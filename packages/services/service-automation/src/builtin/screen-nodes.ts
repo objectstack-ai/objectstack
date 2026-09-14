@@ -4,7 +4,7 @@ import type { PluginContext } from '@objectstack/core';
 import { defineActionDescriptor, ScreenConfigSchema, ScriptConfigSchema } from '@objectstack/spec/automation';
 import type { ScreenConfigParsed, ScriptConfigParsed } from '@objectstack/spec/automation';
 import type { AutomationEngine } from '../engine.js';
-import { interpolate } from './template.js';
+import { interpolate, interpolateText } from './template.js';
 import { parseNodeConfig } from './parse-config.js';
 import { judgeHeadlessScreen } from '../screen-input-contract.js';
 
@@ -163,11 +163,13 @@ export function registerScreenNodes(engine: AutomationEngine, ctx: PluginContext
         // variables here (the engine does NOT pre-interpolate node config) — so
         // a step's title/description/field-default/object-form-default can pull
         // from prior nodes (e.g. `{lead_record.company}`, `{account_id}`).
-        const interp = (v: unknown): string | undefined => {
-          if (v == null) return undefined;
-          const r = interpolate(v, variables, context);
-          return r == null ? undefined : String(r);
-        };
+        //
+        // [#15788] The body of this closure now lives in `template.ts` as
+        // {@link interpolateText}, because a second authored-text slot — the
+        // refusing `end` node's `message` (#14945 lane 2) — has to render
+        // through THE SAME implementation, not a copy of it. Same bytes in,
+        // same bytes out; the only change is where the four lines live.
+        const interp = (v: unknown): string | undefined => interpolateText(v, variables, context);
 
         // ── Object-form screen (master-detail wizards) ──────────────────────
         // When the step names an `objectName`, render that object's FULL

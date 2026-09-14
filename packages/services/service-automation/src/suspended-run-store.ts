@@ -694,6 +694,13 @@ export class ObjectStoreSuspendedRunStore implements SuspendedRunStore {
       finished_at: record.finishedAt ?? now,
       duration_ms: record.durationMs ?? null,
       error: record.error ?? null,
+      // [#15788] The rendered refusal, in its OWN column beside `status:
+      // 'refused'` — ⛔ never folded into `error`, which would tell every
+      // reader the run broke. `?? null` for the same reason the four
+      // consumed-suspension keys are always written: this is an UPSERT, so a
+      // row rewritten by a later terminal write must CLEAR a refusal it no
+      // longer carries rather than inherit a stale one.
+      refusal_message: record.refusalMessage ?? null,
       steps_json: serializeStepsBounded(record.steps),
       // #4354 — the totals land in COLUMNS so an operator can alert on
       // `selected_count > 0 AND acted_count = 0`; the per-node / per-gate detail
@@ -833,6 +840,11 @@ export class ObjectStoreSuspendedRunStore implements SuspendedRunStore {
       finishedAt: row.finished_at ?? undefined,
       durationMs: typeof row.duration_ms === 'number' ? row.duration_ms : undefined,
       error: row.error ?? undefined,
+      // [#15788] `?? undefined` (never `?? ''`): a row written before this
+      // column existed, and every non-refused row, genuinely carries no
+      // refusal — and an empty string would read as "refused, with nothing to
+      // say", which is a different and false statement.
+      refusalMessage: row.refusal_message ?? undefined,
       nodeId: row.node_id ?? undefined,
       organizationId: row.organization_id ?? null,
       userId: row.user_id ?? undefined,

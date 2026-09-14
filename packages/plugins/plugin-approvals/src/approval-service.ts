@@ -354,13 +354,19 @@ type RunLiveness = 'terminal' | 'live';
  * `ExecutionStatus.options` and drives every member through the real sweep, so
  * the classification and the behaviour cannot drift apart either.
  *
- * ⛔ Terminality is NOT declared machine-readably anywhere today — `refused`'s
+ * ⛔ Terminality is NOT declared machine-readably in the SPEC — `refused`'s
  * terminality lives in a COMMENT beside the enum member, and a comment is not a
  * gate. The `TERMINAL_RUN_STATUSES` exported by `@objectstack/service-automation`
  * is a DIFFERENT vocabulary (which terminal states a run may be RECORDED in,
- * tied to `sys_automation_run.status`' options) that excludes `refused` on
- * purpose, and that package is only a devDependency here. Hence a local total
- * map rather than a shared import; see the card for the spec-level proposal.
+ * tied to `sys_automation_run.status`' options), and that package is only a
+ * devDependency here. Hence a local total map rather than a shared import; see
+ * the card for the spec-level proposal.
+ *
+ * [#15788] That list used to exclude `refused` on purpose — nothing could write
+ * the value — and now includes it, because the `end` executor produces it. The
+ * two vocabularies AGREE about `refused` today; they are still not the same
+ * question, so this map stays the authority for THIS sweep. ⛔ Do not replace it
+ * with an import on the strength of one member currently matching.
  *
  * `completed` is classified terminal alongside the failure states. The approval
  * node only writes a request row on the path where it also suspends the run,

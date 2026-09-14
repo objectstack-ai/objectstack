@@ -28,10 +28,35 @@ import type { ConformanceRow } from '@objectstack/verify';
 // `TemplateExpressionInputSchema` could never match — this ledger reported a
 // complete classification while carrying zero `cron` and zero `template` rows.
 // The claim above was FALSE for two whole dialects, and read as true, which is
-// the failure a ratchet is supposed to make impossible. Two limits survive and
-// One limit survives and is worth knowing before trusting a green run:
-// discovery still cannot see a slot typed with a schema nobody registered (the
-// hazard is structural, not spent).
+// the failure a ratchet is supposed to make impossible.
+//
+// Since #17630 the name no longer has to be at the HEAD of the declaration. It
+// used to: a roster schema mounted anywhere but immediately after `field:` was
+// invisible, INCLUDING with its name literally on the line, and this ledger
+// reported a complete classification over five such positions (three union
+// members, two behind one file-local alias const). Discovery now matches a
+// roster name by IDENTITY anywhere on a line, attributes it to the `field:` it
+// mounts, and resolves file-local aliases. THREE limits survive, and they are
+// worth knowing before trusting a green run:
+//
+//   1. A slot typed with a schema nobody registered AND that is not a
+//      file-local alias of a registered one — an independently defined schema,
+//      the way `SettingsVisibilityInputSchema` was before it joined the roster.
+//      Structural, not spent: no text scan can recognise a schema it has never
+//      been told about.
+//   2. Alias resolution is FILE-LOCAL. An EXPORTED alias of a roster member
+//      used in ANOTHER file is invisible — `shared/expression.zod.ts`
+//      `PredicateInputSchema` (`= ExpressionInputSchema`) is one today, latent
+//      rather than live: measured at `a26a114d7`, its only identity hits are
+//      its own definition, its `z.input` type and the barrel re-export, so it
+//      types no slot anywhere.
+//   3. Attribution is textual and positional, not syntactic. A roster schema
+//      reached through a call the scan cannot follow — passed as an argument to
+//      a generic factory, spread out of another object — has no `field:` above
+//      it to attribute to. The companion test refuses to DROP such a hit (see
+//      its unattributed-hits pin), so this limit surfaces as a hard failure
+//      rather than as silence; that is the whole difference from the state
+//      #17630 found.
 //
 // The OTHER limit is spent as of #15500. A ratchet key was `file:field`, so
 // several declarations of one field name in one file shared a single row and
@@ -327,6 +352,46 @@ export const EXPRESSION_SURFACE: ExprSurface[] = [
     enforcement: 'console (objectui) RowActionMenu BuiltinRowActionItem + data-table DataTableBuiltinRowActionItem → useRowPredicate → @objectstack/formula celEngine (interpret); TRUE renders the button disabled, a fault leaves it enabled (server hooks are the real boundary)',
     covers: ['data/object.zod.ts:RowCrudActionOverrideSchema.disabledWhen'],
   },
+
+  // ── FIRST CLASSIFICATIONS from #17630 ─────────────────────────────────────
+  // Discovery was anchored to the HEAD of the declaration, so a roster schema
+  // used as a union member or behind a file-local alias const was invisible
+  // even with its name literally on the line. The three rows below and
+  // `cel-declared-unwired-observability` are FIRST classifications of five
+  // positions this ledger reported a complete classification over. Nothing
+  // about what any of them DOES changed: the widening is a scan change, and
+  // all five accept the two non-evaluable envelopes (an `ast`-only envelope, a
+  // whitespace-only `source`) exactly as they did before it.
+  {
+    id: 'cel-action-visible',
+    summary: 'registered action visibility (Action.visible) — per record/user/features gating of whether the action is offered at all',
+    dialect: 'cel', mode: 'interpret', state: 'enforced', failPolicy: 'fail-closed',
+    // Three halves are MEASURED IN THIS REPO and named first; the evaluator
+    // itself is objectui's, named as such rather than as something this
+    // checkout ran.
+    enforcement:
+      'PRODUCER, measured here: spec/src/kernel/public-auth-features.ts `lowerRequiresFeature` writes this very slot at parse time — `requiresFeature: X` lowers to `{dialect:"cel", source:"features.X == true"}` (`!= false` for default-on), AND-composed into an author\'s own `visible`, and refuses to compose with `visible: false` or with an `ast`-only envelope. BUILD-TIME GATE, measured here: lint/validate-expressions.ts `checkAction` validates the predicate against the `record` scope on every declared action and reports a bare field ref as a build error. EVALUATOR: console (objectui) `ActionEngine.getActionsForLocation` → @objectstack/formula celEngine (interpret), per the objectui evaluator hand-off recorded in packages/console/CHANGELOG.md — evaluated against the record the CLIENT already fetched, which is SPARSE (a list row carries only the view\'s projected columns and no materialization step exists on that path, and the ruling that decided it defers making the binding total). A predicate that faults aborts at key resolution and the action is simply not offered, indistinguishable from the predicate having said no, and nothing logs it — fail-CLOSED, the opposite polarity to a form field/section predicate, stated as such in content/docs/protocol/objectui/{actions,concept}.mdx',
+    covers: ['ui/action.zod.ts:actionObject.visible'],
+    note: 'The ratchet key names `actionObject`, not `ActionSchema`, because the key is mechanically the file, the enclosing column-0 declaration and the field, and `ActionSchema` is `lazySchema(() => actionObject().refine(…))` — the fields live in the `actionObject` factory. Kept mechanical on purpose: re-keying to the exported schema name would move coverage on rows nobody is reading the diff of, which is the granularity lesson the companion test\'s collision assertion was built from. `visible` is UI gating, NOT authorization — the button is gone, the route is not; an action gated for access-control reasons declares `requiredPermissions` (ADR-0066 D4, dual-surface) instead. ⛔ NOT MEASURED HERE: the renderer itself, which is in the sibling repo objectui and not in this checkout — the fail-closed face is this repo\'s own documented contract for the surface, not a run this ledger performed.',
+  },
+  {
+    id: 'cel-action-disabled',
+    summary: 'registered action disabling (Action.disabled) — the action stays on screen and is refused',
+    dialect: 'cel', mode: 'interpret', state: 'enforced', failPolicy: 'fail-soft-log',
+    enforcement:
+      'Same declaration site, same alias type and same evaluator as `cel-action-visible` — console (objectui) action surfaces → @objectstack/formula celEngine (interpret) — and the same build-time gate: lint/validate-expressions.ts `checkAction` checks it whenever it is not a plain boolean. The FAULT FACE is the one thing that differs, and it is why this is a separate row: packages/console/CHANGELOG.md records the closed face being REMOVED as a defect on every action surface (an action whose `disabled` predicate could not be evaluated "is no longer greyed out forever" on each of six action surfaces), so an unevaluable `disabled` leaves the action ENABLED and the server side stays the real boundary',
+    covers: ['ui/action.zod.ts:actionObject.disabled'],
+    note: 'Split from `cel-action-visible` rather than sharing one row with it, for the reason the collision assertion encodes: one classification covering both would have to pick one fail-policy, and the two faces are opposites — a faulting `visible` HIDES the action, a `disabled` the renderer cannot evaluate LEAVES IT RUNNABLE. A single row would have stated one of those and silently spoken for the other. ⛔ NOT MEASURED HERE: the renderer, and the `-log` half of `fail-soft-log` — the reading above establishes the soft DIRECTION from the objectui fix that removed the closed face, not that a line is logged; the same posture, and the same limit, as `cel-row-crud-disabled` on the built-in row buttons.',
+  },
+  {
+    id: 'cel-record-alert-visible',
+    summary: '`record:alert` banner visibility (RecordAlertProps.visible) — the one record component whose PROPS carry a real predicate',
+    dialect: 'cel', mode: 'interpret', state: 'enforced', failPolicy: 'fail-closed',
+    enforcement:
+      'BUILD-TIME GATE, measured here: lint/page-envelope-audit.ts door 3 parses `ComponentPropsMap["record:alert"]` and is the only one of its three doors that reaches `properties.visible` — doors 1 and 2 walk past it because `PageComponentSchema.properties` is `z.record(z.unknown())`. EVALUATOR: the console (objectui) record:alert renderer, `toPredicateInput` + `useCondition` — the same pipeline as every action button — against the record page scope (`record`, the `os.*` identity namespace, `objectName`, `features`). An empty record (page still loading) hides the banner, and a predicate that THROWS hides it too, the same face as action visibility: fail-CLOSED, stated in content/docs/protocol/objectui/record-alert.mdx. The platform\'s own sys_user page is the live specimen',
+    covers: ['ui/component.zod.ts:RecordAlertProps.visible'],
+    note: 'A SEPARATE row from `cel-ui` on purpose, on both axes that row fixes at once: `cel-ui` is `fail-soft-log` (its form-view section/field predicates fault OPEN) and its evaluator is the SchemaRenderer, while this one faults closed through the record:alert renderer. ⚠️ And the honest limit, measured here: because `PageComponentSchema.properties` is an opaque bag served verbatim, a predicate authored in `properties` on a raw `Page` object literal never reaches `ExpressionInputSchema`\'s transform at all — a bare string there stays on the console\'s LEGACY JS evaluator, which has no `has()`, and only an explicit `{dialect:"cel"}` envelope routes to CEL. So the SCHEMA declares the CEL contract this row records while the page path can still deliver the legacy one; the platform\'s sys_user page carries that reading at its own declaration site and gates on the component-NODE `visibleWhen` instead. ⛔ NOT MEASURED HERE: the renderer, which is in objectui and not in this checkout.',
+  },
   {
     id: 'cel-flow',
     summary: 'flow / loader branching + filter predicates',
@@ -434,5 +499,20 @@ export const EXPRESSION_SURFACE: ExprSurface[] = [
       'kernel/plugin-versioning.zod.ts:MultiVersionSupportSchema.condition',
     ],
     note: 'EXPERIMENTAL — declared policy conditions with no runtime evaluator yet (ADR-0056 D8 / ADR-0049 tracking). This row is why `unevaluated` was minted: it carried `fail-closed` — a RUNTIME refusal — while its own `enforcement` cell said `(no runtime consumer yet)`, so on a security-flavoured row the ledger read as a security guarantee over a slot nothing evaluates. `fail-closed` here was the one borrowing with a consequence past legibility, and spreading it to the other four unwired rows was refused for that reason.',
+  },
+  {
+    // The other half of #17630's first classifications. Same tier as the row
+    // above and as `template-prompt` / `cron-knowledge-refresh`: an existing
+    // classification applied to two more instances, not a new category.
+    id: 'cel-declared-unwired-observability',
+    summary: 'observability config predicates — SLI success criteria and composite trace-sampling condition (declared, documented, nothing reads them)',
+    dialect: 'cel', mode: 'interpret', state: 'experimental', failPolicy: 'unevaluated',
+    enforcement:
+      'PARSE ONLY — each slot is `z.union([<a structured arm>, ExpressionInputSchema])`, so the envelope arm normalizes a bare string to `{dialect:"cel",source}` and refuses a blank one; NO EVALUATOR FOUND for either. Measured on `a26a114d7` by identity over the whole tree: `successCriteria`, `ServiceLevelIndicatorSchema` and `TraceSamplingConfigSchema` have ZERO hits outside `packages/spec/src` that are not generated artefacts — `packages/spec/{api-surface,authorable-surface,declaration-map,export-origins,json-schema.manifest}`, `content/docs/references/system/{metrics,tracing}.mdx`, a CHANGELOG and one `skills/objectstack-formula/SKILL.md` prose row. Inside the spec the only readers are the two schemas\' own unit tests. No service, plugin or runtime reads either key',
+    covers: [
+      'system/metrics.zod.ts:ServiceLevelIndicatorSchema.successCriteria',
+      'system/tracing.zod.ts:TraceSamplingConfigSchema.condition',
+    ],
+    note: 'EXPERIMENTAL — a published, documented, author-facing predicate that nothing evaluates, which is the class the `unevaluated` tier exists for, and the class this ratchet exists to surface. This ratchet did not surface them: both positions mount the roster schema as a UNION MEMBER on its own line, so head-anchored discovery never saw them and the ledger read complete over them. ⛔ NOT a synonym for `experimental` in the "we have not looked" sense — the absence above is measured in this checkout, over the whole tree, and stated in the `enforcement` cell as the tier requires. Whether either key should instead be RETIRED under ADR-0049 enforce-or-remove is a separate decision on its own card: this row classifies what is there, and the card that widened discovery deliberately changed no behaviour and retired no key. The structured arm of each union is out of scope here — it is not an expression surface and carries no dialect.',
   },
 ];

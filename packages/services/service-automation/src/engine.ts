@@ -212,6 +212,13 @@ import { summarizeRun, formatRunSummaryLine } from './run-summary.js';
 // provider factory's text), so it renders it as structured `meta` rather than
 // interpolating it into the log message. See ./thrown-cause-diagnostics.ts.
 import { describeThrownForLog } from './thrown-cause-diagnostics.js';
+// [#15788] The refusing `end` node renders its `message` through the SAME
+// interpolator a screen `description` gets — the ruling's own words, so a
+// shared function rather than a second template engine. A value import from
+// `./builtin/` is safe in this direction: `template.ts` imports only
+// `../guard-refusal.js` and package-external contracts, so nothing it pulls in
+// reaches back here.
+import { interpolateText } from './builtin/template.js';
 
 // ─── Node Executor Interface (Plugin Extension Point) ───────────────
 
@@ -997,6 +1004,16 @@ interface ExecutionLogEntry {
     output?: unknown;
     error?: string;
     /**
+     * [#15788] The rendered refusal, set only on a `refused` run — the `end`
+     * node's interpolated `message`. Not new vocabulary: `ExecutionLogSchema`
+     * (`@objectstack/spec`) declared `refusalMessage` when lane 1 landed, and
+     * this interface is "compatible with ExecutionLog from spec", so the key is
+     * consumed rather than invented. Absent on every other status — a failure's
+     * reason is the failing step's `error`, and a completion's `successMessage`
+     * is copied from the flow definition onto the RESULT, never stored here.
+     */
+    refusalMessage?: string;
+    /**
      * #4354: what the run did, folded out of the FULL step log by
      * {@link AutomationEngine.recordLog} — before history compaction, so a
      * 5000-iteration loop's counts are exact even though only 200 of its steps
@@ -1070,6 +1087,47 @@ class FlowSuspendSignal {
 
 function isSuspendSignal(err: unknown): err is FlowSuspendSignal {
     return typeof err === 'object' && err !== null && (err as FlowSuspendSignal).__flowSuspend === true;
+}
+
+/**
+ * [#15788] Internal sentinel thrown by {@link AutomationEngine.executeNode}
+ * when an `end` node declares `outcome: 'refused'` (#14945 ruling 2′, lane 2).
+ * The twin of {@link FlowSuspendSignal}: it unwinds the synchronous DAG
+ * recursion up to `execute()` / `resume()` / `executeWithoutRetry`, which
+ * convert it into a TERMINAL `refused` run rather than a failed one.
+ *
+ * ⚠️ `refused` here is the run OUTCOME, ⛔ not this package's other `refused`.
+ * Everywhere else in `service-automation` a refusal is a GUARD refusal — the
+ * engine declining to execute (`guard-refusal.ts`, `refuseNode`, the resume
+ * authority gate, `refuseUndeclaredSuspension`), which is a kind of FAILURE.
+ * This one is the maintainer's ruling verbatim: *a refusal is a successful
+ * evaluation that says no*. Nearly opposite senses of one word, so a `grep` for
+ * `refused` in this package returns mostly the other family — read the sense at
+ * the site, never from the name.
+ *
+ * Why a thrown sentinel and not a return value: an `end` node can sit anywhere
+ * in the graph, including several `traverseNext` frames deep, and the run has
+ * to STOP there. That is precisely what {@link FlowSuspendSignal} already
+ * exists to do, so this reuses the mechanism rather than inventing a second
+ * unwinding protocol. (Not exported — callers see `status: 'refused'`.)
+ */
+class FlowRefusalSignal {
+    readonly __flowRefused = true as const;
+    constructor(
+        /** The `end` node that refused — the last node the run reached. */
+        readonly nodeId: string,
+        /**
+         * The author's `message`, already interpolated against the run's live
+         * variables. `undefined` only when the config carried none, which
+         * `EndConfigSchema`'s refinement refuses at the flow parse — recorded
+         * honestly rather than filled in with invented text.
+         */
+        readonly message?: string,
+    ) {}
+}
+
+function isRefusalSignal(err: unknown): err is FlowRefusalSignal {
+    return typeof err === 'object' && err !== null && (err as FlowRefusalSignal).__flowRefused === true;
 }
 
 /**
@@ -1284,16 +1342,23 @@ export interface SuspendedRun {
  * it: the writer ({@link AutomationEngine.recordLog}'s terminal predicate),
  * the reader (`ObjectStoreSuspendedRunStore`'s row gate) and the stored
  * column (`sys_automation_run.status`, whose `Field.select` options and
- * retention `onlyWhen` scope enumerate the same four). A second copy of this
- * list is how a widened writer ends up with rows a reader filters away.
+ * retention `onlyWhen` scope enumerate the same members). A second copy of
+ * this list is how a widened writer ends up with rows a reader filters away.
  *
- * These are exactly the four `ExecutionStatus` members (`@objectstack/spec`)
- * that mean "this run has stopped and will not resume". `paused`,
- * `running`, `pending` and `retrying` are live states with no history row;
- * `refused` is declared by the spec but no engine path produces it today, so
- * adding it here would enumerate a value nothing can write.
+ * These are exactly the `ExecutionStatus` members (`@objectstack/spec`) that
+ * mean "this run has stopped and will not resume". `paused`, `running`,
+ * `pending` and `retrying` are live states with no history row.
+ *
+ * [#15788] `refused` joins them, and the reason it was ABSENT is the reason it
+ * is here now: this list may only enumerate values something can write, and
+ * until lane 2 of the #14945 ruling landed, nothing could — the spec declared
+ * the member and `executeNode` returned on every `end` node without reading its
+ * config. {@link AutomationEngine.executeNode} now produces it, so all three
+ * sites widen together, in this change. ⛔ A refusal is NOT a failure: nothing
+ * threw, the flow evaluated successfully and said no, and the authored reason
+ * rides beside the status as `refusalMessage` rather than in `error`.
  */
-export const TERMINAL_RUN_STATUSES = ['completed', 'failed', 'cancelled', 'timed_out'] as const;
+export const TERMINAL_RUN_STATUSES = ['completed', 'failed', 'cancelled', 'timed_out', 'refused'] as const;
 
 /** One member of {@link TERMINAL_RUN_STATUSES}. */
 export type TerminalRunStatus = (typeof TERMINAL_RUN_STATUSES)[number];
@@ -1337,6 +1402,19 @@ export interface RunRecord {
     durationMs?: number;
     /** Failure reason for a `failed` run — what a designer needs to fix it. */
     error?: string;
+    /**
+     * [#15788] The rendered refusal, set only when {@link status} is
+     * `'refused'` — the `end` node's `message` template interpolated against
+     * the run's variables at the moment the run reached it, so the stored text
+     * names the record (`Refused: Acme Corp is a confirmed duplicate`).
+     *
+     * ⛔ Deliberately NOT folded into {@link error}, which would have needed no
+     * new column: a refusal is not a failure, and a reader that finds authored
+     * text in `error` has been told the run broke. The ruling is explicit that
+     * the two are distinct, so the row carries them in distinct places — the
+     * same reason `#15223` refused to keep folding `cancelled` into `failed`.
+     */
+    refusalMessage?: string;
     /**
      * The node this record is ABOUT. On an ordinary terminal record: the run's
      * last step. On a stranded run's record — `consumedSuspension` present, or
@@ -4425,6 +4503,12 @@ export class AutomationEngine implements IAutomationService {
             },
             steps: r.steps ?? [],
             error: r.error,
+            // [#15788] The persisted refusal text, so the run a caller opens
+            // after a restart still says WHY it refused. Without this line the
+            // status survives the round-trip and its reason does not, which is
+            // the worst of the two halves to lose: `refused` with no message is
+            // indistinguishable from a refusal nobody authored.
+            refusalMessage: r.refusalMessage,
             // #4354 — the PERSISTED summary, never re-folded from `r.steps`:
             // those are compacted (200 max), so recomputing here would report a
             // 5000-row sweep as having acted on a couple of hundred.
@@ -5037,6 +5121,20 @@ export class AutomationEngine implements IAutomationService {
                 summary,
             };
         } catch (err: unknown) {
+            // [#15788] The run reached an `end` node declaring
+            // `outcome: 'refused'` (#14945 ruling 2′). Tested FIRST, beside the
+            // pause and for the same reason: this is NOT a failure either, and
+            // a signal recognised only by the arm below would be recorded as
+            // one. The shape is `finishRefusedRun`'s — one method, all three
+            // producers.
+            if (isRefusalSignal(err)) {
+                return this.finishRefusedRun({
+                    runId, flowName, flowVersion: flow.version,
+                    startedAt, durationMs: Date.now() - startTime,
+                    steps, flow, variables,
+                    refusalMessage: err.message, context,
+                });
+            }
             // A node asked to suspend the run (ADR-0019 durable pause). Snapshot
             // the live state, record a `paused` log, and return the run id so the
             // caller can later `resume()` it. This is NOT a failure.
@@ -6359,6 +6457,22 @@ export class AutomationEngine implements IAutomationService {
                     summary,
                 };
             } catch (err: unknown) {
+                // [#15788] A resumed run reached a refusing `end` — the SECOND
+                // producer, and the one a screen flow actually takes: a wizard
+                // that collects an answer and then refuses on it leaves through
+                // here, never through `execute()`'s exit. Tested first, beside
+                // the re-suspend, for the same reason it is tested first there.
+                if (isRefusalSignal(err)) {
+                    return this.finishRefusedRun({
+                        runId,
+                        flowName: run.flowName,
+                        flowVersion: run.flowVersion,
+                        startedAt: run.startedAt,
+                        durationMs: Date.now() - run.startTime,
+                        steps, flow, variables,
+                        refusalMessage: err.message, context,
+                    });
+                }
                 // Re-suspended at a downstream node: persist a fresh continuation.
                 if (isSuspendSignal(err)) {
                     const durationMs = Date.now() - run.startTime;
@@ -8114,6 +8228,13 @@ export class AutomationEngine implements IAutomationService {
                 finishedAt: entry.completedAt,
                 durationMs: entry.durationMs,
                 error: entry.error,
+                // [#15788] The rendered refusal, carried onto the durable row
+                // beside `status: 'refused'`. Set by exactly one producer
+                // ({@link AutomationEngine.finishRefusedRun}) and `undefined`
+                // on every other terminal record, so the store writes an
+                // explicit NULL there — an upsert must CLEAR it, or a run id
+                // reused by a restore would keep a refusal it no longer has.
+                refusalMessage: entry.refusalMessage,
                 userId: entry.trigger?.userId,
                 // [#10101] The two organization-attribution inputs, from the
                 // run context (see the `recordLog` doc): the acting tenant is
@@ -8199,6 +8320,113 @@ export class AutomationEngine implements IAutomationService {
             });
         }
         return entry;
+    }
+
+    /**
+     * [#15788] Finish a run that reached an `end` node declaring
+     * `outcome: 'refused'` — record the terminal row and build the caller's
+     * result (#14945 ruling 2′, lane 2).
+     *
+     * **ONE method, three producers.** `execute()`, `resumeInternal` and
+     * `executeWithoutRetry` each own a terminal exit, and this file's own
+     * history is what makes a shared chokepoint non-negotiable here: the
+     * author's `successMessage` (#9414) and the durable pause (#9510) were each
+     * implemented at one exit and missing from the others, so the run's
+     * user-visible outcome became a function of WHICH ROUTE it took — a
+     * triggered run, a resumed screen flow and a run that succeeded on retry
+     * are the same situation reached three ways. Same rule as
+     * `seedRunVariables` (#9704) and `validateNodeInputSchemas` (#9889): one
+     * method holds the shape, every path calls it.
+     *
+     * The envelope, member by member, is the ruling:
+     *
+     *  - `success: true` — the evaluation SUCCEEDED and said no. ⛔ Not
+     *    `false`: a caller branching on `success` must not route a refusal into
+     *    its error path, and the transport's `status: 'failed'` arm (#9378)
+     *    must not claim it.
+     *  - `status: 'refused'` — terminal, and DISTINCT from `failed`. Nothing
+     *    threw, so there is no `error` and no `errorMessage`.
+     *  - `refusalMessage` — the authored, already-rendered per-record text.
+     *  - ⛔ no `successMessage`. The flow's completion toast is for a
+     *    COMPLETION; stamping it here would toast "Account created!" over a
+     *    refusal to create one. This is also the half the ruling protects from
+     *    the other side — the paused-run `silent` contract is untouched
+     *    because this arm never runs for a pause.
+     *  - ⛔ no `runId`. That member's contract is "set when `status` is
+     *    `'paused'`, so callers can resume it", and a refused run is never
+     *    resumed — handing one back would advertise a verb that answers
+     *    `RUN_NOT_FOUND`.
+     *
+     * The `recordLog` call is guarded exactly as the completion sites are
+     * (#16274 / #15555): a history write must never break the run that
+     * produced it, and `summary` is recomputed from the same pure function when
+     * the write had to be abandoned.
+     */
+    private finishRefusedRun(args: {
+        runId: string;
+        flowName: string;
+        flowVersion?: number;
+        startedAt: string;
+        durationMs: number;
+        steps: StepLogEntry[];
+        /** Read for its `isOutput` variable declarations — see `output` below. */
+        flow: FlowParsed;
+        variables: Map<string, unknown>;
+        refusalMessage?: string;
+        context?: AutomationContext;
+    }): AutomationResult {
+        // The run's declared outputs, collected exactly as the three completion
+        // exits collect them. A refusal is terminal, and the nodes BEFORE the
+        // refusing `end` really ran — withholding what they produced would make
+        // the caller's answer depend on how the run ended rather than on what
+        // the flow declared.
+        const output: Record<string, unknown> = {};
+        if (args.flow.variables) {
+            for (const v of args.flow.variables) {
+                if (v.isOutput) output[v.name] = args.variables.get(v.name);
+            }
+        }
+        let logged: ExecutionLogEntry | undefined;
+        try {
+            logged = this.recordLog({
+                id: args.runId,
+                flowName: args.flowName,
+                flowVersion: args.flowVersion,
+                status: 'refused',
+                refusalMessage: args.refusalMessage,
+                startedAt: args.startedAt,
+                completedAt: new Date().toISOString(),
+                durationMs: args.durationMs,
+                trigger: buildRunTrigger(args.context),
+                steps: args.steps,
+                output,
+            }, args.context);
+        } catch (bookkeeping) {
+            // #4632 verdict: DURABILITY, so `error` — the same judgement and
+            // the same consequence as the completion sites', with one word
+            // changed: the caller is told the truthful thing (the run refused),
+            // which is exactly what makes the rest invisible from outside.
+            // Said ONCE per run. THIRD argument per `error(message, error?,
+            // meta?)`; the `Error` slot stays empty on purpose (#5575).
+            this.logger.error(
+                `[Automation] run '${args.runId}' of flow '${args.flowName}' REFUSED (an 'end' node with ` +
+                    `outcome: 'refused') but its run-history bookkeeping threw, so its terminal history row ` +
+                    `never landed — nothing retries it, the caller is told the run refused, and after the next ` +
+                    `restart this run is invisible to the Runs surfaces while the approvals sweeps read it as ` +
+                    `never-finished. The run itself is TERMINAL and must NOT be re-run, retried or resumed. ` +
+                    `Fix the history failure in this record's meta.`,
+                undefined,
+                describeThrownForLog(bookkeeping),
+            );
+        }
+        return {
+            success: true,
+            status: 'refused',
+            refusalMessage: args.refusalMessage,
+            output,
+            durationMs: args.durationMs,
+            summary: logged?.summary ?? summarizeRun(args.steps),
+        };
     }
 
     /**
@@ -8933,7 +9161,36 @@ export class AutomationEngine implements IAutomationService {
         context: AutomationContext,
         steps: StepLogEntry[],
     ): Promise<void> {
-        if (node.type === 'end') return;
+        if (node.type === 'end') {
+            // [#15788] …unless the author declared a REFUSAL here (#14945
+            // ruling 2′). `end` has no executor and no descriptor — it is
+            // structural (`FLOW_STRUCTURAL_NODE_TYPES`), which is why this
+            // method opens by returning on it — so this is the one place the
+            // outcome can be read, and until now nothing read it: a flow
+            // declaring `outcome: 'refused'` ran as a plain completion and the
+            // author's reason reached nobody.
+            //
+            // The config arrives PARSED. `EndConfigSchema` is applied by
+            // `FlowNodeSchema`'s own transform (`parseEndNodeConfig`, spec
+            // lane 1), which runs on every node including the ones nested in a
+            // region, so `outcome` is defaulted and a `refused` without a
+            // `message` was already refused at the flow parse. ⛔ No second
+            // door, no `??` default, no re-parse: this reads a contract that is
+            // already enforced rather than defending against it.
+            const endConfig = node.config as { outcome?: string; message?: string } | undefined;
+            if (endConfig?.outcome === 'refused') {
+                throw new FlowRefusalSignal(
+                    node.id,
+                    // The SAME interpolation a screen `description` gets — the
+                    // ruling's words, one implementation (`interpolateText`).
+                    // Rendered HERE, against the live variable map, because
+                    // that is what makes the text per-record; a template on the
+                    // wire would put the rendering in every runner.
+                    interpolateText(endConfig.message, variables, context),
+                );
+            }
+            return;
+        }
 
         // ADR-0044 runaway guard: declared back-edges make re-entering a node
         // legal, so a misauthored unconditional loop could otherwise spin
@@ -9541,6 +9798,30 @@ export class AutomationEngine implements IAutomationService {
             if (isSuspendSignal(err)) {
                 throw new Error(
                     `durable pause inside a structured region (node '${err.nodeId}') is not supported`,
+                );
+            }
+            // [#15788] The refusing `end` node's signal, converted at exactly
+            // the same boundary and for the same reason: a control signal must
+            // not cross a region edge silently. It would not merely leak — the
+            // `try_catch` executor's own `catch (err)` arm would read it as the
+            // try region FAILING and hand it to the catch handler, so an
+            // author's refusal would run the error path and the run would
+            // record `completed`. That is the pre-#15788 silence with an extra
+            // step, which is worse than a refusal that says so.
+            //
+            // ⛔ Not a narrowing of anything an author had: today an `end` in a
+            // region is a no-op whatever its `outcome`, so the shape being made
+            // loud has never once been honoured. Whether a refusal should
+            // instead PROPAGATE out of a region and terminate the run is a real
+            // question and ⛔ not one this lane rules on — the #14945 ruling
+            // says nothing about regions, and "prefer failing to falling back"
+            // decides the interim.
+            if (isRefusalSignal(err)) {
+                throw new Error(
+                    `an 'end' node declaring outcome: 'refused' inside a structured region (node ` +
+                    `'${err.nodeId}') is not supported — a refusal terminates the RUN, and a region ` +
+                    `body cannot end one. Put the refusing 'end' on the top-level graph and route the ` +
+                    `region's exit to it.`,
                 );
             }
             throw err;
@@ -10479,6 +10760,29 @@ export class AutomationEngine implements IAutomationService {
             // work — the same route-dependent shape the fix is removing.
             return { success: true, output, durationMs, successMessage: flow.successMessage, summary };
         } catch (err: unknown) {
+            // [#15788] The THIRD producer: an attempt that reached a refusing
+            // `end`. A flow under `errorHandling.strategy: 'retry'` is handed
+            // off to `retryExecution` and every one of its attempts leaves
+            // through this method, so a repair that stopped at `execute()`
+            // would record a refusal as a completion for exactly the flows most
+            // likely to carry one — the same route-dependent shape #9414 and
+            // #9510 each had to close on this very exit.
+            //
+            // ⚠️ The ladder stops here, and `retryExecution` needs no arm of
+            // its own for it: a refusal is `success: true`, which that loop
+            // already reads as "this attempt did not fail, stop retrying" — the
+            // true sentence about a successful evaluation that said no. ⛔ A
+            // refusal must never consume retry budget: re-running the flow
+            // would re-execute every node before the `end` in the hope of a
+            // different answer to a decision the author already made.
+            if (isRefusalSignal(err)) {
+                return this.finishRefusedRun({
+                    runId, flowName, flowVersion: flow.version,
+                    startedAt, durationMs: Date.now() - startTime,
+                    steps, flow, variables,
+                    refusalMessage: err.message, context,
+                });
+            }
             // [#9510] A node asked to suspend the run (ADR-0019 durable pause)
             // — here, on a RETRY attempt, the only way this method is ever
             // reached. Tested FIRST and answered exactly as `execute()`'s own

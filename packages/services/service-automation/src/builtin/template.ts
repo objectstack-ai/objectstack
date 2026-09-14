@@ -354,6 +354,36 @@ export function interpolateString(
 }
 
 /**
+ * Render an authored TEXT slot — a screen `title` / `description`, an `end`
+ * node's refusal `message` — through {@link interpolate}, coerced to a string.
+ *
+ * [#15788] Hoisted out of `screen-nodes.ts`'s local `interp` closure so the
+ * refusing `end` node (#14945 lane 2) renders through the SAME implementation
+ * rather than a second one. The ruling's words are the requirement: the
+ * refusal message "goes through the same interpolation a screen `description`
+ * gets" — ⛔ never a second template engine. A second spelling would start
+ * byte-identical and drift on the first fix that landed in only one of them,
+ * and the drift would be invisible from either side: both would still
+ * substitute `{record.name}`.
+ *
+ * Absent in, absent out — a slot the author left unset renders nothing rather
+ * than the string `"undefined"`, and a whole-string token that resolved to
+ * `null` is the same "nothing" ({@link interpolateString} preserves the raw
+ * value for a single-token string, so an unresolved `{missing}` arrives here as
+ * `null`). Every other value is stringified exactly as an embedded
+ * substitution would be, which is what keeps ONE rendering for both slots.
+ */
+export function interpolateText(
+    value: unknown,
+    variables: VariableMap,
+    context: AutomationContext,
+): string | undefined {
+    if (value == null) return undefined;
+    const rendered = interpolate(value, variables, context);
+    return rendered == null ? undefined : String(rendered);
+}
+
+/**
  * Recursively interpolate template tokens in arbitrary JSON-like values.
  */
 export function interpolate<T = unknown>(
