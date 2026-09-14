@@ -468,7 +468,7 @@ describe('#9482 C9: every derived /admin/ route refuses a non-admin', () => {
     // The `/admin/` surface 501s unless better-auth's admin plugin is on, and
     // `bootStack` exposes no auth-plugin override. `OS_SCIM_ENABLED` is the one
     // env knob that reaches it — `AuthManager.buildPluginList` resolves
-    // `admin: pluginConfig.admin ?? scimEffective` (ADR-0071, SCIM forces admin
+    // `admin: pluginConfig.admin ?? scimEffective` (ADR-0134, SCIM forces admin
     // on), the same derivation `admin-identity-audit-trail.dogfood.test.ts`
     // uses. Read when the auth manager is constructed, so it must precede boot.
     priorScim = process.env.OS_SCIM_ENABLED;

@@ -173,13 +173,31 @@ Why this shape:
   ```
 
   `check:platform-checklist` resolves every anchor: the file must be in this repo and the
-  symbol must still be in it, **comments masked** — a symbol surviving only in a docblock
-  is ABSENT, because prose about a symbol is not a symbol. A symbol inside a string
-  literal counts as present: much of what this ledger cites *is* a string (capability
-  names, error codes, `sys_*` machine names). Dotted anchors resolve segment by segment.
-  This is presence-in-code, not a declaration analysis — what it catches is the rename or
-  deletion that leaves the pointer naming nothing, which is exactly the rot the line
-  numbers used to carry.
+  symbol must still be **declared** in it. ⭐ The rule is **not this gate's** and not this
+  paragraph's — it is the one shared resolver every anchor corpus in this tree uses
+  (`scripts/symbol-anchors.mjs#symbolResolutionClass`), and that module's own
+  `THE RESOLUTION RULE` block is the authority. What an author needs from it:
+
+  - **comments are stripped first** — a symbol surviving only in a docblock is ABSENT,
+    because prose about a symbol is not a symbol;
+  - a **declaration site** resolves (a `function` / `class` / `interface` / `type` /
+    `const` / `let` / `var`, a member or object-literal key written **at the start of a
+    line**, a named re-export). For a `.json` target that means a **key**, never a value;
+  - a **complete quoted string token** resolves — `'sys_metadata'` — which is what keeps
+    the machine names this ledger is full of anchorable (capability names, error codes,
+    `sys_*` object and field names);
+  - ⚠️ and nothing else does. A **call site**, an **import**, a **member access on some
+    other object**, a **local parameter**, or the symbol appearing only as a **substring
+    of a longer string** (`saveItem` inside `'meta.saveItem'`, `:shareId` inside a route
+    pattern) is **NOT** resolution. If that is all the cited file has, the citation is
+    naming the file that *uses* the symbol, not the file that *declares* it — re-point
+    it, or cite the file bare.
+
+  Dotted anchors resolve segment by segment. ⛔ An anchor the shared resolver refuses is
+  either a bad citation or a case for widening that shared core, and the second is its
+  own card against that module — ⛔ never a local rule here: the core is shared with the
+  ADR, `scripts/**`, spec-docblock and system-context corpora, and widening it to suit
+  this ledger would export the looser reading to all four (#16898).
 - **A citation the gate cannot resolve stays BARE — that is honest, not a gap.** Anchors
   are only for extensions the gate reads symbols out of (`.ts .tsx .mts .cts .js .mjs
   .cjs .json`); an anchor on a `.md` or a `.yml` is an ERROR rather than a silent skip,

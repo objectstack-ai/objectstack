@@ -323,6 +323,88 @@ const underFlow = (key: string, valid?: AnyRec): SweptCollection => ({
 });
 
 /**
+ * A judgeable flow EDGE: labelled like an error path, left at the default type,
+ * out of a node whose executor does not select by label — the `#3863` shape, so
+ * a control built from it draws exactly one finding
+ * (`flow-error-label-not-fault`) and the population pin below has something to
+ * count on the edge side too.
+ */
+const VALID_EDGE: AnyRec = { source: 'act', target: 'done', label: 'error' };
+
+/** The nodes {@link VALID_EDGE} runs between, so the edge is judged in context. */
+const EDGE_ENDPOINT_NODES: readonly AnyRec[] = [
+  VALID_NODE,
+  { id: 'act', type: 'create_record', config: { objectName: 'crm_account' } },
+  { id: 'done', type: 'end', config: {} },
+];
+
+/**
+ * A flow's own EDGE list — `stack.flows[].edges` (#16910).
+ *
+ * ## Why this is a row of its own and not covered by `underFlow('nodes')`
+ *
+ * {@link underFlow} addresses ONE key of a flow member, and every existing row
+ * built with it addresses `nodes`. `edges` is a second list on the same member,
+ * read by the same function, four lines from the same repair — and #16751
+ * re-pointed the seven NODE-list readers without reaching it. That is precisely
+ * why this sweep is written over a table: the reader was fixed, the sibling
+ * list beside it was not, and nothing in the suite could say so because no arm
+ * addressed it. `scanErrorLabelledEdges` read `.label` off each member, so a
+ * YAML `edges:` item left empty (`null`) threw a `TypeError` out of a function
+ * contractually typed `(stack) => Finding[]`.
+ *
+ * The constructor supplies real endpoint nodes rather than reusing
+ * {@link underFlow}: the point of the population pin here is that the VALID
+ * edge beside the junk one is still JUDGED, and an edge judged against an empty
+ * node table is a weaker control than one judged in context.
+ */
+const underFlowEdges = (valid?: AnyRec): SweptCollection => ({
+  label: 'flows[].edges',
+  stack: (members) => ({
+    objects: [VALID_OBJECT],
+    flows: [{ name: 'crm_flow', nodes: [...EDGE_ENDPOINT_NODES], edges: members }],
+  }),
+  valid,
+});
+
+/**
+ * A NESTED region's EDGE list — `flows[].nodes[].config.body.edges` (#16910).
+ *
+ * The eighth reader, and the one the card that filed `flows[].edges` predicted
+ * would exist ("an eighth is likelier than not"). It is NOT reachable through
+ * {@link underFlowEdges}: this list is read out of a container's open
+ * `z.record` config by `collectFlowGraphs` behind nothing but `Array.isArray`
+ * — the node side of that same producer walk has been member-filtered since
+ * #16752, the edge side has not — so it arrives at `lint-flow-patterns.ts`'
+ * `graph.edges` reader carrying the producer's word about its members rather
+ * than a check, exactly as `graph.nodes` did before #16751. Measured on the
+ * tree that carried the top-level repair alone: a `null` here still threw, from
+ * the identical `scanErrorLabelledEdges` frame.
+ *
+ * ⛔ The consumer coercion at the call site cannot reach it, which is the whole
+ * reason this is a separate arm rather than a second shape of the one above.
+ */
+const underNestedRegionEdges = (valid?: AnyRec): SweptCollection => ({
+  label: 'flows[].nodes[].config.body.edges',
+  stack: (members) => ({
+    objects: [VALID_OBJECT],
+    flows: [{
+      name: 'crm_flow',
+      nodes: [
+        VALID_NODE,
+        {
+          id: 'lp',
+          type: 'loop',
+          config: { collection: 'x', body: { nodes: [...EDGE_ENDPOINT_NODES], edges: members } },
+        },
+      ],
+      edges: [],
+    }],
+  }),
+  valid,
+});
+
+/**
  * A NESTED region's node list — `flows[].nodes[].config.body.nodes` (#15793).
  *
  * The graph-shaped half proper, and a different reachability question from
@@ -381,6 +463,10 @@ const SWEPT_COLLECTIONS: readonly SweptCollection[] = [
   // is a container's sub-graph, which only the producer can hand out.
   underFlow('nodes', VALID_NODE),
   underNestedRegion(VALID_NODE),
+  // The EDGE lists beside them (#16910) — the same reader, the sibling list
+  // #16751 did not reach, at both addressing depths.
+  underFlowEdges(VALID_EDGE),
+  underNestedRegionEdges(VALID_EDGE),
   // Per-object sub-collections the same readers walk.
   underObject('fields', VALID_FIELD),
   underObject('actions'),

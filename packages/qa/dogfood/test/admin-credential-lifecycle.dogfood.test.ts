@@ -101,7 +101,7 @@ describe('#9482 C1/C2: admin credential lifecycle, both sides', () => {
     // `/admin/` 501s unless better-auth's admin plugin is on, and `bootStack`
     // exposes no auth-plugin override. `OS_SCIM_ENABLED` is the one env knob
     // that reaches it — `buildPluginList` resolves `admin: pluginConfig.admin ??
-    // scimEffective` (ADR-0071). Read at auth-manager construction, so it must
+    // scimEffective` (ADR-0134). Read at auth-manager construction, so it must
     // precede boot. Same derivation `admin-identity-audit-trail` uses.
     priorScim = process.env.OS_SCIM_ENABLED;
     process.env.OS_SCIM_ENABLED = 'true';

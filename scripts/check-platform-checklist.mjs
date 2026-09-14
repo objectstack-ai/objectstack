@@ -47,9 +47,12 @@
 //     Both directions together are what the trap vocabulary beside them has
 //     always had — used implies documented, documented implies used.
 //   - every SYMBOL ANCHOR (`<dir>/<file>.ts#<symbol>`, the spelling
-//     `scripts/symbol-anchors.mjs#ANCHOR_GRAMMAR` defines) resolves: the cited
-//     file is in the tree and the cited symbol is still in it, comments masked
-//     — a symbol surviving only in a docblock is ABSENT. A shrink-never floor
+//     `scripts/symbol-anchors.mjs#ANCHOR_GRAMMAR` defines) resolves — and it is
+//     `scripts/symbol-anchors.mjs#symbolResolutionClass` that says so, the ONE
+//     resolver the #13556 ruling allows. This gate detects anchors and owns no
+//     rule about what "the symbol is in that file" means (#16898); the 56
+//     anchors that stopped resolving when the private permissive rule was
+//     withdrawn are a named, closed, grow-never residual. A shrink-never floor
 //     per family file keeps the population from being emptied one deleted
 //     `#symbol` at a time (see the symbol-anchor block below);
 //   - and no `call` string — the one field in this ledger a runner REPLAYS —
@@ -65,6 +68,7 @@
 
 import { readdirSync, readFileSync, existsSync } from 'node:fs';
 import { maskComments } from './js-comment-mask.mjs';
+import { symbolResolutionClass } from './symbol-anchors.mjs';
 import { join, basename } from 'node:path';
 
 const ROOT = new URL('..', import.meta.url).pathname;
@@ -780,7 +784,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   [BATTERY_UNREFERENCED_RECIPES]: 19,
   [BATTERY_META_CALL_SPELLING]: 53,
   [BATTERY_SOURCE_LINE_CITATIONS]: 19,
-  [BATTERY_SYMBOL_ANCHORS]: 29,
+  [BATTERY_SYMBOL_ANCHORS]: 40,
 });
 const SELF_TEST_BATTERY_FLOOR = 6;
 
@@ -1387,23 +1391,48 @@ function selfTestSourceLineCitations() {
 // untouched — a citation carries its reason, and a rewrite into a bare object
 // per citation would have thrown that away across the whole ledger.
 //
-// ## What "the symbol is there" means here — deliberately dumb, again
+// ## What "the symbol is there" means here — NOT THIS FILE'S CALL (#16898)
 //
-// PRESENCE IN CODE, at identifier boundaries, with comments masked. NOT a
-// declaration analysis: a symbol this file imports and merely calls counts as
-// present, and this check will never tell you the citation names the wrong
-// KIND of thing. What it catches is the rot the ruling named — the rename or
-// the deletion that leaves the anchor pointing at nothing. Two consequences
-// worth stating rather than discovering:
+// It is `scripts/symbol-anchors.mjs#symbolResolutionClass`'s call, and that is
+// the whole point. This gate used to answer the question itself, with a token
+// match: mask comments, then ask whether the bare token appears anywhere in the
+// file. That was a SECOND implementation of the resolution rule, in the place
+// the #13556 ruling this module's header quotes says there is to be exactly
+// one — and it was the LOOSER of the two, which is the dangerous direction: a
+// second resolver that is greener than the shared one is never the resolver
+// anybody points at, so the drift only ever gets discovered by census.
 //
-//   - a symbol surviving only in a COMMENT is ABSENT. Comments are masked
-//     before the scan (the house `maskComments`, for the reason its own header
-//     gives), so a deleted export whose name lingers in a docblock still reds.
-//     This is the direction that matters: prose about a symbol is not a symbol.
-//   - a symbol inside a STRING literal counts as present. That is deliberate —
-//     a large share of what this ledger cites IS a string (capability names,
-//     error codes, route literals, `sys_*` machine names) and a rule that
-//     refused them would push the ledger back to unanchored prose.
+// Measured on the ledger at the moment of binding: of 633 anchor occurrences
+// the permissive rule resolved all 633, and the shared resolver resolves 577
+// (516 `declaration`, 61 `literal`). The 56 it refuses are the coverage this
+// checklist was reporting and did not have; they are enumerated, one per
+// (family file, anchor), in `SHARED_RESOLVER_RESIDUAL` below.
+//
+// The shared rule, restated only so far as a reader here needs it — the
+// authority is that module's own `## THE RESOLUTION RULE` block, ⛔ never this
+// paragraph:
+//
+//   - comments are stripped before anything is matched, so a symbol surviving
+//     only in a COMMENT is ABSENT. Prose about a symbol is not a symbol. (That
+//     half is unchanged; it is the only half the old rule had right.)
+//   - `declaration` — a declaration site in the target's own language, which
+//     for a `.json` target means a KEY and never a value.
+//   - `literal` — a COMPLETE quoted string token (`'sys_metadata'`). This is
+//     what keeps the ledger's DATA identifiers (capability names, error codes,
+//     `sys_*` machine names) anchorable. ⚠️ COMPLETE: a symbol that is only a
+//     SUBSTRING of a longer string — `saveItem` inside `'meta.saveItem'`,
+//     `:shareId` inside a route pattern — does not resolve, and that refusal
+//     is most of the 56.
+//   - a CALL SITE, an IMPORT and a LOCAL PARAMETER are none of those, so they
+//     do not resolve. A citation whose symbol survives only that way is naming
+//     a file that uses the symbol, not the file that declares it.
+//
+// ⛔ Do NOT answer any of this locally again, and ⛔ do not widen the shared
+// core to make a checklist citation green: the core is shared with the ADR,
+// `scripts/**`, `packages/spec/src/**` and system-context corpora, and widening
+// it here would export this defect to all four. An anchor the core refuses is
+// either a bad citation (re-point it) or a case for widening the core, and the
+// second is its own card against `scripts/symbol-anchors.mjs`.
 //
 // ## Why anchors are not authored on every citation
 //
@@ -1442,23 +1471,161 @@ function findSymbolAnchors(text) {
  * the same rot as `Foo` being dropped, and reporting the whole anchor as
  * present because its first half survived is the fail-open one level down.
  *
+ * ⛔ THE VERDICT IS NOT TAKEN HERE. Each segment goes to
+ * `scripts/symbol-anchors.mjs#symbolResolutionClass`, which owns the rule for
+ * every anchor corpus in this tree; the per-segment split above it is this
+ * corpus's anchor GRAMMAR (the shared grammar's `#symbol` carries no dot), not
+ * a rule about what "present" means. A matcher of any kind inside this body is
+ * the fork the ruling forbids, and `selfTestSymbolAnchors`'s N5 reads this
+ * source to say so.
+ *
+ * The target extension is derived by the shared module from `filePath`, so the
+ * `.json`-is-not-masked special case this function used to carry is gone with
+ * the rest of the private rule: JSON resolves against KEYS there.
+ *
  * @param {string} source raw file text
+ * @param {string} filePath repo-relative path of the cited file
  * @param {string} symbol the anchor's symbol, dots allowed
- * @param {string} ext lower-cased extension of the cited file
  * @returns {string[]}
  */
-function absentAnchorSegments(source, symbol, ext) {
-  // JSON has no comment syntax, and masking a `.json` would blank whatever a
-  // `//`-carrying string value holds — a route literal, a URL. Every other
-  // anchorable extension is JS-family and goes through the house masker.
-  const src = ext === 'json' ? source : maskComments(source);
+function absentAnchorSegments(source, filePath, symbol) {
   const absent = [];
   for (const seg of symbol.split('.')) {
-    const esc = seg.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    if (!new RegExp(`(?<![A-Za-z0-9_$])${esc}(?![A-Za-z0-9_$])`).test(src)) absent.push(seg);
+    if (!symbolResolutionClass(source, filePath, seg)) absent.push(seg);
   }
   return absent;
 }
+
+// ── The residual the binding measured (#16898) ────────────────────────
+//
+// Binding this corpus to the shared resolver withdrew a permissive match, and
+// withdrawing it is the DELIVERABLE, not a regression: 56 of 633 anchor
+// occurrences stopped resolving. That population was coverage this checklist
+// reported and did not have, and it is carried here — named, one row per
+// (family file, anchor) — rather than absorbed by a rule or by a lowered floor.
+//
+// ⚠️ Read what this list IS before adding to it. It is a CLOSED LEDGER, not a
+// rule and not an allow-list with a shape:
+//
+//   - every row must FIRE. A row whose anchor resolves again (repaired) or has
+//     gone (re-authored) is a RED that names the row and asks for its deletion,
+//     so the ledger cannot outlive the defect it records and cannot quietly
+//     accumulate dead weight that would excuse a future anchor by accident.
+//   - an anchor that fails to resolve and is NOT on this list is an ordinary
+//     ABSENT SYMBOL red. New bad citations cannot join silently; joining is a
+//     visible diff in a reviewed file.
+//   - so the ledger is SHRINK-ONLY in practice and exact in principle, and
+//     `SHARED_RESOLVER_RESIDUAL_CEILING` beside it pins the other direction.
+//   - ⛔ it is NOT a place to route an inconvenient red. Rows leave by repair.
+//
+// `shape` records HOW the withdrawn rule used to resolve the anchor — the
+// reading, so the repair does not have to be re-derived:
+//
+//   string-substring   the symbol survives only INSIDE a longer string token:
+//                      `saveItem` in `client: 'meta.saveItem'`, `:shareId` in a
+//                      route pattern, a name inside an `it(...)` title or a
+//                      `.describe(...)` sentence. 29 rows, the largest class.
+//   import-only        the cited file IMPORTS the symbol; the declaration is in
+//                      another file. 9 rows.
+//   member-access      the symbol survives only as `x.symbol` on some other
+//                      object — `manifest.objectExtensions`. 3 rows.
+//   json-value-not-key the `.json` target carries the symbol as a VALUE; the
+//                      shared rule reads JSON KEYS. 3 rows.
+//   regex-literal      the symbol survives only inside a regex literal. 1 row.
+//   local-binding      a parameter name, plus a hyphenated string that shares
+//                      the token. 1 row.
+//   detector-artifact  ⭐ not a citation at all: THIS gate's own anchor detector
+//                      truncated an item-id reference at its first hyphen and
+//                      produced a phantom `#access`, which the permissive rule
+//                      then resolved against the spelling `access-security`.
+//                      1 row — the sharpest single illustration of what a
+//                      looser second resolver buys.
+//
+// `verdict` is the classification #16898's acceptance asks for, and there are
+// exactly two:
+//
+//   bad-citation  (47 rows) the anchor names a symbol the cited file does not
+//                 declare. The repair is in the LEDGER: re-point the anchor at
+//                 what the file carries, or drop to a bare citation. ⚠️ Dropping
+//                 costs the file an anchor and most floors have no headroom, so
+//                 re-pointing is the route and the sizing is its own card.
+//   accept-set    (8 rows) the anchor names something real that the SHARED
+//                 resolver's accept set does not reach — an object-literal key
+//                 written INLINE rather than at the start of a line (6), and a
+//                 DATA identifier that is the head segment of a dotted string
+//                 token, `sys_user` in `'sys_user.actions.invite_user'` (2).
+//                 ⛔ THAT IS A DIFFERENT CARD, against
+//                 `scripts/symbol-anchors.mjs`, and ⛔ nothing here may widen
+//                 the core to reach them: it is shared with four other corpora
+//                 and widening it would export this defect to all of them.
+const SHARED_RESOLVER_RESIDUAL = Object.freeze([
+  { doc: 'areas/access-security.json', anchor: 'packages/rest/src/rest-route-ledger.ts#saveItem', shape: 'string-substring', verdict: 'bad-citation' },
+  { doc: 'areas/access-security.json', anchor: 'packages/rest/src/rest-route-ledger.ts#shareId', shape: 'string-substring', verdict: 'bad-citation' },
+  { doc: 'areas/ai.json', anchor: 'packages/mcp/src/plugin.ts#OS_MCP_SERVER_ENABLED', shape: 'string-substring', verdict: 'bad-citation' },
+  { doc: 'areas/ai.json', anchor: 'packages/runtime/src/domains/ai.ts#capabilityUnavailable', shape: 'import-only', verdict: 'bad-citation' },
+  { doc: 'areas/api-backend.json', anchor: 'packages/rest/src/rest-route-ledger.ts#REST', shape: 'string-substring', verdict: 'bad-citation' },
+  { doc: 'areas/api-backend.json', anchor: 'packages/runtime/src/route-ledger.ts#getLegalNextStates', shape: 'string-substring', verdict: 'bad-citation' },
+  { doc: 'areas/api-backend.json', anchor: 'packages/triggers/trigger-api/src/trigger-api-route-ledger.ts#flowName', shape: 'string-substring', verdict: 'bad-citation' },
+  { doc: 'areas/approvals.json', anchor: 'examples/app-showcase/src/security/seed-approval-demo.ts#AUDITOR_DEMO_USER', shape: 'import-only', verdict: 'bad-citation' },
+  { doc: 'areas/attachments-storage.json', anchor: 'packages/spec/liveness/field.json#live', shape: 'json-value-not-key', verdict: 'bad-citation' },
+  { doc: 'areas/automation.json', anchor: 'examples/app-showcase/objectstack.config.ts#ConnectorRestPlugin', shape: 'import-only', verdict: 'bad-citation' },
+  { doc: 'areas/automation.json', anchor: 'packages/runtime/src/route-ledger.ts#getRuntimeStatus', shape: 'string-substring', verdict: 'bad-citation' },
+  { doc: 'areas/automation.json', anchor: 'packages/runtime/src/route-ledger.ts#getScreen', shape: 'string-substring', verdict: 'bad-citation' },
+  { doc: 'areas/automation.json', anchor: 'packages/runtime/src/route-ledger.ts#runId', shape: 'string-substring', verdict: 'bad-citation' },
+  { doc: 'areas/cli.json', anchor: 'packages/cli/src/commands/compile.ts#emitJson', shape: 'import-only', verdict: 'bad-citation' },
+  { doc: 'areas/cli.json', anchor: 'packages/cli/src/commands/doctor-deprecation-hint-commands.test.ts#Doctor', shape: 'import-only', verdict: 'bad-citation' },
+  { doc: 'areas/cli.json', anchor: 'packages/cli/src/utils/format.exit-code.test.ts#emitJson', shape: 'import-only', verdict: 'bad-citation' },
+  { doc: 'areas/cli.json', anchor: 'packages/create-objectstack/src/templates/blank/package.json#objectstack', shape: 'json-value-not-key', verdict: 'bad-citation' },
+  { doc: 'areas/cli.json', anchor: 'packages/verify/src/verify.ts#VALIDATION_FAILED', shape: 'regex-literal', verdict: 'bad-citation' },
+  { doc: 'areas/dashboards.json', anchor: 'examples/app-showcase/src/data/seed/index.ts#sales_region', shape: 'inline-key', verdict: 'accept-set' },
+  { doc: 'areas/dashboards.json', anchor: 'examples/app-showcase/src/data/seed/index.ts#signed_on', shape: 'inline-key', verdict: 'accept-set' },
+  { doc: 'areas/identity-auth.json', anchor: 'docs/qa/platform-checklist/areas/access-security.json#access', shape: 'detector-artifact', verdict: 'bad-citation' },
+  { doc: 'areas/identity-auth.json', anchor: 'examples/app-showcase/src/security/seed-approval-demo.ts#PHONE_DEMO_USER', shape: 'import-only', verdict: 'bad-citation' },
+  { doc: 'areas/identity-auth.json', anchor: 'packages/platform-objects/src/identity/sys-member.object.ts#BUILTIN_MEMBERSHIP_ROLE_OPTIONS', shape: 'import-only', verdict: 'bad-citation' },
+  { doc: 'areas/identity-auth.json', anchor: 'packages/platform-objects/src/identity/sys-oauth-application.object.ts#OAuth', shape: 'string-substring', verdict: 'bad-citation' },
+  { doc: 'areas/identity-auth.json', anchor: 'packages/plugins/plugin-auth/src/auth-route-ledger.ts#bootstrapStatus', shape: 'string-substring', verdict: 'bad-citation' },
+  { doc: 'areas/identity-auth.json', anchor: 'packages/plugins/plugin-auth/src/auth-route-ledger.ts#linkSocial', shape: 'string-substring', verdict: 'bad-citation' },
+  { doc: 'areas/identity-auth.json', anchor: 'packages/plugins/plugin-auth/src/auth-route-ledger.ts#revokeOthers', shape: 'string-substring', verdict: 'bad-citation' },
+  { doc: 'areas/identity-auth.json', anchor: 'packages/plugins/plugin-auth/src/auth-route-ledger.ts#sendVerificationEmail', shape: 'string-substring', verdict: 'bad-citation' },
+  { doc: 'areas/identity-auth.json', anchor: 'packages/plugins/plugin-auth/src/auth-route-ledger.ts#setActive', shape: 'string-substring', verdict: 'bad-citation' },
+  { doc: 'areas/identity-auth.json', anchor: 'packages/plugins/plugin-auth/src/auth-route-ledger.ts#updateUser', shape: 'string-substring', verdict: 'bad-citation' },
+  { doc: 'areas/identity-auth.json', anchor: 'packages/plugins/plugin-security/src/security-plugin.ts#__referentialFieldClear', shape: 'member-access', verdict: 'bad-citation' },
+  { doc: 'areas/identity-auth.json', anchor: 'packages/qa/dogfood/test/membership-role-vocabulary.dogfood.test.ts#PermissionSet', shape: 'string-substring', verdict: 'bad-citation' },
+  { doc: 'areas/identity-auth.json', anchor: 'packages/rest/src/rest-route-ledger.ts#describeDelegableScope', shape: 'string-substring', verdict: 'bad-citation' },
+  { doc: 'areas/identity-auth.json', anchor: 'packages/spec/src/kernel/public-auth-features.ts#sys_invitation', shape: 'dotted-string-head', verdict: 'accept-set' },
+  { doc: 'areas/identity-auth.json', anchor: 'packages/spec/src/kernel/public-auth-features.ts#sys_user', shape: 'dotted-string-head', verdict: 'accept-set' },
+  { doc: 'areas/integration-system.json', anchor: 'examples/app-showcase/objectstack.config.ts#declarativeStdio', shape: 'inline-key', verdict: 'accept-set' },
+  { doc: 'areas/integration-system.json', anchor: 'examples/app-showcase/src/system/datasources/showcase-external.datasource.ts#onMismatch', shape: 'inline-key', verdict: 'accept-set' },
+  { doc: 'areas/integration-system.json', anchor: 'packages/services/service-messaging/src/messaging-service.ts#PreferenceResolver', shape: 'import-only', verdict: 'bad-citation' },
+  { doc: 'areas/integration-system.json', anchor: 'packages/spec/liveness/email_template.json#requireVars', shape: 'json-value-not-key', verdict: 'bad-citation' },
+  { doc: 'areas/platform-core.json', anchor: 'packages/objectql/src/engine.ts#objectExtensions', shape: 'member-access', verdict: 'bad-citation' },
+  { doc: 'areas/platform-core.json', anchor: 'packages/plugins/plugin-auth/src/auth-plugin.ts#Providers', shape: 'string-substring', verdict: 'bad-citation' },
+  { doc: 'areas/platform-core.json', anchor: 'packages/qa/dogfood/test/package-first-authoring.dogfood.test.ts#writable_package_required', shape: 'string-substring', verdict: 'bad-citation' },
+  { doc: 'areas/platform-core.json', anchor: 'packages/runtime/src/domains/notifications.ts#markRead', shape: 'member-access', verdict: 'bad-citation' },
+  { doc: 'areas/platform-core.json', anchor: 'packages/runtime/src/route-ledger.ts#commitId', shape: 'string-substring', verdict: 'bad-citation' },
+  { doc: 'areas/records-forms.json', anchor: 'examples/app-showcase/src/data/objects/business-unit.object.ts#allowCreate', shape: 'inline-key', verdict: 'accept-set' },
+  { doc: 'areas/records-forms.json', anchor: 'examples/app-showcase/src/data/seed/index.ts#Specimen', shape: 'string-substring', verdict: 'bad-citation' },
+  { doc: 'areas/records-forms.json', anchor: 'examples/app-showcase/src/ui/actions/index.ts#maxSize', shape: 'inline-key', verdict: 'accept-set' },
+  { doc: 'areas/records-forms.json', anchor: 'packages/lint/src/validate-action-locations.ts#action', shape: 'local-binding', verdict: 'bad-citation' },
+  { doc: 'areas/records-forms.json', anchor: 'packages/rest/src/rest-route-ledger.ts#jobId', shape: 'string-substring', verdict: 'bad-citation' },
+  { doc: 'areas/records-forms.json', anchor: 'packages/spec/src/data/object.zod.ts#FEEDS_DISABLED', shape: 'string-substring', verdict: 'bad-citation' },
+  { doc: 'areas/records-forms.json', anchor: 'packages/spec/src/data/object.zod.ts#query', shape: 'string-substring', verdict: 'bad-citation' },
+  { doc: 'areas/studio-authoring.json', anchor: 'packages/objectql/src/overlay-precedence.test.ts#not_overridable', shape: 'string-substring', verdict: 'bad-citation' },
+  { doc: 'areas/studio-authoring.json', anchor: 'packages/rest/src/meta-write-actor-identity.test.ts#Actor', shape: 'string-substring', verdict: 'bad-citation' },
+  { doc: 'areas/studio-authoring.json', anchor: 'packages/rest/src/rest-route-ledger.ts#getHistory', shape: 'string-substring', verdict: 'bad-citation' },
+  { doc: 'areas/studio-authoring.json', anchor: 'packages/rest/src/rest-route-ledger.ts#REST', shape: 'string-substring', verdict: 'bad-citation' },
+]);
+
+// Grow-never. The ledger above is exact (every row fires, nothing else may
+// fail), so this is the belt on the braces: a silent append — the one edit that
+// would turn a closed ledger back into a permissive rule, one row at a time —
+// refuses here rather than validating.
+const SHARED_RESOLVER_RESIDUAL_CEILING = 55;
+
+const residualKey = (doc, anchor) => `${doc}::${anchor}`;
+const SHARED_RESOLVER_RESIDUAL_INDEX = new Map(
+  SHARED_RESOLVER_RESIDUAL.map((r) => [residualKey(r.doc, r.anchor), r]),
+);
 
 // ── The anchor floor ────────────────────────────────────────────────────────
 //
@@ -1568,23 +1735,98 @@ function selfTestSymbolAnchors() {
     "const ROUTE = '/api/v1/meta/object';",
     'export function hasPlatformAdminStanding(x) { return RESOLVED.mode === x; }',
   ].join('\n');
+  /* The same shape with the member at the START OF A LINE, which is where the
+   * shared rule reads one. Kept as a second fixture rather than folded into
+   * `src`, because `src`'s inline member is exactly what P3 now pins. */
+  const blockSrc = [
+    'export const PolicyShape = {',
+    "  mode: 'strict',",
+    '};',
+  ].join('\n');
   t('R1 a symbol that is gone from the file is reported absent',
-    absentAnchorSegments(src, 'parsePlatformAdminEmails', 'ts').length === 1);
+    absentAnchorSegments(src, 'x.ts', 'parsePlatformAdminEmails').length === 1);
   t('R2 a symbol surviving ONLY in a comment is ABSENT — prose about a symbol is not a symbol',
-    absentAnchorSegments(src, 'renamed', 'ts').length === 1);
+    absentAnchorSegments(src, 'x.ts', 'renamed').length === 1);
   t('R3 a dotted anchor whose SECOND segment is gone is reported, not passed on the first',
-    absentAnchorSegments(src, 'RESOLVED.strictness', 'ts').join(',') === 'strictness');
+    absentAnchorSegments(src, 'x.ts', 'RESOLVED.strictness').join(',') === 'strictness');
   t('R4 a substring of a present identifier does not count as present',
-    absentAnchorSegments(src, 'PlatformAdmin', 'ts').length === 1);
+    absentAnchorSegments(src, 'x.ts', 'PlatformAdmin').length === 1);
 
   // ── and STAYS SILENT ──────────────────────────────────────────────────────
-  t('P1 a declared export resolves', absentAnchorSegments(src, 'hasPlatformAdminStanding', 'ts').length === 0);
-  t('P2 a const resolves', absentAnchorSegments(src, 'RESOLVED', 'ts').length === 0);
-  t('P3 both segments of a live dotted anchor resolve', absentAnchorSegments(src, 'RESOLVED.mode', 'ts').length === 0);
-  t('P4 a symbol inside a STRING literal counts as present — this ledger cites machine names, not only exports',
-    absentAnchorSegments(src, 'strict', 'ts').length === 0);
-  t('P5 `.json` is scanned unmasked, so a `//`-carrying string value is never blanked away',
-    absentAnchorSegments('{ "route": "https://x/y", "kind": "live" }', 'live', 'json').length === 0);
+  t('P1 a declared export resolves', absentAnchorSegments(src, 'x.ts', 'hasPlatformAdminStanding').length === 0);
+  t('P2 a const resolves', absentAnchorSegments(src, 'x.ts', 'RESOLVED').length === 0);
+  /* P3 and P5 are RE-JUDGED IN PLACE (#16898), ⛔ not deleted. Both asserted a
+   * resolution only the permissive token match this gate used to carry could
+   * produce, so both had to be re-read once the verdict moved to
+   * `scripts/symbol-anchors.mjs#symbolResolutionClass` — and keeping the case
+   * with its verdict inverted is what pins the narrowing, where deleting it
+   * would leave the tree unable to say the narrowing ever happened.
+   *
+   *   P3 asserted `RESOLVED.mode` resolves. `{ mode: 'strict' }` is an
+   *      object-literal key written INLINE; the shared rule admits a member or
+   *      object-literal key written at the START OF A LINE. Six of the ledger's
+   *      own residual rows are this exact shape, and whether the shared accept
+   *      set should reach an inline key is a card against that module — ⛔ never
+   *      a widening made here. The direction P3 used to cover (both segments of
+   *      a live dotted anchor resolving) is P3b, on a member the rule accepts.
+   *   P5 asserted a `.json` VALUE resolves, because this gate used to scan JSON
+   *      unmasked and ask only whether the token appeared. The shared rule reads
+   *      JSON KEYS, which is what keeps a value of the same spelling out. The
+   *      half P5 really cared about — that a `//`-carrying string value is never
+   *      blanked away — is P5b, which resolves a key while such a value sits
+   *      beside it.
+   */
+  t('P3 a dotted anchor whose member is written INLINE is now ABSENT — the shared rule takes a member key at the start of a line (re-judged, #16898)',
+    absentAnchorSegments(src, 'x.ts', 'RESOLVED.mode').join(',') === 'mode');
+  t('P3b both segments of a live dotted anchor resolve when the member IS at the start of a line',
+    absentAnchorSegments(blockSrc, 'x.ts', 'PolicyShape.mode').length === 0);
+  t('P4 a symbol that is a COMPLETE quoted token counts as present — this ledger cites machine names, not only exports',
+    absentAnchorSegments(src, 'x.ts', 'strict').length === 0);
+  t('P5 a `.json` VALUE is ABSENT — the shared rule resolves JSON KEYS (re-judged, #16898)',
+    absentAnchorSegments('{ "route": "https://x/y", "kind": "live" }', 'x.json', 'live').join(',') === 'live');
+  t('P5b a `.json` KEY resolves, and a `//`-carrying string value beside it is never blanked away',
+    absentAnchorSegments('{ "route": "https://x/y", "live": true }', 'x.json', 'live').length === 0);
+
+  // ── the BINDING itself (#16898) ───────────────────────────────────────────
+  //
+  // The four shapes the withdrawn rule accepted and the shared resolver
+  // refuses, measured on one fixture — and, in the same fixture, the POSITIVE
+  // CONTROL that says the binding narrowed rather than simply broke. Without
+  // N4 a green here cannot tell "bound correctly" from "everything stopped
+  // resolving", which is the only way a resolver swap can look fine and be
+  // worthless.
+  const bindSrc = [
+    "import { importedOnly } from './elsewhere.js';",
+    'export function declaredHere(paramOnly) { return importedOnly(paramOnly); }',
+    "export const HOST = { list: ['whole_token', 'dotted_head.actions.go'] };",
+  ].join('\n');
+  t('N1 a CALL SITE / IMPORT only is ABSENT — the file uses the symbol, it does not declare it',
+    absentAnchorSegments(bindSrc, 'x.ts', 'importedOnly').length === 1);
+  t('N2 a LOCAL PARAMETER only is ABSENT',
+    absentAnchorSegments(bindSrc, 'x.ts', 'paramOnly').length === 1);
+  t('N3 a SUBSTRING of a longer string token is ABSENT — `literal` is a COMPLETE quoted token',
+    absentAnchorSegments(bindSrc, 'x.ts', 'dotted_head').length === 1);
+  t('N4 POSITIVE CONTROL — a declaration and a complete quoted token BOTH still resolve, so a green above is a narrowing and not a dead resolver',
+    absentAnchorSegments(bindSrc, 'x.ts', 'declaredHere').length === 0
+      && absentAnchorSegments(bindSrc, 'x.ts', 'whole_token').length === 0);
+  const ownResolverBody = /function absentAnchorSegments\([^)]*\)\s*\{[\s\S]*?\n\}/
+    .exec(readFileSync(new URL(import.meta.url).pathname, 'utf8'))?.[0] ?? '';
+  t('N5 this gate carries NO resolution rule of its own — the body delegates and holds no matcher, which is the fork the #13556 ruling forbids',
+    ownResolverBody.includes('symbolResolutionClass(')
+      && !/new RegExp|RegExp\(|\.test\(|maskComments|indexOf\(/.test(ownResolverBody));
+
+  // ── the residual ledger, both directions ─────────────────────────────────
+  t('D1 the residual is a CLOSED ledger — every row carries a doc, an anchor, a shape and one of exactly two verdicts',
+    SHARED_RESOLVER_RESIDUAL.length > 0
+      && SHARED_RESOLVER_RESIDUAL.every((r) => r.doc && r.anchor.includes('#') && r.shape
+        && (r.verdict === 'bad-citation' || r.verdict === 'accept-set')));
+  t('D2 no row is written twice — a duplicate would let one repair leave a live excuse behind',
+    SHARED_RESOLVER_RESIDUAL_INDEX.size === SHARED_RESOLVER_RESIDUAL.length);
+  t('D3 the ledger is inside its grow-never ceiling — a residual that can grow is the permissive rule coming back a row at a time',
+    SHARED_RESOLVER_RESIDUAL.length <= SHARED_RESOLVER_RESIDUAL_CEILING);
+  t('D4 the `accept-set` rows are the minority and are named as a DIFFERENT card — ⛔ nothing here widens the shared core',
+    SHARED_RESOLVER_RESIDUAL.filter((r) => r.verdict === 'accept-set').length
+      < SHARED_RESOLVER_RESIDUAL.filter((r) => r.verdict === 'bad-citation').length);
 
   // ── the floor, both directions ────────────────────────────────────────────
   const floors = { 'areas/a.json': 10, 'areas/b.json': 4 };
@@ -1634,7 +1876,7 @@ if (process.argv.slice(2).includes('--self-test')) {
         ' the unreferenced-recipe direction fires on a recipe nobody uses while leaving a cross-area consumer, a retired consumer and a `$`-annotation alone;' +
         ' and the `/meta` call-spelling refusal reads its vocabulary out of the live generated contract, fires on every folded spelling a `call` can instruct, and stays silent on the canonical singular, on parameter placeholders, and on the `why`/`expect`/`source`/`requires` prose that narrates the fold;' +
         ' and the source-line-citation refusal fires on every spelling this ledger carried (file-anchored, range, bare continuation, parenthesised, `~:`, comma/slash-chained) while staying silent on HTTP status, config literals, URL ports, clock times, JSON quoted in prose and the README placeholder that documents the ban;' +
-        ' and the symbol-anchor resolver finds every anchor spelling an author writes while reading no issue reference, URL fragment, ADR section or bare citation as one, reports a symbol that survives only in a comment as ABSENT, resolves both segments of a dotted anchor, and holds the per-file anchor floor in both directions.',
+        ' and the symbol-anchor limb finds every anchor spelling an author writes while reading no issue reference, URL fragment, ADR section or bare citation as one, and then RESOLVES NOTHING ITSELF: the verdict is `scripts/symbol-anchors.mjs#symbolResolutionClass` (#16898), pinned here by a body that holds no matcher, by a call site / import / local parameter / string-substring all reading ABSENT, by the positive control that a declaration and a complete quoted token still resolve, by a `.json` key resolving where a `.json` value no longer does, and by the closed, grow-never residual that names what the binding withdrew — with the per-file anchor floor held in both directions beside it.',
     );
     process.exit(0);
   }
@@ -2094,9 +2336,12 @@ function anchorSource(absPath) {
 const anchorCounts = new Map();
 let anchorsScanned = 0;
 let anchorsResolved = 0;
+let anchorsResidual = 0;
+const residualFired = new Set();
 for (const rel of familyFiles(CHECKLIST_DIR)) {
   const text = readFileSync(join(CHECKLIST_DIR, rel), 'utf8');
   let resolved = 0;
+  let residual = 0;
   for (const anchor of findSymbolAnchors(text)) {
     anchorsScanned++;
     if (!ANCHORABLE_EXTENSIONS.has(anchor.ext)) {
@@ -2108,15 +2353,44 @@ for (const rel of familyFiles(CHECKLIST_DIR)) {
       err(rel, null, `ANCHOR FILE NOT FOUND — \`${anchor.anchor}\`: ${anchor.file} is not in this repo. A path this gate cannot open is not an anchor; a sibling-repo citation (objectui/cloud) stays BARE, and a moved file needs the pin re-pointed.`);
       continue;
     }
-    const absent = absentAnchorSegments(anchorSource(abs), anchor.symbol, anchor.ext);
+    const absent = absentAnchorSegments(anchorSource(abs), anchor.file, anchor.symbol);
     if (absent.length) {
-      err(rel, null, `ABSENT SYMBOL — \`${anchor.anchor}\`: ${absent.map((s) => `\`${s}\``).join(' and ')} ${absent.length > 1 ? 'are' : 'is'} not in ${anchor.file} outside its comments. The symbol was renamed or removed and the citation kept reading as "verified against source" — re-point it at what the file carries now, or drop the \`#symbol\` half and cite the file bare.`);
+      // On the measured residual? Then this is one of the 56 the binding
+      // withdrew (#16898) — recorded, counted apart from `resolved`, and NOT a
+      // red. Anything else that fails to resolve is an ordinary red, which is
+      // what keeps the ledger closed instead of permissive.
+      const known = SHARED_RESOLVER_RESIDUAL_INDEX.get(residualKey(rel, anchor.anchor));
+      if (known) {
+        residualFired.add(residualKey(rel, anchor.anchor));
+        residual++;
+        anchorsResidual++;
+        continue;
+      }
+      err(rel, null, `ABSENT SYMBOL — \`${anchor.anchor}\`: ${absent.map((s) => `\`${s}\``).join(' and ')} ${absent.length > 1 ? 'are' : 'is'} not declared in ${anchor.file} by \`scripts/symbol-anchors.mjs#symbolResolutionClass\` — no declaration site and no complete quoted string token, comments stripped. A call site, an import, a member access or a substring of a longer string is NOT resolution. Re-point the anchor at what the file declares now, or drop the \`#symbol\` half and cite the file bare. ⛔ Do not widen \`scripts/symbol-anchors.mjs\` to make this green: it is shared with four other corpora.`);
       continue;
     }
     resolved++;
     anchorsResolved++;
   }
-  anchorCounts.set(rel, resolved);
+  // The floor's population is every anchor this gate holds BOUND — resolved
+  // plus the named residual. ⛔ That is deliberately not the same number as
+  // `resolved`, and the console line prints both so the coverage claim stays
+  // honest: folding the residual in silently is the exact move this card
+  // exists to undo, and no floor in the maintainer-only baseline is touched.
+  anchorCounts.set(rel, resolved + residual);
+}
+
+// A residual row that did not fire has been repaired, re-authored or removed —
+// and a ledger that outlives its defect is a standing excuse for whatever
+// anchor next happens to match it. Deleting the row is the remedy.
+for (const r of SHARED_RESOLVER_RESIDUAL) {
+  if (residualFired.has(residualKey(r.doc, r.anchor))) continue;
+  err(r.doc, null, `STALE RESIDUAL ROW — \`${r.anchor}\` no longer fails to resolve here (repaired, re-authored, or gone). Delete its row from \`SHARED_RESOLVER_RESIDUAL\` in this file, in the same edit; the ledger is shrink-only and every row must fire.`);
+}
+if (SHARED_RESOLVER_RESIDUAL.length > SHARED_RESOLVER_RESIDUAL_CEILING) {
+  console.error(`check-platform-checklist: SHARED_RESOLVER_RESIDUAL carries ${SHARED_RESOLVER_RESIDUAL.length} rows but the grow-never ceiling is ${SHARED_RESOLVER_RESIDUAL_CEILING}.`);
+  console.error('\nThis is a REFUSAL, not a pass: a residual that can grow is the permissive rule coming back one row at a time. Rows leave by repairing the citation, never by raising this number.');
+  process.exit(1);
 }
 
 // The census mode: how the baseline beside this gate is authored, and the one
@@ -2127,7 +2401,7 @@ if (process.argv.slice(2).includes('--anchor-census')) {
   const census = {};
   for (const [rel, n] of [...anchorCounts].sort(([a], [b]) => a.localeCompare(b))) if (n > 0) census[rel] = n;
   console.log(JSON.stringify(census, null, 2));
-  console.error(`\ncheck-platform-checklist --anchor-census: ${anchorsResolved}/${anchorsScanned} anchors resolved across ${Object.keys(census).length} family files. This is a CENSUS, not a verdict — run the gate with no flags for that.`);
+  console.error(`\ncheck-platform-checklist --anchor-census: ${anchorsResolved}/${anchorsScanned} anchors resolved through \`scripts/symbol-anchors.mjs#symbolResolutionClass\`, plus ${anchorsResidual} on the named residual, across ${Object.keys(census).length} family files. ⚠️ The per-file counts printed above are the FLOOR population (resolved + residual), which is what the baseline beside this gate pins; they are NOT a coverage figure on their own. This is a CENSUS, not a verdict — run the gate with no flags for that.`);
   process.exit(0);
 }
 
@@ -2174,6 +2448,7 @@ console.log(
     ` provisioning: ${recipeTotal} area recipes, ${recipeRefs} item references resolved (${qualifiedRefs} area-qualified), ${recipesReferenced}/${recipeTotal} recipes referenced;` +
     ` meta-URL spelling: ${metaCallsScanned} \`call\` strings scanned against ${FOLDED_META_SPELLINGS.size} folded spellings;` +
     ` source citations: ${citationsScanned} family files carry no \`file:line\` pin;` +
-    ` symbol anchors: ${anchorsResolved}/${anchorsScanned} resolved against ${anchorSourceCache.size} cited sources, ${Object.keys(anchorFloors).length} file floors held;` +
+    ` symbol anchors: ${anchorsResolved}/${anchorsScanned} resolved by \`symbol-anchors.mjs\` (the ONE resolver) against ${anchorSourceCache.size} cited sources` +
+    `, ${anchorsResidual} on the named #16898 residual, ${Object.keys(anchorFloors).length} file floors held;` +
     ` (self-checks: ${trapControl.checked} trap-vocabulary + ${provisioningControl.checked} provisioning-resolve + ${unreferencedControl.checked} unreferenced-recipe + ${metaCallControl.checked} meta-call-spelling + ${citationControl.checked} source-line-citation + ${symbolAnchorControl.checked} symbol-anchor assertions).`,
 );

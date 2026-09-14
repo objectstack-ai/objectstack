@@ -456,7 +456,7 @@ describe('AuthManager', () => {
     });
 
     // @better-auth/scim mounts the SCIM 2.0 Service Provider so an external IdP
-    // can auto-provision/deprovision this env's users (ADR-0071). It is opt-in
+    // can auto-provision/deprovision this env's users (ADR-0134). It is opt-in
     // via `plugins.scim` (explicit value wins, #13439) or OS_SCIM_ENABLED
     // (decides where the config leaves it unset), and effective SCIM FORCES
     // the admin plugin on (active:false → ban runs through admin).
@@ -508,7 +508,7 @@ describe('AuthManager', () => {
     // config leaves the key unset. This is the cloud control plane's case:
     // its plan-derived `plugins.scim: false` must be authoritative even in a
     // deployment env that carries an ambient OS_SCIM_ENABLED (cloud#1265).
-    // The forced-admin coupling (ADR-0071) follows the EFFECTIVE scim value,
+    // The forced-admin coupling (ADR-0134) follows the EFFECTIVE scim value,
     // so declining scim also declines the admin plugin it would have dragged
     // in (unless `admin` is set explicitly).
     it('should NOT register the scim plugin (nor force admin on) when plugins.scim=false despite OS_SCIM_ENABLED', async () => {
@@ -559,7 +559,7 @@ describe('AuthManager', () => {
         await manager.getAuthInstance();
         const ids = capturedConfig.plugins.map((p: any) => p.id);
         expect(ids).toContain('scim');
-        // ADR-0071 — the forced-admin coupling is unchanged: effective SCIM
+        // ADR-0134 — the forced-admin coupling is unchanged: effective SCIM
         // still drags the admin plugin in when `admin` is left unset.
         expect(ids).toContain('admin');
         expect(manager.getPublicConfig().features.admin).toBe(true);
@@ -572,11 +572,11 @@ describe('AuthManager', () => {
 
     // #13816 (maintainer ruling 2026-09-01) — `admin` is tri-state, and the
     // one incoherent corner is REFUSED at construction: effective SCIM with an
-    // explicit `plugins.admin: false` contradicts ADR-0071 (SCIM's
+    // explicit `plugins.admin: false` contradicts ADR-0134 (SCIM's
     // active:false deprovisioning runs through the admin plugin), so the
     // manager throws a documented conflict instead of silently honouring the
     // decline and mounting SCIM with a broken deprovisioning path.
-    it('REFUSES construction when plugins.scim=true and plugins.admin=false (documented ADR-0071 conflict)', () => {
+    it('REFUSES construction when plugins.scim=true and plugins.admin=false (documented ADR-0134 conflict)', () => {
       const prev = process.env.OS_SCIM_ENABLED;
       delete process.env.OS_SCIM_ENABLED;
       try {
@@ -584,7 +584,7 @@ describe('AuthManager', () => {
           secret: 'test-secret-at-least-32-chars-long',
           baseUrl: 'http://localhost:3000',
           plugins: { scim: true, admin: false },
-        })).toThrow(/plugins\.admin[\s\S]*ADR-0071[\s\S]*plugins\.scim: false/);
+        })).toThrow(/plugins\.admin[\s\S]*ADR-0134[\s\S]*plugins\.scim: false/);
       } finally {
         if (prev === undefined) delete process.env.OS_SCIM_ENABLED;
         else process.env.OS_SCIM_ENABLED = prev;
@@ -599,7 +599,7 @@ describe('AuthManager', () => {
           secret: 'test-secret-at-least-32-chars-long',
           baseUrl: 'http://localhost:3000',
           plugins: { admin: false },
-        })).toThrow(/OS_SCIM_ENABLED[\s\S]*ADR-0071/);
+        })).toThrow(/OS_SCIM_ENABLED[\s\S]*ADR-0134/);
       } finally {
         if (prev === undefined) delete process.env.OS_SCIM_ENABLED;
         else process.env.OS_SCIM_ENABLED = prev;
@@ -693,7 +693,7 @@ describe('AuthManager', () => {
           plugins: { scim: true },
         });
         expect(() => manager.applyConfigPatch({ plugins: { admin: false } }))
-          .toThrow(/ADR-0071/);
+          .toThrow(/ADR-0134/);
         // The refused patch never became current: the advertised admin flag
         // still reflects the SCIM-forced coupling.
         expect(manager.getPublicConfig().features.admin).toBe(true);
@@ -717,7 +717,7 @@ describe('AuthManager', () => {
         // appearing between construction and the lazy build must not mount
         // SCIM with its deprovisioning path silently declined.
         process.env.OS_SCIM_ENABLED = 'true';
-        await expect(manager.getAuthInstance()).rejects.toThrow(/ADR-0071/);
+        await expect(manager.getAuthInstance()).rejects.toThrow(/ADR-0134/);
       } finally {
         if (prev === undefined) delete process.env.OS_SCIM_ENABLED;
         else process.env.OS_SCIM_ENABLED = prev;

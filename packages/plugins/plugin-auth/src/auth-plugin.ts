@@ -2457,7 +2457,7 @@ export class AuthPlugin implements Plugin {
       // ObjectStack's predicate — a MEASURED property of the installed
       // version, written up in admin-ban-endpoints.ts. The result was that the
       // `sys_user` Ban / Unban buttons 403'd for every platform admin on any
-      // deployment with the admin plugin on (SCIM forces it, ADR-0071).
+      // deployment with the admin plugin on (SCIM forces it, ADR-0134).
       //
       // ⚠️ Shadowing detaches better-auth hooks keyed on the path: the
       // break-glass last-local-credential guard used to fire on

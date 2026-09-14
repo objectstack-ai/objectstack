@@ -34,9 +34,9 @@
 ## 写侧 —— 全部可迁移
 
 - ✓ 评论 `POST .../issues/{n}/comments`;改评论 `PATCH .../issues/comments/{id}`。
-- ✓ 标签加法 `POST .../issues/{n}/labels`,定向删 `DELETE .../issues/{n}/labels/{name}`。
-- 加法写剥不掉并发席位刚挂的标签,比 MCP `issue_write` 的整组替换安全。
-- 门关席位无此端点 ⇒ 回退 = MCP 读现值、并集、整组写、读回;读回是它安全的全部理由。
+- ✓ 标签加法 `POST .../issues/{n}/labels`,定向删 `DELETE .../issues/{n}/labels/{name}`;加法优先。
+- 标签/assignee 写恒经 `scripts/pm/label-write.mjs`:四步内建、回读、回退整组 PATCH 回传 assignees。
+- ⛔ 永不 MCP `issue_write`(锁 1 已拒);会话分类器拒改动 ⇒ 无通道,交有通道席位立卡。
 - ✓ 建卡带标签 `POST .../issues` · 改正文 `PATCH .../issues/{n}` · 认领 `POST .../issues/{n}/assignees`。
 - 请求体走文件(`-d @file`)或引号定界 heredoc(`<<'EOF'`),⛔ 永不内联双引号串。
 - 双引号内 shell 先展开反引号、`$(...)`、`$VAR`,请求尚未成形;只标题坏而正文完好即此形。

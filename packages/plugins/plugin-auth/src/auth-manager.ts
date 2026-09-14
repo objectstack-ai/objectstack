@@ -383,7 +383,7 @@ export function resolveScimEnabled(pluginConfig?: Partial<AuthPluginConfig>): bo
  * env vars read after boot), loudly, with the remedy in the message.
  *
  * SCIM's `active:false` deprovisioning path runs through the better-auth
- * `admin` plugin (ban/unban — ADR-0071), so a SCIM-enabled deployment cannot
+ * `admin` plugin (ban/unban — ADR-0134), so a SCIM-enabled deployment cannot
  * have the admin plugin declined: effective SCIM with an explicit
  * `plugins.admin: false` is a contradiction. Previously the resolution
  * honoured the explicit `false` and mounted SCIM anyway — deprovisioning
@@ -399,7 +399,7 @@ export function assertScimAdminCoherence(pluginConfig?: Partial<AuthPluginConfig
       '[auth] conflicting auth plugin configuration: SCIM provisioning is effective ' +
       '(plugins.scim, or OS_SCIM_ENABLED where the config leaves it unset) while plugins.admin ' +
       "is explicitly false. SCIM's active:false deprovisioning path runs through the better-auth " +
-      'admin plugin (ban/unban — ADR-0071), so a SCIM-enabled deployment cannot decline the admin ' +
+      'admin plugin (ban/unban — ADR-0134), so a SCIM-enabled deployment cannot decline the admin ' +
       'surface. Either accept the admin plugin (remove plugins.admin: false, or set it true), or ' +
       'disable SCIM (plugins.scim: false — which also declines the admin plugin it would force on). ' +
       'Refused loudly at construction instead of silently mounting SCIM without its deprovisioning ' +
@@ -1259,7 +1259,7 @@ export class AuthManager {
 
     // [#13816] SCIM ⇄ admin coherence — same boot-loudly rationale as the two
     // asserts above: effective SCIM with an explicit `plugins.admin: false`
-    // is a contradiction (ADR-0071 routes SCIM deprovisioning through the
+    // is a contradiction (ADR-0134 routes SCIM deprovisioning through the
     // admin plugin), refused here rather than mounting SCIM whose
     // active:false path is silently broken. `applyConfigPatch` re-runs it on
     // the merged result, and `buildPluginList()` re-checks for env vars that
@@ -2801,14 +2801,14 @@ export class AuthManager {
     const ssoDomainVerifyFromEnv = readBooleanEnv('OS_SSO_DOMAIN_VERIFICATION');
     // @better-auth/scim's `active:false` → ban runs through the admin plugin,
     // and org-scoped tokens need the organization plugin — so enabling SCIM
-    // forces `admin` on (organization already defaults on). See ADR-0071.
+    // forces `admin` on (organization already defaults on). See ADR-0134.
     // An explicit `plugins.admin: false` beside effective SCIM is a
     // contradiction refused below (#13816) — never silently honoured.
     const scimEffective = resolveScimEnabled(pluginConfig);
     // Re-checked here (the constructor already refused a conflicted BOOT
     // config) because this is where the env var is actually read: an
     // OS_SCIM_ENABLED that appears between construction and the lazy
-    // better-auth build would otherwise mount SCIM with its ADR-0071
+    // better-auth build would otherwise mount SCIM with its ADR-0134
     // deprovisioning path silently declined.
     assertScimAdminCoherence(pluginConfig);
     const twoFactorFromEnv = readBooleanEnv('OS_AUTH_TWO_FACTOR');
@@ -3679,7 +3679,7 @@ export class AuthManager {
 
     // External SCIM 2.0 Service Provider (@better-auth/scim, MIT) — lets an
     // external IdP (Okta / Entra) auto-provision / deprovision THIS env's users
-    // (the paid Identity lifecycle, ADR-0071). The env is the SCIM Service
+    // (the paid Identity lifecycle, cloud ADR-0071). The env is the SCIM Service
     // Provider; SCIM 2.0 endpoints mount under /api/v1/auth/scim/v2/{Users,…}.
     // `active:false` → ban + session revoke (needs the admin plugin, forced on
     // above). This plugin still accepts no `schema` option (`SCIMOptions`
@@ -5977,7 +5977,7 @@ export class AuthManager {
    * the state is inactive (`dist/index.mjs`, the identity facade's
    * `reconcileUser`). Without a host implementation an IdP's `active: false`
    * revoked sessions and wrote nothing: `sys_user.banned` stayed false and a
-   * local-password user signed straight back in, while ADR-0071, the
+   * local-password user signed straight back in, while ADR-0134, the
    * generated docs and the #13816 refusal all asserted the ban.
    *
    * This method restores declared = enforced by routing the state to the
@@ -6593,7 +6593,7 @@ export class AuthManager {
       ssoEnforced: ssoOnly,
       deviceAuthorization: pluginConfig.deviceAuthorization ?? false,
       // Mirrors `enabled.admin` in buildPluginList() (SCIM forces the admin
-      // plugin on, ADR-0071) — previously `?? false`, which advertised the
+      // plugin on, ADR-0134) — previously `?? false`, which advertised the
       // admin surface as absent in SCIM-enabled deployments where it was
       // actually mounted, hiding the admin sys_user actions (#2766 V1).
       // Shares resolveScimEnabled with the mount path (#13816) so the

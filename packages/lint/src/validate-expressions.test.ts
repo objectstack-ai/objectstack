@@ -2793,8 +2793,15 @@ const READ_SURFACES: Array<{ receiver: string; expected: string[]; declaredBy: s
     keys: () => shapeKeysOf(ObjectStackSchema.shape.hooks),
   },
   {
+    // [#16910] `edges` joined `nodes` here when the flow's EDGE list stopped
+    // being read out of the `{ ...flow }` spread and became a literal
+    // `flow.edges` read through `recordsOf`. Adding it is the deliberate visit
+    // this table exists to force, and the read is literal for exactly the
+    // reason the `f.options` note below gives: the spread handed the raw array
+    // to `collectFlowGraphs` while hiding the surface from this scan, which is
+    // how a `null` edge member reached the edge walk and threw.
     receiver: 'flow',
-    expected: ['name', 'nodes'],
+    expected: ['edges', 'name', 'nodes'],
     declaredBy: 'ObjectStackSchema.flows[]',
     keys: () => shapeKeysOf(ObjectStackSchema.shape.flows),
   },

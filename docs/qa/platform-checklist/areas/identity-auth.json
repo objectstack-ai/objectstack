@@ -478,7 +478,7 @@
         "packages/plugins/plugin-auth/src/auth-route-ledger.ts#BETTER_AUTH_MOUNTED_SURFACE (BETTER_AUTH_MOUNTED_SURFACE admin/* rows: list-users, create-user, set-role, remove-user, revoke-user-session(s))",
         "packages/plugins/plugin-auth/src/admin-user-endpoints.ts#resolvePassword (create-user resolvePassword: explicit password wins over generatePassword — #3031/#3033; leaves sys_user + credential sys_account)",
         "packages/plugins/plugin-security/src/security-plugin.ts#__referentialFieldClear (§A5 #3023 EXEMPTION: __referentialFieldClear owner_id-null cascade rides a server-derived context, the owner-anchor guard must not veto it) + security-plugin.test.ts '[#3023] … engine referential FK clear … is exempt'",
-        "packages/spec/src/kernel/public-auth-features.ts#sys_user (admin flag gates the sys_user lifecycle actions; SCIM forces it on — ADR-0071)",
+        "packages/spec/src/kernel/public-auth-features.ts#sys_user (admin flag gates the sys_user lifecycle actions; SCIM forces it on — ADR-0134)",
         "packages/qa/dogfood/test/admin-identity-audit-trail.dogfood.test.ts",
         "packages/plugins/plugin-auth/src/session-of-record.test.ts#body (better-auth answers /get-session with HTTP 200 + a JSON null body when the session is gone — NOT 401; a status-only assertion would pass against a fully revoked session)"
       ],

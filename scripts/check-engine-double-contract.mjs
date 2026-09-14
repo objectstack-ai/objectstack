@@ -2990,6 +2990,21 @@ function scanSlice(slice) {
 // fraction of the tree makes all of them true of a fraction and silent about
 // the rest.
 //
+// ⚠ That reproduction is HISTORY as of #17117, and the half that changed is
+// the `--write` step in the middle of it. The floor below is now reached by
+// `writeLedger` as well as by `report` (`refusePopulationFloor`), so a reader
+// walking that recipe today meets a refusal WHERE THE REGENERATION WAS -- the
+// ledgers keep the 779/800-row population and never record the 15. The reading
+// the recipe was taken to establish is unchanged and is why the floors exist:
+// the collapsed tree still discovers 15 pinned rows of 779, and before #17099
+// the run that reported on them exited 0. What #17117 closed is that #17099
+// floored the READER only, leaving `--write` -- a sibling branch of the same
+// dispatch chain, and the one the RETAINED remedy sends an author to -- free to
+// bake the collapse into the ledgers as the new agreed population, after which
+// the reporting run reconciles against the smaller set as if it had been
+// chosen. The floor protected the reader and left the writer free to destroy
+// the thing being protected.
+//
 // ⛔ The floors below are over the DERIVED population -- what the two walks
 // found and what the parser made of it -- and NEVER over a ledger's size. The
 // DEBT baseline is shrink-only by design and its stated goal is to empty; a
@@ -3106,6 +3121,45 @@ function populationFloorProblem(counts) {
       + '  nothing about why the others stand — they are reported by their own rows.';
   }
   return null;
+}
+
+/**
+ * Refuse a run whose population fell below a floor -- the ONE place this file
+ * turns `populationFloorProblem` into an exit (#17117).
+ *
+ * ⛔ Every branch that acts on a scan calls THIS, not `populationFloorProblem`
+ * directly. #17099 added the floor with its refusal spelled inline in `report`,
+ * which floored THE READER and left `--write` -- a sibling branch of the same
+ * dispatch chain, reached by the remedy this gate's own RETAINED messages
+ * prescribe -- scanning and writing with nothing in front of it. A scan that
+ * silently under-collects, run through `--write`, bakes the smaller population
+ * into the pinned and seam ledgers as the new truth, and the ledger it produces
+ * is indistinguishable afterwards from a legitimate one. The floor protected
+ * the reader and left the writer free to destroy the thing being protected.
+ *
+ * ⛔ NOT a second copy of the floor: `populationFloorProblem` is still the only
+ * thing that decides, and this is the only thing that exits. A future branch
+ * that scans (`--census` reaches no verdict today, so it does not) gets the
+ * floor by calling this, never by growing a third refusal.
+ *
+ * `what` names what this particular branch was about to do, because "REFUSES"
+ * alone leaves an operator who just ran `--write` unable to tell whether the
+ * ledgers on disk are the old ones or a half-written new pair. They are the old
+ * ones: this runs BEFORE the first `writeFileSync`.
+ *
+ * Not pure -- it exits. The decision it carries out IS pure and the self-test
+ * drives that half (`populationFloorProblem`) with no tree at all; what the
+ * self-test pins HERE is that both branches still route through this.
+ *
+ * @param {{testFiles?: number, productionFiles?: number, discoveredFiles?: number, pinnedRows?: number}} population
+ * @param {string} what
+ * @returns {void}
+ */
+function refusePopulationFloor(population, what) {
+  const problem = populationFloorProblem(population);
+  if (problem === null) return;
+  console.error(`check-engine-double-contract REFUSES — ${problem}\n  ${what}`);
+  process.exit(EXIT_POPULATION_REFUSED);
 }
 
 /**
@@ -3338,7 +3392,26 @@ const PINNED_LEDGER_COMMENT =
  * regenerate, rather than meeting it in review — or not at all.
  */
 function writeLedger() {
-  const { slices, seamFiles } = audit();
+  const { slices, seamFiles, population } = audit();
+  // ⛔ BEFORE the first byte of either ledger (#17117). `--write` is a sibling
+  // of the reporting run in the dispatch chain at the foot of this file, so the
+  // floor #17099 spelled inside `report` never stood in front of it: a scan
+  // that under-collected was free to rewrite BOTH ledgers down to what it
+  // reached, and the next reporting run then reconciled against the smaller
+  // population as if it were the agreed one. Same floor, same refusal, same
+  // exit code -- the writer is held to the reader's standard because it is the
+  // branch that can destroy what the reader's floor protects.
+  //
+  // The floor is over the DERIVED population and never over a ledger's size
+  // (see POPULATION FLOORS above), so this does NOT break the bootstrap the two
+  // ledger readers document: a fresh checkout with the artifacts absent still
+  // walks the whole tree, clears all four counts, and writes them.
+  refusePopulationFloor(
+    population,
+    '⛔ NOTHING WAS WRITTEN. The pinned and seam ledgers on disk are the ones that were already '
+      + 'there — a regeneration from this scan would have recorded the collapse as the new '
+      + 'population. Fix the scan, then re-run.',
+  );
   const census = censusPinned(slices);
   const before = readPinnedLedger();
   const was = new Map((before.entries ?? []).map((e) => [pairKey(e.file, e.verb), e.pinned]));
@@ -3495,11 +3568,7 @@ function report() {
   // report on the fraction it reached. Ordered ahead of the findings branch
   // because "nothing was measured" outranks "here are findings", and the
   // findings would be drawn from the same collapsed set (#13014).
-  const populationFloor = populationFloorProblem(population);
-  if (populationFloor !== null) {
-    console.error(`check-engine-double-contract REFUSES — ${populationFloor}`);
-    process.exit(EXIT_POPULATION_REFUSED);
-  }
+  refusePopulationFloor(population, 'No verdict was reached and no exit code below is a reading.');
 
   if (errors.length) {
     for (const e of errors) console.error(`  x ${e}`);
@@ -3608,11 +3677,12 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'The RECOGNIZER CENSUS (#9943)': 7,
   '#11626: the DECLARED single-verb double': 14,
   'The POPULATION FLOORS (#13014)': 23,
+  'Every branch that SCANS routes through the floor (#17117)': 6,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 32;
+const SELF_TEST_BATTERY_FLOOR = 33;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -5210,6 +5280,55 @@ const driver: any = { create: async (o: string, d: any) => d, find: async (o: st
   expect('FLOOR — a refusal and a finding do not share an exit code',
     EXIT_POPULATION_REFUSED !== 1 && EXIT_POPULATION_REFUSED !== 0);
 
+  // ── Every branch that SCANS routes through the floor (#17117) ─────────────
+  //
+  // The floor above is a PURE function and every case in the battery before
+  // this one drives it with no tree. That is what made #17117 invisible: all 23
+  // of them passed while `--write` -- the branch that OVERWRITES the ledgers
+  // the reporting run reconciles against -- never called it. A decision nothing
+  // routes to is a decision that does not happen, and no amount of driving the
+  // decider says which branches reach it.
+  //
+  // So this battery reads the SOURCE, the one instrument that can answer a
+  // question about wiring. Same shape as the PROVENANCE pass-path case above
+  // and the same reason: without it a refactor can drop a call site and every
+  // other case in this file keeps passing.
+  //
+  // ⛔ `--census` is deliberately NOT required here. It reaches no verdict and
+  // changes no exit code (#9747's ruling, restated at the RECOGNIZER CENSUS
+  // header), so it is a reporter with nothing to destroy; the day it writes or
+  // decides anything it joins this list rather than growing a third refusal.
+  battery('Every branch that SCANS routes through the floor (#17117)');
+  const SELF_SOURCE = readFileSync(fileURLToPath(import.meta.url), 'utf8');
+  // The body of a top-level function: from its declaration to the next line
+  // that closes at column zero. Scoped, so a case asserting a call appears in
+  // `writeLedger` cannot be satisfied by the identical call in `report`.
+  const bodyOfFunction = (name) => {
+    const start = SELF_SOURCE.indexOf(`\nfunction ${name}(`);
+    if (start < 0) return '';
+    const end = SELF_SOURCE.indexOf('\n}\n', start);
+    return end < 0 ? '' : SELF_SOURCE.slice(start, end);
+  };
+  const REFUSAL_CALL = `${'refusePopulationFloor'}(`;
+  expect('ROUTING — the body reader finds a body at all (the control for the four below)',
+    bodyOfFunction('writeLedger').startsWith('\nfunction writeLedger(')
+      && bodyOfFunction('report').startsWith('\nfunction report(')
+      && bodyOfFunction('thisFunctionDoesNotExist') === '');
+  expect('ROUTING — `--write` refuses through the floor before it writes',
+    bodyOfFunction('writeLedger').includes(REFUSAL_CALL));
+  expect('ROUTING — and does it BEFORE the first writeFileSync, not after',
+    bodyOfFunction('writeLedger').indexOf(REFUSAL_CALL)
+      < bodyOfFunction('writeLedger').indexOf('writeFileSync('));
+  expect('ROUTING — the reporting run still refuses through the same floor',
+    bodyOfFunction('report').includes(REFUSAL_CALL));
+  // The shape claim #17117 turns on, asserted rather than described: ONE place
+  // turns the floor into an exit. A branch that grew its own refusal would pass
+  // the two cases above and still be the copy this card exists to not make.
+  expect('ROUTING — exactly one place turns a fallen floor into an exit',
+    SELF_SOURCE.split(`${'process'}.exit(EXIT_POPULATION_REFUSED)`).length - 1 === 1);
+  expect('ROUTING — a refused write says nothing was written',
+    bodyOfFunction('writeLedger').includes('NOTHING WAS WRITTEN'));
+
   // ── The floor: every declared battery RAN, and ran its cases (#13489) ───
   //
   // Evaluated after every battery has had its chance and BEFORE the verdict, so
@@ -5296,7 +5415,10 @@ const driver: any = { create: async (o: string, d: any) => d, find: async (o: st
       + 'double (#11626) on the contract it DECLARES -- the annotation, intersection, '
       + 'return-type and `implements` spellings alike -- reporting it unpinned when it is, '
       + 'while refusing a router, a file-local look-alike, a wrong-module import, a type '
-      + 'argument and a driver-shaped verb, and moving discovery and the census together.',
+      + 'argument and a driver-shaped verb, and moving discovery and the census together; and '
+      + 'holds EVERY branch that scans to the POPULATION FLOOR (#17117) -- `--write` refuses '
+      + 'before it writes either ledger, the reporting run refuses before it reports, and exactly '
+      + 'one place in this file turns a fallen floor into an exit.',
   );
 
   return SELF_TEST_VERDICT;

@@ -210,7 +210,7 @@ export const PUBLIC_AUTH_FEATURES = {
       // note beside `impersonate_user` in sys-user.object.ts.
       'sys_user.actions.impersonate_user',
     ],
-    notes: 'SCIM forces the admin plugin (and this flag) on — ADR-0071.',
+    notes: 'SCIM forces the admin plugin (and this flag) on — ADR-0134.',
   },
   phoneNumber: {
     surface: 'crud',
