@@ -174,14 +174,15 @@
   // ⛔ Every package-root harness module is named here ONE BY ONE, because the
   // `include` above reaches `test/` and nothing else: a root module that is only
   // reachable through a test's import is in the program by accident and leaves
-  // it the moment that import goes. `vitest-filter-preflight.ts` (#17853) is the
-  // fourth for that reason, not because a test happens to import it.
+  // it the moment that import goes. `vitest-filter-preflight.ts` was the fourth
+  // for that reason; #17978 moved that module to
+  // `packages/qa/vitest-filter-preflight`, which type-checks it in its own
+  // program, so the entry leaves with the file rather than dangling here.
   "include": [
     "test/**/*",
     "vitest.config.ts",
     "vitest-tiers.ts",
-    "vitest-tiers.fixtures.ts",
-    "vitest-filter-preflight.ts"
+    "vitest-tiers.fixtures.ts"
   ],
   "exclude": ["node_modules", "dist"]
 }

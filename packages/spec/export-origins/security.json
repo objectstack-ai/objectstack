@@ -10,6 +10,7 @@
     "AdminScope": "src/security/permission.zod.ts#AdminScope (type)",
     "AdminScopeParsed": "src/security/permission.zod.ts#AdminScopeParsed (type)",
     "AdminScopeSchema": "src/security/permission.zod.ts#AdminScopeSchema (const)",
+    "AnchorBindingContext": "src/security/high-privilege.ts#AnchorBindingContext (interface)",
     "AuthzPosture": "src/security/explain.zod.ts#AuthzPosture (type)",
     "AuthzPostureSchema": "src/security/explain.zod.ts#AuthzPostureSchema (const)",
     "CapabilityDeclaration": "src/security/capabilities.ts#CapabilityDeclaration (type)",

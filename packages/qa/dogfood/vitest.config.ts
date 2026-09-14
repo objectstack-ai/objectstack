@@ -40,6 +40,11 @@
 // HERE, in the harness, where the test author can see it.
 import { defineConfig } from 'vitest/config';
 import path from 'path';
+import { parseCLI } from 'vitest/node';
+import {
+  exactAndGlobPopulations,
+  runFilterPreflight,
+} from '../vitest-filter-preflight/src/index.js';
 
 // Files proven eligible for the worker-shared plain showcase stack.
 const SHARED_SHOWCASE = [
@@ -57,6 +62,34 @@ const SHARED_SHOWCASE = [
   'test/showcase-static-readonly.dogfood.test.ts',
   'test/two-doors-permission.dogfood.test.ts',
 ];
+
+// #17853 / #17978 — say so when a path named on the command line will run no
+// tests. Invoked HERE, at config load, and ⛔ deliberately NOT as a
+// `test.reporters` entry: naming that option replaces vitest's own reporter
+// defaulting instead of extending it, which measurably changes a healthy run's
+// output and would drop the `github-actions` reporter in CI. The ONE shared
+// transcription of vitest's `TestProject.filterFiles` carries both measurements,
+// and it is imported by RELATIVE PATH rather than by its package name for a
+// third measured reason recorded in its header. It reads the argv through
+// vitest's own exported parser and writes nothing whatever unless a named path
+// selects nothing.
+//
+// `isolated` takes a GLOB `include`, so its population is derived as a
+// deliberate SUPERSET — every test file under this package, minus
+// `SHARED_SHOWCASE` — which makes a false accusation structurally impossible and
+// leaves drift able only to under-report. ⛔ Not a second run of vitest's own
+// glob engine.
+runFilterPreflight({
+  argv: process.argv,
+  root: __dirname,
+  packageName: '@objectstack/dogfood',
+  populations: exactAndGlobPopulations({
+    root: __dirname,
+    exact: { 'shared-showcase': SHARED_SHOWCASE },
+    globProject: 'isolated',
+  }),
+  parse: parseCLI,
+});
 
 export default defineConfig({
   test: {

@@ -1045,6 +1045,50 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
       'content/docs/protocol/kernel/realtime-protocol.mdx',
     ],
   },
+  '@objectstack/vitest-filter-preflight': {
+    // test/config-wiring-sweep.test.ts is the anti-phantom sweep for the ONE
+    // shared vitest filter preflight (#17978). Its population is DERIVED, not
+    // listed: it walks `packages/` for package-root vitest configs, masks their
+    // comments, and requires every config that declares `projects` to invoke the
+    // preflight. So each package's own config, its manifest name and the exact
+    // `include` ledger it hands the preflight are real inputs to this suite's
+    // verdict — a ninth package declaring `projects` must re-run it, which is the
+    // whole reason the population is derived.
+    //
+    // Scoped to `packages/` by the test itself (its `packageRoots` docblock
+    // carries the trade): three globs under one already-declared root, rather
+    // than opening `examples/` and `apps/` roots in ci.yml's `crosspkg` filter
+    // for a config shape that exists in neither today. The residual is an
+    // UNDER-report, which is the direction this card resolves uncertainty in.
+    globs: [
+      'packages/**/vitest.config.ts',
+      'packages/**/vitest.repo-tests.json',
+      'packages/**/package.json',
+      // `maskComments` — the sweep reads config SOURCE, so a change to what
+      // counts as a comment changes what it sees in code position.
+      'scripts/js-comment-mask.mjs',
+      // Named in the suite's prose rather than read: the config spellings it
+      // accepts come from the console-intercept gate, and this very table is
+      // cited for the radius trade. The literal collector takes quoted paths out
+      // of comments without parsing them, so a mention forces a declaration —
+      // and declaring a file under a root ci.yml's `crosspkg` filter already
+      // carries is cheaper than rewording prose to dodge the scanner.
+      'scripts/check-console-intercept-disarm.mjs',
+      'scripts/cross-package-test-inputs.mjs',
+    ],
+    heldBy: {
+      // Both are built by joining a LOOP VARIABLE (each swept package's own
+      // directory) to a bare filename, so the escape verdict resolves and the
+      // NAME does not — the trade `pathExpression` documents. The sweep reads
+      // one of each per package in its population.
+      'packages/**/vitest.repo-tests.json': [
+        'packages/qa/vitest-filter-preflight/test/config-wiring-sweep.test.ts',
+      ],
+      'packages/**/package.json': [
+        'packages/qa/vitest-filter-preflight/test/config-wiring-sweep.test.ts',
+      ],
+    },
+  },
   '@objectstack/formula': {
     // src/rls-predicate.test.ts pins spec's RLS zod source against the
     // predicate compiler; src/skill-catalog-sync.test.ts pins the published

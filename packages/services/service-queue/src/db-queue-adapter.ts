@@ -476,7 +476,27 @@ export class DbQueueAdapter implements IQueueService {
   private async claimBatch(queue: string, max: number): Promise<any[]> {
     const now = this.now();
     const candidates = await this.engine.find(QUEUE_TABLE, {
-      where: { queue, status: 'pending' },
+      where: {
+        queue,
+        status: 'pending',
+        // [#17612] DUE-ness is a SQL predicate, not a post-`LIMIT` filter.
+        //
+        // This used to read every pending row in `priority` order, take the
+        // first `max * 3`, and only then drop the ones whose `scheduled_for`
+        // is still in the future — so a batch of high-priority jobs scheduled
+        // for later filled the whole candidate window and the already-due
+        // low-priority work behind them was never reachable. Measured on this
+        // package's own fake engine at `batchSize = 10` (candidate cap 30):
+        // 30 future-dated priority-1 rows + 1 due priority-100 row claimed
+        // **0** per poll, indefinitely; with 29 future-dated rows it claimed 1.
+        // Head-of-line starvation, not a slow query.
+        //
+        // `LIMIT` now applies to the DUE set. `null` is "no delay, run now" —
+        // the same reading the JS guard below has always taken — so it needs
+        // its own leg: SQL `NULL <= ?` is NULL, never true. Same shape as
+        // `SqlOutboxStore.claim`'s `next_attempt_at` predicate.
+        $or: [{ scheduled_for: null }, { scheduled_for: { $lte: now.toISOString() } }],
+      },
       limit: max * 3, // over-fetch in case of CAS contention
       orderBy: [
         { field: 'priority', order: 'asc' },
@@ -488,6 +508,13 @@ export class DbQueueAdapter implements IQueueService {
     const out: any[] = [];
     for (const row of candidates ?? []) {
       if (out.length >= max) break;
+      // [#17612] Kept as the AUTHORITY on due-ness, not as a fallback for an
+      // engine that ignored the predicate above. `scheduled_for` is a declared
+      // `Field.datetime`, and the dialects materialize it differently (canonical
+      // ISO text on SQLite/turso, a JS `Date` on Postgres/MySQL — the domain
+      // #13993 measured for `created_at` right above); comparing INSTANTS here
+      // is what makes the verdict independent of that. The predicate decides
+      // WHICH rows `LIMIT` sees; this decides whether a row is due.
       const sched = row.scheduled_for ? new Date(row.scheduled_for).getTime() : 0;
       if (sched > now.getTime()) continue;
       // Honor existing lease
