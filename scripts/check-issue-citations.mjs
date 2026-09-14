@@ -218,13 +218,19 @@ export const DEFERRED_SURFACES = Object.freeze([
       + 'the next version bump is a finding nobody can act on.',
   }),
   Object.freeze({
-    glob: 'packages/**/*.test.ts',
+    globs: Object.freeze(['packages/**/*.test.ts', 'packages/**/*.test.tsx', 'packages/**/*.spec.ts', 'packages/**/*.spec.tsx', 'packages/**/__tests__/**']),
     sites: 2592,
     why: 'Test docblocks. Same shape as the source ones and a candidate for the '
       + 'next widening, held back so the first installation of this gate is '
-      + 'judged on the surfaces the card actually measured damage on.',
+      + 'judged on the surfaces the card actually measured damage on. ⭐ This row '
+      + 'OVERLAPS the declared `packages/**/src/**/*.ts` glob, which is why the '
+      + 'deferred table is applied as an EXCLUSION rather than kept as prose: a '
+      + 'deferred surface nothing enforces is a surface that is swept anyway.',
   }),
 ]);
+
+/** Every deferred glob, flattened — the exclusion `surfaceFor` applies. */
+export const DEFERRED_GLOBS = Object.freeze(DEFERRED_SURFACES.flatMap((s) => (s.globs ? [...s.globs] : [s.glob])));
 
 /** The census this gate was written against. ⛔ Readings, not a budget. */
 export const CENSUS_17512 = Object.freeze({
@@ -509,6 +515,11 @@ function tracked(root) {
 
 /** Which declared surface owns this path, or `null`. */
 export function surfaceFor(path) {
+  /* ⛔ The deferred table is checked FIRST and it wins. A declared surface's
+   * glob can legitimately swallow a deferred one — the package-source glob
+   * swallows every test file beside it — and prose that says otherwise while
+   * the sweep reads them anyway is the shape this repo keeps having to fix. */
+  for (const g of DEFERRED_GLOBS) if (globToRegExp(g).test(path)) return null;
   for (const s of CITATION_SURFACES) if (globToRegExp(s.glob).test(path)) return s;
   return null;
 }
@@ -689,7 +700,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   grammar: 14,
   causes: 12,
   transport: 7,
-  'scope-contract': 8,
+  'scope-contract': 10,
   'diff-scope': 6,
   'live-corpus': 3,
 });
@@ -821,8 +832,12 @@ export async function selfTest() {
     check(CITATION_SURFACES.length >= 3, 'the scope contract must declare its surfaces');
     check(CITATION_SURFACES.every((s) => typeof s.why === 'string' && s.why.length > 40), 'every declared surface must carry the reading that put it in');
     check(DEFERRED_SURFACES.every((s) => typeof s.why === 'string' && s.why.length > 40), 'every DEFERRED surface must carry the reading that kept it out');
-    check(DEFERRED_SURFACES.some((s) => s.glob.startsWith('scripts/')), "⛔ #15809's lane must be declared as deferred, not silently unswept");
-    check(DEFERRED_SURFACES.some((s) => s.glob.includes('CHANGELOG')), 'the changelog surface the card warns about must be declared as deferred');
+    check(DEFERRED_GLOBS.some((g) => g.startsWith('scripts/')), "⛔ #15809's lane must be declared as deferred, not silently unswept");
+    check(DEFERRED_GLOBS.some((g) => g.includes('CHANGELOG')), 'the changelog surface the card warns about must be declared as deferred');
+    check(surfaceFor('packages/spec/src/data/thing.test.ts') === null && surfaceFor('packages/spec/src/data/thing.ts') !== null,
+      '⛔ a deferred glob must EXCLUDE, not merely describe — a test file beside a swept source file must not be swept');
+    check(surfaceFor('scripts/check-issue-citations.mjs') === null && surfaceFor('packages/spec/CHANGELOG.md') === null,
+      'the two lanes the card refuses to fold must not be swept by this gate');
     check(ROOT_DIR_WATCH_HINTS.every((h) => CITATION_SURFACES.some((s) => s.glob.startsWith(h.replace(/\*+$/, '')))),
       'every watch hint must name a root a declared surface actually sweeps');
     check(CITATION_SURFACES.every((s) => ROOT_DIR_WATCH_HINTS.some((h) => s.glob.startsWith(h.replace(/\*+$/, '')))),
