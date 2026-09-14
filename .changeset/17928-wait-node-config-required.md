@@ -7,7 +7,13 @@ fix(automation): a `wait` node must say what resumes it — the config block is 
 
 **BREAKING** — a `type: 'wait'` flow node with no `waitEventConfig` block, and a
 `type: 'boundary_event'` node with no `boundaryConfig` block, no longer parse.
-Under `eventType: 'timer'`, `timerDuration` is now required and may not be blank.
+Under `eventType: 'timer'`, `timerDuration` is now required and may not be blank
+— and that half sits on the `waitEventConfig` BLOCK, not on the node type, so it
+bites on ANY node carrying the block: a `start` node spelled
+`waitEventConfig: { eventType: 'timer' }` parsed before and is refused now. It is
+still a narrowing in every direction (no shape starts parsing that did not), and
+the block is inert on a node type no executor reads it from, so the practical
+reach is `wait`.
 
 `eventType` has been required *inside* each block since protocol 17, so
 `waitEventConfig: {}` was already a loud parse error. The block itself was

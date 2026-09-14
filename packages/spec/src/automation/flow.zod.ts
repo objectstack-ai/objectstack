@@ -278,12 +278,28 @@ export const FlowNodeSchema = lazySchema(() => flowNodeObject().transform(
  *
  * ## Where the refusal lands
  *
- * At the NODE level, so a `wait` nested in an ADR-0031 region is checked exactly
- * like a top-level one, and next to {@link parseEndNodeConfig} because both
- * answer the same question — "this node type owes a block the outer shape
- * cannot demand". Issues are raised under the block's own key, so a flow-level
- * parse reports them at `nodes[i].waitEventConfig`, the address `formatZodError`
- * prints for any other node key.
+ * On the NODE contract, next to {@link parseEndNodeConfig} because both answer
+ * the same question — "this node type owes a block the outer shape cannot
+ * demand". Issues are raised under the block's own key, so a flow-level parse
+ * reports a TOP-LEVEL node at `nodes[i].waitEventConfig`, the address
+ * `formatZodError` prints for any other node key.
+ *
+ * ⚠️ A node nested in an ADR-0031 REGION BODY is refused at a different door, at
+ * a different time — ⛔ it is NOT "checked exactly like a top-level one", and
+ * saying so on a published surface would be false. {@link parseFlowNodeRegions}
+ * parses each region slot with `safeParse` and, on a refusal, leaves that region
+ * RAW and continues (its own comment says so: a refused region is left for
+ * `validateControlFlow` to name). That policy predates this change and is not
+ * specific to `waitEventConfig`, and the consequence is measurable:
+ * `FlowSchema.safeParse` of a flow whose `loop` body holds a block-less `wait`
+ * answers `success: true`. What refuses the nested node is the REGION contract —
+ * `LoopConfigSchema` / `ParallelConfigSchema` / `TryCatchConfigSchema` — at
+ * `body.nodes[i].waitEventConfig`, which is the same contract the container
+ * node's executor parses its config through at execute time, so the nested shape
+ * still cannot RUN; it is refused one door later and by node id. Both halves are
+ * pinned in `flow.test.ts` ("nested in a region: the flow parse leaves it raw,
+ * and the REGION contract refuses it by path"), and the ADR-0087 entry's
+ * `acceptanceCriteria` states the same thing for whoever migrates a stack.
  *
  * ⚠️ `boundary_event` gets the contract half ONLY: the platform registers no
  * executor for that type at all (`NO_EXECUTOR` plus a startup `warn`, measured
@@ -339,17 +355,29 @@ function requireTypeScopedConfig<T extends {
  * through exists for it (no descriptor `configSchema` at `registerFlow()`, no
  * execute-time `parse()`). Without this pass an `end` node carrying
  * `{ outcome: 'refused' }` and no `message`, or a `message` no outcome would
- * ever render, parsed clean and ran as a plain completion. Applied at the NODE
- * level so an `end` nested in a region is checked exactly like a top-level
- * one, and the parsed (defaulted) config is written back — `parsed` means
+ * ever render, parsed clean and ran as a plain completion. Applied on the NODE
+ * contract, and the parsed (defaulted) config is written back — `parsed` means
  * parsed, as for regions. A node with no `config` is left without one: the
  * default `outcome` is `completed` either way, and materialising a config
  * block on every plain terminal would be a shape change nobody asked for.
  *
- * Issues are re-raised under `['config', …]`, so a flow-level parse reports
- * them at `nodes[i].config.message` — the same address `formatZodError`
- * prints for any other node key. A hoisted `function` for the same reason
- * {@link flowNodeObject} is one (trap 2 above).
+ * Issues are re-raised under `['config', …]`, so a flow-level parse reports a
+ * TOP-LEVEL node at `nodes[i].config.message` — the same address
+ * `formatZodError` prints for any other node key. A hoisted `function` for the
+ * same reason {@link flowNodeObject} is one (trap 2 above).
+ *
+ * ⚠️ This docblock used to say the pass ran "at the NODE level so an `end`
+ * nested in a region is checked exactly like a top-level one". It does not, for
+ * the same reason spelled out under {@link requireTypeScopedConfig} — read it
+ * there rather than here, so the two cannot drift. Measured on this file:
+ * `FlowNodeSchema.safeParse` of a top-level `end` carrying
+ * `{ outcome: 'refused' }` and no `message` answers `false`, while
+ * `FlowSchema.safeParse` of a flow whose `loop` body holds that identical node
+ * answers `true` and only `LoopConfigSchema` refuses it, at
+ * `body.nodes.0.config.message`. The refusal is real either way — the container
+ * node's executor parses its config through that same region contract — but it
+ * is a different door at a different time, so ⛔ do not read this pass as a
+ * flow-level guarantee about region bodies.
  */
 function parseEndNodeConfig<T extends { type: string; config?: unknown }>(node: T, ctx: z.RefinementCtx): T {
   if (node.type !== 'end' || node.config === undefined) return node;
@@ -600,6 +628,13 @@ function flowNodeObject() { return strictObject(
     // (or of any whitespace) yields no duration at all, so accepting it here
     // would leave one byte of difference between the shape this refuses and a
     // shape that hangs identically.
+    //
+    // ⚠️ SCOPE: this refinement lives on the BLOCK, so it is NOT gated on
+    // `type: 'wait'` — any node type carrying a `waitEventConfig` is held to it,
+    // and a `start` node spelled `waitEventConfig: { eventType: 'timer' }`
+    // parsed before this change and is refused after it. That is deliberate and
+    // it only ever narrows; ⛔ do not "fix" it by gating on the node type, which
+    // would re-admit the duration-less timer wherever the key is spelled.
     if (wec.eventType === 'timer' && (wec.timerDuration ?? '').trim() === '') {
       ctx.addIssue({
         code: 'custom',

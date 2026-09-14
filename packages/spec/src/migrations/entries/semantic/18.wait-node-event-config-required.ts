@@ -11,7 +11,12 @@ export const entry: SemanticMigration = {
     + 'contract already refused `waitEventConfig: {}`; what it also accepted was the block '
     + 'missing entirely, which is the state a freshly created node is in. Two documents, two '
     + 'verdicts, and the accepted one was the silent one. Also narrowed one level down: under '
-    + '`eventType: \'timer\'`, `timerDuration` is now required and may not be blank.',
+    + '`eventType: \'timer\'`, `timerDuration` is now required and may not be blank. ⚠️ That '
+    + 'second narrowing sits on the BLOCK and is NOT gated on `type: \'wait\'`, so it reaches '
+    + 'any node type that carries a `waitEventConfig` at all — a `start` node spelled '
+    + '`waitEventConfig: { eventType: \'timer\' }` parsed before and is refused now. Inert in '
+    + 'practice, because no executor but the wait one reads the block, but a stack that spells '
+    + 'it elsewhere must be edited too, so scan for the KEY and not only for the node type.',
   replacement:
     'Declare what resumes the node, on the node: `waitEventConfig: { eventType: \'timer\', '
     + 'timerDuration: \'PT1H\' }` for a delay — QUOTE a bare number, the key is a string and a '
