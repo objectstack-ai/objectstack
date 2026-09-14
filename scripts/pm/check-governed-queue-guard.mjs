@@ -40,19 +40,30 @@
  *   `pull_request`  → the same finding is an EARLY WARNING that exits 0.
  *
  * The PR run must not redden, and not for politeness. A governed PR sitting as
- * a draft awaiting the maintainer's own merge is the CORRECT terminal state of
- * the regime — that is what "人工合并即人工审核" means — so a check that is red
- * on it is red on the healthy case, forever, which is precisely the poison the
- * 2026-08-18 ruling named. The queue build, by contrast, is a state a governed
- * PR should never be in at all; red there is red on the anomaly.
+ * a draft while it waits for an authorized approval is the CORRECT resting
+ * state of the regime — 「四件套留 draft 等人批,⛔ 不翻正式不入队;获授权批准后
+ * 认领席落地。」 — so a check that is red on it is red on the healthy case,
+ * forever, which is precisely the poison the 2026-08-18 ruling named. The queue
+ * build, by contrast, is a state an UNAPPROVED governed PR should never be in
+ * at all; red there is red on the anomaly.
+ *
+ * ⭐ AND WHAT HAPPENS AFTER THE APPROVAL IS THIS CHECK'S OWN PASS PATH, which
+ * is why the queue leg is not only a refusal. Ruling C (#17971, maintainer
+ * 2026-09-13, verbatim 「C. approve 后不管后续改动都由席位落地:」) puts the
+ * landing in the CLAIMING SEAT's hands once an authorized APPROVED review is on
+ * record — 「席位落地 = 过落地前检、清标、ready、auto-merge,踢出/变基同法。」 — so
+ * the seat's ready → enqueue is the CORRECT next act there rather than a
+ * violation, and an ejection or a rebase costs no second click.
  *
  * ⚠️ The consequence is worth stating out loud rather than discovering: this
- * guard CANNOT stop a maintainer merging a governed PR by hand, and does not
+ * guard CANNOT stop a maintainer merging a governed PR directly, and does not
  * try. A direct merge produces no `merge_group` event. Under this regime that
- * is not a hole — the human merge IS the review record (measured: #11387 was
+ * is not a hole — it is the OTHER landing, the one an UNAPPROVED governed PR
+ * still has: 「受管面由维护者人合或授权批准后席位落地」 (measured: #11387 was
  * read as an incident for 13 minutes on exactly this confusion, until the
- * maintainer answered 「是我合并的」). What this guard closes is the seat path:
- * flip ready → enqueue → the queue is the entire review.
+ * maintainer answered 「是我合并的」). What this guard closes is the seat path
+ * taken with NEITHER of those: flip ready → enqueue → the queue is the entire
+ * review.
  *
  * ## What satisfies it — an AUTHORIZED approval, on ANY commit
  *
@@ -533,7 +544,9 @@ export const REFERENCES_TIER_PREFIX = '.claude/skills/pm-dispatch/references/';
  * The two landing tiers. `rules` is the DEFAULT in every ambiguous case,
  * because the two are not symmetric: reading a rules-layer path as references
  * lands a maintainer-owned file on a seat's own review, while reading a
- * references path as rules costs one hand merge.
+ * references path as rules costs one authorized approval — the maintainer is
+ * asked to look at a pull request they need not have, and the claiming seat
+ * lands it from there.
  */
 export const TIER_RULES = 'rules';
 export const TIER_REFERENCES = 'references';
@@ -948,9 +961,10 @@ export function guardVerdict({ event, governed = [], unattributed = [], approval
   if (entries.length === 0 && unattributed.length === 0) {
     return { ...base, conclusion: 'clear', exitCode: EXIT_CLEAR, refusalKind: null };
   }
-  // The early-warning run never reddens: a governed PR awaiting the
-  // maintainer's own merge is the regime's healthy terminal state, and a check
-  // that is red on the healthy case is the retired gate rebuilt (see header).
+  // The early-warning run never reddens: a governed PR parked in draft while it
+  // waits for an authorized approval is the regime's healthy resting state, and
+  // a check that is red on the healthy case is the retired gate rebuilt (see
+  // header). What follows that approval is ruling C: the claiming seat lands it.
   if (event !== EVENT_MERGE_GROUP) {
     return { ...base, conclusion: 'warned', exitCode: EXIT_CLEAR, refusalKind: null };
   }
@@ -1167,13 +1181,21 @@ export function renderGuardVerdict(verdict) {
   if (verdict.conclusion === 'warned') {
     lines.push(
       '  ⚠️  EARLY WARNING, not a failure — this run is on the pull request, and this check is deliberately',
-      '      GREEN here. A governed PR held as a draft for the maintainer to merge by hand IS the regime\'s',
-      '      healthy end state (「人工合并即人工审核」), and a check that reddens on the healthy case is the',
-      '      permanently-red gate the 2026-08-18 ruling retired (红灯常态化本身有毒).',
+      '      GREEN here. A governed PR parked in draft while it waits for an authorized approval IS the',
+      '      regime\'s healthy resting state (「四件套留 draft 等人批,⛔ 不翻正式不入队」), and a check that',
+      '      reddens on the healthy case is the permanently-red gate the 2026-08-18 ruling retired',
+      '      (红灯常态化本身有毒).',
       '',
-      '      ⛔ What a seat must NOT do with this PR: flip it ready, enqueue it, or arm auto-merge',
-      '         (AGENTS.md Prime Directive #14). One governed path governs the whole PR —',
-      '         「混合 diff 一条命中即整 PR 分叉」; proportion is not a question.',
+      '      ⛔ What a seat must NOT do with this PR while no authorized APPROVED review is on record:',
+      '         flip it ready, enqueue it, or arm auto-merge (AGENTS.md Prime Directive #14 — its four',
+      '         prohibitions lift for that approval and for nothing else). One governed path governs the',
+      '         whole PR — 「混合 diff 一条命中即整 PR 分叉」; proportion is not a question.',
+      '',
+      `      ✅ What a seat DOES do once an account in GOVERNED_APPROVERS (${GOVERNED_APPROVERS.join(', ')}) has APPROVED it,`,
+      '         on ANY commit: the CLAIMING SEAT lands it — ruling C (#17971, maintainer 2026-09-13, verbatim',
+      '         「C. approve 后不管后续改动都由席位落地:」), 「席位落地 = 过落地前检、清标、ready、',
+      '         auto-merge,踢出/变基同法。」 Unapproved, the maintainer\'s own direct merge (人工直合) is',
+      '         the only landing this pull request has.',
       '',
       '      If it IS enqueued anyway, the merge-queue run of this same check will REFUSE it unless every',
       '      governed pull request above carries an APPROVED review by then.',
@@ -1238,14 +1260,18 @@ export function renderGuardVerdict(verdict) {
   lines.push(
     '',
     '      What satisfies this check:',
-    '        1. ⭐ PREFERRED — take the pull request out of the queue: convert it back to DRAFT (disarming',
-    '           auto-merge alone does NOT dequeue it), and leave the merge to the maintainer. A human merge',
-    '           IS the review record for a governed surface; that is the regime, not a workaround of it.',
-    `        2. Or: obtain an APPROVED review by an authorized approver (GOVERNED_APPROVERS: ${GOVERNED_APPROVERS.join(', ')})`,
-    '           on each governed PR, then re-queue. It does NOT have to sit on the current head sha, and a later',
-    '           push does not expire it (2026-09-04: 「只需要有人工批准记录就行，不需要卡最新的提交。」); the',
-    '           authorized set is still the 2026-08-27 one (「os-zhuang hotlong 批准算数」). ⛔ An agent seat',
-    '           never submits that approval, under any account — the post-merge audit reads the approver too.',
+    '        1. ⭐ FIRST, whatever comes after it — take the pull request out of the queue: convert it back to',
+    '           DRAFT (disarming auto-merge alone does NOT dequeue it) and park it there. 「四件套留 draft 等人',
+    '           批,⛔ 不翻正式不入队」 — parked outside the queue is the SAFE state, not a stalled one.',
+    `        2. Then: obtain an APPROVED review by an authorized approver (GOVERNED_APPROVERS: ${GOVERNED_APPROVERS.join(', ')})`,
+    '           on each governed PR, and the CLAIMING SEAT lands it from there — ruling C (#17971, maintainer',
+    '           2026-09-13, verbatim 「C. approve 后不管后续改动都由席位落地:」), 「席位落地 = 过落地前',
+    '           检、清标、ready、auto-merge,踢出/变基同法。」 The approval does NOT have to sit on the current',
+    '           head sha, and a later push does not expire it (2026-09-04: 「只需要有人工批准记录就行，不需',
+    '           要卡最新的提交。」); the authorized set is still the 2026-08-27 one (「os-zhuang hotlong 批准',
+    '           算数」). ⛔ An agent seat never submits that approval, under any account — the post-merge audit',
+    '           reads the approver too. ⛔ Unapproved, the maintainer\'s own direct merge (人工直合) is the only',
+    '           landing this pull request has.',
   );
   if (verdict.entries.some((e) => e.record !== undefined)) {
     lines.push(
@@ -1930,10 +1956,11 @@ async function main() {
   }
   // BOTH legs are always evaluated and BOTH blocks are always printed, so no
   // reading is lost whichever refuses. The governed refusal wins the exit code
-  // when both fire, because its remedy is the stricter of the two (the
-  // maintainer's own merge, Prime Directive #14) and it subsumes the carrier's
-  // "take it out of the queue". ⛔ The carrier code is not swallowed silently —
-  // its block states the refusal in full either way.
+  // when both fire, because its remedy is the stricter of the two (no landing at
+  // all without either an authorized approval or the maintainer's own direct
+  // merge, Prime Directive #14) and it subsumes the carrier's "take it out of
+  // the queue". ⛔ The carrier code is not swallowed silently — its block states
+  // the refusal in full either way.
   return verdict.exitCode !== EXIT_CLEAR ? verdict.exitCode : carrier.exitCode;
 }
 
@@ -2387,7 +2414,33 @@ export async function selfTest() {
   assert('a-refusal-names-the-exact-paths-that-matched', refusalText.includes('AGENTS.md'), refusalText);
   assert('a-refusal-names-the-pull-request', refusalText.includes('#9527'), refusalText);
   assert('a-refusal-states-what-would-satisfy-it', /What satisfies this check/.test(refusalText) && /DRAFT/.test(refusalText) && /APPROVED review/.test(refusalText), refusalText);
-  assert('a-refusal-names-the-preferred-remedy-first-and-it-is-DEQUEUE-not-approve', refusalText.indexOf('DRAFT') < refusalText.indexOf('obtain an APPROVED review'), refusalText);
+  // ⭐ The remedy is an ORDER, not a menu, and the order is the landed rule's:
+  // out of the queue first, then the authorized approval, then the claiming
+  // seat lands it (ruling C, #17971). The pin reads all three positions rather
+  // than the first two, because a remedy that stopped at the approval would
+  // leave a seat waiting for a merge nobody is going to perform.
+  assert(
+    'a-refusal-orders-the-remedy-DRAFT-then-the-authorized-APPROVAL-then-the-CLAIMING-SEAT-lands-it',
+    refusalText.indexOf('DRAFT') < refusalText.indexOf('obtain an APPROVED review') &&
+      refusalText.indexOf('obtain an APPROVED review') < refusalText.indexOf('CLAIMING SEAT lands it from there'),
+    refusalText,
+  );
+  // ⛔ The pre-ruling-C remedy, pinned in the REFUSING direction. This file used
+  // to tell a seat to leave the merge to the maintainer and to call that merge
+  // the review record; ruling C moved the landing to the claiming seat, so the
+  // old wording now under-permits the text a seat is told to act on. Both
+  // spellings are asserted ABSENT — a negative is the only pin that catches a
+  // paragraph drifting back.
+  assert(
+    '⛔ a-refusal-never-tells-a-seat-to-leave-the-merge-to-the-maintainer-nor-calls-that-merge-the-record',
+    !/leave the merge to the maintainer/.test(refusalText) && !/human merge IS the review record/.test(refusalText),
+    refusalText,
+  );
+  assert(
+    'a-refusal-quotes-ruling-C-verbatim-and-keeps-the-unapproved-direct-merge-as-the-other-landing',
+    refusalText.includes('C. approve 后不管后续改动都由席位落地:') && refusalText.includes('人工直合'),
+    refusalText,
+  );
   assert('a-refusal-forecloses-the-edit-the-check-remedy', /Neither of those is "edit this check"/.test(refusalText), refusalText);
   assert('a-refusal-carries-the-runnable-derivation-command', refusalText.includes('check-governed-merges.mjs --test'), refusalText);
   const clearText = renderGuardVerdict(clearV);
@@ -2396,6 +2449,25 @@ export async function selfTest() {
   const warnText = renderGuardVerdict(warnedV);
   assert('the-warning-says-out-loud-that-it-is-deliberately-green', /EARLY WARNING/.test(warnText) && /GREEN here/.test(warnText), warnText);
   assert('the-warning-tells-a-seat-what-not-to-do', /flip it ready, enqueue it, or arm auto-merge/.test(warnText), warnText);
+  // ⭐ ... and says out loud that the prohibition is CONDITIONAL. Prime Directive
+  // #14's four lift for an authorized approval, and ruling C puts what follows
+  // in the claiming seat's hands; an unconditional ⛔ here would tell a seat to
+  // sit on a PR the rule says it should land.
+  assert(
+    'and-the-prohibition-is-CONDITIONAL-on-there-being-no-authorized-approval-yet',
+    /while no authorized APPROVED review is on record/.test(warnText) && /prohibitions lift for that approval/.test(warnText),
+    warnText,
+  );
+  assert(
+    'and-the-warning-says-what-a-seat-DOES-do-after-that-approval-the-claiming-seat-lands-it',
+    /CLAIMING SEAT lands it/.test(warnText) && warnText.includes('C. approve 后不管后续改动都由席位落地:'),
+    warnText,
+  );
+  assert(
+    '⛔ and-it-no-longer-calls-a-maintainer-hand-merge-the-regimes-healthy-END-state',
+    !/人工合并即人工审核/.test(warnText) && /四件套留 draft 等人批/.test(warnText),
+    warnText,
+  );
   assert('the-warning-forecasts-the-queue-refusal', /will REFUSE it/.test(warnText), warnText);
   assert('an-outstanding-changes-request-is-reported-even-though-it-does-not-flip-the-verdict', /CHANGES_REQUESTED from: b/.test(renderGuardVerdict(run('merge_group', [row(1, ['AGENTS.md'])], new Map([[1, approvalVerdict([...approved('a'), { state: 'CHANGES_REQUESTED', user: { login: 'b' } }])]])))));
   // Every refusal kind renders a distinct, actionable sentence — a shared
