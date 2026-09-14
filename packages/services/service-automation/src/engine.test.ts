@@ -16,6 +16,8 @@ import { defineActionDescriptor } from '@objectstack/spec/automation';
 // program, where `rootDir` rejects it. That module's header carries the full
 // argument and the measurements behind it.
 import { recordGuards, stillPinningTheLoop } from '@objectstack/refd-timer-testkit';
+import { withScheduledWorkOn } from './deployment-switch.test-support.js';
+import { SCHEDULED_WORK_ENV, SCHEDULED_WORK_DISABLED_REASON } from '@objectstack/types';
 
 /**
  * A pausing fixture's `resumeAuthority: 'any'` declaration (#5561).
@@ -2819,6 +2821,14 @@ function recordChangeFlow(name: string, overrides?: Record<string, unknown>) {
 }
 
 describe('AutomationEngine - Flow Trigger Wiring', () => {
+    // [#17396] Time-triggered flows arm only where the deployment runs
+    // package-authored scheduled work, and that switch is OFF by default in
+    // every posture — so without this line the two time-triggered cases below
+    // fail for a reason that has nothing to do with wiring. Scoped to this
+    // suite rather than the file: everything else here is trigger-kind
+    // agnostic and must keep running in the DEFAULT deployment.
+    withScheduledWorkOn();
+
     let engine: AutomationEngine;
 
     beforeEach(() => {
@@ -3289,5 +3299,145 @@ describe('#9378 — execute() classifies terminal exits for the trigger transpor
         // Success keeps the shape it had: `status` is the classification this
         // card needed, not a field being backfilled everywhere.
         expect(ok.status).toBeUndefined();
+    });
+});
+
+// ─── the deployment switch: what the engine does and says (#17396) ──
+//
+// Ruling G, item 6, in one sentence: when package-authored scheduled work is
+// off, every time-triggered flow is listed in `getTriggerBindingAudit()` with a
+// DISTINCT reason — *disabled by deployment policy* — and ⛔ never as "binding
+// failed". A binding failure is a defect with an engineering remedy; this is a
+// deployment policy with an operator remedy, and reporting one as the other
+// sends the reader to the wrong place.
+describe('AutomationEngine - the deployment switch (#17396)', () => {
+    const PRIOR = process.env[SCHEDULED_WORK_ENV];
+    afterEach(() => {
+        if (PRIOR === undefined) delete process.env[SCHEDULED_WORK_ENV];
+        else process.env[SCHEDULED_WORK_ENV] = PRIOR;
+    });
+
+    function scheduleFlow(name: string) {
+        return {
+            name,
+            label: name,
+            type: 'schedule' as const,
+            status: 'active',
+            nodes: [
+                {
+                    id: 'start',
+                    type: 'start' as const,
+                    label: 'Start',
+                    config: { schedule: { type: 'cron', expression: '0 8 * * *' }, organization: 'org_a' },
+                },
+                { id: 'end', type: 'end' as const, label: 'End' },
+            ],
+            edges: [{ id: 'e1', source: 'start', target: 'end' }],
+        };
+    }
+
+    it('OFF: never calls the trigger at all — so nothing can throw and nothing can "fail"', () => {
+        delete process.env[SCHEDULED_WORK_ENV];
+        const engine = new AutomationEngine(createTestLogger());
+        const rec = recordingTrigger('schedule');
+        engine.registerTrigger(rec.trigger);
+        engine.registerFlow('digest', scheduleFlow('digest'));
+
+        expect(rec.started, 'the trigger is not asked to arm work the deployment refused').toHaveLength(0);
+        expect(engine.getActiveTriggerBindings()).toHaveLength(0);
+        expect(engine.getFlowRuntimeStates().find((s) => s.name === 'digest')?.bound).toBe(false);
+    });
+
+    it('OFF: the audit names the policy, and ⛔ NOT a binding failure', () => {
+        delete process.env[SCHEDULED_WORK_ENV];
+        const engine = new AutomationEngine(createTestLogger());
+        engine.registerTrigger(recordingTrigger('schedule').trigger);
+        engine.registerFlow('digest', scheduleFlow('digest'));
+
+        const audit = engine.getTriggerBindingAudit();
+        expect(audit.map((a) => a.flowName), 'ruled item 6: the flow IS listed').toEqual(['digest']);
+        expect(audit[0].triggerType).toBe('schedule');
+        expect(audit[0].reason).toBe(SCHEDULED_WORK_DISABLED_REASON);
+        // ⭐ The distinction the ruling is entirely about. The registered-trigger
+        // branch would have said exactly this, which is why it is pinned by
+        // absence rather than left to the reason's own wording.
+        expect(audit[0].reason).not.toMatch(/binding failed/);
+        expect(audit[0].reason).toContain(SCHEDULED_WORK_ENV);
+    });
+
+    it('OFF: the policy branch outranks "no trigger is registered", because that remedy does not work', () => {
+        // Registering the trigger would change nothing while the switch is off,
+        // so telling the operator to add `requires: ['triggers']` is a remedy
+        // that cannot succeed.
+        delete process.env[SCHEDULED_WORK_ENV];
+        const engine = new AutomationEngine(createTestLogger());
+        engine.registerFlow('digest', scheduleFlow('digest'));
+
+        const audit = engine.getTriggerBindingAudit();
+        expect(audit).toHaveLength(1);
+        expect(audit[0].reason).toBe(SCHEDULED_WORK_DISABLED_REASON);
+        expect(audit[0].reason).not.toMatch(/requires: \['triggers'\]/);
+    });
+
+    it('OFF: a record_change flow is untouched — the switch is scoped to the clock-driven kinds', () => {
+        // The control. `record_change` and `api` are fired by a caller that
+        // already exists and already carries an identity; they are not the
+        // unbounded background load the switch exists to bound.
+        delete process.env[SCHEDULED_WORK_ENV];
+        const engine = new AutomationEngine(createTestLogger());
+        const rec = recordingTrigger('record_change');
+        engine.registerTrigger(rec.trigger);
+        engine.registerFlow('rc_flow', recordChangeFlow('rc_flow'));
+
+        expect(rec.started).toHaveLength(1);
+        expect(engine.getTriggerBindingAudit()).toHaveLength(0);
+    });
+
+    it('ON: the same flow binds and leaves the audit empty', () => {
+        // Non-vacuity for every assertion above: the fixture really is armable,
+        // so "not bound" up there is the switch and not a broken fixture.
+        process.env[SCHEDULED_WORK_ENV] = 'true';
+        const engine = new AutomationEngine(createTestLogger());
+        const rec = recordingTrigger('schedule');
+        engine.registerTrigger(rec.trigger);
+        engine.registerFlow('digest', scheduleFlow('digest'));
+
+        expect(rec.started.map((b) => b.flowName)).toEqual(['digest']);
+        expect(engine.getTriggerBindingAudit()).toHaveLength(0);
+    });
+
+    it('ON: a genuine bind failure still reads as one — the two reasons do not collapse', () => {
+        // The other half of the distinction. With the switch on, a trigger that
+        // throws is reported exactly as it was before this card.
+        process.env[SCHEDULED_WORK_ENV] = 'true';
+        const engine = new AutomationEngine(createTestLogger());
+        engine.registerTrigger({
+            type: 'schedule',
+            start() {
+                throw new Error('the job service refused');
+            },
+            stop() {},
+        });
+        engine.registerFlow('digest', scheduleFlow('digest'));
+
+        const audit = engine.getTriggerBindingAudit();
+        expect(audit).toHaveLength(1);
+        expect(audit[0].reason).toMatch(/binding failed/);
+        expect(audit[0].reason).not.toBe(SCHEDULED_WORK_DISABLED_REASON);
+    });
+
+    it('is read at BIND, not cached, so flipping the switch changes the next registration', () => {
+        // The CLI's `--fresh` harness and any test that flips the switch
+        // between kernels in one process depend on this.
+        delete process.env[SCHEDULED_WORK_ENV];
+        const engine = new AutomationEngine(createTestLogger());
+        const rec = recordingTrigger('schedule');
+        engine.registerTrigger(rec.trigger);
+        engine.registerFlow('a', scheduleFlow('a'));
+        expect(rec.started).toHaveLength(0);
+
+        process.env[SCHEDULED_WORK_ENV] = 'true';
+        engine.registerFlow('b', scheduleFlow('b'));
+        expect(rec.started.map((s) => s.flowName)).toEqual(['b']);
     });
 });

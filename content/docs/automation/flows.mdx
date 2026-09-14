@@ -2071,8 +2071,10 @@ export const renewalReminder: Flow = {
           offsetDays: [60, 30, 7], // — or — withinDays: 30 (negative = overdue lookback)
           filter: { status: 'active' }, // optional, ANDed with the date window
         },
-        // REQUIRED, and for a stronger reason than a plain schedule flow —
-        // see "The acting organization" below.
+        // Required under a WALLED tenancy posture, and for a stronger reason
+        // than a plain schedule flow — it bounds the sweep's query as well as
+        // its runs. Not required under `single`. See "The acting organization"
+        // below.
         organization: '<sys_organization.id>',
         // schedule: { type: 'cron', expression: '0 8 * * *' } // optional; defaults to daily 08:00 UTC
       },
@@ -2092,6 +2094,32 @@ required. Requires the `triggers` **and** `job` capabilities. The record is on
 the flow context (`record.*`), so the start `condition` and `{record.*}`
 interpolation work as in a record-change flow.
 
+### Does this deployment run scheduled work at all?
+
+Before anything below applies: a time-triggered flow arms only on a deployment
+that has switched **package-authored scheduled work** on —
+`OS_AUTOMATION_SCHEDULED_WORK_ENABLED=true`. It is **off by default in every
+tenancy posture and every kernel**, and the same switch governs packaged
+`defineJob` cron jobs.
+
+Whether a clock-driven workload is affordable is a fact about the deployment —
+its database, its tenants, its budget — that no package author can know. So it
+is a deployment variable rather than metadata, and there is deliberately no spec
+key for it.
+
+<Callout>
+While the switch is off, such a flow is listed in the `os dev` / `os start`
+startup summary, in `getTriggerBindingAudit()` and in Studio as **disabled by
+deployment policy** — a distinct reason, never "binding failed". Nothing about
+the flow needs fixing; the deployment has not asked for it. `os doctor` prints
+the effective value.
+
+⛔ Platform-internal scheduled work — approvals escalation, the lifecycle
+Reaper, the messaging dispatch loop, membership backfill — is **not** gated by
+this switch. The boundary is *authored by a package*, not *runs on the job
+service*.
+</Callout>
+
 ### The acting organization
 
 A `record_change` or `api` flow inherits its organization from whoever triggered
@@ -2099,8 +2127,10 @@ it: the caller's session rides into the run and every tenant-scoped write below
 resolves the same organization a normal write would. A **time-triggered** flow
 has no such caller — a job tick carries no identity at all.
 
-So a `schedule` or `timeRelative` flow **declares the organization it runs as**,
-on the start node's `config`, beside the cadence it scopes:
+Under a **walled** tenancy posture (`group` or `isolated`) that is a question
+only the author can answer, so a `schedule` or `timeRelative` flow there
+**declares the organization it runs as**, on the start node's `config`, beside
+the cadence it scopes:
 
 ```typescript
 config: {
@@ -2134,12 +2164,22 @@ scope at all, so the sweep still selects across every organization while its run
 act as the declared one; the trigger warns at bind, naming the object.
 </Callout>
 
-`os lint`, `os validate` and `objectstack build` report a missing declaration as
-a warning (`flow-schedule-organization-missing`) so it is visible at authoring
-time rather than only in a server log at boot.
+<Callout type="warn">
+**Under `single` the declaration is not required, and `os lint` says nothing
+about it.** That posture holds exactly one organization — a second is refused —
+so an armed time-triggered flow there carries **no** organization, its
+`timeRelative` sweep runs unscoped, and every tenant-scoped write beneath it
+resolves the deployment's one organization exactly as a single-organization
+install always did.
 
-**A time-triggered flow that declares none is a declaration error**, refused at
-bind:
+There is no authoring-time check for the key, and that is deliberate rather than
+an omission: whether it is required depends on the deployment's posture and its
+scheduled-work switch, and neither is visible from a stack. A lint rule that
+fired on the default posture would be wrong more often than right.
+</Callout>
+
+**Under a wall, a time-triggered flow that declares none is a declaration
+error**, refused at bind:
 
 - the trigger logs the reason at `error`, naming the flow;
 - the flow is recorded as **not bound** — it is listed by
@@ -2149,12 +2189,14 @@ bind:
 - nothing fires it.
 
 There is deliberately **no fallback** — not the platform organization, not "the
-install's only one". Without the declaration the run would reach every
-tenant-scoped write with nothing to offer, and on an install holding more than
-one `sys_organization` each of those writes is refused one layer below anything
-that summarises the run: the tick reports itself healthy and delivers nothing.
-A wrong `organization_id` is worse still, because it is silently authoritative
-to every report, export and cleanup script that filters by organization.
+first row of `sys_organization`", and never the swept record's own
+`organization_id`. Behind a wall, a run that reached every tenant-scoped write
+with nothing to offer would have each of those writes refused one layer below
+anything that summarises the run: the tick reports itself healthy and delivers
+nothing. A wrong `organization_id` is worse still, because it is silently
+authoritative to every report, export and cleanup script that filters by
+organization. ⛔ This is unchanged by the posture split above: `single` **omits**
+the organization, it never invents one.
 
 **No fan-out.** A single flow belongs to one organization. A sweep wanted in
 several organizations is declared once per organization.
@@ -2163,7 +2205,8 @@ several organizations is declared once per organization.
 The start node's `config` is an open record, so a near-miss spelling —
 `organizationId`, `organization_id`, `orgId`, `org_id`, `tenantId` — parses
 happily and is then ignored. The bind-time refusal names the spelling you
-actually wrote.
+actually wrote — under a wall, which is the only place the key is required and
+therefore the only place a near-miss is a mistake.
 </Callout>
 
 ### Update-triggered flow

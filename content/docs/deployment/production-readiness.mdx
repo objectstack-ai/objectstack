@@ -132,6 +132,17 @@ the [HARDENING.md recipes](https://github.com/objectstack-ai/objectstack/blob/ma
       the deploy instead of leaving a server where most pages work and that one
       subset errors. Setting the flag boots without the database and never
       reconnects; never set it in production.
+- [ ] `OS_AUTOMATION_SCHEDULED_WORK_ENABLED` is a **decision**, not a default.
+      Package-authored scheduled work — time-triggered flows and packaged
+      `defineJob` cron jobs — is OFF in every posture until this is set, so a
+      deployment that expects a packaged digest, sweep or reminder to fire must
+      set it explicitly. Confirm the effective value with `os doctor`, and read
+      the startup summary: anything listed there as *disabled by deployment
+      policy* is not broken, it is simply not switched on. Leaving it off is
+      also a legitimate answer — an unsized clock-driven workload is a real cost
+      — but it should be one somebody made. Under `group` / `isolated`, every
+      flow you do arm must declare `config.organization`; see
+      [Tenancy Modes & Membership](/docs/deployment/tenancy-modes).
 - [ ] Backup / restore drill documented and tested.
 - [ ] Data-retention windows reviewed (ADR-0057): the platform's default
       `lifecycle` declarations bound telemetry (activity 14d, job runs 30d,
