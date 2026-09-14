@@ -202,7 +202,7 @@ Keep them pure, dependency-free, and AI-readable.
 | Binding | Source | Available in |
 |:---|:---|:---|
 | `record` | the row being evaluated | formulas, validation, sharing, visibility |
-| `previous` | row before update — on a `multi: true` write, that row's own pre-write state in `after*` hooks / record-change triggers (per row); unbound in `before*` hooks, which fire once for the batch | hooks, validation on update |
+| `previous` | row before update — on a `multi: true` write, that row's own pre-write state, in `before*` and `after*` hooks alike and in record-change triggers: since ADR-0058 Addendum II both phases dispatch once per matched row | hooks, validation on update |
 | `input` | hook payload | hooks |
 | `current_user` | the authenticated subject — the canonical binding (ADR-0068). `user`, `ctx.user` and `os.user` are aliases of the **same** object | predicates with identity |
 | `os.user` | alias of `current_user` | seed, predicates with identity |
@@ -371,12 +371,13 @@ The condition above is a **transition** — `record.status == 'escalated'` alone
 would be true on every update of an already-escalated case, so "just became" is
 only expressible by comparing against `previous`.
 
-Write it once. A predicate (`multi: true`) write is N record changes, so
-`after*` hooks — and the record-change flow triggers that ride them — are
-evaluated and fired **once per matched row**, with `previous` bound to that
-row's own pre-write state and `record` holding that row's real state rather than
-the write's payload. The same condition therefore means the same thing whether
-the write targets one id or matches a thousand rows:
+Write it once. A predicate (`multi: true`) write is N record changes, so hooks
+in **both** phases — `before*` and `after*` alike, and the record-change flow
+triggers that ride the latter — are evaluated and fired **once per matched
+row**, with `previous` bound to that row's own pre-write state and `record`
+holding that row's own state (stored ⊕ payload) rather than the bare payload.
+The same condition therefore means the same thing whether the write targets one
+id or matches a thousand rows:
 
 ```ts
 await data.update('case', { status: 'escalated' }, { multi: true, where: { severity: 'high' } });
@@ -385,19 +386,33 @@ await data.update('case', { status: 'escalated' }, { multi: true, where: { sever
 ```
 
 The matched rows are read once for the whole batch and reused for every per-row
-evaluation, so this costs one extra query per write, not one per row. Above
-~10 000 matched rows a predicate write against an object with `after*` hooks is
-**refused** rather than fanned out — paginate the write. The refusal is loud;
-the platform never silently downgrades it to a single hook call.
+evaluation in both phases, so this costs one extra query per write, not one per
+row. Above 10 000 matched rows a predicate write against an object carrying
+per-row hooks in **either** phase is **refused** rather than fanned out — one
+ceiling covers `before*` and `after*` together, and it is checked before the
+first dispatch, so nothing is written and no handler runs. Paginate the write.
+The refusal is loud (`ERR_BULK_PER_ROW_HOOK_LIMIT`, naming the event, the
+matched count and the limit); the platform never silently downgrades it to a
+single hook call.
 
 <Callout type="warn">
-`before*` hooks are the exception, by nature rather than by omission.
-`beforeUpdate` / `beforeDelete` fire **once for the whole batch** — they may
-still rewrite the payload, and a bulk write carries exactly one payload — so
-`previous` is unbound there and a `before*` condition that reads it fails the
-write with an error naming the batch and pointing at the matching `after*`
-event. Keep transition conditions on `after*`; keep `before*` conditions to the
-fields the incoming payload actually sets.
+`before*` hooks dispatch per row too, but what they WRITE is still batch-scoped.
+A transition *condition* is safe in either phase — `previous` is that row's own
+pre-image in `beforeUpdate` / `beforeDelete` as much as in `after*`. The payload
+is the asymmetry: `driver.updateMany` takes one SET clause for N rows, so every
+per-row `before*` context carries **the** one payload, and a rewrite made on any
+row's dispatch lands on every matched row. What the contract admits is therefore
+a **row-invariant-in-effect** rewrite — you may DECIDE per row, but the key set
+you write must be the same for every row and must be assigned **in place**
+(`ctx.input.data.customized = true`). The engine enforces it: it records the
+keys each row's chain assigned and refuses the whole batch before any write when
+two rows disagree (`MULTI_UPDATE_HOOK_KEY_DIVERGENCE`, HTTP 400, nothing
+written). Two shapes slip past that guard and stay out of contract anyway —
+writing the same key with a per-row **value** (key sets match, so the last
+dispatch's value silently wins for all rows), and **replacing** `ctx.input.data`
+instead of mutating it (the recording sees nothing, so the batch is judged by
+nothing at all). Need a genuinely per-row write? Write those rows by id, or go
+through `ctx.api` from inside the handler.
 </Callout>
 
 ---
