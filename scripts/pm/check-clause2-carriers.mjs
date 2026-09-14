@@ -697,7 +697,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '#17149: a claim that parses to ZERO branches — malformed, never absent': 26,
   '#17098: a key-INITIAL line that DESCRIBES the spelling — the half the fixture did not cover': 48,
   '#17959: POSITION is the LINE, not the body — the merged #17819 specimen in both its shapes': 10,
-  '#18042: the copyable record TEMPLATE — the one machine-read artefact with nothing to copy': 23,
+  '#18042: the copyable record TEMPLATE — the one machine-read artefact with nothing to copy': 24,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -2668,7 +2668,17 @@ export function readServedTier(text) {
  */
 export const RECORD_TEMPLATE_PLACEHOLDERS = Object.freeze({
   headSha: '0'.repeat(40),
-  implementedBy: 'claude/issue-NNNN-slug',
+  // ⛔ ASSEMBLED, never spelled as one span -- and for the same reason the
+  // repo-shape example in `main`'s refusal below is spelled in two: the
+  // dispatch derivation reads any quoted path-shaped literal in a module body
+  // as the population this gate watches, and a branch placeholder names no
+  // tracked file. Spelled whole, it made this family's ONLY declared literal a
+  // dead one, which `check:declared-population-live` refuses out loud -- a gate
+  // telling the derivation it reads a population while the derivation reads
+  // none. Neither half carries a separator, so neither is admitted, and this
+  // file goes on declaring no path population at all (it reads no file in the
+  // tree). ⛔ Do not re-join these into one literal to tidy it.
+  implementedBy: ['claude', 'issue-NNNN-slug'].join('/'),
   reviewedBy: 'session_SEATSESSIONID',
 });
 
@@ -5417,6 +5427,14 @@ export function selfTest() {
   t('⛔ nor an unfilled MENU in the record — one value per slot, never the `yes|no` shape this file refuses', !TPL_RECORD.includes('|'));
   t('`--template` is an honoured flag, so the parse, the usage text and the refusal all know it', KNOWN_FLAGS.has('--template') && argvRefusalLines(['--template']) === null && usageLines().join('\n').includes('--template'));
   t('⛔ …spelled as taking NO value, so it can never eat the argument after it', KNOWN_FLAGS.get('--template').value === null);
+  // The branch placeholder is ASSEMBLED in the module body so the derivation
+  // does not read it as a dead path population. This pin spells the printed
+  // form OUT, here where the scan does not reach, so the assembly can never
+  // quietly print something else -- and so a future tidy that re-joins it into
+  // one literal is caught by `check:declared-population-live` rather than by
+  // nobody. ⛔ Not derived from the constant: a pin written from the thing it
+  // pins asserts nothing.
+  t('⭐ the printed placeholder is EXACTLY the branch form, assembled or not', says(TPL_RECORD, 'Implemented-by: `claude/issue-NNNN-slug`') && RECORD_TEMPLATE_PLACEHOLDERS.implementedBy === 'claude/issue-NNNN-slug');
 
   // -- The floor: every declared battery RAN, and ran its cases (#13489) -----
   //
