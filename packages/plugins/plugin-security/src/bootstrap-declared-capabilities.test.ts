@@ -1,8 +1,9 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { bootstrapDeclaredCapabilities } from './bootstrap-declared-capabilities.js';
 import { bootstrapSystemCapabilities } from './bootstrap-system-capabilities.js';
+import { CAPABILITY_NAME_COLLISION } from './capability-name-collision.js';
 
 /** Minimal in-memory ql for sys_capability seeding with a registry stub. */
 function makeQl(declared: any[] = []) {
@@ -500,5 +501,207 @@ describe('#11518 — a truncated existence page must never route this seeder to 
     // pre-#10946 per-item answer, unchanged by this repair.
     expect(out.skippedAdmin).toBe(1);
     expect(out.unreadable).toBe(0);
+  });
+});
+
+/**
+ * [#18023] The foreign-owner refusal must REACH THE AUTHOR.
+ *
+ * ## What these pins are about, and what they deliberately do not touch
+ *
+ * ⛔ Not the skip. Refusing to write into a `sys_capability` row another
+ * package owns is correct under ADR-0086 D4 and is asserted UNCHANGED in every
+ * case below (`skippedForeign` still counts, the foreign row is never mutated,
+ * the name is still reported as materialized). The defect was that the refusal
+ * was invisible: `logger?.warn?.(…)` at that branch is optionally chained
+ * TWICE, so a caller passing no logger produced no output at all and an entire
+ * declared capability vanished with one internal counter moved.
+ *
+ * ## The measurement these replace
+ *
+ * On the pre-fix tree, driven through `bootstrapDeclaredCapabilities` with a
+ * foreign-owned row and NO logger, the first case below measured ZERO console
+ * lines across every channel and `undefined` for the outcome's diagnostic
+ * records, while `skippedForeign` was 1. That is the card's reading, reproduced.
+ *
+ * ## The discriminating half
+ *
+ * A pin that only asserts "something was printed on a collision" passes just as
+ * well against a seeder that prints on EVERY seeded capability, which is a
+ * different defect (#12015's: a diagnostic that fires always is as unreadable
+ * as one that never fires). So the no-collision control asserts SILENCE on all
+ * five console channels over a pass that really does seed, really does re-seed
+ * its own drifted row, and really does claim a derived placeholder.
+ *
+ * ⛔ These reuse this file's `makeQl` rather than standing up a second engine
+ * double: a new double would be a new row in `engine-double-contract`'s ledger
+ * for a card that names no engine seam.
+ */
+
+/**
+ * Capture EVERY console channel — "author-visible output" is not
+ * channel-specific, and a pin watching only `warn` could be satisfied by a
+ * change that merely MOVED the silence.
+ */
+function captureAllConsole() {
+  const seen: string[] = [];
+  const spies = (['log', 'info', 'warn', 'error', 'debug'] as const).map((m) =>
+    vi.spyOn(console, m).mockImplementation((...args: unknown[]) => {
+      seen.push(`${m}: ${args.map((a) => (typeof a === 'string' ? a : JSON.stringify(a))).join(' ')}`);
+    }),
+  );
+  return { seen, restore: () => spies.forEach((s) => s.mockRestore()) };
+}
+
+describe('[#18023] a capability-name collision reaches the author', () => {
+  it('prints, WITH NO LOGGER INJECTED, and returns the diagnostic record', async () => {
+    const sets = [{ name: 'ops', systemPermissions: ['shared_cap'] }];
+    const ql = makeQl([{ name: 'shared_cap', label: 'Mine', description: 'B wrote this.', scope: 'org', _packageId: 'com.example.b' }]);
+    ql.rows.push({
+      id: 'cap_owned_by_a',
+      name: 'shared_cap',
+      label: 'Owner Label',
+      description: 'Owner wrote this.',
+      scope: 'platform',
+      managed_by: 'package',
+      package_id: 'com.example.a',
+    });
+
+    const cap = captureAllConsole();
+    let out: Awaited<ReturnType<typeof bootstrapDeclaredCapabilities>>;
+    try {
+      // No logger — the exact call shape under which the old branch was mute.
+      out = await bootstrapDeclaredCapabilities(ql, null, { permissionSets: sets });
+    } finally {
+      cap.restore();
+    }
+
+    // ── The reading this card exists to move: 0 → 1 ──────────────────────────
+    expect(out.skippedForeign).toBe(1);
+    expect(cap.seen).toHaveLength(1);
+    expect(cap.seen[0]!.startsWith('warn: ')).toBe(true);
+    expect(cap.seen[0]).toContain(CAPABILITY_NAME_COLLISION);
+    expect(cap.seen[0]).toContain('shared_cap');
+
+    // ── The record travels back, for a caller that reads no log at all ──────
+    expect(out.collisions).toHaveLength(1);
+    expect(out.collisions![0]).toMatchObject({
+      event: CAPABILITY_NAME_COLLISION,
+      severity: 'warning',
+      name: 'shared_cap',
+      declaredBy: 'com.example.b',
+      ownedBy: 'com.example.a',
+      grantedBy: ['ops'],
+    });
+
+    // ── ⛔ The skip itself is UNCHANGED (ADR-0086 D4) ────────────────────────
+    expect(ql.rows.find((r) => r.name === 'shared_cap')).toMatchObject({
+      label: 'Owner Label', description: 'Owner wrote this.', scope: 'platform', package_id: 'com.example.a',
+    });
+    expect(ql.rows.filter((r) => r.name === 'shared_cap')).toHaveLength(1);
+    // …and the name is still reported materialized, so the back-compat
+    // derivation does not clobber the owner's authored row (#4967 Part 1).
+    expect(out.materializedNames).toEqual(['shared_cap']);
+  });
+
+  it('a package-managed row with NO package_id is FOREIGN — the shared predicate, not a local `===`', async () => {
+    const ql = makeQl([{ name: 'unowned_row_cap', _packageId: 'com.example.b' }]);
+    ql.rows.push({ id: 'cap_no_owner', name: 'unowned_row_cap', managed_by: 'package' });
+
+    const cap = captureAllConsole();
+    let out: Awaited<ReturnType<typeof bootstrapDeclaredCapabilities>>;
+    try {
+      out = await bootstrapDeclaredCapabilities(ql, null);
+    } finally {
+      cap.restore();
+    }
+
+    // ADR-0086 D3: a row that cannot prove its owner is not ours to write.
+    expect(out.skippedForeign).toBe(1);
+    expect(out.updated).toBe(0);
+    expect(out.collisions![0]!.ownedBy).toBeNull();
+    // The RECORD words it; the pass line summarises and carries the record in
+    // its structured meta. ⛔ Neither prints `undefined` at an author.
+    expect(out.collisions![0]!.message).toContain('(a package-managed row with no package_id)');
+    expect(cap.seen).toHaveLength(1);
+    expect(cap.seen[0]).toContain('"ownedBy":null');
+    expect(cap.seen[0]).not.toContain('undefined');
+    expect(ql.rows.find((r) => r.name === 'unowned_row_cap')!.package_id).toBeUndefined();
+  });
+
+  it('says it ONCE per pass, with every dropped declaration in the record list', async () => {
+    const ql = makeQl([
+      { name: 'cap_one', _packageId: 'com.example.b' },
+      { name: 'cap_two', _packageId: 'com.example.b' },
+      { name: 'cap_three', _packageId: 'com.example.b' },
+    ]);
+    for (const [id, name] of [['c1', 'cap_one'], ['c2', 'cap_two'], ['c3', 'cap_three']] as const) {
+      ql.rows.push({ id, name, managed_by: 'package', package_id: 'com.example.a' });
+    }
+
+    const cap = captureAllConsole();
+    let out: Awaited<ReturnType<typeof bootstrapDeclaredCapabilities>>;
+    try {
+      out = await bootstrapDeclaredCapabilities(ql, null);
+    } finally {
+      cap.restore();
+    }
+
+    expect(out.skippedForeign).toBe(3);
+    // ⛔ Three lines would bury the remedy under the finding.
+    expect(cap.seen).toHaveLength(1);
+    expect(cap.seen[0]).toContain('3 declared capabilities were NOT applied');
+    expect(out.collisions!.map((d) => d.name)).toEqual(['cap_one', 'cap_two', 'cap_three']);
+  });
+
+  it('reports through an INJECTED logger and leaves the console alone', async () => {
+    const warn = vi.fn();
+    const ql = makeQl([{ name: 'shared_cap', _packageId: 'com.example.b' }]);
+    ql.rows.push({ id: 'cap_x', name: 'shared_cap', managed_by: 'package', package_id: 'com.example.a' });
+
+    const cap = captureAllConsole();
+    try {
+      await bootstrapDeclaredCapabilities(ql, null, { logger: { warn } });
+    } finally {
+      cap.restore();
+    }
+
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn.mock.calls[0]![0]).toContain(CAPABILITY_NAME_COLLISION);
+    expect(cap.seen).toEqual([]);
+  });
+
+  it('CONTROL: a pass that really works and collides on nothing is SILENT on all five channels', async () => {
+    // ⛔ The discriminating half. Without this, a seeder that warned on every
+    // declaration would satisfy every assertion above.
+    const ql = makeQl([
+      { name: 'b.fresh', _packageId: 'com.example.b' },                  // → seeded
+      { name: 'b.drifted', label: 'New Label', _packageId: 'com.example.b' }, // → updated
+      { name: 'b.derived', _packageId: 'com.example.b' },                // → claimed
+      { name: 'b.steady', _packageId: 'com.example.b' },                 // → unchanged
+    ]);
+    ql.rows.push({ id: 'd1', name: 'b.drifted', label: 'Old Label', description: 'Capability b.drifted.', scope: 'platform', managed_by: 'package', package_id: 'com.example.b' });
+    ql.rows.push({ id: 'd2', name: 'b.derived', managed_by: 'platform' });
+    // ⚠️ Exactly what a re-seed would write (`humanize('b.steady')` = 'B Steady'),
+    // so this row takes the `unchanged` arm — an EQUALITY test, not a presence
+    // test. A label that merely looked plausible would take `updated` instead
+    // and silently delete this control's fourth kind of work.
+    ql.rows.push({ id: 'd3', name: 'b.steady', label: 'B Steady', description: 'Capability b.steady.', scope: 'platform', managed_by: 'package', package_id: 'com.example.b' });
+
+    const cap = captureAllConsole();
+    let out: Awaited<ReturnType<typeof bootstrapDeclaredCapabilities>>;
+    try {
+      out = await bootstrapDeclaredCapabilities(ql, null);
+    } finally {
+      cap.restore();
+    }
+
+    // The pass really did all four kinds of work…
+    expect(out).toMatchObject({ seeded: 1, updated: 1, claimed: 1, unchanged: 1, skippedForeign: 0 });
+    // …and said nothing at all.
+    expect(cap.seen).toEqual([]);
+    // The key stays ABSENT rather than empty: `undefined` and `[]` would
+    // otherwise be the same fact to a caller inspecting the outcome.
+    expect(out.collisions).toBeUndefined();
   });
 });

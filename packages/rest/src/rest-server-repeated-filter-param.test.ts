@@ -47,7 +47,7 @@
  * duplicates serves one of two intents a caller actually expressed.
  */
 
-import { describe, it, expect, vi, afterEach } from 'vitest';
+import { describe, it, expect, vi, afterEach, beforeAll, afterAll } from 'vitest';
 // `.js` on purpose — NodeNext resolution requires the extension, and this
 // package's TEST_DEBT ceiling has no margin for another TS2835 (#7248).
 import { ObjectQL } from '@objectstack/objectql';
@@ -59,6 +59,14 @@ import {
     assertFilterParamSuppliedOnce,
     repeatedFilterParamMessage,
 } from './query-multiplicity.js';
+
+// [#17865] This file observes the REST fault log, so it declares the level it
+// asserts against instead of inheriting the suite's quiet one. 'info' is the
+// SHIPPED default — what a real caller gets. Paired by
+// scripts/check-rest-log-spy-declared.mjs: an observer that declares nothing
+// is a finding by name.
+beforeAll(() => { vi.stubEnv('OS_REST_LOG', 'info'); });
+afterAll(() => { vi.unstubAllEnvs(); });
 
 const DATA = '/api/v1/data';
 

@@ -28,11 +28,13 @@ export default defineConfig({
           // #13517: quiet the registry's per-item registration chatter — the
           // engine's own `OS_REGISTRY_LOG` seam, not a change to its shipped
           // default. Enforced by scripts/check-registry-log-declared.mjs.
-          // #15484: `OS_REST_LOG` is this package's OWN declared fault-log level
-          // seam (packages/rest/src/log.ts). A ROOT-level value is inert for a
-          // project run, so it is declared here too. See the root block for the
-          // measured reason the value is the shipped default and not a quieter one.
-          env: { OS_REGISTRY_LOG: 'warn', OS_REST_LOG: 'info' },
+          // #15484 / #17865: `OS_REST_LOG` is this package's OWN declared
+          // fault-log level seam (packages/rest/src/log.ts). A ROOT-level value
+          // is inert for a project run, so it is declared here too. See the root
+          // block for the measured reason this HARNESS runs quiet while the
+          // shipped default stays `'info'`, and for the two things the quiet
+          // level does not work without.
+          env: { OS_REGISTRY_LOG: 'warn', OS_REST_LOG: 'silent' },
           // A late console.* must not redden a green suite (#10374); see the root
           // block. A ROOT-level value is inert for a project run, so it is
           // declared here as well (scripts/check-console-intercept-disarm.mjs).
@@ -48,11 +50,13 @@ export default defineConfig({
           // #13517: quiet the registry's per-item registration chatter — the
           // engine's own `OS_REGISTRY_LOG` seam, not a change to its shipped
           // default. Enforced by scripts/check-registry-log-declared.mjs.
-          // #15484: `OS_REST_LOG` is this package's OWN declared fault-log level
-          // seam (packages/rest/src/log.ts). A ROOT-level value is inert for a
-          // project run, so it is declared here too. See the root block for the
-          // measured reason the value is the shipped default and not a quieter one.
-          env: { OS_REGISTRY_LOG: 'warn', OS_REST_LOG: 'info' },
+          // #15484 / #17865: `OS_REST_LOG` is this package's OWN declared
+          // fault-log level seam (packages/rest/src/log.ts). A ROOT-level value
+          // is inert for a project run, so it is declared here too. See the root
+          // block for the measured reason this HARNESS runs quiet while the
+          // shipped default stays `'info'`, and for the two things the quiet
+          // level does not work without.
+          env: { OS_REGISTRY_LOG: 'warn', OS_REST_LOG: 'silent' },
           // A late console.* must not redden a green suite (#10374); see the root
           // block. A ROOT-level value is inert for a project run, so it is
           // declared here as well (scripts/check-console-intercept-disarm.mjs).
@@ -79,34 +83,39 @@ export default defineConfig({
     // The ADR-0005 `[Registry] Collision` diagnostics go through a bare
     // `console.warn` the level never gates, so a real shadowing still speaks.
     // Enforced by scripts/check-registry-log-declared.mjs.
-    // #15484: `OS_REST_LOG` — this package's own declared fault-log level seam
-    // (`packages/rest/src/log.ts`, `REST_LOG_LEVELS`), enforced by
-    // `scripts/check-rest-log-declared.mjs`. Declared here at `'info'`, which is
-    // the SHIPPED default: the declaration is the deliverable, the value is a
-    // one-line choice, and this suite's value is deliberately NOT a quieter one.
+    // #15484 / #17865: `OS_REST_LOG` — this package's own declared fault-log
+    // level seam (`packages/rest/src/log.ts`, `REST_LOG_LEVELS`), enforced by
+    // `scripts/check-rest-log-declared.mjs`. ⛔ This is the HARNESS's level, not
+    // the product's: the SHIPPED default is still `'info'` and still gate-pinned,
+    // and nothing here changes what a real caller gets.
     //
-    // ⚠️ MEASURED, on this suite, before choosing it. `OS_REST_LOG: 'silent'`
-    // does remove the whole population this seam was built for — 2,095 indented
-    // `at ` frame lines, 36.7% of a captured run, to ZERO — but it is not a
-    // volume tidy, because it moves this suite's fault-logging assertions in two
-    // opposite and equally wrong directions at once:
+    // ⚠️ MEASURED on this suite, both before and after. At `'info'` a green run
+    // captured 5,705 lines of which 2,095 (36.7%) were indented `at ` stack
+    // frames, 100% of them arriving through `logError`; at `'silent'` that
+    // population is ZERO. But the quiet level alone is NOT a volume tidy — it
+    // moves this suite's fault-logging assertions in two opposite and equally
+    // wrong directions at once:
     //
-    //   * 28 assertions across 15 files go RED. They are the "the operator still
-    //     gets the words" half of the contract, and they read the fault through a
-    //     `vi.spyOn(console, 'error')` mock — so they never printed any of the
-    //     volume in the first place.
-    //   * 8 files assert the OTHER half — that an EXPECTED 4xx logs NOTHING
+    //   * assertions that read the fault through a `vi.spyOn(console, 'error')`
+    //     mock go RED. They are the "the operator still gets the words" half of
+    //     the contract, and they never printed any of the volume in the first
+    //     place.
+    //   * the OTHER half asserts that an EXPECTED 4xx logs NOTHING
     //     (`expect(unhandledLogs()).toHaveLength(0)` and siblings). Silencing the
     //     shim makes those pass for the wrong reason: they would stay green with
     //     every expected 4xx logged loudly. That is the phantom-check shape this
     //     repo refuses, arrived at by a legitimate-looking declaration — exactly
     //     how the `[Registry]` control on #15484 was silently spent by #15425.
     //
-    // ⇒ Opting this suite down needs each file that asserts on the fault log to
-    // declare the loud level for itself, and needs a guard that pairs the two so
-    // a future test cannot assert silence into a silenced suite. That is a
-    // decision about ~20 files, and it is open on #15484 rather than taken here.
-    env: { OS_REGISTRY_LOG: 'warn', OS_REST_LOG: 'info' },
+    // ⇒ The quiet level is therefore paired, in the SAME delivery, with two
+    // things it does not work without (decision batch #128 item 4, #17865):
+    // every test file that observes the fault log declares its own loud level
+    // (`vi.stubEnv('OS_REST_LOG', …)` in that file's own setup), and
+    // `scripts/check-rest-log-spy-declared.mjs` makes an undeclared observer a
+    // finding by name — so a future test cannot assert silence into a silenced
+    // suite. ⛔ Do not raise this value back to a loud one to "fix" a red test:
+    // the file that went red is the one missing its own declaration.
+    env: { OS_REGISTRY_LOG: 'warn', OS_REST_LOG: 'silent' },
     globals: true,
     environment: 'node',
   },

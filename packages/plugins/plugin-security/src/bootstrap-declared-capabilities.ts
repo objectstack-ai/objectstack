@@ -29,8 +29,12 @@
  *    which is the whole point: retire the implicit back-door;
  *  - IDEMPOTENT + UPGRADE-AWARE: a row this seeder owns (`managed_by:'package'`,
  *    same `package_id`) is re-seeded on every boot so the record always
- *    reflects the shipped declaration. Rows owned by a DIFFERENT package are
- *    skipped loudly;
+ *    reflects the shipped declaration. A row owned by a DIFFERENT package is
+ *    skipped, and [#18023] the skip now REACHES THE AUTHOR — one
+ *    `capability_name_collision` line per pass through
+ *    {@link reportCapabilityNameCollisions}, which prints even with no logger
+ *    injected, plus the records themselves on
+ *    {@link CapabilitySeedOutcome.collisions};
  *  - admin-authored rows (`managed_by:'admin'`) are NEVER clobbered.
  *
  * Runs on `kernel:ready` in `@objectstack/plugin-security` alongside the other
@@ -82,6 +86,19 @@ import {
 } from './per-organization-catalog.js';
 import { buildExistingByName, type ExistingByNameIndex } from './seed-name-lookup.js';
 import { readDeclared } from './bootstrap-declared-permissions.js';
+// [#18023] THE owner-comparison predicate, REUSED rather than re-derived. It
+// carries the axis it was first written for in its NAME, and is
+// axis-INDEPENDENT in its question — "is the standing row's owner a DIFFERENT
+// package from the one declaring this?" — which is exactly what this seeder's
+// foreign branch asks. One name for one derivation beats two names for one
+// derivation; re-spelling the comparison here is the drift
+// `permission-set-name-collision.ts` exists to prevent.
+import { permissionSetNameIsForeign } from './permission-set-name-collision.js';
+import {
+  capabilityNameCollisionDiagnostic,
+  reportCapabilityNameCollisions,
+  type CapabilityNameCollisionDiagnostic,
+} from './capability-name-collision.js';
 import { PLATFORM_CAPABILITY_NAMES } from '@objectstack/spec/security';
 
 /** The only shape this seeder reads off a permission set: who grants what. */
@@ -160,6 +177,21 @@ export interface CapabilitySeedOutcome {
    * list, so the derivation gets its own attempt.)
    */
   materializedNames: string[];
+  /**
+   * [#18023] The declarations this pass DROPPED because another package owns
+   * the capability name — one record per dropped declaration, the structured
+   * half of what {@link reportCapabilityNameCollisions} prints.
+   *
+   * ⚠️ Present only when the pass found at least one, exactly like its
+   * permission-set sibling: the absent key keeps a caller from reading an empty
+   * array as "this pass looked" on an outcome that predates the key.
+   *
+   * Here so a caller that reads NO LOG AT ALL — a boot report, a test — can
+   * still ask what happened. ⛔ It is not a substitute for the print: a record
+   * nobody reads is the defect this card removed, so the pass reports through
+   * the sink whether or not anyone inspects this.
+   */
+  collisions?: CapabilityNameCollisionDiagnostic[];
 }
 
 function humanize(name: string): string {
@@ -342,7 +374,14 @@ async function upsertPackageCapability(
   }
 
   if (existing.managed_by === 'package') {
-    if (existing.package_id === packageId) {
+    // [#18023] ⛔ NOT a hand-written `existing.package_id === packageId`. The
+    // owner comparison is THE shared predicate (see the import note): a second
+    // spelling of it is free to drift from the one a compile-time door asks,
+    // and a nullish owner in particular must read FOREIGN — a package-managed
+    // row with no `package_id` is the exact ADR-0086 D3 ambiguity, and adopting
+    // it on a name match would be a package writing into a record it cannot
+    // prove it owns.
+    if (!permissionSetNameIsForeign(existing.package_id, packageId)) {
       // Our own row — re-seed so it always reflects the shipped declaration.
       //
       // [#11096] ⚠️ Only when the stored row ACTUALLY DIFFERS. An unconditional
@@ -362,10 +401,30 @@ async function upsertPackageCapability(
         out.updated += 1;
       }
     } else {
+      // [#18023] The SKIP is unchanged and correct — ADR-0086 D4: a package
+      // never writes into a foreign record. What changed is that it is no
+      // longer invisible.
+      //
+      // ⛔ The old line did not refuse loudly, whatever "skipped loudly" in
+      // this module's header claimed: `logger?.warn?.(…)` is optionally chained
+      // TWICE, so a caller passing no logger produced NO OUTPUT AT ALL and an
+      // entire declared capability vanished with one internal counter moved.
+      // Measured on the pre-fix tree with no logger: `skippedForeign = 1`,
+      // author-visible console lines = 0 across all five channels.
+      //
+      // The report now goes through `reportCapabilityNameCollisions` at the end
+      // of the pass — ONCE, and loud with no sink injected (#10556:
+      // silent-by-declaration is rejected) — and the diagnostic RECORD travels
+      // back on the outcome so a caller that reads no log at all can still ask
+      // what happened. ⛔ The record is not a substitute for the print; it is
+      // the second half of it.
       out.skippedForeign += 1;
-      logger?.warn?.('[security] capability name owned by another package — skipped', {
-        name: cap.name, declaredBy: packageId, ownedBy: existing.package_id,
-      });
+      (out.collisions ??= []).push(capabilityNameCollisionDiagnostic({
+        name: String(cap.name),
+        declaredBy: packageId,
+        ownedBy: typeof existing.package_id === 'string' ? existing.package_id : null,
+        grantedBy: grantors,
+      }));
     }
     // Either way a package-authored row exists and must not be re-derived over.
     return true;
@@ -451,6 +510,10 @@ export async function bootstrapDeclaredCapabilities(
   // This seeder is organization-less today (see the lookup note above), so the
   // report carries no organization either.
   reportSeedWriteRefusals(options.logger, refusals);
+  // [#18023] Said once per pass, and said even when no logger was injected —
+  // the whole defect was that this refusal reached nobody. The records are
+  // already on the outcome (`out.collisions`), for a caller that reads no log.
+  reportCapabilityNameCollisions(options.logger, out.collisions ?? []);
   if (out.unreadable > 0) {
     // [#11096] Said ONCE with the count, like the sibling seeders: a per-name
     // warn on a database that is down is a log flood that buries its own

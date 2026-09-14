@@ -276,7 +276,9 @@
  * `.claude/skills/pm-dispatch/references/` may land on a REVIEW OF RECORD in
  * place of the authorized approval: the `## Contract review` comment on the PR
  * thread that names the pull request's CURRENT head, carries a `Reviewed-by:`
- * line, and declares a `Served-tier:` reading that STANDS. Every other governed
+ * line, and declares a `Served-tier:` reading that STANDS -- its token being the
+ * NAME `CONTRACT_REVIEW_TIER`, ⛔ never a model identifier, which `AGENTS.md`
+ * lets land in no comment and a record IS one (#18060). Every other governed
  * path is the rules layer and keeps the predicate above byte-for-byte.
  *
  * ⭐ THE PROPERTY THAT MAKES THIS SAFE TO SHIP, and it is measured rather than
@@ -597,10 +599,11 @@ export async function loadRecordRecognisers(load = (specifier) => import(specifi
       shaMinHex: record?.H51_SHA_MIN_HEX,
       readServedTier: tier?.readServedTier,
       servedTierStands: tier?.servedTierStands,
+      isModelIdentifierToken: tier?.isModelIdentifierToken,
       reviewedByLine: tier?.REVIEWED_BY_LINE,
     };
     const missing = [
-      ...['headMatch', 'latestMarked', 'readServedTier', 'servedTierStands'].filter((key) => typeof found[key] !== 'function'),
+      ...['headMatch', 'latestMarked', 'readServedTier', 'servedTierStands', 'isModelIdentifierToken'].filter((key) => typeof found[key] !== 'function'),
       ...['headingMarker', 'reviewedByLine'].filter((key) => !(found[key] instanceof RegExp)),
       ...(Number.isInteger(found.shaMinHex) && found.shaMinHex > 0 ? [] : ['shaMinHex']),
     ];
@@ -667,11 +670,18 @@ export function recordVerdict({ comments, headSha, recognisers }) {
 
   const row = onHead[newest.index];
   const body = String(row?.body ?? '');
+  const served = recognisers.readServedTier(body);
   const found = {
     id: row?.id ?? null,
     at: row?.created_at ?? null,
     sha: recognisers.headMatch(body, head),
-    served: recognisers.readServedTier(body),
+    served,
+    // ⭐ Decided HERE and carried, so the renderer never re-decides it and can
+    // never print a token it should not (#18060): the accepted token is the
+    // constant's NAME, and a token of model-identifier shape is refused AND
+    // ⛔ never quoted back — a refusal that quotes it lands the identifier in
+    // one more artifact, which is the thing `AGENTS.md` forbids of a comment.
+    servedIsIdentifier: served.state === 'read' && recognisers.isModelIdentifierToken(served.value),
   };
   if (!body.split(/\r?\n/).some((line) => recognisers.reviewedByLine.test(line))) return { state: 'unsigned', ...found };
   if (!recognisers.servedTierStands(found.served)) return { state: 'below-tier', ...found };
@@ -1070,7 +1080,7 @@ export function renderGuardVerdict(verdict) {
       lines.push(
         `        ✅ review of record on this head: comment ${entry.record.id ?? '(no readable id)'} ` +
           `(${entry.record.at ?? 'undated'}) is a \`## Contract review\` comment naming \`${entry.record.sha}\`,`,
-        '           carrying a `Reviewed-by:` line and a `Served-tier:` reading that STANDS' +
+        '           carrying a `Reviewed-by:` line and a `Served-tier:` naming the tier constant, which STANDS' +
           (entry.record.served?.stamps
             ? ` on a stamp control of ${entry.record.served.stamps.atTier}/${entry.record.served.stamps.total}.`
             : ' (no stamp control declared, which the rule permits).'),
@@ -1112,15 +1122,18 @@ export function renderGuardVerdict(verdict) {
               : [
                   `        ⛔ the \`## Contract review\` comment on this head (comment ${entry.record.id ?? '(no readable id)'}, ` +
                     `${entry.record.at ?? 'undated'}) does not stand:`,
-                  served?.state === 'read'
-                    ? `           it declares the tier \`${served.value}\`` +
-                      (served.stamps
-                        ? ` on a stamp control of ${served.stamps.atTier}/${served.stamps.total}`
-                        : ' with no stamp control') +
-                      ', which is not `CONTRACT_REVIEW_TIER` on a control that holds.'
-                    : served?.state === 'unreadable'
-                      ? `           its \`Served-tier:\` line carries no readable tier token (${served.line}).`
-                      : '           it carries NO `Served-tier:` line at all, so it declares nothing about what served it.',
+                  served?.state === 'read' && entry.record.servedIsIdentifier
+                    ? '           its `Served-tier:` token is a MODEL IDENTIFIER rather than the NAME `CONTRACT_REVIEW_TIER` — ' +
+                      '⛔ not quoted back\n           here, because `AGENTS.md` lets no model identifier land in a comment and a record IS one.'
+                    : served?.state === 'read'
+                      ? `           it declares the tier \`${served.value}\`` +
+                        (served.stamps
+                          ? ` on a stamp control of ${served.stamps.atTier}/${served.stamps.total}`
+                          : ' with no stamp control') +
+                        ', which is not the NAME `CONTRACT_REVIEW_TIER` on a control that holds.'
+                      : served?.state === 'unreadable'
+                        ? `           its \`Served-tier:\` line carries no readable tier token (${served.line}).`
+                        : '           it carries NO `Served-tier:` line at all, so it declares nothing about what served it.',
                   '           ⛔ The comparison is EXACT and the constant is read from `dispatch-gates.mjs`, never restated',
                   '              here; widening it is the maintainer\'s decision, not this file\'s.',
                 ]),
@@ -1239,8 +1252,11 @@ export function renderGuardVerdict(verdict) {
       `        3. Or — ONLY for a pull request whose governed paths all lie under ${REFERENCES_TIER_PREFIX},`,
       '           which the tier line on each entry above says outright — the skills seat posts its review of record',
       '           on the CURRENT head and re-queues: a `## Contract review` comment on the PR thread naming this head,',
-      '           carrying a `Reviewed-by:` line and a `Served-tier:` reading equal to `CONTRACT_REVIEW_TIER` on a',
-      '           stamp control that holds. ⛔ A record on an OLDER head does not carry forward — unlike an approval,',
+      '           carrying a `Reviewed-by:` line and a `Served-tier:` line whose token is the NAME',
+      '           `CONTRACT_REVIEW_TIER` — ⛔ never its value and never any model identifier, because `AGENTS.md`',
+      '           lets none land in a comment — on a stamp control that holds. The tier READING behind it is the',
+      '           seat\'s own transcript grep, which leaves no repository artifact at all.',
+      '           ⛔ A record on an OLDER head does not carry forward — unlike an approval,',
       '           which since 2026-09-04 does — because a record names the head it judged. ⛔ And it widens to nothing:',
       '           one rules-layer path in the diff and option 1 or 2 is the only way through.',
     );
@@ -3060,11 +3076,17 @@ export async function selfTest() {
   const live = await loadRecordRecognisers();
   assert('the-recognisers-LOAD-through-the-lazy-import-this-leg-depends-on', live.available === true, live.reason);
   const { CONTRACT_REVIEW_TIER: TIER } = await import('./dispatch-gates.mjs');
+  const { CONTRACT_REVIEW_TIER_NAME: TIER_TOKEN } = await import(RECOGNISER_SOURCES.tier);
   assert('this-file-spells-NO-tier-value-it-reads-the-constant', typeof TIER === 'string' && TIER.length > 0);
+  assert(
+    'and-the-accepted-TOKEN-is-the-constants-NAME-imported-from-the-row-that-owns-it',
+    TIER_TOKEN === 'CONTRACT_REVIEW_TIER' && TIER_TOKEN !== TIER,
+    `${TIER_TOKEN}`,
+  );
 
   const REF_HEAD = 'abc1234def5678'.padEnd(40, '0');
   const REF_OLD = '9999888777'.padEnd(40, '0');
-  const recordComment = ({ sha = REF_HEAD.slice(0, 12), signed = true, tierLine = `Served-tier: 75/75 \`${TIER}\``, id = 900, at = '2026-09-13T13:00:00Z', verdictWord = 'PASS' } = {}) => ({
+  const recordComment = ({ sha = REF_HEAD.slice(0, 12), signed = true, tierLine = `Served-tier: 75/75 \`${TIER_TOKEN}\``, id = 900, at = '2026-09-13T13:00:00Z', verdictWord = 'PASS' } = {}) => ({
     id,
     created_at: at,
     body: [
@@ -3126,7 +3148,31 @@ export async function selfTest() {
     '⛔ a-record-served-BELOW-the-declared-tier-is-REFUSED-the-comparison-is-exact',
     tierBelow.exitCode === EXIT_REFUSED_UNAPPROVED && tierBelow.entries[0].record.state === 'below-tier',
   );
-  const tierPartial = await tierRun({ comments: [recordComment({ tierLine: `Served-tier: 3/75 \`${TIER}\`` })] });
+  // ⭐ #18060 — the token this leg first required was the constant's VALUE, a
+  // literal model identifier, and a review of record IS a GitHub comment, which
+  // `AGENTS.md` lets no model identifier land in. So the VALUE is now itself a
+  // refusal, and the refusal ⛔ never quotes the token back.
+  const tierIdentifier = await tierRun({ comments: [recordComment({ tierLine: `Served-tier: 75/75 \`${TIER}\`` })] });
+  assert(
+    '⛔ a-record-whose-Served-tier-token-is-a-MODEL-IDENTIFIER-is-REFUSED-AGENTS-md-lets-none-land-in-a-comment',
+    tierIdentifier.exitCode === EXIT_REFUSED_UNAPPROVED &&
+      tierIdentifier.entries[0].record.state === 'below-tier' &&
+      tierIdentifier.entries[0].record.servedIsIdentifier === true,
+    JSON.stringify(tierIdentifier.entries[0].record),
+  );
+  const identifierText = renderGuardVerdict(tierIdentifier);
+  assert(
+    '⛔ and-the-refusal-NEVER-quotes-the-identifier-back-a-refusal-is-not-a-second-violation',
+    !identifierText.includes(TIER) && /MODEL IDENTIFIER/.test(identifierText) && /AGENTS\.md/.test(identifierText),
+    identifierText,
+  );
+  assert(
+    'while-the-PASSING-record-carries-the-NAME-and-no-identifier-so-the-leg-is-narrowed-never-widened',
+    tierPass.entries[0].record.servedIsIdentifier === false &&
+      recordComment().body.includes(TIER_TOKEN) &&
+      !recordComment().body.includes(TIER),
+  );
+  const tierPartial = await tierRun({ comments: [recordComment({ tierLine: `Served-tier: 3/75 \`${TIER_TOKEN}\`` })] });
   assert(
     '⛔ a-record-whose-stamp-control-is-NOT-total-is-REFUSED-the-回退证据-voids-it-entire',
     tierPartial.exitCode === EXIT_REFUSED_UNAPPROVED && tierPartial.entries[0].record.state === 'below-tier',
@@ -3202,7 +3248,10 @@ export async function selfTest() {
   const renamed = await loadRecordRecognisers(async (specifier) => (specifier === RECOGNISER_SOURCES.tier ? {} : await import(specifier)));
   assert(
     'a-RENAMED-export-names-itself-rather-than-half-loading-a-parser-nobody-checked',
-    renamed.available === false && /readServedTier/.test(renamed.reason) && /servedTierStands/.test(renamed.reason),
+    renamed.available === false &&
+      /readServedTier/.test(renamed.reason) &&
+      /servedTierStands/.test(renamed.reason) &&
+      /isModelIdentifierToken/.test(renamed.reason),
     renamed.reason,
   );
   const wontLoad = await loadRecordRecognisers(async () => { throw new Error('ERR_MODULE_NOT_FOUND'); });

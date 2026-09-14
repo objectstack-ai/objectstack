@@ -18,12 +18,20 @@
  * and must fail here.
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach, beforeAll, afterAll } from 'vitest';
 // Explicit `.js` extension: this package's tsconfig resolves NodeNext, so the
 // extensionless spelling its older test files use is a TS2835 — 67 of them are
 // frozen in the TEST_DEBT ledger, which only ever shrinks. A new file must not
 // add the 68th.
 import { RestServer } from './rest-server.js';
+
+// [#17865] This file observes the REST fault log, so it declares the level it
+// asserts against instead of inheriting the suite's quiet one. 'info' is the
+// SHIPPED default — what a real caller gets. Paired by
+// scripts/check-rest-log-spy-declared.mjs: an observer that declares nothing
+// is a finding by name.
+beforeAll(() => { vi.stubEnv('OS_REST_LOG', 'info'); });
+afterAll(() => { vi.unstubAllEnvs(); });
 
 const ANON_API = { api: { requireAuth: false } };
 
