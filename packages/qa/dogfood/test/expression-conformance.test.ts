@@ -11,6 +11,18 @@
 // sharing one key FAIL rather than merge. The expression-specific invariants
 // (mode/dialect/fail-policy, compile rows name the canonical compiler) stay
 // here.
+//
+// Discovery is by IDENTITY rather than by head position since #17630, and
+// resolves file-local aliases. The scan used to require a roster name to start
+// immediately after `field:`, which made two mechanisms invisible while the
+// ratchet reported a complete classification: a roster schema used as a UNION
+// MEMBER (`field: z.union([z.boolean(), ExpressionInputSchema])`, or the member
+// on its own line inside a multi-line union) and a roster schema behind a
+// file-local alias const (`const X = z.union([z.boolean(),
+// ExpressionInputSchema]); … field: X`). The first is the worse of the two: the
+// roster name is literally on the line, so a reader who greps sees it and
+// assumes discovery did. Five declaring positions were blind at `a26a114d7`.
+// `SCAN_CONTROLS` below is what keeps the widening from silently un-widening.
 
 import { describe, expect, it } from 'vitest';
 import { readFileSync, readdirSync } from 'node:fs';
@@ -94,9 +106,60 @@ const EXPRESSION_INPUT_SCHEMAS = [
   'CronExpressionInputSchema',
   'TemplateExpressionInputSchema',
 ];
+/**
+ * A roster (or alias) name as an IDENTIFIER, anywhere on the line — #17630.
+ *
+ * The lookarounds are the whole point: a bare-substring scan for
+ * `ExpressionInputSchema` also fires inside `CronExpressionInputSchema` and
+ * `EvaluatedExpressionInputSchema`, which would collapse three rosters into one
+ * and attribute a cron slot to the CEL name. Identity keeps the Cron and
+ * Template siblings distinct while still finding the name mid-line, which is
+ * where mechanism A hides it.
+ */
+function identityOf(names: readonly string[]): RegExp {
+  return new RegExp(String.raw`(?<![A-Za-z0-9_$])(?:${names.join('|')})(?![A-Za-z0-9_$])`);
+}
+
+/**
+ * The pre-#17630 HEAD-ANCHORED pattern, kept as the `via: 'head'` label rather
+ * than as the scan: it is what tells a reader (and `SCAN_CONTROLS`) which
+ * positions the old regex could already see, so "the widening found nothing
+ * new" is a visible fact instead of a green run.
+ */
 const DECLARES_EXPRESSION = new RegExp(
   String.raw`^\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*:\s*(?:${EXPRESSION_INPUT_SCHEMAS.join('|')})\b`,
 );
+
+/** A property key at the start of a line, with its indentation. */
+const PROPERTY_KEY = /^(\s*)([A-Za-z_][A-Za-z0-9_]*)\s*:/;
+
+/**
+ * A `const` binding — the alias-registration shape of mechanism B. Matched at
+ * ANY indentation: a factory-local `const cond = z.union([…])` inside
+ * `lazySchema(() => { … })` hides a roster schema exactly as well as a
+ * module-scope one, and both are file-local.
+ */
+const LOCAL_BINDING = /^\s*(?:export\s+)?const\s+([A-Za-z_][A-Za-z0-9_]*)\s*(?::[^=]*)?=/;
+
+/**
+ * Lines that carry a roster name but declare no slot. Structural categories,
+ * not an allowlist of positions — a position-keyed exemption would rot, and
+ * silently, which is the defect class this file exists to surface.
+ *
+ * Each one is a real occurrence in `packages/spec/src`: the import that brings
+ * the roster name in, JSDoc and comment prose that names it (52 lines at
+ * `a26a114d7`), the barrel re-export, and the `export type X = z.input<typeof
+ * RosterSchema>` companion beside every roster member. The roster's OWN
+ * definitions are excluded by `LOCAL_BINDING` instead, which registers no alias
+ * for a name already on the roster.
+ */
+const NON_DECLARING_LINE: readonly RegExp[] = [
+  /^\s*\/\//,                                          // line comment
+  /^\s*\*/,                                            // JSDoc / block-comment continuation
+  /^\s*\/\*/,                                          // block-comment opener
+  /^\s*export\s+(?:\*|\{)/,                            // barrel re-export
+  /^\s*(?:export\s+)?(?:type|interface)\s+[A-Za-z_]/,  // a TYPE declaration is never a slot
+];
 
 /**
  * One DECLARING POSITION of an expression surface in the spec.
@@ -115,6 +178,28 @@ interface Declaration {
   schema: string;
   field: string;
   line: number;
+  /**
+   * WHICH mechanism found it (#17630) — the label `SCAN_CONTROLS` asserts on:
+   * `head` a roster name immediately after `field:` (all the pre-#17630 scan
+   * could see), `inline` a roster name elsewhere on the declaring line or on a
+   * line nested under it (mechanism A), `alias` a file-local const that
+   * resolves to a roster member (mechanism B), `manual` the two RLS rows below.
+   */
+  via: 'head' | 'inline' | 'alias' | 'manual';
+}
+
+/** What one file's scan produced — declarations plus the two honesty outputs. */
+interface FileScan {
+  declarations: Declaration[];
+  /** File-local aliases registered, `file:line name` (mechanism B's table). */
+  aliases: string[];
+  /**
+   * Roster hits that reached no `field:` and registered no alias — the scan
+   * saying "I saw a roster name here and cannot tell you what it types". Pinned
+   * empty below rather than dropped, because dropping is the defect: the
+   * pre-#17630 scan's whole failure was discarding a hit it could not place.
+   */
+  unattributed: string[];
 }
 
 /**
@@ -152,9 +237,103 @@ const TOP_LEVEL_DECL = /^(?:export\s+)?(?:const|function|class)\s+([A-Za-z_][A-Z
  * A line number is deliberately not part of the key: it is not an identity, and
  * a key that moved whenever an unrelated edit shifted lines would rot every
  * ledger row on contact.
+ *
+ * ## Attribution (#17630)
+ *
+ * A hit on the `field:` line attributes to that key. A hit on a NESTED line —
+ * the union member on its own line, `system/metrics.zod.ts` and
+ * `system/tracing.zod.ts` both spell it that way — attributes to the nearest
+ * preceding key at STRICTLY SMALLER indentation, bounded by the enclosing
+ * top-level declaration. The indentation constraint is what makes it right
+ * rather than nearly right, and that is measured, not assumed: dropping it and
+ * walking back to the nearest key of ANY indentation lands on a SIBLING inside
+ * the union's structured arm — `percentile:` instead of `successCriteria` in
+ * `ServiceLevelIndicatorSchema` — which classifies a slot nobody declared AND
+ * leaves the real one uncovered, both reported. ⚠️ STRICTLY smaller vs merely
+ * not-deeper is NOT distinguishable on today's tree (measured: relaxing `<` to
+ * `<=` changes no key, because every sibling key inside a structured arm is
+ * DEEPER than the member line, not level with it). `<` is kept as the stricter
+ * of the two on the rule rather than the reading: a key at the SAME indentation
+ * as the hit is its sibling, never the slot it mounts.
  */
-function discoverDeclarations(): Declaration[] {
-  const found: Declaration[] = [];
+function scanFile(abs: string, file: string): FileScan {
+  const out: FileScan = { declarations: [], aliases: [], unattributed: [] };
+  const lines = readFileSync(abs, 'utf8').split('\n');
+  /** File-local aliases of a roster member, in declaration order (mechanism B). */
+  const aliases: string[] = [];
+  let schema = '(top-level)';
+  let schemaStart = 0;
+  let inImportBlock = false;
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const decl = line.match(TOP_LEVEL_DECL);
+    if (decl) { schema = decl[1]; schemaStart = i; }
+    // An import block spans lines; its continuation lines carry a bare roster
+    // name that looks exactly like the union member of mechanism A.
+    if (inImportBlock || /^\s*import\b/.test(line)) {
+      inImportBlock = !/\bfrom\b/.test(line);
+      continue;
+    }
+    if (NON_DECLARING_LINE.some((re) => re.test(line))) continue;
+    const isRoster = identityOf(EXPRESSION_INPUT_SCHEMAS).test(line);
+    const isAlias = aliases.length > 0 && identityOf(aliases).test(line);
+    if (!isRoster && !isAlias) continue;
+
+    const binding = line.match(LOCAL_BINDING);
+    if (binding) {
+      // `const X = …RosterSchema…` registers X for the rest of the file. A name
+      // already on the roster registers nothing: that is the roster's OWN
+      // definition (`shared/expression.zod.ts`) or a rostered refinement of
+      // another member (`system/settings-manifest.zod.ts`'s
+      // `SettingsVisibilityInputSchema`) — already discovered, so re-registering
+      // it as an alias of itself would add nothing and hide the distinction.
+      const name = binding[1];
+      if (!EXPRESSION_INPUT_SCHEMAS.includes(name) && !aliases.includes(name)) {
+        aliases.push(name);
+        out.aliases.push(`${file}:${i + 1} ${name}`);
+      }
+      continue;
+    }
+
+    const field = attributeToField(lines, i, schemaStart);
+    if (field) {
+      const via = DECLARES_EXPRESSION.test(line) ? 'head' : isAlias ? 'alias' : 'inline';
+      out.declarations.push({ key: `${file}:${schema}.${field}`, file, schema, field, line: i + 1, via });
+      continue;
+    }
+    // No `field:` above it inside this declaration ⇒ the hit is in a top-level
+    // const's own INITIALIZER, which is the multi-line spelling of mechanism B
+    // (`const X = z.union([⏎  ExpressionInputSchema,⏎]);`). Register the const.
+    if (schema !== '(top-level)' && !EXPRESSION_INPUT_SCHEMAS.includes(schema) && !aliases.includes(schema)) {
+      aliases.push(schema);
+      out.aliases.push(`${file}:${i + 1} ${schema} (multi-line)`);
+      continue;
+    }
+    out.unattributed.push(`${file}:${i + 1} ${line.trim()}`);
+  }
+  return out;
+}
+
+/**
+ * The `field:` key a roster hit on line `i` mounts — see `scanFile`'s
+ * attribution note. Comment lines are skipped on the walk back so a JSDoc block
+ * between the key and the member cannot end the search early.
+ */
+function attributeToField(lines: string[], i: number, schemaStart: number): string | undefined {
+  const sameLine = lines[i].match(PROPERTY_KEY);
+  if (sameLine) return sameLine[2];
+  const indent = (lines[i].match(/^\s*/)?.[0].length) ?? 0;
+  for (let j = i - 1; j >= schemaStart; j--) {
+    if (/^\s*(?:\/\/|\*|\/\*)/.test(lines[j])) continue;
+    const key = lines[j].match(PROPERTY_KEY);
+    if (key && key[1].length < indent) return key[2];
+  }
+  return undefined;
+}
+
+/** Every `.zod.ts` under `packages/spec/src`, scanned as TEXT. */
+function scanSpec(): FileScan {
+  const all: FileScan = { declarations: [], aliases: [], unattributed: [] };
   const walk = (dir: string) => {
     // `withFileTypes` reads the entry type from the single readdir syscall — no
     // stat-then-read window (avoids a file-system TOCTOU race; CodeQL).
@@ -162,18 +341,19 @@ function discoverDeclarations(): Declaration[] {
       const p = join(dir, ent.name);
       if (ent.isDirectory()) walk(p);
       else if (ent.isFile() && ent.name.endsWith('.zod.ts')) {
-        const file = relative(SPEC_SRC, p);
-        let schema = '(top-level)';
-        readFileSync(p, 'utf8').split('\n').forEach((line, i) => {
-          const decl = line.match(TOP_LEVEL_DECL);
-          if (decl) schema = decl[1];
-          const m = line.match(DECLARES_EXPRESSION);
-          if (m) found.push({ key: `${file}:${schema}.${m[1]}`, file, schema, field: m[1], line: i + 1 });
-        });
+        const one = scanFile(p, relative(SPEC_SRC, p));
+        all.declarations.push(...one.declarations);
+        all.aliases.push(...one.aliases);
+        all.unattributed.push(...one.unattributed);
       }
     }
   };
   walk(SPEC_SRC);
+  return all;
+}
+
+function discoverDeclarations(): Declaration[] {
+  const found = scanSpec().declarations;
   // RLS using/check are expression predicates too (legacy z.string() fields, so
   // no roster schema types them and the scan above cannot see them). Spelled
   // schema-qualified like every other key so the ledger has ONE key vocabulary.
@@ -184,6 +364,7 @@ function discoverDeclarations(): Declaration[] {
       schema: 'RowLevelSecurityPolicySchema',
       field,
       line: 0,
+      via: 'manual',
     });
   }
   return found;
@@ -192,6 +373,29 @@ function discoverDeclarations(): Declaration[] {
 function discoverSurfaces(): Set<string> {
   return new Set(discoverDeclarations().map((d) => d.key));
 }
+
+/**
+ * The three mechanisms the scan must keep finding, with the minimum each was
+ * measured at on the commit that widened discovery (#17630, `a26a114d7`).
+ *
+ * A floor, not an equality: a new position or a retirement moves these counts,
+ * and the ratchet already fails on either (an unclassified position and a STALE
+ * cover are both hard failures), so pinning equality here would only duplicate
+ * that and rot.
+ *
+ * What the floor catches is the one re-narrowing the ratchet CANNOT see. Undo
+ * the widening alone and the five positions leave `discovered` while their rows
+ * stay in `covered` — STALE covers, red. But undo it TOGETHER with deleting
+ * those rows, in this same pair of files, and both sides of the ratchet agree
+ * again: green, over a population five positions smaller, with no diff left to
+ * read. That is this card's own defect wearing a new face, and this floor is
+ * what refuses it — by MECHANISM, naming which one went missing.
+ */
+const SCAN_CONTROLS: ReadonlyArray<{ via: Declaration['via']; min: number; mechanism: string }> = [
+  { via: 'head', min: 37, mechanism: 'a roster name immediately after `field:` (the pre-#17630 scan)' },
+  { via: 'inline', min: 3, mechanism: 'mechanism A — a roster name used as a UNION MEMBER, not at the head of the declaration' },
+  { via: 'alias', min: 2, mechanism: 'mechanism B — a slot typed with a file-local alias const of a roster member' },
+];
 
 describe('ADR-0058 D7 — expression surface conformance ledger', () => {
   it('is a sound conformance ledger + ratchet (ADR-0060 checkLedger)', () => {
@@ -219,6 +423,49 @@ describe('ADR-0058 D7 — expression surface conformance ledger', () => {
       ).toBe(true);
       expect(s.proof, `${s.id}: an enforced compile surface must carry a proof`).toBeTruthy();
     }
+  });
+
+  // The structural half of #17630. The ratchet measures whether the ledger
+  // agrees with discovery; nothing in it measures whether discovery still
+  // REACHES the mechanisms it was widened for. Those are different questions,
+  // and the second one is how this file stayed green over five declaring
+  // positions for as long as it did.
+  it('discovery still reaches every mechanism it was widened for', () => {
+    const declarations = discoverDeclarations();
+    for (const { via, min, mechanism } of SCAN_CONTROLS) {
+      const hits = declarations.filter((d) => d.via === via);
+      expect(
+        hits.length,
+        `discovery found ${hits.length} position(s) via '${via}' (floor ${min}) — ${mechanism}. `
+        + 'Discovery has lost a mechanism it is required to see. If a position was legitimately '
+        + 'retired, lower the floor in SCAN_CONTROLS in the same commit that deletes its ledger row, '
+        + 'and say which position went away; ⛔ do not lower it to make a re-narrowed scan pass.',
+      ).toBeGreaterThanOrEqual(min);
+    }
+  });
+
+  // A roster name the scan can see but cannot place is the pre-#17630 failure
+  // in miniature: the old scan discarded every hit that was not head-anchored,
+  // silently, and the ledger read complete. Anything the widened scan cannot
+  // attribute is surfaced here instead of dropped.
+  it('no roster identifier in the spec is seen and then dropped', () => {
+    const { unattributed, aliases } = scanSpec();
+    // Positive control for the alias table: with it empty, mechanism B resolves
+    // nothing and the `alias` floor above would be the only thing objecting.
+    expect(
+      aliases.length,
+      'the file-local alias table is EMPTY — mechanism B resolution is not running, so every '
+      + 'assertion that depends on it is vacuous',
+    ).toBeGreaterThan(0);
+    expect(
+      unattributed,
+      `roster identifiers the scan could not attribute to a declaring position:\n${unattributed.join('\n')}\n`
+      + 'Each is a line where a roster (or file-local alias) name appears and the scan found no `field:` '
+      + 'to mount it on and no const to register it as an alias. Either it declares a slot the attribution '
+      + 'rule cannot reach — widen the rule — or it is a new NON-DECLARING shape, in which case add the '
+      + 'shape to NON_DECLARING_LINE. ⛔ Never leave it dropped: dropped is how the five positions of '
+      + '#17630 stayed invisible while this ledger reported a complete classification.',
+    ).toEqual([]);
   });
 
   // The structural half of #15500. Before this existed, two declarations of one

@@ -1340,3 +1340,70 @@ describe('ObjectStoreSuspendedRunStore — the persisted terminal status distinc
         expect(refused.refusal).toBe('RUN_CANCELLED');
     });
 });
+
+// ─── The refusal column (#15788) ─────────────────────────────────────────────
+//
+// Same discipline as the trigger-attribution group above: assert the persisted
+// CELL as well as what `loadTerminal` hands back, because a mapper that never
+// wrote the column but happened to reconstruct the value would pass the second
+// and fail the first — and the whole point of the column is that an operator
+// can filter on it.
+//
+// ⛔ `refusal_message` is its own column and NOT a second use of `error`. A
+// refusal is a successful evaluation that said no (#14945 ruling 2′); text
+// found in `error` tells every reader — an operator, the Runs surface, a sweep
+// filtering `error IS NOT NULL` — that the run broke.
+describe('ObjectStoreSuspendedRunStore — the refused terminal and its message (#15788)', () => {
+    const REFUSAL = 'Refused: Acme Corp is a confirmed duplicate';
+
+    it('writes `refused` and the rendered message as COLUMNS, leaving `error` null', async () => {
+        const engine = createFakeEngine();
+        const store = new ObjectStoreSuspendedRunStore(engine, createTestLogger());
+
+        await store.recordTerminal(terminalRecord(1, { status: 'refused', refusalMessage: REFUSAL }));
+
+        const row = engine.rows.get('run_r1');
+        expect(row.status).toBe('refused');
+        expect(row.refusal_message).toBe(REFUSAL);
+        expect(row.error).toBeNull();
+    });
+
+    it('round-trips both back through loadTerminal', async () => {
+        const engine = createFakeEngine();
+        const store = new ObjectStoreSuspendedRunStore(engine, createTestLogger());
+        await store.recordTerminal(terminalRecord(2, { status: 'refused', refusalMessage: REFUSAL }));
+
+        const back = (await store.loadTerminal('r2'))!;
+        expect(back.status).toBe('refused');
+        expect(back.refusalMessage).toBe(REFUSAL);
+        expect(back.error).toBeUndefined();
+    });
+
+    it('a `refused` row is history, not a live suspension — it reaches listHistory', async () => {
+        // The row gate is `isTerminalRunStatus`. Had the engine started writing
+        // `refused` without widening that vocabulary, the row would be written
+        // and then filtered away on every read — the "widened writer, narrower
+        // reader" failure #15223 names.
+        const engine = createFakeEngine();
+        const store = new ObjectStoreSuspendedRunStore(engine, createTestLogger());
+        await store.recordTerminal(terminalRecord(3, { status: 'refused', refusalMessage: REFUSAL }));
+
+        const history = await store.listHistory('busy_flow', 10);
+        expect(history.map((r) => r.runId)).toContain('r3');
+        expect(history.find((r) => r.runId === 'r3')!.refusalMessage).toBe(REFUSAL);
+    });
+
+    it('a NON-refused terminal writes NULL — the upsert clears a refusal it no longer carries', async () => {
+        // `recordTerminal` is an upsert on `run_<id>`. A row rewritten by a
+        // later terminal write must not inherit the earlier one's refusal.
+        const engine = createFakeEngine();
+        const store = new ObjectStoreSuspendedRunStore(engine, createTestLogger());
+
+        await store.recordTerminal(terminalRecord(4, { status: 'refused', refusalMessage: REFUSAL }));
+        expect(engine.rows.get('run_r4').refusal_message).toBe(REFUSAL);
+
+        await store.recordTerminal(terminalRecord(4, { status: 'completed' }));
+        expect(engine.rows.get('run_r4').refusal_message).toBeNull();
+        expect((await store.loadTerminal('r4'))!.refusalMessage).toBeUndefined();
+    });
+});

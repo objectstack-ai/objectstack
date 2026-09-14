@@ -7,6 +7,7 @@ import {
   assertEngineDeleteDispatch,
   resolveEngineDeleteDispatch,
 } from '@objectstack/objectql';
+import { SysJobQueue } from '@objectstack/platform-objects/audit';
 import { DbQueueAdapter } from './db-queue-adapter.js';
 
 /**
@@ -19,10 +20,40 @@ function makeFakeEngine() {
     const t = tables.get(table) ?? [];
     return t.find((r) => r.id === id);
   }
+  /**
+   * [#17612] One comparison, NULL-safe like SQL: a row with no value satisfies
+   * `null` and nothing else — `NULL <= x` is NULL, never true. Same reading the
+   * sibling fake in `job-queue-retention.test.ts` takes for `$lt`.
+   */
+  function compare(cell: any, v: any): boolean {
+    if (v !== null && typeof v === 'object' && !Array.isArray(v)) {
+      for (const [op, target] of Object.entries(v)) {
+        switch (op) {
+          case '$lte': if (cell == null || !(String(cell) <= String(target))) return false; break;
+          case '$lt': if (cell == null || !(String(cell) < String(target))) return false; break;
+          case '$ne': if (cell === target) return false; break;
+          case '$in': if (!(target as unknown[]).includes(cell)) return false; break;
+          default: throw new Error(`fake driver: unsupported operator ${op}`);
+        }
+      }
+      return true;
+    }
+    // `where: { k: null }` is IS NULL — an absent column and an explicit null
+    // are the same absence, which `row[k] !== v` could not say.
+    if (v === null) return cell == null;
+    return cell === v;
+  }
   function matches(row: any, where: Record<string, any>): boolean {
     for (const [k, v] of Object.entries(where)) {
+      // [#17612] `$or` is the one top-level combinator the claim path uses; any
+      // OTHER `$` key is still a loud failure rather than a silent pass, which
+      // is the whole point of a double that cannot be looser than the engine.
+      if (k === '$or') {
+        if (!(v as Array<Record<string, any>>).some((leg) => matches(row, leg))) return false;
+        continue;
+      }
       if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`);
-      if (row[k] !== v) return false;
+      if (!compare(row[k], v)) return false;
     }
     return true;
   }
@@ -316,9 +347,11 @@ describe('makeFakeEngine().delete conforms to ObjectQL.delete (#4550)', () => {
     // `where: { id: { $in: […] } }` only LOOKS like an id: it is a multi-row
     // predicate, so without `multi` the engine rejects it — the exact case a
     // hand-mirrored `if (opts?.where?.id == null)` waves through, and the reason
-    // the mirror had to go rather than be corrected in place. (This fake's
-    // `matches` is equality-only by design — no fixture here sends an operator
-    // predicate — so what is pinned is the dispatch verdict, not `$in` matching.)
+    // the mirror had to go rather than be corrected in place. (What is pinned
+    // here is the DISPATCH verdict, not `$in` matching: the refusal happens in
+    // `assertEngineDeleteDispatch` before `matches` is ever reached, so it
+    // holds whether or not this fake understands the operator — and since
+    // #17612 it does understand a few, `$in` among them.)
     engine.tables.set('sys_job_queue', [{ id: 'a' }, { id: 'b' }, { id: 'c' }]);
     await expect(
       engine.delete('sys_job_queue', { where: { id: { $in: ['a', 'b'] } } }),
@@ -333,5 +366,180 @@ describe('makeFakeEngine().delete conforms to ObjectQL.delete (#4550)', () => {
       engine.delete('sys_job_queue', { id: 'a' } as any),
     ).rejects.toThrow(ENGINE_DELETE_REJECT_MESSAGE);
     expect(rows()).toHaveLength(3);
+  });
+});
+
+/**
+ * [#17612] Head-of-line starvation: the due bound was applied in JS AFTER the
+ * SQL `LIMIT`, so a window full of not-yet-due high-priority rows hid every
+ * already-due row behind them — indefinitely, not just for one tick.
+ *
+ * The numbers below are the reproduction the card carries, re-measured here.
+ * Default `batchSize` is 10, so the candidate window is `10 * 3 = 30`.
+ */
+describe('DbQueueAdapter — the due bound is a predicate, not a post-LIMIT filter', () => {
+  let engine: ReturnType<typeof makeFakeEngine>;
+  let adapter: DbQueueAdapter;
+
+  beforeEach(() => {
+    engine = makeFakeEngine();
+    adapter = new DbQueueAdapter({
+      engine,
+      options: { pollIntervalMs: 60_000, autoStart: false, defaultMaxAttempts: 3 },
+    });
+  });
+
+  /** `n` not-yet-due priority-1 rows, then one already-due priority-100 row. */
+  async function seedStarvation(n: number): Promise<string> {
+    for (let i = 0; i < n; i++) {
+      await adapter.publish('starve', { i }, { priority: 1, delay: 600_000 });
+    }
+    return adapter.publish('starve', { due: true }, { priority: 100 });
+  }
+
+  it('claims the due low-priority row even when the whole candidate window is future-dated work', async () => {
+    const handled: any[] = [];
+    await adapter.subscribe('starve', async (msg) => { handled.push(msg.data); });
+    const dueId = await seedStarvation(30);
+
+    // Was 0 — the 30 priority-1 rows filled the window and the due row was
+    // never a candidate. The queue looked healthy and drained nothing.
+    expect(await adapter.pollOnce()).toBe(1);
+    expect(handled).toEqual([{ due: true }]);
+    expect((engine.tables.get('sys_job_queue') ?? []).find((r: any) => r.id === dueId).status)
+      .toBe('completed');
+  });
+
+  it('CONTROL — one row short of filling the window, the same claim already worked before the fix', async () => {
+    const handled: any[] = [];
+    await adapter.subscribe('starve', async (msg) => { handled.push(msg.data); });
+    await seedStarvation(29);
+
+    // 29 future-dated rows + the due one is exactly 30 = the window, so the due
+    // row rode in on the last slot. This case read 1 before the fix too — which
+    // is what makes the case above a measurement rather than a coincidence.
+    expect(await adapter.pollOnce()).toBe(1);
+    expect(handled).toEqual([{ due: true }]);
+  });
+
+  it('LIMIT now sees the DUE set — the engine hands back one candidate, not a window of thirty', async () => {
+    const claims: Array<{ where: any; limit: number; rows: number }> = [];
+    const inner = engine.find.bind(engine);
+    engine.find = async (table: string, opts: any = {}) => {
+      const rows = await inner(table, opts);
+      if (opts?.orderBy?.[0]?.field === 'priority') {
+        claims.push({ where: opts.where, limit: opts.limit, rows: rows.length });
+      }
+      return rows;
+    };
+
+    await adapter.subscribe('starve', async () => {});
+    await seedStarvation(30);
+    await adapter.pollOnce();
+
+    expect(claims).toHaveLength(1);
+    expect(claims[0].limit).toBe(30);
+    // The over-fetch window is unchanged; what changed is WHICH rows fill it.
+    expect(claims[0].rows).toBe(1);
+    expect(claims[0].where.$or).toEqual([
+      { scheduled_for: null },
+      { scheduled_for: { $lte: expect.any(String) } },
+    ]);
+  });
+
+  it('a row with no `scheduled_for` at all is due — `NULL <= now` is NULL, so it needs its own leg', async () => {
+    const handled: any[] = [];
+    await adapter.subscribe('nulls', async (msg) => { handled.push(msg.data); });
+    await adapter.publish('nulls', { a: 1 });
+    // Not a shape `publish` writes — `sys_job_queue.scheduled_for` is nullable
+    // and a row can reach this table from a migration or a hand-written insert.
+    (engine.tables.get('sys_job_queue') ?? [])[0].scheduled_for = null;
+
+    expect(await adapter.pollOnce()).toBe(1);
+    expect(handled).toEqual([{ a: 1 }]);
+  });
+
+  it('priority still decides the order among DUE rows — the fork this card did NOT take', async () => {
+    const handled: any[] = [];
+    await adapter.subscribe('ordered', async (msg) => { handled.push(msg.data); });
+    await adapter.publish('ordered', { p: 100 }, { priority: 100 });
+    await adapter.publish('ordered', { p: 1 }, { priority: 1 });
+    await adapter.publish('ordered', { p: 50 }, { priority: 50 });
+
+    expect(await adapter.pollOnce()).toBe(3);
+    // Lower number = higher priority (`sys_job_queue.priority`'s own description).
+    // Dropping `priority` from the claim sort — the card's option 2 — would have
+    // made this read in insert order and left the declared field inert.
+    expect(handled).toEqual([{ p: 1 }, { p: 50 }, { p: 100 }]);
+  });
+});
+
+/**
+ * [#17612] The guard for the whole class, not for one instance.
+ *
+ * The defect was a DRIFT between two files that never referenced each other:
+ * `claimBatch` sorted by `priority, scheduled_for` while `sys_job_queue`
+ * declared `['queue','status','scheduled_for']`, so the sort's first key was in
+ * no declared index and every poll built a temp B-tree. Nothing failed — each
+ * file was internally consistent. This pin reads the claim query the adapter
+ * ACTUALLY emits and holds it against the declaration `platform-objects`
+ * ACTUALLY ships, so the next edit to either one has to move both.
+ */
+describe('DbQueueAdapter — the claim query and the declared index are held together', () => {
+  /**
+   * The extra ORDER BY term the driver appends to every PAGED read and the
+   * caller never writes: the unique tie-breaker of ADR-0053 D-A1 /
+   * objectstack#4363 (`SqlDriver.orderKeysFor`), which for this object is its
+   * primary key.
+   *
+   * ⚠️ It is deliberately NOT part of what the index must cover. `id` is an
+   * unbounded `Field.text`, and `pnpm check:keyed-text-bounds` refuses a
+   * text-family column a declared index keys on without a `maxLength` —
+   * MySQL rejects the index DDL outright (ER_BLOB_KEY_WITHOUT_LENGTH). So the
+   * plan keeps a sorter bounded to rows tying on the WHOLE indexed prefix; the
+   * two-face pin in
+   * `driver-turso/src/turso-local-remote-declared-index-parity.test.ts` is where
+   * that residue is measured, and `sys-job-queue.object.ts` carries the reason.
+   */
+  const PAGING_TIE_BREAKER = 'id';
+
+  /** Does `index` begin with `want`, in that order? */
+  const startsWith = (index: string[], want: string[]) => want.every((f, i) => index[i] === f);
+
+  it('one declared index begins with the claim\'s equality keys and then its sort keys, in order', async () => {
+    const engine = makeFakeEngine();
+    const adapter = new DbQueueAdapter({
+      engine,
+      options: { pollIntervalMs: 60_000, autoStart: false },
+    });
+
+    let claim: { where: any; orderBy: Array<{ field: string }> } | undefined;
+    const inner = engine.find.bind(engine);
+    engine.find = async (table: string, opts: any = {}) => {
+      if (opts?.orderBy?.[0]?.field === 'priority') claim = { where: opts.where, orderBy: opts.orderBy };
+      return inner(table, opts);
+    };
+
+    await adapter.subscribe('any-queue', async () => {});
+    await adapter.publish('any-queue', {});
+    await adapter.pollOnce();
+    if (!claim) throw new Error('[#17612] the claim query never reached the engine — this pin measured nothing');
+
+    // Equality keys seek; sort keys order.
+    const equality = Object.keys(claim.where).filter((k) => !k.startsWith('$'));
+    const required = [...equality, ...claim.orderBy.map((o) => o.field)];
+    expect(required).toEqual(['queue', 'status', 'priority', 'scheduled_for']);
+
+    const declared = (SysJobQueue.indexes ?? []).map((i: any) => i.fields as string[]);
+    expect(declared.some((index) => startsWith(index, required))).toBe(true);
+
+    // NEGATIVE CONTROL — the same predicate, asked for the shape this table
+    // declared BEFORE #17612. It must read false, or `startsWith` is answering
+    // true for everything and the assertion above is vacuous.
+    expect(declared.some((index) => startsWith(index, ['queue', 'status', 'scheduled_for']))).toBe(false);
+
+    // ⛔ And the tie-breaker stays OUT of the declaration — on purpose, and not
+    // by oversight. Appending it is what `check:keyed-text-bounds` refuses.
+    expect(declared.some((index) => index.includes(PAGING_TIE_BREAKER))).toBe(false);
   });
 });

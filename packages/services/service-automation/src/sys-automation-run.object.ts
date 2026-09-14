@@ -50,21 +50,23 @@ export const SysAutomationRun = ObjectSchema.create({
   // cap (ObjectStoreSuspendedRunStore.pruneFlowOverflow, #2585) stays in the
   // store — a count bound the declarative contract can't express.
   //
-  // [#15223] ALL FOUR terminal members, not the two this scope used to name.
+  // [#15223] EVERY terminal member, not the two this scope used to name.
   // The list is a $in over stored values, so it is the third copy of the
   // vocabulary `TERMINAL_RUN_STATUSES` declares (engine.ts) — and the one with
-  // the quietest failure: a widened writer plus a two-member sweep scope means
-  // `cancelled` and `timed_out` history rows are simply never aged out, on a
-  // table whose whole retention posture (ADR-0057) is that history is
-  // telemetry. ⛔ Widen this in the same change as the writer, always.
+  // the quietest failure: a widened writer plus a narrower sweep scope means
+  // those history rows are simply never aged out, on a table whose whole
+  // retention posture (ADR-0057) is that history is telemetry.
+  // ⛔ Widen this in the same change as the writer, always — which is what
+  // [#15788] does for `refused`: the engine began producing that terminal in
+  // the same commit that added it here and to the option set below.
   lifecycle: {
     class: 'telemetry',
     retention: {
       maxAge: '30d',
-      onlyWhen: { status: { $in: ['completed', 'failed', 'cancelled', 'timed_out'] } },
+      onlyWhen: { status: { $in: ['completed', 'failed', 'cancelled', 'timed_out', 'refused'] } },
     },
   },
-  description: 'Durable automation run state: live suspended runs (resumable, ADR-0019) and terminal run history (completed / failed / cancelled / timed_out, for observability).',
+  description: 'Durable automation run state: live suspended runs (resumable, ADR-0019) and terminal run history (completed / failed / cancelled / timed_out / refused, for observability).',
   displayNameField: 'id',
   nameField: 'id', // [ADR-0079] canonical primary-title pointer (mirrors deprecated displayNameField)
   titleFormat: '{flow_name} · {node_id}',
@@ -150,23 +152,30 @@ export const SysAutomationRun = ObjectSchema.create({
       group: 'State',
     }),
 
-    // [#15223] The four terminal members are the ones the engine's own
-    // terminal predicate admits (`TERMINAL_RUN_STATUSES`, engine.ts). This
-    // option set used to stop at `failed`, and both ends of the store folded to
-    // match it: a cancelled or timed-out run was written as `failed`, so the
-    // distinction was destroyed at write time rather than merely unshown, and a
-    // restart or ring eviction turned an operator's deliberate `cancelRun`
-    // (ADR-0044) into an indistinguishable failure. `refused` is deliberately
-    // ABSENT: `ExecutionStatus` declares it (#14945) but no engine path
-    // produces it, and an option nothing can write is a declared-but-inert
-    // value (ADR-0078).
+    // [#15223] The terminal members are the ones the engine's own terminal
+    // predicate admits (`TERMINAL_RUN_STATUSES`, engine.ts). This option set
+    // used to stop at `failed`, and both ends of the store folded to match it:
+    // a cancelled or timed-out run was written as `failed`, so the distinction
+    // was destroyed at write time rather than merely unshown, and a restart or
+    // ring eviction turned an operator's deliberate `cancelRun` (ADR-0044) into
+    // an indistinguishable failure.
+    //
+    // [#15788] `refused` joins them, and the note it replaces says exactly why
+    // it could not before: `ExecutionStatus` declared it (#14945) while no
+    // engine path produced it, and an option nothing can write is a
+    // declared-but-inert value (ADR-0078). Lane 2 makes the engine write it —
+    // an `end` node declaring `outcome: 'refused'` — so the option arrives in
+    // the same change as its producer, which is the ADR-0078 condition, not an
+    // exception to it. ⛔ `refused` is not a failure: the run evaluated
+    // successfully and said no, and its authored reason is in
+    // `refusal_message`, never in `error`.
     status: Field.select(
-      ['running', 'paused', 'completed', 'failed', 'cancelled', 'timed_out'],
+      ['running', 'paused', 'completed', 'failed', 'cancelled', 'timed_out', 'refused'],
       {
         label: 'Status',
         required: true,
         defaultValue: 'paused',
-        description: 'paused = a live suspended run (resumable); completed / failed / cancelled / timed_out = a terminal run kept as durable history.',
+        description: 'paused = a live suspended run (resumable); completed / failed / cancelled / timed_out / refused = a terminal run kept as durable history. refused = the flow reached an `end` node declaring `outcome: \'refused\'` — a successful evaluation that said no, distinct from failed, with the rendered reason in refusal_message.',
         group: 'State',
       },
     ),
@@ -338,6 +347,25 @@ export const SysAutomationRun = ObjectSchema.create({
       label: 'Error',
       required: false,
       description: 'Failure reason for a `failed` run — the message a designer needs to fix it.',
+      group: 'Outcome',
+    }),
+
+    // [#15788] The refusal's own column, beside `error` and deliberately NOT
+    // inside it. Reusing `error` would have needed no migration and cost the
+    // exact distinction the #14945 ruling is about: *a refusal is a successful
+    // evaluation that says no*, so a reader — an operator, the Runs surface, a
+    // sweep filtering `error IS NOT NULL` — must be able to tell a refusal from
+    // a breakage by looking at the row. The same reason #15223 stopped folding
+    // `cancelled` into `failed`: a distinction destroyed at write time cannot
+    // be recovered afterwards.
+    //
+    // Written only by the refusal path (`AutomationEngine.finishRefusedRun`)
+    // and always as an explicit value — NULL included — because the terminal
+    // write is an upsert.
+    refusal_message: Field.textarea({
+      label: 'Refusal Message',
+      required: false,
+      description: 'Rendered refusal for a `refused` run — the `end` node\'s `message` template interpolated against the run\'s variables at the moment it was reached, so the stored text names the record (the same rendering a screen `description` gets). Null on every other status: a completion has nothing to say and a failure\'s reason is in `error`.',
       group: 'Outcome',
     }),
 

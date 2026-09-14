@@ -124,7 +124,9 @@ const JOB_QUEUE: ObjectDef = {
     updated_at: Field.datetime({ label: 'Updated At', required: false }),
   },
   indexes: [
-    { fields: ['queue', 'status', 'scheduled_for'] },
+    // [#17612] Widened from `['queue','status','scheduled_for']` — verbatim
+    // from `sys-job-queue.object.ts`, which is where the reasoning lives.
+    { fields: ['queue', 'status', 'priority', 'scheduled_for'] },
     { fields: ['idempotency_key', 'queue'] },
     { fields: ['status'] },
   ],
@@ -168,7 +170,7 @@ const EXPECTED_NAMES: Record<string, string[]> = {
     `sqlite_autoindex_${DELIVERY.name}_1`,
   ].sort(),
   [JOB_QUEUE.name]: [
-    buildIndexName(JOB_QUEUE.name, ['queue', 'status', 'scheduled_for'], false),
+    buildIndexName(JOB_QUEUE.name, ['queue', 'status', 'priority', 'scheduled_for'], false),
     buildIndexName(JOB_QUEUE.name, ['idempotency_key', 'queue'], false),
     buildIndexName(JOB_QUEUE.name, ['status'], false),
     `sqlite_autoindex_${JOB_QUEUE.name}_1`,
@@ -185,6 +187,14 @@ const EXPECTED_NAMES: Record<string, string[]> = {
 };
 
 const CLAIM_INDEX = buildIndexName(DELIVERY.name, ['status', 'partition_key', 'next_attempt_at'], false);
+/** [#17612] The index `sys_job_queue`'s claim path must be served by, end to end. */
+const JOB_CLAIM_INDEX = buildIndexName(JOB_QUEUE.name, ['queue', 'status', 'priority', 'scheduled_for'], false);
+/** The shape the remote face provisioned BEFORE #17612 — this file's negative control. */
+const JOB_QUEUE_PRE_17612: ObjectDef['indexes'] = [
+  { fields: ['queue', 'status', 'scheduled_for'] },
+  { fields: ['idempotency_key', 'queue'] },
+  { fields: ['status'] },
+];
 const DEDUP_INDEX = buildIndexName(DELIVERY.name, ['notification_id', 'recipient_id', 'channel'], true);
 
 /** A fresh copy per sync — neither face may see a definition the other one mutated. */
@@ -275,20 +285,27 @@ async function remoteFace(client: Client = createClient({ url: 'file::memory:' }
 }
 
 /** Every statement the driver hands the client, in order, with the call that carried it. */
-function countingClient(inner: Client): { client: Client; calls: Array<{ via: 'execute' | 'batch'; sql: string[] }> } {
-  const calls: Array<{ via: 'execute' | 'batch'; sql: string[] }> = [];
+function countingClient(inner: Client): {
+  client: Client;
+  calls: Array<{ via: 'execute' | 'batch'; sql: string[]; args: unknown[][] }>;
+} {
+  const calls: Array<{ via: 'execute' | 'batch'; sql: string[]; args: unknown[][] }> = [];
   const sqlOf = (s: InStatement) => (typeof s === 'string' ? s : s.sql);
+  // [#17612] The bound values, alongside the text — a captured statement is only
+  // re-runnable (`EXPLAIN QUERY PLAN`) if its placeholders can be filled again.
+  const argsOf = (s: InStatement): unknown[] =>
+    typeof s === 'string' ? [] : Array.isArray(s.args) ? [...s.args] : [];
   const client = new Proxy(inner, {
     get(target, prop) {
       if (prop === 'execute') {
         return (stmt: InStatement, ...rest: unknown[]) => {
-          calls.push({ via: 'execute', sql: [sqlOf(stmt)] });
+          calls.push({ via: 'execute', sql: [sqlOf(stmt)], args: [argsOf(stmt)] });
           return (target.execute as (...a: unknown[]) => unknown).call(target, stmt, ...rest);
         };
       }
       if (prop === 'batch') {
         return (stmts: InStatement[], ...rest: unknown[]) => {
-          calls.push({ via: 'batch', sql: stmts.map(sqlOf) });
+          calls.push({ via: 'batch', sql: stmts.map(sqlOf), args: stmts.map(argsOf) });
           return (target.batch as (...a: unknown[]) => unknown).call(target, stmts, ...rest);
         };
       }
@@ -297,6 +314,34 @@ function countingClient(inner: Client): { client: Client; calls: Array<{ via: 'e
     },
   });
   return { client, calls };
+}
+
+/**
+ * [#17612] The job-claim SELECT as the driver EMITS it, with its bound values —
+ * driven from `DbQueueAdapter.claimBatch`'s query shape through a throwaway
+ * remote face, so the statement under test is the driver's own rather than a
+ * second copy of it maintained here.
+ */
+async function capturedJobClaim(): Promise<{ sql: string; args: unknown[] }> {
+  const { client, calls } = countingClient(createClient({ url: 'file::memory:' }));
+  const face = await remoteFace(client);
+  await face.driver.initObjects([fresh(JOB_QUEUE)]);
+  calls.length = 0;
+  await face.driver.find(JOB_QUEUE.name, {
+    where: {
+      queue: 'q',
+      status: 'pending',
+      $or: [{ scheduled_for: null }, { scheduled_for: { $lte: '2026-09-14T00:00:00.000Z' } }],
+    },
+    limit: 30,
+    orderBy: [
+      { field: 'priority', order: 'asc' },
+      { field: 'scheduled_for', order: 'asc' },
+    ],
+  } as never);
+  const select = calls.find((c) => /^SELECT\b/i.test(c.sql[0] ?? ''));
+  if (!select) throw new Error('[#17612] no SELECT reached the client — the capture is void');
+  return { sql: select.sql[0]!, args: select.args[0]! };
 }
 
 const INDEX_DDL = /^\s*CREATE\s+(UNIQUE\s+)?INDEX\b/i;
@@ -431,6 +476,56 @@ describe('[#17609] declared object-level indexes land identically on both TursoD
     );
     expect(remotePlan).not.toMatch(/SCAN sys_notification_delivery/);
     expect(remotePlan).toBe(await plan(local.query));
+  });
+
+  it('[#17612] serves the job claim query without sorting the queue — the full ORDER BY sort is gone, both faces', async () => {
+    // The statement is CAPTURED from the driver, never retyped. What comes back
+    // carries one ORDER BY term `DbQueueAdapter.claimBatch` never wrote — `id`,
+    // the deterministic-paging tie-breaker `SqlDriver.orderKeysFor` appends to
+    // every paged read (ADR-0053 D-A1 / objectstack#4363) — and a retyped
+    // literal would have hidden it, along with the residue it leaves below.
+    const claim = await capturedJobClaim();
+    expect(claim.sql).toContain('ORDER BY "priority" ASC, "scheduled_for" ASC, "id" ASC');
+
+    const local = await localFace();
+    const remote = await remoteFace();
+    await local.driver.initObjects([fresh(JOB_QUEUE)]);
+    await remote.driver.initObjects([fresh(JOB_QUEUE)]);
+
+    const plan = async (query: Query) =>
+      (await query(`EXPLAIN QUERY PLAN ${claim.sql}`, claim.args)).map((r) => String(r.detail)).join('\n');
+    const remotePlan = await plan(remote.query);
+    const localPlan = await plan(local.query);
+
+    for (const [face, p] of [['remote', remotePlan], ['local', localPlan]] as const) {
+      expect(p, face).toContain(`SEARCH ${JOB_QUEUE.name} USING INDEX ${JOB_CLAIM_INDEX} (queue=? AND status=?)`);
+      expect(p, face).not.toMatch(new RegExp(`SCAN ${JOB_QUEUE.name}`));
+      // ⛔ The defect's own signature: a sorter over EVERY pending row in the
+      // queue, because the sort's first key was unindexed. Gone on both faces.
+      expect(p, face).not.toMatch(/USE TEMP B-TREE FOR ORDER BY/);
+      // What remains is bounded to rows tying on the whole indexed prefix — the
+      // `id` tie-breaker alone. ⚠️ The two faces WORD it differently because
+      // they run different SQLite builds (`@libsql/client` vs better-sqlite3):
+      // `RIGHT PART OF ORDER BY` remote, `LAST TERM OF ORDER BY` local. Same
+      // plan, two spellings — which is why this pin compares the two faces by
+      // index and by sort CLASS rather than by `EXPLAIN` text equality, the way
+      // the delivery pin above can (its plan has no sorter line to disagree on).
+      expect(p, face).toMatch(/USE TEMP B-TREE FOR (?:RIGHT PART|LAST TERM) OF ORDER BY/);
+    }
+
+    // NEGATIVE CONTROL — the SAME statement against the index set this table
+    // carried before #17612. Both faces must show the FULL sort; if this reads
+    // clean, the assertions above are measuring nothing.
+    const beforeRemote = await remoteFace();
+    const beforeLocal = await localFace();
+    const preFix = { ...fresh(JOB_QUEUE), indexes: JOB_QUEUE_PRE_17612!.map((i) => ({ ...i })) };
+    await beforeRemote.driver.initObjects([preFix]);
+    await beforeLocal.driver.initObjects([{ ...preFix, indexes: JOB_QUEUE_PRE_17612!.map((i) => ({ ...i })) }]);
+    for (const face of [beforeRemote, beforeLocal]) {
+      const p = await plan(face.query);
+      expect(p).toMatch(/USE TEMP B-TREE FOR ORDER BY/);
+      expect(p).not.toContain(JOB_CLAIM_INDEX);
+    }
   });
 });
 

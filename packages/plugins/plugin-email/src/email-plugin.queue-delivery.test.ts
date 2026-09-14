@@ -49,9 +49,26 @@ function fakeSettings(values: Record<string, Resolved>) {
 function fakeEngine() {
   const tables = new Map<string, any[]>();
   const rowsOf = (t: string) => tables.get(t) ?? [];
-  const matches = (row: any, where: Record<string, any>) =>
+  const matches = (row: any, where: Record<string, any>): boolean =>
     Object.entries(where).every(([k, v]) => {
+      // [#17612] `$or` — the due bound `DbQueueAdapter.claimBatch` now pushes
+      // into SQL. Answered from INSIDE the entries callback so `every` still
+      // ANDs it with the sibling keys; an early `return` here would answer a
+      // NARROWER query than it was handed, which is shape (a) of
+      // `check:where-matcher`'s defect class. Every other `$` key still throws:
+      // that gate's criterion is answer-correctly-or-refuse, never silently wrong.
+      if (k === '$or') return (v as Array<Record<string, any>>).some((leg) => matches(row, leg));
       if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`);
+      if (v && typeof v === 'object' && !Array.isArray(v)) {
+        return Object.entries(v).every(([op, target]) => {
+          // NULL-safe like SQL: a row with no value never satisfies `$lte`.
+          if (op === '$lte') return row[k] != null && row[k] <= (target as any);
+          throw new Error(`fakeEngine: unsupported operator ${op}`);
+        });
+      }
+      // `where: { k: null }` is IS NULL — an absent column and an explicit
+      // null are the same absence, which `row[k] === v` could not say.
+      if (v === null) return row[k] == null;
       return row[k] === v;
     });
   return {

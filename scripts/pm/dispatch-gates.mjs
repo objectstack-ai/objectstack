@@ -11753,6 +11753,82 @@ export const RUN_RECORD_REASON_SEPARATOR = ' :: ';
 export const RUN_RECORD_EXIT_PREFIX = 'exit ';
 
 /**
+ * The recorded exit codes that are a KILL rather than a VERDICT — the numbers a
+ * gate never chose, because something outside it ended the process first.
+ *
+ * ## Why the distinction has to be drawn here and cannot be left to the runner
+ *
+ * Every other code in a record is a gate's own answer: `0` passed, `1` failed,
+ * `EXIT_PREREQUISITE_NOT_MET` refused with its own stated prerequisite. These
+ * are not answers at all. The process was terminated with no verdict produced,
+ * so counting the family as `run` asserts a measurement that does not exist —
+ * the false green this whole reconciliation is built to refuse. Measured on a
+ * real card: a gate cap-killed at the container's foreground ceiling recorded
+ * `exit 124`, reconciled inside the `run` total, and the round would have read
+ * its own ledger as complete had the runner not said so in prose.
+ *
+ * ## Why each member is in the set
+ *
+ *   TIMEOUT (124)   coreutils `timeout` exits with this when the deadline fires
+ *                   and it had to signal the child. It is the number the
+ *                   WRAPPER chose to report a kill, not the child's answer, and
+ *                   it is the shape a foreground-cap kill wears in this repo's
+ *                   own gate runs. ⛔ It is below the signal floor, so a floor
+ *                   test alone does not catch it — this is the member the set
+ *                   exists for.
+ *   SIGNAL_FLOOR    a shell reports a signalled child as `128 + signum`, and
+ *   (128)           node's `spawnSync` reports the same shape for its `signal`
+ *                   field, so ANY code at or above the floor names a signal and
+ *                   therefore a process that was ended rather than finished.
+ *                   The named ones a gate run meets here are SIGINT (130),
+ *                   SIGKILL (137, the OOM killer's), SIGPIPE (141, a `| head`
+ *                   closing the read end) and SIGTERM (143, the container's
+ *                   foreground cap) — each labelled below so the row names what
+ *                   killed it, not just a number.
+ *
+ * ## Why over-inclusion is the safe direction
+ *
+ * A gate that deliberately exits ≥ 128 with a meaning of its own would be read
+ * here as killed, and its family would cost a rerun or a stated reason. That is
+ * the direction this module always takes: a rerun is cheap and a false green is
+ * the defect. ⛔ The reverse rule — enumerate only the four signals seen so far
+ * — buys nothing and silently re-admits every signal nobody has met yet.
+ */
+export const RUN_RECORD_KILL_EXITS = Object.freeze({
+  TIMEOUT: 124,
+  SIGNAL_FLOOR: 128,
+  SIGNAL_NAMES: Object.freeze({ 130: 'SIGINT', 137: 'SIGKILL', 141: 'SIGPIPE', 143: 'SIGTERM' }),
+});
+
+/**
+ * What killed a run, in words — or `null` when the code is a verdict.
+ *
+ * The one place a number is compared against `RUN_RECORD_KILL_EXITS`, so no
+ * reconciliation branch and no rendering line carries a bare code of its own.
+ */
+export function runRecordKillLabel(code) {
+  if (typeof code !== 'number' || !Number.isInteger(code)) return null;
+  if (code === RUN_RECORD_KILL_EXITS.TIMEOUT) return 'a `timeout` wrapper fired and signalled the child';
+  if (code < RUN_RECORD_KILL_EXITS.SIGNAL_FLOOR) return null;
+  const named = RUN_RECORD_KILL_EXITS.SIGNAL_NAMES[code];
+  return named
+    ? `killed by ${named}`
+    : `killed by signal ${code - RUN_RECORD_KILL_EXITS.SIGNAL_FLOOR}`;
+}
+
+/**
+ * The `source` a NOT-MEASURED row carries when the runner recorded a KILL code
+ * AND declared the family with a stated reason.
+ *
+ * It is its own value because the three channels answer different questions and
+ * a reader has to be able to tell them apart: `exit-code` is this tool deriving
+ * the class from a number that cannot mean anything else; `claim` is the
+ * runner's word with no code behind it; this one is BOTH — the most honest
+ * record available, and the one the reconciliation used to discard (#18074).
+ */
+export const RUN_RECORD_NOT_MEASURED_KILL_SOURCE = 'kill-claim';
+
+/**
  * A run record, parsed. One entry per line that claims something.
  *
  * ## The format is the tool's, and it is the exact strings `--commands` emits
@@ -11887,17 +11963,29 @@ function ranLineExitAnnotation(raw) {
  * on `silent` alone, and the floor it reports is a floor over exactly those
  * families — not over the record's line count, which is a different number and
  * would make the sentence unfalsifiable.
+ *
+ * ## Why a KILLED family is counted once and not twice (#18074)
+ *
+ * A family whose record carries a kill code AND a reasoned claim arrives
+ * through two doors at once, and it is ONE family. It is already inside
+ * `coded` — it carries a code, which is the question `coded` asks — so adding
+ * it to `claimed` as well would make `accounted` exceed the number of families
+ * the record accounts for, and every sentence quoting that total would be
+ * wrong by exactly the count of the most careful records in it. ⭐ So it keeps
+ * its own count, `killClaimed`, which is reported beside the others and added
+ * to none of them.
  */
 export function runRecordEvidence({ coded = 0, silent = 0, notMeasured = [] } = {}) {
   const derivedFromExit = notMeasured.filter((entry) => entry.source === 'exit-code').length;
-  const claimed = notMeasured.length - derivedFromExit;
+  const killClaimed = notMeasured.filter((entry) => entry.source === RUN_RECORD_NOT_MEASURED_KILL_SOURCE).length;
+  const claimed = notMeasured.length - derivedFromExit - killClaimed;
   const accounted = coded + silent + claimed;
   let kind;
   if (accounted === 0) kind = 'none';
   else if (coded === 0) kind = 'claimed';
   else if (silent === 0) kind = 'derived';
   else kind = 'floor';
-  return { coded, silent, claimed, derivedFromExit, accounted, kind };
+  return { coded, silent, claimed, killClaimed, derivedFromExit, accounted, kind };
 }
 
 /**
@@ -12055,6 +12143,36 @@ export function runReconciliation({
         });
         continue;
       }
+      // ⭐ #18074: a KILL is not a verdict, so it can never be `run`. Which of
+      // the two remaining classes it lands in is decided by the record, and the
+      // ordering is the module's own principle: the runner who recorded the
+      // code AND declared the family with a reason has said everything there is
+      // to say, and their declaration is KEPT rather than overruled by the run
+      // line beside it; a bare kill code says only that nothing was measured,
+      // and that is UNRUN — the direction that costs a rerun, never a false
+      // green.
+      const killed = runRecordKillLabel(recorded.code);
+      if (killed) {
+        const killClaim = unmeasuredClaims.get(command);
+        const recordedPhrase = `recorded ${RUN_RECORD_EXIT_PREFIX}${recorded.code} on line ${recorded.line} — ${killed}, so no verdict was reached`;
+        if (killClaim && killClaim.reason) {
+          notMeasured.push({
+            command,
+            reason: `${recordedPhrase}; declared on line ${killClaim.line}: ${killClaim.reason}`,
+            line: killClaim.line,
+            source: RUN_RECORD_NOT_MEASURED_KILL_SOURCE,
+            exitCode: recorded.code,
+          });
+          continue;
+        }
+        unrun.push({
+          command,
+          why: killClaim
+            ? `${recordedPhrase}, and the ${RUN_RECORD_UNMEASURED_MARKER} on line ${killClaim.line} has ${killClaim.malformed} — a kill without a stated reason is read as unrun`
+            : `${recordedPhrase}; declare it as \`${RUN_RECORD_UNMEASURED_MARKER} <command>${RUN_RECORD_REASON_SEPARATOR}<reason>\` beside the code to count it ${RUN_RECORD_UNMEASURED_MARKER}`,
+        });
+        continue;
+      }
       ran.push(command);
       continue;
     }
@@ -12178,7 +12296,10 @@ export function runReconciliationLines(recon, outside = {}) {
     for (const { command, why } of recon.unrun) lines.push(`    - ${command}   [${why}]`);
   }
   const derivedNotMeasured = recon.notMeasured.filter((entry) => entry.source === 'exit-code');
-  const claimedNotMeasured = recon.notMeasured.filter((entry) => entry.source !== 'exit-code');
+  const killedNotMeasured = recon.notMeasured.filter((entry) => entry.source === RUN_RECORD_NOT_MEASURED_KILL_SOURCE);
+  const claimedNotMeasured = recon.notMeasured.filter(
+    (entry) => entry.source !== 'exit-code' && entry.source !== RUN_RECORD_NOT_MEASURED_KILL_SOURCE,
+  );
   if (derivedNotMeasured.length > 0) {
     lines.push(
       `  ${marker} · DERIVED (${derivedNotMeasured.length}) — your record carries ${RUN_RECORD_EXIT_PREFIX}${EXIT_PREREQUISITE_NOT_MET} for these,`
@@ -12187,6 +12308,14 @@ export function runReconciliationLines(recon, outside = {}) {
     );
     for (const { command, reason } of derivedNotMeasured) lines.push(`    - ${command}   [${reason}]`);
   }
+  if (killedNotMeasured.length > 0) {
+    lines.push(
+      `  ${marker} · KILLED (${killedNotMeasured.length}) — your record carries BOTH a kill code and a stated reason for these, so the run line beside it`
+        + ` is NOT read as run: a kill is not a verdict. ⛔ This tool ran none of them; it read the code YOU recorded and KEPT the declaration you wrote`
+        + ' next to it — the most complete record this format can carry, and the one it used to discard:',
+    );
+    for (const { command, reason } of killedNotMeasured) lines.push(`    - ${command}   [${reason}]`);
+  }
   if (claimedNotMeasured.length > 0) {
     lines.push(
       `  ${marker} · CLAIMED (${claimedNotMeasured.length}) — the RUNNER's claim, recorded with a reason. ⛔ This tool did not measure them and cannot verify the reason:`,
@@ -12194,7 +12323,8 @@ export function runReconciliationLines(recon, outside = {}) {
     for (const { command, reason } of claimedNotMeasured) lines.push(`    - ${command}   [${reason}]`);
     lines.push(
       `    ⚠️ ${marker} is for a gate that REFUSES with its own stated prerequisite. A run the OS killed is not that —` +
-        ' a cap kill (exit 143) leaves no verdict and the family is simply unrun. The two are easy to conflate under time pressure, and one of them was.',
+        ' a cap kill (exit 143) leaves no verdict of its own. Record that code beside the claim and the family is classified KILLED above, with the'
+        + ' number on the page; a bare claim cannot be told from a refusal here. The two are easy to conflate under time pressure, and one of them was.',
     );
   }
   if (recon.explainedCiOnly.length > 0) {
@@ -12243,13 +12373,37 @@ export function runReconciliationLines(recon, outside = {}) {
         + ' — the reading that costs a rerun rather than a false green; fix the record so it states one thing.',
     );
   }
+  // ⭐ The sentence states the reading this run actually TOOK, and it reads it
+  // back out of the classes rather than re-deciding it here (#18074). A second
+  // copy of the precedence in the renderer is a second place for the two to
+  // disagree, and the failure mode is the one this whole module exists to
+  // refuse: a line that confidently reports a classification the totals above
+  // it do not share.
   for (const command of recon.conflicts) {
-    const derivedHere = recon.notMeasured.some((entry) => entry.command === command && entry.source === 'exit-code');
-    lines.push(
-      derivedHere
-        ? `  ⚠️ '${command}' is recorded BOTH as run and as ${marker}. Read as ${marker}, derived from its recorded ${RUN_RECORD_EXIT_PREFIX}${EXIT_PREREQUISITE_NOT_MET}; fix the record so it states one thing.`
-        : `  ⚠️ '${command}' is recorded BOTH as run and as ${marker}. Read as run; fix the record so it states one thing.`,
-    );
+    const landedNotMeasured = recon.notMeasured.find((entry) => entry.command === command);
+    const landedUnrun = recon.unrun.find((entry) => entry.command === command);
+    const both = `  ⚠️ '${command}' is recorded BOTH as run and as ${marker}.`;
+    if (landedNotMeasured?.source === 'exit-code') {
+      lines.push(
+        `${both} Read as ${marker}, derived from its recorded ${RUN_RECORD_EXIT_PREFIX}${EXIT_PREREQUISITE_NOT_MET}; fix the record so it states one thing.`,
+      );
+      continue;
+    }
+    if (landedNotMeasured?.source === RUN_RECORD_NOT_MEASURED_KILL_SOURCE) {
+      // ⛔ Not "fix the record": the two lines AGREE here — a kill code and a
+      // reasoned claim both say no verdict was reached — and this is the shape
+      // a runner should be writing, not one to talk them out of.
+      lines.push(
+        `${both} The two AGREE: ${RUN_RECORD_EXIT_PREFIX}${landedNotMeasured.exitCode} is a kill, not a verdict. Read as ${marker} with your stated reason`
+          + ' — ⭐ this is the record shape to keep, not one to repair.',
+      );
+      continue;
+    }
+    if (landedUnrun) {
+      lines.push(`${both} Read as UNRUN — ${landedUnrun.why}.`);
+      continue;
+    }
+    lines.push(`${both} Read as run; fix the record so it states one thing.`);
   }
   // ⭐ The enumeration READ from the one place it exists, not a prose copy.
   // This sentence used to spell three of the five blocks a plain run prints,
@@ -12284,11 +12438,12 @@ function runRecordEvidenceLines(evidence) {
   const marker = RUN_RECORD_UNMEASURED_MARKER;
   const spelling = `<command>${RUN_RECORD_REASON_SEPARATOR}${RUN_RECORD_EXIT_PREFIX}<code>`;
   const capture = `Record it as \`${spelling}\`, capturing $? BEFORE any pipe.`;
-  const { coded, silent, claimed, accounted, kind } = evidence;
+  const { coded, silent, claimed, killClaimed = 0, accounted, kind } = evidence;
   if (kind === 'none') return [];
   if (kind === 'derived') {
     return [
       `  EXIT CODES — all ${accounted} accounted famil(ies) carry one, so the ${marker} count above is DERIVED from them`
+        + `${killClaimed > 0 ? `, ${killClaimed} of them a KILL code the runner paired with a stated reason` : ''}`
         + `${claimed > 0 ? `, bar ${claimed} reasoned claim(s) counted beside them` : ''}. ⛔ This tool ran none of them; it read the codes you recorded.`,
     ];
   }
@@ -12321,20 +12476,28 @@ function runRecordEvidenceLines(evidence) {
  */
 function notMeasuredEvidenceTerm(recon) {
   const evidence = recon.evidence ?? runRecordEvidence({});
-  const { coded, silent, claimed, derivedFromExit, accounted, kind } = evidence;
+  const { coded, silent, claimed, killClaimed = 0, derivedFromExit, accounted, kind } = evidence;
   const code = EXIT_PREREQUISITE_NOT_MET;
+  // ⭐ Named here once so both branches quote the same clause. A KILLED family
+  // is neither derived from `code` nor a bare claim, and a term that omitted it
+  // would state a NOT-MEASURED count whose parts do not add up to it (#18074).
+  const killedTerm = killClaimed > 0 ? `, ${killClaimed} a KILL code with a stated reason` : '';
   if (kind === 'none') return '';
   if (kind === 'derived') {
     if (recon.notMeasured.length === 0) {
+      // ⛔ Byte-identical to what it always said, and it stays true under the
+      // kill rule for a structural reason: this sentence is only ever reached
+      // from the ✓ line, so every derived family is in `ran` — and a killed
+      // family can no longer be there (#18074).
       return ` (a DERIVED zero — all ${accounted} recorded an exit code and none of them is ${code})`;
     }
-    return ` (${derivedFromExit} DERIVED from a recorded ${RUN_RECORD_EXIT_PREFIX}${code}${claimed > 0 ? `, ${claimed} claimed` : ''})`;
+    return ` (${derivedFromExit} DERIVED from a recorded ${RUN_RECORD_EXIT_PREFIX}${code}${killedTerm}${claimed > 0 ? `, ${claimed} claimed` : ''})`;
   }
   if (kind === 'claimed') {
     return ` (⛔ CLAIMED — ${silent} of ${accounted} recorded no exit code, so this`
       + ` ${recon.notMeasured.length === 0 ? 'zero' : 'count'} is what the runner declared, not what the record shows)`;
   }
-  return ` (⛔ a FLOOR — ${derivedFromExit} derived from ${RUN_RECORD_EXIT_PREFIX}${code}${claimed > 0 ? `, ${claimed} claimed` : ''};`
+  return ` (⛔ a FLOOR — ${derivedFromExit} derived from ${RUN_RECORD_EXIT_PREFIX}${code}${killedTerm}${claimed > 0 ? `, ${claimed} claimed` : ''};`
     + ` ${silent} of ${coded + silent + claimed} recorded no exit code)`;
 }
 
@@ -23741,6 +23904,149 @@ function selfTest() {
       'a family recorded through BOTH channels reads as the derived class, and the contradiction is still reported',
       bothChannels.notMeasured.length === 1 && bothChannels.notMeasured[0].source === 'exit-code' && bothChannels.conflicts.length === 1,
     );
+
+    // ── A KILL is not a verdict (#18074) ────────────────────────────────────
+    // ⭐ The four readings on the card are four readings of ONE instrument: the
+    // same command, the same derivation, and ONLY the record's spelling differs
+    // between them. They are pinned here in that shape, so a future edit that
+    // moves one of them has to say which.
+    const killRecord = (code, reason) => parseRunRecord(
+      [`pnpm check:a${sep}${RUN_RECORD_EXIT_PREFIX}${code}`, ...(reason ? [`${marker} pnpm check:a${sep}${reason}`] : [])].join('\n'),
+    );
+    const readingA = runReconciliation({ derived: ['pnpm check:a'], record: killRecord(RUN_RECORD_KILL_EXITS.TIMEOUT) });
+    t(
+      'READING A — a bare cap-kill code is UNRUN, never run: the run left no verdict to read',
+      !readingA.ok && readingA.ran.length === 0 && readingA.notMeasured.length === 0 && readingA.unrun.length === 1,
+    );
+    // ⛔ `?.` and not `[0].why`: when this classification regresses the array is
+    // EMPTY, and a pin that throws on the regression it exists to catch takes
+    // the whole battery down with it — every case after it stops reporting, so
+    // an ablation can no longer show which of them the regression moved. A pin
+    // must FAIL, and be named while failing.
+    const why0 = (entry) => entry?.why ?? '';
+    const reason0 = (entry) => entry?.reason ?? '';
+    t(
+      '...and the unrun row NAMES the recorded code, so the runner can see what this tool read',
+      why0(readingA.unrun[0]).includes(`${RUN_RECORD_EXIT_PREFIX}${RUN_RECORD_KILL_EXITS.TIMEOUT}`) && why0(readingA.unrun[0]).includes('no verdict'),
+    );
+    const capReason = 'cap-killed at the container foreground ceiling';
+    const readingD = runReconciliation({ derived: ['pnpm check:a'], record: killRecord(RUN_RECORD_KILL_EXITS.TIMEOUT, capReason) });
+    t(
+      `READING D — a kill code PLUS a reasoned claim is ${marker}: the honest runner's declaration WINS over the run line beside it`,
+      readingD.ok && readingD.ran.length === 0 && readingD.unrun.length === 0 && readingD.notMeasured.length === 1
+        && readingD.notMeasured[0]?.source === RUN_RECORD_NOT_MEASURED_KILL_SOURCE
+        && readingD.notMeasured[0]?.exitCode === RUN_RECORD_KILL_EXITS.TIMEOUT,
+    );
+    t(
+      '...and its row carries BOTH halves of the record — the code this tool read and the reason the runner stated',
+      reason0(readingD.notMeasured[0]).includes(`${RUN_RECORD_EXIT_PREFIX}${RUN_RECORD_KILL_EXITS.TIMEOUT}`)
+        && reason0(readingD.notMeasured[0]).includes(capReason),
+    );
+    // ⭐ The double-count control. Reading D accounts for ONE family through two
+    // doors, and `accounted` must still be 1 — a total that counted it twice
+    // would be wrong by exactly the number of the most careful records in it.
+    t(
+      '...and the evidence counts that ONE family once: it is inside `coded`, and `killClaimed` is reported beside the others, not added to them',
+      readingD.evidence.accounted === 1 && readingD.evidence.coded === 1 && readingD.evidence.killClaimed === 1
+        && readingD.evidence.claimed === 0 && readingD.evidence.derivedFromExit === 0,
+    );
+    // Every member of the set, both ways round — the floor is a FLOOR, not the
+    // four signals that happen to have been met so far.
+    for (const code of [RUN_RECORD_KILL_EXITS.TIMEOUT, 130, 137, 141, 143, RUN_RECORD_KILL_EXITS.SIGNAL_FLOOR, 149]) {
+      const bare = runReconciliation({ derived: ['pnpm check:a'], record: killRecord(code) });
+      const declared = runReconciliation({ derived: ['pnpm check:a'], record: killRecord(code, 'the OS ended it') });
+      t(
+        `a recorded ${RUN_RECORD_EXIT_PREFIX}${code} is a kill: UNRUN bare, ${marker} when declared — and run in neither`,
+        bare.ran.length === 0 && bare.unrun.length === 1 && bare.notMeasured.length === 0
+          && declared.ran.length === 0 && declared.unrun.length === 0 && declared.notMeasured.length === 1
+          && declared.notMeasured[0]?.source === RUN_RECORD_NOT_MEASURED_KILL_SOURCE,
+      );
+    }
+    // CONTROL, and it is the load-bearing half: a VERDICT still reads as run.
+    // 127 is the discriminating one — an unusual number, below the floor and
+    // not the timeout wrapper's, so a rule that fired on "looks like trouble"
+    // rather than on this set would fail here.
+    for (const code of [0, 1, 2, 127]) {
+      const verdict = runReconciliation({ derived: ['pnpm check:a'], record: killRecord(code) });
+      t(
+        `CONTROL: a recorded ${RUN_RECORD_EXIT_PREFIX}${code} is a verdict and still reads as run`,
+        verdict.ok && verdict.ran.length === 1 && verdict.notMeasured.length === 0 && verdict.unrun.length === 0,
+      );
+      t(`CONTROL: runRecordKillLabel(${code}) is null — the label is the ONE place a code is judged`, runRecordKillLabel(code) === null);
+    }
+    t(
+      'CONTROL: the prerequisite code keeps its own class, ahead of the kill test',
+      runRecordKillLabel(EXIT_PREREQUISITE_NOT_MET) === null,
+    );
+    t(
+      'the label names the signal where one is known, and the signal NUMBER where it is not',
+      (runRecordKillLabel(143) ?? '').includes('SIGTERM') && (runRecordKillLabel(137) ?? '').includes('SIGKILL')
+        && (runRecordKillLabel(149) ?? '').includes('signal 21')
+        && (runRecordKillLabel(RUN_RECORD_KILL_EXITS.TIMEOUT) ?? '').includes('timeout'),
+    );
+    // A kill code beside a claim with NO reason is the shape the docblock above
+    // refuses by name: an unexplained refusal is what a cap-killed run wears.
+    const killUnreasoned = runReconciliation({
+      derived: ['pnpm check:a'],
+      record: parseRunRecord([`pnpm check:a${sep}${RUN_RECORD_EXIT_PREFIX}143`, `${marker} pnpm check:a`].join('\n')),
+    });
+    t(
+      'a kill code beside an UNREASONED claim stays UNRUN — the claim costs a reason here exactly as it does alone',
+      !killUnreasoned.ok && killUnreasoned.unrun.length === 1 && killUnreasoned.notMeasured.length === 0
+        && why0(killUnreasoned.unrun[0]).includes(`${RUN_RECORD_EXIT_PREFIX}143`),
+    );
+    // ── The contradiction line, read off the RENDERING ──────────────────────
+    // ⭐ Read from the rendered text and not from `conflicts`: the array being
+    // non-empty says the tool NOTICED, and the card's own reproduction filtered
+    // the output down to the count line and therefore could not tell whether
+    // anything was ever PRINTED about it.
+    const verdictPlusClaim = runReconciliation({
+      derived: ['pnpm check:a'],
+      record: parseRunRecord([`pnpm check:a${sep}${RUN_RECORD_EXIT_PREFIX}0`, `${marker} pnpm check:a${sep}also claimed`].join('\n')),
+    });
+    const verdictPlusClaimText = runReconciliationLines(verdictPlusClaim).join('\n');
+    t(
+      'a VERDICT code plus a claim is a genuine contradiction: run still wins, unchanged',
+      verdictPlusClaim.ok && verdictPlusClaim.ran.length === 1 && verdictPlusClaim.notMeasured.length === 0 && verdictPlusClaim.conflicts.length === 1,
+    );
+    t(
+      '...and the contradiction is PRINTED on the default output, not merely held in an array',
+      verdictPlusClaimText.includes('is recorded BOTH as run and as ' + marker) && verdictPlusClaimText.includes('Read as run; fix the record'),
+    );
+    const readingDText = runReconciliationLines(readingD).join('\n');
+    t(
+      `the ${marker} · KILLED block prints, and names the code and the reason on the family's own row`,
+      readingDText.includes(`${marker} · KILLED (1)`) && readingDText.includes(capReason)
+        && readingDText.includes(`${RUN_RECORD_EXIT_PREFIX}${RUN_RECORD_KILL_EXITS.TIMEOUT}`),
+    );
+    t(
+      '...and reading D is reported as the two channels AGREEING — ⛔ never as a record to repair',
+      readingDText.includes('The two AGREE') && !readingDText.includes('Read as run; fix the record'),
+    );
+    const readingAText = runReconciliationLines(readingA).join('\n');
+    t(
+      'reading A names its kill in the UNRUN block and prescribes the spelling that would declare it',
+      readingAText.includes('⛔ UNRUN (1)') && readingAText.includes(`${RUN_RECORD_EXIT_PREFIX}${RUN_RECORD_KILL_EXITS.TIMEOUT}`)
+        && readingAText.includes(`${marker} <command>`),
+    );
+    // READINGS B and C — the two controls the card names, unchanged by this
+    // edit. They are the evidence that the kill branch was inserted BESIDE the
+    // two existing channels rather than over either of them.
+    const readingB = runReconciliation({ derived: ['pnpm check:a'], record: killRecord(EXIT_PREREQUISITE_NOT_MET) });
+    t(
+      `READING B — ${RUN_RECORD_EXIT_PREFIX}${EXIT_PREREQUISITE_NOT_MET} is still DERIVED ${marker}, unchanged`,
+      readingB.ok && readingB.notMeasured.length === 1 && readingB.notMeasured[0].source === 'exit-code' && readingB.evidence.derivedFromExit === 1,
+    );
+    const readingC = runReconciliation({
+      derived: ['pnpm check:a'],
+      record: parseRunRecord(`${marker} pnpm check:a${sep}${capReason}`),
+    });
+    t(
+      `READING C — a claim with a reason and no run line is still CLAIMED ${marker}, unchanged`,
+      readingC.ok && readingC.notMeasured.length === 1 && readingC.notMeasured[0].source === 'claim'
+        && readingC.evidence.claimed === 1 && readingC.evidence.killClaimed === 0,
+    );
+
     // The malformed tail is reported like the malformed claim beside it, and it
     // costs the family: the line stays whole, so it pairs with nothing.
     const badTail = runReconciliation({ derived: ['pnpm check:a'], record: parseRunRecord(`pnpm check:a${sep}EXIT 3`) });
@@ -23803,7 +24109,15 @@ function selfTest() {
       derived: ['pnpm check:a'],
       record: parseRunRecord(['pnpm check:a', `${marker} pnpm check:a${sep}also claimed`].join('\n')),
     });
-    t('a family claimed BOTH ways reads as run and the contradiction is reported, not resolved silently', contradicted.ok && contradicted.conflicts.length === 1);
+    // ⭐ Re-spelled, not weakened (#18074): the expectation is byte-for-byte the
+    // one it always asserted, and the sentence now says which run lines it
+    // covers. A BARE line carries no code at all, so no kill can be read out of
+    // it and the runner's "I ran it" stands — the kill branch above is about
+    // lines that DO carry a code, and this case is the control beside it.
+    t(
+      'a family claimed BOTH ways over a run line carrying no kill code reads as run, and the contradiction is reported, not resolved silently',
+      contradicted.ok && contradicted.conflicts.length === 1 && contradicted.ran.length === 1,
+    );
     const zero = runReconciliation({ derived: [], record: parseRunRecord('') });
     t('an empty derivation and an empty record is a green EMPTY answer, not a missing one', zero.ok && zero.derivedTotal === 0);
 

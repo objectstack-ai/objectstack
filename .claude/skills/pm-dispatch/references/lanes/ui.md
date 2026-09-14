@@ -19,7 +19,7 @@
 
 - 构建产物经 `pnpm objectui:refresh` 回流,见 SKILL.md 〈多仓协调〉。
 - 回流后的 console pin bump 是 objectstack 的单张卡,⛔ 永不做本仓 PR 的 rider。
-- 凡触 `packages/spec` 一律转 `domain:spec` 座位,见 SKILL.md 〈多仓协调〉。
+- 新 `packages/spec` 工作恒归 `domain:spec` 席,已派发卡 ⛔ 不因此转席,见 SKILL.md 〈多仓协调〉。
 - `scripts/pm/**` 单写手恒在 objectstack 侧 ⇒ 本席的工具需求走上游卡带 `Blocked-by:` 回链。
 - 受管面五项含仓根发布 `skills/**`,清单、判据与禁令见 objectui AGENTS.md §9 受管面段。
 - ⇒ 命中即停 draft;⛔ 未获授权批准不 ready 不入队不自合、永不批准,获批后认领席落地。
