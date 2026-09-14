@@ -504,6 +504,16 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
       // declaration, and declaring one rarely-touched file is cheaper than
       // rewording prose to dodge a scanner.
       'scripts/cross-package-test-inputs.mjs',
+      // `check-cli-examples-parity.mjs` is the mention shape again, from
+      // test/docs-cli-enumeration-parity.test.ts (#17723): that pin's header
+      // states WHY it does not extend this sibling gate --- `os lint` declares no
+      // `examples`, and an example set and a flag set are different populations,
+      // so an examples-parity check is structurally blind to a missing flag. The
+      // sentence is the gate's own stated reason, and it has to name what it is
+      // about. Settled the way `check-nul-bytes.mjs` above is: declaring one
+      // rarely touched file is cheaper than rewording prose to dodge a scanner,
+      // and over-collection can only widen a radius, never narrow one.
+      'scripts/check-cli-examples-parity.mjs',
       // `nightly-tiers.mjs` is the mention shape a FIFTH time, and the one entry
       // that was already HALF declared: turbo.json has carried it (and its
       // `.d.mts`) in this task's `inputs` all along, because `vitest-tiers.ts`
