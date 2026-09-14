@@ -21,7 +21,7 @@ import { parseAutonumberFormat, renderAutonumber, resolveAutonumberFormat, readA
 // "the protocol has no such function" refusal cannot drift from what
 // `AggregationNodeSchema.function` actually admits.
 import { AggregationFunction, emptyGroupValueFor } from '@objectstack/spec/data';
-import { STRUCTURED_JSON_TYPES, FILE_REFERENCE_TYPES, MULTI_OPTION_TYPES, NUMERIC_VALUE_TYPES } from '@objectstack/spec/data';
+import { STRUCTURED_JSON_TYPES, FILE_REFERENCE_TYPES, MULTI_OPTION_TYPES, NUMERIC_VALUE_TYPES, isMultiValueField } from '@objectstack/spec/data';
 // [#16318] The per-field-type physical representation of the NUMERIC family.
 // `os generate migration` reads the SAME table, in both of its formats — that
 // shared table IS the repair, so ⛔ never restate one of its numbers here.
@@ -250,8 +250,10 @@ export interface AutoNumberReservation {
  * column on one that has, so the question is asked per driver instance through
  * {@link SqlDriver.mediaColumnIsJson} rather than of this set. A
  * `multiple: true` media field is unaffected — its value is a LIST of ids, it
- * is a JSON column on every deployment, and `!!field.multiple` already says so
- * above every type check.
+ * is a JSON column on every deployment, and `isMultiValueField` already says so
+ * above every type check (`file` / `image` are `MULTI_CAPABLE_TYPES` members;
+ * #17469 refuses `multiple: true` on `avatar` / `video` / `audio` at the
+ * authoring entrance rather than arrayifying their column).
  *
  * ⛔ Do not re-add the family here. Every reader of this set treats membership
  * as deployment-independent, which is exactly what the family stopped being.
@@ -14378,7 +14380,7 @@ export class SqlDriver implements IDataDriver {
    *
    * Reads `jsonFields` — the per-table registry both `initObjects` and
    * `registerExternalObject` fill from {@link SqlDriver.isJsonField}, i.e.
-   * `JSON_COLUMN_TYPES.has(type) || !!field.multiple`. Asking THAT registry
+   * `JSON_COLUMN_TYPES.has(type) || isMultiValueField(field)`. Asking THAT registry
    * rather than growing a second one is the whole point: `JSON_COLUMN_TYPES`
    * already carries a header calling itself the single source for the DDL
    * column-type switch and `isJsonField` "so the two can't drift", and a
@@ -18022,9 +18024,30 @@ export class SqlDriver implements IDataDriver {
     return !this.fileColumnsMoved;
   }
 
+  /**
+   * Is this column a JSON column on this deployment?
+   *
+   * [#17469] (maintainer ruling 2026-09-13, decision batch #128 item 5, option
+   * 1′) The `multiple` half asks `@objectstack/spec`'s `isMultiValueField`
+   * rather than reading `field.multiple` raw, so the header above
+   * ("Membership is owned by @objectstack/spec") is now true for BOTH halves of
+   * this predicate. Before it, `!!field.multiple` arrayified the column for
+   * ANY type, while the spec predicate answered "not multi-value" for the same
+   * field — so a consumer shaping a query from the spec predicate composed `=`
+   * against a JSON array column and the driver answered 400. One definition of
+   * "multi-valued", and the shapes where the two used to disagree are refused
+   * at the authoring entrance by `FieldSchema` in the same ruling.
+   *
+   * ⚠️ The spec predicate reads the AUTHORABLE type vocabulary. A
+   * driver-internal alias (`string` / `integer` / `int` / `float`, the
+   * introspected-column spellings) is not a `FieldType`, so a `multiple: true`
+   * on one of those is no longer a JSON column — `object` / `array`, the
+   * aliases whose value really is structured, are in {@link JSON_COLUMN_TYPES}
+   * and keep their column unchanged.
+   */
   protected isJsonField(type: string, field: any): boolean {
     if (!field.multiple && FILE_REFERENCE_TYPES.has(type)) return this.mediaColumnIsJson();
-    return JSON_COLUMN_TYPES.has(type) || !!field.multiple;
+    return JSON_COLUMN_TYPES.has(type) || isMultiValueField({ type, multiple: field.multiple });
   }
 
   // ── SQLite serialisation ────────────────────────────────────────────────────
