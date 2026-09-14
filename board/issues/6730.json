@@ -1,0 +1,35 @@
+{
+  "number": 6730,
+  "kind": "issue",
+  "title": "`os login --json` 与 `os cloud login --json` 现在对同一件事给出相反的契约 —— 一个发 NDJSON 事件流,一个把设备授权 URL 完全吞掉",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T13:46:24Z",
+  "updated_at": "2026-08-09T00:16:30Z",
+  "closed_at": "2026-08-09T00:16:30Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6730",
+  "body": "分诊卡,由 `domain:cli` 席在 #6531(PR #6727)验收时立。**未认领,未评级。** 记录事实与一处需要裁定的分岔,不预设处置。\n\n## 事实\n\n#6531 的维护者裁定(2026-08-08,#6531 comment 5226101978)把 `os login --json` 定为 **NDJSON 事件流**,理由写得很明确:device flow 在自动化场景的核心价值,是让消费者**在用户授权前**就拿到 `verification_uri`。PR #6727 据此实现,并把这个例外写进了 `--help`、`content/docs/deployment/cli.mdx` 与 `content/docs/permissions/authentication.mdx`。\n\n同一个仓里的姊妹命令走的是相反的路:\n\n- `packages/cli/src/commands/cloud/login.ts` —— `os cloud login --json` 把 `silent: flags.json` 传进它自己的 device flow,于是**只发一份文档**。\n\n这不是缺陷:它的 stdout 是单文档、可被 `JSON.parse` 直接读,格式上完全正确。代价在别处 —— **它从不把 verification URL 交给自动化消费者**,也就是 #6531 裁定认定为 device flow 全部意义所在的那个东西。发现者(#6531 的实施 agent)因此没有把它当缺陷立单,而是交回 PM 分诊。\n\n## 为什么值得记\n\n两条命令现在对「`--json` 下的 device flow 应该给消费者什么」给出**可见的不同答案**,而它们面向的是同一类受众(脚本 / CI runner)。#6531 的裁定是对 `os login` 这一条做的,没有裁 `os cloud login` —— 所以当下的分歧是**未经裁定的**,不是有意为之的差异。\n\n分歧面还会长:任何将来读这两条命令之一的文档或脚本,都会把自己看到的那种形状当成「CLI 的 `--json` 就是这样」。\n\n## 需要裁定的分岔(不预设)\n\n1. **`os cloud login --json` 对齐 NDJSON** —— 两条命令同一契约,自动化都能拿到 URL。代价:`os cloud login --json` 的 stdout 从单文档变成事件流,是**用户可见的破坏性变化**(它今天的单文档形状是可用的,有消费者也说不定)。\n2. **维持分歧,并把它写成有意为之** —— 在两条命令的文档里各自写明「本命令的 `--json` 是单文档 / 是 NDJSON」以及为什么。零行为变化,但等于承认同一个 CLI 里 `--json` 有两种含义。\n3. **反过来:重新审视 #6531 的裁定** —— 若认为单文档才是 `--json` 的唯一正确含义,那 `os login` 应回到路线 1/3。⚠️ 这与 2026-08-08 的现行裁定相反,只有维护者能改。\n\n## 相关\n\n#6531(裁定与 PR #6727)、#6217 / PR #6524(`--json` stdout 纯净度的同一受众家族)、#6728(`os login --json` 在非 TTY 下把裸 `Email: ` 提示写进 stdout 并以 exit 13 退出 —— 另一条路径,已单独立)。\n\nBlocked-by: #6727"
+}

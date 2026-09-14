@@ -1,0 +1,35 @@
+{
+  "number": 6394,
+  "kind": "issue",
+  "title": "[finding][drivers] driver-turso 的 date-bucket-parity 测试里还有一处死 `as never` —— 在 `driver.create` 的 options 门上，与 #6354 不同门",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T16:46:11Z",
+  "updated_at": "2026-08-08T15:34:18Z",
+  "closed_at": "2026-08-08T15:34:18Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6394",
+  "body": "在实施 #6354（删掉 `checkDateBucketParity` / `checkReadCoercion` 调用点的 `as never`）期间实测发现，记录备查。**观察类，不挂 `pm:queue`，请分诊轮定级。**\n\n## 现状\n\n`packages/drivers/driver-turso/src/date-bucket-parity.test.ts:68`：\n\n```ts\nawait driver.create(\n  'bucket_storage_probe',\n  { id: 'p1', at: new Date('2026-01-10T09:00:00Z') },\n  { bypassTenantAudit: true } as never,\n);\n```\n\n这是**同一个文件**里 #6354 之外仅存的一处 `as never`。#6354 处理的是 `checkDateBucketParity(driver, …)` 这个**替身调用点**；这一处是 `driver.create(…)` 的 **options 门**，属于不同的门、不同的生产者，所以在 #6354 的 PR 里按 PD #10 单独记下来，**没有**扩大那个 PR 的 diff。\n\n## 实测：这个 cast 也是死的\n\n把 ` as never` 去掉后（基线为已含 #6355 的 `origin/main`，且已先 build `@objectstack/driver-turso` 的依赖闭包，确保读到的不是陈旧 `dist/*.d.ts`）：\n\n```\n> @objectstack/driver-turso@17.0.0-rc.5 typecheck\n> tsc --noEmit\n\nEXIT=0\n```\n\n零输出、退出码 0。\n\n## 为什么它本来就不需要\n\n`bypassTenantAudit` 是**已声明**的键，不是野键 —— `packages/spec/src/data/driver.zod.ts:99`：\n\n```\nbypassTenantAudit: z.boolean().optional().describe('Suppress the driver tenant-audit warning for\n  a deliberately global write on a tenant-scoped object (diagnostics only — never changes what\n  the write touches)')\n```\n\n同一族的另一处旁证：dogfood 与 turso 两个 parity 测试都往 `checkDateBucketParity` 传 `createOptions: { bypassTenantAudit: true }`，那边**从来没有**写 cast，一直编译得过。\n\n## 不是缺陷\n\n运行期行为完全正确（driver-turso 808 tests 全绿）。丢掉的同样只是编译期检查：这个 cast 把整个 options 形状抹成 `never`，于是 options 里拼错的键、写错类型的值都不会红。代价是休眠的 —— 今天没有人踩。\n\n## 如果要做\n\n删掉这 5 个字符，跑一遍 `@objectstack/driver-turso` 的 typecheck 即可。建议顺带扫一遍其余驱动测试里是否有同形的 options 门 cast（本单未做这个全仓扫描）。\n\n## 相关\n\n- #6354 / PR 见其引用 —— 同一文件、同一类逃逸口，但不同门，故分开\n- #6212 —— 同族（声明了却没人读的形状）\n\n会话：`session_01WyvqvKMG6asi9aXjKE6xtx`（#6354 实施期间发现，未认领）\n"
+}

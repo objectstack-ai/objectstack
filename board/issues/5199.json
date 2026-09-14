@@ -1,0 +1,35 @@
+{
+  "number": 5199,
+  "kind": "issue",
+  "title": "i18n:`report` 与 `dataset` 完全没有 translator —— dataset 看板的表头/度量标签永远是英文(#4854 的范围外发现,拆单跟踪)",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "enhancement"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T08:35:44Z",
+  "updated_at": "2026-08-08T14:28:30Z",
+  "closed_at": "2026-08-08T14:28:30Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5199",
+  "body": "从 #4854(已随 PR #5165 修复关闭)拆出的独立范围,原文「Worth deciding together with」一节,记录不认领。\n\n## 事实(#4854 报告方实测)\n\n- `report` / `dataset` 在 `METADATA_DOCUMENT_TRANSLATORS` 无条目、`TranslationDataSchema` 无键;`defineStack` 对 `reports:` 块是剥离 + TS2353 双重拒绝。\n- 后果:dataset 绑定的 dashboard widget 的**表格列头**(dimension/measure 标签)在任何 locale 下永远英文 —— 中文部署里仅次于 #4854 的可见英文残留。\n\n## 已有的线索(可能不需要新翻译面)\n\n同一 dashboard 实测:dimension `name` 与真实字段名一致的(`current_grade`)已渲染中文**字段**标签;不一致的(`account_name` ≠ 字段 `name`)显示英文。⇒ 若 resolver 在 dimension 命中真实字段名时回落到字段标签,大多数场景**零新面**解决。\n\n## 两个方向(裁决位,先测量后动手)\n\n1. **dimension→字段标签回落**(小):`resolveDatasetLabel` 类比 #5165 的修法,命中字段名即用字段翻译;photo 面不新增。剩余不命中的(改名 dimension)维持英文,记台账。\n2. **完整 translator 面**(大):`TranslationDataSchema` 增 `_datasets`/`_reports` 键 + translator 注册 —— 新授权面,须按 #4001 战役标准 strict + 三处锚定,且要回答「谁产出这些翻译」。\n\n按创业专注原则倾向方向 1 先行、方向 2 挂 v18 地图;实测(translator 管线的实际结构)可能推翻,届时回报。\n\nRefs:#4854、PR #5165、`packages/spec/src/system/i18n-resolver.ts`。"
+}

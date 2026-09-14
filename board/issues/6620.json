@@ -1,0 +1,36 @@
+{
+  "number": 6620,
+  "kind": "issue",
+  "title": "revertCommit's soft-remove limb hard-codes `intent: 'override-artifact'`, so a commit that CREATED an object cannot be reverted either",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched",
+    "pm:queue",
+    "target:v17"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T07:28:11Z",
+  "updated_at": "2026-08-08T15:20:18Z",
+  "closed_at": "2026-08-08T15:17:35Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6620",
+  "body": "Found while implementing #6563 (the RESTORE half of the same loop). Recording only, per Prime Directive #10 — a different line with a different cause (a hard-coded literal, not an unstated default), and outside #6563's ruled file surface.\n\n## Evidence\n\n`ObjectStackProtocolImplementation.revertCommit` (`packages/metadata-protocol/src/protocol.ts`) has two limbs. #6563 fixes the `existedBefore` one. The OTHER limb — an artifact the commit CREATED, which the revert soft-removes — states its intent as a constant:\n\n```ts\nif (!it.existedBefore) {\n    // Created by this commit -> soft-remove (metadata only; table stays).\n    if (current) {\n        await repo.delete(ref, {\n            parentVersion: current.hash,\n            actor,\n            source: 'protocol.revertCommit',\n            intent: 'override-artifact',\n            state: 'active',\n        });\n    }\n    reverted.push({ type: it.type, name: it.name, action: 'removed' });\n}\n```\n\n`SysMetadataRepository.delete` opens with `this.assertAllowed(ref.type, opts.intent)` — the same gate `put` uses — which refuses any type whose registry entry is not `allowOrgOverride`. `object` is exactly such a type, so a commit that created an object cannot be undone.\n\nMeasured on `origin/main` @ e39dd66e7 against a real `SysMetadataRepository` over an in-memory `sys_metadata` / `sys_metadata_history` / `sys_metadata_commit` double (the #6215 harness in `packages/objectql/src/protocol-commit-history.test.ts`): an object created once through `saveMetaItem` under a Studio package workspace, recorded in a commit as `existedBefore: false`, then reverted through `revertCommit`:\n\n```\n{\n \"success\": false, \"revertedCount\": 0, \"failedCount\": 1, \"reverted\": [],\n \"failed\": [{ \"type\": \"object\", \"name\": \"myapp_invoice\",\n   \"error\": \"[NOT_OVERRIDABLE] 'object' is not allowOrgOverride in the registry. ...\",\n   \"code\": \"NOT_OVERRIDABLE\" }]\n}\n```\n\n…and the `sys_metadata` row is still there afterwards (1 row remaining). The same measurement re-run on #6563's branch is byte-identical: fixing the restore limb does not touch this one.\n\n## Why it matters\n\nThis is the *first-build* revert — the AI/Studio flow that publishes a brand-new app and then undoes it. Every object the commit created stays behind, `success` is `false` with a populated `failed[]`, and the package is left half-reverted (its overlay-allowed items removed, its objects not). `rollbackToPackageCommit` reverts through the same loop, so it inherits this.\n\n## Suggested direction (not a ruling)\n\nSame shape as #6563's ruling, applied to the other limb: derive the intent from the artifact per item (`isArtifactBacked` -> `'override-artifact'` : `'runtime-only'`), exactly as the sibling caller `rollbackMetaItem` does, rather than stating a constant. A genuinely artifact-backed item must still be refused. The repository's gate is right; the caller is what never says which of the two cases it is.\n\nNote the delete-limb equivalent of #6563's premise check is worth re-running before implementing: `deleteMetaItem` (the per-item delete path) should be read first to see which intent it derives, so the two delete callers agree.\n\nRelated: #6563 (the restore limb, same loop), ADR-0067, ADR-0005.\n"
+}

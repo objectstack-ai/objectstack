@@ -1,0 +1,37 @@
+{
+  "number": 5957,
+  "kind": "issue",
+  "title": "12 处测试 fixture 用 `triggerType: 'record-created'` —— 平台自己的 lint 判它永不触发(#5762 后是 error)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched",
+    "pm:queue",
+    "tooling"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T12:56:07Z",
+  "updated_at": "2026-08-08T08:19:08Z",
+  "closed_at": "2026-08-08T08:19:08Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5957",
+  "body": "#5762 做消费半径清查时顺带发现的,观察类记录。**未指派,交分诊定级;当前无人踩到。**\n\n## 事实\n\n全仓 12 处 fixture 把 flow start node 的 `triggerType` 写成 `'record-created'`:\n\n- `packages/lint/src/validate-flow-template-paths.test.ts` —— 10 处(:35、:120、:161、:179、:200、:221、:250、:333、:363、:402)\n- `packages/lint/src/reference-integrity-suite.test.ts:194`\n- `packages/services/service-automation/src/record-lookup-expand.integration.test.ts:53`\n\n`record-created` **在文法之外**:引擎认的是 `record-{before,after}-{create,insert,update,delete,write}`(`triggerTypeToHookEvents`,`packages/triggers/trigger-record-change/src/record-change-trigger.ts:115`)。它缺相位段,所以映射到零 hook event —— 正是 `flow-trigger-unknown-event` 命中的形状。#5762 之后该规则是 **error**。\n\n## 为什么今天不红(也是为什么它是观察类而非缺陷)\n\n这些 fixture 所属的测试各自**直接调用自己的规则**(`validateFlowTemplatePaths` / `validateReferenceIntegrity` / 运行时 expand 集成),都不经过 `validateFlowTriggerReadiness`,也不跑授权规则注册表。已逐一核对:`validateFlowTriggerReadiness` **不在** `REFERENCE_INTEGRITY_RULES` 成员内。所以 #5762 的升级对它们零影响 —— PR #5952 的三个示例 A/B 也逐字一致。\n\n## 为什么仍值得记一笔\n\n两点,都是「以后」而不是「现在」:\n\n1. **哪天这些测试改用注册表跑**(例如收敛到 `runAuthoringRules` 以获得跨规则覆盖),12 处 fixture 会一起变 error 红,而红的原因与被测规则毫无关系 —— 排查成本远高于现在改掉。\n2. **fixture 是会被读的样例。** 一个 token 被平台自己的 lint 判为「永不触发」,却在仓内测试里出现 12 次,对照着读的人(以及以仓库为语料的 AI 作者)会当成正确写法抄走。这正是 `flow-trigger-unknown-event` 存在的理由被自己的测试语料反向抵消。\n\n## 修法(若分诊认为值得)\n\n机械替换为符合文法的 token —— 这些 fixture 里 `triggerType` 都只是「让 flow 看起来是 record 触发」的陪衬,不是被测对象,所以 `record-after-create` 直接替换即可,无断言需要跟着改。建议连带扫一遍其余非文法 token(同批实测:`on_create` 2 处、`on_update` 1 处、`onCreate` 1 处,均**不以 `record-` 开头**,故连 `flow-trigger-unknown-event` 都不会命中 —— 它们是另一个形状:引擎把非 `record-` 前缀的 token 整体当作「无 record 触发器」,静默降级为 manual flow,值得单独判断是否要有诊断)。\n\n关联:#5762 / PR #5952(发现出处)、#3427 / #3457 / #3481(`flow-trigger-unknown-event` 的三条来源)。\n"
+}

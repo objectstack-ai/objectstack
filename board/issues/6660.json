@@ -1,0 +1,35 @@
+{
+  "number": 6660,
+  "kind": "issue",
+  "title": "Four `apps.setup.navigation` translation keys have no declaring nav item anywhere in the repo — dead weight that reads as coverage",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T09:03:56Z",
+  "updated_at": "2026-08-08T17:14:47Z",
+  "closed_at": "2026-08-08T15:20:17Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6660",
+  "body": "Found while implementing #5750. Observation-class: nothing a user hits today, but it is the exact shape `app-nav-translation-parity.test.ts` already guards against for Studio (\"a translation for an id the app no longer declares is dead weight that reads as coverage — `nav_workflows` outlived its menu entry in all four locales and nothing said so\").\n\n## Measurement\n\nBooting the real Setup composition and diffing the merged nav ids against each locale's `apps.setup.navigation` keys, on `origin/main` `487a197b5`:\n\n| key | en | zh-CN | ja-JP | es-ES |\n|---|---|---|---|---|\n| `nav_approval_processes` | present | present | present | present |\n| `nav_metadata` | present | present | present | present |\n| `nav_verifications` | present | — | present | present |\n| `nav_device_codes` | present | — | present | present |\n\nNone of the four is declared by any nav item in the repo:\n\n```\n$ for k in nav_approval_processes nav_metadata nav_verifications nav_device_codes; do\n    echo \"$k: $(grep -rn \"id: '$k'\" --include=*.ts packages/ | grep -vc node_modules)\"\n  done\nnav_approval_processes: 0\nnav_metadata: 0\nnav_verifications: 0\nnav_device_codes: 0\n```\n\nControl probe with a live id (`nav_webhooks`) returns a hit, so the zeros are real.\n\nTwo of them have a recorded reason to be gone. `setup-nav.contributions.ts` explains that `sys_verification` and `sys_device_code` deliberately omit `list` from `apiMethods` (sensitive, ephemeral secrets — not browsable), so a nav entry for them \"can only ever render 'failed to load'\". The entries were removed; their translations were not.\n\n## Why this was not just deleted in the #5750 PR\n\nThat PR adds `pnpm check:app-nav-i18n`, which judges the merged Setup app. It deliberately does NOT assert the reverse direction, because from one runtime composition a **dead** key and a **conditionally-contributed** key are indistinguishable — `nav_sso_providers` is contributed only when an external IdP is wired (see the sibling finding). Asserting \"no translation without a declaring nav item\" against a single composition would delete the labels of gated-off entries.\n\nThe four above are safe to delete because they were checked individually against a repo-wide grep, not against one boot. But doing that on a verdict the gate itself cannot reach would leave the deletion unguarded, so it belongs in its own change with its own reasoning — either:\n\n1. **Delete the four keys** (16 lines across four locale files), plainly, citing the grep; or\n2. **Close it structurally** together with the sibling finding, by giving the gate a way to see the union of declared contributions rather than one realisation — at which point the reverse direction becomes assertable for Setup exactly as it already is for Studio.\n\nFiled unassigned.\n"
+}

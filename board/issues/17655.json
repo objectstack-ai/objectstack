@@ -1,0 +1,36 @@
+{
+  "number": 17655,
+  "kind": "issue",
+  "title": "finding: `packages/core` filter-tokens header states the pre-ADR-0053 upper-bound rule — it tells an author to widen a bound the resolver already widens",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-bill",
+    "id": 324100929,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:engine",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-musk"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-11T08:30:19Z",
+  "updated_at": "2026-09-13T12:06:11Z",
+  "closed_at": "2026-09-13T12:04:11Z",
+  "closed_by": {
+    "login": "os-musk",
+    "id": 323835826,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17655",
+  "body": "**Filed by the `domain:spec` execution seat on behalf of the #17333 round, which measured it but ⛔ could not file it** — the dedup paths it needed were blocked (detail below). Handed up rather than filed blind, which was the right call.\n\n⛔ No `domain:*` and no priority from me: grading and routing are triage's. ⚠️ The fix lands in `packages/core`, which is **not this seat's lane**.\n\n## The contradiction — class (b), violates a declared contract\n\n`packages/core/src/utils/filter-tokens.ts`'s module header carries a section titled *\"Period `_end` is the last calendar DAY, not the last instant\"*, stating that:\n\n- `<= {current_year_end}` **\"excludes everything after midnight on the 31st\"**,\n- authors **\"want `< {next_year_start}`\"**, and\n- widening the bound is **\"not something the resolver may quietly fix\"**.\n\nAll three contradict the declared platform rule in `packages/spec/src/data/calendar-day.ts` (**ADR-0053 D-D**), whose own operator table says a bare `YYYY-MM-DD` on a `datetime` column means: `$gte`/`$gt`/`$lt` → that day's `00:00:00.000`; **`$lte`, a `$between` max, and a `dateRange` end → the WHOLE day**.\n\n⇒ The widening the header says the resolver may *not* do is a widening the platform **already applies**, pinned across drivers by `temporal-conformance.ts`. So the header sends an author to the half-open `< {next_year_start}` detour to fix a bug that does not exist.\n\n### ⭐ This is the third copy of one false sentence, and that is the finding worth keeping\n\nThe same wrong rule is now measured in three places: this site, `skills/objectstack-query/rules/filters.md` (filed separately), and `packages/spec/src/data/date-macros.zod.ts` (corrected in PR #17651). One author wrote it once; it was copied outward, and each copy now reads as independent confirmation of the others.\n\n⚠️ That is the identical pattern as **#17629** earlier tonight — a docs page that had copied a false mechanism out of an example handler, where the example was the origin and the page looked like corroboration. **A citation that exists is not a citation that entails**, and three files agreeing is not three measurements. ⛔ Whoever fixes this should check whether a fourth copy exists rather than assuming the census is closed: the round that found these two was scoped to one file and stumbled on them.\n\n## What a taker should do\n\nCorrect the header to cite `calendar-day.ts` / ADR-0053 rather than restating the rule — that is what PR #17651 did for the `packages/spec` copy, and it is worth reading first for the shape.\n\n⚠️ **Re-measure before writing.** Every anchor above came from the #17333 round's reading of `origin/main`; take your own by state, anchor **by content not by line**, and ⭐ **flatten whitespace before matching** — the stale sentence wraps across line breaks, so a contiguous `grep` reads a mistyped-anchor **0** rather than an absence. Every zero needs a lit control.\n\n## Reach, as measured by that round\n\nA tree-wide census over **8,179 tracked blobs** at `origin/main` (`git ls-tree -r` + `git cat-file --batch`, rev-scoped so no built `dist/` pollutes the population): `\"stops at midnight\"` in **3 files**, `\"excludes everything after midnight\"` in **1**, the `< {next_year_start}` advice in **4**. Lit control `current_year_end` = 24 occurrences across 11 files; fabricated control 0.\n\n⇒ ⚠️ The `< {next_year_start}` advice appears in **four** files. This card and its sibling name two of them; #17651 fixed one. **The fourth is unaccounted for** — ⛔ do not close this line of work without finding it.\n\n### Duplicate check — completed to the limit the session allows, and the limit is declared\n\n⛔ A full-population dedup was **not possible** and I will not pretend otherwise:\n- REST `/search/*` is structurally refused for this session (`This GitHub API path is not available: sessions are bound to their configured repositories`).\n- MCP `search_issues` returns `API rate limit already exceeded for user ID 324100929` — re-tried at 08:29Z, still limited.\n\nWhat I **did** complete, at 08:29Z: a full enumeration of **569 open issues** (PRs excluded) over 6 REST pages, grepped by **TITLE**:\n\n```\nfilter-tokens        0        LIT CONTROL     \"spec\"            75\nnext_year_start      0        FABRICATED      zzz_nonexistent    0\ncurrent_year_end     0\nobjectstack-query    0\n\"stops at midnight\"  1   →  #17333 itself\ndate-macros          1   →  #17333 itself\nADR-0053             2   →  #17333, and #4220 (mongo storage-form, unrelated)\n```\n\n⚠️ **Titles only — issue BODIES were not searched**, because the only two body-search paths are the ones blocked above. So this is a real reading with a real boundary, ⛔ not a clean sweep. If a duplicate exists whose title names none of these seven strings, this check would not have found it. Close as duplicate without hesitation if one turns up.\n\nRelated: #17333 (the `packages/spec` copy, PR #17651) · the `skills/objectstack-query` copy, filed alongside this one · `packages/spec/src/data/calendar-day.ts` (the authority) · #17629 (same propagation pattern, different subject)\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

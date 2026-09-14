@@ -1,0 +1,35 @@
+{
+  "number": 6505,
+  "kind": "issue",
+  "title": "IMetadataService.getObject has no declared relationship to get('object', name), and its two implementations disagree",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "qq9340100"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T02:39:18Z",
+  "updated_at": "2026-08-08T14:38:58Z",
+  "closed_at": "2026-08-08T14:38:58Z",
+  "closed_by": {
+    "login": "qq9340100",
+    "id": 313832657,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6505",
+  "body": "Observation-class finding, filed per Prime Directive #10 while implementing #6055. Unassigned, `finding`, deliberately **not** queued — nothing a user hits today; it is a contract-documentation gap that made a consumer-side decision harder than it should have been.\n\n## The fact (verified on `origin/main`)\n\n`packages/spec/src/contracts/metadata-service.ts` documents the sibling convenience readers by their equivalence:\n\n```ts\n/**\n * Convenience: get a view definition by name\n * Equivalent to get('view', name)\n */\ngetView?(name: string): Promise< unknown | undefined >;\n```\n\n`getObject` — the only one of the family that is **required** rather than optional — carries no such sentence:\n\n```ts\n/**\n * Convenience: get an object definition by name\n * @param name - Object name (snake_case)\n * @returns The object definition, or undefined if not found\n */\ngetObject(name: string): Promise< unknown | undefined >;\n```\n\nAnd the two implementations do not agree:\n\n- `packages/metadata/src/metadata-manager.ts` — `async getObject(name) { return this.get('object', name); }`\n- `packages/objectql/src/metadata-facade.ts` — `async getObject(name) { return this.registry.getObject(name); }`, where the facade's own `get()` is `registry.getItem(type, name, pkg)` unwrapped to `item?.content ?? item`. Different lookup, different returned shape.\n\nSo a consumer holding an `IMetadataService` cannot know whether `getObject(n)` and `get('object', n)` answer the same thing, and in one of the two occupants of the `metadata` slot they do not.\n\n## Why it cost something concretely\n\n#6055 needed the ADR-0110 D3 verdict (`getDiagnosed`, #5840) for the `objectstack://objects/{objectName}` MCP resource, whose resolver is `getObject`. `getDiagnosed(type, name)` is `get`'s diagnosed twin, so the obvious fix — swap `getObject(name)` for `getDiagnosed('object', name)` — would have silently re-pointed the lookup on any `MetadataFacade`-backed host. Presuming an undeclared equivalence at a consumer is the private dialect Prime Directive #12 forbids, so PR for #6055 kept `getObject` as the resolver and asked `getDiagnosed` for the verdict only, paying one extra read on the miss path. That trade is written up in `diagnoseEmptyRead`'s TSDoc.\n\n## Dispositions worth pricing (no recommendation forced)\n\n1. **Document the equivalence and make it true** — add \"Equivalent to `get('object', name)`\" to the contract and change `MetadataFacade.getObject` to delegate to its own `get`. Cheapest to state, but it changes what the facade returns (`ServiceObject` becomes the unwrapped content), so it needs a consumer sweep of the facade's readers.\n2. **Document the divergence as intentional** — say in the contract that `getObject` may resolve differently and that consumers needing the canonical `object` item must use `get('object', name)`. Zero behaviour change; makes the existing consumer-side caution correct instead of defensive.\n3. **Retire `getObject` from the contract** — it is a convenience over a member every implementation already has. Largest sweep; only worth it if the divergence is judged to have no business pull.\n\nRefs #6055, #5840, PR #6051, Prime Directive #12.\n"
+}

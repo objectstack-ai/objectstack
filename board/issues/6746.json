@@ -1,0 +1,35 @@
+{
+  "number": 6746,
+  "kind": "pull_request",
+  "title": "fix(service-automation): refuse a suspension the node type declares it cannot produce (#6667)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T13:59:57Z",
+  "updated_at": "2026-08-08T14:54:22Z",
+  "closed_at": "2026-08-08T14:54:20Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": "2026-08-08T14:54:20Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/6746",
+  "body": "Closes #6667\n\n## 背景\n\n`ActionDescriptor.supportsPause` 一直只在**编写期**被读:designer palette、`warnIfResumeAuthorityUndeclared` 注册警告、以及 `check-resume-authority-declared.mjs` CI gate。运行期的暂停只有一个来源 —— executor 的 `execute()` 返回了 `suspend: true` —— 所以一个 executor 完全可以在 descriptor 声明 `supportsPause: false` 的情况下把 run 挂起,而上面三个座位**按构造**全部沉默:它们都以 `supportsPause: true` 为触发条件。\n\n本 PR 只做 #6667 的第一件事(运行期一致性检查)。第二件事(`isAsync` 处置)按派发要求**只测量、不实现**,测量结果见下,卡片由 PM 另开。\n\n## 判决:拒绝(refuse),不是\"放行 + 记 error 日志\"\n\n这是本 PR 需要显式论证的设计决定,按 #4632 的纪律以**后果**而非形容词来判:\n\n- **放行并记日志**:该类型既然没声明 `supportsPause`,那它同样不会被任何东西要求声明 `resumeAuthority`(gate 和注册警告都只看 `supportsPause: true`);而 #5561 step two 之后,未声明的 `resumeAuthority` 解析为 `'service'`,通用 resume 路由会**拒绝它创建的每一次暂停**。于是\"放行\"写下的是一条**没人能继续**的持久化 continuation:`error` 日志打在挂起的那个进程里,而用户在几小时甚至一次重启之后才拿到 `PERMISSION_DENIED`,且那条消息说的是 `resumeAuthority`,不是真正的病根 `supportsPause`。这正是 Prime Directive #10 —— 平台宣称了一个运行时并不提供的能力,并且由一个无法把症状连回成因的人发现。\n- **拒绝**:在犯错的那一刻、在犯错的那个进程里让 run 失败,失败交回给 run 自己的调用方,**不写任何持久化状态**,消息里直接给出一行修复。方向与 #5561 当初的取舍一致:两种可能的错误里,选那个**由犯错的人自己承担**的。\n\n拒绝走的是 #3863 的 guard 类(`refuseNode`),因此 `fault` 边**不会**路由它 —— 声明写错不是\"世界不配合\",重跑一次永远不会好;若可路由,一条边就能把这个检查关掉而 run 仍报成功。\n\n`refuseUndeclaredSuspension` 这里**故意不打日志**:按 AGENTS.md \"Degradation log levels\" 的第三种合法答案 —— 失败已经交回调用方,就不是 degradation;run 自己的 `failed` 历史行已经带着完整消息。再叠一条 `logger.error` 会让每一次执行错误声明的节点都产出一条 error,正是把 `error` 读废的做法。\n\n## 边界位置:一处判定,无旁路\n\n判定放在 `AutomationEngine.executeNode` 中 executor 返回结果之后、成功簿记之前(`packages/services/service-automation/src/engine.ts`)。\n\n- 这是引擎**唯一**会采信 `executor.execute()` 结果的调用点;ADR-0018 alias 路径是把目标的结果 `return` 到这里,自己不挂起,所以不会二次判定。\n- `resume()` 的续跑同样经由 `executeNode` 重新进入,region body(`runRegion`)也是 —— 三条路径共用同一处判定。\n- 放在**成功簿记之前**而不是紧挨着 `throw new FlowSuspendSignal`:这样出错节点在 run 日志里记录为一条 `failure` step(而不是\"success step + 莫名其妙失败的 run\"),`$error` 像任何其它 refusal 一样被写入,并继承 #3863 的不可路由性。\n\n声明的解析走 `resolveCanonicalDescriptor()` —— 本 PR 把 `resolveDeclaredResumeAuthority` 里的 alias hop 抽出来,两个能力 gate 共用**一次**遍历。alias 的 descriptor 是 `registerNodeAlias` 合成的,不复制 canonical 的能力位,直接读它会把老类型名下的合法暂停全部误拒。\n\n## 不管的两种形状(各有 pin)\n\n- **反向**(`supportsPause: true` 但从不挂起)**不是**不一致:声明的是能力不是义务,`wait` 在条件已满足时合法地直接返回。\n- **沉默**(完全不发布 descriptor):没有声明就没有\"声明 vs 行为\"的不一致可判,`NodeExecutor.descriptor` 按契约本就是可选的;而后果早已在另一端 fail-closed —— #5561 的 resume gate 会拒绝这种暂停并说明原因(`resume-authority-gate.test.ts` 的 `bare_pause` 正是这条)。本 PR 没有悄悄把那一半接管过来。\n\n## 仓内错误声明者:0(已测量)\n\n以 AST 扫描全树 `registerNodeExecutor` 字面量,交叉核对 `suspend: true` 与 descriptor 声明:\n\n| | 出货代码 | 测试 fixture |\n|:--|:--|:--|\n| 声明 `supportsPause: true` | 6 | 10 |\n| 声明 false / 省略 | **0** | 0 |\n| 完全无 descriptor | 0 | 3(其中 `bare_pause` 就是故意的) |\n\n6 个出货 executor 为 `screen` / `wait` / `map` / `subflow`(builtin)+ `approval` / `approval_revise`(plugin-approvals),全部声明 `supportsPause: true`。**没有任何内置节点因本 PR 改变行为**;受影响的只有当前处于错误声明状态的第三方 executor,而它们的暂停今天本来就是不可恢复的。\n\n## 测试与反向验证\n\n新增 `supports-pause-runtime-enforcement.test.ts`(9 例),并在 `guard-refusal-inventory.test.ts`(#3863 的 guard 清单)补一行分类 pin。\n\n反向验证做了**两个方向**,预测在跑之前写下:\n\n- **方向 A —— 摘掉检查**(恢复 #6667 之前的世界)。预测:5 条不一致相关 pin + guard 清单那一行共 6 红,4 条\"范围\"pin 保持绿。实测:**6 红 / 18 绿,与预测完全一致**。\n- **方向 B —— 让检查过度伸张**(去掉\"无 descriptor 豁免\"并绕过 alias hop)。方向 A 下那 4 条范围 pin 是不动的,所以它们需要自己的方向来证明不是空转。预测:恰好 `bare_pause` 与 alias 两条转红,其余全绿。实测:**2 红 / 22 绿,与预测完全一致**。\n\n## `isAsync` 的新鲜测量(只报告,本 PR 不实现)\n\n派发要求在**接手时重新测**,而不是沿用 #5703 帖子上的读数。2026-08-08 于 `origin/main` @ `cfeb9a0`(objectstack)与 `origin/main` @ `a4f837c`(objectui)重测:\n\n- **objectstack**:`automation/ActionDescriptor:isAsync` 的读者 **0**。全部命中为一处 schema 声明、三份生成基线(`authorable-surface*`/`authorable-defaults`)、5 处出货 descriptor 的**写入**(`screen` / `map` / `wait` / `approval` / `approval_revise`)、若干测试 fixture 与形状断言、以及 docs/ADR 散文。没有任何一处 `.isAsync` 的**读取**。\n- **objectui**:`isAsync` 与 `supportsPause` 命中数均为 **0**(既无读者也无写者)。\n- **cloud**:该环境**没有**这个仓库(容器内只有 `objectstack` 与 `objectui`);作为交叉核对,GitHub 全组织代码搜索 `isAsync org:objectstack-ai` 返回 19 条,全部落在 `objectstack`。\n- 一处**同名但不同键**需要在开卡时排除:`packages/spec/src/data/hook.zod.ts` 里的 `isasync` 是 data hook 的 tombstone 别名(映射到 `async`),与 `ActionDescriptor.isAsync` 无关。\n\n结论:读数仍是\"零读者\",指向 ADR-0049 enforce-or-remove 的**退役**路线。退役会动 `packages/spec`,按分诊注记归 spec 座位,故本 PR **不含**任何 `isAsync` 改动。\n\n## 遗留:一处 `packages/spec` 文档注释需要跟进(不在本 PR 内)\n\n`packages/spec/src/automation/node-executor.zod.ts` 中 `supportsPause` 的文档注释仍写着 \"A declaration, not an enforced fact (#5703). No execution path reads it\",本 PR 之后这句话已经不成立。派发明确要求本 PR 不动 `packages/spec`(契约面只有一个 owner),所以留给 spec 座位跟进 —— 已在回报中标出。\n\n## 验证\n\n- `pnpm --filter @objectstack/service-automation test` → **71 files / 868 tests passed**\n- `pnpm --filter @objectstack/plugin-approvals test` → **19 files / 446 tests passed**\n- `tsc --noEmit -p packages/services/service-automation` → 3 errors,全部是既有的 `nested-region-parity.test.ts` TS2341 私有成员读取(ledger 记 5,棘轮只在**超过**时失败);新文件已确认在 tsc program 内且贡献 0 个错误\n- `eslint`(engine.ts + 两个测试 + gate 脚本)→ clean\n- gates:`check:resume-authority-declared`(含 `--self-test`)、`check:nul-bytes`、`check:engine-double-contract`、`check:error-code-casing`、`check:durability-log-level`、`check:startup-registry-verdict`、`check:route-envelope`、`check:empty-changeset` 全绿\n\n---\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01USNUyHEr7uaU6MoEWXitei\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01USNUyHEr7uaU6MoEWXitei)_"
+}

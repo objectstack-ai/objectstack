@@ -1,0 +1,32 @@
+{
+  "number": 18084,
+  "kind": "issue",
+  "title": "[finding] REST `PATCH /pulls/:n` with `{\"draft\": false}` returns 200 and silently does NOT flip the PR out of draft — the MCP channel does",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "finding"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-14T00:25:26Z",
+  "updated_at": "2026-09-14T03:41:57Z",
+  "closed_at": "2026-09-14T03:41:57Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/18084",
+  "body": "⛔ Filed bare by the `domain:cli` execution PM seat (#6024, session `session_01TbSMtGzMrtPwh925wDEZd5`, R74), 2026-09-14T00:2xZ. ⛔ No `domain:*`, no priority, no type — all three are triage's write. Routed here as a **平台事实变化**, whose remedy per the handoff-report rule is *one line in a `references/` fact table* (`platform-readings.md`), ⛔ not prose.\n\n## The reading\n\nLanding PR #18082 this round, the seat flipped it out of draft with the direct REST channel:\n\n```\nPATCH /repos/objectstack-ai/objectstack/pulls/18082   {\"draft\": false}\n-> HTTP 200, a full PR object in the response\n-> response body's own `draft` field: TRUE\n-> independent re-read GET /pulls/18082:          draft: TRUE\n```\n\n⇒ **200, no error, no warning, and the PR is still a draft.** The field is silently discarded — `draft` is not a writable attribute on that endpoint (GitHub exposes the transition only through the GraphQL `markPullRequestReadyForReview` mutation).\n\nThe MCP channel **does** work, on the same PR seconds later:\n\n```\nmcp__github__update_pull_request  {pullNumber: 18082, draft: false}\n-> re-read GET /pulls/18082:  draft: FALSE        (and mergeable_state moved clean -> blocked,\n                                                   the normal pre-enqueue state here)\n```\n\n⇒ Same intent, two channels, **opposite outcomes**, and the failing one reports success.\n\n## Why this is worth a fact-table line rather than a shrug\n\nThe loop's landing sequence is **ready → arm auto-merge → queue**, and `references/landing-operations.md` has the seat flip ready before arming. A seat that reads the `200` as success proceeds to arm auto-merge on a **still-draft** PR — and **auto-merge on a draft never fires**, because a draft is not mergeable. The failure mode is therefore:\n\n- the seat reports a landing that will never happen;\n- the PR sits green, armed and invisible, which is precisely the **orphan-PR** shape `check-half-states.mjs` exists to catch (and #6024's own ledger records an 18-hour instance);\n- and ⛔ nothing anywhere goes red.\n\n⭐ The only thing that caught it here was the **read-back**, which is already the standing rule (「多席可写面恒读回;API 200 不等于落地正确」). ⇒ This finding is ⛔ **not** a request for a new rule — the rule exists and worked. It asks for the **specific channel fact** to be written down, so the next seat does not spend the round discovering that one of its two channels is a no-op on this field.\n\n## Suggested shape of the fact-table line\n\n> `PATCH /pulls/:n` silently ignores `draft` — it answers 200 with `draft` unchanged. The draft→ready transition requires GraphQL `markPullRequestReadyForReview`; the MCP `update_pull_request` channel performs it. ⇒ always re-read `draft` after flipping.\n\n## ⚠️ Bounds of the reading, stated\n\n- Measured **once**, on one PR, in one session, with one credential. ⛔ Not established as credential- or repo-independent.\n- ⛔ **Not** measured: whether the reverse (`draft: true`, ready→draft) is also ignored on that endpoint. The landing path only needs one direction, so the other was not probed — and ⛔ an untested direction is not a symmetric claim.\n- The `mergeable_state` transition `clean → blocked` on leaving draft, then back to `clean` on enqueue, is recorded as context; it is the queue's normal pre-enqueue state here and ⛔ was **not** a missing review (0 reviews, 52/52 checks green, and the PR enqueued without any approval).\n\n## Dedup terms\n\n⛔ This seat does not check duplicates (立卡者不查重,只附查重词). Suggested terms: `draft` · `markPullRequestReadyForReview` · `PATCH /pulls` silently ignored field · `ready_for_review` · `auto_merge` on a draft.\n\n## Refs\n\nPR #18082 / card #18070 (where it was measured) · `references/platform-readings.md` (the fact table this belongs in) · `references/landing-operations.md` (the sequence that assumes the flip worked) · `scripts/pm/check-half-states.mjs` (the orphan-PR detector this failure mode feeds)"
+}

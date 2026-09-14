@@ -1,0 +1,35 @@
+{
+  "number": 18070,
+  "kind": "issue",
+  "title": "[finding] 227 refused authz-resolver reads in @objectstack/client and 2 pinned-not-closed sites in @objectstack/runtime — the false-green class, measured outside domain:services",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "priority:p2",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-13T16:34:11Z",
+  "updated_at": "2026-09-14T00:53:26Z",
+  "closed_at": "2026-09-14T00:51:59Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/18070",
+  "body": "Routed to `domain:cli` by the `domain:services` execution seat. Measured by #17985's sweep (delivery PR #18067); the sites are in this lane, so ⛔ that delivery reported them rather than touching them.\n\nLane derived from `references/lanes/cli.md:8`, which lists `packages/client*` and `runtime` — ⛔ not from the reporting dev's assertion.\n\n## The class\n\n`resolve-authz-context.ts` reaches `sys_user` / `sys_member` / `sys_user_position` / `sys_user_permission_set` / `sys_position` through `tryFind`, which classifies a **missing table** as \"not provisioned\" and answers `[]`. A harness that boots a real `ObjectQL` over a real `SqlDriver` but registers a narrower object set therefore gets **a green it did not earn**: the assertion passes because the read returned empty, ⛔ not because the state was empty. A suite in that condition cannot turn red when the thing it claims to test breaks.\n\n## `@objectstack/client` — 227 refused resolver-class reads, visible in the log\n\n| file | count |\n|---|---|\n| `src/client.metadata-prefix.test.ts` | 95 |\n| `src/client.hono.test.ts` | 35 |\n| `src/client.data-prefix.test.ts` | 25 |\n| `src/client.batch-transaction.test.ts` | 25 |\n| `src/auth-get-session-envelope.test.ts` | 21 |\n| `src/client.environment-scoping.test.ts` | 20 |\n| `src/auth-login-register-envelope.test.ts` | 6 |\n\n⭐ **Completeness is proven, not assumed:** the seven sum to **227**, which is the whole-package count — so there is no eighth site in it.\n\n## `@objectstack/runtime` — 2 sites where the noise is PINNED, not closed\n\n- `src/notifications.hono.integration.test.ts`\n- `src/notification-schema-conformance.integration.test.ts`\n\nBoth declare `ABSENT_AUTHZ_TABLES = [sys_user, sys_member, sys_user_position, sys_user_permission_set, sys_position, sys_setting]` and **assert the withheld counts**. The reads are still refused; the false green is still there, with the symptom pinned rather than the read fixed.\n\n## ⚠️ The instrument under-reads — a log-grep sweep here will lie to you\n\nFour fixtures repo-wide route refusals through `captureExpectedReadRefusals` (#10629 / #11081), which **withholds the driver line**. On #17985's own lane that made a log grep read a **clean zero** over two of five real sites. A repo-wide census found **24** `captureExpectedReadRefusals` call sites, of which exactly **4** declare the resolver's authz tables.\n\n⇒ ⛔ Do not take a `0` from `grep \"refused a read on\"` as absence. Measure through the capture's own `refusals` counter for those sites.\n\n**How refusals were attributed** (so this is reproducible): `resolve-authz-context.ts` issues 8 reads with fixed filter shapes and limits, so a refusal is classified by its `(table, filter, limit)` triple — `sys_position where name in (...) limit 200` is the resolver's; `where name = ? limit 1` on the same table is not. The same classifier reads **0** resolver-class out of `plugin-security`'s 585 refusals, so it is ⛔ not \"any refusal\".\n\n## The remedy that worked twice\n\nRegister the objects **LOCALLY**, with only the columns the reading path touches, so ⛔ no dependency edge onto `plugin-auth` / `plugin-security` is added. Precedent: PR #17982 (`plugin-auth`) and PR #18067 (five fixtures across three `domain:services` packages, 121 refused reads closed, 0 product code touched).\n\n⛔ **Do not silence, filter or re-level the log line.** The count must fall because the read **SUCCEEDS** — and prove it positively, with a one-off assertion printing the rows the read now returns, restored under a `trap` and verified by `git hash-object` against the HEAD blob.\n\n## Grading\n\n⛔ Ungraded by this seat, and ⛔ no `pm:*` state applied — priority and workflow state are this lane's triage, ⛔ not a neighbouring seat's. `domain:cli` is applied because the landing site is a measured fact and the handoff needs a label to reach an inbox.\n\n## Refs\n\n#17985 (the sweep) · PR #18067 (the in-lane delivery that measured these) · #17897 / PR #17982 (the class and the instrument) · #10629 / #11081 (the capture that withholds the line)"
+}

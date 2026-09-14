@@ -1,0 +1,36 @@
+{
+  "number": 5928,
+  "kind": "issue",
+  "title": "hook 注册契约只能表达「命中这些对象」,无法表达「全局但排除这些对象」—— #5860 因此在 plugin-audit 内无法落地",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:dispatched",
+    "target:v17"
+  ],
+  "assignees": [
+    "qq9340100"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T12:14:51Z",
+  "updated_at": "2026-08-08T06:28:10Z",
+  "closed_at": "2026-08-08T06:28:10Z",
+  "closed_by": {
+    "login": "qq9340100",
+    "id": 313832657,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5928",
+  "body": "发现于 #5860 的实施核对(#5846 (b) 半边)。本单是 **#5860 的阻塞项**,落点在 `packages/objectql`(engine-core 车道),与 #5860 的文件面不相交。\n\n## 背景\n\n#5860 要求把 plugin-audit 的「哪些对象要审计」这条知识,从 handler 内部(`SKIP_OBJECTS` 早退)搬到**注册面**上,好让 #5284 的单 id 按对象前置行门、#5038 的批量按对象门对 `SKIP_OBJECTS` 内的对象判假。\n\n在 `packages/plugins/plugin-audit` 的文件面内**做不到**,原因不在插件,而在引擎的 hook 注册契约本身只有一种表达能力。\n\n## 事实(origin/main 逐处核对)\n\n契约面,`packages/objectql/src/engine.ts`:\n\n- `HookEntry.object?: string | string[]`(645/647 行),`registerHook` 的 options 同形(1096 行);\n- `triggerHooks` 的按对象匹配(1363 行):`targets.includes('*') || targets.includes(context.object)`;\n- `hasHooksFor(event, object)`(1396 行)镜像同一条,并且 `if (!entry.object) return true;`。\n\n即:注册面只能表达**允许列表**(外加 `'*'` 全集),没有任何否定 / 排除 / 谓词的表达位。\n\n而 plugin-audit 的知识是一条**拒绝列表**(`packages/plugins/plugin-audit/src/audit-writers.ts:96` 的 `SKIP_OBJECTS`,约 20 张 `sys_*` 平台表)。允许列表与拒绝列表只在**封闭全集**上可互换,而对象全集在运行期是**开放的**:\n\n- `packages/metadata-protocol/src/protocol.ts:7216` `applyObjectRegistryMutation` 在 `/meta` PUT 成功后直接 `engine.registry.registerObject(...)`,把新授权的对象注册进引擎;\n- `SchemaRegistry.registerObject`(`packages/objectql/src/registry.ts:1036`)**不发任何事件**(该文件 `emit(` 出现 0 次),这条路径也不宣告 `metadata:reloaded`(只有 metadata 插件的 artifact reload 和 packages 域的 publish 会宣告)。\n\n所以插件侧没有任何可订阅的通道,能把一份枚举出来的允许列表保持为最新。\n\n## 实测(临时探针,测完即删;计数驱动上的 `driver.findOne` 增量)\n\n| 场景 | findOne 增量 | 说明 |\n|---|---|---|\n| A 今天:audit 形状的全局 `afterUpdate` + 对 `SKIP_OBJECTS` 内对象做单 id update | 1 | #5860 的红态,前提成立 |\n| B 同一注册,对普通业务对象 update | 1 | 对照 |\n| C 允许列表注册 `{ object: ['biz_task'] }`:对 `SKIP_OBJECTS` 对象 / 对被枚举对象 | 0 / 1 | 门确实会翻 —— 只要表达得出来 |\n| D 允许列表注册之后**再注册**一个新对象,对它 update | 0,且审计 handler **一次都没跑** | 枚举补集的真实代价 |\n\nD 是决定性的一条:选项 1(枚举 `SKIP_OBJECTS` 的补集)把「新对象默认被审计」变成「新对象静默不被审计」—— 合规方向的行为倒退,而且无声。\n\n## 需要的契约形状\n\n在 `registerHook` 的 options 与 `HookEntry` 上新增一个**声明式的对象排除面**,由 `triggerHooks` 与 `hasHooksFor` 共同读取:\n\n```ts\n// packages/objectql/src/engine.ts\nexport interface HookEntry {\n  object?: string | string[];         // 现有:允许列表(缺省 = 全局)\n  excludeObjects?: string | string[]; // 新增:从上面的集合里减掉这些名字\n  // ...\n}\n```\n\n匹配语义:`matches(entry, X) = allowMatches(entry, X) && !excludeMatches(entry, X)`。两个消费者(派发用的 `triggerHooks`、需求门用的 `hasHooksFor`)必须读**同一个**匹配函数 —— 这两处今天已经是「一份语义两份实现」,再加一维会把 #5038 注释里那条「门比派发更紧就会静默丢 hook」的风险放大。\n\n为什么建议这个形状,而不是谓词回调(`objectFilter?: (object: string) => boolean`):\n\n1. **真实业务需求**:今天就有两个调用方 —— plugin-audit 的 5 个注册(#5860),以及 #5284 注释点名的另一个全局注册方 service-storage 的 file-reference reconcile。两者都是「全局,除了这几张平台表」,都是静态名单;谓词回调多出来的表达力当前没有任何调用方需要。\n2. **本项目的长期正确性**:`excludeObjects` 是本仓已有的词汇(`packages/spec/src/api/rest-server.zod.ts:374`、`packages/spec/src/system/disaster-recovery.zod.ts:222` 都用它表达「全部对象减去这些」),不新造名词;并且它保持「声明 = 执行」—— 排除名单是引擎读的数据,而不是藏在 handler 里的早退。\n3. **让 AI 写的元数据/代码难以出错**:静态名单可打印、可在 `logger.debug('Registered hook', ...)` 里如实报出、可被诊断面枚举;谓词回调把任意插件代码塞进每次写入的热路径,且无法内省 —— 还会诱导插件从可变状态计算作用域,正好撞上 AGENTS.md「启动期注册表读数不得记录裁决」那一节。\n\n## 影响面\n\n- **#5860 被本单阻塞**:没有这个表达位,plugin-audit 侧只能在「门判假」和「新对象默认被审计」之间二选一,而后者按分诊明令不可牺牲。\n- 本单落地后,#5860 的改动就收敛成:5 个注册带上 `excludeObjects`,`SKIP_OBJECTS` 从 handler 早退升格为注册面声明(handler 早退建议保留为纵深防御,行为守恒)。\n- delete 侧另有一层与本单独立的原因让门恒真,单独记录。\n\nRefs:#5860、#5846、#5284、#5038、#5272\n"
+}

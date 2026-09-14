@@ -1,0 +1,35 @@
+{
+  "number": 6537,
+  "kind": "issue",
+  "title": "Import dry run with `runAutomations: true` can now report `required` for a field a `beforeInsert` hook would have populated",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "qq9340100"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T03:25:26Z",
+  "updated_at": "2026-08-08T14:08:12Z",
+  "closed_at": "2026-08-08T14:08:12Z",
+  "closed_by": {
+    "login": "qq9340100",
+    "id": 313832657,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6537",
+  "body": "Observation-class finding, recorded while implementing #4633 (PR #6532), so the trade it makes is on the record rather than discovered later.\n\n## What changed\n\nBefore PR #6532 the import runner's required pre-check was gated on `!runAutomations`, with this reason:\n\n> Skipped when automations run: a beforeInsert hook may populate a required field, so we defer to the engine's own validation rather than false-reject here.\n\nThe gate was not applied to the bound checks #3956 added — those ran on every dry run regardless — so the two families were already asymmetric.\n\nPR #6532 routes the whole dry run through `DataProtocol.validateData` and applies no `runAutomations` gate. `validateData` runs no hooks (a documented, deliberate boundary of #6037: firing user-authored hooks inside a preview is the retired `validateOnly` defect respelled). So on an object whose `beforeInsert` hook derives a *required business field*, a dry run with automations on can now report `required` for a row the real write would create.\n\n## Why it was done this way\n\n`runAutomations` has defaulted to `true` since #2922. Gating the `validateData` call on `!runAutomations` would leave the DEFAULT dry run with no validation at all — strictly worse than both the pre-#6532 state and the state #4633 set out to fix. The trade taken was: close the false all-clear on every dry run, and accept the narrow hook-derived false alarm that #6037 already documents as its boundary.\n\n## Scope of the exposure\n\nNarrow, and worth measuring before acting:\n\n- audit and ownership stamps (`created_by`, `owner_id`, `organization_id`, …) are `system`/`readonly` and are skipped by validation anyway, so they cannot produce this;\n- what remains is a hook deriving a *business* field that its own object also declares `required` with no `defaultValue`.\n\nNo example of that shape was found in `examples/app-crm` or `examples/app-showcase` while implementing #6532, but the search was not exhaustive.\n\n## Possible dispositions\n\n- Leave it, with the boundary documented where an author meets it (import docs, not only the engine's doc comment).\n- Report such rows as a *warning* rather than an error when `runAutomations` is true — the row report already has a `warnings[]` channel as of PR #6532, so the shape exists. Costs: two verdict classes for one finding, which is the vocabulary split #6037 explicitly avoided for postures.\n- Give `validateData` a way to run a declared-safe subset of derivations. Large, and needs its own decision about what \"safe\" means.\n\nRecording, not recommending — the measurement above is what a triage round needs first.\n"
+}

@@ -1,0 +1,36 @@
+{
+  "number": 6580,
+  "kind": "issue",
+  "title": "settings env 门不执行 `pattern`:写入门拒的形状非法值,`OS_*` 覆盖照收——#5204 不对称的最后一族",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T05:48:49Z",
+  "updated_at": "2026-08-08T09:00:49Z",
+  "closed_at": "2026-08-08T09:00:49Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6580",
+  "body": "在 #5712(services 半边落地)实现中读码发现,按 Prime Directive #10 立案。**不在 #5712 完成范围内**(该单只涉 `valueDomain` 族;本单是 `pattern` 族的门间不对称)。\n\n## 事实(origin/main,`settings-service.ts` `effectiveEnvOverride`)\n\nenv 门逐族核对的声明约束是:option 表(#5131/#5204)、值窗/步进(#5932/#6199)、以及 #5712 落地后的 `valueDomain`。**`pattern` 不在其中**——它只在写入门 `validatePatch` 执行(`invalid_format`)。\n\n后果:一个只声明 `pattern` 的键,`PUT /api/settings/:ns` 拒绝的值,经 `OS_*` 覆盖照样生效并置顶 cascade(`locked: true`)。在库实例:\n\n- `company.country`(`^[A-Za-z]{2}$`):`OS_COMPANY_COUNTRY=ZZZ` 生效,同值走 API 被 `invalid_format` 拒;\n- `localization.default_country` 在 #5712 落地后有 `valueDomain` 兜住成员资格,但 pattern 族的门间不对称本身仍在(任何仅 pattern 键复现)。\n\n这正是 #5204 的原始形状(「同一比较只有一扇门在做」),#5932 triage 当时裁定 env 半边必须复用同一判定点——`pattern` 是唯一漏下的声明族。\n\n## 修法建议\n\n`validatePatch` 的 pattern 分支提为共享判定(或在 `RegisteredManifest` 预编译 per-key `RegExp`),`effectiveEnvOverride` 同点复用,拒收走既有 `reportRejectedEnvOverride`(响亮 error + 回落,#5204 契约)。注意与既有分支同款宽容:无效 RegExp 声明 = 无可执行(不拒写)。\n\n未核实项:是否有真实部署依赖「env 值绕过 pattern」——与 #5204 当时同样的迁移面问题,triage 时值得过一眼。"
+}

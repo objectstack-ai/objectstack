@@ -1,0 +1,33 @@
+{
+  "number": 17865,
+  "kind": "issue",
+  "title": "[Decision] #15484's ruling says `packages/rest/vitest.config.ts` opts the suite down — executing that sentence reddens 28 assertions and turns 8 files' \"logs NOTHING\" pins vacuous",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:cli",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-12T15:28:53Z",
+  "updated_at": "2026-09-14T02:05:41Z",
+  "closed_at": "2026-09-14T02:04:12Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17865",
+  "body": "## 维护者速读\n\n**事情** —— 批 #49 裁 #15484 时写了一句:「`packages/rest/vitest.config.ts` 把这个套件调低」。座位把它派出去实施,dev 在动手前先量了一遍,结果是这句话**照字面执行会伤到门禁本身**:\n\n- 把套件调到 `silent`,栈帧确实从 **2,095 → 0**(输出少 36.7%);\n- 但**15 个文件里 28 条断言当场变红**——它们断言的是「运维还是拿得到那句话」,而且是通过 `console.error` 的 mock 读的,本来一行量都没贡献;\n- 更糟的一半:**8 个文件断言的是反面**——「一个预期内的 4xx 一行都不该记」。套件被静音之后,这些断言**会因为错误的原因变绿**:就算每个 4xx 都在狂刷日志,它们照样绿。\n\n⚠️ 这正是这张卡自己踩过的坑:它原来的对照词 `[Registry]` 就是被 #15425 一条完全正当的声明悄悄作废的,于是「对照归零」看起来像「抓取失败」。⇒ 把套件静音、其它什么都不改,等于用一条看起来正当的声明把一道门禁变成摆设。\n\n**已经落地的部分不受这个问题影响**:声明式 seam(`OS_REST_LOG`)、门禁脚本、README、审计文档的裁决交接,都在 PR #17863 里,**出厂默认一字未动**(`'info'`,行为与今天逐字节相同),而且默认值本身被门禁钉住——调到 `error` 或 `silent` 会让门禁红。⇒ 本卡**只问剩下的那一件**:套件的级别怎么设。\n\n**四个选项(卡上有完整四维分析)**\n- **A** —— 维持现状:套件仍然响亮,2,095 行栈帧照旧。⛔ 代价是裁决那句话没兑现,量到的 +50.7%/窗口 的增长没人管。\n- **B** —— 调低套件,同时给那 ~15 个断言文件各自显式声明响亮级别,**并加一道配对门禁**:一个 spy 了 `console.error` 却没声明级别的文件算 finding。⛔ 代价是 ~20 个文件 + 第二道门禁,而且「防摆设」这件事只有那道配对门禁真落地才算数。\n- **C** —— 调低,其它什么都不改。⛔ 28 条红 + 8 个文件变摆设,列在这里只是为了记录它**被量过并被否掉**,不是被忽略。\n- **D** —— 明确把套件的音量问题按「就该这么响」关掉,seam 只留给运维。⛔ 这与裁决自己那句话相反,只有维护者能改。\n\n⇒ **请裁一个字母:A、B、C 还是 D?**\n\n---\n\n## What this card is, in one paragraph\n\nDecision batch #49 ([`5551137024`](https://github.com/objectstack-ai/objectstack/issues/15484#issuecomment-5551137024)) ruled option **A** on #15484 and its execution list included one sentence: 「`packages/rest/vitest.config.ts` opts the suite down」. PR #17863 delivers every other part of that ruling — the declared `OS_REST_LOG` seam on `logError`, a gate that reads it (`scripts/check-rest-log-declared.mjs`, 19-case self-test, wired into `package.json` and `lint.yml`), the published README section, and the audit's lines 419–420 discharge — with the **shipped default unchanged and gate-pinned**. This card carries only the opt-down sentence, because executing it as written is a larger and riskier act than the ruling's author could have known when writing it.\n\n⭐ **This is not a re-litigation of the ruling.** 「A ruling is not settled for a case until its instruction is executable ON that case」 — and the measurement below is what makes that determination, not an opinion about the ruling.\n\n## The measurement, taken before anything was chosen\n\nTaken by the implementing dev on the delivered branch, with the control validated in the same capture it was used in (`[sql-driver] DATABASE_ERROR` = 362 and `[REST]` = 272 both fire; `[Registry]` reads 0, as this card's own thread documented at [`5550786137`](https://github.com/objectstack-ai/objectstack/issues/15484#issuecomment-5550786137)):\n\n| reading | value |\n|:--|--:|\n| captured lines, one green `packages/rest` run | 5,709 |\n| indented `at ` stack frames | **2,095** (36.7%) |\n| frames arriving through `logError` | **100%** |\n| frames with `OS_REST_LOG: 'silent'` | **0** |\n| assertions that go RED at `'silent'` | **28**, across **15** files |\n| files whose \"an expected 4xx logs NOTHING\" assertions become vacuous | **8** (4 such assertions in `rest-expected-error-logging.test.ts` alone) |\n\nThe 28 are not the four pins this card already knew about (#5437 / #4886 / #5489) — they are 7× that, and they read the fault through a `console.error` mock, so they never printed any of the volume being complained about.\n\n## Four-axis analysis — 四维\n\n**① 项目长远合理性(权重恒 ≥50%,领起)** —— 维护者 2026-09-01 裁,逐字:「四维分析中,长期合理应该权重最高,至少50%」。\n\n会烂掉的是**声明**和**默认值**,不是音量——而这两样已经被门禁焊住了(默认值降到 `error`/`silent` 直接门禁红)。⇒ **A 已经买到了耐久的那一半**。**B** 的机器结构本身是一项长期负债:一个「默认不记故障日志」的套件,再由每个文件自己重新调响,只有在那道配对门禁**同时**落地时才是安全的;缺了它,B 比 A 更糟。**D** 把一句裁决直接反掉,只能由维护者来做。**C** 长期上就是把一道门禁换成摆设。\n\n**② 真实业务需要** —— 每次跑 2,095 行、占输出 36.7%,并且这张卡量到的是**增长**(窗口内 +50.7%,而 driver 那一支只有 +2.0%)。真实,但它是摩擦不是缺陷,也不在任何用户路径上。⇒ 支持「要做」,不支持「现在连着做」。\n\n**③ 防 AI 犯错** —— 决定性的一轴。**B 若没有那道配对门禁,就留下一个陷阱**:在一个被静音的套件里断言「什么都没记」永远是绿的。这张卡自己就是被同一形状咬过的——`[Registry]` 对照被 #15425 一条正当声明悄悄作废。⇒ B ⛔ 不能顺手落;而**先落 A 不花任何代价,也不堵死任何一条路**(套件级别是 `vitest.config.ts` 里的一个字符串,B 的门禁到位后一行就能翻过去)。\n\n**④ 防过度设计 / 防范围蔓延** —— B 是派发令**没有点名的 ~20 个文件**,外加第二道针对测试文件的门禁。派发令自己的 stop-and-report 条件说的就是这种情况,dev 停下来是对的。⇒ A 现在,B 单独立卡。\n\n**⇒ 四轴同向 A(本 PR)+ B 独立立卡**。⚠️ 但 A 与裁决自己那句话不一致,所以 ⛔ 不走代裁:这需要维护者一个字母。\n\n## Dedup, with the bound stated\n\nEnumerated **534 open issues** (paged REST, complete) and grepped titles + full bodies: `OS_REST_LOG` → **0**, `opt[- ]down` → **0**, `packages/rest/vitest\\.config` → **0**. ⚠️ Control `OS_REGISTRY_LOG` → 0 as well (a dead control on this population), so the reading rests on the live one: `logError` → **1**, and that one hit is #15484 itself ⇒ the body matcher is alive. #15484's own 10-comment thread was read end to end; the opt-down appears there only inside the ruling's execution list and the dev's report, never as a card.\n\n⛔ **Ungraded and unrouted on purpose** — `domain:*`, `type` and the priority are triage's to set, and this seat does not set them.\n\n⛔ **This card holds nothing and waits on nothing mechanical** — PR #17863 does not depend on the answer and ⛔ must not be held for it. (⚠️ No `Blocked-by` key is written here on purpose: that marker is line-initial and decoration-tolerant, so writing it with a prose target would create exactly the half-state this board repairs.)\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

@@ -1,0 +1,36 @@
+{
+  "number": 6780,
+  "kind": "issue",
+  "title": "An org-scoped metadata DELETE evicts the ENV-WIDE registry entry for every org — `restoreArtifactRegistryView` is `(type, name)`-addressed and org-blind",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched",
+    "pm:queue",
+    "target:v17"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T17:17:18Z",
+  "updated_at": "2026-08-08T23:55:08Z",
+  "closed_at": "2026-08-08T23:55:07Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6780",
+  "body": "Found while implementing #6602 (PR #6779). Filed separately per PD #10 — it is the delete chain, which #6602's ruling explicitly scoped OUT (\"if your fix keeps the plain-key model … the delete chain needs NO re-keying\"), and it survives whichever way the delete chain is later shaped.\n\n## The defect\n\n`ObjectStackProtocolImplementation.restoreArtifactRegistryView(type, name)` in `packages/metadata-protocol/src/protocol.ts` heals the in-memory registry after an overlay-row delete. It is addressed by `(type, name)` only — every step is:\n\n- `registry.removeRuntimeShadow(singular, name)` — drops the **plain key**;\n- `registry.removeOverlayEntry(singular, name)` — retires the **plain key** (#5079 / #6687).\n\n`deleteMetaItem` calls it on **both** paths (the repository path and the legacy raw-engine path) with no org argument, for **any** caller's org:\n\n```ts\nconst orgId = request.organizationId ?? null;   // read, used for the ROW delete\n...\nawait this.restoreArtifactRegistryView(request.type, request.name);   // …not for the REGISTRY heal\n```\n\nSo org A deleting **its own** org-scoped overlay retires the plain-key entry that belongs to the **env-wide** row — the entry every org in the process, and the control plane, reads from.\n\n## Measured (probe on the #6602 branch, unscoped kernel, real `SchemaRegistry`)\n\n```\nenv-wide `view/shared_grid` saved         -> registry entry = \"Env grid\"\norg A saves its overlay of the same name  -> registry entry = \"Env grid\"   (#6602's fix holding)\norg A DELETES its own overlay             -> registry entry = undefined    <-- the defect\n```\n\nThe row-level delete is correct throughout: only org A's row is removed and the env-wide row is still in `sys_metadata`. What is lost is the process-wide registry entry serving it, until the next boot or the next unscoped listing re-hydrates it.\n\n## Why it matters, and who sees it\n\nThe window is not the registry alone. While the entry is gone, the layers that read `engine.registry` directly answer as if the item does not exist — the ADR-0110 D3 declaration gate, `resolveRouteActionDeclaration`, and for `object` the fail-closed `assertObjectRegistered` (404 `OBJECT_NOT_FOUND`). One tenant's ordinary \"reset my customization\" therefore degrades another tenant's runtime, on an unscoped kernel — and per #5086 a host config boots `new ObjectQLPlugin()` with no `environmentId`, so the flagship showcase is exactly that kernel shape.\n\n## Pre-existing, and NOT introduced by #6602\n\nBefore #6602 the env-wide entry was already destroyed on this path, one step earlier: org A's *write* overwrote the plain key with org A's body, and org A's *delete* then removed it. #6602 closes the overwrite; this eviction is independent of it and neither created nor worsened by it. Post-#6602 it is simply the only remaining org-blind seam in the registry's lifecycle, and it is now easy to see in isolation.\n\n## Shape of a fix (not a ruling — for triage)\n\nThe minimal reading, symmetric with #6602's: the registry heal is about the **env-wide** entry, so it should only run when the delete's own scope is env-wide (`orgId === null`) — an org-scoped delete removed nothing that was ever in the shared registry, so there is nothing for it to heal. That is a one-argument change on the same `(type, name)`-addressed helper and needs no re-keying.\n\nThe alternative reading — org-scoped registry keys — is an architecture change well beyond this, and #6602's card already ruled it a `needs_decision` if anyone reaches for it.\n\nNote the self-heal branch (`current == null`, \"even with no overlay row, a stale runtime shadow may linger\") would need the same scope test, or it becomes the new eviction door.\n\n## Refs\n\n- `restoreArtifactRegistryView`, `deleteMetaItem`'s two call sites — `packages/metadata-protocol/src/protocol.ts`\n- `SchemaRegistry.removeRuntimeShadow` / `removeOverlayEntry` — `packages/objectql/src/registry.ts`\n- #6602 / PR #6779 (the two entry seams; this is the exit seam), #5079 / #6687 (step 3's origin), #5086 (unscoped host-config kernels), ADR-0005, ADR-0010 §3.3, ADR-0110 D3\n"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 6771,
+  "kind": "issue",
+  "title": "[metadata] addSysMetadataOverlayIndex 用 ADR-0048 之前的键抢占 idx_sys_metadata_overlay_active——同名索引有两个生产者,先跑的赢",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T15:07:46Z",
+  "updated_at": "2026-08-08T23:55:07Z",
+  "closed_at": "2026-08-08T23:55:07Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6771",
+  "body": "发现于 #6418 的实施(为 `ensureOverlayIndex` 找同名索引的既有生产者时逐行读到)。不在 PR #6770 范围内——那条只改 `packages/metadata-protocol`。\n\n## 事实\n\n`idx_sys_metadata_overlay_active` 这一个索引名,树内有**两个**生产者,键**不一样**:\n\n| 生产者 | 键 | 位置 |\n|---|---|---|\n| `ensureOverlayIndex`(运行时,ADR-0048 现行) | `(type, name, organization_id, COALESCE(package_id, ''))` `WHERE state = 'active'` | `packages/metadata-protocol/src/protocol.ts` |\n| `addSysMetadataOverlayIndex`(DatabaseLoader) | `(type, name, organization_id, environment_id, scope)` `WHERE state = 'active'` | `packages/metadata/src/migrations/add-sys-metadata-overlay-index.ts:30-33` |\n\n第二个的键是 **ADR-0005 Phase 1 的旧键**,模块头注释自己写着 `(type, name, organization_id, environment_id, scope)`。而 `environment_id` 早已按 ADR-0005(2026-05 修订)退役——`sys-metadata.object.ts` 的字段注释原文:「`environment_id` is no longer written by saveMetaItem and not consulted by overlay reads. Kept for legacy rows; new writes leave it NULL.」`scope` 也不在现行判别式里。\n\n`packages/metadata-core/src/objects/sys-metadata.object.ts` 的 `indexes` 声明同样用现行键(`['type','name','organization_id','package_id']`),并在注释里明确指认 `ensureOverlayIndex` 是真正交付 active 范围的那一层。所以旧键只剩这一个生产者还在写。\n\n## 后果\n\n两个生产者都用 `CREATE UNIQUE INDEX IF NOT EXISTS`,所以**先跑的那个占住名字,后跑的静默变成 no-op**。\n\n调用点(`packages/metadata/src/loaders/database-loader.ts:345` 与 `:408`)在 `DatabaseLoader.ensureSchema()` 里,两处的 catch 都是空的(`// ignore — index is an optimization`)。`ensureOverlayIndex` 则由 7 个协议入口按需触发。谁先到取决于 boot 顺序,不由任何一处声明决定。\n\n`addSysMetadataOverlayIndex` 赢的那条路径上,`sys_metadata` 得到的是按旧键的唯一索引:\n\n1. `environment_id` 现在恒为 NULL,`scope` 有默认值,而 SQL UNIQUE 把 NULL 视为 DISTINCT —— 于是这个索引对 `environment_id IS NULL` 的行(即所有新行)**根本不约束**;\n2. `package_id` 不在键里,两个包提供同名元数据会被判为冲突(ADR-0048 引入 `package_id` 正是为了拆开它们);\n3. 名字被占住之后,`ensureOverlayIndex` 的 `IF NOT EXISTS` 什么都不做——ADR-0005 现行的覆盖层唯一性一条都没落地。\n\n⚠️ 与 #6418 的关系:#6418(PR #6770)修的是**顺序**,让建失败时旧索引不被摧毁。本条是**另一个缺陷**——建\"成功\"了,但建的是错的键。PR #6770 落地后,`ensureOverlayIndex` 的探针会先建一个临时索引,再 DROP 正式名重建,所以运行时这一层现在会**覆盖**掉旧键索引(顺序依赖仍在,只是赢面反过来)。两者都不该继续存在。\n\n## 建议方向(未做决定,留给 triage)\n\n看起来是 ADR-0048 迁移时漏掉的一处:`addSysMetadataOverlayIndex` 的键没跟着改。可选项至少有「删掉这个生产者,让运行时那层唯一负责」和「把键对齐到现行判别式」两条,取舍取决于 `DatabaseLoader` 路径上是否存在 `ensureOverlayIndex` 到不了的部署形态——我没有测量这一点,不在本单范围内。\n\n## 复现\n\n读三个文件即可,无需运行:`add-sys-metadata-overlay-index.ts:30-33`、`database-loader.ts:345`/`:408`、`protocol.ts` 的 `ensureOverlayIndex`。\n"
+}

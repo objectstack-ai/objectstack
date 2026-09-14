@@ -1,0 +1,35 @@
+{
+  "number": 6800,
+  "kind": "pull_request",
+  "title": "fix(lint): named listViews/formViews entries keyed by the runtime identity, single spelling (#6422)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T18:04:31Z",
+  "updated_at": "2026-08-08T23:40:07Z",
+  "closed_at": "2026-08-08T23:40:06Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": "2026-08-08T23:40:06Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/6800",
+  "body": "Fixes #6422\n\n## What\n\n`validateTranslationReferences`'s `collectViewRecord()` accepted two spellings for every named `listViews.&lt;key&gt;` / `formViews.&lt;key&gt;` entry — the map key and the entry's inner `name` — while the composer (`expandViewContainerWithDiagnostics` in `packages/spec/src/ui/view.zod.ts`) constructs each named entry's runtime identity from the map key alone and ignores `v.name` entirely.\n\nPer the #5164 ruling (2026-08-06: canonical = the runtime identity's bare key), restated for this card in the PM claim on #6422, the named branches now read their `_views` keys from the composer, exactly as the default `list` already does via `defaultListViewKey` (#6038):\n\n- an inner `name` diverging from its map key stops being a legal bundle key — the runtime never resolves it;\n- a collision-renamed entry becomes legal under its renamed key. This is the issue's sharpest shape: `{ list: {...}, formViews: { default: {...} } }` registers `crm_lead.default` (the list) and `crm_lead.default_2` (the form). The rule previously accepted `default` for the form (a key that resolves the OTHER view) and reported `default_2` — the one spelling that actually resolves the form — as an orphan.\n\nNew helper `namedViewKeys()` is `defaultListViewKey`'s sibling: a thin reader of the composer, never a re-derivation. Positional alignment rests on two documented facts of the composer (named entries expand first per family, one item per object-typed map value, in authoring order).\n\nThe assembler is untouched (teaching it to honour inner `name` is the direction #5164 rejected). `validate-null-guards.ts` is untouched (claimed in parallel under #6458).\n\n## Stop conditions, re-measured\n\n1. **In-repo blast radius: zero, re-measured rather than inherited.** Full `os lint --json` over all 12 ratchet-covered configs (the exact set in `scripts/i18n-coverage-baseline.json`), before vs after, diffed on `(rule, path, message)` triples: **`added: 0 / removed: 0` on every config** — verdicts are byte-identical. No baseline entry was added anywhere.\n2. **Downstream corpora.** objectui at its 2026-08-08 HEAD: 36 files contain `listViews`/`formViews`; a brace-walking scan found **zero** entries whose inner `name` diverges from its map key, and objectui authors no `stack.translations` bundles of its own. **The HotCRM corpus itself (source of the \"authors write either\" comment) is not in this repo or in objectui, and I could not reach it — its blast radius is unmeasured, not zero.** If a HotCRM-family corpus is linted downstream, bundles keyed by a diverging inner `name` will newly warn (warning severity — the rule's findings are never errors).\n\n## Tests\n\nFour new pins in `validate-translation-references.test.ts`, each \"legal\" assertion paired with a planted bad key on the same fixture so a green run is never an empty run:\n\n- inner `name` diverging from map key → flagged (listViews branch, formViews branch);\n- the collision-rename sharp case: `default` and `default_2` both legal (each resolves a real registry entry), planted `default_3` flagged. Dormant in shipped configs only because `lint-view-refs.ts` makes collisions a hard error — dormancy that depends on another rule staying strict is pinned, not trusted;\n- inner `name` matching its map key stays legal (the ubiquitous authored shape — the narrowing removes a spelling, not a view).\n\n## Reverse verification (direction predicted first)\n\n- **Ablation A** — restore the inner-`name` limb (`addView(binding, strName(sub.name))`). Predicted: exactly the two diverging-inner-name tests go red, collision + matching-name pins stay green. Measured: `2 failed | 38 passed`, both failures the named tests.\n- **Ablation B** — feed the raw map key instead of the composer's key. Predicted: exactly the collision-rename pin goes red. Measured: `1 failed | 39 passed`, the failure being that named test.\n\n## Verification\n\n- `pnpm --filter @objectstack/lint test`: 65 files, **1656 passed** (1652 baseline + 4 new)\n- `pnpm --filter @objectstack/lint typecheck`: clean\n- `pnpm exec eslint --no-inline-config packages/lint`: exit 0\n- `node scripts/check-nul-bytes.mjs`: OK\n- changeset: `.changeset/view-record-map-key-only.md` (`@objectstack/lint` patch — published lint verdicts change)\n\nNote: the Docs Drift Check advisory on this PR fired on package paths, not semantics — none of the three listed docs documents the named-view-key spelling surface, so it is not actionable here (and `content/docs/releases/**` is never edited in a code PR; the changeset is the release-notes input).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01F8q5J1MQyocgtNspb15fSn"
+}

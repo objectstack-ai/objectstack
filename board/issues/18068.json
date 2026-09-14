@@ -1,0 +1,33 @@
+{
+  "number": 18068,
+  "kind": "issue",
+  "title": "PM write-identity locks 1–4: deny MCP GitHub content writes in settings, REST-only writes for seats and devs with a declared write budget, `batch` default 2, user accounts limited to assignee and approval",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:skills",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-13T16:17:42Z",
+  "updated_at": "2026-09-13T23:54:40Z",
+  "closed_at": "2026-09-13T23:52:30Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/18068",
+  "body": "**Maintainer direct dispatch** — the maintainer (pm@objectstack.ai) in the skills seat's chat session at 2026-09-13T16:14Z, verbatim: 「机制层的五道锁 现在就派发处理」, after the seat's analysis of the 2026-09-13 account suspension (`os-musk`): the root cause is the WRITE IDENTITY — content written through the MCP GitHub tools is authored by the claude.ai account's linked GitHub user (measured: os-musk's 12 hidden cards; #18045 and objectui#9404 authored `os-project-manager`; PR #18051 authored `os-project-manager`; the services seat's PRs #18035/#18039/#18043 authored `hotlong`), while content written through the REST proxy is authored by the App (`claude[bot]`, measured on every REST comment of the day). Concurrency amplified the shape; identity is what a suspension acts on. Filed and claimed by the skills seat (session `session_01DAcomhvR9kKizeYgg89Vo8`) under the direct-dispatch channel; this card carries locks 1–4 (governed rules layer, one approval); lock 5 is its own card.\n\nDedupe keywords: `write identity`, `claude[bot]`, `MCP write tools`, `permissions.deny`, `batch default 2`, `REST proxy`.\n\n## Lock 1 — MCP GitHub content writes unreachable (`.claude/settings.json`)\nAdd a `permissions.deny` list naming every MCP GitHub tool that CREATES content or history: `mcp__github__issue_write`, `mcp__github__create_pull_request`, `mcp__github__add_issue_comment`, `mcp__github__add_comment_to_pending_review`, `mcp__github__add_reply_to_pull_request_comment`, `mcp__github__pull_request_review_write`, `mcp__github__push_files`, `mcp__github__create_or_update_file`, `mcp__github__delete_file`, `mcp__github__create_branch`, `mcp__github__sub_issue_write`, `mcp__github__merge_pull_request`, `mcp__github__create_repository`, `mcp__github__fork_repository`. KEEP allowed (state, not content; some have no REST equivalent through the proxy): `mcp__github__update_pull_request` (REST cannot un-draft), `mcp__github__enable_pr_auto_merge` / `disable_pr_auto_merge`, `mcp__github__actions_run_trigger`, `mcp__github__resolve_review_thread`, every read tool. The dev measures whether Claude Code honours a repo-level `permissions.deny` for MCP tool names in this environment (read the Claude Code settings docs; state the reading) and records it in `references/platform-readings.md` if a row is owed (references tier).\n\n## Lock 2 — devs make no board API writes beyond three (`.claude/agents/os-dev.md`)\nRule: every GitHub write a dev makes goes through the REST proxy (`curl` with the environment `GITHUB_TOKEN`, `Content-Type: application/json`); the whole budget is `git push` + one `POST /pulls` (draft) + `POST /issues/{n}/labels` (`skip-changeset`) + one `os-dev-report` comment; ⛔ no MCP GitHub write tool, ⛔ no board enumeration (card and thread via the payload channel or repo-scoped single-card reads). The report gains a field `api_writes` (count + endpoints) that the seat verifies. Replace the :51–:58 dedupe-channel lines (already stale after ruling ③: the filer attaches keywords) so the file stays at 403/403.\n\n## Lock 3 — `batch` default 2 (`SKILL.md` :60; `core-rules.md` mirror if its line states a default)\n「默认 `3`」 → 「默认 `2`」; the maintainer ceiling `5` unchanged; the seat post protocol line 「accelerator armed while devs are in flight」 unchanged. Maintainer's own words on the services seat today: 「当前任务处理完,后续并发降到2」.\n\n## Lock 4 — account roles (`SKILL.md` 〈全体座位的不变量〉 or 〈座位贴协议〉, one line; `core-rules.md` mirror)\nUser accounts do three things only — assignee (a label-state, never content), authorized approval, the maintainer's own hand; ⛔ a seat or dev never writes content as a user account; ⛔ an approver account (`os-zhuang`, `hotlong`) never runs a seat and is never the linked user of a seat's claude.ai account. Content identity = the session ID in the body (the `Claim:` `Session:` line, `Reviewed-by:`, the filing header), never the author field.\n\n## Budgets and gates\nEvery file is at its ceiling (SKILL.md 812/812, widest row 342 B; core-rules.md 151/151; os-dev.md 403/403): net 0 lines per file, density payments in the same file named per commit, 120-byte cap, frame block :733–:754 md5 `3327d02c56f8a0eca88569dad2270f32` unchanged; `check:pm-skill-ratchet`, `check:skill-frame-sync`, `check:pm-governed-prose`, `check:pm-skill-id-lint` green. One commit per lock, each quoting the ruling. `.claude/settings.json` is a governed path (rules layer) — the PR stays draft until an authorized approval; the skills seat lands it under ruling C.\n\n## Executable criterion\n`git show origin/main:.claude/settings.json | grep -c mcp__github__issue_write` 0 → 1 (inside `permissions.deny`); `git grep -c '默认 \\`2\\`' .claude/skills/pm-dispatch/SKILL.md` 0 → 1 and 「默认 `3`」 1 → 0; `git grep -c 'api_writes' .claude/agents/os-dev.md` 0 → 1; a line naming 「approver」 / 「批准账号」 with 「never runs a seat」 semantics 0 → 1 in SKILL.md; lit controls on neighbouring phrases unchanged.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

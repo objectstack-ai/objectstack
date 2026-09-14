@@ -1,0 +1,30 @@
+{
+  "number": 18113,
+  "kind": "issue",
+  "title": "spec: publish the `icontains` text-comparand refusal (predicate + reason) beside `FILTER_TEXT_CASES` so every face reads one implementation — ruling D on objectui#9048",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-elon-musk",
+    "id": 328766734,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-14T03:29:22Z",
+  "updated_at": "2026-09-14T03:29:22Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/18113",
+  "body": "Filed by the director seat (objectstack #12708, summon #23, `session_01WCEaPsmKY4UyoivKkkaUHt`) executing decision batch #133 item 1 — maintainer 「决裁批 #133 同意」 to the recommended **D** on objectui#9048, 2026-09-14T03:29Z. Lane by landing site: `packages/spec` ⇒ `domain:spec`. Priority inherited from the parent card (p2); triage may re-rank.\n\n## The ruling this card executes (verbatim from objectui#9048, batch #133 item 1)\n\n> **D — lift the predicate to the contract's owner.** `@objectstack/spec` already publishes the refusal as conformance cases (`FILTER_TEXT_CASES`) and already exports runtime comparand helpers from the sibling module (`isAcceptedFilterComparand`, `normalizeFilterComparandTypes` in `filter-comparand-type.ts`, both re-exported by `packages/spec/src/data/index.ts`). D exports the text-comparand refusal predicate (+ its reason text) from that same place; `@object-ui/core`'s internal `text-comparand.ts` becomes a call into spec, and `@object-ui/data-objectstack` reads the same door. One implementation, three envelopes, and it lives with the producer of the rule.\n\n## What to build (this repo only)\n\nTwo exports, reachable from the package entry via `packages/spec/src/data/index.ts` (the dev chooses whether they live in `filter-text-conformance.ts` beside `FILTER_TEXT_CASES` or in a sibling module that `data/index.ts` re-exports — both satisfy the ruling):\n\n1. `isRefusedTextComparand(target: unknown): boolean` — `true` exactly for the two REJECTION rows `FILTER_TEXT_CASES` declares for the case-insensitive-contains operator: a non-string comparand, or the empty string.\n2. `textComparandRefusalReason(field: string, operator: string, target: unknown): string` — the contract's half of the message, returned without leading capital or trailing period so each face seats it in its own envelope; `operator` is the spelling that ARRIVED (`$icontains` or `icontains`), never a canonical substitute.\n\n⚠️ The reason text is **load-bearing, not stylistic**: `FILTER_TEXT_CASES` rows carry `mustMention`, and two objectui faces already ship this exact text byte-for-byte. The reference implementation is objectui `packages/core/src/utils/text-comparand.ts` (on objectui `origin/main` @ `55f39ee9`) — port its two functions' behaviour and message bytes; ⛔ do not reword. Its `describeComparand` helper travels with the reason function if the reason needs it.\n\n## Acceptance\n\n- A pin that drives every `FILTER_TEXT_CASES` case through `isRefusedTextComparand`: each REJECTION case answers `true`, each `FILTER_TEXT_ROWS` comparand answers `false`.\n- A pin that the reason text for `''` and for a non-string comparand contains each case's `mustMention` tokens for BOTH arriving spellings.\n- `Clause-②: yes` — two new exported symbols on the published `@objectstack/spec` entry; changeset `minor`; `needs:contract-review` carrier at claim per the seat's protocol.\n- Acceptance note (measurement, ⛔ not a gate): this repo's own faces already refuse the same rows (`@objectstack/formula` / the engine answer 0 of 9 `FILTER_TEXT_ROWS`, per objectui#9048's dev report). Measure whether any of them is a literal copy of this predicate; if so, fold it onto the new export in the same PR (one implementation), else report the reading and leave it.\n\n## Fences\n\n- ⛔ No objectui change in this PR — objectui#9048 is the consumer half and is `pm:blocked` on this card; it unblocks when objectui's installed `@objectstack/spec` version exports `isRefusedTextComparand` (the installable-consumer criterion, ⛔ not merge).\n- ⛔ No new error code: `INVALID_FILTER` is the declared code and is already in the ledger.\n- ⛔ `content/docs/releases/**` untouched.\n\n## Re-check before claiming\n\n```\ngit fetch origin main\ngit grep -n -E 'export (const|function) (isRefusedTextComparand|textComparandRefusalReason)' origin/main -- packages/spec/src   # expected 0 today\ngit grep -n -E \"export \\* from './filter-text-conformance'\" origin/main -- packages/spec/src/data/index.ts                   # expected 1 (entry reachability)\n```\n\n## Refs\n\nobjectui#9048 (parent ruling, batch #133 item 1) · objectui#9152 (the objectui half already landed) · objectui#8748 / objectui#9001 (the two shipped envelopes) · `packages/spec/src/data/filter-text-conformance.ts` · `packages/spec/src/data/filter-comparand-type.ts` (sibling runtime helpers precedent)\n\nDedup terms: `isRefusedTextComparand`, `textComparandRefusalReason`, `FILTER_TEXT_CASES export predicate`, `icontains empty comparand spec export`, `text-comparand`\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

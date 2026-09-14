@@ -1,0 +1,35 @@
+{
+  "number": 6709,
+  "kind": "pull_request",
+  "title": "fix(metadata-protocol): PATCH /data/:object/:id binds the PATH row, not the body's id (#6479)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T13:15:21Z",
+  "updated_at": "2026-08-08T14:04:06Z",
+  "closed_at": "2026-08-08T14:04:05Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-08T14:04:04Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/6709",
+  "body": "Fixes objectstack-ai/objectstack#6479\n\n## 结论先说\n\n`PATCH /data/:object/:id` 这一条 ingress 上,**行标识以路径 `:id` 为准**。请求体里的标量 `id` 不再能把写落到别的行上。\n\n实现落在 `packages/metadata-protocol/src/protocol.ts` 的 `updateData` 区,一处派发前的载荷合并;引擎、`packages/spec` 都没动。\n\n## 前提复核(在 `origin/main` 上逐条读过,不是照抄 issue)\n\nIssue 说的三方打架,在合并后的 main 上完整成立(行号已漂移,以下按当时 `e6025e9` 重新定位,现已再合并至 `d6d1a50be`):\n\n- `protocol.ts:5743` `const current = await this.probeRecord(request.object, request.id)` —— 存在性探测判**路径 id**;\n- `:5748` `this.assertVersionOf(request.object, request.id, current, request.expectedVersion)` —— OCC 判**路径 id**;\n- `:5749` `const opts = { where: { id: request.id } }`,`:5759` `await this.engine.update(request.object, request.data, opts)` —— `request.data` **原样**下发;\n- `:5760`–`5764` 回执 `{ id: request.id, record: result }`。\n\n而 `packages/metadata-core/src/engine-update-dispatch.ts` 的规则是载荷优先,案例表里写着 `a SCALAR data.id still wins over a scalar where.id`(`expectId: 'rec_1'`)。两者相加:`PATCH /data/task/rec_1` 带 body `{\"id\":\"rec_2\",\"title\":\"x\"}` 会探测 rec_1、按 rec_1 校 `If-Match`、**写 rec_2**、再回一个 `id: rec_1` 配 rec_2 的回读。rec_2 从未被探测、也从未被 OCC 校验。\n\n线上到引擎之间确实没有任何一层剥 `id`:`rest-server.ts` 的 PATCH 路由只解构掉 `expectedVersion`;`UpdateDataRequestSchema` 把 `data` 声明为 `z.record(z.string(), z.unknown())`。\n\n## 做法(裁决路线 A)\n\n派发前把路径 id 盖到载荷上,和**批量 ingress** 对同一问题的既有答案同形:\n\n```\n// 单条(本 PR)\n{ ...request.data, id: request.id }\n// 批量(rest-server.ts,一直如此)\nql.update(op.object, { ...data, id }, …)\n```\n\n于是探测的行、OCC 校的行、真正写的行、回执 `id`/`record` 指的行,是同一行 —— URL 里那一行。一个仓库对「一次单行写绑定哪一行」只剩一个答案(#4550 / #4434 那一族)。\n\n几点边界,都是刻意的:\n\n- **不改任何引擎判定。** 这次调用照旧 dispatch 成 `by-id`,绑定的还是 `where` 本来就带着的那个 id。#5748 的载荷优先规则、#6435 / PR #6475 的 by-id 载荷剥离,都没碰,`ENGINE_UPDATE_DISPATCH_CASES` 一行未动。\n- **不是路线 B,也不是路线 C。** 裁决明确否掉了「body id 与路径不等就 400」和「在 `UpdateDataRequestSchema` 层禁 `id`」;前者在已发布 API 上新增一条拒绝,后者改的是被接受的请求形状。本 PR 两者都不做,接受的 body 形状一字未变。\n- **非记录载荷原样透传**(`undefined` / `null` / 数组)。引擎是故意不做保护地读 `data.id` 的,所以 `undefined` 在那边就该是 `TypeError`;ingress 若在这里合并出一个 `{ id }`,就会把一次坏调用答成一次成功的空写 —— 比 producer 更宽容,正是 `engine-update-dispatch.ts` 存在的目的所要防的那件事。这些形状本身也没有标量 `id` 去压 `where.id`,所以不变式对它们靠 `opts.where` 就成立。\n- **没有加 warn 日志。** `import-runner.ts` 每匹配一行都走这条 ingress,body 里带 `id` 是 CSV 导入的常态,逐行 warn 会在导入路径上产生无界日志;批量 ingress 也一直是静默覆盖。两条 ingress 保持同一种沉默。\n\n## 测试\n\n新增 `packages/metadata-protocol/src/protocol.update-path-id-wins.test.ts`(16 例)。钉的是 **ingress 级不变式**,不是「这行代码在」:*探测的行、OCC 校的行、写的行、回执的 `id`/`record`,是同一行 —— 路径行。*\n\nfake engine 的 `update` 不自己复刻规则,而是调用 producer 的 `assertEngineUpdateDispatch(data, options)` 并**服从它给出的绑定行**(`delete` 同样开在 `assertEngineDeleteDispatch(options)`)。这一点是关键:若在这里手抄一个 `if (opts?.where?.id)`,每条用例都会写 rec_1,整套测试会把「早就修好了」报成绿。\n\n覆盖:\n\n- (a) body id === 路径 id —— 最常见的「GET 一条、改字段、整份 PUT 回来」仍然成功,落在路径行;\n- (b) body id ≠ 路径 id —— 写落在**路径行**,另一行**未被触碰**(断言的是它**存下来的行体**,不是返回值);回执 `id` 与 `record.id` 不再互相矛盾;body id 指向一条不存在的行时,仍然写路径行(修复前这里回的是 `{ id: 'rec_1', record: null }`);\n- (c) OCC —— 匹配路径行的 `If-Match` 放行,且放行的是**路径行**的写;过期 token 是 `CONCURRENT_UPDATE` / 409 且两行都没动;送**另一行**的版本号(正是 body 指向的那行)照样 409,`currentVersion` 报的是路径行的 —— OCC 判的是路径行,现在守的也正是被写的那一行;\n- (d) 对照钉:路径 id 指向空行仍是 `RECORD_NOT_FOUND` / 404 且 `engine.update` 完全未被调用;无 `id` 的普通 PATCH、非标量 / 假值 body id(算子对象 / 数组 / `null` / `0`,即 #6435 那一族)、数组载荷,全都绑定路径行;`undefined` / `null` 载荷仍然抛引擎自己的 `TypeError`。\n\n最后一条**刻意不按 ADR-0112 断言 `code` + `status`**,差别正是要点:那不是本 ingress 新装的一条拒绝,而是 `ObjectQL.update` 对缺失载荷不做保护地读 `data.id` 的调用方编程错误,原样浮出来。报告里照实说明,而不是套模板凑一个信封断言。\n\n### 反向验证(方向先预测,再执行)\n\n预测:撤掉修复后,只有「被写的行会变」的那几条转红,对照钉保持绿。\n\n`git checkout origin/main -- packages/metadata-protocol/src/protocol.ts` 后重跑该文件:**4 红 / 12 绿**,与预测一致 ——\n\n```\n× (b) body id !== path id …            AssertionError: expected 'rec_2' to be 'rec_1'\n× (b2) 回执自洽 …                       AssertionError: expected 'rec_2' to be 'rec_1'\n× (b3) body id 指向不存在的行 …          AssertionError: expected null to match object { id: 'rec_1', title: 'x' }\n× (c) 匹配的 If-Match 放行的是路径行 …    AssertionError: expected 'rec_2' to be 'rec_1'\nTest Files  1 failed (1)      Tests  4 failed | 12 passed (16)\n```\n\n转绿的 12 条不是凑数:(a)、404、非标量 body id、`TypeError` 那几条在修复前后**本来就该同样是绿**,它们钉的是这次改动**不许动**的行为。\n\n### 本地跑过的\n\n```\npnpm --filter @objectstack/metadata-protocol test   → 59 files / 643 tests passed\npnpm --filter @objectstack/rest test                → 68 files / 1039 tests passed\nobjectql: engine-update-dispatch / engine-update-by-id-payload-id\n          / engine-update-multi-payload-id          → 3 files / 58 tests passed  (#5748 / #6435 的钉未受影响)\npnpm lint                                           → clean\nturbo run typecheck (packages/* + packages/*/* + apps/*) → 120/120 successful\nlint.yml 里 40 条 check:* 逐条跑过                    → 全 PASS(含 check:engine-double-contract、\n                                                       check:kernel-hook-pairs、check:type-check-debt)\n```\n\n`check:type-check-debt` 第一次在我自己批量脚本给的 3 GB 堆上 OOM 了,单独用 6 GB 重跑通过 —— 是我的资源设置,不是门禁判定。\n\n## 后继定价(PM 要的三张卡)\n\n- **#5079(已删 overlay 仍出现在 `/meta` 列表)**:**不受影响**。那条走 `getMetaItems` 的读路径与 overlay 索引,与单条数据写 ingress 无交集。\n- **#6418(`ensureOverlayIndex` DROP-then-CREATE 窗口)**:**不受影响**。同一文件、不同区域(索引维护),本 PR 未触及;两处的临近只是文件级的,不是逻辑上的。\n- **#6285(runtime authoring gate 缺少输入)**:**略微变容易**。该 gate 的输入取自写 ingress 交给引擎的载荷;现在这条 ingress 交出去的载荷里,`id` 一定等于被写的行,少了一种「载荷说一行、被写的是另一行」的输入歧义要先澄清。仅此而已,不构成它的修复。\n\n## 范围外发现\n\n无。\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01W6bLax4KMrSfnE1ydFU8Dw)_"
+}

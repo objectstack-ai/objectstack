@@ -1,0 +1,35 @@
+{
+  "number": 6851,
+  "kind": "pull_request",
+  "title": "test(http-conformance): setFallbackHandler 的四条契约保证跨适配器落锁 —— 参考适配器先补实现 (#6143)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T00:35:00Z",
+  "updated_at": "2026-08-09T00:53:40Z",
+  "closed_at": "2026-08-09T00:53:39Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": "2026-08-09T00:53:39Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/6851",
+  "body": "Fixes #6143\n\n## 摘要\n\n`IHttpServer.setFallbackHandler` 的契约(`packages/spec/src/contracts/http-server.ts`,#5040 §1-C)写了**四条可测的保证**,而被这批语义点名负责跨适配器守卫的 `@objectstack/http-conformance` **一条也没断言**。本 PR 按 issue 给定的、不可反转的顺序补齐:\n\n1. **先**给 conformance 包自己的参考适配器 `NodeHttpServer` 实现 `setFallbackHandler`(`packages/qa/http-conformance/src/adapter.ts`)。`node:http` 没有现成的 not-found 钩子,所以在**路由未命中分支**接入:handler 存为**字段**、仅在 `match()` 对全部显式路由都未命中之后才被咨询,**绝不是**一条 `${prefix}/*` 通配路由;未命中分支同时把 404/405 + `Allow` 的标准答复抽成 `writeUnmatchedResponse()`,fallback 不写响应时原样落回(**405 + `Allow` 仍然优先**);fallback 抛错答 500 `Fallback handler failed`(与主适配器同一措辞),不藏进 404。\n2. **再**加共享用例 `fallback-seam.conformance.test.ts`,把四条保证逐条转写。`describe.each` 同时驱动 `NodeHttpServer` 与 `HonoHttpServer`(真实 socket,`listen(0)`),**9 用例 × 2 适配器 = 18 条**。没有任何 Hono-only 条件用例——那证明不了跨适配器一致,正是本卡片要防的那种绿。\n\n**观察类缺口,不是现网故障。** 今天只有 `HonoHttpServer` 实现该成员;参考适配器 `NodeHttpServer` 此前**不实现**该成员——而该成员在契约上是 optional,所以那是**合规**状态,不是缺陷。本 PR 关闭的是潜伏缺口:#5111 之后该 seam 是声明式 `apis:` 端点的**唯一**进入通路,第二个适配器在这四条上分叉的那天,代价是「该适配器上声明式端点行为不可预期」。趁没有第二个实现者时补,是这份覆盖唯一便宜的时刻。\n\n## 前提核查(在**合并后的** `origin/main` 上重测)\n\n分支闲置期间 `origin/main` 前进了 19 个提交,已合并(无冲突),此前一切测量作废、整条链在合并结果上重跑。\n\n| 前提 | 实测 |\n|------|------|\n| conformance 包内四条保证零断言 | `git grep -iE 'setFallbackHandler\\|fallback' origin/main -- packages/qa/http-conformance/` 唯一命中是 `node-plugin.ts:18` 头注释里一个无关的 \"fallbacks\" 字样 ✅ |\n| `NodeHttpServer` 不实现该成员 | `git grep setFallbackHandler origin/main -- .../http-conformance/src/adapter.ts` 零命中 ✅ |\n| `HonoHttpServer` 实现该成员 | `.../plugin-hono-server/src/adapter.ts:569` ✅ |\n\n## 四条保证 → 用例,以及每条**怎么才会红**\n\n| 用例 | 保证 | 能失败的方式 |\n|------|------|-------------|\n| **G1-a** 先装 fallback、再注册路由,路由不被遮蔽 | 1 | 通配路由实现:先注册的 `/*` 按 first-match-wins 抢走 `/api/v1/thing` → 红。**这条是专门构造出来让 catch-all 必红、让真 not-found 钩子必绿的** |\n| **G1-b** 已被路由匹配的请求不进 fallback | 1 | 惰性实现对它是平凡绿,反向核查中如实排除 |\n| **G1-c** 无人认领的路径进 fallback,请求身份完整 | 1 | 存而不接 → 红 |\n| **G2-a** `req.body` 可读:JSON body + query + method + path + headers + rawBody | 2 | 不解析 body,或 `params` 崩在 `undefined` → 红 |\n| **G2-b** form body 按 content-type 解析,与路由 handler **同一份**解析结果 | 2 | 另起一套请求构造、与路由路径漂移 → 红 |\n| **G3-a** 重复安装是**替换**:只有最后一个跑,且只跑一次 | 3 | 串链或叠钩子 → `ran` 数组与响应体双红 |\n| **G4-a** 不写响应时 404 **逐字节**保留,**且 fallback 确实运行过** | 4 | `ran` 断言把「压根没被咨询」与「拒答后落回」分开:惰性实现 404 一模一样但 `ran=false` → 红 |\n| **G4-b** 不写响应时 **405 + `Allow`** 保留(#5040 §7-1) | 4 | catch-all 把 DELETE 也吃掉答 500 → 红;丢 `Allow` → 红 |\n| **G5-a** 抛错的 fallback 答 500 同一措辞 | (失败模式对齐) | 藏进 404 或答适配器私有错误体 → 红 |\n\n## 反向核查(预测先行,实测在后)\n\n三个方向**都只改 `NodeHttpServer`**;预测写于任何反向运行之前(scratchpad 存档,续作沿用未改)。\n\n| 方向 | 预测(node 侧) | 实测(node 侧) | 一致 |\n|------|----------------|----------------|------|\n| **(a)** 实现还原为惰性(setter 存,未命中分支从不咨询) | **8 红** / 1 绿 | **8 红**:G1-a、G1-c、G2-a、G2-b、G3-a、G4-a、G4-b、G5-a | ✅ 逐条一致 |\n| **(b)** 改为 `/*` 通配路由实现(契约禁止的那个形状) | **5 红**:G1-a、G3-a、G4-a、G4-b、G5-a | **5 红**:同上五条 | ✅ 逐条一致 |\n| **(c)** 重复安装改为串链而非替换 | **1 红**:G3-a | **1 红**:G3-a | ✅ 逐条一致 |\n\n- **如实排除**:G1-b 在方向 (a) 下**两侧皆绿**——一个从不运行的 fallback 当然\"不会为已匹配的路由运行\"。它对 (a) 无鉴别力,不计入战果;保留它是因为它对另一类分叉(fallback 抢跑已匹配路由)仍是守卫。\n- **Hono 侧在三个方向下 9/9 全绿**(反向变体只动 node 适配器),证明红是变体造成的、不是用例本身脆。\n- **Hono 未做任何修改,18 条一次全过**——即**四条保证 Hono 侧无违反**,没有需要\"弯断言\"的发现。\n\n## 门禁(合并后的树,真实输出)\n\n| 门禁 | 结果 |\n|------|------|\n| `pnpm lint` | exit=0 |\n| `pnpm --filter @objectstack/http-conformance typecheck`(`tsc --noEmit`) | exit=0 |\n| `@objectstack/http-conformance` 全量用例 | **Test Files 3 passed (3) / Tests 64 passed (64)**(其中新增 18) |\n| `turbo run build --filter='./packages/*' --filter='./packages/*/*'`(`lint.yml` 的构建闭包) | **70 successful, 70 total** |\n| `lint.yml` 的 `check:*` 全套(42 项) | **42/42 exit=0** |\n| `check:empty-changeset` / `check:adr-0087-registration` | exit=0(后者:本 PR 无 declared-breaking changeset) |\n| TEST_DEBT | **未上升** —— `check:type-check-debt`(`--re-measure`)重测 34 条账目:*\"none above its recorded number\"*,`scripts/check-type-check-coverage.mjs` 账本本 PR **零改动**,工作树干净 |\n\n`@objectstack/http-conformance` 在 TEST_DEBT 账本里(记 4)。新用例文件在解除 `**/*.test.ts` 排除后**贡献 0 个错误**——重测报 3(`TS2307 x2` + `TS2304 x1`,两条在 `node_modules` 的 `.d.ts` 里、一条是既有的 `conformance.integration.test.ts` 里 `@objectstack/spec/contracts` 未解析),比账本记的 4 **少 1**。那个 -1 不是本 PR 造成的:本 PR 只碰两个文件,`adapter.ts` 走的是包自己的 `tsc --noEmit`(绿),新用例文件零错误;该包自身源码在 main 上自 #4935 起未变。全仓共 12 条账目低于天花板(#6376 的既有状况),`--lower` 是 opt-in、本次未传,所以没有任何账本被改写。\n\n> ⚠️ 过程记录:第一遍跑 `check:type-check-debt` 时我自己并发跑了一个 `tsc` 用同一份 `tsconfig.debt-remeasure.json`,把门禁的那次测量打成 `tsc exited null ... refusing to record 0` → exit=1。**那是我制造的并发假红,不是仓库状态**;隔离重跑后 exit=0(上表即重跑结果)。\n\n> `check:type-check-debt` / `check:i18n-coverage` 没有完整构建闭包会**拒绝测量**,按 `lint.yml` 的做法先跑上面那条 `turbo run build` 再跑,不把它们的拒绝读成红。\n\n## Changeset 判断(诚实版)\n\n`.changeset/http-conformance-fallback-seam.md` — **`@objectstack/http-conformance`: `minor`,且只有这一个包。**\n\n- **为什么带 changeset**:AGENTS.md 的「feature work 要带 changeset,纯 bug fix 不用」。这不是纯测试 PR——参考适配器**长出了一个此前没有的契约成员**,是加法式的 API 面。\n- **为什么是 `minor` 而不是 `patch`**:只加共享用例的话是 `patch`;`NodeHttpServer` 新增 `setFallbackHandler` 是新能力,`minor`。\n- **为什么只有这一个包**:因为只有它变了。`packages/spec` 的契约**未动**(四条保证早已声明,本 PR 是**断言**它们,不是改它们);`HonoHttpServer` 也**未动**(它 9 条全过)。给任何已发布包挂个 bump 都是不实。\n- **为什么不是 `skip-changeset`**:该包 `private: true`(不发布),但仓库**确实给私有包做版本**——`pnpm changeset status` 实测把 `@objectstack/http-conformance` 列进 \"Packages to be bumped at minor\",`@objectstack/dogfood` / `@objectstack/downstream-contract` 同样在版本流里。所以「本 PR 不声明任何 release」是假的,`skip-changeset` 会掩掉那条 CHANGELOG——而那条 CHANGELOG 正是未来第三个适配器作者知道「这四条现在是跨适配器强制的」的地方。\n\n## 边界\n\n- 改动面:`packages/qa/http-conformance/**`(适配器 + 用例)+ 一个 changeset。**`packages/spec` 未改**。\n- 未触碰 `content/docs/releases/`。\n- 未触碰 `packages/rest`(#6535 由另一个 agent 持有)。\n\n---\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_017uFVNMmTxLpmfQYiuKM1Yx\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_017uFVNMmTxLpmfQYiuKM1Yx)_"
+}

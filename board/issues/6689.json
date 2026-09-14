@@ -1,0 +1,34 @@
+{
+  "number": 6689,
+  "kind": "pull_request",
+  "title": "test(spec): put the pin file's two prose counts under the counting assertion (#6605)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T12:51:07Z",
+  "updated_at": "2026-08-08T13:34:20Z",
+  "closed_at": "2026-08-08T13:34:19Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": "2026-08-08T13:34:19Z",
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/6689",
+  "body": "Fixes objectstack-ai/objectstack#6605\n\n## What drifted\n\n`packages/spec/src/type-alias-convention.pin.test.ts` states its pin count in three\nplaces. One is asserted; two were not, and both had drifted:\n\n| site | said | actual |\n|:---|---:|---:|\n| section header above the pin list (`:267`) | 717 | 823 |\n| the counting case's own title (`:1620`) | 755 | 823 |\n| `expect(pins).toHaveLength(...)` | 823 | 823 |\n\nThe assertion matches `/^export type Iso\\d+ = Assert` over the file's own source, so it\nreads the **declarations** and never the prose sitting beside them — which is exactly\nwhy the other two could rot unwatched.\n\nRe-counted on `origin/main` @ `b127c8b22` rather than taken from the card:\n`grep -c '^export type Iso'` = **823**, and `pnpm check:spec-parsed-alias` independently\nreports `1517 bare z.input aliases, 823 pinned isomorphic, 694 paired with an XParsed`.\nThe card's 822 was correct when filed and went stale the same day — #6596 landed\n`GetMetaItemLayeredResponseSchema` on top of #4593's backfill.\n\n## One correction to the issue's premise\n\nThe issue title calls the header \"the only number not covered by a counting assertion\".\nIt is not the only one — the counting case's **own title** is a second, and it had\ndrifted 68 behind. The substantive premise holds in full (the header stated 717, the\ntruth is 823, nothing asserted it); only the word \"only\" does not.\n\nThat second site also settles the design question, because it is a *repeat offender*:\nthe receipt above it records that the title was already hand-corrected once, from 751 to\n754 (#6037) — and it drifted again anyway. Hand-maintenance has been tried here and\nmeasured to fail.\n\n## The fix: extend the counting machinery, not the literals\n\nLevel 2 of the ruling, enforcement variant. The case already reads its own source to\ncount declarations; it now recomputes the prose against that same operand:\n\n```ts\nconst stated = [...self.matchAll(/(\\d+) isomorphic \\w+/g)].map((m) => m[0]);\nexpect(stated.length, phrasingMoved).toBeGreaterThanOrEqual(2);\nconst wrong = stated.filter((s) => !s.startsWith(`${pins.length} `));\nexpect(wrong, `prose disagreeing with the ${pins.length} pins counted above`).toEqual([]);\n```\n\nThree deliberate properties:\n\n- **Matched by phrase, not at two fixed line numbers.** A sentence a later author writes\n  is covered the moment it is written. This is the property the alternative — deleting\n  the numbers and pointing at the assertion instead — does not have: removal resets the\n  drift but does nothing about re-introduction, and \"N isomorphic aliases\" is a very\n  natural thing for the next author (or agent) to write into a section header. Keeping\n  the number and making it unfalsifiable is the same bargain the pins themselves are\n  built on, in this file's own words at the top: *\"An exemption nobody can state falsely\n  is the only kind worth having.\"*\n- **The receipts are deliberately NOT matched.** The block above the assertion is dense\n  with historical arithmetic — `749 -> 822`, `-7`, `136 - 17 - 40 - 5 - 1`. Those are\n  true about past states of the file and rewriting them to today's count would destroy\n  the receipts. The matched phrase is the narrow one that can only ever mean \"how many\n  pins are in this file right now\"; verified to match those two sites and nothing else.\n- **A guard on the guard.** If a reword leaves no sentence matching, the filter would\n  pass over an empty list and the check would silently stop existing — the phantom-check\n  shape this repo keeps paying for. `toBeGreaterThanOrEqual(2)` refuses that.\n\nScope note: `docs/adr/0122-...md` also carries pin counts (`final: 1470 / 754 / 716`),\nleft untouched on purpose — that is the phase-2 flip's own dated outcome table, history\nin the same sense as the receipts, not drift.\n\n## Reverse verification\n\nDirection predicted before running, and both came out as predicted — plain red, no\ninversion:\n\n1. **Restore the stale `717` in the header** → the *new* assertion goes red naming the\n   sentence, while `toHaveLength(823)` above it still passes. This is the issue's\n   mechanism, reproduced: the old machinery cannot see this defect.\n   ```\n   AssertionError: prose disagreeing with the 823 pins counted above:\n     expected [ '717 isomorphic aliases' ] to deeply equal []\n   ❯ src/type-alias-convention.pin.test.ts:1788\n   ```\n2. **Reword both sites so the phrase disappears** → the guard-the-guard goes red, so the\n   check cannot pass vacuously.\n   ```\n   AssertionError: no prose states the pin count any more — has the phrasing moved?:\n     expected 0 to be greater than or equal to 2\n   ❯ src/type-alias-convention.pin.test.ts:1786\n   ```\n\n## Verification\n\n- `pnpm --filter @objectstack/spec exec vitest run` — **345 files / 8844 tests passed**\n- `pnpm --filter @objectstack/spec typecheck` — exit 0 (`tsc --noEmit`,\n  `check:scripts-typecheck`, `check:test-typecheck`; the last is where these pins'\n  compile-time proof actually lands, per #6183)\n- `pnpm check:spec-parsed-alias` — OK; self-test 18 assertions. This gate reads this file\n  as its exemption registry, so it is the one that would notice a mangled pin line; the\n  diff touches only comments, a title string and the case body.\n- `pnpm check:nul-bytes` — OK (6237 files); plus a targeted control-byte self-scan of the\n  edited file, clean.\n- `pnpm exec eslint packages/spec/src/type-alias-convention.pin.test.ts` — exit 0\n\n## Changeset\n\nNone: the diff is a single `*.test.ts` file, so nothing user-visible is published.\n`skip-changeset` is the intended route — flagged here for the PM to apply at acceptance\nrather than self-applied. Precedent for test-only diffs carrying that label: #6607, #6658,\n#6582.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_018ffcE95NaMJcL9XJ9VDYgk)_"
+}

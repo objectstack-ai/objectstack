@@ -1,0 +1,35 @@
+{
+  "number": 6543,
+  "kind": "issue",
+  "title": "driver-sql's inline unique-violation regex is a fourth private vocabulary — migrate it onto the shared @objectstack/types predicate",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T03:46:32Z",
+  "updated_at": "2026-08-08T20:41:31Z",
+  "closed_at": "2026-08-08T20:41:31Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6543",
+  "body": "Blocked-by: #6250 (the shared predicate must land first — PR #6541)\n\nFiled by the #6250 developer agent per that issue's ruling: *\"OUT OF SCOPE — the two out-of-lane consumers. ... `packages/drivers/driver-sql/**` (`domain:drivers`) must NOT be edited. Migrating them onto the predicate is a follow-up per lane, filed once the predicate exists.\"* The predicate now exists, so this is that filing.\n\n## What is left\n\n`packages/drivers/driver-sql/src/sql-driver.ts` judges the same question with an inline regex, no name and no doc comment:\n\n```ts\nif (nullSafe.size > 0 && /unique constraint failed|duplicate entry|duplicate key value/i.test(msg)) {\n```\n\nIt reads only `err.message` — the `code` / `errno` channel is not consulted at all, so a driver that surfaces SQLSTATE `23505` or `ER_DUP_ENTRY` with unremarkable prose is invisible to it. That is the same blind spot #6250 measured on the REST side (a Postgres error carrying only `code: '23505'` came back 500), one layer down.\n\n## Why this is `finding` and not a defect\n\n**Nothing a user hits today**, as far as this card measured: on the three dialects the repo ships, the message channel happens to carry the words. The defect is structural — a fourth vocabulary that can be taught a dialect the other three never learn. Grade it in triage rather than trusting the label.\n\n## The migration\n\n`@objectstack/driver-sql` already depends on `@objectstack/types`. Swap for `isUniqueViolationError(error)` and delete the inline regex. Two things to check while there, because they are what makes this more than a mechanical swap:\n\n1. **This site tests `msg`, not the error object.** The shared predicate accepts a bare string on the message channel, so a minimal swap works — but passing the *error* instead is what buys the code/errno channels, which is the point of migrating.\n2. **The `nullSafe.size > 0` guard is the site's own business logic** and must survive untouched; only the discriminator moves.\n\nNote the sibling spelling in this package's own tests (`/UNIQUE constraint failed|duplicate key value/`, in `sql-driver-schema.test.ts`, `sql-driver-unique-tenancy.test.ts`, `adr0120-three-posture-conformance.test.ts`). Those are assertions on what a real driver emitted, not a discriminator, so they are arguably fine as-is — but they are a fifth spelling of the same vocabulary, and worth a decision in the same pass rather than left to the next reader.\n"
+}

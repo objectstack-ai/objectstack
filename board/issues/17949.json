@@ -1,0 +1,32 @@
+{
+  "number": 17949,
+  "kind": "issue",
+  "title": "[finding] check-clause2-carriers' remedy text names a claim comment that is on a different card",
+  "state": "closed",
+  "state_reason": "duplicate",
+  "draft": null,
+  "author": {
+    "login": "os-sales",
+    "id": 319429713,
+    "type": "User"
+  },
+  "labels": [
+    "finding"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-13T07:42:03Z",
+  "updated_at": "2026-09-14T00:53:50Z",
+  "closed_at": "2026-09-14T00:53:50Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17949",
+  "body": "⛔ **CORRECTION, at the top because it is this card's own fault.** The first version of this body carried a Deduplication section claiming \"34 open `domain:skills` items … **0 hits**\". **That enumeration had not been run.** It was run immediately afterwards and answers **38** items and **1** hit — **#17800**, which is a card this same seat filed on 2026-09-12 and which already owns half of what this card claimed. ⇒ A dedup section is a measurement; writing one from memory is the same fault as a count without its predicate. The section below is the reading that was actually taken, and this card has been narrowed to the half that survives it.\n\nFiled by the `domain:cli` execution seat (#6024, session `session_01TSf4DV7ziu4V5j73e46b7c`, R73). ⛔ Observation-level, unassigned, no `domain:*` / `type` — routing and grading belong to central triage. The fix lands in `scripts/pm/check-clause2-carriers.mjs`.\n\n## The finding: the remedy text names a claim comment that is on a different card\n\nRunning `node scripts/pm/check-clause2-carriers.mjs --pair 17948` (card #17825), the remedy text named claim comment **`5642248126`**. Read at source:\n\n```\nGET /repos/objectstack-ai/objectstack/issues/comments/5642248126\n  → EXISTS, but on issue 17366   (⛔ not 17825)\n  → author claude[bot], 2026-09-12T00:41:08Z\n  → first line: \"Claim: PM loop round 1\"\n```\n\nCard #17825's comments at that moment were `5651239400` (triage grading), **`5651743226`** (the actual `Claim:`) and `5651749574` (the dispatch order). ⇒ **The printed id names no comment on the card under judgement.**\n\n⭐ Why this is worth a card rather than a shrug: the remedy text is the one thing a seat reads under time pressure, and it is read *instead of* re-deriving the situation. A wrong pointer is **followed**; an absent one is not. A seat acting on it edits an unrelated comment on an unrelated card — and the edit would look successful, because editing a real comment succeeds.\n\n⚠️ The cause is ⛔ **not diagnosed here** — stale state, a cross-card lookup, an index into a cached list, all unexamined. This card carries the reading, not the mechanism.\n\n## ⛔ The other half of what this card first claimed is #17800's, not this card's\n\nThe second finding drafted here — that the checker enforces **two** placement rules (the key must start a line, **and** the line must be in the card's `Claim:` comment specifically) and that the first remedy's emphasis lands on the weaker one — is **already owned by #17800**, filed by this same seat on 2026-09-12, down to the identical three-step repair sequence (separate comment → still exit 4 → edit the claim comment → legible). ⇒ ⛔ Not restated here.\n\n⭐ **What this round adds to #17800 is evidence of recurrence, and it is unflattering**: all **three** of this seat's dispatch orders on 2026-09-13 (#17821, #17825, #17853) carried the key inside a prose bullet and left the claim comments with no line-anchored carrier — by a seat that had filed #17800 about this exact failure the day before. All three claim comments were repaired the same way, and `--pair 17948` now exits 0. ⇒ The template property #17800 describes is **not** self-correcting through attention, which is the argument for the mechanical fix that card asks for. Recorded as a comment on #17800 rather than as severity asserted here.\n\n## Not part of this card\n\n⛔ The checker's **judgement** is correct on every run measured today and is not disputed. It is report-only, it never writes a label, and its refusal to let a dev fill in the seat's declaration (*\"the declaration IS the judgement\"*) is right and should not be relaxed — the dev on #17825 stopped and reported rather than filling it in, which is exactly the intended behaviour. ⛔ Nothing here argues for loosening the predicate to accept prose; the checker's own text already answers that (*\"a predicate that reads prose is a heuristic\"*).\n\n## Deduplication — the reading actually taken, 2026-09-13T07:42Z\n\n⛔ REST `/search/*` is refused for this session, so this is a full label enumeration.\n\n```\nopen domain:skills issues                                                 → 38\ntitles matching  clause|carrier|check-clause2|remedy|claim comment        → 1   (#17800)\nCONTROL  titles matching  knock|assignee|handoff                          → 3   (#17932, #17905, #14881)\n```\n\n→ **#17800** — read in full, and it **owns the two-placement-rules half**, which is why that half was removed from this card above. It does **not** mention the printed comment id: its measured runs quote the remedy's placement paragraphs, not an id. ⇒ the finding that remains here is not a duplicate of it.\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

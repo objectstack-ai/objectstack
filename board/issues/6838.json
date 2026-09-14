@@ -1,0 +1,35 @@
+{
+  "number": 6838,
+  "kind": "pull_request",
+  "title": "fix(cli)!: `os cloud login --json` 改为 NDJSON 事件流，授权前交出 verification URL",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T23:50:33Z",
+  "updated_at": "2026-08-09T00:16:31Z",
+  "closed_at": "2026-08-09T00:16:29Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": "2026-08-09T00:16:29Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/6838",
+  "body": "Fixes #6730\n\n实施 2026-08-08 维护者裁定（[#6730 comment 5226489062](https://github.com/objectstack-ai/objectstack/issues/6730#issuecomment-5226489062)）取岔口 1：`os cloud login --json` 与 `os login --json`（#6531 / PR #6727）同一契约 —— NDJSON 事件流，**授权前**交出 verification URL。形状与出口一律照抄 PR #6727，不另起一套。\n\n## 前提是实测的，不是从 `silent: flags.json` 推出来的\n\n在**合并后的树**上，把两个源文件 revert 回 `origin/main`，对一个真实的 RFC 8628 端点跑 `os cloud login --json --no-browser`（PTY 驱动），stdout 全文:\n\n```\n{\n  \"success\": true,\n  \"email\": \"device@example.com\",\n  \"userId\": \"usr_6730\",\n  \"url\": \"http://127.0.0.1:41839\"\n}\n```\n\n- `JSON.parse(<整个 stdout>)`: **OK** —— 形式上无可指摘，单文档。\n- 逐行解析: 6 行**全部失败**（2 空格缩进）。\n- `verification_uri` 是否出现在 stdout: **false**。出现在 stderr: **false**。user_code `WXYZ-6730`: **false**。\n\n即缺陷不是「文档畸形」，而是**事件缺席**：device flow 在脚本里唯一有用的那一半被 `silent` 关掉了，什么都没补上。消费者拿到的是一份描述「它无从触发的那次授权」的合法 JSON。\n\n## 改动\n\n1. **单一写出口**。该命令**全部四处** `--json` 写点走 `emitRecord()`（`emitJson(payload, exitCode, { compact: true })` 的唯一封装）—— 不只是 device flow 那两处。失败记录是在 device 记录**之后**才可能到达的（拒批、码过期、poll 失败），留一处缩进就会在消费者最没法恢复的那条路径上重建两文档流。测试里有一条源码 pin 守住这个出口。\n2. **共享 device flow 增加 `onDeviceCode({ record })`**，把服务端原样字段（`device_code` / `user_code` / `verification_uri` / `verification_uri_complete` / `expires_in`）交给调用方，与 `os login --json` 的记录**逐字段同形**；回调改为 `await`，因为 `emitJson` 只在 stdout 真正 drain 后才 resolve —— 管道是异步缓冲的，不 await 等于把「自动化最需要先拿到的那条记录」交给运气。人类模式不传该回调，仍走原打印器。\n3. **例外是声明式的**：`--json` 的 `--help` 文案（已实测渲染）+ `content/docs/deployment/cli.mdx` 的 `os cloud login` 小节 + `content/docs/deployment/index.mdx` 里 cloud 发布流程处的提示与回指。全仓提到 `os cloud login` 的文档页只有这两个（grep 确认），`permissions/authentication.mdx` 从未提及本命令，故未触碰（也避开 PR #6727 的地盘）。\n4. **破坏性如实披露**：changeset 正文写明 wire 形状变化、谁会坏、怎么改。\n\n## 版本号: `minor`，且明确不抄 #6727 的 `patch`\n\n#6727 取 `patch` 的前提是「原来就没有能用的东西被弄坏」——它的 device flow 输出本就不可解析。**这里前提相反**：单文档读法今天是能用的，device flow 路径上会被打断。`major` 不是可选项：本仓所有可发布包锁步版本，launch window 期间破坏性变更一律 `minor`，`scripts/check-changeset-no-major.mjs` 会拒 `major`。所以承担警示职责的是正文披露而非版本号。\n\nchangeset 另带 ADR-0087 处置标记 `not-required (no-migration-prescription)`：变的是一个 CLI 命令 stdout 的流形状，没有可授权键 / 导出符号 / 存储值发生位移，`objectstack migrate meta` 无物可转换；真正触达这些消费者的渠道是 CHANGELOG 正文、`--help` 与 CLI 参考页，三者本 PR 都带上了。\n\n## 复现纪律与「顺序」的钉法\n\ndevice flow 只在 `process.stdin.isTTY` 为真时才走，**管道 stdin 根本到不了那些写点**，所以测试用 `script(1)` 开 PTY，命令内部把 fd 1 / fd 2 重定向到文件（fd 0 是 TTY，fd 1/2 可捕获且非 TTY —— 也正是真实用户把交互式 `os cloud login --json` 接进消费者时的形状）。`script(1)` 缺失时该文件**报错而非 skip**。\n\n**顺序断言是时间性的，不是数组下标**：假端点扣住 token，直到**测试自己**从子进程 stdout 上读到 device 记录才放行。于是「URL 先于授权」是这次运行自身的历史。下标断言抓不到「缓冲成一份尾部文档」的回归——因为合并后的文档里 URL 字段同样排在前面。这一点是实测过的，见下面 R3。\n\n## 验证\n\n预测在动手前落盘，本轮沿用未改写。**合并 `origin/main`（19 个提交）后全部重测，上一轮的测量一律作废。**\n\n| 方向 | 预测 | 实测 |\n|:---|:---|:---|\n| 正向 | 12 GREEN | **12/12 通过** |\n| R1 revert 源码（保留文档+测试） | 8 RED / 4 GREEN | **8 RED / 4 GREEN，逐条命中** |\n| R2 只 revert 文档 | 2 RED（B3/B4） | **2 RED / 10 GREEN，逐条命中** |\n| R3 模拟被否决的「缓冲成单文档」路线 | 4 RED（记录数 / 时序 / 行数 / 拒批路径） | **4 RED / 8 GREEN，逐条命中** |\n\nR1 里时序 pin 的失败信息直接点名成因：`the device record never reached stdout early: expected true to be false`。\n\nR3 是本 PR 最想留下的证据：**「每行可解析」与「URL 出现在 stdout」两条仍然 GREEN，只有时序 pin 变 RED** —— 这正是顺序断言不能写成数组下标的原因。\n\n诚实排除（两个方向都绿，不构成 R1 的证据）：拒批路径的 exit 1、人类模式打印 URL、以及 R1 下未被 revert 的两条文档 pin。\n\n**门禁**（真实输出，非声称）：`pnpm lint` 0；`pnpm --filter @objectstack/cli typecheck` 0；CLI 全量 **98 文件 / 1029 测试全通过**；`lint.yml` 的 `check:*` 全套 **54 项全绿**（`check:i18n-coverage` 与 `check:type-check-debt` 首轮红，两者都自陈缺完整 build closure —— `lint.yml` 在这两步前会先跑 `turbo run build --filter='./packages/*' --filter='./packages/*/*'`；补跑该 build 后两项均转绿，未改任何基线）；工作区 typecheck 120/120；`pr-automation.yml` 的三条 changeset 门禁（adr-0087-registration / no-major / empty-changeset）全绿。\n\n**字节自查**：6 个改动文件逐个 `grep -naP '[\\x00-\\x08\\x0b\\x0c\\x0e-\\x1f\\x7f]'`，**全部 clean，零命中**。测试里关于回车与 ESC 的断言写成 `/[\\r\u001b]/` 转义文本，而非字节本身（PR #6727 的教训）。\n\n## 不碰\n\n`packages/cli/src/commands/login.ts`（#6531 / PR #6727）、`content/docs/releases/`、`packages/rest/`（#6306 另有 agent）。\n\n---\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_017uFVNMmTxLpmfQYiuKM1Yx\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_017uFVNMmTxLpmfQYiuKM1Yx)_"
+}

@@ -1,0 +1,34 @@
+{
+  "number": 6585,
+  "kind": "issue",
+  "title": "字段级 `*When` 的用户根拒绝只认 `current_user` —— ADR-0068 的两个别名 `user` / `ctx.user` 静默放行,写哪个拼写决定拿不拿得到诊断",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T05:55:16Z",
+  "updated_at": "2026-08-08T13:53:34Z",
+  "closed_at": "2026-08-08T13:53:34Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6585",
+  "body": "发现于 #6290 的实现(PR #6584),**不在该单范围**,按纪律另立存档交分诊定级。\n\n## 事实\n\nADR-0068 D1 把 `current_user`、`user`、`ctx.user` 定为**同一个 `EvalUser` 对象的三种拼写** —— `formula/stdlib.ts:312-322` 的 `buildScope` 就是这么挂的(同一个 `currentUser` 引用同时赋给 `scope.current_user` / `scope.user` / `scope.ctx.user` / `os.user`),`validate.ts:261-269` 的四条 role-catalog 正则也全按 `(?:current_user|user|ctx\\.user)` 三选一写。\n\n但**字段级** `visibleWhen` / `readonlyWhen` / `requiredWhen` 一个用户根都不绑(#6146 实测:`evalFieldPredicate` / `resolveFieldRuleState` 只绑 `record` + `previous` + `parent`;objectui#1582 的作者端补全 `FIELD_RULE_ROOTS` 钉的是同一套,注释明写 \"nothing else (no `current_user`)\")。\n\nPR #6584 在 `packages/lint/src/validate-expressions.ts` 加了 `checkFieldRuleUserRoot`,对字段级三槽的 `current_user` 给出面级拒绝 + 正确处方。**该判定只匹配 `current_user` 一个拼写**:\n\n```ts\nif (!roots.ok || !roots.roots.includes('current_user')) return;\n```\n\n于是同一个语义错误,写 `'admin' in current_user.positions` 拿到诊断,写 `'admin' in user.positions` 或 `'admin' in ctx.user.positions` 则**完全静默** —— 后两者一直在 `SCOPE_ROOTS` 里(`cel-engine.ts:56` 的 `user`、`:60` 的 `ctx`),裸引用检查从不报它们。\n\n## 后果\n\n失败方向与 #6146 同:未绑定标识符 ⇒ fault ⇒ 可见性 fallback 为 `true` ⇒ 本想按角色藏起来的字段**对所有人恒可见**,且无任何构建期信号。作者拿不拿得到诊断,取决于他挑了 ADR 认定等价的三个拼写里的哪一个 —— 这正是 AI 作者最容易踩、也最难自查的一类分岔。\n\n## 现状与范围(实测)\n\n- 仓内 `examples/` 与 `packages/` 的字段级 `*When` **零处**使用任一用户根(grep 实测),所以今天没有已发布 metadata 受影响 —— 这是覆盖洞,不是在线故障;\n- 仅有的两处 `current_user` 合法用法都在别的面上:`examples/app-showcase/src/ui/pages/my-work.page.ts:85`(page component,另一条规则管)与 `.../cascading-select.object.ts:85`(option 级,PR #6584 已钉为合法)。\n\n## 为什么没在 #6290 里一并修\n\n`user` / `ctx` 在字段级的静默放行是**收下 `current_user` 之前就存在**的行为(两者一直是 `SCOPE_ROOTS` 成员,从未被该面拒过),不是 #6584 引入的回归;而把拒绝面从一个拼写扩到三个是一次独立的行为变更,`ctx` 尤其还是 ActionEngine 的谓词根,爆炸半径要单独量。#6584 的新文案指向的是**面**(「字段级条件规则只绑 record/previous/parent」)而非拼写,所以它本身不会把作者推去写 `user.positions`。\n\n## 可能的修法(留给分诊,不自选)\n\n1. **把三个拼写并入同一条面级拒绝** —— `checkFieldRuleUserRoot` 的根集合从 `['current_user']` 扩为 `['current_user', 'user', 'ctx']`(`ctx` 需确认只在 `ctx.user` 形态下判,还是整根都判 —— 字段级也不绑 `ctx` 的其余部分);一行改动,但要先扫一遍真实 metadata 与下游仓确认无合法用法;\n2. **让别名在字段级根本不进 `SCOPE_ROOTS`** —— 与 #6290 刚确立的「基线宽、逐面窄」分工相反,不建议,记录以备对照。\n\nBlocked-by: #6584(修法 1 的落点就是该 PR 引入的 `checkFieldRuleUserRoot`,合并前改动会冲突)\n\nRefs: #6290、#6146、#5149、ADR-0068 D1、objectui#1582"
+}

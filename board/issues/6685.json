@@ -1,0 +1,33 @@
+{
+  "number": 6685,
+  "kind": "issue",
+  "title": "[finding][devx] The dev-dispatch model policy lives only in SKILL prose — `os-dev.md` frontmatter has no `model:` pin, so a PM that forgets the parameter silently burns the orchestration model's budget on implementation",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "finding"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T12:43:08Z",
+  "updated_at": "2026-08-08T12:50:22Z",
+  "closed_at": "2026-08-08T12:50:22Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6685",
+  "body": "Filed by the services-lane PM (`session_01USNUyHEr7uaU6MoEWXitei`) against its own miss, per Prime Directive #10. Unassigned, for triage. Tooling only (`.claude/`), no product code.\n\n## The policy, and where it lives\n\n`.claude/skills/pm-dispatch/SKILL.md` §5 (Dispatch), lines 1225-1228:\n\n> **Model split (maintainer policy): pass `model: \"opus\"` on every dev dispatch.** The PM session itself stays on the stronger orchestration model — triage, review, and decision framing are where its judgment pays; implementation goes to Opus.\n\nThat sentence is the **only** place the policy is expressed. `.claude/agents/os-dev.md`'s frontmatter declares `name` and `description` and **no `model:` key**, so an `Agent` call that omits the parameter inherits the parent session's model — silently, with no warning and no observable signal at dispatch time.\n\n## What that cost today (measured, not hypothetical)\n\nThis PM dispatched **11 os-dev agents** in one session (#6299 #6199 #6499 #5712 #6444 #6579 #6542 #6587 #6580 #6550 #6654) and passed `model` on **none** of them, having missed the clause. All 11 therefore ran on the PM session's model instead of Opus. Per-agent subagent token usage from the dispatch records ranged **84k–283k**, well over 2M tokens总计 — the entire implementation load landed on the orchestration model's budget.\n\nConsequences observed in the same session:\n\n- a usage-window cap at ~06:4x–07:20Z terminated **three** in-flight devs mid-task (all recovered from transcript by probe, no work lost, but ~35 min of lane throughput);\n- a model-specific limit later terminated the #6654 dev mid-verification;\n- neither failure was diagnosable as a policy miss from inside the dispatch loop — the symptom is a generic limit error, and nothing ties it back to the missing parameter.\n\n## Why the fix belongs in the agent definition\n\nThe skill's prose is correct and binding, and a PM that reads §5 attentively complies. But the failure mode is asymmetric: complying costs one parameter, forgetting costs an entire session's implementation budget on the wrong model, with the damage invisible until a limit fires. The agent definition already has the slot the harness reads (`model:` in frontmatter, documented as the default when the `Agent` call omits the parameter), and it is currently empty.\n\n## Options (for triage, not self-decided)\n\n- **A — pin it in `os-dev.md` frontmatter** (`model: opus`). Defense in depth: an omitted parameter then resolves to the policy value rather than to inheritance. The explicit `model: \"opus\"` in the SKILL stays (it is still the documented contract and still wins), so nothing about compliant dispatches changes. ⚠️ Check first whether any caller legitimately wants an os-dev on a different tier — a frontmatter pin overrides inheritance for everyone, including non-pm-dispatch callers.\n- **B — make the SKILL's dispatch template carry it literally**, i.e. show the `model: \"opus\"` argument inside the copy-paste block rather than in prose above it, so a PM filling the template cannot drop it.\n- **C — accept as-is**: the policy is written down and a careful reader complies; this instance was one PM's misread.\n\nA and B compose (definition pin + template-visible argument) and are cheap; the PM records no ranking beyond noting that C leaves the asymmetry intact.\n\n## Related\n\n#6586 (the other dev-dispatch tooling defect from the same session: post-PR report delivery is lossy), #6490 / #6492 / #6465 (pm-dispatch skill family)."
+}

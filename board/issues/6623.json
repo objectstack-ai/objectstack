@@ -1,0 +1,35 @@
+{
+  "number": 6623,
+  "kind": "pull_request",
+  "title": "fix(service-automation): trigger-fired-run failure log keeps the AutomationResult.error envelope in meta, not the message (#6587)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T07:30:56Z",
+  "updated_at": "2026-08-08T09:00:16Z",
+  "closed_at": "2026-08-08T09:00:14Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": "2026-08-08T09:00:14Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/6623",
+  "body": "Closes #6587\n\n## The site\n\n`activateFlowTrigger`'s trigger callback logged a failed trigger-fired run as `Trigger-fired run of flow '…' failed: ${result.error ?? 'unknown error'}` at `logger.error` — splicing the `AutomationResult.error` envelope, which carries a failing node's / driver's text verbatim (#5912), into the log MESSAGE. This is the one same-class site PR #6568's residual sweep reported and left (it was outside #6499's list of 13), on the fired-run path — the identical class as that PR's site 12 (`bubbleToParent`'s envelope branch), with the same downstream harm: `ObjectLogger.write()` emits one timestamp+level head per call, so foreign newlines shred ONE record into several physical lines of which only the first is greppable.\n\n## The fix (the family shape, not re-derived)\n\nMessage and cause separated per the merged family idiom (#6498/#6568): the message stays one physical line and carries only controlled facts — the flow name, the trigger type (`resolved.triggerType`), and the consequence — keeping its original `Trigger-fired run of flow '…' failed` lead phrase so existing greps still match. The envelope rides the logger's structured meta slot (`{ error: result.error ?? 'unknown error' }`), passed THIRD in the `error(message, error?, meta?)` contract with the Error slot deliberately empty (#5575). This is the same treatment #6568 gave site 12's string envelope — not `describeThrownForLog`, which renders THROWN values; the envelope here is already a string, so it maps straight onto the meta's `error` field.\n\n## Per-site #4632 verdict\n\n**Stays `error` — on its own reasoning, not inertia.** The judgment question answers YES here: after the failure the system looks normal from the outside — the triggering event was handled, NO caller holds this result envelope (fire-and-forget path), and nothing retries the run — while the flow's declared effects never landed. The only other trace is the passive run-history row (the 2026-07-17 eval preserved in the site comment: a failing record-change flow produced zero output; the failure lived only in that row). That stderr survives the CLI's boot-quiet stdout window is stream mechanics, not the verdict. The verdict is pinned by test because `check:durability-log-level` does not reach this package.\n\n## Tests\n\nThree new pins appended to `engine-residual-log-cause.test.ts` (the #6568 file), in its exact idiom — real bytes off a real `ObjectLogger`, both streams captured, the family's byte-identical multi-line driver fixture. The seam is driven the way a real trigger plugin drives it: the test's `FlowTrigger.start` captures the engine-built callback and fires it once; the flow's work node THROWS the driver text, so `execute()`'s catch lands it in `result.error` verbatim, un-prefixed (the #5912-preserved shape).\n\n1. JSON: level `error`, exactly one stderr line, message one line leaking no driver fact, the whole envelope in `record.error` (meta spread proves the slot), stdout silent. Behaviour-unchanged assert: the callback resolves (nothing thrown back at the trigger plugin) and the failed run still lands in run history with `status: 'failed'`.\n2. Pretty: one physical line carrying the timestamp+ERROR head and every fact greppable on it.\n3. Prototype spy: meta THIRD, Error slot deliberately empty (#5575).\n\n## Reverse verification (direction predicted before running)\n\nPredicted: re-splicing the site turns exactly the 3 new pins red — the JSON pin inside `expectOneLineWithCause` (msg gains the newlines + driver text, `record.error` vanishes), the pretty pin's `toHaveLength(1)` (one record becomes 3 physical lines, the driver's first line concatenating onto the message line), the slot pin's message-one-line assert — and the 18 pre-existing pins stay green. Observed: exactly that, 3 failed / 18 passed, each failing on the predicted assertion (the pretty pin reported `expected [ …(3) ] to have a length of 1 but got 3`). Restored: 21/21 green.\n\n## Local runs\n\n- `pnpm --filter @objectstack/service-automation test`: 70 files, 847 tests, all passed.\n- `tsc --noEmit` in the package: 3 errors, all pre-existing in `nested-region-parity.test.ts` — the same 3 #6568 ledgered; my files contribute 0.\n- `eslint` on both touched files: clean. `node scripts/check-nul-bytes.mjs`: OK; control-byte self-scan of touched files: clean.\n\n## Scope\n\nONE site, per the dispatch. Explicitly untouched: the name-shaped tail (`engine.ts` `:2719`, `:3365`, `:3598`, `:4209`, `:4899` — a different class; the PM splits it into its own finding at review), `evaluateCondition`, `validateFlowExpressions`' fatal `failures` array, and everything #6568 already fixed. A user-visible log-shape change, so a patch changeset rides along.\n\n---\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01USNUyHEr7uaU6MoEWXitei\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01USNUyHEr7uaU6MoEWXitei)_"
+}

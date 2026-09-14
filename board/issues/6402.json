@@ -1,0 +1,35 @@
+{
+  "number": 6402,
+  "kind": "issue",
+  "title": "[finding][drivers] `TursoDriver` 五个 override 的 `options?: any` —— #5181 收窄的是 query，options 这条轴还没人碰过",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T16:57:38Z",
+  "updated_at": "2026-08-08T15:34:18Z",
+  "closed_at": "2026-08-08T15:34:18Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6402",
+  "body": "在 #6212 批 B（`aggregate` 收窄）实施期间实测发现，记录备查。**观察类，不挂 `pm:queue`，请分诊轮定级。**\n\n## 事实\n\n`packages/drivers/driver-turso/src/turso-driver.ts` 里五个 override 的 `options` 形参是 `any`，而它们各自的基类（`SqlDriver` / `IDataDriver`）声明的是 `DriverOptions`：\n\n| 方法 | 当前签名（`options` 部分） |\n|:--|:--|\n| `update` | `options?: any` |\n| `upsert` | `options?: any` |\n| `delete` | `options?: any` |\n| `count` | `options?: any`（query 已在 #6075 / PR #6210 收成 `DriverQuery`） |\n| `aggregate` | `options?: any`（query 已在 #6212 批 B 收成 `DriverQuery`） |\n\n`DriverOptions` 声明的键（`bypassTenantAudit` / `tenantId` / `trx` 等）在这五处一律不受检 —— 与 #5181 对 query 参数的那条论证逐字同构：一个内部调用方拼错 `bypassTenantAudit`，`tsc` 是唯一会说话的通道，而这里把它关掉了。\n\n## 为什么记一笔而不是顺手改\n\n- #5181（PR #6076）/ #6075（PR #6210）/ #6212 收窄的都是 **query** 那条轴，`options` 从未在范围内；\n- 五个 override 的 `options?: any` 是**逐字相同**的一处形状，五改其一（比如只改 `aggregate` 的）会被下一个读者读成「对另外四个的判断」。PR #6210 在 `count` 上、#6212 批 B 在 `aggregate` 上都因此刻意留下了它。\n\n因此这是一次性五处一起收的活，或者一次性判定「不收，并写下理由」，不适合搭在别的 PR 上。\n\n## 判级需要的量\n\n我**没有**量过：这五处 override 的实际调用方是否都已经在传 `DriverOptions` 形状的值（若是，收窄就是纯注解、零报错，与 #6210 在 query 上的实测同形）。收窄前应先跑一遍这个量。\n\n**今天没有人踩**：没有已知缺陷从这个口子出来过，故判级请按观察类走。\n\n关联：#6212、#5181、#6075。\n"
+}

@@ -1,0 +1,34 @@
+{
+  "number": 6329,
+  "kind": "issue",
+  "title": "flaky(core): `health-monitor.test.ts` 的「leaves no ref'd timer behind when the health check wins the race」(#4875)在合并队列全量跑间歇红 —— 踢掉 PR #6269 一次,重排即过",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T13:55:27Z",
+  "updated_at": "2026-08-08T06:21:09Z",
+  "closed_at": "2026-08-08T06:21:09Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6329",
+  "body": "队列健康事项,按「发现 flake 的 PM 立单而不是静默重排绕过」纪律归档。**未指派,标签交分诊**(落点 `packages/core` → 域待分诊判)。\n\n## 签名(取自完整 job 归档,非截断抽取)\n\n- 失败用例:`src/health-monitor.test.ts > PluginHealthMonitor > Health-check timeout guard does not outlive the race (#4875) > leaves no ref'd timer behind when the health check wins the race`\n- 断言:`AssertionError: expected +0 to be 1 // Object.is equality`,位置 `packages/core/src/health-monitor.test.ts:144:28`,即 `expect(refdTimers()).toBe(before)` —— **ref'd timer 计数读到 0,而前置读数 `before` 是 1**\n- 分片总计:`Test Files 1 failed | 26 passed (27)` / `Tests 1 failed | 497 passed (498)`,用例耗时 **105ms**(⇒ 是断言失败,**不是**超时,与 #4796 的 5000ms 家族不同族)\n- `check-test-completeness: OK (6 packages, 2404 tests declared and all 2404 accounted for)` —— completeness 绿 + 套件红 = 真断言失败,非静默死 worker\n- turbo 仅点名一个失败任务:`Failed: @objectstack/core#test`(15 successful / 39 total);日志下方 `driver-sql:test` 与 `mcp:build` 的 `ELIFECYCLE` 是并发收尾,**不是第二成因**\n\n## 命中记录\n\n1. **PR #6269**(#5906 hook alias 死码清理,services 车道)—— 队列构建 [31181660008](https://github.com/objectstack-ai/objectstack/actions/runs/31181660008),13:2xZ 被踢;受害 PR 自身 PR 级 CI **23/23 全绿**,改动面(`service-storage` / `plugin-sharing` / `runtime` / 一处 objectql 测试注释)**不含 `packages/core`**;\n2. **原样重排一次即通过并合并**(13:5xZ)—— ⇒ **间歇性,非 main 硬红**,也非该 PR 的回归。\n\n## 台账状态\n\n队列管家实读比对确认:对 **#5810 台账是新签名**,不匹配任何既有行(非 #4796 的 `Test Core` 5000ms 家族、非 `service-datasource` 5000ms 行、非 `mongodb-memory-server` 下载竞态、非跨仓基础设施行)。台账为**人工升级**,本单可作为管家提请加行的依据。\n\n## 修复方向(不预判,留给承接座位)\n\n该用例钉的是 #4875 的不变量「health-check 赢得竞速时不留下 ref'd timer」。断言在**计数**上翻(读 0、期望 1)提示 `refdTimers()` 的前置读数 `before` 与断言时点之间存在**时序假设**:全量并发负载下,若 `before` 快照期间另有 ref'd timer 恰好到期/清理,两次读数就不再可比。方向候选:把断言改为对**该 monitor 自身产生的 timer** 精确计数(而非进程全局 ref'd timer 数),或在读数前后加稳定化屏障。⛔ 不建议以调超时收尾——它不是超时。\n\nRefs:#4875(该不变量的来源单)、#5810(队列管家 flaky 台账锚点)、PR #6269(受害 PR 与其上的两条 triage 评论,含完整日志抽取)。查重:三仓 open issue 搜 `health-monitor` / `Health-check timeout guard` / `refdTimers` **零命中**,本单是唯一入口。"
+}

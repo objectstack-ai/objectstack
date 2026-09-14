@@ -1,0 +1,37 @@
+{
+  "number": 5750,
+  "kind": "issue",
+  "title": "Setup 应用 4 条运行时贡献的导航在 zh 下仍是英文，而被两处注释同时指定的 coverage ratchet 报绿 —— 能力插件贡献的 nav 不在任何一次走查里",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:devx",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T03:56:03Z",
+  "updated_at": "2026-08-08T09:34:19Z",
+  "closed_at": "2026-08-08T09:34:19Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5750",
+  "body": "浏览器 dogfood 时发现（最新 main `5e3c83bd0` + objectui `5a24ad9cb89c`，zh 语言环境）。\n\n## 现象\n\n系统设置（Setup）应用的侧边导航里，51 条里有 **4 条**在中文界面下仍是英文。这不是客户端渲染问题 —— 直接问服务端要合并后的 app 元数据，服务端发出来的就是英文：\n\n```js\nfetch('/api/v1/meta/app',{credentials:'include'}).then(r=>r.json()).then(j=>{\n  const app=j.items.find(a=>a.name==='setup');\n  // 深度遍历 navigation，挑出纯 ASCII 的 label\n})\n```\n\n```json\n{ \"app\": \"setup\", \"label\": \"系统设置\", \"total\": 51,\n  \"untranslated\": [\n    \"nav_packages = \\\"Packages\\\"\",\n    \"nav_approval_delegations = \\\"Delegations (OOO)\\\" [sys_approval_delegation]\",\n    \"nav_webhooks = \\\"Webhooks\\\" [sys_webhook]\",\n    \"nav_http_deliveries = \\\"HTTP Deliveries\\\" [sys_http_delivery]\"\n  ] }\n```\n\n应用自身的 label 是「系统设置」，其余 47 条导航（用户、组织、岗位、权限集、审批申请、审批历史…）都正常翻译 —— 正是这一点让这 4 条很难被看见：一屏中文菜单里混着几个英文条目，像是「这几个词本来就不译」。（`Webhooks` 也许确实想保留原词，但 `Packages` / `Delegations (OOO)` / `HTTP Deliveries` 显然不是。）\n\n## 两处不同的成因\n\n**其一：`nav_packages` 的翻译写在了另一个应用的命名空间下。**\n\n`packages/platform-objects/src/apps/translations/zh-CN.ts:101` 里 `nav_packages: { label: '软件包' }` 是**存在**的 —— 但它挂在 `apps.studio.navigation` 底下。Setup 应用也贡献了一条同名 id 的 `nav_packages`，查的是 `apps.setup.navigation.nav_packages`，落空，于是回退到作者写的英文 label。**翻译写了，只是写在了取不到的地方。**\n\n**其二：另外 3 条在 zh-CN bundle 里根本不存在。**\n\n```\nnav_packages                 1 处（在 studio 名下）\nnav_approval_delegations     0 处\nnav_webhooks                 0 处\nnav_http_deliveries          0 处\n```\n\n它们的 label 是插件里的硬编码英文字面量：\n\n- `packages/plugins/plugin-approvals/src/approvals-plugin.ts:86` → `label: 'Delegations (OOO)'`\n- `packages/plugins/plugin-webhooks/src/webhook-outbox-plugin.ts:103,104` → `label: 'Webhooks'` / `'HTTP Deliveries'`\n\n## 为什么两道闸门都没拦住 —— 这才是值得记一笔的部分\n\nSetup 的导航是**运行时**由 `SETUP_NAV_CONTRIBUTIONS` 和各能力插件贡献的，静态走查看不到。仓库对此是知情的，而且**两处注释都明确把责任交给了同一道闸门**：\n\n`packages/platform-objects/src/apps/translations/app-nav-translation-parity.test.ts` 开头：\n\n> Setup 刻意不在此覆盖：它的 nav id 在运行时合并前根本不在 app 对象上……**Those labels are gated by the coverage ratchet.**\n\n`packages/platform-objects/scripts/i18n-extract.config.ts` 里：\n\n> ……其 ~25 条菜单项由 `SETUP_NAV_CONTRIBUTIONS` 和能力插件在**运行时**贡献……**Their gate is the coverage ratchet (`scripts/check-i18n-coverage.mjs`), baselined at 0 for this package**。\n\n而那道被两边同时指定的闸门，此刻是绿的：\n\n```\n$ pnpm check:i18n-coverage\ncheck-i18n-coverage: OK (12 config(s), 660 baselined untranslated string(s), none new).\n```\n\n看 `scripts/i18n-coverage-baseline.json` 就明白为什么绿：那 660 条**全部来自三个示例应用**（crm 89 + showcase 451 + todo 120 = 660），而所有第一方包都记着 **0**：\n\n```json\n\"packages/platform-objects/scripts/i18n-extract.config.ts\":        0,\n\"packages/plugins/plugin-approvals/scripts/i18n-extract.config.ts\": 0,\n\"packages/plugins/plugin-webhooks/scripts/i18n-extract.config.ts\":  0,\n\"packages/services/service-messaging/scripts/i18n-extract.config.ts\": 0,\n```\n\n这 0 不是「查过了，干净」，而是「**没查到这里**」。parity test 说「交给 coverage ratchet」，ratchet 走的却是静态配置，而这 4 条恰恰是运行时才存在的、且来自**能力插件**（approvals / webhooks）—— 它既不在 platform-objects 的静态走查里，也不在这些插件各自的 extract 配置里。**两道闸门之间交接了一次，中间那块地谁也没踩。** 声明了归属，没有实现覆盖。\n\n## 建议方向（实现者自选）\n\n1. **先补这 4 条**：`nav_approval_delegations` / `nav_webhooks` / `nav_http_deliveries` 加进 `apps.setup.navigation`（四个 locale 都要）；`nav_packages` 在 `apps.setup.navigation` 下补一份（`studio` 下那份保留，两个应用各有各的同名条目是正常的）。\n2. **把交接补上**（关键，否则下一条插件 nav 照样漏）：让覆盖判定发生在**运行时合并之后**的 app 元数据上，而不是静态配置上 —— 例如启动一个 LiteKernel，取合并后的 `setup` app navigation，断言每条 id 在每个 locale 都有 label。这正是本 issue 的复现脚本干的事，成本不高，且它能同时覆盖 platform-objects 自己的和所有插件贡献的条目。\n3. 顺带值得判一次：插件 nav 的 `label` 是否应该允许裸英文字面量，还是必须走 i18n key。若维持字面量，那 2 的运行时断言就是唯一防线。\n\n## 影响面\n\nzh-CN / ja-JP / es-ES 三个非英语 locale 的 Setup 应用导航（英文环境无影响）。纯展示，无数据或权限风险。但闸门这一项影响的是**未来每一条运行时贡献的导航**，不止这 4 条。\n"
+}

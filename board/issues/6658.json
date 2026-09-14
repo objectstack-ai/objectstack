@@ -1,0 +1,34 @@
+{
+  "number": 6658,
+  "kind": "pull_request",
+  "title": "test(objectql): 把 `now` 单一时刻 pin 从值相等改成按构造断言 (#5896)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T09:02:46Z",
+  "updated_at": "2026-08-08T10:01:19Z",
+  "closed_at": "2026-08-08T10:01:18Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": "2026-08-08T10:01:18Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/6658",
+  "body": "Fixes #5896\n\n## 结论:前提成立,走处置选项 1(加强而非退休)\n\n`engine.test.ts` 的 `pins now once per find so every row sees the same instant (#1979)` 改为**按构造断言单一时刻**:对 `ExpressionEngine.evaluate` 收到的上下文插桩,先钉求值次数,再按**对象同一性**断言三次求值拿到同一个 `now`。保留 `#1979` 出处标记。**test-only,未触碰任何生产文件。**\n\n## 前提复核(P1-P3,动手前逐条实测)\n\n| 前提 | 读数 | 结论 |\n|---|---|---|\n| **P1** origin/main 上该用例仍是值相等形态 | 以内容定位(`#1979` 的 `it` 标题),命中 `engine.test.ts:1931`,断言体为 `expect(result[0].ts).toEqual(result[1].ts)` / `expect(result[1].ts).toEqual(result[2].ts)` | **成立** |\n| **P2** 「按运气报警」可实证 | 见下节 —— 复刻 PR #5894 探针 B 后,旧断言在整文件跑法下 **10 次里绿了 3 次** | **成立** |\n| **P3** `engine.test.ts` 无他席在飞占用 | 该文件在 `origin/main` 上最近一次改动是 `ce5242c88`(2026-08-02),推前 `git fetch` + `git log HEAD..origin/main -- packages/objectql/src/engine.test.ts` 复核为空 | **成立** |\n\n⚠️ **P3 复核时踩到并纠正了一处假读数**,与第 2 轮分诊评论记录的形态相同:本工作树初始是**浅克隆**(`git rev-parse --is-shallow-repository` = true,`origin/main` 仅 438 commit 可达),`git log -- packages/objectql/src/engine.test.ts` 会把浅边界 commit 报成该文件的最近改动。已 `git fetch origin main --deepen=500`(1105 commit 可达)后重读,上表 P3 出自**加深后**的历史。\n\n## 加强前后断言对照\n\n**之前** —— 值相等,判定取决于三次求值是否恰好跨毫秒:\n\n```\nexpect(result[0].ts).toEqual(result[1].ts);\nexpect(result[1].ts).toEqual(result[2].ts);\n```\n\n**之后** —— 按构造,判定与毫秒无关:\n\n```\nconst evaluate = vi.spyOn(ExpressionEngine, 'evaluate');\nonTestFinished(() => { evaluate.mockRestore(); });\n...\nexpect(evaluate).toHaveBeenCalledTimes(3);          // 1 formula 字段 × 3 行\nconst nows = ... .map(([, ctx]) => ctx.now);\nexpect(nows[0]).toBeInstanceOf(Date);\nexpect(nows.every((n) => n === nows[0])).toBe(true); // 同一性\n// 值相等保留为「调用方可见的症状」,但不再是报警来源\n```\n\n选型说明,三点:\n\n1. **同一性 + 求值次数,两者都要**。只断言同一性会有**空绿**风险 —— 调用列表为空时 `[].every(...)` 恒真,断言「因为什么都没产生」而通过。`toHaveBeenCalledTimes(3)` 与 `toBeInstanceOf(Date)` 把这个洞堵上,断言才是对**真实发生的三次求值**说话。\n2. **值相等保留而非删除**。它仍是调用方可见的症状,留着不花成本;但报警来源已经换成同一性(反向验证里红的正是同一性那行,见下)。\n3. **`onTestFinished` 而不是 describe 级 `afterEach`**。spy 的拆除限制在本用例内,不给邻近 129 条用例引入任何新的生命周期钩子 —— 这是热文件,改动面压到最小。\n\n## 反向验证(方向先写死,再实测)\n\n探针复刻 PR #5894 的**探针 B**:把时钟读进逐次求值,即 `applyFormulaPlan` 内层循环改成 `{ now: new Date(), ... }`(临时改动,已回滚,不在本 PR diff 内)。\n\n| # | 跑法 | 预判 | 实测 | 判定 |\n|---|---|---|---|---|\n| 1 | 探针 B + **旧**(值相等)断言,整文件跑 10 次 | 可绿可红(不必红) | `RGRGRRRRRG` → **pin-green=3 pin-red=7** | 与预判一致 |\n| 2 | 探针 B + **加强后**断言,整文件跑 10 次 | **必红** | `RRRRRRRRRR` → **pin-green=0 pin-red=10** | 与预判一致 |\n| 3 | 对照:探针 B + `engine-write-formula-hydration.test.ts` 的 `#5699` 同一性组,跑 5 次 | 必红(该保证今天仍有守卫) | `RRRRR` → **green=0 red=5** | 与预判一致 |\n| 4 | 正常路径(无探针)+ 加强后断言 | 全绿 | `Test Files 1 passed / Tests 130 passed` | 与预判一致 |\n\n第 2 组的失败落点正是同一性那一行,而不是值比较:\n\n```\nFAIL  src/engine.test.ts > ... > pins `now` once per find so every row sees the same instant (#1979)\nAssertionError: expected false to be true // Object.is equality\n ❯ src/engine.test.ts:1970:54\n    1969|             expect(nows[0]).toBeInstanceOf(Date);\n    1970|             expect(nows.every((n) => n === nows[0])).toBe(true);\n```\n\n### ⚠️ 一处必须如实说明的读数反转 —— 20/20 全红差点把本单误判成「前提不成立」\n\n派发令给了一条停止条件:**若探针下旧断言恒红,则前提不成立,停下回报**。第一次测量正好撞上这条:用 `-t` 收窄到该用例、连跑 20 次,结果 **20/20 全红**。\n\n但那是**冷启动**假象。`-t` 会把同文件其余 129 条用例跳过,于是每次跑的都是**冷进程里的第一次 find** —— JIT 未热、CEL 首次编译,三次求值几乎必然跨毫秒。CI 与本地的真实跑法是整文件跑,轮到该用例时进程早已跑热。\n\n直接测底层速率把这一点坐实(临时在该用例内循环 200 次 find,只统计不断言):\n\n```\n[PROBE-5896] all-three-equal 145/200 (old assertion would PASS); spread ms min=0 max=5 mean=0.34\n```\n\n即**同一进程内 200 次 find,145 次(72.5%)三值全等**,旧断言会**放行**这个回归;三行时间跨度均值仅 0.34 ms。换成整文件跑法复测(上表第 1 组),旧断言 10 次里绿 3 次 —— 与 200 次的量级一致。\n\n结论:**停止条件未触发,前提成立**。「20/20 全红」量的是冷启动这一种条件下的 20 次抽样,不是该断言的真实报警率;把它当读数会得出与事实相反的结论。这也顺带解释了为什么 PR #5894 当时那一跑看到它红了 —— 那一次的运气落在红的一侧,而运气正是本单要拆掉的东西。\n\n## 验证\n\n```\npnpm --filter '@objectstack/objectql' test\n  Test Files  149 passed (149)\n        Tests  2519 passed (2519)          # merge origin/main 之后重跑\n\npnpm --filter '@objectstack/objectql' typecheck\n  > tsc --noEmit                            # 无输出 = 通过\n\npnpm check:query-options-erasure\n  ✓ query-options-erasure ratchet holds: 77 unswept non-test site(s) in 18 file(s), none new.\n    test surface: 263 site(s) in 49 file(s) — at the ceiling\n                                              # 仍在 263 上限,本 PR 未新增(未用 `{} as any`)\n\npnpm check:type-check-debt                  # 先全量 build:npx turbo run build --filter='!@objectstack/docs' --concurrency=2\n  check-type-check-coverage --re-measure: OK — 34 ledger entr(ies) re-measured in 181.6s,\n  1771 raw tsc error(s) total, none above its recorded number.\n\nnode scripts/check-nul-bytes.mjs\n  check-nul-bytes: OK (scanned 6207 tracked text file(s); ... no raw ASCII control bytes).\n\nnpx eslint packages/objectql/src/engine.test.ts   # 无输出 = 通过\n```\n\n`check:type-check-debt` 另报了 11 条 entry 的 surplus(记账上限高于实测值,可 `--lower`)。**本 PR 未动**:那是 #6376 的既有账,与本改动无关,台账只缩不抬的要求已满足(none above its recorded number)。\n\n## 范围\n\n`git diff origin/main` 只含 **1 个文件、26 增 3 删**:`packages/objectql/src/engine.test.ts`。\n\n- ⛔ **零生产文件改动** —— 探针 B 对 `engine.ts` 的临时改动已 `git checkout` 回滚,推前 `git status` 复核干净。加强不需要暴露任何插桩点:`applyFormulaPlan` 已经把 `now` 放进传给 `ExpressionEngine.evaluate` 的上下文里,spy 现成可读。\n- ⛔ **未动** `engine-write-formula-hydration.test.ts` 的 `#5699` 组(已必然报警,本单不重复)—— 它在本 PR 里只作为反向验证的**对照**被跑过,未被修改。\n- 未重排/重命名邻近用例;新增的 import 两处(`onTestFinished`、`ExpressionEngine`)。\n\n## changeset\n\n**无 changeset(test-only)**:本 PR 不改变任何运行时行为,不发布任何包。`skip-changeset` 标签按派发口径由 PM 落。\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_019Q7oc7ASjh8yxyS3Yz78We)_"
+}

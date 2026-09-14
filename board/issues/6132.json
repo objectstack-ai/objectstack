@@ -1,0 +1,35 @@
+{
+  "number": 6132,
+  "kind": "issue",
+  "title": "formula 内部还剩第三个 CEL 解析入口:cel-to-filter.ts 自建 limitless env,与 celEngine 对「什么能解析」仍不一致",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T03:06:16Z",
+  "updated_at": "2026-08-08T17:25:48Z",
+  "closed_at": "2026-08-08T17:25:48Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 11,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6132",
+  "body": "范围外发现,出自 #4812 / PR #6130(把 `packages/lint` 的解析收敛到 `parseCelToAst`)。按 Prime Directive #10 记录,不指派。\n\n## 事实(`origin/main` `bc67c28e2` 基线,静态对读 + 实测)\n\n#4812 收敛掉的是 **lint** 那个自建 env。但 `packages/formula` **内部**还有一个,与被收敛掉的那个逐字同构:\n\n`packages/formula/src/cel-to-filter.ts:88-95`\n\n```\n// A roots-permissive env: parsing is purely syntactic (we read `.ast`, never\n// `.check()`/`.evaluate()`), so any identifier or method call parses. Built once.\nlet parseEnv: Environment | undefined;\nfunction getParseEnv(): Environment {\n  if (!parseEnv) {\n    parseEnv = new Environment({ unlistedVariablesAreDyn: true, enableOptionalTypes: true });\n  }\n  return parseEnv;\n}\n```\n\n与 lint 改前那份**选项完全相同**:没有 `limits`,没有 stdlib,没有 `rewriteNullableTernary`。消费它的是两个导出入口:`compileCelToFilter`(`:123`)与 `isPushdownableCel`(`:143`),都是 `getParseEnv().parse(source).ast`。\n\n于是 `DEFAULT_LIMITS` 这一格上的分歧原样保留 —— 实测(同 PR #6130 用的探针):\n\n| 源码形状 | `cel-to-filter` 的 env | `celEngine.compile()` |\n|:--|:--|:--|\n| 300 项连加 | 解析通过 | `Exceeded maxAstNodes (256)` |\n| 60 层括号 | 解析通过 | `Exceeded maxDepth (32)` |\n| 200 元素列表 | 解析通过 | `Exceeded maxListElements (64)` |\n\n即:一条超过平台边界的谓词,`celEngine` 直接拒绝,而 pushdown 编译器照常把它降成 SQL 过滤并下推。\n\n## 为什么按 `finding` 记(不代 triage 定级)\n\n**可达性我没有量化。** 消费 `compileCelToFilter` / `isPushdownableCel` 的是 RLS / sharing 下推路径(ADR-0058),那条路径前面还有 `isSupportedRlsExpression` 等形状闸门,一条 256 节点以上的 RLS 谓词在真实部署里是否写得出来、写出来会不会先被别的闸门拦掉,我**没有测**。所以按「观察类 / 未被行使的漂移」记,不因为「看着小」就压着不报 —— 定级请按 triage,不代表我判断它低。\n\n需要一并注意的是**方向**:这一面比 `celEngine` 更**宽松**,而它的产物是安全谓词下推的 SQL。宽松的一侧产出的是\"多编译了一条引擎本会拒绝的谓词\",不是\"漏掉一条\" —— 但两个入口对同一条源码给不同答案,本身就是 #4812 要消灭的形状。\n\n## 为什么 PR #6130 没顺手改\n\n刻意留下,理由记在这里免得被当成遗漏:\n\n1. #4812 的 scope 明确写死\"只动 `packages/formula` 新增入口 + `packages/lint` 改调\"。把 `compileCelToFilter` 的解析 env 换成带 `DEFAULT_LIMITS` 的那条,是在**安全敏感路径**上改变行为(超界谓词从\"下推成过滤\"变成 `parse-error`,而 `parse-error` 在该路径上是 fail-closed 拒绝),风险画像与一次 refactor 完全不同,应当单独裁、单独测。\n2. 同理,给它加上 `rewriteNullableTernary` 会改变喂给 `lowerCelAst` 的 AST 形状(三元分支会多一层 `dyn(...)` 包裹),`lowerCondition` 对此的反应需要单独验证 —— 三元本来就不可下推,但\"不可下推的**理由**从 A 变成 B\"仍然是行为变化。\n\n## 建议\n\n改走 #4812 落地的 `parseCelToAst`,或**明确裁定\"下推面按纯语法解析另算\"并把理由写进 `cel-to-filter.ts` 文件头** —— 两条都行,别默认它不存在。若选前者,需要一并回答:超界谓词在 RLS 下推路径上应当 fail-closed 拒绝,还是应当继续下推?这是裁决,不是重构。\n\n## 关联\n\n#4812(本体裁决 / PR #6130)、ADR-0058(一个 AST 两个后端)、ADR-0056 D4(RLS 谓词形状闸门)。\n"
+}

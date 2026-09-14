@@ -1,0 +1,30 @@
+{
+  "number": 18116,
+  "kind": "issue",
+  "title": "engine: measure, do not implement — the radius of making `TursoDriver` remote mode honour `SqlDriver.beginTransaction(): Promise<Knex.Transaction>` (two routes priced) — tranche 1 of ruling C on #18063",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-elon-musk",
+    "id": 328766734,
+    "type": "User"
+  },
+  "labels": [
+    "domain:engine",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-14T03:31:43Z",
+  "updated_at": "2026-09-14T03:31:43Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/18116",
+  "body": "Filed by the director seat (objectstack #12708, summon #23, `session_01WCEaPsmKY4UyoivKkkaUHt`) executing decision batch #133 item 5 — maintainer 「决裁批 #133 同意」 to the recommended **C, first tranche M (measure)** on #18063, 2026-09-14T03:31Z. `domain:engine` by landing site (`packages/drivers/driver-turso`, `driver-sql`); p2 inherited; triage may re-rank.\n\n## What this card is — and is not\n\n**Measure, ⛔ do not implement.** The ruling keeps `SqlDriver.beginTransaction(): Promise<Knex.Transaction>` (the honest narrowing) and makes `TursoDriver` remote mode answer that type (C). Its cost is unmeasured; #18063's own analysis says the choice between A (widen the base, cost measured) and C (cost unmeasured) cannot be made until C has a number. This card produces the number. `premise_still_valid: true` + a report with no PR is the expected shape; a throwaway instrument in the worktree is fine, ⛔ nothing under `packages/` changes.\n\n## Read first (all on `origin/main`)\n\n- `packages/drivers/driver-turso/src/turso-driver.ts:1685-1703` — the `#17690` remainder comment and the `override async beginTransaction(): Promise<any>` door (remote ⇒ `remoteTransport.beginTransaction()`, else `super`).\n- `packages/drivers/driver-turso/src/remote-transport.ts:1840` — `RemoteTransport.beginTransaction(): Promise<unknown>` (libsql `client.transaction()`).\n- `packages/drivers/driver-sql/src/sql-driver.ts:8972` — the base door; and every place `SqlDriver` **uses** the returned `Knex.Transaction` (`commit`, `rollback`, and any `trx(...)` / `trx.raw` / `trx.isCompleted` call inside transactional writes).\n- `packages/drivers/driver-turso/src/turso-driver-doors-declared-types.test.ts:60-95` — the recorded TS2416 receipt.\n\n## Deliverable — a report on #18063 with these numbers\n\n1. **The knex surface `SqlDriver` actually depends on** from a transaction handle: enumerate every member of `Knex.Transaction` that `sql-driver.ts` and the turso overrides call on the value `beginTransaction()` returns (method names, count of call sites). This is the surface any remote answer must satisfy.\n2. **Route 1 — knex over a libsql-remote dialect**: does a knex client/dialect exist (in-tree or as a dependency) that can drive `@libsql/client`'s remote (HTTP) transport so that `this.knex.transaction()` is the remote transaction? Files touched, lines estimated, any new runtime dependency (⛔ a new dependency is itself a human-floor item — name it, do not add it).\n3. **Route 2 — adapter**: an object wrapping the libsql transaction that satisfies exactly the surface from (1) and is typed `Knex.Transaction` at the door. Files touched, lines estimated, which members can be honestly implemented and which would have to throw (`NOT_IMPLEMENTED`) — a throwing member is a cost line, not a solution.\n4. For each route: the override fan-out (`commit`, `rollback`, `releaseTransaction`, `openTransactions` bookkeeping) and whether `turso-driver.test.ts:212/221` and the declared-types test keep passing unchanged.\n5. **A size class per route — S / M / L / XL** — using the lane's own size convention, plus a one-line recommendation of which route (or neither) and why.\n\nControls the report must carry: a lit control (a member you KNOW `sql-driver.ts` calls on `trx`, found by the same reader) and a dark control (a made-up member name, 0 hits) so the enumeration in (1) is a reading.\n\n## Fences\n\n- ⛔ No change to `SqlDriver`'s declaration (A is the fallback the maintainer did not choose; it is executed only if this measurement comes back XL/infeasible and the card returns to the box once with the numbers).\n- ⛔ No new runtime dependency added; name it if a route needs one.\n- ⛔ `packages/spec` untouched (`IDataDriver.beginTransaction(): Promise<unknown>` is the contract and is not in question).\n- `Clause-②: no` — no published surface moves in a measurement.\n\n## What happens next\n\n#18063 is `pm:blocked` on this card. When this report lands: route sized M/L ⇒ the engine seat dispatches C directly on #18063 citing the report; XL or infeasible ⇒ #18063 returns to the decision box once, with the numbers.\n\n## Refs\n\n#18063 (ruling, batch #133 item 5) · #17690 (source, self-contradicting on this cell) · #17876 (the landing that annotated the door) · ADR-0119 (editorial note: Turso inherits `beginTransaction` from `SqlDriver`)\n\nDedup terms: `TursoDriver beginTransaction`, `Knex.Transaction remote`, `libsql transaction adapter`, `TS2416 beginTransaction`, `measure route radius`\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

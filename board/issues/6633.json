@@ -1,0 +1,36 @@
+{
+  "number": 6633,
+  "kind": "issue",
+  "title": "`@objectstack/client` 的 `packages.*` 与 `datasources.external.*` 无法跟随非默认 API base:external 面硬编码 `/api/v1`,rest 面 discovery 也从不通告 `routes.packages`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:queue",
+    "target:v17"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T07:50:21Z",
+  "updated_at": "2026-08-08T13:53:33Z",
+  "closed_at": "2026-08-08T13:53:33Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6633",
+  "body": "out-of-scope 发现,来自 #6306 的 dispatch gate-1(SDK 配对验证)。按 Prime Directive #10 单独立单,**未认领**。\n\n## 事实(全部实测,`origin/main` = `e39dd66e7` 时点)\n\n1. **`datasources.external.*` 五个方法硬编码 `/api/v1`,没有任何 discovery 机制。**\n   `packages/client/src/index.ts` ~:1065-1113,五处均为\n   `` `${this.baseUrl}/api/v1/datasources/${...}/external/...` `` 的模板字符串。即使 discovery 通告了别的 base,它们也不读。\n\n2. **`packages.*` 走 `getRoute('packages')`:优先 `discoveryInfo.routes.packages`,fallback 硬编码 `/api/v1/packages`**(`packages/client/src/index.ts` ~:4743-4783 的 routeMap)。机制存在,但——\n\n3. **rest 面(`@objectstack/rest`)的 discovery 从不通告 `routes.packages`。**\n   `packages/metadata-protocol/src/protocol.ts` ~:2768-2798:`serviceToRouteKey` 没有 `packages` 项,routes 字面量只有 `data`/`metadata` + optionalRoutes;\n   `packages/rest/src/rest-server.ts` `registerDiscoveryEndpoints`(~:3198-3251)只 override `data`/`metadata`/`ui`/`mcp`/`auth`。\n   所以对 rest 面部署,SDK 的 `packages.*` 实际永远落到硬编码 fallback。route 已 mount 而 discovery 不通告,是 ADR-0076 D12「advertise everything mounted」的另一半缺失(D12 文字禁止的是通告未挂载;这里是挂载了不通告,后果是 SDK 被钉死在 convention 上)。\n\n4. **探针输出**(mock fetch 驱动真实 `ObjectStackClient`,baseUrl=`https://host.example`):\n\n   - 未 connect(纯 convention):`packages.list` → `/api/v1/packages`;`external.listTables` → `/api/v1/datasources/pg_main/external/tables`\n   - 已 connect,discovery 按 rest 面实际内容(routes 只有 data/metadata/ui,均已 rebase 到 `/backend/api/v9`,无 `packages` 键):两者 URL **不变**,仍 `/api/v1/...`\n   - 反事实:discovery 若通告 `routes.packages: '/backend/api/v9/packages'`,`packages.list` 会跟随(→ `/backend/api/v9/packages`),但 `external.listTables` 仍 `/api/v1/...`\n\n## 后果\n\n任何非默认 base 的部署(设置 `apiPath`,或程序化改 `basePath`/`version`),SDK 这两个面都打错前缀。并且 #6306 的 maintainer ruling(Option 1:9 条 direct-mount 跟随 `apiPath`)一旦按现 scope 落地,这两个面在设置 `apiPath` 的部署上会从「碰巧能用」(双方共享同一个硬编码)变成 404 —— 这正是 #6306 dispatch 的 gate-1 stop 条件,该卡已停工上报,等待重新裁定顺序。\n\n## 方向(留给分诊,不预设)\n\na. rest 面 discovery 通告 `routes.packages`(mounted ⇒ advertised),SDK `packages.*` 即可跟随;\nb. client 的 `datasources.external.*` 改为从 discovery/可配置 base 派生(词表可能需要新增 `datasources` 路由键 —— spec 变更,需单独裁定);\nc. 与 #6306 的落地顺序编排(先 a+b 后移路由,或同 release 内成组落地)。\n\n## 查重\n\nopen issues 已搜 `apiPath` / `datasources external SDK` / `routes.packages discovery` / `client hardcode route`,无同题。相关:#6306(现场)、#5822 / PR #6303(枚举面)。"
+}

@@ -1,0 +1,37 @@
+{
+  "number": 5981,
+  "kind": "issue",
+  "title": "[finding] AGENTS.md 的「It has teeth」段只描述 `check:durability-log-level` 的日志级别那半 —— #5186 之后同一条命令还跑读接缝规则,散文没跟上",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:devx",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T13:51:35Z",
+  "updated_at": "2026-08-08T09:00:15Z",
+  "closed_at": "2026-08-08T09:00:15Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5981",
+  "body": "观察类发现,记录于 #5186 实施期。**今天没有用户会撞到**,也不影响闸门行为——纯粹是 AGENTS.md 的描述面比闸门实际执行面窄了一条规则。#5186 的文件面是 `scripts/` + `.changeset/`(⛔ 越界即停),AGENTS.md 不在其中,故只记录不改。\n\n## 事实\n\n#5186 之后,`pnpm check:durability-log-level`(`scripts/check-durability-degradation-log-level.mjs`)执行**两条独立规则**:\n\n1. 原有的**日志级别**规则:`DURABILITY_CRITICAL_CALLEES` 词表 + `warn`/静默即红,baseline 是 `scripts/durability-degradation.baseline.json`;\n2. 新增的**读接缝编造空值**规则(#5186,族源 #4728 → #4825 → #5108):`catch` 无日志 + `return` 空值/零值 + 块内含读调用 + 未按错误类型区分 → 红,扫描面收窄到 `packages/metadata` / `packages/metadata-protocol` / `packages/objectql`,baseline 是**另一个文件** `scripts/durability-read-invention.baseline.json`。\n\nAGENTS.md「Degradation log levels — `warn` vs `error`」末尾的 **It has teeth** 段(约 642–657 行)只描述第 1 条。两处会误导:\n\n- 「walks the AST for `catch` blocks guarding a declared vocabulary of durability-critical operations and fails when one logs below `error` without rethrowing」——现在这只是一半;\n- 「Accepted exceptions live in `scripts/durability-degradation.baseline.json` … and that file is currently **empty**, which is its intended steady state」——这句对**那个**文件仍然成立,但读者很容易把它当成「这条命令的 baseline 是空的」,而第二条规则的 baseline 有 3 条(2 条真实待修,已分别立卡 #5979 / #5980;1 条复核为合法)。\n\n## 建议(一段散文的量)\n\n在 It has teeth 段后补一段,说明同一条命令还跑读接缝规则、判据是什么、baseline 是哪个文件、扫描面为什么是收窄的(维护者 2026-08-06「裁 3——收窄先行」),并把「发现新的读接缝?」的去处指向该规则的 `READ_FAILURE_DISCRIMINATORS` / baseline,与现有「Found a new one? Add it to `DURABILITY_CRITICAL_CALLEES`」对称。\n\n⚠️ 这不是 #5186 被否决的「方向 2」(纯散文靠 review)——闸门已经落地,这里补的是指路牌。\n\n## 关联\n\n#5186(落地本规则)、#5979 / #5980(其 baseline 里两条待修条目)、#4632(规则起点)、#4754 / #5241(同一脚本此前两次扩张,当时也各自更新了这段散文)。"
+}

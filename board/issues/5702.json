@@ -1,0 +1,34 @@
+{
+  "number": 5702,
+  "kind": "issue",
+  "title": "drivers: `$regex` 响亮拒收 + `$icontains` 各后端实现(#4706 裁决 B 案 · 驱动半边)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T01:06:02Z",
+  "updated_at": "2026-08-08T06:43:29Z",
+  "closed_at": "2026-08-08T06:43:29Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 10,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5702",
+  "body": "Part of #4706(维护者 2026-08-06 裁决 B 案)。驱动半边。\n\n**Blocked-by: #5701**(契约半边:词表 + FILTER_LOGic_CASES 先行 — 修正:FILTER_LOGIC_CASES;case-set 落地后本单清偿各 driver 侧的红/DEBT)。\n\n**Blocked-by: #5710**(生产者先行:plugin-auth 的 `contains` 支是裸 `$regex` 的唯一活体生产者(`driver-memory/src/filter-refusal.ts:154-158` 自注),其翻转为 `$contains` 落地前实施「响亮拒收」会打断 better-auth 认证查询 — 见 #5710 正文)。\n\n## 范围\n\n1. **拒收单点化优先**:实施前先核实 `$regex` 的拒收能否落在**共享校验层**(spec 词表移除后,统一的 unknown-operator 拒收是否已按 ADR-0112 信封覆盖所有 driver 入口 — #5327/#5346 一族的既有格局决定这里还剩多少 driver 侧工作);能单点解决就不在五个 driver 各写一份。\n2. **`$icontains` 实现**,按后端:\n   - `driver-sql`:LIKE + LOWER() 或方言 ILIKE;**转义纪律复用 `applyLike`**(`%`/`_`/`\\` + 显式 ESCAPE,P0-3 守卫与 #5589 方言矩阵同批扩展);\n   - `driver-turso`:local(继承)+ **remote 传输**(`buildWhereSQL` 词表)两面都要,双面 conformance 套件既有形状照搬;\n   - `driver-sqlite-wasm`:照 sql 侧;\n   - `driver-memory` / `driver-mongodb`:**#5499 冻结族** — 拒收半边若由共享校验层承担则零投入;`$icontains` 实现半边属「语义补齐投入」,默认挂起,**除非** case-set 落地后默认跑的矩阵/套件因缺实现判红(届时按冻结令的 restore-invariant 例外升级,由分诊轮点名)。memory 侧实现本身是平凡的(真正则引擎已在,大小写折叠即可)— 若例外成立,最小实现优于长期红格。\n3. 各 driver 的 conformance DEBT/红清偿与 gate LEDGER 同步(⛔ 不动判定逻辑)。\n\n## 边界\n\n- ⛔ 不动 `packages/spec`(契约半边 #5701 的领地)。\n- 套件红 = 真语义分叉时照例另立单,不边写边修他处实现。\n\n**归属**:`packages/drivers/*` → `domain:drivers` 车道;`domain:drivers` 已由分诊座位补(2026-08-06)。"
+}

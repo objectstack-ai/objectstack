@@ -1,0 +1,36 @@
+{
+  "number": 6444,
+  "kind": "issue",
+  "title": "service-analytics 的 `where` 门：字段约束里 `$` 算子与非 `$` 键混写时，非 `$` 兄弟键被静默丢掉（方向是加宽；与值无关，不是 #6386 的 `undefined`）",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T19:41:28Z",
+  "updated_at": "2026-08-08T06:13:25Z",
+  "closed_at": "2026-08-08T06:13:25Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6444",
+  "body": "出自 #6386 的实施（PR 见下）。#6386 的范围是**比较数位置的 `undefined`**；本单是同一个函数里**与值无关**的另一条静默丢弃路径，按 Prime Directive #10 另立单、不指派、不扩大那张 PR 的 diff。\n\n## 缺陷\n\n`packages/services/service-analytics/src/strategies/filter-normalizer.ts` 的 `fieldLeaves`：一个字段约束对象**同时**含 `$` 算子键与非 `$` 键时，非 `$` 的兄弟键被**静默丢弃**。\n\n```ts\nconst opKeys = Object.keys(wrapper).filter((k) => k.startsWith('$'));\nif (opKeys.length > 0) {\n  for (const opKey of opKeys) { /* … */ }\n  return out;               // ← 非 $ 兄弟键从没被看过\n}\n// 嵌套关系的展平在这行之后，opKeys 非空时走不到\n```\n\n## 实测（`origin/main` @ `5faa23ca3`，直接调 `normalizeAnalyticsFilterTree({ where })`）\n\n| `where` | 归一化结果 | 读法 |\n|---|---|---|\n| `{d: {$eq: 1, nested: 'x'}}` | `d equals [1]` | `nested` 这一项静默消失 |\n| `{d: {$eq: 1, nested: undefined}}` | `d equals [1]` | 同上（与值无关） |\n\n对照：**只有**非 `$` 键时（`{d: {nested: 'x'}}`）走的是嵌套关系展平，编成 `d.nested`——即这条路径本身是在的，只是被 `opKeys.length > 0` 的提前 `return` 挡住了。\n\n## 为什么是缺陷而不是「可接受的读法」\n\n方向是**加宽**，与 #6386 前两行同类：丢一个合取项不会收窄查询，只会让它返回作者排除掉的行。这正是同一个文件在 `MONGO_TO_CUBE_OP` 未命中分支的注释里明令禁止的事——\n\n> `NEVER drop: a missing predicate does not narrow the query, it WIDENS it … That failure mode is #3650's`\n\n**最可能的触发不是嵌套关系，是漏写 `$` 的算子拼法**，这恰好是 AI 编写 metadata 的典型手误：\n\n```ts\n{ amount: { gte: 10, $lte: 20 } }   // → 只剩 amount lte 20；下界静默没了\n```\n\n作者拿到的是一张比他写的宽的图，没有任何错误可读。而**同一个包的另一扇门拒了这个形状**：`read-scope-sql.ts` 的 `compileField` 判 `keys.some((k) => !k.startsWith('$'))` 就 fail-closed 拒收。一个形状，两扇门两种答案，且加宽的那扇是调用方直接写的那扇。\n\n## 与 #6386 的关系\n\n**不同缺陷**：#6386 是比较数位置的 `undefined`（值），本单与值无关（任何值都丢）。#6386 的 PR 已把这条测量**钉在测试里**（`a non-$ SIBLING of an operator is still dropped — a different defect, not this one`），免得被后来人误读成已覆盖——但没有修它。\n\n## 可能的处置（供分诊，未自行拍板）\n\n- **A 拒收**，与 `read-scope-sql` 对齐，走本模块现成信封 `INVALID_FILTER` / 400。与 #5240（零算子字段约束）的裁决同向，\"一个横竖读不出作者意图的形状要响亮地拒\"。\n- **B 展平**，把非 `$` 兄弟键按嵌套关系编成 `d.nested`，与只有非 `$` 键时的行为一致。⚠️ 但这会把 `{amount: {gte: 10}}` 这类手误编成对不存在成员 `amount.gte` 的谓词，把一个可诊断的错误变成一个更难懂的错误。\n\n倾向 A，但这是分诊的判断：B 触及\"混合拼法算不算合法授权面\"，属契约问题。\n\n## 触达性\n\n**本单未证实**有生产调用方写出混合形状。过滤器主要来自库存 metadata（dashboard `filter` / report `runtimeFilter` / dataset `filter`），是 JSON，所以这个形状**过得了 JSON**（与 #6386 的 `undefined` 不同），可以躺在库存 metadata 里，也可以由 AI 直接写出来。如实记的是\"未证实触达\"，不是\"不会发生\"。\n\n## 关联\n\n- #6386（本单的出处；同一函数，比较数位置的 `undefined`）\n- #3650 / #4128（\"丢谓词 = 加宽\"的原始事故与复发）\n- #5240（零算子字段约束 `{}` 判\"拒收\"的先例）\n- #5930（仓内 5 个独立谓词编译器，每次裁决 xN）\n\n会话：`session_015a5qkLzpGXhLL2F5gvJ7dD`（#6386 实施过程中发现，未指派）"
+}

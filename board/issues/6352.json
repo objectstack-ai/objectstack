@@ -1,0 +1,35 @@
+{
+  "number": 6352,
+  "kind": "issue",
+  "title": "finding: explain-engine `buildContextForUser` 手工镜像 `resolveAuthzContext` 的授权聚合,两者无任何 parity 断言,只靠注释保持一致",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T14:48:33Z",
+  "updated_at": "2026-08-08T14:59:14Z",
+  "closed_at": "2026-08-08T14:59:14Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6352",
+  "body": "在 #6286(PR 修 `check-single-authz-resolver` 判据词表)施工中量到,**与该 issue 正交、不在其申报面内**,按 Prime Directive #10 立独立观察单,未认领。\n\n## 观察\n\n`packages/plugins/plugin-security/src/explain-engine.ts` 的 `buildContextForUser()` 是 `packages/core/src/security/resolve-authz-context.ts` 授权聚合的**第二份实现**:两者都读 `sys_user_position` + `sys_user_permission_set`,都按 ADR-0091 有效期窗口过滤,都从「未限定 org 的 `admin_full_access` 用户授予」**派生** `platform_admin`。\n\n它自己的注释就把这件事写明了:\n\n- `explain-engine.ts:234` — \"Reconstruct an evaluation context for an arbitrary user, **mirroring the runtime resolver's semantics** (`@objectstack/core` resolveAuthzContext)\"\n- `explain-engine.ts:275` — \"We compute it here with the **IDENTICAL rule** so the explain panel's posture cannot sit higher than enforcement's\"\n\n**「一致」目前只由这两句注释保证** —— 全仓没有任何断言把两者的判据钉在一起。实测:`grep -rn buildContextForUser packages --include=*.ts` 的全部命中里,只有 `explain-engine.test.ts` 单测它自己的行为,没有一处把它的输出与 `resolveAuthzContext` 的输出做对照。\n\n## 为什么是 finding 而不是缺陷\n\n今天两者**是**一致的,没有已知的用户可见错误。这是一条**休眠的漂移风险**,不是活的 bug:\n\n- 它不在请求强制路径上。唯一调用者是 `security-plugin.ts:2221` `explainAccessForCaller()`,而调用者自身的授权(`manage_users` 能力或 ADR-0090 D6/D12 的 delegated adminScope)走的是正常路径,与这份聚合无关。\n- 所以它**不是** `check:authz-resolver` 立案要防的那类「REST 自带一份漂移解析器」—— 那条守的是 request-context 强制面。\n\n漂移真的发生时的后果是 **explain 面板对「为什么有权限」给出与实际强制不一致的解释**(诊断说谎),而不是越权。这是一条独立的、目前无人守的不变量。\n\n## 与 #6286 的关系(重要,避免误读)\n\n#6286 的 PR 把检查 (1) 的判据从「同时**提到**两个字符串」改成「同时**查询**两张表」。新判据在真实仓库上命中 2 个文件:规范解析器,以及这个 `explain-engine.ts`。\n\nPR 把 `explain-engine.ts` 放进 `ALLOW` 并写明理由(它不是 request-context 解析器)。**这是有意的、记录在案的豁免,不是把这条风险扫到地毯下** —— 恰恰相反,是这次判据修复第一次让它**可见**:旧判据一个文件都匹配不到,这份镜像从来没有被任何门禁看见过。\n\n⚠️ 因此**不要**通过放宽 `check:authz-resolver` 的 remit 来「顺手」守这条 —— 那会把该门禁声称守的语义(request-context 解析)偷偷改掉。这条要么单独立守卫,要么把两份实现收敛。\n\n## 候选修向(未实现,供分诊)\n\n1. **收敛**:让 `buildContextForUser` 复用 `resolveUserAuthzGrants`(core),explain 侧只做展示层加工(过期/委派来源等 explain 专有信息)。最彻底,消灭第二份实现。\n2. **parity 断言**:加一条测试,在同一组 fixture 行上分别跑两者,断言 positions / permission sets / platform_admin 派生三项一致。便宜,但保留两份实现。\n3. 现状 + 注释(即今天):不推荐,已被证明是无法察觉漂移的形态 —— #6286 本身就是「靠注释保持一致」失效了几个月无人发现的实例。\n\n倾向 1;若 explain 侧确有 core 不该承担的展示需求(过期行、委派来源),则 1 + 把这些做成 core 聚合的可选返回面。\n\n相关:#6286(判据修复,首次让这份镜像可见)、#6216(ExecutionContext 在 dispatcher / REST / share-link 三处独立组装 —— 同族「一个概念多份装配」,但那条在传输层,这条在 explain 层)、ADR-0068 D2 / ADR-0091 / ADR-0095 D3(被复制的那三条判据的出处)。\n\n由 os-dev 座位在 #6286 施工中量到,未认领,交分诊定级。"
+}

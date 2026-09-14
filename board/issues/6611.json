@@ -1,0 +1,35 @@
+{
+  "number": 6611,
+  "kind": "pull_request",
+  "title": "fix(objectql): insert 剥离作用于调用方提交的值,不再连坐抹掉 beforeInsert hook 的写入 (#6339)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T07:06:48Z",
+  "updated_at": "2026-08-08T07:30:06Z",
+  "closed_at": "2026-08-08T07:30:05Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": "2026-08-08T07:30:05Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/6611",
+  "body": "Fixes #6339\n\n`stripRuntimeOwnedFields` 在 `beforeInsert` 之后执行,却用入口处的「键名集合」判断该删什么。hook 一旦写入 runtime-owned 列,这两件事就不是同一回事:`delete result[name]` 删的是**执行到剥离时键上的当前值**,只要调用方 payload 恰好也提交了同名键,被删掉的就是 hook 的写入。这是 update 面 #5591 / PR #6343 的 insert 面孪生缺陷,错因完全相同 —— 本 PR 是其**机械镜像**。\n\n关键在于:「调用方不提交该键 ⇒ hook 写入存活」正是 `runtimeOwnedStripWarning()` 正文对每个 hook 作者的承诺:\n\n> A beforeInsert/beforeUpdate hook does NOT need either — hook-written keys are not caller-supplied.\n\n键名集合判据让这句话只在「调用方碰巧没提交同名键」时成立。所以这是把代码拉回它自己写下的契约,不是策略变更。\n\n## 前提复核(P1-P4,动手前逐条实测)\n\n| | 前提 | 结论 | 证据 |\n|---|---|---|---|\n| **P1** | origin/main 上 insert 面缺陷仍在 | ✅ 成立 | 复刻正文 A/B 探针(真 ObjectQL + 内存驱动,`probe_num2 { title: text, code: autonumber }`,hook 赋值 `ctx.input.data.code`):`PROBE A code = \"HOOK-OVERWRITE\"` / `PROBE B code = \"1\"`。#6343 未顺带盖住 insert,`premise_still_valid: true` |\n| **P2** | #6343 落地形状可考且可镜像 | ✅ 成立 | 读 squash `9c82b8990`:快照构造点 `engine.ts` update 终端顶部(hook 之前)、比对点 `Object.is` + `hasOwnProperty`、非导出签名 `ReadonlySet< string >` → `Readonly< Record< string, unknown > >`。三处逐项镜像见下表 |\n| **P3** | `suppliedPerRow`(取自 `opCtx.data`)与 hook 原地改的 `ctx.input.data` 是否同引用 | **实测:不同引用** | `PROBE aliasing A/B: ctx.input.data === callerPayload ? false`;插入后调用方对象未被改动(`{\"title\":\"B\",\"code\":\"CALLER-FORGED\"}`)。原因:`applyFieldDefaults` 返回 `{ ...record }`(`engine.ts:1993`)。**但这是巧合而非不变量**:该函数在 `!fields` 提前返回时原样交回同一引用(`engine.ts:1988`),`initializeSummaryFields` 也只在真正播种时复制。所以快照仍显式浅拷贝、并提前到 hook 之前取 —— 与 update 面 #6343 spread 的理由相同,只是那边拷贝是止血、这边是加固 |\n| **P4** | #6553(播种段)与本单(insert 剥离段)无纠缠 | ✅ 成立 | #6553 = `6f6fec72d`,已在本分支 base 内;其 `engine.ts` hunk 全部落在 `@@ 2130/2140/2183/2203`(`seedAutonumber` 一带),本 PR 落在 5590-5720(insert 剥离一带)。merge origin/main 后 `git merge-tree --write-tree` 干净退出 |\n\n## 与 #6343 的镜像对照\n\n| 面 | update(#5591 / PR #6343,已合) | insert(本 PR) |\n|---|---|---|\n| 剥离函数 | `stripReadonlyFields` | `stripRuntimeOwnedFields` |\n| 第三参签名 | `suppliedKeys: ReadonlySet< string >` → `supplied: Readonly< Record< string, unknown > >` | 同(镜像) |\n| 键存在判据 | `Object.prototype.hasOwnProperty.call(supplied, name)`(不用 `in`,`constructor` 是合法字段名) | 同(镜像) |\n| 值身份判据 | `Object.is(result[name], supplied[name])`(不用 `===`,伪造 `NaN` 会被 `===` 判成「hook 改过」而留存) | 同(镜像) |\n| 快照 | `suppliedValues = { ...opCtx.data }`,取于 update 终端顶部、hook 之前 | `suppliedPerRow = rows.map(r => ({ ...r }))`,提前到 `triggerHooks('beforeInsert')` 之前 |\n| 调用点数 | 2(单 id 路径 + 谓词 multi 路径) | 1(单行与批量共用同一 per-row 循环) |\n| 豁免 | `isSystem` / `preserveAudit` 未触碰 | 同 |\n| 已知限制 | 浅快照:hook 原地改调用方传入的对象无法与「什么都没做」区分,仍被剥(fail-safe) | 同,并注明 `autonumber` 值在所有受支持形态下都是标量,故此限制在本面是理论性的 |\n\n⛔ 未发明第二套形状:判据、拼写、注释结构均照搬 #6343。\n\n## 反向验证(方向先写死,再实测)\n\n**预测**(回退为键名集合判据 = 删掉 `Object.is` 一行,保留 own-key 判断):② 类用例转红,①③ 类保持绿。预测清单写在实施前。\n\n**实测:11 红,与预测逐条一致,无额外红绿。**\n\n| 预测 | 实测 | 用例 |\n|---|---|---|\n| 🔴 | 🔴 | `B (THE REPORT)` — 落库回到 `\"1\"` |\n| 🔴 | 🔴 | `A and B now agree` |\n| 🔴 | 🔴 | `a hook-overwritten code produces NO warning` |\n| 🔴 | 🔴 | `P3: the caller-value snapshot is NOT the object the hook mutates in place` |\n| 🔴 | 🔴 | `a hook that REPLACES ctx.input.data wholesale`(键集仍含 `code`,替换后的值一并被删) |\n| 🔴 | 🔴 | `BULK: one batch, mixed rows` |\n| 🔴 | 🔴 | `BULK: a caller-supplied value is never read from the WRONG row` |\n| 🔴 | 🔴 | `onFieldsDropped: silent for a hook-overwritten code` |\n| 🔴 | 🔴 | `strictReadonlyWrites refuses the real forge and admits the hook write` |\n| 🔴 | 🔴 | 单测 `#6339 > KEEPS a record number a hook OVERWROTE` |\n| 🔴 | 🔴 | 单测 `#6339 > warns only for the value it really dropped` |\n| 🟢 | 🟢 | `A (control)` / `#5503 UNCHANGED` / `isSystem` / `preserveAudit` / `hook can still SEE` |\n| 🟢 | 🟢 | 单测 `#5503` 全组 4 条;`#6339` 的 `STILL drops when unchanged` / `NaN` / `Object.prototype key` |\n\n回退实测输出:`Tests  11 failed | 151 passed (162)`。恢复后全绿。\n\n## 测试\n\n新测试落**专用文件** `packages/objectql/src/engine-insert-runtime-owned-strip.test.ts`(15 例,⛔ 未触 `engine.test.ts`),另在 `rule-validator.test.ts` 补 `#6339` 单测组(5 例)并把既有 4 条 `#5503` 用例改成值对象形态(签名变更所致,与 #6343 对 update 单测的改法一致)。\n\n覆盖:① A 用例 pin(hook 新增键存活)② B 用例翻正 ③ 调用方值确实被剥 + 警告文案不变 ④ P3 快照不被 hook 原地改污染 ⑤ bulk 多行混合形态(新增/覆写/未覆写/空)+ 跨行取值防串行,以及 `onFieldsDropped` / `strictReadonlyWrites` / `isSystem` / `preserveAudit` / hook 仍可读到调用方原值。\n\n```\n$ pnpm --workspace-concurrency=2 --filter @objectstack/objectql typecheck\n> tsc --noEmit                                    # 无输出 = 绿\n\n$ pnpm --workspace-concurrency=2 --filter @objectstack/objectql test   # merge origin/main 之后\n Test Files  149 passed (149)\n      Tests  2514 passed (2514)\n\n$ pnpm check:engine-double-contract\ncheck-engine-double-contract: OK — 94 pinned, 133 in the DEBT ledger, 2 exempt.\n\n$ pnpm check:query-options-erasure\n✓ query-options-erasure ratchet holds: 77 unswept non-test site(s) in 18 file(s), none new.\n  test surface: 263 site(s) in 49 file(s) — at the ceiling.      # 新测试文件新增 0 个擦除点,⛔ 未用 `{} as any`\n\n$ pnpm check:type-check-debt                       # 先全量 turbo build(71 tasks successful)\ncheck-type-check-coverage: OK — 62/77 workspace packages type-checked …\ncheck-type-check-coverage --re-measure: OK — 34 ledger entr(ies) re-measured, none above its recorded number.\n                                                   # 台账未抬;既有 surplus 与本 PR 无关,未动\n\n$ node scripts/check-nul-bytes.mjs                 # 绿;另对本 PR 全部改动文件自扫\n$ grep -naP '[\\x00-\\x08\\x0b\\x0c\\x0e-\\x1f\\x7f]' -- (本 PR 改动的全部文件)   # 无命中\n```\n\n## 边界\n\n- ⛔ 不重开 #5503 语义(autonumber 为 runtime-owned、调用方不得 seed —— 剥离本身正确,只是删错了对象);\n- ⛔ 不涉 #3413 / #3043(insert 面对 author-declared `readonly` 的豁免、DataProtocol ingress 剥离);\n- changeset:`patch @objectstack/objectql`(用户可见行为变更)。\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_019Q7oc7ASjh8yxyS3Yz78We)_"
+}

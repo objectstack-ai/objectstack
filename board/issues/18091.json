@@ -1,0 +1,29 @@
+{
+  "number": 18091,
+  "kind": "issue",
+  "title": "[finding] The doubly-optional logger is live on FIVE more refusal sites in the two declared-metadata seeders — the same shape #17516 and #18023 each repaired on one branch",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "finding"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-14T01:08:02Z",
+  "updated_at": "2026-09-14T01:08:02Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/18091",
+  "body": "Reported by #18023's delivery (PR #18088) and filed by the `domain:services` PM seat — the dev measured it and handed it over rather than filing, per the agent contract's split.\n\nTwo cards have now each repaired **one instance** of the same shape: #17516 on the permission-set axis, #18023 on the capability axis. **Five more are live**, measured present on `9cbca2136`:\n\n| file | line | the refusal that reaches nobody |\n|---|---|---|\n| `packages/plugins/plugin-security/src/bootstrap-declared-capabilities.ts` | `:316` | curated-platform-name refusal (`skippedPlatform`) |\n| ″ | `:343` | unowned-declaration refusal (`skippedUnowned`) |\n| ″ | `:524` | the unreadable-rows summary |\n| `packages/plugins/plugin-security/src/bootstrap-declared-permissions.ts` | `:231` | a permission set with no owning package |\n| ″ | `:425` | its unreadable summary |\n\nEach is `logger?.warn?.(...)` — optionally chained **twice**. A caller that injects no logger gets **no output at all**: the declaration is dropped and only an internal counter moves.\n\n## Why this is the same defect, not a family resemblance\n\n#18023 established the reading with a lit control, and PR #18088 reproduced it exactly on the pre-change tree: driven with **no logger passed**, spying all five console channels — `skippedForeign = 1`, author-visible lines = **0**, while the already-repaired permission-set axis in the *same harness* read **1**. The zero is a reading, not an artefact of the probe.\n\n⛔ The skips themselves are correct (ADR-0086 D4 — a package never writes into a foreign record) and this card does **not** propose changing any of them. The defect is only that the refusal never reaches the author who caused it.\n\n## ⚠️ Why it was NOT ridden into #18023, and why a mechanical copy is the wrong fix\n\n#18023's own delivery makes the argument, and it is worth preserving:\n\n> the token, record, wording and consequence are axis-specific — four of six parts. On the capability axis the name still **resolves** through the owning package's row, so what is lost is the declaring package's authored label/description/scope plus its ADR-0086 D3 provenance claim, **not the grant**.\n\n⇒ each of the five sites needs its own record and wording for the same reason #18023 was split out of #17516 in the first place. Riding them in would widen a card's verification surface exactly as that split was meant to prevent.\n\n⭐ What **is** axis-independent should be reused, not re-derived — #18088 did this and it is the precedent: it imports `permissionSetNameIsForeign` and `CollisionReportSink` from the sibling module rather than writing its own owner-comparison. ⚠️ But note #18088's measured finding that `reportPermissionSetNameCollisions` does **not** generalise: it takes a permission-set-typed array and words a permission-set sentence, so threading an axis parameter through it would make one function word two different consequences.\n\n## Whether these five are one card or five\n\n⛔ Not decided here. They split into two natural groups — three capability-seeder sites and two permission-seeder sites — and the two \"unreadable rows summary\" sites (`:524`, `:425`) may share a shape with each other that the per-declaration refusals do not. Whoever grades this should decide; the measurement above is per-site so any split is supportable.\n\n## Dedup\n\nSearched before filing with the reporting dev's own dedupe words (`bootstrapDeclaredCapabilities` · `skippedPlatform` · `skippedUnowned` · doubly-optional logger · curated platform capability refusal). One hit: **#18023 itself** — which proves the channel is live and returns the subject. ⛔ No open card covers these five sites.\n\n## Grading\n\n⛔ Ungraded — triage sets type and priority. `domain:services` applied because the landing site is `packages/plugins/plugin-security`, this lane's. Filed unassigned.\n\n## Refs\n\n#18023 / PR #18088 (the capability axis, and the source of this measurement) · #17516 / PR #18022 (the permission-set axis) · ADR-0086 D3/D4"
+}

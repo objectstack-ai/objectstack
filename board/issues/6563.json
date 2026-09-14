@@ -1,0 +1,36 @@
+{
+  "number": 6563,
+  "kind": "issue",
+  "title": "revertCommit cannot restore an `object` overlay at all — it passes no write intent, so restoreVersion defaults to `override-artifact` and the repository answers NOT_OVERRIDABLE",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched",
+    "pm:queue",
+    "target:v17"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T04:47:46Z",
+  "updated_at": "2026-08-08T08:30:14Z",
+  "closed_at": "2026-08-08T08:30:14Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6563",
+  "body": "Found while implementing #6215 (the package-scoping half of the same call). Recording only, per Prime Directive #10 — it is a different cause on a different line, outside that issue's ruled file surface.\n\n## Evidence\n\n`ObjectStackProtocolImplementation.revertCommit` (`packages/metadata-protocol/src/protocol.ts`, the `existedBefore` limb) restores an edited artifact with:\n\n```ts\nawait repo.restoreVersion(ref, it.prevVersion, {\n    actor,\n    source: 'protocol.revertCommit',\n    message: `revert commit ${request.commitId}`,\n});\n```\n\nNo `intent`. `SysMetadataRepository.restoreVersion` therefore defaults to `intent: opts.intent ?? 'override-artifact'`, and `put` opens with `assertAllowed(ref.type, opts.intent)`, which refuses any type whose registry entry is not `allowOrgOverride`. `object` is exactly such a type, so every `object` item in a reverted commit comes back in `failed[]`:\n\n```\n[NOT_OVERRIDABLE] 'object' is not allowOrgOverride in the registry.\nOverlay-allowed: view, page, dashboard, app, action, report, dataset,\ntranslation, email_template, book, permission, position, tool, skill.\nSet OS_METADATA_WRITABLE to enable additional types at runtime.\n```\n\nMeasured on a real `SysMetadataRepository` over an in-memory `sys_metadata` / `sys_metadata_history` double while writing #6215's pin tests: an `object` saved twice through `saveMetaItem` and then reverted through `revertCommit` returns `revertedCount: 0`, `failedCount: 1` with that message. Package binding is irrelevant — a package-less object fails identically.\n\n## Why the sibling caller works\n\n`rollbackMetaItem` derives the intent instead of defaulting it:\n\n```ts\nconst artifactBacked = this.isArtifactBacked(singularType, request.name);\nconst intent: 'override-artifact' | 'runtime-only' = artifactBacked\n    ? 'override-artifact' : 'runtime-only';\n```\n\nA runtime-created object (`_provenance: 'org'`, the shape Studio's package workspace produces) is not artifact-backed, so the per-item rollback passes `runtime-only` and the same repository line admits it. `revertCommit` never computes that, so the two user-facing revert paths disagree about what is revertable — for the metadata type Studio creates most.\n\n## Why it matters\n\n`revertCommit` is the package-commit \"undo\" (ADR-0067). A commit that edited an object — the common case for an AI-built or Studio-built app — reports partial failure and leaves the edit in place, while the same edit reverts fine one artifact at a time through the version-history revert. The failure is per item, so the revert also reports `success` overall with a populated `failed[]`, which reads as a flaky revert rather than a systematic refusal.\n\n`rollbackToPackageCommit` reverts through the same loop, so it inherits this.\n\n## Suggested direction (not a ruling)\n\nCompute the intent from the artifact the same way `rollbackMetaItem` does, rather than defaulting it at the repository — the repository's default is right for callers that genuinely mean \"override an artifact\", and the bug is that this caller never states which of the two it is. Note `revertCommit` reverts a batch, so the intent is per item, not per call.\n\nRelated: #6215 (the package-scoping defect on the same `restoreVersion` call; its pin tests use `view` precisely because `object` cannot reach the scoping line), ADR-0067, ADR-0048.\n"
+}

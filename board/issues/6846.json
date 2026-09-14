@@ -1,0 +1,34 @@
+{
+  "number": 6846,
+  "kind": "pull_request",
+  "title": "docs(spec): describeHighPrivilegeBits 的裸通配符举例换成仍带 '*' 的 viewer_readonly (#6696)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T00:17:54Z",
+  "updated_at": "2026-08-09T01:00:06Z",
+  "closed_at": "2026-08-09T01:00:04Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": "2026-08-09T01:00:04Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/6846",
+  "body": "Fixes #6696\n\n## 问题\n\n`packages/spec/src/security/high-privilege.ts` 里 `describeHighPrivilegeBits` 的 JSDoc,拿平台自己的 `member_default` 当\"裸 `'*'` 通配符本身不算高权限\"的举例。#5491(PR #6684)按维护者裁定(2026-08-07)把平台基线收窄为 explicit-allow 之后,该集合**完全不带 `'*'` 条目**了,于是这句举例指着一个已经不是那个形状的集合。照着去找的读者一无所获,进而怀疑的是规则本身,而不是这句举例。\n\n**规则没错,也没动。** `describeHighPrivilegeBits` 从不读 `member_default`,它评估调用方递进来的任意集合;ADR-0090 D5 断言原样保留,实现一行未改。\n\n## 前提复核(在 `origin/main` @ `c32944d67` 上量的)\n\n不是照抄 issue,而是拿**真实的 `defaultPermissionSets` 数组**跑真实谓词量出来的 —— 因为\"用另一个同样失效的举例替换失效举例\"是同一个缺陷再犯一次,本 lane 今天已经为这个形状关掉过 #6628:\n\n```\n=== member_default ===\n  has '*' entry:         false          ← 前提成立,举例确实失效\n  describeHighPrivilegeBits             -> null\n  describeAnchorForbiddenBits(everyone) -> null\n\n=== viewer_readonly ===\n  ships:                 yes (\"Viewer — Read-Only\")\n  has '*' entry:         true\n  '*' value:             {\"allowCreate\":false,\"allowRead\":true,\"allowEdit\":false,\n                          \"allowDelete\":false,\"allowTransfer\":false,\"allowRestore\":false,\n                          \"allowPurge\":false,\"viewAllRecords\":false,\"modifyAllRecords\":false}\n  '*' 非 read 的 true 位:  []            ← 名副其实的只读\n  systemPermissions:     null\n  describeHighPrivilegeBits             -> null   ← 确实不是高权限\n  describeAnchorForbiddenBits(everyone) -> null   ← 确实可绑 everyone\n  describeAnchorForbiddenBits(guest)    -> \"a '*' wildcard grant (guest bindings admit explicit objects only)\"\n```\n\n最后一行是意外收获:`viewer_readonly` 比 `member_default` 当年更适合做这个举例 —— 同一个集合把这句话的**两半同时演示**了,everyone 可绑、GUEST 层恰恰因为通配符被拒。\n\n## 改动\n\n一处注释,7 增 5 删,外加一个 changeset。有两点是刻意的:\n\n1. **D5 的形状描述必须跟着放宽。** 原句是\"a **read/create/edit-own** baseline ... 正是这个形状\",而 `viewer_readonly` 是**只读**的。只换名字不动形状,等于把一个失效举例换成另一个失效举例。故改为 \"a read — or read/create/edit-own — baseline\"。\n2. **#2753 的历史保留**(issue 明确要求),改写成 \"the then-wildcard-carrying default baseline\",让时态在新增的 `#5491` 从句旁边不产生歧义。\n\n同一段 JSDoc 后面还有第二处 `member_default` 提及(`allowExport` 那句),已复核**仍然为真**(该集合确实不带 `allowExport`,且 everyone 可绑),故逐字节未动。\n\n## 验证\n\n- **验证方向,先说清楚:此处没有可用的\"红\"方向,如实报告。** 这是注释,没有任何断言读它;`packages/spec` 下不存在覆盖 `high-privilege.ts` 的 prose pin(该函数的行为 pin 在 `plugin-security/src/audience-anchors.test.ts`,它测行为不测文案),因此把改动回退不会让任何测试变红。此处不发明一次性的源码文本正则。真正有证伪力的检查是上面那次探针:若 `viewer_readonly` 没有通配符、或不是只读、或不可绑 anchor,探针会当场说出来 —— 它正是用来挡\"同一个缺陷再犯一次\"的。\n- **Lane 准入(acceptance 逐字节不变):** `pnpm --filter @objectstack/spec check:generated` → **10/10 绿**,含 `check:authorable-surface`(任何 schema 接受的键集未移动)与 `check:docs`。\n- `pnpm --filter @objectstack/spec typecheck` → 绿(TEST_DEBT 未动:未触碰任何测试文件,58 files / 266 errors 原样)。\n- `pnpm --filter @objectstack/spec test` → **346 test files passed / 8877 tests passed**,exit 0。\n- `node scripts/check-nul-bytes.mjs` → OK(6362 文件);改动文件另做了越过该 gate 的控制字符自扫描,干净。\n\n## 参考文档触达结论(本次要求测的那一项)\n\n**不触达 `content/docs/references/`。** `packages/spec/scripts/build-docs.ts:186` 是 `if (!entry.name.endsWith('.zod.ts')) continue;` —— 生成器只遍历 `.zod.ts`,而 `high-privilege.ts` 不是。全文 grep `content/docs/` 对该 JSDoc 的特征句零命中,`check:docs` 亦无任何待重生成产物。所以本次属于今天两类测量中的**不触达**那一类(与 `.describe()` 字符串触达相反,与 TSDoc `@example` / authorable key 的 JSDoc 不触达一致)。⛔ 无生成产物需要提交,也未手改任何生成输出。\n\n## Changeset 判断(要求逐条论证的那一项)\n\n**加了,`@objectstack/spec: patch`。**\n\n`packages/spec` 的 `files` 是 `[\"dist\", \"json-schema\", \"liveness\", \"prompts\", \"llms.txt\", \"README.md\", \"src/**/*.zod.ts\", \"CHANGELOG.md\", \"api-surface\", \"spec-changes.json\"]`。`high-privilege.ts` 不是 `.zod.ts`,**源文件本身确实不随包发布**。但结论不能停在这里:构建后实测\n\n```\n$ grep -rln \"high-privilege by itself\" packages/spec/dist/\ndist/security/index.d.ts\ndist/security/index.d.mts\ndist/security/index.js.map\ndist/security/index.mjs.map\n```\n\n`dist` 在 `files` 里,所以**这段文案是随 npm 包发布给使用方的**,编辑器悬停 `describeHighPrivilegeBits` 读到的就是它 —— 也就是说被误导的不只是本仓库读者。\n\n先例支持同一条线:最贴近的结构同类 `8ad609c69`(`packages/spec/src/contracts/metadata-service.ts`,同为非 `.zod.ts` 的纯 JSDoc 改动)带了 patch changeset,其结语正是 \"Documentation only — no implementation changed, and the doc comment ships in the package's `.d.ts`\"。近期六个同类里四个带 changeset。\n\n非 breaking,故不需要 ADR-0087 disposition 标记。\n\n## 范围\n\n严格限于 issue。过程中发现同一处失效举例在 `plugin-security/src/audience-anchors.test.ts:65` 的测试名里还有一份(以及 line 103 的弱实例),按 Prime Directive #10 **另行归档为 #6842**(observation-class,`finding`,无 `pm:queue`,未指派),未在本 PR 修 —— 它在另一个包,且本卡是 `domain:spec-surface`。该 issue 里也记了更值得 triage 的那一层:目前没有任何机制把\"文案声称集合 X 是形状 Y\"关联到 `defaultPermissionSets` 实际发布的内容,所以 #5491 一改,三处文案同时静默失效而没有一个 gate 动。\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_018ffcE95NaMJcL9XJ9VDYgk)_"
+}

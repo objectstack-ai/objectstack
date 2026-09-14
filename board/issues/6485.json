@@ -1,0 +1,35 @@
+{
+  "number": 6485,
+  "kind": "issue",
+  "title": "[finding][client] `data.find`'s pagination params are emitted on truthiness, so `{ limit: 0 }` is dropped exactly like the `limit` bug #6322 fixed",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T01:46:57Z",
+  "updated_at": "2026-08-08T06:33:59Z",
+  "closed_at": "2026-08-08T06:33:59Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6485",
+  "body": "Found while implementing #6322 (PR #6480). Out of that issue's scope — filed rather than fixed, per Prime Directive #10.\n\n## Fact (measured on `origin/main` eb7613c, and unchanged by PR #6480)\n\nBoth `find` copies emit the two pagination transport params on **truthiness**, not on presence:\n\n```\npackages/client/src/index.ts:4224  if (normalizedOptions.top) queryParams.set('top', normalizedOptions.top.toString());\npackages/client/src/index.ts:4225  if (normalizedOptions.skip) queryParams.set('skip', normalizedOptions.skip.toString());\npackages/client/src/index.ts:4908  (ScopedProjectClient — same two lines)\npackages/client/src/index.ts:4909\n```\n\nMeanwhile the canonical branch normalizes on **presence**:\n\n```\nif (v2.limit != null) normalizedOptions.top = v2.limit;\nif (v2.offset != null) normalizedOptions.skip = v2.offset;\n```\n\nSo `0` survives the normalizer and is then discarded by the emitter. `find('task', { limit: 0 })` — and equally `{ top: 0 }` — reaches the server with **no `top` param at all**, and the caller gets the server's default page size: HTTP 200, no warning. That is the identical silent-wrong-answer shape #6322 was filed for, one value narrower.\n\n`{ offset: 0 }` / `{ skip: 0 }` are dropped too, but harmlessly — `skip=0` is already the default, so the request means the same thing either way. `limit` is the one that changes the answer.\n\n## Why this is `finding` and not a defect queue item\n\nI could not find a caller that writes `limit: 0` today: nothing in the workspace calls `client.data.find` outside `packages/client`'s own tests. Whether `limit: 0` should mean \"return no records\" or should be refused as meaningless is a contract question the transport layer does not get to answer by accident — right now it answers \"return the default page\", which is the one reading nobody would choose deliberately.\n\nWorth grading rather than assuming: severity judged at filing time is unreliable in both directions, so this is filed plainly for triage.\n\n## Note on scope\n\nDeliberately **not** fixed in PR #6480. That PR's ruling was to replace the branch-selection predicate and map `expand`; changing `if (x)` to `if (x != null)` on the emitter is a different behavioural decision (it needs a call on what `limit: 0` means) and would have ridden in unreviewed. The two `find` copies are byte-identical here as well, so whoever takes this must change both — the same multi-face constraint #6322 carried.\n"
+}

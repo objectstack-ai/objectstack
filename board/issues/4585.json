@@ -1,0 +1,30 @@
+{
+  "number": 4585,
+  "kind": "issue",
+  "title": "ADR-0105 D10: layered master data needs its follow-up ADR — the one remaining Phase 2 framework design item",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-02T09:04:52Z",
+  "updated_at": "2026-08-08T13:55:13Z",
+  "closed_at": "2026-08-08T13:52:27Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4585",
+  "body": "Successor tracking for the D10 line of #3541, which closed 2026-07-30 with D10 still open. A closed umbrella cannot carry live work, so the item moves here — same discipline as restarting a branch after its PR merges.\n\n## What D10 is\n\nADR-0105 reserves (Decision D10, concept only) the SAP material-master / 用友-金蝶 distribution shape for group deployments:\n\n> an object may declare layered governance — group-level template rows (platform-global or group-org-owned, read-shared) plus per-org override rows linked to the template, with a resolution rule (org override wins).\n\nThe motivating business shape: a group publishes a canonical material/customer/vendor master; plants consume it, optionally overriding fields locally; the group chooses per object how much local freedom exists (集团统管 / 分级 / 自由).\n\n## Status: blocked on a follow-up ADR that does not exist yet\n\nThe ADR explicitly defers mechanics \"to a follow-up ADR; this ADR reserves the concept and its place in Phase 2.\" Per #3541's closing re-evaluation, **none of ADR-0106…0113 is that ADR.** Nothing here is implementable until it exists — this issue tracks the *design debt*, and the first deliverable is the ADR, not code.\n\n## What the follow-up ADR must decide\n\nFrom the reserved text plus what Phase 1/2 shipped since (constraints the original reservation could not have known):\n\n1. **Linkage** — how an override row names its template row (a dedicated lookup field? the ADR-0092 extension-field whitelist route on shared objects?).\n2. **Resolution point** — read path vs a view layer. This now interacts with machinery that did not exist when D10 was reserved: the D2 union wall (`organization_id IN accessible_org_ids`) and driver-level `DriverOptions.tenantIds` (#3631). A group member's union read can see BOTH the template row and an org's override — the resolution rule has to decide what a union reader sees, not just what a plant reader sees.\n3. **Distribution policies** — 集团统管 / 分级 / 自由 as declarable per-object governance, and what each means for write authority on template vs override rows (D5 stamping already forces every row to carry one `organization_id`; a \"group-owned, read-shared\" template row is exactly the shape the wall exists to prevent — it needs a principled opening, not an exception).\n4. **The open/commercial line** (ADR-0016 铁律): presumably resolution *mechanics* open (they are enforcement), distribution *management* (publish/sync tooling, policy UI) commercial — that is how cloud#874 already lists it (\"Master-data distribution management … mechanics pending a follow-up framework ADR\"). The ADR should say so explicitly rather than inherit it by analogy.\n5. **Grouping-metadata dependency** — D6's `parent_organization_id` tree defines \"the group\"; D9 (#3824) already established \"shares a root\" as the group-boundary predicate and `$root`/`$parent` as portable symbols. D10 should reuse that vocabulary, not mint a parallel one.\n\n## Downstream\n\n- cloud#874's \"Master-data distribution management\" item is blocked on this.\n- Related prior art worth reading before drafting: cloud #2937 (cross-org mirroring contract, the `isolated`-posture analogue), the per-org seed/config replay machinery (cloud#881/#884) — distribution and seed-replay overlap in the \"same rows, many orgs\" problem.\n\nRefs: ADR-0105 (D10, D2, D5, D6), #3541 (closed umbrella; see its 07-30 re-evaluation), cloud#874, cloud ADR-0016, ADR-0092, #3631, #3824."
+}

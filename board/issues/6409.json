@@ -1,0 +1,36 @@
+{
+  "number": 6409,
+  "kind": "issue",
+  "title": "drivers: implement `count_distinct` in the SQL family — enforcement half of the #6188 ruling",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched",
+    "pm:queue",
+    "target:v17"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T17:02:42Z",
+  "updated_at": "2026-08-08T23:24:52Z",
+  "closed_at": "2026-08-08T23:24:52Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6409",
+  "body": "Follow-up filed from the 2026-08-07 maintainer ruling on #6188 (decision batch accepted via the PM session). Unclaimed; no labels applied — routing belongs to the triage seat.\n\n## Ruling context\n\n#6188 was ruled as a split: `array_agg` / `string_agg` retire from `AggregationFunction` (that card keeps the spec retirement half), while **`count_distinct` stays declared and gets enforced** — this card is the enforcement half.\n\n## Scope\n\nImplement `count_distinct` in the SQL family:\n\n- `packages/drivers/driver-sql` — `SqlDriver.mapAggregateFunc` (currently rejects it alongside the two now-retiring keys): lower to `COUNT(DISTINCT column)`.\n- `packages/drivers/driver-turso` (or wherever `RemoteTransport.aggregate` lives per current main) — same lowering on the remote path.\n\nOut of scope: `driver-mongodb` / `driver-memory` (inside the #5499 investment freeze; their existing partial implementations are untouched either way).\n\n## Acceptance\n\n- An analytics query using `count_distinct` compiles and returns correct values on the SQL family (dedup semantics: distinct non-null values of the target column).\n- A conformance cell covering `count_distinct` is added to the shared cases so the two SQL lowerings are pinned against each other (multi-face component rule: shared coverage, not a standalone test file).\n- The rejection message for unknown aggregation functions no longer names `count_distinct` as unsupported.\n\n## Ordering\n\nIndependent of the #6188 retirement half (different keys, different files); no Blocked-by needed. If the retirement PR touches the same `mapAggregateFunc` switch, serialize per same-file discipline.\n\nRefs: #6188 (ruling), #5907 (runtime capability-gap envelope — its wording loses these keys as subjects once both halves land), #5499 (freeze boundary)."
+}

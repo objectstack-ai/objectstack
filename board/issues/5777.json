@@ -1,0 +1,36 @@
+{
+  "number": 5777,
+  "kind": "issue",
+  "title": "`InlineActionSchema.params` 声明为参数定义数组,但 `type:'api'` 的活消费者(与 showcase 页)用的是静态载荷 map —— 一个键两种形状",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:dispatched",
+    "target:v17"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T04:52:49Z",
+  "updated_at": "2026-08-08T23:55:42Z",
+  "closed_at": "2026-08-08T23:55:42Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5777",
+  "body": "#5068 的组件 props 闸门落地后,example 语料上唯一一条与内联多语言无关的 `component-props-invalid` 指向这里。\n\n## 实测\n\n`examples/app-showcase/src/ui/pages/contact-form.page.ts:113-121`,一个 `element:button` 的内联 action:\n\n```ts\naction: {\n  type: 'api',\n  target: '/api/v1/forms/contact-us/submit',\n  method: 'POST',\n  params: {\n    name: '{{page.inquiryName}}',\n    email: '{{page.inquiryEmail}}',\n    // …\n  },\n}\n```\n\n- `InlineActionSchema`(`packages/spec/src/ui/action.zod.ts`)从 `ActionSchema` pick 了 `params`,其类型是**参数定义数组**(`ActionParam` 的数组 —— 给参数对话框渲染用的 `{name,label,type,…}`);\n- 页面写的是**请求载荷的键值 map**;\n- 闸门报 `action.params: Invalid input: expected array, received object`。\n\n**但这不是页面单方面写错。** objectui 的 `ActionRunner`(`packages/core/src/actions/ActionRunner.ts:678-696`)明确两种都接:\n\n> Spec defines this as `params: ActionParam[]`; ActionRunner historically used `actionParams` to disambiguate from the static-params object that some custom handlers consume. Accept both — when `params` is an array, …\n\n即:一个键上并存两种事实契约,消费者用 `Array.isArray` 分流。这正是 Prime Directive #12 说的「宽容消费者把错误约定化石化」的形状,只不过化石已经在那儿了 —— 而生成的参考文档(`content/docs/references/ui/action.mdx`)只讲得出数组那一种,照参考写 `api` 提交按钮的作者(或 AI 作者)写不出能跑的载荷。\n\n## 需要裁定\n\n- **A**:承认两种语义是两件事,给静态载荷一个自己的键(例如 `body` / `payload`,`type:'api'` 专属),`params` 只留参数定义;showcase 页与 runner 一起迁移。契约干净,代价是 breaking + conversion 条目。\n- **B**:把 `params` 声明成 union(定义数组 | 载荷 map),文档写清哪种 type 用哪种。一处改动,代价是把「同名两义」升格为正式契约。\n- **C**:页面改写、runner 收紧到只认数组。代价:`type:'api'` 的内联 action 就没有传载荷的授权方式了 —— 除非先做 A。\n\n倾向 A,但这是 action 契约的形状问题,超出 #5068 的范围,故只记录。\n\n## 与 #5068 的关系\n\nwarning 级下它只是一条建议性诊断;**error 升级前必须裁定**,否则 showcase 的数据录入页会变成硬解析错误。同族但不同键的还有 #5728(内联多语言 label)与 #5775(props 声明与 renderer 不一致)。"
+}

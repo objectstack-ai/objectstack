@@ -1,0 +1,33 @@
+{
+  "number": 6492,
+  "kind": "issue",
+  "title": "[finding] The pm-dispatch SKILL's `merge=os-regen` path list has drifted from `.gitattributes` — says \"eight\", lists nine, and the file has ten",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:queue"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T01:52:22Z",
+  "updated_at": "2026-08-08T14:10:52Z",
+  "closed_at": "2026-08-08T14:10:52Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6492",
+  "body": "Found while running the landing-hazard check on two round-1 PRs (`domain:cli` seat, 2026-08-08). Filed unassigned; recording only, no fix committed.\n\n## Fact (measured, not recalled)\n\n`.claude/skills/pm-dispatch/SKILL.md`, section \"入队与落地 A\", introduces the list with:\n\n> `.gitattributes` 把这**八条**路径路由到 `merge=os-regen`(⛔ 别只记住前五条 —— 后三条是文档产物,同样会被静默吞)\n\nThree different counts are in play:\n\n| Source | Count |\n|---|---|\n| The SKILL's prose | **8** |\n| The SKILL's own code block | **9** |\n| `.gitattributes` on `origin/main` | **10** |\n\n`grep os-regen .gitattributes` (the SKILL's own stated authority) returns ten routed paths. The one absent from the SKILL's block is:\n\n```\npackages/spec/authorable-defaults/**                         merge=os-regen\n```\n\nThe other nine match verbatim.\n\n## Why it is worth recording rather than shrugging at\n\nThe SKILL already inoculates itself — *「权威清单是 `.gitattributes` 本身(`grep os-regen .gitattributes`),不是这份拷贝 —— 它增删过,以文件为准」* — so a reader who follows that instruction is safe, and this is not an active incident. Two things still make it worth a card:\n\n1. **The failure it guards is silent.** The `os-regen` merge driver exits 0 with no conflict markers and drops one side's changes; only a full regeneration exposes it. A dispatch prompt that enumerates \"these eight paths\" and omits `authorable-defaults/**` gives a dev a checklist that reads complete and is not — and the SKILL's own framing (*「别只记住前五条」*) shows the intended reading is \"here is the whole set\", which is exactly the reading the drift breaks.\n2. **The prose/block mismatch is its own hazard.** \"八条\" over a nine-item block invites a reader to stop early, independent of the missing tenth. Whichever way it is fixed, the number and the block should stop disagreeing.\n\n## Suggested shape (for triage, not a commitment)\n\nEither drop the count from the prose and let the block be the list, or — stronger, and in the spirit of the SKILL's own anti-rot devices elsewhere (the `Record<CanonicalOnlyKey, …>` pattern #6322 just landed) — stop copying the list into prose at all and have the section instruct `grep os-regen .gitattributes`, which is already named as authoritative. A copy that can drift is exactly what the compile-error-on-drift patterns elsewhere in this repo exist to avoid; prose cannot be type-checked, so the only rot-proof version is the one that does not duplicate.\n\nSame class as the compile-face inventory clause the SKILL added after #5905, where an incomplete-but-plausible inventory was the defect: *「『inventory』这个词本身就是本条款的缺席证明:那次派发确实有一份清单,只是它不完整,而没有任何机制要求它完整」*.\n\n## Dedup\n\nSearched open issues for `os-regen` + `gitattributes` (0 results) and `authorable-defaults` (2 results, both unrelated — #5067 number formatting, #6488 a spec `X`/`XParsed` sweep). No duplicate.\n\nLands in `.claude/skills/pm-dispatch/SKILL.md`. No `domain:*` label applied here — routing labels are the triage seat's single-producer territory."
+}

@@ -1,0 +1,36 @@
+{
+  "number": 6592,
+  "kind": "issue",
+  "title": "`docs/adr/` is outside the `Check Links` scan surface — ADR cross-links are unverified, and the obvious widening goes red on ADR-0046's illustrative links",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T06:16:05Z",
+  "updated_at": "2026-08-08T18:28:40Z",
+  "closed_at": "2026-08-08T18:28:40Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6592",
+  "body": "Found while implementing #5992 (route C). Out of that card's scope, filed per Prime Directive #10.\n\n## Fact\n\n`.github/workflows/check-links.yml` invokes lychee over exactly three globs:\n\n```\n'content/**/*.md'\n'content/**/*.mdx'\n'README.md'\n```\n\n`docs/adr/` is not among them. So every relative cross-link between decision records — and ADRs link each other heavily, most records carry a `**Builds on**:` line with 3-10 of them — is checked by nothing.\n\n## Evidence that this is not theoretical\n\nThe break #5992 fixed lived in `docs/adr/0057-erp-authorization-core-business-units-and-scope-depth.md:5`:\n\n```\n**Builds on**: [ADR-0010](./0010-metadata-protection.md) (metadata protection / object ownership),\n```\n\nThere is no `0010-metadata-protection.md`; the record is `0010-metadata-protection-model.md`. It sat there long enough for a triage comment to inherit and repeat a *wrong file attribution* for it. A link gate would have named it the day it landed.\n\n## Why this is not a one-line workflow edit\n\nMeasured at `origin/main` `a36db28`, sweeping all `](./…)` targets under `docs/adr/` against the filesystem yields **3** unresolved hits, of which only one is a real break:\n\n| file | target | verdict |\n|:--|:--|:--|\n| `0057-erp-authorization-core-business-units-and-scope-depth.md:5` | `./0010-metadata-protection.md` | genuine break — fixed in #5992's PR |\n| `0046-package-docs-as-metadata.md:30` | `./crm_lead_guide.md` | **illustrative**, inside a code span |\n| `0046-package-docs-as-metadata.md:163` | `./crm_lead_guide.md` | **illustrative**, inside a fenced ` ```md ` block |\n\nADR-0046 is the record that *defines* the package-docs link convention (\"Docs reference each other with plain relative Markdown links\"), so its examples name a doc that deliberately does not exist in this repo. Adding `docs/adr/**/*.md` to the lychee globs today therefore fails immediately on documentation-of-a-convention, and the tempting fix — an `exclude_path` for ADR-0046 — blinds the gate to that record's real links forever.\n\nSomeone picking this up has to choose the discrimination mechanism first: teach the scan to skip fenced blocks and code spans, or carve the two example targets out by URL rather than by file, or land it advisory-first the way `check-links.yml` itself was landed under #6028.\n\n## Severity\n\nObservation-class as filed: no user path, no runtime behaviour, `Check Links` is advisory (not in the required set) and green today. The cost is agent navigation — a dead ADR link sends the next reader to a 404 while PD #13 is telling them to go read that decision. Labelled `finding`, no `pm:queue`; severity is the PM's to grade.\n\n## Not the same as #5992\n\n#5992 is about ADR *numbers* being ambiguous and is closed by a uniqueness gate. This is about ADR *links* being unverified. Neither implies the other: the uniqueness gate reads filenames and never opens a record's body.\n"
+}

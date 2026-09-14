@@ -1,0 +1,33 @@
+{
+  "number": 6267,
+  "kind": "issue",
+  "title": "Under OS_EAGER_SCHEMAS=1, entering a deep spec leaf module first dies on a strict-object ↔ field.zod TDZ",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "finding"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T12:47:50Z",
+  "updated_at": "2026-08-08T10:25:08Z",
+  "closed_at": "2026-08-08T10:25:08Z",
+  "closed_by": {
+    "login": "qq9340100",
+    "id": 313832657,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6267",
+  "body": "Observation-class finding, measured while working #4415 on `origin/main` @ `8e2bbba24`. **Nothing a user hits today** — filing so it is recorded rather than rediscovered.\n\n## What happens\n\nUnder `OS_EAGER_SCHEMAS=1` (the documented `lazySchema` rollback switch, which `gen:schema` / `check:authorable-surface` set), importing a **deep leaf schema module as the process entry point** throws during module evaluation:\n\n```\n$ OS_EAGER_SCHEMAS=1 node --import tsx --input-type=module \\\n    -e \"import './packages/spec/src/automation/control-flow.zod.ts'; console.log('ok');\"\n\n/packages/spec/src/shared/strict-object.ts:255\n  DECLARATIONS.push({ options, shape });\n  ^\nReferenceError: Cannot access 'DECLARATIONS' before initialization\n    at strictObject (packages/spec/src/shared/strict-object.ts:255:3)\n    at (packages/spec/src/data/field.zod.ts:113:52)\n    at lazySchema (packages/spec/src/shared/lazy-schema.ts:23:12)\n    at (packages/spec/src/data/field.zod.ts:113:35)\n    at Object. (packages/spec/src/data/field.zod.ts:1076:1)\n```\n\n## Why\n\n`DECLARATIONS` is a module-level `const` declared **after** the `strictObject` function in `strict-object.ts`. Eager mode makes `lazySchema(factory)` run its factory at module-evaluation time, so when the import graph re-enters `strictObject()` while `strict-object.ts` is itself still evaluating, the `const` is still in its temporal dead zone.\n\nWhether that re-entry happens is decided purely by **which module the process enters first** — it is an ordering property of the graph, not of any one file.\n\n## Why it is dormant\n\nEvery real entry point goes through a barrel (`src/index.ts`, `src/automation/index.ts`), which establishes an order in which `strict-object.ts` finishes evaluating before anything calls into it. Both eager-mode gates use those barrels, so CI never reaches the bad order. Verified green on the same commit:\n\n```\n$ OS_EAGER_SCHEMAS=1 node ... -e \"await import('./packages/spec/src/automation/index.ts')\"   # ok\n```\n\n## Reproduces on origin/main, not caused by any in-flight branch\n\nMeasured by checking out the pristine `origin/main` copies of the two files I was editing and re-running — identical failure, so #4415's changes are not involved.\n\n## Possible fix\n\nHoist `DECLARATIONS` above `strictObject` (a one-line move), which removes the TDZ regardless of evaluation order. Worth a quick check for the same shape elsewhere in `packages/spec/src/shared/` — `alias-table-registry` has a similar registry pattern.\n\nNo `pm:queue`: dormant, no user-visible symptom, and the fix is cheap enough to ride along with any future `strict-object.ts` work.\n"
+}

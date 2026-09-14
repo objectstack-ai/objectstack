@@ -1,0 +1,37 @@
+{
+  "number": 5583,
+  "kind": "issue",
+  "title": "spec: `ChartAggregateSchema` 与 `ChartGroupBySchema` object 分支转 strictObject —— #5020 parse 接通后的收紧半边(#4001 后续批)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:dispatched",
+    "target:v17",
+    "tooling"
+  ],
+  "assignees": [
+    "qq9340100"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T19:48:08Z",
+  "updated_at": "2026-08-08T09:45:48Z",
+  "closed_at": "2026-08-08T09:45:48Z",
+  "closed_by": {
+    "login": "qq9340100",
+    "id": 313832657,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5583",
+  "body": "Blocked-by: #5020\n\nPart of #4001(战役后续批;由 #5020 的 needs_decision 分析派生,按 #5068 方向 A 的两步走裁定同轮立单)。\n\n## 背景\n\n#5020 把 react 页发布闸门接上 `ChartAggregateSchema.safeParse`(lint 侧,在飞)。但实测两个 schema 均为 **STRIP 姿态**(`chart.zod.ts:716` 的 `z.object().superRefine()`、`:691` 的 object 分支;仓内常驻 pin「still STRIPS — deliberate」自证),所以 parse 接通后**未知键仍被静默吞掉** —— `groupby`、`dateGranularty` 照旧丢弃。未知键闸门要成立,必须本单的 spec 侧收紧落地。过渡期缺口由 #5020 的 pin 测试 + 注释点名本单钉住。\n\n## 范围\n\n1. `ChartAggregateSchema` 与 `ChartGroupBySchema` 的 object 分支转 `strictObject`(战役标准件:具名 surface + 改名建议;两处的 `[RETIRED]`/别名纪律照战役惯例)。\n2. ⚠️ **zod 4 联合分支消息塌缩**:`ChartGroupBySchema` 是 union,strict 分支的 `unrecognized_keys` 会被塌成顶层 `invalid_union` 的「Invalid input」—— #5020 的 dev 已实测。lint 侧 #5020 会先落解包逻辑,本单落地时用样本验证具名消息真的到达作者。\n3. **三处记录同步**(账本纪律「三处一起改或都不改」):chart.zod.ts 头部散文、chart.test.ts 两条「still STRIPS — deliberate」pin(本单落地时 pin 断言方向要反转)、台账行(#5020 已把 `no gate` 翻 `authorable`,本单再翻 strict 位)。`.counts.md` 生成物走 `gen:strictness-ledger` 整体重算。\n\n## 需要战役/维护者先答的一个产品问题\n\n**无分组单值图是否受支持形状?** 现状三方不一致:schema 与已发布 react-blocks 类型都声明 `groupBy` **必填**,而 objectui 渲染器兑现其缺席(`ObjectChart.tsx:640` 的 `|| schema.xAxisKey` 兜底),spec 自己的 `chartAggregateCategoryKey` 文档也描述了无分组单行情形。#5068 裁决的条款「渲染器兑现的键先声明后设闸」在此适用:\n\n- 若**受支持** → schema + react-blocks 类型把 `groupBy` 声明为 optional(本单一并做),#5020 的 warning 级容忍随之转正;\n- 若**属债** → objectui 侧收紧渲染器另立单,#5020 的 warning 升 error。\n\n## 关联\n\n- #5020(lint 侧 parse,先行)、#5068(同类同日裁决,方向 A 先例)、#4001(战役)、#4583(精确校验的死槽位 —— 本单是其反面:先接 parse 再收紧,不造「读起来像闸门」的空壳)"
+}

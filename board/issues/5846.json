@@ -1,0 +1,35 @@
+{
+  "number": 5846,
+  "kind": "issue",
+  "title": "单 id update 把同一行前置状态读了 3 次(engine 前置行门 + sys_fetch_previous_update + plugin-audit captureBefore),且后两次不受任何按对象需求门约束",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T07:58:00Z",
+  "updated_at": "2026-08-08T15:36:54Z",
+  "closed_at": "2026-08-08T15:36:54Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5846",
+  "body": "发现于 #5284(PR 见该单:把 `update()` 单 id 前置行门由全局改为按对象)。属 PD #10 的范围外发现,**未在该 PR 内修改**。\n\n## 事实(origin/main,已按文件逐处核对)\n\n一次**单 id** `update()` 在一个装了 plugin-audit 的普通 kernel 上,同一行的前置状态被读 **3 次**:\n\n1. `packages/objectql/src/plugin.ts` — 内建 hook `sys_fetch_previous_update`(`object: '*'`,`events: ['beforeUpdate']`,priority 5)在 `hookCtx.input.id` 存在时**无条件** `ql.findOne`,赋给 `hookCtx.previous`;\n2. `packages/plugins/plugin-audit/src/audit-writers.ts` — `captureBefore`(注册在 `beforeUpdate`/`beforeDelete`,**无 `object` 选项 ⇒ 全局**)对同一 id 再 `ql.findOne` 一次,赋给 `ctx.__previous`(注释自陈原因:「`HookContext.previous` 官方有类型但引擎不总是填」);\n3. `packages/objectql/src/engine.ts` — `update()` 单 id 分支自己的前置行读(#5284 之后按对象判定需求:校验规则 / 本对象 afterUpdate hook / roll-up 汇总),写进 `priorRecord`,并在写入后覆盖 `hookContext.previous`。\n\n其中 1、2 都是**引擎读**(`ql.findOne`,过完整读管线:中间件、RLS、字段掩码),3 是 `driver.findOne`。1、2 都不看任何需求门 —— 只要有 id 就读。\n\n## 两条互相独立的后果\n\n**(a) 三读同一行。** #5272 已经在 delete 侧把这件事做对了:引擎在派发 `beforeDelete` **之前**读一次前置行并绑定 `previous`,两个阶段共用一次读。update 侧仍是「先派发 `beforeUpdate`,写完才绑 `previous`」,于是 before 阶段的两个消费者只能各自去读。把 update 侧对齐 delete 侧的时序,1 和 2 都可以退休(2 的存在理由 —— 引擎不填 —— 届时不再成立)。\n\n**(b) 全局注册让「按对象」的需求门恒真。** plugin-audit 的 `afterInsert`/`afterUpdate`/`afterDelete` 三个 `writeAudit` 注册也**不带 `object`**,而 `hasHooksFor` 按 `triggerHooks` 的语义把「无 object 的注册」正确地当作命中每个对象。于是只要 plugin-audit 启用:\n\n- #5284 刚落地的单 id 按对象门恒真 —— 省不下任何一次读;\n- #5038 的批量按对象门(`afterUpdate`/`afterDelete`)同样恒真 —— 每次谓词写入都读一次匹配行集。\n\n`writeAudit` 自身是在 handler 里用 `SKIP_OBJECTS` 过滤的,也就是说「哪些对象要审计」这件事平台已经知道,只是没有表达在注册面上。把它表达出来(注册时给出 object 列表,或提供一个「本对象是否被审计」的谓词供门查询),按对象门才真正生效。\n\n## 影响与严重度\n\n不是正确性缺陷:`previous` 语义处处正确,只是同一行被读多次、按对象门被架空。严重度我判断不准(没有真实负载测量数据),按 #4949 平铺记录,交 PM 分诊定级。可达性没有疑问 —— 单 id update 是最常见的写路径,plugin-audit 是默认装配的一部分。\n\n## 关联\n\n- #5284(单 id 门按对象化;本发现说明为什么它在 audit 启用时省不下读)\n- #5272(delete 侧已把前置读移到 `beforeDelete` 之前并绑定 —— 本单 (a) 的对照形状)\n- #5574(`beforeUpdate` 在 `multi:true` 上拿不到 `previous`,`needs-user-decision` 中;若按 (a) 的方向改 update 时序,单 id 那一半会被顺带说清)\n- #5038(批量路径的按对象门,被 (b) 同样架空)\n"
+}

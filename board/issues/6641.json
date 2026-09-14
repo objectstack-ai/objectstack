@@ -1,0 +1,34 @@
+{
+  "number": 6641,
+  "kind": "issue",
+  "title": "rls.zod.ts 的 check @example `status IN ('draft', 'pending')` 编译不出来 —— 照抄 schema 自带示例的策略会 fail-closed 拒绝全部访问",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "target:v17"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T07:58:42Z",
+  "updated_at": "2026-08-08T17:24:48Z",
+  "closed_at": "2026-08-08T14:54:21Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6641",
+  "body": "范围外发现,出自 #6132 的可达性测量(未在该单内修)。按 Prime Directive #10 记录,不指派。\n\n## 事实(`origin/main` `0b63b5677` 基线,实测)\n\n`packages/spec/src/security/rls.zod.ts:386` 的 `check` 属性 TSDoc 带这条 `@example`(2026-08-08T13:1xZ 在 `e0f300ba5` 之后重锚:现于 **`:377`**,内容逐字未变):\n\n```\n@example &#34;status IN (&#39;draft&#39;, &#39;pending&#39;)&#34; - Only allow certain statuses\n```\n\n它编译不出来。实测(`sqlPredicateToCel` + `isSupportedRlsExpression` + `compileCelToFilter`,与运行期 `RLSCompiler.compileExpression` 同一条路径):\n\n| `@example` | 桥接后 | `isSupportedRlsExpression` | `compileCelToFilter` |\n|:--|:--|:--|:--|\n| `organization_id = current_user.organization_id` | `organization_id == current_user.organization_id` | true | ok `{&#34;organization_id&#34;:&#34;o1&#34;}` |\n| `owner_id = current_user.id` | `owner_id == current_user.id` | true | ok `{&#34;owner_id&#34;:&#34;u1&#34;}` |\n| `status = &#39;published&#39;` | `status == &#39;published&#39;` | true | ok `{&#34;status&#34;:&#34;published&#34;}` |\n| `assigned_to_id IN (current_user.team_member_ids)` | `assigned_to_id in (current_user.team_member_ids)` | true | ok `{&#34;assigned_to_id&#34;:{&#34;$in&#34;:[&#34;u1&#34;,&#34;u2&#34;]}}` |\n| `1 = 1` | `1 == 1` | true | ok `{}` |\n| **`status IN (&#39;draft&#39;, &#39;pending&#39;)`** | `status in (&#39;draft&#39;, &#39;pending&#39;)` | **false** | **FAIL parse-error: Expected RPAREN, got COMMA** |\n\n原因:`sqlPredicateToCel` 只把 `IN` 这个**词**换成 `in`,不改写括号。CEL 的列表字面量是 `[&#39;draft&#39;, &#39;pending&#39;]`(方括号),`(&#39;draft&#39;, &#39;pending&#39;)` 在 CEL 里不是合法表达式,于是 parse 失败。单元素的 `IN (current_user.xxx)` 之所以能过,是因为 `(expr)` 恰好是合法的括号分组 —— 一进多元素就塌。\n\n## 影响\n\n不是「示例排版错」那一类。作者照抄 schema 自带示例写出的策略,在运行期走的是:\n\n`compileExpression` → `compileCelToFilter` 返回 `!ok` → 返回 `null` → `compileFilter` 里 `filters.length === 0` → 返回 `RLS_DENY_FILTER`。\n\n即**该对象上的这条策略拒绝全部行**(单策略时是彻底拒绝)。同时 `@objectstack/lint` 的 `validateRlsPredicateEnforceability` 也会因 `isSupportedRlsExpression` 为 false 而报错。所以症状是「按官方示例写,然后 lint 报错 / 数据全空」,自纠成本不低 —— 作者没有理由怀疑 schema 自己的 `@example`。\n\n这正是 Prime Directive #10 的 declared ≠ enforced 形状:文档广告了一个运行时不提供的能力。\n\n## 两个修法(留给 triage,不代裁)\n\n1. **改文档**(最小):把该 `@example` 改成 CEL 方括号形式 `status in [&#39;draft&#39;, &#39;pending&#39;]`,与 ADR-0058 D1「CEL 是 canonical」一致。`using` 的几条 `@example` 也仍是 SQL 风格,但那几条都实测可编译,属于 transitional bridge 的既有面。\n2. **改桥**:让 `sqlPredicateToCel` 把 `IN (a, b, c)` 的圆括号列表改写成 CEL 方括号列表。这是**扩桥**,而 `sqlPredicateToCel` 的 TSDoc 明写自己是 `@deprecated` 过渡桥、「只桥历史支持的子集」,方向上与「让 SQL 风格逐步退场」相反。\n\n倾向 1 —— 契约优先:CEL 是 canonical,示例就该是 CEL;把一个已声明 deprecated 的桥加宽,是给要退场的方言追加新面。但这条示例是 `check` 子句唯一的「枚举取值」范例,改写时值得顺带确认 `status in [&#39;draft&#39;, &#39;pending&#39;]` 在 check 语义下确实是想表达的意思。\n\n## 关联\n\n#6132(测量出处)、ADR-0058 D1(一个 canonical 形状闸)、ADR-0056 D4(RLS 谓词形状闸门)。"
+}

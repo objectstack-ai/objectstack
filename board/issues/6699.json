@@ -1,0 +1,35 @@
+{
+  "number": 6699,
+  "kind": "issue",
+  "title": "[finding] classifyIndexFailure is a FIFTH private unique-violation vocabulary, missed by #6250's inventory — and it reads only the message channel",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T13:01:28Z",
+  "updated_at": "2026-08-09T00:40:15Z",
+  "closed_at": "2026-08-09T00:40:15Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6699",
+  "body": "Filed by the #6544 developer agent while migrating `import-runner.ts` onto `@objectstack/types`' shared predicate. Out of that card's lane, so recorded rather than fixed.\n\n## What\n\n`packages/metadata-protocol/src/migrations/view-definition-active-index.ts:279`:\n\n```ts\nexport function classifyIndexFailure(message: string): EnsureViewIndexStatus {\n    if (/unique constraint failed|duplicate entry|duplicate key value|violates unique/i.test(message)) {\n        return 'conflict';\n    }\n    ...\n}\n```\n\nThat first arm is the same question `isUniqueViolationError` (`packages/types/src/unique-violation.ts`, #6250 / PR #6541) exists to answer once. #6250 inventoried **four** private vocabularies — `service-messaging`, `rest`'s `mapDataError`, `rest`'s `sanitizeRowError`, `driver-sql`'s inline regex (#6543). This is a fifth, in a package none of those touched, so it was never in the table and is not covered by any of the queued follow-ups.\n\n## Why it is observation-class, not a live defect\n\nThe four message substrings here are a **superset** of the shared predicate's message limb minus nothing that matters — all three dialects emit one of these words on a duplicate-key `CREATE UNIQUE INDEX` failure, so today's callers get the right verdict.\n\nThe gap is the one #6250 was about: this reads the **message channel only**. A driver that reports the conflict on `code` / `errno` and gives unhelpful prose (`insert failed`, a pooled wrapper's `Write failed`, or the condition on `error.cause`) is classified `failed` here, where the shared predicate answers `true`. That is exactly the hole that made every MySQL conflict a 500 in `mapDataError` before #6541 — the same shape, in a spot nobody has measured.\n\nConsequence if it ever lands: a real duplicate-row conflict on `sys_view_definition` reports as `failed` rather than `conflict`, which (per the function's own doc comment, and more so since #6417 made the data-conflict path live) is precisely the misreport the ordering in that comment was written to prevent.\n\n## Not a mechanical swap\n\nTwo things a migration has to keep, both documented in place:\n\n1. **The ordering is load-bearing.** Duplicate-row wording is deliberately checked BEFORE dialect wording, because MySQL's duplicate error mentions the key and some drivers wrap both facts in one string. `isUniqueViolationError` answers a boolean and has no opinion about the second arm, so the call has to stay first, not merge.\n2. **This function takes a `message: string`, not the error.** The predicate accepts a bare string, so the swap compiles unchanged — but a string-only call throws away the very `code` / `errno` / `cause` channels that are the reason to migrate. Doing this properly means passing the error object down from the caller, which is the actual work.\n\n## Suggested shape\n\nPass the caught error into `classifyIndexFailure` (keeping a string overload if a caller genuinely has only prose), call `isUniqueViolationError(error)` for the first arm, and leave the dialect arm as-is. Sibling to #6543, and the same lane discipline: one consumer per PR.\n\nRelated: #6250 (the predicate), #6543 (`driver-sql`'s copy), #6544 (`import-runner`'s copy), #6417 / #5839 (what made this path live)."
+}

@@ -1,0 +1,35 @@
+{
+  "number": 18076,
+  "kind": "issue",
+  "title": "spec(changelog): the published 17.4.0 notes still say the burn-rate `window` and the OTel exporter `timeout` are outside the duration-unit gate — #17783 and #17785 renamed both",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "domain:spec"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-13T19:00:16Z",
+  "updated_at": "2026-09-13T20:12:23Z",
+  "closed_at": "2026-09-13T20:11:34Z",
+  "closed_by": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/18076",
+  "body": "The published `packages/spec/CHANGELOG.md` tells a reader that two duration keys are outside `check:duration-unit-keys`'s population and will keep their bare names. **Both were renamed under #15939 ruling A**, in `@objectstack/spec 17`. The sentence now actively misdirects anyone reading the 17.4.0 notes to find out whether a key moved.\n\n## The falsified text\n\n`packages/spec/CHANGELOG.md:2865-2869` on `origin/main` @ `484484041a`, inside the **already-released `## 17.4.0`** section, under the heading *\"Keys deliberately left alone\"*:\n\n> `ServiceLevelObjective.errorBudget`'s burn-rate `window` and the OpenTelemetry exporter `timeout` name no unit anywhere in their prose, so both are outside the gate's population entirely. Pin tests assert each of these, so a later sweep cannot read this card as \"every duration-shaped number on these files\".\n\nThree claims, all now false: *\"name no unit anywhere in their prose\"*, *\"outside the gate's population entirely\"*, and the pin-test assertion that was supposed to hold them bare.\n\n## The measurements that falsify it\n\nRead from `origin/main` @ `484484041a`, 2026-09-13T19:00Z. The tree states the contradiction in its own words:\n\n**Half 1 — the burn-rate `window`, renamed by #17783.** `packages/spec/src/system/metrics.zod.ts:368-375` carries the retirement string:\n\n> `` `ServiceLevelObjective.errorBudget.burnRateWindows[].window` was renamed to `durationSeconds` in @objectstack/spec 17 — the unit of a duration-shaped number lives in … ``\n\nIt also records why not `windowSeconds` (*\"the array this object sits in is already called `burnRateWindows`, so the key would stutter\"*). The pin that asserted the bare spelling was itself rewritten by #17783 into `it('REFUSES the burn-rate \\`window\\` with a rename naming \\`durationSeconds\\`', …)`.\n\n**Half 2 — the OpenTelemetry exporter `timeout`, renamed by #17785.** `packages/spec/src/system/tracing.zod.ts:546` is now `timeoutMs: z.number().int().positive().optional().default(10000)`, with `timeout: retiredKey(` tombstoned at `:550`. The sibling moved the same way: `exportTimeoutMs` at `:586`, `exportTimeout: retiredKey(` at `:601`.\n\n⇒ Not merely \"no longer accurate\": the CHANGELOG says these keys are *outside* the very gate whose ruling renamed them.\n\n## Why this is its own PR and was deliberately kept out of #17635\n\n⛔ A code PR never edits `packages/*/CHANGELOG.md`. #17635 (the gate, merged `484484041a`) carried the two in-tree prose repairs and stopped there; this one is release-owned text and takes the documented erratum route instead.\n\n## The prescribed remedy shape — precedent, not improvisation\n\n`ef47459474` — *\"docs(changelog): correct the two published `Seed.locale` claims PR #17013 falsified, with erratum lines\"* (#17896, `Fixes #17026`) — is the on-point precedent. It implements director-seat decision batch #119 item 1, 2026-09-12T04:15Z, maintainer 「同意」:\n\n> **A: correct the two published CHANGELOG entries in the repository, with a post-release erratum note.** … the … sentences … are corrected to the post-#17013 truth, each followed by **one erratum line naming PR #17013 and the correction date**.\n>\n> **Before editing**, run the release tooling's dry-run (`changeset version` on a scratch branch) and record that a manual edit inside an already-compiled section **survives** … **if it does not survive, stop and report**.\n>\n> `skip-changeset`: no package publishes anything from this change.\n\nand the boundary that makes it legitimate, also verbatim from that ruling:\n\n> Immutability belongs to the **shipped npm tarball**, which this ruling does not and cannot touch; it does not belong to the repository's markdown.\n\nThat PR's own reading recorded the survival gate as **passing** (marker present before and after `pnpm changeset version`, with a lit control proving the tool really did rewrite the files). ⛔ Re-run it anyway rather than inheriting the result — it is cheap, and it is the one step the ruling says to stop on.\n\nShape to match: markdown only, `Clause-②: no`, `skip-changeset`, one erratum line naming the correcting PR and the date. `ef47459474` was 2 files, +14/−2; this one touches `packages/spec/CHANGELOG.md` alone.\n\n## Scope note for whoever picks this up\n\nThis card applies batch #119's **remedy shape** to a new instance; it does **not** re-decide whether published CHANGELOG prose may be corrected — the ruling above settled that, and its boundary sentence is stated as a general principle rather than a fact about `Seed.locale`. ⚠️ If on inspection you judge this instance materially different from #17026 — for example if the correction cannot be made without changing what the released version is described as having *done* — ⛔ do not improvise: route it to the decision box.\n\n## Provenance and dedupe\n\nResidue **E** of the five the maintainer named when directing #17635's dispatch ([#15939 comment `5654385018`](https://github.com/objectstack-ai/objectstack/issues/15939#issuecomment-5654385018)); the epic closed at 18:45Z with this explicitly recorded as still owed. Deduped via issue search: the near matches are #18040 (tombstones naming the wrong major — a different axis), #18057 and #17487 (other prose-vs-tree drift, different subjects); no open card covers these two sentences.\n\n<sub>Filed by the epic PM for #15939, `session_015c5G6TmpMKgnusmTpD7Ntt`, 2026-09-13T19:00Z. Every reading above taken from `origin/main` @ `484484041a`, not relayed.</sub>\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

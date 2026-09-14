@@ -1,0 +1,35 @@
+{
+  "number": 5586,
+  "kind": "issue",
+  "title": "UnknownFilterTokenError 漏诊:含非 word 字符的类占位符串({TODAY()}、{current-user-id}、{30 days ago})绕过诊断,原样下发按字面串比较(17.0.0-rc.2)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T19:50:54Z",
+  "updated_at": "2026-08-08T12:29:39Z",
+  "closed_at": "2026-08-08T12:29:39Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5586",
+  "body": "Part of objectstack-ai/hotcrm#786\n\n## 现象\n\n`UnknownFilterTokenError` 的覆盖面止于占位符文法 `/^\\$?\\{([a-zA-Z0-9_]+)\\}$/`。任何含**非 word 字符**的类占位符串——`{TODAY()}`、`{current-user-id}`、`{30 days ago}`、`{user.id}`——在 `classifyFilterToken` 第一行就 `return null`,**不被识别为令牌**,于是绕过诊断、原样下发给 driver 按字面串比较——正好落回该诊断本要消灭的失败模式(静默错误结果,而非显式报错)。\n\n## 证据(pinned 17.0.0-rc.2,InMemoryDriver + 真 ObjectQL.find;crm_task 四行夹具,due_date 分别在 30 天前 / 1 天前 / 今天 / 7 天后)\n\n```\nclassifyFilterToken:\n  {today}            => {\"kind\":\"date-macro\",\"token\":\"today\"}\n  {TODAY}            => {\"kind\":\"unknown\",\"token\":\"TODAY\"}     → 读路径 THROWS UnknownFilterTokenError ✅\n  {TODAY()}          => null                                    → 不识别,原样下发 ❌\n\n读路径:\n  due_date <  '{today}'    =>  2 行(恰好两行逾期,解析正确)\n  due_date <  '{TODAY()}'  =>  4 行(含 7 天后才到期的——字面串比较 + 字典序倒置,'2026-…' < '{')\n```\n\n即:拼错成不带括号的 `{TODAY}` 会得到显式报错(诊断达成目的),拼错成带括号/连字符/空格/点号的形态反而**静默返回错误行集**——后一类恰恰是作者从其它系统的宏语法(`TODAY()`、kebab-case、自然语言)迁移时最容易写出的形态。\n\n## 参照:应用侧守卫比平台诊断更严,次序反了\n\nhotcrm 的作者期守卫用更宽的 `/\\{([^{}]+)\\}/` 扫描 view filter 值,能逮住上述全部形态——所以 hotcrm 今天在 CI 层碰不到这个洞。但这层保护只覆盖一个应用仓库的作者期;运行时(API 调用方、其它应用)仍然裸奔。平台诊断的存在理由就是消灭「类占位符串静默按字面量比较」,现在的文法让最常见的错拼形态恰好漏网。\n\n## 两种可能修法(供上游取舍,应用侧未做任何 workaround)\n\n1. **宽进严出**:诊断的识别文法放宽到 `/\\{[^{}]+\\}/`(任何花括号包裹的串都视为「作者意图写占位符」),词表校验不通过即抛 `UnknownFilterTokenError`——把「不认识」从静默字面量比较变成显式报错;若担心误伤真的想比较字面 `{…}` 字符串的场景,提供显式逃逸(如 `\\{`)。\n2. **保守版**:文法不动,但对进入比较运算的字符串值增加一条启发式诊断(值以 `{` 开头、以 `}` 结尾而未被识别为令牌 → warning 级日志/validate 告警),不改变行为,先让漏网形态可见。\n\n发现过程:objectstack-ai/hotcrm#782 / PR objectstack-ai/hotcrm#785 的注释订正实测(一次性探针,证据全文在该 PR body)。"
+}

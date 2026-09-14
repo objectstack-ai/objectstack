@@ -1,0 +1,32 @@
+{
+  "number": 1825,
+  "kind": "issue",
+  "title": "ADR-0048 follow-up: marketplace publish-time namespace registration & exclusivity",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-13T21:37:14Z",
+  "updated_at": "2026-08-08T14:26:35Z",
+  "closed_at": "2026-08-08T14:23:33Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/1825",
+  "body": "## Context\n\nADR-0048 v1 shipped the **install-time** namespace gate (#1810): `SchemaRegistry.installPackage` throws `NamespaceConflictError` when a package's namespace is already owned by a *different* installed package (shareable `base`/`system`/`sys` exempt; same-package reinstall allowed; `OS_METADATA_COLLISION=warn` downgrades to a warning).\n\nThat protects a single environment at install time. The original ADR discussion also raised a **publish-time / marketplace** half that was deferred: when a vendor publishes a package to the platform/marketplace, the platform should register and **exclusively reserve** its namespace globally, so two vendors can't both ship `crm` and collide on a tenant that installs both.\n\n## Why install-time alone isn't enough\n\n- Install-time only catches a conflict *after* both packages reach the same env. The marketplace can prevent the conflict *before* distribution.\n- Local dev can't be policed (no central authority) — that's accepted. The marketplace IS the central authority, so it can enforce.\n- Reverse-domain **package ids** are globally unique (route/identity key, ADR-0048 option A); **namespaces** (object table prefixes) are not, and a namespace collision is what actually breaks the DB/table layer.\n\n## Scope (open-source vs enterprise)\n\nThis is enterprise/marketplace surface. The open-source repo keeps the install-time gate + federation hooks; the registration/exclusivity service likely lives in the private marketplace backend. Define the **contract** here, implement enforcement in the enterprise tier.\n\n## Proposed direction (needs ADR-0048 addendum)\n\n- **Publish API**: on publish, reserve `(namespace → owning package id / vendor)` in a platform registry; reject a publish whose namespace is owned by a different vendor.\n- **Rename / transfer flow**: deferred in the original ADR (\"暂不考虑\"); revisit whether a vendor can rename a namespace or transfer ownership.\n- **Install-time cross-check**: optionally consult the platform registry at install so a sideloaded package whose namespace is reserved by another vendor is flagged.\n- **Tenant override / alias**: per the ADR, namespace may carry a per-tenant friendly alias distinct from the global reservation — confirm how that interacts with exclusivity.\n\n### Open questions\n- Granularity of reservation: namespace only, or `(namespace, version-range)`?\n- What about shareable namespaces (`base`/`system`/`sys`) and platform-owned ones?\n- Grandfathering already-published packages with colliding namespaces.\n\n## Acceptance\n- Publishing two different vendors' packages that claim the same namespace is rejected at publish time with a clear error.\n- Documented contract so the open-source install-time gate and the enterprise publish-time gate compose without drift.\n\nRelated: ADR-0048, #1810 (install-time gate)."
+}

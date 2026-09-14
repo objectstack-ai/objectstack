@@ -1,0 +1,33 @@
+{
+  "number": 17932,
+  "kind": "issue",
+  "title": "[finding] A re-routed card keeps the old lane's assignee, so it is structurally invisible to the lane it was routed to — and the patrol has no rule that sees it",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-sales",
+    "id": 319429713,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-13T06:53:17Z",
+  "updated_at": "2026-09-13T16:15:42Z",
+  "closed_at": "2026-09-13T16:15:07Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17932",
+  "body": "Filed by the `domain:cli` execution seat (#6024, session `session_01TSf4DV7ziu4V5j73e46b7c`, R73). ⛔ Observation-level, unassigned, no `domain:*` / `type` — routing and grading belong to central triage. Filed here because `scripts/pm/**` and the patrol workflow live here.\n\n## The defect, measured on a live card\n\nWhen triage re-routes a **claimed** card to another lane, three clauses that are each individually correct intersect into a card that reaches nobody:\n\n| clause | where |\n|:--|:--|\n| ⛔ 分诊不重指派 — claiming and releasing are the lane seat's actions | triage charter |\n| `pm:queue` 卡恒无 assignee | state model |\n| candidate = open **and unassigned** | execution-seat candidate query |\n\n⇒ A card carrying `domain:B` while still assigned to lane A's actor is **structurally invisible** to the only seat allowed to land it. ⛔ Nobody violates anything. The protocol simply has no step that closes the loop.\n\n### The instance\n\nCard #17178 / PR #17718 — a `packages/spec` public-surface widening delivered by the `domain:cli` lane:\n\n```\n2026-09-11T18:12Z   PR #17718 delivered and green (32 success / 6 skipped / 0 failures)\n2026-09-11T18:11Z   cli seat raises pm:retriage: the fix lands in packages/spec, re-route it\n2026-09-13T01:57Z   triage answers: domain:cli -> domain:spec, pm:retriage cleared\n                    ⇒ ~32 h  (triage recorded this latency on its own account)\n                    ⇒ and it explicitly left the assignee, per its own charter:\n                       「assignee 是 cli 车道的行动者,而卡现在归 spec 车道。\n                         交接机制由两席自行商定,⛔ 分诊不重指派」\n2026-09-13T06:32Z   cli seat releases: pm:dispatched -> pm:queue, assignee cleared\n                    ⇒ + 4 h 35 m of structural invisibility\n```\n\nThe PR sat green and idle for ~2.5 days. ⛔ None of that is the ownership rule's fault — the rule (`packages/spec` always routes to the spec seat) is doing what it should, because what that ownership buys is **the review**, not the typing.\n\n## ⚠️ The patrol ran and did not see it\n\nThis is the part that makes it mechanisable rather than a one-off. Anchor #9857's sweep at **2026-09-13T01:57:39Z** — the same minute triage re-routed the card — swept **401 open pm-/p0-labeled issues** and emitted **22** `H<n>` rows naming an issue. Grepped for this lane:\n\n```\nlines in the anchor body mentioning 6024 / 12271 / 17927 / 17178 / 17718 / domain:cli / os-sales  → 0\nCONTROL: lines carrying an H<n> token                                                             → 60  (of 146)\nCONTROL: lines matching /cli/i                                                                    → 1   (#11331, a file path on another lane's card)\n```\n\n⇒ The zero is a reading, not a dead instrument. **The anchor did not miss a row it had; it has no rule for this shape.** No `H<n>` tests *assignee's lane ≠ the card's `domain:*`*.\n\n## The mechanical fix (this is the part this card asks for)\n\nAdd a half-state rule: **an open card whose assignee's lane ≠ its `domain:*` label is a half-state**, emitted as its own `H<n>` row naming both lanes.\n\nThe lane↔actor mapping already exists and is already authoritative — every `domain:*` and `repo:*` seat has exactly one `pm:seat` post, indexed by `label:pm:seat`, and the post's own body names its current PM. ⛔ No new label, no new sweep, no new tracker.\n\nDetection would have fired at 01:57:39Z, in the same sweep that re-routed the card, instead of 4 h 35 m later when the releasing seat happened to look.\n\n## ⛔ Two adjacent proposals that are NOT self-ruled and are named here only so they are not lost\n\nBoth change protocol text, so they are the maintainer's, ⛔ not any seat's:\n\n1. **Narrow 「分诊不重指派」to 「分诊不指派给新人」.** *Clearing* an assignee on a re-route is not assigning one, and it would make a re-route self-delivering rather than requiring a second seat to notice. The current wording forbids both, which is what leaves the card stranded.\n2. **A card whose body says its landing site is undecided cannot be routed by landing site.** #17178's own text reads: *\"Export the seed-write execution context once, **from wherever the platform decides owns it** … **Shape is the maintainer's call**\"* — while `domain:*` is defined as *the domain of the package the fix lands in*. ⇒ The routing predicate had no input on this card. Such a card arguably belongs in the decision box first, or should be dispatched with the re-route pre-authorised. ⭐ This is where the 2.5 days were actually bought — at the original routing on 2026-09-10, ⛔ not at the re-route.\n\n## Deduplication\n\n⛔ REST `/search/*` is refused for this session (`sessions are bound to their configured repositories`, verified this session), so the check was a full label enumeration instead: **34** open `domain:skills` items read, titles matched against `重路由|re-route|reroute|handoff|交接|assignee|移交|knock|座位贴`. **2 hits, both read, both rejected as the same-family-but-different-mechanism neighbours:**\n\n- **#17905** — a seat-post body refresh silently expires every unread knock (the read window is \"body + comments newer than the body's last edit\"). Same family — a handoff with no durable carrier — but its mechanism is knock **delivery**, not assignee residue. ⇒ Fixing it would not have surfaced #17178.\n- **#14881** — `hotcrm`'s `pm:dispatched` + assignee residue after a `Fixes` auto-close. Closest neighbour, and still distinct on three axes: a different trigger (**auto-close**, not **re-route**), a different repo, and a different root cause — hotcrm has **no patrol anchor at all**, whereas objectstack's anchor exists, swept 401 cards, and has no rule for this shape. ⇒ Building hotcrm's anchor would not add this rule.\n\nPositive control for the search predicate: both neighbours were returned by it, from 34 titles.\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 6690,
+  "kind": "pull_request",
+  "title": "fix(service-automation): 五处 name 形状的日志拼接改走结构化槽位 (#6654)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T12:51:16Z",
+  "updated_at": "2026-08-08T13:15:25Z",
+  "closed_at": "2026-08-08T13:15:24Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": "2026-08-08T13:15:24Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/6690",
+  "body": "Closes #6654\n\n按 findings-triage 提升评论（2026-08-08 10:22Z）裁定的 **option A**：把五处站点机械地扫到本文件已经确立七次的家族写法上 —— 消息保持单物理行、只携带我们自己控制的事实，外来标识符移到 logger 的结构化 meta 槽位。option B（spec 层禁止控制字符）按提升说明不在本卡范围内。\n\n## 为什么这仍然是同一族伤害\n\n`ObjectLogger.write()` 每次调用只加一个「时间戳 + 等级」记录头，所以消息里的换行会把**一条**记录撕成多个物理行，只有第一行可被 `grep WARN` 找到；`serve` 的 boot-quiet 窗口更会直接丢掉 stdout（warn）路径上无头的续行。#6499 → #6568、#6587 → #6623 关闭的是「抛出文本」那一类；这五处走的是另一扇门：它们拼接的是**名字/标识符**，来自调用方数据或作者元数据，没有任何 schema 约束它们不含换行。\n\n## 五处站点与各自的槽位\n\n| 站点 | 文件 | 外来标识符 → meta |\n| --- | --- | --- |\n| 重入守卫 | `engine.ts` | 调用方的记录 id → `recordId` |\n| resume 信号拒绝 | `engine.ts` | 调用方的信号键名 → `rejected` |\n| screen 输入拒绝 | `engine.ts`（摘要来自 `screen-input-contract.ts` 的 `Unknown screen field \"…\"`） | 用户提交的键 → `issues`，消息改为只说条数 |\n| 未知节点类型 | `engine.ts` | 作者的类型名 + 已注册词表 → `unknownTypes` / `knownTypes` |\n| 无边认领的分支标签（#4414） | `engine.ts` | 计算出的（可能源自记录的）分支标签 + 出边标签 → `branchLabel` / `outEdges` |\n\n第 3 站按提升评论的复核，真正的用户输入是在 `screen-input-contract.ts:129` 组装的 —— 该文件本身**未改动**：它是纯校验器，返回的是 issue 列表；把 issue 拼进日志消息的是 `engine.ts` 的 `refuseInvalidScreenInput`，所以修复落在消费端的日志调用点，校验器的 message 仍然原样交给调用方。\n\n## 等级与行为\n\n**没有任何站点改变等级**（option A 的分析）：五处都是 #4632 意义上的 FUNCTIONAL，全部保持 `warn`。行为全部不变，五个测试都各自钉了这一点（重入仍返回 skip 信封、#4414 仍然退回全出边遍历、拒绝仍返回同样的 code）。\n\n两个**面向调用方的 refusal 信封**（`INVALID_SIGNAL`、`INVALID_SCREEN_INPUT`）刻意保持不动，仍然点名被拒的变量与字段：信封不是日志记录，那一类由别处裁定（本卡的既定边界）。\n\n## 测试\n\n家族写法（`engine-residual-log-cause.test.ts`）新增五个 describe，每处一个**带换行的**标识符 fixture，钉住：消息仍是单行且不含该标识符、标识符完整出现在 meta、等级不变、行为不变。第 1 站另加一个 `pretty` 格式的物理行数断言。\n\n第 3 站需要 `registerScreenNodes`（与既有 site 11 同因）：#5561 step two 之后公共 resume 门会先按挂起节点的 descriptor 判定权限，没注册 `screen` 会 fail-closed 地在到达本 seam 前就拒绝。\n\n### 兄弟 fixture 的三类处置\n\n被扫掉的标识符会让**别处**的 fixture 变红，按「按规则的消费半径而非编辑包扫」逐个重判（全部是 re-spell 类：事实未变，只是改读它现在所在的槽位）：\n\n- `engine.test.ts` ADR-0018 块：捕获 logger 改为记录 `{ msg, meta }`，新增 `reportsType()` 读 `meta.unknownTypes`；\n- `nested-region-parity.test.ts`：region 覆盖这一事实不变，改读 `meta.unknownTypes`；\n- `builtin/decision-branch-routing.test.ts`：#4414 的事实不变，改读 `meta.branchLabel` / `meta.outEdges`。\n\n消费半径已在全仓核对：这五条消息在 `packages` / `apps` / `examples` 内没有其它读取者（`packages/lint` 的同名措辞是它自己的 lint finding 文本，与本日志无关）。\n\n### 反向验证（方向先预测，再执行）\n\n重新拼回第 5 站（最全的一处，两类外来标识符），**预测 RED**：家族文件里 5 条断言（换行、两处标识符不入消息、两个 meta 槽位）与兄弟 fixture 的 meta 谓词变红；而 `soleRecordWith` 的 lead-phrase 定位、等级钉、行为钉应保持绿 —— 因为旧消息同样含该短语，且 JSON 格式会转义换行、记录仍占一物理行。\n\n**实测与预测一致**：2 个测试红、40 个绿；家族文件首个失败正是 `expect(record.msg).not.toContain('\\n')`，收到的消息为 `… selected branch 'sneaky` + 换行 + `branch', but no out-edge carries that label — out-edge labels are ['approved']…`；兄弟 fixture 在 `meta?.branchLabel` 谓词上失败。随后已还原。\n\n### 命令与结果\n\n- `pnpm --filter @objectstack/service-automation test` → **70 files / 858 tests，全绿**（修前为 6 红：1 个是我方 fixture 缺 `registerScreenNodes`，5 个是上述兄弟 fixture）\n- `npx eslint --no-inline-config` 跑五个改动文件 → 退出码 0，无输出\n- `node scripts/check-nul-bytes.mjs` → OK（6235 个文件，无裸控制字节）；改动文件另做 `grep -naP '[\\x00-\\x08\\x0b\\x0c\\x0e-\\x1f\\x7f]'` 自扫，无命中\n\n`tsc --noEmit` 在本包报 3 处 `TS2341: Property 'flows' is private`，位于 `nested-region-parity.test.ts` 我未触及的行（本包无 `typecheck` 脚本，属既有状态）。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01USNUyHEr7uaU6MoEWXitei"
+}

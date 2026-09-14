@@ -1,0 +1,36 @@
+{
+  "number": 6479,
+  "kind": "issue",
+  "title": "REST `PATCH /data/:object/:id`:请求体里的标量 `id` 压过路径 `:id`,存在性探测/OCC 判在一行、写落在另一行、响应报第三个说法",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched",
+    "pm:queue",
+    "target:v17"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T01:26:35Z",
+  "updated_at": "2026-08-08T14:38:45Z",
+  "closed_at": "2026-08-08T14:04:06Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6479",
+  "body": "范围外发现,来自 #6435 / PR #6475 的实施过程(PD #10)。#6435 的范围钉在 by-id 臂里**非标量**载荷 `id` 的剥离(路线 A 明确写着\"标量 `data.id` 现状不动\"),所以本条**未在该 PR 内修改**,只记录。\n\n**证据来源:静态读源码(file:line),未跑端到端 HTTP 复现。** 两个组成事实各自都被现有测试钉着,组合未实测。\n\n## 事实\n\n`PATCH /data/task/rec_1`,请求体 `{\"id\": \"rec_2\", \"title\": \"x\"}`,今天会:\n\n1. **存在性探测判 rec_1**。`packages/metadata-protocol/src/protocol.ts:5636` 的 `updateData`:`const current = await this.probeRecord(request.object, request.id)`,`request.id` 来自**路径参数**;`if (!current) throw recordNotFoundError(...)`。\n2. **OCC 判 rec_1**。紧接着 `this.assertVersionOf(request.object, request.id, current, request.expectedVersion)`——同样是路径 id。\n3. **写落到 rec_2**。同一函数下面:`const opts = { where: { id: request.id } }` … `await this.engine.update(request.object, request.data, opts)`。而 `resolveEngineUpdateDispatch` 的规则是**载荷优先**:真值标量 `data.id` 压过 `where.id`。`ENGINE_UPDATE_DISPATCH_CASES` 里就有这一行:\n\n```\n{ what: 'a SCALAR data.id still wins over a scalar where.id',\n  data: { id: 'rec_1', title: 'x' }, options: { where: { id: 'rec_2' } },\n  expect: 'by-id', expectId: 'rec_1' }\n```\n\n   即引擎绑定的是**请求体**里的 `rec_2`,`driver.update(task, 'rec_2', …)`。\n4. **响应说 rec_1**。`return { object, id: request.id, record: result }`——`id` 是路径 id,`record` 却是 rec_2 写后的回读。\n\n于是 URL 说一行、写落在另一行、响应里 `id` 与 `record` 互相矛盾;并且 rec_2 从未被存在性探测,也从未被 OCC 校验(客户端送的 `If-Match` 是 rec_1 的版本,却放行了对 rec_2 的写)。\n\n## 为什么不是理论输入\n\n请求体**原样**从线上传到引擎,中间没有任何一层剥 `id`:\n\n- `packages/rest/src/rest-server.ts` 的 `PATCH /data/:object/:id`(约 :5268)只从 body 里剥 `expectedVersion`,`id` 不动;\n- `packages/spec/src/api/protocol.zod.ts:519` 的 `UpdateDataRequestSchema` 把 `data` 声明为 `z.record(z.string(), z.unknown())`,任何 `id` 都通过。\n\n而客户端 GET 一条记录、改字段、**整份 PUT 回来**是最常见的写法之一——只要它错拿了另一条记录的 `id`(列表里点错一行、并发刷新后 id 串了、AI 生成的客户端拼错),就变成一次静默的跨行写。\n\n**同仓库里另一条 ingress 已经把这件事做对了**,可作对照:批量路径 `packages/rest/src/rest-server.ts:8523` 写的是\n\n```\nql.update(op.object, { ...data, id }, { context: trxCtx, onFieldsDropped })\n```\n\n`id`(路径/操作里的那个)**排在 spread 之后**,所以它赢。两条 ingress 对同一个问题给了两个答案,正是 #4550 / #4434 那一族。\n\n## 与既有单的关系\n\n- **不是 #6435**:#6435 / PR #6475 只剥「派发已判定**不是**主键」的载荷 `id`(算子对象 / 数组 / `null` / 假值标量),并明确把真值标量 `data.id` 保持原状——本条正是那条\"另一个决定\"的入口,但它的落点在 **REST/协议 ingress**,不在引擎的 by-id 臂。\n- **不是 #5922**(已关闭):那条是载荷**值的类型校验**缺口(`text` 型不拒绝算子对象),另一条轴。\n- **不是 #5748**:引擎的载荷优先规则本身是 #5748 裁 A 的一部分,对**直接调 ObjectQL** 的调用方是合理的(`update(o, { id, ...fields })` 是常见合法写法)。本条说的是:当调用方是一个**已经在 URL 里指定了行**的 REST ingress 时,把行标识的裁决权再交给请求体,是这层自己的缺口。\n\n## 方向(不预设结论)\n\n- **A**:ingress 侧以路径 `:id` 为准——`updateData` 传 `{ ...request.data, id: request.id }`(与批量路径 :8523 同形),或先把 body 的 `id` 剥掉。最小、与仓库内既有对照一致。\n- **B**:ingress 侧**响亮拒绝**——body 带了 `id` 且与路径 `:id` 不等时返回 400,点名两者冲突。诊断最好,但对\"整份 PUT 回来\"的常见写法(body `id` 与路径 id **相同**)必须放行,所以是\"不等才拒\"。\n- **C**:在 `UpdateDataRequestSchema` 层面禁止 `data` 携带 `id`。契约最干净,但会打断上面那种合法回写,且是 `packages/spec` 的改动。\n\n严重度请分诊裁:这是一次**静默的跨行写**,且绕过了 OCC,但触发要求调用方在 body 里放一个与路径不同的真值标量 `id`。\n\n关联:#6435 / PR #6475(by-id 载荷剥离,本条的发现来源)、#5748 / PR #5919(载荷优先的派发规则)、#4435(`updateData` 的存在性探测与 OCC 共用一次读)、#5922(载荷值校验,另一条轴)、#4550 / #4434(为什么共享谓词而不是第二个答案)。\n"
+}

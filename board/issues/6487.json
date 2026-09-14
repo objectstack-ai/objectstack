@@ -1,0 +1,36 @@
+{
+  "number": 6487,
+  "kind": "issue",
+  "title": "[sweep] Three routes serve a shape their responseSchema never declares (#5882 #5950 #6442)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:dispatched",
+    "target:v17"
+  ],
+  "assignees": [
+    "qq9340100"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T01:47:54Z",
+  "updated_at": "2026-08-08T09:45:49Z",
+  "closed_at": "2026-08-08T09:45:49Z",
+  "closed_by": {
+    "login": "qq9340100",
+    "id": 313832657,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6487",
+  "body": "Sweep card (maintainer-directed, 2026-08-07; third member added 2026-08-08 after its ruling). One claim, one PR, three `Fixes`.\n\n## Admission criterion\n\n> A route serves a response shape that its **declared `responseSchema` does not describe** — the contract under-declares, or mis-declares, what actually goes on the wire.\n\n## Members\n\n| # | Route | Declared | Actually served | Ruled direction |\n|---|---|---|---|---|\n| **#5882** | `GET /meta/:type/:name?layers=true` | one `responseSchema` | a **third** shape under `?layers=true` | decide per member (see below) |\n| **#5950** | `GET /meta/:type/:name` (non-cached branch) | `{type, name, item}` | also `lock` / `lockReason` / `lockSource` — the ADR-0008 OCC carrier | decide per member (see below) |\n| **#6442** | `GET /analytics/meta` | `data: { cubes: CubeSchema[] }` | `data: CubeMeta[]` (a bare array, narrower projection) | **ruled: narrow the declaration** (maintainer, 2026-08-08) |\n\n#5882 and #5950 land on the **same handler** and would serialize under the same-file rule regardless, so bundling them costs nothing. #6442 is a different handler in a different package but hits the identical criterion and takes the identical shape of fix, so it reviews as one more checklist line.\n\n## Direction\n\n**#6442 is already decided**: narrow `AnalyticsMetadataResponseSchema.data` to the `CubeMeta[]` projection — zero runtime change. The recorded return path if `format` is ever needed is to **add the key to the `CubeMeta` projection** (additive); ⛔ do not widen the endpoint to full cube definitions (that would push `sql` to clients — capability expansion without pull).\n\n**#5882 / #5950 are per-member calls**: either **declare what is served** (extend the contract, discriminated where the shapes genuinely differ) or **stop serving the undeclared part**. #5950's carrier has a real consumer story (optimistic concurrency), so widening the declaration is the likely answer; #5882's third shape may instead deserve its own declared variant. ⛔ Do not silently pick the cheaper one — the PR states the choice and its reason per member.\n\n## Scope discipline\n\n- **Zero changes beyond the three members.** `git diff --stat` corresponds line-for-line to the checklist — the line between a sweep and a rider.\n- Refusal/validation assertions for genuinely invalid shapes stay verbatim; a widened contract may not shrink the guarded surface.\n- New assertions must bear load: assert the **substance** (the OCC carrier is present and typed; the layered shape parses under its own variant; `/analytics/meta`'s response parses against the narrowed schema), never \"the old assertion is gone\".\n- Out-of-scope findings filed separately per PD #10.\n\n## Landing constraints\n\n- Touches `packages/spec` generated baselines ⇒ os-regen four-step序 on every sync (`git merge origin/main` → `git checkout origin/main -- <generated>` → **commit the merge first, then regenerate wholesale** → assert sibling entries survive). ⛔ Never a text merge; never `gen:schema` while in MERGE state (#5370).\n- Anchor assertion is `pnpm --filter @objectstack/spec check:authorable-surface` **green**; `baseRev` may lag; ⛔ never hand-edit the anchor.\n- **#6442 regenerates `content/docs/references/api/analytics.mdx`** (it currently publishes the wrong shape). The hand-written `data-api.mdx:393-395` already describes the array form correctly — leave it alone.\n\n## Review shape\n\nBy checklist, not diff order: one line per member — route + trigger | declared shape | actual shape | direction taken and why.\n\nFiled unassigned. Member issues keep `pm:queue` but are **excluded from batch selection while this card is open**; all three close together when the PR merges."
+}

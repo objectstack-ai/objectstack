@@ -1,0 +1,36 @@
+{
+  "number": 6589,
+  "kind": "issue",
+  "title": "check-shard-attestation.mjs misclassifies a shard job as an aggregate gate on a bare `--verify` substring anywhere in its run: text (false red, measured)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T06:10:42Z",
+  "updated_at": "2026-08-08T13:49:10Z",
+  "closed_at": "2026-08-08T13:49:10Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6589",
+  "body": "Found while implementing #6195 (PR against `.github/workflows/ci.yml`). Out of that issue's scope, so filed separately and unassigned per Prime Directive #10.\n\n## The defect\n\n`scripts/check-shard-attestation.mjs`, the static drift guard, decides whether a job is an aggregate **gate** with a two-substring test over the job's *joined `run:` text*:\n\n```js\nconst text = runTextOf(job);\nif (!text.includes(SCRIPT_BASENAME) || !text.includes('--verify')) continue;\n```\n\n`SCRIPT_BASENAME` is `check-shard-attestation.mjs`. The problem is that **every attesting shard job already contains that string** — it is the job's own `--emit` step at the bottom (`node scripts/check-shard-attestation.mjs --emit ...`). So for a shard job the sole discriminator is the bare substring for the script's own verify flag, appearing *anywhere* in *any* `run:` step of that job — including inside a shell comment, since comments are part of `run:`.\n\n## How it fires (measured, not hypothesised)\n\nAdding an ordinary `git rev-parse` strict-existence check to the `Compute this shard's package set` step of `ci.yml` — the idiomatic spelling for \"does this ref resolve\" — flipped job `test` from *attesting shard job* to *aggregate gate*, and the guard went red with two complaints that name nothing to do with the edit:\n\n```\n✗ check-shard-attestation — 2 problem(s) in .github/workflows/ci.yml\n\n  • job 'test' is an aggregate gate but its job-level if: is \"${{ !cancelled() && needs.filter.outputs.core != 'false' }}\", not always() — a gate that skips publishes no required context (#3622).\n  • gate 'test' never downloads the shard attestations it claims to count.\n```\n\nBaseline check, both directions, same tree: `origin/main`'s `ci.yml` exits 0; the same file plus that one flag exits 1. Removing only the flag restores green.\n\nThe diagnostic is actively misleading. Neither message mentions the classifier, the flag, or the step that was actually edited, and both describe the shard job as something it is not. The natural response to \"job 'test' is an aggregate gate but its `if:` is not always()\" is to go change the shard job's `if:` — which would be wrong, and would break #3622/#4928.\n\nThere is a second-order trap on top: **documenting** the collision in a comment re-triggers it, because the comment lives in `run:`. That cost a second lap here — the same shape as #4890, where a raw NUL landed in `SKILL.md` while writing the no-raw-NUL rule.\n\n## Why this is worth fixing rather than routing around\n\nPR for #6195 routes around it (`git cat-file -e`, with the reason written next to it), so nothing is on fire. But the trap stays armed for the whole `--verify`-shaped family: `git rev-parse --verify`, `git show-ref --verify`, `gpg --verify`, `npm audit --verify`, or any prose mentioning the flag. The next person to write one in a shard job gets a red naming the wrong job and the wrong property, on a workflow file where the gate's whole purpose is to be trustworthy.\n\n## Suggested direction (not a ruling — triage's call)\n\nRequire adjacency instead of co-occurrence, so the classifier keys on the actual invocation rather than on two independently-occurring substrings, e.g. matching `check-shard-attestation.mjs` followed by the verify flag in the *same* command (a regex over `SCRIPT_BASENAME\\s+.*--verify` on a per-step basis, or per-line). The `--emit` side already works this way in spirit — `emit.run.includes(SCRIPT_BASENAME) && emit.run.includes('--emit')` is scoped to a single step's `run`, not to the job's joined text, which is exactly why the emit side does not have this bug.\n\nWhatever shape is chosen, the self-test should gain a fixture with a shard job whose steps contain the verify flag for an unrelated reason, asserting it is still classified as an attester. Without that fixture the fix can regress silently.\n\n## Scope note\n\nNot fixed in the #6195 PR: that PR's dispatch ruling scopes it to the `Compute this shard's package set` step of `ci.yml`, and this is a defect in `scripts/check-shard-attestation.mjs`.\n"
+}

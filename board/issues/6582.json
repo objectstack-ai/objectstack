@@ -1,0 +1,33 @@
+{
+  "number": 6582,
+  "kind": "pull_request",
+  "title": "test(core): 让 #4875 不变量钉住 monitor 自己的 guard,而不是进程全局 ref'd timer 计数 (#6329)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T05:49:56Z",
+  "updated_at": "2026-08-08T06:21:09Z",
+  "closed_at": "2026-08-08T06:21:07Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": "2026-08-08T06:21:07Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/6582",
+  "body": "Fixes #6329\n\n`leaves no ref'd timer behind when the health check wins the race`(#4875 不变量 pin)在合并队列全量并发跑间歇红。本 PR 让该用例钉住 **monitor 自己 armed 的 guard 句柄**,而不是进程全局的 ref'd timer 计数。**生产面零改动**(`health-monitor.ts` 未被触碰),test-only。\n\n## 前提复核(动手前逐条实测)\n\n| | 前提 | 结论 | 证据 |\n|---|---|---|---|\n| P1 | origin/main 该用例仍是「进程全局 ref'd timer 计数前后比对」形状 | ✅ 成立 | `health-monitor.test.ts:124-125` 的 `refdTimers()` = `process.getActiveResourcesInfo().filter(r => r === 'Timeout').length`;`:131` 取 `before`,`:144` `expect(refdTimers()).toBe(before)`。(注:origin/main 的类型已是 `PluginHealthCheckParsed`,issue 正文写的 `PluginHealthCheck` 是旧名,形状本身不变) |\n| P2 | 「全量并发下两次读数不可比」的成因可复现 | ✅ 已复现,且定位到具体扰动源 | 见下节 |\n| P3 | #4875 不变量仍由该用例守护,修复不弱化断言强度 | ✅ 成立 | 见「反向验证」表 |\n\n## 成因实证 —— 不是假设,是量出来的\n\n**扰动源已定位到 `@vitest/runner` 自身**,不是\"其他并发用例\"的笼统猜测:\n\n1. 先用 `async_hooks` 追踪该进程内所有活着的 `Timeout` 的创建栈,`before` 快照点实测 `before=1`、`all=[\"PipeWrap\",\"PipeWrap\",\"PipeWrap\",\"PipeWrap\",\"Timeout\"]` —— 与 CI 签名的 `before` 是 1 完全一致;活着的 timer 栈全部指向 `@vitest/runner`。\n2. 再读 vendored runner 源码,两条决定性事实:\n   - `runWithTimeout` 里 `const timer = setTimeout(...); timer.unref?.();` —— runner 的 per-test 超时守卫**显式 unref**,所以它**根本不进** `getActiveResourcesInfo()`,可以排除;\n   - `const sendTasksUpdateThrottled = throttle(sendTasksUpdate, 100)`,而 `throttle` 内部 `pendingCall ??= setTimeout(() => call.bind(this)(...args), ms)` —— 这个 **100ms 的节流定时器没有 unref**,它就是被计入的那个 1。\n\n于是成因是确定的:两次读数之间隔着 `await`,窗口一旦超过 **100ms**,runner 的节流定时器就在窗口内到期、且来不及被重新 armed,全局计数凭空少 1。**issue 记录的失败用例耗时正是 105ms** —— 刚好越过 100ms 节流线,这个数字不是巧合。\n\n**并发注入复现(反向验证 B)**:在同一循环上注入一个 25ms 的无关 ref'd timer,并把窗口拉到 60ms(模拟满载),旧形状复现同族失败:\n\n```\n[probe6329] OLD before=2 after=0\nAssertionError: expected +0 to be 2 // Object.is equality\n ❯ src/flake-probe-6329.test.ts:61:26   (用例耗时 125ms)\n```\n\n与 CI 的 `expected +0 to be 1` @105ms 同族;计数从 1 变 2 只是因为我额外注入了一个,机制一致。**同一注入下新形状绿。**\n\n## 选型\n\n正文给了两个候选,选**前者**(精确计数 monitor 自身的 timer),并且**不需要**动 `health-monitor.ts`:\n\n- 用一次性的 `setTimeout` 记录取回本轮 armed 的 guard 句柄,按配置的 `timeout` 值(120_000)与循环上其它定时器区分。**不引入生产侧的 timer 工厂 / 计数钩子注入面** —— 那是纯为测试而扩的公开面,没有业务拉动,而测试侧记录能拿到同样的归属信息,生产行为零变化。\n- 归属拿到手之后,所有读数放在**同一个同步回合**里相邻取:两条相邻同步语句之间不可能有任何定时器回调运行(Node 单线程,timers 阶段不与同步 JS 交错),所以差值只可能是 monitor 自己造成的。这比\"稳定化屏障\"更强 —— 屏障只是让扰动不太可能发生,同步相邻是让它**不可能**发生。\n- 断言的仍是可观察后果(这个句柄是否还在把事件循环钉住),不是 `clearTimeout` 被调用过 —— 保留了原注释坚持的 \"asserts the observable consequence, never the source\"。\n\n新增 `expect(guards).toHaveLength(1)`:防止 guard 根本没 armed 时,后面的差值因为\"什么都没测到\"而空绿(PR #5046 那类假绿)。另保留 `expect(whileMonitoring - afterStop).toBe(1)` 作为仪器自检 —— 证明 `refdTimers()` 确实观察得到本 monitor 挂在本循环上的 timer。\n\n## 反向验证(方向先写死,再测)\n\n| 实验 | 预测 | 实测 | 结果 |\n|---|---|---|---|\n| **A** 删掉 `raceCheckTimeout` 的 `finally { clearTimeout(guard) }` | 本用例红 + fake-timer 同伴红 | `:212 expected 1 to be 2`(`afterStop`=2,测试补刀回收后掉到 1)、`:272 expected 2 to be 1`,`Tests 2 failed \\| 5 passed` | ✅ 与预测一致 |\n| **A'** 把 clearTimeout 换成 arm 时 `guard.unref?.()` | 本用例**绿**、fake-timer 同伴红 | `:272 expected 2 to be 1`,`Tests 1 failed \\| 6 passed` | ✅ 与预测一致 —— 与改动前分工完全相同,没有把覆盖面挪走 |\n| **B** 并发注入(无关 ref'd timer 在窗口内到期) | 旧形状红、新形状绿 | 见上节输出 | ✅ 与预测一致 |\n\nA' 值得单独说明:`unref` 反面修法在**改动前后都是**本用例绿、fake-timer 同伴红 —— 后者靠 `vi.getTimerCount()` 仍能看见 unref'd timer 来区分\"回收了\"与\"只是从循环上摘掉了\"(原注释 :200-202 已写明)。本 PR 没有改变这个分工。\n\n## 稳定性跑数\n\n`packages/core` **全量套件连跑 20 次**(flake 只在全量并发下才有邻居任务的节流定时器,单文件跑复现不出来):\n\n```\nSTABILITY: pass=20 fail=0 of 20 full-suite runs\n```\n\n## 命令输出\n\n```\npnpm --filter @objectstack/core test\n Test Files  27 passed (27)\n      Tests  498 passed (498)          # 与改动前同为 498,未增删用例数\n\nnpx tsc --noEmit -p packages/core/tsconfig.json\n  branch: 98 errors  /  origin/main baseline: 98 errors   # 增量 0\n  health-monitor.test.ts 相关报错: 0 条\n  (core 的 tsconfig 是 include src 全量 + exclude [],测试文件在类型闭包内)\n\nnpx eslint packages/core/src/health-monitor.test.ts --no-inline-config\n  EXIT=0\n\npnpm check:type-check-debt   # 已先跑全量 build 闭包(70 tasks successful),#6510 门禁要求\n  check-type-check-coverage --re-measure: OK — 34 ledger entr(ies) re-measured,\n  1758 raw tsc error(s) total, none above its recorded number.     # 台账未抬\n\nnode scripts/check-nul-bytes.mjs\n  OK (scanned 6134 tracked text file(s); no raw ASCII control bytes)\n  另自查 grep -naP 控制字节扫描 → clean\n```\n\n## changeset\n\n**test-only,无 changeset**(`health-monitor.ts` 未改,不发布任何东西)。需要 `skip-changeset` 标签 —— 按本单派发口径由 PM 落标,开发席不动标签。\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_019Q7oc7ASjh8yxyS3Yz78We)_"
+}

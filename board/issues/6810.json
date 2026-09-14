@@ -1,0 +1,36 @@
+{
+  "number": 6810,
+  "kind": "issue",
+  "title": "meta: `applySystemFields` stamps `indexed` on `organization_id` — a key `FieldSchema` rejects by name, so every registry-backed object read answers `_diagnostics: { valid: false }`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched",
+    "pm:queue",
+    "target:v17"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T19:24:42Z",
+  "updated_at": "2026-08-08T22:39:28Z",
+  "closed_at": "2026-08-08T22:39:28Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6810",
+  "body": "Found while implementing #6562 (the `/meta` object read serving the effective runtime schema). Out of that issue's scope — the fix is at the injection site, not at the read exits — so filed here rather than folded in.\n\n## What\n\n`applySystemFields` (`packages/objectql/src/registry.ts`) provisions `organization_id` with an `indexed: opts.multiTenant` key:\n\n```\nadditions.organization_id = { ...TENANT_SCOPE_FIELD_DEF, indexed: opts.multiTenant };\n```\n\n`indexed` is **not a `FieldSchema` key**. It was removed in the 16.x line (#2377, ADR-0049) and `FieldSchema` is a `strictObject`, so a field definition carrying it is rejected — by name, with a purpose-written message:\n\n```\nUnrecognized key(s) on this field: `indexed`.\n  • never a FieldSchema key; a field-level index flag built no index (#2377).\n    Declare the index in the object's `indexes[]`. Until #4001 closed this shape\n    these were dropped silently — the field was still created, minus whatever the\n    key was meant to constrain, protect or compute.\n```\n\n`registerObject` runs `applySystemFields` before storing, and `SchemaRegistry.getItem('object', name)` serves that post-injection document. So the key travels all the way out to the `/meta` surface, where `decorateMetadataItem` re-parses the served body and stamps the verdict on it.\n\n## Measured\n\n`origin/main` @ `4bb6f01af`, via the real `SchemaRegistry` + the real `ObjectStackProtocolImplementation`, on a plain business object declaring one field:\n\n```\n--- multiTenant=true  REGISTRY-BACKED getMetaItem ---\n_diagnostics: { valid: false,\n  errors: [ { path: 'fields.organization_id', code: 'unrecognized_keys',\n              message: 'Unrecognized key(s) on this field: `indexed`. …' } ] }\nlist exit _diagnostics: (identical)\n\n--- multiTenant=false REGISTRY-BACKED getMetaItem ---\n(identical — the key is present either way, only its VALUE follows the flag)\n```\n\nBoth modes, both exits. The object itself is otherwise spec-clean: delete that one key and the same document parses green.\n\n## Why it matters\n\n`_diagnostics` is what Studio renders invalid-metadata banners and inline field errors from, and what an AI author reads to decide whether a document it produced is acceptable. Here it reports a defect on **every** tenancy-enabled object, attributed to a field the author never wrote and cannot fix — the platform's own column failing the platform's own schema. It also makes the verdict useless as a signal on those objects: a real authoring error is indistinguishable from this one.\n\n## Direction (not a decision — for triage)\n\nThe consumer of `indexed` is a single line in one driver: `packages/drivers/driver-mongodb/src/mongodb-schema.ts:87` (`} else if (field.indexed) {`). Nothing else in the repo reads it. So the plausible shapes are:\n\n- **A.** Move the intent to where the schema says it belongs — declare the tenant index in the object's `indexes[]` and teach `driver-mongodb` to read that (which is what every other index in the system already does). Removes the key.\n- **B.** Keep the DDL hint but strip it before the document leaves the registry for any *metadata* consumer, so the physical layer keeps it and the served/parsed document never sees it.\n- **C.** Re-declare `indexed` on `FieldSchema`. Almost certainly wrong — #2377 removed it precisely because a field-level flag built no index, and re-adding it would restore a declared-but-unenforced key on every field.\n\nA is the contract-first direction; B is smaller. Either is a behaviour change in the DDL/driver lane, which is why it is not folded into #6562.\n\n## Relationship to #6562\n\nIndependent, not blocking. #6562 converges the overlay-backed `/meta` object read onto the registry-backed field set; it deliberately does **not** propagate `indexed` onto served documents (converging onto a key the object schema refuses would spread this defect rather than close that one), and it pins the residual divergence in both directions in `packages/objectql/src/protocol-meta-effective-schema.test.ts`:\n\n```\nexpect(divergences(registryBacked, overlayBacked)).toEqual(['organization_id.indexed']);\nexpect(overlayBacked._diagnostics).toEqual({ valid: true });\nexpect(registryBacked._diagnostics.valid).toBe(false);\n```\n\nWhichever fix lands here flips those three lines, which is the intended tripwire — the pin exists so this cannot be quietly forgotten."
+}

@@ -1,0 +1,35 @@
+{
+  "number": 5929,
+  "kind": "issue",
+  "title": "delete() 的按对象前置行门在任何 kernel 托管引擎上恒真 —— ObjectQLPlugin 自带的 sys_fetch_previous_delete 以 object: '*' 注册在 beforeDelete",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T12:15:16Z",
+  "updated_at": "2026-08-08T19:34:13Z",
+  "closed_at": "2026-08-08T19:34:13Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5929",
+  "body": "发现于 #5860 的实施核对(PD #10 范围外发现,未在任何 PR 内修改)。\n\n## 事实(origin/main)\n\n`packages/objectql/src/engine.ts:6112`,`delete()` 的前置行(pre-image)需求门:\n\n```ts\nconst wantsPreImage =\n  this.hasHooksFor('beforeDelete', object) ||\n  this.hasHooksFor('afterDelete', object) ||\n  this.getSummaryDescriptors(object).length > 0;\n```\n\n`packages/objectql/src/plugin.ts:871`,ObjectQLPlugin **自己**注册的内建 hook:\n\n```ts\n{ name: 'sys_fetch_previous_delete', object: '*', events: ['beforeDelete'], priority: 5, ... }\n```\n\n`hasHooksFor` 把 `'*'` 正确地当作命中每个对象,于是**只要 ObjectQLPlugin 在**(即任何 kernel 托管的引擎),`wantsPreImage` 的第一项恒真、后两项永不被求值 —— 这个门在真实部署里从来没有判过假。\n\n实测(计数驱动,只注册这一条内建形状,完全不装 plugin-audit):对一个既无 delete hook、也无 roll-up 汇总的对象做单 id `delete()`,`driver.findOne` 增量 = 1。\n\n## 为什么这不是 #5272 的重复\n\n#5272 把 delete 侧的前置读**提前到派发 `beforeDelete` 之前并绑定 `previous`**,让 before/after 两个阶段共用一次读 —— 那次改动是对的,而且正因如此,内建 `sys_fetch_previous_delete` 的 `if (!hookCtx.previous)` 现在恒为假,它自己不再多读一次。\n\n剩下的是另一个问题:那条 `object: '*'` 的注册仍然**留在注册表里**,而需求门是按注册面算的,于是门本身失去了判假的能力。换句话说,内建 hook 的存在理由(「引擎不填 `previous`」)在 delete 侧已经不成立,但它的注册还在,并且它现在唯一可观察的效果,就是让按对象门恒真。\n\n## 与 #5860 / #5928 的关系\n\n- #5860(update 侧)的门只看 `afterUpdate`,而两条内建 `'*'` 注册(`sys_stamp_audit_update`、`sys_fetch_previous_update`)都在 **before** 事件上 —— 所以 update 侧的门确实是被 plugin-audit 的全局 `afterUpdate` 顶住的,#5860 的验收判据在 update 侧成立。\n- delete 侧**不是**:即使 plugin-audit 把 `captureBefore` 的 `beforeDelete` 注册收窄,本单这条内建注册仍让门恒真。两者独立,需要分别解。\n- 表达能力的缺口(注册面只有允许列表)记在 #5928。\n\n## 可选方向(交分诊定,本单不预设)\n\n1. 既然 #5272 之后 delete 侧的 `previous` 已由引擎自己绑定,`sys_fetch_previous_delete` 是否可以直接退休?需要先确认引擎的绑定覆盖了哪些分支(单 id 有;谓词 delete 走另一条路径)。\n2. 或者让内建 hook 不参与需求门的计算 —— 例如按 `packageId: 'sys:audit'` 在 `hasHooksFor` 中排除,或把它改成一个不经注册表的引擎内联步骤。⚠️ 前者会让「门」和「派发」的语义分叉,#5038 的注释专门警告过这个方向,若走这条要显式论证。\n\nRefs:#5860、#5928、#5272、#5284、#5038、#5846\n"
+}

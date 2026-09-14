@@ -1,0 +1,37 @@
+{
+  "number": 5593,
+  "kind": "issue",
+  "title": "把 44 个 `strictUnknownKeyError` 直调点批量迁到 `strictObject`,棘轮降到 0(路线 1 消不掉手抄数组与 shape 的漂移)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:dispatched",
+    "target:v17",
+    "tooling"
+  ],
+  "assignees": [
+    "qq9340100"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T20:05:31Z",
+  "updated_at": "2026-08-08T09:45:48Z",
+  "closed_at": "2026-08-08T09:45:48Z",
+  "closed_by": {
+    "login": "qq9340100",
+    "id": 313832657,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5593",
+  "body": "由 #5483 的过渡看守(路线 1)落地后拆出的后续(未指派,记录测量与边界,不认领)。\n\n## 现状\n\n#5483 按**路线 1** 落地:`strictUnknownKeyError` 自己把 `{ surface, knownKeys, aliases, guidance }` 登记进一张内部登记表,`packages/spec/src/shared/alias-integrity.test.ts` 因此把这 44 个直调点也判了 —— **零调用点改动**。\n\n实测规模:44 个源码调用点,运行时 **52 张表**(`ui/app.zod.ts` 的导航项工厂一个调用点跑九次,每个 `type` 变体一张)。\n\n关键在于这批表被判到的**强度不均**,闸门自己也是这么写的:\n\n| 判据 | `strictObject` 那 235 张 | 这 44 个直调点 |\n|:--|:--|:--|\n| 别名 key 不得是已知键 | 对 `.shape` 判 | 对**手抄数组**判 |\n| 别名 target 必须是已知键 | 对 `.shape` 判(含墓碑检查) | 对**手抄数组**判(墓碑不可见) |\n| 表内 `aliasProbe` 不得撞车 | 判 | 判 —— **完全等价** |\n\n第三条不依赖 shape,所以路线 1 就把它开满了(首测 52 张表 0 撞车)。前两条**继承手抄数组与 shape 之间的漂移** —— 数组说 `x` 是已知键,而 schema 里早就没有了,闸门会照着数组给出绿灯。那正是 `strictObject` 存在的理由(见其 docblock:\"the array is a second copy of the truth\"),也正是路线 1 **消不掉**的那一半。\n\n## 该做什么\n\n把 44 个调用点分批迁到 `strictObject(options, shape)`:\n\n- 手抄的 `*_KEYS` 数组连同它的漂移探针测试一起删除;\n- 这批表自动进入 shape 判据(含\"别名 target 不得是墓碑\"这条路线 1 看不见的);\n- `alias-integrity.test.ts` 里 `toBeLessThanOrEqual(44)` 的只减不增棘轮随之降到 0;\n- 路线 1 的登记表(`packages/spec/src/shared/alias-table-registry.ts`)与闸门里\"直调点\"那一整段随最后一个调用点一起删除。\n\n分布(实测,基线见下):\n\n```\nui/app.zod.ts               9   data/datasource.zod.ts      6\nautomation/approval.zod.ts  4   automation/flow.zod.ts      4\nsecurity/permission.zod.ts  4   data/driver/*.zod.ts        6\ndata/hook.zod.ts            2   data/hook-body.zod.ts       2\nsecurity/sharing.zod.ts     2   data/driver/sqlite.zod.ts   (含在上面 6 里)\ndata/object.zod.ts          1   identity/position.zod.ts    1\nsecurity/rls.zod.ts         1   ui/action.zod.ts            1\nui/bulk-action.zod.ts       1\n```\n\n## 迁移时已知的三个坑\n\n1. **`data/object.zod.ts` 的表是延迟构建的**(`objectUnknownKeyErrorImpl ??= …`),为的是绕开一个 temporal dead zone —— `UNKNOWN_KEY_GUIDANCE` 和 shape 都声明在它下面。改成 `strictObject` 需要先解决这个顺序问题,不是纯机械替换。\n2. **`ui/app.zod.ts` 的导航项是一个按变体拼装的工厂**,九张表共用一段拼装逻辑,`knownKeys` 是 `[...BASE, ...NAV_VARIANT_KEYS[variant]]`。迁移意味着九个变体 schema 各自成为 `strictObject`,`extraKeys` 可能用得上。同一族还有 #5555 那条待修缺陷,顺序上建议先修 #5555 再迁,否则修法要写两遍。\n3. **`data/hook.zod.ts` / `data/hook-body.zod.ts` 当时在 #5050 手里**,分批时避开在飞的文件。\n\n## 基线\n\n分支 `claude/issue-5483-strict-unknown-registry`,`origin/main` 5acb93add。测量复现:`pnpm --filter @objectstack/spec exec vitest run src/shared/alias-integrity.test.ts`。\n"
+}

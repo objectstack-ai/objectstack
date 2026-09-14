@@ -1,0 +1,37 @@
+{
+  "number": 6195,
+  "kind": "issue",
+  "title": "ci.yml 的 `TURBO_SCM_BASE` 吃同一个冻结 base.sha —— turbo --affected 在 merge ref 上把 main 漂移算成本 PR 改动(方向保守:多跑,不会少跑)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "ci/cd",
+    "domain:devx",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T10:29:37Z",
+  "updated_at": "2026-08-08T06:38:36Z",
+  "closed_at": "2026-08-08T06:38:36Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6195",
+  "body": "#6129 的同族第三个消费者,在 **ci.yml**。#6129 的实现单(PR #6192)按派单约束不碰 ci.yml,故按 Prime Directive #10 单开、不认领。\n\n## 事实(读的是 `origin/main` 的 ci.yml,不是推的)\n\n`.github/workflows/ci.yml` `Compute this shard's package set` 步骤:\n\n```yaml\n        env:\n          TURBO_SCM_BASE: ${{ github.event.pull_request.base.sha }}\n        run: |\n          if [ \"${{ github.event_name }}\" = \"pull_request\" ]; then\n            pnpm exec turbo ls --affected --output=json ...\n```\n\n同一个 job 的 checkout 是 `actions/checkout@v7` + `fetch-depth: 0`、**没有 `ref:`** —— 即 `pull_request` 事件上的默认 merge ref。于是它和 #6129 是同一对输入:\n\n1. `base.sha` 在 PR **创建时**冻结,不随 main 前进;\n2. HEAD 是 merge ref,含 **当前** main 的一切。\n\n两者之间的 main 漂移,会被 `turbo ls --affected` 当成本 PR 改动的文件,从而把别人 PR 动过的包算进本 PR 的 affected 集合。\n\n## 方向:保守失效,不是假绿 —— 所以按 observation 立单\n\n冻结的 base 是 HEAD 的**祖先**,所以 base..HEAD 的文件集是本 PR 真实改动的**超集**(三点写法同理:祖先自己就是自己的 merge base,#6129 已实测)。affected 包集合因此只会**变大**,不会变小:\n\n- 不存在「本该跑的包没跑」这种漏测;\n- 实际后果是 **affected-only 这项优化随 PR 在飞时长而衰减** —— PR 开得越久,main 合得越多,分片跑的包越多,直到接近全量。本仓一天合 ~18 个 PR,衰减不慢。\n\n也就是说这不是发版安全问题,今天没有用户会撞上,只是 CI 时长与算力。故打 `finding`、不打 `pm:queue`,请分诊按队列节奏定级。\n\n## 若要修\n\n`git merge-base \"origin/$BASE_REF\" HEAD`,与 PR #6192 给 pr-automation.yml 用的是同一条:在 merge ref 上它恰好落在 parent^1,diff 只剩本 PR 自己那侧。PR #6192 的 workflow 注释里记了两个「看着像修法、实际不是」的写法(三点、`HEAD^1`),可直接复用,不必重新推导。\n\n顺带一提:该 job 的 `fetch-depth: 0` 已经在了(注释写的就是 \"Full history so `turbo --affected` can diff against the PR base\"),所以 `origin/main` 本地可解析 —— PR #6192 在真实 CI 上实测过这一点(`Resolve the diff base` 步骤没有触发回退 fetch)。\n\n## 查重与串行\n\n- 查重:`is:open TURBO_SCM_BASE` 零命中;`is:open base.sha in:body` 仅命中 #6129。\n- 文件面 `.github/workflows/ci.yml` 与在飞的 **#6082** 相同,但两者**不相交**:#6082 改的是两处聚合门禁的 `abandoned` 白名单(shard 判决),本单改的是 affected 的 diff 起点。落地时按文件串行即可,不构成 blocked-by。\n"
+}

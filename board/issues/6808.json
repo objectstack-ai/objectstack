@@ -1,0 +1,36 @@
+{
+  "number": 6808,
+  "kind": "issue",
+  "title": "A deleted runtime `object` is still served by `SchemaRegistry.getObject` — the registry heal reaches the `metadata` map but never `objectContributors`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched",
+    "pm:queue",
+    "target:v17"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T19:00:07Z",
+  "updated_at": "2026-08-09T00:48:32Z",
+  "closed_at": "2026-08-09T00:48:32Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6808",
+  "body": "Recording only, per Prime Directive #10 — found while implementing #6621 (PR #6807), on a different function than the one that card touches, and pre-existing on both callers.\n\n## The fact (measured on `origin/main` @ `4bb6f01af`)\n\n`deleteMetaItem` ends its repository delete with `restoreArtifactRegistryView` — the #6687 three-tier heal. That walk operates entirely on `SchemaRegistry`'s **generic** `metadata` map: `removeRuntimeShadow`, `registerItem`, and `removeOverlayEntry` all address `this.metadata.get(type)`.\n\nAn `object` lives in **two** places. `applyRegistryWriteThrough` → `applyObjectRegistryMutation` writes both:\n\n```ts\nthis.engine.registry.registerItem(request.type, request.item, 'name');   // metadata map\nthis.engine.registry.registerObject({ ...item, _provenance: 'org' }, pkg); // objectContributors\n```\n\nThe heal only undoes the first. Measured with the real `SysMetadataRepository` over an in-memory engine, a runtime-created object saved and then deleted:\n\n```\nBEFORE delete: metadata['object'] keys -> [\"myapp_invoice\"] | objectContributors -> [\"myapp_invoice\"]\nAFTER  delete: metadata['object'] keys -> []                | objectContributors -> [\"myapp_invoice\"]\n\nregistry.getObject('myapp_invoice')      -> STILL SERVED\nregistry.getItem('object','myapp_invoice') -> STILL SERVED   (getItem special-cases the\n                                                              object type back to getObject)\n```\n\n`getObject` is the surface **data CRUD dispatches on**, so the half that survives is the load-bearing half: the `sys_metadata` row is gone and the object is still resolvable, syncable and writable for the life of the process. The half that is cleaned (`metadata['object']`) backs listing, which is the less consequential of the two.\n\n## Why there is no one-line fix\n\n`SchemaRegistry` has **no per-`(type, name)` object unregister at all** — the only removal verb is `unregisterObjectsByPackage(packageId, force)` (`packages/objectql/src/registry.ts:1339`), which is package-wide and throws when an owner still has extenders. So closing this is a registry **API** change (a name-addressed `unregisterObject` honouring the ADR-0029 single-owner/extender rules), not a protocol-side call.\n\n## Reachability\n\nLive on the ordinary Studio path: delete a runtime-created object, and the running process keeps dispatching it. Both delete-shaped callers are affected identically, because both run the same heal:\n\n- `deleteMetaItem` (single-item delete / \"reset to factory default\");\n- `revertCommit`'s soft-remove limb, which PR #6807 just wired to the same heal — that PR pins the two callers as leaving the **same** registry view precisely so the parity assertion stays green when this is fixed for both, rather than freezing the current behaviour.\n\n## Not the same as #6725\n\n#6725 is the **write** side of the same map-vs-contributors asymmetry (`MetadataFacade.register('object', …)` writing where its own reads do not look), and is dormant in-tree. This one is the **removal** side, on the shipped protocol path, and is reachable today. Same underlying split in `SchemaRegistry`, two different seams — a fix for either does not close the other, though a name-addressed object unregister would be the natural place to settle both.\n\nRelated: #6687, #5079, #4521, #6621 (PR #6807), #6725, ADR-0029.\n"
+}

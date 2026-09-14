@@ -1,0 +1,33 @@
+{
+  "number": 18054,
+  "kind": "pull_request",
+  "title": "fix(pm): board-snapshot walks a bounded delta before the backfill, so the live board is re-read every run",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/l",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-13T15:56:13Z",
+  "updated_at": "2026-09-13T16:45:45Z",
+  "closed_at": "2026-09-13T16:45:44Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": "2026-09-13T16:45:44Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/18054",
+  "body": "Fixes #18045\n\nMaintainer ruling, verbatim and untranslated (skills seat chat, 2026-09-13T14:58Z): 「现在就派发处理 备份缺口」\n\n## Premises, all four checked against `origin/main` c185d087 before any edit\n\n- **P1 holds.** `selectWalkPlan` reaches `incremental` only once `history` completes, so while the backfill runs no walk ever carries a recent `since`. Confirmed on `board-archive` tip `b7c5f578`: `walk_phase: history`, `next_since: null`, `resume.stopped_by: budget`, history cursor `2026-08-03T11:51:21Z`, `board.read_at: null`, `count_check: pending`.\n- **P2 holds.** 5232 records under `board/issues/`, highest number **17460**; 18010, 18020 and 18025 are absent. Read with `git ls-tree` over a shallow fetch of the branch into a private ref — the shared checkout was never switched.\n- **P3 holds.** 16 open pull requests, none touching `scripts/pm/board-snapshot.mjs`. (#18033 touches `scripts/pm/check-half-states.mjs`, which this file imports from; no overlap in this diff.)\n- **P4 holds.** `.github/workflows/board-snapshot.yml` is unchanged — same cron, same 800-request default, one `GITHUB_TOKEN`, no retry loop.\n\n## The fix, in `scripts/pm/board-snapshot.mjs` alone\n\nA bounded **delta** walk now runs first on every run once the open set is complete: `state=all&sort=updated&direction=asc&since=...`, archiving every row it sees — open or closed, issue or pull request. The history backfill then continues from its own cursor with the remaining budget, its resume semantics untouched. A spent slice is **not** a run stop; only the run budget and a rate-limit refusal stop a run, exactly as before.\n\n**The budget split: 300 of 800, and 500 to the backfill.** A quiet six-hour window moves a few dozen numbers, so a steady-state delta costs one listing page plus a comment read per changed number and the backfill keeps very nearly the whole budget. A catch-up delta buys around 250 numbers a run, closing a multi-day gap in a day of scheduled runs rather than in the weeks the backfill needs to reach the same rows. In the worst case the backfill still gets 500 — five eighths of its former pace, slowed but never starved. An unbounded delta could starve it for good, which is why `DELTA_REQUEST_SLICE` exists at all.\n\n**New manifest keys.** `walk.delta = { complete, cursor, since, slice }` sits beside `walk.history` and is never merged into it. `next_since` becomes the delta's high-water mark instead of the backfill's February cursor. `resume.phase` now names the WALK that stopped (`open` / `delta` / `history` / `incremental`) rather than the phase. `run` gains `delta_ran`, `delta_completed_here` and `delta_requests` — in `run`, which `materialManifest` strips, so a per-run counter cannot commit a manifest-only diff every run. The board's own open count is bought right after the delta and before the backfill, so `count_check` stops being permanently `pending` in the history phase.\n\n## One declared deviation from the card's fix shape\n\nThe card spells the delta anchor as \"the previous manifest's `generated_at`, minus a small skew\". Implemented instead as: the delta's own stored cursor; else `walk.open_set.completed_at` minus the skew; else `next_since`; else `generated_at` minus the skew. On the measured manifest `generated_at` is 2026-09-13T14:22Z while the board was last enumerated in full at 2026-09-10T15:39Z, so anchoring on the stamp would have declared a window this tool never walked and skipped the exact three-day gap the card was filed about. The skew is 30 minutes, two runs' worth of the workflow's own 15-minute job timeout.\n\n## Verification\n\n- `node scripts/pm/board-snapshot.mjs --self-test`: **89 cases across 8 batteries before, 125 across 10 after**, exit 0 both. Two new batteries; the count-check battery's floor moves 15 to 17 and the roster floor 8 to 10.\n- The self-test gains an **offline harness** that drives `snapshot()` end to end against an injected `fetch` — no network, no token, restored in a `finally`. The card assumed one existed; it did not, so the walk order and the budget split had no instrument at all.\n- **Ablation.** Deleting the 25-line delta step turns **10 of 125** cases red, THE REGRESSION among them (blob `f3723530` to `e0cdbd7b`, restored to `f3723530`, `git diff HEAD` empty). A first attempt stayed **green**: over a four-row board the backfill reaches \"today\" inside one page, so the row landed on disk whether or not a delta ran. The harness now carries a 900-row closed backlog, so the backfill provably cannot reach that day inside 800 requests — that fix is its own commit.\n- `origin/main` (226970bb) is merged in; `node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` derives the same **33** commands on the merged head as before it. Every one runs in the foreground with `$?` captured before any pipe, and `--ran` reconciles the list; the verdicts are in the `os-dev-report` comment on the card.\n- `skip-changeset`: the root package is private and no published package's `files[]` carries `scripts/`, so this diff publishes nothing.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01DAcomhvR9kKizeYgg89Vo8)_"
+}

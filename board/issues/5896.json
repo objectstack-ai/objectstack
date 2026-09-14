@@ -1,0 +1,34 @@
+{
+  "number": 5896,
+  "kind": "issue",
+  "title": "finding(objectql): engine.test.ts 的 formula `now` 确定性断言按「值」比较,只有跨毫秒时才会红 —— 一条按运气报警的 pin",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T11:09:02Z",
+  "updated_at": "2026-08-08T10:01:19Z",
+  "closed_at": "2026-08-08T10:01:19Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5896",
+  "body": "观察类 finding,实现 #5699(PR #5894)的反向验证时撞到。**今天没有用户会踩到**(这是测试质量问题,不是产品缺陷),故不带 `pm:queue`,请 PM 分诊定级。\n\n## 事实\n\n`packages/objectql/src/engine.test.ts:1931` 的 `pins ` + \"`now`\" + ` once per find so every row sees the same instant (#1979)`:\n\n```\nconst result = await engine.find('ping', { fields: ['id', 'ts'] });\nexpect(result[0].ts).toEqual(result[1].ts);\nexpect(result[1].ts).toEqual(result[2].ts);\n```\n\n它钉的是 `applyFormulaPlan` 的「一次调用只取一个 `new Date()`」。但断言方式是**值相等**,而回归形态是**逐次求值各取一次 `new Date()`** —— 同一毫秒内产生的两个 Date 对象,值相等、对象不同。也就是说:\n\n- 回归发生时,这条断言**只在三行的求值恰好跨过毫秒边界时**才红;\n- 在快机器上三次 CEL 求值通常落在同一毫秒,断言照样绿。\n\n它不是死代码(能跑到被测逻辑),但报警与否取决于运行时刻,属于「假绿方向的 flaky」。\n\n## 实测\n\nPR #5894 的反向验证探针 B(把时钟读进逐次求值)这一跑**确实**把它跑红了 —— 但那正好说明它靠的是运气:同一探针下,新加的 identity 断言是必红的,而它是可红可绿的。\n\n## 现状已被覆盖到什么程度\n\nPR #5894 在 `engine-write-formula-hydration.test.ts` 新增的 `#5699` 组里,已经用**对象同一性**(断言 `ExpressionEngine.evaluate` 收到的上下文里的 `now` 是同一个对象)把同一条保证钉死了,而且**读路径(find)与写路径(insert 水合)各一条** —— 两条路径本来就走同一个 `applyFormulaPlan`。\n\n所以 `engine.test.ts:1931` 现在是同一保证的一份**较弱的重复**,不是覆盖缺口。这也是 PR #5894 没有顺手改它的原因:落点被派发令限定,且 `engine.test.ts` 是多 agent 高频改动的热文件,为一处纯冗余去动它不划算。\n\n## 可能的处置(留给分诊)\n\n1. **就地加强**:把值比较换成同一性比较(或两者都留),它就与新 pin 同级;\n2. **退休**:删掉这条,理由是 `engine-write-formula-hydration.test.ts` 的 `#5699` 组已经覆盖读路径同一保证 —— 但会丢掉 `#1979` 这个出处标记;\n3. **维持现状**:承认它是较弱的重复,不值一次热文件改动。\n\n倾向 1(加强而非删除):`#1979` 的出处值得留在读路径的测试里,加强只是把「按运气报警」换成「必然报警」。\n\nFound-during: #5699 / PR #5894\n"
+}

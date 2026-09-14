@@ -1,0 +1,36 @@
+{
+  "number": 6469,
+  "kind": "issue",
+  "title": "fix(cli,runtime): os dev / os start / os migrate 解析出三个不同的默认数据库 —— migrate plan 因此在自己刚建的空库上报告全量 drift",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:queue",
+    "target:v17"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-08T00:23:55Z",
+  "updated_at": "2026-08-08T14:51:34Z",
+  "closed_at": "2026-08-08T14:51:34Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6469",
+  "body": "## 现象\n\n在一个装好的 app 项目里（hotcrm，17.0.0-rc.5），先 `objectstack start` 跑起服务并完成 seed，然后按 `docs/MAINTENANCE.md` §3.1 的升级后检查跑 `os migrate plan`，得到：\n\n```\nℹ Database: /home/user/hotcrm/.objectstack/data/standalone.db\nℹ Examined 22 managed table(s).\n\nNew (additive — created when you apply)\n  + crm_account [create_table, 30 column(s)]\n  + crm_campaign [create_table, 29 column(s)]\n  ... 22 张表全部待创建\nℹ 22 table(s) to create, 0 column(s) to add\n```\n\n**这份报告是假的。** 显式指向服务真正在用的库之后：\n\n```\n$ os migrate plan --database-url file:/home/user/hotcrm/.objectstack/data/objectstack.db\nℹ Examined 22 managed table(s).\n✓ Physical schema is in sync with metadata — nothing to migrate.\n```\n\n零漂移。`plan` 打开的是一个**它自己刚刚创建的空库**：\n\n```\n$ ls -la .objectstack/data/\n-rw-r--r-- 2629632 Aug  7 12:02 objectstack.db    ← 服务在用的\n-rw-r--r--    4096 Aug  7 12:01 standalone.db     ← plan 刚建的空库\n```\n\n## 根因：三个命令，三个写死的默认库名，同一个目录\n\n| 命令 | 默认数据库 | 出处 |\n| :--- | :--- | :--- |\n| `os dev` | `<projectRoot>/.objectstack/data/**dev.db**` | `packages/cli/src/commands/dev.ts:37`（`resolveDefaultDevDbUrl`，用于 `dev.ts:301`，由 `dev-default-db.test.ts` 钉住） |\n| `os start` | `<projectRoot>/.objectstack/data/**objectstack.db**` | `packages/cli/src/commands/start.ts:193` |\n| `os migrate *` | `<projectRoot>/.objectstack/data/**standalone.db**` | `packages/runtime/src/standalone-stack.ts:222`（`resolveDatabaseUrl`） |\n\n三条路径谁都不从 `objectstack.config.ts` 解析数据源，各自 fallback 到一个不同的硬编码文件名，而且三个文件落在**同一个目录**里。\n\n这不是「独立工具不认识你的项目」：`migrate plan` 明明读了项目配置 —— 它把整个应用的元数据注册表都加载了（`[Registry] Registered data: app.objectstack.hotcrm:crm_account` 等 20 余行）。它读了 A 的元数据定义，然后拿去 diff B 的物理现状。\n\n## 二阶损害：#3917 的占用检查守着一个不会被占用的文件\n\n`packages/cli/src/utils/sqlite-occupancy.ts:9` 的动机注释写的是：\n\n> the overwhelmingly common shape of a dev machine is a `pnpm dev` server holding the same `.objectstack/data/standalone.db` open while the operator runs a migration in another terminal\n\n这个前提在默认路径下**不成立**。`pnpm dev`（`os dev`）持有的是 `dev.db`，`os migrate apply` 打开的是 `standalone.db`。两者在默认配置下永远不会争用同一个文件，所以 #3917 那套 `/proc` / `lsof` 占用检测在它自己描述的那个主场景里不可能触发。\n\n（守卫本身不是废的 —— 如果操作者显式把 `OS_DATABASE_URL` 指到同一个文件，它照常工作。失效的是它的**默认路径场景**，也就是注释里说的「压倒性常见」的那个。）\n\n## 为什么这条比「输出看着怪」严重\n\n**失败方向是反的。** 真相是「零漂移」，输出是「22 张表全部待创建」。它不会让人漏掉问题，它会让人以为升级把数据库干掉了。照着 §3.1 走的操作者，最可能的下一步是去回滚一个根本没坏的东西。\n\n**它有写副作用。** `plan` 号称 dry-run，但解析路径上的空库会被建出来。跑第二次看到的还是同一份假报告，而且现在磁盘上真有这么个文件，更像「就该是这样」。\n\n**它正在长配套逻辑。** `sqlite-occupancy.ts` 已经把 `standalone.db` 当成事实写进了注释和实现。这类分叉每多待一个版本，就多一处把它当既定行为的代码。\n\n## 给操作者的判别式（在修好之前）\n\n看到 `os migrate plan` 报「所有表都待创建」而应用明明在正常跑 —— 那是**指错库了**，不是数据库坏了。确认办法是看输出第一行的 `ℹ Database:` 路径是不是服务实际在用的那个（`os start` 启动横幅里的 `Driver: ... → <path>`）。\n\n显式指定时注意 scheme 只认 `file:`：\n\n```bash\nos migrate plan --database-url file:/abs/path/.objectstack/data/objectstack.db\n```\n\n`sqlite://` 会被拒（`Unsupported database URL scheme ... Supported schemes: memory://, postgres://, pg://, mongodb://, mongodb+srv://, file:`）。错误信息本身合格，但 `sqlite://` 大概是这个场景下最自然的猜测，值得一并考虑接受。\n\n## 修复方向（供讨论，未认领）\n\n核心是「一个项目的数据库」应当只有一处解析。倾向于把三条 fallback 收敛到一个共享函数，并让它优先读项目配置声明的数据源；默认文件名统一（保留其余两个作为兼容读取，或在检测到旧文件时给出迁移提示，避免既有 dev 环境的数据凭空「消失」）。\n\n兼容性需要考虑：已经存在 `dev.db` / `standalone.db` 的本地环境，统一之后不能表现为数据丢失。\n\n修好后建议补的钉子：一条断言 `dev` / `start` / `migrate` 在同一 `projectRoot` 下解析出**同一个** URL 的测试 —— 这正是现有 `dev-default-db.test.ts` 只钉住自己那一条、因而没能发现分叉的原因。\n\n## 复现\n\n```bash\n# 任一 objectstack app 项目内\nobjectstack build && objectstack start      # 记下横幅里的 Driver 路径\n# 另一个终端\nos migrate plan                             # 报告全量 create_table\nls .objectstack/data/                       # 多出一个空的 standalone.db\n```\n\n发现于 hotcrm 升级到 17.0.0-rc.5 时（objectstack-ai/hotcrm#1056）走 `MAINTENANCE.md` §3.1 的升级后漂移检查。仅记录，未认领。"
+}

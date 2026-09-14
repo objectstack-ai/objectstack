@@ -1,0 +1,35 @@
+{
+  "number": 6787,
+  "kind": "pull_request",
+  "title": "fix(platform-objects): translate the Setup `nav_sso_providers` nav entry in all four locales",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T17:37:26Z",
+  "updated_at": "2026-08-08T18:04:57Z",
+  "closed_at": "2026-08-08T18:04:56Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-08T18:04:56Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/6787",
+  "body": "Fixes objectstack-ai/objectstack#6659\n\n## The gap\n\n`@objectstack/plugin-auth` contributes an **SSO Providers** entry into the Setup app's `group_access_control` (`sys_sso_provider`, priority 250, `auth-plugin.ts:552`), and no locale bundle carried a label for it. A deployment with an external IdP wired therefore rendered `SSO Providers` in English inside an otherwise fully translated Setup menu.\n\n**Premise re-measured on the fresh base** (`origin/main` `ea1d9165d`, i.e. after #6767 rewrote parts of these files):\n\n| probe | en | zh-CN | ja-JP | es-ES |\n| --- | --- | --- | --- | --- |\n| `nav_sso_providers` | 0 | 0 | 0 | 0 |\n| `nav_positions` (control) | 1 | 1 | 1 | 1 |\n\nThe declaring contribution had not drifted — still `auth-plugin.ts:552`.\n\n## The change\n\nOption 1 of the issue only. The union-aware gate (option 2) is deliberately **not** built.\n\n| locale | label |\n| --- | --- |\n| `en` | SSO Providers |\n| `zh-CN` | SSO 提供方 |\n| `ja-JP` | SSO プロバイダー |\n| `es-ES` | Proveedores SSO |\n\nEach matches that locale's existing `sys_sso_provider.pluralLabel` (already in the generated object bundles), since the nav entry opens exactly that object's list view — so the menu and the page it opens read the same words. Placed inside the Access Control block, between `nav_record_shares` and `nav_api_keys`, matching the contribution's priority 250.\n\n## Why no gate caught it, measured both ways\n\n`pnpm check:app-nav-i18n` (#5750) boots the real composition and asserts every **merged** Setup nav id carries a label in every locale — and `plugin-auth` spreads its `navigationContributions` in only when `authManager.isSsoWired()` is true. In the composition that gate boots, this entry is never contributed, never merged, never judged. The gate's own header already declared that bound; this PR is the first concrete specimen of it.\n\nReverse verification, with the expected direction decided up front. The interesting half is that the gate is predicted **not** to move — that is the issue's central claim, not a gap in the verification. Measured with the four labels taken back out (`git checkout origin/main --` the four locale files, then rebuilt):\n\n| check | predicted | measured |\n| --- | --- | --- |\n| new pin case | red x4 | red x4 — `expected [ 'nav_sso_providers' ] to deeply equal []`, one per locale |\n| `check:app-nav-i18n` | **green, unchanged** | `OK (10 contributor(s), 53 merged setup nav id(s), 4 locale(s), every id labelled in every locale)` — byte-identical to the run with the labels present |\n\nThat second row is the point: the gate reports \"every id labelled in every locale\" while all four locales are missing this one. So the id is pinned **by hand** in `setup-nav-dead-key-tombstone.test.ts`, as the converse of the #6660 tombstone it now sits beside — one list holds ids whose label must be **gone**, the other ids whose label must **stay**. The two are the two halves of one ledger, and the file header says so, including the bound that this package can assert only the label half (`plugin-auth` depends on it, so it cannot be imported from here — the same import direction that put the boot gate in `packages/cli`).\n\n## Also in scope (declared in the claim — cli-seat veto welcome)\n\n`packages/cli/scripts/check-app-nav-i18n.mjs` header, **comment only, no logic edits**. Its closing sentence said \"the dead `apps.setup.navigation` keys that exist today are tracked separately\" — those four keys were removed by #6767, so that half-sentence is now false. Rewritten to point at where Setup's reverse direction is actually decided (the two hand-kept lists), keeping the still-true claim intact: the gate makes no reverse assertion, because from one composition a dead key and a gated-off contribution are indistinguishable.\n\nOne more citation was falsified by this PR and corrected in the same file it lives in: the tombstone header said \"Making that gate union-aware is tracked as #6659\". After triage, #6659 tracks the missing label and the union-aware gate is explicitly a separate, unbuilt card — leaving that line would point future readers at a closed issue for work never done.\n\n## Verification\n\nAll foreground, heavy runs under `flock /tmp/os-heavy-verify.lock` with a 4 GB heap cap.\n\n```\npnpm --filter @objectstack/platform-objects test    11 files, 289 passed\npnpm --filter @objectstack/platform-objects typecheck / @objectstack/cli typecheck   clean\npnpm check:app-nav-i18n     OK (10 contributors, 53 merged ids, 4 locales)\npnpm check:i18n             OK (9 packages, all bundles in sync)\npnpm check:i18n-coverage    OK (12 configs, 660 baselined, none new)\npnpm lint                   exit 0\npnpm check:nul-bytes        OK (6321 files)\npnpm check:doc-authoring    OK (373 files clean)\n```\n\n`check:i18n-coverage` first reported `COULD NOT MEASURE` — `@objectstack/connector-mcp` had no build output because the earlier build was scoped to `@objectstack/cli...`. That is the gate's documented `fix: pnpm build`, not a finding; it is green above after building the CI package set.\n\nNo `skip-changeset` label: this PR ships a changeset (`.changeset/sso-providers-nav-label.md`, patch on `@objectstack/platform-objects`).\n\n---\n\n### 中文摘要\n\n`plugin-auth` 只有在外部 IdP 接通时才会向 Setup 的「访问控制」分组贡献 `nav_sso_providers`,而四个语言包都没有它的标签,所以接了 SSO 的部署会在一个已完全翻译的菜单里显示英文的 `SSO Providers`。本 PR 按裁决只做方案一:补齐四个语言的标签,措辞与各语言 `sys_sso_provider.pluralLabel` 保持一致。\n\n`check:app-nav-i18n` 只启动**一个**组合,被条件关掉的贡献根本不会被合并,因此结构上看不到这个 id —— 已双向实测:删掉四个标签后该 gate 仍然输出完全相同的 `every id labelled in every locale`,而新增的 pin 用例四个语言全红。所以这个 id 改为手工 pin 在 `setup-nav-dead-key-tombstone.test.ts`,与 #6660 的墓碑互为反面:一份列「必须消失」的 id,一份列「必须保留」的 id。\n\n**未**实现方案二(让 gate 具备 union 感知)—— 按裁决那是独立的、面向维护者的卡片。\n"
+}

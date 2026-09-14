@@ -1,0 +1,35 @@
+{
+  "number": 6223,
+  "kind": "issue",
+  "title": "classifyError 的 type/runtime 两支仍按文案分类,而 cel-js 把作者源码嵌进 message —— 字段名叫 parse_status 的记录,求值期故障被答成 kind: 'parse'",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T11:13:26Z",
+  "updated_at": "2026-08-08T12:26:08Z",
+  "closed_at": "2026-08-08T12:26:08Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6223",
+  "body": "范围外发现,出自 #6133 / PR #6202 的词表审计。按 Prime Directive #10 记录,不指派。\n\n## 与 #6133 的关系\n\n#6133 修的是 **parse 期**:PR #6202 把 `ParseError` 改成按**错误类**判定,那一支不再读文案。但 `classifyError` 的 `type` / `runtime` 两支**刻意保留**了原关键词表(理由见 PR #6202:cel-js 的 `TypeChecker` 按阶段而非按故障选错误类,整体结构化会迁移既有判定,需要单独定价)。\n\n本单据记录的是:**那两支上,#6133 的根因原封不动地还在**,并且有一个具体的、今天就能踩到的表现。\n\n## 事实(`origin/main` + PR #6202 之后的分类器,实测)\n\ncel-js 的 `formatErrorWithHighlight`(`lib/errors.js`)把**出错那一行源码**拼进 `message`,求值期错误也不例外。于是关键词匹配的是作者可控的文本。同一个 `no such overload` 求值故障,只因字段名不同:\n\n```\nrecord.status > 1         EvaluationError -> kind = 'runtime'   ✅\nrecord.parse_status > 1   EvaluationError -> kind = 'parse'     ❌\nrecord.syntax_mode > 1    EvaluationError -> kind = 'parse'     ❌\nrecord.unexpected_at > 1  EvaluationError -> kind = 'parse'     ❌\n```\n\n四条的首行文案完全一样(`no such overload: dyn` string `> int`),差别只在 message 尾部回显的源码行。\n\n复现(仓库根):\n\n```js\nimport { Environment } from '@marcbachmann/cel-js';\nconst env = new Environment({ unlistedVariablesAreDyn: true, enableOptionalTypes: true });\ntry { env.evaluate('record.parse_status > 1', { record: { parse_status: 'open' } }); }\ncatch (e) { console.log(e.name, JSON.stringify(e.message)); }\n```\n\n## 为什么这条比 #6133 那格更别扭\n\n`kind` 会原样进作者可见面(`objectql` `rule-validator` / `cel-fault`、`rest` 的 `reason`,位置见 #6133)。#6133 是\"语法错被答成运行期错\" —— 指错方向;这条是**反向**:表达式**语法完全正确**、在数据上求值失败,却被告知 `parse`,即\"你的表达式写错了\"。作者会去检查一个没有问题的表达式。ADR-0032 D1d 同样不满足。\n\n`type` 一支同理:字段名叫 `type`(极常见)的记录,求值期故障会落 `/type/` 判成 `kind: 'type'`。这一格危害小些(`type` 与 `runtime` 都指向求值期),但成因是同一个。\n\n## 未量化 / 未主张\n\n- 没有统计真实 metadata 里字段名含 `parse` / `syntax` / `unexpected` 的比例。`type` 的比例显然不低,但那一格危害小。\n- 没有断言\"必须整体结构化\"。PR #6202 已实测:cel-js 求值期共 18 个 evaluation code,现关键词表对其中 17 个判定正确,唯一需要留在 `type` 的是 `unknown_variable`(check 期抛 `TypeError`、eval 期抛 `EvaluationError`,见 `lib/type-checker.js:16` 的 `isEvaluating ? evaluationError : typeError`)。所以逐 code 映射是可做的,只是没在 #6133 的 scope 里做。\n- 没有排查 `bounds` 一支:`/Exceeded max/` 同样是文案匹配,但 PR #6202 已把 `limit_exceeded` 结构化,该支现在只在非 cel-js 错误上生效。\n\n## 建议方向(供 triage,不代裁)\n\n沿 PR #6202 的同一条路走完:`EvaluationError` -> `runtime`、`TypeError` -> `type`,再用一张**按 code**(不是按文案)的小表把 `unknown_variable` 这类\"声明类故障\"挑回 `type`。收益是关键词表可以整个删掉,`classifyError` 不再有任何一支读作者可控的文本;代价是要为 18 个 evaluation code 各定一次价,并钉 fixture。\n\n## 关联\n\n#6133 / PR #6202(发现出处与已修的 parse 一支)。#6132(`cel-to-filter` 第三入口,另有一套 `reason: 'parse-error'` 词表)。ADR-0032 D1d。\n"
+}

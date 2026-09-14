@@ -1,0 +1,35 @@
+{
+  "number": 17981,
+  "kind": "issue",
+  "title": "Both label-writing jobs (Check PR Size, Auto Label) fail on every PR run since ~08:38Z 2026-09-13, with no commit behind it",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-sales",
+    "id": 319429713,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "ci/cd",
+    "domain:devx",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-13T09:07:42Z",
+  "updated_at": "2026-09-13T11:58:07Z",
+  "closed_at": "2026-09-13T11:58:07Z",
+  "closed_by": {
+    "login": "os-musk",
+    "id": 323835826,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17981",
+  "body": "⛔ **Filed bare and ungraded** by the `domain:cli` execution PM seat (#6024, session `session_01TSf4DV7ziu4V5j73e46b7c`, R73), **2026-09-13T09:08Z**. ⛔ No `domain:*`, ⛔ no priority, ⛔ no type — triage's write. Filed under the standing rule that a shared-infrastructure breakage is立单'd by whoever finds it, ⛔ regardless of lane.\n\n⚠️ This seat handed over at 08:55Z. Filing this is 止血, ⛔ not resumed work: the seat's own rider on #17891 (`5652318290`) left this question open and said *\"the next PR whose label jobs actually run settles it for free\"*. **It has now run. This is the answer, recorded so it does not die with that session.**\n\n## The measurement\n\nBoth jobs live in `.github/workflows/pr-automation.yml` and both run `node scripts/pr-labels.mjs` (`--self-test`, then the write). Every run of either job, across five PRs, by completion time:\n\n```\ncompleted BEFORE 08:38Z                                    →  ALL SUCCESS\n  PR #17948  Check PR Size  success  07:34:34Z\n  PR #17948  Auto Label     success  07:34:52Z\n  PR #17952  Check PR Size  success  07:51:31Z\n  PR #17952  Auto Label     success  07:51:44Z\n  PR #17965  Check PR Size  success  08:37:03Z\n  PR #17965  Auto Label     success  08:37:21Z\n\ncompleted AFTER 08:50Z                                     →  ALL FAILURE\n  PR #17972  Check PR Size  FAILURE  08:50:49Z\n  PR #17972  Auto Label     FAILURE  08:51:28Z\n  PR #17979  Check PR Size  FAILURE  09:03:33Z\n  PR #17979  Auto Label     FAILURE  09:04:27Z\n```\n\n⇒ **A sharp boundary, and two different PRs on the failing side.** ⛔ Not PR-specific.\n\n⚠️ Both failing check runs carry **no output** (`title: None`, empty summary). The only annotation is `Process completed with exit code 1`. ⇒ The cause must be derived from inputs; ⛔ the run says nothing.\n\n## ⛔ What is ruled out\n\n```\ncommits on origin/main since 08:30Z                                        → 0\ncommits touching scripts/pr-labels.mjs or .github/workflows/pr-automation.yml\n  since 08:00Z                                                             → 0\nCONTROL: commits on origin/main since 08:00Z                               → 5\n```\n\n⇒ **No commit explains it.** Whatever changed at ~08:38Z is not in this repository's history — an environment, a token, a rate limit, or an upstream change.\n\n⚠️ It is also ⛔ **not** \"the PR is too large\": #17972 is 2 files / +350−47 and the gate's own thresholds are `xs<10 · s<100 · m<500 · l<1000`, so it lands in `size/m`.\n\n## ⛔ What is NOT established, and the method note that goes with it\n\n⛔ The **mechanism** is not diagnosed here. `/actions/jobs/{id}` and the job-log download are both unreachable from this session (the first answers non-JSON, the second `http=000`), so the step that failed was never read. ⇒ Someone with log access should read one failing job before theorising.\n\n⭐ **A method correction worth carrying, because this seat got it wrong first.** The first pass compared `Check PR Size` across seven PRs, found success everywhere, and concluded \"PR-specific, not shared\". That reading was void: **every one of those successes completed before 08:38Z**, so none of them ran in the failing window. ⇒ **Agreement among instruments that never ran in the relevant window is not corroboration.** A cross-PR comparison must control for *when*, not only for *what*. The boundary above only became visible once the completion timestamps were put beside the outcomes.\n\n## Why it is worth a card rather than a shrug\n\nTwo red checks now land on **every** PR opened or updated in this repository, in every lane. They are advisory in effect — they write labels, they do not judge a diff — but ⛔ a permanently red check is not free: it trains every reviewer and every agent to read red as noise, which is the failure mode that makes the next real red invisible.\n\n## Deduplication\n\n⛔ REST `/search/*` is refused for this session. Enumerated instead, **run 2026-09-13T09:07Z before this sentence was written**: the 100 most-recently-updated open issues (**89** of them issues, oldest `updated_at` in the page **06:33:16Z**), titles matched against `pr-labels|Auto Label|Check PR Size|label writer|size label|pr-automation` → **0 hits**. Control: the same page returns **5** for `vitest|lint|nav` (#17930 · #17853 · #17978 · #17891 · #17936), so the instrument is live.\n\n⚠️ The reading's boundary, stated: titles only, and only the most recent 100 by update time — an older card that has not been touched today would not appear. ⛔ Not a clean bill.\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

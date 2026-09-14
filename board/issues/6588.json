@@ -1,0 +1,33 @@
+{
+  "number": 6588,
+  "kind": "pull_request",
+  "title": "fix(ci): ADR-0087 迁移说明探测器读得懂「只由表头起框」的改写表 (#6559)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "size/m",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T06:02:39Z",
+  "updated_at": "2026-08-08T06:23:38Z",
+  "closed_at": "2026-08-08T06:23:36Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": "2026-08-08T06:23:36Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/6588",
+  "body": "Fixes #6559\n\n`findMigrationPrescription()` 新增**分支 4**:改写表的框架来自**表格自己的表头行**,而不是上方的迁移标题。#6497(分支 3)仍要求正文里有一个迁移标题;本仓大量 changeset 从不写那个标题,因为表头行已经说明了两列是什么 —— `| Wrote | Write instead |`。**11 条声明为 breaking 的存量 changeset** 正是从这个缝里拿到了 `not-required (no-migration-prescription)` 豁免,而且这个缝是**前向**的:今后任何 PR 都可以这样写。\n\n## 先量误报,再放宽(#6419 / #6497 / #6558 三次未变的次序)\n\n新词表是从**存量里推导**出来的,不是发明的:先枚举 1402 条 changeset 里**所有**带改写行的表格表头,再从真实拼法里收敛出两组列词。\n\n**旧列词**(作者原来有什么,单元格**开头**锚定):`wrote` / `you wrote`、`removed`、`retired`、`原写法` / `旧写法`\n**新列词**(现在该写什么):`write instead` / `use instead`、`live replacement`、`use`、`now`、`改写为` / `改成`\n\n两侧**都要有**,且新列必须**排在旧列之后**。这个配对是全部的锚:本仓的两列表格绝大多数在比较**行为**而不是开处方,单独一个 `Removed` 领一张取证表和领一张处方表一样常见(`| Removed | Built | Why it 404ed |`)。\n\n**误报面在写之前就量了,而且是隔离测量** —— 不只是新收的 15 条,而是这条臂在整个存量上**所有**会命中的正文(因为将来的 changeset 可能只命中这一条臂):**1402 条里命中 22 条,其中 18 条声明 breaking,逐条人工核对全部是真实的改写处方。误报 0 条**,无论是否声明 breaking。\n\n它还**顺带、且不带那条误报地**收下了 #6558 为被否决的「复用 `MIGRATION_FRAMING_RE` 读表头」捷径量到的那 1 条真阳性(`filter-icontains-and-regex-retirement.md`,`| 原写法 | 改写为 |`)。捷径会把 `rate-limit-config-dual-source-c9.md` 一起带进来;**列词**词表读得到前者、读不到后者,因为那里的 `(renamed)` 在**给列命名**,不在起框(P34 钉住)。\n\n## 数字\n\n存量 1402 条 / 245 条声明 breaking(比卡片的 1384 / 241 有漂移 —— #6558 之后又落了 18 条,如实报告)。\n\n| | 命中 | 其中 breaking |\n|---|---|---|\n| 之前 | 136 | 104 |\n| 之后 | 151 | 115 |\n\n**新增 15 条,消失 0 条,且既有命中的分支与证据行 0 条发生变化。**\n\n`--audit-stock` 桶位移动:`exempt-no-prescription` 139 → **128**(−11),`residue` 96 → **107**(+11)。\n\n**超集性质是结构性的**,沿用 #6558 的做法:本臂的命中同样扣到循环结束才返回,且排在分支 3 之后,所以整个函数恰好是 `arrowBranches(body) ?? framedTable(body) ?? headerFramedTable(body)`。后来的人只改这条臂,拿不走任何旧臂的命中 —— 不需要谁记得重测。\n\n## 11 条 breaking,但**不是**卡片点名的那 11 条 —— 差异是诚实的部分\n\n卡片点名的 11 条里有 **10 条**在这里。少的一条是 `adr-0114-field-error-catalog.md`,表头是 `| Was | Now |`;多的一条是 `script-branch-keys-retired.md`,表头 `| Retired | Use instead |` —— 卡片没有枚举到的第五种拼法。**从存量推导的封闭词表会找到手列清单漏掉的拼法,也会丢掉手列清单想当然的拼法。**\n\n**为什么 `was` 被拒(已量,写进脚本自述并由 P33 钉住)**:`was`/`now`(连同 `before`/`after`、`之前`/`之后`、`改前`/`改后`、`修复前`/`修复后`)是本仓的**行为对照**表头词表,不是改写词表。存量里它出现在 `| route | was | now |`(wire envelope)、`| compiler | was | now |`、`| | was | now |`(一张类型推断探测表)等十几处,没有一处要求读者改写任何东西。**1 条真阳性 vs 同一表头拼法下至少 4 条误报**,且从表头行无法把两者分开 —— 所以 `adr-0114-field-error-catalog.md` 是**故意**继续漏掉的。误报没有诚实的出口:作者被错误拒掉一条他有权使用的豁免时,封闭词表里没有别的选项给他。\n\n## 第二类(标签行起框)实测是第一类的**真子集** —— 没有实现,因为它会是死代码\n\n卡片把「表头起框 14/11」和「标签行起框 4/2」列为两个目标面,说两者重叠。**在表格臂上,两者实测是严格嵌套的。** 在 #6559 之前的基线上单独实现「粗体标签行为**表格臂**起框」:收 13 条 / 10 条 breaking —— 而分支 4 单独把这 13 条**全部**收下。在整个存量里,凡是在改写表上方写 `**Migration.**` 的 changeset,同时也用旧/新表头行写了那张表。所以本 PR **没有**加标签起框的表格臂:它落地当天就是死代码。\n\n另一种更宽的读法 —— 让标签行也为**箭头**分支起框 —— 单独量过并**否决**:收 11 条 / 6 条 breaking,其中**至少 3 条是明确误报**(一致性用例表 `{d: {$null: true}}` 变 `['3','4']`、env 归一化映射 `production`/`prod` 变 `production`、以及一条命中行是与改写无关的 `_packageId` 散文)。没有下一个标题收口的标签会给**文档剩余全部**起框,这是原因。它还会把分支 4 的 13 条命中改标成 `framed-table`,掩盖是哪条臂读到的。两条理由都写进了脚本的「被否决规则」清单。\n\n## 自述(`残余盲区`)已更新 —— 这是 #6497 的成因,不能留旧\n\n- 分支列表 三 → 四,新增分支 4 的说明与 verbatim 形状;\n- #6559 的测量段(前后数字、隔离误报面、超集结构性论证、11 条组成差异);\n- 「被否决的规则」四 → **六**(新增 `was` 词与宽标签起框两条,各带数字);\n- 残余盲区**重测**:无框架箭头清单 131 / 20,无框架改写表 95 / 18,并集 205 / 33;\n- 补记 #6559 05:06Z 的**第四种拼写(纯祈使句处方)**:它不是框架缺失,而是**连改写对都不存在**,放宽词表够不到它,需要另一条判据 —— 且该 changeset(`regex-retirement-icontains-drivers.md`,PR #6549)尚未落 main,不在本次 1402 的口径内,故不给存量数字。\n\n## 反向验证:红集在运行**之前**预测,结果完全吻合\n\n把 `headerFramesRewrite` 改成 `return false`(删掉分支 4)后:\n\n- **预测红(6 处)**:P28、P29、P30、P31、P32、R13 —— 实际红的正是这 6 处(R13 计 4 条失败:1 条判决 + 3 条消息模式)。\n- **预测绿且不可能变红(10 处)**:P25、P26、P27、P33–P38、G8。**删一条臂只会让探测器命中更少,所以「必须不命中」的断言在删除下永远不会转红。** 这一点如实说明,而不是拿这些地板去凑红集。\n- **预测绿(不受影响)**:P22–P24、R12(标题起框,由分支 3 读)。\n\n## fixture 分诊:P25 被**整条替换**,这正是要点\n\nP25 原来把 `TABLE_EN` 换头成 `## What changed` 来钉「标题不带迁移词就不起框」。但 `TABLE_EN` 的表头行**就是** `| Wrote | Write instead |` —— 分支 4 现在正当地读得到它,所以旧 fixture 钉的恰好是本次要移动的那条边界,并在自测里转红。**断言的意图原样保留**(不带迁移词的标题不为其下的表格起框),只是把表格换成表头中性的一张,让它不再自带框架。\n\n## 门禁输出\n\n```\n✓ check-adr-0087-registration --self-test: 100 assertions over real temp git repos (real scan()/assertInputs() path)\n✓ check-adr-0087-registration: this PR adds no declared-breaking changeset (0 non-breaking changeset(s) seen).\ncheck-nul-bytes: OK (scanned 6162 tracked text file(s); skipped 5 binary, 1 non-regular; no raw ASCII control bytes).\neslint scripts/check-adr-0087-registration.mjs --no-inline-config → exit=0\n```\n\n自测断言 90 → **100**(新增 P28–P38 与整合红用例 R13)。\n\n## changeset\n\n**不加,改用 `skip-changeset` 标签** —— 与 #6558 同。按 `pr-automation.yml` 的规则,该标签的含义是「本 PR 自己不发布任何东西」;本 PR 只改 `scripts/check-adr-0087-registration.mjs` 一个 CI 门禁脚本,不属于任何已发布包,对消费者不可见。\n\n## 范围外,未做\n\n- **不修 #6566**(脚本 CLI 派发在模块顶层执行)。测量时按卡片要求屏蔽 `process.exit` 绕过,未动它。\n- **未回补任何 ADR-0087 台账条目** —— 登记判据仍是 #6350 的未决问题。上面那 11 条现在落进 `--audit-stock` 的 residue 工作清单,由人判断,不由本 PR 决定。\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01AZgRyPVwi1jLb1mNNuUQ9o)_"
+}

@@ -1,0 +1,33 @@
+{
+  "number": 6328,
+  "kind": "issue",
+  "title": "[showcase] date 字段读写两侧都被规整成 YYYY-MM-DD：objectui 的「ISO 形状喂进日期控件」类缺陷缺少长期夹具",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "finding"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T13:53:55Z",
+  "updated_at": "2026-08-08T10:24:24Z",
+  "closed_at": "2026-08-08T10:24:24Z",
+  "closed_by": {
+    "login": "qq9340100",
+    "id": 313832657,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6328",
+  "body": "## 背景\n\nobjectui#3566 要求「子表 date 列存 ISO 值时单元格空白」这个缺陷在 showcase 真机复现。实测下来\n**用 showcase 现有夹具复现不了**，原因是 framework 自己把形状规整掉了。\n\n## 实测到的形状（`examples/app-showcase`，本地 `objectstack dev --seed-admin --fresh`）\n\n`showcase_expense_line.incurred_on` 是 `Field.date`，种子写的是 cel`daysAgo(N)`：\n\n- 接口读回：`\"incurred_on\": \"2026-08-04\"` —— 纯 `YYYY-MM-DD`，不是 ISO；\n- 用 `PATCH .../showcase_expense_line/<id>` 写入 `\"2026-06-17T00:00:00.000Z\"`：**落库时被规整**\n  成 `2026-06-17`；\n- 绕过接口、直接把 ISO 串 UPDATE 进 sqlite 表：**读路径同样规整**，接口仍回 `2026-06-17`。\n\n即 `date` 字段在这套后端上读写两侧都被强制成 `YYYY-MM-DD`，客户端拿不到 ISO 形状。\n对照组：同一对象的 `datetime` 字段（`created_at`）接口回 `\"2026-08-07T16:39:20.389Z\"`，未被规整。\n\n## 这为什么值得记一笔\n\n1. 这是**好行为**（date 字段规整成日历日、不带时区，正是应该的），但它意味着 objectui 侧\n   「date 列拿到 ISO」这类缺陷在 showcase 上没有天然夹具，验证只能靠在后端前面架一层改写代理\n   —— 一次性、不可复用，下一个 agent 还得重造。\n2. 若确实希望 showcase 覆盖「宽松后端交出 ISO 形状」这条路径，需要一个**长期夹具**：例如给某个\n   内嵌网格子对象加一个真正的 `datetime` 字段（`fieldTypeToColumnType` 会把它折叠成 date 列，\n   见 objectui#3569），或提供一个刻意不规整的外部数据源对象。\n\n## 待定\n\n要不要加这个夹具、加在哪个对象上，属于 showcase 覆盖面的取舍，交由维护者判断 —— 本条只记录实测\n形状与验证难点，不预设改法。未按 objectui#3566 的范围纪律擅自改动 showcase 种子数据。\n\n## 出处\n\nobjectui#3566 真机验证过程中的实测记录。\n"
+}

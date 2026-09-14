@@ -1,0 +1,36 @@
+{
+  "number": 6323,
+  "kind": "issue",
+  "title": "[docs] `services.data` 页把 `find` 当稳定主入口,而 canonical source 给 `find` 打了 `@deprecated` 指向本页未记载的 `data.query()`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T13:47:03Z",
+  "updated_at": "2026-08-08T18:04:40Z",
+  "closed_at": "2026-08-08T18:04:40Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6323",
+  "body": "## 事实(对 `origin/main` `a682670` 核实)\n\n`content/docs/kernel/runtime-services/data-service.mdx`:\n\n- 页首写 `**Stability:** stable`;\n- Methods 一节把 `find` 列为五个方法之一,Example 通篇演示 `find`;\n- 全页没有出现 `data.query()`(除本单相关的 #6002 那处顺带提及)。\n\ncanonical source `packages/client/src/index.ts`(本页自己声明的 Canonical source):\n\n- `data.query`(:4066)**没有**弃用标记,JSDoc 自述 \"Advanced Query using ObjectStack Query Protocol / Supports both simplified options and full AST\";\n- `data.find`(:4077-4081)的 JSDoc 是 `@deprecated Use data.query() with standard QueryAST parameters instead. This method uses legacy parameter names.`;\n- `QueryOptions`(:138-148)的 `@deprecated` 同样指向 `data.query()`。\n\n即:本页当作稳定主入口记载的 `find`,在它自己指定的 canonical source 里带 `@deprecated`;而 SDK 指向的替代入口 `data.query()` 在本页一个字也没有。\n\n这条方向不是无来由的:**#986**(已关闭的协议路线讨论)明确写着「禁止(deprecated)使用 data.find() 等支持 legacy query 参数的接口,主推 data.query(AST)」。所以 `@deprecated` 是有记录的产品方向,不是笔误。\n\n`data.query()` 在 docs 里并非完全缺席 —— `content/docs/api/client-sdk.mdx:460` 用 QueryBuilder 演示了它。缺的是 **`services.data` 这一页**,而它是 runtime-services 章节里该 surface 的唯一参考页。\n\n## 为什么归 observation 类\n\n今天没有人会撞坏:`find` 完全可用、没有移除动作,页面示例跑得通。\n\n而且 SDK 内部对 `find` 的态度本身是**双面的**:方法层打了 `@deprecated`,options 层的 `QueryOptionsV2`(:162-164)却还在明确说自己是 \"the recommended interface for `data.find()` queries\" —— 一个被弃用的方法,同时在维护一套\"推荐\"的入参词汇。所以这不是「文档写错了」,是**记载姿态与来源姿态不一致**,且来源自己也没收敛。\n\n## 为什么不自动入队(需要先拍板)\n\n怎么改文档,取决于一个此处无法自决的定性问题 —— `find` 到底要不要退场:\n\n- 若 `find` 确实按 #986 退场 → 本页应补 `data.query()` 一节,并给 `find` 标注去向;这是页面结构级改动,不是措辞修补。\n- 若 `@deprecated` 是历史残留(`QueryOptionsV2` 仍在给 `find` 推荐词汇,支持这一读法)→ 该改的是 `packages/client` 的 JSDoc,文档页不动。\n\n两条路的落点在不同仓位、不同文件面,选错就是白做。\n\n## 关联\n\n- #6002 / 其 PR:同页,只处理 options **词汇**那一层(Parameters 补 canonical + Example 换词),刻意没碰方法层这个问题\n- #986:`data.find` 弃用、主推 `data.query(AST)` 的路线记录\n- #6322:同一次实测发现的 `find` 归一化实现缺陷(`limit` 单键丢弃、`expand` 不落地)\n\n未认领。\n"
+}

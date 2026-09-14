@@ -1,0 +1,34 @@
+{
+  "number": 6778,
+  "kind": "issue",
+  "title": "At the GA limits flip, an over-budget RLS predicate reports under `rls-predicate-unparseable` with SQL-vs-CEL prose — off-label for a bounds overrun",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T17:15:53Z",
+  "updated_at": "2026-08-09T00:10:52Z",
+  "closed_at": "2026-08-09T00:10:52Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6778",
+  "body": "Out-of-scope finding from #6132 / PR #6766 (recorded by that dev in its report's `follow_ups_filed_as_notes_not_done`; filed by the engine-core PM — `packages/lint` is a cross-lane surface and the card's standing rule was report-first). Recorded, not claimed.\n\n## Fact (measured on PR #6766's tree, `CEL_PUSHDOWN_LIMITS_MODE = 'fail-closed'`)\n\nWhen the GA flip lands (v17.0.0 GA — the dated switch in `packages/formula/src/cel-pushdown-limits.ts`), an over-limit RLS `using` predicate (e.g. an 80-term conjunction) is reported by lint under **`rls-predicate-unparseable`**, whose hint prose explains SQL-vs-CEL syntax confusion. The verdict is CORRECT (the message does carry the exact `Exceeded maxAstNodes (256)` detail from the reason-carrying parse), but the rule id and its guidance are off-label: the author's predicate is syntactically perfect CEL that exceeds a platform budget — the fix is \"shrink or split the predicate\", not \"check your syntax dialect\".\n\n## Scope if promoted\n\nXS-S: a dedicated `rls-predicate-over-budget` (and possibly a sharing-side sibling) rule id in `packages/lint`, keyed off the sister entrance's `kind: 'bounds'` + `{limit, limitValue, measured}`, with a hint naming the limit and the remedies. No behavior change — same inputs refused, better told. Timing note: worth landing BEFORE the GA flip so the first authors to hit the wall get the right sign-post.\n\n## Routing\n\nLands in `packages/lint` ⇒ expected `domain:devx` / `domain:spec-tooling` per the lane table; label left to the triage seat (single-producer rule).\n\nRefs: #6132 (A′ ruling + the sister entrance), PR #6766 (measurement), #4812 (canonical front end)."
+}

@@ -1,0 +1,34 @@
+{
+  "number": 6713,
+  "kind": "issue",
+  "title": "字段级 `*When` 的未绑定根检查是一张 3 项黑名单,而真相是一张 3 项白名单 —— 其余 ~20 个 `SCOPE_ROOTS` 成员同样 fail-open 且全静默",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T13:19:11Z",
+  "updated_at": "2026-08-08T18:28:40Z",
+  "closed_at": "2026-08-08T18:28:40Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6713",
+  "body": "发现于 #6585 的实现(PR #6711),**不在该单范围**,按纪律另立存档交分诊定级。\n\n## 事实\n\n字段级 `visibleWhen` / `readonlyWhen` / `requiredWhen` 实测只绑三个根,三处独立证据一致:\n\n- 服务端:`rule-validator.ts:577`(`readonlyWhen`)绑 `{ record, previous, extra: { parent } }`,`:1403`(`requiredWhen`)绑 `{ record, previous, ...parentScope }`;\n- 客户端:`evalFieldPredicate` 绑 `record` + `previous` + 调用方 `scope`,而 objectui 全部五个字段级调用点(`form.tsx` ×3、`WizardForm.tsx`、`GridField.tsx`)传的 `scope` 只可能是 `undefined` 或 `{ parent: contextRecord }`;\n- 作者端:objectui 的 `FIELD_RULE_ROOTS = ['record', 'previous', 'parent']`(`ObjectFieldInspector.tsx:127`),注释明写 \"nothing else\"。\n\n也就是说,**真相是一张三项白名单**。\n\n但 `packages/lint/src/validate-expressions.ts` 的 `checkFieldRuleUserRoot` 是一张**黑名单**:#6584 里一项(`current_user`),#6711 之后三项(`current_user` / `user` / `ctx`)。`@objectstack/formula` 的 `SCOPE_ROOTS` 共约 26 个成员,减去白名单的三项与黑名单的三项,还剩约 **20 个根**在字段级同样未绑定、同样 fault、同样 fail-open —— 且**全部静默**:它们都在 `SCOPE_ROOTS` 里,所以裸引用检查从不报它们,而黑名单又不认它们。\n\n具体名单(`cel-engine.ts:54-79`):`input`、`output`、`os`、`vars`、`variables`、`automation`、`context`、`args`、`item`、`env`、`step`、`result`、`trigger`、`event`、`payload`、`data`、`params`、`config`、`settings`、`features`、`current`。\n\n其中几个是**高度可信的作者笔误**,而不是理论可能性:\n\n- `os.user.id` —— ADR-0068 D1 认定的**第四种**用户拼写。#6711 收了三种,`os` 这一支没收(收了会连 `os.env` / `os.org` 一起判,那是另一次面级测量);\n- `data.status == 'x'` —— `data` 是**元数据表单**里同一个 `visibleWhen` 槽位的合法根(见 `view.zod.ts:1440` 的 `.describe()`:\"Root: `record` … in runtime forms, or `data` in metadata forms\"),两种表单同一个键、不同的根,作者极易串;\n- `context` / `vars` / `trigger` —— flow 谓词的根,从 flow 复制粘贴过来就是这几个。\n\n## 后果\n\n与 #6146 / #6585 同一条失败链,方向也一样:未绑定根 ⇒ fault ⇒ 可见性 fallback 为 `true` ⇒ 本想藏起来的字段对所有人恒可见,无任何构建期信号。差别只在于:#6585 是「三个等价拼写里挑错了一个」,本单是「挑了一个压根不属于这个面的根」。\n\n## 现状与范围(实测)\n\n- 仓内 `examples/`(53 处 `*When`)、`packages/`(1173 处,非测试)与下游 `objectui`(527 处)读取**任一**上述根的字段级 `*When` 均为**零** —— 这是覆盖洞,不是在线故障,与 #6585 定性一致;\n- 因此这不是回归,也不阻塞 #6711。\n\n## 可能的修法(留给分诊,不自选)\n\n1. **黑名单翻成白名单** —— `checkFieldRuleUserRoot` 改为「字段级 `*When` 的根不在 `{record, previous, parent}` 内即拒」。与三处实测绑定、与 objectui 作者端白名单完全对齐,且未来 `SCOPE_ROOTS` 新增成员时自动覆盖(黑名单则每次都漏)。代价:文案需要按根分档 —— 现有处方是**用户向**的(移到选项级 / 权限集 FLS),对 `data` / `vars` 这类根答非所问,得给出通用处方(「改写成 `record` 谓词」)并保留用户根的专门处方;\n2. **只把 `os` 补进现有黑名单** —— 只补 ADR-0068 的第四种用户拼写,把 #6585 的别名故事补完整,其余 ~20 个根继续静默。改动最小,但把同一类洞留在原地;\n3. **不动** —— 记录为已知边界。\n\n个人倾向 1(理由:黑名单在这个面上结构性地追不上 `SCOPE_ROOTS`,而白名单的三项已被三处独立证据钉死),但文案分档是真实工作量,且 `parent` 那一项本身还有 #6457 的稀疏问题未了,请分诊定夺。\n\nRefs: #6585、#6584(PR)、#6711(PR)、#6146、#6457、ADR-0068 D1、objectui#1582\n"
+}

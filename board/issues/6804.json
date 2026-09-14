@@ -1,0 +1,35 @@
+{
+  "number": 6804,
+  "kind": "pull_request",
+  "title": "refactor(spec): 三个手写 unrecognized_keys 错误映射折叠进 strictObject 的按集合取键 guidance（#6619）",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/xl",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T18:26:30Z",
+  "updated_at": "2026-08-08T22:42:07Z",
+  "closed_at": "2026-08-08T22:42:05Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": "2026-08-08T22:42:05Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/6804",
+  "body": "Fixes #6619（#6416 方向 2）\n\n## 做了什么\n\n把 `packages/spec` 里仅存的三个手写 `$ZodErrorMap` 折叠进共享 `strictObject` / `strictUnknownKeyError` 模板，删除手工维护的模板副本，并让它们的别名指针与处方进入 `alias-integrity.test.ts` 的审计视野（#6416 命名的盲区，就此闭合）：\n\n| 手写映射 | 所在文件（实测锚点，`252f71bd6`） | 折叠后的形态 |\n|---|---|---|\n| `strictVisibilityError` | `shared/visibility.ts:113` | `VISIBILITY_STRICT_OPTIONS` —— 模式取键的 guidance 集合（`VISIBILITY_KEY_PATTERN`） |\n| `strictWidgetAnalyticsError` | `ui/dashboard.zod.ts:163` | `WIDGET_GUIDANCE_SETS` —— 三个枚举集合，按声明顺序 |\n| `strictTenancyError` | `data/object.zod.ts:442` | 精确 `guidance`（两块墓碑）+ `history` 槽位承载常驻解释句 |\n\n## 核心决策：guidance 的按集合取键形态\n\n`dashboard.zod.ts` 的分支按**集合成员资格**取键（11 个退役 analytics 键共享一条迁移处方），精确键形态无法表达，visibility 的家族甚至不可枚举（模式匹配 `visibleWhenn` / `visibleIf` / `hiddenWhen` / `conceal`…）。因此共享模板新增 `KeySetGuidance` / `guidanceSets`：\n\n- `keys`: 枚举列表 **或** `RegExp`（模式必须携带 `examples`，审计据此判定模式没写错、没被 shape 遮蔽）；\n- `name`: 具名（`LEGACY_WIDGET_ANALYTICS_KEYS` 等）——刻意**不**渲染进消息：面向作者的拒绝应点名**键**，不点名装键的数组；每条处方在文案里自己把家族拼出来，这才是可读性所在。名字供声明处与审计失败文本使用。\n\n**优先级规则（`strict-object.test.ts` 逐条钉住）**：\n1. 精确 `guidance` 条目永远胜过集合——更具体者裁决，新增集合永远偷不走已有手写答案的键；\n2. 集合之间按声明顺序，第一个认领的集合作答（对应手写映射原本的 if 链自上而下）；\n3. 集合命中即抑制改名建议（处方与 \"did you mean\" 是同一问题的两个答案）；\n4. 每条消息每个集合至多一条 bullet，位置在第一个命中键处（11 个 legacy 键 = 1 段处方，不是 11 段）。\n\n`keySetMatches` 用 `String#search` 而非 `RegExp#test`（`/g` 模式下 `test` 有状态，同一键会交替命中/不命中；已有测试钉住）。\n\n## 盲区闭合的实测证据\n\n同一探针矩阵在折叠前后各跑一次（`strictObjectDeclarations()` 全量强制遍历后计数）：\n\n| | 折叠前（`252f71bd6`） | 折叠后 |\n|---|---|---|\n| 注册表可见声明 | 65 | 70 |\n| `this view/page schema` | **不可见** | 可见（×3 shape） |\n| `this dashboard widget` | **不可见** | 可见 |\n| `` `tenancy` `` | **不可见** | 可见 |\n\n`alias-integrity.test.ts` 新增三项：集合成员死条目检查（成员是已声明键 / 与精确 guidance 重复 / 两集合争抢一键均报错）、模式 examples 检查（必须命中自身模式且不是已声明键）、以及**折叠闭合钉**——把任何一个映射还原成手写 `$ZodErrorMap` 会直接红在门上。反向验证已实测：注释掉 widget 的 `guidanceSets` → 8 个测试红（含闭合钉），方向与预测一致（红），恢复后全绿。\n\n## 13 个顺序钉的处置（#6453 遗产）\n\n**零删除，全部随代码迁移**：`view.test.ts` 4 个、`dashboard.test.ts` 7 个、`object.test.ts` 3 个（其中 1 个\"无修复分支全消息钉\"换了夹具键并**新增**同类钉，净增不减）。发射顺序契约（前言 → 修复通道 → 解释句最后）在模板里天然成立，钉子原样验证它。\n\n## 消息字节的刻意变化（顺序契约不变，逐处说明）\n\n1. **处方渲染为 `\\n  • ` bullet**（原为内联空格拼接）——与包内所有已折叠面的处方通道一致；单行渲染器（`os validate`、CI 日志）本就把换行拍平，前言→修复→解释的顺序不动。\n2. **无处方的键获得编辑距离改名**——手写映射没有这条通道：`tenantfield` 原答\"is not a `tenancy` key.\"（说了问题、没给修复），现答\"Did you mean `tenantfield` → `tenantField`?\"；`titel`→`title`、`colourVariant`→`colorVariant`、`labell`→`label` 同理。对读者严格变好。\n3. **widget 多键族时各族处方全部给出**（原 if/else 链只给第一个命中分支，`categoryField`+`component` 会静默丢弃隔离判词）——本折叠唯一的行为向变化，按声明顺序各一条 bullet，`dashboard.test.ts` 有专钉。\n4. **tenancy 无修复键不再有兜底 bullet**——\"`zzzz` is not a `tenancy` key.\" 的信息量已由前言\"Unrecognized key(s) on `tenancy`\"承载，解释句照常收尾（全消息钉）。\n\n七个 #6453 全消息变体中，处方文本本身逐字节保留；变的只是装配（bullet 化）与新增的修复通道。\n\n## `objectUnknownKeyErrorImpl` 惰性构建的处置\n\n#5593 已经在 `object.zod.ts` 里用**声明顺序**替代了 TDZ 惰性构建（`UNKNOWN_KEY_GUIDANCE` 上移到 `ObjectSchemaBase` 之前）。本折叠照搬同一解法：`TENANCY_MODES_EXPLAINER` / `TENANCY_RETIRED_KEY_GUIDANCE` 均在 `TenancyConfigSchema` 之前声明，无新增惰性表；`OS_EAGER_SCHEMAS=1` 全量构建（`check:generated` → `gen:schema`）绿。\n\n## 一处刻意**不**机械折叠：`FormFieldBaseSchema`\n\n它是 module-private base，唯一消费者 `FormFieldSchema = base.extend({fields}).strict()` 在门口关门——#4001 批 18 刻意不关 base（关了就是接受面变化，超出本卡）。因此从 `strictObject` 拆出 `strictObjectError(options, shape)`：**只**构建错误映射并注册进审计，不 `.strict()`。该点位保持字面 `z.object(` 拼写，strictness ledger 的 AST 读数器继续看得见它（`ui/view.zod.ts` 的 strip 计数 3 不动，counts 工件零再生）；`extraKeys: ['fields']` 补上扩展层声明的键，`feilds` → `fields` 的建议因此可用。\n\n## 接受面\n\n**逐字节不变**——所有 schema 接受/拒绝的输入集合与折叠前完全一致（探针矩阵 32 个用例逐一比对；变的只有消息文本）。`strictObject` 的公共行为由既有测试全量回归。\n\n## 公开导出面（`./shared`，`gen:api-surface` 已再生）\n\n- 移除：`strictVisibilityError (const)`（手写映射，本卡的删除对象）\n- 新增：`VISIBILITY_STRICT_OPTIONS (const)`、`KeySetGuidance (interface)`、`keySetMatches (function)`、`strictObjectError`（经 `strict-object.ts`，不在 `./shared` barrel）\n\n## 验证\n\n- `pnpm --filter @objectstack/spec test`：**346 文件 / 8877 用例全绿**（合并 `origin/main` @ `9b86cf696`，含 #6631 后复跑）\n- `pnpm --filter @objectstack/spec typecheck`：绿（test-typecheck 债务台账 58 文件 / 266 错，未新增）\n- `pnpm check:generated`：10 个生成工件全部最新（含 `check:api-surface`、`check:strictness-ledger`、eager schemas）\n- `check:exported-any` / `check:dual-source-exports`：绿\n- `node scripts/check-type-check-coverage.mjs --re-measure`（先 turbo 全量 build 闭包）：34 条台账复测，无一超上限\n- `node scripts/check-nul-bytes.mjs`：绿\n- 反向验证：移除 widget `guidanceSets` → 8 红（方向符合预测），恢复全绿\n\n## 消费半径清扫\n\n按 #5046 的教训沿规则消费半径清扫：spec 之外（packages/、apps/、examples/）对三个旧符号名与全部旧消息字节的引用为**零**（唯一命中是 spec 自身注释与 ledger 证据行，均已更新）。changeset：`.changeset/fold-unrecognized-key-error-maps.md`（patch）。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_018ffcE95NaMJcL9XJ9VDYgk\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_018ffcE95NaMJcL9XJ9VDYgk)_"
+}

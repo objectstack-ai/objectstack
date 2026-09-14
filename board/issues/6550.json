@@ -1,0 +1,36 @@
+{
+  "number": 6550,
+  "kind": "issue",
+  "title": "ai.manifest temperature declares `step: 0.1` — now that the grid binds (#6199), decide whether the declaration itself is product-correct",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T04:06:14Z",
+  "updated_at": "2026-08-08T09:01:09Z",
+  "closed_at": "2026-08-08T09:01:09Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6550",
+  "body": "Follow-up from #6199 / PR #6501, filed by the services seat (session `session_01USNUyHEr7uaU6MoEWXitei`). The gate is correct and landed; this card is about the one real declaration it now binds.\n\n## Situation\n\n`packages/services/service-settings/src/manifests/ai.manifest.ts` declares on `temperature`: `min: 0, max: 2, step: 0.1`. Before PR #6501 the `step` key was decorative (zero read points anywhere in this repo or `objectui` — measured in that PR). Now it binds: `PUT /api/settings/ai` with `temperature: 0.15` is rejected with `invalid_value` (`constraint: { step: 0.1, min: 0 }`), and `OS_AI_TEMPERATURE=0.15` is ignored with a loud error.\n\nThat consequence was accepted at ruling time (declared = enforced; the dev deliberately did not touch the manifest to dodge it — see the \"known consequence\" section of PR #6501). What was never decided — because until enforcement existed nobody had to have an opinion — is whether the declaration says what the manifest owner means.\n\n## The question\n\nIs `step: 0.1` on `temperature` a legality claim (only 21 values between 0 and 2 are valid) or a slider increment that got written into a slot that now has teeth?\n\nEvidence pointing at \"slider increment, not legality claim\":\n\n- `0.15` is a legitimate sampling temperature for every provider behind this setting; no provider constrains temperature to a 0.1 grid.\n- No UI consumer of `step` exists (measured in PR #6501: nothing in this repo or `objectui` reads it), so the declared grid currently serves no rendering purpose either — its only observable effect is rejecting values like `0.15`.\n\n## Options\n\n- **A — keep `step: 0.1`.** The declaration binds as written; an admin who wants `0.15` is asking for a finer grid, which is a manifest change when that need is real.\n- **B — drop `step` from `temperature`** (or declare `step: 0.01`), keeping `min: 0, max: 2`. The gate then enforces exactly what is meant and `0.15` stays legal.\n\nThe #6199 dev's recommendation was B (drop or refine), explicitly deferred out of that PR's scope. Either way the change is one manifest line plus a test adjustment (`settings-service.test.ts` pins the current 0.1-grid consequence on the real ai manifest — the pin would move with the declaration, not be deleted).\n\nRefs: #6199, PR #6501, #5932 / PR #6201 (the family ruling that declared bounds bind), #6514 (the data-field `step` twin, separate schema/validator)."
+}

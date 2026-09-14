@@ -1,0 +1,34 @@
+{
+  "number": 6607,
+  "kind": "pull_request",
+  "title": "test(metadata): pin the writable-loader half of register()'s announcement ordering (#6548)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "size/m",
+    "skip-changeset",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T06:55:33Z",
+  "updated_at": "2026-08-08T07:26:19Z",
+  "closed_at": "2026-08-08T07:26:18Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": "2026-08-08T07:26:18Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/6607",
+  "body": "Fixes objectstack-ai/objectstack#6548\n\n## What the gap was\n\n`register()` documents its announcement ordering as covering **two** writes:\n\n> Announce last, once the write has landed in the registry and every writable loader — a subscriber that re-reads on the event must not race ahead of the data it is meant to observe.\n\nAfter #6043 / PR #6547 the **registry** half was pinned properly — synchronously, inside the watcher callback, at broadcast time. The **writable-loader** half was pinned nowhere, and could not be pinned from this file as it stood: its only loader is a `MemoryLoader` declaring `protocol: 'memory:'`, `register()`'s persistence loop `continue`s on anything that is not a writable `datasource:` loader, so no loader in the file was ever written to. Hoisting the whole `notifyWatchers(...)` block above the save loop — a violation of the declared ordering — left every case green.\n\nRoute taken: **pin the loader half** (the triage direction's default). Nothing was narrowed; the comment on `register()` is unchanged and is now enforced as written.\n\n## What this PR adds\n\n`packages/metadata/src/register-notifies-watchers.test.ts` only — no source change.\n\nA writable `datasource:` fixture backed by a real store (`StoreLoader`, donor shape from `metadata-manager-unregister-invalidate-order.test.ts`, trimmed to the write path) plus a `Gate`, and five cases that peek **that store, synchronously, inside the watcher callback** — the same instant #6043 used for the registry:\n\n1. the loader's store already holds the new body at broadcast time;\n2. the same on an **overwrite**, so the failure is readable (`V1` where `V2` was required) rather than an ambiguous `undefined`;\n3. **every** writable loader, not merely the first — two stores, both asserted, which is what catches an announcement moved *inside* the save loop;\n4. a loader save still **in flight** holds the announcement back: one store parked mid-save, and the window must broadcast nothing;\n5. `{ notify: false }` still suppresses the announcement while the loader write still lands.\n\n`save()` awaits before it seeds on purpose: a real store write is async, so the hop is what lets a synchronous peek see a `register()` that fired the save without awaiting it. It still lands the row before it resolves, so with the gate open every assertion is deterministic rather than timed.\n\n## Reverse verification — direction predicted BEFORE running\n\nPrediction recorded before the experiment: hoisting `notifyWatchers(...)` above the realtime publish and the save loop (leaving the registry write in place — the exact hoist the issue measured as invisible) must turn **4 of the 5 new cases RED**, and must leave all 17 pre-existing cases green, including #6547's registry-half four. Case 5 asserts *silence*, so it stays green under the hoist by construction.\n\nMeasured, exactly that:\n\n```\n FAIL  ... > #6548 ... > the loader store already holds the new body at broadcast time\nAssertionError: expected false to be true // Object.is equality\n FAIL  ... > #6548 ... > on an OVERWRITE too — never with the pre-write row still in the store\nAssertionError: expected { name: 'account', label: 'V1' } to deeply equal { name: 'account', label: 'V2' }\n FAIL  ... > #6548 ... > EVERY writable loader, not merely the first — both stores hold it at broadcast time\nAssertionError: expected { a: undefined, b: undefined } to deeply equal { a: { name: 'account', …(1) }, …(1) }\n FAIL  ... > #6548 ... > a loader save still IN FLIGHT holds the announcement back — the save window broadcasts nothing\nAssertionError: expected [ { type: 'added', …(5) } ] to have a length of +0 but got 1\n\n      Tests  4 failed | 18 passed (22)\n```\n\nThe sabotage was reverted before committing; the diff is one test file (`git diff --stat origin/main` = `1 file changed`).\n\n## Tests\n\n```\npnpm --filter @objectstack/metadata exec vitest run src/register-notifies-watchers.test.ts\n  Test Files  1 passed (1)\n       Tests  22 passed (22)          # 17 on origin/main + 5 new\n\npnpm --filter @objectstack/metadata test\n  Test Files  27 passed (27)\n       Tests  546 passed (546)\n```\n\n## Type-check debt — measured, and paid to zero\n\n`@objectstack/metadata` has no `typecheck` script; it carries a frozen DEBT entry (#4311). As first written the five cases added **3 raw tsc errors** to it: 1 `TS2835` from an extensionless `./loaders/loader-interface` import, and 2 `TS7006` cascading from the file's unresolved `./metadata-manager` import. Spelling the new import with `.js` and annotating the two watcher callbacks with `MetadataWatchEvent` restores the origin/main composition byte for byte — **2 × TS2835 + 14 × TS7006, identical before and after** — so the pin adds no debt. The `.js` also makes `implements MetadataLoader` on the fixture an actual check instead of a comment over an `any`. The two pre-existing extensionless imports are left alone; they belong to the ledger, not to this PR.\n\n## Gates\n\nEvery `check:*` step enumerated from `.github/workflows/lint.yml` (not from memory) was run one by one — 30 in the ESLint job, then the TypeScript job's — all PASS, plus:\n\n- `pnpm lint` — clean\n- `pnpm check:type-check-coverage` — OK\n- `pnpm check:type-check-debt` — OK, \"none above its recorded number\" (metadata: DEBT records 92, tsc reports 91)\n- `turbo run typecheck --filter='./packages/*' --filter='./packages/*/*' --filter='./apps/*'` — 120/120 successful\n- `pnpm check:engine-double-contract` — PASS; the fixture's `delete(type, name)` is a `MetadataLoader` delete, not an ObjectQL engine double, so it is out of that gate's scan scope (no `packages/metadata/` entry in its baseline, same as the donor)\n- `node scripts/check-nul-bytes.mjs` — OK, plus a self-scan of the changed file for the wider control-byte range\n\n## Changeset\n\nNone: tests only, nothing user-visible is released. The PM applies the `skip-changeset` label at acceptance.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01KDU3qAuJyajAQm3GkUXdfA)_"
+}

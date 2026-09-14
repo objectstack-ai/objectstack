@@ -1,0 +1,36 @@
+{
+  "number": 6577,
+  "kind": "issue",
+  "title": "[drivers] `InMemoryDriver.find` applies `limit` on truthiness, so `limit: 0` returns every row — the #6485 defect one layer below the client",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched",
+    "pm:queue",
+    "target:v17"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T05:46:50Z",
+  "updated_at": "2026-08-08T18:34:58Z",
+  "closed_at": "2026-08-08T18:34:58Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6577",
+  "body": "Found while implementing #6485 (PR to follow). Out of that issue's scope — its file surface was `packages/client/src/index.ts` only — so filed rather than fixed, per Prime Directive #10.\n\n## Fact (measured on `origin/main` @ `53ef05744`, not read)\n\n#6485's ruling was that `limit: 0` means \"return no records\", and it required establishing that the server honours `top=0` before shipping the client change. Measuring that turned up a driver that does not.\n\nProbe run against each driver's real `find`, three rows in the table:\n\n```\nPROBE sql-driver    => {\"limit0_rows\":0,\"limit2_rows\":2,\"noLimit_rows\":3,\"offset0_rows\":3}\nPROBE memory-driver => {\"limit0_rows\":3,\"limit2_rows\":2,\"noLimit_rows\":3}\n```\n\n`SqlDriver` returns **0** rows for `limit: 0`. `InMemoryDriver` returns **3 of 3** — the entire table, for a query that asked for none.\n\nThe cause is the same truthiness-vs-presence asymmetry #6485 named, one layer down:\n\n- `packages/drivers/driver-memory/src/memory-driver.ts:315` — `if (query.limit) { results = results.slice(0, query.limit); }`\n- versus `packages/drivers/driver-sql/src/sql-driver.ts:2773` — `if (query.limit !== undefined) b.limit(query.limit);`\n- and `packages/drivers/driver-turso/src/remote-transport.ts:1472` — `if (query.limit !== undefined)`, also presence.\n\nSo two shipped drivers answer the same `QueryAST` with opposite result sets, and the one that disagrees is the one that returns **more** data than was requested rather than less.\n\n## Same shape, three more sites (unmeasured, listed by inspection)\n\nNot probed, so stated as located rather than confirmed:\n\n- `packages/drivers/driver-sql/src/sql-driver.ts:3871` — `findWithWindowFunctions`, `if (query.limit) builder.limit(query.limit)`. Truthiness, while `findRows` in the same file uses presence — so this driver disagrees with **itself** across two read doors.\n- `packages/drivers/driver-sql/src/sql-driver.ts:3911` — `analyzeQuery` / `explain`, same shape. A plan explained for a statement other than the one `find` would run.\n- `packages/drivers/driver-memory/src/memory-analytics.ts:434` and `:598` — the `$limit` pipeline stage and the SQL string builder, both truthiness.\n\n## One that is NOT this bug, and should not be \"fixed\" into one\n\n`MongoDBDriver` (`packages/drivers/driver-mongodb/src/mongodb-driver.ts:231`) already tests presence — `if (query.limit !== undefined) findOptions.limit = query.limit;` — but the MongoDB Node driver defines `limit: 0` as *no limit*, so it returns every row too, for an unrelated reason. Aligning it needs a deliberate guard at that boundary, not the same edit. Worth a decision rather than a patch.\n\n## Why this is user-reachable now rather than theoretical\n\nBefore #6485 the client dropped `limit: 0` on the floor, so no `top=0` ever left the SDK and the divergence was unobservable through it. With that fixed, `find('task', { limit: 0 })` puts `top=0` on the wire, the protocol layer forwards `limit: 0` to the engine (measured: `findData` neither rejects nor ignores it), and the answer now depends on which driver the deployment configured — zero rows on SQL/Turso, every row on memory.\n\nBlocked-by: nothing; independent of #6485's PR, which is correct as it stands for the SQL/Turso path.\n\n## Not graded here\n\nSeverity judged at filing time is unreliable in both directions, so this is filed plainly and unassigned for the triage round. The two questions the grader will want: whether `InMemoryDriver` counts as a production surface (it backs `LiteKernel`, edge/serverless and most of the test suite), and whether the driver contract should state `limit: 0` explicitly so the conformance suite can pin it — `check:driver-conformance` exists and passes today with the two drivers disagreeing."
+}

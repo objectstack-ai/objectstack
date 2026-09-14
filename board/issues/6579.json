@@ -1,0 +1,36 @@
+{
+  "number": 6579,
+  "kind": "issue",
+  "title": "company.country 仍是 #5712 同一洞的第四例:`^[A-Za-z]{2}$` 收下 `ZZ`,而 `iso_3166_alpha2` 域执行已在库",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T05:48:30Z",
+  "updated_at": "2026-08-08T07:42:54Z",
+  "closed_at": "2026-08-08T07:42:54Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6579",
+  "body": "在 #5712(services 半边落地)收尾时按 Prime Directive #10 立案。**不在 #5712 的完成范围内**——该单正文只点名 `localization` 命名空间;`company.country` 是 #6515 前提复核里点名的「四键两 manifest」中唯一未采纳的一键。\n\n## 事实(origin/main,`company.manifest.ts:54-58`)\n\n```\ntype: 'text', key: 'country', label: 'Country', required: false,\ndescription: 'ISO 3166-1 alpha-2 code (e.g. US, GB, CN).',\npattern: '^[A-Za-z]{2}$', minLength: 2, maxLength: 2,\n```\n\n`pattern` 只约束形状:`ZZ`(未分配)、`UK`(CLDR 别名,非 ISO 3166-1 码)均通过写入门;env 门(`OS_COMPANY_COUNTRY`)因 pattern 不在 env 侧执行(另立单)更宽。description 承诺 ISO 3166-1,执行面不兑现——正是 #5712 裁决所指的形状。\n\n## 修法(一行 + 测试)\n\n#5712 的 services PR 之后,`service-settings` 已带 `iso_3166_alpha2` 的执行(显式 249 码表,两扇门共判,`invalid_value` + `constraint: { valueDomain }`)。本单只需:\n\n1. `company.manifest.ts` 的 `country` specifier 加 `valueDomain: 'iso_3166_alpha2'`(`pattern` 保留,形状裁决仍先说话);\n2. 补 manifest 测试(声明存在 + `ZZ`/`UK` 拒、`CH` 收)。\n\n注意与 #5712 相同的收紧:域成员按标准大写精确匹配,小写 `us` 从「pattern 收」变「域拒」。`company.country` 在库内无运行时读者(与 `localization.default_country` 同),风险同级。\n\nBlocked-by: #5712(需其 PR 合入后 `valueDomain` 执行才在库)"
+}

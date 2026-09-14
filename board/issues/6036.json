@@ -1,0 +1,35 @@
+{
+  "number": 6036,
+  "kind": "issue",
+  "title": "`sys_setting.scope` 声明了 `runtime` 选项,但 spec 枚举与 SettingsService 都不认它",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T15:21:52Z",
+  "updated_at": "2026-08-08T13:57:34Z",
+  "closed_at": "2026-08-08T13:40:22Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6036",
+  "body": "观察类发现,#5888 取证途中顺带测到,**不在该 issue 的申报文件面内**,故单独登记不随 PR #6031 修改。\n\n## 事实(origin/main @ `dd98cba`)\n\n`packages/platform-objects/src/system/sys-setting.object.ts:127` 给 `scope` 字段声明了四个选项:\n\n```\n{ label: 'Global',  value: 'global'  },\n{ label: 'Tenant',  value: 'tenant'  },\n{ label: 'User',    value: 'user'    },\n{ label: 'Runtime', value: 'runtime' },\n```\n\n但另外两处只认三个:\n\n- `packages/spec/src/system/settings-manifest.zod.ts:132`\n  `export const SpecifierScopeSchema = z.enum(['global', 'tenant', 'user']);`\n- `SettingsService` 全包对 `'runtime'` **零命中**\n  (`grep -rn \"'runtime'\" packages/services/service-settings/src/` = 0)。\n  `get()` 的 cascade 只走 env → global → tenant → user → default;\n  `setMany()` 的 scope 取自 `reg.scopes.get(key)`,而它来自 manifest,\n  值域就是上面那个三元枚举 —— 没有任何代码路径能写出一行 `scope='runtime'`。\n\n同一文件顶部的注释也只列了五层 resolution order,不含 runtime。\n\n## 为什么按 observation-class 登记(`finding`,不带 `pm:queue`)\n\n今天没有用户能撞到:`sys_setting` 的 `apiMethods` 只有 `['get', 'list']`,\nSetup 里那张栅格是 diagnostic-only,写入一律走 `/api/settings/:namespace`,\n所以这个选项既写不进去也读不出来 —— 它是**休眠的声明**,不是活的缺陷。\n\n登记而不是放过,是因为它正好是 ADR-0049「declared ≠ enforced」那一类:\n一个声明出来、没有任何实现兑现的值域,后来者读 object 定义时会当成平台支持\n第四层 scope。#5888 那页文档写「六层 cascade、含 runtime 层」,很可能就是\n从这里(或同一个早期设想)抄下去的 —— 已在 PR #6031 中按五层改正。\n\n## 两种可能的处置(交 PM 分诊,不预判)\n\n1. 选项从未落地 ⇒ 删掉 `{ label: 'Runtime', value: 'runtime' }`,让 object 的\n   值域与 `SpecifierScopeSchema` 一致(两边本就该是同一个真相);\n2. 确有 runtime-scope 的产品意图 ⇒ 那它缺的是实现,应按 enforce-or-remove\n   单独立项,而不是继续以裸声明的形式挂在 object 上。\n\n个人倾向 1:创业阶段聚焦原则下,一个零消费者、零写入路径的值域没有业务拉力。"
+}

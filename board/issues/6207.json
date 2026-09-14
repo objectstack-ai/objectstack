@@ -1,0 +1,34 @@
+{
+  "number": 6207,
+  "kind": "issue",
+  "title": "[finding] MCP enable_pr_auto_merge 对已全绿(clean)PR 只武装不入队且返回空字段 —— 三例实测 + 可靠检测签名 + 处方,建议固化进 pm-dispatch 运维注记",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:queue",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T10:55:56Z",
+  "updated_at": "2026-08-08T14:10:54Z",
+  "closed_at": "2026-08-08T14:10:54Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6207",
+  "body": "发现于 identity 车道 PM 循环(`session_01JwwiU9bjhwy2SWj13ho8uv`,2026-08-06/07),三例实测,记录为 finding(工具行为在平台侧,仓内可做的是把检测签名与处方固化进 `.claude/skills/pm-dispatch/SKILL.md` 的 Operational notes,防每个新 PM 会话重踩)。\n\n## 现象\n\n对 **checks 已全绿、`mergeable_state: clean`** 的 PR 调用 `mcp__github__enable_pr_auto_merge`:\n\n- 返回值为**空字段形态**:`method: , enabled at `(对照正常形态 `method: MERGE, enabled at <时间戳>`);\n- auto-merge **被武装**(后续 disable 成功返回,反证武装生效);\n- 但 PR **不会自动入队**,无 `added_to_merge_queue` 事件,无限期停在「绿后等待入队」。\n\n对 **checks 尚在跑(`blocked`)** 的 PR 调用同一工具:返回完整字段,行为正常(绿后自动入队)。\n\n## 三例(全部同会话一手实测)\n\n| PR | 空字段 enable | 处方生效 |\n|---|---|---|\n| #6034 | 08-06 22:34Z(武装未入队 ~1h)| 23:35Z disable→enable 翻转 → 入队 → 队首 → 00:03Z 前落地 |\n| #6092 | 08-07 ~01:05Z | 当场翻转 → `pr-6092` 队列分支确认 → 落地 |\n| #6197 | 08-07 ~10:45Z | 当场翻转 → `pr-6197` 队列分支确认 → 10:5xZ 落地 |\n\n对照组(blocked 状态 enable,完整字段、零问题):#6086(20:00:29Z)、#6067(20:04:44Z)、#6107(02:21:25Z)。\n\n## 检测签名与处方(已三次实证)\n\n- **签名**:enable 返回空字段 ⇒ 大概率武装未入队;辅助判据 = 队列分支(`git ls-remote --heads origin 'refs/heads/gh-readonly-queue/*'`)无 `pr-<n>`(注意 max_entries_to_build 截断,分支缺席单独不充分,SKILL note 1 两读数照旧)。\n- **处方**:`disable_pr_auto_merge` → `enable_pr_auto_merge` 翻转一次,随后以队列分支出现为准验证。三例三中。\n- **代价参照**:#6034 首例在识别出签名之前静默停摆约 1 小时(叠加当日队列停滞共 ~6h)。\n\n## 建议(不预设归属,交分诊)\n\n1. 把「空字段签名 + 翻转处方」补进 pm-dispatch SKILL 的 Operational notes(devx/docs 面,XS);\n2. 如条件允许向 GitHub MCP server 上游报告(clean PR 的 enablePullRequestAutoMerge 走了 graceful-failure 分支但未转 enqueue)。"
+}

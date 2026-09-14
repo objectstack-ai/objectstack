@@ -1,0 +1,36 @@
+{
+  "number": 6381,
+  "kind": "issue",
+  "title": "lint: 视图容器阶梯遍历在 packages/lint 内已有三份实现,彼此按不同判据取舍",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T15:49:17Z",
+  "updated_at": "2026-08-08T09:26:53Z",
+  "closed_at": "2026-08-08T09:26:53Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6381",
+  "body": "Filed unassigned from #6251 / PR(见下)。**本单只记录发现,不含修法承诺。** 观察类:今天没有任何用户会踩到它,三份实现在「可能装 section 的每一级」上结论一致 —— 记下来是因为它们各自按不同判据取舍,而这类分歧的成本是**下一次**有人只改其中一份。\n\n## 事实\n\n`packages/lint/src/` 里「从一个 `views[]` 条目下降到它真正的表单/视图站点」这套遍历,现在有三份各自独立的实现:\n\n| 实现 | 位置 | 走的阶梯 |\n| --- | --- | --- |\n| `formViewSites` | `validate-visibility-predicates.ts`（PR #6248 落地） | 自身 + `form` + `formViews.*` |\n| `collectViewSites` | `validate-translatable-sections.ts` | 自身 + `form.sections` + `listViews.*.sections` + `formViews.*.sections` |\n| `formViewSites`（同名,独立副本） | `validate-form-layout.ts`（PR for #6251,照抄第一份并加了绑定继承） | 自身 + `form` + `formViews.*` |\n\n另有第四处形状相近但职责不同的 `collectViewRecord`（`validate-translation-references.ts`），以及 `lint-view-refs.ts` 走的是 spec 官方的 `expandViewContainerWithDiagnostics`。\n\n## 已知的一处判据分歧（当前无害）\n\n第二份额外走 `listViews.*.sections`。按 schema，`ObjectListViewSchema = ListViewSchema.omit({ userFilters }).extend(…)` 不声明 `sections`，所以那一级只可能读到 `undefined`；spec 的 `expandViewContainerWithDiagnostics` 也把 `list` / `listViews.*` 划为 list 族。即：**当前三份结论等价**，分歧只体现为一级读不到东西的多余下降。\n\n绑定解析也是三套写法：`objectName → object → data.object`（两份）、`name → id → object → list.data.object → form.data.object`（`lint-view-refs.ts`，因为它要的是**对象名**而非表单绑定）。后者的差异是有理由的，不是漂移。\n\n## 为什么现在不动\n\n合并这三份必然要改 `validate-visibility-predicates.ts` —— #6248 刚验收的面；而只为一份新建 helper 文件会把三份变四份。属于「等第三个消费者出现，或等一次可以一并动这几个文件的窗口」的整理，不该由某个具体缺陷单顺手做。\n\n## 值得关注的信号\n\n这条遍历已经**连续两单**在两个不同文件里被发现是错的（#6128 / PR #6248，然后 #6251）。每次都是「只读容器自身键」这同一个错法。复制正确实现是当下最省的做法，但复制次数本身就是这条阶梯该有一个单一来源的证据。\n\nRefs：#6251（本次发现处）、#6128 / PR #6248（同族前一例）、#4984 / #5009（幽灵检查族）。\n"
+}

@@ -1,0 +1,34 @@
+{
+  "number": 6790,
+  "kind": "pull_request",
+  "title": "fix(plugins): sweep the plugin composition roots' slot lookups — 35 sites typed, two alias-only HTTP reads fixed (#4251 B5)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T17:43:49Z",
+  "updated_at": "2026-08-09T00:36:52Z",
+  "closed_at": "2026-08-09T00:36:51Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": "2026-08-09T00:36:51Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/6790",
+  "body": "Batch **B5** of the #4251 sweep: the seven remaining `packages/plugins/*` composition roots. Every service-lookup result that had been erased to `any` now carries the slot's contract, so the compiler checks what each plugin actually calls on the service it resolved.\n\n**Ratchet: 143 sites / 32 files → 108 / 25.** All seven files leave the baseline entirely; no keys added.\n\n## Two real defects, both the shape this sweep exists to surface\n\nApprovals' ADR-0043 action-link pages and sharing's public share-link REST routes each read the HTTP server under **`http-server` only — the deprecated alias**. The ledger records `http.server` as canonical *and* as the only name present on every provider path: `runtime.ts`'s `config.server` path registers no alias at all.\n\nOn that path both lookups threw, the surrounding `catch` swallowed it, and the routes **silently never mounted** — approval e-mail action links 404'd and the share-link surface was absent, with nothing in the log to say so. This is the same latent alias-only miss #4393 fixed in metadata and cloud-connection, and the same one still recorded as open on the cloud side.\n\nBoth reads are now canonical-first with the alias as fallback, **each name in its own `try`** — `getService` *throws* on an empty slot, so `a() ?? b()` inside one `try` never reaches `b`. That is exactly the trap #4393 documented after CI caught it.\n\n## Typing follows the B2/B3 method\n\n| Site class | Choice |\n|---|---|\n| Pure data-plane consumer | the narrow contract — `IDataEngine` in reports, whose `ReportEngine` is find/findOne/insert/update/delete only |\n| Binds hook / middleware seams | the engine **seen whole** — `IObjectQLEngine` in approvals, sharing, pinyin-search, which is what the `objectql` slot's ledger entry describes (\"the SAME instance as `data`, seen whole\") |\n| Slot has no contract | a **named** local surface, never `any` |\n\nNamed surfaces used: plugin-email's new `MailSettingsSurface` (the four members it calls on the optional `service-settings`, change-bus types taken from `@objectstack/spec/system` rather than re-declared), plus the surfaces the consuming packages *already* declared — `ApprovalMessagingSurface`, `SharingSecurityProbe`, `ReportEmail`.\n\nOne slot turned out to be better off than assumed: **`hierarchy-scope-resolver` has a real spec contract** (`IHierarchyScopeResolver`), already required by the option it feeds. It takes that, not a local surface.\n\n`plugin-pinyin-search` reads `IObjectQLEngine` through the `@objectstack/core` barrel, which re-exports it — a slot's contract is not a reason to add a `@objectstack/spec` dependency to a package that has none.\n\n## Scope\n\n- **Out of scope, deliberately:** `plugin-approvals/src/status-mirror-cascade.integration.test.ts` (3 sites) sits inside `plugin-*/src/**` but is a **test file**, which the batch table assigns to **B11**. Left in the baseline.\n- **No rule changes. No contract changes.** The batch's site count came in at 35 rather than the 26 last recorded, because 9 of them are the #4373 fourth shape (`let engine: any;` split declaration) firing on the same lines as the type-argument shape — the same double-count B4 recorded for `env-registry`.\n\n## Verification\n\nFull `turbo run build --filter='./packages/*'` ran **before** the ratchet re-count, so the count is not measured against stale `dist`.\n\n- `turbo run typecheck test build` over the seven packages + deps — **42/42 tasks green** (446 approvals tests among them)\n- `pnpm lint` (`eslint . --no-inline-config`) — clean\n- `pnpm check:slot-lookup` enforcing — `✓ 108 unswept site(s) in 25 file(s), none new`, key set verified against `64d764e`, no files added\n- Repo gates run green rather than assumed: `check:query-options-erasure`, `check:verify-stand-in`, `check:service-providers`, `check:engine-double-contract`, `check:init-service-contract`, `check:durability-log-level`, `check:kernel-hook-pairs`, `check:authz-resolver`, `check:startup-registry-verdict`, `check:type-check-coverage`, `check:empty-changeset`\n\nChangeset included (touches published package source).\n\n⛔ **This PR does not close #4251** — B6–B11 remain, plus the cloud-side alias readers and the `MetadataWatchEvent` dual source (#4411).\n\nPart of #4251\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01PymBLAXECPWmZz3ZPcADR7)_"
+}

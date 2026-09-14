@@ -1,0 +1,34 @@
+{
+  "number": 5950,
+  "kind": "issue",
+  "title": "读侧的 ADR-0008 OCC 载体没有契约:`GET /meta/:type/:name` 非缓存分支发 `lock`/`lockReason`/`lockSource`,`GetMetaItemResponseSchema` 只声明 `{type,name,item}`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:queue",
+    "target:v17"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T12:46:22Z",
+  "updated_at": "2026-08-08T09:45:49Z",
+  "closed_at": "2026-08-08T09:45:48Z",
+  "closed_by": {
+    "login": "qq9340100",
+    "id": 313832657,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5950",
+  "body": "在 #5545(给 `client.meta.getItem` 补返回类型注解)里测绘到。写侧的同一问题已由 #5745 修掉(`SaveMetaItemResponseSchema` 曾是真实 body 的真子集,`version`/`seq`/`state` 被抹);读侧还留着一个没人收的同形缺口。\n\n## 事实(基线 `origin/main` @ `a6b3ee7a1`)\n\n**spec 声明**(`packages/spec/src/api/protocol.zod.ts:234`)只有三个键:\n\n```ts\nexport const GetMetaItemResponseSchema = lazySchema(() => z.object({\n  type: z.string(), name: z.string(), item: z.unknown(),\n}));\n```\n\n**生产端**(`packages/metadata-protocol/src/protocol.ts` `getMetaItem`,主 return 在 :3733 附近)发的是超集:\n\n```ts\nreturn {\n    type: request.type,\n    name: request.name,\n    item: decorated,\n    lock: lockState.lock,\n    ...(lockState.lockReason !== undefined ? { lockReason: lockState.lockReason } : {}),\n    ...(lockState.lockSource !== undefined ? { lockSource: lockState.lockSource } : {}),\n```\n\nREST 侧 `translateMetaEnvelope`(`packages/rest/src/rest-server.ts:2714`)`...envelope` 原样铺开,所以这三个键会到线上。而 #5563 收敛后的**缓存分支**(默认 `enableCache: true`)重建的信封只有 `{ type, name }` + `item`,代码注释里写明是有意的:\n\n> `rest-server.ts:4278` — \"The cached read carries no `lock` — it is the fast published-value path and never consulted the lock resolver; a caller that needs the ADR-0008 OCC carriers reads the uncached path.\"\n\n## 为什么这是个缺口\n\n#5563 把**文档**的形状在两条分支上收敛了,但 OCC 载体没有:`lock` 是否出现仍由服务端 `enableCache` 决定,且这件事在 spec 里一个字也没有。于是\n\n- SDK 调用方(#5545 之后 `meta.getItem` 标 `Promise< GetMetaItemResponse >`)在类型上看不到 `lock`,要读只能 cast —— 正是本仓一贯反对的消费端宽容;\n- 「读回 lock → 写时带 `If-Match`」这条 ADR-0008 链路,写侧有契约(#5745 补的 `version`),读侧没有;\n- 一个只在某种服务端配置下出现的键,是 #5563 那类「配置决定契约」的残留。\n\n## 处置(建议,待分诊)\n\n在 `GetMetaItemResponseSchema` 上把三个键声明为 **optional**,并在 describe 里写清「仅非缓存读路径提供;缓存读路径不解析锁」——这与 #5745 的做法一致(先实测哪些必选、哪些条件出现,再照实声明),且不改任何运行时行为。若认为「配置决定字段有无」本身才是要修的,那是更大的一步,应单独定案。\n\n关联:#5545(测绘出处)、#5563(读路由形状收敛)、#5745(写侧同形缺口,已修)、ADR-0008。"
+}

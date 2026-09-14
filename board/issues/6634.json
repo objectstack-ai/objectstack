@@ -1,0 +1,36 @@
+{
+  "number": 6634,
+  "kind": "issue",
+  "title": "[finding] ADR-0079 is cited ~30 times repo-wide (14× in packages/spec) but no docs/adr/ file exists — dangling pointer, neighbours 0076–0078 and 0080–0082 all present",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T07:50:49Z",
+  "updated_at": "2026-08-08T14:38:58Z",
+  "closed_at": "2026-08-08T14:38:57Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6634",
+  "body": "Observation-class finding from the 2026-08-08 spec text-surface truth-sweep (audited at `objectstack` main `1f65bfc39`). Filed unassigned for triage; no labels applied. Likely lands in the docs/ADR seat's territory — triage decides.\n\n## The fact\n\n- ADR-0079 is cited by roughly **30 files repo-wide**, 14 of them inside `packages/spec`, as the authority for the behavior they implement or describe.\n- `docs/adr/` contains **no ADR-0079 file**. The gap is not an off-by-one numbering artifact: 0076, 0077, 0078, 0080, 0081, 0082 all exist.\n- The audit's mechanical pass checked all 95 distinct ADR numbers cited in spec against `docs/adr/` — 0079 is the only dangling one.\n\n## Why it was NOT filed as a truth defect (and what it is instead)\n\nThe sweep's filing bar requires that a reader acting on the text would do something wrong. Measured: the *content* the citing sites attribute to ADR-0079 matches the implementation — the statements are true, only their pointer is dead. So nothing misleads today; what is lost is the decision record itself: a reader following the citation to understand *why* finds nothing, and the number is effectively squatted (a future unrelated ADR-0079 would retroactively falsify 30 citations).\n\nRelated discipline: `check:adr-anchors` exists and is green, so whatever it validates does not cover citation-target existence for this case — worth one look at whether that gate's scope should grow, or whether the ADR file was lost/renamed in a move (history may answer; the audit did not chase it).\n\n## Suggested directions (non-binding, one of)\n\n1. Recover/reconstruct the ADR-0079 document if it existed and was lost in a reorganization (check `git log --diff-filter=D -- docs/adr/` history).\n2. If it never existed as a file, write a retroactive stub recording the decision the 30 sites already agree on, so the pointer resolves.\n3. Extend `check:adr-anchors` (or its sibling) to assert every cited ADR number resolves to a file — this gap survived 95-number citation growth silently.\n\n## Provenance\n\nTruth-sweep audit agent, spec-surface seat session `session_018ffcE95NaMJcL9XJ9VDYgk`; the same sweep filed #6628 / #6630 / #6631. Duplicate search before filing: `ADR-0079` over open issues — zero hits."
+}

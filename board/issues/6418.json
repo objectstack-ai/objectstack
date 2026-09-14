@@ -1,0 +1,35 @@
+{
+  "number": 6418,
+  "kind": "issue",
+  "title": "[metadata-protocol] ensureOverlayIndex 先 DROP 后 CREATE：partial 索引建失败时 sys_metadata 会静默地失去覆盖层唯一约束",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T17:08:53Z",
+  "updated_at": "2026-08-08T17:48:25Z",
+  "closed_at": "2026-08-08T17:28:38Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6418",
+  "body": "发现于 #5839 的实施（照该范式写 `sys_view_definition` 的同类迁移时逐行读到）。**不在 PR #6415 范围内**——那条只新增 `sys_view_definition` 的迁移，没有改动 `ensureOverlayIndex` 本身。\n\n## 事实\n\n`packages/metadata-protocol/src/protocol.ts` 的 `ensureOverlayIndex()`（约 L2519 起）顺序是「先删、后建」：\n\n```ts\ntry { await exec(\"DROP INDEX IF EXISTS idx_sys_metadata_overlay_active\"); } catch { /* best-effort */ }\nconst partialSql =\n    \"CREATE UNIQUE INDEX IF NOT EXISTS idx_sys_metadata_overlay_active \" +\n    \"ON sys_metadata (type, name, organization_id, COALESCE(package_id, '')) \" +\n    \"WHERE state = 'active'\";\nconst fallbackSql =\n    \"CREATE INDEX IF NOT EXISTS idx_sys_metadata_overlay_active \" +\n    \"ON sys_metadata (type, name, organization_id, package_id)\";\ntry {\n    await exec(partialSql);\n} catch (err: any) {\n    const msg = err instanceof Error ? err.message : String(err);\n    if (/partial|where clause|syntax/i.test(msg)) {\n        try { await exec(fallbackSql); } catch { /* ignore — non-essential optimization */ }\n    }\n    // \"already exists\" or anything else: best-effort\n}\n```\n\n两个问题叠在一起：\n\n1. **DROP 已经执行，CREATE 可能失败**——失败后没有任何把旧索引补回来的动作；\n2. **降级目标不是唯一索引**——`fallbackSql` 建的是普通复合索引（`CREATE INDEX`，非 `UNIQUE`），所以即便降级成功，覆盖层唯一性也没有了。\n\n而且降级只在错误信息匹配 `/partial|where clause|syntax/i` 时才触发：**存量行冲突**（`UNIQUE constraint failed` / `duplicate key value`）不匹配这三个词，于是走到最后那句 `// best-effort` 注释，什么都不做——此时旧索引已经被删除，新索引没建成，降级也没执行。\n\n## 后果\n\n在支持 partial index 的方言（SQLite / Postgres）上，如果 `sys_metadata` 里存在违反 `(type, name, organization_id, COALESCE(package_id,''))` 的活跃行，这次启动之后该表**一个唯一约束都不剩**，且日志里没有任何提示（catch 块全是空注释）。ADR-0005 的覆盖层唯一性是元数据正确性的基础——同一 `(type, name, org, package)` 出现两条 active 行时，`getMetaItem` 取到哪一条不确定。\n\n`idx_sys_metadata_overlay_draft` 那一段是同样的形状，同样的问题。\n\n## 触发前提（为什么今天不一定有人踩到）\n\n需要「索引建立之前就已经存在的重复活跃行」——索引一旦建成，约束本身就阻止新的重复产生。可能的来源：该索引引入之前的老库、out-of-band 建表的部署、以及从 MySQL（该索引一直没能建成）迁到 Postgres 的库。范围窄，但不是死代码路径。\n\nMySQL 上反而是安全的，不过是**偶然**的：`DROP INDEX IF EXISTS <name>` 不是合法 MySQL 语法（MySQL 要 `ALTER TABLE … DROP INDEX` 或 `DROP INDEX … ON <table>`），所以 DROP 先失败、旧索引得以幸存。安全性依赖于一条语法恰好不被接受，而不是依赖设计。\n\n## 建议修法（已有现成参照）\n\nPR #6415 给 `sys_view_definition` 写同类迁移时采用了「先探针、后替换」的顺序，可直接照搬：先用一个临时索引名把 partial 索引建一次，确证当前方言与数据都能接受，成功后才 DROP 旧索引并以正式名重建；任何建不成的情况下旧索引原样保留。见 `packages/metadata-protocol/src/migrations/view-definition-active-index.ts` 的模块头注释（\"Why it PROBES before dropping anything\"）与对应测试。\n\n冲突行的处置口径建议对齐 ADR-0120 D4 —— `SqlDriver.createNullSafeUniqueIndex` 已有先例：不阻断启动，在 `error` 级点名「哪几列没有生效」并指向 `os migrate plan`。当前实现的空 catch 是这条口径的反面。\n\n⚠️ 注意 `sys_metadata` 的降级目标**不能**简单改成全量 UNIQUE：该表合法地允许同一 `(type,name,org,package)` 同时存在一条 active 行和一条 draft 行（正是 `idx_sys_metadata_overlay_draft` 存在的原因），全量 UNIQUE 会把它们判为冲突。这也是它与 `sys_view_definition` 的关键差别——后者的全量 UNIQUE 就是今天的现状，可以安全地作为降级目标。\n"
+}

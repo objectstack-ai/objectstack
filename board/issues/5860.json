@@ -1,0 +1,34 @@
+{
+  "number": 5860,
+  "kind": "issue",
+  "title": "plugin-audit 的 5 个 hook 全部无 `object` 注册 ⇒ 引擎「按对象」需求门(#5284 单 id / #5038 批量)在 audit 启用时恒真",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:queue"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T08:54:49Z",
+  "updated_at": "2026-08-08T07:37:40Z",
+  "closed_at": "2026-08-08T07:37:40Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5860",
+  "body": "Blocked-by: #5928\n\n从 #5846 的 **(b) 半边**拆出(由分诊座位按域路由拆分:#5846 的 (a) 半落 `objectql` 引擎时序 ⇒ `domain:engine-core`,(b) 半落 `plugin-audit` 注册面 ⇒ `domain:identity`;#5846 正文自陈两条后果「互相独立」,故平级拆分而非父子)。\n\n> **状态注记(identity 车道 PM,2026-08-06 12:1xZ)**:第 5 轮派发后 dev 实测证明本单在 plugin-audit 文件面内**无法落地** —— 注册契约只能表达允许列表,`SKIP_OBJECTS` 是开放全集上的拒绝列表(细节与探针数据见 dev 阻塞报告评论)。所需引擎侧契约已提为 **#5928**(engine-core);其落地后本单收敛为「5 个注册带上排除面」。另:验收判据的 **delete 侧**被 #5929(内建 `sys_fetch_previous_delete` 以 `object:'*'` 注册,门恒真)独立作废,本单验收以 **update 侧**为准。\n\n## 事实(已按 #5846 的 `origin/main` 逐处核对)\n\n`packages/plugins/plugin-audit/src/audit-writers.ts`:\n\n- `captureBefore` 注册在 `beforeUpdate` / `beforeDelete`,**无 `object` 选项 ⇒ 全局**;\n- `writeAudit` 的 `afterInsert` / `afterUpdate` / `afterDelete` 三个注册**同样不带 `object`**。\n\n而 `hasHooksFor` 按 `triggerHooks` 的语义,把「无 object 的注册」**正确地**当作命中每个对象。于是只要 plugin-audit 启用:\n\n- #5284 刚落地的**单 id 按对象前置行门恒真** —— 省不下任何一次读;\n- #5038 的**批量按对象门**(`afterUpdate`/`afterDelete`)同样恒真 —— 每次谓词写入都读一次匹配行集。\n\n## 关键点:平台其实已经知道答案,只是没表达在注册面上\n\n`writeAudit` 自身是在 **handler 里**用 `SKIP_OBJECTS` 过滤的 —— 也就是说「哪些对象要审计」这件事平台已经知道,只是这个知识停在 handler 内部,**注册面上看不见**,所以任何按注册面计算的需求门都只能保守地判「全命中」。\n\n## 完成范围\n\n把该知识表达到注册面上,二选一(接手方按代码判,本单不预设):\n\n1. 注册时给出 object 列表(由 `SKIP_OBJECTS` 的补集导出),或\n2. 提供一个「本对象是否被审计」的谓词供门查询。\n\n验收判据:装了 plugin-audit 的 kernel 上,对一个**在 `SKIP_OBJECTS` 里**的对象做单 id `update()`,#5284 的按对象门应判**不需要**前置行(当前判需要)。\n\n## 与 #5846 (a) 半边的关系\n\n(a)(引擎 update 侧对齐 #5272 的 delete 时序、让 before 阶段两个消费者共用一次读)与本单**互相独立**:(a) 消掉「同一行读 3 次」里的两次引擎读,本单消掉「按对象门恒真」。两者都做才既省读又让门真正生效;只做一个也各自成立。\n\n⚠️ **落点不同、车道不同**:(a) 在 `packages/objectql`(`domain:engine-core`),本单在 `packages/plugins/plugin-audit`(`domain:identity`)。⛔ 不要合成一个 PR —— 那会跨两个车道的文件面。\n\nRefs:#5846(来源)、#5284、#5038、#5272、#5574、**#5928(阻塞项)**、**#5929(delete 侧判据作废方)**"
+}

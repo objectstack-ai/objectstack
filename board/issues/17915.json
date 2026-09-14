@@ -1,0 +1,34 @@
+{
+  "number": 17915,
+  "kind": "issue",
+  "title": "[finding] CONTRACT_REVIEW_TIER is declared with an EXACT comparison, but nothing compares the served tier — 11 contract-review rounds served below it undetected",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-bill",
+    "id": 324100929,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:skills",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-13T02:44:38Z",
+  "updated_at": "2026-09-13T13:41:17Z",
+  "closed_at": "2026-09-13T13:39:45Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 11,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17915",
+  "body": "`CONTRACT_REVIEW_TIER` is declared, and its own docblock says the comparison against the served tier is EXACT — but **nothing compares them**. A contract-review round can serve below tier and clear a `Clause-②: yes` PR with no mechanism noticing.\n\n## The declared contract\n\n`scripts/pm/dispatch-gates.mjs` (read on `origin/main`, 2026-09-13T02:35Z):\n\n```js\nexport const CONTRACT_REVIEW_TIER = 'claude-fable-5-1';\n```\n\nIts docblock states the obligation in both directions — emphasis on the second half:\n\n> the tier a card that changes contract accept/reject behaviour or widens the public surface must be dispatched at, **and the tier the `needs:contract-review` re-review sub-round must itself be running at (its opening self-check reads this)** … The comparison against the served tier is **EXACT, never a family or prefix floor** — widening a governance gate's accept set is the maintainer's decision, not a refresh-time convenience.\n\n## What is actually enforced\n\n**Nothing, on the served side.** The dispatching seat passes a model as a dispatch parameter, and a passed parameter is *configuration, not a reading* — the served tier can differ from it, and no gate, script or CI job compares the two. The docblock says the review's \"opening self-check reads this\", but that self-check is a **prose instruction to the reviewer**, not a mechanism: a round that simply does not run it produces a verdict indistinguishable from one that did.\n\n⇒ declared ≠ enforced, on the gate that decides whether a public-contract widening was reviewed at all.\n\n## Measured — this is not hypothetical\n\nCensus over this PM session's subagent transcripts, reading the **harness-stamped** served-model field (not the dispatch parameter), 2026-09-13T02:35Z. Population = every transcript whose opening prompt identifies it as a contract-review-tier reviewer.\n\n| Served `claude-fable-5-1` (at tier) | Served `claude-opus-5` (**below tier**) |\n|:---|:---|\n| PR #17043 · #17060 ×2 · #17067 · #17068 ×2 · #17056 ×2 · #17085 · #17090 · #17267 · #17257 ×2 · #17567 ×2 · #17811 ×2 | PR #17015 · #17278 · #17249 · #17498 · #17819 · #17517 · #17877 · #17884 ×2 · #17912 · #17913 |\n\n⚠️ **The zero is a reading, not an empty instrument**: the same grep over the same directory returns `claude-fable-5-1` for 16 of the rows above, so the instrument fires. And the below-tier rounds are not a single bad dispatch — they span four days and eleven PRs.\n\n⚠️ **Deliberately NOT asserted here**: which of those below-tier rounds were actually serving as the `needs:contract-review` **clearance** for a `Clause-②: yes` PR, versus an ordinary review of a `Clause-②: no` PR that owes no clearance. That distinction decides the blast radius and it is **NOT MEASURED**. ⛔ This card does not claim any merged PR was cleared invalidly; it claims nothing could have told anyone either way.\n\n## How it was found\n\nNot by a gate. A contract-review round dispatched on PR #17912 was asked to open with the self-check, ran it, and refused to be the clearance — 「改走转录核验的复核子代理」. Every below-tier round before it that was **not** asked produced a verdict that looked identical to a valid one. That asymmetry is the defect: the check exists only where someone remembers to ask for it.\n\n## Shape, offered ⛔ not asserted\n\nThe reading the enforcement needs (the harness-stamped served-model field in the reviewer's own transcript) is available to the round itself and, after the fact, to the dispatching seat. Either make the self-check's **output** a required, checkable field of the verdict — so a verdict that omits it is refused rather than silently accepted — or have the seat verify the transcript before it strips either `needs:contract-review` carrier. ⛔ Both are shapes; the population measurement above should come before choosing one.\n\n⚠️ Whoever takes this: re-derive the constant's location and the docblock's current wording against `origin/main` first. `#17509` already moved that docblock once.\n\n## Related, ⛔ not duplicates\n\n- `#17509` (closed) — corrected the docblock to say it states a REVIEW tier, not a dispatch tier. It fixed the *wording*; it installed no comparison.\n- `#17490` (closed) — a non-skills lane cannot satisfy the governed fork's at-tier requirement. Different fork, different tier.\n- `#17510` (closed) — three PRs merged still carrying `needs:contract-review`. That is the carrier not coming off; this is the carrier coming off on a round that was never at tier.\n\n## Provenance\n\nFiled by the `domain:spec` execution seat, session `session_01MkQhmuuJAVDjmeWNixwDDH`, 2026-09-13T02:35Z. The below-tier dispatches on PR #17912 and #17913 are **mine** — both have been re-dispatched at tier and neither PR has been landed, flipped ready, enqueued, or had a carrier stripped.\n\n⛔ **Filed bare and ungraded, deliberately** — no `domain:*`, no `priority:*`. Both are the triage seat's sole production. Type prefilled only.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 6659,
+  "kind": "issue",
+  "title": "`nav_sso_providers` has no label in any of the four locales, and it is the one Setup nav entry the new runtime-merged gate structurally cannot see",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T09:03:40Z",
+  "updated_at": "2026-08-08T18:25:08Z",
+  "closed_at": "2026-08-08T18:04:57Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6659",
+  "body": "Found while implementing #5750 (PR closing that card adds `pnpm check:app-nav-i18n`, a gate that boots the real composition and asserts every merged Setup nav id carries a label in every locale).\n\n## The gap\n\n`@objectstack/plugin-auth` contributes a `nav_sso_providers` entry into the Setup app's `group_access_control`:\n\n```\npackages/plugins/plugin-auth/src/auth-plugin.ts:552\n  id: 'nav_sso_providers', type: 'object', label: 'SSO Providers', objectName: 'sys_sso_provider', ...\n```\n\nNo locale file carries a label for it. Measured on `origin/main` `487a197b5`:\n\n```\n$ for f in en zh-CN ja-JP es-ES; do\n    printf '%-8s %s\\n' \"$f\" \"$(grep -c nav_sso_providers packages/platform-objects/src/apps/translations/$f.ts)\"\n  done\nen       0\nzh-CN    0\nja-JP    0\nes-ES    0\n```\n\nControl probe on the same four files with an id that IS translated (`nav_positions`) returns 1 each, so the zeros are real and not a bad path.\n\nConsequence is the same one #5750 reported for four other ids: a deployment with an external IdP wired shows `SSO Providers` in English in an otherwise translated Setup menu. It is narrower than #5750's four only because it is gated.\n\n## Why the new gate does not catch it\n\nThe contribution is conditional — `auth-plugin.ts` spreads `navigationContributions` in only when `this.authManager.isSsoWired()` is true (self-host `OS_SSO_ENABLED`, or the cloud per-environment `planAllowsSso` arriving via `plugins.sso`). `check:app-nav-i18n` judges ONE composition, and a contribution that is gated off in that composition is not merged, so it is not judged. The gate's header states this bound explicitly rather than implying full coverage.\n\nSo this is not a bug in that gate — it is the honest edge of what one runtime composition can answer, and this issue is the concrete instance sitting just past it.\n\n## Two ways to close it\n\n1. **Add the four labels** and leave the gate's bound where it is. Cheapest; the entry stays unverified by CI, so the next conditional contribution can repeat this.\n2. **Teach `check:app-nav-i18n` to enumerate conditional contributions too** — e.g. boot a second composition with the gating conditions forced on, or have contributors declare their conditional nav statically so a gate can read the union rather than one realisation. This is the general fix and is what would make \"every declared Setup nav id is translated\" a claim CI can actually stand behind.\n\nOption 2 changes what plugins are expected to declare, so it is a maintainer call rather than something to pick in passing. Filed unassigned for triage.\n\nRelated: #5750 (the four labels that were visible), and the sibling finding on dead `apps.setup.navigation` keys.\n"
+}

@@ -1,0 +1,32 @@
+{
+  "number": 5873,
+  "kind": "issue",
+  "title": "观察:build-schemas.ts 读 authorable-surface.json 的 JSON.parse 无保护 —— 手编成非法 JSON 时抛栈而非给处方(与姊妹 reader 不对称)",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T10:36:33Z",
+  "updated_at": "2026-08-08T17:26:01Z",
+  "closed_at": "2026-08-08T17:22:48Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5873",
+  "body": "范围外发现,记录于 #4663 的前提复验过程中(该单前提已被证伪,详见其评论)。**观察类:不构成绕过,门禁照样红**,只是诊断质量与同文件的姊妹路径不对称。\n\n## 事实\n\n`packages/spec/scripts/build-schemas.ts` 里有两个「读一个受字节纪律约束的committed 产物」的路径,保护程度不同:\n\n| 读取对象 | 位置 | JSON.parse 保护 | 形状校验 |\n|:--|:--|:--|:--|\n| `authorable-surface.base.json`(锚点) | `readCommittedSurfaceBase()` L951–982 | 有:`try/catch` → `❌ ... is not valid JSON (#5235)` | 有:`baseRev` 40-hex + `Array.isArray(keys)`,并给出 `git checkout --` / 重锚两条处方 |\n| `authorable-surface.json`(本体) | L595–598 | **无** | **无**(L602 直接 `surfaceDoc.keys.map(...)`) |\n\n```ts\n// build-schemas.ts:595-598\nif (fs.existsSync(AUTHORABLE_SURFACE_PATH)) {\n  surfaceRaw = fs.readFileSync(AUTHORABLE_SURFACE_PATH, 'utf-8');\n  surfaceDoc = JSON.parse(surfaceRaw) as AuthorableSurface;   // ← 未保护\n}\n```\n\n## 实测\n\n在 `e2bfa6ce3`(当日 origin/main)的 worktree 里,把 `authorable-surface.json` 末尾的 `}` 删掉(模拟一次手编翻车),跑 `pnpm --filter @objectstack/spec check:authorable-surface`:\n\n```\nEXIT=1\nSyntaxError: Expected ',' or '}' after property value in JSON at position 311133 (line 7942 column 1)\n    at JSON.parse (anonymous)\n    at path (/…/packages/spec/scripts/build-schemas.ts:597:21)\n```\n\n即:**退出码正确(1),但输出是一条 node 栈,而不是这套门禁一贯的「一句诊断 + 一句修法」**。同样的破坏打在 `.base.json` 上,得到的是 `❌ authorable-surface.base.json is not valid JSON (#5235)` 加两条处方。\n\n`keys` 被改成非数组 / 含非字符串项时同理:L602 的 `.map(...)` / `.replace(...)` 抛 TypeError,红但无处方。\n\n## 为什么归为观察类\n\n- 不是绕过:未捕获异常在 node 里就是 exit 1,`--check` 在解析之前不写任何文件,所以既不会过绿也不会顺手改树(#4711 纪律未退步)。\n- 触发前提是「有人手工把生成物编坏成非法 JSON」——今天没有用户路径会命中。\n- 真实代价只有一条:一个本该自解释的门禁,在这条分支上把「这文件是生成证据,跑 `gen:schema` 重生成」这句话丢了,读者要自己从栈顶行号反推。\n\n## 建议修法(窄)\n\n把 L595–598 对齐 `readCommittedSurfaceBase()`:`try/catch` + `Array.isArray(doc?.keys)` 形状校验,失败时输出与字节比对分支(L1536–1546)同族的处方 —— 都是 `pnpm --filter @objectstack/spec gen:schema`。不需要新增任何语义,只是让这条路径和它的姊妹一样会说话。\n\n关联:#4650(门禁本体)、#5235(锚点 reader,对照实现)、#4663(本发现的来源单)\n"
+}

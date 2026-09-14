@@ -1,0 +1,33 @@
+{
+  "number": 4904,
+  "kind": "issue",
+  "title": "objectui 可以在改动已发布包源码的同时不带 changeset —— 这些修复不会出现在任何发布记录里",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T15:07:49Z",
+  "updated_at": "2026-08-08T14:19:52Z",
+  "closed_at": "2026-08-08T14:19:52Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4904",
+  "body": "Blocked-by: objectstack-ai/objectui#3387\n\n**未认领。** 做 #4843(`objectui-range.mjs` 改读 objectui 声明的 changeset)时实测发现的邻近问题,不在那条 PR 的范围内,另立。\n\n## 现状\n\n#4731 / #4843 把「哪些前端改动发版」的判据统一成**读 objectui 自己声明的 `.changeset/*.md`**。这个判据的正确性完全依赖一个前提:**改了已发布包的源码,就必须带 changeset。** objectui 侧目前没有门禁保证这一点。\n\n在实测区间 `7d9734d5e321..785b8a5d432c`(53 个非 merge 提交)里,有 7 条提交完全没有 changeset。其中两条**确实改了已发布包的源码**:\n\n| objectui 提交 | 改动 |\n|:---|:---|\n| `19716b5bf` `fix(charts): name the slices` (objectui#3138) | `packages/plugin-charts/src/AdvancedChartImpl.tsx`、`ChartContainerImpl.tsx`、`packages/plugin-dashboard/src/DatasetWidget.tsx` |\n| `5e7ef1141` `fix(i18n): resolve qualified view ids` (objectui#3132) | `packages/i18n/src/useObjectLabel.ts` |\n\n两条都是真实的用户可见修复,都没有声明 changeset。\n\n## 后果\n\n后果**不是** #4843 造成的,而是被它照出来的 —— 旧的按 `feat|fix` 类型猜的口径碰巧把这两条收了进去,但那是因为它们的 subject 恰好以 `fix` 开头,和它们是否发版无关(同一个口径也把两条 release-nothing 的 `fix(ci)` 收了进去)。真正的洞在上游:\n\n- objectui 自己的 `CHANGELOG.md` / 版本号里没有这两条 —— 它们搭了下一个带 changeset 的发版的顺风车,在任何发布记录里都查不到;\n- 平台侧 `bump-objectui.sh` 写的 `@objectstack/console` changeset 里没有;\n- 发布页 Console 段落里没有。\n\n#4843 之后至少它们不再是无声的:每次产物都会打印「N 条提交不带 changeset」,`--all` 会逐条点名。但**出声不等于修好**。\n\n## 建议\n\n在 objectui 侧加一道门禁:PR 若改动了 `packages/*/src/**` 且没有新增 `.changeset/*.md`,则失败。空 frontmatter(release-nothing)是合法的显式豁免写法 —— 要的是**声明一次**,不是强制发版。这与本仓 `check:changeset-*` 系列的思路一致:声明即强制,而不是让消费侧去猜。\n\n落点在 objectui 仓库,不在本仓;记在这里是因为后果落在本仓的发布页上。\n\n## 关联\n\n- #4731 —— `bump-objectui.sh` 改读声明\n- #4843 —— `objectui-range.mjs` 改读声明,本问题在此实测发现\n- #3340 —— 两者共同要防的洞\n"
+}

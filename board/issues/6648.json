@@ -1,0 +1,33 @@
+{
+  "number": 6648,
+  "kind": "pull_request",
+  "title": "docs(agents): describe the read-seam invention rule in the durability gate's \"It has teeth\" passage",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T08:33:56Z",
+  "updated_at": "2026-08-08T09:00:15Z",
+  "closed_at": "2026-08-08T09:00:14Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": "2026-08-08T09:00:14Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/6648",
+  "body": "Fixes objectstack-ai/objectstack#5981\n\n## What this is\n\nA signpost, not a new gate. `pnpm check:durability-log-level` has run **two\nindependent rules** since #5186, but the AGENTS.md **It has teeth** passage under\n\"Degradation log levels — `warn` vs `error`\" only described the first one. Two\nconcrete ways the old text misleads a reader:\n\n- \"walks the AST for `catch` blocks guarding a declared vocabulary of\n  durability-critical operations and fails when one logs below `error` without\n  rethrowing\" — that is now half of what the command does;\n- \"Accepted exceptions live in `scripts/durability-degradation.baseline.json` …\n  and that file is currently **empty**\" — still true of *that* file, but easy to\n  read as \"this command's baseline is empty\", when the second rule has its own\n  ledger, `scripts/durability-read-invention.baseline.json`, whose steady state\n  is not empty.\n\nThis PR adds three paragraphs after the existing passage. **`AGENTS.md` is the\nonly file touched** — the script, both baselines and every test are untouched.\nThis is explicitly *not* #5186's rejected \"direction 2\" (prose enforced by\nreview): the gate already exists and is green; this documents it.\n\n## What the new prose says\n\n1. **The second rule and its verdict.** The log-level rule grades *how loud the\n   catch is*, which is structurally blind to a read seam — `catch { return []; }`\n   has no log to grade, and a read's callees are `find` / `findOne` / `count`,\n   too generic to declare repo-wide. The read-seam rule asks instead: *the read\n   did not happen; did you make an answer up anyway, and tell nobody?* Red needs\n   all of: a storage read in the `try` (the `IDataDriver` read methods or a\n   same-file wrapper), a `catch` that logs nothing at any level (helpers\n   followed), a path returning an invented answer — an empty/zero value, or one\n   of the enclosing function's own parameters handed straight back (#6451, from\n   #6116) — and that path never reached by discriminating the error's **type**.\n   The paragraph names what the rule protects: distinguishability, not the\n   spelling of the returned value.\n2. **Why the scan surface is narrowed** to `packages/metadata/src`,\n   `packages/metadata-protocol/src`, `packages/objectql/src` — the maintainer's\n   2026-08-06 ruling, quoted verbatim and untranslated:「裁 3 —— 收窄先行」. Also\n   the mechanical reason: the narrow scope is the only honest way to afford\n   `find`/`findOne`/`count` as a vocabulary at all.\n3. **\"Found a new read seam?\"** — symmetric with the existing \"Found a new one?\n   Add it to `DURABILITY_CRITICAL_CALLEES`\": the exemption vocabulary is\n   `READ_FAILURE_DISCRIMINATORS`, and a reviewed-legitimate seam goes in this\n   rule's own ledger, **not** the empty sibling. Both rules share one file, one\n   CI step and one AST pass, and share no vocabulary, no baseline and no verdict.\n\n## Deliberately no counts in the prose\n\nThe issue body and its triage comment both said the read-invention baseline holds\n3 entries. Measured on `origin/main` today: **1** (`referenceExists`, verdict\n`reviewed-legitimate`) — #5979 / #5980 landed and shrank it. Since the defect\nbeing fixed *is* prose that fell out of step with the gate, the new text carries\nno tally at all: it describes the steady state and the two verdict kinds, and\nends with \"Read the entries and the reasons they give — never the count.\"\n\nThe new text also describes the rule as it stands **today**, not as #5186 landed\nit: #6451 added the identity-pass-through criterion after the issue was filed,\nand the paragraph covers it. Writing a second inaccurate description would have\nbeen worse than the gap.\n\n## Verification\n\nProse-only change, so the evidence is that the gate list still passes and that\nthe described behaviour is what the gate really does.\n\nLive run of the command the passage documents, on this branch:\n\n```\n✓ durability-degradation log levels: 24 durability-critical catch seam(s), all loud,\n  rethrowing or propagating to the caller (3 propagating, declared).\n✓ read-seam invention (#5186 + #6451, 3 package roots): 64 read seam(s), none invents\n  an unreported answer (6 answer on a type-discriminated benign branch)\n  (1 pass an input through, reported) (1 baselined).\n```\n\nEvery gate in the ESLint job of `.github/workflows/lint.yml`, enumerated from the\nworkflow and run one by one after `git commit` — all exit 0: `lint`,\n`check:slot-lookup`, `check:query-options-erasure`, `check:verify-stand-in`,\n`check:nul-bytes`, `check:doc-authoring`, `check:docs-audit-scope`,\n`check:role-word`, `check:quick-reference-counts`, `check:adr-anchors`,\n`check:org-identifier`, `check:authz-resolver`, `check:service-providers`,\n`check:route-envelope`, `check:error-code-casing`, `check:wildcard-fallthrough`,\n`check:meta-type-normalized`, `check:init-service-contract`,\n`check:durability-log-level`, `check:startup-registry-verdict`,\n`check:objectui-changeset`, `check:release-notes`, `check:release-body`,\n`check:node-version`, `check:workflow-status-functions`,\n`check:shard-attestation`, `check:published-files`,\n`check:engine-double-contract`, `check:resume-authority-declared`,\n`check:merge-driver`, `check:spec-parsed-alias`. Plus the doc-adjacent gates from\nthe type-check job: `check:stall-guard`, `check:skill-frame-sync`,\n`check:skill-compatibility` — all green.\n\nByte discipline: `pnpm check:nul-bytes` green, and a direct self-scan of\n`AGENTS.md` for raw control bytes returned no matches.\n\n## No changeset — `skip-changeset`\n\n`AGENTS.md` is the agent operating manual. This PR ships no package change, no\npublic API change and nothing user-visible, so it releases nothing and writes no\nchangeset. Label applied by hand as the union with the existing labels.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01F8q5J1MQyocgtNspb15fSn)_"
+}

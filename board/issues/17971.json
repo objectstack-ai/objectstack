@@ -1,0 +1,33 @@
+{
+  "number": 17971,
+  "kind": "issue",
+  "title": "[Ruling] After an authorized approval, the owning seat lands a governed PR — later pushes need no second word from the maintainer (maintainer, 2026-09-13, option C)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:skills",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-13T08:49:17Z",
+  "updated_at": "2026-09-13T13:41:19Z",
+  "closed_at": "2026-09-13T13:39:44Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17971",
+  "body": "Filed by the `domain:skills` execution seat (session `session_01DAcomhvR9kKizeYgg89Vo8`, GitHub `os-project-manager`) to carry a maintainer ruling given in live chat, 2026-09-13T08:4xZ. ⛔ The ruling is the maintainer's; the charter text follows it, not the other way round.\n\n## The question, as put to the maintainer (verbatim, the seat's options)\n\nTrigger: PR #17914 (spec lane, governed `skills/**`) was approved by os-zhuang at 2026-09-13T06:21Z on `8aa2f28a`, ejected from the merge queue at 06:44Z (a red queue build), then carried a merge of `main` and two regenerated ledgers to `c7ae2c10` — governed bytes byte-identical to the approved commit — and the spec seat handed it back to the maintainer for a second click, because AGENTS.md Prime Directive #14 reads 「no AI seat merges, queues, or arms auto-merge on a PR whose diff touches one」. The maintainer asked: 「17914 这种我已经批准过了，再修改应该不需要我批准，这种能处理吗？和我讨论」.\n\nThe seat's options, verbatim:\n\n> - **A. approve 绑定字节,落地交给席位**:授权 approve 存在,且 head 上受管路径的 blob 与你批准那个 commit 的 blob 逐一相同,席位就可以入队 / 挂 auto-merge(含被踢出后重排);受管字节任何改动 ⇒ 回到你手上重新 approve。\n> - **B. 维持现状**:每次踢出/变基都多你一次点击。\n> - **C. approve 后不管后续改动**都由席位落地:不建议,这正是今早你说 skills 要你确认的那条线。\n\n## The ruling (maintainer, verbatim)\n\n> C. approve 后不管后续改动都由席位落地:\n\nThe seat had recommended A and named C as the line drawn earlier the same morning; the maintainer chose C with that concern in front of them. C is the ruling.\n\n## What C means operationally (existing rules that still hold, ⛔ not new ones)\n\n1. The approval must be an authorized approver's APPROVED review (`GOVERNED_APPROVERS`: os-zhuang, hotlong); a DISMISSED or superseded approval never counts (the queue guard's ruled predicate since #8161 is unchanged: an authorized APPROVED on ANY commit).\n2. After that approval, the seat that owns the PR lands it: pre-landing check on the CURRENT head — its own contract-review record naming that head, `check-clause2-carriers --pair N` exit 0, all checks green (a base-inherited red judged by the #17934 shape), then ready + auto-merge / queue. Ejections and rebases are re-queued by the seat, not the maintainer.\n3. The maintainer's word is spent once per governed PR — the approval. The 速读 stays; the four-piece changes shape: `needs-user-decision` on the PR and the review request still ask for that one approval; once it exists the seat clears the label and lands.\n4. Accepted risk, stated so the record is honest: governed bytes changed AFTER the approval land on the seat's contract-review record alone. The maintainer chose this over the byte-pinned variant (A).\n\n## Text to land (charter, governed — one hand merge; rides the charter-revision PR, chain head #17942, since `SKILL.md` is occupied by PR #17957 until it lands)\n\n- `AGENTS.md` Prime Directive #14: the sentence 「no AI seat merges, queues, or arms auto-merge on a PR whose diff touches one」 becomes: the maintainer confirms a governed surface by an authorized approval; before that approval no AI seat merges, queues or arms auto-merge; after it the owning seat lands the PR, later pushes included.\n- `.claude/skills/pm-dispatch/SKILL.md` red line :27 「⛔ 受管面 PR 无授权批准时永不翻 ready、永不入队、永不挂 auto-merge。」 keeps its condition (it already says 无授权批准时) and gains the converse in the 入队与落地 section (:609 四件套): approval present ⇒ the seat clears `needs-user-decision` and lands on its own pre-landing check; `references/core-rules.md` mirror in the same PR; the standing-patrol Routine text of every seat (the 「⛔ never ready / enqueue / auto-merge」 line) is updated by each seat on its next re-arm.\n- Queue guards (`scripts/pm/check-governed-queue-guard.mjs`, objectui `scripts/check-governed-queue-guard.mjs`): no change — their predicate already accepts the approval on any commit.\n\n## Immediate effect\n\nEffective on this record (维护者裁决 > text). #17914 is re-queued by the seat on its pre-landing check today; every governed PR now at the human terminal (PR #17957, objectui#9374, objectui#9377 and the wave-1/2 PRs already approved) follows the same path once its approval exists.\n\nRuling-ref: this card, this comment thread (maintainer's verbatim word above).\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

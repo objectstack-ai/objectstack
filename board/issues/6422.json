@@ -1,0 +1,36 @@
+{
+  "number": 6422,
+  "kind": "issue",
+  "title": "lint: `collectViewRecord` 的 listViews/formViews 分支收「map key + 内层 name」两种拼写,而组装器只认 map key —— 冲突改名时两者恰好相反",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T17:31:05Z",
+  "updated_at": "2026-08-08T23:40:07Z",
+  "closed_at": "2026-08-08T23:40:07Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6422",
+  "body": "观察单(不是缺陷单):发现于 #6038(#5164 裁 A 的 lint 段)实施过程,**不在该单范围内**,故另立。⛔ 未自我认领。\n\n## 事实\n\n`packages/lint/src/validate-translation-references.ts` 的 `collectViewRecord()` 对具名视图条目两种拼写都收:\n\n```ts\nfor (const [subKey, sub] of Object.entries(container)) {\n  addView(binding, subKey);\n  addView(binding, strName(sub.name));   // ← 第二种拼写\n}\n```\n\n注释给的理由是「authors write either」(来自 HotCRM 语料)。但组装器 `expandViewContainerWithDiagnostics`(`packages/spec/src/ui/view.zod.ts`)对 `listViews` / `formViews` 条目**只用 map key**构造运行时身份 —— `v.name` 被完全忽略:\n\n```ts\nfor (const [k, v] of Object.entries(listViews)) {\n  const requested = `${object}.${k}`;   // 只有 k,没有 v.name\n```\n\n按 #5164 的裁决(2026-08-06,canonical = 运行时身份的裸键),内层 `name` 与 map key 不同时,内层 `name` 那个键运行时解析不到,现在却被判为合法。\n\n## 更尖锐的一种形状:冲突改名下两者恰好相反\n\n组装器把冲突键改名(`< object >.default` 已被占用 ⇒ 后来者改名 `< object >.default_2`),而**改名后的名字才是注册表键**。实测(探针,`expandViewContainer`):\n\n```\n容器 { list: {type:'grid'}, formViews: { default: {type:'simple'} } }\n=> crm_lead.default[list,default] | crm_lead.default_2[form,default]\n```\n\n此时本规则:\n- 认 `default`(来自 `formViews` 的 map key)—— 但 `default` 属于**那个 list**,form 的译文写在这里解析不到;\n- 拒 `default_2`(真正的注册表键)—— 作者写对了反而被报孤儿。\n\n方向与 #6038 修掉的默认 `list` 那处完全同源,只是落在具名条目分支上。\n\n## 为什么记为观察级、而非缺陷\n\n目前**休眠**:`packages/lint/src/lint-view-refs.ts` 已把视图键冲突判为硬错误(`ViewKeyCollision` 的 doc 原话:「The build-time view-ref lint turns each collision into a hard error so the author fixes the key instead of shipping a broken reference」),所以带冲突改名的形状发不到线上;而「内层 `name` 与 map key 不同」的形状在本仓 12 个受棘轮覆盖的配置上**零实例**(#6038 实测 `os lint` 全量差分,`added: 0 / removed: 8`,无一条来自该分支)。今天没有用户会撞到。\n\n⚠️ 但收窄它**会给存量增红**(HotCRM 语料的注释明说作者两种都写过),属改变已发布判定的取舍,不该由 dev 顺手做 —— 需要与 #5164 裁 A 同口径拍板:要么四面一致地只认 map key,要么明确把内层 `name` 记为**允许的作者拼写**并让组装器也认它(后者会重开 #5164 否决过的方向)。\n\n## 相邻单(非重复)\n\n- **#6038** —— 只动默认 `list` 的键收集,本条是**具名条目**分支,不同 limb;\n- **#6381** —— 该包内视图容器阶梯遍历有三份实现(结构重复),本条是**语义**取舍,不同面;\n- **#5377** —— `tabs[].label` 无翻译键,不同键面。\n\n发现会话:`session_01BDmDsu2575gDxeMCxXhDE3`(#6038 dev 座位)。严重度留分诊座位判定。\n"
+}

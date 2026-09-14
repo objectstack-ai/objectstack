@@ -1,0 +1,35 @@
+{
+  "number": 6738,
+  "kind": "pull_request",
+  "title": "fix(spec): 参考文档的联合单元格每种拼写只印一次,重复变体计入既有标记 (#6569)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T13:51:10Z",
+  "updated_at": "2026-08-08T14:50:48Z",
+  "closed_at": "2026-08-08T14:50:46Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": "2026-08-08T14:50:46Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/6738",
+  "body": "Fixes #6569\n\n同一个联合的多个变体如果**渲染成逐字相同的字符串**,单元格现在只印一次,被折叠掉的变体数计进 #6226 既有的 `… +N more` 标记。\n\n裁决口径按派单说明取**语义**(正文 A/B/C 与分诊 A/B/C 编号不一致):**折叠**(非正文 A 的维持现状)、**自报元数**(非正文 B 的静默丢弃)、**复用既有标记词汇**(非正文 C 的新记法)。维护者否决窗口仍开在 issue 线程上。\n\n## 落地形状\n\n```ts\nconst spelled = [...new Set(rendered)];\nconst shown = spelled.slice(0, VARIANT_LIMIT);\nconst hidden = rendered.length - shown.length;\nif (hidden === 0) return full;\nconst elided = elideWithMarker(shown, hidden, full.length);\nreturn elided ?? full;\n```\n\n变体数上限和去重合成**一个**标记,而不是叠成两次省略,于是对读者成立的仍是一句话:**印出的拼写数 + 计数 = 联合的元数**,无论某个变体是被上限藏起来的,还是因为这一格已经逐字印过它而被折叠掉的。无重复且未超上限时 `hidden === 0`,走的还是原来那条 `return full`,渲染逐字不变。\n\n## 全语料实测(本次运行测得,post-merge 复测)\n\n`origin/main` 在实现期间前移三次(#6695 / #6688 / #6702,当前 `61282f906`);已 merge 到本分支并**在合并后的树上重跑** `gen:schema && gen:docs`(`.gitattributes` 的 `merge=os-regen` 不会文本合并生成物)。重跑产出**零 diff**,下列数字合并前后**完全一致,无 delta**:\n\n| | 改前(origin/main) | 改后 |\n|---|---|---|\n| 类型单元格总数 | 8461 | 8461 |\n| 改变的单元格 | — | **14 格 / 7 个页面** |\n| 这 14 格的类型文本合计 | 3682 字符 | **2469 字符**(省 1213) |\n| 字面 `object \\| object \\| object \\| object` | **9 格** | **0 格** |\n| 任何相同 `object` 重复 | 9 格 | **0 格** |\n| >200 字符 | 67 | 62 |\n| >400 字符 / p95 / p99 / 最宽 | 1 / 128 / 188 / 690 | 1 / 128 / 187 / 690 |\n\n宽度本来就不是这张卡的目标(#6374 已经把形状宽度收掉了),这里只是顺带。\n\n### 逐格\n\n| 页面 · 属性 | 改前 | 改后 |\n|---|---|---|\n| `kernel/manifest.mdx` · `navigationContributions` | `items: (object \\| object \\| object \\| object \\| … +5 more)[]` | `items: (object \\| … +8 more)[]` |\n| `ai/conversation.mdx` · `messages` | `content: (object \\| object \\| object \\| object)[]` | `content: (object \\| … +3 more)[]` |\n| `ui/view.mdx` · `list` / `listViews` / `config` ×2,`api/protocol.mdx` · `list` / `listViews`,`data/object.mdx` · `listViews`(共 7 格) | `data?: object \\| object \\| object \\| object` | `data?: object \\| … +3 more` |\n| `ui/app.mdx` · `navigation` ×2 / `items`(共 3 格) | 同一导航项形状印 4 遍 + `… +5 more`(385 字符) | 导航项形状 + `{ type: 'separator'; … }` + `… +7 more`(160 字符) |\n| `data/validation.mdx` · `then` / `otherwise` | 同一形状印 4 遍 + `… +2 more`(325 字符) | 形状 + `[ConditionalValidation](#conditionalvalidation)` + `… +4 more`(139 字符) |\n\n### ⚠️ 与 issue 正文数字的两处出入(实测口径,非推翻前提)\n\n1. **正文说 11 格,实测带相同 `object` 重复的是 9 格。** 另外 2 格\n   (`ui/page.mdx` · `slots`、`automation/state-machine.mdx` · `states`)命中的是\n   `object \\| object[]` —— 那是**两种不同拼写**,不是同形变体,本次**有意不动**。\n   正文的 11 应当是子串统计带进来的。\n2. **改变的总格数是 14 而不是 9**,多出的 5 格是**形状拼写**相同的重复\n   (`ui/app.mdx` ×3、`data/validation.mdx` ×2),不是 `object` 拼写。\n\n第 2 点是本 PR 的**范围披露**:裁决的措辞是「渲染成逐字相同的字符串的变体」,这 5 格正在这个措辞里;正文的现象表只列了 `object` 那一类。把去重限定成只对字面 `object` 生效会是一条没有原则的特例,而且会把 **#6226 自己立案的那一格**(`App.navigation`)继续留着重复 —— 见下一节。\n\n## 三条有意的边界\n\n- **判等在渲染出来的字符串上**,不在 schema 结构上。`object | object[]`(`ui/page.mdx` 的 `Page.slots`)是两种拼写,永不折叠。这个渲染器判的是读者看到的东西。\n- **不限于相邻。** 实测语料里两种规则唯一分歧的地方,正是 #6226 立案的那一格:`App.navigation` 的九个变体里八个是同一种导航项拼写、一个是 `{ type: 'separator'; … }`,而分隔符排在**第七位**。`uniq` 式的相邻规则会折叠前面的连续段、遇到分隔符、然后把第八份导航项**再印一遍** —— 等于把缺陷留在这一格里。554 处联合渲染中只有这 3 处(该格在它的三个页面上)分歧。\n- **共享的守卫原样适用,没有豁免,拒绝是正确行为。** 实测:554 处联合渲染中 **14 处**带重复拼写,守卫**全部接受**(语料里今天没有落在拒绝区间的格,所以拒绝由单测钉住而不是由页面钉住)。拒绝区间本身仍然有效:`object | object` 加标记反而**变长 3 字符**,`object | object | object` 只省 6 字符而标记占 12 字符,两者都保留重复;**四个重复**才是第一个划算的宽度(省 15)。四这个数字是守卫算出来的,去重规则本身不认识它。\n\n卡片预判的「6 个 `object` 会被守卫拒绝」在**改前**成立(上限只藏 2 个,省 6 < 12);去重后候选变成「1 种拼写 + `… +5 more`」,省 33,同一条未修改的守卫接受。预判描述的是改前的算术,不是改后的。\n\n## #6226 既有 pin 翻转了 —— 逐条交代\n\n`format-type.test.ts` 里 #6226 把 `string | string | string | string | string` 逐字钉住,注释写的理由是**算术**而不是原则:按上限印四个再加 12 字符标记会**更长**,守卫拒绝。\n\n- **改前**:`string | string | string | string | string`(42 字符)\n- **改后**:`string | … +4 more`(18 字符,省 24)\n\n改的是**候选**而不是守卫 —— 同一条一行未动的 `elideWithMarker` 因此接受。旧 pin 给出的理由,正是新 pin 给出相反结论的理由,所以这是一次**重新测量**而不是一次放松。守卫的拒绝区间仍然有人占着,只是往下挪了一档(两个/三个重复),并由新的单测钉住。\n\n## 夹具分诊(逐条,不是批量重拼)\n\n- **整条替换** — #6226 那个 `variant(id)` helper 的区分键原本是**第五个**,落在 `INLINE_KEY_LIMIT` 之后,于是它造出的每个变体渲染成**同一个字符串**。这忠实于 `App.navigation`,也正是 `… +5 more` 当初在那里可达的原因;但一旦同形变体折叠,这样的夹具考的就是**去重**而不是**上限**,那个 describe 块的每一条都会在答错题。把区分键移进上限之内,该块回到只钉**变体数上限**。\n- **改期望值** — `Manifest.navigationContributions` 那格(#6374 已经替换过一次的夹具):摘要之下九个变体都印 `object`,改后由去重决定,`1 + 8 = 9`。保留在 #6226 块里并保留它指向的语料格,因为两条规则共用一个标记,这里正是读者检查它们如何**合成**的地方 —— 但要按合成读,不要按上限读:**今天已经没有任何语料格是由嵌套上限单独决定的**。\n- **翻面** — #6374 那条 `prints an identical variant once per variant`(PR 里明写「待裁决」的那条)改成折叠后的形状,并把注释从「有意保留重复」改写成「裁决落地」。\n- **搬家而非删除** — `App.navigation` 同形变体的语料真相没有随夹具消失:它以**忠实**的九变体夹具(8 同形 + 第七位分隔符)钉在新的 #6569 块里,并断言那种拼写只出现**一次**。\n\n## 反向验证(先写预判,再跑;含一处未命中)\n\n**正向**(新实现 vs 未改夹具):预判 7 红,实测 **7 failed | 8824 passed**,7 条正是点名的 7 条,零偏差。\n\n**反向**(删掉去重、恢复 `if (rendered.length <= VARIANT_LIMIT) return full;`):预判 **8 红 / 2 绿**,实测 **7 failed | 79 passed**,即 **7 红 / 3 绿**。\n\n- 7 条红全部命中点名的那 7 条;\n- #6226 上限块**七条全绿**(如预判)—— 这正是夹具分诊成立的检验:那里再红就说明它还在答去重的题;\n- **一处未命中,且值得记下来**:「印出的拼写数 + 计数 = 元数」这条**预判红、实际绿**。它**不可能**红 —— 这个不变式**基线渲染器也满足**(上限自己会报它藏了几个;元数 6 时守卫拒绝,于是六个全印、没藏)。它是两条规则都遵守的**性质**,钉的是「裁决**保住**了这个不变式」(正文选项 B 会破坏的正是它),而不是「去重存在」。已就地重新归类进绿组并写明理由,而不是改掉预判假装命中。\n\n## 验证\n\n- `pnpm --filter @objectstack/spec test` → **345 files / 8839 tests passed**\n- `pnpm --filter @objectstack/spec typecheck` → 通过(`tsc --noEmit` + `check:scripts-typecheck` + `check:test-typecheck`)\n- `pnpm --filter @objectstack/spec check:docs` → `✅ 230 generated files in sync with packages/spec`(合并后的树上)\n- `node scripts/check-nul-bytes.mjs` → OK;并按纪律对改动文件做了越界自查(`[\\x00-\\x08\\x0b\\x0c\\x0e-\\x1f\\x7f]`),无命中\n\n## Changeset\n\n写了真 frontmatter 的 `.changeset/identical-union-variant-dedupe.md`(`@objectstack/spec: patch`),**不**打 `skip-changeset`。判据取自本仓先例而非感觉:#6374(同一文件、同一类改动、今天落地)带的是 `@objectstack/spec: patch` 的真 changeset;本 PR 同样改变已发布的 `content/docs/references/**`,那是 ADR-0033 的 AI 作者权威输入。\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01AZgRyPVwi1jLb1mNNuUQ9o)_"
+}

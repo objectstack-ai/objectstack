@@ -1,0 +1,36 @@
+{
+  "number": 5574,
+  "kind": "issue",
+  "title": "beforeUpdate hook 在 multi:true 批量更新上拿不到 ctx.previous —— sys_fetch_previous_update 依赖 input.id;引擎已为校验取 priorRows 却不喂 hook(17.0.0-rc.2)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched",
+    "pm:queue",
+    "target:v17"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T19:27:55Z",
+  "updated_at": "2026-08-08T15:36:54Z",
+  "closed_at": "2026-08-08T15:36:54Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5574",
+  "body": "Part of objectstack-ai/hotcrm#779\n\n## 现象\n\n`ctx.previous` 在 `beforeUpdate` 上的**唯一**来源是内建 `sys_fetch_previous_update`(priority 5,`object: '*'`,由 kernel 的 `registerAuditHooks()` 装载)——引擎主体只在 `afterUpdate` 分支里赋 `hookContext.previous`。而该内建第一行是:\n\n```\nif (hookCtx.input?.id && !hookCtx.previous) { … }\n```\n\n`multi: true` 的批量更新没有 `input.id`(目标由 `where` 圈定),内建取不到任何东西,**`ctx.previous` 在批量路径上恒为 undefined**。\n\n## 证据(pinned 17.0.0-rc.2,真 object schema + 真 hook + 内建忠实复刻,priority 299 探针 hook 观测)\n\n```\n=== single-row update (category only) ===\n  [prev-fetch] input.id=\"crm_knowledge_article-…-1\" previous=undefined\n  [knowledge-hook sees] previous.status=\"published\" input={\"id\":\"…\",\"category\":\"api\"}\n  => last_reviewed_at refreshed: true\n\n=== MULTI update (category only, every published row) ===\n  [prev-fetch] input.id=undefined previous=undefined\n  [knowledge-hook sees] previous.status=undefined input={\"category\":\"troubleshooting\"}\n  => last_reviewed_at refreshed: false\n\n=== MULTI update writing last_reviewed_at: null ===\n  [knowledge-hook sees] previous.status=undefined input={\"last_reviewed_at\":null}\n  => A: last_reviewed_at=null\n  => B: last_reviewed_at=null\n```\n\n## 应用侧影响(hotcrm 实测,详见 hotcrm#779)\n\nhotcrm 有 **15 个** hook 文件读 `ctx.previous`,几乎全用 `previous?.x` 可选链——批量路径上不抛错,而是**静默空转**或走进「当作首次转换」分支。已实测的两种后果:批量编辑不刷新知识文章的 `last_reviewed_at`(打破 stale 报表前提);批量写能把 `readonly: true` 的 `last_reviewed_at` 写成 null(单行路径 hook 会补戳盖掉,批量不会)。**守卫语义的 hook 在批量路径上失效方向是放行**(如 contract.hook 的 `previous?.status === 'activated'` 守卫)。\n\n## 关键问题(设计定夺,不预设是 bug)\n\n引擎在 `needsPriorRecord(updateSchema)` 为真时**确实会取 `priorRows`**(用于校验规则),只是没有把它喂给 hook。所以:\n\n1. 批量路径不供给 previous 是设计取舍还是遗漏?若是取舍,请在 hook 契约文档里写明「multi:true 上 `ctx.previous` 不可用」,应用侧好据此重排不变量(挪到校验规则/flow);\n2. 若愿意供给:per-row previous 的代价与语义(N 行 N 份、hook 逐行执行还是一次批量执行)需要平台定夺——`priorRows` 既然已取,喂给 hook 的增量成本可能有限。\n\n应用侧的修复方向(hook 逐个显式化 vs 不变量搬家)取决于这个答案,hotcrm#779 因此 Blocked-by 本单。"
+}

@@ -1,0 +1,36 @@
+{
+  "number": 6667,
+  "kind": "issue",
+  "title": "automation: enforce ActionDescriptor.supportsPause at runtime (executor suspend vs declaration), and decide isAsync disposition",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T09:31:43Z",
+  "updated_at": "2026-08-08T14:54:22Z",
+  "closed_at": "2026-08-08T14:54:22Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6667",
+  "body": "Successor to #5703, filed per the maintainer ruling of 2026-08-08 (option A there: close the original card — its \"zero readers\" premise expired once #5561 / PR #5725 landed the authoring-time warning and the CI gate for supportsPause).\n\nTwo pieces remain that the #5703 thread identified but no card owns:\n\n1. **Runtime consistency check for supportsPause.** The #5561 warning (warnIfResumeAuthorityUndeclared) and the check-resume-authority-declared.mjs CI gate cover the authoring/CI side only. The runtime blind spot is still open: an executor can return a result with suspend set to true while its ActionDescriptor declares supportsPause false, and nothing flags the mismatch. Proposed shape (from the #5703 thread): validate the executor's suspend result against the descriptor's declaration at the engine boundary and fail loudly on mismatch, so declared = enforced holds at runtime, not just at authoring time.\n\n2. **isAsync disposition.** Taken alone, isAsync still has zero readers across the three repos (measured on the #5703 thread, 2026-08-08). When this card is taken up: retire it under ADR-0049 enforce-or-remove, or enforce it the same way as supportsPause if a real consumer exists by then. Decide on fresh measurements at pickup time, not today's reading.\n\nDedup: searched open issues for supportsPause before filing — only #5703 itself and two PM registry cards match; no existing card owns this work.\n\nNo domain or queue labels applied — routing labels are the triage seat's single-producer territory."
+}

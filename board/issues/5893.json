@@ -1,0 +1,35 @@
+{
+  "number": 5893,
+  "kind": "issue",
+  "title": "`auth-contains-filter.test.ts` 的见证后端迁 sqlite 排在 #5702 之后 —— #5830 裁决 C 的到期单",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T11:04:49Z",
+  "updated_at": "2026-08-08T10:01:36Z",
+  "closed_at": "2026-08-08T10:01:36Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5893",
+  "body": "Blocked-by: #5702\n\n由 #5830 的裁决 C 产生(identity 车道 PM,`session_01JwwiU9bjhwy2SWj13ho8uv`,2026-08-06;域标签沿 #5830 分诊座位的同文件锚定)。#5830 已随 PR #5880 关闭:两个 driver-memory 临时测试消费者一个已迁(`auth-where-operator-coverage.test.ts`),本单承载**未迁的那个**及其到期条件。\n\n## 为什么现在不能迁(实测,PR #5880 留档)\n\n`packages/plugins/plugin-auth/src/auth-contains-filter.test.ts` 是 #5710(`contains` → 裸 `$regex` 翻转)的 pin。driver-sql 把 `$regex` 经 `case '$regex':` fallthrough 与 `$contains` 同走 `applyContainsLike`(`sql-driver.ts:6505-6512`),SQL 后端对两者**逐格同答**:\n\n- 复现缺陷(适配器改回裸 `$regex`)后:memory 见证 3 条行为面 pin **红**;同一行为面搬到 sqlite **全绿**。\n- 驱动层直测:`$regex a.b` → memory `[\"a.b\",\"axb\"]` / sqlite `[\"a.b\"]`;`$regex (` → memory THROW / sqlite `[\"x(y\"]`。\n\n迁过去的 pin 会「因为分辨不出任何东西所以恒绿」—— 恒绿 pin 是最危险的资产:出现在覆盖率里、看起来「有测试」,对它声称守护的缺陷完全失明。\n\n## 到期条件(解锁即执行)\n\n#5702 范围 1(driver 侧 `$regex` 拒收单点化)落地后,SQL 臂对 `$regex` 按名拒收(算子不在 allowlist)—— 缺陷可被 SQL 后端以**拒收**方式见证(红,且理由比原来更好)。届时:\n\n1. 照抄 PR #5880 的 harness(SqlDriver + better-sqlite3 `:memory:` + `initObjects` 真 DDL)迁移本文件;\n2. 摘除 plugin-auth 的 `@objectstack/driver-memory` devDep(届时应为零消费)+ lockfile 涟漪;\n3. 修订 `undeclared-field-write-driver-split.integration.test.ts` 的注释(其 [#5830] 段已预写了这一步),恢复「仅 driver-split 一处」的字面为真;\n4. 反向验证:缺陷复现在新后端上必须**红**(拒收路径),照 #5880 的双向反验打法。\n\n## 关联\n\n#5830(裁决现场)、PR #5880(已迁一半 + 实测数据)、#5710/#5812(pin 的来源)、#5704(程序)、#5702(到期依赖,其正文/评论已有本别名为死产者代码的实测记录)。"
+}

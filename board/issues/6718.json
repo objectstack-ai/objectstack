@@ -1,0 +1,35 @@
+{
+  "number": 6718,
+  "kind": "pull_request",
+  "title": "fix(runtime): /share-links 的权限拒绝答 403 而不是 500 —— catch 走共享的 errorFromThrown (#6649)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T13:28:14Z",
+  "updated_at": "2026-08-08T14:08:12Z",
+  "closed_at": "2026-08-08T14:08:11Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": "2026-08-08T14:08:11Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/6718",
+  "body": "Fixes #6649\n\n## 缺陷与前提复核\n\n在 `origin/main` `d6d1a50be` 上实测复现，前提成立。\n\n`packages/runtime/src/domains/share-links.ts` 的统一 catch 只读一条状态通道：\n\n```\nreturn sendErr(err?.status ?? 500, err?.code ?? 'INTERNAL', err?.message ?? '…');\n```\n\n`ShareLinkService` 自己抛的每个拒绝都带 `status`（`makeError` 同时设 `status` + `code`），所以 403 `FORBIDDEN` / 422 `SHARING_NOT_ENABLED` 一直是对的——但**安全中间件**的拒绝不出自那个 service。建链要做可见性读（`svc.createLink` 调 `engine.find(object, { context })`），当调用者的 permission set 对该对象没有 `allowRead` 时，CRUD 门 throw 的是 `PermissionDeniedError { code = 'PERMISSION_DENIED'; statusCode = 403 }`——**完全没有 `status` 字段**（`packages/plugins/plugin-security/src/errors.ts`；runtime 自己的镜像类 `security/resolve-execution-context.ts` 同形）。`ShareLinkService` 不接它，冒到这个 catch，`err?.status` 为 `undefined`，于是一个 403 类拒绝以 **HTTP 500** 出门，而 `code` 却如实读到 `PERMISSION_DENIED`。\n\n信封自相矛盾，且这个矛盾对客户端是有后果的：5xx 对许多 SDK 与浏览器客户端是可重试的，于是一个**永久性**的授权答复被反复重试；按状态分支的调用者看到的是\"服务器坏了\"，真相是\"你无权读这条记录\"。两种 tenancy 姿态都能复现。而且因为 `registerShareLinkRoutes: false` 让这个 domain 成为 cloud 每环境 kernel 上**唯一**的 share-link 表面，它在那里是主表面而非兜底。\n\n### 前提测量（修前 / 修后）\n\n用无 `allowRead` 的调用者 POST `/api/v1/share-links`：\n\n| | HTTP status | `error.code` |\n|---|---|---|\n| 修前（`origin/main`） | **500** | `PERMISSION_DENIED` |\n| 修后 | **403** | `PERMISSION_DENIED` |\n\n### 一处被证伪的子论断\n\nissue 还称 5xx 路径上 `looksLikeInternalErrorLeak` 会把 `[Security] Access denied…` 消息脱敏掉。**实测不成立**：`packages/types/src/error-leak.ts` 的启发式只匹配 `sqlite_` / `sqlstate` / 以 `select |insert into |update |delete from ` 开头 / `constraint failed` / `unique constraint` / `foreign key`，安全消息一条都不命中。主论断（500 而非 403）成立，脱敏这半条不成立——照实记录，没有据此写断言。\n\n## 方向：走共享映射器，而不是加长 `??` 链\n\ncatch 改为出口到 `deps.errorFromThrown`——dispatcher 已有的共享 thrown-error 映射器，`/meta`、`/actions`、`/mcp` 早已走它。它同时读 `status` 与 `statusCode`，并把 thrown error 的结构化 `issues` / `fields` 一并带出，而不是塌成一条 message。\n\n选它而不是最小改法 `err?.status ?? err?.statusCode ?? 500`，理由是**这张卡本身就是手写 catch 与共享映射器分叉的产物**——再写一份手写副本，正是当初分叉的方式。`errorFromThrown` 已在 `DomainHandlerDeps` 契约上（`domain-handler-registry.ts`），所以本改动**没有碰** `http-dispatcher.ts`。\n\n顺带修掉的第二条通道：`'INTERNAL'` 这个兜底 code 从未为 `@objectstack/runtime` 在 `ERROR_CODE_LEDGER` 注册过（注册它的是 `rest` / `service-storage` / `service-i18n` / `plugin-sharing`；ledger 的分包行是 provenance，全局并集因此让 `ApiErrorSchema` 一直是绿的）。共享映射器把这个必填字段交给 `standardErrorCodeForHttpStatus`，拼出在册的 `INTERNAL_ERROR`（ADR-0112）——与其它每个 dispatcher 出口一致。\n\n## 测试：复用 #6551 的架子，不另起第三套\n\n扩展 PR #6647 落地的 `packages/runtime/src/domains/share-links-enforcement-context.test.ts`（真 `handleShareLinksRequest` + 真 `ShareLinkService` + 真 `SecurityPlugin` 中间件，只有存储是替身）。改动限于：把 permission-set 世界与 additive baseline 提成 `bootSecurity` / `mintOnDispatcher` 的**带默认值**参数（默认逐字等于 #6551 各用例原来的取值），加一个无 `allowRead` 的 permission set，追加一个 `[#6649]` describe 块。**#6551 的 7 个用例正文一字未改，全程绿。**\n\n`deps.errorFromThrown` 在架子里不是手写替身，而是照 `error-envelope.conformance.test.ts` 的 `makeDispatcher()` 的做法，从一个真 `HttpDispatcher` 实例上借来的**真方法**——手写一份 `e?.status ?? e?.statusCode ?? 500` 会让用例绿在替身的规则上而不是生产的规则上，那正是本 issue 所属的错误类别。\n\n每个用例都**同时**断言 `status` 与 `code`：修前 `code` 就已经是 `PERMISSION_DENIED`，所以只断言 code 的用例在缺陷上是绿的；只断言\"不再是 500\"又分不出\"拒绝对了\"和\"拒绝错了\"。信封另经 `BaseResponseSchema` / `ApiErrorSchema` / `envelopeViolations` 解析（ADR-0112 闭集）。\n\n## 反向验证：先写预测，再跑\n\n预测**先于**运行写入 scratchpad。把 `share-links.ts` 单独回滚到 `origin/main`、保留新用例后实测：\n\n| 新用例 | 预测 | 实测 |\n|---|---|---|\n| single 姿态，无 `allowRead` | RED，`status` 500 ≠ 403 | RED，`expected 500 to be 403` ✓ |\n| group 姿态，无 `allowRead` | RED，`status` 500 ≠ 403 | RED，`expected 500 to be 403` ✓ |\n| 共享 catch：GET + DELETE，真 `PermissionDeniedError` | RED，GET 迭代先失败 | RED，`GET status: expected 500 to be 403` ✓ |\n| 两条通道都不带的 throw | RED，`code` `INTERNAL` ≠ `INTERNAL_ERROR` | RED，`expected 'INTERNAL' to be 'INTERNAL_ERROR'` ✓ |\n| 带 `status` 422 + `SHARING_NOT_ENABLED` 的 throw | **两个方向都绿**，构造使然 | 两个方向都绿 ✓ |\n\n预测 5 个新用例 RED 4 个，实测 RED 4 个，方向与失败通道逐条吻合。\n\n**照实排除**：第 5 个用例两个方向都绿，不是 #6649 的回归 pin——`status` 通道旧链与共享映射器都在同一条首分支上读。保留它是为**下一次**改这个出口的人：若 `status` 通道被换成只读 `statusCode`，它会红。用例正文里就是这么写的，没有把它算进反向验证的红计数。\n\n另：修前那次运行同时是全包基线——1701 个用例里只有我新加的 4 个红，#6551 的 7 个用例与其余 1690 个全绿。\n\n## 门禁实测输出\n\n```\npnpm --filter @objectstack/runtime test\n  Test Files  114 passed (114)\n       Tests  1701 passed (1701)\n\npnpm --filter @objectstack/runtime typecheck   → tsc --noEmit，无输出\npnpm lint                                       → eslint . --no-inline-config，无输出\n\ncheck:route-envelope          exit=0\ncheck:error-code-casing       exit=0\ncheck:nul-bytes               OK (scanned 6236 tracked text file(s); no raw ASCII control bytes)\ncheck:slot-lookup             exit=0\ncheck:engine-double-contract  OK — 98 pinned, 133 in the DEBT ledger, 2 exempt\ncheck:wildcard-fallthrough    exit=0\ncheck:verify-stand-in         OK — 2 guarded, 5 exempt, 10 call sites, 0 asserted driver arguments\ncheck:query-options-erasure   exit=0\ncheck:type-check-debt         OK — 62/77 packages type-checked, 15 in DEBT (457 frozen raw errors)\n```\n\nDEBT / TEST_DEBT 未上升（457 与 main 同值）。\n\n## changeset\n\n`@objectstack/runtime`: **minor**。判断依据是本仓已有先例——`action-crash-vs-rejection.md`（\"an action that CRASHED is a 500, not a 200\"）与 `actions-global-key-and-failure-status.md` 都是 wire 上的 HTTP 状态变化，都记 minor。本改动同类：拒绝从 500 变 403（对客户端是\"可重试\"变\"不可重试\"），且 codeless throw 的 `error.code` 从 `INTERNAL` 变 `INTERNAL_ERROR`，两者都是 SDK 可见的。\n\n## 范围\n\n只改 `packages/runtime/src/domains/share-links.ts` + 该测试文件 + changeset。读了 `http-dispatcher.ts`，**未改**——`errorFromThrown` 不需要任何改动即可服务这个调用点。`content/docs/releases/` 未触碰。#5582 的 rest 侧 `mapDataError` 同族兄弟不在本 PR 范围内。\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_017uFVNMmTxLpmfQYiuKM1Yx)_"
+}

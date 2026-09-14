@@ -1,0 +1,34 @@
+{
+  "number": 6371,
+  "kind": "issue",
+  "title": "[skill] 新 worktree 里第一次验证之前必须先 build 依赖闭包 —— AGENTS.md §9 的陈旧产物陷阱当日连咬三个 dev（假红 + 假绿两个方向）",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:queue",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T15:21:14Z",
+  "updated_at": "2026-08-08T14:10:53Z",
+  "closed_at": "2026-08-08T14:10:53Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6371",
+  "body": "来自 `domain:drivers` 车道 2026-08-07 当日的三次真实失误，值得写进 os-dev / pm-dispatch 的验证纪律。unassigned，交 devx 车道分诊。与 #6218 是同一族陷阱（「看起来验证过、实际对被测风险失明」），但成因不同、处方也不同，故分开立单。\n\n## 事实：同一天，三个不同的 dev，三次\n\n| 单 | 表现 |\n|:--|:--|\n| #5962 | 新 worktree 首次验证时 rest 侧 15 个包报红 —— 非代码问题 |\n| #6210 | 同族（该单还另外踩了 #6218 的 filter 方向问题，两者叠加） |\n| #6203 | **三个来回**都在追一个不存在的红 |\n\n三次的共同形状：`git worktree add` 之后 `pnpm install`，然后**直接**跑 `typecheck` / `test`。新 worktree 里跨包依赖的 `dist/*.d.ts` 要么不存在、要么是陈旧的，于是 tsc 读到的不是本次改动后的类型。\n\n## 为什么这个陷阱特别贵\n\n它**两个方向都会骗人**，而且骗法不对称：\n\n- **假红**：依赖包的 `dist` 缺失或陈旧 ⇒ 报一堆与本次改动无关的错。代价是时间——dev 会去「修」一个不存在的问题（#6203 烧了三个来回）。\n- **假绿**：这个更危险。收窄了某个包的导出类型，但下游读的还是**旧的** `dist/*.d.ts` ⇒ 下游 typecheck 报绿，而那个绿**什么也没证明**。dev 会把它当成「消费半径已清扫」写进 PR，复核方从报告里看不出区别。\n\n本车道当日就有一个正面案例说明该怎么办：#6212 批 A+E 的 PR 明确点名「driver-sqlite-wasm 读的是 driver-sql 重建后的 `dist/*.d.ts`」，先 build 再 typecheck，**并且**用一次「临时塞一个类型不认的键、证明它会红」的反向验证坐实了自己确实读到了新 d.ts —— 而不是假绿。这就是该有的形状。\n\n## 建议条款（不代裁决）\n\n1. **新 worktree 的第一条验证命令永远是 build，不是 typecheck。** `pnpm install` 之后、任何 `typecheck` / `test` 之前，先把被改包的依赖闭包 build 起来。\n2. **跨包类型改动（签名收窄、导出类型变更、契约收紧）必须给出「确实读到了新 d.ts」的证据**，不能只贴一个绿。最省事的证据形式就是一次故意的反向验证：临时塞一个新类型不认的键，确认它会红，然后还原。\n3. **「下游包 typecheck 绿」这句话，在没有第 2 条的情况下不构成消费半径已清扫的证据** —— 与 #6218 第 3 条同源：局部绿只能用来加速迭代，不能用来下结论。\n4. 建议把第 1 条直接写进 os-dev 的派工模板与 AGENTS.md §9 的可执行清单里。**本车道的 PM 已在当日后续派工里手动加了这一条**，三次失误之后没有再复发 —— 但那是靠 PM 每次手写记得，不是靠制度，所以立此单。\n\n## 与 #6218 的关系\n\n两者都属「验证动作看起来做了、实际对被测风险失明」，但：\n\n- **#6218** 是**方向**错（扫了上游而非下游）—— 扫的包集合本身就不相关；\n- **本单**是**时序**错（在产物重建前就验证）—— 包集合对，但读的是过期的事实。\n\n一个 PR 可以同时踩中两个（#6210 就是），且两者叠加后的症状会互相掩盖：方向扫反 + 产物陈旧，得到的「25 个包全绿」既不相关也不新鲜。\n\n关联：#6218（同族，方向）、#6144（同族，拒收用例恒绿）、AGENTS.md §9、#6212 批 A+E（正面案例）。\n\n会话：`session_01WyvqvKMG6asi9aXjKE6xtx`（PM 侧观察，未认领）"
+}

@@ -1,0 +1,32 @@
+{
+  "number": 6521,
+  "kind": "issue",
+  "title": "[finding][drivers] 两个驱动包的测试脚手架用 `(driver as any).knex` 触达一个 `protected` 成员 —— 为读一个成员抹掉整个 driver 的类型（实测 52 文件 / 107 行）",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "finding"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T03:08:27Z",
+  "updated_at": "2026-08-08T10:23:49Z",
+  "closed_at": "2026-08-08T10:23:49Z",
+  "closed_by": {
+    "login": "qq9340100",
+    "id": 313832657,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6521",
+  "body": "从 #6320（PR #6517）的实施中带出。**观察类，不是今天会炸的缺陷**：无用户可触达面，`pnpm test` 全绿，任何门禁都不报。按 PD #10 另立单记录，不在 #6320 的 PR 里顺手扫。\n\n## 事实（实测于 `origin/main`）\n\n`SqlDriver.knex` 声明为 `protected`（`packages/drivers/driver-sql/src/sql-driver.ts:1876`），所以类外的测试 fixture 确实需要一次强制转换才能拿到 knex 实例做建表/插数据。当前全仓统一用的写法是：\n\n```ts\nlet knexInstance: any;\nknexInstance = (driver as any).knex;\n```\n\n`git grep -c \"as any).knex\" origin/main -- packages/drivers/` 逐包汇总（计的是**命中行数**，非命中次数）：\n\n| 包 | 文件数 | 命中行数 |\n|:--|--:|--:|\n| driver-sql | 37 | 74 |\n| driver-sqlite-wasm | 14 | 32 |\n| driver-turso | 1 | 1 |\n| **合计** | **52** | **107** |\n\n其中 `packages/drivers/driver-sqlite-wasm/src/sqlite-wasm-driver.ts` 是**非测试**代码里的一处，其余在测试里。\n\n## 为什么记下来\n\n1. **`as any` 在这里是过量的**。要读的成员只有一个（`knex`），但 `as any` 把整个 driver 的类型一起抹掉 —— 同一个 `knexInstance` 变量随后也被声明成 `any`，于是它上面的 `schema.createTable` / `.insert` / `.destroy` 全部不受检查，`createTable` 的回调参数也只能写成 `(t: any)`。一次转换的代价被放大到整条 fixture 链。\n\n2. **它落在所有既有门禁的盲区里**，这一点是实测的、不是推断的：\n   - `check:query-options-erasure` 的词表只匹配 **query/options 位置**的 `as any`，`(driver as any).knex` 从来没进过它的计数（PR #6517 改动前后，它报的都是 `263 test-surface sites in 49 files`，一模一样）；\n   - #4918（已 closed）把这条 lint 护栏**有意收窄到「引擎/驱动查询选项」一个语义位，并有意排除测试代码**，所以本单不是它的重复件，也不与它的裁决冲突 —— 是它明确划出去的那一片。\n   - `pnpm lint` 对测试文件不报这一形状。\n\n3. **现成的替代写法就在仓里**（#6204 体例）：点名要读的那一个成员，而不是抹掉整个对象。\n\n   ```ts\n   import type { Knex } from 'knex';\n   let knexInstance: Knex;\n   knexInstance = (driver as unknown as { knex: Knex }).knex;\n   ```\n\n   PR #6517 已在它**自己新增的两个测试文件**上用了这个写法并验证通过（两包 typecheck 绿、967 + 257 测试通过、eslint 绿），`knex` 在两个包里都是直接依赖，所以 `import type { Knex }` 处处可用。⛔ 它没有顺手扫兄弟文件 —— 超出 #6320 的范围。\n\n## 不代裁的处置线索\n\n- 这是**测试脚手架的类型卫生**，不是契约缺陷，严重度应由分诊定，不由本单预设；\n- 若要扫，扫的是一个机械替换（52 文件），但**值不值得扫是个判断题**：它买到的是 fixture 链上的类型检查，付出的是一次大面积改动与其后的合并冲突面；\n- 另一个方向是**根本不扫**，而是给 `SqlDriver` 一个测试用的具名读取口，让 fixture 不再需要任何转换 —— 但那是往驱动上加面，需要真实业务/测试拉力才划算，⛔ 本单不预判；\n- 第三条：`sqlite-wasm-driver.ts` 里那**一处非测试**出现值得单独看一眼，与测试里的那批不是同一回事。\n\n关联：#6320 / PR #6517（出处）、#4918（有意排除测试代码的那条护栏，已 closed）、#6204（`as unknown as 具名类型` 的体例）。\n"
+}

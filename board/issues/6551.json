@@ -1,0 +1,36 @@
+{
+  "number": 6551,
+  "kind": "issue",
+  "title": "dispatcher 面的 /share-links 把已解析完整的 ExecutionContext 重新裁成两个字段再喂给 enforcement —— 与 #6206 同一条 enforcement 路径的另一张脸",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:queue",
+    "target:v17"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T04:23:38Z",
+  "updated_at": "2026-08-08T09:13:24Z",
+  "closed_at": "2026-08-08T09:13:23Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6551",
+  "body": "**来源**:#6206 消费半边(PR 见下)实施时,遍历 `IShareLinkService` 调用方做消费半径核对时的越界发现。**未评级 —— 交分诊**,下面只给实读到的事实。\n\n## 事实(已核 origin/main `3510e4a25`)\n\n`packages/runtime/src/domains/share-links.ts:77-78`:\n\n```\nconst ec: any = context.executionContext;\nconst callerCtx = { userId: ec?.userId as string | undefined, tenantId: ec?.tenantId as string | undefined };\n```\n\n`ec` 是 dispatcher 已经解析好的**完整**信封(`packages/runtime/src/security/resolve-execution-context.ts` 组装,含 `positions` / `permissions` / `systemPermissions` / `org_user_ids` / `accessible_org_ids` / `posture` / `tabPermissions`)。`callerCtx` 只留两个字段,然后被交给三个裁决方法:\n\n- `:205` `svc.createLink(..., callerCtx)`\n- `:228` `svc.listLinks(..., callerCtx)`\n- `:244` `svc.revokeLink(..., callerCtx)`\n\n按 #6511(`d7e0b4212`)落地的契约,这三个方法的 context 形参已经是完整 `ExecutionContext`,并在 TSDoc 里写明「调用方 MUST NOT rebuild a subset of it」。结构化子类型让这个两字段对象照样编译通过(契约测试 `packages/spec/src/contracts/share-link-service.test.ts` 的最后一例已把「合法但不想要」这一点如实钉住),所以 tsc 不会报。\n\n## 与 #6206 的关系:同一条 enforcement 路径,另一张脸\n\n#6206 修的是 plugin-sharing 自己挂的 HTTP 路由(`registerShareLinkRoutes`)。本单是**同一个 service 的另一个入口** —— dispatcher domain,cloud 每环境 kernel 的设计主面(`registerShareLinkRoutes: false` 时它是唯一的面,见 `share-link-routes.ts` 模块头)。两处互不覆盖:#6206 的 PR 只动 plugin-sharing。\n\n也不同于 #6216:那单说的是「ExecutionContext 有三处**组装**」;这里的 dispatcher 组装本身是完整的,是在**消费点**又裁了一刀,属于第四类站点。\n\n## 方向(实读消费方,本单未跑复现)\n\n裁掉的字段中至少两类有已知消费者:\n\n1. `accessible_org_ids` —— `group` 姿态下就是 Layer 0 墙(`plugin-security/src/tenant-layer.ts`,缺席即 fail closed)。这正是 #6206 已**实测复现**的那条:`group` 姿态下建链对可读记录返回 403(该 PR 的 `packages/plugins/plugin-security/src/share-link-tenant-wall.test.ts` 在恢复裁剪后复现 403 → 修后 201)。dispatcher 面裁得更狠,方向应当相同。\n2. `positions` / `permissions` —— 连这两个都没了,所以 Layer 1(business RLS / sharing)在这个面上是按「无任何 position、无任何 permission」评估的。也就是说即便 `single` 姿态,一条只能靠 position 绑定的 permission set 或 position 范围的共享才看得见的记录,在 dispatcher 面建链/列链时也可能判否 —— 这一点**未复现**,需要接手的人先跑复现再决定评级。\n\n## 建议改法(与 #6206 同形)\n\n`callerCtx` 不再重建,直接把 `ec` 整体传下去;路由自己的 401 判定读 `ec?.userId` 即可(第 199 行那句)。#6206 的 PR 在 plugin-sharing 侧用的就是这个形状(`{ ...authz, isSystem: false }` 整体透传),可直接照搬。\n\n## 查重\n\n- 全文检索 open issues:`#6216`(三处组装的收敛 finding)、`#6206`(plugin-sharing 面,已修)、`#6523`(`SharingExecutionContext` 窄契约类型)均**不覆盖**本处消费点裁剪,不是重复。\n\n*未指派、未标域 —— 由 triage 席分诊。*\n"
+}

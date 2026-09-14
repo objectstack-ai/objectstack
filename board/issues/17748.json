@@ -1,0 +1,33 @@
+{
+  "number": 17748,
+  "kind": "issue",
+  "title": "pm-dispatch charter: add a mechanical self-check to the recommendation item so axis ① (≥50%) derives the letter and ②③④ cannot flip it (maintainer, 2026-09-12)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-tesla",
+    "id": 327383522,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-12T01:59:04Z",
+  "updated_at": "2026-09-13T11:51:33Z",
+  "closed_at": "2026-09-13T11:50:55Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 9,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17748",
+  "body": "Filed by the director seat on the maintainer's word (live PM chat, 2026-09-12T01:4xZ: 「立 domain:skills 卡」). ⛔ The charter lives under `.claude/**`, a governed surface (AGENTS.md PD#14): the skills seat authors the change, the maintainer hand-merges it. ⛔ The director seat writes no repo file.\n\n## Governing text\n\n- `.claude/skills/pm-dispatch/SKILL.md:756-758` — 「长远合理性权重恒 ≥50%:推荐以长远的读数领起,四轴冲突时其余各轴合起来投不翻它。」「权重按缩小而非扩大特例与契约增生读,⛔ 不据它为投机扩张背书。」「权重是推荐规则不是授权规则」.\n- `SKILL.md:753` — 「分歧推荐序按拉动定向:有实测拉动 ⇒ 荐长远形态一次付清;零拉动 ⇒ 荐不扩散。」\n- `SKILL.md` 创业阶段不扩散 block — 「过渡也从紧 —— 创业阶段不渐进 … staged 选项仅凭具名外部用户证据才可呈报为推荐。」\n- `references/core-rules.md:143` — 「spec 与代码不一致默认改代码,改协议单独立卡非选项。」; `:145` — 「推荐须逐轴给理由、长远权重不低于一半;有拉动荐长远终态一次付清,零拉动荐不扩散。」\n- `references/decision-analysis.md` 正文六项 → 推荐项 (current text): 「推荐 + 回退 + 置信缺口:荐一项、给回退项、明说本分析看不见什么。」\n- Maintainer, 2026-09-12, verbatim: 「我要求的平台长远合理性占 50% ，但是我觉得你的推荐答案不是，我改推荐的都是从平台长远合理性角度考虑的。」 then 「你要和我讨论四棱推荐为什么选错了答案。需要如何改进。」 then 「立 domain:skills 卡」.\n\n⇒ The RULE already exists. What is missing is a mechanical step in the writing template that makes a violation visible on the card itself. This card adds that step; it changes no rule.\n\n## The failure this closes, measured on decision batch #117 (director seat, 2026-09-12)\n\n| card | seat recommended | maintainer ruled | what went wrong |\n|:--|:--|:--|:--|\n| #17238 | A — widen the declared `SessionResponse` to admit `null` | **B** — fix the server | a 「契约迁就实现」 option was recommended; core-rules :143 says code follows spec. Axis ① was scored as \"the type becomes complete\" (a documentation-truth reading, axis ③'s virtue), and axis ④ (\"B is the most expensive and breaking\") decided the letter |\n| #16678 | B — bulk import only (one name in an existing constant) | **survey mainstream platforms, develop completely for the long term** | a staged half-capability was recommended with measured pull present; :753 says pull ⇒ recommend the long-term end state paid once; the staged-option rule requires named external evidence, none existed. Axis ① was scored as \"adds no new authorization shape\" — a diff-size proxy, i.e. axis ④ again |\n| #17147 | B — tell the truth, do not build | handed to a person | the seat's own ① line pointed at A; the letter followed ④ |\n| #17598, objectui#8365 | A / B | agreed | correct only because the long-term option happened to be the cheap one; the ≥50% rule was never exercised |\n\nRoot causes, from the director seat's own account to the maintainer: (1) ① was computed as \"which option adds the least surface\", which is ④'s question, so ④ effectively carried 75%; (2) when spec and code disagreed the seat asked \"which is cheaper to change\" instead of applying the fixed direction; (3) the seat inherited the triage seat's recommendation instead of re-deriving; (4) ① was scored without an external reference point (how mature platforms model the capability); (5) \"breaking\" was treated as a veto, contrary to 「创业阶段不渐进」.\n\n## The change\n\n**1. `references/decision-analysis.md`, 正文六项, the 推荐 item** — replace the one line with:\n\n> - 推荐 + 回退 + 置信缺口:荐一项、给回退项、明说本分析看不见什么。**推荐先只按 ① 得出**:一句终态句(两年后该能力在平台上长什么样、主流平台怎么建模,点名参照);②③④ 只调时序与分期,⛔ 不翻字母。推荐段必带自检行:「**只看①选 X;②③④ 是否翻转:否 / 是(理由)**」,答「是」时推荐仍为 X,加一句分期说明。两条硬过滤先于推荐:「契约迁就实现」的选项 ⛔ 不作推荐(spec 与代码不一致默认改代码,改协议另立卡);分期 / 半量方案 ⛔ 不作推荐,除非具名外部用户证据。呈报席 ⛔ 不沿用他席推荐,自行推导;与他席不同时明写差异与理由。\n\n**2. `references/decision-analysis.md`, 四棱卡面块固定形状, the 末尾推荐行** — extend:\n\n> - 末尾一行推荐 + 字母选项(A/B/…),**同一行带自检「只看①选 X;②③④ 是否翻转:…」**,再加一行强制置信缺口:本分析看不见什么。\n\n**3. `SKILL.md:756`** — unchanged (single source of the rule). If the skills seat judges a pointer is needed, one clause: 「自检行见 `references/decision-analysis.md`」. ⛔ No second statement of the rule.\n\n**4. Applicability** — per the file's own 适用面: new records only; existing cards are ⛔ not retroactively edited. The grep-able marker is the literal `只看①选`.\n\n## Acceptance\n\n1. The two edits above land verbatim or with the skills seat's wording improvements that keep the four elements: ①-first derivation with a named reference platform; the self-check line with its literal marker; the two hard filters (契约迁就实现 / 分期半量); no inheriting another seat's recommendation.\n2. `grep -c '只看①选' .claude/skills/pm-dispatch/references/decision-analysis.md` ≥ 2 (the 推荐 item and the 四棱 recommendation row).\n3. The rule text at `SKILL.md:756-758` is byte-identical before and after, or carries only the one pointer clause.\n4. Merged by the maintainer's hand (governed surface); the director seat's next decision batches carry the line, checkable by the same grep on their card comments.\n\n## Refs\n\nDecision batch #117 (director seat post #12708, ledger 5642585243) · #17238 (5642584682) · #16678 (5642584284) · #17147 (5642584078) · `SKILL.md` 升级与决策 · `references/core-rules.md:143-145` · `references/decision-analysis.md`\n\nFiled by the director seat, `session_01QsCVSivtpwT6ZXs5Rtvqxe`, 2026-09-12T01:4xZ, with Claude Code.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

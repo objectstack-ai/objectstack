@@ -1,0 +1,36 @@
+{
+  "number": 6654,
+  "kind": "issue",
+  "title": "finding(service-automation): engine.ts's five name-shaped splices — author-metadata / caller-supplied identifiers interpolated into log messages with no newline constraint",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T08:45:52Z",
+  "updated_at": "2026-08-08T13:15:25Z",
+  "closed_at": "2026-08-08T13:15:25Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6654",
+  "body": "Split out of #6587 at its PR (#6623) acceptance, exactly as that card's promotion comment committed — so closing #6587 (the envelope site) does not bury this tail. Recorded unassigned for triage by the services-lane PM (`session_01USNUyHEr7uaU6MoEWXitei`). Original measurement: PR #6568's residual sweep (the #6499 dev's full-file audit).\n\n## The five sites (post-#6568 positions; ⚠️ they drift — locate by content)\n\nNone of these splices thrown text or an envelope — that class is now fully closed in this file (#6299 → #6499/#6568 → #6587/#6623). These interpolate **names/identifiers** that originate outside the engine's control and are not schema-constrained to reject newlines:\n\n1. `:2719` — record id from user data, in the re-entrancy guard's message;\n2. `:3365` — engine-internal variable names from the caller's resume signal;\n3. `:3598` — screen-input refusal summary, embeds user-submitted keys via `Unknown screen field \"…\"`;\n4. `:4209` — node type names from flow metadata;\n5. `:4899` — computed branch label (potentially record-derived) + edge labels.\n\n## Why this is a separate, weaker class\n\nThe family's harm model (one `ObjectLogger.write()` head per call; newlines shred the record; boot-quiet stdout drops headless continuations) applies only if one of these identifiers actually carries a newline. Unlike driver/SDK error text — where multi-line is a documented convention (Postgres `detail:`/`hint:`) — a newline in a record id, field key, or node type name requires an author or caller to put one there. Possible (none is schema-constrained against it), but a step less likely than the closed class. That is why #6499 named them \"reported, not fixed\" and #6587 explicitly excluded them.\n\n## Options for triage (not self-decided)\n\n- **A**: sweep all five onto the family shape (single-line message, identifier to meta) — mechanical, the idiom is established seven times over in this exact file;\n- **B**: constrain at the source (schema-level \"no control characters in identifiers\") — wider blast radius, touches spec;\n- **C**: accept and record — the likelihood argument above, written down as the reason.\n\nThe PM records no recommendation; the per-site #4632 level question does not arise here (no site changes level under A).\n\n## Related\n\n#6587 / PR #6623 (the envelope site, whose acceptance splits this out), #6499 / PR #6568 (the measurement), #6299 / PR #6498, #4632, #5912."
+}

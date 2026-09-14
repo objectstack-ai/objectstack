@@ -1,0 +1,32 @@
+{
+  "number": 5703,
+  "kind": "issue",
+  "title": "automation: `ActionDescriptor.supportsPause` / `isAsync` 是零读者的声明字段 —— 引擎判定「暂停」的唯一事实是 `execute()` 返回的 `suspend: true`",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T01:06:50Z",
+  "updated_at": "2026-08-08T09:35:02Z",
+  "closed_at": "2026-08-08T09:35:02Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5703",
+  "body": "发现于 #5561 第一步(注册时对未声明 `resumeAuthority` 的 pausing executor 打告警)的前提重验。observation-class:今天没有用户会撞到,单独立单只为把事实记下来。\n\n## 事实(origin/main @ 6ddb2ec4a)\n\n- `ActionDescriptor.supportsPause` 与 `ActionDescriptor.isAsync`(均在 `packages/spec/src/automation/node-executor.zod.ts`,均 `.default(false)`)在 framework / objectui / cloud 三仓**没有任何非测试读者**。仓库范围内对 `.supportsPause` / `.isAsync` 的读取只有 3 处断言:\n  - `packages/spec/src/automation/node-executor.test.ts:174`(读默认值)、`:218`(读 legacy `WAIT_EXECUTOR_DESCRIPTOR`)\n  - `packages/plugins/plugin-approvals/src/approval-node.test.ts:100`\n- 引擎判定「这个节点暂停了」的唯一事实是执行结果,不是描述符声明:`packages/services/service-automation/src/engine.ts:4256` 的 `if (result.suspend)`。\n- #3801 的 resume 闸门也不看它:`resolveResumeAuthority`(`engine.ts:2708`)只沿 alias 走到 canonical 后读 `resumeAuthority`,`supportsPause` 全程不参与。\n\n## 为何是 observation-class\n\n今天全部 6 个 pausing 执行器都在本仓内,且 `supportsPause: true` 声明都正确 —— `screen`(`builtin/screen-nodes.ts:50`)、`wait`(`builtin/wait-node.ts:166`)、`subflow`(`builtin/subflow-node.ts:54`)、`map`(`builtin/map-node.ts:53`)、`approval`(`plugin-approvals/src/approval-node.ts:114`)、`approval_revise`(`approval-revise-node.ts:79`)。仓内没有第三方 pausing 插件,示例应用也不注册任何节点执行器,所以这个字段今天错不了。\n\n## 为何仍值得记\n\n#5561 第一步的裁决把告警的**触发条件**定在 `supportsPause: true`。一旦有代码开始按这个字段下判词,它就从「无人读的声明」变成安全判定的输入 —— 而它当前不被任何执行路径校验:一个 `execute()` 返回 `suspend: true`、却把 `supportsPause` 留在默认 `false` 的执行器,既不会被那条告警点名,又照样拿到 `resumeAuthority` 的 fail-open 默认。这就是 declared 不等于 enforced(Prime Directive #10)在同一个节点上的第二层,且正好落在 #5561 想堵的那条缝上。\n\n## 两条路(只记录,不在本单裁)\n\n按 ADR-0049 enforce-or-remove 择一:\n\n1. **enforce**:在 `engine.ts:4256` 的 `result.suspend` 处对照该节点类型描述符的 `supportsPause`,不一致就拒绝/告警(把描述符声明变成运行时可反驳的事实)。\n2. **承认它是纯设计器面字段**:它确实已经进了 `content/docs/references/automation/node-executor.mdx`,那就在 TSDoc 里写清「声明供设计器/文档使用,运行时不校验」,别让下一个作者以为它是闸门输入。\n\nRefs #5561、#3801、#3823。"
+}

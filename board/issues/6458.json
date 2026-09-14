@@ -1,0 +1,36 @@
+{
+  "number": 6458,
+  "kind": "issue",
+  "title": "`validate-null-guards.ts` 的接缝台账在 PR #6454 合并后会说假话 —— 字段 `readonlyWhen` 那行仍写着 \"sparse / never materializes\"",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T21:48:48Z",
+  "updated_at": "2026-08-08T23:40:41Z",
+  "closed_at": "2026-08-08T23:40:41Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6458",
+  "body": "Filed unassigned from PR #6454(#4953 裁决第 1 条的 engine-core 份额)。**只记录发现,不含修法承诺** —— 派发口径明确本轮不触 `packages/lint`(裁决第 3 条:闸门扩面要等**两处**服务端接缝都补齐,flow 半边在 services 席)。\n\n## 发现\n\n`packages/lint/src/validate-null-guards.ts` 的模块头维护着一张**接缝台账**(#4811 留下的,「一个被排除但没写理由的面,和一个根本没人看过的面无法区分」正是这一族 issue 的主题)。其中一行:\n\n```\n| field `readonlyWhen` | sparse | `stripReadonlyWhenFields` merges `{...previous, ...data}` and never materializes | excluded |\n```\n\nPR #6454 合并后,这一行的 **binding 列(`sparse`)与 evidence 列(`never materializes`)都不再成立** —— 该接缝的 `record` / `previous` 两个根已过 `materializeDeclaredFields`。verdict 列(`excluded`)在 flow 半边落地前仍然正确,但**理由已经换了**:不再是「绑定是稀疏的,规则会开错药方」,而是「裁决第 3 条要求两处服务端接缝都齐才扩面」。\n\n一张说假话的台账比没有台账更糟:它正是下一个作者用来决定「这个面要不要接闸门」的依据,而 evidence 列指向的那行代码已经不在了。\n\n## 两半,别混在一起\n\n1. **台账更正**(小,随时可做):把 binding / evidence 列改成实际形状,verdict 保持 `excluded` 但把理由换成「等 flow 触发记录播种补齐」。\n2. **闸门扩面**(裁决第 3 条,有前置):两处服务端接缝都补齐后,`readonlyWhen` 面可纳入 null-guard 闸门。注意这一面的 fail 策略与已覆盖的两面**不同** —— 校验规则与 hook condition 是 fail-closed,`readonlyWhen` 是 fail-open(除 #4889 的未绑定根),即「谓词写错 ⇒ 声明的锁被放行」,与 `requiredWhen` 那行台账已经记下的理由同类(「fail-OPEN,所以一条没守卫的谓词静默地什么都不强制」)。扩面时这条理由要一并写进 evidence 列。\n\n顺带:`packages/objectql/src/cel-fault.ts` 模块头那句「the same argument that put `materializeDeclaredFields` in front of **both** evaluators」在 #6454 后是三处,属同类文档漂移,可一并捎上。\n\nBlocked-by: PR #6454(engine-core 半边)\nBlocked-by: #4953 裁决第 1 条的 services 半边(flow 触发记录播种,尚未立单)\n\n#4811 已 closed,故本单不作为它的子单;若分诊按裁决把 #4953 拆成子单,本单可并入「结论落档 + 闸门扩面」那一支。\n"
+}

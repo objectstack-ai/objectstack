@@ -1,0 +1,35 @@
+{
+  "number": 5282,
+  "kind": "issue",
+  "title": "core(finding): ObjectKernel 不继承 ObjectKernelBase —— 钩子分发语义在两处各写一遍,#5170/#5257/#5274 都是同一条结构缝",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T15:35:28Z",
+  "updated_at": "2026-08-08T10:40:00Z",
+  "closed_at": "2026-08-08T10:40:00Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5282",
+  "body": "发现于 #5274(PR #5281)的实现阶段。**观察类:今天没有用户会踩到**(#5274 合入后四个生命周期钩子在两个 kernel 上语义已经一致),记录的是让这一致性得以维持的机制有多脆。\n\n## 事实\n\n`packages/core/src/kernel.ts:56` 是 `export class ObjectKernel {` —— **不继承任何基类**。`packages/core/src/kernel-base.ts:30` 的 `export abstract class ObjectKernelBase` 只有一个子类:`lite-kernel.ts:23` 的 `LiteKernel`。\n\n后果:钩子分发在仓库里存在**两套独立实现**,没有共享代码路径。\n\n| | ObjectKernel | LiteKernel |\n|:---|:---|:---|\n| 钩子存储 | `kernel.ts` 自己的私有 `hooks` map | `kernel-base.ts` 的 `hooks` map |\n| 隔离式分发 | `kernel.ts` 的私有 `triggerShutdownHookIsolating()`(#5274 新增) | `ObjectKernelBase.triggerHook()` |\n| 传播式分发 | `context.trigger`(裸 await 循环) | `ObjectKernelBase.triggerHookOrThrow()` |\n\n两侧的隔离式分发现在逐字打同一行日志(`Hook handler failed: kernel:shutdown`),但那是**手工镜像**的结果,不是共享实现。#5274 的实现里之所以没有直接复用 `triggerHook`,原因就是它够不着:`protected` 方法挂在一个 `ObjectKernel` 并不继承的基类上。\n\n## 为什么值得记一笔\n\n**连续三个单都长在这条缝上**,而且每次都是同一个形状 ——「同一个钩子名在两个 kernel 上含义相反」:\n\n- #5170 / PR #5258 —— `kernel:ready`:LiteKernel 吞掉抛错,ObjectKernel 让 boot 失败;\n- #5257 / PR #5275 —— `kernel:bootstrapped` 与 `kernel:listening`:同上;最难看的一例是 `HonoServerPlugin` 在 `kernel:listening` 里 `await server.listen(port)`,LiteKernel 上 listen 失败被吞,进程打印「✅ Bootstrap complete」却没有在监听;\n- #5274 / PR #5281 —— `kernel:shutdown`:方向相反,ObjectKernel 的传播式分发让一个坏 handler 跳过全部 `destroy()` 并 `process.exit(1)`。\n\n目前把两侧钉在一起的,只有**成对的手写测试**(`kernel.test.ts` 与 `lite-kernel.test.ts` 各一份)。这是约定,不是机制:明天新增第五个生命周期钩子,不会自动获得任何配对,也没有门会因为漏配而失败。\n\n## 一处仍然存在的休眠不一致(#5274 之后)\n\n在 ObjectKernel 上,`kernel:shutdown` 现在有两条语义不同的分发路径:\n\n- 内核自己在 `performShutdown()` 里的分发 —— 隔离式(失败记日志,其余继续);\n- 插件手工调用 `ctx.trigger('kernel:shutdown')` —— 仍是 `context.trigger` 的裸 await 循环,传播式。\n\nLiteKernel 那边 `context.trigger`(`kernel-base.ts:123`)同样是裸循环,所以两个 kernel 在这一点上形状相同 —— 但都与各自内核自身的停机分发不一致。今天仓库里没有任何地方手工 trigger `kernel:shutdown`,所以这是**休眠**的,不是在冒烟的火。\n\n## 不预判方向\n\n至少三种走法,代价差很多,需要一次显式裁定而不是顺手改:\n\n- **A** 让 `ObjectKernel` 继承 `ObjectKernelBase` —— 最彻底,但 `ObjectKernel` 是 747 行、自带 `plugins`/`services`/`hooks`/`state`/`logger` 全套字段的生产内核,重构面和回归风险都不小;\n- **B** 把两个分发器抽成模块级自由函数(接收 handlers 数组 + logger),两边各自调用 —— 只统一分发这一件事,改动面小,但不解决「两套 hooks 存储」;\n- **C** 什么都不做,把「成对测试」升格为一道门(例如检查每个 `kernel:*` 钩子在两个测试文件里都有具名 pin)—— 不动运行时,只让漏配可见。\n\n倾向 B 或 C,但这属于架构裁定,留给 PM 分诊。\n\n相关:#5170 / PR #5258、#5257 / PR #5275、#5274 / PR #5281。"
+}

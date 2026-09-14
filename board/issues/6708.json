@@ -1,0 +1,35 @@
+{
+  "number": 6708,
+  "kind": "pull_request",
+  "title": "feat(metadata-protocol): 多组织下「平台级 + schedule + create_record + 未显式 organization_id」发布期拒绝 (#6285)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/xl",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T13:14:16Z",
+  "updated_at": "2026-08-08T13:55:34Z",
+  "closed_at": "2026-08-08T13:55:33Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-08T13:55:33Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/6708",
+  "body": "Fixes objectstack-ai/objectstack#6285\n\n实现 #6155 维护者 2026-08-07 裁决(Q2=A + Q3=A)的 lint 半边:给运行时发布门补两个缺失输入,拒绝裁决点名的那一个组合。#6283 已落地(flow 行 `allowOrgOverride: false`),拒绝语义已定。\n\n## STOP 项的判定:既有设计,且护栏在它保护的部署形态里可达\n\ndispatch 要求动手前先答 `protocol.ts` 的 `if (this.environmentId === undefined) return;`。测量结论:**既有设计,不是遗漏**,并且它**不会**让本护栏在多组织部署里失效。⛔ 未拓宽 gate 激活面。\n\n证据两条:\n\n1. **它是 ADR-0005 控制面通道的既有 carve-out**,与其下方 #3050 authoring gate 的 `if (this.environmentId !== undefined)` 同一条口径,`protocol.runtime-authoring-gate.test.ts` 早已把它作为**刻意行为**钉住(用例 “does not gate control-plane (package-author) writes”,注释原文:「`environmentId === undefined` is the package author's own channel — the same carve-out every ADR-0005 authorization gate above it makes」)。\n2. **每条真实服务路径都绑定 environmentId**,所以多组织部署照常进这道门:\n\n   | 路径 | environmentId | 位置 |\n   |---|---|---|\n   | `os dev` | `env_local`(默认) | `packages/cli/src/commands/dev.ts:225` |\n   | `os start` | `env_local`(默认) | `packages/cli/src/commands/start.ts:197` |\n   | standalone artifact stack | `proj_local`(默认) | `packages/runtime/src/standalone-stack.ts:378` |\n   | cloud 单项目内核 | 各自项目 id | `packages/objectql/src/plugin.ts:295` |\n\n   短路后面剩下的是控制面 bootstrap 内核 —— 它不写租户元数据。拓宽它会改变全部 26 条共享规则的影响面,不是本单的事。\n\n## 拒绝组合\n\n多组织部署形态 && 平台级流程(写入不带 org)&& schedule 触发 && 含 `create_record` && 未在 `fields` 显式给 `organization_id` ⇒ 发布时 422 拒绝(沿用既有 `INVALID_METADATA` 信封,ADR-0112:`code` + `status` + `issues[]`)。\n\n每个肢体的**反面**都单独钉住,都照常发布:单组织部署、org 归属的写入、其它触发器、不建记录的流程,以及作者写了 `config.fields.organization_id`(#6153 fill-only 保证作者值优先 —— 既有能力,本 PR 只核验不重造)。\n\n三处判定不靠猜:\n\n- **schedule 判定**逐分支照抄 `AutomationEngine.resolveTriggerBinding`,含其**优先级** —— start 节点带 `timeRelative` 的绑到 time-relative 触发器(它按记录逐条启动,有 org 可解析),`record-*` 绑到 record-change。放宽成「哪里有 schedule 就算」会误伤根本到不了 `ScheduleTrigger` 的流程。\n- **region 走查**复用 spec 的 `FLOW_REGION_SLOTS_BY_TYPE`(#4401 的唯一声明,已有四个走查读它)。只走 `flow.nodes` 顶层会对**恰恰是本规则要抓的形态**失明 —— 逐行清扫的 `create_record` 就在 `loop` 体里,即 #4380 缺陷重演。\n- **「显式声明」**只读唯一正则键 `config.fields.organization_id`,无 `??` 别名链(Prime Directive #12:`CreateRecordConfigSchema` 是 `strictObject`,`fieldValues` 是它点名拒绝的拼写,且 schema 门在本门之前跑)。写了键但值为 `null` / 空串**不算**声明 —— 否则「写个空键就能消音」正是本门要关掉的 declared ≠ enforced 形状。\n\n## 为什么判定不进 `AUTHORING_RULES`\n\nQ3=A 原文:「护栏只落运行时发布门 …… CLI 纯函数侧 ⛔ 不判(构建机 env 是假信号)」。两个输入都是**部署**事实,而 CLI 跑在构建机上。这不只是取舍,也是结构约束:`authoring-rule-wiring.test.ts` 要求每条 `runtime-publish` 规则**同时**上 `os build`(「the two publish verbs must not disagree」),而那正是 Q3=A 选择的分歧。所以判定归 gate 自己,该文件仍**未**指名任何注册表规则,wiring 守卫的三条不变量原样通过。\n\nposture 作为**入参**而非门内 env 读数:`assertRuntimeAuthoringRules`(不纯的一侧)做 `postureEnforcesWall(resolveTenancyPosture())`,纯函数只收结果。⛔ 未改 `packages/spec` / `packages/types`,只消费其导出。\n\n`resolveTenancyPosture()` 对非法 `OS_TENANCY_POSTURE` 会**抛**,那个拒绝属于 boot 而不属于一次元数据写入,故在此 catch 并按**有墙**读(fail-closed)—— 与 ADR-0105 对这个输入的论证同向,且代价为零:该状态下部署根本起不来,即便到达也只是**武装**护栏,发布仍需命中全部肢体才被拒。\n\n## 测试:26 例;反向验证按预判方向命中\n\n两个面按 dispatch 的口径分别断言:纯函数面断**判定结构**,抛出面断 **ADR-0112 信封的 `code` 与 `status`**(不单用 `toThrow()`)。\n\n反向验证**先定方向再跑**:只撤 `protocol.ts` 的两输入管线、保留纯函数 —— 预判「caller 面拒绝用例转红、纯函数与放行用例保持绿」。实测 **5 红 / 21 绿**,红的形状恰好证明为什么 `toThrow()` 不够:\n\n```text\nAssertionError: expected { success: true, …(4) } to be an instance of Error\nAssertionError: expected undefined to be 'INVALID_METADATA'\nAssertionError: the hatch makes a violation TOLERATED, never invisible: expected +0 to be 1\n```\n\n第一条即未修路径**根本不抛**(它成功落库),单用 `toThrow()` 会报「promise 已 resolve」,永远说不出「信封缺失」。\n\n本地实测(合入 `origin/main` @ `d6d1a50be` 后重跑):\n\n```text\npackages/metadata-protocol test:  Test Files  59 passed (59)   Tests  653 passed (653)\npackages/lint test:               Test Files  63 passed (63)   Tests 1612 passed (1612)\npackages/objectql test:           Test Files 149 passed (149)  Tests 2532 passed (2532)\ntsc --noEmit (metadata-protocol):  63 errors = ledger 记账值,新增/改动文件零错误\n```\n\n门禁按 `.github/workflows/lint.yml` 逐条枚举后全部前台执行:**53 个 `check:*` 全 PASS + `pnpm lint` PASS**(含 `check:engine-double-contract` / `check:error-code-casing` / `check:route-envelope` / `check:nul-bytes` / `check:adr-anchors` / `check:type-check-debt`)。\n\n## 影响面(如实)\n\n行为收紧,仅限**多组织**部署。既有定时流程照常运行 —— 本门只挡新写入,不动存量行(#4463 D4)—— 但下次**重新发布**时会被拒,直到补上 `organization_id`;而那正是让它不再往组织分区之外写行的同一处修改。单组织部署不受影响(`postureEnforcesWall('single')` 为 false)。\n\n## 文件面\n\n未越 dispatch 声明的文件面:`runtime-authoring-gate.ts` + `protocol.ts`(`assertRuntimeAuthoringRules` 区域 ~`:2427`–`:2507` + 导入 + 两处调用点)+ 新测试 + 一个 changeset。protocol.ts 的 diff hunk 全部落在上述区域,**未触及** #6479 在飞的 `updateData`(~`:5743`)与 #5079 在飞的 `getMetaItems`/`deleteMetaItem`(~`:3284`/~`:10514`)。\n\nRefs:#6155(裁决与探针证据)、#6283(Q1=B 契约半边)、#6153(fill-only 先例)、#5494、hotcrm#698、ADR-0105 D1、ADR-0118 D1、#4463。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01W6bLax4KMrSfnE1ydFU8Dw\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01W6bLax4KMrSfnE1ydFU8Dw)_"
+}

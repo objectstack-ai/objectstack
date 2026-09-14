@@ -1,0 +1,33 @@
+{
+  "number": 6490,
+  "kind": "issue",
+  "title": "[skill] pm-dispatch step 3: order batch selection by unlock fan-out — the queue view cannot see which cards are blocking others",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:queue"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T01:50:45Z",
+  "updated_at": "2026-08-08T14:10:53Z",
+  "closed_at": "2026-08-08T14:10:53Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6490",
+  "body": "Filed from the 2026-08-07 unlock sweep (maintainer-approved). Unassigned.\n\n## The gap, with today's evidence\n\nBatch selection (step 3) orders by `priority:p0` → `target:<major>` board → ordinary queue. **Nothing in that order can see that a card is blocking other cards**, because the blocking relation lives in the *dependents'* bodies (`Blocked-by: #N`), never on the upstream. In the queue view a chain head is indistinguishable from an isolated p3.\n\nMeasured today:\n\n| Upstream | Blocks | Fan-out | Its own labels |\n|---|---|---|---|\n| **#5702** | #5814, #5893, #6337 | **3** | no priority label |\n| **#6428** | #5491, #5492 → and #5492 blocks #5493 | **3** (2 direct + 1 transitive) | no priority label |\n| #5492 | #5493 | 1 | — |\n| #6037 / #5309 / #5933 / #5928 / #6191 / #4953 / #6283 / #6285 | one each | 1 | mostly none |\n\n**#5702 is the proof**: dispatchable since 2026-08-06T06:47Z, unswept for ~2 days, with three cards queued behind it. **#6428 is the sharper one**: it carries no priority signal while blocking #5491 + #5492 — the two halves of the v17 security batch the maintainer ruled today, which must land together.\n\n## Proposed clause (step 3, batch selection)\n\n> **Selection priority:** `priority:p0` jump-the-queue > **upstream cards with unlock fan-out ≥ 2** > `target:<major>` board items > ordinary queue items.\n>\n> Fan-out is computed, not declared: build a reverse index of `Blocked-by: #N` lines across open `pm:blocked` issues — the same read the unlock sweep already performs, so the cost is zero. Fan-out ordering is **ordering only**, never an exemption: same-file serialization, the claim protocol and batch independence all still apply.\n\n## Why not a new label\n\nA `priority:*` bump or a new `pm:blocking` label would need a producer, and every unread label rots (a label exists iff something reads it). Fan-out is **derivable from data the protocol already maintains**, so deriving it at selection time keeps one source of truth and cannot drift. It also carries the right incentive by construction: work that unblocks other work goes first, and throughput compounds.\n\n## Acceptance\n\n- SKILL step 3 carries the clause with the derivation method and the explicit \"ordering, not exemption\" caveat.\n- The unlock sweep section notes that the same reverse index feeds both duties.\n- Worked example included (#5702 / #6428 above) so the next reader sees the failure mode, not just the rule.\n\nRelated: today's unlock sweep (8 unblocked, 3 stale ~2 days) recorded on #6015; #6410 is the sibling SKILL card from the same day (compiler-face checklist)."
+}

@@ -1,0 +1,36 @@
+{
+  "number": 5628,
+  "kind": "issue",
+  "title": "[观察] autonumber builder 不注入 readonly: true —— `readonly` 契约的「表单不可编辑」那一半对单号字段不成立",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:dispatched",
+    "target:v17"
+  ],
+  "assignees": [
+    "qq9340100"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T20:52:48Z",
+  "updated_at": "2026-08-08T10:04:08Z",
+  "closed_at": "2026-08-08T10:04:08Z",
+  "closed_by": {
+    "login": "qq9340100",
+    "id": 313832657,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5628",
+  "body": "## 性质\n\n观察类（`finding`），**不是今天用户会踩到的数据缺陷**。#5503 / PR #5627 已在引擎侧把\n`type: 'autonumber'` 视为隐含 readonly，非 system 调用者提交的单号在派发给任何驱动之前\n就被剥离，因此**数据不会再被伪造**。这里记录的是同一契约的另一半没有对齐。\n\n## 事实\n\n`packages/spec/src/data/field.zod.ts:779`，`FieldSchema.readonly` 的 `.describe()` 把\n这个键定义为**两件事**：\n\n> Read-only — **never editable in forms**, AND server-enforced on BOTH write paths…\n\n`packages/spec/src/data/field.zod.ts:898` 的 builder：\n\n```ts\nautonumber: (config: FieldInput = {}) => ({ type: 'autonumber', ...config } as const),\n```\n\n不注入 `readonly: true`。于是任何按 `field.readonly` 决定是否渲染成可编辑输入的\nauthoring / 渲染层，都会把 autonumber 字段当作可编辑字段对待 —— 而它的值现在必然被\n服务端丢弃。\n\n反查过的对照：仓内确实存在若干\"计算字段\"集合，但没有一个被表单层消费成 readonly ——\n`packages/verify/src/derive.ts:23` 的 `COMPUTED`、\n`packages/plugins/plugin-audit/src/audit-writers.ts:188` 的 `COMPUTED_FIELD_TYPES`\n（审计跳过计算列）、`packages/metadata-protocol/src/protocol.ts` 的 clone 剔除。\n`packages/spec/src/data/object.form.ts` 里 autonumber 只出现在类型下拉与\n`autonumberFormat` 的 `visibleWhen` 上，没有可编辑性的分支。\n\n## 后果（低）\n\n一个用户在表单里看到可以输入的\"单号\"框，填了值、提交成功，回包里的单号却是序列发的另一个\n号。写入路径会在 `droppedFields` 里如实上报、服务端也会留下一条带补救办法的 `warn`\n（PR #5627），但渲染器未必把 `droppedFields` 呈现给用户。属于 #4632 那类\"第二等公民\"的\n交互，不是数据正确性问题。\n\n## 可能的方向（未决，交由 spec 座位判断）\n\n1. builder 直接注入 `readonly: true`（issue #5503 建议方向的后一种）。需要确认注入后\n   `stripReadonlyForInsert` 入口剥离、`isPreservableUnderAudit`（`system !== true` 分支）\n   与既有的 `authorable-surface` / 表单基线不会被动出别的语义。\n2. 不动 builder，改为在表单/渲染契约侧把\"运行时拥有的字段类型\"与 `readonly` 并列处理，\n   与 PR #5627 在引擎侧引入的 `isRuntimeOwnedField` 判定同源。\n\n无论走哪条，都**不替代**引擎侧防线：入口剥离对 `sys_` / `managedBy` 平台对象是豁免的，\n而且绕过 DataProtocol 直接调用 `engine.insert` 的路径不经过入口。\n\n发现于 #5503 的实现过程（PR #5627），按 Prime Directive #10 单独记录，未在该 PR 内扩大范围。"
+}

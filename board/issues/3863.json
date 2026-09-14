@@ -1,0 +1,33 @@
+{
+  "number": 3863,
+  "kind": "issue",
+  "title": "Node-level error branches: let a flow handle a failed node instead of aborting the run",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "finding"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-28T12:05:31Z",
+  "updated_at": "2026-08-08T10:24:05Z",
+  "closed_at": "2026-08-08T10:24:05Z",
+  "closed_by": {
+    "login": "qq9340100",
+    "id": 313832657,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3863",
+  "body": "**Status: design placeholder / engine-level feature. Filed to capture the motivation, not scheduled.**\n\n## Today\n\nA node that returns `{ success: false }` fails the entire run. `AutomationEngine.execute` catches it, writes the run-history row, and returns `{ success: false, error }`. The only recovery available is **flow-level** `errorHandling.strategy: 'retry'`, which re-runs the whole flow from the start — useless when the failure is deterministic (a bad filter, a validation rejection, a 4xx from an `http` node).\n\nThere is no way to say \"if this node fails, take this other path.\"\n\n## Why it matters now\n\nGuardrails that refuse to execute are the platform's main defense against silently-wrong data operations, and we keep (correctly) adding them:\n\n- #3810 — a CRUD node refuses when interpolation erased a filter condition\n- #3425 — a `readonly` flow write is a certain no-op\n- ADR-0049 / #1888 — unscoped scheduled runs\n\nEvery one of them makes a node fail hard, and every one therefore aborts the run. That is the right default — a widened `delete_record` must not proceed — but it means the *only* available response to a guard is \"the whole automation stops.\" The strictness debate on #3810 was really a debate about this: the objection was never \"the guard is wrong,\" it was \"aborting is expensive.\" An error branch decouples the two.\n\nIt also generalizes well past guards. A `get_record` that finds nothing, an `http` node that 404s, a `connector_action` that rate-limits — all are ordinary business conditions an author would like to route around, and today each one kills the run.\n\n## Sketch\n\nAn out-edge with an error semantic, resolved when the source node fails:\n\n```ts\nedges: [\n  { source: 'fetch_account', target: 'use_account', label: 'ok' },\n  { source: 'fetch_account', target: 'notify_admin', type: 'error' },\n]\n```\n\nOpen questions:\n\n- **Edge shape** — a reserved `label: 'error'` or a first-class `type: 'error'`? `type: 'back'` (ADR-0044) is the existing precedent for an edge whose type changes traversal semantics, which argues for `type`.\n- **What the branch can read** — the failing node's error message needs to land in a variable (`{<nodeId>.error}`) or the branch cannot act on it.\n- **Unhandled failures stay fatal.** A node with no error edge must keep aborting the run. This is a strict opt-in, or it silently converts every existing guard into a swallowed error — the exact fail-open direction #3810 closed.\n- **Interaction with `errorHandling.retry`** — does a handled node still count toward flow-level retry? Presumably not: the failure was handled.\n- **Cycle validation** — an error edge looping back needs the same `type: 'back'` treatment approvals use, or `registerFlow` will reject legitimate retry-ish shapes.\n- **Run-history semantics** — a run that took an error branch and completed: `success` with a warning on the step, or a distinct status? The Runs surface should not report a clean success with no trace of the failure (#3356 / #3407 lesson).\n\n## Related\n\n- #3810 — the guard whose cost motivated this\n- #3862 — explicit optional filter conditions (the narrow fix for one case; this is the general one)\n- ADR-0044 — `type: 'back'`, the existing precedent for edge-type-driven traversal"
+}

@@ -1,0 +1,34 @@
+{
+  "number": 6716,
+  "kind": "issue",
+  "title": "字段级未绑定根的诊断对三个槽位共用一句「falls back to VISIBLE」——而 readonlyWhen 的未绑定根实测是 fail-CLOSED(#4889),方向刚好相反",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T13:22:12Z",
+  "updated_at": "2026-08-08T18:28:40Z",
+  "closed_at": "2026-08-08T18:28:40Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6716",
+  "body": "PM 座位在验收 PR #6711(#6585)时的越界发现,**不由该 PR 引入**,按 PD #10 立案,**未认领、未定级**。与 #6713 同现场但**不同条**(见下「与 #6713 的关系」)。\n\n## 事实(实测,`origin/main`)\n\n`packages/lint/src/validate-expressions.ts` 的 `checkFieldRuleUserRoot` 对 `visibleWhen` / `readonlyWhen` / `requiredWhen` **三个槽位共用一条文案**,其中的因果句是:\n\n> …`${root}` is unbound here, so the predicate faults and **falls back to VISIBLE**, leaving the field the test was meant to hide **showing for everyone** (#6146).\n\n但 `readonlyWhen` 的未绑定根在服务端**不是** fail-open。`packages/objectql/src/validation/rule-validator.ts` 的模块头自陈(`:99-110`):\n\n> ## `readonlyWhen`: the UNBOUND-ROOT case is fail-CLOSED (#4889)\n> … A `readonlyWhen` predicate that faults because it names a scope ROOT this operation did not bind … **That single case now resolves to LOCKED.** Every OTHER `readonlyWhen` fault (undeclared key, null overload, parse error) keeps the fail-open policy … and `requiredWhen` / option `visibleWhen` are untouched.\n\n实现一致 —— `isReadonlyWhenLocked`(`:399-428`)在 `unknownVariableOf(res.error)` 命中时:\n\n```ts\nlogger?.warn?.(\n  `readonlyWhen for '${name}' reads '${unbound}', which is not bound for this operation — ` +\n    `treating the field as LOCKED (the declared lock is not waived because it could not be evaluated). ` + …\n);\nreturn true;\n```\n\n**未绑定根正是这条 carve-out 命中的那一类**(而不是「undeclared key / parse error」那一类),所以一个写了 `readonlyWhen: \"'admin' in user.positions\"` 的字段,服务端的后果是**被锁死**,不是「对所有人可见」。诊断把失败方向讲反了。\n\n## 边界:哪些已测、哪些没测\n\n诚实分档,不把未测的当已测:\n\n- **已测**:服务端 `readonlyWhen` 路径(上引代码),方向确为 LOCKED,与文案相反;\n- **未测**:客户端 `evalFieldPredicate` 对 `readonlyWhen` fault 的取值(#4889 的 carve-out 明写是服务端写门那一侧,ADR-0057 D10「server enforces, client is courtesy」),两侧是否同向需要单独量;\n- **未测但表面即不成立**:`requiredWhen` —— 该槽位的后果根本不是可见性,「falls back to VISIBLE / showing for everyone」在语义上就不是它的失败面。#4889 明说 `requiredWhen` 未被 carve-out 触及,但那只说明它仍是 fail-open,不说明它的 fail-open **表现为可见**。\n\n所以准确的说法是:这句因果**只对 `visibleWhen` 精确**,对另外两个槽位至少不精确、对 `readonlyWhen` 服务端是反的。\n\n## 为什么记下来(而不是当文案小事)\n\n处方是对的(移到选项级 `visibleWhen` / 用权限集 FLS),作者照着做仍能修好。问题在**理由那半**:本仓反复把「诊断说真话」当契约面对待(ADR-0078 的读者面、`validate-security-posture.ts:52-55` 那段「inert branch 读起来像一个在看着的门」)。一条把失败方向讲反的诊断,会让作者对「不修会怎样」形成相反的心智模型 —— 对 `readonlyWhen` 尤其要命:他以为「不修 = 字段泄漏」,实际是「不修 = 字段被锁,写不进去」,两者的紧迫性与排障方向完全不同。\n\n## 不是 PR #6711 引入的\n\n明确记录,免得被当成回归:#6711 的 diff 只把 `current_user` 换成 `${root}` 插值。这句因果与「三个槽位共用一条文案」都来自 #6584 / #6290,**早于**本次改动。#6711 只是让它更容易被命中(拼写从一种变三种),并顺带给它加了钉子(新测试 `toMatch(/\\`\\w+\\` reads \\`user\\`/)` 断言的是根名,不碰这句因果)。⛔ 不构成阻塞 #6711 的理由,该 PR 是严格的改进。\n\n## 与 #6713 的关系(相邻,不重复)\n\n#6713 讲的是**根集合的形状** —— 黑名单 3 项 vs 实测白名单 3 项,其余 ~20 个 `SCOPE_ROOTS` 成员同样静默。本条讲的是**已命中之后那句话本身讲错了方向**。两者可以各自独立成立:把黑名单翻成白名单(#6713 修法 1)不会自动修好这句因果,反过来改文案也不会多认出一个根。\n\n但**两者在文案分档上会合流**:#6713 修法 1 已经指出「现有处方是用户向的,对 `data` / `vars` 这类根答非所问,得按根分档」。本条追加一条正交的分档轴 —— **按槽位**分(可见性 / 只读 / 必填的失败方向各不相同)。若分诊决定做 #6713 修法 1,建议把这两轴一起设计,否则会改两遍同一段文案。\n\n## 可能的修法(留给分诊,不自选)\n\n1. **按槽位分档因果句**:`visibleWhen` 保留现文案;`readonlyWhen` 改为「faults ⇒ 该字段被视为 LOCKED(#4889),声明的锁不会因为算不出来而被放行」;`requiredWhen` 按实测结果补。需要先把上面「未测」的两格量出来。\n2. **把因果句降格为槽位无关的表述**(例如「谓词 fault,该规则的结果由各槽位的 fault 策略决定,均非你声明的那个」),牺牲具体性换取正确性。成本最低,但也最不像本仓的文案风格 —— 本仓的诊断一贯给具体后果。\n3. **与 #6713 修法 1 合并设计**(推荐先决:若 #6713 走白名单,文案必然要重写,此时两轴一起做)。\n\n## 关联\n\n#6585、#6584(PR)、#6711(PR,发现现场)、#6713(同现场姊妹条)、#6146、#4889(fail-closed carve-out)、#6457(`parent` 稀疏)、ADR-0057 D10、ADR-0058 D5(被 #4889 收窄的那条)、ADR-0078。\n\n查重:`readonlyWhen fail-closed 文案`、`falls back to VISIBLE`、`#4889 diagnostic direction` 三次检索,无同题单;#6713 如上分析为相邻非重复。"
+}

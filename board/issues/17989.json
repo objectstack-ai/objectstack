@@ -1,0 +1,33 @@
+{
+  "number": 17989,
+  "kind": "issue",
+  "title": "Issue backup to Cloudflare R2 — a per-repo Actions snapshot of every issue and comment, so a GitHub account ban cannot take the audit chain with it (maintainer, 2026-09-13)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:skills",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-13T09:47:10Z",
+  "updated_at": "2026-09-13T11:45:50Z",
+  "closed_at": "2026-09-13T11:45:15Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17989",
+  "body": "Filed by the `domain:skills` execution seat (session `session_01DAcomhvR9kKizeYgg89Vo8`) on the maintainer's direct word, live chat 2026-09-13T09:4xZ–09:5xZ, verbatim and untranslated:\n\n> 「先讨论issue 清单，我本来就想备份issue 清单，防止GitHub被封账户。你帮我综合评估结合现在的场景最佳的方案。」\n> 「那如果我单独开一个github 仓库备份issue呢？目前被封号只会丢 issues,不会导致仓库丢」\n> 「那如果推 s3 呢？」\n> 「Cloudflare R2」\n\nRouted and graded under the maintainer's direct-dispatch channel (the words above are the authorization): `domain:skills` (PM tooling under `scripts/pm/**`; the workflow's SUBJECT is the PM board's data, not code quality), `priority:p1` (the maintainer's own data-safety ask; every ruling, review record and landing record of this board lives in issue comments), type `Task`.\n\n## Threat model and why R2\n\nAn account-level ban removes access to the organisation's issues; the code survives in every clone, the issues do not. A backup inside GitHub (a second repository) survives an account ban only under a different owner and never a platform-level action; object storage outside GitHub survives both. The maintainer chose Cloudflare R2 (S3-compatible API, negligible cost). ⚠️ R2 has no bucket versioning: history is kept by the daily tarball below, not by object versions.\n\n## Deliverables\n\n**D1 — `scripts/pm/issue-snapshot.mjs`** (non-governed, this lane). Incremental: `GET /repos/{o}/{r}/issues?state=all&since=<cursor>&per_page=100` (pull requests come back through the same endpoint and are kept, flagged by their `pull_request` key) and the repo-level `GET /repos/{o}/{r}/issues/comments?since=<cursor>&per_page=100` (one endpoint for every new or edited comment, no per-issue reads). Writes a directory: `index.json` (number, title, state, labels, assignee, type, created/updated/closed timestamps, author — small enough to grep), `issues/NNNNN.json` (the issue object plus its comments, merged on every run), `state.json` (the `since` cursor of the last complete run; a run that stops on 403/429 keeps the previous cursor). Flags: `--repo OWNER/NAME`, `--out DIR`, `--full` (ignore the cursor: the bootstrap), `--self-test` (offline). Rate reading printed before and after; stop on the first 403/429. ⛔ No new dependency in the repository: the script uses `fetch` only; the upload is the runner's AWS CLI (see D2).\n\n**D2 — `.github/workflows/issue-snapshot.yml`** in objectstack and objectui. Cron every 30 minutes plus `workflow_dispatch`; steps: checkout → `node scripts/pm/issue-snapshot.mjs --repo <this repo> --out snapshot/` (the previous `state.json` and `index.json` are first pulled down from the bucket so the run is incremental across runners) → `aws s3 sync snapshot/ s3://$BUCKET/<repo>/ --endpoint-url https://<account>.r2.cloudflarestorage.com` → once a day (a second schedule or a date check) `tar` the directory to `s3://$BUCKET/<repo>/snapshots/YYYY-MM-DD.tar.gz`. Uses `GITHUB_TOKEN` for GitHub reads (its own 1 000/h quota, ⛔ none of the seats' identities) and the R2 credentials from repository secrets (`R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET`) — an API token scoped to that one bucket, object read/write only. The bootstrap (`--full`; objectstack has ~18 000 issues) is one `workflow_dispatch` run with a PAT secret, or a run on the maintainer's machine; after it every run is a handful of requests.\n\n**D3 — restore** (documented now, written when needed): `scripts/pm/issue-restore.mjs` recreates issues and comments from the snapshot on a fresh repository in number order so numbers are preserved (placeholders for gaps), with a dry-run and a resume cursor.\n\n**Patrol**: one line in this lane's standing patrol — each fire reads the snapshot workflow's last successful run (`GET /repos/{o}/{r}/actions/workflows/issue-snapshot.yml/runs?status=success&per_page=1`, one request); older than 24 h ⇒ report on the seat post and a comment here. ⛔ No new label, no new sweep.\n\n**Charter text** (governed — rides the charter-revision PR, chain head #17942, ⛔ not this card's PR): the backup is a read-only derivative — 「GitHub 之外永不维护任何跟踪状态」 is untouched, the authority stays the issue itself; the dedupe cache the triage seat keeps in its own container is a separate, session-local thing and is not this backup.\n\n## Maintainer actions (the seat cannot do these)\n\n1. Create the R2 bucket (one bucket, one prefix per repository) and an API token scoped to it (object read/write).\n2. Add the four secrets above to `objectstack-ai/objectstack` and `objectstack-ai/objectui`.\n3. Approve the workflow PR (`.github/workflows/**` is not a governed surface here, but a new scheduled workflow with secrets is the maintainer's to see once — this card asks for that one look).\n\n## Acceptance\n\n1. `--self-test` covers: cursor round-trip; a comment newer than the cursor updates its issue file; a 429 mid-batch keeps the previous cursor and exits non-zero with the cursor printed; `--dry-run` writes nothing.\n2. One dry run against objectstack in CI with the request count and the rate reading printed; the bootstrap run's object count equals the board's issue count read from `GET /repos/{o}/{r}` (`open_issues` plus closed via search is not available — use the listing's last page).\n3. Two consecutive scheduled runs: the second uploads only changed objects (`aws s3 sync` output shows the count).\n4. The daily tarball appears under `snapshots/` and unpacks to the same `index.json`.\n\n## Dedupe\n\nOpen objectstack issues (6 pages, read 2026-09-13T09:5xZ) grepped for backup / snapshot / R2 / 封号 / mirror-of-issues: no existing card. The related-but-different cards: #17374 / #11742 (the shared identity's rate-limit discipline) and the triage-side dedupe cache (a charter item, no card yet).\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

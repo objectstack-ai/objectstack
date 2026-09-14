@@ -1,0 +1,33 @@
+{
+  "number": 18045,
+  "kind": "issue",
+  "title": "board-snapshot: once the open set completes, every run spends its whole budget on the closed history and never re-reads the live board — cards created or updated since 2026-09-10 are in no snapshot",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-13T14:59:12Z",
+  "updated_at": "2026-09-13T16:46:15Z",
+  "closed_at": "2026-09-13T16:45:45Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/18045",
+  "body": "**Maintainer direct dispatch** — the maintainer (pm@objectstack.ai) in the skills seat's chat session at 2026-09-13T14:58Z: 「现在就派发处理 备份缺口」. Filed and claimed by the skills seat (session `session_01DAcomhvR9kKizeYgg89Vo8`) under the direct-dispatch channel; the claim comment below carries the pair.\n\n## Symptom (manifest of the 2026-09-13T14:22Z scheduled run, `board-archive` tip `b7c5f578`)\n- `walk_phase: history`; `walk.open_set.complete: true` (completed 2026-09-10T15:39Z); `walk.history.cursor: 2026-08-03T11:51:21Z`; `resume.stopped_by: budget` (800 requests spent); `next_since: null`; `board.read_at: null`; `count_check.verdict: pending`.\n- Highest issue number under `board/issues/`: **17460**. Nothing created after 2026-09-10 is archived — measured for the 12 cards a suspended account authored on 2026-09-13 (all now 404 on the API) and for this seat's own #18010 #18020 #18025: MISSING in the 14:22Z, 08:28Z and 02:33Z snapshots alike.\n- Every scheduled run since 09-10 (4/day) has walked the closed history from 2026-07-31 forward at 800 requests a run; the cursor has reached 08-03. At this pace the backfill reaches today in weeks, and until then the live board is not re-read at all.\n\n## Contract violated\nThe workflow's own purpose line: 「the archive answers exactly one question, after a loss: what did the record say?」 On 2026-09-13 a loss happened (an account suspension hid 12 cards and ~30 comments) and the record said nothing, because the walk plan (`selectWalkPlan`, phases `open → history → incremental`) only reaches `incremental` after `history` completes, and `resume.since` wins over everything while it is incomplete. Predecessor #17434 made the FIRST walk open-first; it did not cover the steady state after the open set completes.\n\n## Fix shape (the dev falsifies each premise first)\n1. **Delta first, every run**: before the history backfill, walk `state=all&sort=updated&direction=asc&since=<previous manifest's generated_at, minus a small skew>` and archive every row (open or closed) — bounded to a declared slice of the 800 budget (e.g. up to 300 requests, or until the delta is exhausted), so a busy board cannot starve the backfill entirely and a quiet one costs a page.\n2. **History with the remainder**: the existing backfill continues from its cursor with whatever budget is left; its cursor semantics unchanged.\n3. **Manifest**: record both cursors (`delta.since` / `delta.complete` and the history cursor); `next_since` becomes the delta's own high-water mark; `board.read_at` and the count check read the board's open count each run so `count_check` stops being `pending`.\n4. **Self-test**: the regression pinned — a manifest in `history` phase plus a card updated after `generated_at` ⇒ that card is archived on the very next run; the budget split; delta-then-history ordering; resume semantics unchanged for an interrupted history walk.\n5. ⛔ Constraints kept from the file's docblock: no second token, no retry loop, budget stays 800, `GITHUB_TOKEN` only; ⛔ no `.claude/**`; the cron and the workflow file stay as they are unless a premise forces a change (declare it if so).\n\nFile surface: `scripts/pm/board-snapshot.mjs` only (its self-test lives in the same file). Acceptance: `node scripts/pm/board-snapshot.mjs --self-test` green with the regression case; the derived gate families (`dispatch-gates --commands`) green; the PR body states the budget split and the new manifest keys.\n\nDedupe keywords: board-snapshot, open set, incremental, since, history backfill, budget, #17434."
+}

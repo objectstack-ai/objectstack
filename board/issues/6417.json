@@ -1,0 +1,35 @@
+{
+  "number": 6417,
+  "kind": "issue",
+  "title": "[metadata-core] sys_view_definition：owner/organization_id 为 NULL 的视图完全不受唯一索引约束（两条同名活跃共享视图可并存）",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T17:08:21Z",
+  "updated_at": "2026-08-08T10:14:10Z",
+  "closed_at": "2026-08-08T10:07:44Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6417",
+  "body": "发现于 #5839（活跃行唯一）的实施。**不在该 PR 范围内**——#5839 的维护者裁决只针对「归档视图占名额」，本条是同一索引上的另一个缺口，修它是独立的行为变更。\n\nBlocked-by: #5839 / PR #6415（修复点会落在该 PR 新增的 `packages/metadata-protocol/src/migrations/view-definition-active-index.ts` 里，需先落地）\n\n## 事实\n\n`packages/metadata-core/src/objects/sys-view-definition.object.ts` 的索引声明：\n\n```ts\n{ name: 'idx_sys_view_def_active', fields: ['name', 'organization_id', 'owner'], unique: true }\n```\n\n注释写的是：\n\n> A given view name is unique per (organization, owner) — a shared view (owner NULL) and each user's personal views don't collide.\n\n「shared view (owner NULL) 与各用户的个人视图不冲突」成立，但它隐含的另一半——**共享视图之间应当互相冲突**——不成立。`owner` 对共享视图是 NULL，而 SQL 的 UNIQUE 把 NULL 视为**互不相等**，所以该索引对共享视图**完全不生效**。`organization_id` 同理（`required: false`，环境级视图为 NULL）。\n\n## 实测（真实 SQLite，用驱动实际产出的 DDL）\n\nDDL 取自 `packages/drivers/driver-sql/src/declared-index-retired-keys.test.ts` 已钉住的真实产出：\n\n```\nCREATE UNIQUE INDEX `idx_sys_view_def_active` on `sys_view_definition` (`name`, `organization_id`, `owner`)\n```\n\n```\nCASE 2: 两条 ACTIVE 个人视图，同 (name, org, owner)\n  insert active personal view : OK\n  second ACTIVE duplicate     : REJECTED: UNIQUE constraint failed  ← 约束生效\n\nCASE 3: 两条 ACTIVE 共享视图（owner NULL）\n  insert active shared view   : OK\n  second ACTIVE shared dup    : OK                                  ← 约束不生效\n\nCASE 4: 两条 ACTIVE 环境级视图（organization_id NULL）\n  insert active env view      : OK\n  second ACTIVE env dup       : OK                                  ← 约束不生效\n```\n\n即：个人视图受约束，共享视图与环境级视图不受任何约束。\n\n## 用户可达的后果\n\n同一租户内可以存在**两个同名的共享视图**。视图切换器按 `name` 聚合与去重的地方会拿到重名条目；`name` 本身是「全局唯一的限定视图 id `object.viewKey`」（字段注释原文），所以任何按 name 定位视图的读路径都存在取到哪一条不确定的问题。\n\n## 已有的对照解法\n\n`sys_metadata` 侧的同类问题已经解决：`metadata-protocol` 的 `ensureOverlayIndex()` 用 `COALESCE(package_id, '')` 把 NULL 折成空串，注释里写明理由是「a plain unique index would treat NULLs as distinct and allow duplicate globals」。ADR-0120 D3 则对租户列用 `COALESCE(<tenantField>, '__global__')`，并在 `SqlDriver.createNullSafeUniqueIndex` 里带了 MySQL 函数式键值不支持时的降级与 D4 的冲突行口径。两条既有先例都可直接照抄。\n\n## 为什么 #5839 没有顺手修\n\n#5839 的迁移只改索引的**行范围**（`WHERE state = 'active'`），刻意不动键的拼写。这不是遗漏，是让该迁移**严格弱于**它替换掉的全量索引——活跃行是全部行的子集，所以任何满足旧约束的库必然满足新约束，迁移**不可能在存量数据上建失败**。\n\n把键改成 NULL-safe 则相反：那是**收紧**，在已经存在重名活跃共享视图的库上会直接建不出索引（上面 CASE 3 就是这样一条现成的样本），需要 ADR-0120 D4 的冲突行处置口径配套。这是独立的取舍，需要单独拍板。\n\nPR #6415 已加了一条测试把该缺口如实钉住（`does NOT close the pre-existing NULL-distinct hole for shared views`），修复本条时应把它翻转为正向断言。\n\n## 需要拍板的点\n\n共享视图（`scope='shared'`, owner NULL）之间的同名，应当**禁止**还是**允许**？\n\n- 禁止 ⇒ 按 `ensureOverlayIndex` / ADR-0120 D3 的 `COALESCE` 形态收紧，并按 D4 处置存量冲突行；\n- 允许 ⇒ 该索引对共享视图形同虚设这一点应写进声明注释，且 `name` 字段「全局唯一」的描述需要改。\n"
+}

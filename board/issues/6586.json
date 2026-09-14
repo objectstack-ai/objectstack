@@ -1,0 +1,36 @@
+{
+  "number": 6586,
+  "kind": "issue",
+  "title": "[finding] os-dev agents systematically fail to terminate cleanly after opening their PR — 4/4 today: two silent deaths, two passive-wait stalls on nonexistent wakers",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T05:55:29Z",
+  "updated_at": "2026-08-09T01:13:07Z",
+  "closed_at": "2026-08-08T14:35:49Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6586",
+  "body": "Recorded per Prime Directive #10 by the services-lane PM (`session_01USNUyHEr7uaU6MoEWXitei`). Unassigned — for triage. The defect is in the internal agent tooling (`.claude/` os-dev agent definition / pm-dispatch skill), not in product code.\n\n## The pattern\n\nAll four os-dev dispatches from this seat today produced a correct branch + draft PR, and then **failed to deliver the structured report** the dispatch contract ends with — four for four, in two distinct failure shapes:\n\n**Round 1 (issues #6299 → PR #6498, #6199 → PR #6501): silent death post-PR.** Both agents died between opening the PR and returning the report — zero completion notification. Both were revived by a PM probe (SendMessage) and then delivered complete, high-quality reports from their transcripts. The work was done; only the handback was lost.\n\n**Round 2 (issues #5712 → PR #6581, #6444 → PR #6583): passive-wait stall on a waker that does not exist.** Both agents stopped with a final message of the form:\n\n> \"Waiting on the gate jobs — the poll will re-invoke me when all three conclude.\" (#5712 dev)\n> \"Waiting on the timer; I'll re-check the gate jobs when it fires.\" (#6444 dev)\n\nIn both cases the task notification's own semantics said the agent had stopped **with no live background children** — the \"poll\"/\"timer\" each believed in was not running. Nothing would ever re-invoke them. Both were un-stalled by a PM probe carrying an execution-posture line (no passive waits; CI watch is the PM's; report from local verification), after which each returned its full report within one turn.\n\n## Why it costs\n\n- Every dispatch currently needs one extra PM round-trip (probe + revival) before the review can start — the probe threshold discipline (≥2h) turns that into up to 2h of dead air per card when the PM waits politely.\n- The stall shape is worse than the death shape: it *looks* like liveness (\"waiting on CI\") and invites the PM to wait along, when in fact the agent is unreachable by anything except an explicit probe.\n- The report is the review's input; its absence blocks ACCEPT/REJECT, not just bookkeeping.\n\n## Where the tail comes from\n\nThe dev's job ends at: push, draft PR, **structured report from local verification**. Remote-CI watching belongs to the PM session (which subscribes to the PR). The observed tails suggest the os-dev definition (or the models' default habit) treats \"PR opened\" as the start of a CI-babysitting phase, and then either dies in it or invents a waker for it. Round 2's dispatch prompts did not explicitly forbid CI-waiting; the Round 2 probes that corrected the posture worked immediately, which locates the fix.\n\n## Suggested direction (for triage, not binding)\n\nIn the os-dev agent definition, make the termination contract explicit and terminal:\n\n1. After push + draft PR, the agent's **final action is returning the structured report based on its LOCAL verification** (tests/lint/typecheck it already ran). No CI polling, no timers, no background children at exit.\n2. State the ownership split in the definition itself: remote CI, merge, and landing belong to the dispatching PM; the dev's worktree stays in place for follow-ups.\n3. Optionally allow ONE foreground check-runs reading before the report, never a wait.\n\nThe pm-dispatch skill's dispatch-prompt template can carry the same clause until the agent definition does.\n\n## Evidence\n\n- #6299 / PR #6498, #6199 / PR #6501 (Round 1, silent deaths post-PR; revived by probe, full reports recovered)\n- #5712 / PR #6581, #6444 / PR #6583 (Round 2, passive-wait stalls; both quoted lines above are the agents' verbatim final messages)\n- Related tooling cards: #6465, #6490, #6492 (pm-dispatch skill family)"
+}

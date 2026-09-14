@@ -1,0 +1,35 @@
+{
+  "number": 6744,
+  "kind": "pull_request",
+  "title": "fix(cli,runtime): 统一 os dev / os start / os migrate 的默认数据库解析 (#6469)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/xl",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T13:57:09Z",
+  "updated_at": "2026-08-08T14:51:34Z",
+  "closed_at": "2026-08-08T14:51:33Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": "2026-08-08T14:51:33Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/6744",
+  "body": "Fixes #6469\n\n## 问题\n\n同一个项目目录里,三个命令解析出**三个不同的默认数据库**,而且没有一个读项目配置:\n\n| 命令 | 修复前的默认库 |\n|---|---|\n| `os dev` | `.objectstack/data/dev.db` |\n| `os start` | `.objectstack/data/objectstack.db` |\n| `os migrate *` | `.objectstack/data/standalone.db` |\n\n实测后果(本 PR 在 `origin/main` 上按 issue 的复现步骤重跑,`examples/app-crm`):`os start` 起服务后,`os migrate plan` 打开一个**它自己刚建的空库**并报告 11 张表全部待创建,而同一时刻显式指向服务在用的库是**零漂移**。失败方向是反的 —— 真相是「没问题」,输出是「全没了」,照着 `MAINTENANCE.md` §3.1 走的操作者下一步最可能去回滚一个根本没坏的数据库。\n\n## 按维护者裁定实施(2026-08-08,评论 5225112344)\n\n**一个共享解析函数** —— `resolveProjectDatabaseUrl`,新增于 `packages/runtime/src/resolve-project-database.ts`,由 `@objectstack/runtime` 导出。三条命令各自只保留一个**映射层**(`resolveDevDatabase` / `resolveStartDatabase` / `resolveStandaloneDatabase`),把自己的 flag 面映射进去,**不再持有任何 fallback 文件名**。\n\n放置理由:`packages/runtime` 是唯一能被三方共同依赖的位置 —— `os migrate` 的解析发生在 runtime 内部(`resolveStandaloneDatabase`,同时服务于 `os migrate` 的 boot 与 #3917 的占用探测),而 CLI 已经依赖 runtime;放在 CLI 侧会让 runtime 的 embedder(`createStandaloneStack` 的直接调用方)拿不到同一份解析,分叉照旧。\n\n优先级(自上而下):\n\n1. 显式 URL(`--database` / `--database-url` / 编程式 `databaseUrl`);\n2. `OS_DATABASE_URL` / 旧名 `DATABASE_URL` / 厂商 `TURSO_DATABASE_URL`;\n3. 显式内存 driver(`--database-driver memory` / `OS_DATABASE_DRIVER=memory`)—— 不强加文件默认;\n4. **项目配置声明的默认数据源** —— 编译产物里 `datasourceMapping` 的 `{ default: true, datasource: < name > }` 规则所指向、且连接可表达为 URL 的那个 `datasources[]` 声明;\n5. **统一默认文件 `objectstack.db`**,位于 state 目录(`OS_HOME` → `< projectRoot >/.objectstack` → `~/.objectstack`)。\n\n第 4 条的边界是刻意的:sqlite 家族读 `config.filename`(相对路径按 projectRoot 锚定,正是 driver 从项目 boot 解析它的位置),带 URL 的 driver 读 `config.url`;**不会**把离散的 `host`/`port`/`database` 拼装成 DSN —— 凭空造一个作者从没写过的(还可能带凭据的)URL,比落回默认更糟。规则指向宿主保留名 `default`、声明缺失、连接不可导出 —— 都落回统一默认,也就是这些项目在这一层存在之前本来就得到的结果。driver 拼写走 spec 里那张唯一的别名表(`resolveDriverId`),不新增第二份词表。\n\n**存量文件:兼容读取 + 一行响亮提示,无交互中断(CI 安全)。** 统一名不存在而旧名存在时,读旧文件,并打印一行明确指出**正在读哪个文件**、以及收敛用的 `mv` 命令。不自动改名、不删除、不提问。探测顺序 `objectstack.db` → `dev.db` → `standalone.db`,**三命令完全一致** —— `dev.db` 排在两个旧名之首,因为它装着真实的 dev 数据,而 `standalone.db` 极可能正是本 bug 自己建出来的空文件。按命令区分偏好会重新引入分叉,所以顺序是契约,由钉子测试断言。\n\n**`sqlite://` 归一化为 `file:`。** 此前 `os migrate plan --database-url sqlite://...` 会以 `Unsupported database URL scheme` 被拒;真正不支持的 scheme 报错文案保持精确(并补上「`sqlite://` 是 `file:` 的别名」一句)。\n\n**`sqlite-occupancy.ts`(#3917)。** 动机注释此前把「`pnpm dev` 持有 `standalone.db`」写成压倒性常见的主场景 —— 在默认路径下这是**假的**:`os dev` 持有 `dev.db`,`os migrate` 打开 `standalone.db`,两者永不争用,该守卫在自己描述的主场景里不可能触发。统一之后这个场景**重新成立**,注释按新现实改写,并保留了「它曾经为假」这一事实,免得下一位读者再次相信一句未经检验的话。检测逻辑本身是按文件名参数化的,无需改动 —— 变的是传进去的那个文件名。\n\n## 钉子测试(裁定第 5 条)\n\n`packages/cli/src/commands/unified-db-resolution.pin.test.ts` —— 断言 `dev` / `start` / `migrate` 对同一 `projectRoot` 解析出**同一个 URL**,覆盖每一种 fallback 状态:全新项目 / 统一默认已存在 / 仅 `dev.db` / 仅 `standalone.db` / 两个旧名并存 / 配置声明数据源 / env URL(含 `sqlite://` 归一化)。它驱动三条命令**真实的解析入口**,并传入它们运行时真正传的参数。这正是此前缺失、因而让分叉活下来的那条测试:`dev-default-db.test.ts` 只钉住 dev 自己的文件名,没有任何测试比较过三者。\n\n`dev-default-db.test.ts` 原本钉的是旧的 `dev.db` 默认 —— 裁定取代了它,该文件已改写为钉住 dev 在统一契约下的映射(含 legacy 提示与 `OS_HOME` 支持),另有 `packages/runtime/src/resolve-project-database.test.ts` 覆盖解析器每一级与每条边界。\n\n## 验证(全部在合入 `origin/main` **之后**的合并结果上重跑)\n\n**前提复现(`origin/main`,`examples/app-crm`)**:`os start` 服务 `objectstack.db`;同目录 `os migrate plan` 报 `Database: .../standalone.db` + 11 张表全部待创建,并在磁盘留下一个 4096 字节的空 `standalone.db`;显式 `--database-url file:...objectstack.db` 则报零漂移。三叉与写副作用均按 issue 所述复现。\n\n**修复后**:同一场景 `os migrate plan` 无需任何显式参数即报 `Database: .../objectstack.db` + `Physical schema is in sync with metadata — nothing to migrate.`,目录里**没有**多出任何文件;占用守卫同时报出「被 pid ... (node) 打开」—— 它的主场景确实活了。legacy 场景(把库改名回 `dev.db`):`migrate` 与 `start` 都打印那行提示、都读 `dev.db`、都报零漂移,且不创建新文件。`sqlite://` 现在被接受。\n\n**反向验证(预测先写,再测量)。** 把 `standalone-stack.ts` 的解析改回 #6469 之前的分叉(`OS_HOME`/projectRoot → `standalone.db`),预测:钉子测试大面积转红,`resolve-project-database.test.ts` 里只有 standalone seam 那一组转红,而 `dev-default-db.test.ts` **全绿**(只回退了 migrate 那一半,dev 的 seam 不经过 standalone stack)。测量结果与预测逐条吻合:钉子 7 例中 6 例红、resolver 26 例中 2 例红、dev 文件 9 例全绿。\n\n**诚实排除**:钉子测试中「仅 `standalone.db`」一例在回退后**仍然绿**,不计入红转。原因是那个状态下旧的 migrate 默认恰好就是 `standalone.db`,三者偶然一致 —— 这一例证明的是探测顺序的一致性,不是分叉的存在性,把它算作红转会是虚报。\n\n**门禁**(合并结果上):`pnpm lint` 绿;`@objectstack/runtime` + `@objectstack/cli` typecheck 绿;`lint.yml` 的 35 个 `check:*` 全绿(含随本次合并新增的 `check:kernel-hook-pairs`);`check:type-check-debt` 绿,TEST_DEBT **未上升** —— `@objectstack/runtime` 记录 227、实测 225(-2)。全量测试:runtime 115 文件 / 1722 例通过,cli 96 文件 / 1004 例通过。\n\n## 范围外(已记录,未在本 PR 处理)\n\n- `plan` 在全新项目上仍会因 driver 的 open 模式建出空库文件 —— 解析修好后原报告的危害已消失(plan 现在指向真库),剩下的是 driver open-mode 问题,已按 PD #10 另开 **#6743**(未认领)。\n- #6345(explicit driver 别名词表)同一接缝、排在本卡之后,本 PR 不触碰其词表。\n- 文档中描述默认库路径的页面:没有 `check:*` 门禁强制其一致性,故未在本 PR 改动,留作后续。\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_017uFVNMmTxLpmfQYiuKM1Yx)_"
+}

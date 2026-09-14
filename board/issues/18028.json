@@ -1,0 +1,33 @@
+{
+  "number": 18028,
+  "kind": "issue",
+  "title": "[ruling row 7] the user bulk import must admit `manager_id`, resolved in a second pass keyed on the importer's identity key — split from #16678",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-13T12:50:38Z",
+  "updated_at": "2026-09-14T01:07:17Z",
+  "closed_at": "2026-09-14T01:06:07Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/18028",
+  "body": "Maintainer-action: rule how a `domain:services` card obtains the `CONTRACT_REVIEW_TIER` clause-② verdict its carrier needs — route it to the spec seat (naming how), or rule that this seat's default-judgment-tier review plus the gates suffices — done when `node scripts/pm/check-clause2-carriers.mjs --pair 18046` exits 0 with the carrier cleared on both carriers\n\nSplit from #16678's Phase 3 landing (`5653051072`), which flagged it in its own words:\n\n> ⚠️ **Ruling row 7** (admit `manager_id` to the bulk-import tier, resolved in a second pass keyed on email/phone) is **ruled but not delivered here** — `admin-import-users.ts` is untouched and its 0-match reading still holds. That split is this seat's to carry, ⛔ not lost.\n\nThis is the card that carries it. The work is **already ruled** — ⛔ it does not go back to the decision box.\n\n## The ruling, verbatim\n\nRuling `5651634638` (director seat, decision batch #127 item 1, option B), §9 row 7:\n\n> **7 Bulk import** — `manager_id` admitted to the import tier, resolved in a second pass keyed on the importer's identity key (email / phone), every row-level refusal from row 2 applied, unresolved key = per-row error\n\n## Measured — the gap is still open\n\nOn `origin/main` @ `8261ff717`:\n\n| reading | result |\n|---|---|\n| `packages/plugins/plugin-auth/src/admin-import-users.ts` | 632 lines |\n| case-insensitive `manager` in that file | **1** — and it is `AuthManagerOptions` in a comment, a word match, ⛔ not the field |\n| ⇒ field-level `manager_id` hits | **0** |\n| POSITIVE CONTROL `email` in the same file | **73** |\n\nThe control is what makes the zero a reading rather than a broken search.\n\n## ⛔ Consume the landed endpoint; do NOT re-derive its refusals\n\nPhase 3 landed `packages/plugins/plugin-auth/src/admin-set-user-manager.ts` (476 lines) and **already exports the reusable parts**:\n\n```\n:131  export const MAX_MANAGER_CHAIN_DEPTH = 20\n:134  export type SetUserManagerRefusalReason =\n        'self_assignment' | 'cycle' | 'max_depth_exceeded' | 'cross_organization' | 'idp_provisioned'\n:146  export interface SetUserManagerEngine\n:151  export interface SetUserManagerDeps\n:165  export interface SetUserManagerResult\n:333  export async function runSetUserManager(...)\n```\n\nThe ruling says \"every row-level refusal from row 2 applied\". The file already carries that table, verbatim from its header:\n\n| refusal | error | status | reason |\n|---|---|---|---|\n| self-assignment | `INVALID_FIELD` | 400 | `self_assignment` |\n| cycle | `RESOURCE_CONFLICT` | 409 | `cycle` |\n| depth cap | `VALUE_OUT_OF_RANGE` | 400 | `max_depth_exceeded` |\n| cross-organization | `INVALID_REFERENCE` | 400 | `cross_organization` |\n| directory-owned identity | `PERMISSION_DENIED` | 403 | `idp_provisioned` |\n\n⇒ the second pass routes each row through the **existing** derivation. ⛔ A second copy of these five predicates in the importer is the drift this platform keeps paying for — it is the same shape as #15706 (a mirrored copy of auth rules) and the reason #16678's own design insisted on one derivation. If `runSetUserManager` cannot be called row-wise as it stands, say so with the measurement and propose the smallest seam; ⛔ do not fork the predicates.\n\n## What the card is\n\n1. Admit `manager_id` to the importer's accepted tier.\n2. Resolve it in a **second pass**, after all rows exist — the ruling's wording, and it is load-bearing: a manager named in row 40 may be created by row 90, so a single-pass resolve would refuse valid input.\n3. Key the resolve on **the importer's identity key (email / phone)** — the same key the importer already uses, ⛔ not a new one.\n4. **Unresolved key ⇒ per-row error**, not a whole-import failure and ⛔ not a silent skip.\n5. Apply every row-2 refusal per row, through the existing derivation.\n\n## Open questions the taker must answer with a measurement, not a guess\n\n1. Does the importer today have a place for a second pass at all, or does it commit row-by-row? That decides whether this is a small addition or a restructure — **unmeasured here.**\n2. What does the importer's existing per-row error channel look like (`rows[].delivery` is the shape its header mentions for delivery)? The per-row manager error should ride that channel rather than invent one.\n3. `runSetUserManager`'s signature is written for one HTTP call with `SetUserManagerDeps`; whether N row-wise calls are acceptable or a batch seam is owed is a real design question — answer it with the file open.\n\n## Fences\n\n- ⛔ `packages/spec` is not this lane's and must stay untouched; if a new `error.code` looks owed, STOP and route it — #17995 already carries the closed-vocabulary question for this endpoint's five refusals.\n- ⛔ `content/docs/releases/**` untouched.\n- ⛔ Do not widen to §4 (org-unit derivation). The ruling **cut** it, on axis ① (deriving `manager_id` from unit membership would let a membership edit change a security scope as a side effect), ⛔ not on cost.\n- ⛔ Tier 1 stays as it is — #16678's delivery pinned the ABSENCE of a `SYS_USER_PROFILE_EDIT_FIELDS` change with a test. The importer reaches the column by system context, the same way the endpoint does.\n\n## Grading\n\nInherited from the parent: `priority:p2`, `domain:services` (landing site `packages/plugins/plugin-auth`). ⚠️ Triage may re-rank — the parent's p2 was set against the whole card, and this is its last row.\n\n## Refs\n\n#16678 (parent, closed) · `5651634638` (the ruling) · `5653051072` (Phase 3 landing, which flagged this row) · #17995 (`domain:spec`, the error-vocabulary question for the same five refusals) · objectui#9361 (the Console affordance)\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

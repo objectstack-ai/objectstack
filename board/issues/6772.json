@@ -1,0 +1,35 @@
+{
+  "number": 6772,
+  "kind": "issue",
+  "title": "[metadata-protocol] view-definition 冲突报告里附的排重查询在 PostgreSQL 上会报错——SELECT 了裸列,GROUP BY 的却是它的 COALESCE",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T15:08:15Z",
+  "updated_at": "2026-08-08T23:55:07Z",
+  "closed_at": "2026-08-08T23:55:07Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6772",
+  "body": "发现于 #6418 的实施(照 `view-definition-active-index.ts` 写 `sys_metadata` 的同类排重查询时逐行比对到)。不在 PR #6770 范围内——那条的文件面明确要求 `view-definition-active-index.ts` 的行为保持 byte-identical。\n\n## 事实\n\n`packages/metadata-protocol/src/migrations/view-definition-active-index.ts` 的 `buildDuplicateProbeSql()`:\n\n```sql\nSELECT name, organization_id, owner, COUNT(*) AS duplicate_rows\nFROM sys_view_definition WHERE state = 'active'\nGROUP BY name, COALESCE(organization_id, '__global__'), COALESCE(owner, '')\nHAVING COUNT(*) > 1\n```\n\n`organization_id` 与 `owner` 在 SELECT 列表里是**裸列**,但在 GROUP BY 里只以 `COALESCE(...)` 表达式的形式出现。PostgreSQL 的 `GROUP BY` 语义要求 select 列表中的非聚合列必须**逐字**出现在 GROUP BY 里(或函数依赖于其中的列);包在表达式里不算。于是这条查询在 PG 上直接报:\n\n```text\nERROR:  column \"sys_view_definition.organization_id\" must appear in the GROUP BY clause\n        or be used in an aggregate function\n```\n\nSQLite 宽容,所以现有测试(`view-definition-active-index.test.ts` 的 `a pre-existing duplicate pair blocks the tightening`,真 SQLite)照常绿——它确实证明了这条查询能列出冲突行,但只在 SQLite 上。\n\n函数注释目前写的是「Dialect-neutral: `COALESCE`, `GROUP BY` and `HAVING` are ANSI on every engine this platform runs on」。`COALESCE`/`GROUP BY`/`HAVING` 三个构件确实是 ANSI,但这条查询整体不是。\n\n## 后果\n\n这条查询不是装饰字符串——它被塞进 `error` 级降级报告里交给运维,ADR-0120 D4 的「name the offending rows」就靠它。而它失效的**恰好是能建这个索引的两种方言之一**:\n\n- SQLite:能建 partial index,冲突分支可达,查询能跑 ✅\n- PostgreSQL:能建 partial index,冲突分支可达,查询**报错** ❌\n- MySQL/MariaDB:建不了 partial index,走的是 `unsupported` 分支(同一条查询也附在那条消息里,同样跑不了——不过那条路径上 PG 不参与)\n\n也就是说,PG 上的运维照着报错信息复制粘贴,拿到的是第二个 SQL 错误,而不是冲突行清单。\n\n## 修法(已有现成参照,就在隔壁)\n\nPR #6770 给 `sys_metadata` 写同类查询时把折叠列**通过它自己的 COALESCE 投影并起别名**,而不是投影裸列:\n\n```sql\nSELECT type, name, organization_id, COALESCE(package_id, '') AS package_id_key, COUNT(*) AS duplicate_rows\nFROM sys_metadata WHERE state = 'active'\nGROUP BY type, name, organization_id, COALESCE(package_id, '') HAVING COUNT(*) > 1\n```\n\n每个裸投影都是裸的 GROUP BY 项,被折叠的那个只经由自己的表达式投影 —— 两种方言都合法。见 `packages/metadata-protocol/src/migrations/overlay-index.ts` 的 `buildOverlayDuplicateProbeSql()` 与对应测试用例 `the duplicate-listing query is groupable on PostgreSQL, not only SQLite`。\n\n`view-definition` 这边有两个折叠列(`organization_id` → `'__global__'`,`owner` → `''`),照抄即可,同时把那句 \"Dialect-neutral\" 注释改成如实描述。\n\n## 严重度自评(不可靠,交 triage 定)\n\n只在降级路径上可见,且只影响运维拿到的那一条排查命令,不影响任何写入或索引本身。但它属于「声明了却交付不了」那一类:报告承诺给出冲突行,在 PG 上给不出。按 #4949 的口径如实上报,不自行判级。\n"
+}

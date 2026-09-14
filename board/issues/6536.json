@@ -1,0 +1,35 @@
+{
+  "number": 6536,
+  "kind": "issue",
+  "title": "`ExportFieldMeta`'s eight constraint keys are written by `buildFieldMetaMap` and read by nothing, now that the import dry run's mirror is retired",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T03:25:08Z",
+  "updated_at": "2026-08-08T23:31:58Z",
+  "closed_at": "2026-08-08T23:31:58Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6536",
+  "body": "Observation-class finding, recorded while implementing #4633 (PR #6532). Nothing a user hits today — dormant code, not a defect.\n\n## What\n\n`ExportFieldMeta` in `packages/rest/src/export-format.ts` carries eight keys that exist solely to feed the import dry run's hand-copied pre-check mirror:\n\n`required`, `system`, `readonly`, `hasDefault`, `min`, `max`, `minLength`, `maxLength`\n\nTheir own doc comments said so verbatim — \"The following four drive the import path's required-field pre-check (import-runner.ts)\" and \"The bounds below drive the import path's field-constraint pre-check (import-coerce.ts `firstConstraintViolation`)\".\n\n#4633 ruling D retires that mirror: the dry run now asks `DataProtocol.validateData` for the engine's verdict, and the engine reads the object's own schema. So `buildFieldMetaMap` still computes and stores all eight on every import, and after PR #6532 nothing in the repo reads any of them. PR #6532 rewrote the comments so they no longer describe a caller that does not exist, but left the keys in place — retiring them is a separable change with its own sweep, and keeping it out of an already-delicate PR was the deliberate call.\n\n## Why it is not simply \"delete them\"\n\n`ExportFieldMeta` is exported from `@objectstack/rest`, so removal is a public-surface change with its own reviewers. It also needs:\n\n- `buildFieldMetaMap` to stop computing them (the `hasDefault` line carries a substantive comment mirroring `applyFieldDefaults`'s `!= null` gate — that reasoning retires with it);\n- `export-format.test.ts` cases that pin the built map;\n- a sweep of `prepareImportRequest` consumers, notably plugin-auth's identity import, which builds a `metaMap` through the same helper.\n\n## Suggested disposition\n\nRetire them under ADR-0049's enforce-or-remove posture — they are declared-and-unread, which is the shape that rule exists for. Or, if a reader is found (an import-template surface that wants to show \"required\" in the UI), record it and keep them. Either way the current state — computed on every import, read by nobody — should not be the resting state.\n"
+}

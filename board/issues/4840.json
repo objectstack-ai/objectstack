@@ -1,0 +1,35 @@
+{
+  "number": 4840,
+  "kind": "issue",
+  "title": "search: no declarative way to keyword-search by a related record's title ($searchFields rejects cross-object paths)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T09:44:50Z",
+  "updated_at": "2026-08-08T10:30:44Z",
+  "closed_at": "2026-08-08T10:30:44Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4840",
+  "body": "从 #4830 拆出的能力缺口(该 PR 只做构建期校验对齐,本议题不在其范围内)。\n\n## 现状\n\n- `$search` 只扫描本对象自身的列;`$searchFields` 按精确字符串与字段表求交,`project.name` / `project_id.name` 这类跨对象路径会被 #4254 入口闸以 400(Unknown field)拒绝 —— 这是刻意的(search 轴不解析 traversal,见 `assertSearchFieldsAreSearchable` 的注释与 `validate-searchable-fields` 的 dotted-path 严格性)。\n- lint 与运行时的报错都给出同一处方:把关联记录的标题镜像到本对象的 text/formula 字段再声明。\n\n## 缺口\n\n「按关联对象名称做关键字搜索」(例:任务列表里搜项目名)目前**没有声明式落点**,只能靠作者手工建镜像字段。对 AI 生成的元数据应用来说,这是一个高频意图,缺声明式支路就意味着每个项目各自发明镜像约定。\n\n## 待决(需要维护者定方向)\n\n1. 维持现状:镜像字段是唯一正解,把处方写进 objectstack-ui/objectstack-data skill 与文档,让作者/AI 在授时就落镜像字段;\n2. 或在 spec 层给 searchable 集合一个受限的关联投影声明(如 `searchableFields: [{ via: 'project_id', field: 'name' }]`),由引擎展开为对关联对象的子查询/JOIN —— 成本是查询引擎与各 driver 的支持面;\n3. 或依赖 `__search` 伴生列机制(#2486)扩展为可配置的跨对象物化。\n\n相关:#4830(构建期校验对齐)、#4254($searchFields 入口闸)、#2486(__search 伴生列)。"
+}

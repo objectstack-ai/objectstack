@@ -1,0 +1,36 @@
+{
+  "number": 5685,
+  "kind": "issue",
+  "title": "ComparisonOperatorSchema 的 $gt/$gte/$lt/$lte 不含 string,与平台自己只产出字符串的日期宏解析器相矛盾",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:dispatched",
+    "target:v17"
+  ],
+  "assignees": [
+    "qq9340100"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T00:14:40Z",
+  "updated_at": "2026-08-08T06:26:00Z",
+  "closed_at": "2026-08-08T06:26:00Z",
+  "closed_by": {
+    "login": "qq9340100",
+    "id": 313832657,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5685",
+  "body": "发现于 #5500(flow.test.ts fixture 形状普查)第 4 类的契约测量。按 Prime Directive #10 单独记录,未在那个 PR 里顺手改。\n\n## 事实\n\n`packages/spec/src/data/filter.zod.ts:92` 起:\n\n```\nexport const ComparisonOperatorSchema = lazySchema(() => z.object({\n  $gt:  z.union([z.number(), z.date(), FieldReferenceSchema]).optional(),\n  $gte: z.union([z.number(), z.date(), FieldReferenceSchema]).optional(),\n  $lt:  z.union([z.number(), z.date(), FieldReferenceSchema]).optional(),\n  $lte: z.union([z.number(), z.date(), FieldReferenceSchema]).optional(),\n}));\n```\n\n即:**声明里没有 `string`**。但平台自己在这四个槽位里传的恰恰只有字符串:\n\n1. **日期宏解析器只能产出字符串。** `packages/core/src/utils/filter-tokens.ts:18-19` 的规范示例就是这个形状:\n   `{ close_date: { $gte: '{current_year_start}' } }` → `{ close_date: { $gte: '2026-01-01' } }`。\n   实现侧 `:303` `case 'now': return now.toISOString();`、`:319` `addUnits(...).toISOString()`、`asYmd(...)` 全部返回 string,没有任何分支返回 `number` 或 `Date`。\n   `packages/spec/src/data/date-macros.zod.ts:34-35` 也明说「the DRIVER only ever sees ISO date / timestamp strings」。\n\n2. **一方调用方一律传 `.toISOString()`:**\n   - `packages/objectql/src/lifecycle/lifecycle-service.ts:991-992` — `const keepCutoff = new Date(...).toISOString();` → `{ created_at: { $lt: keepCutoff } }`\n   - 同文件 `:1054-1055` — `tCutoff` 同样是 `.toISOString()`\n   - `packages/plugins/plugin-email/src/outbox-sweep.ts:155,160` — `const cutoff = new Date(now - minAgeMs).toISOString();` → `{ created_at: { $lt: cutoff } }`\n\n## 为什么今天没人撞到\n\n`ComparisonOperatorSchema` **没有任何运行期消费者**。仓库内 `grep` 只命中它自己的单测(`filter.zod` 的定义、`data/filter.test.ts`)和导出桶,objectql 的读写路径、各 driver、flow 的 CRUD executor 都不拿它校验 `where`。flow 节点侧的 `filter` 另有声明(`z.record(z.string(), z.unknown())`,`builtin-node-config.zod.ts:219`),值一律 `unknown`,所以也到不了这里。\n\n也就是说:这是一处 declared 与 practiced 不一致,但 declared 那侧不设防,所以不产生运行期失败 —— 按 finding 记录,严重度留给分诊轮。\n\n## 危害面\n\n它仍然是一份**发布出去的契约**:作者(尤其 AI 作者)读 `$lt: number | date | FieldReference` 会得出「日期窗口要传 Date 对象或时间戳数字」的结论,而平台全部通路实际产出并接受的是 ISO 字符串。#5500 的分诊注记正是卡在这个问题上(「插值后的 ISO 日期串走 record-form where 是否是我们要教的形状」)。\n\n## 可选方向(未拍板)\n\n- **A. 补 `string` 进联合**(并在 `.describe()` 里点明 ISO date / date-time 字符串是规范形态)。与 `filter-tokens.ts` 的自带示例、与全部一方调用方一致,改动最小。代价:`string` 很宽,拿不到格式校验。\n- **B. 补一个受约束的字符串**(如 ISO date / date-time 的 refine),表达力更准,但要确认 driver 侧对 date-only 与 full-timestamp 的处理一致。\n- **C. 维持声明、改调用方传 `Date`**。与日期宏解析器的产物冲突(它只能给字符串),等于要求每个消费点再把宏解析结果转回 `Date`,和 ADR 里「driver 只看 ISO 串」的既定方向相反。\n\n倾向 A 或 B —— C 与既有 ADR 方向相反,不宜。\n\n## 相关\n\n#5500(测量来源)、#3810(filter 槽位的两套 `{…}` 方言归属)\n"
+}

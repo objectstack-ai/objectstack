@@ -1,0 +1,33 @@
+{
+  "number": 6186,
+  "kind": "issue",
+  "title": "finding(release): GitHub Releases for 17.0.0-rc.0–rc.3 are absent/incomplete and now beyond automated repair — the one red integrity run (07:52Z) was this hole surfacing in the merge-back gap",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "finding"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T08:19:45Z",
+  "updated_at": "2026-08-08T10:24:40Z",
+  "closed_at": "2026-08-08T10:24:40Z",
+  "closed_by": {
+    "login": "qq9340100",
+    "id": 313832657,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6186",
+  "body": "Observation-class record (Prime Directive #10); not dispatch-urgent. Filed while closing out the rc.4 incident (#6169/#6170).\n\n## The one red run, explained\n\nRelease run [31159366269](https://github.com/objectstack-ai/objectstack/actions/runs/31159366269) (07:52:18Z, push of #6160, i.e. **after** #6172's two-lane workflow landed but **before** #6177's merge-back) failed in `release-integrity`:\n\n```\n##[error]cannot build a release body for @objectstack/connector-slack@17.0.0-rc.3:\n  no changelog entry for @objectstack/connector-slack@17.0.0-rc.3 in packages/connectors/connector-slack/CHANGELOG.md\n##[error]69 GitHub Release(s) could not be published.\n0 created, 0 updated, 69 failed\n```\n\nMechanism: main still carried version `17.0.0-rc.3` (on npm ✓), the job correctly detected the GitHub Releases for rc.3 were incomplete and tried the legitimate #4900 backfill — but rc.3's **compiled CHANGELOG entries were not on main** (they lived only on the orphaned publish commits `c6a52d3`/`a10cbc77` until #6177 merged them back three minutes later). Bodies unbuildable → 69 failed → red. The two runs after the merge-back (07:55, 07:56) are green: main now audits as rc.4, whose Releases/D4/image the 04:17Z run already created.\n\nTransient by construction — this exact state (version on npm + its changelogs absent from main) was the orphan-commit aftermath and cannot recur now that the merge-back landed and the publish lane only ships commits already on main.\n\n## The residual fact worth this record\n\n`release-integrity` audits only **main's current version**, so it will never look at rc.3 again. The GitHub Releases record therefore has a permanent hole for the early v17 RC window: **rc.0, rc.1, rc.2** (already measured absent during #4900) **and now rc.3** (absent/incomplete; npm and tags exist). rc.4 onward is complete.\n\nOptions if anyone ever cares: a one-off manual backfill is now possible for rc.3 (main carries the cumulative CHANGELOGs since #6177) via `RELEASE_VERSION=17.0.0-rc.3 node scripts/release-github-releases.mjs` run by a **human** (publish-adjacent action; 版本发布必须人工 applies in spirit) — or accept the hole for superseded prerelease iterations, which is the cheap and reasonable default.\n\n## Related\n\n#6169 / #6170 (the incident) · #4900 (the backfill mechanism + the rc.0–rc.2 measurement) · #6172 (the lane that surfaced this correctly instead of silently publishing)"
+}

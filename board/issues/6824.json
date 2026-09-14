@@ -1,0 +1,35 @@
+{
+  "number": 6824,
+  "kind": "pull_request",
+  "title": "fix(metadata): one owner for idx_sys_metadata_overlay_active — remove the stale-keyed second producer",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T23:14:13Z",
+  "updated_at": "2026-08-08T23:55:07Z",
+  "closed_at": "2026-08-08T23:55:06Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-08T23:55:06Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/6824",
+  "body": "Fixes objectstack-ai/objectstack#6771\n\n`idx_sys_metadata_overlay_active` had **two** producers with **different** keys, both\nissuing `CREATE ... INDEX IF NOT EXISTS`, so whichever ran first claimed the name and the\nother silently no-opped — decided by boot order, not by any declaration.\n\n| producer | key |\n|---|---|\n| `metadata-protocol`'s `ensureMetadataOverlayIndexes` (runtime, ADR-0048) | `(type, name, organization_id, COALESCE(package_id, ''))` `WHERE state = 'active'` |\n| `packages/metadata`'s `addSysMetadataOverlayIndex` | `(type, name, organization_id, environment_id, scope)` |\n\nThe second is the pre-ADR-0048 key. `environment_id` was retired by ADR-0005 (2026-05\nrevision) — it is NULL on every new row, and SQL UNIQUE treats NULLs as DISTINCT, so that\nindex constrains nothing; `scope` is not in the current discriminator at all.\n\n## The measurement that chose the direction\n\nThe issue left the fork open — delete the producer vs align its key — hinging on whether a\n`DatabaseLoader` shape exists that never reaches `ensureOverlayIndex`. Both halves were\nmeasured.\n\n**Reachability.** `DatabaseLoader` is constructed only by `MetadataManager.setDatabaseDriver`\n/ `setDataEngine`. `setDataEngine` has zero in-tree callers; `setDatabaseDriver` is\nauto-called only when the manager is given both `datasource` and `driver`, which no in-tree\ncaller passes. `MetadataPlugin` — the only `NodeMetadataManager` constructor, and what\n`standalone-stack.ts` boots — passes `{rootDir, watch, formats}` and registers no\n`DatabaseLoader`. That is deliberate and documented (`packages/metadata/README.md`,\n`skills/objectstack-platform/SKILL.md`: do not bridge automatically; the loader stays\navailable for control-plane services that opt in explicitly). `cloud` and `objectui`\nreference `DatabaseLoader` zero times. So yes — a DatabaseLoader-only shape is possible, and\n`ensureOverlayIndex` would never run in it.\n\n**But \"align the key\" rested on a false premise**, and real SQLite says so. On a plain\n`DatabaseLoader` boot the stored DDL is already:\n\n```\nCREATE UNIQUE INDEX `idx_sys_metadata_overlay_active` on `sys_metadata`\n  (`type`, `name`, `organization_id`, `package_id`)\n```\n\nThat is the **declared** index from `metadata-core`'s `sys-metadata.object.ts`, materialized\nby `SqlDriver.syncDeclaredIndexes` — the current key, present without any help from this\npackage. Running the old producer against that table changed the stored DDL by nothing while\nreturning `status: 'created'`. Its one non-no-op window (table present, declared indexes not\nyet materialized — which the engine path hits by construction, since ObjectQL's startup owns\nthe sync) installed the **retired** key, and `syncDeclaredIndexes` skips by name, so nothing\never repaired it.\n\nSo the function could only ever do nothing or do harm. Both deployment shapes already have a\ncorrectly-keyed owner: the runtime partial index from `metadata-protocol`, and — without it —\nthe coarser unrestricted UNIQUE from the declaration, exactly as `sys-metadata.object.ts`\ndocuments (\"the coarser fallback that a driver without that runtime migration gets\").\n**Deleted, not aligned.**\n\n## Changes\n\n- Removed `packages/metadata/src/migrations/add-sys-metadata-overlay-index.ts` and its\n  barrel export, leaving a grep-findable tombstone in `migrations/index.ts` that records the\n  measurement so the producer is not reintroduced.\n- Removed both call sites in `DatabaseLoader.ensureSchema()`. The engine-path `catch` that\n  was empty now reports per the ADR-0120 D4 shape — it names what did not happen (the\n  `project_id` to `environment_id` forward migration was skipped), points at the fix, and\n  never blocks the boot.\n\n## Tests\n\nNew `overlay-index-single-producer.test.ts` asserts the **stored DDL** on real SQLite, not\nthe absence of an exception — the defect was never a throw, the losing producer returned\n`status: 'created'` just like the winning one.\n\n**Reverse verification, directions predicted before running.** Restoring the producer from\n`origin/main`: 3 failed / 84 passed.\n\n- **RED as predicted:** the engine-path case, the barrel-exports-no-producer case, and\n  `issues NO overlay-index DDL` in `database-loader.test.ts`.\n- **GREEN by design, also predicted:** the `syncSchema` cases. The declared index has already\n  claimed the name with the current key before the old producer runs, so it cannot go red\n  there — those cases pin the *covering* producer, which is the reason deletion is safe\n  rather than merely tidy. Asserting they should go red would be fiction.\n- **One prediction was wrong, and is recorded rather than reshaped:** the pre-existing-table\n  case was expected red, on the theory it reaches the benign \"already exists\" branch with the\n  declared indexes unbuilt. A real `syncSchema` does not throw there — it reconciles the\n  table and builds the declared indexes anyway. That branch is reachable only with a mock\n  driver, and is covered as such in `database-loader.test.ts`.\n\n`database-loader.test.ts`'s existing case asserting the stale DDL **was** issued is flipped;\nits sibling still pins that the post-sync migrations run.\n\nGates enumerated from `.github/workflows/lint.yml` and run in the foreground: `pnpm lint`,\n`pnpm typecheck` (125/125), all 31 `check:*` gates, and `@objectstack/metadata` 578/578.\n`check:engine-double-contract` went red first on the new engine double and is green after\ntrimming it to the read verb the test actually drives.\n\n---\nGenerated with [Claude Code](https://claude.com/claude-code)\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01W6bLax4KMrSfnE1ydFU8Dw)_"
+}

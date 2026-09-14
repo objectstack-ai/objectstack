@@ -1,0 +1,35 @@
+{
+  "number": 6722,
+  "kind": "pull_request",
+  "title": "fix(cli): doctor 的账本读取失败行改报真实解析出的目录,install 提示注明其字面量为描述性 (#6643)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T13:37:28Z",
+  "updated_at": "2026-08-08T14:23:34Z",
+  "closed_at": "2026-08-08T14:23:32Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": "2026-08-08T14:23:32Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/6722",
+  "body": "Fixes #6643\n\n#5996 / PR #6645 确立了一条边界:`DEFAULT_INSTALLED_PACKAGES_DIR` —— `@objectstack/cloud-connection` 的导出 —— 是安装包账本目录名的**唯一权威**,消费端既不得容忍它缺失(PD #12),也不得复述它的取值。那张卡按枚举出的三件套收口,并把扫描消费半径时发现的另外两处字面量记进了 #6643。本 PR 收这两处。\n\n## ⚠️ 这不是缺陷修复\n\n该导出在**每一个发布过的版本里都存在,取值也从未变过**,所以今天每一处字面量都与权威一致 —— 没有用户能触达的错误行为,没有可复现的故障。本 PR 消除的是**未来的分歧面**:让这份一致不再是「没人会注意到它何时破裂」的巧合。请按此定级,不要当成 bug fix 读。\n\n## 两处站点,逐处核验\n\n### 站点一 —— `doctor.ts` 的 `installedPackageLedgerFailureCheck`(已收敛)\n\n其 `fix` 开头写死 ``.objectstack/installed-packages/`` 「under the project root」。核验结论:**doctor 此刻手里确实有真实解析值**,与 #6645 已改的 skipped 那处完全同形 —— `failure` 只在 `readInstalledPackageEntries()` 的 `catch` 里被置上,而那个 `try` 开在 `const dir = path.join(cwd, declaredDir)` **之后**,两者在同一个 return 上,故 `reading.dir` 必然在场。\n\n改法同形:签名加必填 `dir: string`,`fix` 引用之。必填是刻意的 —— 可选参数就等于给这一行留了一条悄悄退回猜测的路。\n\n顺带修掉一个精度损失:reading 的 `dir` 是 `cwd`-joined 的**绝对路径**,而被删掉的字面量是相对的,所以原文才需要补一句「under the project root」来定位它。绝对路径自己就说清了位置,那句 hedge 既冗余、在宿主配了非默认 `storageDir` 时又是错的,一并删去。`--verbose` 下现在读作:\n\n```\n→ The ledger is `/srv/app/.objectstack/installed-packages`; it exists here, which is why\n  this is reported rather than treated as \"nothing was ever installed\". …\n```\n\n### 站点二 —— `package/install.ts` 的安装后提示(**无法收敛,保留字面量并注明**)\n\n按任务要求逐处核验「是否真的握有已解析目录」。**没有。** 四条量到的事实:\n\n1. **该目录在远端主机上。** 这条提示之上的一切都是 HTTP 从 `runtime` 取回的;这条命令从不碰目标机的磁盘。在**本地**解析出的常量描述的是敲命令的那台机器,不是存了 manifest 的那台。\n2. **远端目录是可配的,常量只是它的默认值。** `MarketplaceInstallLocalPlugin` 建账本用的是 `new LocalManifestSource(config.storageDir)`(plugin L157)—— 该导出是宿主什么都没配时 ctor 才落到的兜底。内插它等于把一个默认值陈述成观测到的事实。\n3. **刚读完的那个响应里没有答案。** POST 返回 `{ manifestId, version, versionId, installedAt, hotLoaded, upgradedFrom, translationsLoaded, seeded, note }` —— 没有 `storageDir`。GET 列表端点**有**(L765),这个没有。\n4. **静态引入会让这条命令失去独立性。** CLI 对 `@objectstack/cloud-connection` 的每一处引用都是动态的 —— doctor 走 `loadOptionalPackage()`,serve 走带守卫的 `import()` —— 因为该包缺失或未构建时 CLI 仍须可用。为一行提示加静态 import,会让一条纯 HTTP 命令在模块加载期就失败;改成动态则需要一个字面量兜底,即 PD #12 禁止、#5996 刚删掉的那个 `??`。\n\n故此处**打印文本一字未改**,改为在旁边写下这四条理由,并明确写出「不要把它『修』成对常量的引用」。这是 issue triage 里维护者点名认可的解法(「an explicit \"descriptive\" annotation is a legitimate resolution for that half」)。真正的修法在上游 —— 让 POST 响应像 GET 那样带上 `storageDir` —— 已单独立为 #6721(观察类,不带 `pm:queue`)。\n\n考虑过但未采纳:把这句改成「(default: …)」以承认可配性。那会改动用户可见输出,而本卡的题目是字面量复述,不是文案精度;留给 #6721 连同字面量一起删更干净。\n\n## 前提核验(对 `origin/main`)\n\n三项都在,#6645 的合并没有顺带覆盖其中任何一处,卡无需收窄:\n\n| 事实 | 位置 | 结论 |\n|:---|:---|:---|\n| 站点一字面量 | `doctor.ts:1419` | 仍在 |\n| 站点二字面量 | `install.ts:218` | 仍在 |\n| 权威导出 | `local-manifest-source.ts:163`,经 `index.ts:41` 再导出 | 仍在 |\n\n## 反向验证 —— 预测先写,再测\n\n预测写于实现之前(方向:还原字面量 ⇒ 新钉子转红),测得与预测**逐条吻合,4 预测 / 4 实测**。做法是只把 `doctor.ts` 还原到 `origin/main`、保留测试:\n\n| 用例 | 预测 | 实测 |\n|:---|:---|:---|\n| `says WHICH half did not run`(断言重新指向 `dir`) | RED | RED |\n| `a NON-default directory flows through` | RED | RED |\n| `drops the \"under the project root\" hedge` | RED | RED |\n| e2e:`the verbose fix names the directory doctor actually read` | RED | RED |\n\n```\n× says WHICH half did not run, rather than that \"something\" failed 15ms\n× a NON-default directory flows through — the assertion a re-hardcoded literal cannot pass 3ms\n× drops the \"under the project root\" hedge — the resolved dir already says where it is 2ms\n× the verbose fix names the directory doctor actually read, resolved from the authority (#6643) 502ms\n\nTests  4 failed | 23 passed (27)\n```\n\n**无双向绿的钉子**,这四条都是真红。两点说明:\n\n- e2e 的期望值是**从权威算出来的**,不是硬编码:测试里 `await import('@objectstack/cloud-connection')` 取 `DEFAULT_INSTALLED_PACKAGES_DIR` 再与 `mkdtemp` 出的临时 cwd 拼接。若在测试里写死 `.objectstack/installed-packages`,只是把字面量搬进测试、对着同一个猜测再钉一遍 —— 正是本卡要消除的缺陷换个地方复发。`mkdtemp` 的唯一性也正是「解析值而非字面量」可断言的前提:任何字面量都不可能包含它。\n- **站点二没有加测试,这是有意的。** 打印文本一字未改,改动纯为注释,任何断言都不可能观测到它。为它加一条断言只能是把那个字符串字面量在第二个地方再写一遍 —— 同样是复发。如实报告为不可观测,而非补一条假覆盖。\n\n## 单侧站点的既有 fixture\n\n`doctor-ledger-read-failure.test.ts` 里那条 `expect(fix).toContain('.objectstack/installed-packages/')` 钉的正是本 PR 删掉的那条肢体。按 fixture 三分法属**重新拼写**:它原本只是用了那个字面量,现在改为断言传入的 `dir`。同 describe 内其余调用点补上必填参数。\n\n## 验证\n\n- `pnpm lint` —— 通过(无输出)\n- `pnpm --filter @objectstack/cli typecheck`(`tsc --noEmit`)—— 通过\n- `packages/cli` 全量 vitest —— **95 个测试文件 / 998 tests 全通过**\n- `.github/workflows/lint.yml` 的全部 31 个 `check:*` —— **31/31 通过**(含 `check:nul-bytes`)\n\n## Changeset\n\n`@objectstack/cli`: **patch**。站点一是用户可见的:`os doctor --verbose` 里运维读到的那段文字变了(绝对解析路径取代相对字面量,去掉 project-root hedge)。不是新能力,故非 minor;导出的 `installedPackageLedgerFailureCheck` 虽新增必填形参,但 CLI 以 bin 分发、无 `exports` 公开面,该导出只是测试接缝 —— 与 #6645 对同族 `installedPackageLedgerSkippedEntriesCheck` 做同样签名变更时的判级一致。站点二纯注释,不构成用户可见变更,不单独计入。\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_017uFVNMmTxLpmfQYiuKM1Yx)_"
+}

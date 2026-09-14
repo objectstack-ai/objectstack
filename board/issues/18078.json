@@ -1,0 +1,36 @@
+{
+  "number": 18078,
+  "kind": "issue",
+  "title": "spec: measure the option-1 population batch #65 declined for being unmeasured — duration keys whose unit is named only in JSDoc, or nowhere at all (report-only census)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:spec",
+    "priority:p3",
+    "tooling"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-13T20:15:01Z",
+  "updated_at": "2026-09-13T22:56:52Z",
+  "closed_at": "2026-09-13T22:56:51Z",
+  "closed_by": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/18078",
+  "body": "**Report-only.** ⛔ This card changes no code, no gate and no schema. It produces a count, and that count is the input a decision card needs.\n\n## Why this exists\n\nDecision batch #65 (2026-09-07, maintainer 「同意」) declined option 1 — teaching `check:duration-unit-keys` to read JSDoc as a unit channel — and said exactly why ([#15939 comment `5564447683`](https://github.com/objectstack-ai/objectstack/issues/15939#issuecomment-5564447683)):\n\n> the gate does not start reading JSDoc as a unit channel (**option 1 not adopted; its population is unmeasured**)\n\nand, in the same ruling:\n\n> Keys with no unit in either channel stay \"listed, not judged\" (the **#14519 shape**) — unchanged.\n\n⇒ The blocker on reopening that question is **the missing number**, named by the ruling itself. Asking the maintainer to reconsider while the population is still unmeasured puts the identical question with the identical gap and earns the identical answer. So this card measures it first.\n\n## What to count — three distinct sub-populations, ⛔ not one list\n\nEach needs its own count and its own enumeration. Exemplars below were read from `origin/main` @ `fb29f62cee` on 2026-09-13 and are **seeds to verify, not the population**.\n\n**A · Unit named nowhere (the #14519 shape).** Duration-shaped by name token, but no unit in the key name, none in `.describe()`, none in the JSDoc. In the census, listed, never judged.\nSeed: `packages/spec/src/kernel/plugin-lifecycle-advanced.zod.ts:413` `HotReloadConfig.shutdownTimeout`. It carries a recorded rationale worth quoting in the eventual decision card — `packages/spec/src/migrations/entries/semantic/18.kernel-health-check-and-hot-reload-durations-unit-in-key.ts:63-65`:\n\n> The sibling `shutdownTimeout` on `HotReloadConfig` is deliberately NOT renamed with them: its JSDoc reads \"Graceful shutdown timeout\" and names no unit anywhere, so it is the #14519 unit-nowhere shape the #14478 gate leaves outside its verdict, not part of this row set.\n\n⚠️ That sentence classifies the key **out of that PR's row set**; it does **not** settle the #14519 question. ⛔ Do not read it as a prior ruling on this card.\n\n**B · Duration, unit in JSDoc only, outside the census entirely** — because `isDurationShaped()` is a 25-token name list and the key's name hits none of them, so it never enters the population at all.\nSeeds: `packages/spec/src/kernel/plugin-versioning.zod.ts:191` `estimatedMigrationTime` (JSDoc \"Estimated migration time in hours\", **no `.describe()` at all**); `packages/spec/src/system/metrics.zod.ts:847` `resolution` (JSDoc \"Resolution in seconds\", describe \"Downsampled resolution\"). ⚠️ Note `resolution`'s sibling one line above at `:842` is `afterSeconds`, describe \"Downsample after seconds\" — the suffix convention is already in use in the same object, which argues oversight rather than deliberate exemption.\n\n**C · Instants left as bare `z.number()` instead of the `EpochMs` exemption class**, unit stated only in JSDoc.\nSeeds, all four verified: `packages/spec/src/data/document.zod.ts:35` `createdAt` (JSDoc \"…created (Unix milliseconds)\" / describe \"Creation timestamp\"); `:402` `expiresAt` (\"…access expires (Unix milliseconds)\" / \"Access expiration\"); `packages/spec/src/system/supplier-security.zod.ts:146` `assessedAt` (\"Assessment completion timestamp (Unix milliseconds)\" / \"Assessment timestamp\"); `:151` `validUntil` (\"Assessment validity expiry (Unix milliseconds)\" / \"Assessment validity expiry timestamp\"). `EpochMs` **is** in use elsewhere (`api/websocket.zod.ts`, `kernel/context.zod.ts`, `kernel/service-registry.zod.ts`, `kernel/startup-orchestrator.zod.ts`), so this is drift from an established convention, not an unnamed class. Called a #15676 ruling-B shape by the at-tier review of #17635.\n\n**NOT a member — record it as a scope question instead.** `RuntimeConfig.resourceLimits.maxMemory` (`kernel/plugin-security-advanced.zod.ts`) has JSDoc \"Maximum memory in bytes\" and describe \"Maximum memory allocation\" — same hazard, but it is a **size, not a duration**. ⛔ Do not count it into A/B/C. Report separately how many *non-duration* unit-bearing numerics show the same shape, because \"should this rule cover unit-bearing numerics generally?\" is a scoping question the decision card must put to the maintainer, and it needs its own number.\n\n## How to measure\n\nThe gate's own `--list` is the instrument — it prints the census with `[name: …] [prose: …] [jsdoc: …]` per row, so A and B are derivable from it directly. Run it from `packages/spec` (`tsx scripts/check-duration-unit-keys.ts --list`); it needs the spec toolchain, so a throwaway worktree is fine. ⛔ Do not hand-roll a regex scanner as the primary instrument — use the gate, then a second, independently-drawn instrument as the control.\n\nDiscipline this card will be checked against:\n\n- Every zero needs a same-subject **lit control drawn a different way** from the measurement, plus a dark control whose token you invent at read time. ⚠️ A multi-line literal defeats a single-line `grep -o` — a membership test in this epic read \"no\" for *every* token, including a lit control that was visibly present, for exactly that reason.\n- `grep -c` counts lines, not occurrences.\n- Report **counts and full enumerations**, per sub-population, at a named `origin/main` sha with a UTC timestamp.\n- ⛔ Do not relay any number from this card's seed list without re-measuring it. Two of the four seeds originally carried into this work were wrong (one was a size, not a duration; one was misread as already-adjudicated).\n\n## What it feeds\n\nA single class-wide `needs-user-decision` card putting the reopened option-1 question to the maintainer, with the population attached — the thing batch #65 said was missing. ⛔ That decision is not this card's to make, and ⛔ this card must not widen the gate, add a rule, or rename a key.\n\n## Related\n\n#15939 (closed — the parent finding and Ruling A), #14519 (the unit-nowhere shape), #15676 (ruling B, the instants shape), #18075 (a different gap: rows admitted to the census by `keyUnits` that escape the new divergence verdict), #15642 (the scanned-subtree question, independent).\n\n<sub>Filed by the epic PM for #15939, `session_015c5G6TmpMKgnusmTpD7Ntt`, 2026-09-13T20:20Z. Seeds read at `origin/main` @ `fb29f62cee`.</sub>\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

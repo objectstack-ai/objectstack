@@ -1,0 +1,34 @@
+{
+  "number": 17998,
+  "kind": "pull_request",
+  "title": "ci(board-snapshot): mirror the board archive to Cloudflare R2",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "ci/cd",
+    "size/m",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-13T10:35:38Z",
+  "updated_at": "2026-09-13T11:45:15Z",
+  "closed_at": "2026-09-13T11:45:14Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": "2026-09-13T11:45:14Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/17998",
+  "body": "Fixes #17989\n\nOne step in `.github/workflows/board-snapshot.yml`, right after 「Commit and push the archive」: it mirrors the archive checkout to Cloudflare R2 with `--delete` and, once per UTC day, writes the tree as a tarball. `scripts/pm/board-snapshot.mjs` is untouched and so is what the snapshot reads and commits.\n\nWhy: the `board-archive` branch survives an account suspension, because a branch belongs to the repository and not to a user — it does not survive an action against the repository itself. The maintainer's answer, verbatim and untranslated: 「那如果推 s3 呢？」「Cloudflare R2」.\n\nIt lands before the bucket exists: with any of `R2_ACCOUNT_ID` / `R2_BUCKET` / `R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY` unset the step prints one notice and exits 0, while a CONFIGURED upload that fails goes red. `pull_request` runs never upload, the same guard the archive commit carries. No secret value is in the diff, the log or the summary, and no dependency is added — `aws` is the ubuntu-latest runner's own CLI.\n\nTwo decisions to overrule if you disagree: the daily tarball goes to `objectstack/snapshots/`, OUTSIDE the mirrored `objectstack/board/` prefix, because inside it the next `--delete` sync deletes it and the history is one day long; and `.git` is excluded under two patterns, because in a linked worktree it is a FILE that `.git/*` does not match.\n\nThe step's shell, exactly as it lands:\n\n```bash\nset -euo pipefail\n\nif [ -z \"${AWS_ACCESS_KEY_ID:-}\" ] || [ -z \"${AWS_SECRET_ACCESS_KEY:-}\" ] \\\n   || [ -z \"${R2_ACCOUNT_ID:-}\" ] || [ -z \"${R2_BUCKET:-}\" ]; then\n  echo \"status=skipped — no R2 credentials configured in this repository\" >> \"$GITHUB_OUTPUT\"\n  echo \"::notice::R2 upload skipped: R2_ACCOUNT_ID, R2_BUCKET, R2_ACCESS_KEY_ID and R2_SECRET_ACCESS_KEY are not all set as repository secrets; this run is archived on the board-archive branch only.\"\n  exit 0\nfi\n\nendpoint=\"https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com\"\nmirror=\"s3://${R2_BUCKET}/objectstack/board/\"\n\n# `archive/` is a linked worktree, so its `.git` is a FILE and the\n# pattern `.git/*` does not match it; both spellings are excluded.\n# No pipe between the command and `$?` — see the snapshot step.\nset +e\naws s3 sync archive/ \"$mirror\" \\\n  --endpoint-url \"$endpoint\" \\\n  --delete --no-progress \\\n  --exclude '.git' --exclude '.git/*' \\\n  > \"$RUNNER_TEMP/r2-sync.log\" 2>&1\ncode=$?\nset -e\nif [ \"$code\" != \"0\" ]; then\n  cat \"$RUNNER_TEMP/r2-sync.log\" >&2\n  echo \"status=FAILED — aws s3 sync exited $code\" >> \"$GITHUB_OUTPUT\"\n  echo \"::error::aws s3 sync to R2 exited $code. This run IS archived on board-archive; the out-of-GitHub copy is now behind and every later run will stay behind until this is fixed.\"\n  exit 1\nfi\n# One line per object moved. The first configured run moves the whole\n# board and every later run moves a handful, so the log is truncated\n# here and the counts below are taken over all of it.\ntransfers=$(wc -l < \"$RUNNER_TEMP/r2-sync.log\")\nhead -n 50 \"$RUNNER_TEMP/r2-sync.log\"\nif [ \"$transfers\" -gt 50 ]; then\n  echo \"... and $((transfers - 50)) further transfer line(s), not printed.\"\nfi\nuploaded=$(grep -c '^upload:' \"$RUNNER_TEMP/r2-sync.log\" || true)\ndeleted=$(grep -c '^delete:' \"$RUNNER_TEMP/r2-sync.log\" || true)\n\nday=$(date -u +%Y-%m-%d)\ntarball=\"s3://${R2_BUCKET}/objectstack/snapshots/${day}.tar.gz\"\nif aws s3 ls \"$tarball\" --endpoint-url \"$endpoint\" > /dev/null 2>&1; then\n  tarred=\"already written for ${day}\"\nelse\n  tar -czf \"$RUNNER_TEMP/${day}.tar.gz\" --exclude=.git -C archive .\n  aws s3 cp \"$RUNNER_TEMP/${day}.tar.gz\" \"$tarball\" \\\n    --endpoint-url \"$endpoint\" --no-progress\n  tarred=\"written for ${day}\"\nfi\n\necho \"status=synced ${uploaded} object(s), deleted ${deleted}; daily tarball ${tarred}\" >> \"$GITHUB_OUTPUT\"\necho \"R2: synced ${uploaded} object(s), deleted ${deleted}; daily tarball ${tarred}\"\n```\n\nVerified offline with a stand-in on PATH in place of `aws` — nothing in this branch ever contacted R2. Every case ran the shell above as a YAML parser extracted it, never as retyped text:\n\n| case | result |\n|---|---|\n| four secrets empty | exactly one `::notice::` line, exit 0, zero `aws` invocations |\n| three set, one empty | same |\n| configured, no tarball for today | sync, `s3 ls` miss, `tar`, `s3 cp`; `status=synced 2 object(s), deleted 1; daily tarball written for 2026-09-13` |\n| configured, today's tarball present | sync only; status says `already written` |\n| configured, sync exits 3 | log to stderr, one `::error::` line, exit 1 |\n| 60 objects moved | log truncated at 50 lines, counts taken over all 60 |\n\nThe tarball built in the third case holds `./board/...` and no `.git`.\n\nGates: `node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` derived 35 families for this diff; all 35 ran, all 35 exited 0, reconciled through `--ran` (35 accounted, 0 NOT-MEASURED, 0 UNRUN). The nine workflow-roster gates the tool cannot place for a `.github/workflows` path were run as well: eight exited 0, and `check:single-claim-paths` exits 2 as NOT WIRED without a `PR_NUMBER` — its declared list holds only `.objectui-sha`, which this diff does not touch.\n\n`skip-changeset`: `.github/**` publishes nothing from any released package.\n\n## Acceptance notes\n\n- The mirrored keys read `objectstack/board/board/...`, because the sync source is the archive checkout and that branch's tree root holds a `board/` directory. Keeping the ruling's source path is what makes the mirror and the daily tarball the same shape, both rooted at the branch tip.\n- `AWS_REQUEST_CHECKSUM_CALCULATION: when_required` is set for the S3-compatible endpoint and is NOT measured here — nothing in this run contacted R2. The first configured run is its measurement.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01DAcomhvR9kKizeYgg89Vo8)_"
+}

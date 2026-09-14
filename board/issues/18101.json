@@ -1,0 +1,30 @@
+{
+  "number": 18101,
+  "kind": "issue",
+  "title": "[finding] the shared symbol-anchor resolver refuses 8 anchors that name real declaration sites — an INLINE object-literal key, and a DATA identifier that heads a dotted string token",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-14T02:27:00Z",
+  "updated_at": "2026-09-14T04:46:10Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/18101",
+  "body": "Filed unassigned and unlabelled, as an observation for triage, by the #16898 implementer.\nGrade deliberately not asserted. ⛔ Deliberately left alone by the PR for #16898, which is #18100: that card\nforbids widening the shared core by name, because the core is shared and a widening there\nlands on every corpus at once.\n\n## Where this came from\n\n#16898 bound `scripts/check-platform-checklist.mjs` to the one shared resolver,\n`scripts/symbol-anchors.mjs#symbolResolutionClass`. Withdrawing its private permissive rule\nstopped 56 of 633 anchor occurrences from resolving. All 56 were enumerated and classified on\nthat PR; 47 are bad citations (the cited file genuinely does not declare the symbol) and **8\nare not** — they name something real that the shared accept set does not reach. Those 8 are\nthis card.\n\n## The 8, in two shapes\n\n### (1) An object-literal key written INLINE rather than at the start of a line — 6\n\n`scripts/symbol-anchors.mjs#scriptSymbolClass` admits \"a member or object-literal key written\nat the START OF A LINE\". A key written inline in the same object literal is the same\ndeclaration, differently formatted:\n\n| anchor | the site, as written |\n| --- | --- |\n| `examples/app-showcase/objectstack.config.ts#declarativeStdio` | `new ConnectorMcpPlugin({ declarativeStdio: ['node'] }),` |\n| `examples/app-showcase/src/data/objects/business-unit.object.ts#allowCreate` | `Field.lookup('showcase_business_unit', { label: 'Parent Unit', allowCreate: true })` |\n| `examples/app-showcase/src/system/datasources/showcase-external.datasource.ts#onMismatch` | `validation: { onMismatch: 'warn', checkOnBoot: true },` |\n| `examples/app-showcase/src/ui/actions/index.ts#maxSize` | `{ name: 'p_cover', type: 'image', ..., maxSize: 5 * 1024 * 1024 },` |\n| `examples/app-showcase/src/data/seed/index.ts#sales_region` | `{ name: 'Northwind', ..., sales_region: 'amer', ... }` |\n| `examples/app-showcase/src/data/seed/index.ts#signed_on` | same seed rows |\n\n⚠️ Note what they have in common: every one is a **config or seed data literal**, which is\nwhere this platform's authorable surface actually lives, and formatting one object per line is\nexactly what nobody does there.\n\n### (2) A DATA identifier that is the HEAD SEGMENT of a dotted string token — 2\n\n`literal` is a COMPLETE quoted token, deliberately, so a substring of running text cannot\nresolve an anchor. But a dotted *machine name* is not running text:\n\n| anchor | the site, as written |\n| --- | --- |\n| `packages/spec/src/kernel/public-auth-features.ts#sys_user` | `'sys_user.actions.enable_two_factor',` and 10 more |\n| `packages/spec/src/kernel/public-auth-features.ts#sys_invitation` | `'sys_invitation.actions.invite_user',` and 2 more |\n\n`sys_user` is precisely the vocabulary the `literal` class was added for — the module's own\nheader names \"object and field API names like `sys_metadata`, `crm_account`\" as the reason it\nexists. Here the name is declared, and only the dotted suffix keeps it out.\n\n## Why this is worth a card rather than a shrug\n\n- **The refusal is silent in the useful direction but wrong in the honest one.** These are not\n  rotted pointers: each names a real site in the cited file. A resolver that refuses them\n  teaches authors that a correct anchor is not writable, and the documented remedy (\"drop to a\n  bare citation\") deletes a checkable pointer to satisfy a check.\n- **It is load-bearing beyond the checklist.** Any corpus citing a config literal or a dotted\n  machine name meets the same two shapes. There are five corpora now.\n- ⚠️ **And the opposite risk is real, which is why this is a card and not a patch.** Widening\n  (1) toward \"a key anywhere on a line\" starts admitting things that are not declarations at\n  all — a call argument, a destructuring pattern. Widening (2) toward \"the head segment of a\n  dotted string\" is close to the substring rule the census caveat bans by name, and the\n  module's 72.1% figure is a one-way lower bound precisely because the census's own test was\n  permissive. Whether either widening can be written so it admits these 8 and nothing weaker\n  is the question, and it is the maintainer's to rule on across all five corpora.\n\n## Not asserted here\n\nWhether to widen, which of the two shapes to widen, or to leave both refused and re-author the\n8 citations instead. If the ruling is \"leave them refused\", the 8 rows simply become ordinary\n`bad-citation` repairs in the #16898 residual and this card closes with no code change — that\nis a legitimate outcome and the card should record it rather than being deleted.\n\n## Reproduce, no build needed\n\nRead `scriptSymbolClass` in `scripts/symbol-anchors.mjs` beside any site in the tables above.\nThe 8 rows are carried, already classified `verdict: 'accept-set'`, in\n`SHARED_RESOLVER_RESIDUAL` in `scripts/check-platform-checklist.mjs` — they are the only 8 of\nits 55 rows with that verdict, so the population is enumerable with one grep and does not have\nto be re-derived.\n\n⛔ One thing that would be wrong to do from this card alone: widening the core to make the\nplatform-checklist gate greener. The gate is green today with these 8 held as a named\nresidual; the reason to touch the core is the authoring shape, not a red.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

@@ -1,0 +1,36 @@
+{
+  "number": 5992,
+  "kind": "issue",
+  "title": "三个 ADR 编号各自指向两个不同的已接受决策(0010 / 0019 / 0057)—— `adr-anchors.json` 与 328 处代码注释按裸编号引用,无法消歧",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T14:00:01Z",
+  "updated_at": "2026-08-08T06:40:22Z",
+  "closed_at": "2026-08-08T06:40:22Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5992",
+  "body": "在 #4672(知识 reap guard)实现中顺带发现,**不在该单范围内**,按 Prime Directive #10 立单记录。\n\n## 事实\n\n`docs/adr/` 下有三个编号各自被两个**主题完全无关的已接受 ADR** 占用:\n\n| 编号 | 文件 A | 文件 B |\n|:--|:--|:--|\n| `0010` | `0010-metadata-protection-model.md` | `0010-nl-to-flow-authoring.md` |\n| `0019` | `0019-app-as-consumer-unit.md` | `0019-approval-as-flow-node.md` |\n| `0057` | `0057-erp-authorization-core-business-units-and-scope-depth.md` | `0057-system-data-lifecycle-and-retention.md` |\n\n(`0006` 有三个文件,但那是同一决策的 `.v2` / `.v4` 版本,**不算冲突**。)\n\n## 为什么这不只是文件名洁癖\n\nAGENTS.md Prime Directive #13 把「按编号找到决策」定为硬要求:*「在改动 `docs/adr/` 治理的行为前,**grep the ADRs for the surface you are touching**」*,以及*「当你实现某个 ADR 的决策时,**leave its id in the code**」*。这两条都以「编号 ⇒ 唯一决策」为前提,而上面三个编号不满足它。\n\n实测规模:\n\n- `packages/**/*.ts` 中 **328 处**裸 `ADR-0057` 引用。以 `ADR-0057` 为例,两个候选是 **ERP 授权内核(安全)** 与 **系统数据生命周期(保留期回收)** —— 域相差最远的一对,读者无法从编号本身判断。\n- `scripts/adr-anchors.json` 的锚点条目按**裸字符串**记录,例如\n  `{ \"file\": \"packages/objectql/src/lifecycle/lifecycle-service.ts\", \"adrs\": [\"ADR-0057\"], … }`。\n  这个文件存在的目的正是告诉下一位作者「你正站在哪个决策上」(PD #13 原话:*a decision nobody can find is a decision that will be reversed*),而它给出的 id 恰好指向两个决策。\n\n顺带一处**断链**:`0057-system-data-lifecycle-and-retention.md` 头部写\n`[ADR-0010](./0010-metadata-protection.md)`,该文件不存在(实际是 `0010-metadata-protection-model.md`)—— 而 `0010` 本身就是冲突编号之一。\n\n## 观察类,不是今天会咬人的缺陷\n\n没有用户路径受影响,`pnpm check:adr-anchors` 今天是绿的(它校验锚点与文件的对应关系,不校验编号唯一性)。代价落在**agent 导航**上:按编号 grep 会同时命中两个无关决策,或者更糟 —— 只读到先命中的那个,并据此推理。\n\n因此标 `finding`、不入 `pm:queue`,严重性交 PM 分诊。\n\n## 可能的处置方向(未做取舍,留给裁决)\n\n- A. 给后到的那份重新编号,原文件留 tombstone 指向新号;\n- B. 保留编号,强制引用带 slug(`ADR-0057-lifecycle`),并让 `check:adr-anchors` 校验编号唯一性 + 拒绝裸的冲突编号;\n- C. 只加一道唯一性检查止血(不再产生新冲突),存量三处按 B 逐步消歧。\n\n无论选哪条,建议同时给 `check:adr-anchors` 加**编号唯一性**断言 —— 这正是本仓反复付费的「declared ≠ enforced」形状:PD #13 声明了「编号可定位决策」,但没有任何门校验它。"
+}

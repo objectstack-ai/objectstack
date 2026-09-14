@@ -1,0 +1,37 @@
+{
+  "number": 3682,
+  "kind": "issue",
+  "title": "实现 ADR-0106:元数据面 FLS——object schema 按调用者掩码(#3661 ③ 落地)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "enhancement",
+    "pm:dispatched",
+    "pm:queue",
+    "target:v17"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-07-27T14:15:32Z",
+  "updated_at": "2026-08-08T07:48:04Z",
+  "closed_at": "2026-08-08T07:48:04Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3682",
+  "body": "跟踪 [ADR-0106](https://github.com/objectstack-ai/objectstack/blob/main/docs/adr/0106-metadata-plane-fls-object-schema-masking.md)(#3678 已合并)的实现。决策背景与完整论证见 ADR 正文及 #3661;客户端侧 ①② 已由 objectstack-ai/objectui#2866 承担。\n\n## 实现清单(按 ADR 决策点)\n\n- [ ] **D1/D2 — 分发层投影**:object schema 读按 `security.getReadableFields(object, ctx)` 投影 `fields`,掩码字段整体删除。协议层 `getMetaItem`/`getMetaItems` 签名不动。落点:\n  - `packages/rest/src/rest-server.ts` — `GET /meta/object/:name` 的 **cached 与非 cached 两条路径**\n  - `packages/rest/src/rest-server.ts` — `GET /meta/object` 列表读(逐 item 投影)\n  - `packages/runtime/src/domains/meta.ts` — `/metadata` catch-all 的 object 分支(protocol 与 registry 两条查找路径)\n- [ ] **D3 — mask-after-cache + 指纹 ETag**:共享缓存继续每对象存一份全量;取出后掩码;调用者对该对象的 denied-set 稳定哈希(无限制调用者为空)折入 ETag。顺序约束:fetch → mask(或 error)→ send,缓存全量体不得有任何绕过掩码上线的路径。实现受阻时可先落 doc/book 式 bypass(记录为过渡,非终态)。\n- [ ] **D4 — 豁免**:`isSystem`(getReadableFields 已有)+ 平台 admin(复用 app 过滤的 `systemPermissions` 判定)。豁免是 caller 属性,不是路由属性。\n- [ ] **D5(4) — 出口审计**:排查其余 schema-bearing 端点(OData `$metadata`/describe 类、client SDK describe);未覆盖的按 Prime Directive #10 开 issue。\n- [ ] **D6 — 三档失败姿态**:无 security 服务 → 放行;`undefined` → 放行 + 结构化 warn + 指标 + `Cache-Control: private, no-store`(不发共享 ETag);评估抛异常 → **5xx**(绝不放出未掩码体,绝不返回空 fields 的 200)。\n- [ ] **D7 — 零权限集调用者**:接 `/auth/me/permissions` 同款 fallback set 解析(`security.fallbackPermissionSet`,默认 `member_default`),落 `plugin-security`。\n- [ ] **D8 — 配置逃生舱**:`metadata.maskObjectFields`(命名实现时定),默认开,随当前 major 发布。\n- [ ] **测试**:掩码正确性(含 formula/options/requiredPermissions 随字段整体消失)、同 cohort 304 语义与权限变更后指纹失效、admin/isSystem 豁免、guest fallback、三档失败姿态(尤其「抛异常路径不泄漏缓存体」)。\n- [ ] **文档**:部署文档补 CDN/代理缓存指引(指纹 ETag 与共享缓存的交互)。\n- [ ] **收尾**:实现合入后将 ADR-0106 Status 行 `Proposed` → `Accepted`。\n\n## 验收标准\n\n对一个持有受限权限集的已认证调用者:任一 `/meta`/`/metadata` 出口返回的 object schema 中,其不可读字段(含 `readable:false` 与缺失 `requiredPermissions` 两种成因)**完全不存在**;无限制调用者的响应与实现前字节一致;权限变更后旧 ETag 不再命中 304。\n\n关联:#3661(③)、#3678(ADR)、objectstack-ai/objectui#2866(①②)、#3547(`getReadableFields`)、ADR-0049 / ADR-0066 D3 / ADR-0090。"
+}

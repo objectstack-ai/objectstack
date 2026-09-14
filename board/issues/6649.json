@@ -1,0 +1,35 @@
+{
+  "number": 6649,
+  "kind": "issue",
+  "title": "dispatcher 面 /share-links 的 catch 只读 err.status —— 安全中间件的 PermissionDeniedError(statusCode=403)被答成 500 + code PERMISSION_DENIED",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T08:34:14Z",
+  "updated_at": "2026-08-08T14:08:12Z",
+  "closed_at": "2026-08-08T14:08:12Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6649",
+  "body": "**来源**:#6551(dispatcher 面 share-links 整体透传信封,PR #6647)实施时的越界发现。**未评级——交分诊**,只给实读事实。与 #6551 的修复无因果:修前修后该缺陷都在,只是修后授权输入齐了,常规请求不再触发;真正无权(集合确实没有 allowRead)的调用者仍会命中。\n\n## 事实(核于 `origin/main` `e39dd66e7`)\n\n`packages/runtime/src/domains/share-links.ts` 的统一 catch(文件末尾):\n\n```\n} catch (err: any) {\n    return sendErr(err?.status ?? 500, err?.code ?? 'INTERNAL', err?.message ?? 'Share link request failed');\n}\n```\n\n只读 `err?.status`。而这条路径上真实会飞出来的拒绝错误带的是 `statusCode`:\n\n- `packages/plugins/plugin-security/src/errors.ts:8-10` — `PermissionDeniedError { code = 'PERMISSION_DENIED'; statusCode = 403 }`(无 `status` 字段);runtime 自己的镜像类 `packages/runtime/src/security/resolve-execution-context.ts` 同形。\n- 触发链:`svc.createLink` 的 [Finding-2] 可见性读 `engine.find(object, { context })` 走安全中间件;CRUD 门 / 两门写门 / tenant CHECK 拒绝时 throw `PermissionDeniedError` → `ShareLinkService` 不接 → 冒到 share-links 的 catch → `err?.status` 为 undefined → **HTTP 500**,`code` 却如实取到 `PERMISSION_DENIED`。一个 403 类拒绝以 5xx 信封出门(且 5xx 路径上 `looksLikeInternalErrorLeak` 还会把 `[Security] Access denied…` 的消息脱敏掉,进一步遮住真因)。\n\n## 为什么这不是孤例写法的锅\n\ndispatcher 已有共享的映射器 `errorFromThrown`(`packages/runtime/src/http-dispatcher.ts:718`),它同时读 `status` 与 `statusCode`;share-links 域用的是自己的手写 catch,没走它。同族对照:#5582 记的是 rest 侧 `mapDataError` 的状态直通不对等——家族相同(生产者声明的状态拿不回来),表面不同(rest vs dispatcher domain),互不覆盖。\n\n## 复现草图\n\n`group`/`single` 任一姿态,给调用者一个对目标对象**没有** `allowRead` 的 permission set,POST `/api/v1/share-links` 指向该对象任一记录 → 观测 500 + `PERMISSION_DENIED`(期望 403)。#6551 落地的测试架子(`packages/runtime/src/domains/share-links-enforcement-context.test.ts`,真 SecurityPlugin + 真 ShareLinkService)去掉集合的 `allowRead` 即可直接复现。\n\n## 建议方向(实施者定夺)\n\ncatch 改走 `errorFromThrown`(或至少 `err?.status ?? err?.statusCode ?? 500`)。前者顺带把 `issues`/`fields` 结构化细节也接住,与 `/meta` 域一致。\n\n*未指派、未标签——由 triage 席分诊。*"
+}

@@ -1,0 +1,34 @@
+{
+  "number": 5882,
+  "kind": "issue",
+  "title": "`GET /meta/:type/:name?layers=true` 应答一个 spec 未声明的第三形状 —— 路由只声明了一个 `responseSchema`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:queue",
+    "target:v17"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T10:54:39Z",
+  "updated_at": "2026-08-08T09:45:48Z",
+  "closed_at": "2026-08-08T09:45:48Z",
+  "closed_by": {
+    "login": "qq9340100",
+    "id": 313832657,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5882",
+  "body": "从 #5563 里拆出的残留半边(该单的维护者裁定明确允许「对齐或如实报告」,实施后判定对齐不合理,故立此单)。基线 `origin/main` @ `55c74deeb`。\n\n## 事实\n\n`packages/spec/src/api/plugin-rest-api.zod.ts` 为 `GET /meta/:type/:name` 声明了**唯一**响应 schema:\n\n```\nresponseSchema: 'GetMetaItemResponseSchema'\n```\n\n#5563 把这条路由的普通读取(缓存 / 非缓存 / 各兜底)全部收敛到了这个信封。但同一条路由带上 `?layers=true` 时走的是 `getMetaItemLayered`,应答的是三层诊断投影:\n\n```\n{ type, name, code, overlay, overlayScope, effective, validation }\n```\n\n`code`(artifact 基线)/ `overlay`(per-org 定制行)/ `effective`(两者合并后、即普通读取会给的那个值)是并列的三层,驱动 Studio 元数据编辑页的「代码默认 vs 覆盖 vs 生效」对比页签。\n\n## 为什么 #5563 没有把它一起收敛\n\n把三层塞进 `GetMetaItemResponseSchema` 的单个 `item` 里,等于把这个诊断本身删掉 —— 它存在的全部意义就是三层分开可见。所以 #5563 的实施停在普通读取,并在 handler 里就地写明了理由(`rest-server.ts` 的 `wantLayered` 分支上方)。\n\n剩下的不是运行时分裂,而是**声明缺口**:同一条路由按 query flag 分岔到两种资源表示,spec 只声明了其中一种。\n\n## 影响\n\n- 从 spec 生成消费代码(SDK 注解、codegen、AI 客户端)的一方,对 `?layers=true` 会写出错的解析 —— 声明说是 `{ type, name, item }`,实际拿到的是六键的层投影;\n- 与 #5563 收敛的立论同族:声明必须能被强制,机器可读表面不能撒谎(ADR-0076 D12 精神);\n- 今天没有用户被打断(Studio 那条链自己知道形状),所以更像「声明欠缺」而非线上缺陷。\n\n## 可能的处置(未定,spec 座位)\n\n- A:新增 `GetMetaItemLayeredResponseSchema`,并让路由声明能表达「按 query 分岔的两种表示」(需要确认 `plugin-rest-api.zod.ts` 的路由条目是否支持多响应 schema —— 若不支持,这一步本身就是一个契约表达能力的决定);\n- B:把 layered 视图拆成自己的路径(例如 `GET /meta/:type/:name/layers`),一条路径一个响应形状,不需要扩展路由声明的表达能力;\n- B 更贴合「一条路由一个形状」,代价是既有 `?layers=` 调用方(Studio 编辑器)要跟着迁移。二者都动公开契约,不代拍。\n\n关联:#5563(母单,已收敛普通读取)、#5545。"
+}

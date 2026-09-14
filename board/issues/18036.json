@@ -1,0 +1,33 @@
+{
+  "number": 18036,
+  "kind": "pull_request",
+  "title": "feat(pm): teach the merge-queue guard the governed surface references tier",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/l",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-13T14:07:56Z",
+  "updated_at": "2026-09-13T15:24:51Z",
+  "closed_at": "2026-09-13T15:24:50Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": "2026-09-13T15:24:50Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/18036",
+  "body": "Fixes #18020\n\nPart of #17950. The maintainer tiered the governed surface on 2026-09-13 (「我点头」) and the charter text landed with PR #18018, but `check-governed-queue-guard.mjs` still demanded an authorized approval for every governed path — the tier was declared, not enforced. The merge-group leg now learns it.\n\n## What changed\n\nA governed pull request whose governed paths **all** lie under `.claude/skills/pm-dispatch/references/` is satisfied by the skills seat's **review of record on the current head** — a `## Contract review` comment on the PR thread carrying a `Reviewed-by:` line and a `Served-tier:` reading that stands — in place of the approval. One rules-layer path in the same diff and today's predicate is the only way through.\n\n**Monotone by construction.** The tier leg is consulted *only* for an entry no authorized approval satisfied, so it can lift a refusal and can never create one. Nothing that passes the queue today newly refuses.\n\n**Recognition is imported, never re-implemented** — the heading marker, head-sha span test and newest-of resolution (`check-half-states.mjs`), the `Reviewed-by:` / `Served-tier:` readers (`check-clause2-carriers.mjs`). Zero new parsers; `check-clause2-carriers.mjs` carries one **export-only** change (`const` → `export const REVIEWED_BY_LINE`, value expression md5-identical).\n\n## Acceptance greps (both directions)\n\n| reading | before | after |\n| --- | ---: | ---: |\n| `REFERENCES_TIER_PREFIX` in the guard | 0 | 9 |\n| `readServedTier` / `servedTierStands` imported | 0 / 0 | 4 / 4 |\n| `GOVERNED_APPROVERS` (lit control — still hits) | 34 | 39 |\n| self-test cases | 183 | 229 |\n| the tier VALUE spelled in the guard | 0 | 0 |\n| predicate bodies md5-identical to their pre-change selves | — | **16 of 16 untouched** |\n\n## Two measurements the route turned on\n\n1. **The cycle is real, and indirect.** A module-scope import of the recognisers deadlocks (node exits 13, \"Detected unsettled top-level await\") — measured directly *and* through `check-clause2-carriers.mjs`, which imports H31's file. So the import is **lazy**, which is legal only because this file's dispatch no longer carries a top-level `await`. That precondition is pinned against this file's own source; ablation D (restoring `await main()`) reds exactly that one case, and ablation C (in the self-test dispatch) reproduces the exit-13 deadlock.\n2. **The thread read widens no scope.** `GET /repos/{o}/{r}/issues/{n}/comments` answers `X-Accepted-GitHub-Permissions: issues=read; pull_requests=read`, and GitHub documents the semicolon as separating *alternative* permission sets. The workflow's existing `pull-requests: read` is sufficient; ⛔ no workflow change.\n\n## Reverse verification (mutate → prove on disk → run → restore)\n\n| ablation | cases red of 229 |\n| --- | ---: |\n| A — drop the prefix's trailing slash | 2 |\n| B — `entrySatisfied` accepts any record state | 12 |\n| C — top-level `await` in the self-test dispatch | exit 13, deadlock |\n| D — top-level `await` in the live dispatch | 1 (the precondition pin) |\n\nEach leg proved its mutation on disk before running, and its restore by blob hash against `HEAD`.\n\n## Acceptance notes\n\n- `AGENTS.md` PD #14's sentence 「the queue guard refuses an unpinned governed diff」 stays true: a references-only PR is pinned by its record. No prose changed; `check:pm-governed-prose` is not in the derived set for this diff and is green when run anyway.\n- Noted, not filed: `makeLabelReader`'s docblock says the issues-labels route \"needs `issues: read`, which this workflow does not grant\". The live API answers `issues=read; pull_requests=read` for it too, so the stated reason is stale — the choice to read the pull object is still right (it reuses a call the leg already makes). Successor: whoever next edits that reader, in this same file.\n\nAuthored by the `domain:skills` seat, session `session_01DAcomhvR9kKizeYgg89Vo8`.\n\n## Gates (all at `f088df57`)\n\n`node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` derived **37** families; all 37 run, every one with its exit code captured before any pipe, all **0**. `--ran` reconciles: *37 derived, 37 run, 0 NOT-MEASURED (a DERIVED zero), 0 UNRUN*. Includes `check:pm-dispatch-gates` (1682 self-test cases), `check:pm-clause2-carriers`, `check:nul-bytes`, `check:refd-timer-probe`, `check:closing-target-claim`, `check:whole-set-label-write`, and the guard's own `--self-test` (229 cases).\n\n`check:pm-governed-prose` is **not** in the derived set for this diff — no prose surface changed — and was run anyway: green, *2 instruction surfaces name all 5 registered governed surfaces and claim no others*.\n\n`eslint . --no-inline-config` ran the **whole** population rather than a narrowing: **6722 files, 0 errors, 0 warnings**. No `parserOptions.project` and no typed rules are configured, so no untouched file's verdict can move with this diff.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

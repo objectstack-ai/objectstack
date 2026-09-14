@@ -1,0 +1,31 @@
+{
+  "number": 17676,
+  "kind": "issue",
+  "title": "A writable package created via `POST /api/v1/packages` is registered in memory only — it does not survive a restart, and leaves its published metadata orphaned",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:engine",
+    "pm:blocked",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-11T10:23:03Z",
+  "updated_at": "2026-09-13T15:55:21Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17676",
+  "body": "## What happens\n\n`POST /api/v1/packages` returns **201** and the package is fully usable — you can publish object drafts into it, the runtime serves them, the REST endpoints work. But the server logs:\n\n```\n[protocol.installPackage] no 'package' service — '<ns>' registered in-memory only (will not survive a restart)\n```\n\nAfter restarting `objectstack dev`, the state is **split three ways**:\n\n| Probe | Result |\n|---|---|\n| Studio → `MY PACKAGES (WRITABLE)` | `No writable packages yet` |\n| `GET /api/v1/data/<ns>_<obj>` | **404** `Object '<ns>_<obj>' is not registered` |\n| `GET /api/v1/meta/object/<ns>_<obj>/published` | **200** — the published object metadata is still there |\n\nSo the **published metadata outlives both the package and the runtime registration**. Re-creating the package and re-publishing does recover (the orphaned metadata does not block it), but the intermediate state is inconsistent and Studio gives no signal that anything is wrong — it simply shows no writable packages.\n\n## Repro (17.4.0, `objectstack dev`)\n\n1. `POST /api/v1/packages` with a writable-base package → 201.\n2. `PUT /api/v1/meta/object/<obj>?mode=draft&package=<ns>` → 200.\n3. `POST /api/v1/packages/<ns>/publish-drafts` → 200. Confirm the object serves data.\n4. Restart `objectstack dev`, then run the three probes above.\n\n## Expected — one of\n\n1. **Persist** API-created packages (symmetric with whatever path Studio's own \"new writable package\" uses), or\n2. **Refuse to publish** into a package that cannot be persisted (fail at step 3 rather than after a restart), or\n3. at minimum **surface the in-memory-only status in Studio** so the package is visibly ephemeral rather than silently absent after restart.\n\n## Why it matters\n\nThe failure is invisible until a restart, and then it looks like data loss with a contradiction inside it (metadata says published, runtime says not registered, Studio says nothing exists). Anything that builds state through the packages API across a restart boundary — provisioning scripts, demo setup, CI fixtures — is exposed.\n\n## Relationship to existing issues\n\nClosest prior art is **#5047** (`runtime /packages` persistence asymmetry: `enable`/`disable`/`uninstall` write the in-memory registry while `install`/`update` go through the protocol service to `sys_packages`) — **same family, different code path**: that one is about the enable/disable/uninstall side, this one is about **create via `POST /api/v1/packages`**. Also adjacent: #7557 / #7705 (uninstall leaving orphaned `sys_metadata` rows). All three are **closed**; the behaviour above was observed first-hand on **17.4.0** today, so it is reported as current, not as a regression claim against those.\n\n## Provenance\n\nFound while producing a product film in `steedos-labs/video-studio` (internal), issue #357, on a read-only clone of `objectstack-ai/hotcrm` @ `c716a2c` with `@objectstack/* 17.4.0` (same version as platform trunk at the time). Reported by the executing session; filed here by the video lane's PM per our cross-repo finding-transfer flow.\n\n**This is a finding, not a claim on anyone's time — filed unassigned.**"
+}

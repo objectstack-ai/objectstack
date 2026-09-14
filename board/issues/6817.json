@@ -1,0 +1,35 @@
+{
+  "number": 6817,
+  "kind": "pull_request",
+  "title": "fix(metadata-protocol): the view-definition conflict report's remedy query now runs on PostgreSQL, not only SQLite (#6772)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T22:52:44Z",
+  "updated_at": "2026-08-08T23:55:08Z",
+  "closed_at": "2026-08-08T23:55:06Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-08T23:55:06Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/6817",
+  "body": "Fixes objectstack-ai/objectstack#6772\n\n## The defect\n\n`buildDuplicateProbeSql()` is not a decorative string: it is shipped **inside**\n`ensureViewDefinitionActiveIndex`'s `error`-level degradation report as ADR-0120 D4's\n\"name the offending rows\", at both embed sites (the `unsupported` arm and the `conflict`\narm). It projected two **bare** columns while grouping by only their `COALESCE` forms:\n\n```sql\nSELECT name, organization_id, owner, COUNT(*) AS duplicate_rows\nFROM sys_view_definition WHERE state = 'active'\nGROUP BY name, COALESCE(organization_id, '__global__'), COALESCE(owner, '')\nHAVING COUNT(*) > 1\n```\n\nPostgreSQL requires every non-aggregated projection to appear **verbatim** in `GROUP BY`;\nbeing wrapped in an expression does not count. So the remedy an operator is handed fails\nwith a second error instead of the conflicting rows:\n\n```text\nERROR:  column \"sys_view_definition.organization_id\" must appear in the GROUP BY clause\n        or be used in an aggregate function\n```\n\n…and it fails on one of exactly **two** dialects that can build the partial index this\nreport is explaining (SQLite and PostgreSQL; MySQL/MariaDB reaches the same string\nthrough the `unsupported` arm). SQLite is lenient, which is why the existing real-SQLite\ntest stayed green and this shipped unnoticed.\n\n## The fix\n\nEach folded column is now projected through its **own** `COALESCE` under a bucket-key\nalias — the shape `overlay-index.ts`'s `buildOverlayDuplicateProbeSql()` already uses for\nthe sibling migration (#6770):\n\n```sql\nSELECT name, COALESCE(organization_id, '__global__') AS organization_id_key,\n       COALESCE(owner, '') AS owner_key, COUNT(*) AS duplicate_rows\nFROM sys_view_definition WHERE state = 'active'\nGROUP BY name, COALESCE(organization_id, '__global__'), COALESCE(owner, '')\nHAVING COUNT(*) > 1\n```\n\nEvery bare projection is now a bare `GROUP BY` term, so the query is legal on both\ndialects. One deliberate improvement over the sibling: the projection and the `GROUP BY`\nare built from the **same** `viewActiveIndexKeyParts()` array rather than reconstructed in\nparallel, so the two cannot drift apart again.\n\nReading bucket keys instead of stored values costs the operator nothing: neither sentinel\ncan occur in real data, so `organization_id_key = '__global__'` means `organization_id IS\nNULL` and `owner_key = ''` means `owner IS NULL`.\n\nThe `\"Dialect-neutral: COALESCE, GROUP BY and HAVING are ANSI on every engine this\nplatform runs on\"` comment was true about the three constructs and false about the query\nbuilt from them. It now states the projection rule the query has to satisfy, why it holds,\nand why the real-SQLite test cannot see a violation of it.\n\n**No behaviour change** to any index, write path, or returned status — only the text of\nthe remedy query inside the two degradation reports. Both embed sites were rendered and\nre-read with the longer query; both still read correctly.\n\n## Tests\n\n- **Updated** `buildDuplicateProbeSql groups by exactly the index key the CREATE uses` —\n  its old assertion (`Selected columns are the RAW ones`) was the belief that caused the\n  bug; it now pins the aliased projection.\n- **Updated** `a pre-existing duplicate pair blocks the tightening` — still **runs the\n  shipped query on the real SQLite database**, and now also asserts the bucket-key columns\n  come back (`organization_id_key: 'org1'`, `owner_key: ''` for the NULL-owner pair).\n- **New** `the duplicate-listing query is groupable on PostgreSQL, not only SQLite` —\n  mirrors the sibling pin in `overlay-index.test.ts`. Beyond the exact-string equality it\n  applies PG's rule term by term: every bare projection must be a bare `GROUP BY` term,\n  and every folded column must reach the select list only through its own expression.\n\n### Reverse verification (direction predicted before running)\n\nPrediction: restoring the bare projection reddens the groupability pin, while the\nreal-SQLite **execution** facts stay green — because the engine that test has is precisely\nthe lenient one. Measured, with the bare projection restored via `git checkout`:\n\n```text\nTests  3 failed | 25 passed (28)\n\nFAIL  the duplicate-listing query is groupable on PostgreSQL, not only SQLite\nFAIL  buildDuplicateProbeSql groups by exactly the index key the CREATE uses\nFAIL  a pre-existing duplicate pair blocks the tightening …\n      AssertionError: expected undefined to be 'org1'   ← line 395\n```\n\nThe asymmetry is visible in **where** the third one fails: at line 395, i.e. *after*\n`db.prepare(buildDuplicateProbeSql()).all()` executed without throwing and after\n`toHaveLength(1)`, `name === 'lead.team'` and `duplicate_rows === 2` all passed. SQLite ran\nthe broken query happily and returned the right rows; only the column *names* moved. Real\ndatabase execution therefore proves the query lists the offending rows and can never prove\nit is legal on PostgreSQL — which is the gap the new dialect pin fills, and the reason the\ndefect survived until now. The other 25 tests (index DDL, insert rejection, idempotence,\ndegradation wording) are untouched and stayed green.\n\n### Commands\n\n```text\npnpm --filter @objectstack/metadata-protocol test   → Test Files 63 passed (63), Tests 741 passed (741)\nturbo run typecheck --filter @objectstack/metadata-protocol → 13 successful, 13 total\neslint (both changed files, --no-inline-config)    → exit 0\ncheck:nul-bytes · check:durability-log-level · check:adr-anchors · check:doc-authoring → PASS\n```\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01W6bLax4KMrSfnE1ydFU8Dw\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01W6bLax4KMrSfnE1ydFU8Dw)_"
+}

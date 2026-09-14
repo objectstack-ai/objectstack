@@ -1,0 +1,32 @@
+{
+  "number": 6696,
+  "kind": "issue",
+  "title": "`describeHighPrivilegeBits`'s doc comment still cites `member_default` as the \"plain wildcard baseline\" example, which it no longer is",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T12:59:22Z",
+  "updated_at": "2026-08-09T01:00:48Z",
+  "closed_at": "2026-08-09T01:00:05Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6696",
+  "body": "Observation-class finding, filed from the #5492/#5491 paired PR (#6684). **Nothing a user hits today** — prose only, no behaviour change, no gate red.\n\n## What\n\n`packages/spec/src/security/high-privilege.ts`, in the JSDoc of `describeHighPrivilegeBits`:\n\n> A plain `'*'` wildcard grant is NOT high-privilege by itself (D5 permits a read/create/edit-own baseline to cover all objects — the platform's own `member_default` is exactly that shape); the wildcard ban is the GUEST tier's stricter rule (D9 \"explicit objects only\")\n\nAfter #5491 (PR #6684) `member_default` ships **no** `'*'` entry at all — the platform baseline narrowed to explicit-allow by maintainer ruling (2026-08-07). So the sentence's worked example no longer describes the set it names.\n\n## What is NOT wrong\n\nThe **rule** is unaffected and the code is correct. `describeHighPrivilegeBits` never reads `member_default`; it evaluates whatever set it is handed, and \"a plain wildcard is not high-privilege by itself\" remains the right ADR-0090 D5 predicate — `viewer_readonly` still ships exactly that shape and is still legitimately anchor-bindable. Only the *illustration* went stale.\n\nWorth noting the parenthetical's original purpose survives too: it exists to record why the former blanket wildcard rejection was wrong (#2753 — it made the default baseline unbindable to `everyone` and forced it through the fallback channel D5 rejected). That history is still true and still worth keeping; it just needs an example that still exists.\n\n## Suggested fix\n\nOne-line prose edit swapping the example (`viewer_readonly` is the obvious replacement — plain `'*'`, read-only, still shipped), and optionally a clause noting that `member_default` no longer carries a wildcard as of #5491 so the next reader is not sent looking for one.\n\n## Why filed rather than fixed\n\n`packages/spec` was a hard ⛔ on PR #6684's dispatched file surface (the ADR-0111/#6428 contract had just landed there via PR #6564 and the lane was serialized). Not fixed in that PR by instruction, not by oversight.\n\nFound while re-verifying #5491's premise against `origin/main`; no `pm:queue` — this is a `finding` for the triage round to grade.\n"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 6562,
+  "kind": "issue",
+  "title": "meta: an overlay-backed object read OMITS the injected system columns a registry-backed read includes — the same endpoint answers two different field sets",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T04:46:04Z",
+  "updated_at": "2026-08-08T20:31:08Z",
+  "closed_at": "2026-08-08T20:05:45Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6562",
+  "body": "Found while implementing #4513 (PR #6561). Same seam, **different defect**, deliberately left out of that PR's scope — filed separately and unassigned.\n\n## Summary\n\n`GET /api/v1/meta/object/:name` answers a **different set of fields** depending on which link of its resolution chain produced the answer, for the same object:\n\n- **Registry-backed** answer → the schema **after** `applySystemFields`, so it carries the injected system columns (`created_at`, `created_by`, `updated_at`, `updated_by`, `organization_id`, `owner_id`, `owning_business_unit_id`) even when the author declared none of them.\n- **Overlay-backed** answer (a `sys_metadata` customization row, or a MetadataService body) → the stored document **verbatim**, so those columns are simply absent.\n\nWhether an object has a customization overlay is invisible to the caller, so the same request can report `fields` with or without the platform's own columns and nothing in the response says which happened.\n\n## Evidence on `origin/main`\n\nThe two sources, and the asymmetry between them:\n\n- `packages/objectql/src/registry.ts:1050` — `registerObject` runs `schema = applySystemFields(schema, { multiTenant: this.multiTenant })` **before** storing the contributor, so `registry.getObject(name)` always returns the post-injection schema.\n- Already pinned in-tree: `packages/objectql/src/engine-audit-anchor-write.test.ts`, the case `'the injected field metadata marks it read-only and system'`, asserts `engine.registry.getObject('audit_task').fields.created_at` is present and `{ readonly: true, system: true }` — and `taskObject` declares only `id` / `title` / `progress`. So the registry answer carries a field the author never wrote.\n- `packages/metadata-protocol/src/protocol.ts` — `getMetaItem` step 1 returns `this.convertStoredItem(...)` of the `sys_metadata` body with no injection pass; step 2 (`readItemFromMetadataService`) likewise. Only step 3 reads the registry.\n\nConsumers of the differing answers:\n\n- `packages/runtime/src/domains/meta.ts:221` — the dispatcher's object branch registry fallback (`qlService.registry.getObject(name)`), and `:417` `getAllObjects(packageId)` for the list. Both post-injection.\n- `packages/metadata-protocol/src/protocol.ts` — `getMetaItem` / `getMetaItems`, whose overlay rows win over the registry entries they shadow.\n\n## Why this is NOT what #4513 fixed\n\n#4513 is about a **wrong value** on a field that IS reported: `created_at` read `readonly: false` while writes to it were refused. PR #6561 closes exactly that by forcing the audit-family governance on **declared** audit fields at every read exit.\n\nThis issue is the **absence** case, and it was deliberately excluded there for reasons worth recording rather than re-deriving:\n\n1. An absent field does not claim `readonly: false`, so it is not the contradiction #4513 names — the acceptance bar of that card is met without touching this.\n2. Injecting the missing columns into a served document changes what a `GET` then `PUT` round-trip persists, which is a pinned invariant (#4326, `packages/metadata-protocol/src/protocol.read-decorations.test.ts`: \"a GET → PUT round-trip persists a byte-identical body\").\n3. It also changes what the layered read (`?layers=1`) reports as `overlay` vs `effective`, i.e. what Studio shows an author as \"what you customised\" — injected columns nobody wrote would appear as a diff.\n\nSo the fix here is a scope and contract question, not a one-line change.\n\n## Why it still matters\n\nThe `/meta` surface is the machine-readable contract clients and AI authors code against. An author reading an overlay-backed object sees no `created_at` / `owner_id` / `organization_id` and reasonably concludes the columns do not exist — while every one of them is real in the database, filterable, orderable, and (for the audit family and `organization_id`) enforced read-only on write. The same reasoning that made #4513 worth fixing applies: the machine-readable face disagrees with the runtime, and only the client can see the disagreement.\n\nIt is filed as a `finding` rather than a defect because I did not measure a user hitting it today — the divergence is proved from the code paths and the existing registry pin above, not from a live repro. Triage should grade it.\n\n## Question for triage\n\nTwo readings, and they lead to different architectures — which is why this is not being guessed at inside #4513's PR:\n\n- **A. `GET /meta/object/:name` serves the AUTHORED document.** Then the registry-backed answer is the one that is wrong (it leaks materialized columns into what reads as authorship), and the fix is to strip injected-but-undeclared columns from the registry answer. `resolveInjectedSystemColumns` (`@objectstack/spec/data`) already computes exactly that set.\n- **B. It serves the EFFECTIVE runtime schema.** Then the overlay answer is the one that is wrong, and the fix is to run the served document through the injection pass — with the #4326 round-trip invariant and the layered-read diff both needing an answer first (most likely: inject on the read exits but keep `stripReadDecorations`' counterpart on the write side so the round-trip stays byte-identical).\n\nRelated: #4513 / PR #6561 (the value half of this same seam), #4447 (the write-path enforcement), #5378 (`resolveInjectedSystemColumns`, the shared \"which columns exist\" derivation), #4326 (the round-trip invariant).\n"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 6798,
+  "kind": "pull_request",
+  "title": "fix(lint,formula): 字段级 *When 的根检查翻成白名单,因果句按槽位分档 (#6713, #6716)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T18:01:51Z",
+  "updated_at": "2026-08-08T18:28:40Z",
+  "closed_at": "2026-08-08T18:28:39Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": "2026-08-08T18:28:39Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/6798",
+  "body": "Fixes #6713\nFixes #6716\n\n两单合一、同一次设计通过:它们改写的是 `checkFieldRuleUserRoot` 里**同一段文案**,\n分开做等于把那段写两遍,而且第二遍会推翻第一遍的分档。#6713 给的是**按根**分档轴,\n#6716 给的是**按槽位**分档轴,两轴正交。\n\n## 轴一:根集合从 3 项黑名单翻成 3 项白名单(#6713)\n\n字段级 `visibleWhen` / `readonlyWhen` / `requiredWhen` 实测只绑 `record`、`previous`、\n`parent`。三处独立证据,本 PR 逐条复验过:\n\n| 面 | 证据 |\n|---|---|\n| 服务端 | `packages/objectql/src/validation/rule-validator.ts` —— `isReadonlyWhenLocked` 绑 `{ record, previous, extra: { parent } }`;`requiredWhen` 块绑 `{ record, previous, ...parentScope }` |\n| 客户端 | `evalFieldPredicate` 绑 `record` + `previous` + 调用方 `scope`,而 objectui 五个字段级调用点(`form.tsx` 三处、`WizardForm.tsx`、`GridField.tsx`)传的 `scope` 只可能是 `undefined` 或 `{ parent }` |\n| 作者端 | objectui `ObjectFieldInspector.tsx` 的 `FIELD_RULE_ROOTS = ['record', 'previous', 'parent']`,注释明写 \"nothing else\" |\n\n而此前的检查是一张**黑名单**(#6584 一项、#6711 三项)。黑名单在这个面上结构性地追不上\n`SCOPE_ROOTS`:每新增一个根都要有人记得抄过来。实测 **21 个根**落在这条缝里 —— 同样未\n绑定、同样 fault、而且同样**静默**(它们都在 `SCOPE_ROOTS` 里,所以裸引用检查也从不报\n它们)。其中两个是高可信度作者笔误:\n\n- **`os.user.id`** —— ADR-0068 D1 的第四种用户拼写。`stdlib.ts` 的 `buildScope` 把同一个\n  `EvalUser` 同时挂在 `current_user` / `user` / `ctx.user` / `os.user` 下,#6711 收了三种,\n  `os` 这一支没收;\n- **`data.status == 'x'`** —— `data` 是**元数据表单**里同一个 `visibleWhen` 键的**合法**根\n  (`view.zod.ts` 的 `.describe()`:\"Root: `record` … in runtime forms, or `data` in metadata\n  forms\")。两种表单、同一个键名、不同的根。\n\n判定改为 `SCOPE_ROOTS` 成员减去白名单,列表从 `@objectstack/formula` 取而不在消费端重述,\n因此 `SCOPE_ROOTS` 将来新增的成员**自动**被覆盖。处方随之按根分档:用户根保留选项级\n`visibleWhen` 与权限集 FLS 两条用户向处方;`data` 给元数据表单 vs 运行期表单的解释;其余\n根给通用的「改写成 `record` 谓词」。此前只有用户向处方,对写了 `data.type == 'select'` 的\n作者是答非所问。\n\n## 轴二:因果句按槽位分档(#6716)\n\n三个槽位此前共用一句「falls back to VISIBLE … showing for everyone」,而这句只对其中一个\n精确。派单要求「不得沿用未测的表述」,所以三格**每格量了两端**:\n\n| 槽位 | 服务端 | 客户端 | 结论 |\n|---|---|---|---|\n| `visibleWhen` | **根本不评估** —— `ConditionalFieldDef` 无此成员,`fieldsNeedPrior` 只看 `requiredWhen \\|\\| readonlyWhen \\|\\|` 选项可见性 | `fallback: true` | fail-OPEN,**原文案正确** |\n| `readonlyWhen` | `isReadonlyWhenLocked` 命中 `unknownVariableOf` 返回 `true` = **LOCKED**(#4889 carve-out),`stripReadonlyWhenFields` 随即把该字段从 payload 删除 | `fallback: false` ⇒ 表单仍渲染为**可编辑** | 两端**方向相反**,按 ADR-0057 D10 以服务端为准 ⇒ 字段看着能改、保存报成功、值静默不落库。**原文案是反的** |\n| `requiredWhen` | 记日志后 `continue`(#4977 明确没采用 #4889 的 carve-out),该次写入**不强制** | `fallback: false` ⇒ 表单也不标必填 | 两端都 fail-OPEN 且与可见性无关,记录带空字段保存成功。**原文案说错了字段的哪个属性** |\n\n两格「未测」现已实测,结论都与 #6716 的预判一致:客户端 `readonlyWhen` 与服务端**不同向**\n(这正是 ADR-0057 D10 要裁决的情形),`requiredWhen` 的失败面根本不是可见性。\n\n`conditionalRequired` 在 `FieldSchema` 里是 `retiredKey`(按名字拒绝),解析后的编译路径上\n该分支惰性,因此给它一条与槽位无关的通用句,而**不是编造第四格测量**。\n\n## 范围扩张披露(纪律 ㉕)\n\n本 PR 动了 `packages/formula`(简报落点是 `packages/lint`):把 `SCOPE_ROOTS` 改为**公开导出**。\n这是继承自上一位 dev 的改动,我按自己的判断复验后**保留**,理由:\n\n1. **它确实消灭了手抄列表** —— 规则直接 `SCOPE_ROOTS.filter(...)`,测试的残余根表也由同一个\n   import 生成,lint 里不再有任何一份根名副本。新增消费者只有两个,都在 lint,都为这条规则。\n2. **`firstUndeclaredReference` 不能替代,且这是实测而非偏好** —— 严格环境同时声明 CEL 的\n   **类型名**,`type(record.x) == string` 里的 `string` 会被判成「能解析的根」。见下方反向验证 C:\n   按可解析性判定会误杀这条合法谓词,恰好 1 例。\n\n按 #6584 先例(同样 formula + lint 两包),changeset 为两包各 `patch`。\n\n## 爆炸半径(白名单严格宽于黑名单,必测)\n\n自写扫描器跑遍 `examples/` + `packages/` 与下游 `objectui`,按槽位名与根拼写双向扫。\n**结果:字段级 `*When` 读取任一新拒绝根的用例为零。**\n\n值得记一笔:扫描器第一版漏报。本仓谓词写作 **tagged template**(`` visibleWhen: P`record.status == 'paid'` ``),\n而第一版正则既没允许引号前的标签,又用 `[^'\"`]` 排掉了谓词内部的单引号 —— 两个 bug 叠加,\n`examples/` 的 41 处全部隐形。修正后解析出的 `*When` 槽位从 82 涨到 **273**,命中新拒绝根的\n非测试用例 **46 处**,但**全部**落在 `packages/spec/**/*.form.ts` 元数据表单(`data` 在那里是\n合法根)与 objectui 的 `metadata-admin/anchors.ts`。这些面本规则**够不着**:规则只从\n`stack.objects[].fields[]` 的字段走查里调用,而元数据表单是 `defineForm({ sections: [{ fields: [...] }] })`\n的表单视图,两者容器与形状都不同。\n\n## 反向验证(三轮,预测写在跑之前)\n\n| 轮次 | 变异 | 预测 | 实测 |\n|---|---|---|---|\n| A | 白名单还原成 3 项黑名单 | 30 红 | **30 红** ✅ |\n| B | 按槽位的因果句还原成单句共用 | **5 红,且 `visibleWhen` 必绿** | **5 红,`visibleWhen` 绿** ✅ |\n| C | 判据换成严格环境**可解析性**(而非 `SCOPE_ROOTS` 成员) | 恰好 1 红 | **1 红**,正是 `does NOT reject a CEL TYPE name used as a value` ✅ |\n\nB 轮的方向是**部分反转的,并且是预先声明的**:共用的那句话本来就是 `visibleWhen` 的,所以\n`visibleWhen` 断言**不可能**因还原而变红 —— 真正承重的钉子是 `readonlyWhen` / `requiredWhen`\n的两条否定断言。这不是漏测,是这条改动的真实反向形状。\n\n三轮变异每轮结束后都以 `git diff --quiet` 校验过还原是**逐字节**干净的。\n\n## 继承工作的处置\n\n本卡是再派发:上一位 dev 死于配额墙,留下 4 个未提交文件,且死前最后一句是「Restoring.」——\n存在**未还原变异残留**的风险。处置:\n\n- **残留判定:无。** 树里是真实实现(`SCOPE_ROOTS` 成员判据、白名单、按槽位映射俱在),\n  且全量 lint 套件 1702/1702 绿 —— 变异树会在新测试上变红。C 轮变异正是它死前那轮,我从零\n  重跑并复现了同样的 1 例。\n- **决定:在其上构建。** 但每一条承重论断我都独立复验过源码(三处绑定锚点、两端六格失败方向、\n  `os.user` 第四拼写、`conditionalRequired` 的 `retiredKey` 身份、`data` 的元数据表单出处),\n  三轮反向验证全部从零重跑,爆炸半径重新自测 —— 并在重测中发现并修掉了扫描器的漏报 bug。\n\n## 验证\n\n- `pnpm --filter @objectstack/lint test` —— **65 文件 / 1702 用例全绿**\n- `pnpm --filter @objectstack/formula test` —— **21 文件 / 561 用例全绿**\n- `pnpm --filter @objectstack/lint typecheck`、`pnpm --filter @objectstack/formula typecheck` —— 均干净\n- `pnpm check:nul-bytes`(6326 文件)、`check:empty-changeset`、`check:adr-anchors`、\n  `check-changeset-no-major.mjs`、改动文件的 `eslint --no-inline-config` —— 均 exit 0\n- 已合并当前 `origin/main`(`f6cd63549`);其中 #6766 恰好改到 `cel-engine.ts`,合并后 formula\n  已重建、两包测试重跑。\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01AZgRyPVwi1jLb1mNNuUQ9o)_"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 6544,
+  "kind": "issue",
+  "title": "import-runner's sanitizeRowError keeps its own three-dialect unique regexes — deferred from #6250 to avoid a merge race with #4633",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T03:46:52Z",
+  "updated_at": "2026-08-08T14:08:12Z",
+  "closed_at": "2026-08-08T14:08:12Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6544",
+  "body": "Blocked-by: #6250 (the shared predicate must land first — PR #6541)\n\nFiled by the #6250 developer agent. This consumer was **in** #6250's declared scope and was removed mid-task by a PM scope narrowing, so it is recorded here rather than silently dropped.\n\n## Why it was deferred (not forgotten)\n\n#4633 was dispatched in parallel and its consuming half lands squarely in the import path, `packages/rest/src/import-runner.ts` included. Two agents editing that file is a merge race that costs more than serialising. The migration was always the incidental half of #6250, never the user-visible fix — that half (MySQL conflicts returning 409 `UNIQUE_VIOLATION`) shipped in PR #6541.\n\n## What is left\n\n`sanitizeRowError` in `import-runner.ts`:\n\n```ts\nconst unique =\n  /unique constraint failed:\\s*([^\\s,)]+)/i.exec(msg) ??          // sqlite\n  /duplicate entry .* for key '([^']+)'/i.exec(msg) ??            // mysql\n  /duplicate key value violates unique constraint.*?[Kk]ey \\(([^)]+)\\)/is.exec(msg); // postgres\n```\n\n**Correction to #6250's inventory, for whoever picks this up:** that issue's table records this row as \"一条 Postgres 专用正则 ... 仅 Postgres\". That has drifted. All three dialect limbs have been present since #3572 (`git log -S \"duplicate entry .* for key\"` confirms) — the line number the issue cites is the third limb of a three-way chain, not the whole of it. The row is still a private vocabulary; it is just not the *narrowest* one.\n\n## Why this is not a mechanical swap\n\nThis site does **more** than answer yes/no: it extracts the **offending column** so the importer can say *\"A record with this `email` already exists.\"* `isUniqueViolationError` deliberately answers the boolean only — #6250's ruling put the structured conflict-column export out of scope as a new contract surface.\n\nSo this migration needs one of:\n\n- **(a)** keep the column-extracting regexes and use the predicate only as the gate — buys little, and leaves the vocabulary forked; or\n- **(b)** land a `uniqueViolationColumn(error)` sibling in `@objectstack/types` first, which is the actual convergence. PR #6541's structure already separates the channels per dialect, so the shape slots in without restructuring — but it is a **contract decision**, not a refactor: when a dialect names an *index* (`for key 'idx_email_unique'`) rather than a *column* (Postgres' `Key (email)=(...)`), which does the export promise? A caller that renders \"already exists\" into a form field needs the column; an index name mis-rendered there is worse than no answer.\n\nRecommend (b), and note that #5495's autonumber-retry branch wants the same export for a different reason (retry only when the conflicting column IS the autonumber field), so the two callers should agree on the answer before either is built. That decision is the maintainer's, per #6250's ruling — this card should not settle it unilaterally.\n"
+}

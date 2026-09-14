@@ -1,0 +1,34 @@
+{
+  "number": 17814,
+  "kind": "pull_request",
+  "title": "docs(adr): ADR-0090 D5 offending bits are platform system permissions, not any systemPermissions",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-bill",
+    "id": 324100929,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-12T07:37:11Z",
+  "updated_at": "2026-09-13T15:12:44Z",
+  "closed_at": "2026-09-13T15:12:43Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-09-13T15:12:42Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/17814",
+  "body": "Part of #17189 — the **protocol half** of phase ①. ⛔ This PR does not discharge the card, and ⛔ carries no closing keyword: #17189 still owes step ②.\n\n**Sibling**: #17811 carries the `packages/spec` predicate, its test, the changeset and the two regenerated surface snapshots. The two were one PR until the seat review of head `a21ad008`; they are split here on the ruling's own instruction.\n\n## Why this is its own PR\n\nThe ruling (#17189 comment `5615806616`, director seat, batch #110) says it twice, verbatim:\n\n> ADR-0090 D5 的 offending 清单相应收窄为「平台系统权限；带 package provenance 的应用声明 capability 令牌不计」，ADR 修订走独立受管 PR（draft、请审、人合）\n\n> `Clause-②: yes`（放宽接受集）；**ADR-0090 修订单独受管 PR**\n\nThe triage seat had already ruled the same shape: 「那部分**必须是独立的受管 PR**，⛔ 不得与代码同 diff」.\n\nMeasured consequence, not style. `scripts/pm/check-governed-merges.mjs --test` on this PR's one-file list exits **3 = GOVERNED**; on the sibling's five-file list it exits **0 = NOT governed**. Bundled, one governed path made the predicate change human-merge-only too. Split, this half waits for its human and the code half takes ordinary landing.\n\n## Why the revision is required\n\nBoth halves are phase ①, per the ordering note (#17189 comment `5617614086`) carrying the maintainer verbatim:\n\n> 「我们的项目以objectstack 协议为准，文档应该以实际实现为准。协议不正确的应该先修改协议。」\n\nD5's last bullet said **any** `systemPermissions` was an offending bit, and `describeHighPrivilegeBits` implemented that literally — so the protocol, not the implementation, was the half that was wrong. A predicate change without this revision would leave the ADR describing a rule the code no longer applies.\n\n⚠️ **Merge order.** The maintainer's sentence puts the protocol first. This PR is human-merge-only and the sibling is not, so nothing mechanical keeps the code from landing first; if that order matters to you, merge this one before #17811 is enqueued. Flagging rather than deciding — a draft PR cannot enforce it.\n\n## What changed\n\nD5's last bullet now reads \"a `systemPermissions` entry naming a **platform** system permission\", and names an app-declared capability token — one a package declared for itself under ADR-0066 D1, entering `sys_capability` with `managed_by: 'package'` + `package_id` provenance — as **not** an offending bit.\n\nA dated revision note records:\n\n- the two unlike token kinds in one list, and the cost that motivated the narrowing (a named downstream consumer binding its baseline set to seven positions by hand, plus one manual grant per new hire);\n- three boundaries, each failing closed — **the platform floor is absolute** (a platform capability name stays high-privilege however it is declared, so `manage_users` cannot be laundered by declaring it); **the discriminator is provenance, never spelling** (⛔ the dotted-name rule was considered and rejected: `setup.access` is a dotted *platform* capability today); **omission refuses** (a caller that cannot enumerate the declarations gets the pre-revision verdict);\n- that the D9 `guest` tier is untouched — D5 speaks for authenticated members;\n- the ruling's provenance and the landing order, quoted verbatim in the original Chinese;\n- that the consuming callers keep the pre-revision behaviour until they supply the declared list.\n\nThe revision text is **byte-identical** to what stood on `a21ad008` before the split — verified by diffing this branch's file against that branch's. Removing the code hunks made no sentence of it false: nothing in the note claims the predicate ships in this PR.\n\n## Clause ②\n\nRecorded, not re-declared here: the card's declaration is `Clause-②: yes`（放宽接受集）per the ruling's 执行 line, and the `needs:contract-review` carrier is already hung by the seat on card #17189 and on the code PR #17811. This half is prose only — it puts no key on any published payload and moves no accept set by itself. Whether the carrier is also owed on this PR is the seat's call; ⛔ this round writes no labels.\n\n## Verification\n\n- Content: unchanged from the reviewed head, byte-for-byte (see above). The engineering behind it was accepted in the seat review of `a21ad008` and is ⛔ not re-litigated here.\n- `check-governed-merges.mjs --test docs/adr/0090-permission-model-v2-concept-convergence.md` → exit **3 (GOVERNED)**. Control, the sibling's five-file list → exit **0 (NOT governed)**, so the 3 is a verdict about this file rather than an instrument that only ever says 3.\n- ADR gate family on this branch: `check-adr-links`, `check-adr-symbol-anchors`, `check:adr-anchors`, `check-adr-0087-registration --base origin/main`, `check:nul-bytes`, `check:pm-governed-prose`, `check:doc-authoring` — exit codes captured before any pipe, reported in the round's report.\n- No changeset: `docs/adr/**` is in no package's `files[]`, and a phrase unique to this revision note occurs in 0 built files under `packages/spec/dist` — the negative control measured in the sibling PR's changeset decision.\n\n⚠️ **Governed surface** — `docs/adr/**`. Draft only, and it stays draft: ⛔ not flipped ready, ⛔ not enqueued, ⛔ no auto-merge, ⛔ no approving review. A human merge is the review record.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01MkQhmuuJAVDjmeWNixwDDH)_"
+}

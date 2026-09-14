@@ -1,0 +1,32 @@
+{
+  "number": 6698,
+  "kind": "issue",
+  "title": "`modifyAllRecords` still does not widen a by-id write on an object with NO owner field (sharing abstains, the platform `created_by` floor holds)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T12:59:50Z",
+  "updated_at": "2026-08-09T01:11:42Z",
+  "closed_at": "2026-08-09T01:11:34Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6698",
+  "body": "Observation-class finding, filed from the #5492/#5491 paired PR (#6684), where it is **pinned as deliberate measured behaviour** rather than left implicit. Filing it so the residual is graded by triage instead of living only in a test comment.\n\n## Measured\n\nPR #6684 makes the row-level write pre-image gate consult `ISharingService`'s tri-state verdict, so `modifyAllRecords` and `edit`-level shares finally widen by-id writes. On an object with **no `owner_id` field**, they still do not:\n\n```\nobject: no `owner_id` column, sharingModel 'private', ordinary posture (no access.default)\nprincipal: profile with viewAllRecords + modifyAllRecords on that object\nPATCH a row created by someone else\n  -> sharing.checkEdit(...)  = 'abstain'\n  -> platform floor `created_by == current_user.id` stays\n  -> 403 \"[Security] … (row-level security)\"\n```\n\nPinned as a passing case in `packages/plugins/plugin-security/src/row-write-widener-composition.test.ts` (\"an abstention does not become permission for a Modify-All holder either\").\n\n## Why it is currently correct, not a bug in #6684\n\nThree accepted decisions all point the same way, and the PR deliberately did not override any of them:\n\n1. **`checkEdit` abstains before it ever asks about the bypass** — `if (!hasOwnerField(schema)) return 'abstain'` precedes the `hasModifyAllBypass` branch (`plugin-sharing/src/sharing-service.ts`). Record sharing does not enforce on owner-less rows at all.\n2. **`abstain` must fall back to the floor** — that is the whole point of #6428's tri-state, and #5492's E2 experiment measured the cost of reading it as permission: an ordinary member's cross-creator UPDATE on an owner-less object went 403 → 200. The floor is the ONLY row-level write gate such objects have (#1985).\n3. **ADR-0066 ① withholds the superuser RLS short-circuit on an ordinary business posture** (`posturePermits = isPrivate / tenancyDisabled / isBetterAuthManaged`). Widening this cell from the security side would mean re-deriving the bypass there — the second implementation of one contract that #5492's first dev stopped at `needs_decision` over, and that #6564's §7 prescription explicitly forbids.\n\nSo the honest description is: **`modifyAllRecords` widens by-id writes on objects sharing enforces on, and does not on objects it abstains from.** Author-defined objects without an `owner_id` column are the common shape of the second group.\n\n## Why it may still deserve a decision\n\n`packages/spec/src/security/permission.zod.ts` describes `modifyAllRecords` as \"Super-user write access. **Bypasses Sharing Rules and Ownership checks.**\" On an owner-less object it bypasses neither — the `created_by` floor is an ownership check written as RLS, and it wins. That is a `declared ≠ enforced` residual of exactly the class ADR-0049 targets, even though every individual decision producing it is sound.\n\n**No measured business pull, which is why this is a `finding` and not a queued defect.** HotCRM's four probed objects all carry owner fields (their reads widened 43/43 under VAMA, and share rows materialised — both require the owner anchor), so #5492's reported symptom is fully covered by #6684. Nothing in the acceptance sweep exercises this cell.\n\n## Options, if triage decides to price it\n\n- **A — leave as is, fix the declaration.** Amend the `modifyAllRecords` description to say the bypass covers ownership *as sharing computes it*, and that a platform ownership floor on an owner-less object still applies. Zero risk, closes the wording gap; the capability surface does not grow.\n- **B — let the sharing service answer the bypass before abstaining.** Move the `hasModifyAllBypass` probe ahead of the `hasOwnerField` early-return in `checkEdit`/`checkDelete`, so an owner-less row returns `allow` for a bypass holder and `abstain` for everyone else. Keeps one implementation and one authority; needs care that it cannot re-open the E2 fail-open for non-holders. Touches `plugin-sharing` + the #6428 contract prose.\n- **C — recompute the bypass on the security side.** Rejected on sight: a second implementation of the same contract, the thing #6564 §7 was written to prevent.\n\nRecommendation if it is priced at all: **A**, unless a real deployment turns up needing Modify All Data on owner-less objects — at which point **B**, because it keeps the decision in the one authority that owns it. No `pm:queue`.\n"
+}

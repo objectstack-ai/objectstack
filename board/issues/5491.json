@@ -1,0 +1,37 @@
+{
+  "number": 5491,
+  "kind": "issue",
+  "title": "`member_default`'s `*` wildcard object grant (C/R/E) union-merges into every org member — app-side explicit-allow object gates are erased on three axes",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched",
+    "pm:queue",
+    "target:v17"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T14:17:04Z",
+  "updated_at": "2026-08-08T13:24:38Z",
+  "closed_at": "2026-08-08T13:24:38Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5491",
+  "body": "Part of objectstack-ai/hotcrm#703\n\nFound during HotCRM&#39;s 17.0 GA acceptance sweep on `@objectstack/*` **17.0.0-rc.2**, 5-profile permission matrix phase (188 probes, each user with their own Bearer token).\n\n## Symptom\n\nThe platform&#39;s `member_default` permission set carries `object_permissions[&#34;*&#34;] = {allowCreate:true, allowRead:true, allowEdit:true, allowDelete:false}` and is **union-merged (most-permissive) into every org member**. An app&#39;s explicit-allow object gate is therefore erased on the **create, read and edit** axes. Only **delete** stays profile-driven.\n\n`security/explain` states it outright — for a profile carrying an explicit all-false deny on `crm_opportunity`:\n\n&gt; create on &#39;crm_opportunity&#39; is granted by [member_default]\n\n## Measured (HotCRM, 17 objects, 5 profiles)\n\n- **21 create-denial probes, ALL returned 201** — every profile creates on every object once validation passes (incl. objects the profile explicitly denies).\n- `member_default` also grants **own-row EDIT** on objects the profile forbids editing (service_agent edited its own `crm_account`, profile declares no edit anywhere).\n- On **public_read** objects the wildcard yields **200 with ALL rows** for non-holders — real unauthorized reads, not the documented &#34;200 with 0 rows&#34; empty-set pattern.\n\n## Reproduction\n\n```bash\n# as a user whose profile carries an explicit all-false deny on crm_opportunity\nPOST /api/v1/data/crm_opportunity {&#34;name&#34;:&#34;X&#34;,&#34;stage&#34;:&#34;prospecting&#34;,&#34;amount&#34;:1,&#34;close_date&#34;:&#34;2026-09-01&#34;, ...}\n→ 201\nGET /api/v1/security/explain?object=crm_opportunity&amp;operation=create\n→ &#34;... granted by [member_default]&#34;\n```\n\n## Why this matters\n\nThe app *declares* explicit-allow; the platform *enforces* default-allow-except-delete. App-side authorization test suites validate declarations, so CI is green while the runtime posture is default-open — declared ≠ enforced in the security layer itself. If the wildcard is intentional platform policy, apps need a **supported opt-out**: explicit deny entries do not win against the union today.\n\n## Prior related issues (checked, none open on this defect)\n\n- #2753 (closed) — member_default anchor-forbidden bits at boot\n- #3005 (closed) — clarification of viewAll/modifyAll under `public_read_write`; this report is about `member_default`&#39;s wildcard under normal OWDs\n- #1985 (closed) — the 16.x-era broad-access defect\n\nFull probe log: HotCRM acceptance run `w4/results.jsonl` (M1/M9). Sibling findings from the same sweep: objectstack-ai/hotcrm#705 (write gate), objectstack-ai/hotcrm#704 (parent-derived reads, tracked here as #5386).\n\nBlocked-by: #6428"
+}

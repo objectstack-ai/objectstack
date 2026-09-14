@@ -1,0 +1,35 @@
+{
+  "number": 6583,
+  "kind": "pull_request",
+  "title": "fix(analytics): `where` 门拒收 `$` 算子与非 `$` 键混写的字段约束（#6444）",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T05:53:50Z",
+  "updated_at": "2026-08-08T06:13:25Z",
+  "closed_at": "2026-08-08T06:13:23Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": "2026-08-08T06:13:23Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/6583",
+  "body": "Closes #6444\n\n按 2026-08-08 02:12Z 维护者裁决（Option A——拒收）实施，基于已并入 #6445 的 `origin/main`（`1a53a0253`）。**只动 `strategies/filter-normalizer.ts` 与其测试**；同包另一扇门 `read-scope-sql.ts` **零字节未动**（不在 diff 中）。未实现任何展平回退（Option B 被裁决否决）。\n\n## 实测（先验前提，再实现）\n\n在 `origin/main` @ `1a53a0253` 上直接调 `normalizeAnalyticsFilterTree({ where })` 逐行复测。**前提成立**：`opKeys.length > 0` 的分支只遍历 `$` 键就 `return`，嵌套关系展平在其后，走不到——非 `$` 兄弟键静默消失，与值无关：\n\n| `where` | 归一化结果 | 读法 |\n|---|---|---|\n| `{d: {$eq: 1, nested: 'x'}}` | `d equals [1]` | `nested` 合取项静默消失 |\n| `{d: {$eq: 1, nested: undefined}}` | `d equals [1]` | 同上——与值无关，正是 #6386 钉住的测量 |\n| `{amount: {gte: 10, $lte: 20}}` | `amount lte 20` | 漏写 `$` 的典型手误：**下界静默没了** |\n| `{$not: {d: {$eq: 1, nested: 'x'}}}` | `NOT(d set AND d = 1)` | 兄弟键在取反**内部**消失 |\n| `{$not: {d: {$null: true, nested: 'x'}}}` | `NOT(d set AND d notSet)` | **矛盾式取反成 TRUE ⇒ 每一行** |\n\n最后一行是本轮实测新量到的、比 issue 正文更响的一格：#5146 的守卫在兄弟键**还在**时判的 `requireValue`，兄弟键随后在 `fieldLeaves` 里消失，剩下的合取自相矛盾，取反后放行**整个数据集**。每一行方向都是**加宽**——同一个函数 `MONGO_TO_CUBE_OP` 未命中分支的注释明令禁止的 #3650 败法。\n\n## 裁决四项要求——逐项合规\n\n| # | 要求 | 落点 |\n|---|---|---|\n| 1 | 消息点名非 `$` 键并给出**两种**合法改写（算子拼法 `gte` → `$gte` **和**嵌套关系形），区分两种无法消歧的意图 | `mixedFieldWrapperError`：逐键点名（多键全列，有专门用例）、`\"gte\" → \"$gte\"` 加原位示例、嵌套形加它编成的点号成员 `\"amount.gte\"` 加显式 `$and` 组合（一个 JSON 对象写不了两次同名键）。消息合同由 `shows BOTH legal rewrites` 用例逐片断言；措辞唯一性（#5240）由擦除比对用例钉死 |\n| 2 | 拒收测试断言 **`code` + `status`**（ADR-0112），裸 `toThrow()` 不算 | 新文件每条拒收用例（8 位置 + 多键 + 4 条改写路径）都断言 `code === 'INVALID_FILTER'` 且 `status === 400`；账本的 envelope 块对第 11 行自动覆盖同两项 |\n| 3 | #6445 留下的 pin（`a non-$ SIBLING … still dropped`）翻成正向拒收断言 | `filter-normalizer-undefined-comparand.test.ts` 同一用例原位翻转，**保留原 pin 的同两条输入**（`nested: undefined` / `nested: 'x'`），断言消息 + code + status；注释记下翻转前后的可读历史 |\n| 4 | 范围只此一门；#5930 五编译面收敛维持 on hold；按 #6410 条款逐面申报 | 见下表；`read-scope-sql.ts` 零字节 |\n\n## #6410 编译面清单——逐面申报\n\n| 面 | 处置 | 依据（实读代码，非推断） |\n|---|---|---|\n| service-analytics `filter-normalizer.ts` | **changed（本 PR）** | `assertUnmixedFieldWrapper` 于 `fieldLeaves` 包装分支、#5240 空约束闸之后 |\n| service-analytics `read-scope-sql.ts` | **already conformant** | `compileField`：`keys.some((k) => !k.startsWith('$'))` 即 fail-closed 拒收（:379-382）。零字节未动 |\n| driver-sql `sql-driver.ts`（wasm / turso-local 继承） | **already conformant（方向上）** | 对象比较数**所有**键都按算子迭代，非 `$` 兄弟键落到发射器 `default: throw unsupportedFilterError(\"Unsupported filter operator …\")`（:7416-7422）——响亮拒收、点名键，不丢 |\n| turso RemoteTransport `buildWhereSQL` | **already conformant** | `unsupportedOperator` 对非 `$` 键有**专门措辞**（`object comparand whose key \"…\" is not an operator`，:2189-2196），`invalidFilterError` 信封 |\n| formula `matchesFilterCondition` | **out of scope（如实记差异）** | `evalField`：任何非 `$` 键使整个约束 `return false`（matches-filter.ts:161）——**静默收窄**（该行被排除），既不丢键加宽也不响亮拒收。与裁决面向不一致但方向相反且无声；按裁决要求 4 与 #5930 hold 不在本单动，差异如实记档 |\n| objectql `having-filter.ts`（半面，#5905） | **already conformant（方向上）** | `isOperatorObject` 只要有 `$` 键即真，随后**全部**键按算子迭代，非 `$` 键落 `default: throw unknownOperator(op, 'condition')`（:194-196） |\n| driver-memory / driver-mongodb | **out of scope** | #5499 冻结：pin-annotate 而非翻转 |\n\n## 反向验证（方向先预判、写进测试文件头，再跑）\n\n唯一旋钮：摘掉 `fieldLeaves` 里 `assertUnmixedFieldWrapper(key, wrapper)` 这一次调用。\n\n**预判**：新文件 19 条中 **15 红**（8 个位置行 + 多键行 + 措辞唯一性行 + 双改写行 + 4 条 `$not` 改写路径行），4 条对照绿（两条纯形状、邻座拒收措辞、`$eq: undefined` 混写行——它由 #6386 的闸先拒，与本闸无关）；翻转的 pin **1 红**；账本第 11 行在两个循环里 **2 红**；其余全绿。合计 **18 红**。\n\n**实测**：`Test Files 3 failed | 66 passed / Tests 18 failed | 1393 passed`——红的正是预判的 18 条、只在预判的 3 个文件里，逐条名单核对一致；两个纯形状对照块、#6386 全部用例、`null` 对照组全程未红一行。恢复闸后全绿。\n\n措辞唯一性用例带着 #6445 在孪生用例上量出的防空转守卫（先逐行断言确实拒收，再擦除比对），反向档位下它按预期红在「did not refuse」一步，而不是空着绿。\n\n## `null` 对照组与 #6386 的闸：零字节\n\n`filter-normalizer-undefined-comparand.test.ts` 的 diff **只有翻转的那一个用例**：13 行 `NULL_CONTROL`、七行表、位置清单、`$null`/`$exists` 旗标块逐字节未动，全程绿。`comparand()`、`$null`/`$exists` 恒等读、#5332/#5526 裁决——不在 diff 中。两闸次序为实测事实并钉了一条用例：`{d: {$eq: undefined, nested: 'x'}}` 由 #6386 的闸先答（同信封，REST 面无差别），注释写明这是实现事实而非契约。\n\n## 夹具分诊与消费半径\n\n- **翻转（裁决点名）**：#6386 的 sibling-drop pin，原位翻正，同输入。\n- **账本补声明**：`filter-refusal-envelope.test.ts` 的 `covers every refusing site in the module` 是全量声明，新增第 11 行（`addedAfter5352: '#6444'`，尊重 #6445 立下的历史/全量双职责区分——不混入 `issueBullet: false` 集合），计数 10 → 11。\n- **REST 面镜像表**（`packages/rest/analytics-filter-refusal-envelope.test.ts`）是采样表而非全量账本（#6445 同样未加行），不动；信封经由通用读取跨 seam，下游全绿见下。\n- **消费半径扫**：`normalizeAnalyticsFilterTree` 调用方 3 个文件全在本包；examples / plugin-reports 的库存 metadata 过滤器全文扫过——全部纯 `$` 包装或标量等值，**无一处**混写形状；下游 `rest`、`runtime` 全量跑过。\n\n## 门禁（全部实跑）\n\n| 门 | 结果 |\n|---|---|\n| `pnpm --filter @objectstack/service-analytics test` | `Test Files 69 passed (69) / Tests 1411 passed (1411)`（基线 68 文件；本 PR +1 文件 +19 用例，另 3 条用例原位改写） |\n| `tsc --noEmit -p packages/services/service-analytics` | 10 errors，与 `check-type-check-coverage.mjs` 账本记录的 10 **一致**；逐文件核对，全部在原有 3 个测试文件，本 PR 改动文件**零**类型错误 |\n| `eslint`（4 个改动 ts 文件） | exit 0 |\n| `node scripts/check-nul-bytes.mjs` | `OK (scanned 6158 tracked text file(s))`；另对 5 个改动文件跑 `grep -naP` 控制字节自扫描，clean |\n| `pnpm check:engine-double-contract` | `OK — 92 pinned, 133 in the DEBT ledger, 2 exempt.` |\n| `check:error-code-casing` | `✓ no lowercase error codes in 3198 scanned file(s) (ADR-0112).` |\n| `check:route-envelope` | `✓ Dispatcher domains — 16 audited … (0 ratcheted)` |\n| `check:empty-changeset` | `✓ … (1 declaring changeset(s) added)` |\n| 下游 `pnpm --filter @objectstack/rest test` | `Test Files 66 passed (66) / Tests 939 passed (939)` |\n| 下游 `pnpm --filter @objectstack/runtime test` | `Test Files 111 passed (111) / Tests 1611 passed (1611)` |\n\nChangeset：`.changeset/mixed-wrapper-refusal.md`，patch @ `@objectstack/service-analytics`（可观测行为变更：一个此前被静默收窄读取的形状改为 400 拒收）。\n\n## 触达性（与 #6386 的一个实质差别）\n\n`undefined` 过不了 JSON，本形状**过得了**：它可以躺在库存 dashboard `filter` / report `runtimeFilter` / dataset `filter` 里，也可以由 AI 直接写出（`{amount: {gte: 10, $lte: 20}}` 正是漏 `$` 的典型手误）。examples 全扫无现存实例，issue 正文「未证实触达」维持成立；本 PR 把这个形状从「静默画一张比作者写的宽的图」变成一句点名键、给出两种改法的 400。\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01USNUyHEr7uaU6MoEWXitei)_"
+}

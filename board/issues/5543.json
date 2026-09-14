@@ -1,0 +1,36 @@
+{
+  "number": 5543,
+  "kind": "issue",
+  "title": "objectql `registerObject` 的参数标成 schema 的 OUTPUT 类型(z.infer),合法的作者态字面量一律 TS2740 —— 这是 spec/client 两份测试层欠账的同一根因",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched",
+    "pm:queue",
+    "target:v17"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T16:50:34Z",
+  "updated_at": "2026-08-08T19:30:27Z",
+  "closed_at": "2026-08-08T19:30:27Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5543",
+  "body": "在 #5449(PR 把 `@objectstack/client` 的测试层接进 tsc)的编译残渣分诊时发现。基线 `origin/main` @ `9894a723e`。\n\n## 事实\n\n`packages/spec/src/data/object.zod.ts:2091-2092` 同时导出两个类型:\n\n```\nexport type ServiceObject      = z.infer< typeof ObjectSchemaBase >;   // OUTPUT:默认值已填\nexport type ServiceObjectInput = z.input< typeof ObjectSchemaBase >;   // INPUT:作者写的形状\n```\n\n而 `packages/objectql/src/engine.ts:6139` 的公共方法把参数标成了 **OUTPUT** 那一个:\n\n```\nregisterObject(\n  schema: ServiceObject,          // <— 应为 ServiceObjectInput\n  packageId: string = '__runtime__',\n  namespace?: string\n): string\n```\n\n后果:调用方写一个**完全合法**的对象定义,\n\n```\nql.registerObject({\n  name: 'task',\n  label: 'Task',\n  fields: { title: { type: 'text', label: 'Title' } },\n});\n```\n\n会得到 `TS2740: … is missing the following properties …: required, searchable, multiple, unique, and 5 more`。那 9 个 key 在字段 schema 里全是 `.default(...)`(例如 `object.zod.ts:211` 的 `searchable: z.boolean().default(true)`)—— 它们只在 **解析之后** 存在,作者态本就不该写。换句话说:类型要求调用方手写 zod 负责填的默认值。\n\n## 影响面\n\n- `@objectstack/client` 新接入的测试层里,**全部 6 条残留错误**都是这一个形状(`packages/client/test-typecheck-debt.json`:`client.batch-transaction.test.ts` 3、`client.hono.test.ts` 2、`client.environment-scoping.test.ts` 1)。\n- #5478 在 `packages/spec` 的收尾里点名同一族是那 691 条欠账的绝大多数(「fixture object literals annotated with a schema's OUTPUT type (`z.infer`) while holding an authored INPUT literal」)。\n- objectql 自己的测试已经在用 `as any` 绕过它(`packages/objectql/src/registry-log-level.test.ts:25-26`)—— 这正是「消费端容忍」把错误藏起来的样子:`as any` 之后,连真正拼错的 key 都不再报。\n\n## 为什么值得单独修\n\n这是**生产者侧**的注解错误,不是调用方的问题。改成 `ServiceObjectInput` 是参数类型放宽,对现有调用方不破坏;实现内部把 schema 交给 registry 时在「registry 负责补默认值」这个真实边界上做一次收窄即可。修完之后,两个包的 `test-typecheck-debt.json` 条目会按 EXACT ratchet **自动变红要求毕业**,不会悄悄留在台账里。\n\n需要确认的一点(所以没有直接在 #5449 的 PR 里顺手改):`registerObject` 是 `@objectstack/objectql` 的公开 API,参数类型变更属于契约面,应由维护者定案而不是由一个测试层单越界决定。\n\n关联:#5449、#5286、#5478、#4311。\n"
+}

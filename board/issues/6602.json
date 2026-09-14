@@ -1,0 +1,36 @@
+{
+  "number": 6602,
+  "kind": "issue",
+  "title": "An org-scoped overlay row reaches the process-wide SchemaRegistry on unscoped kernels — both the write-through and the read hydration gate only on `environmentId`, never on org",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched",
+    "pm:queue",
+    "target:v17"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T06:39:00Z",
+  "updated_at": "2026-08-08T17:48:29Z",
+  "closed_at": "2026-08-08T17:44:27Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6602",
+  "body": "Found while verifying #6190 against `origin/main` (impact ② of that card). Filed separately per Prime Directive #10 — it is not `flow`-specific and it survives whichever way #6190's contract question is ruled, so it does not belong in #6190's diff.\n\n## The fact (measured, not inferred)\n\n`applyRegistryWriteThrough` (`packages/metadata-protocol/src/protocol.ts`) states its own invariant in its TSDoc:\n\n> The non-object branch carries the same `environmentId === undefined` gate the read-side hydration carries: a project-scoped row must not be registered into a registry that unscoped (control-plane) callers share. **The write must not be more permissive about that than the read is.**\n\nThe gate is one line — `if (this.environmentId !== undefined) return;` — and it says nothing about `organization_id`. So on an **unscoped** kernel (`environmentId === undefined`), a per-org overlay write hydrates straight into the **process-wide** SchemaRegistry under the plain key.\n\nMeasured with the real `ObjectStackProtocolImplementation` over a stub engine, tracking `registry.registerItem` calls:\n\n```\nPROBE P3 rows = [{\"type\":\"view\",\"name\":\"org_grid\",\"org\":\"org_a\"}]\nPROBE P3 registry write-through = [{\"type\":\"view\",\"name\":\"org_grid\"}]\n```\n\n`view` is legitimately `allowOrgOverride: true`, so this is not a case of a type that should not have been writable — it is the designed per-org overlay leaking out of its org. `flow` behaves identically on the runtime-create tier (`PROBE P1 registry write-through = [{\"type\":\"flow\",\"name\":\"org_sweep\"}, ...]`), which is how #6190's own impact ② was first seen.\n\nThis matters because `loadMetaFromDb`'s filter carries the opposite rule as a comment, in the same file:\n\n```\n// ADR-0005 (revised 2026-05): hydrate only env-wide rows\n// (organization_id IS NULL). Per-org overlays are loaded on\n// demand by getMetaItem to avoid cross-org leakage into the\n// process-wide SchemaRegistry.\n```\n\nBoot is careful about exactly the thing the write-through is not.\n\n## The read side has the same hole — so the TSDoc's framing is now wrong in a second way\n\n`getMetaItems` merges `orgRecords` into `overlays` and then hydrates:\n\n```\nif (this.environmentId === undefined) {\n    for (const { data, packageId: recPkg } of overlays) {\n        this.hydrateOverlayIntoRegistry(request.type, data, recPkg);\n    }\n}\n```\n\n`overlays` is built from `envWideRecords` **plus** `orgRecords`, so one org-scoped listing call (`getMetaItems({ type, organizationId })`) grafts that org's overlay bodies into the shared registry too. The write is therefore not \"more permissive than the read\" — both are equally permissive about org, and only the boot path holds the line. Whoever fixes this should fix both seams together, or the next listing call undoes the write-side fix.\n\n## Why it is observable, not theoretical\n\nOn an unscoped kernel `getMetaItems` starts from `registry.listItems(type)` and merges DB rows on top. Once org A's overlay body sits in the registry under the plain key, a listing for org B starts from org A's body — org B's own DB rows overwrite it only where the names collide, and where they do not, org A's item is simply in org B's list. Single-kernel is not a corner case here: per #5086's note in this same file, a host config with instantiated plugins boots `new ObjectQLPlugin()` with **no** environmentId, so the flagship showcase runs with `environmentId === undefined`.\n\n## Not a duplicate\n\nSearched open issues/PRs across the three repos for `applyRegistryWriteThrough`, `hydrateOverlayIntoRegistry`, cross-org + SchemaRegistry, and the Chinese equivalents. Neighbours checked and distinct:\n\n- **#6190** — names this as impact ②, but its subject is the cold-boot unbinding of org-scoped flows; its ruling (write-side refusal for flow) does not touch this seam, and the leak persists for `view`/`dashboard`/`report`/`translation`/`email_template` under either ruling.\n- **#6483** — which types *should* be `allowOrgOverride: true`. Orthogonal: this issue is about what happens to the rows of the types that legitimately are.\n- **#6155** — where a scheduled flow's org comes from. Different question.\n\n## Refs\n\n`packages/metadata-protocol/src/protocol.ts` — `applyRegistryWriteThrough`, `hydrateOverlayIntoRegistry`, the `getMetaItems` hydration loop, and `loadMetaFromDb`'s filter comment; ADR-0005 §Tenant-customizable type whitelist; ADR-0010 §3.3; #4521 (the write-through's origin); #5086 (unscoped single kernels are a real end-user surface).\n"
+}

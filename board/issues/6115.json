@@ -1,0 +1,36 @@
+{
+  "number": 6115,
+  "kind": "issue",
+  "title": "v17.mdx 缺 rc.1 之后两次 console pin 移动的窗口段落(页面自述「that range needs its own section」未兑现)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T02:19:49Z",
+  "updated_at": "2026-08-08T08:00:34Z",
+  "closed_at": "2026-08-08T08:00:34Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6115",
+  "body": "观察类记录(`finding`,不入队)。在 #6106 / PR #6109 的工作中如实撞到,**不属于该单范围**,已按纪律只报不改。\n\n## 事实\n\n`content/docs/releases/v17.mdx` 的窗口段落停在 `## Landed since 17.0.0-rc.1`。该段开头原本写着(PR #6109 修正前):\n\n```\nThe Console pin is **unchanged** at `785b8a5d432c` … (If `scripts/bump-objectui.sh`\nadvances the pin before the cut, that range needs its own section — objectui `main`\nhas moved past `785b8a5d432c`.)\n```\n\npin 此后确实动了**两次**:`785b8a5d432c → f5bc4c78be76`(31 个 non-merge commit)→ `f995a452d2ca`(98 个),合计 129 个;实测 `git rev-list --count --no-merges 785b8a5d432c..f995a452d2ca` = 129,与两份 pin changeset 自报的数字吻合。但页面**没有**为这两次移动新增窗口段落 —— 也就是页面给自己定的规则没有兑现。\n\n## PR #6109 做了什么、没做什么\n\n- **做了**:把 rc.0 窗口那条 console 段标题的区间推到 `→ f995a452d2ca`,补一句指向两份 pin changeset 的说明,并把 rc.1 段开头那句已成假的「pin unchanged」按事实改写。事实层面该页现在是诚实的。\n- **没做**(有意):没有按页面自述新建 rc.2/rc.3 窗口段落,也没有把新增的 129 个 commit 逐条展开进正文列表。那是发布记录的编纂工作,属于「发布时集中撰写」的范畴(CLAUDE.md 第三条),不该由一个 docs-only 修正 PR 顺手扩张。\n\n## 为什么是观察类而非缺陷\n\n今天没有用户会撞到:两条真正会影响升级者的破坏性迁移已由 PR #6109 收进「Breaking changes & migration」,pin 区间与说明也已指向两份 pin changeset。剩下的是**结构**与页面自述规则的偏离 —— 要不要为 rc.2/rc.3 各起一段、还是在 rc.4 发布时统一重编,是编纂决定,交分诊。\n\n## 关联\n\n- #6106 / PR #6109(缺口的取证与修正出处)、PR #6097(pin 推进)\n- #6099 —— digest 只读首段的机制盲区(另一条同源记录)\n"
+}

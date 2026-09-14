@@ -1,0 +1,36 @@
+{
+  "number": 6542,
+  "kind": "issue",
+  "title": "service-messaging still carries its own hand-written isUniqueViolation() — migrate it onto the shared @objectstack/types predicate",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T03:46:15Z",
+  "updated_at": "2026-08-08T07:52:52Z",
+  "closed_at": "2026-08-08T07:52:52Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6542",
+  "body": "Blocked-by: #6250 (the shared predicate must land first — PR #6541)\n\nFiled by the #6250 developer agent per that issue's ruling: *\"OUT OF SCOPE — the two out-of-lane consumers. `packages/services/service-messaging/**` (`domain:services`) ... must NOT be edited. Migrating them onto the predicate is a follow-up per lane, filed once the predicate exists.\"* The predicate now exists, so this is that filing.\n\n## What is left\n\n`packages/services/service-messaging/src/messaging-service.ts` declares a private `isUniqueViolation(err)` — the most complete of the four copies #6250 inventoried, and the one `isUniqueViolationError` in `@objectstack/types` was seeded from:\n\n```ts\nfunction isUniqueViolation(err: unknown): boolean {\n    const e = err as { code?: string | number; message?: string } | undefined;\n    if (!e) return false;\n    if (e.code === '23505' || e.code === 'ER_DUP_ENTRY' || e.code === 'SQLITE_CONSTRAINT_UNIQUE') return true;\n    const msg = String(e.message ?? '').toLowerCase();\n    return (\n        msg.includes('unique constraint failed') ||\n        msg.includes('duplicate key') ||\n        msg.includes('duplicate entry')\n    );\n}\n```\n\nOne call site: the lost check-then-act race on the inbox read-receipt unique index (`isUniqueViolation(err) && (await flipToRead())`).\n\n## Why this is `finding` and not a defect\n\n**No user hits anything today.** This copy is three-dialect complete — it is the copy that was *right*. The cost is the fork itself: the next driver quirk gets taught to whichever copy its discoverer is standing in, and the two silently diverge. That is exactly how the REST copy came to miss MySQL while this one did not. Grade it in triage; do not read the `finding` label as \"small\".\n\n## The migration\n\n`@objectstack/service-messaging` already depends on `@objectstack/types`, so this is an import swap plus deleting the local function. The shared predicate is a strict superset of this one on every channel:\n\n- same three codes, plus MySQL's `errno 1062` (the numeric field mysql2 sets beside `code` for the same condition);\n- same three message substrings, plus `unique constraint` and `unique violation` (inherited from the REST limb #6250 replaced), so `unique constraint failed` is subsumed;\n- additionally follows one bounded step down the `cause` chain, which pool and query-builder layers wrap with — `service-messaging`'s copy would return `false` on a wrapped conflict and silently skip the `flipToRead()` fallback.\n\nThat last point is the only behaviour change, and it is in the direction the call site wants (a wrapped conflict is still a conflict). Worth a test at the call site rather than a blind swap.\n"
+}

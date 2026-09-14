@@ -1,0 +1,34 @@
+{
+  "number": 6664,
+  "kind": "issue",
+  "title": "driver-memory census in `undeclared-field-write-driver-split.integration.test.ts` is stale — a second `packages/runtime` test consumer (#6468) is outside #5704's \"in this one place\" ruling",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "qq9340100"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T09:25:06Z",
+  "updated_at": "2026-08-08T13:24:37Z",
+  "closed_at": "2026-08-08T13:24:37Z",
+  "closed_by": {
+    "login": "qq9340100",
+    "id": 313832657,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6664",
+  "body": "Observation-class finding, surfaced while migrating `auth-contains-filter.test.ts` off driver-memory (#5893). Nothing a user hits — this is a **bookkeeping invariant of the driver-memory retirement programme** that has silently expired. Filed unassigned for PM triage; not fixed in #5893's PR (out of its file surface, and the disposition needs a ruling rather than an edit).\n\n## What is stale\n\n`packages/runtime/src/sandbox/undeclared-field-write-driver-split.integration.test.ts` opens with a load-bearing census sentence:\n\n> `@objectstack/driver-memory` is imported here ON PURPOSE, and this is the **only PERMANENT test consumer of it in the repository**.\n\nand closes the same block with the mechanism that sentence exists to serve:\n\n> #5704/#5784 renamed them all to `makeStubDriver`, precisely so that **grepping for the driver lands here, and only here**.\n\nThat is the verification handle the retirement programme uses: grep the declarations, land on exactly one ruled file, and anything else is a new arrival to dispose of. The count is no longer true.\n\n## Evidence (on `origin/main`, e6025e9)\n\n```\n$ git grep -n \"from '@objectstack/driver-memory'\" -- '*.ts' | grep -v node_modules\npackages/runtime/src/sandbox/undeclared-field-write-driver-split.integration.test.ts:107\npackages/runtime/src/autonumber-seed-cross-side-parity.integration.test.ts:35\nexamples/embed-objectql/src/index.ts:17\n```\n\nThe second line is the finding. `packages/runtime/src/autonumber-seed-cross-side-parity.integration.test.ts` arrived with #6468 (PR #6553, `fix(objectql,driver-sql): 播种解析按声明的 suffix 定位计数器`) — **after** #5704's survey and after #5830's follow-up — and it imports `InMemoryDriver` for a reason that reads exactly as permanent as the ruled file's:\n\n> The engine half runs on the REAL `InMemoryDriver` (`supports = {}`, so the engine's fallback owns the counter — the shape memory/mongo deployments run) and the driver half on a REAL `SqlDriver` over better-sqlite3, each holding the same fixture rows.\n\ni.e. it is the same *shape* of justification #5704 Q2=B accepted for the driver-split file — a cross-family divergence/convergence pin that structurally needs a schemaless arm — but it has never been through that ruling, carries no `⚠️`-block saying so, and is not named anywhere in the census it invalidates.\n\n(`examples/embed-objectql/src/index.ts` is a published example demonstrating the driver, not a test consumer; `packages/runtime`, `packages/cli`, `packages/services/service-datasource`, `packages/plugins/plugin-dev` and `examples/embed-objectql` declare the dependency in `package.json`. Those are a separate axis and not what this finding is about.)\n\n## Why it matters even though it is \"just a comment\"\n\nThe census IS the enforcement. There is no gate counting driver-memory consumers — #5704's design deliberately made the *grep* authoritative by renaming every look-alike stub to `makeStubDriver`. So the comment is the only thing telling the next agent what a grep hit means. As written today it tells them \"one hit, and it is ruled\" while the tree has two, one of them unruled. Two concrete ways that misleads:\n\n1. An agent verifying \"driver-memory retirement is complete\" greps, sees two hits, reads the ruled file's \"only here\", and concludes the other hit is a **migration leftover to delete** — deleting the schemaless arm of #6468's convergence assertion, which would leave the autonumber parity test asserting SQL against SQL.\n2. The opposite error: an agent takes the second file as implicitly covered by #5704 and stops looking, so a *third* arrival never gets disposed of either. #5830 → #5893 is the worked example of what the census is supposed to catch; it worked because the ruled file's comment was updated by hand each time, which is exactly the step that did not happen for #6468.\n\n#5893's PR corrects the ruled file's own sentence so it no longer claims a repository-wide count it cannot defend (it now claims a *ruling about itself*, and points here). That stops the comment lying; it does not decide the second file's status.\n\n## The decision this needs\n\nFor `packages/runtime/src/autonumber-seed-cross-side-parity.integration.test.ts`:\n\n- **A. Rule it permanent too**, the same way #5704 Q2=B ruled the driver-split file — give it its own `⚠️` block stating why the schemaless arm is structural (the engine's `supports = {}` fallback path has no SQL equivalent), and restate the census as \"two ruled consumers\".\n- **B. Migrate it**, if the engine-fallback arm can be witnessed without driver-memory — needs measuring first, exactly as #5830 measured before deferring #5893: a backend swap that cannot distinguish the defect produces an always-green pin, which is the failure mode this family has already paid for once.\n- **C. Replace the census with a gate**, so the invariant stops depending on hand-edited prose: a `check:*` that enumerates `@objectstack/driver-memory` declarations (imports + `package.json` deps) against a small ledger of ruled entries, failing on any unledgered arrival. This is the option that makes the next #6468 impossible to miss, and it is the same ratchet shape the repo already uses for type-check coverage and query-options erasure.\n\nRecommendation, for whoever triages: **A or B on the file** (measure before choosing, per #5830's precedent), and **C independently** — the underlying defect here is not that someone forgot to edit a comment, it is that a programme-critical invariant was left in a comment where nothing can hold it to the tree.\n\n## Links\n\n#5704 (the ruling + the `makeStubDriver` rename), #5499 (the driver-memory investment freeze), #5830 / PR #5880 (identity-lane migration, half), #5893 (the other half — where this was found), #6468 / PR #6553 (the unruled arrival)."
+}

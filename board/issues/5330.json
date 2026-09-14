@@ -1,0 +1,36 @@
+{
+  "number": 5330,
+  "kind": "issue",
+  "title": "publish/lint 面对字面量空组合子响亮拒收 —— #5322 拍板单位元后的可选编写期信号(PD #12 形状)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T23:06:29Z",
+  "updated_at": "2026-08-08T13:40:23Z",
+  "closed_at": "2026-08-08T13:40:23Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5330",
+  "body": "#5322 已拍板:运行期空组合子(`{$and:[]}` / `{$or:[]}` / `{$not:{}}` / `{}`)统一取**布尔单位元归约**,service-analytics 两个编译器与五个后端对齐(实施 PR 见 #5322 的分支)。\n\n本单记录拍板时明确保留的**可选增强**,unassigned,不阻塞任何在途工作:\n\n## 内容\n\n在 **publish/lint 面**(生产端)对**字面量**空组合子响亮拒收:作者在元数据里手写出 `{$or: []}` 这类形状时,编写期即报错并给出处方(想表达「零行」应写什么、想表达「无过滤」应省略该键),而不是等运行期按单位元静默求值。\n\n- 运行期语义保持**单一**(单位元归约,#5322 的拍板),本单不改任何 translate/求值路径;\n- 这是 PD #12「在生产端拒绝、不要在消费端容忍」的标准形状,也是 #5240(`{field:{}}` 编写期拒收)的同向先例;\n- 与运行期归约不冲突:程序化 producer(循环拼 disjuncts 得零项)走运行期单位元(fail-closed,`$or:[]` = 零行),人类/AI 作者的字面量笔误走编写期爆炸。\n\n## 为什么不并入 #5322 的实施 PR\n\n拒收落点在 lint/publish 管线(`packages/lint` 或 spec 授权门),与 analytics 编译器对齐分属不同包与不同风险面;且「字面量 vs 程序化产物」的判定边界(lint 能看到源码字面量,publish 门只看到值)需要单独设计,不该作为 rider 搭车。\n\n## 验收方向\n\n- lint 面:字面量空组合子 → 报错 + 处方;\n- 运行期矩阵(FILTER_LOGIC_CASES 四条)不受影响;\n- 拒收信息与 filter-normalizer 曾有的措辞(\"An empty combinator has no defensible reading…\")的历史关系在 docblock 里交代,避免下一个读者以为运行期还在抛错。\n\n关联:#5322(拍板)、#5239(一致性表四条)、#5240(编写期拒收先例)、#5134(`$or:[]` = 零行的 P0 来源)。"
+}

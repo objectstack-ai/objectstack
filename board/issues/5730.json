@@ -1,0 +1,35 @@
+{
+  "number": 5730,
+  "kind": "issue",
+  "title": "record:details 分区标题存在 title/label 双拼写:三个消费方都读 `title ?? label`,但 spec 只声明 label",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "qq9340100"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T02:20:58Z",
+  "updated_at": "2026-08-08T08:13:05Z",
+  "closed_at": "2026-08-08T08:13:05Z",
+  "closed_by": {
+    "login": "qq9340100",
+    "id": 313832657,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5730",
+  "body": "实施 #5611(`RecordDetailsProps.sections` 改对象形式)时实测到的范围外问题,只记录不修。\n\n## 实测\n\n`record:details` 分区的标题有两个拼写,三个消费方都做了 `title ?? label` 或 `label ?? title` 的容忍读取:\n\n| 消费方 | 位置 | 读法 |\n|---|---|---|\n| objectui 渲染器 | `plugin-detail/src/renderers/record-details.tsx:193` | `s.title ?? s.label` |\n| 仓内 i18n 抽取 | `packages/cli/src/utils/i18n-extract.ts:401` | `s.label ?? s.title` |\n| 仓内 lint | `packages/lint/src/validate-translatable-sections.ts:329` | `strName(section.label) ?? strName(section.title)` |\n\n而**授权侧只有一种拼写**:\n\n- 仓内全部 5 个真实 section(3 个 showcase 页 + `sys-user.page.ts`)都写 `label`,零处写 `title`;\n- objectui 的类型镜像 `RecordDetailsComponentProps.sections[]` 只声明 `label`;\n- objectui 的 Studio 区块设计器 `block-config.ts:312` 的 `itemFields` 也只产出 `label`。\n\n唯一写 `title` 的地方是一个合成测试夹具:`packages/cli/test/i18n-section-coverage.test.ts:220`(`{ name: 'timeline', title: 'Timeline', fields: [...] }`)。\n\n#5611 的 PR 据此把 `sections[].label` 声明为 `I18nLabelSchema.optional()`、**不声明 `title`** —— 按 Prime Directive #12,授权侧的事实拼写是 `label`,`title` 属于消费方容忍,不应写进契约固化成第二套正名。\n\n## 为什么今天不痛、但值得记\n\n今天没有作者写 `title`,所以没有用户会踩到 —— 故打 `finding` 不进队列。\n\n值得记的是**方向**:#5611 之后 `title` 成为 spec 明确不认的拼写,而三个消费方仍然优先读它(objectui 甚至把 `title` 排在 `??` 链**前面**)。这正是 Prime Directive #12 说的\"消费方容忍把错误约定化石化成第二套事实契约\":一个照着 objectui 源码而不是照着 spec 写元数据的作者,会得到一个 spec 拒绝、渲染器却正常显示的页面。#5068 闸门落地后,这类页面会在 publish 期硬失败,而错误信息指向的是作者从渲染器里学来的拼写。\n\n## 修复方向\n\n按 #5611 已确立的方向清掉容忍侧,而不是补声明:\n\n1. 仓内两处(`i18n-extract.ts:401`、`validate-translatable-sections.ts:329`)去掉 `?? title` 分支;\n2. `packages/cli/test/i18n-section-coverage.test.ts:220` 的夹具改写为 `label`(该夹具用 `title` 正是为了覆盖这条容忍分支,分支去掉后夹具应一并改拼写);\n3. objectui 侧 `record-details.tsx:193` 去掉 `s.title ??`(跨仓,需单独 PR)。\n\n注意第 2 条是 #5046 记下的\"夹具三分法\"里的**整体替换**类:那个夹具钉的正是要删的那条分支,分支删掉后它会因为\"什么都没产生\"而继续通过,而不是因为逻辑正确。"
+}

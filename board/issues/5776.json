@@ -1,0 +1,36 @@
+{
+  "number": 5776,
+  "kind": "issue",
+  "title": "showcase 的 project-detail 页在 `page:tabs` 上授权 `items[].key`,renderer 读的是 `items[].value` —— 两个 tab 的稳定 URL token 从未生效",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:dispatched",
+    "target:v17"
+  ],
+  "assignees": [
+    "qq9340100"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T04:52:24Z",
+  "updated_at": "2026-08-08T07:37:40Z",
+  "closed_at": "2026-08-08T07:37:40Z",
+  "closed_by": {
+    "login": "qq9340100",
+    "id": 313832657,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5776",
+  "body": "Blocked-by: #5775\n\n#5068 的组件 props 闸门落地后,对 example 语料跑出的 `component-props-unknown-key` 里有 2 条指向同一处授权错误。\n\n## 实测\n\n`examples/app-showcase/src/ui/pages/project-detail.page.ts:43,59` 在 `page:tabs` 的 `items[]` 上写 `key: 'details'` / `key: 'tasks'`:\n\n```ts\nitems: [\n  { key: 'details', label: '…', children: [ … ] },\n  { key: 'tasks',   label: '…', children: [ … ] },\n]\n```\n\n- `PageTabsProps.items[]`(`packages/spec/src/ui/component.zod.ts`)声明的是 `label` / `icon` / `visibleWhen` / `children` —— **没有 `key`**;\n- objectui 的 tabs renderer(`packages/components/src/renderers/layout/containers.tsx:503-519`)读的是 **`it.value`**,并在注册表里把它描述为「the stable `?tab=` URL token」;\n- 所以 `key` 既不被 schema 声明、也不被任何 renderer 读:两个 tab 的稳定 URL token 事实上没有设置,tab 选中态回落到「按下标取第一个」。页面看起来正常,深链回不到原来那个 tab。\n\n这是「作者拿到成功回执、配置被无声忽略」的教科书形状(ADR-0078),也是 #5068 闸门存在的理由 —— 在闸门之前没有任何东西会说一句话。\n\n## 修法\n\n把 `key:` 改成 `value:`。⚠️ 前置:`value` 本身目前也**不在** `PageTabsProps.items[]` 的声明里(与 `count` 一起),这一条记在 #5775 的 A 表。所以顺序是先补声明、再改页面,否则闸门只会把一个未声明键换成另一个未声明键。\n\n## 范围说明\n\n在 #5068 的实施 PR 里没有顺手改:该 PR 的交付物是闸门本身,而 warning 期的违例清单是 error 升级的验收基线 —— 在同一个 PR 里改语料会让基线自己动。"
+}

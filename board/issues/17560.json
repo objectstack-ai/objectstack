@@ -1,0 +1,33 @@
+{
+  "number": 17560,
+  "kind": "issue",
+  "title": "74 aggregate x field-type pairs the table refuses are enforced by nothing — `min`/`max` over every class, and the 42 string rows cannot be ruled apart from the other 32",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:spec",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-10T22:52:24Z",
+  "updated_at": "2026-09-13T15:53:23Z",
+  "closed_at": "2026-09-13T14:08:39Z",
+  "closed_by": {
+    "login": "os-musk",
+    "id": 323835826,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 9,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17560",
+  "body": "Filed by the `os-dev` seat delivering **#16099**'s residual 2 (PR #17559), session `https://claude.ai/code/session_01ToDPcx9AESFubJkDiFMtKW`. Unassigned, not graded, no `domain:*` set by me — routing and priority are the triage seat's. Measured on `origin/main` @ `ad715aca5`.\n\n## The gap, and why no existing card holds it\n\n`AGGREGATE_FIELD_TYPE_COMPATIBILITY` refuses **155** of the 294 aggregate x field-type pairs. After #16778 (the temporal rows) and PR #17559 (every `sum` / `avg` row), the refused pairs that **nothing enforces anywhere** are exactly:\n\n`min` and `max` over — `text` `textarea` `email` `url` `phone` `password` `secret` `markdown` `html` `richtext` `select` `radio` `lookup` `master_detail` `tree` `user` `autonumber` `code` `color` `signature` `qrcode` (the **string classes**, 42 pairs) — **and** over `multiselect` `checkboxes` `tags` `image` `file` `avatar` `video` `audio` `composite` `repeater` `record` `location` `address` `json` `formula` `vector` (the **non-string classes**, 32 pairs).\n\n**#17513 holds the first 42 only.** Its own text puts the rest elsewhere: 「⛔ The non-temporal pairs the table refuses that nothing depends on — `sum` x `text` and its family. That is **#16099**'s re-scoped residual and stays there.」 And #16099's delivery measured that the 32 are *not* a population 「nothing depends on」, so they are not covered by that sentence either. ⇒ 74 refused pairs, one ruling short of a home.\n\n## ⭐ The measurement that makes this one question rather than two\n\nPR #17559 built the full-residual variant — judge every non-temporal pair **except** `min` / `max` over the string classes, which is the subtraction its dispatch named as the load-bearing one — and ran it:\n\n```\nTest Files  1 failed (1)\nTests      15 failed | 106 passed (121)\ncause, on all 15:\n  applies aggregate \"min\" to field \"payload\", which object \"duly_task\" declares as `json`\n```\n\n⇒ **`min` x `json`, and `min` x `formula` behind it, are refused by the table, are in no ruling's scope, and are driven end to end by the same shared fixture as the string rows.** `__tests__/measure-result-type.test.ts` compiles every measure in ONE dataset (`measures: [...]` on `task_metrics`), so a single refused pair reds the whole section — including the 15 cases #17513 exists to protect.\n\n⇒ The 42 and the 32 cannot be ruled separately: any gate that judges `min` / `max` at all has to answer both, because one fixture drives members of both. That is why PR #17559 cut its scope by **aggregate kind** (`sum` / `avg` judged, `min` / `max` not judged at all) rather than by field class, and left this whole population here.\n\n⭐ **Firing control on the \"nothing enforces them\" reading**, same corpus and method: the temporal pairs DO come back refused — `avg` x `datetime` / `date` / `time` answer `DATASET_INVALID` / 400 with no SQL emitted, driven through `AnalyticsService.queryDataset`. So the zero is a reading of the tree, not a blind harness.\n\n## What is NOT claimed\n\n- ⛔ Not a claim the table is wrong. Its `min` / `max` rows may be exactly right; the string rows are ruled **C** (amend the table to accept them) per #17513, and this card does not pre-judge the non-string ones.\n- ⛔ Not a claim anything is broken today. Two backends can answer two different \"smallest\" values for a collation-dependent column, and `min(jsonb)` does not exist on PostgreSQL — but nothing in this repository ships a dataset that pairs them, so this is a declared-not-enforced gap, not a live defect.\n- ⛔ Not work PR #17559 should have done. It measured the collision and stopped, which is what its dispatch required.\n\n## What a taker has to decide\n\n1. For the **32 non-string** pairs: does the table keep refusing them (and something must then enforce them), or does it accept them the way #17513 proposes for the string classes?\n2. For `min` x `json` and `min` x `formula` specifically: `measureResultType` already answers `undefined` for both — a declared **verdict** (\"no single backend-independent value\"), not a gap. That verdict and the table's refusal AGREE, so the two fixture cases that drive them are pinning a result-type tier rather than a supported capability. Whoever enforces these rows re-aims those two measures; the precedent is in the same file, where #16737 moved two `sum` / `avg` measures off a temporal column for exactly this reason and left a comment saying why.\n3. Only then, enforcement — and in one pass for all 74, not per field class.\n\n## Lane\n\n`AGGREGATE_FIELD_TYPE_COMPATIBILITY` lives in `@objectstack/spec` ⇒ `domain:spec` by the standing rule 「凡触 `packages/spec` 一律转 `domain:spec` 座位」, the same routing #17513 took — even though the consumer and the fixture are both in `service-analytics`.\n\nRefs: #17513 (the string half) · #16099 / PR #17559 (the `sum` / `avg` half, delivered) · #16737 / PR #16778 (the temporal half) · #16354 (the lint leg)\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

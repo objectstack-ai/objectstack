@@ -1,0 +1,37 @@
+{
+  "number": 4251,
+  "kind": "issue",
+  "title": "The service-lookup `any` rule misses `getService<any>(...)` — 80 sites erase the slot contract, 3 of them inside the rule's own scope",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched",
+    "pm:queue",
+    "tooling"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-31T00:46:27Z",
+  "updated_at": "2026-08-09T00:36:52Z",
+  "closed_at": "2026-08-09T00:36:52Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 16,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4251",
+  "body": "#4127 / #4214 added a lint rule against annotating a service-lookup result as `any`, on the grounds that \"the lookup already returns the slot's contract … every such annotation found so far was hiding a real gap, including a project-membership gate that silently stopped gating.\" The reasoning is right. The rule as written catches a narrower shape than the reasoning covers.\n\n## Two gaps, and the second is the load-bearing one\n\n**Selector.** Both selectors in `eslint.config.mjs` key off an annotation on a *variable* or an `as` expression:\n\n```js\n'VariableDeclarator[id.typeAnnotation.typeAnnotation.type=\"TSAnyKeyword\"]:has(CallExpression[callee.property.name=/^(resolveService|getService|getRequestKernelService)$/]...)'\n'TSAsExpression[typeAnnotation.type=\"TSAnyKeyword\"]:has(CallExpression[...])'\n```\n\nNeither matches the **type argument** form, which erases the contract just as completely:\n\n```ts\nconst engine = ctx.getService<any>('data');\n```\n\nHere `engine` has no annotation and there is no `as`, so nothing matches — yet `IDataEngine` is gone exactly as if it had been written `const engine: any = ctx.getService('data')`, the form the rule does catch. This is a near sibling of the KNOWN RESIDUAL the rule already documents (an annotated wrapper return type), except this one needs no type information to catch — it is a plain AST shape.\n\n**Scope.** The rule's `files` is `['packages/runtime/**/*.{ts,mts,cts}']`, so route modules and service plugins outside `packages/runtime` are unlinted regardless of shape.\n\n## Evidence\n\nRepo-wide, excluding tests and `node_modules`:\n\n```\n$ grep -rn \"getService<any>\\|resolveService<any>\\|getRequestKernelService<any>\" --include=*.ts packages/ | grep -v node_modules | grep -v \"\\.test\\.\" | wc -l\n80\n```\n\nConcentrated in the composition roots:\n\n```\n14  packages/rest/src/rest-api-plugin.ts\n13  packages/plugins/plugin-auth/src/auth-plugin.ts\n 7  packages/plugins/plugin-approvals/src/approvals-plugin.ts\n 6  packages/plugins/plugin-sharing/src/sharing-plugin.ts\n 5  packages/services/service-storage/src/storage-service-plugin.ts\n 5  packages/plugins/plugin-reports/src/reports-plugin.ts\n …\n```\n\nThree of the 80 sit **inside the rule's own scope**, which isolates the selector gap from the scope gap — the rule is active in this directory today and these pass:\n\n```\npackages/runtime/src/default-datasource-plugin.ts:163:      const engine = ctx.getService<any>('data');\npackages/runtime/src/default-datasource-plugin.ts:229:      const metadata = ctx.getService<any>('metadata');\npackages/runtime/src/driver-plugin.ts:60:            const metadata = ctx.getService<any>('metadata');\n```\n\nNeither `data` nor `metadata` is in `UNCONTRACTED_SLOTS` (`protocol`, `mcp`, `kernel-resolver`, `scope-manager`), so by the rule's own ledger these are contracted slots being erased.\n\n## Suggested shape\n\nAdd a third selector for the type-argument form, and widen `files` to the packages that hold composition roots and route modules. The `UNCONTRACTED_SLOTS` exemption mechanism carries over unchanged — the `:not(:has(Literal[value=/…/]))` clause reads the slot name the same way.\n\n80 sites is not a one-sitting sweep, and #4214 already established the pattern for this: batches, with the ratchet visible. Worth noting that #4214's own batches found a real bug (the project-membership gate), so the expected yield here is not just cosmetic.\n\nFound while fixing #4225 — `packages/services/service-datasource/src/admin-routes.ts` is one of the 80, and its `ctx.getService<any>(service)` was carried over unchanged by #4234 rather than silently expanding that PR's scope."
+}

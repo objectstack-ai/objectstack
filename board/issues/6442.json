@@ -1,0 +1,33 @@
+{
+  "number": 6442,
+  "kind": "issue",
+  "title": "`GET /analytics/meta` 的已声明响应契约与实际响应不是同一个形状（`data: { cubes: CubeSchema[] }` vs `data: CubeMeta[]`）",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:queue"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T18:46:09Z",
+  "updated_at": "2026-08-08T09:45:49Z",
+  "closed_at": "2026-08-08T09:45:49Z",
+  "closed_by": {
+    "login": "qq9340100",
+    "id": 313832657,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6442",
+  "body": "在实现 #6369（`/analytics/query` 响应示例的 `fields[]` 键集）时，为核实「display name / format 由 `GET /analytics/meta` 暴露」这句话而顺带查到。按 Prime Directive #10 独立立单，**不搭 #6369 那个 docs PR（#6441）的车** —— 那张卡的评审面是 `/analytics/query` 的响应示例，本条是 `/analytics/meta` 的响应形状，两件事；而且本条的修复面在 `packages/**`，#6369 明确不动。\n\n未自我认领。\n\n## 事实面（实测，file:line）\n\n**声明侧** —— 路由表为该端点指定的响应 schema：\n\n- `packages/spec/src/api/plugin-rest-api.zod.ts:1230` — `GET /meta` 的 `responseSchema: 'AnalyticsMetadataResponseSchema'`\n- `packages/spec/src/api/analytics.zod.ts:94-99` — 该 schema 声明 `data: z.object({ cubes: z.array(CubeSchema) })`，即 **一个对象，带 `cubes` 键，元素是完整的 `CubeSchema`**\n- `content/docs/references/api/analytics.mdx:49` — 由上面这个 schema **生成并已发布**的参考页照印：`data` 为 `{ cubes: { name: string; title?: string; description?: string; sql: string; … }[] }`\n\n**实际侧** —— 运行时真正返回的：\n\n- `packages/runtime/src/domains/analytics.ts:110-117` — `subPath === 'meta' && m === 'GET'` ⇒ `const result = await analyticsService.getMeta(cube); return deps.success(result)`\n- `packages/services/service-analytics/src/analytics-service.ts:1184-1204` — `getMeta` 返回 `CubeMeta[]`，**一个裸数组**\n- `packages/spec/src/contracts/analytics-service.ts:89-99` — `CubeMeta` 是更窄的投影：`{ name, title?, measures: Array< { name, type, title? } >, dimensions: Array< { name, type, title? } > }`\n- 第二个实现同形：`packages/drivers/driver-memory/src/memory-analytics.ts:504-522`\n\n也就是说，按已发布契约写的客户端读 `data.cubes` 拿到的是 `undefined`（实际 `data` 本身就是数组），拿 `AnalyticsMetadataResponseSchema` 去 parse 会直接失败。\n\n## 顺带的第二个后果：metric 的 `format` 没有任何读端点暴露\n\n`MetricSchema.format`（`packages/spec/src/data/analytics.zod.ts:72`）被 `packages/services/service-analytics/src/dataset-compiler.ts:381` 写入编译出的 cube metric，但 `getMeta` 的 `CubeMeta` 投影只保留 `{ name, type, title }` —— `format`（以及 `sql` / `filters` / `description`）在投影里被丢弃。\n\n这正是 #6441 里那处「对分诊措辞的实测修正」的来源：分诊原句说 display name 与 format 都「由 `GET /analytics/meta` 暴露」，实测只有 **label**（映射为 `title`）到得了线上，**format 到不了**。#6441 因此只对 label 那半句写进了文档。\n\n## 影响 / 修法方向（不自行选）\n\n两个方向对称度不高，需要裁定：\n\n- **(a) 收窄声明**：把 `AnalyticsMetadataResponseSchema` 改成实际形状（`data: CubeMeta[]`）。零运行时改动，契约照实描述；代价是承认 `/analytics/meta` 只发投影，`format` 等键继续不可达。\n- **(b) 放宽实现**：让 `getMeta` 按已声明的 `{ cubes: CubeSchema[] }` 返回完整 cube 定义。这会**扩大**该端点的输出面（把 `sql` 也发到客户端），属能力扩张，按启动期聚焦原则应先问有没有真实消费方拉动。\n\n⚠️ 严重性我不自评：`data-api.mdx:393-395` 的手写描述其实贴近**实际**形状（说 `data` 是数组），只有 spec schema 和由它生成的 `references/` 参考页是错的；一个只读手写页的读者不会撞上，一个照生成参考页或照 schema 写类型的读者会。这两种读者哪个是今天的真实用户，由分诊判定。\n\n## 查重\n\n搜过本仓 open issue：`analytics meta cubes response schema` / `AnalyticsMetadataResponseSchema` / `CubeMeta` / `getMeta cube metadata format label` / `\"analytics/meta\"` —— 除 #6369 本身外无同题单。"
+}

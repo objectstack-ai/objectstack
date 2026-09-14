@@ -1,0 +1,35 @@
+{
+  "number": 6531,
+  "kind": "issue",
+  "title": "`os login --json` (device flow) writes TWO JSON documents to stdout, so the whole stream is unparseable",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T03:20:11Z",
+  "updated_at": "2026-08-08T14:35:16Z",
+  "closed_at": "2026-08-08T14:35:16Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6531",
+  "body": "Found while fixing #6217 (`--json` stdout purity for the `bootSchemaStack` family). **Unclaimed.** Different family, different cause, same harm class — filed separately rather than widened into that PR.\n\n## Observation\n\n`os login` without `--email` / `--password` takes the RFC 8628 device flow (`loginWithBrowser`). Under `--json` that path emits **two** separate `emitJson` calls in one run, on one stdout:\n\n- `packages/cli/src/commands/login.ts:255` — the device authorization payload, compact:\n  ```\n  await emitJson({ device_code, user_code, verification_uri, verification_uri_complete, expires_in }, 0, { compact: true });\n  ```\n- `packages/cli/src/commands/login.ts:321` — after the token poll succeeds, the result payload, 2-space indented:\n  ```\n  await emitJson({ success: true, email: user?.email, userId: user?.id });\n  ```\n\nSo stdout is one compact object on one line, followed by a multi-line indented object. `JSON.parse(stdout)` fails, and it is not JSONL either (the second document spans lines), so a consumer cannot read it as a stream of records without writing a bracket-counting parser.\n\nThis is not a new discovery so much as an already-recorded one that nobody filed: `packages/cli/src/utils/format.ts` says so in the `EmitJsonOptions.compact` doc comment —\n\n> The split is accidental rather than designed — `os login --json` prints a compact payload and then an indented one in the same run — so unifying it is worth doing, but as its own decision, not as a side effect of fixing truncated pipes.\n\nThe comment frames it as a formatting inconsistency. It is more than that: **two documents on one stdout is unparseable regardless of formatting**, which is the same harm as #6217 (a declared machine-readable flag that isn't machine-readable) for the same audience.\n\nNot reproduced against a live server here — the device flow needs one — so this is read off the source, and the format.ts comment is an independent witness that both writes really do happen in one run.\n\n## Why it matters\n\n`--json` exists only for programs. A CI step or script that runs `os login --json` to capture the verification URL, then waits for the token result, gets a stdout it cannot parse in either shape.\n\n## Possible shapes (undecided, for triage)\n\n1. **One document at the end.** Buffer the device-authorization fields and emit a single payload containing both halves. Loses the ability to read the verification URL *before* the user authorizes, which is the point of emitting it early.\n2. **NDJSON.** Make both writes compact (`{ compact: true }`) and declare `os login --json` a newline-delimited stream. Machine-readable, keeps the early emission — but `--json` means \"one document\" everywhere else in this CLI, so this would need to be a declared, documented exception rather than a silent one.\n3. **Emit the early payload on stderr.** Keeps stdout one document; abuses stderr for something that is not a diagnostic.\n\nRoute 2 looks closest to what the flow actually is (two events over time), but it is a contract decision about what `--json` promises, so it belongs to the maintainer rather than to a drive-by fix.\n\nRefs #6217.\n"
+}

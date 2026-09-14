@@ -1,0 +1,36 @@
+{
+  "number": 6518,
+  "kind": "issue",
+  "title": "drivers(sql family): 文本算子的大小写折叠是「方言的」而非「契约的」—— `$contains` 在 SQLite 过折叠、`$icontains` 在 PG/MySQL 过折叠",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched",
+    "pm:queue",
+    "target:v17"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T03:07:39Z",
+  "updated_at": "2026-08-08T14:21:02Z",
+  "closed_at": "2026-08-08T14:21:02Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6518",
+  "body": "Part of #4706(裁决 Q1=A / Q2=A)。从 #5702 实施期实测拆出 —— #5702 交付了 `$regex` 拒收与 `$icontains` 实现,**没有**交付这一条,原因见下「为什么不能在 #5702 里顺手做」。\n\n## 两个方向的同一个缺陷\n\n`SqlDriver.applyLike` 发的 SQL 里,大小写由**方言**决定,不由契约决定。两个算子各在一半方言上跑偏:\n\n| 算子 | 契约(#4706) | SQLite / turso / sqlite-wasm | Postgres | MySQL |\n|:--|:--|:--|:--|:--|\n| `$contains` / `$notContains` / `$startsWith` / `$endsWith` | 大小写**敏感**(Q2=A) | ❌ `LIKE` 自带 ASCII 折叠 | ✅ 恰好正确 | ⚠️ 随 collation |\n| `$icontains` | 折叠 **ASCII only**(Q1=A) | ✅ SQLite `lower()` 只折 ASCII | ❌ `LOWER()` 折全 Unicode | ❌ 同左 |\n\n两格都是**过匹配**(返回了不该返回的行),不是漏匹配。\n\n## 实测(better-sqlite3,`FILTER_TEXT_ROWS` 九行,`origin/main` + PR of #5702)\n\n```\n$contains  'acme'  → [\"1\",\"2\"]     契约要求 [\"2\"]      (行 1 = \"ACME Corp\")\n$contains  'ACME'  → [\"1\",\"2\"]     契约要求 [\"1\"]\n$icontains 'acme'  → [\"1\",\"2\"]     ✅\n$icontains 'café'  → [\"4\"]         ✅(É 不折)\n```\n\n顺带一条对分诊有用的读数:**在 SQLite 上 `$contains` 与 `$icontains` 对任意比较数返回完全相同的行** —— 因为 `LIKE` 已经折了 ASCII,外面再套一层 `LOWER()` 是幂等的。也就是说这条不修,`$icontains` 在 SQLite 上是**行为不可观测**的(它的正确性只能靠编译出的 SQL 文本和 PG 见证)。#5702 的 `remote-transport-text-predicates.test.ts` / `sql-driver-icontains-and-retired-operators.test.ts` 已把这两条如实钉住。\n\n## 为什么不能在 #5702 里顺手做(这是本单独立的理由)\n\n修 `$contains` 的大小写需要在 SQLite 上换构造(`GLOB` / `instr()` / 二进制 collation —— `LIKE` 不受 collation 影响,只能靠 `PRAGMA case_sensitive_like`,而那是连接级全局开关)。这个下译**在三处并存**,必须同批移动:\n\n1. `packages/drivers/driver-sql/src/sql-driver.ts` 的 `applyLike`;\n2. `packages/drivers/driver-turso/src/remote-transport.ts` 的 `pushLike`(remote 不走 knex,自带一份);\n3. **RLS / 分析面的孪生实现** —— `read-scope-sql` 与 `packages/services/service-analytics/src/like-pattern.ts`(后者的注释自陈「held to THIS expression, character for character」)。\n\n只改 driver 不改第 3 组,等于**一条权限规则编出两个行集** —— #3948 那一类 P0,比现状更糟。所以它不是 `domain:drivers` 单车道能闭环的改动。\n\n## 验收\n\n- 五个后端对 `FILTER_TEXT_CASES` 的 5 条大小写用例(`$contains` ×2 / `$startsWith` / `$endsWith` / `$notContains`)一致判绿;\n- `$icontains` 的 ASCII-only 边界在 **live PG / MySQL 格**上也成立(`live-dialect-matrix.testkit.ts` 已有基建,#5589 的方言矩阵加算子轴即可);\n- `scripts/check-driver-conformance.mjs` 的 `FILTER_TEXT_CASES` DEBT 行随之清偿(#5702 已把 `$regex` / `$icontains` 两个半边从这些行里划掉,剩下的就是本单)。"
+}

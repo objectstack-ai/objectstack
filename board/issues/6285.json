@@ -1,0 +1,35 @@
+{
+  "number": 6285,
+  "kind": "issue",
+  "title": "[转移] 发布期护栏:多组织下「平台级 + schedule + create_record + 未显式 organization_id」拒绝——#6155 Q3=A 裁决的 lint 半边",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T13:01:07Z",
+  "updated_at": "2026-08-08T13:57:36Z",
+  "closed_at": "2026-08-08T13:55:34Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6285",
+  "body": "Part of #6155(维护者 2026-08-07 裁决 Q2=**A** + Q3=**A**;services 座位转移立单,落点在运行时发布门——域标签交分诊按落点文件定)。\n\n## 裁决口径\n\n- **Q2=A**:平台级定时流程的 org 由作者在 `create_record` 的 `fields.organization_id` **显式声明**(#6153 的 fill-only 已保证作者值优先——该半边**零新代码**,既有能力);\n- **Q3=A**:护栏**只落运行时发布门**——给 `assertRuntimeAuthoringRules` → `evaluateRuntimeAuthoringGate` 补两个缺失输入(**写入 org** 与 **部署形态** `postureEnforcesWall(resolveTenancyPosture())`),CLI 纯函数侧 ⛔ 不判(构建机 env 是假信号);\n- 拒绝组合:多组织部署 && 平台级流程 && schedule 触发 && 含 `create_record` && 未在 `fields` 显式给 `organization_id` ⇒ **发布时拒绝**(与 #2308/#5378 lint 面同族,照抄形状不发明新面)。\n\n## #6155 dev 探针已量出的两个输入缺口(实现起点,勿重查)\n\n1. 部署形态:`postureEnforcesWall(resolveTenancyPosture())` 是进程级 env 读数,`AUTHORING_RULES` 纯函数签名不含它——按 Q3=A 从 gate 侧注入;\n2. 写入 org:在 `saveMetaItem` 手里但 `assertRuntimeAuthoringRules` 未传给 `evaluateRuntimeAuthoringGate`;\n3. ⚠️ **待确认的短路**:`assertRuntimeAuthoringRules` 现有 `if (this.environmentId === undefined) return;`——控制面 kernel 上整条 gate 不跑。实现前先答「这是既有设计还是遗漏」:若短路使护栏在关键部署形态不可达,STOP 上报,⛔ 不得擅自拓宽 gate 激活面(#6155 dev 原话:无把握,未擅自改动)。\n\n## 依赖\n\nBlocked-by: #6283(spec 半边 flip——Q1=B 落地后「org 归属的 flow」不复存在,本护栏的拒绝组合语义才是终态)。\n\nRefs:#6155(裁决与探针证据)、#6153(fill-only 先例)、#2308/#5378(lint 面同族)、ADR-0118 D1。"
+}

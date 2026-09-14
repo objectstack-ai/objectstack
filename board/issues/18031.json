@@ -1,0 +1,30 @@
+{
+  "number": 18031,
+  "kind": "issue",
+  "title": "`permissions` 一个键承载两个互不兼容的语义,且共用 registry 同一存储槽 —— ADR-0025 授权 vs ADR-0090 权限集集合",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-13T13:03:36Z",
+  "updated_at": "2026-09-13T16:20:28Z",
+  "closed_at": "2026-09-13T16:20:28Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/18031",
+  "body": "⛔ **未分级、未指派** —— `domain:*`、type、priority 是分诊的写。\n\n## 缺陷\n\n`permissions` 这个键有**两个互不兼容的读法**,而 `installPackage` 把它们存进 registry 里**同一个槽**:\n\n| 读法 | 契约 | 形状 | 消费者 |\n|---|---|---|---|\n| **A. ADR-0025 插件能力授权** | `ManifestSchema.permissions` = `ManifestPermissionsSchema` (`manifest.zod.ts`) | `string[]` \\| `{ services, hooks, network, fs }` | `PluginPermissionEnforcer`,经 artifact `grantedPermissions` |\n| **B. ADR-0090 权限集集合** | 包 bundle 的 app-category 集合 | `PermissionSet[]`(带 `.name` / `.isDefault`) | `app-plugin.ts` 的 `SECURITY_FIELDS ['permissions','permission']` → `metadata.registerInMemory('permission', …)` → `suggested-audience-bindings.ts` Source 2 |\n\n⇒ **一个包声明了其中一种,另一种就没地方放。**\n\n## 两条可验证的后果\n\n### 1. 声明 A 的包,其 B 被静默丢弃(潜伏,非活)\n\n`suggested-audience-bindings.ts`(`plugin-security`)Source 2:\n\n```js\nconst declared = Array.isArray(manifest?.permissions) ? manifest.permissions : [];\nfor (const ps of declared) consider(ps, manifest?.id);\n```\n\n`consider` 首行:`if (!ps || typeof ps !== 'object' || !ps.name) return;`\n\n- 结构化臂 `{services,…}` → 是对象但**非数组** → `Array.isArray` 为 false → `declared = []`,不进循环\n- legacy `string[]` 臂 → 元素是 **string** → `typeof !== 'object'` → 首行 return,**全部丢弃**\n\n⇒ 管理员**永远收不到**「把这个权限集授予 Everyone 吗?」的建议,**且无任何日志**。这违反本仓成文规矩「absence must be loud」(Route & surface ownership §3)。\n\n⚠️ **当前潜伏**:ADR-0025 结构化授权的生产使用量为零,所以今天没有包踩到。但它会在第一个使用 A 的包上生效,而那正是 #17147 那条路要引入的东西。\n\n### 2. `InstalledPackageSchema.manifest` 误声明了实际存储的形状\n\n`package-registry.zod.ts` 声明 `manifest: ManifestSchema`。但 `registerApp` 实际传进 `installPackage` 的是**整包 bundle**——判据在 `objectql/src/engine.ts` 同一函数内,`installPackage` 调用的**前后两行**分别把 `manifest.datasources` / `manifest.objects` 当作**定义对象**来读(`ds.name`)。\n\n> ⛔ **更正(2026-09-13,派发席自己写错的):** 本段原文写的是「而 `ManifestSchema` 没有这些键」——**错**。`manifest.zod.ts:401 / :409` 确有这两键,声明为 `z.array(z.string())`(**glob 模式**),且 `:244` 是 `strictObject`。⇒ 错配是**类型**不是缺键,而且比原文更严重:真实的 assembled 记录会被拒两次(两键 `invalid_type` + 其余键 `unrecognized_keys`)。由承接席位在复核中测出并反驳,复审席独立核实成立。\n\n⇒ 任何按该 schema 读 registry 的消费者都可能读到与声明不符的形状。\n\n## 范围建议(⛔ 非裁决,执行席自行判断)\n\n⛔ **不要**为此重命名任一侧的键——那是跨三仓的破坏性改动,而缺陷当前是潜伏的。**成本最低且立刻正确**的三件:\n\n1. ~~**把 #2 的 schema 声明改成事实**(或显式声明它是超集),让 `InstalledPackage.manifest` 不再对读者撒谎。~~\n   > ⛔ **已否决(2026-09-13),理由是一条已记录裁决,不是口味。** `package-api.zod.ts:67-74`:维护者 2026-09-02 取 **road B**「declare the assembled stage rather than widen the authoring one」,而「把 manifest 某键放宽成两阶段 union」是 **road C,被点名 REJECTED**(键上的 union 让两个阶段都不可校验,Prime Directive #12 拒绝的形状)。照本条做 = 推翻已记录裁决(Prime Directive #13,要新 ADR 不是 changeset)。assembled 阶段已有 `AssembledInstalledPackageSchema` / `InstalledPackageAtEitherStageSchema`。**真正缺的只是**:站在 `package-registry.zod.ts` 的读者拿不到指向那一侧的指针——已在 PR 里以纯声明文本补上。\n2. **让 #1 的丢弃变响**:Source 2 遇到 `permissions` 是 ADR-0025 形状(非 `PermissionSet[]`)时 `warn` 一次并说明它丢了什么、为什么,而不是静默返回空。\n3. **在两处契约上互相点名**(`ManifestSchema.permissions` 的 describe / docblock ↔ app-category 集合那侧),让下一个作者在读到任一侧时就知道另一侧存在。\n\n⚠️ 如果你核实后认为其中某条不值得做,**说出来比照做有价值**——请带结构性证据反驳。\n\n## 溯源\n\n在复核 **#13458** 正文断言「legacy 臂在 framework 有活读者 → `suggested-audience-bindings.ts`」时测出。该断言是**误归属**:那个读者消费的是 B(权限集集合),不是 A(ADR-0025 授权臂)。已在 #13458 上更正,并提示派发前重新定位 legacy 臂的真实读者。\n\n⚠️ 本卡的自我更正史记录在 #13458 的两条评论里(先错判 Source 2 惰性,后以 `engine.ts` 的 `installPackage` 调用点推翻)——留作判读参考:**别从 schema 声明推运行时形状,去看实际传参**。\n\nRefs: #13458 · #17147 · #11333 · ADR-0025 · ADR-0090\n\n"
+}

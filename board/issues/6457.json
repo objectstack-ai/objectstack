@@ -1,0 +1,36 @@
+{
+  "number": 6457,
+  "kind": "issue",
+  "title": "`parent` 表头绑定也是稀疏的 —— #4953 修完 `record` 之后,同一个作者陷阱在 `parent` 根上原样留着",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched",
+    "pm:queue",
+    "target:v17"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T21:48:23Z",
+  "updated_at": "2026-08-08T19:32:08Z",
+  "closed_at": "2026-08-08T19:32:08Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6457",
+  "body": "Filed unassigned from PR #6454(#4953 裁决第 1 条的 engine-core 份额)。**只记录发现,不含修法承诺,不在该 PR 内扩面** —— 维护者 2026-08-06 裁决只覆盖 `record` / `previous` 两个根,`parent` 未被覆盖,而 #4889 给表头读语义自有一套(未绑定 ⇒ LOCKED),不能顺手推广。\n\n## 发现\n\nPR #6454 把字段 `readonlyWhen` 的 `record`(merged)与 `previous` 两个根过了 `materializeDeclaredFields`。**`parent` 根刻意没有物化**,理由写在代码注释里:它是**另一个对象**的行,该函数手上没有它的声明字段表;而且「未绑定」正是 #4889 fail-closed 判定所依赖的信号,不能被物化成一个存在的空对象。\n\n但表头本身是驱动读出来的一行,没有任何补齐:\n\n```\npackages/objectql/src/engine.ts:3074\n  const row = await this.findOne(rel.master, { where: { id: parentId }, context: { isSystem: true } } as any);\n  return (row as Record<string, unknown>) ?? null;\n```\n\n于是 `parent` 上完整重现了 #4953 正文描述的那个陷阱,只是换了一个根:\n\n| 情形 | `readonlyWhen: parent.status == null` | 结果 |\n|:--|:--|:--|\n| 表头行带 `status` 列 | 正常求值 | 按谓词真假锁 / 不锁 |\n| 驱动没回读 `status` 列 | fault `No such key: status` | `unknownVariableOf` **不匹配**(`parent` 根是绑定的),走普通 fail-open 出口 ⇒ **声明的锁被放行** |\n| 表头解析不到(`null`) | fault `Unknown variable: parent` | LOCKED(#4889 的 fail-closed 出口) |\n\n中间那一行由 PR #6454 的测试实测钉住(`does not disturb the #4889 parent binding` 用例的后半段:表头 `{ id: 'inv1' }` 缺 `status` ⇒ `{ quantity: 9999 }` 原样放行 + `failed to evaluate — change allowed through`)。该用例当时是为了证明**没有**顺手物化 `parent`,顺带把这个洞量了出来。\n\n同一形状也存在于 bulk 路径的 `resolveMasterDetailParents`(`engine.ts:3097`),以及 #4977 给 `requiredWhen` 绑的同一个 `parent` 绑定 —— 后者 fail-open 的后果是**要求不被强制**,方向与 `readonlyWhen` 相反但同为 `declared ≠ enforced`。\n\n## 为什么单独立单而不是随 PR 扩面\n\n1. 裁决没覆盖:2026-08-06 的裁决逐条列的是「字段 `readonlyWhen`」与「flow 触发记录播种」两处服务端接缝,`parent` 不在其中。\n2. 修法不是同一套:`record` 的物化用的是**本对象**的 `fields`;`parent` 要用的是 **master 对象**的 `fields`,意味着物化点要么下移到 `resolveMasterDetailParent(s)`(引擎手上有 master schema),要么给 strip 函数多传一份 master 声明字段表 —— 这是一个接口形状选择,不该由一个 bugfix PR 顺手定。\n3. 与 #4889 的 fail-closed 出口有交互:物化后「表头缺键」会从 fault 变成可求值,而「表头读不到」仍应保持 LOCKED —— 两条路径必须继续可区分,需要一并想清楚再动。\n\n## 建议(供分诊判断,非承诺)\n\n若采纳,落点更可能在 `resolveMasterDetailParent(s)` 内(引擎在那里同时握有 master schema 与刚读回的行),这样 `readonlyWhen` / `requiredWhen` 两个消费者一次到位,strip 函数签名不变。\n\nBlocked-by: PR #6454(先把 `record` / `previous` 两根的形状定下来)\n"
+}

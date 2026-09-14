@@ -1,0 +1,35 @@
+{
+  "number": 18074,
+  "kind": "issue",
+  "title": "[finding] dispatch-gates --ran silently discards an explicit NOT-MEASURED claim when the same command also carries a run line — and a cap-kill exit (124/143) reads as RUN",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:skills",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-13T17:39:56Z",
+  "updated_at": "2026-09-14T04:25:16Z",
+  "closed_at": "2026-09-14T04:22:04Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/18074",
+  "body": "## What was measured\n\n`scripts/pm/dispatch-gates.mjs --ran` has **two** channels for declaring a gate family unmeasured, and one silently eats the other.\n\nAll four readings taken 2026-09-13T17:45Z at `origin/main` `6a3bcd8174`, same derivation each time (`--repo objectstack-ai/objectstack packages/spec/src/system/metrics.zod.ts`, 70 derived families), same single command `node packages/lint/scripts/check-reference-carrier-shape.mjs`. **Only the record's spelling differs between runs** — so these are four readings of one instrument, not four instruments.\n\n| record contents | verdict line |\n|:--|:--|\n| **A** `<cmd> :: exit 124` | `70 derived, **1 run**, **0 NOT-MEASURED**, 69 UNRUN` |\n| **B** `<cmd> :: exit 3` | `70 derived, 0 run, **1 NOT-MEASURED**, 69 UNRUN` |\n| **C** `NOT-MEASURED <cmd> :: cap-killed at the container foreground ceiling` | `70 derived, 0 run, **1 NOT-MEASURED**, 69 UNRUN` |\n| **D** *both* the A line *and* the C line | `70 derived, **1 run**, **0 NOT-MEASURED**, 69 UNRUN` |\n\n**B is the discriminating control for A** — same command, same derivation, only the recorded code differs, and the classification flips. **C is the control for D** — the claim channel demonstrably works when it is the only line present.\n\n## The defect\n\n**D is the finding.** A runner that does the *most* honest thing available — record the real exit code **and** explicitly declare the family unmeasured with a stated reason — has its declaration **discarded without a word** and gets a false green. The most careful record produces the least truthful total.\n\nThe cause is a short-circuit, not a missing feature. In `parseRunRecord`'s reconciliation loop the run-line branch returns before the claim map is ever consulted:\n\n- `scripts/pm/dispatch-gates.mjs:12032` — `if (ranClaims.has(command)) {`\n- `:12045` — `if (recorded.code === EXIT_PREREQUISITE_NOT_MET)` — **exit 3 is the only code that leaves this branch as NOT-MEASURED**\n- `:12055` — `ran.push(command)` — every other recorded code, `124` / `143` / `141` included, falls through to **run**\n- `:12058` — `const claim = unmeasuredClaims.get(command)` — **unreachable** for any command that appears in `ran.list`\n\n## Why this is a defect and not the documented design\n\nThe module's own docblock at `:11788-11799` anticipates exactly this case and argues the opposite way round:\n\n> a gate cap-killed at the container's foreground ceiling (exit 143) was written off as NOT MEASURED, and on re-running to completion it was green. So the claim parses only with a stated reason … a marked line without one leaves its family UNRUN, **which is the direction that costs a rerun instead of a false green.**\n\nThe stated principle is *prefer the direction that costs a rerun*. Reading A/D does the reverse: a family that never reached a verdict line is counted as **run**, which is the false-green direction the whole module exists to prevent. Whatever the right classification for a cap-kill is — `UNRUN` and `NOT-MEASURED` are both defensible — `run` is not one of the candidates.\n\n## Reproduction\n\n```sh\nnode scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack \\\n  packages/spec/src/system/metrics.zod.ts | head -1 > /tmp/cmd\nCMD=$(cat /tmp/cmd)\n{ printf '%s :: exit 124\\n' \"$CMD\"\n  printf 'NOT-MEASURED %s :: cap-killed at the foreground ceiling\\n' \"$CMD\"; } > /tmp/both.list\nnode scripts/pm/dispatch-gates.mjs --ran /tmp/both.list --repo objectstack-ai/objectstack \\\n  packages/spec/src/system/metrics.zod.ts | grep -i reconciliation\n# reads: 1 run, 0 NOT-MEASURED   — the claim line is gone with no diagnostic\n```\n\n## How it surfaced\n\nOn PR #17635 (#15939's gate card), the round's `check:pm-dispatch-gates` was killed by its own `timeout` at 560s under the container's foreground cap and recorded `exit 124`. Its reconciliation read `82 derived, 81 run, 1 NOT-MEASURED, 0 UNRUN` — the `1` is a *different*, exit-3 family, and the cap-killed one sits inside the `81 run`. The round declared it in prose instead, which is why it was caught at all. ⛔ A round that trusted the tool's total would not have known.\n\n## Dedupe — checked, and these are neighbours, not duplicates\n\n- **#14281** (closed) — *`check:pm-dispatch-gates` runs 11m27s and is SIGTERMed at the container cap with zero diagnostic*. That is the **symptom** on one gate. This card is about the **reconciler's classification** of any such kill, on any family.\n- **#16398** (closed) — *the reconciliation line enumerates what sits OUTSIDE the runnable total and omits two blocks*. Same line, different defect: that was about what the line *enumerates*, this is about which bucket a family *lands in*.\n- **#15761** (closed) — a command whose input arrives by `env:` never reaches the NOT-MEASURED bucket. Adjacent, but a derivation-side problem, not a record-side one.\n- **#17204** is cited in the module's own docblock as the four-delivery `0 NOT-MEASURED` measurement; this card is consistent with it and does not restate it.\n\n## Suggested direction — for the triaging seat, not a ruling\n\nThe failure is that two channels disagree and the loser is silent. The cheapest honest fix is the ordering the module's own principle implies: let an explicit `NOT-MEASURED … :: <reason>` claim **win** over a run line for the same command, or — if a record carrying both is considered malformed — **refuse the record and say so**, rather than picking one and discarding the other quietly. ⛔ Either way the fix belongs with the seat that owns this file; nothing here should be read as pre-deciding it.\n\n<sub>Filed by the epic PM for #15939, `session_015c5G6TmpMKgnusmTpD7Ntt`, 2026-09-13T17:45Z. Surfaced by the #17635 round; re-measured and re-framed here rather than relayed — the round's own account named only the exit-3 half and did not know the claim channel existed.</sub>\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

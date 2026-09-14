@@ -1,0 +1,36 @@
+{
+  "number": 6569,
+  "kind": "issue",
+  "title": "gen:docs 深度预算落地后,11 个单元格出现 `object | object | object | object` —— 同形变体是否该去重,落在 #6226 的裁决面上",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "pm:dispatched",
+    "target:v17"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T05:13:56Z",
+  "updated_at": "2026-08-08T14:50:47Z",
+  "closed_at": "2026-08-08T14:50:47Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6569",
+  "body": "实现 #6374(形状深度预算)时量出来的观察类发现,**未认领**,按 PD#10 立案。\n不在 #6374 的 PR 里顺手改,因为它落在 #6226 刚被维护者裁决过的那个面上。\n\n## 现象\n\n#6374 给内联形状摘要加了深度预算(`SHAPE_DEPTH_LIMIT = 1`,嵌套形状印 `object`)。\n后果之一:一个联合的多个变体如果**都是对象**,它们现在会渲染成**同一个字符串**,\n于是单元格里出现连续重复的 `object`。全语料实测 **11 格**,改前是 **0 格**:\n\n| 页面 | 属性 | 现在印出 |\n|---|---|---|\n| `ai/conversation.mdx` | `ConversationSession.messages` | `content: (object \\| object \\| object \\| object)[]` |\n| `ui/view.mdx` / `data/object.mdx` / `api/protocol.mdx` | `View.list` / `.listViews` / `ViewItem.config` 等 7 格 | `data?: object \\| object \\| object \\| object` |\n| `kernel/manifest.mdx` | `Manifest.navigationContributions` | `items: (object \\| object \\| object \\| object \\| … +5 more)[]` |\n\n最后一格尤其刺眼:`… +5 more` 在数「还有 5 个**和已印出的这四个一样**的 `object`」。\n\n## 为什么 #6374 没有顺手收掉它\n\n三条理由,都指向「这不是实施者能单方面决定的」:\n\n1. **它落在 #6226 的裁决面上。** #6226 的维护者裁决是「变体数上限 + **自报被省略的\n   变体数**」,理由是省略必须自报数量。把 4 个同形变体折叠成 1 个 `object`,丢掉的\n   正是**元数**(arity)—— 这一格还剩的唯一事实(「你要在 N 个形状里选一个」)。\n2. **仓库已经有意在印这种重复了。** `format-type.test.ts` 里 #6226 的一条现存 pin:\n   `string | string | string | string | string` 逐字保留、不省略,理由写在测试注释里\n   ——「标记比省下的还长」。也就是说「重复拼写同一个变体」是这个渲染器**已经钉住的\n   既有行为**,`object | object | object | object` 只是同一行为遇上了新的拼写,\n   不是 #6374 造出来的新行为。\n3. **共享的「标记必须挣回自己的位置」守卫在这里是对的。** 6 个 `object` 比替换掉\n   其中两个的计数标记还窄,所以守卫拒绝加标记 —— 拒绝是正确的,只是结果好看不了。\n\n## 待裁决的问题\n\n同一个单元格内渲染结果**逐字相同**的联合变体,应该:\n\n- **A(现状,#6374 落地后):** 逐个印出。元数保留;`object | object | object | object`\n  读起来像 bug,但它说的是真话(四个可选形状,一个都没在这格里拼出来)。\n- **B(折叠):** 印一次。好看;丢掉元数;并且会覆盖 #6226 对\n  `Manifest.navigationContributions` 那一格的渲染裁决。\n- **C(折叠 + 自报元数):** 印一次并带上计数(需要发明一种新记号,例如\n  `object` 后面跟一个数量标记)。保住元数,但在同一张表里引入**第四种**省略风格\n  —— 而 #6226 的裁决理由恰恰是「同一张表里出现两种省略风格,才是比宽度更严重的\n  问题」。\n\n## 定性\n\n- 观察类:信息**正确**,只是拼写冗余;今天没有用户被误导。\n- 影响面 11 格,总计约 259 字符 —— 宽度上无关紧要(#6374 实测:折叠只把 >200 的\n  单元格从 42 降到 39),纯粹是可读性与契约一致性的取舍。\n- ⛔ 不建议随手拍板;需要维护者在 A/B/C 里选一个。\n\n## 相关\n\n同文件面:`packages/spec/scripts/lib/format-type.ts`。与 #6374(本条的来源)、\n#6226(裁决面)、#5340、#6225 同源。**须与该文件面的其他在飞单串行。**\n#6374 的 PR 已把 A 的行为明确钉在\n`format-type.test.ts` 的 `prints an identical variant once per variant` 一条里,\n并在注释里写明这是待裁决项 —— 裁决若选 B/C,改的是那一条 pin。"
+}

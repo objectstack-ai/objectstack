@@ -1,0 +1,37 @@
+{
+  "number": 5492,
+  "kind": "issue",
+  "title": "Row-level write gate consults neither `modifyAllRecords` nor `sys_record_share.access_level` — both declared write-widening mechanisms are inert",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched",
+    "pm:queue",
+    "target:v17"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T14:17:16Z",
+  "updated_at": "2026-08-08T13:24:37Z",
+  "closed_at": "2026-08-08T13:24:37Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 10,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5492",
+  "body": "Part of objectstack-ai/hotcrm#705\n\nFound during HotCRM&#39;s 17.0 GA acceptance sweep on `@objectstack/*` **17.0.0-rc.2**, permission matrix phase. Two write-widening mechanisms, both inert; filed together because they share one root: the row write gate consults neither.\n\n## Measured\n\nThe effective row write gate is: `owner_id == caller` **AND** (`member_default`&#39;s wildcard RLS `owner_only_writes`: `created_by == caller`, OR an explicit RLS update-widener). Nothing else widens writes.\n\n**1. `modifyAllRecords` is inert.** A manager profile with declared viewAll + modifyAll on its core objects got **403 row-level** on every cross-owner write probed (update AND delete, four objects). Reads widen exactly as declared (43/43, 9/9); writes never.\n\n**2. Edit-level shares grant read only.** All three edit-level sharing rules verified to **materialize** in `sys_record_share` (incl. a fixture created after rule evaluation — the hook fires; and clean revocation on unbinding) and to widen **reads** exactly. But a PATCH by the share target on the shared record → **403 row-level**, every time. The write gate does not consult `sys_record_share.access_level`.\n\nCorollary from the other side: read-level shares correctly deny writes — the share machinery distinguishes levels on paper, and the write gate then ignores the distinction.\n\n## Reproduction\n\n```bash\n# as a manager-profile user with modifyAllRecords on crm_opportunity\nPATCH /api/v1/data/crm_opportunity/ {&#34;next_step&#34;:&#34;x&#34;}\n→ 403 &#34;[Security] … not permitted to update this &#39;crm_opportunity&#39; record (row-level security)&#34;\n# share row present (object=crm_account, access_level=edit, target=):\nPATCH that account as the share target → 403 (same shape)\n```\n\n## Impact\n\nA manager cannot correct, reassign, or clean up anything they didn&#39;t personally create; every &#34;manager fixes it&#34; workflow is unimplementable. Org-admin is the only identity that can write across owners.\n\n## Prior related issues (checked)\n\n- #4647 (closed) — `security/explain` vs write path contradiction for VAMA holders; the write-path half of that contradiction is what this issue measures systematically\n- #5125 (open, docs) — spec doc drift: `ISharingService.canEdit` doesn&#39;t mention a modifyAllRecords bypass; once the enforcement question here is settled the doc should follow the ruling\n- #3005 (closed) — clarified viewAll/modifyAll under `public_read_write`; the objects here are `private`/`public_read`\n\nEvidence: HotCRM acceptance run `w4/results.jsonl` (M3/M4/M8). Sibling: objectstack-ai/hotcrm#703 (the same `member_default` wildcard RLS supplies the `created_by` co-gate).\n\nBlocked-by: #6428"
+}

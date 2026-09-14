@@ -1,0 +1,33 @@
+{
+  "number": 17933,
+  "kind": "issue",
+  "title": "pm-dispatch: `lanes/ui.md` 指向条款②的适用面却不陈述它 —— 维护者据此读成「本车道无需契约复核」",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-tesla",
+    "id": 327383522,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-13T06:57:12Z",
+  "updated_at": "2026-09-13T15:03:01Z",
+  "closed_at": "2026-09-13T15:00:55Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 10,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17933",
+  "body": "出处 / provenance: 由 objectui 的 `domain:ui` 执行 PM 席(`os-tesla`)在 R33 提出。⛔ 不认领、不写代码、不定级 —— `domain:*`、type 与定级归中央分诊(`lanes/ui.md` 〈形态〉)。\n\n## 现场\n\n维护者在一轮派发中直接问:\n\n> 不是说你的 ui 车道不需要契约复审了吗?为什么还有 `needs:contract-review`\n\n⇒ 这不是假设的歧义,是**已经发生的误读**,而且发生在规则的使用者身上。\n\n## 规则现状\n\n`references/lanes/ui.md:38`,逐字:\n\n```\n- 档位与复核豁免边界读源码与 `references/contract-review.md`,⛔ 不凭记忆或继承的注记。\n```\n\n它**指向**边界,不**陈述**边界。而被指向的 `references/contract-review.md` 里,答案分散在三段、需要读者自行合成:\n\n| 段 | 相关句 |\n|:--|:--|\n| 复核归属与资格 | `spec 席审低档实现者的契约增量,非自身产物;余席条款②复核 = 默认判断档自审加门禁。` |\n| 独立性件 | `独立性件,spec 席:契约判断真分叉或 dev 挂旗 ⇒ 起上下文隔离的达档复核子代理。` |\n| 降档保险丝 | `保险丝只管 spec 席条款②复核与 skills 席` / `余席条款②复核与总监席裁决非达档裁决,⛔ 不受本丝` |\n\n合成后的正确答案是:**余席(含 `domain:ui`)要做条款②复核,形态是默认判断档自审加门禁;被豁免的只有独立性件与降档保险丝。**\n\n⛔ 但没有任何一处把这句话写出来。三段各自正确,合成的负担全在读者身上 —— 而 `lanes/ui.md:38` 那条「⛔ 不凭记忆或继承的注记」还额外禁止读者用记忆补足,于是每次都要重新合成一遍。\n\n## ⚠️ 这个问题不是纯粹的措辞 —— 源码里有一句让它成为真问题\n\n`references/contract-review.md` 降档保险丝段末:\n\n```\n- 契约复核 ⛔ 不适用额度耗尽豁免降档:豁免对象是派发,复核正为补偿低档派发而存在。\n```\n\n**「复核正为补偿低档派发而存在」** —— 这句话给出了复核的*目的*。若某条车道的派发本身不低档,该目的的前提就不成立,「所以这条车道不需要复核」是一个**从源码本身推得出来的读法**,不是凭空的。\n\n⇒ 所以这不是「读者没读仔细」,是文档**留下了一个可推导但未裁定的结论**。维护者的提问正是沿着这条推导走的。\n\n## 一行可执行判据\n\n`references/lanes/ui.md` 或 `references/contract-review.md` 其一,出现一句直接陈述本车道答案的话,使得「本车道挂不挂 `needs:contract-review`」⛔ 不需要跨三段合成即可读出;并就上面那条「补偿低档派发」的推导给出裁定(适用 / 不适用),⛔ 不留作可推导项。\n\n## 建议的形状(⛔ 非裁定)\n\n- 在 `contract-review.md` 增一段〈适用面〉,逐车道一行,给出该车道是否挂标、由谁复核、被豁免哪几件。\n- `lanes/ui.md:38` 由指针改为该表的引用加本车道那一行的复述。\n\n⇒ 判据是**读者读一处即得答案**,而不是「文档某处含有答案」。\n\n## 血缘\n\n同一场里本席另有两处协议缺口,各自立卡而非并入本卡:落地前检③对 base 继承红无处置;在飞 PR 重叠只查文件面、查不到点名证人。三者在不同文件、不同修法。\n"
+}

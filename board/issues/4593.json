@@ -1,0 +1,33 @@
+{
+  "number": 4593,
+  "kind": "issue",
+  "title": "150 个已发布 schema 没有配套的 export type 别名,reference 页给不出 import type 示例",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "target:v17"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-02T09:22:58Z",
+  "updated_at": "2026-08-08T09:35:11Z",
+  "closed_at": "2026-08-08T09:35:11Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4593",
+  "body": "#4570 把 reference 页的 import 示例改成对照 `api-surface.json` 真实导出面生成之后,顺带把「推导得到但导出面里查无此名」的名字全部落成了棘轮基线 `packages/spec/docs-import-surface.baseline.json`。目前 154 条,其中 **150 条是 `no type export`**:schema 常量 `XSchema` 正常导出,但对应的 `export type X = z.infer< typeof XSchema >` 不存在。\n\n## 为什么值得单独跟\n\n这 150 个 schema 的文档页现在只有 `import { XSchema }` 一行,没有 `import type { X }`。对手写代码的人只是不方便;对 AI 写元数据应用的人是**缺一半契约**——他能拿到运行时校验器,却没有可以标注变量、写函数签名的类型,只能退化成 `any` 或自己 `z.infer<>`(而 `z` 的版本和 `lazySchema()` 包装并不总是好写)。\n\n分布很集中,像是历史习惯而非有意设计:`system/` 的可观测性枚举(`LogLevel`、`SpanKind`、`MetricType`、`TaskStatus` …)、`ui/` 的 `Element*Props` / `Page*Props` 一族、`data/` 的若干 request 形状(`DataEngine*Request`)。完整清单见基线文件。\n\n## 需要决策的点\n\n1. **补齐**:给这 150 个逐一加 `export type`。方向上正确(声明即导出、类型可用),但一次性把 `api-surface.json` 撑大 150 个导出,是可观的公共面扩张,需要维护者点头;\n2. **按需补**:只补真正会被外部引用的(枚举类、request/props 形状),其余保留在基线里并注明理由;\n3. **维持现状**:基线已经把它们变成可数、可审的债务,新增的会被 `check:docs` 挡红,存量慢慢还。\n\n倾向 (2):枚举与 props 形状是元数据作者最常需要标注的,补起来收益最直接;而纯内部的中间 schema 留在基线里,比硬凑一批没人用的导出更诚实。\n\n无论选哪条,修复方式都一样:加别名 → `gen:api-surface` → `gen:docs`,并**删掉**基线里对应的行(只减不增的棘轮,陈旧条目同样会让 `check:docs` 变红)。\n\n发现于 #4570。\n"
+}

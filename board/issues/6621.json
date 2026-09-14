@@ -1,0 +1,36 @@
+{
+  "number": 6621,
+  "kind": "issue",
+  "title": "A successful `revertCommit` never refreshes the SchemaRegistry — the runtime keeps dispatching the reverted-away body until restart (the #4521 rule, missing on the batch path)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched",
+    "pm:queue",
+    "target:v17"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T07:28:32Z",
+  "updated_at": "2026-08-08T19:49:09Z",
+  "closed_at": "2026-08-08T19:19:05Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6621",
+  "body": "Found while implementing #6563. Recording only, per Prime Directive #10 — a different cause (a missing call) on a different line than the write intent #6563 fixes.\n\n## Evidence\n\n`rollbackMetaItem` — the per-item revert — ends its restore with a registry write-through, and #4521 states why in that file:\n\n```ts\n// #4521 — a rollback is a live write like any other: the restored\n// body must be the one the runtime dispatches on immediately, not\n// after someone lists the type.\nthis.applyRegistryWriteThrough({\n    type: singularType, name: request.name,\n    item: result.item.body, packageId: rollbackPackageId,\n});\n```\n\n`revertCommit` — the batch revert over the same repository call — has no equivalent. Its restore limb awaits `repo.restoreVersion(...)`, pushes `{ action: 'restored' }` and moves on; nothing re-registers the restored body.\n\nMeasured on #6563's branch (where an `object` can reach the restore at all — on `origin/main` @ e39dd66e7 it fails earlier with `NOT_OVERRIDABLE`), real `SysMetadataRepository` over the #6215 in-memory double: an object saved twice through `saveMetaItem` (v2 adds a `due_date` field), then reverted through `revertCommit`:\n\n```\nrevertCommit  ->  { success: true, revertedCount: 1, failed: [] }\nstored sys_metadata row fields  ->  [\"name\",\"amount\"]            # reverted\nSchemaRegistry.getObject(...) fields ->  [... ,\"name\",\"amount\",\"due_date\"]  # NOT reverted\n```\n\nOwnership survives (`getObjectOwner(...).packageId === 'app.myapp'`, `_provenance: 'org'`), so this is purely the body going stale.\n\nThis is type-agnostic and pre-dates #6563: an overlay-allowed type (`view`, `page`, `dashboard`, …) has always been able to reach this limb and has always come back with the same split — #6215's pins assert the stored row and are silent on the registry. `object` merely makes it loud, because the registry copy is what CRUD dispatches on.\n\n## Why it matters\n\n`revertCommit` answers `success: true` while the runtime keeps serving the body the operator just reverted away — a revert that looks done and is not, healing only at the next restart or re-hydration. That is exactly the failure mode #4521 named for the single-item path, one seam over. `rollbackToPackageCommit` reverts through the same loop, so a whole package rollback can report success and change nothing the running process can see.\n\n## Suggested direction (not a ruling)\n\nMirror `rollbackMetaItem` inside `revertCommit`'s loop: use the `restoreVersion` result's body plus the row's own ownership key (`resolveOverlayPackageBinding`, per item, read the way #4636 requires so the re-register does not clash with `already owned by package ...`). The soft-remove limb needs the symmetric decision made deliberately rather than by omission — whether an unregister belongs there is a real question, not an obvious yes.\n\nWorth deciding together with #6602 (which gates write-through on `environmentId` and never on org): a batch revert of org-scoped rows would inherit whatever that issue rules.\n\nRelated: #6563, #4521, #4636, #6215, #6602, ADR-0067.\n"
+}

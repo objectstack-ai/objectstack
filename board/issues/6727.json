@@ -1,0 +1,35 @@
+{
+  "number": 6727,
+  "kind": "pull_request",
+  "title": "fix(cli): `os login --json` 声明为 NDJSON 事件流，每行一份可解析文档 (#6531)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T13:42:26Z",
+  "updated_at": "2026-08-08T14:35:16Z",
+  "closed_at": "2026-08-08T14:35:15Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": "2026-08-08T14:35:15Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/6727",
+  "body": "Fixes #6531\n\n按 2026-08-08 维护者裁定（comment 5226101978）实现**路线 2 —— NDJSON，作为声明式例外**。\n\n## 前提复现（issue 未做，本 PR 做了）\n\nissue 是**读源码**得出的，没有跑通过。本 PR 先在**未修改的 `origin/main`**（`b230e5efd`）上真机复现：搭了一个最小 RFC 8628 假端点，并用 `script(1)` 分配 PTY 驱动真实子进程 —— 因为 `login.ts` 只在 `process.stdin.isTTY` 为真时才走 device flow，管道 stdin 会掉进 email/password 分支，**根本到不了那两个写点**。\n\n实测 stdout（`--json --no-browser`）：\n\n```\n{\"device_code\":\"DEV-CODE-6531\",\"user_code\":\"WXYZ-6531\",\"verification_uri\":\"…\",\"expires_in\":600}\n{\n  \"success\": true,\n  \"email\": \"device@example.com\",\n  \"userId\": \"usr_6531\"\n}\n```\n\n两种读法都失败，前提坐实：\n\n- `JSON.parse(整个 stdout)` → `Unexpected non-whitespace character after JSON at position 200`\n- 按 NDJSON 逐行读 → **6 行里 5 行解析失败**（第二份文档跨 5 行）\n\nstderr **完全为空**。顺带回答派单里的问题：`os login` **不 boot kernel**（无 `bootSchemaStack`），所以 #6217 的 stdout 保留接缝在这里用不上，日志污染不存在。\n\n## 改动\n\n`os login --json` 现在是**换行分隔的事件流**：每行一份紧凑 JSON 文档。\n\n**为什么是全部四个写点，而不只是裁定字面说的「两次写」**：契约属于**命令**，不属于某条路径。失败记录（`{\"success\":false,…}`）是在 device 记录**已经写出去之后**才可能到达的（授权被拒、code 过期、poll 失败），所以它若保持缩进，就在消费者最没法恢复的那条路径上原样重建了本 issue 的两文档流。文档已经告诉消费者逐行读，那 `--email`/`--password` 结果与「已登录」提示也必须成立。四个写点统一走 `emitRecord()` —— 全文件唯一的 `--json` 写出口，让「一行一文档」成为命令的结构性属性，而不是四处各自记得传 option。\n\n## 声明式例外的文档落点（裁定的强制条件）\n\n一个没写进文档的例外，和现在这个 bug 是同一类伤害。三处：\n\n1. **`--help` 文案** —— `--json` flag description 直接写明 NDJSON、逐行解析、以及「与其它命令单文档不同」。\n2. **`content/docs/deployment/cli.mdx`** —— `#### os login` 下新增 `##### os login --json is NDJSON — the one exception`，含实际输出样例与一段可直接用的 `while read` + `jq` 消费脚本。\n3. **`content/docs/permissions/authentication.mdx`** —— device flow 小节加指针（这里才是描述 device flow 本身的地方）。\n\n⛔ 未碰 `content/docs/releases/`。\n\n## `format.ts` 为什么动了\n\n只动注释。`EmitJsonOptions.compact` 的 doc comment 原文把 `os login` 当作「split 是意外而非设计」的**证据**在引用；改完之后那段话描述的是已经不存在的行为，会主动误导下一个读者。改为记录：`compact` 现在有了唯一一个**设计内**用途，其余站点仍只是保留历史格式。\n\n## 反向验证（方向与红数**先写后跑**）\n\n| 回滚 | 预测 | 实测 |\n|---|---|---|\n| R1 源码回 `origin/main` | 6 红 | **6 红 / 4 绿**，测试名逐条命中 |\n| R2 仅回滚两个 .mdx | 2 红 | **2 红 / 8 绿** |\n| R3 路线 1 模拟（缓冲后结尾一次写） | 时序钉转红 | **该钉转红**（另有 3 红未预测，见下） |\n\nR1 保持绿的 4 条正是我**事先写明的诚实排除**：时序钉、exit code、两条文档钉 —— R1 只改第二份文档的**格式**，不改第一份**何时**写出，所以时序钉两个方向都绿，它不构成 R1 的证据。\n\nR3 是为此单独做的：把 device 记录缓冲、结尾合并成一份文档（正是裁定否掉的路线 1）。时序钉以 `the device record never reached stdout early: expected true to be false` 转红，且**整个文件耗时从 10.09s 涨到 42.15s** —— 两次运行都掉进 20s 逃生阀，这是缓冲实现的指纹。**诚实差异**：我对 R3 只预测了「该钉转红」这一条，实测另有 3 条记录计数类断言同时转红（合并后 stdout 只剩 1 条记录），这 3 条我没预测到。\n\n## 时序钉为什么不是数组下标\n\n裁定选 NDJSON 而非路线 1，理由只有一个：消费者要在**还能行动时**拿到 verification URL。断言 `records[0]` 是 device 记录**完全抓不到**路线 1 回归 —— 结尾合并写同样把 URL 字段排在前面。所以假端点**扣住 token 不放，直到本测试在子进程 stdout 上真的读到了 device 记录**才放行；「授权前拿到 URL」因此是这次运行的**历史事实**，而不是事后对数组的观察。缓冲实现等不到放行，掉进 `RELEASE_DEADLINE_MS` 逃生阀（所以是断言失败而不是挂死），以 `urlSeenAt === null` 转红。\n\n## 测试\n\n`packages/cli/test/login-json-ndjson.e2e.test.ts`，10 条：真实子进程 + PTY + 真实 RFC 8628 端点。成功流（逐行可解析 / 恰好两条记录且顺序正确 / 时序钉 / stdout 只有 payload，2 行，无 banner 无 spinner 无回车符）、**授权被拒流**（device 记录之后到达的失败仍逐行可解析，`{\"success\":false,\"error\":\"Login denied by user.\"}` + exit 1）、以及四条「例外必须保持被声明」的钉（唯一写出口 + `--help` + 两处文档）。\n\n`script(1)` 缺失时该文件**红**而非 skip —— 静默 skip 的契约测试就是 #5046 换掉那批 fixture 的同一种「因为什么都没产生所以绿」。本仓 CI 全部 `ubuntu-latest`。\n\n## 门禁\n\n`pnpm lint` 0 ✅（家族门禁跑在 ESLint job 内）、`pnpm --filter @objectstack/cli typecheck` ✅、CLI 全量 **96 files / 1005 tests 全绿** ✅、`check:nul-bytes` / `check:doc-authoring` / `check:docs-audit-scope` / `check:role-word` / `check:quick-reference-counts` / `check:adr-anchors` / `check:empty-changeset` / `check:release-notes` 全绿 ✅。\n\n**字节纪律（本 PR 自身踩中一次，已修）**：写那条 spinner 断言时，编辑工具把 ESC **实体化成了裸控制字节**（0x1b，文件内 offset 12579）—— 正是「写*关于*控制字符的内容时最容易中招」那条（#4890 / PR #5140 同款）。已改回**六字符转义文本形式**（反斜杠 + 小写 u + 0 + 0 + 1 + b），字节级自扫描 `grep -naP` 0 命中，`check:nul-bytes` 绿。同理，本正文一律**用文字描述该转义**，不粘贴字节本身。\n\n## Changeset\n\n`@objectstack/cli: patch`。理由：无接口增删，且**没有任何原先可用的东西停止可用** —— device flow 输出此前不可解析，本就没有消费者可破坏；唯一另一处可观察变化是 email/password 结果由缩进变紧凑，`JSON.parse` 读法完全相同。与 #6217/PR #6524（同样是修好一个坏掉的 `--json`）取同一档。\n\n## 顺手发现（未在本 PR 修，PD #10）\n\n`os login --json` 在**非 TTY** 下（无 `--email`/`--password`）会把裸提示 `Email: ` 写到 **stdout**，实测 stdout 全文就是 `Email: `，随后以「unsettled top-level await」exit 13。同一 stdout 纯净度家族，但属于**另一条路径**、且「`--json` 下是否还该交互提示」是独立的契约决定，故单独立卡未认领。"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 6347,
+  "kind": "issue",
+  "title": "[finding] `isMissingTableError` 同样把 Postgres 写路径的「缺列」措辞判为「缺表」——其 docblock 明说 42703 必须响亮失败,而消费点会据此「从 1 开始编号」",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T14:32:19Z",
+  "updated_at": "2026-08-08T07:50:50Z",
+  "closed_at": "2026-08-08T07:50:50Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6347",
+  "body": "## 观察(#6035 / PR #6346 落地过程中量出的同族残留,不在该单范围)\n\n`packages/metadata/src/utils/schema-sync-errors.ts` 的 `MISSING_TABLE` 签名,与 #6035 修掉的 analytics 面是**同一族子串洞**,但消费点更重一档。\n\n### 判据自身的文档已经点名了这个 SQLSTATE\n\n`MISSING_TABLE` 上方的 docblock 写得很清楚(:128-134),而且**恰好点名了缺列**:\n\n> Narrower than it looks, on purpose. `does not exist` on its own also covers `role \"x\" does not exist` (42704), `database \"x\" does not exist` (3D000) and **`column \"x\" does not exist` (42703) — every one of them a real failure that must stay loud**, and every one of them a case where \"start numbering at 1\" would be the wrong answer against a table that may be full of rows.\n\n所以它把 message 判据收紧成「要求 table/relation 一词紧贴该短语」,并且 code 集合只收表级 SQLSTATE:\n\n```\ncodes:  42P01 (undefined_table), ER_NO_SUCH_TABLE\nerrnos: 1146\nmessage: /no such table|relation [\"'`][^\"'`]+[\"'`] does not exist|table [\"'`][^\"'`]+[\"'`] doesn'?t exist|unknown table/i\n```\n\n### 但被排除的只有**读路径**那一种拼法\n\nPostgres 的缺列有两种措辞,docblock 只考虑了前一种:\n\n| 措辞 | 出处 | 是否命中 `MISSING_TABLE.message` |\n|---|---|---|\n| `column \"bogus\" does not exist` | SELECT(读路径) | 否 ✅(docblock 想要的效果) |\n| `column \"label\" of relation \"sys_team\" does not exist` | INSERT/UPDATE/ALTER(写路径) | **是** ❌ |\n\n实测(把 `MISSING_TABLE.message` 原样拿出来跑):\n\n```\nwrite-path column phrase matches MISSING_TABLE.message: true\nread-path  column phrase matches MISSING_TABLE.message: false\n```\n\n原因与 #6035 完全同构:写路径措辞里**逐字包含**一整段合法的缺表措辞 `relation \"sys_team\" does not exist`。\n\n### code 优先并不能挡住它——`matchesDriverError` 里三条是**并列的或**\n\n缺列的 SQLSTATE 是 `42703`,不在 `MISSING_TABLE.codes` 里,直觉上会以为「code 对不上就否了」。但 `matchesDriverError`(:178-180)是顺序**或**,不是 code 优先:\n\n```\nif (typeof err.code === 'string' && signature.codes.has(err.code)) return true;\nif (typeof err.errno === 'number' && signature.errnos.has(err.errno)) return true;\nif (typeof err.message === 'string' && signature.message.test(err.message)) return true;\n```\n\n一个 `code: '42703'` 的错误在前两行落空,然后**在第三行靠 message 命中**。code 集合的收紧因此保护不了这一支。\n\n## 为什么比 #6035 重一档:消费点的语义\n\n`isMissingTableError` 的判定被用来断言「这张表还没建,所以没有任何行,所以空表就是真相」。`packages/metadata/src/loaders/database-loader.ts:307-312`:\n\n```\n} catch (error) {\n  // Benign — and ONLY benign: there is no table, therefore no row, so\n  // numbering from 1 cannot collide with anything.\n  if (isMissingTableError(error)) return 1;\n  throw error;\n}\n```\n\n即 docblock 里那句「\"start numbering at 1\" would be the wrong answer against a table that may be full of rows」**正是这个消费点**——它自己已经写下了误判的代价,只是判据漏掉了写路径那种拼法。同一函数还从 `packages/metadata/src/errors.ts:50` 对外再导出,消费面不止一处。\n\n## 今天为什么无害(observation 类,与 #6035 同样的休眠理由)\n\n该消费点走的是 `_find` / `_findOne` / `_count` 读路径,而 Postgres 在 **SELECT** 下的未知列措辞是 `column \"x\" does not exist`(不含 `relation`,按上表**不命中**);`column … of relation …` 是 INSERT/UPDATE/ALTER 措辞,读路径不产生它。所以这是一条「判据比自己的文档宽」的静默残留,不是今天有人踩得到的缺陷——与 #6035 的结论形状一致,故按 observation 类记录,不带 `pm:queue`,留给分诊轮定级。\n\n⚠️ 但有一处不对称值得分诊注意:#6035 的误判后果是「空网格 / 误报拓扑错误」(读面,可见),这里的误判后果是「从 1 开始重新编号」(可能写坏数据)。严重度不由我在立单时判定(#4949:立单时的严重度判断两个方向都不可靠),这里只把两边的消费点语义都摆出来。\n\n## 可能的方向(不预判)\n\n- 仓内已有两处先例可照抄同一手「先摘缺列、再判缺表」:`packages/rest/src/rest-server.ts` 的 `mapDataError`(#5352 起),以及刚落地的 `packages/services/service-analytics/src/analytics-service.ts` 的 `MISSING_COLUMN_OF_RELATION`(#6035 / PR #6346),两者用的是同一条正则。\n- 或者顺 #5717 方向 A(驱动侧结构化 error code)一并解决——该方向分诊已裁定需要时独立立单。\n- 若只想最小改动:把 `42703` 之类的列级 SQLSTATE 做成一条**前置排除**,而不是继续在 message 正则上打补丁(message 正则永远排除不掉一个包含它的超串)。\n\n## 参考\n\n- `packages/metadata/src/utils/schema-sync-errors.ts`(`MISSING_TABLE` / `matchesDriverError` / `isMissingTableError`)\n- `packages/metadata/src/loaders/database-loader.ts:307-312`(「从 1 开始编号」的消费点)、`packages/metadata/src/errors.ts:50`(再导出)\n- #6035 / PR #6346(analytics 面的同族修复,含 13 条措辞语料的量化)、#5352(REST 面先例)、#5717(第二个 message 嗅探器)\n\n由 #6035 的执行座位在 PR #6346 落地过程中发现并记录,未认领。\n"
+}

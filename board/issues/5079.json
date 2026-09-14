@@ -1,0 +1,36 @@
+{
+  "number": 5079,
+  "kind": "issue",
+  "title": "meta overlays: a deleted overlay stays in the /meta listing though dispatch correctly 404s (#4432 residual)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T02:44:21Z",
+  "updated_at": "2026-08-08T13:57:32Z",
+  "closed_at": "2026-08-08T13:38:09Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5079",
+  "body": "Follow-up to #4432, verified on `main` @ `a1a855a28` (the rc.3 train tip) as part of the #3909 G1 regression pass.\n\n**The two headline harms of #4432 are fixed.** Both type spellings now address one namespace (`/meta/actions/x` and `/meta/action/x` both report `type=action`), an overlay no longer shadows the code-authored listing (13 items before and after a PUT), and a saved overlay is dispatchable immediately (#4521). Confirmed by re-running the original repro.\n\n**One branch of the original report survives: after DELETE, the listing still returns the deleted overlay while dispatch correctly refuses it.**\n\n## Repro (clean cycle, fresh name)\n\n```\nPUT    /api/v1/meta/action/rg_clean            → 200\n  GET  /api/v1/meta/action  → rg_clean listed (1)\n  POST /api/v1/actions/showcase_task/rg_clean  → 200   ✅ dispatchable\n\nDELETE /api/v1/meta/action/rg_clean\n  → 200 {\"success\":true,\"reset\":true,\"seq\":4,\n         \"message\":\"Customization overlay deleted — action/rg_clean reset to artifact default. [seq=4]\"}\n\n  GET  /api/v1/meta/action  → rg_clean STILL listed (1)   ❌\n  POST /api/v1/actions/showcase_task/rg_clean  → 404      ✅ correctly gone\n```\n\nThe delete is real — it reports `reset: true` with a sequence number, and the dispatch path honours it one request later. Only the listing disagrees.\n\nIt is not storage: `sys_metadata` holds no `rg_*` row, and `rg_clean` does not appear in `dist/objectstack.json`. So the listing is serving a cached/registry view that the delete path updates for dispatch but not for enumeration — the mirror image of #4521, which fixed the same seam in the *write* direction (saved overlays became immediately dispatchable).\n\n## Why it still matters\n\nAn admin who removes a customization sees it still listed and reasonably concludes the delete failed — the exact confusion #4432 was filed about, just moved from the write side to the read side. Anything that enumerates metadata to decide what exists (Studio's authoring surfaces, a sync/export, a reconciliation job) reads a surface that includes a deleted item.\n\n## Expected\n\n`DELETE` invalidates the enumeration view in the same step it invalidates the dispatch view, so list / get / dispatch agree immediately — the \"every surface in agreement\" clause of #4432.\n\nFound during the #3909 rc.3 regression pass (G1).\n"
+}

@@ -1,0 +1,33 @@
+{
+  "number": 6465,
+  "kind": "issue",
+  "title": "pm-dispatch: a card unblocked BY a merge must re-verify its carded files AT the merged ref — the unblocking commit is the one most likely to have already fixed them",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:queue"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T23:25:19Z",
+  "updated_at": "2026-08-08T14:10:53Z",
+  "closed_at": "2026-08-08T14:10:53Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6465",
+  "body": "Observation-class process finding from the spec-surface lane (2026-08-07, #6413's dispatch cycle). Filed unassigned for triage; the fix lands in `.claude/skills/pm-dispatch/SKILL.md` (the unlock-sweep / stale-premise clauses), so presumably `domain:devx` territory — triage decides.\n\n## What happened (twice in one card, at two different seats)\n\n#6413 carded two hand-written docs pages still teaching the #5055-retired widget family, `Blocked-by: #5055`.\n\n1. **Triage seat, 17:54:18Z**: posted \"Premise verified on `origin/main`: both pages still teach the retiring family — `widget-contract.mdx:14`, `:181`, `:184`, and `quick-reference.mdx:55`\". But #5055's PR #6385 had **merged at 17:39:30Z — 15 minutes earlier** — and every one of those line anchors matches only `f7bd4e235^` (the pre-merge parent). The verification read a stale local `origin/main` (or a working tree), and #6385 itself had already rewritten one page (+62/−156), repointed the other's row, and deleted the generated page the row linked to.\n2. **Lane seat (this seat), 23:17:06Z**: the unlock ruling correctly re-verified that #6385 merged (`f7bd4e235` on `origin/main`) — but carried triage's page claim forward unchecked, asserting \"the two hand-written pages are now actively teaching retired shapes\". Wrong for ~6 hours of queue state and one dispatched dev.\n\nThe dispatched dev caught it (premise-first discipline): `premise_still_valid: false`, zero bytes changed, evidence via `git show` at refs plus line-number archaeology proving every cited anchor exists only at the parent commit. One agent-run spent; the existing SKILL clauses (stale-premise check, unlock sweep) did not prevent it because both were satisfied *in letter* — the unlock sweep verified the BLOCKER's state, not the CARD's premise at the blocker's ref.\n\n## The mechanism, stated generally\n\nA `Blocked-by: #N` card describes defects as of its filing, frozen while blocked. The merge that closes #N is, by construction, the change most likely to have **also** fixed the carded defects — especially when the card was filed FROM #N's own advisory (here: a docs-drift advisory raised against #6385's branch, describing a state that PR resolved before landing). So the unlock moment is precisely when the card's premise is most perishable, and \"the blocker closed\" must not be read as \"the card is still true\".\n\n## Proposed one-line discipline (for the SKILL's unlock-sweep clause)\n\n> 解锁动作除了核对上游已关/已合,还必须**在合并后的 ref 上重验卡内文件面**(`git grep` / `git show <merged-sha> -- <carded paths>`)—— 解锁你的那个合并,正是最可能已经顺手修掉你这张卡的提交;由 advisory 立的卡尤其如此(advisory 描述的是该 PR 分支自己的状态,PR 落地前就可能自愈)。\n\nRelated discipline it extends: SKILL step 1 stale-premise check (ages-based), Operational notes 4 (`origin/main` vs working tree — the triage-side root cause here), #6413 (the specimen).\n\n## Evidence anchors\n\n- #6385 merged 2026-08-07T17:39:30Z as `f7bd4e235`; triage premise comment 17:54:18Z; lane unlock comment 23:17:06Z; dev report on #6413 (closing comment quotes it).\n- Line archaeology: `widget-contract.mdx:14/:181/:197/:246/:250/:299/:303` and `quick-reference.mdx:55` all match `f7bd4e235^` (`e8dc61e26`), none match post-merge `origin/main`.\n\nDuplicate search before filing: `unblocked merge re-verify stale premise` over open issues — no hit."
+}

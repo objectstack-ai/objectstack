@@ -1,0 +1,36 @@
+{
+  "number": 4614,
+  "kind": "issue",
+  "title": "spec: dashboard date filter 的 defaultValue 没有作者时校验 —— 拼错的预设名要到浏览器控制台才被发现",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:dispatched",
+    "target:v17"
+  ],
+  "assignees": [
+    "qq9340100"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-02T11:07:47Z",
+  "updated_at": "2026-08-08T09:16:29Z",
+  "closed_at": "2026-08-08T09:16:29Z",
+  "closed_by": {
+    "login": "qq9340100",
+    "id": 313832657,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4614",
+  "body": "越界发现,来自 objectui#3151 的实现(渲染器侧那一半已修)。**未认领,仅记录。**\n\n## 背景\n\n`GlobalFilterSchema.defaultValue` 是 `string | number | boolean`,对 `type: 'date' | 'dateRange'` 的 filter 而言,作者能写的字符串实际上只有两类合法值:\n\n1. 一个已知的日期区间**预设名**(`last_7_days`、`this_month`、…);\n2. 一个 **ISO 日期**(`2026-01-15`),或一个日期宏 token(`{today}`、`{7_days_ago}`)。\n\n第三类(既不是预设名也不是日期,通常就是拼错:`last_7_dayz`)在 spec 层是**完全合法**的 —— schema 只知道它是 string。\n\n## 现在发生什么\n\n- objectstack#4475:预设名那一半在 objectui#3150 修好之前会降级成等值比较,KPI 全为 0(`200 OK`,零行,没有任何信号)。\n- objectui#3151:拼错的值会降级成一个永不命中的等值比较,同样是 `200 OK` + 0。**已修**:`buildFilterCondition` 现在跳过该 filter 并 `console.warn` 点名 filter 与该值。\n\n## 为什么还值得单独立一条\n\nobjectui#3151 的修复是**运行时**的,只能给出一条 `console.warn`:\n\n- 只有打开 devtools 的人看得见 —— dashboard 照常渲染,只是不再过滤;\n- CI / publish 完全看不见:一份 AI 生成的 dashboard 元数据带着拼错的 `defaultValue` 可以一路发布上线,没有任何门拦它;\n- 它是**放宽**方向(跳过 = 不过滤)。这是三选一里对作者最友好的失败模式(数字会明显变化而不是变成 0),但它不是**拒绝**。\n\n按 Prime Directive #12(contract-first:在作者/发布时大声拒绝,而不是在消费端容忍),这类「只有两种合法拼法」的值应当在 spec 层就被钉死,而不是靠每个消费者各自宽容。这也正是 AI 写元数据最容易藏错的地方 —— 声明即强制,才不会让一个拼写错误在 13 个 widget 上安静地复制 13 遍。\n\n## 需要定夺的选项(维护者决定,不要直接实现)\n\n- **A. 在 `GlobalFilterSchema` 上做条件校验**:当 `type` 是 `date` / `dateRange` 时,`defaultValue` 必须匹配 `预设名枚举 | ISO 日期 | 日期宏 token`(`superRefine`)。\n  - 长期正确性:最强 —— 声明即强制,发布/解析时硬失败,错误在作者手上而不是在用户的 0 上。\n  - 代价:预设名清单目前住在 objectui 的 `PRESET_RANGES`,spec 要成为这份词汇表的唯一来源(日期宏 token 已经有 `DATE_MACRO_TOKENS` / `DATE_MACRO_PARAM_RE` 在 spec 里,可以复用);会拒绝掉存量里已有的拼错元数据(这正是意图,但要走 ADR-0087 的转换/迁移评估)。\n- **B. 只做 publish-gate lint**,schema 保持宽松。\n  - 代价:schema 与 lint 两处知识,容易漂移;`z.infer` 出来的类型仍然说「任意 string 都行」。\n- **C. 什么都不做**,只留 objectui 的运行时 `console.warn`。\n  - 代价:门槛完全落在「有人正好打开了 devtools」,AI 生成的元数据依旧可以带着拼写错误发布。\n\n倾向 **A**:两条判据同向 —— 长期架构上它把 filter 值的词汇表收进 spec 这一个契约里(消费端不必再各自宽容),AI 写元数据这条上它在作者时就硬拒绝而不是在渲染时静默降级。但它要动 spec 的公开契约(词汇表归属 + 存量元数据的处置),所以先立此条请维护者定夺,不在 objectui#3151 的 PR 里顺手做。\n\n## 关联\n\n- objectui#3151 —— 渲染器侧:未知值跳过 + 警告(本条的运行时对应物)\n- objectui#3150 / objectstack#4475 —— 预设名那一半\n- objectstack#4482 / #3909 —— v17 验收汇总\n"
+}

@@ -1,0 +1,37 @@
+{
+  "number": 5742,
+  "kind": "issue",
+  "title": "`git stash` is repo-GLOBAL across worktrees — two parallel agents popped each other's stashes today; AGENTS.md's worktree discipline never warns about it",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:devx",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T03:25:07Z",
+  "updated_at": "2026-08-08T08:15:09Z",
+  "closed_at": "2026-08-08T08:15:09Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5742",
+  "body": "Found while working objectstack#5733 (objectui PR objectstack-ai/objectui#3429). Out of that task's file fence (it is an `AGENTS.md` / process defect, not `packages/plugin-detail` code), so filed rather than fixed there.\n\n## What happened, concretely\n\n`AGENTS.md` Prime Directive #11 and both `CLAUDE.md` files sell the per-task worktree as **physical isolation**: \"共享的 main checkout 不是可用退路 … 一个任务一个 git worktree 做物理隔离\". A `PreToolUse` hook mechanically enforces it. The isolation is real for the **working tree** and for **HEAD**.\n\nIt is NOT real for the stash. `refs/stash` and its reflog live in the **common** git dir (`/home/user/objectui/.git`), shared by every linked worktree. `git stash push` from one worktree pushes onto the same stack every other worktree pops from.\n\nToday, in one container, two agents ran the standard reverse-verification move — \"stash the source change, keep the new tests, re-run, confirm the predicted direction\" — and interleaved:\n\n1. Agent A (issue 5733, `packages/plugin-detail`) `git stash push` — becomes `stash@{0}`.\n2. Agent B (issue 3422, `packages/fields`) `git stash push` — becomes `stash@{0}`; A's is pushed down to `stash@{1}`.\n3. Agent A `git stash pop` — pops **B's** entry. A's worktree gains `packages/fields/src/widgets/RecordPickerDialog.tsx`, a file entirely outside A's fence, and B's stash entry is dropped.\n4. B pops symmetrically and gains A's two `packages/plugin-detail` files.\n\nObserved state after step 4, from A's worktree:\n\n```\n$ git status --porcelain\n M packages/fields/src/widgets/RecordPickerDialog.tsx    <-- not mine\n?? packages/plugin-detail/src/__tests__/…                <-- mine\n\n$ git stash list\n                                                         <-- EMPTY: refs/stash deleted,\n                                                             its reflog gone with it\n```\n\nBoth agents' changes were still recoverable only as **unreachable commits** (`git stash pop` reports the dropped SHA; A's was recovered via `git update-ref refs/recovered/… SHA`, and both agents' work landed intact). But recovery depended on noticing, and on the dropped SHA still being in scrollback — `refs/stash` and `logs/refs/stash` are both gone once the stack empties, so `git reflog refs/stash` returns `fatal: ambiguous argument`. A `git gc` between drop and rescue would have made it permanent.\n\n## Why this is worse than it looks\n\n- **It is silent.** `git stash pop` succeeded and printed a normal \"Dropped refs/stash@{0}\" line. Nothing says the entry was not yours.\n- **It lands foreign files inside your fence.** An agent that then runs `git add -A` (already forbidden, but this is exactly the trap that rule guards) commits another agent's half-finished work into its own PR.\n- **It hits the one workflow we ask every dev agent to run.** The dispatch template's reverse verification (\"revert the fix and watch the diagnostics\") makes stash-then-pop the *default* move, so the collision window opens on nearly every task, and widens with parallelism.\n- **The `PreToolUse` hook cannot see it.** The hook checks the *edited file's* repo/worktree. `git stash` is a Bash call that mutates a shared ref; nothing guards it.\n\n## Suggested direction (not implemented here)\n\nCheapest correct fix is documentation plus a safer recipe, in `AGENTS.md` (objectstack + objectui + cloud) next to the worktree rule:\n\n- State plainly that `refs/stash` is shared across worktrees and that `git stash push` / `pop` are **not** worktree-local.\n- Give the collision-free replacement for reverse verification. Any of these avoid the shared stack entirely:\n  - `git diff -- path1 path2 > /tmp/mine.patch && git apply -R /tmp/mine.patch` … then `git apply /tmp/mine.patch` to restore.\n  - `git stash push --staged` is no better; the stack is still shared. Prefer a **patch file** or a throwaway commit (`git commit`, verify, `git reset --soft HEAD~1`).\n  - Simplest for a small change: just re-apply the edit by hand.\n- If a mechanical guard is wanted, `git config --worktree` cannot relocate `refs/stash`; a wrapper or a `PreToolUse` matcher on `Bash(git stash*)` that refuses the command in a linked worktree would be the enforcement point.\n\nI have deliberately made no change to any `AGENTS.md` — that is outside my task's fence and the wording should be the maintainer's call.\n\n## Repro\n\nTwo linked worktrees of the same repo; in each, modify a different file, then `git stash push` in worktree 1, `git stash push` in worktree 2, `git stash pop` in worktree 1. Worktree 1 receives worktree 2's changes.\n"
+}

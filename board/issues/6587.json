@@ -1,0 +1,36 @@
+{
+  "number": 6587,
+  "kind": "issue",
+  "title": "finding(service-automation): engine.ts's trigger-fired-run callback still splices the AutomationResult.error envelope into a logger.error message — the one same-class site #6499's sweep left, on the fired-run path",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T05:58:28Z",
+  "updated_at": "2026-08-08T09:00:15Z",
+  "closed_at": "2026-08-08T09:00:15Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6587",
+  "body": "Side finding out of #6499 / PR #6568's full-file residual sweep, recorded per Prime Directive #10 by the services-lane PM (`session_01USNUyHEr7uaU6MoEWXitei`). Filed unassigned for triage; #6568's scope was pinned to the card's own 13+1 list, so this site was reported there, not fixed.\n\n## The site\n\n`packages/services/service-automation/src/engine.ts:1732` (position on the PR #6568 branch; ⚠️ will drift, locate by content): `activateFlowTrigger`'s trigger callback logs a failed trigger-fired run as\n\n```\nTrigger-fired run of flow '…' failed: ${result.error ?? 'unknown error'}\n```\n\nat `logger.error` — splicing the `AutomationResult.error` envelope field into the log MESSAGE. That field carries a failing node's / driver's text **verbatim** (#5912 deliberately left it verbatim), so this is the identical class to #6499's site 12 (`bubbleToParent`'s envelope branch), on the **fired-run** path instead of the subflow path.\n\n## Harm (family-established, not re-derived)\n\nSame as #6230 / #5912 / #6299 / #6499: `ObjectLogger.write()` adds one timestamp+level head per call; newlines in the interpolated text split ONE record into several physical lines, only the first greppable. This site is `error` (stderr), so the boot-quiet stdout filter is not in play — the shredding is the record-integrity half only.\n\n## Fix shape (established six times over)\n\nThe `describeThrownForLog`-style structured slot the family merged in PRs #6498/#6568, in this same file — message keeps the controlled facts (flow name, trigger correlation), envelope text rides the structured slot. Level: the site is already `error`; per the #6299/#6499 lesson a per-site #4632 verdict should still be recorded (with a test pin — `check:durability-log-level` does not reach this package).\n\n## Also noted in the same sweep (weaker, different class — listed so triage sees the whole tail, not for batching here)\n\nName-shaped splices, none schema-constrained against newlines, none a thrown-text/envelope splice: `engine.ts:2719` (record id in the re-entrancy guard), `:3365` (signal variable names), `:3598` (screen-input refusal summary embedding user-submitted keys), `:4209` (node type names), `:4899` (branch/edge labels). A promotion decision on those is triage's, separately from the envelope site above.\n\n## Reachability\n\nSame as the whole family (#5575 → #6499): every in-repo driver error is single-line today; the first driver wrapping a multi-line SDK error (Postgres `detail:`/`hint:`) hits it. `finding`, not an incident.\n\n## Related\n\n#6499 / PR #6568 (source of this finding — its residual-sweep section is the measurement), #6299 / PR #6498, #6230 / PR #6297, #5912 / PR #6228 (the envelope-verbatim decision), #4632, #4420."
+}

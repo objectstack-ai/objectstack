@@ -1,0 +1,36 @@
+{
+  "number": 6686,
+  "kind": "issue",
+  "title": "os-dev 定义未钉模型,继承 PM 会话模型 —— 一次配额耗尽同时打死一整批 dev(实测 4/4)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched",
+    "tooling"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T12:46:06Z",
+  "updated_at": "2026-08-08T13:25:05Z",
+  "closed_at": "2026-08-08T13:25:05Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6686",
+  "body": "由 `domain:spec-tooling` 座位在一次实际事故后立单(维护者当场指示立卡)。**未认领**,交分诊定级。\n\n## 事实\n\n`.claude/agents/os-dev.md` 的 frontmatter **只有 `name` 与 `description` 两个字段,没有 `model:`**:\n\n```yaml\n---\nname: os-dev\ndescription: >\n  Developer agent for exactly ONE GitHub issue, dispatched by the /pm-dispatch\n  PM loop. …\n---\n```\n\n按 Agent 工具的语义,未指定 `model` 时 **agent 继承父会话(即 PM 座位)的模型**。于是「dev 跑在什么模型上」这件事,取决于**派单那一刻 PM 会话恰好挂在哪个模型**,而不是任何一处写下来的约定。\n\n## 事故实测(2026-08-08 12:3xZ,本座位)\n\n本座位在会话模型为 Fable 5 时并行派出 4 个 dev(#6629 / #6585 / #6566 / #6569)。随后 **4 个全部**以同一条 API 错误死亡:\n\n```\nAgent terminated early due to an API error:\nYou've reached your Fable 5 limit.\n```\n\n死亡分布在各自不同的阶段,说明这不是任务本身的问题,而是**共享配额被同一批次一次性耗尽**:\n\n| 单 | 死亡点 | 工作树残留 |\n|---|---|---|\n| #6569 | 探索阶段 | 干净 |\n| #6585 | 语料扫描后进入实现 | `M validate-expressions.ts` + `M …test.ts` |\n| #6629 | 「准备跑门禁」前 | `M validate-page-field-bindings.ts` + **新建**一个测试文件 |\n| #6566 | 「准备验证」前 | `M check-adr-0087-registration.mjs` + `M objectui-changeset-digest.mjs` |\n\n**四个工作树里有三个躺着未提交、未经任何门禁验证的成果**,全部 0 commits ahead。恢复不是「重跑一遍」那么简单:重派时必须让接手的 dev 先读既有 diff、判断优劣、明确交代继承还是弃用 —— 否则要么白扔工作,要么把未验证的改动当成已验证的继承下去。\n\n## 为什么这是配置缺陷而不只是运气不好\n\n1. **失败是批量的,不是单点的。** 同一批次共享同一配额,所以撞墙时**整批一起死**,而不是一个一个降级。批次越大,损失越大。\n2. **它对派单方不可见。** PM 的派单前置检查(落点提交、竞态、文件不相交)没有一条会暴露「这批 dev 会跑在什么模型上」——本座位派了十几个 dev 都没显式传过 `model`,因为在会话模型是 Opus 时这**完全看不出问题**。\n3. **它把一个进程属性绑在了偶然状态上。** dev 用什么模型,应该是 dev 这个角色的属性,不该由「哪个 PM 在什么时候派的它」决定。\n\n## 建议的修法(不预设,交分诊/维护者)\n\n- **最小面**:在 `.claude/agents/os-dev.md` frontmatter 加 `model: opus`(或维护者认可的其它固定值),让它不再继承会话模型。⚠️ 需确认该 frontmatter 键在本仓的 agent 加载器里确实被读取 —— 本单**没有**验证过这一点,只验证了「当前没有这个键」与「继承行为确实发生了」。\n- **配套**:`/pm-dispatch` 侧是否也要求派单显式传 `model` 作为双保险(定义与调用两处一致,任一失效另一处仍成立),由分诊判断值不值这个重复。\n- **相邻但不同的面,刻意不并入**:批次大小与配额的关系(4 个并行是否本身过激)是排程策略问题,不是配置问题;若要处理请另立。\n\n## 本座位已做的临时处置\n\n四单已全部在 Opus 上重派(派单时**显式传 `model`**),并在每份重派单里写明了工作树残留的处置方式。这是绕开而非修复 —— 它依赖 PM 每次都记得传参,正是本单想消除的那种依赖。\n\n## 关联\n\n事故批次:#6629、#6585、#6566、#6569。座位贴:#6018(纪律 ㉔/㉕/㉖ 所在处)。"
+}

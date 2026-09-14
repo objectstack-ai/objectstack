@@ -1,0 +1,33 @@
+{
+  "number": 18015,
+  "kind": "pull_request",
+  "title": "feat(pm): flag decision-box cards with open downstream dependents",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/m",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-13T11:51:09Z",
+  "updated_at": "2026-09-13T12:41:59Z",
+  "closed_at": "2026-09-13T12:41:58Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": "2026-09-13T12:41:58Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/18015",
+  "body": "Fixes #17968\n\nStanding triage instruction ④ (2026-08-11 maintainer ruling) asks every round-closing brief to flag the decision cards somebody is waiting on. Verbatim, and quoted verbatim in the code:\n\n> **④(决策箱依赖旗标,2026-08-11 维护者裁决)**:每轮收尾简报的决策箱段须标注带有 open 下游依赖的决策卡(判据:**任一 open 卡的 `Blocked-by:` 行指向它**;读时派生,⛔ 不打优先级标签)。\n\nThe card measured that unrunnable on the triage seat's own tool surface: MCP `search_issues` is semantic matching, so a literal `Blocked-by:` needle returns 0 against a board where an open card's first body line is exactly that string. It offers routes A / B / C and picks none.\n\nThis is route A over a reader the repo already has — ⛔ no new channel, no charter text, no gate on the line, no objectui edit. `scripts/pm/check-half-states.mjs` already builds the `Blocked-by:` reverse index for H14 across BOTH channels (every open card's body; comments for `pm:blocked` / `pm:blocking` cards whose body is clean), so ④ is one `Map.get` per decision card and costs the patrol no request.\n\n## What lands\n\n- A rendered inventory SECTION beside the H17 trigger-file index — never a finding, never a half-state row, never counted in the half-state total, never a label — with one line per open `needs-user-decision` card that an open card's `Blocked-by:` line names, listing its waiters (capped by the existing `BLOCKING_DEPENDENT_LIST_CAP`, overflow counted).\n- Three lines that render on every run, findings or none: the count PAIR (`N of M`, so a quiet inbox reads differently from an empty one), a declared NOT-MEASURED population equal to **H4's own count** of open `pm:blocked` cards with no machine-readable line in either channel (the loss objectui#6653 measured at 17 of 24) — counted off the H4 rows the sweep emitted, one computation with two readers — and the section's own population scope, so a brief can cite both numbers or write NOT MEASURED honestly.\n- The card's reading three — 「`list_issues` 只能按 label / state / since 过滤,不返回正文检索」 — is true of that MCP tool and FALSE of this script's REST reader. Stated once in the docblock so the next reader does not re-file the card.\n- The H17 docblock's claim to be \"the only thing in this file that can never produce a finding\" is corrected to \"one of the TWO\" in the same edit: this section is the other one.\n\n## Acceptance\n\n- Heading phrase `Decision-box dependency flags` in `check-half-states.mjs`: `git grep -c` **0 → 1**. Lit control `On-hold trigger-file index (H17)` still hits, **4 → 4**.\n- H4 / H14 machinery byte-unchanged — md5 of each function body, base `c45ea8c3` vs HEAD, identical on both sides: `h4BlockedNoBlockedBy` `1d13e91922b8`, `h14BlockingCacheIncoherent` `7fbcf7210da9`, `buildBlockingIndex` `9a9e68b027de`, `blockedByTargets` `eb04b7cd2dc6`, `needsBlockedByComments` `e0aad3851d31`, `renderTriggerIndex` `6848a4809bc0`.\n- Self-test cases **3765 → 3806** (41 new: the five batteries the card asked for, plus posture, scope, placement and budget). `node scripts/pm/check-half-states.mjs --self-test` exits **0**.\n- Ablation, one-off and restored: deleting the NOT-MEASURED line from the renderer turns **exactly the three `④ loss:` cases red**, exit 1 — the predicted direction. Restored from `HEAD`; blob back to `f48453c67d6c`, `git diff HEAD` empty, self-test green again at 3806.\n- Gates: `node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` derived **41** commands at `8ff5d429`; **all 41 exit 0**, among them `check:nul-bytes`, `check:refd-timer-probe`, `check:whole-set-label-write`, `check:pm-half-states`, `check:self-test-wired`, `check:commit-card-trailers`, `check:pm-dispatch-gates`. Reconciled: `--ran` with a record carrying every exit code returns 「41 derived, 41 run, 0 NOT-MEASURED, 0 UNRUN」, exit 0. The 47 artifact-roster, 11 wide-population, 10 pending-changeset and 1 path-scheduled families dispatch-gates names as outside that total are left to CI.\n- Still read-only in this mode: no GitHub write is added anywhere, and `check:whole-set-label-write` is green.\n\n`scripts/pm/**` publishes nothing ⇒ `skip-changeset` label, no changeset file.\n\n## Acceptance notes\n\n- noted, not filed: `pnpm check:pm-dispatch-gates` needs roughly 25 minutes of wall clock in this shared container — past a 300s and a 540s foreground cap, though it exits 0 with 1682 cases passing. The box was running parallel agents, so that is a cost reading under contention rather than a reproducible defect; every dev agent whose diff touches `scripts/**` derives this family.\n- noted, not filed: the dispatch premise scoped the H14 reverse index to the `pm:blocked` ∪ `pm:blocking` population. Measured on the tree, the BODY channel is wider — the unscoped open-issue listing, i.e. every open card — and only the COMMENT channel is label-gated. The section's scope line states the real shape rather than the narrower premise.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01DAcomhvR9kKizeYgg89Vo8)_\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

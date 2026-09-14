@@ -1,0 +1,35 @@
+{
+  "number": 6548,
+  "kind": "issue",
+  "title": "register() claims the announcement follows the write into every writable loader, but no test fixture can observe that half",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T04:01:46Z",
+  "updated_at": "2026-08-08T07:26:19Z",
+  "closed_at": "2026-08-08T07:26:19Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6548",
+  "body": "Found while doing #6043 (PR #6547). Filed separately per PD #10. Observation-class: no user-visible defect today — the gap is in coverage, not behavior.\n\n## Fact\n\n`register()` in `packages/metadata/src/metadata-manager.ts` documents its announcement ordering as covering two writes:\n\n```\n// Announce last, once the write has landed in the registry and every\n// writable loader — a subscriber that re-reads on the event must not\n// race ahead of the data it is meant to observe.\n```\n\n`register-notifies-watchers.test.ts` is the file that pins this contract. After PR #6547 it asserts the **registry** half properly (synchronously, inside the watcher callback, at broadcast time). The **writable-loader** half is not asserted anywhere, and cannot be from that file as it stands:\n\n- the fixture's only loader is `MemoryLoader`, whose contract declares `protocol: 'memory:'`;\n- `register()`'s persistence loop is gated on `loader.contract.protocol !== 'datasource:' || !loader.contract.capabilities.write` and `continue`s otherwise;\n- so `register()` never saves to any loader in that file, and moving the announcement across the save loop changes nothing observable there.\n\n## Measured\n\nHoisting the `notifyWatchers(...)` block above the realtime publish and the writable-loader save loop — leaving the registry write in place — keeps the whole file green, both before and after PR #6547:\n\n```\n Test Files  1 passed (1)\n      Tests  15 passed (15)\n```\n\nThat hoist violates the ordering the comment declares. Nothing reports it.\n\n## Why this is observation-class rather than a defect\n\nA subscriber that re-reads via `get()` resolves against the in-memory registry, which outranks every loader, so it never observes the loader write — the half that IS pinned is the half consumers actually depend on. The unpinned half would only matter to a consumer reading through a loader directly, bypassing the registry, which nothing does today.\n\n## Shape of the fix (not chosen)\n\nNeeds a writable `datasource:` loader fixture whose `save()` records the store's state, then a synchronous peek at that store inside the watcher callback — the same shape #6043 used for the registry. `metadata-manager-unregister-invalidate-order.test.ts` already builds a writable `datasource:` loader backed by a real store and could be the donor.\n\nAlternatively, if the loader half is deliberately NOT part of the guarantee, the comment on `register()` should be narrowed to say so — declared = enforced, in either direction.\n\n## Related\n\n#6043 (where this surfaced), #3112 (origin of the test file), PR #6547.\n"
+}

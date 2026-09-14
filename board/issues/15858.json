@@ -14,7 +14,6 @@
     "bug",
     "documentation",
     "domain:cli",
-    "finding",
     "pm:blocked",
     "priority:p3"
   ],
@@ -22,7 +21,7 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-09-05T11:23:45Z",
-  "updated_at": "2026-09-07T09:14:14Z",
+  "updated_at": "2026-09-13T11:19:25Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,

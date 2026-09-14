@@ -1,0 +1,34 @@
+{
+  "number": 6742,
+  "kind": "pull_request",
+  "title": "docs(agents): split the language rule — Chinese for maintainer chat, English on GitHub (#6692)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T13:53:37Z",
+  "updated_at": "2026-08-08T14:41:07Z",
+  "closed_at": "2026-08-08T14:41:05Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": "2026-08-08T14:41:05Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/6742",
+  "body": "Fixes objectstack-ai/objectstack#6692\n\nDocumentation only, two files. A dev agent was being told both languages at once: the two in-repo files it is instructed to treat as binding said Chinese for PR/issue prose, while every dispatch prompt said English. This lands the maintainer ruling of 2026-08-08 in the files themselves, so the next agent reads one rule instead of picking between two.\n\n## The ruling this implements\n\nQuoted verbatim and untranslated, as recorded on #6692:\n\n> issue 和 PR 必须用英文，在 claude code 中和我讨论可以用中文。\n\nEnglish for GitHub artifacts (issue and PR titles, bodies, comments); Chinese is fine for talking to the maintainer in Claude Code. That resolves the card in favour of the **split** it identified: the language for maintainer conversation and the language for repo artifacts are separable things.\n\n## What changed\n\n**1. `AGENTS.md` §Communication** — the old first bullet merged the two rules into one sentence, and its parenthetical explicitly assigned 「PR/issue 讨论中的解释性文字」 to Chinese. That clause is exactly what the ruling overturns. The section is now split:\n\n- maintainer conversation in Claude Code (chat replies, round reports) → Chinese;\n- GitHub artifacts — issue and PR titles, bodies, comments → English, with the ruling quoted verbatim and dated at the point of use, so the next reader finds the authority instead of inheriting it second-hand;\n- quoted Chinese rulings stay **verbatim and untranslated** inside an English body — rewriting a quoted ruling is rewriting the ruling. The quote in that same bullet is an instance of its own rule.\n\n**2. `.claude/agents/os-dev.md`, \"Definition of done\"** — the PR bullet said \"explanatory prose in **Chinese** per repo convention\". That sentence is now false, so it says English, names the artifacts it covers, points at AGENTS.md §Communication for the authority, and carries the verbatim-quote rule with it. The rest of the bullet (the session-URL attribution footer) is untouched.\n\n## Neighbouring sentence fixed in the same pass\n\nThe section's last bullet ends 「不要因**本条**而改写」 — \"do not rewrite because of *this rule*\", written when the section held one language rule. With the section now holding several it reads as pointing at only the previous bullet, so it becomes 「不要因**本节**而改写」. Its substance is unchanged: code, identifiers, commit messages and ADR/doc prose keep their existing conventions. The ruling names issue and PR; it does not reach commit messages, and this PR does not extend it there.\n\n## Why the citation is part of the deliverable\n\nThe contradiction survived because the English policy was propagated through dispatch prompts that no one could trace to a maintainer statement — the PM seat said so plainly on the card. The measured cost was two full PR-body rewrites in one afternoon and a corpus that went both ways on the same day under the same identity (#6556 Chinese, #6691 English). A dispatch prompt is written fresh per card; `AGENTS.md` and the os-dev template are read once by every agent, which is why the rule now lives there with its source attached.\n\n## Verification\n\nPremise re-checked against `origin/main` before editing: both stale sentences were still present (`AGENTS.md:11`, `.claude/agents/os-dev.md:180`), despite the same-day touches from #6632 / #6648 / #6691. Anchors were located by content, not by line number, and re-verified after `git merge origin/main` — no conflict with #6586, which had not landed on that file.\n\nGate list enumerated from `.github/workflows/lint.yml` and run locally after `git commit`, all green:\n\n```text\ncheck:nul-bytes            OK (6258 tracked text files, no raw ASCII control bytes)\ncheck:doc-authoring        365 files clean\ncheck:docs-audit-scope     178 hand-written docs in sync\ncheck:role-word            OK (44 baselined files, no new occurrences)\ncheck:quick-reference-counts  13 sections match their tables\ncheck:adr-anchors          OK\ncheck:skill-frame-sync     4 copies isomorphic across 3 files; 3 axes\ncheck:skill-frame-freshness  frame current with origin/main\ncheck:skill-compatibility  11 SKILL.md reconciled\n```\n\n`check:skill-frame-sync` matters here because it reads `.claude/agents/os-dev.md`; the edit is in \"Definition of done\", not in the decision frame, and the gate confirms the frame is untouched.\n\nThe quoted ruling was byte-checked after writing: full-width comma U+FF0C and full stop U+3002 preserved, `claude code` lower-case — verbatim, not normalized. Self-scan beyond the gate (`grep -naP '[\\x00-\\x08\\x0b\\x0c\\x0e-\\x1f\\x7f]'`) is clean on both files.\n\nNo changeset: this is the agent operating manual, it publishes nothing to npm and is invisible to users of the packages. `skip-changeset` applied as a union with the labels already on the PR.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01F8q5J1MQyocgtNspb15fSn)_"
+}

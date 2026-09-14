@@ -1,0 +1,35 @@
+{
+  "number": 6712,
+  "kind": "pull_request",
+  "title": "feat(spec,metadata-protocol,rest,client): 直挂面 `packages` / `datasources` 可发现,SDK 跟随通告的 base(#6633 · 路线 B)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T13:18:55Z",
+  "updated_at": "2026-08-08T13:53:34Z",
+  "closed_at": "2026-08-08T13:53:32Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": "2026-08-08T13:53:32Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/6712",
+  "body": "Fixes #6633\n\n按维护者 2026-08-08 裁定(路线 B,#6633 评论 5225249241;#6306 的前置卡)实施:方向 a + b + c 全取。跨席预派发声明已发且否决窗口开放(spec-surface 席 #6298 评论 5225247046;metadata 席 #6367 评论 5225247338),实施期间多次复读 #6633 评论,无任何席位异议。\n\n## 缺陷(全部实测,`origin/main` = `78f0be872` 复核;原始测量点 `e39dd66e7`)\n\n- 探针 C 案(mock fetch 驱动真实 `ObjectStackClient`):discovery 通告 `routes.packages: '/backend/api/v9/packages'` + `routes.datasources: '/backend/api/v9/datasources'` 时,`packages.list` 跟随(→ `/backend/api/v9/packages`),而 `external.listTables` 仍打 `/api/v1/datasources/pg_main/external/tables` —— client 五个 `external.*` 方法硬编码、无任何 discovery 机制。\n- rest 面从不通告 `routes.packages`:`getDiscovery()`(services 注册 `package` + `external-datasource` 时)routes 键实测仅 `['data','metadata']`;`registerDiscoveryEndpoints` 只 override `data`/`metadata`/`ui`/`mcp`/`auth`。已挂载而不通告,即 ADR-0076 D12「advertise everything mounted」缺失的另一半。\n\n## 四阶段(依赖序,每阶段一个 commit)\n\n1. **spec**(`d61072d85`):`ApiRoutesSchema` 新增 `datasources` 键(federation-admin 家族的 base)。**注意:`packages` 键在 `origin/main` 已存在**(`discovery.zod.ts` 既有声明),故 spec 阶段只需新增 `datasources` —— 与派发卡「gains a `packages` route key and a `datasources` route key」的表述相比,前者已成立,以现场为准。optional 语义同 `mcp`:缺席 = 未挂载。生成物(`authorable-surface/api.json`、`references/api/discovery.mdx`)经 `check:generated --fix` 再生。\n2. **metadata-protocol**(`37c1bd117`):`serviceToRouteKey` 增 `package: 'packages'`;路由值经新增的 `NON_SLOT_SERVICE_ROUTES` 小循环流入(`package` 不是 `CoreServiceName` slot,进 `SERVICE_CONFIG` 会重演已退役的 `graphql` 缺陷并伪造 `services` 可用性条目)。`datasources` 在本 builder **刻意不通告**——处置同 `mcp`(#5679):federation 挂载属于 REST 宿主,本 builder 看不见;dispatcher 宿主根本没有 `/datasources` 域,通告即 D12 禁止的「通告未挂载」。conformance 测试钉住两个方向。\n3. **rest**(`076f8365b`):`/discovery` 的 `routes.packages` / `routes.datasources` 是**已录制直挂路由的投影**(`RestServer.getDirectMountRouteBases()`,读的就是 registrar 挂载时迭代的那批数组,#5822)——通告与挂载同源派生,#6306 未来移 base 时通告**按构造**跟随,不需要再改这里。未挂载 ⇒ 不通告:无 `package` service 的 boot 会删掉 protocol 乐观通告的 `packages` 键。今天直挂 registrar 挂在 plugin 的 `versionedBase`(`/api/v1`)而非 `getApiBasePath()`,通告如实反映这一点(设 `apiPath` 的部署会通告 `/api/v1/...`——那正是路由真实所在;#6306 落地后两者一起移动)。\n4. **client**(`aff5f3c94`):五个 `external.*` 方法经 `getRoute('datasources')` 派生 base;未连接或服务端未通告时 fallback `/api/v1/datasources`,URL 与旧硬编码逐字节一致。`routeMap` 对声明键保持 TOTAL。`ScopedProjectClient` 无 `external.*` 副本(已核对),无第二份需要改。\n\n## 验收钉 —— mounted ⇒ advertised 奇偶钉\n\n`packages/rest/src/discovery-advertised-direct-mounts.parity.test.ts`:用与生产完全相同的组合(`RestServer.registerRoutes()` + `mountAndRecordDirectRoutes(...)`)boot 真实 rest 面到一张真实 handler 表,经该表读 `/discovery`,再断言通告的 `routes.packages` / `routes.datasources` URL 在**同一张表**里解析并应答。四个用例:默认 base、**非默认 base(`/backend/api/v9`,载荷用例:证明通告不再从 convention 二次推导)**、未挂载 ⇒ 不通告、scoped 挂载(environmentId 代入)。任何只动挂载或只动通告一侧的未来改动(含 #6306 移路由)在此必红——反向验证已实测(见下)。\n\nclient 侧三案:A(未连接 → `/api/v1/...` 逐字节不变,沿用既有 pin 测试)、B(已连接但无新键 → fallback 不变)、C(通告 rebased 键 → `packages.*` 与全部五个 `external.*` 一起跟随;五个断言合在一个用例,半修不可能保绿)。\n\n## 反向验证(预测先行,逐向实测 —— **全部在 merge `origin/main` 之后的合并结果上重跑**)\n\n回退方式:只 `git apply -R` 我自己那一阶段对该文件的 diff,main 期间对同文件的改动**保持在位**,故测量不被 main 的改动混淆(`protocol.ts`、`rest-server.ts` 在停机期间被 main 改过,变更区与我的区段无交叠)。每次测量后立即 `git checkout HEAD --` 还原,收尾已核 worktree 干净。\n\n| 回退 | 预测 | 实测 |\n|---|---|---|\n| client 阶段(恢复硬编码,保留新测试) | C 案红,首断言 `listTables` 收到 `/api/v1/...`;A/B 保绿(fallback 逐字节同,双向绿,不作为反向证据) | ✅ 1 failed / 158 passed,失败断言与预测逐字符一致 |\n| rest 阶段(恢复旧 `rest-server.ts`,保留奇偶钉) | 4/4 红,机理各异:默认 base 案红在 `datasources` undefined(`packages` 因 stage-2 的 `/api/v1/packages` 恰好同值——被掩盖的漂移);非默认 base 案红在 `'/api/v1/packages' ≠ '/backend/api/v9/packages'`(奇偶钉存在的意义);未挂载案红在 `datasources`;scoped 案红在未代入 | ✅ 4/4 红,四条失败信息与预测逐一对应 |\n| metadata-protocol 阶段 | `packages iff` 测试红(undefined);`datasources` 阴性钉双向绿(方向钉,排除出反向证据);rest 奇偶钉在此回退下**保绿**(stage 3 从录制挂载投影,不读 protocol 通告)——stage 2 的独立红通道只有本包 conformance 测试,如实申报 | ✅ 1 failed / 20 passed |\n| spec 阶段(恢复 `discovery.zod.ts`) | spec 自身 schema 测试红(`datasources` 被 strip → undefined);client typecheck 红(routeMap 多余属性)与 metadata-protocol `declaredRouteKeys` 红为**预测未实测**(避免为一次同义反复的 tsc 红做两轮全量 spec dist 重建;正向 typecheck 已在门禁跑) | ✅ 1 failed / 82 passed(实测半);另半预测未实测,如实申报 |\n\n## 与 `origin/main` 的合并(`d6d1a50be`)\n\n停机期间 main 前进约 3.7 小时。已 merge(无冲突),并按 AGENTS.md §9/§10/§11 处理:\n\n- **生成物 text-merge 陷阱实际发生**:`packages/spec/authorable-surface/api.json` 被文本合并,本分支较旧的副本吃掉了 main 新增的 `GetMetaItemLayeredResponse` / `GetMetaItemResponse` 键。已按 §11 从**合并后的源**重建 spec 并再生该产物(`46e82d44d`),现分支相对 main 的 delta 恰为我意图中的一行 `api/ApiRoutes:datasources`;pre-commit 的 `os-regen` 标记也已确认清除。\n- **重叠复核**:main 改过 `protocol.ts` / `rest-server.ts`,但变更区(rest ~2904/4354/4510,protocol ~28/1026/10163)与我的区段(rest ~3378 与 ~9200,protocol ~2768)无交叠,我的代码在合并后完好。\n- **合并前采集的绿一律作废**,下节全部为合并结果上的重跑。\n\n## 门禁(全部在合并结果上实跑)\n\n- turbo build:`70 successful, 70 total`。\n- 四包测试全绿:spec `345 files / 8832 tests`、metadata-protocol `58 / 629`、rest `69 / 1043`、client `21 / 271`。\n- `pnpm lint`(eslint 无输出)、`typecheck-spec`、`typecheck-client` 全绿。`@objectstack/rest` 与 `@objectstack/metadata-protocol` **不声明 `typecheck` 脚本**(二者是 DEBT 台账包),其 tsc 由 `check:type-check-debt` 复测——该门禁 **GATE_OK**,全仓无任何 DEBT/TEST_DEBT **上升**(rest TEST_DEBT 实测 152 < 记录 163,只有信息性「可下调」行,按 AGENTS.md 不欠记账)。\n- `lint.yml` 两个作业的 `check:*` 全家共 39 项 **GATE_OK / 0 GATE_FAIL**,含 `check:generated`(10 项生成物全部 up to date)、`check:route-envelope`、`check:error-code-casing`、`check:engine-double-contract`、`check:nul-bytes`、`check:type-check-coverage`、`check:adr-0087-registration`、`check:i18n{,-coverage}`、新增的 `check:kernel-hook-pairs` 等。ratchet 的 baseline 均已对齐 `d6d1a50`。\n\nchangeset 覆盖四包(spec/metadata-protocol/rest minor,client patch;无 breaking,故无需 ADR-0087 处置标记)。**本 PR 带 changeset,不适用 `skip-changeset` 标签。**\n\n## 备注\n\n- ADR-0076 D12 文档本身(「advertise everything mounted」半句未成文)按派发卡要求**不在本 PR 内改**,已在报告中列为 docs 跟进建议。\n- PD #10 发现:client 还有一整族绕过 `getRoute()` 的硬编码面(`email.send`、约 20 条 `cloud.environments.*`、`ScopedProjectClient` 的 scope 前缀)——单独立 issue(未认领),不在本卡四车道内。\n\n---\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_017uFVNMmTxLpmfQYiuKM1Yx\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_017uFVNMmTxLpmfQYiuKM1Yx)_"
+}

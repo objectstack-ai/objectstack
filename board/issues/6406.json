@@ -1,0 +1,34 @@
+{
+  "number": 6406,
+  "kind": "issue",
+  "title": "沙箱三件套(__txBegin)同样不 join ambient 事务 —— #6168 修好了回调面,VM 侧 ctx.api.transaction 仍在事务中再开事务",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T16:59:24Z",
+  "updated_at": "2026-08-08T09:45:48Z",
+  "closed_at": "2026-08-08T09:45:48Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6406",
+  "body": "发现于 #6168 的实施(PD #10 范围外发现,**未在该 PR 内修改**)。**未认领。**\n\n## 事实\n\n#6168 / PR #6403 给 `ScopedContext.transaction()`(回调式)补上了 ADR-0067 D2 的 ambient join。实施中实读发现:**QuickJS 沙箱面的 `ctx.api.transaction(fn)` 根本不走那个方法**,因此不在该修复的覆盖范围内。\n\n`packages/runtime/src/sandbox/quickjs-runner.ts:639-660` 里,VM 侧的 `ctx.api.transaction` 是一段 JS 糖,底下驱动三个 host leaf:`__txBegin` / `__txCommit` / `__txRollback`。`__txBegin`(`:566-579`)调的是离散三件套:\n\n```ts\nconst begin = apiTx?.beginTransaction;\nif (typeof begin === 'function') {\n  const r = await begin.call(apiTx) ?? null;\n  if (r) { txState.api = r.ctx; txState.handle = r.handle; }\n}\n```\n\n而 `ScopedContext.beginTransaction()`(`packages/objectql/src/engine.ts`,三件套区)与修复前的回调面一样,**没有 ambient 判定**:直接 `txDriver()` 再 `driver.beginTransaction()`。\n\n于是 #6168 描述的两条后果,在 VM 侧 body 上原样存在:\n\n1. 再要一条连接 —— 单连接池(knex/SQLite)上就是死锁;\n2. 内层由 `__txCommit` 自行 commit,写入**存活过外层回滚** —— 外层 `engine.transaction()` 回滚后,VM 里写的行仍在,无报错无日志。\n\n## 为什么不能顺手在 #6168 里一起修\n\n三件套**刻意**不用 ALS:body 跨很多 host event-loop turn 执行(deferred promise + pump),`setImmediate` 边界上 AsyncLocalStorage 不存活 —— 这是三件套存在的全部理由,`engine.ts` 的三件套 TSDoc 与 ADR-0119 的「declared LIMIT」段都写明了。所以 `__txBegin` 里直接 `txStore.getStore()` **未必读得到**外层 ambient(leaf 在 deferred 里跑,多半已不在那个 ALS 上下文里),不是加一个 if 就能了事。\n\n至少需要决定:\n\n- ambient 句柄在**哪一刻**捕获并显式穿进 `txState`(建 sandbox api 时?还是 hook dispatch 时?);\n- join 之后 `__txCommit` / `__txRollback` 必须**弃权**(不能 commit 自己不拥有的事务),`txState` 得带 `owned` 位;\n- body 显式 rollback 一个 joined 事务时的语义(标记外层必回滚?还是报错?)—— 这一条是契约级决定,不是实现细节。\n\n这些都超出 #6168 的范围(该单锁定回调面),故另开。\n\n## 可达性(诚实说明)\n\n与 #6168 同款,且更窄一层:需要「沙箱 hook/action body 显式调 `ctx.api.transaction()`」+「该 body 由一次 `engine.transaction()` 触发」+「该 body 走 QuickJS 而非进程内」三者同时成立。示例 app 里没有可指的用例。方向上是持久性一类,不是功能一类:失败时看起来一切正常,回滚后留下不该留的行。\n\n注:`quickjs-runner.ts:567` 已挡住 body **自己**的嵌套(`nested ctx.api.transaction is not supported`),但那只看 `txState.open`,看不见宿主侧的外层事务。\n\n## 与 #6167 的关系\n\n不是同一件事,别合并。#6167 是**同源校验对不可归属句柄弃权**(`transactionCoversDriverFor` 判不了引擎没开过的句柄);本单是**嵌套时不 join**。两者都落在三件套这片面上,#6167 的收口方向(让句柄属主在 `IDataDriver` 上可查)不解决本单,反之亦然。\n\nRefs:#6168(回调面已修,PR #6403)、#6167、ADR-0067 D2、ADR-0119 D1 的 declared-LIMIT 段、#5696(`owned` 信号)。\n"
+}
