@@ -19,10 +19,40 @@ function makeFakeEngine() {
     const t = tables.get(table) ?? [];
     return t.find((r) => r.id === id);
   }
+  /**
+   * [#17612] One comparison, NULL-safe like SQL: a row with no value satisfies
+   * `null` and nothing else — `NULL <= x` is NULL, never true. Same reading the
+   * sibling fake in `job-queue-retention.test.ts` takes for `$lt`.
+   */
+  function compare(cell: any, v: any): boolean {
+    if (v !== null && typeof v === 'object' && !Array.isArray(v)) {
+      for (const [op, target] of Object.entries(v)) {
+        switch (op) {
+          case '$lte': if (cell == null || !(String(cell) <= String(target))) return false; break;
+          case '$lt': if (cell == null || !(String(cell) < String(target))) return false; break;
+          case '$ne': if (cell === target) return false; break;
+          case '$in': if (!(target as unknown[]).includes(cell)) return false; break;
+          default: throw new Error(`fake driver: unsupported operator ${op}`);
+        }
+      }
+      return true;
+    }
+    // `where: { k: null }` is IS NULL — an absent column and an explicit null
+    // are the same absence, which `row[k] !== v` could not say.
+    if (v === null) return cell == null;
+    return cell === v;
+  }
   function matches(row: any, where: Record<string, any>): boolean {
     for (const [k, v] of Object.entries(where)) {
+      // [#17612] `$or` is the one top-level combinator the claim path uses; any
+      // OTHER `$` key is still a loud failure rather than a silent pass, which
+      // is the whole point of a double that cannot be looser than the engine.
+      if (k === '$or') {
+        if (!(v as Array<Record<string, any>>).some((leg) => matches(row, leg))) return false;
+        continue;
+      }
       if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`);
-      if (row[k] !== v) return false;
+      if (!compare(row[k], v)) return false;
     }
     return true;
   }

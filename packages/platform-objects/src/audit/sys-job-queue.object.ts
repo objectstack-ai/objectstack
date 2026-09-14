@@ -196,8 +196,34 @@ export const SysJobQueue = ObjectSchema.create({
     updated_at: Field.datetime({ label: 'Updated At', required: false, group: 'System' }),
   },
 
+  // [#17612] The claim path's read order, materialized.
+  //
+  // `DbQueueAdapter.claimBatch` reads the queue as
+  //   WHERE queue = ? AND status = 'pending'
+  //         AND (scheduled_for IS NULL OR scheduled_for <= ?)
+  //   ORDER BY priority ASC, scheduled_for ASC
+  // and a paged read carries one more ORDER BY term the caller never wrote:
+  // the unique tie-breaker the deterministic-paging contract appends
+  // (ADR-0053 D-A1 / objectstack#4363, `SqlDriver.orderKeysFor`), which for
+  // this object is `id`. So the ORDER BY the planner actually sees is
+  // `priority, scheduled_for, id`, and an index that stops at `scheduled_for`
+  // still leaves the planner building a sorter over every pending row in the
+  // queue — which is what `['queue','status','scheduled_for']` did: measured
+  // `USE TEMP B-TREE FOR ORDER BY` on both Turso faces, because the sort's
+  // FIRST key, `priority`, appeared in no declared index at all.
+  //
+  // Five columns is the shortest form that serves the whole ORDER BY; the pin
+  // is `turso-local-remote-declared-index-parity.test.ts`, which reads the
+  // plan off both faces.
+  //
+  // It REPLACES `['queue','status','scheduled_for']` rather than joining it,
+  // so the table carries three indexes as before: the equality prefix
+  // `queue, status` is unchanged — `getQueueSize` and `purge` keep the same
+  // seek — and no reader in this repo uses `scheduled_for` as an index RANGE
+  // (the claim's due bound is a residual filter on index rows, and the
+  // retention reaper is keyed on `created_at`).
   indexes: [
-    { fields: ['queue', 'status', 'scheduled_for'] },
+    { fields: ['queue', 'status', 'priority', 'scheduled_for', 'id'] },
     { fields: ['idempotency_key', 'queue'] },
     { fields: ['status'] },
   ],
