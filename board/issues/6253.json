@@ -1,0 +1,35 @@
+{
+  "number": 6253,
+  "kind": "issue",
+  "title": "view/page 可见性谓词的 CEL **语法**在构建期无人校验 —— `country === \"USA\"` 这类写法零诊断、运行时静默 fail-open",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T12:09:22Z",
+  "updated_at": "2026-08-08T01:55:09Z",
+  "closed_at": "2026-08-08T01:55:09Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6253",
+  "body": "Filed unassigned from #6128 / PR #6248。**本单只记录发现,不含修法承诺。**\n\n## 事实\n\n`validate-expressions.ts`(ADR-0032)对每个它遍历到的谓词都跑 `validateExpression`,语法错误报 blocking error。但它的遍历面是 objects / flows / actions / sharingRules / hooks,**从不走 `views` 与 `pages`**。\n\n走这个面的只有 `validate-visibility-predicates.ts`(ADR-0089 D3b + #6128 新增的裸标识符闸),而这三条规则都**不判语法**:PR #6248 的新规则明确在 `parseCelToAst` 返回 `null` 时保持沉默,理由是「不发明第二个语法判定」——与 `validate-null-guards.ts` 同一条政策。那条政策在它自己的调用点上是成立的,因为 `validateExpression` 就在同一批调用点上跑;**在 view/page 面上它不成立:那里根本没有第二个判定,沉默就是没人报。**\n\n后果与 #5149 同型:语法不通过的谓词求值失败 → `evalFieldPredicate` 返回 fallback → 可见性的 fallback 是 `true` → 元素无条件渲染,与「没写谓词」在屏幕上一模一样。#5149 已落地的运行时 warn-once(objectui#3541)现在会把它喊出来,但那是运行时;构建期依然放行。\n\n## 现成的样本形状\n\n`packages/spec/src/ui/view.test.ts:1126` / `:1240` / `:1245` / `:1291` / `:1373` 的 fixture 就写着 `'country === \"USA\"'` / `'billing_country === \"USA\"'` —— `===` 不是 CEL。这些是 schema 测试的 fixture(不是发货内容,schema 也不判表达式值),但它们正说明这个写法是作者会写出来的。\n\n## 决定点(不是实现细节)\n\nview/page 谓词的语法要不要判、判成 error 还是 warning,是一个「作者被允许写什么」的产品判断,不是接线缺口:\n\n- 判 **error**:与其它面(validation rule / flow / action)一致 —— 那些面上语法错就是 blocking。坏谓词发不出去。\n- 判 **warning**:爆炸半径更小,但这一族的教训恰恰是「静默不可以」,而 warning 在 CI 里通常也不拦。\n- 不判:那就得写下来为什么这个面例外。\n\n若采纳,落点就在 `validate-visibility-predicates.ts` 已有的 `parseCelToAst` 返回 `null` 那个分支上 —— 一处判断,配一条自纠措辞的消息。PR #6248 已在该分支写下这条缺口的注释,便于接手者定位。\n\nRefs:#6128 / PR #6248(发现处)、#5149(同族的 fail-open 静默)、ADR-0032(其它面的语法判定)。"
+}

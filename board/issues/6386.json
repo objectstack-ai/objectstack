@@ -1,0 +1,37 @@
+{
+  "number": 6386,
+  "kind": "issue",
+  "title": "service-analytics 的 `where` 门把 `undefined` 值的键整个丢掉 —— 单键 where 退化成「无过滤器」，方向是加宽（#6125 五面表漏记的第六、七种读法）",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:services",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T15:54:09Z",
+  "updated_at": "2026-08-07T20:19:23Z",
+  "closed_at": "2026-08-07T20:19:23Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6386",
+  "body": "出自 #6125 的实施（PR 见下）。#6125 的裁决只派了 `read-scope-sql` 一格；实施中在**同一个包的另一扇门**上实测出同一形状的两种新读法，按 Prime Directive #10 另立单、不指派、不扩大那张 PR 的 diff。\n\n⚠️ **这两格不在 #6125 正文的五面表里。** 那张表把 `service-analytics` 记作一行（`read-scope-sql`），但本包有**两扇独立的门**：调用方自己写的 `where` 走 `strategies/filter-normalizer.ts`（`INVALID_FILTER` / 400，#5352），平台编译出来的 read scope 走 `read-scope-sql.ts`（`READ_SCOPE_COMPILE_FAILED` / 500）。#6125 只实测了后者。\n\n## 实测（`origin/main` @ `d8e8d9cbc`，直接调 `normalizeAnalyticsFilterTree({ where })`）\n\n| where | 归一化结果 | 读法 |\n|---|---|---|\n| `{d: undefined}` | `null` | **整条 where 被丢弃 → 查询无过滤器运行** |\n| `{stage:'won', d: undefined}` | 只剩 `stage equals 'won'` | **`d` 这一合取项静默消失** |\n| `{$not: {d: undefined}}` | `NOT (d set)`，即 `d IS NULL` | 作者没写过的谓词 |\n| `{d: {$eq: undefined}}` | `d equals [null]` | 值比较（零行），**不是** `$eq: null` 的 `notSet` |\n| `{d: {$gt: undefined}}` | `d gt [null]` | 同上 |\n| `{d: {$in: [undefined]}}` | `d in [null]` | 同上 |\n| `{d: {$ne: undefined}}` | `d notSet OR d notEquals [null]` | 同上 |\n\n对照组（`null` 比较数）正常：`{d: null}` / `{$eq: null}` → `notSet`，`{$ne: null}` → `set`。\n\n## 为什么这是缺陷而不是「可接受的读法」\n\n前两行的方向是**加宽**，不是 fail-closed：\n\n- `buildNode` 第一行就是 `if (raw === undefined) continue;` —— 键被丢掉，不留任何痕迹。\n- 同一个函数往下几十行的注释自己写着（针对未映射算子）：\n\n  > `NEVER drop: a missing predicate does not narrow the query, it WIDENS it — the compiled SQL stays valid and simply returns rows the author excluded, which is indistinguishable from a legitimately broad query and invisible to any test that asserts the emitted SQL. That failure mode is #3650's`\n\n  丢一个 `undefined` 值的键，就是这段注释禁止的那件事，发生在它自己文件的入口。\n\n- 第三行（`{$not: {d: undefined}}` → `d IS NULL`）更绕：#5146 的空值安全改写先把叶子拆成 `{d:{$null:false}} AND {d: undefined}`，`buildNode` 丢掉后一半，只剩前一半被取反 —— 于是**从一个被丢弃的叶子里凭空长出一条谓词**。\n\n- 第四行起是另一回事：`comparand()` 把 `undefined` 归一成 `null`（#5526 / #5332 的既有决定），但判「这是空值谓词还是值比较」的分支用的是严格 `wrapper[opKey] === null`，在归一之前。所以 `$eq: undefined` 与 `$eq: null` 在这扇门上**含义不同**，而 #5332 的注释明确说这两者在契约里是同一条谓词。\n\n## 与 #6050 裁决的关系\n\n#6050 于 2026-08-07 裁 B 案：比较数位置的 `undefined` **一律拒收**。实施面按裁决只覆盖 `driver-sql` / `driver-turso`；#6125 的裁决又把 `read-scope-sql` 一格推平（PR 见下）。**这扇 `where` 门从未被任何一次裁决点名**，它今天的处置（丢键 + 归一成 null）与 B 案相反。\n\n要不要把 B 案推到这扇门上，是本单要问的；信封现成（`INVALID_FILTER` / 400，与 #6050 同码同状态，因为这扇门收的确实是调用方输入）。⚠️ 但前四行里至少「`$eq: undefined` vs `$eq: null` 含义不同」这一条与 #5526 / #5332 的既有决定相邻，改动前请确认不会顺手改掉那两次裁决的结论。\n\n## 触达性（判严重度需要的那一半）\n\n`undefined` 过不了 JSON，所以 REST 的 `/analytics/dataset/query` 请求体带不进来 —— 这一格只能从**进程内**调 `AnalyticsService.query({ where })` 的代码来。要找的形状与 #6050 完全同款：\n\n```ts\nawait analytics.query({ where: { owner_id: ctx.user?.id } });   // id 缺失 → 整条 where 消失\n```\n\n**本单未证实**今天有生产调用方这样拼 `where`（未逐个审 dashboard / report 编译路径）。如实记的是「未证实触达」，不是「不会发生」。⚠️ 但请注意方向差异：#6125 那一格是 fail-closed（匹配零行），**这一格是加宽**（前两行），与 #6050 判 P0 的那格同向。严重度请分诊自己判 —— #5347 的先例是立单时的定级两个方向都不可靠。\n\n## 关联\n\n- #6125（本单的出处；其裁决只覆盖 `read-scope-sql`）\n- #6050（比较数 `undefined` 一律拒收的 B 案裁决 + driver-sql/turso 实施）\n- #5299（`formula` 的「键缺失 vs 值为 null」，同族未决）\n- #5526 / #5332（`comparand()` 归一与 `$eq: null` 的空值谓词分支，改动前必读）\n- #3650（「丢谓词 = 加宽」的原始事故）\n- #5930（仓内 5 个独立谓词编译器，每次裁决 ×N —— 本单是「×N」又多一格的实证）\n\n会话：`session_01WyvqvKMG6asi9aXjKE6xtx`（#6125 实施过程中发现，未指派）"
+}

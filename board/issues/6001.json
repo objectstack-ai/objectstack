@@ -1,0 +1,35 @@
+{
+  "number": 6001,
+  "kind": "issue",
+  "title": "[spec] `hook.zod.ts` 的 `positions` JSDoc 仍把 `services.sharing.canEdit(…)` 举为「hook 可以这么读」的正例 —— #5720 已证实 hook 拿不到 `services`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "qq9340100"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T14:16:59Z",
+  "updated_at": "2026-08-07T15:32:10Z",
+  "closed_at": "2026-08-07T15:32:10Z",
+  "closed_by": {
+    "login": "qq9340100",
+    "id": 313832657,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6001",
+  "body": "## 事实(对 `origin/main` 核实,628b028)\n\n`packages/spec/src/data/hook.zod.ts`,`session.positions` 的 JSDoc(约 415-418 行):\n\n```\n * ⚠️ **Descriptive, NOT an authorization input.** A hook may READ this to\n * describe the caller — forwarding it as the sharing service's evaluation\n * context (`services.sharing.canEdit(..., { positions })`, the shape both\n * `content/docs/kernel/runtime-services/` pages teach), tailoring a\n * message, logging — and nothing more.\n```\n\n这段注释在两个层面都已过时:\n\n1. **它举的动作在 hook 里做不到。** #5720 已实测钉死:引擎逐键构造 hook 上下文(`object` / `event` / `input` / `session` / `provenance` / `user` / `api` / `transaction` / `ql`,见 `packages/objectql/src/engine.ts` 4796 / 4929 / 5505 / 6059),`buildSandboxContext`(`packages/runtime/src/sandbox/body-runner.ts`)同样只产 `input` / `previous` / `user` / `session` / `event` / `object` / `result` / `api` / `log` / `crypto` —— **两条路径都没有 `services` 键**。所以「a hook may READ positions … forwarding it as `services.sharing.canEdit(…)`」举的正例,恰恰是 #5720 认定会**无条件拒掉每一次写入**的那个形状(`ctx.services?.sharing?.canEdit(…)` 短路成 `undefined`,`if (!ok) throw` 全拒)。\n\n2. **它引用的文档现状已反转。** 注释说这是「both `content/docs/kernel/runtime-services/` pages teach」的形状。PR #5938 之后:`sharing-service.mdx` 新增了一整节 **\"Enforcement is automatic — do not re-check it in a hook\"**,并把 Example 改成由**持有该服务的代码**(`ISharingService` 入参)调用;`examples.mdx` 第 2 节改教 `ctx.api`。也就是说这两页现在教的正好相反。\n\n## 为什么值得记一笔\n\n`packages/spec` 的 JSDoc 是 AI 与人**照抄**的语料(它还会被 `/api/v1/meta/types/hook` 与 Studio 表单读到,见同文件 22 行附近的说明)。这里留着的不是措辞旧,而是**一个被点名修掉的缺陷形状仍被当作正例**在契约里挂着 —— 与 #5720 / #5944 同族,只是藏在 spec 的注释里,不在 `content/docs/` 下,所以 #5938、#5995 的派发面都够不着。\n\n注意本单**不主张**改 `positions` 的语义结论(「描述性、非授权输入」是对的,不动);要改的只是它选用的那个举例通道。\n\n## 建议修法\n\n把举例通道换成 hook 真实拿得到的:保留「可以读来描述调用者」的结论,例子改为 `ctx.api` 侧的业务判断 / 定制消息 / 日志,并删掉「the shape both `content/docs/kernel/runtime-services/` pages teach」这句已反转的交叉引用(或改指 `sharing-service.mdx` 的 \"do not re-check it in a hook\" 一节)。\n\n## 关联\n\n- #5720 / PR #5938(同族源头,已定模式)\n- #5944 / PR #5995(`data-service.mdx`,本单是在做该页时越界发现的,按 PD #10 未夹带)\n\n未认领、未标 `pm:queue`,交 PM 分诊定级。\n"
+}

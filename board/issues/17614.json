@@ -1,0 +1,37 @@
+{
+  "number": 17614,
+  "kind": "issue",
+  "title": "[finding] An emailTemplates bundle tagged with the stack's own defaultLocale (e.g. `en`) has no fallback floor: the resolver retries only the literal `en-US`, so every unlisted recipient locale dead-letters permanently",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "documentation",
+    "domain:spec",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-bill"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-11T03:53:15Z",
+  "updated_at": "2026-09-12T19:46:47Z",
+  "closed_at": "2026-09-12T19:42:55Z",
+  "closed_by": {
+    "login": "os-bill",
+    "id": 324100929,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17614",
+  "body": "## The trap\n\nAn app declares its locale vocabulary once, in `defineStack`:\n\n```ts\ni18n: { defaultLocale: 'en', supportedLocales: ['en', 'zh-CN', 'ja-JP', 'es-ES'], fallbackLocale: 'en' }\n```\n\nSo when that app authors an `emailTemplates` bundle, the obvious spelling of the English row is `locale: 'en'` — the same tag the stack already calls its default. That row **validates, builds and installs clean**. There is no author-time diagnostic anywhere.\n\nAt delivery it permanently dead-letters for any recipient the bundle does not carry a row for.\n\n## Measured, on the installed 17.4.0\n\n`EmailService.resolveAndRenderTemplate` (`@objectstack/plugin-email`) matches `(name, locale)` **exactly**, and the single fallback rung is the **literal** string `en-US`:\n\n```js\nconst preferred = input.locale && String(input.locale).trim();\nconst wanted = preferred || DEFAULT_TEMPLATE_LOCALE;          // DEFAULT_TEMPLATE_LOCALE = \"en-US\"\nlet row = await loader.load(input.template, wanted);\nif (!row && wanted !== DEFAULT_TEMPLATE_LOCALE) {\n  row = await loader.load(input.template, DEFAULT_TEMPLATE_LOCALE);\n}\nif (!row && !preferred) { row = await loader.load(input.template, void 0); }\nif (!row) { throw new Error(`TEMPLATE_NOT_FOUND: ${input.template} (locale=${wanted})`); }\n```\n\nThere is **no language-subtag folding** on this path: `en-US` does not fall back to `en`, and `en` is not reachable from `en-US`. `TEMPLATE_NOT_FOUND` classifies `permanent`, so the delivery dead-letters without retry.\n\n`sys_user.locale` is a free-text BCP-47 column — `maxLength: 35`, pattern `^[A-Za-z]{2,8}(?:-[A-Za-z0-9]{1,8})*$`, no default, no enum, user-editable. Nothing constrains it to the app's `supportedLocales`.\n\nCross that with `resolveRecipientLocale`'s ruled chain (recipient's own `sys_user.locale`, then the deployment default) and a bundle whose English row is tagged `en` behaves like this:\n\n| recipient's `sys_user.locale` | bundle tagged `en` | bundle tagged `en-US` |\n|---|---|---|\n| unset — deployment default `en` applies | delivers | delivers, via the `en-US` retry |\n| `en-US` | **TEMPLATE_NOT_FOUND** (permanent) | delivers |\n| `de-DE` — legal tag, not in `supportedLocales` | **TEMPLATE_NOT_FOUND** (permanent) | delivers |\n\nSame metadata, same gates, same green build. The only difference is a three-character spelling the authoring surface never mentions.\n\n## Why an author picks the wrong one\n\n`EmailTemplateDefinitionSchema.locale` is `z.ZodDefault(z.ZodString)` — any string, defaulting to `en-US`. Its `describe` and the schema module's header say the template is resolved by `(name, locale)`; neither says that `en-US` is a **floor** with special standing, nor that an explicitly-authored `en` forfeits the fallback the default would have given.\n\nThe one place the rule is written down is a docstring two packages away, in `service-messaging`'s `recipient-locale` module, under a heading about a different subject:\n\n> The one asymmetry: such a bundle that carries the deployment default's row but not `en-US` delivered under the old single value and fails for a recipient whose own locale is a third tag. That bundle is off the documented contract (`en-US` is the ladder's floor), so the fix is the bundle, not a third rung here.\n\nThat paragraph is correct and it is where this behaviour was reasoned about. It is not where an app author is standing when they type `locale:`.\n\n⭐ The asymmetry is sharper than that paragraph suggests, because it is not only \"a third tag\": the app's **own declared default locale** is the wrong answer whenever it is not spelled `en-US`. An app that says `defaultLocale: 'en'` and authors `locale: 'en'` has done the consistent thing throughout and still shipped a bundle with no floor.\n\n## Carrier\n\nobjectstack-ai/hotcrm#1185 — 15 `notify` nodes converted to template references, four locales each (objectstack-ai/hotcrm PR 1893). That app declares `defaultLocale: 'en'`; its bundles are tagged `en-US` **only** because this path was read end to end first. The card's own scope line, and the app's `supportedLocales`, both say `en`.\n\n## What would close this\n\nEither of these; whichever the maintainer prefers. ⛔ Not proposing a behaviour change without a ruling — the ladder's shape is settled by 2026-09-01 (#13881).\n\n1. **Say it where the author is.** `EmailTemplateDefinitionSchema.locale`'s `describe` states that the resolver matches exactly, retries only `en-US`, and that a bundle without an `en-US` row has no floor. Cheapest, no behaviour change.\n2. **Make it unrepresentable or diagnosable.** An author-time rule that a bundle carrying rows for a stack's `supportedLocales` but none tagged `en-US` is reported, the way other declared-but-unreachable metadata is reported today.\n\nLanguage-subtag folding in the resolver is deliberately **not** proposed: it would change delivery behaviour for every existing bundle, which is a ruling and not a finding."
+}

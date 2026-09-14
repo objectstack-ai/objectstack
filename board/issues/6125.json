@@ -1,0 +1,35 @@
+{
+  "number": 6125,
+  "kind": "issue",
+  "title": "[finding] `undefined` 比较数在仓内有五种读法 —— #6050 只在 driver-sql/turso 落了拒收,formula 读作「键缺失」、read-scope-sql 编成 `= NULL`、driver-memory 读作 null",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "finding"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T02:48:35Z",
+  "updated_at": "2026-08-07T16:39:46Z",
+  "closed_at": "2026-08-07T16:38:47Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6125",
+  "body": "出自 #6050 的实施(PR 见下)。#6050 的裁决(2026-08-07,B 案)把「比较数位置的 `undefined`」定为一律拒收(`INVALID_FILTER` / 400),实施面按裁决只覆盖 `driver-sql` + `driver-turso` 的 remote transport;issue 正文「落点」节要求裁决后按 #5298 的方式逐格实测其余无值语义面。**实测做完了,记录在此**,按 Prime Directive #10 不指派、不扩大那张 PR 的 diff。\n\n## 实测(`origin/main` @ `cba7454df`,PR 落地前;四行 fixture:`d` 在 1-2 有值、3 为 SQL NULL、4 为「键不存在」)\n\n同一个形状 `{ d: undefined }`,**五个求值面五种读法**:\n\n| 求值面 | `{ d: undefined }` | 读法 |\n|---|---|---|\n| `driver-sql` / turso LOCAL | 抛裸 knex `Undefined binding(s)`(无 `code`/`status`) | 崩 |\n| turso REMOTE(`buildWhereSQL`) | `['3','4']` | `undefined ≡ null` → `IS NULL` |\n| `driver-memory`(mingo 活路径) | `['3','4']` | `undefined ≡ null` |\n| `@objectstack/formula` `matchesFilterCondition` | `['4']` | `undefined ≢ null`,只匹配**键缺失**的行 |\n| `service-analytics` `read-scope-sql.ts` `compileScopedFilterToSql` | `\"t\".\"d\" = ?` / params `[null]` | `d = NULL` → UNKNOWN → **匹配零行** |\n\n对照组(`null` 比较数)五面一致,`{d: null}` / `{$eq: null}` → IS NULL 族,`{$ne: null}` → IS NOT NULL 族。\n\n其余格(实测同表):\n\n- `read-scope-sql`:`{$gt: undefined}` → `\"t\".\"d\" > ?` bound `null`;`{$in:[undefined]}` → `IN (?)` bound `null`;`{$not:{d: undefined}}` → `NOT ((\"t\".\"d\" IS NOT NULL AND \"t\".\"d\" = ?))` bound `null`。全部是「合法 SQL、绑了个 NULL、答一个没人问的问题」,且**一条日志都不报**。\n- `formula`:`{$ne: undefined}` → `['1','2','3']`(含 SQL NULL 行),`{$in:[undefined]}` → `['4']`,`{$gt: undefined}` → `[]`。\n- `driver-memory`:`{$ne: undefined}` → `['1','2']`,`{$in:[undefined]}` → `[]`,`{$not:{d:{$ne: undefined}}}` → `['3','4']`。\n\n## 为什么单独立单而不是搭 #6050 的车\n\n三条,都是**语义争议**而非实现细节,#6050 的裁决没有覆盖它们,其派工单也明确要求「有语义争议只记录留后续单」:\n\n1. **`formula` 的读法是第三种语义,不是第三个 bug 拼写。** 它把 `undefined` 读成「这个键在记录里不存在」——`{d: undefined}` 只匹配 row 4,而 `{d: null}` 匹配 3 和 4。这是**有意义的区分**(#5299 正在争的就是「键缺失」vs「值为 null」该不该分家),直接照 #6050 改成拒收会顺手替 #5299 拍板。\n2. **`read-scope-sql` 的信封不同。** 它只会抛 `READ_SCOPE_COMPILE_FAILED` / **500**(模块自述「⛔ The only way this module refuses」),而 #6050 判的是 `INVALID_FILTER` / **400**。read scope 是平台自己编译出来的,不是调用方输入,所以「这是谁的错、该报哪个码」是一次独立裁决,不能默认沿用。\n3. **`driver-memory` / `driver-mongodb` 是 #5499 的冻结面**,#6050 的裁决明确写了「照 #5499 只 pin 不改」。但请注意后果:**PR 落地后 driver-memory 与 driver-sql 在这一格上开始不一致**(memory 答 `['3','4']`,sql 拒收)。这是裁决接受的代价,不是回归,但它是冻结解冻时要还的账。\n\n## 触达性(判严重度需要的那一半)\n\n`undefined` 过不了 JSON,所以只能从**进程内**代码来。三个面的进料口:\n\n- `read-scope-sql` 的 `filter` 来自 CEL 编译(`cel-to-filter.ts`)与存库的 metadata(JSON,不可能带 undefined)——**未证实**今天有生产调用方能喂进 undefined,所以按 observation 立单;\n- `formula` 同理;\n- 反过来,`driver-sql`/turso 那两格是**已证实**触达的(`{ owner_id: ctx.user?.id }`),所以才有 #6050。\n\n⚠️ 严重度请分诊自己判:立单时判的严重度两个方向都不可靠(#5347 的先例)。这里如实记的是「未证实触达」,不是「不会发生」——`read-scope-sql` 那格若真被喂到,方向是**匹配零行**(fail-closed,不是越权),而 `formula` 那格方向是「少匹配」,两者都不是 #6050 那种越权读。\n\n## 建议的处置(供裁决方,不是既定结论)\n\n1. 把 #6050 的 B 案推平到 `formula` + `read-scope-sql`,各自用**自己**的信封(formula 无信封,需先定;read-scope 用 `READ_SCOPE_COMPILE_FAILED`/500);同时给 #5299 的「键缺失 vs null」一并拍板,因为改 formula 绕不过它;或\n2. 只补 `read-scope-sql`(信封已有、方向单一),`formula` 挂到 #5299 上一起裁;或\n3. 全部并入 #5930 提议的「谓词编译收敛」调查程序 —— 这已经是同一形状第 N 次要 5 份裁决,#5930 的成本清单说的正是这件事。\n\n## 关联\n\nBlocked-by: #6050(其 PR 落地后本单的对照表才是当前状态)。同族:#5298(无值语义族的裁决入口 + 「守卫匹配发射器」不变量)、#5299(driver-memory 与 formula 对「字段没有值」的三处分歧)、#5905(objectql `having-filter.ts` 是第五个求值面)、#5930([finding] 仓内 5 个独立过滤器→谓词编译器,每次裁决 ×5)、#5499(memory/mongodb 投入冻结)、#5347 / #5369(比较数按声明拒收的先例)。\n\n会话:`session_01WyvqvKMG6asi9aXjKE6xtx`"
+}

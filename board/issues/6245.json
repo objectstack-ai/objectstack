@@ -1,0 +1,36 @@
+{
+  "number": 6245,
+  "kind": "issue",
+  "title": "meta: bind Zod schemas for webhook / connector / sharing_rule WITHOUT registering the kinds — close the unvalidated `PUT /meta` write hole (#2657 audit, option A)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:dispatched",
+    "target:v17"
+  ],
+  "assignees": [
+    "qq9340100"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T11:53:02Z",
+  "updated_at": "2026-08-07T16:35:26Z",
+  "closed_at": "2026-08-07T16:35:26Z",
+  "closed_by": {
+    "login": "qq9340100",
+    "id": 313832657,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6245",
+  "body": "Split from the #2657 coverage audit (#6234, 2026-08-07) as the unconditional first step — restore-invariant class, compatible with whichever way the maintainer later rules the admission question (B/C) on #2657.\n\n## The hole (today, on main)\n\n`webhook`, `connector` and `sharing_rule` stack collections are **already writable through `PUT /meta` with zero schema validation** — a spec-invalid webhook body stores and answers `success: true`. Proven by the repo's own test: `packages/objectql/src/protocol-meta.test.ts:1461-1469` saves an invalid webhook and expects success (that pin flips with this fix). This is the same enforced-but-undeclared shape #5271 closed for `api`.\n\n## The fix (size S)\n\nBind the three kinds' Zod schemas via `registerMetadataTypeSchema` (`metadata-type-schemas.ts:183`) — exactly the #5271 mechanism — **without** registering them as metadata kinds (no registry entries, no new capability surface, no authorization change). Effects:\n\n- a wrong body fails loudly at the existing door (422) instead of storing garbage;\n- the registry-driven Metadata Directory upgrades from raw-JSON to a real form for free;\n- the #2657 admission ruling stays fully open — this card neither presumes B nor C.\n\n## Caveats (from the audit, follow the precedents)\n\n- **Author-shape vs stored-shape envelope**: `sharing_rule`'s schema is `.strict()` with no envelope — stamped/stored rows would fail a naive parse; follow the #5271/#5312 lesson (validate the author shape at the write door; do not reject stamped rows).\n- **connector**: pick the binding target deliberately (`ConnectorSchema` vs `DeclarativeConnectorEntrySchema`) and record why in the PR.\n- Flip the `protocol-meta.test.ts:1461` pin to assert the 422 (it currently pins the hole).\n\nRelease-board note: criterion ① (an authoring surface that stores arbitrary invalid bodies today) — same class as #5961, which is on the board; `target:v17` applied accordingly, triage seat may veto.\n\n## Related\n\n#2657 (admission ruling B/C, pending) · #6234 (the audit) · #5271 / #5312 (the `api` precedent pair) · #6242 (enumeration-drift finding, adjacent)"
+}

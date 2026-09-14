@@ -1,0 +1,36 @@
+{
+  "number": 6434,
+  "kind": "issue",
+  "title": "观察单:`Resolve the diff base` 是 Check Changeset 里唯一只认快路径标签读取的可失败步骤,标签晚到 + git 基准不可用时会红一个本该豁免的 PR",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "ci/cd",
+    "domain:devx",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T18:32:03Z",
+  "updated_at": "2026-08-08T03:10:33Z",
+  "closed_at": "2026-08-08T03:10:33Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6434",
+  "body": "由 #6378 / PR #6429 的实现过程中记录,**未在该 PR 内修复**(超出本单范围),按 Prime Directive #10 单独立观察单。\n\n## 现象\n\n`pr-automation.yml` 的 `changeset-check` job 里,能让 PR 变红的步骤共五个。PR #6429 之后,其中四个同时认**两次**活标签读取(快路径读取 + 结算读):\n\n- `Require a changeset (or the skip-changeset label)`\n- `Reject an empty-frontmatter changeset added by this PR`\n- `Require an ADR-0087 disposition on a declared-breaking changeset`\n- `Guard against accidental major bumps (launch window)`\n\n第五个 —— `Resolve the diff base (merge base with the base branch)` —— 只带 `steps.labels.outputs.skip != 'true'` 这一条快路径守卫,而它自己有两处 `exit 1`:\n\n- 事件不带 base 分支;\n- `git merge-base` 算不出来(例如 `origin/BASE_REF` 取不到)。\n\n## 后果(复合条件,今天没人撞得到)\n\n要踩到需要同时成立两件事:\n\n1. `skip-changeset` 标签**晚于快路径读取**才落地(即 #6378 的那个窗口内 —— 这恰恰是常态),**并且**\n2. 该跑的 git 基准解析真的失败。\n\n此时 `Resolve the diff base` 会在结算读有机会纠正之前就把 job 判红,而这个 PR 本该是豁免的。条件 2 极少发生(需要 fetch 失败一类的基础设施抖动),所以**今天没有已知实例**,归观察类。\n\n## 这是有意留下的,不是遗漏\n\nPR #6429 在正文的「不在本 PR 里」一节写明了该格,理由是:它的 `exit 1` 表达的是「git 基准不可用」,不是 changeset 判决,本就不受标签豁免;#6378 的范围是消除结构性假红,顺手扩大一个豁免面不在其内。该 PR 新增的 CONSUMER 断言按「跑 `check-*.mjs` 或发出 no-changeset 错误」来圈定判定步骤,**有意**把这一步排除在外,以免断言把一个没论证过的豁免钉成契约。\n\n## 候选处置(未预设结论)\n\n1. 维持现状,只补注释说明该格是有意的(最省,今天也确实没人撞到)。\n2. 把结算读**前移**到 `Resolve the diff base` 之前。代价:结算读能白拿的已流逝时间从「约 +45s」降到「约 +20s」(checkout 之前),窗口内需要真等的概率上升 —— 而 #6429 的成本论证正建立在「等待只向将红的 PR 收取」上,前移会让计数尚未发生、无法判断该 PR 是否将红,等待面因此扩大到所有无标签的 PR。**这一条与 #6378 的成本结论直接冲突,需要重新测量再决定。**\n3. 让 `Resolve the diff base` 的失败先落成一个 output,由后面已认两次读取的判定步骤统一裁决。\n\n倾向 1 或 3;⛔ 选 2 之前必须重测,否则会把 #6378 刚消掉的成本以另一种形式加回来。\n\n未认领,交分诊定级。\n"
+}

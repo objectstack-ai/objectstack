@@ -1,0 +1,35 @@
+{
+  "number": 6446,
+  "kind": "pull_request",
+  "title": "fix(objectql): HAVING 的 `$nin` / `$notContains` 对无值行 NULL-safe (#5905)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T20:15:56Z",
+  "updated_at": "2026-08-07T20:42:27Z",
+  "closed_at": "2026-08-07T20:42:26Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": "2026-08-07T20:42:25Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/6446",
+  "body": "Fixes #5905\n\n把 HAVING 求值面对齐到 #5298 已生效的裁决(方案 A:非否定路径对无值行 NULL-safe)。**restore-invariant,不重开语义取舍。**\n\n#5298 的裁决由 PR #5962(main `07f1822`)落到了 driver-sql / formula / service-analytics 与 `FILTER_LOGIC_*` 一致性表,但那次清点的 20 个文件里没有 `packages/objectql/src/having-filter.ts` —— 它是同一套算子词表的**第五个求值面**,于是成为唯一仍与已生效裁决相反的一面,而且是唯一**没有任何一致性表覆盖**的一面。\n\n## 一、前提复核(动手前逐条实测)\n\n| # | 前提 | 实测 | 证据 |\n|---|---|---|---|\n| P1 | `having-filter.ts` 两处仍是分诊记录的形状 | ✅ 成立 | `:112` 豁免名单实为 `$exists` / `$ne` / `$null`(无 `$nin`、无 `$notContains`);`:137` `case '$notContains': if (typeof value !== 'string' \\|\\| value.includes(target)) return false;` |\n| P2 | #5962 的答案 = 无值行**成立**,且没带上 having-filter | ✅ 成立 | formula `matches-filter.ts`:`$nin` → `Array.isArray(v) && !v.some(…)`、`$notContains` → `!(typeof actual === 'string' && …)`;driver-sql 极性表 `case '$nin': return true;` / `case '$notContains': return true;`。`git show --name-only 07f1822` 的 20 个文件**不含** having-filter.ts |\n| P3 | `FILTER_LOGIC_CASES` 今天不驱动 HAVING 路径 | ✅ 成立 | `grep -rn FILTER_LOGIC packages/objectql/` = **0** 命中;`applyHaving` / `matchesHaving` 的消费者只有 `engine.ts:6751,6760` 与本文件自己的测试 |\n\n基线 `origin/main` `be87153a4`(复核时)。\n\n## 二、改动前后真值表(两格 × NULLED / MISSING)\n\nNULLED = 键在、值为 `null`;MISSING = 键不在(聚合行读作 `undefined`)。\n\n| 单元 | before | after | 谁在管这一格 |\n|---|---|---|---|\n| `$nin` × NULLED | **true** | true(**不变**) | 早退守卫只判 `=== undefined`,不拦 `null`;`[…].includes(null)` 假 ⇒ 改前就已 NULL-safe |\n| `$nin` × MISSING | false | **true** | 早退守卫先返回 false,`$nin` 分支本来会答 true 却从未被走到 |\n| `$notContains` × NULLED | false | **true** | 算子分支:`typeof null !== 'string'` ⇒ 判否 |\n| `$notContains` × MISSING | false | **true** | 早退守卫先拦(守卫与分支两处都要改这一格才成立) |\n| 两算子 × 有值行(命中 / 不命中) | — | **逐条不变** | 见测试对照组 |\n\n> ⚠️ 诚实记录:分诊评论把「无值」笼统写成一格,**实测是 `$nin` × NULLED 改前就已经成立** —— 四格里只有三格发生翻转。没有为了凑「before 全 false」的模板而改写读数。\n\n## 三、改法(只动这两格)\n\n1. **早退守卫豁免名单**补 `$nin` / `$notContains`,并抽成具名常量 `NO_VALUE_ANSWERED_BY_OPERATOR`,把「哪些算子自己回答无值」写在一处;\n2. **`$notContains` 分支**改为 formula 读法:`if (typeof value === 'string' && value.includes(target)) return false;` —— 它是 `$contains` 的**镜像**而不是「取反的副本」:非字符串/无值的列不可能包含子串,故「不包含」成立。\n\n⛔ **未动的格子**:`$exists` / `$null` / `$eq` 等未被裁决的算子;以及 `$notContains` 的**比较数**类型(formula 额外要求 `typeof v === 'string'`,本 PR 不引入 —— 那一格不在裁决范围内)。\n\n**第三种被顺带影响的形状,如实记下**:`$notContains` 改成镜像读法后,值为**非字符串且非空**的列(例如把 `$notContains` 写在数值 measure 上)也从「判否」变为「成立」。这不是本 PR 额外做的取舍,而是 formula 读法本身的形状(`!(typeof actual === 'string' && …)`),两面因此逐格一致;并且该形状在类型化的编写面上本就不可达 —— `filter.zod.ts:475` 把 `$notContains` 声明为 `T[K] extends string ? string : never`。\n\ndriver-memory / driver-mongodb 仍是旧答案,因为 **#5499 冻结**了它们;本文件的分叉是相对一个被冻结的面,不是相对裁决 —— 这一点写进了文件头。\n\n## 四、反向验证(方向先写死,再跑)\n\n预测记录在动手前,逐用例细化也在跑之前写死。两次回退**逐条命中**,无偏差:\n\n| 回退 | 预测转红 | 实测转红 | 预测保持绿 | 实测保持绿 |\n|---|---|---|---|---|\n| **A** 豁免名单去掉 `$nin`/`$notContains`(保留 `$notContains` 新读法) | 5 | **5** ✅ | 18 | **18** ✅ |\n| **B** `$notContains` 还原 `typeof value !== 'string' \\|\\| …`(保留豁免名单) | 4 | **4** ✅ | 19 | **19** ✅ |\n\n回退 A 实测红名单(与预测同名同序):\n\n```\n× a MISSING column satisfies $nin\n× applyHaving keeps both no-value rows and drops only the listed value\n× a MISSING column satisfies $notContains\n× applyHaving keeps both no-value rows and drops only the containing value\n× $not inverts the leaf answer instead of re-applying the guard\nTests  5 failed | 18 passed (23)\n```\n\n回退 B 实测红名单:\n\n```\n× a NULLED column satisfies $notContains\n× a MISSING column satisfies $notContains\n× applyHaving keeps both no-value rows and drops only the containing value\n× $not inverts the leaf answer instead of re-applying the guard\nTests  4 failed | 19 passed (23)\n```\n\n两种回退下**对照组全绿**:`$nin` / `$notContains` 的四条有值用例、`$in` / `$contains` 的无值拒绝对照、`$ne`(#5905 之前就已豁免)三条。这组对照正是防「豁免名单开太宽」的那道闸 —— 把正向算子也放进名单会让它们转绿。\n\n## 五、命令输出\n\n```\n$ pnpm --filter @objectstack/objectql exec vitest run src/having-filter.test.ts\n Test Files  1 passed (1)\n      Tests  23 passed (23)          # 9 原有 + 14 新增\n\n$ pnpm --workspace-concurrency=2 --filter @objectstack/objectql test\n Test Files  141 passed (141)\n      Tests  2350 passed (2350)\n\n$ pnpm --workspace-concurrency=2 --filter @objectstack/objectql typecheck\n> tsc --noEmit                        # exit 0,无输出\n\n$ node scripts/check-nul-bytes.mjs\ncheck-nul-bytes: OK (scanned 6078 tracked text file(s); … no raw ASCII control bytes)\n```\n\n**`check:type-check-debt`(objectql TEST_DEBT 棘轮,冻结 355)**:\n\n```\nℹ @objectstack/objectql: TEST_DEBT records 355, tsc now reports 351 (-4) -- the entry can be lowered.\n```\n\n新增测试代码引入 tsc 错误 **0 条** —— 复算了该 ledger 的测试面测量(临时 tsconfig 解除 `*.test.ts` 排除)得 351 条,其中落在 `having-filter.ts` / `having-filter.test.ts` 的为 **0**。**未抬账**。\n\n该 gate 另报 15 条 ledger 上飘(cloud-connection / hono / runtime / plugin-approvals 等),**与本 PR 无关且非本 PR 造成**:把工作树两个文件 `git checkout origin/main --` 还原成纯净 `origin/main` 后重跑同一 gate,得到**同样的 15 条、同样的增量**(objectql 同样读 351)。这是未全量 build 的工作树上的既有读数,不是本 PR 的回归。\n"
+}

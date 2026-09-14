@@ -1,0 +1,34 @@
+{
+  "number": 5924,
+  "kind": "issue",
+  "title": "[finding] save-meta-response-conformance.test.ts:119 的调试助手引用两个不存在的名字(appendFileSync / OUT),因 objectql 排除测试对 tsc 隐形",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T11:51:10Z",
+  "updated_at": "2026-08-07T19:03:05Z",
+  "closed_at": "2026-08-07T19:03:05Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5924",
+  "body": "Observation-class finding,做 #5278(PR #5827)的台账重测时量到 —— 那道新棘轮把 `@objectstack/objectql` 的 TEST_DEBT 从 335 顶到 339,追这 +4 的来源时发现的。**今天没有任何东西是红的**,没有闸门失败,没有测试被静默跳过,没有用户受影响。\n\n## 现象\n\n`packages/objectql/src/save-meta-response-conformance.test.ts:119`:\n\n```ts\nconst LOG = (...a: any[]) => appendFileSync(OUT, a.join(' ') + '\\n');\n```\n\n这一行同时踩三样:\n\n- `appendFileSync` —— 全文件**没有任何 `node:fs` import**;\n- `OUT` —— 全文件**没有任何定义**;\n- `LOG` —— 全文件**从未被调用**(`grep -n 'LOG('` 只命中这条声明本身)。\n\n看起来是调试用的落盘日志助手,提交时把 import 和 `OUT` 常量删了、助手本身留下了。\n\n## 证据(`tsc --noEmit`,把该包 tsconfig 的 test 排除项抬掉后)\n\n`@objectstack/objectql` 那 +4 条**全部**在这一个文件里:\n\n```\npackages/objectql/src/save-meta-response-conformance.test.ts(115,21): error TS2554: Expected 2-5 arguments, but got 1.\npackages/objectql/src/save-meta-response-conformance.test.ts(119,7):  error TS6133: 'LOG' is declared but its value is never read.\npackages/objectql/src/save-meta-response-conformance.test.ts(119,30): error TS2304: Cannot find name 'appendFileSync'.\npackages/objectql/src/save-meta-response-conformance.test.ts(119,45): error TS2304: Cannot find name 'OUT'.\n```\n\n出处:该文件由 **#5861**(`5c94f833c`,`feat(spec): SaveMetaItemResponseSchema 声明保存响应的全集字段 version / seq / state / projectionApplied`,实现 **#5745**)新增。\n\n## 严重性:低,但不是零 —— 请按「休眠」而不是「故障」读\n\n**先把话说准**:因为 `LOG` 从未被调用,这行在运行时**不会抛**,该文件的 conformance 断言**全部照常执行**。我在 PR #5827 的交接里一度把它说成「该行不可执行」,那是对的,但容易被读成「有东西没跑起来」—— 没有,只是这个助手本身是死的。\n\n它值得记一笔的理由是**它会怎么变成故障**:任何人日后想调试这个 conformance 用例、顺手取消注释一句 `LOG(...)`,拿到的是 `ReferenceError: appendFileSync is not defined`,而不是日志。一个「看起来能用的调试助手」比没有助手更费时间。\n\n## 为什么没有闸门看见它\n\n`packages/objectql/src/tsconfig.json` 把 `**/*.test.ts` 排除在外,所以 `tsc` 根本不读这些文件 —— 这正是 #4311 的洞、也正是该包在 `scripts/check-type-check-coverage.mjs` 里带着一条 `TEST_DEBT` 条目(`tests: 127, errors: 339`)的原因。vitest 只跑不判类型,ESLint 也不做跨符号解析。所以两条 `TS2304` 从落地那天起就对每一道闸门隐形。\n\n顺带说明它为什么现在**才**被看到:#5278 的重测棘轮会把每条台账数字重跑 `tsc`,数字一涨就红,于是这 +4 被顶了出来。台账被抬到 339 是**记录**这笔债,不是修它 —— 修在 #5861 那一侧,所以另开此单而不是夹进 #5827(#4949「先搜重、能附就附」:搜过 `save-meta-response-conformance` / `appendFileSync`,开单 issue 零命中;这条不落在 #5278 的完成范围内 —— #5278 是「让数字不再静默漂移」,不是「修各包的债」—— 所以标准立单,不作子单)。\n\n## 建议的修法(留给分诊/车道定,这里只列)\n\n1. **删掉 :119 整行**(最省)—— 死代码,没有任何调用点,一并消掉 TS6133 与两条 TS2304。\n2. **补全它**:`import { appendFileSync } from 'node:fs'` + 定义 `OUT`。只有在确实要保留落盘调试通道时才值得。\n\n另外那条 `:115` 的 `TS2554`(`Expected 2-5 arguments, but got 1`)是**独立的**一条,与 `LOG` 无关,顺手在同一文件里,是否同批处理由车道决定。\n\n⛔ 我没有代修:PR #5827 的派发范围明确禁止碰任何包的源码,而这是 #5861 的文件。\n\n落点 `packages/objectql` ⇒ engine-core 车道。\n"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 6254,
+  "kind": "issue",
+  "title": "`object.form.ts` 的 20 处 `visibleWhen` 写的是裸标识符(`type == 'formula'`),同仓 `field.form.ts` 写的是 `data.type` —— 同一面两种拼写,必有一种不生效",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "qq9340100"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T12:09:48Z",
+  "updated_at": "2026-08-07T17:22:26Z",
+  "closed_at": "2026-08-07T17:22:26Z",
+  "closed_by": {
+    "login": "qq9340100",
+    "id": 313832657,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6254",
+  "body": "Filed unassigned from #6128 / PR #6248,那里为了给新闸门定爆炸半径把全仓可见性谓词扫了一遍。**本单只记录发现,不含修法承诺** —— 它没有被 #6248 的闸门判到,原因见下。\n\n## 事实:同一层的两种拼写\n\nmetadata 编辑表单(`*.form.ts`)的绑定根是 `data`(编辑中的那一行)—— `packages/spec/src/ui/view.zod.ts:1416` / `:1510` 的 describe 原文,ADR-0089 D3 §Context 同。\n\n`packages/spec/src/data/field.form.ts` 全部照此书写:\n\n```ts\n{ field: 'minLength', visibleWhen: \"data.type == 'text' || data.type == 'textarea'\" }\n{ field: 'reference',  visibleWhen: \"data.type == 'lookup' || data.type == 'master_detail'\" }\n```\n\n`packages/spec/src/data/object.form.ts` 则一律写**裸标识符**,约 20 处(行号 120-190):\n\n```ts\n{ field: 'maxLength', visibleWhen: \"type in ['text','textarea','email',…]\" }\n{ field: 'expression', visibleWhen: \"type == 'formula'\" }\n{ field: 'autonumberFormat', visibleWhen: \"type == 'autonumber'\" }\n```\n\n`view.form.ts` / `page.form.ts` / `report.form.ts` / `action.form.ts` 也都是 `data.` 写法。只有 `object.form.ts` 是裸的。\n\n## 需要先确定的一件事(不要凭印象判)\n\n`object.form.ts` 的这些字段嵌在 object 表单的 **repeater**(字段列表)的 `fields[]` 里,行本身就是一个字段定义。所以有两种读法:\n\n1. repeater 子字段的谓词也按整张表单的 `data` 绑定求值 ⇒ 这 20 处全是坏谓词,Studio 的对象/字段编辑器里这些条件字段从来没有真正条件化过(fail-open ⇒ 一直显示);\n2. repeater 行在子字段谓词里另有一层行级绑定 ⇒ 裸写法是对的,那么**这层绑定在 spec 里没有任何一句话写下来**,而 `field.form.ts` 的 `data.` 写法就成了另一头的错。\n\n无论哪一种,现状都是「同一个面上两种拼写并存,且没有文档说清楚」——这本身就是要修的东西。\n\n## 为什么 #6248 的新闸门没有判到它\n\n三条独立原因,记下来免得接手者以为闸门坏了:\n\n1. `packages/spec` 的 `*.form.ts` 不是任何 app stack 的一部分,`os validate` 不会 lint 它们;\n2. 全仓**没有任何调用方**传 `layer: 'metadata'` —— 该层目前只有测试在跑;\n3. 即便前两条都补上,`type` 恰好是 **CEL 自己声明的类型名标识符**,`type == 'formula'` 到 checker 那里是类型 overload 错误而非「未知变量」,#6248 的闸门按设计不判它(改读 overload 消息会误杀合法的 `type(record.x) == string`)。这一条已在 PR #6248 里作为已知盲点钉了测试。\n\n也就是说:这 20 处即使把闸门指过去也抓不到,得靠人读或靠一条专门的判据。\n\nRefs:#6128 / PR #6248(发现处与盲点说明)、#5149(可见性谓词 fail-open 静默一族)、ADR-0089 D3。"
+}

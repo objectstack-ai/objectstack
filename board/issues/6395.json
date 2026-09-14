@@ -1,0 +1,34 @@
+{
+  "number": 6395,
+  "kind": "pull_request",
+  "title": "docs(spec): SYNC_ARCHITECTURE.md L3 段停止宣传字段映射的值转换能力 (#6384)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T16:47:00Z",
+  "updated_at": "2026-08-07T17:22:42Z",
+  "closed_at": "2026-08-07T17:22:41Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-07T17:22:41Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/6395",
+  "body": "Fixes #6384\n\n`FieldMapping.transform` —— 作者面上写作 `connector.fieldMappings[].transform` 与 `externalLookup.fieldMappings[].transform` —— 连同整个五成员 `FieldMappingTransform` 联合(`constant` / `cast` / `lookup` / `javascript` / `map`)已在 `@objectstack/spec` 17.0.0 按 #5552 / ADR-0049 退役:五个成员没有任何一个有执行器,`javascript` 成员还在推荐 #3278 已退役的 `js` dialect。\n\n文档 L303 示例块的墓碑注释早已写对,散文却没跟着改 —— 与 #5554 / PR #6388 完全同型,只是换了一次退役。\n\n## 实测站点数:正文点名 1 处,实测 4 处\n\n| # | 位置 | Before | After |\n|---|------|--------|-------|\n| 1 | L198 Key Features | `- ✅ **Field Mapping**: With transformations and data type conversion` | `- ✅ **Field Mapping**: `dataType` target type and `syncMode` per-field direction — **no value transformation**; see below` + 引用块 |\n| 2 | L287 示例块内注释 | `// Field Mappings with Transformations.` | `// Field Mappings — `dataType` target type and `syncMode` direction. There is no value transformation here; see the tombstone on the second entry.` |\n| 3 | L387 Decision Matrix | `Do you need complex transformations (joins, aggregations)?` → `**Yes** → L2 (ETL)` | `Do you need to transform values at all — joins and aggregations, or just a per-field convert?` → L2 或 import mapping 的 `fieldMapping[].transform`;并写明 **Not** L3 |\n| 4 | L430 Migration Guide L3→L2 | `When a connector's declarative sync needs complex transformations:` | `…needs to transform values — joins and aggregations, or a per-field convert that `fieldMappings` cannot do (#5552):` |\n\n未改的三处近似命中,逐条给了理由而非漏掉:\n\n- **L162** `| `map` | Field mapping/renaming |` —— 这是 L2 ETL 的 `ETLTransformation.type` 表,不是连接器字段映射。\n- **L220** Use Case 1 \"Full bidirectional sync with complex business logic\" —— 不点名任何键,`bidirectional` 本身是真的(`syncConfig.direction` / `syncMode`)。\n- **L377** Best Practices \"Document field mappings and business logic\" —— 中性,不含能力断言。\n\n## 沿用 #5554 的两个动作\n\n1. **显式否定,而非静默删除。** 打勾行未删(`data type conversion` 那半是真的),而是行内写出 **no value transformation** 并另加引用块。删掉只是不再重复该断言,消不掉读者已形成的信念 —— 而这个信念比编译不过更贵:作者会把值转换逻辑规划到一个不执行它的面上。同理 L387 未删行(joins/aggregations → L2 那半是对的)。\n2. **复用 `shared/mapping.zod.ts:89` 墓碑现成措辞**,不另造第二种说法 —— 同一次退役出现两种描述,正是它们日后互相矛盾的成因。\n\nL387 值得单说:原行只问 `complex transformations`,想做逐字段值转换的作者不会把自己读进 \"complex\",于是落到 L3 —— 正是本 issue 描述的失败路径。\n\n## 保留的每一条都对着 schema 核过,不是假定\n\n- `ConnectorFieldMappingSchema`(`connector.zod.ts:121`)= `BaseFieldMappingSchema.extend({ dataType, required, syncMode })` —— 新增的确实只有这三个键;基类 `FieldMappingSchema`(`shared/mapping.zod.ts:72`)的 `transform` 是 `retiredKey(...)` 墓碑。\n- ⚠️ 因此行文只说 schema **declares** `dataType`,不宣称运行时执行 —— `packages/spec/liveness/` 下没有 connector 记录,执行侧断言无据可依。这是我在措辞上刻意收窄的一处。\n- 墓碑指定的去处真实存在:`MappingSchema.fieldMapping`(`data/mapping.zod.ts:224`)= `z.array(ImportFieldMappingSchema)`,其 `transform: TransformType.default('none')`(:140)+ `params`(:147)。\n- `TransformType`(:84)实为**七**成员,含 `javascript`;墓碑列的是**六**个。差额不是笔误:REST import path 对 `javascript` 回 400。故沿用六成员列表时**必须**带上 \"rejects its own `javascript` value with a 400\" 的补语,列表才是诚实的 —— 已带上。\n- `os migrate meta --from 16` 存在(`packages/cli/src/commands/migrate/meta.ts:146`),且转换 `field-mapping-transform-removed` 的 `toMajor: 17`(`conversions/registry.ts:4197`)—— `--from 16` 是对的入口。\n\n## 门禁:实跑,非推理\n\n```\ngrep -c '^```typescript' packages/spec/docs/SYNC_ARCHITECTURE.md\n6\n```\n\n```\n✓ src/automation/etl-author-shape.test.ts > [#4963] … > finds the examples this gate exists for, and counts the ones it skips\n✓ src/integration/connector-author-shape.test.ts > [#5515] … > finds the example this gate exists for, and classifies the ones it skips\n Test Files  2 passed (2)\n      Tests  30 passed (30)\n```\n\npackages/spec 全量:`Test Files 338 passed (338)` / `Tests 8644 passed (8644)`。\n`typecheck`:`tsc --noEmit` + `check:test-typecheck: OK`。\n`node scripts/check-nul-bytes.mjs`:`OK (scanned 6046 tracked text file(s); no raw ASCII control bytes)`。\n\n纯散文改动,未新增/删除任何 ```typescript 块,两个门禁钉的数字均未移动。\n\n## Changeset\n\n`packages/spec/docs/` 不在该包 `package.json` 的 `files` 白名单(`dist` / `json-schema` / `liveness` / `prompts` / `llms.txt` / `README.md` / `src/**/*.zod.ts` / `CHANGELOG.md` / `api-surface` / `spec-changes.json`)内,不随包发布,故不写 changeset,改用 `skip-changeset` 标签。\n\n注意:`src/**/*.zod.ts` **在**白名单内 —— 同一问题的模块 JSDoc 那半(#6383,已转 `domain:spec`)是随包发布的,那一半需要 changeset。本 PR 未触碰任何 `*.zod.ts`。\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_014wsZeReNTqiceBfLb5Pyf5)_"
+}

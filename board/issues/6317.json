@@ -1,0 +1,35 @@
+{
+  "number": 6317,
+  "kind": "issue",
+  "title": "chore(console): bump objectui pin 7dfbeb70 → b785a77 (1 commit, 0 declared changesets) — pin-chain watch, re-read range at claim time",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T13:39:46Z",
+  "updated_at": "2026-08-08T02:15:50Z",
+  "closed_at": "2026-08-08T02:15:50Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6317",
+  "body": "Filed mechanically by the **queue steward** Routine seat (anchor #5810, seat post #6016) under the pin-chain clause added by #6162 — *file when the window closes, do not wait for the release red light*. Precedent and template: #6159 / #6173. ⛔ The steward files only; it never runs the bump itself.\n\n## Readings at filing (2026-08-07 ~13:35Z)\n\n| reading | value |\n|---|---|\n| `.objectui-sha` on objectstack `origin/main` | `7dfbeb704e1eace5dc5eae1d6168c4ded805a32b` (set by #6173, merged 07:28Z) |\n| objectui `origin/main` head | `b785a77b3bd9dd32a320fd2ae3cb756644b66e85` — `fix(fields): 编辑弹窗 datetime/date 字段回显存量值 (objectui#3565)`, 13:30:15Z |\n| lag (REST `compare`) | `status: ahead`, `ahead_by: 1`, `behind_by: 0` ⇒ the pin is a **true ancestor**, 1 commit behind |\n| objectui merge queue | empty — objectui has **zero** `merge_group` runs ever (`total_count: 0`), i.e. it does not use a merge queue |\n| pending `.changeset/*.md` on objectui main | **none** (`.changeset/` holds only `README.md` + `config.json`) |\n\n## Scope: 1 commit, 0 declared changesets — and why that is not the same as \"nothing to ship\"\n\nThe single in-range commit `b785a77` (objectui#3565) adds **no** changeset — confirmed against the commit's own file list (8 files: `packages/fields/src/widgets/{DateField,DateTimeField,nativeDateValue}.tsx|ts` + tests, `packages/fields/src/index.tsx`, `packages/app-shell/src/views/ActionParamDialog.tsx` + test). So the generated `@objectstack/console` changeset digest for this range will report `0 releasing changeset(s)`.\n\nThat is a reading about the **release record**, not about the code: objectui has no gate requiring a releasing change to declare a changeset — that gap is filed as **#6174**, and #6173 recorded a concrete instance of it (objectui#3518 shipped 26 files with no changeset). #3565 is a user-visible datetime/date field-display fix and **will ship in the console build** whether or not it is in the release record. Treat the empty changeset list as \"the record will not mention it\", not as \"the window is empty\".\n\n## Honest sizing — this is a thin, fresh window\n\nThe lag opened **~5 minutes before filing** and is a single commit, against #6159's 17 / #6173's 28. This ticket is filed now because #6162 makes filing a function of the window closing rather than of the window's size, and because the clause caps the pin chain at **one open ticket that later rounds refresh** rather than one ticket per merge. Concretely, for whoever claims it:\n\n- **Re-read the range at claim time.** It has almost certainly grown; the title's `b785a77` is the head as of filing, not the bump target. The maintainer's standing direction on #6159 was to bump to the **current** objectui `origin/main` head at execution time.\n- Later steward rounds will append refreshed lag readings to this ticket rather than opening new ones.\n- There is no release red light forcing this yet: `check:objectui-pin-fresh` runs **enforcing** only on the Version Packages release PR, so this is cheap now and blocking later.\n\n## How\n\nRun `scripts/bump-objectui.sh` from a dedicated objectstack worktree with a sibling objectui checkout at the current objectui `origin/main` head, passing the SHA explicitly rather than inheriting whatever the sibling checkout has (the #6173 precedent). The script writes exactly two files — `.objectui-sha` and a generated `.changeset/console-<sha>.md`. ⛔ Do not hand-edit `packages/console/dist` — it is gitignored and built by `build-console.sh`.\n\n## Checks the claimant still owes\n\n- **#6099 re-verification.** The digest flags only `major`-declared breaking, while objectui declares v17-window breaking as `minor` + a body annotation. Vacuous at filing (zero changesets in range) — **must be redone against the grown range at execution time**, reading each changeset body and scanning for `BREAKING` / `breaking change` / `不兼容` / `破坏性` / `migration required`.\n- **Ordering.** Must merge **before** the Version Packages release PR — that PR regenerates on every push to main and has to contain this bump's `@objectstack/console` changeset. The freshness gate (#3340) exists because v16 was cut with a lagging pin and silently dropped 4 frontend changes from the release record.\n- **Not a rider.** `.objectui-sha` plus the generated changeset is the whole file surface; keep it off unrelated PRs.\n\n## Steward authorization note\n\n⛔ No bump executed, no code touched, no assignee set, no `domain:*` / `repo:*` label applied — routing labels are the triage seat's single-producer territory. Only `pm:queue` is set here.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

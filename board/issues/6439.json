@@ -1,0 +1,35 @@
+{
+  "number": 6439,
+  "kind": "pull_request",
+  "title": "fix(services): listInbox 的 unreadCount 数总未读,不再只数取回窗口 (#6363)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T18:36:58Z",
+  "updated_at": "2026-08-07T19:05:47Z",
+  "closed_at": "2026-08-07T19:05:46Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-08-07T19:05:46Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/6439",
+  "body": "Fixes objectstack-ai/objectstack#6363\n\n按维护者 2026-08-07 17:00Z 的裁决实施 **Option A**：让声明成真 —— `unreadCount` 数**总**未读，而不是取回窗口内的；列表本身保持既有窗口行为。\n\n## 前提复核（先证伪，再动手）\n\n三条都对着 `origin/main` 复核过，全部成立：\n\n| issue 的断言 | 复核结果 |\n|:---|:---|\n| `protocol.zod.ts:924` 声明 `'Total number of unread notifications'` | ✅ 在 |\n| 计数发生在 `messaging-service.ts` 的 `rows.map(...)` 里，而 `rows` 已被 `limit` 截断（clamp `[1,200]`，默认 50） | ✅ 在（`:316-331`；行号因本 PR 前的上游改动略有平移，位置与形状一致） |\n| 实测 60 条未读 → 无 limit 得 50、`?limit=10` 得 10 | ✅ 可复现（见下方「反向验证」的真实输出） |\n\n另有一条不在 issue 正文里、但影响设计的复核：`find` 无 `limit` 时**不会**被隐式截断（`driver-sql/src/sql-driver.ts:2743` 是 `if (query.limit !== undefined)`），所以既有的收据全量读是真·无界，本 PR 的反连接读同理。\n\n## 改了什么\n\n`MessagingService.listInbox` 里两个界**故意分开**：\n\n- `notifications[]` —— 仍是取回窗口：`limit` 行，默认 50，硬上限 200，最新在前。**一行没动**。\n- `unreadCount` —— 整个匹配信箱的总未读，即 `ListNotificationsResponseSchema` 发布到 API 参考里的那句话。\n\n## 取舍与成本（裁决点名的「真实设计工作」）\n\n读态在 `sys_notification_receipt`、不在收件箱行上（ADR-0030），所以总未读的谓词**跨两个对象**，没有任何单条 `count()` 能回答。三条候选：\n\n| 方案 | 判定 |\n|:---|:---|\n| **维护计数列** | 快，但要处理并发写与历史回填，且给一个每次读都能精确算出的量引入一份可漂移的副本。本单范围内不值。 |\n| **`count(消息) - count(已读收据)` 相减** | 一次查询最省，但**不正确**：收据不带 `topic`，所以 `type` 过滤下直接错；`notification_id` 为空的行（从未被收据键住 ⇒ 恒未读）也算不进去；收据与消息若 TTL 不同步还会长期漂移。 |\n| **反连接（本 PR 采用）** | 精确，且在 `type` 过滤与空 `notification_id` 两种情况下都对。 |\n\n反连接的代价是被**刻意夹住**的：\n\n1. **只在窗口被打满时才发生。** `rows.length < limit` 说明这一页就是全集，窗口计数**已经**是总数，第二次读只会把第一次读的东西再读一遍。所以常见信箱（消息数少于页大小）的读路径开销**与本 PR 之前逐字节相同** —— 有一条钉子专门量这件事（`a window that came back SHORT costs no second read`，断言 `sys_inbox_message` 上恰好 1 次 `find`）。\n2. **打满时，多的那次读是一列投影**：同一个 `where`，`fields: ['notification_id']`，无 `orderBy`、无 `limit`。收据那半本来就已经全量在内存里（`listInbox` 一直无界地读用户的全部收件箱收据来做 join），所以补上的是消息那半 —— **与该方法本来就无条件付出的收据扫描同一量级**，宽度一列。同样有钉子把这个查询形状钉死。\n\n**没有做成 best-effort，这是刻意的。** 收据那次读之所以 `catch` 后降级，是因为收据是**另一个对象**、极简栈里可能压根没注册；而这次读重读的是刚刚 `find` 成功的**同一个对象、同一个 `where`**。它失败的世界里调用方手上那份列表也不可信 —— 而吞掉异常等于把这个方法刚刚不再讲的那个「窗口大小的谎」悄悄讲回去。有一条钉子断言异常向上抛。\n\n## 反向验证（方向是**事先**定的：红）\n\n把 `unreadCount` 改回 `windowUnread` 单行还原，预测新钉子里 **9 条转红、1 条保持绿**（`a window that came back SHORT costs no second read` 钉的是「没有回归」而不是「修好了」，旧实现同样只发 1 次读，本就该绿）。实测与预测逐条一致：\n\n```\n× counts every unread message when the window truncates the inbox\n× subtracts read-state across the whole inbox, not just inside the window\n× counts rows carrying no notification_id — never receipted, so never read\n× answers the `type` filter it was asked, over the whole inbox\n× counts only the addressed user, at any window size\n× the `read` filter narrows the list and never the badge\n✓ a window that came back SHORT costs no second read      ← 预测即为绿\n× the total read is one narrow projection, unwindowed, over the same predicate\n× a failing total read is NOT swallowed into a window-sized answer\n× the list keeps its window: default 50, hard cap 200, floor 1, newest first\n\nAssertionError: expected 50 to be 60 // Object.is equality\n```\n\n`expected 50 to be 60` 就是 issue 实测那一行：60 条未读、无 limit，旧实现答 50。\n\n## 测试\n\n新增 10 条钉子（`messaging-service.test.ts`），fixture 照 issue 实测形状造（60 条未读 / `limit=10`）：\n\n- **核心**：60 条未读时，无 limit → 列表 50 条、`unreadCount` **60**；`?limit=10` → 列表 10 条、`unreadCount` **60**。\n- 已读态在**整个信箱**上相减（20 条最旧的已读落在 `limit=10` 的窗口之外 —— 窗口计数看不见它们）⇒ 40。\n- `notification_id` 为空的行恒未读；只数被寻址的那个用户；`type` 过滤两边都收窄；`read` 过滤只收窄列表、**从不**动角标。\n- 成本与查询形状各一条（见上）。\n- **窗口行为不变的回归钉**：默认 50 / 上限 200 / 下限 1 / 最新在前。\n\n翻转了 #5792 在真栈上留下的那条测量钉（`packages/runtime/src/notification-schema-conformance.integration.test.ts`）—— 它当初就写明「无论 #6361 / #6363 怎么裁，这两条断言都是必须翻的那两条」。现在它在真 socket + 真 SQL driver 上钉的是修好后的行为：窗口变小，角标不变。\n\n```\npnpm --filter @objectstack/service-messaging test        →  Test Files 16 passed (16) / Tests 185 passed (185)\npnpm --filter @objectstack/service-messaging typecheck   →  clean\npnpm --filter @objectstack/runtime typecheck             →  clean\nruntime 通知三件套(含真栈 integration)                    →  Test Files 3 passed (3) / Tests 28 passed (28)\nruntime http-dispatcher + domain-handler-registry         →  Test Files 2 passed (2) / Tests 285 passed (285)\n消费半径 SDK: pnpm --filter @objectstack/client test      →  Test Files 20 passed (20) / Tests 244 passed (244)\n根门: check:nul-bytes / check:engine-double-contract / check:empty-changeset /\n      check:query-options-erasure / check:route-envelope / check:service-providers /\n      check:doc-authoring                                 →  全绿\neslint(三个改动文件)                                      →  clean\n```\n\n`check:engine-double-contract` 特别说明：没有新增 engine double —— 测试里的 `recordFinds` 是**包住**既有 `inboxEngine` 记录调用，不是另起一个替身，门保持 `80 pinned / 133 DEBT / 4 exempt` 不变。\n\n## 范围（红线）\n\n- ⛔ **`cursor` 半边不在本 PR**。裁决明确「分页能力不半删」，响应侧 `cursor` 随 **#6361** 同向处理，其移除落 `packages/spec`，归 spec 座位。上面那条 integration 里的 `cursor` 钉子**原样保留**为已测量事实。\n- ⛔ 没有改 `.describe()`（Option A 是让声明成真），也没有改 `packages/spec` 的任何一行。\n\n## 顺带发现（已另立单，未在本 PR 修）\n\n- **#6436** —— `markAllRead` 只清窗口内的 200 条。这不是本 PR 引入的，但本 PR 把掩盖它的布揭掉了：以前清完 200 条后窗口内确实空了、角标显示 0；现在同一条路径会自己暴露 `readCount: 200` 而 `unreadCount: 150`。\n- **#6438** —— `packages/spec/src/contracts/notification-service.ts` 里 `InboxListResult.unreadCount` 的 JSDoc 仍写着 `Unread count over the returned window`，与本 PR 落地后的实现、以及同包 `protocol.zod.ts:924` 的 `.describe()` 都相反。按本单红线（不改 `packages/spec`）留给 spec 座位，与 #6361 一并处理。\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_015a5qkLzpGXhLL2F5gvJ7dD)_"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 5554,
+  "kind": "issue",
+  "title": "SYNC_ARCHITECTURE.md 的 L3 段仍在三处宣传 Rate Limiting,而 connector.rateLimitConfig 及其整个形状已在 #4911 退役",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:queue",
+    "target:v17"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T17:18:02Z",
+  "updated_at": "2026-08-07T16:26:42Z",
+  "closed_at": "2026-08-07T16:26:42Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5554",
+  "body": "发现于 #5515(修同文件 L3 `sapConnector` 示例的四处键名/取值)时,属于同一节的**散文**而非示例块,不在该 PR 的裁定范围内。\n\n## 事实\n\n`packages/spec/src/integration/connector.zod.ts:685` 起,`rateLimitConfig` 是一个 `retiredKey()` 墓碑:\n\n```\n&#39;`connector.rateLimitConfig` was removed in @objectstack/spec 17.0.0 (#4911, ADR-0049 D2) —\n the entire shape is gone, not just this key: `ConnectorRateLimitConfig` and its\n `RateLimitStrategy` enum were removed with it, because no outbound rate-limiting engine\n ever existed …&#39;\n```\n\n同文件 317–340 行的长注释写得更明白:平台唯一的令牌桶是 `packages/runtime/src/security/rate-limit.ts`,而它是**入站**的;没有任何东西节流我们**发出**的调用。\n\n而 `packages/spec/docs/SYNC_ARCHITECTURE.md` 的 L3 段仍有三处反过来讲:\n\n1. `### Key Features` 列表:`- ✅ **Rate Limiting**: Token bucket, leaky bucket algorithms` —— 打了勾,还点名了两个从来不存在的算法。\n2. `## Decision Matrix` 表:`| Do you need rate limiting and retry policies? | **Yes** → L3 (Connector) |` —— 一半是对的(`retryConfig` 真在),一半把作者引向一个已退役的键。\n3. `#### Pattern 2: Enterprise Integration (L3)` 的示意图:`Webhooks, Auth, Rate Limiting`。\n\n示例块里那行 `// (rateLimitConfig 曾在这里,#4911 退役)` 的墓碑注释是对的 —— 恰恰是它证明文档的其余部分没跟着改。\n\n## 影响\n\nPrime Directive #10 的正面反例:一个作者读 Key Features 打勾的那行,去写 `rateLimitConfig`,拿到的是 `strictObject` 的退役提示。比编译不过更糟的是,他会以为&#34;平台会替我限流&#34;这件事成立 —— 这是 #4911 的注释专门点名的那种&#34;最像安全承诺的一面&#34;。\n\n## 建议\n\n三处都改成如实说法:出站限流请在 provider / 网关侧做(#4911 的墓碑文案已经有现成措辞),`retryConfig` 与 `health.circuitBreaker`(`ConnectorHealthSchema:512`,真实存在)保留。属纯文档修正,但涉及三处措辞选择,值得单独一单而不是搭 #5515 的车。\n\n---\nBlocked-by: #5515"
+}

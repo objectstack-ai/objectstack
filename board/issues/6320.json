@@ -1,0 +1,36 @@
+{
+  "number": 6320,
+  "kind": "issue",
+  "title": "drivers: `distinct` 的第三参在 memory 与 sql 上语义不同 —— 把 sql 那面的写法交给 memory,静默返回未过滤全集(运行期实测)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T13:45:03Z",
+  "updated_at": "2026-08-08T03:38:17Z",
+  "closed_at": "2026-08-08T03:38:17Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6320",
+  "body": "从 #6212 的测量棒中带出(基线 `d367f03d6`)。**不是类型冗余,是具体缺陷**,故独立立单而非压在 #6212 的观察清单下。\n\n## 事实\n\n同名方法,第三参要的东西不一样:\n\n| 驱动 | 签名 | 方法体怎么读 |\n|---|---|---|\n| `driver-memory/src/memory-driver.ts:612` | `distinct(object, field, query?: QueryInput)` | 读 **`query.where`**(要 query 信封) |\n| `driver-sql/src/sql-driver.ts:3481` | `distinct(object, field, filters?: any)` | 直接 `applyFilters(builder, filters)`(要**裸 filter**) |\n\n两边的测试自己就是证据:`memory-driver.test.ts:310` 传 `{ object, where: {...} }`;`sql-driver-advanced.test.ts:393` 与 `sqlite-wasm-driver-advanced.test.ts:382` 传 `{ status: 'completed' }`。\n\n## 运行期实测(built driver-memory,三行:Laptop/Mouse 为 completed、Ghost 为 pending)\n\n```\nmemory.distinct envelope {object,where}: [\"Laptop\",\"Mouse\"]\nmemory.distinct bare filter  {status}  : [\"Laptop\",\"Mouse\",\"Ghost\"]\nmemory.distinct no filter              : [\"Laptop\",\"Mouse\",\"Ghost\"]\nbare === unfiltered (SILENT PASS-THROUGH)? true\n```\n\n把 SQL 那一面的写法交给 memory:**不报错、不告警,直接返回未过滤的全集**。方向是**放宽** —— 一个本意「按条件去重取值」的调用拿到了全部值。\n\n## 为什么今天没炸\n\n`distinct` 的**非测试生产者为零**(全仓实测),所以是休眠缺陷。但它与 #5234 刚更正过的那类同形:「静默错答案」在没有对抗性 fixture 时不会被任何测试看见。\n\n## 处置线索(不代裁)\n\n- `sql.distinct` 第三参的正确类型是**裸 filter**:实测 `FilterCondition` 对 sql / sqlite-wasm 三处调用点**零报错**,是现成的收窄目标;\n- memory 半边要不要改成同一语义,是**语义补齐** ⇒ 落 #5499 冻结面内(与「跨面分歧单只冻 memory 半边」的既有处置一致);\n- 两面统一之前,至少应让**错配的写法响亮失败**而不是静默放行。\n\n关联:#6212(测量棒出处)、#5234(同族「静默错答案」且严重度曾被低估)、#5499(冻结令)、#5181/#6075(签名收窄程序)。"
+}

@@ -1,0 +1,37 @@
+{
+  "number": 6376,
+  "kind": "issue",
+  "title": "[finding][devx] `check:type-check-debt` 的 ledger 余量会让新写的 pin 变哑：mongodb 曾有 33 条余量吞掉一次真实回退，另有 5 条目前带 4–19 余量",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T15:33:54Z",
+  "updated_at": "2026-08-08T03:12:50Z",
+  "closed_at": "2026-08-08T03:12:50Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6376",
+  "body": "在 #6212 批 C（PR #6356）实施期间实测发现，记录备查。**观察类，不挂 `pm:queue`，请分诊轮定级。**\n\n## 现象\n\n`scripts/check-type-check-coverage.mjs` 的 `DEBT` / `TEST_DEBT` 是只减不增的棘轮，但**记录值低于实测值时它不报错**，只打一条 ℹ 提示：\n\n> ℹ @objectstack/rest: TEST_DEBT records 163, tsc now reports 144 (-19) -- the entry can be lowered. Not an error: an improvement must not have to pay a bookkeeping toll to land.\n\n这条设计本身是对的（改进不该为记账付过路费）。但那段差额是**实打实的许可额度**：在被抹平之前，任何新增的、数量不超过余量的错误都不会让门禁变红。\n\n## 为什么单独记一笔：它能让一条新写的 pin 完全失效\n\n不是理论推演，是 PR #6356 实测撞上的：\n\n- `driver-mongodb` 的 `TEST_DEBT` 记 **43**，实测只有 **10**（`TS1309` x7 + `TS2550` x3）；\n- 归因已坐实：在 `d367f03d6^`（PR #6210 前一刻）实测**正好 43**，组成 `TS2345` x33 + 上述 10，与 ledger 里 note 的文字逐字吻合。那 33 条是 #6210 收窄六个契约方法时消掉的，ledger 一直没跟着降；\n- 关键后果：该包的 `tsconfig.json` 排除 `*.test.ts`，所以 `pnpm typecheck` **看不见它的测试层**，而 `aggregate` 这类驱动自有方法的唯一消费者恰恰就在那些被排除的测试里。把 `aggregate` 的签名从 `DriverQuery` 改回 `QueryAST`，实测测试层报 **12** 条 —— `12 < 43`，**旧天花板会把这次回退整个吞掉，门禁全绿**。\n\n也就是说：ledger 的余量不只是\"记账不准\"，它会让**这个包唯一能钉住该签名的门禁**变成哑的。PR #6356 因此在同 PR 内把该条目降到实测的 10，降完之后同一反转实测报 `records 10 … now reports 12 (+2)`，门禁才真的红。\n\n## 当前还带余量的条目（在 `d8e8d9cbc` 实测）\n\n| 条目 | ledger | 实测 | 余量 |\n|:--|--:|--:|--:|\n| `@objectstack/service-storage`（DEBT） | 52 | 42 | -10 |\n| `@objectstack/objectql`（TEST_DEBT） | 355 | 350 | -5 |\n| `@objectstack/runtime`（TEST_DEBT） | 227 | 223 | -4 |\n| `@objectstack/rest`（TEST_DEBT） | 163 | 144 | -19 |\n| `@objectstack/mcp`（TEST_DEBT） | 63 | 53 | -10 |\n\n（`driver-mongodb` 已由 PR #6356 抹平，不在表内。数字会随 `main` 漂，以 re-measure 为准。）\n\n其中 `objectql` / `runtime` / `rest` 三个包**同样排除测试层**，和 mongodb 是同一形态 —— 它们的测试层同样只由这条 ledger 看着。\n\n## 不是缺陷，别当缺陷派\n\n今天没有人踩：门禁在\"高于记录值\"时照常变红，余量只是**削弱**灵敏度而非关闭它，而且 ℹ 提示每次 re-measure 都会打出来、不会静默。所以这是**被削弱的检查**，不是活体缺陷，判级请按观察类走。\n\n## 如果要做\n\n几个方向，各有取舍，未预断：\n\n1. **逐条抹平**（PR #6356 对 mongodb 做的那样）—— 最直接，但每条都要重写 `note` 的组成描述，且 `objectql` / `rest` 这类活跃包很容易在评审期间再次漂移（#5278 记过这个 race，option D 输了五次）。\n2. **给\"余量超过阈值\"加一条会红的判据** —— 比如余量超过记录值的某个比例、或某个绝对值就失败，逼作者当场抹平。风险是把 #5278 明确不想要的\"记账过路费\"又加回来。\n3. **只对排除测试层的包收紧** —— 那些包的 ledger 是唯一的看门人，余量的代价最高；不排除测试层的包有 `pnpm typecheck` 兜底，余量无害。这一条的信噪比看起来最好，但需要先确认 `TESTS_COVERED` 那批的实际分布。\n\n会话：`session_01WyvqvKMG6asi9aXjKE6xtx`（#6212 批 C 实施期间发现，未认领）"
+}

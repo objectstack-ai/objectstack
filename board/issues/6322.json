@@ -1,0 +1,37 @@
+{
+  "number": 6322,
+  "kind": "issue",
+  "title": "[client] `data.find` 的 canonical options 探测漏掉 `limit`;`QueryOptionsV2.expand` 声明了但从不落到传输参数",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched",
+    "pm:queue",
+    "target:v17"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T13:46:36Z",
+  "updated_at": "2026-08-08T02:06:24Z",
+  "closed_at": "2026-08-08T02:06:24Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6322",
+  "body": "## 事实(对 `origin/main` `a682670` 实测)\n\n`packages/client/src/index.ts` 的 `ObjectStackClient.data.find`(:4081)靠一组「嗅探键」判断传入的是 canonical `QueryOptionsV2` 还是 legacy `QueryOptions`:\n\n```\nif ('where' in options || 'fields' in options || 'orderBy' in options || 'offset' in options) {\n```\n\n(:4089;`ScopedProjectClient.data.find` :4766 是逐字同形的第二份拷贝)\n\n嗅探键只有四个 —— `where` / `fields` / `orderBy` / `offset`。`limit` 不在其中。\n\n### 实测\n\nvitest + stub fetch,读 `find` 真正发出的 query string(探针跑完即删,未入库):\n\n| 传入 options | 实际发出的 query string |\n|:---|:---|\n| `{ where, orderBy, limit, offset, fields }` | `top=20&skip=5&sort=-created_at&select=id%2Camount&contact_id=c1` |\n| `{ filter, sort, top, skip, select }` | `top=20&skip=5&sort=-created_at&select=id%2Camount&contact_id=c1` |\n| **`{ limit: 20 }`** | **(空)** |\n| `{ top: 20 }` | `top=20` |\n| `{ offset: 5 }` | `skip=5` |\n| `{ where, limit: 20 }` | `top=20&contact_id=c1` |\n| `{ where, expand: ['contact'] }` | `contact_id=c1` |\n\n前两行是好消息:canonical 与 legacy 的五个配对键产出**逐字节相同**的传输参数,翻译层本身是对的。问题在另外两处。\n\n### A. `{ limit: N }` 单键调用被静默丢弃\n\n`limit` 不是嗅探键,于是走 legacy 分支的 `Object.assign`(:4100);而 legacy 分支此后只读 `top` / `skip` / `sort` / `select` / `filter` / `filters` / `aggregations` / `groupBy`(:4104-4150)—— `limit` 从头到尾没有任何一行读它。\n\n调用方拿到的是服务端默认页大小,HTTP 200,无警告无报错。而 `data.find('task', { limit: 20 })` 恰恰是 canonical 词汇下最自然的「取前 20 条」写法:不带 filter 的分页读取,一个键都不多写。\n\n`offset` 单键(`{ offset: 5 }`)因为在嗅探键里,是正常的 —— 同一个接口的两个分页键行为不一致。\n\n### B. `QueryOptionsV2.expand` 声明了但从不映射\n\n`expand` 在 :186 声明,JSDoc 说明是 \"Relations to expand (JOIN / eager-load)\"。但:\n\n- V2 分支逐键搬运 `where` / `fields` / `orderBy` / `limit` / `offset` / `aggregations` / `groupBy`(:4091-4097),**没有 `expand`**;\n- legacy 分支也接不住 —— `QueryOptions` 根本没有对应键(V2 的 JSDoc 说 `expand` \"replaces legacy `populate`\",而 `QueryOptions` 从来没有 `populate`)。\n\n所以 `expand` 在两条分支上都落地为空,一个字符都到不了 wire。这不是服务端不认:REST 列表路由是处理 expand 的(参见 #4240 对 `sort`/`select`/`expand` 的字段校验)。是 SDK 单方面的 declared ≠ delivered(Prime Directive #10 的正例形状)。\n\n## 为什么现在报\n\n在 #6002(给 `content/docs/kernel/runtime-services/data-service.mdx` 的 Parameters 补 canonical 词汇)的实现过程中实测出来的。那一单的文件面只有 `content/docs/**`,且按 contract-first 不该在消费侧或文档侧糊补丁,所以 producer 侧的洞单独立单。\n\n有一点值得 PM 权衡优先级时知道:#6002 的文档页从此会**正面推荐** canonical 列(`where` / `fields` / `orderBy` / `limit` / `offset`),照抄这页的人会开始直接写 `limit` —— A 的命中面随之变大,而不是维持现状。\n\n## 建议\n\n不要逐个往嗅探列表里补键(补完 `limit` 还有 `expand`,下一个新键还会漏)。按「存在任一 **canonical-only** 键」判定 —— 即 `where` / `fields` / `orderBy` / `limit` / `offset` / `expand` 的全集,和 `QueryOptionsV2` 的声明同源,新增键自动在内。\n\n`expand` 另按 ADR-0049 enforce-or-remove 二选一:补上映射,或从 `QueryOptionsV2` 摘掉。\n\n两处 `find` 拷贝(:4081 / :4761)必须一起改 —— 它们目前逐字相同,只改一处就会分叉。\n\n未认领,交 PM 分诊定级。\n"
+}

@@ -1,0 +1,33 @@
+{
+  "number": 6335,
+  "kind": "pull_request",
+  "title": "fix(scripts): digest 的回落读取不再刷一屏 git `fatal:`,改说一句可读事实 (#6175)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "size/m",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T14:05:08Z",
+  "updated_at": "2026-08-07T14:47:41Z",
+  "closed_at": "2026-08-07T14:47:39Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-08-07T14:47:39Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/6335",
+  "body": "Fixes #6175\n\n`readAt()` 的回落路径本身是对的 —— 坏的是它把一次**完整**的结果打成了一次失败的样子。本 PR 落地分诊 07:57Z 同意的 **B + C** 组合:B 消掉误导,C 把「发生了回落」从噪声变成一句可读的事实。\n\n## 前提复核(#6289 合并后)\n\n- 分支从 `origin/main` @ `3264516` 切出,已含 PR #6289(`7330c1d`,判据扩到「声明 major 或作者正文标注」)。\n- issue 正文把 `readAt()` 记在 :186–192;#6289 之后**行号漂移到 :313–319**,函数体逐字一致(`try { git show ${to}:${path} } catch { git show ${sha}:${path} }`)。按内容定位,前提成立。\n- 机制当场复现,不是推断:`execFileSync` 未指定 `stdio` 时子进程 stderr 直接接到父进程的 stderr,所以第一次 `git show` 的 `fatal:` 在 `catch` 跑起来之前就已经写出去了。\n\n### 一处派发单事实更正\n\n派发单称重放区间 `f5bc4c78be76...f995a452d2ca` 的 `to` 是 release commit。实测**不是**:\n\n| sha | 真实 subject |\n| --- | --- |\n| `f995a452d2ca` | `ci(scripts): type-check scripts/ via a standalone tsconfig.scripts.json (#3494)` |\n| `7dfbeb704e1e` | `chore: release packages (#3248)` ← 真正的 release commit |\n\n`7dfbeb704e1e` 正是 issue 正文自己观察到的那次 pin bump 的 `to`。所以主重放改用 issue 自己的区间 `f995a452d2ca..7dfbeb704e1e`(**会**回落),并把派发单给的 `f5bc4c78be76..f995a452d2ca`(**不**回落)留作零回落对照组 —— 比原计划多出一个方向的证据。\n\n## 实现(仅 `scripts/objectui-changeset-digest.mjs`)\n\n### B — 第一次尝试静默,但只静默「成功的回落」\n\n`git()` 增加 `captureStderr` 选项(默认关):打开时用 `stdio: ['ignore', 'pipe', 'pipe']` 把子进程 stderr 收进抛出的 error,而不是接到我们自己的 stderr。默认关是有意的 —— 失败即失败的调用(例如 `main()` 里那次 `git cat-file -e` 端点探测)应当继续把 git 的诊断直接打出来。\n\n`readAt()` 因此变成:第一次尝试捕获 stderr;失败则回落到「添加它的那个 commit」,同样捕获;**两次都失败**时把两次的诊断按尝试点名重新打出来再继续抛错:\n\n```\n✗ objectui-changeset-digest: cannot read .changeset/never-existed.md — neither at `to` nor at the commit that added it.\n  at `to` (9b4f60aa1055f38a27a159d1ab2779fae2735d2e):\n    fatal: path '.changeset/never-existed.md' does not exist in '9b4f60aa1055…'\n  at the commit that added it (9b4f60aa1055f38a27a159d1ab2779fae2735d2e):\n    fatal: path '.changeset/never-existed.md' does not exist in '9b4f60aa1055…'\n```\n\n安静是「回落成功」挣来的,永不外借给真正的失败 —— 彻底失败比改前更响(多了一行点名摘要和两段按尝试标注的诊断,退出码不变)。\n\n### C — 回落发生时,在 accounting 行旁说一句事实\n\n`classifyRange()` 统计 `absentAtTo`(实际发生回落的 changeset 数,`entries` 已按 path 去重,故一条只记一次),经 `buildDigest()` 透传到 CLI,在 accounting 行**之后**打一句、且仅在大于 0 时打:\n\n```\n→ 9 of 9 changeset(s) added in this range no longer exist at 7dfbeb704e1e — a release consumes the changesets it ships; each was read from the commit that added it, so the account above is complete.\n```\n\n两个刻意的落点选择:\n\n1. **落在 stderr,不落在 changeset 正文。** 正文记录的是「这个区间发布了什么」,而「工具怎么读到这个文件」不是发布事实;需要这句话的是盯着这次运行的操作者,也正是当初被那九行 `fatal:` 误导的那个读者。\n2. **措辞不做主观断言。** 不去读 `to` 的 subject 判断它是不是 release commit —— 那正是 #4731 从这个文件里清掉的 subject 推断。只陈述实测事实(N 条在 `to` 处不存在、各自从添加它的 commit 读到),再用一句通用机制解释。\n\n## 真实区间重放(改前 / 改后)\n\n**主重放 `f995a452d2ca..7dfbeb704e1e`(`to` = release commit,9 次回落)**\n\n| | 改前 | 改后 |\n| --- | --- | --- |\n| stdout sha256 | `539eb31c7b0674b9…` | `539eb31c7b0674b9…` **逐字节不变**(`cmp` exit 0) |\n| stderr `fatal:` 行数 | **9** | **0** |\n| stderr accounting 行 | `→ 9 releasing changeset(s), 0 breaking (0 declared major, 0 annotated), 0 release-nothing, 20 commit(s) without a changeset` | 同上,**逐字不变** |\n| stderr 新增 | — | 一行 C 句(`→ 9 of 9 changeset(s) … the account above is complete.`) |\n| 退出码 | 0 | 0 |\n\n**对照组 `f5bc4c78be76..f995a452d2ca`(0 次回落)**:stdout **和** stderr **双流逐字节不变**(`cmp` 两次 exit 0)—— 没有回落就没有新行,C 不制造新噪声。\n\n## 反向验证(先申报,后执行)\n\n两个变异体都**先申报预期方向再跑**,实测逐条对上:\n\n**M1 —— 撤掉 B(第一次尝试恢复继承 stderr),保留全部新断言**\n\n- 申报:`#6175 the fallback no longer leaks git fatal: onto stderr` 转红;其余 7 条 #6175 断言应**保持绿**(零回落那条的区间根本不失败;两条彻底失败断言里,第一次的 `fatal:` 泄漏到同一条流、第二次仍被捕获重发,`fatal:` 计数与双 sha 断言都还成立)。\n- 实测:**恰好 1 红**,正是申报那条;真实区间同时恢复刷九行 `fatal:`。申报命中。\n\n**M2 —— 删掉 C 的输出,其余不动**\n\n- 申报:`#6175 the fallback SAYS SO — once, with the real count` 转红。并且**明确申报另外两条不会转红**,理由是结构性的,不是运气:`a range that crossed no release gains NO new line` 是一条**否定式**断言,把 C 整个删掉恰好平凡地满足它;`the fallback is COUNTED` 读的是返回值上的 `absentAtTo` 字段而不是打印出来的那行。\n- 实测:**恰好 1 红**,正是申报那条;那两条如申报保持绿。\n\n这一条与派发单模板不同,如实记录:派发单写的是「删掉 C ⇒ (a/c 相关断言转红」,实测只有 (a) 侧那条**肯定式**断言会红。一条否定式断言在构造上无法察觉「它所禁止的东西被删掉了」—— 这正是那条 CLI 子进程肯定式断言必须单独存在的原因,两条并不冗余。\n\n## self-test\n\n`--self-test` 从 #6289 的 37 条 → **45 条**,新增 8 条独立成组,⛔ 未改 #4731 / #6099 既有 fixture 的任何精确计数(新建第三个临时仓库 `objectui-released`:两条 changeset 各自被一个 commit 添加,再由一个 `chore: release packages` commit 一并删除,范围 `base..release` 同时含增与删)。\n\n其中 3 条通过 **spawnSync 子进程跑真实 CLI**:git 的 `fatal:` 落在真实 stderr 上,进程内断言根本看不见它。彻底失败那条通过新导出的 `readAt` 驱动 —— `classifyRange` 到不了那个分支(它的 `sha` 来自 `--diff-filter=A`,路径必然存在),而一条测试进不去的错误路径,正是会悄悄烂成静默的那条。\n\n## 门禁(均在 `git add` 之后跑)\n\n| 门禁 | EXIT |\n| --- | --- |\n| `pnpm check:objectui-changeset`(digest 45 条 + objectui-range 自测) | **0** |\n| `pnpm exec eslint scripts/objectui-changeset-digest.mjs --no-inline-config` | **0** |\n| `pnpm check:nul-bytes` | **0**(56 断言自测 + 扫 5978 个跟踪文本文件) |\n| 控制字节自扫 `grep -naP '[\\x00-\\x08\\x0b\\x0c\\x0e-\\x1f\\x7f]'` | grep exit **1**(无命中 = 干净) |\n\n## 不在本 PR 里\n\n- **A 方案(先 `git cat-file -e` 探测再读)未采纳**:它把回落变得**完全无声**,与本仓刚立的 absence/degradation must be loud 反向。B + C 保留「发生了回落」这个事实,只是把它从九行噪声压成一句可读的话。\n- **`bump-objectui.sh` 一字未动** —— 它只是调用方,`fatal:` 出自 digest 的 `readAt()`。\n- **`scripts/objectui-range.mjs` 未动**(#6174 的面,该单在本 PR 合并后才派)。它经 `classifyRange` 消费本文件,新增的 `absentAtTo` 是纯增量字段,不改变任何既有返回值。\n- **pin 一律不动**:不重跑、不改任何 pin;#6159 / PR #6173 的产物已核对无误,产物正确性不在本单范围。\n- **`main()` 里 `git cat-file -e` 端点探测的 `fatal:` 保留**:那条路径失败即真失败(随后 `✗ … cannot walk …` 并 exit 2),响亮是对的,与本单要修的「完整结果长得像失败」不是一回事。\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01BDmDsu2575gDxeMCxXhDE3)_"
+}

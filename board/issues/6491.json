@@ -1,0 +1,35 @@
+{
+  "number": 6491,
+  "kind": "pull_request",
+  "title": "fix(spec): 参考页里写在括号中的裸源码路径重新成链接 —— 删掉 tokenizer 之后已无事可做的前后瞻对",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T01:51:04Z",
+  "updated_at": "2026-08-08T02:30:11Z",
+  "closed_at": "2026-08-08T02:30:10Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": "2026-08-08T02:30:10Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/6491",
+  "body": "Fixes objectstack-ai/objectstack#6420\n\n## 问题\n\n参考页开篇那段模块描述由 `packages/spec/scripts/lib/file-description.ts` 渲染。其中把 JSDoc 里裸写的 `*.zod.ts` 路径改写成站内链接的那一步(`renderProse()`),正则两端各挂着一个前后瞻 —— 「前面不是左括号」和「后面不是右括号」。\n\n这对前后瞻是 **tokenizer 出现之前**的产物,本意是「别去动已经是链接目标的路径」:`](route)` 恰好把那个路径夹在这两个字符中间。它从来表达不了这件事(前后瞻说不出「不在链接内部」—— 该文件模块注释里就写着这句),而 #6136 之后它更是**无事可做**:成形的链接是独立的 `link` token,这一步只会拿到 `text` token。\n\n它**仍在**做的,是把作者自己写在**普通括号**里的每一个路径一并拒掉。那是散文,不是链接,于是这些路径既没成链接、也没回退成代码段,以**纯文本**发布在三张参考页上:\n\n| 页面 | 原样 |\n|:--|:--|\n| `references/automation/etl:16` | `- **Enterprise Connector** (integration/connector.zod.ts) - …` |\n| `references/integration/connector:17` | `- **ETL Pipeline** (automation/etl.zod.ts) - …` |\n| `references/shared/mapping:16` | `- Integration connectors (integration/connector.zod.ts)` |\n| `references/shared/mapping:17` | `- External lookups (data/external-lookup.zod.ts)` |\n\n## 变更\n\n删掉这对前后瞻,它们原本想守的不变量交还给 tokenizer 守。渲染成链接的**前提没有放宽** —— 目标没有页面的路径照旧回退成代码段,所以括号位置永远不会产出 404。\n\n四处的前后对照:\n\n```\n- **Enterprise Connector** (integration/connector.zod.ts) - System integrators\n+ **Enterprise Connector** ([integration/connector.zod.ts](/docs/references/integration/connector)) - System integrators\n```\n\n## 放宽的实测半径:就是这四处,别无其他\n\n分诊座位点名这是本单最需要量出来的数,也定了一条 stop-and-report。在修好的生成器上重跑 `pnpm --filter @objectstack/spec gen:docs`:\n\n```\n✅ Generated 231 files\n content/docs/references/automation/etl.mdx        | 2 +-\n content/docs/references/integration/connector.mdx | 2 +-\n content/docs/references/shared/mapping.mdx        | 4 ++--\n 3 files changed, 4 insertions(+), 4 deletions(-)\n```\n\n**231 个产物,3 个文件,4 行** —— 新成链接的位置全语料共 4 处,与 issue 点名的四处完全重合,零附带。三条新路由 `/docs/references/{integration/connector, automation/etl, data/external-lookup}` 均对应真实存在的 `.mdx`;顺带把 `content/docs/references/**` 里发出的全部 214 条站内路由逐条核了一遍,无死链(其中 14 条是分类首页,落在 `分类/index.mdx`)。\n\n**stop-and-report 条件未触发**。\n\n## 反向验证 —— 方向是先预言再跑的\n\n预言:把守卫放回去,四条括号用例 + 语料条转红,其余全绿。实测三种放法结果一致:\n\n| 放回的东西 | 结果 |\n|:--|:--|\n| 整对前后瞻 | `Tests  5 failed \\| 41 passed (46)` |\n| 只放回前瞻 | `Tests  5 failed \\| 41 passed (46)` |\n| 只放回后瞻 | `Tests  5 failed \\| 41 passed (46)` |\n\n红的恒是同一组:四条括号用例 + 语料条。**未括号用例、#6229 整块、以及「成形链接的目标不被二次改写」那条,三种放法下全绿** —— 最后这条正是本 PR 的立论:守不变量的现在是 tokenizer,不是被删掉的守卫,所以删它不会重开 #6136。\n\n这一点也单独量过,没有只靠推断:把 bare-path 那步的 token 白名单从「只含 text」改成「text 加 link」(即模拟 tokenizer 保护失效),#6136 的两条与这条一起转红,输出正是注释里写下的那个形状(下面去掉了 vitest 的外层引号):\n\n```\nExpected: See [the fallback](../nowhere/absent.zod.ts) for now.\nReceived: See [the fallback](`../nowhere/absent.zod.ts`) for now.\n```\n\n## 测试\n\n`packages/spec/scripts/file-description.test.ts` 新增 6 条单测(与 #6229 的 7 条并列)+ 1 条语料级断言:\n\n- 括号内路径成链接 —— `automation/etl` 已发布那行的逐字输入;\n- 括号收尾于行末 —— `shared/mapping` 形状(与上一条的闭合方式不同,后瞻两者都拒);\n- 括号内带 `../` 前缀 —— #6229 与本单可组合;\n- 括号内**无路由**路径回退成代码段,绝不发死链;\n- **反空过守卫**:同一条路径在括号外仍成链接,把唯一变量钉死在括号上(否则前四条大可围着代码段回退去写,写成全绿却什么都没证明);\n- **成形链接的目标不被二次改写** —— 被删守卫真正的用意所在,现由 tokenizer 承担;\n- 语料级:凡本步能匹配的路径,不得以裸文本留在括号里(在**渲染结果**上判,不读 `.mdx` —— `check:docs` 会忠实复制产物,三处已发布症状正是这样一路绿过来的)。\n\n## 与在飞 #6473 的同页相撞\n\n#6473(#6383)在本单实施途中于 01:38Z 落地,与本单同改 `content/docs/references/integration/connector.mdx`。⛔ **未做文本合并**:合 `main` 后在**合并树上**整体重跑 `gen:schema` 与 `gen:docs`(#4675 第四步,#6224 / #5552 有先例)。仓库自带的 regen merge driver 也正是这样拒绝文本合并并给出这条指令的。`packages/spec/src/integration/connector.zod.ts` 本单**一字未碰**。\n\n合并后同页**实测**两侧效果俱在:#6473 的「What this layer does NOT provide」一节在第 27-43 行;本单的第 17 行已成链接。并逐行复核 #6473 新增散文里的路径(第 43 / 54 / 80 / 106 / 113 行)全在反引号内,是 `code` token,本单放宽够不着 —— 此处为实测,非假定。\n\n## 门禁(全部前台执行,持容器级 `flock` 锁,`--filter` 限定范围)\n\n在**合并后**的树上:\n\n```\npnpm --filter @objectstack/spec test            → Test Files 339 passed (339) / Tests 8706 passed (8706)\npnpm --filter @objectstack/spec typecheck       → tsc --noEmit + check:scripts-typecheck + check:test-typecheck 全绿\npnpm --filter @objectstack/spec check:docs      → 231 generated files in sync with packages/spec\npnpm --filter @objectstack/spec check:generated → All 10 generated artifacts are up to date\nnode scripts/check-nul-bytes.mjs                → OK(6095 tracked text files,无裸 ASCII 控制字节)\npnpm docs:build                                 → 全语料 MDX 编译通过,390+ 路由预渲染\neslint(两个改动文件,--no-inline-config)         → exit 0\ncheck:doc-authoring / docs-audit-scope / role-word / quick-reference-counts\n  / empty-changeset / release-notes / adr-anchors → 全 PASS\n```\n\n`Tests 8706` 对得上账:`main` 上是 8699,本单新增 6 + 1 = 7 条。\n\n`check:generated` 首跑曾报 `api-surface/` 陈旧 —— 那是**新 worktree 未 build 的假红**(`gen:api-surface` 直接以 `Could not resolve module symbol … Is the package built?` 失败)。`pnpm --filter @objectstack/spec build` 后复跑 10 项全绿,`api-surface/` 一个字节未变 —— 本单不碰 `packages/spec/src`,结构上不可能影响它。\n\n另在构建产物里核了终态:`.next/server/app/en/docs/references/shared/mapping.html` 与 `automation/etl.html` 里,这几处已是真正的 `a href` 锚点。\n\n## 交付物取舍\n\n- 带 **changeset(`patch`,`@objectstack/spec`)**:有读者可见的产物 —— 三张已发布参考页上四处纯文本变成可点链接。\n- ⛔ **未碰 `content/docs/releases/`**。\n- 生成物为 `gen:docs` 纯输出,**未手改一个字节**;源码修改与重生成分属不同 commit(合并树上的重跑再单列一个)。\n\n## 顺带扫出、未在本 PR 修\n\n**#6484** —— 同目录裸路径(无分类段,如 `auth.zod.ts`)从来不成链接:改写正则与 `sourcePathToDocsRoute()` 两侧都要求路径里有一个 `/`,所以这类路径带不带括号都以纯文本落地。实测模块描述管线内 9 处 / 4 张已发布页,另有 2 处在 schema 级 description 那条别的管线里。已按 Prime Directive #10 独立立单(未认领、未打标,留给分诊),**不在本 PR 内顺手修** —— 它要动的是 `FileDescriptionContext` 的入参契约,本单一个字节都不碰那个接口。\n\n---\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01AZgRyPVwi1jLb1mNNuUQ9o\n"
+}

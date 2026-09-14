@@ -1,0 +1,34 @@
+{
+  "number": 6137,
+  "kind": "issue",
+  "title": "[finding] `theme.zod.ts` / `chart.zod.ts` 里那两段「本块之上不得出现 doc block」的 `//` 警告,在 #5059 之后已过时(保守但无害)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:queue"
+  ],
+  "assignees": [
+    "qq9340100"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T03:11:35Z",
+  "updated_at": "2026-08-07T14:20:40Z",
+  "closed_at": "2026-08-07T14:20:40Z",
+  "closed_by": {
+    "login": "qq9340100",
+    "id": 313832657,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6137",
+  "body": "观察项,**今天没有任何用户会踩到** —— 照着这两段警告做仍然完全安全,只是理由已经不成立了。不排期,登记备查。\n\n## 现状\n\n`packages/spec/src/ui/theme.zod.ts:11-22` 与 `packages/spec/src/ui/chart.zod.ts:13-18` 各有一段 `//` 行注释,内容是 #3746 陷阱 1 的自我提醒:\n\n- theme:「⚠️ Nothing above this block may be a JSDoc block: `build-docs.ts` 的 `getFileDescription()` 把模块的**第一个** doc block 发布为参考页描述……而且不要把那个两星记号字面写出来,因为它用裸正则扫原文,**即使写在 `//` 行里**也会被当成文件里第一个 doc block」——后半段还记录了这条警告的初稿自己踩中陷阱、把 `Color Palette Schema / Defines brand colors…` 从已发布页删掉的经过;\n- chart:同形状,指向 theme 里那段更长的说明。\n\n## 为什么现在过时\n\n#5059(PR #6134)把取块规则改成了「顶层 + 首个声明之前 + 其后不紧跟声明」。两条被警告的危险都不再存在:\n\n1. 写在这两个块**之上**的 doc block,如果紧跟着它下面的首个 schema,新规则判它属于那个符号,不会发布;如果被横幅隔开,那它本来就是一段真的模块说明,发布是正确行为。\n2. 「在 `//` 行里字面写出两星记号也会命中」这条彻底消失:新扫描要求 `/**` 出现在**第 0 列**,`// … /** …` 这样的行以 `//` 开头,匹配不到。\n\n也就是说这两段注释现在教的是一条比实际更严的自我约束,以及一个已经不存在的次生陷阱。**照做无害**(不写文件头 JSDoc 永远是安全的),所以这只是指引漂移,不是缺陷。\n\n## 可能的处置(交分诊)\n\n改写这两段注释,说明真正的规则(「想给这张参考页写开篇,就在文件里放一个不文档任何符号的 doc block;紧贴 schema 写的块归那个 schema」),顺便让 `ui/theme` / `ui/chart` 两张页面**有机会**重新拿到开篇 —— 它们目前的描述来自别处,或者干脆是这两段 `//` 挡出来的空缺。\n\n落点在 `packages/spec/src/**/*.zod.ts`,属 `domain:spec` 车道;#5059 的开发座位被明确限制不得触碰 zod 文件,故只登记不动手。\n\n由 #5059(PR #6134)的开发过程扫出。范围外,故单开。"
+}

@@ -1,0 +1,36 @@
+{
+  "number": 6073,
+  "kind": "issue",
+  "title": "`defineStack` parses at definition time, so the authoring registry's `normalized` (pre-parse) tier may never actually be pre-parse for a TS config — the tier's whole reason for existing",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched",
+    "tooling"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T17:18:56Z",
+  "updated_at": "2026-08-07T15:01:46Z",
+  "closed_at": "2026-08-07T15:01:46Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6073",
+  "body": "Found while implementing #5693. Filed unassigned, **observation-class** (`finding`, no `pm:queue`): the first half is measured, the second half is a consequence I did **not** verify — see \"What still needs measuring\". Nothing is known to be broken for a user today.\n\n## The tier's contract\n\n`packages/lint/src/authoring-rules.ts` declares two input tiers, and says why the pre-parse one exists:\n\n```ts\n/**\n * - `normalized` — the `normalizeStackInput` output, BEFORE the Zod parse. The\n *   rules that need it check keys the parse strips (a flat list view in\n *   `views: []`, `userFilters` on an object list view, a `visibleOn` alias): by\n *   the time `result.data` exists the evidence is gone.\n */\nexport type AuthoringRuleInputTier = 'normalized' | 'parsed';\n```\n\nSix rules are wired `input: 'normalized'` today, and their own headers repeat it — e.g. `validate-list-view-mode.ts:15` \"Runs PRE-parse (on the normalizeStackInput output, before the …)\", same in `validate-view-containers.ts:14`.\n\n## What is measured\n\n`defineStack` — the documented and universal way a TS config declares a stack — **parses**, strictly by default (`packages/spec/src/stack.zod.ts:1245`):\n\n```ts\nconst result = ObjectStackDefinitionSchema.safeParse(normalized, { error: objectStackErrorMap });\n...\nconst data = result.data;   // returned to the caller\n```\n\nSo `export default defineStack({...})` evaluates to `result.data` — defaults filled, unknown keys stripped — **before the CLI ever loads the module**. Whatever the commands then do with that value, the parse has already happened.\n\nDirectly observed on `examples/app-todo` (a `defineStack` config), during #5693:\n\n- `os lint` calls `runAuthoringRules('lint', { normalized: config, … })` with **no** `parsed` key (`packages/cli/src/commands/lint.ts:428`), and the runner falls back — `run.parsed ?? run.normalized` (`authoring-rules.ts:1035`) — precisely so a `parsed`-tier rule still gets *something*. The comment there is explicit that `os lint` \"does not Zod-parse\".\n- Yet with the flow's `runAs` line deleted, `os lint` printed the `flow-runas-unscoped` message arm that is only reachable when `flow.runAs` **is a string**. It could only be a string because `FlowSchema`'s `.default('user')` had already been applied — i.e. the stack `os lint` had in hand was post-parse.\n\nThat is the measurement: for a `defineStack` config, `os lint`'s \"normalized\" input is a **parsed** stack.\n\n## Why it may matter beyond #5693\n\nFor `flow-runas-unscoped` this was harmless-and-then-fixed (#5693 removed the branch that could see the difference). But the tier exists for rules whose evidence is *destroyed* by the parse. If the value handed to `normalizeStackInput` in `lint.ts` / `validate.ts` / `compile.ts` is already `result.data`, then normalizing it again cannot resurrect a key the parse stripped — the alias, the flat list view, the `userFilters` are gone before any command runs, and the `normalized`-tier rules would be structurally silent on exactly the configs that make up the repo's own examples.\n\nIf that holds, the tier is only genuinely pre-parse for stacks that never went through strict `defineStack`: raw JSON/YAML, `defineStack(x, { strict: false })`, and direct API callers. Same family as #4984 / #5693 — a check whose input shape in production differs from the input shape its tests feed it.\n\n## What still needs measuring (do this before treating it as a defect)\n\nI did not verify the consequence, only the mechanism. Concretely:\n\n1. Take one `normalized`-tier rule with a real stripped-key fixture — `validate-list-view-mode` (flat list view in `views: []`) or `validate-view-containers` — and author that shape in a `defineStack` TS config in an example app.\n2. Run `os lint` and `os validate` on it. Does the rule report? If it reports, the parse is not stripping what we assume (`ObjectStackDefinitionSchema` may be permissive at that site) and there is nothing here.\n3. If it does **not** report, compare against the same stack fed as raw JSON — that difference is the defect, and its size is \"how many of the six `normalized` rules are affected\".\n\nWorth noting one non-obvious possibility in the other direction: `defineStack` also runs `warnUnknownAuthoringKeys(normalized)` on the pre-parse value and warns there, so some of this ground may already be covered at definition time by a different channel — which would change the remedy (delete the tier's claim, or route those rules through the same seam) rather than the finding.\n\n## Related\n\n- #5693 — where this surfaced (`os lint` printing a parsed-tier-only message arm).\n- #4984 — the family: a rule proven only on an input shape production never sends.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01BDmDsu2575gDxeMCxXhDE3)_"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 6440,
+  "kind": "pull_request",
+  "title": "fix(objectql,lint): 服务端为 `requiredWhen` 绑定 parent 作用域,并把构建期硬闸扩到同一格 (#4977)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T18:37:44Z",
+  "updated_at": "2026-08-07T20:44:57Z",
+  "closed_at": "2026-08-07T20:44:54Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": "2026-08-07T20:44:54Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/6440",
+  "body": "Fixes objectstack-ai/objectstack#4977\n\n按维护者 2026-08-06 裁决执行 **A + C**;**B(不可求值 422 拒写)明确不做**,留 ADR-0058 D5 复审。\n\n## 前提复核(三条,全部成立)\n\n| | 结论 | 证据 |\n|:--|:--|:--|\n| **P1** requiredWhen 的 parent 作用域今天确实不绑 | ✅ 成立 | `rule-validator.ts` 的 requiredWhen 分支求值上下文只有 `{ record: merged, previous }`。反向验证实测:去掉本 PR 的 parent 传参,新增的 4 条命中用例立刻转红。 |\n| **P2** #4889 管件在 main 且形态可复用 | ✅ 成立 | `resolveMasterDetailRelation` / `resolveMasterDetailParent(s)` / `readsParentRoot` / `unknownVariableOf` 全部原样复用,本 PR **没有**新建第二套。 |\n| **P3** 仓内暂无 app 使用该形态 | ✅ 成立 | 全仓 grep:parent 作用域的 `requiredWhen` 只出现在 lint 的一条测试 fixture 里;showcase 的 invoice line 用的是行作用域 `record.quantity >= 100`(`invoice.object.ts` L212,原注释已写明 \"ROW-scoped\")。属补潜伏缺口,不改变任何现有 app 行为。 |\n\n## 肢 A —— 服务端绑 parent(求值语义不动)\n\n引擎在三个调用点解析主表头并传入求值器:insert(批量一次读)、单 id update(与 readonlyWhen **共用同一次**解析)、bulk update(每行一个表头,批量一次读)。\n\n**不可求值仍然 fail-open** —— 记日志、跳过、放行。唯一变化是诊断:未绑定的**根**会被点名(复用 `unknownVariableOf`),因为「表头读不到」和「作者写错 key」是两种故障、两种修法,而它们只有一行日志可分辨。\n\n### `previousParent`:为什么多了这一个绑定\n\nADR-0113 非回归判定问的是「**写入前**那一行是否已经违规」,而它挂的是**旧**表头。改挂(repoint)到另一个主表时,若把落地表头也喂给这个前置判定,就会把「移到 Sent 表头之下」读成既有违规而放行 —— 正是本 issue 要堵的那个收下动作,只是换了个入口。因此新增 `previousParent`,**仅在载荷确实改挂时**由引擎解析,其余情况沿用同一行、不多付一次读。\n\n### 爆炸半径(#4972 当初把本改动挡在范围外的原因)\n\n对象级 `script` / `cross_field` 规则共用这个求值调用点,自 #4649 起对不可求值谓词 **fail-closed**。本 PR **没有**给它们绑新根 —— 绑了会把它们今天拒掉的写入翻成接受。已由 pin 测试钉住(单元 + 端到端各一条),实测报错仍是 #4649 的原文案。\n\n## 肢 C —— 构建期硬闸\n\n`packages/lint` 的 parent 作用域闸原本刻意只盖 `readonlyWhen`,现在同样判 `requiredWhen`。两格共用**同一道**闸(同一个 `masterDetailCount` + `readsParentRoot`,CEL 解析走 formula 规范入口 `collectCelRootIdentifiers`,未直连 cel-js),但**文案分岔**:两边运行时失败方向相反(`readonlyWhen` fail-closed ⇒ 字段永远写不进;`requiredWhen` fail-open ⇒ 要求永远不生效),文案指错了就等于给了相反的修法。这正是运行时敢保持 fail-open 的前提 —— 会无声烂掉的那条声明进不来。\n\n实现上两个槽位都保持**字面量**成员读取(`f.readonlyWhen` / `f.requiredWhen`),没有改成 `f[key]` 索引:后者会**静默解除** #5017 那道扫源码的 meta-test 的武装。\n\n## 测试\n\n新增/改写覆盖(命中 / 不命中 / 缺 parent fail-open / repoint / bulk / 对照 / 爆炸半径):\n\n- `packages/objectql/src/engine-required-when-parent.test.ts`(新,14 条,真引擎 + 真 driver 端到端,driver fixture 沿用 #4889 的)\n- `packages/objectql/src/validation/rule-validator.test.ts`(+16 条单元:11 条求值语义 + 5 条 gate)\n- `packages/lint/src/validate-expressions.test.ts`(+5 条)\n\n**fixture 处置**:原 `it('is scoped to readonlyWhen — requiredWhen/visibleWhen verdicts are unchanged')` 钉的恰好是本 PR 删掉的那条肢,断言会因为「什么都没产出」而继续通过。按整体替换处理 —— `requiredWhen` 半边移入新增的正向用例,此处保留的是真正没变的 `visibleWhen`,fixture 也只声明这一个槽位。\n\n### 反向验证(方向**先**写死,两肢分别做)\n\n| 肢 | 预测方向 | 实测 |\n|:--|:--|:--|\n| **A** 摘掉引擎的 parent 传参 | **转红**,且只红「命中」用例 | ✅ 4 红 / 10 绿。红的正是 insert、update 置空、repoint、bulk 四条;fail-open、诊断、对照、爆炸半径 pin 保持绿(它们本就不依赖该绑定) |\n| **C** 把闸恢复成只盖 readonlyWhen | **转红** | ✅ 3 红 / 143 绿。红的是三条**正向**用例 |\n\n**诚实标注**:C 肢另有两条「断言 0 个 issue」的**负向** pin,在该回退下按构造必然保持绿 —— 它们不构成证据,分量全在那三条正向用例上。\n\n<details>\n<summary>命令与输出</summary>\n\n```\npnpm --filter @objectstack/objectql test   →  Test Files 141 passed (141) / Tests 2351 passed (2351)\npnpm --filter @objectstack/lint     test   →  Test Files  62 passed  (62) / Tests 1541 passed (1541)\npnpm --filter @objectstack/objectql --filter @objectstack/lint typecheck  →  both Done\npnpm check:engine-double-contract          →  OK — 80 pinned, 133 in the DEBT ledger, 4 exempt\nnode scripts/check-nul-bytes.mjs           →  OK (6070 tracked text files; no raw ASCII control bytes)\n```\n\n以上为 merge `origin/main` **之后**重跑的结果;merge-tree 预检 exit 0(无冲突)。\n</details>\n\n## 与同批在飞单的交互(实测)\n\n- **#5591(update 载荷剥离时序)**:无交互。剥离次序原样保留 —— readonlyWhen 剥离 → 静态 readonly 剥离 → `assertNoStrictDrops()` → `evaluateValidationRules`;本 PR 只在第一步**之前**多解析一个表头行,不碰 `suppliedValues`。\n- **#5922(算子对象拒收)**:无交互。`validateRecord` 在单 id update 路径上位于 `evaluateValidationRules` **之前**(engine.ts L5866 vs L6000),算子对象在到达本 PR 的代码前就已被拒。`operator-object-write-value.test.ts` 与 `engine-update-dispatch.test.ts` 一并重跑,214/214 绿。\n- **#6262(`data.id` 算子对象 + multi)**:落点在派发层与 bulk 分支的 SET 载荷;本 PR 在 bulk 分支只上提了 `parentForRow` 的解析并加了一个 opts 字段,与 SET 载荷的构造互不相干。merge-tree 对当前 `origin/main` 无冲突。\n\n## 偏差说明(需 PM 确认)\n\n派单要求 **⛔ 不触 `engine.ts`**。此项与裁决 A 不可兼得:`evaluateValidationRules` 是纯函数、不持有 driver,**只有引擎能读表头**,而 `engine.ts` 是全仓唯一的接线点(已 grep 确认无第二处调用方)。若严守该约束,交付物就只剩「求值器能接受 parent 但没人传」—— `declared ≠ enforced` 原样留在原地。\n\n故按裁决执行,并把 `engine.ts` 的改动压到最小、且刻意避开 #6262 的落点。\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_019Q7oc7ASjh8yxyS3Yz78We)_"
+}

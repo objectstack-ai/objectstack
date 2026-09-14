@@ -1,0 +1,34 @@
+{
+  "number": 5475,
+  "kind": "issue",
+  "title": "`packages/spec/scripts/**` 在任何 tsconfig 的 include 之外:9 个 vitest 测试文件 + 全部构建/gate 脚本无类型检查覆盖",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T13:38:14Z",
+  "updated_at": "2026-08-07T17:30:15Z",
+  "closed_at": "2026-08-07T17:30:15Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5475",
+  "body": "在 #5286（spec 测试层进 tsc）的实施中发现，记录备查，未认领。基线 `origin/main` @ `01c0baef9`。\n\n## 事实\n\n`packages/spec/tsconfig.json` 的 `include` 是 `[\"src/**/*\"]`，`tsconfig.test.json`（#5286 新增）同样只到 `src`。于是整个 `packages/spec/scripts/**` 不在该包任何 tsconfig 的 program 里——既不是「被 exclude 排除」，而是压根没被 include 选进来，所以连 `check:type-check-coverage` 的 `TESTS_COVERED` 都数不到它（该不变式只统计 include 根之下的测试文件）。\n\n这批文件不是死代码：\n\n- `vitest.config.ts` 的 `include` 含 `scripts/**/*.test.ts`，共 **9 个测试文件**在 `pnpm test` 里真的跑；\n- 其余是 `gen:schema` / `gen:openapi` / `check:liveness` / `check:strictness-ledger` 等 20 多个 CI gate 脚本本体。\n\n也就是说：这些脚本决定 spec 的生成物和多条 gate 的判定，却没有任何类型检查器读过它们。这正是 #4311 的缺陷类别，只是下沉了一层（#4311 关心「包级 tsc 覆盖」，#5286 关心「测试层被 exclude」，本单是第三种形态：**根本不在 include 里**）。\n\n## 实测\n\n把 `scripts/**/*` 并进 #5286 的 `tsconfig.test.json`（需同时把继承来的 `rootDir: \"./src\"` 放宽到 `\".\"`，因为 `scripts/` 在 `src/` 之外）后：\n\n```\n16 个文件 / 33 条错误\n```\n\n分层：\n\n| 层 | 数量 | 说明 |\n|---|---|---|\n| config-tier | TS5097 x13 | `.mts` 后缀 import，需要 `allowImportingTsExtensions` |\n| config-tier | TS2593/TS2304 x2 | `scripts/build-schemas-check-mode.test.ts` 用了全局 `beforeEach`/`afterEach`，需 vitest 类型 |\n| config-tier | TS7016 x1 | `check-generated.ts` import 仓库根的 `.mjs` 无声明文件 |\n| **code-tier** | **TS2339 x5 + TS7006 x1** | `scripts/build-schemas.ts:1208-1228` —— 一串 `Property 'keys'/'rev' does not exist on type 'never'`，某个值被推成 `never` 后仍在被取属性 |\n| noise | TS6133 x7 | 未使用的局部/导入（`build-docs.ts` x4、`build-openapi.ts`、`generate-sbom.ts`） |\n| code-tier? | TS7006 x1 | `check-liveness.mts:618` 隐式 any 参数 |\n\n按 AGENTS.md 已写下的纪律：先修 config 层再读残差，`build-schemas.ts` 那堆 `never` 才是真正要看的东西——而 `build-schemas.ts` 是 `gen:schema` 的本体，spec 全部 JSON Schema 由它产出。\n\n## 与 #5286 的边界\n\n#5286 的 PR 明确把这块**排除在外**并在 `tsconfig.test.json` 的注释里写明了理由（不夹带 riders）。同时确认：`scripts/**` 里**没有任何 `@ts-expect-error`**，所以 #5286 新增的 `PINS_CHECKED` 不变式不受影响——这里藏的不是幽灵 pin，是没被检查的生成器。\n\n## 建议方向（未定，交 triage）\n\n1. 把 `scripts/**/*` 并入 `tsconfig.test.json`（`rootDir` 放宽 + `allowImportingTsExtensions` + `types` 补 vitest），把 config-tier 一次修掉，code-tier 的 6 条按 #5286 的每文件台账 `packages/spec/test-typecheck-debt.json` 收口或直接修完；或\n2. 给 `scripts/` 单开一份 tsconfig，由 `typecheck` 脚本链一并指名（#5286 改造后的 `TESTS_COVERED` 已经支持 sibling 配置被指名即算覆盖）。\n\n两条路都会让 `check:type-check-coverage` 继续通过；差别只在 program 边界怎么切。\n\n关联：#5286、#4311、AGENTS.md「Build &amp; Test」段的 typecheck 覆盖纪律。\n"
+}

@@ -1,0 +1,36 @@
+{
+  "number": 6486,
+  "kind": "issue",
+  "title": "[sweep] ADR-0049 retire 5 declared-but-inert spec surfaces (#5295 #5703 #6239 #6247 #6414)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "qq9340100"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T01:47:35Z",
+  "updated_at": "2026-08-08T04:47:16Z",
+  "closed_at": "2026-08-08T04:47:16Z",
+  "closed_by": {
+    "login": "qq9340100",
+    "id": 313832657,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6486",
+  "body": "Sweep card (maintainer-directed, 2026-08-07). One claim, one PR, five `Fixes`, per-item checklist review — the #6243 / PR #6288 pattern, adopted here to amortize the claim/CI/acceptance overhead that `domain:spec` currently pays five times over.\n\n## Admission criterion (all five members hit the same one)\n\n> A surface declared in `packages/spec` with **zero runtime consumers repo-wide**, whose disposition under ADR-0049 enforce-or-remove is **remove**.\n\nSame route for every member: `spec-property-retirement` playbook — `retiredKey()` tombstone, ADR-0087 conversion/registry entry, regenerated baselines, docs regen, changeset. That shared machinery is exactly what makes one PR cheaper than five.\n\n## Members — verify, then retire\n\n**Per-item gate, mandatory before touching any member:** re-run the zero-consumer measurement on `origin/main` (quoted exact names, declaration-site grep per the scan discipline — a bare-name grep hits surviving relatives). **If a live consumer turns up, drop that member from the sweep and report it** — a wrong retirement is far more expensive than a smaller sweep.\n\n| # | Surface | Recorded evidence | Note |\n|---|---|---|---|\n| **#5295** | `ServerEvent*` / `ServerCapabilities` / `ServerStatus` in `system/http-server.zod.ts` | zero consumers measured during #4938 / PR #5293 | ⚠️ **Measurement first**: this card's own hold reason was that response/capability vocabularies may be a host-implementer reference surface. Confirm `plugin-hono-server` neither implements nor reports them; if it does, this member leaves the sweep and becomes an adopt/conformance card. |\n| **#5703** | `ActionDescriptor.supportsPause` / `isAsync` | zero non-test readers across three repos; the engine's only pause fact is `result.suspend` | |\n| **#6239** | View-Management five methods (`listViews`/`getView`/`createView`/`updateView`/`deleteView`) | zero implementation, zero routes; already mis-read once as a live route contract (#5948) | |\n| **#6247** | `TestSuiteSchema` / `TestScenarioSchema` / `TestStepSchema` / `TestActionSchema` / `TestAssertionSchema` (`qa/testing.zod.ts`) | zero runtime consumers, no liveness ledger entry; **ruled retire by the maintainer 2026-08-07** | Only member with the disposition already settled. |\n| **#6414** | L2 `ETLPipeline` | no execution-side consumer in this repo (spec + generated docs only) | ⚠️ `SYNC_ARCHITECTURE.md` currently recommends it as the destination after the L1 retirement — that prose must be corrected in the same PR, or the retirement contradicts the doc. |\n\n## Scope discipline\n\n- **Zero changes beyond the five members.** The PR self-certifies: `git diff --stat` file count must correspond line-for-line to the checklist. This is the line between a sweep and a rider.\n- **Out-of-scope findings are filed separately, as always** — PD #10 is not suspended by bundling.\n- Each retirement keeps its own changeset entry (one file per change; they never conflict).\n\n## Landing constraints\n\n- Touches `packages/spec` generated baselines ⇒ the `merge=os-regen` four-step序 applies on every sync: `git merge origin/main` → `git checkout origin/main -- <generated>` → **commit the merge first, then regenerate wholesale** → assert sibling entries survive. Never a text merge, never `gen:schema` while in MERGE state (#5370).\n- Anchor assertion is `pnpm --filter @objectstack/spec check:authorable-surface` **green** — `baseRev` is allowed to lag; ⛔ never hand-edit the anchor.\n- Serialize against other in-flight regenerating PRs in this lane per the #4675 four-step order.\n\n## Review shape\n\nReviewed **by the checklist, not by diff order**: one line per member — landing site | what was declared | what the tombstone now says — plus the consumer-measurement evidence for each. A member without its measurement quoted is not reviewable.\n\nFiled unassigned. Member issues keep `pm:queue` but are **excluded from batch selection while this card is open** (double-dispatch guard); all five close together when the PR merges."
+}

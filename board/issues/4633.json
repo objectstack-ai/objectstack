@@ -1,0 +1,37 @@
+{
+  "number": 4633,
+  "kind": "issue",
+  "title": "Import dry run green-lights a row the write then rejects: structured value shapes (address / location) are not pre-checked",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-02T12:21:19Z",
+  "updated_at": "2026-08-08T04:56:05Z",
+  "closed_at": "2026-08-08T04:56:05Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 10,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4633",
+  "body": "Found while authoring HotCRM&#39;s first `mapping` artifacts (objectstack-ai/hotcrm#603). Not blocking that work — filing so the divergence is recorded rather than rediscovered.\n\n## What happens\n\nA CSV cell aimed at a structured `address` (json-backed) field passes the dry run and fails the real write.\n\nMeasured on 17.0.0-rc.1, `POST /api/v1/data/crm_account/import`, mapping `Billing Address` to `billing_address` (a `Field.address`):\n\n**dryRun: true, runAutomations: false**\n\n```json\n{ &#34;total&#34;: 1, &#34;ok&#34;: 1, &#34;errors&#34;: 0, &#34;created&#34;: 1,\n  &#34;results&#34;: [ { &#34;row&#34;: 1, &#34;ok&#34;: true, &#34;action&#34;: &#34;created&#34; } ] }\n```\n\n**the same payload, dryRun omitted**\n\n```json\n{ &#34;total&#34;: 1, &#34;ok&#34;: 0, &#34;errors&#34;: 1, &#34;created&#34;: 0,\n  &#34;results&#34;: [ { &#34;row&#34;: 1, &#34;ok&#34;: false, &#34;action&#34;: &#34;failed&#34;,\n    &#34;code&#34;: &#34;VALIDATION_FAILED&#34;,\n    &#34;error&#34;: &#34;Billing Address has an invalid address value: Invalid input: expected object, received string&#34; } ] }\n```\n\nNothing is corrupted — the engine rejects the string per row, loudly and readably. The problem is only that the dry run promised otherwise.\n\n## Why it matters\n\nThe dry run&#39;s stated contract is that it predicts the verdict the real write produces. `import-coerce.ts` says so twice, and both `firstMissingRequiredField` and `firstConstraintViolation` exist specifically to close that gap:\n\n&gt; Mirrors the numeric-range and string-length rules of the engine&#39;s `validateRecord` — same type applicability, same comparison, same `code` and `message` text — so the import&#39;s dry run predicts the verdict the real write produces (framework#3956). Before this, a dry run only reported *coercion* failures … so `-500` in a `min: 0` column was reported valid and then rejected by the write.\n\nThe engine&#39;s value-shape validation (`valueShapeStrictFor` / `mediaValueShapeStrictFor`) is a third such rule, and it has no pre-check counterpart. `coerceCell` routes `address` / `location` through its final catch-all — &#34;Everything else (text, email, phone, json, html, single file, …): pass through&#34; — so no verdict is formed at all.\n\nThis is precisely the &#34;false all-clear&#34; #3956 set out to eliminate, and it lands on the user who did the right thing: dry-run a 5,000-row file, get a clean report, run it, watch a column&#39;s worth of rows fail.\n\n## Suggested shape\n\nAdd a value-shape pre-check beside `firstConstraintViolation`, rendering the same `code` / message the engine&#39;s own rejection renders, so the two read identically. Scope it to the same &#34;engine&#39;s OWN list&#34; discipline the bounds check already follows — only the types `validateRecord` actually shape-checks — so it does not start false-alarming on types the write accepts.\n\n## Not the same thing\n\nComposing an address object from separate `Street` / `City` / `Postcode` columns is a *feature* the mapping spec does not have (no object-building transform), and that is a defensible gap, not this bug. This issue is only about the dry run and the write disagreeing on the payload a caller did send.\n\n---\n\n**裁决后状态(2026-08-06,cli 车道 PM 按裁决 D 拆分):** 本单收缩为 **cli 消费半边**(rest/import 走新 validate-only 操作 + `import-coerce.ts` 手抄预检镜像退役);契约半边(DataProtocol 新增 validate-only 操作,spec 先行)已拆出 #6037。\n\nBlocked-by: #6037"
+}

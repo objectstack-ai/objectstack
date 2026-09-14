@@ -1,0 +1,32 @@
+{
+  "number": 5507,
+  "kind": "issue",
+  "title": "`automation/` 里还有两处 `X` / `XParsed` 未兑现:`execution.zod.ts` 的七对别名两边都是 `z.infer`,`ScreenFieldConfig` 缺 `Parsed`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T14:33:03Z",
+  "updated_at": "2026-08-08T06:10:15Z",
+  "closed_at": "2026-08-08T06:10:04Z",
+  "closed_by": {
+    "login": "qq9340100",
+    "id": 313832657,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5507",
+  "body": "发现于 #4963(`automation/etl.zod.ts` 九个别名翻转为 house convention)的邻域扫描,不在该 PR 范围内。\n\nhouse convention 见 `packages/spec/src/shared/retry-policy.zod.ts` 的 JSDoc:裸名 = `z.input` = 作者写的形状,`XParsed` = `z.infer` = parse 之后的形状。`flow.zod.ts` / `control-flow.zod.ts` / `io-node-config.zod.ts` / `builtin-node-config.zod.ts` 都成对导出并且方向正确。\n\n## 事实 1 —— `packages/spec/src/automation/execution.zod.ts`:七对别名两边都是 `z.infer`\n\n文件底部有一段 `// Type Exports` 集中声明了七个 `*Parsed`,但**每一个都是 `z.infer`,而对应的裸名也是 `z.infer`**(分散在各 schema 声明处),于是这七对是纯同义词:\n\n| 裸名(行) | `*Parsed`(行) | 两者 |\n|:---|:---|:---|\n| `ExecutionStepLog` (122) | `ExecutionStepLogParsed` (410) | 都是 `z.infer` |\n| `ExecutionLog` (260) | `ExecutionLogParsed` (411) | 都是 `z.infer` |\n| `FlowRunSummary` (194) | `FlowRunSummaryParsed` (412) | 都是 `z.infer` |\n| `ExecutionError` (294) | `ExecutionErrorParsed` (413) | 都是 `z.infer` |\n| `Checkpoint` (327) | `CheckpointParsed` (414) | 都是 `z.infer` |\n| `ConcurrencyPolicy` (358) | `ConcurrencyPolicyParsed` (415) | 都是 `z.infer` |\n| `ScheduleState` (404) | `ScheduleStateParsed` (416) | 都是 `z.infer` |\n\n这比\"根本没有 `*Parsed`\"(#4963 的原状)更容易误导:成对的名字看起来就是约定已经兑现,读者据此假定裸名是作者形状,而实际上裸名仍然是 parsed 形状。\n\n**同款构造在 `ScheduleState` 上完整重现了 #4963 的失败面**:它有四个带 `.default()` 的键(`timezone` / `status` / `totalRuns` / `consecutiveFailures`,379–392 行)和一个 `cronExpression: CronExpressionInputSchema`(378 行,transform)。在 `z.infer` 下四个默认键全部必填、裸 cron 字符串被拒,所以手写一份 `ScheduleState` 字面量(测试 fixture、seed 数据)编译不过 —— 与 #4963 逐条对应。`ConcurrencyPolicy` 上另有三个默认键(341/346/351)。\n\n**与 #4963 的关键差别:这里迁移面不为空。** `service-automation` 和 `packages/spec/src/contracts/automation-service.ts` 都在消费 `ExecutionLog` / `FlowRunSummary`(`packages/services/service-automation/src/engine.ts:5,10`、`run-summary.ts:6,31`、`contracts/automation-service.ts:17,256,411,418`),而且它们读的都是引擎产出的 parsed 形状 —— 也就是说这些消费点在翻转后需要改成 `*Parsed`。#4963 的\"三仓零 importer 所以一次做完\"的论证在这里**不成立**,需要单独裁定翻转 vs. 其它路线。\n\n## 事实 2 —— `packages/spec/src/automation/builtin-node-config.zod.ts`:`ScreenFieldConfig` 缺 `Parsed`\n\n`ScreenFieldConfig`(304 行)是该文件里唯一一个方向正确(`z.input`)却没有 `Parsed` 对应物的别名;同文件另外六个(`GetRecordConfig` / `CreateRecordConfig` / `UpdateRecordConfig` / `DeleteRecordConfig` / `ScreenConfig` / `MapConfig`)都成对。纯遗漏,补一行即可。\n\n## 为什么标 `finding` 而不是直接排期\n\n今天没有已知的用户命中路径:仓内没有任何文档或示例把这七个名字当作**作者字面量**来标注(唯一的手写字面量是 `contracts/automation-service.test.ts:117` 的 `const mockRun: ExecutionLog = { … }`,它写全了键所以照样编译),而现有的消费点读的正是 parsed 形状 —— 也就是说当前裸名的含义恰好是消费者要的。#4963 有 `SYNC_ARCHITECTURE.md` 三段不可编译的示例作为实证,这里没有对应的实证。\n\n严重度请 PM 复核:#4963 的评审记录提醒过,filing 时刻的严重度判断两个方向都不可靠。事实 2 无论如何都是一行的事。\n"
+}

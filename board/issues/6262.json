@@ -1,0 +1,35 @@
+{
+  "number": 6262,
+  "kind": "issue",
+  "title": "`data.id` 是算子对象 + `multi: true` 时,`{\"$in\":[...]}` 作为普通列进入 `updateMany` 的 SET 载荷,写向主键列",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched",
+    "target:v17"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T12:33:11Z",
+  "updated_at": "2026-08-07T19:01:11Z",
+  "closed_at": "2026-08-07T19:01:11Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6262",
+  "body": "范围外发现,来自 #5922(PR 见该单)的实现过程。#5922 收口的是**声明值为标量的字段**上的算子对象;`id` 不在其中,因为它的归属在另一条轴上,**未在该 PR 内修改**(PD #10)。\n\n## 事实(worktree @ `origin/main` @ `70f132c15`,记录型 driver 驱动真实引擎,`packages/objectql`)\n\n```\nPROBE data.id operator + multi: {\"err\":null,\n  \"calls\":[{\"fn\":\"updateMany\",\"args\":[{\"object\":\"probe_task\"},{\"id\":{\"$in\":[\"a\",\"b\"]},\"title\":\"x\"}]}]}\n```\n\n`update('task', { id: { $in: ['a','b'] }, title: 'x' }, { multi: true })` 今天:\n\n- **派发**是对的 —— #5748 裁 A / PR #5919 之后,非标量 `data.id` 不再被绑成主键,调用落到 `updateMany`;\n- 但**载荷**未被清理:`{ \"id\": { \"$in\": [\"a\",\"b\"] }, \"title\": \"x\" }` 原样作为 SET 交给驱动,即驱动被要求把主键列写成一个序列化的算子对象。命中的每一行都被改写主键。\n\n## 为什么 #5922 没顺手收口\n\n`record-validator.ts` 的 `SKIP_FIELDS` 按设计跳过 `id`(引擎自有列),而**更重要的是**:这一格的裁定已经写在派发层,而不是校验层。`ENGINE_UPDATE_DISPATCH_CASES`(`packages/metadata-core/src/engine-update-dispatch.ts`)明确列了这条 case:\n\n> `operator object in data.id WITH multi:true — the declared bulk intent is honoured (#5748)` → `expect: 'multi'`\n\n且 `packages/objectql/src/engine-update-dispatch.test.ts` 用**真实引擎**逐条驱动这个 case-set。在 record-validator 里拒收同一个调用,就是对同一个问题给出第二个答案 —— 正是 `engine-update-dispatch.ts` 这一族模块被抽出来防止的事(#4550 / #4434)。所以这条要么由派发层在判定 `data.id` **不是 id** 之后顺手把它从 SET 载荷里剥掉,要么是一次明确的裁决说「带算子对象 `data.id` 的 multi 调用应当拒绝」—— 两者都在 #5748 / #5919 的轴上,不在字段校验的轴上。\n\n## 建议方向(不预设结论)\n\n- **A**:派发层剥离 —— `resolveEngineUpdateDispatch` 已经判出 `data.id` 不是 id,引擎在 `multi` 分支把 `id` 从 SET 载荷里去掉(它既不是主键也不是作者想写的列)。语义最小,不改任何 case 的 verdict。\n- **B**:响亮拒绝 —— 带非标量 `data.id` 的 multi 调用整体拒绝。诊断最好,但要改 `ENGINE_UPDATE_DISPATCH_CASES` 里那条刚落地的 case,属对 #5748 裁 A 的部分回退,需要新裁决。\n- **C**:留给驱动 —— 不建议:五个后端各自会对「把对象写进主键列」给出不同的答案,正是 #5240 / #4434 那一族。\n\n注意 **#5591**(update 载荷剥离时序,同包待发)可能与 A 落在同一处代码,建议一并定价。\n\n倾向 A。它与 #5748 已裁的语义一致(声明了 bulk intent 就照做),只是把「不是 id 的 `data.id`」从主键位置移走之后**不再把它留在列位置**。\n\n关联:#5922(母体,`id` 之外的标量面已收口)、#5748 / PR #5919(裁 A,`data.id` 的标量判定)、#5591(同包 update 剥离时序)、#4550 / #4434(为什么共享谓词而不是第二个答案)。"
+}

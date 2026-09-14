@@ -1,0 +1,35 @@
+{
+  "number": 6257,
+  "kind": "issue",
+  "title": "spec: `BulkActionDefSchema` 缺 `requiredPermissions` —— 渲染器已按它过滤，作者却写不出来（内联 update/delete 批量定义没有任何合法写法加能力门）",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:queue"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T12:13:43Z",
+  "updated_at": "2026-08-07T15:02:31Z",
+  "closed_at": "2026-08-07T15:02:31Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6257",
+  "body": "`BulkActionDefSchema` 是 `.strict()` 且没有 `requiredPermissions`，所以内联批量定义**声明不了**能力门：\n\n```ts\nbulkActionDefs: [\n  { name: 'bulk_delete_plan', operation: 'delete', requiredPermissions: ['plan.delete'] },\n]\n```\n\n```\nUnrecognized key(s) on this bulk action definition: `requiredPermissions`.\n```\n\n而**渲染侧早已在读这个键** —— objectui#3492 落地后 `BulkActionBar` 就是按它过滤的：\n\n```ts\nconst permittedDefs = (actionDefs ?? []).filter(d => mayInvoke(d?.requiredPermissions));\n```\n\n也就是说这是「declared ≠ enforced」的镜像面：**enforced ≠ declarable**。运行时认这个键、按它隐藏按钮，spec 却不让作者写出来。\n\n## 现状盘点（对着合并后的 main 实测，三条断言全过）\n\n| 写法 | 能否拿到 `requiredPermissions` | 机制 |\n|---|---|---|\n| `bulkActions: ['my_action']`（命名式） | ✅ | `resolveBulkActions` 提升时转发动作上的声明（objectui#3492） |\n| `bulkActionDefs: [{ name, operation:'custom', execution:'aggregate' }]`，`name` 命中已声明动作 | ✅ 继承 | 该形态会解析 `objectDef.actions` 并把命中动作合并进 def |\n| `bulkActionDefs: [{ …, requiredPermissions: [...] }]` 直写 | ❌ spec 拒绝 | 本单 |\n| `bulkActionDefs: [{ operation:'update' \\| 'delete', patch }]` | ❌ 无处继承 | 数据面 def 不解析对象动作 |\n\n前两行意味着**大多数场景今天就有出路**（也是 schema 自己在 `label` 描述里推荐的那条：「declare a real action and name it in `bulkActions` to get localization」）。\n\n真正表达不出来的是最后一行：**内联的 `update` / `delete` 数据面批量定义**。它按设计就不该去引用一个对象动作（它不派发动作，它是数据面 mass mutation），于是没有任何合法写法能给「批量删除」加上能力门 —— 而这恰恰是最需要门的一类按钮。\n\n## 方案\n\n给 `BulkActionDefSchema`（`packages/spec/src/ui/bulk-action.zod.ts`）加：\n\n```ts\nrequiredPermissions: z.array(z.string()).optional().describe(\n  'ADR-0066 D4 capability gate, same semantics as `action.requiredPermissions`: ' +\n  'an empty/absent declaration always passes, several are AND-ed, and a client that ' +\n  'cannot resolve the caller’s capabilities fails OPEN (the server is the authority). ' +\n  'A def PROMOTED from `bulkActions: [name]` inherits the action’s declaration instead — ' +\n  'this key is for inline defs, notably the `update`/`delete` data-plane forms that ' +\n  'dispatch no action and therefore have nothing to inherit from.'\n),\n```\n\n消费侧无需改动 —— objectui 的 `BulkActionDef` 类型与 `BulkActionBar` 的过滤都已就位，加上 spec 声明即打通。\n\n配套：`examples/app-showcase` 里补一条内联 `delete` + `requiredPermissions` 的标本（#6157 的动作显隐矩阵已经把命名式的四种规格钉住了，缺的正是这一格）。\n\n## 验收\n\n`bulkActionDefs: [{ operation: 'delete', requiredPermissions: ['x'] }]` 能通过 `objectstack validate`，且无权用户在批量条上看不到该按钮 —— 与列表工具栏 / 行内 kebab / 记录页头三面结论一致。\n"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 6230,
+  "kind": "issue",
+  "title": "finding(service-automation): engine.ts 的 loadSuspendedRun 把驱动错误插进 warn 的 message —— 与 #5912 同文件、同一次失败的另一半,且这条会被 boot 缓冲丢弃",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "pm:queue"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T11:19:12Z",
+  "updated_at": "2026-08-07T13:48:02Z",
+  "closed_at": "2026-08-07T13:48:02Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6230",
+  "body": "做 #5912(PR #6228)时在**同一个文件**扫到的旁生发现,但在**另一个方法、另一条分支**上,且 #5912 的分诊评论(2026-08-06 16:57Z)已把那一单范围明确钉死在 `:3017` 一处、⛔ 不扩面,因此不在那一单范围内,按 Prime Directive #10 / objectstack#4949 单开。\n\n## 现象\n\n`packages/services/service-automation/src/engine.ts:2931`(origin/main `1549605f6`;⚠️ 行号会漂,**以内容定位**),`loadSuspendedRun` —— 也就是 `loadSuspendedRunStrict` 的**降级版**读取器:\n\n```ts\nprivate async loadSuspendedRun(runId: string): Promise<SuspendedRun | null> {\n    try {\n        return await this.loadSuspendedRunStrict(runId);\n    } catch (err) {\n        this.logger.warn(\n            `[automation] failed to load suspended run '${runId}' from durable store: ${(err as Error).message}`,\n        );\n        return null;\n    }\n}\n```\n\n`(err as Error).message` 来自 `loadSuspendedRunStrict` 底下的**数据源驱动**,和 #5912 是**同一个** thrown 值 —— 我们不控制它有几行。它被插进 `logger.warn` 的 message。\n\n## 与 #5912 的关系:同一次失败的另一半\n\n两者读的是同一个 `loadSuspendedRunStrict`。一次「resume 时存储不可达」会**同时**走这两条:\n\n- `resume()` 先跑 gate(`refuseGatedResume` → `resolveEffectiveSuspension`),用的是**这个降级版**,把失败吞成 stdout 上的一条 `warn`;\n- 然后 `resumeInternal` 用严格版,产出 stderr 上的那条 `error` —— #5912 / PR #6228 治的就是它。\n\n所以 PR #6228 落地后,这条路径上 stderr 那条已经干净,**stdout 这条仍会被换行切碎**。PR #6228 的测试正是靠「只抓 stderr」把待验接缝与这条 `warn` 隔开的(见该 PR 测试文件里 `resumeAgainstUnreadableStore` 的注释)。\n\n## 危害机制:比 #5912 那条更重一档\n\n同族基础危害相同 —— `ObjectLogger.write()` 一次调用只加一个「时间戳 + 级别」记录头,message 里的换行把**一条**记录变成多个物理行,后几行无级别无时间戳,`grep WARN` 只捞到不含事实的那一行。\n\n但**多一条**:`ObjectLogger` 把 `debug` / `info` / `warn` 路由到 **stdout**,而 `serve` 的 boot-quiet 窗口只包了 `process.stdout.write`,其 `BootLogCapture.offer()` 仅在 `classifyBootLogLine` 找得到级别头时才保留该物理行。这条是 `warn` ⇒ **落在那个缓冲的过滤面上**,无头续行是被**直接丢弃**而不只是被误读。\n\n而且它**在 boot 期真实可达**:`plugin.ts` 的 `start()`(`:939`)调 `rearmSuspendedWaitTimers`,后者对 overdue 运行调 `engine.resume(run.runId)`(`builtin/wait-node.ts:378`),`resume()` 的 gate 就走到这个降级版读取器。\n\n对照:#5912 那条是 `error` 走 stderr,不经该缓冲,危害是**被误读**;这条是**被误读 + boot 期被丢弃**。这正是 `thrown-cause-diagnostics.ts` 模块 docblock 里 `warn` / `error` 下游不同的那段所描述的形态,也是 #5661 第 2、3 条与 cloud#971 的形态。\n\n## 级别本身是对的,不要顺手改\n\n`warn` 在这里是**正确**的:这是一个刻意的降级读取器,注释写明它服务于「只需要 best-effort 答案」的顺带读取方(gate 查询、screen 取数),真正需要区分「存储挂了」与「运行没了」的 `resumeInternal` 用的是严格版。按 #4632 的判据,这是功能性降级而非耐久性降级,**不应上调到 `error`** —— 上调才是 #4632 明确警告的镜像错误。本单只谈 message 拼接。\n\n## 可达性(为什么是 `finding` 而不是事故报告)\n\n与 #5575 / #5636 / #5661 / #5737 / #5912 同样的理由:今天库内的驱动错误均为单行,所以这是 `finding`。第一个包装多行 SDK 错误的驱动撞上 —— 数据库驱动的多行错误(Postgres 的 `detail:` / `hint:` 续行、better-sqlite3 包装器)在生态里很常见,#5737 与 #5912 的实测都是照这个形状造的。\n\n## 修法(同族既定模板,零新词汇)\n\n与前六次完全一致,复用同包 `thrown-cause-diagnostics.ts` 的 `describeThrownForLog`:message 保持单行自足,cause 走 meta。按 `Logger` 契约(`packages/spec/src/contracts/logger.ts`)`warn(message, meta?)` 是**第二**参(不是 `error` 的第三参 —— `warn` 没有 `Error` 槽)。新增字段名不得含 key / token / secret / password 子串(#5573);直接用 helper 自己的 `error` / `issues` 即可,无需新字段。\n\n顺带值得判断(不是阻塞项):message 里可否同时补上这条降级的**后果**(返回 `null`,调用方会当作「没有这个挂起运行」)—— 目前文本只说「读失败」,没说读失败被翻译成了什么。倾向补,但属于同一处改动的自然范围。\n\n## 关联\n\n#5912 / PR #6228(本发现的来源,同文件另一方法)、#5737 / PR #5911、#5661、#5636 / PR #5662、#5575 / PR #5639、#5048 / PR #5572、#5660(同在 `engine.ts` 的 `registerDegradedConnector`,已闭)、#5573、#4632、#4420、cloud#971。\n"
+}

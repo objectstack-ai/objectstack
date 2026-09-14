@@ -1,0 +1,35 @@
+{
+  "number": 6225,
+  "kind": "issue",
+  "title": "gen:docs 顶层长枚举仍是单个 6092 字符的表格单元格 —— `### Allowed Values` 项目符号只对「整个 schema 是枚举」生效,对「某个属性是枚举」从不生效",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "finding"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T11:15:30Z",
+  "updated_at": "2026-08-07T16:09:40Z",
+  "closed_at": "2026-08-07T16:09:40Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6225",
+  "body": "实现 #5340(PR #6211)时量语料量出来的观察类发现,**未认领**,按 PD#10 立案。不是该 PR 造成的,也**不是**它的返工项 —— #5340 的范围明确只收「内联形状里的第二份拷贝」,而这一条恰恰是那份**唯一的完整拷贝**,故意不动才是对的。\n\n## 现象\n\n#5340 落地后,`content/docs/references/**` 里仍有 **27 个超过 400 字符的类型单元格**,其中 **9 个是「整格就是一个 `Enum< ... >`」的顶层枚举**:\n\n| 字符数 | 页面 | 属性 |\n|---|---|---|\n| **6092** | `api/contract.mdx` | `ApiError.code`(261 个成员) |\n| 1159 | `api/errors.mdx` | `code` |\n| 1083 | `api/events.mdx` | `type` |\n| 561 | `data/field.mdx` / `ui/action.mdx` / `ui/view.mdx` / `ui/bulk-action.mdx` / `ai/solution-blueprint.mdx` | `type`(49 个字段类型) |\n\n6092 字符挤在一个 GFM 表格单元格里,和 #5340 修掉的那个是同一种阅读体验。\n\n## 机制(为什么它没被 #5340 的省略碰到,也不该被碰到)\n\n两件事叠在一起:\n\n1. `formatType` 的省略只在 `ctx.inShapeSummary` 置位时生效,而该标志只在内联摘要的 `{ ... }` 之下设置。顶层位置**永不省略**,这是 #5340 刻意的设计 —— 已核实 `api/contract.mdx` 上**没有** `ErrorCode` 小节、**没有**任何项目符号列表,这 6092 字符是该页上这份词表的**唯一**完整拷贝,省略它等于把信息删掉。\n2. `build-docs.ts` 确实有一条更适合长词表的渲染路径 —— `### Allowed Values` + 每个成员一行项目符号 —— 但它只在**整个 schema** 是 `type: 'string'` + `enum` 时才走(`build-docs.ts` 里 `mainDef.type === 'string' && mainDef.enum` 那一支)。一个**属性**的类型是枚举时永远走不到,只能得到一个表格单元格。\n\n所以 261 个成员的词表落在哪种渲染上,取决于它在 zod 里是被提升成了具名 schema 还是内联在属性上 —— 而这跟「读者需要怎样读它」无关。\n\n## 可能的修法(未验证,留给分诊)\n\n- 顶层枚举超过 N 个成员/字符时,单元格印一个短摘要,完整词表移到该属性下方的 `### Allowed Values` 项目符号列表(复用已有渲染路径,且**信息不丢**);\n- 或让具名枚举 schema 的 `$ref` 保持链接而不是被内联展开,把词表留在它自己的页/小节里。\n\n两种都要逐页确认重生成 diff。⛔ 不得手改生成的 `.mdx`。\n\n## 相关 / 串行\n\n同文件面:`packages/spec/scripts/lib/format-type.ts` + `build-docs.ts`。与 #5340(PR #6211,内联枚举省略)、#5729、#5606、#5338 同源;另有一条同批量出的、**机制不同**的残留宽度观察已另立(union/shape 变体重复)。**须与该文件面的其他在飞单串行**,不得同批并行。"
+}

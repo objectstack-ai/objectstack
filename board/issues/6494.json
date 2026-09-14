@@ -1,0 +1,36 @@
+{
+  "number": 6494,
+  "kind": "issue",
+  "title": "objectui-changeset-digest 生成的 console changeset 不带 ADR-0087 处置标记 —— 手工补的会被下次 bump 覆盖，且复发条件是常见情形",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched",
+    "tooling"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T02:07:00Z",
+  "updated_at": "2026-08-08T05:11:02Z",
+  "closed_at": "2026-08-08T05:11:02Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6494",
+  "body": "发现于 #6317 / PR #6476（objectui pin bump）实施期间，按 Prime Directive #10 只记录不修，**未认领**。⚠️ 成因出自本车道自己的 #6289，如实写明。\n\n## 事实\n\n`scripts/bump-objectui.sh` 生成的 `@objectstack/console` changeset 正文里会带 `**BREAKING**` 标记（当区间内存在破坏性 changeset 时），而 ADR-0087 门（#6148）要求**任何声明破坏性的 changeset 必须携带 `adr-0087:` 处置标记**。生成器不写这个标记，于是 `Check Changeset` 判红：\n\n```\n##[error] .changeset/console-0cf8f0f70d10.md declares a breaking change with no\nvalid ADR-0087 disposition. Add an `adr-0087:` marker to the changeset body.\nA retirement that never reaches the ledger is invisible to every upgrade\nchannel and to every other gate (#6148).\n```\n\nPR #6476 由实施方手工补了一行 `&lt;!-- adr-0087: not-required (already-registered …) --&gt;` 而绿。**但那份 changeset 是生成的**：下一次 pin bump 重新生成时，手工补的标记消失，同一个红复现。\n\n## 根因已实证分离（两个候选成因是可分的，答案是 (a)）\n\n立单时有两个候选：**(a)** 生成器从前根本不打 `**BREAKING**` 标记；**(b)** 从前的区间里恰好没有标注式破坏。实施方实测判定为 **(a)**：\n\n- `**BREAKING**` 这个常量由 **#6289**（commit `7330c1d`，2026-08-07 13:23:31Z，「digest 的破坏性判据扩到『声明 major 或作者正文标注』」）**引入** —— diff 里是 `export const BREAKING_MARKER = '**BREAKING**'` 的纯新增，没有对应删除。在它之前 digest 不发出任何 BREAKING 标记，**无论区间内容如何，ADR-0087 都不可能在 pin bump 上触发**。\n- `7330c1d` 落在上一次 bump #6173（`72b55d34`，07:21:27Z）**之后**，且不是它的祖先（`merge-base --is-ancestor` 退出 1）。\n- 存量旁证：main 上此前全部 **16 份** `.changeset/console-*.md`，`**BREAKING**` 行数 **0**、`adr-0087` 标记数 **0**。\n\n次要数据点（**不是决定性的**）：#6173 的区间里 9 份 changeset 恰好 0 份标注式破坏，所以即便在 #6289 之后它也不会撞。但决定性的事实是 (a)。\n\n**PR #6476 是 #6289 之后的第一次 pin bump。**\n\n## ⚠️ 复发条件是常见情形，不是罕见情形\n\nobjectui 在发布窗口内由 `scripts/check-changeset-no-major.mjs` **禁止 `major`**，因此它把破坏性一律声明为 `minor` + 正文标注 —— **那是它的常规做法，不是例外**。PR #6476 的区间里 24 份 changeset 就有 2 份是这个形状。\n\n⇒ 此后**大多数有分量的 pin bump 都会撞这个红**，直到生成器自己把标记（或一份 `not-required` 脚手架）写进去。\n\n## 可能的方向（不预设结论，交分诊定级）\n\n1. **生成器写入一份脚手架** —— 例如在带 BREAKING 时输出 `&lt;!-- adr-0087: TODO --&gt;` 这类**会被门判红**的占位，逼实施方当场作答。好处是保留「问题必须被书面回答」这一 #6148 的核心意图；坏处是每次 bump 都要人判一次。\n2. **生成器直接写 `not-required`** —— 依据是 console 发布的是按 pin SHA 构建的**冻结 SPA 产物**，不转发 objectui 的类型入口，所以上游的 TS 导出面破坏对 objectstack 消费者没有编译期破坏面。⚠️ 但这等于让生成器**代替人做出处置判断**，与 #6148「不替你判断、只要求书面回答」的设计直接冲突，需要明确裁一次。\n3. **在 ADR-0087 门侧豁免生成的 console changeset** —— 最省事，但会让这一类 changeset 彻底脱离台账视野，与 #6148 立门的理由相悖。\n\n## 相邻（非重复）\n\n- **#6289** —— 引入 `BREAKING_MARKER` 的那单（本车道，已合并）；本条是它的下游交互，不是它的缺陷。\n- **#6148** —— ADR-0087 门本身。\n- **#6174 / objectui#3387** —— objectui 侧「发布变更未声明 changeset」的缺口，另一个面。\n\n## 另一条同源观察（一并记录，不单独立单）\n\n`scripts/check-adr-0087-registration.mjs` 用 `git show HEAD:` + path 读取 changeset 内容（`:491` / `:1353`），即读的是**已提交树**而非工作树。因此在 `git add` 之后、`git commit` **之前**运行它，会对磁盘上明明存在的标记报「no adr-0087 disposition marker」的**假红**。PR #6476 的实施方为此白跑一圈。\n\n⚠️ 这不算门的缺陷（它审的是 PR 实际包含的内容，行为可辩护），但它**证伪了一条被广泛照抄的作业指导**：「门禁一律在 `git add` 之后跑」对这道门不成立，**它必须在 `git commit` 之后跑**。记录于此，供派发模板与 AGENTS.md 采纳。\n\n发现会话：`session_01BDmDsu2575gDxeMCxXhDE3`（devx 车道 PM 座位）。严重度留分诊座位判定。"
+}

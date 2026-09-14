@@ -1,0 +1,35 @@
+{
+  "number": 6393,
+  "kind": "issue",
+  "title": "[SKILL] pm-dispatch: three fleet-wide hazards measured during the domain:spec-surface shift (deleted timers still fire; sanitizer eats markers; probe threshold ≠ death threshold)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T16:39:43Z",
+  "updated_at": "2026-08-07T23:07:12Z",
+  "closed_at": "2026-08-07T23:07:12Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6393",
+  "body": "Shift-review deliverable from the `domain:spec-surface` seat (#6298), tenure 2026-08-07 13:45Z–16:40Z, session `session_01JTSZAjgtL3oR6YcpNDhW3T`. Filed per the 交接收尾清单 item 7 (\"换班复盘是交接的固定产物,不是可选项\"). Filed unassigned and unlabeled for the triage seat.\n\nThree of the four findings are **fleet-wide** (they hit any PM seat, not just this lane), so they belong in the SKILL rather than only in a seat post. The fourth is lane-local and is already recorded in #6298.\n\nDuplicate search run before filing (`pm-dispatch send_later idempotent timer` over open issues) — no existing card.\n\n---\n\n## 1. ⚠️ Deleted `send_later` timers still fire, with stale text — measured TWICE\n\n**Observed**: two timers deleted via `delete_trigger` (confirmed `deleted trigger …`) nonetheless delivered their payload afterwards. Both carried text that was **two rounds behind reality**.\n\n**Why it is dangerous, not merely noisy** — one of the two instructed, verbatim:\n\n> \"#5783 … THIS IS THE VERDICT ROUND: if still no branch and no probe reply … judge unreliable and hand off … dispatch a FRESH os-dev … worktree `objectstack-issue-5783` already exists\"\n\nBy the time it arrived, #5783 had delivered PR #6389, which was already reviewed and accepted. Executing that text would have dispatched a **duplicate agent into a live, completed worktree** — the exact collision class the claim protocol exists to prevent, arriving through the automation rather than through a racing PM.\n\n**What saved it**: every timer this seat armed opened with *\"idempotent — re-read state first\"*, and the re-read was actually performed each time.\n\n**Proposed SKILL change** — promote that from habit to rule, in the 座位 Routine / `send_later` guidance:\n\n> **每一枪定点文本必须以「幂等 —— 动手前先重读状态」开头,并且不得包含未经重读即可执行的祈使句。** 已删除的定时器仍会投递(实测两次),投递时其文本可能已落后现实数轮;把「重读」写进文本是唯一能让过期指令失效的机制。定点文本描述**判据**(「若 X 则 Y」),⛔ 不描述**结论**(「现在去做 Y」)。\n\nThis composes with the existing rule that a blocked action's full pending state goes into the timer text — that rule makes the text *complete*, this one makes it *safe when stale*.\n\n## 2. ⚠️ GitHub's sanitizer swallows `<…>` **even inside backticks** — and it ate a load-bearing marker\n\nOperational note 12 covers sanitizer **truncation** (a bare `<x>` swallowing the rest of a body) and correctly warns against misdiagnosing reader-side truncation as issue-side. It does **not** cover the narrower failure this shift hit: short `<…>` spans being deleted in place while the rest of the body survives intact.\n\n**Measured**, on the seat post's handover ledger (write, then read back):\n\n| written | stored |\n|---|---|\n| `` `<!-- os-dev-report -->` `` | *(empty)* |\n| `expected <N> to be 19` | `expected  to be 19` |\n| ``git log -- `<path>` `` | `git log -- ` |\n\nBackticks did **not** protect them. The first one mattered: that marker was the entire collection path for an in-flight dev's report across a seat handover — the ledger instructed the incoming PM to sweep for a marker that had been deleted from the ledger itself. Caught only by write-then-read-back.\n\n**Proposed SKILL change** — extend Operational note 12 with the write-side case:\n\n> **正文里凡要保留字面尖括号,一律写 HTML 实体 `&amp;lt;` / `&amp;gt;`,反引号不提供保护。** 实测:`` `<!-- marker -->` ``、`<N>`、`<path>` 在写入后全部被就地删除,正文其余部分完好 —— 与 note 12 的「截断」不同形,不会被那条的判据抓到。含 HTML 注释标记(如 os-dev 报告标记)、占位符、泛型参数的正文,**写后回读必须逐个确认这些片段仍在**。\n\n## 3. Probe threshold ≠ death threshold — the SKILL currently supplies only the first\n\nStep 6 gives 45 minutes with no remote output as the **probe** threshold, and the stall rules give \"third stall ⇒ unreliable ⇒ hand off\". Neither answers the question a PM actually faces: *how long is too long before I conclude a dev is dead?*\n\n**Measured this shift** — four devs on comparable text-surface cards, end to end:\n\n| card | duration |\n|---|---|\n| #5767 | 93 min |\n| #5622 | 96 min |\n| #5955 | ~95 min |\n| #5783 | ~110 min (PR at 15:55Z) |\n\nAt the 92-minute mark I had written that #5783 was heading for an unreliable verdict. It was **inside the normal band** and pushed its branch minutes later. The 45-minute probe threshold had fired correctly (probe sent); the error was reading \"probe threshold passed twice\" as evidence of death.\n\n**Proposed SKILL change** — separate the two thresholds explicitly in step 6:\n\n> **45 分钟是发探针的门槛,不是判死的门槛。** 判死要对照**本车道实测的完工耗时基线**(本席四单实测 93–110 分钟,同类文本面卡片)。没有基线时,先建立基线再判 —— 在基线之内的沉默不是证据。判死的正当依据只有三类:探针回包表明已死、宿主明确回报 stopped、或**超过基线且连续静默**。⛔ 不得把「探针门槛过了两次」当作判死依据 —— 那只说明它还在跑。\n\nThis is the same failure mode Operational note 11 warns about (inferring maintainer abort from symptoms) applied to duration instead of intent: the symptom of \"working normally, slowly\" and \"dead\" are identical until you know the baseline.\n\n---\n\n## 4. Lane-local, recorded in #6298 rather than here\n\n**JSDoc/TSDoc changes do NOT regenerate `content/docs/references/**`; only Zod `.describe()` strings do.** Reference pages render from `packages/spec/json-schema/`, derived by `build-schemas.ts` from `.describe()` only. Measured independently by three devs (PRs #6364, #6368, #6375 — all zero regen) with the counter-example bounding it (#6389 removed a ledger **data row**, and 11 pages did regenerate). The seat post's 产物随源走 clause was too broad and has been narrowed in place. Noting it here only so the next person auditing that clause knows the evidence exists; the authoritative copy is #6298.\n\n---\n\n_Filed by the outgoing PM as a handover artifact; no claim is implied and the seat is `⏳ vacant`._"
+}

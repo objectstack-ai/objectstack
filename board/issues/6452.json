@@ -1,0 +1,35 @@
+{
+  "number": 6452,
+  "kind": "issue",
+  "title": "`resolveSurfaceBase()` 的 tip fallback 是静默的正确性降级 —— 拿不到 merge base 时它照样把「删除」判成违规并 `exit 1`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T21:41:09Z",
+  "updated_at": "2026-08-08T00:04:00Z",
+  "closed_at": "2026-08-08T00:04:00Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6452",
+  "body": "## 背景\n\n从 #6359 拆出。#6359 的止血(给 `lint.yml` 的 `typecheck` job 加 `fetch-depth: 0`)只修好了**一个** job；`resolveSurfaceBase()` 里那条 fallback 本身没动，本单记录的是它。\n\n#6359 立单人建议「把假设变成断言」并建议一并做。实现时量到这条 fallback 的**爆炸半径远大于一个 job**，两条被建议的处置各自撞上一条硬约束，所以按 PD#10 拆出来交分诊 —— **拆开的理由(下面第三节的测量)是本单最值钱的部分，不要只当成「fallback 应显式化」。**\n\n## 现状\n\n`packages/spec/scripts/build-schemas.ts` — `resolveSurfaceBase()`：\n\n```js\nconst mergeBase = git('merge-base', 'HEAD', tip);\nconst rev = mergeBase.status === 0 ? mergeBase.stdout.trim() : tip;\n```\n\n`merge-base` 走不通时静默落到 origin/main 的 **tip**。而 tip 锚下「main 在分叉后**新增**的键」与「本分支**删掉**的键」是同一个事实，门会把前者报成后者 —— #6359 实测：PR #6356 一行 `packages/spec` 没碰，被判「删除了 `ui/BulkActionDef:requiredPermissions`」，而那个键是 main 刚加的。\n\n## 爆炸半径(实测，`origin/main` @ `26b72e0`)\n\n这三条是本单区别于「一个 job 的配置疏漏」的关键：\n\n1. **这段代码不受 `--check` 保护。** `CHECK` 常量在 `build-schemas.ts:109`，而调用 `resolveSurfaceBase()` 的块是**顶层裸块**(`build-schemas.ts:1760` 附近，`{ const base = resolveSurfaceBase(); … }`)，没有任何 `if (CHECK)` 守卫。\n2. **判决是无条件致命的。** 违规分支以 `process.exit(1)` 结束(`build-schemas.ts:1907`)，同样不受 `CHECK` 守卫 —— 也就是说这不是「`--check` 模式下的一个门」，而是**任何一次 `gen:schema` 都可能据此让构建红掉**。\n3. **`gen:schema` 是 `build` 的一部分。** `packages/spec/package.json:185` — `\"build\": \"pnpm gen:schema && pnpm gen:openapi && tsup …\"`。于是每一个 shallow checkout 且会构建 `@objectstack/spec` 的 job 都走这条 fallback。仓库里 checkout 不带 `fetch-depth: 0`(即默认 1)的 workflow：`ci.yml` 的 `build-core` / `test-gate` / `temporal-conformance` / `dogfood*` 各 job(`ci.yml:150` 那个 `fetch-depth: 0` 只属于 `test` job)、`docker-publish.yml`、`release.yml`、`publish-smoke.yml`、`showcase-smoke.yml`、`scaffold-e2e.yml`、`coverage-nightly.yml`、`spec-liveness-check.yml`、`codeql.yml`、`check-links.yml`、`validate-deps.yml`。\n\n**一处诚实的限定(未实测，留给接单人核)**：`turbo.json` 把 `build` 声明为可缓存(`outputs: [\"dist/**\", \"json-schema/**\", …]`)，所以在 `packages/spec` **未被改动**的 PR 上 spec 的 `build` 很可能是缓存命中、`gen:schema` 根本不执行 —— 这大概率就是 #6356 只在 `TypeScript Type Check` 上红、`Build Core` 没红的原因。若成立，这条 fallback 的实际触发面是「**改了 packages/spec 的 PR** + 冷缓存的 job(docker/release/nightly)」。⚠️ 注意这个相关性是**反的**：它专挑改了 spec 的 PR 下手，而那正是「你删了一个 authorable 键」这句话最可信、也最费时间去自证清白的场合。\n\n## 为什么 #6359 里没有顺手改掉它\n\n#6359 建议的两条处置，在上面这个半径下各自撞墙：\n\n- **(a)「拿不到 merge base 时拒绝把删除判成违规，只报 ℹ️ 未验证」** ⇒ 等于在上述**所有 shallow job** 里**放宽 #4650 删除门**。`resolveSurfaceBase()` 自己的文档注释已经把这条路判过死刑：「failure to ANCHOR the base is fatal — a deletion check that silently skips is the #4650 bypass with extra steps」。\n- **(b)「拿不到 merge base 直接对 CI 配置报错」** ⇒ 上述那批 job 第一天全红。用一个更大的假红换掉一个假红，方向不对。\n\n两条都不是「成本高」，是「方向错」，所以不是在两个坏选项里挑一个的问题。\n\n## 建议的第三条路(未实现，需设计裁决)\n\n**改锚，而不是改判**：`merge-base` 走不通、但 in-tree 锚 `packages/spec/authorable-surface.base.json` 存在时，锚到该文件的 `baseRev`(而不是 tip)。\n\n- 它是 origin/main 的真实祖先，且落地时验证过；\n- 分支的 fork point 通常**不早于**它 ⇒ main 在分叉后新增的键不在基线里 ⇒ **假红消失**；\n- 在该 rev 存在过的键若真被删掉，仍然被抓 ⇒ **门不放宽**；\n- 离线路线(#5235)已经在用这个锚，是复用而非新增概念。\n\n⚠️ 但这需要重排 `verifyCommittedSurfaceBase()` 的验证互动：若基线的 keys 直接取自锚文件本身，会走进 `rev === resolved.rev` 的快路径而**自我验证**(拿文件验文件)，比现状更弱；正确形态应是「rev 取 `baseRev`，keys 用 `--depth=1` 取回该 commit 后从 git 读」。这是一道有 #4650 / #5235 / #5358 / #5370 / #5847 / #5898 六单历史的门的设计决定，不该由一张「加一行 `fetch-depth`」的卡顺手拍。\n\n## 已经落地的部分(#6359 的 PR 里)\n\n只做了**纯诊断**的一半：shallow 那行日志现在点名方向(「tip 锚下 main 新增 == 本分支删除」)并指出「若这是 CI，该 job 的 checkout 需要 `fetch-depth: 0`」。零行为变更、零爆炸半径。判决逻辑一行未动 —— 那就是本单。\n\n## 验收建议\n\n- 选定处置(建议第三条路)并说明它在 shallow 环境下**不放宽**门的依据；\n- `packages/spec/scripts/build-schemas-check-mode.test.ts` 已有 git 沙箱 harness(写 `.git/shallow` 即可造截断)，新行为应在那里被钉住：**同一棵树，shallow 下不再误报 main 新增的键，真删除仍然红**；\n- ⛔ 不要用有界 `fetch-depth`(`50` 之类)绕过 —— 那是把「永远走不通」换成「偶尔走不通」，更难诊断。"
+}

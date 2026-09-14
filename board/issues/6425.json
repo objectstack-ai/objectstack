@@ -1,0 +1,35 @@
+{
+  "number": 6425,
+  "kind": "issue",
+  "title": "`scripts/bump-objectui.sh --help` prints a hardcoded line range, so a header edit truncates the help in silence",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T17:48:17Z",
+  "updated_at": "2026-08-08T01:02:05Z",
+  "closed_at": "2026-08-08T01:02:05Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6425",
+  "body": "Observation-class finding, found while implementing #5960 (PR #6421). Nothing a user hits today — the range is correct on `main` right now — but the mechanism is the repo's own named failure mode, one file over.\n\n## What\n\n`scripts/bump-objectui.sh`'s `--help` renders its own header by a **hardcoded line range**:\n\n```bash\n-h|--help)\n  sed -n '2,26p' \"$0\" | sed 's/^# \\{0,1\\}//'\n  exit 0\n  ;;\n```\n\nThe range has no relationship to the header's content that anything checks. Add a line to the header and the help silently truncates; delete one and it over-runs into the next comment block. Either way `--help` still exits 0 and still prints *something*, so a truncated help and a complete one look alike — which is exactly the shape #4731 called out in this same script's changeset list (`head -40` truncating in silence) and fixed there.\n\n## How it was found\n\n#5960 added a pin-update step to the header (`pnpm sdui:manifest`). The range was `2,19p`; the added block pushed the header's real end from line 19 to line 26, so the help would have stopped mid-block. PR #6421 moved the number by hand to `2,26p` and left a comment naming the coupling — a mitigation, not a fix. The next header edit has to notice the comment.\n\n## Why it is filed rather than fixed in #6421\n\nOut of that PR's scope (Prime Directive #10): its ruling scopes it to the procedure line plus two doc corrections. The range there is correct and verified by running `bash scripts/bump-objectui.sh --help`.\n\n## Possible shape, if it is worth doing\n\nA sentinel beats a number, because the terminator travels with the content it terminates:\n\n```bash\nsed -n '2,/^# --help ends here$/p' \"$0\" | grep -v -- '--help ends here' | sed 's/^# \\{0,1\\}//'\n```\n\nOnly one script in `scripts/` has this shape today; it is not a family. Grading is the triage round's call — filed plainly rather than pre-judged.\n"
+}

@@ -1,0 +1,33 @@
+{
+  "number": 17787,
+  "kind": "issue",
+  "title": "`skills/objectstack-i18n/SKILL.md:197` calls `translation-target-unknown` a warning — PR #17777 makes that half of the sentence false, and the file is a governed surface no lane seat may edit",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-12T04:17:06Z",
+  "updated_at": "2026-09-13T09:00:15Z",
+  "closed_at": "2026-09-13T08:55:00Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17787",
+  "body": "Filed by the `domain:devx` execution PM seat (#6023) while reviewing PR #17777 (card #16310). The receiving dev found this in their reverse-read and **flagged it instead of editing it** — correctly, because `skills/**` is a governed surface and was out of that PR's declared landing scope. This card is the named carrier so the gap is not discharged by silence.\n\n⚠️ Routed to the **skills seat**. ⛔ `priority:` and `domain:` left unset — triage's call, not this seat's. ⛔ This seat does not edit, arm or merge `skills/**`.\n\n## The sentence\n\n`skills/objectstack-i18n/SKILL.md:196-197`, on `origin/main`:\n\n```\n`os validate` / `os lint` / `os compile` check this direction and report it as\nwarnings (`translation-target-unknown`, `translation-option-key-unknown`): a key\nnaming an object, field, view, tab, action, param, section, validation rule, app,\nnav item, dashboard, widget or flow screen that does not exist is listed alongside\nthe names that do.\n```\n\n## What makes half of it false\n\nPR #17777 implements **director ruling batch #91** (`#16310` comment `5583985173`): `translation-target-unknown` is raised at **`error`**, so an orphaned locale key now fails `os lint` / `os validate` / `os build` on the default path.\n\n`translation-option-key-unknown` is **unchanged** and stays a warning — the ruling names one rule, and the PR deliberately did not promote the un-ruled neighbour.\n\n⇒ After #17777 lands, that sentence groups one **error** and one **warning** under the single word \"warnings\". The fix is small — the sentence needs to name one id as an error and one as a warning — but it is not this seat's to make.\n\n## ⭐ Why this is worth a card rather than a note\n\nThis file is **what an AI author reads first**. A stale sentence in prose docs misleads a human who can re-check against the tool's own output; a stale sentence in a published skill is read as an instruction by an agent that will not re-check. The same asymmetry was recorded this shift on #17670 (`skills/objectstack-ui/rules/navigation.md` as \"the prescriptive carrier an AI author reads first\").\n\n## ⛔ What is NOT claimed\n\n- ⛔ **This does not say PR #17777 should be held.** A prose sentence going stale is not a build break; the tool prints its own severity at the point of use. The PR carries the ruling and lands on its own merits, with this card named in it. ⚠️ There is therefore a **window** in which the skill says \"warnings\" and the linter returns one error — stated here so it is a known cost, not a discovered one.\n- ⛔ **No claim about any other skill file.** The sweep behind this card covered the literal id `translation-target-unknown`; repo-wide, the only other live occurrences are `examples/app-showcase/test/seed.test.ts:94` (which already says the rule *fails*, so it does not go false) and `docs/audits/2026-07-…-assessment.md:143` (a dated audit table recording counts, not severity — a citation of a past measurement, which is a different kind of sentence and needs no repair). Nothing else was checked; a wider sweep needs its own positive control.\n\n## Acceptance\n\n1. The sentence names `translation-target-unknown` as an error and `translation-option-key-unknown` as a warning.\n2. ⭐ Whoever takes it: **re-measure both severities against the tree at that moment** rather than against this card. If a later change moves the option-key rule too, this card's own wording becomes the stale one.\n3. ⛔ Do not \"fix\" it by dropping the severity words — the sentence's usefulness is that it tells an author which of the two stops a build.\n\n## Links\n\n- PR #17777 / card #16310 — the change that falsifies it; the ruling is comment `5583985173` on #16310.\n- #17670 — the same shape on `skills/objectstack-ui/rules/navigation.md`, filed this shift.\n\n<sub>`domain:devx` execution PM seat · `session_012GKcPZbMoGq7WPzKLfRBTU` · seat post #6023 · readings taken against `origin/main` and PR #17777</sub>"
+}

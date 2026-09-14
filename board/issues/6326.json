@@ -1,0 +1,35 @@
+{
+  "number": 6326,
+  "kind": "issue",
+  "title": "`primaryField` 不是可声明键(ObjectSchema 以 unrecognized_keys 拒收),但两条 lint 规则与 objectstack-data 技能文档都把它当作合法 name 面",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T13:51:28Z",
+  "updated_at": "2026-08-08T02:31:43Z",
+  "closed_at": "2026-08-08T02:31:43Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6326",
+  "body": "在 #6108(`object/missing-name-field` 谓词补读 `nameField`)实施过程中量到的相邻事实,按 Prime Directive #10 单独立单,不在那条 PR 里修。\n\n## 量到的事实\n\n`primaryField` 在 `packages/spec` 的对象 Zod schema 里**根本不存在**。全仓检索(排除 `node_modules` / `dist`)只有 4 处提及,没有一处是 schema 声明:\n\n| 位置 | 用法 |\n|---|---|\n| `packages/lint/src/data-model-rules.ts` | `object/missing-name-field` 谓词的一支:`!!obj.primaryField` |\n| `packages/lint/src/validate-semantic-roles.ts:190` | 标题解析链 `[obj.nameField, obj.primaryField, obj.displayNameField]` |\n| `skills/objectstack-data/SKILL.md:1001` | 规则表:「an object with no name/title field or `primaryField`」 |\n| `packages/spec/src/shared/suggestions.test.ts:100` | 仅作为 camelCase 拼写建议语料里的一个字符串 |\n\n实测(`packages/spec` dist,17.0.0-rc.5):\n\n```js\nconst { ObjectSchema } = require('@objectstack/spec/data');\nObjectSchema.safeParse({ name: 'probe_obj', label: 'Probe', primaryField: 'code',\n                         fields: { code: { type: 'text', label: 'Code' } } });\n// => success: false\n// => issues: [{ code: 'unrecognized_keys', keys: ['primaryField'], path: [] }]\n\nObjectSchema.create(/* 同上 */);\n// => throws: ObjectSchema.create('probe_obj'): unknown key(s) — primaryField.\n```\n\n对照组 `nameField: 'code'` 同一形状 `safeParse` 通过。\n\n## 为什么这不只是「死代码」\n\n两个方向各有一个可达面:\n\n1. **文档面(作者会照做)** —— `skills/objectstack-data/SKILL.md` 是 AI 编写元数据时读的技能文档,它明说 `primaryField` 是这条规则的合法逃逸口。照它写的对象在 `ObjectSchema.create()` 上被 ADR-0032「不静默丢弃未知键」的闸硬拒。文档说可以写,schema 说不能写。\n2. **规则面(判定永不成立)** —— 反过来,`!!obj.primaryField` 与 `validate-semantic-roles` 的那一项对任何 schema 收得下的对象都恒为 false,属于 #4984 家族的死支:它看起来在保护什么,实际什么都判不到,而覆盖它的既有断言(`packages/cli/test/data-model-rules.test.ts:138`)喂的是一个 schema 会拒收的 fixture,所以绿得没有意义。\n\n两面同源:`primaryField` 从来没有(或已经不再)是可声明面,而三处消费者没跟上。\n\n## 建议的处置方向(未定,交分诊)\n\n要么在 spec 里补声明 `primaryField`(若它确有业务面),要么按 ADR-0049 enforce-or-remove 把三处消费者一起摘掉并改 SKILL.md。**倾向后者**:`nameField` 已是 ADR-0079 的规范主标题指针,再留一个平行指针与「One Zod source per metadata type」相悖;但这是公共作者面的取舍,不自行裁定。\n\n发现现场:#6108 / PR(谓词修正)。那条 PR 只做了两件事以避免夹带——保留 `primaryField` 支不动(行为不变),并把该规则新的提示文案收敛为只点名真实可声明面(`nameField` 与 name-like 字段),不再向作者广告一个会被拒收的键。\n\n查重:已按 `primaryField` / `unrecognized_keys` / phantom 在本仓 open issues 检索,无既有单。"
+}

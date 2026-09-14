@@ -1,0 +1,35 @@
+{
+  "number": 6467,
+  "kind": "pull_request",
+  "title": "fix(objectql): seedAutonumber 播种扫描覆盖 scope 内每一行,不再取 5000 行窗口 (#6249)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T23:46:13Z",
+  "updated_at": "2026-08-08T00:15:11Z",
+  "closed_at": "2026-08-08T00:15:09Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": "2026-08-08T00:15:09Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/6467",
+  "body": "Fixes #6249\n\n引擎兜底路径(驱动未声明 `supports.autonumber`)的自增号播种,此前是一次 `limit: 5000`、**无排序、无过滤**的 `find`,把「任意 5000 行窗口内的最大值」当成了全表 MAX。对象超过 5000 行、或某个 scope(日期 / `{field}` 分组)的行被其他 scope 的行挤出窗口时,播种出低于真实 MAX 的号,计数器从一个已被占用的号段起号 —— 对声明了 `unique` 的记录号字段,就是直接发出重复的业务标识符。\n\n## 前提复核(动手前逐条实测 origin/main@48f98b0)\n\n| 前提 | 结论 | 证据 |\n|:---|:---|:---|\n| **P1** `seedAutonumber` 仍是窗口形状 | ✅ 成立 | `engine.ts:2142`(#6456 落地后行号漂移,按内容定位):`find({ fields: ['id', field], limit: 5000, context })` —— 无 `orderBy`、无 `where` |\n| **P2** 影响面 = 引擎兜底路径专属 | ✅ 成立 | `engine.ts:2083` `if (driverOwnsAutonumber) return;`;`sql-driver.ts:3033` `scanMaxNumericTail` 用 `.where(field, 'like', prefix%)` + `whereNotNull`,**无 limit**;`driver-turso` / `driver-sqlite-wasm` 继承 `SqlDriver`。⛔ 驱动侧零改动 |\n| **P3** 串行核对 #5495 | ✅ 无冲突 | #5495 现为 `pm:queue`、assignee 已清空(PM 于 12:16Z 采纳前提证伪后释放),评论区无在飞认领对;其真凶经实测落在 `driver-sql.getNextSequenceValue`,与本单零文件交集 |\n| **P4** #6114 loud-fail catch 仍在且不回退 | ✅ 成立且未触碰 | `isMissingTableError` 判别 catch 原样,`git diff` 在 `} catch (error) {` 之后无任何 diff;两条 pin 测试在反向验证中保持绿 |\n\n## 选型\n\n**采用:`keysetWalk` 游标分页全扫 + 前缀下推,数值最大值在引擎侧逐值解析。**\n\n- 分页用仓内既有的 `keysetWalk`(`packages/types/src/keyset-walk.ts`),与 `summary-backfill` 同一把,而不是再手抄一份游标合并;\n- 按 `id` 游标 seek 而非 `offset` —— 该模块自己的理由(#4363):offset walk 无法保证访问过每一行,而这里漏掉的一行正好就是不能漏的那个号;\n- `prefix` 非空时下推 `{ [field]: { $startsWith: prefix } }`,让日期 / `{field}` scope 只读自己的行;JS 侧的 `startsWith` 复核**保留为权威**,这样匹配更宽松的驱动(大小写不敏感的 `LIKE`)无法用别的 scope 的行抬高 max;\n- 页大小沿用 5000,但语义从「硬上限」变成「页大小」,单次读的驱动侧成本不变。\n\n这与 SQL 驱动自身的播种形状(`scanMaxNumericTail`,无 limit 的 scope 内全扫)一致 —— 兜底路径不再比它弱。\n\n**被否路线:**\n\n| 路线 | 否决理由 |\n|:---|:---|\n| `orderBy desc + limit 1` 取值最大 | 按**文本**排序。字典序等于数值序,仅当 scope 内所有值补零到**同一定宽** —— 格式语言不保证:`{0}` 不补零;任何定宽在计数器越过后**溢出**(`CASE-99999` 排在 `CASE-100000` 之上);legacy 空前缀路径取整串最后一个数字段,根本没有对应的字典序读法。要救它就得再加一道「本格式是否定宽」的判定加溢出逃生口 —— 更多假设,而猜错的代价是重复的业务标识符 |\n| `aggregate` 的 `max` | 继承**完全相同**的文本排序陷阱(SQL / Mongo 的 `MAX` 对文本列即字典序),另外还要依赖驱动的 aggregate 支持与引擎的内存聚合兜底(后者本身仍要读全部行)。收益为零,依赖面更大 |\n| 分页全扫但用 `offset` | `keyset-walk.ts` 模块注释已写明:offset walk 会漏行且是 O(n²/p) |\n\n**未新增任何驱动能力声明**,因此不触发分诊指定的 `needs_decision` 出口。查询词汇全部对着仓内词表核实:`where` / `orderBy` / `limit` / `fields` 均在 `ENGINE_FIND_OPTION_KEYS`(`engine.ts:271`);`$startsWith` / `$gt` / `$and` 均在 `FILTER_OPERATORS` / `LOGICAL_OPERATORS`(`filter.zod.ts:1085`);排序节点用 `order` 而非 `direction` —— 后者被 `SortNodeSchema` 按名拒绝(#4721),派单示例里的写法正是词表外的那个。\n\n## 字典序陷阱的处置\n\n**结构上不进入。** 排序只用于游标推进(按 `id`),从不用于判定最大值;数值最大值由既有的数字段解析逻辑(有前缀取紧随其后的数字串,无前缀取最后一个数字串)逐值算出,该逻辑一字未改。因此定宽、不定宽、溢出、legacy 空前缀四种形态走同一条正确路径,不需要豁免任何一种。\n\n有一条专门的 pin 测试守住这一点:legacy 裸计数器 `'7' '8' '9' '10'` 的字典序最大是 `'9'`,据此播种会重发已存在的 `'10'`;测试断言得到 `'11'`。任何未来把这段换成排序捷径的改动都会撞红它。\n\n## 无法正确计算时的处置\n\n扫描走不完(行缺 `id` 游标、或驱动未执行游标谓词)时,`walk.truncated` 为真 —— 此时「已读部分的最大值」是下界而不是最大值。**不静默播这个低号**,而是抛错、不分配号、不写入,与 #6114 对读故障的处置同族。该拒绝错误刻意不匹配 `isMissingTableError` 的任何模式,不会被兜回「播种 0」。\n\n## 反向验证(方向先写死,再运行)\n\n预测写在 `predictions.md` 后才执行:回退窗口修复 ⇒ 9 红 4 绿。**实测与预测逐条相符。**\n\n| 用例 | 预测 | 实测 |\n|:---|:---:|:---:|\n| (1) 超页对象取真实 max | 红 | 红 `expected 'D-5001' to be 'D-6001'` |\n| (1) 游标分页而非停在首页 | 红 | 红 `expected 1 to be greater than 1` |\n| (1) 只播种一次后内存计数 | 红 | 红 `expected 'D-5001' to be 'D-6001'` |\n| (2) 被挤出窗口的 scope 不从 1 重来 | 红 | 红 `expected 'APAC-0001' to be 'APAC-0004'` |\n| (2) scope 前缀下推 | 红 | 红 `expected undefined to deeply equal { ticket_no … }` |\n| (2) scope 之间互不干扰 | 红 | 红 `expected 'APAC-0001' to be 'APAC-0004'` |\n| (3) 无前缀时跨页扫描 | 红 | 红 `expected '5001' to be '6001'` |\n| (5) 拒绝用不完整扫描播种 | 红 | 红(旧码直接 resolve,不抛) |\n| (5) 该拒绝不被吞成 missing table | 红 | 红(旧码直接 resolve) |\n| (3) **取数值最大而非字典序最大** | **绿** | **绿** |\n| (4) 对照:`supports.autonumber` 驱动无播种扫描 | 绿 | 绿 |\n| (5) 读故障仍上抛、不写入 | 绿 | 绿 |\n| (5) 表未建仍播种 0 | 绿 | 绿 |\n\n⚠️ **第 10 行是刻意预测为绿的,不是漏网。** 它不是窗口守卫:旧码同样在 JS 侧对返回的 4 行算数值最大值,4 行不触发窗口。这条守的是**未来**换成 `orderBy desc + limit 1` / 聚合 `max` 的捷径。按报告纪律照实写出来,而不是硬凑成红。\n\n(4)(5) 的绿正是它们该有的方向 —— 驱动侧对照与 #6114 行为都不该被本改动移动。\n\n`APAC-0001` 这一条尤其值得看:它不是「号偏小」,是与库内已存在行**逐字相同**的值。\n\n## 命令输出\n\n```\npnpm --filter @objectstack/objectql test\n  Test Files  144 passed (144)\n       Tests  2427 passed (2427)\n\n新增文件单跑(13 例全绿):\n  Test Files  1 passed (1)\n       Tests  13 passed (13)\n\npnpm --filter @objectstack/objectql typecheck\n  tsc --noEmit        (无输出 = 通过)\n\npnpm check:engine-double-contract\n  OK — 80 pinned, 133 in the DEBT ledger, 4 exempt.\n\npnpm check:query-options-erasure\n  OK: 83 unswept non-test site(s) in 19 file(s), none new.\n  test surface: 263 site(s) in 49 file(s) — at the ceiling.      ← 新测试零新增擦除\n  baseline key set verified against 48f98b0: no files added.\n\npnpm check:type-check-debt(先跑全量 build,70/70 successful)\n  OK — 62/77 workspace packages type-checked, 15 in the DEBT ledger.\n  @objectstack/objectql: TEST_DEBT records 355, tsc now reports 352 (-3)  ← 未抬\n  --re-measure: OK — 34 ledger entr(ies), none above its recorded number.\n\nnode scripts/check-nul-bytes.mjs\n  OK (scanned 6089 tracked text file(s); no raw ASCII control bytes).\n  自扫补充:grep -naP '[\\x00-\\x08\\x0b\\x0c\\x0e-\\x1f\\x7f]' 改动三文件 —— 无命中\n\nnpx eslint engine.ts engine-autonumber-seed-scan.test.ts   exit=0\n```\n\n## 文件面\n\n- `packages/objectql/src/engine.ts` —— 仅 `seedAutonumber()` 一带 + 其 import 与页大小常量。⛔ 未触同文件的 sys_file hydrate catch 位(#6456)与其他区域;#6114 的 catch 在 `git diff` 中零变更。\n- `packages/objectql/src/engine-autonumber-seed-scan.test.ts`(新增,13 例)\n- `.changeset/tidy-pugs-tap.md` —— patch `@objectstack/objectql`\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_019Q7oc7ASjh8yxyS3Yz78We)_"
+}

@@ -1,0 +1,36 @@
+{
+  "number": 6299,
+  "kind": "issue",
+  "title": "finding(service-automation): engine.ts 还剩三处同形的 warn message 拼接 —— forgetSuspendedRun / cancelRun / listSuspendedRunsDurable,是 #5912+#6230 之后该文件的最后一批",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T13:24:53Z",
+  "updated_at": "2026-08-08T04:25:28Z",
+  "closed_at": "2026-08-08T04:25:28Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6299",
+  "body": "做 #6230(PR #6297)时在**同一个文件**扫到的旁生发现。#6230 的分诊评论已把那一单范围钉死在 `loadSuspendedRun` 一处、⛔ 不扩面,故按 Prime Directive #10 / objectstack#4949 单开。\n\n## 现象\n\n`packages/services/service-automation/src/engine.ts`(基线 `origin/main` `dbe92a7e1` + PR #6297;⚠️ 行号会漂,**以内容定位**)还有**三处**与 #5912 / #6230 完全同形的拼接 —— 都是 `logger.warn`,都把**我们不控制文本**的数据源驱动 `message` 插进 message:\n\n1. `forgetSuspendedRun`(PR #6297 后在 `:1273`)——\n   `` `[automation] failed to delete suspended run '${run.runId}' from durable store: ${(err as Error).message}` ``\n2. `cancelRun`(`:3528`)——\n   `` `[automation] cancelRun: failed to load suspended run '${runId}' from durable store: ${(err as Error).message}` ``\n3. `listSuspendedRunsDurable`(`:3603`)——\n   `` `[automation] failed to list suspended runs from durable store: ${(err as Error).message}` ``\n\n三条的 thrown 值都来自 `SuspendedRunStore` 底下的同一个驱动,和 #5912 / #6230 是同一族。\n\n## 危害机制\n\n与 #6230 逐字相同,不重复推演:`ObjectLogger.write()` 一次调用只加一个「时间戳 + 级别」记录头,message 里的换行把**一条**记录变成多个物理行,后几行无级别无时间戳,`grep WARN` 只捞到不含事实的那一行。\n\n且三条都是 `warn` ⇒ 走 **stdout** ⇒ 落在 `serve` boot-quiet 缓冲的过滤面上(`BootLogCapture.offer()` 只保留有级别头的行),无头续行是被**直接丢弃**。PR #6297 已把这个「丢弃」量出来了:三行驱动错误进过滤器,**只剩 1 行**出来,而留下的那行不含任何驱动事实。\n\n## 与 #6230 不同的地方:级别判定要逐条做,不能整批照抄\n\n⚠️ **不要把这三条当成一次批量替换。** #6230 之所以判「级别不上调」,是因为 `loadSuspendedRun` 的 JSDoc 明写它是刻意的**功能性**降级读取器。这三条各自的 #4632 判定要单独看,而且至少有一条看起来不一样:\n\n- `forgetSuspendedRun` 的 `store.delete()` 失败意味着挂起态**没有被消费**却已从热缓存里删掉(`this.suspendedRuns.delete(run.runId)` 在 try 之前),下次重启会把一个已经走完的运行当成仍然挂起 —— 这更像 #4632 的**耐久性**形态,`warn` 是否正确需要判,不能默认沿用。\n- `cancelRun` 的读失败会让取消静默变成 `return false`(幂等成功),调用方以为「本来就没有这个运行」。\n- `listSuspendedRunsDurable` 的列举失败会让durable 里的运行**从列表里消失**,只剩内存里那批 —— 这是 #5186 read-seam invention 规则关心的形态,只是那条规则的扫描根(`packages/metadata`/`metadata-protocol`/`objectql`)不覆盖本包,所以 `pnpm check:durability-log-level` 今天不会报它。\n\n所以这一单如果被晋级,**接手的人必须逐条给出 #4632 判定并各自钉测试**,而不是把 #6230 的模板套三遍。message 拼接那一半是三条共通的,级别那一半不是。\n\n## 可达性(为什么是 `finding`)\n\n与 #5575 / #5636 / #5661 / #5737 / #5912 / #6230 同样的理由:今天库内的驱动错误均为单行,所以是 `finding` 而非事故报告。第一个包装多行 SDK 错误的驱动撞上 —— Postgres 的 `detail:` / `hint:` 续行、better-sqlite3 包装器在生态里很常见,同族历次实测都是照这个形状造的。\n\n## 关联\n\n#6230 / PR #6297(本发现的来源,同文件另三处)、#5912 / PR #6228、#5737 / PR #5911、#5661、#5636 / PR #5662、#5575 / PR #5639、#5048 / PR #5572、#5660(同在 `engine.ts` 的 `registerDegradedConnector`,已闭)、#5573、#5186、#4632、#4420、cloud#971。\n\n治完这三处,`engine.ts` 这一族就**全净**了。\n"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 4666,
+  "kind": "issue",
+  "title": "spec 门禁盲区:可作者化 key 的「默认值 / 约束」变更不被任何 gate、tombstone 或 conversion 记录(#4650 / #4659 同族)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:queue",
+    "protocol:breaking"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-02T15:27:54Z",
+  "updated_at": "2026-08-07T16:02:23Z",
+  "closed_at": "2026-08-07T16:02:23Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4666",
+  "body": "从 #4661(#4535 C8 `RetryPolicy` 收敛)里分出来的独立发现,**已实证,不是推测**。与 #4650(基线可手编)、#4659(检查 (b) 按 leaf name 匹配)是同一族:门禁看起来绿,但它没在看你以为它在看的东西。\n\n## 结论\n\n`packages/spec/scripts/build-schemas.ts` 的可作者化面门禁 **只比较 key 的集合**。同一个 key 的 **默认值 (`.default()`)** 和 **约束 (`.min()` / `.max()` / `.positive()`)** 变更,对它完全不可见 —— 而这类变更恰恰能**静默改变已部署元数据的运行时行为**。\n\n三条记录通道全部漏掉它:\n\n| 通道 | 是否记录默认值变更 |\n|:--|:--|\n| `authorable-surface.json` 比对(检查 (a) vanish)| ❌ 只有 key 名 |\n| `retiredKey()` tombstone(检查 (b))| ❌ 只在 live → retired 时触发 |\n| `spec-changes.json` / upgrade guide(ADR-0087 D4)| ❌ 是 conversion + migration registry 的投影,而默认值变更不必然带 conversion |\n\n也就是说:**一个 PR 可以把 `job.retryPolicy.maxRetries` 的默认值从 3 改成 0(让所有依赖默认值的存量 job 静默停止重试),而全部门禁绿、基线不动、没有任何一行 tombstone 或 conversion 记录这件事。**\n\n## 实证(#4661 的 sabotage 验证)\n\n在 #4661 的分支上,把 `shared/retry-policy.zod.ts` 的 `maxRetries` 默认值从 `0` 改成 `3`,**只改这一个字符**,然后跑门禁:\n\n```\n$ pnpm check:authorable-surface\n\n✅ Generated bundled schema: objectstack.json (1686 definitions)\n✅ Successfully generated 1703 schemas.\n```\n\n**绿。** 同一处改动被 #4661 手写的运行时 pin 抓住了:\n\n```\n$ npx vitest run src/shared/retry-policy.test.ts\n\n × pins the opt-in defaults that no gate can observe\n FAIL  ... > pins the opt-in defaults that no gate can observe\n AssertionError: expected 3 to be +0 // Object.is equality\n```\n\n即:**今天唯一能挡住这类变更的,是作者自己想起来手写一个 pin 测试。** 没有任何机制强制它存在。\n\n## 为什么这比听上去更糟\n\n1. **它专挑最危险的语义。** 默认值决定「作者没写这个 key 时会发生什么」。retry 次数、超时、`enabled`、`required`、各种 `allow*` —— 这些的默认值翻转就是安全/可靠性事件,而且是**静默**的。\n2. **AI 写的元数据大量依赖默认值。** 省略 key 是 LLM 生成元数据的常态,所以默认值的实际覆盖面远大于人手写的时代。\n3. **约束收紧同理。** `#4661` 把 `maxRetries` 加了 `max(10)`、`backoffMultiplier` 加了 `min(1)`,存量 `maxRetries: 20` 的 job 会**硬拒**。硬拒是响亮的、可接受的,但门禁一样没记录 —— 是人写了 `semantic` 迁移条目才留下痕迹。\n4. **ADR-0087 的机器不建模它。** D2 conversion 的 `ConversionApplication` 是 `{from, to, path}` —— 描述的是**值的重写**,没有「这个 key 的默认语义变了」的表达形式。\n\n## 可能的处置方向(未裁决,列出来供讨论)\n\n- **A. 把默认值/约束纳入 `authorable-surface.json` 的比对。** 每个 key 除了名字再记一个形状指纹(默认值 + 约束的规范化摘要)。变更即失败,要求显式确认。\n  - 好处:与现有 ratchet 同构,零新概念,且**结构性**地防错(不靠作者自觉)。\n  - 代价:该文件会明显变大、变吵(#4535 §1 已经在抱怨它过度收集);需要一个「已确认的变更」出口,否则每次调 describe 都红。\n- **B. 只对**「默认值存在性/取值」**做指纹,不管约束。** 更窄、更少噪音,覆盖最危险的那一类。\n- **C. 不改门禁,改流程**:要求任何 `.default()` 变更必须带 `semantic` 迁移条目,用 lint 规则(AST)检查 diff。\n  - 好处:噪音低。代价:靠 diff 检测,`git` 语境下比 ratchet 脆。\n- **D. 什么都不做,只把「默认值变更必须写进 changeset」写进 AGENTS.md。** 最便宜,但正是本 issue 想指出的「靠自觉」。\n\n**倾向 A 或 B** —— 与 #4650 要加的可达性窄例外是同一批门禁加固,可以一起做。但选哪个取决于维护者对「ratchet 噪音 vs 覆盖面」的偏好,所以不预设。\n\n## 关联\n\n- #4661 —— 发现来源,含 sabotage 输出;其运行时 pin 是目前唯一的补偿控制\n- #4650 —— 基线可手编(删证据)\n- #4659 —— 检查 (b) 按 leaf name 匹配 conversion surface\n- #4535 §1 —— `authorable-surface.json` 过度收集\n- #4642 —— 编译期 pin 空转(所以 pin 必须是运行时断言)\n- ADR-0049、ADR-0087"
+}

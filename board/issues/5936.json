@@ -1,0 +1,37 @@
+{
+  "number": 5936,
+  "kind": "issue",
+  "title": "NODE_ENV 未设置时,第二个 /discovery 生产者(metadata-protocol 的 getDiscovery,经 @objectstack/rest)仍广播 environment=development",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:dispatched",
+    "pm:queue",
+    "target:v17"
+  ],
+  "assignees": [
+    "qq9340100"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T12:29:49Z",
+  "updated_at": "2026-08-08T05:11:02Z",
+  "closed_at": "2026-08-08T05:11:02Z",
+  "closed_by": {
+    "login": "qq9340100",
+    "id": 313832657,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5936",
+  "body": "发现于 #5673 的实施(界外发现,关键词 + 文件路径查重无命中,故新开)。\n\n## 现象\n\n`/discovery` 有**两个**生产者,#5673 的裁定只点名了其中一个:\n\n| 生产者 | 服务方 | `NODE_ENV` 未设置时 `environment` |\n|:---|:---|:---|\n| `HttpDispatcher.getDiscoveryInfo()`(`packages/runtime/src/http-dispatcher.ts`) | `dispatcher-plugin.ts` / `packages/adapters/hono` | `production`(#5673 已改) |\n| `MetadataProtocol.getDiscovery()`(`packages/metadata-protocol/src/protocol.ts:2900`) | `packages/rest/src/rest-server.ts:3050` | **`development`**(未改) |\n\n第二个生产者把宿主真实的缺省值原样递给映射函数:\n\n```ts\nenvironment: resolveDiscoveryEnvironment(\n    (globalThis as { process?: { env?: Record< string, string | undefined > } })\n        .process?.env?.NODE_ENV,\n),\n```\n\n`resolveDiscoveryEnvironment(undefined)` 走 `typeof raw !== 'string'` 分支返回 `development`(`packages/spec/src/api/discovery.zod.ts:341-344`),所以经 `@objectstack/rest` 暴露的 `/discovery` 在「忘记设 NODE_ENV 的生产部署」上仍然自称 `development` —— 正是 #5673 判定为危险方向的那一个。\n\n## 为什么 #5673 没有一并解决\n\n#5673 的 maintainer 裁定(2026-08-06)把落点明确限定在 `packages/runtime/src/http-dispatcher.ts`,并把 `packages/metadata-protocol` 标为跨域文件面、要求「若必须改它就 STOP + needs_decision」。派发单进一步禁止改 `packages/spec` / `packages/metadata-protocol`。所以 #5673 的 PR 在 runtime 侧就地翻默认,并在注释里如实写明本条残留,而不是悄悄绕过。\n\n## 两条可能的落点(需要裁定,不要直接猜)\n\n1. **默认收进共享映射函数** —— `resolveDiscoveryEnvironment` 把「缺省」判为 `production`,两个生产者都不再各自带默认。契约优先,单点决策,#4828 建这张共享表的初衷就是防两个生产者漂移;代价是动 `packages/spec`,且要同步改 `NODE_ENV_TO_DISCOVERY_ENVIRONMENT` 上方那张表格里「unset / anything else → development」那一行(该行现在对 runtime 调用方已经过时)。\n2. **只在 metadata-protocol 生产者就地补默认** —— 与 #5673 的做法对称,不动 spec;代价是同一个「缺省语义」在仓里有两处副本,正是共享表要防的漂移。\n\n倾向 1(单点决策、契约优先、AI 写元数据时不给消费方留宽容分支),但落点跨域,交 maintainer 裁。\n\n## 附带的文档面漂移(同一处,顺带记录)\n\n`packages/spec/src/api/discovery.zod.ts` 映射表上方注释仍写:\n\n> | unset / anything else | `development` | preserves the pre-existing `getEnv('NODE_ENV', 'development')` default…\n\n#5673 之后 runtime 调用方已不再传该默认,这句话对映射函数自身仍为真、对调用方已不为真。无论走上面哪条路,这行都要一起改。\n\n参考:#5673(runtime 侧 + doctor 提示行)、#4828(枚举映射的由来)、Prime Directive #9(`NODE_ENV` 是第三方边界上的既有例外)。\n"
+}

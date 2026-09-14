@@ -1,0 +1,36 @@
+{
+  "number": 17611,
+  "kind": "issue",
+  "title": "service-messaging: fan-out writes an `email` delivery for a tenant with no email transport — it dead-letters on its first attempt and is kept 90d, so the hot outbox grows ~1 dead row per notification",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:services",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-11T03:32:39Z",
+  "updated_at": "2026-09-12T16:49:43Z",
+  "closed_at": "2026-09-12T16:48:47Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17611",
+  "body": "## 现象（生产实测；租户信息已匿名）\n\n一个生产租户库的 `sys_notification_delivery`：\n\n| channel | status | 行数 | max(attempts) |\n|---|---|---|---|\n| `email` | `dead` | 2,876 | 1 |\n| `inbox` | `success` | 2,876 | 1 |\n\n零 pending。该租户**没有配置邮件传输**。\n\n每条 `notify`（`channels: ['inbox','email']`）写 2 行投递，email 那行第一次尝试就死信。对象声明 `lifecycle: { class: 'telemetry', retention: { maxAge: '90d' } }` ⇒ 投递表在 90 天内线性增长，该库每天 +316 行。\n\n## 为什么要紧\n\n投递表是调度器每一跳都要查的热表（调度器空闲成本、驱动缺索引两张关联卡，编号见本卡评论）。这些死信行不再承载任何工作，却让每一次领取查询的代价随时间线性上涨。按目前速度，第 90 天该表约 2.8 万行。\n\n## 需要裁决（附推荐）\n\n- **推荐 A**：fan-out 时解析渠道可用性。传输未配置的渠道**不写投递行**，在 `sys_notification` 上记录该渠道被抑制及原因。可审计，热表零成本\n- B：照写，但直接落 `suppressed`（而非 `dead`），并为 `dead` / `suppressed` 这类终态行设更短的保留（例如 7d）\n- C：只缩短终态行保留\n\nA 最干净：热表只装有工作的行。B 保留逐条审计。C 治标不治本。\n\n## 验收（按 A）\n\n1. 无邮件传输的租户：`notify` 只写 inbox 投递行；notification 上可读到 email 被抑制的原因\n2. 有邮件传输的租户：行为不变\n3. 两种租户各有测试\n"
+}

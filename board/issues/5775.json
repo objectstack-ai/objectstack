@@ -1,0 +1,36 @@
+{
+  "number": 5775,
+  "kind": "issue",
+  "title": "SDUI props 声明与 renderer 不一致:6 处「renderer 兑现但 ComponentPropsMap 未声明」+ 2 处「声明了没人读」(#5068 error 升级的 spec 侧前置)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:queue",
+    "target:v17"
+  ],
+  "assignees": [
+    "qq9340100"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T04:52:02Z",
+  "updated_at": "2026-08-07T14:25:10Z",
+  "closed_at": "2026-08-07T14:25:10Z",
+  "closed_by": {
+    "login": "qq9340100",
+    "id": 313832657,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5775",
+  "body": "实施 #5068(SDUI 组件 props 解析闸门)时,按其 2026-08-04「硬前置」评论要求,开闸前扫了一遍「objectui renderer 真实消费、但 `packages/spec/src/ui/component.zod.ts` 的 `ComponentPropsMap` 未声明」的键。#5176(`readonly`)与 #5611(`sections` / `hideFields`)已清;本 issue 记录这一轮扫出来的其余各处,以及反方向的两处(声明了、必填、但没有任何消费者)。\n\n**与 #5068 的关系**:#5068 的闸门本次只落 warning 级,所以这些键今天不会打红任何构建 —— 但它们正是 warning 期违例清单的 spec 侧半边,**error 升级前必须逐条裁定**。与 #5728(内联多语言 label)同族、不同键,故另开。\n\n## A. renderer 兑现、schema 未声明\n\n| type | 键 | 消费点(objectui,只读实测) | 仓内是否已授权 |\n|---|---|---|---|\n| `element:record_picker` | `labelField` | `packages/components/src/renderers/basic/record-picker.tsx:81`(`props.labelField ?? 'name'`),用于 `:163` 渲染行文本;`:183` 的注册表 `inputs` 也把它列为设计器可授权输入 | 是 —— `examples/app-showcase/src/ui/pages/page-variables.page.ts:64` |\n| `element:record_picker` | `label` | 同文件 `:130` 读取、`:143` 渲染为控件标签 | 是 —— 同上 `:63` |\n| `element:record_picker` | `valueField` / `emptyText` | `:82`/`:152` 与 `:160` | 否 |\n| `page:card` | `children` | `packages/components/src/renderers/layout/containers.tsx:627`(`schema.body ?? schema.children`),注册表描述明写「plain `children` also render here」 | 是 —— `examples/app-showcase/src/ui/pages/my-work.page.ts` 2 处 |\n| `page:section` / `page:footer` / `page:sidebar` | `children` / `body` | `containers.tsx:757` / `:1407` / `:1432`(`renderChildren(schema.children \\|\\| schema.body)`)。这三个 type 在 `ComponentPropsMap` 里是 `EmptyProps`,即声明为「零个 prop」 | 否 |\n| `page:tabs` | `items[].value`、`items[].count` | `containers.tsx:503-519`(`value` 是 `?tab=` 的稳定 URL token)、`probeTargets` 读 `it.count` | 否(但见 #5776:showcase 写的是 `key`,两边都不对) |\n| `record:path` | `stages[].terminal` | `packages/plugin-detail/src/renderers/record-path.tsx:68`(`if (s.terminal) return s.terminal`,值域 `'won' \\| 'lost'`) | 是 —— `examples/app-showcase/src/ui/pages/task-detail.page.ts:40` |\n\n## B. 反方向:声明了、但没有消费者\n\n| type | 键 | 实测 |\n|---|---|---|\n| `element:record_picker` | `displayField`(**必填**) | objectui 全仓无任何 `element:record_picker` 消费点读它。`displayField` 在 objectui 只出现在 lookup 字段 / filter-builder / reference-rail 等**字段**语境。renderer 读的是 `labelField`,缺省 `'name'` —— 所以一个照 schema 写 `displayField: 'title'` 的作者,拿到的是按 `name` 渲染的下拉,零诊断。这正是 ADR-0078 的形状 |\n| `element:record_picker` | `searchFields` / `multiple` | 同样无消费点(`multiple` 在 renderer 里不存在,控件恒为单选 Select) |\n\n## 为什么 A/B 的第一行需要维护者裁定,不能顺手补声明\n\n`labelField` 与 `displayField` 是**同一个概念的两种拼法**,其中被兑现的那个未声明、声明的那个必填且无人读。#5068 的派发单预授权了「若测得被 renderer 兑现则同批补声明」,但只补 `labelField` 会让:\n\n- schema 里同时站着 `labelField`(可选)与 `displayField`(必填),即一个键两种拼法 —— Prime Directive #12 明令禁止的方言;\n- 且**并不能让闸门闭嘴**:一个只写 `labelField` 的合规页面仍会因缺 `displayField` 报 warning(实测:showcase 的 `page-variables.page.ts` 今天正是这一条)。\n\n所以这里不是「补一个键」,而是「哪个拼法是正统」的契约决定。三个方向:\n\n- **A(推荐)**:照 #5611 的先例 —— 以「唯一交付且被授权的形状」为准:`labelField` 转正,`displayField` 走 ADR-0087 D2 conversion + tombstone 退休,`label`/`valueField`/`emptyText` 一并补声明。一种形状,不是两种事实契约;代价:breaking,需要 conversion 条目与升级指南。\n- **B**:两个都声明、都可选(`displayField` 标注 deprecated)。代价:方言固化,`displayField` 仍然是「声明了没人读」,ADR-0049 的 enforce-or-remove 债务原地不动。\n- **C**:反过来让 renderer 读 `displayField`。代价:objectui 侧 breaking,且 `labelField` 已被注册表 `inputs` 公开为设计器输入、已被 showcase 授权。\n\nB 组的 `searchFields` / `multiple` 是独立的 ADR-0049 enforce-or-remove 题(实现,或退休)。\n\nA 组其余各行的方向要直白得多(补声明即可),但 `page:section`/`footer`/`sidebar` 那一行要连带回答一个更基础的问题:这三个 type 的 props 是不是真该是 `EmptyProps`。\n\n## 复现\n\n#5068 落地后,对 example 语料 + 平台页跑闸门:`component-props-unknown-key` 共 8 条,其中 6 条来自本表(`page:card.children` ×2、`page:card.visible`、`element:record_picker.label`/`labelField`、`record:path.stages[].terminal`),另 2 条是 #5776 的 tab `key` 拼写。`element:record_picker.displayField` 则以 `component-props-invalid`(必填缺失)出现。\n\n> `page:card.visible` 是本表之外的第三类:它是把组件级的可见性谓词写进了 `properties`,靠 `SchemaRenderer` 的 hoist 生效(`packages/react/src/SchemaRenderer.tsx:288` 读 `schema.visible`)。ADR-0089 的正统拼法是组件级 `visibleWhen`,`visible` 连别名表都不在 —— 这一条是页面该改,不是 schema 该补。"
+}

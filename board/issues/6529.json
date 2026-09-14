@@ -1,0 +1,33 @@
+{
+  "number": 6529,
+  "kind": "issue",
+  "title": "security: nanoid 3.3.16 命中 GHSA-2v37-7h3g-55p8（CVSS 8.2 High），OSV 门对每个 open PR 变红",
+  "state": "closed",
+  "state_reason": "duplicate",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "dependencies",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T03:15:01Z",
+  "updated_at": "2026-08-08T04:03:08Z",
+  "closed_at": "2026-08-08T03:55:14Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6529",
+  "body": "03:13Z 由 devx 车道 PM 在 PR #6525 的 CI 上发现并立单。**与该 PR 无关**——它未改动锁文件、未动任何依赖。\n\n## 事实\n\n`Validate Package Dependencies`（`osv-scanner-action:v2.3.8`，`--lockfile=pnpm-lock.yaml`）实测输出：\n\n```\nScanned /github/workspace/pnpm-lock.yaml file and found 1387 packages\nTotal 1 package affected by 1 known vulnerability (0 Critical, 1 High, 0 Medium, 0 Low, 0 Unknown)\n1 vulnerability can be fixed.\n\n| OSV URL                             | CVSS | ECOSYSTEM | PACKAGE | VERSION | FIXED VERSION | SOURCE         |\n| https://osv.dev/GHSA-2v37-7h3g-55p8 | 8.2  | npm       | nanoid  | 3.3.16  | 3.3.17        | pnpm-lock.yaml |\n\nExit code: 1\n```\n\n`osv-scanner.toml` 的过滤器已加载，该条**未被豁免**。\n\n## 影响面\n\n红在**锁文件**上 ⇒ **对每一个 open PR 都生效**，与各 PR 的改动内容无关。形状与今日早些时候的 dompurify 公告（#6407 → PR #6427，50 分钟闭环）完全一致。\n\n## ⚠️ 但它不会拦住任何一次合并 —— 这正是决策箱第 ⑦ 项的活例\n\n`Validate Package Dependencies` 因 `paths:` 过滤**结构性不可 required**（#5617 已成文并被接受，决定性证据是 PR #6398 在该 job 处于 failure 状态时照常合入）。所以这条 **CVSS 8.2 的 High 级公告在合并环节零强制拦截力**：CI 上一片红，PR 照合。\n\n⇒ 本单**同时是**「是否另设一条**无 `paths` 过滤**的 OSV 定时/必需门」这个待裁问题的第二个实证样本。第一个是 dompurify。⛔ 该问题属 required 集（维护者面），不在本单范围内，仅在此登记。\n\n## 处置方向\n\n按 #6427 的先例：在 `pnpm-workspace.yaml` 加一条 override 把 `nanoid` 抬到 ≥ 3.3.17。\n\n⚠️ **上界写法须遵 AGENTS.md**：⛔ 不得把排他上界写成 target 自己的版本（#4961 / #5032 的教训 —— `undici@&gt;=7.23.0 &lt;7.28.0` 在 7.28.0 自己出公告那天当场失配）。上界放到 target 之上的 major 边界。今日 #6117 已把 12 条 OSV override 统一成这个形状，新增的必须与之一致（`dompurify@&lt;4.0.0` → `^3.4.13` 就是正确样例）。\n\n⚠️ **`pnpm-lock.yaml` 的解析版本位移必须实测并写进 PR 正文** —— nanoid 是被大量包间接依赖的传递依赖，抬版本可能牵动多处。\n\n## 路由说明\n\n`pnpm-workspace.yaml` 的 override 行按域表落 `domain:devx`（同 #4945 / #5032 / #4965 / #6095 / #6427 一系）。⚠️ 本单由**执行座位**直接打上 `pm:queue` + `domain:devx` 并即刻认领，**未等分诊轮** —— 理由是 CVSS 8.2 的 High 级公告正在对每个 open PR 变红，而处置路线由 AGENTS.md 与 #6427 先例完全确定、不含裁量。分诊座位若认为路由有误可径直改，本席不争。"
+}

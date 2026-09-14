@@ -1,0 +1,35 @@
+{
+  "number": 6175,
+  "kind": "issue",
+  "title": "finding(bump-objectui): pin 范围跨过 objectui 的 release commit 时,digest 会先刷一屏 `fatal:` 再报成功 —— 一个完整的结果长得像一次失败",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T07:09:54Z",
+  "updated_at": "2026-08-07T14:47:41Z",
+  "closed_at": "2026-08-07T14:47:41Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6175",
+  "body": "在 #6159 的 pin bump(PR #6173)执行时观察到,产物完全正确,属 observation-class,按 Prime Directive #10 记录。\n\n## 现象\n\n`scripts/bump-objectui.sh` 在本次范围(`f995a452..7dfbeb70`)上的真实输出:\n\n```\n→ objectui pin: f995a452d2ca → 7dfbeb704e1e\nfatal: path '.changeset/bulk-action-capability-gate.md' does not exist in '7dfbeb704e1eace5dc5eae1d6168c4ded805a32b'\nfatal: path '.changeset/lookup-fields-in-predicates.md' does not exist in '7dfbeb704e1eace5dc5eae1d6168c4ded805a32b'\nfatal: path '.changeset/predicate-eval-failures-warn-once.md' exists on disk, but not in '7dfbeb704e1eace5dc5eae1d6168c4ded805a32b'\n... 共 9 行 ...\n→ 9 releasing changeset(s), 0 breaking, 0 release-nothing, 20 commit(s) without a changeset\n→ wrote changeset console-7dfbeb704e1e.md (@objectstack/console: patch)\n```\n\n九行 `fatal:`,然后成功。**产物是对的** —— 9 条 releasing changeset 一条不少地进了 console changeset 正文,级别、范围、计数全部核对无误。\n\n## 来源\n\n`scripts/objectui-changeset-digest.mjs` 的 `readAt()`:\n\n```js\nfunction readAt(objectuiRoot, to, sha, path) {\n  try {\n    return git(objectuiRoot, ['show', `${to}:${path}`]);\n  } catch {\n    return git(objectuiRoot, ['show', `${sha}:${path}`]);\n  }\n}\n```\n\n第一次 `git show` 的失败被 `catch` 正确接住并回落到「添加它的那个 commit」,但 git 的诊断已经写进了继承来的 stderr,`catch` 拦不住。\n\n触发条件是 `to` 端点是一个 **release commit**:本次目标 `7dfbeb7` 是 objectui 自己的 `chore: release packages (#3248)`,它消费并删除了当时挂着的全部 88 个 changeset,于是范围内新增的 9 个在 `to` 处一个都不存在,回落路径逐个触发。这是本仓第一次让 pin 落在 objectui 的 release commit 上。\n\n## 为什么值得记一笔,尽管它只是噪声\n\n本仓在这个脚本上反复写下的原则是「**a degraded list and a complete one must never look alike**」(#4731,`bump-objectui.sh` 的注释与降级分支)。这里发生的是它的镜像:**一个完整的列表长得像一次失败**。对下一个执行 pin bump 的人(或 agent),九行 `fatal:` 的第一反应是「digest 挂了、要不要改用 `--no-changeset` 手写」,而正确的反应是「忽略它,产物是全的」。判断成本落在读者身上,而读者恰恰是最没有上下文的那个人。\n\n而且它会**复现**:objectui 现在会定期跑 release,今后每一次跨过 release commit 的 pin bump 都会打这一屏。\n\n## 备选修法(成本都很小,留给 triage 定)\n\n- **A. 先探测再读**:`git cat-file -e ${to}:${path}` 判断存在性,不存在就直接读 `${sha}:${path}`,不产生 `fatal:`。语义不变。\n- **B. 静默第一次尝试**:给 `readAt` 的第一次 `git()` 调用加 `stdio: ['ignore', 'pipe', 'ignore']`,只在两次都失败时才把诊断放出来。改动最小。\n- **C. 把回落说成一句话**:吞掉 git 的 stderr,改为在 digest 的 accounting 行旁边打一句「N 个 changeset 已被范围内的 release commit 消费,已从添加它们的 commit 读取」。信息量最大,也最贴合本仓「absence/degradation must be loud, but must be READABLE」的调子。\n\n倾向 **B + C**:B 消掉误导,C 把「发生了回落」这件事从噪声变成一句可读的事实 —— 直接做 A 会把回落变得完全无声,而这件事本身是值得说一句的。\n\n## 明确不在范围内\n\n产物无误,#6159 / PR #6173 不受影响,也不需要因此重跑或改动 pin。这条纯粹是工具可读性。\n"
+}

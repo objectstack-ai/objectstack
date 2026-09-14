@@ -1,0 +1,35 @@
+{
+  "number": 5792,
+  "kind": "issue",
+  "title": "conformance(Stage A / #3877):notification 族响应体一致性测试 —— 双断言口径,预期违规率按 2/2 双向查",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:queue"
+  ],
+  "assignees": [
+    "qq9340100"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T05:43:10Z",
+  "updated_at": "2026-08-07T16:14:59Z",
+  "closed_at": "2026-08-07T16:14:59Z",
+  "closed_by": {
+    "login": "qq9340100",
+    "id": 313832657,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5792",
+  "body": "Part of #3877(维护者批文见该单 2026-08-06 裁决评论:Stage A 逐族推进,notification 为下一族)。devx 车道 PM 按跨分片协议立单转 cli 座位(notification emit 面属 runtime/rest 线),**未认领**。\n\n## 任务\n\n给 notification 族(#3877 测量:8 条薄 emit 路由,inline literal,已有声明)上响应体一致性测试,照 PR #5682(discovery 族)的成套做法:\n\n1. **双断言口径**(#3877 已裁定为 Stage D 棘轮定义,本族即按此实施):\n   - `schema.parse(body)` 判**值**(必填键、枚举);\n   - 发出键集 ⊆ 声明键集,判**键**(单一 parse 断言对「多发未声明键」永远绿);允许集从 schema shape 推导,⛔ 不手写数组。\n2. 宽松响应 schema 与严格生产者 schema 若并存,加等价性钉子(#5682 先例),防两边单独长键。\n3. **两个方向都要查**:discovery 族实测 2/2 违规且方向相反(漏发必填 + 多发未声明)——按此心理预期排,不按 i18n 的 4/5。\n4. 违规修复是判断题(#3676 删声明 vs #3847 改实现,方向相反)——方向不明时报 needs_decision,⛔ 不许猜。\n\n## 验收\n\n- 8 条路由逐条有双断言覆盖;违规清单如实报告(修复可同 PR 或按判断题拆单);\n- 落地后向 #3877 回报违规率与经验(续批 analytics/automation 已声明路由的依据)。\n\n## 关联\n\n#3877、PR #5682(模板)、#5679(嵌套键盲区,本族如遇同形状照记不修)。"
+}

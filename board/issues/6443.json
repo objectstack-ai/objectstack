@@ -1,0 +1,35 @@
+{
+  "number": 6443,
+  "kind": "pull_request",
+  "title": "fix(analytics): read scope 的 `$null` / `$exists` 非布尔比较数改为拒收,不再按真值性编成相反的谓词 (#6387)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T19:01:41Z",
+  "updated_at": "2026-08-07T19:53:19Z",
+  "closed_at": "2026-08-07T19:53:18Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-08-07T19:53:18Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/6443",
+  "body": "Fixes objectstack-ai/objectstack#6387\n\n按 #5347（`$null`）/ #5369（`$exists`）在 `driver-sql` 面确立的先例，把非布尔比较数的**按声明拒收**推到 RLS 编译器 `read-scope-sql.ts`。分诊已定第三档（适用既有先例），不含新契约取舍。\n\n## 实测：立单的前提成立，逐字节复现\n\n在 `origin/main`（`5faa23ca3`，已含 PR #6390）上直接调 `compileScopedFilterToSql`，alias `t`。发射器读的是 `val ? … : …` —— **真值性**，不是 `@objectstack/spec` `FieldOperatorsSchema` 声明的 `z.boolean()`：\n\n| read scope | 编译结果 | |\n|---|---|---|\n| `{ owner_id: { $null: \"false\" } }`   | `\"t\".\"owner_id\" IS NULL`     | ⛔ 与作者写的意思**相反** |\n| `{ owner_id: { $null: \"true\" } }`    | `\"t\".\"owner_id\" IS NULL`     | |\n| `{ owner_id: { $null: 0 } }`         | `\"t\".\"owner_id\" IS NOT NULL` | |\n| `{ owner_id: { $null: null } }`      | `\"t\".\"owner_id\" IS NOT NULL` | |\n| `{ owner_id: { $null: undefined } }` | `\"t\".\"owner_id\" IS NOT NULL` | |\n| `{ owner_id: { $exists: \"false\" } }` | `\"t\".\"owner_id\" IS NOT NULL` | ⛔ 与作者写的意思**相反** |\n| `{ owner_id: { $exists: 0 } }`       | `\"t\".\"owner_id\" IS NULL`     | |\n| `{ owner_id: { $exists: \"no\" } }`    | `\"t\".\"owner_id\" IS NOT NULL` | |\n\n两行 ⛔ 是要害：字符串 `\"false\"` 是**真值**，于是它落在它被写下来所要表达的 `false` 的**对面**。`{ $exists: \"false\" }` 写来表示「没有 owner 的行」，编出来是「**有** owner 的行」—— 在一个自述「A read-scope predicate must never be silently dropped、fail-closed」的模块里，这是**加宽**（admit 了策略要排除的行），方向与 #6125 那一格（fail-closed、匹配零行、只是安静）相反。\n\n## reachability_measured：库存 metadata **走不通**（三道闸各自独立关死）\n\n这是本单点名的决定性测量，我把它跑通了 —— 结论是**否**，如实回报，定级依据是测量而不是立单时的措辞。进料口链条 `ctx.getReadScope` → `plugin-security.getReadFilter` → `computeRlsFilter` 上，没有任何一处能产出非布尔的 `$null`：\n\n1. **规则元数据本身不收 FilterCondition。** `RowLevelSecurityPolicySchema` 把 `using` / `check` 声明为 `z.string()`（CEL 谓词）。实测 `safeParse` 一个对象：`{\"expected\":\"string\",\"code\":\"invalid_type\",\"path\":[\"using\"],\"message\":\"Invalid input: expected string, received object\"}`。\n2. **CEL 下降根本不发射这个形状。** `@objectstack/formula` 的 `cel-to-filter.ts` 只在两处发射 `$null`，两处的比较数都是**硬编码布尔**（`== null` → `{ $null: true }`，`!= null` → `{ $null: false }`），`$exists` **一次都不发射**。实测 12 条 CEL：`owner_id == null` → `{\"owner_id\":{\"$null\":true}}`；`owner_id != null` → `{\"owner_id\":{\"$null\":false}}`；`owner_id == current_user.nothing`（变量解析为 null）→ `unresolved-variable`，策略被丢弃、fail-closed，不会留下游离比较数。\n3. **绕开 schema 也到不了。** 把裸对象当谓词喂给 `RLSCompiler.compileFilter`，在 `sqlPredicateToCel` 里抛 `TypeError: expression.replace is not a function`，被 `getReadFilter` 的 catch 变成 `RLS_DENY_FILTER`。存成 JSON **字符串**则通过 schema，但 CEL 解析失败 → `null` → deny 哨兵。两条路都终止于 fail-closed。\n\n其余 read scope 生产者同样不含这两个算子：Layer 0 租户过滤（`computeTenantLayer0Filter`）、`plugin-sharing` 的 `buildReadFilter`（只产 `{owner: id}` / `$in` / `$or` / `{id:'__deny_all__'}`）、controlled-by-parent（`{fk: {$in: […]}}`）、deny 哨兵。\n\n**仍然开着的那条，如实记：** `getReadScope` 是 `AnalyticsPluginOptions` 上**有文档的公开扩展点**（`plugin.ts`），宿主自带的 read scope（来自 JSON 配置，或没走类型检查的 JS）与本编译器之间没有任何闸。本单也确认了立单时的另一半测量：`plugin-security` 全路径 `FilterConditionSchema` / `safeParse` 命中数为 **0**。\n\n**这对定级意味着什么：** 它**不是**今天由库存 metadata 驱动的活体绕过（#5347 那种 P0 形态在这里没有复现），而是一个 fail-closed 编译器上的**契约缺陷** —— 今天不可从库存 metadata 触达，且没有任何结构性的东西挡住下一个生产者。处置不受影响：先例定的是**处置**（拒收），不是严重度；在编译器处拒收，才让「声明为布尔」等于「强制为布尔」，与谁写这条 scope 无关。\n\n## 修法\n\n- **发射器**：闸 `assertBooleanFlagComparands` 落在 `compileField`，紧挨 #6125 的 `undefined` 闸。两道闸作用域**互不相交**（`assertDefinedComparands` 按名字跳过这两个算子），所以谁也盖不住谁的措辞；`hasOwnProperty` 而非 `in`（对齐 driver-sql 的孪生实现，继承来的键不该触闸，而 `{ $null: undefined }` 算数）。两臂随之从 `val ? …` 改为 `val === true ? …`，在闸之下是穷尽的二选一。\n- **一条措辞管两个算子**（#5240）：`driver-sql` 给孪生实现两条措辞，是因为各自要指名**自己**发射器默认倒向哪边；本模块只有一条规则（真值性）同时管着两个算子，两者失败方式完全一样，所以一条措辞才是诚实的写法。只有算子名与 `path` 不同，并有一条断言把「只有这两处不同」钉死。\n- **信封**复用本模块自述唯一的那个（`READ_SCOPE_COMPILE_FAILED` / 500），不是 #5347 的 `INVALID_FILTER` / 400：read scope 是平台编译产物，报 400 等于让调用方去修一个他既没写、也改不动的东西。继承的是处置，不是信封。\n- **极性表同 PR 改**（本单点名的陷阱）：`nullValueSatisfiesOperator` 的 `$null` / `$exists` 两臂从真值性（`Boolean(value)` / `!value`）改为恒等（`value === true` / `value === false`）。每张极性表钉的是它**自己**发射器的拼写（#5146 / #5298），只改发射器不改表，不变量会**安静地**断在定义处。这条有意的差异消失后，本编译器与 `driver-sql` 的同名表第一次逐臂一致 —— 差异没了，是因为它的成因没了。\n\n### ⚠️ 极性表这一半「测不出来」，如实记而不是编一条证据\n\n极性表的改动**无法从模块外独立观察**：闸把两种拼写会分歧的值全部拒掉，而幸存下来的 `true` / `false` 上，真值性与恒等给出同一答案（`driver-sql` 的 `$exists` 臂当年也是这么记的）。所以测试钉的是它的**前提**，并在文件里写明为什么 —— 布尔行经 `$not` 重写的极性逐字节不变（收紧无害的对照组），以及非布尔在 `$not` 重写里**无论被归成哪一档**，重写后的叶子仍会走到 `compileField` 被拒，表的判读一定被丢弃。凑一条「证明表改了」的断言只会因为错误的原因变绿。\n\n## ⛔ 一字未动\n\n- **合法布尔**：`$null: true/false`、`$exists: true/false` 的 SQL 逐字节不变（`IS NULL` 下降正是 RLS 用来圈无主行的写法，也是 CEL 唯一能产出的四种形状）—— 有自己的对照组。\n- **#6390 的 11 行 `NULL_CONTROL`**（比较数位置上的 `null`）全部保持绿。\n- `driver-sql` / `driver-turso`、`packages/spec`（声明已是 `z.boolean()`，够用）、以及本包的 `where` 门 `strategies/filter-normalizer.ts`（#6386 在飞的另一扇门）均未触碰。\n\n## #6390 钉的那两行，按新语义重写\n\n`read-scope-undefined-comparand.test.ts` 里 `{ $null: undefined }` → `IS NOT NULL` / `{ $exists: undefined }` → `IS NULL` 两行，正是本单要改的地方，改红是预期。重写后：**两者都拒收**，但拒收的**理由**换了 —— `undefined` 在这里不是「比较数位置」（那道闸至今仍按名字跳过这两个算子，#6125 的说法一字未动），而是落在**声明的布尔域之外**，对一个 flag 而言这是更贴切的诊断。测试同时断言它拿到的**不是** #6125 的措辞。\n\n## 反向验证（方向先判后跑：预期为红）\n\n把闸关掉、两臂还原成 `val ? …` 复跑：**39 条新 pin 转红**，失败信息逐条引出改动前的下降结果（`it still COMPILED — pre-#6387 this lowered to \"t\".\"d\" IS NULL`），正好回证上表的 `wasSql` 一列。对照组在还原状态下**保持绿**（17 条纯对照断言全过），证明它确实是「改动前后都过」的对照组而非改动本身。\n\n## 验证\n\n- `pnpm --filter @objectstack/service-analytics test`：**67 files / 1345 tests passed**\n- 消费半径：`packages/rest` 的 `analytics-read-scope-refusal-envelope` + `rest-4xx-message-truncation`（19 passed）、`packages/runtime` 的 `analytics-query-read-scope-withhold`（10 passed）\n- `tsc --noEmit`：改动的 4 个文件**零错误**（该包 10 条既有报错全在无关测试文件里）；`pnpm build` 成功\n- 根门：`check:type-check-debt`（**先全量 `pnpm build` 再判** —— 新 worktree 首跑因未建依赖假红 9 个包，均与本包无关；建完后 `OK — none above its recorded number`）、`check:nul-bytes`、`check:error-code-casing`、`check:route-envelope`、`check:empty-changeset`、`check:doc-authoring` 全绿；eslint 无输出\n- 拒收清单棘轮同步：`read-scope-refusal-envelope.test.ts` 12 行 / 11 site → **14 行 / 12 site**（一道闸、两个触发器，与 `quoteIdent` 的 alias/field 分裂同形）\n\nchangeset：`@objectstack/service-analytics` patch，按 Observable behaviour change 写法声明今天靠静默翻转在跑的 read scope 将开始 500 拒收。\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_015a5qkLzpGXhLL2F5gvJ7dD)_"
+}

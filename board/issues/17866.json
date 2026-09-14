@@ -1,0 +1,31 @@
+{
+  "number": 17866,
+  "kind": "issue",
+  "title": "CI: test-nightly-tiers.yml carries the same run-level Turbo passthrough defect — both legs, and its whole-package leg has it too",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:devx",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-12T15:36:36Z",
+  "updated_at": "2026-09-13T06:12:54Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17866",
+  "body": "Found by the whole-tree `--filter`-plus-run-level-passthrough sweep #16886's triage asked for. It is **outside #16886's fence** (that card's surface is the `dogfood:` job in `ci.yml`), so it is filed rather than fixed there.\n\n## The sites\n\n`.github/workflows/test-nightly-tiers.yml`, both legs of the `Run this shard's nightly tiers` step (job `tiers`), located by content — line numbers are a reading of `c88fa2ccd` and this file moves:\n\n```\n:276   set -- pnpm turbo run test $FILTERS --concurrency=4 --summarize --log-order=stream -- $REPORTER\n:281   set -- pnpm turbo run test \"--filter=$PKG\" --concurrency=4 --summarize --log-order=stream -- \"--shard=$SLICE\" $REPORTER\n```\n\nwhere `REPORTER=\"--reporter=default --reporter=json --outputFile.json=.nightly-tiers/vitest-report.json\"`.\n\nNeither leg carries `--only`, and no passthrough-free `turbo run build` precedes the step. Both halves of the fix that landed for the `test` job (PR #16868) and for the `dogfood` job are absent.\n\n## Why it is the same defect\n\nA run-level passthrough — everything after the bare `--` — folds into the hash of **every task in the run**, not only the tasks that receive it. `turbo.json` has `test` and `build` both `dependsOn: [\"^build\"]`, so a filtered `turbo run test` pulls the whole upstream `build` closure into the run and hashes all of it under the passthrough.\n\nMeasured here, turbo 2.10.10, `--filter=@objectstack/cli` (the one tier-owning package `nightly-tiers.mjs --packages` reports today), `turbo run test ... --dry=json`, 60 tasks (59 `build` + 1 `test`):\n\n```\nplain vs plain                          60 identical,  0 changed   <- control, fires\nplain vs -- REPORTER                     0 identical, 60 changed\n-- shard=1/2 +REPORTER vs 2/2 +REPORTER  0 identical, 60 changed\n```\n\n## The half that is NOT just a copy of #16395\n\nThe slice leg (`:281`) is the shape already fixed twice. The **whole-package leg** (`:276`) is a case neither `ci.yml` job has: `ci.yml`'s corresponding whole leg carries **no** passthrough at all, while this one appends `-- $REPORTER` unconditionally. So on this workflow even the non-sliced leg re-hashes its entire build closure and cannot reach the shared, passthrough-free `build` cache — a constant scatter rather than a per-shard one, but a scatter.\n\nThat is why this is a card and not a rider on #16886: fixing `:281` is mechanical (the pinned shape), but `:276` needs a decision the pinned shape does not answer — the reporter args are wanted on every leg, so `--only` there requires a passthrough-free build for a whole multi-package filter set, which is a derivation, not an application.\n\n## Not claimed\n\n- No wall-clock cost measured. This is a static reading plus the dry-run hash evidence above; the size of the win is not part of the claim.\n- Nothing here is verifiable on a PR's own CI: this is a `schedule`-triggered workflow outside the required set, so any fix lands unexercised until a nightly run. Whoever takes it should say how they intend to read the result.\n\nFiled unassigned and unlabelled — triage owns `domain:*` and priority."
+}

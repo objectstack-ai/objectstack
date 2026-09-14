@@ -1,0 +1,36 @@
+{
+  "number": 6415,
+  "kind": "pull_request",
+  "title": "fix(metadata): sys_view_definition 的「活跃行唯一」补运行时 partial UNIQUE 迁移 (#5839)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T17:07:09Z",
+  "updated_at": "2026-08-07T17:56:45Z",
+  "closed_at": "2026-08-07T17:56:44Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": "2026-08-07T17:56:44Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/6415",
+  "body": "Fixes objectstack-ai/objectstack#5839\n\n按维护者 2026-08-06 裁决（**选项 1：名额可回收**）实施：补运行时 partial UNIQUE 迁移，归档视图不再占用 `(name, organization_id, owner)` 名额。\n\n## 前提核验（三条全部成立）\n\n| 前提 | 结论 | 证据 |\n|---|---|---|\n| **P1** 活跃行唯一今天确实不生效 | ✅ 成立 | 真实 SQLite 实测，见下 |\n| **P2** `ensureOverlayIndex` 范式在 main 且形态如假设 | ✅ 成立 | `packages/metadata-protocol/src/protocol.ts:2519`，raw SQL `CREATE UNIQUE INDEX … WHERE state = 'active'` + 方言降级 |\n| **P3** #5248 现状与本单不冲突 | ✅ 成立 | #5248 已于 2026-08-06 **合并关闭**；`partial` 现为 `retiredKey` 墓碑，本单未恢复该键 |\n\n**P1 实测**（用 `declared-index-retired-keys.test.ts` 已钉住的、驱动真实产出的 DDL）：\n\n```\nCREATE UNIQUE INDEX `idx_sys_view_def_active` on `sys_view_definition` (`name`, `organization_id`, `owner`)\n\ninsert active personal view : OK\n归档 v1 后同名新建           : REJECTED: UNIQUE constraint failed:\n    sys_view_definition.name, sys_view_definition.organization_id, sys_view_definition.owner\n```\n\n用户归档「我的管道」之后，被一条自己刚扔掉的记录挡住，无法重建同名视图——正文口径复现成功。\n\n## 落点\n\n- **迁移**：`packages/metadata-protocol/src/migrations/view-definition-active-index.ts`（新增）\n- **接线**：`packages/metadata-protocol/src/plugin.ts` 的 `assembleMetadataProtocol`，在 `kernel:ready` 触发\n- **声明面**：`packages/metadata-core/src/objects/sys-view-definition.object.ts` 仅改注释\n\n⛔ **未触** `engine.ts` / `protocol.ts` 热区。接线选在 `assembleMetadataProtocol` 而非 `protocol.ts`，是因为它是**两种挂载共用的唯一入口**（`MetadataProtocolPlugin` 委托模式 **与** `ObjectQLPlugin` 的 `registerProtocol !== false` 内建便利模式）——只在委托插件上挂 hook 会漏掉默认挂载。选 `kernel:ready` 是因为表必须先存在：`ObjectQLPlugin` 在 `start()` 里经 `syncRegisteredSchemas` 建表，晚于所有插件的 `init()`。\n\n**零新增依赖**：`pnpm-lock.yaml` 与 main 完全一致。测试用 Node 内置的 `node:sqlite` 跑真实数据库，而不是为跑测试把 `better-sqlite3` 这个原生模块写进 lockfile。\n\n## 为什么复用声明的索引名\n\n`syncDeclaredIndexes` 按名跳过（`if (existing.has(name)) continue;`）。用 `idx_sys_view_def_active` 这个**声明里的同名**建 partial 索引，才能让后续每次启动都看到名额已占、不再把全量 UNIQUE 加回来。换个名字会在下次启动被静默撤销；而删掉声明则会让不跑该迁移的宿主完全失去唯一性——所以声明保留为**降级形态**。\n\n## 与范式的两处有意偏离（均在模块头注释写明）\n\n**1. 先探针、后替换。** `ensureOverlayIndex` 是「先 DROP 旧索引、再建 partial」；建失败（方言不支持 / 数据冲突）时，表会**静默地一个唯一索引都不剩**。本迁移反转顺序：先用临时探针名建一次 partial 索引，确证当前方言与数据都能接受，才 DROP 旧索引并以声明名重建。任何建不成的情况下，原有全量 UNIQUE 索引原样保留——**只会退回今天的行为，不会更低**。代价是迁移那一次启动把小索引建了两遍。（范式自身的这个窗口已另单记录：#6418。）\n\n**2. `resolveIndexExec` 逐个 probe 加 try/catch，并优先 `getDriverForObject`。** `ObjectQL.getDriver(objectName)` **必须**带对象名，不带会抛 `No driver available for object 'undefined'`；范式因整体 try/catch 掩盖了这一点，而本迁移跑在 `kernel:ready` 钩子里，抛出会**失败整个 bootstrap**。这不是假设——消费半径扫描时它真的让 16 个 ObjectQL 启动测试翻红，已按此修复并加钉子测试。优先 `getDriverForObject(sys_view_definition)` 还更正确：多数据源内核上平台对象可能落在自己的数据源上。\n\n## 测试（18 条，全部跑真实 SQLite）\n\n`packages/metadata-protocol/src/migrations/view-definition-active-index.test.ts`\n\n- **名额回收（本单钉子）**：归档后同名新建**成功**；配一条 `BEFORE the migration…` 把缺陷本身钉住\n- **唯一性不放宽**：两条 `state='active'` 同名同域行仍被拒；多条归档行可共存，但活跃行仍只允许一条；不同 owner / 不同 org 互不干扰\n- **幂等**：重跑后索引定义逐字节相同、探针无残留；行为层面重跑后名额回收依然成立；从「从未建过声明索引」的表也能收敛\n- **降级**：模拟无 partial 索引的方言 → 原全量 UNIQUE 索引**逐字节保留**且仍在生效，以 `info` 记录（非操作者错误）；模拟冲突行 → 按 **ADR-0120 D4 口径**在 `error` 点名未生效的列并指向 `os migrate plan`，旧索引保留，不阻断启动\n- **seam**：`getDriver` 抛错时不抛出（上面那条回归的钉子）；`getDriverForObject` 优先于引擎级默认\n\n### 反向验证（肢 A：去掉迁移）\n\n预测方向 **翻红**，实测一致：`ensureViewDefinitionActiveIndex` 改为直接 `return { status: 'created' }` 后 **7 红 9 绿**，其中本单钉子 `AFTER the migration, an archived view frees its slot` 翻红。\n\n如实记录两点：`still rejects two ACTIVE rows…` 与 `does NOT close the NULL-distinct hole` 在肢 A 下**保持绿**——前者由被保留的全量索引提供，后者是既有事实的钉子，二者都不是迁移的证明，而是「不放宽 / 不越界」的守卫。另外 `is idempotent — 逐字节相同` 在肢 A 下**空绿**（什么都没做当然不变），真正覆盖它的是同组的行为版 `is idempotent in BEHAVIOUR too`，该条翻红。\n\n## 已知未涵盖（已另单：#6417）\n\n`owner` 为 NULL 的**共享视图**与 `organization_id` 为 NULL 的环境级视图，因 SQL UNIQUE 的 NULL-distinct 语义本来就不受该索引约束——实测两条同名活跃共享视图今天可以并存。这是**早于本次修复的既有缺口**，且不是 #5839 裁决的内容；本迁移只改**行范围**（`WHERE state = 'active'`）而不动键的拼写，这也正是它**严格弱于**被替换的索引、因而不可能在存量数据上建失败的原因。已加测试如实钉住该缺口。\n\n## 验证\n\n```\npnpm --filter @objectstack/metadata-protocol --filter @objectstack/metadata-core test\n  metadata-core      8 files / 103 tests passed\n  metadata-protocol 53 files / 552 tests passed\npnpm --filter @objectstack/objectql test      140 files / 2308 tests passed\npnpm --filter @objectstack/driver-sql test     68 passed | 4 skipped, 953 passed\nnode scripts/check-engine-double-contract.mjs    OK — 80 pinned, 133 DEBT, 4 exempt\nnode scripts/check-startup-registry-verdict.mjs  OK — 40 seams, none contradictable\nnode scripts/check-nul-bytes.mjs                 OK — 6055 files, no raw control bytes\n```\n\n`@objectstack/metadata-protocol` 无 `typecheck` script（既有状况），其 `tsup` DTS 构建即类型门，已通过。\n\n⚠️ 过程记录：`objectql` 的 `protocol-meta.test.ts` 一度出现 3 条红，排查为 AGENTS.md §9 的**陈旧产物**陷阱——合并 origin/main 后只重建了本单两个包，spec/lint 的 dist 仍是旧的。用 `origin/main` 的对照工作树复核（同一文件 89/89 绿），再在本分支重建完整依赖链后同样 89/89 绿，与本 PR 无关。\n"
+}

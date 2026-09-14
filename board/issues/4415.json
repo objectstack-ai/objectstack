@@ -1,0 +1,37 @@
+{
+  "number": 4415,
+  "kind": "issue",
+  "title": "Design: should FlowNodeSchema parse its ADR-0031 regions, instead of a post-parse pass callers must remember to run?",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:dispatched",
+    "pm:queue",
+    "tooling"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-31T12:39:29Z",
+  "updated_at": "2026-08-07T14:51:22Z",
+  "closed_at": "2026-08-07T14:51:22Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4415",
+  "body": "设计讨论,不是 bug —— 现状能工作,问的是它能不能不依赖调用方的记性。接 #4347 / #4381 / #4399 / #4401。\n\n## 现状\n\n`FlowSchema.parse` 归一化 flow 自己的 `nodes[]` / `edges[]`,但**够不到 region**,因为 region 住在 `FlowNodeSchema.config` 里 —— 一个刻意开放的 `z.record`。#4381 用一道**后置 pass** 补上:\n\n```ts\nconst flowShell = FlowSchema.parse(converted);\nvalidateControlFlow(flowShell);\nconst parsed = normalizeControlFlowRegions(flowShell);   // ← 必须记得调\n```\n\n## 问题\n\n「parse 完拿到的就该是规范形状」是 Zod-First(PD #1)的默认预期。现在多了一条不成文规则:**拿到 `FlowParsed` 之后还得再调一个函数**,否则嵌套 region 里的边条件还是裸字符串、节点还没过 `.strict()`。\n\n今天只有一个消费方(`registerFlow`),所以没出事。但这正是 #4347 那一族缺陷的生成条件 —— 一个新消费方(Studio 发布路径、未来的 MCP 工具、某个批量校验脚本)拿到 `FlowParsed` 就直接用,就又是一次「看起来解析过了、其实只解析了一半」。\n\n## 为什么 #4381 当时没做\n\n评估过、刻意没做,理由是 blast radius:\n\n- 给 `FlowNodeSchema` 挂 `.transform()` 会把它从 `ZodObject` 变成 `ZodPipe`,而它被 form 生成、`z.toJSONSchema`、以及 `FlowRegionSchema` / `ParallelBranchSchema` 反过来引用;\n- `lazy-schema.ts` 的注释里已经记着 `.strict().transform(…)` pipe 曾经把 `toJSONSchema` 的 `seen` 表打崩过(ADR-0089 D3a 时 `FormFieldSchema` / `PageComponentSchema` 踩过),现在靠一个 `_zod` facade 兜着;\n- region 是自递归的(`FlowNodeSchema` → `FlowRegionSchema` → `FlowNodeSchema`),transform 里再套一层解析要小心构造期递归。\n\n把这些混进一个 bugfix PR 里,会让那个 PR 的风险说不清 —— 所以当时选了后置 pass,并在函数注释里写明了这笔债。\n\n## 可选方向(未定)\n\n1. **`FlowNodeSchema` 自解析 region。** 最符合 PD #1,一次解决所有消费方。代价见上,需要先确认 `toJSONSchema` / form 生成不受影响。\n2. **`FlowSchema` 层挂 transform。** 比 1 影响面小(`FlowNodeSchema` 保持 `ZodObject`),但嵌套递归得自己写,且绕过 `FlowSchema` 直接 `FlowNodeSchema.parse` 的调用方仍然漏。\n3. **维持现状 + 加护栏。** 比如让 `collectFlowGraphs` / `runRegion` 在遇到未归一化的 region 时 warn,把「忘了调」变成有声音的。成本最低,但没有消除那条不成文规则。\n\n倾向 1,前提是先量清楚 `toJSONSchema` 的影响 —— 不该在没有这个数之前动手,这和 #4389 「先量再改」是同一个道理。\n\n## 相关\n\n#4336 的建议修复 #3(「给 node config 上类型」)是邻近但不同的一件事:那条针对表达式归一化够不到 `config.condition`,这条针对 region 子结构。两者如果都做,大概率是同一个机制的两次应用。"
+}

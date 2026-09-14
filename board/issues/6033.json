@@ -1,0 +1,36 @@
+{
+  "number": 6033,
+  "kind": "issue",
+  "title": "check-i18n-coverage:example 自身依赖未构建时仍抛裸异常 + node 栈(诊断准确,但不是结论)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched",
+    "tooling"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T15:16:15Z",
+  "updated_at": "2026-08-07T14:05:34Z",
+  "closed_at": "2026-08-07T14:05:34Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6033",
+  "body": "观察类发现(`finding`,不入 `pm:queue`)。实现 #5862(PR #6032)时按 Prime Directive #10 只记录、不顺手修 —— 它与 #5862 的成因不同,落点也不在该 PR 的申报文件面之外那半步。\n\n## 现象\n\n#5862 修的是「CLI 未构建」这一个前置。清掉它之后(`pnpm exec turbo run build --filter=@objectstack/cli`),在一棵**其余部分仍未构建**的树上跑 `node scripts/check-i18n-coverage.mjs`,第二堵墙立刻出现:\n\n```\nfile:///…/scripts/check-i18n-coverage.mjs:185\n    if (report.error) throw new Error(`os lint failed for ${configPath}: ${report.error}`);\n                            ^\n\nError: os lint failed for examples/app-showcase/objectstack.config.ts:\n  Cannot find module '/…/examples/app-showcase/node_modules/@objectstack/connector-mcp/dist/index.mjs'\n    at countI18nIssues (…/check-i18n-coverage.mjs:185:29)\nNode.js v22.22.2\n```\n\n退出码 1。本轮实测,在 f192981fe 的 worktree 上复现。\n\n## 与 #5862 的区别:这次诊断**没有说谎**\n\n这是为什么它是观察类而不是缺陷。#5862 的那句话把成因指向一个完全无辜的示例配置;这一句点的是**真的**缺失模块路径 —— 读者拿到的是可行动的一手读数。坏的只是**形状**:一段 node 栈,而不是一条「前置未满足 + 修法」的结论,并且同样是「第一个撞上的 config 顶罪」式呈现(app-showcase 只是恰好排在前面;每个 example 都会以各自的缺失模块再来一次,如果循环没在第一个就崩)。\n\n家族里已有的几条:#5217(`check-i18n-bundles`,已落地)、#5862(本条的直接前身,PR #6032 在飞)、#5795(根 `dev` 入口)、#5794(datasource fail-fast 不认识该成因)。\n\n## 为什么不在 PR #6032 里顺手修\n\n- **文件面**:#6032 的申报面是 `check-i18n-coverage.mjs`(+ 共享提取的两个文件 + `package.json` 一行接线),这一条落在同一个文件里 —— 但它是**另一个前置**(example 自身的 workspace 依赖 vs CLI 产物),判定方式也不同:CLI 那个能从 `oclif.commands.target` 精确推导出一个文件路径,这个要枚举每个 example 配置 import 的 workspace 包,是另一套设计。\n- #6032 已经在那条前置消息里**把修法说全了**(紧跟一行:从未构建过的树要 `pnpm build`),所以今天不会有人因为跟着修法走却仍然卡住 —— 本条的剩余代价只是「没跟修法走的人拿到的是栈而不是结论」。\n\n## 建议方向(实现者自选)\n\n若要修,最省的形状可能不是再加一个前置探测,而是把 `report.error` 这条路径从 `throw` 改成**收集式**:整轮跑完后一次性报告「哪些 config 没能 lint 成功 + 各自的原因 + 一句 `pnpm build`」,而不是让第一个失败的 config 中止全程 —— 与 #5217 「一个原因不要报成 N 个结果」的取向一致,方向相反(这里是 N 个不同原因不应被第一个吃掉)。\n\n## 影响面\n\n纯内部工具链 DX。CI 永远命中不到(`lint.yml` 的 `Build workspace packages` 在这一步之前),今天没有人因此拿到**错误**结果;坏的是本地/worktree 复现 i18n CI 时的呈现形状。故按观察类归档,交由 PM 定级。"
+}

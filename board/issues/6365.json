@@ -1,0 +1,35 @@
+{
+  "number": 6365,
+  "kind": "issue",
+  "title": "[spec] `systemFields` `owner` guidance misstates `ownership: 'org'` — tells authors org \"chooses the principal\" when it injects no `owner_id` at all",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T15:13:48Z",
+  "updated_at": "2026-08-07T19:25:28Z",
+  "closed_at": "2026-08-07T19:25:28Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6365",
+  "body": "Found while doing the ADR-0117 D1 declaration sync (#5767 / PR #6364). **Not fixed there** — different fact, different defect class, and it predates #5677. Filed unassigned for triage.\n\n## The defect\n\n`packages/spec/src/data/object.zod.ts`, in the `systemFields` `strictObject`'s `guidance` block — the message an author gets when they write the non-existent `systemFields: { owner: ... }` key:\n\n```\n`owner` is not a `systemFields` key — `owner_id` injection is governed by the\nobject-level `ownership` property (`ownership: 'none'` skips it;\n`'user'`/`'org'` choose the principal). `systemFields` controls only `tenant`\n(organization_id) and `audit` (created_at/created_by/updated_at/updated_by).\n```\n\n**`'user'`/`'org'` choose the principal** is false. `ownership: 'org'` does not choose a different principal — it injects **no** `owner_id` at all. From `packages/spec/src/data/injected-system-columns.ts` (the authority `applySystemFields` consumes):\n\n```ts\nconst owner = ownershipEligible && (ownership === undefined || ownership === 'user');\n```\n\nOnly `undefined` and `'user'` produce the column. The same file's own `ownership` JSDoc, ~90 lines above the guidance, already states it correctly:\n\n```\n- `org` / `none` — no per-record owner (Dataverse-style catalog / junction\n  tables); `owner_id` is NOT injected.\n```\n\nSo the guidance contradicts the JSDoc two stanzas away, and it is the guidance that is wrong.\n\n## Why it matters — the message is on a real authoring path\n\nThis is not dormant prose: it is the error text an author (or an AI writing metadata) is handed at the moment they are already confused about where owner injection is configured. It sends them to `ownership: 'org'` expecting an owner column keyed to the organization. They get no owner column, and every owner-keyed feature quietly does nothing — owner-scoped RLS, \"My\" views, owner reports, the first-admin bootstrap handoff. Silent, not loud: nothing rejects `ownership: 'org'`, so the mistake ships.\n\nThe failure mode is exactly the one the surrounding `guidance` machinery exists to prevent, inverted — a wrong-key rescue that hands out a second wrong answer.\n\n## Second, smaller item in the same block (fix together)\n\nThe sibling `guidance.ownership` message is now incomplete rather than wrong:\n\n```\n`ownership` is a TOP-LEVEL object key, not a `systemFields` key — write it beside\n`systemFields`. It, not this block, decides whether `owner_id` is injected.\n```\n\nSince #5677, `ownership` governs **both** ownership anchors — `owner_id` and `owning_business_unit_id`. PR #6364 deliberately left this alone (it is an error-message surface, not the injection-list description that issue named), but whoever fixes the `'org'` claim should widen this sentence in the same pass, since both messages describe the same property.\n\n## Suggested fix\n\nText only, no schema change. Something like: `ownership: 'user'` (or omitted) injects the ownership anchors; `'org'` and `'none'` both skip them, `'org'` meaning \"org-wide catalog, no per-record owner\". Keep `'none'` and `'org'` visibly distinct in intent so the message still explains why both exist.\n\n## Not in scope of this finding\n\nThe `ownership` enum's own `error` text and `describe()` (they enumerate the legal values verbatim and are #5678's surface), and adding the `business_unit` tier anywhere.\n\n## Provenance\n\n- Introduced long before #5677; the string survives unchanged through `git log -S`, most recently rebased in b5bdf48af (#4723 / PR #6000).\n- Verified against `origin/main` at `db59e9c5f`.\n- Duplicate search run over open issues (`systemFields guidance owner ownership`, `\"choose the principal\"`) — no existing card.\n"
+}

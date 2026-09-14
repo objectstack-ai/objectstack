@@ -1,0 +1,34 @@
+{
+  "number": 5676,
+  "kind": "issue",
+  "title": "「环境类别」这一个概念在 spec 里有两个枚举:DiscoverySchema.environment(3 成员)与 EnvironmentTypeSchema(7 成员)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:queue"
+  ],
+  "assignees": [
+    "qq9340100"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T23:48:41Z",
+  "updated_at": "2026-08-07T14:20:41Z",
+  "closed_at": "2026-08-07T14:20:40Z",
+  "closed_by": {
+    "login": "qq9340100",
+    "id": 313832657,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5676",
+  "body": "发现于 #4828 的实施(界外发现,查重无命中故新开;**未认领**;observation-class)。\n\n## 现象\n\n`packages/spec` 里有两个枚举描述同一个概念:\n\n| 声明 | 位置 | 成员 |\n|:---|:---|:---|\n| `DiscoverySchema.environment` | `src/api/discovery.zod.ts` | `production`、`sandbox`、`development` |\n| `EnvironmentTypeSchema` | `src/cloud/environment.zod.ts` | `production`、`sandbox`、`development`、`test`、`staging`、`preview`、`trial` |\n\n后者的注释写着「canonical buckets per industry convention (Salesforce, Power Platform, ServiceNow all use this taxonomy)」,即它自认是这个分类法的正本。前者是后者的真子集,两者之间没有任何引用关系,也没有任何东西保证它们同步演进。\n\n## 影响\n\n#4828 因此必须引入一个**有损映射**:`NODE_ENV=staging` 和 `test` 都是 `EnvironmentTypeSchema` 里的一等成员,但在 discovery 面上必须被折叠进 3 个桶(`staging → sandbox`、`test → development`)。这个映射本身是维护者裁定认可的(discovery 只需回答「我在不在生产」这种粗粒度问题),但「同一个词在两个 schema 里含义不同」这件事本身是漂移。\n\n具体的坑:一个读了 `EnvironmentTypeSchema` 的作者会以为 `staging` 是合法的 `environment` 取值,而 `DiscoverySchema` 会拒绝它(`discovery.test.ts` 里就有一条 `should reject invalid environment` 用的正是 `'staging'`)。\n\n## 可能的处置\n\n1. **维持两个,但写清楚关系**:在 `DiscoverySchema.environment` 的 `.describe()` 里点名 `EnvironmentTypeSchema` 是更细的分类法(#4828 已经加了这句),并在 `EnvironmentTypeSchema` 那边回指;再加一条测试钉住「discovery 的 3 个成员是 EnvironmentType 的子集」,这样后者改名/删成员时前者会红。\n2. **让 discovery 复用 `EnvironmentTypeSchema`**:去掉有损映射,但这会**放宽**一个响应枚举 —— 对按 3 个值做 switch 的消费者是前向不兼容的。#4828 的裁定明确要求生产者取值落在 3 成员枚举内,所以这条需要新的裁定才能走。\n\n选 1 的话是小活;选 2 是契约变更。倾向 1 + 那条子集测试:成本极低,而且能把「两个枚举」从**沉默的**漂移变成**有闸门看着的**关系。\n\n参考:#4828(引入了映射函数 `resolveDiscoveryEnvironment` 与映射表)。\n"
+}

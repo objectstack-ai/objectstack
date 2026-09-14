@@ -1,0 +1,35 @@
+{
+  "number": 6503,
+  "kind": "pull_request",
+  "title": "fix(objectql): lifecycle 的空间回收与分片轮转尊重 teardown abort 位 (#6412)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T02:37:41Z",
+  "updated_at": "2026-08-08T03:08:12Z",
+  "closed_at": "2026-08-08T03:08:11Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": "2026-08-08T03:08:11Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/6503",
+  "body": "Fixes #6412\n\n#4747 的不变量是「abort 位抬起后不发破坏性操作」。PR #5956 / #5755 / PR #6397 依次覆盖了 reap 分页循环、Archiver 批循环和冷侧 `keep` prune;本 PR 补上 `sweep()` 里剩下的两条同形腿,按分诊 22:54Z 晋级评论的口径,**逐项复制 PR #6397 已评审落地的范式**,不发明第二种写法。\n\n## 前提复核表(动手前逐条实测)\n\n| 前提 | 结论 | 证据 |\n| --- | --- | --- |\n| **P1** `origin/main` 两处调用点仍如分诊核对的形状 | ✅ 成立 | `reclaimSpace` 在 `for (const driver of reclaimable)` 内(原 `:616`),对象循环退出与该循环之间无任何 abort 读;`rotateShards`(原 `:852`)仅由 `lc.storage?.strategy === 'rotation'`、驱动能力与 `supportsRotation !== false` 把关,无 abort 合取项。行号已漂(实际 `:616` / `:852` 对应本次基线),按内容定位一致。 |\n| **P2** #6397 的合取项 + 注释口径在 main 上原样可考 | ✅ 成立 | `lifecycle-service.ts:1090`(基线)`if (!this.abort.aborted && archive.keep && typeof cold.deleteMany === 'function')`,其上为 16 行 `[#4747] Leg boundary…` 注释;测试形状见 `lifecycle-service.test.ts` 的 `KEEP_OBJ` 三例。 |\n| **P3** abort 位读法对这两处同样可用 | ✅ 成立 | `private abort: { aborted: boolean }` 是 **单一实例字段**(`:380`),`stop()` 抬位(`:438`),`get stopped()` 即 `this.abort.aborted`(`:397`)。两处调用点分别在 `sweep()` 与 `reapObject()` —— 同一实例的方法,信号源与 #5966 完全相同,无不同实例/作用域问题。 |\n\n## 两条腿\n\n**1. 空间回收(VACUUM 级)—— 对象循环之后**\n\nabort 判定在对象循环的**头部**(`if (this.stopped) return report;`)。teardown 落在**最后一个**声明对象的 reap 内时,`batchedReap` 因读到 `aborted === true` 而 break,对象循环随即**自然结束**(不再经过那个判定),控制流直接落到回收循环 —— 向正在关闭的 datasource 发一次 VACUUM 级操作。正文探针实测 `reclaims === ['vacuum']`。\n\n**2. 分片轮转(DROP 过期分片)—— ttl reap 之后**\n\n对象同时声明 `ttl` 与 `storage.strategy: 'rotation'` 时,ttl reap 已经读过位并 break,返回后轮转仅由 strategy 与驱动能力把关,无判定地 DROP 过期物理分片。正文探针实测 `drops === ['DROP shard']`。\n\n两条都是「**已经拿到答案之后作出的决定**」,而不是恰好横跨 teardown 的一次 await —— 这正是 #6397 注释里区分本类腿与 pre-#5194 reap 形状的那句话。推迟均无代价:回收是纯粹的页面归还,不删任何行;轮转是 O(1) 的窗口回收,下一轮 sweep 用同一个 `shards × unit` 推出同一个窗口、清同一批分片,至多晚一个 sweep 间隔。\n\n## 与 #6397 范式的同构对照\n\n| 项 | PR #6397(`keep` prune) | 本 PR · 腿 1(回收) | 本 PR · 腿 2(轮转) |\n| --- | --- | --- | --- |\n| abort 读法 | `this.abort.aborted` | `this.abort.aborted` ✅ 同 | `this.abort.aborted` ✅ 同 |\n| 合取项写法 | `if (!this.abort.aborted && …)`,置于链首 | `if (this.abort.aborted) break;` 置于循环头 —— **站点形状决定的既有拼写**,见下 | `if (!this.abort.aborted && driver && …)`,置于**链首** ✅ 逐字同构 |\n| 注释口径 | `[#4747] Leg boundary` + 「位已被 READ,继续是决定而非 race」+「推迟无代价,下一轮重导同一 cutoff」 | 三段齐备 ✅ | 三段齐备 ✅ |\n| 测试形状 | 1 条对照(位落下,腿照常发)+ 2 条 abort 例(两种进入方式) | 1 条对照 + 1 条 abort 例 ✅ | 1 条对照 + 1 条 abort 例 + 1 条良性路 pin ✅ |\n\n**腿 1 拼写的说明(唯一一处未逐字取 `&&` 形)**:该调用点是 `for` 循环而非 `if` 守卫,没有可挂合取项的条件式。取的是 **#4747 在本文件对循环的既有拼写** —— `batchedReap:1230` 与 `archiveObject:1060` 都是 `if (this.abort.aborted) break;`。这不是第二种写法,是同一不变量在本文件已有的两种站点拼写中按站点选取;且循环头判定严格更强:teardown 落在**某一个驱动的回收内**时,后续排队的 datasource 也一并免除,而循环前的单次合取项做不到。\n\n**为什么腿 2 的合取项不会改动良性路**:轮转被抑制后,下方 `else if (lc.storage?.strategy === 'rotation' && !rotated && !lc.ttl)` 的年龄兜底 reap 是 `!lc.ttl` 把关的。而在 rotation-无-ttl 形态下(且无 `archive`,那条提前 return),`reapObject` 在轮转之前**没有任何 await** —— 位在结构上必为 false,而非「无人读过」。所以合取项在该形态下恒真,不可能把轮转改道成兜底 DELETE。新增的良性路 pin 测试把这一点钉住。\n\n## 反向验证(方向先写死,再实测)\n\n**预测**(动手前写下):摘掉两个合取项 ⇒ ①② 转红、③④ 保持绿。\n\n**实测**(`vitest run src/lifecycle/lifecycle-service.test.ts -t 'teardown'`):\n\n```\n     × stop() inside the LAST object's reap calls the space reclaim off too 33ms\n     × stop() inside the ttl reap calls the shard rotation off 6ms\n FAIL  … > stop() inside the LAST object's reap calls the space reclaim off too\nAssertionError: expected \"vi.fn()\" to not be called at all, but actually been called 1 times\n FAIL  … > stop() inside the ttl reap calls the shard rotation off\nAssertionError: expected \"vi.fn()\" to not be called at all, but actually been called 1 times\n Test Files  1 failed (1)\n      Tests  2 failed | 13 passed | 65 skipped (80)\n```\n\n| 用例 | 预测 | 实测 |\n| --- | --- | --- |\n| ① `stop()` 落在最后对象的 reap 内 ⇒ 不发 `reclaimSpace` | 红 | ✅ 红(`called 1 times`,正是探针的 `reclaims === ['vacuum']`) |\n| ② ttl+rotation `stop()` 后 ⇒ 不发 `rotateShards` | 红 | ✅ 红(`called 1 times`,正是探针的 `drops === ['DROP shard']`) |\n| ③ 对照:无 abort 时两者照常发出 | 绿 | ✅ 绿 |\n| ④ 良性路:rotation 无 ttl 行为不变 | 绿 | ✅ 绿 |\n\n预测与实测**逐项一致**,无反转、无「因为什么都没产生所以断言照过」的空绿(①② 的失败信息是「被调用了 1 次」,证明断言读的是真实调用而非缺席)。\n\n## 命令输出\n\n```\n$ pnpm --filter @objectstack/objectql test\n Test Files  146 passed (146)\n      Tests  2453 passed (2453)\n\n$ pnpm --filter @objectstack/objectql typecheck\n> tsc --noEmit                       # 无输出 = 绿\n\n$ pnpm check:engine-double-contract\ncheck-engine-double-contract: OK — 82 pinned, 133 in the DEBT ledger, 4 exempt.\n\n$ pnpm check:query-options-erasure\n✓ query-options-erasure ratchet holds: 77 unswept non-test site(s) in 18 file(s), none new.\n  test surface: 263 site(s) in 49 file(s) — at the ceiling\n  baseline key set verified against 6ce10bd: no files added.\n\n$ pnpm check:type-check-debt          # 先全量 build(70 tasks successful)\ncheck-type-check-coverage --re-measure: OK — 34 ledger entr(ies) re-measured in 298.6s,\n  1762 raw tsc error(s) total, none above its recorded number.\n  ℹ @objectstack/objectql: TEST_DEBT records 355, tsc now reports 353 (-2)\n\n$ node scripts/check-nul-bytes.mjs\ncheck-nul-bytes: OK (scanned 6105 tracked text file(s); … no raw ASCII control bytes).\n```\n\nTEST_DEBT 台账 355 未抬(实测 353,低于台账 2)。台账数值未下调 —— 闸门明言「an improvement must not have to pay a bookkeeping toll to land」,且下调属本 PR 范围外。\n\n## 范围\n\n严格按分诊红线:仅 `lifecycle-service.ts` 两处调用点 + 其测试文件 + changeset。\n- ⛔ `:1134` 兜底 DELETE 的 N+1(已并 #5756)未碰;\n- ⛔ rotation-无-ttl 路(分诊裁良性)未改行为,仅新增一条 pin 测试防止后续误伤。\n\nchangeset:`patch @objectstack/objectql`。\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_019Q7oc7ASjh8yxyS3Yz78We)_"
+}

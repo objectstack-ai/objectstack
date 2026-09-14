@@ -1,0 +1,35 @@
+{
+  "number": 6403,
+  "kind": "pull_request",
+  "title": "fix(objectql): ScopedContext.transaction 补齐 ADR-0067 D2 的 ambient join (#6168)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T16:58:12Z",
+  "updated_at": "2026-08-07T17:27:17Z",
+  "closed_at": "2026-08-07T17:27:16Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": "2026-08-07T17:27:16Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/6403",
+  "body": "Fixes objectstack-ai/objectstack#6168\n\n## 问题\n\n`ObjectQL.transaction()` 的第一件事是 ADR-0067 D2 的 join 判定:已有 ambient 事务就在其中跑回调并报 `owned: false`,不自开嵌套的 driver 事务。\n\n`ScopedContext.transaction()` —— 同一原语的第二份实现,hook / action 体里的 `ctx.api.transaction(fn)` —— 没有这一支,直接取默认驱动 `beginTransaction()`。它自己的 TSDoc 称自己是「同一件事的第二份实现」,并逐条对齐了 ADR-0119 D1 的两条 caveat,唯独 join 这条从未对齐;方法体内甚至留着一行注释明说「本面永远 OPEN(没有自己的 D2 join 支)」。\n\n后果两条,都是 D2 存在的理由:\n\n1. 再要一条连接 —— 单连接池(D2 点名的 knex/SQLite)上就是死锁;\n2. 内层自行 commit,写入**存活过外层回滚** —— 调用者被告知工作单元已撤销,而其中若干行仍在,**无报错、无日志**。\n\n#5696 的 `owned` 信号在这一面永远报 `true`。信号没说谎(它确实每次都自开),说谎的是被它如实描述的行为。\n\n## 修法\n\n在 `ScopedContext.transaction` 顶部补上与引擎面同形、同位的 join 支:\n\n- **位置**在驱动查找与 `opts.require` **之前**,与引擎面一致 —— 有 ambient 事务就是有事务,声明「不能没有事务」的调用者由 join 满足,降级路径不可达;\n- 句柄**显式**穿进子 `ScopedContext`(而非只靠 ambient store),理由与引擎面相同:`buildDriverOptions` 优先读显式句柄,且显式句柄能穿过 ALS 穿不过的异步边界;\n- 因它与 store 中句柄**同一对象**,`transactionCoversDriverFor` 仍按外层属主归属,#5351 同源判定不变;\n- 向回调报 `{ owned: false }`。\n\nTSDoc 同步更新,并写明**声明式边界**:join 只读引擎 ambient `txStore`,而离散 `beginTransaction`/`commit`/`rollback` 三件套刻意不写该 store(句柄跨 `setImmediate` 显式穿线,ALS 不存活),因此三件套句柄在此不可见、**不会**被误当成 ambient —— 这正是 issue 要求的那条约束。交叉引用 #6167。\n\n## 一处与 issue 正文的出入(如实记录)\n\nissue 把可达路径写作「沙箱 hook 体里的 `ctx.api.transaction`」。实读 `packages/runtime/src/sandbox/quickjs-runner.ts:526-600`:QuickJS 面的 `ctx.api.transaction(fn)` 是 VM 侧糖,底下驱动 `__txBegin`/`__txCommit`/`__txRollback` 三个 host leaf,**走的是三件套,不是本方法**。所以 VM 内的 body 不在本次 join 的覆盖范围内。\n\n本方法真正的可达面是**进程内** body:`HookContext.api` 就是 `ScopedContext`(`ObjectQL.buildHookApi`),action body 的 `ctx.api` 同样是它(`packages/runtime/src/action-execution.ts:868` 的 `buildActionApi`),外加任何直接 `engine.createContext(...).transaction(...)` 的插件/应用代码。**缺陷本身与 issue 所述完全一致**,只是可达面比正文写的窄一档。测试用的是真 hook(`registerHook` 注册 `afterInsert`,在 `engine.transaction()` 内被写触发),不是 `createContext` 替身。\n\n## 测试(9 例新增)\n\n`engine-ambient-transaction.test.ts`(+6):\n\n- join 外层:同一句柄、`owned: false`、**只有一次 begin**;\n- **回滚持久性钉子**:内层写 + 外层回滚 → 内层写消失;\n- 外层成功时内外一起 commit;\n- 单连接池钉子:嵌套调用不再申请第二条连接;\n- 无 ambient 时仍自开(`owned: true`)—— 回归;\n- 事务关闭后不误 join —— store 不泄漏。\n\n回滚钉子需要一个 **rollback-honest** 的 driver 双替:带句柄的写按句柄暂存,`commit` 落库、`rollback` 丢弃。文件里原有的双替只**记录** rollback 被调用过,那只能钉「回滚被调用」,钉不到本 issue 真正关心的事实 —— 事后那行还在不在。\n\n`engine-transaction-contract.test.ts`(+2):契约对齐(join 的句柄与信号;`require: true` 下由 join 满足而非拒绝)。原有用例标题里「本面永远自开」的说法已失效,改为 `reports owned: true when it opens one`。\n\n`engine-transaction-same-origin.test.ts`(+2):join 后 #5351 判定走**外层属主**(跨源业务写被拒,`transactionDatasource` 为 `primary`;系统台账照旧豁免、无外来句柄、一条 debug)。\n\n## 反向验证(先立预测,后跑)\n\n预测:移除 join 支 → ambient 文件的 join 三例 + 契约两例翻红,且回滚例的红呈「**残留**」形状;无 ambient 与已关闭两例保持绿;同源两例**保持绿**(它们量的是交互,不是 join 本身)。\n\n实测逐条吻合:\n\n```\n× joins the outer transaction — same handle, owned: false, no second begin\n  → expected true to be false\n× the joined write is UNDONE by the outer rollback — the durability pin\n  → expected [ 'inner' ] to deeply equal []\n× the joined write commits with the outer one when the outer succeeds\n  → expected [ { __trx: 1 }, { __trx: 2 } ] to have a length of 1 but got 2\n✓ with NO ambient transaction it still OPENS one — owned: true, unchanged\n✓ does not join a transaction that has already closed\n✓ (same-origin) refuses ... against the OUTER owner\n✓ (same-origin) carves an audit row out of a JOINED ScopedContext.transaction\n```\n\n单连接池例单独反验,报 `pool exhausted: no connection available (max=1)`,栈正是 issue 所述机制:\n\n```\nat ScopedContext.transaction (engine.ts:7590)\nat registerHook handler\nat ObjectQL.triggerHooks (engine.ts:1406)\nat ObjectQL.insert (engine.ts:5271)\n```\n\n## 范围外发现(PD #10,已另开单,未在本 PR 修改)\n\n- **#6406** —— 沙箱三件套(`__txBegin`)同样不 join ambient 事务。上面那节的另一面:VM 侧 body 走三件套,因此本 PR 修不到它,而三件套**刻意**不用 ALS(跨 `setImmediate` 不存活),所以那边不是加个 if 就能了事 —— 需要先定「ambient 句柄何时捕获」「join 后 `__txCommit` 如何弃权」两个契约级问题。与 #6167(同源校验对不可归属句柄弃权)不是同一件事,别合并。\n\n## 门禁\n\n`pnpm --filter @objectstack/objectql test` 140 文件 / **2318 通过**;`typecheck` 干净;`check:engine-double-contract` OK(80 pinned / 133 DEBT / 4 exempt,未变动);`check:durability-log-level` OK;`check-nul-bytes` OK。已 merge `origin/main`(761a0babf)后重跑。\n"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 6468,
+  "kind": "issue",
+  "title": "自增号格式带「序号槽之后的后缀」时,播种解析读错数字段:引擎读成年份(2026),driver-sql 读成拼接串(12026),两侧还互不一致",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched",
+    "target:v17"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T23:57:38Z",
+  "updated_at": "2026-08-08T05:04:21Z",
+  "closed_at": "2026-08-08T05:04:21Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6468",
+  "body": "发现于 #6249 的实现(PR #6467)途中,**未在该单 PR 内顺手修** —— #6249 修的是播种扫描的行窗口,本条是同一函数里**数字段解析**的独立缺陷。按 Prime Directive #10 单独开单。\n\n## 缺陷\n\n`autonumberFormat` 允许序号槽 `{0..0}` **后面**还有 token(`renderAutonumber` 专门有 `suffix` 这个返回值,见 `packages/spec/src/data/autonumber-format.ts:199-213`:`width === null` 之前的片段进 `prefix`,之后的进 `suffix`)。\n\n这类格式渲染出的值,**序号不在字符串末尾**。而两侧的播种解析都假定「末尾的数字就是计数器」:\n\n- 引擎 `packages/objectql/src/engine.ts` `seedAutonumber()`:`prefix` 为空时取整串的**最后一个**数字段;\n- driver-sql `packages/drivers/driver-sql/src/sql-driver.ts:3033` `scanMaxNumericTail()`:`parseInt(tail.replace(/[^0-9]/g, ''), 10)` —— 把 tail 里**所有**数字拼起来。\n\n以 `{000}-{YYYY}` 为例(序号在前、年份在后,是一种常见的单号写法),实测:\n\n```\nfmt={000}-{YYYY}   value=001-2026    prefix='' suffix='-2026' engineSeed=2026 sqlDriverSeed=12026\nfmt=D-{0000}       value=D-0001      prefix='D-' suffix=''    engineSeed=0001 sqlDriverSeed=1\nfmt={0000}         value=0001        prefix='' suffix=''      engineSeed=0001 sqlDriverSeed=1\n```\n\n(探针直接调用 `packages/spec/dist` 的 `parseAutonumberFormat` / `renderAutonumber`,再分别复刻两侧的解析。后两行是对照:无后缀的格式两侧都正确。)\n\n真实计数器是 **1**,而:\n\n- **引擎播种成 2026** —— 把年份当计数器,下一个号直接跳到 `2027-2026`;\n- **driver-sql 播种成 12026** —— 把 `001` 和 `2026` 拼成一个数;\n- 两侧对同一份数据给出**两个不同的错误答案**,所以同一份元数据换驱动跑,号段还不一样。\n\n## 为什么这不是 #6249 的一部分\n\n#6249 / PR #6467 修的是「只看任意 5000 行窗口」,修法是把扫描做完整;**逐值解析的那几行原封未动**(PR 里明确写了「该逻辑一字未改」)。扫描做完整之后,这条解析缺陷照旧:读全了,还是读错。\n\n## 可达性\n\n需要作者写出「序号槽之后还有 token」的格式。`suffix` 是 `renderAutonumber` 的**声明返回值**、不是意外产物,格式语言明确支持;`{000}-{YYYY}` 这种「序号-年份」写法在单号里很常见。没有任何校验或 lint 拦截这类格式。\n\n## 供分诊参考(不预设结论)\n\n修法至少要先定一件事:**播种解析应当按 `suffix` 反向定位序号段**(即 tail 去掉已知 suffix 之后再取数字段),还是**收窄格式语言**(禁止序号槽后出现 token,在 compile lint 里拒绝)。前者两侧各改一处解析;后者是 authorable surface 的收窄,要走既有格式的兼容判断。两侧解析必须同时改,否则会把「两个不同的错误答案」变成「一个正确一个错误」,跨驱动仍不一致。\n\n⚠️ 与 #5495(driver-sql `getNextSequenceValue` 序列重同步)同文件同区域,串行安排时需一并考虑。\n"
+}

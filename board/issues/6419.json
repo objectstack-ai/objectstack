@@ -1,0 +1,38 @@
+{
+  "number": 6419,
+  "kind": "issue",
+  "title": "[finding][spec-tooling] ADR-0087 门的 `no-migration-prescription` 矛盾检查匹配的是占位符 `FROM`/`TO`,不是真实处方 —— 写得越好的处方越照不到",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "ci/cd",
+    "pm:dispatched",
+    "pm:queue",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T17:09:18Z",
+  "updated_at": "2026-08-07T19:12:10Z",
+  "closed_at": "2026-08-07T19:12:10Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 10,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6419",
+  "body": "`check-adr-0087-registration.mjs`（#6148 / PR #6342，今天合入）在 PR #6404 上拦下第一例，实测发现它的**闭合词表**对这一类变更**没有任何一个诚实可用的格**。四个标记逐个实测（都是在真的 commit 上跑 `node scripts/check-adr-0087-registration.mjs`，不是读代码推断）。\n\n## 变更形状\n\nPR #6404（#6212 批 B）：`@objectstack/driver-sql` / `@objectstack/driver-turso` 两个**已发布**包，`major`，删掉 `query.aggregate` 与 `agg.func` 两个宽容分支。这两个键**从未是已声明表面**：\n\n- `git log -S\"aggregate: z.\" --all -- packages/spec/src/data/query.zod.ts` → **零 commit**；`func: z.` 同样零。即 `QueryASTSchema` / `AggregationNodeSchema` 历史上从未声明过它们。\n- 没有 `retiredKey()` 墓碑，`QuerySchema` 上也没有 alias table 收录它们（该文件唯一的 alias table 是 `SortNode` 的 `direction: 'order'`）。\n- `docs/protocol-upgrade-guide.md` 与 `content/docs/releases/` **零命中**。\n- 非测试书写者实测为零（唯一书写者是这两个驱动包自己的 fixture）。\n\n（注：`content/docs/**` 里确实有 `aggregate:` / `func:`，但那是**另一个表面** —— UI dataset measure（`dataset.zod.ts`），那里 `aggregate` 是规范键、`func` 是该 schema alias table 里**已声明的响亮别名**。与本次删的 query AST 键无关，本 PR 不碰。）\n\n## 四个标记的实测结果\n\n| 标记 | 实测 | 为什么落空 |\n|:--|:--|:--|\n| `not-required (unpublished)` | ❌ **硬红** | 该格判的是「**npm 包** `private: true`」，不是「**这个键**从未发布」。实测报 `@objectstack/driver-sql, @objectstack/driver-turso are PUBLISHED`。这两件事同名不同义，是最容易照着直觉写错的一格。 |\n| `not-required (already-registered <id>)` | ❌ | 台账里没有覆盖它的既有条目。台账里的 query 键退役（`query-joins-retired` / `query-cursor-retired` / `query-distinct-retired` / `query-window-functions-retired`）**全都是已声明并带墓碑的键**，与本例正相反。 |\n| `registered <id>` | ❌ 实质错 | 需要在 `packages/spec/src/migrations/registry.ts` 新增条目。但台账是 `objectstack migrate meta` 的数据源，改写的是**静态存储的 metadata**；`query.aggregate` 是运行期调用实参，从不入库、也从未被告知过任何人。写条目等于告诉升级者「一个你从没拿到过的表面没了」，污染升级指南。 |\n| `not-required (no-migration-prescription)` | ⚠️ **机械上会绿，但只是探测器盲区** | `hasMigrationPrescription` 是**大小写敏感**、只认本仓 `FROM → TO` 的英文大写写法。本 changeset 的迁移段写作 `**迁移**：\\`aggregate:\\` → \\`aggregations:\\``（中文），因此不匹配。但正文**确实**给了消费方改写处方 —— 用这一格就是踩探测器的盲区过关，正是该格文档里点名禁止的自相矛盾。 |\n\n于是这条 PR 只剩两个选择：**写一个机械上绿、实质上撒谎的标记**，或**把 CI 红着**。它选了后者并上报。\n\n## 缺的那一格是什么\n\n**「该键从未是已声明表面（never-declared）」** —— 与 `unpublished` 正交：包发布了，键从未发布。而这恰恰是最该免于台账的一类：台账的全部内容是「一个**你曾被告知**的表面没了」，从未告知过的键没有任何升级通道需要交代。\n\n顺带：`no-migration-prescription` 的探测器只读英文大写 `FROM → TO`，而本仓 AGENTS.md 要求解释性文字用中文，**中文写的迁移处方一律照不到**。这不只影响本例 —— 它意味着该格在本仓的实际约束力远低于设计意图（设计时实测 32 个里 11 个带处方，那是按英文大写量的）。\n\n## 可选处置（不预断，交维护者/门禁车道裁）\n\n- **A. 加第四个 `not-required` 类别** `(never-declared) <why>`，机械校验方式现成：在 `packages/spec` 全历史里 grep 该键的声明（`git log -S`）+ 确认无 `retiredKey` 墓碑无 alias-table 条目 —— 与其它三格一样「按事实复核而非凭信任」。⚠️ 代价：多一格就多一条可被滥用的出口，需要把校验做成真检查而不是自述。\n- **B. 把 `hasMigrationPrescription` 扩到中文写法**（`迁移：X → Y`），然后裁定本例必须 `registered`。⚠️ 代价：等于承认台账要收录从未声明的键，与台账语义冲突。\n- **C. 维持词表，裁定这一类走 `registered`**。⚠️ 代价同上，且会让升级指南出现「你从未拿到过的键退役了」的条目。\n\n我倾向 **A**：它把「包私有」与「键从未声明」两件本就不同的事分开，而不是逼作者在两个都不真的格里挑一个。但这属门禁词表设计，不是实施者该拍的板。\n\n阻塞：PR #6404（其余全绿，仅此一红）。关联：#6148、PR #6342、#6212。\n"
+}

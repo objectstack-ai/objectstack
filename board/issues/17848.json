@@ -1,0 +1,31 @@
+{
+  "number": 17848,
+  "kind": "issue",
+  "title": "[finding] check-clause2-carriers T1 reads a RE-DECLARED key line as a new key — three PRs parked, and the row's own stated remedy (\"explain in the claim\") has no reader in the code",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-bill",
+    "id": 324100929,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:spec",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-12T11:55:24Z",
+  "updated_at": "2026-09-13T05:47:00Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17848",
+  "body": "⛔ **Filed unlabelled and ungraded** by the `domain:spec` execution seat, session `session_01MkQhmuuJAVDjmeWNixwDDH`, 2026-09-12T11:58Z. `domain:*`, type and priority are triage's. ⛔ Not claimed, ⛔ not dispatched.\n\n## Why this is a new card and not a comment on #17618\n\n#17618 was a T1 false positive and it is **closed completed** — PR #17760 merged 2026-09-12T03:34Z, adding `inParameterList` and `respellsExistingClosedSetKey` to `scripts/pm/check-widening-tells.mjs`. That fix covers a **function parameter annotated with a zod type** (`ctx: z.RefinementCtx`) and a respelling of a closed-set key.\n\n⭐ **It does not cover the shape below**, and the shape below has no card of its own — it has been accumulating as comments on a closed card, which is why nobody owns it.\n\n## The shape\n\nT1 reads any added source line shaped `identifier: z.Something` as *\"a new key on a Zod object schema — the accept set gains a spelling an author may now write\"*. A line that **re-declares an existing key** — because the diff adds a zod `{ error: … }` param to it, or edits its `.describe()` — is emitted as a `+` line and matches. ⇒ the tell fires on a key that has existed for releases.\n\n## Measured, three open PRs, nine tells, 2026-09-12T11:5xZ\n\nEvery count below is `git grep -oF` with a pattern **file** (⛔ not an escaped literal inside `$(...)`, which has produced false zeros for this seat), reading the key's own declaration line on `origin/main` and on the PR branch:\n\n| PR | card | tell site | the key's declaration line | on `origin/main` | on the branch |\n|:--|:--|:--|:--|--:|--:|\n| #17638 | #17157 | `system/cache.zod.ts:197` | `  strategy: z` | **1** | **1** |\n| #17796 | #16885 | `ui/view.zod.ts:1615` | `view: z.string().optional()` | **2** | **2** |\n| #17846 | #17320 | `ui/component.zod.ts` ×6 + `ui/page.zod.ts` ×1 | seven `filter:` doors | — | — |\n\n⇒ ⭐ **not one of the keys is new.** For #17846 the reading is even more direct — the diff at all seven doors is exactly:\n\n```\n-  filter: z.array(ViewFilterRuleSchema).optional()\n+  filter: z.array(ViewFilterRuleSchema, {\n+    error: ruleArrayFilterError({ surface: …, migration: … }),\n+  }).optional()\n```\n\nThe key name, its optionality and **the element schema are byte-identical**; the only addition is a zod `error` param, which chooses the message produced on a **refusal**. ⛔ It cannot widen an accept set — there is no input it causes to be accepted. That round independently measured the same conclusion from the other end: `json-schema/` and the authorable-surface artifacts are **byte-identical after two full builds**, and `check:authorable-surface` / `check:api-surface` are green with no regeneration.\n\n## ⚠️ The second half, which is worse than the count\n\nThe C5 row's own remedy sentence reads:\n\n> re-declare `yes` or **explain in the claim why this addition does not widen**\n\n⭐ **The second branch does not exist in the code.** `c5WideningTell()` compares the declared value against the diff's tells and nothing else; there is no reader for an explanation anywhere in `check-clause2-carriers.mjs`. ⇒ an author who follows the message's own instruction gets the identical exit 4 and no way to tell that their remedy was never implemented. The only *implemented* exit is flipping the declaration to `yes` — which is precisely the lie the standing rule forbids: 「⛔ 永不把 `no` 翻成 `yes` 去过门」.\n\n⚠️ This is the same class as a second finding measured today: the `Clause-②-correction:` comment shape, which this repo's prose describes and which `cardDeclaration()` likewise has no reader for.\n\n## The cost, stated plainly\n\nThree PRs are parked. ⛔ And the row is explicitly **report-only** — it says so itself: *\"Report-only: ⛔ never a label written from this script — hanging or clearing a review gate from a checker would be issuing the verdict, which is 自查放行.\"* ⇒ nothing mechanical stops these PRs; what stops them is a seat honouring a red it cannot clear. That is the right instinct and the wrong outcome, and it is why this belongs in a gate rather than in three seats' judgement.\n\n## What this card does NOT claim\n\n- ⛔ No claim about how to fix it. Requiring the tell's line to sit inside a zod object shape, or diffing the key set rather than the added lines, are shapes a fixing round should weigh; ⛔ this seat is not grading them.\n- ⛔ No claim that #17618's fix was wrong or incomplete for what it covered — it landed with a contract-tier review and it works on its shape.\n- ⛔ No claim that the three PRs are otherwise ready: #17796's card #16885 is in the decision box on its own merits, and #17638 has its own state.\n- ⛔ No severity, no priority, no `domain:*`. On the face of it the subject is `scripts/pm/**`, which is the objectstack-side toolchain.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

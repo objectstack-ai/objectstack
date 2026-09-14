@@ -1,0 +1,35 @@
+{
+  "number": 4977,
+  "kind": "issue",
+  "title": "Parent-scoped `requiredWhen` is unenforced server-side — the same gap #4889 closed for `readonlyWhen`, one slot over",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T17:51:43Z",
+  "updated_at": "2026-08-07T20:44:56Z",
+  "closed_at": "2026-08-07T20:44:56Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4977",
+  "body": "Found while implementing #4889 (PR #4972). Filed unassigned, deliberately **not** fixed there — see \"Why it was left\" below.\n\n## Summary\n\n#4889 closed the `parent`-scope hole for `readonlyWhen`: the server-side strip\nnow resolves the master-detail header and binds it as `parent`, so\n``readonlyWhen: P`parent.status == 'paid'` `` is enforced where it is documented\nto be enforced.\n\n`requiredWhen` sits on the **same field**, is evaluated by the **same module**,\nand still has the hole.\n\n## Evidence\n\n`packages/objectql/src/validation/rule-validator.ts` → `evaluateValidationRules`,\nthe field-level conditional block (~L690, the `requiredWhen` branch):\n\n```js\nconst res = ExpressionEngine.evaluate< boolean >(toExpression(pred), {\n  record: merged,\n  previous,\n  currentUser,\n});\nif (!res.ok) {\n  opts.logger?.warn?.(`requiredWhen for '${name}' failed to evaluate — skipped`);\n  // ... rule not applied\n}\n```\n\nNo `parent`. So a detail object declaring\n``requiredWhen: P`parent.status == 'sent'` `` — \"once the header is Sent, every\nline must carry a description\" — evaluates in the inline grid (which binds\n`parent`) and is a **no-op on the server**: the write is accepted with the field\nempty.\n\nNote this is the *mirror* of #4889's failure mode, not the same one:\n`readonlyWhen` failing open **wrote a field that should have been frozen**;\n`requiredWhen` failing open **accepts a record that should have been rejected**.\nBoth are `declared ≠ enforced` (PD #10), on the same declaration site.\n\nNo app in this repo authors a parent-scoped `requiredWhen` today, so this is a\nlatent gap rather than a live data defect — the reason it is a normal-priority\nissue and not an urgent one.\n\n## What #4889 already built that this can reuse\n\n- `resolveMasterDetailRelation()` — `packages/objectql/src/master-detail.ts`\n  (exactly one `master_detail` relationship ⇒ that master is `parent`).\n- `ObjectQL.resolveMasterDetailParent()` / `resolveMasterDetailParents()` —\n  `packages/objectql/src/engine.ts`, single-id and batched-bulk header reads,\n  payload-FK-first so a repoint is judged against the master it lands on.\n- `hasParentScopedReadonlyWhenInPayload()` — the AST-based \"does this predicate\n  read `parent`?\" gate; the `requiredWhen` counterpart is the same helper over a\n  different slot.\n- The build-time gate in `packages/lint/src/validate-expressions.ts` that rejects\n  a `parent`-scoped predicate on an object with no single master.\n\nSo the plumbing is ~all present. What is NOT decided is the semantics question\nbelow, which is why this was not a \"while I'm here\" change.\n\n## The decision this needs (do not guess it)\n\n`requiredWhen`'s current unevaluable policy is **skip** (fail-open) —\nADR-0058 D5's tier, and #4649 explicitly declined to change it for field\npredicates. #4889 narrowed exactly one case for `readonlyWhen` (unbound scope\nroot ⇒ treat as LOCKED) and recorded it as an ADR-0058 addendum.\n\nThe equivalent narrowing for `requiredWhen` is **not** symmetric, and that is the\nwhole question:\n\n- \"Locked\" is the conservative answer for `readonlyWhen` — it preserves stored\n  data and costs a caller one rejected field.\n- The conservative answer for `requiredWhen` is **reject the write** (422),\n  which is a much louder failure and can block writes on records whose header is\n  merely unreadable at that moment.\n\nOptions:\n\n- **A — bind `parent`, keep fail-open on unevaluable.** Closes the enforcement\n  gap; a header that cannot be read still silently skips the requirement.\n  Cheapest, and strictly better than today, but leaves a smaller version of the\n  same hole.\n- **B — bind `parent`, and reject the write when a `parent`-scoped\n  `requiredWhen` cannot be evaluated.** Fully symmetric with #4649/#4775's\n  fail-loud direction and with #4889. Costs: an unreadable header 422s an\n  otherwise-legal write.\n- **C — bind `parent` and gate hard at build time only** (the lint rule already\n  landed for `readonlyWhen`, extended to `requiredWhen`), keeping runtime\n  fail-open on the assumption the build already rejected the unbindable case.\n\nMy reading: **A + C** is the sound first step (enforcement gap closed, authoring\nmistake caught where it is cheap, no new way to 422 a legitimate write), with B\nreserved for a deliberate decision by the maintainer alongside the next review of\nADR-0058 D5. But this is a fail-policy question on a public authoring contract,\nso it wants a maintainer's ruling rather than an implementer's preference.\n\n## Why it was left out of #4972\n\nScope discipline. #4889's brief was `readonlyWhen`, and adding a `parent`\nbinding to `evaluateValidationRules` changes the outcome surface of a *different*\nrule family in the same call (object-level `script`/`cross_field` predicates share\nthat evaluation site and have been fail-CLOSED since #4649, so binding a new root\nthere flips previously-rejected writes to accepted). That is a wider blast radius\nthan the issue authorized, and it deserves its own change with its own tests.\n"
+}

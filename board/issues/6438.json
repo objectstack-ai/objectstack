@@ -1,0 +1,35 @@
+{
+  "number": 6438,
+  "kind": "issue",
+  "title": "spec: `InboxListResult.unreadCount` 的 JSDoc 仍写「over the returned window」—— 与 #6363 落地后的实现和同族 `.describe()` 相反",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T18:34:18Z",
+  "updated_at": "2026-08-07T23:55:22Z",
+  "closed_at": "2026-08-07T23:55:22Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6438",
+  "body": "发现于 #6363 的实施。**故意不在该 PR 修**：#6363 的派单红线是「不改 `packages/spec`」（Option A 是让声明成真，不是改声明），而这一行落在 spec 座位的文件里，与 #6361 的 `cursor` 移除同属一个包。单独立单，好让 spec 座位一次处理。\n\n## 事实\n\n`packages/spec/src/contracts/notification-service.ts`：\n\n```\n/** Result of {@link INotificationService.listInbox}. */\nexport interface InboxListResult {\n    notifications: InboxNotification[];\n    /** Unread count over the returned window. */\n    unreadCount: number;\n}\n```\n\n`/** Unread count over the returned window. */` 记录的是 #6363 修好之前的实现语义。#6363 落地后：\n\n- 实现（`service-messaging/src/messaging-service.ts`）数的是**整个匹配信箱的总未读**，窗口只约束 `notifications[]`；\n- 同族的 wire 声明（`packages/spec/src/api/protocol.zod.ts:924`）一直写的是 `&#39;Total number of unread notifications&#39;`。\n\n于是同一个字段在**同一个包里**有两句相反的散文，而实现站在 `.describe()` 那边。\n\n## 为什么值得单独修，而不是「只是个注释」\n\n这行不是内部注释：它是 `INotificationService` 这个对外契约接口的 JSDoc，随 `.d.ts` 发布，是 TS SDK 使用者在编辑器里读到的那句话。一个把「窗口内计数」讲给消费者听的提示，正好会诱导消费者写出 #6363 要消灭的那种适配（自己再去数一遍、或按窗口大小截断显示）。防 AI 轴上也是同一件事：AI 写的消费端就是照这句 JSDoc 生成的。\n\n## 修法（一行）\n\n把 `/** Unread count over the returned window. */` 改成与 `.describe()` 同义的表述，例如：\n\n```\n/** Total unread across the user&#39;s whole matching inbox — NOT the returned window (#6363). */\n```\n\n顺带可考虑给 `notifications` 补一句「the `limit`-bounded window」，因为这两个界现在是**故意不同**的，而当前接口里没有任何一句写下这个区别。\n\n## 关联\n\n- 原单：#6363（`unreadCount` 数总未读，维护者 2026-08-07 裁 Option A）\n- 同包同族：#6361（请求侧 `cursor`；响应侧 `cursor` 的移除随其同向处理）"
+}

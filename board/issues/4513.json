@@ -1,0 +1,37 @@
+{
+  "number": 4513,
+  "kind": "issue",
+  "title": "meta: /meta/objects reports field metadata from the build artifact, not the registry — `created_at` reads `readonly: false` while the write path enforces read-only",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched",
+    "pm:queue",
+    "target:v17"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-01T14:15:20Z",
+  "updated_at": "2026-08-08T05:19:19Z",
+  "closed_at": "2026-08-08T05:19:19Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4513",
+  "body": "发现于修复 #4447 时（PR #4511），与该 issue 同源但**是另一处缺陷**，故单独记录，未认领。\n\n## 摘要\n\n`GET /api/v1/meta/objects/<object>` 返回的字段元数据来自**应用构建产物**（`dist/objectstack.json`），而不是运行时**注册表**（`registry.getObject()`）。两者已经不一致：写入路径按注册表强制 `created_at` 为只读，而这个机器可读面仍然声称它可写。\n\n## 复现\n\n`pnpm dev -- --fresh -p <port>`，showcase，admin 会话，**在 #4447 修复之后**：\n\n```\nGET /api/v1/meta/objects/showcase_task\n→ \"created_at\": {\"label\":\"Created At\",\"type\":\"datetime\", …, \"readonly\": false}\n```\n\n但同一个字段在同一次启动里确实是只读的：\n\n```\nPATCH /api/v1/data/showcase_task/<id>  {\"progress\":42,\"created_at\":\"1999-01-01T00:00:00Z\"}\n→ 200\n   droppedFields: [{\"object\":\"showcase_task\",\"fields\":[\"created_at\"],\"reason\":\"readonly\"}]\nGET  …?select=created_at,progress\n→ {\"created_at\":\"2026-06-22T00:00:00.000Z\",\"progress\":42}   ← 锚点没动\n```\n\n即：**面说可写，引擎按只读执行。**\n\n另外注意同一响应里 `updated_at` / `created_by` / `updated_by` **根本不出现**，只有 `created_at` 出现——这本身就说明这份字段表不是注册表的投影（注册表四个都有），而是构建产物里恰好被物化的那一个。\n\n## 与 #4447 的区别\n\n- **#4447（已在 #4511 修复）**是**写入路径**缺陷：构建产物里那个只带 FieldSchema 默认值的 `created_at`（`readonly: false`）遮蔽了 `AUDIT_FIELD_DEFS.created_at`，导致 `stripReadonlyFields` 无从判断，伪造值落库。修法是让审计字段族的治理键（`readonly`/`system`）由平台强制，注册表因此已经正确。\n- **本 issue** 是**读取面**缺陷：注册表已经修正了，但 `/meta/objects` 不读注册表，所以它继续报旧值。修 #4447 并不会顺带修好这一条——反而是修完之后，两者才第一次**公开矛盾**。\n\n## 影响\n\nAGENTS.md「Route & surface ownership」第 4 条：**机器可读面不许撒谎**。`/meta/objects` 会被 SDK、代码生成、Studio 表单渲染和 AI 客户端读取：\n\n- 表单/Studio 会把 `created_at` 渲染成可编辑输入框，用户改了却静默不生效（值被 `droppedFields` 丢弃，UI 若不读该字段就完全无提示）；\n- 代码生成/AI 作者会据此认为该字段可写，产出写它的代码；\n- 更一般地：任何构建产物与注册表存在差异的字段，这个面给出的都是产物那一侧的答案，而强制的是注册表那一侧。`created_at` 只是第一个被抓到的样本，不一定是唯一的。\n\n## 期望\n\n`/meta/objects` 投影应以**运行时注册表**为准（`registry.getObject()`，即 `applySystemFields` / `provisionPrimary` 之后的规范形状），使它与实际执行的写入契约一致。若出于性能或其他原因必须读产物，则产物必须在构建时就经过同样的规范化，并有门禁保证两者不漂移。\n\n顺带值得查清的：构建产物里那个 `created_at` 是**谁**物化进去的（showcase 源码并未声明它，`task.view.ts` / dashboards / datasets 只是引用了它）。如果是「把视图引用到的字段补进对象」这类构建步骤，那它用 FieldSchema 默认值补出一个系统字段本身就该修——那会是第三处，比这个面更靠上游。"
+}

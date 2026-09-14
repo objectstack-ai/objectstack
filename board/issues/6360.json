@@ -1,0 +1,35 @@
+{
+  "number": 6360,
+  "kind": "pull_request",
+  "title": "feat(spec): 可作者化 key 的默认值进入门禁 —— authorable-defaults 指纹比对 (#4666)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/xl",
+    "skip-changeset",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T15:10:58Z",
+  "updated_at": "2026-08-07T16:02:24Z",
+  "closed_at": "2026-08-07T16:02:22Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-07T16:02:22Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/6360",
+  "body": "Fixes #4666\n\n按维护者 2026-08-07 裁决执行**方向 B —— 只对默认值做指纹，约束不纳入**。\n\n## 前提复核（当前 `origin/main`）\n\n盲区原样存在。`build-schemas.ts` 今天被移动过三次，正文行号已过期，但结论未变：可作者化面门禁只比较 key 的集合（`currentKeys` 只记 key 到 isRetired 的映射），`.default()` 对它完全不可见。#4661 的 sabotage 在本分支上原样复现（见下表 P1）。\n\n一处正文已过期的细节：`shared/retry-policy.zod.ts` 的 shape 并不发出 `shared/RetryPolicy` def，它被 `./automation` 和 `./system` 两个 barrel 复用，所以改一个字符实际移动的是**两个** def key。门禁按 def key 逐个报，这是对的 —— 声明也必须逐个写。\n\n## 指纹捕获什么，怎么规范化\n\n新增 `packages/spec/authorable-defaults/{category}.json`（按 category 分片，与 `authorable-surface/` 同构，所以两个 PR 改不同 category 不共享文件）。每行形如 `\"{def}:{key} = {规范化 JSON}\"`，例如 `shared/CorsConfig:enabled = true`，只收**有默认值**的 key。\n\n指纹读的是**发出的 JSON Schema 的 `default` 字段**，不是 Zod 内部节点。理由：那是已发布契约真正对作者和 IDE 承诺的东西，也是 key 集合本身的来源；读 `_zod.def` 会把门禁绑死在「值由 `.default()` 还是 `.prefault()` 还是 `.meta()` 产生」上，而作者体验到的只有结果。\n\n规范化四条，每条都对着一类会误报的 churn：\n\n| 规则 | 排除掉的噪音 |\n|:--|:--|\n| 对象键**递归排序** | 对象字面量重排键不是语义变化 |\n| 数组顺序**保留** | 数组默认值的顺序作者看得见，重排是真变化 |\n| 无空白（compact） | 重新格式化不能动指纹 |\n| **只读 `default` 一个字段** | 约束、`.describe()`、`title` 结构性地进不来 |\n\n最后一条就是方向 B 的边界，它是**结构性**的而不是靠自觉：门禁根本不读 `minimum` / `maximum`，所以收紧一个 bound 连意外移动指纹都做不到。这条边界另有单测钉住（两个只差 bound 和文案的 shape 必须指纹相同），免得后人「顺手改进」时把它侵蚀掉。\n\n**只记有默认值的 key，不记 `(none)` 行**：7943 个可作者化 key 里 1326 个有默认值，只记这些让产物只有六分之一大；存在性并没丢 —— 新增默认值让一行**出现**，删除让一行**消失**，两者都被判为变更。\n\n## 基线取哪儿：这才是能不能防住的关键\n\n- `upstream` —— merge base 上的 `authorable-defaults/`，**本 commit 改不动**。这是真正承重的那个。\n- `in-tree` —— 树内已提交的记录。**弱**：本 commit 拥有这些字节。只在 upstream 读不到时用（本 ratchet 落地前 fork 的分支，以及 #5235 描述的离线构建 —— 那些是已合并的不可变树）。\n- 两者都没有 → 跳过比对，但**打印说明**。这不是 #4690 那个洞：产物的陈旧检查无条件跑，所以缺 `authorable-defaults/` 的树在 `--check` 下照样红。用了哪个锚点**每次都打印**。\n\n另一条纪律：**判定跑在写产物之前**。所以 `gen:schema` 不会把未声明的变更吸收进它自己充当证据的那份记录里 —— 实测见下表。\n\n## 「已确认的变更」出口怎么保持诚实\n\n出口是 `DEFAULT_CHANGES_BY_MAJOR`（`scripts/lib/default-changes.ts`），四条性质每次运行都从**声明者控制不了的来源**重新推导：\n\n1. **两端都钉死** —— `from` 对基线（git 里的 merge base），`to` 对**本次构建发出的值**。都不是填表人能设的字段。\n2. **链尾必须仍然为真** —— 当前 major 下某 key 的最后一跳 `to` 必须等于活值。默认值再动一次、或者被回滚，声明立刻红。**这就是「不再为真就死掉」的那条**，也是 check (b2) 的镜像。\n3. **链必须连续** —— 前一跳的 `to` 必须等于后一跳的 `from`，跳不过中间真的发过的值。\n4. **只有当前 major 授权** —— 旧 major 的行是历史记录，授权不能活过它被写下的那个 major。\n\n外加：被消费的声明**每次都整条打印 `reason`**。已确认的默认值翻转在构建日志里自报家门，而不是静默通过。\n\n本 PR 落地时表是**空的** —— 这份空本身就是门禁的自证：表里什么都没有而 `check:authorable-surface` 在 `origin/main` 上是绿的，等于说树里每个默认值都对得上记录。\n\n## 反向验证（预测先写后跑）\n\n预测写在实现之前。P1 里 sabotage = `retryPolicyShape()` 的 `.default(0)` 改成 `.default(3)`，一个字符。\n\n| # | 场景 | 预测 | 实测 | |\n|:--|:--|:--|:--|:--|\n| P0 | 未改动的树 | 绿 | 绿，`1326 default(s) unchanged` | ✅ |\n| P1 | sabotage | 红，点名两个 key，`0 → 3` | 红，`automation/RetryPolicy:maxRetries: 0 → 3` + `system/RetryPolicy:maxRetries: 0 → 3` | ✅ |\n| P2 | sabotage + 先跑 `gen:schema` | 红 | 红 —— **但机理和预测的不一样**，见下 | ⚠️ |\n| P3 | 删掉指纹比对 + 重生成记录 | 绿 | 绿，且记录静默吸收 `= 3` | ✅ |\n| P6 | 只声明两个 key 中的一个 | 仍红 | 红：一个 `📌 accepted`，另一个仍被拦 | ✅ |\n| P7 | 两个都声明 | 绿，且打印 reason | 绿，两条 reason 整条打印 | ✅ |\n| P8 | 两个都声明后把默认值**改回去** | 红（声明过期） | 红：`declared to end at 3, but this build emits 0` | ✅ |\n\n**P2 预测落空，而且这是本 PR 最有价值的发现。** 预测的理由是「基线来自本 commit 拥有不了的锚点，所以重生成洗不掉」。在**本分支上这个理由是错的** —— 本分支的 merge base 还没有这份产物，用的是 `in-tree` 锚点，本 commit 恰恰拥有它。方向对了，机理是另一个：**`gen:schema` 直接拒绝写**（判定在写之前），所以记录压根没被重生成。\n\n顺着这条继续挖，得到了真正该知道的那件事：把 schema 和记录**同时**手改成一致（把记录里的 `= 0` 字节手术成 `= 3`），`in-tree` 锚点下**门禁全绿**。这就是 #4650 的攻击形状，原样长在新产物上。\n\n于是补了一次隔离 probe（独立 bare clone + linked worktree，`origin/main` 指向本 PR 的 commit，refs 与共享 checkout 完全隔离），把同一次「协同手改」重放一遍：\n\n```\n❌ 2 authorable key(s) changed the DEFAULT they apply when the author omits them:\n     - automation/RetryPolicy:maxRetries: 0 → 3  (changed)\n     - system/RetryPolicy:maxRetries: 0 → 3  (changed)\n\n   Baseline: upstream 3cc2bf0e5841\n```\n\n**结论：`in-tree` 锚点挡得住忘记，挡不住手改；`upstream` 锚点两个都挡得住。** 这个窗口在本 PR 合并的那一刻自动关闭（此后每条分支的 merge base 都带着这份产物），离线构建则是已合并的不可变树 —— #5235 对同一处境给的理由在这里逐字适用。这一点写进了代码注释，不留给下一个读者自己踩。\n\n另一条没预测到但很说明问题的：rebase 到新 main 后记录少了一行，`ui/ElementRecordPickerProps:multiple`。查下来是 #6281（SDUI props enforce-or-remove）把它 `retiredKey()` 墓碑化了，默认值随墓碑消失。门禁按设计**保持沉默** —— 墓碑归 check (b) 的 `RETIRED_KEYS_BY_MAJOR` 管，在这里再要一次声明就是同一次退役记两遍。写下来的排除规则在落地几小时内就被一次真实的上游事件验证了一遍。\n\n## 防空转的钉子\n\n`scripts/authorable-defaults.test.ts`，23 条，全部关于**区分度**（这个输入出结论、那个不出），而不是「函数能跑」。把 `diffAuthorableDefaults` 改成无条件返回空数组之后，`catches the #4661 sabotage: one character, one finding, named` 立刻红 —— 空转钉不住的正是 #4642 的那类病。\n\n## 产物成本（A-vs-B 决策的代价侧，要数字不要印象）\n\n| | 行数 | 字节 |\n|:--|--:|--:|\n| `authorable-defaults/`（新增，13 个 shard） | 1405 | 86,715 |\n| `authorable-surface/`（既有） | — | **0（逐字节未变）** |\n\n方向 B 的代价全部落在一个新文件上，`authorable-surface/` 一个字节没动 —— #4535 §1 抱怨的那个文件不因本 PR 变大变吵。方向 A 会把 7943 个 key 全部加上约束摘要，落点正是那个文件。\n\n## 登记点\n\n`.gitattributes`（`merge=os-regen`）、`scripts/regen-artifacts.mjs`、`packages/spec/scripts/check-generated.ts` 的 artifact 描述。没有新增 `gen:` / `check:` 脚本 —— 门禁跑在 `build-schemas.ts` 内，`check:authorable-surface` 已经覆盖它，`check:generated --reconcile-only` 双向对账通过。\n\n`build-schemas-check-mode.test.ts` 的四个沙箱补种了这份产物：默认值门禁每次调用都跑，缺记录时六条 fixture 会在它们真正要测的删除 / 改名判定之前就红。\n\n## changeset\n\n**不需要 —— 走 `skip-changeset`（已打标）。** `packages/spec` 的 `files` 白名单是 `[dist, json-schema, liveness, prompts, llms.txt, README.md, src/**/*.zod.ts, CHANGELOG.md, api-surface, spec-changes.json]`：`authorable-defaults` 和 `scripts/` 都不在其中。本 PR 不含任何 `packages/spec/src/**` 改动（sabotage 是本地临时改动，已复原并逐条核过），所以 `dist/*.d.ts` 不变、`api-surface` 不变，发布物零变化。\n\n## 验证\n\n- `pnpm --filter @objectstack/spec test` —— 333 files / 8523 tests 全绿\n- `pnpm --filter @objectstack/spec typecheck` —— 绿\n- `pnpm --filter @objectstack/spec check:authorable-surface` —— 绿（rebase 到当前 main 之后）\n- `pnpm --filter @objectstack/spec check:generated --reconcile-only` —— 18 check: + 13 gen: 全部归类\n- `node scripts/check-nul-bytes.mjs` —— 绿；新文件另做了越过门禁扫描面的自查，无命中\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_014wsZeReNTqiceBfLb5Pyf5)_"
+}

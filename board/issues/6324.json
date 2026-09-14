@@ -1,0 +1,34 @@
+{
+  "number": 6324,
+  "kind": "pull_request",
+  "title": "docs(kernel): services.data 的 Parameters 补上 canonical QueryOptionsV2 词汇,Example 同批换用 (#6002)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T13:49:57Z",
+  "updated_at": "2026-08-07T14:47:41Z",
+  "closed_at": "2026-08-07T14:47:39Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-08-07T14:47:39Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/6324",
+  "body": "Fixes #6002\n\n`content/docs/kernel/runtime-services/data-service.mdx` 的 Methods 写明 `find` 接受两套\noptions,但 Parameters 只教了其中被 SDK 自己标注为 legacy 的那套。本 PR 把两套都列出来、\n点明推荐关系,并按分诊提示把 Example 同批换成 canonical 词汇。\n\n**推荐关系不是本 PR 的取舍** —— 它由 `packages/client/src/index.ts` 的 JSDoc 写死,本 PR\n只是把它如实转述到唯一的参考页上。\n\n## 前提复核(在 worktree 实测,基线 `origin/main` `a682670`)\n\n| 事实 | 位置(改动前) | 结论 |\n|:---|:---|:---|\n| 签名接受两套 options | `data-service.mdx:36` — `options?: QueryOptions \\| QueryOptionsV2` | 成立 |\n| Parameters 只列 legacy | `data-service.mdx:63` — ``(`top`, `skip`, `filter`, `sort`, `select`)`` | 成立 |\n| `QueryOptions` 自述 legacy | `packages/client/src/index.ts:138-148` | 成立 |\n| `QueryOptionsV2` 自述 recommended | `packages/client/src/index.ts:162-174` | 成立 |\n| 同页 PR #5995 已 MERGED,面锁释放 | commit `f192981` | 成立 |\n\nissue 正文引用的行号(148 / 174)与今天一致,四条陈述逐字复核无漂移。\n\n## 字段名 ↔ 接口定义映射(逐字取证)\n\n页面新表里的十个字段名,每一个都在 `packages/client/src/index.ts` 的对应接口里逐字存在:\n\n| 页面列出的名字 | 所属接口 | 定义行 |\n|:---|:---|:---|\n| `where` | `QueryOptionsV2`(:174) | :176 |\n| `fields` | `QueryOptionsV2` | :178 |\n| `orderBy` | `QueryOptionsV2` | :180 |\n| `limit` | `QueryOptionsV2` | :182 |\n| `offset` | `QueryOptionsV2` | :184 |\n| `filter` | `QueryOptions`(:148) | :151 |\n| `select` | `QueryOptions` | :149 |\n| `sort` | `QueryOptions` | :154 |\n| `top` | `QueryOptions` | :155 |\n| `skip` | `QueryOptions` | :156 |\n\n零个「页面写了但接口没有」,零个反向缺失。\n\n## 「两列等价」是实测的,不是推断的\n\n页面写下 \"normalizes it into exactly the transport parameters the legacy names produce\"\n之前,用一次性探针(vitest + stub fetch,读 `find` 真正发出的 query string;跑完即删,\n未入库)量过:\n\n```\ncanonical  { where, orderBy, limit, offset, fields }\n  -> top=20&skip=5&sort=-created_at&select=id%2Camount&contact_id=c1\nlegacy     { filter, sort, top, skip, select }\n  -> top=20&skip=5&sort=-created_at&select=id%2Camount&contact_id=c1\n```\n\n两串**逐字节相同** —— 所以\"等价\"这个词用得起。\n\n同一次实测也支撑了页面第三段「Use one column per call」:\n\n```\n{ where, top: 20 }     -> contact_id=c1        (top 被丢)\n{ filter, limit: 20 }  -> contact_id=c1        (limit 被丢)\n```\n\n混写会静默丢键,两个方向都会。页面因此只说\"整个 options 对象一起迁移\",没有教任何混合写法。\n\n## Example before / after\n\n改动是三个 key 的同义替换,加一行说明注释;查询语义、字段、排序方向、条数全部不变:\n\nbefore\n```\n    filter: { contact_id: contact.id },\n    sort: [{ field: 'created_at', order: 'desc' }],\n    top: 20,\n```\n\nafter\n```\n    where: { contact_id: contact.id },\n    orderBy: [{ field: 'created_at', order: 'desc' }],\n    limit: 20,\n```\n\n`orderBy` 的元素形状不变 —— `SortNode` 是 `{ field, order }`\n(`packages/spec/src/data/query.zod.ts:53-66`),`sort` 与 `orderBy` 声明的是同一个类型。\n\n## 与 #5944 / PR #5995 的边界\n\nPR #5995 在本页新增 57 行(Callout、\"不是 hook body\" 的语境、`ctx.api` 指路、Canonical\nsource 一节、`os:check` 标记的说明段),并刻意保留了 Example 的 legacy 拼法。逐行核对本 PR\n对这 57 行的影响:\n\n- **53 行逐字存活**;\n- **4 行被本 PR 改动**,全部落在 Example 的 options 对象内:三个 legacy key,以及紧邻其上\n  那行注释(是扩写,不是回退)。\n\n改这 4 行正是分诊 2026-08-06T14:56Z 的明确指示(「建议换,并与 Parameters 一节同批……拆两\n次会让同一段落连续动两轮」)。#5995 落定的**语境**一处未动。\n\nParameters 里被替换的那条 `options` bullet 不是 #5995 写的,是它之前就存在的原文 —— 也就是\n本 issue 的靶心。\n\n## 门禁(均在 `git add` 之后跑)\n\n| 门 | EXIT | 输出摘要 |\n|:---|:---|:---|\n| `pnpm check:doc-authoring` | 0 | `365 files clean — no bare metadata literals` |\n| `pnpm check:role-word` | 0 | `OK (44 baselined file(s), no new occurrences)` |\n| `pnpm check:nul-bytes` | 0 | `OK (scanned 5965 tracked text file(s) ... no raw ASCII control bytes)` |\n| `pnpm check:docs-audit-scope` | 0 | `scope is in sync with content/docs/: 178 hand-written doc(s)` |\n\n另跑了一项**不是仓内门禁**的自查:用仓库自己的 `@mdx-js/mdx@3.1.1` 编译改后页面,\n`MDX_PARSE_OK`(14455 bytes)。MDX 语法错误是这四道门都不覆盖的一类,值得单独证一次。\n\n`check:skill-examples` 不适用:它只编译带 `{/* os:check */}` 标记的块,本页的 ts 块刻意\n不带该标记(页面自己有一段解释为什么)。\n\n## 实测出的代码漂移(已单独立单,**不在本 PR 里修**)\n\n上面那次探针顺带量出两处 `packages/client` 的实现缺陷。本单文件面只有 `content/docs/**`,\n且按 contract-first 不在文档侧糊补丁,故单独立单:\n\n- **#6322**(具体缺陷,未打标待 PM 分诊)—— `find` 的 canonical 探测键只有\n  `where`/`fields`/`orderBy`/`offset`,漏了 `limit`:`data.find('task', { limit: 20 })`\n  这种单键调用走 legacy 分支后无人读 `limit`,静默丢弃,返回服务端默认页大小、HTTP 200。\n  另 `QueryOptionsV2.expand`(:186)声明了但两条分支都不映射,一个字符到不了 wire。\n- **#6323**(observation,`finding` 标签)—— 本页把 `find` 当稳定主入口记载,而 canonical\n  source 给 `find` 和 `QueryOptions` 都打了 `@deprecated` 指向 `data.query()`(路线见已关闭的\n  #986),而 `data.query()` 本页只字未提。改法需要先定性 `find` 是否退场,故不自动入队。\n\n**给 review 的一个判断点**:#6322 的 A 项与本页有交互 —— 本页从此正面推荐 canonical 列,\n照抄者会开始直接写 `limit`,命中面变大。本 PR **没有**在页面上加这条 caveat,理由是分诊已\n明确「按现状写并在 PR 正文记录漂移」,且在参考页里写下消费侧的规避写法正是 contract-first\n要避免的形状。若 #6322 一时排不上,可以再补一条 #5638 式的实测注记(那种形状本页已有先例)。\n\n## 不在本 PR 里\n\n- 不动 `packages/client/**`(canonical source 只读)\n- 不动本页其他章节(Callout / Methods / Canonical source / Returns / Typical Errors /\n  `os:check` 说明段)\n- 不动其他 docs 页(已核:`content/docs` 里没有第二处用 legacy option key 教 `data.find` 的\n  页面;`protocol/objectql/query-syntax.mdx` 讲的是更低层的 `IDataEngine.find`,不同 surface)\n- 不动 `content/docs/releases/**`\n- 无 `.changeset/`:纯文档、不发布任何包 ⇒ `skip-changeset`\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01BDmDsu2575gDxeMCxXhDE3)_"
+}

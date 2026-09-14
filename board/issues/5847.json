@@ -1,0 +1,34 @@
+{
+  "number": 5847,
+  "kind": "issue",
+  "title": "gen:schema 在锚点「领先于」解析基线时打印「trails the baseline … by 0 key(s)」——方向说反,信息为零",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "pm:queue"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T08:00:27Z",
+  "updated_at": "2026-08-07T14:09:57Z",
+  "closed_at": "2026-08-07T14:09:57Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5847",
+  "body": "## 现象\n\n`packages/spec/scripts/build-schemas.ts`(origin/main `77adf29`)第 1313–1323 行,普通 `gen:schema` / 任何构建在锚点与解析基线不一致时打印:\n\n```\nℹ️  authorable-surface.base.json trails the baseline at <rev> by <behind> key(s)\n   — expected, and not an error: …\n```\n\n`behind` 的算法是 `anchor.keys.filter((k) =` 不在 committed 锚点里 `).length`(第 1317 行)。当**已提交的锚点比本次解析出的基线更新**时,解析基线的键是锚点键的子集,于是 `behind === 0`,输出变成:\n\n```\nℹ️  authorable-surface.base.json trails the baseline at 9ce056a879ef by 0 key(s)\n```\n\n文件此刻并没有「trail」,它是**领先**的;而 `by 0 key(s)` 又把这句话的信息量清零。读者拿到的是一句方向说反、且自相矛盾的提示。\n\n## 何时可达\n\n正是 #5370 描述的那类状态,并不罕见:\n\n- merge 停在未 commit 时的任意一次构建 —— `merge-base(HEAD, origin/main)` 落在分支的旧分叉点,而工作树里的锚点来自 main(os-regen 驱动把该路径解析为 OURS/THEIRS 后就是这个形状);\n- 分支分叉早于锚点推进,随后 `git checkout origin/main -- packages/spec/authorable-surface.base.json` 或 rebase 带入较新锚点。\n\n实测(#5370 的沙箱夹具,`build-schemas-check-mode.test.ts` 的 `#5370` describe):锚点在 `tip`、HEAD 分叉于 `older` 时,`gen:schema` 退出码 0 并打印上述 `by 0 key(s)`。\n\n## 影响与定性\n\n纯提示文案,退出码不变、不写文件、无门禁后果 —— 所以按 observation-class 归档,不带 `pm:queue`。记录理由是:#5370 之后 `--update-base` 会在这个状态**拒绝**并解释方向,而同一状态下的普通构建仍在用一句反向措辞描述它,两者读起来会互相矛盾。\n\n## 可能的修法(不预设)\n\n在 `else if (drifted)` 分支里按方向分叉:锚点键 ⊇ 解析基线键时说「锚点比本次解析出的基线新(HEAD 的 merge base 落后于锚点)」,否则维持现有 trails 措辞;或直接复用 #5370 引入的 `merge-base --is-ancestor` 判定给出方向。\n\n发现于 #5370 的实现过程(PR 里未修,范围外)。\n"
+}

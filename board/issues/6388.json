@@ -1,0 +1,34 @@
+{
+  "number": 6388,
+  "kind": "pull_request",
+  "title": "docs(spec): SYNC_ARCHITECTURE.md L3 段停止宣传已退役的出站 Rate Limiting (#5554)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T15:55:16Z",
+  "updated_at": "2026-08-07T16:26:42Z",
+  "closed_at": "2026-08-07T16:26:41Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-07T16:26:41Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/6388",
+  "body": "Fixes #5554\n\n## 背景\n\n`connector.rateLimitConfig` 及其**整个形状**(`ConnectorRateLimitConfig` 与它内嵌的 `RateLimitStrategy` 枚举)已在 `@objectstack/spec` 17.0.0 按 #4911 / ADR-0049 D2 退役。退役理由不是\"暂时没有读者\",而是**出站限流引擎从来就不存在**:`connector.zod.ts:317–349` 的长注释写得很明白 —— 平台唯一的令牌桶 `packages/runtime/src/security/rate-limit.ts` 是**入站**的(dispatcher 拿请求指纹调 `consume(key)`,超限 429 短路),没有任何东西节流连接器**发出**的调用。\n\n`packages/spec/docs/SYNC_ARCHITECTURE.md` 的示例块早在 #5515 就带上了墓碑注释,散文却没跟着改。\n\n## 为什么值得一个 PR\n\nPrime Directive #10 的反面。作者读到 Key Features 打勾那行去写 `rateLimitConfig`,拿到的是 `strictObject` 退役提示 —— 这还算好的。**更糟的是不报错的那种失败**:他会以为\"平台会替我限流\"成立,而这正是 #4911 注释专门点名的\"最像安全承诺的一面\"。一份 AI 会当权威读(ADR-0033)的文档里的假安全承诺,才是真实成本。\n\n## 改动:正文点名三处,实测为六处\n\n正文列了三处;`grep -i \"rate.limit\"` 实测该文件另有三处同类措辞,按验收条件\"若发现第四处,一并修掉并说明\"一并处理。措辞统一复用 #4911 墓碑的现成句(**出站限流请在 connector provider 或上游网关做**),避免同一次退役出现两种说法而漂移。\n\n| # | 位置 | 之前 | 之后 |\n|---|---|---|---|\n| 1 | L191 `### Purpose` 导语 | `… webhooks, rate limiting, and full lifecycle management.` | `… webhooks, retry policies, and full lifecycle management.` |\n| 2 | L197 `### Key Features` | `- ✅ **Rate Limiting**: Token bucket, leaky bucket algorithms` | 删该勾项,改为 `- ❌ **Outbound rate limiting**: **not provided**` + 一段引用块 |\n| 3 | L356 `### Best Practices` | `- **Rate Limiting**: Respect external API rate limits to avoid throttling` | 尊重上游限额,但**在 provider / 网关侧强制**;`retryConfig` 处理超限后拿到的 `429`,它不负责让你不超限 |\n| 4 | L374 `## Decision Matrix` | `\\| Do you need rate limiting and retry policies? \\| **Yes** → L3 (Connector) \\|` | `\\| Do you need retry policies and circuit breaking? \\| **Yes** → L3 — `retryConfig`, `health.circuitBreaker`。出站限流不构成选择任何一层的理由 \\|` |\n| 5 | L394 Pattern 2 示意图 | `Webhooks, Auth, Rate Limiting` | `Webhooks, Auth, Retry / Circuit Breaker` |\n| 6 | L447 Migration Guide L2→L3 | `When your ETL pipeline needs webhooks, advanced auth, or rate limiting:` | `… or retry / circuit-breaker policies:` |\n\n### 两个刻意的取舍\n\n**第 2 处用显式否定,而不是静默删掉那一行。** 悄悄删除只解决\"编译不过\"那一半;本单真正的伤害是作者**带着错误认知离开**。所以留一条 ❌ 条目并附引用块,写明:这行曾经写着什么、它为什么是假的、正确做法是什么、以及 ⛔ 不要拿 `shared` 的 `RateLimitConfig` 顶替(那是入站限流器,会限反方向)。\n\n**第 4 处⛔ 没有删行。** 该行一半是对的(`retryConfig` 真在),整行删掉会连带删掉正确的一半。改写为保留 retry/断路器、并明确出站限流不是选层理由。\n\n## 保留的每一条都对着 schema 核过(不是假定)\n\n| 留下的说法 | 核验 |\n|---|---|\n| `retryConfig` | `connector.zod.ts:769`,`RetryConfigSchema:370` |\n| `Retry Policies: Exponential backoff` | `strategy` 默认 `'exponential_backoff'`(`connector.zod.ts:374`) |\n| 引用块写「`retryConfig` 的默认值含 `429`」 | `retryableStatusCodes` 默认 `[408, 429, 500, 502, 503, 504]`(`connector.zod.ts:397`)—— 确含 429,故这句可以写 |\n| `health.circuitBreaker` | `ConnectorHealthSchema:526` → `CircuitBreakerConfigSchema:505`(`enabled` / `failureThreshold` / `resetTimeoutMs` / …) |\n\n措辞上刻意只说 L3 **声明**(declare)了这些形状,不承诺运行时行为 —— 本单没有核过执行者,不在一份正在修正过度承诺的文档里制造新的过度承诺。\n\n## 门禁\n\n该文档被两个门禁钉住,**实跑确认而非假定**(纯散文改动本不应移动它们):\n\n- `packages/spec/src/automation/etl-author-shape.test.ts` — 钉总 ```typescript 块数 = 6 ✅ 仍为 6\n- `packages/spec/src/integration/connector-author-shape.test.ts` — 钉 `Connector` 例子 = 3(2 个省略号草图 + 1 个可编译 `sapConnector`)✅ 未动\n\n```\n Test Files  2 passed (2)\n      Tests  30 passed (30)\n```\n\n全量:`packages/spec` 337 files / 8597 tests 全绿;`typecheck`、`check:doc-authoring`(365 files clean)、`check:docs-audit-scope`、`check:nul-bytes` 均绿。\n\n## Changeset:无(用 `skip-changeset` 标签)\n\n按验收条件核过实际 `packages/spec/package.json` 而非转述:`files` 白名单为 `[dist, json-schema, liveness, prompts, llms.txt, README.md, src/**/*.zod.ts, CHANGELOG.md, api-surface, spec-changes.json]` —— **不含 `docs/`**,本改动不随包发布,零用户可见变更。⛔ 空 frontmatter changeset 是禁止的(#6059 / #5471),故不写 changeset,改打 `skip-changeset` 标签。\n\n## 范围外发现(⛔ 本 PR 未修,已另开单)\n\n- **#6383** — `connector.zod.ts` **模块 JSDoc** 在三处宣传同一个已退役的出站限流,并被 `gen:docs` 逐字生成进 `content/docs/references/integration/connector.mdx`(L21 / L25 / L56,其中 `comprehensive rate limiting` 尤其重)。这正面回答了 #5515 留下的未核项。顺带:`connector.zod.ts` 全文**没有任何 `@example` 块**,所以该待核项的另一半是\"不存在\",而非\"是对的\"。⛔ 未在此修:`references/**` 是生成产物(且 PR #6377 正在其上作业),`*.zod.ts` 属另一条 lane 的文件面。\n- **#6384** — 同文件 Key Features 仍打勾 `Field Mapping: With transformations`,而 `FieldMapping.transform` 与整个联合已在 #5552 / PR #6078 退役(墓碑 `shared/mapping.zod.ts:89`)。与本单同型但属**另一次退役**,故未搭车。\n\n---\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_014wsZeReNTqiceBfLb5Pyf5\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_014wsZeReNTqiceBfLb5Pyf5)_"
+}

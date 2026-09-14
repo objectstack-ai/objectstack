@@ -1,0 +1,35 @@
+{
+  "number": 6002,
+  "kind": "issue",
+  "title": "[docs] `services.data` 页的 Parameters 只列 legacy 查询词汇(`top`/`skip`/`filter`),而签名接受的 `QueryOptionsV2` 才是 SDK 自称推荐的那套",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T14:17:21Z",
+  "updated_at": "2026-08-07T14:47:41Z",
+  "closed_at": "2026-08-07T14:47:41Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6002",
+  "body": "## 事实(对 `origin/main` 核实,628b028)\n\n`content/docs/kernel/runtime-services/data-service.mdx` 的 Methods 一节写明 `find` 接受**两种** options:\n\n```\nservices.data.find( object: string, options?: QueryOptions | QueryOptionsV2 )\n```\n\n但 Parameters 一节只列了其中 legacy 的那套:\n\n```\n- `options` (`find`): filters, sorting, pagination (`top`, `skip`, `filter`, `sort`, `select`)\n```\n\n而 canonical source(`packages/client/src/index.ts`)对这两个接口的自述正好相反:\n\n- `QueryOptions`(148 行起)的 JSDoc:*\"This interface uses **legacy** parameter names (filter/sort/top/skip) that require translation to QueryAST. **Prefer QueryAST fields directly**: filter → where, select → fields, sort → orderBy, skip → offset, top → limit\"*\n- `QueryOptionsV2`(174 行起)的 JSDoc:*\"Canonical query options using Spec protocol field names. This is the **recommended** interface for `data.find()` queries.\"*\n\n即:本页把签名里那个被 SDK 自己称作 **recommended / canonical** 的词汇表整个略过,只教被称作 **legacy、需要翻译**的那套。\n\n## 为什么算缺陷(以及为什么归到 observation 类)\n\n`content/docs/` 是 AI 照抄的语料,这页又是 `services.data` 的唯一参考页 —— 照抄的人拿到的是需要运行时翻译的旧词汇,而 `where` / `fields` / `orderBy` / `limit` / `offset` 与 QueryAST、与协议层是同名的,长期看是少一层心智映射的那套。\n\n但**今天没有用户会撞坏**:两套 options 在 `find` 里都真的被 normalize(`packages/client/src/index.ts` 的 `find` 显式嗅探 `where`/`fields`/`orderBy`/`offset` 再翻译),legacy 词汇不是幻觉也没被弃用移除。所以这是**教得不全**,不是教错 —— 与 #5944 修掉的「教了运行时不交付的形状」不同族,故按 observation 类记录,打 `finding`、不入 `pm:queue`。\n\n## 建议修法\n\nParameters 一节把两套都列出来并点明推荐关系(canonical `where` / `fields` / `orderBy` / `limit` / `offset`,legacy `filter` / `select` / `sort` / `top` / `skip` 仍受支持),Example 是否跟着换成 canonical 词汇一并决定。\n\n## 关联\n\n- #5944 / PR #5995(同页,修的是 Example 的 hook 语境混搭 + Canonical source 措辞;该 PR 刻意未动本项以免越界,Example 保留 legacy 拼法)\n\n未认领,交 PM 分诊定级。\n"
+}

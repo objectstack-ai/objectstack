@@ -1,0 +1,36 @@
+{
+  "number": 6055,
+  "kind": "issue",
+  "title": "mcp-server-runtime:443 把 metadata outage 答成 'Agent \"X\" not found' —— fail-closed 但误述,#5840 定性后的 cli 侧跟进",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T15:48:10Z",
+  "updated_at": "2026-08-08T05:01:18Z",
+  "closed_at": "2026-08-08T05:01:18Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6055",
+  "body": "Part of #5840(engine-core 车道按跨座位协议转席;定性测量由该单 dev 完成,⛔ 未改动 cli 车道文件)。\n\n## 事实(#5840 / PR #6051 的跨车道定性,origin/main)\n\n`packages/mcp/src/mcp-server-runtime.ts:443`(行号会漂,内容定位:`metadataService.get('agent', agentName)`)把 `get()` 的 `undefined` 一律读成「不存在」:metadata 平面 outage 时,MCP 调用方拿到 `Error: Agent \"X\" not found` —— **误述**(把可用性故障讲成声明事实,ADR-0110 D3 的形状),但 **fail-closed**(不放宽任何访问),故非安全缺陷,是诊断质量缺陷。\n\n## 修法(PR #6051 落地后可用)\n\nPR #6051 已在 `IMetadataService` 提供可选 `getDiagnosed(type, name) → { data, degraded, errors }`(spec 座位核可在途)。本单 = mcp 调用点切换到诊断版读法,degraded 时返回如实的 unavailable 错误(而非 not found),错误措辞与 #5532/#5843 家族的 SERVICE_UNAVAILABLE 口径对齐。\n\n**Blocked-by: #5840**(PR #6051 合入后解锁)。\n\nRefs #5840 / PR #6051、ADR-0110 D3、#5532/#5705。"
+}

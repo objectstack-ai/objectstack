@@ -1,0 +1,35 @@
+{
+  "number": 6423,
+  "kind": "pull_request",
+  "title": "fix(spec): `systemFields.owner` guidance no longer claims `ownership: 'org'` picks a principal (#6365)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T17:31:36Z",
+  "updated_at": "2026-08-07T19:25:28Z",
+  "closed_at": "2026-08-07T19:25:27Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": "2026-08-07T19:25:27Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/6423",
+  "body": "Fixes objectstack-ai/objectstack#6365\n\n## The defect\n\n`packages/spec/src/data/object.zod.ts`, in the `systemFields` `strictObject`'s `guidance` block — the message an author gets when they write the non-existent `systemFields: { owner: ... }` key — said:\n\n> `owner_id` injection is governed by the object-level `ownership` property (`ownership: 'none'` skips it; `'user'`/`'org'` **choose the principal**).\n\nThe second half is false. `ownership: 'org'` does not choose a different principal; it injects **no** `owner_id` at all. The authority `applySystemFields` consumes — `resolveInjectedSystemColumns` in `packages/spec/src/data/injected-system-columns.ts` — admits exactly two spellings:\n\n```ts\nconst owner = ownershipEligible && (ownership === undefined || ownership === 'user');\n```\n\nThe `ownership` property's own JSDoc, ~90 lines above the guidance, already stated it correctly (`org` / `none` — no per-record owner; `owner_id` is NOT injected). So the guidance contradicted a sibling stanza in the same file, and the guidance was the wrong side.\n\n## Why it was worth fixing\n\nThis is not dormant prose. It is the error text an author — or an AI writing metadata — is handed at the exact moment they are already confused about where owner injection is configured, and it sent them to `ownership: 'org'` expecting an owner column keyed to the organization. Nothing rejects `ownership: 'org'`, so the mistake ships silently and every owner-keyed feature quietly does nothing: owner-scoped RLS, \"My\" views, owner reports, the first-admin bootstrap handoff. That is the failure mode the surrounding `guidance` machinery exists to prevent, inverted — a wrong-key rescue handing out a second wrong answer.\n\n## What changed\n\nTwo strings, nothing else.\n\n**`guidance.owner`** now states the rule as the authority implements it: `'user'` (or omitted) injects `owner_id`, while `'org'` and `'none'` **both** skip it and no `owner_id` is injected at all. The two skipping values stay visibly distinct in intent (`'org'` for an org-wide catalog, Dataverse-style; `'none'` for a junction/link table), since that distinction is the reason the enum carries both.\n\n**`guidance.ownership`** is widened in the same pass. It was not wrong, only out of date: since #5677 / ADR-0117 D1 the `ownership` property governs **both** record-ownership anchors, so the message now says it decides whether `owner_id` **and** `owning_business_unit_id` are injected, rather than naming only the first.\n\nDeliberately untouched per the issue's scope ruling: the `ownership` enum's own `error` text and `describe()` (#5678's surface), and any mention of the `business_unit` tier.\n\n## The acceptance surface does not move\n\nText only. Every value `ObjectSchema` accepted before is accepted now, every value it rejected is still rejected, and the injection behaviour is untouched. `git status` after a full build carries only the three files in this diff — in particular `authorable-surface.base.json` is byte-identical and `content/docs/references/**` did not regenerate, which confirms the expectation that a `guidance` string is an error-message template rather than a `.describe()` input.\n\n## Tests\n\nThe batch-20 pin gains two cases. They assert the message's **substance against `resolveInjectedSystemColumns`** rather than echoing the sentence, so the prescription can only stay green while it still describes what the injection pass really does:\n\n- `'org'` and `'none'` both resolve `owner: false`, `'user'` and omitted resolve `owner: true` — and the message names the two skipping values together, states the absence as an absence, keeps them distinct in intent, and no longer contains the word `principal`.\n- Across the whole authorable enum the two anchors move together (`plan.owningBusinessUnit === plan.owner`) — and the message names both.\n\n**Reverse verification, direction predicted before running: red.** Restoring the old string turns exactly those two new cases red and leaves the other 43 in the file green, so the pins are load-bearing and additive rather than a re-spelling of an existing assertion.\n\n```\n× `systemFields.owner`'s prescription matches the injection authority … (#6365)\n× `systemFields.ownership` names BOTH ownership anchors … (#6365)\nTests  2 failed | 43 passed (45)\n```\n\nWith the fix in place:\n\n```\npnpm --filter @objectstack/spec test\nTest Files  338 passed (338)\n     Tests  8651 passed (8651)\n\npnpm --filter @objectstack/spec typecheck   →  PASS (tsc --noEmit + tsconfig.test.json)\npnpm --filter @objectstack/spec check:generated  →  All 10 generated artifacts are up to date.\n```\n\nGates enumerated from `.github/workflows/lint.yml` and run one by one: all 30 ESLint-job `check:*` steps pass, plus the TypeScript-job set (`type-check-coverage`, `driver-conformance`, `stall-guard`, `skill-frame-sync`, `skill-compatibility`, `exported-any`, `dual-source-exports`, `skill-examples`, `doc-formula-expressions`, `type-check-debt`, `i18n`, `i18n-coverage`) and `pr-automation.yml`'s `check-adr-0087-registration` (0 declared-breaking changesets — this is a patch).\n\nOne note on build state: `check:i18n` and `check:i18n-coverage` first reported red in the fresh worktree because they run the **built** CLI, which did not exist yet. Both are green after `turbo run build` — the AGENTS.md §9 stale/absent-artefact trap, not a finding.\n\n## Changeset\n\n`.changeset/systemfields-owner-guidance-org-skips-owner-id.md` — `@objectstack/spec: patch`. An author-visible error-message change earns a real changeset; no ADR-0087 marker is required because nothing is declared breaking.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_018ffcE95NaMJcL9XJ9VDYgk)_"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 6472,
+  "kind": "pull_request",
+  "title": "feat(lint): view/page 可见性谓词的 CEL 语法构建期闸门 (#6253)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T00:55:49Z",
+  "updated_at": "2026-08-08T01:55:09Z",
+  "closed_at": "2026-08-08T01:55:08Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-08-08T01:55:08Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/6472",
+  "body": "Fixes #6253\n\nview/page 的可见性谓词此前在构建期**无人判语法**。本 PR 新增 error 级规则\n`visibility-predicate-syntax`,落在 PR #6248 已经注释过的那个 `parseCelToAst` 返回\n`null` 的分支上。\n\n## 裁定与路线\n\n按维护者 2026-08-07 的裁定执行:判 **blocking error**,与 ADR-0032 下其它谓词面\n(validation rule / flow / action)同级;**不设 warning 档,不为本面写豁免**。\n实施方在这一点上没有裁量,本 PR 也不提替代方案、不加软化开关。\n\n## 为什么这一面此前没人报\n\n`validate-expressions.ts`(ADR-0032)对它遍历到的每条谓词都跑 `validateExpression`,\n语法错报 blocking error —— 但它的遍历面是 objects / flows / actions / sharingRules /\nhooks,**从不走 `views` 与 `pages`**。走这一面的三条规则都明确不判语法,理由是\n「不发明第二个语法判定」。那条政策在它自己的调用点上成立(`validateExpression` 就在\n同一批调用点上跑),**在 view/page 面上不成立:那里没有第二个判定,沉默就是没人报**。\n\n后果是 #5149 同型的 fail-open:谓词求值失败 → `evalFieldPredicate` 返回 fallback →\n可见性 fallback 是 `true` → 元素无条件渲染,与「没写谓词」在屏幕上一模一样。\n\n## 判定仍然不是本包给的(这正是旧政策要保护的东西)\n\n旧政策的真实内容是「对『什么能解析』只有一个答案」,这一点完整保留:判定取\n`parseCelToAst`(规范前端,带 #3306 改写与 `DEFAULT_LIMITS`,#4812),本规则\n**不自建 `Environment`、不手写 tokenizer**。新增的是**对既有判定的上报**,外加原始\n报错缺的自纠措辞 —— cel-js 只说 `Unexpected character: =` 并画一个 caret,既没点名\n作者写的运算符,也没给出 CEL 的写法。\n\n### 明确不走 `validateExpression` / `celEngine.compile`\n\n尽管那才是 ADR-0032 的入口。`compile()` 是 parse **+ 类型检查**,差别不是理论上的 ——\n本 PR 实测它会以 `no such overload: type == string` 拒掉 `type == 'grid'`,而那正是\n本文件**已钉测试的既有盲点**(字段名与 CEL 类型名相同时不判,因为改读 overload 消息会\n误杀合法的 `type(record.x) == string`)。从语法分支绕过去会把那条决定悄悄推翻,并把一条\nerror 级闸门从「解析不了」扩张成「类型检查不过」—— 而这一面的谓词绝大多数是 `dyn`。\n裁定说的是语法,parse 判定恰好就是语法。已加测试钉住这条边界。\n\n## 消息自纠\n\n实测过的非 CEL 拼法各自点名并给出 CEL 写法:`===`→`==`、`!==`→`!=`、`<>`→`!=`、\n`and`→`&&`、`or`→`||`、`not`→`!`、单个 `=`→`==`。扫描前先把字符串字面量抹平,\n所以 `record.msg == 'a === b' and record.n > 1` 归咎于 `and` 而不是字面量里的 `===`;\n`record.msg == 'a === b'` 本身能解析,压根不报。\n\n`??` 与 SQL 的 `IN (…)` 故意不进表:两者都会解析失败、都照报(带前端原话),但都没有\n「换一个 token」就能修好的等价写法,给半个修法只会让作者多跑一趟。\n\n真实 CLI 门后的输出(下面「端到端」一节的注入实验):\n\n```\n✗ Author-time rules failed (1 issue)\n• view \"views[0]\" · formViews.edit: visibility predicate is not valid CEL — Unexpected character: = (predicate: `record.priority === 'urgent'`). A predicate that does not parse can never evaluate, and the console falls OPEN: the element renders unconditionally and looks exactly like one with no predicate at all (#5149).\n    `===` is not a CEL operator — CEL spells it `==`. Replace `===` with `==`, e.g. `record.country == 'USA'`.\n    rule: visibility-predicate-syntax  at views[0].formViews.edit.sections[0].fields[6]\n```\n\n## 边界(均已钉测试)\n\n- **空/纯空白谓词不是语法错**。`parseCelToAst` 对空源也返回 `null`,没有这道 guard\n  会把「没写谓词」报成坏 CEL。\n- **`DEFAULT_LIMITS` 超限属于边界错而非语法错**,照报但引用前端原话、不假装找到了\n  typo(与 ADR-0032 把两者一并归入「invalid CEL predicate」的既有做法一致);\n  超长谓词在消息里省略,单条 runaway 表达式刷不满控制台。\n- **一条坏谓词只出一个 finding**。源码解析不出 AST 就没有标识符可判,裸标识符闸自动\n  让位。该互斥性由「断言整个上报集合」钉住,而不是靠调用方内部实现。\n\n## 反向验证(先声明,后运行)\n\n**声明的方向:RED**(常规方向)—— 把生产改动摘掉、测试全留,新增的钉子测试应当变红。\n预测 **21 红 / 65 绿(共 86)**,并逐条列出了哪些断言会红。\n\n**实测结果:21 failed | 65 passed (86)**,且逐条命中,与声明**完全一致**。\n\n诚实记录的一点:纯「不报」型断言在功能被删掉时是**空绿**的。因此凡是有意义的地方,\n都把否定断言与同一测试内的肯定断言配对(如「CEL 写法是干净的 —— 配对以防空绿」、\n「空谓词不是语法错」、「一条坏谓词只出一个 finding」),删掉规则时红的是配对里的\n**肯定**那一半。仍然空绿的几条(如「字符串字面量里的 `===` 不是错」「不扩张到类型\n检查」「若干合法谓词不报」)在报告里按空绿如实标注,不当作证据。\n\n另有一条既有测试原本断言**整条规则沉默**(`'country === \"USA\"'` → `[]`),它钉的正是\n本 PR 删掉的那个分支 —— 按「整条替换」处置,重写为它幸存的那半个事实:解析不出 AST\n的源**不产生裸标识符判定**。\n\n## 验证证据\n\n| 闸门 | 结果 |\n|---|---|\n| `pnpm lint`(ESLint,家族闸在此 job 内) | pass,无输出 |\n| `pnpm --filter @objectstack/lint typecheck` | pass |\n| `pnpm --filter @objectstack/cli typecheck` | pass(消费方编译面) |\n| `pnpm --filter @objectstack/lint test` | 62 files / **1573 passed** |\n| `pnpm --filter @objectstack/cli test` | 91 files / **928 passed** |\n| `pnpm --filter @objectstack/metadata-protocol test` | 53 files / **552 passed** |\n| `pnpm check:nul-bytes` | OK(6093 文件,无裸控制字节) |\n| `pnpm check:empty-changeset` | OK(本 diff 新增 1 份声明式 changeset) |\n| `pnpm check:adr-anchors` | OK |\n| `pnpm --filter @objectstack/lint check:doc-formula-expressions` | OK |\n\n新增 32 条测试。另按字节纪律对改动文件做了闸门之外的自扫描\n(`grep -naP '[\\x00-\\x08\\x0b\\x0c\\x0e-\\x1f\\x7f]'`),干净。\n\n### 消费半径清扫\n\n规则只有注册表一个调用方,但改动会把原本沉默的谓词变成**阻断**,所以全仓清扫了会喂到\n这条规则的 fixture:全仓 examples / apps / packages 的 view/page 可见性谓词都能通过\n规范前端解析。唯一的 `===` 出现在 `packages/spec/src/ui/view.test.ts`(:1126 / :1240 /\n:1245 / :1291 / :1373)—— 那是**纯 schema 测试样本**,只跑 `FormFieldSchema.parse`,\n不经 lint,是本单援引的**证据**而非待修点,按要求只读未改。CLI 的模板与脚手架里没有\n任何可见性谓词。\n\n### 端到端(证明真的会拦)\n\n三个示例 app `os validate` 全部通过、零 visibility finding、exit 0。\n随后往 `app-showcase` 的表单谓词临时注入 `===`,`os validate` **exit 1**、\n`✗ Author-time rules failed (1 issue)`(见上面的输出),随即已还原并复验通过 ——\n「坏谓词发不出去」是实测的,不是推断的。\n\n## 明确没有做的事\n\n- **没碰 `validate-expressions.ts`** —— 本单不改 ADR-0032 的遍历面。\n- **没碰 `packages/spec/src/ui/view.test.ts`** —— 那里的 `===` 是样本,不是待修点。\n- **没碰 `validate-null-guards.ts`** —— 同一条沉默政策的另一条规则,不在本单射程内。\n  顺带说明:它的沉默在**它自己的**调用点上仍然成立(`validateExpression` 就在旁边跑),\n  本 PR 的论据不构成对它的改动理由。\n- **没碰 `content/docs/releases/`**。\n- **没改注册表**:`validateVisibilityPredicates` 的 tier 在 #6128 已是 `gating`、\n  commands 已是 build/lint/validate,本规则的 `error` 直接沿用(已加测试复核该前提仍然成立)。\n- **没加 `skip-changeset` 标签**(本 PR 有 changeset)。\n- 未翻 ready-for-review、未开启 auto-merge。\n\n## Changeset\n\n`.changeset/lint-visibility-predicate-syntax-gate.md`,`@objectstack/lint: minor`。\n取 minor 的理由是照搬同族先例:同一文件、同样「新增一条 error 级规则」的\n`visibility-bare-identifier`(#6128)用的就是 minor。这是新增能力而非破坏性 API 变更 ——\n公开签名只是**追加**了一个规则 id 常量,既有类型与函数签名一律未变。\n\n规则 id 常量已按 `rule-id-barrel-exports.test.ts` 的要求加入已发布 barrel\n(`packages/lint/src/index.ts`)—— 这是本 PR 唯一一处在 issue 指定文件面之外的改动,\n纯机械要求:少了这一行,该闸门会红。\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01BDmDsu2575gDxeMCxXhDE3)_"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 5960,
+  "kind": "issue",
+  "title": "sdui.manifest.json 的来源未定:声明一致性 ratchet 目前只在手工 `pnpm sdui:manifest` 时跑,CI 里从来不跑(#4690 的遗留决定)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T13:01:16Z",
+  "updated_at": "2026-08-07T18:04:18Z",
+  "closed_at": "2026-08-07T18:04:18Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5960",
+  "body": "在 #4690(把 `check:react-declaration-parity` 的静默 skip 改成报错退出)里实测出来的遗留问题,按 PM 裁决 (c) 单独记一笔。**本条只记录测量与选项,不含实现主张。**\n\n## 事实(#4690 的实测,2026-08-06,origin/main 72bd873)\n\nspec↔registry 声明一致性 ratchet 需要 objectui 的 `sdui.manifest.json`。它在本仓的可得性:\n\n| 候选来源 | 实测 |\n|:--|:--|\n| 签入副本 | 无。`packages/console/` 只跟踪 4 个文件,`dist/` 在 `.gitignore` 里;`git ls-files` 里没有任何 `sdui.manifest.json` |\n| `scripts/build-console.sh`(ci.yml 会跑) | **故意不产出**。收尾注释:manifest 需要真实浏览器,console 构建不能拖进浏览器依赖 |\n| 已发布的 `@objectstack/console` | 无。16.1.0 tarball 共 513 个文件,`sdui` 命中 0;`dist/manifest.json` 是 PWA manifest。→ CLI `resolveSduiManifest()` 的 console 兜底路径对任何 npm 安装用户都解析不到 |\n| 任何 workflow | 没有一个跑 `pnpm sdui:manifest`;除 showcase-smoke(无关)外没有装 Playwright |\n\n唯一生产者:objectui 的 `scripts/dump-public-manifest.mjs` —— Playwright chromium 打开构建后 console 的 `dev/manifest-dump.html`,读 `window.__MANIFEST`。包装脚本是 `scripts/gen-sdui-manifest.sh`(`pnpm sdui:manifest`),它按 `.objectui-sha` 构建 objectui、dump manifest、然后跑 ratchet。\n\n**净结果:ratchet 只在有人手工跑 `pnpm sdui:manifest` 时才跑。** #4690 已经让「没 manifest」从静默退 0 变成报错退 1,所以现在不会再有人误以为它跑过了;但它在自动化里跑到的次数仍然是零,registry 侧的声明漂移在实践中没有被 ratchet 住。\n\n## 待决定(带成本,不宜由开发 agent 猜)\n\n- **A. 在本仓 CI 里生产 manifest。** ci.yml 已有一个 job 会 shallow-clone objectui 并构建 console(命中 `.objectui-sha` 路径过滤时),所以并非不可能;增量是 objectui 全量 workspace 构建 + Vite dev server + 一次 Playwright chromium 下载,且需要决定触发条件(`.objectui-sha` 变、或 `packages/spec/src/ui/react-blocks.ts` 变 —— spec 侧删属性同样会把某个 registry input 变成 registry-only)。\n- **B. 让 objectui 把 manifest 作为发布制品带出来**(随 console dist 或独立 artifact),本仓在 pin 更新时消费。跨仓协调,但把浏览器成本留在它本来就存在的那一侧。\n- **C. 在 objectui 侧做 Node 端 dump**(若 public registry 能被切成不拉浏览器依赖的一层),则 manifest 变成一次普通 node 调用。可行性未测,属 objectui 仓。\n- **D. 维持现状**:显式承认这是「按需门禁」,只在 pin 更新流程里由人跑,并把这一点写进 pin 更新的操作规程。\n\n## 关联\n\n#4690(本条来源)、ADR-0082 D4(「manifest 只在 console 构建期存在,不值得每个 PR 跑」—— 该判断成立,但当时没回答「那到底什么时候跑」)、#4804 / #4777(把 #4690 当作「只在 main 上绿的门禁证明不了任何事」的反面教材引用)。\n\n顺带一条同源观察,可一并裁:ADR-0082 的 Consumers 行与 D4 都写着 ratchet 跑在 `scripts/build-console.sh` 里,实际它在 #4472 之后搬到了 `scripts/gen-sdui-manifest.sh`;`docs/audits/2026-06-react-blocks-conformance.md` 有同样的过期指向。照 ADR 去找的人会翻错文件。"
+}

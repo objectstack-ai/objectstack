@@ -1,0 +1,35 @@
+{
+  "number": 6384,
+  "kind": "issue",
+  "title": "SYNC_ARCHITECTURE.md 的 L3 Key Features 仍打勾 \"Field Mapping: With transformations\",而 FieldMapping.transform 已在 #5552 退役",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T15:52:57Z",
+  "updated_at": "2026-08-07T17:22:42Z",
+  "closed_at": "2026-08-07T17:22:42Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6384",
+  "body": "发现于 #5554(修同文件同一节的 Rate Limiting 措辞)。属**另一次退役**(#5552,非 #4911),故不搭 #5554 的车。\n\n## 事实\n\n`packages/spec/docs/SYNC_ARCHITECTURE.md` 的 L3 `### Key Features` 仍有:\n\n```\n- ✅ **Field Mapping**: With transformations and data type conversion\n```\n\n而 `FieldMapping.transform` —— 作者面上写作 `connector.fieldMappings[].transform` —— 与整个 `FieldMappingTransform` 五成员联合已在 #5552 / PR #6078 按 ADR-0049 退役。墓碑在 `packages/spec/src/shared/mapping.zod.ts:89`:\n\n```\n'`FieldMapping.transform` — authored as `connector.fieldMappings[].transform` and\n `externalLookup.fieldMappings[].transform` — was removed in @objectstack/spec 17.0.0 …'\n```\n\n实测 `ConnectorFieldMappingSchema`(`connector.zod.ts:121`)扩展 `BaseFieldMappingSchema` 后新增的只有 `dataType` / `required` / `syncMode` —— **`data type conversion` 那半句是真的(`dataType`),`With transformations` 那半句不是**。与 #5554 的 Decision Matrix 行同构:一半对,一半把作者引向已退役的键。\n\n## 同文件内的自相矛盾(与 #5554 完全同型)\n\n同一文档 L303–L310 的示例块里,墓碑注释已经写对了:\n\n```\n// (`transform` sat here until #5552 retired it — the five-member union never had\n//  an executor …)\n```\n\n—— 例子改了,散文没跟着改。这正是 #5554 的成因,只是换了一次退役。\n\n## 影响\n\n作者读打勾那行去写 `fieldMappings[].transform`,拿到 `strictObject` 的退役提示;比编译不过更值得修的是他会以为连接器字段映射能做值转换,从而把本该放到 L2 import mapping 的 `transform`(墓碑指定的真实去处)或 ETL transformation step 的逻辑,规划到一个不执行它的面上。\n\n## 建议\n\n- 把该行改成如实说法:字段映射提供 `dataType` 类型转换与 `syncMode` 方向控制;**值转换**请用 L2 import mapping 的 `transform`(字符串枚举 + `params`,墓碑指定)或 ETL transformation step。措辞直接复用 `shared/mapping.zod.ts:89` 墓碑现成句,避免同一次退役出现两种说法。\n- 顺带核一下 `connector.zod.ts` 模块 JSDoc 的 `- Bidirectional sync with field mapping and transformations`(同一处过期,已在 #6383 记录)。\n\n## 门禁提示\n\n该文档被两个门禁钉住:`packages/spec/src/automation/etl-author-shape.test.ts` 钉总 ```typescript 块数 = 6,`packages/spec/src/integration/connector-author-shape.test.ts` 钉 `Connector` 例子 = 3。纯散文改动不动这两个数,但请跑一遍确认而非假定。\n\n## 分诊提示\n\n按 PM 指示打 `finding`,但请复核等级:按 #5554 自己的标准这是作者今天就会撞上的具体缺陷,不像观察类。"
+}

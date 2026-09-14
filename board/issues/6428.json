@@ -1,0 +1,37 @@
+{
+  "number": 6428,
+  "kind": "issue",
+  "title": "ISharingService 写判定补三态(放行/不表态/拒绝)—— #5492 裁决 B 案的 step1,二态 canEdit 已实测产出 fail-open",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:dispatched",
+    "pm:queue",
+    "target:v17"
+  ],
+  "assignees": [
+    "qq9340100"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T18:22:05Z",
+  "updated_at": "2026-08-08T05:25:31Z",
+  "closed_at": "2026-08-08T05:25:31Z",
+  "closed_by": {
+    "login": "qq9340100",
+    "id": 313832657,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6428",
+  "body": "Part of #5492(维护者 2026-08-07 裁决:兑现两种已声明写扩权,方案 B 分两步;裁决与实验证据见 #5492 comment 5217309179 / 5219846435)\n\n## 为什么需要三态\n\n#5492 的 E2 实验(前像门委托 `ISharingService.canEdit/canDelete`)实测出一个 fail-open:**无 `owner_id` 列的对象**上,普通成员跨 creator UPDATE 在 E2 下变 `ok:true`(main 上 403)—— 因为二态 `canEdit` 把「**放行**(有 edit 级共享/扩权依据)」与「**不表态**(本服务对此行无意见)」合并成同一个 `true`,而平台 `created_by` 地板恰是这类对象唯一的行级写门,委托后被 `true` 覆盖。\n\n## 要做什么\n\n`packages/spec/src/contracts/sharing-service.ts` 的写判定契约(`canEdit` / `canDelete`,以及消费方需要的形状)补**三态语义**:放行 / 不表态 / 拒绝;`packages/plugins/plugin-sharing/src/sharing-service.ts` 同步实现。三态的消费方是 #5492 step2 的前像门 provenance 分层合成(plugin-security,identity 车道),它把「不表态」回落到平台所有权地板,把「放行」按声明顶替地板,「拒绝」维持拒绝。\n\n- 动作边界照 ADR-0111 D3 继承:edit 级共享 → update(不含 delete);`canDelete` 单独成门;\n- 兼容:现有二态消费方(CBP 路径 `resolveSharingCanEdit`,security-plugin.ts:3484 附近唯一调用点)的语义不得漂移 —— 迁移方式由实现者按契约演进惯例定(新方法 / 判别联合返回值皆可),PR 正文说明取舍;\n- fail-closed 纪律照旧:查询失败 ≠ 不表态,是拒绝。\n\n## 排序(contract-first)\n\n本单是链条第一环:**本单落地 → identity 车道的配对 PR(#5492 前像门合成 + #5491 种子通配符摘除,维护者要求同批)随后**。#5492/#5491 已挂 `Blocked-by:` 指向本单。\n\n落点在 `packages/spec` ⇒ 按「shared contract surfaces have one owner」归 spec 座位;本单由 identity 车道 PM 按跨座位转移协议代立(`session_01JwwiU9bjhwy2SWj13ho8uv`),`domain:*` 标签留分诊座位补。"
+}

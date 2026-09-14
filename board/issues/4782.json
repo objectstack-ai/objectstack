@@ -1,0 +1,36 @@
+{
+  "number": 4782,
+  "kind": "issue",
+  "title": "metadata/loaders/database-loader.test.ts 的 mock driver `supports` 写满 off-spec 键(aggregations/nestedObjects/geoQueries/changeStreams…)—— 从未与 DriverCapabilities 对上",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched",
+    "pm:queue",
+    "tests"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T06:16:12Z",
+  "updated_at": "2026-08-08T04:29:07Z",
+  "closed_at": "2026-08-08T04:29:07Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4782",
+  "body": "#4634(DriverCapabilities 活性审计)期间发现,顺带记录,不在该 PR 范围内修(metadata 包不在其区域约束内,且不影响任何门禁/测试结果)。\n\n## 现象\n\n`packages/metadata/src/loaders/database-loader.test.ts:36-47` 的 mock driver:\n\n```ts\nsupports: {\n  transactions: false,\n  joins: false,\n  aggregations: false,      // ← 不是 DriverCapabilities 的键(那边叫 queryAggregations,现已退役)\n  streaming: false,\n  bulkOperations: true,     // ← 不存在的键\n  nestedObjects: false,     // ← 不存在的键\n  fullTextSearch: false,\n  geoQueries: false,        // ← 不存在的键(那边曾叫 geospatialQuery)\n  changeStreams: false,     // ← 不存在的键\n},\n```\n\n一半键从未在 `DriverCapabilitiesSchema` 里存在过,另一半(transactions/joins/streaming/fullTextSearch)已于 #4634 退役。对象未做类型标注所以一直编译通过,也没有任何读者,纯属误导下一个照抄 mock 的作者。cloud 侧 `ControlPlaneProxyDriver` 的 fallback 字面量(`supports: any`)有同款问题,已另行记入 cloud 仓 issue。\n\n## 建议\n\n#4634 落地后改为 `supports: {}`(空广告即合法广告),删掉整块假键。一行修复。\n\n发现于 #4634 审计,未认领。"
+}

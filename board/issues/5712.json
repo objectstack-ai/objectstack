@@ -1,0 +1,36 @@
+{
+  "number": 5712,
+  "kind": "issue",
+  "title": "localization 的 timezone / currency 用「策展式 options 表」当穷尽执行边界:合法的 IANA 时区与 ISO 4217 币种被拒",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T01:49:06Z",
+  "updated_at": "2026-08-08T06:05:27Z",
+  "closed_at": "2026-08-08T06:05:27Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5712",
+  "body": "在 #5204(env 覆盖过 options 表)的实现中发现,记录下来交 triage。**不在 #5204 的完成范围内**,#5204 也没有为它开豁免口子。\n\n## 事实\n\n`packages/services/service-settings/src/manifests/localization.manifest.ts` 里两个 `select` 的 options 表是「策展便利列表」,而它们各自的 `description` 描述的是一个**开放域**:\n\n| 键 | 表里有 | description 声明的域 |\n|:---|:---|:---|\n| `timezone` | 17 个时区(`UTC`、`America/New_York`、`Asia/Shanghai` …) | 「IANA zone used to resolve today()/daysFromNow, analytics date buckets, and rendered datetimes.」 |\n| `currency` | 9 个币种(`USD`/`EUR`/`GBP`/`JPY`/`CNY`/`INR`/`AUD`/`CAD`/`BRL`) | 「ISO 4217 code applied when a currency field omits its own.」 |\n\nIANA 时区数据库有约 600 个 zone,ISO 4217 有约 180 个 code。\n\n自 #5131 起,`SettingsService.validatePatch` 把 options 表当作**穷尽式执行边界**:`PUT /api/settings/localization` 写入 `timezone: 'Europe/Zurich'`(或 `currency: 'CHF'`)会被 `invalid_option` 拒绝——尽管那是一个完全合法、运行时也能正常处理的 IANA 标识符。#5204 把同一张表接到 env 侧之后,`OS_LOCALIZATION_TIMEZONE=Europe/Zurich` 也会被忽略并回落(带响亮 error)。于是两扇门都关上了。\n\n## 为什么值得判一下\n\n两种读法都说得通,而它们指向相反的修法:\n\n1. **表是 UI 便利列表,域是开放的** → 那么 #5131 起写入侧就在越权执行,specifier 类型选错了。契约优先的修法在**生产者**侧:补全表(时区表可生成),或者换成带校验的 `text`(IANA/ISO 4217 校验),而不是在消费侧放宽。\n2. **表就是「受支持集合」** → 那么现状正确,只是 `description` 在撒谎,该改的是文案(说清只支持列出的这些),顺便让 #5204 的 error 消息不至于让运维困惑。\n\n按 AGENTS.md Prime Directive #10 的反面(「never advertise a capability the runtime doesn't actually deliver」),现在这个形状两头都不干净:文档宣称 IANA / ISO 4217,执行面只认 17 / 9 个。\n\n## 影响面(已核实的部分)\n\n- 仓库内**没有任何地方**实际设置 `OS_LOCALIZATION_TIMEZONE` / `OS_LOCALIZATION_CURRENCY`(只有 `packages/rest/src/rest-api-plugin.ts` 的注释提到前者),所以不存在在库回归。\n- 写入侧的拒绝自 #5131 起就是活的,与 #5204 无关;#5204 只是让 env 侧与之一致。\n- 未核实:是否有真实部署依赖未列出的时区/币种。这一条需要维护者的判断,不是代码能回答的。\n\n## 建议\n\n按读法 1 处理(生产者侧补全或换类型)看起来更符合 description 已经承诺的东西,但这是一次会影响公开 authoring 面的取舍(枚举语义 = 是否穷尽),交维护者定。\n\n---\n\n**2026-08-06 契约拆分(services 座位)**:裁读法 1 的落地经 dev 实测确认需要 spec 声明位(`valueDomain`),按裁决预授权路径 contract-first 拆分 —— spec 半边见 #5933,本单收窄为 **services 半边**(manifest 对 `timezone`/`currency` 声明 `valueDomain` + 两扇门按域校验 + description 对齐;`default_country` 同洞第三例一并采纳或另立小单)。\n\nBlocked-by: #5933"
+}

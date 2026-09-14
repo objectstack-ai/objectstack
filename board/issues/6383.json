@@ -1,0 +1,37 @@
+{
+  "number": 6383,
+  "kind": "issue",
+  "title": "connector.zod.ts 的模块 JSDoc 仍在三处宣传出站 Rate Limiting(#4911 已退役),并被逐字生成进 content/docs/references/integration/connector.mdx",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:spec",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "qq9340100"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T15:52:33Z",
+  "updated_at": "2026-08-08T01:38:53Z",
+  "closed_at": "2026-08-08T01:38:53Z",
+  "closed_by": {
+    "login": "qq9340100",
+    "id": 313832657,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6383",
+  "body": "发现于 #5554(修 `packages/spec/docs/SYNC_ARCHITECTURE.md` 的同类措辞)。#5515 曾记下一条**未核实**项:`content/docs/references/integration/connector.mdx` 与 `connector.zod.ts` 自己的 `@example` 是否带着同样的错误说法。现已实测,结论如下。\n\n## 事实一:`@example` 不存在\n\n`packages/spec/src/integration/connector.zod.ts` 全文**没有任何 `@example` 块**(`grep -n \"@example\"` 零命中)。#5515 这半条待核项就此关闭 —— 不是\"对的\",是\"没有这个东西\"。\n\n## 事实二:错的是模块 JSDoc,`.mdx` 只是它的下游镜像\n\n`connector.mdx` 的三处措辞是从 `connector.zod.ts` 的模块级 JSDoc **逐字生成**的(`pnpm --filter @objectstack/spec gen:docs`),不是手写:\n\n| `connector.mdx` | 生成自 `connector.zod.ts` JSDoc | 文本 |\n|---|---|---|\n| L21 | 模块 JSDoc「SCOPE」段 | `Includes authentication, webhooks, rate limiting, field mapping, bidirectional sync, retry policies, and complete lifecycle management.` |\n| L25 | 同段下一句 | `This protocol supports multiple authentication strategies, bidirectional sync, field mapping, webhooks, and comprehensive rate limiting.` |\n| L56 | 「When to Use This Layer」清单 | `- Webhook management and rate limiting required` |\n\n三处都与 `rateLimitConfig` 的退役理由直接冲突:`connector.zod.ts` 自己 317–349 行的长注释写着,平台唯一的令牌桶 `packages/runtime/src/security/rate-limit.ts` 是**入站**的,没有任何东西节流连接器**发出**的调用;`comprehensive rate limiting` 尤其重。\n\n同一页 L139 / L454 的 `rateLimitConfig` 墓碑行是**对的**(由 `retiredKey()` 文案生成)—— 同一页里散文说\"有\",表格说\"已移除且从未存在\",正是 #5554 在 `SYNC_ARCHITECTURE.md` 里修掉的那种自相矛盾,只是换了一个文件面。\n\n## 顺带:同一段 JSDoc 还留着 #5552 的旧说法\n\n`connector.zod.ts` 模块 JSDoc 的 `- Bidirectional sync with field mapping and transformations`(生成到 `connector.mdx` L54)在 #5552 / PR #6078 之后同样过期:`FieldMapping.transform` 与整个 `FieldMappingTransform` 联合已退役,`shared/mapping.zod.ts:89` 是它的 `retiredKey()` 墓碑。建议与上面三处一并处理 —— 同一个 JSDoc 块,一次改动 + 一次 `gen:docs` 全部收敛。\n\n## 修复落点(注意不要改错文件)\n\n改 **`packages/spec/src/integration/connector.zod.ts` 的模块 JSDoc**,然后跑 `pnpm --filter @objectstack/spec gen:docs` 让 `content/docs/references/integration/connector.mdx` 重新生成。⛔ 不要手改 `.mdx` —— 那是生成产物,`check:docs` 会把手改判红。措辞建议直接复用 #4911 墓碑的现成句:出站限流请在 connector provider 或上游网关做。\n\n## 为什么单独一单\n\n`.mdx` 树是生成的(且 PR #6377 当时正在其上作业),`*.zod.ts` 属另一条 lane 的文件面,两者都在 #5554 的范围之外,故按 Prime Directive #10 单独记录,不搭车。\n\n## 分诊提示\n\n按 PM 指示打了 `finding`,但请分诊时复核这个等级:按 #5554 自己的标准,这是作者**今天就会撞上**的具体缺陷(读到 `comprehensive rate limiting` 去写 `rateLimitConfig`,拿到退役报错;更糟的是他会以为\"平台替我限流\"成立 —— 即 #4911 注释点名的\"最像安全承诺的一面\"),不像观察类。是否摘掉 `finding` 由分诊裁定。"
+}

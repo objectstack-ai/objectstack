@@ -1,0 +1,35 @@
+{
+  "number": 6035,
+  "kind": "issue",
+  "title": "[finding] `isMissingSourceError` 仍把 Postgres 的「缺列」措辞 `column \"c\" of relation \"t\" does not exist` 判为「缺源」——文档明说不该,今天靠读路径不产生该措辞而无害",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "pm:queue"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T15:21:39Z",
+  "updated_at": "2026-08-07T15:16:58Z",
+  "closed_at": "2026-08-07T15:16:58Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6035",
+  "body": "## 观察(#5717 落地过程中量出的残留,非 #5717 范围)\n\n`packages/services/service-analytics/src/analytics-service.ts` 的 `isMissingSourceError` 自己的文档写着:\n\n> Deliberately scoped to MISSING SOURCE (table/object/relation) — **not column/syntax errors, which stay hard failures so real query bugs still surface**.\n\n但 Postgres 的**缺列**措辞里含有一段完整的缺表措辞:\n\n```\ncolumn \"label\" of relation \"acct\" does not exist\n```\n\n`relation \"acct\" does not exist` 是它的子串,所以:\n\n- #5717 之前的宽判据(`includes('relation') && includes('does not exist')`)命中;\n- #5717 收紧后的锚定判据(`/relation\\s+[\"']?…[\"']?\\s+does not exist/i`)**同样命中** —— 收紧的是「任意同时含两词的句子」,不是这一支。\n\n命中的后果与 #5717 描述的一致:`missingSourceRelation` 会把 `acct` 当成「缺失的关系」,于是要么降级成空网格(若 `acct` 就是 dataset 自己的 object),要么报成跨库拓扑错误(若是 join 表)——两者都不是真相,真相是**一个列名写错了**,正是文档说要让它响亮失败的那一类。\n\n## 为什么今天无害(observation 类)\n\nanalytics 是只读面。Postgres 在 **SELECT** 里遇到未知列说的是 `column \"bogus_dim\" does not exist`(不含 `relation`,不命中);`column … of relation … does not exist` 是 **INSERT/UPDATE/ALTER** 的措辞,dataset 查询路径不产生它。所以这是一条「判据比文档宽」的静默残留,不是今天有人踩得到的缺陷。\n\n量化(#5717 的 13 条仓内真实措辞语料):收紧前后该串均为 HIT,是 13 条里唯一一条「判据与自身文档不一致」的。\n\n## 可能的方向(不预判,留给 triage)\n\n- 仓内已有先例:`packages/rest/src/rest-server.ts:825` 先用 `/column\\s+[\"'\\`]([a-z0-9_]+)[\"'\\`]\\s+of relation\\s+\\S+\\s+does not exist/i` 把缺列摘出来再判缺表(#5352 面),照抄这一手即可。\n- 或者顺着 #5717 方向 A(驱动侧结构化 code)一并解决 —— 该方向分诊已裁定需要时独立立单,涉 drivers 面。\n\n## 参考\n\n- `packages/services/service-analytics/src/analytics-service.ts`(`isMissingSourceError` / `missingSourceRelation`)\n- #5717(第二个 message 嗅探器 —— 本条是它收紧后剩下的残留)、PR 见 #5717 的实现分支\n- `packages/rest/src/rest-server.ts:825`(缺列先摘的既有先例)、`packages/rest/src/rest.test.ts:2417`(该措辞的既有用例)"
+}

@@ -1,0 +1,33 @@
+{
+  "number": 5883,
+  "kind": "issue",
+  "title": "观察:guard-main-checkout-bash.sh 的逐字符分词对超长单 token 是超线性的(16KB 起约 1.5s,64KB 超 20s)——现实命令形状不触发",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "finding"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T10:55:14Z",
+  "updated_at": "2026-08-08T00:41:53Z",
+  "closed_at": "2026-08-08T00:41:52Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5883",
+  "body": "在实现 #5790(PR #5879)时对新钩子做超出自测矩阵的模糊测试顺带测出来的**性能特性**,不是功能缺陷,**当前没有任何 agent 会踩到**,故按观察项记录、不进队列。**未做任何改动。**\n\n## 现象\n\n`.claude/hooks/guard-main-checkout-bash.sh` 的 `split_segments()` 与 `tokenize()` 都是纯 bash 的逐字符循环(`for ((i=0;i<n;i++)); ch=\"${s:i:1}\"`),配合 `tok+=\"$ch\"` 的字符串累加,整体随命令长度**超线性**增长。实测(fixture 为临时 git 仓库,命令形状 `tee` 加一个超长单 token):\n\n| 命令长度 | 钩子耗时 |\n| --- | --- |\n| 200 | 46 ms |\n| 1000 | 78 ms |\n| 2000 | 126 ms |\n| 4000 | 204 ms |\n| 8000 | 478 ms |\n| 16000 | 1565 ms |\n| 32000 | 5422 ms |\n| 65536 | 超过 20s(模糊测试里以 `timeout 20` 计,rc=124) |\n\n## 为什么现在不影响任何人\n\n- **现实命令形状是 18–20 ms**,与长度无关地快:`pnpm --filter @objectstack/spec test`(36 字符)18 ms、一条 161 字符的 `flock ... -c \"NODE_OPTIONS=... pnpm ... test --maxWorkers=2\"` 20 ms、带 `--format` 与多路径的 `git log`(102 字符)19 ms。\n- **大 heredoc 不受影响**:正文在进入字符循环之前就被 `strip_heredocs()` 整段剥离,所以「用 heredoc 写一个大文件」这个最可能产生超长命令的真实场景很便宜 —— 实测 25938 字符的 heredoc 命令仅 50 ms,且判定仍然正确(引入行自己的重定向照样拦)。\n- 要触发到秒级,需要单条命令里出现一个**万字符量级的 token**(不是长命令,而是长*单词*)。当前仓内没有这种调用形状。\n\n## 同源影响\n\nPR #5879 是从 objectui 逐例移植的成品(objectstack-ai/objectui#3452),两边可执行代码逐字节相同,所以 `objectstack-ai/objectui` 的同名钩子**有完全相同的特性**。修的话应两仓一起,否则会引入本来刻意避免的守卫漂移。\n\n## 若将来要修\n\n思路(未验证,留给接手的人判断):把逐字符循环换成一次性的 `read -r -a` 加引号预处理,或用 `${s//[^chars]/}` 之类的批量替换替代逐字符累加;也可以直接给一个长度上限 —— 超过某个阈值就 **fail open**(与钩子既有的「解析不了一律放行」哲学一致,而且比让每个 Bash 调用等 5 秒更符合「guard 是防呆不是安防」)。后者改动最小。\n\n## 复现\n\n```\n# 在 PR #5879 的分支上\ntmp=$(mktemp -d); mkdir -p $tmp/m/pkg\n( cd $tmp/m && git init -q . && git config user.email a@b.c && git config user.name a && : > pkg/x.ts && git add -A && git commit -qm i )\narg=$(head -c 32000 /dev/zero | tr '\\0' 'a')\ntime jq -nc --arg c \"tee $arg.ts\" --arg w \"$tmp/m\" '{cwd:$w,tool_name:\"Bash\",tool_input:{command:$c}}' \\\n  | .claude/hooks/guard-main-checkout-bash.sh\n```\n\n按关键词(hook / latency / tokenize / guard-main-checkout / PreToolUse)搜过 open issue,未搜到同类记录。"
+}

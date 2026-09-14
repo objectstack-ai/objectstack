@@ -1,0 +1,36 @@
+{
+  "number": 6342,
+  "kind": "pull_request",
+  "title": "feat(ci): ADR-0087 台账完备性门禁 —— 声明为 breaking 的 changeset 必须写明台账处置 (#6148)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "ci/cd",
+    "dependencies",
+    "documentation",
+    "size/xl",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T14:18:28Z",
+  "updated_at": "2026-08-07T15:19:24Z",
+  "closed_at": "2026-08-07T15:19:22Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-07T15:19:21Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/6342",
+  "body": "Fixes objectstack-ai/objectstack#6148\n\n## 前提复核(在当前 `origin/main` 上)\n\n前提**仍然成立**,逐条实测:\n\n- 两道现存门禁钉的确实只是「台账 ↔ 生成物同步」。\n- `packages/spec/src/migrations/registry.ts` 现有 39 条 semantic id、`conversions/registry.ts` 88 条;`spec-changes.json` 里 39 条 `migrationId` 全部能在源码中找到 —— 生成物是 registry 的**纯投影**,所以条目从未写过时两者互相一致,**全仓全绿**。\n- `dca5bd36a`(PR #6048)确实新增了 `.changeset/tidy-donkeys-yawn.md`(`@objectstack/runtime: major` + `**BREAKING**`)且**没有**动过任何台账文件;补登记发生在两个多小时后的 `7f6270600`(PR #6138)。\n\n## 实现的规则\n\n新增 `scripts/check-adr-0087-registration.mjs`,与 `check-empty-changeset.mjs` 同族:判 PR 的 **diff**(始终从 `merge-base(base, head)` 起算,#6129),不判库存。\n\n本 PR **新增**(或新变为 breaking)且声明了 breaking 的 changeset,必须携带且仅携带一条处置标记:\n\n```\n<!-- adr-0087: registered SOME-MIGRATION-ID -->\n<!-- adr-0087: not-required (unpublished) why -->\n<!-- adr-0087: not-required (already-registered SOME-MIGRATION-ID) why -->\n<!-- adr-0087: not-required (no-migration-prescription) why -->\n```\n\n「声明了 breaking」取三种拼法的并集(frontmatter `major` / 正文 `**BREAKING`/ summary 行的 conventional-commit `!`)。库存 1304 条中命中 227 条。取并集而非其一:#6048 用的是 (1)+(2) 而**没有** (3),而 `check-changeset-no-major.mjs` 在 pre 模式外会把 breaking 压成 `minor`,那时只剩 (2)/(3) 承载信号。\n\n⛔ **不做跨包退役自动检测** —— 那正是维护者裁定要绕开的部分。作者已经声明过「这是 breaking」,门禁只需注意到它对台账只字未提。\n\n### 逃生舱如何保持诚实\n\n四种处置里**三种可机械复验,每次运行重新验证**:\n\n| 处置 | 每次运行复验什么 |\n| :--- | :--- |\n| `registered SOME-ID` | 每个 id 必须在台账中存在,**且至少一个是本次 diff 新增的** —— 不能声称一次自己没做的登记 |\n| `not-required (unpublished)` | changeset bump 的**每个**包都必须 `private: true`;命中已发布包直接红 |\n| `not-required (already-registered SOME-ID)` | 命名的 id 必须存在,**且在 merge base 就已存在**。若是本次新增,诚实的写法是 `registered` |\n| `not-required (no-migration-prescription)` | 当 changeset **自己的正文**带 FROM → TO 迁移说明时**拒绝** |\n\n最后一条是够到 #6048 的那一条:它的 changeset 带着 `### 迁移:FROM → TO` 和完整的前后对照代码块 —— 一份发布了改写指令的 changeset,不能同时声称无人需要改写。这是**陈述与陈述**的自相矛盾检查,不是退役检测器。该模式大小写敏感、只匹配本仓的大写房规拼法(早期大小写不敏感的草稿会误命中普通散文 \"from the old value to the new\",在 32 条上命中 14 而非 11)。\n\n此外所有 `not-required` 的理由都会在每次运行时被**逐字打印并发出 `::notice` 注解**,`--list` 提供常设审计面 —— 一条没人再读的豁免正是本门禁要避免的失效模式。\n\n## ⚠️ 一个改变了设计形状的实测(请维护者过目)\n\n派单假设逃生舱是例外(「构建工具或 dev-only 包显然不需要」)。**实测相反 —— 它是多数路径**:\n\n- main 最近 400 个 first-parent commit:32 条新增的 breaking changeset,**仅 5 条(15.6%)动过台账**。\n- 独立佐证:v17 列车 213 条 breaking changeset 对 step-17 的 29 条 semantic 条目 —— **约 1/7**。\n\n所以门禁的价值**不是**判定谁该登记(它做不到,也不该做),而是让这个问题**被书面回答**。#6048 没有回答,也没有任何东西问过它。绝对成本很小:约每 400 个 PR 有 32 次处置,其中约 27 次是一行 `not-required`。\n\n## 反向验证(**预测先写,后运行**)\n\n预测写在 `predictions.md` 后才执行。18 条 self-test 方向预测**全部命中**;下面是要求的那一对,以及**一次真实的预测落空**。\n\n### 头条对照 —— 在真实提交上\n\n| | 输入 | 结果 |\n| :--- | :--- | :--- |\n| 有对账步骤 | `--base dca5bd36a~1 --head dca5bd36a`(#6048 原样) | **红**,指名 `.changeset/tidy-donkeys-yawn.md`:`declares a breaking change (major, BREAKING) but no adr-0087: disposition marker` |\n| 去掉对账步骤 | 同一输入,把「缺 marker」改为不判 | **绿(exit 0)** |\n\n三处 ablation 各自让 self-test 对应红路径转绿,证明 self-test 不是空转:\n\n| ablation | 真实 #6048 回放 | self-test |\n| :--- | :--- | :--- |\n| 去掉「必须有 marker」 | **绿** | FAIL — R1、R9 转绿 |\n| 去掉 FROM→TO 矛盾检查 | 红(它同时也缺 marker,两检查独立) | FAIL — R2 转绿 |\n| 去掉「registered 必须是本次新增」 | 红(同上) | FAIL — R4 转绿 |\n\n### ❗ 落空的预测(如实报告)\n\n我第一次做 B2a ablation 时预测 #6048 回放转**绿**,实际**仍是红**。原因不是门禁的性质,而是**我的 ablation 本身不干净**:把 `if (!d.ok)` 改成 `if (false && !d.ok)` 后,控制流**落穿**进了 `not-required` 分支,`d.category` 为 `undefined`,于是报出 `unknown not-required category \"undefined\"` —— 依然红,但理由是胡话,既没指出真正的问题也没给出修法。\n\n两个收获,都留在了代码里:\n\n1. 换成语义正确的 ablation(缺 marker 即不判)后,预测的绿如期出现。\n2. 这暴露了一处**真实的脆弱性**:`registered` 与 `not-required` 的分派此前依赖前面的 `continue` 而非一个明说的条件。已改为显式判 `d.verdict !== 'not-required'`,并把这次 ablation 的经过写进了注释 —— 依赖「上面提前返回过」才成立的正确性,离出错只有一次编辑。\n\n顺带一提,self-test 在这次落空中**报出了正确的诊断**(R1 断言的是**报错文本**而不只是颜色),这正是它该有的行为。\n\n## 历史回放\n\n267 个「新增过 changeset」的提交逐个回放:**33 红 / 234 绿**(12.4%)。33 条全部是「声明 breaking 但没有 marker」—— 标记当时还不存在,这是**采纳前的基线**,不是误报率。`dca5bd36a` 在红集中。红集里 `*-retired.md` / `*-removed.md` 命名的有 5 条,正是台账服务的退役类。\n\n## main 上是绿的\n\n- `node scripts/check-adr-0087-registration.mjs --base origin/main --head origin/main` → **绿**。`merge-base(main, main) == main`,diff 为空。\n- `--list`:库存 227 条声明 breaking 的 changeset **全部豁免** —— 门禁判 diff,不判库存,所以采纳无需任何回填。\n\n## #4690:缺输入永远不是通过\n\n出任何判决**之前**断言全部输入非空:`.changeset/` 非空、两个台账源存在且解析出非零 id、`spec-changes.json` 可解析。另有两道专门防止本门禁腐化成绿色空转的断言:\n\n- **解析器腐化** —— 生成物 `spec-changes.json` 里的每个 `migrationId` 都必须能被源码解析器看见。方向是刻意的(投影 ⊆ 源码):新增条目尚未重生是 `check:spec-changes` 的红,不是这道的,两者永不重复报同一事实。\n  > 这道断言是被实测**赚**出来的:id 字符类最初写成小写,静悄悄地把 39 条里的 `object-titleFormat-to-nameField` 漏掉、只抽出看起来很像样的 38 条。\n- **约定改写** —— 库存中至少要有一条能被 breaking 检测器命中,否则说明拼法被整体改写,门禁会匹配不到任何东西并静默放行一切。\n\n## 落地位置\n\n放在 `pr-automation.yml` 的 **Check Changeset** job 里、`check-empty-changeset` 旁边,而不是 `ci.yml` 的 lint family —— 它的判决是 PR **diff** 的函数,需要同一个 `$MERGE_BASE`。lint job 里的副本没有分叉点可判,只能退回读库存,那正是 #6129 要防的「拿 PR 开着期间 main 新增的东西去问责作者」。\n\n## 性能\n\n首版每次运行 5.25s(库存 1304 条各 spawn 一次 `git show`,外加无条件读 ~90 份 workspace manifest)。改为单次 `git cat-file --batch` 批读 + manifest 惰性求值(只有真出现 `unpublished` 主张才读)后 **0.77s**。\n\n## Changeset 决策\n\n**`skip-changeset` 标签,不写 changeset。** 改动为 root `scripts/`、root `package.json`(`private: true`)、`.github/workflows/`、`AGENTS.md` —— 无一属于已发布包,发布物为空。⛔ 未使用空 frontmatter changeset(#6059/#5471 已禁)。\n\n## 范围\n\n⛔ 未触碰 `packages/spec/src/**/*.zod.ts`、strictness ledger、`content/docs/releases/`,以及 `build-schemas.ts` / `build-docs.ts` / `lib/format-type.ts`(#6309、#6308 在飞)。台账本身一条未改。\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_014wsZeReNTqiceBfLb5Pyf5)_"
+}

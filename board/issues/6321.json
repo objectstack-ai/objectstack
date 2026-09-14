@@ -1,0 +1,32 @@
+{
+  "number": 6321,
+  "kind": "issue",
+  "title": "[finding] `query.aggregate` 与 `agg.func` 是 spec 从未声明的宽容别名,唯一书写者是驱动自己的 fixture(#4984 家族)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "finding"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T13:45:13Z",
+  "updated_at": "2026-08-07T18:02:25Z",
+  "closed_at": "2026-08-07T18:02:25Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6321",
+  "body": "从 #6212 的测量棒中带出(基线 `d367f03d6`),观察类。\n\n## 事实\n\n三处驱动读两个**协议从未声明**的别名:\n\n| 读者 | 别名 |\n|---|---|\n| `driver-sql/src/sql-driver.ts:3439` / `:3442` | `query.aggregate`(应为 `aggregations`)/ `agg.func`(应为 `function`) |\n| `driver-turso/src/remote-transport.ts:833` / `:837` | 同上 |\n| `driver-mongodb/src/mongodb-driver.ts:472` | `query.aggregate`(已被 `as any` 罩住,签名收窄照不到它) |\n\n**唯一书写者是驱动自己的 fixture**:`sql-driver-advanced.test.ts`(7 处 `aggregate:` + 全部 `func:`)、`sql-driver-queryast.test.ts:159`、`sqlite-wasm-driver-advanced.test.ts`(7 处)、`sqlite-wasm-driver-queryast.test.ts:149`。**非测试面零书写者。**\n\n## 为什么记一笔\n\n这是 #4984 家族:**fixture 拼着未声明的别名,让宽容分支永远绿着活下去**——没有任何测试会发现删掉它们不影响任何人。按 ADR-0049 enforce-or-remove,重拼 fixture 到已声明拼写后,两个别名分支的生产者归零,应一并删除。\n\n## 已有归属\n\n已并入 **#6212 批 B**(`aggregate` 收窄)的**前置步骤**:顺序必须是 ①重拼 fixture ②删别名分支 ③再收窄签名——倒过来会拿到一堆解释不清的红。本单只作独立记账,便于 ADR-0049 的账面追踪;批 B 落地即可关闭。\n\n关联:#6212、#4984、ADR-0049。"
+}

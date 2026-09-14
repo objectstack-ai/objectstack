@@ -1,0 +1,35 @@
+{
+  "number": 6174,
+  "kind": "issue",
+  "title": "objectui 没有「发布性改动必须声明 changeset」闸门 —— changeset-guard.yml 的触发器决定了它只看得见已经带 changeset 的 PR(objectui#3518 因此整个从发布记录里消失)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T07:09:03Z",
+  "updated_at": "2026-08-07T16:00:44Z",
+  "closed_at": "2026-08-07T16:00:44Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6174",
+  "body": "在 #6159 的 pin bump(PR #6173,范围 `f995a452..7dfbeb70`)执行 #6099 复核时发现,与 #6159 本身无关,按 Prime Directive #10 单独记录。\n\n## 现象\n\nobjectui#3518 —— commit `0e50440`,`fix(form): bind ``previous`` for field rules and stop resubmitting read-only fields` —— 落在本次 pin 范围内,改动 26 个文件,覆盖 `packages/components`、`packages/plugin-form`、`packages/types`、`packages/data-objectstack`、`packages/app-shell` 以及全部十个 locale pack,新增两个测试文件。**它没有添加任何 `.changeset/*.md`。**\n\n证据(在 objectui 检出里,只读):\n\n```\n$ git show --name-status --format='' 0e50440 -- .changeset/\n(空)\n```\n\n后果是双向的:\n\n1. **objectui 自己的发布记录里没有它。** `7dfbeb7`(`chore: release packages (#3248)`)消费掉了当时挂着的 88 个 changeset 并发布,`0e50440` 的代码随 `@object-ui/components` 等包一起出去了,但任何 CHANGELOG 里都没有一行提到它。\n2. **平台侧的 console changeset 也拿不到它。** `scripts/objectui-changeset-digest.mjs` 的判据是「objectui 声明了什么」(#4731),这条判据本身是对的 —— 它忠实地把 `0e50440` 归进「20 个不带 changeset 的 commit」并把这个数字写进正文。但一个真实的、用户可见的表单行为变更,就这样只以一个计数的形式存在于 v17 的发布记录里。\n\n这正是 #3340 记录过的那一类损失(v16 因 pin 滞后丢了 4 条前端改动)换了一扇门进来:不是 pin 陈旧,而是**源头就没声明**。`check:objectui-pin-fresh` 对此完全无能为力 —— 它证明的是 pin 是否 CURRENT,而 `0e50440` 已经在范围内了。\n\n## 根因:闸门的触发器把它自己挡在门外\n\nobjectui 有 `.github/workflows/changeset-guard.yml`,但读它的触发器:\n\n```yaml\non:\n  pull_request:\n    branches: [main, develop]\n    paths:\n      - '.changeset/**'\n```\n\n以及它唯一的 job:\n\n```yaml\njobs:\n  no-major:\n    name: Changeset Bump Policy\n```\n\n两件事叠在一起,结果是结构性的:\n\n- 这个 workflow **只在 `.changeset/**` 发生变化时才启动**。一个「漏了 changeset」的 PR 按定义不动 `.changeset/**`,所以它一个 job 都不跑。\n- 就算跑了,它检查的也是**级别策略**(不许 `major`),而不是「这次改动该不该带 changeset」。\n\n也就是说:能发现「缺 changeset」的检查,恰恰跑不到缺 changeset 的 PR 上。这个 workflow 的注释本身就写明了它是为「只加 changeset 的 PR 会一个 workflow 都不启动」这个反向问题设计的 —— 设计是自洽的,只是**正向的那个问题从来没有闸门**。\n\n对照本仓的既有判断:「a check that does not run reports nothing」(objectui-pin-freshness.yml 的 WHY THE JOB IS NEVER SKIPPED 段),以及 Route & surface ownership §3「Absence must be loud」。这里的缺席是完全静默的。\n\n## 需要决定的事(留给 triage,我不预设)\n\n修复面在 objectui,不在本仓,所以这条主要是**路由 + 记录**。可选方向,成本递增:\n\n- **A. objectui 加一个反向触发的 changeset-required 闸门**:PR 改到 `packages/*/src/**` 但没加 `.changeset/*.md` 时红,配 `skip-changeset` 标签逃生口。这是最直接的一版,和本仓 `check-empty-changeset.mjs` + `skip-changeset` 的组合同构。\n- **B. 只补记录不加闸门**:给 objectui#3518 补一个追溯 changeset。能修这一次,修不了这个类。\n- **C. 平台侧把「无 changeset 的 commit」从计数升级为点名**:`objectui-range.mjs` 已经有 `--all` 能按 subject 逐条列出被排除的 commit(见其 self-test「`--all` itemizes the excluded commits by subject」),把它接进 console changeset 正文,至少让漏声明的改动在平台发布记录里留下标题。这不解决 objectui 侧的根因,但把静默变成了可读的噪声。\n\n我倾向 **A + C**:A 治根因,C 让平台侧在 A 落地之前不再是全盲,而且 C 需要的能力已经写好了、只差接线。B 单独做等于承认下一次还会发生。\n\n## 不在本 issue 范围内\n\n- #6159 / PR #6173 本身不受影响:digest 的行为完全正确,`0e50440` 的代码照常进 console build,只是发布记录里没有它。PR #6173 已在正文里把这件事写明,没有粉饰。\n- #6099(digest 只认 `major` 声明级别)是另一个问题:那条讲的是**声明了但级别标低**,这条讲的是**根本没声明**。两者互不覆盖。\n"
+}

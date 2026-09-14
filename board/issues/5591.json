@@ -1,0 +1,35 @@
+{
+  "number": 5591,
+  "kind": "issue",
+  "title": "update 路径的 stripReadonlyFields 删除的是 hook 已覆写的当前值而非调用方提交的值 —— 调用方回传 readonly 键会连坐抹掉 beforeUpdate hook 的写入,可落出 status=published 而 published_at=null 的行(17.0.0-rc.2)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched",
+    "target:v17"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T20:01:59Z",
+  "updated_at": "2026-08-07T15:16:58Z",
+  "closed_at": "2026-08-07T15:16:58Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5591",
+  "body": "Part of objectstack-ai/hotcrm#788\n\n## 现象\n\n`suppliedKeys` 在 hook 运行**之前**从调用方 payload 快照,而 `stripReadonlyFields` 在 `beforeUpdate` hook **之后**执行、且对每个「readonly 且 ∈ suppliedKeys」的 key 做 `delete result[name]` —— 删的是**当前值**,而当前值可能已被 hook 覆写。于是「调用方回传了该 readonly 字段」这一件事,会连带把 hook 在同一次写里打的戳一起抹掉。\n\n```\nconst suppliedKeys = new Set(Object.keys(opCtx.data ?? {}));\n…\nawait this.triggerHooks(\"beforeUpdate\", hookContext);\n…\nhookContext.input.data = stripReadonlyFields(updateSchema, preRo, suppliedKeys, …);\n```\n\n## 实测(pinned 17.0.0-rc.2,真 ObjectQL + InMemoryDriver + 真 crm_knowledge_article schema + 真 hook + sys_fetch_previous_update 复刻,非系统上下文)\n\n```\ndraft -> published,非系统 update,payload 整记录回传(含 readonly 的 published_at):\n=> 落库 status = \"published\", published_at = null, last_reviewed_at = 2026-08-05T…\n```\n\nhook(`knowledge_article_publish_timestamps`)在首发转换上写入了 `published_at = nowIso`,随后剥离因「调用方 supplied 了这个 key」把 hook 刚写的值一起删掉。结果是一篇 **status 为 published、published_at 为 null** 的文章——按 `published_at` 排序/过滤的每个面(列表、报表)对这行都无定义。\n\n可达性:REST/集成调用方「读出整记录 → 改一个字段 → 整记录写回」是常见写法;console 表单不回传只读字段所以 UI 路径不触发。\n\n## 与在案记录的边界(先搜后立,均已读过)\n\n- **#2948 / #3003 / #3015**(update 面剥离)与 **#3043 / PR #3162**(insert 面入口级剥离)建立的语义——「非 system 调用方不得写 readonly 列」——本单**不质疑**;本单指出的是剥离**实现**删错了对象:它该丢弃的是「调用方提交的那个值」,实际丢弃的是「该 key 上执行到剥离时的值」,两者在 hook 已覆写时不同。\n- **#4903**(插件 data.update 无 context 被剥离、与 hook 补写不对称)是身份判定问题,与本单的时序/连坐问题不同;其结论(hook 补写的键不在 suppliedKeys 里能落库)恰恰是本单的对照面:hook 写**新** key 能落库,hook 覆写**调用方回传过的** key 会被连坐删除——同为 hook 派生写,存亡取决于调用方 payload 里有没有碰巧出现同名键,这不可能是有意语义。\n- **#3407**(剥离静默、无可观测性)是另一维度,不重复。\n\n## 期望\n\n剥离作用于**调用方提交的值**而非执行时的当前值。实现方向任选:在 hook 之前剥离(caller 输入在进 hook 前就干净);或剥离时跳过「hook 已改写过的 key」(比较剥离时值与 supplied 快照值);或把 supplied 快照与 hook 写入分账。任一方向下,上面的实测都应落出 `published_at = nowIso` 而非 null。\n\n发现过程:objectstack-ai/hotcrm#780 / PR objectstack-ai/hotcrm#789 的实测(探针脚本未入库,复现步骤在 hotcrm#788)。hotcrm 侧对照实测已证明该行为在 #780 修复前后完全一致(非新引入)。"
+}

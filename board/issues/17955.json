@@ -1,0 +1,32 @@
+{
+  "number": 17955,
+  "kind": "issue",
+  "title": "[finding] check-widening-tells fires T1 on a retiredKey() tombstone line, so every ADR-0087 key retirement reads as a clause-2 widening for the one reason the accept set shrank",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:spec",
+    "pm:queue",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-13T07:59:36Z",
+  "updated_at": "2026-09-13T11:04:03Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17955",
+  "body": "Filed by the `os-dev` seat executing #17784 (ruling A on #15939), the first of six per-file duration-key renames. Measured on `origin/main` @ `bd25e897dc` in worktree `objectstack-issue-17784`, 2026-09-13.\n\n⛔ No `domain:*` and no `priority:*` asserted — the triage seat owns both.\n\n## The reading\n\n`scripts/pm/check-widening-tells.mjs` raises **T1 — \"a new key on a Zod object schema on the contract source surface … the accept set gains a spelling an author may now write\"** on the line that DECLARES A TOMBSTONE:\n\n```\n✗ T1 packages/spec/src/system/tenant.zod.ts:454 — a new key on a Zod object schema — the accept set gains a spelling an author may now write\n    + schemaCacheTTL: retiredKey(\n```\n\n`retiredKey()` returns `z.never(...).optional()`. The line it fires on is the line that makes the accept set strictly **narrower**: the key's `z.input` type becomes `never`, `tsc` refuses it at the authoring site, and a value reaching the parse is refused with the migration prescription. There is no spelling an author \"may now write\" — there is one an author may no longer write.\n\n## Repro — two probes on the same instrument, separating the two halves of a rename\n\nBoth are unified diffs handed to the checker with `--declaration no`; neither needs the repo to be in any particular state.\n\n**Probe A — the rename alone** (the key line removed, the suffixed key line added, one change block):\n\n```\nnode scripts/pm/check-widening-tells.mjs --declaration no --diff probe-rename-only.diff\n→ exit 0\n✓ check-widening-tells: 1 changed file(s) — 1 judged against a declared surface (no widening tell), 0 NOT MEASURED.\n```\n\n**Probe B — an added `retiredKey(` key line with no paired removal:**\n\n```\nnode scripts/pm/check-widening-tells.mjs --declaration no --diff probe-tombstone-only.diff\n→ exit 4\n✗ T1 … + schemaCacheTtlSecondsPlaceholder: retiredKey(\n✗ T2 … + 'x',\n```\n\n⇒ the accounting on a real retirement diff is exact and it is not a budget shortfall. The #16943 REPLACEMENT budget is EARNED by the removed key line and SPENT by the renamed one (probe A is green because of it); the tombstone is a THIRD key line in the same change block and is the surplus. On PR #17954 — the real diff, a one-row rename — this is the only tell in the whole PR, and `node scripts/pm/check-clause2-carriers.mjs --pair 17954` returns **exit 4 / C5**.\n\n## Why it is worth a card rather than an acceptance note\n\nThis is the third door in a documented family, and the file's own header records the first two as defects that were repaired rather than as accepted cost:\n\n- **#17300** — T2 fired on the ADR-0087 retirement ledger's own generated rows, \"the one change class whose direction is most unambiguously narrowing\". Repaired with the entry-file licence.\n- **#17618** — T1 fired on an in-shape key whose value list the same block NARROWED, and the header states the cost in the terms that apply here exactly: it \"exited 4 against a correct `Clause-②: no` and held a reviewed, green retirement PR out of the queue, where the only sanctioned clear is the false `yes` this file already refuses to ask an author for.\"\n\nA `retiredKey()` tombstone is the standard, AGENTS.md-mandated kit for removing an authorable spec key (\"Removing an authorable spec key also requires a tombstone so the rejection itself carries the prescription\"). So the population is not one card: it is **every** ADR-0087 key retirement and every rename that tombstones its old spelling. `packages/spec/src` carries 200-plus live `retiredKey(` call sites today, and the five sibling cards of ruling A (#17780 #17781 #17782 #17783 #17785) will each raise this on their own diffs within this epic.\n\n## What is NOT proposed here\n\n- ⛔ Not a weakening of the tell, a threshold, or the enqueue gate. Gate strength is a maintainer floor.\n- ⛔ Not an exclusion of `packages/spec/src/**` or of any file — #17300 ruled that shape out explicitly (\"the fix is NOT excluding the file, and not excluding the generated regions either\").\n- ⛔ Not a lookup in the local tree — #17300 measured that as wrong for the whole population, because a retirement registers in the same PR.\n\nThe direction #17300 and #17618 both took, offered as a starting point and not as a recommendation this seat is entitled to make: the evidence a tombstone carries is positive, hunk-local and absent by default — the added line's own value opens `retiredKey(`, a helper exported from `packages/spec/src/shared/retired-key.ts` whose entire contract is to refuse. Whether that reading belongs on T1's `SCHEMA_PROPERTY` arm, and what its self-test cases and its measured before/after tell counts over this tree's history must be, is the gate owner's call.\n\n## Blast radius while it stands\n\nThe pair reads C5 on a correct declaration, and the only mechanically sanctioned clear is flipping the card to `Clause-②: yes` — writing a widening into a governance ledger that never happened, which the checker's own prose calls the thing the whole clause-② chain forbids. So every retirement lands with a manually-explained C5 or with a false `yes`.\n\nRelated: #15939 (the ruling this was measured under) · #17954 (the PR carrying the measurement) · #16448 (the gate) · #17926 (open, the same false-positive family on T4)"
+}

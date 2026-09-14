@@ -1,0 +1,32 @@
+{
+  "number": 5756,
+  "kind": "issue",
+  "title": "finding(objectql): reap 的每轮上限是「按 (对象, where 作用域)」计的 —— N 个租户覆写把一轮的实际预算变成 (N+1) × 10000 行",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "finding"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T03:59:45Z",
+  "updated_at": "2026-08-08T00:41:51Z",
+  "closed_at": "2026-08-08T00:41:51Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5756",
+  "body": "观察类 finding,来自 #5194 / PR #5753 的实现。**今天没有用户会撞到**,记录在案由 PM 定级。\n\n## 事实(`origin/main` + PR #5753)\n\n`REAP_BATCH_SIZE (500) × REAP_MAX_BATCHES_PER_SWEEP (20)` 的注释说的是「bound one sweep's work」。实际上这个预算是在 `batchedReap()` **一次调用**内计的,而 `reap()` 在有租户覆写时会**多次**调用它(`lifecycle-service.ts:1128` 起):\n\n- 每个声明了 `maxAge`/`expireAfter` 覆写的租户一个 pass(`organization_id: t.tenantId` + 该租户自己的 cutoff);\n- 外加一个全局 pass(`$or: [{organization_id: {$nin: [...]}}, {organization_id: null}]`)。\n\n于是 N 个租户覆写 ⇒ 一个对象一轮最多删 (N+1) × 10000 行,而不是注释承诺的 10000。\n\n## 为什么这不是 #5194 的回归,也不是当下的故障\n\n- 这是 guard 路径(#5535/#5708)原有的性质;PR #5753 只是把同一条分批路径扩展到了无 guard 对象,未改变预算的计法;\n- **长事务问题没有回来**:每次删除仍是单行 by-id,(N+1) × 10000 是「一轮总工作量」变大,不是「单条语句变长」;\n- 触发前提是租户级 retention 覆写(P4 governance,`lifecycle` settings namespace),目前没有部署在用;\n- 每轮之间是一小时的 sweep 间隔,工作量再大也不阻塞别的对象(per-object 失败隔离,leg boundary 检查 abort)。\n\n## 值得记下来的原因\n\n「bound one sweep's work」是文件里写明的承诺,而在租户覆写存在时它字面上不成立 —— 下一个读这段注释的人会按 10000 估算一轮的成本。要么把预算改成跨 pass 共享(一个对象一轮一份 10000,按 pass 依次消耗),要么把注释改成「per (object, scope)」并说明为什么这样是对的。两种都是小改动,但属于语义取舍,不该由本 PR 顺手决定。\n\nPR #5753 的正文里已如实记了这一条。\n\nFound-during: #5194 / PR #5753\n"
+}

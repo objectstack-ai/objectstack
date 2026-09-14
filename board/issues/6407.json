@@ -1,0 +1,35 @@
+{
+  "number": 6407,
+  "kind": "issue",
+  "title": "`Validate Package Dependencies` 在所有 PR 上红:dompurify@3.4.12 新公告 GHSA-55q2-fjhq-7xh7(已有 fix 3.4.13,经 mermaid 传递引入)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T17:01:11Z",
+  "updated_at": "2026-08-07T18:45:11Z",
+  "closed_at": "2026-08-07T18:45:11Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6407",
+  "body": "在 #5475 / PR #6398 的 CI 上撞到,与该 PR 的改动无关(该 PR 只改 `packages/spec/package.json` 的 `scripts` 字段与 tsconfig,未动 `pnpm-lock.yaml` / `pnpm-workspace.yaml` / `osv-scanner.toml`)。按 PD #10 立单,未认领。\n\n## 事实\n\n`Validate Package Dependencies` 作业失败,OSV-Scanner 输出:\n\n```\nTotal 1 package affected by 1 known vulnerability (0 Critical, 0 High, 1 Medium, 0 Low, 0 Unknown) from 1 ecosystem.\n1 vulnerability can be fixed.\n\n| OSV URL                             | CVSS | ECOSYSTEM | PACKAGE   | VERSION | FIXED VERSION | SOURCE         |\n| https://osv.dev/GHSA-55q2-fjhq-7xh7 | 5.1  | npm       | dompurify | 3.4.12  | 3.4.13        | pnpm-lock.yaml |\nExit code: 1\n```\n\n日志:https://github.com/objectstack-ai/objectstack/actions/runs/31199359930/job/92935337053\n\n## 引入路径\n\n`dompurify@3.4.12` 是 **`mermaid` 的传递依赖**(`pnpm-lock.yaml` 中 `mermaid` 的依赖块里 `dompurify: 3.4.12`),不是任何工作区包的直接依赖。\n\n## 处置方向(不预判,交 triage)\n\n`osv-scanner.toml` 的抬头把这一类写得很明确:\n\n> When an advisory HAS a fixed version, you take the fix — that path stays untouched (#4945 was cleared in ten minutes that way). This file exists for the other case only: an advisory with no fix available yet.\n\n本公告 **有 fixed version(3.4.13)**,所以按该纪律**不应**走 `osv-scanner.toml` 豁免,而应把 `dompurify` 顶到 3.4.13。传递依赖,故落点是 override。\n\n⚠️ 两条已被这个仓库付过学费的注意事项:\n\n1. **override 只在 `pnpm-workspace.yaml` 里生效** —— 写进 `package.json` 的 `overrides` 本仓库不读,看起来已提交但什么都没改变,`check:override-consistency` 也看不到。\n2. **上界不要写成 exclusive 的 fixed version(`<FIXED`)** —— 这种钉法在被钉的版本自己出公告的当天自我失效(#5032 是 `undici@>=7.23.0 <7.28.0` 的活体标本,#4961 已提前警告过;brace-expansion 在 5.0.8 上重演过一次)。上界放到 major 边界,只挪替换目标。\n\n## 影响\n\n这是一条 required check,红在 `pnpm-lock.yaml` 上而非任何一个 PR 的改动上,所以它会**卡住此刻起的每一个 PR**,直到有人处理。\n"
+}

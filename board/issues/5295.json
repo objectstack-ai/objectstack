@@ -1,0 +1,33 @@
+{
+  "number": 5295,
+  "kind": "issue",
+  "title": "`system/http-server.zod.ts` 幸存导出 `ServerEvent*` / `ServerCapabilities` / `ServerStatus` 全仓零消费者 —— 响应/能力形状,ADR-0049 判定待做",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:queue"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T16:05:01Z",
+  "updated_at": "2026-08-08T04:47:16Z",
+  "closed_at": "2026-08-08T04:47:16Z",
+  "closed_by": {
+    "login": "qq9340100",
+    "id": 313832657,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5295",
+  "body": "#4938 / PR #5293 退役 `HttpServerConfigSchema` 时的过程观察,PM 代 dev 归档(dev 依范围纪律未捎带处置,正确 —— 这批形状不在该裁决范围内)。基线 `origin/main` @ `3905c00` + PR #5293 diff。\n\n## 事实\n\n`system/http-server.zod.ts` 在容器退役后仍导出 `ServerEventSchema` / `ServerEventType` / `ServerCapabilitiesSchema` / `ServerStatusSchema`(及对应类型)。#5293 的消费者扫描顺带测得:**除本文件与其测试外,全仓(objectstack / spec 之外)零消费者**。\n\n与 #4938 的差别:那九个键是 authorable 配置面(在 `authorable-surface.json` 在册、文档渲染为「作者可写」),这批是**响应/能力词表**(server 实现向外报告的形状)—— 不在 authorable surface,不适用同一裁决,故单独立单。\n\n## 为什么持有而不是直接入队\n\n- 响应形状的「仓内零消费者」证据弱于 authorable 键(与 CSS 变量同型的反驳:契约词表可能是给 host 实现者/外部消费者的参考面);\n- 需要先回答:这三个形状是**对外承诺的 server 实现契约**(那就该有消费它的 conformance/adapter 面),还是 #4938 同一批「声明了没人接」的残留;`plugin-hono-server` 是否实现/报告这些能力是关键测量,本单未做;\n- v17 不卡它,错过窗口的代价是零(非 breaking 的观察)。\n\n处置候选(未裁):补消费者(adapter conformance)/ ADR-0049 退役 / 降级为纯参考类型。发现分诊轮按过时前提检查后定级。\n\n关联:#4938、PR #5293(消费者扫描证据)、ADR-0049。"
+}

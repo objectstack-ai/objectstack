@@ -1,0 +1,36 @@
+{
+  "number": 6080,
+  "kind": "issue",
+  "title": "翻译契约 pages 无组件文案面:.strict() 四键且 title/subtitle 归 page:header,卡片/KPI 文案无键可写;dashboards.widgets 同按 id 定位却有 title/description 翻译位",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "qq9340100"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T18:26:15Z",
+  "updated_at": "2026-08-08T00:33:32Z",
+  "closed_at": "2026-08-08T00:32:16Z",
+  "closed_by": {
+    "login": "qq9340100",
+    "id": 313832657,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6080",
+  "body": "Part of objectstack-ai/hotcrm#1004\n\n下游应用(hotcrm,平台依赖 `@objectstack/* 17.0.0-rc.3`)在修复过程中发现:页面组件的用户可见文案(卡片标题、卡片描述、KPI 块 label)在翻译契约里**没有任何键位**,zh/ja/es 语言包写不进去(strict 拒收),运行时也无处可读——而同一契约里形状几乎相同的 `dashboards.widgets` 是有翻译面的。\n\n## 契约现状(rc.3)\n\n`node_modules/@objectstack/spec/dist/translation.zod-*.d.ts`:\n\n```\npages: Record( name, { label?, description?, title?, subtitle? } )   // .strict()\n```\n\n- 四个键、`.strict()`——任何额外键都被拒;\n- `title` / `subtitle` 的语义是 **`page:header`**(header 实例没有稳定 id,页面名是唯一能够到它的键;下游 `test/i18n-references.test.ts` 的注释与断言均按此口径);\n- 于是 `page:header` 以外的组件文案**没有翻译位**,值链是 `*.page.ts` 字面量直通 `dist/objectstack.json`。\n\n## 不对称证据\n\n同一契约中仪表盘组件**有**翻译面:\n\n```\ndashboards: Record( name, { label?, description?, actions?, widgets? } )\nwidgets:    Record( id,   { title?, description? } )                  // 按 id 定位\n```\n\nwidget 按 `id` 定位即可翻 title/description;page 的组件同样有稳定 `id`(`ai_briefing`、`kpi_revenue_won` …),却没有对应的 `components` 面。两棵几乎同形的 UI 组件树,一个能翻一个不能——更像 spec 侧缺一个面,而非下游用法问题。\n\n## 下游实测面(从 dist 产物统计,非源码 grep;基线 hotcrm main = 86010ffb)\n\n8 个页面,12 处用户可见英文字符串在 zh/ja/es 下无法本地化:\n\n```\nsales_home_page (10)\n  quick_create.title        \"Quick Create\"\n  my_recent_items.title     \"Recent Items\"\n  key_metrics.title         \"Key Performance Indicators\"\n  kpi_revenue_won.label     \"Revenue (Won)\"\n  kpi_deals_won.label       \"Deals Won\"\n  kpi_pipeline_value.label  \"Pipeline Value\"\n  kpi_open_leads.label      \"Open Leads\"\n  ai_briefing.title         \"Ask the AI Assistant\"\n  ai_briefing.description   \"Open the assistant panel from the right edge …\"\n  upcoming_events.title     \"Today's Schedule\"\nlead_detail_page (1)\n  related_tasks.title       \"Open Tasks\"\nutility_bar_page (1)\n  quick_notes.title         \"Quick Notes\"\n```\n\n`sales_home_page` 是 `isDefault: true`、发给 sales_rep / sales_manager 的落地页:zh-CN 用户登录后页头是「销售看板 / 欢迎回来,…」(有翻译位),同屏的四张卡片、四个 KPI 块全是英文。\n\n## 建议方向\n\n给 `pages` 补组件面,与 `dashboards.widgets` 对齐,例如:\n\n```\npages: Record( name, { label?, description?, title?, subtitle?,\n                       components?: Record( id, { title?, description?, label?, help? } ) } )\n```\n\n(键面按 spec 侧实际组件模型定;下游诉求只是「有稳定 id 的页面组件的用户可见文案要有翻译位」。)\n\n## 关联(下游侧)\n\n- objectstack-ai/hotcrm#1004(本单镜像源,含完整发现过程)\n- objectstack-ai/hotcrm#760(同族:视图切换器 `tabs[].label` 同样无翻译位——两条合起来说明「无翻译位」不是个别键遗漏)\n- objectstack-ai/hotcrm#494(对照:语言包内部键漂移是「有键但漂」,本条是「根本无键」)"
+}

@@ -1,0 +1,36 @@
+{
+  "number": 5955,
+  "kind": "issue",
+  "title": "strictObject 的 history 句夹在「哪个键错了」与「该写什么」之间,在单行 error 显示位上把修法推到 222 字符之后(#5762 实测)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched",
+    "pm:queue",
+    "tooling"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T12:55:34Z",
+  "updated_at": "2026-08-07T16:49:14Z",
+  "closed_at": "2026-08-07T16:49:14Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5955",
+  "body": "#5762 把 `flow-time-relative-descriptor-invalid` 从 warning 升为 error 时实测出来的,记录防丢。**未指派,交分诊定级。** 本条是 #5762 第三问(「zod history 句在 error 显示位的噪音」)里**未在该 PR 内解决的那一半** —— 裁定允许折叠,但干净的修法不在那个 PR 的文件面内(见下)。\n\n## 测量\n\n`strictUnknownKeyError` 的消息结构是(`packages/spec/src/shared/suggestions.zod.ts:320`):\n\n```\nUnrecognized key(s) on <surface>: <keys>. <history>   ← 拼在这里\n[ Did you mean `k` → `canonical`? ]                    ← 修法在最后\n[ \\n  • <guidance 逐条> ]\n```\n\n`history` 是每个 surface 自己声明的一句沿革。以 `TimeRelativeTriggerSchema` 为例,它是 **222 字符**:\n\n> Until #4001 these were dropped silently — the descriptor still parsed and the sweep still bound, so a mis-spelled window or filter produced a trigger that matched nothing (or everything) while reporting itself as configured.\n\n实测 `validateFlowTriggerReadiness` 转发后的 finding 全长(#5496 那个真实描述符,三个 zod issue):\n\n| 用例 | message 长度 |\n|---|---|\n| #5496 原始描述符(`field` + 缺 `dateField` + 标量 `offsetDays`) | 709 |\n| 单个拼错键(`offsetDay`) | 595 |\n| 命中 guidance 的键(`schedule`) | 779 |\n| 无未知键(只违反「恰好其一」) | 316 |\n\n对比第 1 行与第 4 行:**history 句是这条 finding 近 1/3 的长度**,且它的位置在「`field` 错了」与「`Did you mean field → dateField?`」**之间**。\n\n## 为什么现在才碍事\n\nCLI 把 finding 打成**单行**(`packages/cli/src/commands/validate.ts:141`):\n\n```js\nconsole.log(`  • ${f.where}: ${f.message}`);\n```\n\n在 warning 块里,读者可以整段跳过。#5762 之后这条规则进入 **error 块**,作者必须据此动手 —— 而修法(`Did you mean …`)落在 709 字符的最末。history 讲的是「#4001 之前会怎样静默失败」,对**正在修的这个人**没有动作价值。\n\n`history` 的设计初衷是好的:让「以前会静默剥离」这件事可追溯。问题只在**渲染顺序与消费位置** —— 它被拼在消息中段,而消费方之一是单行 error 显示位。\n\n## 为什么没在 #5762 内修\n\n四条路都不干净,PR #5952 正文已记录:\n\n1. **消费者侧正则剥离** —— 要在 `packages/lint` 里重述生产者的消息结构(`Unrecognized key(s) on …: …. ` + history + ` Did you mean …?`),正是 `validate-flow-trigger-readiness.ts` 模块注释声明要避免的「契约的第二份拷贝」,也违反 contract-first(消费者容忍换不来正确性)。\n2. **按长度截断** —— `Did you mean` 在末尾,截断恰好切掉最有用的部分,比不截更糟。\n3. **消费者查生产者拿 history 原文** —— 拿不到:`strictObjectDeclarations()`(`shared/strict-object.ts`)与 `directAliasTables()`(`shared/alias-table-registry.ts`)都**刻意不进 barrel**,是内部审计接缝,且前者无 schema 身份可匹配。\n4. **生产者侧改渲染** —— 干净,但影响面是 spec 的**授权错误契约对外变更**:全仓 62 个 `strictObject` 站点 / 293 处 `history:` 声明,以及跨包钉死这些文案的测试。属独立 PR + 独立拍板。\n\n## 候选方向(供分诊/拍板)\n\n- **A. history 排到消息末尾**(`… keys. Did you mean …? <history>`)。最小改动、修法前置,信息一句不丢。代价:所有钉死完整消息顺序的测试要跟着改。\n- **B. history 只在 `guidance`/rename 都无话可说时才拼**。噪音只在「有明确修法」时消失,但规则变得依赖分支、可解释性下降。\n- **C. 结构化返回**,由消费方决定渲染(单行位丢 history,完整报告位保留)。最正确也最贵:zod 的 error map 只能返回字符串,要另开通道。\n- **D. 不改,承认单行 error 位不适合承载沿革**,由消费者改用多行渲染(CLI 把 message 折行/分段)。改的是 `packages/cli` 而非 spec,影响所有 finding。\n\n倾向 **A** —— 它不删任何信息(#5762 裁定的「保留原始信息可达路径」自动满足),只把「对正在修的人有动作价值的部分」排到前面,且是四条里唯一既不新增分支也不新增通道的。\n\n关联:#5762(实测出处)、PR #5952(记录了完整推理)、#4001(history 机制的来源)、#5593(`strictUnknownKeyError` 直调点迁移 —— 不同关切:机制迁移,非消息版式)。\n"
+}

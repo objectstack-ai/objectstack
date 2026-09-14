@@ -1,0 +1,34 @@
+{
+  "number": 6489,
+  "kind": "issue",
+  "title": "[sweep] Two user-visible labels the authoring contract cannot express a translation for (#5377 #5728)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:queue",
+    "target:v17"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T01:48:34Z",
+  "updated_at": "2026-08-08T05:34:15Z",
+  "closed_at": "2026-08-08T05:34:15Z",
+  "closed_by": {
+    "login": "qq9340100",
+    "id": 313832657,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6489",
+  "body": "Sweep card (maintainer-directed, 2026-08-07). One claim, one PR, two `Fixes`.\n\n## Admission criterion\n\n> A **user-visible label** that the platform otherwise translates, which the **authoring contract cannot express a translation for** — the author has no legal way to write the localized value.\n\n| # | Surface | Gap |\n|---|---|---|\n| **#5377** | view tab labels (`tabs[].label`) | no translation key and no resolver — the list-page tab bar is untranslatable in every locale |\n| **#5728** | `component.zod.ts`'s `I18nLabelSchema` key | declared as a plain string, while **3 platform pages author inline multilingual maps at 31 sites** — i.e. real authoring already exceeds the declaration |\n\nBoth are authoring-surface gaps, and both are `target:v17`. #5728 is the sharper one: the declaration is already contradicted by in-repo authored metadata, so either the sites are wrong or the schema is.\n\n## Explicitly NOT members (same topic, different review face)\n\n- **#5199** (`report` / `dataset` have no translator at all) — that is **runtime translator wiring**, not an authoring-surface widening. Different mechanism, different reviewer question; it stays its own card.\n- **#4426** (flow / workflow authorable label + node translation contract) — currently `pm:on-hold`; a held card may not ride a sweep.\n\nRecording the exclusions because \"i18n\" is a *topic*, not an admission criterion — bundling by topic is exactly what the same-class rule forbids.\n\n## Direction (state per member)\n\nEach member widens the authoring surface (add the key + resolver / accept the inline map form) **or** rules the current authoring wrong and corrects the 31 sites. #5728 cannot be settled without deciding which side is authoritative — say which, with the site count as evidence.\n\n## Scope discipline\n\n- **Zero changes beyond the two members**; `git diff --stat` corresponds to the checklist.\n- A widened schema may not shrink the refusal surface: shapes that are genuinely invalid keep rejecting, verbatim.\n- Out-of-scope findings filed separately per PD #10.\n\n## Landing constraints\n\nTouches `packages/spec` generated baselines ⇒ os-regen four-step序; `check:authorable-surface` green; ⛔ never hand-edit the anchor. If the ruling lands on \"correct the 31 sites\", the platform-page edits ride the same PR and appear in the checklist.\n\n## Review shape\n\nBy checklist: one line per member — surface | what an author can write today | what they can write after | which side was ruled authoritative.\n\nFiled unassigned. Member issues keep `pm:queue` but are **excluded from batch selection while this card is open**; both close with the PR."
+}

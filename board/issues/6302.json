@@ -1,0 +1,35 @@
+{
+  "number": 6302,
+  "kind": "pull_request",
+  "title": "fix(service-datasource): datasource fail-fast 认得「工作区未构建」这个成因 (#5794)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T13:28:58Z",
+  "updated_at": "2026-08-07T13:54:20Z",
+  "closed_at": "2026-08-07T13:54:18Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-08-07T13:54:18Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/6302",
+  "body": "Fixes objectstack-ai/objectstack#5794\n\n## 前提复核(先做的一步)\n\nissue 正文锚在 `:687-701`;当前 `origin/main`(`dbe92a7e1`)上该文件已长到 796 行,\n这段代码在 **`:754-758`** —— 按 issue 自己的提示以内容定位,措辞一字未变,**前提成立**。\n\n仓库里还有一份独立佐证:`scripts/check-dev-prereqs.mjs`(#5795 / #5863)的头注释逐字写着\n\n> `- STILL LIVE. The only actionable line suggests two fixes that are both WRONG for this cause`\n> `... A separate services-lane issue off #5726 teaches that message to recognise the unbuilt`\n> `cause; this gate stops dev before it is reached.`\n\n那个 \"separate services-lane issue\" 就是本单。\n\n## 抛出值上到底有什么(实测,不是猜)\n\n判据要「结构化信号优先」,前提是先知道抛出值上真实可读的是什么。在**本 worktree**\n(装了 node_modules、没 build)实测三种形状:\n\n| 触发方式 | `err.code` | `err.message` 首行 |\n|---|---|---|\n| ESM `import('@objectstack/driver-sql')` | `ERR_MODULE_NOT_FOUND` | `Cannot find module '…/driver-sql/dist/index.mjs' imported from …` |\n| CJS `require('@objectstack/driver-sql')` | `MODULE_NOT_FOUND` | `Cannot find module '…/driver-sql/dist/index.js'` |\n| 包目录整个不在 | `ERR_MODULE_NOT_FOUND` | `Cannot find package '@objectstack/driver-sql' imported from …` |\n\n(第三行就是 issue 正文引的那种形状。)三种都带结构化 `code`。\n\n同时发现:这个信号**原本在到达消息之前就被丢掉了**。`attemptConnect` 的末尾 catch 只\n把 `errMsg(err)` 传给 `handleFailure`,而 `handleFailure` 的签名收的是 `reason: string`\n—— 字符串化的那一刻 `err.code` 就没了。所以本 PR 除了换文案,还要把**抛出值本身**\n传下去。\n\n## 改了什么\n\n新增 `packages/services/service-datasource/src/connect-failure-remedy.ts`:把 fail-fast\n报错的**收尾句**按成因分成两支,两段文案 + 为什么这么写的理由都放在这一个文件里。\n\n- **判据复用 `@objectstack/types` 的 `isModuleNotFoundError`**,不另起一份。那是\n  framework#3265 起这个判断的唯一所有者(CLI 的 optional-plugin 守卫、`requires`\n  能力解析器都走它);再抄一份就有权和它分叉,而分叉的方式恰好就是把 ESM 的\n  `Cannot find package` 误判成崩溃 —— framework#1595 那个 bug 本身。\n  它先看 `err.code`、再退回文本匹配。文本那一支在这条路径上**不是备胎**:factory 的\n  `sqlite-wasm` 和 `mongo` 两个 arm 会 catch 掉 import 失败、`new Error(...)` 重抛,\n  把原 message 插进去而**丢掉 code**,那两个 arm 到这里只剩文本信号。\n- **新消息只给一个正确修法,而且不提那个逃生开关** —— 连「别用它」都不提。点名一个\n  逃生舱就是它被用掉的方式:一个已经卡住的人会去找最短的那行看起来能让他继续的话。\n  这与同包 `datasource-pool-support.ts`(#5714 / #5931)、与 `check:dev-prereqs`\n  (#5795,它自己的 pin 断言红字里修法只出现一次)是同一条消息纪律。\n- 用 `pnpm install && pnpm build` 的完整形而不是光 `pnpm build`:`ERR_MODULE_NOT_FOUND`\n  分不出「装了没构建」和「根本没装」,合起来这一条对两种都对 —— 和 `check-dev-prereqs`\n  对无 `node_modules` 工作区的选择一致。\n\n### 实际输出(用真实的 `bootCritical` default datasource 跑出来的)\n\n改之前 / 其它成因(**逐字未动**):\n\n```\ndatasource 'default': connect failed — connect ECONNREFUSED 127.0.0.1:5432. (declared\nboot-critical by the host — … ⇒ fail-fast per ADR-0062 D5). Fix the datasource\nconfiguration, or set OS_ALLOW_DRIVER_CONNECT_FAILURE=1 to boot anyway and serve errors\nuntil it is reachable.\n```\n\n改之后 / 未构建成因:\n\n```\ndatasource 'default': connect failed — Cannot find module\n'…/@objectstack/driver-sql/dist/index.mjs' imported from …. (declared boot-critical by\nthe host — … ⇒ fail-fast per ADR-0062 D5). The driver package could not be LOADED at all\n— it is not installed, or its build output is missing. That is a build precondition, not\na datasource fault: the configuration is fine, and no boot-time override can make a\ndriver that does not exist answer a query. Run `pnpm install && pnpm build`, then start\nagain.\n```\n\n收尾句之前的部分(datasource 名、底层原因、绑定对象清单、ADR-0062 D5 的裁定)一字未改。\n\n## 零行为变化\n\nfail-fast 的判定与时机、抛出的错误类型(仍是 plain `Error`)、保留的连接状态与上报给\nengine 的 `markDatasourceUnavailable`、以及设了 `OS_ALLOW_DRIVER_CONNECT_FAILURE` 时的\n降级启动路径与横幅 —— 全部不变,并且都单独钉住了。\n\n## 反向验证(方向是**先**预判再跑的)\n\n预判:把分类关掉(让 `connectFailureRemedy` 恒返回通用文案),**新的未构建 pin 应该全红,\n而所有「其它成因逐字不变」与「零行为变化」的 pin 应该全绿** —— 因为通用文案没被这次改动碰过。\n\n实测与预判一致:\n\n```\nFAIL … > by err.code alone: ERR_MODULE_NOT_FOUND with an unrecognisable message\nFAIL … > by err.code alone: CJS require() reports MODULE_NOT_FOUND\nFAIL … > by message alone: ESM's `Cannot find package`, no code\nFAIL … > by message alone: the factory-wrapped optional-driver form, no code\nFAIL … > the real unbuilt-worktree shape names the build fix and nothing else\n Tests  5 failed | 60 passed (65)\n```\n\n红的正好是「两个判据」那一组的 5 条,其余 60 条全绿。两点值得记下来,免得下一位读成别的:\n\n1. `keeps everything ABOVE the remedy` 这条**没有**变红,而且它就该不变红 —— 它只断言\n   共享前缀,而分类开关碰不到前缀。\n2. `isUnbuiltWorkspaceFailure` 的那组单测也**没有**变红 —— 我关掉的是**分派**,不是\n   分类器本身。也就是说分类器的 pin 和分派的 pin 各自独立承重,不是一组的复读。\n\n## 测试\n\n新增 20 条 pin,分四组:两个判据(code / message 各有覆盖)、其它成因逐字不变、\n零行为变化、以及分类器本身的单测(含两条负例:真连接失败、以及 `ERR_DLOPEN_FAILED`\n的原生 addon ABI 不匹配 —— 那是要 rebuild,不是工作区没构建,必须不被认成未构建)。\n\n```\npnpm --filter @objectstack/service-datasource test     Test Files 12 passed (12)   Tests 264 passed (264)\npnpm --filter @objectstack/service-datasource typecheck  tsc --noEmit — clean\npnpm --filter @objectstack/service-datasource build      CJS/ESM/DTS build success\npackages/runtime(4 个 datasource 测试文件)                Test Files 4 passed (4)     Tests 67 passed (67)\ncheck:nul-bytes / check:empty-changeset / check:engine-double-contract\ncheck:error-code-casing / check:type-check-coverage       全部 OK\n```\n\n## 消费半径已扫\n\n改的是 `handleFailure` 的消息,凡是跑到这条路径的包都读它,所以按调用者而不是按改动的\n包来扫。全仓 grep 那句通用文案,`packages/services/service-datasource` 之外没有任何测试\n钉它;唯一的另一处出现是 `packages/objectql/src/driver-connect-errors.ts` 的\n`DriverConnectError` —— 另一个包、另一个类、另一条路径,本 PR 未触及(见下)。\n消费方 `packages/runtime` 的 4 个 datasource 测试文件跑通,日志里能直接看到凭据失败与\n不受支持驱动这两个成因的消息**逐字未变**。\n\n## 刻意划出去的边界\n\n- **降级横幅(设了 `OS_ALLOW_DRIVER_CONNECT_FAILURE` 那一支)未改。** 那一支不给建议,\n  它描述的是使用者已经主动选进去的状态;而且 fail-fast 这句不再推销那个开关之后,\n  未构建这个成因基本就到不了那一支了 —— 承重的修法在 fail-fast 这边。\n- **`packages/objectql` 的 `DriverConnectError` 未改。** 它带着同样的两句建议,但属于\n  另一个包的另一条路径(driver 已注册、其 `connect()` 拒绝),而未构建的工作区里 driver\n  根本构造不出来、到不了那里。它是否真能被模块解析失败命中,我**没有实测**,所以不在\n  本 PR 里顺手改,按 Prime Directive #10 另立观察类 finding。\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_015a5qkLzpGXhLL2F5gvJ7dD)_"
+}

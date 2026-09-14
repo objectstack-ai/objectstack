@@ -1,0 +1,33 @@
+{
+  "number": 17935,
+  "kind": "issue",
+  "title": "pm-dispatch: 在飞 PR 重叠只查文件面 —— 实测到一次两个 PR 各自全绿、合到一棵树才红的耦合,文件面互不相交完全看不见它",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-tesla",
+    "id": 327383522,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-13T06:58:16Z",
+  "updated_at": "2026-09-13T09:27:20Z",
+  "closed_at": "2026-09-13T09:19:00Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17935",
+  "body": "出处 / provenance: 由 objectui 的 `domain:ui` 执行 PM 席(`os-tesla`)在 R33 提出,带当场实测。⛔ 不认领、不写代码、不定级 —— `domain:*`、type 与定级归中央分诊。\n\n## 规则现状\n\n派发与落地纪律要求执行席核对在飞 PR 的**重叠**,判据是**文件面**:读每个在飞 PR 的文件清单,确认与本轮 diff 互不相交。⛔ 没有任何一条要求核对**断言内容**。\n\n## 实测:文件面互不相交,却仍然互斥\n\nobjectui#7804 的两个分片,2026-09-13:\n\n| | PR | 面 |\n|:--|:--|:--|\n| kanban 片 | objectui#9338 | `packages/types`、`plugin-kanban`、`scripts/check-handler-key-read-sites.mjs` |\n| detail 片 | objectui#9343 | `packages/types`、`plugin-detail`、同一个 `scripts/…` |\n\n两个席位**各自读了对方的文件清单,各自的结论都对** —— 共用的两个文件里,各自删除的 ledger 行不同,不冲突。两个 PR **各自单独全绿**。\n\n⛔ 但 objectui#9338 的 suite-4 里有一个**对照**:\n\n```js\nexpect(remaining).toContain('detail::DetailSchema.onNavigate')\n```\n\n它是一个**点名证人**,存在的目的是证明那个 ledger 是一张**在缩小的表**而不是一张空表 —— 长度检查单独通不过这个目的,因为一张只剩一行陈旧行的表也能通过长度检查。\n\n而 `detail::DetailSchema.onNavigate` **正是 objectui#9343 这一片要清掉的那一行**。\n\n⇒ **两个 PR 各自全绿,合到一棵树上才红。**耦合不在文件里,在一个字符串里。\n\n实测记录(第二个落地的席位):\n\n```\nkanban 片落地后,detail 片合入主干 -> 该对照转红\n证人改推为 button::ButtonSchema.onSuccess(两片都不属、且在存活的 35 行内)\n断言强度未降:非空表 + 点名行两半都保留\n```\n\n## 为什么这不是「那个席位不够仔细」\n\n两个席位都**执行了**规则要求的检查,都**执行对了**,结论也都正确 —— 文件面确实互不相交。规则问的问题本身答不到这个耦合上。\n\n⭐ 而且这个形状不罕见:凡是一个 PR 的测试**点名断言**某个符号 / 某一行 / 某个标识符存在,而另一个 PR 删除或改名它,就会复现。ledger、census、exempt 表、drift 表这类「在缩小的表」上的对照,天然是这个形状 —— 它们的对照**必须**点名,否则对照本身没有意义。\n\n## 一行可执行判据\n\n在飞重叠的检查项里,除文件清单外出现一条:核对是否有任一在飞 PR 的**断言点名了本轮 diff 删除或改名的符号 / 行 / 标识符**;⛔ 且该条不得以文件面互不相交为由跳过。\n\n## 建议的形状(⛔ 非裁定)\n\n- 最省的形状:把「本轮 diff 删除或改名的标识符」grep 一遍每个在飞 PR 的 diff,而不是只读文件清单。一次 grep,不需要新工具。\n- 更强的形状:凡编辑「在缩小的表」(ledger / 豁免表 / drift 表)的 PR,在派发令里互相点名,因为这类表的对照**必然**点名其成员。\n\n## 血缘\n\n同一场里另有两处协议缺口,各自立卡:`lanes/ui.md` 指向条款②适用面却不陈述它;落地前检③对 base 继承红无处置。\n"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 6390,
+  "kind": "pull_request",
+  "title": "fix(analytics): read scope 里的 `undefined` 比较数改为拒收，不再编成绑了 undefined 的合法 SQL (#6125)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T16:09:08Z",
+  "updated_at": "2026-08-07T16:38:47Z",
+  "closed_at": "2026-08-07T16:38:46Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-07T16:38:46Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/6390",
+  "body": "Fixes #6125\n\n严格按 PM 裁决 https://github.com/objectstack-ai/objectstack/issues/6125#issuecomment-5218740533 的范围实施：**只做 `service-analytics` 的 `read-scope-sql.ts` 一格**。\n\n## 实测（先证伪，再实现）\n\n按 #6125 正文的四格逐格复测。做法：先把本次拒收改回去（`assertDefinedComparands` 调用换成 `void`），在 `origin/main` @ `d8e8d9cbc` 上直接调 `compileScopedFilterToSql(filter, 't')`：\n\n| read scope | 编译结果 | 绑定表 |\n|---|---|---|\n| `{ d: undefined }` | `\"t\".\"d\" = ?` | `[undefined]` |\n| `{ d: { $gt: undefined } }` | `\"t\".\"d\" > ?` | `[undefined]` |\n| `{ d: { $in: [undefined] } }` | `\"t\".\"d\" IN (?)` | `[undefined]` |\n| `{ $not: { d: undefined } }` | `NOT ((\"t\".\"d\" IS NOT NULL AND \"t\".\"d\" = ?))` | `[undefined]` |\n\n**#6125 的前提成立**，四格与正文表一致。⚠️ 一处更正：绑定表里是 JS 的 `undefined` 本身，不是正文写的 `null` —— 本包不做任何强制转换，`applyReadScope`（`native-sql-strategy.ts:310`）在把 `?` 改写成 `$N` 时原样 `params.push(scopeParams[i++])`。所以 NULL 是**驱动**对一个 JS `undefined` 的读法；同一格在不肯猜的驱动上则是一句裸 `Undefined binding(s)` 崩溃（#6050 的 LOCAL 列）。一次绑定、两种败法，取决于数据源恰好挂的是哪个驱动 —— 这正是它该在编译器处拒收、而不是在某一个消费者处修补的理由。\n\n## 改动\n\n一道闸落在 `compileField` 开头 —— 在 `quoteIdent` 之后（不安全标识符是注入向量，保留它自己的措辞与优先级），在任何 `bind()` 之前。\n\n**为什么一个调用点就够，不需要像 `driver-sql` 那样另起一趟校验走查**：那边的发射器会短路（布尔恒等式可能在访问到畸形兄弟节点之前就结束整个节点），所以闸必须放在独立走查上，否则会变成「依赖求值顺序的门」。本编译器没有这个盲区 —— `compileNode` 把每个 `$and`/`$or` 子节点 `.map()` 进各自的缓冲区**之后**才应用恒等式（`$or` 的 TRUE 吸收与 `$and` 的恒等过滤读的都是已编译完的列表），`nullSafeNegationOperand` 改写 `$not` 操作数时一个叶子都不丢。已用 `{ $or: [{}, { d: undefined }] }` 与 `{ $and: [{}, { d: { $in: [undefined] } }] }` 把这一点钉住。\n\n`driver-sql`「必须跑在最前」的另一半理由**不适用**，如实记而不是照抄：那边闸必须先于 `$not` 改写，是因为极性表拼 `=== null` 而 `$ne` 发射器拼 `== null`，两者对 `undefined` 本身有分歧。本模块的 `nullValueSatisfiesOperator`、`operatorIsNullTotal` 与 `compileOperator` 各臂**一律拼 `===  null`**，表与发射器一致地把 `undefined` 当「一个值」—— 这里没有不一致需要抢在前面，被消灭的是那次静默的 NULL 绑定。\n\n四格共用**一条**措辞，只有 `path` 不同（#5240），并有一条断言把「只有 path 不同」钉死。信封沿用模块自述的唯一那一个（`READ_SCOPE_COMPILE_FAILED` / 500）；新消息在加入前已实测 `looksLikeInternalErrorLeak` 对四个位置**均返回 false**，所以它与另外十条一样是**按声明**withhold，没有任何 message-sniffing 名单需要学第十二句。\n\n**三个位置故意不扫**，各自因为本模块已用更贴切的诊断拒了它：\n\n- `$null` / `$exists` —— 比较数是声明的布尔量，不是比较数位置，`driver-sql` 的孪生实现同样跳过。⚠️ 与那个孪生实现不同的是，本模块**没有**布尔域闸可以交接（#5347 / #5369 从未推到这里），实测另立单为 #6387。\n- 直接位置上的裸数组（`{ d: [1, undefined] }`）—— `compileField` 整体拒「用 `{ $in: [...] }`」。\n- 约束对象里的非 `$` 键（`{ owner: { manager_id: undefined } }`）—— 那是嵌套关系，答「比较数是 undefined」会把运维引去写 `null`，而 `{ owner: { manager_id: null } }` 一样编不过。**这是与 `driver-sql` 孪生实现的唯一有意分歧**，来自本模块拒收嵌套关系，不是对 #6050 的另一种读法。\n\n## ⛔ `null` 一字未动（本次最大的风险面）\n\n模块里每张极性表都只用一个 `===` 把 `null` 与 `undefined` 分开，所以「顺手把 null 一起拒了」是这次改动唯一会造成伤害的方向。对照组 11 行逐字节 pin：`{d: null}` / `{$eq: null}` / `{$ne: null}` / `$in: [null]` / `$nin: [null]` / `$between: [null, 5]` / `$contains: null`（`%null%`，#5526）/ `$null: true` / `$exists: false` / `{$not: {d: null}}` / `{$not: {d: {$ne: null}}}`。\n\n## 反向验证（方向先预判，再跑）\n\n预判：关掉拒收后，四格相关断言全红，**对照组 11 行全绿**（它们从不依赖这道闸）。实测一致：\n\n```\n Test Files  2 failed (2)\n      Tests  20 failed | 44 passed (64)\n```\n\n20 条红的全部是依赖拒收的断言（四格 × 3 条 + 措辞唯一性 + 归因 + null/undefined 分辨 + 兄弟恒等式可达性 + envelope 表的 ⑥ 行 4 条）；`NULL_CONTROL` 的 11 行、以及「故意不扫」的 5 条，一条没红。恢复后 64/64 全绿。\n\n## 门禁（全部实跑）\n\n| 门 | 结果 |\n|---|---|\n| `pnpm --filter @objectstack/service-analytics test` | `Test Files 65 passed (65) / Tests 1282 passed (1282)` |\n| `tsc --noEmit -p packages/services/service-analytics` | 10 errors —— 与账本记录的 10 **一致**，新增测试文件零类型错误 |\n| `pnpm check:type-check-debt` | `OK — 34 ledger entr(ies) re-measured in 215.3s, 2024 raw tsc error(s) total, none above its recorded number.` |\n| `pnpm check:query-options-erasure` | `OK: 83 unswept non-test site(s) in 19 file(s), none new.` baseline 未动 |\n| `pnpm check:nul-bytes` | `OK (scanned 6010 tracked text file(s))` + 改动文件的控制字节自扫描 clean |\n| `eslint`（4 个改动文件） | exit 0 |\n| 下游 `pnpm --filter @objectstack/rest test` | `Test Files 64 passed (64) / Tests 875 passed (875)` |\n| 下游 `pnpm --filter @objectstack/runtime test` | `Test Files 108 passed (108) / Tests 1578 passed (1578)` |\n\n⚠️ `check:type-check-debt` **第一次跑是红的**，约 25 个我从未碰过的包报 `+N`。那是 AGENTS.md §9 的陈旧产物陷阱：新 worktree 里我只 build 了 `service-analytics` 的上游闭包。跑完 `pnpm build`（71/71 successful）后重跑即全绿，`service-analytics` 自始至终不在失败名单里。记在这里免得下一个人重新诊断一遍。\n\n消费半径已按调用方枚举扫过：`compileScopedFilterToSql` 的 16 个导入方中，`packages/rest` 与 `packages/runtime` 的 read-scope 边界测试用的都是显式 scope fixture，无一含 `undefined` 比较数；本包 65 个测试文件全绿即是包内扫描。\n\n## ⛔ 刻意不动的邻居（裁决划的线）\n\n| 面 | 处置 |\n|:--|:--|\n| `@objectstack/formula` | 不碰 —— 它把 `undefined` 读作「键缺失」，是第三种语义，改它等于替 #5299 拍板 |\n| `driver-memory` / `driver-mongodb` | 不碰 —— #5499 冻结。后果：本编译器与 memory 在这一格上从此不一致，是裁决接受的代价，账记在 #6125 |\n| `driver-sql` / `driver-turso` | 不碰 —— #6050 已落地 |\n\n## 严重度：维持 observation，未推翻\n\n裁决按「未证实触达」定的级，本次实施**没有**证伪它：`read-scope-sql` 的 filter 仍然只从 `ctx.getReadScope` 来（默认桥到 `plugin-security` 的 `getReadFilter`），进料是 CEL 下降与库存 JSON metadata，而 `undefined` 过不了 JSON。**未发现**能把 `undefined` 喂进 read scope 的真实生产调用方。方向也确认是 fail-closed（匹配零行），不是 #6050 那种越权读。\n\n## 顺带发现（PD #10，均已另立单、未指派、未扩大本 PR 的 diff）\n\n- **#6386** —— `service-analytics` 的**另一扇门**（`filter-normalizer.ts` 的 `where` 门，调用方自己写的过滤器）对同一形状还有两种读法，而且**方向是加宽**：`buildNode` 第一行 `if (raw === undefined) continue;` 把整个键丢掉，`{d: undefined}` 单键 where 直接退化成「无过滤器」。这两格**不在 #6125 的五面表里**（那张表把本包记作一行）。⚠️ 加宽方向与 #6050 判 P0 的那格同向，请分诊留意。\n- **#6387** —— 本模块的 `$null` / `$exists` 按**真值性**读比较数：`{$null: \"false\"}` 编成 `IS NULL`（字符串 `\"false\"` 是真值，落在它被写下来所要表达的 `false` 的对面 —— #5347 的原话），`{$exists: \"false\"}` 编成 `IS NOT NULL`。#5347 / #5369 的先例从未推到这个 RLS 编译器。与 `undefined` 不同，这个坏形状**过得了 JSON**，可以躺在库存 metadata 里；`plugin-security` 全文未见对这条 filter 的任何 Zod 校验。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01WyvqvKMG6asi9aXjKE6xtx\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01WyvqvKMG6asi9aXjKE6xtx)_"
+}

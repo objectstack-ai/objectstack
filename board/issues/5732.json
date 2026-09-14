@@ -1,0 +1,33 @@
+{
+  "number": 5732,
+  "kind": "issue",
+  "title": "ADR-0087 里另外两处「松散键抬进声明块」的 lift 仍是无条件遮蔽 —— #4923 的按值裁决刻意没覆盖它们",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "finding"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T02:35:58Z",
+  "updated_at": "2026-08-08T00:41:49Z",
+  "closed_at": "2026-08-08T00:41:49Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5732",
+  "body": "观察类发现,实施 #4923(PR #5731)时顺手清点,**未修、不在该单范围内**。今天没有用户会撞到,故只记录不排期。\n\n## 事实\n\n#4923 的维护者裁决把 `renameKey` / `renameConfigKey` 遇「两个拼法同时存在」的处置改成**按值拆分**:等值删冗余 + 发 notice,异值双保留交给 strict 门点名双键。`liftNotifySourceShape` 按 issue 点名一并跟进。\n\n`conversions/registry.ts` 里还有**两处**结构不同、但同样以「规范/声明的一侧赢,另一侧原样遮蔽」收场的分支,它们**没有**跟着动,而且是刻意的:\n\n| 位置 | 形状 | 当前分支 |\n|---|---|---|\n| `liftWaitEventConfig`(`WAIT_EVENT_CONFIG_LIFTS`) | 松散 `config.duration` 等 → 声明块 `waitEventConfig.timerDuration` | `waitEventConfig` 已有值则不抬,松散键原样留下 |\n| `connector_action` 的声明块 lift | `config.connectorId` → `connectorConfig.connectorId` | `cc[key] != null` 则 `continue`,松散键原样留下 |\n\nPR #5731 在 `liftWaitEventConfig` 的注释里写明了为什么不扩张,并在 `conversions.test.ts` 对应用例上留了同样的说明,免得下一个读者以为是漏改。\n\n## 为什么它和 #4923 不是同一个问题\n\n- #4923 判的是**一个槽的两种拼法**(同一个 dict 里 `object` vs `objectName`),两边是同级的、1:1 的;\n- 这两处是**跨位置搬迁**:松散 `config` 这个**位置本身**才是退役的东西,而且 `WAIT_EVENT_CONFIG_LIFTS` 是**一个 target 对多个候选名**(`timerDuration` 的候选有 `duration` 等),「等值就删」在多候选下要先定义「和谁比、删几个」。\n\n所以按 #4923 的口径直接套过来是**不成立的**,需要单独判一次。\n\n## 待裁定的问题(若认为值得动)\n\n1. 松散候选与声明块的值**结构相等**时,是否也按无损卫生删掉松散键 + 发 notice?\n2. 多候选情形下,等值比较的对象是「声明块的现值」还是「第一个 present 的候选」?被判定等值的候选是删一个还是删全部?\n3. 不等时保留松散键——这一半已经是现状,strict 契约也已按此拒绝,应该无需变更。\n\n## 现状为何不算缺陷\n\n松散键留下后由收紧后的 `wait` / `connector_action` 契约拒绝,并带处方;也就是说**最终结果是响的、可行动的**,只是元数据在静止态没被清干净(和 #4923 修掉的那一半同源的卫生问题,程度更轻)。没有「今天能跑、17 上硬停」的可达回归——那正是 #4923 之所以要修的理由,而这两处不具备。\n\n## 相关\n\n- #4923 / PR #5731(本发现的来源;裁决与实现)\n- #4001 批 9(把这两个 config 契约收紧的批次)\n- ADR-0087 D2\n"
+}

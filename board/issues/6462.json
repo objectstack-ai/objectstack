@@ -1,0 +1,37 @@
+{
+  "number": 6462,
+  "kind": "issue",
+  "title": "spec 契约:multi:true 批量更新上 beforeUpdate 的 per-row 载荷可变语义(#5574 裁决 B 的 contract-first 前置)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:dispatched",
+    "pm:queue",
+    "target:v17"
+  ],
+  "assignees": [
+    "qq9340100"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T23:14:01Z",
+  "updated_at": "2026-08-08T03:41:50Z",
+  "closed_at": "2026-08-08T03:41:50Z",
+  "closed_by": {
+    "login": "qq9340100",
+    "id": 313832657,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6462",
+  "body": "#5574 的维护者裁决(2026-08-06 两级批复:裁决评论 + 全舰队决策箱「同意」)选定**方案 B —— 把「批量写按行语义为平台契约」(#4800/#4862 既有裁决,after 侧已由 #5038 交付)延伸到 before 型 hook**,并明确 **contract-first 拆分:spec 契约子单先行,engine 实现随后**。本单即该 spec 半边,由 engine-core 席按裁决的拆分指令代立;**domain 标签交分诊落**(预期 `domain:spec`)。\n\n## 本单要定形的(裁决必答项映射)\n\n1. **per-row 载荷可改写语义**:`multi: true` 批量更新逐行派发 `beforeUpdate` 时,每行 hook 拿到 per-row `ctx.previous` 与该行载荷 —— 需定:hook 改写载荷的合法面(哪些改写生效、作用域是否仅限本行)、N 行各自改写后与「一份谓词 payload」原形的关系(分叉合并规则)、`ctx.result` 形状、与单行路径的等价性声明。\n2. **预算护栏的契约面**:`assertBulkPerRowHookBudget` 先例的 spec 级表述(上限、超限行为);engine 侧复用已取的 `priorRows`、⛔ 不二次取数(裁决原文)。\n3. **pin 测试**落 `packages/spec`,与 after 侧按行契约(#5038)同口径对表。\n4. 与 #5748 同写 **bulk-write ADR 附录**(裁决指定)。\n\n## 流程与下游\n\n- 按裁决:PM 复核、维护者否决窗口。\n- **engine 实现半边(engine-core 席)Blocked-by 本单**,spec 定形落地后由该席派发;届时与同接缝卡 #5846(单 id 三读前置行,其 (a) 方向 = 前置读移到 beforeUpdate 之前并绑定)统一编排,避免同一时序被改两次。\n- 下游解锁:hotcrm#779(Blocked-by #5574)。\n\nRefs:#5574(裁决与实测证据)、#4800 / #4862(after 侧既有裁决)、#5038(after 侧交付)、#5748(ADR 附录同伴)、#5846(同接缝编排)。"
+}

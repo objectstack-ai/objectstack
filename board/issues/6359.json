@@ -1,0 +1,38 @@
+{
+  "number": 6359,
+  "kind": "issue",
+  "title": "CI: `TypeScript Type Check` 缺 `fetch-depth: 0`，authorable-surface 删除门把「main 新增的键」误判成「本 PR 删了键」",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "ci/cd",
+    "domain:devx",
+    "pm:dispatched",
+    "priority:p1"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T15:06:07Z",
+  "updated_at": "2026-08-07T22:49:59Z",
+  "closed_at": "2026-08-07T22:49:59Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6359",
+  "body": "## 现象\n\n2026-08-07 15:02，PR #6356（只改 `driver-memory` / `driver-mongodb` 的类型签名，**一行 `packages/spec` 都没碰**）在 `TypeScript Type Check` 上红：\n\n```\n❌ 1 authorable baseline line(s) were deleted without proof (#4650):\n   - ui/BulkActionDef:requiredPermissions — def reachable from the metadata-type roots;\n     the entry at d8e8d9cbc892 was LIVE (never tombstoned).\n```\n\n同一 job 在上面几行已经自陈了原因：\n\n```\n(shallow history — using origin/main tip d8e8d9cbc892 as the baseline anchor)\n```\n\n## 归因（已坐实，非猜测）\n\n`d8e8d9cbc` 是 **main 当前 tip**，提交标题逐字是 `feat(spec): declare requiredPermissions on BulkActionDefSchema (#6257) (#6332)` —— 它**新增**了这个 authorable key。PR #6356 的分叉点是 `4d552af3f`，落后 main 三个提交：\n\n```\nd8e8d9cbc feat(spec): declare requiredPermissions on BulkActionDefSchema (#6257) (#6332)\ncfb549db8 feat(runtime): standalone stack dispatches mysql:// ... (#6344)\nfb363b20e docs(lint): 按实测改正 `normalized` 输入层的三条依据 ... (#6340)\n4d552af3f ← #6356 / #6355 的 base\n```\n\n于是「main 上新增的键」在分支侧看起来就是「本 PR 删掉的键」。方向恰好反了。\n\n## 根因是一行 CI 配置\n\n`resolveSurfaceBase()`（`packages/spec/scripts/build-schemas.ts:1024-1031`）的逻辑本身是对的，注释也写明了意图：\n\n```js\n// Merge base, so a branch behind origin/main is compared against what it\n// FORKED from (keys added on main since then are not \"deleted\" here). In a\n// shallow clone there is no walkable ancestry — fall back to the tip, which\n// on a PR's synthetic merge commit is the merge base anyway.\nconst mergeBase = git('merge-base', 'HEAD', tip);\nconst rev = mergeBase.status === 0 ? mergeBase.stdout.trim() : tip;\n```\n\n括号里那句假设正是失效的一环。而问题在于 **fallback 不是罕见降级，它是这个 job 的常态路径**：\n\n`.github/workflows/lint.yml:378` 的 `typecheck` job 用的是 `actions/checkout@v7` **默认 `fetch-depth: 1`**。加上门自己那句 `git fetch --quiet --depth=1`，`merge-base HEAD origin/main` 在这个 job 里**永远**走不通 —— 每一次运行都落到 tip 分支。\n\n而 tip == merge base 这个假设只在「合并 ref 是对着 main 当前 tip 生成的」时成立。合并 ref 是 PR 打开/更新时生成、随 main 前进而变陈旧的；本例中合并 ref 建于 `4d552af3f`，`--depth=1` 却抓到了 `d8e8d9cbc`，两者不等，门就看见了幽灵删除。\n\n**同一个文件里的兄弟 job 已经踩过并修好了同一个坑**（`.github/workflows/lint.yml:32-38`，ESLint job）：\n\n```yaml\n      - name: Checkout repository\n        uses: actions/checkout@v7\n        with:\n          # The slot-lookup ratchet compares the baseline against its state at\n          # the merge base with main — the only way to see a file being ADDED\n          # to the grandfather list. A shallow clone has no merge base, and the\n          # check would degrade to \"not verified\" on every run.\n          fetch-depth: 0\n```\n\n`typecheck` job 需要的是同一句话，只是失效方式更糟：ESLint 那道门 shallow 时**降级为不校验**，这道门 shallow 时**降级为误报红**。\n\n## 影响面\n\n任何分叉点早于「某个新增 authorable key 的提交」、且此后跑过 `TypeScript Type Check` 的开放 PR，都会在一个自己从未碰过的文件上红。#6332 于本日 15:00 前后合入，此刻 #6356、#6355 均命中。这是一个**假红发生器**：它按 main 的合并节奏周期性地扫过所有在飞 PR，而报错文案（「删除了 authorable 键」「未经证明」）指向的是一个严重的规范违规，读起来完全不像环境问题 —— 排查成本远高于修复成本。\n\n## 建议修法\n\n1. **一行修复**：给 `lint.yml` 的 `typecheck` job 加 `fetch-depth: 0`，注释比照兄弟 job 写明「这道门要走 merge base」。\n2. **把假设变成断言**（建议一并做）：`resolveSurfaceBase()` 的 tip fallback 目前是静默正确性降级。既然 tip ≠ merge base 会产生**假红而非假绿**，这一路不该悄悄执行 —— 要么在 `rev !== tip` 无法判定时明确拒绝把「删除」判成违规（只报 ℹ️ 未验证），要么把「拿不到 merge base」直接变成对 CI 配置的显式报错。这样下次某个 job 忘了 `fetch-depth: 0`，红的是配置本身，而不是无辜 PR 的规范合规性。\n\n## 现场处置\n\n两个 PR 均已 `update branch` 合入 main 重跑，问题消失 —— 但那是绕开，不是修复；本单记录的是 CI 配置本身。\n\n按 PD#10 只记录不修，未认领。"
+}

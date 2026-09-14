@@ -1,0 +1,33 @@
+{
+  "number": 5690,
+  "kind": "issue",
+  "title": "objectui: 两个 dataset 渲染器用逗号 join 维度「名字」列表来匹配 totals grouping —— 与 #5665 同族的最后一处拼接式 key(今天不可达)",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "finding",
+    "repo:objectui"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T00:22:54Z",
+  "updated_at": "2026-08-08T00:41:48Z",
+  "closed_at": "2026-08-08T00:41:48Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5690",
+  "body": "实现 objectstack#5665(PR objectui#3415)、按「消费半径」清扫同文件其余拼接式 key 时发现。#5665 修的是维度**值**的拼接;这一处拼的是维度**名字**,是同一个「靠数据不会包含某字符」的家族里最后一处,单独记为观察项。\n\n### 位置\n\n两个渲染器逐字相同:\n\n- `packages/plugin-report/src/DatasetReportRenderer.tsx:876`\n- `packages/plugin-dashboard/src/DatasetWidget.tsx:482`\n\n```\nconst findTotals = (dims: string[]) =>\n  state.totals?.find((t) => Array.isArray(t.dimensions) && t.dimensions.join(',') === dims.join(','))?.rows;\n```\n\n服务端返回的每个 totals grouping 用它的 `dimensions` 数组来认领:把两个**名字数组**各自 `join(',')` 成一个字符串再比。同形的还有两处 refetch signature(`DatasetReportRenderer.tsx:286` / `DatasetWidget.tsx:284`,用 `|` 和 `,` 拼名字列表)。\n\n### 后果(以及为什么按 observation 记)\n\n`['a,b']` 与 `['a','b']` join 后是同一个字符串,于是一个 grouping 会认领另一个 grouping 的行 —— 小计落到错误的轴上,症状与 #5665/#5473 一致(显示另一组的数字,无报错)。\n\n但**要求某个维度的名字里含逗号**。维度名来自 dataset spec,是标识符,今天走不到:**没有用户会撞到**。所以按 observation 记、不按缺陷记。放上来只是因为 #5473/#5665 的教训恰恰是「假设数据不含某字符」本身不可靠 —— 同一个函数里其余的 key 已经全部不再依赖该假设(PR objectui#3415 之后:bucket id、cell key 都走 `JSON.stringify`),只剩这一处还依赖。\n\n### 若要处理\n\n比较两个名字数组用逐元素相等(或同样 `JSON.stringify` 两边),而不是 join 成字符串;radius 是上述四处,两个包各两处。改动前请一并看 objectstack#5666 —— 那一单是**值**侧的占位符残留,与本单不重叠,但同属「pivot key 编码收敛」这条线。\n\n发现来源:objectstack#5665 / PR objectui#3415。严重度按贵重口径判,我按发现原样记。\n"
+}

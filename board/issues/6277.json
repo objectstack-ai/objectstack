@@ -1,0 +1,35 @@
+{
+  "number": 6277,
+  "kind": "issue",
+  "title": "`vama-write-path-convergence.test.ts` 的 DELETE 用例喂的是引擎会拒绝的调用形状,安全侧前像门在这一半从未被执行",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T12:54:35Z",
+  "updated_at": "2026-08-08T03:04:32Z",
+  "closed_at": "2026-08-08T03:04:32Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6277",
+  "body": "观察类发现(#5492 复现过程中量到,范围外,不在该单修)。\n\n## 事实\n\n`packages/plugins/plugin-security/src/vama-write-path-convergence.test.ts` 的测试替身把一次 by-id delete 构造成:\n\n```ts\nconst opCtx: any = {\n  object: 'crm_contract',\n  operation: 'delete',\n  options: { id: recordId },   // ← 引擎不接受这个形状\n};\n```\n\n而真实引擎的 by-id delete 判定(`metadata-core/src/engine-delete-dispatch.ts` 的 `scalarDeleteId` / `resolveEngineDeleteDispatch`)只认 `options.where.id`:`options.id` 既不是 `by-id` 也不是 `multi`,落到 `reject` 分支。\n\n后果是这一半的覆盖被悄悄掏空:`SecurityPlugin` 中间件的 `extractSingleId`(`security-plugin.ts:2980`)读的是 `data.id` 与 `options.where.id`,对 `options.id` 返回 `null`,于是 **#1994 前像行级写门整段跳过**;该用例里 `write('delete', …)` 实际只经过了 plugin-sharing 中间件的 `canDelete` 门。用例名声称的是「explain 与它所解释的那次写,答案一致」,而写的那一侧在 delete 上只跑了两个门中的一个。\n\n实测(#5492 的复现装置里把同一形状换成 `options: { where: { id } }` 后):同一个 manager 的 delete 从 `ok: true` 变成 403 `(row-level security)` —— 前像门这才被执行到。UPDATE 一侧不受影响(`data.id` 是引擎与安全侧一致认可的 by-id 形状)。\n\n## 为什么按 `finding` 归档而不是缺陷\n\n生产路径没有这个形状(引擎会拒绝),所以今天没有用户会碰到;这是测试装置的保真度问题,不是运行时漏洞。但它属于「绿得不是因为逻辑对,而是因为什么都没执行」的那一类,值得在下一次动这个文件时一起修正。\n\n## 建议修法\n\n测试替身的 delete 分支改用引擎的规范形状 `options: { where: { id } }`;更稳的做法是让替身像其他 fake engine 那样用 `assertEngineDeleteDispatch(options)` 把自己钉在生产者的拒绝面上(`scripts/check-engine-double-contract.mjs` 的既有纪律)。"
+}

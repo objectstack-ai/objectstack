@@ -1,0 +1,35 @@
+{
+  "number": 5234,
+  "kind": "issue",
+  "title": "driver-sql:两类无意义比较对象仍编译成「静默空谓词」—— `$in`/`$nin` 的非 `$field` 对象成员,与 LIKE 族的对象比较值(String 成 `[object Object]`)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T11:20:41Z",
+  "updated_at": "2026-08-07T13:49:14Z",
+  "closed_at": "2026-08-07T13:49:14Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5234",
+  "body": "#5041(PR #5223)实施过程中的范围外发现,只记录不修、不指派。发现者(os-dev)已实测,证据基础同 PR #5223 的探针方法。\n\n## 两个形状\n\n1. **`$in` / `$nin` 列表里的非 `$field` 对象成员**:`{ status: { $in: ['a', { foo: 1 }] } }` —— 编译通过、执行、**静默零行**(该成员绑定为无法命中的值)。PR #5223 已拦下列表成员是 `{$field: ...}` 的情形(按成员序号点名拒绝),但**其它对象成员**仍走旧路。\n2. **LIKE 族(`$contains`/`$startsWith`/`$endsWith`…)遇对象比较值**:被 `String()` 成 `'[object Object]'` 参与匹配 —— 语义上永假,**静默零行**。\n\n## 为什么当时没有一并修(记录 dev 的边界判断,供接手者参考)\n\n- 两者都**不抛错**,与 #5041 实测的「裸 TypeError」不同类:是「过滤器被无意义地应用」,不是「过滤器无法应用」;\n- 失败方向 **fail-closed**(收窄结果集,不存在权限绕过),风险级别低于 #5041;\n- 拓宽守卫会改变今天不崩溃的路径的行为,超出 #5041 的测量范围 —— 按范围纪律停手立案。\n\n## 与既有账的关系\n\n同属 #3948 / #4209 点名的「静默错误答案」类;修法大概率是把 PR #5223 在三个比较发射器上装的形状守卫拓宽到这两类(同一收口点、同一 `INVALID_FILTER` 信封),但需要先测量 `$in` 数组成员与 LIKE 比较值的**合法**形状全集,避免误伤。\n\nRefs:#5041、PR #5223(探针与发射器清单)、#5222(`$field` 的 SQL 实现,v18)、#3948、#4209。"
+}

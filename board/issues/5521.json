@@ -1,0 +1,35 @@
+{
+  "number": 5521,
+  "kind": "issue",
+  "title": "`ScriptContext.user` 是 `unknown` —— 沙箱接缝上没有任何类型把 dispatcher 的 user 形状钉住(observation)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:queue"
+  ],
+  "assignees": [
+    "qq9340100"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T15:04:34Z",
+  "updated_at": "2026-08-07T14:03:41Z",
+  "closed_at": "2026-08-07T14:03:41Z",
+  "closed_by": {
+    "login": "qq9340100",
+    "id": 313832657,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5521",
+  "body": "Observation-class finding,来自 #5372 / PR #5518 的实施。**今天没有用户会撞到**,不影响任何运行行为 —— 记录的是一处\"声明缺席\"而非缺陷。\n\n## 观察到的事实\n\n`ScriptContext`(`packages/runtime/src/sandbox/script-runner.ts:59`)把交给 body 的调用者声明为:\n\n```ts\nuser?: unknown;\n```\n\n而 `ctx.user` 在两个方向上都是有契约的:\n\n- **谓词面**已经有一个 spec 声明的契约 —— ADR-0068 D1 的 `EvalUser`(`packages/spec/src/identity/eval-user.zod.ts`),`formula/stdlib.ts` 的 `buildScope` 正是把它挂在 `current_user` / `user` / `ctx.user` 三个别名上;\n- **body 面**在 PR #5518 之后由单一生产者 `packages/runtime/src/security/actor-user.ts` 构造,其身份内核就是同一个 `createEvalUser`。\n\n也就是说值已经统一了,但**类型系统对此一无所知**:`unknown` 之下,第四个 dispatch 面明天再手搓一个 user 字面量,编译器不会说一句话 —— 而\"三个 dispatcher 手搓出三种形状\"正是 #5372 的成因。#5372 之所以能存在几个版本,部分原因就是没有任何声明可以违背。\n\n## 为什么按 observation 归档而不是缺陷\n\n- 运行时形状现在是对的,且有 pin 测试(`packages/runtime/src/action-ctx-user-shape.test.ts` 逐键、逐值断言三条路径相等);\n- 该字段是沙箱的通用接缝(hook 与 action 共用),hook 路径的 `user` 来自引擎 `engineCtx.user`,与 dispatch 面不是同一个生产者 —— 直接把类型收紧成 `ActorUser` 会把 hook 面一起断言进来,需要先核 hook 侧交付的到底是什么形状。这是这条 finding 里唯一真正的工作量,也是它不适合顺手做进 #5372 的原因。\n\n## 可能的方向(未裁决)\n\n1. `ScriptContext.user?: EvalUser`(spec 契约,最小公分母),dispatch 面的传输键作为结构化扩展仍然合法;\n2. 在 runtime 侧导出 `ActorUser` 并声明 `user?: ActorUser | EvalUser`;\n3. 维持 `unknown`,改以闸门(而非类型)约束\"user 形状只有一个生产者\" —— 与 `check:single-authz-resolver` 同形。\n\n需要先测 hook 面实际交付的形状再选。\n\n会话:`session_016FNvXhtSdnEGEfLEsMmvxh`(仅记录,不认领)"
+}

@@ -1,0 +1,33 @@
+{
+  "number": 6519,
+  "kind": "pull_request",
+  "title": "docs(quick-reference): 为 Data Protocol 的 Postgres / Mongo Driver 两行补上参考页链接",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "size/xs",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T03:07:56Z",
+  "updated_at": "2026-08-08T03:32:41Z",
+  "closed_at": "2026-08-08T03:32:40Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-08-08T03:32:40Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/6519",
+  "body": "Fixes #6373\n\n`content/docs/getting-started/quick-reference.mdx` 的 **Data Protocol** 小节里，`Postgres Driver` 与 `Mongo Driver` 两行是纯粗体、没有链接，而它们的参考页一直存在。本 PR 只补这两个链接目标，不写任何新内容。\n\n## 前提复核（不照抄卡片，在 `origin/main` 上实测）\n\n卡片正文的表格没有照抄，全部按当前 `origin/main`（`e6a7e26`）重测：\n\n| 复核项 | 实测结果 |\n| :--- | :--- |\n| 两行仍未链接 | ✅ 第 36 / 37 行仍是 `**Postgres Driver**` / `**Mongo Driver**`，无链接 |\n| 小节行数 | ✅ 标题声明 `## Data Protocol (17 schemas)`，表格第 21–37 行 = 17 行，其中 15 行已是链接 |\n| 目标页存在 | ✅ `content/docs/references/data/driver-postgres.mdx`、`driver-mongo.mdx` 均在 |\n| 源文件逐字对应 | ✅ 两页页内 Callout：`**Source:** packages/spec/src/data/driver/postgres.zod.ts` / `.../driver/mongo.zod.ts`，与表格 Source File 列一致 |\n\n链接检查器本身也独立佐证了「两行未链接」：改动前对该文件单独跑 lychee，`--dump` 出来的 driver 类链接只有 `driver`、`driver-sql`、`driver-nosql` 三条，没有 postgres / mongo。\n\n**一处与 issue 正文的事实出入（据实记录，不影响结论）**：正文说同小节的 `driver-sql.zod.ts` 行「用的就是同一条拍平规则」。实测 `driver-sql.zod.ts` 其实是**平铺**文件（`packages/spec/src/data/driver-sql.zod.ts`），它的 slug 只是取了 basename，并没有经过拍平。拍平规则本身是真的，但佐证在 `packages/spec/scripts/build-docs.ts:188`：\n\n```\nslug: rel.replace(/\\.zod\\.ts$/, '').replace(/\\//g, '-')\n```\n\n即 `driver/postgres.zod.ts` → slug `driver-postgres` → 路由 `/docs/references/data/driver-postgres`。路由形式两种情况下完全一致，所以结论不变；链接形式沿用同小节既有行，未发明新写法。\n\n## 改动\n\n只改两行（+2 / -2，单文件）：\n\n- `**Postgres Driver**` → `**[Postgres Driver](/docs/references/data/driver-postgres)**`\n- `**Mongo Driver**` → `**[Mongo Driver](/docs/references/data/driver-mongo)**`\n\n## 链接门实测（含检查条数，非空泛通过）\n\n仓库里**没有** `pnpm check:links` 这个脚本 —— 链接门是 `.github/workflows/check-links.yml` 里的 lychee（advisory 车道，`pull_request` 触发）。本地下载了该 action 所钉的同一版本 **lychee 0.24.2**，用与 workflow 完全相同的参数复跑。\n\n⚠️ 针对「无破损链接」可能**空洞通过**的问题，给出条数而非结论：\n\n| 运行 | Total | Unique | OK | Errors | Excluded | exit |\n| :--- | ---: | ---: | ---: | ---: | ---: | ---: |\n| 改动前（全量） | 1699 | 743 | 1480 | 0 | 219 | 0 |\n| 改动后（全量） | **1701** | 743 | **1482** | 0 | 219 | 0 |\n\n差值正好 **+2 Total / +2 OK**，且这两条**逐条点名**落在本文件的第 36、37 行：\n\n```\n[200] file:///.../content/docs/references/data/driver-postgres (at 36:5)\n[200] file:///.../content/docs/references/data/driver-mongo (at 37:5)\n```\n\n（Unique 保持 743 不变是对的：这两个页面本来就被 `driver.mdx` 等页面链过，新增的是**引用**而非新目标。）\n\n本文件确实在扫描面内、而非被跳过：单独对 `quick-reference.mdx` 跑该门，报 `120 Total / 118 Unique / 119 OK / 0 Errors / 1 Excluded` —— 门实打实读了这个文件的 120 条链接。\n\n## 反向验证（先声明预期，再执行）\n\n**执行前声明的预期**：把 Postgres 那条指向一个故意不存在的目标，lychee 在 `--root-dir content` + `--fallback-extensions mdx,md` 下解析不到文件，应报 **ERROR**（而非 OK、也非 EXCLUDED），汇总从 `0 Errors` 变成 `1 Error`，退出码非零（workflow 里 `fail: true` 即红）。此处不存在方向反转 —— 该门直接解析文件目标，目标缺失就是明确的红。\n\n**实测结果，与声明一致**：\n\n```\n🔍 1701 Total 🔗 744 Unique ✅ 1481 OK 🚫 1 Error 👻 219 Excluded     (exit 2)\n\nIssues found in 1 input. Find details below.\n\n[content/docs/getting-started/quick-reference.mdx]:\n[ERROR] file:///.../content/docs/references/data/driver-postgres-NOPE (at 36:5) | File not found. Check if file exists and path is correct\n```\n\n门点名了**本文件、本行号**，证明它确实在盯这个文件，而不是默认放行。随后已还原（`git checkout -- content/docs/getting-started/quick-reference.mdx`，从暂存区恢复；⛔ 全程未用 `git stash`）。\n\n## 其它门\n\n| 门 | 结果 |\n| :--- | :--- |\n| `pnpm check:quick-reference-counts` | ✅ `13 section(s), every \"(N schemas)\" heading matches its table.`（本次只改链接、不增删行，计数不受影响） |\n| `pnpm check:doc-authoring` | ✅ self-test 通过 + `365 files clean — no bare metadata literals.` |\n| `pnpm check:nul-bytes` | ✅ `scanned 6112 tracked text file(s); ... no raw ASCII control bytes.` |\n| 本文件控制字符自扫 | ✅ `grep -naP '[\\x00-\\x08\\x0b\\x0c\\x0e-\\x1f\\x7f]'` 无命中 |\n\n**`pnpm lint` 未在本地跑，据实说明**：`eslint.config.mjs` 里 `mdx` 出现 0 次，五个 `files:` glob 全是 `**/*.{ts,tsx,mts,cts,js,jsx,mjs,cjs}` —— ESLint 在结构上**看不到** `content/docs/**/*.mdx`。本地为它做一次全仓 `pnpm install` 只会得到一个与本 diff 无关的结果，且本仓 CI 的家族门是跑在 ESLint job 里的、无论如何都会在本 PR 上全量执行，所以以 CI 上该 job 的实际结论为准。\n\n## 刻意未做\n\n- ⛔ **未碰 `connector-auth`**。它与本单**方向相反**：schema 存在但参考页**不存在**，需要写一整页（独立写作量），处置留待分诊。合并处理会把一张两行的单变成一张写页的单。\n- ⛔ 未碰本文件其它小节（Kernel / Cloud 的计数是 #6319 的面，已由 PR #6357 落地）。\n- ⛔ 未新增任何参考页；`content/docs/references/` 是 `build-docs.ts` 自动生成面，本 PR 零改动。\n- ⛔ 未碰 `content/docs/releases/`。\n\n## Changeset\n\n纯文档改动，不影响任何已发布包的行为 ⇒ 无 changeset，按约定加 `skip-changeset` 标签。\n"
+}

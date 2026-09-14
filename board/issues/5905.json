@@ -1,0 +1,34 @@
+{
+  "number": 5905,
+  "kind": "issue",
+  "title": "objectql `having-filter.ts` 是「无值字段」语义的第五个求值面,且带着 #5299 同款的早退守卫(`$nin` / `$notContains` 不在豁免名单)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T11:21:37Z",
+  "updated_at": "2026-08-07T20:42:27Z",
+  "closed_at": "2026-08-07T20:42:27Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5905",
+  "body": "出自 #5298「第一棒:成本清单」的消费点清点(纯读调查),范围外发现,按 Prime Directive #10 记录,不指派。\n\n## 事实(origin/main `5c94f833c`,静态对读)\n\n`packages/objectql/src/having-filter.ts` 用**自己的一套 arm** 求值 HAVING 子句,算子词表与 `FilterCondition` 同一套(`having-filter.ts:35-37` 列了 `$eq $ne $gt $gte $lt $lte $between $in $nin $exists $null $contains $notContains $startsWith $endsWith $regex`)。它是 `driver-sql` / `driver-memory` 的 mingo 面 / `driver-memory` 的参考匹配器 / `formula.matchesFilterCondition` 之外的**第五个求值面**,#5146 / #5299 / #5298 的清点里都没有出现过。\n\n两处与 #5299 记录的 `driver-memory` 分叉**形状完全相同**:\n\n1. `having-filter.ts:112`\n   `if (value === undefined && op !== '$exists' && op !== '$ne' && op !== '$null') return false;`\n   —— 豁免名单里没有 `$nin`(也没有 `$notContains`),与 #5299 正文点名的 `memory-matcher.ts` 早退守卫逐字同构。\n2. `having-filter.ts:137`\n   `case '$notContains': if (typeof value !== 'string' || value.includes(target)) return false;`\n   —— 值不是字符串(null / undefined)一律判否,与 #5299 记录的 `driver-memory` 读法一致、与 `formula` 相反(`formula/src/matches-filter.ts:183` 判是)。\n\n另外 `having-filter.ts:126` 的 `$nin` 本体 `if (Array.isArray(target) && target.includes(value)) return false;` 对 `value === undefined` 本来是「通过」的,是上面那条早退守卫先把它拦成了「不通过」—— 与 #5299 描述的机制一模一样。\n\n## 为什么按 `finding` 记(不代 triage 定级)\n\nHAVING 求值的输入是**聚合输出行**,measure 键通常总是存在,所以 `value === undefined` 这一格今天不太容易被真实用户撞到;`$notContains` 对 null 值那一格则取决于聚合是否产出 null measure。没有量化真实 dashboard 里出现这两种形状的频率。按「观察类」记,不因为「看着小」就压着不报 —— 定级请按 triage,不代表我判断它低。\n\n## 与既有账的关系\n\n- **#5299** 裁的是「字段没有值」三格的 canonical 读法,正文只清点了 `driver-memory` 与 `formula`。若那次裁决落地时只改这两家,本文件会成为**新的少数派**,并且是唯一没被任何 conformance 表覆盖的一面(`FILTER_LOGIC_CASES` 不驱动 HAVING 路径)。\n- **#5298** 的裁决(非否定路径 NULL-safe)方向上要求 `$nin` / `$notContains` 对无值行**成立**,与本文件现行答案相反。\n- 建议:#5299 / #5298 落地时把这一面一并对齐,或明确裁定「HAVING 面按聚合语义另算」并把理由写在文件头 —— 两条都行,别默认它不存在。\n\n## 关联\n\n#5299(driver-memory vs formula 的同款三格)、#5298(非否定路径 NULL-safe 裁决)、#5146 / PR #5296(极性表)、#5239(`FILTER_LOGIC_CASES` —— 今天不覆盖 HAVING 路径)。\n"
+}

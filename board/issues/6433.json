@@ -1,0 +1,35 @@
+{
+  "number": 6433,
+  "kind": "pull_request",
+  "title": "fix(objectql): multi update 的 SET 载荷剥掉非 id 的 `data.id` (#6262)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T18:30:41Z",
+  "updated_at": "2026-08-07T19:01:12Z",
+  "closed_at": "2026-08-07T19:01:10Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": "2026-08-07T19:01:10Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/6433",
+  "body": "Fixes objectstack-ai/objectstack#6262\n\n按分诊评论「**Scope as queued = route A only**」执行:只做 A 案(派发层剥离),**零 verdict 变更**,B 案(响亮拒绝)不在本次范围。\n\n## 问题\n\n`update(o, { id: { $in: ['a','b'] }, title: 'x' }, { multi: true })` 的**派发**自 #5748 裁 A / PR #5919 起就是对的:算子对象不是主键,不再遮蔽派发阶梯,声明的 bulk intent 照做,调用落到 `driver.updateMany`。#5919 没做、#5922 也按 PD #10 明确留在范围外的,是**载荷**那一半。\n\n实测复现(worktree @ `origin/main`,记录型 driver 驱动真实引擎,新增测试在打补丁前的失败断言原文):\n\n```\nAssertionError: SET payload was {\"id\":{\"$in\":[\"a\",\"b\"]},\"title\":\"x\"}: expected true to be false\n```\n\n与 issue 正文的 PROBE 逐字一致:驱动被要求把一个序列化的算子对象写进**每一条命中行**的主键列。五个后端会对这件事各给一个答案(#5240 / #4434 家族),而在接受它的后端上,命中行的身份不可逆地丢失。\n\n## 修法\n\n`packages/objectql/src/engine.ts` 的 update **multi 分支载荷组装点**(分支第一件事,`encryptSecretFields` 之前):载荷带 `id` 键时剥掉,并按 `warn` 记一条点明后果与两种正确写法的日志。\n\n论证只有一句:**走到 multi 分支本身就意味着 `resolveEngineUpdateDispatch` 答了 `multi`**,即它在**两个** id 来源里都没找到真值标量 id —— 所以此刻 `data.id` 里的任何东西(算子对象、数组、`null`、假值标量)都是引擎**已经裁定不是主键**的值。剥离是同一个问题的同一个答案多用在一层上,不是第二个答案:不是主键的东西,也就不该坐在主键列上。\n\n## 必答项一:与 #5922 / #5748 的语义一致性\n\n**与 #5748(裁 A / PR #5919)一致 —— 这是它的另一半,不是它的回退。**\n#5748 把 `data.id` 送进了和 `where.id` 同一个标量测试,答案是「这个 `data.id` 不是主键」;它据此做了一件事(不再遮蔽阶梯,`multi` 照做)。本 PR 据同一个答案做第二件事(不再留在主键列位置)。`ENGINE_UPDATE_DISPATCH_CASES` **一行未动**,`operator object in data.id WITH multi:true` 仍是 `'multi'`,`engine-update-dispatch.test.ts` 用真实引擎逐条驱动的 25 例全绿(该文件 36/36)。反过来的 B 案要反转这条刚落地的 case,那才是对裁 A 的部分回退。\n\n**与 #5922 一致 —— 它留下的正是这条轴,而不是校验轴。**\n#5922 收口的是「声明值为标量的字段」上的算子对象,走 `record-validator`;`id` 被 `SKIP_FIELDS` 按设计跳过(引擎自有列),因为这一格的裁定写在**派发层**。若改在 record-validator 里拒收同一个调用,就是对同一个问题给出第二个答案 —— 正是 `engine-update-dispatch.ts` 这一族模块被抽出来防止的事(#4550 / #4434)。本 PR 落在派发已给出的答案上,`record-validator.ts` 一字未动,两条轴仍各管各的。\n\n**「一个问题一个答案」不被破坏的可检验形式**:唯一的判定仍只有 `resolveEngineUpdateDispatch` 一处;剥离**不重新问**「这是不是 id」,而是消费分支本身携带的答案(`kind === 'multi'` ⇒ 无 id)。代码里没有第二个标量测试、没有 `??` 兜底、没有手抄的 `if`。\n\n## 必答项二:B 案(响亮拒绝)将来若裁定,要动哪里(只答不做)\n\n1. `packages/metadata-core/src/engine-update-dispatch.ts` —— 判定本体。`resolveEngineUpdateDispatch` 需要新增一个 `reject` 前置:`data.id` 存在且非标量真值 **且** `options.multi` 为真 ⇒ `reject`(今天这条落在 `if (options?.multi) return { kind: 'multi' }`)。同文件的 `ENGINE_UPDATE_DISPATCH_CASES` 里 `operator object in data.id WITH multi:true` 与 `array data.id with multi:true` 两例的 `expect` 由 `'multi'` 改为 `'reject'`,模块头 point 2 的叙述需要重写(「不再遮蔽阶梯」变成「非标量 `data.id` 本身即拒绝理由」)。新拒绝语句大概率需要一条**独立**的 message 常量,而不是复用 `ENGINE_UPDATE_REJECT_MESSAGE`(「既没点名一行也没声明 bulk」和「声明了 bulk 但载荷里塞了个非 id 的 id」是两种不同的作者错误,共用一句话会把诊断打回原点)。\n2. `packages/objectql/src/engine.ts` —— 生产者侧。`update()` 末尾那条 `else { throw new Error(ENGINE_UPDATE_REJECT_MESSAGE) }` 是 hook 改写后**重问**判定的地方,需要按新 message 分叉;本 PR 加的剥离块整块删除(拒绝之后没有载荷可剥)。\n3. 拒绝面的连带:所有钉在 `assertEngineUpdateDispatch` 上的**假引擎**自动跟进(这正是该模块存在的理由,不需要逐个改);但 `scripts/check-engine-double-contract.mjs` 的 DEBT 账本里那 133 条**未钉**的替身会开始与生产者分歧,需要重新测量。\n4. 消费者侧诊断:REST/flow `update_record` 把新拒绝映射成 4xx 而非 500 —— 属 `packages/rest` 的 `mapDataError` 与 automation 侧执行器,拒绝语义落地时才有意义。\n5. 需要新裁决的原因(不是工作量):B 是对 #5748 裁 A 的部分回退,而 A 与 B 在**同一个业务场景**上给用户不同的东西 —— A 让「声明了 bulk intent 就照做」继续成立(作者多写了个 `id` 谓词,行集由 `where` 决定),B 认为这种调用形状本身即作者错误、必须响亮。这是产品判断,不是实现判断。\n\n## 变更清单\n\n| 文件 | 改动 |\n|:---|:---|\n| `packages/objectql/src/engine.ts` | multi 分支载荷组装点新增 `id` 剥离 + 论证注释(+51) |\n| `packages/objectql/src/engine-update-multi-payload-id.test.ts` | 新增,11 例(+227) |\n| `.changeset/engine-update-multi-payload-id-strip.md` | 新增,`@objectstack/objectql` patch |\n\n⛔ 未触碰:`ENGINE_UPDATE_DISPATCH_CASES` / metadata-core 全包、`record-validator.ts`、非 multi 路径、事务区(#6403)、自增、剥离时序区(#5591 / #6343)、summary、`content/docs/releases/`。\n\n## 测试\n\n新增 `packages/objectql/src/engine-update-multi-payload-id.test.ts`,11 例三组:\n\n1. **PROBE 钉死**:算子对象 / 数组 / `null` 的 `data.id` + `multi` ⇒ `updateMany` 载荷**无 `id` 键**,`title` 照常落地;调用方传入的载荷对象不被就地改写(剥离走浅拷贝,与本路径其它 strip 一致)。\n2. **无 id 与 `where.id` 侧不变**:`multi` 且载荷从未带 id ⇒ 载荷与行域 AST 双双原样;`where: { id: { $in: [...] } }` 仍由 AST 选行,载荷不动。\n3. **假值标量与单 id 路径**:`{ id: 0 }` / `{ id: '' }` + `multi` 的**判定**仍是 `multi`(#5747 / #5748 语义,原样);单 id 路径(`data.id` 标量压过 `multi`、`where.id` 标量、以及 #5748 的「算子 `data.id` 旁有标量 `where.id`」头号形状)全部 `driver.update`,载荷**按原样**送达 —— 主键走独立参数,载荷里的 `id` 是冗余而非破坏,本 PR 不动它,并按现状钉死,使将来任何扩大剥离范围的动作都必须是刻意的。\n\n### 反向验证(方向:红,如预测)\n\n肢 A = 去掉剥离。这次的测量顺序天然就是这个实验:测试文件先在**未打补丁**的 `origin/main` 上跑,`engine.ts` 一字未改 —— 5 例红,且失败信息直接印出问题载荷:\n\n```\nTest Files  1 failed (1)\n     Tests  5 failed | 6 passed (11)\n\nFAIL  the PROBE shape: operator-object data.id + multi:true reaches updateMany with NO id in the payload\nAssertionError: SET payload was {\"id\":{\"$in\":[\"a\",\"b\"]},\"title\":\"x\"}: expected true to be false\n```\n\n打补丁后同一文件 11/11 绿。注意 `does not mutate the payload object the CALLER handed in` 一例在补丁**前**就是绿的(引擎当时根本不剥,自然不会改到调用方对象)—— 它是对修法的护栏,不是复现用例,如实记在此处而非充作反向证据。\n\n同一次运行还证明了「只有这 5 例动了」:补丁前整包 `5 failed | 2327 passed (2332)`,补丁后 `2332 passed (2332)`,总数一致。\n\n### 命令与实测输出\n\n```\npnpm --filter @objectstack/objectql test         → Test Files 141 passed (141) / Tests 2332 passed (2332)\npnpm --filter @objectstack/objectql typecheck    → tsc --noEmit,无输出\npnpm check:engine-double-contract                → OK — 80 pinned, 133 in the DEBT ledger, 4 exempt\nnode scripts/check-nul-bytes.mjs                 → OK (scanned 6070 tracked text file(s))\nnpx eslint (两个改动文件)                          → exit 0\n```\n\n消费半径(multi 分支的下游调用者)另跑:\n\n```\npnpm --filter @objectstack/rest test                 → Test Files 64 passed (64) / Tests 881 passed (881)\npnpm --filter @objectstack/service-automation test   → Test Files 68 passed (68) / Tests 806 passed (806)\n```\n\n合并 `origin/main`(至 `7618ee814`)后按 AGENTS.md §10 重跑:`packages/spec` 在对侧动过,故 `pnpm --filter @objectstack/spec build && check:generated` → `All 10 generated artifacts are up to date`;`objectql` 全量 test + typecheck 复跑仍全绿。\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_019Q7oc7ASjh8yxyS3Yz78We)_"
+}

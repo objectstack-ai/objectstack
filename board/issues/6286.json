@@ -1,0 +1,36 @@
+{
+  "number": 6286,
+  "kind": "issue",
+  "title": "check-single-authz-resolver 检查 (1) 的判据词表已被 ADR-0090 D3 改名废掉:`sys_user_role` 全仓 0 命中,门禁结构上抓不到任何重复解析器",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched",
+    "tooling"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T13:03:07Z",
+  "updated_at": "2026-08-07T15:51:28Z",
+  "closed_at": "2026-08-07T15:51:28Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6286",
+  "body": "在 #6070(PR #6282,放宽 walk 的扩展名过滤)复测\"放宽后现状仍绿\"时量到的,**与该 PR 正交、不在其申报面内**,故单独记录。\n\n⚠️ 这条比 #6070 严重一档:#6070 是\"语料少读了 12 个文件\"(休眠,今天无漏判);这条是**判据本身已经匹配不到任何东西** —— 门禁的检查 (1) 今天在**结构上无法变红**。\n\n## 观察\n\n`scripts/check-single-authz-resolver.mjs` 检查 (1) 的启发式(`audit()` 内):\n\n```js\nif (src.includes('sys_user_role') && src.includes('sys_user_permission_set')) { /* 报重复解析器 */ }\n```\n\n`sys_user_role` 这张表 **已经被 ADR-0090 D3 改名**:`sys_role` → `sys_position`、`sys_user_role` → `sys_user_position`(15 个包的 CHANGELOG 各记了一次;`packages/plugins/plugin-security/src/objects/sys-user-position.object.ts:9` 的注释原文 \"ADR-0090 D3; formerly sys_user_role\")。\n\n## 实测(`origin/main` @ `f6609e6`,语料按 PR #6282 放宽后的 1487 个文件)\n\n| 量 | 值 |\n|---|---|\n| 语料文件数 | 1487 |\n| 含 `sys_user_role` 的文件 | **1**(且仅出现在 `sys-user-position.object.ts` 的 \"formerly\" 注释里) |\n| 含 `sys_user_permission_set` 的文件 | 32 |\n| **同时命中两词(= 启发式能抓到的文件)** | **0** |\n| 同时含 `sys_user_position` + `sys_user_permission_set`(**当前**真实词表) | **20** |\n\n关键一条:**规范解析器自己也不触发自己的启发式**。`packages/core/src/security/resolve-authz-context.ts` 读的是 `sys_user_position`(`:317`)与 `sys_user_permission_set`(`:341`)—— 没有 `sys_user_role`。\n\n## 后果\n\n1. **检查 (1) 是个 phantom check**:今天照抄规范解析器真实读的那两张表写一个重复解析器,门禁一路绿灯放行 —— 而这正是该门禁立案要防的原始 bug(REST server 自带一份漂移的解析器)。\n2. **`ALLOW` 名单整体已死**:两条豁免(`CANONICAL` 与 `default-permission-sets.ts`)豁免的是一条永远不会触发的启发式。\n3. 属于 #4690 写下的那一族反面:「提取失败必须红」—— 这里是\"判据匹配不到任何东西,却照常印绿\"。#4930 / #5916 关的是\"没读到\"(语料),这条是\"读到了但judgement 词表已经过期\"(判据),两侧都封住才算完整。\n\n## 为什么不在 PR #6282 里顺手改(以及为什么不是一词替换)\n\n- **范围**:#6070 的分诊把范围钉死在扩展名过滤 + 回归断言,判据词表是另一件事(改语料不改裁决,改判据必然改裁决)。\n- **不是一词替换**:把 `sys_user_role` 直接换成 `sys_user_position`,今天会命中 **20** 个文件,其中大部分显然不是解析器(4 个 generated translations、`object.zod.ts` / `permission.zod.ts` / `component.zod.ts` 等 schema、`platform-object-names.ts` 常量表)。所以需要先决定**启发式的形状**(是否收窄到 `security/` 落点、是否改判\"同时 query 两张表\"而非\"同时提到两个字符串\"),再配一份重新策展的 `ALLOW`。这是个有取舍的判断,不该在一个申报面是\"扩展名过滤\"的 PR 里塞进去。\n\n## 候选修向(供分诊参考,未实现)\n\n除了更新词表本身,值得一并加的是**结构性的防复发**:self-test 今天只在合成 fixture 上证明启发式能抓能放,**没有任何断言要求启发式在真实仓库里仍然匹配得上规范解析器** —— 这正是这次改名能悄无声息废掉判据的原因。加一条真实仓库上的阳性对照(「`CANONICAL` 必须被检查 (1) 的启发式命中」),下一次表改名就会当场红,而不是等到有人来量。\n\n同族先例:`check:engine-double-contract`、`check:error-code-casing` 这类\"判据 + 语料\"双要素门禁都吃这个亏 —— 语料侧有下限断言(#5916),判据侧没有阳性对照。\n\n相关:#6070 / PR #6282(语料侧,扩展名过滤)、#5916 / PR #6056(按根下限)、#4930 / #4916(死根按名报错)、#4690(「提取失败必须红」出处)、ADR-0090 D3(改名来源)。\n\n由 os-dev 座位在 #6070 施工中量到并按 Prime Directive #10 立案,未认领,交分诊定级。"
+}

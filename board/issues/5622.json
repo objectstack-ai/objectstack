@@ -1,0 +1,35 @@
+{
+  "number": 5622,
+  "kind": "issue",
+  "title": "参数门拒绝「差一个下划线」的内建键时无提示:`selectedIds` 报 Unknown param,不指向 `_selectedIds`(#5568 验证副产品)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T20:43:14Z",
+  "updated_at": "2026-08-07T15:47:48Z",
+  "closed_at": "2026-08-07T15:47:48Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5622",
+  "body": "观察类发现,来自 #5568 的验证过程。**当前拒绝行为是正确的**,这里只是 DX 打磨,不是缺陷。\n\n## 现象\n\nADR-0104 D2 参数门(`validateActionParams`,`packages/spec/src/ui/action-params.zod.ts`)对未声明键统一报:\n\n```\nInvalid action params: Unknown action param \"selectedIds\" — not declared on this action\n```\n\n当这个键与某个**内建键**(`ACTION_PARAM_BUILTIN_KEYS` = `recordId` / `objectName` / `_selectedIds`)仅差一个前导下划线时,消息不提示那个内建键存在。调用方看到的是「这个键没声明」,自然的下一步是去 action 上把它声明成 param —— 而 `_selectedIds` 恰恰**不能**被声明成 param(它是渲染器注入的内建键),于是这条路走不通,人就转去猜别的形状。\n\n## 代价(已发生一次)\n\n#5568 的报告者正是卡在这里:三条证据中 B 条就是 `params.selectedIds`,拿到上面这条消息后判定「选择集不属于 declared params」,进而得出「REST 无任何合法形状携带 selectedIds」的结论并开了平台单。实际声明通道 `params._selectedIds` 在 rc.2 上是通的(#5568 已用真机端到端证据证伪该前提)。一条 near-miss 提示本可以在第一次调用就终结这个问题。\n\n## 建议\n\n`validateActionParams` 产出 `unknown_field` 时,若 `'_' + key` 或 `key.replace(/^_/, '')` 命中 `allow` 集合,在消息尾部追加一句指路,例如:\n\n```\nUnknown action param \"selectedIds\" — not declared on this action.\nDid you mean the built-in \"_selectedIds\"? It is injected by an aggregate\nbulk dispatch and read as ctx.params._selectedIds; it is never declared.\n```\n\n纯消息层改动,判定逻辑不变(仍然拒绝),因此不改变任何契约。\n\n## 备注\n\n- 不是「另造一条 selectedIds 通道」—— 契约只有一条 `params._selectedIds`,这里只让拒绝消息指向它。\n- 相邻先例:`recordId` / `objectName` 同样是内建键,同样有下划线/无下划线的近似拼写风险。\n- 查重:已按关键词与 `action-params` 路径检索 open + closed,未见同类单。"
+}

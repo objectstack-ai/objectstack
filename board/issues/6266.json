@@ -1,0 +1,36 @@
+{
+  "number": 6266,
+  "kind": "issue",
+  "title": "flaky: `cli/src/utils/format.exit-code.test.ts` 把真实计时器的读数硬编码成 19 —— 只有 `elapsed()` 恰好为 0 才绿(#5896 同族,今日已踢红一个不相干 PR)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T12:47:34Z",
+  "updated_at": "2026-08-08T02:06:24Z",
+  "closed_at": "2026-08-08T02:06:24Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6266",
+  "body": "Filed unassigned from #6128 / PR #6248 —— 该 PR 的 `Test Core (3/3)` 被这条用例踢红,而它只改了 `packages/lint` + `packages/formula`。**本单只记录发现,不含修法承诺。**\n\n## 签名\n\n```\nFAIL src/utils/format.exit-code.test.ts > emitJson / emitText — process.exitCode (#4873)\n     > a duration can no longer reach the exit-code slot (#4873)\nAssertionError: expected 20 to be 19 // Object.is equality\n ❯ src/utils/format.exit-code.test.ts:115:31\n```\n\n## 判据(不是猜的)\n\n用例(`packages/cli/src/utils/format.exit-code.test.ts:101-115`,由 #6220 / #4873 引入):\n\n```ts\nconst timer = createTimer();\nconst durationMs = timer.elapsed() + 531;   // 真实墙钟\n…\nexpect(durationMs & 0xff).toBe(19);          // 硬编码\n```\n\n而 `createTimer`(`packages/cli/src/utils/format.ts:158-164`)是真实墙钟:\n\n```ts\nexport function createTimer() {\n  const start = Date.now();\n  return { elapsed: () => Date.now() - start, … };\n}\n```\n\n`531 & 0xff === 19`,`532 & 0xff === 20`,`533 & 0xff === 21`。也就是说这条断言**只有在 `timer.elapsed()` 恰好返回 0 时才成立** —— 而两行之间隔着一次 `await emitJson(...)` 和若干模块工作。runner 上只要跨了 1 毫秒就红,红的数字正好是 `20`,与 CI 的实际输出一致。\n\n本机复现:空载时 6/6 全绿(`elapsed()` 一直是 0);把两行之间的耗时人为拉到 0-2ms 后,200 次里 **133 次**断言不成立。CI runner 比本机忙,所以它先撞上。\n\n## 归属\n\n- 引入于 #6220(`fix(cli): os migrate --json 成功时不再把耗时毫秒当成退出码`),晚于 PR #6248 的分支点,PR #6248 树里根本没有这个文件 —— 它是通过 CI 的 merge ref 进来的,会**踢红任何**当天开出的 PR。\n- 与 #5896 是同一族:「确定性断言按值比较,只有跨毫秒时才会红 —— 一条按运气报警的 pin」。\n- 队列侧的常规处置见 #5810(flaky 签名分诊 / 原样重投)。\n\n## 修法方向(供分诊参考,非承诺)\n\n用例真正想钉的是「Node 把退出码截断到 8 位,所以一个毫秒数会变成看似随机的退出码」。这与计时器无关,把 `durationMs` 换成一个**字面量**即可,断言随之变成确定性的:\n\n```ts\nconst durationMs = 531;      // 一次 `os migrate` 的合理耗时,取字面量\nexpect(durationMs & 0xff).toBe(19);\n```\n\n`timer` 在这条用例里只提供了一个不确定性来源,没有提供任何被测行为 —— `emitJson` 的类型拒绝与 `process.exitCode` 的截断都与它无关。\n\nRefs:#6220 / #4873(引入处)、#5896(同族)、#5810(队列 flaky 处置)、PR #6248(被踢红的 PR)。"
+}

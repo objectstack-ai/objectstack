@@ -1,0 +1,35 @@
+{
+  "number": 6454,
+  "kind": "pull_request",
+  "title": "fix(objectql): 字段 `readonlyWhen` 求值补 `materializeDeclaredFields` —— 服务端第三个接缝 (#4953)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T21:46:21Z",
+  "updated_at": "2026-08-07T22:14:23Z",
+  "closed_at": "2026-08-07T22:14:20Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": "2026-08-07T22:14:20Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/6454",
+  "body": "Part of #4953\n\n维护者 2026-08-06 裁决第 1 条的 **engine-core 份额**:字段 `readonlyWhen` 求值补\n`materializeDeclaredFields`。母单是决策锚点,**不随本 PR 关闭**;flow 触发记录播种\n(services 席)与 objectui 稀疏面文档 / lint 评估不在本 PR 内,#4811 的 null-guard\n闸门扩面按裁决第 3 条要等两处服务端接缝都齐,故本 PR **不触 `packages/lint`**。\n\n## 问题\n\n`materializeDeclaredFields`(#1871 / #4649)只接在两个求值接缝上:\n`evaluateValidationRules`(对象级规则 + 字段 `requiredWhen` + option `visibleWhen`)\n与 `hook-wrappers.ts` 的 hook `condition`。写入路径上的 `stripReadonlyWhenFields` /\n`stripReadonlyWhenFieldsMulti` 把 `{ ...previous, ...data }` 原样交给 CEL。\n\n于是**同一个字段上的两条谓词对「记录是什么」给出相反答案**:`requiredWhen:\nrecord.approved_at == null` 是可用的守卫,同字段的 `readonlyWhen: record.approved_at\n== null` 只要驱动没回读该列就 fault —— 而 `readonlyWhen` fault 是 fail-open,\n作者声明为冻结的字段被照常写入。是否被拦取决于驱动回读了哪些列,作者看不见也控制不了。\n\n## 改动\n\n`packages/objectql/src/validation/rule-validator.ts` 新增 `readonlyWhenBindings()`,\n把 `record`(merged)与 `previous` 两个根过共用的 `materializeDeclaredFields`,单行与\nbulk 两条路径共用;bulk 的行视图按行构造一次(不随字段重复构造),且仅在载荷确实写了\n`readonlyWhen` 字段时才构造。`packages/objectql/src/declared-fields.ts` 的接缝台账\n同步更新(哪些面已物化、哪两面仍稀疏、以及两者的区别是「尚未接线」还是「已裁决保持稀疏」)。\n\n## 前提复核(动手前对 origin/main 逐条实测)\n\n| 前提 | 结论 | 证据 |\n|:--|:--|:--|\n| **P1** `stripReadonlyWhenFields` 未物化,而同文件 `requiredWhen` 已物化 | ✅ 成立 | 改前 `rule-validator.ts` 第 418 行 `const merged = { ...(previous ?? {}), ...data };`(bulk 同形 `{ ...(row ?? {}), ...data }`),对照第 1186 / 1197 行 `materializeDeclaredFields`。#6440 落地后重核形状,该函数只多了 `parent` 形参,合并仍未物化 |\n| **P2** `materializeDeclaredFields` 签名可直接复用 | ✅ 成立 | `(record, fields)`,`fields` 直接传 `objectSchema.fields`,无需第二套实现 |\n| **P3** 语义后果方向 | ⚠️ **主方向成立,另有一格反向** | 见下节实测格子表 |\n\n## 语义后果方向(实测,非断言)\n\n改前的实测网格(稀疏前序行 = 驱动只回读写过的列):\n\n| 谓词 | 改前(稀疏) | 改后(稀疏) | 方向 |\n|:--|:--|:--|:--|\n| `record.b == null` | fault → **放行** | true → **剥离** | ✅ 恢复 enforcement |\n| `previous.b == null` | fault → 放行 | true → 剥离 | ✅ 同上 |\n| `record.b != null` | fault → 放行 | false → 放行 | 结果同,少一条 fault 告警 |\n| `has(record.b)` | false → 放行 | true → **剥离** | ✅ 同向(更严) |\n| `!has(record.b)` | true → **剥离** | false → **放行** | ⚠️ **反向翻转** |\n| `record.a < record.b` | fault → 放行 | fault(`no such overload`)→ 放行 | 不变,fail-open 分支仍活 |\n| `record.stauts`(未声明键) | fault → 放行 | fault → 放行 | 不变(#4649 的线未动) |\n\n**唯一反向格 `!has(record.< 已声明字段 >)` 的处置:实现并钉住,不静默。** 理由:全量绑定下\n`has(已声明字段)` 恒真是 CEL 自身规则,也是 `declared-fields.ts` 自 #4649 起写明的契约\n(「`has()` 守的是**未声明**的键,不是空值;判空用 `!= null`」);它在另外两个已物化接缝上\n早已如此。而且它改前也不是一条保证 —— 在回读全部列的驱动上同一声明从不锁 —— 所以这次是把\n一个取决于存储细节的判定换成确定的 `false`。两种拼写都由测试钉住,`!has` 那条的注释写明\n作者应改用 `== null`(正是 lint null-guard 闸门一直建议的写法)。此格已在报告中单列上报。\n\n## 爆炸半径\n\n- **`parent` 表头不物化**:它是**另一个对象**的行(本函数没有它的声明字段表),且「未绑定」\n  正是 #4889 fail-closed 判定所依赖的信号。测试钉住:未绑定 `parent` 仍判 LOCKED;\n  已绑定但表头缺键仍 fault → fail-open。\n- **对象级 `script` / `cross_field`** 自 #4649 起 fail-closed —— 本改动完全不进\n  `evaluateValidationRules`,测试钉住两者报错文案(`could not be evaluated`)不变。\n- **INSERT**:`readonlyWhen` 剥离本就只在 update 路径(`engine.ts` 注释「INSERT stays\n  exempt」),故本接缝**不存在** insert 格;派发词里的 insert 用例已按实际形状换成\n  「前序行在手但稀疏」这一真正的稀疏典型格,并另加一格钉住「前序行不在手 ⇒ 不物化」。\n- **不捏造**:未读到前序行(引擎未取 / 行已不存在)时保持原状,与\n  `evaluateValidationRules` 的 `groundTruth` 同规则。引擎在对象声明了 `readonlyWhen`\n  时必取前序行(`needsPriorRecord` → `fieldsNeedPrior`),故物化分支是常态分支。\n- **不改调用方对象**:`previous` / `priorRows` 是引擎的 `hookContext.previous`,物化前先\n  浅拷贝,测试钉住原对象不长出 `null` 键。\n\n## 反向验证(方向先写死,再实测)\n\n摘掉两处 `materializeDeclaredFields` 调用(测试不动),预测 6 红 / 137 绿:\n\n```\n × evaluates `record.< declared > == null` on a SPARSE prior instead of faulting through\n × reads the same verdict on a sparse prior as on a total one (the point)\n × materialises the `previous` root too, not just `record`\n × applies on the BULK path identically — one payload, N sparse rows\n × `has(record.< declared >)` is uniformly TRUE — so it locks even on a sparse prior\n × `!has(record.< declared >)` is uniformly FALSE — a lock spelled that way STOPS locking\n Test Files  1 failed (1)\n      Tests  6 failed | 137 passed (143)\n```\n\n(上面引用的用例名里 `< >` 两侧加了空格,以免被 GitHub 正文的 HTML 标签清洗吞掉;源码中为不带空格的尖括号形式。)\n\n实测与预测**逐条一致**(红名单、绿名单、总数)。其中 `!has(...)` 那条的红是**反向**的:\n摘掉物化后字段被剥离、断言的 `{ amount: 999 }` 不成立 —— 这正是上表那一格,PR 按实际方向\n记录而不是套模板。恢复物化后 143/143 全绿。\n\n## 命令输出\n\n```\n$ pnpm --filter @objectstack/objectql test -- --maxWorkers=2\n Test Files  142 passed (142)\n      Tests  2393 passed (2393)\n\n$ pnpm --filter @objectstack/objectql typecheck\n> tsc --noEmit          (无输出,退出码 0)\n\n$ pnpm check:engine-double-contract\ncheck-engine-double-contract: OK — 80 pinned, 133 in the DEBT ledger, 4 exempt.\n\n$ turbo run build --filter='./packages/*' --filter='./packages/*/*'   # 棘轮前置全量 build\n Tasks:    70 successful, 70 total\n\n$ pnpm check:type-check-debt\ncheck-type-check-coverage: OK — 62/77 workspace packages type-checked …\n  ℹ @objectstack/objectql: TEST_DEBT records 355, tsc now reports 345 (-10) …\ncheck-type-check-coverage --re-measure: OK — 34 ledger entr(ies) re-measured, none above its recorded number.\n\n$ node scripts/check-nul-bytes.mjs\ncheck-nul-bytes: OK (scanned 6085 tracked text file(s); … no raw ASCII control bytes).\n```\n\nTEST_DEBT 未抬账(台账 355,实测 345);新增测试代码在 objectql 测试层 tsc 下 0 报错。\n\n## changeset\n\n`.changeset/readonly-when-total-record.md` — `@objectstack/objectql` patch,正文写明这是\n可见行为变化及其两个方向(含 `!has()` 写法不再锁字段与替代写法)。\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_019Q7oc7ASjh8yxyS3Yz78We)_"
+}

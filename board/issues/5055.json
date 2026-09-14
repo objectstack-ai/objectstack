@@ -1,0 +1,36 @@
+{
+  "number": 5055,
+  "kind": "issue",
+  "title": "ADR-0049 enforce-or-remove: ui/widget.zod.ts 全文件 + ui/i18n.zod.ts 五个形状实测无门(#4001 批 16 改判)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:queue",
+    "target:v17"
+  ],
+  "assignees": [
+    "qq9340100"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T01:12:40Z",
+  "updated_at": "2026-08-07T17:54:11Z",
+  "closed_at": "2026-08-07T17:54:11Z",
+  "closed_by": {
+    "login": "qq9340100",
+    "id": 313832657,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5055",
+  "body": "从 #4001 批 16 的门测量拆出。**这不是收紧工作** —— 批 16 已按实测把它们改判为 `no door` 并在台账留行,`.strict()` 对它们零意义(没有 parse,收紧只会把死槽装扮成受校验的活槽 —— #4583 的「更有说服力的谎」)。真正待答的是 ADR-0049 enforce-or-remove。\n\n与 #4988(批 13 的 `touch`/`animation`/`dnd`/`keyboard`/`offline` 22 站点)**同一类**,证据形状一致,可合并处理。\n\n## 实测(2026-08-04,三条独立测量,同一轮跑正负对照)\n\n### `packages/spec/src/ui/widget.zod.ts` —— 9 站点 / 6 个 schema 全部无门\n\n`WidgetManifestSchema` · `WidgetLifecycleSchema` · `WidgetEventSchema` · `WidgetPropertySchema` · `WidgetSourceSchema`(3 个 union 分支)· `FieldWidgetPropsSchema`\n\n1. **无载体键**:`packages/spec/src` 下除 `ui/index.ts` 桶文件外**无任何模块 import 本文件**,所以全仓没有任何 schema 声明过指向 widget 形状的键。`field.widget` 是一个 `z.string()`,命名的是**已注册组件**,从来不指向 `WidgetManifest`。\n2. **图上不可达**:从 24 个 metadata-type 根 + `defineStack` 的 `ObjectStackSchema` 出发的 BFS(4766 节点)一个都够不到;同一轮里 `PageSchema` / `ObjectListViewSchema` 正对照解析为可达,注入合成载体后 6 个 schema 全部翻转为可达 —— 结论是图的事实,不是走图器坏了。\n3. **零 parse**:`objectstack` / `objectui` / `cloud` 三仓中,除本文件自己的单测外没有任何 `.parse()` / `.safeParse()`。objectui 只 re-export 推导出的 TYPE,且**改了名**(`RuntimeWidgetManifest` / `FieldWidgetComponentProps`,objectui#3161 / objectstack#4115),即两边连名字都不再共享。cloud 仓 code search 对全部符号返回 0 命中(正对照:`\"@objectstack/spec\"` 在同仓 345 命中,索引可用)。\n\n### `packages/spec/src/ui/i18n.zod.ts` —— 6 站点中 5 个无门\n\n`I18nObjectSchema` · `PluralRuleSchema` · `NumberFormatSchema` · `DateFormatSchema` · `LocaleConfigSchema`\n\n同样三条:除 `ui/index.ts` 外无 import 本文件的这五个符号(该文件被广泛 import 的只有 `I18nLabelSchema` 和 `AriaPropsSchema`);BFS 不可达;三仓零 parse。\n\n两点值得单独记:\n\n- `NumberFormatSchema` / `DateFormatSchema` **确有载体键**(`LocaleConfig.numberFormat` / `.dateFormat`),但载体 `LocaleConfigSchema` 自己无门,所以整棵子树不可达 —— 是 `no door` 而不是 `no gate`。\n- `I18nObjectSchema` 是一份**被自己文件里的后继取代**的旧词表:同文件 `I18nLabelSchema` 的 JSDoc 明写「i18n 翻译键由框架在注册时按命名约定自动生成,开发者只需给默认语言字符串;翻译走翻译文件,不写内联 i18n 对象」。真正活着的翻译面是 `system/translation.zod.ts`(已在早前批次收紧),它不使用本文件的任何形状。\n- `AriaPropsSchema` **不在此列** —— 它是真门(view / page / page component / dashboard widget / chart / action / SDUI component 共约 30 个 `aria:` 载体),批 16 已按真门收紧。\n\n## 要决定什么\n\n对这 14 个站点(widget 9 + i18n 5),ADR-0049 二选一:\n\n- **A 退役**:删掉词表。声明面缩小,`api-surface` / 文档同步收缩。代价:objectui 的 `packages/types/src/widget.ts` 目前在注释里把自己的运行时类型**锚定在**这些 spec 名字上(「Renamed off the spec's `WidgetManifest` name」),退役后那些注释指向不存在的东西 —— 需要同批在 objectui 侧改注释(本仓只读,得开配套 PR)。\n- **B 给载体**:让它们真的可授权(例如把 widget manifest 提升为一个 metadata type,或挂到某个既有根上)。这是产品意图问题,不是清扫问题 —— 现在没有任何证据表明有人想写它们。\n\n倾向 **A**,理由同 #4988:一个从来没有作者、没有 parse、没有读者的词表,留着的唯一作用是让 AI 作者以为它是可写的面。但这属于产品/协议规划,按 2026-08-04 切线规则不是「作者今天在写的面上的活伤害」,应进 v18 地图而不是抢 v17 窗口。\n\n## 参考\n\n- #4001 批 16(改判来源,台账 ui 段已留行)· #4988(同类,批 13 的 22 站点)\n- ADR-0049 enforce-or-remove · ADR-0078\n- #4583(「精确校验的死槽」这一说法的出处)\n- `docs/audits/2026-07-unknown-key-strictness-ledger.md` ui/ 段\n"
+}

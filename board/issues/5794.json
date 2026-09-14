@@ -1,0 +1,35 @@
+{
+  "number": 5794,
+  "kind": "issue",
+  "title": "datasource fail-fast 不认识「工作区未构建」这个成因 —— 对 ERR_MODULE_NOT_FOUND 仍建议改配置或设 OS_ALLOW_DRIVER_CONNECT_FAILURE=1(两条都是有害建议)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "pm:queue"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T05:48:59Z",
+  "updated_at": "2026-08-07T13:54:20Z",
+  "closed_at": "2026-08-07T13:54:20Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5794",
+  "body": "拆自 objectstack-ai/objectstack#5726(方向 2,分诊当时裁定不作 rider、由 PM 转 services 车道);cli 车道 PM 立单,`domain:*` 标签待分诊座位补(落点 `packages/services/service-datasource`)。查重:`OS_ALLOW_DRIVER_CONNECT_FAILURE` 开放单仅 #5726 自身命中,无重复。\n\n## 现象(#5726 实测,PR #5789 已消掉 CLI 侧放大器,本条现状未变)\n\n在未构建的 worktree 里 boot,`packages/services/service-datasource/src/datasource-connection-service.ts:687-701` 的 fail-fast 输出:\n\n```\n✗ datasource 'default': connect failed — Cannot find package '.../@objectstack/driver-sql/index.js' ...\n  Fix the datasource configuration, or set OS_ALLOW_DRIVER_CONNECT_FAILURE=1 to boot anyway\n  and serve errors until it is reachable.\n```\n\n对「driver dist 未构建」这个成因,**两条建议都是错的**:datasource 配置是好的;设 `OS_ALLOW_DRIVER_CONNECT_FAILURE=1` 只会让一个构建不完整的工作区「启动成功」然后对所有请求报错。正确修法(`pnpm build`)一句没提。这是把有害建议递到正要复现问题的人手里——本地 worktree 正是复现 CI 红的第一现场(CI 里 build 恒在前,永远跑不出这个形态)。\n\n## 修法方向(#5726 正文原案)\n\nconnect 失败的底层原因是 `ERR_MODULE_NOT_FOUND` / `Cannot find package '…/dist/…'` 时,判定为「工作区未构建」,提示 `pnpm build`,⛔ 不再建议改 datasource 配置或设逃生开关。属诊断消息分类,无行为变化。\n\n## 参考\n\n- #5726 / PR #5789(发现现场;CLI 侧放大器已消,触发前提仍在)\n- #5217(同族:`check-i18n-bundles` 把「CLI 没 build」报成 9 个包的 bundle 问题;`一个前置条件 ≠ N 个内容问题`是共同不变量)\n- 实测补充:driver dist 缺失时受影响的 CLI 命令已从 6 条涨到 9 条(#5789 PR 正文有完整对照表)"
+}

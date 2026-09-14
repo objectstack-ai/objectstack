@@ -1,0 +1,36 @@
+{
+  "number": 6095,
+  "kind": "issue",
+  "title": "finding: pnpm override 台账两项体检事实 —— 26/28 条自失效上界形状、3 条 #5835 裁决范围外的空转 override",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "dependencies",
+    "domain:devx",
+    "tooling"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T01:07:59Z",
+  "updated_at": "2026-08-08T01:07:15Z",
+  "closed_at": "2026-08-08T01:07:15Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6095",
+  "body": "观察类记录(observation-class),**今天没有用户会踩到**,故只打 `finding`、不进 `pm:queue`,交 PM triage 定级。\n\n来源:#6046 / PR #6093 落地 `check-override-consistency` 消费者体检时,对 `origin/main`(e3ef52b)的实测副产物。两项事实都已被该体检**持续输出在 CI 里**,本单只是把「要不要动手清」这个问题单独记下来 —— 体检本身是 report-only,不会替维护者做决定。\n\n## 事实一:26 / 28 条 override 的选择器排他上界压在自己 target 的版本线上\n\nAGENTS.md 明文写着「Never write an OSV override's upper bound as the exclusive fixed version」(#4961 / #5032 的教训:`undici@>=7.23.0 <7.28.0` 在 7.28.0 自己出公告那天当场失配)。实测这个形状在本仓是**普遍写法而非个例**:28 条 override 里 26 条命中,包括 better-auth 家族 12 条、以及 minimatch / tar / uuid / postcss / hono / fast-uri / brace-expansion 等。\n\n其中 `@hono/node-server@<2.0.5` -> `^2.0.10` 是严格更差的一种:上界**低于** target 下限,2.0.5 .. 2.0.10 这段谁都不覆盖。\n\n- 危害是**潜伏**的:只有当 target 版本自身出公告、需要往上挪时才发作,发作时 pin 静默失配。\n- 修法按 AGENTS.md:上界放到 target 之上的 major 边界,以后只挪 target。\n- ⚠️ better-auth 家族那 12 条是**预发布兼容 pin**(`pnpm-workspace.yaml` 注释写明 1.7.0 stable 出来就整体放宽),与 OSV 安全 pin 性质不同,是否要一起改由维护者判断。\n\n## 事实二:3 条空转 override 落在 #5835 裁决范围之外\n\n#5835 裁 A 明确保留了 `form-data` / `undici` 两条。实测**空转的其实有 4 条**,除 form-data 外还有:\n\n| override | 依赖树消费者数 |\n| --- | --- |\n| `@tootallnate/once@<2.0.1` | 0 |\n| `react-router@<8.3.0` | 0 |\n| `@sveltejs/kit@<2.69.1` | 0 |\n\n(`undici` 并不空转,有 2 个消费者:`@ai-sdk/provider-utils@5.0.16`、`jsdom@30.0.1`。)\n\n这三条从没被裁决表过态。空转本身是合法的纵深防御姿态,保留零成本;记下来只是因为**在 #6046 的体检上线之前没人看得见它们**,现在看得见了,值得维护者顺手表个态(保留 / 清理),免得下一个 agent 各凭理解处置。\n\n⛔ 请勿在没有裁决的情况下直接删除任何一条 —— #6046 体检的输出里已经带了同样的告诫。\n\n## 参考\n\n- 裁决锚点 #5835;体检落地 #6046 / PR #6093\n- 形状家族源头 #4961、活体标本 #5032\n- 实测复现:`pnpm check:override-consistency`(exit 0,两栏报告)\n"
+}

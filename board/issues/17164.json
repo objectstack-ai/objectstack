@@ -2,8 +2,8 @@
   "number": 17164,
   "kind": "issue",
   "title": "[objectos] CLAUDE.md becomes a pointer to AGENTS.md — measure the pair first, then reduce to the pointer",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "os-justin",
@@ -21,9 +21,13 @@
   "milestone": null,
   "type": "Task",
   "created_at": "2026-09-09T13:49:17Z",
-  "updated_at": "2026-09-10T09:29:33Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-13T11:16:48Z",
+  "closed_at": "2026-09-13T11:16:48Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
   "merged_at": null,
   "comments": 4,
   "locked": false,

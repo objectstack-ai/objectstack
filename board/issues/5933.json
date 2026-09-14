@@ -1,0 +1,36 @@
+{
+  "number": 5933,
+  "kind": "issue",
+  "title": "spec: SettingsManifest 的 SpecifierSchema 新增 `valueDomain` 闭合枚举 —— 声明存在时标准域为执行边界,options 退化为 UI 便利列表(#5712 裁决的 spec 半边)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "qq9340100"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T12:23:22Z",
+  "updated_at": "2026-08-08T03:27:45Z",
+  "closed_at": "2026-08-08T03:27:45Z",
+  "closed_by": {
+    "login": "qq9340100",
+    "id": 313832657,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5933",
+  "body": "Part of #5712(维护者 2026-08-06 裁读法 1;裁决评论预授权本拆分:「若需要 spec 新增带格式校验的 specifier,按 contract-first 拆分转 spec 座位,services 侧跟进」)。spec 半边先行(contract-first),services 半边(#5712)Blocked-by 本单。\n\n## 为什么现行 spec 表达不了裁决\n\n#5712 的 dev 实测(2026-08-06,报告存档于该单):\n\n- `SettingsManifestSchema` 的 SpecifierSchema 值约束位只有 `options` / `pattern` / `min` / `max` / `minLength` / `maxLength`;夹带 `format` 键被 Zod 直接剥掉(parse 后 `undefined`);\n- `pattern` 只能约束**形状**,拦不住形状合法的垃圾值(`Mars/Olympus` 会被放行)——违反「垃圾值响亮拒收」;\n- `options` 补全路线同样违反裁决:见下面的实测陷阱。\n\n于是「options 表 = UI 便利列表,执行边界 = 标准域」这句裁决在 manifest 里没有任何声明位。\n\n## 提案(#5712 dev 的方案 C,services 座位推荐,枚举词表由 spec 座位定夺)\n\nSpecifierSchema 新增可选键 `valueDomain`,**闭合枚举**,例如:\n\n```\nvalueDomain?: 'iana_time_zone' | 'iso_4217_currency' | 'iso_3166_alpha2' | 'bcp47_locale'\n```\n\n语义:声明存在时,**该标准域是执行边界**,`options` 退化为 UI 便利列表(下拉建议,不再穷尽拒绝);未声明时一切照旧(#5131 的 options 穷尽语义对注册表背书类的表保持不变,如 sms/mail 的 provider)。**校验的执行仍在 service-settings**(spec 只声明,不执行)—— spec 侧交付物按本车道纪律:schema + authorable-surface 基线 + pin + 文档。\n\n## ⚠️ 实现陷阱(已实测,直接决定域校验的正确定义)\n\n- **时区域 ⛔ 不可用 `Intl.supportedValuesOf('timeZone')` 当词表**:Node 22(仓基线)上它只有 **418 项 CLDR 规范名子集**,缺 `UTC`(该 specifier 自己的 default!)、缺 `Asia/Kolkata`(在库策展值!)、缺 `Europe/Kyiv` / `Asia/Ho_Chi_Minh` / `US/Eastern` / `GMT` 等。「合法 IANA 时区」的正确定义是 **`Intl.DateTimeFormat` 探针** —— 仓内已有两处先例采用它:`resolve-authz-context.ts:449` 的 `isValidTimeZone`、`localization.manifest.test.ts:33`。\n- **币种域可用 `Intl.supportedValuesOf('currency')`**:实测 162 项,CHF 在、XYZ 不在、9 个在库策展值全在(缺 VED 与金属/基金码,可接受或另断)。\n\n## 真实拉动(创业聚焦轴,实测非断言)\n\n同一个 localization.manifest 里就有三个键需要它:`timezone`、`currency`、`default_country`(第三例:现用 `^[A-Za-z]{2}$` pattern,`ZZ` 照收 —— 同一个洞)。本 issue 源头是真实 env 配置路径(#5204)。\n\n## 相邻但不并入\n\n#5932(min/max/minLength/maxLength 在写入路径全空转)是同一 validatePatch 的另一族缺陷,已单独立案待分诊,⛔ 不作本单 rider。\n\n来源座位:services(会话 `session_015a5qkLzpGXhLL2F5gvJ7dD`);`domain:spec` 标签待分诊座位补。维护者否决窗口:若坚持零 spec 改动,#5712 上有 dev 给出的最小一致态备选(A 仅 currency + timezone 改 description),在该单评论重裁即可。"
+}

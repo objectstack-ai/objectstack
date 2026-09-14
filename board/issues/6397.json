@@ -1,0 +1,35 @@
+{
+  "number": 6397,
+  "kind": "pull_request",
+  "title": "fix(objectql): archive 冷侧 keep prune 尊重 #4747 的 teardown abort 位",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T16:47:52Z",
+  "updated_at": "2026-08-07T17:15:28Z",
+  "closed_at": "2026-08-07T17:15:25Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": "2026-08-07T17:15:25Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/6397",
+  "body": "Fixes objectstack-ai/objectstack#5966\n\n## 前提复核(先于实现)\n\n派发令给了三条破则停的前提,逐条对 `origin/main`(`881a3cc06`)实读 —— **三条全部成立**(行号按内容定位,与分诊评论记的 :1074-1077 有微小漂移):\n\n| 前提 | 分诊记录 | 本次实读(`881a3cc06`) | 结论 |\n|---|---|---|---|\n| P1 该腿仍无判定 | :1074-1077 | `:1075` `if (archive.keep && typeof cold.deleteMany === 'function')` → `:1077` `await cold.deleteMany(...)`,其间**确无**任何 abort 判定 | 成立 |\n| P2 循环内判定在(同款可抄) | :1061 | `:1060` `if (this.abort.aborted) break;`,上方 6 行 #4747 注释(PR #5956 落地) | 成立 |\n| P3 PR #5956 已 MERGED | — | `merged: true`,`merged_at: 2026-08-06T13:35:04Z` | 成立 |\n\n顺带核实了两个判定读的是**同一个位**:`stopped` 是 `get stopped() { return this.abort.aborted; }`(:396-398),所以 `sweep()` 对象间的 `this.stopped` 与循环内的 `this.abort.aborted` 不是两套状态。\n\n## 改动\n\n`archiveObject()` 循环之后那一处条件,按 issue 正文给的修法并入同一个判定:\n\n```ts\nif (!this.abort.aborted && archive.keep && typeof cold.deleteMany === 'function') {\n```\n\n⛔ **没有**写成前置早退。早退会连 `:1080` 的 `report.swept.push({ …, archived })` 一起跳过 —— 已经归档成功的那些行是真实完成的工作,不该因为 prune 被推迟就从报告里消失。归入条件则只推迟 prune,报告照常。\n\n注释按 :1060 的口径写,讲清两件本 PR 特有的事:\n\n- **为什么这一处是「可判定却没判」而不是竞态**:循环可能刚刚**因为读到 `aborted === true` 而 break**,紧接着这条腿仍向正在关闭的 cold datasource 发一次谓词 DELETE。这与 #5194 之前那种「abort 只可能在单个 await 进行中被抬起、此前没有任何代码观察过这个位」的形态不同 —— 那种情况下继续执行不是一个决定。\n- **为什么推迟零代价**:冷侧 prune 是纯保留期回收,不是配对的一半。循环内的 `upsert` → `bulkDelete` 必须做完,否则会热删一行冷库没收下的记录;跳过 prune 不留下任何不一致,下一轮 sweep 按同一个 `keep` 推出同一个 cutoff、清同一批行。\n\n⛔ 未触 `engine.ts`;⛔ 未触同文件的 #5756(reap 每轮预算按「(对象, where 作用域)」计)。\n\n## 测试(`packages/objectql/src/lifecycle/lifecycle-service.test.ts`)\n\n贴 #5755 / PR #5956 的既有结构:同一个 `LifecycleService teardown (#4747)` describe、同一个 `archivePair` 计数冷热 driver 对。helper 加了一个 `coldPruned` 账本,记的是 `cold.deleteMany` 收到的**谓词本身**而不只是次数,好让「prune 跑了」和「prune 跑在对的 cutoff 上」成为两条可分开断言的事实。\n\nfixture 新增 `KEEP_OBJ`,与 #5956 的 `ARCHIVED_OBJ` 的差别**只有** `keep: '365d'` 一处 —— #5956 的 fixture 有意不声明 `keep`(那条腿它不治理),所以这条腿此前无任何断言覆盖。\n\n三条用例,覆盖 prune 的两端以及循环把控制权交出去的**两种**方式:\n\n1. **对照 / 回归** —— `a keep prune nobody calls off runs, on the cutoff keep declares`:700 行在预算内排空,不抬 abort 位,断言 prune 恰好发一次,且带的是 `keep`(365d)的 cutoff 而不是 `after`(90d)的。新判定不能顺手把正常工作也掐掉。\n2. **主用例(可判定形态)** —— `stop() mid-archive stops the prune too, not just the batch loop`:在第 2 批第一行 copy 处抬起 abort 位(与 #5956 主用例同一时点),循环在头部读到位并 break,断言 `coldPruned` 为空;同时 #5755 的旧不变量仍在(页读 2 次、copy 1000 行),且 9500 行仍在热库等下一轮。\n3. **循环后形态(派发令点名的那个窗口)** —— `stop() after the loop has made its last check still calls the prune off`:700 行在预算内排空,teardown 落在**最后一批的热删**里 —— 此时循环是按 `rows.length < ARCHIVE_BATCH_SIZE` 正常退出的,**根本没有机会再读一次 abort 位**,所以 per-batch 检查在原理上看不见这一路。断言归档本身完整完成(逐批配对 `[500, 200]`,`hotDeleted.flat()` 逐项等于 `copied`),而唯一欠着的那条腿被推迟。\n\n### 反向验证(方向先预测,后运行)\n\n**预测:标准红。** 去掉 `!this.abort.aborted &&` 后,用例 2、3 转红(`coldPruned` 多出一项,`toEqual([])` 失败);用例 1 **保持绿** —— 它从不抬 abort 位,本就无法区分两个版本,这正是它作为回归对照而非第二个 pin 的原因。#5755 的两条旧用例也应保持绿:它们的 fixture 不声明 `keep`,prune 腿根本不执行。\n\n实跑与预测逐条一致:\n\n```\n✓ … > a `keep` prune nobody calls off runs, on the cutoff `keep` declares 1ms\n× … > stop() mid-archive stops the prune too, not just the batch loop 13ms\n  → expected [ { where: { created_at: { …(1) } } } ] to deeply equal []\n× … > stop() after the loop has made its last check still calls the prune off 2ms\n  → expected [ { where: { created_at: { …(1) } } } ] to deeply equal []\n✓ … > an archive nobody calls off runs its whole 20-batch budget 17ms\n✓ … > stop() mid-archive ends the batch loop instead of running out the page budget 7ms\n Test Files  1 failed (1)\n      Tests  2 failed | 73 passed (75)\n```\n\n失败消息本身就是证据:红的不是一个计数偏差,而是**那次 DELETE 确实发出去了**,带着 `where.created_at.$lt`。恢复该腿后 75/75 全绿。\n\n## 验证\n\n```\npnpm --filter @objectstack/objectql test       → Test Files 140 passed | Tests 2311 passed\npnpm --filter @objectstack/objectql typecheck  → tsc --noEmit,无输出(通过)\nnode scripts/check-engine-double-contract.mjs  → OK — 80 pinned, 133 DEBT, 4 exempt\nnode scripts/check-nul-bytes.mjs               → OK(6049 个文件,无裸控制字节)\neslint(两个改动文件)                           → 无输出\n```\n\n数字取自 `git merge origin/main`(⛔ 未 rebase)之后按 AGENTS §9/§10 重建依赖的重跑 —— 合入的 `packages/spec` 与 `objectql/protocol-meta.test.ts` 落在本包的依赖面上,故整包重跑而非只跑改动文件。\n\n未引入新的 fake engine:复用文件内既有的 `captureEngine`,`archivePair` 是 **driver** 替身(`find`/`upsert`/`bulkDelete`/`deleteMany`),不含引擎 `delete`/`update` 派发面,`check:engine-double-contract` 复跑仍为 OK。\n\n## 影响面\n\n今天不可达,三重叠加照旧:archive 策略要求已配置 cold datasource(`archive.to`,未配置直接 `skipped: 'archive-pending'`),还要求显式声明 `archive.keep`,而仓内当前无平台对象声明 `archive`。这是为**首个声明 `archive.keep` 的部署**做的预防,changeset 按 `@objectstack/objectql` patch 记。\n\n## 顺带发现(⛔ 本 PR 未修,交 PM 定级)\n\n派发令要我回答「同文件是否还有其他 #4747 未覆盖的破坏性操作腿」。**有两条,形态与本单同类**(控制流已经读到 `aborted === true`,之后仍发出破坏性操作),且**都是实测的、不是读代码推断的** —— 用一次性探针跑通后已删除,未留在本 PR 里:\n\n- **`:616` `driver.reclaimSpace()`**(对象循环之后的空间回收循环)。abort 落在**最后一个**声明对象的 reap 里时,`batchedReap` 读到位并 break,对象循环随即自然结束(不走 `:598` 的 `return`),控制流落到回收循环,向正在关闭的 datasource 发一次 VACUUM 级操作。探针实测:`reclaims === ['vacuum']`。\n- **`:852` `driver.rotateShards()`**(物理分片轮转,会 DROP 过期分片)。对象**同时**声明 `ttl` 与 `storage.strategy: 'rotation'` 时,`reapObject` 先跑 ttl 的 reap,`batchedReap` 读到位并 break 后返回,紧接着无任何判定地发出 rotateShards。探针实测:`drops === ['DROP shard']`。仅声明 rotation(无 `ttl`)时不构成该形态 —— 那一路上从 `:598` 到 `:852` 之间只有同步调用,属「无人观察过这个位」的良性形态。\n\n两条今天同样不可达(仓内无平台对象声明 `storage.strategy: 'rotation'`,仅测试与 spec fixture 里有)。按 #4949 查重过:三仓无影子单,`reclaimSpace` / `rotateShards` / teardown 关键词在 open issue 里无对应条目。按派发令的「只测只报」未自行开单,证据留在此处供 PM 定级开单。\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_019Q7oc7ASjh8yxyS3Yz78We)_"
+}

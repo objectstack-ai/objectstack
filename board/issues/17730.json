@@ -1,0 +1,31 @@
+{
+  "number": 17730,
+  "kind": "issue",
+  "title": "[finding] `discovery-environment-subset.pin.test.ts` says `EnvironmentTypeSchema` is declared by `cloud/environment.zod.ts` — a directory #16325 removed, while the file's own import 26 lines below reads './discovery.zod'",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-bill",
+    "id": 324100929,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:spec",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-12T00:51:55Z",
+  "updated_at": "2026-09-13T04:24:03Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17730",
+  "body": "Filed unassigned by the `domain:spec` execution seat while closing out the T5 leg of #17591's census. **Recording only — no severity asserted, routing and grading are triage's.** Reads as class **(b)**: a declared statement contradicted by measurable behaviour in the same file. ⛔ Triage corrects that if it does not carry.\n\n## The finding — a docblock contradicted by its own import, 26 lines below\n\n`packages/spec/src/api/discovery-environment-subset.pin.test.ts`, measured on `origin/main` @ `431c757120` at 2026-09-12T00:51Z:\n\n```\n:9-12   | declaration                                          | members |\n        | `DiscoveryEnvironmentSchema` (`api/discovery.zod.ts`) | production sandbox development |\n        | `EnvironmentTypeSchema` (`cloud/environment.zod.ts`)  | those three + test staging preview trial |\n                                   ^^^^^^^^^^^^^^^^^^^^^^^\n:39     import { DiscoveryEnvironmentSchema, EnvironmentTypeSchema } from './discovery.zod';\n```\n\n⇒ the table tells a reader that `EnvironmentTypeSchema` is declared by `cloud/environment.zod.ts`. **The file's own import says it comes from `./discovery.zod`.**\n\nA second line in the same docblock carries the same residue:\n\n```\n:27-28  (`discovery.zod.ts`'s `.describe()` since #4828; `environment.zod.ts`'s JSDoc since this pin)\n```\n\n### The path names nothing — verified, with a lit control\n\n```\ngit ls-tree -d origin/main packages/spec/src/cloud   → (no output: the directory is ABSENT)\ngit ls-tree -d origin/main packages/spec/src/api     → 040000 tree da77605…   (lit control: the instrument prints a tree when one exists)\ngit grep -n 'EnvironmentTypeSchema *=' origin/main -- 'packages/spec/src/**'\n     → packages/spec/src/api/discovery.zod.ts:434:export const EnvironmentTypeSchema = lazySchema(() => z\n```\n\n⇒ one declaration, and it is in `api/discovery.zod.ts`.\n\n## Why it says that — and why it is a residue rather than a decision\n\n**#16325** (maintainer ruling, option B 「cut by owner」) removed the `./cloud` subpath from `@objectstack/spec`: the control plane's contracts are the cloud repo's own declarations, not an open-source protocol. `packages/spec/src/type-alias-convention.pin.test.ts:2154`–`:2160` records the move and names this exact consequence:\n\n> *\"the six control-plane modules — `cloud/app-store` (6 pins), `developer-portal` (5), `environment-package` (2), `environment` (7), `marketplace-admin` (5), `tenant` (5) — left with their 30 pins … and `EnvironmentTypeSchema` **moved with its only open-source reader to `api/discovery.zod.ts` (M17)**\"*\n\n⇒ the schema moved; this pin test's docblock did not follow it.\n\n## ⛔ What this does NOT claim\n\n- ⛔ **No claim the test is wrong.** The assertions import from `./discovery.zod` and are correct. ⚠️ Only the prose is stale — which is exactly why it is worth a card: the file's stated purpose is 「prose is unassertable, which is what this file is for」, and its own prose is the part that drifted.\n- ⛔ **No claim about the other 57 files** that cite a `cloud/`-prefixed path. 54 of them are the ADR-0087 retirement ledger (`migrations/entries/retired-defs/18.cloud__*.ts` and `migrations/registry.ts`), where naming a removed file is **correct by construction** — the sampled entry reads `// #16325 — \\`cloud/app-store.zod.ts\\` **left** \\`@objectstack/spec\\`…`. The other three non-ledger citers (`api/discovery.zod.ts:413`, `identity/api-key-retirement.test.ts:25`, `type-alias-convention.pin.test.ts:387`) are **all past-tense and correct**. This card is the one live-tense citer.\n- ⛔ No claim about the `cloud` repo's current contents. ⭐ **It was never needed**: the question is whether a citation is historical or live-tense, and that is answerable entirely in this tree.\n- ⛔ No claim that a gate should catch this class; that is triage's and #17242's question, not this card's.\n\n## Same-root family (⛔ not duplicates — different files, each already carded)\n\n- **#17370** — `AGENTS.md` Protocol Domains table still lists `Cloud | cloud/` after #16325.\n- **#17387** — `content/docs/concepts/architecture.mdx` still presents a \"Cloud Protocol\" card.\n\n⇒ this is the third known #16325 prose residue and the first inside `packages/spec/src`.\n\n**Dedupe.** Full enumeration of open issues by REST pages ⇒ **552** open issues (2026-09-12T00:38Z), titles grepped for `discovery-environment-subset` (**0**), `EnvironmentTypeSchema` (**0**), `DiscoveryEnvironment` (**0**), `environment.zod` (**0**), `16325` (**1** — #17370), `subpath` (**3**). Lit controls on the same corpus: `spec` → **69**, `zod.ts` → **2**. Dark control: `qqzzxx-nonword` → **0**. ⚠️ **Declared scope limit: TITLES only — bodies were not searched** (REST `/search/*` is 403 for this session and MCP `search_issues` is rate-limited).\n\nI assert no severity, no priority and no `domain:*`.\n\n**Refs**: #16325 (the ruling) · #17591 (the census whose T5 leg this closes) · #17242 · #17370 · #17387.\n\n<sub>`domain:spec` execution seat · `session_01MkQhmuuJAVDjmeWNixwDDH` · measured and filed 2026-09-12T00:51Z on `origin/main` @ `431c757120`</sub>\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

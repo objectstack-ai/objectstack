@@ -1,0 +1,35 @@
+{
+  "number": 6260,
+  "kind": "issue",
+  "title": "[finding] Check Changeset 在 `opened` 事件上先于 `skip-changeset` 标签落地而判红 —— 每个走 skip 路线的 PR 都要白跑一次重投(今日 6 例)",
+  "state": "closed",
+  "state_reason": "duplicate",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "ci/cd",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T12:27:05Z",
+  "updated_at": "2026-08-08T02:20:32Z",
+  "closed_at": "2026-08-08T02:20:15Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6260",
+  "body": "观察类发现,来自 2026-08-07 一整天 `domain:spec-tooling` 车道的派发实测。**不影响任何用户能碰到的行为**,也不会让错误的 PR 通过 —— 纯粹是每个走 `skip-changeset` 路线的 PR 都要额外付一次重投 + 一轮等待。按 PD#10 登记,**未指派**,交分诊定级。\n\n## 机制\n\n`Check Changeset` 门禁在 PR 的 `opened` 事件上就触发。而 `skip-changeset` 标签是 dev 在**开完 PR 之后**才打上去的 —— 两者之间有一个不可避免的窗口。门在窗口内读到的是「无 changeset、无 skip 标签」,于是判红。\n\n#5625 之后该门**读实时标签**,所以标签落地后**重投一次即绿**,无需任何代码改动。也就是说这一红从来不是 PR 的缺陷,而是事件时序。\n\n## 直接证据(本条立单当时正在发生的那一例)\n\nPR #6258(#5331,新增 SKILL.md compatibility 对账门禁):\n\n- `Check Changeset` 在 head `104d0a259` 上 **failure**(run `31177486494` / job `92862633929`,12:16Z);\n- 同一时刻读 PR:`skip-changeset` 标签**已在位**(labels = `ci/cd, size/l, dependencies, skip-changeset`);\n- 改动 3 个文件(`scripts/check-skill-compatibility-version.mjs`、根 `package.json` 脚本注册、`.github/workflows/lint.yml`),**无 `.changeset/*.md`**,且没有一个落在已发布包里 —— 即 `skip-changeset` 是**正确**档位;\n- 重投该 job 后转绿。\n\n## 今日复发计数\n\n同一形态今天在本车道至少 **6 次**:#6096、#6102、#6196、#6200、#6222、#6258。每次处置都相同(重投一次),累计浪费的是排队与等待时间,不是判断力 —— 但它也**训练出一种坏习惯**:「Check Changeset 红了?先重投看看」。这条捷径在真·缺 changeset 的 PR 上同样会被套用,那才是真正的代价 —— 一道**经常性假红**的门禁,会把「读一下它到底在说什么」这个动作磨掉。\n\n## 为什么值得记一笔,而不是继续人工重投\n\n空 frontmatter changeset 已被 #6059/#5471 禁止,`skip-changeset` 标签因此是「本 PR 不发布任何东西」的**唯一**合法表达(三选一规则的一档)。也就是说这条假红**不是边角路径,而是三分之一的正常路径**,且会随 tooling/CI 类 PR 的比例上升而更频繁。\n\n## 可能的修法(不预设,交分诊)\n\n1. **把触发事件收窄**:去掉 `opened`,只在 `labeled` / `unlabeled` / `synchronize` 上跑 —— 最小,但要确认「开了 PR 之后再也不动」的情形仍会被覆盖到;\n2. **在 `opened` 上给一个宽限**:首次运行若判定为「无 changeset 且无 skip 标签」,不直接判红,而是等待/重查一次标签;\n3. **让 dev 先打标签再开 PR** —— 流程侧规避,零 CI 改动,但依赖每个 dev 记得,且对已有 PR 无效(**不推荐**:这正是把机制问题转嫁成纪律问题)。\n\n方向 1 看起来最干净,但 `opened` 上完全不跑意味着一个从头到尾没有标签、也没有 changeset 的 PR 要等到第一次 `synchronize` 才被拦 —— 是否可接受,需要看这道门在合并队列上的必需性(required check 集合),我没有量,所以不替维护者选。\n\n## 边界\n\n零运行时、零协议、零发布面;只动 `.github/workflows/` 的触发条件或该门禁脚本自身。\n\n关联:#5625(门改读实时标签)、#6059 / #5471(空 changeset 已被禁止)、#5292(changeset 三选一规则)、#4898(全空 changeset 集静默拖停 17.0.0-rc.2,即这套规则的来历)。"
+}

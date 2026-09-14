@@ -1,0 +1,35 @@
+{
+  "number": 6294,
+  "kind": "issue",
+  "title": "objectui-range 的 release 页 Console 段按声明级别分节,`### Breaking changes` 在发布窗内结构性永不渲染(#6099 的同源另一半)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T13:21:25Z",
+  "updated_at": "2026-08-07T17:05:36Z",
+  "closed_at": "2026-08-07T17:05:36Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6294",
+  "body": "**未认领。** 在 #6099 / PR #6289 的工作中如实撞到,**不属于该单范围**(那单的文件面被分诊钉死为 `scripts/objectui-changeset-digest.mjs`),按纪律只报不改。\n\n## 现象\n\n`scripts/objectui-range.mjs`(#4843,release 页 Console 段的渲染器)按**声明级别**分节:\n\n```js\n// scripts/objectui-range.mjs\nconst SECTIONS = [\n  ['major', 'Breaking changes'],\n  ['minor', 'Features'],\n  ['patch', 'Fixes'],\n];\n```\n\n这与 #6099 修掉的是**同一个错位**:objectui 在发布窗内从不声明 `major`(破坏性一律 `minor` + 作者正文标注)。于是 `### Breaking changes` 这一节**结构性永不渲染**,而真正的破坏性条目被归进 `### Features`。\n\n## 实测(区间 `f5bc4c78be76...f995a452d2ca`,与 #6099 同一现场)\n\n```\n$ node scripts/objectui-range.mjs --objectui-root ../objectui \\\n      --from f5bc4c78be76 --to f995a452d2ca | grep '^###'\n### Features\n### Fixes\n```\n\n64 条 releasing changeset、0 条 `major`,所以只出来两节。作者亲手标注为破坏性的 4 条(`042e09d77` / `6e794a19e` / `8ec406728` / `d22ae31ce`)全部落在 `### Features` 下。\n\n## 与 #6099 的关系:同源,但不同消费者、不同文件\n\n#6099 处理的是 digest 生成 changeset 时那句 `⚠️` 提示;这一条是 release 页的**分节**。两者共用 `classifyRange`,但错位各出现一次。#6099 的 body 里本来就点了「#4843 —— 同一判据的另一个消费者(release 页 Console 段)」,这是把那半句坐实。\n\n**独立开单而非 #6099 的子单**:#6099 的完成范围被分诊明确限定在 digest 一个文件,这个修复落在另一个文件的另一个函数上,不在其完成范围内。\n\n## 修复面已经就位(PR #6289 之后)\n\nPR #6289 把破坏性判据放进了 `classifyRange` —— 也就是 `objectui-range.mjs` **正在调用**的那个共享实现 —— 每个 releasing 条目现在都带:\n\n```js\nr.breaking       // boolean:声明 major 或作者正文标注\nr.breakingSource // 'declared-major' | 'annotation' | null\n```\n\n`objectui-range.mjs` 目前不读这两个字段。所以修复大概是:分节改为先按 `r.breaking` 抽出 Breaking changes 一节,余下再按级别分 Features / Fixes。**判据不必重写**,只是消费端接上——这正是 #6289 把判据放进共享实现而不是放进 `buildDigest` 的原因。\n\n## 两种读法(留给分诊定级,不自打级别标签)\n\n- **具体缺陷**:v17 发布说明正由这批内容编译,升级者会踩到的 4 条破坏性迁移当前被呈现在「Features」标题下,现在就在生效。\n- **观察项**:release 页仍由人工集中编纂(CLAUDE.md 第三条),分节错位不必然传导到最终页面;#6109 已手工把破坏性迁移收进页面的「Breaking changes & migration」。\n\n按 #4949「立案时判定的严重度两个方向都不可靠」的原则如实记两读法。\n\n## 关联\n\n- #6099 / PR #6289 —— 同一错位在 digest 侧的那一半(已修)\n- #4843 —— 本文件的出处\n- #4731 —— declaration over inference 的原始约束\n- #6110 —— 曾手工补标破坏性条目的现场\n- #6115 —— v17.mdx 窗口段落缺失,另一条同源记录(不同失效模式)\n"
+}

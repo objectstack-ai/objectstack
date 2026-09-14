@@ -1,0 +1,36 @@
+{
+  "number": 5945,
+  "kind": "issue",
+  "title": "[spec] `HookContext.api` 声明为 `z.unknown()` —— 按 `(ctx: HookContext)` 标类型的 hook 无法调用 `ctx.api.object(…)`,而文档/技能全在这么教",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:queue",
+    "target:v17"
+  ],
+  "assignees": [
+    "qq9340100"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T12:42:35Z",
+  "updated_at": "2026-08-07T14:24:53Z",
+  "closed_at": "2026-08-07T14:24:53Z",
+  "closed_by": {
+    "login": "qq9340100",
+    "id": 313832657,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5945",
+  "body": "## 事实(对 `origin/main` 核实)\n\n`packages/spec/src/data/hook.zod.ts` 里,hook 的**主数据通道**是这样声明的:\n\n```\n  /**\n   * Cross-Object API\n   * …\n   * Usage in hooks:\n   *   const users = ctx.api.object('user');\n   *   const admin = await users.findOne({ where: { role: 'admin' } });\n   */\n  api: z.unknown().optional().describe('Cross-object data access (ScopedContext)'),\n```\n\n于是 `HookContext['api']` 推断为 `unknown`,**JSDoc 里那两行示例本身编译不过**。实测(用 `check:skill-examples` 同一套 tsconfig,对已构建的 `@objectstack/spec` 声明编译):\n\n```\nerror TS18046: 'ctx.api' is of type 'unknown'.      // ctx.api.object('x')\n```\n\n## 为什么是缺陷而不是风格问题\n\n1. **整个语料库都在教这个写法。** `skills/objectstack-data/references/data-hooks.md:732-745`(`handler: async (ctx: HookContext) => { const users = ctx.api?.object('user'); … }`)、`content/docs/automation/hooks.mdx:173-224`、`content/docs/api/error-handling-server.mdx:289/382`、`content/docs/automation/hook-bodies.mdx` 的能力表 …… 都是 `(ctx: HookContext)` + `ctx.api.object(…)`。这些块**都没有 `os:check` 标记**,所以从没被编译过 —— 一旦标记就会全红。也就是说:AI 与人照抄的首选写法,在类型层面是不成立的,只是没有任何门看见。\n2. **它把「消费者兜底」写成了唯一出路。** #5720 的 PR #5938 需要一个真编译的 hook 示例,只能在示例里写 `const api = ctx.api as CrossObjectApi`(自建局部结构类型)。这正是 contract-first 反对的方向:每个消费者各自 cast 一遍,cast 的形状彼此不一致,而真值(ObjectQL 的 `ScopedContext`:`object(name)` → repo,`transaction(cb)`)在契约里一个字都没有。\n3. **对照组说明这不是「Zod 表达不了就只能 unknown」。** 同仓 `packages/spec/src/contracts/` 已经用普通 TS interface 声明了一堆运行时服务面(`IDataEngine`、`ISharingService`、`IObjectQLEngine` …),`transaction` / `ql` 这些同样\"引擎侧对象\"的键也是 `z.unknown()`,但它们不是文档教读者天天调的东西 —— `api` 是。\n\n## 待定(不预设结论,交维护者/分诊)\n\n- **A. 在 `packages/spec/src/contracts/` 声明作用域跨对象 API 的接口**(如 `IScopedContext`:`object(name)` 返回一个 repo 接口,`transaction(cb)`),`HookContext.api` 的 TS 类型指向它(Zod 侧可继续 `z.custom`/`z.unknown`,运行时不校验活对象),让 `ctx.api.object('x').findOne(…)` 直接编译过。成本:要把 repo 的方法面(`find`/`findOne`/`count`/`aggregate`/`insert`/`update`/`upsert`/`delete`)定成公共契约,并与 `ScopedContext` 实现对齐(此后二者漂移会被 `check:api-surface` 之类的门看见 —— 这正是收益)。\n- **B. 什么都不改,把语料库改成显式窄化**(每处示例自带 cast)。成本:教 AI 写 cast,且 cast 形状无人校验;`api` 的真实面继续只存在于 objectql 的实现里。\n- **C. 折中**:只声明 `object(name)` 与 `transaction(cb)` 两个成员(文档实际教的全集),其余留待有消费者时再加 —— 与仓内「有证据才声明」的惯例一致(`IDataEngine` 的 `#4251` 注释就是这个论证)。\n\n我倾向 **C**:它让文档现在教的写法真的成立(收益立刻兑现),声明面又不超过已被消费的部分;A 的完整 repo 契约可以在有第二个消费者时按同一论证增补。但这是公共契约拍板,故不自行实现。\n\n## 关联\n\n- #5720 / PR #5938(hook 文档改教 `ctx.api`;因该 PR 派发面 `packages/spec/**` 零改动,故此项单独记录)\n- #5943(`check:skill-examples` 禁 os:check 块内入参标 `any`)—— 若本单按 A/C 修好,那些语料块才可能真的进 `os:check`;否则它们进门就红。\n\n未加标签、未认领,交 PM 分诊定级。"
+}

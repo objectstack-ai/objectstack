@@ -1,0 +1,37 @@
+{
+  "number": 5791,
+  "kind": "issue",
+  "title": "spec: route-ledger entry 类型加可选 `responseSchema` 字段(#3877 最小首步,维护者 2026-08-06 已批)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:dispatched",
+    "pm:queue",
+    "target:v17"
+  ],
+  "assignees": [
+    "qq9340100"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T05:42:59Z",
+  "updated_at": "2026-08-08T01:50:12Z",
+  "closed_at": "2026-08-08T01:50:12Z",
+  "closed_by": {
+    "login": "qq9340100",
+    "id": 313832657,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5791",
+  "body": "Part of #3877(维护者批文见该单 2026-08-06 裁决评论)。devx 车道 PM 按跨分片协议立单转 spec 座位,**未认领**。\n\n## 任务\n\n给 route-ledger entry 类型(5 个 route ledger 共用的条目形状)加**可选** `responseSchema` 字段:\n\n- 只加类型位,**不做批量填充**——#3877 已裁定 Stage C(批量补 ~190 条无声明路由)永不排期;字段随 Stage A 各族落地与路由被触碰时增量填。\n- 它把「这条路由声明了什么响应」变成可查询数据,是 Stage D 棘轮的前置;字段缺省即「未声明」,不改变任何现有行为。\n\n## 验收\n\n- 类型编译过;5 个 ledger 现有条目零改动(字段可选);\n- 至少给 discovery 族已落地的 2 条路由(PR #5682 的面)填上引用,作为字段可用性的实证;\n- 不引入「声明了但没人验证」的新面——填了 `responseSchema` 的路由应当已有(或同 PR 补上)#5682 双断言口径的一致性覆盖,否则宁可不填。\n\n## 关联\n\n#3877(程序卡)、PR #5682(discovery 族一致性测试,双断言口径出处)、#5679(嵌套键同病,Stage D 递归收严时的第一个红)。"
+}

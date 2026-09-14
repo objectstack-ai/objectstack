@@ -1,0 +1,32 @@
+{
+  "number": 6167,
+  "kind": "issue",
+  "title": "事务句柄没有属主可查,同源校验对「引擎没开过的句柄」只能弃权(#5351 的已知边界)",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "finding"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T05:03:13Z",
+  "updated_at": "2026-08-08T00:51:22Z",
+  "closed_at": "2026-08-08T00:51:22Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6167",
+  "body": "发现于 #5351 / #5696 的实施(PD #10 范围外发现,**未在该批 PR 内修改**;该批已把这条边界写进 ADR-0067/0119 修订与测试,作为**决定**而非缺口)。**未认领。**\n\n## 事实\n\n#5351 落地的同源校验按 `TransactionScope`(#5724)记录的属主 driver、以**实例身份**比对,决定一次写入是拒绝、carve-out 还是照常穿句柄。它能判的前提是:**这个句柄的属主是谁,引擎知道**。\n\n引擎只在自己 `transaction()` 开事务时知道 —— 那一刻它把属主记进 txStore。两条路径上它不知道:\n\n1. `ScopedContext` 的离散 `beginTransaction` / `commit` / `rollback` 三件套(`packages/objectql/src/engine.ts`)。它为沙箱 runner 而存在:hook/action 体的 `ctx.api.transaction(fn)` 被跨多个宿主事件循环轮次驱动,`AsyncLocalStorage` 在 `setImmediate` 边界上不存活,所以句柄是**显式穿**的,根本不进 txStore;\n2. 任何外部调用方自己拿到、以 `execCtx.transaction` 传进来的句柄。\n\n(⚠️ 常见的显式穿法**是**覆盖到的:`transaction()` 把 `trxCtx` 交给调用方、调用方再以 `{ context: trxCtx }` 传回,这个句柄按身份能匹配回 txStore 条目。这里说的是引擎从未开过的那些。)\n\n这两条上引擎手里只有一个**不透明的 driver 对象**,没有任何回指其 driver 的引用。所以没有诚实的比较可做,校验弃权、保持 #5351 之前的行为。\n\n## 为什么当时不猜\n\n猜有一个显而易见的候选 —— 「没有属主记录的句柄就当它属于默认驱动」。它两边都会错:\n\n- 假阳性:某个部署把默认驱动之外的库交给沙箱开事务,合法的单库工作被拒;\n- 假阴性:真正被覆盖的写入被误判成跨源、按 carve-out 移出事务,悄悄失去回滚保护。\n\n一个**保证**建立在猜测之上,比明确不覆盖更坏。\n\n## 收口需要什么\n\n让句柄属主可查,这是 **driver 契约变更**:`IDataDriver` 需要一条「这个句柄是不是我开的」的谓词(或让 `beginTransaction` 返回带属主标记的包装)。方向候选,交分诊定,本单不预设:\n\n1. `IDataDriver.ownsTransaction?(handle): boolean` —— 可选成员,没实现的 driver 维持今天的弃权语义;\n2. `beginTransaction` 返回值统一包一层引擎侧的信封(属主 + 原句柄),由引擎在下发给 driver 前拆封。⚠️ 会碰到每个 driver 的 `.transacting(trx)` 调用面,面更宽;\n3. 让沙箱三件套也登记进一个非 ALS 的属主表(只解上面第 1 条路径,不解第 2 条)。\n\n## 可达性(诚实说明)\n\n今天**不是**用户能撞到的缺陷:它是一条已声明的边界,而且只在「沙箱 hook 用离散三件套开事务」+「其中的写被路由到第二个数据源」同时成立时才有语义差别。按 #4949 平铺记录、给 `finding` 标签,严重度交 PM 分诊定 —— 但它是 #5351 那条保证唯一没有覆盖到的角落,值得有个编号。\n\nRefs:#5351(裁 A 与同源校验)、#5696(契约收紧)、#5724(`TransactionScope` 属主记录)、ADR-0067 / ADR-0119 的 2026-08-06 修订(「The declared LIMIT of the same-origin gate」一节)、ADR-0034(ambient 事务)。钉住这条边界的测试:`packages/objectql/src/engine-transaction-same-origin.test.ts` 的 “does NOT cover a foreign handle passed in from outside — declared, not overlooked”。\n"
+}

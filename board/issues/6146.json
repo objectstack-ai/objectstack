@@ -1,0 +1,35 @@
+{
+  "number": 6146,
+  "kind": "issue",
+  "title": "FormField/FormSection `visibleWhen` describe 宣称 runtime 表单绑定 `current_user`,但字段级条件规则的求值面从未绑过它——按文档写的谓词必然 fault 并 fail-open",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "pm:queue",
+    "target:v17"
+  ],
+  "assignees": [
+    "qq9340100"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T03:29:12Z",
+  "updated_at": "2026-08-07T15:32:10Z",
+  "closed_at": "2026-08-07T15:32:10Z",
+  "closed_by": {
+    "login": "qq9340100",
+    "id": 313832657,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6146",
+  "body": "## 现象\n\n`packages/spec/src/ui/view.zod.ts` 的字段级与 section 级 `visibleWhen` 文档(origin/main):\n\n- `:1410-1412`(JSDoc)与 `:1414`(describe):「Root: `record`+`current_user` (runtime forms) or `data` (metadata forms)」\n- `:1505-1508`:FormSection 级同样宣称\n\n但 **字段级条件规则的实际求值面没有任何一处绑定 `current_user`**:\n\n- objectui 侧:`resolveFieldRuleState` 的三个生产调用点(`packages/components/src/renderers/form/form.tsx` 渲染门与 error-clearing effect、`packages/plugin-form/src/WizardForm.tsx` 必填门)都不传 scope,`evalFieldPredicate` 只绑 `record` / `previous` /(经 extra 的)`parent`。objectui 的授权 autocomplete 也是这么钉的:`packages/app-shell/src/views/metadata-admin/celAuthoring.ts` 的 `FIELD_RULE_ROOTS = ['record', 'previous', 'parent']`,注释明说 \"nothing else (no `current_user`)\"(objectui#1582 的决定);\n- 服务端:`packages/objectql/src/validation/rule-validator.ts` 的 `EvaluateRulesOptions.currentUser` 按其 JSDoc 只供 **per-option** `visibleWhen`(objectui#2284,ADR-0068);`readonlyWhen` 求值(`isReadonlyWhenLocked`)绑 `record`/merged + `parent`,不含 `current_user`。\n\n**per-option** `visibleWhen`(选项级)确实绑 `current_user`——文档对「选项级」为真,对「字段级/section 级」为假。\n\n## 后果\n\n照 describe 写 `visibleWhen: \"current_user.positions.exists(p, p == 'admin')\"` 的字段级谓词,引用未绑定根 → fault → fail-open(字段恒可见)。这正是 #5149 的「文档诱导写出永不生效谓词」类别(Repro 1 是裸标识符,这里是文档亲自点名的根)。objectui PR objectstack-ai/objectui#3541(#5149 诉求 2)落地后该 fault 会以每谓词一条 `console.warn` 显形(`undeclared reference to current_user` 一类),不再静默,但谓词本身依旧不工作。\n\n## 两个修法方向(留给分诊)\n\n1. **文档收窄**:describe 与 JSDoc 把字段级/section 级的 runtime 根改为 `record`(+`previous`/`parent`),`current_user` 只保留在 per-option `visibleWhen` 的文档上——与 objectui#1582 钉的授权面一致,改动最小;\n2. **实现补齐**:让字段级规则求值面(客户端 `resolveFieldRuleState` 调用点传 host predicate scope;服务端 rule-validator 同步)真的绑 `current_user`——有真实业务拉力(按角色显隐字段)时才值得,且需两端同时落,否则客户端/服务端 verdict 漂移。\n\n按仓规不自选方向,留 PM 分诊。发现于 #5149 诉求 4 验收(该验收本身成立:`record.`/`data.` 绑定说明与示例齐全,本单只针对 `current_user` 这一半句的过度宣称)。\n\nRefs: #5149、objectstack-ai/objectui#3541、objectui#1582、objectui#2284、ADR-0068"
+}

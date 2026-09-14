@@ -1,0 +1,32 @@
+{
+  "number": 6212,
+  "kind": "issue",
+  "title": "[finding][drivers] `DriverQuery` 收窄之外：`aggregate` / `distinct` / `analyzeQuery` 等驱动自有查询方法仍要求把对象名写两遍",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:queue"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T10:59:26Z",
+  "updated_at": "2026-08-08T04:27:36Z",
+  "closed_at": "2026-08-08T04:27:36Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6212",
+  "body": "在 #6075（PR #6210）把五个驱动的六个契约方法签名迁到 `DriverQuery` 时实测发现，记录备查。**观察类，不挂 `pm:queue`，请分诊轮定级。**\n\n## 现状\n\n#5181 只收窄了 `IDataDriver` 声明的六个方法（`find` / `findOne` / `count` / `updateMany` / `deleteMany` / `explain`），#6075 让五个驱动的实现跟上。但驱动上还有一批**同样吃 query AST、却不在 `IDataDriver` 里**的方法，它们的第一个实参同样已经是对象名，query 里却仍然要求（或放任）再写一遍 `object`：\n\n| 位置 | 签名 | 形态 |\n|:--|:--|:--|\n| `driver-memory/src/memory-driver.ts:653` | `aggregate(object, pipeline: Record< string, any >[] \\| QueryAST, …)` | 要求 `object` |\n| `driver-memory/src/memory-driver.ts:612` | `distinct(object, field, query?: QueryInput)` | 要求 `object` |\n| `driver-mongodb/src/mongodb-driver.ts:468` | `aggregate(object, query: QueryAST, …)` | 要求 `object` |\n| `driver-sql/src/sql-driver.ts:3249` | `aggregate(object, query: any, …)` | `any`，全无检查 |\n| `driver-sql/src/sql-driver.ts:3372` | `findWithWindowFunctions(object, query: any, …)` | `any` |\n| `driver-sql/src/sql-driver.ts:3409` | `analyzeQuery(object, query: any, …)` | `any` |\n| `driver-turso/src/turso-driver.ts:547` | `aggregate(object, query: any, …)` | `any` |\n\n（行号取自 `origin/main` @ `80f7dc6`，会漂。）\n\n## 为什么单独记一笔\n\n这正是 #5181 判定为「同一个事实要求写两遍，因此有了两处互相矛盾的余地」的那种冗余，只是它活在契约没有覆盖的方法上。两个后果：\n\n1. **要求 `object` 的那几处**：调用方手上只有 `where` / `groupBy` 时叫不出类型的名字，于是走 `as any` —— #5181 的 changeset 记过这笔账的代价（cloud#1053 实测 20 处，cloud#1030 的 `$like` 就是从这个口子活到运行时的）。\n2. **写成 `any` 的那几处**：连 `where` / `orderBy` / `fields` 的检查一起关掉，与 #6075 刚在 turso 上收回来的是同一批检查。\n\nPR #6210 **没有**动它们：它们不是 #5181 收窄的那六个方法，顺手改属于超范围。\n\n## 不是缺陷，别当缺陷派\n\n今天没有人踩：`git grep 'query\\.object' -- 'packages/drivers/*/src'` 在 `main` 上仍是**零命中**，这几个方法自己也不读 `query.object`。所以这是**休眠的冗余 + 放弃的检查**，不是活体缺陷，判级请按观察类走。\n\n## 如果要做\n\n给这批方法定一个 query 参数类型。要注意它们彼此并不同形，**不是**一刀切换成 `DriverQuery` 就完：\n\n- `memory.aggregate` 的形参是 `pipeline`，联合了 mongo 风格管线数组与 AST 两种输入，收窄前得先确认两条分支各自的真实生产者；\n- `memory.distinct` 用的是**输入形** `QueryInput`（不是输出形 `QueryAST`），直接换成 `DriverQuery` 会连带收紧 `groupBy` 的元素类型 —— PR #6210 在 `performAggregation` 上就是因为这一点选了 `Omit< QueryInput, 'object' >` 而不是 `DriverQuery`；\n- `analyzeQuery` / `findWithWindowFunctions` 是否还有生产者，值得先量一量再决定是收窄还是退役（`explain` 已经只是 `analyzeQuery` 的一层转发）。\n\n⚠️ 另注：`driver-memory` / `driver-mongodb` 在 #5499 的冻结面内，跨面处置请按冻结令的口径框定范围。\n\n会话：`session_01WyvqvKMG6asi9aXjKE6xtx`（#6075 实施期间发现，未认领）\n"
+}

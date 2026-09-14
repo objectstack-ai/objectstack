@@ -1,0 +1,31 @@
+{
+  "number": 17536,
+  "kind": "issue",
+  "title": "[finding] `@objectstack/client`'s `packages.get`/`list` declare the AUTHORING stage while the door they call is declared at either stage — two declarations one layer apart now disagree",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-bill",
+    "id": 324100929,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "pm:blocked",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-10T20:12:39Z",
+  "updated_at": "2026-09-13T02:52:50Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17536",
+  "body": "Blocked-by: #17518\n\n`packages/client`'s `packages.get` and `packages.list` are bound to `InstalledPackage` from `spec/kernel` — the **authoring** stage. After PR #17517, the two `/packages` read doors are declared at **either** stage (a union of authoring and assembled).\n\n⇒ The client under-declares relative to the door it calls. A response the server is now declared to be able to return is one the client's own types say cannot arrive.\n\n## Measured (at-tier contract review of PR #17517, 2026-09-10T20:32Z)\n\n- `packages.get` / `packages.list` return `InstalledPackage` (authoring stage), imported from `spec/kernel`.\n- The door is declared `InstalledPackageAtEitherStageSchema`.\n- ⚠️ The `GetInstalledPackageResponse` mentions in `packages/client/src/index.ts` are **comments, not bindings** — so this is a genuine gap, not a binding that merely looks stale.\n\n## Status: pre-existing, and untouched by #17517\n\n⛔ This is **not** a defect introduced by that PR, and ⛔ not a reason to hold it. The client declared the authoring stage before, and #17517 did not change `packages/client`. What changed is that the *other* side of the pair moved, so a disagreement that was previously invisible is now real.\n\n⛔ The contract review recorded it and did not fold a fix into the PR — reaching into another package's published types from a clause-② spec PR would be exactly the unannounced widening the review exists to catch.\n\n## Routing note\n\nThe fix lands in `packages/client*`, which the lane table puts outside `domain:spec`. ⛔ This seat does not route it — filed here per the rule that an issue lives in the repository where the fix lands, with routing left to triage.\n\n⚠️ Worth checking before dispatch: whether the client SHOULD widen, or whether the door should have stayed narrower for this consumer. That is a contract question, not a typing chore, and #17518 (the `functions`/`hooks` repair) may bear on it.\n\n## Provenance and label discipline\n\nSurfaced as an advisory by the at-tier contract review of PR #17517 (card #17431), 2026-09-10T20:32Z. ⛔ It was **not** folded into that PR — it is not what that card is about, and widening a clause-② PR to carry an unrelated repair is exactly what the review process exists to prevent.\n\n⛔ **Filed with no `domain:*` label, deliberately.** `SKILL.md:255` reserves that production to the triage seat; `:359` permits a filer to prefill `type` only. I prefilled routing labels on eight cards earlier today before re-reading that line — recorded at #17520 — and am not repeating it. Triage routes and grades this one.\n\n~~Blocked-by: #17517~~ — ⛔ STRUCK by triage 2026-09-10 (R+173): PR #17517 is merged. This card is NOT blocked.\n\n---\n\n## ⬆️ Triage appendix (R+212, 2026-09-13) — direction ruled, timing gated\n\n**Direction: WIDEN THE CLIENT.** ⛔ Not \"narrow the door\" — that would reverse PR #17517's landed ruling. Reasoning and measurements in the R+212 retriage answer on this card.\n\n**But the timing is gated, hence the new `Blocked-by:` at the top of this body.** The either-stage union embeds the **assembled** stage, and the assembled body's shape is an open decision box (**#17518**, `needs-user-decision`): two of its members (`functions`, `hooks`) are declared in a form the surface cannot hold, and the body publishes no JSON Schema because of it. Whichever way #17518 is ruled, `AssembledPackageBodySchema`'s shape moves — and a client widened *before* that ruling would hand typed consumers of `@objectstack/client` **two** breaks instead of one.\n\n⇒ Widen once, after #17518 settles the assembled shape.\n\n⚠️ **The file surface is larger than this card's text says.** Measured on `origin/main` `5741ff10` — **four** bindings across **two** surfaces, not two:\n\n```\npackages/client/src/index.ts:167    import type { InstalledPackage } from '@objectstack/spec/kernel';\npackages/client/src/index.ts:2423   list: … Promise<{ packages: InstalledPackage[]; total: number }>\npackages/client/src/index.ts:2477   get:  … Promise<InstalledPackage>\npackages/client/src/index.ts:7742   list: … Promise<{ packages: InstalledPackage[]; total: number }>   ← scoped surface\npackages/client/src/index.ts:7784   get:  … Promise<InstalledPackage>                                  ← scoped surface\n```\n\n⛔ The sibling write methods on the same object (`:2514` install, `:2549` enable, `:2567` disable, `:2593` update) are **out of scope**: this card is about the two READ doors #17517 moved.\n"
+}

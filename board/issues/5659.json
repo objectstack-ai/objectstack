@@ -1,0 +1,37 @@
+{
+  "number": 5659,
+  "kind": "issue",
+  "title": "`flow-multi-write-unfiltered` 不判空组合子:`filter: { $and: [] }` + `multi: true` 是整表删除,却零告警 —— 身份归约在 producer 侧有三份,lint 侧不该再抄第四份",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:dispatched",
+    "pm:queue",
+    "target:v17"
+  ],
+  "assignees": [
+    "qq9340100"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T22:55:19Z",
+  "updated_at": "2026-08-08T03:48:22Z",
+  "closed_at": "2026-08-08T03:48:22Z",
+  "closed_by": {
+    "login": "qq9340100",
+    "id": 313832657,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5659",
+  "body": "范围外发现,来自 #5482(PR 见该单)的实现过程。#5482 的规则刻意只判两种可证形状,这条记录它没判的那一格,以及为什么补它需要一份共享谓词而不是第四份手抄。\n\n## 事实\n\n#5482 落地的 `flow-multi-write-unfiltered` 只在两种形状下告警(`packages/lint/src/lint-flow-patterns.ts` 的 `filterCarriesNoCondition`):\n\n- `filter` 键缺失;\n- `filter` 是零个自有键的普通对象(`{}`)。\n\n**空组合子数组不在其中**,而其中一种确实是整表写:\n\n| 形状 | 平台已裁定的语义 | 是否整表写 | 当前是否告警 |\n|---|---|---|---|\n| `filter: { $and: [] }` | TRUE(AND 恒等元,#5322/#5134) | **是** —— `multi: true` 下删/改每一行 | **否** |\n| `filter: { $or: [] }` | FALSE(OR 恒等元) | 否(一行都不匹配) | 否(正确) |\n| `filter: { $not: {} }` | FALSE(NOT TRUE) | 否 | 否(正确) |\n| `filter: { $or: [ {} ] }` | TRUE(`{}` 是 TRUE 析取项,吸收整个 `$or`) | **是** | **否** |\n\n裁定不是猜的,三个 driver 都实现了它:`packages/drivers/driver-sql/src/sql-driver.ts` 的 `reduceFilterNode` 与其上方 `applyFilterCondition` 的 \"Boolean identities (#5134)\" 注释、`packages/drivers/driver-mongodb/src/mongodb-filter.ts:139` 的同名函数、`packages/drivers/driver-memory/src/memory-matcher.ts:44-85` 的 `evaluate`,并由 `packages/spec/src/data/filter-logic-conformance.ts` 的共享 case-set 钉住(`empty $and is TRUE` / `empty $or is FALSE` / `a {} branch is a TRUE disjunct and absorbs its $or`)。\n\n所以 `config: { objectName: 'lead', filter: { $and: [] }, multi: true }` 今天可写、可跑、清空整表,而 authoring 期一声不响 —— 与 #5482 的原始形状同类,只是拼法更少见。\n\n## 为什么 #5482 没顺手补\n\n判「哪个恒等元」需要那套**布尔身份归约**。它已经存在三份(上面三个 driver),规约来源是 spec 的 case-set 而不是一个可复用的函数。在 linter 里手写第四份,正是 `packages/objectql/src/engine-delete-dispatch.ts` 被抽出来防的那种事故:扫描器与校验器用两个不同的谓词回答同一个问题,某天其中一个被改。#5240 的 `{ field: {} }` 三个答案、#4434 的假引擎比真引擎宽松,都是同一族。\n\n## 建议方向(不预设结论)\n\n1. **把归约提到共享层**:在 `packages/spec` 暴露一个纯谓词(`reduceFilterVerdict(node) -> 'true' | 'false' | 'clause'`,与 `FILTER_LOGIC_CASES` 同处一地并由它证明),三个 driver 各自的 `reduceFilterNode` 改为消费它,lint 侧 `filterCarriesNoCondition` 也消费它 —— 一个概念一个实现。工作量最大,但这是唯一让「declared = enforced」在四个消费者之间成立的形状。\n2. **只在 lint 侧近似**:识别 `$and: []` 这一种拼法。便宜,但立刻就是第四份归约的开头,且对 `$or: [ {} ]` 这类嵌套形状仍然沉默 —— 不建议。\n3. **不做**:记录在规则的 JSDoc 里(#5482 已经这么记了),把这格留给 code review。\n\n倾向 1。它同时改善另一条轴:AI 生成的 filter builder 掉光条件后 emit 的正是空组合子,而共享谓词让「空组合子等于什么」在四个消费者处只有一个答案,而不是四处各自宽容。\n\n关联:#5482(引入这条规则的单)、#5322 / #5134(恒等元裁定)、#5240(零算子字段约束,同族先例)、#4550 / #4434(为什么共享谓词而不是手抄)。"
+}

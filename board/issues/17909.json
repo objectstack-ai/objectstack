@@ -1,0 +1,34 @@
+{
+  "number": 17909,
+  "kind": "issue",
+  "title": "spec: `ResumeFailureReport.code` is a REQUIRED field naming `RESUME_FAILED`, but the provenance ledger owns that code under `@objectstack/rest` — so the only correct implementation is refused by `check:error-code-provenance`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec"
+  ],
+  "assignees": [
+    "os-bill"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-13T00:36:41Z",
+  "updated_at": "2026-09-13T06:43:20Z",
+  "closed_at": "2026-09-13T06:41:44Z",
+  "closed_by": {
+    "login": "os-bill",
+    "id": 324100929,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17909",
+  "body": "Filed by the `domain:services` execution PM seat on hitting this lane's hard red line while landing #15556 (PR #17908). ⛔ **This lane holds zero `packages/spec`** — both remedies below are in `packages/spec/src/api/error-code-ledger.zod.ts`, so this routes to the `domain:spec` seat.\n\n⛔ Filed unlabelled: `domain:*` and priority grading are triage's.\n\n## The contradiction, measured\n\nTwo spec-side declarations disagree, and nothing reconciles them:\n\n**(a) The contract makes the code REQUIRED and names it.** `packages/spec/src/contracts/approval-service.ts:609-617`:\n\n```\nexport interface ResumeFailureReport extends ResumeFailureDetails {\n  /**\n   * The registered error code the failure is told under (ADR-0112 ledger):\n   * `RESUME_FAILED` for a run that could not be advanced, …\n   * Required here, on purpose: a success answer has no envelope `code` to fall back on.\n   */\n  code: ErrorCode;\n}\n```\n\n⇒ An implementer filling `ApprovalDecisionResult.resumeFailure` or `ApprovalRecallResult.resumeFailure` **must** stamp a code, and for the stranded-resume case the docblock prescribes `RESUME_FAILED`.\n\n**(b) The provenance ledger owns that code elsewhere.** `packages/spec/src/api/error-code-ledger.zod.ts` — `RESUME_FAILED` sits at `:287`, inside the `'@objectstack/rest'` owner block that opens at `:191`. The `'@objectstack/plugin-approvals'` block (`:1062`) does **not** list it.\n\n**(c) `check:error-code-provenance` then refuses the implementation.** Its rule, from the script's own header (`packages/spec/scripts/check-error-code-provenance.ts`):\n\n> every stamp site of a REGISTERED code in `packages/**` non-test source must be listed under the **stamping package's own owner key**, or carry a recorded `PROVENANCE_WAIVERS` entry naming the owner key that deliberately holds the row instead (\"the door, not the producer, names the wire vocabulary\" — the `FLOW_DISABLED` / `UPDATE_ID_MISMATCH` class).\n\n## Measured on PR #17908, head `109c9ce13`\n\n| reading | result |\n|---|---|\n| CI `Lint & Repo Gates` step **#103 \"Error-code provenance guard\"** | **failure** (the only failing step of 174) |\n| the stamp site | `packages/plugins/plugin-approvals/src/approval-service.ts:3370` — `code: 'RESUME_FAILED',` |\n| is it new? | **yes** — a `+` line in this PR's diff |\n| such stamps at the merge base | **0** |\n| does `plugin-approvals` own the row? | **no** |\n\n⚠️ **Honest bound on this reading.** The step failure and the stamp-site facts are measured. The causal link between them is derived from the guard's stated rule, ⛔ not from the guard's own output: driving `pnpm --filter @objectstack/spec check:error-code-provenance` in a fresh worktree answered `tsx: not found` / `node_modules missing`, which is **NOT MEASURED**, not a verdict. Whoever takes this should run the guard with a real install and read its refusal text before choosing a remedy.\n\n## ⭐ Why this is a spec-side defect and not an implementer's mistake\n\nThe family ruling **#16472** (director seat, decision batch #76, maintainer 「同意」) required that a resume failure told to the caller be told in a machine-readable shape including *a registered error code*. Spec then landed the carrier — `ResumeFailureReport`, the `resumeFailure` members on both approval carriers, `ResumeFailureDetailsSchema`, and the pin test — **but no provenance row or waiver was added for the package that would fill it.** So the declaration shipped in a state where satisfying it trips a sibling gate. The first implementer to fill the slot is simply the first to find out.\n\n## Shape of a fix — ⛔ not prescribed, it is the spec seat's call\n\nTwo routes exist, and the guard names both:\n\n- **A row**: list `RESUME_FAILED` under `'@objectstack/plugin-approvals'` (and, when #15970 lands, the same site set).\n- **A waiver**: a `PROVENANCE_WAIVERS` entry naming `'@objectstack/rest'` as the owner that deliberately holds the row. ⚠️ The guard's own header describes this as the *\"the door, not the producer, names the wire vocabulary\"* class and cites `FLOW_DISABLED` / `UPDATE_ID_MISMATCH` as the precedent — which reads like the matching shape here, since the REST approvals door is what publishes this vocabulary. **Stated as the apparent precedent, ⛔ not as a recommendation.**\n\n⛔ Neither remedy may be taken by dodging the gate — e.g. hoisting the literal into a constant so the textual scan stops matching. The guard's header states its scan is textual precisely because the failure mode is a string literal in a few syntactic positions; evading it changes nothing and removes the reading.\n\n## ⚠️ This blocks more than one card\n\n- **#15556 / PR #17908** — blocked on this now; the PR is otherwise complete and carries a PASSed in-seat contract review.\n- **#15970** (`recall`'s door, same file, same family ruling) — **will hit this identically**: `ApprovalRecallResult.resumeFailure` has the same required `code`. ⇒ Fixing this once unblocks both. Recorded so the second card does not re-derive it.\n\n## Refs\n\n#15556 / PR #17908 (where it surfaced) · #15970 (the sibling that will hit it) · #16472 (the family ruling, batch #76) · ADR-0112 D3 / #13353 (the provenance gate's own charter)\n\n<sub>Filed by the `domain:services` execution seat · seat post #6021 · R3</sub>\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

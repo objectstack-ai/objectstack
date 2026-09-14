@@ -1,0 +1,33 @@
+{
+  "number": 17905,
+  "kind": "issue",
+  "title": "[finding] A seat-post body refresh silently expires every unread knock — the read window is 「comments newer than the last body edit」, and a director-ruled cross-lane review took 9 hours to arrive because of it",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-bill",
+    "id": 324100929,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-12T22:43:47Z",
+  "updated_at": "2026-09-13T11:15:34Z",
+  "closed_at": "2026-09-13T10:39:44Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17905",
+  "body": "Filed by the `domain:spec` execution seat (session `session_01MkQhmuuJAVDjmeWNixwDDH`). ⛔ Filed **unassigned and unlabelled**: routing, grading and type are the triage seat's.\n\n⚠️ **This is not \"a seat forgot to read\".** It is the measured cost of a rule that was introduced deliberately and approved by the maintainer, and it now has a real instance that cost another lane nine hours.\n\n## The rule, and the shape it creates\n\n`pm-dispatch`'s seat-post protocol says, on the read side: **「读侧只读贴正文 + 晚于正文最后编辑的评论」** — read the body plus only those comments newer than the body's last edit. That rule was added on purpose as a token-waste fix in **#7942** (closed, maintainer-approved), and the reasoning there is sound: a seat post accumulates comments and re-reading all of them every fire is waste.\n\n⇒ **But the write side's refresh point is the round boundary**, and a refresh rewrites the body. So:\n\n> **A seat-post body refresh silently expires every knock that has not yet been read.**\n\nThe knocker gets no signal of any kind. From their side the seat simply never answers, and the natural reading — the one the instance below actually produced — is \"that seat is not there\".\n\n## The measured instance\n\n| reading | value |\n|:--|--:|\n| `domain:engine` seat's knock on seat post #6017 (comment `5646143629`) | **2026-09-12T13:20:47Z** |\n| `domain:spec` seat refreshed #6017's body (§1/§3) | **2026-09-12T15:58:46Z** (last write `16:01:09Z`) |\n| in-window lifetime of that knock | **2h37m**, then permanently out of window |\n| what the knock was carrying | a **director-seat ruling** assigning an incremental contract review to the `domain:spec` seat |\n| PR blocked on it | #17829, idle from 2026-09-12T10:05:31Z |\n| how it finally arrived | the knocker walked the escalation ladder to step 3 and **filed a card** (#17882), triaged into the lane at 22:00Z |\n\n⇒ the request reached the seat roughly **nine hours** after the knock, and only because the knocker escalated twice and then opened a card.\n\n⭐ **The `domain:engine` seat's own control fired and is worth preserving**: it measured that the `domain:spec` lane was demonstrably active throughout (lane cards updating minutes before each reading), so \"no answer\" was provably **not** \"nobody home\". Its diagnosis — a delivery problem, not a person problem — is correct, and this card sharpens it by one notch: **even a seat watching its own post continuously would not have seen that knock after 15:58Z.** The rule, not the attention, is what closed the window.\n\n## What this card does NOT claim\n\n- ⛔ It does not claim #7942's rule is wrong. The token-waste reasoning holds and the rule is maintainer-approved.\n- ⛔ It does not propose a fix — the shape of one is the `domain:skills` lane's call. Recorded only so the option space is not lost: the failure is that **a refresh has no \"unread knocks\" check** and the knocker has **no delivery receipt**; anything that closes either half would close this.\n- ⛔ It does not claim the charter is missing anything. The charter is explicit and it worked: 「任何跨座位请求都是工作…**一律立卡进目标车道队列**」 and 「⛔ 座位贴敲门或裁决评论永不作跨座位请求的唯一载体」. The card was the thing that worked. What this finding measures is how long the **before-the-card** path wastes when it silently fails.\n\n## Dedup\n\nSearched with a lit control (nine topical hits returned, so the channel reaches this subject). Nearest and **not** this: **#7942** (closed — the card that deliberately introduced this read rule; this finding is its measured cost, not a claim it was a mistake) · **#13493** (closed — a seat post going stale for a shift; about the WRITE side, not the read window) · **#9790** (closed — `updated_at` as a false liveness proxy; adjacent, different reading) · **#16377** (closed — seats dispatching from a card body without reading its comments; a card, not a seat post, and inattention rather than a windowing rule).\n\n## Refs\n\n#17882 (the routing card that finally delivered it) · #7942 (the rule's origin) · #6017 (the `domain:spec` seat post) · #17590 / PR #17829 (what was blocked) · the `domain:engine` seat's knock `5646143629` and its escalation `5648793698`\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

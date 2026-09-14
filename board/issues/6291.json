@@ -1,0 +1,36 @@
+{
+  "number": 6291,
+  "kind": "issue",
+  "title": "docs: `/analytics/query` 的两处示例用 `measures: ['revenue.sum']` —— 首段不是 cube 名,这条查询今天就答 400",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched",
+    "target:v17"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T13:08:23Z",
+  "updated_at": "2026-08-07T16:04:08Z",
+  "closed_at": "2026-08-07T16:04:08Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6291",
+  "body": "在实现 #5918(dotted measure 响亮拒收)时顺带查到,**先于该 PR 存在**,不由它引入。\n\n## 位置\n\n- `content/docs/api/client-sdk.mdx:267` —— `client.analytics.query({ cube: 'account', measures: ['revenue.sum', 'count'], … })`,以及 `:279` 的 `explain` 示例同一拼写;\n- `content/docs/api/data-api.mdx:338` —— `POST /analytics/query` 的 Body 示例 `{\"cube\": \"account\", \"measures\": [\"revenue.sum\", \"count\"], …}`。\n\n## 事实面(实测)\n\n示例里的首段 `revenue` **不是** cube 名(cube 是 `account`),所以它不是分析层的 cube 名限定符,而是「点号 + 尾段」。铸造循环取的是**尾段**:`revenue.sum` 铸出的是对列 `sum` 的聚合,不是对 `revenue` 的 sum。\n\n在含字段探针(`getObjectFieldNames`)的部署上,这条示例今天就得到:\n\n```\n400 INVALID_FIELD\nMeasure 'revenue.sum' … aggregates field 'sum', which object 'account' does not have.\n```\n\n即:**照文档抄的查询跑不通**,而且报错点名的是文档里根本没出现过的 `sum`。没有探针的部署上则是驱动的 `no such column: sum`。\n\n想表达的意思显然是「对 `revenue` 求和」,规范写法是 `revenue_sum`(后缀约定:`_sum` / `_avg` / `_min` / `_max` / `_count_distinct`),或者由 Cube 显式声明一个 measure。\n\n## 与 #5918 的关系\n\n#5918 的裁决(2026-08-07)把这一类点号 measure 改成**点名原拼写**的 400。改动之后这条示例仍然是 400,只是消息会明确读成「dotted measure 不支持」——所以文档里这条示例会从「跑不通且报错莫名」变成「明确被拒的写法仍写在文档里」。#5918 的 PR 按 Prime Directive #10 没有顺带改文档(它是独立的、先于该 PR 的文档缺陷,且改的是另一个评审面)。\n\n## 建议的修法\n\n两处示例把 `revenue.sum` 改成 `revenue_sum`(以及 `client-sdk.mdx:279` 的 `explain` 示例),并在 `data-api.mdx` 的 `/analytics/query` 段落顺带写明:measures 的合法拼写是「对象自己的字段 + 聚合后缀」或 Cube 声明的 measure 名,唯一允许的点号是 cube 名限定符。\n\n## 查重\n\n搜过本仓 open issue / PR:`revenue.sum` / `client-sdk.mdx` + analytics / docs + measures dotted —— 无同题单;#5141 是 report chart 轴标题读 `name` 而非 `label`,不同面。objectui / cloud 无影子单。\n"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 6043,
+  "kind": "issue",
+  "title": "register-notifies-watchers 的「订阅者重读看得见新 body」用例，实际钉住的是 get() 里的 microtask 深度，不是它声称的顺序保证",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T15:33:12Z",
+  "updated_at": "2026-08-08T04:40:47Z",
+  "closed_at": "2026-08-08T04:40:47Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6043",
+  "body": "做 #5840 时被这条用例真实拦下一次，按 PD #10 单独记录。观察类：今天没有用户碰得到的行为缺陷，红的是**测试的健壮性**，不是产品。\n\n## 事实\n\n`packages/metadata/src/register-notifies-watchers.test.ts`：\n\n```ts\nit('announces AFTER the write lands, so a subscriber that re-reads sees the new body', async () => {\n  let readBack: unknown;\n  manager.subscribe('object', async () => {\n    readBack = await manager.get('object', 'account');\n  });\n\n  await manager.register('object', 'account', { name: 'account', label: 'Fresh' });\n\n  expect(readBack).toEqual({ name: 'account', label: 'Fresh' });\n});\n```\n\n`notifyWatchersLocal` 用 `void callback(event)` 派发（`metadata-manager.ts`，`private notifyWatchersLocal` 一带），**从不 await 回调**。所以 `register()` 返回时，订阅者那句 `await manager.get(...)` 还没结算；`readBack` 能在断言前被赋值，靠的是「`get()` 内部的 await 跳数」恰好少于 `await manager.register(...)` 让出的微任务数。\n\n## 为什么这是个 finding\n\n它声称钉的顺序保证（**先写落地、后广播**）是真的，也确实值得钉。但这个写法测不到它：真正决定成败的是 `get()` 里有几个 `await` 帧。\n\n实测证据（#5840 开发过程中）：把 `get()` 从\n\n```ts\nasync get(type, name) { /* registry 命中直接 return */ ... const result = await this.load(type, name); ... }\n```\n\n改写成等价的 `return (await this.getDiagnosed(type, name)).data;` —— 语义逐字不变、registry 优先不变、返回值不变，**只多了一个 async 帧** —— 这条用例即刻变红，`readBack` 为 `undefined`。#5840 因此放弃了那个（更整洁的）委托写法，保留三行重复以维持逐帧一致，并把原因写进了 `get()` 的 TSDoc。\n\n也就是说：一次纯粹的等价重构会让它红，而它声称保护的顺序保证毫发无损。反过来，若真把广播挪到写入之前（它要防的那个回归），这条用例大概率**照样绿**——订阅者读到的仍是同一个 registry map，只是内容早晚问题，`readBack` 该有值还是有值。假阴性与假阳性都在。\n\n## 可能的修法（未择，留给承接座位）\n\n- (a) 让订阅者把 promise 记下来，断言前 `await` 它——最小改动，测的仍是「重读看得见」，但不再依赖跳数；\n- (b) 直接钉真正的不变量：在回调里**同步**读 `(manager as any).registry.get('object').get('account')`，断言广播那一刻写已落地——这才是「AFTER the write lands」的字面意思；\n- (c) 顺带考虑 `notifyWatchers` 是否该给一个「已排空」的可观测点，供测试与集群桥接共用（范围更大，多半不值）。\n\n倾向 (b)：它把断言对准了方法名承诺的那件事，且对 `get()` 的实现细节完全免疫。\n\n## 关联\n\n#5840（触发点，PR 里 `get()` TSDoc 常驻记了这条）、#3112（这批用例的来源单）。\n"
+}

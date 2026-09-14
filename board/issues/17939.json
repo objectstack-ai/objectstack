@@ -1,0 +1,33 @@
+{
+  "number": 17939,
+  "kind": "issue",
+  "title": "service-automation: a duration-less timer `wait` suspends a run forever with no job, no `waitUntil` and not one log line — should it warn, refuse, or stay silent?",
+  "state": "closed",
+  "state_reason": "duplicate",
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:services",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-13T07:11:30Z",
+  "updated_at": "2026-09-13T07:37:42Z",
+  "closed_at": "2026-09-13T07:37:42Z",
+  "closed_by": {
+    "login": "os-tesla",
+    "id": 327383522,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17939",
+  "body": "Filed by the `domain:services` execution seat from **#17843**'s delivered measurement (PR #17937). ⛔ Unlabelled on purpose — `domain:*` and priority are triage's to set, not this seat's.\n\n## The question\n\n**Should a `wait` node that resolves to a timer with no duration warn, refuse, or keep suspending silently?**\n\nThis is a product question with a real case on each side, ⛔ not a defect with one obvious repair — which is why it is a card and not a patch.\n\n## The measurement it rests on — observed, ⛔ not read from source\n\n#17843 converted a source reading into a real `engine.execute()` run. With the whole `waitEventConfig` block **absent** — a document `FlowNodeSchema` **accepts**, and the state a freshly created node is in:\n\n```\nnode:                { id: 'pause', type: 'wait', label: 'Wait' }\nexecutor return:     { success: true, suspend: true, correlation: 'timer:pause', output: undefined }\nengine result:       { success: true, status: 'paused', runId: 'run_caa5b321-...' }\nscheduled jobs:      []          <- a job service WAS present and answering\nstored variables:    no 'pause.waitUntil' key\nlog lines during run: []          <- none, at ANY level\nnodes that ran:      [ 'before' ] <- reached the node, never got past it\n```\n\n⇒ `eventType` defaults to `'timer'`, the timer branch computes no deadline, **no wake-up job is armed despite a job service being available**, **no `waitUntil` is persisted**, and **not one log line is emitted at any level**. The run parks until something external calls `resume(runId)` — which, with no `waitUntil` recorded anywhere, nothing knows to do.\n\n**The control discriminates on every channel**: the same node with `eventType: 'timer'` + `timerDuration: 'PT1H'` schedules a job, writes `waitUntil`, and carries the job's own correlation. ⭐ The one channel that does **not** discriminate is `status: 'paused'` — both halves park — so it is not a signal.\n\nPinned as a characterization at `packages/services/service-automation/src/builtin/absent-config-node-characterization.test.ts` (PR #17937). ⚠️ That file is explicitly **a photograph, not an endorsement** — it records the behaviour so a change to it is visible; it takes no position on this card's question.\n\n## Why it is a decision\n\n- **For leaving it**: `wait-node.ts` carries a source comment declaring the fallback deliberate — *\"`waitEventConfig` is itself optional, and a wait node without one is a VALID TIMER WAIT\"*. Someone decided this. A `wait` with no duration may be a legitimate \"park until externally resumed\" shape, and a `resume(runId)` door exists.\n- **Against**: if that IS the intended shape, the silence still costs — there is no `waitUntil`, no job, and no log line, so an operator has no way to distinguish \"deliberately parked pending an external resume\" from \"stuck\". A run in that state is indistinguishable from a lost one.\n- **The blast radius is real, not hypothetical**: objectstack-ai/objectui#9109 is at **p1** precisely because its inspector reveals `timerDuration` on a node whose config block is absent, so an author who reads it as *\"already a timer wait\"* and saves untouched ships exactly this document. It parses clean at every step and the author receives no negative signal anywhere.\n\n## ⚠️ What this card is NOT\n\n- ⛔ Not a claim the executor is wrong. The honest state is **\"measured, and the behaviour is deliberate per its own comment\"**.\n- ⛔ Not about `boundary_event`. Measured separately in #17843 and it is the **opposite** shape — no executor is registered for the type at all, so it fails **loudly** with `NO_EXECUTOR` plus a startup `warn` naming the type, and a fully populated `boundaryConfig` fails identically. Loud by design; nothing to decide there.\n- ⛔ Not objectui#9109's own question (whether those declared defaults should be deleted or backed upstream). That is `needs-user-decision` over there and is unaffected by the answer here.\n\n## Two adjacent observations from the same run, recorded so they are not re-derived\n\n1. The `wait` executor's return carries `output` as a **present key holding `undefined`** rather than omitting it, so any JSON rendering of that value silently reads as *\"no `output` key\"*. An observation about how the value reads, not a defect — but whatever answers this card touches that exact return shape.\n2. A **paused** run emits no run-level log line at all, where a completed or failed run gets an `[automation] run flow=... status=...` line. Consistent with *\"paused is not terminal\"*; it is the other half of why the absent-config `wait` is silent end to end.\n\n## Refs\n\n#17843 (the measurement request, answered) · PR #17937 (the characterization test) · `5651444086` (the triage seat's source reading, which the run confirmed on the `wait` half) · objectstack-ai/objectui#9109 (p1, the surface that leads an author here)\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

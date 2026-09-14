@@ -1,0 +1,35 @@
+{
+  "number": 6435,
+  "kind": "issue",
+  "title": "`update` 的 **by-id** 路径同样把非标量 `data.id` 交给驱动写主键列(#6262 的孪生形状,`where.id` 胜出时)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched",
+    "target:v17"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T18:33:25Z",
+  "updated_at": "2026-08-08T01:44:09Z",
+  "closed_at": "2026-08-08T01:44:09Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6435",
+  "body": "范围外发现,来自 #6262 / PR #6433 的实施过程(PD #10)。#6262 与其分诊都把范围钉在 **multi 分支**(「Scope as queued = route A only」、「非 multi 路径不动」),所以本条**未在该 PR 内修改**,只记录。\n\n## 事实\n\n#6262 收口的是 multi 分支的 SET 载荷。同一个缺陷在 **by-id 分支**上还留着一份,触发条件是 `data.id` 非标量、而 `options.where.id` 是标量真值 —— 也就是 `ENGINE_UPDATE_DISPATCH_CASES` 自己列着的那一行:\n\n```\n{ what: 'operator object in data.id, scalar where.id — the WHERE id wins, the operator is not one',\n  data: { id: { $in: ['a', 'b'] }, title: 'x' },\n  options: { where: { id: 'rec_1' } },\n  expect: 'by-id', expectId: 'rec_1' }\n```\n\n**派发是对的**(#5748 裁 A / PR #5919:算子对象不是 id,`where.id` 胜出,绑定 `rec_1`),但载荷同样没被清理。实测(PR #6433 新增测试里对现状的钉死断言,绿):\n\n```\ndriver.update('task', 'rec_1', { id: { $in: ['a','b'] }, title: 'x' })\n                                 ^^^^^^^^^^^^^^^^^^^^^^ 进 SET 子句\n```\n\n驱动侧确认这确实落到 SET 而非被忽略 —— `packages/drivers/driver-sql/src/sql-driver.ts:3254` 的 `update()`:\n\n```ts\nconst builder = this.getBuilder(object, options).where('id', id);\nconst formatted = this.applyWriteColumnMap(object, this.formatInput(object, data));\nawait builder.update(formatted);\n```\n\n`formatted` 由**整个** `data` 得出,`id` 不在任何跳过名单里。于是 SQL 形如 `UPDATE task SET id = '{\"$in\":[\"a\",\"b\"]}', title = 'x' WHERE id = 'rec_1'` —— rec_1 的主键被改写成一个序列化的算子对象。\n\n## 与 #6262 的关系\n\n同一族、不同分支,**不是重复**:\n\n| | 行定位 | 载荷里的 `id` | 状态 |\n|:---|:---|:---|:---|\n| #6262 | `where` 谓词(AST) | 算子对象等 ⇒ 已剥离(PR #6433) | 已修 |\n| 本条 | `driver.update` 的独立 id 参数 | 算子对象等 ⇒ **仍原样进 SET** | 未修 |\n\nPR #6433 的注释与测试对 by-id 路径的说法是「主键走独立参数,载荷里的 `id` 是冗余而非破坏」—— 那句话对**标量** `data.id` 成立(`SET id = 'rec_1' WHERE id = 'rec_1'`,同值空写),对**非标量**不成立,这就是本条。该 PR 已按现状把 by-id 载荷钉死,所以本条一旦修,那两个 pin 会响亮翻红,不会被悄悄改掉。\n\n## 另一个更常见的入口\n\n同样的判定阶梯下,`data: { id: null, … }` + 标量 `where.id` 也走 by-id,SET 里就带上 `id = NULL`:客户端 GET 一条记录、改两个字段、整体 PUT 回来,而序列化把 `id` 写成 `null` 的形状,就够了。落到 SQL 是 NOT NULL 约束报错(好的情况),或在宽松存储上留下一条主键为空的行。**未实测这条端到端**(REST 层是否先行剥 `id` 没有查),只记录形状,严重度请分诊裁。\n\n## 方向(不预设结论)\n\n- **A(与 #6262 同构)**:by-id 分支也剥 —— 但只剥「派发判定不是 id」的那一份;标量 `data.id` 保持现状(它等于绑定的主键,同值空写,且这是长期行为,动它是另一个决定)。\n- **B**:响亮拒绝非标量 `data.id`(无论哪条分支)—— 与 #6262 的 B 案是同一个裁决,要改 `ENGINE_UPDATE_DISPATCH_CASES` 里那条 `expect: 'by-id'`,属对 #5748 裁 A 的部分回退,需要新裁决。\n- **C**:驱动侧各自跳过 `id` —— 不建议,五个后端各给一个答案,正是 #5240 / #4434 那一族。\n\n关联:#6262 / PR #6433(multi 分支那一半)、#5748 / PR #5919(`data.id` 的标量判定)、#5922(`id` 之外的标量面)、#4550 / #4434(为什么共享谓词而不是第二个答案)。\n"
+}

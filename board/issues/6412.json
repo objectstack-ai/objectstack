@@ -1,0 +1,34 @@
+{
+  "number": 6412,
+  "kind": "issue",
+  "title": "[finding][objectql] lifecycle-service 还有两条 #4747 未覆盖的破坏性操作腿:abort 抬起后仍发 reclaimSpace(VACUUM)与 rotateShards(DROP 分片)—— 探针实测,当前不可达",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T17:03:58Z",
+  "updated_at": "2026-08-08T03:08:12Z",
+  "closed_at": "2026-08-08T03:08:12Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6412",
+  "body": "来自 #5966 / PR #6397 实施期的必答项探针(一次性探针已删,证据在该 PR 正文「顺带发现」一节),按 PD #10 记录,**未认领**。dev 已做三仓查重(reclaimSpace / rotateShards / teardown 关键词零命中),本单为唯一入口。\n\n## 两条腿(均为「控制流已读到 aborted === true 之后仍发破坏性操作」,与 #5966 同形)\n\n1. **`lifecycle-service.ts:616` `driver.reclaimSpace()`** —— 对象循环之后的空间回收循环。abort 落在最后一个声明对象的 reap 内时,`batchedReap` 在 :1215 读位 break、对象循环自然结束(不经 :598 的对象间 return),控制流落到 :614,向正在关闭的 datasource 发 VACUUM 级操作。探针实测 `reclaims === ['vacuum']`。\n2. **`lifecycle-service.ts:852` `driver.rotateShards()`** —— 对象同时声明 ttl + `storage.strategy: 'rotation'` 时,ttl reap 读位 break 返回后,无判定地发出物理分片轮转(DROP 过期分片)。探针实测 `drops === ['DROP shard']`。仅声明 rotation(无 ttl)的一路属「无人读过位」的良性形态,不在此列。\n\n## 为什么是 finding 而非 pm:queue\n\n两条今天同样**不可达**:仓内无平台对象声明 `storage.strategy: 'rotation'`(仅测试与 spec fixture);reclaimSpace 一条需要 abort 恰落在最后对象的 reap 内。修法与 #5966/PR #6397 同款(判定合取项 + 同注释口径),成本低,但无现实触发面 —— 交发现分诊轮定级。\n\n另::1134 无 find 引擎的兜底 DELETE 在 N 租户下的 N+1 形态与在册 #5756 同区域,已按 dev 判断并入其观察面,不单列。\n\nRefs:#5966、PR #6397、#4747(纪律)、PR #5956(第一腿)、#5194。"
+}

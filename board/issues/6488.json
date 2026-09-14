@@ -1,0 +1,33 @@
+{
+  "number": 6488,
+  "kind": "issue",
+  "title": "[sweep] Restore the `X` / `XParsed` house convention in two more spec partitions (#5507 #5975)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "target:v17"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T01:48:14Z",
+  "updated_at": "2026-08-08T06:09:56Z",
+  "closed_at": "2026-08-08T06:09:56Z",
+  "closed_by": {
+    "login": "qq9340100",
+    "id": 313832657,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6488",
+  "body": "Sweep card (maintainer-directed, 2026-08-07). One claim, one PR, two `Fixes`.\n\n## Admission criterion\n\n> The `X` / `XParsed` house convention (bare name = `z.input` = what the author writes; `XParsed` = `z.infer` = post-parse shape, per `shared/retry-policy.zod.ts`'s JSDoc) is **not applied** in this partition — the bare name is wrongly `z.infer`, or the author-side twin is missing entirely.\n\nShipped precedents to copy, not re-derive: **#4963 / PR #5514** (`automation/etl.zod.ts`, nine aliases) and **#5551** (`integration/connector.zod.ts`, twenty aliases, closed 2026-08-07).\n\n| # | Partition | Defect |\n|---|---|---|\n| **#5507** | `automation/execution.zod.ts` | seven `X` / `XParsed` pairs where **both sides are `z.infer`** — pure synonyms, so the convention conveys nothing; plus `ScreenFieldConfig` missing its `Parsed` twin |\n| **#5975** | `spec/src/cloud/` request types | only `z.infer` (output) exported, no Input twin — cloud-repo callers are forced to hand-write the defaults zod fills in |\n\nSame failure mode in both: the one bare annotation an author would naturally reach for (`const x: Connector = {…}`) does not compile, because defaulted keys are required in the parsed view.\n\n## Two things to settle inside the PR (state both explicitly)\n\n1. **Enum-class aliases are exempt** — `z.input` and `z.infer` are identical for them; flipping is churn. Only object-shaped aliases have a real difference. Enumerate which members were exempt and why.\n2. **Importer surface across the three repos** must be checked before renaming anything — #5551 was a real breaking rename precisely because its parse path was live. If a rename here is breaking, it needs its own changeset wording, not a silent flip.\n\n## Scope discipline\n\n- **Zero changes beyond the two partitions**; `git diff --stat` corresponds to the checklist.\n- ⛔ **#4593 is deliberately NOT a member.** It reads as the same family but is a different class: it *adds ~150 new `export type` aliases*, expanding `api-surface.json` — a public-surface expansion its own body says needs a maintainer ruling (补齐 / 按需补 / 维持现状). It waits for that ruling; do not absorb it.\n- Out-of-scope findings filed separately per PD #10.\n\n## Landing constraints\n\nType exports move `api-surface.json` ⇒ os-regen four-step序 on every sync; `check:authorable-surface` green as the anchor assertion; ⛔ never hand-edit the anchor.\n\n## Review shape\n\nBy checklist: one line per alias touched — name | before (`z.infer`/absent) | after (`z.input` + `XParsed` twin) — with the exempt enum list stated separately.\n\nFiled unassigned. Member issues keep `pm:queue` but are **excluded from batch selection while this card is open**; both close with the PR."
+}

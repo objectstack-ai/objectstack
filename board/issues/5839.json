@@ -1,0 +1,34 @@
+{
+  "number": 5839,
+  "kind": "issue",
+  "title": "[metadata-core] `sys_view_definition` 的\"活跃行唯一\"从未生效——归档视图仍占用 (name, organization_id, owner) 名额",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:queue"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T07:44:19Z",
+  "updated_at": "2026-08-07T17:56:45Z",
+  "closed_at": "2026-08-07T17:56:45Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5839",
+  "body": "发现于 #5248(`IndexSchema.type` / `partial` 退役)的生产者清点。**不在该 PR 范围内**——退役本身是零 DDL 变化,这条是被退役暴露出来的既有行为缺口,修它是行为变更。\n\n## 事实\n\n`packages/metadata-core/src/objects/sys-view-definition.object.ts` 声明:\n\n```ts\nindexes: [\n  // A given view name is unique per (organization, owner) among active rows —\n  // a shared view (owner NULL) and each user's personal views don't collide.\n  {\n    name: 'idx_sys_view_def_active',\n    fields: ['name', 'organization_id', 'owner'],\n    unique: true,\n    partial: \"state = 'active'\",   // ← #5248 退役前的原文\n  },\n```\n\n注释说的是\"among active rows\",但 `partial` 从来没有任何 driver 消费者:`SqlDriver.syncDeclaredIndexes` 走 knex 的 `table.unique(fields, { indexName })`,无法表达 `WHERE`。所以实际建出来的一直是**无谓词的全量 UNIQUE 索引**。\n\n实测(#5248 PR 里的 `packages/drivers/driver-sql/src/declared-index-retired-keys.test.ts` 同一手法,真实 SQLite 存储的 DDL):\n\n```\nWITH partial    -> CREATE UNIQUE INDEX `idx_sys_view_def_active` on `t` (`name`, `organization_id`, `owner`)\nWITHOUT partial -> CREATE UNIQUE INDEX `idx_sys_view_def_active` on `t` (`name`, `organization_id`, `owner`)\n```\n\n两者逐字节相同,且都不含 `WHERE`。\n\n## 与 `sys_metadata` 的关键差别\n\n`sys_metadata` 的同类声明(`idx_sys_metadata_overlay_active`)有一个**运行时兜底**:`packages/metadata-protocol/src/protocol.ts` 的 `ensureOverlayIndex()` 用 raw SQL 发 `CREATE UNIQUE INDEX … WHERE state = 'active'`(并且顺带修了 `COALESCE(package_id,'')` 的 NULL-distinct 问题),所以那张表的活跃行范围是真的交付了的。\n\n**`sys_view_definition` 没有任何等价的运行时迁移**——全仓检索 `idx_sys_view_def_active` 只有声明处一个命中。也就是说这张表的\"活跃行唯一\"在任何一层都没有实现。\n\n## 用户可达的后果\n\n`sys_view_definition` 有 `state` 字段(`defaultValue: 'active'`)。一旦某个视图被置为非 active(归档/重置/软删),它的 `(name, organization_id, owner)` 组合仍然被全量 UNIQUE 索引占用,于是:\n\n- 用户删除/归档一个名为 \"我的管道\" 的个人视图后,**无法再新建同名视图**——唯一约束会拒绝插入;\n- 反过来,如果当初的意图是\"同名的历史版本可以共存\",那么当前的全量唯一约束比设计更严。\n\n两种读法下当前行为都不是声明所描述的那个。\n\n## 可选修法(需要拍板,故不自行实施)\n\n1. **补运行时迁移**——照 `ensureOverlayIndex` 的形状,为 `sys_view_definition` 发 partial UNIQUE,MySQL 侧降级为普通复合索引 + 应用层 upsert 语义。交付注释所承诺的语义。\n2. **接受全量唯一并改注释**——如果产品上就是\"视图名在 (org, owner) 内永久唯一,含已归档\",那么把注释里的 \"among active rows\" 删掉即可,零代码。\n3. **把 `state` 纳入索引列**——`(name, organization_id, owner, state)`,允许同名的一个 active + 多个非 active;但这不等价于 partial(多个 active 之间仍互斥,而多个同 state 的归档行会互斥),语义要单独想清楚。\n\n倾向 1 或 2:取决于产品是否要求视图名可回收。这是行为决策,不是机械修复。\n\n## 相关\n\n- #5248 / #4943 —— `IndexSchema.partial` 退役(本条的发现路径);该 PR 只删声明面的死键,**不改**任何 DDL,因此没有顺手改这里。\n- ADR-0005 / ADR-0048 —— `sys_metadata` 侧同类问题的既有解法参考。"
+}

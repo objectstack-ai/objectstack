@@ -1,0 +1,36 @@
+{
+  "number": 6283,
+  "kind": "issue",
+  "title": "[转移·spec] flow 的 `allowOrgOverride:true` 回滚为 false——#6155 Q1=B 裁决的契约半边,同步了结 #6191",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "qq9340100"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T13:00:51Z",
+  "updated_at": "2026-08-08T01:58:05Z",
+  "closed_at": "2026-08-08T01:58:05Z",
+  "closed_by": {
+    "login": "qq9340100",
+    "id": 313832657,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6283",
+  "body": "Part of #6155(维护者 2026-08-07 裁决 Q1=**B**:org 归属的 flow overlay 按 ADR-0005 原判**写入侧响亮拒绝**;services 座位按 shared-contract 规则转移立单——`packages/spec` 恒归 spec 座位)。\n\n## 要做的\n\n1. `packages/spec/src/kernel/metadata-plugin.zod.ts:649` flow 行:`allowOrgOverride: true` → **`false`**(与同行 `supportsOverlay: false` 的矛盾组合一并消除),注释引 ADR-0005:57 原文(automation ❌:「Per-org variants are a deployment, not an overlay」)与本单;\n2. **declared = enforced 核验(验收关键)**:确认 `allowOrgOverride` 在**写入路径**真的被消费——flip 后 org 归属的 flow 写入(publish/saveMetaItem)必须**响亮拒绝**而非静默照收。#6190 实测「写路径比读路径宽松」,若 flip 后写入仍成功 = 标志位无写侧消费者,则拒绝逻辑缺口按落点(metadata 写路径,预判 engine-core)**另立单**并在本单记录,⛔ 不在 spec 单里越界实现;\n3. 落地即可**关闭 #6191**(未走 ADR 的反转记录单——本次回滚正是其修复)。\n\n## 依据链\n\n#6155 三问裁决(评论 5215882772 的 Q1=B 及维护者批复)、ADR-0005 `docs/adr/0005-metadata-customization-overlay.md:57`、#6191(反转立案,commit ba252da0b)、#6190(write-through 幻影绑定——flip 后其触发面随之消失,届时按其单核实是否连带关闭)。\n\n## 影响面(如实)\n\n行为收紧:org 归属的 flow overlay 写入从「成功但重启失绑」(#6190 的幻觉状态)变为写入时拒绝。dev 探针实测冷启动读路径本就滤掉 org 行,**今天没有任何在跑的 org flow**,收掉的是幻觉不是能力。"
+}

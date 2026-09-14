@@ -1,0 +1,34 @@
+{
+  "number": 6116,
+  "kind": "issue",
+  "title": "finding(objectql): engine.ts 的 sys_file hydrate 读故障走 `catch → return records` —— 静默返回裸 id,零日志(#5979 实施期扫出,闸门词表外)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T02:20:02Z",
+  "updated_at": "2026-08-07T22:24:29Z",
+  "closed_at": "2026-08-07T22:24:29Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6116",
+  "body": "发现于 #5979(PR #6114)实施期的邻域清扫,按 Prime Directive #10 只记录不修,**未认领**。严重度不自评,交分诊。\n\n## 事实\n\n`packages/objectql/src/engine.ts:4686` 一带(以内容定位:sys_file 引用 hydrate 的读路径):\n\n```ts\n} catch {\n  return records;\n}\n```\n\n`sys_file` 读不到时**原样返回入参**(未 hydrate 的裸 id),不记一行日志。\n\n## 为什么闸门看不见、以及定性\n\n- `check-durability-degradation-log-level.mjs` 的 read-seam invention 规则(#5186)扫的是「编造空答案」—— 这里**不编造空值**(返回的是入参本身),落在词表外;\n- 降级对调用方**部分可见**(拿到裸 id 而非 hydrate 后的文件引用),属**功能性降级**而非持久性降级,与 #6051 里 `restoreArtifactRegistryView` 的「已声明 best-effort」不同 —— 这里没有任何声明,也没有任何声音;\n- 危险方向:消费方(UI/导出)把裸 id 当作「无附件」渲染,故障期间的表现与「记录本无文件」不可分辨 —— ADR-0110 D3 的族形,只是载体是功能面。\n\n同次清扫的相邻点已裁定不立案,一并记录免得下一轮重复裁:`engine.ts:3870` 的 `catch → return { verified: false, conclusive: false }` 是**显式三态**(`conclusive` 即「读没读成」位),与 baseline 里 `referenceExists` 的 `reviewed-legitimate` 同形,站得住。\n\n## 处置方向(供分诊定价,不预判)\n\n最小:catch 里按 `isMissingTableError` 判别 + 非良性时 `warn`(带后果与修法,AGENTS「Degradation log levels」的判定问句:无持久性声称 ⇒ 不升 error);或跟 #5840 的 `getDiagnosed` 形状对齐把判定交给调用方。是否值得动,交分诊按 finding 池纪律裁。\n\nRefs:#5979 / PR #6114(dev 报告 `family_residue` 节)、#5186(闸门)、ADR-0110 D3、AGENTS「Degradation log levels」。"
+}

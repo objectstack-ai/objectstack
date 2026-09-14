@@ -1,0 +1,36 @@
+{
+  "number": 6506,
+  "kind": "issue",
+  "title": "`Validate Package Dependencies` 在 main 上全仓变红:nanoid 3.3.16 命中 GHSA-2v37-7h3g-55p8(有 fix,缺 override)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched",
+    "target:v17"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T02:39:37Z",
+  "updated_at": "2026-08-08T04:25:28Z",
+  "closed_at": "2026-08-08T04:25:28Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6506",
+  "body": "范围外发现,来自 #6277 / PR #6502 的 CI。**不是该 PR 引入的**,证据在下面。\n\n## 事实\n\n`Validate Package Dependencies` 的 OSV-Scanner 步骤在 PR #6502 上 exit 1:\n\n```\nTotal 1 package affected by 1 known vulnerability (0 Critical, 1 High, 0 Medium, 0 Low, 0 Unknown)\n1 vulnerability can be fixed.\n\n| OSV URL                             | CVSS | ECOSYSTEM | PACKAGE | VERSION | FIXED VERSION | SOURCE         |\n| https://osv.dev/GHSA-2v37-7h3g-55p8 | 8.2  | npm       | nanoid  | 3.3.16  | 3.3.17        | pnpm-lock.yaml |\n```\n\n## 为什么这是全仓状态,不是某个 PR 的问题\n\n- `nanoid@3.3.16` 在 `origin/main` 的 `pnpm-lock.yaml` 里逐字相同(main:7403 / 14106;PR 分支:7406 / 14109 —— 只是被上面 3 行 workspace link 顶下去了)。\n- PR #6502 对 `pnpm-lock.yaml` 的全部改动就是这 3 行(给 plugin-security 加一条 workspace devDependency 的 link),不涉及任何版本变化。\n- 该 job 扫的是 `--lockfile=pnpm-lock.yaml`,所以**任何**基于当前 main 的 PR 都会撞到同一条,直到 main 上修掉。\n\n传入路径:`postcss@8.5.25` -> `nanoid: 3.3.16`(`pnpm-lock.yaml:14408`)。`pnpm-workspace.yaml` 的 `overrides` 里目前**没有** nanoid 条目。\n\n## 修法方向(未在本单实施)\n\n`osv-scanner.toml` 的头部规矩很明确:**advisory 有 fixed version 时走取修复那条路,不进豁免账本**(该账本当前是零条目的稳态)。所以这里应当是在 `pnpm-workspace.yaml` 的 `overrides` 里加一条 nanoid 的 floor pin,并遵守 #6095 的选择子形状 —— 上界放在**大版本边界**,不要写成目标自身的版本线(`nanoid@<3.3.17` -> `^3.3.17` 正是 #4961 / #5032 那种一上线就自失效的写法)。形如:\n\n```yaml\n  'nanoid@>=<advisory 的 affected floor> <4.0.0': '^3.3.17'\n```\n\nfloor 请按 GHSA-2v37-7h3g-55p8 通告里的 affected range 填,不要照抄本文。改完跑 `pnpm install` + `node scripts/check-override-consistency.mjs`。\n\n顺带留意 `overrides` 里已有 `'postcss@<9.0.0': '^8.5.10'` —— nanoid 是它拖进来的,但 postcss 8.5.25 已经在这条 pin 之上,所以抬 postcss 未必能解决,直接 pin nanoid 更直接。这一点没有实测,只是提醒下一位不要先去动 postcss。\n\n## 影响\n\n`Validate Package Dependencies` 是每个 PR 都会跑的 job,现在它在所有 PR 上都是红的。#5617 记录过「红 job 没拦住合并」的另一半问题;这条是让它红的具体原因,值得单独修掉而不是等它自己消失。"
+}

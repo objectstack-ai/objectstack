@@ -1,0 +1,34 @@
+{
+  "number": 5927,
+  "kind": "issue",
+  "title": "deleteMetaItem 的四句回执一律说 \"customization overlay … reset to artifact default\",包括根本没有 artifact 可回退的 runtime-only 项",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T12:13:14Z",
+  "updated_at": "2026-08-07T14:35:10Z",
+  "closed_at": "2026-08-07T14:35:10Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5927",
+  "body": "观察类发现,在修 #5265(保存回执一律自称 \"customization overlay\")时于同一文件的 delete 侧看到。**纯文案**,不影响持久化或枚举行为,所以单独记录、不搭车。\n\n## 事实\n\n`packages/metadata-protocol/src/protocol.ts`(内容定位,行号会漂)的 `deleteMetaItem` 有四句回执,全部无条件把这次删除叙述成\"移除一层 overlay、回到 artifact 默认值\":\n\n```\n10213:  `No customization overlay found for ${request.type}/${request.name} — already at artifact default.`\n10286:  `Customization overlay deleted — ${request.type}/${request.name} reset to artifact default. [seq=${result.seq}]`\n10343:  `No customization overlay found for ${request.type}/${request.name} — already at artifact default.`\n10363:  `Customization overlay deleted — ${request.type}/${request.name} reset to artifact default.`\n```\n\n但对一个 **runtime-only**(无 artifact 背书)的项 —— 例如一次全新创建的 `object` / `flow` / `hook` —— 删除后并不存在什么 \"artifact default\" 可以回退:那一行就是这个项的全部,删掉之后它**不复存在**。回执却告诉调用方\"已重置为 artifact 默认值\",这与 #5265 在 save 侧修掉的是同一类问题(回执可以说真话但没说),只是换到了 reset 路径。\n\n## 事实是现成的,不需要新查询\n\n同一个方法里已经算过这条事实 —— delete 的 repo 路径就用它决定 `intent`:\n\n```ts\nintent: this.isArtifactBacked(singularTypeForRepo, request.name)\n    ? 'override-artifact'\n    : ...\n```\n\n所以分句的成本和 #5265 一样:改 message 模板 + 对应断言,零新增读路径。\n\n## 与 #5079 的关系(不是它的子问题)\n\n#5079(deleted overlay 仍在 /meta listing)碰的是同一条 DELETE 的用户可见面,但它的完成判据是\"list / get / dispatch 三者立即一致\",与这句措辞无关 —— 修完 #5079 这四句仍然会对 runtime-only 项说假话,修完这个也不会让 #5079 少做一件事。故按独立 issue 记录,不作为 #5079 的 sub-issue。两者若被同一个人接走,可以一并处理。\n\n## 未做判断\n\n严重性留给 triage:今天没有用户因此丢数据(删除本身是对的,#5079 那条 listing 不一致才是行为问题),但 \"reset to artifact default\" 是一句会被 Studio toast 原样展示的话,一个刚删掉自己新建对象的管理员会据此以为还有个默认值在。\n\n参考:#5265(save 侧同族,已修)/ PR #5926 / #5079。\n"
+}

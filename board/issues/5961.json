@@ -1,0 +1,37 @@
+{
+  "number": 5961,
+  "kind": "issue",
+  "title": "`capability` 无 DEFAULT_METADATA_TYPE_REGISTRY / schema 条目 —— `PUT /api/v1/meta/capability/:name` 接受任意 JSON 且 `/meta/types` 报 allowRuntimeCreate:true(与 #5271 的 `api` 同形)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:dispatched",
+    "pm:queue",
+    "target:v17"
+  ],
+  "assignees": [
+    "qq9340100"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T13:01:42Z",
+  "updated_at": "2026-08-08T05:10:01Z",
+  "closed_at": "2026-08-08T05:10:01Z",
+  "closed_by": {
+    "login": "qq9340100",
+    "id": 313832657,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5961",
+  "body": "在实现 #5870(把 `capabilities` 接进 ObjectQL 的 provenance 盖章缝)时发现,**未在该 PR 中修复**,按 Prime Directive #10 记录。**未指派 —— 无人在做。**\n\n## 证据(均读自 `origin/main` a6b3ee7a1)\n\n`capability` 既不在 `DEFAULT_METADATA_TYPE_REGISTRY`(`packages/spec/src/kernel/metadata-plugin.zod.ts`,`permission` / `position` 都在,见 ~775-776),也不在 `BUILTIN_METADATA_TYPE_SCHEMAS`(`packages/spec/src/kernel/metadata-type-schemas.ts`,Security Protocol 段只有 `permission` / `position`),也不在 `HAND_CRAFTED_SCHEMAS`(`packages/metadata-protocol/src/protocol.ts` ~189,只有 `object`)。三处皆缺,导致两个后果:\n\n1. **写入门无校验。** `isRuntimeCreateAllowed()`(`protocol.ts` ~6810)在 `RUNTIME_CREATE_ALLOWED_TYPES` 未命中后走这条兜底:\n\n   ```ts\n   // Runtime-registered types (no static registry entry) are\n   // synthesised by getMetaTypes() with allowRuntimeCreate=true;\n   // mirror that here so /api/v1/meta and PUT /api/v1/meta agree.\n   if (!this.STATIC_REGISTRY_TYPES.has(singular)\n       && !this.STATIC_REGISTRY_TYPES.has(type)) {\n       return true;\n   }\n   ```\n\n   `STATIC_REGISTRY_TYPES` 由 `DEFAULT_METADATA_TYPE_REGISTRY` 派生,不含 `capability`,所以该分支恒真。又因 `getMetadataTypeSchema('capability')` 返回 `undefined`,`saveMetaItem` 走它自己那条「未注册类型 → 不校验直接存」的分支 —— 于是 `PUT /api/v1/meta/capability/:name` **接受任意 JSON** 落进 `sys_metadata`。这正是 #5271 给 `api` 修掉的同一形态(该 issue 的结论写在 `metadata-type-schemas.ts` 的 `api:` 条目注释里)。\n\n2. **`/meta/types` 合成一个假描述符。** `getMetaTypes()`(`protocol.ts` ~2988)对无注册条目的类型合成 `allowRuntimeCreate: true`、`supportsOverlay: false`、`schema: undefined`、`label: 'capability'` 的最小描述符。Studio 的 metadata-admin 引擎据此渲染一个**无 schema 的 raw-JSON 文本框创建表单**。\n\n## 与 #5870 的关系(重要,别误判为回归)\n\n写入门的判定**只读注册表、不读 item store**,所以这条路在 #5870 之前就已敞开 —— #5870 不会打开它。#5870 改变的只是**可见性**:capabilities 现在真的会注册进 SchemaRegistry,于是 `capability` 开始出现在 `getMetaTypes()` 的枚举里(此前包声明的 capability 根本没进过 registry,该类型从不出现)。也就是说这是一个**既存缺陷,被 #5870 从不可见变为可见**。#5870 的 changeset 已就「运行时可创建性未改变」这一点作了明确陈述。\n\n## 为什么值得修\n\n`sys_capability` 是授权面。一条未经 `CapabilityDeclarationSchema` 校验就落库的 capability 行,其 `name` 可以不满足 schema 的 `^[a-z][a-z0-9_.]*$`,`scope` 可以是任意字符串 —— 而 `systemPermissions` / `requiredPermissions` 是按 name 字符串解析的。declared ≠ enforced 的一个变体:声明面有 Zod,写入面没有。\n\n## 建议修法(需裁决,故不夹带)\n\n至少三个选项,取舍不属于 #5870 的范围:\n\n- **A. 补 `BUILTIN_METADATA_TYPE_SCHEMAS['capability'] = CapabilityDeclarationSchema` + 一条 `DEFAULT_METADATA_TYPE_REGISTRY` 条目并显式设 `allowRuntimeCreate: false`**(与 ADR-0066 D1「packages DEFINE capabilities」一致:capability 由包声明,不由管理员在运行时凭空创建)。这条同时关掉无校验写入门与假的可创建描述符。\n- **B. 只补 schema**,让 422 校验生效,但保留运行时可创建 —— 需要先确认真有「管理员运行时新建 capability」的业务拉力。\n- **C. 判定 `capability` 根本不该出现在 `/meta/types`**,改合成逻辑而非补条目。\n\n另需注意:`MetadataTypeSchema`(`metadata-plugin.zod.ts` ~72 的 z.enum)也不含 `'capability'`,A/B 两案都要一并处理,并按 AGENTS.md 重新生成 spec 的产物(`check:authorable-surface` / `check:docs` / `check:api-surface`)。\n\n同类邻居(同样缺注册条目、同样走合成分支)还有 `role` / `profile` / `policy` —— 它们连 `PLURAL_TO_SINGULAR` 映射都没有,以复数键注册。是否一并处理请一并裁决。\n"
+}

@@ -1,0 +1,34 @@
+{
+  "number": 6191,
+  "kind": "issue",
+  "title": "ADR-0005 的租户可定制白名单表说 `flow`/`workflow`/`approval` 一律 ❌ per-org override,注册表却写着 `allowOrgOverride: true`——反转没有走 ADR(Prime Directive #13)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:queue",
+    "target:v17"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T10:25:05Z",
+  "updated_at": "2026-08-08T01:58:24Z",
+  "closed_at": "2026-08-08T01:58:24Z",
+  "closed_by": {
+    "login": "qq9340100",
+    "id": 313832657,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6191",
+  "body": "发现于 #6155 的前提核验(未在该 PR 内修,按 Prime Directive #10 单开)。\n\n## 两处直接冲突\n\n**ADR-0005**(accepted,`docs/adr/0005-metadata-customization-overlay.md`,§\"Tenant-customizable type whitelist (shared-DB tenancy invariant)\")的表格原文:\n\n| Domain | Type | Per-org override? | Why |\n|:---|:---|:---:|:---|\n| automation | `flow`, `workflow`, `approval` | ❌ | Carry execution side-effects (events, jobs, audit). Per-org variants are a deployment, not an overlay. |\n\n同一节还写明「The authoritative whitelist lives on `MetadataTypeRegistryEntry.allowOrgOverride`」「The runtime validator (`OVERLAY_ALLOWED_TYPES`) derives its set from that flag — there is no parallel allowlist」。\n\n**代码**(`packages/spec/src/kernel/metadata-plugin.zod.ts`,`DEFAULT_METADATA_TYPE_REGISTRY`):\n\n```ts\n{ type: 'flow', label: 'Flow', …, supportsOverlay: false, allowOrgOverride: true, allowRuntimeCreate: true, … }\n```\n\n`OVERLAY_ALLOWED_TYPES`(`metadata-protocol/src/protocol.ts:6860`)照此派生,于是 `saveMetaItem({ type:'flow', organizationId })` 放行。仓内已有的 `packages/objectql/src/overlay-precedence.test.ts:18-22` 把这次反转当既成事实记了下来:\n\n> Note: object, field, flow, workflow, agent, permission, role, and profile all flipped to `allowOrgOverride: true` in commit ba252da0b (feat: add project mode, metadata forms, and org overlays). The invariant now pins the execution/wiring-layer types that MUST stay false.\n\n## 为什么是缺陷而不是文档陈旧\n\nPrime Directive #13:「An accepted ADR binds until a superseding ADR says otherwise. Reversing a recorded decision is itself a decision: it needs a **new ADR**(或旧 ADR 上的修订状态行),not a changeset that quietly does the opposite.」这次反转把 ADR 表里点名为 ❌ 的 8 个类型(object/field/flow/workflow/agent/permission/role/profile,含 ADR 明确写「Authorization correctness; overlays would create silent privilege drift」的三个安全类型)一次性翻成 ✅,ADR 正文与状态行都没动。今天读 ADR-0005 的人得到的是与运行时相反的答案,而 ADR 自称是权威。\n\n## 已经付出的代价\n\n- #6190(同批开):org 归属的 flow overlay 因此可写,但两条冷启动读路径都把它滤掉,重启后静默失绑。\n- #6155:维护者裁决的主路径建立在「org overlay 里的流程天然归属其 org」之上——该前提是否成立,恰恰取决于本单的定性(若 ADR 表仍然有效,org flow overlay 本就不该存在,主路径就没有主体)。\n\n## 建议(不越权,只列选项)\n\n1. **修 ADR**:给 ADR-0005 加修订段,逐类型说明为什么这 8 类可以 per-org override,以及 ADR 原文点名的三条风险(物理表 schema 分叉 / 执行副作用 / 权限静默漂移)各自如何被消解;这也是 #6155 主路径成立所需要的那段论证。\n2. **修代码**:把 ADR 表判 ❌ 的类型改回 `allowOrgOverride: false`(需评估已在库的 overlay 行的迁移)。\n3. 无论走哪条,给 `DEFAULT_METADATA_TYPE_REGISTRY` 的相关条目留下 ADR id(Prime Directive #13 的推论:实现某个 ADR 决定时把 id 留在代码里),并考虑登记进 `scripts/adr-anchors.json`——本次反转之所以能悄悄发生,正是因为被编辑的那一行没有点名管辖它的 ADR。\n\nRefs:#6155、#6190、ADR-0005、`packages/objectql/src/overlay-precedence.test.ts:18`、commit `ba252da0b`。"
+}

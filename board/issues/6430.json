@@ -1,0 +1,37 @@
+{
+  "number": 6430,
+  "kind": "issue",
+  "title": "share-link 契约:enforcement 路径改收完整 ExecutionContext,窄的 ShareLinkExecutionContext 只服务路由 401 —— #6206 裁决 A 案的契约半边",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:dispatched",
+    "pm:queue",
+    "target:v17"
+  ],
+  "assignees": [
+    "qq9340100"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T18:24:09Z",
+  "updated_at": "2026-08-08T03:26:50Z",
+  "closed_at": "2026-08-08T03:26:50Z",
+  "closed_by": {
+    "login": "qq9340100",
+    "id": 313832657,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6430",
+  "body": "Part of #6206(维护者 2026-08-07 裁决 A 案,见 #6206 comment 5219847367)\n\n## 要做什么\n\n`packages/spec/src/contracts/share-link-service.ts`(:100-112 的 `ShareLinkExecutionContext`,仅五字段)按裁决调整:**share-link 的可见性校验(enforcement)路径必须收完整的 `resolveAuthzContext` 信封**(含 `accessible_org_ids`、`org_user_ids`、`systemPermissions`、`posture`、`tabPermissions`),窄类型可保留但**只准服务路由自身的 401 判断,不得再进任何 enforcement 路径**——契约形状要让这条边界可见(如可见性校验的签名改收 ExecutionContext,并在 TSDoc 写明窄类型的边界)。\n\n## 依据\n\n- ADR-0095 D2:posture 解析一次、随上下文流动、永不在 enforcement 处重推;\n- 裁决理由原文:裁剪信封喂 enforcement 是 bypass 形状的模式,本例是同族第三处组装(前两处 #6071/#5997),治理默认收敛到完整信封,不留 per-site 子集;\n- 今天的失效是 fail-closed(`group` 姿态下 share-link 创建全量 403,可用性缺陷非泄露),tenant-layer.ts 的 TSDoc 自证(accessibleOrgIds 在 group 姿态缺席即拒)。\n\n## 排序(contract-first)\n\n本卡先落;**plugin-sharing 消费半边**(`sharing-plugin.ts` `contextFromRequest` / `share-link-service.ts` 喂 engine.find 处)留 identity 车道,已挂 `Blocked-by:` 指向本卡。消费半边的 before-red 证据将同时兑现分诊留下的 repro 义务(`group` 姿态 403 实测,修后转 200)。\n\n落点 `packages/spec` ⇒ 归 spec 座位;本卡由 identity 车道 PM 按跨座位转移协议代立(`session_01JwwiU9bjhwy2SWj13ho8uv`),`domain:*` 留分诊补。"
+}

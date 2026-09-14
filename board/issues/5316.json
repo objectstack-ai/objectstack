@@ -1,0 +1,37 @@
+{
+  "number": 5316,
+  "kind": "issue",
+  "title": "objectui 的 metadata-admin 用「授权 schema」校验一份 STORED view —— #5074 收紧后,给已保存视图打过 pin 再进编辑器会误报",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched",
+    "pm:queue",
+    "repo:objectui"
+  ],
+  "assignees": [
+    "yinlianghui"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T18:39:14Z",
+  "updated_at": "2026-08-07T15:49:54Z",
+  "closed_at": "2026-08-07T15:49:54Z",
+  "closed_by": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5316",
+  "body": "Blocked-by: objectstack-ai/objectui#3374(抬 spec pin 至含 objectstack#5319 的 rc)\n\n发现于 #5074 实施途中(只测量,未修 —— 修在 objectui 侧,本仓不动)。\n\n## 事实\n\nobjectui `packages/app-shell/src/views/metadata-admin/clientValidation.ts:102` 的 `view` loader:\n\n```ts\nview: async () => {\n  const { ViewItemSchema, ViewSchema } = await import('@objectstack/spec/ui');\n  return viewSchemaForDraft(ViewItemSchema, ViewSchema);\n},\n```\n\n`viewSchemaForDraft` 按 `'viewKind' in value` 分派:带 `viewKind` 的 draft 走 `ViewItemSchema`。\n\n这个 loader 同时服务**创建**和**编辑**两条路。创建路没问题 —— `createBuildBody`(`anchors.ts:291`)只发声明键(已实测:#5074 收紧后仍全部通过)。**编辑路有问题**:编辑器打开的是一份 STORED body,而 stored body 会带 wire 键。\n\n链条(全部实测,非推断):\n\n1. 用户在视图切换器上给某视图打 pin → `dataSource.updateView(object, vid, { isPinned: true })`(`app-shell/src/views/ObjectView.tsx:882`)\n2. `updateView`(`data-objectstack/src/index.ts:2801`)GET 存储项 → PUT `{ ...current, ...partial, name, object }`\n3. `saveMetaItem` 校验后**原样落库**(ADR-0005 §Validation),于是 `isPinned` 进了 `sys_metadata`\n4. 之后在 metadata-admin 里打开这条 view 记录 → `validateMetadataDraft('view', storedBody)` → `ViewItemSchema`\n\n#5074 之前 `ViewItemSchema` 是 strip,`isPinned` 被静默丢掉,校验通过。#5074 把它收紧成授权门之后,这一步会报 `isPinned` 未识别 —— 而**服务端会接受这份 body**(它命中 `ViewMetadataSchema` 的 wire 成员 `ViewItemWireSchema`,`isPinned`/`sortOrder` 在那里是声明键)。客户端比服务端严,方向反了。\n\n同类键还有 `sortOrder`(`ObjectView.tsx:931` 的重排写入)。\n\n## 这不是要求回滚 #5074\n\n授权门收紧是维护者裁决(#5074,2026-08-04),两轴同向;`createBuildBody` 那条路本来就该按授权 schema 判。问题只在于**同一个 loader 拿授权 schema 去判一份 wire body**。\n\n## 建议(objectui 侧)\n\n编辑一份 stored body 时改用 wire 门。spec 现在导出了可直接用的目标:\n\n- `ViewMetadataSchema` —— 注册的 `view` 元数据 schema,和服务端 `saveMetaItem` 判的是同一个,覆盖三种运行时形状(容器 / ViewItem 记录 / 扁平 overlay),编辑器也确实会打开后两种;\n- `ViewItemWireSchema` —— 只要 ViewItem 记录那一种时用。\n\n创建路继续用 `ViewItemSchema`(那才是授权面),即「创建按授权判,编辑按 wire 判」。这样客户端与服务端同向,而 `createBuildBody` 的严格性一点不丢。\n\n⚠️ 不要用「两个都试,过一个就算过」的兜底 —— `clientValidation.viewShapes.test.ts` 的后两条 pin 正是为挡住这种退化写的。\n\n## 影响面\n\n- 仅 Studio 客户端预校验,服务端不受影响(PUT 仍然成功)。\n- 触发条件:该视图被 pin 过 / 被拖动排序过,再进 metadata-admin 编辑器。\n- 严重性由 PM 定级 —— 我只测量到「客户端会对一份服务端接受的 body 报错」,没测量它是否阻塞保存按钮。\n\n仓库:objectui(`packages/app-shell/src/views/metadata-admin/clientValidation.ts`)。"
+}

@@ -1,0 +1,34 @@
+{
+  "number": 17790,
+  "kind": "issue",
+  "title": "os info reports stats.objects: 1 and objects: [] in the SAME --json payload for a packages[]-only project — its four detail reads are still top-level-only",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-12T05:01:46Z",
+  "updated_at": "2026-09-12T23:01:03Z",
+  "closed_at": "2026-09-12T22:59:32Z",
+  "closed_by": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17790",
+  "body": "## Symptom\n\n`os info` renders its **detail** sections — `Objects:`, `Agents:`, `Apps:` — and its `--json` `objects` array from `config.objects` / `config.agents` / `config.apps` **directly**, off the top level. On an ADR-0130 D4 / option-B project (every definition inside `packages[]`, none flattened up) those reads see nothing, so the command contradicts itself within one run.\n\nThe `--json` face is the sharp half, because it is the one machines read:\n\n```json\n{ \"stats\": { \"objects\": 1, \"apps\": 1, \"views\": 1 }, \"objects\": [] }\n```\n\n`stats.objects` and `objects[]` describe the same project in the same payload and disagree. Nothing in the payload distinguishes \"this project has no objects\" from \"this reader could not see them\".\n\nThe text face shows the same gap as an absence rather than a contradiction: `Data: 1 Objects  2 Fields` prints, and the `Objects:` section that normally follows it is simply not there.\n\n## Minimal repro\n\n`objectstack.config.ts` — one package, nothing at the top level except the envelope:\n\n```ts\nexport default {\n  manifest: { id: 'com.example.ob', name: 'ob', version: '1.0.0', type: 'app', namespace: 'ob' },\n  packages: [\n    { manifest: { id: 'com.example.ob', name: 'ob', version: '1.0.0', type: 'app', namespace: 'ob',\n        objects: [\n          { name: 'ob_order', label: 'Order', sharingModel: 'private',\n            fields: {\n              number: { type: 'text', label: 'Number' },\n              ghost: { type: 'lookup', label: 'Ghost', reference: 'ob_order' },\n            } },\n        ],\n        views: [\n          { name: 'ob_order_views', object: 'ob_order',\n            list: { label: 'Orders', type: 'grid',\n              data: { provider: 'object', object: 'ob_order' },\n              columns: [{ field: 'number' }, { field: 'ghost' }] } },\n        ],\n        apps: [\n          { name: 'ob_app', label: 'OB',\n            navigation: [{ id: 'nav_orders', type: 'object', objectName: 'ob_order', label: 'Orders' }] },\n        ] } },\n  ],\n};\n```\n\nMeasured through the real binary (`node packages/cli/bin/run.js`) on branch `claude/issue-17527-metadata-stats-package-fold`:\n\n```\nos info --json   exit 0   stats.objects = 1 | stats.apps = 1 | stats.views = 1\n                          objects[] length = 0\n\nos info          exit 0   Data: 1 Objects  2 Fields\n                          UI: 1 Apps  1 Views\n                          (no `Objects:` section)\n```\n\nControl — the identical object authored at the TOP LEVEL, same command, same binary: `Objects:` prints `ob_order (2 fields, user) — Order`, and `--json` carries the one entry. So the absence is produced by the reader, not by the stack.\n\n## Cause, located\n\n`packages/cli/src/commands/info.ts` — four reads, all off the top level, none of them going through the package-owned-collection seam:\n\n```\ninfo.ts:50    objects: (config.objects || []).map((o: any) => ({ … }))   # the --json array\ninfo.ts:75    if (config.objects && config.objects.length > 0) { … }     # the `Objects:` section\ninfo.ts:91    if (config.agents && config.agents.length > 0) { … }       # the `Agents:` section\ninfo.ts:103   if (config.apps && config.apps.length > 0) { … }           # the `Apps:` section\n```\n\n`packages/cli/src/utils/stack-collections.ts` already ships the primitive these need — `resolveStackCollection(stack, key)` answers the caller's original expression first and consults `packages[]` only when the top level does not carry the key, so adopting it cannot change what any stack the platform emits today reports.\n\n## Relationship to #17527\n\nFound while landing #17527 (PR #17775), and **not created by it**. #17527 folds `packages[]` into `collectMetadataStats`, which is the reader behind the **summary** — a different reader from these four, on a different path. Before that fix both halves of `os info` reported zero and agreed with each other; the fix corrects the summary and leaves the detail reads where they were, which is what turns a consistent wrong answer into a visible contradiction. The `--json` self-contradiction is therefore newly *visible*, not newly *true*: `objects[]` was empty on this stack before the fix as well.\n\n## Why it was filed rather than folded into that PR\n\nTwo reasons, and the second is the one that decided it.\n\n1. The card #17527 carries is explicit that the summary's **presentation** is the question it answers, and it answers only that one.\n2. `os info --json`'s `objects` array is a **machine face**. Whether an option-B project's detail listing should be a flat union (what `resolveStackCollection` would give) or grouped per package is a presentation decision nobody has made, and making it silently inside a fix for the summary would settle a published output shape by accident.\n\n## Deduplication\n\nOne targeted repo-scoped REST read — `GET /repos/objectstack-ai/objectstack/issues?state=open&labels=domain:cli&per_page=100`, 44 open non-PR cards, page 2 empty — then grepped locally over title + body. `collectMetadataStats` as the positive control returns exactly 1 hit (#17527), so the greps are live and the zeroes are readings.\n\n- `os info` in title or body: 1 hit, #17527 itself.\n- `config.objects`: 2 hits — #17527 and #17528. **#17528 rejected**: it is `os lint`'s hand-written checks plus `scoreMetadata`, a different pair of readers in a different command.\n- `scoreMetadata`: 1 hit, #17528.\n\nNo open card names these four reads or the `--json` `objects` array. Scope of the read is stated so it can be re-run: open cards carrying `domain:cli` only.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

@@ -1,0 +1,37 @@
+{
+  "number": 6188,
+  "kind": "issue",
+  "title": "[spec] AggregationFunction 声明 8 个,SQL 族只实现 5 个 —— count_distinct / array_agg / string_agg 按 ADR-0049 enforce-or-remove 定去留",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:dispatched",
+    "pm:queue",
+    "target:v17"
+  ],
+  "assignees": [
+    "qq9340100"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T10:04:31Z",
+  "updated_at": "2026-08-08T03:43:49Z",
+  "closed_at": "2026-08-08T03:43:49Z",
+  "closed_by": {
+    "login": "qq9340100",
+    "id": 313832657,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6188",
+  "body": "从 #5907 分流而来(分诊 2026-08-06 明确:运行时说实话归 drivers 车道、声明面去留归 spec 座位,⛔ 不夹带)。\n\n## 事实\n\n`packages/spec/src/data/query.zod.ts:108` 的 `AggregationFunction` 声明 8 个:\n\n```\n'count', 'sum', 'avg', 'min', 'max', 'count_distinct', 'array_agg', 'string_agg'\n```\n\n后 3 个 —— `count_distinct` / `array_agg` / `string_agg` —— **没有任何 SQL 后端编译**:`SqlDriver.mapAggregateFunc`(sql-driver.ts:7071 附近)与 `RemoteTransport.aggregate`(remote-transport.ts:726 附近)各自只编译前 5 个,后 3 个落同一句拒绝。非 SQL 族里 `driver-mongodb`(mongodb-aggregation.ts:139/144/147)与 `driver-memory`(memory-analytics.ts:866,`count_distinct`)实现了其中若干,**且各后端实现的子集互不相同**。\n\n即 declared ≠ enforced,且「哪个后端能算什么」对作者不可预测。\n\n## 需要一次裁决(spec 座位)\n\n- **A 保留声明**:承认它是「部分后端支持」的能力面,则需要一个作者可查的能力矩阵(哪些后端支持哪些聚合),否则作者只能靠试;\n- **B 按 ADR-0049 摘除**:三个键从 `AggregationFunction` 退役(走 ADR-0087 墓碑与生成物流程),已实现它们的 mongodb/memory 侧按各自冻结/退役状态处置;\n- **C 保留但标注实验/后端限定**:需要 spec 侧有表达「按后端可用性」的位,#5240 曾拒绝为共享表临时发明例外位,此路需先设计。\n\ndrivers 侧的运行时半边(让第 2 类拿到能力缺口信封而不是被说成打错字)在 **#5907** 独立进行,不阻塞本单;本单的结论反过来会决定 #5907 那条措辞将来是长期存在还是随退役消失。\n\n关联:#5907(运行时半边)、#5345(driver-memory 上同构的「协议没有」vs「本面降不下去」分线先例)、ADR-0049 enforce-or-remove、ADR-0087。"
+}

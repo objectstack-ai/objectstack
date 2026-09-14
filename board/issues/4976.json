@@ -1,0 +1,37 @@
+{
+  "number": 4976,
+  "kind": "issue",
+  "title": "`functions: { fn: { handler, effect: 'writes' } }` cannot survive `objectstack build` — lowering emits a shape FlowFunctionEntrySchema rejects",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:spec",
+    "pm:queue",
+    "target:v17"
+  ],
+  "assignees": [
+    "qq9340100"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T17:46:49Z",
+  "updated_at": "2026-08-07T13:54:20Z",
+  "closed_at": "2026-08-07T13:54:20Z",
+  "closed_by": {
+    "login": "qq9340100",
+    "id": 313832657,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4976",
+  "body": "Hit while implementing #4774's health-sweep job in `examples/app-showcase`. Authoring the declared `functions` entry — the spelling #4396 introduced so a writer keeps its run's metrics honest — makes `objectstack build` fail. The showcase works around it there by authoring the bare form, with a comment pointing here.\n\n## What happens\n\n```ts\ndefineStack({\n  functions: {\n    sweepProjectHealth: { handler: sweepProjectHealth, effect: 'writes' },\n  },\n});\n```\n\n`pnpm --filter @objectstack/example-showcase build`:\n\n```\n  → Lowering inline handlers...\n  → Validating protocol compliance...\n\n  ✗ Validation failed\n\n  functions:\n    ✗ functions\n      invalid_union: Invalid input\n\n  1 validation error(s) total\n```\n\nLoading from source is fine — `pnpm dev`, `objectstack validate`, and the vitest suite all pass. Only the built path fails, which is the same asymmetry #4343 fixed for the bare form.\n\n## Why\n\n`lowerCallables` correctly lowers a declared entry, keeping the declaration and replacing the callable with a ref. Its own test states the contract (`packages/cli/src/utils/lower-callables.test.ts`):\n\n```ts\nit('lowers a declared entry and keeps what it declared', () => {\n  const result = lowerCallables({\n    functions: { syncBilling: { handler: () =&gt; 'synced', effect: 'writes' } },\n  });\n  expect(functionsOf(result).syncBilling).toEqual({ handler: 'syncBilling', effect: 'writes' });\n});\n```\n\nSo the value reaching the parse is `{ handler: 'syncBilling', effect: 'writes' }` — a declaration whose `handler` is a **string**.\n\n`FlowFunctionEntrySchema` (`packages/spec/src/automation/flow-function.zod.ts` ~137) has three members, and none accepts it:\n\n```ts\nexport const FlowFunctionEntrySchema = lazySchema(() =&gt; z.union([\n  z.function(),                    // bare callable — authored\n  FlowFunctionDeclarationSchema,   // { handler: z.function(), effect } — handler must be a CALLABLE\n  z.string().min(1),               // lowered BARE ref\n]));\n```\n\nConfirmed directly against the built spec:\n\n```\nlowered declared entry parses? false\n  invalid_union → [expected function, received object], [expected function, ...]\nlowered BARE entry parses? true\n```\n\n`#4396` taught the lowering step about declared entries; the schema union was not extended in the same change, so the fourth member — the **lowered declaration** — is missing. The module's own docblock describes the exact bug for the third member and stops one shape short:\n\n&gt; The first two are what an author writes. The third is what `objectstack build` produces and was, until #4343, the reason `defineStack({ functions })` could not survive a build at all … The build failed on a mechanism its own docs call first-class.\n\n## Why it matters beyond the build failure\n\n`effect: 'writes'` exists so an undeclared writer is not silently \"counted as having written nothing\" (#4396, #4354). Today an author who follows that guidance gets a build failure whose message (`invalid_union: Invalid input`, no path past `functions`) does not name the key, the entry, or the reason — so the practical outcome is that they delete the declaration and ship an undeclared writer, which is precisely the state the declaration exists to prevent.\n\n## Suggested direction\n\nAdd the lowered-declaration member to the union — a declaration whose `handler` may be a string ref, mirroring how the third member relates to the first. `normalizeFlowFunctionEntry` already drops string handlers (the callable rides in the sibling ESM module and is merged by name in `collectBundleFunctionEntries`), so the runtime half should need no change; worth confirming it keeps `effect` off the lowered record rather than dropping the entry.\n\nA pin test in the shape of the existing lowering tests — lower a declared entry, then parse the result through `FlowFunctionEntrySchema` — would have caught this and would keep the two halves from drifting again. Right now no test crosses that boundary: `lower-callables.test.ts` asserts the emitted shape, and the spec tests parse only authored shapes.\n\n## Repro\n\n```bash\ncd examples/app-showcase\n# author functions: { sweepProjectHealth: { handler: sweepProjectHealth, effect: 'writes' } }\npnpm build      # ✗ functions: invalid_union\npnpm validate   # ✓ passes — source path only\n```\n\nObserved on `main` @ f61c8cf.\n\nFiled unassigned per Prime Directive #10.\n"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 6226,
+  "kind": "issue",
+  "title": "gen:docs 联合类型的每个对象变体都印一遍完整摘要,一个单元格里出现近乎相同的形状 N 次(`PageSlots.slots` 1538 字符,枚举已省略后仍如此)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "finding"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T11:15:55Z",
+  "updated_at": "2026-08-07T16:09:40Z",
+  "closed_at": "2026-08-07T16:09:40Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6226",
+  "body": "实现 #5340(PR #6211)时量语料量出来的观察类发现,**未认领**,按 PD#10 立案。与 #6225 同批量出但**机制不同**,故分开立案。\n\n## 现象\n\n#5340 落地后仍有 27 个超过 400 字符的类型单元格。上一条(#6225)解释了其中 9 个「顶层长枚举」。**剩下 18 个的宽度与枚举无关** —— 是联合类型把每个对象变体的完整摘要各印了一遍。\n\n最清楚的实例是 `content/docs/references/ui/page.mdx` 的 `slots`,**枚举省略已经生效了 8 次**(该行带 8 个 `... +N more` 标记),单元格仍有 **1538 字符**:\n\n```\n{ header?: { type: Enum< 'page:header' | ... | … +29 more > | string; id?: string;\nlabel?: string; properties?: Record< string, any >; … } | { type: Enum< 'page:header'\n| ... | … +29 more > | string; ... } | ... }\n```\n\n同一个 `{ type; id?; label?; properties?; … }` 形状被重复了 8 次,彼此只差极少。其余 17 个在 400–656 字符之间(`kernel/manifest.mdx` 的 `navigationContributions` / `capabilities`、`automation/state-machine.mdx` 的 `states`、`ui/app.mdx` 的 `navigation`、`api/protocol.mdx` 的 `translations` 等)。\n\n## 定性(为什么这是独立的一条,也不是 #5340 的返工项)\n\n- 宽度来源是 **`anyOf` 变体数 × 每个变体的摘要长度**,不是单个类型的宽度。#5340 的字符预算作用在 `Enum< ... >` 的 body 上,天然管不到这里 —— 而且在本实例上它**已经生效了 8 次**,把该行从更宽压到了 1538。\n- 信息是**正确**的,只是重复:`formatType` 的 `anyOf` 分支是 `variants.map(v => formatType(v, ctx)).join(' | ')`,对变体之间的相似度一无所知。\n- 今天没有用户被误导 —— 与 #5340 立单时的定性同类(正确但冗长)。\n\n## 可能的修法(未验证,留给分诊)\n\n- 对变体**数量**设上限,与 `INLINE_KEY_LIMIT` 同源地印 `| …`(但要带上被省略的变体数,遵循 #5340 定下的「省略必须自报数量」原则);\n- 或对整个单元格设字符预算,超出时整体退化为 `object` / 变体数摘要(#5340 原始 issue body 里列过的第二种方案,当时没选);\n- 或在变体全是同一具名 schema 的情况下恢复 `$ref` 链接而不是逐个内联展开(与 #6225 的第二种修法同源)。\n\n三种都涉及**公开可读契约的取舍**(读者看到的是变体的完整枚举还是数量),⛔ 不建议随手拍板;需要分诊给出方向。逐页确认重生成 diff,不得手改生成的 `.mdx`。\n\n## 相关 / 串行\n\n同文件面:`packages/spec/scripts/lib/format-type.ts`。与 #5340(PR #6211)、#6225、#5729、#5606、#5338 同源。**须与该文件面的其他在飞单串行**,不得同批并行。"
+}

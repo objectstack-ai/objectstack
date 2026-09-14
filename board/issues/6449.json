@@ -1,0 +1,35 @@
+{
+  "number": 6449,
+  "kind": "pull_request",
+  "title": "fix(services): markAllRead 清空整个收件箱,不再只清列表窗口的 200 条 (#6436)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T21:08:15Z",
+  "updated_at": "2026-08-07T21:27:25Z",
+  "closed_at": "2026-08-07T21:27:24Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-08-07T21:27:24Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/6449",
+  "body": "Fixes objectstack-ai/objectstack#6436\n\n## 前提复核（先证伪，再动手）\n\n在 `origin/main`（含 #6363 的 PR #6439，merge 提交 `17d09541`）上逐条复核，issue 的前提**成立且低估了**：\n\n- `markAllRead` 形状未变，仍是 `listInbox(userId, { read: false, limit: 200 })` → `markRead(...)`，`200` 正是 `listInbox` 的硬上限（clamp `[1,200]`）。\n- #6439 那一半（窗口打满时多做一次单列反连接读）**完整保留**，`unreadCount` 的既有钉子全绿（`service-messaging` 195/195、`runtime` 1604/1604，含 `notification-schema-conformance.integration.test.ts` 里 #6363 翻转过的那条）。\n\n**低估的部分 —— 也是本 PR 的路线依据。** 那个窗口是对**全部**行按 `created_at desc` 取的，`read` 过滤在截断**之后**于内存中施加（`listInbox` 末行 `all.filter(...)`）。于是最新 200 条恰好都已读的信箱，交给清扫的是一个**空** id 列表：无论后面压着多少更旧的未读，`markAllRead` **一条都不标**，返回 `readCount: 0`。已钉成回归（改前实测 `expected +0 to be 150`）。\n\n这直接**否掉了 issue 里的路线 A（循环翻页直到取空）**：它不是「代价高但正确」，而是**不正确** —— 循环恰好在那空的第一页退出。即便信箱全是未读，第二轮取回的仍是刚被标为已读的同一批最新 200 行，同样退出。\n\n## 路线取舍\n\n| | 路线 A（循环翻页） | 路线 B（谓词式批量写） | **本 PR（读未读集合）** |\n|:---|:---|:---|:---|\n| 正确性 | ❌ 见上，空首页即退出 | ✅ | ✅ |\n| 读次数 | 无上界的多轮 | 0 | **固定 2 次**，与信箱大小无关 |\n| 写次数 | 每条未读 1 次 | 1 次批量 | 每条未读 1 次 |\n| 触碰 `markRead` 并发面 | 否 | **是（升级条件）** | **否** |\n\n**路线 B 未做，也未静默改。** 它要求把 `markRead` 的 check-then-act upsert（`findOne` → `update`/`insert` + unique 冲突收敛）与「尚无收据行」的插入面改成谓词式：未读消息里既有已存在 `delivered` 收据的（可被 `update` 谓词覆盖），也有**根本没有收据行**的（`writeDeliveredReceipt` 在事件 id 缺失时跳过，以及最小栈上收据写入尽力而为地失败过），后者只能靠插入面解决 —— 那正是分诊写死的升级条件。按「A/B 按成本选是实施方权限、重设计并发语义不是」，此处**选择不进入 B**，`markRead` 三个面（upsert、unique 冲突收敛、插入）一行未动。\n\n**路线 C（把「all」改成「当前窗口」）**：已被维护者 2026-08-07 对 #6363 的 Option A 裁决排除 —— 让声明成真，不把谎话写进文档。\n\n**本 PR 的做法**：读未读**集合**而不是列表的一页。所需的读恰好是 #6439 已经为角标付过的那次 —— `sys_inbox_message` 上单列（`fields: ['notification_id']`）、无 `orderBy`、无 `limit` 的投影 —— 再与 `listInbox` 本就无界读取的收据脊连接。**不论信箱多大都是固定两次读**，没有循环，没有需要设上界的页数；向数据层要的东西，不超出角标轮询在每个打满的页上已经要的。\n\n### 关于「无上界」（issue 明确要求回答）\n\n**不加数值安全阀。** 一个上限就是换了个更大数字的路线 C：超过它，「all」重新变成谎话，正是维护者裁决反对的那种读法。真正需要回答的两半分开看：\n\n- **读**：已经有界 —— 固定 2 次，且与 #6439 为角标所付的读同阶同形。本 PR 没有引入任何**新的**无界读。\n- **写**：每条未读 1 条收据，这是收据模型本身（ADR-0030，读态在 `sys_notification_receipt` 上），唯一能把它压成 O(1) 的就是路线 B。\n\n约束这半的不是上限，而是**幂等且可续**：`markRead` 逐条捕获失败、记日志、跳过，`readCount` 只报真正落库的条数，下一次清扫接着做（已钉「第二次清扫写 0 条、报 0」）。\n\n## 实测\n\n真实栈（sqlite-wasm + ObjectQL + service-messaging + hono + dispatcher），单用户 260 条未读，**同一条 HTTP 路径**：\n\n| 请求 | 修复前（实测） | 修复后（实测） |\n|:---|---:|---:|\n| `POST /api/v1/notifications/read/all` | `readCount: 200` | `readCount: 260` |\n| 紧接着 `GET /api/v1/notifications` | `unreadCount: 60` | `unreadCount: 0` |\n| 同上，`notifications[]` 长度 | 50 | 50（列表窗口不变） |\n\n修复前那两个数字是把实现临时还原后跑出来的（反向验证，方向**事前预测为红**，结果与预测一致），不是推算。\n\n## `readCount` 现在报什么\n\n**本次调用真正翻成 `read` 的去重通知条数。** 此前报的是「最新 200 行里未读的那些」。两个推论，都已钉：\n\n1. 一条通知被多条收件箱行物化时**只计一次** —— 收据键是 `(notification_id, user_id, channel)`，本就只有一行。\n2. 没有 `notification_id` 的收件箱行**被跳过而不是计入**。读态以事件 id 为键，旧代码为它们写的那条（以收件箱**行** id 为键的）收据，连接永远读不回来 —— 既没让行变成已读，又把自己计进了 `readCount`。该行恒为未读的结构性缺口不属于本 PR，另行记为 #6448（观察类：唯一 ingress `emit()` 必带事件 id，出厂管线不产生这种行）。\n\n## 测试\n\n`packages/services/service-messaging/src/messaging-service.test.ts` 新增 `[#6436]` 一组 11 条，全部先在未改动的实现上跑出红（7 条真红 + 4 条按设计本就绿的「不变」钉），再转绿：\n\n- 核心钉：未读 350（issue 的形状）→ `readCount: 350`，随后 `unreadCount` 为 **0**，且 350 条收据落库全为 `read`（改前：`readCount: 200`）\n- 最新 200 条已读 + 更旧 150 条未读 → 标 150（改前：**0**）\n- 小信箱（10 条，2 条已读）行为不变：只翻 8 条，两条已存收据**未被重新盖章**\n- 成本钉：信箱 10 与 350 都恰好 2 次 `find`，且形状为 `where: {user_id}` / `fields: ['notification_id']` / 无 `limit` / 无 `orderBy`\n- 只动被点名的用户；幂等（第二次 0 条）；同一通知多行只计一次；收据脊不可用时与 `listInbox` 同向降级；无 data engine / 无 user id 仍是 no-op\n\n`packages/runtime/src/notifications.hono.integration.test.ts` 新增线上钉一条：真实 HTTP 栈上 260 条未读，`POST /read/all` → `GET /notifications`，把 issue 里那对矛盾响应钉成回归。\n\n未新增任何 fake engine（复用既有 `inboxEngine`），故 `assertEngineDeleteDispatch` 不适用。\n\n```\nservice-messaging  test  16 files / 195 tests passed     typecheck  clean\nruntime            test 110 files / 1604 tests passed    typecheck  clean\ncheck:nul-bytes / check:empty-changeset / check:route-envelope /\ncheck:service-providers / check:query-options-erasure /\ncheck:engine-double-contract                              OK\ncheck:type-check-debt   全量 pnpm build 后 OK（新 worktree 首跑的 8 条上飘\n                        全在本 PR 未触碰的包，建完即消失；runtime 反而 -7）\n```\n\n## 改动面\n\n- `packages/services/service-messaging/src/messaging-service.ts` — `markAllRead` 改读未读集合；新增私有 `unreadNotificationIds`；把 `listInbox` 里的收据脊读取原样抽成 `readReceiptStates` 供两处共用（纯提取，行为不变，读态语义只此一处）\n- `packages/services/service-messaging/src/messaging-service.test.ts`、`packages/runtime/src/notifications.hono.integration.test.ts` — 上述钉子\n- `.changeset/notification-mark-all-read-full-sweep.md` — `@objectstack/service-messaging` patch\n\n**不变**：列表窗口（默认 50、上限 200、最新在前）、`unreadCount`（#6363）、`markRead` 的三个面、`packages/spec` 一行未动（`MarkAllNotificationsReadResponseSchema` 对 `readCount` 的声明「Number of notifications marked as read」本就与新语义一致 —— 是实现向声明靠拢，不是反过来）。\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_015a5qkLzpGXhLL2F5gvJ7dD)_"
+}

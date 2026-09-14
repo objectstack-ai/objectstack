@@ -1,0 +1,37 @@
+{
+  "number": 6250,
+  "kind": "issue",
+  "title": "唯一约束冲突没有单一判别谓词:仓内四套各自为政的方言词表,REST 的 409 映射漏掉 MySQL(`Duplicate entry` 落成 500 INTERNAL_ERROR)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched",
+    "pm:queue",
+    "target:v17"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T12:08:52Z",
+  "updated_at": "2026-08-08T04:55:35Z",
+  "closed_at": "2026-08-08T04:55:35Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6250",
+  "body": "发现于 #5495 的前提复核(engine-core 车道),**未在该单 PR 内顺手修**,按 Prime Directive #10 单独开单。\n\n## 缺陷\n\n「这个驱动错误是不是唯一约束冲突」这件事,仓内有**四份互不相同的手抄实现**,没有一个共享谓词:\n\n| 位置 | 判别方式 | 覆盖 |\n|:---|:---|:---|\n| `packages/services/service-messaging/src/messaging-service.ts:27` `isUniqueViolation()` | 3 个 code(`23505` / `ER_DUP_ENTRY` / `SQLITE_CONSTRAINT_UNIQUE`)+ 3 个消息子串(`unique constraint failed` / `duplicate key` / `duplicate entry`) | 三方言齐全 |\n| `packages/rest/src/rest-server.ts:948` | 仅 `lower.includes('unique constraint') \\|\\| lower.includes('unique violation')` | **漏 MySQL** |\n| `packages/rest/src/import-runner.ts:186` | 一条 Postgres 专用正则,顺带抽冲突列名 | 仅 Postgres |\n| `packages/drivers/driver-sql/src/sql-driver.ts:5664` | 行内正则 `/unique constraint failed\\|duplicate entry\\|duplicate key value/i` | 三方言齐全 |\n\n## 用户可见后果:MySQL 上的唯一冲突返回 500 而不是 409\n\n`rest-server.ts` 的错误映射先过 `looksLikeInternalErrorLeak()`(`packages/types`),再在其内部判 409。MySQL 的唯一冲突消息形如:\n\n```\nER_DUP_ENTRY: Duplicate entry 'acme@example.com' for key 'idx_email_unique'\n```\n\n逐条比对 `looksLikeInternalErrorLeak` 的判据 —— `sqlite_` / `sqlstate` / `constraint failed` / `unique constraint` / `foreign key` / 以 `insert into `、`update `、`select `、`delete from ` 开头 —— **一条都不命中**,所以它连 409 分支所在的那个 `if` 都进不去,直接落到 `UNCLASSIFIED_FAULT()`:\n\n```ts\nconst UNCLASSIFIED_FAULT = () => ({\n  status: 500,\n  body: { error: INTERNAL_ERROR_MESSAGE, code: 'INTERNAL_ERROR' },\n});\n```\n\n即:**MySQL 部署下,每一次唯一约束冲突都是 500 INTERNAL_ERROR,而不是 API 契约声明的 409 `UNIQUE_VIOLATION`**(`UNIQUE_VIOLATION` 在 `packages/spec/src/api/error-code-ledger.zod.ts:117` 是登记在册的错误码)。前端拿不到「这个值已存在」,只能看到一个通用服务端故障。SQLite 与 Postgres 的消息恰好命中子串,所以这个洞在这两种方言上是隐形的。\n\n## 这正是 #5841 修过的缺陷类型,只是换了个谓词\n\n#5841 把「表未 provision」的判别收敛成**一个具名谓词** `isMissingTableError`(`packages/metadata/src/errors.ts:50` 导出),明确点名「第二套良性词表」是缺陷本身;`scripts/check-durability-degradation-log-level.mjs` 的 `READ_FAILURE_DISCRIMINATORS` 按**谓词名**登记它。唯一冲突判别今天正处在 `isMissingTableError` 落地之前的状态,而且已经分叉到四份。\n\n## 它挡住了什么\n\n#5495 的裁向之一是「撞 UNIQUE 且**冲突列是本 autonumber 字段**时,重同步 + 有界重试;非本字段的冲突原样上抛」。这需要生产侧提供**带冲突列名的结构化唯一冲突错误** —— 今天不存在:四份实现里只有 `import-runner` 那条 Postgres 正则抽列名,且只在 Postgres 上有效。在 engine 里手抄第五套方言词表来做重试判据,恰好是 Prime Directive #12 禁止的消费者侧宽容解析。所以 #5495 的该分支被本条阻塞。\n\n## 建议方向(不预设结论)\n\n把 `service-messaging` 那份最完整的实现提取成具名共享谓词(落点候选:`@objectstack/types`,四个消费者都已依赖它;或参照 #5841 走 `metadata/errors` 那条子路径),并考虑同时提供「冲突列名」的结构化出口 —— 后者是新契约面,需要维护者定夺,不应由某个 bug 修复单顺手拍。"
+}

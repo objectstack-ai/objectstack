@@ -1,0 +1,34 @@
+{
+  "number": 6249,
+  "kind": "issue",
+  "title": "seedAutonumber 的播种扫描是「取前 5000 行、不排序、不按前缀过滤」的 MAX —— 超过 5000 行的对象会播种出低于真实 MAX 的号",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T12:08:20Z",
+  "updated_at": "2026-08-08T00:15:10Z",
+  "closed_at": "2026-08-08T00:15:10Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6249",
+  "body": "发现于 #5495 的前提复核(engine-core 车道),**未在该单 PR 内顺手修**,按 Prime Directive #10 单独开单。\n\n## 缺陷\n\n`packages/objectql/src/engine.ts` 的 `seedAutonumber()`(:2111 起)用一次普通 `find` 播种内存计数器:\n\n```ts\nconst rows = await this.find(object, {\n  fields: ['id', field],\n  limit: 5000,\n  context: execCtx,\n} as any);\n```\n\n三个问题叠在一起:\n\n1. **`limit: 5000` 是硬上限**,且\n2. **没有 `sort`** —— 取的是驱动返回的任意 5000 行(SQL 上通常是插入顺序的前 5000 行),再在这个窗口里求 max;\n3. **没有按 `prefix` 下推过滤** —— 前缀筛选是在 JS 侧 `if (prefix && !s.startsWith(prefix)) continue;` 做的,所以对日期/`{field}` 分组格式,5000 行窗口还要先被其他 scope 的行占掉。\n\n结果:对象行数一旦超过 5000(或某个 scope 的行排在窗口之外),播种得到的 max **低于库内真实 MAX**,计数器从一个已被占用的号段起号。对声明了 `unique` 的自增号字段,这就是直接发出撞号值。\n\n实测(fake driver 捕获引擎实际下发的查询):\n\n```\nPROBE2 seedQuery={\"fields\":[\"id\",\"case_number\"],\"limit\":5000,\"object\":\"crm_case\"}\n```\n\n—— 无 `sort`、无 `filters`,`limit` 恒为 5000。\n\n## 与 #5495 的关系\n\n#5495 记的是另外两个缺陷(计数器不按分区同步、撞号烧号)。本条是**第三个、独立的**播种正确性缺陷:即使 #5495 的两条都修好,超过 5000 行的对象仍然会播种出低号。#5495 报告的 HotCRM 现场行数远小于 5000,所以本条**不是**那次风暴的成因,是同一函数里发现的另一个洞。\n\n## 修法的难点(供分诊参考,不预设结论)\n\n「读真正的 MAX」在引擎层没有现成的便宜写法:\n\n- `sort: [{ field, direction: 'desc' }] + limit: 1` 取的是**字符串字典序**最大值。对定宽补零、且**在同一前缀 scope 内**的格式,字典序最大 == 数值最大;但对 `prefix` 为空的 legacy 路径(取整串**最后一个**数字段),字典序最大不等于数值最大。\n- 因此正确做法多半要按 scope 下推 `startsWith(prefix)` 过滤 + 定宽假设,或者走 `aggregate` 的 `max`。两条都要先决定引擎与驱动之间的契约面,不是一行改动。\n\n## 影响面\n\n只影响**引擎兜底路径**(驱动未声明 `supports.autonumber`)。`driver-sql`/`driver-turso`/`driver-sqlite-wasm` 走各自的 `_objectstack_sequences`,其播种是 `scanMaxNumericTail`(SQL 侧 `where field like 'prefix%'`,无 limit),不受本条影响。"
+}

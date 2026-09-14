@@ -1,0 +1,35 @@
+{
+  "number": 6396,
+  "kind": "pull_request",
+  "title": "test(verify): 删掉 checkDateBucketParity / checkReadCoercion 全部调用点的 `as never` (#6354)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T16:47:28Z",
+  "updated_at": "2026-08-07T17:15:27Z",
+  "closed_at": "2026-08-07T17:15:25Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-07T17:15:25Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/6396",
+  "body": "Fixes #6354\n\n**观察类（p3），不是缺陷。** 运行期行为此前就完全正确：`checkDateBucketParity` 照常跑，date-bucket 一致性照常被验证（dogfood 520 全绿，改动前后一致）。本 PR 恢复的只是**编译期**的一致性检查，**零运行时改动**。\n\n## 前提复核：论断成立，但立单时的计数偏低\n\n立单表里列了 3 个调用点。实测全仓是 **10 个** —— 立单人的表只覆盖了「传真实驱动」的那几处，漏掉了同一文件里 5 个传假驱动（负向控制）的调用点，以及 `checkReadCoercion` 的 2 处。\n\n| 文件 | 立单表 | 实测 |\n|:--|--:|--:|\n| `packages/qa/dogfood/test/date-bucket-parity-conformance.test.ts` | 1 | **6** |\n| `packages/drivers/driver-turso/src/date-bucket-parity.test.ts` | 2 | **2** |\n| `packages/qa/dogfood/test/read-coercion-conformance.test.ts`（同族，见下） | 未列 | **2** |\n\n漏掉的 5 处不是无关紧要的：负向控制那几个假驱动**恰恰是最需要被替身检查的对象** —— 它们是手写字面量，最容易与替身失配，而 `as never` 把它们全部放行了。全部 10 处一并删除，一个不留。\n\n## 基线\n\n按派工单要求，基线取**已合入 #6355（批 A+E+F）之后**的 `origin/main`。本分支已 merge 到 `466bd9285`，合并后的 `BucketableDriver.aggregate` 已是收窄后的形状（不再是 `unknown`），全套验证在该基线上重跑了一遍。\n\n（说明：#6355 合入前我已用它的 `date-bucket-parity.ts` 在本地先行复核过一次，结论与合入后一致 —— 收窄不改变结果，原因见下。）\n\n## 三处（实为十处）各自独立复核\n\nturso 两处**没有沿用 dogfood 的结论**：driver-turso 是独立的 tsc program，跑的是它自己的 `typecheck`。\n\n```\n### @objectstack/verify        -> exit=0   (zero tsc diagnostics)\n### @objectstack/dogfood       -> exit=0   (zero tsc diagnostics)\n### @objectstack/driver-turso  -> exit=0   (zero tsc diagnostics)\n```\n\n**没有任何一处报错。** 派工单说「若某处去掉后真的报错，那个报错就是本单最有价值的产出」—— 本单没有拿到这个产出：替身与三个真实驱动（`SqlDriver` / `SqliteWasmDriver` / `TursoDriver`）以及 5 个手写假驱动的形状本来就一致。10 个 cast 全是死的。\n\n为什么 #6355 的收窄不改变结论，值得写下来：接口里以**方法简写语法**声明的成员，其参数按**双变**比较，所以把 `aggregate` 的 query 参数从 `unknown` 收到更窄的类型，并不会让一个原本满足替身的驱动变得不满足。这也正是 #6355 自己在注释里已经说明的那件事。\n\n## 「确实读到了新 d.ts」的证据（AGENTS.md §9）\n\n绿本身不算数 —— dogfood / driver-turso 读的是 `@objectstack/verify` 的**构建产物** `dist/*.d.ts`，读到陈旧的一份也会绿。所以先按派工单要求做了反向验证。\n\n**方向先预判：往替身里塞一个真实驱动不可能有的成员，10 个已去 cast 的调用点应当全部变红。** 临时给两个替身各加一行 `__freshnessProbe(): void;`，重新 build `@objectstack/verify`，再 typecheck 两个消费方：\n\n```\n--- dogfood: 8 处 error TS2345\n--- turso:\nsrc/date-bucket-parity.test.ts(43,52): error TS2345: ... not assignable to parameter of type 'BucketableDriver'.\nsrc/date-bucket-parity.test.ts(128,52): error TS2345: ... not assignable to parameter of type 'BucketableDriver'.\n```\n\n**8 + 2 = 10，与删掉的 cast 数一一对应。** 这同时证明了两件事：消费方读到的确实是刚 build 出来的新 d.ts（不是假绿），且**每一个**调用点现在都真的在受检 —— 不是「没报错」，是「检查活着且会咬人」。探针已还原，`dist` 中 `__freshnessProbe` 命中数已回到 0。\n\n## 顺带一项：`checkReadCoercion` 已并入（派工单授权）\n\n派工单点名要实测 `CoercibleDriver` 是否同形。实测：**同形**。它就是 `BucketableDriver` 去掉 `aggregate` 和 `supports`，2 个调用点同样全是 `as never`，同样全是死 cast（上面的探针实验里这 2 处也一并变红）。改动 2 行，判定「同形且改动微小」，按派工单授权**并入本 PR**。\n\n## 硬约束自查\n\n**零新增逃逸口。** 全 diff 只删不加：\n\n```\n$ git diff origin/main -- packages/ | grep '^+' | grep -E 'as any|as unknown as|@ts-ignore|@ts-expect-error|as never'\nclean: no added escape hatches\n```\n\n未碰 `content/docs/releases/`；未碰 driver-memory / driver-mongodb（#5499 冻结）；未碰 `packages/spec`。\n\n## 门禁\n\n```\n✓ query-options-erasure ratchet holds: 83 unswept non-test site(s) in 19 file(s), none new.\n✓ check-type-check-coverage --re-measure: OK — 34 ledger entr(ies) re-measured in 207.8s,\n    2030 raw tsc error(s) total, none above its recorded number.\n✓ check-nul-bytes: OK (scanned 6047 tracked text file(s); no raw ASCII control bytes).\n✓ check-empty-changeset: 1 declaring changeset(s) added.\n✓ eslint（三个改动文件）：零输出\n```\n\n关于 erasure 棘轮，有一处要如实说明：派工单预判「本单删 cast，测试面可能下降而变红」。**实测没有下降，计数 267 未动。** 原因是该棘轮的词汇表只匹配 query/options 参数上的 `as any`（及 `as any as X` 洗白链），**不包含 `as never`**，三个改动文件也都不在它的 baseline 里（各 grep 命中 0）。所以不需要 `--update`，也**不应**把它说成本次改动的回归护栏 —— 事实是：目前没有任何门禁会阻止有人把 `as never` 加回去。\n\n## 测试\n\n```\n@objectstack/verify        Test Files  4 passed        Tests  17 passed\n@objectstack/driver-turso  Test Files 25 passed        Tests 808 passed\n@objectstack/dogfood       Test Files 85 passed | 1 skipped   Tests 520 passed | 3 skipped\n```\n\n均在合并后的基线上重跑。运行期行为与改动前完全一致 —— 本来就应该一致，这是纯类型改动。\n\n## 消费半径\n\n`@objectstack/verify` 的**下游**（前缀点 `...pkg`）实测只有 `@objectstack/dogfood` 与 `@objectstack/driver-turso` 两个包引用这两个导出，两处都在本 PR 内。\n\n## 顺带发现（已另立单，不在本 PR 修）\n\n- **#6394**：同一个 turso 文件第 68 行 `{ bypassTenantAudit: true } as never` —— 也是死 cast（实测去掉后 driver-turso typecheck 依旧 exit=0），但它是 `driver.create` 的 options 门、不是本单的替身调用点，按 PD #10 另立单，不扩大本 PR 的 diff。\n\n---\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01WyvqvKMG6asi9aXjKE6xtx\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01WyvqvKMG6asi9aXjKE6xtx)_"
+}

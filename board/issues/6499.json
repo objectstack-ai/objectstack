@@ -1,0 +1,36 @@
+{
+  "number": 6499,
+  "kind": "issue",
+  "title": "finding(service-automation): engine.ts has 13 MORE log messages splicing uncontrolled thrown text — #6299's \"last batch\" premise was wrong, and persistSuspendedRun sits 25 lines from one it fixed",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T02:29:20Z",
+  "updated_at": "2026-08-08T06:05:27Z",
+  "closed_at": "2026-08-08T06:05:27Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6499",
+  "body": "Side finding from #6299 (PR #6498), recorded per Prime Directive #10 / objectstack#4949. #6299's scope was pinned to its three named seams, so none of these is touched there.\n\n## The premise that turned out to be false\n\n#6299 closes with:\n\n> 治完这三处,`engine.ts` 这一族就**全净**了。\n\nIt is not. Fixing `forgetSuspendedRun` / `cancelRun` / `listSuspendedRunsDurable` left **13 more** logger calls in the same file with the same shape: a thrown value's `.message`, whose text we do not control, interpolated into the log MESSAGE. The most awkward one, `persistSuspendedRun`, sits **25 lines above** one of the three #6299 fixed and is on the **same `SuspendedRunStore` driver seam**.\n\nThis is not a criticism of #6299's triage — its scope was correctly pinned. It is a correction to the \"this file is now clean\" claim, so the next reader does not trust it.\n\n## The harm (unchanged from the family — not re-derived)\n\nIdentical to #6230 / #5912: `ObjectLogger.write()` adds one \"timestamp + level\" head per call, so newlines in the interpolated text split ONE record into several physical lines of which only the first is greppable. On `warn` (stdout) inside `serve`'s boot-quiet window, `BootLogCapture.offer()` drops the headless continuation lines outright. PR #6498 measured the current cost at these seams: a three-line driver error became 3 physical lines and the boot filter retained 1, carrying no driver fact.\n\n## The 13 sites\n\nLocated by content on `origin/main` + PR #6498; ⚠️ line numbers drift, they are the post-#6498 positions.\n\n**Datasource-driver seam (`SuspendedRunStore`) — same family as #5912 / #6230 / #6299:**\n\n1. `persistSuspendedRun` (`:1248`) — `store.save()`, already `logger.error`, message still concatenated. The nearest twin of #6299's `forgetSuspendedRun`.\n2. `listRuns` (`:2361`) — `store.listHistory()`, `logger.warn`.\n3. `getRun` (`:2416`) — `store.loadTerminal()`, `logger.warn`.\n4. `recordLog` (`:3842`) — `store.recordTerminal()`, `logger.warn`, inside a fire-and-forget `.catch()`.\n\n**Plugin-supplied code seam (trigger / node-executor implementations we do not own):**\n\n5. `releaseSuspension` (`:1361`) — `NodeExecutor.onSuspensionReleased` threw.\n6. `unregisterTrigger` (`:1558`) — `trigger.stop()` threw.\n7. `activateFlowTrigger` (`:1699`) — bind failed.\n8. `deactivateFlowTrigger` (`:1710`) — `trigger.stop()` threw.\n\n**Engine-internal, but transitively carrying foreign text:**\n\n9. `resolveRunContext` (`:2491`) — grant resolution failed.\n10. `expandDeclaredLookups` (`:2564`) — lookup expand failed.\n11. `refuseInvalidScreenInput` (`:3451`) — a screen field's `visibleWhen` failed to evaluate.\n12. `bubbleToParent` (`:3524`) — splices `${parentRes.error}`. Note this is the envelope field #5912 deliberately left carrying the driver's text verbatim, so the driver's newlines reach this message second-hand.\n13. `bubbleToParent` (`:3529`) — parent resume threw.\n\n## A 14th, different sub-shape — worth separating, not merging\n\n`validateFlowExpressions` (`:4244`) writes a literal newline into a message **we control**:\n\n    `[flow '${flowName}'] ${where}: ${issue.message}\\n      source: \\`${issue.source}\\``\n\nSame downstream damage (one record, several physical lines, only the first with a head), but the opposite cause: nobody's foreign text is involved, we simply authored a multi-line record. The fix is the same shape (structured slot) but the reasoning and the \"is it reachable\" argument are different, so it should not be batched with the 13 above.\n\nAlso noted and deliberately NOT counted: `evaluateCondition` (`:5001`) builds a multi-line **thrown** `Error` message rather than a log record. It is not a logger call, but its text lands in `AutomationResult.error`, which is exactly what site 12 then splices into a log message.\n\n## Reachability — why `finding`, not an incident\n\nSame reason as #5575 / #5636 / #5661 / #5737 / #5912 / #6230 / #6299: every in-repo driver's error is single-line today, so nothing shreds in practice yet. The first driver wrapping a multi-line SDK error hits it — Postgres `detail:` / `hint:` continuations and better-sqlite3 wrappers are both common, and every prior instalment's fixture was built on that shape.\n\nThe datasource group (1–4) is the strongest candidate for promotion: it is the same seam and the same driver as the three #6299 just fixed, and #4420 is the accident that seam already caused once.\n\n## If this is promoted\n\nPer #6299's own lesson, the message half is common to all 13 but the **level** half is not: each site needs its own #4632 verdict. #6299 produced two `error` and one `warn` from three sites that looked identical in the issue text. Site 1 (`persistSuspendedRun`) is already `error` and needs no re-grade; sites 2–4 and 9–13 each need judging on their own consequence path.\n\nNote also that `pnpm check:durability-log-level` grades none of these: its write-rule vocabulary does not name `SuspendedRunStore`'s methods, and its read-seam rule's scan roots (`packages/metadata`, `metadata-protocol`, `objectql`) do not reach this package. Any level verdict needs a test pin.\n\n## Related\n\n#6299 / PR #6498 (source of this finding), #6230 / PR #6297, #5912 / PR #6228, #5737 / PR #5911, #5661, #5636 / PR #5662, #5575 / PR #5639, #5048 / PR #5572, #5660, #5573, #5186, #4632, #4420, cloud#971."
+}

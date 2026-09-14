@@ -1,0 +1,36 @@
+{
+  "number": 5599,
+  "kind": "issue",
+  "title": "`view` 的 spec 校验闸门形同虚设:`saveMetaItem({ item: { nope: 1 } })` 返回 success 并把 `{\"nope\":1}` 存成一个 active view",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:queue",
+    "target:v17"
+  ],
+  "assignees": [
+    "qq9340100"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T20:14:28Z",
+  "updated_at": "2026-08-07T14:24:53Z",
+  "closed_at": "2026-08-07T14:24:53Z",
+  "closed_by": {
+    "login": "qq9340100",
+    "id": 313832657,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5599",
+  "body": "在做 #5364(saveMetaItem 的 422 展开 `invalid_union`,PR #5596)时,为了给\"修后合法 view 仍照常保存\"的承重断言挑对照输入而核出的。不在那单的文件面内(落点在 `packages/spec`),故独立记录。\n\n## 现象\n\n`ViewMetadataSchema` 接受**任意对象**。实测(`origin/main` @ `e900015`,`getMetadataTypeSchema('view').safeParse`):\n\n```\n{\"nope\":1}                                          -> ACCEPTED as {\"type\":\"simple\"}\n{}                                                  -> ACCEPTED as {\"type\":\"simple\"}\n{\"label\":\"x\"}                                       -> ACCEPTED as {\"type\":\"simple\",\"label\":\"x\"}\n{\"name\":\"v\",\"object\":\"o\",\"columns\":\"not-an-array\"}  -> rejected\n```\n\n走真实 `saveMetaItem`(stub engine,记录 insert):\n\n```\nsaveMetaItem({ type:'view', name:'garbage_view', item:{ nope: 1 } })\n  -> {\"success\":true, \"state\":\"active\", \"seq\":1, \"message\":\"Saved customization overlay ...\"}\npersisted body = {\"nope\":1,\"name\":\"garbage_view\"}\n```\n\n即:一个 `{ nope: 1 }` 通过了 `saveMetaItem` 的 spec-conformance 闸门,原样落库成一条 **active** 的 view overlay。\n\n## 原因\n\n`ViewMetadataSchema`(`packages/spec/src/ui/view.zod.ts` 约 L2330)是四个 arm 的 union,第 4 个是:\n\n```ts\nFormViewSchema.extend(flattenedViewOverlayFields()).strip(),\n```\n\n`.strip()` 丢弃未知键,而该 arm 自己没有任何**必填**键(`type` 还带 `'simple'` 默认值),于是\"任何对象\"都能匹配它并被规约成 `{ type: 'simple' }`。第 3 个 arm(`ListViewSchema…strip()`)要求 `columns`,所以还挡得住一点;form arm 什么都不挡。\n\n`.strip()` 本身是有意为之且文件里写明了理由 —— 该 arm 存在就是为了驮 Studio 的往返辅助键(`isPinned` / `sortOrder` / …),`.extend()` 会继承严格性,#4001 把 `FormViewSchema` 收紧后如果不 strip 回来,平台自己写的 body 会被 422。**问题不在 strip,在这个 arm 没有任何必填字段作底**:一个 union arm 既 strip 又无必填,等于给整个 union 开了一张万能通行证。\n\n## 为什么值得单独判\n\n这是 Prime Directive #10 的\"declared ≠ enforced\":`saveMetaItem` 的注释与 ADR-0005 §Validation 都声明 view 的写路径做 spec 校验,而实际上 view 是**唯一**一个校验可以被任意 body 绕过的常见 overlay 类型。连带影响:\n\n- 一个 AI 生成/手写出错的 view body(整份结构写歪、键名整体拼错),不会在保存时被拒,而是静默落库成一条渲染不出任何东西的 view;\n- 读路径的 `_diagnostics` 会报 `valid: true`(它查的是同一个 schema),于是 Studio 的合法性徽章也说它没问题;\n- 这正好是 #4001 那一整轮\"未知键静默剥离\"要消灭的形态,只不过发生在 union arm 选择这一层,而不是单个 object schema 那一层。\n\n## 可能的方向(未裁决)\n\n- **A. 给 form arm 一个最小必填底**(例如 `type` 不给默认值、或要求 `sections`/`fields` 之一),让\"空对象\"落不到任何 arm 上 —— 但要先量清 Studio 的往返 body 里到底有什么,不能把平台自己的写变成 422;\n- **B. 在 union 前加一道最小身份前置**(view body 至少要有可辨识的 view 形状),把\"什么都不是\"从四个 arm 之前挡掉;\n- C. 判定这是 `.strip()` 往返能力的已知代价,接受现状并在文档里写明 view 写路径不做结构保证。\n\n落点在 `packages/spec/src/ui/view.zod.ts`,改动会影响生成产物(`gen:schema` / `authorable-surface`)与 `/api/v1/meta/types/view` 喂给 Studio SchemaForm 的 `anyOf`,pin 在 `view-metadata-schema.test.ts` / `view-authoring-wire-split.test.ts`,需要一次正经的裁决而不是顺手改。相关但不同:#5316 讲的是 objectui 拿\"授权 schema\"去校验 STORED view 的误报,与本单方向相反(那边过严,这边过松)。"
+}

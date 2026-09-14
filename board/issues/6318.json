@@ -1,0 +1,35 @@
+{
+  "number": 6318,
+  "kind": "issue",
+  "title": "lint `visibility-alias-deprecated` 在任何 CLI 输入形状上都不可达 —— 别名在 `normalizeStackInput` 内被 ADR-0087 D2 转换折叠掉,而不是像规则注释说的「在 parse() 期间」",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T13:43:10Z",
+  "updated_at": "2026-08-08T05:25:31Z",
+  "closed_at": "2026-08-08T05:25:31Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6318",
+  "body": "在 #6073 的测量过程中发现,未在该单的范围内修复。**观察类,只记录发现,不含修法承诺。**\n\n## 规则自陈的机制\n\n`packages/lint/src/validate-visibility-predicates.ts:8-13`:\n\n> The deprecated spellings — `visibleOn` (view form) and `visibility` (page component) — stay accepted and are folded into `visibleWhen` at the schema boundary (a zod `.transform()`). **Because that fold happens during `parse()`**, the aliases are gone from the *parsed* stack — so this rule runs on the **pre-parse** (normalized) stack … to see what the author actually wrote.\n\n`visibility-alias-deprecated` 因此被注册为 `input: 'normalized'`(`authoring-rules.ts` 第六条)。\n\n## 实测:折叠发生在 `normalizeStackInput` **之内**,即 `normalized` 层的上一层\n\nADR-0087 D2 的两条转换 —— `view-visibleOn-to-visibleWhen`(`packages/spec/src/conversions/registry.ts:438`)与 `page-component-visibility-to-visibleWhen`(`:549`)—— 由 `normalizeStackInput` 执行。而 `normalizeStackInput` 的**输出**就是 `normalized` 层的定义。所以规则拿到手时别名已经不在了。\n\n在 `origin/main` @ `a7e7851` 的 worktree 上逐个 site 实测(spec/lint 均为本地 `dist` 构建):\n\n| 别名 site | 规则读**原始对象**(= 单测的喂法) | 规则读 `normalized` 层(= 三条命令的喂法) | `defineStack` |\n|---|---|---|---|\n| `views[].form.sections[].visibleOn` | 1 finding | **0** | 通过,发 1 条转换通知 |\n| `views[].formViews.edit.sections[].visibleOn` | 1 finding | **0** | 通过,发 1 条转换通知 |\n| `pages[].regions[].components[].visibility` | 1 finding | **0** | 通过,发 1 条转换通知 |\n| `views[].sections[].visibleOn`(单测 `:42` 用的形状) | 1 finding | 1 finding | **抛错**:`views.0: Unrecognized key(s) on this view container: ` + 反引号 sections |\n\n即:**三个 spec-合法的别名 site 上,规则在 `normalized` 层一律报 0**;唯一还能报的形状(容器顶层 `sections`)被 `.strict()` 的 `ViewSchema` 直接拒收 —— 正是 #4984 / #6251 那一族的签名:**单测绿,是因为 fixture 用的形状生产环境永远不会送进来**。\n\n## 但作者并没有被静默\n\n同一条转换在 `defineStack` 里会经 `warnConversionNotice` 喊出来,措辞比规则本身更好(带退役窗口):\n\n```\ndefineStack: views[0].form.sections[0].visibleWhen: 'visibleOn' -> 'visibleWhen'\n  (converted at load; conversion 'view-visibleOn-to-visibleWhen', retires in protocol 16).\n  Update the source to the canonical shape — the conversion stops running then.\n```\n\n所以**今天没有用户受损**,这也是本单按观察类归档、不打 `pm:queue` 的理由。受影响的只是这条 advisory 规则本身:它是一条永不触发的分支,而它的单测一直报绿。\n\n同文件另外两条规则(`visibility-bare-identifier`、`visibility-root-mislayered`)判的是**谓词值**,值在折叠后原样搬进 `visibleWhen`,实测在 `normalized` 层照常各报 1 条 —— **不受影响**,不要连坐。\n\n## 两种读法,交分诊评级\n\n- **可以退役**:D2 转换通知已经完整覆盖这条 advisory 的证据面,且措辞更好、带退役期。按 ADR-0049「declared ≠ enforced」,一条不可达的规则分支应当摘掉,而不是留着当假覆盖。\n- **可以修活**:若希望 `os lint` 的报告里出现这条(转换通知走的是 `defineStack` 的 `console.warn`,不进 lint 的 findings 列表,`--json` 里也看不到),那就得让规则读真正的 pre-parse 值 —— 而这会改动 `runAuthoringRules` 的对外输入契约,属于 lint 包公共 API 的措辞问题,须由维护者定。\n\n我倾向**第一种**:通知通道已经存在、更准确、且随 protocol 16 一起退役,重复一遍只是多一个声音;但严重性由分诊轮判,不由我判。\n\n## 复现\n\n`packages/lint` 内即可复现,不需要跑 CLI:\n\n```js\nimport { normalizeStackInput } from '@objectstack/spec';\nimport { validateVisibilityPredicates } from '@objectstack/lint';\n\nconst stack = { views: [{ name: 'f',\n  form: { type: 'simple', sections: [{ label: 'S', visibleOn: \"record.a == 1\", fields: [{ field: 'name' }] }] } }] };\n\nvalidateVisibilityPredicates(stack);                        // => 1  (visibility-alias-deprecated)\nvalidateVisibilityPredicates(normalizeStackInput(stack));   // => 0  ← 三条命令走的就是这条\n```\n\nRefs:#6073(发现处,该单的 PR 已按实测把 `AuthoringRuleInputTier` 注释里「别名靠 pre-parse 层才看得见」这句改掉并附回归 pin)、#6251(同族:规则遍历面 vs 真实 stack 形状)、#4984 / #5009(幽灵检查一族)、ADR-0089 D3b、ADR-0087 D2。"
+}

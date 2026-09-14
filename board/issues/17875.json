@@ -1,0 +1,33 @@
+{
+  "number": 17875,
+  "kind": "issue",
+  "title": "An ablation's `trap … EXIT INT TERM` restore cannot be assumed to fire in the agent container — measured twice, reproducibly, with the shell taking SIGSEGV at script exit and the tree left mutated",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-12T16:30:35Z",
+  "updated_at": "2026-09-13T09:31:47Z",
+  "closed_at": "2026-09-13T09:31:44Z",
+  "closed_by": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17875",
+  "body": "Filed by the `domain:devx` execution PM seat (#6023) from the #15185 dev's environment finding (PR #17874). ⚠️ This is not a product defect — it invalidates a **verification idiom the whole fleet uses**, which is why it gets a card instead of a note.\n\n⚠️ `priority:` and `domain:` deliberately unset — triage's call.\n\n## What was measured\n\nThe #15185 dev ran ablation scripts that mutate the tree, then restore it. Both carried the standard guard:\n\n```bash\ntrap RESTORE EXIT INT TERM\n```\n\nTheir report, verbatim:\n\n> both ablation scripts carried a trap on EXIT INT TERM calling a RESTORE function and **the trap DID NOT FIRE** — the shell took **SIGSEGV at script exit twice, reproducibly**, leaving the tree mutated. Restores were done and verified by hash afterwards. **In this container a trap firing cannot be assumed; the hash comparison is what settles it.**\n\nThe restores were completed by hand and each verified by `git hash-object` against the recorded HEAD blob plus an empty `git diff HEAD` (`showcase d98f17aa53`, `crm 681122206f`, `todo 48173191e1`), so **that PR's tree is clean** — this card is about the idiom, not about #17874.\n\n## ⭐ Why this is worth a card rather than a shrug\n\nThe repo's ablation discipline is: mutate → **prove the mutation landed on disk** → observe the predicted red → **restore under a trap**. The trap is what makes the third step safe to attempt at all.\n\n⇒ If the trap can silently not fire, then **every ablation in this repo has been leaving its safety net unverified**. The failure is silent in the worst direction:\n\n- A dev who trusts the trap and checks nothing afterwards **leaves the tree mutated**.\n- A subsequent commit then carries a planted defect, and its PR body says the ablation was reverted.\n- ⛔ And a mutated tree that nobody re-read looks exactly like a clean one in every gate that does not happen to read the mutated file.\n\n⭐ The only thing that actually settled it here was the **hash comparison after the fact** — not the trap, and not an exit code.\n\n## ⛔ What is NOT claimed\n\n- ⛔ **No claim about the cause.** SIGSEGV at shell exit was observed twice in one container; this card does not assert which shell, which build, or which interaction produced it. Whoever takes it measures that.\n- ⛔ **No claim that it is universal.** Two reproductions in one session on one container is a rate worth acting on, not a proof about every agent container. ⚠️ Whoever takes it should try to reproduce it **before** designing anything — and if it does not reproduce, say so, because a fix for a condition nobody can trigger is worse than the note.\n- ⛔ **No claim that any landed PR carries a stray mutation.** This seat did not audit for that.\n\n## Acceptance (⛔ implementation not prescribed)\n\n1. Reproduce it, or establish that it does not reproduce — with the shell, its version, and the script shape recorded. ⭐ If it does not reproduce, that reading is the deliverable and the card closes on it.\n2. If it does reproduce: the ablation idiom gains a step that does not depend on the trap. ⭐ The #15185 dev's own practice is the candidate shape: **verify the restore by content** (`git hash-object` against the recorded blob, plus an empty `git diff HEAD`) and treat that comparison — ⛔ never the trap, ⛔ never an exit code — as the thing that settles it.\n3. ⭐ **Control mandatory, both directions**: show the new verification **catches** a restore that genuinely did not happen, and **passes** a restore that did. ⛔ A check that has only ever been seen to pass proves nothing about the case it exists for.\n4. ⚠️ Whatever lands, the guidance it changes is likely in `AGENTS.md` or under `.claude/**` — **governed surfaces**. ⛔ That half is a draft PR left for a human merge, and ⛔ no lane seat arms or merges it.\n\n## Where the fleet reads this idiom today\n\n⚠️ Not enumerated by this seat, and that is deliberate: the population is whatever documents the ablation discipline, and ⛔ a card that names a partial list invites a sweep that stops at the list. Whoever takes it declares the population first — same requirement as #17797.\n\n## Links\n\n- PR #17874 / card #15185 — where it was measured; that PR's ablation covered all three example apps and each restore was hash-verified after the trap failed.\n- #17797 — the neighbouring card on declaring a population before sweeping it.\n\n<sub>`domain:devx` execution PM seat · `session_012GKcPZbMoGq7WPzKLfRBTU` · seat post #6023 · the SIGSEGV observation is the #15185 dev's, cited as theirs; this seat did not reproduce it</sub>"
+}

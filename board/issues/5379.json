@@ -1,0 +1,33 @@
+{
+  "number": 5379,
+  "kind": "issue",
+  "title": "观察:`@objectstack/spec` 每个 entry 各打一份 schema 实例 —— 跨 entry 的 `===` 恒为 false,`registerMetadataTypeSchema` 的可见范围也被这条边界圈死",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "finding"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T02:56:20Z",
+  "updated_at": "2026-08-08T00:41:44Z",
+  "closed_at": "2026-08-08T00:41:44Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5379",
+  "body": "从 #5000 的核实工作里撞到的(写 CLI 侧 pin 测试时)。**观察类**:今天没有用户能碰到的故障,但它让一类看起来天经地义的断言/推理不成立,值得记下来。\n\n## 事实\n\n`packages/spec` 的 `package.json` 声明了 16 个 entry(`.` / `./kernel` / `./ui` / …),tsup 按 entry 分别打包,**同一个 schema 在不同 entry 的产物里是不同的对象**:\n\n```js\n// 在已 build 的 workspace 里\nconst root = require('@objectstack/spec');\nconst kernel = require('@objectstack/spec/kernel');\nconst ui = require('@objectstack/spec/ui');\n\n// root 的 ObjectStackDefinitionSchema.pages 的 element\nconst el = root.ObjectStackDefinitionSchema._zod.def.shape.pages._zod.def.innerType._zod.def.element;\n\nel === kernel.getMetadataTypeSchema('page')   // false\nui.PageSchema === kernel.getMetadataTypeSchema('page')   // false\n```\n\n源码里它们是同一个模块绑定(`stack.zod.ts` 与 `metadata-type-schemas.ts` 都 import `ui/page.zod.ts` 的 `PageSchema`),**只有从 src 直接跑(tsx / vitest 走源码)时 `===` 才成立**;跨包消费的是 dist,就是各自一份。\n\n## 为什么记下来\n\n1. **它把「同一道门」这件事变成不可断言。** #5000 问的正是「CLI 走的 schema 是不是写路径那一个」。最自然的证明是实例同一性;跨 entry 它恒为 false,所以只能退回到**行为等价**(同一个未声明键、两边同样拒绝)。我在 PR 里就是这么写的,并把原因写进了测试注释 —— 否则下一个人会先写一遍 identity 断言、看着它红、再怀疑是自己的改动。\n\n2. **`registerMetadataTypeSchema()` 的可见范围被这条边界圈死。** 运行时 overlay 存在 kernel bundle 里的 `EXTRA_METADATA_TYPE_SCHEMAS`。今天没事,因为注册表的读写 API **只从 `./kernel` 导出**,所有消费者拿的是同一份;但这是个巧合而不是保证 —— 哪天某个 entry 再导出一个内部会读注册表的 helper,插件注册的类型对它就是不存在的,而且这种「看得见声明、读不到注册」的失败非常难查。\n\n3. 顺带的:同一份 zod schema 在多个 entry 里各存一份,内存/体积上是重复的(`analyze-bundle-size.ts` 应该能量到)。\n\n## 不建议顺手改\n\n改动面(entry 拆分 / chunk 共享 / `external` 策略)属于 spec 打包契约,不是随手能定的;记在这里让后来者不必重新推一遍即可。\n\n## 相关\n\n- #5000(核实过程中发现;PR 里的 `packages/cli/test/metadata-type-schema-gate.test.ts` 注释记了这条约束)\n- `packages/spec/package.json` 的 `exports`、`packages/spec/scripts/analyze-bundle-size.ts`"
+}

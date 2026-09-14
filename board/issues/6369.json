@@ -1,0 +1,35 @@
+{
+  "number": 6369,
+  "kind": "issue",
+  "title": "docs: `/analytics/query` 的响应示例给 `data.fields[]` 标了 `label` / `format` —— 运行时只发 `{ name, type }`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T15:18:12Z",
+  "updated_at": "2026-08-07T19:11:13Z",
+  "closed_at": "2026-08-07T19:11:13Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6369",
+  "body": "在实现 #6291(同一示例的 measure 拼写)时顺带查到,**先于该 PR 存在**,不由它引入。按 Prime Directive #10 独立立单,不在 #6291 的 PR 里顺手改(#6291 的评审面是 measure 拼写,本条是响应描述符的键集,两件事)。\n\n## 位置\n\n`content/docs/api/data-api.mdx` —— `POST /analytics/query` 的**响应**示例,`data.fields[]` 三个条目:\n\n```\n{ \"name\": \"industry\", \"type\": \"string\", \"label\": \"Industry\" },\n{ \"name\": \"revenue_sum\", \"type\": \"number\", \"label\": \"Revenue Sum\", \"format\": \"$0,0\" },\n{ \"name\": \"count\", \"type\": \"number\", \"label\": \"Count\" }\n```\n\n(`revenue_sum` 是 #6291 的 PR 刚改正的拼写;`label` / `format` 这一条与那次改动无关,改前改后都在。)\n\n## 事实面(实测)\n\n查询结果的 `fields[]` 由五处产出,**全部只发 `{ name, type }`**,没有 `label`,也没有 `format`:\n\n| file:line | 产出 |\n|---|---|\n| `packages/services/service-analytics/src/strategies/native-sql-strategy.ts:794` | `fields.push({ name: dim, type: d?.type \\|\\| 'string' })` |\n| `packages/services/service-analytics/src/strategies/native-sql-strategy.ts:799` | `fields.push({ name: m, type: 'number' })` |\n| `packages/services/service-analytics/src/strategies/objectql-strategy.ts:1179` | 同上(维度) |\n| `packages/services/service-analytics/src/strategies/objectql-strategy.ts:1183` | 同上(度量) |\n| `packages/services/service-analytics/src/dataset-executor.ts:893 / 932 / 1055` | `{ name, type: 'number' }` |\n| `packages/services/service-analytics/src/preview-evaluator.ts:251-254` | `{ name, type }` |\n\n**实跑取证**(worktree 内 `pnpm --filter \"@objectstack/service-analytics...\" build` 后,直接驱动 built dist 的 `AnalyticsService`,喂文档里那条 query):\n\n```\nFULL fields = [\n  { \"name\": \"industry\",    \"type\": \"string\" },\n  { \"name\": \"revenue_sum\", \"type\": \"number\" },\n  { \"name\": \"count\",       \"type\": \"number\" }\n]\n```\n\n即文档承诺的 `label` / `format` 两个键运行时一个都不发。\n\n## 影响\n\n照文档写客户端的人会去读 `data.fields[i].label` 渲染表头、读 `format` 做金额格式化,拿到的是 `undefined`。不像 #6291 那样当场 400,而是安静地渲染出空表头 —— 属于「文档承诺了不存在的字段」。\n\n注意 `label` / `format` **确实**存在于 Cube/Metric 的**定义**面(`packages/spec/src/data/analytics.zod.ts:72` 的 `format`),`GET /analytics/meta` 发的就是那一层;两者被文档混成了一层。\n\n## 两个修法方向(需要裁定,故不自行选)\n\n- **(a) 文档面**:把响应示例里的 `label` / `format` 删掉,并写明「显示名/格式在 `GET /analytics/meta` 的 cube 定义里取,不在查询结果里」。零运行时改动,契约照实描述。\n- **(b) 运行时面**:让查询结果的 `fields[]` 带上 cube 已声明的 `label` / `format`。这是**新增能力**,要按启动期聚焦原则先问有没有真实业务拉动(谁在读这个键),不能因为文档写了就补。\n\n倾向 (a):文档描述现状是无条件正确的;(b) 是能力扩张,应由真实消费方拉动而不是由一处文档笔误反向定义。\n\n## 查重\n\n搜过本仓 open issue / PR:`analytics fields label format` / `data-api.mdx analytics response` / `AnalyticsResult field descriptor` / `analytics query 文档 示例 响应` —— 无同题单。#6291 是同一示例的 measure 拼写面,不同事实。\n"
+}

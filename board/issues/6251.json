@@ -1,0 +1,35 @@
+{
+  "number": 6251,
+  "kind": "issue",
+  "title": "lint: 表单类规则只读 `views[].sections`,而真实 app 形状下 `views[]` 是视图容器 —— `validateFormLayout` 两条规则在实测 stack 上不可达",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T12:08:57Z",
+  "updated_at": "2026-08-07T17:02:07Z",
+  "closed_at": "2026-08-07T17:02:07Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6251",
+  "body": "Filed unassigned from #6128 / PR #6248,那里为了让新增的 `visibility-bare-identifier` 闸门真能触发,把这条遍历实测了一遍。**本单只记录发现,不含修法承诺。**\n\n## 事实\n\n`ViewSchema` 是一个**视图容器**,自有键只有 `name` / `label` / `object` / `list` / `form` / `listViews` / `formViews`(`packages/spec/src/ui/view.zod.ts:1890-1903`,严格错误映射里把这句话原文写了出来:「The container's own keys are `list`, `form`, `listViews`, `formViews`」)。表单的 `sections` 属于 `FormViewSchema`(`view.zod.ts:1623-1624`),在容器**下一层**。\n\n`os build` 跑 `examples/app-showcase`,产物里唯一一条 view 表单谓词落在:\n\n```\nviews[0].formViews.edit.sections[0].fields[6].visibleWhen\n```\n\n`views[0]` 自身的键是 `list,listViews,formViews` —— 既没有 `name`,也没有 `sections`。\n\n## 实测:`validateFormLayout` 只在被读的那一种形状上触发\n\n同一份有缺陷的表单(引用了对象上不存在的字段),摆在三个位置:\n\n```js\nconst objects = [{ name: 'task', fields: { title: { type: 'text' } } }];\nconst bad = { sections: [{ fields: [{ field: 'no_such_field' }] }] };\n\nvalidateFormLayout({ objects, views: [{ name:'v', data:{object:'task'}, ...bad }] })\n// => ['form-field-unknown']\n\nvalidateFormLayout({ objects, views: [{ name:'v', formViews: { edit: { data:{object:'task'}, ...bad } } }] })\n// => []      ← 真实 app 形状\n\nvalidateFormLayout({ objects, views: [{ name:'v', form: { data:{object:'task'}, ...bad } }] })\n// => []      ← 容器默认表单\n```\n\n也就是说 `form-field-unknown` / `form-colspan-absolute` 两条规则,在真实 app 产出的形状上基本不可达。`packages/lint/src/validate-form-layout.ts:96-108` 直接读 `stack.views[i].sections`,`if (!sections) continue`。\n\n同族的 `validateVisibilityPredicates`(ADR-0089 D3b 的两条 advisory)此前有完全相同的洞;PR #6248 已在**该文件内**把遍历补成容器的 `form` + 每个 `formViews` 具名项,并附了实测依据。本单是同一洞在**另一个规则文件**里的实例 —— 补丁没有外溢到 `validate-form-layout.ts`,因为那超出了 #6128 的范围。\n\n## 建议顺带核查的邻居\n\n按「读 `views[].sections`」这一模式全包搜一遍即可,不要逐个凭印象判断。`validate-translatable-sections.ts` 的 `collectViewSites` 已经把正确的阶梯写对了(`sections` / `form.sections` / `listViews.*.sections` / `formViews.*.sections`),可以直接作为参照实现。\n\n这一族的判据在 #4984 / #5009 已经写过:**一条键在真实/合法 stack 上永不出现的分支,不是保守,是幽灵检查** —— 它一直报绿,而绿是因为什么都没读到。\n\nRefs:#6128 / PR #6248(发现处与已修的同族实例)、#4984 / #5009(幽灵检查一族)、ADR-0089 D3b。"
+}

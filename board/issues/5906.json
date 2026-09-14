@@ -1,0 +1,35 @@
+{
+  "number": 5906,
+  "kind": "issue",
+  "title": "同源:另外三处 hook context 上的 `doc` / `previousDoc` 防御性 alias 读也没有生产者(#5671 全仓 grep 的剩余部分)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "pm:queue"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T11:22:44Z",
+  "updated_at": "2026-08-07T13:54:50Z",
+  "closed_at": "2026-08-07T13:54:50Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5906",
+  "body": "在 #5671(PR 见下)按必答项做「全仓 grep hook input 形状上的 `doc` 读者」时发现,PD #10 单独记录。**观察类**(`finding`):与 #5671 同一族,今天没有用户会撞上,三处都是永不命中的兜底分支。\n\n#5671 的作业面被派发口径限定在 `packages/triggers/trigger-record-change` + 两处 fixture,所以下面三处**没有**在那个 PR 里一起清,按纪律另立此单。\n\n## 事实(对 `origin/main` 核实)\n\n真值源:`packages/objectql/src/hook-input-shape-contract.test.ts`(PR #5668)断言 insert 上下文「carries `data` — never `doc`」;`packages/spec/src/data/hook.zod.ts` 的 `HookContext` 只声明 `input` / `result` / `previous` 三个键 —— 既没有顶层 `doc`,也没有 `previousDoc`。\n\n### 1. `packages/services/service-storage/src/attachment-lifecycle.ts:174`\n\n```ts\nconst row: any = ctx?.result ?? ctx?.input?.doc ?? ctx?.input?.data;\n```\n\n注意这条的**次序与 #5671 相反**:`doc` 排在 `data` 前面。因为 `doc` 恒为 undefined,`??` 每次都穿到 `data`,等价于 `ctx?.result ?? ctx?.input?.data`。纯死码。\n\n### 2. `packages/plugins/plugin-sharing/src/primary-bu-projection.ts:80`\n\n```ts\nadd((ctx?.input?.data ?? ctx?.input?.doc)?.user_id);\n```\n\n`data` 在前,`doc` 限支不可达。\n\n### 3. `packages/runtime/src/sandbox/body-runner.ts:308`(**不同的键,同一族**)\n\n```ts\nconst inputSnapshot = unwrapProxyToPlain(engineCtx?.input ?? engineCtx?.doc);\nconst previousRaw = engineCtx?.previous ?? engineCtx?.previousDoc;\n```\n\n这两条读的是 **`ctx.doc` / `ctx.previousDoc`(顶层)**,不是 `ctx.input.doc`,所以严格说不属于「hook input 形状」那次 grep 的目标;但它同样是为一个 `HookContext` 从未声明、引擎从未构造的键留的兜底,列在一起便于一次性判。\n\n## 分级说明\n\n标 `finding`:三处都是纯休眠代码,行为上零影响,与 #5671 判法一致。论据也一样 —— AGENTS.md PD #12 点名的消费端 `??` 兜底,「a tolerant fallback fossilizes the wrong convention into a second de-facto contract」,而且是为从来不存在的生产者留的。严重程度请分诊轮判。\n\n## 建议\n\n三处各自只读引擎真值键(`input.data` / `input` / `previous`),删掉 alias 限支。做之前留意 fixture 三分法:#5671 里 `attachment-lifecycle.test.ts:159` 的 insert fixture 已按引擎真值 re-spell 成 `input: { data: … }`,但那条 fixture 同时给了 `result`,`??` 链首位就命中,所以它对 1 号点的两条限支都不承重 —— 清 1 号点时若要留 pin,得另配一条不带 `result` 的用例。\n\n## 关联\n\n- 同源:#5671(`trigger-record-change` 的同一条 alias,已修)\n- 真值源:#5273 / PR #5668\n- spec fixture 半边:#5886"
+}

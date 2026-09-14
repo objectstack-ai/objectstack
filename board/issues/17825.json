@@ -1,0 +1,34 @@
+{
+  "number": 17825,
+  "kind": "issue",
+  "title": "client SDK: environments.update JSDoc promises plan/status/visibility writes the control plane rejects (400 since cloud#2193)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-12T09:27:46Z",
+  "updated_at": "2026-09-13T08:33:05Z",
+  "closed_at": "2026-09-13T08:33:05Z",
+  "closed_by": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17825",
+  "body": "## Problem\n\n`environments.update`'s JSDoc in the client SDK says a caller may change `plan` and `status`. Neither has ever taken effect: the control plane declares both columns read-only, so the values were silently dropped. Since cloud#2193 the route answers **400** for them instead of dropping them, so the doc now describes a call that fails.\n\nThe same doc comment also implies `visibility` is writable. The control plane forces `visibility` to `private` at create time and rejects the column on update. A maintainer ruling on 2026-09-12 keeps it that way until the public-listing feature exists, at which point it gets its own endpoint rather than the generic update.\n\n## Proposal\n\nCorrect the doc comment on the next SDK touch:\n\n- `plan` — not updatable through this call; plan changes go through the billing routes.\n- `status` — not updatable through this call; use the lifecycle actions (archive / restore / suspend / resume).\n- `visibility` — server-owned, `private` today; a write entry will arrive with the public-listing feature.\n- State plainly that unknown or read-only keys are answered with 400, so callers do not assume a silent drop.\n\n## Acceptance\n\n- The doc comment lists only fields the control plane actually accepts.\n- If the SDK has a type for the update payload, read-only fields are not part of it (or are marked as such), so the compiler catches the mistake the comment used to invite.\n"
+}

@@ -1,0 +1,34 @@
+{
+  "number": 5966,
+  "kind": "issue",
+  "title": "finding(objectql): archive 的冷侧 keep prune 在 abort 位已抬起后仍发一次 DELETE —— 循环之后的那条腿没跟上 #4747",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T13:21:07Z",
+  "updated_at": "2026-08-07T17:15:27Z",
+  "closed_at": "2026-08-07T17:15:27Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5966",
+  "body": "观察类 finding,来自 #5755 / PR #5956 的实现。**今天没有用户会撞到**,记录在案由 PM 定级。\n\n## 事实(`origin/main` + PR #5956)\n\nPR #5956 给 `archiveObject()` 的批循环补上了 #4747 的 abort 检查(与 `batchedReap` 同款)。补完之后,`archiveObject()` 里**循环之后**还剩一条腿没有该检查 —— 冷侧 `keep` 保留期的 prune:\n\n```ts\n// (批循环在此 break —— 此时 this.abort.aborted 已确定为 true)\n\n// Cold-side retention: `keep` bounds the archive itself.\nif (archive.keep && typeof cold.deleteMany === 'function') {\n  const keepCutoff = new Date(this.now() - parseLifecycleDuration(archive.keep)).toISOString();\n  await cold.deleteMany(object, { where: { created_at: { $lt: keepCutoff } } });\n}\n```\n\n于是 teardown 落在批循环中途时:循环按新检查停下,紧接着仍会向**正在关闭的 cold datasource** 发一次谓词 DELETE。\n\n## 为什么值得单独记一条(而不是「单次 await,可接受」)\n\n这与 #5194 之前「无 guard reap 是两个检查点之间的单个 await」的形态**不同**,差别在于代码是否已经知道答案:\n\n- 那种形态里,abort 只可能在那个 await **进行中**被抬起 —— 之后没有任何代码观察过这个位,继续执行不是「明知故犯」;\n- 这里,控制流**刚刚因为读到 `aborted === true` 而 break**,然后仍然发了一次写。契约(#4747:「stop() 抬起 abort 位,sweep 在每个 leg boundary 检查」)在这一处是可判定的,却没判。\n\n## 为什么现在不会有人撞到\n\n三重叠加,比 #5755 还窄:\n\n- archive 策略要求已配置 cold datasource(`archive.to`),未配置直接 `skipped: 'archive-pending'`;\n- 还要求显式声明 `archive.keep`(未声明则整条腿不执行);\n- 目前仓内没有平台对象声明 `archive`,更没有声明 `keep`。\n\n## 修法(一行,若 PM 认为该修)\n\n把该腿并入同一个判定即可,例如 `if (!this.abort.aborted && archive.keep && typeof cold.deleteMany === 'function')`,或在其前加一行早退。语义上不存在取舍:cold prune 是纯保留期回收,推迟到下一轮 sweep 无任何副作用(它不像热删那样受「归档成功才热删」的配对约束)。\n\nPR #5956 未顺手改:该 PR 的裁定范围是批循环那一行,且其测试 fixture 有意不声明 `keep`,以免断言一条本 PR 不治理的腿。\n\nFound-during: #5755 / PR #5956"
+}

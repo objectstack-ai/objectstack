@@ -1,0 +1,35 @@
+{
+  "number": 6416,
+  "kind": "issue",
+  "title": "三个手写 unrecognized_keys error map 绕过 strictUnknownKeyError,把说明句夹在「哪个键错了」与处方之间 —— #5955 的修法与 #5593 的迁移都够不到",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T17:08:12Z",
+  "updated_at": "2026-08-07T22:18:24Z",
+  "closed_at": "2026-08-07T22:18:24Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6416",
+  "body": "Found while implementing #5955 (PR #6375, direction A: move the surface `history` sentence to the end of `strictUnknownKeyError`'s message so the fix is read first). **Unassigned — filed for triage, not claimed.** Out of that PR's scope by construction: the ruling scoped it to *one* concatenation point in `packages/spec/src/shared/suggestions.zod.ts`, and none of these sites goes through it.\n\n## The finding\n\nThree `unrecognized_keys` error maps are written by hand instead of via `strictUnknownKeyError` / `strictObject`, and each reproduces the exact shape #5955 was filed against — a non-actionable explanatory sentence sitting **between** the offending key and the prescription that fixes it:\n\n| site | the sentence in the middle | the prescription behind it |\n|:--|:--|:--|\n| `packages/spec/src/shared/visibility.ts:94-112` (`strictVisibilityError`) | \"Before ADR-0089 D3a these were dropped silently, shipping inert metadata; a mis-layered or stale key is now a loud parse error.\" (~120 chars) | \"the canonical key is `visibleWhen` (ADR-0089) — `visibleOn` … and `visibility` … are still accepted as deprecated aliases\" |\n| `packages/spec/src/ui/dashboard.zod.ts:145-190` (`strictWidgetAnalyticsError`) | \"Undeclared top-level keys were dropped silently before strict validation, shipping inert metadata; a stale or mis-layered key is now a loud parse error.\" (~150 chars) | three separate branches: the ADR-0021 dataset migration, the objectui-internal `component`/`data` quarantine, and the #5022 drill near-key answer |\n| `packages/spec/src/data/object.zod.ts:428-438` (`tenancy`) | \"The two supported tenancy modes are: database-per-tenant = environment-level deployment (no object config); row-level isolation = `tenancy.enabled` + `tenancy.tenantField`.\" | the per-key `\\n  • ` bullets built just above it |\n\nEvery one is built as `const base = front matter + sentence` and then `return base + ' ' + prescription`, so the prescription is unreachable by a reader who stops at the front of a single-line render — which is the consumption position #5955 measured (`os validate`'s `• where: message` at `packages/cli/src/commands/validate.ts:141`, CI logs, and `validateFlowTriggerReadiness`, which flattens newlines out of schema text on purpose).\n\nTwo sibling maps are **fine** and worth naming so a fixer does not touch them: `packages/spec/src/ai/tool.zod.ts:85-93` and `packages/spec/src/data/object.zod.ts:163-171` (`enable`) carry no explanatory sentence at all — front matter, then bullets.\n\n## Why neither in-flight change reaches them\n\n- **#5955 / PR #6375** moves `history` to the end inside `strictUnknownKeyError`. These three maps never call it, so they are untouched. After that PR lands, the shared surfaces and these three disagree about where the explanation goes.\n- **#5593** migrates the 44 **direct `strictUnknownKeyError` call sites** to `strictObject`. These three are not direct call sites either — they are independent `z.core.$ZodErrorMap` functions passed as `{ error }`. They are outside its completion scope, which is why this is filed standalone rather than as a sub-issue of #5593, and why there is no `Blocked-by:` line: the fix does not depend on that migration landing.\n\nSo this is not \"the same work, later\" — it is a set of surfaces that both campaigns' inventories miss. The `aliases`/`guidance` integrity gate has the same blind spot for the same reason: `alias-integrity.test.ts` judges the two registries (`strictObjectDeclarations()` and `directAliasTables()`), and a hand-rolled map registers in neither, so its prescriptions are unmeasured rather than clean.\n\n## Candidate directions (for triage, not a recommendation to implement)\n\n1. **Reorder in place** — three local edits mirroring #5955, no mechanism change. Cheapest; leaves three hand-maintained copies of the template.\n2. **Fold them into `strictObject` / `strictUnknownKeyError`** — the `guidance` channel already models exactly what all three do (`visibility.ts`'s alias pointer, dashboard's three branches, `tenancy`'s mode explainer are per-key prescriptions), so this would delete the copies and pull them under the integrity gate at the same time. Larger, and dashboard's branches are keyed by *set membership* (`LEGACY_WIDGET_ANALYTICS_KEYS`, `QUARANTINED_WIDGET_KEYS`) rather than by exact key, which `guidance` does not express today — that gap is the real decision.\n3. Leave as-is and accept the divergence.\n\nDirection 2 is the contract-first shape and would close the gate blind spot too, but it needs a call on whether `guidance` grows a set-keyed form; that is a spec-surface decision, not a mechanical one.\n\n## Verification notes\n\nRead off `origin/main` at `bbd2d8d3d`. Duplicate search run over open issues on the file paths, on `strictUnknownKeyError`, and on the message-order wording — no hit. Related: #5955 (the ruling and the measurement this generalizes), #5762 (why the position started mattering), #5593 (the migration that does not cover these), #4001 / ADR-0078 (the strictness ratchet), #5013 / #5483 (the two registries the gate reads).\n"
+}

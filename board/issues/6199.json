@@ -1,0 +1,36 @@
+{
+  "number": 6199,
+  "kind": "issue",
+  "title": "settings 的 `step` 是同族第五个声明但不执行的值约束键 —— 先要一个「它算不算值约束」的判断",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T10:39:38Z",
+  "updated_at": "2026-08-08T04:25:28Z",
+  "closed_at": "2026-08-08T04:25:28Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6199",
+  "body": "在实施 #5932(补 `min`/`max`/`minLength`/`maxLength` 的执行)时顺带发现,记录下来交 triage。**不在 #5932 的完成范围内** —— #5932 的分诊评论按名点死了那四个键,`step` 是第五个。\n\n## 事实\n\n`packages/spec/src/system/settings-manifest.zod.ts` 的 `SpecifierSchema` 在同一段注释下声明了三个键:\n\n```\n/** `number` / `slider`: numeric bounds and step. */\nmin: z.number().optional(),\nmax: z.number().optional(),\nstep: z.number().optional(),\n```\n\n#5932 落地后,`min` / `max` 在写入路径(`validatePatch`)与 env 路径\n(`effectiveEnvOverride`)都被执行了。同一行注释下的 `step` 仍然**零读取点** ——\n`packages/services/service-settings/src/` 里没有任何消费者,superRefine 也不校验它\n(不像 `min`/`max` 至少查了次序、`minLength`/`maxLength` 至少查了次序)。\n\n生产侧目前只有一处声明:`packages/services/service-settings/src/manifests/ai.manifest.ts:189`\n的 `temperature`(`min: 0, max: 2, step: 0.1`)。\n\n## 为什么单独一条,而不是 #5932 的续集\n\n因为它**先需要一个产品判断,而不是一段实现**。`step` 有两种读法,导向不同的结果:\n\n- **它是值约束** —— 值必须落在 `min + k * step` 的网格上。那么 `temperature: 0.15`\n  应当在写入时被拒(码表里 `invalid_value` 可用),`step` 就应当照 #5932 同形补执行。\n  代价:浮点网格判定需要容差策略(`0.1` 的整数倍在二进制浮点下不精确),这本身是个\n  需要定的规格。\n- **它是纯 UI affordance** —— 只是 HTML `input[type=number]` 的 `step` 属性,告诉控件\n  上下箭头一次走多远,从不表达「其他值非法」。那么它今天的行为就是正确的,不该补执行;\n  该做的是把注释写清楚,免得下一个人按 ADR-0049「declared ≠ enforced」把它当洞来补。\n\n我倾向第二种(HTML 语义就是这样,而且 `temperature: 0.15` 对 AI 服务显然是合法值),\n但这是**规格判断不是实现细节**,所以按 #5932 分诊的同一条界线上报而不自行决定。\n\n## 影响面\n\n- 今天没有用户会撞到:唯一的声明点是 `ai.temperature`,`step: 0.1` 与 `min: 0 max: 2`\n  并存,而越过网格的值(如 `0.15`)对下游是完全合法的温度。故按**观察类**记录\n  (`finding`,不入 `pm:queue`),严重度请 triage 定。\n- 若判定为「纯 UI affordance」,建议把 `SpecifierSchema` 的注释从\n  \"numeric bounds and step\" 拆开,并在 `step` 上写明它不参与校验 —— 否则 #5932 的\n  同族记忆会让下一个 agent 再来补一次。\n\n## 相关\n\n- #5932 —— 同族的 `min`/`max`/`minLength`/`maxLength` 执行(本条的发现上下文)。\n- #5131 —— `options` 表在写入路径上的执行。\n- #5204 —— env 侧与写入侧对齐。\n"
+}

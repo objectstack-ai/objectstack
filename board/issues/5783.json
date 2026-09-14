@@ -1,0 +1,36 @@
+{
+  "number": 5783,
+  "kind": "issue",
+  "title": "删除 saveMetaItem legacy 写入分支后的三处残留:一个无生产者的 ledger 错误码 + 两处已过期的跨包注释",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched",
+    "pm:queue",
+    "target:v17"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T05:20:29Z",
+  "updated_at": "2026-08-07T18:35:56Z",
+  "closed_at": "2026-08-07T18:35:56Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 10,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5783",
+  "body": "观察类发现,来自 #5264 / PR #5782 的实施过程。**当前不影响任何用户行为**,三处都在本次改动的硬性文件面之外(`packages/spec` / `packages/rest`),所以没有顺手改,单独记一笔。\n\n## 1. `OVERLAY_PERSISTENCE_FAILED` 失去了唯一的生产端\n\nPR #5782 删掉 `saveMetaItem` 的 legacy raw-engine 分支后,`OVERLAY_PERSISTENCE_FAILED` 在整个仓库里**没有任何生产端会再抛出它**(原唯一发射点是被删分支的 catch,`packages/metadata-protocol/src/protocol.ts` 原 7952 行)。但它仍登记在 `packages/spec/src/api/error-code-ledger.zod.ts` 的 `@objectstack/metadata-protocol` 名下。\n\nledger 的自检(`error-code-ledger.test.ts`)只查大小写、重复与遮蔽,不查「有没有生产者」,所以这一条不会变红 —— 它就是 ADR-0112 那句「no silent fourth state」反过来的形状:**注册了、但永远不会被发出**。\n\n两处 `packages/rest` 的测试仍在自行构造这个 error 来断言 5xx 行为,因此它们今天钉的是一个没有生产者的码(#4984 家族的 phantom check):\n\n- `packages/rest/src/rest-5xx-message-sanitization.test.ts:278` 起\n- `packages/rest/src/rest-unknown-object-heuristic.test.ts:413` 起\n\n两条断言本身仍然有价值(它们验证的是 `resolveErrorResponse` 对「声明了 status 的 5xx」的处理),换一个仍有生产者的码即可,不必删。处置有两种,都需要维护者裁一下:**(a)** 从 ledger 摘掉这个码、两个测试改用别的已声明 5xx;**(b)** 保留,理由是它属于「rest 层对协议 5xx 的通用契约」而非某个具体分支 —— 那就该在 ledger 里写明它由谁发出。\n\n## 2. `packages/spec/src/kernel/metadata-plugin.zod.ts` 的 `agent` 注释已过期\n\n约 793 行,在解释「agent 为什么没有 governed write path」时写道:\n\n> `saveMetaItem` would route it down the legacy raw-engine branch, and nothing calls it.\n\n结论(agent 无变更日志、以 git 为记录)完全成立且未受影响,但**机制描述已经不对了**:今天 `saveMetaItem` 会以 403 直接拒绝 code-only 类型(#5086),那条 legacy 分支也已被 #5264 删除。这段注释正是 AGENTS.md「Route & surface ownership」第 1 条点名的输入 —— grep 找得到、按它推理会得出错误的运行时模型。\n\n## 3. `packages/rest/src/rest-5xx-message-sanitization.test.ts` 的注释在 #5263 当天就已过期\n\n165-172 行说明为什么 `saveMetaItem` 的 5xx 生产者是「按形状覆盖」而非实测:\n\n> reaching its legacy raw-engine branch requires a metadata type that is neither overlay-allowed nor runtime-creatable AND an artifact-backed item of that type, and a runtime-created one is refused earlier with `403 NOT_CREATABLE`.\n\n前半句在 PR #5263 落地当天就不再成立:artifact-backed 的 code-only 类型同样在更早位置被拒(`NOT_OVERRIDABLE`, 403)—— 这一点 PR #5782 的不可达性复核已用 `protocol.code-only-types.test.ts` 的既有用例证实。有意思的是这段注释**当时是对的**,它只是没跟上同一周的门禁收紧,可以当作「注释里写死可达性论证」这种做法本身的样本。\n\n## 建议\n\n三条同源(都是同一次收紧留下的尾巴),但落在两个包、性质也不同:1 是词表漂移(要裁),2 和 3 是纯注释。可以合成一个小 PR 收掉,前提是 1 先有结论。\n\n参考:#5264 / PR #5782,#5086 / PR #5263。\n"
+}

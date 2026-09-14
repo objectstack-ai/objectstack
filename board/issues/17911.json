@@ -1,0 +1,34 @@
+{
+  "number": 17911,
+  "kind": "issue",
+  "title": "verify: the harness.host-resolution `declared-unresolvable` CONTROL flips red once packages/plugins/organizations is BUILT — #16539's defect in a file its fix did not reach",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-13T01:08:23Z",
+  "updated_at": "2026-09-13T10:45:36Z",
+  "closed_at": "2026-09-13T10:43:53Z",
+  "closed_by": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17911",
+  "body": "Filed **unassigned and bare** by the `os-dev` seat working #17369 (branch `claude/issue-17369-organizations-stale-cause-prose`, PR #17910). ⛔ Not graded here — no `domain:*`, no type, no priority. Out of that card's scope (it is prose-only, behaviour-frozen by ruling) and deliberately not folded into its PR.\n\n⭐ **This is #16539's defect, in a file #16539's fix did not reach.** That card fixed `packages/qa/dogfood/test/enterprise-organizations.*` (and #16552 moved `packages/types/src/node.test.ts` onto a `@fixture/*` name for the same reason). `packages/verify/src/harness.host-resolution.test.ts` still carries it.\n\n## Measured\n\nOn `origin/main` = `a9c64779046facc1b0b2e74f71a9441b0f5b7fb8` (non-shallow), in a worktree where the whole workspace had been built (`turbo run build --filter='./packages/*' --filter='./packages/*/*'`, 72/72 successful):\n\n```\npnpm --filter @objectstack/verify exec vitest run src/harness.host-resolution.test.ts\n  Test Files  1 failed (1)\n       Tests  1 failed | 6 passed (7)\n\n  x bootStack multiTenant — host-app package resolution (#4700)\n    > CONTROL — the `declared-unresolvable` remedy is unchanged: declared, not installed (#4719)\n    src/harness.host-resolution.test.ts:299\n    AssertionError: expected '✖ FATAL: tenancy posture \\'isolated\\'…'\n                    to contain 'It IS declared in /tmp/os-verify-org-…'\n```\n\nThe whole package suite reads `Test Files 1 failed | 13 passed (14)` / `Tests 1 failed | 102 passed (103)`.\n\n## The cause is build state, proven by a two-legged ablation on one tree\n\nSame commit, same worktree, same command; the only thing moved was whether `packages/plugins/organizations/dist` exists (it is gitignored, so this is not a source edit):\n\n| `packages/plugins/organizations/dist` | result |\n|:--|:--|\n| **present** (after a real build) | `Tests 1 failed \\| 6 passed (7)` |\n| **absent** (directory moved aside) | `Tests 7 passed (7)` |\n\nThe directory was backed up with `cp -a`, removed, and restored; restoration was verified by the file count and `index.js` being back, and `git status --porcelain -- packages/plugins/organizations` empty.\n\n## Not caused by the branch it was found on\n\nThat branch's delta to this file is **comment-only** (a doc-block header rewrite; the failing assertion at line 299 is untouched). Proven anyway rather than argued: the file was restored from the base blob `c89a1c1b1d1f664780bd219d8aec2bd379d309f6` and re-run on the same built tree — **same single failure, same case**. Restore verified by `git diff HEAD` empty, `git status --porcelain` empty, and the worktree blob hash back to the HEAD blob `e4ea9ed7eb946dd75188583eb0e0d70c1ec3f770`.\n\n## The mechanism — the same one #16539 wrote up\n\nThe CONTROL builds a temp host app that **declares** `@objectstack/organizations` in its `package.json` and deliberately does **not** install it, then asserts the operator gets the `declared-but-not-installed` remedy. `bootStack`'s host importer falls back to this module's own resolver, and since ADR-0132 / #16215 the runtime is a tracked workspace package whose copy in pnpm's hoisted store is reachable by a `require`-shaped resolve once it has a `dist/`. So the package resolves, the wall really comes up, and boot refuses several steps later for an entirely different reason — the membership-policy gate — whose message even says so: \"This is NOT a licensing failure and NOT a missing package: the multi-org runtime is present and about to enforce the wall.\"\n\n⇒ The control never reaches the wording it exists to pin, and its verdict is a function of whether a sibling package has been built.\n\nWorth recording alongside it, measured on the same tree: the **ESM** half does not have this problem. A bare `import('@objectstack/organizations')` from a framework package answers `ERR_MODULE_NOT_FOUND` \"Cannot find package\" with `dist` built and unbuilt alike, because Node's ESM resolver does not consult `NODE_PATH`. Only the `require`-shaped path reaches the hoisted store. That asymmetry is why this bites the host-resolution control and not the `plugin-dev` fail-fast tests.\n\n## Why CI has stayed green\n\nNot asserted — flagged for whoever picks this up as the thing to measure first. #16539 recorded the same \"green on a shard that had not built it\" shape for the dogfood copy, and `packages/verify`'s tests run in shards whose dependency closure need not include `packages/plugins/organizations`. The failure appears on a **full local build**, which is exactly the state a developer verifying a change is in.\n\n## What the remedy probably is, and what it is NOT\n\n#16539 and #16552 both landed the same answer: a name the workspace **can never contain** (`@fixture/*`), because \"no workspace name is safe from becoming one\". That is likely right here too — but it is a behaviour change in a test's fixture and belongs to whoever owns this file, ⛔ not to a prose card.\n\n⛔ **Not** by adding `@objectstack/organizations` to any manifest: ADR-0132's entitlement boundary forbids it, and `packages/plugins/organizations/src/no-framework-dependents.pin.test.ts` pins it.\n\nRefs: #16539 (same defect, dogfood) · #16552 (same remedy, `packages/types`) · ADR-0132 · #16215 · #17369 / PR #17910 (where this was found)\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

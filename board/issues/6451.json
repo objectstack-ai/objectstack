@@ -1,0 +1,35 @@
+{
+  "number": 6451,
+  "kind": "issue",
+  "title": "finding(devx): #5186 读接缝规则的「编造空答案」词表看不见「原样返回入参」这一形状 —— #6116 是实证样本",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T21:37:57Z",
+  "updated_at": "2026-08-08T01:02:05Z",
+  "closed_at": "2026-08-08T01:02:05Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6451",
+  "body": "发现于 #6116(PR 见下)实施期,按 Prime Directive #10 只记录不修,**未认领**。严重度不自评,交分诊。#6116 的分诊评论明确要求实施方对这个问题表态、且**不得夹带进那条 PR**(闸门在 `scripts/`,devx 车道),故独立立单。\n\n## 事实\n\n`scripts/check-durability-degradation-log-level.mjs` 的读接缝编造规则(#5186)判红需要四个条件同时成立,其中第三条是:\n\n> some path out of the `catch` `return`s an EMPTY/ZERO value for that method (`[]`, `false`, `null`, `undefined`, `{}`, `''`, `0`, `1`)\n\n`packages/objectql/src/engine.ts` 的 `resolveFileReferences` 里,`sys_file` hydrate 的批量读故障走的是 `catch { return records }` —— **返回的是入参本身**,不在上面这张值表里。实测:该接缝在 65 个被发现的读接缝里被正常计入普查,但从不判红,#6116 的缺陷因此在闸门下存活到人工清扫才被看见(闸门在修复前后都报 `✓ … none invents an unreported empty answer`)。\n\n## 为什么值得单独裁\n\n**支持扩的一面。** 危害轴与 `[]`/`null` 完全同族:读没发生,调用方却拿到一个与「合法的空/无」不可分辨的答案(ADR-0110 D3)。#6116 的具体形态是消费方把裸 id 当「无附件」渲染。规则的名字叫「invention」,但它真正保护的是**可分辨性**,而不是「返回值字面上是不是空」。\n\n**需要审慎的一面(也是我不敢在实施单里顺手扩的原因)。** 「原样返回入参」与「返回空字面量」有一处不对称:对 `resolveFileReferences` 这类**富化/装饰**函数,原样返回是它 happy path 上的**已声明契约**(inline blob、外部 url 字符串本来就原样穿过),不是编造。要把「作为契约的穿过」与「吞掉故障的穿过」分开,需要知道函数的声明语义,而这条语法规则看不到 —— 这与脚本头部自陈的局限 1(信封形状 `{ data: null, … }` 判不了)是同一类盲区,不是同一个盲区。\n\n所以我的倾向是「**该扩,但要作为一条新判据而不是往 EMPTY 值表里塞一项**」:判据是「catch 返回了本函数的某个形参(identity 穿过)」,并且仍受原有两条豁免约束(catch 内有任意级别日志 ⇒ 豁免;按错误类型判别 ⇒ 豁免)。#6116 修好之后这两条豁免都命中,所以扩了也不会把已修的点判红 —— 但**扩之前必须先量三个 scan root 的假阳性面**并落 baseline,这正是脚本自己对「收窄先行」的纪律要求(维护者 2026-08-06 裁定)。是否值得做、按什么优先级,交分诊。\n\n## 处置方向(供分诊定价,不预判)\n\n1. 在 `READ_SEAM_SCAN_ROOTS` 三个包上先做一次**测量**:有多少 catch 返回形参、其中多少已有日志或类型判别(即扩了之后的真实红集大小);\n2. 若红集可控,加 identity-穿过判据 + 自测用例 + `durability-read-invention.baseline.json` 的初始条目;\n3. 若红集过大或大量落在「穿过即契约」的富化函数上,则记录为 honest limitation(与信封局限并列写进脚本头部),不扩规则。\n\n⚠️ 与 #5981 不同:那条是 AGENTS.md 散文没跟上 #5186,这条是规则**判据本身**的覆盖面。\n\nRefs:#6116(实证样本 + 修复 PR)、#5186(读接缝规则)、#5108 / #4825 / #4728(族形来源)、ADR-0110 D3、#5981(同闸门的散文单,不同面)。"
+}

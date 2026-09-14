@@ -1,0 +1,35 @@
+{
+  "number": 6094,
+  "kind": "issue",
+  "title": "The `fallbackNodeId` tombstone prescribes `condition: 'fault'` — the migration it hands authors does not draw a fault edge",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:queue",
+    "target:v17"
+  ],
+  "assignees": [
+    "qq9340100"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T00:55:43Z",
+  "updated_at": "2026-08-07T15:23:17Z",
+  "closed_at": "2026-08-07T15:23:17Z",
+  "closed_by": {
+    "login": "qq9340100",
+    "id": 313832657,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6094",
+  "body": "Found by the triage seat while re-checking the residuals on #3863 (findings triage round, 2026-08-07). Filed unassigned. Baseline: `origin/main` @ `1eb13a0`.\n\n## Fact\n\n`packages/spec/src/automation/flow.zod.ts:715` — the `retiredKey()` tombstone for `flow.errorHandling.fallbackNodeId` tells the author how to migrate:\n\n> `flow.errorHandling.fallbackNodeId` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — the engine routes unrecoverable node errors via per-node fault edges (**an edge with condition `'fault'`**), and never read this key: a fallback configured here silently did not exist. Delete the key and draw a fault edge from the failing node to the handler node instead.\n\nThe fault semantic does not live in `condition`. It lives in `type`:\n\n```\nflow.zod.ts:440   type: z.enum(['default', 'fault', 'conditional', 'back']).default('default')\nflow.zod.ts:438   condition: ExpressionInputSchema.optional()  // CEL predicate\n```\n\n## Why this bites, and which direction it fails\n\nAn author who follows the prescription literally writes `{ source, target, condition: 'fault' }`. That edge:\n\n1. **parses clean** — `type` is `.default('default')`, so omitting it is legal, and `condition` accepts any expression input. No error is raised at publish time;\n2. **is a normal edge**, not a fault edge — `executeNode` routes failures on `type === 'fault'`, so the handler is never reached on failure;\n3. carries `'fault'` as a **CEL predicate** — a bare identifier where a boolean was expected, so the edge is not reliably traversed on the success path either.\n\nNet: the author deletes a key that \"silently did not exist\", follows the prescribed replacement, and lands a second thing that silently does not exist. The tombstone exists precisely to stop that, which is why this is worth a one-line fix rather than a note.\n\n**This is fail-open in the authoring sense** (nothing rejects it), though not a data-safety hole: an un-drawn fault edge means failures keep aborting the run, which is the safe default. No stored data is at risk; no current user is known to have hit it.\n\n## The repo already knows this exact mistake by name\n\n- `content/docs/automation/flows.mdx:869` — \"**`type: 'fault'` is what routes — a label is not.**\"\n- `content/docs/releases/v17.mdx:1365` names the failure mode in the release notes: \"`label: 'error'` written where `type: 'fault'` was meant\".\n\nSo a documented, named author error is being prescribed by the spec's own migration message — in a different slot (`condition` instead of `label`), but the same shape. #3881 added the docs half; the tombstone was not swept with it.\n\n## Scope — deliberately one line\n\n`flow.zod.ts:715`: `an edge with condition 'fault'` → `an edge with type: 'fault'`.\n\n⛔ Do **not** widen this into an `errorHandling` prose pass, and ⛔ do not touch the `fallbackNodeId` retirement itself — the retirement is correct and #3896 is closed. The trailing sentence (\"draw a fault edge from the failing node to the handler node\") is already right and stays.\n\n## Verification notes for whoever takes it\n\n- **`:715` is the only occurrence of the wrong spelling repo-wide** — `git grep \"condition 'fault'\" origin/main` returns exactly this one line. Positive control that the scan surface works: `type: 'fault'` hits `flows.mdx:864`, `bpmn-mapping.ts:269`, `flow.test.ts:1354`/`:1378`.\n- The string is not mirrored into any generated doc under `content/docs` today (`git grep \"an edge with condition\"` hits only the source line), so this is a single-file change. Whether the reference generator will pick it up later is #5606's territory, not this issue's — that issue is about tombstones rendering as `any`, a different defect on the same machinery, and the two do not collide (it changes the renderer, this changes one string).\n- Acceptance is stateable in one sentence: the tombstone names the slot that actually routes.\n\nRelated: #3863 (fault-edge residuals — where this was found), #3881 (fault-edge v1 + docs), #3896 (the retirement this tombstone records), #5606 (tombstone rendering, distinct).\n\n本单来自分诊座位 Routine(#5474 试点),不构成认领。 *(Filed by the triage-seat Routine; not a claim. English per the language policy effective with #6029.)*"
+}

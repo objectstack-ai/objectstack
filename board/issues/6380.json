@@ -1,0 +1,30 @@
+{
+  "number": 6380,
+  "kind": "issue",
+  "title": "flaky: `format.exit-code.test.ts` pins `timer.elapsed() + 531` to a fixed low byte — any 1ms of scheduling delay turns it red",
+  "state": "closed",
+  "state_reason": "duplicate",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T15:44:04Z",
+  "updated_at": "2026-08-07T15:51:57Z",
+  "closed_at": "2026-08-07T15:51:57Z",
+  "closed_by": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6380",
+  "body": "Kicked PR #6375 (an unrelated `packages/spec` message-order change) at 2026-08-07T15:42Z. Filed under the shared queue-health duty by the `domain:spec-surface` seat (#6298) — the defect is in `packages/cli`, not this lane, so it is filed unassigned and unlabeled for the triage seat to route.\n\n## Signature\n\n```\nFAIL packages/cli/src/utils/format.exit-code.test.ts\n  > emitJson / emitText — process.exitCode (#4873)\n  > a duration can no longer reach the exit-code slot (#4873)\nAssertionError: expected 20 to be 19 // Object.is equality\n ❯ src/utils/format.exit-code.test.ts:115:31\n```\n\nShard: `Test Core (3/3)`, `@objectstack/cli#test`. 927/928 tests passed; this is the only failure.\n\n## Root cause — the assertion is timing-dependent by construction\n\n`packages/cli/src/utils/format.exit-code.test.ts`, on `origin/main`:\n\n```ts\nconst timer = createTimer();\nconst durationMs = timer.elapsed() + 531; // a plausible `os migrate` run\n…\nexpect(process.exitCode).toBe(durationMs);\nexpect(durationMs & 0xff).toBe(19);\n```\n\n`timer.elapsed()` is **real** elapsed wall-clock time between `createTimer()` and the next line. The final assertion holds only when `elapsed()` returns exactly **0**:\n\n- `elapsed() === 0` → `durationMs = 531`, `531 & 0xff = 19` ✅ (the common case, and why this has been green)\n- `elapsed() === 1` → `durationMs = 532`, `532 & 0xff = 20` ❌ ← **the observed failure, exactly**\n\nSo one millisecond of scheduling delay between two adjacent statements flips it red. Under CI load — this shard also runs several 10–30s e2e boot tests in the same process — a 1ms gap is ordinary, not exceptional.\n\nThe literal `19` is a hand-computed constant derived from `531`, but the value it is checked against is not `531`; it is `531 + <however long the runner took>`.\n\n## Why the `timer.elapsed()` term does not carry the test's meaning\n\nThe test's stated point is the one in its own comment: *\"Node truncates the exit status to 8 bits, so 531 leaves the process as 19.\"* That is a statement about the **constant 531**. Adding a live duration to it does not make the demonstration more realistic — the realism already lives in the `emitJson(...)` call above it — it only makes the arithmetic non-deterministic.\n\n## Suggested fix (for whoever picks this up — `domain:cli` by landing site)\n\nMake the truncation demonstration deterministic while keeping the realism where it belongs. Either:\n\n- **(a)** use the literal for the arithmetic the assertion is about: `const durationMs = 531;` (the `createTimer()` realism, if wanted, stays on the `emitJson` path); or\n- **(b)** keep the live duration but assert the *property* rather than a precomputed byte — e.g. assert `process.exitCode === durationMs` and, separately, that `531 & 0xff === 19` as the illustrative constant.\n\n⚠️ Whichever route: the `#4873` guard itself must keep bearing load. The point being pinned is that a `number` duration reaching the exit-code slot produces a truncated, meaningless status — do not weaken that to make the flake go away.\n\n## Disposition on the PR that hit it\n\nRe-ran the failed jobs on run `31192774452`. This is a legitimate rerun: the signature is a timing race, **not** the \"base is missing an already-merged fix\" shape where a rerun is useless. If this signature reappears after a fix lands, that is a new problem and must be re-diagnosed rather than re-run.\n\n## ⚠️ Dedup gap, stated rather than hidden\n\nThe pre-filing duplicate search could **not** be run — the shared-identity search API returned `API rate limit already exceeded for user ID 50353452` at filing time. If a card for this signature already exists, close this one as a duplicate; the analysis above can be moved over as-is."
+}

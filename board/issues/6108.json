@@ -1,0 +1,35 @@
+{
+  "number": 6108,
+  "kind": "issue",
+  "title": "lint object/missing-name-field 谓词不读 nameField,却仍采信 ADR-0079 已退役的 titleFormat——照平台自己的迁移建议做反而多得一条告警",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T02:09:39Z",
+  "updated_at": "2026-08-07T14:50:14Z",
+  "closed_at": "2026-08-07T14:50:14Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6108",
+  "body": "下游应用(hotcrm,`@objectstack/* 17.0.0-rc.3`)在 hotcrm#715 实施过程中发现,记录于此。同包内两条规则互相矛盾:\n\n## 现象\n\n`object/missing-name-field` 的谓词(`node_modules/@objectstack/lint/dist/index.js`,`lintDataModel`):\n\n```\nhasNameField = !!obj.primaryField || !!obj.titleFormat || fields.some(name-like)\n```\n\n- **从不读 `obj.nameField`**;\n- 却仍然采信 `titleFormat`——而同一个包里的 `validate-record-title.ts` 明确报告 `titleFormat` 已被 **ADR-0079** 退役,并指示迁移到 `nameField`。\n\n净效果:一个照平台自己的迁移建议声明了 `nameField` 的应用,反而会得到一条新的 \"records will display as raw IDs\" suggestion。\n\n## 下游实测面(hotcrm main)\n\n6 处命中,4 处为误报——这四个对象都显式声明了 `nameField`:\n\n| 对象 | nameField |\n|---|---|\n| crm_campaign_member | member_number |\n| crm_event_attendee | attendee_number |\n| crm_contract | contract_number |\n| crm_forecast | display_title |\n\n只有两个 line-item 对象(crm_opportunity_line_item / crm_quote_line_item)是真命中(确实没有 name 面)。\n\n## 建议\n\n谓词补上 `!!obj.nameField`,并考虑摘掉对已退役 `titleFormat` 的采信(或至少降为迁移期兼容并注明)。\n\n查重:已在 objectstack 与 hotcrm 两仓按 missing-name-field / nameField / titleFormat / ADR-0079 检索 open issues,无既有单。\n\nRefs: objectstack-ai/hotcrm#715(发现现场,PR objectstack-ai/hotcrm#1007)"
+}

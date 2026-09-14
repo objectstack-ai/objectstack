@@ -1,0 +1,34 @@
+{
+  "number": 17821,
+  "kind": "issue",
+  "title": "os lint's `naming/namespace-prefix` reports a legitimate cross-package name reuse as an intra-package duplicate, contradicting the ADR-0048 §3.4 sentence in its own message",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-12T09:09:25Z",
+  "updated_at": "2026-09-13T09:05:42Z",
+  "closed_at": "2026-09-13T09:03:33Z",
+  "closed_by": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17821",
+  "body": "## Symptom\n\n`os lint`'s intra-package duplicate advisory (`naming/namespace-prefix`, `packages/cli/src/commands/lint.ts`) reads ONE flattened array per collection key and has no idea which package each item came from. On a composed multi-package stack the flattened array carries both packages' items, so two packages that each legitimately declare `home` are reported as one package declaring it twice — and the warning's own last sentence says the opposite.\n\nThe rule's in-code comment states the contract it is implementing:\n\n> ADR-0048 §3.4 retired the per-item CROSS-package throw: package ids are globally unique, so two installed packages shipping the same bare name (e.g. `page/home`) legitimately COEXIST under distinct composite keys and each caller resolves to its own via package-scoped resolution. A bare name is therefore NOT a collision risk and must not warn on its own.\n> […] We only see one package's config here, so the legitimate signal is a genuine duplicate `(type, name)` pair within it — never a unique bare name.\n\n\"We only see one package's config here\" is false for a composed multi-package project, which is exactly the shape `composeStacks(…, { manifest: 'preserve' })` emits.\n\n## Minimal repro — two packages, one bare name each\n\n`objectstack.config.ts`, today's additive shape (flattened top level PLUS `packages[]`, i.e. what the platform emits):\n\n```ts\nconst appA = { name: 'home', label: 'Home A' };\nconst appB = { name: 'home', label: 'Home B' };\nconst obj = { name: 'ob_order', label: 'Order', sharingModel: 'private', nameField: 'number',\n              fields: { number: { type: 'text', label: 'Number' } } };\n\nexport default {\n  manifest: { id: 'com.example.a', name: 'a', version: '1.0.0', type: 'app', namespace: 'alpha', engines: { protocol: '^17' } },\n  apps: [appA, appB], objects: [obj],\n  packages: [\n    { manifest: { id: 'com.example.a', name: 'a', version: '1.0.0', type: 'app', namespace: 'alpha', apps: [appA], objects: [obj] } },\n    { manifest: { id: 'com.example.b', name: 'b', version: '1.0.0', type: 'module', namespace: 'beta',\n                  dependencies: { 'com.example.a': '^1.0.0' }, apps: [appB] } },\n  ],\n};\n```\n\nMeasured through the real binary on `origin/main` `c9eb773ba`, `os lint`, exit 0:\n\n```\n  Warnings (1)\n  ⚠ App \"home\" is declared more than once in this package (also at apps[0].name). Two items of the\n    same type sharing a bare name within one package shadow each other on the registry key\n    (ADR-0048 §3.4) — rename one, e.g. \"alpha_home\". Distinct packages may reuse the same name\n    freely; the namespace prefix is an optional convention, not a collision-avoidance requirement.\n    naming/namespace-prefix  at apps[1].name\n```\n\nThe two declarations are in `com.example.a` and `com.example.b`. Nothing shadows anything: they occupy distinct composite registry keys, which is precisely what the message's own final sentence says. The prescribed remedy (`rename one, e.g. \"alpha_home\"`) asks the author to rename a name that is already correct, and `alpha_` is the namespace of the OTHER package.\n\n## Cause, located\n\n`packages/cli/src/commands/lint.ts`, the `PREFIXED_TYPES` loop:\n\n```ts\nconst items: any[] = Array.isArray(stack[key]) ? stack[key] : [];\n```\n\nOne array, one `firstSeen` map, no package boundary. The reader never sees which `packages[i]` an item came from, so \"within ONE package\" cannot be evaluated at all — it is asserted by the comment, not computed.\n\n## Scope note\n\nMeasured in both ADR-0130 D4 shapes, with and without #17528's fold (which moves that read from `config` to the union-folded stack):\n\n| stack shape | before #17528 | after #17528 |\n|:--|:--|:--|\n| additive (today's emitted shape) | 1 false positive | 1 false positive |\n| `packages[]`-only (option B) | 0 (the family read an empty stack) | 1 false positive |\n\nSo this is **pre-existing on the shape the platform emits today** and independent of that card: #17528 only brings the option-B spelling into parity with the additive one, which is its acceptance. Filed separately rather than folded in, because the fix is not mechanical — the advisory needs per-item package attribution (or to run per package body, as `compile.ts`'s step 3b-ii rule run already does), and which of those is right is a design decision, not a wiring detail.\n\nFound while driving #17528's parity controls.\n\n⛔ Deduplication: REST `/search/*` is refused by this session's egress proxy (HTTP 403, `sessions are bound to their configured repositories` — verified this session), so one targeted MCP `search_issues` over open and closed, channel switch declared. 4 results, all read. Positive control fired: #5510 and #17069 both returned. Nearest neighbours rejected: #5510 (closed — the SAME rule false-positiving, but on actions whose dedup key omitted `objectName`; an intra-package, per-object axis, and its fix is the `registryKey` hook that is still in the code), #17069 (closed — which stack the rule table is handed, not how this advisory interprets it), #16565 (open — docs about one app per `type: 'app'` package), #4698 (closed — declared-but-never-read metadata). No card names the cross-package attribution axis.\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 6420,
+  "kind": "issue",
+  "title": "docs-gen: 括号里的裸源码路径既不成链接也不成代码 —— 4 处、3 张已发布参考页(#6224 之后残留的 lookaround 对)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T17:18:24Z",
+  "updated_at": "2026-08-08T02:30:11Z",
+  "closed_at": "2026-08-08T02:30:11Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6420",
+  "body": "在实施 #6229(PR #6408,`../` 前缀漏在链接外面)时**顺带**扫出,**非本单范围**,按 Prime Directive #10 独立记录。⛔ 未自我认领。\n\n## 观察\n\n`packages/spec/scripts/lib/file-description.ts` 的 bare-path 改写步骤,正则两端各带一个前后瞻:\n\n```js\n/(?<!\\()( … )\\b(?!\\))/g\n```\n\n它们的作用是「前面不是左括号、后面不是右括号」。于是**任何写在圆括号里的裸源码路径一律不被改写** ——\n既不成链接,也不成行内代码,原样落成纯文本。而语料里其它位置的裸路径都会变成链接或代码段。\n\n## 已发布的 4 处(路由都存在,不是死链问题,是根本没链)\n\n| 页面 | 行 | 文本 | 对应参考页 |\n|---|---|---|---|\n| `content/docs/references/automation/etl.mdx` | 16 | `- **Enterprise Connector** (integration/connector.zod.ts) - …` | `/docs/references/integration/connector` ✅ 存在 |\n| `content/docs/references/integration/connector.mdx` | 17 | `- **ETL Pipeline** (automation/etl.zod.ts) - …` | `/docs/references/automation/etl` ✅ 存在 |\n| `content/docs/references/shared/mapping.mdx` | 16 | `- Integration connectors (integration/connector.zod.ts)` | `/docs/references/integration/connector` ✅ 存在 |\n| `content/docs/references/shared/mapping.mdx` | 17 | `- External lookups (data/external-lookup.zod.ts)` | `/docs/references/data/external-lookup` ✅ 存在 |\n\n源分别在 `packages/spec/src/automation/etl.zod.ts:18`、`integration/connector.zod.ts:20`、\n`shared/mapping.zod.ts:15-16`。\n\n讽刺的是 `etl.mdx` 同一页上,`{@link}` 写法的那条**是**链接(#6136 修的那条),而正上方括号里的同一个\n`integration/connector.zod.ts` 是纯文本 —— 同一页、同一个目标、两种待遇。\n\n## 为什么这对 lookaround 现在是残留\n\n它们是 #6136 之前的**防嵌套**手段:那时改写器直接跑在已含 markdown 链接的整串上,只能靠「前面不是 `(`、\n后面不是 `)`」勉强躲开链接的 `](route)` 部分。PR #6224 把这一步改成**分词器**方案后,已成形的链接是\n`link` 段、行内代码是 `code` 段,本步骤根本看不到它们 —— 该文件模块注释自己写着「lookaround 表达不了\n『不要嵌在链接里』」。防嵌套的职责已经整体转移,这对 lookaround 只剩下**误伤圆括号里的正常散文**这一个\n实际效果。\n\n`(?<!\\()` 与 `(?!\\))` 是一对,#6229 只动中间的前缀与 `\\b`,两端一字未改,所以 PR #6408 落地后这条依旧成立。\n\n## 复现\n\n```js\n// 现状:无匹配,整串保持纯文本\n'see (system/cache.zod.ts) here'.replace(/(?<!\\()((?:\\.\\.\\/)*\\b[\\w-]+\\/[\\w.-]+\\.zod\\.ts)\\b(?!\\))/g, 'X')\n```\n\n## 为什么没有随 #6229 一起修\n\n不同的输入形态、不同的成因(#6229 是匹配**起点**,这条是匹配**两端的守卫**),而且删掉这对 lookaround\n是**放宽**改写器的行为面 —— 会让此前从不成链接的一类位置开始产出链接,超出 #6229 的验收范围。契约优先:\n该在产出侧(改写器)裁决要不要放宽,不该在别处兜底。\n\n## 影响面(据实,不夸大)\n\n无运行时影响,`check:docs` / `check:generated` / 全语料 MDX 编译在现状下**全绿** —— 产物忠实复现了\n改写器的行为,门禁看不见这类「本该有链接却没有」。代价是 3 张已发布页上 4 个导航出口缺失。\n**不自评级别**,留待分诊。\n\n## 去重\n\n已翻过三仓 336 条 open issue/PR,按 `file-description`、`docs-gen`、`lookahead/lookbehind`、`裸露`、\n`链接` 本地匹配。同族三单都是**别的输入形态**,不重复:#6136(untitled `{@link}` 嵌套链接)、\n#6229(`../` 前缀,本单母体)、#5853(`getCategoryTitle()` 大小写)。\n\n⚠️ 与 **#6373** 方向相似但**不是**一回事:那条是**手写**的 `quick-reference.mdx` 表格里缺链接目标,\n本条是**生成器**在参考页上系统性地漏掉一类位置。修法与文件面零重叠。"
+}

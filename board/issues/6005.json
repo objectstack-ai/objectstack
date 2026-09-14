@@ -1,0 +1,33 @@
+{
+  "number": 6005,
+  "kind": "issue",
+  "title": "[finding] filter-normalizer 的 `$not` allowNull 守卫在 #5298 第二批之后变成冗余的第二层(谓词等价,SQL 多一层括号)",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "finding"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T14:23:33Z",
+  "updated_at": "2026-08-08T00:41:54Z",
+  "closed_at": "2026-08-08T00:41:54Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6005",
+  "body": "PR #6004(#5977 / #5298 第二批)实施途中的范围外观察,按 Prime Directive #10 记录,**不指派**。观察类:今天没有任何用户会撞到它,谓词逐行等价,执行计划不变 —— 故挂 `finding`、不挂 `pm:queue`,严重度交分诊轮判。\n\n## 事实\n\n`packages/services/service-analytics/src/strategies/filter-normalizer.ts`\n\n#5146 为 `$not` 引入了 `nullSafeNegationOperand` → `guardFieldEntry` → `nullGuardForFieldSpec`,后者对一个字段 spec 给三种判定:`none` / `requireValue` / `allowNull`。\n\nPR #6004 之后,`fieldLeaves` 在**叶子层**自己发守卫,条件恰好就是 `nullValueSatisfiesOperator(op, v) && !operatorIsNullTotal(op, v)` —— 也就是 `nullGuardForFieldSpec` 的 **`allowNull` 判定本身**。于是 `allowNull` 这一支变成冗余的第二层:\n\n```\n{$not: {stage: {$ne: 'won'}}}\n→ NOT ((stage IS NULL OR (stage IS NULL OR stage != $1)))\n              ^^^^^^^^^^^^^^^  guardFieldEntry 的 allowNull 支\n                                ^^^^^^^^^^^^^^^  fieldLeaves 的叶子守卫\n```\n\n`X OR (X OR Y)` ≡ `X OR Y`,所以**行为完全等价**(PR #6004 实测钉住:`$not` of `$ne` / `$nin` 仍答 `['1']`,极性未被拓宽)。#5146 的 header 本来就把「引擎路径守卫两次、幂等」写成已接受的代价,这条只是把同一笔代价又叠了一层。\n\n`requireValue` 支**不受影响**,仍然必需(正向比较、以及多算子 spec 里只要有一个算子不接受 NULL 的情况)。\n\n## 为什么可能值得清\n\n`allowNull` 支能到达的算子,恰好只有 `$ne`(非 null 比较数)/ `$nin`(非空)/ `$notContains` —— 其余要么 total(`$null` / `$exists` / `$eq: null` / `$ne: null` / 空 `$nin`)走 `none`,要么正向走 `requireValue`。也就是说这三个算子现在**每一个都自带守卫**,`allowNull` 支再没有独占的落点。\n\n去掉它(改为 `none`)在多算子 spec 上也成立,靠分配律:\n\n- 现在:`(c IS NULL OR (X AND Y))`\n- 去掉后:`(c IS NULL OR X) AND (c IS NULL OR Y)`\n\n两者逐行等价。\n\n## 为什么 PR #6004 没有顺手做\n\n1. 它改的是 #5146 的守卫代码,不在 #5977 的验收范围内(「scope = the issue」);\n2. 删肢需要按 fixture 三分诊重新逐条判 `filter-normalizer-not-null-safe.test.ts` 里 #5146 的钉子 —— 其中至少一条(`$not` of `$ne` 的生成 SQL 断言)会跟着变形,值得单独一轮而不是搭车;\n3. 收益是**可读性 / SQL 噪音**,不是正确性。\n\n## 关联\n\n- PR #6004(#5977):引入叶子层守卫的那次改动,本观察的出处;\n- #5146 / PR #5296:`$not` NULL-safe 与 `allowNull` 支的来源;\n- #5298:非否定路径的同族裁决;\n- #5930:仓内 5 个独立谓词编译器的收敛调查 —— 若那条程序起了,这条应并进去一起判,而不是单独动手。\n"
+}

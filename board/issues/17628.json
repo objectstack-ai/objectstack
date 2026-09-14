@@ -1,0 +1,37 @@
+{
+  "number": 17628,
+  "kind": "issue",
+  "title": "plugin-security: `claimSeedOwnership` runs once, at admin promotion, and races the platform's own background seeder — every object seeded after its pass is ownerless forever",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:services",
+    "priority:p1",
+    "security"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-11T05:04:42Z",
+  "updated_at": "2026-09-12T18:13:36Z",
+  "closed_at": "2026-09-12T18:12:31Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17628",
+  "body": "## What happens\n\n`claimSeedOwnership` (plugin-security) is reached from `bootstrapPlatformAdmin` **exactly once per database lifetime** — on the single pass that promotes the first admin. It then walks the object registry **once**, in registry order, while the platform's own seeder is **still writing rows in the background**. Every object whose claim pass happens before its seed rows land stays `owner_id IS NULL` **forever**: nothing ever re-runs the claim.\n\nRegistry order and seed order are unrelated, so which objects lose the race is arbitrary — but it is deterministic per app, and it reproduces identically boot after boot.\n\n### The two halves that combine\n\n1. **The claim is one-shot.** Later replays short-circuit before ever reaching it:\n\n   - `runBootstrap` is hooked on `kernel:ready`, and replayed by a middleware only for `sys_user` / `sys_account` **insert** (`shouldReplayBootstrapFor`).\n   - `bootstrapPlatformAdmin` returns `{ adminPromoted: false, reason: \"already_have_admin\" }` as soon as an unscoped human holder of the admin permission set exists — which is true on every pass after the first. `claimSeedOwnership` is called **after** the grant insert, so a short-circuited pass never reaches it.\n\n2. **The seeder outlives that instant, by the platform's own design.** An app whose inline seed exceeds the 8000 ms budget is continued in the background:\n\n   `WARN [Seeder] Inline seed exceeded 8000ms budget for APP_ID; continuing in background to avoid blocking kernel start.`\n\n   So for any non-trivial app, seeding is *guaranteed* to still be running when the one-shot claim walks the registry.\n\n## Reproduction — `@objectstack/* 17.4.0`, HotCRM, `objectstack dev`, fresh DB\n\n(Timings below are from the first boot. The second, independent boot used `objectstack serve --dev` on a fresh DB and produced the identical loser set.)\n\nThe dev admin is created at `04:21:12.578` and promoted at `04:21:12.655`; the claim walks from there. The seeder runs until `04:21:50.8`.\n\nThe claim's own passes are readable in `updated_at` (one bulk write per object, so `MIN(updated_at) == MAX(updated_at)` on an untouched table):\n\n| object | seed rows written | claim pass reached it | outcome |\n|---|---|---|---|\n| `crm_account` | 04:21:03–04 | 04:21:13.1 | claimed, 9/9 |\n| `crm_lead` | 04:21:09–15.0 | 04:21:18.4 | claimed, 21/21 |\n| `crm_contract` | 04:21:20.7–23.1 | (already passed) | **4 rows unowned** |\n| `crm_campaign_member` | 04:21:23.9–29.1 | (already passed) | **51 rows unowned** |\n| `crm_opportunity_line_item` | 04:21:15.3–19.9 | 04:21:32.7 | claimed, 74/74 |\n| `crm_case` | 04:21:35.2–45.0 | (already passed) | **38 rows unowned** |\n| `crm_product` | 04:21:04–05 | 04:21:36.1 | claimed, 13/13 |\n| `crm_quote` | 04:21:23.2–23.8 | 04:21:36.3 | claimed, 6/6 |\n| `crm_task` | 04:21:31.6–32.7 | 04:21:39.0 | claimed, 7/7 |\n| `crm_event` | 04:21:45.4–49.6 | (already passed) | **27 rows unowned** |\n| `crm_event_attendee` | 04:21:49.8–49.9 | (already passed) | **27 rows unowned** |\n| `crm_knowledge_article` | 04:21:50.0–50.4 | (already passed) | **4 rows unowned** |\n\nEvery row of the rule holds: an object is claimed **iff** its seed rows had landed when the walk reached it. The registry order here is the app's alphabetical barrel order, and the loser set is contiguous in it.\n\n**Second, independent boot of the same tree reproduced the identical loser set** — `crm_case` 38, `crm_campaign_member` 51, `crm_contract` 4, `crm_event` 27, `crm_event_attendee` 27, `crm_knowledge_article` 4. Not flaky; deterministic.\n\nNo warning is logged. `claimSeedOwnership`'s own failure paths (`claimSeedOwnership failed for OBJECT`, the paging and affected-count warnings) never fire, because from the claim's point of view there was simply nothing to match yet. The boot banner is clean and every later boot reports healthy.\n\n## Why it matters\n\nRows that miss the claim are ownerless permanently. Under `sharingModel: 'private'` they are invisible to every `readScope: 'own'` grant; under `public_read` they read fine and answer 403 on every write for any grant at `modifyAllRecords: false` — a *granted* permission that can never be exercised. Nothing in the product says so.\n\nAn app can only work around this with a **recurring** sweep, because the completion of a background seed is not an event app metadata can observe. That is the state HotCRM is in today: a `*/10 * * * *` flow, measured in one production tenant at **1,776 runs in 13 days** (objectstack-ai/hotcrm#1892), whose only real job is to finish the claim the platform abandoned. It cannot be made one-shot or self-disabling while this defect stands — verified by ablation: with that sweep's cron disabled on an otherwise identical boot, the 73 rows above were still ownerless 21 minutes later, while two other scheduled flows fired normally in the same boot.\n\n## Suggested direction (not a ruling)\n\nEither re-run the claim when the background seed completes, or defer the first claim until then. A \"claim on admin promotion\" that races a seeder the platform itself deferred cannot be correct as a single pass.\n\nRelated: objectstack-ai/hotcrm#1892 (the app-side card this blocks) · #14719 and #14530 (other `claimSeedOwnership` limits, both closed, neither this ordering) · #14157 (the neighbouring `maybeSeedDevAdmin` / `kernel:ready` ordering bug).\n\nMeasured and filed by Claude Code (session `session_0132iDHq4FLW2zS9VPXqbf9f`) while working objectstack-ai/hotcrm#1892.\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

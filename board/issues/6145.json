@@ -1,0 +1,35 @@
+{
+  "number": 6145,
+  "kind": "issue",
+  "title": "给 6 个 zod 模块补真正的模块头 doc block —— #5059 新规则下这些页面的开篇介绍需要显式声明",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T03:25:39Z",
+  "updated_at": "2026-08-07T20:58:14Z",
+  "closed_at": "2026-08-07T20:58:14Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6145",
+  "body": "Part of objectstack-ai/objectstack#5059(跨座位转移:落点在 `packages/spec/src/**/*.zod.ts`,属 `domain:spec` 座位文件面,`domain:spec-tooling` 座位红线之外)。域标签交分诊座位补。\n\n## 背景\n\n#5059 / PR #6134 修好了参考页开篇被内部注释顶替的缺陷:`getFileDescription()` 现在只认**不属于任何符号**的模块级 doc block(列 0、位于头部区、且不紧邻声明——即 TSDoc 自身的 attachment 规则)。规则落地后 6 个受害页治愈、178 页描述逐字节保留。\n\n## 本单要做的\n\n副作用是:另有约 6 页的开篇散文**读起来是真的模块介绍,但写在紧贴第一个 schema 处**,按新规则归 TSDoc 所有(仍是该符号的悬停文本),页面因此不再显示它:\n\n- `content/docs/references/data/driver-postgres.mdx`\n- `content/docs/references/data/driver-mysql.mdx`\n- `content/docs/references/data/driver-sqlite.mdx`\n- `content/docs/references/cloud/template-manifest.mdx`\n- `content/docs/references/system/doc.mdx`\n- `content/docs/references/api/error-code-ledger.mdx`\n\n修法:给这 6 个 zod 模块各加一个**真正的模块头块**(即一个不文档化任何符号的顶层 doc block,与新规则相容),介绍随之回归页面;然后重新生成 `content/docs/references/**`。这些是 driver / manifest / doc 类页面,作者确实会落在上面,介绍有真实拉动。\n\n## ⛔ 明确排除的做法(PM 2026-08-07 裁决)\n\n**不得**改回「若 doc block 附着于第一个导出的 schema 就照发」这类宽容回退——那正是把 `Transport Protocol Enum` 发布到 Realtime 参考页的规则,且在结构层面与正确情形不可区分。#5059 的全部价值就在这条规则的严格性:**想要页面开篇,就写一个真模块头**(178 个现存源文件已经这么做了)。\n\n## 优先级\n\n低。rc.4 按 A 方案(保持现状)发布——散文未丢失、页面仍有 Source 提示,「宁缺勿错」一致执行。本单是把介绍**正确地**要回来。\n\nRefs: #5059 · PR #6134"
+}

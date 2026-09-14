@@ -1,0 +1,36 @@
+{
+  "number": 6399,
+  "kind": "issue",
+  "title": "[finding][devx] 没有任何门禁阻止 `as never` 被加回来 —— #6354 一次清掉 10 个死 cast，但清理本身没有护栏",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched",
+    "tooling"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T16:49:29Z",
+  "updated_at": "2026-08-08T03:40:23Z",
+  "closed_at": "2026-08-08T03:40:23Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6399",
+  "body": "出自 PR #6396（#6354）的实测。**观察类，不挂 `pm:queue`，请分诊轮定级。** 未认领。\n\n## 事实\n\nPR #6396 一次性删掉了 10 个 `as never` —— `checkDateBucketParity` / `checkReadCoercion` 的**全部**调用点，实测全部是死 cast（去掉后三个包 typecheck 均 exit=0）。这些 cast 把 `BucketableDriver` / `CoercibleDriver` 两个结构替身的编译期一致性 100% 关掉了，而替身存在的意义正是表达那组一致性。\n\n**但这次清理没有留下任何护栏。** 该 PR 自己如实写明：\n\n> 不应把它说成本次改动的回归护栏 —— 事实是：目前没有任何门禁会阻止有人把 `as never` 加回去。\n\n派工时曾预判 `check:query-options-erasure` 会因删 cast 而测试面下降、需要 `--update`。**实测没有下降，267 未动**，原因是该棘轮的词汇表只匹配 query/options 参数位置上的 `as any`（及 `as any as X` 洗白链），**不含 `as never`**；三个改动文件也都不在它的 baseline 里（各 grep 命中 0）。\n\n所以今天的状态是：明天任何人可以把这 10 个 cast 原样加回来，或在新调用点写第 11 个，**没有一道门会响**。\n\n## 为什么值得记一笔\n\n这 10 个 cast 之所以能长期存在，恰恰是因为没有东西拦它们。清掉一次而不留闸，等于把同一笔债重新计时 —— #6354 本身就是「先于本次改动很久就已存在的死 cast」被偶然发现的产物，发现它靠的是一次无关的签名收窄任务，不是任何门禁。\n\n⚠️ 尤其值得注意的是 PR #6396 实测出的这一点：立单表只数了「传真实驱动」的 3 处，实际有 10 处，漏掉的 5 处是**传手写假驱动**的负向控制调用点。而手写字面量正是最容易与替身漂移的一类 —— 真实驱动来自生产代码、本来就大概率满足替身。**护栏缺失的代价，在假驱动那一侧最高。**\n\n## 不是缺陷\n\n今天没有人踩：10 个 cast 已删，编译期检查已恢复且**证明是活的**（PR 用「往替身加一个真实驱动不可能有的成员 → 10 个调用点全红、8+2 与 cast 数一一对应」证明了这一点）。本单记的是**这个状态没有被锁住**。\n\n## 如果要做（几个方向，未预断）\n\n1. **扩 `check:query-options-erasure` 的词汇表**，把 `as never` 纳入。⚠️ 风险：该棘轮的语义是「query/options 参数上的类型擦除」，`as never` 的用途远不止于此，混进去可能让这道门的含义变糊，且会一次性涌入大量既有站点需要 baseline。\n2. **一条 ESLint 规则**，禁止在测试文件里对**函数实参**写 `as never`（或更窄：禁止对已知结构替身参数写任何断言）。信噪比可能最好，但需要先测全仓既有 `as never` 的分布与用途。\n3. **只在替身那一侧加钉子** —— 例如给 `BucketableDriver` / `CoercibleDriver` 各写一条「真实驱动确实满足替身」的静态断言（`satisfies`），使替身漂移在**声明处**就红，而不依赖调用点写没写 cast。这一条不拦 `as never` 本身，但让它变得无害，可能是最省事的一支。\n\n⚠️ 方向 1 与 #6376 相邻（同样是「门禁的灵敏度被削弱」一族），处置时建议一并看。\n\n关联：#6354 / PR #6396（出处）、#6394（同文件另一处死 cast，不同的门）、#6376（`check:type-check-debt` 的 ledger 余量让 pin 变哑）、#6371（§9 陈旧产物陷阱）、#5018 / #4984（死 pin 形状的学费）。\n\n会话：`session_01WyvqvKMG6asi9aXjKE6xtx`（PR #6396 复核时记录，未认领）"
+}

@@ -1,0 +1,33 @@
+{
+  "number": 6471,
+  "kind": "pull_request",
+  "title": "feat(devx): 读接缝规则新增「原样返回入参」判据 (#6451)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "size/m",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T00:36:38Z",
+  "updated_at": "2026-08-08T01:02:05Z",
+  "closed_at": "2026-08-08T01:02:04Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-08-08T01:02:04Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/6471",
+  "body": "Fixes #6451\n\n本单的交付物是**测量**，扩不扩规则由数据决定。测量先做完了，结论是「扩」，理由在下面。\n\n---\n\n## 1. 测量：三个 `READ_SEAM_SCAN_ROOTS` 上的「原样返回入参」到底有多少\n\n在写任何判据之前做的（维护者 2026-08-06「收窄先行」裁定使测量成为强制、扩展成为条件）。用闸门自己的分析器跑，所以口径与规则完全一致 —— 同一份接缝普查、同样的嵌套遮蔽纪律、同样两条豁免。\n\n| 量 | 值 |\n|:---|---:|\n| 扫描范围内生产文件数 | 78 |\n| `catch` 子句总数 | 292 |\n| 被规则认作「读接缝」的 catch | 63 |\n| **catch 返回本函数形参（identity 穿过）** | **2** |\n| 其中 try 块真的做了存储读的 | 1 |\n| 其中已被「catch 内有任意级别日志」豁免吃掉的 | 2 |\n| 其中仅靠「按错误类型判别」豁免的 | 0 |\n| **扩了之后的真实新增红集** | **0** |\n\n**逐点明细**\n\n- `packages/objectql/src/engine.ts:4870` — `resolveFileReferences()`，守 `find()@4866`，`return records`@4905。**#6116 的实证样本**。已有 `warn@4894`（#6116 加的），所以被日志豁免吸收。\n  - 补一个比 issue 正文更精确的事实：这里**只有日志那条豁免命中**。`isMissingTableError` 判别确实在，但它的 `if` 没有 else 也不终止，`return records` 落在两条分支的合流处，`walkBenignPaths` 判定 `benign = false` —— 即类型判别豁免在这个形状上并不生效。结论不变（不会把已修的点判红），但生效的机制只有一条，不是两条。\n- `packages/objectql/src/lifecycle/lifecycle-service.ts:947` — `effectiveWindowMs()`，`catch { return fallbackMs }`。try 里解析的是时长字符串，**不是存储读**，READ 词表本身就把它排除在外；它也有 `warn@948`。\n\n**对照量：为什么判据只认「形参」，不认「任意标识符」**\n\n同一份语料里，有 10 个 catch 返回裸标识符，其中 8 个返回的是**局部变量** —— 累积出来的 `report`、部分完成的 `unbound` 集、测试辅助函数里再抛出去的 `err`。那些是函数**造出来**的值，判它们等于把所有「部分结果累加器」拖进这条规则。形参在种类上不同：它是函数在读之前就已经拿在手里的值，所以把它交回去，不可能是这次读的结果。这条线是纯语法的，不需要类型信息，而危害恰好就落在这条线上。\n\n（两种方法交叉验证过：一是复用闸门自身的出口分析，二是完全独立地枚举每个 catch 里的 `return 裸标识符` 再手工比对形参表。两者结果一致，都是 2。）\n\n## 2. 结论：扩。数据为什么这么说\n\n「红集可控」这个条件，得到的是**最强的一种答案：红集为空**。没有假阳性要处理，没有 baseline 条目要写，没有富化函数被拖下水 —— 因为整个扫描范围里这个形状只有 2 处，且都已经在说话了。\n\n需要正面回应的反对意见是：红集为 0，会不会正是这个仓库反复清理的「declared ≠ enforced」？**不是**，而且区别是硬的：那条纪律针对的是**词表条目** —— Map 里一个没有任何接缝消费的**名字**，闸门自己有 staleness 检查会把它判红（`READ_FAILURE_DISCRIMINATORS`、`FAILURE_PROPAGATION_SITES` 都是）。本次改动**没有往任何 Map 里加名字**，加的是一条结构性判据，并且它被自测在**两个方向**上都钉住了（#6116 修复前判红、修复后判绿）。这正是 #5186 自己落地时的姿势：它的三个已知实例（#4728 / #4825 / #5108）在规则写出来时都已经修好了，规则靠复刻修复前形状的 fixture 存活。\n\n另外两条轴：\n\n- **长期正确性**：这是一个已经**被实证**的逃逸口，不是假设的 —— #6116 是家族第四例，也是第一例「闸门普查到了、却判不了红」。家族已经复发四次，规则存在的意义就是拦住第五次。在代价为 0 红集、0 baseline 的情况下选择只写注释而不闭合，是更弱的选择。\n- **让 AI 写的代码不容易写错**：判据在写代码的当下就结构化地拦住它，而且逃生口既便宜又正确（说一句话，或者判别错误类型），正是 #6116 的修复所做的事。一段脚本头部的说明拦不住任何东西。\n\n## 3. 判据怎么写的\n\n- **一条新判据，不是往 EMPTY 值表里塞一项**（issue 明确要求，理由也成立）：`inventedEmptyValue` 只看表达式本身，这一条需要外层函数的形参表；合并会让值表悄悄获得一个上下文依赖。两条判据对**同一批出口路径**独立判定，finding 带 `kind`，报错信息因此能说清是哪一条命中、以及对应的修法。\n- **两条原有豁免原封不动**：catch 内有任意级别日志 ⇒ 不由这条规则再判；只在类型判别过的良性分支上穿过 ⇒ 放行。所以 #6116 修好的接缝保持绿色 —— 它在两条分支上**照旧原样返回 records**，只是让非良性的那条说了一句话。规则要求的是**可分辨**，从来不是「把返回值换掉」。\n- 解构形参也算（`({ records })`），理由与值表收 `undefined` / `{}` / `''` 同源：今天不多花任何代价，堵掉换个写法就绕过去的口子。\n- 就近的函数式作用域优先：callback 里的 catch 用的是 callback 自己的形参。\n\n**诚实局限（脚本头部第 4 条，与信封形状那条并列）**：这条规则**分不开「穿过即契约」与「穿过吞掉故障」**。对富化/装饰函数，原样返回是它 happy path 上已声明的契约 —— `resolveFileReferences` 在读之前就有六个 guard 原样返回 `records`。要分开需要函数的声明语义，语法规则看不到。这是与信封局限**不同**的一类盲区：信封那条是规则**匹配不到**的形状，这条是匹配到之后**分辨不出**的两种含义。规则不试图分辨，也不需要分辨：它从不判「穿过」本身，只判「又穿过、又沉默、又没判别过类型」的穿过，而两种读法都由同一个一行答案满足。真正有契约、又确实无话可说也无法判别的穿过，去 baseline 里写 `reviewed-legitimate`，和 `referenceExists` 并列 —— 那是一句「有人读过了」，不是一条靠猜的规则。\n\n## 4. 逆向验证（先声明方向，再跑）\n\n**声明（跑之前写下）**：把判据废掉、自测原样保留，预期 **8 个 case 转红**：6 个 `expectViolation: true` 的 identity case，外加 2 个「因为豁免命中而通过」的 case（#6116 修复后、类型判别良性分支）—— 后两个**只能**通过 `expectInvents` 转红，绝不会通过 `expectViolation` 转红，因为对它们来说「没有 violation」是**空洞断言**。预期**保持绿色**：两个 `expectInvents: []` 的 case，以及全部既有的 empty-value case。\n\n**观测**：完全一致，8 红。两个「passes」case 的报错行是 `expected violation=false invents=[\"pass-through records\"], got violation=false ... invents=[]` —— `violation` 那一列纹丝不动，红是 `expectInvents` 带来的，正好证明这两条断言不空洞。审计行同时丢掉了 `(1 pass an input through, reported)`，接缝在普查里重新变回隐形，即 issue 报告的那个逃逸。恢复后与备份逐字节相同，70 个自测 case 全绿。\n\n这就是本次新增 `expectInvents` 的原因：断言**被报告出来的确切集合**，而不只是某个字符串的缺席。\n\n## 5. 闸门\n\n| 闸门 | 结果 | 证据 |\n|:---|:---|:---|\n| `pnpm lint`（ESLint，家族硬闸都在这个 job 里） | pass | 无输出 |\n| `pnpm check:durability-log-level` | pass | 自测 35 + 35 case 全绿；审计 `✓ read-seam invention (#5186 + #6451, 3 package roots): 63 read seam(s), none invents an unreported answer (6 answer on a type-discriminated benign branch) (1 pass an input through, reported) (1 baselined).` |\n| `pnpm check:nul-bytes` | pass | `scanned 6092 tracked text file(s) … no raw ASCII control bytes` |\n| `pnpm check:doc-authoring` | pass | `365 files clean` |\n| `pnpm exec turbo run typecheck` | pass | 125/125，FULL TURBO 全缓存命中 —— 本次改动不含任何 TypeScript，turbo 的输入哈希证明没有任何包的 typecheck 输入发生变化 |\n\n重量级步骤都在共享 `flock` 锁内、`--max-old-space-size=4096`、`--concurrency=2` 下跑。闸门都在 `git add -A` **之后**跑（部分闸门读暂存集）。\n\n另外单独验证了一件自测覆盖不到的事：**穿过型 violation 的操作者报错信息**只在真的有 violation 时才走到，自测不会走到那条打印分支。用一个仓库外的临时 fixture 临时挂进扫描根跑了一次，确认整段 `found` / `consequence` / `fix` 渲染正确（包括 pass-through 专属的那两段），然后把扫描根改回、删掉 fixture，并与备份逐字节比对确认还原。\n\n## 6. 刻意没做的事\n\n- **没有碰 `packages/objectql/src/engine.ts`** —— 那是实证样本，#6116 已修，本 PR 只读不写。\n- **没有碰 `AGENTS.md`** —— 那道散文缺口是 #5981，同一闸门的另一个面。\n- **没有碰 `content/docs/releases/`**。\n- **没有往 `durability-read-invention.baseline.json` 加条目** —— 红集为 0，没有东西要 baseline。只更新了它 `$comment` 里对「规则是什么」的描述，让台账自己的说明跟得上两条判据（`entries` 一字未动）。\n- **没有加 changeset** —— 纯仓库内部闸门工具，无对外发布面，已打 `skip-changeset` 标签。\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01BDmDsu2575gDxeMCxXhDE3)_"
+}

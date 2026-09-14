@@ -1,0 +1,34 @@
+{
+  "number": 17656,
+  "kind": "issue",
+  "title": "finding: `skills/objectstack-query` filters.md teaches the pre-ADR-0053 upper-bound rule — a governed surface contradicting `calendar-day.ts`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-bill",
+    "id": 324100929,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:skills",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-11T08:30:20Z",
+  "updated_at": "2026-09-13T08:42:31Z",
+  "closed_at": "2026-09-13T08:41:31Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17656",
+  "body": "**Filed by the `domain:spec` execution seat on behalf of the #17333 round, which measured it but ⛔ could not file it** — its dedup paths were blocked (detail below). Handed up rather than filed blind.\n\n⛔ No `domain:*` and no priority from me. ⚠️ **`skills/**` is a GOVERNED surface** with its own line/token ratchet — routing and the governed-merge path are triage's and the owning seat's, ⛔ not mine.\n\n## The contradiction — class (b), violates a declared contract\n\n`skills/objectstack-query/rules/filters.md`, lines 249-251, state:\n\n> `<= {current_year_end}` stops at midnight on the 31st. Use the half-open `< {next_year_start}` for timestamps.\n\nThat contradicts the declared rule in `packages/spec/src/data/calendar-day.ts` (**ADR-0053 D-D**): `$lte`, a `$between` max and a `dateRange` end all mean the **WHOLE day**, and the platform already applies that widening — pinned across drivers by `temporal-conformance.ts`.\n\n⚠️ **The file is hand-written** — the #17333 round checked and it carries no `AUTO-GENERATED` marker — so ⛔ this is not fixed by regenerating anything.\n\n⭐ Worse here than in code: this file is **instructions an agent follows**. A wrong rule in a skill does not merely misinform a reader, it gets executed — every query an agent writes from this page carries the unnecessary half-open detour.\n\n### ⭐ This is the third copy of one false sentence, and that is the finding worth keeping\n\nThe same wrong rule is now measured in three places: this site, `skills/objectstack-query/rules/filters.md` (filed separately), and `packages/spec/src/data/date-macros.zod.ts` (corrected in PR #17651). One author wrote it once; it was copied outward, and each copy now reads as independent confirmation of the others.\n\n⚠️ That is the identical pattern as **#17629** earlier tonight — a docs page that had copied a false mechanism out of an example handler, where the example was the origin and the page looked like corroboration. **A citation that exists is not a citation that entails**, and three files agreeing is not three measurements. ⛔ Whoever fixes this should check whether a fourth copy exists rather than assuming the census is closed: the round that found these two was scoped to one file and stumbled on them.\n\n## Why the #17333 round left it alone — correctly\n\nIts claim scoped it to `packages/spec/src/data/date-macros.zod.ts`. Editing `skills/**` would have added a **new verification face** (the governed line/token ratchet) to a prose-only PR and failed the bounded-in-place-fix test. ⛔ It did the right thing by reporting instead of reaching.\n\n## What a taker should do\n\nCorrect lines 249-251 to state the ADR-0053 rule, citing `calendar-day.ts`. ⚠️ Re-measure by state first — anchor **by content not by line**, ⭐ **flatten whitespace before matching** (the sentence wraps; a contiguous grep reads a mistyped-anchor 0), and give every zero a lit control. ⚠️ Landing on a governed surface has its own rules: **a governed PR is the maintainer's hand merge** — ⛔ no seat flips it ready, enqueues it, or arms auto-merge.\n\n⚠️ The round's tree-wide census found the `< {next_year_start}` advice in **4 files**; this card and its sibling name two, PR #17651 fixed one, and **the fourth is unaccounted for**. ⛔ Do not close this line of work without finding it.\n\n### Duplicate check — completed to the limit the session allows, and the limit is declared\n\n⛔ A full-population dedup was **not possible** and I will not pretend otherwise:\n- REST `/search/*` is structurally refused for this session (`This GitHub API path is not available: sessions are bound to their configured repositories`).\n- MCP `search_issues` returns `API rate limit already exceeded for user ID 324100929` — re-tried at 08:29Z, still limited.\n\nWhat I **did** complete, at 08:29Z: a full enumeration of **569 open issues** (PRs excluded) over 6 REST pages, grepped by **TITLE**:\n\n```\nfilter-tokens        0        LIT CONTROL     \"spec\"            75\nnext_year_start      0        FABRICATED      zzz_nonexistent    0\ncurrent_year_end     0\nobjectstack-query    0\n\"stops at midnight\"  1   →  #17333 itself\ndate-macros          1   →  #17333 itself\nADR-0053             2   →  #17333, and #4220 (mongo storage-form, unrelated)\n```\n\n⚠️ **Titles only — issue BODIES were not searched**, because the only two body-search paths are the ones blocked above. So this is a real reading with a real boundary, ⛔ not a clean sweep. If a duplicate exists whose title names none of these seven strings, this check would not have found it. Close as duplicate without hesitation if one turns up.\n\nRelated: #17333 (the `packages/spec` copy, PR #17651) · the `packages/core/src/utils/filter-tokens.ts` copy, filed alongside this one · #17629 (same propagation pattern)\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

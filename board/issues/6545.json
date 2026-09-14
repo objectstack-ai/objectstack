@@ -1,0 +1,34 @@
+{
+  "number": 6545,
+  "kind": "pull_request",
+  "title": "test(metadata): converge the database-loader mock driver's `supports` to an empty advertisement (#4782)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T03:48:38Z",
+  "updated_at": "2026-08-08T04:29:07Z",
+  "closed_at": "2026-08-08T04:29:06Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": "2026-08-08T04:29:06Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/6545",
+  "body": "Fixes objectstack-ai/objectstack#4782\n\n## What\n\n`createMockDriver()` in `packages/metadata/src/loaders/database-loader.test.ts`\nadvertised nine capability bits in `supports`. Not one of them was a live key:\n\n- **Four were RETIRED by #4634** and are now tombstoned as `never` in\n  `DriverCapabilitiesSchema`: `transactions`, `joins`, `streaming`,\n  `fullTextSearch`.\n- **Five were never keys of `DriverCapabilitiesSchema` at all** — they have no\n  tombstone because they never existed: `aggregations`, `bulkOperations`,\n  `nestedObjects`, `geoQueries`, `changeStreams`.\n\nNothing in the file read any of them. Their only effect was to be copied into\nthe next mock, which is the harm the issue names.\n\nThe block is now `supports: {}`. Every surviving bit in `DriverCapabilities`\n(`queryDateGranularity` / `autonumber` / `batchSchemaSync`) is optional, so an\nempty advertisement is a legal advertisement — the spec's own suite already\npins that shape in `packages/spec/src/data/driver.test.ts`:\n\n> `it('accepts a driver that advertises nothing — capability bits are opt-in')`\n\nA comment replaces the block, recording that capability is METHOD presence and\nnot a boolean, so the next author does not re-add bits here.\n\n## Evidence — the two halves failed differently, and only one was visible\n\n`packages/metadata` has no `typecheck` script; it is carried in the\n`check:type-check-coverage` DEBT ledger, whose numbers come from\n`tsc --noEmit -p packages/metadata/tsconfig.json`. That tsconfig includes\n`src/**/*`, so the test file **is** inside a tsc program. Measured on the\nbranch point:\n\n```\nsrc/loaders/database-loader.test.ts(41,7): error TS2322: Type 'false' is not assignable to type 'undefined'.\nsrc/loaders/database-loader.test.ts(42,7): error TS2322: Type 'false' is not assignable to type 'undefined'.\nsrc/loaders/database-loader.test.ts(44,7): error TS2322: Type 'false' is not assignable to type 'undefined'.\nsrc/loaders/database-loader.test.ts(47,7): error TS2322: Type 'false' is not assignable to type 'undefined'.\n```\n\nLines 41/42/44/47 are exactly the four **retired** keys — the tombstones were\ndoing their job, and those four errors are precisely the `TS2322 x4` component\nthe ledger note records for this package.\n\nThe five **phantom** keys (43/45/46/48/49) produced **no diagnostic at all**.\nThat is not because the type is loose: a directly annotated literal is checked\nnormally, as a probe confirmed —\n\n```\nerror TS2353: Object literal may only specify known properties, and 'phantomKeyXyz' does not exist in type '{ queryDateGranularity?: ...; autonumber?: boolean | undefined; batchSchemaSync?: boolean | undefined; ... }'.\n```\n\nThe excess-property check was suppressed on the nested literal because that same\nliteral already had known-property mismatches to report. So the retired half was\nloudly wrong and the invented half was silently wrong, in one object.\n\n## Reverse verification\n\nDirection predicted **before** running, and it is the \"fewer diagnostics\" one —\nthe deleted keys were themselves the source of the errors, so the honest\nprediction is a drop, not a new red:\n\n| | `tsc --noEmit` errors, `@objectstack/metadata` |\n|---|---|\n| branch point | **92** (matches the recorded ledger entry exactly) |\n| after this change | **88** |\n\nThe delta is precisely those four TS2322 and nothing else — `diff` of the two\nruns shows four deletions and zero additions. `check:type-check-debt` agrees and\nstays green, by design:\n\n```\nℹ @objectstack/metadata: DEBT records 92, tsc now reports 88 (-4) -- the entry can be lowered.\n  Not an error: an improvement must not have to pay a bookkeeping toll to land.\ncheck-type-check-coverage --re-measure: OK — 34 ledger entr(ies) re-measured, 1758 raw tsc error(s) total, none above its recorded number.\n```\n\nThe ledger entry in `scripts/check-type-check-coverage.mjs` is left untouched:\nit sits outside this issue's file surface, shrinkage is explicitly not red, and\neleven other entries already carry larger un-booked shrinkage on `main`.\n\n## Tests\n\n`pnpm --filter @objectstack/metadata test` — **26 files, 517 tests, all pass.**\n\nNo new test is added, and that is deliberate rather than an omission. There is\nnothing here to assert: the keys had no reader, so no behaviour changes and any\n\"test\" would restate the literal. The check that actually holds this closed is\nthe compiler — the four tombstones go red the moment a retired bit comes back,\nwhich is the channel `retiredKey()` exists to provide.\n\n## Gates\n\nEvery `check:*` step enumerated from `.github/workflows/lint.yml` was run\nlocally, one by one — all 30 ESLint-job steps and all TypeScript-job steps —\nincluding `check:nul-bytes`, `check:engine-double-contract`,\n`check:route-envelope`, `check:error-code-casing`, `check:type-check-coverage`,\n`check:type-check-debt`, the workspace `turbo run typecheck`, and both i18n\ngates after a full workspace build. All green. The mock introduces no engine\nwrite verbs and no new fake engine, so `assertEngineDeleteDispatch` does not\napply.\n\n## Changeset\n\n**Tests-only** — one test file, no shipped behaviour, nothing to release, so no\n`.changeset/*.md` is included. The `skip-changeset` label applies; per dispatch\nit will be applied at acceptance.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01KDU3qAuJyajAQm3GkUXdfA)_"
+}

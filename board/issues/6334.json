@@ -1,0 +1,37 @@
+{
+  "number": 6334,
+  "kind": "issue",
+  "title": "hono current-user 端点的独立解析器不读 sys_user_position —— 岗位绑定的能力到不了 /me/permissions,UI 能力门看不见岗位授予",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched",
+    "pm:queue",
+    "target:v17"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T14:04:13Z",
+  "updated_at": "2026-08-08T02:18:17Z",
+  "closed_at": "2026-08-08T02:18:17Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6334",
+  "body": "## 一句话\n\nhono 宿主上,`/api/v1/auth/me/permissions` 的独立上下文解析器(`packages/plugins/plugin-hono-server/src/current-user-endpoints.ts` 的 `makeExecutionContextResolver`)只查 `sys_member` + `sys_user_permission_set`,**不查 `sys_user_position` / `sys_position_permission_set`** —— 岗位绑定的权限集(及其 `systemPermissions` 能力)对该端点不可见,而 objectui 的四面能力门(`useCapabilityGate` → `MePermissionsProvider`)整个读的就是它。\n\n## 真机复现(2026-08-07,worktree @ main `95c4227` + #6332,`objectstack dev --seed-admin --fresh`)\n\nshowcase 里 `ops` 岗位 ↔ `showcase_ops` 权限集绑定行(`ppsb_showcase_ops`)存在,`showcase_ops.systemPermissions = ['setup.access', 'showcase.export_data']`:\n\n1. 给 admin 插 `sys_user_position { user_id, position: 'ops', organization_id: <活动租户> }`(行确认写入,`valid_from/valid_until` 均空)→ **重新登录后** `/me/permissions` 仍然:`positions: []`,`systemPermissions` 里没有 `showcase.export_data`。UI 上门在 `showcase.export_data` 的批量按钮对该用户保持隐藏。\n2. 改插 `sys_user_permission_set { user_id, permission_set_id: <showcase_ops> }`(用户直绑,该解析器读的表)→ `/me/permissions` 立即出现 `showcase_ops` 与 `showcase.export_data`,UI 门立刻放行。\n\n同时可见:showcase 播种的 `usp_showcase_admin_exec/finance/legal/manager` 四行岗位授予同样不反映在 `positions`/`permissionSets` 里;`everyone → showcase_member_default`(isDefault 自动绑定)也没有出现在 `permissionSets`。\n\n## 为什么要紧\n\n- **声明 ≠ 生效的又一格**:ADR-0090 说分发 = `position`,showcase 的人设授权全走岗位绑定;但在 hono 宿主上这些授予对 UI 能力门(工具栏 / 行内 kebab / 记录页头 / 批量条,ADR-0066 D4)全部不可见 —— 按钮对**确实持有能力**的用户隐藏,是 fail-open 设计里明确点名的「更糟的失败方向」。\n- 数据面 CRUD 走 SecurityPlugin 中间件(canonical 解析链,读岗位),所以**服务端放行、UI 却藏按钮**,两边答案不一致。\n- 标准解析器 `resolveUserAuthzGrants`(`packages/core/src/security/resolve-authz-context.ts`)明确处理 `sys_user_position`(null org = 全局、租户匹配、有效期窗口、`everyone` 隐式岗位)。该 hono 副本自述「duplicates the canonical `resolveAuthzContext` by design; the duplication is tracked by `scripts/check-single-authz-resolver.mjs`」—— 但该 guard 防的是*新增*副本与两个 DELEGATOR 的失联,并不断言这个被豁免副本的**行为等价**;`sys_user_position` 的缺失正是从这个缝里漏掉的(与当年 REST 副本静默丢 `sys_user_role` 同型)。\n\n## 建议方向(二选一,倾向 1)\n\n1. 让 `current-user-endpoints` 的 `resolveCtx` 委托共享的 `resolveUserAuthzGrants`(它就是为「已知 userId 的非 HTTP 面构建同一信封」而导出的),删掉手抄的表读取;\n2. 若刻意保持自包含,至少补上 `sys_user_position` → `sys_position_permission_set` 链(含 null-org=全局、租户匹配、`isGrantActive` 有效期窗口、隐式 `everyone`),并在 `check-single-authz-resolver` 里为「豁免副本必须与 canonical 读同一组表」补一条机械断言。\n\n发现于 #6257 / PR #6332 的 showcase UI 实测过程(正向对照被迫改用用户直绑);仅记录,未认领。"
+}

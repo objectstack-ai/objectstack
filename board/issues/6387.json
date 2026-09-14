@@ -1,0 +1,38 @@
+{
+  "number": 6387,
+  "kind": "issue",
+  "title": "read-scope-sql 的 `$null` / `$exists` 按真值性读比较数 —— `{$null: \"false\"}` 编成 `IS NULL`，#5347 / #5369 的先例没推到 RLS 编译器",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:services",
+    "pm:queue",
+    "priority:p1",
+    "security"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T15:54:53Z",
+  "updated_at": "2026-08-07T19:53:20Z",
+  "closed_at": "2026-08-07T19:53:19Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6387",
+  "body": "出自 #6125 的实施（PR 见下）。#6125 的裁决把派工严格限定在「比较数位置的 `undefined`」一格；`$null` / `$exists` 被**有意排除**在那次清扫之外（它们的比较数是声明的布尔量，不是比较数位置 —— `driver-sql` 的孪生实现也这样跳过）。排除时顺手实测了这一格，记在此处，按 Prime Directive #10 另立单、不指派、不扩大那张 PR 的 diff。\n\n## 实测（`origin/main` @ `d8e8d9cbc`，直接调 `compileScopedFilterToSql(filter, 't')`）\n\n| read scope | 编译结果 |\n|---|---|\n| `{owner_id: {$null: true}}` | `\"t\".\"owner_id\" IS NULL` ✅ |\n| `{owner_id: {$null: false}}` | `\"t\".\"owner_id\" IS NOT NULL` ✅ |\n| `{owner_id: {$null: \"false\"}}` | `\"t\".\"owner_id\" IS NULL` ⛔ **与作者写的意思相反** |\n| `{owner_id: {$null: \"true\"}}` | `\"t\".\"owner_id\" IS NULL` |\n| `{owner_id: {$null: 0}}` | `\"t\".\"owner_id\" IS NOT NULL` |\n| `{owner_id: {$null: null}}` | `\"t\".\"owner_id\" IS NOT NULL` |\n| `{owner_id: {$exists: \"false\"}}` | `\"t\".\"owner_id\" IS NOT NULL` ⛔ **与作者写的意思相反** |\n| `{owner_id: {$exists: 0}}` | `\"t\".\"owner_id\" IS NULL` |\n| `{owner_id: {$exists: \"no\"}}` | `\"t\".\"owner_id\" IS NOT NULL` |\n\n发射器是 `compileOperator` 里的 `case '$null': return val ? IS NULL : IS NOT NULL;` 与 `case '$exists': return val ? IS NOT NULL : IS NULL;` —— **真值性**，不是按声明的布尔域。\n\n## 为什么这是缺陷\n\n1. **`@objectstack/spec` 的 `FieldOperatorsSchema` 把两者都声明为 `z.boolean()`。** 声明 ≠ 强制（PD #10 的原话）。\n2. **`driver-sql` 已经不这么读了。** #5347（`$null`）与 #5369（`$exists`）在那一面把非布尔比较数改成了拒收，理由逐字适用于此：`\"false\"` 这个**字符串是真值**，于是它落在了它被写下来所要表达的 `false` 的**对面**。那两次裁决没有推到本编译器。\n3. **这一面比 driver-sql 那面更该拒。** `read-scope-sql` 是 RLS / 租户读取范围的下降点，模块自述「Fail-closed. Any operator, value shape, or identifier it cannot translate THROWS. A read-scope predicate must never be silently dropped」。`{$exists: \"false\"}` 写来表示「没有 owner 的行」，编出来是「**有** owner 的行」—— 这是**加宽**（admit 了策略要排除的行），不是 fail-closed 的收窄。\n\n## 触达性（判严重度需要的那一半）\n\n与 #6125 那格有一个关键差别：**这个坏形状过得了 JSON。** `undefined` 只能从进程内来，而 `\"false\"` / `0` / `null` 是合法 JSON 值，可以躺在库存的 `sys_metadata` 里。\n\n进料口：`compileScopedFilterToSql` 的 `filter` 来自 `ctx.getReadScope(objectName)`，默认桥到 `plugin-security` 的 `getReadFilter` → `computeRlsFilter`，后者从管理员写的 permission set / sharing rule 与 CEL 下降编出来。**本单在 `packages/plugins/plugin-security/src/security-plugin.ts` 里没找到对这条 filter 的任何 Zod 校验**（全文无 `FilterConditionSchema` / `safeParse`），也就是说这条路径上没有一道把非布尔 `$null` 挡下来的闸。\n\n⚠️ **未证实**的那一半，如实记：本单**没有**证明管理员真的能在 sharing rule 里写出 `$null: \"false\"` —— 规则元数据本身可能只允许特定算子形状，或 CEL 下降根本不发射 `$null`。谁来处置这一格，第一件事应该是把「`{$null: <非布尔>}` 能不能从库存 metadata 走到 `compileScopedFilterToSql`」跑通或证伪；跑通了就不是 observation 级。严重度请分诊自己判（#5347 的先例：立单时的定级两个方向都不可靠 —— #5347 自己那格的「转义细节」后来是个 P0 过滤器绕过）。\n\n## 处置提示（供裁决方，不是既定结论）\n\n信封现成，不需要新设：本模块自述「⛔ The only way this module refuses」就是 `READ_SCOPE_COMPILE_FAILED` / 500，#6125 的裁决刚刚复用过一次，理由同样适用（read scope 是平台编译产物，不是调用方输入）。措辞可参照 `driver-sql` 的 `nonBooleanNullComparandError` / `nonBooleanExistsComparandError`，注意 #5240「一个条件一种措辞」。\n\n⛔ 顺带提醒：本编译器的 `nullValueSatisfiesOperator` 对 `$null` / `$exists` 用**真值性**判、而 `driver-sql` 的同名表用与 `false` 的恒等判 —— 这是有意的（每张极性表钉的是它**自己**发射器的拼写，#5146 / #5298 的不变量）。发射器若改成按声明拒收，这两张表的对应条目必须同 PR 一起改，否则不变量断在定义处。\n\n`{$null: undefined}` / `{$exists: undefined}` 今天分别编成 `IS NOT NULL` / `IS NULL`，已在 PR 的 `read-scope-undefined-comparand.test.ts` 里作为「本次有意不扫的位置」钉住 —— 本单落地时那两行就是要改的地方。\n\n## 关联\n\n- #6125（本单的出处；其裁决只覆盖 `undefined` 比较数，明确不含 `$null` / `$exists`）\n- #5347（`$null` 非布尔比较数按声明拒收，driver-sql）\n- #5369（`$exists` 同上）\n- #5367（本模块的 `READ_SCOPE_COMPILE_FAILED` / 500 信封）\n- #5146 / #5298（极性表钉自己发射器拼写的不变量）\n\n会话：`session_01WyvqvKMG6asi9aXjKE6xtx`（#6125 实施过程中发现，未指派）"
+}

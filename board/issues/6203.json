@@ -1,0 +1,35 @@
+{
+  "number": 6203,
+  "kind": "issue",
+  "title": "drivers(turso): 聚合函数名的大小写归一化 local/remote 不一致 —— `COUNT` 在 remote 编得出、在 local 被拒(同一个 TursoDriver,取决于 url)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T10:44:21Z",
+  "updated_at": "2026-08-07T14:34:13Z",
+  "closed_at": "2026-08-07T14:34:13Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6203",
+  "body": "从 #5907(聚合函数拒收信封,两面同改)的落点实测中带出。**不在该单的信封面内**(该单只改拒收的 `code`/`status` 与措辞,不动「什么能编译」),按 Prime Directive #10 单独记一笔。\n\n**观察类**:仓内没有活体发送方,协议门也表达不出这个输入 —— 严重度请分诊时判定。\n\n## 事实\n\n两个面对聚合函数名的归一化不一样:\n\n- `packages/drivers/driver-turso/src/remote-transport.ts` — `aggregate()` 先 `.toLowerCase()` 再查自己的编译表;\n- `packages/drivers/driver-sql/src/sql-driver.ts` — `mapAggregateFunc()` 拿到什么查什么,不归一化。\n\n`TursoDriver` 按 `url` 选面(本地/副本继承 `SqlDriver`,远程委派 `RemoteTransport`),于是同一个驱动、同一条查询,答案取决于连接串。在 `origin/main` @ `80f7dc6a3` 实测(一条 `aggregations: [{ function, field: 'stage', alias: 'n' }]`):\n\n```\nCOUNT           REMOTE -> RESOLVED  \"SELECT count(\\\"stage\\\") AS \\\"n\\\" FROM \\\"deal\\\"\"\nCOUNT           LOCAL  -> THREW     \"Unsupported aggregate function: COUNT\"\n\nCOUNT_DISTINCT  REMOTE -> THREW     \"Unsupported aggregate function: count_distinct\"   (注意:回显的是归一化后的名字)\nCOUNT_DISTINCT  LOCAL  -> THREW     \"Unsupported aggregate function: COUNT_DISTINCT\"\n\nMedian          REMOTE -> THREW     \"Unsupported aggregate function: median\"\nMedian          LOCAL  -> THREW     \"Unsupported aggregate function: Median\"\n```\n\n第一行是分叉本身:一个面返回行,另一个面抛错。后两行是同一归一化的影子 —— 拒收消息回显的名字不是调用方写的那个。\n\n## 为什么记一笔\n\n- 这正是 #5769 花整单去关的那类叉(一个条件、两种线上身份、取决于 `url`),只是落在聚合层的**编译能力**上而不是拒收信封上。\n- `AggregationFunction` 是**大小写敏感**的 `z.enum`,`AggregationNodeSchema.function` 因此表达不出 `COUNT`。所以 remote 今天接受的是一个**协议从未声明的拼写** —— PD#12 的宽容消费方形状:声明侧只有小写,消费侧偷偷多认一种方言。\n\n## 为什么今天没人撞上(=> 观察类)\n\n- 全仓搜 `function: 'COUNT'` / `'SUM'` / `'AVG'` / `'MIN'` / `'MAX'`(大写)零命中,没有活体发送方;\n- 经 REST/协议门进来的查询过 `AggregationNodeSchema`,大写拼写在到达任何驱动之前就被拒;\n- 只有绕过 spec 校验的进程内调用方才够得着。\n\n## 修法(供分诊,两个方向相反)\n\n1. **收紧 remote(契约优先,倾向这个)**:删掉 `.toLowerCase()`,两面都只认协议声明的小写拼写,`COUNT` 在两面都落 #5907 的第 1 类拒收(`INVALID_QUERY` / 400,「不是已声明的聚合函数」)。与本仓两次同形先例一致(`RemoteTransport.findOne` 的未声明 string-id 分支、`FilterArray` 的第二套编译器,都是删掉后收敛到一种拼写)。代价:任何今天靠大写拼写工作的进程外调用方会开始拿到 400 —— 但那本来就不是协议表达得出的输入。\n2. **放宽 local**:给 `mapAggregateFunc` 也加 `.toLowerCase()`。两面同样收敛,但方向是把方言固化成第二套事实上的契约,PD#12 明确反对。\n\n## 已经钉住的部分\n\n#5907 的 PR 在 `remote-transport-aggregate-function-refusal.test.ts` 里留了一条**如实记录现状**的用例(`[filed, not fixed] COUNT still compiles HERE while the local driver refuses it`),这样下一个读者是读到它、而不是重新踩一遍;同一 PR 也把两面的**拒收分类**改为按调用方写的原始拼写判定,免得归一化差异顺着信封扩散(否则 `COUNT_DISTINCT` 会在 remote 拿 501、在 local 拿 400)。所以本单剩下的只有「什么能编译」这一半。\n\n相关:#5907(带出本单)、#5769(同族 local/remote 叉)、#6188(那三个已声明未实现的函数按 ADR-0049 的去留)。"
+}

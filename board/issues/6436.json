@@ -1,0 +1,36 @@
+{
+  "number": 6436,
+  "kind": "issue",
+  "title": "notification: `markAllRead` 只清窗口内的 200 条 —— 未读超过 200 的用户按「全部已读」清不掉角标",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "pm:queue",
+    "target:v17"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T18:33:58Z",
+  "updated_at": "2026-08-07T21:27:25Z",
+  "closed_at": "2026-08-07T21:27:25Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6436",
+  "body": "发现于 #6363 的实施（PR 见下方关联）。**不在该 PR 修** —— #6363 的裁决范围明确只覆盖 `unreadCount` 半边，本条是相邻但独立的一条。\n\n## 事实\n\n`MessagingService.markAllRead`（`packages/services/service-messaging/src/messaging-service.ts`）的文档说的是「Mark **every** currently-unread inbox message for the user as read」，实现是：\n\n```\nconst { notifications } = await this.listInbox(userId, { read: false, limit: 200 });\nreturn this.markRead(userId, notifications.map((n) => n.id));\n```\n\n`limit: 200` 是 `listInbox` 的硬上限（clamp 到 `[1, 200]`），所以这条路由一次最多翻 200 条收据。未读 350 条的用户点一次「全部已读」，剩 150 条仍是未读 —— 而路由名与 `.describe()` 都说是「all」。\n\n## #6363 让它从「看不见」变成「看得见」\n\n在 #6363 之前，`unreadCount` 数的是窗口内，所以这个截断自洽地隐身：清完 200 条后再 `GET /api/v1/notifications`，窗口内确实一条不剩，角标显示 0，用户以为清干净了。#6363 让 `unreadCount` 变成真总数之后，同一条路径的响应自己就把矛盾摆出来了：\n\n```\nPOST /api/v1/notifications/read/all  →  { success: true, readCount: 200 }\nGET  /api/v1/notifications           →  { unreadCount: 150 }   ← 「全部已读」之后还有 150\n```\n\n也就是说这不是 #6363 引入的缺陷，是 #6363 揭掉了掩盖它的那块布。严重度也因此上升：以前是「静默漏清」，现在是「用户点了全部已读、界面仍然显示未读」的可见故障。\n\n## 可选路线（不猜，留给分诊）\n\n- **A. 循环翻页直到清空** —— `listInbox(read:false, limit:200)` 反复取到空为止，逐批 `markRead`。改动最小，无新能力面；代价是大信箱下一次请求打多轮查询，且没有上界。\n- **B. 谓词式批量写** —— 直接对该用户 `channel:'inbox'` 的未读收据做一次批量 upsert / update，不经过列表。真正 O(1) 次查询；但 `markRead` 的 upsert 是 check-then-act（`findOne` → `update`/`insert`，处理 unique 冲突），改成谓词式要重新想并发与「尚无收据行」的插入面。\n- **C. 声明侧收口** —— 承认它是「清当前窗口」，改名/改描述。与 #6363 的裁决方向相反（那次的理由是「让声明成真而不是把谎话写进文档」），列在这里只是为了完整。\n\n倾向 A 或 B，由维护者定；B 更长远但需要一次真实设计工作，和 #6363 的反连接是同一类。\n\n## 关联\n\n- 相邻单：#6363（`unreadCount` 数总未读，已裁 Option A）\n- 读态模型：ADR-0030（读态在 `sys_notification_receipt`，不在收件箱行上）\n"
+}
