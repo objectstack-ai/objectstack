@@ -376,6 +376,111 @@ export function planPathWrites({ prNumber, matched, current }) {
 }
 
 // ---------------------------------------------------------------------------
+// Settling an indeterminate write (#17984). Pure -- the self-test pins it.
+// ---------------------------------------------------------------------------
+//
+// ## The defect
+//
+// On PR #17982 this job went red for work it had COMPLETED. Step `--paths`
+// POSTed `tests`, the API answered `500`, the retry loop below exhausted, the
+// script exited 1 -- and the PR's label set read `size/s, skip-changeset,
+// tests` immediately afterwards. The label was on the PR. The job said it was
+// not.
+//
+// ⛔ A `500` is NOT evidence the write failed. That is the whole finding: the
+// red says "the response failed", every reader takes it to mean "the label is
+// missing", and those are different facts. A bounded 5xx retry does not close
+// it (this file has had one since #10777 -- the card's "no retry on 5xx"
+// premise is false); what closes it is asking the BOARD instead of believing
+// the RESPONSE.
+//
+// ## The line this draws
+//
+// A failure is either DETERMINATE -- the server refused and did not act -- or
+// INDETERMINATE -- it may have acted before the answer was lost. Only the
+// second kind is settleable by a re-read, and only the second kind gets one:
+//
+//   * `5xx`, and a fetch that THREW (the request may have been sent and the
+//     response lost) -> indeterminate -> re-read the label set and judge the
+//     POST-CONDITION;
+//   * `4xx`, `429` included -> determinate -> fatal, loud, unchanged. A `403`
+//     is a broken token and a `422` is a label that does not exist in the
+//     repo; both are real misconfigurations and must stay red.
+//
+// ⛔ And a re-read that itself fails settles NOTHING -- the caller reports the
+// write as UNVERIFIED and fails on the original error rather than falling back
+// to a guess ("absence must be loud", AGENTS.md Route & surface ownership §3).
+
+/**
+ * Is a failed attempt one the server might have ACTED on before it failed?
+ * @param {{ status?: number, threw?: boolean }} attempt
+ */
+export function failureIsIndeterminate({ status, threw = false } = {}) {
+  if (threw) return true;
+  return Number(status) >= 500;
+}
+
+/**
+ * The state of the world a plan step was trying to bring about -- read off the
+ * step itself, so it cannot drift from what the step actually asks for.
+ * `null` means "this step declares none this function can read", which settles
+ * nothing.
+ *
+ * @returns {{ kind: 'present'|'absent', labels: string[] } | null}
+ */
+export function postconditionOf(step) {
+  if (step?.method === 'POST') {
+    const labels = step?.body?.labels;
+    if (!Array.isArray(labels) || labels.length === 0) return null;
+    return { kind: 'present', labels: [...labels] };
+  }
+  if (step?.method === 'DELETE' && typeof step.path === 'string') {
+    const marker = '/labels/';
+    const at = step.path.indexOf(marker);
+    if (at < 0) return null;
+    const name = decodeURIComponent(step.path.slice(at + marker.length));
+    if (!name) return null;
+    return { kind: 'absent', labels: [name] };
+  }
+  return null;
+}
+
+/**
+ * Given a failed write and the label set read back afterwards: did the thing we
+ * wanted happen anyway?
+ *
+ * @param {{ step: object, liveLabels?: string[], indeterminate?: boolean }} input
+ * @returns {{ settled: boolean, why: string }}
+ */
+export function settleWriteFailure({ step, liveLabels = [], indeterminate = false } = {}) {
+  if (!indeterminate) {
+    return {
+      settled: false,
+      why: 'the API answered DETERMINATELY (a 4xx, 429 included) -- the server refused and did not act, '
+        + 'so this is a real misconfiguration and stays loud'
+    };
+  }
+  const post = postconditionOf(step);
+  if (post === null) {
+    return {
+      settled: false,
+      why: 'this step declares no post-condition that can be read off it, and an unreadable post-condition settles nothing'
+    };
+  }
+  const present = new Set(liveLabels);
+  if (post.kind === 'present') {
+    const missing = post.labels.filter((label) => !present.has(label));
+    return missing.length === 0
+      ? { settled: true, why: `the write reported as failed had LANDED: ${post.labels.join(', ')} is on the PR` }
+      : { settled: false, why: `the write did NOT land: still missing from the PR: ${missing.join(', ')}` };
+  }
+  const lingering = post.labels.filter((label) => present.has(label));
+  return lingering.length === 0
+    ? { settled: true, why: `the write reported as failed had LANDED: ${post.labels.join(', ')} is off the PR` }
+    : { settled: false, why: `the write did NOT land: still on the PR: ${lingering.join(', ')}` };
+}
+
+// ---------------------------------------------------------------------------
 // GitHub REST plumbing.
 // ---------------------------------------------------------------------------
 
@@ -395,6 +500,11 @@ async function ghRequest(method, path, body) {
   const url = `${apiUrl}/repos/${repo}${path}`;
 
   let lastError = null;
+  // Sticky across attempts on purpose: if ANY attempt could have reached the
+  // server's state, the whole request is indeterminate, even when a later
+  // attempt came back with a clean 4xx. The write we cannot rule out is the
+  // one from the attempt that went dark, not the one that was refused.
+  let indeterminate = false;
   for (let attempt = 1; attempt <= 4; attempt += 1) {
     try {
       const response = await fetch(url, {
@@ -418,14 +528,21 @@ async function ghRequest(method, path, body) {
 
       const text = await response.text();
       lastError = new Error(`${method} ${url} -> HTTP ${response.status}: ${text.slice(0, 400)}`);
+      indeterminate ||= failureIsIndeterminate({ status: response.status });
       // 4xx other than 429 will not get better by trying again.
       if (response.status < 500 && response.status !== 429) break;
     } catch (error) {
       lastError = error;
+      indeterminate ||= failureIsIndeterminate({ threw: true });
     }
     if (attempt < 4) await new Promise((resolve) => setTimeout(resolve, 2 ** attempt * 500));
   }
-  throw lastError ?? new Error(`${method} ${url} failed`);
+  const failure = lastError ?? new Error(`${method} ${url} failed`);
+  // The caller settles an indeterminate failure by re-reading the label set;
+  // a determinate one it rethrows unchanged. Carrying the class on the error is
+  // what keeps that decision out of string-matching on the message.
+  failure.indeterminate = indeterminate;
+  throw failure;
 }
 
 async function listPullFiles(prNumber) {
@@ -444,7 +561,41 @@ async function listCurrentLabels(prNumber) {
   return Array.isArray(labels) ? labels.map((l) => l.name) : [];
 }
 
-async function runPlan(plan, dryRun) {
+/**
+ * A write that failed indeterminately is settled against the BOARD, not against
+ * the response. See the `settleWriteFailure` section header for why.
+ */
+async function settleOrRethrow(step, error, readLabels) {
+  if (error?.indeterminate !== true || typeof readLabels !== 'function') {
+    // Determinate refusal, or nothing wired to read with: the response IS the
+    // verdict and it is a failure.
+    throw error;
+  }
+  console.log(`pr-labels: ${error.message}`);
+  console.log(
+    'pr-labels: that failure is INDETERMINATE -- the server may have acted before it failed. '
+      + "Re-reading the PR's labels to settle it against the board."
+  );
+
+  let live;
+  try {
+    live = await readLabels();
+  } catch (readError) {
+    console.error(
+      `pr-labels: the settling re-read ITSELF failed (${readError.message}) -- the write is UNVERIFIED, not verified.`
+    );
+    throw error;
+  }
+  console.log(`pr-labels: labels on the PR after the failure: ${live.join(', ') || '(none)'}`);
+
+  const verdict = settleWriteFailure({ step, liveLabels: live, indeterminate: true });
+  if (!verdict.settled) {
+    throw new Error(`${error.message} -- and ${verdict.why}`);
+  }
+  console.log(`pr-labels: SETTLED -- ${verdict.why}. Not failing the job for a response that was wrong about its own effect.`);
+}
+
+async function runPlan(plan, dryRun, readLabels) {
   if (plan.length === 0) {
     console.log('pr-labels: nothing to write.');
     return;
@@ -456,7 +607,12 @@ async function runPlan(plan, dryRun) {
       throw new Error(`pr-labels: refusing to issue a whole-set ${FORBIDDEN_VERB} (${step.path}).`);
     }
     console.log(`pr-labels: ${step.method} ${step.path} -- ${step.why}`);
-    if (!dryRun) await ghRequest(step.method, step.path, step.body);
+    if (dryRun) continue;
+    try {
+      await ghRequest(step.method, step.path, step.body);
+    } catch (error) {
+      await settleOrRethrow(step, error, readLabels);
+    }
   }
 }
 
@@ -501,7 +657,7 @@ async function runSize(dryRun) {
     family: buckets.map((b) => b.label),
     current
   });
-  await runPlan(plan, dryRun);
+  await runPlan(plan, dryRun, () => listCurrentLabels(prNumber));
 }
 
 async function runPaths(dryRun) {
@@ -516,7 +672,7 @@ async function runPaths(dryRun) {
 
   const current = await listCurrentLabels(prNumber);
   console.log(`pr-labels: labels on PR #${prNumber} right now: ${current.join(', ') || '(none)'}`);
-  await runPlan(planPathWrites({ prNumber, matched, current }), dryRun);
+  await runPlan(planPathWrites({ prNumber, matched, current }), dryRun, () => listCurrentLabels(prNumber));
 }
 
 // ---------------------------------------------------------------------------
@@ -550,13 +706,14 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'size bucketing: `<`, not `<=`': 10,
   'the write plans: POST and DELETE only': 11,
   'the #10698 interleaving, replayed': 3,
+  'the #17982 indeterminate write, settled against the board': 16,
   'config parsing': 6,
   'the REAL config, so drift fails lint rather than a PR run': 2,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 6;
+const SELF_TEST_BATTERY_FLOOR = 7;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -753,6 +910,89 @@ function selfTest() {
       current: ['size/m']
     })),
     ['skip-changeset', 'size/l']
+  );
+
+  // --- the #17982 indeterminate write, settled against the board -----------
+  //
+  // TWO DIRECTIONS, and both are required. A battery that only proved the
+  // settle succeeds where the write landed would be the same exit-0-by-
+  // construction shape this card is about: it would stay green if the 4xx leg
+  // were deleted tomorrow.
+  battery('the #17982 indeterminate write, settled against the board');
+
+  // ① Which failures could the server have ACTED on?
+  check('a 500 is indeterminate', failureIsIndeterminate({ status: 500 }), true);
+  check('so is a 503', failureIsIndeterminate({ status: 503 }), true);
+  check('a thrown fetch is indeterminate -- the response, not the request, is what was lost',
+    failureIsIndeterminate({ threw: true }), true);
+  check('a 403 is DETERMINATE -- a broken token refused and did not act', failureIsIndeterminate({ status: 403 }), false);
+  check('a 422 is DETERMINATE -- the label does not exist in this repo', failureIsIndeterminate({ status: 422 }), false);
+  check('a 429 is DETERMINATE -- rate-limited means not served, not half-served',
+    failureIsIndeterminate({ status: 429 }), false);
+
+  // ② The post-condition is read off the step, so it cannot drift from it.
+  const addTests = { method: 'POST', path: '/issues/17982/labels', body: { labels: ['tests'] }, why: 'add' };
+  const dropSizeS = { method: 'DELETE', path: '/issues/17982/labels/size%2Fs', why: 'retire' };
+  check('a POST wants its labels PRESENT', postconditionOf(addTests), { kind: 'present', labels: ['tests'] });
+  check('a DELETE wants ONE named label ABSENT, url-decoded', postconditionOf(dropSizeS),
+    { kind: 'absent', labels: ['size/s'] });
+  check('a POST with no labels declares no post-condition',
+    postconditionOf({ method: 'POST', path: '/issues/1/labels', body: { labels: [] } }), null);
+  check('a verb this file does not emit declares none either',
+    postconditionOf({ method: FORBIDDEN_VERB, path: '/issues/1/labels', body: { labels: ['x'] } }), null);
+
+  // ③ DIRECTION ONE -- the incident, replayed. The POST 500'd; the board shows
+  //    the label. The job must NOT be red for work it completed.
+  check(
+    'the #17982 incident: POST -> 500, and `tests` is on the PR -> SETTLED',
+    settleWriteFailure({
+      step: addTests,
+      liveLabels: ['size/s', 'skip-changeset', 'tests'],
+      indeterminate: true
+    }).settled,
+    true
+  );
+  check(
+    'a PARTIAL landing is not a landing',
+    settleWriteFailure({
+      step: { method: 'POST', path: '/issues/17982/labels', body: { labels: ['tests', 'ci/cd'] }, why: 'add' },
+      liveLabels: ['tests'],
+      indeterminate: true
+    }),
+    { settled: false, why: 'the write did NOT land: still missing from the PR: ci/cd' }
+  );
+  check(
+    'a 5xx whose label really is missing stays red',
+    settleWriteFailure({ step: addTests, liveLabels: ['size/s'], indeterminate: true }).settled,
+    false
+  );
+  check(
+    'a DELETE that 5xx-ed but took the label off IS settled',
+    settleWriteFailure({ step: dropSizeS, liveLabels: ['size/l', 'tests'], indeterminate: true }).settled,
+    true
+  );
+  check(
+    'a DELETE whose label is still there is not',
+    settleWriteFailure({ step: dropSizeS, liveLabels: ['size/s'], indeterminate: true }).settled,
+    false
+  );
+
+  // ④ DIRECTION TWO -- a genuine 4xx stays loud, and stays loud EVEN WHEN the
+  //    board happens to satisfy the post-condition. A determinate refusal is a
+  //    misconfiguration; the label being there by some other hand does not make
+  //    the token work. ⛔ This is the case that must never be "relaxed".
+  const determinate = settleWriteFailure({
+    step: addTests,
+    liveLabels: ['size/s', 'skip-changeset', 'tests'],
+    indeterminate: false
+  });
+  check('a determinate 4xx is NOT settled, even with the label present', determinate.settled, false);
+  check('…and it says so in those words', /DETERMINATELY/.test(determinate.why), true);
+  check(
+    'a step with no readable post-condition settles nothing either',
+    settleWriteFailure({ step: { method: 'POST', path: '/issues/1/labels' }, liveLabels: ['tests'], indeterminate: true })
+      .settled,
+    false
   );
 
   // --- config parsing ------------------------------------------------------
