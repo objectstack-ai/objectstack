@@ -432,6 +432,15 @@ The rules worth knowing before you split a product this way:
   may reference an object another package owns. An app's own `navigation` may
   not point outside its package — inject into another package's app with
   `navigationContributions` instead.
+- **Permission sets and seed data cross the boundary; declare what they reach.**
+  A permission set is authored per *role*, not per module, so the `type: 'app'`
+  package keeps every set whole and grants across the whole artifact — and seed
+  rows are the same shape. Both resolve against the artifact rather than the one
+  stack, but only once you hand `defineStack` the sibling object names:
+  `defineStack(appConfig, { artifactObjects: ordersStack.objects?.map((o) => o.name) })`.
+  `composeStacks` then refuses any name no package in the artifact defines, so a
+  typo is still caught — one pass later, and by name. Hooks are the deliberate
+  exception: a hook still belongs to the package that owns its object.
 - **One artifact, one version.** Everything inside ships, installs and upgrades
   together; you cannot hot-fix one module on its own. A module that needs its
   own release cadence belongs in its own artifact.
