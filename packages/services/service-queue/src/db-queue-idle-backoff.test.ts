@@ -29,7 +29,7 @@
  */
 
 import { describe, it, expect, afterEach, vi } from 'vitest';
-import { assertEngineDeleteDispatch } from '@objectstack/objectql';
+import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/objectql';
 import { DEFAULT_MAX_IDLE_INTERVAL_MS } from '@objectstack/core';
 import { DbQueueAdapter } from './db-queue-adapter.js';
 
@@ -93,8 +93,12 @@ function makeCountingEngine() {
                     });
                 }
             }
-            if (opts.offset) out = out.slice(opts.offset);
-            if (opts.limit) out = out.slice(0, opts.limit);
+            // [#9540] Apply the caller's bound by PRESENCE, not truthiness: a
+            // `limit: 0` is a real bound meaning "no rows", and `if (opts.limit)`
+            // would hand back the whole table for it — a double LOOSER than the
+            // engine, on the one axis this suite counts.
+            if (typeof opts?.offset === 'number') out = out.slice(opts.offset);
+            if (typeof opts?.limit === 'number') out = out.slice(0, opts.limit);
             return out;
         },
         async insert(table: string, data: Row) {
@@ -104,7 +108,12 @@ function makeCountingEngine() {
             tables.set(table, t);
             return { id: data.id };
         },
-        async update(table: string, patch: Row) {
+        async update(table: string, patch: Row, options?: any) {
+            // [#5480] Opened with ObjectQL.update's OWN dispatch predicate, for
+            // the same reason `delete` below is: a predicate update rewrites
+            // every matching row, so a double looser than the engine here hides
+            // exactly the writes it was introduced to observe.
+            assertEngineUpdateDispatch(patch, options);
             if (table === QUEUE_TABLE) calls.update++;
             const r = (tables.get(table) ?? []).find((x) => x.id === patch.id);
             if (!r) throw new Error(`row ${patch.id} not found in ${table}`);
