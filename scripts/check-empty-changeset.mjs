@@ -119,9 +119,22 @@
 // ## The foreign changeset rule (#17712)
 //
 // A PR may not MODIFY or DELETE a `.changeset/*.md` that exists on the merge
-// base and was not added by this PR. Refused by name, with one remedy:
+// base and was not added by this PR. Refused by name, and the refusal names TWO
+// classes because the diff shape cannot tell them apart and their remedies are
+// opposite (#18160, ruling D on #17712, 2026-09-14):
 //
-//     rename yours; restore theirs from base
+//     COLLISION            -> rename yours; restore theirs from base
+//     DELIBERATE CORRECTION -> do NOT restore it; get it confirmed on the PR
+//
+// The second class is a PR that changed behaviour a PENDING release note
+// describes and corrected that note in the same stroke. It is refused exactly as
+// before -- ruling D moved no verdict, `--diff-filter=MD`, `--no-renames`, the
+// merge-base derivation and both exemptions are untouched -- but the single
+// remedy sent that author to restore a sentence their own PR had just falsified.
+// The measured instance is `ed7243d52` (boolean support for `sum` / `avg` /
+// `min` / `max`, rewriting `.changeset/aggregate-field-type-compatibility.md`,
+// which had said booleans were refused). Where the two classes are rendered and
+// how they are held equal is at `FOREIGN_TWO_CLASS_LINES`.
 //
 // Ruled 2026-09-13 (director seat, decision batch #130 item 3) on #17712, as
 // option A'. The census the ruling rests on, taken on `origin/main` at
@@ -511,11 +524,41 @@ function report(violations) {
 }
 
 /**
- * The one remedy the #17712 ruling names, verbatim. A constant because the
- * self-test asserts the rendered report carries it: a refusal that names the
- * offending file but not the way out sends an author to read this script.
+ * The remedy for the COLLISION class, verbatim as the #17712 ruling names it.
+ * A constant because the self-test asserts the rendered report carries it: a
+ * refusal that names the offending file but not the way out sends an author to
+ * read this script.
  */
 export const FOREIGN_REMEDY = 'rename yours; restore theirs from base';
+
+/**
+ * The remedy for the DELIBERATE-CORRECTION class (#18160, ruling D on #17712).
+ * It is the OPPOSITE act, and that is the whole point of naming two classes: a
+ * PR that changed behaviour a PENDING release note describes and corrected that
+ * note in the same stroke is refused CORRECTLY -- this text changes no verdict
+ * -- but following `FOREIGN_REMEDY` there restores a sentence the same PR has
+ * just made false. Measured instance: `ed7243d52` lands boolean support for
+ * `sum` / `avg` / `min` / `max` and rewrites
+ * `.changeset/aggregate-field-type-compatibility.md`, whose base text stated
+ * booleans were refused for exactly those four aggregates.
+ */
+export const FOREIGN_CORRECTION_REMEDY = 'do NOT restore it -- say so on the PR and get it confirmed';
+
+// ONE source for the two-class remedy, rendered TWICE: as indented lines in the
+// human body, and joined into the single line a `::error` annotation has to be.
+// A reviewer who reads only the annotation on the diff and an author who reads
+// only the job log must be told the same thing, so the two renderings are held
+// equal by construction (one source) AND by assertion -- the self-test reads the
+// block back OUT of the rendered body, normalises it to one line, and requires
+// it to equal `FOREIGN_TWO_CLASS_TEXT` byte for byte (#18160 acceptance 2).
+const FOREIGN_TWO_CLASS_LINES = Object.freeze([
+  'Two things produce this refusal and their remedies are OPPOSITE, so read which one you are before you act.',
+  `COLLISION -- you and another PR drew the same changeset filename, and yours overwrote theirs. Remedy: ${FOREIGN_REMEDY}.`,
+  `DELIBERATE CORRECTION -- your change may have made this PENDING release note false, and you rewrote it in the same stroke. Remedy: ${FOREIGN_CORRECTION_REMEDY}; restoring it from the base would put the false sentence back.`,
+]);
+
+/** The one-line rendering of {@link FOREIGN_TWO_CLASS_LINES}, for annotations. */
+export const FOREIGN_TWO_CLASS_TEXT = FOREIGN_TWO_CLASS_LINES.join(' ');
 
 const FOREIGN_NOTE = {
   M: 'present on the merge base and CHANGED by this PR -- this is somebody else\'s release note',
@@ -530,7 +573,7 @@ function reportForeign(rows) {
   console.error(
     [
       '',
-      `Remedy: ${FOREIGN_REMEDY}.`,
+      ...FOREIGN_TWO_CLASS_LINES.map((line, i) => (i === 0 ? line : `  ${line}`)),
       '',
       'A changeset filename carries no meaning, so a collision looks like nothing: the',
       'default word-pair names were designed for one human running the CLI at a time, and',
@@ -540,7 +583,7 @@ function reportForeign(rows) {
       'replaced by yours, its own CI never re-runs, and the loss surfaces at release time in',
       'the generated CHANGELOG, with the authoring PR long merged (#17712).',
       '',
-      'Concretely:',
+      'Concretely, for the COLLISION class:',
       '',
       '  1. Restore their file exactly as it stands on the merge base:',
       '       git checkout <merge-base> -- <the file named above>',
@@ -553,14 +596,19 @@ function reportForeign(rows) {
       'only thing that consumes them, and it runs on the release PR, which this gate never',
       'judges.',
       '',
-      'If you are deliberately correcting somebody else\'s release note, that is a decision',
-      'about a release, not a refactor -- say so on the PR and get it confirmed, rather than',
-      'routing around this gate.',
+      'For the DELIBERATE CORRECTION class there is no second command to run, and step 1',
+      'above is the one thing not to do: the note you rewrote describes behaviour THIS PR',
+      'changed, so restoring it from the base republishes a sentence that is now false, and',
+      'no label and no diff shape makes that safe. Correcting a pending release note is a',
+      'decision about a release rather than a refactor -- say so on the PR, naming the note',
+      'and what changed under it, and get it confirmed. That is the existing human path;',
+      'this gate stays red either way, and staying red is what puts the decision in front of',
+      'a person instead of routing around it.',
     ].join('\n'),
   );
   for (const { file } of rows) {
     console.error(
-      `::error file=${file}::${file} exists on the merge base and was not added by this PR, so changing or deleting it silently replaces somebody else's release note (#17712). Remedy: ${FOREIGN_REMEDY}.`,
+      `::error file=${file}::${file} exists on the merge base and was not added by this PR, so changing or deleting it silently replaces somebody else's release note (#17712). ${FOREIGN_TWO_CLASS_TEXT}`,
     );
   }
 }
@@ -634,6 +682,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '#6129: main drift must not move the verdict, in EITHER direction': 6,
   '#6129, the other half: a base branch that DELETES': 2,
   "A' (#17712): a changeset the PR did not add is neither modified nor deleted": 29,
+  'D (#18160): the refusal names BOTH classes, body and annotation pinned equal': 12,
   '#4690, one step later: no merge base at all is a failure': 1,
   'The consumer: this gate\'s own CI step (#6129)': 23,
   'The second consumer: where THIS SELF-TEST runs (#6509)': 12,
@@ -645,7 +694,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 22;
+const SELF_TEST_BATTERY_FLOOR = 23;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -1344,6 +1393,107 @@ function selfTest() {
         assert(
           captured.some((line) => line.startsWith('::error file=') && line.includes(FOREIGN_REMEDY)),
           "A' report: the GitHub annotation must carry the remedy too -- an annotation that only accuses sends the author to read this script",
+        );
+      }
+    }
+
+    // ── D (#18160): the refusal names BOTH classes, and cannot drift ─────────
+    //
+    // Ruling D on #17712 changed the refusal TEXT and nothing else: the same
+    // diffs are refused before and after, so every case here asserts about what
+    // is PRINTED, plus one fixture that pins the strength it does not move.
+    //
+    // The equality case is the load-bearing one. Body and annotation are two
+    // renderings of one source, and a later author editing only the one they
+    // happened to be reading is exactly the drift acceptance 2 forbids -- so the
+    // two-class block is read back OUT of the rendered body, normalised to a
+    // single line, and required to equal the annotation's text byte for byte. A
+    // case that asserted each rendering against its own constant would pass
+    // through that drift without a word.
+    battery('D (#18160): the refusal names BOTH classes, body and annotation pinned equal');
+    {
+      const THEIRS = '.changeset/plain-donkeys-repeat.md';
+      const MINE = '.changeset/18160-foreign-changeset-remedy.md';
+      const OTHER_DECLARING = '---\n"@objectstack/cli": minor\n---\n\nfeat(cli): somebody else\n';
+      const render = (rows) => {
+        const captured = [];
+        const realError = console.error;
+        console.error = (...args) => captured.push(args.join(' '));
+        try {
+          reportForeign(rows);
+        } finally {
+          console.error = realError;
+        }
+        return captured;
+      };
+
+      const captured = render([{ file: THEIRS, status: 'M' }]);
+      const text = captured.join('\n');
+
+      assert(
+        text.includes(FOREIGN_REMEDY),
+        'D two-class: the body still carries the COLLISION remedy verbatim -- ruling D removed nothing',
+      );
+      assert(
+        text.includes(FOREIGN_CORRECTION_REMEDY),
+        'D two-class: the body carries the DELIBERATE CORRECTION remedy -- the class the single remedy misrouted',
+      );
+      assert(
+        /your change may have made this PENDING release note false/.test(text),
+        'D two-class: the body names the second class in the ruling\'s own terms, not as a generic caveat',
+      );
+      assert(
+        text.includes('there is no second command to run') && text.includes('get it confirmed'),
+        'D two-class: the second class is ROUTED to the confirmation path rather than to the restore',
+      );
+
+      // The equality pin, taken against the REAL rendered body.
+      {
+        const lines = text.split('\n');
+        const start = lines.findIndex((line) => line.trim() === FOREIGN_TWO_CLASS_LINES[0]);
+        assert(start !== -1, 'D two-class: the body really contains the two-class block (the pin below is not vacuous)');
+        const normalised = lines
+          .slice(start, start + FOREIGN_TWO_CLASS_LINES.length)
+          .map((line) => line.trim())
+          .join(' ');
+        assert(
+          normalised === FOREIGN_TWO_CLASS_TEXT,
+          'D two-class: the body block and the annotation text are EQUAL once normalised -- neither rendering may drift from the other',
+        );
+      }
+
+      const annotations = captured.filter((line) => line.startsWith('::error file='));
+      assert(annotations.length === 1, 'D two-class: one annotation per refused file, unchanged');
+      assert(
+        annotations[0].includes(FOREIGN_TWO_CLASS_TEXT),
+        'D two-class: the annotation a reviewer reads on the diff carries the WHOLE two-class text, not the collision half',
+      );
+      assert(
+        annotations[0].includes(THEIRS),
+        'D two-class: the annotation still names the file -- CONTROL that the line above is the real annotation',
+      );
+
+      // Strength, unchanged. The `ed7243d52` shape in miniature: the PR adds its
+      // OWN changeset (so `skip-changeset` is not available to it) and rewrites a
+      // foreign one in the same commit. Ruling D does NOT make this pass.
+      {
+        const { dir, base } = makeRepo(
+          { '.changeset/README.md': '# Changesets\n', [THEIRS]: OTHER_DECLARING },
+          { [THEIRS]: DECLARING, [MINE]: DECLARING, 'packages/spec/src/data/table.ts': 'export const v = 2;\n' },
+        );
+        const shape = git(['diff', '--name-status', '--no-renames', base, 'HEAD', '--', '.changeset/*.md'], dir);
+        assert(
+          /^A\t\.changeset\/18160-foreign-changeset-remedy\.md$/m.test(shape),
+          'D strength: CONTROL -- the fixture really adds a changeset of its own, so this PR could not take the skip-changeset exemption',
+        );
+        assert(
+          /^M\t\.changeset\/plain-donkeys-repeat\.md$/m.test(shape),
+          'D strength: CONTROL -- and it really rewrites a foreign one in the same commit',
+        );
+        const r = scanForeign({ cwd: dir, base });
+        assert(
+          r.foreign.length === 1 && r.foreign[0]?.file === THEIRS && r.foreign[0]?.status === 'M',
+          'D strength: the deliberate-correction shape is STILL refused, and refused by name -- ruling D moved the text, never the verdict',
         );
       }
     }
