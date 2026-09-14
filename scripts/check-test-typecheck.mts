@@ -315,16 +315,71 @@ const DIAGNOSTIC = /^(\S[^(]*)\((\d+),(\d+)\): error (TS\d+): (.*)$/;
 /** Longest quoted span kept verbatim; beyond this it is a type blob, not a name. */
 const STABLE_QUOTED_SPAN = 32;
 
+// ── Why an ABSOLUTE PATH collapses at every length (#17739) ──────────────
+//
+// The length test is the WHOLE decision for a span carrying none of `{ < ( [`,
+// and an absolute filesystem path carries none of them. So until this rule
+// existed, whether such a path survived verbatim was decided by how long the
+// CHECKOUT's path is — by nothing about the error at all:
+//
+//   TS6059 reads `File '…' is not under 'rootDir' '<an ABSOLUTE path>'.`
+//     /tmp/w9/packages/lint/src                  25 chars → survived VERBATIM
+//     /home/user/objectstack/packages/lint/src   40 chars → collapsed to '…'
+//
+// Measured on pristine `origin/main` @ 7e58d177e, same command, same commit:
+// `pnpm --filter @objectstack/lint typecheck` exits 0 from a 52-character
+// checkout and 1 from a 25-character one, where it reports the SAME six TS6059
+// errors as both ARRIVED (a signature the ledger does not record) and VANISHED
+// (the recorded one absent). The ledger was recorded from a long path, and CI's
+// path is long too, which is why this survived: it reds only in a short-path
+// checkout — and its ARRIVED text there instructs the reader to go repair
+// errors that are not new, which is worse than a gate that is merely noisy.
+//
+// It also contradicted the docblock below. An absolute checkout path is not "a
+// name, a dotted path, or a small literal type", and it changes when the
+// CHECKOUT moves, not when the error does — the one property that paragraph
+// says every surviving span has.
+//
+// THE REPAIR IS THE NARROWEST ONE THAT MAKES THE SIGNATURE PATH-INDEPENDENT: a
+// span that is an absolute path collapses like a type blob does, at every
+// length. Relativising it against the repo root instead was considered and
+// rejected — it would re-spell the signature every ledger already holds in its
+// collapsed form, churning a maintainer-gated shrink-only ratchet to buy
+// discrimination no ledger has ever recorded. Measured before choosing, across
+// all 19 `test-typecheck-debt.json` ledgers: quoted spans beginning `/` = 0,
+// drive-letter spans = 0, against 89 spans beginning with a capital letter as
+// the firing control. So this rule re-spells NO recorded signature; it only
+// stops a short-path checkout from producing a different one.
+//
+// ⚠️ It therefore collapses only what a long-path checkout already collapsed:
+// no discrimination any ledger, or CI, has ever relied on is given up.
+
+/** A quoted span that is a filesystem-absolute path: POSIX, Windows drive, or UNC. */
+const ABSOLUTE_PATH_SPAN = /^(?:\/|[A-Za-z]:[\\/]|\\\\)/;
+
+/**
+ * Whether a quoted span is an absolute filesystem path, and therefore moves
+ * with the CHECKOUT rather than with the error (#17739). Exported so the
+ * self-test can prove the detector still reaches its subject: a span shape that
+ * stopped matching would make the path-independence pins pass vacuously.
+ */
+export function isAbsolutePathSpan(inner: string): boolean {
+  return ABSOLUTE_PATH_SPAN.test(inner);
+}
+
 /**
  * A diagnostic message with its churn-prone spans collapsed. A quoted span
  * survives only when it is short AND free of the structural punctuation that
- * makes tsc print a whole shape — i.e. when it is a name, a dotted path, or a
- * small literal type, all of which change only when the error does.
+ * makes tsc print a whole shape AND not an absolute filesystem path — i.e. when
+ * it is a name, a dotted path, or a small literal type, all of which change
+ * only when the error does.
  */
 export function normalizeMessage(message: string): string {
   return message
     .replace(/'([^']*)'/g, (whole, inner: string) =>
-      inner.length <= STABLE_QUOTED_SPAN && !/[{<(\[]/.test(inner) ? whole : "'…'",
+      inner.length <= STABLE_QUOTED_SPAN && !/[{<(\[]/.test(inner) && !isAbsolutePathSpan(inner)
+        ? whole
+        : "'…'",
     )
     .replace(/\s+/g, ' ')
     .trim();
@@ -538,11 +593,12 @@ const SELF_TEST_BATTERIES: Readonly<Record<string, number>> = Object.freeze({
   'The ratchet-remedy authority convention (#8435)': 7,
   'The same authority rule, applied to the per-SIGNATURE offer (#13470)': 3,
   'The ledger\'s own prose (#12624)': 11,
+  'Path-independence: a signature must not move with the CHECKOUT (#17739)': 7,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 5;
+const SELF_TEST_BATTERY_FLOOR = 6;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -756,6 +812,86 @@ function selfTest(): string {
         + '"... 37 more ..." elisions)',
       [...before.get('src/rest.test.ts')!.keys()][0] ===
         "TS2345: Argument of type '…' is not assignable to parameter of type 'IHttpResponse'.",
+    );
+  }
+
+  // ── A signature must not move with the CHECKOUT (#17739) ─────────────────
+  //
+  // TS6059 prints the offending file and the `rootDir` as ABSOLUTE paths, and
+  // an absolute path carries none of the structural punctuation the collapse
+  // rule keys on — so its LENGTH decided whether it survived, and the same
+  // diagnostic had one signature in a short-path checkout and a different one
+  // in a long one. The ledgers were recorded long, so a short-path checkout
+  // reported six real, already-ledgered TS6059 errors as ARRIVED and VANISHED
+  // at once and exited 1 on pristine `main`.
+  //
+  // The pins are paired the way the rest of this file pairs them: the property
+  // (one signature from two checkout paths), a control proving the fixture
+  // really straddles the length threshold the defect lived on — else the
+  // equality could hold for a reason that is not the repair — a zero-churn pin
+  // against the spelling every ledger already holds, and an over-masking
+  // control proving short NON-path spans are left alone.
+  battery('Path-independence: a signature must not move with the CHECKOUT (#17739)');
+  {
+    const SHORT_ROOT = '/tmp/w9/packages/lint/src';
+    const LONG_ROOT = '/home/user/objectstack/packages/lint/src';
+    const ts6059 = (rootDir: string): string =>
+      `File '${rootDir}/../../../examples/app-showcase/src/app.tsx' is not under 'rootDir' `
+      + `'${rootDir}'. 'rootDir' is expected to contain all source files.`;
+    /** The spelling packages/lint and packages/cli record TODAY. */
+    const LEDGERED =
+      "TS6059: File '…' is not under 'rootDir' '…'. 'rootDir' is expected to contain all source files.";
+
+    expect(
+      `#17739 (control) — the fixture straddles the length threshold the defect lived on: the short `
+        + `rootDir is ${SHORT_ROOT.length} chars (<= ${STABLE_QUOTED_SPAN}, so it USED to survive `
+        + `verbatim) and the long one ${LONG_ROOT.length} (> ${STABLE_QUOTED_SPAN}, always collapsed). `
+        + 'Without this the equality below could hold for a reason that is not the repair',
+      SHORT_ROOT.length <= STABLE_QUOTED_SPAN && LONG_ROOT.length > STABLE_QUOTED_SPAN,
+    );
+    expect(
+      '#17739 (control) — and the two RAW messages really do differ, so the equality below is not one '
+        + 'input compared with itself',
+      ts6059(SHORT_ROOT) !== ts6059(LONG_ROOT),
+    );
+    expect(
+      `⭐ #17739 — the SAME diagnostic from two different checkout paths produces ONE signature. A `
+        + `signature that moved with the checkout made the identical error read as ARRIVED and `
+        + `VANISHED at once: got ${JSON.stringify(diagnosticSignature('TS6059', ts6059(SHORT_ROOT)))} `
+        + `vs ${JSON.stringify(diagnosticSignature('TS6059', ts6059(LONG_ROOT)))}`,
+      diagnosticSignature('TS6059', ts6059(SHORT_ROOT)) === diagnosticSignature('TS6059', ts6059(LONG_ROOT)),
+    );
+    expect(
+      '#17739 (zero churn) — and that one signature is the collapsed spelling the ledgers ALREADY '
+        + 'hold, so this repair re-records nothing in a maintainer-gated shrink-only ratchet: got '
+        + `${JSON.stringify(diagnosticSignature('TS6059', ts6059(SHORT_ROOT)))}`,
+      diagnosticSignature('TS6059', ts6059(SHORT_ROOT)) === LEDGERED,
+    );
+    expect(
+      '#17739 — the Windows spellings collapse too (drive letter with either separator, and UNC). A '
+        + 'rule that knew only POSIX would leave the same length-dependence standing on the other '
+        + 'platform this ledger is meant to read identically on',
+      [String.raw`C:\checkouts\os\src`, 'C:/checkouts/os/src', String.raw`\\build\os\src`].every(
+        (root) => normalizeMessage(`is not under 'rootDir' '${root}'.`) === "is not under 'rootDir' '…'.",
+      ),
+    );
+    expect(
+      '#17739 (over-masking control) — a SHORT span that is not an absolute path still survives '
+        + 'verbatim, so the repair collapses PATHS rather than widening the mask: a relative specifier '
+        + 'and a named type both keep their text',
+      normalizeMessage("Cannot find module './fixtures/a.js' or its type declarations.") ===
+        "Cannot find module './fixtures/a.js' or its type declarations." &&
+        normalizeMessage("not assignable to parameter of type 'IHttpRequest'.") ===
+          "not assignable to parameter of type 'IHttpRequest'.",
+    );
+    expect(
+      '#17739 (detector control) — isAbsolutePathSpan() DISCRIMINATES rather than answering true for '
+        + 'everything: it accepts a POSIX absolute path and rejects a relative specifier, a bare name, '
+        + "and a string-literal type whose own quotes wrap a slash-leading route",
+      isAbsolutePathSpan('/etc/hosts') &&
+        !isAbsolutePathSpan('./fixtures/a.js') &&
+        !isAbsolutePathSpan('IHttpRequest') &&
+        !isAbsolutePathSpan('"/api/v1"'),
     );
   }
 
@@ -1068,7 +1204,9 @@ function selfTest(): string {
       + 'signature that ARRIVED and the one that VANISHED; signatures are position-blind but '
       + 'identity-sharp; the ARRIVED offer is marked maintainer-only and VANISHED is not), the #8435 '
       + 'convention (the unledgered-file verdict keeps its ledger offer marked maintainer-only, and the '
-      + 'SHRANK / GRADUATED / GREW verdicts stay unmarked) and the #12624 ledger-prose pins (the text '
+      + 'SHRANK / GRADUATED / GREW verdicts stay unmarked), the #17739 path-independence pins (one '
+      + 'signature from two checkout paths, in the collapsed spelling the ledgers already hold, with '
+      + 'short non-path spans left verbatim) and the #12624 ledger-prose pins (the text '
       + '`--update` writes carries every mechanism sentence, states no refuted cause, passes the '
       + 'measured counts through unchanged, and preserves an authored `_note` verbatim in its own key) '
       + 'all hold.',
