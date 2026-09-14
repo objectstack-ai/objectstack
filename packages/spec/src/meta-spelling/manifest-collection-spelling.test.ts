@@ -64,3 +64,60 @@ describe('#8424 — widening the entry did not merge the two spelling contracts'
     expect(META_URL_TO_SINGULAR['seeds']).toBe('seed');
   });
 });
+
+/**
+ * The `Object.prototype` fall-through pin for BOTH folds.
+ *
+ * Its POPULATION is the point. The assertions above iterate the declared
+ * manifest vocabulary and one ordinary unmapped word — precisely the population
+ * that behaves — which is why both sites sat green while
+ * `pluralToSingular('constructor')` returned the `Object` FUNCTION out of a
+ * signature that declares `string`.
+ *
+ * `key` is uncontrolled: these folds sit at the boundary where manifest
+ * collection fields and `/meta/:type` path segments — author- and
+ * client-supplied — are fed into the metadata registry.
+ *
+ * ⭐ `SINGULAR_TO_PLURAL` is built by `Object.fromEntries`, not written as an
+ * object literal. That changes nothing: `Object.fromEntries` returns an
+ * ORDINARY object, and the first assertion below is the measurement — both
+ * tables carry `Object.prototype` on their chain, so both take the same guard.
+ */
+describe('pluralToSingular / singularToPlural — Object.prototype fall-through', () => {
+  // Fixed at five: the three prototype methods a raw key can name, the
+  // assignment-shaped one, and a plain unknown word that names nothing at all.
+  // Four is not four-fifths of this pin.
+  const POPULATION = ['constructor', 'toString', 'valueOf', '__proto__', 'nope'] as const;
+
+  it('both tables inherit from Object.prototype — the reason the guard is needed on BOTH', () => {
+    // The discriminating fact for the second fold: `Object.fromEntries` is not
+    // an object literal, and is an ordinary object all the same.
+    expect(Object.getPrototypeOf(PLURAL_TO_SINGULAR)).toBe(Object.prototype);
+    expect(Object.getPrototypeOf(SINGULAR_TO_PLURAL)).toBe(Object.prototype);
+  });
+
+  it('folds the real vocabulary in both directions (lit control — the pin is not vacuous)', () => {
+    expect(pluralToSingular('objects')).toBe('object');
+    expect(singularToPlural('object')).toBe('objects');
+    expect(pluralToSingular('sharingRules')).toBe('sharing_rule');
+    expect(singularToPlural('sharing_rule')).toBe('sharingRules');
+  });
+
+  it.each(POPULATION)('%s answers a string from both folds, never a prototype member', (word) => {
+    // What the defect produced was a `function` (and an `object` for
+    // `__proto__`) out of a signature that declares `string`.
+    expect(typeof pluralToSingular(word)).toBe('string');
+    expect(typeof singularToPlural(word)).toBe('string');
+  });
+
+  it("refuses each probe with each function's own declared refusal value", () => {
+    // Returning the input verbatim is the trailing `return` of each function —
+    // the answer an unmapped word already gets, and what keeps a store key from
+    // being manufactured for a collection that does not exist. ⛔ Not a value
+    // invented for the fix.
+    for (const word of POPULATION) {
+      expect(pluralToSingular(word), `pluralToSingular(${word})`).toBe(word);
+      expect(singularToPlural(word), `singularToPlural(${word})`).toBe(word);
+    }
+  });
+});

@@ -637,7 +637,37 @@ export function resolveDiscoveryEnvironment(raw?: string | null): DiscoveryEnvir
   // bucket cannot reach this line by being forgotten. Keep it: `NODE_ENV` is an
   // arbitrary operator string, so "anything else" is a real input class, and
   // degrading it to `development` is what stops a guess claiming `production`.
-  return NODE_ENV_TO_DISCOVERY_ENVIRONMENT[spelling] ?? 'development';
+  //
+  // Own-property guard. The table is a plain object literal, so a bare index
+  // resolves `Object.prototype`'s members for an off-taxonomy `spelling`:
+  // `constructor` handed the `Object` FUNCTION, and `__proto__`
+  // `Object.prototype` itself, out of a signature that declares
+  // `DiscoveryEnvironment` — and out of the `@returns` above, which promises
+  // verbatim "a value guaranteed to satisfy {@link DiscoveryEnvironmentSchema}".
+  // The `??` never fires on those, because the inherited member is truthy.
+  // `raw` is uncontrolled by construction — it is an arbitrary operator
+  // `NODE_ENV` string. (`toString` / `valueOf` are quiet here only by the
+  // accident that `spelling` is lower-cased first; a guard that named words
+  // would not survive the next prototype member.)
+  //
+  // The refusal value is this function's own declared one, `'development'` —
+  // the same answer `qa`, `uat` or a typo already gets. The guard only narrows:
+  // every declared bucket and operator shorthand is an own key.
+  //
+  // ⛔ Not a null-prototype table: `src/data/type-compat.ts` records the
+  // measurement — a `__proto__: null` object literal does not type-check
+  // against the `Record<…>` annotation (TS2353), and the
+  // `Object.assign(Object.create(null), …)` spelling that does compile silently
+  // COSTS the exhaustiveness check, which here is the `satisfies
+  // Record<EnvironmentType, DiscoveryEnvironment>` above — the #6287 gate this
+  // table is built around.
+  if (
+    Object.prototype.hasOwnProperty.call(NODE_ENV_TO_DISCOVERY_ENVIRONMENT, spelling) &&
+    NODE_ENV_TO_DISCOVERY_ENVIRONMENT[spelling]
+  ) {
+    return NODE_ENV_TO_DISCOVERY_ENVIRONMENT[spelling];
+  }
+  return 'development';
 }
 
 // ============================================================================

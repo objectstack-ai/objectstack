@@ -12,6 +12,7 @@ import {
   ServiceSelfInfoSchema,
   readServiceSelfInfo,
   resolveDiscoveryEnvironment,
+  DiscoveryEnvironmentSchema,
   SERVICE_SELF_INFO_KEY,
   type DiscoveryResponse,
   type ApiRoutes,
@@ -1364,5 +1365,57 @@ describe('[#6287] the fold table is total over EnvironmentType', () => {
       preview: 'sandbox',
     };
     expect(Object.keys(missingTrial)).toHaveLength(6);
+  });
+});
+
+/**
+ * The `Object.prototype` fall-through pin for `resolveDiscoveryEnvironment`.
+ *
+ * Its POPULATION is the point. Every other assertion on this fold above
+ * iterates the declared `EnvironmentTypeSchema` buckets, the two operator
+ * shorthands and a handful of ordinary typos — precisely the population that
+ * behaves — which is why the site sat green while
+ * `resolveDiscoveryEnvironment('constructor')` returned the `Object` FUNCTION.
+ *
+ * `raw` is uncontrolled by construction: the docblock names it as
+ * `process.env.NODE_ENV`, an arbitrary operator string.
+ *
+ * The contract this asserts is the function's OWN `@returns` text, verbatim:
+ * "a value guaranteed to satisfy {@link DiscoveryEnvironmentSchema}". So the
+ * assertion is a full `safeParse` against that schema, not a `typeof` check —
+ * the guarantee is about the VALUE, and settling for less would delete the
+ * coverage the sentence claims.
+ */
+describe('resolveDiscoveryEnvironment — Object.prototype fall-through', () => {
+  // Fixed at five: the three prototype methods, the assignment-shaped one, and
+  // a plain unknown word that names nothing at all. Four is not four-fifths of
+  // this pin. `toString` / `valueOf` are quiet here only by the accident that
+  // `spelling` is lower-cased first — they stay in the population because a
+  // guard that relied on that accident is exactly what this fix refuses.
+  const POPULATION = ['constructor', 'toString', 'valueOf', '__proto__', 'nope'] as const;
+
+  it('folds the real taxonomy (lit control — the pin is not vacuous)', () => {
+    expect(resolveDiscoveryEnvironment('production')).toBe('production');
+    expect(resolveDiscoveryEnvironment('prod')).toBe('production');
+    expect(resolveDiscoveryEnvironment('staging')).toBe('sandbox');
+  });
+
+  it.each(POPULATION)('%s answers a value that satisfies the declared schema', (word) => {
+    // What the defect produced was a `function` (and an `object` for
+    // `__proto__`) out of a signature that declares `DiscoveryEnvironment` —
+    // and out of a docblock that GUARANTEES this parse.
+    const answer = resolveDiscoveryEnvironment(word);
+    expect(typeof answer).toBe('string');
+    const parsed = DiscoveryEnvironmentSchema.safeParse(answer);
+    expect(parsed.success, `${word} -> ${String(answer)}`).toBe(true);
+  });
+
+  it("refuses each probe with this function's own declared refusal value", () => {
+    // `'development'` is the trailing `return` of the function itself — the
+    // answer `qa`, `uat` or a typo already gets, and the one that stops a guess
+    // claiming `production`. ⛔ Not a value invented for the fix.
+    for (const word of POPULATION) {
+      expect(resolveDiscoveryEnvironment(word), word).toBe('development');
+    }
   });
 });

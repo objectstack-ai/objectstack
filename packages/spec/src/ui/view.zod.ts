@@ -329,7 +329,45 @@ export const VIEW_FILTER_OPERATOR_ALIASES: Record<string, ViewFilterOperator> = 
 export function normalizeFilterOperator(op: unknown): string {
   if (typeof op !== 'string') return op as string;
   if ((VIEW_FILTER_OPERATORS as readonly string[]).includes(op)) return op;
-  return VIEW_FILTER_OPERATOR_ALIASES[op] ?? VIEW_FILTER_OPERATOR_ALIASES[op.toLowerCase()] ?? op;
+  // Own-property guard on BOTH halves. The alias table is a plain object
+  // literal, so a bare index resolves `Object.prototype`'s members for an
+  // off-vocabulary `op`: `constructor` handed the `Object` FUNCTION, and
+  // `toString` / `valueOf` their prototype methods, out of a signature that
+  // declares `string`. `op` is uncontrolled here — it arrives from stored
+  // metadata and from plain-JS producers, which have no compile-time narrowing
+  // at all.
+  //
+  // This site is the worst member of the family because it indexes the table
+  // TWICE, once raw and once lower-cased: the case-folding accident that keeps
+  // `toString` / `valueOf` quiet at the sibling sites (`canonicalizeSqlType`,
+  // `resolveDiscoveryEnvironment`) does not exist here, so all three prototype
+  // methods come back.
+  //
+  // The refusal value is this function's own declared one — `op` returned
+  // verbatim, the trailing `return`, which is exactly what an unknown word like
+  // `nope` already gets, so the enum's own validation reports it as invalid.
+  // The guard only narrows: every alias that answered before is an own key.
+  //
+  // ⛔ Not a null-prototype table, for the reason `src/data/type-compat.ts`
+  // records: a `__proto__: null` object literal does not type-check against the
+  // `Record<…>` annotation at all (TS2353), and the
+  // `Object.assign(Object.create(null), …)` spelling that does compile silently
+  // COSTS the annotation's exhaustiveness check. A quiet failure is worse than
+  // a loud one.
+  //
+  // ⛔ Not a list of prototype member names either — a guard that names words
+  // does not survive the next prototype member.
+  if (Object.prototype.hasOwnProperty.call(VIEW_FILTER_OPERATOR_ALIASES, op) && VIEW_FILTER_OPERATOR_ALIASES[op]) {
+    return VIEW_FILTER_OPERATOR_ALIASES[op];
+  }
+  const lowered = op.toLowerCase();
+  if (
+    Object.prototype.hasOwnProperty.call(VIEW_FILTER_OPERATOR_ALIASES, lowered) &&
+    VIEW_FILTER_OPERATOR_ALIASES[lowered]
+  ) {
+    return VIEW_FILTER_OPERATOR_ALIASES[lowered];
+  }
+  return op;
 }
 
 // ───────────────────────────────────────────────────────────────────────────
