@@ -10,7 +10,7 @@
 
 feat(types,triggers,service-automation,runtime,cli,spec,lint)!: package-authored scheduled work is a deployment decision — `OS_AUTOMATION_SCHEDULED_WORK_ENABLED`, off by default everywhere (#17396)
 
-<!-- adr-0087: registered schedule-flow-acting-organization-required -->
+<!-- adr-0087: not-required (already-registered schedule-flow-acting-organization-required) entry 18 is the ledger row for this exact surface — the start-node `config.organization` key of a time-triggered flow — and this change REWRITES it rather than adding a sibling: its surface, replacement, reason and acceptance criteria now carry the deployment switch and the posture split, so an upgrader reading `objectstack migrate meta`, `spec-changes.json` or the generated upgrade guide gets the narrowed rule from the one row that was always going to be their channel. A second entry would split one prescription across two rows and let a reader act on half of it. -->
 
 Maintainer ruling, 2026-09-12, verbatim, untranslated:
 
