@@ -4,6 +4,19 @@
 
 Declare the ASSEMBLED manifest stage on the installed-package read API.
 
+**BREAKING** — a TYPE-level break on two PUBLISHED response types. It ships
+`minor` under the pre-GA launch-window convention (ADR-0087, *Ratified: the
+pre-launch launch-window exemption*), where the npm level is deliberately not the
+carrier of breaking-ness; this banner and the ADR-0087 disposition at the bottom
+are. Runtime is untouched and stays additive — every payload that parsed before
+still parses — so the affected party is a TypeScript consumer and the channel is
+the compiler at their own call site. Reading a manifest field off
+`ListInstalledPackagesResponseSchema` or `GetInstalledPackageResponseSchema` can
+stop compiling, and assigning a malformed manifest to either can start compiling
+where the old annotation refused it. Both directions are measured against the
+built `.d.ts` under *The STATIC gain is one-sided* below, which is also where the
+point-of-use reading lives.
+
 `GET /api/v1/packages` and `GET /api/v1/packages/:packageId` serve whatever a
 package was installed with, and two stages reach that table through declared
 doors: `POST /api/v1/packages` installs an authoring manifest (`manifest.objects`
@@ -54,3 +67,5 @@ before `parse` — the unix-socket short-circuit and the refusal of the
 filesystem-reading `?sslcert=` / `?sslkey=` / `?sslrootcert=` query parameters
 are kept; the "is this a URL `pg` can open" arm answers "no findings". Datasource
 publish is a server-side act, so that arm never legitimately ran in a browser.
+
+<!-- adr-0087: not-required (no-migration-prescription) nothing is removed or renamed: `ManifestSchema` is unchanged, no authorable key moves and no stored row shape moves, so `objectstack migrate meta` has nothing to rewrite and the ledger cannot carry this change. The break is confined to the declared TypeScript surface of two response schemas, where the compiler reaches every affected consumer. -->
