@@ -777,6 +777,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   "the live battery's prerequisite, and the floor it was misread as": 17,
   '⭐ #15406: the sweep row names the register it does not recompute': 10,
   '⭐ #17003: the list is DERIVED three-dot, or refused': 43,
+  '⭐ #18055: the INCOMPLETE banner is BUILT, never thrown away': 11,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -2839,6 +2840,52 @@ function rearmProxyOrNull(args, what, whatLower) {
   return null;
 }
 
+/**
+ * The sweep's INCOMPLETE banner, and the exit code that belongs with it
+ * (#18055).
+ *
+ * Lifted out of `main()`, and its shape IS the reason: the banner is built
+ * inside a `console.error` ARGUMENT, so anything that throws while building
+ * that argument deletes the call and the `return` behind it — the reader is
+ * handed a full findings list, a complete-looking tail note, and no
+ * incompleteness warning on either stream. That is exactly what an unbound
+ * `rearm` did here. `main()` reads git and the network and cannot be driven
+ * down the attribution-failure path offline, so the banner owns a function
+ * that can be: the re-arm plan its hint branch reads arrives as an argument,
+ * and `emit` is the sink, defaulting to the stream the sweep prints on.
+ *
+ * ⛔ Behaviour is unchanged — same words, same order, same stream, same exit
+ * code. Rewording any string here rewords a verdict a maintainer acts on.
+ *
+ * @param {{ unaudited: { slug: string, precondition?: string }[],
+ *           edged: { slug: string }[],
+ *           attributionFailed: boolean,
+ *           rearm: { hint?: boolean, reason?: string } }} state
+ * @param {(banner: string) => void} emit  where the banner goes; stderr in the sweep
+ * @returns {number} EXIT_INCOMPLETE — the classification the banner announces
+ */
+function reportSweepIncomplete({ unaudited, edged, attributionFailed, rearm }, emit = console.error) {
+  const why = [];
+  // The footer names WHICH precondition failed per repo (#13836): two
+  // footers minutes apart used to differ only by a slug list, so a repo
+  // dropped between identical invocations was attributable only by
+  // cross-run diffing against the rows above the fold.
+  if (unaudited.length > 0) why.push(`${unaudited.length} governed repo(s) unaudited (${unaudited.map((r) => `${r.slug}: ${r.precondition ?? 'unstated'}`).join(', ')})`);
+  if (edged.length > 0) why.push(`${edged.length} governed repo(s) at the WINDOW EDGE (${edged.map((r) => r.slug).join(', ')}) — the boundary could not be proven`);
+  if (attributionFailed) why.push('at least one entry has no merged_by reading on any channel');
+  emit(
+    `\n⚠️  sweep INCOMPLETE — ${why.join('; ')}. The list above is printed, but it must not read as\n` +
+      `    clean (#4690): "does the maintainer recognise every entry" cannot be answered over repos that\n` +
+      `    were never looked at, windows whose boundary could not be proven, or entries with no\n` +
+      `    who-merged-it column.` +
+      (attributionFailed && rearm.hint
+        ? `\n    ⚠️  ${rearm.reason} — node's fetch is bypassing the session proxy, which answers 401/403 here.\n` +
+          `        Re-run as NODE_OPTIONS=${PROXY_FLAG} before concluding anything about credentials (#9642).`
+        : ''),
+  );
+  return EXIT_INCOMPLETE;
+}
+
 /** The three ways to ask the register one question. Exactly one per run. */
 const PREDICATE_MODES = ['--test', '--pr', '--branch'];
 
@@ -3071,25 +3118,19 @@ async function main() {
   }
 
   if (!complete) {
-    const why = [];
-    // The footer names WHICH precondition failed per repo (#13836): two
-    // footers minutes apart used to differ only by a slug list, so a repo
-    // dropped between identical invocations was attributable only by
-    // cross-run diffing against the rows above the fold.
-    if (unaudited.length > 0) why.push(`${unaudited.length} governed repo(s) unaudited (${unaudited.map((r) => `${r.slug}: ${r.precondition ?? 'unstated'}`).join(', ')})`);
-    if (edged.length > 0) why.push(`${edged.length} governed repo(s) at the WINDOW EDGE (${edged.map((r) => r.slug).join(', ')}) — the boundary could not be proven`);
-    if (attributionFailed) why.push('at least one entry has no merged_by reading on any channel');
-    console.error(
-      `\n⚠️  sweep INCOMPLETE — ${why.join('; ')}. The list above is printed, but it must not read as\n` +
-        `    clean (#4690): "does the maintainer recognise every entry" cannot be answered over repos that\n` +
-        `    were never looked at, windows whose boundary could not be proven, or entries with no\n` +
-        `    who-merged-it column.` +
-        (attributionFailed && rearm.hint
-          ? `\n    ⚠️  ${rearm.reason} — node's fetch is bypassing the session proxy, which answers 401/403 here.\n` +
-            `        Re-run as NODE_OPTIONS=${PROXY_FLAG} before concluding anything about credentials (#9642).`
-          : ''),
-    );
-    return EXIT_INCOMPLETE;
+    // ⭐ The plan the banner's hint branch reads, bound HERE — in the scope
+    // that reads it — out of the same inputs `rearmProxyOrNull` builds its own
+    // from (#18055). It used to be read off a `rearm` this scope never had, so
+    // the reference threw while the banner's ARGUMENT was being built: an
+    // argument that throws means the call never happens, so the crash deleted
+    // the one warning saying the list above must not read as clean — and the
+    // `return` behind it.
+    const rearm = proxyRearmPlan({
+      env: process.env,
+      execArgv: process.execArgv,
+      flagSupported: process.allowedNodeEnvironmentFlags.has(PROXY_FLAG),
+    });
+    return reportSweepIncomplete({ unaudited, edged, attributionFailed, rearm });
   }
   return EXIT_SWEPT;
 }
@@ -4835,6 +4876,129 @@ async function selfTest() {
     rmSync(derFx, { recursive: true, force: true });
   }
 
+  // ── ⭐ #18055: the INCOMPLETE banner is BUILT, never thrown away ──────────
+  //
+  // The banner is assembled inside the ARGUMENT of the call that prints it, and
+  // `main()` read the re-arm plan's `hint` off a binding that scope never
+  // had. An argument that throws means the call never happens: the measured
+  // consequence was not a survivable crash but a DELETED WARNING — 11 governed
+  // rows, a complete-looking attribution note, and no incompleteness banner on
+  // either stream, with the `return EXIT_INCOMPLETE` behind it never reached.
+  //
+  // The three pre-existing re-arm assertions were green throughout, because all
+  // three call `proxyRearmPlan` directly and none of them reaches the banner.
+  // Measured on this branch, on a copy of the file: with the `attributionFailed`
+  // branch made to throw unconditionally, the whole battery still passed — 317
+  // assertions, exit 0. So these cases drive the BANNER: offline through the
+  // function that owns it, and end to end through a real sweep whose every
+  // attribution channel fails.
+  battery('⭐ #18055: the INCOMPLETE banner is BUILT, never thrown away');
+  const hintPlan = proxyRearmPlan({ env: { HTTPS_PROXY: 'http://proxy.invalid:8080' }, flagSupported: false });
+  const noHintPlan = proxyRearmPlan({ env: {} });
+  assert('the-fixture-plans-are-the-REAL-planners-output-not-a-hand-built-shape',
+    hintPlan.hint === true && noHintPlan.hint === false, JSON.stringify([hintPlan, noHintPlan]));
+  const bannerOf = (state, rearm) => {
+    const lines = [];
+    const code = reportSweepIncomplete(
+      { unaudited: [], edged: [], attributionFailed: false, ...state, rearm },
+      (line) => lines.push(line),
+    );
+    return { code, text: lines.join('\n'), calls: lines.length };
+  };
+  const attrOnly = bannerOf({ attributionFailed: true }, noHintPlan);
+  assert('the-attribution-failure-path-BUILDS-the-banner-instead-of-throwing-while-building-it',
+    attrOnly.calls === 1 && attrOnly.text.includes('sweep INCOMPLETE') &&
+      attrOnly.text.includes('at least one entry has no merged_by reading on any channel') &&
+      attrOnly.text.includes('must not read as'), JSON.stringify(attrOnly));
+  assert('and-it-returns-EXIT_INCOMPLETE-the-return-the-throw-used-to-eat-along-with-the-banner',
+    attrOnly.code === EXIT_INCOMPLETE, String(attrOnly.code));
+  const attrHinted = bannerOf({ attributionFailed: true }, hintPlan);
+  assert('a-plan-that-says-hint-renders-its-reason-and-the-re-run-prescription',
+    attrHinted.text.includes(hintPlan.reason) && attrHinted.text.includes(`NODE_OPTIONS=${PROXY_FLAG}`) &&
+      attrHinted.text.includes('#9642') && attrHinted.code === EXIT_INCOMPLETE, JSON.stringify(attrHinted));
+  assert('and-a-plan-that-does-not-leaves-the-hint-EMPTY-while-the-banner-itself-still-prints',
+    !attrOnly.text.includes('bypassing the session proxy') && !attrOnly.text.includes('NODE_OPTIONS=') &&
+      attrOnly.text.includes('sweep INCOMPLETE'), attrOnly.text);
+  // The `&&` is load-bearing in the other direction too: a hinting plan on a
+  // sweep whose attribution SUCCEEDED must print no proxy advice at all.
+  const edgeOnly = bannerOf({ unaudited: [{ slug: 'objectstack-ai/cloud', precondition: 'stale-mirror' }] }, hintPlan);
+  assert('an-INCOMPLETE-that-is-not-about-attribution-renders-no-proxy-hint-even-on-a-hinting-plan',
+    !edgeOnly.text.includes('bypassing the session proxy') && edgeOnly.text.includes('sweep INCOMPLETE') &&
+      edgeOnly.code === EXIT_INCOMPLETE, edgeOnly.text);
+  const everyReason = bannerOf(
+    {
+      unaudited: [{ slug: 'objectstack-ai/cloud', precondition: 'stale-mirror' }],
+      edged: [{ slug: 'objectstack-ai/objectui' }],
+      attributionFailed: true,
+    },
+    noHintPlan,
+  );
+  assert('the-banner-names-every-reason-it-was-given-slug-and-precondition-included',
+    everyReason.text.includes('objectstack-ai/cloud: stale-mirror') && everyReason.text.includes('WINDOW EDGE') &&
+      everyReason.text.includes('at least one entry has no merged_by reading on any channel'), everyReason.text);
+
+  // ⭐ End to end, on the card's own shape: a real sweep, a real governed
+  // merge in the window, and attribution that fails on EVERY channel. The
+  // assertions above all call the banner directly and would stay green if
+  // `main()` stopped reaching it — or reached it with an unbound plan again,
+  // which is the defect. This one runs the sweep and reads the streams the
+  // operator reads, separately, by capture — ⛔ never through a pipe, which is
+  // what turned the measured `exit 1` into a reported `exit 0`.
+  const bannerFx = mkdtempSync(join(tmpdir(), 'governed-merges-banner-'));
+  try {
+    const bg = (cwd, ...rest) =>
+      execFileSync('git', ['-c', 'user.email=t@t.invalid', '-c', 'user.name=t', '-c', 'init.defaultBranch=main', '-c', 'commit.gpgsign=false', ...rest], {
+        cwd,
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+    const bannerSeed = join(bannerFx, 'seed');
+    bg(bannerFx, 'init', '-q', bannerSeed);
+    // Two BACKDATED commits so the window's boundary is provable here: without
+    // them the run is also INCOMPLETE at the window EDGE, and the case would
+    // pass on a reason it is not about.
+    for (const [msg, ago] of [['chore: forty days ago', 40], ['chore: thirty-five days ago', 35]]) {
+      const when = new Date(Date.now() - ago * 86_400_000).toISOString();
+      execFileSync('git', ['-c', 'user.email=t@t.invalid', '-c', 'user.name=t', '-c', 'commit.gpgsign=false', 'commit', '-q', '--allow-empty', '-m', msg], {
+        cwd: bannerSeed, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'],
+        env: { ...process.env, GIT_COMMITTER_DATE: when, GIT_AUTHOR_DATE: when },
+      });
+    }
+    mkdirSync(join(bannerSeed, 'docs', 'adr'), { recursive: true });
+    writeFileSync(join(bannerSeed, 'docs', 'adr', '0001-fixture.md'), '# a governed path\n');
+    bg(bannerSeed, 'add', '-A');
+    bg(bannerSeed, 'commit', '-qm', 'docs(adr): a governed merge the sweep must attribute (#424242)');
+    const bannerBare = join(bannerFx, 'live.git');
+    bg(bannerFx, 'clone', '-q', '--bare', bannerSeed, bannerBare);
+    const bannerCo = join(bannerFx, 'co');
+    bg(bannerFx, 'clone', '-q', bannerBare, bannerCo);
+    bg(bannerCo, 'remote', 'set-url', 'origin', 'https://github.com/objectstack-ai/cloud');
+    bg(bannerCo, 'config', `url.${bannerBare}.insteadOf`, 'https://github.com/objectstack-ai/cloud');
+    // Attribution over a port nothing listens on: every channel fails at the
+    // transport, offline, in milliseconds. ⛔ Not a 404 — this has to be the
+    // every-channel-failed branch, not a resolved reading.
+    const bannerEnv = { ...process.env, [PROXY_REARM_GUARD]: '1', GITHUB_API_URL: 'http://127.0.0.1:1' };
+    const bannerRun = spawnSync(process.execPath, [scriptPath, '--repos', 'cloud', '--repo-root', `cloud=${bannerCo}`], { encoding: 'utf8', env: bannerEnv });
+    const bannerOut = bannerRun.stdout ?? '';
+    const bannerErr = bannerRun.stderr ?? '';
+    assert('a-sweep-whose-every-attribution-channel-fails-exits-EXIT_INCOMPLETE-not-a-crash',
+      bannerRun.status === EXIT_INCOMPLETE, `status=${bannerRun.status} err=${bannerErr.slice(0, 400)}`);
+    assert('⭐ and-the-INCOMPLETE-banner-REACHES-STDERR-the-one-thing-the-crash-deleted',
+      bannerErr.includes('sweep INCOMPLETE') && bannerErr.includes('at least one entry has no merged_by reading on any channel') &&
+        !bannerErr.includes('governed repo(s) unaudited'), `err=${bannerErr.slice(-600)}`);
+    assert('with-the-cards-own-positive-controls-on-stdout-rows-and-a-complete-looking-note',
+      bannerOut.includes('attribution unavailable') && bannerOut.includes('#424242') && !bannerOut.includes('sweep INCOMPLETE'),
+      `out=${bannerOut.slice(0, 600)}`);
+    assert('and-nothing-on-either-stream-is-a-ReferenceError',
+      !bannerErr.includes('ReferenceError') && !bannerOut.includes('ReferenceError'), `err=${bannerErr.slice(0, 400)}`);
+  } catch (error) {
+    // ⛔ Never a silent skip: an environment that cannot run this leaves the
+    // banner's wiring unpinned, and that must read as red.
+    assert('the-banner-end-to-end-fixture-could-be-built-and-run', false, String(error?.message ?? error).split('\n')[0]);
+  } finally {
+    rmSync(bannerFx, { recursive: true, force: true });
+  }
+
   // ── The floor: every declared battery RAN, and ran its cases (#13489) ────
   //
   // Evaluated after every battery has had its chance and BEFORE the verdict, so
@@ -4848,7 +5012,7 @@ async function selfTest() {
     for (const failure of failures) console.error(`  • ${failure}`);
     process.exit(1);
   }
-  console.log(`✓ check-governed-merges --self-test: ${checked} assertions (the unified governed predicate + near misses, subject→PR spellings, window parsing, the #12633 landing window — the QS-7 regression pin in both directions, the topological close beyond the budget, the unproven-boundary EDGE, the listed-or-INCOMPLETE invariant over every fixture, the escalating floors, per-repo --since-ref resolution and its named fallback, and the window words — the replay fixtures, the five-repo resolution incl. absent/wrong-origin/relocated checkouts, the attribution channel chain + its proxy-transport re-arm plan and its one named fallback line, the three-way attribution column (resolved · every-channel-failed · NOT LOOKED UP, and the note pointer that belongs to the middle one alone), the --test pre-arm predicate, the generated-artifact provenance exception — the register's invariants incl. the RETIRED #9866 row staying retired (no row lifts anything under .claude/**, and the audit workflow is plainly governed again), a row with no recompute failing closed, lift/reject/absent-provenance semantics, the untouched mixed-diff rule, named-rows-not-a-class, the #11084 generator co-edit fence in both directions incl. a row with no instrument tree, and its render words — the #11705 generator-owned rows inside skills/** (a genuine generated file passes, the same path hand-edited does not, a path no generator declares is hand-authored content, per-row fences, and the enumeration read from the real generator), the exit table, the report wording pins, and the #13307 remote-reachability leg — the pure freshness verdicts in every branch (unreachable · a remote naming no commit · an unreadable local tip · a mirror behind its remote · the two-unreadable-shas degenerate case that must never read as a match), the report words in both directions (an unreachable repo never renders the tick, a reachable one still says a MEASURED zero, and a row with no remote reading never claims one), and the REAL prober on local bare-repo fixtures over the file transport — a live remote, a deleted one, the --exit-code branch, and a mirror the remote moved past — the #13423 identity leg (an origin no slug parses from refuses, pure and end-to-end, with audited reachable only through a parsed matching slug), the #13424 per-repo window resolution (a sibling-only pin resolves in its own repo, the self-only control still errors, and the end-to-end sibling-pin sweep reports instead of exiting 1), the #13307 sweep-code provenance line in all three branches, and the #13836 attribution set — every refusal carries its precondition category on the row, in the footer, and in --json; the shallow-clone path in both directions; and the run-1-vs-run-2 flip reproduced on real fixtures with zero local writes — and the live battery's own PREREQUISITE, asked before a single case runs: an uninstalled checkout refuses with the repo-wide NOT-MEASURED code end to end instead of reporting a shrunken battery, while the floor still names the battery, by itself, for a case that genuinely stopped registering) — and the #15406 replay of PR #15284: the sweep still CLASSIFIES a certified regeneration as a governed merge and still lists it, its row now names the register row it does not recompute and where certification is recorded, and the --test head no longer reports a post-lift zero as if nothing had hit the register — and the #17003 derivation set: the Link walk that ends on rel=next rather than on a short page, a rename reaching the predicate as BOTH of its paths, a walk the PR's own count contradicts refusing rather than answering on a subset, a channel chosen once and never spliced mid-walk, every --branch leg on an injected git incl. the uncomputable merge base that REFUSES instead of falling back to two-dot, and the card's own reproduction run end to end on a real repo — a branch behind a main that has since touched a governed path answers GOVERNED two-dot and NOT governed three-dot, a rename out of a governed path is a hit only because the diff is taken --no-renames, the merge-base refusal prints no verdict at all, and the verdict is byte-identical through --branch and through --test on the same list.\n  ${liveNote}`);
+  console.log(`✓ check-governed-merges --self-test: ${checked} assertions (the unified governed predicate + near misses, subject→PR spellings, window parsing, the #12633 landing window — the QS-7 regression pin in both directions, the topological close beyond the budget, the unproven-boundary EDGE, the listed-or-INCOMPLETE invariant over every fixture, the escalating floors, per-repo --since-ref resolution and its named fallback, and the window words — the replay fixtures, the five-repo resolution incl. absent/wrong-origin/relocated checkouts, the attribution channel chain + its proxy-transport re-arm plan and its one named fallback line, the three-way attribution column (resolved · every-channel-failed · NOT LOOKED UP, and the note pointer that belongs to the middle one alone), the --test pre-arm predicate, the generated-artifact provenance exception — the register's invariants incl. the RETIRED #9866 row staying retired (no row lifts anything under .claude/**, and the audit workflow is plainly governed again), a row with no recompute failing closed, lift/reject/absent-provenance semantics, the untouched mixed-diff rule, named-rows-not-a-class, the #11084 generator co-edit fence in both directions incl. a row with no instrument tree, and its render words — the #11705 generator-owned rows inside skills/** (a genuine generated file passes, the same path hand-edited does not, a path no generator declares is hand-authored content, per-row fences, and the enumeration read from the real generator), the exit table, the report wording pins, and the #13307 remote-reachability leg — the pure freshness verdicts in every branch (unreachable · a remote naming no commit · an unreadable local tip · a mirror behind its remote · the two-unreadable-shas degenerate case that must never read as a match), the report words in both directions (an unreachable repo never renders the tick, a reachable one still says a MEASURED zero, and a row with no remote reading never claims one), and the REAL prober on local bare-repo fixtures over the file transport — a live remote, a deleted one, the --exit-code branch, and a mirror the remote moved past — the #13423 identity leg (an origin no slug parses from refuses, pure and end-to-end, with audited reachable only through a parsed matching slug), the #13424 per-repo window resolution (a sibling-only pin resolves in its own repo, the self-only control still errors, and the end-to-end sibling-pin sweep reports instead of exiting 1), the #13307 sweep-code provenance line in all three branches, and the #13836 attribution set — every refusal carries its precondition category on the row, in the footer, and in --json; the shallow-clone path in both directions; and the run-1-vs-run-2 flip reproduced on real fixtures with zero local writes — and the live battery's own PREREQUISITE, asked before a single case runs: an uninstalled checkout refuses with the repo-wide NOT-MEASURED code end to end instead of reporting a shrunken battery, while the floor still names the battery, by itself, for a case that genuinely stopped registering) — and the #15406 replay of PR #15284: the sweep still CLASSIFIES a certified regeneration as a governed merge and still lists it, its row now names the register row it does not recompute and where certification is recorded, and the --test head no longer reports a post-lift zero as if nothing had hit the register — and the #17003 derivation set: the Link walk that ends on rel=next rather than on a short page, a rename reaching the predicate as BOTH of its paths, a walk the PR's own count contradicts refusing rather than answering on a subset, a channel chosen once and never spliced mid-walk, every --branch leg on an injected git incl. the uncomputable merge base that REFUSES instead of falling back to two-dot, and the card's own reproduction run end to end on a real repo — a branch behind a main that has since touched a governed path answers GOVERNED two-dot and NOT governed three-dot, a rename out of a governed path is a hit only because the diff is taken --no-renames, the merge-base refusal prints no verdict at all, and the verdict is byte-identical through --branch and through --test on the same list. — and the #18055 banner set: the INCOMPLETE banner is BUILT on the attribution-failure path instead of throwing while it is built, it still returns EXIT_INCOMPLETE, the proxy hint renders from the plan the sweep now binds and stays empty both when the plan says no hint and when the incompleteness is not about attribution, and a real sweep whose every attribution channel fails prints the banner on STDERR and exits 2.\n  ${liveNote}`);
 
   return SELF_TEST_VERDICT;
 }
