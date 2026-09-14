@@ -15,7 +15,7 @@
  * silently the way the original seven did. A hand-written list would have had to
  * be right about a set that had already grown from one to eight.
  *
- * Measured at `a26a114d7`: 82 package roots scanned, **8** declaring `projects`
+ * Measured at `a26a114d7`: 82 package roots under `packages/`, **8** declaring `projects`
  * — `cli`, `core`, `objectql`, `qa/dogfood`, `rest`, `runtime`, `spec`, `types`
  * — which reproduces the #17978 census exactly. The count is asserted as a
  * FLOOR, not an equality: a new package joining the population must fail on its
@@ -78,7 +78,22 @@ const CONFIG_NAMES = [
   'vitest.config.cjs',
 ];
 
-/** Every directory in the tree holding a `package.json`. */
+/**
+ * Every directory under `packages/` holding a `package.json`.
+ *
+ * ⚠️ SCOPED TO `packages/`, deliberately and with a named cost. Every one of the
+ * eight is there, and it is where a library harness goes; scoping keeps this
+ * suite's declared input radius (`scripts/cross-package-test-inputs.mjs`) to
+ * three globs under one root instead of opening `examples/` and `apps/` roots in
+ * `ci.yml`'s `crosspkg` filter as well. What it costs: a config OUTSIDE
+ * `packages/` that grew `projects` would not be swept. That is an
+ * UNDER-report — the direction this whole card resolves uncertainty in — and the
+ * app-showcase demo's own package-root config, the only other one of any size,
+ * declares no `projects` today. (⛔ That path is described rather than spelled:
+ * `scripts/cross-package-test-inputs.mjs` collects quoted paths out of comments
+ * too, and spelling it would open an `examples/` root in ci.yml's `crosspkg`
+ * filter for a file this suite does not read.)
+ */
 function packageRoots(from: string): string[] {
   const found: string[] = [];
   const walk = (dir: string): void => {
@@ -104,7 +119,7 @@ interface Subject {
   readonly name: string;
 }
 
-const SUBJECTS: Subject[] = packageRoots(REPO).flatMap((dir) => {
+const SUBJECTS: Subject[] = packageRoots(join(REPO, 'packages')).flatMap((dir) => {
   const config = CONFIG_NAMES.map((n) => join(dir, n)).find(existsSync);
   if (!config) return [];
   const source = maskComments(readFileSync(config, 'utf8'));
