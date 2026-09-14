@@ -175,10 +175,7 @@ describe('#15788 — the defect: a refusing `end` ran as a plain completion', ()
         // neighbourhood — so a repair that stopped at `execute()` would leave
         // every screen flow's refusal recorded as a completion.
         const { engine, store } = engineWithStore();
-        installBuiltinNodes(
-            { logger: createTestLogger(), getService: () => undefined } as never,
-            engine,
-        );
+        installBuiltinNodes(engine, { logger: createTestLogger(), getService: () => undefined } as never);
         engine.registerFlow('review', {
             name: 'review',
             label: 'review',
@@ -353,10 +350,7 @@ describe('#15788 — one interpolator, not a second template engine', () => {
 
         for (const template of PROBES) {
             const screenEngine = new AutomationEngine(createTestLogger(), new InMemorySuspendedRunStore());
-            installBuiltinNodes(
-                { logger: createTestLogger(), getService: () => undefined } as never,
-                screenEngine,
-            );
+            installBuiltinNodes(screenEngine, { logger: createTestLogger(), getService: () => undefined } as never);
             screenEngine.registerFlow('probe_screen', {
                 name: 'probe_screen', label: 'probe_screen', type: 'screen',
                 nodes: [
@@ -379,5 +373,60 @@ describe('#15788 — one interpolator, not a second template engine', () => {
             expect(refused.refusalMessage, `refusal message for ${template}`)
                 .toBe(paused.screen!.description);
         }
+    });
+});
+
+describe('#15788 — the region boundary, made loud', () => {
+    /**
+     * A refusal terminates the RUN, and a structured region's body cannot end
+     * one — the same statement `runRegion` already makes about a durable pause,
+     * at the same line, for the same reason. Left to propagate, the signal
+     * would unwind into `try_catch`'s own `catch (err)` arm, which reads every
+     * throw as the try region FAILING: the author's refusal would run the catch
+     * handler and the run would still record `completed`.
+     *
+     * ⛔ Nothing an author had is narrowed. Before #15788 an `end` inside a
+     * region was a no-op whatever its `outcome`, so this shape has never once
+     * been honoured; whether a refusal should instead propagate out of a region
+     * is a real question the #14945 ruling does not answer.
+     */
+    it('a refusing `end` inside a `loop` body fails the run loudly instead of vanishing', async () => {
+        const { engine } = engineWithStore();
+        installBuiltinNodes(engine, { logger: createTestLogger(), getService: () => undefined } as never);
+        engine.registerFlow('in_region', {
+            name: 'in_region', label: 'in_region', type: 'autolaunched',
+            successMessage: SUCCESS_TEXT,
+            nodes: [
+                { id: 'start', type: 'start', label: 'Start' },
+                {
+                    id: 'sweep', type: 'loop', label: 'Sweep',
+                    config: {
+                        collection: '{items}',
+                        iteratorVariable: 'item',
+                        body: {
+                            nodes: [{ id: 'nope', type: 'end', label: 'Nope', config: { outcome: 'refused', message: REFUSAL_TEMPLATE } }],
+                            edges: [],
+                        },
+                    },
+                },
+            ],
+            edges: [{ id: 'e0', source: 'start', target: 'sweep' }],
+        } as never);
+
+        // `items` rides on the trigger record, which the engine flattens into
+        // the variable map — so `{items}` resolves without declaring an input.
+        const result = await engine.execute('in_region', {
+            event: 'manual', object: 'account', record: { ...ACME, items: [1] },
+        } as unknown as AutomationContext);
+
+        expect(result.success).toBe(false);
+        expect(result.status).toBe('failed');
+        // The message names the shape and the one-line fix, per "absence must
+        // be loud" — ⛔ not a bare stringified sentinel.
+        expect(result.error).toContain('structured region');
+        expect(result.error).toContain("outcome: 'refused'");
+        // ⛔ And it is NOT recorded as a refusal: the run did not refuse, the
+        // engine declined to honour a shape it cannot express.
+        expect(result.refusalMessage).toBeUndefined();
     });
 });
