@@ -433,9 +433,9 @@ The rules worth knowing before you split a product this way:
   not point outside its package — inject into another package's app with
   `navigationContributions` instead.
 - **Permission sets and seed data cross the boundary; declare what they reach.**
-  A permission set is authored per *role*, not per module, so the `type: 'app'`
-  package keeps every set whole and grants across the whole artifact — and seed
-  rows are the same shape. Both resolve against the artifact rather than the one
+  A permission set is authored for a **position**, not for a module, so the
+  `type: 'app'` package keeps every set whole and grants across the whole
+  artifact — and seed rows are the same shape. Both resolve against the artifact rather than the one
   stack, but only once you hand `defineStack` the sibling object names:
   `defineStack(appConfig, { artifactObjects: ordersStack.objects?.map((o) => o.name) })`.
   `composeStacks` then refuses any name no package in the artifact defines, so a
