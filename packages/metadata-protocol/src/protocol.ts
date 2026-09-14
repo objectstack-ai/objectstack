@@ -15,6 +15,11 @@ import { postureEnforcesWall } from '@objectstack/spec/security';
 import { resolveDiscoveryVersion } from './discovery-version.js';
 import type { MetadataHostEngine } from './host-engine.js';
 import { omitInternalFieldsFromWriteResponse } from './write-response-internal-fields.js';
+// [#17502] The served JSON Schema publishes what an author MAY write, so a
+// property no instance can satisfy — a `retiredKey()` tombstone, rendered
+// `{ not: {} }` — is dropped from it. See the module header for the channels
+// that keep carrying the retirement's prescription.
+import { stripUnauthorableProperties } from './unauthorable-nodes.js';
 import {
     evaluateRuntimeAuthoringGate,
     CLOSURE_CONTEXT_KEY_BY_TYPE,
@@ -476,8 +481,9 @@ function toJsonSchemaSafe(schema: z.ZodTypeAny, typeLabel?: string): Record<stri
     }
 
     if (!isDegenerateDerivation(output)) {
-        _jsonSchemaCache.set(schema, output);
-        return output;
+        const authorable = stripUnauthorableProperties(output);
+        _jsonSchemaCache.set(schema, authorable);
+        return authorable;
     }
 
     // The default derivation produced a husk. Retry in the authoring shape
@@ -486,8 +492,9 @@ function toJsonSchemaSafe(schema: z.ZodTypeAny, typeLabel?: string): Record<stri
     try {
         const authoring = z.toJSONSchema(schema, { unrepresentable: 'any', io: 'input' }) as Record<string, unknown>;
         if (!isDegenerateDerivation(authoring)) {
-            _jsonSchemaCache.set(schema, authoring);
-            return authoring;
+            const authorable = stripUnauthorableProperties(authoring);
+            _jsonSchemaCache.set(schema, authorable);
+            return authorable;
         }
     } catch {
         // Fall through to the loud arm below.
