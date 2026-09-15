@@ -47,6 +47,17 @@ import type { StepLogEntry } from './engine.js';
  * including through its subflows — otherwise a sweep that delegates its writes
  * would report `acted: 0` and trip the very detector this exists to feed.
  *
+ * #15617 puts the failure count on that same footing, each total on its own
+ * rule: `selected` / `acted` ride up from a completed and a failed child alike,
+ * `unmeasured` as one per-execution flag, and `failures` — the contained
+ * failures of a child that COMPLETED and went on — through
+ * `metrics.failures`. A child that FAILED is the delegating step's own failure,
+ * counted once through `nodes[].failures` as it always was; nothing of its own
+ * `failed` rides up, which is the one place the rule parts from `acted`'s.
+ * Until that slot existed a parent whose child lost a row read `failed: 0`,
+ * which is the misreading the run-level count was added to prevent, one level
+ * up. Node `status` is untouched by the roll-up — see the fold below.
+ *
  * #14456 adds the run-level `failed` counter — `Σ nodes[].failures` — which is
  * the count a GREEN run hides. `loop { body: [ try_catch { try, catch } ] }` is
  * the containment spelling for a per-iteration failure that must not end the
@@ -68,6 +79,12 @@ export function summarizeRun(steps: readonly StepLogEntry[]): FlowRunSummary {
     let acted = 0;
     let skipped = 0;
     let unmeasured = 0;
+    // #15617 — what a DELEGATING execution rolled up from a child run that
+    // COMPLETED while containing failures. Held apart from `node.failures`
+    // until the status verdict below is taken, because the two answer
+    // different questions: `FlowRunNodeSummary.status` is judged on this
+    // node's OWN executions, while its `failures` publishes own + rolled-up.
+    const rolledUp = new Map<string, number>();
 
     for (const step of steps) {
         let node = nodes.get(step.nodeId);
@@ -130,6 +147,13 @@ export function summarizeRun(steps: readonly StepLogEntry[]): FlowRunSummary {
             node.unmeasured = (node.unmeasured ?? 0) + 1;
             unmeasured += 1;
         }
+        if (metrics?.failures !== undefined) {
+            // A `subflow` / `map` step whose child COMPLETED while containing
+            // failures (#15617). Summed like `selected` / `acted` — a `map`
+            // re-entering once per item reports each entry's own share on its
+            // own step, so the fold adds them rather than replacing.
+            rolledUp.set(step.nodeId, (rolledUp.get(step.nodeId) ?? 0) + metrics.failures);
+        }
     }
 
     // #14456 — `failed = Σ nodes[].failures`, stated as a fold over the SAME
@@ -140,7 +164,18 @@ export function summarizeRun(steps: readonly StepLogEntry[]): FlowRunSummary {
         // Worst outcome wins: one failed iteration makes the node's run-level
         // status `failure`, and `runs`/`failures` carry the nuance. A node that
         // only ever got skipped never ran at all.
+        //
+        // ⚠️ ORDER IS LOAD-BEARING (#15617): the verdict is taken while
+        // `node.failures` still holds this node's OWN failed executions only.
+        // `FlowRunNodeSummary.status` declares exactly that — "a delegating
+        // node whose child completed while containing failures reads `success`
+        // here with `failures > 0`" — so a `subflow` step that ran fine and
+        // delegated to a child that lost a row must not be recoloured
+        // `failure`. Add the roll-up after, never before.
         node.status = node.failures > 0 ? 'failure' : node.runs > 0 ? 'success' : 'skipped';
+        // On a delegating node this may now exceed `runs`, which the field
+        // declares: it is no longer only this node's own failed executions.
+        node.failures += rolledUp.get(node.nodeId) ?? 0;
         failed += node.failures;
     }
 
@@ -201,17 +236,19 @@ export function formatRunSummaryLine(
     // asked at all — a completed run says nothing about the rows it lost — so
     // the token has to be there to be read.
     //
-    // What `failed=0` says, exactly: NO NODE EXECUTION OF THIS RUN FAILED.
-    // That is narrower than "nothing failed", and the difference is a
-    // `subflow`: the fold this prints is `Sigma nodes[].failures` over THIS
-    // run's own nodes, so a child run that CONTAINED failures of its own
-    // reports them on the child's summary and the parent still prints
-    // `failed=0` — measured, alongside the control where a child that FAILS
-    // rather than contains does reach the parent's count through the
-    // `subflow` node's own failure step. `acted` rolls a child's totals up
-    // and this does not; the declaration says both things in two paragraphs
-    // and is being reconciled in #15617. Until it is, this line is the node
-    // fold, and only that.
+    // What `failed=0` says, exactly: NOTHING THIS RUN CAUSED FAILED,
+    // subflows included. #15617 reconciled the two paragraphs that used to
+    // disagree here, and this line was narrowed to "no node execution OF THIS
+    // RUN failed" only while they did. The fold this prints is
+    // `Sigma nodes[].failures`, and a delegating node's `failures` now carries
+    // what a `subflow` child — or a `map` item — CONTAINED while completing,
+    // rolled up through `metrics.failures` the way `acted` already rode up. So
+    // a parent whose child lost a row prints the loss instead of `failed=0`.
+    //
+    // The one boundary the roll-up does not cross, unchanged and measured as
+    // the control: a child that FAILED rather than contained is the delegating
+    // step's OWN failure, counted once through that node's failure step, and
+    // its own `failed` stays on the child's run row.
     //
     // A line with no token at all is a different reading again — the older
     // "not tracked". A run summarized by `summarizeRun` always carries the

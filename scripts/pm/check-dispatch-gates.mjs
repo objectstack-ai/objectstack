@@ -31,6 +31,69 @@
  * for this same file) — see #14281 for the reading that motivated this
  * section.
  *
+ * ## What #18201 changed about that, and what it did NOT
+ *
+ * The section above was written against a battery that spent most of its wall
+ * clock discovering the SAME tree over and over: a profile of it found every
+ * child derivation running the discovery twice, and the live cases in the
+ * parent driving it a further twenty-odd times, each pass re-reading every
+ * workflow and re-masking every gate source for bytes that had not changed.
+ * #18201 collapsed those to one pass per tree per process — ⛔ not one case
+ * fewer, ⛔ not one assertion weaker, and the tool's output byte-identical.
+ * The battery now fits inside a quiet container's cap with room to spare, and
+ * the figures for it belong to that card and its PR rather than to this
+ * paragraph.
+ *
+ * ⛔ That is NOT a licence to drop the detached form. The cap is a property of
+ * the CALLER's container and the margin is a property of how contended it is,
+ * neither of which this file can see — and an agent box runs several agents
+ * at once. So: detached is still the form that cannot be cut off, and the
+ * `result.signal` branch below now spends its one chance on the remedy rather
+ * than on naming the signal. What the collapse bought is that a foreground run
+ * on a quiet box reaches a verdict at all, where before it could only ever be
+ * killed.
+ *
+ * ## The exit contract, and why the kill branch does not keep its old code
+ *
+ * Four endings, four codes, and what fixes them is not this file's taste — it
+ * is what READS them. A dev records a gate's exit beside the command it ran
+ * (a `:: exit N` tail) and `dispatch-gates.mjs --ran` reconciles that record
+ * against the families it derives, classifying each line FROM THE CODE. A code
+ * here is therefore a claim addressed to a reconciler, and this file had one of
+ * them wrong:
+ *
+ *     the battery passed         result.status (0)           a run that passed
+ *     the battery failed         result.status               a run that failed
+ *     the battery was KILLED     EXIT_PREREQUISITE_NOT_MET   NOT MEASURED
+ *     the tool could not spawn   2                           neither, on purpose
+ *
+ * The kill row used to exit 2, and 2 is in none of the reconciler's classes —
+ * not its NOT-MEASURED code, and not its kill set (coreutils `timeout`'s 124
+ * and the 128 + signum floor), so it landed inside the `run` total. A family
+ * counted as measured on the strength of a run that measured nothing is the
+ * exact false green that reconciliation exists to refuse. The branch's own text
+ * said the opposite in the same breath — do not record it as a run — and was
+ * the only carrier saying it, so a reader who copied the number rather than the
+ * sentence filed a red run over a gate that never reached a verdict.
+ *
+ * ⛔ The fix is NOT 143, the shape a shell reports for a SIGTERM'd child. The
+ * reconciler reads a kill code as UNRUN unless the runner ALSO writes a
+ * NOT-MEASURED claim with a stated reason beside it — deliberately, because an
+ * unexplained kill is where an unfinished run hides. That is the right default
+ * for a runner relaying a kill it did not diagnose. It is the wrong one here,
+ * where this branch has already identified the kill, printed the reason and
+ * named the remedy before it exits: everything the claim line would carry is
+ * already on stderr, and requiring a second line to be remembered is how the
+ * reading gets lost again. EXIT_PREREQUISITE_NOT_MET carries it in the code
+ * itself, and it is the repo-wide code for this reading.
+ *
+ * The spawn-failure row keeps 2 deliberately; its reason sits at that branch.
+ *
+ * ⛔ None of this moves CI. lint.yml runs this gate as an ordinary step with no
+ * `continue-on-error`, so every non-zero code above is equally red there. These
+ * codes are read by devs and by `--ran`, and the contract is pinned by this
+ * file's own `--self-test` rather than by this paragraph.
+ *
  * ## Why the gate exists
  *
  * scripts/pm/dispatch-gates.mjs derives the "local gates for this card" line of
@@ -161,8 +224,13 @@
  */
 
 import { spawnSync } from 'node:child_process';
-import { join } from 'node:path';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
 import process from 'node:process';
+import { fileURLToPath } from 'node:url';
+
+import { EXIT_PREREQUISITE_NOT_MET } from '../import-prerequisite.mjs';
 
 const ROOT = new URL('../..', import.meta.url).pathname;
 
@@ -201,14 +269,234 @@ const SURFACE_MODULE = 'scripts/i18n-bundle-surface.mjs';
  */
 const FRAME_MODULE = 'scripts/check-skill-frame-sync.mjs';
 
-const result = spawnSync(process.execPath, [join(ROOT, TOOL), '--self-test'], { stdio: 'inherit' });
+/**
+ * The flag under which this file drives a child OTHER than TOOL, spelled so
+ * that any invocation carrying it reads as a test invocation wherever it is
+ * written down.
+ *
+ * ⛔ Not `--tool`, and not an `OS_TEST_*` environment variable. The exit
+ * contract below cannot be pinned without standing the 435-second battery
+ * down, and the battery is named by a module-body constant, so SOMETHING has
+ * to be substitutable. What that something must never be is quiet: a run
+ * against a stub grades nothing about the real tool, so the one failure this
+ * affordance could introduce is a green gate over a child that is not TOOL.
+ * An environment variable is the shape that fails that way — it is inherited
+ * from whatever shell the runner was started in, so it can arrive without
+ * appearing in any invocation anyone reads. A flag cannot: it is spelled at
+ * the call site, `package.json` holds the only invocation CI runs, and the
+ * word `self-test` is in the flag itself. The substituted run also announces
+ * itself on stderr, and the self-test asserts that it does — so the loudness
+ * is live rather than promised.
+ *
+ * The right boundary matters to a sibling gate: `check-self-test-wired`
+ * matches `--self-test` with one, so this longer flag is not read as an
+ * invocation of the self-test, and no row is credited for it.
+ */
+const SELF_TEST_CHILD_FLAG = '--self-test-child';
+
+/** The flag that runs this file's own battery instead of the tool's. */
+const SELF_TEST_FLAG = '--self-test';
+
+const argv = process.argv.slice(2);
+
+if (argv.includes(SELF_TEST_FLAG)) await selfTest();
+
+const childAt = argv.indexOf(SELF_TEST_CHILD_FLAG);
+const child = childAt < 0 ? TOOL : argv[childAt + 1];
+if (child === undefined || child === '') {
+  console.error(`✗ check:pm-dispatch-gates: ${SELF_TEST_CHILD_FLAG} needs a path after it.`);
+  process.exit(2);
+}
+if (child !== TOOL) {
+  console.error(
+    `⛔ check:pm-dispatch-gates: SUBSTITUTED CHILD — this run spawned ${child}, not ${TOOL}, so it grades` +
+      " NOTHING about the tool. It exists so this file's own self-test can drive the exit contract below" +
+      ' without standing up the real battery. A production run never prints this line.',
+  );
+}
+
+const started = Date.now();
+/**
+ * ⛔ The production spawn names TOOL DIRECTLY, and it has to keep doing so.
+ *
+ * The tool's derivation follows this call as a RUN edge, which is how this gate
+ * inherits TOOL's own watch hints — the workflow tree among them — so that a
+ * card touching only `.github/workflows` derives this gate at all. That scan
+ * refuses a REBOUND program component on purpose, so collapsing both spawns
+ * into one `resolve(ROOT, child)` silently cuts the edge. Measured when this
+ * file's self-test was first written that way: five cases of the tool's own
+ * battery red, and a workflows-only derivation stopped naming this gate
+ * entirely. The substituted child therefore gets its OWN call, and the
+ * production one is byte-for-byte the expression that was here before.
+ */
+const result =
+  childAt < 0
+    ? spawnSync(process.execPath, [join(ROOT, TOOL), '--self-test'], { stdio: 'inherit' })
+    : spawnSync(process.execPath, [resolve(ROOT, child), '--self-test'], { stdio: 'inherit' });
+/**
+ * What the battery cost on THIS box, printed rather than frozen anywhere.
+ *
+ * The header above refuses to carry a figure and says why: a reading belongs
+ * to a named commit, not to a comment. A reading taken at RUN TIME belongs to
+ * the run that took it, which is the one shape that cannot rot — and it is
+ * what a caller needs, because the cap this file's first section is about is
+ * a property of the caller's container and not of this battery.
+ */
+const seconds = ((Date.now() - started) / 1000).toFixed(1);
 
 if (result.error) {
-  console.error(`✗ check:pm-dispatch-gates: could not run ${TOOL} — ${result.error.message}`);
+  // ⛔ NOT the kill branch's code, and the difference is argued in the header's
+  // exit-contract section: a spawn that never started has two causes this file
+  // cannot tell apart — the tool is gone from the tree, which is a finding
+  // about the tree, and the box could not fork, which is not. 3 would assert
+  // the second reading over both. Until one measurement separates them this
+  // stays the code that claims neither.
+  console.error(`✗ check:pm-dispatch-gates: could not run ${child} — ${result.error.message}`);
   process.exit(2);
 }
 if (result.signal) {
-  console.error(`✗ check:pm-dispatch-gates: ${TOOL} --self-test was killed by ${result.signal}.`);
-  process.exit(2);
+  // ⛔ A kill is NOT a verdict, and this branch is the only place that can
+  // say so before a reader reaches for the cases that did print. It answers
+  // the question a killed caller actually has — what do I do now — rather
+  // than naming the signal and stopping, which is what it used to do.
+  console.error(
+    `✗ check:pm-dispatch-gates: ${child} --self-test was killed by ${result.signal} after ${seconds}s — NOTHING was measured.`,
+  );
+  console.error(
+    '  Every case decided before the kill is in the output above and every case after it is unjudged, so this run' +
+      ' grades neither the tool nor your diff. ⛔ Do not record it as a run.',
+  );
+  console.error(
+    `  This exits ${EXIT_PREREQUISITE_NOT_MET}, the repo-wide NOT MEASURED code, so a record line` +
+      ` \`<command> :: exit ${EXIT_PREREQUISITE_NOT_MET}\` reconciles as NOT-MEASURED rather than as a run that failed.`,
+  );
+  console.error(
+    "  Remedy — detach it and read the log, the invocation this file's header prescribes for a capped container:",
+  );
+  console.error('      nohup pnpm check:pm-dispatch-gates > pm-dispatch-gates.log 2>&1 &');
+  console.error('  then tail that log until it stops growing. CI runs this step with no such cap.');
+  process.exit(EXIT_PREREQUISITE_NOT_MET);
 }
+console.error(`check:pm-dispatch-gates: the battery took ${seconds}s on this box.`);
 process.exit(result.status ?? 2);
+
+/**
+ * This file's own battery — the exit contract, driven against stub children.
+ *
+ * ## Why it cannot simply run the gate
+ *
+ * Every other assertion about this file would be a reading of the 435-second
+ * tool battery, and the branch under test only fires when that battery is
+ * KILLED. A self-test that reproduced the real conditions would have to stand
+ * the battery up and then race it, which is the one shape that cannot be run
+ * on every PR. So the child is substituted and the three ways a child can end
+ * are written directly: killed by a signal, exited red, exited green.
+ *
+ * ## Why the killed stub kills ITSELF
+ *
+ * Measured both ways on this box. Signalling from outside — spawn the wrapper,
+ * find its child, send it a SIGTERM — needs the grandchild's pid, so it races
+ * the spawn and reads the process table to get it; and `timeout -s TERM` on
+ * the wrapper does not exercise this branch AT ALL, because the wrapper has no
+ * SIGTERM handler and dies with the child, leaving `timeout`'s own 124 and no
+ * `result.signal` anywhere. A stub that signals its own pid has no race and no
+ * pid lookup: node with no SIGTERM listener takes the default disposition, so
+ * `spawnSync` reports `signal: 'SIGTERM'` and `status: null` — the exact shape
+ * a foreground-cap kill produces, reached deterministically.
+ *
+ * ## The half that is NOT about this file
+ *
+ * A number is only a contract if something reads it that way, so each exit is
+ * also pushed through the reconciler that consumes it, on a derivation of one
+ * family. That is what makes `3` mean NOT MEASURED here rather than merely
+ * being three — and the old `2` is pinned alongside it, still reconciling as a
+ * run, so the case that motivated the change cannot quietly come back.
+ */
+async function selfTest() {
+  let failures = 0;
+  const t = (name, ok) => {
+    console.log(`${ok ? '✓' : '✗'} ${name}`);
+    if (!ok) failures += 1;
+  };
+
+  const SELF = fileURLToPath(import.meta.url);
+  const dir = mkdtempSync(join(tmpdir(), 'check-dispatch-gates-selftest-'));
+  try {
+    const stub = (name, body) => {
+      const at = join(dir, name);
+      writeFileSync(at, body);
+      return at;
+    };
+    // Signals its own pid: no listener is registered, so the default
+    // disposition ends the process and the timer only keeps the loop alive in
+    // case delivery is not synchronous.
+    const killedChild = stub('killed.mjs', "process.kill(process.pid, 'SIGTERM');\nsetTimeout(() => {}, 5000);\n");
+    const redChild = stub('red.mjs', 'process.exit(1);\n');
+    const greenChild = stub('green.mjs', 'process.exit(0);\n');
+
+    const drive = (childPath) =>
+      spawnSync(process.execPath, [SELF, SELF_TEST_CHILD_FLAG, childPath], { encoding: 'utf8' });
+
+    const killed = drive(killedChild);
+    const red = drive(redChild);
+    const green = drive(greenChild);
+
+    t(
+      'CONTROL: the killed stub really died by SIGNAL, so the branch under test is the one that ran',
+      killed.stderr.includes('was killed by SIGTERM'),
+    );
+    t(
+      `⭐ a child killed by a signal exits ${EXIT_PREREQUISITE_NOT_MET} — the code this branch's own text asks for`,
+      killed.status === EXIT_PREREQUISITE_NOT_MET,
+    );
+    t(
+      "…and the text that asks for it is still printed, so the two carriers cannot drift apart silently",
+      killed.stderr.includes('Do not record it as a run') && killed.stderr.includes('NOTHING was measured'),
+    );
+    t('a child that RAN and failed keeps its own status', red.status === 1);
+    t('a child that RAN and passed keeps its own status', green.status === 0);
+    t(
+      '⛔ and a substituted child announces itself on every one of those runs — a stub run is never quiet',
+      [killed, red, green].every((r) => r.stderr.includes('SUBSTITUTED CHILD')),
+    );
+
+    // The reconciler's own reading of those three codes. Imported rather than
+    // spawned: what is under test is how a RECORDED code classifies, not how
+    // the derivation finds this family, and a spawned derivation would add a
+    // full workflow-tree walk per case to every run of this gate.
+    const { parseRunRecord, runReconciliation, RUN_RECORD_EXIT_PREFIX, RUN_RECORD_REASON_SEPARATOR } = await import(
+      resolve(ROOT, TOOL)
+    );
+    const COMMAND = 'pnpm check:pm-dispatch-gates';
+    const reconcile = (code) =>
+      runReconciliation({
+        derived: [COMMAND],
+        record: parseRunRecord(`${COMMAND}${RUN_RECORD_REASON_SEPARATOR}${RUN_RECORD_EXIT_PREFIX}${code}`),
+      });
+
+    const onKill = reconcile(killed.status);
+    t(
+      `⭐ …and a record of that exit reconciles as NOT-MEASURED, which is the whole contract`,
+      onKill.notMeasured.length === 1 && onKill.ran.length === 0 && onKill.unrun.length === 0,
+    );
+    t(
+      '…derived from the CODE, not claimed by the runner — so a killed battery cannot be recorded as a run by hand',
+      onKill.notMeasured[0]?.source === 'exit-code',
+    );
+    t('a red run reconciles as a RUN, and the reconciliation holds', reconcile(red.status).ran.length === 1);
+    t('a green run reconciles as a RUN too', reconcile(green.status).ran.length === 1);
+    t(
+      '⛔ REGRESSION PIN: the code this branch used to exit still reconciles as a RUN — which is why it moved',
+      reconcile(2).ran.length === 1 && reconcile(2).notMeasured.length === 0,
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+
+  console.log(
+    failures === 0
+      ? '✓ check:pm-dispatch-gates --self-test: the exit contract holds in all three directions.'
+      : `✗ check:pm-dispatch-gates --self-test: ${failures} case(s) failed.`,
+  );
+  process.exit(failures === 0 ? 0 : 1);
+}

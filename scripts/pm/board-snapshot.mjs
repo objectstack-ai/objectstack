@@ -212,6 +212,78 @@
  * is still archived in its old state and a verdict would be an alarm about the
  * clock rather than about the board.
  *
+ * ## Stale is not green — the freshness row
+ *
+ * `pending` keeps "could not check" apart from "checked and clean", and until
+ * this row existed that distinction went no further than the manifest: the exit
+ * code is built from the count check's `ok`, and `pending` leaves that `null`,
+ * so a run that archived days-old state exited 0 and the workflow step that
+ * reads the exit code never fired. Measured on this repository's own archive —
+ * the 21 manifests `board-archive` has ever carried: NINETEEN consecutive runs
+ * reported `pending`, 2026-09-10T20:23Z through 2026-09-14T20:24Z, and every
+ * scheduled run over that window is `success` in the Actions history. Among
+ * them 2026-09-14T02:37Z, whose delta cursor was 2026-09-12T00:40Z — two days
+ * behind the live board, on the morning an account suspension destroyed cards
+ * the archive did not hold (#18137). A backup that is behind is the one case
+ * this file exists to prevent, and it was the case reporting success.
+ *
+ * So a run answers one more question: is this archive still level with the
+ * live board?
+ *
+ *   building  the open board has never been enumerated in full. There is no
+ *             reading to age yet, the open-set line already says so, and a
+ *             first snapshot is not a stale one. Every `pull_request` run of
+ *             the workflow is here too — it walks into a temp dir with no
+ *             manifest under a `--limit`, and it stays green.
+ *   fresh     this run reached a count-check VERDICT, so the census on disk and
+ *             the board's own count named one instant — or it did not, and the
+ *             streak of runs that did not is still inside the window below.
+ *   stale     no run has reached a verdict for longer than that window. The run
+ *             exits `EXIT_STALE`, the workflow step reads the code, the row
+ *             goes red.
+ *
+ * **The anchor is the streak's START, never the delta cursor** — measured, and
+ * the literal reading is a false-alarm generator. `walk.delta.cursor` is the
+ * `updated_at` of the newest row the delta archived, not the instant the board
+ * was last read: an empty page is a short page, `nextWalkStep` ends the walk
+ * returning the cursor it was given, and so on a quiet board the delta
+ * completes every run, the archive is exactly level, and that cursor sits as
+ * far in the past as the last card anyone touched. Ageing it reds a board for
+ * being quiet — driven in `--self-test`, not argued. What ages honestly is
+ * `freshness.pending_since`: the stamp of the first run of the current streak
+ * of runs that could not confirm the archive against the board.
+ *
+ * **And a stamp rather than a counter, for a reason the manifest already
+ * states.** A count of consecutive runs moves on every run, and
+ * `materialManifest` exists because a value that moves every run commits a
+ * manifest-only diff on every scheduled run and buries the real ones. A streak
+ * start is written once when the streak opens, carried forward byte-identical
+ * for as long as it lasts, and cleared when a verdict returns: two manifest
+ * writes per incident, and idempotence survives intact.
+ *
+ * **Why a day.** `STALE_AFTER_MS` is measured from the first UNCONFIRMED run,
+ * and that run is itself one schedule interval after the last confirmed one, so
+ * the red lands a day plus one interval after the archive was last known level
+ * — on the four-a-day cron, the 30 hours the card asked for. The calibration is
+ * from those same 21 manifests: the one legitimate catch-up in this archive's
+ * history — a bounded delta slice closing a three-day gap after #18045 — ran
+ * from 2026-09-13T20:23Z to 2026-09-15T02:34Z, 30 h 04 m, and every run inside
+ * it held an archive that did not have the newest cards. So this window never
+ * reds a single stalled run, never reds a day-long gap, reds the tail of a
+ * worst-case catch-up, and reds every run of the four-day streak the card was
+ * filed on.
+ *
+ * ⛔ What this row does NOT do is prescribe the remedy. More runs, a larger
+ * budget and a wider delta slice are the maintainer's decisions and are named
+ * nowhere in the verdict; what the summary prints is what CLEARS it — the first
+ * run whose delta catches up and whose count check reports a verdict again.
+ * ⛔ Nor does it hold the archive back: the workflow commits and mirrors what
+ * the run read BEFORE the step that reads this exit code, because a stale
+ * archive is still better than none.
+ *
+ * ⚠️ It reds a RUN, so it cannot red the ABSENCE of runs — a schedule that
+ * stopped firing is still read off the Actions history, below.
+ *
  * ## Heartbeat
  *
  * ⚠️ Unlike the half-state patrol, this run does NOT refresh a timestamp when
@@ -254,6 +326,14 @@ export const EXIT_USAGE = 1;
 export const EXIT_COUNT_MISMATCH = 2;
 // 3 is EXIT_PREREQUISITE_NOT_MET, imported so the register is one register.
 export const EXIT_RATE_LIMITED = 4;
+/**
+ * The archive is behind the live board and no run has confirmed it against the
+ * board for longer than `STALE_AFTER_MS` (§ Stale is not green). Its own code,
+ * distinct from the count check's 2: that one says the archive and the board
+ * DISAGREE about a count both sides were read for, this one says no such
+ * reading has happened at all for a day.
+ */
+export const EXIT_STALE = 5;
 
 /**
  * The re-exec guard, per script rather than shared with its neighbours: two
@@ -306,6 +386,25 @@ export const DELTA_SKEW_MS = 30 * 60 * 1000;
 
 /** Where a run writes when `--out` is not given. */
 export const DEFAULT_OUT_DIR = 'board';
+
+/**
+ * How long this archive may go without confirming itself against the live board
+ * before a run reports `stale` and exits non-zero.
+ *
+ * Measured from `freshness.pending_since` — the first run of the current streak
+ * of runs that reached no count-check verdict — which is itself one schedule
+ * interval after the last run that did, so the red lands a day plus one
+ * interval after the archive was last known level. The readings behind the
+ * number are in the header (§ Stale is not green).
+ *
+ * ⛔ This is neither the cadence nor the budget: both are the maintainer's and
+ * neither appears in this file. Widening this window does not make a stale
+ * archive fresher — it only makes the run stop saying so.
+ */
+export const STALE_AFTER_MS = 24 * 60 * 60 * 1000;
+
+/** The three answers the freshness row gives, in the order they age. */
+export const FRESHNESS_VERDICTS = Object.freeze(['building', 'fresh', 'stale']);
 
 export const MANIFEST_NAME = 'manifest.json';
 export const GONE_LEDGER_NAME = 'gone.json';
@@ -655,6 +754,71 @@ export function countCheck({ openIssuesCount, openPullRequests, archivedOpenIssu
   return { verdict: ok ? 'ok' : shortfall > 0 ? 'shortfall' : 'surplus', reason: null, expected, archived, shortfall, surplus, gone_ledger: goneOpen.size, ok };
 }
 
+/** A duration in whole hours, for a line a human reads. */
+function inHours(ms) {
+  return `${Math.round(ms / 3_600_000)} h`;
+}
+
+/** Milliseconds between two ISO stamps, or `null` when either is not one. */
+function elapsedBetween(from, to) {
+  const a = Date.parse(from ?? '');
+  const b = Date.parse(to ?? '');
+  return Number.isFinite(a) && Number.isFinite(b) ? b - a : null;
+}
+
+/**
+ * Is this archive still level with the live board, and for how long has it not
+ * been? The row that keeps a stale archive from reporting success.
+ *
+ * The predicate is the count check's own verdict rather than a second reading
+ * of the walk: `pending` is exactly "this run could not confirm the census
+ * against the board", in every phase and for every reason, and any other
+ * verdict means the two sides named one instant this run. So a streak of
+ * `pending` IS the archive going unconfirmed, and its length is what ages.
+ *
+ * ⛔ Not the delta cursor, which is the `updated_at` of the newest row the
+ * delta archived and not the instant the board was last read — on a quiet board
+ * it sits days in the past while the archive is exactly level (§ Stale is not
+ * green). ⛔ And not a counter of runs: a value that moves every run commits a
+ * manifest-only diff on every scheduled run. The streak's START stamp is
+ * written once, carried byte-identical while the streak lasts, and cleared when
+ * a verdict returns.
+ */
+export function freshnessCheck({
+  openSetComplete = false,
+  countCheckVerdict = null,
+  generatedAt = null,
+  previousPendingSince = null,
+  staleAfterMs = STALE_AFTER_MS,
+}) {
+  if (!openSetComplete) {
+    return {
+      verdict: 'building',
+      pending_since: null,
+      reason: 'the open board has never been enumerated in full — this archive is still being built, which the open-set line above is where to read',
+    };
+  }
+  if (countCheckVerdict !== 'pending') return { verdict: 'fresh', pending_since: null, reason: null };
+  // An unreadable stored stamp restarts the streak here rather than being
+  // turned into an age built from `NaN`: a clock that cannot be read must not
+  // decide a verdict in either direction.
+  const carried = Number.isFinite(Date.parse(previousPendingSince ?? '')) ? previousPendingSince : null;
+  const since = carried ?? generatedAt ?? null;
+  const elapsed = elapsedBetween(since, generatedAt);
+  if (elapsed !== null && elapsed > staleAfterMs) {
+    return {
+      verdict: 'stale',
+      pending_since: since,
+      reason: `no run has reached a count-check verdict since ${since}, longer than the ${inHours(staleAfterMs)} this archive accepts — it is behind the live board by an unknown amount`,
+    };
+  }
+  return {
+    verdict: 'fresh',
+    pending_since: since,
+    reason: `no count-check verdict since ${since}, still inside the ${inHours(staleAfterMs)} this archive accepts`,
+  };
+}
+
 /**
  * The manifest, minus every field that moves on every run whether or not
  * anything changed. Comparing THIS is what makes "no change ⇒ no write" real:
@@ -693,6 +857,7 @@ export function buildManifest({
   counts,
   board,
   check,
+  freshness = null,
   requests,
   run,
 }) {
@@ -709,6 +874,7 @@ export function buildManifest({
     counts,
     board,
     count_check: check,
+    freshness,
     requests,
     run,
   };
@@ -1223,10 +1389,25 @@ async function snapshot(repo, options) {
         };
 
   const resumeWalk = stoppedIn ?? phase;
+  // One stamp for this run, read once: the freshness row ages the streak
+  // against the very instant the manifest records, so two `new Date()` calls
+  // would have the row and the manifest disagree about when this run finished.
+  const generatedAt = new Date().toISOString();
+
+  // Is the archive this run just wrote still level with the live board? The
+  // count check answers "did this run confirm it"; this answers "and if not,
+  // for how long". The streak start is carried from the previous manifest, so a
+  // first run under an archive written before this row existed opens its own.
+  const freshness = freshnessCheck({
+    openSetComplete,
+    countCheckVerdict: check.verdict,
+    generatedAt,
+    previousPendingSince: previous?.freshness?.pending_since ?? null,
+  });
 
   const manifest = buildManifest({
     repo,
-    generatedAt: new Date().toISOString(),
+    generatedAt,
     walkPhase: phase,
     walk: {
       open_set: { complete: openSetComplete, completed_at: openCompletedAt, cursor: cursors.open },
@@ -1248,6 +1429,7 @@ async function snapshot(repo, options) {
     counts,
     board,
     check,
+    freshness,
     requests: requestCount.value,
     run: {
       numbers_read: seen.size,
@@ -1344,11 +1526,36 @@ export function renderRun(result, options) {
     );
   }
 
+  // LAST, because it is the run's verdict about the archive rather than about
+  // the walk — and because everything above is what a reader needs to have read
+  // before it. A stale row is the one line that decides the exit code on a run
+  // whose walk did nothing wrong at all.
+  const fresh = m.freshness ?? { verdict: 'fresh', pending_since: null, reason: null };
+  const unconfirmedFor = fresh.pending_since ? elapsedBetween(fresh.pending_since, m.generated_at) : null;
+  const ago = unconfirmedFor === null ? 'an unreadable stamp' : `${inHours(unconfirmedFor)} ago`;
+  if (fresh.verdict === 'stale') {
+    lines.push(
+      `  freshness    STALE — no run has reached a count-check verdict since ${fresh.pending_since} (${ago}); the window is ${inHours(STALE_AFTER_MS)}.`,
+      '               This archive is behind the live board by an unknown amount, so the run is RED rather than green: a backup that is',
+      '               behind while reporting success is the one state this row exists to end. Whatever this run DID read is committed',
+      '               before the step that reads this exit code — a stale archive is better than none.',
+      '               It clears on the first run whose delta catches up with the live board and whose count check reports a verdict again.',
+    );
+  } else if (fresh.verdict === 'building') {
+    lines.push('  freshness    building — the open board has never been enumerated in full, so there is no reading to age yet.');
+  } else if (fresh.pending_since) {
+    lines.push(`  freshness    behind — no count-check verdict since ${fresh.pending_since} (${ago}), still inside the ${inHours(STALE_AFTER_MS)} window.`);
+  } else {
+    lines.push('  freshness    fresh — this run confirmed the archive against the live board.');
+  }
+
   const exitCode = result.stopped?.kind === 'rate-limit'
     ? EXIT_RATE_LIMITED
     : check.ok === false
       ? EXIT_COUNT_MISMATCH
-      : EXIT_OK;
+      : fresh.verdict === 'stale'
+        ? EXIT_STALE
+        : EXIT_OK;
   return { text: lines.join('\n'), exitCode };
 }
 
@@ -1690,7 +1897,8 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the restore payload: a rebuilt record says it is one': 9,
   'the refusals: a typo must never make this decision': 11,
   'the rate-limit stop, and the two properties that are structural': 8,
-  'the delta walk, driven: the archive catches up with the live board': 18,
+  'the delta walk, driven: the archive catches up with the live board': 19,
+  'the freshness row: a stale archive is never a green run': 18,
 });
 const SELF_TEST_BATTERY_FLOOR = 10;
 const UNATTRIBUTED_BATTERY = '(unattributed)';
@@ -2001,6 +2209,8 @@ export async function selfTest() {
   const busyDir = mkdtempSync(join(tmpdir(), 'board-snapshot-split-'));
   const stopDir = mkdtempSync(join(tmpdir(), 'board-snapshot-resume-'));
   const idemDir = mkdtempSync(join(tmpdir(), 'board-snapshot-idem-'));
+  const quietDir = mkdtempSync(join(tmpdir(), 'board-snapshot-quiet-'));
+  const staleDir = mkdtempSync(join(tmpdir(), 'board-snapshot-stale-'));
   try {
     // THE REGRESSION, driven from the manifest board-archive actually carried.
     //
@@ -2102,8 +2312,143 @@ export async function selfTest() {
     const third = await driveSnapshot({ dir: idemDir, board: fakeBoard({ rows: idemRows, openPulls: [movedPull] }) });
     t('IDEMPOTENCE survives the delta: a run over a board that has not moved writes nothing at all, manifest included',
       third.written.length === 0 && third.manifestMoved === false && third.manifest.walk_phase === 'incremental');
+    t('…and the freshness row does not break it: a confirmed run carries no streak stamp, so the block is byte-identical run over run',
+      third.manifest.freshness.pending_since === null && stableJson(third.manifest.freshness) === stableJson({ verdict: 'fresh', pending_since: null, reason: null }));
+
+    // -- the freshness row ---------------------------------------------------
+    battery('the freshness row: a stale archive is never a green run');
+    const CARD_RUN = '2026-09-14T02:37:36.943Z';
+    const STREAK_OPENED = '2026-09-10T20:23:11.768Z';
+    const building = freshnessCheck({ openSetComplete: false, countCheckVerdict: 'pending', generatedAt: CARD_RUN });
+    t('an open board never enumerated in full reads BUILDING, not stale — a first snapshot is not a backup that fell behind, and the workflow\'s pull_request run lives here',
+      building.verdict === 'building' && building.pending_since === null);
+    t('a run that reached a VERDICT clears the streak, whatever that verdict says about the counts — the row asks whether the archive was CONFIRMED, not whether it agreed',
+      ['ok', 'shortfall', 'surplus'].every((v) => {
+        const f = freshnessCheck({ openSetComplete: true, countCheckVerdict: v, generatedAt: CARD_RUN, previousPendingSince: STREAK_OPENED });
+        return f.verdict === 'fresh' && f.pending_since === null && f.reason === null;
+      }));
+    const opened = freshnessCheck({ openSetComplete: true, countCheckVerdict: 'pending', generatedAt: CARD_RUN });
+    t('the FIRST run that cannot confirm opens the streak at its own stamp and is NOT stale — one unconfirmed run is a run, not an outage',
+      opened.verdict === 'fresh' && opened.pending_since === CARD_RUN);
+    t('…and later runs carry that stamp forward BYTE-IDENTICAL rather than restamping it: the streak start is what ages, and a counter that moved every run would commit a manifest-only diff on every scheduled run',
+      stableJson(freshnessCheck({ openSetComplete: true, countCheckVerdict: 'pending', generatedAt: '2026-09-14T08:37:22.617Z', previousPendingSince: CARD_RUN }))
+      === stableJson(freshnessCheck({ openSetComplete: true, countCheckVerdict: 'pending', generatedAt: '2026-09-14T14:28:17.784Z', previousPendingSince: CARD_RUN })));
+    const boundary = Date.parse(CARD_RUN) + STALE_AFTER_MS;
+    t('THE BOUNDARY: exactly the window is not yet stale…',
+      freshnessCheck({ openSetComplete: true, countCheckVerdict: 'pending', generatedAt: new Date(boundary).toISOString(), previousPendingSince: CARD_RUN }).verdict === 'fresh');
+    t('…and one millisecond past it is',
+      freshnessCheck({ openSetComplete: true, countCheckVerdict: 'pending', generatedAt: new Date(boundary + 1).toISOString(), previousPendingSince: CARD_RUN }).verdict === 'stale');
+    t('an unreadable stored stamp restarts the streak here instead of deciding a verdict from a clock nobody can read',
+      freshnessCheck({ openSetComplete: true, countCheckVerdict: 'pending', generatedAt: CARD_RUN, previousPendingSince: 'not a date' }).pending_since === CARD_RUN);
+    t('the window is a day, measured from the first UNCONFIRMED run — itself one interval after the last confirmed one, so the red lands a day plus an interval after the archive was last known level',
+      STALE_AFTER_MS === 24 * 60 * 60 * 1000);
+    t('every verdict this row returns is declared, and there are three',
+      FRESHNESS_VERDICTS.length === 3 && ['building', 'fresh', 'stale'].every((v) => FRESHNESS_VERDICTS.includes(v)));
+    t('the exit register is still ONE register: six codes, all distinct, and the stale one is none of the others',
+      new Set([EXIT_OK, EXIT_USAGE, EXIT_COUNT_MISMATCH, EXIT_PREREQUISITE_NOT_MET, EXIT_RATE_LIMITED, EXIT_STALE]).size === 6 && EXIT_STALE === 5);
+
+    // THE CARD REPLAYED, from the manifest `board-archive` carried at 2621e5a45.
+    const cardManifest = (over = {}) => buildManifest({
+      repo: 'o/r',
+      generatedAt: CARD_RUN,
+      walkPhase: 'history',
+      walk: {
+        open_set: { complete: true, completed_at: '2026-09-10T15:39:49.484Z', cursor: null },
+        delta: { complete: false, cursor: '2026-09-12T00:40:33Z', since: '2026-09-11T02:47:09Z', slice: DELTA_REQUEST_SLICE },
+        history: { complete: false, cursor: '2026-08-06T13:26:08Z' },
+      },
+      since: '2026-08-06T13:26:08Z',
+      sinceReason: 'the open set is complete — the closed history resumes at 2026-08-06T13:26:08Z',
+      nextSince: '2026-09-12T00:40:33Z',
+      resume: { since: '2026-08-06T13:26:08Z', phase: 'history', stopped_by: 'budget', reason: 'the per-run budget of 800 requests is spent' },
+      counts: { issues_open: 485, issues_closed: 2000, pulls_open: 30, pulls_closed: 3799, records: 6314 },
+      board: { open_issues_count: 512, open_pull_requests: 0, read_at: CARD_RUN },
+      check: countCheck({
+        openIssuesCount: 512,
+        openPullRequests: 0,
+        archivedOpenIssues: 485,
+        pending: countCheckPendingReason({ phase: 'history', openSetComplete: true, deltaCompletedHere: false, boardCountRead: true }),
+      }),
+      freshness: freshnessCheck({ openSetComplete: true, countCheckVerdict: 'pending', generatedAt: CARD_RUN, previousPendingSince: STREAK_OPENED }),
+      requests: 800,
+      run: { numbers_read: 400, files_written: 762, walk_complete: false, open_set_completed_here: false, delta_ran: true, delta_completed_here: false, delta_requests: 300 },
+      ...over,
+    });
+    const cardRendered = renderRun(
+      { manifest: cardManifest(), written: ['x'], manifestMoved: true, stopped: { kind: 'budget', reason: 'the per-run budget of 800 requests is spent' }, plan: {}, deltaPlan: {}, walkComplete: false },
+      { out: 'archive/board', dryRun: false },
+    );
+    t('THE CARD #18137 REPLAYED: the manifest of 2026-09-14T02:37Z — delta cursor two days behind, count check pending — is STALE, and the run that exited 0 exits EXIT_STALE',
+      cardManifest().freshness.verdict === 'stale' && cardRendered.exitCode === EXIT_STALE);
+    const cardTail = cardRendered.text.slice(cardRendered.text.indexOf('  freshness'));
+    t('…and the row names the streak and what CLEARS it, and ⛔ prescribes neither cadence nor budget nor slice — those are the maintainer\'s',
+      /STALE/.test(cardTail) && cardTail.includes(STREAK_OPENED) && /catches up/.test(cardTail) && !/cadence|budget|slice|more runs/i.test(cardTail));
+    t('…while the ARCHIVE is untouched by the verdict: this run wrote its records, and the workflow commits them before the step that reads the exit code',
+      cardRendered.text.includes('written      1 file(s)'));
+
+    // THE CORRECTED READING REPLAYED: the run whose delta caught up.
+    const caughtUp = cardManifest({
+      generatedAt: '2026-09-15T02:34:24.005Z',
+      walk: {
+        open_set: { complete: true, completed_at: '2026-09-10T15:39:49.484Z', cursor: null },
+        delta: { complete: true, cursor: '2026-09-15T02:30:25Z', since: '2026-09-14T04:46:18Z', slice: DELTA_REQUEST_SLICE },
+        history: { complete: false, cursor: '2026-08-09T00:00:00Z' },
+      },
+      check: countCheck({ openIssuesCount: 519, openPullRequests: 0, archivedOpenIssues: 536 }),
+      freshness: freshnessCheck({ openSetComplete: true, countCheckVerdict: 'surplus', generatedAt: '2026-09-15T02:34:24.005Z', previousPendingSince: STREAK_OPENED }),
+    });
+    t('THE CORRECTED READING REPLAYED: the run whose delta caught up reaches a verdict, so the streak is cleared and this row is NOT what reddens it',
+      caughtUp.freshness.verdict === 'fresh' && caughtUp.freshness.pending_since === null
+      && renderRun({ manifest: caughtUp, written: [], manifestMoved: true, stopped: null, plan: {}, deltaPlan: {}, walkComplete: false }, { out: 'archive/board', dryRun: false }).exitCode === EXIT_COUNT_MISMATCH);
+
+    // THE QUIET BOARD, driven: the false alarm ageing the delta cursor would raise.
+    const longAgo = new Date(Date.now() - 5 * 24 * 60 * 60 * 1000).toISOString();
+    writeIfChanged(join(quietDir, MANIFEST_NAME), stableJson({
+      ...measuredHistoryManifest(),
+      walk: {
+        open_set: { complete: true, completed_at: '2026-09-10T15:39:49.484Z', cursor: null },
+        delta: { complete: true, cursor: longAgo, since: longAgo, slice: DELTA_REQUEST_SLICE },
+        history: { complete: true, cursor: longAgo },
+      },
+      next_since: longAgo,
+      resume: null,
+    }));
+    const quiet = await driveSnapshot({ dir: quietDir, board: fakeBoard({ rows: [RAW({ number: 42, state: 'open', comments: 0, created_at: longAgo, updated_at: longAgo })] }) });
+    t('THE QUIET BOARD, driven: nothing has moved for five days, so the walk completes, the census IS the board — and the delta cursor is five days old because it is the newest row\'s stamp, not the instant the board was read',
+      quiet.manifest.count_check.verdict === 'ok'
+      && quiet.manifest.walk.delta.cursor === longAgo
+      && elapsedBetween(quiet.manifest.walk.delta.cursor, quiet.manifest.generated_at) > STALE_AFTER_MS);
+    t('…and this row calls it FRESH and the run green — ageing that cursor is the false alarm this anchor exists to avoid',
+      quiet.manifest.freshness.verdict === 'fresh'
+      && renderRun(quiet, { out: quietDir, dryRun: false }).exitCode === EXIT_OK);
+
+    // A STALE RUN, driven end to end: the records still land.
+    writeIfChanged(join(staleDir, MANIFEST_NAME), stableJson({
+      ...measuredHistoryManifest(),
+      freshness: { verdict: 'fresh', pending_since: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString(), reason: 'carried from the run that opened the streak' },
+    }));
+    // Three rows inside the delta's window, each with a thread, against a run
+    // budget of three requests: the delta stops on the budget before the board's
+    // own count is bought, which is the shape every `pending` run in this
+    // archive's history had.
+    const unreadRows = Array.from({ length: 3 }, (_, i) => RAW({
+      number: 18100 + i,
+      state: 'open',
+      comments: 1,
+      updated_at: `2026-09-13T1${i}:00:00Z`,
+      thread: [RAW_COMMENT({ id: 950000 + i })],
+    }));
+    const staleRun = await driveSnapshot({ dir: staleDir, board: fakeBoard({ rows: unreadRows }), options: { maxRequests: 3 } });
+    const staleRendered = renderRun(staleRun, { out: staleDir, dryRun: false });
+    t('A STALE RUN, DRIVEN: a run that could not confirm the archive, under a streak three days old, reports stale — and it still ARCHIVED what it read',
+      staleRun.manifest.count_check.verdict === 'pending' && staleRun.manifest.freshness.verdict === 'stale' && staleRun.written.length > 0);
+    t('…and THAT is what turns the run red: EXIT_STALE where the same run exited 0 before this row existed',
+      staleRendered.exitCode === EXIT_STALE && /freshness    STALE/.test(staleRendered.text));
+    t('…while the streak stamp it carries forward is the one the previous manifest opened, never this run\'s',
+      staleRun.manifest.freshness.pending_since === readJsonFile(join(staleDir, MANIFEST_NAME)).freshness.pending_since
+      && Date.parse(staleRun.manifest.freshness.pending_since) < Date.parse(staleRun.manifest.generated_at) - STALE_AFTER_MS);
   } finally {
-    for (const d of [liveDir, busyDir, stopDir, idemDir]) rmSync(d, { recursive: true, force: true });
+    for (const d of [liveDir, busyDir, stopDir, idemDir, quietDir, staleDir]) rmSync(d, { recursive: true, force: true });
   }
 
   const declared = Object.keys(SELF_TEST_BATTERIES);
@@ -2129,7 +2474,7 @@ export async function selfTest() {
     console.error(`x board-snapshot self-test: ${failed.length} of ${cases.length} case(s) failed.`);
     return 1;
   }
-  console.log(`OK board-snapshot self-test: ${cases.length} cases pass across ${declared.length} batteries (open-first walk order, the delta-first run order and its budget split driven end to end, walk re-anchor, the three walk cursors, idempotence, the count-check verdicts and their predicate, the restore header, and the two structural properties).`);
+  console.log(`OK board-snapshot self-test: ${cases.length} cases pass across ${declared.length} batteries (open-first walk order, the delta-first run order and its budget split driven end to end, walk re-anchor, the three walk cursors, idempotence, the count-check verdicts and their predicate, the freshness row that keeps a stale archive from reporting success, the restore header, and the two structural properties).`);
   selfTestReachedVerdict = true;
   return 0;
 }

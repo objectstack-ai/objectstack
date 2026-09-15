@@ -142,11 +142,17 @@ const ENGINE_ORGANIZATION_REFUSAL_CODE: SystemWriteOrganizationRequiredError['co
  * [#14754] What one reconcile pass did, plus the grants the engine's
  * organization rule REFUSED in it.
  *
- * Extends the spec's {@link SharingRuleEvaluationResult} rather than changing
- * it: the contract lives in `@objectstack/spec` and is another lane's to move,
- * and every declared consumer keeps compiling against the six fields it always
- * had. The seventh is additive and rides along for the callers that want it —
- * the boot backfill's aggregate and this package's own pins.
+ * [#14969] The NARROWING is the point, not a lag. `@objectstack/spec` declares
+ * `grantsRefused?: number` on {@link SharingRuleEvaluationResult} itself, and
+ * declares it OPTIONAL on purpose: an `ISharingRuleService` implementation that
+ * does not count refusals leaves the key ABSENT, and absent is not `0`. This
+ * implementation always counts them, so it REQUIRES the key — a legal covariant
+ * narrowing, and the reason a caller holding this type never has to decide
+ * whether an unset key means "no grant was refused" or "this implementation
+ * does not report refusals". Consumers typed against the spec contract are
+ * unaffected; for them the key stays optional. The required form is what this
+ * package's own pins assert and what the evaluate route puts on the wire — it
+ * answers this service's return value unfiltered.
  *
  * ⛔ `grantsRefused > 0` is NOT "the pass failed". It is the pass reporting that
  * it met a record it cannot grant on (an organization-less record under a

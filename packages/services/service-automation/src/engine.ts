@@ -5881,6 +5881,12 @@ export class AutomationEngine implements IAutomationService {
      * The credit lands on the LAST step for the node, which is the entry that
      * suspended awaiting this child — so a `map` re-entering once per item
      * credits each item to its own step and nothing is counted twice.
+     *
+     * Both call sites are COMPLETION paths — the up-bubble is raised only from
+     * a child that completed, and the down-delegation path returns on
+     * `!childRes.success` before reaching here — which is what lets #15617's
+     * `failures` ride this seam under exactly its declared rule: the contained
+     * failures of a child that COMPLETED, never a failed child's own `failed`.
      */
     private creditChildRun(steps: StepLogEntry[], nodeId: string, child: FlowRunSummary | undefined): void {
         if (!child) return;
@@ -5898,6 +5904,15 @@ export class AutomationEngine implements IAutomationService {
                     // its own run row, and the question this feeds — "is the
                     // parent's `acted` complete?" — is boolean either way.
                     ...(prior.unmeasuredEffect || child.unmeasured ? { unmeasuredEffect: true } : {}),
+                    // #15617 — the pausing item's own contained failures, which
+                    // the synchronous path reports through the executor's
+                    // `metrics`. Written only when one of the two sides actually
+                    // tracked a count: an absent `failures` means "not tracked",
+                    // and a `0` written here would claim a measurement of a
+                    // child recorded before the count existed.
+                    ...(prior.failures !== undefined || child.failed !== undefined
+                        ? { failures: (prior.failures ?? 0) + (child.failed ?? 0) }
+                        : {}),
                 },
             };
             return;

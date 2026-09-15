@@ -172,8 +172,7 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 - advisory 门禁红着进 main 是共享损伤,任何车道发现都立即止血并立单。
 - main-red 的跳队例外与事故锚卡约定见 `references/landing-operations.md` B 节。
 - dev 自己死了不等于维护者中止:子代理消失是正常死法,走死认领回收。
-- 维护者中止只在有显式信号时成立:原话,或宿主回报 stopped by the user。
-- ⛔ 不据推断立一道没有重启条件的门;判据是信号不是症状。
+- 维护者中止只认原话或宿主回报 stopped by the user,⛔ 不据推断立无重启条件的门。
 - 立卡者不查重,只附 3–5 个查重词;分诊按词查自有列表,零命中须控制词背书。
 - 共享基础设施修复入队前按症状复查 main,不按 issue 号。
 - 真撞上重复,先比数值与作用域再决定关哪个。
@@ -183,6 +182,7 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 - 冲突立成 `needs-user-decision` 卡,该 PR 不挂 auto-merge 留异议窗口。
 - 读序 git、payload、REST、MCP;REST 可达性逐会话探一次;通道对照见 `references/rest-channel.md`。
 - 派发前读一次 `rate_limit`,余量装不下整批就减批,⛔ 不靠撞墙发现。
+- 写少而大:同卡同轮结论合成一条评论,⛔ 不放慢单笔、不攒着一次性发;写量按身份计。
 
 ## 多仓协调
 
@@ -308,8 +308,7 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 - sweep 与首触定级只对多车道仓,单车道仓机械三务自理。
 - 发版板(无板仓跳过)、查重/shadow 检查与代裁通道全仓照跑。
 - 代裁只由维护者召唤的总监席产出,⛔ 永不凭自述、⛔ 无子代理裁决。
-- fire 开局只按名加载互斥检查所需工具,`ToolSearch` 用 `select:` 形式。
-- 判定本轮有活之后才加载其余工具。
+- fire 开局只按名加载互斥检查所需工具,`ToolSearch` 用 `select:`;判定本轮有活才加载其余。
 - ⛔ 分诊 fresh session 开局不做泛关键词 ToolSearch;可验判据:空转轮 ~4 万 token 以内。
 - 工具加载纪律只约束分诊 fresh session 的开局;执行座位与 dev 不受约束。
 - 两级盘点:小时轮以 `since` 窗口读增量,锚 = 座位贴上一份收班简报的时间戳。
@@ -337,6 +336,7 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 - bump 单单张封顶:先查同题 open 单,已有就追评刷新;工具链新形态只提请不扩面。
 - 分类动作每张三选一,外加一个修复通道。
 - ⛔ 不挂 `needs:contract-review`:随 draft PR 或 `Clause-②: yes` 认领;裁定写方向、给六态之一。
+- 方向落在 ADR/已裁卡/不可重裁规则:贴 `check-prior-rulings.mjs` 的 `Prior rulings read:` 行,或不点。
 - `pm:queue` = 有具名落点或复现的具体缺陷,或范围明确的工具/门禁修复,无可问之事。
 - `pm:queue` 也收恢复不变量的 finding、test-only pin,与实现未被裁错的说明书脱节(修文档)。
 - `needs-user-decision` = 设计卡、feature/契约形状提案、需要 appetite 的多周程序。
@@ -619,7 +619,7 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 - ③ 在 draft PR 上向两个授权批准账户 `os-zhuang` 与 `hotlong` 都 request review,主动推。
 - PR 作者身份即两账户之一的席位时,对该账户请审必失败(author-identity 422)。
 - 该账户改为把 PR assign 给它替代通知,另一账户照常请审;轮次报告点名说明走了兜底。
-- 请审走免碰 draft 位的专用 REST 端点,MCP 兜底显式带 `draft: true`;端点事实住 platform-readings。
+- 请审走免碰 draft 位的 REST 专用路,ready/draft 走 ccr 路;MCP 兜底已拒;端点见 platform-readings。
 - ④ 轮次报告单列 awaiting a human merge。
 - 已入队才读到本条 ⇒ 转 draft 与 disable 都做;出队以阳性探针答,ref 缺席只旁证。
 - skills 车道自有 PR:纯代码面如 `scripts/pm/` 由本席按达档自审(清单不减)后落地。
@@ -642,8 +642,8 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 - PASS ⇒ 同席剥标并引记录、ready、auto-merge;FAIL ⇒ 补丁轮;⛔ 免复核不放行。
 - 真正设计分叉照旧进决策箱,席内复核 ⛔ 不替代维护者裁定。
 - 外部评审链降为可选事后审计,非放行前提。
-- `needs:contract-review`(恒英文)由 PR 创建者随可复审契约增量同笔挂:draft PR,或先到的报告。
-- `Clause-②: yes` 认领同笔在卡上挂标;PR 开出即读 `check-clause2-carriers --pair N` 为 0 再请审。
+- `needs:contract-review`(恒英文)由席位同笔挂:PR 一现即挂 PR;报告先到则先挂卡。
+- `Clause-②: yes` 认领同笔卡上挂标;PR 开出读 `check-clause2-carriers --pair PR-NUMBER` 为 0 再请审。
 - 挂标后复核完成前短暂停靠;⛔ 不前瞻预挂。
 - 席内复核的适用面、载体纪律、资格与归属、降档保险丝见 `references/contract-review.md`。
 - 碰生成物的 PR 入队前先同步 + 整体重生成:四步序 `bash scripts/pm/os-regen-merge.sh`。

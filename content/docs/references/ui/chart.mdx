@@ -117,7 +117,7 @@ Inline aggregation for an object-bound chart
 | **showDataLabels** | `boolean` | optional (default: `false`) | Display data labels |
 | **annotations** | `{ type: Enum<'line' \| 'region'>; axis: Enum<'x' \| 'y'>; value: number \| string; endValue?: number \| string; … }[]` | optional | Reference lines/bands drawn over the plot: `{ type: "line" \| "region", axis: "x" \| "y", value, endValue?, color?, label?, style? }` |
 | **interaction** | `{ tooltips: boolean; brush: boolean }` | optional | Interaction toggles: `{ tooltips?, brush? }` |
-| **aria** | `{ ariaLabel?: string \| Record<string, string>; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes |
+| **aria** | `never` | optional | [REMOVED] `ChartConfig.aria` — authored as `dashboard.widgets[].chartConfig.aria`, `report.chart.aria` and `report.blocks[].chart.aria` — was removed in @objectstack/spec 17 (ADR-0049 D2). No chart renderer ever applied it: the chart implementation declares no `aria` prop, the presentation lowering names it nowhere, and the react `<ObjectChart>` block never published it, so ARIA attributes declared here parsed and then silently did not reach the DOM. Delete the key. The accessible name that IS applied on this same chart config is its sibling `description`, which the chart renderer lowers onto the chart graphic as `role="img"` plus `aria-label`. The shared `AriaProps` shape is NOT gone — `ariaLabel` / `ariaDescribedBy` / `role` stay live in the `aria` block on `page.aria`, `page.components[].aria` and the list view `aria`. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand. |
 
 ### Allowed Values: `ChartConfig.type`
 
@@ -202,14 +202,6 @@ Inline aggregation for an object-bound chart
 | :--- | :--- | :--- | :--- |
 | **tooltips** | `boolean` | optional (default: `true`) | Show the hover tooltip |
 | **brush** | `boolean` | optional (default: `false`) | Show the range selector under the plot |
-
-### Nested Shape: `ChartConfig.aria`
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **ariaLabel** | `string \| Record<string, string>` | optional | Accessible label for screen readers (WAI-ARIA aria-label). Plain string, or an inline locale map — no translation-bundle slot addresses this key, so a plain string is announced in the source language. |
-| **ariaDescribedBy** | `string` | optional | ID of element providing additional description (WAI-ARIA aria-describedby) |
-| **role** | `string` | optional | WAI-ARIA role attribute (e.g., "dialog", "navigation", "alert") |
 
 
 ---

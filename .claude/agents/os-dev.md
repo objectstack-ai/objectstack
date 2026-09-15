@@ -284,7 +284,7 @@ model: opus
 - 受管面(见 AGENTS.md)PR 正文带 `## 维护者速读(草稿)` 节,中文、业务角度,席位意见留空。
 - 五段固定:改了什么/为什么改/风险与代价(含回滚)/席位意见/你要做的;席位定稿成评论。
 - 正文以 session-URL 形式的署名页脚收尾(见字节与 sanitizer 纪律节)。
-- 认领写 `Clause-②: yes` ⇒ 开 PR 同笔挂 `needs:contract-review`,报告附 `--pair N` 退出码。
+- `needs:contract-review` 归席位,⛔ 不挂不摘不等;报 PR 上有无与 `--pair PR-NUMBER` 退出码作读数。
 - 触 `skills/**`(对外发布的技能包)的 diff:PR 正文报两个读数,并默认拒绝小功能大扩写。
 - 两个读数缺一不可:被改文件的整文件 before/after,与整包 before/after(全部 SKILL.md 之和)。
 - 行数为准,姊妹门禁定义 token 计数后同报 token。
@@ -298,7 +298,7 @@ model: opus
 - 其余实测:构建后 grep `files[]` 所列路径找符号,带正控;符号零命中、正控命中 ⇒ 不发布。
 - 本仓库:标签是真实机制,打标签是你的步骤、不是 CI 的,PR 一开出就打。
 - 写入首选加法端点(REST `POST .../issues/<n>/labels`,不碰已有标签);可达性按会话探,先探后用。
-- 被拒 ⇒ 停下报 `blocked` 点名端点与状态码,⛔ 不换 MCP 写道;写后必做对比式读回。
+- 被拒 ⇒ 报端点与状态码、席位代挂,⛔ 不报 `blocked`、不走 MCP;写后必做对比式读回。
 - 读回 diff 现集对 union(读集, 目标):union 有而回读缺 = 被剥的并发标签,重挂并写进报告。
 - 读回只检测剥除防不了,门语义标签被剥恰成绿灯;加法写同样必要不充分。
 - size-labeler 的整组 PUT 会抹掉正确的加法写;收尾一律读回、清单进报告;标签没了就重挂。
@@ -363,6 +363,7 @@ model: opus
   "status": "done | rework | blocked | needs_decision",
   "branch": "claude/issue-<n>-<slug>",
   "pr": "<url or null>",
+  "session": "session_<id> — this run's harness-stamped id (transcript Claude-Session: line; subagent = parent's)",
   "premise_still_valid": true,
   "summary": "what was implemented, 2-4 sentences",
   "tests": "commands run + pass/fail evidence (real output excerpts); ablation: rebuild + on-disk mutation proof",
@@ -376,8 +377,7 @@ model: opus
 ```
 
 - `status: "rework"` = 你自知不完整的部分成果,在 `summary` 里说明为什么。
-- `premise_still_valid: false` = 你的核验证伪了 issue 的前提(规则 6):证据写进 `summary`。
-- 那时 `pr` 为 null 或只圈存活的部分,PM 重新分诊。
+- `premise_still_valid: false` = 核验证伪了前提(规则 6):证据进 `summary`,`pr` null 或只圈存活部分。
 - 报告模板是工具,不是真相:某字段的预设与实际发生的对不上时直说。
 - 例:反向验证方向反转、前提死了、某个产物在此无意义;按模板硬造比留白更糟。
 
