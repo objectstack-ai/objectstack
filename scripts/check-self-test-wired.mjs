@@ -234,12 +234,6 @@ const INVOCATION_RE =
  */
 const SELF_TEST_RUN_OTHERWISE = [
   {
-    script: 'scripts/pm/check-dispatch-gates.mjs',
-    via: 'drives',
-    evidence: 'scripts/pm/dispatch-gates.mjs',
-    why: 'its whole body spawns the tool with --self-test; lint.yml runs the wrapper bare',
-  },
-  {
     script: 'scripts/docs-audit/check-affected-docs.mjs',
     via: 'drives',
     evidence: 'scripts/docs-audit/affected-docs.mjs',

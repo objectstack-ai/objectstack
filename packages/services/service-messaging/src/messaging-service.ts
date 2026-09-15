@@ -200,8 +200,23 @@ export interface MessagingServiceContext extends MessagingChannelContext {
  * failures are reported in the result. The seams are shaped so those land
  * without breaking callers.
  */
+/**
+ * A channel mount that is answered AT LOOKUP TIME rather than at registration
+ * time (#18050) — `undefined` means "not mounted right now", asked again on
+ * the next lookup.
+ *
+ * Deliberately NOT exported: it is the shape
+ * {@link MessagingService.registerChannelProvider} takes, and a caller writes
+ * the arrow function inline.
+ */
+type ChannelProvider = () => MessagingChannel | undefined;
+
 export class MessagingService {
     private readonly channels = new Map<string, MessagingChannel>();
+    /** [#18050] Channels resolved on every lookup — see {@link MessagingService.registerChannelProvider}. */
+    private readonly channelProviders = new Map<string, ChannelProvider>();
+    /** [#18050] Provider ids whose throw has already been announced — the log is said once, the PROBE is not. */
+    private readonly providerThrewAnnounced = new Set<string>();
     private readonly now: () => string;
     private readonly resolver: RecipientResolver;
     private readonly preferences: PreferenceResolver;
@@ -362,28 +377,107 @@ export class MessagingService {
         return this.httpOutbox.list(filter);
     }
 
-    /** Register a channel implementation. A duplicate id warns and replaces. */
+    /**
+     * Register a channel implementation. A duplicate id warns and replaces —
+     * including a lazy provider previously registered under the same id.
+     *
+     * The mount is IMMEDIATE and unconditional: the object handed in is what
+     * every later lookup gets. When the mount depends on something that may not
+     * exist yet — a transport service another plugin registers later in the
+     * same boot — use {@link MessagingService.registerChannelProvider}, which
+     * is asked again on every lookup instead.
+     */
     registerChannel(channel: MessagingChannel): void {
-        if (this.channels.has(channel.id)) {
+        if (this.channels.has(channel.id) || this.channelProviders.has(channel.id)) {
             this.ctx.logger.warn(`[messaging] channel '${channel.id}' already registered; replacing`);
         }
+        this.channelProviders.delete(channel.id);
         this.channels.set(channel.id, channel);
         this.ctx.logger.info(`[messaging] channel registered: ${channel.id}`);
+    }
+
+    /**
+     * Register a channel whose implementation is RESOLVED ON EVERY LOOKUP
+     * (#18050) — `resolve()` answers the channel, or `undefined` for "not
+     * mounted right now".
+     *
+     * ## Why a mount can't be decided once, at boot
+     *
+     * A composition fills its service registry incrementally, and `kernel:ready`
+     * is not the end of it: a plugin ordered after this one registers services
+     * from its OWN `kernel:ready` handler, and `kernel:bootstrapped` /
+     * `kernel:listening` run later still. A mount decided by reading that
+     * registry once — `if (getEmail()) registerChannel(…)` — turns "not there
+     * yet" into a permanent verdict nothing revisits: the transport arrives a
+     * moment later and every `notify` on that channel is refused as "not
+     * registered" for the life of the process. That is the three-part shape
+     * AGENTS.md's "Startup registry reads" section names (a read of a filling
+     * registry, a terminal conclusion from absence, and the conclusion
+     * recorded), and its first cure — resolve where it is USED, not where you
+     * start — is this method.
+     *
+     * ## What it deliberately does NOT change
+     *
+     * A channel that answers `undefined` is not mounted, so both fan-out paths
+     * refuse it exactly as they refuse a name nobody ever registered, and
+     * nothing is written to `sys_notification.suppressed_channels`: an absent
+     * mount stays a COMPOSITION fact (#18050 / #18041's boundary). Whether a
+     * MOUNTED channel can send for a given tenant is the separate question
+     * {@link MessagingChannel.isAvailable} answers.
+     *
+     * ⛔ No cache, for the reason the availability probe carries none: the
+     * answer is read from in-memory composition state, so caching it would
+     * serve the stale verdict this method exists to abolish. Provider authors
+     * keep the probe cheap (a service-registry closure call) and memoise the
+     * CHANNEL OBJECT, never the presence of the transport.
+     */
+    registerChannelProvider(id: string, resolve: ChannelProvider): void {
+        if (this.channels.has(id) || this.channelProviders.has(id)) {
+            this.ctx.logger.warn(`[messaging] channel '${id}' already registered; replacing`);
+        }
+        this.channels.delete(id);
+        this.channelProviders.set(id, resolve);
+        this.ctx.logger.info(`[messaging] channel provider registered: ${id} (resolved per lookup)`);
     }
 
     /** Remove a channel. No-op when absent. */
     unregisterChannel(id: string): void {
         this.channels.delete(id);
+        this.channelProviders.delete(id);
+        this.providerThrewAnnounced.delete(id);
     }
 
-    /** Look up a channel by id. */
+    /**
+     * Look up a channel by id, asking a lazy provider when one is registered
+     * (#18050). A provider that throws is "not mounted right now" — said once
+     * per id, then asked again on the next lookup like any other absence.
+     */
     getChannel(id: string): MessagingChannel | undefined {
-        return this.channels.get(id);
+        const direct = this.channels.get(id);
+        if (direct) return direct;
+        const provider = this.channelProviders.get(id);
+        if (!provider) return undefined;
+        try {
+            return provider() ?? undefined;
+        } catch (err) {
+            if (!this.providerThrewAnnounced.has(id)) {
+                this.providerThrewAnnounced.add(id);
+                this.ctx.logger.warn(
+                    `[messaging] channel provider '${id}' threw ` +
+                    `(${(err as Error)?.message ?? String(err)}); treating '${id}' as not mounted`,
+                );
+            }
+            return undefined;
+        }
     }
 
-    /** All registered channel ids. */
+    /** The channel ids that resolve RIGHT NOW — a provider that answers nothing is not listed. */
     getRegisteredChannels(): string[] {
-        return [...this.channels.keys()];
+        const ids = new Set(this.channels.keys());
+        for (const id of this.channelProviders.keys()) {
+            if (this.getChannel(id)) ids.add(id);
+        }
+        return [...ids];
     }
 
     /* ------------------------------------------------------------------ */
@@ -1062,7 +1156,7 @@ export class MessagingService {
         const available: string[] = [];
         const suppressed: ChannelSuppression[] = [];
         for (const id of requested) {
-            const channel = this.channels.get(id);
+            const channel = this.getChannel(id);
             if (!channel?.isAvailable) {
                 available.push(id);
                 continue;
@@ -1138,9 +1232,24 @@ export class MessagingService {
         // channel. Said ONCE per channel below, with the volume it refused —
         // which is the number an operator needs to size the misconfiguration.
         const refused = new Map<string, number>();
+        // [#18050] One mount answer per CHANNEL per emit, not one per
+        // `(recipient × channel)` pair: a lazy provider (see
+        // {@link MessagingService.registerChannelProvider}) is a closure call,
+        // and asking it 500 times for one audience would also let one emit
+        // report a channel as both refused and enqueued — which is exactly the
+        // ambiguity the once-per-channel refusal count below exists to remove.
+        const mounted = new Map<string, boolean>();
+        const isMounted = (id: string): boolean => {
+            let answer = mounted.get(id);
+            if (answer === undefined) {
+                answer = this.getChannel(id) !== undefined;
+                mounted.set(id, answer);
+            }
+            return answer;
+        };
         for (const { recipient, channels, notBefore, digest } of targets) {
             for (const channel of channels) {
-                if (!this.channels.has(channel)) {
+                if (!isMounted(channel)) {
                     refused.set(channel, (refused.get(channel) ?? 0) + 1);
                     deliveries.push({
                         channel,
@@ -1257,7 +1366,7 @@ export class MessagingService {
 
         for (const { recipient, channels } of targets) {
             for (const channelId of channels) {
-                const channel = this.channels.get(channelId);
+                const channel = this.getChannel(channelId);
                 if (!channel) {
                     deliveries.push({
                         channel: channelId,
