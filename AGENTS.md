@@ -1026,6 +1026,30 @@ registry? Add it to `OPEN_CAPABILITY_REGISTRIES` in the same PR that fixes it.
 
 ---
 
+## Writing a `--self-test` — it must be capable of failing when it runs nothing
+
+**Floor — pin battery NAMES, never one total.** Declare a frozen roster of battery name → minimum
+case count, register every case against a battery, and fail when a declared battery registers fewer
+cases than its pin, when a registered case names no declared battery, or when the roster itself
+falls below its pinned battery count. ⛔ A printed case count is EVIDENCE, NOT PROOF — a battery
+falling 40 → 3 still prints a non-zero count — and one pinned TOTAL rots the moment a sibling grows.
+
+**Handshake — the verdict sets a module-level flag, and the dispatch refuses when it is unset.**
+Set the flag as the self-test's last statement, after its success line prints; the dispatch must
+SAY the self-test never reached its verdict. ⛔ An exit code is not a handshake. Without this a
+`return` above the verdict prints nothing and exits 0, and a perfect floor never runs either —
+the two holes are ORTHOGONAL, so close both.
+
+**Copy a landed one — ⛔ never import one.** `scripts/check-agent-model-declared.mjs` carries all
+three parts (`SELF_TEST_BATTERIES`, `SELF_TEST_BATTERY_FLOOR`, `selfTestReachedVerdict`); every
+self-test must keep running standalone as `node scripts/<x>.mjs --self-test`, so a shared assertion
+module is one point of failure for every instrument at once.
+
+Both non-handshake shapes, and how to classify and probe your own:
+`docs/audits/2026-09-self-test-shape-census.md` and the `scripts/measure-self-test-floor.mjs` docblock.
+
+---
+
 ## Post-Task Checklist
 
 1. `pnpm test` — verify nothing broke. Touched a type-check-covered package? `pnpm typecheck` too.
