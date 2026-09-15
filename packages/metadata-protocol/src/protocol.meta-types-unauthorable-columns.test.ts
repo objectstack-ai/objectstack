@@ -17,11 +17,15 @@
  * `saveMetaItem` then refuses.
  *
  * Measured on `origin/main` at 1bdbf82cb5 over the whole served registry:
- * **77 tombstone nodes across 15 types**, of which exactly **5** are reachable
- * as repeater columns — `dashboard.widgets[]`'s `actionUrl`, `actionType`,
- * `actionIcon`, `responsive`, `aria`. Every other tombstone sits where the
- * consumer does not derive its key list from the schema (a top-level property,
- * whose column set `*.form.ts` enumerates by hand — the #5280 fix).
+ * **77 tombstone nodes across 15 types**. Five of them are `dashboard.widgets[]`'s
+ * `actionUrl`, `actionType`, `actionIcon`, `responsive` and `aria` — the row
+ * this file pins, and the carrier the card was filed on. ⚠️ They are not the
+ * whole reachable set: a repeater row in another type reaches an author the
+ * same way, as does the flat schema-driven fallback for a layout-less type and
+ * an inspector that grafts server-only properties into a "More fields" section.
+ * How many sites there are at any moment is a function of the renderer and of
+ * the pinned Console build, so no count of them is pinned here — the class
+ * guard below is over the whole registry instead.
  *
  * ⚠️ The card's headline carrier, `flow.nodes[].outputSchema`, is NOT on the
  * served path: `flow` takes the output derivation, where `nodes.items` carries
