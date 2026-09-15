@@ -251,9 +251,14 @@
 // What that lets such a walk reach: any subtree a declared glob opens onto --
 // `packages/`, `examples/`, `content/`, `skills/`, `scripts/` on the live pin,
 // each held by a per-extension or whole-subtree glob the table already carries.
-// What it does not: `docs/`, `apps/`, and the repo-root files, which no
-// declaration reaches -- a walk seeded at the repo root spans all of them, and
-// that is exactly the radius the table cannot spell.
+// What it does not: `apps/`, the repo-root files, and every `docs/` subtree bar
+// the one audit FILE `@objectstack/spec` names -- stated at that grain because
+// the grain is the point. Declaring one file under `docs/` reaches INTO `docs/`
+// and no further, so a walk rooted there is judged by its children: measured on
+// this tree, rooting the live pin at `docs/` names `docs/adr`, `docs/design`,
+// `docs/handoff`, `docs/notes`, `docs/plans`, `docs/qa` and `docs/screenshots`
+// and NOT `docs/audits`. A walk seeded at the repo root spans all of them at
+// once, and that is exactly the radius the table cannot spell.
 //
 // Two bounds, stated rather than discovered later:
 //
@@ -277,6 +282,25 @@
 // this limb is green on it -- the live positive control. Its red is a root
 // outside them, and a descent whose root does NOT climb above the package root
 // is not a walk root at all, so it stays green by construction.
+//
+// The three readings that landed this limb, all on `objectstack-ai/objectstack`
+// at `a09725dde` plus this change, and each one PAIRED so the verdict is a
+// measurement rather than a shape:
+//
+//   RED     -- one root added to the live pin's folded array (`docs`) and
+//              nothing else: this gate exits 1 naming the seven `docs/`
+//              subtrees no glob reaches. The SAME edit on `a09725dde` without
+//              this limb exits 0 naming nothing, which is the card's claim,
+//              re-taken rather than recalled.
+//   GREEN   -- the same edit plus `docs/**` on the entry and in turbo.json:
+//              exit 0, and the printed walked-root count moves 13 -> 14, so the
+//              green is a root that was JUDGED, not one that stopped resolving.
+//   REVERSE -- an anonymous descent added to a test in another package and
+//              rooted INSIDE it (`join(HERE, 'fixtures')`): exit 0, count still
+//              13. Moving only the root of that same descent to
+//              `join(HERE, '../../../docs')` reds. One file, one descent, one
+//              variable -- which is what distinguishes this limb from a leg
+//              that reds on directory walks in general.
 //
 // Usage:
 //   node scripts/check-cross-package-test-inputs.mjs --verify
