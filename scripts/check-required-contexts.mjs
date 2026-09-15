@@ -517,7 +517,14 @@ export const REQUIRED_CONTEXTS = [
  * docs/launch-readiness.md) is invisible to both halves; and after a
  * SHORTENING rename (new name a substring of the old), an old-literal mention
  * satisfies the new name's `mustName` by substring — the budget half still
- * tracks the old name, so staleness stays bounded.
+ * tracks the old name, so staleness stays bounded; and the COUNT WORD that
+ * introduces such a list is prose like any other, so it is hand-followed and
+ * unpinned — measured, not assumed: reverting AGENTS.md's 「seven contexts
+ * block」 to 「six」 while all seven literals stay listed runs GREEN here.
+ * Bounded by the census rather than covered by it: every enrolled literal is
+ * forced into the prose, so a stale numeral sits next to a complete list, not
+ * a short one. Pinning the numeral needs the arbitrary-literal recognition
+ * this scan measured as out of reach above.
  *
  * ## The scan set, derived 2026-08-18, not assumed
  *
