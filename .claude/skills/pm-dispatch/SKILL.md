@@ -642,7 +642,7 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 - PASS ⇒ 同席剥标并引记录、ready、auto-merge;FAIL ⇒ 补丁轮;⛔ 免复核不放行。
 - 真正设计分叉照旧进决策箱,席内复核 ⛔ 不替代维护者裁定。
 - 外部评审链降为可选事后审计,非放行前提。
-- `needs:contract-review`(恒英文)由 PR 创建者随可复审契约增量同笔挂:draft PR,或先到的报告。
+- `needs:contract-review`(恒英文)由席位同笔挂:PR 一现即挂 PR;报告先到则先挂卡。
 - `Clause-②: yes` 认领同笔卡上挂标;PR 开出读 `check-clause2-carriers --pair PR-NUMBER` 为 0 再请审。
 - 挂标后复核完成前短暂停靠;⛔ 不前瞻预挂。
 - 席内复核的适用面、载体纪律、资格与归属、降档保险丝见 `references/contract-review.md`。
