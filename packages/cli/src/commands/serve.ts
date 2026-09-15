@@ -4311,7 +4311,7 @@ export default class Serve extends Command {
         const projectResolution = apiConfig.projectResolution ?? 'auto';
         // Per-project membership (sys_environment_member 403 gate) is, by
         // default, ON whenever project-scoping is on. A host can opt OUT
-        // (env-native auth IS the membership — ADR-0024 D9) by setting
+        // (env-native auth IS the membership — ADR-0135 D9) by setting
         // `api.enforceProjectMembership: false`. Undefined → dispatcher default.
         const enforceProjectMembership = apiConfig.enforceProjectMembership;
         // [#4910] The stack's top-level `server:` block — deliberately narrow:

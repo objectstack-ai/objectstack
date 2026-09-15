@@ -17,7 +17,11 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { FieldErrorCode, MarkNotificationsReadRequestSchema } from '@objectstack/spec/api';
+import {
+    AnalyticsQueryRequestSchema,
+    FieldErrorCode,
+    MarkNotificationsReadRequestSchema,
+} from '@objectstack/spec/api';
 import { FlowSchema } from '@objectstack/spec/automation';
 import { fieldsFromZodIssues } from './validation-failure';
 
@@ -99,5 +103,76 @@ describe('fieldsFromZodIssues — ADR-0114 D3 catalog codes, not Zod codes (#812
         // With it, the D3 `invalid_type` split fires.
         const informed = fieldsFromZodIssues(issues, bad);
         expect(informed.find((f) => f.field.endsWith('label'))?.code).toBe('required');
+    });
+});
+
+/**
+ * [#17598] ONE condition, ONE wording — for the `timeDimensions[].dateRange`
+ * refusal, on the wire and not merely at `error.issues`.
+ *
+ * `AnalyticsDateRangeSchema` is a `z.union` carrying its own error map, so the
+ * single issue zod raises is already a prescription AND already names the
+ * arity ("received a 1-element array, not the two bounds [start, end]"). Its
+ * tuple arm complains about the same value at the same path in zod's own words
+ * ("Too small: expected array to have >=2 items"), and the #5014 union
+ * expansion put both on the wire — one condition, two wordings, which is what
+ * the #5240 convention exists to prevent and what `analytics.zod.ts` claims for
+ * this refusal.
+ *
+ * Before #17598 the arm was `z.array(z.string())` with no length constraint, so
+ * a 1-element window was not refused by the schema at all and there was no
+ * second wording to have; the narrowing is what introduced it, and this is
+ * where it is collapsed. The two edge cases below are as load-bearing as the
+ * collapse itself: this narrows a RESTATEMENT, never a diagnosis.
+ */
+describe('fieldsFromZodIssues — the dateRange refusal keeps one wording (#17598)', () => {
+    const analyticsBody = (dateRange: unknown) => ({
+        cube: 'orders',
+        measures: ['count'],
+        timeDimensions: [{ dimension: 'created_at', granularity: 'day', dateRange }],
+    });
+
+    const arities: Array<[string, unknown]> = [
+        ['a 1-element window', ['2026-01-01']],
+        ['an empty array', []],
+        ['three bounds', ['2026-01-01', '2026-01-15', '2026-01-31']],
+    ];
+
+    for (const [name, dateRange] of arities) {
+        it(`${name} maps to exactly one entry, and it is the prescription`, () => {
+            const fields = fieldsFromZodIssues(
+                issuesOf(AnalyticsQueryRequestSchema, analyticsBody(dateRange)),
+            );
+            expect(fields).toHaveLength(1);
+            expect(fields[0].field).toBe('timeDimensions.0.dateRange');
+            expect(fields[0].message).toContain('not the two bounds [start, end]');
+            // ⛔ The arm's own arity text is the second wording, and it is gone.
+            expect(fields[0].message).not.toMatch(/Too (small|big)/);
+        });
+    }
+
+    it('a NON-string bound keeps the branch entry naming WHICH bound is wrong', () => {
+        // The prescription says "an array with a non-string bound"; it does not
+        // say WHICH one. `dateRange.1` names a position the prescription has
+        // not, so it is a diagnosis rather than a restatement and it stays.
+        const fields = fieldsFromZodIssues(
+            issuesOf(AnalyticsQueryRequestSchema, analyticsBody(['2026-01-01', 3])),
+        );
+        expect(fields.map((f) => f.field)).toContain('timeDimensions.0.dateRange');
+        expect(fields.map((f) => f.field)).toContain('timeDimensions.0.dateRange.1');
+    });
+
+    it('CONTROL — a branch issue at its own branch ROOT still reaches the wire for every other key', () => {
+        // `unrecognized_keys` is raised at the BRANCH root — structurally the
+        // same position as the tuple arm's arity text — and it carries the
+        // #4001 campaign's curated prose. If the collapse above were written as
+        // "drop branch issues at the union's own path" rather than keyed on the
+        // date-range recogniser, this is the family it would have silenced.
+        const fields = fieldsFromZodIssues(issuesOf(FlowSchema, {
+            ...WELL_FORMED_FLOW,
+            nodes: [{ id: 'n', type: 'notify', label: 'Notify', next: 'other' }],
+        }));
+        expect(fields.map((f) => f.code)).toContain('unknown_field');
+        expect(fields.some((f) => f.message.includes('next'))).toBe(true);
     });
 });

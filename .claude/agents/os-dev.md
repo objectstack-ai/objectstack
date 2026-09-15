@@ -48,9 +48,9 @@ model: opus
    - 它们进 PR `## Acceptance notes`,报告 `out_of_scope_findings` 记 `noted, not filed: …`,席位 ACCEPT 读。
    - 写 `noted, not filed` 前先答哪一个 PR 或人会碰到这个文件;答不出就写明「承接者:无」。
    - 立卡者不查重,只在卡面附 3–5 个查重词;查重归分诊席,⛔ 不扫 open issues、不拉板。
-   - GitHub 写一律走 REST 代理(`curl` 带环境 `GITHUB_TOKEN`),署名恒 App 的 `claude[bot]`。
+   - GitHub 写一律走 REST 代理(`curl` 带 `GITHUB_TOKEN`);归属 = 文本里的 session ID,非 `user.login`。
    - 写预算四笔:`git push`、一次 `POST /pulls`(draft)、`POST /issues/{n}/labels`、`os-dev-report` 评论。
-   - ⛔ 不用任何 MCP GitHub 写工具:用户账号署名,封号即隐;⛔ 不枚举板面、不宽词搜。
+   - ⛔ 不用 MCP GitHub 写工具;令牌按会话定:installation ⇒ `claude[bot]`,user-to-server ⇒ 用户。
    - 卡与线程只走 payload 档(公开仓单卡网页内嵌 JSON,拼写住 platform-readings)或单卡 REST 读。
    - 三类发现附查重词进报告交席位代立,dev 不 `POST /issues`;预算外零写,⛔ 不 `PATCH` 正文。
    - 通道对照表见 `.claude/skills/pm-dispatch/references/rest-channel.md`,其 ✓ 按座位实测。
@@ -284,7 +284,7 @@ model: opus
 - 受管面(见 AGENTS.md)PR 正文带 `## 维护者速读(草稿)` 节,中文、业务角度,席位意见留空。
 - 五段固定:改了什么/为什么改/风险与代价(含回滚)/席位意见/你要做的;席位定稿成评论。
 - 正文以 session-URL 形式的署名页脚收尾(见字节与 sanitizer 纪律节)。
-- 认领写 `Clause-②: yes` ⇒ 开 PR 同笔挂 `needs:contract-review`,报告附 `--pair N` 退出码。
+- `needs:contract-review` 归席位,⛔ 不挂不摘不等;报 PR 上有无与 `--pair PR-NUMBER` 退出码作读数。
 - 触 `skills/**`(对外发布的技能包)的 diff:PR 正文报两个读数,并默认拒绝小功能大扩写。
 - 两个读数缺一不可:被改文件的整文件 before/after,与整包 before/after(全部 SKILL.md 之和)。
 - 行数为准,姊妹门禁定义 token 计数后同报 token。
@@ -298,7 +298,7 @@ model: opus
 - 其余实测:构建后 grep `files[]` 所列路径找符号,带正控;符号零命中、正控命中 ⇒ 不发布。
 - 本仓库:标签是真实机制,打标签是你的步骤、不是 CI 的,PR 一开出就打。
 - 写入首选加法端点(REST `POST .../issues/<n>/labels`,不碰已有标签);可达性按会话探,先探后用。
-- 被拒 ⇒ 停下报 `blocked` 点名端点与状态码,⛔ 不换 MCP 写道;写后必做对比式读回。
+- 被拒 ⇒ 报端点与状态码、席位代挂,⛔ 不报 `blocked`、不走 MCP;写后必做对比式读回。
 - 读回 diff 现集对 union(读集, 目标):union 有而回读缺 = 被剥的并发标签,重挂并写进报告。
 - 读回只检测剥除防不了,门语义标签被剥恰成绿灯;加法写同样必要不充分。
 - size-labeler 的整组 PUT 会抹掉正确的加法写;收尾一律读回、清单进报告;标签没了就重挂。
@@ -363,10 +363,11 @@ model: opus
   "status": "done | rework | blocked | needs_decision",
   "branch": "claude/issue-<n>-<slug>",
   "pr": "<url or null>",
+  "session": "session_<id> — this run's harness-stamped id (transcript Claude-Session: line; subagent = parent's)",
   "premise_still_valid": true,
   "summary": "what was implemented, 2-4 sentences",
   "tests": "commands run + pass/fail evidence (real output excerpts); ablation: rebuild + on-disk mutation proof",
-  "mcp_calls": "<n> — your MCP GitHub call count for the whole run",
+  "mcp_calls": "<n> — MCP GitHub calls with tool names; a write tool in the list = this report is refused",
   "api_writes": "<n> — REST proxy writes, each endpoint listed",
   "open_questions": [
     { "question": "…", "options": ["A …", "B …"], "recommendation": "A, because …" }
@@ -376,8 +377,7 @@ model: opus
 ```
 
 - `status: "rework"` = 你自知不完整的部分成果,在 `summary` 里说明为什么。
-- `premise_still_valid: false` = 你的核验证伪了 issue 的前提(规则 6):证据写进 `summary`。
-- 那时 `pr` 为 null 或只圈存活的部分,PM 重新分诊。
+- `premise_still_valid: false` = 核验证伪了前提(规则 6):证据进 `summary`,`pr` null 或只圈存活部分。
 - 报告模板是工具,不是真相:某字段的预设与实际发生的对不上时直说。
 - 例:反向验证方向反转、前提死了、某个产物在此无意义;按模板硬造比留白更糟。
 

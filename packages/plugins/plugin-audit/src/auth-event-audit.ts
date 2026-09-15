@@ -62,7 +62,12 @@
  */
 
 import type { IDataEngine } from '@objectstack/spec/contracts';
-import { createFieldPresenceProbe } from './audit-writers.js';
+import { isMissingTableError } from '@objectstack/types';
+import {
+  auditFailureCauseKey,
+  auditFailureCauseSummary,
+  createFieldPresenceProbe,
+} from './audit-writers.js';
 
 /** The two auth session events the ledger records (`sys_audit_log.action`). */
 export type AuthSessionAuditAction = 'login' | 'logout';
@@ -170,34 +175,79 @@ export function createAuthEventAuditSink(opts: AuthEventAuditSinkOptions): AuthE
   let probedEngine: IDataEngine | undefined;
 
   /**
-   * Report a lost auth-event row — once per process, not once per failure.
+   * Report a lost auth-event row — once per CAUSE, not once per failed write.
    *
    * Same discipline, and the same reason, as `reportAuditWriteFailure` in
    * `audit-writers.ts`: a systemic cause (the table is unreachable from this
    * connection) would otherwise emit one `error` per sign-in and train everyone
-   * to skim the channel.
+   * to skim the channel. That much is unchanged, and ⛔ must stay — AGENTS.md
+   * records the once-per-degradation rule as a deliberate anti-noise choice and
+   * names 「log every failure at `error`」 as its falsifier.
+   *
+   * [#17452] What changed is the COUNTING UNIT, and it changed here for the
+   * second time in this package: this file carried its OWN copy of the
+   * process-wide boolean and its OWN fixed message literal, so #15166's fix to
+   * `audit-writers.ts` did not reach it. Both copies had the same two defects.
+   *
+   *  1. One process-wide boolean means the first failure of ANY cause silences
+   *     every later failure of every OTHER cause for the life of the process.
+   *     The rule's unit is a DEGRADATION and a second cause is a second
+   *     degradation, so the key is now the failure's identity —
+   *     {@link auditFailureCauseKey}, imported rather than re-spelled. A repeat
+   *     of an already-reported cause still degrades to `debug`, exactly as
+   *     before; a NEW cause gets its own `error` line, once.
+   *  2. The fixed literal printed the ADR-0057 §3.6 telemetry-datasource
+   *     remedy for every cause, so a fault that had nothing to do with
+   *     datasource routing sent its operator to check something that was
+   *     working. ⛔ The guidance is not deleted and not weakened — it is the
+   *     right remedy for the missing-table cause it was written for, and is now
+   *     printed for exactly that cause, asked through the shared
+   *     `isMissingTableError` predicate.
+   *
+   * ⛔ The key is built from the error's `code`, NEVER its message — see
+   * {@link auditFailureCauseKey} for why that is what keeps the cause set
+   * bounded by boot-declared vocabularies instead of by traffic.
    */
-  let failureReported = false;
+  const reportedAuthEventFailureCauses = new Set<string>();
   const reportAuthEventWriteFailure = (action: string, err: unknown): void => {
     const detail = String((err as any)?.message ?? err);
     try {
-      if (failureReported) {
-        logger?.debug?.('Auth-event audit write failed (already reported)', { action, err: detail });
+      // The object dimension of the shared key is `sys_session` here — the
+      // object these rows are ABOUT (`object_name`), which is what
+      // `audit-writers.ts` passes too (`ctx.object`). It is constant on this
+      // seam, so the key reduces to the driver's code vocabulary: bounded by
+      // construction, and still the same key shape rather than a second one.
+      const cause = auditFailureCauseKey(SESSION_OBJECT, err);
+      if (reportedAuthEventFailureCauses.has(cause)) {
+        logger?.debug?.('Auth-event audit write failed (already reported)', {
+          action,
+          err: detail,
+          cause,
+        });
         return;
       }
-      failureReported = true;
+      reportedAuthEventFailureCauses.add(cause);
+      // `persistAuthEventAuditRow` writes ONE table, so the missing-table
+      // question is asked about that one — unlike `persistAuditTrailRow`, which
+      // writes the ledger row and its `sys_activity` mirror and asks about both.
+      const missingTable = isMissingTableError(err, 'sys_audit_log');
       const message =
-        'Auth-event audit write FAILED — the compliance trail is now INCOMPLETE. The sign-in/sign-out itself ' +
-          'SUCCEEDED and the user holds a valid session, so the API returned 200 and nothing downstream looks ' +
-          `broken; only the \`sys_audit_log\` row recording the ${action} never landed, and nothing retries it. ` +
-          'Every subsequent auth event is likely losing its row the same way (this is reported ONCE — raise the ' +
-          'log level to `debug` to see the rest). The shipped `auth_events` list view and the system-overview ' +
-          'widgets read exactly these rows, so they will keep showing an empty, healthy-looking screen. ' +
-          'Fix: confirm `sys_audit_log` is reachable from the connection this write ran on — its ADR-0057 §3.6 ' +
-          'lifecycle class routes it to the dedicated `telemetry` datasource whenever one is registered (`os dev` ' +
-          'provisions one by default as a SIBLING SQLite file), so a "no such table" here usually means the write ' +
-          'executed against a DIFFERENT datasource than the one the table was created in. Set `OS_TELEMETRY_DB=0` ' +
-          'to keep every lifecycle-classed object on the primary datasource.';
+        `Auth-event audit write FAILED (${auditFailureCauseSummary(err, detail)}) — the compliance trail is ` +
+          'now INCOMPLETE. The sign-in/sign-out itself SUCCEEDED and the user holds a valid session, so the API ' +
+          'returned 200 and nothing downstream looks broken; only the `sys_audit_log` row recording the ' +
+          `${action} never landed, and nothing retries it. Every subsequent auth event failing THIS WAY is ` +
+          'losing its row the same way (this CAUSE is reported ONCE — raise the log level to `debug` to see ' +
+          'the rest; a DIFFERENT cause gets its own `error` line). The shipped `auth_events` list view and the ' +
+          'system-overview widgets read exactly these rows, so they will keep showing an empty, healthy-looking ' +
+          'screen. ' +
+          (missingTable
+            ? 'Fix: confirm `sys_audit_log` is reachable from the connection this write ran on — its ADR-0057 ' +
+              '§3.6 lifecycle class routes it to the dedicated `telemetry` datasource whenever one is registered ' +
+              '(`os dev` provisions one by default as a SIBLING SQLite file), so a "no such table" here usually ' +
+              'means the write executed against a DIFFERENT datasource than the one the table was created in. ' +
+              'Set `OS_TELEMETRY_DB=0` to keep every lifecycle-classed object on the primary datasource.'
+            : 'Fix: resolve the driver fault quoted at the head of this line on the connection this write ran ' +
+              'on — every auth event that hits it loses its row until it is resolved.');
       // `error` is OPTIONAL on this sink, so `logger?.error?.(…)` printed
       // NOTHING when the host injected one without it — the durability
       // degradation this text describes would then be reported by nobody at

@@ -221,7 +221,7 @@ export interface MemberRoleCanonicalizationOptions {
  *
  * **Priority 5 — ahead of every other `sys_member` before-hook**, and that
  * placement is the contract rather than a detail. The ADR-0092 identity write
- * guard sits at 10 and the ADR-0024 D5.2 break-glass guard at 20; both JUDGE
+ * guard sits at 10 and the ADR-0135 D5.2 break-glass guard at 20; both JUDGE
  * the payload, and a judgement should be made on the value's normal form, not
  * on whichever spelling the caller happened to send. Canonicalisation decides
  * nothing and performs no I/O, so running it first costs a string compare on
@@ -353,7 +353,7 @@ function spellingIsDivergent(stored: string): boolean {
  *
  * Idempotent and convergent: a second run finds nothing, and a partial run
  * leaves the rest for the next boot. It writes through `ql.update` under a
- * system context, so it passes back through the ADR-0024 D5.2 break-glass guard
+ * system context, so it passes back through the ADR-0135 D5.2 break-glass guard
  * — which is correct and deliberate: `Owner` and `owner` are the same grade to
  * `isOrgAdminGrade`, so a canonicalisation can never be the write that revokes
  * the last administrator's standing, and if it somehow were, being refused is

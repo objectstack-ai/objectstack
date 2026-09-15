@@ -5482,7 +5482,26 @@ const step18: MigrationStep = {
     + 'teach — and the two alias entries became refusals naming the permission-set route. The '
     + 'D2 conversion STRIPS the key — there is no lossless target, because which permission set '
     + 'a given profile name corresponds to is a judgement no walker can make, which is what the '
-    + 'paired D3 semantic entry is for.',
+    + 'paired D3 semantic entry is for. '
+    + 'Finally, it removes `aria` from the chart config (ADR-0049 enforce-or-remove; maintainer '
+    + 'decision batch #118 item 2, 2026-09-12 — recommendation C, judge the protocol wrong for '
+    + 'this one key). It is the last member of the `aria` family retired for the same measured '
+    + 'reason as `dashboard.aria` and `dashboard.widgets[].aria` before it: an ARIA block an '
+    + 'author can declare and nothing lowers to the DOM. It survived those two sweeps by depth — '
+    + 'it sits inside the widget’s `chartConfig` bag, which no drill had reached until the '
+    + 'per-key pass recorded in `liveness/dashboard.json`. That pass found `aria` to be the one '
+    + '`ChartConfigSchema` key with no reader on EITHER face: the chart implementation declares '
+    + 'no `aria` prop, the presentation lowering names it nowhere, and the react block omits it '
+    + 'from `<ObjectChart>`’s `dataProps`. Remove rather than enforce, because the same chart '
+    + 'config already carries a WORKING accessible-name channel in `description` (lowered as '
+    + '`role="img"` + `aria-label`), and giving `aria` a reader would put two accessible-name '
+    + 'sources on one element behind a precedence rule nobody has written — one node, one '
+    + 'accessibility vocabulary. The tombstone rides `ChartConfigSchema` and therefore copies '
+    + 'into `ReportChartSchema`, so the key is registered twice; the D2 conversion STRIPS it '
+    + 'from all three authored sites (`dashboards[].widgets[].chartConfig`, `reports[].chart`, '
+    + '`reports[].blocks[].chart`) as a pure lossless delete — it never had an effect to lose. '
+    + 'The two alias spellings that pointed at it, `accessibility` and `ariaProps`, became '
+    + 'refusals carrying the same prescription rather than renames onto a tombstone.',
   conversionIds: [
     'field-malformed-scale-precision-removed',
     'record-chatter-position-vocabulary',
@@ -5512,6 +5531,7 @@ const step18: MigrationStep = {
     'view-page-mount-removed',
     'list-view-sort-string-clause-to-array',
     'page-assigned-profiles-removed',
+    'chart-config-aria-removed',
   ],
   semantic: [
     // One file per entry under `entries/semantic/`, concatenated here sorted by
@@ -5777,6 +5797,63 @@ const step18: MigrationStep = {
         + 'keys at every level (cube, refreshKey, measures, dimensions, joins); '
         + 'every `/analytics/query` body\'s `timeDimensions[]` items carry only '
         + '`dimension`/`granularity`/`dateRange`. Declared keys parse byte-identically to before.',
+    },
+    {
+      id: 'analytics-date-range-array-two-bounds-required',
+      // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
+      // code span already, and a nested backtick would close it.
+      surface:
+        'the ARRAY arm of timeDimensions[].dateRange on an analytics query — '
+        + 'AnalyticsQuerySchema / the POST /analytics/query and /analytics/sql bodies, a dataset '
+        + 'selection\'s timeDimensions, and any AnalyticsQuery a host passes to '
+        + 'AnalyticsService.query in-process — authored with anything other than EXACTLY two '
+        + 'string bounds: a one-element window such as ["2026-01-01"], the empty array [], and '
+        + 'three or more bounds such as ["2026-01-01", "2026-01-31", "2026-02-28"]',
+      replacement:
+        'exactly two string bounds — `[start, end]`. A ONE-ELEMENT window is that day written as '
+        + 'BOTH bounds: `[\'2026-01-01\']` becomes `[\'2026-01-01\', \'2026-01-01\']`, the shape '
+        + 'the shipped #16322 migration table already prescribes for a single day, and the shape '
+        + 'all four analytics faces have selected that one day with since PR #17593. ⛔ The EMPTY '
+        + 'array and THREE-OR-MORE bounds have NO replacement that can be derived from what was '
+        + 'written: an empty array names no window at all, and a 3+ array names no pair — decide '
+        + 'the window the widget was meant to show and write its two bounds, or drop the '
+        + 'dateRange entirely (the field is optional, and absent means the query is not '
+        + 'time-bounded). A relative window is a preset name from the closed vocabulary '
+        + '(`\'last_7_days\'`) or a date-macro pair (`[\'{7_days_ago}\', \'{today}\']`).',
+      reason:
+        'Maintainer ruling A on #17598 (decision batch #117 item 3, 2026-09-12, re-affirmed '
+        + '2026-09-13): the array arm was a bare `z.array(z.string())` with NO length constraint, '
+        + 'while the refusal sentence in the same source file said verbatim that "an explicit '
+        + 'window is the two-element array [start, end]" and #16322\'s shipped migration table '
+        + 'told an author to write a single day as `[\'2026-01-20\', \'2026-01-20\']`. So only the '
+        + 'TYPE was weaker than the prose beside it, and #17124 measured what that bought: one '
+        + 'authored `[\'2026-01-01\']` meant a point window on ObjectQLStrategy, NO time clause at '
+        + 'all on NativeSQLStrategy (the whole of history), an unbounded-above window in the '
+        + 'draft-preview evaluator, and a shifted point window in DatasetExecutor.runCompare — the '
+        + 'same document, four backends, four different numbers, no error on any of them. PR '
+        + '#17593 made all four faces refuse it with the ADR-0112 envelope `400 '
+        + 'ANALYTICS_DATE_RANGE_UNRECOGNIZED`, which left the contract door LOOSER than every '
+        + 'reader behind it; this narrowing closes that gap at the door. ⚠️ No D2 conversion and '
+        + 'no stored-metadata rewrite, deliberately: rewriting `[\'2026-01-01\']` to the same day '
+        + 'twice at load would be the platform deciding, silently, that the author meant one day '
+        + 'rather than a window whose end they forgot — and for the empty array and 3+ bounds '
+        + 'there is nothing to decide FROM. The blast radius is the WIDGET, not the page: a stored '
+        + 'dashboard carrying a now-refused range loses that widget with the accurate refusal '
+        + 'shown, and the dashboard still loads. Since PR #17593 every such stored range already '
+        + 'failed at QUERY time with the same code and status, so this adds no new class of '
+        + 'breakage — it moves the refusal to authoring time and states it accurately. '
+        + 'ADR-0049 / ADR-0087 / ADR-0112.',
+      acceptanceCriteria:
+        'Grep every authored `timeDimensions[].dateRange` ARRAY — dashboard widget datasets, saved '
+        + 'analytics queries, SDK / MCP callers, in-process `AnalyticsService.query` calls — and '
+        + 'count its bounds. Two string bounds parse byte-identically to before, as do every preset '
+        + 'name and an absent `dateRange`; anything else now answers one prescriptive issue at '
+        + '`timeDimensions.N.dateRange` naming the arity it received, so `AnalyticsQuerySchema.'
+        + 'safeParse` and `POST /analytics/query` both make the sweep mechanical. ⚠️ Do not trust '
+        + 'the numbers a one-element window used to produce: the four analytics faces disagreed '
+        + 'about what it meant, so a widget that showed a plausible figure may have been reading '
+        + 'all of history on one backend and a single day on another. Re-check what each converted '
+        + 'widget was supposed to show against its two explicit bounds.',
     },
     {
       id: 'analytics-time-dimension-date-range-vocabulary-closed',
@@ -14310,6 +14387,45 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // parse) and the D3 semantic entry named below.
     // D3 semantic entry: `training-deadline-keys-retired`.
     'system/TrainingPlan:reminderDaysBefore',
+    // #17751 — ADR-0049 enforce-or-remove (maintainer decision batch #118 item 2,
+    // 2026-09-12: recommendation C, judge the protocol wrong for this one key).
+    // The third and last member of the `aria` family retired on the same measured
+    // evidence: `dashboard.aria` at the #3896 close-out, `dashboard.widgets[].aria`
+    // at #5010, and now the block-local spelling one level further in, inside the
+    // widget's `chartConfig`. It outlived the first two sweeps by DEPTH, not by
+    // evidence — `widgets.chartConfig` was an undrilled container, so no key inside
+    // it had ever been classified until the per-key pass recorded in
+    // `liveness/dashboard.json` at the `.objectui-sha` pin `53ded82bf7a4`. That pass
+    // found `aria` to be the one `ChartConfigSchema` key with no reader on EITHER
+    // face: `AdvancedChartImpl` declares no `aria` prop, `chartConfigPresentation`
+    // names it nowhere (its docblock calls it "the one declared key with no reader
+    // at all"), `SchemaRenderer`'s ARIA injection reads flat node props and never a
+    // nested `aria` object, and `ui/react-blocks.ts` omits it from `<ObjectChart>`'s
+    // thirteen `dataProps` — the one key of this shape missing from that list.
+    // Pinned as a negative from both spellings in objectui ("ignores
+    // chartConfig.aria", "ignores aria — nested and flattened").
+    //
+    // REMOVE rather than ENFORCE, which is the less usual ADR-0049 answer and is
+    // the whole of the ruling: this same chart config already carries a WORKING
+    // accessible-name channel in `description`, lowered onto the chart graphic as
+    // `role="img"` + `aria-label` and pinned in the DOM. Wiring `aria` too would
+    // put two accessible-name sources on one element and demand a precedence rule
+    // nobody has written. One node, one accessibility vocabulary — which on the
+    // surfaces that really render DOM is the shared `AriaProps` block, untouched
+    // and still live on `page.aria`, `page.components[].aria` and the list view
+    // `aria`.
+    //
+    // `retiredKey()` rather than a bare deletion even though `ChartConfigSchema` IS
+    // a `strictObject`: a bare delete would still be loud, but as a generic
+    // unrecognized-key rejection that cannot carry the prescription — the exact
+    // distinction `aria-carrier-tombstones.test.ts` asserts by name for the widget
+    // twin. Sources are rewritten by the D2 conversion `chart-config-aria-removed`.
+    //
+    // Registered under 18, not 17: v17 was cut before this landed, so the tombstone
+    // ships on the 17.x line (launch-window convention — accept-set narrowings ride
+    // minor releases) and the prescription lives at the major boundary where
+    // `migrate meta` users look.
+    'ui/ChartConfig:aria',
     // #15680 (stack card 5/6 of #14478) — ruling B. `dashboard.refreshInterval`
     // said "Auto-refresh interval in seconds" in prose and nothing else. The three
     // rename-hint aliases beside it — `refresh`, `autoRefresh`, `pollInterval` —
@@ -14797,6 +14913,18 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // entries of every `record:highlights` `fields[]` (pure lossless delete — the
     // chip renders label and value only, so the key never had an effect to lose).
     'ui/RecordHighlightsField:icon',
+    // #17751 — the SECOND key one tombstone produced. `ReportChartSchema` is a
+    // `ChartConfigSchema.extend(...)`, and an extension copies the retired property
+    // into its own walked shape, which `authorable-surface/` marks `[RETIRED]`
+    // separately. Registered per key, as the gate reads them — nothing radiates
+    // from the base (the `shared/FieldMapping:transform` precedent). See
+    // `18.ui__ChartConfig__aria.ts` for the evidence and the ruling.
+    //
+    // The report face is where this key was authorable at two depths —
+    // `reports[].chart.aria` and `reports[].blocks[].chart.aria`, a `joined` report
+    // carrying both — and the D2 conversion `chart-config-aria-removed` strips all
+    // of them together with the dashboard site.
+    'ui/ReportChart:aria',
     // </os-generated retired-key:18>
   ],
 };

@@ -919,6 +919,26 @@ function renderType(prop: any, ctx: TypeContext | undefined, depth: number): str
   }
 
   if (prop.type === 'array') {
+    // A TUPLE first. Draft-2020-12 spells the fixed positions as `prefixItems`
+    // and leaves `items` absent (draft-7 spelled the same thing as an ARRAY in
+    // `items`), so the element branch below would render the type of `undefined`
+    // and print `any[]` — a cell strictly WEAKER than the schema it describes,
+    // on every tuple in the spec. Measured before this branch existed: the
+    // `timeDimensions[].dateRange` window and `ListView.map.center` both read
+    // `any[]`, while the JSON Schema beside them carried both element types.
+    const positions = Array.isArray(prop.prefixItems) ? prop.prefixItems
+      : Array.isArray(prop.items) ? prop.items
+      : null;
+    if (positions) {
+      const rendered = positions.map((position: any) => renderType(position, ctx, depth));
+      // A tuple may also declare a REST element (`z.tuple([…]).rest(x)`), which
+      // 2020-12 puts in `items` beside `prefixItems`. Spelling it keeps the cell
+      // from claiming a fixed length the schema does not have.
+      const rest = Array.isArray(prop.prefixItems) && prop.items && !Array.isArray(prop.items)
+        ? `, ...${renderType(prop.items, ctx, depth)}[]`
+        : '';
+      return `[${rendered.join(', ')}${rest}]`;
+    }
     const element = renderType(prop.items, ctx, depth);
     // An open object element renders as an intersection and a multi-variant
     // element as a union — `[]` would re-associate either — so parenthesize

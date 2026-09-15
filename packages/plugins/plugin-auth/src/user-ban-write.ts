@@ -16,7 +16,7 @@
  * write better-auth's own `banUser` handler makes (`banned` / `banReason` /
  * `banExpires` / `updatedAt`), so the vendor's `session.create` hook
  * (`BANNED_USER`) enforces both halves identically. The break-glass
- * last-administrator guard (ADR-0024 D5.2, `last-admin-guard.ts`) judges the
+ * last-administrator guard (ADR-0135 D5.2, `last-admin-guard.ts`) judges the
  * write at the ENGINE, so it holds on both callers by construction — neither
  * can reach the column without passing it.
  *

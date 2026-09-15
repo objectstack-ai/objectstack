@@ -23,9 +23,11 @@ export {
 export {
   SharingRuleService,
   type SharingRuleServiceOptions,
-  // [#14754] The spec's `SharingRuleEvaluationResult` plus the pass's
-  // `grantsRefused` count. Additive: the six declared fields are unchanged, and
-  // a consumer typed against the spec contract keeps compiling untouched.
+  // [#14754, #14969] The spec's `SharingRuleEvaluationResult` with its OPTIONAL
+  // `grantsRefused` NARROWED to REQUIRED — this implementation always counts
+  // refusals, so a caller holding this type never has to read an absent key as
+  // "no grant was refused". The narrowing is covariant, so consumers typed
+  // against the spec contract are unaffected: for them the key stays optional.
   type SharingRuleReconcilePassResult,
 } from './sharing-rule-service.js';
 export {

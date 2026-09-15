@@ -1774,7 +1774,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       domain_verified: {
         label: "ドメイン検証済み",
-        help: "メールドメインの DNS 所有権が証明済みかどうか（ADR-0024 ②）。DNS TXT レコードが解決した後、「ドメインを検証」により設定されます。better-auth が管理し、直接編集はできません。環境でドメイン検証が有効な場合にのみ適用されます。"
+        help: "メールドメインの DNS 所有権が証明済みかどうか（ADR-0135 D6）。DNS TXT レコードが解決した後、「ドメインを検証」により設定されます。better-auth が管理し、直接編集はできません。環境でドメイン検証が有効な場合にのみ適用されます。"
       },
       oidc_config: {
         label: "OIDC 設定",

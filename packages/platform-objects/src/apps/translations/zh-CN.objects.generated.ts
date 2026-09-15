@@ -1774,7 +1774,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       domain_verified: {
         label: "域名已验证",
-        help: "是否已证明对该邮箱域名的 DNS 所有权（ADR-0024 ②）。在 DNS TXT 记录解析后由“验证域名”设置。由 better-auth 管理——不可直接编辑。仅在本环境启用域名验证时强制执行。"
+        help: "是否已证明对该邮箱域名的 DNS 所有权（ADR-0135 D6）。在 DNS TXT 记录解析后由“验证域名”设置。由 better-auth 管理——不可直接编辑。仅在本环境启用域名验证时强制执行。"
       },
       oidc_config: {
         label: "OIDC 配置",

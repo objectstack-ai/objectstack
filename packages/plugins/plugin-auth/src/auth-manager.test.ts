@@ -3032,7 +3032,7 @@ describe('AuthManager', () => {
       }
     });
 
-    // ADR-0024 / cloud#551 — OS_SSO_ENABLED uses the shared `readBooleanEnv`
+    // ADR-0135 D6 / cloud#551 — OS_SSO_ENABLED uses the shared `readBooleanEnv`
     // parser, so the platform-standard truthy/falsy set works (not only the
     // literal `'true'`). Operators kept setting `OS_SSO_ENABLED=1` and getting
     // a silently-disabled RP.
@@ -4724,7 +4724,7 @@ describe('getPublicConfig devSeedAdmin (dev-only login hint)', () => {
 });
 
 // ---------------------------------------------------------------------------
-// [#10009] `isPlatformAdminUserId` — the criterion the ADR-0024
+// [#10009] `isPlatformAdminUserId` — the criterion the ADR-0135 D6
 // `/sso/register` before-hook now judges on.
 //
 // This block replaces the #5942 `isOrgOrPlatformAdmin` block that stood here.
@@ -4826,7 +4826,7 @@ describe('isPlatformAdminUserId – the /sso/register criterion is platform-admi
   });
 
   // -- (3) fail-closed floor -------------------------------------------------
-  describe('fail-closed floor (ADR-0024)', () => {
+  describe('fail-closed floor (ADR-0135 D6)', () => {
     it('refuses a plain member with no grant', async () => {
       expect(await judge(makeEngine({ members: [memberRow('member')] }))).toBe(false);
     });

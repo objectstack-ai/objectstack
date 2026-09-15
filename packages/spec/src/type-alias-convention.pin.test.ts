@@ -268,9 +268,12 @@ import type * as M183 from './api/sortability.zod.js';
 import type * as M184 from './shared/value-domain.zod.js';
 // [#15676] The shared epoch-millisecond instant — new module, next free index.
 import type * as M185 from './shared/epoch.zod.js';
+// [#18122] The closed duration vocabulary beside that instant — new module,
+// next free index (M186 is `automation/schedule-organization.zod.ts`).
+import type * as M187 from './shared/duration.zod.js';
 
 // ---------------------------------------------------------------------------
-// 783 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
+// 785 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
 //
 // That number is machine-checked, not hand-kept. The runtime companion at the
 // bottom of this file recomputes the pin count from the source and asserts that
@@ -1016,6 +1019,15 @@ export type Iso502 = Assert<Eq< z.input< typeof M115.ProtectionSchema >, z.infer
 // `z.number().int()`: no default, no transform, the (RISE) case.
 export type Iso868 = Assert<Eq< z.input< typeof M185.EpochMs >, z.infer< typeof M185.EpochMs > >>;
 
+// shared/duration.zod.ts — the closed DURATION vocabulary (#18122), step ① of
+// ruling A on #18115 and the counterpart of the instant above. Both are
+// `z.number().int().nonnegative()`: no default, no transform, the (RISE) case.
+// The refinement is deliberate rather than incidental, so these two pins are
+// what goes red the day someone gives a duration type a `.default()` — which
+// would put the author state and the parsed state on different sides of it.
+export type Iso873 = Assert<Eq< z.input< typeof M187.DurationMs >, z.infer< typeof M187.DurationMs > >>;
+export type Iso874 = Assert<Eq< z.input< typeof M187.DurationSeconds >, z.infer< typeof M187.DurationSeconds > >>;
+
 // shared/value-domain.zod.ts — the ONE standard-domain vocabulary (#14168);
 // `SpecifierValueDomainSchema` (Iso758) is an alias of it, so both pins hold
 // or fall together. A `z.enum` has no default or transform, the (RISE) case.
@@ -1654,7 +1666,7 @@ describe('ADR-0122 type-alias convention', () => {
   // this title and the section header above the pin list — are now asserted
   // against the recomputed count below, so neither can go stale without a red
   // test naming it.
-  it('still declares all 783 isomorphic pins', () => {
+  it('still declares all 785 isomorphic pins', () => {
     // The truth of each pin is proved by tsc, not here — an `Assert<Eq<...>>`
     // that stops holding is a compile error with the alias named. What tsc
     // cannot notice is a pin that was DELETED: removing the assertion removes
@@ -2184,7 +2196,21 @@ describe('ADR-0122 type-alias convention', () => {
     // `Iso872`, the next free id after the merged file's maximum; ids are
     // claims about pins, not positions, so the collision costs nothing but a
     // number. The merged count is 811 - 30 + 1 + 1.
-    expect(pins).toHaveLength(783);
+    //
+    // 783 -> 785 is #18122's closed DURATION vocabulary (shared/duration.zod.ts,
+    // new module slot M187): `DurationMs` and `DurationSeconds`, the declared
+    // half of ruling A on #18115 and the counterpart of `EpochMs` (`Iso868`)
+    // one block above. Both are `z.number().int().nonnegative()` with no
+    // default and no transform — the (RISE) case twice, two new pins. +2 added.
+    //
+    // Note what these two pins are FOR, because the schemas are trivial and the
+    // reason is not: the whole point of the vocabulary is that the unit rides on
+    // the VALUE, so a site composes `DurationSeconds.default(60 * 60 * 24)`
+    // rather than the type carrying a default of its own. The day someone moves
+    // that default onto the shared type instead, author state and parsed state
+    // part company for every key in the family at once, and these are the lines
+    // that say so by name.
+    expect(pins).toHaveLength(785);
 
     // The count is stated in PROSE twice as well — this case's title and the
     // section header above the pin list — and until #6605 nothing read either

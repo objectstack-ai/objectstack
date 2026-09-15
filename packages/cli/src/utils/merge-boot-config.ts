@@ -27,7 +27,7 @@
  *   publicly (ADR-0056 D2, the v12 migration note). Authoring it did nothing:
  *   the value never reached the REST plugin, so the boot warning that is supposed
  *   to make a fail-open posture visible never fired either.
- * - `api.enforceProjectMembership` — the ADR-0024 D9 opt-out from the
+ * - `api.enforceProjectMembership` — the ADR-0135 D9 opt-out from the
  *   `sys_environment_member` 403 gate. Silently fell back to the dispatcher
  *   default.
  *

@@ -22,15 +22,14 @@ import { ExpressionEngine, collectCelRootIdentifiers } from '@objectstack/formul
 // a third answer to a question the codebase already answered two ways.
 import { createRecordOrganizationResolver, type RecordOrganizationResolver } from '@objectstack/metadata-core';
 import { keysetWalk, strandedDecisionFailure } from '@objectstack/types';
-// [#15981] `BUILTIN_IDENTITY_PLATFORM_ADMIN` is deliberately absent: the
-// platform arm of `isOverrideActor` reads the ADR-0095 rung, never the name.
-// The two org-level built-ins below are a NARROWER question and are untouched
-// here — see that predicate's doc block.
+// [#15981 / #16166] Every built-in identity NAME is deliberately absent here:
+// both arms of `isOverrideActor` read an ADR-0095 capability rung, never a name.
+// `BUILTIN_IDENTITY_PLATFORM_ADMIN` went with the platform arm's name read and
+// `BUILTIN_IDENTITY_ORG_OWNER` / `_ORG_ADMIN` with the tenant arm's — see that
+// predicate's doc block.
 import {
   ADMIN_FULL_ACCESS,
   ORGANIZATION_ADMIN_GRANTS,
-  BUILTIN_IDENTITY_ORG_OWNER,
-  BUILTIN_IDENTITY_ORG_ADMIN,
 } from '@objectstack/spec/identity';
 import type {
   IApprovalService,
@@ -1367,15 +1366,16 @@ export class ApprovalService implements IApprovalService {
    * A platform admin crosses the tenant wall (matching the unscoped
    * `admin_full_access` evidence); a tenant admin may override only within their
    * own org (or an org-less request). A system context always passes. Signals are
-   * read defensively off the resolved exec context (`permissions` / `positions` /
-   * the derived `posture`, ADR-0095) so any transport that resolves through the
-   * shared authz resolver lights this up without extra wiring.
+   * read defensively off the resolved exec context (`permissions` and the derived
+   * `posture`, ADR-0095) so any transport that resolves through the shared authz
+   * resolver lights this up without extra wiring. ⛔ NOT `positions` — on BOTH
+   * rungs now: that array carries names, and a name is not an authority (see the
+   * two blocks inside).
    */
   private isOverrideActor(context: ExecutionContext, requestOrg?: string | null): boolean {
     if (!context) return false;
     if (context.isSystem) return true;
     const perms = Array.isArray(context.permissions) ? context.permissions : [];
-    const positions = Array.isArray(context.positions) ? context.positions : [];
     // [#7135] A DECLARED read. `posture` (ADR-0095 D2) is resolved by
     // `resolveAuthzContext` and is a field of the envelope the contract has
     // named here since #6523 — the doc block above already says it is the
@@ -1402,10 +1402,29 @@ export class ApprovalService implements IApprovalService {
     const isPlatformAdmin = posture === 'PLATFORM_ADMIN'
       || perms.includes(ADMIN_FULL_ACCESS);
     if (isPlatformAdmin) return true;
+    // ⛔ [#16166] The tenant counterpart of the platform rule above — and
+    // deliberately NOT the same expression. ADR-0095 D3 derives `TENANT_ADMIN`
+    // in `derivePosture` from `ORGANIZATION_ADMIN_GRANTS.some(n =>
+    // permissions.includes(n))` and from nothing else, and
+    // `packages/spec/src/identity/eval-user.zod.ts` declares those two grants
+    // the source of truth for that rung. So the two arms below are ONE authority
+    // read in two spellings — kept apart only so a transport that never resolved
+    // `posture` still reads the held capability — and neither of them is the
+    // platform side's literal copied across.
+    //
+    // There is NO `positions.includes(BUILTIN_IDENTITY_ORG_OWNER | _ORG_ADMIN)`
+    // arm any more, for the same reason the platform arm lost its name read:
+    // ADR-0068 D2 declares those names a normalized PROJECTION into `positions`
+    // whose sources of truth are elsewhere (`sys_member.role`), while the same
+    // array also carries ADR-0057 D4 `sys_user_position` values — so a stored
+    // row spelling one arrived here with no authority behind it, and an OR is
+    // only as strong as its weakest arm. The write door refuses such a row today
+    // (`plugin-security`'s `reserved_identity_position` rule), but that ruling
+    // refused new writes WITHOUT a migration, so rows predating it still resolve
+    // on every request — and a reader that trusts a name is not an invariant in
+    // any case. Driven in `approval-tenant-positions-name-authority.test.ts`.
     const isTenantAdmin = posture === 'TENANT_ADMIN'
-      || ORGANIZATION_ADMIN_GRANTS.some((n) => perms.includes(n))
-      || positions.includes(BUILTIN_IDENTITY_ORG_OWNER)
-      || positions.includes(BUILTIN_IDENTITY_ORG_ADMIN);
+      || ORGANIZATION_ADMIN_GRANTS.some((n) => perms.includes(n));
     if (!isTenantAdmin) return false;
     // A tenant admin's authority stops at their own org; a null-org request is
     // global and any admin may release it.
