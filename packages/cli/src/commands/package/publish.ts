@@ -685,12 +685,16 @@ export default class PackagePublish extends Command {
         verBody.install_env_id = installEnvId;
         verBody.seed_sample_data = flags['seed-sample-data'];
         if (installEnvFromActive) {
-          printStep(`Installing into the active environment ${installEnvId} (os environments switch)`);
+          printStep(
+            `Installing into the active environment ${installEnvId} `
+            + '(os environments switch / os environments create --activate)',
+          );
         }
       } else if (flags.install && !installEnvId) {
         printError(
           '`--install` requires `--env <id>`, $OS_ENVIRONMENT_ID, or an active environment '
-          + '(`os environments switch <id>` against this control plane). Skipping auto-install.',
+          + '(`os environments switch <id>` or `os environments create --activate` against this '
+          + 'control plane). Skipping auto-install.',
         );
       }
 

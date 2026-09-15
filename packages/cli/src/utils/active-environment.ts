@@ -31,6 +31,16 @@
  * and `os environments` authenticating as the runtime identity is deliberate).
  * When the control plane it just talked to IS `cloud.json`'s server, it records
  * the same id there too — and that is the copy the publish reads back.
+ *
+ * ## Two writers, ONE gate
+ *
+ * `os environments switch <id>` is not the only command that names an active
+ * environment: `os environments create --activate` (the default) names the one
+ * it just provisioned, and that is the FIRST half of the flow this module
+ * exists for — create your own cloud dev environment, publish into it, with no
+ * `switch` anywhere. Both writers call `recordCloudActiveEnvironmentId` and
+ * neither carries a url check of its own: a second copy of this gate is how
+ * one of the two stops gating while every test still passes.
  */
 
 import { readAuthConfig } from './auth-config.js';
