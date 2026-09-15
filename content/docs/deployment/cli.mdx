@@ -1795,7 +1795,7 @@ spells them, so one consumer reads both commands.
 |---------|-------------|
 | `os environments list` | List environments visible to the current session |
 | `os environments show <id>` | Show one environment |
-| `os environments create` | Provision a new environment |
+| `os environments create` | Provision a new environment. With `--activate` (the default) the new environment becomes the active one, recorded in `~/.objectstack/cloud.json` as well when the control plane it talked to is the one `os cloud login` recorded — so [`os package publish --install`](#os-package-publish) can install into it with no `switch` in between |
 | `os environments switch <id>` | Set the active environment for later CLI calls. Recorded in `~/.objectstack/cloud.json` as well when the control plane it talked to is the one `os cloud login` recorded, so [`os package publish --install`](#os-package-publish) can use it |
 | `os environments bind <id>` | Bind a compiled local artifact to an existing environment |
 
@@ -1865,7 +1865,8 @@ OS_CLOUD_URL=http://localhost:4000 os package publish     # against a local cont
 token at all the command exits `1` and tells you to run `os cloud login`.
 
 **The install target follows the same split.** `--install` with no `--env` uses
-the environment `os environments switch` recorded **in `cloud.json`**, and that
+the environment `os environments switch` — or `os environments create
+--activate` — recorded **in `cloud.json`**, and that
 id is only used when `cloud.json`'s `url` is the control plane this publish is
 POSTing to. It is never read out of `credentials.json`: the two files name
 different servers (`credentials.json` defaults to `http://localhost:3000`), so
@@ -1888,7 +1889,7 @@ when both files' `url`s agree.
 | `--category <slug>` | — | Marketplace category slug (`crm`, `hr`, `devtools`, …) |
 | `--visibility <level>` | — | `org` (default, installable across your organization) · `private` (explicit grants only) · `marketplace` (public after review) |
 | `--org <id>` | `OS_ORG_ID` | `owner_org_id`. Required with a bearer key in service mode; ignored in user mode |
-| `--env <id>` | `OS_ENVIRONMENT_ID` | Environment to install the new version into. Defaults to the environment [`os environments switch`](#cloud-environments) recorded **for this control plane** in `~/.objectstack/cloud.json` |
+| `--env <id>` | `OS_ENVIRONMENT_ID` | Environment to install the new version into. Defaults to the environment [`os environments switch`](#cloud-environments) — or `os environments create --activate` — recorded **for this control plane** in `~/.objectstack/cloud.json` |
 | `--install` | — | Auto-install into `--env` after publishing. With no `--env`, no `$OS_ENVIRONMENT_ID` and no active environment for this control plane, it reports that and publishes without installing |
 | `--seed-sample-data` | — | Include sample data in that auto-install |
 | `--pre-release` | — | Mark the version as a pre-release (also inferred — see below) |

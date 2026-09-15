@@ -137,7 +137,8 @@ os package publish
 # explicit artifact + install into an environment in one step
 os package publish ./dist/objectstack.json --env env_prod --install
 
-# no --env: installs into the environment `os environments switch` last selected
+# no --env: installs into the active environment (`os environments switch`,
+# or `os environments create --activate`)
 os package publish --install
 ```
 
@@ -157,7 +158,7 @@ Common flags:
 | `--version`, `-v` | — | Semver version (default: `artifact.manifest.version`) |
 | `--visibility` | — | `org` (default) · `private` · `marketplace` |
 | `--org` | `OS_ORG_ID` | Owner org id (service mode) |
-| `--env` | `OS_ENVIRONMENT_ID` | Environment to install the new version into. Defaults to the environment `os environments switch` recorded for this control plane in `~/.objectstack/cloud.json` |
+| `--env` | `OS_ENVIRONMENT_ID` | Environment to install the new version into. Defaults to the environment `os environments switch` (or `os environments create --activate`) recorded for this control plane in `~/.objectstack/cloud.json` |
 | `--install` | — | Auto-install the new version into `--env` after publishing |
 
 The `--env` default is read from the **cloud** credential store only, and only
