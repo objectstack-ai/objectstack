@@ -366,36 +366,118 @@ export const AnalyticsDateRangePresetSchema = z.enum(DATE_RANGE_PRESETS);
 export type AnalyticsDateRangePreset = z.input<typeof AnalyticsDateRangePresetSchema>;
 
 /**
+ * The `received …` clause of {@link analyticsDateRangeRefusalMessage} — what is
+ * actually wrong with a value that is not a string, stated so an author can act
+ * on it.
+ *
+ * ⚠️ Since the array arm narrowed to exactly two bounds (#17598) an array is
+ * refused for its ARITY with every bound a perfectly good string, so
+ * "an array with a non-string bound" — the one description this clause used to
+ * carry for every array — is FALSE for `['2026-01-01']`, `[]` and
+ * `[a, b, c]`. The arity and the bad bound are named separately, and neither is
+ * claimed when it is not true.
+ */
+function describeRefusedDateRange(input: unknown): string {
+  if (input === null) return 'null';
+  if (!Array.isArray(input)) return typeof input;
+  const hasNonStringBound = input.some((bound) => typeof bound !== 'string');
+  if (input.length === 2) {
+    // Two bounds is the arity the contract asks for, so the only way such an
+    // array reaches a refusal is a bound that is not a string.
+    return hasNonStringBound ? 'an array with a non-string bound' : 'a two-element array';
+  }
+  const arity = input.length === 0 ? 'an empty array' : `a ${input.length}-element array`;
+  return hasNonStringBound
+    ? `${arity} with a non-string bound, not the two bounds [start, end]`
+    : `${arity}, not the two bounds [start, end]`;
+}
+
+/**
  * The one refusal wording for a `timeDimensions[].dateRange` value outside
  * the closed contract — shared by the schema door (this file) and, through
  * the `ANALYTICS_DATE_RANGE_UNRECOGNIZED` envelope, by the runtime door and
  * the drivers (#16322), so one condition keeps one wording (the #5240
  * convention). A bare string is judged against {@link DATE_RANGE_PRESETS};
- * anything that is neither a preset name nor an array is described by type.
+ * anything that is neither a preset name nor a two-bound window is described
+ * by {@link describeRefusedDateRange}, i.e. by what is wrong with it.
+ *
+ * ## ⭐ The ORIGIN is a PARAMETER, not a sentence each caller rewrites
+ *
+ * Where the refusal happened is the one clause no INPUT can supply: the same
+ * value is refused at parse time by {@link AnalyticsDateRangeSchema} and, for a
+ * caller past that door, in-process by `analyticsDateRangeUnrecognizedError`
+ * (`@objectstack/core`) — `AnalyticsService.query`, `queryDataset` and the
+ * dataset executor behind it reached IN PROCESS, and a driver's cube face
+ * called directly. ⚠️ Every REST analytics route is a SCHEMA-origin door,
+ * `POST /analytics/dataset/query` included: since PR #17548, the PR that
+ * landed that door for card #17058, the route parses its selection's shared
+ * members — `timeDimensions` among them — against
+ * `AnalyticsQuerySchema.pick(…)` ahead of the executor, so that route's
+ * refusal is THIS schema's and says so. Until this parameter existed the
+ * shared sentence asserted the SCHEMA origin for both, so an author refused past
+ * the door was sent to inspect a parse call that never ran; the one package that
+ * noticed (`service-analytics`, #17593) had to OVERWRITE the message instead of
+ * reusing it, which is one condition with two wordings — exactly what the #5240
+ * convention exists to prevent.
+ *
+ * ⛔ There is no default. A defaulted origin makes the same false assertion,
+ * silently, for every caller who does not think about it.
+ *
+ * @param input - the refused value, exactly as it arrived.
+ * @param origin - `'schema'` when {@link AnalyticsDateRangeSchema} itself refused
+ *   the value at parse time, `'runtime'` when a reader past that door did.
  */
-export function analyticsDateRangeRefusalMessage(input: unknown): string {
+export function analyticsDateRangeRefusalMessage(
+  input: unknown,
+  origin: 'schema' | 'runtime',
+): string {
   const window = 'an explicit window is the two-element array [start, end] of ISO dates or '
-    + '{date-macro} tokens — e.g. ["2026-01-01", "2026-01-31"] or ["{7_days_ago}", "{today}"]';
+    + '{date-macro} tokens — e.g. ["2026-01-01", "2026-01-31"] or ["{7_days_ago}", "{today}"], '
+    + 'and a single day is that day written as BOTH bounds — ["2026-01-20", "2026-01-20"]';
+  const refusedAt = origin === 'schema'
+    ? 'Refused at the schema'
+    : 'Refused past the schema door, by the analytics reader that received it';
   if (typeof input === 'string') {
     return (
       `${JSON.stringify(input)} is not a dateRange the platform can resolve. A bare string must `
       + `be one of the declared date-range PRESET names (${DATE_RANGE_PRESETS.join(', ')}) — the `
       + `same closed vocabulary the dashboard date filter uses, case-sensitive, snake_case; `
-      + `${window}. Refused at the schema (ANALYTICS_DATE_RANGE_UNRECOGNIZED / 400): an `
+      + `${window}. ${refusedAt} (ANALYTICS_DATE_RANGE_UNRECOGNIZED / 400): an `
       + 'unrecognised spelling used to reach the driver as written and silently widen the window '
       + 'to every row instead of the one you named.'
     );
   }
-  const received = input === null ? 'null' : Array.isArray(input) ? 'an array with a non-string bound' : typeof input;
   return (
     `dateRange must be a date-range preset name (${DATE_RANGE_PRESETS.join(', ')}) or `
-    + `${window}; received ${received}. Refused at the schema (ANALYTICS_DATE_RANGE_UNRECOGNIZED / 400).`
+    + `${window}; received ${describeRefusedDateRange(input)}. `
+    + `${refusedAt} (ANALYTICS_DATE_RANGE_UNRECOGNIZED / 400).`
   );
 }
 
 /**
  * `timeDimensions[].dateRange` — a preset name from the closed vocabulary, or
- * an explicit `[start, end]` window.
+ * an explicit `[start, end]` window: EXACTLY two string bounds.
+ *
+ * ## ⭐ Why the array arm is a PAIR and not a `string[]` (#17598)
+ *
+ * It was `z.array(z.string())`, with no length constraint, while the refusal
+ * sentence three functions up said "the two-element array [start, end]" and
+ * #16322's shipped migration table told an author to write a single day as
+ * `['2026-01-20', '2026-01-20']`. So `['2026-01-01']`, `[]` and `[a, b, c]`
+ * passed the CONTRACT DOOR and were then refused by every reader behind it
+ * (#17593 aligned all four analytics faces on "not exactly two bounds is a
+ * refusal"): the door was looser than everything it guards, and only the TYPE
+ * was weaker than the sentence beside it. Maintainer ruling A on #17598
+ * (decision batch #117 item 3, 2026-09-12) closed that gap in the direction
+ * the file already documented — an accept-set NARROWING back onto declared
+ * prose, not a new rule.
+ *
+ * A tuple rather than `z.array(z.string()).length(2)` because the ruling is
+ * that "the type says what the prose says": `[string, string]` states the
+ * arity to the AUTHOR's compiler, before any parse runs. The ADR-0087 semantic
+ * migration entry `analytics-date-range-array-two-bounds-required` carries the
+ * rewrite (a one-element window becomes the same day twice; an empty array and
+ * 3+ bounds have no conversion and get the structured TODO).
  *
  * @example
  * <!-- os:check -->
@@ -406,6 +488,7 @@ export function analyticsDateRangeRefusalMessage(input: unknown): string {
  *   { dimension: 'created_at', granularity: 'day', dateRange: 'last_7_days' },
  *   { dimension: 'created_at', granularity: 'month', dateRange: ['2023-01-01', '2023-01-31'] },
  *   { dimension: 'created_at', dateRange: ['{30_days_ago}', '{today}'] },
+ *   { dimension: 'created_at', dateRange: ['2026-01-20', '2026-01-20'] }, // one day: both bounds
  * ];
  * ```
  *
@@ -416,12 +499,22 @@ export function analyticsDateRangeRefusalMessage(input: unknown): string {
  * (registered in `api/error-code-ledger.zod.ts`).
  */
 export const AnalyticsDateRangeSchema = z.union(
-  [AnalyticsDateRangePresetSchema, z.array(z.string())],
+  [AnalyticsDateRangePresetSchema, z.tuple([z.string(), z.string()])],
   {
     // Zod 4 reports a union with no matching arm as ONE `invalid_union` issue
     // at the union's own path, so the prescription lands on
     // `timeDimensions.N.dateRange` instead of on the two arms' generic texts.
-    error: (issue) => (issue.code === 'invalid_union' ? analyticsDateRangeRefusalMessage(issue.input) : undefined),
+    // That is also what keeps the ARITY refusal a single prescriptive issue
+    // rather than the tuple arm's own `too_big` / `too_small` text.
+    // ⚠️ At `error.issues` only. The ADR-0114 wire mapper EXPANDS a failed
+    // union into its branches (#5014), so the arm's arity text reaches a
+    // `fields[]` entry unless something drops it; `fieldsFromZodIssues`
+    // (`@objectstack/types`) does, for the branches at this union's own path,
+    // keyed on {@link isAnalyticsDateRangeRefusalIssue}. ⛔ Do not read this
+    // comment as covering the wire — that half is pinned at both REST doors.
+    error: (issue) => (
+      issue.code === 'invalid_union' ? analyticsDateRangeRefusalMessage(issue.input, 'schema') : undefined
+    ),
   },
 );
 export type AnalyticsDateRange = z.input<typeof AnalyticsDateRangeSchema>;

@@ -76,7 +76,7 @@ describe('AnalyticsQuerySchema.timeDimensions[].dateRange — closed vocabulary 
     }
   });
 
-  it('keeps the array arm exactly as it was — ISO dates or date-macro tokens', () => {
+  it('still accepts every two-bound array window — ISO dates or date-macro tokens', () => {
     for (const window of [
       ['2023-01-01', '2023-01-31'],
       ['{7_days_ago}', '{today}'],
@@ -115,7 +115,7 @@ describe('AnalyticsQuerySchema.timeDimensions[].dateRange — closed vocabulary 
       if (parsed.success) continue;
       expect(parsed.error.issues, JSON.stringify(spelling)).toHaveLength(1);
       expect(parsed.error.issues[0].path).toEqual(RANGE_PATH);
-      expect(parsed.error.issues[0].message).toBe(analyticsDateRangeRefusalMessage(spelling));
+      expect(parsed.error.issues[0].message).toBe(analyticsDateRangeRefusalMessage(spelling, 'schema'));
       expect(isAnalyticsDateRangeRefusalIssue(parsed.error.issues[0])).toBe(true);
     }
   });
@@ -147,7 +147,7 @@ describe('AnalyticsQuerySchema.timeDimensions[].dateRange — closed vocabulary 
   });
 
   it('spells the vocabulary in the refusal from the module, so the prescription cannot drift from the enum', () => {
-    const message = analyticsDateRangeRefusalMessage('Last 7 days');
+    const message = analyticsDateRangeRefusalMessage('Last 7 days', 'schema');
     for (const preset of DATE_RANGE_PRESETS) expect(message).toContain(preset);
     // And the standalone union reports the same wording as the nested field.
     const bare = AnalyticsDateRangeSchema.safeParse('Last 7 days');

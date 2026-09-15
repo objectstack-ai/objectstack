@@ -143,3 +143,47 @@ describe('#16041 — /analytics/query refuses an unrecognised dateRange string a
         expect(calls.query).toEqual([]);
     });
 });
+
+/**
+ * [#17598] The same door, the arity half. The array arm is exactly two string
+ * bounds now, so `['2026-01-01']` is refused here; the union's own issue is the
+ * prescription and names the arity, and the tuple arm's `Too small: expected
+ * array to have >=2 items` is that same condition in zod's words. One condition
+ * keeps one wording (#5240), ON THE WIRE — the served envelope, not
+ * `error.issues`, where the union has always been a single issue.
+ */
+describe('#17598 — an arity refusal carries one wording on the wire', () => {
+    const arities: Array<[string, unknown]> = [
+        ['one bound', ['2026-01-01']],
+        ['no bounds', []],
+        ['three bounds', ['2026-01-01', '2026-01-15', '2026-01-31']],
+    ];
+
+    for (const [name, dateRange] of arities) {
+        it(`${name}: the registered code, the prescription, and no second wording`, async () => {
+            const { res, calls } = await post('/analytics/query', body(dateRange));
+
+            expect(res.statusCode).toBe(400);
+            expect(res.body.error.code).toBe('ANALYTICS_DATE_RANGE_UNRECOGNIZED');
+            expect(res.body.error.message).toContain('not the two bounds [start, end]');
+            expect(res.body.error.message).not.toMatch(/Too (small|big)/);
+            expect(String(res.body.error.message).match(/timeDimensions\.0\.dateRange/g))
+                .toHaveLength(1);
+            expect(calls.query).toEqual([]);
+        });
+    }
+
+    it('a body wrong in MORE than the dateRange keeps the other diagnosis and still says the arity once', async () => {
+        const { res, calls } = await post('/analytics/query', body(['2026-01-01'], { granuarity: 'day' }));
+
+        expect(res.statusCode).toBe(400);
+        expect(res.body.error.code).toBe('VALIDATION_FAILED');
+        const fields: Array<{ field: string; code: string; message: string }> = res.body.error.details.fields;
+        // The typo'd key still speaks…
+        expect(fields.map((f) => f.code)).toContain('unknown_field');
+        // …and the dateRange condition is named exactly once, prescription only.
+        expect(fields.filter((f) => f.field === 'timeDimensions.0.dateRange')).toHaveLength(1);
+        expect(fields.some((f) => /Too (small|big)/.test(f.message))).toBe(false);
+        expect(calls.query).toEqual([]);
+    });
+});
