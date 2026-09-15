@@ -50,9 +50,10 @@
  *   QUOTED      a `{{WAS:…}}` value is not one stamp and nothing else, or names
  *               an instant LATER than the clock this act holds. See the
  *               direction section below.
- *   UNKNOWN     a `{{…}}` token survives substitution. A mistyped `{{now}}`
- *               would otherwise post literally AND leave the artefact
- *               unstamped, which is the quiet direction.
+ *   UNKNOWN     a double-brace opener that is not one of the two tokens. A
+ *               mistyped `{{now}}` would otherwise post literally AND leave the
+ *               artefact unstamped, which is the quiet direction. See the
+ *               opener scan below for what "not one of the two" now covers.
  *
  * ⛔ The positional refusal is NOT the mixed one widened for tidiness. Mixed
  * alone leaves the estimated stamp fully spellable — a seat that never types
@@ -92,6 +93,44 @@
  * stderr rather than refused: prose quoting a ruling's date is a reading of
  * something else, and refusing it would push seats back onto the channel this
  * tool exists to replace.
+ *
+ * ## EVERY `{{` is a token this tool can render, or the body is refused (#18284)
+ *
+ * The UNKNOWN refusal above used to run AFTER substitution, over whatever
+ * `{{…}}` the two regexes had left behind. Both of those regexes spell their
+ * payload `[^{}]*`, so a token-shaped opener whose payload carries a BRACE, or
+ * that never closes at all, matched neither one — it was not substituted,
+ * because nothing recognised it, and it was not refused either, because the
+ * leftover scan could not see it. It was copied to the board verbatim.
+ *
+ * That is not a hypothetical. A seat filled a `{{WAS:…}}` slot from a shell
+ * variable, the read failed, and the variable held a multi-line Node dump —
+ * which carries braces. `--dry-run` printed its DRY RUN line reporting "0
+ * token(s) substituted, 0 quoted stamp(s) rendered verbatim", the live write
+ * printed 「comment posted」, and the stored comment carried the opener, the
+ * dump and the closer. A leftover double-brace opener in a stored artefact is
+ * never intended by anyone.
+ *
+ * So the check moved AHEAD of substitution and changed what it walks: not the
+ * tokens a regex happens to match, but every `{{` in the body, each of which
+ * must be `{{NOW}}` or a `{{WAS:…}}` whose payload is brace-free and closed.
+ * Four shapes are refused there — an unknown token NAME, an opener with no
+ * closer, a brace inside the payload, a second opener before the first closes
+ * — and the refusal prints the offending span so the typo is findable.
+ *
+ * ⛔ The scan judges the SHAPE and stops. Whether an admitted `{{WAS:…}}`
+ * payload is really an instant, and one the clock has reached, stays with
+ * `stampRefusals` — two places deciding "what is a quoted stamp" is two
+ * spellings of one decision, which is the defect this file spends its length
+ * avoiding. What the scan guarantees `stampRefusals` is the thing that rule
+ * could not previously assume: that `maskQuotedStamps` consumed every opener,
+ * so the BARE-stamp scan underneath it is reading prose and not the inside of a
+ * token nobody could parse.
+ *
+ * ⛔ And the scan opens no escape hatch. There has never been one — no
+ * backslash form, no entity form — and a token inside backticks is still
+ * substituted, because a fence is a rendering instruction and the substitution
+ * runs on bytes. A body that must SHOW a token spells it some other way.
  *
  * ## ⚖️ Why this ACTS by default, where `sweep-closed-cards.mjs` dry-runs
  *
@@ -201,10 +240,132 @@ export const STAMP_TOKEN = '{{NOW}}';
  */
 export const QUOTED_TOKEN_RE = /\{\{WAS:([^{}]*)\}\}/;
 
-/** Any `{{…}}` token, used to catch the ones substitution did not consume. */
+/**
+ * Any well-formed `{{…}}` token — an opener, a brace-free payload, a closer.
+ * Read by the opener scan to tell a token with an unknown NAME (`{{now}}`, and
+ * the rest of the typo family) from one that does not close at all.
+ */
 export const ANY_TOKEN_RE = /\{\{[^{}]*\}\}/;
 
 const globalOf = (re) => new RegExp(re.source, 'g');
+const anchoredOf = (re) => new RegExp(`^${re.source}`);
+
+/** The double-brace pair every token in this contract is built out of. */
+const TOKEN_OPENER = '{{';
+const TOKEN_CLOSER = '}}';
+
+/** How much of an offending span a refusal prints. */
+export const SPAN_BYTES = 60;
+
+/**
+ * The C0 controls that have a spelling everybody reads; the rest get `\xNN`.
+ * ⛔ Written as escapes rather than as the bytes themselves — a raw control
+ * byte in a source file is what `check:nul-bytes` exists to keep out.
+ */
+const CONTROL_ESCAPES = Object.freeze({ '\n': '\\n', '\r': '\\r', '\t': '\\t' });
+const CONTROL_RE = /[\u0000-\u001f\u007f]/gu;
+
+/**
+ * An offending span as a refusal can print it: the first `SPAN_BYTES` BYTES,
+ * every control character spelled out, one line.
+ *
+ * Bytes rather than characters because the span this exists for is a shell
+ * variable that went wrong — a Node dump, a stack trace, a whole file — and a
+ * refusal that inlines it raw stops being readable at exactly the moment a
+ * reader needs it. The cut is taken on the byte, then a half-character left at
+ * the edge is dropped rather than printed as a replacement glyph.
+ */
+export function offendingSpan(text, limit = SPAN_BYTES) {
+  const buf = Buffer.from(String(text ?? ''), 'utf8');
+  const clipped = buf.byteLength > limit;
+  const head = clipped
+    ? buf.subarray(0, limit).toString('utf8').replace(/\uFFFD+$/u, '')
+    : buf.toString('utf8');
+  const shown = head.replace(CONTROL_RE, (ch) => CONTROL_ESCAPES[ch] ?? `\\x${ch.codePointAt(0).toString(16).padStart(2, '0')}`);
+  return `${shown}${clipped ? '…' : ''}`;
+}
+
+/** Why an opener is not a token, in the words the refusal prints. */
+export const OPENER_REASONS = Object.freeze({
+  'unknown-token-name': 'a well-formed token, but not one this tool knows',
+  'unclosed-opener': 'an opener with no closer after it anywhere in the body',
+  'brace-in-payload': 'a brace inside the payload, so no token ends here',
+  'nested-opener': 'a second opener before this one is closed',
+});
+
+/**
+ * Every `{{` in this text that is not one of the two tokens, in the order a
+ * reader meets them. An empty array is a body whose every opener renders.
+ *
+ * The walk is positional rather than a regex sweep on purpose: the defect this
+ * closes is an opener NO regex in this file matches, so a scan built out of
+ * those same regexes would walk straight past it again. What the regexes are
+ * still used for is recognition at a known position — anchored, so the one
+ * definition of "a quoted token" serves both the scan and the substitution.
+ */
+export function unrecognisedOpeners(text) {
+  const raw = String(text ?? '');
+  const quotedHere = anchoredOf(QUOTED_TOKEN_RE);
+  const anyHere = anchoredOf(ANY_TOKEN_RE);
+  const out = [];
+  let i = 0;
+  for (;;) {
+    const at = raw.indexOf(TOKEN_OPENER, i);
+    if (at === -1) return out;
+    const rest = raw.slice(at);
+
+    if (rest.startsWith(STAMP_TOKEN)) {
+      i = at + STAMP_TOKEN.length;
+      continue;
+    }
+    const quoted = quotedHere.exec(rest);
+    if (quoted) {
+      // A recognised SHAPE. Whether the payload is an instant the clock has
+      // reached is `stampRefusals`' rule, not this one.
+      i = at + quoted[0].length;
+      continue;
+    }
+    const wellFormed = anyHere.exec(rest);
+    if (wellFormed) {
+      out.push({ kind: 'unknown-token-name', at, span: wellFormed[0] });
+      i = at + wellFormed[0].length;
+      continue;
+    }
+
+    const close = raw.indexOf(TOKEN_CLOSER, at + TOKEN_OPENER.length);
+    if (close === -1) {
+      // Nothing after an unclosed opener can be resynchronised on: every later
+      // `{{` is arguably inside it. One refusal, naming where it starts.
+      out.push({ kind: 'unclosed-opener', at, span: rest });
+      return out;
+    }
+    const span = raw.slice(at, close + TOKEN_CLOSER.length);
+    out.push({
+      kind: span.slice(TOKEN_OPENER.length).includes(TOKEN_OPENER) ? 'nested-opener' : 'brace-in-payload',
+      at,
+      span,
+    });
+    i = close + TOKEN_CLOSER.length;
+  }
+}
+
+/** The refusal a caller reads when an opener is not a token this tool renders. */
+export function unrecognisedOpenerText(problems) {
+  const rows = (problems ?? []).map(
+    (p, i) => `  ${i + 1}. [${p.kind}] ${OPENER_REASONS[p.kind] ?? p.kind} — \`${offendingSpan(p.span)}\``,
+  );
+  return (
+    `post-stamped: REFUSED — ${rows.length} double-brace opener(s) in this body are not tokens this tool\n` +
+    '  can render. Nothing was written.\n' +
+    `${rows.join('\n')}\n\n` +
+    '  Posting them would put the literal text on the card AND leave the artefact unstamped, which is\n' +
+    '  the quiet direction: an opener nothing recognises is substituted by nothing and refused by\n' +
+    `  nothing. The tokens this tool knows are \`${STAMP_TOKEN}\` and \`{{WAS:YYYY-MM-DDThh:mmZ}}\`; a\n` +
+    '  mistyped one is a typo, and a typo must never decide whether a stamp was read. (Spans are\n' +
+    `  clipped to ${SPAN_BYTES} bytes with control characters escaped, so a payload that arrived from a\n` +
+    '  shell read gone wrong stays readable.)'
+  );
+}
 
 /** The clock, in the protocol's own spelling. */
 export function stampNow(ms = Date.now()) {
@@ -265,7 +426,7 @@ export function stampRefusals(text, nowMs = Date.now()) {
       refusals.push({
         kind: 'quoted-not-a-stamp',
         detail:
-          `\`{{WAS:${value}}}\` does not declare a stamp. The quoted route renders a reading of ` +
+          `\`{{WAS:${offendingSpan(value)}}}\` does not declare a stamp. The quoted route renders a reading of ` +
           'something else VERBATIM, so its contents must be one `YYYY-MM-DDThh:mmZ` and nothing else — ' +
           'it is a declaration, not a free-text escape from the contract.',
       });
@@ -353,6 +514,16 @@ export function renderBody(text, nowMs = Date.now()) {
         '  reader has to judge; supply a body with --file=PATH or on stdin.',
     };
   }
+  // ⛔ Ahead of `stampRefusals`, and not folded into it. Its bare-stamp scan
+  // reads `maskQuotedStamps`, which is built out of the very regex an
+  // unrecognised opener defeats — so until every opener is a token, what that
+  // scan calls "a bare stamp in the opening line" may be the inside of a token
+  // nobody could parse. One opener, one refusal: the shape first, alone.
+  const openers = unrecognisedOpeners(raw);
+  if (openers.length > 0) {
+    return { ok: false, kind: 'unknown-token', openers, error: unrecognisedOpenerText(openers) };
+  }
+
   const refusals = stampRefusals(raw, nowMs);
   if (refusals.length > 0) return { ok: false, kind: 'stamp-contract', refusals, error: refusalText(refusals) };
 
@@ -365,19 +536,14 @@ export function renderBody(text, nowMs = Date.now()) {
   const substituted = body.split(STAMP_TOKEN).length - 1;
   body = body.split(STAMP_TOKEN).join(stamp);
 
-  const leftover = body.match(globalOf(ANY_TOKEN_RE));
-  if (leftover) {
-    return {
-      ok: false,
-      kind: 'unknown-token',
-      error:
-        `post-stamped: REFUSED — ${leftover.length} token(s) survived substitution: ${leftover.join(', ')}.\n` +
-        `  Posting them would put the literal text on the card AND leave the artefact unstamped, which is\n` +
-        `  the quiet direction. The tokens this tool knows are \`${STAMP_TOKEN}\` and \`{{WAS:…}}\`; a\n` +
-        '  mistyped one is a typo, and a typo must never decide whether a stamp was read.',
-    };
-  }
-
+  // ⛔ No second leftover scan here. The one that used to sit at this line
+  // matched `{{…}}` AFTER substitution, which is both too late and too narrow:
+  // too late because an opener that never closes is not a leftover of anything,
+  // and too narrow because its payload class excluded the braces the filed
+  // artefact's payload carried. `unrecognisedOpeners` above walks every opener
+  // instead, and the two stamps substituted here carry no braces — so a second
+  // check at this line could never fire, and a check that cannot fire is a
+  // check nobody maintains.
   return { ok: true, body, stamp, substituted, quoted };
 }
 
@@ -820,6 +986,7 @@ async function main(argv) {
 const SELF_TEST_BATTERIES = Object.freeze({
   'the token contract: the two spellings, and nothing else': 9,
   'the refusals: every route that must not reach the board': 20,
+  'the opener scan: every `{{` is a token this tool renders, or the body is refused': 35,
   'the direction check: a stamp no act can have read': 22,
   'the substitution: one clock, read once, written everywhere': 9,
   'the read-back: what the transcript can actually prove': 11,
@@ -827,7 +994,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the unread-knock check: a refresh cannot void what nobody read': 23,
   'the shared rule: this tool and H56 cannot come to disagree': 6,
 });
-const SELF_TEST_BATTERY_FLOOR = 8;
+const SELF_TEST_BATTERY_FLOOR = 9;
 const UNATTRIBUTED_BATTERY = '(unattributed)';
 
 let selfTestReachedVerdict = false;
@@ -881,6 +1048,61 @@ export function selfTest() {
   t('every refusal reaches the caller as text naming the two spellings', refusalText(stampRefusals(OPENING)).includes('{{WAS:YYYY-MM-DDThh:mmZ}}'));
   t('…and states that no flag turns the contract off', refusalText(stampRefusals(OPENING)).includes('There is no flag'));
   t('…and that nothing was written', refusalText(stampRefusals(OPENING)).includes('Nothing was written'));
+
+  // The filed artefact's shape, in kind: a shell read failed and the quoted
+  // slot took a multi-line Node dump. Dumps carry braces, and both payload
+  // classes in this file are `[^{}]*`, so nothing matched and the opener was
+  // copied to the board — neither rendered nor refused.
+  battery('the opener scan: every `{{` is a token this tool renders, or the body is refused');
+  const CARD_DUMP =
+    'Merged at {{WAS:[eval]:1\n' +
+    'JSON.parse(process.env.LANDED).mergedAt\n' +
+    '                              ^\n' +
+    "SyntaxError: Unexpected token '}' in JSON at position 0}} — read from the merge commit.";
+  t('⭐ the filed repro: a quoted slot holding a Node dump is REFUSED, not copied to the board', renderBody(CARD_DUMP, NOW_MS).ok === false);
+  t('…and nothing is rendered from it', renderBody(CARD_DUMP, NOW_MS).body === undefined);
+  t('⛔ WHY it used to pass: neither payload class can cross a brace, so nothing matched at all', QUOTED_TOKEN_RE.test(CARD_DUMP) === false && ANY_TOKEN_RE.test(CARD_DUMP) === false);
+  t('…so the scan walks openers positionally and names the brace', unrecognisedOpeners(CARD_DUMP)[0].kind === 'brace-in-payload');
+  t('…and the refusal prints the span with its newlines ESCAPED', renderBody(CARD_DUMP, NOW_MS).error.split('\n')[2].includes('[eval]:1\\n'));
+  t('⛔ …so the dump never reaches the refusal text raw, at any length', renderBody(CARD_DUMP, NOW_MS).error.includes('\nJSON.parse(process.env') === false);
+
+  const MULTI_LINE_PAYLOAD = 'Merged at {{WAS:[eval]:1\nSyntaxError: Unexpected end of JSON input}} — read from the log.';
+  t('a quoted payload spanning LINES is refused', renderBody(MULTI_LINE_PAYLOAD, NOW_MS).ok === false);
+  t('…by the shape rule, which owns what a quoted payload may say', kinds(MULTI_LINE_PAYLOAD, NOW_MS).join() === 'quoted-not-a-stamp');
+  t('…and its span is escaped and clipped too — one spelling of "show me the offender"', stampRefusals(MULTI_LINE_PAYLOAD, NOW_MS)[0].detail.includes('[eval]:1\\nSyntaxError'));
+
+  t('an unknown token NAME is refused', renderBody('Claim: {{THEN}} — dispatched.', NOW_MS).ok === false);
+  t('…named as a well-formed token this tool does not know', unrecognisedOpeners('{{THEN}}')[0].kind === 'unknown-token-name');
+  t('…and the recorded `{{now}}` typo is that same kind', unrecognisedOpeners('Claim: {{now}}')[0].kind === 'unknown-token-name');
+
+  const UNCLOSED = 'Landing provenance\n\nMerged at {{WAS:2026-09-08T14:00Z — read from the merge commit.';
+  t('an opener with NO closer is refused', renderBody(UNCLOSED, NOW_MS).ok === false);
+  t('…named as exactly that, rather than guessed at', unrecognisedOpeners(UNCLOSED)[0].kind === 'unclosed-opener');
+  t('…and the act-clock token is not exempt: an unclosed `{{NOW` is refused too', unrecognisedOpeners('Claim {{NOW — dispatched.')[0].kind === 'unclosed-opener');
+  const UNCLOSED_OPENING = 'Claim: skills seat, {{WAS:2026-09-08T14:00Z — dispatched.';
+  t('⭐ ONE opener, ONE refusal: an unclosed opener is reported as the opener it is', renderBody(UNCLOSED_OPENING, NOW_MS).kind === 'unknown-token');
+  t('⛔ …and NOT as the positional refusal the unmasked payload would otherwise raise', kinds(UNCLOSED_OPENING, NOW_MS).includes('positional') && renderBody(UNCLOSED_OPENING, NOW_MS).error.includes('positional') === false);
+  t('a DOUBLED opener is refused', unrecognisedOpeners('Claim {{{{NOW}}}} — dispatched.')[0].kind === 'nested-opener');
+  t('…and a NESTED one, a quoted slot wrapped round the act-clock token', unrecognisedOpeners('Board read {{WAS:{{NOW}}}}.')[0].kind === 'nested-opener');
+  t('every opener is walked, not only the first', unrecognisedOpeners('Claim {{now}} and board read {{WAS:{}}}.').length === 2);
+
+  const SCAN_CONTROL = 'Verdict {{NOW}} — on the board read {{WAS:2026-09-08T14:00Z}}.';
+  t('⭐ THE CONTROL: one valid `{{NOW}}` and one valid quoted stamp still render', renderBody(SCAN_CONTROL, NOW_MS).ok === true);
+  t('…with the scan finding nothing to refuse', unrecognisedOpeners(SCAN_CONTROL).length === 0);
+  t('…and the rendered body carrying no opener at all', renderBody(SCAN_CONTROL, NOW_MS).body.includes('{{') === false);
+  t('⛔ NO accepted form narrowed: whitespace inside the declaration still clears the scan', unrecognisedOpeners('read {{WAS: 2026-09-08T14:00Z }}').length === 0 && renderBody('read {{WAS: 2026-09-08T14:00Z }}', NOW_MS).ok === true);
+  t('⛔ …and the seconds grain still clears it', unrecognisedOpeners('read {{WAS:2026-09-08T14:00:30Z}}').length === 0);
+  t('⛔ …and a bare stamp in prose is no opener\'s business', unrecognisedOpeners('The 2026-09-08T14:00Z ruling stands.').length === 0);
+  t('⛔ the scan opens NO escape hatch: the entity spelling is not an opener, so it is prose', unrecognisedOpeners('the token &#123;&#123;NOW&#125;&#125;').length === 0);
+  t('⛔ …and a token inside backticks is STILL substituted — a fence is not an escape', renderBody('Write `{{NOW}}` there.', NOW_MS).body === 'Write `2026-09-10T06:37Z` there.');
+
+  t('the span renderer escapes a newline', offendingSpan('a\nb') === 'a\\nb');
+  t('…a carriage return and a tab too', offendingSpan('a\r\tb') === 'a\\r\\tb');
+  t('…and any other control byte as an `\\xNN` escape, never as the byte itself', offendingSpan('a\u0007b') === 'a\\x07b');
+  t('a span inside the budget is printed whole, with no ellipsis', offendingSpan('{{THEN}}') === '{{THEN}}');
+  t(`a longer one is clipped to ${SPAN_BYTES} bytes and says so`, offendingSpan('x'.repeat(100)) === `${'x'.repeat(SPAN_BYTES)}…`);
+  t('⛔ …and never cuts a multi-byte character in half', offendingSpan(`${'x'.repeat(SPAN_BYTES - 1)}€€`) === `${'x'.repeat(SPAN_BYTES - 1)}…`);
+  t('the budget is counted in BYTES, which is the unit a dump arrives in', SPAN_BYTES === 60 && Buffer.byteLength(offendingSpan('€'.repeat(40)), 'utf8') <= SPAN_BYTES + 3);
 
   // The clock this act holds is 06:37:48 — so 06:37Z is the minute it is IN,
   // 06:38Z the first minute it has not reached, and 06:51Z sits 14 minutes
