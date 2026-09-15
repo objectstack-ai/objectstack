@@ -9636,8 +9636,34 @@ export function h43GovernedReviewRequestGap(pr, governed, approvers, reviewed = 
 /**
  * The timestamp that makes a paragraph clean. See narrowing 1 in the banner —
  * the seconds field is optional so a full ISO stamp counts as the rule obeyed.
+ *
+ * ⚠️ The left anchor is a word boundary OR a literal `T`, and that alternation
+ * is the whole of #18323. A bare `\b` needs a NON-word character before the
+ * hour and the `T` of an ISO instant is a word character, so
+ * `2026-09-15T14:51Z` read FALSE — and so did `2026-03T00:21Z`, the spelling
+ * the 2026-09-02 ruling itself gives. A reading that DID carry its 取数时刻 in
+ * the ruled minute form was therefore reported as untimestamped: a false
+ * positive on this row's own subject. A seconds stamp escaped only by
+ * ACCIDENT, its match starting at the minutes of the `mm:ssZ` tail, which is
+ * why the pin below reads where the match BEGINS and not merely that it exists.
+ *
+ * The `T` branch is the one predecessor the ISO form needs, it looks BEHIND
+ * rather than consuming — so a match is still exactly the stamp and a reader
+ * echoing one gets no stray designator — and it is the only thing admitted:
+ *
+ *   • ⛔ The boundary is NOT dropped. `12314:51Z` is a digit run that merely
+ *     contains a clock, never a stamp, and it still reads false — that is what
+ *     the boundary was there for and it is kept.
+ *   • ⛔ Nor widened to any letter: `abc14:51Z` stays false. The ISO
+ *     designator is the only predecessor measured on this board.
+ *   • ⛔ And only the UPPERCASE `T` the ruling spells. RFC 3339's lowercase
+ *     `t` is legal and absent from this corpus; admitting it is one
+ *     measurement away, not a guess.
+ *
+ * Like every narrowing in the banner this admits strictly MORE paragraphs as
+ * clean, so it can only make the row QUIETER — it cannot manufacture a finding.
  */
-export const H44_READING_TIMESTAMP = /\b\d{2}:\d{2}(?::\d{2})?Z\b/;
+export const H44_READING_TIMESTAMP = /(?:\b|(?<=T))\d{2}:\d{2}(?::\d{2})?Z\b/;
 
 /**
  * The reading grammar, as data so the self-test can drive every shape by name
@@ -28900,6 +28926,21 @@ Mutual exclusion: \`get_comments\` page 747 → \`[]\`, page 746 = my own R+117 
   t('H44 grammar: the timestamp accepts the ruled HH:MMZ', H44_READING_TIMESTAMP.test('19:38Z'), true);
   t('H44 grammar: …and the seconds field, which is the same rule obeyed harder', H44_READING_TIMESTAMP.test('2026-09-03T10:37:51Z'), true);
   t('H44 grammar: …but not a bare clock with no zone', H44_READING_TIMESTAMP.test('19:38'), false);
+  // ⭐ The ISO instant (#18323). Both of these read FALSE before that change —
+  // the second is the spelling the 2026-09-02 ruling itself gives — because the
+  // hour sat behind a `T`, which is a word character and so no boundary.
+  t('H44 grammar: ⭐ …and an ISO instant whose hour follows the `T`', H44_READING_TIMESTAMP.test('2026-09-15T14:51Z'), true);
+  t('H44 grammar: …including the ruling\'s own spelling, which read false against its own rule', H44_READING_TIMESTAMP.test('2026-03T00:21Z'), true);
+  // ⛔ The seconds form always passed — by ACCIDENT, the boundary holding before
+  // its `mm:ssZ` tail so the match began at the MINUTES. Pinning where the match
+  // STARTS is what tells the fix apart from the accident it replaces.
+  t('H44 grammar: the seconds stamp now matches from its HOUR, not from its `mm:ssZ` tail', '2026-09-15T14:51:42Z'.match(H44_READING_TIMESTAMP)[0], '14:51:42Z');
+  // ⛔ THE DECLARED NEGATIVES of the new anchor: it names one predecessor and
+  // does not drop the boundary.
+  t('H44 grammar: ⛔ a clock inside a longer digit run is not a stamp', H44_READING_TIMESTAMP.test('12314:51Z'), false);
+  t('H44 grammar: ⛔ nor does any other letter open one — only the ISO `T`', H44_READING_TIMESTAMP.test('abc14:51Z'), false);
+  t('H44 grammar: ⛔ and only the UPPERCASE `T` the ruling spells', H44_READING_TIMESTAMP.test('2026-09-15t14:51Z'), false);
+  t('H44 grammar: an ISO instant still needs its zone, exactly as a bare clock does', H44_READING_TIMESTAMP.test('2026-09-15T14:51'), false);
   t('H44 fences: an unterminated fence swallows to the end rather than reopening', h44StripFences('a\n```\n92 open cards').trim(), 'a');
 
   // ⑨ The row sentence: it names the comment, the fragment, and its posture.
@@ -28989,11 +29030,14 @@ Doubles as the fire's **write self-check** (step 0). \`201\` is not the reading.
   t('H44 marker: ⭐ what it reports on that body is the untimestamped CHARTER reading', h44kind(MARKER_R236_18312, true), 'tree');
   t('H44 marker: …echoed verbatim, so the remedy is one edit of a known artefact', h44frag(MARKER_R236_18312, true), '827cacbf');
   t('H44 marker: …under the marker\'s own name rather than the carrier\'s', h44hit(MARKER_R236_18312, true).shape, 'a round-open marker');
-  // ⚠️ The stamp here is spelled to SECONDS deliberately: `H44_READING_TIMESTAMP`
-  // requires a word boundary before the hour, which a preceding `T` does not
-  // give, so a minute-precision ISO stamp does not clean a paragraph. That is
-  // this row's own reading and ⛔ not this card's to change — it is filed.
-  t('H44 marker: ⛔ and it stays SILENT on the same marker once the reading carries its stamp', h44hit(MARKER_R236_18312.replace('tip `827cacbf`)', 'tip `827cacbf`, read 2026-09-15T14:51:42Z)'), true), null);
+  // ⭐ The stamp here is spelled to MINUTES — the ruled form — because the limit
+  // that forced SECONDS is gone (#18323). `H44_READING_TIMESTAMP` used to need a
+  // non-word character before the hour, which a preceding `T` is not, so a
+  // minute-precision ISO stamp did not clean a paragraph and this case bought its
+  // silence with a precision the ruling never asked for. The seconds spelling is
+  // pinned beside it, so neither reading can regress alone.
+  t('H44 marker: ⛔ and it stays SILENT on the same marker once the reading carries its stamp', h44hit(MARKER_R236_18312.replace('tip `827cacbf`)', 'tip `827cacbf`, read 2026-09-15T14:51Z)'), true), null);
+  t('H44 marker: …and the SECONDS spelling of the same reading is silent too', h44hit(MARKER_R236_18312.replace('tip `827cacbf`)', 'tip `827cacbf`, read 2026-09-15T14:51:42Z)'), true), null);
   t('H44 marker: ⛔ a comment that QUOTES a marker deeper down is not one — H65\'s headline control', h44IsRoundOpenMarker('A note about last round.\n\n**Round-open marker** · triage seat · **R+235**'), false);
   t('H44 marker: …and such a comment off a seat post stays out of scope entirely', h44hit('A note about last round.\n\n**Round-open marker** · triage seat · tip `827cacbf`'), null);
   // ⭐ ONE declaration of the spellings: H44 reads H65's grammar rather than
