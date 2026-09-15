@@ -658,9 +658,20 @@ export function resolveDiscoveryEnvironment(raw?: string | null): DiscoveryEnvir
   // measurement — a `__proto__: null` object literal does not type-check
   // against the `Record<…>` annotation (TS2353), and the
   // `Object.assign(Object.create(null), …)` spelling that does compile silently
-  // COSTS the exhaustiveness check, which here is the `satisfies
-  // Record<EnvironmentType, DiscoveryEnvironment>` above — the #6287 gate this
-  // table is built around.
+  // COSTS whatever check the ANNOTATION carries: `Object.create(null)` is
+  // `any`, and `Object.assign`'s `any & U` result is assignable to anything.
+  //
+  // Here that annotation is the outer `Readonly<Record<string,
+  // DiscoveryEnvironment>>`, so what the spelling would cost is its VALUE
+  // check — an index signature carries no key exhaustiveness to lose. Measured
+  // under this package's `tsconfig.json`: a bogus `dev: 'nope'` reports TS2322
+  // as a literal and is silent under `Object.assign`.
+  //
+  // ⚠️ It is NOT the #6287 `satisfies Record<EnvironmentType,
+  // DiscoveryEnvironment>` gate above that would be lost. `satisfies` applies
+  // to the literal, not to the assignment, so under that spelling a missing
+  // bucket still reports TS1360. Losing the value check silently is reason
+  // enough on its own.
   if (
     Object.prototype.hasOwnProperty.call(NODE_ENV_TO_DISCOVERY_ENVIRONMENT, spelling) &&
     NODE_ENV_TO_DISCOVERY_ENVIRONMENT[spelling]

@@ -352,8 +352,11 @@ export function normalizeFilterOperator(op: unknown): string {
   // records: a `__proto__: null` object literal does not type-check against the
   // `Record<…>` annotation at all (TS2353), and the
   // `Object.assign(Object.create(null), …)` spelling that does compile silently
-  // COSTS the annotation's exhaustiveness check. A quiet failure is worse than
-  // a loud one.
+  // COSTS the annotation's VALUE check — `Record<string, ViewFilterOperator>`
+  // is an index signature, so it never carried a key-exhaustiveness check to
+  // lose. Measured under this package's `tsconfig.json`: a bogus `ne: 'nope'`
+  // reports TS2322 as a literal and is silent under `Object.assign`. A quiet
+  // failure is worse than a loud one.
   //
   // ⛔ Not a list of prototype member names either — a guard that names words
   // does not survive the next prototype member.
