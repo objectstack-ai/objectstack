@@ -121,7 +121,8 @@ function provisionCtx() {
         ['manifest', { register() {} }],
     ]);
     const readyHooks: Array<() => Promise<void> | void> = [];
-    const logger = { info() {}, warn() {}, error() {}, debug() {}, child() { return logger; } };
+    const logs: string[] = [];
+    const logger = { info(msg: string) { logs.push(String(msg)); }, warn() {}, error() {}, debug() {}, child() { return logger; } };
     const ctx = {
         logger,
         getService(name: string) { return services.get(name); },
@@ -130,7 +131,7 @@ function provisionCtx() {
             if (event === 'kernel:ready') readyHooks.push(fn);
         },
     } as any;
-    return { ctx, engine, synced, fireReady: async () => { for (const fn of readyHooks) await fn(); } };
+    return { ctx, engine, synced, logs, fireReady: async () => { for (const fn of readyHooks) await fn(); } };
 }
 
 describe('MessagingServicePlugin — email/sms channel registration (kernel:ready)', () => {
@@ -151,6 +152,47 @@ describe('MessagingServicePlugin — email/sms channel registration (kernel:read
         await fireReady();
         const messaging: any = ctx.getService('messaging');
         expect(messaging.getRegisteredChannels()).not.toContain('sms');
+    });
+
+    // [#18050] The two pins above say what the mount answers at `kernel:ready`.
+    // These say it is an ANSWER and not a VERDICT: the plugin reads the service
+    // registry on every lookup, so a transport that registers after
+    // `kernel:ready` — another plugin's own ready handler, `kernel:bootstrapped`,
+    // `kernel:listening`, a runtime mount — still gets its channel. Before this,
+    // `if (getSms())` ran once and recorded the absence as a permanent
+    // non-registration, and every `notify(channels:['sms'])` for the life of the
+    // process was refused as "not registered" with the transport sitting right
+    // there in the registry.
+    it('mounts the sms channel when the sms service arrives AFTER kernel:ready (#18050)', async () => {
+        const { ctx, fireReady } = provisionCtx();
+        await new MessagingServicePlugin({ reliableDelivery: false }).init(ctx);
+        await fireReady();
+        const messaging: any = ctx.getService('messaging');
+        expect(messaging.getRegisteredChannels()).not.toContain('sms');
+
+        ctx.registerService('sms', { async send() { return { status: 'sent' }; } });
+
+        expect(messaging.getRegisteredChannels()).toContain('sms');
+        expect(messaging.getChannel('sms')?.id).toBe('sms');
+    });
+
+    it('mounts the email channel when the email service arrives AFTER kernel:ready, and builds it ONCE (#18050)', async () => {
+        const { ctx, fireReady, logs } = provisionCtx();
+        await new MessagingServicePlugin({ reliableDelivery: false }).init(ctx);
+        await fireReady();
+        const messaging: any = ctx.getService('messaging');
+        expect(messaging.getRegisteredChannels()).not.toContain('email');
+
+        ctx.registerService('email', { async send() { return { id: 'mail_1' }; } });
+
+        const first = messaging.getChannel('email');
+        expect(first?.id).toBe('email');
+        // The mount is re-decided per lookup; the channel OBJECT is not rebuilt
+        // per lookup, so it keeps its identity (and its template-store handle)
+        // and announces the bind exactly once however often it is consulted.
+        expect(messaging.getChannel('email')).toBe(first);
+        expect(messaging.getRegisteredChannels()).toContain('email');
+        expect(logs.filter((l) => l.includes('email channel registered'))).toHaveLength(1);
     });
 });
 
