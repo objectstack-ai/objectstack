@@ -60,14 +60,14 @@
       "status": "live",
       "verifiedAt": "2026-09-15",
       "evidenceScope": "cross-repo",
-      "evidence": "cloud @cb8ee7ff: packages/service-ai/src/agent-runtime.ts#listAgents — an inactive record never enters the catalog; cloud @cb8ee7ff: packages/service-ai/src/routes/agent-routes.ts — chat answers 403 PERMISSION_DENIED with reason \"is not active\"; cloud @cb8ee7ff: packages/service-ai/src/agent-runtime.ts#resolveDefaultAgent — an inactive agent is never the ambient default.",
+      "evidence": "cloud @cb8ee7ff: packages/service-ai/src/agent-runtime.ts#listAgents — an inactive record never enters the catalog; cloud @cb8ee7ff: packages/service-ai/src/routes/agent-routes.ts#buildAgentRoutes — chat answers 403 PERMISSION_DENIED with reason \"is not active\"; cloud @cb8ee7ff: packages/service-ai/src/agent-runtime.ts#resolveDefaultAgent — an inactive agent is never the ambient default.",
       "note": "gates listing + 403 on chat."
     },
     "planning": {
       "status": "live",
       "verifiedAt": "2026-09-15",
       "evidenceScope": "cross-repo",
-      "evidence": "cloud @cb8ee7ff: packages/service-ai/src/routes/agent-routes.ts — reads agent.planning?.maxIterations into the turn options; cloud @cb8ee7ff: packages/service-ai/src/routes/assistant-routes.ts — same read on the assistant path; cloud @cb8ee7ff: packages/service-ai/src/eval/eval-runner.ts — same read in the eval harness. agent-runtime.ts does NOT read planning.",
+      "evidence": "cloud @cb8ee7ff: packages/service-ai/src/routes/agent-routes.ts#buildAgentRoutes — reads agent.planning?.maxIterations into the turn options; cloud @cb8ee7ff: packages/service-ai/src/routes/assistant-routes.ts#buildAssistantRoutes — same read on the assistant path; cloud @cb8ee7ff: packages/service-ai/src/eval/eval-runner.ts#EvalRunner — same read in the eval harness. agent-runtime.ts does NOT read planning.",
       "note": "Only planning.maxIterations remains; the dead strategy/allowReplan knobs were removed in 16.0 (#2377)."
     },
     "access": {
