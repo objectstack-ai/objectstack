@@ -8,7 +8,7 @@
 // widget's `chartConfig`. It outlived the first two sweeps by DEPTH, not by
 // evidence — `widgets.chartConfig` was an undrilled container, so no key inside
 // it had ever been classified until the per-key pass recorded in
-// `liveness/dashboard.json` at the `.objectui-sha` pin 53ded82bf7a4. That pass
+// `liveness/dashboard.json` at the `.objectui-sha` pin `53ded82bf7a4`. That pass
 // found `aria` to be the one `ChartConfigSchema` key with no reader on EITHER
 // face: `AdvancedChartImpl` declares no `aria` prop, `chartConfigPresentation`
 // names it nowhere (its docblock calls it "the one declared key with no reader
