@@ -223,13 +223,30 @@
  * "The body's last write" has no platform field: the REST issue object carries
  * `updated_at`, which moves on comments and labels too, and the body's edit
  * history is GraphQL-only, which agent containers cannot reach. So the instant
- * is read from the body ITSELF — the newest protocol stamp in the stored body,
- * which is this tool's own `{{NOW}}` whenever the last refresh came through it
- * (the protocol says every seat-post stamp does). ⚠️ That derivation is a LOWER
- * bound: a refresh that carried no `{{NOW}}`, or one made by hand, leaves an
- * older stamp behind, so MORE comments count as newer, never fewer — the check
- * may ask for an acknowledgement it did not strictly need, and cannot skip one
- * it did. A body with no stamp at all counts every comment, and says so.
+ * is read from the body ITSELF — the newest protocol stamp in the stored body
+ * that names an instant the calendar HAS, which is this tool's own `{{NOW}}`
+ * whenever the last refresh came through it (the protocol says every seat-post
+ * stamp does). ⚠️ That derivation is a LOWER bound: a refresh that carried no
+ * `{{NOW}}`, or one made by hand, leaves an older stamp behind, so MORE
+ * comments count as newer, never fewer — the check may ask for an
+ * acknowledgement it did not strictly need, and cannot skip one it did. A body
+ * with no stamp at all counts every comment, and says so.
+ *
+ * "Names an instant the calendar has" is the load-bearing half of that promise,
+ * not a politeness. `Date.parse` rolls an impossible date FORWARD and hands back
+ * an ordinary number, so a stored `2026-04-31T00:00Z` reads as 1 May — LATER
+ * than its own digits — and a knock at 30 April falls outside a window measured
+ * from it: the derivation would have SHRUNK, which is the one direction it may
+ * never move. So a stamp `stampRealInstant` judges unreal (NaN or rolled over —
+ * the same round trip the write side refuses a quoted stamp with, one predicate
+ * and never two) is not read as the last write at all. The derivation falls
+ * back to the newest REAL stamp, which is earlier, so the window only widens;
+ * a body whose stamps are ALL unreal lands on the no-stamp rule above and
+ * counts every comment. Nothing else changes — a card with nothing newer is
+ * still written, because refusing a refresh nobody knocked on would break the
+ * same acceptance the next paragraph states. Refusal and pass both NAME the
+ * stamps that were not read: a window wider than the body looks is a thing the
+ * transcript has to be able to say.
  *
  * ⛔ It cannot tell a knock from any other comment: under one shared identity
  * the author field names no seat, and content is not classified. So the control
@@ -702,18 +719,38 @@ export function readBackVerdict({ stamp, writtenAt, sent, stored, substituted = 
 
 /**
  * The instant the stored body was last written, as far as the body itself can
- * say: its NEWEST protocol stamp, judged as an instant (a seconds-grained stamp
- * and a minute-grained one compare by `stampSpan`, never as strings). `null`
- * when the body carries no stamp. A lower bound on the true last write — see
- * the header — so a caller using it as "since" over-includes, never under.
+ * say: its NEWEST protocol stamp that names a real instant, judged as an
+ * instant (a seconds-grained stamp and a minute-grained one compare by
+ * `stampSpan`, never as strings).
+ *
+ * Always an object. `stamp`/`from` are null when the body carries no stamp this
+ * may read — the same population as "no stamp at all", on purpose — and
+ * `unreal` carries the stamps it refused, each with the date it rolls over to
+ * (`null` for the half that does not parse at all, so a caller cannot report a
+ * rollover that did not happen).
+ *
+ * ONE predicate decides what may be read: `stampRealInstant`, the round trip
+ * the write side refuses a quoted stamp with. Reading a stamp through
+ * `Date.parse` alone lets an impossible date roll FORWARD into a LATER instant
+ * and NARROW the unread window, which is the one direction the header forbids —
+ * so NaN and rollover are one class here, not two accidents of the parser.
+ *
+ * A lower bound on the true last write — see the header — so a caller using it
+ * as "since" over-includes, never under.
  */
 export function lastWriteStamp(storedBody) {
   let best = null;
+  const unreal = [];
   for (const stamp of protocolStamps(storedBody)) {
+    const calendar = stampRealInstant(stamp);
+    if (!calendar.real) {
+      unreal.push({ stamp, rolledTo: calendar.rolledTo });
+      continue;
+    }
     const span = stampSpan(stamp);
-    if (span && (!best || span.from > best.from)) best = { stamp, from: span.from };
+    if (!best || span.from > best.from) best = { stamp, from: span.from };
   }
-  return best;
+  return { stamp: best?.stamp ?? null, from: best?.from ?? null, unreal };
 }
 
 const commentCreatedMs = (c) => {
@@ -724,8 +761,10 @@ const commentCreatedMs = (c) => {
 /**
  * Whether this refresh may write over the card's comment tail. Pure: the
  * caller hands in the stored body and the comments it fetched; the population
- * judged is every comment CREATED at or after the minute of the body's newest
- * stamp (an edit to an older comment is not a knock the read window knows).
+ * judged is every comment CREATED at or after the minute of the newest stamp in
+ * the body that names a real instant (an edit to an older comment is not a
+ * knock the read window knows) — and EVERY comment when the body carries no
+ * such stamp, whether it carries none at all or only impossible ones.
  *
  *   ok, kind 'none-newer'      nothing newer than the last write — the control
  *   ok, kind 'acknowledged'    `ackThrough` names the newest of the newer ones
@@ -737,7 +776,7 @@ export function unreadComments({ storedBody, comments, ackThrough = null }) {
   const since = lastWriteStamp(storedBody);
   const all = Array.isArray(comments) ? comments : [];
   const newer = all
-    .filter((c) => since === null || commentCreatedMs(c) >= since.from)
+    .filter((c) => since.from === null || commentCreatedMs(c) >= since.from)
     .sort((a, b) => commentCreatedMs(a) - commentCreatedMs(b) || Number(a?.id) - Number(b?.id));
   const newest = newer.length > 0 ? newer[newer.length - 1] : null;
   const base = { since, newer, newest, ackThrough };
@@ -756,9 +795,23 @@ const commentRow = (c, i) => {
   return `  ${i + 1}. ${c?.id ?? '?'} · ${c?.created_at ?? '(no created_at)'} · ${c?.user?.login ?? '?'} · ${shown}`;
 };
 
+/**
+ * The stamps `lastWriteStamp` refused to read, as the rows a refusal carries.
+ * Rendered in ONE place so the refusal and the transcript cannot come to
+ * describe the same skipped stamp two ways.
+ */
+const unrealStampRows = (unreal) =>
+  unreal.map(
+    (u) =>
+      `    · \`${u.stamp}\` — ` +
+      (u.rolledTo === null
+        ? 'a field is outside its own range, so it does not parse at all'
+        : `it rolls over to \`${u.rolledTo}\`, a LATER instant than the date its own digits spell`),
+  );
+
 /** The refusal a caller reads when `unreadComments` says no. */
 export function unreadRefusalText(check, number) {
-  const sinceText = check.since ? `the body's last write stamp (\`${check.since.stamp}\`)` : 'the body\'s last write';
+  const sinceText = check.since.stamp ? `the body's last write stamp (\`${check.since.stamp}\`)` : 'the body\'s last write';
   const newestId = check.newest?.id ?? '?';
   const head =
     check.kind === 'ack-unknown'
@@ -775,16 +828,32 @@ export function unreadRefusalText(check, number) {
     '  silence. Read the tail to its end, receipt every request it carries (a reply comment, or a',
     `  carry-over into the body), then re-run with --ack-through=${newestId} — the newest comment.`,
   );
-  if (check.since === null) {
+  if (check.since.stamp === null && check.since.unreal.length === 0) {
     lines.push(
       '  ⚠️ The stored body carries NO protocol stamp, so EVERY comment on the card counts as newer than',
       `  its last write. Put \`${STAMP_TOKEN}\` in the body so the next refresh measures from this write.`,
+    );
+  } else if (check.since.stamp === null) {
+    lines.push(
+      '  ⚠️ No stamp in the stored body names an instant the calendar HAS, so none of them is read as the',
+      '  last write and EVERY comment on the card counts as newer — a date nothing can have been written',
+      `  on may not narrow this window. Put \`${STAMP_TOKEN}\` in the body so the next refresh measures from`,
+      '  this write.',
+      ...unrealStampRows(check.since.unreal),
     );
   } else {
     lines.push(
       '  (The stamp is a lower bound on the last write — a refresh that carried no token leaves an older',
       '  stamp behind — so this list can be longer than the true unread set, never shorter.)',
     );
+    if (check.since.unreal.length > 0) {
+      lines.push(
+        `  ⚠️ ${check.since.unreal.length} stamp(s) in the body name no instant the calendar has and were NOT read as the`,
+        '  last write; the window measures from the newest REAL stamp instead, so it is WIDER here, never',
+        '  narrower.',
+        ...unrealStampRows(check.since.unreal),
+      );
+    }
   }
   lines.push(...check.after.map(commentRow));
   return lines.join('\n');
@@ -792,10 +861,17 @@ export function unreadRefusalText(check, number) {
 
 /** The one line a transcript carries when the check passed. */
 export function unreadPassText(check) {
-  const sinceText = check.since ? `the body's last write stamp \`${check.since.stamp}\`` : 'the body (which carries no stamp)';
+  const sinceText = check.since.stamp
+    ? `the body's last write stamp \`${check.since.stamp}\``
+    : 'the body (which carries no stamp that names an instant)';
+  const skipped =
+    check.since.unreal.length === 0
+      ? ''
+      : ` (${check.since.unreal.length} stamp(s) naming no instant the calendar has were NOT read as the last write: ` +
+        `${check.since.unreal.map((u) => `\`${u.stamp}\``).join(', ')} — the window is wider, never narrower)`;
   return check.kind === 'none-newer'
-    ? `  unread check: no comment newer than ${sinceText} — nothing to acknowledge`
-    : `  unread check: ${check.newer.length} comment(s) newer than ${sinceText}, acknowledged through ${check.newest?.id} (the newest)`;
+    ? `  unread check: no comment newer than ${sinceText}${skipped} — nothing to acknowledge`
+    : `  unread check: ${check.newer.length} comment(s) newer than ${sinceText}${skipped}, acknowledged through ${check.newest?.id} (the newest)`;
 }
 
 /** The flags this tool takes. An argument outside this set is a typo, and a typo is refused. */
@@ -1029,7 +1105,7 @@ async function main(argv) {
     let tail;
     try {
       const probe = await rest(`/repos/${repoRes.repo}/issues/${options.number}`);
-      tail = await readCardTail(repoRes.repo, options.number, lastWriteStamp(probe?.body)?.from);
+      tail = await readCardTail(repoRes.repo, options.number, lastWriteStamp(probe?.body).from);
     } catch (err) {
       return reportPrerequisiteNotMet(err);
     }
@@ -1071,7 +1147,14 @@ async function main(argv) {
           drift_minutes: verdict.drift,
           body_mutated: verdict.mutated,
           ...(unread
-            ? { unread_check: { since: unread.since?.stamp ?? null, newer: unread.newer.length, ack_through: unread.ackThrough } }
+            ? {
+                unread_check: {
+                  since: unread.since.stamp,
+                  unreal_stamps: unread.since.unreal.map((u) => u.stamp),
+                  newer: unread.newer.length,
+                  ack_through: unread.ackThrough,
+                },
+              }
             : {}),
         },
         null,
@@ -1112,7 +1195,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the substitution: one clock, read once, written everywhere': 9,
   'the read-back: what the transcript can actually prove': 11,
   'the CLI: the one decision a typo must never make': 16,
-  'the unread-knock check: a refresh cannot void what nobody read': 23,
+  'the unread-knock check: a refresh cannot void what nobody read': 41,
   'the shared rule: this tool and H56 cannot come to disagree': 6,
 });
 const SELF_TEST_BATTERY_FLOOR = 10;
@@ -1386,6 +1469,37 @@ export function selfTest() {
   t('…and one at the last second of the minute before does not', unreadComments({ storedBody: SEAT_BODY, comments: [{ id: 1, created_at: '2026-09-12T09:59:59Z' }] }).ok === true);
   t('the newest is by created_at, not by input order', unreadComments({ storedBody: SEAT_BODY, comments: [LATER, KNOCK] }).newest.id === 5648793698);
   t('a comment with an unreadable created_at is newer, never silently old', unreadComments({ storedBody: SEAT_BODY, comments: [{ id: 7, created_at: 'n/a' }] }).ok === false);
+  // The post-stamped reading: a STORED body whose newest stamp names no instant
+  // the calendar has. `Date.parse` rolls 31 April FORWARD to 1 May, so reading
+  // it as the last write moved the window LATER and a knock inside the gap read
+  // as "none-newer" — the derivation shrank, which the header forbids. The
+  // write side refuses such a stamp; a stored body can still carry one by hand,
+  // through the platform's own editor, or from before this tool existed.
+  const ROLLED_BODY = '**Seat post.**\n\n🟢 seat · 自 2026-04-31T00:00Z 就座。\n';
+  const NO_PARSE_BODY = '**Seat post.**\n\n🟢 seat · 自 2026-13-45T99:99Z 就座。\n';
+  const ROLLED_OVER_REAL_BODY = '**Seat post.**\n\n🟢 seat · 自 2026-04-31T00:00Z 就座;前任 2026-04-29T09:00Z 离任。\n';
+  const GAP_KNOCK = { id: 5678039238, created_at: '2026-04-30T12:00:00Z', user: { login: 'engine-seat' }, body: '敲门:a knock inside the rollover gap.' };
+  const rolled = unreadComments({ storedBody: ROLLED_BODY, comments: [GAP_KNOCK] });
+  t('⭐ THE FILED READING: a knock inside a rolled-over stamp\'s gap is NOT "none-newer"', rolled.kind !== 'none-newer', `kind=${rolled.kind}`);
+  t('…it is refused as unacknowledged — the window may only widen', rolled.ok === false && rolled.kind === 'unacknowledged');
+  t('…because the rolled-over stamp is not read as the last write at all', rolled.since.stamp === null && rolled.since.from === null);
+  t('…and the stamp it would not read is named, with the date it actually rolls to', rolled.since.unreal.length === 1 && rolled.since.unreal[0].stamp === '2026-04-31T00:00Z' && rolled.since.unreal[0].rolledTo === '2026-05-01T00:00Z');
+  t('…the refusal says THAT, rather than claiming the body carries no stamp', unreadRefusalText(rolled, 18293).includes('2026-04-31T00:00Z') && unreadRefusalText(rolled, 18293).includes('names an instant the calendar HAS'));
+  t('…and still points at the newest comment as the flag to pass', unreadRefusalText(rolled, 18293).includes('--ack-through=5678039238'));
+  const noParse = unreadComments({ storedBody: NO_PARSE_BODY, comments: [GAP_KNOCK] });
+  t('⭐ a stamp that does not parse AT ALL reaches the same outcome — one rule, not two accidents', noParse.kind === 'unacknowledged' && noParse.since.stamp === null);
+  t('…and reports no rollover it did not have', noParse.since.unreal.length === 1 && noParse.since.unreal[0].rolledTo === null);
+  const fellBack = unreadComments({ storedBody: ROLLED_OVER_REAL_BODY, comments: [GAP_KNOCK] });
+  t('⭐ with an older REAL stamp beside it the window measures from THAT one — earlier, so wider', fellBack.since.stamp === '2026-04-29T09:00Z');
+  t('…so the same knock still counts as newer', fellBack.ok === false && fellBack.after.length === 1 && fellBack.after[0].id === 5678039238);
+  t('…and the refusal says the window is WIDER here, never narrower', unreadRefusalText(fellBack, 18293).includes('WIDER here, never') && unreadRefusalText(fellBack, 18293).includes('2026-04-31T00:00Z'));
+  t('⭐ --ack-through naming the newest comment still clears a body with no readable stamp', unreadComments({ storedBody: ROLLED_BODY, comments: [GAP_KNOCK], ackThrough: 5678039238 }).kind === 'acknowledged');
+  t('⭐ THE ACCEPTANCE CONTROL: nothing newer ⇒ the refresh is still written, unreal stamp or not', unreadComments({ storedBody: ROLLED_BODY, comments: [] }).ok === true);
+  t('…and the pass line names the stamp the derivation did not read', unreadPassText(unreadComments({ storedBody: ROLLED_BODY, comments: [] })).includes('2026-04-31T00:00Z'));
+  t('⭐ THE CONTROL, UNCHANGED: a body whose stamps are all real is judged exactly as before', control.ok === true && control.kind === 'none-newer' && control.since.stamp === '2026-09-12T10:00Z' && control.since.unreal.length === 0);
+  t('…and its pass line carries no skipped-stamp clause at all', unreadPassText(control).includes('NOT read as the last write') === false);
+  t('a body with NO stamp stays distinguishable from one with only unreal stamps', lastWriteStamp('nothing stamped').unreal.length === 0 && lastWriteStamp(ROLLED_BODY).unreal.length === 1);
+  t('lastWriteStamp always answers an object, so no caller can read a null as "no stamp problem"', lastWriteStamp('nothing stamped').stamp === null && Array.isArray(lastWriteStamp('nothing stamped').unreal));
   t('the pass line names what was measured against', unreadPassText(control).includes('2026-09-12T10:00Z'));
 
   battery('the shared rule: this tool and H56 cannot come to disagree');
