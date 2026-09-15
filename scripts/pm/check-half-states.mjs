@@ -6998,6 +6998,48 @@ export function h44NeedsSeatComments(issue) {
 }
 
 /**
+ * The seat-post WINDOW audit (#18312) — read off this file's own source, the
+ * detector shape `h57RunsPathAudit` and `familyRegistryCoverage` use, and for
+ * their reason: the window lives inside `sweepInto`, which takes no injectable
+ * transport, so the property a spy would prove has to be proved on the text.
+ *
+ * Three readings, each a different half of 「ONE fetch per seat post, and the
+ * ordinary card keeps its window」:
+ *
+ *   pagelessPaths   comment request paths carrying no `page=`. GitHub serves
+ *                   issue comments OLDEST-FIRST, so each of these is a FIRST
+ *                   page. Exactly ONE is correct — the card window in
+ *                   `commentRowsFor` — and a second one is a new row quietly
+ *                   reading a seat thread's archive.
+ *   purchaseSites   call sites that actually REQUEST a located page
+ *                   (`h65CommentPagePath` against the swept repo). ONE, inside
+ *                   the memo, is what makes the fetch-per-post bound hold; two
+ *                   is the same page bought twice per run.
+ *   readers         call sites that take the window through the memo. More of
+ *                   these is free by construction — that is the point of the
+ *                   memo — so this count is reported rather than bounded.
+ *
+ * @param {string} [source] — defaults to this file; injectable for the self-test.
+ * @returns {{ commentPaths: string[], pagelessPaths: string[], purchaseSites: number, readers: number }}
+ */
+export function seatWindowAudit(source) {
+  const text =
+    typeof source === 'string' ? source : readFileSync(fileURLToPath(import.meta.url), 'utf8');
+  const commentPaths = [];
+  const re = /`\/repos\/[^`]*?\/issues\/[^`]*?\/comments\?[^`]*`/g;
+  let m;
+  while ((m = re.exec(text))) commentPaths.push(m[0]);
+  return {
+    commentPaths,
+    // ⚠️ `[?&]page=` rather than `page=`: `per_page=100` carries that substring
+    // and a bare `includes` would read every path in the file as paged.
+    pagelessPaths: commentPaths.filter((p) => !/[?&]page=/.test(p)),
+    purchaseSites: (text.match(/h65CommentPagePath\(OWNER_REPO/g) ?? []).length,
+    readers: (text.match(/await seatPostRowsFor\(/g) ?? []).length,
+  };
+}
+
+/**
  * H32 — null when clean, else the finding sentence.
  *
  * @param {object} issue — the seat post.
@@ -8841,6 +8883,10 @@ export function renderFreshResidueClause(fresh) {
 //    requests: every byte scanned was fetched for some other item. Comment
 //    coverage is therefore the GATED subset (H2/H4/H9/H17/H32 candidates), not
 //    the whole board, and the report says so rather than implying a full read.
+//    ⚠️ And a cached thread is one PAGE of its card, never the whole of a long
+//    one: a card's is its first, a `pm:seat` post's its NEWEST (#18312, the
+//    seat window), so a reference living on another page of either is outside
+//    this corpus — one more reason the coverage is stated rather than implied.
 //    ⛔ Merged PRs and closed cards are deliberately NOT referrers even though
 //    this sweep holds them: they are archive nobody re-reads, and every number
 //    they add competes for the finite resolution budget below with numbers on
@@ -9538,6 +9584,47 @@ export function h43GovernedReviewRequestGap(pr, governed, approvers, reviewed = 
 // argument for H32 and not this row's to overturn. H38 takes the same widening
 // under its own card.
 //
+// ## The seat-post WINDOW is the thread's NEWEST page, and that is measured
+//
+// ⚠️ What that leg buys is ⛔ NOT a first page, and the correction is the whole
+// of #18312. `commentRowsFor` fetches `?per_page=100` with no `page` and GitHub
+// serves issue comments OLDEST-FIRST (`direction=desc` / `sort=created` are
+// silently ignored on this endpoint — measured). On the triage seat post
+// (#6015, 816 comments at the reading) that page is 2026-08-06T16:01:10Z →
+// 2026-08-10T17:29:28Z: five weeks of archive nobody will ever edit, holding 0
+// of the 9 artefacts of the round then running. A row reporting on that window
+// fires forever on August and never sees a live round — a check that cannot
+// observe its subject.
+//
+// ⇒ For a `pm:seat` carrier the window is `seatPostRowsFor`: the LAST page,
+// `ceil(comments / H50_COMMENTS_PAGE_SIZE)` computed from the carrier's own
+// count, exactly as H65 locates its page and through the same two exported
+// helpers (`h65NewestPagePlan` / `h65CommentPagePath`) so the file carries ONE
+// declaration of 「which page is a seat post's window」. It is ONE request per
+// seat post per run and it is SHARED: the leg writes it into `commentCache`
+// before the judging loop, so H56 and H64 — which read this row's corpus by
+// construction — get the same page, and H65 consumes the same memo at the foot
+// instead of buying a second copy of it.
+//
+// Three prices, each stated where it is paid:
+//
+//   • A seat post whose thread fits in ONE page costs nothing new: page 1 IS
+//     the newest page, and the rows already in the cache are reused unfetched.
+//   • A HELD multi-page seat post that H32 already fetched costs +1 request —
+//     H32 bought page 1 for its own corpus, which this row ⛔ does not touch
+//     (H32/H38 keep reading exactly the rows they read before, captured in
+//     `seatMarkers` before this leg runs).
+//   • A seat post with no readable `comments` count cannot have its newest page
+//     LOCATED, so the window falls back to page 1 — today's reading, never a
+//     better one — and the summary clause counts those separately rather than
+//     letting them read as newest-page coverage.
+//
+// ⚠️ A seat post's cached thread is now a PAGE OF THE TAIL rather than a
+// prefix, so the walk memo records it as INCOMPLETE: H52's「a short page proves
+// exhaustion」is true of a first page only, and a short LAST page would
+// otherwise read as a whole thread. That leaves H52 exactly where it was on
+// these posts — UNJUDGED, never clean (#4690).
+//
 // ⚠️ DECLARED RESIDUAL: a verdict posted on a PULL REQUEST is not read here at
 // all. Every listing that feeds `commentCache` filters `!i.pull_request`, so PR
 // comment pages are not in hand — 0 of 30 open PRs when this row was written,
@@ -9611,7 +9698,10 @@ export function h44StripFences(text) {
  * `onSeatPost` is the CARRIER leg: the rule names 「座位贴段落」, and a section
  * of a seat post is edited or posted as a comment on that post, so the carrier
  * decides it rather than any marker in the body. The three body markers are
- * ordered so the most specific spelling names the row.
+ * ordered so the most specific spelling names the row — which is what the
+ * round-open leg buys on a seat post, where the carrier leg already fired: the
+ * artefact is NAMED as the marker it is instead of falling through to 「a
+ * seat-post section」, and the remedy sentence says which artefact to edit.
  *
  * ⛔ Verdict words are matched UPPERCASE ONLY: the protocol writes ACCEPT /
  * REJECT / REWORK in caps, and a case-insensitive match would read the ordinary
@@ -9619,13 +9709,67 @@ export function h44StripFences(text) {
  */
 export const H44_VERDICT_MARKER = /^[ \t>]*(?:#{1,6}[ \t]*)?(?:\*\*|__)?[ \t]*(?:ACCEPT|REJECT|REWORK)\b/m;
 
-/** A round-open marker: `R+118 open`, however it is decorated. */
+/**
+ * A round-open marker in the spelling this row was written against:
+ * `R+118 open`, however it is decorated. ⛔ It is NOT widened to the spelling
+ * the triage seat writes today — see `h44IsRoundOpenMarker`, which reaches that
+ * one through H65's declared grammar rather than by growing a second regex.
+ */
 export const H44_ROUND_OPEN_MARKER = /^[ \t>]*(?:#{1,6}[ \t]*)?(?:\*\*|__)?[ \t]*R\+\d+[ \t]+open\b/im;
+
+/**
+ * The one name for this artefact kind, shared with `H65_ROUND_ARTEFACT_SHAPES`
+ * so the two rows cannot drift into two spellings of one word.
+ */
+export const ROUND_OPEN_ARTEFACT_KIND = 'a round-open marker';
+
+/**
+ * The round-open spellings this row recognises — H65's declared grammar,
+ * filtered to this kind, so the FILE has one declaration of what a round-open
+ * marker looks like and a spelling added there is reached here for free
+ * (#18312).
+ *
+ * ⛔ A function rather than a `const`: `H65_ROUND_ARTEFACT_SHAPES` is declared
+ * far below this line, so a module-level derivation here would evaluate in its
+ * temporal dead zone and throw at import.
+ *
+ * ⛔ And only THIS kind. The same list carries a round close and a stand-down
+ * brief; taking them too would hand this row two artefact shapes it was never
+ * measured against, which is a widening of what it JUDGES rather than of which
+ * spellings count as a marker.
+ */
+export function h44RoundOpenShapes() {
+  return H65_ROUND_ARTEFACT_SHAPES.filter((shape) => shape.kind === ROUND_OPEN_ARTEFACT_KIND);
+}
+
+/**
+ * Is this comment a round-open marker?
+ *
+ * Two legs, and the asymmetry between them is deliberate:
+ *
+ *   the OWNED spelling   `H44_ROUND_OPEN_MARKER` anywhere in the body — this
+ *                        row's population since it landed, unchanged, so no
+ *                        carrier it already reports can fall out.
+ *   the CURRENT spelling H65's grammar against the HEADLINE (the first
+ *                        non-empty line), which is that row's measured
+ *                        false-positive control: every live marker announces
+ *                        itself on line one, and a comment that merely QUOTES a
+ *                        marker deeper in its body — a report ABOUT a round,
+ *                        this very file's own card — is not itself an artefact.
+ *                        ⛔ Matching it body-wide would enrol every comment that
+ *                        mentions the words.
+ */
+export function h44IsRoundOpenMarker(body) {
+  const text = String(body ?? '');
+  if (H44_ROUND_OPEN_MARKER.test(text)) return true;
+  const headline = h65Headline(text);
+  return headline !== '' && h44RoundOpenShapes().some((shape) => shape.re.test(headline));
+}
 
 export function h44ArtefactShape(body, onSeatPost = false) {
   const text = String(body ?? '');
   if (CLAIM_COMMENT_MARKER.test(text)) return 'a claim';
-  if (H44_ROUND_OPEN_MARKER.test(text)) return 'a round-open marker';
+  if (h44IsRoundOpenMarker(text)) return ROUND_OPEN_ARTEFACT_KIND;
   if (H44_VERDICT_MARKER.test(text)) return 'an ACCEPT/REJECT/REWORK verdict';
   if (onSeatPost) return 'a seat-post section';
   return null;
@@ -11953,6 +12097,13 @@ export function h55LegacyCensus(issues, since = MAINTAINER_ACTION_LINE_SINCE) {
 // immediately after H44's loop and BEFORE H46, whose leg (b) widens the cache
 // — reading after H46 would give this row a corpus H44 never saw, and the two
 // counts in the summary would stop describing the same population.
+//
+// ⚠️ For a `pm:seat` carrier that thread is the post's NEWEST comment page
+// (#18312) rather than its first: H44's seat leg locates it from the carrier's
+// own `comments` count and lands it in the cache before either row judges. This
+// row therefore reads a seat post's CURRENT stamps instead of the five-week-old
+// prefix GitHub serves for a page-less request — the same corpus as H44 and
+// H64, still not one byte of it bought here.
 //
 // ## ⛔ Report-only, and no gate
 //
@@ -14405,10 +14556,14 @@ export function h63StaleFindingBesideGrade(issue) {
 // `commentCache` already holds when this pass runs — H44's and H56's corpus
 // exactly, which is why this pass sits beside them and BEFORE H46's leg (b)
 // widens the cache: three clauses describing one population is worth more than
-// a few extra threads. ⚠️ Declared residual, H44's and stated again because it
-// is this row's too: a PULL-REQUEST comment thread is not read here — H48 and
-// H51 buy those for a different population, and folding them in would make this
-// row's corpus depend on which PRs happened to be governed or gated.
+// a few extra threads. ⚠️ For a `pm:seat` carrier that thread is the post's
+// NEWEST comment page (#18312), located from the carrier's own `comments` count
+// by H44's seat leg and shared from the same cache — so an unsigned write on a
+// seat post is judged on the CURRENT page rather than on the oldest one the
+// page-less request returns. ⚠️ Declared residual, H44's and stated again
+// because it is this row's too: a PULL-REQUEST comment thread is not read here
+// — H48 and H51 buy those for a different population, and folding them in would
+// make this row's corpus depend on which PRs happened to be governed or gated.
 //
 // One row per CARRIER for comments (H44's choice), naming the NEWEST offender
 // rather than H44's oldest: the remedy is one edit per comment either way, and
@@ -14876,17 +15031,21 @@ export function h64ExposureClause(counts = {}, cap = H64_LOGIN_ROSTER_CAP) {
 //   a round-open marker   H44's `R+<n> open` spelling, reused BY REFERENCE
 //                         (`H44_ROUND_OPEN_MARKER`) rather than re-spelled.
 //
-// ⚠️ That last entry is the reason H44 is untouched here. Its regex expects
-// `R+<n> open` and does NOT match the current marker spelling — measured
-// against all four bodies above — so widening H44 to reach them would change
-// what an existing row reports about a corpus it has read for weeks. Reusing
-// the constant costs nothing, keeps ONE spelling of that shape in the file, and
-// leaves H44's own population exactly as it was.
+// ⚠️ That last entry left H44 untouched on the flight that landed this row: its
+// regex expects `R+<n> open` and does NOT match the current marker spelling —
+// measured against all four bodies above — so widening it then would have
+// changed what an existing row reported about a corpus it had read for weeks,
+// which that card's rule forbade. #18312 is the card that paid for the change:
+// the direction is now REVERSED and the list below is the file's ONE
+// declaration of these spellings — `h44RoundOpenShapes()` reads the round-open
+// entries back out of it, so neither row carries a private copy and a spelling
+// added here is reached by both. `H44_ROUND_OPEN_MARKER` stays exactly what it
+// was, the OWNED legacy spelling, and is still matched body-wide by its owner.
 //
-// ## The window: the NEWEST comment page, bought, and why a cached one lies
+// ## The window: the seat post's NEWEST comment page, read ONCE for every row
 //
 // ⚠️ The obvious first draft is "read the threads `commentCache` already holds",
-// which is what H44/H56/H64 do and what this row was dispatched to do. It was
+// which is what H44/H56/H64 did and what this row was dispatched to do. It was
 // measured and abandoned. `commentRowsFor` fetches `?per_page=100` with no
 // `page`, and GitHub serves issue comments OLDEST-FIRST: on #6015, 816 comments
 // at the reading, that first page is 2026-08-06T16:01:10Z → 2026-08-10T17:29:28Z
@@ -14896,17 +15055,22 @@ export function h64ExposureClause(counts = {}, cap = H64_LOGIN_ROSTER_CAP) {
 // archive and never see a live round: a check that cannot observe its subject,
 // which is the exact shape this card exists to remove.
 //
-// So the row BUYS one page — the LAST one — per triage seat post: page
-// `ceil(comments / H65_COMMENTS_PAGE_SIZE)` computed from the carrier's own
-// `comments` count, so there is no time constant to defend and no `since`
-// window that can truncate away the newest rows. ONE request per post per run,
-// one such post on this board.
+// So the window is the LAST page — `ceil(comments / H65_COMMENTS_PAGE_SIZE)`
+// computed from the carrier's own `comments` count, so there is no time
+// constant to defend and no `since` window that can truncate away the newest
+// rows. ⚠️ #18312 made that window the SEAT POST's window rather than this
+// row's: `seatPostRowsFor` is where it is declared and memoised, H44's seat leg
+// fills it before H44/H56/H64 judge, and this row consumes the SAME memo — ONE
+// request per seat post per run, whichever row paid for it. A triage seat post
+// that H44's leg did not read (its gate needs `seatIsHeld`, which excludes a
+// `🟢 Routine` or vacant seat by name) is bought here, which is why this row
+// still owns a purchase at all.
 //
-// ⛔ The page is judged IN PLACE and never written to `commentCache`. H44's,
-// H56's and H64's corpus is whatever the rows above them fetched, and each of
-// those headers forbids a later row widening it; `prCommentCache` is the same
-// refusal one row over. A reader can check this cheaply: nothing below calls
-// `commentRowsFor`, and no `commentCache.set` exists in this pass.
+// ⛔ It still writes NOTHING into `commentCache` itself: the seat leg does that,
+// above, where the rows that report on that corpus can see it. A later row
+// widening a corpus an earlier row already reported on remains the refusal —
+// `prCommentCache` is the same one over — and a reader can check this cheaply:
+// no `commentCache.set` exists in this pass.
 //
 // ## Population: the triage seat post, and ⛔ NOT via `seatIsHeld`
 //
@@ -14955,8 +15119,8 @@ export const H65_TIER_KEY = /Tier:/;
  * answer depend on how many comments preceded it (H44's rule, same reason).
  */
 export const H65_ROUND_ARTEFACT_SHAPES = Object.freeze([
-  Object.freeze({ kind: 'a round-open marker', re: /Round-open marker/i }),
-  Object.freeze({ kind: 'a round-open marker', re: H44_ROUND_OPEN_MARKER }),
+  Object.freeze({ kind: ROUND_OPEN_ARTEFACT_KIND, re: /Round-open marker/i }),
+  Object.freeze({ kind: ROUND_OPEN_ARTEFACT_KIND, re: H44_ROUND_OPEN_MARKER }),
   Object.freeze({ kind: 'a round close', re: /分诊轮收尾/ }),
   Object.freeze({ kind: 'a stand-down brief', re: /收班简报/ }),
 ]);
@@ -15246,6 +15410,11 @@ export const SWEEP_COUNT_KEYS = [
   'readingComments',
   'readingSeatCandidates',
   'readingSeatRead',
+  // …and the window that leg reads (#18312). `readingSeatNewest` is the subset
+  // whose NEWEST page could be located from the carrier's own `comments` count;
+  // the difference is the posts that fell back to page 1, which must not read as
+  // newest-page coverage.
+  'readingSeatNewest',
   // H56's census (#17314). `stampComments` is the judged half of H44's own
   // corpus — same threads, one field over — and the other two are the two ways
   // a comment leaves this row unjudged rather than clean.
@@ -15799,7 +15968,10 @@ export function summaryLine(counts, findingCount) {
     `${counts.readingThreads ?? 0} thread(s) ALREADY in hand were read for the five artefact shapes, ` +
     `and the seat leg widened the fetch to ${counts.readingSeatRead ?? 0} of ` +
     `${counts.readingSeatCandidates ?? 0} HELD seat post(s) — every held seat, whatever its lane ` +
-    'spelling, which is wider than H32\'s own population and deliberately so. ⛔ A verdict posted on a ' +
+    'spelling, which is wider than H32\'s own population and deliberately so. A seat post\'s window is ' +
+    `its NEWEST comment page, not the oldest one a page-less request returns: ${counts.readingSeatNewest ?? 0} ` +
+    'of those post(s) had that page LOCATED from the carrier\'s own `comments` count and the rest fell ' +
+    'back to page 1, one request per seat post either way and shared with H56, H64 and H65. ⛔ A verdict posted on a ' +
     'PULL REQUEST is NOT in this corpus: no listing here fetches a PR comment page, so this row\'s ' +
     'silence about PRs is an unread surface and never a clean one, and every count above is a LOWER ' +
     'BOUND. ' +
@@ -15963,13 +16135,15 @@ export function summaryLine(counts, findingCount) {
     `Triage round tiers (H65): ${counts.roundTierArtefacts ?? 0} round artefact(s) judged on the ` +
     `NEWEST comment page of ${counts.roundTierRead ?? 0} of ${counts.roundTierPosts ?? 0} triage seat ` +
     `post(s) (${counts.roundTierComments ?? 0} comment(s) on those pages), ` +
-    `${counts.roundTierRows ?? 0} carrier(s) filed. It BUYS that page — ONE request per post, the page ` +
-    "computed from the carrier's own `comments` count — because the shared comment cache holds a " +
-    'thread\'s FIRST page and GitHub serves comments OLDEST-FIRST: on an 800-comment seat thread that ' +
-    'window is five weeks stale, so a cache-only read would judge artefacts nobody will edit and never ' +
-    'see the current round. The page is judged in place and never cached, so no other row\'s corpus ' +
-    'moves. An artefact OLDER than that page is outside this row by construction and a post whose page ' +
-    'could not be read is UNJUDGED rather than clean, so the rows are a LOWER BOUND. ' +
+    `${counts.roundTierRows ?? 0} carrier(s) filed. It BUYS that page — ONE request per seat post per ` +
+    "run, the page computed from the carrier's own `comments` count — because a page-less request " +
+    'returns a thread\'s FIRST page and GitHub serves comments OLDEST-FIRST: on an 800-comment seat ' +
+    'thread that window is five weeks stale, so reading it would judge artefacts nobody will edit and ' +
+    'never see the current round. That page is SHARED with the seat leg above rather than bought twice ' +
+    '— H44, H56 and H64 read the same rows for a seat post — and this row writes nothing into any ' +
+    'cache itself, so no other row\'s corpus moves here. An artefact OLDER than that page is outside ' +
+    'this row by construction and a post whose page could not be read is UNJUDGED rather than clean, ' +
+    'so the rows are a LOWER BOUND. ' +
     `Report-only: findings are patrol input, not a gate verdict.`
   );
 }
@@ -19930,6 +20104,53 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
     return { rows, ...walk };
   };
 
+  // The SEAT-POST window (#18312) — the one declaration of 「which page of a
+  // seat post's thread this sweep reads」, and it is the LAST one.
+  //
+  // `commentRowsFor` above asks for `?per_page=100` with no `page`, and GitHub
+  // serves issue comments OLDEST-FIRST (`direction=desc` / `sort=created` are
+  // ignored on this endpoint — measured). That is the right window for a CARD,
+  // where the claim is early in the thread and H50's walk completes a full first
+  // page. It is the wrong window for a SEAT POST, which is an append-only log
+  // running to hundreds of comments: on #6015 (816 at the reading) the page-less
+  // request returns 2026-08-06 → 2026-08-10, five weeks of archive holding none
+  // of the round then running. Every row that reads a seat post's comments —
+  // H44, H56 and H64 through the cache, H65 through this memo — was reporting on
+  // that archive.
+  //
+  // So the page is located from the carrier's own `comments` count, through
+  // H65's two exported helpers rather than a second copy of the arithmetic, and
+  // memoised: ONE request per seat post per run, whichever row asks first.
+  // Returns `null` for a page that could not be read — UNJUDGED, never clean
+  // (#4690) — and that null is memoised too, so a failed post is not retried
+  // once per reader.
+  //
+  // ⛔ It does not touch `commentCache` itself. The caller that OWNS the corpus
+  // (H44's seat leg) writes it there before the rows that report on that corpus
+  // run, and the reader at the foot (H65) takes the memo without moving anyone
+  // else's window — the placement rule every comment row in this file states.
+  const seatPageCache = new Map();
+  const seatPostRowsFor = async (issue) => {
+    const number = issue?.number;
+    if (seatPageCache.has(number)) return seatPageCache.get(number);
+    const plan = h65NewestPagePlan(issue);
+    let page = null;
+    if (plan.page === 1 && commentCache.has(number)) {
+      // Page 1 IS the newest page on a thread that fits in one, so the rows a
+      // row above already paid for are the window — no second request.
+      page = { rows: commentCache.get(number) ?? [], plan, bought: false };
+    } else {
+      try {
+        const rows = await rest(h65CommentPagePath(OWNER_REPO, number, plan.page));
+        page = { rows: Array.isArray(rows) ? rows : [], plan, bought: true };
+      } catch {
+        page = null;
+      }
+    }
+    seatPageCache.set(number, page);
+    return page;
+  };
+
   // The PULL-REQUEST comment cache (#15895), and it is a SECOND cache rather
   // than a widening of the one above on purpose: `commentCache` is keyed by card
   // number and fed by listings that all filter `!i.pull_request`, so a PR
@@ -20941,15 +21162,31 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
   // A seat post this leg cannot read is one post unexamined, never a report
   // worth discarding (H32's posture); the coverage pair in the summary is what
   // states the gap.
+  //
+  // ⚠️ What it buys is the post's NEWEST page (#18312), through
+  // `seatPostRowsFor` — the file's one declaration of a seat post's window —
+  // and it LANDS it in `commentCache`, which is what makes it this row's corpus
+  // and, by construction, H56's and H64's. A page-less request would hand all
+  // three the thread's oldest 100 comments: on the triage post, five weeks of
+  // archive with none of the current round on it.
+  //
+  // ⛔ H32's rows are not moved by this. It captured its own `seatMarkers` rows
+  // before this line runs, and H38 read them one pass above.
   const h44Seats = [...seen.values()].filter((issue) => h44NeedsSeatComments(issue));
   stats.readingSeatCandidates = h44Seats.length;
   for (const issue of h44Seats) {
-    try {
-      await commentRowsFor(issue);
-      stats.readingSeatRead = (stats.readingSeatRead ?? 0) + 1;
-    } catch {
-      // Deliberately silent per-post; the pair above is the disclosure.
+    const page = await seatPostRowsFor(issue);
+    // Deliberately silent per-post; the coverage pair above is the disclosure.
+    if (!page) continue;
+    commentCache.set(issue.number, page.rows);
+    // A page of the TAIL is not a prefix, so a SHORT one does not prove the
+    // thread was exhausted — H52 reads that completeness off `threadWalks` and
+    // must keep treating these posts as UNJUDGED rather than clean (#4690).
+    if (page.plan.page > 1 && !threadWalks.has(issue.number)) {
+      threadWalks.set(issue.number, { complete: false, pagesBought: 0 });
     }
+    stats.readingSeatRead = (stats.readingSeatRead ?? 0) + 1;
+    if (page.plan.counted) stats.readingSeatNewest = (stats.readingSeatNewest ?? 0) + 1;
   }
   // One row per CARRIER, naming the OLDEST offending comment and counting the
   // rest. A per-comment row would put a hundred lines on the anchor for a single
@@ -21517,11 +21754,18 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
   // later row widening the corpus they reported on; `prCommentCache` is the same
   // refusal one row over. The page is read, judged and dropped.
   //
-  // ⚠️ It must also not be moved ABOVE those rows on the theory that it is
-  // another seat-post reader: the cache it would have to share is exactly the
-  // one measured wrong for this subject — a thread's FIRST page, which GitHub
-  // serves oldest-first — and the whole argument for buying a page is in this
-  // row's header.
+  // ⚠️ The placement argument is REVISED rather than inherited (#18312). It read
+  // 「it must not be moved ABOVE those rows, because the cache it would have to
+  // share is exactly the one measured wrong for this subject — a thread's FIRST
+  // page」. That is no longer the state of the file: a seat post's cached thread
+  // IS its newest page now, filled by H44's seat leg from the same
+  // `seatPostRowsFor` memo this row reads, so the two are not looking at
+  // different windows any more. What keeps the row here is the other half of
+  // its population: `h65IsTriageSeatPost` admits a `🟢 Routine` or vacant triage
+  // seat that `h44NeedsSeatComments` excludes by name, so this row must still be
+  // able to BUY, and a purchase belongs where every free read is already done.
+  // Moved above H44 it would also start deciding which posts land in that row's
+  // corpus, which is the widening those headers forbid.
   const h65Posts = new Map();
   for (const [number, issue] of seenUnscoped) {
     if (h65IsTriageSeatPost(issue)) h65Posts.set(number, issue);
@@ -21531,15 +21775,16 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
   }
   for (const issue of h65Posts.values()) {
     stats.roundTierPosts = (stats.roundTierPosts ?? 0) + 1;
-    const plan = h65NewestPagePlan(issue);
-    let rows;
-    try {
-      rows = await rest(h65CommentPagePath(OWNER_REPO, issue.number, plan.page));
-    } catch {
-      // ⛔ No retry on any status (#17374). An unread page leaves the post
-      // UNJUDGED and the coverage pair is the only thing that says so.
-      continue;
-    }
+    // The SHARED seat window (#18312): the same memo H44's seat leg filled, so
+    // a triage post that leg read costs nothing here, and one it skipped — its
+    // gate needs `seatIsHeld`, which excludes a `🟢 Routine` or vacant seat by
+    // name — is bought once, right here.
+    //
+    // ⛔ No retry on any status (#17374): an unread page leaves the post
+    // UNJUDGED, and the coverage pair is the only thing that says so.
+    const page = await seatPostRowsFor(issue);
+    if (!page) continue;
+    const { rows, plan } = page;
     if (!Array.isArray(rows) || rows.length === 0) continue;
     // A page reached WITHOUT a readable comment count may not be the last one,
     // and a full page is exactly the shape that hides what follows it.
@@ -28680,6 +28925,92 @@ Mutual exclusion: \`get_comments\` page 747 → \`[]\`, page 746 = my own R+117 
   t('H44 summary: …and says the counts are a lower bound', saidBy('h44Readings', summaryLine({}, 0)).includes('LOWER BOUND'), true);
   t('H44 summary: a bare line renders numbers, never `undefined`', saidBy('h44Readings', summaryLine({}, 0)).includes('undefined'), false);
 
+  // -- The SEAT-POST WINDOW (#18312) — where H44/H56/H64/H65 look ------------
+  //
+  // The defect these pin: `commentRowsFor` asks for `?per_page=100` with no
+  // `page`, GitHub serves issue comments OLDEST-FIRST, and on the triage seat
+  // post (816 comments) that page was 2026-08-06 → 2026-08-10 — five weeks of
+  // archive holding NONE of the round then running. Three rows reported on it.
+  //
+  // The window itself lives in `sweepInto`, which takes no injectable
+  // transport, so it is pinned the way this file pins every other property of
+  // that function: the ARITHMETIC and the REQUEST through the exported helpers,
+  // and the call graph through a source audit (`h57RunsPathAudit`'s shape).
+  const seat18312 = (comments, title = '[PM seat] domain:devx @ objectstack — 🟢 os-project-manager') => ({
+    ...issue(['pm:seat'], [], '', title),
+    number: 6023,
+    comments,
+  });
+  // ⭐ A seat post's window is its LAST page, located from its own count.
+  t('seat window: a 225-comment seat post reads page 3, not page 1', h65NewestPagePlan(seat18312(225)).page, 3);
+  t('seat window: …and that plan is COUNTED, so the page is the real last one', h65NewestPagePlan(seat18312(225)).counted, true);
+  t('seat window: the request is that page at the shared page size', h65CommentPagePath('o/r', 6023, h65NewestPagePlan(seat18312(225)).page), '/repos/o/r/issues/6023/comments?per_page=100&page=3');
+  t('seat window: a seat post inside one page stays on page 1 — no second request to make', h65NewestPagePlan(seat18312(63)).page, 1);
+  t('seat window: an exactly-full single page is still page 1', h65NewestPagePlan(seat18312(100)).page, 1);
+  t('seat window: ⛔ an unreadable count cannot LOCATE a newest page, so the window falls back to page 1', h65NewestPagePlan(seat18312(undefined)).page, 1);
+  t('seat window: …and says so, which is what keeps it out of the newest-page coverage count', h65NewestPagePlan(seat18312(undefined)).counted, false);
+  // ⭐ The ordinary card keeps its window — exactly ONE page-less comment read
+  // exists in this file, and it is the card one.
+  const audit18312 = seatWindowAudit();
+  t('seat window: exactly ONE page-less comment read exists in this file', audit18312.pagelessPaths.length, 1);
+  t('seat window: …and it is the CARD window, keyed by the card number', audit18312.pagelessPaths[0].includes('issue.number'), true);
+  t('seat window: every other comment read names its page', audit18312.commentPaths.length - audit18312.pagelessPaths.length, 3);
+  // ⭐ ONE fetch per seat post: one purchase site, behind a memo every reader
+  // shares. ⚠️ The needles are ASSEMBLED — a literal one in a fixture would be
+  // counted by the file-wide audit it exists to check (`RETIRED_ASSIGNEE_COINAGE`'s
+  // reason, one row over).
+  t('seat window: the located page is REQUESTED in exactly one place', audit18312.purchaseSites, 1);
+  t('seat window: …and taken through the memo by more than one row, which is what makes it shared', audit18312.readers, 2);
+  const TICK18312 = String.fromCharCode(96);
+  const commentsPath18312 = (query) =>
+    `${TICK18312}/repos/\${OWNER_REPO}/issues/\${issue.number}/comments?${query}${TICK18312}`;
+  t('seat window: the audit SEES a second page-less read when one exists', seatWindowAudit([commentsPath18312('per_page=100'), commentsPath18312('per_page=100')].join('\n')).pagelessPaths.length, 2);
+  t('seat window: …and does not read `per_page=` as a page number', seatWindowAudit(commentsPath18312('per_page=100&page=9')).pagelessPaths.length, 0);
+  t('seat window: the audit SEES a second purchase site when one exists', seatWindowAudit(['h65CommentPagePath(', 'OWNER_REPO, a)\n', 'h65CommentPagePath(', 'OWNER_REPO, b)'].join('')).purchaseSites, 2);
+  t('seat window: …and the assembled needles did not defeat the file-wide audit', seatWindowAudit().purchaseSites, 1);
+
+  // -- H44's marker spelling (#18312) ----------------------------------------
+  //
+  // ⭐ The measured body: comment 5682407231 on the triage seat post, the
+  // round-open marker of R+236 (2026-09-15T14:51Z). Its headline carries the
+  // fire stamp; the CHARTER paragraph carries a tree tip and no stamp, which is
+  // the reading H44 reports. Before this change `H44_ROUND_OPEN_MARKER` read
+  // false against it and the artefact was named only by its carrier.
+  const MARKER_R236_18312 = `**Round-open marker** · triage seat · \`session_01VxjMEAhT53WHUCtP9WMrSU\` · **R+236** · fire 2026-09-15T14:51Z · **objectui 轮**
+
+Doubles as the fire's **write self-check** (step 0). \`201\` is not the reading.
+
+**Charters** (\`origin/main\` tip \`827cacbf\`): \`SKILL.md\` \`681317c3\` — **all identical to the R+235 marker**, so no re-read is owed this fire.`;
+  t('H44 marker: ⛔ the OWNED regex is unchanged and still reads false on the current spelling', H44_ROUND_OPEN_MARKER.test(MARKER_R236_18312), false);
+  t('H44 marker: …and still matches the `R+<n> open` spelling it owns', H44_ROUND_OPEN_MARKER.test('**R+118 open** — triage seat'), true);
+  t('H44 marker: ⭐ the live R+236 marker IS a round-open marker now', h44IsRoundOpenMarker(MARKER_R236_18312), true);
+  t('H44 marker: …so the artefact is NAMED as one, off a seat post as well as on it', h44ArtefactShape(MARKER_R236_18312), 'a round-open marker');
+  t('H44 marker: …and the old spelling is named identically', h44ArtefactShape('**R+118 open** — triage seat'), 'a round-open marker');
+  t('H44 marker: ⭐ what it reports on that body is the untimestamped CHARTER reading', h44kind(MARKER_R236_18312, true), 'tree');
+  t('H44 marker: …echoed verbatim, so the remedy is one edit of a known artefact', h44frag(MARKER_R236_18312, true), '827cacbf');
+  t('H44 marker: …under the marker\'s own name rather than the carrier\'s', h44hit(MARKER_R236_18312, true).shape, 'a round-open marker');
+  // ⚠️ The stamp here is spelled to SECONDS deliberately: `H44_READING_TIMESTAMP`
+  // requires a word boundary before the hour, which a preceding `T` does not
+  // give, so a minute-precision ISO stamp does not clean a paragraph. That is
+  // this row's own reading and ⛔ not this card's to change — it is filed.
+  t('H44 marker: ⛔ and it stays SILENT on the same marker once the reading carries its stamp', h44hit(MARKER_R236_18312.replace('tip `827cacbf`)', 'tip `827cacbf`, read 2026-09-15T14:51:42Z)'), true), null);
+  t('H44 marker: ⛔ a comment that QUOTES a marker deeper down is not one — H65\'s headline control', h44IsRoundOpenMarker('A note about last round.\n\n**Round-open marker** · triage seat · **R+235**'), false);
+  t('H44 marker: …and such a comment off a seat post stays out of scope entirely', h44hit('A note about last round.\n\n**Round-open marker** · triage seat · tip `827cacbf`'), null);
+  // ⭐ ONE declaration of the spellings: H44 reads H65's grammar rather than
+  // carrying a copy, so a spelling added there is reached here for free.
+  t('H44 marker: the round-open spellings come from H65\'s declared grammar', h44RoundOpenShapes().every((shape) => H65_ROUND_ARTEFACT_SHAPES.includes(shape)), true);
+  t('H44 marker: …there are two of them, so the filter is not silently empty', h44RoundOpenShapes().length, 2);
+  t('H44 marker: …the legacy regex is one of them, by reference', h44RoundOpenShapes().some((shape) => shape.re === H44_ROUND_OPEN_MARKER), true);
+  t('H44 marker: ⛔ and only that KIND — a round close is H65\'s subject, not this row\'s', h44ArtefactShape('分诊轮收尾 · R+234 · tip `827cacbf`'), null);
+  t('H44 marker: ⛔ nor a stand-down brief', h44ArtefactShape('# 🔻 收班简报 · 分诊席 · **R+220 → R+234** · tip `827cacbf`'), null);
+  t('H44 marker: both rows name the kind with the same constant', H65_ROUND_ARTEFACT_SHAPES[0].kind, ROUND_OPEN_ARTEFACT_KIND);
+  t('H44 marker: ⛔ no round-open regex is sticky — an answer must not depend on how many comments preceded it', h44RoundOpenShapes().every((shape) => !shape.re.global), true);
+  // ⭐ The seat leg's coverage, as the clause renders it.
+  t('H44 summary: the seat window is declared as the NEWEST page', saidBy('h44Readings', summaryLine({}, 0)).includes('NEWEST comment page'), true);
+  t('H44 summary: …with the located count beside the read count', saidBy('h44Readings', summaryLine({ readingSeatRead: 6, readingSeatCandidates: 6, readingSeatNewest: 5 }, 0)).includes('5 of those post(s) had that page LOCATED'), true);
+  t('H44 summary: …and that the page is shared rather than bought per row', saidBy('h44Readings', summaryLine({}, 0)).includes('shared with H56, H64 and H65'), true);
+  t('H44: the window count key rides the enumerated forwarding contract too', SWEEP_COUNT_KEYS.includes('readingSeatNewest'), true);
+
   // -- H45 — reserved and handed over at once (#15667, report-only) ----------
   // Both directions of a pure label intersection. The neighbour cases pin that
   // H45 takes the pair H3 cannot see and leaves H3's own pair alone.
@@ -30962,7 +31293,8 @@ Mutual exclusion: \`get_comments\` page 747 → \`[]\`, page 746 = my own R+117 
   t('H65 summary: …and how many carriers were filed', SUM65.includes('1 carrier(s) filed'), true);
   t('H65 summary: it says the page is BOUGHT rather than read off the cache', SUM65.includes('It BUYS that page'), true);
   t('H65 summary: …and WHY — the shared cache holds the OLDEST page', saidBy('h65RoundTier', summaryLine({}, 0)).includes('OLDEST-FIRST'), true);
-  t('H65 summary: …that no other row\'s corpus moves', saidBy('h65RoundTier', summaryLine({}, 0)).includes('never cached'), true);
+  t('H65 summary: …that the page is SHARED with the seat leg rather than bought twice (#18312)', saidBy('h65RoundTier', summaryLine({}, 0)).includes('SHARED with the seat leg above rather than bought twice'), true);
+  t('H65 summary: …and that this row still moves no other row\'s corpus itself', saidBy('h65RoundTier', summaryLine({}, 0)).includes('writes nothing into any cache itself'), true);
   t('H65 summary: …that an older artefact is outside the row', saidBy('h65RoundTier', summaryLine({}, 0)).includes('OLDER than that page is outside this row'), true);
   t('H65 summary: …and that an unread page is UNJUDGED, never clean', saidBy('h65RoundTier', summaryLine({}, 0)).includes('UNJUDGED rather than clean'), true);
   t('H65 summary: the clause is rendered on EVERY run, not just interesting ones', saidBy('h65RoundTier', summaryLine({}, 0)).includes('0 of 0'), true);
