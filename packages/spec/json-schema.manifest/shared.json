@@ -5,6 +5,8 @@
     "shared/BaseMetadataRecord",
     "shared/CorsConfig",
     "shared/CronExpressionInput",
+    "shared/DurationMs",
+    "shared/DurationSeconds",
     "shared/EpochMs",
     "shared/EvaluatedExpression",
     "shared/EvaluatedExpressionInput",
