@@ -50,7 +50,7 @@
 - ✓ auto-merge 挂载 `PUT .../pulls/{n}/ccr/auto_merge` 带 `{"merge_method":"SQUASH"}`,`DELETE` 卸载。
 - ⛔ `PUT .../ccr/auto_merge` 在 draft 上 422 零存储;`DELETE` 无挂载回 422 = 本就没挂,非失败。
 - 入队读 timeline `added_to_merge_queue`,落地读 `git rev-list --parents`;⛔ `auto_merge` 与回显都不作数。
-- 备用通道 MCP `update_pull_request` 与 `enable_pr_auto_merge`。
+- ⛔ 永不 MCP `update_pull_request`(锁 1 已拒);ready/draft 翻转只走 ccr 路;auto-merge 备用 MCP 未拒。
 - 直合仓 `PUT .../pulls/{n}/merge`;actor 记通道令牌:REST 按会话为 `claude[bot]` 或用户,MCP 恒用户。
 
 ## 不可迁移 —— 只有这三件,围着它们排计划;红窗守候规则住 `platform-readings.md` 配额段
