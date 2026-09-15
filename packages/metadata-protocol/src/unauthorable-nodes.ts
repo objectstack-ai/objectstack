@@ -53,12 +53,40 @@
  * `required` array is kept, unsatisfiable and all. `retiredKey()` is
  * `.optional()`, so no tombstone is ever in that arm; the guard is for
  * whatever else may one day derive to `{ not: {} }`.
+ *
+ * ## Which is why the walk is POSITION-aware
+ *
+ * The drop decision is legal in exactly one position: an entry of a schema
+ * node's own `properties` map, where the sibling `required` array is in scope
+ * to veto it. Everywhere else a `{ not: {} }` is load-bearing — it is what
+ * `additionalProperties`, `items`, `propertyNames` or `patternProperties` use
+ * to say "and nothing more" — and removing it widens the node.
+ *
+ * So a `properties` / `$defs` / `patternProperties` / `dependentSchemas` value
+ * is walked as a MAP, never as a schema node: its keys are author-chosen NAMES,
+ * not keywords. Reading such a map as a node is how a property literally named
+ * `properties` gets its keywords treated as property subschemas —
+ * `z.object({ properties: z.record(z.string(), z.never()) })` then loses the
+ * `additionalProperties: { not: {} }` that made it admit only `{}` — and it is
+ * also how a property named `required` or `default` buys its whole subtree an
+ * exemption from the walk. Both directions are pinned in
+ * `unauthorable-nodes.test.ts`.
  */
 
 /** JSON Schema keywords whose values are DATA, not subschemas — never walked. */
 const NON_SCHEMA_KEYS: ReadonlySet<string> = new Set([
     'default', 'const', 'enum', 'examples', 'title', 'description',
     '$schema', '$id', '$comment', 'required',
+]);
+
+/**
+ * JSON Schema keywords whose value is a MAP of author-chosen NAME -> subschema.
+ * The map is not a schema node; every VALUE in it is. Nothing is ever dropped
+ * from one of these — `patternProperties` and `$defs` have no `required` array
+ * that could license a drop, and a `$defs` entry may be the target of a `$ref`.
+ */
+const SCHEMA_MAP_KEYS: ReadonlySet<string> = new Set([
+    'properties', 'patternProperties', 'dependentSchemas', '$defs', 'definitions',
 ]);
 
 /**
@@ -86,14 +114,20 @@ export function acceptsNothing(node: unknown): boolean {
  * byte-identical (and reference-identical) to its derivation.
  */
 export function stripUnauthorableProperties<T>(json: T): T {
-    return walk(json) as T;
+    return walkSchema(json) as T;
 }
 
-function walk(node: unknown): unknown {
+/**
+ * Walk a SCHEMA node — the only position in which a property may be dropped,
+ * because it is the only position where the deciding `required` array is a
+ * sibling.
+ */
+function walkSchema(node: unknown): unknown {
     if (Array.isArray(node)) {
+        // `allOf` / `anyOf` / `oneOf` / `prefixItems`: every entry is a schema.
         let changed = false;
         const out = node.map((entry) => {
-            const next = walk(entry);
+            const next = walkSchema(entry);
             if (next !== entry) changed = true;
             return next;
         });
@@ -125,10 +159,30 @@ function walk(node: unknown): unknown {
 
     for (const [key, value] of Object.entries(source)) {
         if (NON_SCHEMA_KEYS.has(key)) continue;
-        const current = key === 'properties' && out ? out[key] : value;
-        const next = walk(current);
+        // `properties` may already have been pruned above; recurse into that.
+        const current = out ? out[key] : value;
+        const next = SCHEMA_MAP_KEYS.has(key) ? walkSchemaMap(current) : walkSchema(current);
         if (next !== current) write(key, next);
     }
 
+    return out ?? node;
+}
+
+/**
+ * Walk a MAP of NAME -> schema. The map itself is never read as a schema node,
+ * so no keyword logic applies to its keys and nothing is dropped here; each
+ * value is handed back to `walkSchema`, whatever it happens to be called.
+ */
+function walkSchemaMap(node: unknown): unknown {
+    if (!node || typeof node !== 'object' || Array.isArray(node)) return node;
+    const source = node as Record<string, unknown>;
+    let out: Record<string, unknown> | undefined;
+    for (const [key, value] of Object.entries(source)) {
+        const next = walkSchema(value);
+        if (next !== value) {
+            out ??= { ...source };
+            out[key] = next;
+        }
+    }
     return out ?? node;
 }

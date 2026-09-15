@@ -104,14 +104,54 @@ async function servedSchemas(): Promise<Map<string, Record<string, unknown> | un
 }
 
 /** The derivation the endpoint ran BEFORE this card's strip stage. */
-function preStripDerivation(type: string): Record<string, unknown> | undefined {
+function preStripDerivation(type: string, io: 'output' | 'input' = 'output'): Record<string, unknown> | undefined {
     const schema = getMetadataTypeSchema(type);
     if (!schema) return undefined;
     try {
-        return z.toJSONSchema(schema as z.ZodTypeAny, { unrepresentable: 'any' }) as Record<string, unknown>;
+        return z.toJSONSchema(schema as z.ZodTypeAny, { unrepresentable: 'any', io }) as Record<string, unknown>;
     } catch {
         return undefined;
     }
+}
+
+/**
+ * What the strip DID to one document, read off the two documents by a parallel
+ * walk rather than by re-running the strip: `removed` is every key the
+ * derivation has and the served payload does not, with the node that was
+ * dropped; `other` is everything else that moved — an addition, a changed
+ * value, a changed array length.
+ *
+ * ⚠️ Deliberately NOT a second implementation of the strip. It asks only
+ * "what moved"; the assertion supplies the verdict, so a defect in the strip
+ * cannot appear on both sides of the comparison and cancel itself out.
+ */
+function strippedDiff(
+    before: unknown,
+    after: unknown,
+): { removed: Array<{ path: string; node: unknown }>; other: string[] } {
+    const removed: Array<{ path: string; node: unknown }> = [];
+    const other: string[] = [];
+    const visit = (b: unknown, a: unknown, p: string): void => {
+        if (Array.isArray(b) || Array.isArray(a)) {
+            if (!Array.isArray(b) || !Array.isArray(a) || b.length !== a.length) { other.push(p); return; }
+            b.forEach((entry, i) => visit(entry, a[i], `${p}[${i}]`));
+            return;
+        }
+        if (b && typeof b === 'object') {
+            if (!a || typeof a !== 'object') { other.push(p); return; }
+            const bo = b as Record<string, unknown>;
+            const ao = a as Record<string, unknown>;
+            for (const [key, value] of Object.entries(bo)) {
+                if (!(key in ao)) { removed.push({ path: `${p}.${key}`, node: value }); continue; }
+                visit(value, ao[key], `${p}.${key}`);
+            }
+            for (const key of Object.keys(ao)) if (!(key in bo)) other.push(`${p}.${key}`);
+            return;
+        }
+        if (b !== a) other.push(p);
+    };
+    visit(before, after, '$');
+    return { removed, other };
 }
 
 /**
@@ -191,6 +231,61 @@ describe('#17502 — the served repeater row offers no column the parse door ref
         // ⛔ An entry here is a key the endpoint advertises and the publish door
         // refuses — file it, never add it to a list.
         expect(offenders).toEqual([]);
+    });
+
+    it('over-drop guard: the served payload is its derivation MINUS unsatisfiable nodes, nothing else', async () => {
+        // ⚠️ This is the direction the blast-radius pin in
+        // `protocol.meta-types-degenerate-derivation.test.ts` CANNOT see. Since
+        // #17502 its baseline is `stripUnauthorableProperties(preFixDerivation(type))`,
+        // so a strip that drops too much drops it on BOTH sides of that
+        // comparison and stays invisible — only `dashboard.widgets`'s lit
+        // columns and the CARD types' TOP-level counts guard over-dropping
+        // there. This pin reads the removals themselves, at every depth, for
+        // every served type, and asks the one question that makes a removal
+        // legal: did that node admit any instance?
+        const served = await servedSchemas();
+        const unexplained: string[] = [];
+        const overDropped: string[] = [];
+        const removedByType = new Map<string, string[]>();
+
+        for (const type of SERVED_TYPES) {
+            const after = served.get(type);
+            if (!after) continue;
+            // The endpoint derives on zod's default arm and retries `io: 'input'`
+            // only when the default one is degenerate (#17501). Take whichever
+            // arm the served document is a pure DELETION of, so this pin never
+            // re-spells `isDegenerateDerivation`, whose only copy belongs in
+            // the emitter.
+            const diff = (['output', 'input'] as const)
+                .map((io) => preStripDerivation(type, io))
+                .filter((d): d is Record<string, unknown> => Boolean(d))
+                .map((before) => strippedDiff(before, after))
+                .find((d) => d.other.length === 0);
+            if (!diff) { unexplained.push(type); continue; }
+            removedByType.set(type, diff.removed.map((r) => `${type}${r.path.slice(1)}`));
+            for (const r of diff.removed) {
+                if (!acceptsNothing(r.node)) overDropped.push(`${type}${r.path.slice(1)}`);
+            }
+        }
+
+        // ⛔ The strip only ever takes keys AWAY. An entry here means the served
+        // payload is no longer either derivation minus something.
+        expect(unexplained).toEqual([]);
+        // ⛔ An entry here is a LIVE node the endpoint stopped serving — the
+        // over-drop defect. File it, never add it to a list.
+        expect(overDropped).toEqual([]);
+
+        // Non-vacuity: without this the two assertions above pass over a ledger
+        // that read nothing at all. `dashboard` is the type that exercises both
+        // depths — the five repeater-row columns pinned above, and three
+        // top-level tombstones — so the ledger is proven to reach a row shape
+        // and not only the surface. Sorted, so key ORDER is not what is pinned.
+        expect([...(removedByType.get('dashboard') ?? [])].sort()).toEqual([
+            ...RETIRED_WIDGET_COLUMNS.map((k) => `dashboard.properties.widgets.items.properties.${k}`),
+            'dashboard.properties.refreshInterval',
+            'dashboard.properties.aria',
+            'dashboard.properties.performance',
+        ].sort());
     });
 
     // ⚠️ This control derives with zod's DEFAULT (output) arm only, which is

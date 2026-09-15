@@ -64,6 +64,50 @@ describe('stripUnauthorableProperties', () => {
         expect(stripUnauthorableProperties(input)).toBe(input);
     });
 
+    it('is POSITION-aware: a property literally NAMED `properties` is not a properties map', () => {
+        // A `properties` / `$defs` value is a map of author-chosen NAMES, not a
+        // schema node. A walk that reads the map as a node reads the keywords of
+        // the property named `properties` as property subschemas — and deletes
+        // any one valued `{ not: {} }`. Both inputs below are pure zod.
+        const record: any = z.toJSONSchema(z.object({ properties: z.record(z.string(), z.never()) }), { unrepresentable: 'any' });
+        expect(record.properties.properties.additionalProperties, 'precondition').toEqual({ not: {} });
+        const strippedRecord: any = stripUnauthorableProperties(record);
+        // `additionalProperties: { not: {} }` is what makes this node admit ONLY
+        // `{}`. Dropping it lets any object through — a widening of a live node.
+        expect(strippedRecord.properties.properties.additionalProperties).toEqual({ not: {} });
+        expect(strippedRecord).toBe(record); // nothing to drop ⇒ by reference
+
+        const list: any = z.toJSONSchema(z.object({ properties: z.array(z.never()) }), { unrepresentable: 'any' });
+        expect(list.properties.properties.items, 'precondition').toEqual({ not: {} });
+        const strippedList: any = stripUnauthorableProperties(list);
+        // `items: { not: {} }` is what makes this node admit ONLY `[]`.
+        expect(strippedList.properties.properties.items).toEqual({ not: {} });
+        expect(strippedList).toBe(list);
+    });
+
+    it('is POSITION-aware in `$defs` too, where the entry names are just as free', () => {
+        const input = { $defs: { properties: { type: 'object', additionalProperties: { not: {} } } } };
+        const out: any = stripUnauthorableProperties(input);
+        expect(out.$defs.properties.additionalProperties).toEqual({ not: {} });
+        expect(out).toBe(input);
+    });
+
+    it('still strips inside a property whose NAME collides with a data-valued keyword', () => {
+        // The mirror of the two above: the map's VALUES are schema nodes
+        // whatever they are called, so `required` and `default` as property
+        // NAMES must not buy their subtrees an exemption from the walk.
+        const input = {
+            type: 'object',
+            properties: {
+                required: { type: 'object', properties: { dead: NEVER, live: { type: 'string' } } },
+                default: { type: 'object', properties: { dead: NEVER } },
+            },
+        };
+        const out: any = stripUnauthorableProperties(input);
+        expect(Object.keys(out.properties.required.properties)).toEqual(['live']);
+        expect(Object.keys(out.properties.default.properties)).toEqual([]);
+    });
+
     it('never rewrites DATA-valued keywords that merely look like a schema', () => {
         // `default` carries an author's value, not a subschema. A walk that
         // treats it as one silently edits served defaults.
