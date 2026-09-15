@@ -371,3 +371,84 @@ describe('#17058 §5 — a valid selection still passes, and passes through unch
         }
     });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// §5 — [#17598] an arity refusal is ONE condition with ONE wording ON THE WIRE
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * The array arm is `z.tuple([z.string(), z.string()])` since #17598, so a
+ * 1-element window is refused HERE — on the base it was not refused by the
+ * schema at all, which is why the arm's own `Too small` text only started
+ * riding the wire with that narrowing. The prescription already names the
+ * arity, so the arm's restatement is dropped in `fieldsFromZodIssues`
+ * (`@objectstack/types`), the one mapper both analytics doors share.
+ *
+ * ⚠️ These assert the SERVED BODY. The review that found the second wording
+ * recorded that nothing pinned the wire in either direction; at `error.issues`
+ * the union has always been a single issue, so an issue-level pin would have
+ * stayed green through exactly this defect.
+ */
+describe('#17598 §5 — the arity refusal carries one wording on the wire', () => {
+    const arities: Array<[string, unknown]> = [
+        ['one bound', ['2026-01-01']],
+        ['no bounds', []],
+        ['three bounds', ['2026-01-01', '2026-01-15', '2026-01-31']],
+    ];
+
+    for (const [name, dateRange] of arities) {
+        it(`${name}: the prescription, and NOT the arm's own arity text`, async () => {
+            const { res, queryDataset } = await post({
+                dataset: inlineDataset,
+                selection: {
+                    measures: ['revenue'],
+                    timeDimensions: [{ dimension: 'close_date', dateRange }],
+                },
+            });
+
+            expect(res.statusCode).toBe(400);
+            expect(res.body.code).toBe('ANALYTICS_DATE_RANGE_UNRECOGNIZED');
+            expect(res.body.message).toContain('not the two bounds [start, end]');
+            expect(res.body.message).not.toMatch(/Too (small|big)/);
+            // One entry for the member, so the `<field>: <message>` join names
+            // it once — the shape a second wording showed up as.
+            expect(String(res.body.message).match(/selection\.timeDimensions\.0\.dateRange/g))
+                .toHaveLength(1);
+            expect(queryDataset).not.toHaveBeenCalled();
+        });
+    }
+
+    it('a selection wrong in MORE than the dateRange keeps every other diagnosis', async () => {
+        // ⛔ The collapse is not a silencer: the generic envelope still carries
+        // the other member, and the dateRange condition appears exactly once.
+        const { res } = await post({
+            dataset: inlineDataset,
+            selection: {
+                measures: ['revenue'],
+                dimensions: 'region',
+                timeDimensions: [{ dimension: 'close_date', dateRange: ['2026-01-01'] }],
+            },
+        });
+
+        expect(res.statusCode).toBe(400);
+        expect(res.body.code).toBe('VALIDATION_FAILED');
+        const fields: Array<{ field: string; message: string }> = res.body.details.fields;
+        expect(fields.map((f) => f.field)).toContain('selection.dimensions');
+        expect(fields.filter((f) => f.field === 'selection.timeDimensions.0.dateRange'))
+            .toHaveLength(1);
+        expect(fields.some((f) => /Too (small|big)/.test(f.message))).toBe(false);
+    });
+
+    it('a non-string bound still names WHICH bound — that is a location, not a restatement', async () => {
+        const { res } = await post({
+            dataset: inlineDataset,
+            selection: {
+                measures: ['revenue'],
+                timeDimensions: [{ dimension: 'close_date', dateRange: ['2026-01-01', 3] }],
+            },
+        });
+
+        expect(res.statusCode).toBe(400);
+        expect(res.body.message).toContain('selection.timeDimensions.0.dateRange.1');
+    });
+});

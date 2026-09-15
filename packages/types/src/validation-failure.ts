@@ -39,6 +39,7 @@
 
 import { zodIssuesToFields } from '@objectstack/spec/api';
 import type { FieldErrorCode } from '@objectstack/spec/api';
+import { isAnalyticsDateRangeRefusalIssue } from '@objectstack/spec/data';
 
 /** The HTTP status a validation failure maps to when the error names none. */
 export const VALIDATION_FAILED_STATUS = 400;
@@ -111,7 +112,53 @@ export function fieldsFromZodIssues(
   issues: Array<{ path: Array<string | number | symbol>; code: string; message: string }>,
   ...input: [] | [unknown]
 ): Array<{ field: string; code: FieldErrorCode; message: string }> {
-  return zodIssuesToFields(issues, ...input).map((entry) =>
+  return zodIssuesToFields(issues.map(withoutDateRangeArityRestatement), ...input).map((entry) =>
     entry.field === '' ? { ...entry, field: '(body)' } : entry,
   );
+}
+
+/**
+ * [#17598] Drop the tuple arm's RESTATEMENT of a `timeDimensions[].dateRange`
+ * refusal before the union expansion above puts it on the wire.
+ *
+ * `AnalyticsDateRangeSchema` is a `z.union` carrying its own error map, so the
+ * one issue zod raises already reads as a prescription and already names the
+ * arity — `… received a 1-element array, not the two bounds [start, end].
+ * Refused at the schema (…)`. Its tuple arm complains about the SAME value at
+ * the SAME path in zod's own words (`Too small: expected array to have >=2
+ * items`), and the #5014 expansion faithfully emits both: one condition, two
+ * wordings on the wire, which is the #5240 convention's whole subject and the
+ * property `analytics.zod.ts` claims for this refusal. So the branch issues
+ * that land at the UNION'S OWN PATH are dropped and the prescription stands
+ * alone.
+ *
+ * ⚠️ **Only those.** A branch issue naming a DEEPER position — `dateRange.1`
+ * for `['2026-01-01', 3]` — says WHICH bound is not a string, which the
+ * prescription does not, so it is kept: this narrows a restatement, never a
+ * diagnosis. And the filter is keyed on
+ * {@link isAnalyticsDateRangeRefusalIssue}, the structural recogniser both
+ * analytics doors already lift this condition with (never message prose), so
+ * every other union on every other key expands exactly as it did before —
+ * ⛔ union-branch expansion is not suppressed wholesale, here or anywhere.
+ *
+ * A non-array `path` on a branch issue is left alone rather than read as the
+ * root: zod always produces an array, and the conservative reading keeps a junk
+ * issue visible instead of silently dropping it.
+ */
+function withoutDateRangeArityRestatement<
+  T extends { path: Array<string | number | symbol>; code: string; message: string },
+>(issue: T): T {
+  const errors = (issue as { errors?: unknown }).errors;
+  if (!Array.isArray(errors) || !isAnalyticsDateRangeRefusalIssue(issue)) return issue;
+  return {
+    ...issue,
+    errors: errors.map((branch: unknown) =>
+      Array.isArray(branch)
+        ? branch.filter((nested: unknown) => {
+            const path = (nested as { path?: unknown } | null | undefined)?.path;
+            return !Array.isArray(path) || path.length > 0;
+          })
+        : branch,
+    ),
+  };
 }

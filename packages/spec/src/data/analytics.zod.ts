@@ -406,9 +406,13 @@ function describeRefusedDateRange(input: unknown): string {
  * Where the refusal happened is the one clause no INPUT can supply: the same
  * value is refused at parse time by {@link AnalyticsDateRangeSchema} and, for a
  * caller past that door, in-process by `analyticsDateRangeUnrecognizedError`
- * (`@objectstack/core`) — `AnalyticsService.query`, a driver's cube face called
- * directly, `POST /analytics/dataset/query`, which types its selection from
- * `AnalyticsQuery` but never Zod-parses it. Until this parameter existed the
+ * (`@objectstack/core`) — `AnalyticsService.query`, `queryDataset` and the
+ * dataset executor behind it reached IN PROCESS, and a driver's cube face
+ * called directly. ⚠️ Every REST analytics route is a SCHEMA-origin door,
+ * `POST /analytics/dataset/query` included: since #17058 that route parses its
+ * selection's shared members — `timeDimensions` among them — against
+ * `AnalyticsQuerySchema.pick(…)` ahead of the executor, so that route's
+ * refusal is THIS schema's and says so. Until this parameter existed the
  * shared sentence asserted the SCHEMA origin for both, so an author refused past
  * the door was sent to inspect a parse call that never ran; the one package that
  * noticed (`service-analytics`, #17593) had to OVERWRITE the message instead of

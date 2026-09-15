@@ -207,23 +207,30 @@ export function resolveAnalyticsDateRangePreset(
  * condition, one wording), quoted rather than restated — asked for the
  * `'runtime'` ORIGIN, which is the one this constructor has.
  *
- * ⚠️ That argument is not decoration (#17598 item ②). Every refusal raised
- * here is raised PAST the schema door, so the sentence the spec used to return
- * unconditionally — "Refused at the schema" — was false for every one of
- * them, and sent an author to inspect a parse call that never ran. The origin
- * is a parameter precisely so this call site states the truth it alone knows;
- * ⛔ it is never omitted and there is no default to omit it to.
+ * ⚠️ That argument is not decoration (#17598 item ②). Every refusal whose
+ * MESSAGE leaves here is raised PAST the schema door, so the sentence the spec
+ * used to return unconditionally — "Refused at the schema" — was false for
+ * every one of them, and sent an author to inspect a parse call that never
+ * ran. The origin is a parameter precisely so this call site states the truth
+ * it alone knows; ⛔ it is never omitted and there is no default to omit it to.
+ * The one caller that keeps the `.code`/`.status` and DISCARDS the message is
+ * the REST dataset door, whose own refusal is the schema's — Reachability
+ * below says why that is not an exception to the sentence.
  *
  * ⚠️ The code is registered under `@objectstack/runtime` (the door that names
  * the wire vocabulary) and this package carries a recorded provenance waiver
  * in `error-code-ledger.zod.ts` — the shared-constructor shape, the same one
  * `UPDATE_ID_MISMATCH` records.
  *
- * Reachability: on `POST /analytics/query` and `/analytics/sql` the schema door
- * refuses first and this never fires. It is the answer for the in-process
- * caller past that door — `AnalyticsService.query`, a driver's cube face
- * called directly, and `POST /analytics/dataset/query`, which types
- * `selection.timeDimensions` from `AnalyticsQuery` but does not Zod-parse it.
+ * Reachability: on EVERY REST analytics route the schema door refuses first and
+ * this never fires. `POST /analytics/query` and `/analytics/sql` parse the whole
+ * body; `POST /analytics/dataset/query` has parsed its selection's shared
+ * members — `timeDimensions` included — against `AnalyticsQuerySchema.pick(…)`
+ * since #17058 (`rest/src/analytics-selection-door.ts`, wired ahead of the
+ * executor), so that route answers "Refused at the schema" and takes only this
+ * constructor's `.code`/`.status`. This is the answer for the IN-PROCESS caller
+ * past those doors — `AnalyticsService.query`, `queryDataset` and the dataset
+ * executor behind it, and a driver's cube face called directly.
  */
 export function analyticsDateRangeUnrecognizedError(input: unknown): Error {
   const err = new Error(analyticsDateRangeRefusalMessage(input, 'runtime')) as Error & {

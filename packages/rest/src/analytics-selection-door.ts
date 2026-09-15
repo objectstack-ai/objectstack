@@ -76,7 +76,14 @@
  * own TSDoc names this route as the caller it was waiting for.
  *
  * The `message` is built the way the sibling builds it — `<field>: <message>`
- * joined — over `zodIssuesToFields`, the one ADR-0114 D3 mapper. Field paths
+ * joined — over `fieldsFromZodIssues` (`@objectstack/types`), which is
+ * `zodIssuesToFields`, the one ADR-0114 D3 mapper, plus the two things every
+ * HTTP boundary owes on top of it: the root-path rename, and [#17598] the drop
+ * of the date-range union's own arm RESTATEMENT, so an arity refusal reaches
+ * the wire with ONE wording rather than the prescription followed by zod's
+ * `Too small: expected array to have >=2 items`. That collapse lives in the one
+ * mapper both analytics doors share, ⛔ never as a second copy here — which is
+ * why this door reads the wrapper rather than the raw D3 function. Field paths
  * are prefixed `selection.` because they are reported against the REQUEST
  * body, where the parsed object sits one level down.
  *
@@ -86,7 +93,7 @@
  * not silently override the engine's own resolution chain).
  */
 
-import { zodIssuesToFields } from '@objectstack/spec/api';
+import { fieldsFromZodIssues } from '@objectstack/types';
 import { analyticsDateRangeUnrecognizedError } from '@objectstack/core';
 
 /**
@@ -166,9 +173,13 @@ export async function datasetSelectionRefusal(
     const parsed = schema.safeParse(projection);
     if (parsed.success) return undefined;
 
-    const issues: Array<{ code: string; path: ReadonlyArray<PropertyKey>; input?: unknown }> =
-        parsed.error.issues;
-    const fields = zodIssuesToFields(issues, projection).map((entry) => ({
+    const issues: Array<{
+        code: string;
+        path: Array<string | number | symbol>;
+        message: string;
+        input?: unknown;
+    }> = parsed.error.issues;
+    const fields = fieldsFromZodIssues(issues, projection).map((entry) => ({
         ...entry,
         field: `selection.${entry.field}`,
     }));

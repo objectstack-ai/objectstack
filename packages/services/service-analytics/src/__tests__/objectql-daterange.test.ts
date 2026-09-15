@@ -219,10 +219,11 @@ describe('ObjectQLStrategy — timeDimensions[].dateRange (#3650)', () => {
           // [#17598] The array arm now types `dateRange` as EXACTLY two string
           // bounds, so this window no longer COMPILES — that is the schema door
           // doing its half of the same rule. The half THIS test pins is the
-          // face's own refusal for a caller past that door (`POST
-          // /analytics/dataset/query` types its selection from `AnalyticsQuery`
-          // and never Zod-parses it), so the value is still handed over and the
-          // type error is expected by name rather than the case deleted.
+          // face's own refusal for a caller past that door — an IN-PROCESS
+          // `AnalyticsService.query` / `queryDataset` call, never a REST route:
+          // every analytics route parses `timeDimensions` at its own door and
+          // answers "Refused at the schema". So the value is still handed over
+          // and the type error is expected by name rather than the case deleted.
           // @ts-expect-error — one bound is not a window; write the day twice
           timeDimensions: [{ dimension: 'close_date', dateRange: ['2026-01-20'] }],
         },
