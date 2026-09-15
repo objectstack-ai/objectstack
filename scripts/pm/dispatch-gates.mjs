@@ -21,11 +21,15 @@
  *
  * The battery re-spawns this tool's own CLI as a child process many times —
  * deliberate (see `check-dispatch-gates.mjs`'s header for why a self-test this
- * size is not fixture-only) — and on an agent container that makes the full
- * run longer than the container's foreground command cap, which SIGTERMs a
- * run past it. Do not run `--self-test` (or `pnpm check:pm-dispatch-gates`,
- * which is exactly that flag) in the foreground there. Detach it and poll the
- * log instead:
+ * size is not fixture-only) — and on an agent container it now runs
+ * cap-SIZED, not cap-exceeding: since #18201 made discovery run once per tree
+ * per process instead of many times over, it fits inside a quiet container's
+ * foreground command cap with room to spare — but the cap is a property of
+ * the CALLER's container and the margin a property of how contended it is,
+ * neither of which this file can see, and an agent box runs several agents at
+ * once. Do not run `--self-test` (or `pnpm check:pm-dispatch-gates`, which is
+ * exactly that flag) in the foreground there. Detach it and poll the log
+ * instead:
  *
  *   nohup pnpm check:pm-dispatch-gates > /tmp/pm-dispatch-gates.log 2>&1 &
  *
