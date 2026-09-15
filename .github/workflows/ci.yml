@@ -928,12 +928,17 @@ jobs:
       # here is fine; moving them below that pair is not — and ⛔ that pair does
       # not acquire an `if:` or a `continue-on-error:` to "match" these.
       #
-      # The `--self-test` runs here because this is where CI names the script,
-      # which is what check:self-test-wired requires. ⚠ Under
-      # `continue-on-error` its verdict is VISIBLE but not enforcing: inside
-      # this workflow, no step this card may add is permitted to fail anything.
-      # Giving that self-test teeth means a `check:` step in lint.yml, which is
-      # deliberately NOT taken here.
+      # ⛔ The `--self-test` is deliberately NOT invoked here (#17097). It ran
+      # in this step until then, where `continue-on-error` discarded its verdict:
+      # the self-test reached an answer nothing could act on, and
+      # `check:self-test-wired` was satisfied by an invocation that could not
+      # fail. A self-test with no teeth is worse than no self-test, because its
+      # presence is what stops anyone from adding a real one. It now runs in
+      # lint.yml's `Lint & Repo Gates` job, as `Test-timing parser self-test`,
+      # with no `continue-on-error` — so a broken timing parser reddens there
+      # while this workflow keeps the report-only property #16454 ruled and
+      # #14469 measured the cost of losing. ⛔ Do not re-add it here; giving it
+      # teeth in `ci.yml` is exactly the trade-off those two cards refuse.
       - name: Capture this shard's test timings
         if: always()
         continue-on-error: true
@@ -942,7 +947,6 @@ jobs:
             echo "No test log — the test step did not get far enough to produce one."
             exit 0
           fi
-          node scripts/report-test-timings.mjs --self-test
           node scripts/report-test-timings.mjs --capture \
             --log "$RUNNER_TEMP/test-core.log" \
             --summaries .turbo/runs \
