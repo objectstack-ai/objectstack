@@ -22,9 +22,11 @@ would put a second hand-written spelling of "this is a tombstone" in a consumer.
 A property that admits nothing and is `required` is kept: dropping it would turn
 "this object admits nothing" into "this object admits anything".
 
-Measured over the whole served registry at `@objectstack/spec` 17.4.0: 77 such
-nodes across 15 types — a reading taken at that version, not a standing
-invariant; it moves as retired keys land or age out.
+Measured over the whole served registry at `1bdbf82cb5`, this change's merge
+base (`@objectstack/spec` SOURCE at 17.4.0, plus the retirements unreleased at
+that sha — not the published release): 77 such nodes across 15 types — a
+reading taken at that tree, not a standing invariant; it moves as retired keys
+land or age out.
 
 **Nothing is un-retired, and no prescription CHANNEL is destroyed.** The removal is a
 property of ONE emitter. `tsc` still types the key `never`, the parse still
