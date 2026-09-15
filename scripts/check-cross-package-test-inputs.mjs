@@ -1532,6 +1532,9 @@ export function globReachesDirectory(dir, glob) {
 /** How many uncovered directories a single unheld walk root reports before it stops. */
 const WALK_RADIUS_REPORT_CAP = 8;
 
+/** The repo-relative separator, kept out of the ledger rows below on purpose. */
+const SEGMENT_JOIN = '/';
+
 /**
  * Walk radii this limb found on the tree it landed on, reviewed and accepted —
  * shrink-only and hand-edited, per test and per root, each naming WHY it is
@@ -1553,33 +1556,75 @@ const WALK_RADIUS_REPORT_CAP = 8;
  * radius by "just run the update command", which is how a ratchet stops meaning
  * anything. An entry that no longer matches a live walk root fails as stale in
  * the same pass, so this can only shrink.
+ *
+ * ⚠️ SPELLING RULE, mechanical rather than stylistic, and it is why the rows
+ * below are SEGMENTS rather than paths. `scripts/pm/dispatch-gates.mjs` reads
+ * every quoted span in a gate's MODULE BODY as a path that gate watches —
+ * including a backticked span sitting INSIDE a quoted sentence, which is not
+ * the shape the rule is usually remembered as. Measured on this tree: spelling
+ * the three test paths and the one nested root whole, and naming the bare
+ * whole-subtree packages glob in backticks inside a reason, put five watch
+ * hints on this gate that it does not read, and two of them turned pins in
+ * `check:pm-dispatch-gates` red — the one holding that no hint of this gate
+ * reaches a TSX test file, and the one holding that its covering hint is
+ * inherited from the declaration module rather than declared here. So: no
+ * literal in this ledger carries a separator, and a glob named in a reason is
+ * named in WORDS. The same discipline the shared glob module's fixtures are
+ * assembled under, one file over.
  */
-const ACCEPTED_WALK_RADII = Object.freeze({
-  'packages/client/src/envelope-caller-census.test.ts': Object.freeze({
+const ACCEPTED_WALK_RADII = acceptedWalkRadii([
+  {
     // The repo root. The census walks the whole workspace to BOUND a migration,
-    // and the trade is recorded in that file's own header: `packages/**` is
-    // deliberately not declared because it would re-run the client suite on
-    // virtually every commit, so the count is exact on a cold cache and in CI's
-    // full run and a recorded bound otherwise. CLOSED BY: the census retiring
-    // with the migration it bounds, or a ruling that buys `packages/**` at the
-    // price that header states and refuses.
-    '': 'recorded bound: the migration census walks the workspace; `packages/**` refused on cost in its own header',
-  }),
-  'packages/lint/src/lint-startup-registry-verdict.corpus.test.ts': Object.freeze({
+    // and the trade is recorded in that file's own header: the bare recursive
+    // packages glob is deliberately not declared because it would re-run the
+    // client suite on virtually every commit, so the count is exact on a cold
+    // cache and in CI's full run and a recorded bound otherwise. CLOSED BY: the
+    // census retiring with the migration it bounds, or a ruling that buys that
+    // glob at the price that header states and refuses.
+    test: ['packages', 'client', 'src', 'envelope-caller-census.test.ts'],
+    root: [],
+    why: 'recorded bound: the migration census walks the workspace; the bare recursive packages glob is refused on cost in its own header',
+  },
+  {
     // `collectSourceFiles(packagesDir)` sweeps every `.ts` under `packages/`
-    // while the entry declares four per-package subtrees. CLOSED BY: either
-    // `packages/**/*.ts` on this entry — the price `@objectstack/core` pays and
-    // this package has never been ruled to — or narrowing the sweep to the
-    // subtrees the entry declares.
-    packages: 'corpus sweep wider than the four declared subtrees; widening or narrowing is an unruled cost decision',
-  }),
-  'packages/qa/dogfood/test/expression-conformance.test.ts': Object.freeze({
-    // `walk(SPEC_SRC)` sweeps all of `packages/spec/src` while the entry
-    // declares `automation/**` and `data/**` of it. CLOSED BY: declaring
-    // `packages/spec/src/**` here, or narrowing the sweep to those two.
-    'packages/spec/src': 'sweep wider than the two declared spec subtrees; same unruled cost decision',
-  }),
-});
+    // while the entry declares four per-package subtrees. CLOSED BY: either the
+    // per-extension recursive packages glob on this entry — the price
+    // `@objectstack/core` pays and this package has never been ruled to — or
+    // narrowing the sweep to the subtrees the entry declares.
+    test: ['packages', 'lint', 'src', 'lint-startup-registry-verdict.corpus.test.ts'],
+    root: ['packages'],
+    why: 'corpus sweep wider than the four declared subtrees; widening or narrowing is an unruled cost decision',
+  },
+  {
+    // `walk(SPEC_SRC)` sweeps all of spec's `src` while the entry declares two
+    // subtrees of it. CLOSED BY: declaring that whole subtree here, or
+    // narrowing the sweep to those two.
+    test: ['packages', 'qa', 'dogfood', 'test', 'expression-conformance.test.ts'],
+    root: ['packages', 'spec', 'src'],
+    why: 'sweep wider than the two declared spec subtrees; same unruled cost decision',
+  },
+]);
+
+/**
+ * The ledger rows above, joined into the `{ test: { root: why } }` shape
+ * `verify()` compares live walk roots against.
+ *
+ * The join happens HERE, at runtime, for the reason the docblock above states:
+ * a repo-relative path spelled as a module-body literal is read by the dispatch
+ * derivation as a population this gate watches. Segments carry no separator, so
+ * they are invisible to it and identical to it afterwards.
+ *
+ * @param {{test: string[], root: string[], why: string}[]} rows
+ * @returns {Readonly<Record<string, Readonly<Record<string, string>>>>}
+ */
+function acceptedWalkRadii(rows) {
+  const out = {};
+  for (const { test, root, why } of rows) {
+    const key = test.join(SEGMENT_JOIN);
+    out[key] = Object.freeze({ ...(out[key] ?? {}), [root.join(SEGMENT_JOIN)]: why });
+  }
+  return Object.freeze(out);
+}
 
 /**
  * The directories inside a walk root that no declared glob reaches — empty when
