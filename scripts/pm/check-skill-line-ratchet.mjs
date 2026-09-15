@@ -936,7 +936,47 @@ export const CEILINGS = new Map([
   // increment MEASURED zero line-neutral folds among this file's adjacent rule
   // pairs, and re-wrap funding is refused per the 2026-08-17 rule in any case.
   // Landed count, headroom 0, same convention.
-  ['.claude/skills/pm-dispatch/references/platform-readings.md', 459],
+  // Raised 459 → 465 by the SIXTEENTH readings increment, again under the
+  // STANDING one-file exception quoted above rather than a fresh decision
+  // card, and again recorded as a `ruledRaises` record citing it. Its carrier
+  // was a FOLDED family of seven cards, each graded separately and each
+  // checkable by its own control word. Spent at ONE line per deduplicated
+  // reading, each written in this file's voice: the write-identity probe — the
+  // discriminator between the two token classes is the read-back of the
+  // session's own write, and within it `user.type` (with `user.login`) ALONE,
+  // because `performed_via_github_app` names the same App under both classes
+  // and `GET /user` answers the bound account under both (+1); a suspension erases
+  // the account's EVENTS as well as its content, so a label stays on the card
+  // while the `labeled` event that wrote it is gone and 「who labelled what」 is
+  // unreconstructable (+1); the card `comments` COUNT over-reads — 1 against a
+  // comment list and a timeline that both read 0, with four same-round controls
+  // consistent, so the thread-empty question goes to those two channels (+1);
+  // the join-before-search instrument as a sixth reading trap — a phrase that
+  // exists only after joining reads zero for the SUBJECT and the CONTROL alike
+  // under a single-line grep (+1); the PR-keyed CI concurrency cell — both
+  // repositories key the group on the pull-request number, so re-running a
+  // SUPERSEDED head cancels the CURRENT head's run and a re-run is a write
+  // (+1); and the comment-write cell of the exclamation-mark-before-left-bracket
+  // loss, where the stored regex is already invalid and a reader who runs it
+  // gets a zero wearing a published provenance (+1) = +6 exactly. Candidates 12
+  // / landed 6 / rewritten in place 1 / already present 3 / refused 2 — the
+  // three already-present facts are the refused `/search/*` path's absent
+  // `total_count` and, for the mangling card, the trigger itself with its
+  // issue-body cells and the author-side prescription; the two refusals are a
+  // single self-healing observation and an explicitly falsifiable hypothesis,
+  // neither of which is a reading.
+  //
+  // FOUR corrections are paid in place and buy nothing: the three `search_issues`
+  // rows, whose stated basis 「限定符形回 `total_count: 0`」 is refuted by two
+  // independent sessions and by this increment's own REST control (the
+  // qualifier-shaped query and the deterministic list endpoint return the same
+  // 208 issues, number for number), are rewritten onto what is measured; and the
+  // reading-trap list's own count word moves 五 → 六 for the trap appended to it.
+  // Nothing else was paid in place: the fourth increment MEASURED zero
+  // line-neutral folds among this file's adjacent rule pairs, and re-wrap funding
+  // is refused per the 2026-08-17 rule in any case. Landed count, headroom 0,
+  // same convention.
+  ['.claude/skills/pm-dispatch/references/platform-readings.md', 465],
   // Per-operation REST/GraphQL/git channel mapping — which fleet operation has
   // a REST twin (each row executed in a real session, provenance date carried
   // per row), the handful that are GraphQL-only, and the queue-routing
@@ -1607,6 +1647,23 @@ export const CROSS_FILE_MOVES = new Map([
             + '逐条核实、去重计数(候选/落地/已有/拒收)、一事一行、不计重排」',
           date: '2026-09-15',
           delta: 5,
+        },
+        {
+          // The SIXTEENTH increment, under the same STANDING exception — the
+          // same words again, for the same reason: a record that quotes no
+          // ruling is RED and each record stands alone. The +6 is accounted for
+          // line by line beside this entry's ceiling above; the exception's
+          // conditions (per-item verification and the candidate / landed /
+          // already-present / refused counts) are carried by the raising PR's
+          // body and the seat's ACCEPT.
+          ruling:
+            'the standing one-file exception for'
+            + ' `.claude/skills/pm-dispatch/references/platform-readings.md` — pm-dispatch'
+            + ' SKILL.md, verbatim and untranslated: 「唯一例外:`platform-readings.md`'
+            + ' 增量抬上限到落地行数,免决策卡,记 `ruledRaises` 引常设裁决。条件:席位验收评论'
+            + '逐条核实、去重计数(候选/落地/已有/拒收)、一事一行、不计重排」',
+          date: '2026-09-15',
+          delta: 6,
         },
       ],
       sources: [
