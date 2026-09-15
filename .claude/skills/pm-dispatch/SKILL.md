@@ -308,8 +308,7 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 - sweep 与首触定级只对多车道仓,单车道仓机械三务自理。
 - 发版板(无板仓跳过)、查重/shadow 检查与代裁通道全仓照跑。
 - 代裁只由维护者召唤的总监席产出,⛔ 永不凭自述、⛔ 无子代理裁决。
-- fire 开局只按名加载互斥检查所需工具,`ToolSearch` 用 `select:` 形式。
-- 判定本轮有活之后才加载其余工具。
+- fire 开局只按名加载互斥检查所需工具,`ToolSearch` 用 `select:`;判定本轮有活才加载其余。
 - ⛔ 分诊 fresh session 开局不做泛关键词 ToolSearch;可验判据:空转轮 ~4 万 token 以内。
 - 工具加载纪律只约束分诊 fresh session 的开局;执行座位与 dev 不受约束。
 - 两级盘点:小时轮以 `since` 窗口读增量,锚 = 座位贴上一份收班简报的时间戳。
@@ -337,6 +336,7 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 - bump 单单张封顶:先查同题 open 单,已有就追评刷新;工具链新形态只提请不扩面。
 - 分类动作每张三选一,外加一个修复通道。
 - ⛔ 不挂 `needs:contract-review`:随 draft PR 或 `Clause-②: yes` 认领;裁定写方向、给六态之一。
+- 方向落在 ADR/已裁卡/不可重裁规则:贴 `check-prior-rulings.mjs` 的 `Prior rulings read:` 行,或不点。
 - `pm:queue` = 有具名落点或复现的具体缺陷,或范围明确的工具/门禁修复,无可问之事。
 - `pm:queue` 也收恢复不变量的 finding、test-only pin,与实现未被裁错的说明书脱节(修文档)。
 - `needs-user-decision` = 设计卡、feature/契约形状提案、需要 appetite 的多周程序。
