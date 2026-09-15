@@ -363,6 +363,7 @@ model: opus
   "status": "done | rework | blocked | needs_decision",
   "branch": "claude/issue-<n>-<slug>",
   "pr": "<url or null>",
+  "session": "session_<id> — this run's harness-stamped id (transcript Claude-Session: line; subagent = parent's)",
   "premise_still_valid": true,
   "summary": "what was implemented, 2-4 sentences",
   "tests": "commands run + pass/fail evidence (real output excerpts); ablation: rebuild + on-disk mutation proof",
@@ -376,8 +377,7 @@ model: opus
 ```
 
 - `status: "rework"` = 你自知不完整的部分成果,在 `summary` 里说明为什么。
-- `premise_still_valid: false` = 你的核验证伪了 issue 的前提(规则 6):证据写进 `summary`。
-- 那时 `pr` 为 null 或只圈存活的部分,PM 重新分诊。
+- `premise_still_valid: false` = 核验证伪了前提(规则 6):证据进 `summary`,`pr` null 或只圈存活部分。
 - 报告模板是工具,不是真相:某字段的预设与实际发生的对不上时直说。
 - 例:反向验证方向反转、前提死了、某个产物在此无意义;按模板硬造比留白更糟。
 
