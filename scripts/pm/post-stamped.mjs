@@ -198,8 +198,56 @@
  * edit, which is when that write happened), and the DRIFT between the stamp
  * this run substituted and that instant — the same measurement H56 makes on
  * the corpus, taken at write time, against the same imported tolerance. The
- * stored bytes are compared with the bytes sent, so a body the platform's
- * sanitizer mutated is reported instead of assumed.
+ * stored bytes are then compared with the bytes sent, judged by the declared
+ * set below, so a body the platform's sanitizer mutated is reported instead of
+ * assumed — and a body the platform merely NORMALISED is named instead of
+ * warned about.
+ *
+ * ## The read-back names the normalisations, or its warning is noise (#18296)
+ *
+ * That comparison was `stored === sent`, and GitHub stores no body
+ * byte-for-byte. Measured across one shift: every body refresh read back one
+ * byte short (the platform strips the trailing newline), every comment 58 bytes
+ * long (it appends its footer block) — and the ONE real mutation of that shift,
+ * a token the sanitizer ate out of a PR's provenance line, printed the SAME
+ * sentence as all of them. A warning that fires on nearly every write is not a
+ * warning: a seat learns to scroll past it, which is exactly how that token
+ * went unread until the next re-read.
+ *
+ * So the stored body is judged against a DECLARED set of normalisations, each
+ * one measured in this repository, and the line NAMES the one it saw:
+ *
+ *   identical                   the bytes came back as they went out.
+ *   trailing-newline-stripped   stored is the sent body minus its trailing
+ *                               newline(s) — the reading every `--body`
+ *                               refresh takes, and every comment whose sent
+ *                               body already ended in the footer block.
+ *   footer-appended             stored is that body plus EXACTLY
+ *                               `PLATFORM_COMMENT_FOOTER`, with or without the
+ *                               strip above. ⛔ COMMENT MODE ONLY: whether the
+ *                               platform synthesises a footer for a footer-less
+ *                               ISSUE BODY is unmeasured, and an unmeasured
+ *                               cell is not a cell this tool forgives — a
+ *                               footer on a body read-back stays MUTATED until
+ *                               somebody measures it.
+ *   mutated                     anything else — the warning, kept whole, plus
+ *                               the FIRST DIFFERING BYTE and what stands at it
+ *                               on each side.
+ *
+ * ⛔ An exact declared set, ⛔ never a tolerant comparison. Trimming both sides
+ * or matching the footer with a pattern buys the same quiet by making the tool
+ * agree with whatever it is shown, and what it would then agree with is a
+ * footer the sanitizer has chewed or a whitespace edit nobody made. The
+ * declared set forgives what was measured and stays loud about everything else,
+ * which is the only version of this line a reader can act on.
+ *
+ * ⛔ And the offset is counted in BYTES, never in characters or lines: the line
+ * already counts bytes on both sides, the platform's own deltas are quoted in
+ * bytes, and a multi-byte character ahead of the difference must not move the
+ * number a reader checks against `Buffer.byteLength`. The mutated line carries
+ * up to `SPAN_BYTES` bytes from each body starting AT that offset — every byte
+ * before it is identical in both by construction, so a window spent on them
+ * would print the one thing already known.
  *
  * ## The unread-knock check on a body refresh (#17905)
  *
@@ -345,8 +393,16 @@ export function offendingSpan(text, limit = SPAN_BYTES) {
   const head = clipped
     ? buf.subarray(0, limit).toString('utf8').replace(/\uFFFD+$/u, '')
     : buf.toString('utf8');
-  const shown = head.replace(CONTROL_RE, (ch) => CONTROL_ESCAPES[ch] ?? `\\x${ch.codePointAt(0).toString(16).padStart(2, '0')}`);
-  return `${shown}${clipped ? '…' : ''}`;
+  return `${escapeControls(head)}${clipped ? '…' : ''}`;
+}
+
+/**
+ * Every control character in a piece of text, spelled the way `offendingSpan`
+ * spells it — one rendering of "show me the offender", shared by the refusals
+ * and by the read-back's first-difference context, never two.
+ */
+function escapeControls(text) {
+  return String(text ?? '').replace(CONTROL_RE, (ch) => CONTROL_ESCAPES[ch] ?? `\\x${ch.codePointAt(0).toString(16).padStart(2, '0')}`);
 }
 
 /** Why an opener is not a token, in the words the refusal prints. */
@@ -682,11 +738,123 @@ export function renderBody(text, nowMs = Date.now()) {
 }
 
 /**
+ * The block the platform appends to a COMMENT whose sent body does not already
+ * carry one: a blank line, a rule, the bare attribution line — 58 bytes,
+ * measured on every comment this seat's tooling posted through the REST proxy,
+ * and the same 58 the register records for both comment channels.
+ *
+ * ⛔ The exact bytes, ⛔ never a regex and ⛔ never a trim. What a read-back
+ * asks is whether the difference is EXACTLY a normalisation somebody measured;
+ * a pattern that matches "a footer, roughly" also forgives a footer the
+ * sanitizer has chewed, which is the one mutation this verdict exists to make
+ * legible.
+ */
+export const PLATFORM_COMMENT_FOOTER = '\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_';
+
+/**
+ * The vocabulary of what a stored body can show, and what each word means.
+ * Declared so the line, the `--json` field and the self-test spell one set of
+ * names rather than three.
+ */
+export const READ_BACK_CLASSES = Object.freeze({
+  unreadable: 'the platform returned no readable body — the write is UNVERIFIED',
+  identical: 'the bytes came back exactly as they went out',
+  'trailing-newline-stripped': 'the stored body is the sent body minus its trailing newline(s)',
+  'footer-appended': "the stored body is that body plus exactly the platform's comment footer",
+  mutated: 'something nobody measured — the bytes disagree, and the offset says where',
+});
+
+/**
+ * The first byte at which two bodies disagree, or `-1` when they do not.
+ *
+ * UTF-8 BYTES, because that is the unit both halves of this line already count
+ * in and the unit the platform's own deltas are quoted in. Where one body is a
+ * PREFIX of the other the answer is the shorter one's length — the first byte
+ * it does not have — so a pure append and a pure truncation both land at the
+ * seam rather than reporting "no difference".
+ */
+export function firstDifferingByte(sent, stored) {
+  const a = Buffer.from(String(sent ?? ''), 'utf8');
+  const b = Buffer.from(String(stored ?? ''), 'utf8');
+  const shared = Math.min(a.byteLength, b.byteLength);
+  for (let i = 0; i < shared; i += 1) {
+    if (a[i] !== b[i]) return i;
+  }
+  return a.byteLength === b.byteLength ? -1 : shared;
+}
+
+/**
+ * Up to `limit` bytes of one body starting AT a byte offset, escaped the way a
+ * refusal escapes a span. The window opens at the offset rather than around it
+ * because every byte before it is identical in both bodies by construction.
+ *
+ * A window that starts at or past the end of its body prints `(end of body)`:
+ * where one body is a prefix of the other, "this one stops here" IS the
+ * finding, and an empty string would render it as nothing at all.
+ */
+function byteWindowFrom(text, from, limit = SPAN_BYTES) {
+  const buf = Buffer.from(String(text ?? ''), 'utf8');
+  if (!Number.isInteger(from) || from < 0 || from >= buf.byteLength) return '(end of body)';
+  const clipped = buf.byteLength > from + limit;
+  const shown = buf
+    .subarray(from, from + limit)
+    .toString('utf8')
+    .replace(/^�+/u, '')
+    .replace(/�+$/u, '');
+  return `${from > 0 ? '…' : ''}${escapeControls(shown)}${clipped ? '…' : ''}`;
+}
+
+/**
+ * Which of the platform's KNOWN normalisations the stored body shows, judged
+ * exactly — the whole vocabulary is `READ_BACK_CLASSES` and the reasoning is
+ * the header's read-back section.
+ *
+ * ⛔ `mode` defaults to `body`, the STRICT side, and the comment-only footer
+ * rule must be asked for by name. A default that forgave a footer wherever it
+ * appeared would be a second warning nobody can act on — the defect this
+ * function was rewritten to close — and the issue-body cell is UNMEASURED: no
+ * reading in this repository says whether the platform synthesises a footer for
+ * a footer-less body, so that shape stays MUTATED with its offset until one
+ * does.
+ */
+export function classifyReadBack({ sent, stored, mode = 'body' } = {}) {
+  if (typeof stored !== 'string') return { class: 'unreadable', offset: null, strippedNewlines: 0 };
+  const sentText = String(sent ?? '');
+  if (stored === sentText) return { class: 'identical', offset: null, strippedNewlines: 0 };
+
+  const trimmed = sentText.replace(/\n+$/u, '');
+  const strippedNewlines = sentText.length - trimmed.length;
+  if (strippedNewlines > 0 && stored === trimmed) {
+    return { class: 'trailing-newline-stripped', offset: null, strippedNewlines };
+  }
+  if (mode === 'comment') {
+    if (stored === `${sentText}${PLATFORM_COMMENT_FOOTER}`) {
+      return { class: 'footer-appended', offset: null, strippedNewlines: 0 };
+    }
+    if (strippedNewlines > 0 && stored === `${trimmed}${PLATFORM_COMMENT_FOOTER}`) {
+      return { class: 'footer-appended', offset: null, strippedNewlines };
+    }
+  }
+
+  const offset = firstDifferingByte(sentText, stored);
+  return {
+    class: 'mutated',
+    offset,
+    strippedNewlines: 0,
+    sentContext: byteWindowFrom(sentText, offset),
+    storedContext: byteWindowFrom(stored, offset),
+  };
+}
+
+/**
  * What the read-back proves, as lines a transcript carries. `writtenAt` is the
  * platform's own clock for the write — `created_at` for a comment, `updated_at`
- * for a body edit, which is when that write actually happened.
+ * for a body edit, which is when that write actually happened. `mode` is the
+ * act this verdict is about, and it is load-bearing: the footer rule is
+ * comment-only, so a verdict that does not know which act it read cannot apply
+ * it — and gets the strict reading rather than a guess.
  */
-export function readBackVerdict({ stamp, writtenAt, sent, stored, substituted = 0 }) {
+export function readBackVerdict({ stamp, writtenAt, sent, stored, substituted = 0, mode = 'body' }) {
   const lines = [];
   const drift = substituted > 0 ? stampDriftMinutes(stamp, writtenAt, writtenAt) : null;
   if (substituted === 0) {
@@ -704,17 +872,27 @@ export function readBackVerdict({ stamp, writtenAt, sent, stored, substituted = 
     );
   }
   const sentBytes = Buffer.byteLength(String(sent ?? ''), 'utf8');
-  if (typeof stored !== 'string') {
+  const storedBytes = typeof stored === 'string' ? Buffer.byteLength(stored, 'utf8') : null;
+  const readBack = classifyReadBack({ sent, stored, mode });
+  if (readBack.class === 'unreadable') {
     lines.push('  ⚠️ read-back: the stored body could not be read — the write is UNVERIFIED, not verified');
-  } else if (stored === sent) {
+  } else if (readBack.class === 'identical') {
     lines.push(`  read-back: ${sentBytes} byte(s) stored, IDENTICAL to what was sent`);
+  } else if (readBack.class === 'trailing-newline-stripped') {
+    lines.push(`  read-back: clean — the platform stripped the trailing newline (sent ${sentBytes}, stored ${storedBytes})`);
+  } else if (readBack.class === 'footer-appended') {
+    lines.push(
+      `  read-back: clean — the platform appended its footer${readBack.strippedNewlines > 0 ? ', over the stripped trailing newline' : ''}` +
+        ` (sent ${sentBytes}, stored ${storedBytes})`,
+    );
   } else {
     lines.push(
-      `  ⚠️ read-back: sent ${sentBytes} byte(s), stored ${Buffer.byteLength(stored, 'utf8')} — the platform ` +
+      `  ⚠️ read-back: sent ${sentBytes} byte(s), stored ${storedBytes} — the platform ` +
         'MUTATED the body. Read the artefact before trusting it: the sanitizer eats tag-shaped fragments.',
     );
+    lines.push(`     first difference at byte ${readBack.offset}: sent ${readBack.sentContext} | stored ${readBack.storedContext}`);
   }
-  return { lines, drift, mutated: typeof stored === 'string' && stored !== sent };
+  return { lines, drift, mutated: readBack.class === 'mutated', readBack };
 }
 
 /**
@@ -1143,6 +1321,9 @@ async function main(argv) {
     sent: rendered.body,
     stored: written.stored,
     substituted: rendered.substituted,
+    // The act, not a guess: the footer rule is comment-only, and this is the
+    // one place that knows which of the two writes just happened.
+    mode: options.mode,
   });
 
   if (options.json) {
@@ -1160,6 +1341,7 @@ async function main(argv) {
           written_at: written.writtenAt,
           drift_minutes: verdict.drift,
           body_mutated: verdict.mutated,
+          read_back: { class: verdict.readBack.class, first_difference_byte: verdict.readBack.offset },
           ...(unread
             ? {
                 unread_check: {
@@ -1207,7 +1389,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the calendar rule: a stamp shaped like an instant the calendar does not have': 34,
   'the direction check: a stamp no act can have read': 22,
   'the substitution: one clock, read once, written everywhere': 9,
-  'the read-back: what the transcript can actually prove': 11,
+  'the read-back: what the transcript can actually prove': 33,
   'the CLI: the one decision a typo must never make': 16,
   'the unread-knock check: a refresh cannot void what nobody read': 49,
   'the shared rule: this tool and H56 cannot come to disagree': 6,
@@ -1432,6 +1614,53 @@ export function selfTest() {
   t('⭐ a body the platform MUTATED is reported, not assumed identical', readBackVerdict({ stamp: '2026-09-10T06:37Z', writtenAt: '2026-09-10T06:37:48Z', sent: SENT, stored: `${SENT} x`, substituted: 1 }).mutated === true);
   t('…and the sanitizer is named as the thing to go read about', readBackVerdict({ stamp: '2026-09-10T06:37Z', writtenAt: '2026-09-10T06:37:48Z', sent: SENT, stored: `${SENT} x`, substituted: 1 }).lines[1].includes('sanitizer'));
   t('an unreadable stored body is UNVERIFIED, never verified', readBackVerdict({ stamp: '2026-09-10T06:37Z', writtenAt: '2026-09-10T06:37:48Z', sent: SENT, stored: undefined, substituted: 1 }).lines[1].includes('UNVERIFIED'));
+
+  // The platform normalises nearly every body it stores, so a verdict that only
+  // knows `stored === sent` warns on nearly every write — and the one real
+  // mutation of a shift then reads exactly like the noise around it. The cases
+  // below pin the MEASURED normalisations as clean and named, and pin that
+  // everything else keeps the warning and gains an offset a reader can chase.
+  const rb = (extra) => readBackVerdict({ stamp: '2026-09-10T06:37Z', writtenAt: '2026-09-10T06:37:48Z', substituted: 1, ...extra });
+  const FIVE = [
+    classifyReadBack({ sent: 'x', stored: undefined }),
+    classifyReadBack({ sent: 'x', stored: 'x' }),
+    classifyReadBack({ sent: 'x\n', stored: 'x' }),
+    classifyReadBack({ sent: 'x', stored: `x${PLATFORM_COMMENT_FOOTER}`, mode: 'comment' }),
+    classifyReadBack({ sent: 'x', stored: 'y' }),
+  ];
+  t('the platform comment footer is declared as the 58 bytes measured, never a pattern', Buffer.byteLength(PLATFORM_COMMENT_FOOTER, 'utf8') === 58, `bytes=${Buffer.byteLength(PLATFORM_COMMENT_FOOTER, 'utf8')}`);
+  t('every class the classifier answers with has a declared meaning', FIVE.every((r) => r.class in READ_BACK_CLASSES), FIVE.map((r) => r.class).join());
+  t('…and those five inputs are five DIFFERENT classes, not one word repeated', new Set(FIVE.map((r) => r.class)).size === 5);
+
+  const STRIPPED_SENT = `${SENT}\n`;
+  const STRIPPED = rb({ sent: STRIPPED_SENT, stored: SENT, mode: 'body' });
+  t('⭐ THE FILED READING: a body stored one trailing newline short is CLEAN, not MUTATED', STRIPPED.mutated === false && STRIPPED.readBack.class === 'trailing-newline-stripped');
+  t('…and the line NAMES the strip rather than warning about the sanitizer', STRIPPED.lines[1].includes('clean — the platform stripped the trailing newline') && STRIPPED.lines[1].includes('⚠️') === false);
+  t('…carrying both byte counts, so a reader reads the delta instead of recomputing it', STRIPPED.lines[1].includes(`sent ${Buffer.byteLength(STRIPPED_SENT, 'utf8')}, stored ${Buffer.byteLength(SENT, 'utf8')}`), STRIPPED.lines[1]);
+
+  const APPENDED = rb({ sent: SENT, stored: `${SENT}${PLATFORM_COMMENT_FOOTER}`, mode: 'comment' });
+  t('⭐ a COMMENT stored with the platform footer appended is CLEAN', APPENDED.mutated === false && APPENDED.readBack.class === 'footer-appended');
+  t('…and the line names the footer as the thing that was added', APPENDED.lines[1].includes('clean — the platform appended its footer'));
+  t('⭐ THE CONTROL: the same append in BODY mode stays MUTATED — an unmeasured cell is not forgiven', rb({ sent: SENT, stored: `${SENT}${PLATFORM_COMMENT_FOOTER}`, mode: 'body' }).mutated === true);
+  t('…and a caller naming NO mode gets that strict reading, never the lenient one', rb({ sent: SENT, stored: `${SENT}${PLATFORM_COMMENT_FOOTER}` }).mutated === true);
+
+  const BOTH = rb({ sent: STRIPPED_SENT, stored: `${SENT}${PLATFORM_COMMENT_FOOTER}`, mode: 'comment' });
+  t('⭐ a strip AND the footer on one comment is clean, named by the footer', BOTH.mutated === false && BOTH.readBack.class === 'footer-appended' && BOTH.lines[1].includes('appended its footer'));
+  t('…and the strip is said too, rather than one normalisation hiding the other', BOTH.lines[1].includes('over the stripped trailing newline'), BOTH.lines[1]);
+
+  const UNDER = rb({ sent: 'a [b] c\n', stored: `a b c${PLATFORM_COMMENT_FOOTER}`, mode: 'comment' });
+  t('⭐ a real mutation UNDERNEATH an appended footer is still MUTATED', UNDER.mutated === true && UNDER.readBack.class === 'mutated');
+  t('…at an offset INSIDE the body, not at the tail where the footer starts', UNDER.readBack.offset === 2, `offset=${UNDER.readBack.offset}`);
+  t('…and the added line shows both sides at that byte', UNDER.lines[2].includes('first difference at byte 2') && UNDER.lines[2].includes('| stored'), UNDER.lines[2]);
+
+  const WIDE = rb({ sent: '维护者 [x] 的裁决', stored: '维护者 x 的裁决', mode: 'comment' });
+  t('⭐ a multi-byte character ahead of the difference gives a BYTE offset, never a character one', WIDE.readBack.offset === Buffer.byteLength('维护者 ', 'utf8'), `offset=${WIDE.readBack.offset}`);
+  t('…and the context window opens ON the difference, not on the prefix both bodies share', WIDE.readBack.sentContext.includes('[x]'), WIDE.readBack.sentContext);
+  t('…with control characters escaped, the way a refusal prints a span', rb({ sent: 'line one\nline two', stored: 'line one line two', mode: 'comment' }).readBack.sentContext.includes('\\n'));
+
+  t('two identical bodies have no first differing byte at all', firstDifferingByte('x', 'x') === -1);
+  t('…and where one is a PREFIX of the other the seam is the shorter one\'s end', firstDifferingByte('abc', 'ab') === 2);
+  t('an unreadable stored body reports no offset to chase', rb({ sent: SENT, stored: undefined }).readBack.offset === null);
 
   battery('the CLI: the one decision a typo must never make');
   t('a comment target parses', parseOptions(['--comment=17314']).options.mode === 'comment');
