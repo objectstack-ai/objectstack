@@ -46,11 +46,11 @@
 - `expected_head_sha` 必须是完整 40 字符 SHA,短 SHA 回 422。
 - base 未动回 422 no new commits on the base branch = 无事可做,不是失败。
 - ✓ draft 转 ready `POST .../pulls/{n}/ccr/ready_for_review`,反向 `.../ccr/convert_to_draft`。
-- ⛔ 裸 `PATCH /pulls/{n}` 带 `{"draft": false}` 回 200 且什么都没改(2026-09-11 实调),读回仍 draft。
+- ⛔ 裸 `PATCH /pulls/{n}` 带 `{"draft": false}` 回 200 且什么都没改,读回仍 draft。
 - ⇒ 状态码不作数,读回才作数:`GET /pulls/{n}` 的 `draft: false`、timeline 的 `ready_for_review`。
 - ✓ auto-merge 挂载 `PUT .../pulls/{n}/ccr/auto_merge` 带 `{"merge_method":"SQUASH"}`,`DELETE` 卸载。
 - 入队读 timeline `added_to_merge_queue`,落地读 `git rev-list --parents`;⛔ `auto_merge` 与回显都不作数。
-- 两条 2026-09-12 两席实调;备用通道 MCP `update_pull_request` 与 `enable_pr_auto_merge`。
+- 备用通道 MCP `update_pull_request` 与 `enable_pr_auto_merge`。
 - 直合仓 `PUT .../pulls/{n}/merge`;actor 记通道令牌:REST 按会话为 `claude[bot]` 或用户,MCP 恒用户。
 
 ## 不可迁移 —— 只有这三件,围着它们排计划;红窗守候规则住 `platform-readings.md` 配额段
