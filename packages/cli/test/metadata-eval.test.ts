@@ -33,7 +33,7 @@ describe('runMetadataEval — offline (golden corpus)', () => {
 
 describe('runMetadataEval — live seam', () => {
   const oneCase: MetadataEvalCase[] = [
-    { id: 'c1', prompt: 'invoice with lines', fixture: { manifest: { id: 'a', namespace: 'aa', version: '1.0.0', name: 'A', type: 'app' } } },
+    { id: 'c1', prompt: 'invoice with lines', fixture: { manifest: { id: 'com.example.a', namespace: 'aa', version: '1.0.0', name: 'A', type: 'app' } } },
   ];
 
   it('scores the generated stack (not the fixture) when a generator is injected', async () => {
@@ -117,7 +117,7 @@ describe('runMetadataEval — live seam', () => {
  */
 describe('runMetadataEval — a stack that cannot be scored is a FAILED case, not a crash', () => {
   const oneCase: MetadataEvalCase[] = [
-    { id: 'c1', prompt: 'invoice with lines', fixture: { manifest: { id: 'a', namespace: 'aa', version: '1.0.0', name: 'A', type: 'app' } } },
+    { id: 'c1', prompt: 'invoice with lines', fixture: { manifest: { id: 'com.example.a', namespace: 'aa', version: '1.0.0', name: 'A', type: 'app' } } },
   ];
 
   /** Poison on a TOP-LEVEL key: throws inside `normalizeStackInput`'s spread. */
@@ -200,7 +200,7 @@ describe('runMetadataEval — a stack that cannot be scored is a FAILED case, no
       { ...oneCase[0], id: 'fine' },
     ];
     const generate = (_prompt: string, id: string) =>
-      id === 'poisoned' ? topLevelPoison() : { manifest: { id: 'b', namespace: 'bb', version: '1.0.0', name: 'B', type: 'app' } };
+      id === 'poisoned' ? topLevelPoison() : { manifest: { id: 'com.example.b', namespace: 'bb', version: '1.0.0', name: 'B', type: 'app' } };
 
     const report = await runMetadataEval(twoCases, { generate });
 
@@ -252,7 +252,7 @@ describe('runMetadataEval — a stack that cannot be scored is a FAILED case, no
  */
 describe('runMetadataEval — a generator that THREW scores 0, not 100', () => {
   const oneCase: MetadataEvalCase[] = [
-    { id: 'c1', prompt: 'invoice with lines', fixture: { manifest: { id: 'a', namespace: 'aa', version: '1.0.0', name: 'A', type: 'app' } } },
+    { id: 'c1', prompt: 'invoice with lines', fixture: { manifest: { id: 'com.example.a', namespace: 'aa', version: '1.0.0', name: 'A', type: 'app' } } },
   ];
   const throwingGen = () => {
     throw new Error('model unavailable');
