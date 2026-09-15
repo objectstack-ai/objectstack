@@ -214,13 +214,77 @@
 // what proves the instrument was sensitive; the unchanged tree on its own would
 // prove nothing.
 //
+// ── The fifth way to be invisible: the TREE-SCOPED WALK (#15565) ───────────
+//
+// Every limb above is package-scoped or name-scoped, and a directory walk is
+// neither. `verify()` asks five questions -- an escaping package with no entry,
+// an entry whose package stopped escaping, a NAMED path no declared glob covers,
+// a declared glob nothing holds, a declared glob turbo.json does not hash -- and
+// a `readdirSync` descending on a LOOP VARIABLE answers none of them. It names
+// no literal, so the roster limb sees nothing; it adds no glob, so the two glob
+// limbs see nothing; and inside a package that already carries an entry
+// (`@objectstack/spec` does, for its other escaping tests) the two package-scoped
+// limbs are already satisfied. So a tree-scoped absence pin -- the shape the
+// ADR-0049 retirement playbook MANDATES for a whole-family removal -- can land
+// with its entire radius unhashed and this gate exits 0 naming nothing.
+//
+// The input the missing limb needs was already here. The escape verdict is
+// computed from the seed's DEPTH, and an argument this scan cannot read costs
+// the NAME and keeps the DEPTH (see `pathExpression`). So the question is asked
+// on the SEED a descent is rooted at, never on the names the descent produces:
+// those names are precisely what cannot be enumerated statically, which is why
+// limb 3 is blind here in the first place.
+//
+// ── THE MANDATE, NARROWED (the #15565 triage ruling) ───────────────────────
+//
+// An honest WHOLE-REPO radius is not declarable in this table, and the ruling
+// refused widening the grammar to make it one: entries are positive globs only,
+// `expectedInputs()` prefixes each with `$TURBO_ROOT$/` verbatim, and the only
+// negations it emits are package-local and fixed -- a `!`-prefixed entry would
+// reach turbo.json as the literal `$TURBO_ROOT$/!...`. So the mandate is
+// narrowed first, and the narrowed radius is what this limb asserts:
+//
+//   A tree-scoped pin descends from NAMED ROOTS, and every root it descends
+//   from is a directory some declared glob REACHES -- as is every directory
+//   below that root. It does not descend from the repo root itself.
+//
+// What that lets such a walk reach: any subtree a declared glob opens onto --
+// `packages/`, `examples/`, `content/`, `skills/`, `scripts/` on the live pin,
+// each held by a per-extension or whole-subtree glob the table already carries.
+// What it does not: `docs/`, `apps/`, and the repo-root files, which no
+// declaration reaches -- a walk seeded at the repo root spans all of them, and
+// that is exactly the radius the table cannot spell.
+//
+// Two bounds, stated rather than discovered later:
+//
+//   GRANULARITY. What is asked of a directory is REACH, not coverage: does some
+//   declared glob match anything inside it (`globReachesDirectory`)?
+//   File-granularity coverage would demand `packages/**` of a walk that skips
+//   `.tsx` on purpose -- and that widening is refused on its own measurement
+//   (the `@objectstack/core` entry's note), so the per-extension spelling the
+//   live pin declares has to be allowed to hold a root. The residue: a walk
+//   reading an extension its package declared no glob for stays invisible here.
+//   That axis belongs to the pin's own scanner, which is narrowed to the globs.
+//
+//   DOT-DIRECTORIES. The radius scan skips them, as it skips SKIP_DIRS, because
+//   the pins skip them; a walk that deliberately descends into `.github/` is not
+//   judged by this limb.
+//
+// Measured on this tree: the live #15513 pin
+// (`packages/spec/src/system/compliance-families-retirement.test.ts`) descends
+// from five roots spelled `path.join(REPO_ROOT, root)` over a folded array
+// literal, and all five are reached by `@objectstack/spec`'s declared globs, so
+// this limb is green on it -- the live positive control. Its red is a root
+// outside them, and a descent whose root does NOT climb above the package root
+// is not a walk root at all, so it stays green by construction.
+//
 // Usage:
 //   node scripts/check-cross-package-test-inputs.mjs --verify
 //   node scripts/check-cross-package-test-inputs.mjs --union-into <turbo-ls.json> --changed <file>
 //   node scripts/check-cross-package-test-inputs.mjs --list-escapes
 //   node scripts/check-cross-package-test-inputs.mjs --self-test
 
-import { readFileSync, readdirSync, statSync, existsSync, writeFileSync, mkdtempSync, rmSync } from 'node:fs';
+import { readFileSync, readdirSync, statSync, existsSync, writeFileSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join, resolve, relative, dirname, sep, isAbsolute } from 'node:path';
@@ -268,6 +332,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the entry guard, driven for real': 6,
   'the SPLIT test:repo task (#16466)': 16,
   'the node_modules REACH rule (#16555)': 18,
+  'the TREE-SCOPED WALK (#15565)': 24,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -1123,11 +1188,18 @@ function scanPathExpressions(src, hereDepth, fileSegs = null, ownPackageName = n
     report(m[1], info);
   }
 
+  // A directory listing this scan cannot NAME is a descent of unknown radius —
+  // the shape limb 3 is blind to (#15565). It is the precondition for asking
+  // the walk-root question at all: a file with no such read has no radius this
+  // scan is failing to see.
+  let anonymousDescent = false;
+
   let n = 0;
   for (const { fn, args } of readArgumentLists(src)) {
     n += 1;
     const first = splitTopLevel(args)[0];
     const info = known.get(first) ?? pathExpression(first, hereDepth, known, fileSegs);
+    if (DIR_ARG_READS.has(fn) && (!info || info.segs === null)) anonymousDescent = true;
     collect(DIR_ARG_READS.has(fn) ? dirs : files, info);
     // A bare binding here was already judged at its declaration; reporting it a
     // second time would only duplicate the finding under a less useful name.
@@ -1151,7 +1223,8 @@ function scanPathExpressions(src, hereDepth, fileSegs = null, ownPackageName = n
     report(`import '${spec}'`, info);
     if (info.segs?.length && !info.vendored) imports.add(info.segs.join('/'));
   }
-  return { escapes, files, dirs, imports };
+  const walkRoots = anonymousDescent ? descentRoots(src, hereDepth, fileSegs, known) : new Set();
+  return { escapes, files, dirs, imports, walkRoots };
 }
 
 /**
@@ -1161,6 +1234,19 @@ function scanPathExpressions(src, hereDepth, fileSegs = null, ownPackageName = n
  */
 export function escapingBindings(src, hereDepth, fileSegs = null, ownPackageName = null) {
   return scanPathExpressions(src, hereDepth, fileSegs, ownPackageName).escapes;
+}
+
+/**
+ * The roots a tree-scoped descent in `src` starts from (#15565), as the
+ * repo-relative names `verify()`'s walk limb judges — the public entry the
+ * `--self-test` drives, beside `escapingBindings` and for the same reason.
+ *
+ * Empty whenever the file performs no directory read this scan cannot name: a
+ * file with no anonymous descent has no radius this scan is failing to see, so
+ * there is nothing for the limb to ask about.
+ */
+export function walkRootsOf(src, hereDepth, fileSegs = null, ownPackageName = null) {
+  return [...scanPathExpressions(src, hereDepth, fileSegs, ownPackageName).walkRoots];
 }
 
 /**
@@ -1241,11 +1327,31 @@ export function findEscapingPackages() {
       if (!scan.escapes.length) continue;
       if (!name) continue;
       if (!found.has(name))
-        found.set(name, { dir: relative(REPO_ROOT, pkgRoot), tests: [], literals: new Map(), dirEntries: new Set() });
+        found.set(name, {
+          dir: relative(REPO_ROOT, pkgRoot),
+          tests: [],
+          literals: new Map(),
+          dirEntries: new Set(),
+          walkRoots: new Map(),
+        });
       const entry = found.get(name);
       const rel = relative(REPO_ROOT, file);
       entry.tests.push(rel);
       const own = relative(REPO_ROOT, pkgRoot);
+      // The roots a tree-scoped descent in this test starts from (#15565). Same
+      // own-prefix filter as the roster: a walk that stays inside the package is
+      // already covered by `$TURBO_DEFAULT$`. A folded name that is not a real
+      // directory is dropped here rather than reported — the same rule that
+      // keeps a synthetic fixture path off the roster.
+      for (const root of scan.walkRoots) {
+        if (root === own || root.startsWith(`${own}/`)) continue;
+        try {
+          if (!statSync(join(REPO_ROOT, root)).isDirectory()) continue;
+        } catch {
+          continue;
+        }
+        if (!entry.walkRoots.has(root)) entry.walkRoots.set(root, rel);
+      }
       // Two rosters, one filter. The flat literals are what an author WROTE in
       // one quoted piece; the reconstructed ones are what the recognised path
       // expressions RESOLVE to — the reads that hold a radius without ever
@@ -1355,6 +1461,278 @@ export function globHolderVerdict({ globs, heldBy = {} }, info) {
   };
 }
 
+// ── the tree-scoped WALK limb (#15565) ──────────────────────────────────────
+
+/**
+ * Whether `glob` can match anything INSIDE `dir` — the directory-granularity
+ * question, and deliberately not the file-granularity one `matchesAny` and
+ * `coversDirectory` answer.
+ *
+ * A walk root is held by a glob that OPENS onto it, not by one that happens to
+ * match every file currently sitting in it: `packages/**\/*.ts` reaches
+ * `packages/client-react/src` even though that directory's `.tsx` files match
+ * nothing, and demanding otherwise would force the bare `packages/**` whose
+ * cost the `@objectstack/core` entry measures and refuses. The header above
+ * states what this granularity leaves to the pin's own scanner.
+ *
+ * `dir` is repo-relative with POSIX separators; the empty string is the repo
+ * root, which every glob reaches trivially — so a repo-root walk is judged by
+ * the directories BELOW it, where the declarations run out.
+ *
+ * @param {string} dir
+ * @param {string} glob
+ * @returns {boolean}
+ */
+export function globReachesDirectory(dir, glob) {
+  const g = glob.split('/').filter(Boolean);
+  const d = dir === '' ? [] : dir.split('/').filter(Boolean);
+  const seen = new Set();
+  // A plain DFS over (glob segment, dir segment) pairs: `**` spans zero or more
+  // whole segments, so it is the one state with two successors. Marking a pair
+  // visited is sound because the answer is reachability, not a count.
+  const can = (i, j) => {
+    const key = `${i}:${j}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    // Every dir segment consumed: the glob REACHES inside only while it still
+    // has a segment left to spend on a name below. A glob that ends exactly
+    // here names this directory as a FILE and reaches nothing inside it.
+    if (j === d.length) return i < g.length;
+    if (i === g.length) return false;
+    if (g[i] === '**') return can(i + 1, j) || can(i, j + 1);
+    return matchesAny(d[j], [g[i]]) && can(i + 1, j + 1);
+  };
+  return can(0, 0);
+}
+
+/** How many uncovered directories a single unheld walk root reports before it stops. */
+const WALK_RADIUS_REPORT_CAP = 8;
+
+/**
+ * Walk radii this limb found on the tree it landed on, reviewed and accepted —
+ * shrink-only and hand-edited, per test and per root, each naming WHY it is
+ * still here and WHAT closes it.
+ *
+ * ⚠️ This is NOT the dated allowance the #15565 ruling refused. That would have
+ * exempted the MANDATED shape — the retirement playbook's tree-scoped absence
+ * pin — leaving the mandate prose, which is the state the card exists to end.
+ * The mandated shape is enforced from the first run: the live #15513 pin
+ * descends from five roots every one of which `@objectstack/spec`'s globs reach,
+ * and a new pin whose root they do not reach reds. What is recorded here is
+ * three PRE-EXISTING census and corpus sweeps in other packages, none of them a
+ * retirement pin, each of which already carries its own written bound in the
+ * test's own header. Accepting them is what makes the limb landable without
+ * buying three radius widenings nobody has ruled on; naming them is what stops
+ * them being invisible, which is what they were before this limb existed.
+ *
+ * ⛔ No generator, deliberately: a `--update` flag admits a new undeclared
+ * radius by "just run the update command", which is how a ratchet stops meaning
+ * anything. An entry that no longer matches a live walk root fails as stale in
+ * the same pass, so this can only shrink.
+ */
+const ACCEPTED_WALK_RADII = Object.freeze({
+  'packages/client/src/envelope-caller-census.test.ts': Object.freeze({
+    // The repo root. The census walks the whole workspace to BOUND a migration,
+    // and the trade is recorded in that file's own header: `packages/**` is
+    // deliberately not declared because it would re-run the client suite on
+    // virtually every commit, so the count is exact on a cold cache and in CI's
+    // full run and a recorded bound otherwise. CLOSED BY: the census retiring
+    // with the migration it bounds, or a ruling that buys `packages/**` at the
+    // price that header states and refuses.
+    '': 'recorded bound: the migration census walks the workspace; `packages/**` refused on cost in its own header',
+  }),
+  'packages/lint/src/lint-startup-registry-verdict.corpus.test.ts': Object.freeze({
+    // `collectSourceFiles(packagesDir)` sweeps every `.ts` under `packages/`
+    // while the entry declares four per-package subtrees. CLOSED BY: either
+    // `packages/**/*.ts` on this entry — the price `@objectstack/core` pays and
+    // this package has never been ruled to — or narrowing the sweep to the
+    // subtrees the entry declares.
+    packages: 'corpus sweep wider than the four declared subtrees; widening or narrowing is an unruled cost decision',
+  }),
+  'packages/qa/dogfood/test/expression-conformance.test.ts': Object.freeze({
+    // `walk(SPEC_SRC)` sweeps all of `packages/spec/src` while the entry
+    // declares `automation/**` and `data/**` of it. CLOSED BY: declaring
+    // `packages/spec/src/**` here, or narrowing the sweep to those two.
+    'packages/spec/src': 'sweep wider than the two declared spec subtrees; same unruled cost decision',
+  }),
+});
+
+/**
+ * The directories inside a walk root that no declared glob reaches — empty when
+ * the whole radius is declared.
+ *
+ * Stops at the first uncovered directory on each branch rather than descending
+ * through it: a root nothing declares would otherwise print its entire subtree,
+ * and the remedy is the same for the branch as for one file in it.
+ *
+ * @param {string} root repo-relative walk root; `''` is the repo root
+ * @param {string[]} globs the package's declared globs
+ * @param {string} rootDir
+ * @returns {string[]}
+ */
+export function uncoveredWalkRadius(root, globs, rootDir = REPO_ROOT) {
+  if (root !== '' && !globs.some((g) => globReachesDirectory(root, g))) return [root];
+  // A glob that opens `<root>/**` reaches every directory below it, so the walk
+  // below cannot find one it does not — and this is the live pin's shape, which
+  // is what keeps the healthy case off the filesystem entirely.
+  const prefix = root === '' ? '' : `${root}/`;
+  if (globs.some((g) => g === `${prefix}**` || g.startsWith(`${prefix}**/`))) return [];
+  const uncovered = [];
+  const queue = [root];
+  while (queue.length && uncovered.length < WALK_RADIUS_REPORT_CAP) {
+    const dir = queue.shift();
+    let entries;
+    try {
+      entries = readdirSync(join(rootDir, dir), { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const e of entries) {
+      if (!e.isDirectory() || SKIP_DIRS.has(e.name) || e.name.startsWith('.')) continue;
+      const child = dir === '' ? e.name : `${dir}/${e.name}`;
+      if (globs.some((g) => globReachesDirectory(child, g))) queue.push(child);
+      else uncovered.push(child);
+    }
+  }
+  return uncovered;
+}
+
+/**
+ * The string-literal arrays a file folds a walk over, and the loop variables
+ * bound across them.
+ *
+ * `pathExpression` throws a name away rather than invent one, which is right
+ * everywhere else and is exactly why the live pin's five roots —
+ * `for (const root of WALK_ROOTS) walk(path.join(REPO_ROOT, root))` — resolve to
+ * a depth and no name. Folding the array recovers those names for THIS limb
+ * only: nothing here is wired into the roster or into `escapingBindings`, so no
+ * existing verdict moves, and a fold that produces a name matching no real
+ * directory on disk is dropped by the caller rather than reported.
+ *
+ * ⛔ This is not a new RECOGNISED_PATH_SPELLINGS entry and must not become one.
+ * That list is the contract with an AUTHOR — the spellings in which an escaping
+ * READ must be written to be seen at all — and no read's escape verdict, name or
+ * roster entry changes by a byte here.
+ *
+ * @param {string} src
+ * @returns {Map<string, string[]>}
+ */
+export function literalStringSets(src) {
+  const sets = new Map();
+  const literalList = (text) => {
+    const parts = splitTopLevel(text)
+      .map((s) => s.trim())
+      .filter((s) => s !== '');
+    if (!parts.length) return null;
+    const out = [];
+    for (const p of parts) {
+      const lit = readablePathLiteral(p);
+      // One unfoldable element and the whole array is unfoldable: a PARTIAL
+      // fold would name some roots and silently drop the others, which is the
+      // "keep the depth, lose the name" trade inverted into a fabrication.
+      if (!lit) return null;
+      out.push(lit[2]);
+    }
+    return out;
+  };
+  for (const m of src.matchAll(/(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*(?::[^=;]*)?=\s*\[([^[\]]*)\]/g)) {
+    const list = literalList(m[2]);
+    if (list) sets.set(m[1], list);
+  }
+  for (const m of src.matchAll(/for\s*\(\s*(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s+of\s+\[([^[\]]*)\]\s*\)/g)) {
+    const list = literalList(m[2]);
+    if (list) sets.set(m[1], list);
+  }
+  for (const m of src.matchAll(/for\s*\(\s*(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s+of\s+([A-Za-z_$][\w$]*)\s*\)/g)) {
+    const list = sets.get(m[2]);
+    if (list) sets.set(m[1], list);
+  }
+  return sets;
+}
+
+/**
+ * `expr` with one folded identifier substituted, once per value it can hold.
+ *
+ * ONE identifier, not the product: a root built from two folded lists is a
+ * shape no pin writes, and the product is where a scan like this goes
+ * quadratic. A substitution that produces a path naming no real directory is
+ * dropped downstream, so a wrong fold costs nothing.
+ */
+function expandLiteralSets(expr, sets) {
+  const id = [...new Set([...expr.matchAll(/[A-Za-z_$][\w$]*/g)].map((m) => m[0]))].find((n) => sets.has(n));
+  if (!id) return [expr];
+  return sets.get(id).map((v) => expr.replace(new RegExp(`\\b${id}\\b`, 'g'), JSON.stringify(v)));
+}
+
+/**
+ * Callees that cannot be a descent ENTRY, for the bare-identifier root below.
+ *
+ * A path being built, relativised or read is not a walk being started — and the
+ * read itself is judged by the roster limbs, at the grain they work at. The list
+ * also holds the language and test-framework forms a bare
+ * `<identifier>(` regex matches, none of which takes a directory to descend.
+ *
+ * ⚠️ An unlisted callee is TREATED AS A DESCENT, which is the safe direction
+ * here for the same reason the flat literal collector takes quoted paths without
+ * parsing: it can only force a declaration nobody needed, never withdraw one.
+ */
+const NON_DESCENT_CALLEES = new Set([
+  ...PATH_ARG_READS,
+  'join', 'resolve', 'relative', 'dirname', 'basename', 'extname', 'normalize', 'parse', 'format',
+  'fileURLToPath', 'pathToFileURL', 'URL',
+  'readFile', 'writeFileSync', 'appendFileSync', 'mkdirSync', 'rmSync', 'cpSync', 'renameSync',
+  'realpathSync', 'readlinkSync', 'unlinkSync', 'execFileSync', 'spawnSync', 'execSync', 'spawn',
+  'if', 'for', 'while', 'switch', 'catch', 'return', 'function', 'typeof', 'await', 'new', 'do', 'else',
+  'describe', 'it', 'test', 'expect', 'vi', 'beforeAll', 'afterAll', 'beforeEach', 'afterEach',
+  'String', 'Number', 'Boolean', 'Set', 'Map', 'Array', 'Object', 'JSON', 'require', 'import',
+]);
+
+/**
+ * The roots a directory descent in `src` is started from, as repo-relative
+ * names (`''` is the repo root).
+ *
+ * A root is read from CALL-ARGUMENT position and nowhere else — `walk(SPEC_SRC)`
+ * or `walk(path.join(REPO_ROOT, root))`, folded over its array if it is one.
+ * The argument position is the whole of the precision here, and it was measured:
+ * collecting every `join`/`resolve` expression in the file instead reported
+ * fourteen roots on this tree, ten of them the plain ascent
+ * `const REPO_ROOT = resolve(HERE, '../../../..')` that every escaping test
+ * performs on its way to naming something below it, and the rest ordinary path
+ * prefixes (`resolve(REPO_ROOT, 'packages/spec')` beside a `readdirSync` of a
+ * tmpdir). A path being BUILT is not a tree being walked; a path being HANDED to
+ * something is the only shape that can be.
+ *
+ * Only a root whose seed CLIMBS ABOVE the package root is returned: `min < 0` is
+ * the same escape verdict every other limb is judged on, so a descent that stays
+ * inside its own package is not a walk root and cannot be reported as one.
+ *
+ * @param {string} src
+ * @param {number} hereDepth
+ * @param {string[]|null} fileSegs
+ * @param {Map<string, object>} known bindings the path scan already resolved
+ * @returns {Set<string>}
+ */
+export function descentRoots(src, hereDepth, fileSegs, known) {
+  const roots = new Set();
+  const note = (info) => {
+    if (!info || info.vendored || info.min >= 0 || info.segs === null) return;
+    roots.add(info.segs.join('/'));
+  };
+  const sets = literalStringSets(src);
+  for (const m of src.matchAll(/\b([A-Za-z_$][\w$.]*)\s*\(/g)) {
+    if (NON_DESCENT_CALLEES.has(m[1].split('.').pop())) continue;
+    const args = balancedArgs(src, m.index + m[0].length);
+    if (args === null) continue;
+    // The entry argument, by position: a walker takes the directory first.
+    const first = splitTopLevel(withoutTrailingComma(args))[0];
+    if (!first) continue;
+    for (const expr of expandLiteralSets(first, sets)) {
+      note(pathExpression(expr, hereDepth, known, fileSegs));
+    }
+  }
+  return roots;
+}
+
 // ── modes ────────────────────────────────────────────────────────────────────
 
 function verify() {
@@ -1451,6 +1829,62 @@ function verify() {
     }
   }
 
+  // The sixth question, and the one a tree-scoped pin raises (#15565): does this
+  // package contain a DESCENT whose root climbs above the package root and whose
+  // radius no declared glob reaches? Judged on the SEED — the names a descent
+  // produces are exactly what cannot be enumerated, which is why the roster limb
+  // above is blind to it. See the header for the narrowed mandate this asserts.
+  const acceptedSeen = new Set();
+  let walkRootCount = 0;
+  for (const [name, { globs }] of Object.entries(CROSS_PACKAGE_TEST_INPUTS)) {
+    const info = escaping.get(name);
+    if (!info) continue;
+    for (const [root, test] of info.walkRoots) {
+      walkRootCount += 1;
+      const uncovered = uncoveredWalkRadius(root, globs);
+      // A radius that is now covered is NOT marked seen, so an accepted entry
+      // whose declaration caught up is reported stale below rather than sitting
+      // there reading as an outstanding exception.
+      if (!uncovered.length) continue;
+      if (ACCEPTED_WALK_RADII[test]?.[root] !== undefined) {
+        acceptedSeen.add(`${test} :: ${root}`);
+        continue;
+      }
+      problems.push(
+        `${name} descends a directory tree from ${root === '' ? 'the REPO ROOT' : `\`${root}/\``}, and\n` +
+          `    part of that radius is reached by no declared glob — so a change there does not\n` +
+          `    re-run the walk, which is the #7802 blind spot one grain below the roster:\n` +
+          `      rooted in ${test}\n` +
+          uncovered.map((d) => `      ${d}/   (no declared glob reaches inside it)`).join('\n') +
+          (uncovered.length >= WALK_RADIUS_REPORT_CAP ? '\n      … (stopped at the report cap)' : '') +
+          `\n    Two dispositions, and the first is the one the retirement playbook mandates:\n` +
+          `      1. NARROW THE WALK. Descend from roots the declaration already reaches,\n` +
+          `         never from the repo root — the table holds positive globs only, so a\n` +
+          `         whole-repo radius has no spelling here at all (an exclusion would reach\n` +
+          `         turbo.json as the literal "$TURBO_ROOT$/!…").\n` +
+          `      2. DECLARE THE ROOT. Add a glob that reaches it, and name this test in the\n` +
+          `         entry's \`heldBy\` — a walked root holds its glob by witness, since the\n` +
+          `         descent names no path this scan can put on the roster.`,
+      );
+    }
+  }
+
+  // The ledger's other direction, so it can only ever shrink: an accepted radius
+  // whose walk is gone — or whose declaration caught up with it — is deleted, not
+  // left standing as an exception nobody owes any more.
+  for (const [test, roots] of Object.entries(ACCEPTED_WALK_RADII)) {
+    for (const root of Object.keys(roots)) {
+      if (acceptedSeen.has(`${test} :: ${root}`)) continue;
+      problems.push(
+        `ACCEPTED_WALK_RADII holds an entry nothing owes any more:\n` +
+          `      ${test}  ->  ${root === '' ? '(the repo root)' : root}\n` +
+          `    Either the walk is gone, or the package's globs now reach that radius. Delete\n` +
+          `    the entry — this ledger is shrink-only, and an accepted exception that is no\n` +
+          `    longer an exception is the shape that lets the next one in unnoticed.`,
+      );
+    }
+  }
+
   // Layer B: turbo.json must hash the declared globs, or the merge queue
   // replays a cached green over a scan it never ran (the #7802 escape itself).
   let turbo;
@@ -1502,7 +1936,12 @@ function verify() {
   console.log(
     `OK: ${escaping.size} package(s) read outside themselves, all declared, ` +
       `and turbo.json hashes every declared glob` +
-      (splitCount ? ` (${splitCount} of them on a split "${REPO_TASK}" task).` : '.'),
+      (splitCount ? ` (${splitCount} of them on a split "${REPO_TASK}" task)` : '') +
+      // Printed so the walk limb's silence is a MEASUREMENT rather than an
+      // absence: a run in which the descent scan stopped resolving prints 0
+      // walked roots instead of the same "all declared" line it printed while
+      // it was working. The #13489 lesson, applied to the limb's live corpus.
+      `; ${walkRootCount} walked root(s) judged, ${acceptedSeen.size} on ACCEPTED_WALK_RADII.`,
   );
 }
 
@@ -2696,6 +3135,153 @@ function selfTest() {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  }
+
+  // ── the TREE-SCOPED WALK (#15565) ────────────────────────────────────────
+  //
+  // Pinned in BOTH directions, and the green cases carry as much weight as the
+  // red ones. Measured while this limb was being written: a rule that took
+  // every escaping path EXPRESSION for a walk root reported fourteen roots on
+  // this tree and would have reddened ten healthy tests over the plain ascent
+  // `const REPO_ROOT = resolve(HERE, '../../../..')`. So "it catches the
+  // undeclared walk" is only half the pin; "it is not a walk root unless
+  // something was HANDED it" is the other half, and the negative controls below
+  // are what hold it.
+  battery('the TREE-SCOPED WALK (#15565)');
+  {
+    // A synthetic test at `packages/pkg/src/x.test.ts`: one level below its
+    // package root, so a three-step ascent lands on the repo root exactly as it
+    // does for the live pin.
+    const SEGS = ['packages', 'pkg', 'src', 'x.test.ts'];
+    const SEED =
+      'const HERE = dirname(fileURLToPath(import.meta.url));\n' + "const REPO = resolve(HERE, '../../..');\n";
+    // The descent itself: `readdirSync` on a parameter, which is the read this
+    // scan cannot name and the reason the limb exists.
+    const WALKER = 'const walk = (dir) => { for (const e of readdirSync(dir)) walk(join(dir, e)); };\n';
+    const rootsOf = (src) => walkRootsOf(SEED + src, 1, SEGS);
+
+    ok(
+      'a descent handed a binding that climbs out of the package names that root',
+      rootsOf(`const DOCS = join(REPO, 'docs');\n${WALKER}walk(DOCS);`).includes('docs'),
+    );
+    ok(
+      'a descent handed the repo root itself names it -- the radius this table cannot spell',
+      rootsOf(`${WALKER}walk(REPO);`).includes(''),
+    );
+    ok(
+      'the roots of a FOLDED array literal all resolve (the live #15513 pin shape)',
+      (() => {
+        const roots = rootsOf(
+          "const WALK_ROOTS = ['packages', 'content', 'skills'];\n" +
+            `${WALKER}for (const root of WALK_ROOTS) walk(path.join(REPO, root));`,
+        );
+        // And the ascent they are built FROM is not itself reported: the pin
+        // descends from the five, never from the root it measured them against.
+        return ['packages', 'content', 'skills'].every((r) => roots.includes(r)) && !roots.includes('');
+      })(),
+    );
+    ok(
+      'REVERSE CONTROL: a descent whose seed never climbs out of the package is not a walk root',
+      rootsOf(`const FIX = resolve(HERE, '../fixtures');\n${WALKER}walk(FIX);`).length === 0,
+    );
+    ok(
+      'NEGATIVE CONTROL: no anonymous descent, no walk root -- a named directory alone is not a walk',
+      rootsOf("const DOCS = join(REPO, 'docs');\ncollect(DOCS);").length === 0,
+    );
+    ok(
+      'NEGATIVE CONTROL: a path merely BUILT beside an unrelated descent is not a root',
+      rootsOf(`const SPEC = resolve(REPO, 'packages/spec');\n${WALKER}walk(tmpDir);`).length === 0,
+    );
+    ok(
+      'NEGATIVE CONTROL: relativising against the repo root is not descending from it',
+      rootsOf(`${WALKER}walk(tmpDir);\nconst r = relative(REPO, someFile);`).length === 0,
+    );
+
+    // The fold, which is what recovers a root spelled over a loop variable.
+    ok(
+      'an array of string literals folds',
+      literalStringSets("const A = ['x', 'y'];").get('A')?.join(',') === 'x,y',
+    );
+    ok(
+      'one unfoldable element folds NONE of it -- a partial fold would name some roots and drop the rest',
+      !literalStringSets('const B = [\'x\', z];').has('B'),
+    );
+    ok(
+      'a loop variable inherits the array it is bound over, and an INLINE array folds too',
+      literalStringSets("const A = ['x'];\nfor (const one of A) {}").get('one')?.join(',') === 'x' &&
+        literalStringSets("for (const two of ['p', 'q']) {}").get('two')?.join(',') === 'p,q',
+    );
+
+    // REACH, the granularity this limb judges a directory at.
+    ok('a `**` glob opens onto every directory below its root', globReachesDirectory('packages/spec/src', 'packages/**/*.ts'));
+    ok(
+      'GRANULARITY: a per-extension glob reaches a directory holding none of that extension',
+      globReachesDirectory('packages/client-react/src/components', 'packages/**/*.ts'),
+    );
+    ok(
+      'a glob naming ONE file reaches the directory it sits in',
+      globReachesDirectory('content/docs/api', 'content/docs/api/error-catalog.mdx'),
+    );
+    ok(
+      'and a glob that ends exactly at a path does not reach INSIDE it -- it names it as a file',
+      !globReachesDirectory('content/docs/api/error-catalog.mdx', 'content/docs/api/error-catalog.mdx'),
+    );
+    ok('a sibling tree is not reached', !globReachesDirectory('docs/adr', 'packages/**/*.ts'));
+    ok('nor is a sibling package by a per-package subtree glob', !globReachesDirectory('packages/spec/src', 'packages/lint/src/**'));
+    ok(
+      'the repo root is reached by everything -- a repo-root walk is judged by what lies BELOW it',
+      globReachesDirectory('', 'packages/**/*.ts'),
+    );
+
+    // The verdict, driven on a real tree in both directions (#15565 acceptance).
+    const tree = mkdtempSync(join(tmpdir(), 'xpkg-walk-'));
+    try {
+      mkdirSync(join(tree, 'packages', 'a'), { recursive: true });
+      mkdirSync(join(tree, 'docs', 'adr'), { recursive: true });
+      mkdirSync(join(tree, 'node_modules', 'dep'), { recursive: true });
+      mkdirSync(join(tree, '.github'), { recursive: true });
+      writeFileSync(join(tree, 'packages', 'a', 'x.ts'), '');
+      writeFileSync(join(tree, 'docs', 'adr', 'y.md'), '');
+      const DECLARED = ['packages/**/*.ts'];
+      ok(
+        'RED: a walk rooted at the repo root names the trees no declared glob reaches',
+        uncoveredWalkRadius('', DECLARED, tree).join(',') === 'docs',
+      );
+      ok(
+        'GREEN: the same walk, once that tree is declared',
+        uncoveredWalkRadius('', [...DECLARED, 'docs/**'], tree).length === 0,
+      );
+      ok(
+        'RED: a walk rooted at an undeclared tree names the ROOT itself, not its contents',
+        uncoveredWalkRadius('docs', DECLARED, tree).join(',') === 'docs',
+      );
+      ok(
+        'GREEN: a walk rooted where a `**` glob opens is answered without touching the filesystem',
+        uncoveredWalkRadius('packages', DECLARED, tree).length === 0,
+      );
+      ok(
+        'node_modules and dot-directories are outside the radius scan, as they are outside the walks',
+        uncoveredWalkRadius('', ['packages/**/*.ts', 'docs/**'], tree).length === 0,
+      );
+    } finally {
+      rmSync(tree, { recursive: true, force: true });
+    }
+
+    // LIVE positive control. The limb's whole claim is that the mandated shape
+    // is now asserted rather than described, so the mandated pin on this tree is
+    // pinned here -- both that its roots RESOLVE (a scan that stopped resolving
+    // would otherwise read as a clean tree) and that each is declared.
+    const liveSpec = findEscapingPackages().get('@objectstack/spec');
+    const liveGlobs = CROSS_PACKAGE_TEST_INPUTS['@objectstack/spec'].globs;
+    const PIN_ROOTS = ['packages', 'examples', 'skills', 'content', 'scripts'];
+    ok(
+      'LIVE POSITIVE CONTROL: the #15513 pin`s five walked roots all resolve to names',
+      PIN_ROOTS.every((r) => liveSpec?.walkRoots.has(r)),
+    );
+    ok(
+      'LIVE POSITIVE CONTROL: and every one of them is reached by a declared glob',
+      PIN_ROOTS.every((r) => uncoveredWalkRadius(r, liveGlobs).length === 0),
+    );
   }
 
   // ── the node_modules REACH rule (#16555) ─────────────────────────────────
