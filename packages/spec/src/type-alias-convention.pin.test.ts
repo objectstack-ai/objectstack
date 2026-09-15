@@ -273,7 +273,7 @@ import type * as M185 from './shared/epoch.zod.js';
 import type * as M187 from './shared/duration.zod.js';
 
 // ---------------------------------------------------------------------------
-// 785 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
+// 783 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
 //
 // That number is machine-checked, not hand-kept. The runtime companion at the
 // bottom of this file recomputes the pin count from the source and asserts that
@@ -950,9 +950,7 @@ export type Iso465 = Assert<Eq< z.input< typeof M103.ScopeConfigSchema >, z.infe
 export type Iso466 = Assert<Eq< z.input< typeof M103.ScopeInfoSchema >, z.infer< typeof M103.ScopeInfoSchema > >>;
 
 // kernel/startup-orchestrator.zod.ts
-export type Iso467 = Assert<Eq< z.input< typeof M104.HealthStatusSchema >, z.infer< typeof M104.HealthStatusSchema > >>;
 export type Iso468 = Assert<Eq< z.input< typeof M104.PluginStartupResultSchema >, z.infer< typeof M104.PluginStartupResultSchema > >>;
-export type Iso469 = Assert<Eq< z.input< typeof M104.StartupOrchestrationResultSchema >, z.infer< typeof M104.StartupOrchestrationResultSchema > >>;
 
 // qa/testing.zod.ts
 export type Iso470 = Assert<Eq< z.input< typeof M105.TestSuiteSchema >, z.infer< typeof M105.TestSuiteSchema > >>;
@@ -1666,7 +1664,7 @@ describe('ADR-0122 type-alias convention', () => {
   // this title and the section header above the pin list — are now asserted
   // against the recomputed count below, so neither can go stale without a red
   // test naming it.
-  it('still declares all 785 isomorphic pins', () => {
+  it('still declares all 783 isomorphic pins', () => {
     // The truth of each pin is proved by tsc, not here — an `Assert<Eq<...>>`
     // that stops holding is a compile error with the alias named. What tsc
     // cannot notice is a pin that was DELETED: removing the assertion removes
@@ -2210,7 +2208,26 @@ describe('ADR-0122 type-alias convention', () => {
     // that default onto the shared type instead, author state and parsed state
     // part company for every key in the family at once, and these are the lines
     // that say so by name.
-    expect(pins).toHaveLength(785);
+    // 785 -> 783 is #16059's ADR-0049 retirement of the startup ORCHESTRATION
+    // surface (kernel/startup-orchestrator.zod.ts, module slot M104):
+    // `HealthStatusSchema` (`Iso467`) and `StartupOrchestrationResultSchema`
+    // (`Iso469`) left with their defs (whole-def removal,
+    // `RETIRED_DEFS_BY_MAJOR[18]` `kernel/HealthStatus` +
+    // `kernel/StartupOrchestrationResult`), so the pins that named them leave
+    // with the schemas — there is nothing left to be isomorphic. The module
+    // slot stays occupied and `Iso468` stays with it: the maintainer ruling
+    // KEEPS `PluginStartupResultSchema`, re-declared against the shape
+    // `@objectstack/core` ships, and it is still the (RISE) case — every new
+    // member is `.optional()` with no default and no transform, so author
+    // state and parsed state still coincide. -2 removed; the Iso numbers stay
+    // vacant (ids are claims about pins, not positions).
+    //
+    // Worth one line on the member that could have moved it: the deprecated
+    // `startTime` alias is mirrored, not defaulted. The day someone writes
+    // `startTime: durationMs`-style `.default()` or a `.transform()` that
+    // fills one member from another, this pin is the line that says the alias
+    // has gained a second shape.
+    expect(pins).toHaveLength(783);
 
     // The count is stated in PROSE twice as well — this case's title and the
     // section header above the pin list — and until #6605 nothing read either

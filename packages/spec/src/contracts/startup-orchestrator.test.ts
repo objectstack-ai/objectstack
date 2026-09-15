@@ -1,202 +1,75 @@
 import { describe, it, expect } from 'vitest';
-import type {
-  StartupOptions,
-  StartupOptionsParsed,
-  PluginStartupResult,
-  HealthStatus,
-  IStartupOrchestrator,
-} from './startup-orchestrator';
-// [#4538] The contract's data shapes ARE the kernel zod types — the same
+import type { PluginStartupResult } from './startup-orchestrator';
+// [#4538] The contract's data shape IS the kernel zod type — the same
 // declaration, re-exported. This import compiling is part of the pin.
-import { StartupOptionsSchema } from '../kernel/startup-orchestrator.zod';
-import type { Plugin } from './plugin-validator';
+import { PluginStartupResultSchema } from '../kernel/startup-orchestrator.zod';
 
-describe('Startup Orchestrator Contract', () => {
-  describe('StartupOptions tiers (re-exported kernel zod types, #4538)', () => {
-    it('should allow an empty INPUT-tier options object (all optional)', () => {
-      const options: StartupOptions = {};
+// [#16059] `IStartupOrchestrator` and the three data schemas it tied together
+// (`StartupOptions`, `HealthStatus`, `StartupOrchestrationResult`) are retired
+// under ADR-0049 — nothing implemented the interface, nothing parsed the
+// schemas, and `checkHealth` was the interface of a probe system that does not
+// exist. Their absence is pinned in
+// `../kernel/startup-orchestrator-retirement.test.ts`; what this file still
+// covers is the one shape that survived, on the entry that re-exports it.
+describe('Startup Orchestrator Contract — the surviving result shape', () => {
+  it('types a successful startup with the plugin NAME', () => {
+    const result: PluginStartupResult = {
+      pluginName: 'auth-plugin',
+      success: true,
+      durationMs: 150,
+    };
 
-      expect(options).toBeDefined();
-      expect(options.timeoutMs).toBeUndefined();
-      expect(options.rollbackOnFailure).toBeUndefined();
-    });
-
-    it('parses the input tier into the defaulted StartupOptions tier', () => {
-      const parsed: StartupOptionsParsed = StartupOptionsSchema.parse({});
-
-      expect(parsed.timeoutMs).toBe(30000);
-      expect(parsed.rollbackOnFailure).toBe(true);
-      expect(parsed.healthCheck).toBe(false);
-      expect(parsed.parallel).toBe(false);
-    });
-
-    it('should allow full options', () => {
-      const options: StartupOptions = {
-        timeoutMs: 30000,
-        rollbackOnFailure: true,
-        healthCheck: true,
-        parallel: false,
-        context: { db: 'postgres' },
-      };
-
-      expect(options.timeoutMs).toBe(30000);
-      expect(options.rollbackOnFailure).toBe(true);
-      expect(options.healthCheck).toBe(true);
-      expect(options.parallel).toBe(false);
-      expect(options.context).toEqual({ db: 'postgres' });
-    });
+    expect(result.success).toBe(true);
+    expect(result.pluginName).toBe('auth-plugin');
+    expect(result.durationMs).toBe(150);
+    expect(result.error).toBeUndefined();
   });
 
-  describe('HealthStatus interface', () => {
-    it('should allow a minimal health status', () => {
-      const status: HealthStatus = {
-        healthy: true,
-        checkedAt: Date.now(),
-      };
+  it('types the no-start() path, where durationMs is absent', () => {
+    const result: PluginStartupResult = {
+      pluginName: 'inert-plugin',
+      success: true,
+    };
 
-      expect(status.healthy).toBe(true);
-      expect(status.checkedAt).toBeGreaterThan(0);
-    });
-
-    it('should allow a full health status with details', () => {
-      const status: HealthStatus = {
-        healthy: false,
-        checkedAt: Date.now(),
-        details: { connections: 0, maxConnections: 10 },
-        message: 'No database connections available',
-      };
-
-      expect(status.healthy).toBe(false);
-      expect(status.message).toBe('No database connections available');
-      expect(status.details).toHaveProperty('connections');
-    });
+    expect(result.durationMs).toBeUndefined();
   });
 
-  describe('PluginStartupResult interface', () => {
-    it('should represent a successful startup', () => {
-      const plugin: Plugin = { name: 'auth-plugin', version: '1.0.0' };
-      const result: PluginStartupResult = {
-        plugin,
-        success: true,
-        durationMs: 150,
-      };
+  it('types a timed-out startup with a SERIALIZABLE error (#4538)', () => {
+    const result: PluginStartupResult = {
+      pluginName: 'broken-plugin',
+      success: false,
+      durationMs: 30000,
+      // The kernel schema declares the serializable projection — what a
+      // wire/log consumer of the result can carry.
+      error: { name: 'Error', message: 'Timeout' },
+      timedOut: true,
+    };
 
-      expect(result.success).toBe(true);
-      expect(result.durationMs).toBe(150);
-      expect(result.error).toBeUndefined();
-    });
-
-    it('should represent a failed startup with a SERIALIZABLE error (#4538)', () => {
-      const plugin: Plugin = { name: 'broken-plugin' };
-      const result: PluginStartupResult = {
-        plugin,
-        success: false,
-        durationMs: 30000,
-        // The kernel schema declares the serializable projection, not a live
-        // Error instance — what a wire/log consumer of the result can carry.
-        error: { name: 'Error', message: 'Timeout' },
-      };
-
-      expect(result.success).toBe(false);
-      expect(result.error!.message).toBe('Timeout');
-    });
-
-    it('should include optional health status', () => {
-      const plugin: Plugin = { name: 'healthy-plugin' };
-      const result: PluginStartupResult = {
-        plugin,
-        success: true,
-        durationMs: 50,
-        health: {
-          healthy: true,
-          checkedAt: Date.now(),
-          details: { uptime: 1000 },
-        },
-      };
-
-      expect(result.health!.healthy).toBe(true);
-    });
+    expect(result.success).toBe(false);
+    expect(result.error!.message).toBe('Timeout');
+    expect(result.timedOut).toBe(true);
   });
 
-  describe('IStartupOrchestrator interface', () => {
-    it('should allow a minimal implementation', () => {
-      const orchestrator: IStartupOrchestrator = {
-        orchestrateStartup: async (plugins, _options) => {
-          return plugins.map((p) => ({
-            plugin: p,
-            success: true,
-            durationMs: 10,
-          }));
-        },
-        rollback: async (_startedPlugins) => {},
-        checkHealth: async (_plugin) => ({
-          healthy: true,
-          checkedAt: Date.now(),
-        }),
-      };
+  it('a live Error satisfies the declared projection — what the kernel hands through', () => {
+    // `ObjectKernel.startPluginWithTimeout()` puts the thrown instance in
+    // `error` so the boot loop can rethrow it as the new error's `cause`. That
+    // is legal against this contract because `Error` IS a
+    // `{ name, message, stack? }` — the projection is what a consumer may
+    // rely on, not a narrowing of what the kernel may pass.
+    const thrown = new Error('Connection failed');
+    const result: PluginStartupResult = {
+      pluginName: 'db-plugin',
+      success: false,
+      error: thrown,
+    };
 
-      expect(typeof orchestrator.orchestrateStartup).toBe('function');
-      expect(typeof orchestrator.rollback).toBe('function');
-      expect(typeof orchestrator.checkHealth).toBe('function');
-    });
+    expect(result.error instanceof Error).toBe(true);
+    expect(result.error!.name).toBe('Error');
+  });
 
-    it('should orchestrate startup for multiple plugins', async () => {
-      const plugins: Plugin[] = [
-        { name: 'core', version: '1.0.0' },
-        { name: 'auth', version: '2.0.0', dependencies: ['core'] },
-      ];
-
-      const orchestrator: IStartupOrchestrator = {
-        orchestrateStartup: async (pluginList, options) => {
-          return pluginList.map((p) => ({
-            plugin: p,
-            success: true,
-            durationMs: options.timeoutMs ? 10 : 20,
-          }));
-        },
-        rollback: async () => {},
-        checkHealth: async () => ({ healthy: true, checkedAt: Date.now() }),
-      };
-
-      const results = await orchestrator.orchestrateStartup(plugins, { timeoutMs: 5000 });
-      expect(results).toHaveLength(2);
-      expect(results[0].success).toBe(true);
-      expect(results[1].plugin.name).toBe('auth');
-    });
-
-    it('should support optional startWithTimeout method', async () => {
-      const orchestrator: IStartupOrchestrator = {
-        orchestrateStartup: async () => [],
-        rollback: async () => {},
-        checkHealth: async () => ({ healthy: true, checkedAt: Date.now() }),
-        startWithTimeout: async (_plugin, _context, _timeoutMs) => {},
-      };
-
-      expect(orchestrator.startWithTimeout).toBeDefined();
-      await expect(
-        orchestrator.startWithTimeout!({ name: 'test' }, {}, 5000)
-      ).resolves.toBeUndefined();
-    });
-
-    it('should rollback started plugins on failure', async () => {
-      const rolledBack: string[] = [];
-
-      const orchestrator: IStartupOrchestrator = {
-        orchestrateStartup: async () => [],
-        rollback: async (startedPlugins) => {
-          for (const p of startedPlugins) {
-            rolledBack.push(p.name);
-          }
-        },
-        checkHealth: async () => ({ healthy: true, checkedAt: Date.now() }),
-      };
-
-      await orchestrator.rollback([
-        { name: 'plugin-a' },
-        { name: 'plugin-b' },
-      ]);
-
-      expect(rolledBack).toEqual(['plugin-a', 'plugin-b']);
-    });
+  it('is the SAME declaration the kernel entry exports (#4538)', () => {
+    const value: PluginStartupResult = { pluginName: 'x', success: true };
+    const parsed = PluginStartupResultSchema.safeParse(value);
+    expect(parsed.success).toBe(true);
   });
 });

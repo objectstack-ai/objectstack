@@ -88,35 +88,25 @@ export interface PluginLoadResult {
 
 /**
  * Plugin Startup Result
+ *
+ * [#16059] DECLARED BY THE SPEC, re-exported here.
+ *
+ * This interface used to be hand-written in this file, and its twin lived in
+ * `packages/spec/src/kernel/startup-orchestrator.zod.ts` describing a different
+ * shape (a `plugin: { name, version }` object, a required `durationMs`, a
+ * `health` member for a probe system that does not exist). The maintainer ruling
+ * on #16059 (director seat, decision batch #60, 2026-09-06) re-declared the
+ * SCHEMA against what this package actually ships and made the type flow one
+ * way — spec to core — so the two cannot drift apart again.
+ *
+ * The shape is unchanged for every producer and reader here: `pluginName`,
+ * `success`, optional `durationMs`, the deprecated `startTime` alias,
+ * `timedOut`, and `error` — declared by the spec as the serializable projection
+ * (`name` / `message` / `stack` / `code`) that a thrown `Error` satisfies
+ * structurally, so `ObjectKernel` keeps handing the live instance through and
+ * `instanceof Error` keeps narrowing at the read site.
  */
-export interface PluginStartupResult {
-    success: boolean;
-    pluginName: string;
-    /**
-     * Elapsed milliseconds the plugin's `start()` took.
-     *
-     * Named for the member `packages/spec` declares for the same measure --
-     * `PluginStartupResultSchema.durationMs` in
-     * `packages/spec/src/kernel/startup-orchestrator.zod.ts` ("Time taken to
-     * start the plugin in milliseconds"), where the bare `duration` spelling is
-     * retired: a duration-shaped number carries its unit in its key name. Like
-     * `PluginLoadResult.loadTime` above, it is the same `Date.now() - startTime`
-     * computation under a name that does not lie.
-     */
-    durationMs?: number;
-    /**
-     * The same elapsed milliseconds as {@link PluginStartupResult.durationMs}.
-     *
-     * @deprecated Misnamed: this has never held an instant, so a reader who
-     * correctly takes `startTime` for one and writes `Date.now() - result.startTime`
-     * gets an age near the epoch instead of a wait. Read `durationMs` instead.
-     * Still populated so nothing has to change on this release (ADR-0087 L1 --
-     * the old shape keeps working while the fleet moves); slated for removal.
-     */
-    startTime?: number;
-    error?: Error;
-    timedOut?: boolean;
-}
+export type { PluginStartupResult } from '@objectstack/spec/kernel';
 
 /**
  * Version Compatibility Result
