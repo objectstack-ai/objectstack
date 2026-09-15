@@ -260,7 +260,7 @@ directory rather than per file.
 | `api/` | 451 |
 | `identity/` | 32 |
 | `integration/` | 8 |
-| `kernel/` | 260 |
+| `kernel/` | 256 |
 | `marketplace/` | 29 |
 | `qa/` | 6 |
 | `shared/` | 20 |
