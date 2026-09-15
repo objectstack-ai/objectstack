@@ -1479,12 +1479,20 @@ export interface DefineStackOptions {
    * it therefore leaves `ObjectStackDefinitionSchema` — and every artifact
    * already built from it — untouched.
    *
-   * ## The claim is verified, not trusted
+   * ## The claim is verified, not trusted — in a composition of two or more packages
    *
    * A name listed here that no package in the artifact actually defines is
-   * refused by {@link composeStacks}, with the same `STACK_CROSS_REFERENCE_INVALID`
-   * envelope and the same per-finding message. Omitting the option keeps
-   * today's behaviour byte-for-byte.
+   * refused by {@link composeStacks} **in a composition of two or more
+   * packages**, with the same `STACK_CROSS_REFERENCE_INVALID` envelope and the
+   * same per-finding message. The qualifier is load-bearing: `composeStacks`
+   * returns a single input untouched, so a one-package composition — like a
+   * stack that is never composed — leaves the claim unverified. See
+   * {@link collectArtifactCrossReferenceErrors}'s known boundary.
+   *
+   * Omitting the option keeps `defineStack`'s own behaviour byte-for-byte. It
+   * does not exempt the stack from the artifact pass, which re-runs the two
+   * rules over every input: a no-op for anything that passed the strict parse,
+   * and the first application of those rules to anything that bypassed it.
    *
    * @example
    * ```ts
@@ -2086,17 +2094,39 @@ class StackTriggerCapabilityRequiredError extends StackRefusalError {
  * The MESSAGE is identical either way, which is what lets {@link composeStacks}
  * re-raise this rule over the artifact without inventing a second dialect for
  * the same finding.
+ *
+ * ## Why this guards shapes the strict parse already rejects
+ *
+ * Since #18202 this runs from {@link composeStacks} too, and composition
+ * accepts inputs the strict parse never saw (`strict: false`, a hand-built
+ * stack object). So `data` here can be a non-array, and an entry can be `null`
+ * or a scalar. Those shapes are SKIPPED, never dereferenced: a rule whose job
+ * is to resolve object references must not turn a malformed collection into a
+ * bare `TypeError` with no `code` and no `status` — the refusal discipline of
+ * this file is the ADR-0112 envelope. A non-array `data` gets the same word
+ * {@link composeStacks}'s concat pass gives it ({@link warnMalformedCollectionKey},
+ * #5005, deduplicated per key so the two passes speak once); an entry that is
+ * not an object, or whose `object` is not a string, carries no object
+ * reference for this rule to resolve and is simply not this rule's finding.
  */
 function collectSeedDataObjectErrors(
   config: ObjectStackDefinition,
   resolvable: ReadonlySet<string>,
 ): string[] {
   const errors: string[] = [];
-  if (!config.data) return errors;
-  for (const dataset of config.data) {
-    if (dataset.object && !resolvable.has(dataset.object) && !isPlatformObjectName(dataset.object)) {
+  const datasets: unknown = (config as { data?: unknown }).data;
+  if (datasets === undefined || datasets === null) return errors;
+  if (!Array.isArray(datasets)) {
+    warnMalformedCollectionKey('data');
+    return errors;
+  }
+  for (const dataset of datasets) {
+    if (!dataset || typeof dataset !== 'object') continue;
+    const objectName: unknown = (dataset as { object?: unknown }).object;
+    if (typeof objectName !== 'string' || objectName.length === 0) continue;
+    if (!resolvable.has(objectName) && !isPlatformObjectName(objectName)) {
       errors.push(
-        `Seed data references object '${dataset.object}' which is not defined in objects.`,
+        `Seed data references object '${objectName}' which is not defined in objects.`,
       );
     }
   }
@@ -2116,15 +2146,27 @@ function collectSeedDataObjectErrors(
  * Platform objects are legitimate grant targets (e.g. a delegated-admin set
  * carrying CRUD on the RBAC link tables, ADR-0090 D12) — skip them here.
  *
- * `resolvable` carries the same two readings as its seed-data sibling above.
+ * `resolvable` carries the same two readings as its seed-data sibling above,
+ * and so does its shape guard: a non-array `permissions` is announced through
+ * {@link warnMalformedCollectionKey} and skipped, and a `permissions` entry
+ * that is not an object is skipped, because this rule reads
+ * `permissions[].objects` and an unparsed input may carry neither. Same reason
+ * as the sibling — a malformed collection must not become a bare `TypeError`
+ * in the pass whose refusals are ADR-0112 envelopes.
  */
 function collectPermissionGrantObjectErrors(
   config: ObjectStackDefinition,
   resolvable: ReadonlySet<string>,
 ): string[] {
   const errors: string[] = [];
-  if (!config.permissions) return errors;
-  for (const perm of config.permissions) {
+  const permissions: unknown = (config as { permissions?: unknown }).permissions;
+  if (permissions === undefined || permissions === null) return errors;
+  if (!Array.isArray(permissions)) {
+    warnMalformedCollectionKey('permissions');
+    return errors;
+  }
+  for (const perm of permissions) {
+    if (!perm || typeof perm !== 'object') continue;
     const grants = (perm as { objects?: Record<string, unknown> }).objects;
     if (!grants || typeof grants !== 'object') continue;
     for (const objName of Object.keys(grants)) {
@@ -3753,15 +3795,35 @@ function assemblePackageBody(stack: ObjectStackDefinition): AssembledPackageBody
  * artifact, so a name no package in it defines is refused here, loudly, with
  * the same envelope and the same per-finding message the per-stack pass uses.
  *
- * ## Why it re-checks inputs that never opted in (and why that is free)
+ * ## Why it re-checks inputs that never opted in, and what that changes
  *
  * It does not read the option — the option is not recorded on the returned
  * stack, and deliberately so: recording it would put a composition-time concern
  * on `ObjectStackDefinitionSchema`, i.e. on every artifact already built. It
- * instead re-runs the two rules for every input, which is a NO-OP for an input
- * that did not opt in: that input's references already resolved against its own
- * objects, and its own objects are a subset of the composed set. Nothing that
- * composes cleanly today can newly fail here.
+ * instead re-runs the two rules for every input. The invariant that buys is
+ * narrower than "nothing can newly fail", and the narrower statement is the
+ * true one:
+ *
+ * - **An input that passed the strict `defineStack` parse cannot newly fail
+ *   here.** Its references already resolved against its own objects, and its
+ *   own objects are a subset of the composed set — so re-running the two rules
+ *   over a superset is a no-op.
+ * - **An input that BYPASSED the strict parse is checked for these two rules
+ *   here for the first time.** `defineStack(config, { strict: false })` returns
+ *   before {@link validateCrossReferences} runs at all, and a hand-built stack
+ *   object never enters it — so such an input has never had these two rules
+ *   applied, and a dangling `permissions[].objects` key or `data[].object` in
+ *   it is refused at composition where it previously composed.
+ *
+ * The second bullet is a real narrowing of what {@link composeStacks} accepts,
+ * and it is DECLARED rather than incidental: it is the Prime Directive #12
+ * direction (reject off-spec input at the producer, loudly), the changeset
+ * states it, and `stack-artifact-crossref.test.ts` pins it as behaviour rather
+ * than leaving it to be rediscovered as a regression. What it is NOT is a
+ * licence to crash: the two collectors guard their own shapes, so an unparsed
+ * input carrying a malformed `permissions` / `data` is warned about and skipped
+ * — the same treatment {@link composeStacks}'s concat pass gives it — instead
+ * of raising a bare `TypeError` outside the ADR-0112 envelope.
  *
  * ## The one leniency it inherits verbatim
  *
@@ -3772,13 +3834,17 @@ function assemblePackageBody(stack: ObjectStackDefinition): AssembledPackageBody
  * It is also why hotcrm#1449's measurement (an app package declaring no
  * objects) never saw the defect #18202 reports.
  *
- * ## Known boundary
+ * ## Known boundary — this pass runs only for TWO OR MORE packages
  *
- * A stack that opts in and is then NEVER composed has no artifact to be
- * checked against, and its claim stands unverified — the same shape as
- * `strict: false`, and for the same reason: the author asserted something only
- * a composition can confirm. `os build` composes; a stack that does not is not
- * a package of an artifact.
+ * {@link composeStacks} returns `stacks[0]` untouched for a single input, so a
+ * one-package composition never reaches this pass. Together with a stack that
+ * is never composed at all, that is the population whose `artifactObjects`
+ * claim stands unverified — the same shape as `strict: false`, and for the same
+ * reason: the author asserted something only a composition can confirm. So the
+ * guarantee to state to authors is "a name no package in the artifact defines
+ * is refused **in a composition of two or more packages**", never the
+ * unqualified form. `os build` composes; a stack that does not is not a package
+ * of an artifact.
  */
 function collectArtifactCrossReferenceErrors(
   stacks: readonly ObjectStackDefinition[],
@@ -3921,9 +3987,12 @@ export function composeStacks(
   //     collections are concatenated, because it reads the composed
   //     `permissions` / `data` of each INPUT against the composed `objects`;
   //     BEFORE anything else can throw on a stack whose references do not
-  //     resolve in the first place. See
-  //     {@link collectArtifactCrossReferenceErrors} for why re-checking every
-  //     input cannot newly refuse a composition that passes today.
+  //     resolve in the first place. Never reached for a single input — the
+  //     `stacks.length === 1` early return above is the declared boundary. See
+  //     {@link collectArtifactCrossReferenceErrors} for which inputs this can
+  //     and cannot newly refuse: an input that passed the strict parse cannot
+  //     newly fail, an input that bypassed it is checked here for the first
+  //     time.
   const artifactCrossRefErrors = collectArtifactCrossReferenceErrors(
     stacks,
     objects as readonly { name: string }[] | undefined,

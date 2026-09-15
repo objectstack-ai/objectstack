@@ -39,6 +39,26 @@
  * because only the pass differs. `ArtifactPass` is that fixture, and it is an
  * acceptance criterion of #18202 rather than a nicety.
  *
+ * ## What the artifact pass DOES newly refuse, and what it must never do
+ *
+ * The compatibility statement that holds is not "nothing can newly fail". It
+ * is two statements:
+ *
+ * - an input that passed the strict `defineStack` parse cannot newly fail at
+ *   composition — its references already resolved against its own objects, a
+ *   subset of the composed set;
+ * - an input that BYPASSED the strict parse (`strict: false`, a hand-built
+ *   stack object) is checked for these two rules at composition for the FIRST
+ *   time, and a dangling reference in it is refused where it previously
+ *   composed.
+ *
+ * The second is a narrowing, it is deliberate, and the three blocks at the
+ * bottom of this file pin it as declared behaviour: the refusals themselves,
+ * the shape guards that keep an unparsed malformed collection a warning rather
+ * than a bare `TypeError` outside the ADR-0112 envelope, and the one-input
+ * boundary that makes "in a composition of two or more packages" the only
+ * correct way to state the guarantee to an author.
+ *
  * ## Fixture shape
  *
  * The two-package shape measured downstream, reproduced at its smallest: the
@@ -293,5 +313,184 @@ describe('#18202 — the object-less leniency the ARTIFACT pass inherits verbati
   it('still accepts an object-less package granting on a name nobody defines — unchanged leniency', () => {
     expect(refusalOf(() => composeStacks([serviceStack(), objectLessApp(NOWHERE)], { manifest: 'preserve' })))
       .toBeNull();
+  });
+});
+
+/**
+ * The ARTIFACT pass runs over EVERY input, not only the ones that opted in —
+ * and for an input that never went through the strict `defineStack` parse that
+ * is not a no-op. `defineStack(config, { strict: false })` returns before
+ * `validateCrossReferences` runs at all, and a hand-built stack object never
+ * enters it, so these two rules have never been applied to such an input. The
+ * artifact pass is the first place they are.
+ *
+ * That is a real narrowing of what `composeStacks` accepts, in the Prime
+ * Directive #12 direction. It is pinned here as DECLARED behaviour so the next
+ * reader meets it as a decision rather than as a regression: the changeset says
+ * it, `collectArtifactCrossReferenceErrors`'s docstring says it, and these
+ * fixtures hold it.
+ */
+describe('#18202 — an input that bypassed the strict parse IS checked at composition', () => {
+  /** The app package as an unparsed stack: `strict: false` skips every validation. */
+  const unparsedApp = (grantObject: string, seedObject: string) =>
+    defineStack(appConfig(grantObject, seedObject), { strict: false });
+
+  /** The same config as a hand-built object — it never enters `defineStack` at all. */
+  const handBuiltApp = (grantObject: string, seedObject: string) =>
+    appConfig(grantObject, seedObject) as unknown as ReturnType<typeof defineStack>;
+
+  it('`strict: false` alone still composes — the parse it skipped is not reinstated here', () => {
+    // The control for the two refusals below: same construction, a name the
+    // artifact DOES define. If this went red the refusals would prove nothing.
+    expect(
+      refusalOf(() => composeStacks([serviceStack(), unparsedApp('crm_case', 'crm_case')], { manifest: 'preserve' })),
+    ).toBeNull();
+  });
+
+  it('REFUSES a `strict: false` input whose grant names an object NO package defines', () => {
+    const refused = refusalOf(() =>
+      composeStacks([serviceStack(), unparsedApp(NOWHERE, 'crm_case')], { manifest: 'preserve' }),
+    );
+    expect(refused?.code).toBe('STACK_CROSS_REFERENCE_INVALID');
+    expect(refused?.status).toBe(422);
+    expect(refused?.issues).toContain(GRANT_ON_NOWHERE);
+  });
+
+  it('REFUSES the seed-data twin on a `strict: false` input', () => {
+    const refused = refusalOf(() =>
+      composeStacks([serviceStack(), unparsedApp('crm_case', NOWHERE)], { manifest: 'preserve' }),
+    );
+    expect(refused?.code).toBe('STACK_CROSS_REFERENCE_INVALID');
+    expect(refused?.issues).toContain(SEED_ON_NOWHERE);
+  });
+
+  it('REFUSES a hand-built stack object on the same two rules', () => {
+    const refused = refusalOf(() =>
+      composeStacks([serviceStack(), handBuiltApp(NOWHERE, NOWHERE)], { manifest: 'preserve' }),
+    );
+    expect(refused?.code).toBe('STACK_CROSS_REFERENCE_INVALID');
+    expect(refused?.issues).toContain(GRANT_ON_NOWHERE);
+    expect(refused?.issues).toContain(SEED_ON_NOWHERE);
+  });
+
+  it('leaves every OTHER rule un-applied to an unparsed input — only these two cross', () => {
+    // A hook on an object nobody defines is refused by the PER-STACK pass only.
+    // The artifact pass re-raises the two ARTIFACT-SCOPED rules and nothing
+    // else, so an unparsed input carrying a dangling hook still composes.
+    const unparsedHook = defineStack(
+      anyStack({
+        manifest: appManifest,
+        objects: [account],
+        hooks: [{ name: 'nowhere_hook', object: NOWHERE, events: ['afterInsert'], handler: 'noop' }],
+      }),
+      { strict: false },
+    );
+    expect(refusalOf(() => composeStacks([serviceStack(), unparsedHook], { manifest: 'preserve' }))).toBeNull();
+  });
+});
+
+/**
+ * The shape guard the two collectors carry (#18202 rework).
+ *
+ * Because the artifact pass reads `permissions` / `data` off inputs the strict
+ * parse never saw, those keys can be a non-array, and an entry can be `null` or
+ * a scalar. `composeStacks`'s step-3 concat pass already refuses to drop such a
+ * key without a word (#5005); the two collectors must not turn the same input
+ * into a bare `TypeError` with no `code` and no `status`, which is exactly what
+ * this pass did before the guards existed. Every case below composes on
+ * `origin/main`, so a throw here is a regression, not a stricter contract.
+ *
+ * ⚠️ `warnMalformedCollectionKey` deduplicates per key for the lifetime of the
+ * module, so each key is asserted in exactly ONE test and the count assertion
+ * (`toBe(1)`) is what proves the two passes do not both speak.
+ */
+describe('#18202 — a malformed collection on an unparsed input is skipped, never a bare TypeError', () => {
+  /** Collect `console.warn` for one call, restoring the real one afterwards. */
+  function warningsDuring(run: () => unknown): { warnings: string[]; thrown: Envelope | null } {
+    const warnings: string[] = [];
+    const real = console.warn;
+    console.warn = (...args: unknown[]) => {
+      warnings.push(args.map(String).join(' '));
+    };
+    try {
+      return { warnings, thrown: refusalOf(run) };
+    } finally {
+      console.warn = real;
+    }
+  }
+
+  const malformed = (overrides: Record<string, unknown>) =>
+    anyStack({ manifest: appManifest, objects: [account], ...overrides }) as unknown as ReturnType<typeof defineStack>;
+
+  const composeWith = (stack: ReturnType<typeof defineStack>) => () =>
+    composeStacks([serviceStack(), stack], { manifest: 'preserve' });
+
+  it('a non-array `permissions` composes, and the key is warned about exactly once', () => {
+    const { warnings, thrown } = warningsDuring(composeWith(malformed({ permissions: 'not-an-array' })));
+    expect(thrown).toBeNull();
+    expect(warnings.filter((w) => w.includes("top-level key 'permissions'"))).toHaveLength(1);
+  });
+
+  it('a non-array `data` composes, and the key is warned about exactly once', () => {
+    const { warnings, thrown } = warningsDuring(composeWith(malformed({ data: 42 })));
+    expect(thrown).toBeNull();
+    expect(warnings.filter((w) => w.includes("top-level key 'data'"))).toHaveLength(1);
+  });
+
+  it('a null entry inside `permissions` is skipped, not dereferenced', () => {
+    expect(refusalOf(composeWith(malformed({ permissions: [null] })))).toBeNull();
+  });
+
+  it('a null entry inside `data` is skipped, not dereferenced', () => {
+    expect(refusalOf(composeWith(malformed({ data: [null] })))).toBeNull();
+  });
+
+  it('a scalar entry, and a non-string `object`, carry no reference for the rule to resolve', () => {
+    expect(
+      refusalOf(composeWith(malformed({ data: ['crm_case', { object: 7 }], permissions: ['sales_rep'] }))),
+    ).toBeNull();
+  });
+
+  it('a malformed `objects` grant map is skipped while the rest of the set is still read', () => {
+    const refused = refusalOf(
+      composeWith(
+        malformed({
+          permissions: [
+            { name: 'broken', label: 'Broken', objects: null },
+            { name: 'sales_rep', label: 'Sales Rep', objects: { [NOWHERE]: { allowRead: true } } },
+          ],
+        }),
+      ),
+    );
+    expect(refused?.code).toBe('STACK_CROSS_REFERENCE_INVALID');
+    expect(refused?.issues).toContain(GRANT_ON_NOWHERE);
+  });
+});
+
+/**
+ * The declared boundary of the artifact pass (#18202 rework).
+ *
+ * `composeStacks` returns `stacks[0]` untouched for a single input, so a
+ * one-package composition never reaches the pass at all. That is why every
+ * reader-facing statement of the guarantee — the option's docstring and the
+ * multi-package docs bullet — says "in a composition of two or more packages".
+ * This block is the fence on that qualifier: if the early return is ever
+ * removed, the qualifier becomes wrong and these tests say so.
+ */
+describe('#18202 — a composition of ONE package never reaches the artifact pass', () => {
+  const claiming = () => defineStack(appConfig(NOWHERE, NOWHERE), { artifactObjects: [NOWHERE] });
+
+  it('accepts a one-input composition whose claim names an object nothing defines', () => {
+    expect(refusalOf(() => composeStacks([claiming()], { manifest: 'preserve' }))).toBeNull();
+  });
+
+  it('accepts it with no options either — the early return precedes the option parse', () => {
+    expect(refusalOf(() => composeStacks([claiming()]))).toBeNull();
+  });
+
+  it('and REFUSES the identical claim as soon as a second package joins — the contrast', () => {
+    const refused = refusalOf(() => composeStacks([serviceStack(), claiming()], { manifest: 'preserve' }));
+    expect(refused?.code).toBe('STACK_CROSS_REFERENCE_INVALID');
+    expect(refused?.issues).toContain(GRANT_ON_NOWHERE);
   });
 });
