@@ -8464,6 +8464,36 @@ export function watchHintTree(files = trackedFiles()) {
 }
 
 /**
+ * ── The repository's OWN corpus, listed once per process (#18201) ───────────
+ *
+ * The listing and the tree built from it, for the one tree this process is
+ * about: the checkout `ROOT` names. Every caller that wants "this repo" takes
+ * the SAME two objects from here, which is the "one read, N answers"
+ * discipline `watchHintTree`'s own docblock states, promoted from an
+ * invariant each caller had to keep by hand to one the module keeps for them.
+ *
+ * ⛔ It is NOT a general tree cache. A caller that means a DIFFERENT tree — a
+ * temporary repository, a hand-built fixture listing, `null` — still builds
+ * and passes its own, and nothing here answers for it; the memo below is keyed
+ * on the tree object, so a fixture tree can never be served this one's answer.
+ *
+ * What makes the reuse observationally identical rather than merely cheaper:
+ * within one process nothing writes to `ROOT`. The CLI is one-shot, and the
+ * self-test's every write goes to a `mkdtemp` directory under the system temp
+ * root — the in-tree-fixture class its own cases refuse. A process that did
+ * mutate the checkout under itself would need a fresh listing, and would ask
+ * `trackedFiles()` for one, which is untouched.
+ */
+let repoCorpusMemo = null;
+export function repoCorpus() {
+  if (repoCorpusMemo === null) {
+    const files = trackedFiles();
+    repoCorpusMemo = { files, tree: watchHintTree(files) };
+  }
+  return repoCorpusMemo;
+}
+
+/**
  * The longest leading run of a hint's segments that the tree still has, or ''
  * when even its first segment names nothing.
  *
@@ -10994,7 +11024,58 @@ export function tierLines(result) {
  * is the drift this file's header refuses everywhere else. The self-test is
  * the only other caller, and it calls THIS.
  */
-export function discoverFamilies({ tree = watchHintTree() } = {}) {
+/**
+ * ── ONE discovery pass per tree, per process (#18201) ──────────────────────
+ *
+ * PROFILED, not guessed, on the same principle as the source maskers far
+ * above and with the same promise: ⛔ this changes nothing about WHAT is
+ * discovered — it is the same derivation run once instead of N times, which
+ * is the only kind of speed-up this tool may take.
+ *
+ * The reading that motivated it belongs to a named commit rather than to this
+ * comment, so it lives on the card: a V8 CPU profile of one plain derivation
+ * found this function running TWICE over the identical tree — once from
+ * `derive`, once from `gateFamilyFiles` under `changeKindGates` — and the
+ * self-test driving it a further twenty-odd times in one process, every pass
+ * re-reading every workflow and re-masking every gate source for bytes that
+ * cannot have changed in between.
+ *
+ * Keyed on the TREE OBJECT, which is what makes the memo observationally
+ * identical rather than merely cheaper: the answer is a pure function of the
+ * tree it is handed plus the checkout on disk, a caller that means a
+ * different tree hands a different object and gets its own pass, and nothing
+ * in this process writes to the checkout (see `repoCorpus`). A `null` tree —
+ * the deliberate no-tree probe — is not an object and is never memoised.
+ *
+ * ⛔ The entries this hands back are SHARED. A caller that mutates one for an
+ * ablation must restore it before it returns, exactly as the one self-test
+ * case that does so already restores `entry.reads`.
+ */
+const discoveryMemo = new WeakMap();
+
+/**
+ * How many discovery passes this process has really computed — the reading a
+ * case needs to tell "memoised" from "cheap enough that nobody noticed", and
+ * the only way to pin a collapse whose whole symptom is the absence of work.
+ */
+let discoveryPasses = 0;
+export function discoveryPassCount() {
+  return discoveryPasses;
+}
+
+export function discoverFamilies({ tree = repoCorpus().tree } = {}) {
+  if (tree !== null && typeof tree === 'object') {
+    const hit = discoveryMemo.get(tree);
+    if (hit !== undefined) return hit;
+    const value = discoverFamiliesPass(tree);
+    discoveryMemo.set(tree, value);
+    return value;
+  }
+  return discoverFamiliesPass(tree);
+}
+
+function discoverFamiliesPass(tree) {
+  discoveryPasses += 1;
   const wfDir = nodePath.join(ROOT, '.github/workflows');
   const workflows = readdirSync(wfDir).filter((f) => /\.ya?ml$/.test(f));
   if (workflows.length === 0) throw new Error('no workflow files found under .github/workflows');
@@ -12941,12 +13022,16 @@ function derive(paths, { showResidue = false, mode = 'human', runRecord = [] } =
   // It is read here, above the discovery, because the extractor needs the same
   // corpus to judge a single-segment directory literal — one listing, so the
   // hints and the sweep that grades them cannot be taken from different trees.
-  const swept = trackedFiles();
-  // Held in a name rather than built inline: the artifact-roster split needs
-  // the SAME bundle the discovery was handed. Built twice it would be two
-  // readings of one listing, which is the drift `watchHintTree`'s own docblock
-  // refuses ("the pair is meaningless apart").
-  const tree = watchHintTree(swept);
+  // Both halves come from `repoCorpus`, which lists the checkout once per
+  // process. Held in names rather than built inline: the artifact-roster split
+  // needs the SAME bundle the discovery was handed. Built twice they would be
+  // two readings of one listing, which is the drift `watchHintTree`'s own
+  // docblock refuses ("the pair is meaningless apart") — and taking them from
+  // the shared corpus makes the pair the same two OBJECTS rather than two
+  // equal copies, which is also what lets the discovery below be the same pass
+  // `gateFamilyFiles` gets under `changeKindGates` instead of a second one
+  // over an identical tree (#18201).
+  const { files: swept, tree } = repoCorpus();
   const { byCheck, workflows, workflowEntries } = discoverFamilies({ tree });
   // ONE per-hint sweep feeds both readers of dead literals: the unreachable
   // listing (whole-family grain) and the residue annotations (per-hint grain,
@@ -21293,6 +21378,76 @@ function selfTest() {
   t('the live tree has at least one paths-filtered workflow (the guard is not vacuous)', liveWorkflowEntries.some((e) => extractTriggerPaths(e.text).length > 0));
   const liveGaps = checkFamilyCoverageGaps(liveWorkflowEntries);
   t(`every real paths-filtered workflow discovers a check family or declares why not (gaps: ${liveGaps.join(', ') || 'none'})`, liveGaps.length === 0);
+
+  // ── ONE discovery pass per tree, and the collapse is OBSERVED (#18201) ────
+  //
+  // The memo's whole symptom is work that does NOT happen, and absent work is
+  // invisible to every other case here: each of them asks what discovery
+  // ANSWERS, and the answer is identical either way — which is the point of
+  // the memo and also the reason nothing already in this file can tell a
+  // collapsed pass from a repeated one. So the pass counter is read directly,
+  // and both directions are pinned: the default tree is discovered once, and a
+  // tree that is NOT that object is never served its answer.
+  //
+  // ⛔ The second half is not decoration. The cheap wrong memo is one module
+  // slot ignoring the argument, and under it every fixture-tree case in this
+  // file — the directory-landing tree, the class tree, the no-tree probe —
+  // would be answered about the REAL tree while still reading as a pass on the
+  // day their expectations happen to coincide. The pin that costs a pass is
+  // what makes that unbuildable.
+  const warmDiscovery = discoverFamilies();
+  const passesWarm = discoveryPassCount();
+  const defaultAgain = discoverFamilies();
+  const defaultOnceMore = discoverFamilies();
+  t(
+    'the default tree is discovered ONCE per process — two further calls compute no pass',
+    discoveryPassCount() === passesWarm,
+    `passes before ${passesWarm}, after ${discoveryPassCount()}`,
+  );
+  t(
+    'and those calls hand back the SAME object, so an entry ablated and restored is one entry',
+    defaultAgain === warmDiscovery && defaultOnceMore === warmDiscovery,
+  );
+  t(
+    'the corpus behind it is listed once too — one bundle, so the sweep and the discovery cannot describe different revisions',
+    repoCorpus() === repoCorpus() && repoCorpus().tree === repoCorpus().tree,
+  );
+  t(
+    "and that listing is the tracked corpus itself, not a trimmed copy of it",
+    repoCorpus().files.length === trackedFiles().length && repoCorpus().tree.files.size === repoCorpus().files.length,
+  );
+  // The derivation's own collapse, pinned at the seam that used to pay twice:
+  // `derive` takes this exact tree object and `gateFamilyFiles` — reached from
+  // `changeKindGates`, a whole call chain away — asks for the default one. The
+  // two are the same object, so the second ask is the first pass.
+  const passesBeforeSeam = discoveryPassCount();
+  const seamDiscovery = discoverFamilies({ tree: repoCorpus().tree });
+  const seamFiles = gateFamilyFiles();
+  t(
+    'the tree `derive` hands down and the default `gateFamilyFiles` asks for are ONE pass, not two',
+    discoveryPassCount() === passesBeforeSeam && seamDiscovery === warmDiscovery && seamFiles.size > 0,
+    `passes before ${passesBeforeSeam}, after ${discoveryPassCount()}, gate files ${seamFiles.size}`,
+  );
+  // A DIFFERENT tree object, built from the very same listing: identical
+  // content, and still its own pass. Content is not the key — the object is —
+  // because a caller that built its own bundle is asking about ITS tree.
+  const twinTree = watchHintTree(repoCorpus().files);
+  const passesBeforeTwin = discoveryPassCount();
+  const twinDiscovery = discoverFamilies({ tree: twinTree });
+  t(
+    'a tree object that is not the corpus’s is never served its answer — same content, its own pass',
+    discoveryPassCount() === passesBeforeTwin + 1 && twinDiscovery !== warmDiscovery,
+    `passes before ${passesBeforeTwin}, after ${discoveryPassCount()}`,
+  );
+  // The no-tree probe is not an object, so it cannot be a key at all — and a
+  // memo that tried would throw rather than answer. It computes every time.
+  const passesBeforeNull = discoveryPassCount();
+  const nullDiscovery = discoverFamilies({ tree: null });
+  t(
+    'the no-tree probe is never memoised — it is not an object, and it still answers',
+    discoveryPassCount() === passesBeforeNull + 1 && nullDiscovery !== warmDiscovery && nullDiscovery.byCheck.size > 0,
+    `passes before ${passesBeforeNull}, after ${discoveryPassCount()}`,
+  );
 
   // ── The reachability sweep — the third verdict (#9883) ────────────────────
   //

@@ -31,6 +31,28 @@
  * for this same file) — see #14281 for the reading that motivated this
  * section.
  *
+ * ## What #18201 changed about that, and what it did NOT
+ *
+ * The section above was written against a battery that spent most of its wall
+ * clock discovering the SAME tree over and over: a profile of it found every
+ * child derivation running the discovery twice, and the live cases in the
+ * parent driving it a further twenty-odd times, each pass re-reading every
+ * workflow and re-masking every gate source for bytes that had not changed.
+ * #18201 collapsed those to one pass per tree per process — ⛔ not one case
+ * fewer, ⛔ not one assertion weaker, and the tool's output byte-identical.
+ * The battery now fits inside a quiet container's cap with room to spare, and
+ * the figures for it belong to that card and its PR rather than to this
+ * paragraph.
+ *
+ * ⛔ That is NOT a licence to drop the detached form. The cap is a property of
+ * the CALLER's container and the margin is a property of how contended it is,
+ * neither of which this file can see — and an agent box runs several agents
+ * at once. So: detached is still the form that cannot be cut off, and the
+ * `result.signal` branch below now spends its one chance on the remedy rather
+ * than on naming the signal. What the collapse bought is that a foreground run
+ * on a quiet box reaches a verdict at all, where before it could only ever be
+ * killed.
+ *
  * ## Why the gate exists
  *
  * scripts/pm/dispatch-gates.mjs derives the "local gates for this card" line of
@@ -201,14 +223,41 @@ const SURFACE_MODULE = 'scripts/i18n-bundle-surface.mjs';
  */
 const FRAME_MODULE = 'scripts/check-skill-frame-sync.mjs';
 
+const started = Date.now();
 const result = spawnSync(process.execPath, [join(ROOT, TOOL), '--self-test'], { stdio: 'inherit' });
+/**
+ * What the battery cost on THIS box, printed rather than frozen anywhere.
+ *
+ * The header above refuses to carry a figure and says why: a reading belongs
+ * to a named commit, not to a comment. A reading taken at RUN TIME belongs to
+ * the run that took it, which is the one shape that cannot rot — and it is
+ * what a caller needs, because the cap this file's first section is about is
+ * a property of the caller's container and not of this battery.
+ */
+const seconds = ((Date.now() - started) / 1000).toFixed(1);
 
 if (result.error) {
   console.error(`✗ check:pm-dispatch-gates: could not run ${TOOL} — ${result.error.message}`);
   process.exit(2);
 }
 if (result.signal) {
-  console.error(`✗ check:pm-dispatch-gates: ${TOOL} --self-test was killed by ${result.signal}.`);
+  // ⛔ A kill is NOT a verdict, and this branch is the only place that can
+  // say so before a reader reaches for the cases that did print. It answers
+  // the question a killed caller actually has — what do I do now — rather
+  // than naming the signal and stopping, which is what it used to do.
+  console.error(
+    `✗ check:pm-dispatch-gates: ${TOOL} --self-test was killed by ${result.signal} after ${seconds}s — NOTHING was measured.`,
+  );
+  console.error(
+    '  Every case decided before the kill is in the output above and every case after it is unjudged, so this run' +
+      ' grades neither the tool nor your diff. ⛔ Do not record it as a run.',
+  );
+  console.error(
+    "  Remedy — detach it and read the log, the invocation this file's header prescribes for a capped container:",
+  );
+  console.error('      nohup pnpm check:pm-dispatch-gates > pm-dispatch-gates.log 2>&1 &');
+  console.error('  then tail that log until it stops growing. CI runs this step with no such cap.');
   process.exit(2);
 }
+console.error(`check:pm-dispatch-gates: the battery took ${seconds}s on this box.`);
 process.exit(result.status ?? 2);
