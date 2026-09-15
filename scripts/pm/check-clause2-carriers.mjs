@@ -310,7 +310,7 @@
  * `references/contract-review.md` now names the record: ONE comment on the PR
  * or its card, in the shape the tier verdict already has minus the tier line —
  * 「复核记录 = 一条评论落 PR 或卡,达档与默认档同形」, 「同形 = `## Contract
- * review` 题头、所审 head sha 码段、①②③ 逐项、独立性对、PASS/FAIL 判词」 — and
+ * review` 题头、所审 head sha 独占码段、①②③ 逐项、独立性对、PASS/FAIL」 — and
  * makes every clear cite it (「凡清标同笔留 provenance 评论,引记录 id 与所判
  * head」, 「清标缺引记录即半态」). C6 is the machine half of that sentence: on a
  * pair in the COMPLETED state (declared `yes`, cleared on both carriers, head
@@ -713,6 +713,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '#17098: a key-INITIAL line that DESCRIBES the spelling — the half the fixture did not cover': 48,
   '#17959: POSITION is the LINE, not the body — the merged #17819 specimen in both its shapes': 10,
   '#18042: the copyable record TEMPLATE — the one machine-read artefact with nothing to copy': 24,
+  '#18141: the head sha sits in a span of ITS OWN — the key-in-span spelling, refused and NAMED': 19,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -722,8 +723,8 @@ const SELF_TEST_BATTERIES = Object.freeze({
 // existing slack is preserved rather than tightened or loosened as a side
 // effect, and once more by the one #17149 adds, by the one #17098 adds, by the
 // one #17915 adds, by the one #17959 adds, by the one #18042 adds, and by the
-// one #18174 adds.
-const SELF_TEST_BATTERY_FLOOR = 23;
+// one #18174 adds, and by the one #18141 adds.
+const SELF_TEST_BATTERY_FLOOR = 24;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -2909,6 +2910,64 @@ export function reviewOfRecord(pair) {
 }
 
 /**
+ * The key-and-sha-in-ONE-span spelling -- the shape `H51_SHA_SPAN` cannot read.
+ *
+ * The key is the one `contractReviewRecordLines` prints, and the self-test
+ * derives its fixture by collapsing THAT line rather than retyping the key, so
+ * a template that renamed it reds here instead of drifting silently.
+ */
+export const HEAD_KEY_IN_SPAN = /`\s*Head-sha\s*:\s*([0-9a-fA-F]{7,40})\s*`/;
+
+/**
+ * The refused spelling, NAMED where the absence is reported (#18141).
+ *
+ * ⛔ A DIAGNOSIS, never a second accepted spelling. `H51_SHA_SPAN` matches a
+ * span that is hex and nothing else, so a record writing its head as
+ * `Head-sha: …` inside ONE span names no head, and a complete review written
+ * that way reads exactly like a pair that was never reviewed at all. That was
+ * the trap: `references/contract-review.md` :28 said 「head sha 码段」 and never
+ * that the span holds the sha ALONE, so a seat reading it in good faith wrote
+ * the refused spelling. The prose now says 「独占码段」 and this function is its
+ * machine half -- read only AFTER the locator has answered `absent`, choosing
+ * no comment and admitting none, so the accept set stays exactly one spelling.
+ * What it buys is the seat's next edit: 「no record at all」 and 「a record whose
+ * span carries the key」 stop printing the same sentence.
+ *
+ * ⛔ A comment the locator can already read is never this finding, whichever
+ * span carried the head -- measured on the live corpus specimen (PR #17986's
+ * comment 5652813288), whose `Head-sha:` span names nothing but which is still
+ * FOUND today, because its prose happens to quote the head in a bare span of
+ * its own. The defect is the spelling, not that comment.
+ *
+ * @returns {{ where: 'PR'|'card', id: number|null, sha: string, at: string|null } | null}
+ */
+export function headSpanHoldsKey(pair) {
+  const head = String(pair?.headSha ?? '').toLowerCase();
+  if (head.length < H51_SHA_MIN_HEX) return null;
+  const tagged = [
+    ...(Array.isArray(pair?.prComments) ? pair.prComments.map((row) => ({ row, where: 'PR' })) : []),
+    ...(Array.isArray(pair?.cardComments) ? pair.cardComments.map((row) => ({ row, where: 'card' })) : []),
+  ];
+  const keyed = tagged.filter(({ row }) => {
+    const body = String(row?.body ?? '');
+    if (!CONTRACT_REVIEW_HEADING_MARKER.test(body)) return false;
+    if (contractReviewHeadMatch(body, head) !== null) return false;
+    const m = HEAD_KEY_IN_SPAN.exec(body);
+    return m !== null && head.startsWith(m[1].toLowerCase());
+  });
+  // The same newest-of idiom the locator resolves with, never a second one.
+  const newest = latestMarkedComment(keyed.map(({ row }) => row), CONTRACT_REVIEW_HEADING_MARKER);
+  if (!newest) return null;
+  const { row, where } = keyed[newest.index];
+  return {
+    where,
+    id: row?.id ?? null,
+    sha: HEAD_KEY_IN_SPAN.exec(String(row?.body ?? ''))[1],
+    at: row?.created_at ?? null,
+  };
+}
+
+/**
  * C6 -- a gate cleared on both carriers with no review of record on the head.
  *
  * The rule this row carries is the one #17302 landed: the default-tier lanes'
@@ -2936,7 +2995,8 @@ export function c6NoReviewOfRecord(pair) {
   const shape =
     'The record is the comment `references/contract-review.md` names -- 「复核记录 = 一条评论落 PR 或卡,达档与默认档' +
     '同形」 -- read here in H51\'s measured shape: a level-2 heading beginning `## Contract review`, this head\'s sha ' +
-    'as a code span, and a `Reviewed-by:` line naming the reviewer. Existing tier verdicts already carry all three; a ' +
+    'as a code span of ITS OWN (「所审 head sha 独占码段」: a span carrying the key as well is not a sha and names no ' +
+    'head), and a `Reviewed-by:` line naming the reviewer. Existing tier verdicts already carry all three; a ' +
     'dev\'s own report, or an ACCEPT paragraph with the head and the line but no heading, is not one -- and ' +
     '「清标缺引记录即半态」.';
   const boundary =
@@ -2953,10 +3013,29 @@ export function c6NoReviewOfRecord(pair) {
       `and cites it in the provenance comment beside the clear. ${boundary} ${NEVER_WRITES}`
     );
   }
-  return (
+  const read =
     `${head} -- and NO review of record exists on this head: ${v.read.pr} comment(s) on the PR thread and ` +
     `${v.read.card} on the card were read, and none is a \`## Contract review\` comment naming \`${short}\` with a ` +
-    '`Reviewed-by:` line. This is the shape the filing sweep measured five times in one window -- a cleared gate ' +
+    '`Reviewed-by:` line.';
+
+  // The two ways a pair reaches this row print two sentences, because they ask
+  // two different things of the seat: writing a review down, or respelling one
+  // that was already written. ⛔ The spelling is still refused either way.
+  const keyed = headSpanHoldsKey(pair);
+  if (keyed) {
+    return (
+      `${read} ⚠️ The SPELLING is why, and this pair is NOT the empty case: the ${keyed.where} thread's ` +
+      `${keyed.id ? `comment ${keyed.id}` : 'comment carrying no readable id'} (${keyed.at ?? 'undated'}) carries ` +
+      `the heading and writes this head INSIDE one code span, as \`Head-sha: ${keyed.sha}\`. A span is read as a ` +
+      'sha only when it is hex and nothing else, so a span carrying the key as well names no head, and a complete ' +
+      `review written that way reads here exactly like no review at all. ${shape} Remedy: the reviewing seat ` +
+      'reposts the record with the key OUTSIDE the span and the sha in a span of its OWN -- `--template` prints ' +
+      'the whole record -- and cites it in the provenance comment beside the clear. ' +
+      `${boundary} ${NEVER_WRITES}`
+    );
+  }
+  return (
+    `${read} This is the shape the filing sweep measured five times in one window -- a cleared gate ` +
     `with nothing behind it, indistinguishable from never reviewing. ${shape} Remedy: the owning seat writes down ` +
     'the review it already performed, in that shape, on the PR or the card, and cites it in the provenance comment ' +
     `beside the clear. ${boundary} ${NEVER_WRITES}`
@@ -4968,6 +5047,50 @@ export function selfTest() {
   t('C6 is a FINDING — it rides the exit, not the notes', pairRows(bare({})).some((r) => r.code === 'C6') && pairNotes(bare({})).length === 0);
   t('the offline document serves the PR thread from the same `comments` bag, keyed by the PR number', Array.isArray(pairJsonReader({ pulls: DOC.pulls, comments: { 13910: [] } }).readCardComments('owner/name', 13910)));
   t('…and one it omits reads null — UNJUDGED, ⛔ never a missing record', pairJsonReader({ pulls: DOC.pulls }).readCardComments('owner/name', 13910) === null);
+
+  // -- #18141: the head sha's span holds the sha ALONE -----------------------
+  //
+  // ★ The trap, both halves. `references/contract-review.md` :28 said only
+  // 「head sha 码段」, so a seat reading it in good faith wrote the key and the
+  // sha into ONE span -- the live corpus spelling -- and a span is read as a
+  // sha only when it is hex and nothing else, so that record names no head and
+  // a complete review reads exactly like a pair nobody ever reviewed. The prose
+  // now says 「独占码段」. Here the reader pins that the refused spelling stays
+  // REFUSED -- ⛔ a second accepted spelling would be the trap's twin -- and
+  // that the row NAMES it, so the seat's next act is one respell, not a hunt.
+  battery('#18141: the head sha sits in a span of ITS OWN — the key-in-span spelling, refused and NAMED');
+  // ⛔ Derived by collapsing the TEMPLATE's own line, never retyped: the key the
+  // diagnosis matches is the key `--template` prints, so a template that
+  // renamed it reds here instead of leaving this battery green about nothing.
+  const OWN_SPAN = contractReviewRecordLines({ headSha: HEAD_9AF9, implementedBy: 'claude/issue-13657-x', reviewedBy: RECORD_SESSION }).join('\n');
+  const IN_SPAN = OWN_SPAN.replace(/^([A-Za-z-]+): `([0-9a-fA-F]{7,40})`$/m, '`$1: $2`');
+  const KEYED_ROW = { id: 3401, created_at: '2026-09-01T08:50:00Z', body: IN_SPAN };
+  const NEWER_RECORD = RECORD(HEAD_9AF9, undefined, '2026-09-01T08:55:00Z', 3403);
+  const keyedPair = bare({ prComments: [KEYED_ROW] });
+  const keyedRow = c6NoReviewOfRecord(keyedPair);
+  t('⭐ the template writes the key OUTSIDE the span, and that record names the head', IN_SPAN !== OWN_SPAN && contractReviewHeadMatch(OWN_SPAN, HEAD_9AF9) === HEAD_9AF9);
+  t('⛔ …and the SAME record with the key folded INTO the span names no head — the defect isolated to the fold', contractReviewHeadMatch(IN_SPAN, HEAD_9AF9) === null);
+  t('⛔ so it is not a review of record: the accept set is still exactly one spelling', reviewOfRecord(keyedPair).state === 'absent');
+  t('…and the pair is a C6 row, exactly as if nothing had been written', typeof keyedRow === 'string');
+  t('⭐ but the row NAMES the spelling, quoting the span the seat actually wrote', says(keyedRow, `\`Head-sha: ${HEAD_9AF9}\``) && says(keyedRow, 'comment 3401'));
+  t('…and says WHERE it read it, so the seat opens the right thread', says(keyedRow, 'PR thread'));
+  t('…and prescribes the fix in the rule\'s own words — key outside, sha in a span of its OWN', says(keyedRow, 'in a span of its OWN') && says(keyedRow, '所审 head sha 独占码段'));
+  t('…pointing at the template as the thing to COPY, never a shape to compose', says(keyedRow, '`--template`'));
+  t('⛔ and it is a DIFFERENT sentence from the empty case — the two stopped printing alike', keyedRow !== absentRow && says(absentRow, 'indistinguishable from never reviewing') && !says(absentRow, 'The SPELLING is why'));
+  t('⛔ verdict-agnostic and never writes, exactly like the sentence it stands beside', says(keyedRow, 'PASS half') && says(keyedRow, '自查放行'));
+  t('⛔ a heading-less comment carrying the head is the plain absence, not this diagnosis', headSpanHoldsKey(bare({ cardComments: [CLAIM('Clause-②: yes'), SEAT_ACCEPT] })) === null);
+  t('⛔ a keyed span naming an OLDER head is the plain absence too — this row speaks about THIS head', headSpanHoldsKey(bare({ prComments: [{ ...KEYED_ROW, body: IN_SPAN.replace(HEAD_9AF9, 'facefeed') }] })) === null);
+  t('⛔ and a head too short to match is refused before any of it — unreadable is not a spelling verdict', headSpanHoldsKey(bare({ headSha: 'abc', prComments: [KEYED_ROW] })) === null);
+  t('the NEWEST refused spelling is the one named, when a thread carries two', headSpanHoldsKey(bare({ prComments: [KEYED_ROW, { ...KEYED_ROW, id: 3405, created_at: '2026-09-01T09:10:00Z' }] }))?.id === 3405);
+  // ⭐ The live corpus specimen's own shape: the refused line, and the head
+  // quoted in a bare span somewhere in the prose. It reads FOUND today -- the
+  // spelling is the defect, not that comment -- and this diagnosis stays silent.
+  const RESCUED = { id: 3402, created_at: '2026-09-01T08:51:00Z', body: `${IN_SPAN}\n\nCross-file staleness, searched at \`${HEAD_9AF9}\`.` };
+  t('⭐ the refused line BESIDE a bare sha span elsewhere in the prose reads FOUND — and is not this finding', reviewOfRecord(bare({ prComments: [RESCUED] })).state === 'found' && headSpanHoldsKey(bare({ prComments: [RESCUED] })) === null);
+  t('⭐ a correct record beside a refused one is FOUND, in either arrival order', reviewOfRecord(bare({ prComments: [KEYED_ROW, NEWER_RECORD] })).state === 'found' && reviewOfRecord(bare({ prComments: [RECORD(HEAD_9AF9, undefined, '2026-09-01T08:45:00Z', 3404), KEYED_ROW] })).state === 'found');
+  t('…and the locator chooses the CORRECT one — a refused spelling is never chosen over it, and never chosen at all', locateReviewOfRecord(bare({ prComments: [KEYED_ROW, NEWER_RECORD] })).id === 3403 && locateReviewOfRecord(bare({ prComments: [RECORD(HEAD_9AF9, undefined, '2026-09-01T08:45:00Z', 3404), KEYED_ROW] })).id === 3404);
+  t('…so no C6 row and no spelling sentence on a pair that has a real record', c6NoReviewOfRecord(bare({ prComments: [KEYED_ROW, NEWER_RECORD] })) === null);
+  t('the PROSE, the template and the reader name ONE spelling — and the template still round-trips', says(keyedRow, '独占码段') && contractReviewHeadMatch(contractReviewTemplateLines({ headSha: HEAD_9AF9 }).join('\n'), HEAD_9AF9) === HEAD_9AF9);
 
 
   // -- C7: the tier that SERVED the verdict the strip stands on (#17915) -----
