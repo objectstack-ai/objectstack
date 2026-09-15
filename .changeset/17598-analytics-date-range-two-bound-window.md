@@ -1,6 +1,8 @@
 ---
 "@objectstack/spec": minor
 "@objectstack/core": minor
+"@objectstack/types": patch
+"@objectstack/rest": patch
 ---
 
 fix(spec)!: `timeDimensions[].dateRange`'s array arm is exactly two string bounds, and each refusal ORIGIN gets a true sentence (#17598; ruling A, decision batch #117 item 3)
@@ -9,10 +11,14 @@ fix(spec)!: `timeDimensions[].dateRange`'s array arm is exactly two string bound
 
 **BREAKING** accept-set narrowing at `timeDimensions[].dateRange` — shipped as
 `minor` under this repo's launch-window convention for breaking changes
-(`scripts/check-changeset-no-major.mjs`), which is the grade that convention
-prescribes rather than the grade a precedent set: the string-arm closing on this
-same schema (#16322) declared `"@objectstack/spec": patch`, so `minor` here RAISES
-the level above the `fix` floor rather than repeating what came before. The maintainer
+(`scripts/check-changeset-no-major.mjs`), above the `patch` floor the `fix`
+commit type sets, and the same grade the one comparable precedent took: the
+STRING-arm closing on this same schema is #16041, and it shipped
+`"@objectstack/spec": minor` (`packages/spec/CHANGELOG.md` 17.4.0, under Minor
+Changes). ⚠️ Its driver half #16322 declares `"@objectstack/spec": patch`, but
+that entry is — in that changeset's own words — "a `PROVENANCE_WAIVERS` row
+only", not an accept-set narrowing, so it is not a grade this one is measured
+against. The maintainer
 ruling calls it a "major changeset"; under the launch window that phrase maps to
 the protocol MAJOR the migration registers against (18), not to the changeset's
 bump level, which `scripts/check-changeset-no-major.mjs` reserves. The semantic
@@ -68,3 +74,17 @@ and it was refused past the schema, not at it — which is why
 leaving one condition with two wordings. The origin is now a parameter and the
 `received …` clause names the arity and the bad bound separately, so the sentence
 is true for each origin both before and after the arm narrows.
+
+The same rule reaches the WIRE. Narrowing the arm to a tuple gave the union a
+second voice: its arm answers `Too small: expected array to have >=2 items` for
+the very arity the prescription just prescribed, and the ADR-0114 union
+expansion emitted both as `fields[]` entries on `POST /analytics/query` and
+`POST /analytics/dataset/query`. `fieldsFromZodIssues` (`@objectstack/types`),
+the one mapper both doors report through, now drops the branch issues that land
+at the union's OWN path for this refusal — recognised structurally through
+`isAnalyticsDateRangeRefusalIssue`, never by message prose. A refusal that names
+a DEEPER position keeps it: `dateRange: ['2026-01-01', 3]` still reports
+`timeDimensions.0.dateRange.1`, because WHICH bound is not a string is a
+location the prescription does not carry. Every other union expands exactly as
+before. Client-visible effect: one `fields[]` entry for an arity refusal instead
+of two, with the prescriptive one kept.

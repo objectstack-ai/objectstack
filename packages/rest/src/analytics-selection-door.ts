@@ -83,9 +83,11 @@
  * the wire with ONE wording rather than the prescription followed by zod's
  * `Too small: expected array to have >=2 items`. That collapse lives in the one
  * mapper both analytics doors share, ⛔ never as a second copy here — which is
- * why this door reads the wrapper rather than the raw D3 function. Field paths
- * are prefixed `selection.` because they are reported against the REQUEST
- * body, where the parsed object sits one level down.
+ * why this door reads the wrapper rather than the raw D3 function. (The rename
+ * is inert here: the projection is always an object built from declared members
+ * only, so no issue of this parse lands at the root.) Field paths are prefixed
+ * `selection.` because they are reported against the REQUEST body, where the
+ * parsed object sits one level down.
  *
  * Validation-only: the caller's `selection` is forwarded to the service
  * untouched, never the parse output — the rule `assertAnalyticsQueryBody`

@@ -141,15 +141,19 @@ export function fieldsFromZodIssues(
  * every other union on every other key expands exactly as it did before —
  * ⛔ union-branch expansion is not suppressed wholesale, here or anywhere.
  *
- * A non-array `path` on a branch issue is left alone rather than read as the
- * root: zod always produces an array, and the conservative reading keeps a junk
- * issue visible instead of silently dropping it.
+ * A non-array `path` is left alone rather than read as the root — on the issue
+ * itself (which also keeps the recogniser, whose `path.length` read assumes
+ * zod's array, off a shape zod never produces) and on a branch issue. Zod
+ * always produces an array; the conservative reading keeps a junk issue visible
+ * instead of silently dropping it, which is the posture `zodIssuesToFields`
+ * takes one package over.
  */
 function withoutDateRangeArityRestatement<
   T extends { path: Array<string | number | symbol>; code: string; message: string },
 >(issue: T): T {
   const errors = (issue as { errors?: unknown }).errors;
-  if (!Array.isArray(errors) || !isAnalyticsDateRangeRefusalIssue(issue)) return issue;
+  if (!Array.isArray(errors) || !Array.isArray(issue?.path)) return issue;
+  if (!isAnalyticsDateRangeRefusalIssue(issue)) return issue;
   return {
     ...issue,
     errors: errors.map((branch: unknown) =>

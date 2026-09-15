@@ -505,6 +505,12 @@ export const AnalyticsDateRangeSchema = z.union(
     // `timeDimensions.N.dateRange` instead of on the two arms' generic texts.
     // That is also what keeps the ARITY refusal a single prescriptive issue
     // rather than the tuple arm's own `too_big` / `too_small` text.
+    // ⚠️ At `error.issues` only. The ADR-0114 wire mapper EXPANDS a failed
+    // union into its branches (#5014), so the arm's arity text reaches a
+    // `fields[]` entry unless something drops it; `fieldsFromZodIssues`
+    // (`@objectstack/types`) does, for the branches at this union's own path,
+    // keyed on {@link isAnalyticsDateRangeRefusalIssue}. ⛔ Do not read this
+    // comment as covering the wire — that half is pinned at both REST doors.
     error: (issue) => (
       issue.code === 'invalid_union' ? analyticsDateRangeRefusalMessage(issue.input, 'schema') : undefined
     ),
