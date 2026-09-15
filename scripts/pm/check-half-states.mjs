@@ -6986,15 +6986,42 @@ export function h32NeedsSeatComments(issue) {
  * measured on the live board while this row was written, H32's gate fetched 4 of
  * 13 open seat posts, and the 9 it skipped included the TRIAGE seat — carrier of
  * the round-open marker that is this card's worked example — and the SKILLS
- * seat. So this gate keeps the `pm:seat` + HELD legs and drops the lane test.
+ * seat. So this gate drops the lane test.
  *
- * The cost is stated where it is paid: +6 comment pages per run at that board.
- * ⛔ H32's population is untouched, and H38 — which inherited the same gate for
- * the same reason — takes this widening under its own card, not here.
+ * ## The HELD leg had the same defect one step further in (#18324)
+ *
+ * ⚠️ The paragraph above names the TRIAGE post as this row's worked example, and
+ * the held leg is exactly what kept the row off it: `seatIsHeld` excludes a
+ * `🟢 Routine` holder BY NAME and every non-🟢 status, while the triage seat runs
+ * as a Routine or sits vacant most of the time. Measured on the live board at
+ * the filing, the post read `[PM seat] triage (objectstack-wide) — 🔴 空缺 …`, so
+ * H44, H56 and H64 read NOTHING on it while H65 — whose own population carries
+ * no held gate — read it every run. A report-only row that cannot see its own
+ * worked example is dead letter, so the triage post is admitted BESIDE the held
+ * leg, never instead of it, through `h65IsTriageSeatPost` — the file's ONE
+ * reading of 「is this the triage post」, reused rather than re-spelled.
+ *
+ * ⛔ It is NOT a vacant-seat posture, and that is MEASURED rather than assumed.
+ * All three rows accuse a COMMENT and name its author; none of them names the
+ * post's current holder, so 「nobody is on the clock」 changes nothing about
+ * whether an artefact on the thread states a reading with no time on it. On the
+ * vacant triage post's newest page (18 comments, 2026-09-10T23:26:55Z →
+ * 2026-09-15T15:54:40Z, read 2026-09-15): H44 files ONE carrier row naming 10
+ * offending comments, H56 files 0 and H64 files 0.
+ *
+ * The cost is stated where it is paid. The lane widening (#14929) was +6 comment
+ * pages per run at that board; this one is ZERO — H65 already buys exactly that
+ * page every run through the same `seatPostRowsFor` memo, so widening this gate
+ * moves WHO asks first and changes no total.
+ *
+ * ⛔ H32's population is untouched by either widening: its subject is an
+ * accusation that a NAMED holder is not working, which is what the held gate is
+ * for and what this row's subject is not. H38 reads H32's population and keeps
+ * it — what #18325 moved there is the WINDOW, not the population.
  */
 export function h44NeedsSeatComments(issue) {
   if (!labelNames(issue ?? {}).includes('pm:seat')) return false;
-  return seatIsHeld(issue);
+  return seatIsHeld(issue) || h65IsTriageSeatPost(issue);
 }
 
 /**
@@ -9581,8 +9608,19 @@ export function h43GovernedReviewRequestGap(pr, governed, approvers, reviewed = 
 // every HELD seat post regardless of lane shape: +6 requests per run at that
 // board, 4 runs a day. ⛔ H32's own population and lane gate are untouched — its
 // exclusion is argued from a lane INVENTORY it cannot count, which is a real
-// argument for H32 and not this row's to overturn. H38 takes the same widening
-// under its own card.
+// argument for H32 and not this row's to overturn.
+//
+// ⚠️ …and the TRIAGE post whether or not it is HELD (#18324). The widening above
+// stopped one leg short: `seatIsHeld` excludes a `🟢 Routine` holder BY NAME and
+// every non-🟢 status, so the post this banner names as the worked example was
+// still unread whenever the triage seat ran as a Routine or sat vacant — which
+// it does most of the time, and did at that filing (`🔴 空缺`). It is admitted
+// through `h65IsTriageSeatPost`, the file's one reading of that question, and it
+// costs NOTHING: H65 buys exactly that page every run through the same memo, so
+// this leg only changes which row asks first. ⛔ Not a vacant-seat posture —
+// these three rows accuse a COMMENT and name its author, never the post's
+// holder. H38 reads H32's population and keeps it; what its own card moved
+// (#18325) is the WINDOW those rows read, not the population.
 //
 // ## The seat-post WINDOW is the thread's NEWEST page, and that is measured
 //
@@ -20116,7 +20154,8 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
   // request returns 2026-08-06 → 2026-08-10, five weeks of archive holding none
   // of the round then running. Every row that reads a seat post's comments —
   // H44, H56 and H64 through the cache, H65 through this memo — was reporting on
-  // that archive.
+  // that archive. (#18324 widened the first of those to the triage post
+  // whatever its holder.)
   //
   // So the page is located from the carrier's own `comments` count, through
   // H65's two exported helpers rather than a second copy of the arithmetic, and
@@ -21760,12 +21799,17 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
   // page」. That is no longer the state of the file: a seat post's cached thread
   // IS its newest page now, filled by H44's seat leg from the same
   // `seatPostRowsFor` memo this row reads, so the two are not looking at
-  // different windows any more. What keeps the row here is the other half of
-  // its population: `h65IsTriageSeatPost` admits a `🟢 Routine` or vacant triage
-  // seat that `h44NeedsSeatComments` excludes by name, so this row must still be
-  // able to BUY, and a purchase belongs where every free read is already done.
-  // Moved above H44 it would also start deciding which posts land in that row's
-  // corpus, which is the widening those headers forbid.
+  // different windows any more. The second half of that argument is spent too
+  // (#18324): `h44NeedsSeatComments` now admits the triage post whether or not
+  // it is held, through this row's own `h65IsTriageSeatPost`, so H44's seat leg
+  // reaches every post in this population and the page is always already
+  // memoised by the time this runs. ⛔ That is not a reason to move the row UP:
+  // a purchase belongs where every free read is already done, the memo is what
+  // makes this row cost nothing WHEREVER it sits, and moved above H44 it would
+  // start deciding which posts land in that row's corpus — the widening those
+  // headers forbid. What it does mean is that the request this row still knows
+  // how to buy is now a FALLBACK rather than the normal path: a triage post the
+  // seat leg failed to read is bought here, and one it read is free.
   const h65Posts = new Map();
   for (const [number, issue] of seenUnscoped) {
     if (h65IsTriageSeatPost(issue)) h65Posts.set(number, issue);
@@ -28893,6 +28937,28 @@ Mutual exclusion: \`get_comments\` page 747 → \`[]\`, page 746 = my own R+117 
   t('H44 gate: a VACANT seat is fetched by neither', h44NeedsSeatComments(seat44('[PM seat] domain:devx — ⏳ vacant')), false);
   t('H44 gate: a non-seat card is out of scope', h44NeedsSeatComments(seat44('[PM seat] domain:spec — 🟢 os-zhuang', ['pm:queue'])), false);
 
+  // ⑦b The TRIAGE leg (#18324) — the post this row's own header names as its
+  // worked example, admitted whatever its holder. ⭐ The four cases below are
+  // the statement that was FALSE before this leg existed: on the live board the
+  // triage seat reads `🔴 空缺` or `🟢 Routine` most of the time, and the held
+  // gate alone excluded both by name.
+  const TRIAGE_VACANT = seat44('[PM seat] triage (objectstack-wide) — 🔴 空缺 · 上一任 session_x 留简报');
+  const TRIAGE_ROUTINE = seat44('[PM seat] triage (objectstack-wide) — 🟢 Routine');
+  t('H44 gate: ⭐ a VACANT triage post IS fetched — the held leg alone made this row dead letter on it', h44NeedsSeatComments(TRIAGE_VACANT), true);
+  t('H44 gate: ⭐ …and a `🟢 Routine` triage post too, which `seatIsHeld` excludes BY NAME', h44NeedsSeatComments(TRIAGE_ROUTINE), true);
+  t('H44 gate: the held leg is what is doing NONE of that work — both are unheld', seatIsHeld(TRIAGE_VACANT) || seatIsHeld(TRIAGE_ROUTINE), false);
+  t('H44 gate: …so the triage leg is the whole of the difference, and it is H65\'s own reading', h65IsTriageSeatPost(TRIAGE_VACANT) && h65IsTriageSeatPost(TRIAGE_ROUTINE), true);
+  // ⛔ The widening is the TRIAGE post and nothing else: an unheld EXECUTION
+  // seat stays out, and H32's population does not move at all.
+  t('H44 gate: ⛔ an unheld `domain:*` seat is still out — the leg is the triage post, not every post', h44NeedsSeatComments(seat44('[PM seat] domain:spec — 🔴 vacant')), false);
+  t('H44 gate: ⛔ …nor does an unheld `repo:*` seat come in', h44NeedsSeatComments(seat44('[PM seat] repo:cloud — ⏳ vacant')), false);
+  t('H44 gate: ⛔ H32 does not follow it onto the vacant triage post', h32NeedsSeatComments(TRIAGE_VACANT), false);
+  t('H44 gate: ⛔ …nor onto the Routine one — that gate is still `pm:seat` + HELD + countable lane', h32NeedsSeatComments(TRIAGE_ROUTINE), false);
+  // What the three rows then REPORT on a vacant post is a reading about the
+  // COMMENT, never about the holder — which is why no vacant-seat posture is
+  // owed. The body below is the shape measured on the live post's newest page.
+  t('H44 gate: …and the row it then files reads the COMMENT, so a vacant holder changes nothing', h44hit('分诊轮收尾 — 本轮 7 open cards 已派完。', true).shape, 'a seat-post section');
+
   // ⑧ Grammar hygiene. A `g` flag would carry `lastIndex` between calls and make
   // this row's answer depend on how many comments preceded it.
   t('H44 grammar: ⛔ no fragment regex is sticky', H44_READING_FRAGMENTS.every((f) => !f.re.global), true);
@@ -31240,7 +31306,15 @@ Doubles as the fire's **write self-check** (step 0). \`201\` is not the reading.
   t('H65 scope: a missing card does not crash', h65IsTriageSeatPost(undefined), false);
   t('H65 scope: ⭐ a `🟢 Routine` triage seat IS in population — the seat runs as a Routine', h65IsTriageSeatPost(seat65('[PM seat] triage (objectstack-wide) — 🟢 Routine')), true);
   t('H65 scope: …and that is exactly what `seatIsHeld` would have excluded by name', seatIsHeld(seat65('[PM seat] triage (objectstack-wide) — 🟢 Routine')), false);
-  t('H65 scope: …so inheriting H44\'s seat gate would have silenced this row', h44NeedsSeatComments(seat65('[PM seat] triage (objectstack-wide) — 🟢 Routine')), false);
+  // ⚠️ REWRITTEN (#18324), not deleted: this case used to read 「…so inheriting
+  // H44's seat gate would have silenced this row」 and pinned that gate at
+  // `false` on a `🟢 Routine` triage post. That is no longer what the file does
+  // — H44's seat leg now admits the triage post through THIS row's predicate —
+  // so the case pins the fact that replaced it. The reason this row does not
+  // inherit that gate is unchanged and is the sentence above: `seatIsHeld` is
+  // about accusing a named holder, and this row's subject is an artefact.
+  t('H65 scope: ⭐ H44\'s seat leg now REACHES the Routine triage post, through this very predicate', h44NeedsSeatComments(seat65('[PM seat] triage (objectstack-wide) — 🟢 Routine')), true);
+  t('H65 scope: …and it is the triage leg carrying it, since the held leg still reads false', seatIsHeld(seat65('[PM seat] triage (objectstack-wide) — 🟢 Routine')), false);
 
   // ⭐ H44 is UNTOUCHED, and the measured reason this row could not lean on it.
   t('H65 adjacency: ⛔ H44\'s round-open regex does NOT match the current marker spelling', H44_ROUND_OPEN_MARKER.test(MARKER65), false);
