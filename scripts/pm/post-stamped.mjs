@@ -759,6 +759,21 @@ const commentCreatedMs = (c) => {
 };
 
 /**
+ * The ONE order the unread window is judged in: `created_at` first, then `id`
+ * for the comments that share one (same-second writes — a batch, a bot). Both
+ * the newest pick and the "landed after" set read THIS comparator, so the two
+ * can never disagree about which comment follows which: a same-second later id
+ * that is the newest is also, necessarily, after the acknowledged one. Judged
+ * on `created_at` alone, it was the newest AND absent from the set — a refusal
+ * whose head counted 0 comments after the very id it was refusing.
+ *
+ * `id` breaks only an exact tie, so it never outranks the clock; comments whose
+ * `created_at` is unreadable share one instant (+∞) and are ordered by id, the
+ * same tie the sort already resolved that way.
+ */
+const byCommentOrder = (a, b) => commentCreatedMs(a) - commentCreatedMs(b) || Number(a?.id) - Number(b?.id);
+
+/**
  * Whether this refresh may write over the card's comment tail. Pure: the
  * caller hands in the stored body and the comments it fetched; the population
  * judged is every comment CREATED at or after the minute of the newest stamp in
@@ -777,7 +792,7 @@ export function unreadComments({ storedBody, comments, ackThrough = null }) {
   const all = Array.isArray(comments) ? comments : [];
   const newer = all
     .filter((c) => since.from === null || commentCreatedMs(c) >= since.from)
-    .sort((a, b) => commentCreatedMs(a) - commentCreatedMs(b) || Number(a?.id) - Number(b?.id));
+    .sort(byCommentOrder);
   const newest = newer.length > 0 ? newer[newer.length - 1] : null;
   const base = { since, newer, newest, ackThrough };
   if (newer.length === 0) return { ...base, ok: true, kind: 'none-newer', after: [] };
@@ -785,8 +800,7 @@ export function unreadComments({ storedBody, comments, ackThrough = null }) {
   if (Number(newest.id) === Number(ackThrough)) return { ...base, ok: true, kind: 'acknowledged', after: [] };
   const named = all.find((c) => Number(c?.id) === Number(ackThrough));
   if (!named) return { ...base, ok: false, kind: 'ack-unknown', after: newer };
-  const namedAt = commentCreatedMs(named);
-  return { ...base, ok: false, kind: 'ack-not-newest', after: newer.filter((c) => commentCreatedMs(c) > namedAt) };
+  return { ...base, ok: false, kind: 'ack-not-newest', after: newer.filter((c) => byCommentOrder(c, named) > 0) };
 }
 
 const commentRow = (c, i) => {
@@ -1195,7 +1209,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the substitution: one clock, read once, written everywhere': 9,
   'the read-back: what the transcript can actually prove': 11,
   'the CLI: the one decision a typo must never make': 16,
-  'the unread-knock check: a refresh cannot void what nobody read': 41,
+  'the unread-knock check: a refresh cannot void what nobody read': 49,
   'the shared rule: this tool and H56 cannot come to disagree': 6,
 });
 const SELF_TEST_BATTERY_FLOOR = 10;
@@ -1501,6 +1515,25 @@ export function selfTest() {
   t('a body with NO stamp stays distinguishable from one with only unreal stamps', lastWriteStamp('nothing stamped').unreal.length === 0 && lastWriteStamp(ROLLED_BODY).unreal.length === 1);
   t('lastWriteStamp always answers an object, so no caller can read a null as "no stamp problem"', lastWriteStamp('nothing stamped').stamp === null && Array.isArray(lastWriteStamp('nothing stamped').unreal));
   t('the pass line names what was measured against', unreadPassText(control).includes('2026-09-12T10:00Z'));
+
+  // The post-stamped reading, second one: two comments written inside ONE
+  // second (a batch, a bot). `newest` breaks that tie on `id`, so the LOWER id
+  // is not the newest and the refresh is rightly refused — but the "landed
+  // after" set was derived from `created_at` ALONE, so the refusal's head
+  // counted 0 comment(s) after the very id it was refusing and listed none of
+  // them: a count contradicting the refusal it sits in. One comparator answers
+  // both now.
+  const PAIR_LOW = { id: 5679000100, created_at: '2026-09-12T11:00:00Z', user: { login: 'engine-seat' }, body: 'batch write, first' };
+  const PAIR_HIGH = { id: 5679000101, created_at: '2026-09-12T11:00:00Z', user: { login: 'engine-seat' }, body: 'batch write, second' };
+  const sameSecond = unreadComments({ storedBody: SEAT_BODY, comments: [PAIR_LOW, PAIR_HIGH], ackThrough: 5679000100 });
+  t('⭐ THE FILED READING: same-second comments, the ack naming the LOWER id ⇒ refused as ack-not-newest', sameSecond.ok === false && sameSecond.kind === 'ack-not-newest');
+  t('…and the later id COUNTS as after it — the count no longer contradicts the refusal it sits in', sameSecond.after.length === 1 && sameSecond.after[0].id === 5679000101, `after=${JSON.stringify(sameSecond.after.map((c) => c.id))}`);
+  t('…so the refusal head reads 1, not 0', unreadRefusalText(sameSecond, 18295).includes('1 comment(s) landed after it'));
+  t('…and lists that comment, so the seat reads it rather than a count', unreadRefusalText(sameSecond, 18295).includes('5679000101 · 2026-09-12T11:00:00Z · engine-seat'));
+  t('…the newest pick and the after set read ONE order: whoever is newest is in the set the refusal lists', sameSecond.newest.id === 5679000101 && sameSecond.after.some((c) => Number(c.id) === Number(sameSecond.newest.id)));
+  t('⭐ THE CONTROL, UNCHANGED: an ordinary later-SECOND comment is after the acknowledged one exactly as before', stale.kind === 'ack-not-newest' && stale.after.length === 1 && stale.after[0].id === 5648793698);
+  t('⭐ same second, the ack naming the HIGHER id ⇒ cleared, it IS the newest', unreadComments({ storedBody: SEAT_BODY, comments: [PAIR_LOW, PAIR_HIGH], ackThrough: 5679000101 }).kind === 'acknowledged');
+  t('…and the ack naming the newest still clears in the ordinary case too', unreadComments({ storedBody: SEAT_BODY, comments: [OLDER, KNOCK], ackThrough: 5646143629 }).ok === true);
 
   battery('the shared rule: this tool and H56 cannot come to disagree');
   t('⭐ the positions this tool refuses are the ones H56 reads — one imported reader, never two', h56StampedReadings(maskQuotedStamps(OPENING)).length === 1);
