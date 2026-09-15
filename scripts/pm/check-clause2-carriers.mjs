@@ -4048,8 +4048,8 @@ function renderPair(pair, repo, pairs = null) {
               'both carriers agree'
             : 'readable in the fixed spelling and both carriers agree') +
         (record
-          ? ', and a review of record names this head (the note above says which comment to cite; ' +
-            'existence, not the verdict)'
+          ? ', and a review of record names this head (the note above says which comment it is, and ' +
+            'whether this pair owes anything about it; existence, not the verdict)'
           : '') +
         (widening.state === 'clean'
           ? ', and its diff carries no widening tell. ⚠️ A tell is not a proof and its absence is not one either.'
