@@ -792,9 +792,6 @@ export class ObjectKernel {
                 success: true,
                 pluginName: plugin.name,
                 durationMs: duration,
-                // Deprecated alias carrying the same elapsed value; see
-                // PluginStartupResult.startTime.
-                startTime: duration,
             };
         } catch (error) {
             const duration = Date.now() - startTime;
@@ -805,9 +802,6 @@ export class ObjectKernel {
                 pluginName: plugin.name,
                 error: error as Error,
                 durationMs: duration,
-                // Deprecated alias carrying the same elapsed value; see
-                // PluginStartupResult.startTime.
-                startTime: duration,
                 timedOut: isTimeout,
             };
         }

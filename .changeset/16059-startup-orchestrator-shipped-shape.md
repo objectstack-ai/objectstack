@@ -47,14 +47,24 @@ cannot drift again.
 | `pluginName` | absent | `string`, required |
 | `success` | `boolean`, required | unchanged |
 | `durationMs` | `number`, **required** | `number`, **optional** (absent when the plugin declares no `start()`) |
-| `startTime` | absent | `number`, optional — deprecated alias of `durationMs`, mirrored because the kernel still populates it |
+| `startTime` | absent (it was core's own deprecated alias) | **removed** — read `durationMs`, which always carried the same value |
 | `error` | serializable projection | unchanged (a thrown `Error` satisfies it) |
 | `timedOut` | absent | `boolean`, optional — set when the failure was the timeout |
 | `health: HealthStatus` | optional | **removed** — no probe ever filled it |
 
-**The one-line fix:** rename `plugin: { name }` to `pluginName`, and delete `health`. Both
-old spellings are `retiredKey()` tombstones on the surviving schema, so each is a `tsc`
-error at the construction site and a parse error carrying the prescription.
+**The one-line fix:** rename `plugin: { name }` to `pluginName`, delete `health`, and read
+`durationMs` wherever you read `startTime`. All three old spellings are `retiredKey()`
+tombstones on the surviving schema, so each is a `tsc` error at the construction site and a
+parse error carrying the prescription.
+
+`startTime` is the one member whose removal a reader can OBSERVE: `@objectstack/core`
+populated it beside `durationMs` with the identical elapsed value, under its own ADR-0087
+L1 deprecation, and `ObjectKernel.startPluginWithTimeout()` stops setting it here. Mirroring
+it on the contract was the alternative and the tree refuses it — `check:duration-unit-keys`
+(ruling B on #14478) fails an elapsed number whose key name carries no unit, and neither of
+that rule's two schema-declared exemptions fits: it is not an `EpochMs` instant and it
+mirrors no external standard. Renaming it to `startTimeMs` would mint a spelling nothing has
+ever produced, for a member already documented as slated for removal.
 
 For `@objectstack/core` consumers the members are unchanged; the one narrowing is that
 `PluginStartupResult.error` is now typed as the serializable projection

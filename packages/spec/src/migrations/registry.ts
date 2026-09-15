@@ -10662,7 +10662,14 @@ const step18: MigrationStep = {
         + 'plus this entry ARE the declaration. The two keys of the SURVIVING result '
         + 'schema that leave (plugin, health) are tombstoned instead, and registered '
         + 'in RETIRED_KEYS_BY_MAJOR, because that def keeps emitting and its type is '
-        + 'imported by @objectstack/core.',
+        + 'imported by @objectstack/core. A third key arrives on the spec surface only '
+        + 'to leave it: core deprecated startTime alias, which held the same elapsed '
+        + 'milliseconds as durationMs under a name that promises an instant. The '
+        + 're-declaration had to either mirror it or tombstone it, and mirroring is '
+        + 'refused by check:duration-unit-keys (ruling B on #14478) since it is an '
+        + 'elapsed number whose key name carries no unit and matches neither of that '
+        + 'rule two schema-declared exemptions. So the L1 window closes here and the '
+        + 'kernel stops populating it in the same change.',
       acceptanceCriteria:
         'No code imports any of the 8 retired names from @objectstack/spec, '
         + '@objectstack/spec/kernel or @objectstack/spec/contracts — every one is '
@@ -10672,12 +10679,15 @@ const step18: MigrationStep = {
         + 'binding, a stack collection or a manifest embed, so no authored document '
         + 'could ever carry one. PluginStartupResult SURVIVES on both entries with '
         + 'the shape the kernel ships — pluginName, success, optional durationMs, the '
-        + 'deprecated startTime alias, the serializable error projection, timedOut — '
-        + 'and @objectstack/core now imports that type instead of declaring a twin, '
-        + 'so the drift cannot recur. Writing plugin or health on a PluginStartupResult '
-        + 'is a tsc error and a parse error carrying the rename or the deletion. '
-        + 'Runtime behaviour is deliberately UNCHANGED: nothing ever read the retired '
-        + 'surfaces, and the kernel boot loop is untouched.',
+        + 'serializable error projection, timedOut — and @objectstack/core now imports '
+        + 'that type instead of declaring a twin, so the drift cannot recur. Writing '
+        + 'plugin, health or startTime on a PluginStartupResult is a tsc error and a '
+        + 'parse error carrying the rename or the deletion; a reader of the removed '
+        + 'startTime alias reads durationMs, which has always carried the same value. '
+        + 'Runtime behaviour is unchanged except for that one alias: nothing ever read '
+        + 'the retired ORCHESTRATION surfaces, the kernel boot loop is untouched, and '
+        + 'the only observable difference is that a startup result no longer carries '
+        + 'startTime beside durationMs.',
     },
     {
       id: 'strategy-context-aggregation-method-narrowed',
@@ -13602,6 +13612,18 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // `@objectstack/core`, so a construction site still writing `plugin` meets the
     // prescription through tsc as well as through a parse.
     'kernel/PluginStartupResult:plugin',
+    // #16059 — `PluginStartupResult.startTime` was `@objectstack/core`'s own
+    // ADR-0087 L1 alias: the kernel set it to the SAME elapsed milliseconds as
+    // `durationMs`, under a name that promises an instant. It arrives on the spec's
+    // surface only to leave it, because the re-declaration of this schema against
+    // the shipped shape had to choose between mirroring the member and tombstoning
+    // it, and mirroring is refused by `check:duration-unit-keys` (ruling B on
+    // #14478): an elapsed number whose key name carries no unit, matching neither
+    // of that rule's two schema-declared exemptions — not an `EpochMs` instant, not
+    // an external-standard mirror. Renaming it to `startTimeMs` would mint a
+    // spelling nothing ever produced for a member already slated for removal, so
+    // the alias ends here and the kernel stops populating it in the same change.
+    'kernel/PluginStartupResult:startTime',
     // #15939 ruling A (per-file remediation of #14478 ruling B). This is the fifth
     // duration on `kernel/plugin-security-advanced.zod.ts` and the one #15678
     // deliberately left alone: `resourceLimits.timeout` said "Execution timeout in

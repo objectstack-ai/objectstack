@@ -53,7 +53,14 @@ export const entry: SemanticMigration = {
     + 'plus this entry ARE the declaration. The two keys of the SURVIVING result '
     + 'schema that leave (plugin, health) are tombstoned instead, and registered '
     + 'in RETIRED_KEYS_BY_MAJOR, because that def keeps emitting and its type is '
-    + 'imported by @objectstack/core.',
+    + 'imported by @objectstack/core. A third key arrives on the spec surface only '
+    + 'to leave it: core deprecated startTime alias, which held the same elapsed '
+    + 'milliseconds as durationMs under a name that promises an instant. The '
+    + 're-declaration had to either mirror it or tombstone it, and mirroring is '
+    + 'refused by check:duration-unit-keys (ruling B on #14478) since it is an '
+    + 'elapsed number whose key name carries no unit and matches neither of that '
+    + 'rule two schema-declared exemptions. So the L1 window closes here and the '
+    + 'kernel stops populating it in the same change.',
   acceptanceCriteria:
     'No code imports any of the 8 retired names from @objectstack/spec, '
     + '@objectstack/spec/kernel or @objectstack/spec/contracts — every one is '
@@ -63,10 +70,13 @@ export const entry: SemanticMigration = {
     + 'binding, a stack collection or a manifest embed, so no authored document '
     + 'could ever carry one. PluginStartupResult SURVIVES on both entries with '
     + 'the shape the kernel ships — pluginName, success, optional durationMs, the '
-    + 'deprecated startTime alias, the serializable error projection, timedOut — '
-    + 'and @objectstack/core now imports that type instead of declaring a twin, '
-    + 'so the drift cannot recur. Writing plugin or health on a PluginStartupResult '
-    + 'is a tsc error and a parse error carrying the rename or the deletion. '
-    + 'Runtime behaviour is deliberately UNCHANGED: nothing ever read the retired '
-    + 'surfaces, and the kernel boot loop is untouched.',
+    + 'serializable error projection, timedOut — and @objectstack/core now imports '
+    + 'that type instead of declaring a twin, so the drift cannot recur. Writing '
+    + 'plugin, health or startTime on a PluginStartupResult is a tsc error and a '
+    + 'parse error carrying the rename or the deletion; a reader of the removed '
+    + 'startTime alias reads durationMs, which has always carried the same value. '
+    + 'Runtime behaviour is unchanged except for that one alias: nothing ever read '
+    + 'the retired ORCHESTRATION surfaces, the kernel boot loop is untouched, and '
+    + 'the only observable difference is that a startup result no longer carries '
+    + 'startTime beside durationMs.',
 };

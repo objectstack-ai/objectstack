@@ -117,12 +117,14 @@ describe('[#16059] startup orchestrator retirement', () => {
     // asserts the shape here too, so the reason is named at the spec end.
     const { PluginStartupResultSchema } = await import('./startup-orchestrator.zod');
     const shape = (PluginStartupResultSchema as unknown as { shape: Record<string, unknown> }).shape;
-    for (const member of ['pluginName', 'success', 'durationMs', 'startTime', 'error', 'timedOut']) {
+    for (const member of ['pluginName', 'success', 'durationMs', 'error', 'timedOut']) {
       expect(Object.keys(shape), `${member} must be declared`).toContain(member);
     }
-    // The two members that left the surviving def are tombstones, not
-    // deletions — present in the shape, refusing with a prescription.
-    for (const member of ['plugin', 'health', 'duration']) {
+    // The members that left the surviving def are tombstones, not deletions —
+    // present in the shape, refusing with a prescription. `startTime` is here
+    // rather than above on purpose: mirroring the deprecated alias is what
+    // `check:duration-unit-keys` refuses, so the contract ends it instead.
+    for (const member of ['plugin', 'health', 'startTime', 'duration']) {
       expect(Object.keys(shape), `${member} must remain as a tombstone`).toContain(member);
     }
   });

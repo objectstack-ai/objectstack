@@ -583,7 +583,7 @@
     "kernel/PluginStartupResult:health [RETIRED]",
     "kernel/PluginStartupResult:plugin [RETIRED]",
     "kernel/PluginStartupResult:pluginName",
-    "kernel/PluginStartupResult:startTime",
+    "kernel/PluginStartupResult:startTime [RETIRED]",
     "kernel/PluginStartupResult:success",
     "kernel/PluginStartupResult:timedOut",
     "kernel/PluginStateSnapshot:metadata",

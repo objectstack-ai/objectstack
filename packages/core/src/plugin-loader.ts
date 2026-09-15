@@ -99,12 +99,18 @@ export interface PluginLoadResult {
  * SCHEMA against what this package actually ships and made the type flow one
  * way — spec to core — so the two cannot drift apart again.
  *
- * The shape is unchanged for every producer and reader here: `pluginName`,
- * `success`, optional `durationMs`, the deprecated `startTime` alias,
- * `timedOut`, and `error` — declared by the spec as the serializable projection
- * (`name` / `message` / `stack` / `code`) that a thrown `Error` satisfies
- * structurally, so `ObjectKernel` keeps handing the live instance through and
- * `instanceof Error` keeps narrowing at the read site.
+ * The members carry over unchanged — `pluginName`, `success`, optional
+ * `durationMs`, `timedOut`, and `error`, which the spec declares as the
+ * serializable projection (`name` / `message` / `stack` / `code`) that a thrown
+ * `Error` satisfies structurally, so `ObjectKernel` keeps handing the live
+ * instance through and `instanceof Error` keeps narrowing at the read site.
+ *
+ * One member does NOT carry over: the deprecated `startTime` alias, which held
+ * the same elapsed milliseconds as `durationMs` under a name that promises an
+ * instant. The spec tombstones it rather than mirroring it —
+ * `check:duration-unit-keys` refuses an elapsed number whose key name carries
+ * no unit, and neither of that rule's schema-declared exemptions fits — so the
+ * L1 window closes here and `ObjectKernel` no longer populates it.
  */
 export type { PluginStartupResult } from '@objectstack/spec/kernel';
 

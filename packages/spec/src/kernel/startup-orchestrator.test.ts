@@ -17,21 +17,14 @@ describe('PluginStartupResultSchema — the shape the kernel produces', () => {
     expect(result.success).toBe(true);
   });
 
-  it('accepts the success path: durationMs plus the deprecated startTime alias', () => {
+  it('accepts the success path: durationMs alone', () => {
     const result = PluginStartupResultSchema.safeParse({
       pluginName: 'crm-plugin',
       success: true,
       durationMs: 1250,
-      startTime: 1250,
     });
     expect(result.success).toBe(true);
-    if (result.success) {
-      expect(result.data.durationMs).toBe(1250);
-      // The kernel populates both with the SAME elapsed value under its
-      // ADR-0087 L1 disposition; the contract mirrors that rather than
-      // declaring `never` for a member the kernel emits.
-      expect(result.data.startTime).toBe(result.data.durationMs);
-    }
+    if (result.success) expect(result.data.durationMs).toBe(1250);
   });
 
   it('accepts the failure path: the serializable error projection', () => {
@@ -110,6 +103,22 @@ describe('[#16059] the re-declared result refuses the members it dropped', () =>
     expect(issue).toBeDefined();
     expect(issue!.code).not.toBe('unrecognized_keys');
     expect(issue!.message).toContain('Replace the key with `pluginName`');
+  });
+
+  it('REFUSES the deprecated `startTime` alias and prescribes `durationMs`', () => {
+    const result = PluginStartupResultSchema.safeParse({
+      pluginName: 'crm-plugin',
+      success: true,
+      durationMs: 1250,
+      startTime: 1250,
+    });
+    expect(result.success).toBe(false);
+    const issue = result.error!.issues.find((i) => i.path.join('.') === 'startTime');
+    expect(issue).toBeDefined();
+    expect(issue!.code).not.toBe('unrecognized_keys');
+    // The prescription is the payload: the name promised an instant and the
+    // value was always an elapsed duration.
+    expect(issue!.message).toMatch(/startTime.*removed.*read `durationMs`/s);
   });
 
   it('REFUSES `health` and says no startup probe system exists', () => {

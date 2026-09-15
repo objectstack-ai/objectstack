@@ -35,7 +35,12 @@ import { retiredKey } from '../shared/retired-key';
  *   TIMEOUT rather than a throw from inside `start()`: the kernel sets it from
  *   the raced rejection's message. Absent on the success path; absent, not
  *   `false`, when a plugin's own `start()` threw.
- * - `startTime` — deprecated; see its own note below.
+ *
+ * The deprecated `startTime` alias the kernel used to set beside `durationMs`
+ * ends here: it never held an instant, and a member whose name promises one
+ * while carrying an elapsed duration is the confusion the duration-unit rule
+ * exists to stop. It is a tombstone on this schema and the kernel no longer
+ * populates it.
  *
  * ── [#16059] What this module used to declare, and why it no longer does ────
  *
@@ -122,21 +127,6 @@ export const PluginStartupResultSchema = lazySchema(() => z.object({
     .describe('Time taken to start the plugin in milliseconds; absent when the plugin declares no start()'),
 
   /**
-   * The same elapsed milliseconds as `durationMs`.
-   *
-   * @deprecated Misnamed: it has never held an instant, so a reader who
-   * correctly takes `startTime` for one and computes `Date.now() - startTime`
-   * gets an age near the epoch instead of a wait. Read `durationMs` instead.
-   * Mirrored here because `@objectstack/core` still POPULATES it under its
-   * ADR-0087 L1 disposition — the old shape keeps working while the fleet
-   * moves — and a contract that declared `never` for a member the kernel emits
-   * would be the very drift #16059 closed. It leaves this schema in the same
-   * change that stops the kernel emitting it.
-   */
-  startTime: z.number().min(0).optional()
-    .describe('[DEPRECATED] The same elapsed milliseconds as durationMs — read durationMs instead'),
-
-  /**
    * Error if startup failed
    */
   error: z.object({
@@ -152,6 +142,25 @@ export const PluginStartupResultSchema = lazySchema(() => z.object({
    */
   timedOut: z.boolean().optional()
     .describe('Whether startup failed because the startup timeout fired, rather than start() throwing'),
+
+  /**
+   * Tombstone for the deprecated `startTime` alias core carried (#16059).
+   *
+   * Mirroring it was the other candidate and the tree refuses it: the member
+   * holds elapsed milliseconds under a name that carries no unit, which is
+   * exactly what `check:duration-unit-keys` (ruling B on #14478) fails, and
+   * neither of that rule's two schema-declared exemptions applies — it is not
+   * an `EpochMs` instant and it mirrors no external standard. Renaming it to
+   * `startTimeMs` would mint a spelling nothing has ever produced, for a member
+   * already slated for removal. So the L1 alias ends here, audibly.
+   */
+  startTime: retiredKey(
+    '`PluginStartupResult.startTime` was removed in @objectstack/spec 18 (ADR-0049) — '
+    + 'it never held an instant: the kernel filled it with the SAME elapsed milliseconds as '
+    + '`durationMs`, so a reader who took the name at its word and computed '
+    + '`Date.now() - startTime` got an age near the epoch instead of a wait. Delete the key '
+    + 'and read `durationMs`, which has always carried the same value.',
+  ),
 
   /** Tombstone for the `duration` → `durationMs` rename (#15678, ruling B on #14478). */
   duration: retiredKey(
