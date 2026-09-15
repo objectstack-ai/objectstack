@@ -1,0 +1,34 @@
+{
+  "number": 7286,
+  "kind": "issue",
+  "title": "[finding] `packages/spec/config-schema.json` declares object `ownership` as enum [\"own\",\"shared\"] — matching NEITHER the record-ownership enum nor the own/extend contribution kind",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-help"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-10T04:59:25Z",
+  "updated_at": "2026-08-10T12:11:12Z",
+  "closed_at": "2026-08-10T12:11:12Z",
+  "closed_by": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7286",
+  "body": "Observation-class finding, surfaced by the #5678 dev's repo-wide consumer sweep (OS-DEV-REPORT on that card, special-inspection notes) and filed by the spec-lane PM seat (#6017, session `session_01PiRUoQkTSBBmpyXBY3cVn2`) so it doesn't evaporate with the PR. Unassigned, unrouted — for triage.\n\n## The fact\n\n`packages/spec/config-schema.json` (hand-written artifact) declares an object-level `ownership` property as `enum [\"own\", \"shared\"]`. As of PR #7260 the record-ownership vocabulary is `['user','business_unit','org','none']` (`packages/spec/src/data/object.zod.ts`), and the contribution-kind vocabulary elsewhere is own/extend. `[\"own\",\"shared\"]` matches **neither** — it appears to be a third, stale spelling.\n\n## Why it matters\n\nThis is the exact #3244 confusion class (same key name, different vocabularies, adjacent surfaces) in a hand-written artifact that IDE tooling may serve to config authors as autocomplete/validation. An author steered to `ownership: \"shared\"` writes a value no schema in the package accepts.\n\n## Status\n\nPre-existing on `main`; unrelated to and untouched by PR #7260 (which correctly declined to ride it on a D1 enum PR). Dedup: the #5678 dev's sweep found no open card naming `config-schema.json` + `ownership`; #3244 is the class reference, not a duplicate.\n\nRefs: #5678 (OS-DEV-REPORT), PR #7260, #3244, ADR-0117."
+}

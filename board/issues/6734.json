@@ -1,0 +1,34 @@
+{
+  "number": 6734,
+  "kind": "issue",
+  "title": "[finding] `code` counts as a title face to lint's R9 but is not a name-ish key to spec's ADR-0079 derivation — two \"name-like\" sets, one undocumented gap",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T13:48:09Z",
+  "updated_at": "2026-08-10T11:28:00Z",
+  "closed_at": "2026-08-10T09:25:34Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6734",
+  "body": "Observation-class finding from the #6634 work (reconstructing ADR-0079 from its citations). Filed unassigned, no `pm:queue`; recorded as open question 4 in the new `docs/adr/0079-record-display-name.md`.\n\n## The fact\n\nTwo sets answer \"is this field name a record-title-ish name\", and they differ by exactly one entry:\n\n- `packages/lint/src/data-model-rules.ts:36`\n  `const NAME_LIKE_FIELDS = ['name', 'title', 'subject', 'label', 'full_name', 'display_name', 'code'];`\n- `packages/spec/src/data/display-name.ts` — `NAME_ISH_EXACT`\n  `'name', 'title', 'subject', 'label', 'full_name', 'display_name'`\n\n`code` is in the first and not the second.\n\n## What it costs\n\nLint rule R9 (`object/missing-name-field`) treats an object as having a title face when it declares `nameField` **or** carries any `NAME_LIKE_FIELDS` name. So an object whose only name-ish field is `code` is judged clean by R9 — while ADR-0079's `resolveDisplayField` will not derive `code` at tier 1 (name-ish exact) or tier 2 (name-ish affix). It may still be picked at **tier 3** (\"first title-eligible field by declaration order\"), but by a different rule and a different priority — so the two are not equivalent even where they happen to agree on the outcome.\n\nNothing a user hits today, which is why this is observation-class rather than a defect: R9 is `severity: 'suggestion'`, and the `Record #(id)` floor plus designate-only auto-provisioning mean no object ships without a title regardless. What is wrong is that **two independent answers to one question exist**, and the divergence is written down nowhere.\n\nThe skill doc has already absorbed the lint spelling as the contract — `skills/objectstack-data/SKILL.md:1091` documents the rule's name-like set including `code` — so the drift is now taught, not just implemented.\n\n## Why it wasn't decided in #6634's PR\n\nThe reconstruction is evidence-bound: nothing in the 77 citing sites says whether these two sets are *meant* to be the same set. Assuming they are (and deleting `code`, or adding it to spec) would have been the reconstruction inventing a decision, which that PR is explicitly not allowed to do. Recorded as open there; graded here.\n\n## Dispositions, if triage wants them\n\n1. **Converge on spec** — drop `code` from `NAME_LIKE_FIELDS`, so lint asks exactly the question `objectTitleCompleteness` answers. Arguably R9 should call the shared spec predicate outright rather than keep its own list; `validate-record-title.ts` already does. Most aligned with \"one source per contract\".\n2. **Converge on lint** — add `code` to spec's `NAME_ISH_EXACT`. Changes runtime derivation for real objects, so it needs its own justification (is a `code` a *title*?).\n3. **Document the difference as intentional** — R9 asks a looser \"will records be anonymous?\" question than derivation does, and that is defensible; then say so in both places.\n"
+}

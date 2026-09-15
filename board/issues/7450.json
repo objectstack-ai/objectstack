@@ -1,0 +1,36 @@
+{
+  "number": 7450,
+  "kind": "issue",
+  "title": "The runtime dispatcher serialises a PermissionDeniedError's `details` to the client, so `positions` / `permissionSets` reach the browser on the `/data` transport",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched",
+    "target:v17"
+  ],
+  "assignees": [
+    "os-help"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-10T12:41:32Z",
+  "updated_at": "2026-08-11T05:50:46Z",
+  "closed_at": "2026-08-11T05:50:46Z",
+  "closed_by": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7450",
+  "body": "Found while implementing #7414 (PR #7449). Filed separately because fixing it means changing what a 403 **body** carries, which #7414 explicitly ruled out of scope (that card is user-facing copy only, structured payload untouched).\n\n## What was measured\n\n`plugin-security`'s object gate attaches a structured payload to every `PermissionDeniedError`:\n\n```ts\nthrow new PermissionDeniedError(\n  message,\n  { operation: opCtx.operation, object: opCtx.object, positions, permissionSets: explicitPermissionSets },\n);\n```\n\nThe two transports treat that payload differently, and only one of them was checked when #7414 was written.\n\n**`@objectstack/rest` — `mapDataError`, `packages/rest/src/rest-server.ts:726-737`:**\n\n```ts\nreturn {\n    status: 403,\n    body: {\n        error: error?.message ?? 'Permission denied',\n        code: 'PERMISSION_DENIED',\n        ...(object ? { object } : {}),\n    },\n};\n```\n\n`error.details` is never read. Nothing structured reaches the client, and the `object` that does ride is the object the **route** named, not `error.details.object`.\n\n**`@objectstack/runtime` — `http-dispatcher.ts:1945-1951`:**\n\n```ts\n} catch (e) {\n    if (isPermissionDeniedError(e)) {\n        return {\n            handled: true,\n            response: this.error(e.message, 403, { code: 'PERMISSION_DENIED', ...(e.details ?? {}) }),\n        };\n    }\n    throw e;\n}\n```\n\n`this.error` hands that object to `apiErrorResponse` / `buildApiError` (`packages/runtime/src/error-envelope.ts`), which promotes the string `code` into `error.code` and puts **everything else on the wire as `error.details`**. `/data` is served by this dispatcher (the domain registry, `packages/runtime/src/domains/data.ts`), and that domain handler does not catch — so a permission denial on an ordinary CRUD request answers with `error.details.positions`, `error.details.permissionSets`, `error.details.operation` and `error.details.object`.\n\nSo on that transport a client is told the caller's position names, the names of the permission sets attached to their context, and — on a cascade delete, where `cascadeDeleteRelations` re-authorises each child independently — the API name of a **child** object the caller never addressed.\n\n## Why this matters beyond tidiness\n\n#7414's \"Expected\" section asserted that the structured fields \"are the right channel for the machine detail, and they are already there\", and PR #7423 (the sibling `DELETE_RESTRICTED` card) justified shipping a `developerMessage` over the wire on the premise that the envelope already carried the same API names. Both readings assume one answer to \"where do these fields land\". There are two, and they disagree. PR #7449 declined to ship a developer sentence on either transport for exactly this reason, but it deliberately left the existing `details` disclosure standing because narrowing it is an envelope change, not a copy change.\n\n## What a fix would have to decide\n\n1. Is `positions` / `permissionSets` intended client-facing detail at all, or server-side diagnostics that leaked through a generic spread? (`operation` and `object` are far less sensitive — the caller supplied both, except on a cascade child.)\n2. If they are not: narrow the spread at the dispatcher (allowlist rather than `...e.details`), which is a wire-visible change for any consumer already reading them.\n3. Either way the two transports should agree on what a `PERMISSION_DENIED` body carries. Today one carries nothing structured and the other carries everything.\n\nRelated: #7270 (runtime re-declares `PermissionDeniedError` with nothing enforcing the identity) touches the same class from the type side.\n\n## Reproduction pointers\n\n- `packages/runtime/src/http-dispatcher.ts` — the catch at the end of `dispatch()`\n- `packages/runtime/src/error-envelope.ts` — `splitSemanticCode` / `buildApiError`\n- `packages/runtime/src/domains/data.ts` — no local catch, so the gate's throw reaches the dispatcher catch\n- `packages/rest/src/rest-server.ts` — `mapDataError`'s `PERMISSION_DENIED` branch, for the contrast\n- `packages/rest/src/rest.test.ts` — the pin PR #7449 added for the REST half\n"
+}

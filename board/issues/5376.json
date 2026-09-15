@@ -1,0 +1,35 @@
+{
+  "number": 5376,
+  "kind": "issue",
+  "title": "driver-mongodb 是 `{ field: {} }` 唯一还在作答的后端:#5240 拍板拒收、#5327 已闸四家,mongodb 仍译成「字段深等于空文档」",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "huangyiirene"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T02:46:34Z",
+  "updated_at": "2026-08-11T05:40:09Z",
+  "closed_at": "2026-08-11T05:40:09Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5376",
+  "body": "同步 PR #5323 到当前 main(#5239 的接力单)时逐条复核其散文论断,发现其中「`{ field: {} }` 尚未在任何后端设闸」已过时:#5327 已按 #5240 的拍板在 driver-sql / driver-sqlite-wasm / driver-memory / formula 四家落闸(`INVALID_FILTER` / 400,消息点名位置)。**driver-mongodb 是第五家,不在 #5240 的「四后端」范围里,今天仍在作答**。按 PD #10 立单,unassigned。\n\n## 现场\n\n`packages/plugins/driver-mongodb/src/mongodb-filter.ts`,`translateCondition` 的字段路径:值是对象但没有任何 `$` 键时走「Nested object — treat as exact match」,于是:\n\n```\ntranslateFilter({ stage: {} })   =>   { \"stage\": {} }\n```\n\nMongoDB 把 `{ stage: {} }` 读作**字段深等于空文档** —— 与 driver-memory 修复前 mingo 的读法同款(#5327 的实现评论里实测过:特意播的 `a: {}` 行会被选中)。也就是说这不是 FALSE,是**另一个 filter**,只在正常数据上看着像 FALSE。\n\nPR #5323(合入后)的 `reduceFilterKey` 刻意把带字段键的节点一律判 `'clause'`、译文逐字节不变 —— 它当时的注释写明「不替 #5240 做裁决」;拍板(取拒收)与四家落闸都发生在其 base 之后。同步轮已把注释校订为指向本单,归约判定未动。\n\n## 建议(照抄先例即可)\n\n与 #5327 在 driver-sql 的落法同构:闸门放在**归约的校验遍历**(`reduceFilterKey`,与 `assertFilterNode` 并列),不是发射器 —— 发射器会被布尔单位元整体短路,`{ $or: [ { a: {} }, {} ] }` 在发射器侧永远见不到 `{ a: {} }`,拒不拒收取决于兄弟节点(#5327 PR 正文的原论证)。消息首句照抄 driver-sql 的 `emptyFieldConstraintError`,一况一词(#5240)。\n\n判定本身不改:字段键仍是 `'clause'`,这是加一条拒收,不是重分类幸存形状。\n\n## 关联\n\n- #5240(拍板:拒收)、#5327(四家已落 + 位置论证)\n- #5346(同文件的姊妹拒收批:`$between` 形状、节点级未声明 `$op` 透传、`default:` 信封 —— 修本单时建议同批,共用同一个 `unsupportedFilterError` 信封与 path 线)\n- PR #5323(mongodb 的三值归约,本单闸门的挂点;需其先合入)\n- spec 半边(收窄 `FilterConditionSchema` + `FILTER_LOGIC_CASES` 扩 `expectRejection` 表形)仍归 spec 车道,不在本单。\n\n## 未验证\n\n未跑真 mongod(本容器取不到 `mongodb-memory-server` 二进制);`{ stage: {} }` 的译文由 `translateFilter` 纯函数实测,服务端读法引自 MongoDB 文档语义与 #5327 对 mingo 的实测同款,未在真服务端复测。"
+}

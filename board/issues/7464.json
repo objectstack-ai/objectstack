@@ -1,0 +1,33 @@
+{
+  "number": 7464,
+  "kind": "issue",
+  "title": "conversions/registry.ts is now the last hand-authored append registry — extend the #7297 per-entry split?",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "finding"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-10T14:11:30Z",
+  "updated_at": "2026-08-10T18:27:52Z",
+  "closed_at": "2026-08-10T18:27:52Z",
+  "closed_by": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7464",
+  "body": "Filed from PR #7454's open question (spec-lane PM seat #6017); recording only, not claiming.\n\n## Context\n\nPR #7454 (#7297) split `packages/spec/src/migrations/registry.ts`'s three append tables (59 semantic / 16 retired-keys / 45 retired-defs entries) into per-entry files under `packages/spec/src/migrations/entries/{semantic,retired-keys,retired-defs}/`, generated back into `registry.ts` between markers by `build-migration-registry.ts` (`gen:`/`check:migration-registry`, `--self-test`). Concatenation stays inside `registry.ts` because the browser-reachable barrel forbids `readdirSync`; `LEDGER_SOURCES` was deliberately unchanged.\n\n`conversions/registry.ts` was **deliberately excluded** per the dispatch ruling \"when in doubt, migrations only\" — leaving it the last hand-authored append registry in the package.\n\n## Question for triage\n\nDoes the same merge-conflict/append-contention argument that justified #7297 apply to `conversions/registry.ts`, and if so does `build-migration-registry.ts` generalize or does the conversions table need its own generator? A quick churn measurement (how often that file's append tables take concurrent edits) would settle the priority.\n\nNatural lane if promoted: `domain:spec`. Reference implementation: PR #7454."
+}

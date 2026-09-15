@@ -1,0 +1,35 @@
+{
+  "number": 7558,
+  "kind": "pull_request",
+  "title": "fix(runtime): answer 404, not 500, when toggling an unknown automation flow (#7535)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T05:25:48Z",
+  "updated_at": "2026-08-11T08:04:12Z",
+  "closed_at": "2026-08-11T08:04:10Z",
+  "closed_by": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "merged_at": "2026-08-11T08:04:10Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/7558",
+  "body": "Fixes #7535\n\n`POST /api/v1/automation/:name/toggle` against a flow name the registry does not hold answered **500 `INTERNAL_ERROR`**. It now answers **404 `RESOURCE_NOT_FOUND`**, naming the flow it could not find.\n\nThe class was the defect, not the wording. Clients and retry layers branch on it: 5xx means \"the server broke, try again\", 4xx means \"your request was wrong, don't\". A typo'd flow name presented as a transient server fault, so any retry-on-5xx caller re-sent — repeatedly — a request that can never succeed.\n\n## Cause\n\n`toggleFlow` on an unregistered name throws a plain `Error(\"Flow '<name>' not found\")` (`packages/services/service-automation/src/engine.ts:2411`). It carries no `.status`, so **both** dispatcher error exits — `HttpDispatcher.errorFromThrown` and `dispatcher-plugin`'s `errorResponseBase` — fell back to their 500 default. Nothing was catching the not-found case and calling it a not-found.\n\n## Fix\n\n`packages/runtime/src/domains/automation.ts` — the toggle branch runs an existence probe before touching the service, and returns `404` in the house envelope naming the flow.\n\nThree deliberate choices worth reviewing:\n\n- **At the domain handler, not in a generic catch.** Which HTTP status a plain domain error means is the serving boundary's decision — the rule `validation-failure.ts` already states for `ValidationError` → 400. Teaching a shared catch to recognise one engine's message string would make every domain's not-found depend on that prose. (This also keeps the PR clear of `http-dispatcher.ts`, which #7450 is editing.)\n- **The same probe `GET /automation/:name` already uses**, rather than a second notion of existence, so the two routes cannot disagree about which flows exist.\n- **After the body checks, not before.** #3899's guarantee is that nothing reaches the service until the body is legal; an existence probe running first would consult the registry on a request the handler is about to refuse anyway. Pinned by a test.\n\nThe endpoint's *body* arm already met this bar — `{\"enable\": false}`, one letter off, is a located 400 naming the offending key rather than a silent enable (#3899). The missing-flow arm now answers in kind: a 404 that names the flow, not a bare status change.\n\n**Unchanged**: toggling a real flow in either direction, the documented bodyless enable, the strict `{ enabled?: boolean }` validation, and any `IAutomationService` implementation that omits the optional `getFlow?` — it cannot be asked whether a flow exists, so its toggle proceeds exactly as before rather than this inventing a 404.\n\n### On `error.code`\n\nLeft to derive from the status (`RESOURCE_NOT_FOUND`), matching the sibling `GET /:name` on this domain. Two alternatives were considered and rejected:\n\n- `StandardErrorCode`'s 404 bucket has no flow-specific member (`RESOURCE_/OBJECT_/RECORD_/FIELD_/ENDPOINT_NOT_FOUND`), and adding one is not this PR's business.\n- `packages/spec` *does* declare `AutomationApiErrorCode.flow_not_found` — but a repo-wide search finds **no producer and no consumer** for that enum outside its own shape test and the type-alias pin, so nothing serves it on the wire today. Adopting it here would (a) start wiring up a declared-but-unenforced vocabulary as a rider on a P3 bug fix, and (b) make `toggle` and `GET /:name` answer *different* codes for the identical condition — the exact drift the shared existence probe above was chosen to avoid. Worth its own enforce-or-remove card; flagged, not actioned.\n\n## Tests\n\nNew: `packages/runtime/src/domains/automation-toggle-unknown-flow.test.ts` (6 tests). The fake models the real engine — `getFlow` resolves `null` for an unknown name and `toggleFlow` **throws** — so a handler that never checks cannot pass.\n\nEvery test proved to fail against a mutated source:\n\n| # | Mutation | Tests that went red |\n|---|---|---|\n| M1 | Guard deleted entirely (pre-fix behaviour) | 404-envelope; no-500-by-any-route |\n| M2 | `deps.error(…, 404)` → `500` | 404-envelope; no-500-by-any-route |\n| M3 | Message stops naming the flow | 404-envelope |\n| M4 | `if (!existing)` → `if (existing)` | 404-envelope; no-500-by-any-route; **real flow still toggles** |\n| M5 | `typeof getFlow === 'function'` guard dropped | contract-optional `getFlow` |\n| M6 | Probe moved ahead of the body checks | body-before-registry ordering |\n\nBaseline restored green after each.\n\n## Verification\n\n- `pnpm --filter @objectstack/runtime typecheck` — clean\n- `eslint --no-inline-config` on both changed files — clean\n- Full `@objectstack/runtime` suite — **123 files, 1982 tests, all passing**, including the neighbouring `automation-body-validation.test.ts` (#3899) unchanged\n\nChangeset included (`@objectstack/runtime` patch). No `content/docs/releases/**` edits.\n\n**Docs drift check**: the 20 flagged pages are package-wide `@objectstack/runtime` references, none of which document this endpoint. The only page that mentions `/toggle` at all is `content/docs/references/api/automation-api.mdx`, which is auto-generated and lists no error statuses. No doc asserts the old 500 behaviour. Conversely, `docs/qa/platform-checklist/areas/automation.json:982` already specified the negative probe as *\"expect a not-found error, no state change\"* — the checklist was right and the implementation was out of step; this change makes reality match it."
+}

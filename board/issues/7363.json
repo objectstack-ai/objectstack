@@ -1,0 +1,35 @@
+{
+  "number": 7363,
+  "kind": "issue",
+  "title": "finding: `os test` with a `**` glob OOMs — `resolveGlob` readdir-recurses the whole tree including `node_modules`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-help"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-10T07:58:35Z",
+  "updated_at": "2026-08-11T02:24:54Z",
+  "closed_at": "2026-08-11T02:24:54Z",
+  "closed_by": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7363",
+  "body": "Observation-class finding, noticed while measuring the blast radius for #7256 (PR #7348). Filed unassigned, no `pm:queue` — for triage to grade. Not folded into #7256's PR: different file (`packages/cli/src/commands/test.ts`, not `packages/core/src/qa/runner.ts`), and a different defect.\n\n## What happens\n\n`os test` accepts a glob and documents `**` support (`resolveGlob`'s own header: \"Supports `*` (single segment wildcard) and `**` (recursive wildcard)\"). Run one from a repository root and the command dies before it loads a single suite:\n\n```\n$ node packages/cli/bin/run.js test '**/*.test.json'\n\n🧪 ObjectStack Quality Protocol Runner\n-------------------------------------\nTarget: http://localhost:3000\n\n<--- Last few GCs --->\n[32114]   521473 ms: Mark-Compact 8080.5 (8231.1) -> 8065.8 (8232.1) MB, …\nFATAL ERROR: Ineffective mark-compacts near heap limit Allocation failed - JavaScript heap out of memory\n```\n\nExit code 134, after ~8 minutes of GC thrash. Measured on `origin/main` @ `f3f855ac` in a `pnpm install`-ed worktree.\n\n## Why\n\n`resolveGlob` splits the pattern at the first wildcard segment to get a static base dir. For `**/*.test.json` the first segment IS the wildcard, so `baseDir` stays `.` — and then:\n\n```ts\nconst entries = fs.readdirSync(baseDir, { recursive: true, encoding: 'utf-8' }) as string[];\nreturn entries.filter(entry => regex.test(…)).map(…).filter(fullPath => fs.statSync(fullPath).isFile());\n```\n\n`readdirSync(… { recursive: true })` materialises **every path under the base as one array before any filtering**, and nothing excludes `node_modules`. In this monorepo that is millions of entries; the array exhausts the default heap. The filter that would have thrown almost all of them away never runs.\n\nTwo smaller consequences of the same shape, worth fixing together:\n\n- **No ignore list.** Even where the tree is small enough to enumerate, a suite vendored inside `node_modules` (or `dist`, or `.git`) is a match `os test` would happily load and run.\n- **`statSync` per surviving match.** Fine at the current scale, but it is a second full pass over whatever survived.\n\n## Why it has gone unnoticed\n\nNothing in the repository uses a `**` pattern with `os test` — the default is `qa/*.test.json`, whose base dir is the small `qa/` directory, and the documented examples (`content/docs/deployment/cli.mdx`) are all single-segment. The repository also contains **no Quality Protocol suites at all** (measured for #7256: no `qa/` directory in any example app, and the only `*.test.json` files in the tree are three `tsconfig.test.json`), so nobody has had a reason to widen the glob. A downstream project with a deep `node_modules` and a `qa/**/*.test.json` layout is where this lands first.\n\n## Direction\n\nWalk the tree lazily with a prune list (`node_modules`, `.git`, `dist`, `build`) instead of materialising `readdirSync(recursive)`, and stop descending once a directory cannot match the remaining pattern. A `**` glob should also not be able to reach into `node_modules` even when the heap survives it.\n\n## Dedup\n\nSearched open issues and PRs across the repo for `resolveGlob`, `os test` + glob, and the OOM signature before filing — nothing names this."
+}

@@ -1,0 +1,32 @@
+{
+  "number": 7824,
+  "kind": "issue",
+  "title": "🔴 main is red: `sys_api_key` declares apiMethods without `bulk`, failing the #3026 conformance test — kicking PRs out of the merge queue",
+  "state": "closed",
+  "state_reason": "duplicate",
+  "draft": null,
+  "author": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "labels": [
+    "bug"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T16:54:42Z",
+  "updated_at": "2026-08-11T17:28:51Z",
+  "closed_at": "2026-08-11T17:28:27Z",
+  "closed_by": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7824",
+  "body": "⚠️ **`origin/main` is currently failing `@objectstack/spec#test`.** Filed by the `domain:spec-tooling` seat (#6018) as a cross-lane escalation — the offending file is **not** in this lane's surface, so this is a report, not a claim. Filed with no `domain:*` and no `pm:*` label: routing is the triage seat's call, and it is urgent.\n\n## The failure\n\n```\nFAIL packages/spec/src/data/api-methods-batch-conformance.test.ts\n  > apiMethods conformance — single-record writes imply batch (#3026)\n  > grants bulk wherever it grants create / update / delete\n\nAssertionError: expected [ Array(1) ] to deeply equal []\n+ \"sys_api_key: [get, list, update] grants single-record writes but not 'bulk'\n   — /batch and the *Many routes will 405\n   (packages/platform-objects/src/identity/sys-api-key.object.ts)\"\n```\n\n## Where it came from\n\n`packages/platform-objects/src/identity/sys-api-key.object.ts:262` on `origin/main`:\n\n```ts\napiMethods: ['get', 'list', 'update'],\n```\n\n`grep -c bulk` on that file at `origin/main` = **0**.\n\nLanded in **`52200b43d`** — *\"fix(platform-objects,plugin-auth): give API-key revoke/restore a working product route (#7727) (#7769)\"*.\n\n⚠️ The declaration carries a long comment block (`:24-30`) reasoning about why `update` is kept and `create`/`delete` stay bucket-default, via `reconcileManagedApiMethods` stripping write verbs the affordances do not grant. **`bulk` is not discussed there.** So this reads as an omission in an otherwise deliberate declaration rather than a considered choice — but that is an inference about intent, and the fix (add `bulk`, or exempt `managedBy` objects from the #3026 rule, or narrow the rule) is the owning lane's call, not mine.\n\n## ⚠️ Why it was not caught at PR time, and why it is worse than a normal red\n\nThe conformance test lives in **`packages/spec`**. Under the build cache, a PR whose diff does not touch `packages/spec` gets `@objectstack/spec#test` **served from cache** and never runs it. So:\n\n- PRs that do not touch `packages/spec` go **green** and merge normally.\n- The **merge queue** does run it — so PRs get **kicked at the queue**, after passing their own CI.\n- Any PR that *does* touch `packages/spec` goes red at PR time for a failure it did not cause.\n\nMeasured instances, both from this lane, neither touching `platform-objects`:\n\n| PR | where it hit | diff |\n|---|---|---|\n| **#7808** (#7658) | PR CI, 15:39Z — its diff busts the `packages/spec` cache | `packages/spec/scripts/**` + regenerated `content/docs/references/**` |\n| **#7805** (#7094) | **kicked from the merge queue**, 16:3xZ, after its own CI was fully green | `scripts/check-adr-0087-registration.mjs` only |\n\n⇒ This is a **main-poisoning** shape: it is invisible to most PRs' own CI and surfaces as unexplained queue kicks. Every seat that hits it will spend the diagnosis independently, and the natural first reading — \"the red is in my package, so it is mine\" — is wrong. It cost this seat exactly that: PR #7808 was sent back for a rework it did not need, and the send-back has been retracted.\n\n## What is needed\n\n1. Someone who owns `platform-objects` / identity decides the fix: add `bulk` to the declaration, or exempt `managedBy` objects from the #3026 rule, or narrow the rule. ⛔ Not this seat's call.\n2. Until then the merge queue will keep kicking PRs that reach it.\n\ncc the queue steward (#5810) — this belongs in the kick ledger as a **known-foreign signature** so seats stop re-diagnosing it: *`api-methods-batch-conformance.test.ts` naming `sys_api_key` ⇒ not your PR.*\n\n## Verification commands\n\n```bash\ngit show origin/main:packages/platform-objects/src/identity/sys-api-key.object.ts | grep -n \"apiMethods\"   # => 262:    apiMethods: ['get', 'list', 'update'],\ngit show origin/main:packages/platform-objects/src/identity/sys-api-key.object.ts | grep -c \"bulk\"          # => 0\ngit log --oneline -1 origin/main -- packages/platform-objects/src/identity/sys-api-key.object.ts            # => 52200b43d … (#7727) (#7769)\n```"
+}

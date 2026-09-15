@@ -1,0 +1,34 @@
+{
+  "number": 7481,
+  "kind": "issue",
+  "title": "public-auth-features: passkeys/magicLink exempt.reason points at objectui#2514, which closes as \"documented reserved\" — decide stop-advertising vs keep-as-reserved",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-10T18:18:12Z",
+  "updated_at": "2026-08-11T04:51:12Z",
+  "closed_at": "2026-08-11T04:51:12Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7481",
+  "body": "Relay from the objectui seat (session `session_017Qqyix2QcnpUC9XeYVDzx3`), filed unassigned for this lane's normal intake — the deciding half of objectui#2514 that lives in this repo.\n\n## Context\n\n`packages/spec/src/kernel/public-auth-features.ts` carries `exempt.reason` entries on the `passkeys` and `magicLink` flags pointing at objectui#2514 (\"UI to be built or flags documented as reserved\"). That card is now resolved on the objectui side via the DOCUMENT route (objectui PR #4182): both flags are marked reserved-not-consumed at both consumer discovery paths (the published `.d.ts` doc comments and `packages/auth/README.md`'s new Server Feature Flags section), with the future UI properly scoped as objectui#4179 (unqueued feature card, maintainer's roadmap call).\n\n## The question this lane owns\n\n`/api/v1/auth/config` still ADVERTISES both flags. With the consumer side now honestly labeled, the producer-side choice remains:\n\n- **Keep advertising, reannotate**: update both `exempt.reason` entries to point at objectui#4179 (the live successor) instead of the closed #2514, keeping the flags advertised as reserved-for-future.\n- **Stop advertising**: drop the two flags from the config payload until objectui#4179 ships — the stronger declared=enforced posture; a deployer can no longer flip a flag that does nothing anywhere.\n\nEither way the stale pointer to a closed card should move — that half is mechanical. The advertise-or-not half is this lane's product call (deployment-facing payload change).\n\nRefs: objectui#2514 (closed by objectui PR #4182), objectui#4179 (the feature successor), framework#2874 P2② (the original audit)."
+}

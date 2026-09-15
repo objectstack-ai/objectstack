@@ -1,0 +1,34 @@
+{
+  "number": 7754,
+  "kind": "issue",
+  "title": "pm-dispatch SKILL structural compression: 3050 → ~1400–1600 lines (PR₂ of batch #7631, maintainer-directed)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T12:42:51Z",
+  "updated_at": "2026-08-11T14:39:54Z",
+  "closed_at": "2026-08-11T14:38:18Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7754",
+  "body": "Handoff card filed by the skills seat (#7623, session `session_01ATJiqhFNL82YwV8udPkoqX`) — the session ran out of budget mid-batch and the maintainer directed the remainder be filed for another seat to pick up. This is **PR₂ of batch #7631**; PR₁ (the eight ruled amendments) merged at 2026-08-11 11:45Z as PR #7698, so this card is unblocked and dispatchable now.\n\n## Maintainer directive (verbatim, untranslated — skills seat 专题讨论, 2026-08-11)\n\n&gt; 现在 的 项目经理skills 太长了,需要考虑怎么压缩\n\nDelivery shape (PR₁ then PR₂, pure moves last) was accepted in the same exchange and is recorded on #7631.\n\n## Measured starting state (`origin/main` after PR #7698 — re-measure at work time, do not trust these)\n\n`.claude/skills/pm-dispatch/SKILL.md` = **3050 lines**, sitting exactly on the `check:pm-skill-ratchet` ceiling (3050, config at `scripts/pm/check-skill-line-ratchet.mjs`). `references/incidents.md` = 437 lines (append-only). `references/compile-surfaces.md` = 27.\n\nComposition measured before PR₁ (shape still holds; re-derive the numbers):\n\n| section | lines |\n|---|---|\n| The round loop | 1870 — step 5 Dispatch 587 (Prompt template 326), step 7 Review 380, step 0 sweep 200, step 6 Collect 195, 入队与落地 167, step 8 130 |\n| Operational notes | 612 (21 notes, each = rule + incident narrative) |\n| Domain lanes | 209 (incl. the `spec-tooling` 沿革 111, self-labelled \"沿革, 不是待办\") |\n| State model / Epic / Guardrails / report contract | ~300, mostly load-bearing |\n\n## Target and method\n\n- **Target ~1400–1600 lines** in the main file (roughly −50%).\n- **Every rule keeps three things in the main file**: the imperative, its criteria/command, and a one-line case anchor (issue number). Narratives, 沿革, worked examples and incident retellings move **verbatim** to `references/incidents.md` (append-only, one 出处 line per section, matching the convention PR #7698 established with 24 such moves) or a new `references/operational-notes.md` if the notes section warrants its own file.\n- **Machine-consumed content stays**: domain-lane table, 词表 roster, seat/label setup loop, the escalation frame (all four gate-synchronized copies — `check:skill-frame-sync`), report contract JSON.\n- ⛔ **No rule deletion.** Compression moves prose; removing a binding rule, criterion, or prohibition requires its own maintainer ruling. A reviewer must be able to diff old→new and see every imperative still present.\n- **Ratchet**: lower the ceiling to the achieved count (shrink-only lock-in) in the same PR.\n\n## Constraints\n\n- File surface: `.claude/skills/pm-dispatch/SKILL.md`, `.claude/skills/pm-dispatch/references/**`, the ratchet config. ⛔ No `docs/adr/**`, no `content/docs/releases/**`.\n- **ADR-class terminal state** (#7548, now live in SKILL.md step 7 + Guardrails): draft/review by AI seats; ⛔ no AI seat merges, enqueues, or arms auto-merge — the maintainer merges manually. Round reports carry an \"awaiting a human merge\" line until it lands.\n- Dispatch tier: **`model: claude-fable-5` mandatory** (any card editing `.claude/skills/pm-dispatch/**`, maintainer 2026-08-10), `mode:cloud`. ⚠️ The filing session exhausted its Fable budget — whoever picks this up needs headroom for an L-sized card.\n- `skip-changeset` label (`.claude/` only; #5471 rejects empty changesets).\n- Gates for this surface: `check:pm-skill-ratchet`, `check:skill-frame-sync`, `check:doc-authoring`, `check:nul-bytes`, plus `pnpm --filter @objectstack/lint run check:doc-formula-expressions` after building the lint dependency closure.\n- Sanitizer discipline on every SKILL.md write (HTML entities for literal angle brackets; read back and verify fragments survived).\n- `Fixes` this card + `Part of #7631`; close #7631 when this lands.\n\n## Prior art to reuse\n\nPR #7698's diff is the pattern: each moved section left an anchor + pointer in place and gained an 出处 line at the destination. The cloud dev session that did PR₁ (`session_01KCFsFypEHm1Cnp26yAofxg`, now archived) sketched this plan in its report's `open_questions[2]` on #7631."
+}

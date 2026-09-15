@@ -1,0 +1,35 @@
+{
+  "number": 7420,
+  "kind": "issue",
+  "title": "finding: showcase `RecalcSelectionAction` TSDoc still narrates the pre-objectui#3142 \"missing/empty locations → every location\" rule",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "huangyiirene"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-10T10:41:30Z",
+  "updated_at": "2026-08-11T05:35:23Z",
+  "closed_at": "2026-08-11T05:35:23Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7420",
+  "body": "Observation-class finding, tripped over while executing #7323 (inverting the same stale claim in `docs/qa/platform-checklist/areas/records-forms.json`). Filed unassigned, no `pm:queue` — for triage to grade. Nothing a product user hits; it is stale explanatory prose in an example app.\n\n## What\n\n`examples/app-showcase/src/ui/actions/index.ts`, the TSDoc above `RecalcSelectionAction` (around L138-149 on `origin/main` `1788e19`), states the pre-objectui#3142 placement rule as current fact:\n\n> `locations` still has to be declared, even though the selection bar entry comes from the view. Omitting it does NOT mean \"nowhere\": the action:bar renderer treats a missing/empty `locations` as \"every location\" (objectui `action-bar.tsx`), so a locations-less action also lands on the LIST TOOLBAR — where there is no selection, so the dispatch posts no `_selectedIds` and the endpoint rejects it. Declaring `record_more` keeps the single-record entry somewhere it works (the endpoint's per-record branch, via `recordIdParam`) and off the toolbar. See objectui#3142.\n\nOmitting `locations` **does** now mean \"nowhere\". objectui#3142 collapsed four disagreeing renderers onto a single membership predicate, `actionRendersAt` (`objectui packages/types/src/ui-action.ts`), so an undeclared or empty `locations` matches no location at all.\n\n## Evidence, in this repo\n\n`packages/lint/src/validate-action-locations.ts` is built on the opposite rule, and its docblock states it explicitly:\n\n> The renderer half is now unambiguous: objectui#3142 collapsed four disagreeing renderers onto one predicate — an action renders at a location only if it DECLARES that location. Before that, `action:bar` and the record header showed an undeclared action *everywhere*, which is what made this shape look alive; it is measurably inert as of objectui 17.1.\n\nThe whole `action-no-placement` rule exists **because** a locations-less action renders nowhere. So the lint package and this fixture comment currently say opposite things about the same behavior.\n\n## Why it is worth a card\n\nThe comment is not decorative — it is cited as a `source` by the QA checklist item `records-forms.action-location-matrix`, and it is very plausibly where that item's now-corrected \"empty-locations means EVERY location\" probe came from in the first place. A runner or author who follows the `source` link lands back on the stale rule after #7323 fixed the downstream copy.\n\n**The declaration the comment explains is correct either way**: `locations: ['record_more']` is right, and `RecalcSelectionAction` needs no change. Only the *reason given* has inverted — `record_more` is an explicit single-record placement (which incidentally keeps it off the toolbar), not an opt-out of an everywhere-default.\n\nWorth checking in the same pass: the file's header TSDoc and `NewTaskAction`'s comment both discuss `locations: []` as \"a declaration in its own right, not an omission\", which reads correctly post-#3142 — the defect looks localized to the `RecalcSelectionAction` block, but the sweep should confirm rather than assume.\n\n## Deliberately not fixed in PR for #7323\n\n#7323's dispatch pinned the file surface to `docs/qa/platform-checklist/areas/records-forms.json` with a stop-on-breach clause, and Prime Directive #10 keeps unrelated fixes out of that PR. That PR instead annotates the `source` entry so the stale prose is flagged in place until this card is worked.\n\n## Scope\n\nComment-only edit to `examples/app-showcase/src/ui/actions/index.ts` (plus the sweep above). No behavior change, no spec change."
+}

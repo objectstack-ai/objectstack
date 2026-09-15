@@ -1,0 +1,35 @@
+{
+  "number": 6676,
+  "kind": "issue",
+  "title": "docs/adr has a number hole at 0107 — either a withdrawn record with no tombstone, or a lost file",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-help"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T10:14:03Z",
+  "updated_at": "2026-08-11T02:35:34Z",
+  "closed_at": "2026-08-11T02:35:34Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6676",
+  "body": "Out-of-scope finding from #4585 / PR #6668 (surfaced while confirming ADR number 0123 was free; filed by the engine-core PM on the dev's behalf). Recorded, not claimed.\n\n## Fact (origin/main, 2026-08-08)\n\n`docs/adr/` runs `0106-*` then `0108-*` — there is no `0107-*` file. `check:adr-anchors` does not object: it audits decision-anchor collisions, not numbering gaps.\n\n## Why it is worth a card at all\n\nIf 0107 was drafted and withdrawn, nothing stops a future author from re-using the number for something unrelated — and then two eras of cross-references (commits, issues, chat rulings that said \"ADR-0107\") point at different documents. A one-paragraph tombstone file (\"0107 — withdrawn/never assigned, do not reuse\") closes that permanently. If instead a record was lost, that is worth knowing now rather than at the moment someone needs it.\n\n## Scope if promoted\n\nXS: `git log`-archaeology to determine which case it is, then either a tombstone file or a restoration. Optionally teach `check:adr-anchors` to flag future gaps (separate judgment — gaps may be legitimate).\n\nRefs: #4585, PR #6668 (report `out_of_scope_findings`)."
+}

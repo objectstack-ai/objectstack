@@ -1,0 +1,35 @@
+{
+  "number": 7671,
+  "kind": "issue",
+  "title": "Checklist maintenance from attachments-storage run: step-text fix + clause/fixture cross-refs (docs/qa/platform-checklist)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "huangyiirene"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T10:10:20Z",
+  "updated_at": "2026-08-11T12:25:13Z",
+  "closed_at": "2026-08-11T12:25:13Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7671",
+  "body": "## Symptom\n\nSeveral text/coverage items fall out of the `attachments-storage` run that need editing in `docs/qa/platform-checklist/`. This card owns the one pure step-text edit and cross-references the cards that own the substantive restatements, so the doc edits are not duplicated.\n\n## Root cause\n\nLocated — pure checklist/doc maintenance.\n\n- **Owned here (pure step-text edit):** `upload-session-abort` step text says `size`; the chunked-init route takes **`totalSize`** and forces `chunkSize &gt;= 5 MiB` (`packages/services/service-storage/src/storage-routes.ts:274`). Fix the step text `size` &rarr; `totalSize`.\n- **`inline-grid-receipt-cells` clause 3** — restate against ADR-0104 D3 (opaque `sys_file` id, not a resolved object). Tracked by #7669.\n- **`upload-session-abort` clause 4** — enforce-or-remove `failed`/`expired` (retention references states with no producer). Tracked by #7667.\n- **`attach-requires-parent-edit` clause 3** — the pin needs a CI rebuild of `@objectstack/core` before it runs, or a live oracle. Tracked by #7668.\n- **Fixture** — land the runtime-provisioned scratch objects (`qa_vault`/`qa_shared`/`qa_nofiles`) + two personas as a permanent fixture. Tracked by #7670.\n\nGrouping note: the six problems from the run are filed as six distinct cards per the standing rule (four PARTIALs #4269/#7667/#7668/#7669, the fixture #7670, and this checklist-maintenance card). This card is not over-combined — it carries only the single pure step-text doc edit plus the cross-reference index; each substantive restatement lives in its own partial card.\n\n## Reproduction\n\nRead the `attachments-storage` checklist step for `upload-session-abort` &rarr; it instructs sending `size`; the live route rejects that and requires `totalSize` (`storage-routes.ts:274-276`).\n\n## Source\n\nExtracted from the QA run objectstack-ai/objectstack#7635 (framework 92f26f75, console 6314e87f)."
+}

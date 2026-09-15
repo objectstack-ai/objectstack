@@ -1,0 +1,34 @@
+{
+  "number": 6350,
+  "kind": "issue",
+  "title": "[finding] #6148 的门禁只判 diff,v17 列车已有的 227 条 breaking changeset 从未被比对过 —— 抽样已见 2 条疑似同形漏登记",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "target:v17"
+  ],
+  "assignees": [
+    "os-help"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T14:35:13Z",
+  "updated_at": "2026-08-11T10:01:28Z",
+  "closed_at": "2026-08-11T09:59:02Z",
+  "closed_by": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 9,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6350",
+  "body": "观察类发现,在实现 #6148 的完备性门禁(PR #6342)时测出来的。**不影响任何用户今天能碰到的行为**,故只打 `finding`、不入 `pm:queue`,交 PM 分诊定级。未认领。\n\n## 事实\n\nPR #6342 的门禁**只判 PR 的 diff**(与 `check-empty-changeset` 同族,从 `merge-base` 起算)。这是刻意的 —— 判库存会让采纳当天全仓变红,且会拿 main 上早已存在的东西问责当前作者(#6129)。\n\n代价是它**前瞻性的**:库存里 **227 条已声明 breaking 的 changeset 一条都不会被检查**(`--list` 实测:227 条声明 breaking,0 条带处置标记,全部豁免)。#6011 是靠人眼比对发现的**一个**实例;这 227 条里还藏着几个同形缺口,**目前无人知道**。\n\n## 抽样证据(2 条疑似,已核实台账确实没有)\n\n用门禁回放 main 最近 400 个 first-parent commit 时,有 7 条 changeset 同时满足「声明 breaking」+「正文带 FROM → TO 迁移说明」+「未动过任何台账文件」。抽查其中 3 条,逐一 grep 台账:\n\n| changeset | 退役了什么 | 台账 |\n| :--- | :--- | :--- |\n| `runtime-httpserver-wrapper-retired.md` (#5122) | 已发布包的导出 `HttpServer` 委托包装器 | **无条目**。`registry.ts:1823` 有一处 `HttpServerConfig` 字样,但那是**另一条条目正文里的顺带提及**,不是本次退役的登记 |\n| `record-details-sections-object-form.md` (#5611) | `RecordDetailsProps.sections` 形状变更 + `hideFields` | **无条目**(`RecordDetails` / `hideFields` 在两个 registry 里各 0 命中) |\n| `data-driver-query-omit-object.md` (#5181) | `IDataDriver` 的 query 参数契约 | `IDataDriver` 有 6 处命中,**可能已覆盖** —— 未逐条确认 |\n\n前两条与 #6011 同类:退役已经发生、面向消费者、changeset 自己带着改写指令,而台账静默。第三条说明**不能**把这 7 条一概当成漏登记 —— 需要人判断。\n\n⚠️ 明确不主张这两条「应该」登记 —— 那是维护者的判断。这里只陈述:**它们没有被登记,也从未被任何东西问过**。\n\n## 为什么值得记一笔\n\n#6148 分诊评论写下的重启条件之一是「**再发现一次人工漏登记**,两个实例就把『人工比对能抓到』变成已证实的模式」。上表把它从 1 变成了 2~3,且这次是**工具**抽样出来的而不是人眼扫出来的 —— 这本身就是 PR #6342 的副产品能力。\n\n## 可选的补法(不主张)\n\n`check-adr-0087-registration.mjs --list` 已经是常设审计面,一行就能列出全部 227 条及其「是否带 FROM → TO 说明」。真要收口,候选是**一次性的人工分诊过账**(按 `--list` 输出逐条判、该补的补),而**不是**把门禁改成判库存 —— 后者会让采纳当天全仓变红,并把 main 的历史算到当前作者头上。按 startup focus,先记在案。\n\n发现于 PR #6342(#6148 的门禁半边),该 PR 正文也如实写明了门禁是前瞻性的、库存全部豁免。"
+}

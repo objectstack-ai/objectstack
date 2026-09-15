@@ -1,0 +1,32 @@
+{
+  "number": 6305,
+  "kind": "issue",
+  "title": "观察:engine 侧 DriverConnectError 带着与 #5794 相同的两句建议 —— 是否真能被 ERR_MODULE_NOT_FOUND 命中,未实测",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "finding"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T13:30:10Z",
+  "updated_at": "2026-08-11T14:35:41Z",
+  "closed_at": "2026-08-11T14:35:41Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6305",
+  "body": "在实施 #5794(PR #6302)扫消费半径时发现的旁证,**不在该 PR 范围内**,单独记录。落点 `packages/objectql/src/driver-connect-errors.ts`(域标签留分诊座位补)。\n\n## 观察到的事实\n\n#5794 修的是 `packages/services/service-datasource` 里 `DatasourceConnectionService.handleFailure` 的 fail-fast 收尾句。全仓 grep 那句通用建议时,**另一处**出现在 `packages/objectql/src/driver-connect-errors.ts:65-73`,`DriverConnectError` 的构造函数里:\n\n```\nA driver that did not connect cannot serve queries, and the schema sync that runs right\nafter init would issue DDL against it. Fix the datasource configuration (e.g.\nOS_DATABASE_URL), or set OS_ALLOW_DRIVER_CONNECT_FAILURE=1 to boot anyway and serve\nerrors until the datasource becomes reachable.\n```\n\n同样的两句建议,同样的成因分类缺失 —— 只要底层原因是「模块加载不出来」,这两句就同样是 #5794 论证过的有害建议(配置本来是对的;设开关只会让坏工作区宣称启动成功)。\n\n## 为什么它不是 #5794 的一部分,也不是今天有人撞得到的形态\n\n`DriverConnectError` 由 `ObjectQL.init()` 汇总,收的是**已注册 driver** 的 `connect()` 拒绝。而在未构建的工作区里,driver 压根构造不出来:失败发生在 `DefaultDatasourceDriverFactory.create()` 的 `await import('@objectstack/driver-…')`,还没轮到注册。所以 #5726 / #5794 实测到的那条消息是 service 侧那条,不是这条 —— 这条在那个场景里到不了。\n\n## 未实测的部分(明说,别当结论用)\n\n存在一条**理论上**的路径:driver 本身构造成功、注册了,但它的 `connect()` 里懒加载客户端(例如 `SqlDriver` + `client: 'pg'` 走 knex 解析 `pg`)。若那个客户端没装,`connect()` 会以模块解析失败拒绝,于是 `DriverConnectError` 就会带着上面两句建议描述一个「装个包」的问题。\n\n**我没有实测这条路径**(本工作区里 `pg` 是装着的,构造不出那个状态),所以本单按观察类记录,不带 `pm:queue`,严重度请分诊座位判定 —— 若分诊认为值得,合适的做法大概是复用 #5794 落下的 `@objectstack/types` 判据 `isModuleNotFoundError`,而不是在 objectql 里另写一份。\n\n## 参考\n\n- #5794 / PR #6302(service 侧同形修法;判据、消息纪律与理由都写在 `packages/services/service-datasource/src/connect-failure-remedy.ts`)\n- #5714 / #5931(同一条「不提供逃生舱、只给一个正确修法」的消息纪律)\n- #5795 / `scripts/check-dev-prereqs.mjs`(「一个前置条件一句修法」)\n"
+}

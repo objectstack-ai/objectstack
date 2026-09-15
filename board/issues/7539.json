@@ -1,0 +1,35 @@
+{
+  "number": 7539,
+  "kind": "issue",
+  "title": "Per-object `/batch` (non-atomic default) stops at the first failing record — no `NOT_ATTEMPTED`, `succeeded + failed != total`, the valid tail row never lands",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T05:02:10Z",
+  "updated_at": "2026-08-11T06:52:30Z",
+  "closed_at": "2026-08-11T06:52:30Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7539",
+  "body": "## Symptom\n\n`POST /api/v1/data/showcase_private_note/batch` with **no `options`** (so `atomic` defaults to `false` on this door) and three records — valid, failing, valid — answers:\n\n```\n200 {\n  \"total\": 3,\n  \"succeeded\": 1,\n  \"failed\": 1,\n  \"results\": [ { idx 0: ok }, { idx 1: VALIDATION_FAILED } ]\n}\n```\n\nFour things are wrong in one body:\n\n- only **2 results for 3 records**;\n- **no `NOT_ATTEMPTED` entry for idx 2** — the caller cannot tell it was skipped;\n- `succeeded + failed` (2) **!=** `total` (3), so the counters do not reconcile;\n- the third, **valid** record returns 0 rows on re-read — it was never attempted, and no amount of reading the response says so.\n\n**Expected** per ADR-0119 D4 (`atomic` defaults **false** on this door): valid rows land, and neither valid row is blocked by the other. Reproduced **2/2**.\n\nTwo same-run controls isolate it:\n\n| variant | result |\n|---|---|\n| `continueOnError: true` | 3 results, **both** valid rows persisted |\n| `atomic: true` | the correct `ROLLED_BACK` / `VALIDATION_FAILED` / `NOT_ATTEMPTED` triple |\n\n(The rest of the checklist item passes: the discovery bit matches live behaviour incl. `$ref` parenting and `BATCH_UNRESOLVED_REF`; `atomic:false` on the cross-object door is refused `400 BATCH_NOT_ATOMIC`; cross-object rollback held at both write-time and validation-time failures; `BATCH_TOO_LARGE` brackets exactly at 200/201 on all three doors.)\n\n## Root cause\n\nThe **non-atomic loop breaks out of the record loop on the first failure**, while `buildBatchDataResponse` (`packages/metadata-protocol/src/protocol.ts`) reports `total = records.length`. The un-attempted tail is therefore invisible twice over: it produces no `results[]` entry and it is not counted in either bucket, so the arithmetic mismatch is the only trace of it.\n\nSame family, recorded in the run's smaller observations: **per-object bulk counters under-report whenever a row fails without `continueOnError`** — worth fixing in the same pass. Related but distinct: **#4620** (closed/completed) covered `deleteManyData` / `updateManyData` atomicity, not this loop's break-and-miscount.\n\n## Reproduction\n\n1. Boot showcase on a fresh isolated file DB (`SqlDriver` / better-sqlite3); authenticate as `admin@objectos.ai`.\n2. `POST /api/v1/data/showcase_private_note/batch` with **no `options` key** and three records: valid, one that fails validation, valid.\n3. Observe `200 {total:3, succeeded:1, failed:1, results:[idx0 ok, idx1 VALIDATION_FAILED]}` — no idx 2 entry.\n4. Re-read the object: the third record is absent (0 rows).\n5. Controls: repeat with `options.continueOnError = true` → 3 results, both valid rows persisted; repeat with `options.atomic = true` → `ROLLED_BACK` / `VALIDATION_FAILED` / `NOT_ATTEMPTED`.\n\n## Source\n\nExtracted from the QA run #7463 (framework a86db175)."
+}

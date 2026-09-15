@@ -1,0 +1,35 @@
+{
+  "number": 7594,
+  "kind": "pull_request",
+  "title": "fix(objectql): force the join key into the expand sub-read, strip it when unrequested (#7537)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T06:45:17Z",
+  "updated_at": "2026-08-11T09:42:12Z",
+  "closed_at": "2026-08-11T09:42:11Z",
+  "closed_by": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "merged_at": "2026-08-11T09:42:11Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/7594",
+  "body": "Fixes #7537\n\n## Premise: verified against `origin/main` @ `97b6658`, and it still holds\n\nThe issue was filed against `a86db175`; `engine.ts` has moved since. Re-checked on `97b6658` — `expandRelatedRecords` is still at `:6168`, still forwards `nestedAST.fields` verbatim at `:6292`, still keys `recordMap` on `rec.id` at `:6301`, and the injection still falls through `recordMap.get(String(val)) ?? val` at `:6330`. The root-cause paragraph in the issue is accurate as written.\n\n**Empirically reproduced before touching anything.** The new integration test failed 3/3 on the pre-fix tree, with exactly the reported symptom:\n\n```\n× expands with `fields: [\"name\"]`   → expected 'string' to be 'object'\n× second object pair (task→project) → expected 'uHiWgyMU_yePSp2T' to equal { name: 'Apollo' }\n× findOne takes the same path       → expected 'xYvxWjuwNasB1pNK' to equal { name: 'Acme' }\n```\n\nThe two control cases (`fields: ['id','name']`, and no projection at all) passed pre-fix — matching the issue's \"adding `id` expands correctly\".\n\n## Two measurements the issue did not have\n\n**1. The defect is driver-conditional, which is why no existing suite caught it.** `SqlDriver` emits the requested column list verbatim (`builder.select(query.fields)`, `sql-driver.ts:3383`) so it genuinely drops `id`. `InMemoryDriver.projectFields` **force-adds** the primary key to every projection (\"Always include id if not explicitly listed\", `memory-driver.ts:1370`) so its rows always carry the join key and the map is never empty. The engine's own expand pins all run on mocks that return whole rows. That is why a better-sqlite3 QA run found this and 3157 objectql tests did not — and why the end-to-end pin here is wired to a **real** `SqlDriver` rather than a mock.\n\n**2. The join key is always literally `id` — the PM's \"is it configurable?\" fork resolves.** `referenceTargetOf` (`field-value.zod.ts:132`) returns a target **object name** and nothing else; a `lookup`/`master_detail`/`tree`/`user` field carries no target-column metadata anywhere in `spec`. (`relationshipField`/`foreignKey` in `field.zod.ts:712` names the *child's* FK field for related lists, not a target key on the parent.) The batch filter is `{ id: { $in: uniqueIds } }` by construction, so forcing `id` is correct rather than a guess at a configurable key.\n\n## Route: add-and-strip, not refuse\n\nThe issue offered \"add-and-strip **or** refuse the mismatch\". Add-and-strip, because the failing spelling is **prescribed verbatim** by the platform itself — `FIELD_NODE_OBJECT_FORM_REMOVED` (`query.zod.ts:322`) and `QUERY_JOINS_REMOVED` (`:359`) both tell authors migrating off the retired forms to write `expand: { owner: { object: 'user', fields: ['name'] } }`, and the same string appears in three more places: `migrations/registry.ts:3062`, `:3083`, and the two semantic migration entries `17.query-field-node-object-form-retired.ts` / `17.query-joins-retired.ts`. A refusal would turn five documented migration targets into an error. Making the prescribed form work is the only answer with no collateral.\n\n## Change\n\n`packages/objectql/src/engine.ts` — `expandRelatedRecords`:\n\n- The sub-read's projection gets `id` appended when the caller's nested `fields` is a non-empty array that does not already name it. Non-triggering shapes (absent `fields`, `[]`, `fields` already containing `id`) forward exactly as before.\n- The key is stripped back out of each related record before injection, so the emitted nested record carries exactly the columns the projection named — the same contract a top-level `fields` gets. **Deliberately after** the recursive-expand block, which rebuilds `recordMap` keyed on `rec.id` and still needs it; stripping at sub-read time would break the inner level the same way the outer one was broken.\n\nAll four entry points route through this one helper (`find` `:6805`, `findOne` `:6944`, the recursion `:6307`), so the fix covers them all — confirmed by test rather than by reading: the `findOne` case failed pre-fix and passes now, and there is a dedicated recursive-expand pin.\n\n## Behaviour change worth flagging\n\nA nested projection that omits `id` now emits a nested record **without** `id`. Previously the outcome was driver-dependent: SQL-backed stores produced the no-op above (so there was no `.id` to read — the value was a plain FK string), while `InMemoryDriver` returned an expanded record carrying an unrequested `id`. Both now emit exactly the projected columns. Callers wanting the key add `id` to the nested `fields`. Recorded in the changeset.\n\n## Tests\n\n`packages/runtime/src/expand-nested-fields-join-key.integration.test.ts` (new, real `ObjectQL` + real `SqlDriver` on better-sqlite3, on-disk) — 5 cases:\n- the prescribed `fields: ['name']` spelling expands, and the nested record equals `{ name: 'Acme' }` exactly (the unrequested `industry` absent, `id` absent);\n- `fields: ['id','name']` keeps the key (the issue's workaround spelling stays intact);\n- the issue's **second object pair** `showcase_task → project`, since the report confirmed 2/2;\n- `findOne` (single-record entry point);\n- no projection at all → whole related record, unchanged.\n\n`packages/objectql/src/engine.test.ts` — 4 unit pins under `[#7537]`, asserting the substance at the seam:\n- the sub-read is actually called with `fields: ['name','id']` while the emitted record is `{ name: 'Alice' }`;\n- a caller-supplied `['id','name']` is forwarded untouched;\n- array-valued (`multiple: true`) expansion strips too;\n- a recursive nested expand resolves both levels and strips the key at both.\n\nNo refusal path was added, so ADR-0112 envelope assertions do not apply.\n\n## Gates\n\nAll six card gates run locally, all pass: `check:adr-anchors`, `check:durability-log-level`, `check:engine-double-contract` (148 pinned / 133 DEBT / 2 exempt), `check:stack-collection-maps`, `scripts/check-engine-split-ratio.mjs`, `check:nul-bytes` (7015 files). Build closure: full `pnpm build`, 71/71 tasks. Suites: **objectql 3157/3157**, **runtime 1995/1995**, **rest 1344/1344**. `typecheck` clean on both changed packages; `eslint` clean on all three changed files. CI owns the rest of the farm.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01HJVZqLviCkZMJV8Nh3DUao)_"
+}

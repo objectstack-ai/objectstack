@@ -1,0 +1,34 @@
+{
+  "number": 6960,
+  "kind": "issue",
+  "title": "A legacy env overlay on an artifact-backed item of a rolled-back type can no longer be REMOVED through the ordinary delete path (403) — only via OS_METADATA_WRITABLE",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T06:24:14Z",
+  "updated_at": "2026-08-10T11:56:47Z",
+  "closed_at": "2026-08-10T11:56:47Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6960",
+  "body": "Observation-class finding, spotted while writing the ADR-0094 D5-R revision (#6858). **Dormant today** — the in-repo corpus has zero such rows (measured at PR #6608) — so nothing is user-visible right now. Filing plainly and leaving the grading to triage.\n\n## The asymmetry\n\n#6483 / PR #6608 flipped ten types to `allowOrgOverride: false`. That closed the **write** door. It did not close the **read** path: `supportsOverlay: true` is unchanged for `permission` / `position` / `page` / `app` / `dataset` / `book`, so an overlay row authored **before** the rollback still merges overlay-wins at read time and still shapes the effective body.\n\nRemoving such a row is where it gets stuck. `deleteMetaItem` refuses an artifact-backed target of a non-overridable type on **both** paths, and neither is conditioned on an overlay row actually existing in a way that helps:\n\n- `packages/metadata-protocol/src/protocol.ts` — inside `environmentId !== undefined`, `artifactBacked && !overlayAllowed` throws `NOT_OVERRIDABLE` / 403 **before** any probe for the row;\n- on a kernel with no `environmentId` (host configs, per #5086) the repository path runs with `intent: artifactBacked ? 'override-artifact' : 'runtime-only'`, and `SysMetadataRepository.assertAllowed` refuses `override-artifact` for these types — reached exactly when a row *does* exist, because the \"no overlay found\" probe returns a no-op success earlier.\n\nNet: on an environment carrying a pre-rollback overlay of an artifact-backed item, the row keeps applying and the ordinary \"Reset to package default\" flow answers 403. The only documented removal is the operator escape hatch, `OS_METADATA_WRITABLE=(type)`.\n\n## Why it reads as unintended rather than ruled\n\nThe save-side gate carries a comment stating that `deleteMetaItem` is deliberately **not** gated the same way, with the reason that \"removing a code-only row that predates this refusal is repair, and must stay possible\". That reasoning applies verbatim to this case — a legacy overlay predating the rollback is exactly repair — but the carve-out as written only covers the **code-only** tier (`allowRuntimeCreate: false` AND `allowOrgOverride: false`), not the artifact-backed tier a rolled-back type now sits in. So the stated intent and the enforced behaviour diverge for this one shape.\n\nNot asserting which side should move: a delete that lifts an overlay is strictly de-escalating on the authorization surface, which argues for allowing it; equally, \"any write against an artifact-backed authorization item is refused\" is a clean, defensible line that an operator hatch already relieves. That is a call for triage / the maintainer, not for this finding.\n\n## Blast radius\n\nZero in-repo today. It bites an environment that upgrades across the #6483 rollback while holding such a row, and the symptom is a Reset button that 403s with the item still customized. Scope is the metadata protocol and all rolled-back overlayable types, not ADR-0094 — which is why #6858 recorded the carry-over in ADR-0094 D5-R prose and filed this separately rather than widening its own change.\n\nRefs: #6483, PR #6608, #6609 (ruling A), #6858 (the ADR-0094 revision that surfaced it), ADR-0005."
+}

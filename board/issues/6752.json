@@ -1,0 +1,34 @@
+{
+  "number": 6752,
+  "kind": "issue",
+  "title": "delete() by-id 仍允许 beforeDelete 重定向 input.id —— 与 update() 侧的 ADR-0058 Amendment II.1 不对称，需定夺是否一并退休",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T14:14:03Z",
+  "updated_at": "2026-08-11T02:35:51Z",
+  "closed_at": "2026-08-11T02:35:51Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6752",
+  "body": "发现于 #5574 的引擎半边（PR #6697）。属范围外发现，**已在该 PR 内刻意保持原状**，仅把不对称写进 ADR 与 pin，交由本单定夺。\n\n## 事实（PR #6697 落地后的 origin/main 形状）\n\n`before*` 处理器改写 `ctx.input.id` 时，两个动词的答复**不一致**：\n\n| | 清空 id (CLEARED) | 改指到另一个 id (REBOUND) |\n|---|---|---|\n| `update()` by-id | 拒绝 | 拒绝 |\n| `delete()` by-id | 拒绝 | **仍然照办**（#5272 的重读，未改动） |\n| 二者，per-row | 拒绝 (D4) | 拒绝 (D4) |\n\n**清空这一列是齐的**，而且不是选择题：它原本靠\"落到 predicate 分支\"生效，而 ADR-0058 Addendum II 要求派发阶梯在 before 阶段之前解析（per-row 上下文是从匹配行集**构造**出来的），所以那条落法已经不存在。这就是裁决点名要退休的能力，`HookTargetRebindError` / `ERR_HOOK_TARGET_REBIND` 是它的拒绝面。\n\n**改指这一列不齐，且是有理由的不齐。** 反对照办的论据是\"写会落到一条从未被读过前像、从未评估过 `readonlyWhen` 锁、验证规则是对着别的记录跑的行上\"——而 `delete()` 上这句话根本不成立：#5272 已经**重新解析**新目标，重读它的前像并重绑 `previous`，`afterDelete` 与 roll-up 汇总看到的都是真正被删的那行。`update()` 没有这套机制，要退休就得**新造**一套，而那正是 #5574 裁决明令禁止的\"silently pick re-resolution instead\"。\n\n所以 PR #6697 的选择是：`update()` 拒绝，`delete()` 维持照办，把 repoint 本身留作独立问题——不作为一次时序改动的搭车项。\n\n## 需要定夺的问题\n\n`delete()` by-id 的 repoint 能力，是**保留**还是**退休**？\n\n三条候选路线，代价都已量过：\n\n1. **保留（现状）。** 代价是两个动词对同一个槽位答复不同，作者要记两条规则。收益是 #5272 的既有能力与其 pin 全部不动，且它是**正确**的——重读让语义自洽，没有任何陈旧绑定泄漏给消费者。\n2. **退休 delete 侧的 repoint。** 与 `update()` 对齐成一条规则。代价是删掉一个已交付、有 pin 的能力（#5272 明确写了\"A `beforeDelete` hook may repoint the target id\"），这是行为移除，需要裁决而非重构。\n3. **给 `update()` 也造重解析。** 与 `delete()` 对齐成另一条规则。**已被 #5574 裁决排除**（\"⛔ do not silently pick re-resolution instead\"），除非裁决被显式修订。\n\n## 前提核查（对着 origin/main 实测）\n\n仓内**没有任何消费者**依赖 delete 侧的 repoint：全仓 `grep -rn \"input\\.id\\s*=\" --include=*.ts --include=*.tsx --include=*.md --include=*.mdx`（排除 node_modules 与 `input.id ===`）只有一处命中，是 `packages/objectql/src/engine.test.ts` 里为触发 #2982 fail-closed 断言而清空 id 的用例，与 repoint 无关。所以路线 2 的**兼容性代价为零**，它纯粹是一个\"要不要少一条规则\"的取舍，不是\"会不会弄坏谁\"。\n\n这也意味着本单**不阻塞任何东西**——现状是自洽且正确的，只是不够齐整。\n\n## 已落地的记录点（改动时需一并移动）\n\n- `docs/adr/0058-expression-and-predicate-surface.md` — Amendment II.1 的 scope 表格与其后的两段理由；\n- `packages/objectql/src/hook-target-rebind-errors.ts` — \"What this error does NOT cover: `delete()`'s by-id REPOINT\" 一节；\n- `packages/objectql/src/engine.ts` — `delete()` by-id 分支里重读块上方的注释；\n- `packages/objectql/src/bulk-write-per-row-hooks.test.ts` §7 D4 — `still HONOURS a by-id beforeDelete REPOINT — deliberately not retired here`，该用例断言重定向后**被删的是新目标**且 `afterDelete` 的 `previous` 是新目标的前像。\n\n## 关联\n\n#5574（引擎半边，PR #6697）/ #5272（delete 侧前像时序与 repoint 重读）/ #5846 / ADR-0058 Addendum II + Amendment II.1"
+}

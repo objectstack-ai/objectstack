@@ -1,0 +1,34 @@
+{
+  "number": 7505,
+  "kind": "issue",
+  "title": "`readRowById` swallows engine failures into `null`, so a store outage is indistinguishable from an absent row at every gate that probes with it",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-help"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T04:09:46Z",
+  "updated_at": "2026-08-11T11:28:45Z",
+  "closed_at": "2026-08-11T11:28:45Z",
+  "closed_by": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7505",
+  "body": "Found while implementing #7474 (splitting the `assertControlledByParentWrite` refusal legs). Filed rather than fixed: fixing it changes what several security gates answer during an outage, which is a wider decision than the ruled card.\n\n## What was measured\n\n`packages/plugins/plugin-security/src/security-plugin.ts` — the shared single-row probe:\n\n```ts\nprivate async readRowById(object: string, id: unknown, context: any): Promise<Record< string, unknown > | null> {\n  if (id == null || typeof this.ql?.findOne !== 'function') return null;\n  try {\n    const row = await this.ql.findOne(object, { where: { id }, context });\n    return row && typeof row === 'object' ? (row as Record< string, unknown >) : null;\n  } catch {\n    return null;\n  }\n}\n```\n\nThree distinct facts collapse into one `null`: the row does not exist; the engine threw (driver down, table missing, timeout); no engine is wired at all. Every caller then reads `null` as \"no such row\".\n\n## Why it is more visible after #7474\n\nBefore that card, `assertControlledByParentWrite`'s `!row` branch answered `403 PERMISSION_DENIED — requires edit access to its master record`, which was untrue for all three causes equally. It now answers `404 RECORD_NOT_FOUND`, which is exactly right for the first cause and newly wrong-in-a-specific-way for the other two: a driver outage is reported to the caller as \"that record does not exist\", an answer an SDK treats as terminal (do not retry, drop the id) rather than as a transient fault it should back off on. The platform has a code for this — `ERR_DATASOURCE_UNAVAILABLE` / `503` — and this path cannot reach it.\n\nThe same `null` also feeds `getCallerPreImage`, so the collapse is not local to the controlled-by-parent gate.\n\n## Direction, not a prescription\n\nDistinguishing \"absent\" from \"could not be read\" in the probe's return (and letting an engine fault propagate rather than being flattened) is the shape; whether each caller should then fail closed on a fault, or surface the datasource error, is per-gate and is the part that needs deciding. Note the fail-closed direction is already the house answer next door — `assertControlledByParentWrite`'s master-RLS probe catches and treats a throw as \"not visible\", and the sharing service throwing denies both faces (`controlled-by-parent-sharing.test.ts`, \"fail-closed\"). A probe that fails closed on the DETAIL row would answer 403, not 404.\n\n## Pointers\n\n- `packages/plugins/plugin-security/src/security-plugin.ts` — `readRowById`, `getCallerPreImage`, and the `!row` branch in `assertControlledByParentWrite`\n- #7474 — the split that made the 404 leg explicit"
+}

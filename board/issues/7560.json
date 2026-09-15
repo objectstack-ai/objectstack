@@ -1,0 +1,36 @@
+{
+  "number": 7560,
+  "kind": "issue",
+  "title": "The ADR-0070 read-only gate is missing on package lifecycle: `PATCH /packages/:id/disable` and `DELETE /packages/:id` both answer 200 on platform packages, removing them from the running deployment",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-help"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T05:26:28Z",
+  "updated_at": "2026-08-11T08:22:20Z",
+  "closed_at": "2026-08-11T08:22:20Z",
+  "closed_by": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7560",
+  "body": "## Symptom\n\nPlatform packages are supposed to be read-only under ADR-0070. On the package lifecycle routes they are not:\n\n- `PATCH /packages/&lt;id&gt;/disable` on a platform package → **200**.\n- `DELETE /packages/&lt;id&gt;` on a platform package → **200**, and the code package is **actually removed from the registry listing**.\n\nReproduced on **two** platform packages.\n\nExpected: both operations refuse a platform package with the ADR-0070 read-only refusal, the way other protected-resource writes do.\n\nBlast radius, stated precisely: the packages come back **after a restart** — they are code-loaded, so nothing is permanently destroyed — but **the running deployment loses them until then**. A single API call takes platform functionality out of a live deployment with no way back short of a restart.\n\n## Root cause\n\nNot located by the report. What it establishes is that the refusal is simply absent on these two routes: they execute the lifecycle operation and answer success rather than declining a protected package. The package domain lives in `packages/runtime/src/domains/packages.ts` (per objectstack-ai/objectstack#7033's census), which is why this is filed `domain:cli`.\n\n## Not covered by the recent `/packages` authorization work\n\nobjectstack-ai/objectstack#7033 (\"`/packages` 域整体没有授权判据\") was closed on 2026-08-09 by PR objectstack-ai/objectstack#7083, which added caller authorization to the whole domain — writes require `manage_metadata`, reads require the D4 read set, plus a domain-wide anonymous gate. That fix landed **before** this run's framework commit was cut, and it is on a **different axis**: it decides *who may call* the route. This card is about *what the route may do once the caller is allowed* — an authorized admin can still disable and delete a platform package. So this is neither a duplicate of #7033 nor a regression of it; the read-only gate is a second, missing check on the same routes.\n\n## Reproduction\n\n1. Boot the platform and list `/packages`; pick a code-loaded platform package (repeated with a second one).\n2. `PATCH /packages/&lt;id&gt;/disable` → 200.\n3. `DELETE /packages/&lt;id&gt;` → 200; re-list `/packages` — the package is gone from the registry listing of the running process.\n4. Restart — the package is back, confirming it is code-loaded and the loss is confined to the running deployment.\n\n## Source\n\nExtracted from the QA run objectstack-ai/objectstack#7514 (framework a86db175, console 09987b68)."
+}

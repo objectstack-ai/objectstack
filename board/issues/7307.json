@@ -1,0 +1,34 @@
+{
+  "number": 7307,
+  "kind": "issue",
+  "title": "DELETE_RESTRICTED (409) message is shown verbatim to end users: English-only, leaks API names, and contains developer-facing advice",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-10T05:58:46Z",
+  "updated_at": "2026-08-10T11:59:34Z",
+  "closed_at": "2026-08-10T11:59:34Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7307",
+  "body": "## Summary\n\nWhen a delete is refused by referential integrity, the engine throws a `409 DELETE_RESTRICTED`\nwhose `message` is surfaced **verbatim to end users** by Console's toast. That message is\nEnglish-only, embeds machine object/field names, and hands the user a developer instruction\n(`set deleteBehavior:'cascade' on ...`) — none of which is actionable or comprehensible for a\nbusiness user of a localized app.\n\nThe error transport itself is fine (`status` is set, so the message is not swallowed into a\ngeneric 500). This is purely about the **user-facing copy**.\n\n## Where\n\n`packages/objectql` — `cascadeDeleteRelations`, the `behavior === \"restrict\"` branch\n(observed in `@objectstack/objectql@17.0.0-rc.5`, `dist/core.js`):\n\n```js\nconst reason = fdef.deleteBehavior !== \"restrict\" && fdef.required === true\n  ? ` (${fieldName} is required, so it cannot be cleared)` : \"\";\nconst err = new Error(\n  `Cannot delete ${object} (${id}): ${dependents.length} dependent ${childName} record(s) ` +\n  `reference it via ${fieldName}${reason}. Delete or reassign them first, ` +\n  `or set deleteBehavior:'cascade' on ${childName}.${fieldName}.`\n);\nerr.code = \"DELETE_RESTRICTED\";\nerr.status = 409;\nerr.object = object;\nerr.dependentObject = childName;\nerr.dependentCount = dependents.length;\n```\n\n## Actual behaviour\n\nDeleting a `sys_business_unit` referenced by a required lookup produces this **red toast in\nConsole**, shown as-is to the operator in an otherwise fully Chinese UI:\n\n```\nCannot delete sys_business_unit (<id>): 1 dependent os_tianshun_ehr_sporadic_application\nrecord(s) reference it via apply_dept (apply_dept is required, so it cannot be cleared).\nDelete or reassign them first, or set deleteBehavior:'cascade' on\nos_tianshun_ehr_sporadic_application.apply_dept.\n```\n\nThree separate problems for the end user:\n\n1. **Not localized** — English string in a zh-CN app; there is no i18n key to override.\n2. **Machine names leak** — `os_tianshun_ehr_sporadic_application`, `apply_dept`. The user\n   knows these as 「零星申请」and「申报部门」; the raw API names mean nothing to them.\n3. **Developer advice shown to end users** — `set deleteBehavior:'cascade' on ...` is a\n   metadata-authoring instruction. A business user cannot act on it, and it invites\n   support tickets asking where that setting lives.\n\n## Expected\n\nA business user should get something like:「该 <对象label> 正被 1 条 <子对象label> 通过\n「<字段label>」引用,且该字段为必填,无法清空。请先删除或改派这些记录。」 — i.e. localized,\nusing **labels** rather than API names, and **without** the metadata-authoring hint.\n\nThe structured fields (`code`, `object`, `dependentObject`, `dependentCount`) are already\npresent and are the right channel for developers/logs — the developer guidance belongs there\n(or in a separate `detail`/`devHint` property), not in the user-visible `message`.\n\n## Suggested direction\n\n- Emit `message` through the i18n layer with an overridable key (e.g.\n  `errors.deleteRestricted`), interpolating **resolved labels** for object/field where\n  available and falling back to API names only when no label exists;\n- Move `Delete or reassign them first, or set deleteBehavior:'cascade' on ...` out of\n  `message` into a developer-only field (or drop the `deleteBehavior` half of it entirely —\n  the \"delete or reassign them first\" half *is* useful to end users);\n- Keep `status: 409` and the structured fields exactly as they are — that part works well.\n\n## Repro\n\n1. Object A with a lookup field on object B where `required: true` (so `set_null` is coerced to `restrict`);\n2. Create one B record and one A record referencing it;\n3. Delete the B record from Console (record page, drawer, list row action, or bulk bar — all four surface the same toast);\n4. Observe the raw English message in the toast.\n\nFound while building an app on 17.0.0-rc.5; reported per \"platform issues go to the platform repo\".\n"
+}

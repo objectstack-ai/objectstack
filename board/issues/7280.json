@@ -1,0 +1,34 @@
+{
+  "number": 7280,
+  "kind": "issue",
+  "title": "finding: `context.authGate` is read by REST's `enforceAuth` but is not declared on `ExecutionContextSchema` — an undeclared field outside every closure gate",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-10T04:36:45Z",
+  "updated_at": "2026-08-10T11:42:04Z",
+  "closed_at": "2026-08-10T11:40:40Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7280",
+  "body": "Found while implementing #6216 (PR #7259). Filed unassigned; deliberately not fixed there, because declaring a field on `ExecutionContextSchema` is a spec change with its own review surface, not a refactor rider.\n\n## The fact\n\nThe ADR-0069 authentication-policy gate rides on the execution context:\n\n- **written** in `packages/rest/src/rest-server.ts` `computeExecCtx` — the assembled envelope is spread with `...(authGate ? { authGate } : {})` behind an `as any`;\n- **read** in the same file's `enforceAuth` (`const gate = context?.authGate;`), which blocks protected resources for a gated user;\n- **not declared** anywhere in `packages/spec/src/kernel/execution-context.zod.ts` — `grep -n authGate packages/spec/src` returns nothing.\n\n## Why it matters now specifically\n\n#6216's whole point is that the `ExecutionContext` field set is **closed by type**, so a field cannot reach one transport and miss another. That closure is derived from `keyof ExecutionContext`, i.e. from the schema. A field that lives only in an `as any` spread is, by construction, **outside** the closure: `ENTRY_EXECUTION_CONTEXT_FIELDS` cannot list it, `ExecutionContextEntryFields` cannot demand it, and the runtime pin that reconciles the closed set against `ExecutionContextSchema.shape` cannot see it either. It is exactly the blind spot the new gate is meant to remove, sitting one `as any` outside the gate.\n\nNothing is broken today: the producer and the consumer are ten lines apart in one file, so they cannot drift the way #6071's two files did. The cost is that a second transport wiring up the ADR-0069 gate has nothing to tell it the field exists.\n\n## Suggested shape if it is taken up\n\nDeclare `authGate` on `ExecutionContextSchema` (shape: `{ code, message }` per `packages/core/src/security/auth-gate.ts`), drop the `as any`, and let #6216's closed set pick it up — at which point every face must decide it, which is the intended outcome. Note the ADR-0087 / authorable-surface consequences of adding a key: `pnpm --filter @objectstack/spec build` regenerates `packages/spec/authorable-surface/kernel.json`, and that regeneration is itself gated.\n\nRelated: #6216 / PR #7259, ADR-0069."
+}

@@ -1,0 +1,34 @@
+{
+  "number": 7689,
+  "kind": "pull_request",
+  "title": "test(spec-tooling): restore the liveness author-lint's array fan-out assertion (#7079)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "labels": [
+    "size/m",
+    "skip-changeset",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T10:17:54Z",
+  "updated_at": "2026-08-11T11:12:45Z",
+  "closed_at": "2026-08-11T11:12:43Z",
+  "closed_by": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "merged_at": "2026-08-11T11:12:43Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/7689",
+  "body": "Fixes #7079\n\n## What was lost, and what pays it back\n\n`getNested` (`packages/lint/src/lint-liveness-properties.ts:146`) resolves a dotted warn-map path by fanning it out over an **array container level** — `navigation.runAction` must check *every* navigation entry, not just `navigation[0]`. That reach is the half a walk can lose silently: a `getNested` that stopped at index 0 still warns on every single-entry fixture, on every top-level warned key, and on the first item of every real app, so nothing else in the suite goes red.\n\nIt had exactly one subject, `dashboard.widgets.colorVariant`, and #6774 flipped that row to `live`. The assertion — *\"fans out over EVERY widget, not just the first\"* — was removed with a tombstone comment rather than downgraded into a silence check that would pass on a broken fan-out. #7079 recorded the loss.\n\n`app.props.navigation.children.runAction` is now a dotted warned path under an array container: #4848's spec half, `planned` + `authorWarn` (the declared deep-link auto-run slot is validated at authoring, but no shipped shell reads it yet), and `navigation` is an array in all three authored apps. The assertion is rebuilt against it in the deleted test's construction — **the warned key on `navigation[1]`, nowhere on `navigation[0]`**.\n\n## The evidence is the mutation, not the green suite\n\nA test that merely passes today would be the exact non-test this card was filed to avoid. So `getNested` was temporarily broken to take only `c[0]` at an array level:\n\n```\n ❯ src/lint-liveness-properties.test.ts (32 tests | 1 failed) 120ms\n       × fans out over EVERY navigation entry, not just the first 12ms\n\nAssertionError: expected [] to have a length of 1 but got +0\n ❯ src/lint-liveness-properties.test.ts:572:23\n\n Test Files  1 failed | 69 passed (70)\n      Tests  1 failed | 1883 passed (1884)\n```\n\nThe new assertion is the **only** failure in the entire package — the red is attributable to the broken walk, not to collateral damage. Mutation reverted, `getNested` byte-identical to `main`:\n\n```\n Test Files  70 passed (70)\n      Tests  1884 passed (1884)\n```\n\n## Also in the block\n\n- a **control** pinning that index 0 is not a blind spot either, so a red on the main assertion reads \"the fan-out is broken\", not \"the walk moved\";\n- the `checkItem` one-finding-per-`(item, path)` contract the `toHaveLength(1)` rests on, so that number is pinned rather than accidental;\n- a silence pin for navigation entries authoring no warned key;\n- the tombstone comment at `:448` replaced by a pointer to this resolution.\n\nBecause the discriminating assertion is a **positive** warning, it cannot pass vacuously: `lintLivenessProperties` returns `[]` both when the ledgers fail to load and when the walk is broken, and this block fails in either case.\n\n## Option 1 (export `getNested`) — declined, deliberately\n\nThe card offered a ledger-independent unit test via an exported `getNested` or an `@internal` seam, and named its cost: a second contract on a function whose entire design is *\"ledger-driven, coverage grows by marking entries\"*. Declined, because the mutation above shows the ledger-driven test already delivers the one fact the card asks for — it distinguishes a working walk from one that never looks past `[0]`. A seam would add public surface to `@objectstack/lint` for no additional discriminating power, and would cost the property this test has and a unit test would not: it holds the real shipped ledger to its `authorWarn` on that row, the contract this file's header docblock describes.\n\n## Scope\n\nEntirely `packages/lint/src/lint-liveness-properties.test.ts` (+99 / −9, one file). No ledger row was added or flipped — the subject already existed. `lint-liveness-properties.ts`, `packages/spec/liveness/*.json`, `packages/spec/src/**/*.zod.ts` and `content/docs/releases/**` are untouched.\n\n## Gates\n\n| Gate | Invocation | Result |\n|---|---|---|\n| tests | `pnpm --filter @objectstack/lint run test` | 1884 passed (70 files) |\n| typecheck | `pnpm --filter @objectstack/lint run typecheck` | clean |\n\n**`skip-changeset`**: test-only, nothing published changes — `packages/lint`'s `files` ships `dist`, `README.md`, `CHANGELOG.md`, and vitest sources are in none of them. AGENTS.md:1018 requires a changeset for feature work; the label's own description is \"PR has no user-facing published change; bypasses the changeset gate\". Precedent: **#7579** (`test(drivers): remove redundant object: key from mongodb/sql query test literals`), merged test-only with the label.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01DveDnLVD1syPGfXryonczk)_"
+}

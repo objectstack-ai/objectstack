@@ -1,0 +1,37 @@
+{
+  "number": 7522,
+  "kind": "issue",
+  "title": "[security] GET /api/settings/:namespace returns encrypted setting values as plaintext — no redaction at the REST read boundary",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:services",
+    "pm:dispatched",
+    "security"
+  ],
+  "assignees": [
+    "huangyiirene"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T04:56:34Z",
+  "updated_at": "2026-08-11T05:52:42Z",
+  "closed_at": "2026-08-11T05:48:30Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7522",
+  "body": "Extracted from the QA run objectstack-ai/objectstack#7514 (`settings-hub-roundtrip`, framework `a86db175`). The run held back the step-by-step recipe pending a maintainer disclosure decision; the defect and its root cause were already public in that report, and this card carries the same level of detail — **no new disclosure**. The reproduction recipe stays withheld here too.\n\n## Symptom\n\nStorage of encrypted settings is **correct**: `sys_setting.value` is null, `encrypted: true`, `value_enc: 'sec_…'`, and `sys_secret` holds aes-256-gcm ciphertext. The leak is on the way **out**:\n\n`GET /api/settings/:namespace` returns the secret's **plaintext** in `values.&lt;key&gt;.value`, and repeats that same plaintext inside every `cascadeChain` entry.\n\nBoth specifier flavours are affected — `type: 'password'` and the explicit `encrypted: true`.\n\nThe endpoint requires `setup.access` (anonymous callers get 403), so this is **defense-in-depth, not privilege escalation**. It is still a real exposure: any operator or integration holding setup access — and any log, proxy, browser cache, or HAR capture on that response path — receives the cleartext of every secret in the namespace, when the whole point of `value_enc` + `sys_secret` is that those values never materialise outside the crypto boundary.\n\n## Root cause\n\nVerified against `origin/main` at the time of filing (not merely restated from the run):\n\n1. `packages/services/service-settings/src/settings-service.ts` — `materialiseRow()` (~:1870) sees `row.encrypted`, dereferences the `sec_` handle through `secretStore`, and calls `cryptoProvider.decrypt(...)`, returning **plaintext**.\n2. The same file's `get()` builds `cascadeChain` by calling `materialiseRow()` per scope (~:1068 global, ~:1082 tenant, ~:1094 user), so the plaintext is copied into **each** chain entry as well as the resolved value.\n3. `getNamespace()` (~:1118) loops `this.get(namespace, key, ctx)` over every key and returns `{ manifest, values }` with **no redaction step**.\n4. `packages/services/service-settings/src/settings-routes.ts` (~:75-87) — the `GET ${base}/:namespace` handler calls `service.getNamespace(ns, ctx)` and hands the payload straight to `sendOk`. **There is no redaction anywhere on this path.**\n\n## Where the fix belongs — and where it must NOT go\n\nThe missing boundary is the **REST read**, not the service.\n\nThe service-layer decryption is deliberate and load-bearing: `snapshotOf()` / `createClient()` (~:1190-1200) consume `payload.values[k].value` to hand plugins their real secret values, and `settings-service.test.ts` pins that round-trip on purpose. Redacting inside `materialiseRow()` or `getNamespace()` would break every legitimate in-process consumer.\n\n⛔ So do not \"fix\" this by making the service stop decrypting. The REST response is the only surface that should never carry the cleartext.\n\n## Acceptance criteria\n\n- `GET /api/settings/:namespace` never emits the plaintext of a key whose specifier is `encrypted: true` or `type: 'password'` — neither in `values.&lt;key&gt;.value` nor anywhere in `cascadeChain`.\n- The redaction is **presence-preserving**: a caller must still be able to tell that a value is set vs unset (so the console can render \"configured\" state and the existing env-lock affordances keep working). Pick the marker shape that matches whatever this repo already uses for masked reads — check the encrypted-**field** read-mask convention that `records-forms`' `encrypted-field-behavior` item pins, and follow it rather than inventing a new sentinel.\n- The existing **write** path keeps working, including the no-op echoed-mask case: PUTting back a redacted marker must not overwrite the stored secret with the marker's literal text. Assert this explicitly — it is the classic second bug introduced by a redaction fix.\n- `source`, `locked`, and the `409 SETTINGS_LOCKED` env-lock behaviour are unchanged (the run verified these are currently correct).\n- In-process consumers (`createClient` / `snapshotOf`) still receive **real plaintext** — add or keep a test proving the service layer is untouched.\n- A regression test at the **route** level asserting the response body contains no ciphertext-backed cleartext for both specifier flavours.\n\n## Source\n\nExtracted from the QA run objectstack-ai/objectstack#7514 (framework `a86db175`, vendored console `09987b68`). Root cause re-verified against `origin/main` before filing."
+}

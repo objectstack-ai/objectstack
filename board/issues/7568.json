@@ -1,0 +1,34 @@
+{
+  "number": 7568,
+  "kind": "issue",
+  "title": "showcase authoring gap: the ops dashboard's global filter is `field:'status'` with *task* statuses, and the project widgets carry no `filterBindings` — so it also lands on `showcase_project.status` and zeroes those tiles",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T05:27:44Z",
+  "updated_at": "2026-08-11T08:58:47Z",
+  "closed_at": "2026-08-11T08:58:47Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7568",
+  "body": "## Symptom\n\n> **This is a showcase authoring gap, not a platform defect.** The run classified it as such deliberately. Do not go hunting for a bug in the global-filter engine — the engine does exactly what the metadata tells it to. The fix is in the example's dashboard authoring.\n\nOn the showcase ops dashboard, picking any value in the \"Task Status\" global filter **zeroes the project-bound tiles** (Active Projects, At-Risk (Red), Total Budget, Projects by Health) as well as filtering the task widgets it was meant for.\n\n`examples/app-showcase/src/ui/dashboards/ops-dashboard.dashboard.ts` declares one dashboard-scoped global filter:\n\n```\nglobalFilters: [\n  { field: 'status', label: 'Task Status', type: 'select',\n    options: [ backlog, todo, in_progress, in_review, done ],\n    scope: 'dashboard' },\n]\n```\n\nThose five options are the **task** status vocabulary. But the filter is declared by bare `field` name at `scope: 'dashboard'`, and the widgets bound to the project dataset (`kpi_active_projects`, `kpi_at_risk`, `kpi_total_budget`, `col_health`) declare **no `filterBindings`**, so the same `status` filter is also applied to `showcase_project.status` — whose value domain is a different set entirely (`active` / health-style values). No project row matches `in_review`, so those tiles read 0.\n\n**Expected authoring:** either give the project-bound widgets `filterBindings` that map (or opt out of) the dashboard filter, or scope the filter to the task widgets — the same per-widget field-mapping mechanism proven exact elsewhere in this run (`region` on invoice widgets vs `sales_region` on account widgets, correct on the wire and in the echoed SQL).\n\nStill present on `origin/main` as of 2026-08-11.\n\n## Root cause\n\nAuthoring, in the example app: a dashboard-scoped global filter declared by bare field name (`status`) fans out to every widget that has not opted out via `filterBindings`, and the showcase's project widgets never opted out. The platform behaviour is the documented one — a widget without `filterBindings` inherits the dashboard filter on its own object's like-named field.\n\nFile: `examples/app-showcase/src/ui/dashboards/ops-dashboard.dashboard.ts` (the `globalFilters` block and the four `projectDs` widgets).\n\n## Reproduction\n\n1. Boot showcase and open the ops dashboard.\n2. Note the baseline values of Active Projects / At-Risk (Red) / Total Budget / Projects by Health.\n3. Set the \"Task Status\" global filter to any option (e.g. `in_review`).\n4. Observe the task widgets filter correctly while all four project-bound tiles drop to 0 — the filter reached `showcase_project.status`, whose domain does not contain task statuses.\n\n## Source\n\nExtracted from the QA run objectstack-ai/objectstack#7515 (framework a86db175)."
+}

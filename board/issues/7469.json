@@ -1,0 +1,35 @@
+{
+  "number": 7469,
+  "kind": "pull_request",
+  "title": "fix(objectql): a CEL `defaultValue` stores the declared type's contract shape, not a raw `Date` (#7373)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-10T14:39:38Z",
+  "updated_at": "2026-08-10T15:23:18Z",
+  "closed_at": "2026-08-10T15:23:17Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-10T15:23:17Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/7469",
+  "body": "Closes #7373.\n\n## The defect\n\n`applyFieldDefaults` produces a default three ways, and only two of them honoured the stored-value contract:\n\n| branch | normalization |\n|---|---|\n| `NOW()` token | routes through `resolveNowDefault` → the form the declared type stores |\n| literal | checked against `valueSchemaFor(def, 'stored')` at author time (#7127) |\n| **expression envelope** | **assigned verbatim** — no counterpart |\n\nThe temporal stdlib returns a JS `Date` (ADR-0053 D1: `today()` / `daysFromNow(n)` / `daysAgo(n)` are UTC-midnight of the reference-tz calendar day; `now()` the raw instant), so `{ dialect: 'cel', source: 'daysFromNow(7)' }` on a `datetime` put a `Date` **object** in the column while `valueSchemaFor` names an ISO-8601 **string**. `validateRecord` accepts a `Date` on `date`/`datetime` by explicit decision, so nothing refused the write — and `os migrate value-shapes`, which walks stored values against that same schema, reports such a row as a violation by the platform's own scan.\n\n## The fix\n\nThe expression branch routes a `Date` result through the **same** per-type table the `NOW()` token uses — one table, both branches, not a second copy of the contract:\n\n| declared type | stored |\n|---|---|\n| `datetime` (and anything else) | `YYYY-MM-DDTHH:MM:SS.sssZ` |\n| `date` | `YYYY-MM-DD` |\n| `time` | `HH:MM:SS[.fff]` |\n\n## Measurement behind the choice\n\n**In-tree CEL `defaultValue` census** — the `dialect: 'cel'` corpus is almost entirely `expression:` (formula fields, virtual — never stored), `condition:`/`when:` (rule predicates). Exactly two are `defaultValue`, one temporal:\n\n| site | source | declared type | pre-fix stored shape |\n|---|---|---|---|\n| `engine-write-formula-hydration.test.ts:157` | `now()` | `datetime` | `Date` object |\n| `engine-select-option-default.test.ts:210` | `'approved'` | `text` | `string` (unaffected) |\n\n**Per-driver behaviour when handed a `Date`** — measured by reading each driver's write seam:\n\n| driver | `datetime` | `date` | net effect of this change |\n|---|---|---|---|\n| driver-sql | `canonicalUtcDatetime` → `toISOString()` | `toDateOnly` → `YYYY-MM-DD` | **byte-identical** |\n| driver-mongodb | `storageDatetimeValue` keeps BSON `Date`; an ISO string parses to the identical `Date` | `storageDateValue` → `YYYY-MM-DD` | **byte-identical** |\n| driver-memory | imports only `coerceTemporalValue` (filter comparands); stores writes **as handed** | same | **`Date` object → contract shape** |\n\nSo SQL and MongoDB already stored exactly what the engine now produces; the only stored-shape change is on the memory driver, which is where the defect was visible. This is the split #4597 / #4560 closed for the `NOW()` token, reappearing on the CEL branch and closed the same way — engine-side, so one answer serves every driver.\n\n**Why normalize rather than refuse.** Refusing a `Date` out of a CEL default would make the rule depend on *who wrote the value*: `validateRecord` accepts a `Date` on `date`/`datetime` from **any** caller (`if (value instanceof Date) return null`), and temporal types are not in ADR-0104's strict value-shape block at all — so there is no strict path that already refuses this on a user write for a defaults path to be bypassing. Refusal would also break the documented envelope (#7244) on precisely the SQL backends where it stores correctly today.\n\n**No day-shift.** ADR-0053 D1's `Date` is UTC-midnight *of* the reference-tz calendar day, and it is read back with `toISOString()` — UTC getters, the same `getUTC*` the ADR names for the driver filter path. Reading those parts in local time is the move that would shift a day, and nothing here does it. Pinned directly: at an instant whose UTC day and `America/Los_Angeles` day differ, a `date` field defaulted by `today()` stores the LA day.\n\nNon-`Date` results pass through untouched (a CEL default's result type is otherwise a runtime concern), as does an `Invalid Date` — the same totality the driver canons keep.\n\n## Pins\n\n`packages/objectql/src/engine-cel-default-temporal-shape.test.ts` — 8 tests. They assert stored values against `valueSchemaFor` **itself** rather than a hand-copied shape, and assert the **type** as well as the text: `JSON.stringify` renders a `Date` as its ISO string, which is exactly what made the original defect read as correct.\n\nSubjects: `datetime`, `date`, `time` CEL defaults; the reference-tz day-shift guard.\nControls: `NOW()` token byte-identical, literal defaults untouched, non-date CEL results passed through, caller-supplied values untouched.\n\n**Reverse-verified** by restoring the pre-fix `out[f.name] = result.value` — the 4 subject pins fail, the 4 controls pass in both states.\n\n## Verification\n\n- `packages/objectql` suite: **177 files / 3135 tests pass**\n- Derived gates, all exit 0: `check:adr-anchors`, `check:durability-log-level`, `check:engine-double-contract`, `check:stack-collection-maps`, `scripts/check-engine-split-ratio.mjs`, `check:nul-bytes`\n- `check-empty-changeset` (1 declaring changeset added), `check-changeset-no-major` (no major)\n- `tsc --noEmit` and `eslint` clean on the changed files\n\n## Changeset\n\n`patch`, on `@objectstack/objectql` alone. Argued from the gate text: `check-changeset-no-major.mjs` records that the launch window ships even breaking changes as `minor`, so `major` (and the ADR-0087 trio) is out regardless. Between `patch` and `minor`, the observable change is confined to correcting values the platform's own value-shape scan already classified as violations, on the one backend that stored them — no API, type, or message-contract change. That matches the recent precedent for contract-correcting behaviour fixes (`nested-plugin-view-container-expansion`, `driver-sql-json-column-operator-refusal`, both `patch`).\n\n**No `packages/spec` touch** — deliberately. `resolveNowDefault` keeps its name so the reference in `packages/spec/src/data/default-value-shape.ts` stays accurate; only its parameter is renamed `now` → `instant`, since `daysFromNow(7)` is not \"now\" and takes the identical per-type treatment.\n\nRefs #7373, #7244, #7127, #4597 / #4560, ADR-0053, ADR-0104.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_012tjfhdVGuYU9KH7SNbor56)_"
+}

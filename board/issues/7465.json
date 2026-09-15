@@ -1,0 +1,34 @@
+{
+  "number": 7465,
+  "kind": "issue",
+  "title": "[finding] The gate section and `cli.mdx` disagree about the gate in three places — a heading/anchor pair that cannot be renamed alone, a stale rule count, and a retired rule still listed",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-help"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-10T14:20:34Z",
+  "updated_at": "2026-08-10T20:08:02Z",
+  "closed_at": "2026-08-10T20:08:02Z",
+  "closed_by": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7465",
+  "body": "Observation-class cluster, surfaced while implementing #7442 (the \"gate\" table's fourth column) and deliberately left out of PR #7458 because all three sit outside that card's ruled file surface. **Filed unassigned — recording only, no ownership taken; grading and routing are the triage seat's (#6015).** ⛔ Not self-claimed.\n\nThese are three separate drifts, but they are one cluster: `content/docs/deployment/validating-metadata.mdx` and `content/docs/deployment/cli.mdx` describe the same gate and no longer agree with each other or with the code.\n\n## 1. The heading is now wrong, and it cannot be fixed in one file\n\n`validating-metadata.mdx` has `## The one gate, three entry points`. Since #4463 P1 there are **four** doors — the three CLI commands plus the runtime publish gate (`saveMetaItem` on a `state: 'active'` write, and `publishMetaItem` on the draft→active promotion), which PR #7458 has just documented as a fourth column.\n\n⚠️ **The rename is a paired edit, not a one-word fix.** `content/docs/deployment/cli.mdx:458` links the anchor `#the-one-gate-three-entry-points`. Renaming the heading alone silently breaks that inbound link — and because the two files are in different cards' file surfaces, the obvious \"just fix the heading\" change is exactly the one that breaks it. PR #7458 left the heading alone for this reason and reconciled it in the body instead.\n\nBoth edits belong in **one commit**: the heading and the `cli.mdx` link.\n\n## 2. The sample transcript's rule count is stale\n\nThe console transcript quoted in `validating-metadata.mdx` reads:\n\n```\nRunning author-time rules (26)\n```\n\n`AUTHORING_RULES` now holds **38** entries. This is a quoted run transcript rather than a claim about the gate, which is why it was out of scope for a card about the table — but a reader comparing the transcript against the table below it gets two different answers about how many rules exist.\n\n## 3. `cli.mdx` still lists a rule that was retired\n\n`content/docs/deployment/cli.mdx:473` lists **`deprecated visibility aliases`** among what `os lint` reports. `visibility-alias-deprecated` was **retired by #6318** — confirmed in `validate-visibility-predicates.ts`, `authoring-rules.ts` and `authoring-rule-input-tier.test.ts`. PR #7458 dropped it from the table's advisory row in `validating-metadata.mdx`; the same claim survives in `cli.mdx`, which that card could not touch.\n\nThis is the only one of the three that is `declared ≠ enforced` in the user-facing direction: the docs promise a lint report that no longer exists.\n\n## Why observation-class\n\nNobody is blocked. (1) is a correctness-of-prose issue whose only cost is a reader mis-counting doors; (2) is a stale quoted number; (3) is the sharpest — a documented lint output that will never appear — but it is a report line, not a guarantee anyone builds on. Grading left to triage; ⛔ this seat does not self-grade.\n\n## Dedup\n\nSearched open issues for `the-one-gate-three-entry-points`, `author-time rules (26)`, `visibility alias` and `cli.mdx` before filing: no existing card. #7442 (now closed by PR #7458) is the discovering neighbour and its report comment records all three; this card exists so they remain discoverable after that issue closes.\n\nRefs: #7442, PR #7458, #4463 (P1, the fourth door), #6318 (the retirement), #7435 / `89d7b35a7` (the advisory channel)."
+}

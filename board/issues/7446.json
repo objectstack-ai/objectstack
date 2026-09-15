@@ -1,0 +1,36 @@
+{
+  "number": 7446,
+  "kind": "pull_request",
+  "title": "fix(service-job,service-automation): map a degraded job outcome to sys_job_run.status instead of success (#5548)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-10T12:20:22Z",
+  "updated_at": "2026-08-10T13:12:34Z",
+  "closed_at": "2026-08-10T13:12:32Z",
+  "closed_by": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "merged_at": "2026-08-10T13:12:32Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/7446",
+  "body": "Fixes #5548\n\nThe services half of the 2026-08-08 maintainer ruling (B-minimal). The producer half shipped as #6617 (`JobRunOutcome` on `JobHandler`) and the consumer vocabulary as #7072/#7340 (`degraded` in `JobExecutionStatus` and both `Field.select` sites); the adapters still discarded the resolved value, so `DbJobAdapter` decided a run's outcome purely by whether the handler threw.\n\nThe ruling, quoted verbatim and untranslated:\n\n> 采纳 B-minimal —— 给 handler 一个「跑完了但没干成」的可加性回报通道,由适配器映射到一个区别于 `success` 的 `sys_job_run.status`。\n\n## What changed\n\n`packages/services/service-job`\n\n- `DbJobAdapter.wrap()` reads the handler's resolved value. `{ outcome: 'degraded', reason? }` lands `sys_job_run.status: 'degraded'` with the reason in `error`; `undefined` and `{ outcome: 'completed' }` keep landing `success`; a throw keeps landing `failed` and retrying.\n- `bumpJob()` mirrors `degraded` onto `sys_job.last_status` / `last_error` and leaves `failure_count` flat — `degraded` is not a failure, so the failure/alerting signal must not move (contract, `job-service.ts`).\n- `IntervalJobAdapter` / `CronJobAdapter` map the same third state onto the in-memory `JobExecution`. Without this, `DbJobAdapter.getExecutions()` (which delegates to the inner adapter) would report `success` for the very run whose persisted row says `degraded`.\n- `replay()`'s synthetic row is settled from the execution the inner adapter just recorded, so a replayed degraded run no longer writes one `degraded` row next to one `success` row. `IJobService.trigger` resolves `void` by contract, so the outcome cannot travel back through it.\n\n`packages/services/service-automation`\n\n- The `wait` node's timer wake-up — the ruling's named acceptance case — adopts the channel: a shot that fires into an unreachable suspended-run store resolves `{ outcome: 'degraded', reason: 'STORE_UNAVAILABLE' }`. It still does not throw and still keeps the one-shot ARMED with its `sys_job` row `active`, so #5529 is untouched. The `reason` is the short code only; the driver's own (possibly multi-line) message stays in the log record's `meta` per #5737.\n- `@objectstack/service-job` added as a **devDependency** so the end-to-end regression can drive the real adapter instead of a spy.\n\n## Two judgement calls the card left open, and why\n\n1. **Where `reason` lands** — the existing `error` / `last_error` columns, no new column. This is not a fresh decision: it was taken at the `domain:services` seat on #7072 and is recorded in the `JobExecutionStatus` TSDoc, together with its honest cost (a column labelled \"Error\" carries a non-error note when `status === 'degraded'`, so a reader must gate on the status). Implementing anything else here would contradict a shipped contract comment.\n2. **Whether `bumpJob` mirrors `degraded` onto `sys_job.last_status`** — yes. The summary row is the operator's first stop, and leaving it on `success` would move the defect one table over rather than fixing it; `sys_job.last_status`'s own `Field.select` was widened by #7340 for exactly this. What deliberately does **not** move is `failure_count` (and nothing about retry), which is the direct consequence of \"degraded is not a failure\".\n\n## Verification\n\n- `packages/services/service-job`: 56/56 pass (13 new). `packages/services/service-automation`: 890/890 pass (3 new).\n- `pnpm --filter '@objectstack/service-job' typecheck` clean; `tsc --noEmit` on service-automation reports only three pre-existing `TS2341` errors in `nested-region-parity.test.ts` (untouched file, present on `origin/main`; that package has no `typecheck` script).\n- Reverse verification, both halves separately, taking each file out with `git checkout origin/main -- PATH` (never `git stash`):\n  - adapter removed ⇒ 7 of 13 new cases red, every one naming the cell: `expected 'success' to be 'degraded'`. The 6 that stay green are exactly the additivity/legacy cases plus the two timer-adapter cases (different file, still fixed) — the predicted direction.\n  - `wait-node.ts` removed ⇒ 2 of the 3 end-to-end cases red (`expected 'success' to be 'degraded'`), success control still green. That is what proves the end-to-end pin exercises the producer adoption and not just the adapter.\n- Additivity has its own reverse evidence: a handler resolving `undefined` is asserted to still land `success` with a null `error` and a flat `failure_count`.\n- Gates derived from the changed paths with `scripts/pm/dispatch-gates.mjs`: `check:nul-bytes`, `check:docs-audit-scope`, `check:changeset-gate-self-tests`, `check-changeset-fixed`, `check-changeset-no-major` — all green locally. ESLint clean on the changed files.\n\nEvery rejection-class / status-class assertion reads the value written into the `sys_job_run` / `sys_job` cell — never \"the handler was called\" or \"it did not throw\", since that criterion is the defect itself.\n\n⛔ Out of scope by the dispatch's own boundary: `packages/spec` and `packages/platform-objects` are untouched (both halves already landed). Nothing further was found missing in either.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_015fkdTyGmMD5s8ZtEifvuGy)_\n"
+}

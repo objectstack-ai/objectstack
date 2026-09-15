@@ -1,0 +1,30 @@
+{
+  "number": 7500,
+  "kind": "issue",
+  "title": "docs: plugin-distribution-framework-tasks.md marks F4 ✅, but PluginPermissionEnforcer has no production caller — the status row overstates",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T03:29:21Z",
+  "updated_at": "2026-08-11T04:05:31Z",
+  "closed_at": "2026-08-11T04:05:31Z",
+  "closed_by": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7500",
+  "body": "Cross-repo half of **cloud#1202** (the cloud-side row correction is dispatched there; this card is the framework-side row). Filed by the repo:cloud seat per multi-repo rule 3 — linkage chores are issues, not memory. Session: `session_01PPDkETJ37ntVTFUZWX5FQg`.\n\n## The drift, as measured on the cloud card\n\n`docs/design/plugin-distribution-framework-tasks.md:131` marks **F4 ✅** on the strength of the helpers existing. The helpers do exist and are unit-covered, but cloud#1202's trace (2026-08-08) found **no construction site and no load-path call** in `packages/**/*.ts` (tests excluded) for any of:\n\n- `PluginPermissionEnforcer` (`packages/core/src/security/plugin-permission-enforcer.ts:56`)\n- `createPluginPermissionEnforcer` (`:465`)\n- `registerGrantedPermissions` (`:102`)\n- `buildPermissionsFromGrants` (`:504`)\n\nAll four are exported from `packages/core/src/security/index.ts`; the only non-test references are the exports themselves and a doc-comment usage example. So the enforcement relationship the row asserts (`granted_permissions` → load-time gating) does not currently run anywhere. Not a permission hole — every designed consumer is fail-closed on an absent grant set — but the row reads as a shipped guarantee.\n\nPremise re-check command (run before acting; the trace is 3 days old):\n`git grep -n \"createPluginPermissionEnforcer\\|registerGrantedPermissions\" origin/main -- 'packages/**/*.ts' ':!**/*.test.ts'`\n\n## Ask\n\nCorrect the F4 row to state the actual state: **helpers shipped + unit-covered; no production caller; end-to-end enforcement not wired**. Cross-reference cloud#1202.\n\n⛔ Out of scope: actually wiring the enforcer into the plugin load path. Per the finding-triage ruling on cloud#1202, that is a parked appetite question (no current pull for third-party plugin distribution — startup-focus default); it should get its own card only if the maintainer schedules it.\n\n(Unlabeled on purpose — routing/`domain:*` is the triage seat's single-producer territory.)"
+}

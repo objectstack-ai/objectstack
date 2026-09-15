@@ -1,0 +1,36 @@
+{
+  "number": 6954,
+  "kind": "issue",
+  "title": "cloud: the AI materialization path stamps `_unpublished: true` instead of `hidden: true` (#4829 A1 cloud half)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:blocked",
+    "repo:cloud",
+    "target:v17"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T06:20:58Z",
+  "updated_at": "2026-08-10T13:16:39Z",
+  "closed_at": "2026-08-10T08:36:54Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6954",
+  "body": "Blocked-by: #4829\n\nPart of #4829 (maintainer ruling A1, 2026-08-04 + v17 window re-ruling 2026-08-07). Filed by the `domain:spec` seat at ACCEPT time from PR #6942's measured mandatory-answer contract; routing label left to the triage seat (lands in `objectstack-ai/cloud`).\n\n## The contract, verbatim from the framework half\n\nThe ADR-0045 publish gate no longer reads `app.hidden` — it reads the machine-managed **`_unpublished`** key declared on `AppSchema` in PR #6942.\n\n**What the cloud side must do** (`service-ai-studio`, blueprint tools — the additive-materialization write point):\n\n- Stamp **`_unpublished: true`** on the built app wherever it stamps `hidden: true` today.\n- **Stop writing `hidden`** — after the framework half lands, writing it only affects App Switcher placement and gates nothing.\n- Nothing else in `apply_blueprint`'s envelope changes.\n\nWho writes/clears/reads, in one line: **written by the cloud AI materialization path (this card), cleared by `POST /packages/:id/publish-drafts` (framework, PR #6942), read by `filterAppForUser` (framework, PR #6942). No author, no UI, ever writes it.**\n\n## Sequencing\n\nThe framework half is an ADR PR reserved for maintainer hand-merge (AGENTS.md PD #14). Until it lands, cloud keeps writing `hidden` and the current behavior is unchanged; after it lands, a materialized app that still carries only `hidden: true` becomes **visible to normal users while still unpublished** — so this card should follow the framework merge closely rather than drift.\n\nStored rows written the old way are handled by the framework's ADR-0087 D2 conversion `app-hidden-to-unpublished` (stored population only — `retiredFromLoadPath: true`), so this card is about the *writer*, not about existing data.\n\nRefs: #4829 (ruling chain), PR #6942 (framework half incl. the naming rationale for the `_` prefix), ADR-0045, ADR-0010 (the `_`-prefix machine-managed precedent)."
+}

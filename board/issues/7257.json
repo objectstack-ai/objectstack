@@ -1,0 +1,34 @@
+{
+  "number": 7257,
+  "kind": "issue",
+  "title": "spec(liveness): the README state table has no rows for `api` / `capability` — the table silently fell behind its own registry",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-10T04:00:51Z",
+  "updated_at": "2026-08-10T11:28:16Z",
+  "closed_at": "2026-08-10T09:14:30Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7257",
+  "body": "Recorded while implementing #6247 (PR #7255). Not claiming or fixing here — filing per Prime Directive #10.\n\n**Finding.** `packages/spec/liveness/README.md`'s \"Current state\" table is the ledger's own index: one row per governed type, with counts regenerated from the gate's `--json` report and a hand-written Notes cell recording how each type got where it is. It carried **27 rows** under a heading that said \"27 governed types (complete registry coverage)\".\n\n`GOVERNED` in `check-liveness.mts` had **29** entries at the time. `api` (seeded 2026-08-04, #5271/#5206) and `capability` both have ledgers, are counted by the gate, and have **no row in the table**. So the heading's own number was the count of rows, not the count of governed types, and the two agreed only by coincidence until they didn't.\n\n**Why it's worth a card rather than a shrug.** This is the same failure shape the file spends 500 lines warning about, one level up. `dashboard.widgets` asserted in prose that its 22 child keys were \"classified in the DashboardWidgetSchema subtree\" — a subtree that never existed — and the claim survived a release because **prose cannot fail a build** (#4956). The heading `27 governed types (complete registry coverage)` is the same kind of sentence: a completeness claim, checked by nothing, that read as true to every subsequent reader. The gate now reconciles `GOVERNED` against the metadata-type registry in both directions, but nothing reconciles the README against `GOVERNED`, and the README is what a human or an AI reads first to learn what this ledger covers.\n\nPR #7255 changed the heading to 30 (it adds `qa`) and added a note admitting the table carries 28 of them. It deliberately did **not** back-fill the two missing rows: a Notes cell records what was measured and why a type landed where it did, and writing two of them from a guess about somebody else's change is precisely the fabrication the drill section forbids (\"do not drill by fanning a parent's status out over its children; that manufactures verdicts, which is worse than the gap\").\n\n**Options.**\n1. **Write the two rows** — whoever landed #5271/#5206 (`api`) and the `capability` governance has the measurement; `--json` gives the counts, the Notes cell needs a human. Closes the gap honestly.\n2. **Generate the row skeleton** — extend the documented regeneration snippet so a governed type with no row prints one, making the omission visible at regeneration time instead of at reading time.\n3. **Gate it** — a check that every entry in `GOVERNED` has a row and that the heading's count matches. Turns the completeness claim into something that can fail, which is the treatment every other claim in this file eventually got. Strongest, and the most in keeping with the file's own argument.\n\nNot urgent — nothing is mis-classified and no verdict is wrong. It is the map that is incomplete, and the map is the part that gets believed.\n\n**Dedup.** No open issue or PR in the three repos names the liveness README state table or the `api`/`capability` rows. Searched before filing."
+}

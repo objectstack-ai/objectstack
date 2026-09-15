@@ -1,0 +1,35 @@
+{
+  "number": 7650,
+  "kind": "issue",
+  "title": "[finding] cli checklist: dev-boot-contract clause 2 names retired `resolveDefaultDevDbUrl` / `dev.db` — refresh to unified `objectstack.db`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "huangyiirene"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T09:50:35Z",
+  "updated_at": "2026-08-11T12:24:34Z",
+  "closed_at": "2026-08-11T12:24:34Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7650",
+  "body": "## Symptom\n`cli.dev-boot-contract` clause 2 (`docs/qa/platform-checklist/areas/cli.json:45`) names `.objectstack/data/dev.db` and the helper `resolveDefaultDevDbUrl`, both superseded by the unified `objectstack.db` default. On `origin/main`, `packages/cli/src/commands/dev.ts` now resolves the nothing-chosen default to `&lt;state dir&gt;/data/objectstack.db` (legacy `dev.db` handled only for back-compat) and no longer exports `resolveDefaultDevDbUrl` — `git grep resolveDefaultDevDbUrl -- 'packages/cli/src/**'` returns nothing. The load-bearing property the clause verifies — nothing-chosen defaults to a PERSISTENT project-anchored sqlite file, never the `:memory:` that wipes work on restart — still holds; only the item text is stale.\n\n## Root cause\nChecklist text drift. The clause text was not updated when the DB default was unified to `objectstack.db` and the `resolveDefaultDevDbUrl` helper was removed/renamed. Refresh the clause and its related file/step references (`cli.json:28`, `:80`, `:88`, all of which still name `resolveDefaultDevDbUrl` and/or `.objectstack/data/dev.db`) to name `objectstack.db` and the current resolution path in `dev.ts`, keeping the persistent-file property assertion intact.\n\n## Reproduction\nOn `origin/main`: `git grep -n resolveDefaultDevDbUrl -- 'packages/cli/src/**'` returns nothing, while `docs/qa/platform-checklist/areas/cli.json` still names it and `.objectstack/data/dev.db`. `packages/cli/src/commands/dev.ts` comments and code use the unified `objectstack.db` default (e.g. lines 29, 239, 275).\n\n## Source\nExtracted from the QA run objectstack-ai/objectstack#7628 (framework 92f26f75, console 6314e87f)."
+}

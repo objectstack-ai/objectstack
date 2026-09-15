@@ -1,0 +1,32 @@
+{
+  "number": 7659,
+  "kind": "issue",
+  "title": "lint: publish-time predicate validation should refuse a path-shaped RIGHT-hand side — outside the renderer's declared ==/!= subset, and unreachable by #7214's resolution check",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-help"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T09:58:07Z",
+  "updated_at": "2026-08-11T11:29:36Z",
+  "closed_at": "2026-08-11T11:12:44Z",
+  "closed_by": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7659",
+  "body": "Cross-repo relay from the objectui whole-repo seat (session `session_017Qqyix2QcnpUC9XeYVDzx3`), executing the D half of the ruling recorded on objectui#4049. Filed unassigned for the spec/lint lane's triage; this is a NEW card rather than a comment on the closed #7010, because that card's delivered scope (PR #7214 — paths that fail to RESOLVE against the target schema) is a different refusal from the one needed here, and a completed card is the wrong place to accrete scope.\n\n## The gap\n\nobjectui's metadata-admin predicate evaluator supports a declared subset: the RIGHT side of `==`/`!=` is a LITERAL (`parseLiteral`), never a resolved path. `data.a == data.b` therefore compares `data.a`'s value against the literal STRING `\"data.b\"` — always false, silently. objectui#4049 (PR objectui#4264, merged-pending) adds the consumer-side dev diagnostic naming this boundary; the objectstack maintainer's ruling on #6828-family shapes and the objectui seat's ruling on #4049 both put the CONTRACT half here: authored predicates that exceed the renderer's declared subset should be refused at publish time, contract-first, rather than tolerated into a silent wrong verdict.\n\n## What #7214 covers vs what this asks\n\n- **#7214 (landed)**: a path reference that does not RESOLVE against the target schema → refused. A well-formed `data.a == data.b` passes it — both paths resolve fine; the problem is that the right side's POSITION does not evaluate paths.\n- **This card**: the publish-time check additionally refuses (or warns, per this lane's severity conventions) a `==`/`!=` right-hand side that is path-shaped — an unquoted identifier chain (`data.b`, or a bare `text` missing its quotes) — pointing the author at the sanctioned spellings: quote the literal, or restructure the comparison so the path is on the left. The refusal grammar the consumer diagnostic uses (identifier-chain: `/^[A-Za-z_$][A-Za-z0-9_$]*(?:\\.[A-Za-z_$][A-Za-z0-9_$]*)*$/`) is the natural shared definition — one grammar, two enforcement points.\n\n## Why publish-time and not just the dev warning\n\nThe consumer diagnostic (objectui#4264) is dev-mode only and fires at RENDER time — after the metadata is stored. An AI author or CI pipeline publishing forms never sees it. The publish door is where \"declared subset\" becomes \"enforced subset\" (the ADR-0049 declared-equals-enforced shape this lint check exists for).\n\nRefs: objectui#4049 (the ruling + consumer half), objectui PR #4264, #7010 / PR #7214 (the landed resolution check this extends), #6828 (the vocabulary-ruling family), objectui#4266 (adjacent third path in the same family — the `in` array-parse collapse — for the lane's awareness when shaping the check)."
+}

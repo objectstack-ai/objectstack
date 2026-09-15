@@ -1,0 +1,38 @@
+{
+  "number": 7380,
+  "kind": "issue",
+  "title": "[console][nav] `filterNav` never drops a group DECLARED with `children: []` — Setup renders an inert 「Approvals」 group on a runtime without plugin-approvals",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "approvals",
+    "bug",
+    "domain:cli",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-help"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-10T08:19:44Z",
+  "updated_at": "2026-08-10T14:05:40Z",
+  "closed_at": "2026-08-10T14:05:39Z",
+  "closed_by": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7380",
+  "body": "Found while browser-verifying the #7213 epic's converged approvals surface (the epic's close-out lists browser verification as its open gap). Not a regression from that epic — the defect predates it — but it is on the same nav face, so recording it here.\n\n## The finding\n\n`filterNav` (`packages/rest/src/rest-server.ts:2724`) is documented to *\"Drop empty groups so the sidebar doesn't render a label with nothing under it\"*. It does not do that for a group **declared** with `children: []` — only for a group whose children were non-empty and were then filtered away:\n\n```ts\nif (Array.isArray(e.children) && e.children.length > 0) {   // ← gate\n    const kids = filterNav(e.children);\n    if (e.type === 'group' && kids.length === 0) continue;  // ← the drop rule\n    out.push({ ...e, children: kids });\n} else {\n    out.push(e);                                            // ← declared-empty group lands here\n}\n```\n\nA group that starts out empty never enters the branch that owns the drop rule, so it is pushed through untouched. That is precisely the shape every contribution slot in the setup app uses — `packages/platform-objects/src/apps/setup.app.ts` declares `group_approvals` (and its siblings) with `children: []` and lets plugins fill them via `navigationContributions`. When the contributing plugin is absent, the slot survives filtering as an empty group.\n\n## Reproduction (measured)\n\nTwo runtimes, same build (objectstack `main` `88154bee1`, vendored console rebuilt at `.objectui-sha` = `8aad9fd50b16`), both `objectstack dev --ui --seed-admin` on a fresh DB, signed in as the dev admin:\n\n- `examples/app-showcase` — `requires: [… 'approvals' …]`, so `ApprovalsServicePlugin` loads and contributes four items. `GET /api/v1/meta/app` → `group_approvals` has its four children; the sidebar renders 审批 with 审批中心 / 审批申请 / 审批历史 / 审批委派（外出）. Correct.\n- `examples/app-crm` — `requires: ['ui', 'automation']`, no approvals plugin. `GET /api/v1/meta/app` returns:\n\n```\n  - group_approvals [group] \"Approvals\"      ← no children key content, nothing under it\n```\n\nand the Setup sidebar renders an 审批 group with a chevron that **does not expand and reveals nothing on click** — an inert label.\n\nWorth noting the same run confirms the item-level gate works exactly as intended one app over: the account app's `nav_account_approvals` (`requiresService: 'approvals'`) is correctly absent from the same response, so no dead component route is served. It is only the *group* that leaks.\n\n## Scope\n\nEvery `children: []` contribution slot has this exposure, not just approvals — approvals is simply the one where the contributing plugin is genuinely optional, so it is the one that shows up on a stock example. A runtime that drops any other optional contributor would surface the same empty label.\n\n## Suggested shape (not prescriptive)\n\nMove the drop rule out from under the non-empty gate, so a `type: 'group'` with no surviving children is dropped whether it *became* empty or *started* empty. The one thing worth deciding before writing it: whether a childless group is ever legitimately a navigation target on its own (a clickable group header). If it never is, the rule is unconditional; if it can be, the rule needs to spare those.\n\nAn alternative fix lives in the console (`AppSidebar` skipping empty groups), but ADR-0057 D10 makes the server the authoritative visibility gate and the client's filtering a courtesy, so the server side is the one that should not emit it.\n\n## Environment\n\n- objectstack `main` @ `88154bee1`, `@objectstack/*@17.0.0-rc.5`, vendored console at objectui `8aad9fd50b16`, sqlite driver, single tenancy, zh-CN.\n"
+}

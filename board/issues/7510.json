@@ -1,0 +1,34 @@
+{
+  "number": 7510,
+  "kind": "issue",
+  "title": "A bad key inside a form field's `publicPicker` reports the CONTAINER branch's diagnostic — the author is told to fix `viewKind`/`config`, not the key they typed",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-help"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T04:16:47Z",
+  "updated_at": "2026-08-11T07:36:10Z",
+  "closed_at": "2026-08-11T07:36:10Z",
+  "closed_by": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7510",
+  "body": "Found while implementing #7485 (retiring the public lookup route's `picker.sort` read). Filed, not fixed: it is a pre-existing union-diagnostic defect in `ViewMetadataSchema`, unrelated to that card's ruling, and fixing it as a rider would have widened a route-only change into the shared view-parse error path.\n\n## What happens\n\nSaving a view whose form field carries an **unknown `publicPicker` subkey** through the real write path (`saveMetaItem` → `ViewMetadataSchema`) is correctly REFUSED — but the reported message describes a different failure entirely. Measured on this branch (`claude/issue-7485-retire-sort-read`, worktree, `@objectstack/spec` built from source), saving a `viewKind: 'form'` item whose field declares `publicPicker: { ...valid four keys, sort: [{ field: 'email', order: 'desc' }] }`:\n\n```\n[invalid_metadata] view/lead.contact failed spec validation: &lt;root&gt;: Invalid input;\n&lt;root&gt;: Unrecognized key(s) on this view container: `viewKind`, `config`.\n  • `viewKind` belongs to a single VIEW, not to the container. Wrap it:\n    `defineView({ list: { type, data, columns, … } })`, or name it —\n    `defineView({ listViews: { my_view: { … } } })`. The container's own keys are\n    `list`, `form`, `listViews`, `formViews`. …\n```\n\nThe word `sort` — the only thing actually wrong with the input — appears nowhere. The author is instead handed a confident, detailed, and **wrong** instruction: to restructure a container shape that was correct all along.\n\n## Why\n\n`ViewMetadataSchema` is a union. The ViewItem branch is the right branch and the one that fails (on `unrecognized_keys` for the picker subkey); the container branch also fails, on `viewKind`/`config` being unknown container keys. The surfaced error is the container branch's, so the diagnostic quality inverts: the branch that got FURTHEST is the one whose message is discarded.\n\nThe byte-identical item minus the bad subkey saves successfully, so the union does pick the ViewItem branch when it passes — this is purely about which failure is reported.\n\n## Scope — it is not about `publicPicker`\n\n`publicPicker` is just where it was noticed. Any ViewItem-branch parse failure on a `viewKind`-carrying item should reproduce it; the misleading `viewKind`/`config` text comes from the container branch and is independent of what the real error was. Worth confirming the general case before sizing a fix.\n\nNote the direct door is fine: `FormViewSchema.safeParse` reports `unrecognized_keys` naming the key correctly (pinned in `packages/spec/src/ui/view-public-picker.test.ts`, `offset` case, since #7467). Only the union door degrades — which is the door `saveMetaItem` and therefore Studio uses.\n\n## Why it matters\n\nThe measured cost is not \"a vague error\". It is an error that **names the wrong keys and prescribes a wrong fix with high confidence** — the failure mode Prime Directive #12 is about, and one an AI metadata author will follow straight into mangling a correct container.\n\n## Sizing note\n\nNot obviously a one-liner: it needs the union to pick a \"best\" failing branch (most-specific / deepest-progress) rather than reporting a fixed one, and any change there moves error text for every view-parse failure in the repo — including whatever baselines and pin tests currently encode today's messages. Worth its own card and its own reverse verification.\n\nRelated: #7485, #7467, #4001 (the container-shape messages this surfaces), ADR-0089 D3a."
+}

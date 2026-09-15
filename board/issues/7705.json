@@ -1,0 +1,35 @@
+{
+  "number": 7705,
+  "kind": "issue",
+  "title": "`protocol.deletePackage` finds zero `sys_metadata` rows the data plane finds 3 of — uninstall leaves orphaned rows (persistence half of #7557)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T11:36:30Z",
+  "updated_at": "2026-08-11T14:51:06Z",
+  "closed_at": "2026-08-11T14:51:06Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7705",
+  "body": "Part of objectstack-ai/objectstack#7557 — transferred to the metadata lane per the cross-seat protocol, from the engine-core dispatch of that card (PR #7700's report located it and deliberately did not patch it from the consumer side).\n\n## Symptom (reproduced live on origin/main, 2026-08-11)\n\n`DELETE /api/v1/packages/:id` reports `persisted: { success: false, deletedCount: 0, failedCount: 0 }` while the package's `sys_metadata` rows demonstrably exist and survive: with 3 rows carrying `package_id = 'com.repro.b'`,\n\n- `protocol.deletePackage` finds **0** rows to delete;\n- the same predicate through the data plane finds **3**: `GET /api/v1/data/sys_metadata?filters=[[\"package_id\",\"=\",\"com.repro.b\"]]` → 3 records.\n\nAfter PR #7700 the dispatcher no longer wraps this in a 200 — but that fix is invisible to THIS defect by construction (`failedCount: 0` legitimately reads as success). The rows still orphan until the producer stops missing them.\n\n## Located mechanism (from PR #7700's verification)\n\n`packages/metadata-protocol/src/protocol.ts:11486-11488`:\n\n```ts\nconst where = { package_id: request.packageId };\nif (request.organizationId) where.organization_id = request.organizationId;\nconst rows = await this.engine.find('sys_metadata', { where });\n```\n\nThe `where` clause is not intrinsically wrong (the data plane returns 3 with it). The scoping the protocol's engine applies to it is the suspect — strongest candidate: **strict `organization_id` equality against rows stored env-wide (`organization_id IS NULL`)**. This is the same defect class this package already fixed once at `sys-metadata-repository.ts:887-901`, where identical strict equality silently dropped env-wide drafts and was replaced by an `$or` over `[{organization_id: oid}, {organization_id: null}]` (the orphaned-draft bug). Re-check commands:\n\n```bash\ngit grep -n \"organization_id\" origin/main -- packages/metadata-protocol/src/protocol.ts | sed -n '1,10p'\ngit show origin/main:packages/metadata-service/src/sys-metadata-repository.ts | sed -n '880,905p'\n```\n\n## Adjacent, distinct\n\n- #7221 (open finding): `MetadataFacade.unregisterPackage` removes only object contributors — same family at the **in-memory** layer; this card is the **persisted** layer. PR #7700's measured fix path did not run through it.\n- PR #7700 shipped: disable enforcement (metadata listing + data plane) and the honest uninstall envelope. This card is the remaining third piece.\n\nNo `domain:*` label applied — routing labels are the triage seat's single-producer territory; filed with `pm:queue` per the transfer-via-target-queue protocol."
+}

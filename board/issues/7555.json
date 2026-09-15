@@ -1,0 +1,35 @@
+{
+  "number": 7555,
+  "kind": "issue",
+  "title": "An app-declared permission baseline REPLACES the platform `member_default` instead of composing with it — every built-in Account destination 403s for members of any such app",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-help"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T05:24:14Z",
+  "updated_at": "2026-08-11T08:13:37Z",
+  "closed_at": "2026-08-11T08:13:37Z",
+  "closed_by": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7555",
+  "body": "Security-adjacent. The observed failure is fail-closed (403s, no data exposure), but the mechanism — one app's baseline silently displacing the platform baseline for the `everyone` anchor — is a permission-composition defect, and the same displacement decides what an app's members *do* keep.\n\n## Symptom\n\nA fresh member (purpose-signed-up, no positions beyond the implicit ones) is served the **whole** Account app and can use none of it:\n\n- All **10** Account-app nav ids are served to the member.\n- **7/7** of the objects backing those entries answer **403** on read.\n\nSo every built-in Account destination is a dead end for that persona, while the nav still advertises all of them.\n\nExpected: either the platform baseline still applies to members of an app that declares its own baseline (so the built-in Account destinations keep working), or the entries whose objects the caller cannot read are pruned from the served nav. Neither happens.\n\n## Root cause\n\nThe report locates the chain, at this level:\n\n1. The showcase declares its own baseline set and binds it to the `everyone` anchor. Boot log, verbatim:\n\n   ```\n   [security] baseline set bound to everyone anchor (ADR-0090 D5)\n   ```\n\n2. That binding **replaces rather than composes with** the platform `member_default`. Measured breadth: platform `member_default` grants **23** objects — including all the Account ones — while `showcase_member_default` grants **7**.\n\n3. Therefore this is not a showcase-specific fixture problem: **every built-in Account destination dies for members on any app that declares a baseline**.\n\n4. The second, unprunable half: the Account nav entries are gated with `requiresObject`, not `requiredPermissions`, so the nav server has **no signal** with which to prune an entry whose backing object the caller cannot read. The entry is served regardless of the 403 that follows.\n\nThe report does not name the exact code site of the replace-vs-compose behaviour — it locates it at the ADR-0090 D5 `everyone`-anchor binding. The presumed home is the baseline/permission-set assembly in `packages/plugins/plugin-security`; confirm the site before fixing rather than assuming it from this card.\n\n## Reproduction\n\n1. Boot the showcase app; confirm the boot log line `[security] baseline set bound to everyone anchor (ADR-0090 D5)`.\n2. Sign up a fresh member and sign in.\n3. Read the served nav for the Account app — all 10 nav ids are present.\n4. For each of the 7 objects backing those entries, `GET /api/v1/data/&lt;object&gt;` as that member — all 7 answer 403.\n\nReproduced **2×** with two independent member sessions.\n\n## Related\n\n- objectstack-ai/objectstack#7544 is the sibling half of the same \"a nav entry cannot be pruned\" gap: there the gate is `requiredPermissions` and the blocker is `enable.apiEnabled:false`; here the gate is `requiresObject` and the blocker is the baseline replacement. A prune rule that covers only one gate vocabulary will leave the other dead.\n- objectstack-ai/objectstack#7344 (open) reports the Account app's Notifications entry 403ing for every non-admin because *no* shipped permission set grants `sys_inbox_message`. That is a different cause (an absolute gap in the platform baseline) and its write-up describes `member_default` as much narrower than the 23 objects measured here. Measure the current baseline contents rather than trusting either number — the two runs are on different framework commits.\n- objectstack-ai/objectstack#5491 (closed) deliberately narrowed `member_default` from a `*` wildcard to explicit-allow. This card does **not** dispute that narrowing; it disputes replacement vs composition when an app binds its own baseline to the same anchor.\n\n## Source\n\nExtracted from the QA run objectstack-ai/objectstack#7514 (framework a86db175, console 09987b68)."
+}

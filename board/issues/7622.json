@@ -1,0 +1,34 @@
+{
+  "number": 7622,
+  "kind": "pull_request",
+  "title": "fix(spec): stop emitting meta.json for a reference category with no pages (#7303)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T09:13:05Z",
+  "updated_at": "2026-08-11T09:59:03Z",
+  "closed_at": "2026-08-11T09:59:00Z",
+  "closed_by": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "merged_at": "2026-08-11T09:59:00Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/7622",
+  "body": "Fixes #7303\n\n## What\n\n`gen:docs` wrote `content/docs/references/<category>/meta.json` for every category it iterated, including one whose page list came out empty. The result was a directory holding a single `{ \"title\": …, \"pages\": [] }` and nothing else: no reference page, no `index.mdx` (§2.5 already skipped that), and no entry in the root `meta.json` — so the route could not resolve and the link checker never saw it. Its one measurable effect was on whoever enumerated the tree, human or agent, who counted one category more than the docs publish. Which is exactly how #7303 came to be filed.\n\nThe `meta.json` emit is now guarded on the page list being non-empty, mirroring the guard the category `index.mdx` emit already carries.\n\n`content/docs/references/`: **15 category directories → 14**. Emitted files: **231 → 230**.\n\n## Why the delete happens at the generator\n\n`content/docs/references/**` is routed `merge=os-regen` — the repo's own declaration that the tree is generated output. A hand delete reds the gate and the next regeneration undoes it, measured twice before this PR:\n\n```\n$ rm -rf content/docs/references/contracts && pnpm --filter @objectstack/spec check:docs\n✗ content/docs/references/ is out of date with packages/spec:\n  + content/docs/references/contracts/meta.json (missing — spec adds it)\n```\n\nThat is also this PR's positive control that the gate can see the file at all.\n\n## `contracts` is the standing case\n\nIt holds TypeScript service interfaces rather than `.zod.ts` schemas, so `gen:schema` creates `packages/spec/json-schema/contracts/` and leaves it **empty**. `conversions`/`migrations` have no schema directory at all and `groupSchemasByPage` skips them outright; `contracts` fell through to the emit with zero pages. All three now emit nothing and produce no directory:\n\n```\ncontracts    references/: (absent)\nconversions  references/: (absent)\nmigrations   references/: (absent)\n```\n\nThe `⚠ Skipping clean of contracts/ …` warning that every build printed is gone too.\n\nThe guard is on the **page count**, not on that schema-directory asymmetry, so a future category in either shape lands the same way.\n\n## One mechanical note worth a reviewer's eye\n\n`contracts/` is not `manageDir`'d — step 1 returns before claiming it, because it has no JSON Schema to regenerate from. So the generator cannot *delete* the file it no longer *writes*, and the tracked copy is dropped in this commit as the one-time reconciliation. The removal is durable because the guard exists: `gen:docs` was run **four** times after the guard landed and the directory never came back, and `check:docs` is green at 230 files.\n\n## `category-title.ts` — measured, not assumed\n\n`contracts: 'Contracts Protocol'` **stays**. `resolveCategoryTitles` is total over the directories under `packages/spec/src/`, and `packages/spec/src/contracts/` has 84 live source files. Removing the declaration was tested and is build-stopping:\n\n```\n$ pnpm --filter @objectstack/spec gen:docs      # with the line deleted\n✗ … Every reference page title, sidebar label and root-index row for a module is this string.\nExit status 1\n```\n\n`conversions` is the in-repo precedent: declared, emits nothing, and that is the supported steady state.\n\n## ⚠️ Caveat carried forward from the issue, not resolved by this PR\n\n`contracts` is a **declared** category with **84 live source files**, and that empty `meta.json` was the only committed trace in the docs tree that the category exists. After this change the references tree silently stops representing it. That is the ruled outcome. The Contracts Protocol prose documentation is unaffected — it lives at `content/docs/kernel/contracts/` (7 files) and is not generated from this tree.\n\n## Also changed\n\n- The now-stale `contracts` row in the quick-reference **Categories Without a Section** table, plus the sentence above it (\"two more category directories\" → \"one more\"). Reverse-controlled: leaving the row in place reds the gate with ``[coverage] `contracts` is declared as having no section, but content/docs/references/contracts/ does not exist``.\n- The same category in `scripts/check-quick-reference-counts.mjs`'s docblock prose, which would otherwise state something now false. The gate's synthetic `GOOD_CATALOG`/`GOOD_PAGE` self-test fixtures are **untouched** — they do not read the real tree and still exercise a reachable parse case.\n\n## Gates run (with invocation scope)\n\n| Gate | Result |\n|---|---|\n| `pnpm --filter @objectstack/spec check:docs` | ✅ 230 generated files in sync |\n| `pnpm --filter @objectstack/spec gen:docs` ×4 | ✅ directory never restored |\n| `pnpm --filter @objectstack/spec test` | ✅ 376 files / 9867 tests |\n| `pnpm --filter @objectstack/spec typecheck` | ✅ (incl. `check:scripts-typecheck`, `check:test-typecheck`) |\n| `pnpm run check:quick-reference-counts` | ✅ self-test 22/22; 14 categories, all sectioned or declared |\n| `pnpm run check:doc-authoring` | ✅ 375 files clean |\n| `pnpm run check:docs-audit-scope` | ✅ 179 hand-written docs in sync |\n| `pnpm run check:empty-changeset` | ✅ |\n| `pnpm run check:nul-bytes` | ✅ 7056 files |\n| `pnpm run check:adr-anchors` / `check:adr-links` | ✅ |\n| `npx eslint` on the two touched sources | ✅ |\n\nChangeset included (`@objectstack/spec: patch`).\n\n## Not verified\n\nNo heading or link fragment was touched, so no `github-slugger` check was needed. The docs site was not booted — this PR changes no published page. CI has not been consulted; that is the PM's.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_017Mqbd23qE51QfBjgJv3Zsp)_"
+}

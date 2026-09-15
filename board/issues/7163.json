@@ -1,0 +1,34 @@
+{
+  "number": 7163,
+  "kind": "issue",
+  "title": "[finding] the nested-plugin seam does not expand an aggregated `views` container — a nested plugin's per-view items never reach the registry, so `getViewsByObject()` / `GET /meta/view?object=` answer with the container alone",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-10T01:32:48Z",
+  "updated_at": "2026-08-10T13:46:30Z",
+  "closed_at": "2026-08-10T13:46:30Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7163",
+  "body": "Out-of-scope finding measured while closing #7049 / PR #7153. Recorded per Prime Directive #10, unassigned. That card was scoped to which **collections** the two registration seams enumerate; this is a difference in what the two seams **do** with a collection they both enumerate, so it was deliberately not folded in — #7049's brief said to file rather than widen, and the seam difference is real behaviour change owing its own verification.\n\n## The fact\n\n`packages/objectql/src/engine.ts` reaches the registration seam from two entry points. Since #7049 both read one `METADATA_ARRAY_KEYS`, so `views` is enumerated by both. But only the **manifest** seam expands an aggregated view container:\n\n```ts\nif (key === 'views' && isAggregatedViewContainer(toRegister)) {\n    for (const vi of expandViewContainer(itemName, toRegister)) {\n        this._registry.registerItem('view', vi, 'name' as any, id);\n    }\n}\n```\n\nThe nested-plugin loop in `registerPlugin()` has no equivalent. \"Object has-many View\" (ADR-0017) says a `defineView` document aggregates an object's views and must ALSO be expanded into independent `ViewItem`s registered under `<object>.<key>` — that expansion is what `getViewsByObject()` and `GET /meta/view?object=` consume, and it is what carries the per-view `package` layer the view switcher and Studio read.\n\n## The measurement\n\nOn PR #7153's branch (the divergence is identical on `origin/main` @ `3e8e669`), one aggregated container registered through each seam, reading `registry.listItems('view')` back:\n\n```text\ncontainer = { list: { data: { object: 'account' }, name: 'all_accounts' },\n              form: { data: { object: 'account' } } }\n\nvia manifest      ->  [ 'account', 'account.all_accounts', 'account.form' ]\nvia nested plugin ->  [ 'account' ]\n```\n\nSame document, same package id, same collection key — two of the three registry entries simply are not created on the nested path.\n\n## Impact\n\nA package shipping its views through `manifest.plugins[]` registers the container and nothing else. Readers that ask for the container by object name still find it (which is why this is silent); readers that go through the expanded per-view items — the view switcher, Studio's per-view package attribution, `GET /meta/view?object=` — see an object with no views. No refusal and no diagnostic, the same silent-under-registration shape as #7049 one layer in.\n\nFrequency is not measured and none is claimed: how many published packages ship an aggregated `views:` container from a nested plugin rather than from the top-level manifest is unknown.\n\n## Class\n\nObservation-class with a demonstrated missing value, filed for triage to grade. Two shapes are plausible and they differ in cost:\n\n1. **Share the loop body, not just the enumeration** — extract one `registerMetadataCollections(source, ownerId, opts)` both seams call, with the remaining seam differences (the per-key `debug` line, the warn-on-nameless-item) as named parameters rather than accidental drift. Closes this and makes the next body-level divergence unrepresentable, the way #7049 did for the enumeration.\n2. **Add the expansion to the nested loop** — small, and it is the one-instance shape #7049 explicitly argues against, since it leaves the two loop bodies undiffed exactly as the two lists were.\n\nThe other two measured body differences are recorded here so the next reader does not have to re-derive them: the manifest seam emits a per-key `debug` line and warns on an item with no derivable name; the nested seam does neither, so a nameless nested item is dropped in total silence.\n\n## Related\n\n#7049 / PR #7153 (the enumeration half of the same two-seam divergence, and the source of this measurement), #6242 (the enumeration sweep), #5870 (the `capabilities` precedent for patching one seam at a time), ADR-0017 (Object has-many View), ADR-0010 (provenance envelope)."
+}

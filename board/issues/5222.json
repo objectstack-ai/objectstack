@@ -1,0 +1,36 @@
+{
+  "number": 5222,
+  "kind": "issue",
+  "title": "[spec] SqlDriver 将 `$field` 编译为列对列比较(cross-field comparison push-down)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "enhancement",
+    "target:v17"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T10:56:04Z",
+  "updated_at": "2026-08-11T07:38:12Z",
+  "closed_at": "2026-08-11T07:37:37Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5222",
+  "body": "## 一句话\n\n让 `FieldReferenceSchema`(`{ $field: '...' }`)在 SQL 下推路径上**真正执行** —— 编译为列对列比较(`where \"amount\" > \"budget\"`),补齐 #5041 裁决 C 明确挂起的那一半。\n\n## 背景:本单是 #5041 的下半场\n\n#5041 的维护者裁决(2026-08-04)选了 **C —— 最低限度**:SqlDriver 遇到 `{ $field }` 值形态时按 ADR-0112 响亮拒绝(`INVALID_FILTER` + `httpStatus 400`),消除裸 `TypeError` 与 `$in`/`$between` 列表里的静默零行;**保留** spec 声明;真正的 SQL 实现另立本单。\n\n也就是说,现状是**已知且诚实的半态**,不是遗漏:\n\n| 执行路径 | `$field` 行为 |\n|:---|:---|\n| 内存求值 `matchesFilter`(`packages/formula/src/matches-filter.ts`) | ✅ 按记录解析引用,支持点号路径 |\n| SQL 下推 `driver-sql` / `driver-sqlite-wasm` | ❌ `INVALID_FILTER` 响亮拒绝(#5041 已落地) |\n\n生产者是真实的:`compileCelToFilter`(`packages/formula/src/cel-to-filter.ts`)在把含字段间比较的 CEL 权限 / RLS 规则转译为 filter 时会产出 `{ $field: path }`。所以今天这类规则**只有内存路径能跑**,一旦下推到 SQL 就是一个 400,而不是结果。\n\n## 本单要做的事\n\n在 `packages/plugins/driver-sql` 的比较发射点(`applyFilterCondition` / `applyAstComparison`)把 `{ $field: 'col' }` 编译成**列引用**而非绑定值 —— SQL 层面 `where ?? > ??` 是平凡的,难点全在语义边界(见下)。落地时把 #5041 装的那道拒绝闸门收窄到「仍然编译不了的形态」,而不是整个删掉。\n\n验收面:\n- `{ amount: { $gt: { $field: 'budget' } } }` 在 SqlDriver 上返回正确行集,与内存求值器对同一条 filter 的结果一致(建议做成跨路径 conformance 测试,和 `filter-logic-conformance` / `temporal-conformance` 同形);\n- 拒绝臂只保留给下面两问决定不支持的形态,且仍是 `INVALID_FILTER` 信封;\n- 现有 `sql-driver-cross-field-reference.test.ts`(#5041 装的)随之改写,不是删除。\n\n## 两个待决语义点(本单一并议,勿默认)\n\n### 1. 点号关联路径的语义\n\n内存求值器的 `getPath` 对 `{ $field: 'account.owner_id' }` 是**沿对象逐层取属性**。SQL 侧同一个字符串有至少三种读法:\n\n- **A. 只允许同表列**,点号一律拒绝 —— 最小、最安全,但和内存路径语义不等价(同一条 filter 两条路径答案不同,正是 #5041 想消除的那类分裂);\n- **B. 点号 = 关联字段解引用**,编译为 JOIN 或相关子查询 —— 与内存语义对齐,但把 filter 编译器变成了 join 规划器,代价与影响面都大;\n- **C. 点号 = 已 JOIN 别名的限定列引用**,只在调用方已经建立该别名时有效 —— 折中,但需要一个别名契约。\n\n选哪个直接决定 `FieldReferenceSchema` 的 `$field` 是「列名」还是「路径」,属于**契约面**,不应由实现顺手定。\n\n### 2. 被引用列名的校验边界\n\n`$field` 的值最终要进入 SQL 标识符位置。cloud#1051 讨论过:**放行不校验等于拆护栏**。需要明确:\n\n- 是否只允许对象已声明的字段(`initObjects` 已知列),未知列一律 `INVALID_FILTER`?\n- 系统列(`created_at` / `space` / 租户列)是否可被引用?尤其**租户隔离列若可被引用,是否构成越权比较面**?\n- 外部表 / 联邦表(ADR-0015,列集未知)上如何取舍 —— 拒绝,还是放行由数据库报错?\n\n倾向:**声明即枚举**,只接受已声明字段,未知列在编译期响亮拒绝 —— 与本仓「declared = enforced」的一贯姿态一致,也让 AI 产出的元数据在写的时候就错不了,而不是在数据库里错。但这是需要维护者拍板的契约决定。\n\n## Refs\n\n- #5041(裁决 C + 完整探针证据)\n- objectstack-ai/cloud#1051(列名校验边界讨论)\n- objectstack-ai/cloud#1058(Turso transport 静默零行,独立跟踪)\n- ADR-0112 / #4436(`INVALID_FILTER` 信封与错误码词表)\n"
+}

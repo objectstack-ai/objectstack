@@ -1,0 +1,33 @@
+{
+  "number": 7028,
+  "kind": "issue",
+  "title": "`os start` / `os dev` 的 `--database` 描述手写了一份 URL scheme 举例，相对 `inferDriverTypeFromUrl` 实际识别的 scheme 不完整",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "finding"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T09:51:03Z",
+  "updated_at": "2026-08-11T14:35:32Z",
+  "closed_at": "2026-08-11T14:35:32Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7028",
+  "body": "observation 级（**今天没有用户会撞到**）——由 #6969 顺手发现，按 Prime Directive #10 不在那个 PR 里修。\n\n## 现状\n\n`packages/cli/src/commands/start.ts` 与 `dev.ts` 的 `--database` flag 描述里手写了一串 URL scheme 举例：\n\n```\nDatabase URL: file:./db.sqlite | libsql://... | postgres://... | mongodb://... | memory://\n```\n\n而真正决定「哪些 scheme 会被识别成驱动」的是 `packages/cli/src/utils/storage-driver.ts` 的 `inferDriverTypeFromUrl()`。两边对照，散文里没提到的还有：`mysql://` / `mysql2://`、`sqlite:`、`wasm-sqlite://`、`mongodb+srv://`、`:memory:`、`.db` / `.sqlite` / `.sqlite3` 后缀、以及 `https://*.turso.*`。\n\n## 为什么归为 observation 而不是缺陷\n\n- 该 flag **没有** `options:` 白名单，是自由文本，所以散文只是举例，不是可接受值的声明——列举不全不会拒绝任何合法输入。\n- 举例里的每一条都确实被识别，没有说错的。\n- 与 #6969 处理的那一处形状不同：那一处是 oclif 的**强制白名单**加一段与之并列的散文，两份都是驱动 id 词表的副本；这一处是 URL scheme，而 scheme 词表今天只存在于 `inferDriverTypeFromUrl` 的一串正则里，没有共享表可推导。\n\n## 可选的收口方向（留给 triage 定夺，不预设）\n\n1. 什么都不做——举例就是举例。\n2. 把散文补齐到与 `inferDriverTypeFromUrl` 一致（治标：仍是手写副本，仍会漂移）。\n3. 先让 scheme 词表有一处定义（例如把 `inferDriverTypeFromUrl` 的匹配改成表驱动），再让描述从它派生——与 #6345 / #6969 对驱动 id 走的是同一条路。方向 3 才是结构性的，但它要的是一次真正的重构，不是文案修补。\n\n## 关联\n\n#6969（驱动 id 词表的同类收口，本 finding 的来源）· #6345（一个词表、一处推导）· `packages/cli/src/utils/storage-driver.ts` 的 `inferDriverTypeFromUrl()`"
+}

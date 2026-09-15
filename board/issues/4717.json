@@ -1,0 +1,35 @@
+{
+  "number": 4717,
+  "kind": "issue",
+  "title": "[P2/P3] 运行时授权门的 advisory findings 要进响应并被 Studio 渲染 + docs「the gate」补第四列(#4463 收尾)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched",
+    "repo:objectstack"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-02T20:52:24Z",
+  "updated_at": "2026-08-10T11:59:34Z",
+  "closed_at": "2026-08-10T11:59:34Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 9,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4717",
+  "body": "`Blocked-by: objectstack-ai/objectstack#4463`(PR #4715 合并前不要派发)\n\n#4463 P1 让运行时闸门跑起来了,但 **advisory 级 findings 目前只进服务端日志,不进响应**。PR #4715 自己写明了这一点的性质:\n\n> 跑了规则却把结论丢掉,是本单要修的那个洞小一号的版本。\n\n同意这个判断 —— 所以它是本单,不是「以后再说」。\n\n## 范围\n\n- [ ] **advisory findings 进响应**:gating → 422 已经落地;advisory 应走 2xx + 响应里带 findings。#4463 D3 已经定了形状 —— 复用 Zod 失败那个结构化 `issues` 信封(`rule` / `path` / `where` / `message` / `hint`),**objectui 不需要新协议,只需读一个已有形状的新字段**\n- [ ] **objectui 侧渲染**(跨仓):Studio 保存后把 advisory findings 显示成警告。按跨仓协议,这一半要在 objectui 队列里单独立单并用 `Blocked-by` 指回本单;本单落地后由 objectui 分片的 PM 接手\n- [ ] **P3 `surfaces` 泛化**:#4463 P1 已按需引入 `surfaces: ('cli'|'runtime-publish')[]` + `runtimeTypes` / `surfaceReason`(那是棘轮守卫的结构性前提,不是可选项 —— 守卫无法守一个没被声明的 surface)。本单把它推广成开放的 N-surface 维度\n- [ ] **docs**:把「the gate」那张表加上第四列(运行时发布面)。注意方向 —— P1 之后运行时**多**做了一层检查而文档只写了三个 CLI 命令,属于**少承诺多兑现**,不是 declared ≠ enforced,所以不紧急;但表格不补,下一个读文档的人(和 AI)仍会以为 Studio 保存不过闸门\n\n## 关联\n\n#4463(P1 本体)、PR #4715、#4716(P2 object 写入上门)、#4409 / #4445、cloud#688(publish-gate lint 先例)"
+}

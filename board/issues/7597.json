@@ -1,0 +1,35 @@
+{
+  "number": 7597,
+  "kind": "issue",
+  "title": "[spec] `parseFilterAST` lowers `['a', '=', { $field: 'b' }]` to a bare field spec no backend reads as equality",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:spec"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T06:51:00Z",
+  "updated_at": "2026-08-11T11:00:52Z",
+  "closed_at": "2026-08-11T10:51:25Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7597",
+  "body": "Measured while implementing #5222 (cross-field push-down). Filing unassigned — recording, not claiming.\n\n## The fact\n\n`parseFilterAST` lowers an authored triple differently depending on the operator spelling. Measured on current `main`:\n\n| Authored | Lowered to |\n| :--- | :--- |\n| `[['amount', '&gt;', { $field: 'budget' }]]` | `{\"amount\":{\"$gt\":{\"$field\":\"budget\"}}}` |\n| `[['amount', 'gt', { $field: 'budget' }]]` | `{\"amount\":{\"$gt\":{\"$field\":\"budget\"}}}` |\n| `[['amount', '=', { $field: 'budget' }]]` | `{\"amount\":{\"$field\":\"budget\"}}` ← **bare** |\n| `[['amount', 'equals', { $field: 'budget' }]]` | `{\"amount\":{\"$field\":\"budget\"}}` ← **bare** |\n\nThe equality spellings drop the operator, because a literal comparand's implicit-equality form is `{ field: value }` — correct for a literal, but for a field reference it produces a field spec whose only key is `$field`.\n\n**Nothing reads that shape as an equality.** In `matches-filter.ts`, `evalField` sees an all-`$` key set and dispatches `$field` to `evalOp`, which has no arm for it and returns its fail-closed `false`. So the filter silently matches no record. On the SQL side the same shape arrives as an OPERATOR named `$field`.\n\n## Why it matters\n\nTwo authored spellings of one intent, two fates: `['amount', '&gt;', ref]` works (post-#5222 on SQL, and always in memory), `['amount', '=', ref]` silently matches nothing. The failure is invisible on the path that produces it.\n\n#5222 narrowed the SQL side to give this shape an actionable refusal naming `$eq` rather than a generic operator list — but that is a driver-side mitigation of a lowering defect, and it deliberately did NOT compile the shape, because compiling it would make SQL answer rows for a filter the memory evaluator answers `false` for (a new divergence in the change that closed one).\n\n## The decision this needs\n\nMost likely: `parseFilterAST` should lower an equality triple whose comparand is a `FieldReferenceSchema` to `{ field: { $eq: ref } }` rather than the bare form — the spelling that IS implemented on both paths. That is a one-sink change (`parseFilterAST` is the single lowering sink per #5158), but it is a semantics change at the authoring face, so it wants a ruling rather than a drive-by fix.\n\nAlternatively, `matches-filter.ts` could read a bare `{ $field }` field spec as an implicit equality — but that changes the evaluator's unknown-operator posture, which #6520 examined and deliberately KEPT.\n\n## Refs\n\n- #5222 (the driver-side refusal + its wording)\n- #5158 (`FilterArray` is input-only sugar; `parseFilterAST` is the single sink)\n- #6520 (the evaluator's unknown-operator posture, kept deliberately)"
+}

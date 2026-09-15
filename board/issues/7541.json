@@ -1,0 +1,35 @@
+{
+  "number": 7541,
+  "kind": "issue",
+  "title": "Discovery advertises `capabilities.search = {enabled:false}` while `GET /api/v1/search` serves 200 with real hits",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T05:02:26Z",
+  "updated_at": "2026-08-11T07:21:09Z",
+  "closed_at": "2026-08-11T07:21:09Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7541",
+  "body": "## Symptom\n\nOn a live showcase host, `/discovery` reports:\n\n```\ncapabilities.search = { \"enabled\": false }\nservices.search     = { \"enabled\": false, \"status\": \"unavailable\", ... }\n```\n\nwhile the endpoint those bits describe is fully live:\n\n```\nGET /api/v1/search?q=audit  →  200, 5 real hits\n```\n\n**Expected:** the declared capability matches served behaviour (Prime Directive #10, `declared === enforced`) — either the bit is `enabled: true`, or the endpoint refuses.\n\nImpact: a client that trusts the discovery document — which is exactly what the document is for — **skips a working surface**. This is the failure mode discovery exists to prevent, inverted: not an advertised endpoint that 404s, but a real endpoint no conforming client will ever call.\n\n## Root cause\n\nThe capability bit derives from a **registered `search` service slot** — `search: registeredServices.has('search')` in the well-known capability builder (`packages/metadata-protocol/src/protocol.ts`) — while the route (`registerSearchEndpoints`, `packages/rest/src/rest-server.ts`) gates on something else entirely: it only answers `501 NOT_IMPLEMENTED` when `protocol.searchAll` is missing, and the protocol implements `searchAll` **regardless** of whether any `search` service slot is registered. The two producers answer the same question with two unrelated predicates.\n\nNote the neighbouring keys in that same builder are already serveability-gated with a comment stating the rule (\"the predicate is deliberately the SAME one that decides whether the route is advertised — what we advertise and what we claim cannot disagree\"; `chunkedUpload` was moved onto it in #5672). `search` is one of the keys still on bare slot presence, and its route does not consult the slot at all — so the fix must pick ONE predicate for both ends: either derive the bit from `typeof protocol.searchAll === 'function'`, or make the route honour the slot. Primary lane is the capability builder in `packages/metadata-protocol`; the seam reaches `packages/rest`.\n\n## Reproduction\n\n1. Boot showcase on a fresh isolated file DB (`SqlDriver` / better-sqlite3); authenticate as `admin@objectos.ai`.\n2. `GET /api/v1/discovery` → `capabilities.search.enabled === false`, `services.search.status === \"unavailable\"`.\n3. `GET /api/v1/search?q=audit` → `200` with 5 real hits.\n\n## Source\n\nExtracted from the QA run #7463 (framework a86db175)."
+}

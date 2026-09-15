@@ -1,0 +1,35 @@
+{
+  "number": 7684,
+  "kind": "issue",
+  "title": "Checklist decision: `notification-localized-and-clears` c0/c4 assume a per-recipient localized title — a capability the spec retired",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "huangyiirene"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T10:14:22Z",
+  "updated_at": "2026-08-11T12:24:34Z",
+  "closed_at": "2026-08-11T12:24:34Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7684",
+  "body": "## Symptom\n\n`notification-localized-and-clears` clauses c0 and c4 assume a **per-recipient localized notification title**. On a stock showcase app the title renders as the literal English string `New task assigned: Build homepage`, so both clauses land `blocked(fixture)`. The mechanical half of the item passes cleanly (`POST /notifications/read` &rarr; 200 and `read/all` &rarr; 200 against the running Hono server, clear survives a full reload); only the localized-title premise is unprovable.\n\n## Root cause\n\nThis is a checklist decision, not a code fix. The title is a **literal English string authored in the showcase flow's notify node** (`examples/app-showcase/src/automation/flows/index.ts` ~160-166), not a translation key. There is no translation group for notification copy at all: `notifications` is a **retired** top-level translation key whose own spec guidance reads *\"`notifications` is the retired object-first dialect — notifications have no translation group, omit them\"* (`packages/spec/src/system/translation.zod.ts:341`, verified on `origin/main`). Platform-side assignment notifications were deliberately moved to app-authored flows (#3403). `sys_user` carries no `locale` field, and the notify path never consults a recipient locale.\n\nAs written, c0/c4 assume a capability the spec retired — unprovable on any stock app.\n\n**Decision needed:** rewrite or waive c0/c4. (Also cross-referenced from the consolidated checklist-maintenance card for this run.)\n\n## Reproduction\n\nNot a code defect. To observe: trigger the showcase task-done flow; the notification title is the literal flow-authored English string, identical regardless of the recipient's or session's locale.\n\n## Source\n\nExtracted from the QA run objectstack-ai/objectstack#7640 (framework 92f26f75, console 09987b680)."
+}

@@ -1,0 +1,36 @@
+{
+  "number": 7535,
+  "kind": "issue",
+  "title": "`POST /api/v1/automation/:name/toggle` answers 500 INTERNAL_ERROR instead of 404 NOT_FOUND for an unknown flow",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-help"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T05:01:29Z",
+  "updated_at": "2026-08-11T08:04:12Z",
+  "closed_at": "2026-08-11T08:04:12Z",
+  "closed_by": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7535",
+  "body": "## Symptom\n\n`POST /api/v1/automation/:name/toggle` against a flow name that does not exist answers **`500 INTERNAL_ERROR`** where it should answer **`404 NOT_FOUND`**.\n\nAn error-class mismatch, P3. Nothing is corrupted and nothing leaks — the toggle does not happen — but a 500 tells every caller the wrong thing: clients and retry layers treat 5xx as \"the server broke, try again\" and 4xx as \"your request was wrong, don't\". A typo in a flow name currently presents as a server fault, and any client with retry-on-5xx will hammer the endpoint over a request that can never succeed.\n\n## Root cause\n\nNot root-caused to a line. The handler is `POST /automation/:name/toggle`, registered in `packages/runtime/src/dispatcher-plugin.ts` and dispatched to `toggleFlow` in `packages/runtime/src/domains/automation.ts`; the route is declared in `packages/runtime/src/route-ledger.ts`. The shape is the familiar one — an unknown-name lookup throws and the catch maps everything to `INTERNAL_ERROR` rather than mapping the not-found case to 404 first.\n\nNote the same endpoint already gets its **body** validation right: `{ enabled?: boolean }` is strict, and `{\"enable\": false}` (one letter off) is a located 400 rather than a silent enable (#3899). The missing-flow arm just never got the same treatment.\n\n## Reproduction\n\n1. Boot the showcase on an isolated file DB and port.\n2. `POST /api/v1/automation/definitely_not_a_flow/toggle` with body `{\"enabled\": false}`.\n3. Observe `500 INTERNAL_ERROR`. Expected `404 NOT_FOUND` naming the unknown flow.\n\nRe-check the handler:\n\n```\nrg -n \"toggle\" packages/runtime/src/domains/automation.ts packages/runtime/src/dispatcher-plugin.ts\n```\n\n## Source\n\nExtracted from the QA run objectstack-ai/objectstack#7516 (framework a86db175). Listed there as item 4 under \"Fixture / authoring issues to fix\", flagged P3."
+}

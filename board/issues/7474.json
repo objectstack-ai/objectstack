@@ -1,0 +1,34 @@
+{
+  "number": 7474,
+  "kind": "issue",
+  "title": "`assertControlledByParentWrite` answers a metadata defect and a missing row with the same `403 PERMISSION_DENIED` \"requires edit access to its master record\"",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-10T15:28:15Z",
+  "updated_at": "2026-08-11T04:49:24Z",
+  "closed_at": "2026-08-11T04:49:24Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7474",
+  "body": "Found while classifying the `[Security] Access denied` family for #7451 (PR #7471). Filed rather than fixed: that card is user-facing copy for the gates it converted, and this one is not a copy bug — the sentence is wrong because the *branch* is wrong, so fixing it decides something about the envelope.\n\n## What was measured\n\n`packages/plugins/plugin-security/src/security-plugin.ts` — `assertControlledByParentWrite` funnels **six** distinct conditions through one `deny()` helper, which composes one sentence and one code:\n\n```ts\nconst deny = (reason: string, recordId?: unknown) => {\n  throw new PermissionDeniedError(\n    `[Security] Access denied: ${operation} on '${object}' requires edit access to its master record (${reason})`,\n    { operation, object, recordId },\n  );\n};\n```\n\nThe six `reason` values it is called with:\n\n| `reason` | What actually happened | Is \"requires edit access to its master record\" true? |\n|---|---|---|\n| `no edit permission on master '…'` | caller lacks object-level `update` on the master | yes |\n| `master '…' not editable by this user (row-level security)` | master row outside the caller's write RLS | yes |\n| `master '…' not editable by this user (record sharing)` | no OWD / record-share edit grant | yes |\n| `controlled_by_parent declared but no master_detail relation` | **the app's metadata is broken** — the object declares the sharing model with no relation to hang it on | no |\n| `target record not found` | the detail row does not exist | no |\n| `detail record has no master reference` | the row's master FK is null | no |\n\nThe bottom three are not authorization verdicts. The caller is told, with a 403, that they lack access to a record — when the truth is that their app is misconfigured, or the row is gone.\n\n## Why it matters in both directions\n\n- **To the user**, it is a false statement with a false remedy: \"ask whoever owns the parent record\" cannot fix a null FK or a missing `master_detail` relation.\n- **To the app author**, it is worse. `controlled_by_parent declared but no master_detail relation` is a genuine authoring defect that ObjectStack can detect precisely, and it is currently disguised as a routine permission denial — the class of thing an author will never see, because 403s on a detail object look like ordinary RBAC noise. This is the \"declared = enforced, and say so loudly\" principle inverted.\n- The first condition is also **unreachable-looking but not unreachable**: `deny()` returns `never` only by throwing, and `if (!rel) deny(...)` is followed by non-null assertions (`rel!.fk`), so the metadata-defect branch is load-bearing rather than defensive.\n\nNote also that `'target record not found'` turns a concurrent delete into a 403 rather than a 404 — an answer that leaks less but says something untrue, and the two transports already disagree about what a `PERMISSION_DENIED` body carries (#7450).\n\n## What a fix has to decide\n\n1. Do the three non-verdict conditions keep `PERMISSION_DENIED`, or get their own codes (a metadata/configuration error, and a not-found)? That is an ADR-0112 vocabulary question, not a copy edit — which is why this is filed rather than folded into #7471.\n2. Should the metadata-defect branch be a *lint* finding at publish time instead of (or as well as) a runtime refusal? `controlled_by_parent` with no `master_detail` relation is statically detectable.\n3. Once the branches are separated, the genuine-verdict half becomes convertible to the user-facing operation-message catalog exactly as #7471 converted the row-level gates — it is one of the end-user-facing gates that card identified but deliberately did not touch for this reason.\n\n## Pointers\n\n- `packages/plugins/plugin-security/src/security-plugin.ts` — `assertControlledByParentWrite`, the `deny()` helper and its six call sites\n- `packages/plugins/plugin-security/src/controlled-by-parent-sharing.test.ts:315` — the current pin, which asserts only the shared sentence and so cannot tell the six apart\n- `examples/app-crm/src/objects/opportunity-line-item.object.ts`, showcase's `invoice` / `expense-report` — real business objects that reach this gate\n- #7471 — the classification that surfaced it; #7451 — the parent sweep card; #7450 — the related envelope question"
+}

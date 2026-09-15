@@ -1,0 +1,34 @@
+{
+  "number": 7127,
+  "kind": "issue",
+  "title": "`FieldSchema.defaultValue` has the same `z.unknown()` acceptance hole as the action param one, but it is NARROWER — a literal must first be told apart from the runtime-token / CEL vocabulary before it can be checked",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T18:45:09Z",
+  "updated_at": "2026-08-10T12:19:59Z",
+  "closed_at": "2026-08-10T11:41:03Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7127",
+  "body": "Found while implementing #6970 (PR #7126), which closed the same hole one layer up on `ActionParamSchema.defaultValue`. Filed unassigned per Prime Directive #10. **Deliberately not fixed in that PR** — it is not the same bug, and unlike #6970 it is not decision-free.\n\n## Measured\n\n`FieldSchema.defaultValue` is `z.unknown().optional()` (`packages/spec/src/data/field.zod.ts:513`). Probed against `FieldSchema.safeParse` on `origin/main` (2026-08-09):\n\n```\nDEFAULT_VALUE_TOKENS = [\"NOW()\",\"current_user\"]\n\nFIELD number field + literal \"abc\"        -> ACCEPT\nFIELD datetime field + wall clock          -> ACCEPT\nFIELD select field + non-member            -> ACCEPT\nFIELD number field + current_user TOKEN    -> ACCEPT\nFIELD datetime field + NOW() TOKEN         -> ACCEPT\nFIELD date field + CEL envelope            -> ACCEPT\n```\n\nThe first three are the residual hole: a literal that can never satisfy the field's own `valueSchemaFor` contract is accepted silently at authoring.\n\n## Why the #6970 fix does NOT transfer\n\nAn action param's `defaultValue` is a pure LITERAL — objectui's `ActionParamDialog` seeds dialog state with it verbatim and `serializeParamValues` resolves nothing — so `valueSchemaFor` is the whole contract, and #6970 could run the default through it unchanged.\n\nA FIELD's `defaultValue` is **polymorphic by design**, three legal shapes, documented in `packages/spec/src/data/default-value-tokens.ts`:\n\n1. a literal (`'open'`, `0`, `false`)\n2. a runtime TOKEN — `DEFAULT_VALUE_TOKENS`: `NOW()`, `current_user`\n3. an Expression envelope — `{ dialect: 'cel', source: 'today()' }` (ROADMAP §M9.9b)\n\nRunning `valueSchemaFor` naively over this key would reject shipped, correct metadata. Measured instances:\n\n- `examples/app-showcase/src/data/objects/field-zoo.object.ts:120` — `Field.user({ defaultValue: 'current_user' })`\n- `cloud` `packages/service-ai/src/objects/*.object.ts` — many `datetime` fields with `defaultValue: 'NOW()'` (ai-conversation, ai-trace, ai-message, ai-eval-run, ai-eval-case)\n\n`datetime` + `'NOW()'` is legitimate and would fail `InstantValueSchema`.\n\n## What has to be decided before anything is enforced\n\nAny fix must first subtract the token/expression vocabulary, and that subtraction is a real design question rather than a mechanical tightening:\n\n- Is the token set gated **per type**? Is `NOW()` legal on a `number`? Is `current_user` legal on anything but a `user` / `lookup('sys_user')`? Today nothing says.\n- The DDL split already documented in `default-value-tokens.ts` (`NOW()` becomes a physical column DEFAULT, `current_user` deliberately does not) suggests the answer is per-token AND per-type, not one flat allow-list.\n- A CEL envelope's RESULT type is not knowable at parse time at all, so that shape can only ever be accepted structurally.\n\nThat is why this is filed rather than folded into #6970: that card's triage explicitly ruled it \"decision-free 的契约收紧 …… 不是新设计\", and this one is not.\n\n## Why it still matters\n\nSame argument the parent card makes about AI-authored metadata: a wrong literal here is accepted at authoring and only surfaces as bad data (a `number` column seeded with `'abc'`) or a runtime failure far from the cause. No shipped metadata in `objectstack` or `cloud` currently carries such a literal — the hole is real but has no known live instance, which is why it is being recorded rather than escalated.\n\n## Related\n\n- #6970 / PR #7126 — the action-param half, fixed\n- ADR-0104 D1 (`valueSchemaFor`), ADR-0049 enforce-or-remove, ADR-0078"
+}

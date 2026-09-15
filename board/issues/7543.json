@@ -1,0 +1,36 @@
+{
+  "number": 7543,
+  "kind": "issue",
+  "title": "A raw `TypeError: not a function` leaks in the 400 envelope for `{\"title\": 12345}` — no `code`, no `fields[]`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-help"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T05:02:43Z",
+  "updated_at": "2026-08-11T11:12:45Z",
+  "closed_at": "2026-08-11T11:12:45Z",
+  "closed_by": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7543",
+  "body": "## Symptom\n\n`POST /api/v1/data/showcase_task` with a number in a declared `text` field:\n\n```json\n{\"title\": 12345}\n```\n\nanswers:\n\n```\n400 { \"error\": \"TypeError: not a function\", \"object\": \"showcase_task\" }\n```\n\n— a raw JS runtime error as the client-facing message, with **no `code`** and **no `fields[]`**. Reproduced 3x.\n\n**Expected:** the ledgered envelope the neighbouring invalid bodies produce on the same route in the same run:\n\n| body | observed | |\n|---|---|---|\n| `{}` | `400 VALIDATION_FAILED` with `fields[]` | correct |\n| bad enum value | `400` with `invalid_option` and the allowed list | correct |\n| `{\"title\": 12345}` | `400 \"TypeError: not a function\"`, no `code` | **defect** |\n\nTwo separate contract breaks in one response: a handler-internal `TypeError` reaching the wire verbatim, and an error body outside the ledgered envelope shape (a client keying on `code` / `fields[]` gets neither).\n\n## Root cause\n\n**Not fully located in the report.** Its suspicion: a coercion path calls a string method on a number **before** validation reports the type mismatch, so the write throws a `TypeError` instead of producing a field error.\n\nInvestigation note from extraction (working tree checked 2026-08-11, so verify against `a86db175` before acting): the observed body shape — status `400`, raw message, an `object` key, and no `code` — matches **no** branch of `mapDataError` in `packages/rest/src/rest-server.ts` on current main. #5489 moved that mapper's terminal branch to a sanitised `500 INTERNAL_ERROR` (no `object` key), the declared-4xx passthrough in `resolveErrorResponse` does not attach `object`, and every remaining 400 branch carries a `code`. Likewise `validateOne` in `packages/objectql/src/validation/record-validator.ts` handles a number in a `text` field safely (`String(value)`), so the throw is upstream or downstream of it. Locating the emitting seam is step 1 of the fix.\n\n**No `domain:*` label applied deliberately:** the fix could land in `packages/rest` (envelope classification ⇒ `domain:cli`) or in `packages/objectql` (the coercion that throws ⇒ `domain:engine-core`), and the extraction pass could not tell which from the report plus a tree read. Label it once the throw site is found.\n\n## Reproduction\n\n1. Boot showcase on a fresh isolated file DB (`SqlDriver` / better-sqlite3); authenticate as `admin@objectos.ai`.\n2. `POST /api/v1/data/showcase_task` with body `{\"title\": 12345}` (a number into the declared `text` field) → `400 {\"error\":\"TypeError: not a function\",\"object\":\"showcase_task\"}`. Repeats 3/3.\n3. Controls on the same route: body `{}` → `400 VALIDATION_FAILED` with `fields[]`; a bad enum value → `invalid_option` with the allowed list.\n\n## Source\n\nExtracted from the QA run #7463 (framework a86db175)."
+}

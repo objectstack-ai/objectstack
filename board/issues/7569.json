@@ -1,0 +1,35 @@
+{
+  "number": 7569,
+  "kind": "issue",
+  "title": "finding (QA harness): `nav-surfaces-render`'s one red assertion is the test's own timing race — poll `boundingBox` until non-null instead of a fixed 1500 ms wait",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "huangyiirene"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T05:27:49Z",
+  "updated_at": "2026-08-11T11:45:50Z",
+  "closed_at": "2026-08-11T11:45:50Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7569",
+  "body": "Not a product defect. This is a fix to the checklist item under `docs/qa/platform-checklist/`, filed so the harness stops manufacturing a red that costs a triage cycle every run.\n\n## Symptom\n\n`nav-surfaces-render` scores 30/31 pinned surfaces green with **one** red chart assertion. The red was **disproven as a product defect** and traced to the suite's own measurement window:\n\n- 3 fresh loads each rendered **5 real charts** — the product renders correctly every time.\n- Polling `boundingBox` every 400 ms returned **null only at t = 1.5 s**, and **non-null for all 19 later samples**.\n- t = 1.5 s is exactly where the suite measures, and exactly the recharts `ResponsiveContainer` initial-layout window.\n- The same test re-run in isolation is **4/4 green**.\n\nSo the item reports a failing surface whenever the fixed wait happens to land inside the layout window — a coin-flip red on a correct product.\n\n## Root cause\n\nThe assertion waits a **fixed 1500 ms** and then reads `boundingBox` once. `ResponsiveContainer` has not committed its layout at that instant, so the box is null and the assertion fails. Nothing about the product is involved: the chart is present and measures non-null from the next sample onward.\n\n## Fix\n\nPoll `boundingBox` until it is non-null (with a bounded timeout) instead of waiting a fixed 1500 ms and reading once. The change lands in the checklist/harness under `docs/qa/platform-checklist/` — no product code.\n\nThis is the same de-flaking shape as the recently merged objectstack-ai/objectstack#7472 (\"bracket case 2's negative assertion instead of waiting 4s\") and #7409 (\"derive the dot-root watcher waits from the case budget instead of a fixed 20s race\"); follow whichever polling helper those settled on rather than adding a third spelling.\n\n## Reproduction\n\n1. Run the `nav-surfaces-render` checklist item as part of the full `platform-core` area — 30/31, with the chart `boundingBox` assertion red.\n2. Re-run the same item in isolation — 4/4 green.\n3. On a fresh load, poll `boundingBox` every 400 ms: null at t = 1.5 s, non-null on all 19 subsequent samples; 5 real charts render on each of 3 fresh loads.\n\n## Source\n\nExtracted from the QA run objectstack-ai/objectstack#7514 (framework a86db175, console 09987b68)."
+}

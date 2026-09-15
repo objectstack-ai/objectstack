@@ -1,0 +1,34 @@
+{
+  "number": 7377,
+  "kind": "issue",
+  "title": "spec(liveness): 9 rows of the README state table have count columns that disagree with the gate's `--json` report",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-10T08:11:07Z",
+  "updated_at": "2026-08-10T14:43:08Z",
+  "closed_at": "2026-08-10T14:25:15Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7377",
+  "body": "Found while implementing #7257 (PR #7374). **Not claiming or fixing here** — filing per Prime Directive #10. Unassigned: nobody is working on this.\n\n## Finding\n\n`packages/spec/liveness/README.md`'s \"Current state\" table states its own counting method in the paragraph directly above it:\n\n> **The counting method for this table is the gate's own report** — `check-liveness.mts --json`, `types.<type>.byStatus` — decided in #4488 after two methods spent a release disagreeing. […] the count columns are **never hand-edited** — regenerate: […]\n\nRun that documented snippet on merged `main` (`f188ed6`) and **9 of the 30 rows disagree with it**:\n\n| Type | README says (live / exp / dead / planned) | `--json` says |\n|---|---|---|\n| `field` | 59 / 0 / 0 / 0 | **66** / 0 / 0 / 0 |\n| `flow` | 34 / 0 / 5 / 0 | 34 / 0 / **6** / 0 |\n| `action` | 34 / 0 / 2 / 0 | **41** / 0 / 2 / 0 |\n| `hook` | 11 / 0 / 2 / 0 | **18** / 0 / 2 / 0 |\n| `page` | 16 / 0 / 0 / 1 | **23** / 0 / 0 / 1 |\n| `view` | 79 / 0 / 4 / 0 | **80** / 0 / **6** / 0 |\n| `webhook` | 11 / 0 / 0 / 0 | **19** / 0 / 0 / 0 |\n| `app` | 45 / 0 / 9 / 0 | **46** / 0 / 9 / **1** |\n| `seed` | 5 / 0 / 0 / 0 | **12** / 0 / 0 / 0 |\n\nThe drift is mostly one-directional (the gate now counts *more* than the table records — `seed` 5 → 12, `webhook` 11 → 19, `hook` 11 → 18), which is what growth in the walked shape looks like when nobody re-ran the snippet. But `view` and `flow` also moved in the **`dead`** column, and `app` grew a `planned` the row does not show — those are verdict-shaped, not just arithmetic.\n\n## Why it is a card and not a `sed`\n\nPR #7374 gates the **row set** against `GOVERNED` — a governed type with no row, an orphan row, or a heading count that disagrees now fails CI. It deliberately does **not** check the count columns, and this issue is the reason that boundary was drawn rather than the two being landed together:\n\n- **The Notes cells enumerate their own dead sets by hand.** `view`'s cell says *\"level-2 dead residue (userActions.buttons, addRecord.mode/formView, tabs[].order)\"*; `flow`'s says *\"dead count = 4 tombstone entries + the kept docs field\"* and then names them; `app`'s reconciles 9 dead against seven `retiredKey` tombstones plus two named keys. Regenerating the numbers without re-reading each Note would leave the count column and the prose beside it contradicting each other — a row that says `dead 6` next to a sentence enumerating four. That is a worse state than the current one, because the prose is the part a reader believes.\n- **So each drifted row needs its delta explained, not just applied**: which keys entered the walked shape, and whether the Note that describes the row's composition is still true. `webhook` 11 → 19 and `seed` 5 → 12 are large enough that something structural moved (a container began drilling, or a schema grew a block), and that is worth knowing rather than absorbing.\n- **A gate is the obvious end state**, in keeping with #7257's own argument and with `check:strictness-ledger`'s history (#5107 moved that ledger's numbers into a generated artifact precisely because hand-maintained counts merge clean and wrong). But #5107 is also the warning: it found the numbers were the file's entire merge-conflict surface. Whether these counts should be *checked* in place or *generated* into an artifact carrying `merge=os-regen` is a design call this card should make, not assume.\n\n## Suggested shape (not a ruling)\n\n1. Regenerate the 9 rows, and for each one read the Note beside it and reconcile the prose with the new numbers — this is the work, and it is per-row evidence review, not bookkeeping.\n2. Then extend `readme-table.mts` (added in PR #7374, already parsing every row) to compare the count cells against `types.<type>.byStatus`, or move the columns into a generated artifact per #5107's precedent.\n\nStep 2 is cheap once step 1 is done; doing it first would just make CI red with no path to green.\n\n## Dedup\n\nSearched the three repos before filing. #7257 covers the *row set* and the heading's completeness claim, and PR #7374 explicitly scopes the count columns out. No open issue or PR names the count drift."
+}

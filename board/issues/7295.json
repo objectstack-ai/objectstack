@@ -1,0 +1,36 @@
+{
+  "number": 7295,
+  "kind": "issue",
+  "title": "finding: no gate sees `rest-server.ts`'s response envelopes — `check:route-envelope` does not scan the file, and neither gate has a rule for envelope POSITION",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-help"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-10T05:12:44Z",
+  "updated_at": "2026-08-10T14:05:55Z",
+  "closed_at": "2026-08-10T14:05:55Z",
+  "closed_by": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7295",
+  "body": "Measured while implementing #7035 (PR #7293), whose triage ruling asked to extend the `error-code-casing` / `route-envelope` gate family to cover the two non-conforming `/meta` 501 sites **if it does not already**. It does not, and extending it is not the one-rule change the dispatch hoped for — so this is filed rather than built there.\n\nFiled unassigned, `finding`-class: nothing a user hits today. It is a gate gap, not a defect.\n\n## 1. `check:route-envelope` never looks at `rest-server.ts`\n\n`scripts/check-route-envelope.mjs`'s `discover()` collects only files whose name ends in `-routes.ts`, plus the single hard-coded `i18n-service-plugin.ts`. `packages/rest/src/rest-server.ts` matches neither, so it has never been audited — while being, by a wide margin, the largest response-emitting file in the repo (#5949).\n\nRunning the gate's own exported `scanSource` against it by hand:\n\n```\npackages/rest/src/rest-server.ts {\"responses\":208,\"ok\":2,\"err\":0,\"privateOk\":0,\"stringError\":44}\n```\n\nFor comparison, every module the gate *does* audit declares `0 / 0 / 0` — they route every body through the shared `sendOk` / `sendError` in `packages/types/src/response-envelope.ts`.\n\nThe gate's header states its own thesis on exactly this point: *\"A module discovered by the scan but absent from the table is an ERROR, not a default\"*, and *\"a module nobody thought to convert still gets audited.\"* Both were written about the discovery surface. The file with 208 hand-built write sites sits outside it.\n\n## 2. Even if it were scanned, the sibling-`code` dialect is invisible\n\n`scanSource` counts `responses`, `ok`, `err`, `privateOk` and `stringError`. There is **no counter for a top-level `code` sitting as a sibling of `error`** — which is one of the two dialects #7035 was about:\n\n```js\n// what the gate can see:            { error: 'some message' }        → stringError\n// what it cannot:                   { error: 'some message', code }  → nothing\n```\n\nSo adding the file to the table would catch the bare-string half of #7035 and silently pass the sibling-key half.\n\n## 3. `check:error-code-casing` scans the file, but only for casing\n\n`scripts/check-error-code-casing.mjs` does walk `packages/**`, `rest-server.ts` included — but its patterns match lowercase literals in code positions (`code: 'x'`, `.code = 'x'`, `code === 'x'`, union types). Position is outside its thesis, and it is textual by design; the header explains that `check-route-envelope` went AST precisely because textual counting of response shapes was wrong twice over. Teaching position to the textual gate would re-make that mistake.\n\n## Why this is not a small fix\n\nBringing `rest-server.ts` into `check:route-envelope` means entering it as a **ratchet** at `responses: 208`. That number moves whenever any of the file's ~208 write sites is added or removed, in a file that changes several times a day — so the gate would go red constantly for reasons unrelated to envelopes, and the pressure would be to raise the ratchet rather than fix anything. The gate's model — \"declare zero, route everything through the shared pair\" — is #7035's **option 3** (a shared envelope constructor for the file), which that card's triage explicitly ruled out of scope.\n\nSo the honest options are a decision, not a patch:\n\n1. **Convert `rest-server.ts` onto the shared `sendOk` / `sendError`**, then declare `0 / 0 / 0` like every other module. Largest, and the only one that ends the problem. Effectively #7035 option 3 + the gate for free.\n2. **Ratchet the file in as-is** (`responses: 208, stringError: 44`) and add a `siblingCode` counter plus self-test cases. Cheap to write, but pins a hot number and creates recurring unrelated red.\n3. **Extend discovery, but count only the error-shape facts** (`stringError`, a new `siblingCode`), not `responses`. Stable under ordinary edits because it counts *dialects* rather than write sites, and it would have caught both halves of #7035. Middle-sized; needs a ratchet at 44 that only ever ticks down.\n\nMy read, from having just measured it: option 3 is the one worth costing, because it is the only one whose number does not move under unrelated edits and it covers both dialects. But this is a gate-architecture decision, not a dev call.\n\n## Not measured (do not cite as fact)\n\n- Whether other unscanned files have the same exposure. `discover()`'s `-routes.ts` convention was only checked against `rest-server.ts` here; a repo-wide census of response-emitting files outside the convention was **not** run.\n- The 44 `stringError` sites in `rest-server.ts` were counted, not read. How many are `/meta`, how many are reachable in a default deployment, and whether any consumer reads them — **unmeasured**.\n\n## Related\n\n#7035 (the card this came out of; PR #7293 converged three `/meta` 501 sites and deliberately left the other ~44) · #5949 (`rest-server.ts` size) · #3877 (response bodies never checked against their declaring schemas — adjacent, but about schema validation rather than gate discovery) · ADR-0112 · ADR-0049\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_0158ZQo7LiHSxGWpYKuPq1wu)_\n"
+}

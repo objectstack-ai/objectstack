@@ -1,0 +1,35 @@
+{
+  "number": 7411,
+  "kind": "issue",
+  "title": "chore: bump the console pin — 18 objectui commits behind, including the objectui#4096 row-action permission gate",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "huangyiirene"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-10T10:26:10Z",
+  "updated_at": "2026-08-11T05:55:06Z",
+  "closed_at": "2026-08-11T05:55:06Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7411",
+  "body": "Linkage chore per the multi-repo coordination rule (accepted `repo:objectui` PR ⇒ file the console bump in the consuming repo).\n\nobjectstack-ai/objectui#4108 is **merged** (objectui main `aeb8424`, 2026-08-10T10:24:11Z): the list row kebab's built-in Edit/Delete, the grid bulk-delete bar, the non-grid (`ListView`) bulk delete and the related-list Create/Edit/Delete now AND the caller's own `/me/permissions` verdict (`allowEdit` / `allowDelete`) on top of the layers they already had. Fixes objectui#4096.\n\n## Task\n\nRun the standard console refresh (`scripts/bump-objectui.sh` / `pnpm objectui:refresh` per repo convention) and land the `.objectui-sha` + `packages/console` bump.\n\n## Staleness reading (2026-08-10T10:30Z)\n\n- `.objectui-sha` on `origin/main`: `8aad9fd50b16750aebdd294392ff79540f17cd32` (objectui `fix(components): bind the row three ways on the four action renderers (#4075)`)\n- objectui `origin/main`: `aeb8424`\n- **18 commits behind**, spanning the objectui#4096 gate above, the `evalRowPredicate` fault-reason/subject fix (objectui#3792 / #3796), the `clientValidation` wiring (objectui#3561), the object-grid `filter` key fix (objectui#4041) and a dependabot wave.\n\n## Why it matters beyond routine freshness\n\nobjectui#4096 is a **user-facing permission-affordance repair on a destructive control** — Delete rendered one click away from accounts the server answers `403` on. Server-side enforcement was already hard (403, DB unchanged), so nothing is unsafe today, but the bundled console keeps showing the misleading entry until this bump lands.\n\nStandard pin-bump discipline applies: dedicated PR, no riders; `.objectui-sha` is a shared file — take the whole regen (hono override + lockfile) through the script.\n\nNote for triage: no `domain:*` / `repo:*` label applied — routing labels are the triage seat's single-producer territory. Only `pm:queue` is set here. Single-card cap checked at filing time: #7268 (the previous console-bump card) is **closed** (2026-08-10T06:45Z) and no other open console-bump card exists."
+}

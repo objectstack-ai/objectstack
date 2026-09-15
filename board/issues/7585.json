@@ -1,0 +1,35 @@
+{
+  "number": 7585,
+  "kind": "pull_request",
+  "title": "fix(spec): report the claimed branch when a `view` union fails (#7510)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T06:27:32Z",
+  "updated_at": "2026-08-11T07:36:11Z",
+  "closed_at": "2026-08-11T07:36:08Z",
+  "closed_by": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "merged_at": "2026-08-11T07:36:08Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/7585",
+  "body": "Closes #7510.\n\n`ViewMetadataSchema` now focuses a **failed** union on the branch the body claims (`selectViewMetadataBranch`), so a ViewItem-branch failure surfaces the ViewItem branch's own diagnostic instead of the container branch's wrap prescription. Verdicts, parse output and top-level issue codes are unchanged.\n\n> The full **OS-DEV-REPORT** (general-case confirmation, mechanism, acceptance proof, blast-radius inventory, reverse verification, verification output, out-of-scope findings) is the body of the single commit on this branch — `git show 9baa159`. It is the report of record per the E34-adapted transport; the summary below is an index into it.\n\n## The defect\n\nMeasured on `origin/main` @ `9051802` through the real write path (`saveMetaItem` → this union). A form ViewItem whose field carries an unknown `publicPicker` subkey is correctly refused, and the author is handed:\n\n```\n<root>: Invalid input; <root>: Unrecognized key(s) on this view container: `viewKind`, `config`.\n  • `viewKind` belongs to a single VIEW, not to the container. Wrap it: `defineView({ list: { … } })` …\n```\n\nThe key they mistyped appears nowhere; what they get is a confident, detailed instruction to restructure a container that was correct all along.\n\n**Confirmed general** (the card asked for this before sizing): six unrelated ViewItem-branch failures — a picker subkey, `offset`, two unknown form-field keys, a typo'd column summary, a `columns` type error — all surfaced that same container text.\n\n**Mechanism.** The shared ranking (`selectUnionBranches` + its two verbatim copies) scores a branch by `[issue count, carries an unrecognized_keys]`. The container branch reports exactly one root `unrecognized_keys` (`viewKind`/`config` are not container keys); the ViewItem branch reports exactly one *nested* `invalid_union` whose real key sits a level below where the tiebreak looks. One issue each, and the bonus goes to the branch that understood the body least.\n\n## The fix\n\nA `z.core.$ZodCheck` with `when: () => true` on the union (`focusClaimedBranch`). On failure it replaces every non-claimed branch's entry inside the `invalid_union` issue's `errors`, **in place**, with the root-level `invalid_type` shape all three consumer copies already drop before ranking. The claimed branch is then what every existing renderer surfaces — no renderer change, no message rewritten.\n\nIt reuses the answer the file already had: `selectViewMetadataBranch` (#6391), which `diagnoseViewMetadata` has used since objectui#3624. The union's error path was the one door that didn't consult it — which is why Studio's 422 and `diagnoseViewMetadata` could describe one body two different ways.\n\nThe card's repro now reads:\n\n```\nconfig.sections.0.fields.0.publicPicker: Unrecognized key(s) on this public picker configuration: `sort`.\n```\n\n## ⛔ Acceptance face\n\nUnmoved, **by construction**: a check runs after the union has reached its verdict, adds no issue and removes none. Empirically, a 53-body corpus (the 42 from `view-union-diagnostics.test.ts` + the repros + container/undiscriminated cases) measured at `9051802` and re-measured with the fix:\n\n| | diffs |\n|---|---|\n| verdicts | 0 / 53 |\n| parse output | 0 / 53 |\n| top-level issue codes | 0 / 53 |\n| rendered messages | 15 / 53 — all listed and justified in the commit body |\n\nA genuine container failure keeps the #4001 wrap prescription verbatim; an undiscriminated body is left to the ranking exactly as before; the `errors` array keeps its length and order for positional consumers.\n\n## Blast radius\n\n**No existing test or baseline moved** — not one assertion changed, including the `options[i] === VIEW_METADATA_MEMBERS[branch]` identity pin, the `errors[2]` positional read, the `anyOf`-of-4 pin, and #5364's `issues[0]` envelope pin. Added: `packages/spec/src/ui/view-union-branch-focus.test.ts` (35 cases, incl. an executable reverse verification that reconstructs the pre-#7510 ranking) and a `#7510` block on the real `saveMetaItem` harness in `protocol.save-union-issues.test.ts` (3 cases).\n\n## Verification\n\n`spec` 374 files / 9805 tests · `spec typecheck` · `spec check:generated` 13/13 · `gen:docs` zero drift · `metadata-protocol` 71/1051 + build · `rest` 82/1341 · `objectql` view-parse 90 · `cli` 51 — all green.\n\n## Changeset\n\n`.changeset/view-union-branch-focus.md` — `@objectstack/spec: patch` (error-guidance motion in a published package, per the triage comment's surface-seat rule). `content/docs/releases/` untouched.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_013d3ZWVKcUeieQzqcAJqg4F)_"
+}

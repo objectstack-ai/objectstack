@@ -1,0 +1,35 @@
+{
+  "number": 7670,
+  "kind": "issue",
+  "title": "Land the attachments-storage QA scratch fixture (`qa_vault`/`qa_shared`/`qa_nofiles` + two personas) as permanent",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "huangyiirene"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T10:10:04Z",
+  "updated_at": "2026-08-11T12:25:14Z",
+  "closed_at": "2026-08-11T12:25:14Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7670",
+  "body": "## Symptom\n\nThe `attachments-storage` area has no private, files-enabled parent on stock showcase — the only `enable.files` object is `public_read_write` **and** readable via the showcase `everyone` baseline. That would force `blocked(fixture)` on the entire authz core of this area every run.\n\n## Root cause\n\nNot a defect — a missing fixture. The run closed the gap **at runtime**, touching no repo file: `POST /api/v1/packages`, then `PUT /meta/objects/qa_vault?package=…` with `sharingModel:'private'`, plus `qa_shared` (public_read) and `qa_nofiles` (no `enable.files`); and two real member personas provisioned via sign-up + a runtime permission-set / position binding. This should be landed as a permanent fixture (docs/qa/platform-checklist fixtures) so the area does not need re-provisioning each run.\n\n## Reproduction\n\nRun any `attachments-storage` authz item on stock showcase &rarr; no private files-enabled parent exists &rarr; `blocked(fixture)` unless the scratch objects + two personas are provisioned by hand first.\n\n## Source\n\nExtracted from the QA run objectstack-ai/objectstack#7635 (framework 92f26f75, console 6314e87f)."
+}

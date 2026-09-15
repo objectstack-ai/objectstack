@@ -1,0 +1,35 @@
+{
+  "number": 5548,
+  "kind": "issue",
+  "title": "DbJobAdapter 把「handler 没抛错」记成 sys_job_run.status='success' —— 内部自行降级的 job(如 wait 唤醒打空)在作业审计面上仍显示成功",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-help"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T16:59:27Z",
+  "updated_at": "2026-08-10T13:12:34Z",
+  "closed_at": "2026-08-10T13:12:34Z",
+  "closed_by": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 14,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5548",
+  "body": "发现于 #5529 的实测过程(PR 见该 issue),与该修复相邻但不同面 —— 这是 **job 域的审计面**问题,不是 automation 域的。\n\n## 观察(实测,非推断)\n\n`DbJobAdapter.wrap()`(`packages/services/service-job/src/db-job-adapter.ts` L161-176)只按 handler **是否抛错**判定运行结果:\n\n```\ntry { await handler(ctx); finishRun(runId, 'success'); bumpJob(name, 'success'); }\ncatch { finishRun(runId, 'failed', msg); bumpJob(name, 'failed', msg); throw err; }\n```\n\n对于「内部自行处理失败、不抛错」的 handler,这条路径把它记成成功。实测(临时 harness,已删除):一个 once job 的 handler 正常返回但什么也没完成,`sys_job` 行是\n\n```\n{\"name\":\"flow-wait:run1:pause\",\"active\":true,\"schedule_expression\":\"2026-08-05T16:45:20.837Z\",\"last_status\":\"success\",\"run_count\":1}\n```\n\n`sys_job_run` 只有一行 `status: 'success'`。\n\n## 为什么可能值得看\n\n`sys_job` / `sys_job_run` 是机器可读面(Studio 的作业界面读它)。一种读法是 `sys_job_run.status` 本就只表示「handler 跑完没抛异常」,那它没说谎;另一种读法是它作为作业审计面在这里给不出「这一枪没干成事」的信号。两种读法都成立,所以这里只做记录、不预判严重度。\n\n需要说明的是 #5529 之后这个洞不是无声的:那条路径已经有一条 error 日志,并且 job 被刻意保留 `active`(#5529 就是这么修的),所以「run 卡住」本身是可见的 —— 缺的只是**作业审计行**里的那一格。因此按观察类归档(`finding`,不进 `pm:queue`),严重度交分诊判定。\n\n## 可能的方向(未决,不在本 issue 范围内实施)\n\n- A:让这类 handler 抛错 —— #5529 刻意**没**这么做:抛错会改变 handler 与 `IJobService` 的失败语义(第三方实现可能据此重试),超出该 issue 派发范围。\n- B:给 `IJobService` 的 handler 一个「跑完了但没干成」的回报方式(而不是只有 throw / 不 throw 两态),由适配器映射到一个区别于 `success` 的 `sys_job_run.status`。这会动 `IJobService` 契约面,属公开契约决定。\n- C:什么都不做,认定 `sys_job_run.status` 的语义就是「handler 未抛错」,并把这一点写进契约注释,免得下一个读者重新推一遍。\n\n## 佐证\n\n- `packages/services/service-job/src/db-job-adapter.ts` L161-176(`wrap`),L277-299(`bumpJob`)。\n- `packages/spec/src/contracts/job-service.ts` —— `JobHandler` 返回 `Promise`,没有第三态。\n- #5529 / 其 PR:wait 唤醒 handler 在 `STORE_UNAVAILABLE` 时不取消 + 记 error,是本条观察的具体触发场景。\n\n---\n\n**2026-08-08 裁决落地(services 座位 PM,会话 `session_01USNUyHEr7uaU6MoEWXitei`)**:维护者批复三轴分析,采纳 **B-minimal**(可加性第三态;A 与 #5529 裁决冲突被否,C 把审计静默合法化被否)。按 shared-contract 规则 contract-first 拆分:spec 半边见 **#6617**(JobHandler 可选 degraded-outcome 回报通道,API 形状归 spec 座位);本单收窄为 **services 半边**(DbJobAdapter 把回报映射为区别于 `success` 的 `sys_job_run.status` + `bumpJob` 同步 + #5529 场景回归测试)。\n\n**2026-08-09 二次阻塞(round 18 dev 实测,详见 #7072 与本线程 13:4xZ 评论)**:#6617 只交付了**生产者侧**(`JobRunOutcome` + `JobHandler` 返回值);`sys_job_run.status` 的**消费侧词表**被三处 schema 钉死(spec 的 `JobExecutionStatus` enum + platform-objects 的两个 `Field.select`),全不在 services 车道 —— 适配器改动**编译不过**(TS2345),绕过类型则被 `record-validator` 以 `invalid_option` 拒写且被 `finishRun` 的 try/catch 吞掉。词表拓宽 = #7072;它落地后本单退化为一次小的适配器接线。\n\nBlocked-by: #7072"
+}

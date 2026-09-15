@@ -1,0 +1,33 @@
+{
+  "number": 7552,
+  "kind": "pull_request",
+  "title": "pm-dispatch SKILL: require a four-lens block on every needs-user-decision card, Blocked-by-aware batch selection, round-brief decision flags",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T05:11:27Z",
+  "updated_at": "2026-08-11T10:09:02Z",
+  "closed_at": "2026-08-11T10:09:02Z",
+  "closed_by": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/7552",
+  "body": "Fixes #7498\n\nImplements both maintainer rulings of 2026-08-11 recorded on the card (body + the 03:11Z scope-extension comment), in one PR, inside the card's file surface (`.claude/skills/pm-dispatch/SKILL.md` + `references/**` only).\n\n## Ruling 1 — required four-lens block on every `needs-user-decision` card\n\n- **Step 8**: after the frame's binding sentence, a new block requires every `needs-user-decision` card to carry a four-line analysis block — one line per lens — at step-0 filing and step-8 escalation time: ① platform long-term coherence, ② measured business pull, ③ AI-agent error-resistance, ④ startup scope discipline. The evidence line (2026-08-11 re-review reversed 4 of ~30 ledger recommendations: #7485, #7243, objectui#4165, objectui#3804) is recorded with it.\n- **Step 0**: the \"Maintainer confirm\" classification now requires the block from filing time (previously: \"The label alone is the inbox entry; the deep three-axis analysis is written when the card is actually taken up\").\n- **Step 5 dispatch clause template**: the self-drive clause's wording updated to 「按裁决与三轴/四棱自裁」, matching how dispatch prompts already quote it.\n\n**How the merge respects `check:skill-frame-sync`.** The escalation frame exists as four gate-synchronized copies across three files (`.claude/skills/pm-dispatch/SKILL.md`, `.claude/agents/os-dev.md`, and two copies in the published `skills/objectstack-pm-dispatch/SKILL.md`), with the axis count, order, and binding sentence compared structurally by the gate — and its AXIS_MAP lives in `scripts/`. Changing the frame's axis count 3→4 is therefore a four-copy + gate-map edit, all outside this card's file surface. So the merge is expressed as: **one frame, whose card-face serialization is the four-lens block** — ②↔axis 1 (实际业务需求), ①↔axis 2 (项目长远合理性), ③↔axis 3 (防 AI 犯错), and ④ promotes the startup-focus principle already embedded in axis 1 to its own required line. The block text states explicitly it is NOT a second frame. The gate-anchored declaring/binding sentences and the three axis entries are structurally untouched; `check:skill-frame-sync` stays green. If the maintainer wants the frame itself renumbered to four axes across all four copies + the published mirror, that is a follow-up card with a wider file surface (noted in the report's open_questions).\n\n## Ruling 2 — scope extension (03:11Z comment)\n\n- **Step 3 selection rule**: among `pm:queue` candidates, a card named by any open card's `Blocked-by:` line now sorts ahead of plain queue items (fan-out ≥ 1), computed at selection time from the greppable `Blocked-by:` lines — the same reverse index the unlock sweep already reads; no stored label. Placed after the existing `扇出 ≥ 2` and `target:` tiers so the standing ruling-backed order is preserved and \"named sorts ahead\" lands against ordinary queue items.\n- **Step 9 round brief**: the decision-inbox health metric now requires the triage seat's brief to flag decision cards with open downstream dependents (first instance: #7496 ← objectui#4190), noting it went live same-day via a standing instruction on seat post #6015 and this change makes it durable.\n- **Considered-and-declined record**: the step-3 「不要为此发明新标签」 paragraph now records the 2026-08-11 rejection of a blanket `priority:*`/`pm:unblocks` label on depended-upon cards (derived decaying property — the gradient-rot shape the `target:v17` ruling refused; no-reader labels banned; release-critical chains covered by `target:v17` propagation), with the revisit condition (population well past today's ~6 cards).\n\n## Line ratchet\n\nSKILL.md 3027 → **3043** lines (ceiling 3050, headroom 7). Additions paid for by extracting four step-8 narrative passages **verbatim** to `references/incidents.md` (append-only, each with an 出处 line per that file's convention): the 第三档 #5373 example, the 两条元判据 precedent narratives (both bullets), and the business-need axis precedent block (#5021/#4988/#4834, #5021 vs #4936). Main-file rules keep a one-line anchor + pointer in each spot.\n\n## Same-day churn guard\n\n#7492 (Operational note 1 merge-queue membership criterion) and #7493 (发版板 queries / cloud contradiction) are open undecided cards on this file — this diff touches neither Operational note 1 nor the 发版板 section nor step 9's release-blockers metric; edits are orthogonal to both questions.\n\n## Gates run locally (all green)\n\n- `pnpm check:pm-skill-ratchet` — 3043/3050, self-test 5 cases pass\n- `pnpm check:skill-frame-sync` — 4 copies structurally isomorphic, 3 axes, 4 count mentions agree, self-test 12 cases pass\n- `pnpm check:doc-authoring` — 375 files clean\n- `pnpm --filter @objectstack/lint run check:doc-formula-expressions` — green after building the dependency closure (`pnpm --filter '@objectstack/lint^...' build`)\n- `pnpm check:nul-bytes` — 7000 files clean\n\n## Changeset\n\nNone — internal agent tooling (`.claude/**` only), docs-only for the agent protocol; releases nothing. `skip-changeset` applies (label applied separately; the PM applies/confirms at acceptance).\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01Lm8fPF2HR2Ty2iTFLHpafm)_"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 7423,
+  "kind": "pull_request",
+  "title": "fix(objectql,rest,spec): DELETE_RESTRICTED stops showing developer copy to end users (#7307)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-10T10:42:04Z",
+  "updated_at": "2026-08-10T11:59:34Z",
+  "closed_at": "2026-08-10T11:59:33Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-10T11:59:33Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/7423",
+  "body": "Closes #7307.\n\n## The defect\n\nThe refusal is correct and its transport is fine — `status` is set, the structured fields survive `mapDataError`. **The message was the defect.** `error.message` is shipped verbatim as `body.error`, and Console renders that as-is in a toast, so an operator deleting a 部门 in a fully Chinese app read:\n\n```\nCannot delete sys_business_unit (): 1 dependent os_tianshun_ehr_sporadic_application\nrecord(s) reference it via apply_dept (apply_dept is required, so it cannot be cleared).\nDelete or reassign them first, or set deleteBehavior:'cascade' on\nos_tianshun_ehr_sporadic_application.apply_dept.\n```\n\nEnglish in a zh-CN UI, naming two tables and a column the user has never seen (they know them as 「零星申请」 and 「申报部门」), ending in a metadata-authoring instruction a business user cannot act on.\n\n## Who consumes the thrown error — measured first\n\n| Consumer | Reads | Where | Effect of this change |\n|---|---|---|---|\n| REST 409 envelope | `.message` → `body.error`; `code`, `dependentObject`, `dependentCount`, `object` | `packages/rest/src/rest-server.ts:598` (`mapDataError`) | `body.error` is now the localized user sentence; new sibling `developerMessage` |\n| **Console toast** | `body.error`, **verbatim** | objectui — pass-through, **no** `DELETE_RESTRICTED` branch (triage measured 0 hits) | fixed at the producer; **no objectui change needed** |\n| Engine delete error log | `.message` + `.stack` | `engine.ts` delete `catch` | would have lost the operator detail to the localized sentence → now logs `developerMessage` |\n| Engine behavior pins | `code`, `status`, `dependentObject`, `dependentCount` — **never the text** | `engine-cascade-delete.test.ts:110` | unchanged; extended, not replaced |\n| REST fault-status pin | `code` → 409 only | `rest-unclassified-fault-status.test.ts:229` | unchanged |\n| `@objectstack/client` | generic `err.code`; no `DELETE_RESTRICTED` branch (0 hits) | `packages/client` | unchanged |\n| Docs | envelope shape only; no text pin | `content/docs/**` | unchanged |\n\n**Exactly one consumer reads `.message`, and it shows it to an end user.** That is what makes the split the right shape rather than a taste call.\n\n## The shape\n\nTwo messages, because there are two audiences:\n\n- **`message`** — the user's half. Rendered in `ExecutionContext.locale` from a new built-in catalog against resolved **labels** for the object, the dependent object and the field: translation bundle → declared `label` → API name, so the API name is where the ladder *ends* rather than where it starts. The actionable half of the old advice (\"delete or reassign them first\") stays; `deleteBehavior` appears in no locale.\n- **`developerMessage`** — the developer's half, and the previous sentence **byte for byte**. The guidance is correct and useful, so it is *moved to a channel that reaches developers*, not dropped: `mapDataError` ships it as a sibling field (disclosing nothing new — `object` and `dependentObject` are API names on the same body) and the engine's delete log carries it.\n\n`code`, `status`, `object`, `dependentObject`, `dependentCount` are byte-identical. **The wire code does not split** — one `DELETE_RESTRICTED` (ADR-0112), two sentences, exactly as the field catalog splits a message key without splitting `FieldErrorCode`.\n\n### Why a new catalog rather than `validation.field.*`\n\n`validation-message.ts` is addressed `validation.field.<key>` because every entry names a field and the constraint that field broke. A `DELETE_RESTRICTED` names neither: the offending field is on a *different object* from the one the caller acted on, the caller supplied no value, and there is no `fields[]` entry to hang it off. Filing it there would hand deployments an override key that lies about what it overrides. So: `packages/spec/src/system/operation-message.ts`, addressed `errors.<key>`, same machinery and the same resolution order (override → locale → `en`), sharing `interpolateValidationMessage` so the two cannot drift.\n\nThis is #3957's fix reached from the operation side.\n\n## Pins\n\n- refusal unchanged: 409 + `DELETE_RESTRICTED` + all structured fields (`engine-cascade-delete.test.ts`, extended not replaced)\n- user message: locale-rendered, **labels only**, no API name, no `deleteBehavior` — in en and zh-CN\n- developer hint is in the **developer** channel and **not** in the user-facing half (asserted both ways)\n- `developerMessage` matches the pre-change sentence exactly\n- an i18n service that throws still yields 409, not 500\n- REST carries both fields and merges neither; omits `developerMessage` when absent\n- catalog: locale fallback, base-language match, override wins, every locale complete, and no template in any locale mentions `deleteBehavior`/`cascade`\n\n## Changeset\n\n`minor` for the three packages. Nothing breaks — structured fields untouched, no test or doc pinned the message text, both new fields additive. `check-changeset-no-major.mjs` is the second reason: every publishable package is in the Changesets `fixed` group, so one `major` promotes all ~70 packages, and the launch-window convention ships even genuinely breaking changes as `minor`.\n\n⚠️ **`packages/spec` is touched** (new `operation-message.ts` + `objectLabelKey`). This is **not** an error-code-ledger touch — no new or renamed `error.code`, so ADR-0112's registry is untouched and `check:error-code-casing` passes clean.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_017CZbGQYbdUMyzTMdqcQxp9)_"
+}

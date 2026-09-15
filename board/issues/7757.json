@@ -1,0 +1,35 @@
+{
+  "number": 7757,
+  "kind": "pull_request",
+  "title": "docs(spec,i18n): `GET /i18n/locales` stops declaring `label` a display name",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T13:05:15Z",
+  "updated_at": "2026-08-11T14:12:08Z",
+  "closed_at": "2026-08-11T14:12:07Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-11T14:12:07Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/7757",
+  "body": "Fixes #7634\n\n`GetLocalesResponseSchema` described each locale descriptor's `label` as \"Display name of the locale\", and no producer has ever written one. The sole producer is `toLocaleDescriptors` (`packages/spec/src/system/i18n-resolver.ts:1118`) — shared deliberately by the runtime dispatcher's `/i18n` domain and `service-i18n`'s autonomous route, so there is no second implementation to diverge — and it sets `label` to the code. `GET /api/v1/i18n/locales` answers `code: 'th', label: 'th'`, never `label: 'ไทย'`. Declared-not-enforced (ADR-0049), one field wide, and the describe is what carries the claim into the generated JSON Schema, the OpenAPI surface and the SDK type.\n\n## The premise, measured first\n\nThe card's fork was conditional: describe-only fix **if** no consumer treats `label` as a human display name; **stop and report** if one does. Both halves were measured, and no consumer reads the field.\n\n**This repo** — quoted-exact-name greps over `toLocaleDescriptors` / `LocaleDescriptor` / `GetLocalesResponse` / `i18n/locales`, plus a co-occurrence sweep for `label` in any file mentioning `locales`. Every read of the body takes `code` or `isDefault`:\n\n| Site | Reads |\n| :--- | :--- |\n| `packages/runtime/src/http-dispatcher.test.ts` (4 sites) | `l.code` |\n| `packages/runtime/src/domain-handler-registry.test.ts:130` | `l.code` |\n| `packages/runtime/src/i18n-success-envelope.conformance.test.ts:162` | `l.isDefault` |\n| `packages/spec/src/system/i18n-resolver.test.ts:1624` | `l.code` / `isDefault` |\n| `packages/client/src/i18n-wire-dialect.test.ts:46` | fixture **sets** `label: 'zh-CN'` (the code); asserts only array length |\n\nPositive control: the same grep method finds real `isDefault` and `code` reads across the repo, so the absence of `label` reads is a measurement rather than a missed pattern.\n\n**objectui** — verified directly against a read-only clone at `3b7d1cc`, not taken on the filer's word. The one real consumer is `apps/console/src/loadLocales.ts`, which reads `entry?.code` and says so in its header: *\"that helper sets `label` to the code itself, so the descriptor's label is not a display name and the switcher names locales for itself.\"* `packages/app-shell/src/layout/LocaleSwitcher.tsx` names locales from a built-in native-name table plus `Intl.DisplayNames`, and its header gives the reason — *\"a server label would put `th` in the menu where `ไทย` belongs\"*.\n\nSo the premise holds, and the narrowest fix applies. No consumer changes; runtime behaviour is byte-identical.\n\n## What changed\n\n- **`packages/spec/src/api/protocol.zod.ts`** — `label`'s describe now states the convention it ships: *\"Locale label. Equals `code` on every serving surface today — the client names locales for its UI (#7634)\"*, with a schema-level comment recording why display naming stays a client concern (`Intl.DisplayNames` is in every runtime that matters, and *which* language to name a locale in — its own, or the requester's `Accept-Language` — is the caller's choice).\n- **`packages/spec/src/system/i18n-resolver.ts`** — `LocaleDescriptor.label`'s JSDoc said \"Display name. Falls back to the code\"; it now says the field is the code. The `toLocaleDescriptors` header records the no-pull measurement.\n- **`packages/spec/src/system/i18n-resolver.test.ts`** — one pin asserting the **substance**: producer output equals the declared shape, on both sides.\n\n## Deliberately not done\n\nBoth are contract actions nobody has ruled, and they stay open on #7634:\n\n- **Serving real display names** — a capability addition with no measured pull, putting CLDR data behind an endpoint for something every client already computes. Startup-focus: a declared surface with no pull is not built out.\n- **Retiring the field** — removing a shipped response field is a heavier contract action, explicitly off the table on this card.\n\n## Tests\n\nThe pin is two-sided, and reverse verification was run in both directions with the expected direction predicted first — the halves move independently, which is the point:\n\n- **Producer half broken** (`label: NAME(${code})`) → RED on the value assertion: `expected 'NAME(en)' to be 'en'`. Describe assertions stayed green.\n- **Declaration half broken** (describe restored to \"Display name of the locale\") → RED on the describe assertion: `Expected: /display name/i · Received: \"Display name of the locale\"`. The value assertion stayed green.\n\nRestored via `git checkout HEAD -- ...` against a checkpoint commit; tree verified clean at HEAD afterwards. No `git stash`.\n\nGates run locally, scoped to this card's surface:\n\n| Gate | Result |\n| :--- | :--- |\n| `@objectstack/spec` full suite | 377 files / **9884 passed** |\n| `@objectstack/spec` typecheck (+ scripts, + test-typecheck) | pass |\n| `check:generated` (13 artifacts) | **all up to date** |\n| `check:authorable-surface`, `check:api-surface`, `check:docs` | pass (inside `check:generated`) |\n| `pnpm check:i18n` | OK, 9 packages in sync — `EXIT=0` read explicitly, not via a pipe |\n| `check:nul-bytes` | OK — 7115 files, no raw control bytes |\n| `runtime` i18n conformance + domain-handler-registry | 55 passed |\n| `service-i18n` full suite | 62 passed |\n| `client` i18n wire-dialect | 4 passed |\n\n`check:i18n` needed the built CLI on its first run (`pnpm exec turbo run build --filter=@objectstack/cli`) — a fresh-worktree prerequisite, not drift; green after building.\n\n**Generated-artifact closure**: the new describe reaches `packages/spec/json-schema/api/GetLocalesResponse.json` and the bundled `objectstack.json`, both of which are gitignored build outputs. `content/docs/references/api/protocol.mdx` renders only the array-level describe for this schema, so no committed generated file changes — `check:generated` reports all 13 artifacts current.\n\nChangeset: `patch` on `@objectstack/spec`. User-visible because the describe ships in the JSON Schema, OpenAPI and SDK type surfaces; patch because no runtime behaviour, no type shape and no field moves.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01GPgsGSmRULUdnh8NPxqezp)_"
+}

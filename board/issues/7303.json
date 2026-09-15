@@ -1,0 +1,34 @@
+{
+  "number": 7303,
+  "kind": "issue",
+  "title": "[finding] `content/docs/references/contracts/` 是一个只剩 `meta.json` 的空目录，build-docs.ts 已不再产出它",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "documentation"
+  ],
+  "assignees": [
+    "os-help"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-10T05:36:20Z",
+  "updated_at": "2026-08-11T10:01:49Z",
+  "closed_at": "2026-08-11T09:59:02Z",
+  "closed_by": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 12,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7303",
+  "body": "在做 #6530（PR #7302，把 quick-reference 的计数与真实参考目录对齐并纳入门）时**顺带**发现，**非该单范围**，按 Prime Directive #10 独立记录。⛔ 未自我认领。\n\n## 观察\n\n`content/docs/references/` 下的 15 个分类目录里，`contracts/` 是唯一一个**没有任何 `.mdx`** 的：\n\n```\n$ ls -a content/docs/references/contracts/\n.  ..  meta.json\n\n$ cat content/docs/references/contracts/meta.json\n{\n  \"title\": \"Contracts Protocol\",\n  \"pages\": []\n}\n```\n\n其余 14 个目录页数（去掉 `index.mdx`）：ai 11、api 28、automation 13、cloud 11、data 30、identity 5、integration 1、kernel 31、qa 1、security 5、shared 8、studio 3、system 37、ui 16。\n\n## 它是怎么留下的\n\n`packages/spec/scripts/build-docs.ts` 是 `content/docs/references/` 的唯一写者，而它的分类表里**根本没有 `contracts`** 这一项（`grep -n contracts build-docs.ts` 只命中 `api:` 的一句描述文字和一句注释）。目录本身是历史残留：\n\n- `c483c1326` \"fix: migrate hand-written docs from auto-generated references/ to guides/\" 删掉了 `contracts/` 下全部 6 个页（`auth-service` / `cache-service` / `data-engine` / `index` / `metadata-service` / `storage-service`）以及当时的 `meta.json`；\n- `36425099a` \"docs: regenerate references from current spec (#1908)\" 又把 `meta.json` 单独加了回来，但页没有回来。\n\n那批内容今天活在 `content/docs/kernel/contracts/`（`auth-service.mdx` / `cache-service.mdx` / `data-engine.mdx` / `index.mdx` / `metadata-service.mdx` / `storage-service.mdx` 六页都在），所以内容没有丢，丢的只是这个空壳目录没人清。\n\n## 影响面（据实，不夸大）\n\n**今天没有任何用户会撞到它，所以按 observation-class 记录、不自评级别。** 依据：\n\n- `content/docs/references/meta.json` 的 `pages` 数组显式枚举了 14 个分类，**不含 `contracts`**，所以导航里不会出现一个空的 \"Contracts Protocol\" 组；\n- 没有任何页链接到 `/docs/references/contracts`；\n- `Check Documentation Links`（lychee）今天是绿的。\n\n代价只有两处，都是对**读者与 agent** 的：\n\n1. `content/docs/references/` 是「每个分类一个目录」这条结构约定的实例，多一个空目录会让任何按目录枚举分类的人（包括 agent）数出 15 而不是 14；\n2. `meta.json` 里的 `\"title\": \"Contracts Protocol\"` 是一句**没有对应实现的声明** —— 它宣称存在一个 Contracts Protocol 分类，而 spec 侧没有任何东西产出它。\n\n## 为什么现在才被看见\n\nPR #7302 给 `scripts/check-quick-reference-counts.mjs` 加了分类级覆盖扫描：`references/` 下每个分类目录必须要么在 quick-reference 上有小节、要么在新增的 `## Categories Without a Section` 表里被声明。`contracts` 因此被迫写进那张表，写的时候才发现它 0 页。也就是说，这个空目录现在是**被 gate 盯着的**（页数从 0 变成非 0 会红），只是它该不该继续存在是另一个问题。\n\n## 需要决定的是「删还是留」\n\n| | 若判定 = 残留 | 若判定 = 占位 |\n| :--- | :--- | :--- |\n| 动作 | 删掉 `content/docs/references/contracts/`，并把 PR #7302 那张表里的 `contracts` 行一并去掉 | 保留，但要说明 spec 侧什么时候会产出它；`meta.json` 的 title 应改成不暗示已存在 |\n\n倾向前者：`build-docs.ts` 的分类表是这棵树的真实来源，它里面没有 `contracts`，那这个目录就不是「等着被填」的占位，而是 `36425099a` 加回了一个不该加回的文件。但这是分诊该定的，不是我在 #6530 范围内该定的。\n"
+}

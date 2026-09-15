@@ -1,0 +1,34 @@
+{
+  "number": 7177,
+  "kind": "issue",
+  "title": "[finding][drivers] The `object`-in-query sweep of #6231 was source-only — 10 more sites of the same shape live in driver test files",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "huangyiirene"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-10T01:55:49Z",
+  "updated_at": "2026-08-11T06:39:00Z",
+  "closed_at": "2026-08-11T06:39:00Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7177",
+  "body": "Found while implementing #6231 (metadata seat). Filed unassigned, **observation-class**, no `pm:queue` — please grade in triage.\n\n## What #6231 measured, and what it missed\n\n#6231 named **five** call sites that restate the object name inside a driver query and use a cast to carry it. All five were in *source* files, and all five are fixed by its PR.\n\nRunning the card's own recommended method — a back-reference pattern that matches only when the value is character-for-character the first argument — over the **whole** tree rather than over source only finds **10 more live sites**, all in driver *test* files:\n\n```\ngit grep -nP \"\\.(find|findOne|count|updateMany|deleteMany|explain)\\(\\s*('[^']*'|\\\"[^\\\"]*\\\"|[A-Za-z_\\$][\\w.\\$!]*)\\s*,\\s*\\{\\s*object:\\s*\\2\\s*[,}]\" -- packages apps\n```\n\n| File | Sites |\n|---|---|\n| `packages/drivers/driver-mongodb/src/mongodb-findone-options.test.ts` | 5 (`:117`, `:136`, `:154`, `:163`, `:168`) |\n| `packages/drivers/driver-mongodb/src/mongodb-filter-logic-conformance.test.ts` | 2 (`:72`, `:85`) |\n| `packages/drivers/driver-mongodb/src/mongodb-findone-query.test.ts` | 2 (`:61`, `:70`) |\n| `packages/drivers/driver-mongodb/src/mongodb-filter-boolean-identity.test.ts` | 1 (`:333`) |\n| `packages/drivers/driver-sql/src/sql-driver-temporal-conformance.test.ts` | 1 (`:118`) |\n\n(Line numbers from `origin/main` @ `3e8e669c0` — locate by content, this tree moves.)\n\nShape is identical to the five that were fixed, e.g.:\n\n```ts\nconst rows = await driver.find(table, { object: table, where } as any);\nawait driver.findOne('account', { object: 'account', ...c.query } as any);\n```\n\nOne variant worth noting: `mongodb-filter-boolean-identity.test.ts:333` spells the cast `as never` rather than `as any`. A sweep grepping only for `as any` misses it.\n\n## Why it is observation-class rather than a defect\n\nSame reasoning as #6231's own body: the key is **inert** (`git grep 'query\\.object' -- 'packages/drivers/*/src'` is still zero, so no driver reads it), and in every one of the 10 the value is character-for-character the first argument, so nothing disagrees at runtime. Nobody is hitting this today.\n\nThe cost is the same second-order one #6231 names, scoped to test code: the cast is not suppressing one redundant key, it switches off checking for `where` / `orderBy` / `fields` in the same literal. In a *conformance* test that is worth something — several of these files exist precisely to pin filter-dialect behaviour, and an operator the dialect does not have would compile silently inside them. That is the cloud#1030 `$like` shape, in the tests that are supposed to catch it.\n\nCounter-argument for the triage seat: `check:query-options-erasure` deliberately keeps a separate decrease-only channel for test code, on the grounds that \"a test whose subject IS off-contract engine input must be able to build it\". Some of these may be exactly that and should stay. They should be judged one at a time — which is why this is filed rather than swept.\n\n## Note for whoever takes it\n\n⚠️ `packages/objectql/src/engine-unknown-option.test.ts` holds a **deliberately unequal** site — `engine.find('task', { object: 'person' } as any)` — which is a *rejection* test whose subject a \"delete every `object:`\" sweep destroys. The back-reference pattern above does **not** match it (`'person'` is not `'task'`), which is the reason to use that pattern rather than a plain grep. Two other keys must not be touched either: `object` inside an `expand` entry names the *related* object, and `syncSchemasBatch([{ object, schema }])`'s `object` is genuinely read. Verified intact by #6231's PR.\n\nSession: `session_01W6bLax4KMrSfnE1ydFU8Dw` (found during #6231, unclaimed)"
+}

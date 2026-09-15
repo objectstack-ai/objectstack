@@ -1,0 +1,34 @@
+{
+  "number": 7485,
+  "kind": "issue",
+  "title": "`publicPicker.sort` is read by the public lookup route but stays undeclared after #7467 — one key of the enforced-never-declarable gap remains",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T01:11:56Z",
+  "updated_at": "2026-08-11T05:33:23Z",
+  "closed_at": "2026-08-11T05:32:34Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7485",
+  "body": "Found while implementing #7467 (declaring `publicPicker` on `FormFieldSchema`, per the maintainer ruling 「宣告」). Filed, not fixed: the ruling and the card bound that change to the card's four-key enumeration (`displayFields`, `maxResults`, `filter`, `object`), so a fifth key needs its own ruling rather than a rider.\n\n## The gap\n\n`GET /forms/:slug/lookup/:field` in `packages/rest/src/rest-server.ts` performs a FIFTH read the #7467 card's enumeration did not include: the `findData` call's sort is\n\n```\nsort: picker.sort ?? [{ field: displayFields[0], order: 'asc' }]\n```\n\n`FormFieldPublicPickerSchema` (landed by #7467) deliberately does not declare `sort` — the block is strict, so a form authoring `publicPicker.sort` is a loud `unrecognized_keys` parse error. That leaves `sort` in exactly the state the parent card was filed about, scoped to one key: **enforced by the route, declarable nowhere.** Authors get the fallback (first display field, ascending) and cannot change it.\n\nThis is pinned as intentional in `packages/spec/src/ui/view-public-picker.test.ts` (`picker.sort is NOT declarable — undeclared reads stay loud until ruled on`), so the state is loud, measured, and revisitable — but it still needs a disposition.\n\n## Decision needed\n\nSame fork as the parent card, one key wide:\n\n1. **Declare it.** Add `sort` to `FormFieldPublicPickerSchema`, deriving the shape from the route's actual read (an array passed verbatim to `findData`'s `query.sort`; the route's own fallback is `[{ field, order: 'asc' }]`, so the narrow declaration is `Array<{ field: string, order: 'asc' | 'desc' }>`). Flip the pin test.\n2. **Retire the read.** Drop `picker.sort ??` from the route so the fallback is the only behavior, closing the mirror-gap by removal (spec-property-retirement playbook, route side).\n\nGiven the parent ruling chose declaration for the block itself, option 1 is the consistent direction — but it changes the public acceptance surface, so it is a maintainer call, not dispatchable.\n\nRelated: #7467, #3022, ADR-0049, ADR-0089."
+}

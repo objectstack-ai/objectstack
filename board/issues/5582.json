@@ -1,0 +1,35 @@
+{
+  "number": 5582,
+  "kind": "issue",
+  "title": "mapDataError 的显式状态直通只覆盖 4xx,数据路由上一个声明了 502/503 的生产者拿不回自己的状态码(与 resolveErrorResponse 不对等)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-help"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T19:48:00Z",
+  "updated_at": "2026-08-10T10:36:06Z",
+  "closed_at": "2026-08-10T10:36:06Z",
+  "closed_by": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5582",
+  "body": "发现于 #5489 的兜底测绘,不在该单文件面内,按 Prime Directive #10 单独立项。**观察类**:我是用注入错误测到的,没有找到会走到这条组合的活体生产者,严重度请分诊时判定。\n\n## 事实\n\n`packages/rest/src/rest-server.ts` 有两道错误门,对「生产者声明了 `status`」这件事给的判断不一样:\n\n- `resolveErrorResponse`(`sendError` / `handleRouteError` 走的那道)接受 **400–599**,5xx 保留声明的状态码、丢措辞、留 `code`(#5437 / PR #5464)。\n- `mapDataError` 自己的直通分支**只接受 4xx**(`error.status >= 400 && error.status < 500`)。5xx 落下去继续走文本启发式。\n\n而 CRUD 数据路由是**直接调 `mapDataError`** 的(`const mapped = mapDataError(error, req.params?.object)`,rest-server.ts 约 4804 / 4839 / 4894 / 4956 / 5034 / 5076,另有 6049 / 6462 / 6612 三处),不经过 `resolveErrorResponse`。所以同一个声明了 `status: 502` 的错误:\n\n```\n经 sendError / handleRouteError → 502 {\"error\":\"Internal server error\", ...}\n直接经 mapDataError            → 声明的 502 丢失\n```\n\n实测(#5489 的兜底测绘,给终局兜底加桩跑 `@objectstack/rest` 全套):\n\n```\n{\"raw\":\"connect ECONNREFUSED 10.0.0.5:5432 (internal pool)\",\"name\":\"Error\",\"status\":502}\n```\n\n这个错误没有命中任何文本启发式,一路落到终局兜底。#5489 之前它以 **400 携带主机与端口原文**下发;#5489 之后它是 `500 INTERNAL_ERROR`(已消毒、在正确的段位)。**残留的只有状态码保真度**:声明的 502(「上游依赖不可达,可重试、可换节点」)被压成 500。\n\n## 为什么值得记一笔\n\n- 502/503 与 500 对调用方不是同义词:`isExpectedDataStatus` 把 502/503 当正常生命周期结果(不打 unhandled 日志),500 不是;代理与重试策略也区别对待。\n- 这是**同一个问题的两个答案**,而 #5437 的分析已经把「两道门对一个问题给相反判断」记成过缺陷形状本身。\n- 目前是观察类:仓内声明 5xx 且能走到数据路由直调点的生产者,我没有测到活体(`ERR_DATASOURCE_UNAVAILABLE` 有自己的 503 分支;metadata-protocol 的两个 overlay 500 走的是 meta 路由,即 `resolveErrorResponse` 那道门)。所以今天没有用户会撞上;但它是一条 `mapDataError` 被直调时就生效的静默降级。\n\n## 可能的修法(供分诊)\n\n把 `mapDataError` 的直通改为与 `resolveErrorResponse` 同款:4xx 截断措辞、5xx 保状态丢措辞留 `code`。注意 `rest.test.ts` 的 `does NOT pass through an explicit 5xx status` 与 `rest-4xx-message-truncation.test.ts` 的 `5xx never enters this branch at all` 两条 pin 是按现状写的,改动需一并重写(#5489 已把这两条从纯否定断言升级为钉住实际落点,便于下一手对照)。\n\n相关:#5489(本单发现来源,已把终局兜底改为消毒 5xx)、#5437 / PR #5464、#5462 / PR #5530、#5532(同一片领地的另一半:`getMetaItem` 的裸 catch 把存储故障吞成 not found)。"
+}

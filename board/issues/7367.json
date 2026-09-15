@@ -1,0 +1,34 @@
+{
+  "number": 7367,
+  "kind": "issue",
+  "title": "Add `description` to the action contract (ActionSchema + actionTranslationSchema + i18n extractor) — the maintainer-ruled mechanism for #7278/#7309",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-10T08:03:43Z",
+  "updated_at": "2026-08-10T12:20:05Z",
+  "closed_at": "2026-08-10T11:44:18Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7367",
+  "body": "Cross-seat transfer filed by the `domain:services` seat (#6021) executing the maintainer's 2026-08-10 ruling on #7278. `domain:*` left to triage (expected `domain:spec` — the edit is `packages/spec/src/ui/action.zod.ts` + `packages/spec/src/system/translation.zod.ts`, hard spec ownership; the extractor half is `packages/cli/src/utils/i18n-extract.ts`, flag at claim if that needs a split).\n\n## The ruling this card implements the mechanism for (verbatim, #7278 comment 5237211565)\n\n\"Drop `confirmText` from `approval_reject` and `approval_recall`; the param dialog carries the confirm question as its description — one condition, one wording, one dialog, nothing sent until its own Confirm. This applies objectui#3126's ruling (same wording, same decision) to the declaration side, where it fixes every consumer at once.\"\n\n## Why a spec card is the prerequisite (measured on #7278, zero-code dev run)\n\nThe slot the ruling names is `action.description`: objectui's param dialog renders it (`ActionParamDialog.tsx:221`, fed by `actionDescription(...)` in two independent handlers, with the `objects.{obj}._actions.{action}.description` i18n convention already documented in `useObjectLabel`). But NO producer can emit it today — `ActionSchema` (strictObject) refuses a top-level `description`, and `actionTranslationSchema` refuses it too (both probed through the real rebuilt schemas; the i18n extractor's emitted key set has no action-level description either). Consumer machinery exists; the producer surface does not — the mirror image of declared-but-unenforced.\n\n## Scope\n\n1. `ActionSchema`: optional `description` (I18nLabel-shaped, matching `label`), with describe-prose stating where it renders (the param dialog's description line).\n2. `actionTranslationSchema`: the matching key.\n3. i18n extractor: emit it alongside label/confirmText/successMessage/params.\n4. Authorable-surface anchor, liveness-ledger entry, generated references — the standard new-key train (four-step regen).\n5. Consider (or file follow-up for) a schema-level warn/refuse on the `confirmText`+`params` PAIR — the structural fix that prevents the double-dialog class at authoring time.\n\n## Downstream, blocked on this\n\n- #7278 (the two plugin-approvals actions; `Blocked-by:` updated there) — lands as a two-line move once the key exists.\n- #7309 (18 more confirmText+params sites incl. `rotate_client_secret`'s triple dialog) — same ruling, same mechanism.\n\nRefs: #7278 (ruling + measurement), #7309 (census), objectui#3126 (precedent)."
+}

@@ -1,0 +1,34 @@
+{
+  "number": 7316,
+  "kind": "pull_request",
+  "title": "docs(adr),chore(devx): tombstone ADR-0107 — 撤回后退役的编号，附考古证据 (#6676)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-10T06:29:37Z",
+  "updated_at": "2026-08-11T02:35:34Z",
+  "closed_at": "2026-08-11T02:35:33Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-08-11T02:35:33Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/7316",
+  "body": "Fixes #6676\n\n## 结论先说：是「起草后撤回」，不是丢失，也不是从未分配\n\n卡片列了三种可能，考古结果唯一且无歧义：**ADR-0107 曾经真实存在于 `main` 上九个小时，随后被 owner 决定删除**。\n\n| 时间（UTC+8） | 事件 | 证据 |\n|---|---|---|\n| 2026-07-27 | #3700 上做出决定：接受 hook body 写入面的静态分析缺口（三选项里的 (a)） | 审计 §5 D4 |\n| 2026-07-28 00:25 | ADR-0107《The Hook-Body Write Set Is an Accepted Static-Analysis Gap》合入，Status *Proposed* | `53d37f1ae`（#3716） |\n| 2026-07-28 09:24 | Owner 改变决定：记录与其 changeset 一并删除，#3700 关为 **not planned** | `3bb382b67`（#3735） |\n| 2026-07-31 14:25 | 被撤回记录的核心立场**被推翻**（见下） | `c1d44f7dc`（#4271） |\n| 2026-08-08 | 裸编号被 #6634 挂到 `check-adr-anchors` 的引用 allowlist 上过渡 | #6634 |\n\n## 我搜了什么，以及为什么负结果是可信的\n\n先确认克隆**不是浅克隆**（9,829 commits；#6634 曾被 106 commit 的浅克隆误导过，会把「从未存在」当成事实答出来）：\n\n```\ngit log --all --diff-filter=AD -- 'docs/adr/0107*'   ->  恰好 2 个 commit，即上表两行\ngit log --all --oneline -S'ADR-0107'                 ->  5 个 commit，全部可归因\ngit log --all --oneline -S'0107' -- docs/            ->  同样那 2 个 commit\ngit log --all --oneline --diff-filter=ADMR -- '*0107*' -> 同样那 2 个\n```\n\n**没有第二个东西曾经占用过这个编号**——任何分支、任何时间点都没有。所以不存在「两个 ADR-0107 时代」这一停止条件。被撤回的正文也没有丢，`git show 53d37f1ae:docs/adr/0107-hook-body-write-set-accepted-static-gap.md` 可完整取回；tombstone 里**故意不转载**它，因为把被撤回的记录重印在自己的墓碑里，读起来就还是一份记录。\n\n## 为什么不恢复——恢复会是错的\n\n不只是「被撤回了」。被撤回记录的 **D2** 把「不用启发式分析源码」写成了 *permanent posture, not a deferral*：永远不会用正则或 AST 去猜 Turing-complete body 的写入集。\n\n撤回三天后，#4271（`c1d44f7dc`，2026-07-31）做的恰恰就是这件事：`validateHookBodyWrites` 解析 `body.source`，把字面写入解析到目标对象字段上，`hook-body-write-unknown-field` 带 did-you-mean 告警。那个 commit 的标题自己就记着这次反转——「L2 hook body 写不存在字段从 accepted gap 变为作者时 lint 告警」。\n\n也就是说，**恢复正文等于往决策日志里种一句和已发布代码矛盾的话**。今天这块面的真实说法在 `content/docs/automation/hook-bodies.mdx`「Write-set checking」，tombstone 把读者指过去。\n\n## 改动\n\n**1. `docs/adr/0107-withdrawn-hook-body-write-set-static-gap.md`（新增）**\n\n按邻居 `0106-*` / `0108-*` 的 front-matter 与标题形状写的（粗体 `**Status**:` 行组 + `---` + `## TL;DR`）。明说编号已退役、不得复用，记下撤回、后续反转、以及上面这段考古，让下一个人不用重做。\n\n**2. `scripts/check-adr-anchors.mjs`（allowlist 收缩一条 + 三处注释）**\n\n这一处**不是顺手扩大范围，而是 tombstone 强制的**。#6634 把裸编号 0107 放进了 `UNRESOLVED_ADR_CITATIONS`，而这张表是**双向审计**的：编号一旦获得记录，条目就以 stale 失败。所以加了 tombstone 就必须删这条——这正是 gate 自己在悬空引用报错里排第一的补救方式「(a) write the record」。\n\n而且它**严格更强**：allowlist 条目只在还有人引用该编号时存活（方向 B「nothing cites it any more」），而 0107 今天的三个引用里有一个是**等待发布消费的 changeset**——`.changeset/` 是设计上就会被 `changeset version` 删掉的。等它被消费掉，这条 grandfather clause 会自己过期、被要求删除，编号就**悄悄重新空出来**了，也就是这张卡担心的那件事。记录不会过期；而且复用现在会撞进编号唯一性审计，红得直白。\n\n## 反向验证（方向是**先预测再跑**的，两侧都红，但红的理由不同）\n\n```\n① 拿掉 tombstone，allowlist 条目保持已删除\n   -> RED：ADR-0107 is cited by 3 file(s) but names no record under docs/adr/\n           ……Fix, in order of preference: (a) write the record\n   （gate 自己点名了本 PR 采取的路线）\n\n② 保留 tombstone，把 allowlist 条目放回去\n   -> RED：the UNRESOLVED_ADR_CITATIONS entry for 0107 is stale —\n           docs/adr/ now HAS a record for that number\n```\n\n两处改动因此是耦合的，任何一边单独存在都是红的；没有一处是死重。\n\n## Gates（本地实测输出）\n\n```\npnpm check:adr-anchors  OK (47 anchored file(s); 119 decision number(s); 20916 citation(s) across 3486 file(s) resolve)\n                        --self-test: 51 assertions\npnpm check:adr-links    OK (532 relative link destination(s) resolve; 8 frozen on baseline)\npnpm check:nul-bytes    OK (scanned 6722 text file(s); no raw ASCII control bytes) + 75 assertions\ncheck:doc-authoring     OK (375 files clean)\ncheck:empty-changeset   OK (0 declaring changeset(s) added)\ncheck:adr-merge-approval --self-test: 27 assertions\neslint scripts/check-adr-anchors.mjs --no-inline-config   exit=0\n```\n\n编号数从 118 变 119，`docs/adr/` 里 0106 → 0107 → 0108 连续。\n\n## Changeset：走 `skip-changeset` 标签\n\n`docs/adr/**` 与 `scripts/**` 不在任何已发布包里，本 PR 不发布任何东西。空 frontmatter 的 changeset 已被 `check:empty-changeset`（#5471）明确拒绝——它对 `changesets/action` 是真实输入，能触发 #4898 那种静默停发，而标签不会。所以按仓库文档化的路线打 `skip-changeset` 标签，不写 changeset。\n\n## ⚠️ 落地纪律：本 PR 不由 AI 合并\n\n按维护者在 #6015 / #6741 的裁定，本 PR 触及 `docs/adr/**`，因此**只起草和推送**：**没有开启 auto-merge，也没有进 merge queue**。`ADR maintainer approval` 检查在维护者本人 approve 之前会是红的——这是设计如此，不是失败。合并键在维护者手里。\n\n## 顺带测到、但**本 PR 不动**的事\n\n`docs/adr/` 一共有 4 个洞，而且**成因各不相同**，这正好是卡片里「gaps 是否合法」那个可选 gate 问题的输入：\n\n- **0001** —— 记录于 2026-02-11（`9da8e3e72`）permission-protocol 重写时删除，至今在 allowlist 上；\n- **0075** —— 只存在于**未合入的分支**（`148f4c8f5` / `617f3f8ae`，均 `git merge-base --is-ancestor` 判否），即 `main` 上从未分配；\n- **0083** —— 任何分支、任何时间都没有过文件，也无人引用，真正的「从未分配」；\n- **0107** —— 本 PR，落地后撤回。\n\n四个洞四种故事，其中至少两个（0075/0083）是完全正常的编号跳过。所以「给 gaps 加告警」不能是一刀切的，已按卡片要求记为 out-of-scope finding 交分诊判断，本 PR 不实现。\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01F8q5J1MQyocgtNspb15fSn)_"
+}

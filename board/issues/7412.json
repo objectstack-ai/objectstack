@@ -1,0 +1,35 @@
+{
+  "number": 7412,
+  "kind": "issue",
+  "title": "[finding] `scripts/pm/check-half-states.mjs` live sweep cannot run in a PM session container — direct api.github.com is 403 with or without the token, and the docblock's \"unauthenticated works\" is false here",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "huangyiirene"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-10T10:26:52Z",
+  "updated_at": "2026-08-11T18:20:20Z",
+  "closed_at": "2026-08-11T18:20:20Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7412",
+  "body": "Observation-class finding, recorded while loading the current pm-dispatch skill in a live `domain:spec-tooling` seat session (`session_01KJATVrh6V2ysutYUJigh3B`). **Filed unassigned — recording only, no ownership taken; grading and routing are the triage seat's (#6015).** ⛔ Not self-claimed.\n\nThe half-state sweeper landed ~2h before this measurement (#7379 / `b56a163c9`, #7341 PR C). Its **self-test is healthy — 16/16 pass**. The problem is only the live mode, which is the mode PM seats would actually use each patrol.\n\n## Measured, in a standard PM session container\n\n```\n$ node scripts/pm/check-half-states.mjs\ncheck-half-states: sweep failed to run — GET /repos/objectstack-ai/objectstack/issues\n  ?state=open&labels=pm%3Adispatched&per_page=100&page=1 -> HTTP 401\n```\n\nThe script reads `GITHUB_TOKEN ?? GH_TOKEN ?? ''` (`:67`). Both are **set** in this container, so the \"no token\" branch never engages — but the value is not a GitHub credential:\n\n```\ntoken prefix: prox…   len=14\n```\n\nProbing the API directly settles which side is at fault:\n\n```\nwith token: HTTP 403\nno token  : HTTP 403\n```\n\nSo `api.github.com` is unreachable from this container **in both directions**. The script is not broken; its transport assumption does not hold here. This session's GitHub access is exclusively via the `mcp__github__*` tools.\n\n## The docblock claim that does not hold\n\n`:57` reads:\n\n> Auth: uses `GITHUB_TOKEN` / `GH_TOKEN` when present (unauthenticated works at lower rate limits…)\n\nUnauthenticated does **not** work here — it is 403, not rate-limited. A reader following that line would conclude the sweep degrades gracefully without a token; it does not run at all.\n\n⚠️ Worth noting the failure direction is the **good** one: it fails **loudly** (`sweep failed to run`, non-silent). The seat card #6018 already records the sibling hazard where an unauthenticated `curl` to this same host failed **open** — an empty array parsed out of an error payload, i.e. a zero meaning \"the reader is broken\" rather than \"there are nothing to report\". This script is not that; it refuses rather than reporting a false all-clear. That is why this is filed observation-class and not as a defect.\n\n## Why it still matters\n\nThe sweeper mechanizes a real duty that is otherwise a manual read of every card — and it encodes exactly the invariant that bit this lane tonight. Its `H4: blocked without body line -> finding` case is **#7181**: a card carrying `pm:blocked` with no `Blocked-by:` in its body and zero comments, which is structurally invisible to every unlock scan and had been parked that way. This seat found it by hand this round; the tool would have found it mechanically. So the gap between \"tool exists\" and \"tool runs where the seats live\" is the whole value.\n\n## Not proposing the fix\n\nTwo directions are visible (an MCP-backed transport, or documenting a required real-token env and the surfaces where the live mode is expected to run), but which is right depends on where these scripts are meant to execute — Routine seats, session seats, or CI — and that is not this seat's call. `scripts/pm/**` is PM tooling rather than spec-contract tooling, so by the 2026-08-09 #5469 criterion the route is probably `domain:devx` rather than this lane — ⛔ but routing is the triage seat's single-producer territory, so no `domain:*` label is applied here.\n\nSame measurement applies to the two siblings landed in that commit (`dispatch-gates.mjs`, `check-skill-line-ratchet.mjs`) **only if** they also hit the network — not checked; `dispatch-gates.mjs` derives from the tree at runtime and looked local-only on a read.\n\n## Dedup\n\nSearched open issues for `check-half-states`, `scripts/pm`, and `half-state` before filing: no existing card. #7341 is the parent batch and #7379 the landing PR; neither carries this measurement.\n\nRefs: #7341, #7379, `b56a163c9`, #7181 (the H4 instance this lane hit by hand)."
+}

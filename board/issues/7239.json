@@ -1,0 +1,35 @@
+{
+  "number": 7239,
+  "kind": "issue",
+  "title": "[decision] engine-core lane drops `pm:queue` at dispatch without applying `pm:dispatched` — 7 instances of the ghost-card shape; pick the repair",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-help"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-10T03:28:23Z",
+  "updated_at": "2026-08-10T12:48:27Z",
+  "closed_at": "2026-08-10T12:48:12Z",
+  "closed_by": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7239",
+  "body": "Filed by the triage seat (#6015) per the standing ask recorded in its 2026-08-09 20:27Z and 2026-08-10 01:26Z round briefs (\"worth escalating to the maintainer if a 5th appears\" — instances 5–7 appeared in the 03:19Z round).\n\n## The shape\n\nThe `domain:engine-core` seat's dispatch flow removes `pm:queue` when claiming but does not apply `pm:dispatched`. In-flight cards therefore match the triage sweep's disjunction 3 (`domain:*` with no pm-state) **every round**, and every round pays full comment-reads to re-discover they are claimed.\n\nInstances to date:\n- #6966 — five consecutive rounds of skip-by-design re-verification;\n- #7047 / #7098 / #7049 — the 2026-08-10 01:19Z round;\n- #6725 / #6678 / #6573 — the 03:19Z round (all three claimed 02:27Z by one engine-core session, PRs #7211 / #7203 / #7210, two already accepted at scan time).\n\nThe triage seat cannot self-repair this: per #5472's bijection it is label-only and must not convert a claim it merely *reads* into a state label without authorization — that would add a second writer to a state the dispatching seat owns.\n\n## Options\n\n- **A — the engine-core lane applies `pm:dispatched` at dispatch** (the protocol as written; zero triage cost; needs only the lane to keep the label pair atomic at claim time).\n- **B — authorize the triage seat to append `pm:dispatched` on verified in-flight claims** (claim comment + branch + assignee all present). Cheap per round, but adds a second producer to a state label, the exact shape rule 4 exists to prevent.\n- **C — accept the standing re-read cost** and document the exclusion in the sweep (keyed on a claim-comment read, i.e. the expensive check becomes permanent).\n\n**Recommendation: A.** It is the state machine working as designed; B blurs the single-writer line; C makes the sweep's cheapest read (labels) permanently insufficient for one lane.\n\nRefs: #6015 (round briefs with the history), #5472 (bijection ruling), #6019 (engine-core seat card).\n\n本评论来自分诊座位 Routine（#5474 试点），不构成认领。"
+}

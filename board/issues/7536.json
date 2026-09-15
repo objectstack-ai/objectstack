@@ -1,0 +1,35 @@
+{
+  "number": 7536,
+  "kind": "issue",
+  "title": "Filter AST: `like` is folded to `$contains` at the wire — wildcards bind as literals and driver-sql's `like`/`ilike` arm is unreachable",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:spec"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T05:01:37Z",
+  "updated_at": "2026-08-11T07:45:33Z",
+  "closed_at": "2026-08-11T07:44:34Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7536",
+  "body": "## Symptom\n\nA `like` predicate carrying SQL wildcards matches nothing, because the `%` is bound as a literal character:\n\n| filter node | observed | expected |\n|---|---|---|\n| `[\"name\",\"like\",\"%Industries\"]` | `200`, **0 rows** | the rows whose `name` ENDS WITH `Industries` |\n| `[\"name\",\"like\",\"Industries\"]` | `200`, the 2 matching rows — **byte-identical** to the `$contains` control | a `LIKE 'Industries'` (exact) match, not a substring match |\n\nThe second line is the tell: `like` and `$contains` produce the same bytes, so `like` is not reaching the driver as `LIKE` at all — it is being lowered onto `contains`, which wraps the value in `%…%` and changes what the query means. A caller who writes their own wildcards therefore gets a silently wrong answer in both directions: with wildcards, zero rows; without them, a substring match they did not ask for.\n\nThis contradicts `canonicalAstOperator`'s own comment in the same file:\n\n> `like`/`ilike` share the `$contains` lowering but are NOT substring matches at the driver: driver-sql passes them to SQL verbatim, so the caller binds the wildcards. Folding them onto `contains` would silently wrap the value in `%…%` and change what the query means.\n\nConsequence: **driver-sql's `like`/`ilike` bind arm has been unreachable from the wire since #5158** — dead code guarding a contract nothing can exercise over HTTP.\n\n## Root cause\n\nLocated in the report as the `like` → `$contains` fold on the wire path. In tree (checked 2026-08-11), the fold is the `AST_OPERATOR_MAP` entry\n\n```\n'like': '$contains',\n```\n\nin `packages/spec/src/data/filter.zod.ts`, reached via `astOperatorLowering()` from the AST comparison converter (`parseFilterAST` / `convertComparison`) — the path a wire filter actually takes. `canonicalAstOperator()`, immediately below it in the same file, exempts `like`/`ilike` deliberately (that is the comment quoted above), but that exemption only shapes its own canonical-name output; the lowering the wire uses has no such exemption. Fix lands in `packages/spec`, with driver-side verification that the `like`/`ilike` bind arm is exercised again.\n\n## Reproduction\n\n1. Boot showcase on a fresh isolated file DB (`SqlDriver` / better-sqlite3); authenticate as `admin@objectos.ai`.\n2. `POST /api/v1/data/showcase_account/query` with the filter AST `[\"name\",\"like\",\"%Industries\"]` → `200`, 0 rows.\n3. Same request with `[\"name\",\"like\",\"Industries\"]` → `200`, the 2 matching rows.\n4. Control: the same value through `$contains` → byte-identical response to step 3.\n\n## Source\n\nExtracted from the QA run #7463 (framework a86db175)."
+}

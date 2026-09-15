@@ -1,0 +1,35 @@
+{
+  "number": 7509,
+  "kind": "pull_request",
+  "title": "refactor(rest): retire the public lookup route's picker.sort read (#7485)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T04:16:17Z",
+  "updated_at": "2026-08-11T05:32:34Z",
+  "closed_at": "2026-08-11T05:32:33Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-11T05:32:33Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/7509",
+  "body": "Executes the maintainer's four-lens ruling recorded on #7485 (02:55Z): **Option 2 — retire the read.**\n\nCloses #7485\n\n## The gap this closes\n\n`GET /forms/:slug/lookup/:field` composed its `findData` query with\n\n```\nsort: picker.sort ?? [{ field: displayFields[0], order: 'asc' }],\n```\n\n— a **fifth** read of the `publicPicker` block whose declaration (#7467, landed by PR #7487) enumerated four keys: `displayFields`, `maxResults`, `filter`, `object`. `sort` was in neither the schema nor the enumeration, which left it in exactly the state ADR-0049 calls the mirror-gap, one key wide: **enforced by the route, declarable nowhere.** The block is strict (ADR-0089 D3a), so a form authoring `publicPicker.sort` is an `unrecognized_keys` parse error — no form written since #7467 has ever reached that read.\n\nThe ruling closes the gap by **removal** rather than declaration: `sort` has zero measured pull, and declaring it would mean permanently maintaining one more public knob on an **unauthenticated** search surface. Ordering is now fixed — first display field, ascending — and is the only behavior. If real demand appears, the declare fork re-runs then; it stays cheap.\n\n## Changes\n\n| File | Change |\n|---|---|\n| `packages/rest/src/rest-server.ts` | the lookup route's query is `sort: [{ field: displayFields[0], order: 'asc' }]` — the `picker.sort ??` read is gone |\n| `packages/rest/src/public-form-lookup-picker.test.ts` | route-side pins (below) |\n| `packages/spec/src/ui/view-public-picker.test.ts` | the existing pin now says **\"not declarable AND not read\"**, and asserts the refusal is `unrecognized_keys` on `sort` rather than merely a failed parse |\n| `content/docs/ui/forms.mdx` | the public-picker section states the fixed ordering explicitly |\n| `.changeset/retire-public-picker-sort-read.md` | `@objectstack/rest` patch |\n\n**Both sides of \"ignored, not an error\" are pinned**, per the card:\n\n- the schema **refuses** a new form authoring `publicPicker.sort` through the real `saveMetaItem` write path — no row is written (with the byte-identical form minus `sort` saving as the control, so `sort` is provably the sole cause);\n- a **pre-#7467 stored row** still carrying `sort` — rows persisted before the block was declared never went through `ViewMetadataSchema`, so one can carry a key the schema refuses today — is read past, answered `200`, ordering unchanged, and the stored `{ field: 'email', order: 'desc' }` reaches `findData` nowhere;\n- the fixed sort **tracks `displayFields[0]`**, including the no-`displayFields` default (it is \"first display field, ascending\", not a frozen constant).\n\nThat stored-row half is why the route pin lives in `packages/rest` rather than the spec suite: the route must neither honor the stale key nor choke on it — a 500 on an anonymous surface would be a regression the removal itself caused.\n\n## Impact\n\nNone for any form that parses today — the read was unreachable through the authoring path. The declared four `publicPicker` keys are untouched.\n\n## Gates\n\n| Gate | Result |\n|---|---|\n| `@objectstack/rest` full suite | 82 files / **1344 passed** |\n| `@objectstack/spec` full suite | 374 files / **9802 passed** |\n| `@objectstack/rest` + `@objectstack/spec` typecheck | clean |\n| `pnpm build` | 71/71 tasks, **no generated artifact moved** (`git status` clean but for the 5 intended files) |\n\n## Reverse verification\n\nPredicted in writing before running; all three landed exactly as predicted.\n\n| Mutation | Predicted | Observed |\n|---|---|---|\n| restore `sort: picker.sort ?? …` | stored-row pin RED, rest green | 1 failed / 5 passed — the stored-row pin |\n| delete the `sort:` key entirely | all three composition pins RED | 3 failed / 3 passed — happy path, stored row, `displayFields[0]` tracking |\n| declare `sort` in `FormFieldPublicPickerSchema` | spec pin **and** rest save-refusal pin RED | both RED (and `pnpm build` failed the artifact-drift guard on `authorable-surface/ui.json` — the guard working as designed) |\n\n## Scope boundaries observed\n\nSibling finding #7486 (the target fallback reading only `referenceTo` / `target` / `options.objectName`) is **not** touched. No `content/docs/releases/`, no `docs/adr/**`.\n\n## Finding noted, not fixed here\n\nThrough `ViewMetadataSchema`'s union, a form that fails the ViewItem branch on a bad `publicPicker` subkey reports the **container** branch's diagnostic instead — the author sees `Unrecognized key(s) on this view container: viewKind, config` rather than a message naming `sort`. Pre-existing, unrelated to this change (the direct `FormViewSchema` door names the key correctly), and recorded on the issue rather than fixed as a rider.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01Wft6gbSGhtq1J9nmBxZfNg)_"
+}

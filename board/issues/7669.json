@@ -1,0 +1,35 @@
+{
+  "number": 7669,
+  "kind": "issue",
+  "title": "`inline-grid-receipt-cells` c3: checklist clause predates ADR-0104 (opaque id, not a resolved object)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "huangyiirene"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T10:09:59Z",
+  "updated_at": "2026-08-11T12:25:14Z",
+  "closed_at": "2026-08-11T12:25:14Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7669",
+  "body": "## Symptom\n\nThe product works correctly: the grid derives one Receipt column with a real `input[type=file]` (objectui#2360 does not reproduce), picking a file runs a genuine presign &rarr; `PUT` &rarr; complete &rarr; thumbnail trace, and submit emits one atomic `POST /api/v1/batch` (`atomic:true`, `{\"$ref\":0}` parent reference), persisting both records. But checklist clause 3 reads `partial` because it expects a **resolved stored-file object** carrying `receipt.name` and an absolute http(s) URL, whereas the shipped payload is the **bare opaque `sys_file` id**.\n\n## Root cause\n\nLocated — checklist-vs-product drift, not a defect. Under ADR-0104 D3 (`docs/adr/0104-field-runtime-value-shape-contract.md`, \"D3 — File-as-reference: field values point into `sys_file`\"), a file field stores an opaque `sys_file` id as a field-ownership reference. The persisted value is a managed reference (`{status:'committed', ref_object:'showcase_invoice_line', ref_id:…, ref_field:'receipt', acl:'private'}`), **not** a `data:`/`blob:` placeholder, and is correctly gated (anon 401 / two members 403 / admin 200). `storage-routes.ts` documents the id as \"the value a file field stores as a reference\". The clause should be restated against ADR-0104 D3.\n\n## Reproduction\n\nRun the `inline-grid-receipt-cells` item; inspect the submitted `receipt` value &rarr; it is the opaque `sys_file` id, not a resolved `{name, url}` object. Clause 3 as written expects the resolved shape and therefore reads `partial`.\n\n## Source\n\nExtracted from the QA run objectstack-ai/objectstack#7635 (framework 92f26f75, console 6314e87f)."
+}

@@ -1,0 +1,30 @@
+{
+  "number": 7475,
+  "kind": "issue",
+  "title": "`[Security] Access denied` copy — the remaining 38 templates, classified: admin-surface should be RETAINED as developer copy, four end-user sites need their own decision",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-10T15:48:40Z",
+  "updated_at": "2026-08-11T02:54:58Z",
+  "closed_at": "2026-08-11T02:54:58Z",
+  "closed_by": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7475",
+  "body": "Successor to **#7451**, which is closed by PR #7471. **Filed unassigned, no `domain:*` label** — routing and grading are the triage seat's call.\n\n#7451 was a ~40-template sweep card. PR #7471 implemented the **end-user-facing** half under a scope limit set at claim time, and produced an audience classification of *every* producer template with evidence. This card carries the remainder, so the classification does not die inside a merged PR.\n\n**The remainder is not one backlog.** It splits into a decision and a short list of open questions, and conflating them is what made #7451 hard to price.\n\n## Part 1 — the admin-surface family: recommend RETAIN, do not translate (~30 templates)\n\n`delegated-admin-gate.ts` (13), `suggested-audience-bindings.ts` (3), `permission-set-projection.ts` (1), `system-write-guard.ts` (1), `plugin-auth/invitation-role-cap.ts` (3), and `security-plugin.ts`'s admin-door family (`:2457`, `:3314`, `:3339`, `:3376`, `:3389`, `:3456`, `:3482`, `:3500`).\n\nThese are reached from an admin console by someone administering the system, and **most cite ADR clauses** (ADR-0090 D5/D9 and D6/D12, ADR-0091 D3, ADR-0103). Localizing copy that cites an ADR clause destroys the citation without helping anyone: the reader is an operator who benefits from the clause number.\n\n**This is a decision to record, not work to schedule.** The useful outcome is a written verdict — \"this family is correctly developer-facing\" — so the next census does not re-file it as a translation backlog. If triage agrees, closing this part as `not planned` with that sentence in the thread is a better artifact than a card that stays open forever.\n\n## Part 2 — four end-user-reachable sites that are NOT cleanly one situation\n\nEach was measured as end-user reachable but declined conversion for a *stated* reason. None is a copy fix; each needs a decision first.\n\n| site | why it was not converted |\n|:--|:--|\n| `security-plugin.ts:3981` `assertControlledByParentWrite` | **Already filed as #7474.** One `deny()` multiplexes six conditions, three of which are not access verdicts (a metadata defect, a not-found, a null master FK). User copy would tell a user they lack access when their app is misconfigured. |\n| `security-plugin.ts:1657` owner_id transfer grant | Plausible end-user situation (record reassignment) but **zero measured pull** — `allowTransfer` appears in neither example app. Converting on speculation is the capability-expansion this repo defers. |\n| `security-plugin.ts:1069` / `:1140` fail-closed | End-user *visible* during degradation, but the situation is \"the check could not run\", not \"you lack permission\". Copy saying the latter would be **false**. Needs its own message key and arguably its own status. |\n| `:953` public-form grant · `:1891` tenant wall · `:1094` / `:1265` on-behalf-of · `predicate-guard.ts:122` | Reached via a misbuilt or forged client, a configured agent integration, or a team-administration action — not an ordinary business operation. |\n\n## What PR #7471 leaves for whoever takes any of this\n\n- The mechanism is settled and has three consumers: `@objectstack/spec/system`'s `renderOperationMessage` / `BUILTIN_OPERATION_MESSAGES`, `errors.<key>` override address, four-rung ladder.\n- **Key granularity is settled**: one key per **situation**, not per gate and not per wire code (#7307 gave one code two keys; #7471 gave three gates two new keys and reused a third).\n- ⚠️ **The developer half is LOGGED, not shipped** — #7449 measured that #7423's \"discloses nothing new\" premise fails for 403s. `developerMessage` is a sibling of `details`, never a member, because `details` is what the runtime dispatcher serialises.\n- The dispatcher-side `details.positions` disclosure is **#7450** (`needs-user-decision`, cli lane), not part of this.\n- A consumption-radius warning worth inheriting: #7471's repo-wide grep found three pins, and **two more were found only by running the suites** — one pinned a fragment, one pinned a *regex* (`toThrow(/denied|permission/i)`) that matched only because the English sentence happened to start with \"Access denied\". Grep is necessary and not sufficient here.\n\nRefs: #7451 (predecessor), PR #7471, #7414 / PR #7449, #7307 / PR #7423, #7450, #7474."
+}

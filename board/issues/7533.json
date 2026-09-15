@@ -1,0 +1,36 @@
+{
+  "number": 7533,
+  "kind": "issue",
+  "title": "`trigger.recordId` is never populated on record_change runs, and the persisted `sys_automation_run` row carries no trigger block at all — runs cannot be correlated to their triggering record, and trigger kinds are lost across restart",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:services",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-help"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T05:01:15Z",
+  "updated_at": "2026-08-11T07:14:41Z",
+  "closed_at": "2026-08-11T07:14:41Z",
+  "closed_by": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7533",
+  "body": "## Symptom\n\nTwo related gaps in what an automation run records about **why it ran**.\n\n**1. `trigger.recordId` is never populated on `record_change` runs.** A flow fired by a record change produces a run whose trigger block has no `recordId`, so there is no way to correlate a run back to the record that triggered it from the run log. Given a suspicious run you cannot answer \"which record caused this\"; given a suspicious record you cannot find the runs it provoked. For the single most common trigger kind on the platform, the run log is not usable as an audit trail.\n\n**2. The persisted `sys_automation_run` history row carries no trigger block at all.** In-memory runs do record their runtime trigger kind — that part works and was verified for all six kinds. But the persisted history row has no trigger information whatsoever, so **the trigger kind is lost across a process restart**. After a restart the run history can tell you a flow ran and whether it succeeded, but not what fired it: a scheduled run, a webhook intake, and a record change become indistinguishable rows.\n\nThese compound. The runs that most need attribution (record changes) lose their record id immediately, and every run loses its kind as soon as the process cycles — which for a long-lived deployment means the durable history is the *less* informative copy.\n\nEverything else in the trigger surface is solid and was verified in the same run: all 6 trigger kinds fire and record their runtime kind; webhook HMAC intake answers 202 with payload interpolation, and **both** bad-signature and missing-signature are refused 401 with no task created; anonymous `/trigger` is denied 401 with no run row; the schedule fired 12 consecutive runs exactly 60s apart. The mechanism is right; the record of it is incomplete.\n\n## Root cause\n\nNot root-caused to a line in this run. The behavioural split is informative though: the in-memory run object *does* carry the runtime trigger kind while the persisted row carries none, which points at the persistence mapping rather than at trigger dispatch — the information exists at the moment of the run and is dropped on the way to `sys_automation_run`.\n\n`recordId` is a separate omission: it is absent even in-memory on `record_change` runs, so that one is upstream, where the record-change trigger builds the run's trigger context.\n\nBoth live in the flow engine / automation service — `packages/services/service-automation`.\n\n## Reproduction\n\n1. Boot the showcase on an isolated file DB and port.\n2. Trigger a `record_change` flow by writing a matching record.\n3. Read the run from the automation run log and inspect its trigger block &rarr; **no `recordId`**. There is no field correlating the run to the record just written.\n4. Read the persisted `sys_automation_run` row for the same run &rarr; **no trigger block at all**.\n5. Cold-restart the process against the same file DB.\n6. Re-read the run history &rarr; the runs are still there, but nothing records what kind of trigger fired each one. Repeat across the other trigger kinds (schedule, webhook, manual) — all indistinguishable after the restart.\n\n## Source\n\nExtracted from the QA run objectstack-ai/objectstack#7516 (framework a86db175). Checklist item `trigger-type-matrix` (PARTIAL) — these are the two gaps that held it back from a pass."
+}

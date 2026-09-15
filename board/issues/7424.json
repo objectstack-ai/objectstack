@@ -1,0 +1,33 @@
+{
+  "number": 7424,
+  "kind": "pull_request",
+  "title": "fix(spec): retire page.json's obsolete prose-in-note citation mandate",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "labels": [
+    "size/xs",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-10T10:43:00Z",
+  "updated_at": "2026-08-10T11:27:54Z",
+  "closed_at": "2026-08-10T11:27:52Z",
+  "closed_by": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "merged_at": "2026-08-10T11:27:52Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/7424",
+  "body": "Fixes #7188\n\n`packages/spec/liveness/page.json`'s file-level `_note` justified its \"objectui citations belong in `note` prose, not `evidence`\" convention with a parser limitation: \"not `evidence`, which resolves framework file:line\". That premise has been false since **#5623** taught `check:liveness` realm attribution — an `objectui:`-prefixed path in `evidence` is counted in the foreign bucket and never resolved locally, exactly like `view.json` / `field.json` already do.\n\n## What changed\n\n- Moved the two `RE-CITED 2026-08-10 (#7133/#7142)` entries (`template`, `regions`) from `note` prose into `evidence`, with an `objectui:` realm marker — these are page.json's counterparts to PR #7179's sweep, which deliberately left them in `note` specifically to honor this file's (now obsolete) `_note` clause rather than contradict it.\n- Deleted the obsolete `_note` clause (\"not `evidence`, which resolves framework file:line\") and replaced it with the accurate, present-day description (paths get the `objectui:` realm marker and are counted, not resolved — #5623), matching `view.json`'s equivalent sentence. The still-true clauses (Studio dogfood provenance, container-drill note, roadmap-type removal) are unchanged.\n- Prefixed the cited path with `packages/` (`packages/components/src/renderers/layout/page.tsx`) — the gate's `PATH_RE` only recognizes tokens rooted at one of `apps|content|docker|docs|examples|packages|scripts|skills`; the original prose path (`components/src/renderers/layout/page.tsx`, no `packages/`) doesn't match that regex and so is invisible to the scanner regardless of realm marker. Without this the moved citations would silently not register as foreign at all. Confirmed by probing `evidence.mts`'s `scanEvidence()` directly (see report).\n- Appended `— measured objectui @11c1e71e` to both new `evidence` strings, matching the sibling convention exactly — this is the same objectui pin PR #7179 measured everything else in the same sweep against (stated in that PR's own \"Measurement provenance\" and echoed in `regions`' own RE-CITED note text), so it's making an already-true fact explicit, not a new claim.\n\nNo other page.json properties were touched — their citations are older-style, undated, non-RE-CITED prose that matches the same convention still used throughout untouched entries in `view.json` / `field.json`; moving those too was out of this card's scope.\n\n## Verification\n\n- `node -e \"JSON.parse(...)\"` — valid JSON.\n- `pnpm --filter @objectstack/spec` has no workspace deps, so no build-closure step was needed for this ledger-only script.\n- `check:liveness` (`tsx scripts/liveness/check-liveness.mts`, under the shared verification lock, `NODE_OPTIONS=--max-old-space-size=4096`) — **green**, exit 0.\n  - `evidence paths: 353 repo-local path(s) declared by 'live' entries, 353 resolved against this checkout; 133 attributed to another repo` — up from a measured pre-edit baseline of **131** foreign (via `--ledger-root` against a copy with the original `page.json`), i.e. **exactly +2**, one per moved citation. Local declared/resolved unchanged at 353/353 — no local path leaked, no new MISSING.\n- `check:empty-state` — green, unaffected (unrelated content).\n- `node scripts/check-nul-bytes.mjs` — OK, 6801 tracked files scanned, no raw control bytes.\n\n### Reverse verification (route step 7)\n\nDropped the `objectui:` marker from `template`'s new `evidence` string (via `--ledger-root` against a mutated copy — the tracked file was never touched) and re-ran the gate:\n\n```\nevidence paths: 354 repo-local path(s) declared by 'live' entries, 353 resolved against this checkout, 1 MISSING; 132 attributed to another repo\n✗ 1 'live' entr(ies) cite a file that is missing from THIS repo:\n    page/template → packages/components/src/renderers/layout/page.tsx\n```\n\nExactly one MISSING, naming the row touched — restored (the mutated copy was a throwaway under scratchpad, discarded afterward; the tracked worktree file was never edited for this probe). Confirms the `objectui:` marker is what keeps the two new foreign citations from resolving locally.\n\n## PM 机制假设 check\n\nThe card's assumption — since #5623 the gate treats foreign citations in `note` and `evidence` identically except the `evidenceForeign` tally — held exactly: the gate output never attempted to resolve the moved `objectui:` paths locally, and the only observable delta was the `evidenceForeign` counter (+2). No contradiction surfaced.\n\n## Scope\n\n`packages/spec/liveness/page.json` only, as routed. No changeset — this is ledger prose with no user-visible surface, matching PR #7179's precedent exactly (\"No changeset: this is ledger prose with no user-visible surface\"). `skip-changeset` label applied.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_016R9de1FqP7NvwKvqXi92Gh)_"
+}

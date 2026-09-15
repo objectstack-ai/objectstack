@@ -1,0 +1,36 @@
+{
+  "number": 7603,
+  "kind": "issue",
+  "title": "finding: `DELETE /reports/schedules/:scheduleId` has the same enumeration oracle #7523 closed, in the 404-vs-204 costume — and `rest.test.ts:1651` pins the leaking arm green",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "finding",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-help"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T07:06:02Z",
+  "updated_at": "2026-08-11T11:45:49Z",
+  "closed_at": "2026-08-11T11:45:49Z",
+  "closed_by": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7603",
+  "body": "Found by the dev implementing **#7523** (PR #7562) and deliberately **not** fixed there: it is a different handler in a file three cards were editing concurrently, so it wants its own card. Filing unassigned; grading is triage's channel.\n\n## The finding\n\n`DELETE /api/v1/reports/schedules/:scheduleId` discriminates on existence exactly the way `DELETE /reports/:id` did before #7523:\n\n| Target | Response |\n| :-- | :-- |\n| A schedule id that does not exist | **204** — `unscheduleReport()` returns early (`if (!schedule) return; // idempotent`) |\n| Another owner's schedule id | **404** — throws `REPORT_NOT_FOUND` → `handleValidation` |\n\nSame oracle, quieter costume. #7523's card warned about precisely this shape — *\"align the unknown-id arm to the same status so the two arms are byte-indistinguishable; otherwise 404-vs-204 remains the same oracle in a quieter costume\"* — and that warning turns out to describe **this** route as it stands today.\n\n## Why it was read as correct\n\nThis handler is the one the #7523 investigation cited as **proof of the right shape**, because it *does* route its catch through `handleValidation` — which is why the cross-owner arm answers 404 rather than 500. The QA run (#7515) exercised only that cross-owner arm and recorded it as clean. The unknown-id arm was never probed on this route, so the surviving half went unseen.\n\n⚠️ **A pin currently locks the leak in place**: `packages/rest/src/rest.test.ts:1651` asserts the unknown arm is **204**. Any fix must supersede that pin explicitly — replacing it with the opposite assertion on the same input, not deleting it quietly.\n\n## Suggested shape, if promoted\n\nThe same one #7523 landed, which is now precedent in the same file: answer **both** deny arms from **one** response emitted before the unschedule fires, via a visibility read that is already blind to the difference, so status and body cannot drift apart. Assert the two arms' **whole responses are equal** rather than pinning each arm's status separately — #7523's mutation table shows a per-arm assertion cannot fail on the half-fix.\n\nWorth deciding at the same time whether any **other** `unschedule`/idempotent-early-return handler on this surface has the same split; #7523's fix covered only `deleteReport`.\n\n## Provenance\n\nReported by the dev in PR #7562's body under \"Sibling finding — not fixed here, filing to the PM\". Related: #7523 (closed by #7562), #2980 (`getReport()` blind to the difference — the mechanism the fix leans on)."
+}

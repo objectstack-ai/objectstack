@@ -1,0 +1,33 @@
+{
+  "number": 7422,
+  "kind": "pull_request",
+  "title": "docs(qa): invert the action-location-matrix empty-locations probe to the post-objectui#3142 contract (#7323)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-10T10:42:01Z",
+  "updated_at": "2026-08-10T12:14:14Z",
+  "closed_at": "2026-08-10T12:14:13Z",
+  "closed_by": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "merged_at": "2026-08-10T12:14:13Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/7422",
+  "body": "Fixes #7323\n\n`docs/qa/platform-checklist/areas/records-forms.json`, item `records-forms.action-location-matrix`, asserted that an action with no `locations` renders at **every** location. objectui#3142 ended that: placement collapsed onto a single membership predicate, so a locations-less action renders at **none**. The probe was manually runnable and would produce a false FAIL — and the item contradicted itself, because its `negative` list already encoded the post-#3142 contract.\n\n## What changed\n\nOne file, one item, `revision` 3 → 4.\n\n- **variant** — \"lands on EVERY location including the toolbar\" → \"renders on NO surface, and `locations: []` likewise\", attributed to `actionRendersAt` rather than to `action-bar.tsx`'s old behavior.\n- **step** — the probe now has two halves and an explicit expected-empty result: (a) author a scratch api action with no `locations` key, sweep all six surfaces, expect an empty placement list, delete the probe; (b) sweep the same six surfaces for `showcase_new_task`, the fleet's headless `locations: []` declaration, expect empty too.\n- **acceptance clause** — inverted to \"empty/missing locations means NO location\", and the `recalc_selection` note re-anchored: it names `record_more` because placement is an explicit declaration (which incidentally keeps it off the toolbar, where a dispatch carries no selection), **not** to opt out of an everywhere-default. `verify`/`evidence` updated to the two empty sweeps.\n- **negative** — dropped \"(and did not inherit via the empty-locations rule)\"; there is no everywhere-default left to inherit.\n- **fixtures.requires** — `recalc_selection` re-worded to \"declares `record_more` ONLY, which is what keeps it off the toolbar\"; `showcase_new_task` added as the headless specimen the probe reads.\n- **source** — the objectui line now names `packages/types/src/ui-action.ts` `actionRendersAt` (the predicate) with `action-bar.tsx` as its consumer; `packages/lint/src/validate-action-locations.ts` added as the in-repo codification; the `examples/app-showcase` entry annotated because its prose is still stale (see below).\n- **history** — revision 4 entry recording the inversion and why the probe was kept rather than deleted.\n\nThe probe is **inverted, not removed**: both halves are still observable end-to-end, and they now pin the two shapes the platform actually distinguishes — key absent (inert, what `action-no-placement` warns about) vs `locations: []` (deliberate headless declaration, explicitly not flagged).\n\n## Evidence base — and its one limit\n\nThis session has **no access to the objectui repo**, so the rewrite was verified against two things rather than against `action-bar.tsx` directly:\n\n1. **This repo's codification**, `packages/lint/src/validate-action-locations.ts`. The `action-no-placement` rule exists *because* a locations-less action renders nowhere, and its docblock says so verbatim: *\"objectui#3142 collapsed four disagreeing renderers onto one predicate — an action renders at a location only if it DECLARES that location. … it is measurably inert as of objectui 17.1.\"* The same docblock is the authority for `locations: []` being a deliberate headless shape that the rule does not flag — which is what the probe's second half pins.\n2. **The verbatim objectui quotes in #7323** — the `actionRendersAt` body (`Array.isArray(declared) && declared.includes(location)`) and the `action-bar.tsx` comment stating the change in the past tense.\n\nWhere the two disagreed with the checklist, the checklist was the stale party.\n\n## Pre-derived from `origin/main`, not from the card\n\nPR #7322 (#6888, `global_nav` retirement) merged today and edited this same item. The item's text and revision were re-derived from `origin/main` `1788e19` before editing: it was at **revision 3**, not the revision the card was filed against, and revision 3 is what made `showcase_new_task` headless — which this change then uses as the `locations: []` specimen. The card's quotes were treated as a lead only.\n\n## Gates\n\n- `pnpm check:nul-bytes` — **green** (`6801` text files scanned, self-test 75 assertions).\n- `pnpm check:platform-checklist` — **1 problem, pre-existing and unrelated**: `coverage.json · qa: UNCLASSIFIED`. Reproduced identically on a clean `origin/main` tree with no local edits, and already filed as #7347 (the new `qa` liveness ledger is neither mapped nor waived). This gate is manual by maintainer decision, not CI-wired (`.github/workflows/lint.yml:225-230`). The validator's revision/history check — the one that would catch a forgotten `revision` bump — passes on this item.\n- No path-scoped check family names `docs/qa/**`.\n\n## Out-of-scope finding filed\n\n#7420 — `examples/app-showcase/src/ui/actions/index.ts`'s `RecalcSelectionAction` TSDoc still narrates the same pre-#3142 rule, and is very plausibly where the checklist's claim originated. Out of this card's pinned file surface, so it is annotated in the `source` entry here and fixed there. The declaration that comment explains (`record_more`) is correct either way — only the stated reason inverted.\n\nDocs/QA-only diff — no changeset (PM applies `skip-changeset` at review).\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01AccJhQLicuvwvYDUtzaG4d)_"
+}

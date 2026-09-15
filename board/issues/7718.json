@@ -1,0 +1,33 @@
+{
+  "number": 7718,
+  "kind": "pull_request",
+  "title": "fix(scripts): report a stale workspace dist as a prerequisite, not a bundle problem (#7681)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "size/m",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T11:54:55Z",
+  "updated_at": "2026-08-11T12:30:16Z",
+  "closed_at": "2026-08-11T12:30:15Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": "2026-08-11T12:30:15Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/7718",
+  "body": "Fixes #7681\n\n## What was wrong\n\n`check-i18n-bundles` had exactly one prerequisite classifier: `looksLikeMissingCliCommand()`, which matches oclif's `Error: command … not found` and therefore recognises an **unbuilt CLI** only. A stale *dependency* dist makes the extract fail with a module-export mismatch instead — node refusing the import outright — which matched no classifier, fell past the in-loop prerequisite net into the `else` branch, and printed as:\n\n```\ncheck-i18n-bundles: 1 bundle problem(s)\n\n  • platform-objects: extract failed - ...\n```\n\nOne environment fact, rendered as a **content verdict** about translation bundles nothing had compared, in the two words (\"bundle\", \"extract\") that send the reader to the i18n configs. The sibling `check-i18n-coverage` met the identical cause in the same QA run and refused to judge instead (\"Nothing was compared… the baseline was left exactly as committed\" — the #6033/#5862 honesty).\n\nPremise verified at `21888ab`: the mislabel path is present on `origin/main`, and reproduced end-to-end (see below).\n\n## What changed\n\n**`scripts/cli-build-prerequisite.mjs`** — a second classifier, `looksLikeStaleWorkspaceDist()`, living beside the first so the sibling gates can adopt it. It recognises two shapes of the same prerequisite:\n\n- an **export mismatch** on a workspace specifier — `The requested module '@objectstack/spec/system' does not provide an export named 'authorisesIrreversibleAction'` — that package's `dist` predates its source;\n- a **`Cannot find module`** reaching into a workspace package's `dist/` — never built at all.\n\nIt shares the existing oclif-flattening step, since node prints its diagnostics as a frame plus a stack and a per-line regex would meet the frame first.\n\n**`scripts/check-i18n-bundles.mjs`** — the in-loop net now tries both signatures and raises a hard `PREREQUISITE NOT MET` that names the package whose build output is at fault, exonerates the i18n config that was merely holding the bag, and prescribes rebuilding **that package** rather than the CLI. `reportPrerequisiteNotMet` also learned how many packages the loop had already attempted: the in-loop nets can fire after other packages have printed \"in sync\", where the old fixed \"Nothing was checked\" line would have been false — it now says what was and was not judged, mirroring the coverage gate's partial-round wording.\n\n## Deliberately narrow\n\nA genuine content failure must still read as content, so the classifier claims only specifiers naming a package this repo builds. Everything else keeps the verdict it had: a third party's export mismatch, CommonJS interop's differently-worded `Named export 'x' not found`, a `Cannot find module` for a path that is not build output, a real bundle drift, and an undeclared authoring key. Both directions are pinned in the self-test — 29 to 53 assertions.\n\n## Verification\n\n`--self-test` (29 to 53 assertions), coverage gate's self-test (shared module unchanged in behaviour), `pnpm check:nul-bytes`, ESLint over both touched scripts: all green.\n\nEnd-to-end against a fixture workspace with a scripted CLI, same tree, before = `origin/main`:\n\n| scenario | before | after |\n| --- | --- | --- |\n| both packages in sync | `OK (2 package(s) …)` | unchanged |\n| genuine drift | `1 bundle problem(s)` | unchanged |\n| genuinely broken config | `1 bundle problem(s)` | unchanged |\n| stale spec dist (this issue) | `1 bundle problem(s) / extract failed` | `PREREQUISITE NOT MET — a workspace package this gate loads is built from older source — @objectstack/spec` |\n| dependency never built | `1 bundle problem(s)` | `PREREQUISITE NOT MET — … is not built — @objectstack/spec` |\n\nReverse verification, predicted red: neutering `looksLikeStaleWorkspaceDist` to return `null` turns exactly the 9 positive pins red and leaves the negative ones green; restored green.\n\nThe corpus is honest about its provenance: node's exact message shape was produced locally against a fixture standing in for the stale `packages/spec/dist`, carrying the specifier and export name of the QA run. A full workspace build was not run in this container (no `node_modules`), so the healthy-tree confirmation is the fixture matrix above plus the real gate on this worktree still raising the unbuilt-CLI prerequisite.\n\n## Changeset\n\nNone: internal gate tooling under `scripts/`, nothing published or user-visible. `skip-changeset` applied.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01Y6fHWBsZR49WqpEpssAFQv)_"
+}

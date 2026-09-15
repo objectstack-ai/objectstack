@@ -1,0 +1,35 @@
+{
+  "number": 7407,
+  "kind": "issue",
+  "title": "driver-sql's uncompilableAggregateFunctionError docblock states a consequence PR #7402 removes (declared 501 \"does not survive to the wire\")",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-10T10:21:11Z",
+  "updated_at": "2026-08-10T18:31:27Z",
+  "closed_at": "2026-08-10T18:31:27Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7407",
+  "body": "Observation class — comment-only, no behaviour. Filed from PR #7402 (#5582) rather than fixed there, because that dispatch scoped driver files out.\n\n## Fact\n\n`packages/drivers/driver-sql/src/sql-driver.ts`, `uncompilableAggregateFunctionError`'s docblock, closing paragraph:\n\n> Measured consequence, recorded so it is not rediscovered as a bug: on the `/data` routes `mapDataError`'s generic status passthrough is 4xx-ONLY, so this declared 501 does not survive to the wire — it falls to `UNCLASSIFIED_FAULT`'s `500 INTERNAL_ERROR`. That is a gap in the REST boundary — #5582, which this is the first live producer for — not a reason for the driver to misdescribe the fault as the caller's.\n\nEvery sentence of that was true when written (#5907) and the pointer to #5582 was exactly right. PR #7402 closes #5582: `mapDataError`'s passthrough is now 400-599, so the declared `501` / `NOT_IMPLEMENTED` **does** survive to the wire. Once that merges, the paragraph asserts the opposite of the shipped behaviour.\n\n## Why it is worth a line rather than nothing\n\nThe paragraph exists precisely to stop the next reader re-diagnosing this as a driver bug. Left as is, it does the reverse: a reader measuring `501` on the wire and reading \"does not survive to the wire\" has to work out which of the two is stale. The same docblock already carries the repo's own warning about this failure mode one paragraph up — a reachability/consequence argument written into a comment is what rots.\n\n`packages/drivers/driver-turso/src/remote-transport.ts` and `turso-driver.ts` carry the same 501 condition; worth a grep for the same wording when fixing (not re-read for this filing).\n\n## Suggested disposition\n\nComment-only edit: replace the measured-consequence paragraph with the post-#5582 reading (the declared 501 now reaches the caller; the driver's job at the throw site is unchanged), keeping the ADR-0112 argument and the issue pointers. Roughly three lines, no test impact. Deliberately **not** `pm:queue` — nothing a user hits, and it should ride whenever someone is next in that file, or land as a trivial follow-up once #7402 merges.\n"
+}

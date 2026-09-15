@@ -1,0 +1,33 @@
+{
+  "number": 7480,
+  "kind": "pull_request",
+  "title": "docs(driver-sql): uncompilableAggregateFunctionError's 501 now survives to the wire (#7407)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-10T17:40:50Z",
+  "updated_at": "2026-08-10T18:31:27Z",
+  "closed_at": "2026-08-10T18:31:26Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-10T18:31:25Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/7480",
+  "body": "Fixes objectstack-ai/objectstack#7407\n\nComment-only. One paragraph of one docblock in `packages/drivers/driver-sql/src/sql-driver.ts`. No behaviour, no tests, no changeset — `skip-changeset` route (per the card; not creating an empty changeset).\n\n## What was stale\n\n`uncompilableAggregateFunctionError`'s closing \"measured consequence\" paragraph said:\n\n> on the `/data` routes `mapDataError`'s generic status passthrough is 4xx-ONLY, so this declared 501 does not survive to the wire — it falls to `UNCLASSIFIED_FAULT`'s `500 INTERNAL_ERROR`.\n\nTrue when written (#5907). PR #7402 closed #5582 and inverted it.\n\n## Verification (read, not taken on trust)\n\nAgainst merged `main` @ `36237a1`:\n\n- `packages/rest/src/rest-server.ts:846` — `if (typeof error?.status === 'number' && error.status >= 400 && error.status < 600)`. The passthrough is 400-599, not 4xx-only.\n- `packages/rest/src/rest-server.ts:872-880` — the `>= 500` arm returns `{ status: error.status, body: { error: INTERNAL_ERROR_MESSAGE, ...(declaresServerFault(error) ? { code: error.code } : {}) } }`.\n- `packages/types/src/error-leak.ts:113-117` — `declaresServerFault` is `status >= 500 && typeof code === 'string' && code.length > 0`. The driver throws `status: 501` + `code: 'NOT_IMPLEMENTED'`, so both halves hold.\n- Nothing above `:846` intercepts it: every earlier branch keys on `DELETE_RESTRICTED` / `CONCURRENT_UPDATE` / `ERR_DATASOURCE_UNAVAILABLE` / `VALIDATION_FAILED` / the capability + access gates / `PERMISSION_DENIED` / `innerMessage` / `OBJECT_NOT_FOUND` / `INVALID_FIELD`.\n- Pinned end-to-end, not just as a unit: `packages/rest/src/rest-5xx-status-passthrough.test.ts:406-415` — \"an aggregate the backend cannot compile answers 501 NOT_IMPLEMENTED on the wire\", asserting `res.statusCode === 501` and `res.body === { error: INTERNAL_ERROR_MESSAGE, code: 'NOT_IMPLEMENTED' }`.\n\nSo: the status **and** the ADR-0112 code now reach the caller. The **prose does not** — the 5xx arm drops the message unconditionally and substitutes `'Internal server error'`. The card and the dispatch both described only the first half; the new paragraph records both, because the message-drop is the next thing a reader measuring this endpoint will notice, and it is what the paragraph's existing closing ADR-0112 sentence (\"what reaches every in-process caller and the operator log\") was always about.\n\n## The edit\n\nBefore:\n\n```\n * Measured consequence, recorded so it is not rediscovered as a bug: on the\n * `/data` routes `mapDataError`'s generic status passthrough is 4xx-ONLY, so\n * this declared 501 does not survive to the wire — it falls to\n * `UNCLASSIFIED_FAULT`'s `500 INTERNAL_ERROR`. That is a gap in the REST\n * boundary — #5582, which this is the first live producer for — not a reason\n * for the driver to misdescribe the fault as the caller's. The driver's job is\n * to state the condition truthfully at the throw site (ADR-0112), which is also\n * what reaches every in-process caller and the operator log.\n```\n\nAfter:\n\n```\n * Measured consequence, recorded so it is not rediscovered as a bug: on the\n * `/data` routes `mapDataError`'s generic status passthrough spans 400-599, so\n * this declared 501 DOES survive to the wire as `501` / `NOT_IMPLEMENTED` —\n * pinned end-to-end by `rest-5xx-status-passthrough.test.ts`. This paragraph\n * read the opposite until #7402 closed #5582: the passthrough was 4xx-ONLY,\n * this was its first live producer, and the status fell to\n * `UNCLASSIFIED_FAULT`'s `500 INTERNAL_ERROR`. What that band does drop is the\n * PROSE — a 5xx body is the generic `Internal server error` — so the driver's\n * job at the throw site is unchanged: state the condition truthfully\n * (ADR-0112), which is what reaches every in-process caller and the operator\n * log.\n```\n\nThe ADR-0112 class-2 argument, the #6188/ADR-0049 history, the \"class is now EMPTY, kept deliberately\" warning, and the catalog-choice rationale are all untouched. The issue pointers (#5582, plus #7402) are kept, now as the history that explains why the paragraph once said the opposite — so a reader measuring a real 501 learns it is correct-by-design instead of having to work out which of the two statements is stale.\n\n## Companion grep (positive control, re-run)\n\n```\n$ grep -rn \"survive to the wire\" . | grep -v '^./.git/'\n./packages/drivers/driver-sql/src/sql-driver.ts:713: * this declared 501 does not survive to the wire — it falls to\n```\n\nOne hit, this file. No `driver-turso` companion edit needed — matches triage's finding.\n\n## Comment-only self-check\n\n```\n$ git diff -U0 | grep -E '^[+-]' | grep -v '^[+-][+-]'\n```\n\nEmits 17 lines, every one of them ` * …` docblock content. `git diff --stat`: 1 file, +10 −7.\n\n## Gates run locally\n\n| Gate | Result |\n| --- | --- |\n| `eslint packages/drivers/driver-sql/src/sql-driver.ts --no-inline-config` | pass (exit 0, no output) |\n| `pnpm --filter @objectstack/driver-sql typecheck` | pass (exit 0) — needed `turbo run build --filter=@objectstack/driver-sql^...` first, since a fresh worktree has no built workspace `dist/` type declarations |\n\nPer the card, the rest of the gate farm is CI's; it is `in_progress` at the time of writing.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01YcMB8dGrg4WFmpH8JuSRmo\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01YcMB8dGrg4WFmpH8JuSRmo)_"
+}

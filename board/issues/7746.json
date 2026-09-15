@@ -1,0 +1,35 @@
+{
+  "number": 7746,
+  "kind": "issue",
+  "title": "finding: showcase seed assigns tasks to non-user emails — a stock reassignment lands an inbox row nobody can read",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "huangyiirene"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T12:26:08Z",
+  "updated_at": "2026-08-11T18:03:43Z",
+  "closed_at": "2026-08-11T18:03:43Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7746",
+  "body": "## Symptom\n\nThe stock showcase seed assigns tasks to `ada@example.com` / `linus@example.com` / `sam@example.com`, which are **not** `sys_user` rows and resolve verbatim to non-users. A stock reassignment through the notify path therefore lands a `sys_inbox_message` row that nobody can read (its `user_id` is a non-resolving email). The runner had to sign up real personas and use their emails instead to test the notify path at all.\n\n## Root cause\n\n`examples/app-showcase/src/data/seed/index.ts` seeds task `assignee` / `owner` as bare email strings (e.g. ~line 161 `assignee: 'sam@example.com'`, ~lines 159-160 `ada@example.com`) that never correspond to `sys_user` records. Split from the run's \"Notes worth keeping\" #1 as a real defect: the stock action (reassignment) produces a persisted-but-unreadable inbox row. Fix at the seed (assign to real seeded users); the notify/assignment path additionally not validating that an assignee resolves to a real user before creating the inbox row is a related, arguably deeper gap worth considering (`packages/services`).\n\nStale-premise check: present on `origin/main` (seed still assigns the non-user emails).\n\n## Reproduction\n\n1. Boot the stock showcase and let the seed run.\n2. Reassign a seeded task to its seeded `assignee` email (e.g. `ada@example.com`) through the notify path.\n3. Look for the resulting `sys_inbox_message`, then try to read it as any real user.\n\nExpected: the assignee resolves to a real user who can read the inbox row (or the assignment is refused). Actual: an inbox row is written keyed to a non-resolving email that no authenticated user can read.\n\n## Source\n\nExtracted from the QA run objectstack-ai/objectstack#7690 (framework 92f26f75, console 09987b680)."
+}

@@ -1,0 +1,34 @@
+{
+  "number": 7417,
+  "kind": "pull_request",
+  "title": "docs(ui): state the `type: 'form'` action contract — in-shell, submit lands on the record (#7245)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-10T10:39:41Z",
+  "updated_at": "2026-08-10T12:15:13Z",
+  "closed_at": "2026-08-10T12:15:12Z",
+  "closed_by": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "merged_at": "2026-08-10T12:15:12Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/7417",
+  "body": "Part of #7245 — the objectstack half only (the contract statement in hand-written docs). The renderer half lands in ObjectUI as a separate card, so this PR must not close the issue.\n\n## The ruling this implements\n\nMaintainer ruling 2026-08-10 07:34Z on #7245, verbatim:\n\n> the `type: 'form'` contract means in-shell, and an internal submit lands on the record.\n> 1. `/forms/:name` in `mode=\"internal\"` nests inside the console shell (keep the route — deep-linking survives; the missing chrome is the defect, not the navigation).\n> 2. Internal-mode submit defaults to redirect-to-created-record; `thank-you` stays the default for the public `/f/:slug` path only.\n> 3. `showcase_task.edit` may declare a `submitBehavior` as an interim corpus fix, but the platform default is the ruling above — the corpus must not have to opt out of a wrong default.\n\n## What was measured first\n\nWhere the current prose describes `type: 'form'` / `submitBehavior` behavior, before writing anything:\n\n| Page | What it said |\n|---|---|\n| `content/docs/protocol/objectui/actions.mdx` §Form Actions | Route only (\"Open a FormView by name. The renderer routes to `/console/forms/:name`\"). Silent on chrome and on post-submit. |\n| `content/docs/ui/forms.mdx` §8 | Kind table labelled `thank-you` **\"*(default)*\"** — mode-blind, i.e. today's renderer fallback stated as the contract. |\n| `content/docs/ui/forms.mdx` §9 | `type: 'form'` launchers — route only, silent on shell and submit. |\n| `content/docs/ui/actions.mdx` type table | One-line `form` row, route only. |\n| `content/docs/ui/public-data-collection.mdx` | Declares an explicit `thank-you`; never says it is also the public default, so the split was invisible. |\n\n## Changes\n\n- **`protocol/objectui/actions.mdx`** — new `#### What type: 'form' promises` subsection under Form Actions: renders in-shell (route kept, so deep-linking survives), internal submit defaults to redirect-to-created-record, explicit `submitBehavior` always wins; plus a public-vs-internal table (audience / chrome / default). The `Action Types` row gains the in-shell + lands-on-record clause.\n- **`ui/forms.mdx`** — §8 drops the bare `*(default)*` marker from the kind table and gains a `### The default is mode-aware` table (`thank-you` for public `/console/f/:slug`, redirect-to-created-record for internal `/console/forms/:name`, with the reason for each). §9 and the top-of-page bullet restate it and link the contract.\n- **`ui/actions.mdx`** — `form` row links the contract.\n- **`ui/public-data-collection.mdx`** — one paragraph: the explicit `thank-you` there is copy, not behavior, and the internal path defaults the other way.\n\n## Contract vs. shipped renderer — stated honestly, not documented as the contract\n\nThe console at the pinned `.objectui-sha` does not implement this yet (out-of-shell page, `thank-you` in both modes). Rather than documenting the defect, both pages carry a short dated **\"Current renderer status (2026-08-10)\"** note saying the renderer does not match yet, pointing at the ObjectUI half tracked from the #7245 thread, and telling authors to declare `submitBehavior` explicitly until it lands. Those notes come out when the renderer card lands.\n\n## Surface boundary — checked, and one out-of-surface flag\n\nGenerated `content/docs/references/**` and `packages/spec/src/**` were treated as out of surface. Measured whether the contract text is really spec-produced:\n\n- `submitBehavior` is `z.discriminatedUnion(...).optional().describe('Post-submit behavior')` — the `.describe()` carries **no** default claim, and the generated `content/docs/references/ui/view.mdx:269` reproduces exactly that neutral string. The schema has no `.default()`; the default is resolved by the renderer (`FormPage`'s `?? { kind: 'thank-you' }`).\n- So the reader-facing producer of the \"(default)\" claim was the hand-written page, not the generated reference — this is a docs-surface change, not `domain:spec-surface`.\n- ⚠️ **Flag, not patched (out of surface):** the source JSDoc above `submitBehavior` in `packages/spec/src/ui/view.zod.ts` (~line 2029) still says \"`thank-you` (default) — show a confirmation panel\". It is a source comment, not published to the docs site, but it will read as false once the renderer half lands. Worth a `domain:spec-surface` follow-up to make it mode-aware.\n\n## Gates\n\nRun locally in the task worktree, all green: `check:nul-bytes`, `check:role-word` (44 baselined files, no new occurrences — the new prose avoids the ratcheted word), `check:quick-reference-counts`, `check:doc-authoring`, `check:docs-audit-scope` (incl. both self-tests; 179 hand-written docs in sync). Note: the card named `check:doc-formula-expressions`, which does not exist in `package.json` — the nearest existing doc-corpus gate, `check:doc-authoring`, was run instead. CI's full farm is authoritative.\n\n## Changeset\n\nNone. Docs-only diff touching no published package; the reader-visible **behavior** change belongs to the ObjectUI renderer half and should carry its changeset there, so a changeset here would announce a shipped change that has not shipped. `skip-changeset` at review.\n\n## Also observed, not fixed (kept the diff single-purpose)\n\nThe hand-written docs spell the console mount `/console/forms/:name` (9 occurrences across `content/docs` + `skills/`), while the measured live URL in #7245 is `/_console/forms/...` and `protocol/objectui/actions.mdx:87` itself uses `/_console/`. Fixing 2 of 9 would make it worse; it wants its own docs-accuracy card.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01QnGHxdcvU63spYLamVnpkX)_"
+}

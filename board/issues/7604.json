@@ -1,0 +1,32 @@
+{
+  "number": 7604,
+  "kind": "issue",
+  "title": "[finding] service-analytics is a second filter emitter that still refuses `$field` — a CEL rule that now pushes down on the drivers still 400s through the analytics faces",
+  "state": "closed",
+  "state_reason": "duplicate",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "finding"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T07:22:41Z",
+  "updated_at": "2026-08-11T08:06:21Z",
+  "closed_at": "2026-08-11T08:06:21Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7604",
+  "body": "Reported by the dev seat while implementing #5222 (PR #7582), filed by the spec-lane PM as its own card per that PR's scope boundary. **Recording, not claiming.**\n\n## The residue\n\n#5222 landed cross-field push-down (`{ $field: 'col' }` → a real column reference) in `driver-sql`, closing the split where one CEL permission/RLS rule behaved differently depending on whether the query reached a database. `service-analytics` has **its own independent filter emitters** — `read-scope-sql` and `filter-normalizer` — each carrying its own mirrored comparand gate, and both still refuse `$field`.\n\nSo the split is narrowed, not closed: a CEL rule containing a field-to-field comparison now works through the ObjectQL/driver path and still answers **400** when lowered through the analytics faces.\n\n## Why it was correctly left out of #5222\n\nThat issue's maintainer rulings (2026-08-06) are about the **driver**: same-table columns only, declared-only enumeration, tenant-isolation column forbidden as a referent, federated tables refused. Nothing in them speaks to the analytics emitters, and #5222's dev seat declined to widen a security-relevant acceptance surface in a second subsystem as a side effect — the right call.\n\nNote the envelope difference already recorded in #5222's blast-radius sweep: `read-scope-sql` refuses with `READ_SCOPE_COMPILE_FAILED` / 500 rather than `INVALID_FILTER` / 400, deliberately, because it is compiling an RLS read scope. Any disposition here has to say what that path should do — a 500 on a rule the drivers now execute is a worse split than the 400.\n\n## What a card here would have to decide\n\n1. Do the analytics emitters implement `$field` under the same four constraints #5222 adopted (same-table, declared-only, tenant column forbidden, federated refused), or do they stay refusing by design because an analytics read scope is a different trust boundary?\n2. If they implement: is the constraint set shareable, or does each emitter re-derive it? #5222 deliberately kept its corpus out of `packages/spec/src/data` so it would not enrol every driver in conformance DEBT — the same reasoning needs re-running for a second consumer.\n3. If they keep refusing: `READ_SCOPE_COMPILE_FAILED` / 500 should probably become a loud, documented refusal rather than a compile failure, so the rule author learns the rule is unsupported *here* instead of seeing a server error.\n\nNatural lane: `domain:spec` for the acceptance decision (precedent: #5222 itself, #7464). Reference implementation and the constraint arguments: PR #7582.\n\nRefs: #5222, #5041, PR #7582, ADR-0015, ADR-0112."
+}

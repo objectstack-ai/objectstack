@@ -1,0 +1,35 @@
+{
+  "number": 7278,
+  "kind": "issue",
+  "title": "approvals: `sys_approval_request.approval_reject` / `approval_recall` declare both `confirmText` and `params`, so one decision opens two sequential dialogs",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-help"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-10T04:34:20Z",
+  "updated_at": "2026-08-11T07:13:51Z",
+  "closed_at": "2026-08-11T07:13:51Z",
+  "closed_by": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 10,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7278",
+  "body": "Out-of-scope finding from objectui#3055 (record page now runs these declared actions). Filed per PD #10 — **unassigned, ungraded**.\n\n## Fact\n\nThe shared console action runner chains confirmation **then** param collection, both awaited, in `packages/core/src/actions/ActionRunner.ts` of the objectui repo:\n\n- `:794-806` — `confirmText` → `confirmHandler(...)`, cancel aborts;\n- `:809-832` — immediately after, `actionParams` / a `params` array → `paramCollectionHandler(...)`, a second dialog.\n\n`packages/plugins/plugin-approvals/src/sys-approval-request.object.ts` declares both keys on two actions:\n\n| action | line | `confirmText` | `params` |\n|---|---|---|---|\n| `approval_reject` | `:277-296` | \"Reject this request? A rejection is final for every approver.\" | `comment`, `attachments` |\n| `approval_recall` | `:370-384` | \"Recall this request? Approvers can no longer act on it…\" | `comment` |\n\nSo rejecting is: confirm prompt → Continue → *another* dialog the approver did not ask for → Confirm. Nothing is sent until the second one.\n\n## Why this is the producer's to decide, not the consumer's\n\nobjectui#3126 hit exactly this shape on the record page's **hand-written** reject button and removed `confirmText` there, keeping the question as the param dialog's `description` — \"the param dialog IS the confirmation: it is titled by this label, carries the confirm question as its description, and nothing is sent until its own Confirm.\" That reasoning was applied to console code because the buttons were console code.\n\nobjectui#3055 retires those hand-written buttons in favour of these declared actions, so the record page now inherits the declared shape — and the approvals inbox has had it all along. The fix belongs in the declaration, not in a consumer special-case: a console that stripped `confirmText` when `params` are present would be deciding a metadata author's intent for them, and would do it for every object, not just this one.\n\nWorth noting the two dialogs are **not** cosmetic on a decision surface: the first one already reads as \"the action is running\", which is what made objectui#3126's version read as a silent no-op.\n\n## Suggested fix (left to triage, not self-selected)\n\n1. Drop `confirmText` from both actions and carry the question as the param dialog's description (mirrors objectui#3126's ruling for the same wording on the same decision);\n2. keep `confirmText` and drop the params from these two (loses the reject comment + attachments — almost certainly wrong);\n3. rule that confirm-then-collect is intended for irreversible decisions and leave both.\n\nLeaning 1: one condition, one wording, one dialog — and the approver is already being asked to confirm, in a dialog titled by the action.\n\n## Dedup\n\nSearched open issues in this repo for `approval_reject confirmText param dialog`: no hits. objectui#3126 is the same question decided for the retired console-side copy, i.e. the precedent, not a duplicate.\n\nRefs: objectui#3055, objectui#3126, objectui#2678.\n"
+}

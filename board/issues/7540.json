@@ -1,0 +1,33 @@
+{
+  "number": 7540,
+  "kind": "pull_request",
+  "title": "docs(showcase): correct RecalcSelectionAction TSDoc to the post-objectui#3142 placement rule",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T05:02:23Z",
+  "updated_at": "2026-08-11T05:35:23Z",
+  "closed_at": "2026-08-11T05:35:22Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": "2026-08-11T05:35:22Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/7540",
+  "body": "Fixes #7420\n\nComment-only edit to `examples/app-showcase/src/ui/actions/index.ts`. No behavior change, no spec change.\n\n## Premise: verified stale on `origin/main` @ `1530870`\n\nThe TSDoc above `RecalcSelectionAction` still narrated the **pre-objectui#3142** rule as current fact — that the `action:bar` renderer treats a missing/empty `locations` as \"every location\", so a locations-less action would also land on the list toolbar, and declaring `record_more` was the way to opt out of that everywhere-default.\n\nobjectui#3142 inverted that rule. It collapsed four disagreeing renderers onto a single membership predicate (`actionRendersAt`, objectui `packages/types/src/ui-action.ts`), so an undeclared or empty `locations` now matches **no** location. This repo already codifies the current rule in `packages/lint/src/validate-action-locations.ts` — the `action-no-placement` warning exists precisely because an action nobody placed renders nowhere — so the lint package and this comment were stating opposite things about the same behavior.\n\n## What changed\n\nThe rewrite mirrors the lint docblock rather than inventing semantics:\n\n- placement is **declared, not inherited** — an action renders at a location only if it declares it; missing or empty `locations` matches nothing;\n- `locations: []` is that same nowhere said **deliberately** (cross-referenced to `NewTaskAction` in the same file);\n- `record_more` is therefore an **explicit single-record placement** — the record overflow menu, where the dispatch carries one id and the recalc endpoint's per-record branch handles it via `recordIdParam`;\n- staying off the **list toolbar** (where a dispatch would carry neither `_selectedIds` nor a record id) is preserved as a *consequence* of naming one location, not as the reason for naming it.\n\nThe declaration itself is unchanged and was correct either way: `locations: ['record_more']`, `recordIdParam: 'recordId'`. Confirmed against the view side too — the aggregate selection-bar entry comes from `task.view.ts`'s `bulkActionDefs` (`execution: 'aggregate'`), which is what the first half of the comment describes and which remains accurate.\n\n## In-file confirmation sweep (the card asked for this rather than assuming)\n\nThe defect is **localized to this one block**, as the finding predicted:\n\n- file header TSDoc — describes the two headless actions' `locations: []` as \"a declaration in its own right, not an omission\". Correct post-#3142, unchanged.\n- `NewTaskAction` — \"`[]`, 'nowhere, deliberately'\" plus the #6888 `global_nav` retirement note (\"the declaration placed the action nowhere\"). Correct, unchanged.\n- `PortfolioSnapshotAction` — same headless framing for the object-less specimen. Correct, unchanged.\n- `MarkDoneAction` — \"the engine location-filters even explicitly-named actions\", which is the post-#3142 contract. Correct, unchanged.\n\nA grep across `examples/` for the stale claim (`every location`, `everywhere-default`, `missing/empty locations`) returns exactly one hit: the block this PR rewrites.\n\n## QA-checklist linkage kept intact\n\n`docs/qa/platform-checklist/areas/records-forms.json` → `records-forms.action-location-matrix` cites this comment as a `source`, and #7323 already inverted the downstream copy (revision 4: \"record_more is an explicit placement, not an opt-out of an everywhere-default\"). The rewrite is deliberately worded to agree with that clause, so a runner following the `source` link now lands on the same rule rather than the stale one. The `source` entry's inline NOTE flagging this prose as stale is now obsolete — left alone here because it lives outside this card's pinned file surface; noted for the PM in the report.\n\n## Verification\n\n- `node scripts/check-nul-bytes.mjs` — OK, 7000 files scanned, no raw control bytes. Plus a targeted self-scan of the edited file for `0x00-0x08 / 0x0b / 0x0c / 0x0e-0x1f / 0x7f`: no matches.\n- `pnpm --filter '@objectstack/example-showcase^...' build` — dependency closure built first (fresh worktree), then `pnpm --filter @objectstack/example-showcase typecheck` → `tsc --noEmit`, exit 0.\n- `pnpm --filter @objectstack/example-showcase test` — 17 files, 168 tests passed.\n- Comment-only proven mechanically, two ways: every changed line in `git diff -U0` is a block-comment line, and the file is **byte-identical to `origin/main` after stripping comments and normalizing whitespace** (6235 bytes both sides).\n\n## No changeset\n\nDeliberate. The change is explanatory prose inside an example app — nothing user-visible ships and nothing releases, so there is nothing for a changeset to describe. `skip-changeset` applies.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01GZKbx4xyF7U5WXj6ch49BM)_"
+}

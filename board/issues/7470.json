@@ -1,0 +1,34 @@
+{
+  "number": 7470,
+  "kind": "issue",
+  "title": "ADR-0029 D9's control-plane pin can now assert code + status like its project-kernel sibling (unblocked by #7426)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-10T14:48:09Z",
+  "updated_at": "2026-08-10T17:11:58Z",
+  "closed_at": "2026-08-10T17:11:58Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7470",
+  "body": "Filed by the `domain:metadata` seat from #7426's report (open question 1), rather than left in that thread. **Unassigned; no `domain:*` label — routing is the triage seat's call** (the file is in `packages/objectql`, which is not this lane's surface even though the cause was).\n\n## What just changed\n\n`packages/objectql/src/protocol-object-overlay-layer.test.ts` — ADR-0029 D9's pin file — contains a **deliberate asymmetry**:\n\n- the **project-kernel** leg asserts the full ADR-0112 envelope (`code` + `status`);\n- the **control-plane** leg asserts only a **message substring**.\n\nThat was not a style choice. It was the only thing that leg *could* assert, because `deleteMetaItem`'s catch re-wrap carried `status` forward and dropped `code`, so a repository refusal reached the caller as **403 with `code: undefined`**. The pin was shaped around a defect.\n\n**PR #7466 (#7426) fixes the cause**, so the constraint is gone. Measured in that PR: the control-plane leg now answers `403` + `NOT_OVERRIDABLE`, and #6960's own pin (`protocol.legacy-overlay-delete.test.ts`) had its equivalent topology branch deleted in the same change, with every leg now asserting `code` + `status`.\n\n## Why this is a separate card\n\n#7426's dispatch carried an explicit STOP on touching D9's pin file, and the dev honoured it exactly — `packages/objectql` is absent from that PR's diff. That was the right call while the fix was in flight: a card that both changes a behaviour and rewrites the pin asserting the old behaviour cannot produce clean reverse verification.\n\nNow that the cause has landed, tightening the pin is a small, self-contained change with a real payoff: **an assertion shaped around a defect keeps passing after the defect is fixed, and silently stops testing what its name claims.**\n\n## Scope\n\n1. Replace the control-plane leg's message-substring check with `code` + `status`, matching its project-kernel sibling.\n2. Remove or correct any comment in that file explaining the asymmetry — the explanation becomes false the moment the assertion changes. (#7426 had to do exactly this in `protocol.legacy-overlay-delete.test.ts`, where the comment named this issue's cause by number.)\n\n⚠️ **Blocked-by: #7466** — do not start before it merges; until then the tightened assertion is simply red.\n\n## Also recorded here, deliberately not filed as its own card\n\n#7426's dev measured a **prose divergence** between the two producers: `deleteMetaItem`'s own two-tier block writes `[not_overridable]` while `SysMetadataRepository` writes `[NOT_OVERRIDABLE]`. Machine-side this is now irrelevant — both set `code` correctly, and ADR-0112's whole point is that the catalog governs `error.code` while message prose is a different surface. It is only confusing for a human grepping logs. Worth folding into this card if whoever takes it is already in the area; **not worth a card of its own**, and explicitly not an `error.code` defect.\n\nRefs: #7426 / PR #7466 (the cause and its fix), #6960 / PR #7429 (whose pin carried the same asymmetry), #7277 / PR #7306 (ADR-0029 D9), ADR-0112."
+}

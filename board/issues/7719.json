@@ -1,0 +1,32 @@
+{
+  "number": 7719,
+  "kind": "issue",
+  "title": "Roll-up summary recompute runs under the CALLER's context: a granted child insert 500s (ERR_SUMMARY_RECOMPUTE) after the row is already written",
+  "state": "closed",
+  "state_reason": "duplicate",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "bug"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T11:58:51Z",
+  "updated_at": "2026-08-11T12:02:25Z",
+  "closed_at": "2026-08-11T12:02:25Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7719",
+  "body": "## Summary\n\nA member with a legitimate `create` grant on a CHILD object gets **HTTP 500** from `POST /api/v1/data/<child>` — **after the row has already been written** — whenever the child feeds a roll-up summary on a PARENT record the member may not write. The roll-up recompute runs under the **caller's** execution context, so updating the parent's summary fields raises `PermissionDeniedError`, which surfaces as `SummaryRecomputeError` / `ERR_SUMMARY_RECOMPUTE`.\n\nThe caller sees a 500 for a write that succeeded. A client that retries (or a user who clicks Save again) creates a duplicate row.\n\n## Repro (real runtime, `examples/app-showcase`)\n\n1. Boot the showcase, sign in as admin, sign up a plain member (holds only the `everyone` baseline `showcase_member_default`, which grants `showcase_task: create + read`).\n2. As that member:\n\n```\nPOST /api/v1/data/showcase_task\n{ \"title\": \"SummaryBugProbe-1\", \"project\": \"<a project owned by someone else>\",\n  \"assignee\": \"<member email>\", \"status\": \"todo\", \"priority\": \"low\" }\n```\n\n3. Response: **500** `{\"error\":\"Internal server error\",\"code\":\"INTERNAL_ERROR\"}`\n4. As admin: `GET /api/v1/data/showcase_task?filters=[[\"title\",\"=\",\"SummaryBugProbe-1\"]]` → **1 row**. The write landed.\n\nServer log for that request:\n\n```\nERROR Insert operation failed {\"object\":\"showcase_task\", …\n  SummaryRecomputeError: Roll-up summary recompute failed after retries for 2 parent record(s);\n  the triggering records WERE written (summary values may be stale).\n  failures: [\n    { childObject: 'showcase_task', parentObject: 'showcase_project',\n      parentId: '6nljsw5hhuT_DPUL', field: 'task_count',      error: [PermissionDeniedError] },\n    { childObject: 'showcase_task', parentObject: 'showcase_project',\n      parentId: '6nljsw5hhuT_DPUL', field: 'total_estimate',  error: [PermissionDeniedError] }\n  ]\n  code: 'ERR_SUMMARY_RECOMPUTE'\n```\n\n`PATCH` on the member's own child row fails the same way (500, row updated).\n\n## Cause\n\n`packages/objectql/src/engine.ts` passes the caller's context straight into the recompute:\n\n* L7578 — `const summaryFailures = await this.recomputeSummaries(object, result, null, opCtx.context);`\n* L8478 / L9174 — the update paths do the same.\n\nSo the parent write inherits the caller's permissions. But a roll-up is **engine-derived state**, not a user write: whether `showcase_project.task_count` may be refreshed is not a question about the member's grant on `showcase_project`. The retry loop (framework#3147) cannot help — a permission denial is deterministic, so it burns every retry and then throws.\n\n## Impact\n\nAny parent/child pair where the child is more widely writable than the parent — the ordinary shape for line items, tasks, comments, time entries. The member's own create is a **legitimate, granted** operation; it 500s on a permission check about a record they never asked to touch, and the failure is not atomic (row written, error returned).\n\n## Suggested direction\n\nRecompute summaries under a system context (the recompute is engine-owned state, and the permission decision that matters — may the caller write the CHILD — has already been made), and keep `SummaryRecomputeError` for genuinely transient failures. If a caller-scoped recompute must stay for some reason, a permission denial should not be retried and should not fail the caller's otherwise-successful write.\n"
+}

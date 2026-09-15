@@ -1,0 +1,32 @@
+{
+  "number": 7079,
+  "kind": "issue",
+  "title": "finding: the liveness author-lint's array fan-out (`getNested`) has no warned subject left, so it is now untested",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-help"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T14:01:49Z",
+  "updated_at": "2026-08-11T11:29:11Z",
+  "closed_at": "2026-08-11T11:12:44Z",
+  "closed_by": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 10,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7079",
+  "body": "Out-of-scope discovery from the #7069 sweep (member #6774). Filed unassigned, observation class — nothing is broken today.\n\n## Fact\n\n`lintLivenessProperties` (`packages/lint/src/lint-liveness-properties.ts`) resolves a dotted warn-map path through `getNested`, which **fans a path out over an array container level** — so `widgets.colorVariant` checks every widget on a dashboard, not just `widgets[0]`. The docblock names the intended reach: *\"Container properties fan out over arrays (each flow node, each dataset measure).\"*\n\nThat behaviour had exactly one test, in `lint-liveness-properties.test.ts`:\n\n```\nit('fans out over EVERY widget, not just the first', …)   // the dead key sits on widgets[1]\n```\n\nand exactly one subject — `dashboard.widgets[].colorVariant`, because a warn-map entry only becomes a dotted path when it sits in a ledger row's `children`.\n\nMeasured across all 28 ledgers on `origin/main` @ `2c7e62d`, the **complete** set of entries the lint warns on (`authorWarn: true`, or `status: experimental`) is six:\n\n| Ledger | Path | Under an array container? |\n|---|---|---|\n| `dashboard.json` | `widgets.colorVariant` | **yes** |\n| `agent.json` | `lifecycle`, `memory`, `guardrails`, `structuredOutput` | no (top-level) |\n| `object.json` | `externalSharingModel` | no (top-level) |\n| `tool.json` | `outputSchema` | no (top-level) |\n\nPR for #7069 flips `widgets.colorVariant` to `live` (objectui#3799 gave it a renderer — #5010 ruling B's enforce leg), which drops its `authorWarn`. That leaves **zero** warned entries under any array container, so the fan-out assertion has no subject that can distinguish a working walk from one that never looks past index 0. The PR removes the assertion rather than rewriting it into a silence check that would pass on a broken fan-out, and records the loss in a comment pointing here.\n\n## Why it is worth recording rather than shrugging off\n\nThe mechanism is the one this repo keeps paying for: a check whose coverage lapses **silently, as a side effect of good news elsewhere**. Nothing goes red. The next author to touch `getNested` — or to add a `children` entry with `authorWarn` under an array container — gets a green suite either way, and the first symptom would be an advisory that is half-blind on every real dashboard (the exact defect the deleted test was written for, per its own comment).\n\nIt is also the shape #4956 already hit once from the other side: the ledger was correct and the lint silent, because `dashboard` was not registered in `TYPE_COLLECTIONS`.\n\n## Options, none obviously right — hence a finding, not a task\n\n1. **Make `getNested` testable directly.** It is module-private today. Exporting it (or an `@internal` test seam) buys a unit test that does not depend on which ledger rows happen to warn this month. Cost: a second, ledger-independent contract on a function whose whole design is \"ledger-driven, coverage grows by marking entries\".\n2. **Let the next warned array entry re-adopt the test.** Cheapest, and honest — but it is a promise nobody is holding, which is what this issue exists to stop being invisible.\n3. **Accept it.** The fan-out is exercised in production by no one right now (zero dotted warned paths), so the untested code is also unreached code. That is a real argument, and it expires the moment option 2's entry arrives.\n\n## Refs\n\n- `packages/lint/src/lint-liveness-properties.ts` — `getNested`, `checkItem`, `TYPE_COLLECTIONS`\n- #4956 (the drill that created the only subject), #5010 / PR #5255 (retired four of the five warned widget keys), #6774 (flips the fifth to `live`), #7069 (sweep)"
+}

@@ -1,0 +1,33 @@
+{
+  "number": 7524,
+  "kind": "issue",
+  "title": "[showcase][approvals] Approving an Invoice Dual Sign-off request strands its flow run — `notify_cleared` resolves `{record.account.owner}` to nothing (possible regression of #7381)",
+  "state": "closed",
+  "state_reason": "duplicate",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:services"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T04:58:42Z",
+  "updated_at": "2026-08-11T05:04:05Z",
+  "closed_at": "2026-08-11T05:04:05Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7524",
+  "body": "## Symptom\n\nApproving any `flow:showcase_invoice_signoff` approval request records the decision correctly — the request re-reads `status:'approved'` and an approve action row is appended — but the approver receives **HTTP 500 `RESUME_FAILED`** and the backing flow run re-reads **`status:'failed'`**. The engine error is:\n\n&gt; `Node 'notify_cleared' failed: notify: at least one recipient is required, but every recipient template resolved to nothing: {record.account.owner}`\n\nThe boot log carries the matching `[approvals] resume failed — the run is stranded` ERROR. The invoice therefore never reaches `end_ok`, and the \"Notify: Cleared\" message the demo promises is never delivered. **Deterministic for every invoice approval.**\n\n⚠️ **Possible regression of objectstack-ai/objectstack#7381**, which is closed as completed (fixed by PR objectstack-ai/objectstack#7395 — \"unstrand the Invoice Dual Sign-off approval demo, and the second instance of the same hop\"). The node, the template, the engine message and the stranded-run symptom are identical, and it reproduces on framework `a86db175`. Worth confirming whether the fix regressed, was never merged into this branch, or covered only the sibling instance.\n\n## Root cause\n\n`examples/app-showcase/src/automation/flows/index.ts` — `InvoiceDualSignoffFlow`. The `notify_cleared` node declares `recipients: ['{record.account.owner}']` while the flow's **start node declares no `config.expand`**, so `record.account` is the raw scalar FK id and the relation hop resolves to nothing. The engine's own diagnostic already names both candidate fixes: add the relation to the start node's `config.expand` so the engine hydrates it, or address a scalar the trigger record already carries.\n\n## Reproduction\n\n1. Boot `examples/app-showcase` on framework `a86db175`.\n2. Take any `flow:showcase_invoice_signoff` request — seeded `INV-1008`, or raise a fresh one by PATCHing a draft invoice to `status:'sent'`.\n3. `POST /api/v1/approvals/requests/…/approve` as an entitled approver.\n\nObserved: HTTP 500 `RESUME_FAILED`; `sys_approval_request` re-reads `status:'approved'` with the approve action row present; the flow run re-reads `status:'failed'`. **Reproduced 2×** on two separate invoices with a byte-identical error, plus the matching stranded-run ERROR in the boot log.\n\n## Source\n\nExtracted from the QA run objectstack-ai/objectstack#7517 (framework a86db175, console 09987b68)."
+}

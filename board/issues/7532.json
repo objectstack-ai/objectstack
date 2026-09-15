@@ -1,0 +1,35 @@
+{
+  "number": 7532,
+  "kind": "issue",
+  "title": "Data query: a dotted projection entry silently WIDENS the response — `fields:[\"name\",\"account.name\"]` returns every field",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T05:01:04Z",
+  "updated_at": "2026-08-11T07:29:42Z",
+  "closed_at": "2026-08-11T07:29:42Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7532",
+  "body": "## Symptom\n\n`POST /api/v1/data/showcase_invoice/query` with `{\"fields\":[\"name\",\"account.name\"]}` answers **`200` returning every business field** of each record, and no resolved `account.name`.\n\n**Expected:** the projection narrows to the named columns (with the dotted path resolved), or — if a dotted path is not supported on this door — a `400 INVALID_FIELD`.\n\nMeasured across three doors and two object pairs in the same run:\n\n| request | observed | expected |\n|---|---|---|\n| `POST /data/showcase_invoice/query {\"fields\":[\"name\",\"account.name\"]}` | `200`, **every** field, no resolved `account.name` | narrowed projection |\n| `GET /data/showcase_invoice?$select=name,account.name` | `200`, **every** field | narrowed projection |\n| `POST /data/showcase_task/query {\"fields\":[\"title\",\"project.name\"]}` | `200`, **every** field | narrowed projection |\n| control — `POST /data/showcase_task/query {\"fields\":[\"title\"]}` | `200`, correctly narrowed | — |\n| a **nonexistent dotted** column | `200` + every field (swallowed) | `400 INVALID_FIELD` |\n| a **nonexistent plain** column | `400 INVALID_FIELD` | — |\n\nTwo things are wrong at once: the request is answered with strictly **more** data than it asked for (a projection is how a caller keeps heavy or unwanted columns out of a response, and nothing in the body says it did not apply), and the two spellings of the same mistake — plain vs dotted unknown column — get opposite verdicts on one endpoint. The `400 INVALID_FIELD` message the plain spelling produces names this exact failure mode.\n\n## Root cause\n\n`assertProjectionFieldsExist` (`packages/metadata-protocol/src/protocol.ts`) validates only `f.split('.')[0]`, so a dotted entry passes the ingress gate on its **head segment** and then defeats the projection downstream — the unknown projection name is dropped and the projection falls back to `*` (the engine's documented per-axis tolerance for internal callers), i.e. over-return instead of refusal.\n\nNeighbour: **#4226** (closed/completed) is the card that closed the `select` / `sort` / `expand` axes against silently-dropped unknown fields. Plain names behave per #4226 in this run; the dotted spelling is the leg its gate does not cover, so treat this as an uncovered leg of — or a regression against — #4226.\n\n## Reproduction\n\n1. Boot showcase on a fresh isolated file DB (`SqlDriver` / better-sqlite3); authenticate as `admin@objectos.ai`.\n2. `POST /api/v1/data/showcase_invoice/query` body `{\"fields\":[\"name\",\"account.name\"]}` → `200`, every business field, no resolved `account.name`.\n3. Same via `GET /api/v1/data/showcase_invoice?$select=name,account.name`.\n4. Second object pair: `POST /api/v1/data/showcase_task/query` body `{\"fields\":[\"title\",\"project.name\"]}`.\n5. Controls: `{\"fields\":[\"title\"]}` narrows correctly; a nonexistent **plain** column answers `400 INVALID_FIELD`; a nonexistent **dotted** column answers `200` + every field.\n\n## Source\n\nExtracted from the QA run #7463 (framework a86db175)."
+}

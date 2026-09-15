@@ -1,0 +1,34 @@
+{
+  "number": 7365,
+  "kind": "issue",
+  "title": "finding: the QA assertion `field` path is documented as `body.*`, but `HttpTestAdapter` returns the parsed body with no `body` wrapper — every documented path resolves to `undefined`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-help"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-10T08:01:16Z",
+  "updated_at": "2026-08-11T06:06:14Z",
+  "closed_at": "2026-08-11T06:06:14Z",
+  "closed_by": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7365",
+  "body": "Observation-class finding, measured while running the blast radius for #7256 (PR #7348). Filed unassigned, no `pm:queue` — for triage to grade. Deliberately **not** folded into #7256's PR: the fix there is one `else` branch in `packages/core/src/qa/runner.ts`, and this is a mismatch between `packages/core/src/qa/http-adapter.ts` and the `describe()` text in `packages/spec/src/qa/testing.zod.ts` — a different file and a different call (change the adapter, or change the convention).\n\n## The mismatch\n\n`TestAssertionSchema.field` documents its own convention, and the generated reference repeats it:\n\n```ts\nfield: z.string().describe('Field path in the result to check (e.g. \"body.data.0.status\")')\n```\n\n`TestRunner.assert` resolves that path against whatever the adapter returned. `HttpTestAdapter.handleResponse` returns the **parsed response body itself**:\n\n```ts\nconst contentType = response.headers.get('content-type');\nif (contentType && contentType.includes('application/json')) {\n    return response.json();     // ← the body, not { body: … }\n}\nreturn response.text();\n```\n\nThere is no `body` key anywhere in the value the runner sees, and none in the platform's own response envelope either (`ResponseEnvelopeConfigSchema` wraps into `data` + `meta`, never `body`). So a suite written to the documented convention — `field: \"body.data.0.status\"`, `field: \"body.status\"` — resolves **every** assertion path to `undefined`.\n\n## Why it surfaced now, and why it is worth a card\n\nUntil #7256 this was half-invisible. With `equals`/`not_equals`/`not_null` a `body.*` path already failed loudly, so an author hit it on their first run and worked the convention out by trial. With `contains` the `undefined` fell out of the switch and the assertion **passed**, so a `body.*` `contains` reported ✅ forever and nobody learned anything.\n\nMeasured against a stand-in server returning `{\"ok\":true,\"data\":{\"total\":0},\"name\":\"acme corp\",\"tags\":[\"acme\",\"globex\"]}`, same fixture, same `HttpTestAdapter`:\n\n| scenario | base `f3f855ac` | with #7256's fix |\n| --- | --- | --- |\n| `contains` on `body.data.items` (**the documented convention**) | ✅ *(asserting nothing)* | ❌ `got undefined` |\n| `contains` on `data.items` (path absent) | ✅ *(asserting nothing)* | ❌ `got undefined` |\n| `contains` on `data.total` (a number) | ✅ *(asserting nothing)* | ❌ `got number` |\n| `contains` on `tags` (a real array) | ✅ | ✅ |\n| `contains` on `name` (a real string) | ✅ | ✅ |\n\nSo #7256 makes the mismatch visible rather than causing it — the documented-convention row is a test that was never running. That is the right outcome, but the author who now sees red is following the schema's own example, and the error will tell them the path did not resolve without telling them the documentation is what's wrong.\n\n## The call, which is a real choice\n\n1. **Fix the convention** — correct the `describe()` example (and the generated reference) to the shape the adapter actually returns (`data.0.status`). Cheapest, and makes the docs true today. Touches `packages/spec` (`domain:spec-surface` by the accept-face test: describe text only, no accept/reject change).\n2. **Fix the adapter** — have `HttpTestAdapter` return `{ status, headers, body }` so `body.*` and `status` both work, which is the shape the `field` example implies and what most HTTP test runners hand back. Strictly better for authors (an assertion on the status code is impossible today), but it is a behaviour change to a published adapter and would break any suite written against the current shape.\n\nOption 2 is the better surface and option 1 is the smaller change; picking between them is a protocol call, not a cleanup, which is why this is filed rather than fixed.\n\n## Dedup\n\nSearched open issues and PRs for `HttpTestAdapter`, the `field` path convention and the `body` prefix before filing — nothing names this. #7256 names the `contains` fall-through only."
+}

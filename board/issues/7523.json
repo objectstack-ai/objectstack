@@ -1,0 +1,37 @@
+{
+  "number": 7523,
+  "kind": "issue",
+  "title": "SECURITY: `DELETE /api/v1/reports/:id` answers 500 for another owner's report but 204 for a nonexistent id — an enumeration oracle over report ids",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "pm:dispatched",
+    "security"
+  ],
+  "assignees": [
+    "os-help"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T04:57:59Z",
+  "updated_at": "2026-08-11T07:21:10Z",
+  "closed_at": "2026-08-11T07:21:10Z",
+  "closed_by": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7523",
+  "body": "## Symptom\n\n`DELETE /api/v1/reports/:id` answers differently depending on whether the target id **exists**:\n\n| Target | Response |\n| --- | --- |\n| Another owner's report id | `500 REPORT_DELETE_FAILED` |\n| An id that does not exist | `204 No Content` |\n\nThe 500-vs-204 split is an **enumeration oracle** over other users' saved-report ids: an authenticated caller can probe ids and read existence straight off the status code. That is precisely what the deny-as-404 posture exists to prevent, and it is the one hole in an otherwise clean surface — in the same run, cross-owner GET / run / upsert-overwrite / unschedule all answered 404, schedule list returned empty, `ownerId` could not be spoofed on create, and anonymous access was 401. **No cross-owner 2xx anywhere**; the leak is purely in the status-code discrimination.\n\nReproduced 2× on two distinct reports.\n\n## Root cause\n\nThe route, not the service.\n\n- **The service layer is already correct.** `deleteReport()` returns early for an unknown id and throws `REPORT_NOT_FOUND` for a cross-owner id, commented *\"others get a not-found so the delete neither fires nor reveals the report's existence\"*. The intent is written down and implemented.\n- **The route discards it.** The `DELETE ${dataPath}/reports/:id` handler in `packages/rest/src/rest-server.ts` has a catch that goes straight to `res.status(500)` with `REPORT_DELETE_FAILED`. It never calls the file-local `handleValidation(res, error)` helper that maps `REPORT_NOT_FOUND*` &rarr; 404.\n- **The sibling handler proves the shape.** `DELETE .../reports/schedules/:scheduleId`, in the same file, *does* call `handleValidation` — which is why that route answers 404 correctly. One file, two handlers, only one of them wired through the mapper.\n\nNot a stale-dist artifact.\n\n**Fix:** one line — route the delete handler's catch through `handleValidation(res, error)` so `REPORT_NOT_FOUND*` becomes 404. Then align the unknown-id arm to the **same** status so the two arms are byte-indistinguishable; otherwise 404-vs-204 remains the same oracle in a quieter costume.\n\n## Reproduction\n\n1. Boot the showcase. Authenticate as user **A** and create a saved report; note its id.\n2. Authenticate as user **B** (a different owner).\n3. As B: `DELETE /api/v1/reports/:idOwnedByA` &rarr; observe `500 REPORT_DELETE_FAILED`.\n4. As B: `DELETE /api/v1/reports/:idThatDoesNotExist` &rarr; observe `204 No Content`.\n5. The differing status codes are the oracle. Repeat with a second report owned by A — reproduced 2×.\n\nRe-check the seam directly:\n\n```\nrg -n \"REPORT_DELETE_FAILED|handleValidation\" packages/rest/src/rest-server.ts\n```\n\n## Source\n\nExtracted from the QA run objectstack-ai/objectstack#7515 (framework a86db175). The item is `saved-report-ownership`; #6683's owner gate is otherwise live and the item's revision-2 positive-deny assertions all hold."
+}

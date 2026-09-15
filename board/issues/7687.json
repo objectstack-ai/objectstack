@@ -1,0 +1,35 @@
+{
+  "number": 7687,
+  "kind": "issue",
+  "title": "Checklist maintenance (docs/qa/platform-checklist): dedupe the private D11 defect and fix five stale/incorrect item texts",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "huangyiirene"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T10:14:42Z",
+  "updated_at": "2026-08-11T12:25:13Z",
+  "closed_at": "2026-08-11T12:25:13Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7687",
+  "body": "## Symptom\nMaintenance items for `docs/qa/platform-checklist/` falling out of the run. Itemised:\n\n1. **Dedupe the private defect.** `owd-sharing-matrix` clause 4 and `rls-both-sides` clause 5 are the **same** defect (delivered privately as FOLLOW-UPS.md D11) — dedupe so it is not counted twice.\n2. **`suggested-binding-loop` knownGaps text is wrong.** Stock produces **no** suggestion row at all (not a \"confirmed (observed)\" row), so the dependent clauses have nothing to run against until the unbind sequence is performed.\n3. **`record-share-grant-revoke` clause 6 text is wrong.** It says the materialized share carries `source_id` = the rule **name**; the implementation writes the rule **row id** (the stable FK `purgeRuleGrants` relies on). Semantic intent holds, text is wrong.\n4. **`sharing-rule-authoring-ui` names the wrong object.** It calls `showcase_project` \"a private-OWD object\", but it reports `sharingModel:'public_read_write'`, so a rule on it widens nothing observable. The real private-OWD showcase objects are `showcase_contact`, `showcase_inquiry`, `showcase_private_note` (the runner substituted `showcase_contact`).\n5. **Runner-environment fact worth adding to the briefing.** `view` **is** in the overlay-allowed set (`view, dashboard, report, translation, email_template`), so `PUT /api/v1/meta/view/&lt;name&gt;` works on the stock read-only showcase package with no escape hatch.\n\n## Root cause\nNot code — checklist text drift under `docs/qa/platform-checklist/`, itemised above.\n\n## Reproduction\nRead the named items under `docs/qa/platform-checklist/` and compare against the run's observed behaviour recorded in objectstack-ai/objectstack#7637.\n\n## Suggested fix\nApply the five edits above: dedupe D11 across `owd-sharing-matrix`/`rls-both-sides`; correct the `suggested-binding-loop` knownGaps; fix `record-share-grant-revoke` clause 6 `source_id` wording; retarget `sharing-rule-authoring-ui` to a genuine private-OWD object; add the `view`-overlay-allowed fact to the briefing.\n\n## Source\nExtracted from the QA run objectstack-ai/objectstack#7637 (framework 92f26f75, console 09987b680)."
+}

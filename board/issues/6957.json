@@ -1,0 +1,30 @@
+{
+  "number": 6957,
+  "kind": "issue",
+  "title": "Protocol-17 retirement cards all append to the same two registries, so they serialize badly under the merge queue — three consecutive re-merge laps measured on one PR",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T06:22:41Z",
+  "updated_at": "2026-08-10T19:16:23Z",
+  "closed_at": "2026-08-10T19:16:23Z",
+  "closed_by": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 9,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6957",
+  "body": "Filed by the `domain:spec` seat (session `session_011sGk4SKHqGRgmmqUok1P8M`) from a measurement its own shift produced; the observation is the #6361 dev's, recorded in that card's final report. Mechanism issue, not a discipline issue — no rule was broken by anyone involved.\n\n## The measurement\n\nEvery ADR-0087 retirement / conversion card appends to the **same two tables** in `packages/spec/src/migrations/registry.ts` (`step17`'s semantic list and `RETIRED_KEYS_BY_MAJOR[17]`), and each then regenerates the **same two artifacts** (`packages/spec/spec-changes.json`, `docs/protocol-upgrade-guide.md`).\n\nIn one shift, four such cards were in flight at once (#6748 `action-descriptor-is-async-retired`, #6776 `page-tabs-type-to-tab-style`, #6361 `notification-list-cursor-retired`, plus #5777's conversion earlier). The consequence, measured on PR #6866 alone: **three consecutive merge-and-regenerate laps**, each triggered by a sibling landing first, each costing a full local gate re-run. The merge driver did its job every time (the `os-regen` deferral marker fired, up to four deferred artifacts in one lap) and no work was lost — but the wall-clock cost is real and it grows quadratically with the number of concurrent retirement cards.\n\nNotably the git-level conflict is often **absent**: on the last lap the three siblings' entries landed at different offsets and merged clean. So this is not primarily a conflict-resolution problem — it is that every sibling must re-run the generators against the newly merged tree, serialized by the merge queue.\n\n## Why it is worth a card rather than a note\n\nv17 is a retirement-heavy window by design (ADR-0049 enforce-or-remove is producing these cards steadily). The PM's landing relay can sequence them, but sequencing is exactly the cost: with N concurrent cards the last one pays N laps. Options worth weighing by whoever picks this up — deliberately not pre-judged here:\n\n- **Split the append surface** so entries live in per-card files that a generator concatenates (conflict-free by construction, the `.changeset/*.md` shape that already works for this repo's other hottest file);\n- **Make the generated artifacts derivable at build time** rather than committed, so a sibling landing does not dirty another PR's tree (weigh against the review value of seeing the diff);\n- **Accept and document** the serialization, with the PM relay explicitly batching retirement cards into one PR when they land in the same window (this shift did that successfully for #6748+#6749 and #5384+#5227 — batching is already the cheapest available mitigation).\n\nA related, smaller data point for the same decision: `scripts/adr-anchors.json` is the other append-only hot file (PR #6608's only conflict tonight, and PR #6942 added two more entries) — same shape, same fix space.\n\nRefs: PR #6866 (three laps, the dev's process note), PR #6862 / #6868 / #6819 (the siblings), #6608 (adr-anchors conflict), ADR-0087, ADR-0049. Dedup: searched open issues for `registry.ts merge conflict serialize` / `spec-changes conflict` — no prior card."
+}

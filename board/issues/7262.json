@@ -1,0 +1,32 @@
+{
+  "number": 7262,
+  "kind": "issue",
+  "title": "De-fallback the engine's autonumber render path — read the declared `{0000}` default instead of parsing the empty string (#6555 half 2/3)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-10T04:03:35Z",
+  "updated_at": "2026-08-10T11:42:07Z",
+  "closed_at": "2026-08-10T11:41:03Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7262",
+  "body": "**Blocked-by:** #6555's spec-half PR (branch `claude/issue-6555-autonumber-default-format`) — the declared default must exist before this reads it.\n\nExecution half of the maintainer's route-3 ruling on #6555. Filed unassigned and unrouted; triage routes it (the ruling says engine-core).\n\n## The ruling (verbatim, comment [5225535766](https://github.com/objectstack-ai/objectstack/issues/6555#issuecomment-5225535766))\n\n> **Maintainer ruling (2026-08-08): Route 3, with the default fixed at {0000}.** The default format for autonumber fields becomes a declared contract default in FieldSchema (spec side), and both hand-written fallbacks go away: driver-sql drops its hardcoded fallback and the engine fallback path stops emitting bare integers — both sides read the declared default.\n>\n> Rationale (three-axis review): routes 1 and 2 both fix the fork but leave \"the default\" living in two hand-written fallbacks — and route 2 would break number-shape continuity for already-stored SQL data, the largest install base (business). Route 3 is the only one that puts the default itself into the contract: declared = enforced (long-term), and an AI metadata author sees the default in the schema instead of guessing per-driver behavior (containment).\n>\n> Compatibility note (must be in the changeset): choosing {0000} keeps stored driver-sql data undisturbed; engine-fallback deployments flip from bare 1 to 0001 for newly issued numbers. Counter continuity itself is unaffected (#6468 pinned it).\n>\n> For the dispatch: contract-first ordering — the spec default lands first (spec lane), the two de-fallback changes follow (engine-core / drivers as routed by triage).\n\n## The change\n\n`packages/objectql/src/engine.ts` — `applyAutonumbers`, currently (re-measured on `origin/main` @ `3566e55`; the line drifted from the `:2115` triage cited):\n\n```ts\n// :2553\nconst fmt = (def as any).autonumberFormat ?? (def as any).format;\n// :2554\nconst tokens = parseAutonumberFormat(typeof fmt === 'string' ? fmt : '');\n```\n\nAn undeclared format parses to an empty token list, which `renderAutonumber` renders through its `width === null` branch as a **bare counter** — `1`, `2`, …. Replace both lines with the contract:\n\n```ts\nconst tokens = parseAutonumberFormat(resolveAutonumberFormat(def as never));\n```\n\n`resolveAutonumberFormat` / `DEFAULT_AUTONUMBER_FORMAT` are exported from `@objectstack/spec/data` by the blocking PR; `engine.ts:24` already imports from that entry.\n\n## This one MOVES behaviour — unlike its driver-sql sibling\n\nThis is the half the ruling's compatibility note is about. A deployment whose driver does not advertise `supports.autonumber` (the in-memory driver, any driver without the capability) flips from `1` to `0001` for **newly issued** numbers on format-less fields. Counter continuity is untouched — #6468 pinned seeding parity, and both sides already agreed on the counter value.\n\nTwo consequences worth handling explicitly:\n\n- The engine used `??`, so today an explicit `autonumberFormat: ''` reaches it as `''` and renders bare. `resolveAutonumberFormat` uses truthiness (driver-sql's rule), so `''` will resolve to `{0000}` too. Intentional — it is what makes the two sides agree — but it is a second, smaller behaviour move on this side, and it belongs in the changeset.\n- Any engine-side test asserting a bare `'1'` / `'2'` against a format-less autonumber field is asserting the defect and must be re-pinned to `'0001'` — with a comment naming #6555, so the next reader does not \"fix\" it back.\n\n## Suggested gates\n\n- `packages/objectql` autonumber suites (`engine-autonumber-*.test.ts`).\n- `packages/runtime/src/autonumber-seed-cross-side-parity.integration.test.ts` — the cross-side pin; this card is what should make it able to assert a shared *rendering*, not just a shared counter. Worth extending it with the bug report's exact reproduction: `{ rec_no: { type: 'autonumber' } }`, rows `1` / `2` / `10` already stored, both sides expected to mint `0011`.\n- Changeset carrying the compatibility note verbatim.\n\n## Not in this card\n\ndriver-sql's two `|| '{0000}'` sites — its own card. #6555 stays open until both land."
+}

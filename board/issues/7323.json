@@ -1,0 +1,35 @@
+{
+  "number": 7323,
+  "kind": "issue",
+  "title": "QA checklist `records-forms.action-location-matrix` still asserts pre-objectui#3142 semantics — its \"empty-locations means EVERY location\" probe now grades correct behavior as a FAIL",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-help"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-10T06:40:29Z",
+  "updated_at": "2026-08-10T12:14:14Z",
+  "closed_at": "2026-08-10T12:14:14Z",
+  "closed_by": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7323",
+  "body": "Found while executing #6888 (retiring `global_nav`). Out of scope there — that card removes one vocabulary member; this is a different, still-live claim inside the same checklist item, so it is filed rather than fixed in PR #7322.\n\n## What\n\n`docs/qa/platform-checklist/areas/records-forms.json`, item `records-forms.action-location-matrix`, asserts that an action with **no** `locations` renders at **every** location:\n\n- variant: `\"empty-locations semantics probe — a locations-less action lands on EVERY location including the toolbar (objectui action-bar.tsx documented behavior; the reason recalc_selection must declare record_more)\"`\n- acceptance clause: `\"empty/missing locations means EVERY location — the probe action appears on all surfaced slots including the list toolbar\"`\n- `source` line: `\"objectui: packages/.../action-bar.tsx (missing/empty locations → every location)\"`\n\n**That is no longer true, and the checklist item itself records the change that made it false.** The same item cites objectui#3142 twice — and objectui#3142 is exactly the change that ended this behavior.\n\n## Evidence\n\nThe placement predicate is a single function, and it is a plain membership test — an undeclared or empty `locations` matches nothing:\n\n`objectui packages/types/src/ui-action.ts:86-99`\n\n```ts\nexport function actionRendersAt(\n  action: { locations?: readonly string[] } | null | undefined,\n  location: ActionLocation | undefined,\n): boolean {\n  if (!location) return true;\n  const declared = action?.locations;\n  return Array.isArray(declared) &amp;&amp; declared.includes(location);\n}\n```\n\n`action-bar.tsx:134-140` is the consumer, and its comment states the change in the past tense:\n\n> Placement is `actionRendersAt`'s call, not ours (objectui#3142): an action renders here only if it DECLARES this location. This bar used to show a locationless action at every location …\n\nThis repo already treats the new semantics as fact. `packages/lint/src/validate-action-locations.ts` is built on it — the whole `action-no-placement` rule exists **because** an action with no `locations` now renders nowhere, and its docblock says so: *\"objectui#3142 collapsed four disagreeing renderers onto one predicate — an action renders at a location only if it DECLARES that location. Before that, `action:bar` and the record header showed an undeclared action everywhere, which is what made this shape look alive; it is measurably inert as of objectui 17.1.\"*\n\nSo two artifacts in this repo state opposite things about the same behavior.\n\n## Why it matters\n\nThe probe is **manually runnable and will produce a false FAIL**. A runner follows the step — \"in a scratch/writable package author a copy of an api action with NO locations key; reload and record every surface it appears on (including the toolbar)\" — observes it appearing on **no** surface, and reads the acceptance clause as broken product behavior. The item's own `negative` list makes that reading worse: *\"any action rendering at a location it did not declare … is a FAIL — placement is a contract, not a hint.\"* The negative encodes the post-#3142 contract while the acceptance clause encodes the pre-#3142 one, so the item now contradicts itself and grades correct behavior as a regression.\n\nThe `enumSource` ratchet cannot catch this: it counts `ACTION_LOCATIONS` members and says nothing about semantics prose.\n\n## Suggested fix (not applied)\n\nRewrite the probe to pin the current contract rather than deleting it — the probe is still worth running, only its expected outcome inverted:\n\n- a `locations`-less action renders on **no** surface (the `action-no-placement` lint shape, observable end-to-end);\n- `locations: []` likewise renders nowhere, and that is the *deliberate* headless declaration;\n- keep the `recalc_selection` note, but re-anchor it: it must declare `record_more` because placement is now explicit, not to opt out of an everywhere-default.\n\nAlso re-word the `source` line, and bump the item revision.\n\n## Scope note\n\nIndependent of #6888: it is true whether or not `global_nav` exists, and #6888's PR deliberately touches only the `global_nav` variant of this item."
+}

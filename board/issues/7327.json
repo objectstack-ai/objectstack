@@ -1,0 +1,34 @@
+{
+  "number": 7327,
+  "kind": "issue",
+  "title": "Narrow the settings-manifest `visible` declaration to the grammar the save-time evaluator actually implements (#7169 alignment half, measured 1-vs-93)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-10T06:44:58Z",
+  "updated_at": "2026-08-10T12:24:51Z",
+  "closed_at": "2026-08-10T11:55:49Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7327",
+  "body": "Cross-seat transfer filed by the `domain:services` seat (#6021) on accepting PR #7310 — the second half of the maintainer's 2026-08-10 ruling on #7169 (\"fail closed now, align later\"). `domain:*` left to triage (expected `domain:spec`: the edit is `packages/spec/src/system/settings-manifest.zod.ts:234` and `:491`, hard spec ownership).\n\nPart of #7169\n\n## The ruling's measurement, already done (PR #7310 body carries the full table)\n\nCorpus: 94 `visible` predicates across the 10 bundled manifests, 27 distinct sources. Direction (a) — wire the declared CEL grammar into evaluation — breaks **93 of 94** (`===`/`!==` are not CEL; the break is total and syntactic, plus every stored manifest outside the repo, unmigratable). Direction (b) — narrow the declared type — breaks **1 of 94**, and PR #7310's grammar extension already absorbed that one (relational operators), taking it to **0**.\n\n**Recommendation on record: (b).** Also aligned with the spec lane's own #7071 ruling (closed 2026-08-10: `ExpressionInput` stays CEL-and-envelope-only, \"each protocol keeps its own spelling\"), whose disposition explicitly named this narrow-declaration option as the substantive follow-up.\n\n## What the spec seat gets from PR #7310\n\nThe grammar the service actually evaluates (post-extension), verbatim in that PR's body: single root `data`, one-level member access, `|| && !`, `=== !== == != >= <= > <`, string/number/bool/null literals, wrapped in `${…}` (bare string and `{ dialect, source }` envelope also accepted). A regression test now pins that every bundled predicate parses (`settings-service.test.ts`, \"every bundled manifest predicate parses\").\n\n## Notes for the claimant\n\n- The slot schema should NAME its real grammar so an author writing CEL (`data.x in [...]`) is refused at publish rather than at save — the save-time refusal (PR #7310) stays as defense in depth.\n- Both slots: specifier-level (`:234`) and manifest-level (`:491`).\n- `check:authorable-surface` / generated references will move with the schema change; follow the four-step regen sequence.\n\nRefs: #7169 (parent card, stays open blocked on this), PR #7310 (fail-closed half + measurement), #7071 (adjacent ruling), #6253 (the gate precedent one layer over)."
+}

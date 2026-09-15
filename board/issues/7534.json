@@ -1,0 +1,35 @@
+{
+  "number": 7534,
+  "kind": "issue",
+  "title": "Data query: an unknown field inside `where` / `$filter` answers 200/0 instead of `400 INVALID_FIELD` — the bare-key door disagrees (#4134's uncovered sibling)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T05:01:20Z",
+  "updated_at": "2026-08-11T07:19:02Z",
+  "closed_at": "2026-08-11T07:19:02Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7534",
+  "body": "## Symptom\n\n`POST /api/v1/data/showcase_invoice/query` with `{\"where\":{\"not_a_field\":\"x\"}}` answers:\n\n```\n200 { \"records\": [], \"total\": 0 }\n```\n\n— no `code`, no mention of the unknown name. Identically for the `$filter` door (`GET ...?$filter=...`) and for the filter-AST door (`POST {filter: [...]}`).\n\n**Expected:** `400 INVALID_FIELD` naming the field, the same envelope the sibling door already produces.\n\nSame-run control on the same object, same field name: `GET /api/v1/data/showcase_invoice?not_a_field=x` → `400 INVALID_FIELD`.\n\nSo one endpoint family answers **two different verdicts for one mistake**, chosen by which door the caller used — and the losing answer is \"indistinguishable from no data\", which is exactly what #4134 closed for the bare-key door: an empty result set that a client cannot tell apart from a filter that legitimately matched nothing.\n\n## Root cause\n\nThe #4134 read-path field-existence gate (`assertQueryParamsAreFields`, backed by `resolveQueryFields`, in `packages/metadata-protocol/src/protocol.ts`) covers only the **implicit** filters `findData` derives from leftover query parameters. The **explicit** filter axes — a `where` object, a `$filter` string, a filter AST — reach the driver without passing that gate, so an unknown key is lowered into a field-equality predicate that can only match zero rows.\n\nRelationship to **#4134** (closed/completed, fixed by PR #4169): this is **not** a regression of it — the bare-key control still answers `400 INVALID_FIELD` in this run. It is the sibling door #4134's fix did not reach, and the gate it introduced (`resolveQueryFields`, explicitly documented as \"ONE resolution shared by all four read axes\") is the natural place for the fix to land.\n\n## Reproduction\n\n1. Boot showcase on a fresh isolated file DB (`SqlDriver` / better-sqlite3); authenticate as `admin@objectos.ai`.\n2. `POST /api/v1/data/showcase_invoice/query` body `{\"where\":{\"not_a_field\":\"x\"}}` → `200 {\"records\":[],\"total\":0}`, no `code`.\n3. Repeat through the `$filter` door and the AST (`filter`) door — same 200/0.\n4. Control, same run and same object: `GET /api/v1/data/showcase_invoice?not_a_field=x` → `400 INVALID_FIELD`.\n\n## Source\n\nExtracted from the QA run #7463 (framework a86db175)."
+}

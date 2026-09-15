@@ -1,0 +1,35 @@
+{
+  "number": 7704,
+  "kind": "pull_request",
+  "title": "fix(plugin-security): surface the isDefault audience-binding suggestion on stock instead of skipping auto-bound declarations",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T11:34:36Z",
+  "updated_at": "2026-08-11T12:05:58Z",
+  "closed_at": "2026-08-11T12:05:56Z",
+  "closed_by": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "merged_at": "2026-08-11T12:05:56Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/7704",
+  "body": "Fixes #7677\n\n## Problem\n\n`GET /api/v1/security/suggested-bindings` returned `{suggestions: [], synced: {created: 0}}` on a stock boot, even though the app's `isDefault` permission set and its `everyone` binding both existed. The reporter's discriminator — delete the binding row, re-list, and a PENDING row appears with `created: 1` — showed the declaration *is* collected and merely never surfaced.\n\nPremise verified on `origin/main`, and the ordering that causes it is explicit in the boot path:\n\n- `security-plugin.ts` binds the composed baseline set(s) to the `everyone` anchor at boot, and its own comment says this must run **before** `syncAudienceBindingSuggestions` \"so the app's own fallback set is already bound and never generates a redundant pending suggestion\".\n- `suggested-audience-bindings.ts` then reached `if (bound) continue` for any declaration with no row yet. \"Already bound\" is therefore the *normal* stock case, not an exception, so nothing was ever written.\n\nNet effect: the reconciler's `confirmed (observed)` transition only fired for a row **already** in `pending`, and on stock no row ever reached `pending`. That contradicted the module's own docblock, which promises the table reflects every current declaration.\n\n## Fix\n\nAn already-satisfied declaration is now **recorded rather than skipped**, in the state it is actually in: `confirmed`, with `resolved_at` set and `resolved_by` left empty. This is the same end state the existing pending-to-confirmed branch reaches, just arrived at without passing through `pending` first.\n\n### Why `confirmed` and not `pending`\n\nThe card left this open. Every consumer of the `status` field points the same way:\n\n1. **The module docblock** already specifies \"binding already present → confirmed (observed)\". `confirmed` implements the stated contract; `pending` would contradict it.\n2. **The backing object schema** defines this exact case in the `resolved_by` field description: *\"Empty on a confirmed row means the binding was observed (e.g. bound at boot or by hand), not confirmed through the prompt.\"* A confirmed row with no resolver is the schema's own name for a boot-observed binding.\n3. **The console panel** (`objectui` `SuggestedBindingsPanel`) lists exactly `status=pending` and renders nothing when that set is empty — `pending` is the *actionable prompt* state. A pending row here would ask an admin to \"accept\" a binding that already exists.\n4. **The confirm/dismiss service methods** both 409 on a non-pending row. A pending-but-already-bound row would permit a meaningless confirm (a no-op write) and a misleading dismiss (recorded \"no\" while the binding stays in force).\n5. **The boot comment** in `security-plugin.ts` requires that a satisfied baseline \"never nags\". `confirmed` honours that; `pending` breaks it.\n\nSo `confirmed` is the only value that satisfies the docblock, the schema, the UI and the boot contract at once — and it is the truthful one, since the binding does exist. No new status value was introduced.\n\n**Deliberate consequence, recorded:** on a post-fix stock system the row is created `confirmed`, so a *later* unbind does not re-open it as pending. That matches how the module treats resolved rows everywhere else — confirmed and dismissed rows are terminal audit history, never re-opened, and re-opening would nag an admin who just deliberately unbound the set.\n\n## Tests\n\n`packages/plugins/plugin-security`: 46 files, 955 tests green; `typecheck` clean.\n\nThe pre-existing test `skips a set that is already bound to the anchor (e.g. the boot baseline)` asserted `created: 0` and zero rows — it pinned the defect, so it is replaced by a test asserting the recorded confirmed/observed row. Added:\n\n- already-bound set is recorded as `confirmed` with empty `resolved_by` and a set `resolved_at`;\n- idempotency for the bound case — second sync yields `created: 0`, `confirmedObserved: 0`, no duplicate row;\n- stock surfacing through `listAudienceBindingSuggestions` — non-empty list, `created: 1` once, and `status=pending` still returns nothing (never nag);\n- the discriminating step still works — an unbound declaration surfaces as `pending`, and the pending-to-confirmed transition still fires when the binding is observed later.\n\nAlso run green: `@objectstack/runtime` full suite (127 files / 2018 tests, covering `http-dispatcher` and `domain-handler-registry` which carry the `/security/suggested-bindings` routes) and `@objectstack/client` `admin-surfaces.test.ts` (7 tests).\n\n### Reverse verification (ablation)\n\nReverted `suggested-audience-bindings.ts` to `origin/main` while keeping the new tests. Result matched the prediction: **exactly the 3 new stock-surfacing tests flipped red; all 18 existing pins stayed green** (952 passed / 3 failed) — including pending creation, the pending-to-confirmed transition, pruning, dismiss and the full confirm flow. Restored afterwards.\n\n## Scope\n\nThree files: `suggested-audience-bindings.ts`, its test, and the changeset. `security-plugin.ts` is **not** touched — no overlap with #7505 / PR #7697 or #7665, which edit that file. The fix stayed entirely within the reconciler, so no reordering of the boot sequence was needed. Merged `origin/main` and re-ran the suites before pushing.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01BVc1ekPpi6yaWywAUhfzfd)_"
+}

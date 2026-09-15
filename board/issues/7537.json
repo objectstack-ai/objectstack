@@ -1,0 +1,35 @@
+{
+  "number": 7537,
+  "kind": "issue",
+  "title": "`expand` is a silent no-op when the nested `fields` omits `id` — the exact spelling two retirement messages prescribe",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-help"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T05:01:52Z",
+  "updated_at": "2026-08-11T09:42:12Z",
+  "closed_at": "2026-08-11T09:42:12Z",
+  "closed_by": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7537",
+  "body": "## Symptom\n\n`POST /api/v1/data/showcase_invoice/query` with\n\n```json\n{\"expand\":{\"account\":{\"object\":\"showcase_account\",\"fields\":[\"name\"]}}}\n```\n\nanswers `200` with `account` left as the **raw FK id** — the expansion silently did not happen. Adding `\"id\"` to the nested projection (`\"fields\":[\"id\",\"name\"]`) expands correctly. Confirmed 2/2 on a second object pair.\n\n**Expected:** `account` carries the related record projected to `name`, or a refusal. Nothing in the response distinguishes \"expanded\" from \"not expanded\" — the field just still holds an id, which is a valid-looking value.\n\nThe stakes are raised by where the failing spelling comes from: **it is the form prescribed verbatim** in two spec retirement messages (`FIELD_NODE_OBJECT_FORM_REMOVED` and `QUERY_JOINS_REMOVED`) and in this checklist item's own steps. A caller who does exactly what the error message told them to do gets a silent no-op.\n\n## Root cause\n\n`expandRelatedRecords` (`packages/objectql/src/engine.ts`) forwards `nestedAST.fields` to the sub-`find`, then keys `recordMap` on `rec.id`. A nested projection that omits `id` therefore yields an **empty map**, and the injection falls through to `recordMap.get(val) ?? val` — i.e. the original FK value is written back and the expansion is indistinguishable from never having been requested.\n\nFix shape: `id` must be added to the sub-read's projection unconditionally (it is the join key, not a caller-chosen column) and stripped from the emitted nested record if the caller did not ask for it — or, failing that, the mismatch must be refused rather than degraded.\n\n## Reproduction\n\n1. Boot showcase on a fresh isolated file DB (`SqlDriver` / better-sqlite3); authenticate as `admin@objectos.ai`.\n2. `POST /api/v1/data/showcase_invoice/query` body `{\"expand\":{\"account\":{\"object\":\"showcase_account\",\"fields\":[\"name\"]}}}` → `200`, `account` is the raw FK id.\n3. Add `\"id\"`: `{\"expand\":{\"account\":{\"object\":\"showcase_account\",\"fields\":[\"id\",\"name\"]}}}` → expands correctly.\n4. Repeat on a second object pair (`showcase_task` → `project`) — same 2/2 result.\n\n## Source\n\nExtracted from the QA run #7463 (framework a86db175)."
+}

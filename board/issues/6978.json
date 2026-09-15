@@ -1,0 +1,32 @@
+{
+  "number": 6978,
+  "kind": "issue",
+  "title": "After #6656 retires `captureBefore`, the `ctx.__previous` stash has no producer left — a dead fallback limb in trigger-record-change kept alive by its own fixture, plus four stale comments",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T07:26:04Z",
+  "updated_at": "2026-08-11T11:46:49Z",
+  "closed_at": "2026-08-11T11:46:49Z",
+  "closed_by": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6978",
+  "body": "Observation-class finding from the #6656 dev seat (PR #6977). Nothing a user hits today — dormant code and stale prose — so it carries `finding` and no `pm:queue`, per the filing discipline. Filed unassigned; routing left to triage.\n\n`Blocked-by: #6656` (the retirement is what creates both items; neither is actionable before it lands).\n\n## Fact\n\n`plugin-audit`'s `captureBefore` was the **only** producer of `ctx.__previous` in the repo. PR #6977 retires it. Measured on that branch after the change:\n\n```\n$ grep -rn \"__previous\\s*=\" --include=*.ts packages apps | grep -v node_modules\npackages/triggers/trigger-record-change/src/record-change-trigger.test.ts:362:\n    (ctx as unknown as { __previous: Record[string, unknown] }).__previous = { status: 'old' };\n\n$ grep -rn \"\\.__previous\\b\" --include=*.ts packages apps | grep -v node_modules | grep -v \"__previous\\s*=\"\npackages/triggers/trigger-record-change/src/record-change-trigger.ts:299:\n    ((ctx as unknown as { __previous?: Record[string, unknown] }).__previous ?? undefined);\n```\n\n(Generic brackets softened above so the issue sanitizer does not eat them.)\n\nSo the one surviving **producer** is a test fixture that writes the key itself, and the one surviving **consumer** is the fallback limb that fixture exists to exercise.\n\n## Item 1 — the dead limb (the only code item)\n\n`packages/triggers/trigger-record-change/src/record-change-trigger.ts:299`:\n\n```ts\nconst previous =\n    (ctx.previous as Record[string, unknown] | undefined) ??\n    ((ctx as unknown as { __previous?: Record[string, unknown] }).__previous ?? undefined);\n```\n\nCanonical key first, so this is the **inverted** reverse-verification family, not the usual one: deleting the limb changes nothing that any engine path can produce, and every existing test stays green — because `record-change-trigger.test.ts:352` (\"reads the `__previous` stash when `ctx.previous` is absent\") **synthesises the key in the test body**. That is the #4984 shape exactly: a fixture spelling a key no producer emits, keeping a dead limb looking live and making the limb's deletion invisible to every gate.\n\nSuggested disposition under ADR-0049 enforce-or-remove: delete the limb and the fixture that feeds it. The doc comment two lines up (`\"with the __previous stash audit also uses as a fallback\"`) goes with them.\n\n## Item 2 — four comments that assert something no longer true\n\nNone of these change behaviour; all four will read as current fact to the next author, which is the mechanism Prime Directive #13 names (\"the file being edited never named the ADRs that governed it\") and that #6966 is a live instance of.\n\n| file | what it says | why it is stale after #6656 |\n|:--|:--|:--|\n| `packages/objectql/src/engine.ts:7842` | enumerates `plugin-audit  captureBefore / writeAudit  before+afterDelete` among the hooks holding the delete pre-image gate open | plugin-audit registers **no** `beforeDelete` hook now; only `writeAudit` on `afterDelete` holds that term |\n| `packages/objectql/src/plugin.ts:918` | \"`captureBefore`'s now-redundant read is the identity lane's follow-up\" | forward reference to #6656 itself; becomes past tense |\n| `packages/metadata/src/metadata-manager.ts:311` | \"`plugin-audit`'s `captureBefore` threads the transaction by hand for exactly this reason\" — cited as evidence the single-connection-pool stall is current | the cited example no longer exists. The **hazard claim is independent** and still stands on `DatabaseLoader._find()`; only the witness is gone, so this needs a replacement example rather than deletion of the policy |\n| `packages/spec/src/contracts/scoped-context.ts:64` | \"plugin-audit's `persistAuditTrailRow` **and its `captureBefore` snapshot** both reach `api.sudo()`\" | only the writer reaches `sudo()` now. The conclusion (sudo excluded on purpose) is unaffected |\n\n## Why this was not fixed in PR #6977\n\nIts scope is `packages/plugins/plugin-audit`, and two of the four files are in `packages/objectql`, which that card explicitly fences off (the engine half is landed and closed; `sys_fetch_previous_delete` is #5929, engine-core lane). Item 1 is in `packages/triggers`. Cross-lane by construction, hence a standalone card rather than a rider.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01BM1tNf5U3nEbHKR4fo5qVQ)_"
+}

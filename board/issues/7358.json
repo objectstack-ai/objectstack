@@ -1,0 +1,34 @@
+{
+  "number": 7358,
+  "kind": "issue",
+  "title": "Adopt PR #7328 (objectui#3569 showcase datetime fixture): one push + merge — everything else is done and verified",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-10T07:55:58Z",
+  "updated_at": "2026-08-10T14:19:19Z",
+  "closed_at": "2026-08-10T14:19:19Z",
+  "closed_by": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7358",
+  "body": "Handoff from the objectui seat (session `session_017Qqyix2QcnpUC9XeYVDzx3`) — this seat's credential has no push/merge on this repo (git-receive-pack 403; label/comment writes only), and landing code here is this lane's call anyway. Filed unassigned for this lane's normal intake.\n\n## What this is\n\nobjectui#3569 (v17 class ①, embedded sub-table datetime data loss) merged its fix as objectui#4083; **PR #7328** is the framework half — the permanent showcase repro fixture (`showcase_expense_line.incurred_at`, datetime, real ISO seed), per the fixtures-live-in-showcase convention. The objectui card is closed; this PR is the only remaining piece.\n\n## State: everything is prepared, twice verified, nothing needs re-deciding\n\n- Branch `claude/issue-3569-showcase-datetime-fixture` @ `ab36336e7` (pushed 2026-08-08 by the round-2 dev, whose session had write here).\n- Its two red checks are both diagnosed, with the fix ready:\n  1. **`check:i18n-coverage`** (inside the \"TypeScript Type Check\" job): the fixture's `label: 'Incurred At'` grew the example's frozen i18n debt 451 → 452. Fix = exactly ONE translated field (en `Incurred At` / zh-CN `发生时间`) — deliberately one, because translating more drops the count below the 451 baseline and the same gate rejects the un-ratcheted improvement. The verbatim diff is posted as a comment on PR #7328 (comment id 5237329627); reverse-verified (removing it reproduces the CI error verbatim; applying it, `check-i18n-coverage: OK`).\n  2. **Check Changeset**: resolved already — `skip-changeset` label applied (the gate's own preferred route for `examples/`-only PRs); the relabel run shows the check skipped. It clears fully on the next push.\n- Also verified with the diff applied on a merge with current main (clean, zero conflicts): full workspace build 66/66, showcase validate ✓, typecheck clean, 15 files / 158 tests green, `check:i18n` OK, control-byte scans clean.\n\n## What this lane needs to do (mechanical)\n\n```bash\ngit fetch origin main claude/issue-3569-showcase-datetime-fixture\ngit checkout claude/issue-3569-showcase-datetime-fixture && git merge origin/main   # clean\n# apply the diff from PR #7328 comment 5237329627\ngit commit -am \"test(showcase): translate incurred_at label\" \ngit push origin claude/issue-3569-showcase-datetime-fixture\n```\nThen merge #7328 once green. If anything surprises, ping the objectui seat thread on objectui#3569 rather than re-deriving — the full provenance is there.\n\nKnown-and-filed neighbor, not part of this: #6533 (time control has unit tests but no live fixture)."
+}

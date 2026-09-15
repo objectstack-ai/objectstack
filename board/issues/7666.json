@@ -1,0 +1,35 @@
+{
+  "number": 7666,
+  "kind": "pull_request",
+  "title": "fix(rest): give `POST /packages/publish` an owner on every boot (#7563)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T10:09:22Z",
+  "updated_at": "2026-08-11T12:00:12Z",
+  "closed_at": "2026-08-11T12:00:10Z",
+  "closed_by": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "merged_at": "2026-08-11T12:00:10Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/7666",
+  "body": "Fixes #7563\n\n## The defect\n\n`POST /api/v1/packages/publish` answered **405** with `Allow: DELETE, GET, HEAD, PATCH`. Not one of those verbs belongs to the publish surface — `POST` is the only verb it has ever had. They are `/packages/:id`'s method set, offered because with the publish route unmounted that pattern was the only registration still matching the path, with `id = \"publish\"`. The caller was told *\"this path exists, use another method\"*, and every method on offer would have operated on a package literally named `publish`.\n\n## Which outcome, and why\n\n**The real publish handler answers** wherever a `package` service is composed; an **honest 404** naming the surface everywhere else. Both, because the root cause turned out to be two separate things:\n\n**1. The gate was a boot-instant snapshot, not a composition fact.** The registrar was gated on `ctx.getService('package')` resolving at the one moment `RestApiPlugin.start()` ran. `objectstack serve` registers capability providers (`requires: ['marketplace']` → `PackageServicePlugin`, `serve.ts:2414`) **after** `createRestApiPlugin` (`serve.ts:2138`), and `resolvePluginOrder` preserves registration order for plugins with no edge between them. So on showcase — which *declares* `requires: ['marketplace']` — the service exists at request time and was absent at exactly the instant the mount decision was taken. The service is now handed to the registrar as a **resolver** and read per request.\n\n**2. \"Not mounted\" never meant \"404\" for this path.** `POST /packages/publish` has no dispatcher twin, so leaving it unowned did not degrade to the 404 `direct-mount-composition.ts` documented — it degraded to a sibling's 405. It now mounts **unconditionally** and answers its own 404 naming the surface.\n\n404 rather than 503: a deployment that composed no marketplace capability will not grow one on retry, and 503 invites exactly that retry. It is also the answer the composition module has always documented for a skipped registrar.\n\n**The other three package routes deliberately do NOT follow.** `GET /packages`, `GET /packages/:id` and `DELETE /packages/:id` each shadow a live dispatcher twin at a byte-identical pattern; mounting them without a service would replace three working routes with a degraded refusal. That asymmetry is pinned so a later \"make it consistent\" edit goes red.\n\n## The parity gate question — did #7584 flag this? No, and the reason generalises\n\n`POST /api/v1/packages/publish` was **pinned** in `UNEXERCISED_BY_THIS_BOOT`, reasoned as *\"the registrar is service-gated and the showcase composes none\"*. The reason was true and the conclusion was wrong: **an unmounted route is not automatically an unanswered one.** A conditional mount was excused from the very check that would have caught it — the \"LEDGERED BUT NOT MOUNTED, and DISGUISED\" failure the gate spells out for every unpinned row.\n\nThe pin is deleted (the route is observable for real now) and the pin rule is tightened: **a pinned path that any other pattern matches now fails the gate.** That probe runs **across every verb**, which is the subtlety — this class is invisible to a method-scoped check. Nothing registers `POST` on `/packages/:id`, so `resolveMountedRoute('POST', …)` reports a clean absence, while the adapter's `allowedMethodsForPath()` ignores the request method and builds the 405 from whatever else matches the path. A method-scoped version of this check was written first and **failed to fail** under mutation; that is what led to the all-verbs form.\n\n### A second, unfixed measurement for the PM (not this card)\n\nThe same gate cannot see whether the three `:id` package routes are mounted **by REST or by the dispatcher** — it compares patterns, and both owners register the same strings. So the REST registrar sitting out on a real `objectstack serve` boot (cause 1 above) is invisible to it: the ledger says these three \"shadow the dispatcher twin (registered first)\", and on showcase they currently do not. Behaviour differs (the REST list route merges registry + database packages; the dispatcher's does not). Left alone here — changing which owner serves `GET /packages` on showcase is beyond this card's scope and is its own risk.\n\n## Tests\n\nNew `packages/rest/src/package-publish-mount.test.ts` (10 cases) + two live-router/live-wire pins in the parity gate. Every new test was mutation-proved:\n\n| # | Mutation | Test that went red |\n|---|---|---|\n| M1 | publish back to service-gated (`: []`) | 8 cases across both rest files |\n| M2 | 404 → 503 / `SERVICE_UNAVAILABLE` | `404s with a message about THIS surface…` |\n| M3 | message names a package id, not the surface | `404s with a message about THIS surface…` |\n| M4 | mount the gated three unconditionally too | 5 cases (incl. `keeps its hands off the three dispatcher twins`) |\n| M5 | resolve the service eagerly at mount | `runs the real handler when the service arrives AFTER the mount decision` |\n| M6 | 404 emitted before the anonymous-deny gate | `refuses an anonymous caller before disclosing whether the surface exists here` |\n| M7 | revert the mount **and** re-add the pin (rebuilt dist) | `no pinned path is matched by any OTHER pattern, under any verb` **and** `POST /packages/publish is owned by the publish route…` |\n\n## Verification\n\n- `pnpm lint` ✅ · `pnpm typecheck` ✅ (126/126)\n- `@objectstack/rest` full suite ✅ 1415 passed\n- `route-ledger-live-mount-parity.dogfood.test.ts` (the new parity gate) ✅ 8 passed\n- `pnpm check:route-envelope` ✅ · client ledger-coverage / url-conformance / response-schema ✅\n\nChangeset: `.changeset/packages-publish-mount-or-404.md`. No `content/docs/releases/**` edits. `rest-server.ts` untouched (#7566 owns `/meta/app` in this wave).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01Wpp7qrGdj3e8vdX5LmkmM5\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01Wpp7qrGdj3e8vdX5LmkmM5)_"
+}

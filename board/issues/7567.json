@@ -1,0 +1,34 @@
+{
+  "number": 7567,
+  "kind": "issue",
+  "title": "Doc nit: `skill.zod.ts`'s docblock still says an authored `permissions` key is \"silently stripped\" — `SkillSchema` now rejects it outright",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-help"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T05:27:30Z",
+  "updated_at": "2026-08-11T08:50:51Z",
+  "closed_at": "2026-08-11T08:50:51Z",
+  "closed_by": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7567",
+  "body": "## Symptom\n\nThe prose and the behaviour disagree, and the **prose is the wrong one**.\n\n`packages/spec/src/ai/skill.zod.ts` carries a `NOTE` paragraph in its docblock:\n\n> NOTE — there is deliberately NO per-skill `permissions` field. Access to AI capability is gated at the AGENT level (`agent.access` / `agent.permissions`, both enforced at the chat route), and each tool enforces its own authz when invoked. A `permissions` key authored on a skill is unknown to this schema **and silently stripped at parse time** — it grants and restricts nothing (ADR-0049: no unenforced security-shaped fields). Do not author one.\n\nBut `SkillSchema` no longer strips it — it **refuses** it, with a located message keyed on `permissions` in the same file:\n\n> `permissions` is not a skill key — skill invocation was never permission-gated, so this was stripped in silence and the author believed they had a gate. Gate at the AGENT instead (`access` / `permissions` on the agent, enforced since #1884), or on the underlying tools' actions.\n\nThe behaviour is strictly **safer** than the docblock claims (an author who writes `permissions` is now told, instead of quietly believing they have a gate — the exact hazard the refusal message describes). Only the docblock needs to change: it should say the key is rejected, and point at the refusal message, so nobody reads \"silently stripped\" and concludes the authoring surface is still lax.\n\nNote the refusal message's own \"this was stripped in silence\" is fine as written — it narrates the historical reason for the refusal, not current behaviour. The `NOTE` paragraph is the one that states the stale present tense.\n\nStill present on `origin/main` as of 2026-08-11.\n\n## Root cause\n\nDocumentation drift: the `permissions` key was moved onto the strict unknown-key refusal list without the surrounding docblock being updated in the same pass. Not a behaviour defect — no code change is required, only the prose.\n\n## Reproduction\n\n1. Read the docblock paragraph beginning \"NOTE — there is deliberately NO per-skill `permissions` field\" in `packages/spec/src/ai/skill.zod.ts`.\n2. Read the `permissions:` entry in the unknown-key refusal messages further down the same file.\n3. Parse a skill authored with a `permissions` key: it is rejected with that message, not accepted-and-stripped as the docblock states.\n\n## Source\n\nExtracted from the QA run objectstack-ai/objectstack#7463 (framework a86db175)."
+}

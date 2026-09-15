@@ -1,0 +1,35 @@
+{
+  "number": 7677,
+  "kind": "issue",
+  "title": "suggested-binding-loop (a): the isDefault audience-binding suggestion is never surfaced on stock (auto-bound at boot, then skipped)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-help"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T10:13:43Z",
+  "updated_at": "2026-08-11T12:05:58Z",
+  "closed_at": "2026-08-11T12:05:58Z",
+  "closed_by": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7677",
+  "body": "## Symptom\n`GET /api/v1/security/suggested-bindings` → 200 `{suggestions:[], synced:{created:0}}` and the table is empty on stock, though the permission set and its `everyone` binding both exist.\n\nDiscriminating step: delete that binding row and re-list → `synced {created:1}` and a PENDING row appears — so the declaration **is** collected; it is just never surfaced on stock.\n\n## Root cause\nLocated by the run. `packages/plugins/plugin-security/src/suggested-audience-bindings.ts` `syncAudienceBindingSuggestions` does `if (bound) continue` when no row exists yet (~L224), and the \"confirmed (observed)\" transition only fires for a row **already** in status `pending`. But the security plugin auto-binds the app's `isDefault` set to `everyone` **at boot**, before any list call, so stock always takes the `continue`. This contradicts the module's own docblock. Confirmed present on `origin/main` (`if (bound) continue` still at suggested-audience-bindings.ts ~L224).\n\n## Reproduction\n1. Stock boot with an `isDefault` permission set that auto-binds to `everyone`.\n2. `GET /api/v1/security/suggested-bindings` → empty, `synced.created:0`.\n3. Delete the `everyone` binding row and re-list → a PENDING suggestion appears, `synced.created:1`.\n\n## Suggested fix\nSurface a PENDING suggestion for a declared `isDefault` binding even when the boot auto-bind has already satisfied it (or record it before the auto-bind), so the suggestion table reflects the declaration on stock rather than only after an unbind.\n\n## Source\nExtracted from the QA run objectstack-ai/objectstack#7637 (framework 92f26f75, console 09987b680)."
+}

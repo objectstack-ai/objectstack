@@ -1,0 +1,35 @@
+{
+  "number": 7542,
+  "kind": "issue",
+  "title": "Showcase flow comments overstate behaviour: `TaskCompletedRestPingFlow` / `ShowcaseDeclarativeConnectorPingFlow` claim the connector response is captured on the run, but neither declares an `isOutput` variable",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-help"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T05:02:26Z",
+  "updated_at": "2026-08-11T09:54:55Z",
+  "closed_at": "2026-08-11T09:54:55Z",
+  "closed_by": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7542",
+  "body": "## Symptom\n\nThe source comments on `TaskCompletedRestPingFlow` and `ShowcaseDeclarativeConnectorPingFlow` claim that *\"the call and its `{status:'ok'}` response are captured on the flow run\"*.\n\nThey are not. Both flows dispatch correctly, but **`run.output` is empty** — neither flow declares an `isOutput` variable, so nothing from the connector call is ever surfaced on the run.\n\nThe comment is the damaging part. A reader — human or agent — takes it as a statement of platform behaviour and concludes that connector responses are captured automatically. When `run.output` then comes back empty, the natural reading is \"the engine dropped the response\", and the next step is to go hunting in the connector dispatch path for a bug that does not exist. The engine is fine; the fixture simply never asked for the value. A comment that describes behaviour the code does not implement is worse than no comment, because it redirects debugging away from the real cause.\n\nThis is an **authoring gap, not an engine one**, and the sibling fixture proves it: the MCP connector flow **does** declare an `isOutput` variable and its run output is captured correctly (`upper=OBJECTSTACK`). Same engine, same dispatch path, different fixture — one asks for the output, two do not.\n\n## Root cause\n\n`TaskCompletedRestPingFlow` and `ShowcaseDeclarativeConnectorPingFlow` declare no `isOutput` variable. `run.output` is therefore legitimately empty, and the source comments describe an outcome the flows do not arrange for.\n\n**Fix — either direction, but do both halves of whichever you pick:**\n\n1. **Add the `isOutput` variable** to both flows, matching what the MCP connector flow already does. This makes the comments true and makes the response genuinely inspectable on the run. Preferred: it is what the fixtures were evidently meant to demonstrate.\n2. **Or correct the comments** to say the response is not captured — and in that case also fix the **checklist clause** that asserts capture, since it is written against the comment's claim rather than the code's behaviour. Correcting the comment while leaving the clause asserting capture just relocates the same contradiction.\n\n## Reproduction\n\n1. Boot the showcase on an isolated file DB and port. (Note the connectors' hard-wired `baseUrl` will need working around on a non-3000 port — see the companion finding on `StatusApi`/`StatusOpenApi`.)\n2. Trigger `TaskCompletedRestPingFlow`; repeat for `ShowcaseDeclarativeConnectorPingFlow`.\n3. Read the resulting run &rarr; dispatch succeeded, but `run.output` is **empty**.\n4. Trigger the MCP connector flow for contrast &rarr; `run.output` carries `upper=OBJECTSTACK`.\n5. Compare the three flow definitions: only the MCP one declares an `isOutput` variable.\n\nRe-check the fixtures:\n\n```\nrg -rn \"TaskCompletedRestPingFlow|ShowcaseDeclarativeConnectorPingFlow\" examples\nrg -rn \"isOutput\" examples\n```\n\n## Source\n\nExtracted from the QA run objectstack-ai/objectstack#7516 (framework a86db175). Listed there as item 3 under \"Fixture / authoring issues to fix\"; it is what held `connector-dispatch-matrix` to PARTIAL."
+}

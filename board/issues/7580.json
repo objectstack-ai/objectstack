@@ -1,0 +1,34 @@
+{
+  "number": 7580,
+  "kind": "issue",
+  "title": "driver-mongodb: native dateGranularity lowering ($dateTrunc → engine bucket labels) + publish supports.queryDateGranularity",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "huangyiirene"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T06:02:13Z",
+  "updated_at": "2026-08-11T07:29:42Z",
+  "closed_at": "2026-08-11T07:29:42Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7580",
+  "body": "## Provenance (maintainer direct-route, 2026-08-11)\n\nFiled and queued on the maintainer's instruction in the drivers PM session chat (session `session_013ZU38vNzLXCscgdFZjKd53`), verbatim:\n\n> mongodb dateGranularity 立卡排进队列\n\nRouting label applied under the 2026-08-10 direct-route standing authorization (maintainer-commanded cards route directly; natural-inflow triage remains the triage seat's). driver-mongodb is unfrozen per #5499 comment `5249019855`.\n\n## Background — what PR #7550 measured and deliberately did not do\n\nPR #7550 (`Fixes #6850` / `Part of #6814`) gave `driver-mongodb` a real structured-`GroupByNode` lowering, and chose to **refuse** a `dateGranularity`-bearing node (`NOT_IMPLEMENTED` / 501, ADR-0112 envelope) rather than implement or silently drop it. Its PR body records the measurement that sized the native lowering as a card of its own — this card.\n\n## The standard already exists — this card joins it, it does not invent it\n\n- **Capability record**: `supports.queryDateGranularity` is a per-granularity record (`{ day, week, month, quarter, year }`). `packages/objectql/src/engine.ts` (~`:9295-9301`, drifts — locate by content) pushes a bucketed groupBy down only for granularities the driver advertises; otherwise the engine buckets **in memory** (`in-memory-aggregation.ts`). So today mongodb aggregations still bucket correctly — one layer up, without index/server-side benefit.\n- **Precedent + parity suites**: `driver-sql` publishes the capability and is held to `sql-driver-date-bucket.test.ts` (parity), `sql-driver-date-bucket-storage.test.ts` (storage forms), `sql-driver-aggregate-datetime-window.test.ts` / `-temporal-output.test.ts`. The engine's timezone semantics are pinned in `engine-aggregate-timezone.test.ts`.\n- **Labels are the contract**: buckets must come back as the ENGINE's label spellings (e.g. `2026-01`, quarter and ISO-week forms) — byte-parity with what the in-memory fallback emits, or the two paths answer the same query differently depending on a capability bit.\n\n## Scope\n\n1. Lower a `dateGranularity`-bearing groupBy node natively (`$dateTrunc` or equivalent expression), emitting the engine's bucket labels.\n2. Storage forms per ADR-0053: mongodb stores `datetime` as BSON `Date` but `date`/`time` as text — measure which granularity × field-kind cells a native lowering can honestly serve, and only advertise those.\n3. Publish `supports.queryDateGranularity` for exactly the cells implemented — **declared = enforced**; an advertised granularity the lowering mishandles is worse than the current honest refusal.\n4. Keep the #7550 refusal as local defense for direct callers with unadvertised granularities (the engine will not push those down once the capability record is honest).\n5. Parity coverage in the shape of the driver-sql suites, server-free per #5517 (the in-process evaluator from `mongodb-aggregation-translation.test.ts` — note its stated bound: it holds the LOWERING to the table; live-mongod agreement stays out of reach in this fleet, and any modelled `$dateTrunc` semantics must carry the same written bound).\n\n## Acceptance\n\n- For every advertised granularity × field-kind cell: pushdown result labels are byte-identical to the engine's in-memory fallback on the same rows (parity cases, both spellings of the node).\n- Unadvertised cells keep refusing loudly at the builder (existing tests stay green or are consciously updated).\n- Timezone semantics match `engine-aggregate-timezone.test.ts`'s pinned behavior — measure before implementing; if a faithful timezone treatment is not achievable server-free, narrow the advertised set and record why rather than approximating.\n\nRefs: PR #7550 (measurement + refusal), #6850 / #6814 (the cell this grew from), #5499 (unfreeze), `aggregation-conformance.ts:51` (capability note), ADR-0053 (storage forms), ADR-0112 (refusal envelope)."
+}

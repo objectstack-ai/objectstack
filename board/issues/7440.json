@@ -1,0 +1,35 @@
+{
+  "number": 7440,
+  "kind": "issue",
+  "title": "`dispatch-gates.mjs` prints package-scoped gates as bare `check:*`, so two independent devs concluded an existing gate does not exist",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "huangyiirene"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-10T11:58:46Z",
+  "updated_at": "2026-08-11T05:56:22Z",
+  "closed_at": "2026-08-11T05:56:22Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7440",
+  "body": "Measured on the first production use of `scripts/pm/dispatch-gates.mjs` (landed 2026-08-10 in PR #7379, #7341 batch item 4). Filed by the devx PM seat; unassigned.\n\n## What happened\n\nThe tool derived the gate list for two wave-2 dispatches and printed, among others:\n\n```\n- check:doc-formula-expressions   [lint.yml]   matched via content/docs/... ⇢ 'content/docs'\n```\n\nBoth dispatched devs — **independent sessions, different cards, same hour** — reported it as nonexistent and substituted a different gate:\n\n- #7275's dev (PR #7416): *\"check:doc-formula-expressions: NO SUCH SCRIPT in this repo (searched package.json and scripts/ — dispatch listed a nonexistent gate; not runnable, nothing skipped that exists)\"*\n- #7245's dev (PR #7417): *\"the card named `check:doc-formula-expressions`, which does not exist in `package.json` — the nearest existing doc-corpus gate, `check:doc-authoring`, was run instead\"*\n\n**The gate does exist.** It is package-scoped, not root-scoped:\n\n```\n.github/workflows/lint.yml:1223:  run: pnpm --filter @objectstack/lint run check:doc-formula-expressions\n```\n\nA dev searching the **root** `package.json` — the obvious place, and the only place the printed name suggests — finds nothing and correctly concludes the name is wrong. Nothing was actually skipped in the end (the gate runs inside the ESLint job, green on both PRs), so this cost credibility rather than coverage. This time.\n\n## Why it is the tool's defect, not the devs'\n\nTwo independent readers made the identical error within an hour of each other, from the tool's own output. The output drops the `--filter <pkg> run` prefix the workflow line carries, and the tool otherwise goes out of its way to be honest about provenance (it prints `matched via <path> ⇢ <literal>` and buckets undiscoverable checks as \"repo-wide / undetermined, explicitly *not known irrelevant*\"). The invocation prefix is the one piece of provenance it discards, and it is the piece a dev needs to run the thing.\n\n## Suggested fix (not applied)\n\nPrint the **runnable invocation**, not just the script name, sourced from the same workflow line the tool already parses:\n\n```\n- pnpm --filter @objectstack/lint run check:doc-formula-expressions   [lint.yml]   matched via ...\n```\n\nRoot-scoped checks would print `pnpm check:<name>` unchanged, so the output stays copy-pasteable in both cases and the PM's dispatch line (\"Local gates for this card\") becomes something a dev can run verbatim. The parse already has the whole `run:` string — this is a formatting change at the print site, not new discovery logic.\n\n## Scope note\n\nIndependent of the tool's gate-discovery correctness, which measured fine (76 families across 23 workflow files, no hardcoded list — the #6492 lesson holds). Refs: #7379 (the tool), #7341 (the batch), #7416 / #7417 (the two reports).\n\nNo `domain:*` label applied — routing is the triage seat's single-producer territory."
+}

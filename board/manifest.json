@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "repo": "objectstack-ai/objectstack",
-  "generated_at": "2026-09-15T08:33:19.099Z",
+  "generated_at": "2026-09-15T20:24:46.535Z",
   "walk_phase": "history",
   "walk": {
     "open_set": {
@@ -11,35 +11,35 @@
     },
     "delta": {
       "complete": true,
-      "cursor": "2026-09-15T08:24:29Z",
-      "since": "2026-09-15T02:30:25Z",
+      "cursor": "2026-09-15T20:05:20Z",
+      "since": "2026-09-15T08:24:29Z",
       "slice": 300
     },
     "history": {
       "complete": false,
-      "cursor": "2026-08-10T10:28:27Z"
+      "cursor": "2026-08-11T18:20:21Z"
     }
   },
-  "since": "2026-08-09T18:33:54Z",
-  "since_reason": "the open set is complete — the closed history resumes at 2026-08-09T18:33:54Z",
-  "next_since": "2026-09-15T08:24:29Z",
+  "since": "2026-08-10T10:28:27Z",
+  "since_reason": "the open set is complete — the closed history resumes at 2026-08-10T10:28:27Z",
+  "next_since": "2026-09-15T20:05:20Z",
   "resume": {
-    "since": "2026-08-10T10:28:27Z",
+    "since": "2026-08-11T18:20:21Z",
     "phase": "history",
     "stopped_by": "budget",
     "reason": "the per-run budget of 800 requests is spent"
   },
   "counts": {
     "issues_open": 523,
-    "issues_closed": 2954,
-    "pulls_open": 10,
-    "pulls_closed": 4812,
-    "records": 8299
+    "issues_closed": 3164,
+    "pulls_open": 13,
+    "pulls_closed": 4981,
+    "records": 8681
   },
   "board": {
-    "open_issues_count": 516,
-    "open_pull_requests": 10,
-    "read_at": "2026-09-15T08:30:52.646Z"
+    "open_issues_count": 519,
+    "open_pull_requests": 13,
+    "read_at": "2026-09-15T20:22:02.723Z"
   },
   "count_check": {
     "verdict": "surplus",
@@ -59,11 +59,11 @@
   "requests": 800,
   "run": {
     "numbers_read": 437,
-    "files_written": 862,
+    "files_written": 860,
     "walk_complete": false,
     "open_set_completed_here": false,
     "delta_ran": true,
     "delta_completed_here": true,
-    "delta_requests": 155
+    "delta_requests": 153
   }
 }

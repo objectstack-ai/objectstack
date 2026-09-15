@@ -1,0 +1,35 @@
+{
+  "number": 7499,
+  "kind": "pull_request",
+  "title": "fix(runtime): refuse a non-string descriptor filter instead of serving an empty automation palette (#7360)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T03:09:25Z",
+  "updated_at": "2026-08-11T03:46:37Z",
+  "closed_at": "2026-08-11T03:46:36Z",
+  "closed_by": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "merged_at": "2026-08-11T03:46:35Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/7499",
+  "body": "Fixes #7360\n\n## What was broken\n\n`GET /api/v1/automation/actions` (`?paradigm` / `?source` / `?category`) and `GET /api/v1/automation/connectors` (`?type`) compared a **raw** query value against a string field:\n\n```ts\nactions.filter((a) => Array.isArray(a?.paradigms) && a.paradigms.includes(query.paradigm))\nactions.filter((a) => a?.source === query.source)\nconnectors.filter((c) => c?.type === query.type)\n```\n\nA repeated parameter arrives as an **array** from every query parser these routes run behind, and an array is never `===` any string and never a member of `paradigms[]`. So `?source=builtin&source=plugin` — a caller widening its filter, or a UI serialising a multi-select the obvious way — answered **200 with zero descriptors**. The designer palette reads that as \"this deployment registers no actions\", which is a different sentence from \"no actions matched\", and nothing in the response tells them apart. A structured `?category[$ne]=x` failed identically.\n\nThis is #7300/#6928's family but **not** its mechanism: nothing is coerced and no value is invented — the filter is simply never satisfiable, and the emptiness is indistinguishable from a genuinely empty registry.\n\n## The fix\n\nAll four filters now go through the shared `parseStringParam` that the same file's runs branch already uses (`packages/runtime/src/query-param.ts`), so a non-string is refused in the house shape: `400` `VALIDATION_FAILED` (ADR-0112) with a `details.fields[]` entry naming the parameter and carrying ADR-0114's `invalid_type`. Four call sites, one helper, no new vocabulary. ⛔ The runs branch (#7359 / PR #7490) is untouched.\n\n## Two judgement calls\n\n**1. The parse runs ahead of each route's service-capability probe.** A malformed query is malformed whichever automation service a deployment mounts, and a 400 that appeared only where `getActionDescriptors` happens to be implemented would be a contract that varies by deployment — leaving the caller unable to tell a rejected filter from an empty registry, which is the very confusion this card is about. A *well-formed* filter against an unimplemented method still answers the declared empty-but-valid registry, unchanged.\n\n**2. Repeated parameters are refused, not read as an OR-filter.** The card left this open as a capability question. Measured, nothing needs it:\n\n| Caller | What it sends |\n| --- | --- |\n| Typed SDK `automation.listActions` (`packages/client/src/index.ts:3043`) | `URLSearchParams.set` per key — structurally cannot repeat a parameter |\n| Typed SDK `automation.listConnectors` (`:3058`) | a single `?type=` |\n| objectui designer palette (`packages/app-shell/src/views/metadata-admin/previews/useFlowNodePalette.ts:93`) | `/automation/actions` with **no query string at all**; narrows by `paradigms.includes('flow')` **client-side** (`:61`) |\n| objectui connector pickers (`inspectors/FlowReferenceField.tsx:378,415`) | `/automation/connectors` unfiltered |\n| Wire contract (`plugin-rest-api.zod.ts`) | prose only, no request schema, no multi-value language |\n\nNo caller anywhere sends a repeated descriptor filter — and the one place a multi-paradigm filter would be natural, the palette, does not use the server filter at all. Accepting one would be inventing a wire capability nothing asks for, on the route where a wrong empty answer is hardest to notice. Widening a refusal later is a compatible change; refusing first is the safe floor. No follow-up card filed, since the evidence points away from the need rather than merely being absent.\n\n## What does not change\n\nEvery **string** still filters exactly as today, including one that names no live paradigm, source, category or type — \"no actions of that source\" is a legitimate empty answer and stays one. Absent and empty spellings still mean \"no filter\": the falsy gate these filters always had is preserved verbatim. Only a non-string is refused.\n\n## Tests\n\n`packages/runtime/src/domains/automation-descriptor-query-validation.test.ts`, 37 cases, alongside the runs branch's own file. Every refusal asserts the **envelope** (code *and* status), never a bare `toThrow()`: unfixed, these inputs do not throw at all — they answer 200 with an empty list — so a throw-only assertion would pin the absence of a throw rather than the defect.\n\nEach new assertion proven fail-able by mutation (mutate → red → revert):\n\n| # | Mutation | Red |\n| --- | --- | --- |\n| M1 | `paradigm` back to the raw value | 4 — the three `?paradigm=` refusals + the capped-message pin |\n| M2 | `source` back to raw | 5 — the three `?source=` refusals, the `?source=builtin&source=plugin` pin, the deployment-independence pin |\n| M3 | `category` back to raw | 4 — the three `?category=` refusals + \"refuses before the registry is read\" |\n| M4 | `type` back to raw | 4 — the three `?type=` refusals + `/connectors` deployment-independence |\n| M5 | parse moved back **inside** the capability branch | 1 — the `/actions` deployment-independence pin, alone |\n| M6 | falsy gate → `!== undefined` | 2 — both empty-spelling preservation rows |\n| M7 | `parseStringParam` → closed-set `parseEnumParam` on `?source` | 2 — both \"a string naming nothing live is still a 200 empty list\" rows |\n| M8 | `?source=` filter inverted (`!==`) | 3 — its preservation rows |\n| M9 | parse hoisted above the #5519 anonymous baseline | 1 — the 401-before-parse ordering pin |\n\n## Checks\n\n- `pnpm lint` — clean (repo-wide)\n- `tsc --noEmit` (`@objectstack/runtime`) — clean\n- `@objectstack/runtime` — **1976/1976** pass (122 files)\n- `@objectstack/client` descriptor tests — 6/6 pass\n- Changeset: `.changeset/automation-descriptor-query-refusal.md` (`@objectstack/runtime` patch). No `content/docs/releases/**` edits.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01S1QoEPoisVygn59vuMq948)_"
+}

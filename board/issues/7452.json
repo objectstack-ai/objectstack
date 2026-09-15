@@ -1,0 +1,35 @@
+{
+  "number": 7452,
+  "kind": "pull_request",
+  "title": "fix(objectql): expand an aggregated `views` container from the nested-plugin seam too (#7163)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-10T12:48:02Z",
+  "updated_at": "2026-08-10T13:46:30Z",
+  "closed_at": "2026-08-10T13:46:28Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-10T13:46:28Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/7452",
+  "body": "Closes #7163. Follow-on to #7049.\n\n## The fact, re-measured on `ba63f0e`\n\n`packages/objectql/src/engine.ts` reaches the registration seam from two entry points. Since #7049 both enumerate one `METADATA_ARRAY_KEYS`, so `views` is seen by both — but only the **manifest** seam expanded an aggregated view container (`expandViewContainer` imported at `engine.ts:136`, called at exactly one site, `:3458`). The nested-plugin loop had no equivalent. One container through each seam:\n\n```\nvia manifest      → ['account', 'account.all_accounts', 'account.form']\nvia nested plugin → ['account']\n```\n\n\"Object has-many View\" (ADR-0017 §2, §3.2) makes the loader **dual-read**: the aggregated `defineView` container is registered under the bare `<object>` key for back-compatible reads **and** expanded into independent `ViewItem`s under `<object>.<viewKey>`. Only the expanded items carry `viewKind`, and `getViewsByObject()` filters on exactly that — so a container that is registered but never expanded is invisible to it, to `GET /meta/view?object=`, and to the view switcher and Studio's package attribution above it. No refusal and no diagnostic.\n\n## Which seam is right — measured, not assumed\n\nThe card deliberately did not pick. Both readings were live: the nested seam gains the expansion, or the manifest seam's expansion is the anomaly. Four measurements, all on this base:\n\n1. **ADR-0017 scopes the dual-read to \"the loader\" at load time**, not to one entry point; §3.2 spells out that it registers **both** the container and every expanded item.\n2. **The other loader agrees with the manifest seam.** `MetadataPlugin`'s artifact/HMR path expands too (`packages/metadata/src/plugin.ts:643-655`). That is why the implementation was pushed down into `@objectstack/spec` in the first place — `ui/view.zod.ts` states the reason inline: *\"so the two loaders cannot drift.\"* Removing the expansion would put `engine.ts` alone against both the ADR and the sibling loader.\n3. **Every authored stack in the tree ships `views` at manifest top level** — ~51 files, including `examples/app-crm`, `examples/app-todo`, `examples/app-showcase`, `packages/qa/downstream-contract`. Removing the manifest seam's expansion takes the view switcher away from all of them.\n4. **No in-tree package ships `views` through a nested plugin** — swept `examples/`, `apps/`, `packages/` and every fixture: zero. Every in-tree `plugins:` array holds runtime `Plugin` instances or package-name strings, none carrying metadata collections.\n\nSo the divergence is **not** load-bearing in both directions: one direction breaks every shipping consumer, the other breaks nobody in-tree. The nested seam catches up — the same direction #7049 took for the enumeration.\n\n## The change\n\nThe copies are gone rather than reconciled: both seams now run one `registerMetadataCollections(source, ownerId, sourceLabel)`.\n\n#7049 hoisted the shared `METADATA_ARRAY_KEYS` and measured the two loop bodies on the way past, recording that they still differed in a per-key `debug` line, this view expansion, and a warn-on-nameless-item. Sharing the list made *\"which collections does a seam see?\"* unanswerable-differently; it left *\"what does a seam **do** with a collection both see?\"* answered in two places. Both remaining differences had the same structure — a body copied, then improved on one side only — so the body is shared too, for the reason #7049 gave for the list: a divergence that cannot be written down cannot be re-introduced by the next hand patch. What legally varies is passed in (which object is read, which package id is stamped, the `debug` label).\n\n**Behaviour deltas for a nested plugin**, both from body-sharing: an aggregated `views` container now expands, and a nameless item now emits the `warn` the manifest seam always emitted instead of being silently skipped. Nothing is removed and no manifest-seam behaviour changes.\n\n## Pins\n\nNew `packages/objectql/src/engine-nested-plugin-view-expansion.test.ts`:\n\n- **parity** — an aggregated container registers identically via manifest and via nested plugin (stated as seam-vs-seam equality, so a change to the expansion rules must move both or fail);\n- **expanded identities** — name, `viewKind`, `object`, `scope`, `isDefault`, `order`, `config`, and ADR-0010 provenance stamped to the **parent** package;\n- **ADR-0017 dual-read** — the bare `<object>` container survives alongside the expansion, both seams;\n- **control** — a non-aggregated `ViewItem` still registers exactly once through both seams, no expansion, no new keys; a container-free manifest still registers no views.\n\n`engine-nested-plugin-collections.test.ts`: the `views` exclusion row — the only entry ever excluded for a *behaviour* difference rather than a retired kind — is removed with the divergence, and `views` rejoins the cross-seam property test.\n\n**Reverse-verified**: with `engine.ts` reverted to `origin/main` and the new tests kept, 8 pins fail with exactly the reported symptom (`['account']` alone); the two control pins still pass, which is what makes them controls.\n\n## Gates run locally (all `success`)\n\n| gate | result |\n|---|---|\n| `packages/objectql` full vitest | 176 files, **3127 passed** |\n| `check:stack-collection-maps` | OK — 7 enumerations reconciled |\n| `check:adr-anchors` | OK |\n| `check:nul-bytes` | OK — 6830 files |\n| `check:engine-double-contract` | OK — 134 pinned, 2 exempt |\n| `check:durability-log-level` | OK — 24 seams, all loud |\n| `tsc --noEmit` (objectql) | clean |\n\n`check-engine-split-ratio.mjs` is report-only by default (ADR-0076 OQ#5) — no threshold to trip.\n\n## Changeset\n\n`patch`, `@objectstack/objectql`. Direct precedent: #7049's own changeset (`nested-plugin-collection-registration.md`) shipped the same class — *\"this changes boot behaviour for packages that already ship today\"*, a nested plugin beginning to register what it silently dropped — as `patch`. This is additive registration on one shape (`isAggregatedViewContainer`), removes nothing, and changes no public type. **No `packages/spec` touch**, so no #6017 declaration; not `major`, so no ADR-0087 trio.\n\nRefs: #7163, #7049, #6242, #5870, ADR-0017, ADR-0010.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01BPVc5WY75PkeXoA5NFiEEk)_"
+}

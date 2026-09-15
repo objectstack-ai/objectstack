@@ -1,0 +1,35 @@
+{
+  "number": 7591,
+  "kind": "pull_request",
+  "title": "fix(objectql,runtime): stop platform stamps failing spec validation — /meta/diagnostics reads clean again (#7561)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T06:38:27Z",
+  "updated_at": "2026-08-11T09:48:38Z",
+  "closed_at": "2026-08-11T09:48:36Z",
+  "closed_by": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "merged_at": "2026-08-11T09:48:36Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/7591",
+  "body": "Fixes #7561\n\n## Premise verification (against `origin/main` @ `97b6658`, not a working tree)\n\nThe card was filed against framework `a86db175`; every quoted fact was re-measured on current `origin/main`. **Premise holds, both halves**, reproduced from live code:\n\n```\nfields.__search: Unrecognized key(s) on this field: `index`.   → code: unrecognized_keys\nconfig: Invalid input: expected record, received undefined     → code: invalid_type\n```\n\n- **`index: true` stamp** — confirmed at `packages/objectql/src/search-companion.ts:155`, and it is the **only** field-level `index`/`indexed` writer left in `packages/`. The docblock at `:132` claimed *\"It IS `index`ed — every search touches it\"*.\n- **The PM's falsification hypothesis is confirmed: that claim was false.** Field-level `index` was removed from `FieldSchema` in the 16.x line (#2377, ADR-0049) — the comment at `packages/spec/src/data/field.zod.ts:~921` states the driver builds indexes from `indexes[]` and a field-level `index: true` created **no** index. No driver reads a field-level `index` today. Dropping the key is behaviour-neutral for indexing.\n- **The `config` half is now located** (it was not in the card): `DefaultDatasourcePlugin.registerVisibility` (`packages/runtime/src/default-datasource-plugin.ts:250`) publishes the `default` datasource row as `{ name, label, driver, origin }`, while `DatasourceSchema.config` (`packages/spec/src/data/datasource.zod.ts:406`) is a **required** `z.record(...)`. `origin` *is* declared (`:522`), so `config` is the only missing key.\n\n## What changed\n\n**1. `provisionSearchCompanion` no longer stamps `index: true`** (+ the false docblock claim replaced with the measured account). Producer-side fix, exactly #6810's shape.\n\n**2. No `indexes[]` entry replaces it — a measured divergence from #6810, not an omission.** #6810's predicate is `organization_id = ?`, equality, which a B-tree serves. This column's *only* reader is `buildSearchFilter` (`search-filter.ts:122`), which emits `{ __search: { $contains: term } }` — a leading-wildcard `LIKE '%term%'` no B-tree can answer. `IndexSchema` (`object.zod.ts:372`) spells only `name` / `fields` / `unique` — no trigram/GIN method — so the sanctioned spelling *cannot* express an index this column could use. Declaring one would buy write amplification on every row for a read path that cannot use it. Recorded in the docblock; a real substring index needs an `IndexSchema` that can express one, which is a separate change.\n\n**3. `DefaultDatasourcePlugin` stamps `config: {}`** — deliberately empty, **not** `this.def.config`. That registration is a deliberately non-secret projection: the host's real config carries connection credentials (`user`/`password`), and `DatasourceSchema` itself refuses an inlined `password`, so publishing it would put credentials on `GET /api/v1/meta/datasources` for every metadata reader. `{}` carries exactly what the row always carried; only the spelling changes.\n\n**⛔ No `packages/spec` touch.** Neither half is fixed by widening `FieldSchema` (that would re-open a key ADR-0049 retired) or by relaxing `DatasourceSchema.config` (a real datasource genuinely needs its config; relaxing trades one honest verdict for a permanently weaker one). The #6017 declare-and-proceed convention was therefore not triggered.\n\n## The durable ask\n\n| Ask | Delivered |\n|---|---|\n| (a) baseline → 0 INVALID | Both error shapes eliminated at their producers |\n| (b) clean-baseline pin on the diagnostics surface | `diagnostics-clean-baseline.test.ts` — builds a registry the way the platform builds one (every stamper live, both tenancy modes), asserts the sweep finds **nothing**, and names **both** of the card's error shapes explicitly so a reintroduction fails on the reported shape, not a generic count |\n| (c) class fix — every stamper through `FieldSchema` | `stamped-system-fields-spec-conformance.test.ts` — walks every field `applySystemFields` + `provisionSearchCompanion` stamp, across every ownership / `managedBy` / `systemFields` / tenancy branch, through `FieldSchema`; plus an explicit \"no `index`/`indexed` on any stamped field\" assertion |\n\nBoth pins **guard the guard** (they fail if the matrix stamps nothing, or if `__search` stops being provisioned) so neither can pass vacuously.\n\n### Reverse-verified\n\nBoth pins were re-run against the *unfixed* producers and confirmed red with the card's exact shapes — a pin that cannot fail is worth nothing:\n\n- class pin: **24/24 failed**, `__search: Unrecognized key(s) on this field: \\`index\\``\n- baseline pin: **4 failed** — `object/showcase_{account,contact,order,note} + sys_thing → fields.__search: unrecognized_keys` across both tenancy modes, and `config: invalid_type`\n\n`search-companion.test.ts` asserted `expect(col.index).toBe(true)` — it pinned the **defect**, not the contract. It now pins the key's absence, with a comment saying why.\n\n## Gates\n\n| Gate | Status |\n|---|---|\n| `pnpm check:durability-log-level` | ✅ pass |\n| `pnpm check:engine-double-contract` | ✅ pass (148 pinned, 133 debt, 2 exempt) |\n| `pnpm check:error-code-casing` | ✅ pass (3587 files) |\n| `node scripts/check-engine-split-ratio.mjs` | ✅ pass |\n| `pnpm check:nul-bytes` | ✅ pass (7017 files) |\n| `pnpm --filter @objectstack/spec check:generated` | n/a — no spec touch |\n| `@objectstack/objectql` typecheck | ✅ clean |\n| `@objectstack/runtime` typecheck | ✅ clean |\n| build closure (`objectql`, `runtime`, `metadata-protocol` + deps) | ✅ success |\n\n**Suites:** full `@objectstack/objectql` — **180 files / 3183 tests pass**; `@objectstack/runtime` (`default-datasource-plugin`, `standalone-stack`, `app-plugin`) — 57 pass; `plugin-pinyin-search` — 14 pass.\n\nChangeset included (`patch` ×2) — user-visible: diagnostics endpoint verdicts.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_019MfMR4enbnPgoH6efeKmDJ)_"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 7275,
+  "kind": "issue",
+  "title": "No producer files the final console bump card at the release-cut moment — the #6162 chore is keyed to a settled window, and the card it does file never reaches the release board",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-help"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-10T04:30:03Z",
+  "updated_at": "2026-08-10T12:25:47Z",
+  "closed_at": "2026-08-10T12:25:47Z",
+  "closed_by": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7275",
+  "body": "Filed by the dev agent implementing #6906 deliverable 2 (\"console bump linkage — **verify, do not assume**\"). Coverage of the release-cut moment could **not** be proven, and #6906's own body routes that outcome here rather than into itself:\n\n> Doc-only + verification scope; if item 2 finds a real gap, that gap gets its own card rather than growing this one.\n\nBacklinks: #6906 (the card that asked) · #6162 (the mechanism under test) · #5810 (steward anchor / live Routine prompt) · #6159 (the hand-filed instance that motivated #6162) · #3340 / #6170 (the technical gates) · #7268 (live specimen, leg 2).\n\n## The question\n\nDoes the queue steward's window-close chore guarantee that **at release-cut time** a final console bump card exists **on the release board**, or is explicitly waived?\n\n## Verdict: no. Two independent legs, either one sufficient on its own.\n\n### The mechanism's trigger, verbatim from where it is defined\n\n`.claude/skills/pm-dispatch/SKILL.md`, section 「入队与落地 —— ACCEPT 之后才是最容易丢单的一段」 → B → 「Pin 链观测的机械产出 —— 窗口收口即立单,不等发版红灯(维护者 2026-08-07 拍板,#6162)」:\n\n> 自本条起,管家的 pin 链观测每轮附带机械产出,两个触发各产一张杂事单(⛔ 仍**只立单,不执行 bump** —— 授权面一字不变):\n>\n> - **objectui → objectstack(发版前侧)**:`.objectui-sha` 落后 objectui main **且** objectui 合并队列已空(窗口收口判据)⇒ 在 objectstack 立/刷新 console bump 单(`pm:queue`;模板照 #6159:滞后读数、releasing changeset 清单、`bump-objectui.sh` 口径、#6099 破坏性标注复核项、与 Version Packages PR 的顺序约束)。\n\n### Leg 1 — the trigger is a *window-settled* predicate; it never mentions a cut\n\nBoth conjuncts describe **objectui's** state, not the release's:\n\n1. `.objectui-sha` lags objectui `main`, **and**\n2. objectui's merge queue is **empty**.\n\nConjunct 2 is a filter, and it is false exactly when a cut is most likely to be inconvenient: a cut taken while any objectui PR sits in the queue yields **no card at all**, however far the pin lags. The chore is by its own name (窗口收口即立单) a window-close producer fired on the steward's hourly cadence (「管家的 pin 链观测**每轮**附带机械产出」); nothing on the release path re-evaluates the predicate, and the SKILL's release protocol (「发版时刻 = 清板,不是重扫」) enumerates three dispositions for board items and says nothing about the bump card.\n\n#6162's own problem statement says this in English, and is the strongest available evidence *against* cut coverage — the mechanism's author wrote the residual down:\n\n> The required freshness gate (`check:objectui-pin-fresh` on the Version Packages PR, #3340) prevents **loss** — you cannot cut a release with a stale pin — but not **lateness**: the red light turns on at cut time, and the bump chore still has to be filed and driven by hand at that moment. Tonight's instance #6159 was filed manually only because the maintainer happened to ask in chat\n\nand its Boundaries section positions the duty one level below the cut:\n\n> **Rule 3 stays the first producer**: the accepting seat filing at accept time is still correct; this duty is the window-level backstop\n\nDesigned to make the chore arrive *earlier* than the cut. Not to guarantee it exists *at* the cut.\n\n### Leg 2 — even when it fires, the card it files is not on the board\n\nThe chore's own text pins the label: `pm:queue`. The release inventory that release-time board-clearing consumes is `label:target:v17 is:open` (two of them since #6906 — objectstack and objectui). A `pm:queue` card carries no `target:v17` and is therefore outside both queries **by construction**, not by accident.\n\nLive specimen, measured 2026-08-10: **#7268** (\"chore: bump the console pin to pick up objectui#4071\"), filed 04:11Z, labels = `pm:queue` only. A maintainer running the release inventory this minute sees neither that card nor the pin lag it describes.\n\nCorollary — the waiver half fails too. The SKILL's only waiver form is 「明示接受带病发布(摘标签 + 一句 accepted-for-GA 评论留痕,进 release notes 的 known issues)」, which operates on a `target:v17` label the bump card never carries. So \"on the board **or** explicitly waived\" is false on both halves.\n\n### What IS guaranteed (so the gap is not overstated)\n\nThe **release record** is protected, by machinery that has nothing to do with the board:\n\n- `.github/workflows/objectui-pin-freshness.yml` runs `check:objectui-pin-fresh` **blocking** on the release lane (`HEAD_REF` = `changeset-release/main`, or `PR_TITLE` = `chore: version packages`, or `workflow_dispatch`) and advisory everywhere else;\n- `.github/workflows/release.yml` runs `pnpm check:objectui-pin-fresh` **enforcing on the publish path** (R4, #6170), with no override input on purpose.\n\nSo a stale pin cannot silently ship, and this card is **not** a release-integrity hole. What is missing is the process half #6162 named: the card, at the moment the light turns red — exactly the state #6159 was in when a maintainer had to ask in chat.\n\n## Candidate shapes (deliberately not a decision — this needs the maintainer / triage seat)\n\n- **A. Cut-moment producer.** Add a precondition to the SKILL's 「发版时刻 = 清板」 protocol: before a cut, take the pin readout once; if the pin lags, the bump card must exist and be **boarded** (`target:v17`) or waived with the standard accepted-for-GA comment. Preserves the single-producer discipline (the boarding is done by the seat that already owns `target:v17`).\n- **B. Board it at the source.** Have the steward's pre-release-side trigger stamp `target:v17` alongside `pm:queue`. Cheapest mechanically, most expensive in governance: it creates a **second** `target:v17` producer, and rule 4's whole guarantee is that there is exactly one per backlog. Needs a maintainer ruling, not an agent's judgement.\n- **C. Rule it sufficient and say so.** Decide the two technical gates cover the risk and the card is a convenience — in which case the SKILL should state that out loud, because as written the linkage reads as covered.\n\nNo `domain:*` label applied — routing is the triage seat's single-producer territory. Unassigned."
+}

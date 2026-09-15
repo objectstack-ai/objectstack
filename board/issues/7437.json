@@ -1,0 +1,32 @@
+{
+  "number": 7437,
+  "kind": "issue",
+  "title": "[finding] `packages/spec/config-schema.json` is unguarded and has drifted from the acceptance faces on its two remaining enums (6 phantom field types)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-help"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-10T11:07:26Z",
+  "updated_at": "2026-08-11T04:55:47Z",
+  "closed_at": "2026-08-11T04:52:26Z",
+  "closed_by": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7437",
+  "body": "Observation-class finding, surfaced while fixing #7286 (PR #7436) and filed unassigned so it does not evaporate with that PR. #7286 fixed **one** entry in this artifact — the object-level `ownership` enum. This card records what the same sweep found in the **rest** of the file, plus the mechanism that let all of it drift.\n\nMeasured at `origin/main` @ `07383fe` by parsing the artifact's JSON and diffing each enum against the zod enum literal it mirrors.\n\n## 1. `objects[].fields.*.type` — 6 phantom values, 21 hidden values\n\nThe artifact offers 34 field types. `FieldType` (`packages/spec/src/data/field.zod.ts:17`) accepts 49. They are not nested sets — the artifact offers values that are accepted nowhere:\n\n- **PHANTOM (artifact offers, schema rejects), 6:** `integer`, `slug`, `uuid`, `ip_address`, `geo_point`, `encrypted`\n- **MISSING (schema accepts, artifact hides), 21:** `secret`, `toggle`, `radio`, `checkboxes`, `tree`, `user`, `avatar`, `video`, `audio`, `summary`, `composite`, `repeater`, `record`, `location`, `address`, `code`, `slider`, `signature`, `qrcode`, `progress`, `tags`\n\nTwo of the phantoms look like renamed-and-never-followed spellings: `geo_point` against the accepted `location`, and `encrypted` against the accepted `secret`. This is the **same defect class as #7286** — IDE autocomplete steering an author to a value no schema accepts — just 6 values wide instead of 2.\n\nIt was deliberately **not** folded into PR #7436: aligning a 34-value list to a 49-value list is not the identical mechanical fix, because it first needs a decision (below) on whether the artifact is meant to offer a curated subset at all.\n\n## 2. `data[].mode` — 1 hidden value\n\nArtifact has `[\"upsert\",\"insert\",\"ignore\",\"replace\"]`; `SeedMode` (`packages/spec/src/data/seed.zod.ts:12`) has 5, including **`update`**. Weaker than the above — it hides a valid value rather than offering an invalid one, so no author is steered into a rejected write.\n\n## 3. The mechanism — why all three drifted\n\n- **Nothing guards it.** No pin/sync test, no gate, no consumer. The only in-repo mentions of `config-schema.json` are prose in one code comment, `CHANGELOG.md`, and a changeset. `check:generated` does not cover it. Nothing can go red when an acceptance face moves.\n- **Its provenance claim is false.** The file's own top-level `description` says it is \"Generated from ObjectStackDefinitionSchema\". It is hand-written. That false claim is plausibly *why* nobody re-derived it as the vocabularies moved — it reads as already-generated.\n- **It is not shipped.** `npm pack --dry-run --ignore-scripts` on `@objectstack/spec` packs 269 entries; zero match `config-schema`. It is absent from the package's `files` list, so no npm consumer can reach it.\n- **A correct generated route already exists.** `objectstack generate schema` (`packages/cli/src/commands/generate.ts:817-865`) builds this exact schema live from `ObjectStackDefinitionSchema` via `z.toJSONSchema` — it cannot drift by construction. It writes `objectstack.schema.json` into the user's cwd, not this path.\n\n## The decision this needs\n\nGiven that the generated route exists and the hand-written file is unshipped and unguarded, the choice is a route decision rather than a patch, and it should be made once for the whole file rather than per-enum:\n\n- **A — retire the artifact.** Delete `packages/spec/config-schema.json` and point authors at `objectstack generate schema`. Removes the drift surface permanently instead of re-synchronising it by hand every time a vocabulary moves. Cost: anything outside this repo pointing at the path by URL or relative path breaks — though it is unshipped, so no npm consumer can be relying on it.\n- **B — regenerate it in place.** Add a `gen:`/`check:` script pair that writes this path from `ObjectStackDefinitionSchema` and fails CI when it is stale, the same shape as the package's other generated baselines. Keeps the path alive and makes drift impossible. Cost: one more generated artifact plus its gate.\n- **C — hand-align the two remaining enums and correct the false provenance line.** Cheapest now; leaves the drift surface and its silence intact, so this exact card recurs on the next vocabulary move. Given ADR-0049's enforce-or-remove posture, C is the weakest of the three.\n\nNo recommendation is being forced here — this is filed as `finding`, not queued, and the three options above are the material for triage. Options A and B both structurally prevent the class; C does not.\n\nRefs: #7286 (the `ownership` entry, fixed), PR #7436, #3244 (confusion class).\n"
+}

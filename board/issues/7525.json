@@ -1,0 +1,36 @@
+{
+  "number": 7525,
+  "kind": "issue",
+  "title": "[rest] Hook refusals carrying an explicit `statusCode` are not mapped by `/api/v1/data` — they leak as HTTP 500 `INTERNAL_ERROR` with no located guidance",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-help"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T04:59:06Z",
+  "updated_at": "2026-08-11T08:56:21Z",
+  "closed_at": "2026-08-11T08:56:21Z",
+  "closed_by": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7525",
+  "body": "## Symptom\n\nA hook that refuses a write **with an explicit `statusCode`** does not get that status back out through `/api/v1/data`. The refusal is swallowed and re-emitted as an opaque **HTTP 500 `INTERNAL_ERROR`** carrying no code, no located guidance, and nothing the caller can act on — while the server log holds the real, correctly-shaped refusal.\n\nTwo independent cases, **each reproduced 2×**:\n\n**(a) Record lock.** `PATCH` a record while a `lockRecord:true` approval is pending → **500**, while the log holds `RECORD_LOCKED`. Expected: the refusal's own status with the `RECORD_LOCKED` code in the envelope.\n\n**(b) Delegation ownership.** `POST sys_approval_delegation` with `delegator_id` not equal to the authenticated caller → **500**, while the log holds `FORBIDDEN … statusCode 403`. Expected: **403 `FORBIDDEN`**.\n\nThis is cross-cutting: neither case is approvals-specific in its fix face. The approvals hooks are simply two well-behaved producers that happen to declare a status, and the mapping layer drops it on the floor — so **any** hook that refuses with a status is affected.\n\nThe console never hits case (a), because the affordance is correctly disabled when a lock is live. A direct API caller — script, integration, second-party client — gets an unactionable 500 for what is a deliberate, well-understood refusal.\n\n**Same family as the raw-`TypeError`-in-envelope defect from the api-backend run, objectstack-ai/objectstack#7463** (defect 7 there: `POST /api/v1/data/showcase_task` with a number in a declared `text` field → `400 {\"error\":\"TypeError: not a function\"}`, no `code`, no `fields[]`). Both are the `/api/v1/data` error boundary failing to turn a known producer signal into the ledgered envelope. Related but not the same: objectstack-ai/objectstack#5582 (closed) covered `mapDataError`'s explicit-status passthrough only honouring 4xx for **service**-declared statuses; the hook-refusal path evidently does not reach that passthrough at all.\n\n## Root cause\n\nNot located in this run — the QA oracle is live HTTP plus the server log. The evidence localises it to the `/api/v1/data` error boundary: the hook throws with a `statusCode` (visible in the log line), and the route's error mapping neither reads the property nor maps the code, falling through to the generic 500 arm. Both `mapDataError` and the hook-dispatch seam are the places to look.\n\n## Reproduction\n\nFramework `a86db175`, `examples/app-showcase`, admin session.\n\n**(a)**\n1. Raise an approval on a record whose approval node declares `lockRecord:true` and leave it pending.\n2. `PATCH /api/v1/data/{object}/{id}` with any field change.\n3. Observed: HTTP 500 `INTERNAL_ERROR`. The boot log carries `RECORD_LOCKED`. 2/2.\n\n**(b)**\n1. `POST /api/v1/data/sys_approval_delegation` with `delegator_id` set to a user other than the authenticated caller.\n2. Observed: HTTP 500 `INTERNAL_ERROR`. The boot log carries `FORBIDDEN … statusCode 403`. 2/2.\n\nControl: the refusal itself is correct in both cases — the write is refused, nothing is persisted, and the intended code exists. Only the wire status and envelope are wrong.\n\n## Source\n\nExtracted from the QA run objectstack-ai/objectstack#7517 (framework a86db175, console 09987b68).\n"
+}

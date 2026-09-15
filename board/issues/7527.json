@@ -1,0 +1,36 @@
+{
+  "number": 7527,
+  "kind": "issue",
+  "title": "[approvals] `assignedToMe=true` is not a supported list filter on `/api/v1/approvals/requests` — silently ignored, returns every request",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:services",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-help"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T04:59:24Z",
+  "updated_at": "2026-08-11T08:35:27Z",
+  "closed_at": "2026-08-11T08:35:27Z",
+  "closed_by": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7527",
+  "body": "## Symptom\n\n`GET /api/v1/approvals/requests?assignedToMe=true` answers **200 with every request the caller can see** — the parameter is neither honoured nor rejected, it is silently dropped. A caller who believes they are asking for \"the requests assigned to me\" gets the unfiltered list back and has no way to tell, because an unfiltered result is indistinguishable from a genuinely broad one.\n\nThe filter the console actually uses for that question is `approverId=…,role:user`. So the capability exists; `assignedToMe` is simply not a parameter the endpoint knows, and unknown parameters are dropped rather than refused.\n\n**Silent-ignore of an unknown filter is the same anti-pattern as defect 2 in the api-backend run, objectstack-ai/objectstack#7463** — \"unknown field inside `where`/`$filter` answers 200/0 instead of `400 INVALID_FIELD`\". Same failure mode, opposite direction: there an unknown key silently narrows to zero, here an unknown parameter silently widens to everything. Both are wrong in the same way — the server accepts a request it does not understand and returns a plausible-looking answer. Worth fixing as one policy (reject unknown query parameters with a located `400`) rather than one endpoint at a time.\n\n## Root cause\n\nNot located in this run. Behaviourally: the approvals request-list route reads its known parameters (`approverId`, `role`, and the rest) off the query string and ignores the remainder, with no unknown-parameter rejection at ingress. The fix face is the approvals REST route's query parsing in `packages/plugins/plugin-approvals`.\n\n## Reproduction\n\nFramework `a86db175`, `examples/app-showcase`, an authenticated approver session.\n\n1. `GET /api/v1/approvals/requests?assignedToMe=true`\n2. `GET /api/v1/approvals/requests`\n\nObserved: the two responses are the same list — the parameter changes nothing and no error is raised. Control: `GET /api/v1/approvals/requests?approverId=…&amp;role=user` does narrow correctly to the caller's assigned slate, confirming the filter capability itself works and only the parameter name is unrecognised.\n\nExpected: either honour `assignedToMe=true` as an alias for the caller's own approver slate, or refuse the unknown parameter with a located `400` naming the supported filters. Silently returning everything is the one answer that cannot be detected by the caller.\n\n## Source\n\nExtracted from the QA run objectstack-ai/objectstack#7517 (framework a86db175, console 09987b68).\n"
+}

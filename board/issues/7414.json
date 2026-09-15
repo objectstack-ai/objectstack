@@ -1,0 +1,34 @@
+{
+  "number": 7414,
+  "kind": "issue",
+  "title": "PermissionDeniedError (403) message is shown verbatim to end users too — English-only, leaks the object API name and the internal `positions` vocabulary (sibling of #7307, different package)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-10T10:27:19Z",
+  "updated_at": "2026-08-10T14:18:10Z",
+  "closed_at": "2026-08-10T14:18:10Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7414",
+  "body": "## Summary\n\nSibling of #7307, **different producer**. #7307 covers the `DELETE_RESTRICTED` (409) copy thrown by\n`cascadeDeleteRelations` in `packages/objectql`. The same problem exists for\n`PermissionDeniedError` (403) thrown by `packages/plugin-security`: its `message` is surfaced\nverbatim to end users by Console's toast, and it is English-only, embeds the machine object name,\nand exposes the internal `positions` vocabulary.\n\nFiling separately rather than commenting on #7307 because **the fix sites are different packages**\n— rewriting the objectql message does not touch this one. Happy for it to be closed as a duplicate\nif you'd rather track both under #7307.\n\n## Where\n\n`packages/plugin-security` (observed in `@objectstack/plugin-security@17.0.0-rc.5`,\n`dist/index.js`, the object-permission gate):\n\n```js\nconst allowed = this.permissionEvaluator.checkObjectPermission(\n  opCtx.operation, opCtx.object, permissionSets, { isPrivate: secMeta.isPrivate },\n);\nif (!allowed) {\n  throw new PermissionDeniedError(\n    `[Security] Access denied: operation '${opCtx.operation}' on object '${opCtx.object}' is not permitted for positions [${positions.join(\", \")}]`,\n    { operation: opCtx.operation, object: opCtx.object, positions, permissionSets: explicitPermissionSets },\n  );\n}\n```\n\nAs with #7307, the **transport is fine** — `PERMISSION_DENIED` maps to a real 403 and the message is\nnot swallowed into a generic 500. This is purely about the user-facing copy.\n\n## Actual behaviour\n\nA downstream business app (names generalised). A user deletes a parent record they are explicitly\nauthorised to delete; the engine cascades into a child object on which that user's role holds only\nread. The cascade's re-authorisation of the child fails, and this red toast appears in an otherwise\nfully localized UI:\n\n```\n[Security] Access denied: operation 'delete' on object 'app_child_object'\nis not permitted for positions [org_member, everyone]\n```\n\nThree things make it unusable as end-user copy:\n\n1. **English-only**, in a UI whose every other string is localized;\n2. **`app_child_object` is a machine name** the operator has never seen — the object they acted on\n   was the *parent*, and this names a child they may not even know exists;\n3. **`positions [org_member, everyone]`** is internal authorization vocabulary. It also reads as a\n   contradiction to the operator, who *does* have delete rights on the record they clicked.\n\nThe operator's takeaway is \"the system is broken\", not \"you lack a permission\" — and certainly not\nanything actionable.\n\n## Why it lands on users more often than it looks\n\nThis message is not confined to obviously-unauthorized actions. Because\n`cascadeDeleteRelations` re-enters `ObjectQL.delete()` for every cascade child, each child is\nre-authorised **independently**. So a parent-level permission that the app deliberately granted can\nstill produce this 403, naming a child object the user never addressed. Any app where parent and\nchild object permissions differ — the normal case for derived/snapshot/audit child tables — will\nsurface it on an ordinary delete.\n\n## Expected\n\nSame shape as #7307:\n\n- an error `code` (`PERMISSION_DENIED`) plus structured fields (`operation`, `object`, `positions`)\n  are already attached — those are the right channel for the machine detail, and they are already\n  there;\n- the `message` should be a short, localizable, business-readable sentence that does not name\n  internal objects or positions;\n- if a single generic string is preferred, \"You do not have permission to perform this action.\"\n  plus the existing structured payload is already a strict improvement over the current string.\n\n## Related\n\n- #7307 — same class, `DELETE_RESTRICTED` (409) from `packages/objectql`.\n"
+}

@@ -1,0 +1,34 @@
+{
+  "number": 6828,
+  "kind": "issue",
+  "title": "Object-form `params` on a `type:'url'` inline action is a THIRD meaning of the key (interpolation scope + `newTab`) with no authorized spelling (observation)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T23:32:23Z",
+  "updated_at": "2026-08-10T11:27:59Z",
+  "closed_at": "2026-08-10T09:18:40Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6828",
+  "body": "Found while implementing #5777 (PR #6819). Not fixed there — filing per Prime Directive #10 so the third meaning is written down before someone assumes there were only two.\n\n## What #5777 settled, and what it did not\n\n#5777 measured `params` carrying two fact-contracts on an inline action and the maintainer ruled direction A: the `type:'api'` **request payload** moves to its own key (`bodyExtra`), `params` keeps only the `ActionParam[]` definition-array meaning.\n\nWhile scoping that conversion I had to answer \"does object-form `params` mean the same thing on every inline action type?\" It does not. On `type:'url'` it is a **third** concept again, and objectui reads it in two places:\n\n- `packages/core/src/actions/ActionRunner.ts` — `interpolateTarget` takes a non-array `params` as the **`${param.X}` interpolation scope** for the target URL. This is a live, documented mechanism: `target` carries `${param.X}` / `${ctx.X}` tokens and the runner substitutes them (URL-encoded) just before navigation.\n- the same file's `executeUrl` — reads `params.newTab` as the legacy new-tab escape hatch, below `openIn` in priority.\n\nSo the same key has meant: definition array (spec), api request payload (#5777, now `bodyExtra`), and url interpolation scope / `newTab` flag (this issue).\n\n## Why the #5777 conversion deliberately does not touch it\n\n`inline-action-api-params-to-body-extra` guards on `action.type === 'api'` precisely because of this. Rewriting a `url` action's object-form `params` into `bodyExtra` would be **lossy**, not lossless — an api request-body key is not an interpolation scope — and ADR-0087 D2 requires losslessness. The guard is correctness, not conservatism, and it is pinned by a test.\n\n## Why this is observation-class\n\n- **Nothing in the reachable corpus authors it.** I grepped `origin/main` in all three repos for inline-action sites (`objectstack` examples, `cloud` service-tenant pages, `objectui`). Every `type:'url'` inline action is target-only; the only object-form `params` anywhere was the showcase's `api` submit button, which #5777 migrates.\n- **The spec already refuses it**, and always has: `params` is `z.array(ActionParamSchema)`, so a `url` action authored this way fails the props parse. After #5777 the refusal message names `bodyExtra`, which for a `url` action is the *wrong* prescription — but only for a shape nobody writes and the schema rejects.\n\nSo no user hits this today. It is a latent inconsistency in the vocabulary, not a live defect.\n\n## What a fix would have to decide\n\nNot obvious, which is the other reason this is a record rather than a patch:\n\n1. **Is the interpolation scope worth an authorable key at all?** `${param.X}` on an inline action with no param dialog can only read a statically-authored bag — which is what `target` string interpolation already expresses more directly. This may be a capability with no business pull (startup-focus axis), in which case the answer is retirement in objectui, not a new spec key.\n2. **`params.newTab` is already superseded** by the declared `openIn` key, which the runner reads with priority. That half looks like a plain deprecation.\n3. If (1) says keep, the key needs its own name and the same treatment #5777 gave the payload — a separate key, not a third arm of `params`.\n\nDeciding this needs the same three-axis analysis #5777 got, and it needs objectui's read of whether the interpolation scope has any consumer left. Filing unlabeled for triage rather than guessing.\n\nRelated: #5777 (the payload half, ruled 2026-08-06), PR #6819 (spec half), #5068 (the props gate that made any of this visible).\n"
+}

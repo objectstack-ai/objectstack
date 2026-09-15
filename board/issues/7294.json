@@ -1,0 +1,35 @@
+{
+  "number": 7294,
+  "kind": "issue",
+  "title": "[finding] `POST /meta/:type/:name/publish` is a served REST route with NO spec declaration — the #5745 \"declared = returned\" discipline covers only the save door",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "repo:objectstack"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-10T05:12:10Z",
+  "updated_at": "2026-08-10T11:27:57Z",
+  "closed_at": "2026-08-10T09:15:24Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7294",
+  "body": "Observation-class finding, measured while scoping #4717 on `origin/main` @ `ea8e8490f`. Nothing a user hits today — the route works and returns a sensible body. Filing plainly and letting triage grade it.\n\n## What was measured\n\n`publishMetaItem` is served over REST:\n\n- `packages/rest/src/rest-server.ts:5468` registers `POST {metaPath}/:type/:name/publish`, and `:5488` awaits `publishMetaItem(...)` and hands the result to `res.json()`.\n- Its success return is built at `packages/metadata-protocol/src/protocol.ts:9771-9798` and carries `success` / `version` / `seq` / `message`, plus the conditional `seedApplied` / `materializeApplied` / `projectionApplied`.\n\nBut the string `PublishMetaItem` appears **nowhere** under `packages/spec/src/`:\n\n```\ngrep -rn \"PublishMetaItem\" packages/spec/src/     # zero hits\n```\n\nAnd the endpoint itself is not in the REST declaration — `packages/spec/src/api/plugin-rest-api.zod.ts` declares 6 endpoints with `category: 'metadata'`, and none of them has `handler: 'publishMetaItem'` or a `/publish` path (`grep -n publish` on that file: zero hits).\n\n## Why this is the same class as #5745, one door over\n\n#5745 closed exactly this gap for the sibling write door, and its own prose states the discipline it was establishing. `SaveMetaItemResponseSchema` (`packages/spec/src/api/protocol.zod.ts:456`) now declares the FULL save body, the endpoint declares `responseSchema: 'SaveMetaItemResponseSchema'` (`plugin-rest-api.zod.ts:824`), and a producer-side conformance gate keeps the two in step — `packages/objectql/src/save-meta-response-conformance.test.ts`, whose header reads:\n\n> a future field added to the response, or an existing one dropped, turns this red instead of silently vanishing at parse.\n\nThe publish door has none of those three: no declaration, no `responseSchema` reference, no conformance gate. So `version` on the publish response is in the same undeclared state `version` on the save response was in before #5745 — and it is the same ADR-0008 OCC token, with the same \"echo it back as `If-Match`\" job.\n\n## Why it is observation-class rather than a defect\n\nThe route answers correctly and the body is well-formed; no caller is broken today. The cost is the one #5745 named: a public wire surface with no contract behind it, so a later field addition or removal is invisible instead of gated, and `PublishMetaItemResponse` cannot be named at the type level the way `SaveMetaItemResponse` can (`packages/client/src/index.ts:18` imports and re-exports the latter).\n\n## Adjacent, and the reason this surfaced\n\n#4717's metadata half puts the runtime authoring gate's advisory findings on the `saveMetaItem` response. The gate runs on **both** doors — `protocol.ts:9133` for a direct active save, and `protocol.ts:9869` for the draft-to-active promotion inside `publishMetaItem` (deliberately, per #4463 D1, so `?mode=draft` then `/publish` is not a bypass). So whoever designs the advisory field will face two response envelopes, one declared and conformance-gated, one not declared at all. That asymmetry is worth knowing before the shape is chosen, not after.\n\nFiled unassigned per Prime Directive #10. No `pm:queue` — observation class.\n"
+}

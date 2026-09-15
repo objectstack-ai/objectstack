@@ -1,0 +1,35 @@
+{
+  "number": 7600,
+  "kind": "pull_request",
+  "title": "fix(services,spec): reject the last two silent `pool` drops — turso whole-arm, mongodb's two timeouts by name (#7243)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T07:00:34Z",
+  "updated_at": "2026-08-11T07:50:38Z",
+  "closed_at": "2026-08-11T07:50:37Z",
+  "closed_by": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "merged_at": "2026-08-11T07:50:37Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/7600",
+  "body": "Fixes #7243\n\n`datasource.pool` was already a loud authoring error on `sqlite` / `sqlite-wasm` / `memory` (#5714 / #5931). #6214's ledger pass found the two faces the rejected set could not cover, both still dropped in silence. Measured on `origin/main` through the real factory, before any edit:\n\n```text\nturso   + pool{min:3,max:9,idleTimeoutMillis:30000}\n             the arm never references `spec.pool` at all\nmongodb + pool{max:20,idleTimeoutMillis:30000,connectionTimeoutMillis:3000}\n             driver config: { url, database: 'orders', maxPoolSize: 20 }  — and nothing else\n```\n\nThe mongodb one is the harder failure: it is **half**-effective. `max` took effect, so the author's evidence that their pool config worked was real, and half of it was wrong.\n\n## The ruling, executed as written\n\nMaintainer ruling of 2026-08-11 (quoted verbatim on the card, both halves):\n\n> (1) **`turso` joins `POOL_UNSUPPORTED_DRIVER_IDS` whole-arm** — no url-mode forking. Local mode is literally the engine the rejection set exists for; remote mode has no pool either; the fork buys complexity and serves no measured consumer. (2) **mongodb's two unread timeout keys are REJECTED loudly, not wired.** Wiring would be pull-less behavior-surface expansion; rejection matches the #5714/#5931 family, keeps declared=enforced, and tells an author (human or AI) immediately instead of silently dropping their config.\n\n**Half one — `turso`.** Joins the set whole-arm with its own explanation rather than SQLite's borrowed one: `TursoDriverConfig` has no `min` / `max`, a `file:` / `:memory:` url runs the same better-sqlite3 engine the set already rejects for, and a `libsql://` url is a remote request transport with no persistent connections, capped by `config.concurrency`. Both modes are named in the message, because an author on the remote transport told only about `:memory:` would be reading about somebody else's datasource.\n\n**Half two — mongodb's two timeouts.** A new shape for this module: a rejection scoped to individual **keys** rather than the whole block, because `min` / `max` on that arm are honoured and must keep working. `POOL_UNREAD_KEYS_BY_DRIVER` is a data table rather than a per-arm `if`, so the next arm that half-reads the block is one line and inherits every door. Both gates route through the existing `unsupportedPoolIssue`, so all three doors — the Setup wizard's create/update, the boot-time auto-connect pre-pass, and the driver factory's last door — get this with no call-site change.\n\nMessage discipline follows the family: name the datasource, name the offending key(s), state the rejection is deliberate, give the one edit that fixes it, no escape-hatch env var (#5794), no \"use another driver\". The mongodb message adds one thing the whole-block message cannot — what **survives** the edit, since telling a mongo author to \"remove `pool`\" would delete two keys that do take effect.\n\n## Reverse verification\n\nRun twice, both times by surgically reverting the two behaviour changes (turso out of the set, the key table emptied) while keeping the module loadable, so the failures name real cells instead of collapsing into an import error. **20 cases red**, and the direction is the interesting part:\n\n- `turso + pool is rejected by the pool gate, not by the missing-package arm` failed with `expected 'datasource 'edge': a libSQL/Turso d…' to contain 'Datasource 'edge' declares a `pool`…'` — the reverted code **still throws**, just the missing-`@objectstack/driver-turso` error. A bare `.rejects.toThrow()` is green on the unfixed arm, which is exactly the defect class this card's clause warns about; every case here asserts message content.\n- The factory / wizard cases that used to build silently now fail with `expected the declaration to be rejected, but it built it instead of rejecting: {…}` — a helper added for this, so \"accepted the declaration\" never surfaces as a confusing `undefined.message`.\n- The anti-drift pin failed as `expected [ 'max', 'min' ] to deeply equal [ 'connectionTimeoutMillis', …(3) ]`.\n\nThat last one is a pin worth naming: it re-derives the four declared keys from `DatasourceSchema` and mongodb's actually-read keys from the factory arm's own source, then asserts read ∪ rejected covers the block exactly and disjointly. Wiring `maxIdleTimeMS` up later — the option the ruling deferred — fails there until the key leaves the table, which is the point.\n\n## Tests\n\n`pnpm --filter @objectstack/service-datasource test` — **326 passed (12 files)**, 30 of them new; `typecheck` clean. Downstream sweep by **prefix** filter (`...@objectstack/service-datasource`, i.e. the consumers): `@objectstack/runtime` **1990 passed**, `@objectstack/cli` **1182 passed** — the two hosts that dispatch turso. Regression nails kept: postgres/mysql still receive all four keys, and mongodb + `{min, max}` still builds with `minPoolSize` / `maxPoolSize`.\n\nGates run locally: `check:nul-bytes`, `check:docs-audit-scope`, `check-changeset-fixed.mjs`, and `@objectstack/spec check:liveness` (green with the ledger edit).\n\n## Two files outside the card's named surface, deliberately\n\n- `packages/spec/liveness/datasource.json` — its four `pool.*` rows and block note record both of these as *\"still dropped in silence\"*. That was the honest record #6214 left; it is false the moment this lands, so the verdicts are updated. Pre-existing stale line numbers in that file are left alone rather than churned.\n- `content/docs/data-modeling/drivers.mdx` — the pool paragraph named only the two sqlite arms and had never picked up `memory` (#5931). Rewritten as a per-driver verdict table, since the sentence being edited is the list of who rejects the block.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_015fkdTyGmMD5s8ZtEifvuGy)_"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 7243,
+  "kind": "issue",
+  "title": "[finding][services] datasource `pool` 还有两处静默丢弃:turso 整块、mongodb 的两个 timeout 键(#5714/#5931 拒绝集合覆盖不到的剩余面)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-help"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-10T03:35:09Z",
+  "updated_at": "2026-08-11T07:50:38Z",
+  "closed_at": "2026-08-11T07:50:38Z",
+  "closed_by": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7243",
+  "body": "发现于 #6214 的台账精确化工作(把 `packages/spec/liveness/datasource.json` 的四行 `pool.*` 按驱动限定)。为了让台账不再高估 `pool` 的生效面,必须逐臂读一遍落地真值 —— 读出来的时候发现,#5714 / #5931 把 `sqlite` / `sqlite-wasm` / `memory` 变成响亮拒绝之后,**仍有两处「可写、被静默吞掉」的面**。两处都不在本卡声明面内(收紧公开 authoring 面是契约决策),单独记录,严重度请分诊定。\n\n台账已如实把两处记为「still dropped in silence」,不是漏看 —— 与 #5714 当初把 `memory` 记进模块注释是同一个做法。\n\n## 事实一:`turso` 整块 `pool` 被静默丢弃\n\n`turso` 不在 `POOL_UNSUPPORTED_DRIVER_IDS` 里,而 `driverReadsDeclaredPool` 对不在拒绝集合里的 id 一律答 `true`,所以工厂的拒绝闸门放行;`turso` 臂随后压根不读 `spec.pool`。\n\n- `packages/services/service-datasource/src/datasource-pool-support.ts:79` — 拒绝集合是 `['memory', 'sqlite', 'sqlite-wasm']`。\n- `packages/services/service-datasource/src/default-datasource-driver-factory.ts:488-530` — `turso` 臂只把 `url` / `authToken` / `encryptionKey` / `concurrency` / `syncUrl` / `sync` 传给 `TursoDriver`,`spec.pool` 从不出现。\n\n这一处**落地代码自己已经写明**,不是新发现,只是没有卡:`datasource-pool-support.ts:90-99` 原文 —\n\n> `TursoDriverConfig` has no `min`/`max`, only `concurrency`, and in local mode the driver is a better-sqlite3 `SqlDriver` — the very engine `POOL_UNSUPPORTED_DRIVER_IDS` rejects a `pool` block for. A declared `pool` on a turso datasource is therefore dropped in silence today. Changing that is a new rejection on an authoring surface and needs its own ruling; see the #6345 PR's follow-ups.\n\n#6345 的验收评论(PR #6910)里没有立这张卡,所以「见 #6345 的 follow-ups」今天指向不存在的东西。本卡补上。\n\n⚠️ 注意这一臂的形状比 sqlite 更难判:local 模式(`file:` url)下 TursoDriver 确实就是 better-sqlite3 `SqlDriver`,与 sqlite 臂同因;remote 模式(`libsql://`)下没有 knex 连接池、只有 `concurrency`。是「整臂拒绝」还是「按 url 模式分叉」,不是实现方能自己扩的。\n\n## 事实二:`mongodb` 只读 `min` / `max`,两个 timeout 键落地无人接\n\n`mongodb` 在拒绝集合之外、且确实读 `pool` —— 但只读两个键:\n\n```\npackages/services/service-datasource/src/default-datasource-driver-factory.ts:477-483\n  const pool = (spec.pool ?? {}) as Record<string, unknown>;\n  const driver = new MongoDBDriver({\n    url: buildMongoUrl(spec),\n    ...(cfg.database ? { database: cfg.database } : {}),\n    ...(cfg.options && typeof cfg.options === 'object' ? { options: cfg.options } : {}),\n    ...(typeof pool.min === 'number' ? { minPoolSize: pool.min } : {}),\n    ...(typeof pool.max === 'number' ? { maxPoolSize: pool.max } : {}),\n  });\n```\n\n`pool.idleTimeoutMillis` 与 `pool.connectionTimeoutMillis` 在这一臂**不出现在任何位置**。二者只在 `buildSqlPool`(`:188-198`,`postgres` / `mysql`)里被读。\n\n所以一个 mongo 数据源写 `pool: { max: 20, idleTimeoutMillis: 30000 }` 会得到:`maxPoolSize` 生效、`idleTimeoutMillis` 无声消失。这是**同一个块内的半生效**,比整块丢弃更难被作者察觉 —— 「我的 pool 配置生效了」有一半是真的。\n\nMongoClient 本身有对应旋钮(`maxIdleTimeMS` / `connectTimeoutMS` 或 `serverSelectionTimeoutMS`),所以这一处与 sqlite/memory 不同类:**不是「没有东西能承接」,而是「有东西能承接但没接」**,候选修向里多一个「接上」的选项。\n\n## 仓内标本\n\n- `turso` + `pool`:未发现声明标本(与 #5931 里 `memory` 的情况相同 —— authoring 面缺陷,不是今天有人在踩的线上问题)。\n- `mongodb` + 两个 timeout 键:未发现声明标本。\n\n## 候选修向(不预判,列给分诊)\n\n1. **`turso`**:(a) 整臂并入 `POOL_UNSUPPORTED_DRIVER_IDS`(按 #6140 第 1 条 meta-裁定,「静默丢弃的键默认并入既有拒绝集合」的默认路径,需要为它写自己的 `POOL_UNSUPPORTED_REASONS` 条目);(b) 按 url 模式分叉判定;(c) 维持现状并在 spec 的 `.describe()` 里写明。\n2. **`mongodb` 的两个 timeout**:(a) 接上 MongoClient 的 `maxIdleTimeMS` / `connectTimeoutMS`(「实现」而非「拒绝」,ADR-0049 enforce-or-remove 的 enforce 边);(b) 做成**按键**的拒绝(现有 helper 是按驱动 id 全块拒绝,这需要新形状);(c) 维持现状并在台账/文档写明。\n\n注意 #6140 的边界条款:「母单的理由被实测为**臂特有**时,默认不顺延」。`sqlite` 的理由(`:memory:` 会把一个数据源劈成多个库)对 mongo 的 timeout 键明显不适用,对 turso remote 也不适用 —— 所以两处都**不能**直接套用默认路径,这正是分别立卡的原因。\n\n## 出处链\n\n#5714(sqlite / sqlite-wasm 臂拒绝)→ #5931(memory 并入)→ #6214(spec 台账按驱动限定,PR #7242 —— 台账已把这两处如实记为 still-silent)。\n\n## 去重\n\n已搜索 issues/PR:`turso pool`、`mongodb pool minPoolSize maxPoolSize`、`idleTimeoutMillis`、`datasource pool` —— 除 #5714 / #5931 / #6214 三张既有卡外无重复。#6268 / #7099 是 turso 的另两条缝(loader 双份、remote upsert),与本卡不同门。"
+}

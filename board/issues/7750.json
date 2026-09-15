@@ -1,0 +1,35 @@
+{
+  "number": 7750,
+  "kind": "issue",
+  "title": "showcase `my-work`: the personal work queue authors `filters:` (plural) and no `$filter` ever reaches the wire — the grid lists every row",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T12:27:20Z",
+  "updated_at": "2026-08-11T14:54:27Z",
+  "closed_at": "2026-08-11T14:54:27Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7750",
+  "body": "## Symptom\n\nThe showcase's personal work queue is not personal. Open `/_console/apps/showcase_app/page/showcase_my_work` with the network recorder on, having first created a task owned by another user.\n\n- **Expected** `$filter=[[\"owner_id\",\"=\",\"&lt;current user&gt;\"]]` on the grid's query.\n- **Actual** the wire carries **no `$filter` at all**, and the grid lists every row including the foreign-owned probe.\n\nReproduced twice with fresh logins. Contrast on the same run: `active-projects`' `interfaceConfig.filterBy` *does* reach the wire, so the page-level plumbing is fine.\n\n## Scope, stated precisely\n\nCarried verbatim from the run so nobody over-escalates it:\n\n> **Scope, stated precisely: this is not an authorization bypass.** The unfiltered read is still RLS-constrained, so the caller sees only rows they may see (admin sees all because admin may see all). The defect is that a declared personal-scope filter **silently never applies** — and that a typo'd key is accepted without complaint. The second half is the more general problem.\n\nThe general half is filed separately as #7751.\n\n## Root cause — a key-name mismatch\n\n`examples/app-showcase/src/ui/pages/my-work.page.ts:52` authors the **plural** key:\n\n```\n{\n  type: 'object-grid',\n  properties: {\n    objectName: 'showcase_task',\n    columns: ['title', 'project', 'status', 'priority', 'due_date'],\n    filters: [['owner_id', '=', '{current_user_id}']],\n  },\n},\n```\n\nobjectui's `ObjectGrid` reads only `schema.filter` (`packages/plugin-grid/src/ObjectGrid.tsx:472`, lowered through `toFilterNode`) and the legacy `schema.defaultFilters` (line 657). `schema.filters` has **zero** read points in that file. `filters` appears **exactly once** in the whole showcase — this line; every other page uses `filter`.\n\n**Stale-premise check.** Re-verified on `objectstack` `origin/main` (`00e9196`): line 52 still reads `filters:`. Re-verified on `objectui` `origin/main` (`33c32bf`): the renderer still reads only `filter` / `defaultFilters`, and `schema.filters` still has no reader — so this is not a stale-bundle artefact.\n\n**New since the run, and it changes the fix.** objectui#4041 (commit `9154d9e`, 2026-08-10) retired the plural spelling from the block's *published* vocabulary: `packages/plugin-grid/src/index.tsx:117` now declares `{ name: 'filter', type: 'array', label: 'Filter' }`, with `gridFilterInputSpelling.test.tsx` pinning that the declared name reaches `$filter`. At the time this page was authored, `filters` was what `object-grid` published, so the author was following the manifest — that excuse is now gone, and the one-word fix (`filters:` → `filter:`) lands on the declared, pinned, lowered path.\n\n⚠️ **Pin dependency for verification.** `9154d9e` landed **after** the console pin this run served (`09987b680`, 2026-08-09) and is present in the repo-root pin `6314e87f2`. On a console built at the old pin, `filter` was not yet a reachable declared input, so the fix cannot be verified end-to-end until the vendored `packages/console/dist` is rebuilt — see #7752.\n\n## Reproduction\n\n1. Boot the showcase; sign in as user A and create a `showcase_task` owned by user B.\n2. Sign in as user A and open `/_console/apps/showcase_app/page/showcase_my_work` with the network recorder on.\n3. Inspect the grid's data request — there is no `$filter` parameter.\n4. Observe the foreign-owned task listed in the personal queue.\n\n## Source\n\nExtracted from the QA run objectstack-ai/objectstack#7695 (framework 92f26f75, console 09987b680)."
+}

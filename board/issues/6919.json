@@ -1,0 +1,34 @@
+{
+  "number": 6919,
+  "kind": "issue",
+  "title": "[观察] rls.zod.ts `using` 属性上方的 TSDoc 块仍宣称「Exactly four forms compile」——与同属性 `.describe()`（#6762 修正后）直接矛盾",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-help"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T04:20:37Z",
+  "updated_at": "2026-08-10T13:18:04Z",
+  "closed_at": "2026-08-10T13:18:04Z",
+  "closed_by": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6919",
+  "body": "## 性质\n\n观察类（`finding`），不加 `pm:queue`：**不进生成器**，今天没有用户会撞上它 —— 影响面是「读源码的作者被一段过时的语法规范误导」。不认领，仅记录。\n\n来自 #6762 / PR #6918 的 out-of-scope finding（Prime Directive #10），未指派。\n\n> **2026-08-09 更新 —— 本卡范围已收窄，只剩未发布的那一半。**\n> 早先本卡的评论区还记录了同文件 `:79` **模块级** docblock 的同类问题（「A small, fixed expression grammar (equality, set-membership, always-true)」，会逐字渲染到 `content/docs/references/security/rls.mdx:79`）。经 PM 裁定，**那一半是已发布面、属于 #6762 的条目范围，已在 PR #6918 内一并修掉**，不再属于本卡。\n> 因此本卡现在**纯粹**是属性级 TSDoc（不进生成器）—— 这也让 `finding` 这个等级从「勉强站得住」变成「确实正确」。下方评论区里关于 `:79` 的那条记录**已过时，仅作历史留存**。\n\n## 事实\n\n`packages/spec/src/security/rls.zod.ts` 中 `using` 属性**上方**的 TSDoc 块（`origin/main` @ `2672f855f` 实测 `:296-354`）写着：\n\n```\n * The reference RLS compiler implements a deliberately **small, fixed\n * grammar** rather than a general SQL parser. Exactly four forms compile;\n * anything else fails closed (the policy matches zero rows). Keep `using`\n * to one of:\n *\n * 1. `field = current_user.< prop >` — equality against a context value\n * 2. `field = 'literal'` — equality against a single-quoted string literal\n * 3. `field IN (current_user.< array_prop >)` — set membership ...\n * 4. `1 = 1` — always true / no restriction\n *\n * There is intentionally **no** support for `AND`/`OR`/`NOT`, comparison\n * operators other than `=`, ...\n```\n\n（上面两处 `< prop >` / `< array_prop >` 是为绕开 GitHub body sanitizer 加的空格，源码里没有空格。）\n\n这与实测不符。在 PR #6918 里我对 `isSupportedRlsExpression`（`packages/formula/src/rls-predicate.ts`）逐条实测：\n\n- **ENFORCES**：`!=`、`<`、`<=`、`>`、`>=`；`in` 对 `current_user.*` 数组**以及**对内联字面量列表（`status in ['draft', 'pending']`）；`&&`；`||`；裸 `true`。\n- **FAILS CLOSED**：SQL 的 `AND` / `OR` / `NOT IN` / `IS NULL` / `LIKE`、算术、子查询、跨对象 traversal、裸真值字段、取反 `!`。\n\n所以这段块注释**一半对一半错**：它说 SQL 的 `AND`/`OR` 不支持 —— 对；它说「恰好四种形式编译」「除 `=` 外没有比较算子」—— 错，CEL 的 `&&`/`||` 与全套比较算子都会真正下推。\n\n`isSupportedRlsExpression` 自己的注释早就点破了这点：*\"This is broader than the historical 4 forms — comparisons (`amount > 100`) and `==` now ENFORCE\"*。\n\n## 为什么 PR #6918 只打标记、不重写\n\nPR #6918 已在 `:310` 处加了一段 `⚠️ STALE` 标记指向本卡，说明下方四项枚举 under-states、`.describe()` 才是当前事实。**标记不是修复**：它把「两条互相矛盾的断言」降级为「一条断言 + 一句诚实警告」，本卡落地时应连同标记一并移除。\n\n之所以不在那张卡里重写：\n\n1. **它不进生成器。** `gen:docs` 只渲染属性的 `.describe()` 和**模块级** docblock，从不渲染属性级 TSDoc。实测复证：给这段 TSDoc 加标记后 `content/docs/references/**` **零 diff**。所以它是观察类。\n2. **它是一段约 60 行的语法规范散文**，还顺带对 context values、§7.3.1 dynamic membership、prohibited 清单做规范性陈述 —— 重写值得自己一轮复核，塞进一张两条目 sweep 卡会被淹没。\n\n## 建议的修法\n\n把这段块注释按 `.describe()` 与 `:79` 已确立的口径重述：讲**能被下推的形态**而非固定计数（⛔ 「四」换成「八」是同一个缺陷），canonical CEL 在前、SQL 拼写作为过渡桥接（ADR-0058 D1，`sqlPredicateToCel` 已标 `@deprecated`）。同属性的 5 条 `@example`（`\"organization_id = current_user.organization_id\"` 等）也全是 SQL 方言，同一轮一起改比较合算。顺手移除 `:310` 的 STALE 标记。\n\n⚠️ 注意 #6763：**没有任何门读 spec 的 TSDoc `@example`**，所以这些例子改完也仍然没有回归保护 —— 这条与 #6763 是同一根因的两个面。\n\n## Related\n\n#6762 / PR #6918（`.describe()` 与已发布的 `:79` 模块 docblock，均已修）、#6763（无门读 TSDoc `@example`）、#6641 / PR #6729（`check` 子句的 `@example`）、ADR-0058 D1。\n"
+}

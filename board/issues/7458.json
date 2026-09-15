@@ -1,0 +1,33 @@
+{
+  "number": 7458,
+  "kind": "pull_request",
+  "title": "docs(deployment): give the \"gate\" table its fourth column — the runtime publish surface (#7442)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-10T13:17:55Z",
+  "updated_at": "2026-08-10T14:20:53Z",
+  "closed_at": "2026-08-10T14:20:52Z",
+  "closed_by": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "merged_at": "2026-08-10T14:20:51Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/7458",
+  "body": "Fixes #7442\n\nThe \"the gate\" table in `content/docs/deployment/validating-metadata.mdx` documented three CLI commands. Since #4463 P1 there is a fourth door — `saveMetaItem` runs the same `AUTHORING_RULES` table on a `state: 'active'` write, and `publishMetaItem` runs it on the draft→active promotion — and the table said nothing about it. A reader of that table (human or AI) concluded a Studio save passes no gate. That is false, and it is exactly the mental model that leads someone to add a redundant check or to skip a real one.\n\nDocs-only. One file: `content/docs/deployment/validating-metadata.mdx`.\n\n## Every cell measured, not assumed\n\nThe column was derived from the code, not from the issue body. Measured live through the real dispatch path (`runRuntimeAuthoringRules`) with a throwaway probe against the built workspace:\n\n- `runtimeGatedTypes()` → `['flow']`. **`flow` is the only metadata type any rule declares at that door.** An `object`, `view`, `page` or `dashboard` write runs **zero** rules — measured, all three returned `rulesRun: []`.\n- Six registry rules carry `surfaces: ['cli', 'runtime-publish']`, all with `runtimeTypes: ['flow']`: `validateStackExpressions`, `validateEmptyCombinators`, `validateReferenceIntegrity`, `validateFlowTriggerReadiness`, `validateApprovalApprovers`, `lintFlowPatterns`.\n- Refusals observed on crafted flow bodies: `expression-invalid`, `approval-expression-invalid`, `flow-trigger-unknown-event`, `flow-runas-unscoped`, `filter-empty-combinator`, `flow-node-write-unknown-field`.\n- Advisories observed (never block): `flow-template-unknown-field`, `flow-draft-status-ambiguous`, `approval-expression-no-empty-policy`.\n- Falsified along the way: a flow node naming a **non-existent object** is *not* caught at that door. `validateObjectReferences` reads `stack.objects` / `actions` / `dashboards` / `apps` and never `flows`, so the \"Object & action name references\" row is `—`, not `✓`.\n\nSo the new column is `✓ᶠ` (runs, `flow` writes only) on six rows, a plain `✓` on the Zod row (the per-type `safeParse` runs on every write, before the gate), and `—` everywhere else.\n\n## Four rows added, so the column can be honest\n\n- **Empty filter combinators (#5330)** and **flow reference integrity — node writes, template paths, read-only writes (#3583)** had no row at all, yet both are enforced at the runtime door. Leaving them out would have reproduced the very defect the issue reports.\n- **Flow trigger readiness (#5762)** moved out of the row labelled \"Advisory:\" — #5762 promoted it to `gating`, so describing it as advisory while the new column says it refuses a publish would contradict itself.\n- **Platform-schedule `create_record` organization (#6285)** is `— — —  ✓ᶠ`: runtime-only by ruling, because both its inputs are facts about the *deployment*. It shows the column is not a pure subset in the other direction either.\n\nAlso dropped `visibility aliases` from the advisory row — `visibility-alias-deprecated` was retired by #6318 (confirmed in `validate-visibility-predicates.ts`, `authoring-rules.ts` and `authoring-rule-input-tier.test.ts`).\n\n## The closing prose\n\nThe sentence at the end of the section (\"a stack cannot be published through the one command that happens to skip a check\") was written before the fourth surface and reads as a guarantee about publishing in general. It is kept — it is still true of the three commands — and followed by what the fourth door does and does not guarantee: `authoring-rule-wiring.test.ts` fails if a rule runs at the runtime gate but not on `os build` (\"the two publish verbs must not disagree\"), so the door narrows *types*, never *verdicts*, with #6285 as the one stated exception.\n\nThe section also now documents what #7435 (`89d7b35a7`) landed: advisories ride back on the save response under `advisories`, which is a channel a Studio / MCP / AI author can actually read, rather than only a deduped `console.warn`.\n\n## Adjacent drift fixed\n\nThe `AUTHORING_RULES` citation said `packages/cli/src/lint/authoring-rules.ts`. The file is at `packages/lint/src/authoring-rules.ts` (`packages/cli/src/lint/` contains only `corpus.ts`, `metadata-eval.ts`, `score.ts`). Fixed in the same pass, as triage asked.\n\n## Deliberately not done\n\n- The heading is still `## The one gate, three entry points`. `content/docs/deployment/cli.mdx:458` links `#the-one-gate-three-entry-points`; renaming it would break that link and `cli.mdx` is outside this card's file surface. The body reconciles the heading with the fourth column instead.\n- The sample console transcript still reads `Running author-time rules (26)`; the registry now holds 38 entries. Out of this card's scope — reported on the issue.\n\n## Gates run locally\n\n`check:nul-bytes`, `check:doc-authoring`, `check:docs-audit-scope`, `check:role-word`, `check:quick-reference-counts`, `check:adr-anchors`, `check:adr-links` — all green. MDX compiles (`fumadocs-mdx`). Note: `check:doc-formula-expressions` (named at dispatch) does not exist at this HEAD; `check:doc-authoring` is the doc gate that does.\n\nNo changeset — docs-only, `skip-changeset`.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01XAdrnFmbvpLodAR88aoagw\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01XAdrnFmbvpLodAR88aoagw)_"
+}

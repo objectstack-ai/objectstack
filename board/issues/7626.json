@@ -1,0 +1,37 @@
+{
+  "number": 7626,
+  "kind": "issue",
+  "title": "[security] `$expand` bypasses the CRUD gate and OWD row scope — a contributor reads records they are 403'd from, because the #2850 expand waiver keys on the wrong axis",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched",
+    "security",
+    "target:v17"
+  ],
+  "assignees": [
+    "huangyiirene"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T09:18:03Z",
+  "updated_at": "2026-08-11T11:47:42Z",
+  "closed_at": "2026-08-11T11:45:49Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7626",
+  "body": "## Impact\n\nA **low-privilege authenticated user reads records they are explicitly denied.** Not admin-only — the probing persona held only the `contributor` position. Both the CRUD gate and the OWD (private) row scope are bypassed on the expand sub-read; RLS on the *direct* path still works, so the hole is specific to the expand seam.\n\nRuled `target:v17` class ① (a user-hitting defect on a shipped surface) by the maintainer on 2026-08-11.\n\n## Reproduction (2/2)\n\nAs a user holding only `contributor`:\n\n1. `GET /api/v1/data/showcase_contact/&lt;contactId&gt;` → **403 PERMISSION_DENIED** (`operation 'findOne' on object 'showcase_contact' is not permitted for positions [org_member, contributor, everyone]`).\n2. Same session, on an invoice **they own** that references that contact: `GET /api/v1/data/showcase_invoice?$expand=contact` → **200 with the contact fully materialised** — all 18 fields including `email` — **byte-identical to the admin's response** (`JSON.stringify` equality true).\n3. Also via the body door: `POST /api/v1/data/showcase_invoice/query` `{\"expand\":{\"contact\":{\"object\":\"showcase_contact\",\"fields\":[\"id\",\"name\"]}}}`.\n\n`showcase_contact` is `sharingModel:'private'` and the row is admin-owned, so both the CRUD gate and the OWD row scope were bypassed. A contributor's *direct* query for a foreign invoice correctly returns 200 with 0 rows — RLS on the direct path is intact.\n\n## Root cause (located, re-verified on `origin/main`)\n\n`packages/plugins/plugin-security/src/security-plugin.ts`:\n\n- `:1206` — `const expandSkipCrud = operation === 'find' &amp;&amp; opCtx.context?.__expandRead === true &amp;&amp; !secMeta.isPrivate;`\n- `:4314` — `isPrivate: (obj as any)?.access?.default === 'private'`\n- `:1216` and `:1274` — both the CRUD permission check and the effective-scope application are guarded by `!expandSkipCrud`.\n\n`secMeta.isPrivate` reads `access.default`, which is a **different axis** from the `sharingModel` the object actually declares — and `access` is `null` for every object in the built artifact, so `isPrivate` is always `false` and the waiver fires for **every** referenced object, including ones the caller holds no grant on. The waiver's premise (\"the referenced object is already broadly readable\") does not hold.\n\n## Why the existing pin didn't catch it\n\nThe `#2850` unit pin asserts only that the expand sub-read **re-enters `find()` tagged `__expandRead`**. It never asserts the end-to-end authorization *outcome*, so it stays green while a live server discloses. A re-tagged unit pin would reproduce exactly this blind spot.\n\n## Acceptance criteria\n\n- A `contributor`-only session that is 403'd on `findOne` for a private object must **not** receive that object's fields through **any** expand door — query-string `$expand` and body `expand` alike — on a parent record it is allowed to read.\n- The regression test is **end-to-end and both-personas**: admin sees the full expansion, the denied persona sees it withheld, both driven through the live gate. ⛔ Not a re-tagged `__expandRead` unit assertion — that is the exact shape that missed this.\n- The **direct-path RLS behaviour is unchanged** (a contributor's foreign-row query still returns 200/0 rows) — assert it as a guard so the fix does not over-correct.\n- Whichever fix shape is taken, the `__expandRead` sub-read for a private object must be subject to the caller's CRUD gate **and** OWD scope.\n\n## Suggested shape (not prescriptive)\n\nEither evaluate the waiver against the axis the object actually declares (`sharingModel`) instead of `access.default`, or drop the waiver entirely and let the sub-read carry the caller's context through the normal gate. The write-up leans toward the latter as the more clearly-correct option, since the waiver's premise is what failed.\n\n## Provenance &amp; disclosure\n\nThis defect was held back from the public #7463 run report pending a maintainer disclosure decision (D1 precedent). The private write-up was delivered 2026-08-11 in `docs/qa/platform-checklist/FOLLOW-UPS.md` §1a (entry **D9**, branch `claude/platform-test-checklist-ocwugl` @ `e9e24aab`). The maintainer then instructed the PM directly to file this fix card publicly (verbatim, 2026-08-11): 「D9 私有修复卡你来立，domain:identity + security + target:v17」 — so the disclosure here is authorized, not a leak.\n\n## Source\n\nQA run objectstack-ai/objectstack#7463 (`query-contract-matrix` clause 4, framework `a86db175`), private write-up FOLLOW-UPS.md §1a D9. Root cause re-verified against `origin/main` before filing. The **functional** half of the same expand seam — `expand` is a silent no-op when nested `fields` omits `id` — is the separate, non-security card #7537 in `domain:engine-core`; different file, same feature, worth coordinating so an expand-path change lands once."
+}

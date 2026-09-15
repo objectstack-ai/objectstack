@@ -1,0 +1,34 @@
+{
+  "number": 7561,
+  "kind": "issue",
+  "title": "finding: `GET /api/v1/meta/diagnostics` reports 94/94 registry entries INVALID — the platform's own `__search` column carries a key `FieldSchema` rejects, plus a missing `config`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-help"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T05:26:55Z",
+  "updated_at": "2026-08-11T09:48:37Z",
+  "closed_at": "2026-08-11T09:48:37Z",
+  "closed_by": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7561",
+  "body": "## Symptom\n\n`GET /api/v1/meta/diagnostics` reports **94 of 94** registry entries as **INVALID** — every entry in the registry, `sys_*` and `showcase_*` alike, with no exceptions.\n\nThere are only **two** distinct error shapes behind all 94:\n\n```\nfields.__search: Unrecognized key 'index'\nconfig: expected record, received undefined\n```\n\nBoth are self-inflicted: `__search` is the platform's **own auto-added search column**, and the entries are otherwise healthy — they serve, they round-trip, and nothing else in the run pointed at broken schemas.\n\nExpected: a healthy registry validates clean, and the diagnostics endpoint's verdict means something. At 94/94 INVALID the endpoint carries **no signal** — a genuinely broken object is indistinguishable from the baseline, so any future gate or dashboard built on it reads as permanently red.\n\n## Root cause\n\nNot located by the report at code level. The evidence constrains it to the validator/producer seam rather than to the objects being validated:\n\n- The rejected key `index` on `fields.__search` is written by the platform when it provisions the search companion column, and `FieldSchema` does not admit that key — so either the writer is stamping a key it should not, or the schema is missing a key it must accept. One of the two is wrong; the report does not say which.\n- `config: expected record, received undefined` is the same class: the shape validation expects a record that the registry entry does not carry at all.\n\n## Same family as a fix that already landed — read it first\n\nobjectstack-ai/objectstack#6810 (closed 2026-08-08, `domain:engine-core`): \"`applySystemFields` stamps `indexed` on `organization_id` — a key `FieldSchema` rejects by name, so every registry-backed object read answers `_diagnostics: { valid: false }`\". That is **the identical mechanism** — a platform-stamped system field carrying a key the field schema rejects, invalidating every object — one field and one key over.\n\nIts fix closed before this build was cut (`a86db175`, 2026-08-10), so the `organization_id`/`indexed` instance is presumably gone and this is the **next instance of the same class** (`__search`/`index`) rather than a regression of #6810 itself. Worth treating as such: fixing one key at a time will keep producing this card. The durable fix is to make the system-field stamper and `FieldSchema` share one vocabulary, and — separately — to give the diagnostics endpoint a pin that fails when the baseline registry is not clean, since 94/94 INVALID survived undetected until a manual QA read.\n\n## Reproduction\n\n1. Boot the showcase.\n2. `GET /api/v1/meta/diagnostics`.\n3. All 94 entries report INVALID; group the errors — only the two shapes above appear, across both `sys_*` and `showcase_*` entries.\n\n## Source\n\nExtracted from the QA run objectstack-ai/objectstack#7514 (framework a86db175, console 09987b68)."
+}

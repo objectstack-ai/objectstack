@@ -1,0 +1,34 @@
+{
+  "number": 7427,
+  "kind": "issue",
+  "title": "Sweep the remaining \"no runtime consumer\" ledger notes that predate the previews-count-as-consumers ruling — datasource `_note`, permission `rowLevelSecurity.label`, plus a mechanical pass",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-help"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-10T10:50:36Z",
+  "updated_at": "2026-08-11T07:48:05Z",
+  "closed_at": "2026-08-10T13:18:04Z",
+  "closed_by": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7427",
+  "body": "Follow-up mandated by the 2026-08-10 maintainer ruling on #7131 (\"previews count as consumers\", directed in session `session_01BPWqbmEFU8gJepBJTHESXd`, recorded verbatim at https://github.com/objectstack-ai/objectstack/issues/7131#issuecomment-5237224148): *\"the ledger methodology note records the principle **so the next sweep asks the question mechanically**.\"* This card is that next sweep. Filed by the spec-surface PM seat (#6298, session `session_016R9de1FqP7NvwKvqXi92Gh`) from the #7131 dev's held findings (OS-DEV-REPORT, out-of-scope item 2 — the dev deliberately did not file, deferring the one-card-vs-sweep-pack call to the PM; decision: one card).\n\nBlocked-by: #7425\n\n(Blocked because the README methodology section — \"Designer previews count as consumers\" — and the re-graded row shape this sweep must follow land in PR #7425; start after it merges and re-measure at the merged ref.)\n\n## Known rows (from the #7131 dev's measurement, objectui @aeb8424b)\n\n1. `packages/spec/liveness/datasource.json` file-level `_note`: *\"objectui's DatasourcePreview renders pool/ssl/retryPolicy/healthCheck as SideBlocks and is NOT counted as evidence for any entry\"* — rests on the superseded principle AND is likely stale a second way: its cited SideBlocks were themselves removed in #4583. Needs re-measurement, not a text edit.\n2. `packages/spec/liveness/permission.json` → `rowLevelSecurity.label`: *\"CORRECTED 2026-07-30 … an authoring surface echoing input is not a runtime consumer\"* — the closest structural twin of the four rows re-graded in PR #7425 (a display `label` marked dead on the superseded ground). ⚠️ Do not assume the outcome: the cited surface (\"PermissionPreview counts them\") may count entries without rendering the label — measure whether the preview actually renders the value to a human before re-grading.\n\n## The sweep step\n\nApply the mechanical rule from the new README section: for every ledger row or file-level note whose verdict or prose rests on \"no runtime consumer\" (or wording that means it) written before 2026-08-10, enumerate the registered metadata-admin preview read points in objectui at a pinned commit and reconcile. Display keys with a measured, **reachable** render re-grade dead → live following PR #7425's row shape exactly (realm-marked commit-pinned evidence + producer + note recording what is and is not superseded). Behavioural keys stay governed by the older README section — the ruling does not reopen the 2026-07 corrections (PM-ratified reading, #7131 thread).\n\n## Constraints\n\n- KEPT/ADR-0033 statuses do not move; this is verdict/prose reconciliation only.\n- Stay out of the README state table (#7377 owns its count columns).\n- Reverse-verify at least one new realm marker (drop → exactly one MISSING, correctly named → restore).\n\nSize/model suggestion: S–M; per-row verdict measurement means the S-mechanical floor does not apply — default tier."
+}

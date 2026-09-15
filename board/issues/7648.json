@@ -1,0 +1,35 @@
+{
+  "number": 7648,
+  "kind": "issue",
+  "title": "[finding] cli checklist: build-own-contract clause 4 vs flag-command-error-ux disagree on exit code 2 — narrow clause 4 to the #4873 duration-leak",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "huangyiirene"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T09:50:23Z",
+  "updated_at": "2026-08-11T12:24:34Z",
+  "closed_at": "2026-08-11T12:24:34Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7648",
+  "body": "## Symptom\nTwo items in the `cli` checklist area disagree about exit code 2. `cli.build-own-contract` clause 4 (`docs/qa/platform-checklist/areas/cli.json:145` — \"exit codes are exactly 0 or 1 (the CliExitCode union) — never a count, never a duration\") treats a config-load-time throw that exits **2** as a violation, while `cli.flag-command-error-ux` asserts that exit **2** IS the correct oclif `ExitError` code. In the run, a config-load-time throw on the human path exits 2 (reproduced twice) because `packages/cli/src/commands/compile.ts`'s catch ends in `this.error()` and oclif's `ExitError` is 2; the `CliExitCode 0|1` type only narrows the `emitJson`/`emitText` slot. Every `--json` invocation exits cleanly (0/1/1/1).\n\n## Root cause\nChecklist reconciliation, not a product defect. Clause 4 was written to pin the #4873 duration-in-exit-slot leak (a timer value reaching the exit-code slot), not to forbid oclif's standard error exit. As phrased it collides with `flag-command-error-ux`, which correctly treats exit 2 as the oclif error exit. The clause should be narrowed to the #4873 duration-leak it exists to catch, so a legitimate oclif `ExitError` (2) on a config-load-time throw no longer reads as a violation.\n\n## Reproduction\nRun a `build`/`compile` invocation whose config fails to load at load time on the human (non-`--json`) path; observe exit 2 from `compile.ts`'s `this.error()` catch. Compare against `cli.flag-command-error-ux`, which asserts exit 2 as the correct oclif `ExitError`. The two checklist clauses cannot both hold as written. On `origin/main` the clause text (`cli.json:145`) and `compile.ts`'s `this.error()` catch (lines 411, 480) are unchanged, so the reconciliation is still needed.\n\n## Source\nExtracted from the QA run objectstack-ai/objectstack#7628 (framework 92f26f75, console 6314e87f)."
+}

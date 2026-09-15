@@ -1,0 +1,35 @@
+{
+  "number": 7566,
+  "kind": "issue",
+  "title": "finding: `GET /api/v1/meta/app?id=…` — the `?id=` filter is inert, the same 3 apps come back for any value",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-help"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T05:27:18Z",
+  "updated_at": "2026-08-11T11:12:44Z",
+  "closed_at": "2026-08-11T11:12:44Z",
+  "closed_by": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7566",
+  "body": "## Symptom\n\n`GET /api/v1/meta/app?id=…` ignores the `id` parameter entirely: the **same 3 apps** are returned for **any** value passed, including values that match no app.\n\nExpected: either the filter narrows the response to the named app, or an unsupported parameter is refused rather than silently dropped — the platform has been closing exactly this \"silently ignored query parameter\" class elsewhere (see below).\n\nWhy it matters even though nothing crashes: a caller cannot tell a working filter from a dropped one. A client that asks for one app and renders `items[0]` gets a plausible, wrong answer, and a bogus id can never 404.\n\n## Root cause\n\nNot located by the report — it observed the endpoint's behaviour only. Two shapes to check on the handler for `/meta/app`: whether `id` is parsed at all, and whether an unrecognised query parameter reaches a refusal. Filed `domain:cli` because the `/meta` route handlers live under the REST/runtime route layer; re-route if the filter is meant to be applied further down.\n\n## Related — the same class, being closed one endpoint at a time\n\n- objectstack-ai/objectstack#7527 (open): `assignedToMe=true` is not a supported list filter on `/api/v1/approvals/requests` — silently ignored, returns every request. Same defect shape on a different domain.\n- Recent merges in this class: objectstack-ai/objectstack#7490 (`GET /automation/:name/runs?status=` filters instead of being dropped), #7350 and #7299 (malformed query params refused with an ADR-0112 400), #7324 / #7396 (repeated query parameters). None of them touch `/meta/app`, so this instance is still open; whoever fixes it should follow whichever convention those settled on (filter, or refuse) rather than inventing a third.\n\n## Reproduction\n\n1. Boot the showcase (3 apps published).\n2. `GET /api/v1/meta/app?id=&lt;a real app id&gt;` → all 3 apps.\n3. `GET /api/v1/meta/app?id=&lt;a nonsense value&gt;` → the same 3 apps, byte-identical response.\n\n## Source\n\nExtracted from the QA run objectstack-ai/objectstack#7514 (framework a86db175, console 09987b68)."
+}

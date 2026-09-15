@@ -1,0 +1,34 @@
+{
+  "number": 7397,
+  "kind": "issue",
+  "title": "[observation] `config.objects[].actions[]` (object-embedded actions) may also bypass defineStack's cross-reference walk — unverified, same mechanism as #6889's row E",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-10T09:34:04Z",
+  "updated_at": "2026-08-10T13:52:10Z",
+  "closed_at": "2026-08-10T13:50:31Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7397",
+  "body": "Observation-class record, **deliberately unverified** — filing so it is not lost, per the finding-first discipline. Surfaced by the #6889 dev while implementing PR #7392; reported to the PM rather than filed as a defect because it was not probed.\n\n## The hypothesis\n\n`defineStack`'s action cross-reference walk (`packages/spec/src/stack.zod.ts`, `validateCrossReferences`) iterated `config.actions` — the registered list — and, since PR #7392, also inline page-element actions collected from page regions/slots/nested containers. **Neither walk visits actions embedded on objects (`config.objects[].actions[]`)**, if that authoring position carries the same modal/flow `target` keys. A dangling `type: 'modal'` or `type: 'flow'` target there would build clean by the same mechanism as #6889's row E — silent until clicked.\n\n## Status of the claim\n\n- **NOT probed.** The #6889 dev reported it as an unverified observation (\"a ~10-minute probe of the same shape as this card's five-stack probe\") and did not measure it; neither has this seat. Nothing here asserts the hole exists — the schema may not accept cross-referencing action shapes at that position at all, which would void the observation.\n- The probe that settles it: one `defineStack` call with an object-embedded action carrying `type: 'modal', target: 'nowhere'` (and a `flow` twin), expecting either a rejection (observation void — close this) or an acceptance (the #6889 defect class, one surface over — promote to a queue card).\n\n## Context\n\n- #6889 / PR #7392 — the inline-page-action half, landed with the traversal + 20-case pin suite; its PR body documents the walk's roots (registered list + page trees).\n- #6739's maintainer ruling (2026-08-09): a modal `target` names a PAGE only — the contract any new arm would enforce.\n- The #7392 test file (`stack-inline-action-crossref.test.ts`) is the natural home for the probe's pins if the hole is real.\n\nFiled unlabeled and unassigned for triage per #4949 discipline. Dedup: open-issue search for `objects actions cross-reference` / `object-embedded action target` / `defineStack validation` returns #6889 (closed by PR #7392, inline half) and #6739 (closed, target semantics) — no card covers the object-embedded position."
+}

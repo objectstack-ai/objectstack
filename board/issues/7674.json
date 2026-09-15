@@ -1,0 +1,35 @@
+{
+  "number": 7674,
+  "kind": "issue",
+  "title": "owd-save-gate: the ADR-0090 D11 authoring gate never runs on any host-config deployment (keyed on environmentId, not authoringChannel)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T10:12:58Z",
+  "updated_at": "2026-08-11T13:16:26Z",
+  "closed_at": "2026-08-11T13:16:26Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7674",
+  "body": "## Symptom\nNothing on a host-config deploy refuses an ADR-0090 D11 OWD violation. Studio turns the external-OWD description amber and says *\"publishing will be rejected (ADR-0090 D11)\"*, then leaves **Save draft and Publish enabled, and both succeed**.\n\n`PUT /api/v1/meta/object/qa_probe {…, sharingModel:'private', externalSharingModel:'public_read'}`\n\n- **Expected** 403 `owd_external_wider`.\n- **Actual** 200; `GET` returns the violating pair persisted — on the draft path, the active path, and with `?package=`. Reproduced 3× on one boot, 3× on a second boot with a fresh DB, plus once through the browser.\n\n## Root cause\nLocated by the run at `packages/metadata-protocol/src/protocol.ts`. The #3050 authoring-gate call is wrapped in `if (this.environmentId !== undefined)`. The showcase config is a **host config** (`isHostConfig` → `shouldBootWithLibrary(config) === false`), so `serve.ts` takes the lightweight assembler, which constructs `new ObjectQLPlugin()` with no options → `environmentId` stays undefined → the guard is false and `runAuthoringGate` is **never called**. So R2 (`owd_external_wider`) and R1 (`owd_widening_forbidden`) execute on **no self-hosted/host-config deployment**.\n\nThis is the same proxy-signal hazard #6710 already diagnosed and retired for the sibling #4463 gate. The `authoringChannel` infrastructure from #6710 exists on `origin/main` (protocol.ts ~L2929; `runAuthoringGate` returns early for `authoringChannel === 'package-author'` ~L3094), but the #3050 gate call site (protocol.ts ~L10003) is **still** gated on `if (this.environmentId !== undefined)` — its own comment reaffirms \"Environment writes only … environmentId undefined\". Confirmed not fixed on `origin/main`.\n\nThe gate logic itself is not the bug: `object-posture-gate.test.ts` is 18/18 green. A grep for `owd_external_wider` finds only the gate source and its unit test — there is no integration test exercising R2 through the real save path.\n\nFiled **publicly** as an authoring-validation gap: external-principal enforcement is #2696-planned, so a wider external baseline does not itself disclose anything today — it is a validation gap, not a live disclosure.\n\n## Reproduction\n1. Boot the showcase app via the CLI host-config path (`serve.ts` lightweight assembler).\n2. `PUT /api/v1/meta/object/qa_probe` with `{sharingModel:'private', externalSharingModel:'public_read'}`.\n3. Observe 200; `GET` the object → the violating pair persisted. Repeat with `?package=` and against the active path — all 200.\n\n## Suggested fix\nKey the #3050 gate on the declared `authoringChannel`, as #6710 did for #4463, instead of on `environmentId !== undefined`. Add an integration test that exercises R1/R2 through the real save path.\n\n## Source\nExtracted from the QA run objectstack-ai/objectstack#7637 (framework 92f26f75, console 09987b680)."
+}

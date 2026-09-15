@@ -1,0 +1,34 @@
+{
+  "number": 7287,
+  "kind": "issue",
+  "title": "[finding] Unanchored autonumber counter readback diverges cross-side by design — engine reads the LAST digit run, driver-sql concatenates EVERY digit — and #6555's `{0000}` declared default makes \"unanchored\" the default shape",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-10T04:59:41Z",
+  "updated_at": "2026-08-10T12:24:52Z",
+  "closed_at": "2026-08-10T11:55:49Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7287",
+  "body": "Observation-class finding, surfaced during #6560's implementation (OS-DEV-REPORT on that card) and filed by the spec-lane PM seat (#6017, session `session_01PiRUoQkTSBBmpyXBY3cVn2`) so the deliberately-preserved divergence has a tracking record now that its reachability changes. Unassigned, unrouted — for triage.\n\n## The fact (measured by the #6560 dev, both sides pinned by their own existing tests)\n\nFor the **anchored** case (non-empty prefix/suffix) the counter readback rule is now shared: `readAutonumberCounter` in `packages/spec/src/data/autonumber-format.ts` (PR #7247), both sides call it. For the **unanchored** case (both affixes empty) the two sides deliberately differ and PR #6553 preserved both byte-for-byte:\n\n- engine (`packages/objectql/src/engine.ts`, `readStoredAutonumberCounter` legacy arm): takes the **last digit run** — `'SO-2024-0007'` → `7`;\n- driver-sql (`scanMaxNumericTail` unanchored arm): **concatenates every digit** — `'SO-2024-0007'` → `20240007`.\n\nSpec's shared export returns `undefined` for the unanchored slot rather than picking a side — correctly refusing to claim an agreement that does not exist (#7247's recorded rationale).\n\n## Why file it now\n\n#6555's Route-3 ruling (PR #7265, in flight) makes `{0000}` the declared default for format-less autonumber fields — and `{0000}` has **no prefix/suffix**, so the default authoring shape resolves to the unanchored readback path on both sides. For pure-digit stored values the two readings agree (`'0007'` → 7 both ways); they diverge only on unanchored fields whose stored values carry non-digit content (legacy/migrated data, e.g. dash-separated strings in a field later declared autonumber). That is narrow but it is the same \"same metadata, different driver, different number\" class as #6555 itself — one seam over (readback instead of render).\n\n## Suggested treatments (for triage, no recommendation pre-empted)\n\n1. Rule which unanchored reading is the contract and hoist it into `readAutonumberCounter` (a behavior change on one side — the reason #7247 refused to do it as a rider);\n2. Declare the divergence out-of-contract: unanchored fields with mixed-content stored values are unsupported for seeding, documented in the TSDoc both sides already share;\n3. Record-only (this card).\n\n## Dedup\n\n`readAutonumberCounter` / `scanMaxNumericTail` / unanchored: only #6560 (closed by PR #7247, which scoped this out explicitly) and #6555 (render-side fork, different function). The #6553 PR documented the preservation but no open card tracks the divergence itself.\n\nRefs: #6560 (OS-DEV-REPORT + PR #7247), #6553, #6555 (PR #7265), #6468."
+}

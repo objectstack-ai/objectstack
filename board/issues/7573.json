@@ -1,0 +1,35 @@
+{
+  "number": 7573,
+  "kind": "issue",
+  "title": "QA checklist: `platform-core.settings-hub-roundtrip`'s secret clause says what must NOT be returned but never what IS — it cannot distinguish masked from omitted",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "huangyiirene"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T05:30:29Z",
+  "updated_at": "2026-08-11T11:45:50Z",
+  "closed_at": "2026-08-11T11:45:49Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7573",
+  "body": "Follow-up from the #7522 security fix (PR #7554), raised by the implementing dev and accepted by the PM as checklist-author territory rather than that PR's job.\n\n## Symptom\n\n`docs/qa/platform-checklist/areas/platform-core.json`'s clause reads, in effect:\n\n> `GET /api/settings/:namespace` never returns the plaintext.\n\nThat is true again now that #7522 has landed a redaction — but the clause **only states a negative**. A tester satisfying it cannot distinguish between:\n\n- the value is **masked** (`••••••••` — the intended behaviour),\n- the value is **omitted** (key present, `value` gone),\n- the **key vanished** entirely from the response.\n\nAll three satisfy \"never returns the plaintext\", and two of them are regressions: the console renders \"configured vs not configured\" from exactly this field, so an omission breaks the settings UI while the checklist stays green.\n\nThe clause is measurably weaker than the behaviour it now guards, and the next QA run will read it.\n\n## Suggested strengthening\n\nName the positive contract, which #7522 pinned at the route level:\n\n- a **set** secret is served as `SETTINGS_SECRET_MASK` (`••••••••`);\n- an **unset** secret stays `null` — the redaction is presence-preserving;\n- the masking covers `values.&lt;key&gt;.value` **and every `cascadeChain` entry**;\n- `source`, `locked` and `lockedReason` are **unchanged** by the redaction, so `source:'env'` / `locked:true` / `409 SETTINGS_LOCKED` keep working;\n- both specifier flavours are in scope — `type:'password'` and an explicit `encrypted:true`.\n\nWorth adding as a distinct clause, because it is the half a redaction fix most often breaks: **PUTting the echoed mask back is a no-op**, not an overwrite of the stored secret with the mask's literal text.\n\n## Notes\n\n- This touches `docs/qa/platform-checklist/` and may require a `coverage.json` update, so it belongs to the `checklist-author` skill's flow rather than an ad-hoc edit.\n- The behaviour is already pinned by tests in `packages/services/service-settings/src/settings-routes.test.ts` (10 route-level cases added by PR #7554) — the checklist clause should mirror those assertions rather than invent its own vocabulary.\n- Also worth a glance while in there: whether the sibling `records-forms.encrypted-field-behavior` item states its positive contract, or has the same negative-only shape.\n\n## Source\n\nFollow-up from objectstack-ai/objectstack#7522 (PR #7554), which came from the QA run objectstack-ai/objectstack#7514."
+}

@@ -1,0 +1,35 @@
+{
+  "number": 7686,
+  "kind": "issue",
+  "title": "Checklist maintenance (i18n area run): step-4 no-op, unaddressable `_sections`/`emptyState` fixtures, clause-1 frozen-debt reconcile",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "huangyiirene"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T10:14:38Z",
+  "updated_at": "2026-08-11T12:24:34Z",
+  "closed_at": "2026-08-11T12:24:34Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7686",
+  "body": "## Symptom\n\nChecklist maintenance falling out of the i18n (FULL area) run — items whose steps or premises no longer match the shipped contract or the showcase fixture. Consolidated into one card per the maintainer standing rule. All live under `docs/qa/platform-checklist/`.\n\n## Root cause\n\nItemised:\n\n1. **`build-gates-hold` step 4 is a no-op as written.** \"Perturb one committed bundle **value**\" leaves the gate green **by design** — merge mode re-uses the committed file as its own baseline, so drift is *structural*, not textual. It should read \"**remove or rename** a committed bundle **key**\" (the structural perturbation that actually bites). (The runner found this by trying the literal step, watching it stay green, then finding the structural perturbation.)\n\n2. **`surface-matrix` `_sections` has no addressable surface on this fixture.** The record page renders the showcase's `record:details` block whose sections are authored with `label` and **no `name`** (`task-detail.page.ts` ~74-76); `component.zod.ts:491` documents that a nameless section renders its authored label in every locale. The bundle *does* carry 概览/排期/详细信息 — they are simply unreachable. Fixture-authoring gap, not a resolver defect: either add a `name` to a fixture section, or drop the clause.\n\n3. **`surface-matrix` view `emptyState`.** The showcase authors no `emptyState` on any view, so no translated key exists to test. Add a fixture `emptyState`, or waive the clause.\n\n4. **`studio-follows-app-locale` clause 1 should allow the frozen untranslated debt the sibling item already declares legitimate.** The residual English strings (`Announcement`, `Business Unit`, `Owning Business Unit`, `Sales Region`, …) render their EN **source label**, never a raw key — which the sibling item's `knownGaps` declares legitimate. The clause wording (\"no untranslated declared string next to translated ones\") should be reconciled with the coverage ratchet.\n\n5. **`notification-localized-and-clears` c0/c4 premise is a retired capability** — tracked separately in #7684 (rewrite-or-waive c0/c4 there). Cross-referenced, not duplicated here.\n\n## Reproduction\n\nNot a code defect — these are checklist authoring/wording decisions surfaced by the run. Each item above names its exact fixture/clause location under `docs/qa/platform-checklist/` (and the referenced showcase/spec sources) for the reconcile.\n\n## Source\n\nExtracted from the QA run objectstack-ai/objectstack#7640 (framework 92f26f75, console 09987b680)."
+}

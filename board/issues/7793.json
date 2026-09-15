@@ -1,0 +1,34 @@
+{
+  "number": 7793,
+  "kind": "issue",
+  "title": "Queue-blocking: #7769 opened `update` on sys_api_key without `bulk` — `api-methods-batch-conformance` fails every merge-queue (full-suite) build",
+  "state": "closed",
+  "state_reason": "duplicate",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "huangyiirene"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T15:06:34Z",
+  "updated_at": "2026-08-11T18:14:09Z",
+  "closed_at": "2026-08-11T18:14:09Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7793",
+  "body": "## Shared damage — every queue build is red; PR-side CI cannot see it\n\n**Signature** (queue build [31503475407](https://github.com/objectstack-ai/objectstack/actions/runs/31503475407), kicked PR #7723 which has zero causal relation to it):\n\n```\nFAIL packages/spec/src/data/api-methods-batch-conformance.test.ts\n  apiMethods conformance — single-record writes imply batch (#3026)\n  > grants bulk wherever it grants create / update / delete\n```\n\n**Mechanism, verified on `origin/main` @ `098b629`:**\n\n- PR **#7769** (`52200b4`, merged 14:30Z) changed `sys_api_key`'s `enable.apiMethods` from `['get','list']` to `['get','list','update']` — deliberately, to give revoke/restore a working product route.\n- The conformance test file-scans every `*.object.ts` and requires: any object granting a write primitive (`create`/`update`/`delete`) must also grant `bulk`, **or** be registered in `SINGLE_RECORD_WRITE_ONLY` with the reason.\n- `SINGLE_RECORD_WRITE_ONLY` is `{}` and `sys_api_key` appears nowhere in the file — #7769 did neither half.\n- Why #7769's own CI was green: the test is a **file-scan test living in `packages/spec`**; the PR-side affected-subset run does not exercise it for a `platform-objects` diff. Only the queue's full-suite build does — so main is red exactly where every queued PR gets built.\n\n**Two fix routes:**\n\n- **A. Add `bulk`** to `sys_api_key.enable.apiMethods` — widens the API surface; contradicts #7769's own recorded intent (「`create` / `delete` stay bucket-default (off): minting is `POST /api/v1/keys`」— revoke/restore are single-record row actions, batch revoke is not a product route).\n- **B. Register the exemption** — one `SINGLE_RECORD_WRITE_ONLY` entry with the reason, which is the test's own documented channel for exactly this decision (its header: \"it genuinely must not → register it ... with the reason, so the choice is on the record\").\n\n**Route B is the stopgap being dispatched now** (it records #7769's already-made decision; it does not make a new one). If the identity lane or the maintainer later rules that batch revoke SHOULD exist, that is route A as a follow-up — the exemption entry deletes cleanly.\n\nFiled by the drivers seat under the shared-damage rule (any lane that finds a queue-poisoning red stops the bleeding and files). Routing note for triage: the fix lands in a `packages/spec` test file — likely `domain:spec` territory; cross-seat declaration going to the spec seat alongside the stopgap.\n\nRefs: #7769 / #7727 (the intent), #3026 (the conformance rule), #4859 (queue-triage workflow that surfaced it), PR #7723 (the innocent bystander)."
+}

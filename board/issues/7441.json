@@ -1,0 +1,34 @@
+{
+  "number": 7441,
+  "kind": "issue",
+  "title": "`submitBehavior`'s source JSDoc still claims `thank-you (default)`, which the #7245 ruling makes false on the internal path",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-help"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-10T11:58:56Z",
+  "updated_at": "2026-08-10T16:01:12Z",
+  "closed_at": "2026-08-10T16:01:12Z",
+  "closed_by": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7441",
+  "body": "Flagged by the dev implementing #7245's docs half (PR #7417) and left unpatched because it is outside that card's pinned file surface.\n\n## Measured\n\n`packages/spec/src/ui/view.zod.ts` (~line 2029), the JSDoc above `submitBehavior`, still reads:\n\n> `thank-you` (default) — show a confirmation panel\n\nThe maintainer's 2026-08-10 ruling on #7245 makes that mode-dependent: `thank-you` stays the default for the **public** `/console/f/:slug` path only, while the **internal** `/console/forms/:name` path (where `type: 'form'` actions send operators) defaults to redirecting to the created record.\n\n## Why it is worth a card rather than nothing\n\nThe schema itself is correct and unchanged — `submitBehavior` is `.optional()` with **no** `.default()`, and its `.describe()` string is the neutral `'Post-submit behavior'`, which is why the generated `content/docs/references/ui/view.mdx:269` reproduces nothing false. Only the **source comment** carries the stale claim, so nothing user-facing is wrong today.\n\nIt becomes wrong the moment the renderer half lands (objectui#4109), and a source comment is exactly where the next author reaches for the answer. Small, mechanical, and cheap now; a silent contradiction between contract and comment later.\n\n## Suggested fix\n\nMake the JSDoc mode-aware, mirroring the contract now stated in `content/docs/protocol/objectui/actions.mdx` and `content/docs/ui/forms.mdx` (PR #7417): public path defaults to `thank-you`, internal path defaults to redirect-to-created-record, an explicit `submitBehavior` wins in either mode.\n\nRefs: #7245 (the ruling) · #7417 (docs half, where the flag came from) · objectui#4109 (renderer half).\n\nNo `domain:*` label applied — routing is the triage seat's single-producer territory. (Landing site is `packages/spec/src/**` text, which reads as `domain:spec-surface` territory.)"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 7676,
+  "kind": "issue",
+  "title": "record-share-grant-revoke: package-seeded sharing rules are unaddressable by name (org filter excludes org_id-null rows)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-help"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T10:13:31Z",
+  "updated_at": "2026-08-11T13:51:34Z",
+  "closed_at": "2026-08-11T13:51:34Z",
+  "closed_by": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7676",
+  "body": "## Symptom\nPackage-seeded sharing rules are invisible and unmanageable through the admin API. Stock boot, admin bearer:\n1. `GET /api/v1/sharing/rules` → 200 `{\"data\":[]}` though `sys_sharing_rule` lists **4 active seeded rules**.\n2. `GET /api/v1/sharing/rules/share_red_projects_with_execs` → 404 `RULE_NOT_FOUND`.\n3. `POST …/&lt;name&gt;/evaluate` → 404.\n4. Control: `POST /api/v1/sharing/rules/srule_&lt;row id&gt;/evaluate` → 200 `{matchedRecords:1, expandedUsers:2, grantsCreated:1}`.\n\nConfirming experiment: a rule *created* via the API (where `defineRule` stamps `organization_id` from the same context) **is** findable by name, listed, and evaluable by name.\n\nEnforcement is unaffected — the boot reconcile uses `SYSTEM_CTX`, which carries no org — which is exactly why this stayed invisible.\n\n## Root cause\nLocated by the run. `packages/plugins/plugin-sharing/src/sharing-rule-service.ts` applies a strict-equality org filter that package-seeded rows cannot satisfy: `listRules` does `if (orgId) where.organization_id = orgId` (~L234), and `getRule`'s name fallback is `orgId ? {name, organization_id: orgId} : {name}` (~L255). Package-seeded rows carry `organization_id = null` while an authenticated admin's context carries `organizationId='org_…'`, so only the unfiltered by-id branch survives. Confirmed present on `origin/main`.\n\n## Reproduction\n1. Stock showcase boot with 4 package-seeded sharing rules present in `sys_sharing_rule`.\n2. As admin: `GET /api/v1/sharing/rules` → empty; `GET /api/v1/sharing/rules/&lt;seeded name&gt;` → 404; by-id evaluate → 200.\n\n## Suggested fix\nTreat package-seeded (`organization_id = null`) rows as visible to an org-scoped admin — e.g. match `organization_id = orgId OR organization_id IS NULL` in `listRules`/`getRule`, mirroring how enforcement reads them under `SYSTEM_CTX`.\n\n## Source\nExtracted from the QA run objectstack-ai/objectstack#7637 (framework 92f26f75, console 09987b680)."
+}

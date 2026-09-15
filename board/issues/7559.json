@@ -1,0 +1,35 @@
+{
+  "number": 7559,
+  "kind": "issue",
+  "title": "Commit-revert fails with `VERSION_NOT_FOUND: No history row at version 2` while `/history` shows exactly that row — the revert's lookup key disagrees with the history writer (and the package-level revert route 500s)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T05:25:48Z",
+  "updated_at": "2026-08-11T10:34:57Z",
+  "closed_at": "2026-08-11T10:34:57Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7559",
+  "body": "## Symptom\n\nCommit history itself is **correct**: commits grow by one per publish, and a *failed* publish adds none. What cannot be done is undoing one.\n\n- Commit-revert answers `success: false` with:\n\n  ```\n  VERSION_NOT_FOUND: No history row at version 2\n  ```\n\n- …while `GET …/history` at that same moment lists **exactly that version-2 publish row**.\n- The package-level revert route answers **500**.\n\nExpected: reverting to a version the history endpoint lists restores that version; a revert route that cannot serve the request answers a declared 4xx, not a 500.\n\n## Root cause\n\nThe report locates it to this much and no further: **the revert's lookup key disagrees with what the history writer stores.** The row exists — the reader asks for it under a key the writer did not use (or under a different scope). The report does not open the code, so the specific key (version numbering base, package/overlay scoping, or the parent id) is unidentified; measure the write and the read side of the same row before choosing a fix. The 500 on the package-level route is a separate, unexamined failure on the same feature.\n\n## Relationship to the closed revert family — a distinct key mismatch, not a regression\n\n`revertCommit` / `rollbackMetaItem` had four cards closed on 2026-08-08, all before this run's framework commit (`a86db175`, cut 2026-08-10) — so their fixes are **in** this build:\n\n- objectstack-ai/objectstack#6215 — `rollbackMetaItem` / `revertCommit` always 409 on a package-bound overlay row; `restoreVersion`'s `put()` scoped the parent lookup to `package_id IS NULL`.\n- objectstack-ai/objectstack#6563 — `revertCommit` passed no write intent, so `restoreVersion` defaulted to `override-artifact` → `NOT_OVERRIDABLE`.\n- objectstack-ai/objectstack#6620 — the soft-remove limb hard-coded `intent:'override-artifact'`.\n- objectstack-ai/objectstack#6621 — a successful `revertCommit` never refreshed the `SchemaRegistry`.\n\nReading against #6215 specifically, as asked: this looks like a **distinct key mismatch, not a regression of #6215**. #6215 failed *after* the version row was located, at `restoreVersion`'s `put()` parent lookup, and its signature was a **409**; here the failure is *earlier and different in class* — the version row is not found at all, `VERSION_NOT_FOUND`, on a lookup the history endpoint satisfies. Same family (the revert path's row addressing disagreeing with the writer's), different key and different stage. Caveat: that judgement is made from symptoms only, since the report did not inspect the code — confirm by comparing #6215's fixed `package_id` scoping against whatever scope the version lookup uses.\n\n## Reproduction\n\n1. Publish a package twice so history holds ≥ 2 versions (confirm a *failed* publish adds no commit — it correctly does not).\n2. `GET …/history` — the version-2 publish row is listed.\n3. Revert that commit → `success:false`, `VERSION_NOT_FOUND: No history row at version 2`.\n4. Call the package-level revert route → **500**.\n\n## Source\n\nExtracted from the QA run objectstack-ai/objectstack#7514 (framework a86db175, console 09987b68)."
+}

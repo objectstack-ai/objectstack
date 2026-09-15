@@ -1,0 +1,35 @@
+{
+  "number": 7547,
+  "kind": "issue",
+  "title": "chore(qa): drop the obsolete stale-prose NOTE from records-forms.action-location-matrix once PR #7540 lands",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "huangyiirene"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T05:05:25Z",
+  "updated_at": "2026-08-11T10:04:47Z",
+  "closed_at": "2026-08-11T10:04:47Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7547",
+  "body": "Blocked-by: objectstack-ai/objectstack#7540\n\nOne-line follow-up surfaced by #7420's dev report (a consequence of that fix landing, not a pre-existing defect — deliberately kept out of PR #7540, whose file surface was pinned to the showcase actions file).\n\n## Task\n\n`docs/qa/platform-checklist/areas/records-forms.json`, item `records-forms.action-location-matrix`: the second `source` entry carries an inline NOTE saying RecalcSelectionAction's TSDoc \"still narrates the pre-objectui#3142 rule - stale prose, filed separately\". #7323 added that as an explicit temporary marker \"until this card is worked\". PR #7540 rewrites that TSDoc, so the NOTE becomes false the moment it merges. Delete the NOTE clause from the source string (one-line edit; keep the source citation itself).\n\n## Provenance\n\n- #7420 (the TSDoc card) → PR #7540 (the fix this note points at)\n- #7323 (the checklist-side inversion that planted the marker)\n\nFiled by the `domain:devx` execution seat (session `session_01GZKbx4xyF7U5WXj6ch49BM`) per the linkage-chore rule (issues, not memory). No `domain:*` label applied — routing is the triage seat's single-producer territory; `pm:blocked` + the `Blocked-by:` line above keep it out of selection until #7540 merges."
+}

@@ -1,0 +1,34 @@
+{
+  "number": 7188,
+  "kind": "issue",
+  "title": "finding: page.json's `_note` justifies its prose-in-note citation convention with a parser limitation #5623 removed — the convention now rests on a false premise",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-help"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-10T02:13:24Z",
+  "updated_at": "2026-08-10T11:27:54Z",
+  "closed_at": "2026-08-10T11:27:54Z",
+  "closed_by": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7188",
+  "body": "Observation-class finding surfaced by sweep #7142's review (PR #7179, spec-surface seat, session `session_016R9de1FqP7NvwKvqXi92Gh`). Filed unassigned; grading/routing is triage's call (suggested lane: `domain:spec-surface`; harmless today, prose-accuracy only).\n\n## Fact\n\n`packages/spec/liveness/page.json` carries a file-level `_note` declaring that objectui citations belong in `note` prose rather than the `evidence` field, justified with words to the effect of \"not `evidence`, which resolves framework file:line\" — i.e. the claim that the machine parser can only resolve repo-local paths and a foreign path in `evidence` would break the gate.\n\nThat premise has been false since **#5623** taught `check:liveness` realm attribution: an `objectui:`-prefixed path in `evidence` is counted in the foreign bucket and never resolved locally. PR #7179 exercised this at scale the other way — 19 new foreign `evidence` citations in `view.json` / `field.json`, gate green, and a reverse-verification run proving the realm marker is exactly what keeps them green (dropping one marker produced one MISSING).\n\n## Why it matters (mildly)\n\n- The practice itself is harmless — the gate treats foreign paths identically whether they sit in `evidence` or `note`; only the `evidenceForeign` tally differs.\n- But the *stated reason* is dead, and a convention resting on a false premise invites two failure shapes: someone \"fixes\" page.json to match its siblings and gets reverted citing the `_note`, or someone extends the false premise to a new ledger file. #7179 deliberately honored the `_note` (adding `evidence` there would have contradicted a sentence in the same file — new prose rot of exactly the class that sweep repaired) and flagged instead.\n\n## Fix shapes (either is decision-free)\n\n1. Re-anchor the `_note`'s rationale to the true present-day reason (stylistic uniformity within the file / historical), keeping the convention; or\n2. Retire the convention: move page.json's objectui citations into `evidence` with realm markers, matching `view.json` / `field.json`, and delete the obsolete clause — one file, E22-dated.\n\nPrecedents: #7128 house style; #7179's convention note (where this was first recorded).\n\n## Dedup\n\nSearched open issues for `page.json _note`, `prose-in-note`, `evidence realm` — nothing. #7176 (from the same sweep) is a verdict question, different rows, different class."
+}

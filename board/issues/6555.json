@@ -1,0 +1,34 @@
+{
+  "number": 6555,
+  "kind": "issue",
+  "title": "无 format 的 autonumber 字段两侧渲染不同:driver-sql 兜底成 `{0000}` 发出 `0001`,引擎兜底路径发出裸 `1` —— 同一份元数据换驱动号形不同",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T04:30:18Z",
+  "updated_at": "2026-08-10T12:19:57Z",
+  "closed_at": "2026-08-10T12:19:57Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6555",
+  "body": "发现于 #6468 的实现(PR #6553)途中,**未在该 PR 内顺手修** —— #6468 修的是播种时\n**怎么从已存值里读回计数器**,本条是**渲染兜底**:两侧对「字段没写 format」这件事\n给出的默认格式不同。机制不同、代码位置不同,按 Prime Directive #10 单独开单。\n\n## 缺陷\n\n`autonumberFormat` / `format` 在字段上是可选的。两侧对缺省的处理不一致:\n\n- **driver-sql** 把空格式兜底成 `{0000}`:\n  `packages/drivers/driver-sql/src/sql-driver.ts:4322` 与 `:4404`\n  同一行 `const fmt = rawFmt || '{0000}';`(两处分别在 `initObjects` 与外部对象注册路径)。\n  渲染结果是 4 位零填充 —— `0001`、`0002`、…\n- **引擎兜底路径**(驱动不声明 `supports.autonumber` 时)不兜底,直接用空格式:\n  `packages/objectql/src/engine.ts:2115`\n  `const tokens = parseAutonumberFormat(typeof fmt === 'string' ? fmt : '');`\n  空 token 列表在 `renderAutonumber` 里走 `width === null` 分支\n  (`packages/spec/src/data/autonumber-format.ts:210-212`),渲染出**裸计数器** —— `1`、`2`、…\n\n## 实测\n\n在 #6468 的工作树上,同一份元数据 `{ rec_no: { type: 'autonumber' } }`(无 format),\n库内已有 `1` / `2` / `10` 三行:\n\n- `SqlDriver.create()` ⇒ `rec_no = '0011'`\n- 引擎兜底路径(`InMemoryDriver`,`supports = {}`)⇒ `rec_no = '11'`\n\n两侧的**计数器都是 11**(播种一致,#6468 已 pin 住这一点),分歧纯粹在渲染宽度。\nPR #6553 的 `packages/drivers/driver-sql/src/sql-driver-autonumber-suffix.test.ts`\n里那条 legacy 用例已把 driver 侧的 `'0011'` 显式 pin 住,并在注释里点名这条分歧,\n以免下一个读者把它误当成 #6468 的一部分。\n\n## 可达性\n\n不需要任何异常写法 —— 声明 `{ type: 'autonumber' }` 且不写 format 即可。典型暴露面:\n开发/测试跑 memory 驱动、生产跑 SQL 驱动,同一份元数据在两处发出的单号**字面不同**\n(`1` vs `0001`),测试里断言的号形到了生产就不成立;数据迁移或换驱动时,同一对象\n的历史号形也会在切换点前后突变。\n\n## 供分诊参考(不预设结论)\n\n三条路各有代价,需要先定「无 format 的 autonumber 该长什么样」这个契约问题:\n\n1. **引擎跟随 driver-sql**,空格式也兜底成 `{0000}`;\n2. **driver-sql 跟随引擎**,去掉 `|| '{0000}'`,无格式即裸计数器 —— 但这会改变**已落地\n   数据**的号形(现存 `0001` 之后接 `2`),需要兼容判断;\n3. **在 spec 侧把默认写进契约**(例如 `FieldSchema` 对 autonumber 给出 `format` 的\n   声明式默认),让「declared = enforced」,两侧都没有自己的兜底。\n\n⚠️ 与 #6468(PR #6553,播种解析)同区域但不同函数:#6468 动的是 `seedAutonumber` /\n`scanMaxNumericTail` 的**读回**,本条在 `applyAutonumbers` / `initObjects` 的**格式\n兜底**。#6468 落地后再动本条不会冲突。"
+}

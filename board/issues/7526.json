@@ -1,0 +1,36 @@
+{
+  "number": 7526,
+  "kind": "issue",
+  "title": "Three ledgered /meta routes are never mounted and die in the `/meta/:type` catch-all — the route audit can't see this class because it treats the ledger as ground truth for what's mounted",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-help"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T04:59:10Z",
+  "updated_at": "2026-08-11T09:32:40Z",
+  "closed_at": "2026-08-11T09:32:40Z",
+  "closed_by": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7526",
+  "body": "Three instances of one defect class, found independently by two QA runs on the same build (objectstack-ai/objectstack#7514 `metadata-registry-serving` / `metadata-authoring-roundtrip`, and objectstack-ai/objectstack#7463 `route-ledger-live-parity`). Filed as one card because they share a single root cause and a single fix.\n\n## Symptom — three dead routes, two different disguises\n\n**1. `GET /meta/types`** is swallowed by the generic `/meta/:type` handler and answers `{\"type\":\"types\",\"items\":[]}` — shape-identical to `/meta/zzz_not_a_type`. The dispatcher implements the branch; REST never registers it. Control: `/meta/diagnostics` and `/meta/_drafts` **do** work, so literal routes registered *before* `:type` are honored — this is a missing registration, not an ordering theory.\n\n**2. `GET /meta/:type/:name/published`** is dead the same way: it returns a protection-envelope stub named `/published`, identical before publish **and for a bogus name**, so it can never 404. `rest-server` pre-registers `/references`, `/layers`, `/history`, `/audit`, `/diff` before the compound-name route — but never `/published`.\n\n**3. `GET /meta/objects/:name/state/:field`** → `404 {\"error\":\"Not found\"}`, **byte-identical to an unmounted-path control**, so it is Hono's `notFound` and not a handler answer. Expected per `route-ledger.ts` (ADR-0020 D3.3): `200 {object, field, from, next:[…]}`. The domain handler exists and **ships in dist** (so this is not stale-dist); REST registers ~17 `/meta` routes maxing at **3 path segments**, and this route needs 4 — so no registration can ever deliver it.\n\nTwo failure disguises, both worse than a 404: #1 and #2 return a **plausible 200** that a client cannot distinguish from \"the thing you asked for is empty\", and #2 can never 404 even for a nonexistent name.\n\n## Root cause\n\nA catch-all `/meta/:type` absorbs any single-segment path that no literal route claimed first, and the REST registration table has no mechanical relationship to either the dispatcher's implemented branches or the route ledger's declared entries. Routes get added to the ledger and to the dispatcher, and the REST mount is a **third place** someone has to remember.\n\n## Why the existing route audit cannot catch this — the important half\n\nobjectstack-ai/objectstack#3642 (closed, PR #3658) built the reverse guard: every URL the SDK constructs must match a pattern in some surface's ledger. That guard's source of truth for \"what is mounted\" is **the union of the ledgers**.\n\nThat is precisely the assumption these three defects falsify. `/meta/objects/:name/state/:field` **is** in `route-ledger.ts` — so under #3642's guard it counts as mounted, an SDK method calling it passes the check, and it 404s at runtime anyway. The ledger is a *declaration*; the guard reads it as an *observation*.\n\nSo the whole audit chain (#3563 / #3587 / #3636 / #3642) is green on this class by construction, and will stay green no matter how many more instances land. That is the actual thing to fix.\n\n## What the fix should be\n\nA **route-ledger ↔ live-mount parity gate**: boot (or otherwise introspect) the real server, enumerate the patterns it **actually** mounts, and assert both directions against the ledgers —\n\n- every ledgered route is really mounted (catches all three defects above);\n- every mounted route is really ledgered (catches the unledgered-mount list below).\n\nThe gate must read the **live mount table**, not a hand-maintained list — a second hand-maintained list would have exactly the drift this card is about. Note that Hono's registration order is part of the answer for the catch-all cases: a literal route registered after `:type` is mounted-but-unreachable, so \"is it in the table\" is necessary and not sufficient for the `/meta/*` family; the gate should probe reachability for routes that sit behind a catch-all sibling.\n\n⚠️ **Do not fix only the three routes.** Three instances in one build, found by two independent runs, is the signal — the missing gate is the deliverable. Fixing the routes without the gate buys the next three.\n\n## Also in scope (same seam, cheap to close together)\n\n**Unledgered live mounts** — these answer 200 but appear in no route ledger (PENDING-GAPS §E, still open): `/api/settings`, `/api/v1/datasources`, `/api/v1/datasources/drivers`, `GET /api/v1/health`, `GET /api/v1/meta/types`.\n\n**An unpinned drift in the test that should have guarded #1:** the pinned dogfood test says `/meta/types` in its header comment but actually calls `/meta`. The comment describes coverage that does not exist — worth fixing in the same pass, and worth asking whether any sibling pin has the same gap.\n\n## Acceptance criteria\n\n- All three routes serve their documented responses; `/meta/:type/:name/published` 404s for a bogus name.\n- A CI gate fails when a ledgered route is not reachably mounted, and when a mounted route is unledgered.\n- The gate derives mounted patterns from the running server, not from a maintained list.\n- The dogfood pin that claims to cover `/meta/types` actually calls it.\n\n## Source\n\nExtracted from the QA runs objectstack-ai/objectstack#7514 and objectstack-ai/objectstack#7463 (framework `a86db175`). Prior art: #3642 / #3658 (the reverse guard whose ledger-as-ground-truth assumption this card corrects), #3563, #3587, #3636. Adjacent and closed: #7294 (a served `/meta` route with no spec declaration — the declaration half of the same seam)."
+}

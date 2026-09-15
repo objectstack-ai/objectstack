@@ -1,0 +1,33 @@
+{
+  "number": 18297,
+  "kind": "pull_request",
+  "title": "fix(pm): post-stamped counts a same-second later comment as after the acknowledged one",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-15T11:29:34Z",
+  "updated_at": "2026-09-15T12:08:59Z",
+  "closed_at": "2026-09-15T12:08:57Z",
+  "closed_by": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "merged_at": "2026-09-15T12:08:57Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/18297",
+  "body": "Fixes #18295\n\n## The defect\n\n`unreadComments` in `scripts/pm/post-stamped.mjs` picked `newest` as the last element of a list sorted by `created_at` **with an `id` tiebreak**, but derived `after` — the comments that landed after the acknowledged one — from a strictly-later comparison on `created_at` **alone**. Two comments written inside one second (a batch, a bot) with `--ack-through` naming the lower id: the refresh was rightly refused as `ack-not-newest` and the remedy line named the right id, but the refusal's head read `0 comment(s) landed after it` and listed nothing — a count contradicting the refusal it sits in.\n\nTwo orderings answering one question is the whole defect, so the fix is one ordering, not a second comparison bolted onto the filter.\n\n## The fix\n\nOne comparator, `byCommentOrder` (`created_at`, then `id`), declared once beside `commentCreatedMs` and read by **both** the newest pick and the \"landed after\" set. `id` breaks only an exact tie, so it never outranks the clock; comments whose `created_at` is unreadable share one instant and are ordered by id — the same tie the sort already resolved that way. The window filter keeps reading the instant alone, because it compares a comment against a stamp, not against another comment.\n\nWhich refusal fires on which input is unchanged; only the count and the listing move.\n\n## Reverse verification — ablation from the committed state, hash-proved\n\nBlobs: HEAD `0e6d55abf5a895c285bdb20879fb2024915543cb`, pre-fix `48275456ba4f55f10422aa25c76cba7e45015e73`.\n\n**Leg A — the unpatched derivation** (pre-fix blob restored on disk; on-disk hash re-read and matched, `byCommentOrder` occurrences 0). The reproducer, called on the pure core:\n\n```\nREPRO kind=ack-not-newest after.length=0 after.ids=[] newest.id=101\nREPRO head: post-stamped: REFUSED — --ack-through=100 is not the newest comment on #18295: 0 comment(s) landed after it. Nothing was written.\n```\n\nRestored with `git checkout HEAD --`; on-disk hash back to `0e6d55ab`, `git diff HEAD` and `git status --porcelain` both empty. After the restore:\n\n```\nREPRO kind=ack-not-newest after.length=1 after.ids=[101] newest.id=101\nREPRO head: post-stamped: REFUSED — --ack-through=100 is not the newest comment on #18295: 1 comment(s) landed after it. Nothing was written.\nREPRO listing-names-101: true\n```\n\n**Leg A says nothing about the new self-test cases** — a whole-file revert takes them with it, so its `--self-test` is green at 204 cases. Recorded as observed, not as a pass.\n\n**Leg B — the derivation alone reverted, the new cases kept** (mutation on top of HEAD; mutated blob `a577b24bb6afa543d4db105f44cc8c9121e4e956`, proved different from the HEAD blob and proved on disk by occurrence counts: new form 0, old form 1). `--self-test` exits **1**, `4 of 212 case(s) failed`:\n\n```\n✗ …and the later id COUNTS as after it — the count no longer contradicts the refusal it sits in (after=[])\n✗ …so the refusal head reads 1, not 0\n✗ …and lists that comment, so the seat reads it rather than a count\n✗ …the newest pick and the after set read ONE order: whoever is newest is in the set the refusal lists\n```\n\nThe fifth new refusal case stays green there on purpose: the refusal itself was always right, only its count was not. Restore: on-disk hash back to `0e6d55ab`, `git diff HEAD` and `git status --porcelain` empty, `--self-test` back to 212 passing. Both legs run a `trap … EXIT INT TERM` restore against an absolute path; neither leaves a temporary file in the tree.\n\n## Self-test\n\n204 → **212** cases across 10 batteries; the unread-knock battery's floor 41 → **49**, the measured count. Added: the filed reproducer (after = `[101]`, the head reads 1, the listing names 101), the newest/after agreement invariant, the ordinary later-second control restated as unchanged, the same-second pair with the ack naming the **higher** id still cleared, and the ordinary ack-the-newest case still cleared.\n\n## Gates\n\n`node scripts/pm/dispatch-gates.mjs --commands scripts/pm/post-stamped.mjs` derived **32** commands; all 32 ran, all exit 0. Reconciliation on the same tree:\n\n```\n✓ dispatch-gates --ran: 32 derived famil(ies) accounted for — 32 run, 0 NOT-MEASURED\n```\n\nAmong them `pnpm check:pm-dispatch-gates` (the gate source's own battery, run detached: 1730 cases, exit 0, 439.0s on this box), `pnpm check:pm-post-stamped`, `pnpm check:nul-bytes`, `node scripts/check-self-test-wired.mjs`. Plus, outside the derivation: `node --stack-size=4000 node_modules/eslint/bin/eslint.js scripts/pm/post-stamped.mjs` — clean; and a control-character self-scan over the file — no hit.\n\n## Acceptance notes\n\n- `skip-changeset`: `scripts/pm/**` is tooling, shipped by no package's `files[]` — nothing published moves.\n- Landing: non-governed surface, so the skills seat lands it in-seat after review. Left **draft**, no reviewers requested, no auto-merge, no queue.\n- Serial with PR #18294 (landed), which touched the same function; the sibling card #18296 names a different defect shape in this file and is not addressed here.\n- No out-of-scope findings to file: `commentCreatedMs` has exactly three call sites, and the third (the read-window filter) compares a comment against a stamp instant rather than against another comment, so it is not a second ordering.\n\n---\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01HZfg2AwVX191qCizp88gQr\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01HZfg2AwVX191qCizp88gQr)_"
+}

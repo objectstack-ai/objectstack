@@ -1,0 +1,36 @@
+{
+  "number": 7608,
+  "kind": "issue",
+  "title": "`/auth/me/permissions` and `/me/apps` still apply the baseline only when the caller resolves to ZERO sets — the ADR-0090 D5 fallback cliff, one plane over from where it was abolished",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-help"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T07:46:09Z",
+  "updated_at": "2026-08-11T09:36:41Z",
+  "closed_at": "2026-08-11T09:36:41Z",
+  "closed_by": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7608",
+  "body": "Found while implementing #7555 (PR #7605); deliberately **not** folded into that PR, whose scope is baseline composition rather than baseline application.\n\n## The defect\n\nBoth permission resolutions in `packages/plugins/plugin-hono-server/src/current-user-endpoints.ts` apply the baseline set(s) **only when the caller's own names resolved to nothing**:\n\n- `:740` — the `/auth/me/permissions` object/field surface\n- `:954` — the `/me/apps` capability + tab surface\n\nBoth spelled `if (resolved.length === 0 && ...)`.\n\nThat is exactly the fallback **cliff** ADR-0090 D5 abolishes, verbatim:\n\n> The fallback cliff is abolished. Today's semantics (\"fallback applies only while the user has *zero* explicit grants\") mean the first real grant silently *removes* the user's baseline. `everyone` is additive like any other position: baseline ∪ explicit, always.\n\n`SecurityPlugin.resolvePermissionSetsForContext` was fixed for this years-in-ADR-terms ago and applies the baseline **additively** on every authenticated request. These two endpoints were not, so the two planes disagree the moment a user holds any explicit grant at all.\n\n## Consequence\n\nA member who receives their first position or permission-set grant keeps the baseline on the **data** plane (the engine middleware resolves it additively) but loses it on the **UI** plane:\n\n- `/auth/me/permissions` reports object/field access computed without the baseline — narrower than what a read will actually return;\n- `/me/apps` computes `systemPermissions` and `tabPermissions` without the baseline, so a baseline-granted tab or capability can disappear from the served app list for a user who demonstrably still has it.\n\nFail-direction is *closed* (the UI under-reports), so it presents as \"the console hides things the API allows\" rather than as an exposure.\n\n## Not fixed by #7605\n\nPR #7605 changes **which** names those two call sites resolve (the composed baseline instead of a single displaced name) and leaves the `resolved.length === 0` guard exactly as it found it — widening the guard is a distinct behaviour change for every user who holds a grant, and it deserves its own measurement rather than riding along on a composition fix. Both `fallbackNames.length > 0` guards in that PR are the same cliff with a new variable name.\n\n## Suggested shape\n\nMirror `resolvePermissionSetsForContext`: push the baseline names into `requested` before the single `resolvePermissionSets` call, rather than resolving them in a second call gated on emptiness. Worth checking at the same time whether the endpoints should stop re-implementing this resolution at all and call the plugin's own service instead — the drift is a symptom of two copies of one rule.\n\nPlease measure the before/after on a real member with one explicit grant; the interesting number is how many tabs/capabilities appear that did not before.\n"
+}

@@ -1,0 +1,32 @@
+{
+  "number": 7503,
+  "kind": "issue",
+  "title": "Publish-time lint: `sharingModel: controlled_by_parent` with no `master_detail` relation is statically detectable and unreported",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-help"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T04:09:11Z",
+  "updated_at": "2026-08-11T06:37:59Z",
+  "closed_at": "2026-08-11T06:35:47Z",
+  "closed_by": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7503",
+  "body": "Found while implementing #7474 (PR splitting the six `assertControlledByParentWrite` refusal legs). Filed rather than fixed: the maintainer ruling of 2026-08-11 on #7474 ordered the runtime split only, and explicitly left question 2 of that card — lint vs runtime — undecided. This is that question, filed so it is not lost.\n\n## What was measured\n\nAn object that declares `sharingModel: 'controlled_by_parent'` and has no relation for the platform to derive access from is now refused at RUNTIME with `422 INVALID_METADATA` (the #7474 PR). Nothing reports it before that:\n\n- `packages/lint/src/validate-security-posture.ts` carries the adjacent rules — `security-owd-unset`, `security-owd-alias`, `security-master-detail-ungranted` (a detail object that no authored permission set grants), `security-private-no-readscope` — and none of them checks this one. Grep for `controlled_by_parent` in `packages/lint/src` returns only the OWD vocabulary list, the D11 comment, and the `security-master-detail-ungranted` docblock.\n- The check needs nothing a lint pass does not already hold: the object document carries `sharingModel` and `fields`, and the relation resolution is the same three-step fallback `resolveCbpRelation` performs at runtime (`security-plugin.ts`) — a required `master_detail`, then any `master_detail`, then a required `lookup`. An object matching none of the three has nothing to derive from.\n\n## Why it is worth a rule\n\nThe runtime refusal fires when a user attempts a write on that object — i.e. after the app is published and in someone's hands, and only on the detail objects a caller happens to touch. The defect exists from the moment the metadata is authored. This is the shape `security-master-detail-ungranted` already exists for, one gate earlier.\n\nIt matters most for AI-authored metadata: `controlled_by_parent` is a plausible thing for an agent to write next to a lookup it forgot to mark `required`, and nothing in the authoring loop says so.\n\n## Suggested shape\n\nA new advisory rule alongside `SECURITY_MASTER_DETAIL_UNGRANTED` in `validate-security-posture.ts` — `error` rather than `warning` is arguable, since the runtime answer is already a hard refusal, and that severity choice is the one thing this needs a decision on.\n\n## Pointers\n\n- `packages/lint/src/validate-security-posture.ts` — the rule family and its existing master-detail rule\n- `packages/plugins/plugin-security/src/security-plugin.ts` — `resolveCbpRelation` (the relation resolution a rule must mirror) and `assertControlledByParentWrite` (the runtime refusal)\n- #7474 — the runtime split; its question 2 is this issue"
+}

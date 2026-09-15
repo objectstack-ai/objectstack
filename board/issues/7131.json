@@ -1,0 +1,34 @@
+{
+  "number": 7131,
+  "kind": "issue",
+  "title": "finding: \"no runtime consumer\" on docs-shaped dead ledger rows is contradicted by metadata-admin previews — JobPreview renders `job.label`/`job.description`, TranslationPreview renders `translation.label`/`.name`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-help"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T19:14:03Z",
+  "updated_at": "2026-08-10T11:28:29Z",
+  "closed_at": "2026-08-10T11:28:29Z",
+  "closed_by": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7131",
+  "body": "Observation-class finding from the axis-③ liveness audit (ledger claims vs measured objectui readers). Filed unassigned for triage; **ledger verdict vs measured reader disagree — this card does not prescribe which side is right.** Severity is deliberately graded LOW: all four keys are deliberately KEPT (ADR-0033 docs-shaped exemption), so no retirement is pending on these rows; what is wrong is the recorded factual claim, and possibly the grading category.\n\n## Audited revisions (E24)\n\n- objectstack `origin/main` @ `4ac12ef4cfe4a1925fb7e950c56d7aff0bbc5381`\n- objectui `origin/main` @ `5bfaabde05c3876c9604a2aa47f4822f9e6de8b5`\n\nBoth read via `git fetch` + `git archive` of `origin/main`, not working trees.\n\n## The ledger claims\n\n- `packages/spec/liveness/job.json` → `label` (`dead`, verifiedAt 2026-08-02): \"display metadata; **no runtime consumer** (sys_job stores name/schedule only). Docs-shaped annotation, deliberately KEPT…\" — `description`: \"same as `label`\".\n- `packages/spec/liveness/translation.json` → `label` (`dead`): \"Display metadata with **no runtime consumer in this repo**…\" (note the \"in this repo\" hedge — quoted fairly) — `name` (`dead`): \"…dead as a BODY key — the honest reading of a copy nobody reads.\"\n\n## Measured reality at objectui @5bfaabd\n\n`packages/app-shell/src/views/metadata-admin/previews/JobPreview.tsx:257-258` reads the job draft's body keys and renders them (`:313`, `:316`):\n\n```ts\n  const label = String(d.label ?? jobName);\n  const description = (d.description as string | undefined) ?? '';\n```\n\n`packages/app-shell/src/views/metadata-admin/previews/TranslationPreview.tsx:67` reads the translation draft's body `label` and `name`:\n\n```ts\n  const label = (d.label as string | undefined) ?? (d.name as string | undefined) ?? name ?? '';\n```\n\nIn both, `d` is `draft as Record<string, unknown>` — the metadata body of the exact type the ledger row covers, not a same-named key on another object.\n\n## Why this is worth a card despite the KEPT status\n\nBy the ledger's own methodology these surfaces count: the `permission.rowLevelSecurity.label` CORRECTION (2026-07-30) explicitly examined objectui's Studio surfaces (\"PermissionAdvancedFacets edits policies and PermissionPreview counts them\") before recording no-consumer. Under the same instrument, `job.label`/`job.description` and `translation.label`/`.name` measure as **rendered** today. Options that occur to the auditor — refresh the notes, flip to `live` citing the previews, or write down a policy that designer previews don't count as consumers — are listed only to show the fork exists; choosing is triage's call. Note the `translation.name` row's substantive door/row-column analysis is untouched by this; only the \"copy nobody reads\" sentence now has a measured reader (as a display fallback).\n\n## Dedup\n\nOrg-wide open-issue searches for `JobPreview label`, `liveness ledger` (open) return no card on this; objectui#3901 is the form-view `aria` specimen, distinct.\n\n## Suggested lane\n\nspec-surface / ledger hygiene (single-repo: the fix lands in the ledgers either way, unless triage picks the preview-cleanup side).\n\nProvenance: cross-repo read-only audit, session https://claude.ai/code/session_018ffcE95NaMJcL9XJ9VDYgk"
+}

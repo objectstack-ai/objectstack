@@ -1,0 +1,34 @@
+{
+  "number": 7419,
+  "kind": "pull_request",
+  "title": "docs(spec,formula,driver-memory): the 2026-08-10 EXCLUDE ruling was withdrawn — record include as re-affirmed (#7406)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/m",
+    "skip-changeset",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-10T10:40:37Z",
+  "updated_at": "2026-08-10T12:10:55Z",
+  "closed_at": "2026-08-10T12:10:52Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-10T12:10:52Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/7419",
+  "body": "Closes #7406. Refs #5299, #5298, #5146, #5962, #5499, PR #7391 (`5f7669e0c`).\n\n## Why\n\nPR #7391 landed minutes before the maintainer **withdrew cells 1 and 3** of the 2026-08-10 07:33Z ruling on #5299 and **re-affirmed #5298's include direction** as the platform semantics (`$ne` / `$nin` / `$notContains` MATCH no-value rows). `$exists` = has-value — cell 2, shipped in PR #5962 — was never in conflict and stands.\n\nThat left the tree proclaiming a withdrawn target in `filter-logic-conformance.ts`, the one file whose job is to be the single source of truth, plus matching \"ruled target / superseded direction\" annotations in the formula and driver-memory pins. This rewrites that record.\n\n## ⛔ Zero behaviour\n\nOnly comments and `describe` / `it` titles move. **Every `expect(...)` line is byte-identical** — verified by filtering the diff to non-comment lines, which yields six `describe`/`it` title changes and nothing else. `driver-memory` is inside the #5499 freeze; annotation-only edits are the sanctioned exception here and no live path is touched.\n\n## What changed\n\n**`packages/spec/src/data/filter-logic-conformance.ts`**\n- The family-4 note is rewritten as what it now is: a reversal that was ruled, **measured, and withdrawn the same day**. It moves out from under the \"RULED but not yet enrolled\" heading — it is not a pending family and nothing waits on a backend — into its own section, and that heading's singular wording (\"the one family left\", \"the one that remains\") is restored.\n- The eleven-surface **measurement table stays**. It is the record of *why* the reversal was declined: a cross-backend programme (flip `formula` and `read-scope-sql` together — they are security-coupled — rewrite four copies of `nullValueSatisfiesOperator`, re-rule two enrolled rows, touch two frozen backends' live paths) buying a worse failure mode, silent absence in place of visible surplus, with no business pull.\n- The enrolled `$ne` / `$not` `d`-column rows now state the **affirmed** direction rather than a superseded one.\n- One table cell that judged `driver-memory`'s reference matcher \"already ruled-correct\" on `$notContains` is corrected to DIVERGENT — under the withdrawal that answer is the outlier again.\n- The residual `$exists` enrolment blocker (the DEBT ledger is per driver × case-set, not per case; two of five scored drivers are frozen) is kept, re-pointed at the cell it actually still blocks.\n\n**`packages/formula/src/matches-filter-not-null-safe.test.ts`** — the section becomes \"the affirmed direction\". The security coupling it documents (this evaluator is the RLS write-side `check`, `read-scope-sql` the read-side lowering, converged by PR #5962) is kept as the tripwire for anyone re-proposing a reversal.\n\n**`packages/drivers/driver-memory/src/memory-matcher-not-null-safe.test.ts`** — re-annotated against the affirmed direction: `$notContains` is DIVERGENT again rather than canonical, `$nin` is half-converged (null value matches as required; missing key still does not), `$exists` is CONVERGED and unchanged.\n\n**`packages/drivers/driver-memory/src/memory-driver-document-not.test.ts`** — the live-vs-reference pin now records that **neither column is wholly right**: reference is correct on `$exists`, live is correct on `$nin` and `$notContains`. The 07:33Z ruling would have made reference the target on all three.\n\n`.changeset/filter-null-semantics-ruled-target.md` is **left alone** — it describes what PR #7391 did at the time and is historical.\n\n## Changeset\n\nNo changeset; this PR takes the **`skip-changeset`** label. Read from `scripts/check-empty-changeset.mjs`'s own prescription: *\"It releases nothing (… tests-only, and the like) → delete the changeset and apply the `skip-changeset` label (route 2).\"* This PR ships comments and test titles only — no runtime behaviour, no API, no type change. An empty changeset is explicitly rejected by that gate (#4898 / #4551), so the label is the route.\n\n## Verification — all `completed: success`\n\n**Byte-identity bar**: `check:driver-conformance` output captured before and after (baseline taken by restoring the four files to `origin/main` in-tree, never `git stash`), then `diff`ed: **identical**, both `OK — 36 covered cell(s), 4 in the DEBT ledger, 0 exempt`.\n\nSuites:\n| suite | result |\n|---|---|\n| `@objectstack/spec` | 366 files / 9557 tests passed |\n| `@objectstack/formula` | 24 files / 623 tests passed |\n| `@objectstack/driver-memory` | 19 files / 560 tests passed |\n\nThe 9 spec gates, individually: `check:generated --reconcile-only`, `check:skill-docs`, `check:spec-changes`, `check:upgrade-guide`, `check:export-origins`, `check:authorable-surface`, `check:docs`, `check:skill-refs`, `check:react-blocks` — all `completed: success`.\n\nAlso green: `check:template-manifests`, `check:skill-examples`, `check:exported-any`, `check:dual-source-exports`, `check:api-surface`, `check:driver-conformance`, `check:driver-memory-census`, `check:spec-parsed-alias`, `check:empty-changeset`, and `tsc --noEmit` on `packages/spec`.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01KAmtMhy6R2uBfATXW1o6Ku)_"
+}

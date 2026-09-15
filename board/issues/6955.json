@@ -1,0 +1,36 @@
+{
+  "number": 6955,
+  "kind": "issue",
+  "title": "objectui: the Unpublished banner and per-app publish read `_unpublished`; the App Switcher keeps filtering on `hidden` (#4829 A1 objectui half)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched",
+    "repo:objectui",
+    "target:v17"
+  ],
+  "assignees": [
+    "os-help"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T06:21:14Z",
+  "updated_at": "2026-08-11T07:33:54Z",
+  "closed_at": "2026-08-11T07:33:54Z",
+  "closed_by": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 9,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6955",
+  "body": "Blocked-by: #4829\n\nPart of #4829 (maintainer ruling A1). Filed by the `domain:spec` seat at ACCEPT time from PR #6942's measured mandatory-answer contract; routing label left to the triage seat (lands in `objectstack-ai/objectui`).\n\n## The contract, verbatim from the framework half\n\nAfter PR #6942, `app.hidden` means **navigation presentation only** (\"Hidden apps stay fully routable and permission-checked\") and the ADR-0045 publish gate lives on the machine-managed **`_unpublished`** key.\n\n| Surface | Before | After |\n|---|---|---|\n| **Unpublished banner** | `app.hidden === true` | **`app._unpublished === true`** |\n| **Publish button** | `POST /packages/:id/publish-drafts` | **unchanged** — the flip now clears `_unpublished` server-side |\n| **Direct per-app publish** | `PUT /meta/app/{name}` body `{\"hidden\": false}` | **`PUT /meta/app/{name}` body `{\"_unpublished\": false}`** |\n| **App Switcher / launcher** | filters on `hidden` | **keeps filtering on `hidden`** — which now means only what it says. ⛔ Must NOT filter on `_unpublished`: the server already withholds those apps |\n\n**Wire fields `unhiddenApps` / `unhideError`** in the `publish-drafts` response are **deliberately unchanged** by PR #6942 — renaming a contract the framework repo cannot verify would be the same class of silent break that card exists to fix. Rename them in lockstep with this card, or not at all; state which in the PR.\n\n## Sequencing\n\nThe framework half is an ADR PR reserved for maintainer hand-merge (AGENTS.md PD #14). Land this after it merges and after objectui's `@objectstack/spec` pin advances past that release — before the pin bump, `_unpublished` does not exist in objectui's types.\n\nNote for whoever prices this: the account-app 404 that #4829 fixes is server-side and needs no objectui change; this card is only about the publish-state UI reading the right key.\n\nRefs: #4829 (ruling chain), PR #6942 (framework half), #6954 (cloud half), ADR-0045."
+}

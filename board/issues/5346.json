@@ -1,0 +1,35 @@
+{
+  "number": 5346,
+  "kind": "issue",
+  "title": "driver-mongodb 带着 #5328 的同一条缝:形状错误的 `$between` / 非数组 `$and`、`$or` / 非对象 `$not` 全被静默吞掉,且它的算子拒收没有 ADR-0112 信封",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "huangyiirene"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T00:04:10Z",
+  "updated_at": "2026-08-11T05:40:09Z",
+  "closed_at": "2026-08-11T05:40:09Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5346",
+  "body": "修 #5324 / #5328 时把 driver-memory 的 `normalizeFilterCondition` 与 driver-mongodb 的 `translateFilter` 逐 arm 对读(后者是前者 `$not` → `$nor` 改写的先例),发现 mongodb 侧带着同一批「该拒收没拒收」的 arm。按 Prime Directive #10 单独记在这里,unassigned。\n\n## 位置\n\n`packages/plugins/driver-mongodb/src/mongodb-filter.ts`,`translateCondition`(:96)与 `translateFieldOperators`(:170)。\n\n## 三条静默吞掉 + 一条信封缺失\n\n### 1. `$between` 形状错误 —— 与 #5328 逐字同款\n\n```ts\ncase '$between':\n  if (Array.isArray(value) && value.length === 2) {\n    result.$gte = store(value[0]);\n    …\n  }\n  break;               // ← 形状不对时什么都不写,整条约束消失\n```\n\n这是 #5328 在 driver-memory 上修掉的那段代码的孪生。同一输入 `{ score: { $between: 5 } }`:\n\n| 后端 | 行为 |\n|---|---|\n| driver-sql | `INVALID_FILTER` / 400 —— `Operator \"$between\" on field \"score\" requires a [min, max] value array.`(实测) |\n| driver-memory | `INVALID_FILTER` / 400(#5328 修复后,措辞与 SQL 首句逐字一致) |\n| driver-mongodb | **不抛**,字段归一化成 `{}`,交给 MongoDB → 结构相等比较 |\n\n### 2. `$and` / `$or` 非数组、`$not` 非对象 —— 整条组合子消失\n\n```ts\ncase '$and':\n  if (Array.isArray(value)) { … }\n  break;               // 非数组 → 什么都不写\ncase '$not':\n  if (value && typeof value === 'object') { … }\n  break;               // 非对象 → 什么都不写\n```\n\n一个组合子写坏了不报错,而是**不产生任何谓词** —— 在 `$and` 位置上等于「匹配全表」,方向是放大。driver-sql 的 `assertFilterNodeList` / `assertFilterNode`(#5134)与 driver-memory 现在的 shape gate(#5324)都拒收这些。\n\n### 3. 未知算子拒收了,但丢了信封\n\n```ts\ndefault:\n  throw new Error(`[mongodb] unsupported filter operator '${op}'`);\n```\n\n拒收本身是对的(注释还写明了 `$where` / `$function` 的 P0 理由,值得保留)。缺的是**拒收的身份**:\n\n- 没有 `code`,没有 `status` → `mapDataError` 走 default 分支 → 客户端拿到 500 形状的裸 `{ error }`。这正是 #4436 为 driver-sql、#5240 为 driver-memory 已经补上的那件事,mongodb 是**唯一还没补**的后端。\n- 消息里带 `[mongodb]` 前缀 —— driver-sql 的 `unsupportedFilterError` 注释明确写过这类前缀「is driver-internal wording, and shipping it to clients is exactly what the #3867 sanitiser exists to stop」,已从 SQL 侧删除。\n\n另外 `translateCondition` 的 `default` 分支会跳过 `['limit','offset','fields','orderBy']` 四个 key —— 这是把**查询级**字段混进 `where` 的历史兜底,`QueryASTSchema.where` 是 `FilterConditionSchema`,不该有这四个 key;顺带一并看。\n\n## 建议(不代裁决)\n\n四家后端里三家已经统一到「无法编译 → `INVALID_FILTER` / 400 + 位置信息」,mongodb 补齐即可:\n\n- 建一个与 `driver-sql` / `driver-memory` 孪生的 `filter-refusal.ts`(两边现有实现逐字可抄),`unsupportedFilterError` 带 `INVALID_FILTER` / 400、不带包名前缀;\n- `$between` 补 else 抛错,措辞用 driver-sql 的首句 `Operator \"$between\" on field \"…\" requires a [min, max] value array.`;\n- 组合子操作数补 `assertFilterNode` / `assertFilterNodeList`;\n- `default` 的现有 throw 换成带信封的版本。\n\n## 未验证的部分\n\n我**没有跑** driver-mongodb 的测试套件(它需要真实 mongod / `mongodb-memory-server`,本地未起),以上全部来自逐行代码对读,不是实测。`mongodb-filter-logic-conformance.test.ts` 是否会因为这些改动变红也未验证。请实现方先实测再动手。\n\n关联:#5328(driver-memory 的 `$between` 同款,已修)、#5324(未知算子逃出信封,已修)、#5134(driver-sql 的组合子形状门)、#4436 / #5240(信封统一)、#3867(消息前缀不外泄)、#4405(mongodb 的 `$not` → `$nor` 翻译)。"
+}

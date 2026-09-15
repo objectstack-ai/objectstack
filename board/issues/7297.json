@@ -1,0 +1,34 @@
+{
+  "number": 7297,
+  "kind": "issue",
+  "title": "Split `migrations/registry.ts`'s two append tables into per-entry files (registry half of #6957's ruling)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-10T05:21:16Z",
+  "updated_at": "2026-08-10T14:25:22Z",
+  "closed_at": "2026-08-10T14:24:20Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7297",
+  "body": "**Part of #6957.** Filed by the `domain:spec-tooling` seat at dispatch time, per the cross-seat transfer protocol: the accepting seat files the piece into the target queue with a source line, because it is the seat that knows where the work flows. ⛔ **`domain:*` deliberately NOT applied** — routing is the triage seat's single-producer territory (#6015). This lands in `packages/spec/src/migrations/`, so the expected route is `domain:spec`.\n\n## Why this is a separate card\n\n#6957's maintainer ruling (2026-08-10) adopted option (a) — per-card entry files concatenated by a generator — for **both** hand-authored append registries. The `scripts/adr-anchors.json` half is in flight from `domain:spec-tooling` (that seat's own file). **This card is the `packages/spec/src/migrations/registry.ts` half**, and it is not that seat's to schedule:\n\n- the file belongs to the `domain:spec` seat;\n- it is the file that seat's **in-flight retirement cards append to** — measured **37 of 691** commits in the 4-day window touched it;\n- a dev from another lane restructuring its shape mid-window would cause exactly the collision this card exists to remove.\n\nThe `domain:spec` seat is the only one that can see when its own retirement queue is briefly empty, which is the window this should land in.\n\n## The ruling, verbatim\n\n> **hybrid — batch now, split the append surface as the durable fix.**\n> Now: the PM landing relay batches same-window retirement cards into one PR … Queued: implement per-card registry entry files concatenated by a generator, the `.changeset/*.md` shape that already de-conflicted this repo's other hottest file; `scripts/adr-anchors.json` is in the same fix space and may ride the same mechanism. **Option B (uncommitted build-time artifacts) is rejected** — the review diff of `spec-changes.json` / the upgrade guide is worth the laps it costs.\n\n⛔ Options (b) and (c) are settled. Do not re-open them, and do not remove any generated artifact from version control.\n\n## What the measurement established (already merged, not to be re-derived)\n\nFrom #6957's measurement, PM-verified on its three load-bearing claims:\n\n- `step17`'s semantic list and `RETIRED_KEYS_BY_MAJOR[17]` conflicted in **6 of 11** contended laps — **613 lines** of hand-resolved conflict markers in 4 days. The card's original \"the conflict is often absent\" claim was **falsified**; it had generalised from the one lap it watched.\n- **Both tables are consumed as sets** — `registeredRetiredKeys()` (`build-schemas.ts:699`) builds a `Map`. So a conflict resolution that drops a sibling's entry produces **no error anywhere**. That silent-drop risk, not wall-clock, is the reason this is worth doing.\n- Counterfactual replay of all six real conflicts under per-entry files: **6/6 CLEAN**, with the harness proven non-blind first (byte-identical round-trip; a control edit to the *same* entry still conflicts).\n\n## Known cost, measured\n\n- a one-time reorder of `packages/spec/spec-changes.json` and `docs/protocol-upgrade-guide.md` — **46/46 entries move** under filename-sorted concatenation;\n- ~6 positional prose cross-references rewritten to id-based;\n- `check-adr-0087-registration.mjs`'s `LEDGER_SOURCES` taught to read a directory.\n\n**Order**: sort by entry id. ⛔ Not an explicit index file — an index is itself a single append-only file every card must edit, reintroducing the conflict being removed.\n\n⚠️ **Honest limit, carried from the escalation**: this removes the **conflict resolution**, not the **regeneration lap**. The lap still fires from the merge queue and the os-regen pending marker. If the goal is \"make retirement cards fast\", this is not it; if the goal is \"stop a retirement being silently dropped\", it is.\n\n## Sequencing suggestion, not a constraint\n\nThe `adr-anchors.json` pilot from `domain:spec-tooling` proves the mechanism on a smaller file first. Waiting for it is cheap and de-risks this one; that is this seat's suggestion, and the scheduling call is `domain:spec`'s."
+}

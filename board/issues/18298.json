@@ -1,0 +1,33 @@
+{
+  "number": 18298,
+  "kind": "pull_request",
+  "title": "fix(pm): post-stamped names the platform's known read-back normalisations and locates a real mutation",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/m",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-15T12:30:38Z",
+  "updated_at": "2026-09-15T13:13:03Z",
+  "closed_at": "2026-09-15T13:13:01Z",
+  "closed_by": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "merged_at": "2026-09-15T13:13:01Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/18298",
+  "body": "Fixes #18296\n\n## The defect\n\n`readBackVerdict` compared `stored === sent`, and GitHub stores no body byte-for-byte. Measured over one shift: every `--body` refresh read back one byte short (the platform strips the trailing newline) and every comment 58 bytes long (the platform appends its footer block). So the warning meant for the sanitizer — \"the platform MUTATED the body\" — fired on nearly every write, and the one real mutation of that shift, the garbled token on a provenance line (carded as #18284), printed the same sentence as all the noise around it.\n\n## What changed — `scripts/pm/post-stamped.mjs` only\n\n- `PLATFORM_COMMENT_FOOTER`: the platform's comment footer as the exact 58 bytes, declared once. Not a regex and not a trim: the question a read-back asks is whether the difference is exactly a normalisation somebody measured, and a pattern matching \"a footer, roughly\" also forgives a footer the sanitizer has chewed.\n- `classifyReadBack({ sent, stored, mode })` (exported, pure): `identical` · `trailing-newline-stripped` (stored equals sent minus its trailing newlines) · `footer-appended` (that body plus exactly the footer constant, with or without the strip) · `mutated` for everything else, carrying the first differing BYTE offset and up to 60 bytes of context from each body, control characters escaped the way the refusals escape a span.\n- The footer class is COMMENT MODE ONLY. Whether the platform synthesises a footer for a footer-less issue body is unmeasured in this repository — every reading behind the body cell was taken on a draft that already ended in the footer block — so a footer on a body read-back stays `mutated` with its offset until somebody measures it. `readBackVerdict` takes the mode, and defaults to the strict `body` reading, so the lenient rule has to be asked for by name.\n- Transcript lines: `read-back: clean — the platform stripped the trailing newline (sent N, stored M)` / `read-back: clean — the platform appended its footer (sent N, stored M)` — no warning sign, `mutated: false`. The MUTATED line keeps its warning and its sanitizer sentence and adds `first difference at byte K: sent ... | stored ...`.\n- `--json` carries `read_back: { class, first_difference_byte }` beside the existing `body_mutated`.\n- 21 new self-test cases in the read-back battery (12 to 33 cases; its floor moves 11 to 33), including the body-mode footer control, a real mutation underneath an appended footer (offset inside the body, not at the tail), a multi-byte character ahead of the difference, and the strip-plus-footer comment case.\n\nNothing else moved: the stamp lines, the refusals, the unread-knock check and the write path are untouched.\n\n## The design choice: an exact declared set, not a tolerant comparison\n\nTrimming both sides, or matching the footer with a pattern, buys the same quiet by making the tool agree with whatever it is shown — and what it would then agree with is a chewed footer or a whitespace edit nobody made. Declaring the measured set keeps the tool loud everywhere else and keeps the unmeasured body-footer cell honest, which is the contract-first shape: the leniency is declared, named in the output, and removable.\n\n## Reverse verification (ablation from the committed state)\n\nBase blob `0e6d55abf5a895c285bdb20879fb2024915543cb` restored to disk and confirmed by `git hash-object`; reading taken; HEAD blob `f5fe528a9f2b5c0752efcb71f22226634e1b0393` restored and `git diff HEAD` empty with a clean `git status --porcelain`.\n\n| probe | unpatched (origin/main 99d20cfd) | patched |\n| --- | --- | --- |\n| `sent 'x\\n'`, `stored 'x'`, body | `mutated=true`, \"the platform MUTATED the body\" | `mutated=false`, `trailing-newline-stripped`, \"clean — the platform stripped the trailing newline (sent 2, stored 1)\" |\n| `sent 'x'`, `stored 'x' + footer`, comment | `mutated=true`, same sentence | `mutated=false`, `footer-appended`, \"clean — the platform appended its footer (sent 1, stored 59)\" |\n| `sent 'a [b] c'`, `stored 'a b c'` | `mutated=true`, same sentence, no offset | `mutated=true`, offset at byte 2 with `sent ...[b] c` beside `stored ...b c` |\n\nAll three printed one indistinguishable warning before; two are now named clean and the third is located.\n\nThe smoke test is the act: this card's terminal report is posted with the tool itself, and its own read-back line is quoted in that report.\n\n## Gates\n\n`node scripts/pm/dispatch-gates.mjs --commands` derived 32 commands; all 32 ran, reconciled with `--ran`. `node scripts/pm/post-stamped.mjs --self-test` 212 to 233 cases across 10 batteries. ESLint on the file clean, `node scripts/check-self-test-wired.mjs` clean.\n\n## Acceptance notes\n\n- Observation, not filed: `writeArtefact` re-reads the artefact with a second GET in both modes, so a comment write costs two requests where the POST response already carries the stored body. Harmless, and a read-back that goes back to the platform is arguably the stronger proof.\n- Observation, not filed: the register's PR-body footer cells stay unmeasured from here — this card's surface is the tool, and a body write to measure them is outside both the file surface and the writes budget.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01HZfg2AwVX191qCizp88gQr)_"
+}

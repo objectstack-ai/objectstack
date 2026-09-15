@@ -1,0 +1,34 @@
+{
+  "number": 7531,
+  "kind": "issue",
+  "title": "System Overview board mislabels two tiles: \"Total Users\" is really users created in the last 7 days, and \"Active Sessions\" counts every session",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T05:00:42Z",
+  "updated_at": "2026-08-11T09:21:32Z",
+  "closed_at": "2026-08-11T09:21:32Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7531",
+  "body": "## Symptom\n\nTwo tiles on the built-in **System Overview** board say something other than what they count.\n\n**1. \"Total Users\" is not a total.** The board's default `dateRange` filter is \"Last 7 days\", and it applies to `sys_user.created_at`. So the tile labelled *Total Users* actually reports **users created in the last 7 days**. On a fresh datastore this is indistinguishable from the true total — every user was created recently — which is exactly why it reads as correct in a demo and will read as a catastrophic user-loss event on any instance older than a week.\n\n**2. \"Active Sessions\" is not active-only.** The tile is backed by `sys_session_metrics`, which carries **no active-only filter**, so the label overstates what the number represents: it is a session count, not a count of currently-active sessions.\n\nBoth are label/query disagreements on a **shipped platform board**, not showcase authoring — the board is `packages/platform-objects/src/apps/dashboards/system_overview.dashboard.ts`, so every deployment sees them.\n\nThe tiles are otherwise genuinely **live**: each equals its own captured query *and* an independent direct aggregate, and Active Sessions moved 25 &rarr; 26 in lockstep with the direct count during the run. Nothing is stale or fabricated — the numbers are real, they are just not the numbers the labels promise.\n\n### Once-observed weakness recorded in the same run (not reproduced)\n\nOn the **first** capture, the \"Events by User\" bar chart rendered its y-axis with **zero bars and no empty state**. Its query had returned a single `{user_id: null, …}` row, and the renderer drops the null-keyed category — leaving an axis, no marks, and no \"no data\" affordance.\n\nObserved **once** and not reproduced, so it is recorded as a weakness per RUNNER rule 2 rather than promoted to a failure. It is worth carrying anyway: it is exactly the blank-widget shape the `system-overview-live-counts` clause exists to guard, and it is reachable on any real instance whose only audit actor is the system itself — a common state for a freshly provisioned deployment.\n\n## Root cause\n\nNot root-caused to a line in this run; the observations are behavioural and the fix is an authoring decision on the board metadata:\n\n- The `dateRange` global filter's binding to `sys_user.created_at` is what makes the Total Users tile a windowed count. Either the tile should opt out of the global filter (the way a true total must), or its label should say what it counts.\n- The `sys_session_metrics` widget needs an active-only predicate, or a label that matches the unfiltered count.\n- The null-category drop is a renderer behaviour (objectui) rather than metadata, and would need its own reproduction before filing on that side — captured here only so the observation is not lost.\n\n## Reproduction\n\n1. Boot the showcase and open the built-in **System Overview** board.\n2. Note the default `dateRange` filter reads \"Last 7 days\".\n3. Compare the \"Total Users\" tile against a direct unfiltered `count` over `sys_user`. On a datastore with users older than 7 days these diverge; on a fresh one they coincide, which is the trap.\n4. Widen the `dateRange` filter and watch \"Total Users\" change — a total that moves with a date filter is not a total.\n5. Compare \"Active Sessions\" against a direct count over `sys_session_metrics` with and without an active-only predicate; the tile matches the **unfiltered** count.\n\nRe-check the board source:\n\n```\nrg -n \"Total Users|Active Sessions|dateRange|sys_session_metrics\" packages/platform-objects/src/apps/dashboards/system_overview.dashboard.ts packages/platform-objects/src/apps/dashboards/system.datasets.ts\n```\n\n## Source\n\nExtracted from the QA run objectstack-ai/objectstack#7515 (framework a86db175). Checklist item `system-overview-live-counts` (PARTIAL) plus the matching entry under \"Smaller observations\"."
+}

@@ -1,0 +1,33 @@
+{
+  "number": 7564,
+  "kind": "issue",
+  "title": "API Console never renders the Storage group on any host — the catalog key is `storage` while `/discovery` names the slot `file-storage`, so the fail-closed branch hides 3 endpoints",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:queue"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T05:27:14Z",
+  "updated_at": "2026-08-11T06:05:03Z",
+  "closed_at": "2026-08-11T06:05:03Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7564",
+  "body": "## Symptom\n\nThe API Console page (`developer:api-console`, Studio → Developer → API Console) renders **no Storage group at all — on any host**, whether or not a storage service is registered and healthy.\n\nThree endpoints are consequently unreachable from that page:\n\n| method | path | description |\n|---|---|---|\n| POST | `/api/v1/storage/upload` | Upload file (multipart/form-data) |\n| GET | `/api/v1/storage/:fileId` | Download file |\n| DELETE | `/api/v1/storage/:fileId` | Delete file |\n\n**Expected:** the Storage group renders wherever the storage slot is filled and usable, exactly like the other service-gated groups (the rest of the item passed — the tree matched `/discovery` 10/10 and executed real 200/404/400 calls).\n\n## Root cause\n\nLocated, and it is a **name mismatch across the two sides of one lookup**:\n\n- the console's catalog declares the group under the key **`storage`** (objectui `apps/console/src/pages/developer/hooks/useApiDiscovery.ts`, `SERVICE_ENDPOINT_CATALOG`);\n- `/discovery` reports the service under its canonical slot name **`file-storage`** (`packages/spec/src/system/core-services.zod.ts` lists `'file-storage'` as the storage-driver slot, mapped to `@objectstack/service-storage`);\n- the render loop looks the catalog key up directly in the discovery payload — `const serviceInfo = discoveredServices[serviceName]` — so it always misses, and the very next line is the **fail-closed** branch: `const usable = serviceInfo ? isServiceUsable(serviceInfo) : false;` with the comment *\"Services absent from discovery keep the historical fail-closed behavior of this page: no entry → no endpoint group.\"*\n\nThe fail-closed posture is correct and deliberate (ADR-0076 D12); it is the key that is wrong. The framework side is the canonical one here — `file-storage` is the declared slot name — so the fix belongs to the **console catalog key**, not to `/discovery`.\n\n**Cross-repo:** the fix lands in **objectui** (`apps/console/src/pages/developer/hooks/useApiDiscovery.ts`), not in this repo — which is why this card carries no `domain:*` lane. Still present on objectui `origin/main` as of 2026-08-11 (key `storage`; the string `file-storage` appears nowhere under `apps/console`).\n\n## Reproduction\n\n1. Boot showcase (or any host with the storage service registered) and open Studio → Developer → API Console.\n2. Wait for discovery to resolve; enumerate the rendered endpoint groups.\n3. Observe: no **Storage** group, on every host tried.\n4. Confirm the service is really there: `GET /api/v1/discovery` reports the slot under the name `file-storage`, not `storage`.\n\n## Source\n\nExtracted from the QA run objectstack-ai/objectstack#7463 (framework a86db175)."
+}

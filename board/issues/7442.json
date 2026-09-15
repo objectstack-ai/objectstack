@@ -1,0 +1,34 @@
+{
+  "number": 7442,
+  "kind": "issue",
+  "title": "docs: the \"the gate\" table has no fourth column for the runtime publish surface (#4463 P1 shipped one)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-help"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-10T12:01:24Z",
+  "updated_at": "2026-08-10T14:20:53Z",
+  "closed_at": "2026-08-10T14:20:53Z",
+  "closed_by": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7442",
+  "body": "Split out of #4717 at dispatch, per the maintainer's 2026-08-07 migration ruling. Filed by the `domain:metadata` seat that landed the backend half; **unassigned, and deliberately carrying no `domain:*` label — routing is the triage seat's call** (this lands in docs, not in `packages/metadata*`).\n\n## The fact\n\n#4463 P1 added a **fourth** enforcement surface — the runtime publish gate, which runs on `saveMetaItem` and on the draft-to-active promotion — but the \"the gate\" table in the docs still documents only the three CLI commands.\n\n## Direction matters, and it is the *safe* direction\n\nThis is **not** a `declared ≠ enforced` defect. The runtime does **more** checking than the docs promise, which is under-promise / over-deliver — so it is not urgent and there is no user being lied to about a guarantee they do not have.\n\nIt is still worth fixing, for one specific reason: **a reader of that table — human or AI — currently concludes that a Studio save does not pass a gate.** That is false, and it is exactly the kind of false mental model that leads someone to add a redundant check, or to skip a real one because they think the surface is unguarded.\n\n## Now more true than when #4717 was filed\n\nThe gate no longer only *refuses* on this surface — since `89d7b35a7` (#4717 / PR #7435) it also **returns advisory findings on the save response**. So the runtime publish surface now has both halves of a gate's behaviour (refuse the gating half, report the advisory half), which makes its absence from the table more conspicuous, not less.\n\n## Scope\n\nAdd the fourth column (runtime publish surface) to the \"the gate\" table, and describe what it enforces. Small and self-contained.\n\n## Related\n\n#4463 (P1), PR #4715, #4717 (parent, now closed — its metadata half landed as `89d7b35a7`), #7294 (the publish door's missing spec declaration)."
+}

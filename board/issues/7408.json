@@ -1,0 +1,34 @@
+{
+  "number": 7408,
+  "kind": "issue",
+  "title": "[finding] `watch-dot-root.test.ts` case 2's 4s quiet window degrades to a false pass under load — measured against 32-36s delivery",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-10T10:21:16Z",
+  "updated_at": "2026-08-11T01:32:45Z",
+  "closed_at": "2026-08-11T01:32:45Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7408",
+  "body": "Observation-class finding, recorded while implementing #7369 (PR against `packages/metadata-fs/test/watch-dot-root.test.ts`). **Filed unassigned, no `pm:queue`** — nothing a user hits today; this is test-infra correctness.\n\n## What was measured\n\n#7369's work replaced both **positive** waits in `watch-dot-root.test.ts` with a deadline derived from the case's own ceiling. In the course of that, delivery latency for a single external edit was measured on `18ff1dab1` under in-process event-loop starvation (the case blocks its own loop for BLOCK ms out of every BLOCK+GAP ms), 120 iterations across four levels:\n\n| BLOCK/GAP | n | delivery |\n|---|---|---|\n| none | 60 | 650-707 ms |\n| 300/10 | 40 | 3.6-4.9 s |\n| 900/5 | 12 | 9.9-12.7 s |\n| 2000/5 | 8 | 24-36 s |\n\n## The finding\n\nCase 2 (`still ignores dot entries UNDER the root, including its own bookkeeping`) proves a **negative**: it writes noise (`.cache/x.json`, `view/.scratch.json`, an append to `.objectstack/.log/main.jsonl`), waits `QUIET_WINDOW_MS = 4_000`, and asserts `sink.events` is empty.\n\nThat window is 4 s. Delivery under load was measured at up to 36 s. **At any load level past roughly the third row, the quiet window is shorter than the watcher's own delivery latency, so the array is empty because nothing has had time to arrive — not because the noise was correctly ignored.** The assertion passes for the wrong reason, and it passes *more* reliably the more loaded the runner is.\n\nThis is not a new hazard in kind — the file's existing comment already warns \"a too-short quiet window cannot fail, it can only produce a FALSE PASS on an empty-array assertion\". What is new is the measurement: the window is not merely \"don't shorten it\", it is already 8x too short at a starvation level this repository's merge queue can plausibly reach, and the guard silently stops being a guard exactly when the suite is under the most stress.\n\n## Why it was not fixed in #7369\n\n#7369 is scoped to the wall-clock **positive** waits, and the disciplined fix here is a different shape: you cannot wait for an absence, so making this sound means restructuring the case — for example writing the control edit *after* the noise and using its (event-driven) arrival as the proof that the watcher had a real chance to deliver the noise too, converting the wall-clock window into an event-driven one. That is a semantic change to what case 2 measures and deserves its own reverse verification, not a rider on a timing card.\n\nNote the guard is worth keeping sound rather than deleting: case 2 is one of the two halves of #7150's fix (a fix that only widened the matcher would pass case 1 and fail case 2).\n\n## Refs\n\n#7369 (the positive-wait hardening and the measurement), #7150 / PR #7208 (the defect this file guards), #7282 / `ab07b5382` (the blind-watcher fix that removed the never-arrives failure mode)."
+}

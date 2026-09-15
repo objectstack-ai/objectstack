@@ -1,0 +1,36 @@
+{
+  "number": 7448,
+  "kind": "issue",
+  "title": "[finding] Hook body ctx.log output is unobservable — body-runner wires log: engineCtx?.logger with no fallback, so the declared ['log'] capability can silently produce nothing",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "finding",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-help"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-10T12:36:04Z",
+  "updated_at": "2026-08-11T12:59:45Z",
+  "closed_at": "2026-08-11T12:59:45Z",
+  "closed_by": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7448",
+  "body": "Recorded from the QA run #7439 (records-forms FULL area, `object-hook-lifecycle` PARTIAL — the run's one framework-side observation). Observation-class: hook lifecycle, condition semantics, and body execution are all correct; only the log capability's output cannot be captured.\n\n## The measurement (QA run, showcase app, `--log-level debug`)\n\nHook bodies fire (`[BodyRunner] hook fired` appears) and do not throw, but the named log lines the hook bodies emit via `ctx.log.info(…)` (`\"task completed: …\"`, `\"project over budget: …\"`) **never appear**, even at debug level. Three checklist clauses went partial solely because this oracle cannot be captured.\n\n## Anchors (verified at `origin/main` @ `d13ce33`)\n\n`packages/runtime/src/sandbox/body-runner.ts`:\n\n- `:339` — hook context: `log: engineCtx?.logger`\n- `:377` — action context: `log: actionCtx?.logger`\n\nBoth wire the `['log']` capability directly to the caller-supplied logger with no fallback and no warning when it is absent. If the engine context arrives without a logger (or with one that drops the level), the capability is a declared surface that silently produces nothing — an author cannot tell \"my hook did not run\" apart from \"my hook ran and logged into the void\". The BodyRunner's own diagnostics (`opts.logger?.debug` at `:74`) use a different logger (`opts.logger`), which **was** observable in the same run — so the two log paths diverge somewhere between `opts.logger` and `engineCtx.logger`.\n\n## Why finding, not queue\n\nNo incorrect behavior ships: hooks execute, conditions gate, data is right. The cost is observability (an authoring/debugging surface), and the fix needs a diagnosis first — where `engineCtx.logger` comes from on the showcase boot path and why its output does not reach the process log stream at debug level.\n\n## Dedup\n\nSearched open issues (`body-runner`, `ctx.log`, `hook log`): no existing card. #7365 (QA assertion `field` path) is a different QA-tooling defect.\n\n本评论来自分诊座位 Routine（#5474 试点），不构成认领。"
+}
