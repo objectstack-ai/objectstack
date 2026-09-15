@@ -75,14 +75,14 @@
       "verifiedAt": "2026-09-15",
       "evidenceScope": "cross-repo",
       "evidence": "cloud @cb8ee7ff: packages/service-ai/src/routes/agent-access.ts#evaluateAgentAccess — the allow-list; a caller matches by userId or by a held position, otherwise chat is refused and the listing drops the agent.",
-      "note": "evaluateAgentAccess() — allow-list by userId/role; enforced at the chat route (agent-routes.ts:151). #1884 (landed after the 2026-06 audit, which still listed it dead)."
+      "note": "evaluateAgentAccess() — allow-list by userId or by a held POSITION; two enforcement points, not one: the chat route routes/agent-routes.ts#buildAgentRoutes answers 403, and the catalog agent-runtime.ts#listAgents drops an inaccessible agent SILENTLY. #1884, landed after the 2026-06 audit which still listed it dead. ⚠ 2026-09-15 (#13272): the previous wording of this note — \"allow-list by userId/role; enforced at the chat route (agent-routes.ts:151)\" — is FALSIFIED in BOTH halves, measured at cloud @cb8ee7ff. (a) `roles` is the alias protocol 17 removed from the producer's envelope (framework #6011), after which `user.roles ?? []` degraded to the empty set — the cloud#1442 outage. `user.roles` now occurs ONCE in agent-access.ts, inside the docblock recording its removal, while `user.positions` is the live read, twice, both executable. (b) agent-routes.ts:151 now holds an unrelated ADR-0013 conversation-history guardrail; the chat-route call sits at :494. ⚠ And the single-enforcement-point framing was the more costly half: it teaches that an agent missing from the picker is a DIFFERENT bug from a 403, when agent-access-lint.ts:14 names exactly this asymmetry — \"two consumers with two denial shapes\"."
     },
     "permissions": {
       "status": "live",
       "verifiedAt": "2026-09-15",
       "evidenceScope": "cross-repo",
       "evidence": "cloud @cb8ee7ff: packages/service-ai/src/routes/agent-access.ts#evaluateAgentAccess — every named permission must be held; the check is fail-closed on a caller with no userId.",
-      "note": "evaluateAgentAccess() — caller must hold ALL required permissions/roles; enforced at the chat route. #1884."
+      "note": "evaluateAgentAccess() — the caller must hold ALL required entries, matched against the union of user.permissions and user.positions; same two enforcement points as access. ⚠ 2026-09-15 (#13272): the previous wording — \"caller must hold ALL required permissions/roles; enforced at the chat route.\" — is FALSIFIED, measured at cloud @cb8ee7ff. `roles` is the alias protocol 17 removed from the producer's envelope (framework #6011), and what can satisfy a required entry is a permission or a POSITION name, never a role. The chat route is one of the two enforcement points, not the only one."
     },
     "lifecycle": {
       "status": "experimental",
