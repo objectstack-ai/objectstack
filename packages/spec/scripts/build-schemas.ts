@@ -85,6 +85,7 @@ import { RETIRED_DEFS_BY_MAJOR, RETIRED_KEYS_BY_MAJOR } from '../src/migrations/
 import {
   getMetadataTypeSchema,
   listMetadataTypeSchemaTypes,
+  listUnregisteredKindSchemaTypes,
 } from '../src/kernel/metadata-type-schemas';
 import * as AI from '../src/ai';
 import * as API from '../src/api';
@@ -1143,10 +1144,60 @@ interface SurfaceReachability {
 }
 
 /**
+ * The type names this gate starts its BFS from — deliberately NOT the same set
+ * as `listMetadataTypeSchemaTypes()`, and the difference is the whole of #17356.
+ *
+ * Two different questions wear the same words here, and conflating them produced
+ * a false "unreachable" in the tree:
+ *
+ *   - **"is this a REGISTERED metadata type?"** — `listMetadataTypeSchemaTypes()`,
+ *     which unions BUILTIN_METADATA_TYPE_SCHEMAS with the
+ *     EXTRA_METADATA_TYPE_SCHEMAS overlay and, per **#6245**, pointedly does not
+ *     enumerate UNREGISTERED_KIND_SCHEMAS: enrolling those entries there "would
+ *     claim a status this change is careful not to grant" (a `MetadataTypeSchema`
+ *     enum member, a DEFAULT_METADATA_TYPE_REGISTRY entry, a create seed, a place
+ *     in the #4001 campaign count). That function answers its own question
+ *     correctly and this file does not touch it.
+ *   - **"is there an AUTHOR who could be authoring against this def?"** — the only
+ *     question a REACHABILITY root set is asking, because the sole consequence of
+ *     `reachableVia() === null` is waiving a tombstone on the grounds that nobody
+ *     can receive the prescription. For THAT question the unregistered kinds are
+ *     authored documents too: `PUT /api/v1/meta/connector/:name` and a
+ *     `defineStack({ connectors: [...] })` manifest both parse a metadata document
+ *     against `UNREGISTERED_KIND_SCHEMAS['connector']` (#6245 bound them there for
+ *     exactly that reason), and `getMetadataTypeSchema()` resolves them as its
+ *     third fallback.
+ *
+ * Measured on #17356: with the registered set alone the BFS starts from 26 roots,
+ * closes over 5420 nodes, and misses `integration/DataSyncConfig` — two hops from
+ * the `connector` root, through `syncConfig` unwrapped once through `optional` to
+ * the very instance the module exports. A bare deletion of one of its baseline
+ * lines was therefore waived by check (c) proof 2 as "over-collection, never parsed
+ * against a metadata document", while `stack.connectors[]` parses it on every boot.
+ *
+ * ⛔ So do NOT "simplify" these two back into one call. They differ on purpose, in
+ * the direction #6245 fixed and the direction #4650's docblock promises: one shared
+ * entry marks a def reachable, because a false "reachable" demands a tombstone too
+ * many while a false "unreachable" would waive one silently.
+ *
+ * `listUnregisteredKindSchemaTypes()` exists (#6931) so a check can ENUMERATE that
+ * map and for nothing else, and being listed by it grants nothing — which is the
+ * whole reason it, and not a new kind registration, is what this gate reads.
+ */
+function reachabilityRootTypes(): string[] {
+  const types = new Set<string>(listMetadataTypeSchemaTypes());
+  for (const kind of listUnregisteredKindSchemaTypes()) types.add(kind);
+  return [...types].sort();
+}
+
+/**
  * Reachability of every emitted def from the metadata-type roots —
  * BUILTIN_METADATA_TYPE_SCHEMAS plus the EXTRA_METADATA_TYPE_SCHEMAS overlay
- * (both behind listMetadataTypeSchemaTypes / getMetadataTypeSchema), i.e. the
- * schemas a metadata document is actually parsed against. Computed by BFS over
+ * plus the UNREGISTERED_KIND_SCHEMAS bindings (all three behind
+ * `reachabilityRootTypes()` / getMetadataTypeSchema), i.e. the schemas a metadata
+ * document is actually parsed against. That union is this gate's own, and the
+ * docblock on `reachabilityRootTypes()` above is the authority on why it is not
+ * `listMetadataTypeSchemaTypes()`. Computed by BFS over
  * THIS build's in-memory Zod graph, per the 2026-08-02 ruling on #4650 — a
  * static import/regex approximation misses alias imports, runtime
  * registration and casts, so it is deliberately not used here.
@@ -1163,7 +1214,7 @@ interface SurfaceReachability {
 function computeSurfaceReachability(): SurfaceReachability {
   const rootTypes: string[] = [];
   const roots: z.ZodType[] = [];
-  for (const type of listMetadataTypeSchemaTypes()) {
+  for (const type of reachabilityRootTypes()) {
     const schema = getMetadataTypeSchema(type);
     if (schema) {
       rootTypes.push(type);
@@ -2202,7 +2253,8 @@ let gitResolvedAnchor: { rev: string; keys: string[] } | null = null;
         if (via === null) {
           allowed.push(
             `${key} — def not reachable from the ${reachability.rootTypes.length} metadata-type roots\n` +
-              `       (BUILTIN_METADATA_TYPE_SCHEMAS + EXTRA_METADATA_TYPE_SCHEMAS overlay; BFS over this\n` +
+              `       (BUILTIN_METADATA_TYPE_SCHEMAS + EXTRA_METADATA_TYPE_SCHEMAS overlay +\n` +
+              `       UNREGISTERED_KIND_SCHEMAS, this gate's own union — #17356; BFS over this\n` +
               `       build's in-memory Zod graph): an over-collected entry, never parsed against a\n` +
               `       metadata document. This waives ONLY the tombstone requirement of this file — it is\n` +
               `       not a license to change the schema (#4650).`,
