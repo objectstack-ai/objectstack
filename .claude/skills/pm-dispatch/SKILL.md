@@ -619,7 +619,7 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 - ③ 在 draft PR 上向两个授权批准账户 `os-zhuang` 与 `hotlong` 都 request review,主动推。
 - PR 作者身份即两账户之一的席位时,对该账户请审必失败(author-identity 422)。
 - 该账户改为把 PR assign 给它替代通知,另一账户照常请审;轮次报告点名说明走了兜底。
-- 请审走免碰 draft 位的专用 REST 端点,MCP 兜底显式带 `draft: true`;端点事实住 platform-readings。
+- 请审走免碰 draft 位的 REST 专用路,ready/draft 走 ccr 路;MCP 兜底已拒;端点见 platform-readings。
 - ④ 轮次报告单列 awaiting a human merge。
 - 已入队才读到本条 ⇒ 转 draft 与 disable 都做;出队以阳性探针答,ref 缺席只旁证。
 - skills 车道自有 PR:纯代码面如 `scripts/pm/` 由本席按达档自审(清单不减)后落地。

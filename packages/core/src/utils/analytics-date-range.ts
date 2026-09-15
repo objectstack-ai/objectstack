@@ -213,15 +213,19 @@ export function resolveAnalyticsDateRangePreset(
  * every one of them, and sent an author to inspect a parse call that never
  * ran. The origin is a parameter precisely so this call site states the truth
  * it alone knows; ⛔ it is never omitted and there is no default to omit it to.
- * Three of the four callers keep the `.code`/`.status` and supply their OWN
+ * TWO of the four callers keep the `.code`/`.status` and supply their OWN
  * message: the REST dataset door (`rest/src/analytics-selection-door.ts`),
  * which serves the schema's own prescription because its refusal IS the
- * schema's, and the two face-side array arms
- * (`service-analytics/src/date-range-array-arm.ts` and
- * `driver-memory/src/memory-analytics.ts`), each of which names what its own
- * face would otherwise have guessed. The sentence built here leaves only
- * through this package's own string resolver below — reached in process, past
- * every door — which is the caller the `'runtime'` origin describes.
+ * schema's, and `driver-memory`'s face-side array arm
+ * (`driver-memory/src/memory-analytics.ts`), which names what its own face
+ * would otherwise have guessed. ⚠️ `service-analytics`' array arm
+ * (`service-analytics/src/date-range-array-arm.ts`) was a third until #18232:
+ * it overwrote the message on two grounds — a sentence that judged a bare
+ * STRING, and "Refused at the schema" — that this parameter and
+ * `describeRefusedDateRange` removed, so it now raises the sentence built here
+ * unchanged. That sentence therefore leaves through this package's own string
+ * resolver below AND through that arm, which are the callers the `'runtime'`
+ * origin describes.
  *
  * ⚠️ The code is registered under `@objectstack/runtime` (the door that names
  * the wire vocabulary) and this package carries a recorded provenance waiver
@@ -242,10 +246,14 @@ export function resolveAnalyticsDateRangePreset(
  * `z.tuple([z.string(), z.string()])` — it judges arity and bound TYPE, never a
  * bound's VALUE — so the residue it cannot refuse, a two-string tuple with an
  * empty bound such as `['', '']`, passes every door and reaches this
- * constructor at each face (`date-range-array-arm.ts`, `memory-analytics.ts`),
- * which then replaces the message. What does hold on a REST route is about the
- * SENTENCE: each of the three callers a route can reach supplies its own, and a
- * string that passed the preset enum cannot reach the resolver's throw below.
+ * constructor at each face (`date-range-array-arm.ts`, `memory-analytics.ts`) —
+ * `memory-analytics.ts` then replaces the message and, since #18232,
+ * `date-range-array-arm.ts` does not. What does hold on a REST route is about
+ * the SENTENCE: each of the three callers a route can reach answers with the
+ * sentence chosen for its own door — the schema's own prescription at the REST
+ * door, `driver-memory`'s at that face, and the one built here at
+ * `service-analytics`' — and a string that passed the preset enum cannot reach
+ * the resolver's throw below.
  * This is also the answer for the IN-PROCESS caller past those doors —
  * `AnalyticsService.query`, `queryDataset` and the dataset executor behind it,
  * and a driver's cube face called directly.
