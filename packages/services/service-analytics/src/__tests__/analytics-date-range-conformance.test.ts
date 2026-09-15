@@ -48,8 +48,11 @@ import {
 import { DatasetSchema } from '@objectstack/spec/ui';
 import type { Cube } from '@objectstack/spec/data';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
+import type { AnalyticsQuery, AnalyticsResult, IAnalyticsService } from '@objectstack/spec/contracts';
 import { AnalyticsService } from '../analytics-service.js';
 import { evaluateAnalyticsQueryOverRows, lowerPreviewDateRange } from '../preview-evaluator.js';
+import { compileDataset } from '../dataset-compiler.js';
+import { DatasetExecutor, lowerDatasetCompareDateRange } from '../dataset-executor.js';
 
 /** Frozen so the three rolling presets, whose bound is NOW, are comparable. */
 const NOW = new Date('2026-09-09T12:34:56.789Z');
@@ -130,10 +133,33 @@ async function lowerViaPreview(range: string | readonly string[]): Promise<Lower
     return lowerPreviewDateRange(range);
 }
 
+/**
+ * [#17973] The dataset executor's `compareTo` window — the FOURTH face in this
+ * package, and the one #17015 never reached. It kept the degenerate
+ * `[range, range]` fallback every sibling shed, so a DECLARED preset plus
+ * `compareTo` was refused outright. MEASURED on `b3b43b6ea`, before the fix:
+ *
+ * ```
+ * DATASET_INVALID  400  [dataset-executor] invalid date in dateRange: "last_30_days"
+ * ```
+ *
+ * ⛔ Read off the lowering rather than an emitted filter, for the preview
+ * face's reason and one more of its own: what this face EMITS is the SHIFTED
+ * window, so the window it resolved cannot be recovered from the query it
+ * issues without inverting the shift. `lowerDatasetCompareDateRange` is the ONE
+ * call site `runCompare` uses for either arm; the `APPLIES the window it
+ * reports` block below is the control that it really is wired there, driven end
+ * to end through the executor.
+ */
+async function lowerViaCompare(range: string | readonly string[]): Promise<LoweredDateRangeWindow> {
+    return lowerDatasetCompareDateRange(range);
+}
+
 const FACES: AnalyticsDateRangeFace[] = [
     { name: 'service-analytics (ObjectQL strategy)', lower: lowerViaObjectql },
     { name: 'service-analytics (native SQL strategy)', lower: lowerViaNativeSql },
     { name: 'service-analytics (draft-preview evaluator)', lower: lowerViaPreview },
+    { name: 'service-analytics (dataset executor compareTo)', lower: lowerViaCompare },
 ];
 
 beforeEach(() => {
@@ -251,5 +277,124 @@ describe('#16322 — the draft-preview evaluator APPLIES the window it reports',
             { id: 'upper', created_at: '2026-09-30T00:00:00.000Z' },
             { id: 'after', created_at: '2026-09-30T00:00:00.001Z' },
         ])).toEqual(['lower', 'upper']);
+    });
+});
+
+/**
+ * [#17973] ⭐ The executor face is registered above on its LOWERING; these cases
+ * are why that registration means anything — and they are the pin the card
+ * asks for, because "the string changed" is not the claim. The claim is that a
+ * declared preset is LOWERED to a real window and that window is SHIFTED.
+ *
+ * Driven end to end through `DatasetExecutor.execute`, reading the `dateRange`
+ * of every pass the executor issues. ⛔ The expectations are stated LITERALLY
+ * against the frozen clock and only cross-checked against the shared resolver —
+ * ⛔ never computed with `shiftRange`, which would restate the implementation
+ * and pass for any window at all.
+ *
+ * ⚠️ The PRIMARY pass keeps the preset NAME on purpose: the strategy behind it
+ * is itself a registered face and lowers it there (#16322). Only the comparison
+ * pass carries a resolved window, because only it is shifted.
+ */
+const CMP_DATASET = DatasetSchema.parse({
+    name: 'trend', label: 'Trend', object: 'events', include: [],
+    dimensions: [{ name: 'created_at', field: 'created_at', type: 'date', dateGranularity: 'month' }],
+    measures: [{ name: 'count', aggregate: 'count' }],
+});
+
+/** The `dateRange` of every pass the executor issues — primary first, then the shifted compare pass. */
+async function comparePasses(
+    dateRange: string | readonly unknown[],
+    kind: 'previousPeriod' | 'previousYear',
+): Promise<unknown[]> {
+    const seen: AnalyticsQuery[] = [];
+    const svc: IAnalyticsService = {
+        query: vi.fn(async (q: AnalyticsQuery): Promise<AnalyticsResult> => {
+            seen.push(q);
+            return { rows: [], fields: [] };
+        }),
+        getMeta: async () => [],
+    };
+    await new DatasetExecutor(svc).execute(
+        compileDataset(CMP_DATASET),
+        {
+            dimensions: ['created_at'], measures: ['count'],
+            timeDimensions: [{ dimension: 'created_at', dateRange, granularity: 'month' }],
+            compareTo: { kind },
+        } as never,
+        CTX,
+    );
+    return seen.map((q) => (q.timeDimensions ?? []).map((t) => (t as { dateRange?: unknown }).dateRange));
+}
+
+describe('#17973 — the dataset executor APPLIES the window it reports', () => {
+    // The frozen clock is the file-level `beforeEach`; the rolling presets' upper
+    // bound is NOW, so it has to be the same NOW here.
+
+    it('a CALENDAR preset is LOWERED, its exclusive end honoured, and the window SHIFTED', async () => {
+        // The shared resolver's own answer for the frozen clock: September 2026,
+        // ending at OCTOBER's first instant because the calendar presets stop
+        // BEFORE their end.
+        const w = resolveAnalyticsDateRangeString('this_month', { now: NOW });
+        expect([w.start, w.end, w.endExclusive])
+            .toEqual(['2026-09-01T00:00:00.000Z', '2026-10-01T00:00:00.000Z', true]);
+
+        // ⇒ the days that window COVERS are the 1st to the 30th — ⛔ not to the
+        // 1st of October, which is the off-by-one an inclusive reading of an
+        // exclusive bound produces — and `previousYear` is those same days a
+        // calendar year back.
+        expect(await comparePasses('this_month', 'previousYear')).toEqual([
+            ['this_month'],
+            [['2025-09-01', '2025-09-30']],
+        ]);
+    });
+
+    it('a ROLLING preset reaches NOW\'s own day and `previousPeriod` shifts by the window\'s length', async () => {
+        const w = resolveAnalyticsDateRangeString('last_30_days', { now: NOW });
+        // Ends at NOW, a moment it REACHES (#16179 leaves the rolling leg inclusive).
+        expect([w.start, w.end, w.endExclusive])
+            .toEqual(['2026-08-10T00:00:00.000Z', '2026-09-09T12:34:56.789Z', false]);
+
+        // 2026-08-10 through 2026-09-09 inclusive is 31 days; `previousPeriod` is
+        // the equal-length window ending the day before this one starts.
+        expect(await comparePasses('last_30_days', 'previousPeriod')).toEqual([
+            ['last_30_days'],
+            [['2026-07-10', '2026-08-09']],
+        ]);
+    });
+
+    it('⛔ distinct presets select DISTINCT comparison windows', async () => {
+        // The fallback's real signature: twelve of thirteen names collapsed onto
+        // one window, so a green "it did not throw" is not enough — the windows
+        // have to differ from each other.
+        const windows = new Set<string>();
+        for (const preset of ['today', 'this_week', 'this_month', 'this_quarter', 'this_year']) {
+            windows.add(JSON.stringify((await comparePasses(preset, 'previousYear'))[1]));
+        }
+        expect(windows.size).toBe(5);
+    });
+
+    it('⛔ an unrecognised string is REFUSED with the ADR-0112 envelope, not DATASET_INVALID', async () => {
+        // ⛔ On the ENVELOPE, not `toThrow()`: this face DID throw before the fix
+        // — it threw `DATASET_INVALID "invalid date in dateRange"`, its own
+        // envelope for a condition four faces already answered with one.
+        let thrown: (Error & { code?: string; status?: number }) | undefined;
+        try {
+            await comparePasses('not a range at all', 'previousPeriod');
+        } catch (e) {
+            thrown = e as Error & { code?: string; status?: number };
+        }
+        expect(thrown?.code).toBe('ANALYTICS_DATE_RANGE_UNRECOGNIZED');
+        expect(thrown?.status).toBe(400);
+    });
+
+    it('⛔ CONTROL — the CALLER\'s explicit window is still shifted bound for bound', async () => {
+        // ⭐ Without this, every assertion above is satisfied by a face that
+        // rewrote the array arm too. The answer is byte-identical to the one
+        // #17124 pinned before this change.
+        expect(await comparePasses(['2026-01-01', '2026-01-31'], 'previousPeriod')).toEqual([
+            [['2026-01-01', '2026-01-31']],
+            [['2025-12-01', '2025-12-31']],
+        ]);
     });
 });
