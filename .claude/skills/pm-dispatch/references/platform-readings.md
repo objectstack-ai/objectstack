@@ -55,6 +55,7 @@
 - ⇒ 落地方法读分支规则,⛔ 永不读 auto-merge 请求;树上每 PR 一个 squash 提交。
 - `auto_merge_enabled` webhook 载荷同报 `merge` ⇒ 三个载体一致也不作数,判据是落地提交的父数。
 - squash 落地重写署名 trailer:作者行按提交作者身份改拼,`Claude-Session:` 原样存活。
+- squash 的 committer date 是入队时刻,快进不改 ⇒ 落地时刻读 `merged_at`/`merged`,不读 `git log`。
 - `enable_pr_auto_merge` 对已 `mergeable_state: clean` 的 PR 照样成功,与工具描述的优雅失败相反。
 - 回显两向不可靠,空回显不等于未挂上 ⇒ ⛔ 不拿它当任何方向的证据、不为它空转。
 - 配额枯竭时 `enable_pr_auto_merge` 回成功而挂载根本没发生 ⇒ 验效果,不验回应。
