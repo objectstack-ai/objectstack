@@ -1028,42 +1028,25 @@ registry? Add it to `OPEN_CAPABILITY_REGISTRIES` in the same PR that fixes it.
 
 ## Writing a `--self-test` — it must be capable of failing when it runs nothing
 
-`scripts/check-self-test-wired.mjs` enforces that a self-test EXISTS and that CI runs it; its SHAPE was
-enforced nowhere, and the shape is where the instrument dies. With `failures.length === 0` as the
-only success condition **"every case passed" and "no case ran" print the same line** — and a gate
-whose defect class is its own matching rule has no second instrument, because weakening that rule
-only shrinks the finding set and the production run is green either way. Two holes, ORTHOGONAL;
-a self-test clean on one is still defeated by the other, so close both:
+**Floor — pin battery NAMES, never one total.** Declare a frozen roster of battery name → minimum
+case count, register every case against a battery, and fail when a declared battery registers fewer
+cases than its pin, when a registered case names no declared battery, or when the roster itself
+falls below its pinned battery count. ⛔ A printed case count is EVIDENCE, NOT PROOF — a battery
+falling 40 → 3 still prints a non-zero count — and one pinned TOTAL rots the moment a sibling grows.
 
-1. **No assertion floor** — success decided by "no failure was recorded", so an empty run passes.
-2. **No verdict handshake** — the dispatch discards the self-test's completion, so a `return`
-   anywhere above the verdict prints nothing and exits 0. A perfect floor never runs either.
-
-**The floor pins NAMES, not a total.** Declare a frozen roster of battery name → minimum case count,
-register every case against a battery, and fail when a declared battery registers fewer cases than
-its pin, when a registered case names no declared battery, or when the roster itself falls below a
-pinned battery count — a battery deleted from the roster otherwise takes its own floor with it.
-⛔ A printed case count is EVIDENCE, NOT PROOF (a battery falling 40 → 3 still prints a non-zero
-count), and one pinned TOTAL rots the moment a sibling battery grows.
-
-**The handshake makes the dispatch read something the VERDICT set.** Set a module-level flag as the
-last statement of the self-test, after its success line prints, and refuse at the dispatch when it
-is unset. ⛔ `process.exit(selfTest())` and `selfTest() === 0` are NOT handshakes: over an early
-`return` the first is `process.exit(undefined)` → exit 0 and the second exits 1 having printed ZERO
-BYTES — a comparison against a missing return value, with no refusal behind it.
+**Handshake — the verdict sets a module-level flag, and the dispatch refuses when it is unset.**
+Set the flag as the self-test's last statement, after its success line prints; the dispatch must
+SAY the self-test never reached its verdict. ⛔ An exit code is not a handshake. Without this a
+`return` above the verdict prints nothing and exits 0, and a perfect floor never runs either —
+the two holes are ORTHOGONAL, so close both.
 
 **Copy a landed one — ⛔ never import one.** `scripts/check-agent-model-declared.mjs` carries all
-three parts (`SELF_TEST_BATTERIES`, `SELF_TEST_BATTERY_FLOOR`, `selfTestReachedVerdict`), and most
-of `scripts/**` already spells it this way. Every self-test must keep running standalone as
-`node scripts/<x>.mjs --self-test`: a shared assertion module is one point of failure for every
-instrument at once, the direction `check-self-test-wired` exists to avoid.
+three parts (`SELF_TEST_BATTERIES`, `SELF_TEST_BATTERY_FLOOR`, `selfTestReachedVerdict`); every
+self-test must keep running standalone as `node scripts/<x>.mjs --self-test`, so a shared assertion
+module is one point of failure for every instrument at once.
 
-**Its instrument MEASURES, and is not a per-PR gate** — the probe spawns every member twice, so
-nothing ratchets this and reading your own script is the check. `scripts/measure-self-test-floor.mjs`
-classifies each floor from source; `--probe --only <path>` injects the early `return` and reads what
-your gate does (DEFEATED = exit 0; HELD = non-zero AND it said so; ACCIDENT = non-zero printing
-nothing). Its 2026-09-05 reading of 179 members — 165 HELD / 4 DEFEATED / 1 ACCIDENT / 9 NOT MEASURED
-(`docs/audits/2026-09-self-test-shape-census.md`) — was a reading of that tree on that date.
+Both non-handshake shapes, and how to classify and probe your own:
+`docs/audits/2026-09-self-test-shape-census.md` and the `scripts/measure-self-test-floor.mjs` docblock.
 
 ---
 

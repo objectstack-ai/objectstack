@@ -1255,7 +1255,26 @@ export const CEILINGS = new Map([
   // and holds the gate's LEVEL axis unchanged). AGENTS.md is not a CROSS_FILE_MOVES
   // destination, so no `ruledRaises` record applies. Landed count, headroom 0, same
   // convention.
-  ['AGENTS.md', 1075],
+  //
+  // 1075 → 1099 (card #15410): the `--self-test` shape section — nothing in this repo
+  // said what a self-test must look like, so every author re-derived it and the two
+  // holes (no assertion floor; no verdict handshake) kept being re-entered. Landed as
+  // the two judgeable clauses plus one pointer line: the floor pins battery NAMES with
+  // a per-battery minimum (never one total), and the verdict sets a module-level flag
+  // the dispatch refuses on when unset. The narrative, the census numbers and the two
+  // worked non-handshake shapes are NOT here — they were moved into
+  // `docs/audits/2026-09-self-test-shape-census.md`, which the pointer line names
+  // alongside the `scripts/measure-self-test-floor.mjs` docblock. +24 lines, the
+  // measured count of the compressed section including its heading, against a first
+  // draft that measured 41; the section has 0 lossless rewrap headroom at the
+  // surrounding ~100-byte prose width, and the ruling's single pointer line is two
+  // physical lines only because one would be 170B against this file's own 120-byte
+  // per-line budget. Maintainer ruling, verbatim and untranslated:
+  // 「135 同意」 (decision batch #135 item 4, 2026-09-15, presented as 「B,目标 ≤ 24 行,
+  // 并按实测行数抬上限」; recorded by the director on #15410 comment 5682595374, which
+  // also refuses option D). AGENTS.md is not a CROSS_FILE_MOVES destination, so no
+  // `ruledRaises` record applies. Landed count, headroom 0, same convention.
+  ['AGENTS.md', 1099],
   // #9965: root CLAUDE.md is the other repo-root instruction file — same read
   // path (every seat session), same governance (Prime Directive #14). It is
   // structurally growth-prone in the way the ratchet is built for: it exists to
