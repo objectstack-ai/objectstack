@@ -167,7 +167,7 @@ describe('MessagingServicePlugin — email/sms channel registration (kernel:read
         const { ctx, fireReady } = provisionCtx();
         await new MessagingServicePlugin({ reliableDelivery: false }).init(ctx);
         await fireReady();
-        const messaging: any = ctx.getService('messaging');
+        const messaging = ctx.getService('messaging') as MessagingService;
         expect(messaging.getRegisteredChannels()).not.toContain('sms');
 
         ctx.registerService('sms', { async send() { return { status: 'sent' }; } });
@@ -180,7 +180,7 @@ describe('MessagingServicePlugin — email/sms channel registration (kernel:read
         const { ctx, fireReady, logs } = provisionCtx();
         await new MessagingServicePlugin({ reliableDelivery: false }).init(ctx);
         await fireReady();
-        const messaging: any = ctx.getService('messaging');
+        const messaging = ctx.getService('messaging') as MessagingService;
         expect(messaging.getRegisteredChannels()).not.toContain('email');
 
         ctx.registerService('email', { async send() { return { id: 'mail_1' }; } });
