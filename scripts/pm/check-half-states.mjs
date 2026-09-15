@@ -9641,17 +9641,25 @@ export function h43GovernedReviewRequestGap(pr, governed, approvers, reviewed = 
 // declaration of 「which page is a seat post's window」. It is ONE request per
 // seat post per run and it is SHARED: the leg writes it into `commentCache`
 // before the judging loop, so H56 and H64 — which read this row's corpus by
-// construction — get the same page, and H65 consumes the same memo at the foot
-// instead of buying a second copy of it.
+// construction — get the same page; H65 consumes the same memo at the foot
+// instead of buying a second copy of it; and H32 and H38 take it at the top of
+// the sweep (#18325), which makes the gather loop the first asker on every post
+// in both populations rather than a second buyer.
 //
 // Three prices, each stated where it is paid:
 //
 //   • A seat post whose thread fits in ONE page costs nothing new: page 1 IS
 //     the newest page, and the rows already in the cache are reused unfetched.
-//   • A HELD multi-page seat post that H32 already fetched costs +1 request —
-//     H32 bought page 1 for its own corpus, which this row ⛔ does not touch
-//     (H32/H38 keep reading exactly the rows they read before, captured in
-//     `seatMarkers` before this leg runs).
+//   • A HELD multi-page seat post in H32's population costs this leg NOTHING —
+//     ⚠️ REWRITTEN (#18325). It used to read 「costs +1 request — H32 bought
+//     page 1 for its own corpus, which this row ⛔ does not touch (H32/H38 keep
+//     reading exactly the rows they read before)」, and that was true only while
+//     H32 bought a page-less FIRST page nobody wanted: its clock and H38's
+//     `T_seat` were reading an archive, and this leg then overwrote that cache
+//     entry a pass below. H32 now takes the same window through the same memo,
+//     so the page is bought ONCE, at the gather loop, and this leg finds it
+//     memoised. H32's POPULATION is still untouched — what moved is which page
+//     it reads, never which posts it reads.
 //   • A seat post with no readable `comments` count cannot have its newest page
 //     LOCATED, so the window falls back to page 1 — today's reading, never a
 //     better one — and the summary clause counts those separately rather than
@@ -20155,7 +20163,8 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
   // of the round then running. Every row that reads a seat post's comments —
   // H44, H56 and H64 through the cache, H65 through this memo — was reporting on
   // that archive. (#18324 widened the first of those to the triage post
-  // whatever its holder.)
+  // whatever its holder; #18325 moved H32 and H38 onto this memo too, so the
+  // gather loop is the first asker and every later reader is free.)
   //
   // So the page is located from the carrier's own `comments` count, through
   // H65's two exported helpers rather than a second copy of the arithmetic, and
@@ -20422,11 +20431,36 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
           // The ROWS are kept, not just the derived marker: H38 needs every
           // comment stamp on the post to compute `T_seat`, and re-fetching for
           // it would double a cost this gate exists to bound. H32 reads the
-          // same rows through `latestSeatMarker` exactly as before.
-          const rows = await commentRowsFor(issue);
-          const marker = latestSeatMarker(rows);
-          stats.seatMarkersRead = (stats.seatMarkersRead ?? 0) + 1;
-          seatMarkers.set(issue.number, { issue, marker, rows });
+          // same rows through `latestSeatMarker`, whose contract is unchanged.
+          //
+          // ⚠️ The WINDOW is `seatPostRowsFor` — the file's one declaration of
+          // 「which page of a seat post's thread this sweep reads」 — and ⛔ not
+          // a page-less `commentRowsFor` (#18325). GitHub serves issue comments
+          // OLDEST-FIRST, so the page-less request this line used to make
+          // returned the thread's FIRST page and `latestSeatMarker` returned
+          // the newest row OF THAT PAGE: measured on the live board, #6023's
+          // 225-comment thread yielded 2026-08-27T16:38:35Z while its real
+          // latest marker was 2026-09-14T11:41:59Z, 18 days newer. That row is
+          // H32's IDLE CLOCK and carries H32's wait exemption, and it is H38's
+          // `T_seat` — so the one reading on this post that must be the newest
+          // was the oldest page the endpoint serves.
+          //
+          // It buys NOTHING that was not already bought: this population is a
+          // SUBSET of H44's seat leg (`pm:seat` + held + countable lane, inside
+          // `pm:seat` + held), the memo is shared, and asking here simply makes
+          // this loop the first asker. The page-less fetch it replaces was
+          // itself wasted — H44's leg overwrote that `commentCache` entry with
+          // the newest page a pass below.
+          const page = await seatPostRowsFor(issue);
+          // `seatPostRowsFor` returns `null` for a page it could not read, and
+          // memoises that null. Treated exactly as the throw below is: the seat
+          // is left out rather than judged on nothing (#4690).
+          if (page) {
+            const rows = page.rows;
+            const marker = latestSeatMarker(rows);
+            stats.seatMarkersRead = (stats.seatMarkersRead ?? 0) + 1;
+            seatMarkers.set(issue.number, { issue, marker, rows });
+          }
         } catch {
           // Left out of `seatMarkers` entirely: the predicate's `undefined`
           // and `null` both decline, and the coverage pair is what states the
@@ -21175,6 +21209,19 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
   // Its seat population is exactly `h32NeedsSeatComments`' — HELD seats on a
   // lane this board can count — because that gate is what decided which seat
   // threads were READ, and a row must not speak about a post nobody fetched.
+  //
+  // ⚠️ Its WINDOW moved with H32's (#18325) and the placement argument above is
+  // unchanged by it: `rows` is still whatever the gather loop captured, still
+  // read here and nowhere else, and still costs this row no request. What those
+  // rows now are is the post's NEWEST page rather than its oldest, so `T_seat`
+  // is computed over the comments of the round that is actually running. ⚠️ On
+  // the live board that rarely MOVES a verdict, and the reason is worth stating
+  // rather than discovering: `seatPostLastEventMs` maxes the comment stamps
+  // against the post's own `updated_at`, and GitHub bumps `updated_at` when a
+  // comment is added, so the post's own field already dominates. The page
+  // choice decides `T_seat` exactly where it cannot — a comment EDITED after
+  // the post's last bump, which is the one 「seat writing home」 signal that
+  // lives only in the rows.
   // ⚠️ The residual, named rather than left implicit: a VACANT seat post whose
   // lane is still taking claims is not reported here. That shape is real (it is
   // dispatch on a lane whose seat says nobody is on the clock) but it is a
@@ -21209,8 +21256,12 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
   // three the thread's oldest 100 comments: on the triage post, five weeks of
   // archive with none of the current round on it.
   //
-  // ⛔ H32's rows are not moved by this. It captured its own `seatMarkers` rows
-  // before this line runs, and H38 read them one pass above.
+  // ⛔ H32's rows are not moved by this, and since #18325 they no longer need to
+  // be: the gather loop captured `seatMarkers` from this same memo, at this same
+  // window, before this line runs, and H38 read them one pass above. So the
+  // cache write below can only REPEAT what those rows already hold for a post in
+  // both populations, and the posts this leg adds (an unheld triage post, a
+  // `repo:*` seat) are ones H32 never speaks about.
   const h44Seats = [...seen.values()].filter((issue) => h44NeedsSeatComments(issue));
   stats.readingSeatCandidates = h44Seats.length;
   for (const issue of h44Seats) {
@@ -29026,7 +29077,11 @@ Mutual exclusion: \`get_comments\` page 747 → \`[]\`, page 746 = my own R+117 
   // counted by the file-wide audit it exists to check (`RETIRED_ASSIGNEE_COINAGE`'s
   // reason, one row over).
   t('seat window: the located page is REQUESTED in exactly one place', audit18312.purchaseSites, 1);
-  t('seat window: …and taken through the memo by more than one row, which is what makes it shared', audit18312.readers, 2);
+  // ⚠️ REWRITTEN (#18325), not deleted: this pin read `2` while the memo's
+  // readers were H44's seat leg and H65. H32's gather is the third, and it is
+  // the FIRST to ask on every post in both populations — which is what makes
+  // the count a statement about sharing rather than about cost.
+  t('seat window: …and taken through the memo by more than one row, which is what makes it shared', audit18312.readers, 3);
   const TICK18312 = String.fromCharCode(96);
   const commentsPath18312 = (query) =>
     `${TICK18312}/repos/\${OWNER_REPO}/issues/\${issue.number}/comments?${query}${TICK18312}`;
@@ -29034,6 +29089,62 @@ Mutual exclusion: \`get_comments\` page 747 → \`[]\`, page 746 = my own R+117 
   t('seat window: …and does not read `per_page=` as a page number', seatWindowAudit(commentsPath18312('per_page=100&page=9')).pagelessPaths.length, 0);
   t('seat window: the audit SEES a second purchase site when one exists', seatWindowAudit(['h65CommentPagePath(', 'OWNER_REPO, a)\n', 'h65CommentPagePath(', 'OWNER_REPO, b)'].join('')).purchaseSites, 2);
   t('seat window: …and the assembled needles did not defeat the file-wide audit', seatWindowAudit().purchaseSites, 1);
+
+  // -- H32's clock and H38's `T_seat` read the NEWEST page (#18325) ----------
+  //
+  // The gather that fills `seatMarkers` lives inside `sweepInto`, which takes no
+  // injectable transport, so the property is pinned where it is decidable: the
+  // two pages a multi-page seat post can serve, and what each of the three
+  // readings (`latestSeatMarker`, its age, `seatPostLastEventMs`) returns off
+  // each. ⭐ The fixture is the measured live shape of #6023 — 225 comments, so
+  // page 1 ends 2026-08-27 while the real latest marker is 2026-09-14.
+  const at18325 = (iso, body) => ({ created_at: iso, updated_at: iso, body });
+  const PAGE1_18325 = [
+    at18325('2026-08-08T05:34:17Z', 'R1 开场:队列 12 open cards。'),
+    at18325('2026-08-27T16:38:35Z', '本轮等 CI 收敛后再派。'),
+  ];
+  const LASTPAGE_18325 = [
+    at18325('2026-09-08T05:16:07Z', 'R1 wave 2 派发 4 张。'),
+    at18325('2026-09-14T11:41:59Z', '继承落地债 4/4 已清,PR 已入队。'),
+  ];
+  const SEAT_18325 = { ...seat18312(225), updated_at: '2026-09-14T11:41:59Z' };
+  const NOW_18325 = Date.parse('2026-09-15T19:00:00Z');
+  // ⭐ BEFORE — the page-less first page, which is what this row used to read.
+  t('seat marker window: ⛔ page 1 makes the seat\'s LATEST utterance an August one', latestSeatMarker(PAGE1_18325).createdAt, '2026-08-27T16:38:35Z');
+  t('seat marker window: …so H32\'s idle clock reads ~19 days, not hours', Math.round(seatMarkerAgeMinutes(latestSeatMarker(PAGE1_18325), NOW_18325) / 1440), 19);
+  t('seat marker window: …and the wait exemption is read off that August comment', seatDeclaresWait(latestSeatMarker(PAGE1_18325).body), true);
+  // ⭐ AFTER — the located newest page, which is what the memo hands it now.
+  t('seat marker window: ⭐ the newest page makes it the seat\'s real latest utterance', latestSeatMarker(LASTPAGE_18325).createdAt, '2026-09-14T11:41:59Z');
+  t('seat marker window: …so the clock reads the round that is actually running', Math.round(seatMarkerAgeMinutes(latestSeatMarker(LASTPAGE_18325), NOW_18325) / 1440), 1);
+  t('seat marker window: …and the exemption is judged on the CURRENT marker, which declares no wait', seatDeclaresWait(latestSeatMarker(LASTPAGE_18325).body), false);
+  // ⛔ `latestSeatMarker`'s own contract is untouched: hand it either page and
+  // it still returns the newest row OF WHAT IT WAS GIVEN. The defect was never
+  // in this function; it was in which rows reached it.
+  t('seat marker window: ⛔ the resolver is unchanged — newest row of whatever page it is handed', latestSeatMarker([...PAGE1_18325, ...LASTPAGE_18325]).createdAt, '2026-09-14T11:41:59Z');
+  t('seat marker window: …and thread order still breaks a tie no stamp can', latestSeatMarker([{ created_at: 'x', body: 'first' }, { created_at: 'x', body: 'second' }]).body, 'second');
+  // ⭐ H38's `T_seat`. ⚠️ On the live board the page rarely moves it, because
+  // `seatPostLastEventMs` maxes the rows against the post's own `updated_at`
+  // and GitHub bumps that on every new comment — the first case pins exactly
+  // that, so the small live delta is a measured property and not a surprise.
+  t('H38 T_seat: the post\'s own `updated_at` dominates, so both pages agree here', seatPostLastEventMs(SEAT_18325, PAGE1_18325), seatPostLastEventMs(SEAT_18325, LASTPAGE_18325));
+  // …and the one signal that lives ONLY in the rows: a comment EDITED after the
+  // post's last bump. That is the seat writing home, and page 1 cannot see it.
+  const EDITED_18325 = [
+    { created_at: '2026-09-10T09:00:00Z', updated_at: '2026-09-15T08:00:00Z', body: 'R1 wave 3 记账(已编辑)' },
+  ];
+  t('H38 T_seat: ⭐ a comment edited after the post\'s last bump only reaches it through the newest page', seatPostLastEventMs(SEAT_18325, EDITED_18325), Date.parse('2026-09-15T08:00:00Z'));
+  t('H38 T_seat: ⛔ …and page 1 leaves `T_seat` back at the post\'s own bump, one day stale', seatPostLastEventMs(SEAT_18325, PAGE1_18325), Date.parse('2026-09-14T11:41:59Z'));
+  // ⭐ The consequence H38 actually files, both ways round: a lane claim written
+  // between the two readings is STALE on page 1's `T_seat` and CLEAN on the
+  // newest page's — the verdict flip this card is about.
+  const CLAIM_18325 = { number: 18324, at: Date.parse('2026-09-14T20:00:00Z') };
+  const LANE_SEAT_18325 = { ...SEAT_18325, title: '[PM seat] domain:devx @ objectstack — 🟢 os-project-manager' };
+  t('H38 verdict: ⛔ on the OLD window the post reads STALE against a claim it already answered', typeof h38SeatPostStale(LANE_SEAT_18325, Date.parse('2026-09-14T11:41:59Z'), CLAIM_18325), 'string');
+  t('H38 verdict: ⭐ …and CLEAN once `T_seat` comes off the newest page', h38SeatPostStale(LANE_SEAT_18325, Date.parse('2026-09-15T08:00:00Z'), CLAIM_18325), null);
+  // ⭐ The population is what did NOT move. Both gates read exactly as before.
+  t('seat marker window: ⛔ H32\'s population is unmoved — a vacant seat still buys no fetch', h32NeedsSeatComments({ ...SEAT_18325, title: '[PM seat] domain:devx — ⏳ vacant' }), false);
+  t('seat marker window: ⛔ …and a foreign-lane seat still buys none', h32NeedsSeatComments({ ...SEAT_18325, title: '[PM seat] repo:cloud — 🟢 os-zhuang' }), false);
+  t('seat marker window: …while the held own-board seat it DOES read is a subset of H44\'s leg, which is why the memo costs nothing', h32NeedsSeatComments(SEAT_18325) && h44NeedsSeatComments(SEAT_18325), true);
 
   // -- H44's marker spelling (#18312) ----------------------------------------
   //
