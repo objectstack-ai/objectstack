@@ -905,7 +905,38 @@ export const CEILINGS = new Map([
   // width 134 B), and the two neighbours the row joins offer 37 and 6 spare
   // bytes against its 115 bytes of content; re-wrap funding is refused per the
   // 2026-08-17 rule in any case. Landed count, headroom 0, same convention.
-  ['.claude/skills/pm-dispatch/references/platform-readings.md', 454],
+  // Raised 454 → 459 by the FIFTEENTH readings increment, again under the
+  // STANDING one-file exception quoted above rather than a fresh decision
+  // card, and again recorded as a `ruledRaises` record citing it. Spent at ONE
+  // line per deduplicated reading, each written in this file's voice, all five
+  // from one measured account-level incident and its measured recovery: the
+  // suspension signal is `account was suspended` on every endpoint including
+  // `/rate_limit` and on git, with no reason given — a third 403 shape beside
+  // the session gate and the rate limit (+1); a suspension destroys the
+  // account's PRs, cards and comments while every branch and commit stays on
+  // the remote, because those belong to the repository (+1); a destroyed PR
+  // still holds its branch name — the API answers 404 yet a new PR on the same
+  // branch is refused — so the same commits go up under a NEW branch name (+1);
+  // the local object store is the last backup — every branch a reviewer fetched
+  // to verify on the tree still has its head locally after the suspension, and
+  // it pushes (+1); and a rebuilt PR self-reports four things in its body:
+  // byte-identical head, no rebase/amend/squash, numbers from the old base, CI
+  // decides (+1) = +5 exactly. Candidates 5 / landed 5 / already present 0 /
+  // refused 0 — the family grep (suspended / 停用 / 销毁 / 幽灵 / 重推 / 重建 /
+  // 对象库 / 分支名) on `origin/main` hit only the Routine-rebuild and
+  // issue-transfer rows, none of which carries any of the five.
+  //
+  // TWO corrections are paid in place and buy nothing: the quota block's
+  // 「限流、403、传输失败都要试过另一侧才说得出我没手段」 row and its 「⇒ MCP 限流先探
+  // REST 再定退避」 conclusion, which until this increment instructed the very
+  // same-identity channel switch that `rest-channel.md`'s identity-bound
+  // rate-limit rows forbid; both are re-conditioned in place, line-neutral, on
+  // the `GET /user` identity test, with the 403 and transport halves kept as
+  // the per-side readings they are. Nothing else was paid in place: the fourth
+  // increment MEASURED zero line-neutral folds among this file's adjacent rule
+  // pairs, and re-wrap funding is refused per the 2026-08-17 rule in any case.
+  // Landed count, headroom 0, same convention.
+  ['.claude/skills/pm-dispatch/references/platform-readings.md', 459],
   // Per-operation REST/GraphQL/git channel mapping — which fleet operation has
   // a REST twin (each row executed in a real session, provenance date carried
   // per row), the handful that are GraphQL-only, and the queue-routing
@@ -1559,6 +1590,23 @@ export const CROSS_FILE_MOVES = new Map([
             + '逐条核实、去重计数(候选/落地/已有/拒收)、一事一行、不计重排」',
           date: '2026-09-14',
           delta: 1,
+        },
+        {
+          // The FIFTEENTH increment, under the same STANDING exception — the
+          // same words again, for the same reason: a record that quotes no
+          // ruling is RED and each record stands alone. The +5 is accounted for
+          // line by line beside this entry's ceiling above; the exception's
+          // conditions (per-item verification and the candidate / landed /
+          // already-present / refused counts) are carried by the raising PR's
+          // body and the seat's ACCEPT.
+          ruling:
+            'the standing one-file exception for'
+            + ' `.claude/skills/pm-dispatch/references/platform-readings.md` — pm-dispatch'
+            + ' SKILL.md, verbatim and untranslated: 「唯一例外:`platform-readings.md`'
+            + ' 增量抬上限到落地行数,免决策卡,记 `ruledRaises` 引常设裁决。条件:席位验收评论'
+            + '逐条核实、去重计数(候选/落地/已有/拒收)、一事一行、不计重排」',
+          date: '2026-09-15',
+          delta: 5,
         },
       ],
       sources: [

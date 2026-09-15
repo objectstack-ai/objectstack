@@ -120,10 +120,10 @@
 - REST 写侧经出口代理必带 `Content-Type: application/json`,否则代理回 415 且一个字节都没写。
 - 判别式:该 415 的 `documentation_url` 指 Claude Code 不指 GitHub ⇒ 代理拒,不是 GitHub;四端点实测。
 - 两通道的信封在配额、权限、传输三样上都不同 ⇒ 任一侧的拒绝只是那一侧的读数。
-- 限流、403、传输失败都要试过另一侧才说得出我没手段。
+- 403 与传输失败要试过另一侧才说得出我没手段;限流先比身份,同 ID 的他侧不是手段。
 - 读数:`POST /actions/runs/{id}/rerun-failed-jobs` REST 回 403 而 MCP 回 201。
 - job 日志只有 MCP 取得回,REST 侧转 blob 存储 `http=000`;同分钟 MCP 限流而 REST core 满 15000。
-- ⇒ MCP 限流先探 REST 再定退避,⛔ 不据一侧限流把整个平台的写都停掉。
+- ⇒ MCP 限流先 `GET /user` 比 ID:同 ID 的 REST 满额不是退路,写排队到重置;异 ID 才是。
 - MCP 的读限流与写限流彼此独立,两向各有实测 ⇒ 一侧被拒 ⛔ 不推另一侧也不可用。
 - REST 档以本班 repo-scoped 探针绿为前提;403 会话改按降级梯读。
 - 容器 curl 的 REST 通道令牌按会话定:installation(`claude[bot]`)或 user-to-server(用户),core 15,000/时。
@@ -158,6 +158,11 @@
 - 中途撞限流的 dev 完不成强制查重,只能把发现交回 PM 代为归档,⛔ 不盲目开卡。
 - 打满时待执行写排成有序清单挂进巡逻词,不靠记忆;恢复窗口按序连清。
 - 重试对齐整点(REST core 整点重置)优于指数退避,⛔ 绝不忙轮询。
+- 停用报文 account was suspended 遍及 /rate_limit 与 git,不给理由;非会话门 403、非限流。
+- 账号停用销毁其名下 PR、卡与评论;分支与 commit 属仓库照留远端 ⇒ 代码从未真丢。
+- 被销毁的 PR 仍占分支名:API 答 404,同名开新 PR 仍被拒 ⇒ 同批 commit 推新分支名再开。
+- 本地对象库是最后备份:复核时 fetch 过的每条分支,其 head 在停用后仍在本地可推。
+- 重建 PR 正文自报四件:head 逐字节同、无 rebase/amend/squash、数字出自旧基底、CI 为准。
 - 文档载明未实测:条件请求答 `304` 不计 core 池。
 - 公开仓零配额读法两档,payload 档优先 —— 只有 body 精确。
 - 网页档可达性逐会话逐 URL 形状分叉:一处容器 `/actions/**` 与 api. 回 403,另一处网页全 200。
