@@ -29,7 +29,9 @@
  *
  *   `{{NOW}}`                    the clock read in THIS invocation.
  *   `{{WAS:2026-09-08T14:00Z}}`  a stamp that is a reading of something ELSE,
- *                                declared as such and rendered verbatim.
+ *                                declared as such and rendered verbatim. The
+ *                                seconds grain (`2026-09-08T14:00:30Z`) is
+ *                                taken here too.
  *
  * There is no third spelling, and no flag that turns the contract off.
  *
@@ -71,12 +73,16 @@
  * the quoted route renders a reading of something ELSE, and an instant that has
  * not happened yet is provably not a reading of anything.
  *
- * The boundary, because the format is minute-grained: a stamp names the SPAN of
- * its own grain (`stampSpan`, imported — the same widening H56 makes before it
+ * The boundary, and the two grains it is taken at. The accepted shape has a
+ * minute form and a seconds form — `YYYY-MM-DDThh:mmZ` and
+ * `YYYY-MM-DDThh:mm:ssZ` — and BOTH are quotable; a stamp names the SPAN of its
+ * own grain (`stampSpan`, imported — the same widening H56 makes before it
  * measures drift), and the value is a possible reading exactly while that span
  * has STARTED. So a stamp equal to the act's own minute is ACCEPTED — a reading
  * taken at any instant inside this minute is spelled exactly that way — and the
- * refusal begins at the first minute whose start the clock has not reached.
+ * refusal begins at the first minute whose start the clock has not reached. A
+ * seconds-grained value is judged on its own second, which is narrower than the
+ * minute around it, never on that minute.
  *
  * ⛔ There is no skew tolerance, and `H56_STAMP_TOLERANCE_MIN` is not one.
  * That number measures how far a WRITE may land after the read it carries — a
@@ -85,14 +91,55 @@
  *
  * The same judgement corrects what the OTHER refusals offer: the positional and
  * mixed texts hand the seat `{{WAS:<the typed stamp>}}` with the stamp filled
- * in, so when that stamp is in the future they must stop offering a route that
- * will refuse it — a refusal text prescribing a refused remedy is a tool
- * arguing with itself.
+ * in, so when that stamp is one the quoted route would itself refuse — later
+ * than this act's clock, or naming no instant at all (the section below) — they
+ * must stop offering a route that will refuse it. A refusal text prescribing a
+ * refused remedy is a tool arguing with itself.
  *
  * A bare stamp OUTSIDE those two positions is passed through with a note on
  * stderr rather than refused: prose quoting a ruling's date is a reading of
  * something else, and refusing it would push seats back onto the channel this
  * tool exists to replace.
+ *
+ * ## The digits must name an instant the calendar HAS (#18289)
+ *
+ * The shape rule is the protocol's stamp REGEX, and a regex counts digits:
+ * `2026-13-45T99:99Z` satisfies every class in it. The direction rule then let
+ * it through in the quiet direction — `stampSpan` asks `Date.parse`, which
+ * answers NaN, so the span is null, so "is this later than now" is `false`. Not
+ * future, therefore not refused: the value was rendered VERBATIM and
+ * `--dry-run` reported "1 quoted stamp(s) rendered verbatim" at exit 0. A stamp
+ * no clock could ever have shown went onto the board as a reading.
+ *
+ * `Date.parse` has two ways of not meaning what the digits say, and only the
+ * first one is loud:
+ *
+ *   NaN          a field outside its own range — month 13 or 00, day 45 or 00,
+ *                hour 99, minute 99, second 60. Nothing comes back to judge.
+ *   ROLLED OVER  a field inside its range but not on the calendar — 31 April,
+ *                29 February in a non-leap year, hour 24. These are rolled
+ *                FORWARD silently, so `2026-04-31T00:00Z` is a real number: the
+ *                one that spells 2026-05-01. It parses, it is in the past, and
+ *                it is not the date its own text names. Measured on this
+ *                runtime, not assumed.
+ *
+ * One rule refuses both: re-render the instant it parsed to, at the stamp's own
+ * grain, and require the bytes back unchanged (`stampRealInstant`). A value
+ * that round-trips to a different date is not a reading of the instant it
+ * names — it is a typo this tool would otherwise publish as a measurement,
+ * which is the defect the whole file exists to close, reached by another road.
+ *
+ * ⛔ The round trip is not a second shape check, and the three rules fire one
+ * at a time. The shape rule owns what a quoted payload may SAY (one stamp and
+ * nothing else); this one owns whether the thing it says EXISTS; the direction
+ * rule owns whether the clock has reached it. A payload that fails the shape is
+ * never also filed as a calendar problem, and a date the calendar does not have
+ * is never also filed as a direction one — one typo, one refusal.
+ *
+ * ⛔ And it narrows nothing. Every value this tool accepted before — both
+ * grains, a leap day in a leap year, whitespace inside the declaration —
+ * round-trips by construction, because a stamp the calendar has is exactly what
+ * `Date.parse` returns unchanged.
  *
  * ## EVERY `{{` is a token this tool can render, or the body is refused (#18284)
  *
@@ -391,6 +438,37 @@ export function quotedStampValues(text) {
 }
 
 /**
+ * The seconds grain, in the same spelling `stampSpan` uses to pick its widening
+ * — mirrored rather than imported, because `stampSpan` does not export the
+ * test. A self-test case holds the two equal, so a change on either side is a
+ * red rather than a silent disagreement about which second a stamp names.
+ */
+const SECONDS_GRAIN_RE = /\d{2}:\d{2}:\d{2}Z$/;
+
+/**
+ * Whether `stamp` names an instant the calendar actually HAS — and, when it
+ * does not, the date it names instead.
+ *
+ * `Date.parse` fails two different ways here and only one of them is visible.
+ * An out-of-range field (month 13, day 45, 99:99) gives NaN. A field inside its
+ * range but not on the calendar (31 April, 29 February in a non-leap year, hour
+ * 24) is rolled FORWARD into the next real date and returned as an ordinary
+ * number — so `2026-04-31T00:00Z` parses, sits in the past, and is not the date
+ * its digits spell. So the test is a ROUND TRIP: re-render the parsed instant
+ * at the stamp's own grain and require the bytes back.
+ *
+ * ⛔ `rolledTo` is null for the NaN half and a stamp for the rolled-over half,
+ * never the input — so a caller cannot report a rollover that did not happen.
+ */
+export function stampRealInstant(stamp) {
+  const text = String(stamp ?? '').trim();
+  const span = stampSpan(text);
+  if (span === null) return { real: false, rolledTo: null };
+  const rolledTo = `${new Date(span.from).toISOString().slice(0, SECONDS_GRAIN_RE.test(text) ? 19 : 16)}Z`;
+  return rolledTo === text ? { real: true, rolledTo: null } : { real: false, rolledTo };
+}
+
+/**
  * Whether `stamp` names an instant the clock this act holds has NOT reached.
  *
  * The stamp is widened to its own grain first (`stampSpan`, imported rather
@@ -399,12 +477,35 @@ export function quotedStampValues(text) {
  * about the boundary). A value is a possible reading exactly while its span has
  * started, so the current minute is accepted and the next one is not.
  *
- * An unparseable value is NOT future — it is the shape refusal's business, and
- * answering `true` here would file one typo under two kinds.
+ * A value that names no instant is NOT future — it is `stampRealInstant`'s
+ * business, and answering `true` here would file one typo under two kinds.
  */
 export function stampIsFuture(stamp, nowMs = Date.now()) {
   const span = stampSpan(String(stamp ?? '').trim());
   return span !== null && span.from > nowMs;
+}
+
+/**
+ * Why the quoted route cannot take this bare stamp, as the clause a remedy text
+ * appends — or null when the route IS open to it.
+ *
+ * The positional and mixed refusals hand the seat `{{WAS:<the typed stamp>}}`
+ * with the stamp filled in, so a stamp the quoted route would itself refuse
+ * must not be offered through it. One predicate for both texts and both
+ * closures: two spellings of "may this be quoted" is how a remedy comes to
+ * prescribe a refusal.
+ */
+function quotedRouteClosed(stamp, nowMs) {
+  if (!stampRealInstant(stamp).real) {
+    return `\`${stamp}\` names no instant the calendar has, so it is not a reading of anything either`;
+  }
+  if (stampIsFuture(stamp, nowMs)) {
+    return (
+      `\`${stamp}\` is later than the clock this act holds (\`${stampNow(nowMs)}\`), so it cannot be a ` +
+      'reading of something else either'
+    );
+  }
+  return null;
 }
 
 /**
@@ -432,6 +533,23 @@ export function stampRefusals(text, nowMs = Date.now()) {
       });
       continue;
     }
+    const calendar = stampRealInstant(value);
+    if (!calendar.real) {
+      refusals.push({
+        kind: 'quoted-no-such-instant',
+        detail:
+          `\`{{WAS:${offendingSpan(value)}}}\` is shaped like a stamp but names no instant the calendar has` +
+          (calendar.rolledTo === null
+            ? ' — a field is outside its own range, so it does not parse at all. '
+            : ` — it rolls over to \`${calendar.rolledTo}\`, which is a different date from the one its digits ` +
+              'spell. ') +
+          'The quoted route renders a reading of something ELSE verbatim, and no clock has ever shown an ' +
+          'instant that does not exist — the digit shape is satisfied by month 13 and 99:99 alike, so a ' +
+          'value that clears it is still a typo until the calendar agrees. Correct the digits to the ' +
+          `instant that was actually read, or write \`${STAMP_TOKEN}\` if it is this act's own clock.`,
+      });
+      continue;
+    }
     if (!stampIsFuture(value, nowMs)) continue;
     refusals.push({
       kind: 'quoted-in-the-future',
@@ -451,12 +569,11 @@ export function stampRefusals(text, nowMs = Date.now()) {
       `${hit.where} carries the bare stamp \`${hit.stamp}\`. That position belongs to the writing ` +
       'act, so a stamp typed there is the act\'s own time written from memory — the defect this tool ' +
       'exists to make unspellable. ';
+    const closed = quotedRouteClosed(hit.stamp, nowMs);
     refusals.push({
       kind: 'positional',
-      detail: stampIsFuture(hit.stamp, nowMs)
-        ? `${opener}Write \`${STAMP_TOKEN}\` there. The quoted route is NOT open to this one: ` +
-          `\`${hit.stamp}\` is later than the clock this act holds (\`${now}\`), so it cannot be a reading ` +
-          'of something else either.'
+      detail: closed
+        ? `${opener}Write \`${STAMP_TOKEN}\` there. The quoted route is NOT open to this one: ${closed}.`
         : `${opener}Write \`${STAMP_TOKEN}\` there, or \`{{WAS:${hit.stamp}}}\` if it ` +
           'is genuinely a reading of something else.',
     });
@@ -470,12 +587,12 @@ export function stampRefusals(text, nowMs = Date.now()) {
       const opener =
         `this body uses \`${STAMP_TOKEN}\` and also carries the bare stamp \`${stamp}\`. One of the ` +
         'two clocks was read by this act and the other was typed; a reader cannot tell which. ';
+      const closed = quotedRouteClosed(stamp, nowMs);
       refusals.push({
         kind: 'mixed',
-        detail: stampIsFuture(stamp, nowMs)
+        detail: closed
           ? `${opener}Make it \`${STAMP_TOKEN}\` if it is this act's own. The quoted route is NOT open to ` +
-            `it: \`${stamp}\` is later than the clock this act holds (\`${now}\`), so it cannot be a ` +
-            'reading of something else either.'
+            `it: ${closed}.`
           : `${opener}Declare ` +
             `it with \`{{WAS:${stamp}}}\` if it is a quoted reading, or make it \`${STAMP_TOKEN}\` if it ` +
             'is this act\'s own.',
@@ -848,9 +965,12 @@ const USAGE = [
   '',
   '  With no --file the body is read from stdin.',
   `  In the body: \`${STAMP_TOKEN}\` is the clock this run reads; \`{{WAS:YYYY-MM-DDThh:mmZ}}\` declares a`,
-  '  stamp that is a reading of something else. A bare stamp on the opening line, or on a subscript',
+  '  stamp that is a reading of something else — at either grain the protocol takes, the minute above or',
+  '  the seconds form `YYYY-MM-DDThh:mm:ssZ`. A bare stamp on the opening line, or on a subscript',
   '  reading-time line, is REFUSED — that position belongs to the writing act. A quoted stamp LATER',
-  '  than the clock this run reads is REFUSED too — the future is not a thing anyone read.',
+  '  than the clock this run reads is REFUSED too — the future is not a thing anyone read — and so is',
+  '  one whose digits name no instant the calendar has (month 13, 99:99, 31 April), whether it fails to',
+  '  parse at all or rolls over silently to another date.',
   '  A body refresh is REFUSED while comments newer than the body\'s last write stamp exist and',
   '  --ack-through=ID does not name the newest of them — a refresh must not void an unread knock.',
   '  The attribution footer is the caller\'s: its form differs by channel and act, so this tool adds none.',
@@ -987,6 +1107,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the token contract: the two spellings, and nothing else': 9,
   'the refusals: every route that must not reach the board': 20,
   'the opener scan: every `{{` is a token this tool renders, or the body is refused': 35,
+  'the calendar rule: a stamp shaped like an instant the calendar does not have': 34,
   'the direction check: a stamp no act can have read': 22,
   'the substitution: one clock, read once, written everywhere': 9,
   'the read-back: what the transcript can actually prove': 11,
@@ -994,7 +1115,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the unread-knock check: a refresh cannot void what nobody read': 23,
   'the shared rule: this tool and H56 cannot come to disagree': 6,
 });
-const SELF_TEST_BATTERY_FLOOR = 9;
+const SELF_TEST_BATTERY_FLOOR = 10;
 const UNATTRIBUTED_BATTERY = '(unattributed)';
 
 let selfTestReachedVerdict = false;
@@ -1103,6 +1224,57 @@ export function selfTest() {
   t(`a longer one is clipped to ${SPAN_BYTES} bytes and says so`, offendingSpan('x'.repeat(100)) === `${'x'.repeat(SPAN_BYTES)}…`);
   t('⛔ …and never cuts a multi-byte character in half', offendingSpan(`${'x'.repeat(SPAN_BYTES - 1)}€€`) === `${'x'.repeat(SPAN_BYTES - 1)}…`);
   t('the budget is counted in BYTES, which is the unit a dump arrives in', SPAN_BYTES === 60 && Buffer.byteLength(offendingSpan('€'.repeat(40)), 'utf8') <= SPAN_BYTES + 3);
+
+  // The filed repro: the protocol's own digit shape, filled with an instant no
+  // calendar has. `Date.parse` answers NaN, the span is null, and a null span
+  // is "not future" — so before this rule the value was RENDERED, and
+  // `--dry-run` said so at exit 0.
+  battery('the calendar rule: a stamp shaped like an instant the calendar does not have');
+  const NO_SUCH = 'The board was read at {{WAS:2026-13-45T99:99Z}}.';
+  t('\u2b50 the filed repro: month 13, day 45, 99:99 is REFUSED, not rendered verbatim', kinds(NO_SUCH, NOW_MS).includes('quoted-no-such-instant'));
+  t('\u2b50 \u2026so the whole body is refused and NOTHING is rendered', renderBody(NO_SUCH, NOW_MS).ok === false && renderBody(NO_SUCH, NOW_MS).body === undefined);
+  t('\u26d4 WHY it used to pass: the shape regex counts digits and this satisfies it', protocolStamps('2026-13-45T99:99Z').length === 1);
+  t('\u26d4 \u2026and the direction rule reads its NaN span as "not future"', stampIsFuture('2026-13-45T99:99Z', NOW_MS) === false);
+  t('\u2026so the refusal is the calendar one and NOT the direction one \u2014 one typo, one refusal', kinds(NO_SUCH, NOW_MS).join() === 'quoted-no-such-instant');
+  t('\u2026and the refusal prints the offending span in the row form', stampRefusals(NO_SUCH, NOW_MS)[0].detail.includes('{{WAS:2026-13-45T99:99Z}}'));
+  t('\u2026saying the calendar has no such instant', stampRefusals(NO_SUCH, NOW_MS)[0].detail.includes('names no instant the calendar has'));
+
+  t('an impossible MONTH is refused', kinds('read {{WAS:2026-13-01T00:00Z}}', NOW_MS).includes('quoted-no-such-instant'));
+  t('an impossible DAY is refused', kinds('read {{WAS:2026-01-45T00:00Z}}', NOW_MS).includes('quoted-no-such-instant'));
+  t('an impossible HOUR is refused', kinds('read {{WAS:2026-01-01T99:00Z}}', NOW_MS).includes('quoted-no-such-instant'));
+  t('an impossible MINUTE is refused', kinds('read {{WAS:2026-01-01T00:99Z}}', NOW_MS).includes('quoted-no-such-instant'));
+  t('\u2026and a zero month or day, which is the same range failure from below', kinds('read {{WAS:2026-00-01T00:00Z}}', NOW_MS).includes('quoted-no-such-instant') && kinds('read {{WAS:2026-01-00T00:00Z}}', NOW_MS).includes('quoted-no-such-instant'));
+  t('\u2026an impossible SECOND at the seconds grain too', kinds('read {{WAS:2026-01-01T00:00:60Z}}', NOW_MS).includes('quoted-no-such-instant'));
+  t('none of those parses at all, so the refusal reports no rollover', stampRealInstant('2026-13-45T99:99Z').rolledTo === null);
+
+  // The quiet half: these PARSE. `Date.parse` rolls a date that is not on the
+  // calendar forward into one that is, so the number is real and in the past
+  // — the direction rule has nothing to say and the value was rendered.
+  t('\u2b50 the 31st of a 30-day month is REFUSED', kinds('read {{WAS:2026-04-31T00:00Z}}', NOW_MS).includes('quoted-no-such-instant'));
+  t('\u26d4 \u2026although it PARSES and sits in the past \u2014 which is why no earlier rule caught it', stampSpan('2026-04-31T00:00Z') !== null && stampIsFuture('2026-04-31T00:00Z', NOW_MS) === false);
+  t('\u2026and the refusal names the date it silently rolled over to', stampRefusals('read {{WAS:2026-04-31T00:00Z}}', NOW_MS)[0].detail.includes('rolls over to `2026-05-01T00:00Z`'));
+  t('\u2b50 a 29 February in a NON-leap year is REFUSED', kinds('read {{WAS:2027-02-29T00:00Z}}', NOW_MS).includes('quoted-no-such-instant'));
+  t('\u2026rolled to the 1 March it actually parses to', stampRealInstant('2027-02-29T00:00Z').rolledTo === '2027-03-01T00:00Z');
+  t('\u26d4 \u2026and NOT also filed as a direction problem, though 2027 is ahead of this clock', kinds('read {{WAS:2027-02-29T00:00Z}}', NOW_MS).join() === 'quoted-no-such-instant');
+  t('hour 24 rolls into the next day and is refused as the date it is not', stampRealInstant('2026-09-10T24:00Z').rolledTo === '2026-09-11T00:00Z');
+
+  t('\u2b50 THE CONTROL: a real instant at the MINUTE grain still renders verbatim', renderBody('read {{WAS:2026-09-08T14:00Z}}', NOW_MS).body === 'read 2026-09-08T14:00Z');
+  t('\u2b50 \u2026and a real instant at the SECONDS grain, which this tool takes too \u2014 NOT narrowed', renderBody('read {{WAS:2026-09-08T14:00:30Z}}', NOW_MS).body === 'read 2026-09-08T14:00:30Z');
+  t('\u2026both judged real by the round trip itself', stampRealInstant('2026-09-08T14:00Z').real === true && stampRealInstant('2026-09-08T14:00:30Z').real === true);
+  t('\u2b50 a real LEAP DAY is an instant the calendar has: 2028-02-29 is not a calendar problem', stampRealInstant('2028-02-29T00:00Z').real === true && kinds('read {{WAS:2028-02-29T00:00Z}}', NOW_MS).includes('quoted-no-such-instant') === false);
+  t('\u2026it is refused by the DIRECTION rule alone, because 2028 is ahead of this clock', kinds('read {{WAS:2028-02-29T00:00Z}}', NOW_MS).join() === 'quoted-in-the-future');
+  t('\u2026and a leap day already PAST clears every rule', stampRefusals('read {{WAS:2024-02-29T00:00Z}}', NOW_MS).length === 0);
+  t('\u2b50 the act\'s OWN minute is still accepted \u2014 the boundary rule is untouched', stampRefusals('read {{WAS:2026-09-10T06:37Z}}', NOW_MS).length === 0);
+  t('\u26d4 whitespace inside the declaration is no escape: the value is trimmed before it is judged', kinds('read {{WAS: 2026-13-45T99:99Z }}', NOW_MS).includes('quoted-no-such-instant'));
+  t('\u26d4 a payload that fails the SHAPE is not also filed as a calendar problem', kinds('{{WAS:2026-13-45T99:99Z ruling}}', NOW_MS).join() === 'quoted-not-a-stamp');
+  t('the grain test mirrors `stampSpan`\'s own widening, minute and second alike', stampSpan('2026-09-08T14:00Z').to - stampSpan('2026-09-08T14:00Z').from === 60000 && stampSpan('2026-09-08T14:00:30Z').to - stampSpan('2026-09-08T14:00:30Z').from === 1000);
+
+  // The remedy texts hand a bare stamp back through the quoted route, so the
+  // route's two closures must both shut the offer off.
+  const POSITIONAL_NO_SUCH = 'Claim: skills seat, 2026-13-45T99:99Z \u2014 dispatched.';
+  t('\u2b50 the POSITIONAL refusal stops offering a quoted route that would refuse the stamp', stampRefusals(POSITIONAL_NO_SUCH, NOW_MS)[0]?.detail?.includes('{{WAS:2026-13-45T99:99Z}}') === false);
+  t('\u2026saying instead that the calendar has no such instant', stampRefusals(POSITIONAL_NO_SUCH, NOW_MS)[0]?.detail?.includes('names no instant the calendar has') === true);
+  t('the MIXED refusal likewise', stampRefusals('Claim: {{NOW}}\n\nread 2026-13-45T99:99Z', NOW_MS).find((r) => r.kind === 'mixed')?.detail?.includes('{{WAS:2026-13-45T99:99Z}}') === false);
 
   // The clock this act holds is 06:37:48 — so 06:37Z is the minute it is IN,
   // 06:38Z the first minute it has not reached, and 06:51Z sits 14 minutes
