@@ -112,8 +112,12 @@ describe('refuses loudly at authoring time, in both directions', () => {
       const result = schema.safeParse(1.5);
       expect(result.success).toBe(false);
       if (!result.success) {
-        expect(result.error.issues[0]?.code).toBe('invalid_type');
-        expect(result.error.issues[0]?.expected).toBe('int');
+        const issue = result.error.issues[0];
+        expect(issue?.code).toBe('invalid_type');
+        // Narrowed on `code` rather than cast: `$ZodIssue` is a discriminated
+        // union, and `expected` exists only on this member. A cast here would
+        // typecheck against a shape the issue may not have.
+        if (issue?.code === 'invalid_type') expect(issue.expected).toBe('int');
       }
     });
 
@@ -122,8 +126,11 @@ describe('refuses loudly at authoring time, in both directions', () => {
       const result = schema.safeParse(-1);
       expect(result.success).toBe(false);
       if (!result.success) {
-        expect(result.error.issues[0]?.code).toBe('too_small');
-        expect((result.error.issues[0] as { minimum?: unknown }).minimum).toBe(0);
+        const issue = result.error.issues[0];
+        expect(issue?.code).toBe('too_small');
+        // The floor itself, not just that some floor fired: `0` is what makes
+        // this `.nonnegative()` rather than `.positive()`.
+        if (issue?.code === 'too_small') expect(issue.minimum).toBe(0);
       }
     });
   }
