@@ -426,7 +426,12 @@ describe('#18202 — a malformed collection on an unparsed input is skipped, nev
     composeStacks([serviceStack(), stack], { manifest: 'preserve' });
 
   it('a non-array `permissions` composes, and the key is warned about exactly once', () => {
-    const { warnings, thrown } = warningsDuring(composeWith(malformed({ permissions: 'not-an-array' })));
+    // Map format, which `permissions` does not support — the shape a
+    // hand-built stack most plausibly carries. It is NOT iterable, which is
+    // what makes this the case that distinguishes the guard: a string value
+    // would iterate its characters and never throw either way.
+    const mapShaped = { sales_rep: { label: 'Sales Rep', objects: { [NOWHERE]: { allowRead: true } } } };
+    const { warnings, thrown } = warningsDuring(composeWith(malformed({ permissions: mapShaped })));
     expect(thrown).toBeNull();
     expect(warnings.filter((w) => w.includes("top-level key 'permissions'"))).toHaveLength(1);
   });
