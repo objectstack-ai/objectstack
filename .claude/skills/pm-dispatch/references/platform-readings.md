@@ -127,7 +127,7 @@
 - MCP 的读限流与写限流彼此独立,两向各有实测 ⇒ 一侧被拒 ⛔ 不推另一侧也不可用。
 - REST 档以本班 repo-scoped 探针绿为前提;403 会话改按降级梯读。
 - 容器 curl 的 REST 通道令牌按会话定:installation(`claude[bot]`)或 user-to-server(用户),core 15,000/时。
-- 令牌类判别走自写回读的 `user.type` 与 `performed_via_github_app`,`GET /user` 两类同答绑定账号。
+- 令牌类只认自写回读的 `user.type`/`user.login`;`performed_via_github_app` 与 `GET /user` 两类同答。
 - GraphQL 池 5000/时,只留给没有 REST 对应物的几件。
 - 那几件 = draft 翻转、auto-merge 挂载、语义 `/search/*`、Projects field_values、`issue transfer`。
 - 逐操作通道归属、写侧配方与队列路由三读法见 `rest-channel.md`,⛔ 不在本表复述。
@@ -186,9 +186,9 @@
 - 边界:⛔ 只因仓库公开成立;⛔ 覆盖单卡读,搜索页只给锚点不给正文。
 - ⛔ 永不拿渲染列表定规模:静默只显一页。渲染层 WebFetch 仍在,~15 分缓存、有损。
 - issue 查询页有 SSR 锚点且 `label:` 是真 AND:小结果与 REST 逐号相等,大结果静默截到十余条。
-- 查重先 `search_issues`;它自述语义匹配器,而两形实测与自述相反,按下两行的读数拼。
+- 查重先 `search_issues`;它自述语义匹配器,只有限定符形与自述相反,按下两行的读数拼。
 - 限定符拼进 `query` 不被拒且真过滤:总数与号码与 REST 列表端点逐一相等,范围参数可省。
-- 描述句形反而回 `total_count: 0` 加 `incomplete_results: false`,点亮控制词同零 ⇒ 自信的错答案。
+- 句子形两测:2026-09-09 对已知总体回 0,2026-09-15 命中首条 ⇒ 只作线索,⛔ 不作零证明。
 - 零还按词形分叉:camelCase 标识符与带引号短语回 0,同序列里连字符 slug 照常回全集。
 - 同一意图换文档形则命中,首条即目标;body 文本匹配是 repo-scoped `list` 做不到的。
 - `list` 加本地扫描是确定性回退,⛔ 不是默认。

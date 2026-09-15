@@ -943,8 +943,9 @@ export const CEILINGS = new Map([
   // checkable by its own control word. Spent at ONE line per deduplicated
   // reading, each written in this file's voice: the write-identity probe — the
   // discriminator between the two token classes is the read-back of the
-  // session's own write (`user.type` plus `performed_via_github_app`), because
-  // `GET /user` answers the bound account under both (+1); a suspension erases
+  // session's own write, and within it `user.type` (with `user.login`) ALONE,
+  // because `performed_via_github_app` names the same App under both classes
+  // and `GET /user` answers the bound account under both (+1); a suspension erases
   // the account's EVENTS as well as its content, so a label stays on the card
   // while the `labeled` event that wrote it is gone and 「who labelled what」 is
   // unreconstructable (+1); the card `comments` COUNT over-reads — 1 against a
