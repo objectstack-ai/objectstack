@@ -64,7 +64,9 @@
       "mcp__github__sub_issue_write",
       "mcp__github__merge_pull_request",
       "mcp__github__create_repository",
-      "mcp__github__fork_repository"
+      "mcp__github__fork_repository",
+      "mcp__github__enable_pr_auto_merge",
+      "mcp__github__disable_pr_auto_merge"
     ]
   },
   "hooks": {
