@@ -245,8 +245,8 @@ describe('#17502 — the served repeater row offers no column the parse door ref
         // comparison and stays invisible — only `dashboard.widgets`'s lit
         // columns and the CARD types' TOP-level counts guard over-dropping
         // there. This pin reads the removals themselves, at every depth, for
-        // every served type, and asks the one question that makes a removal
-        // legal: did that node admit any instance?
+        // every served type. The one question this pin asks: did that node
+        // admit any instance?
         const served = await servedSchemas();
         const unexplained: string[] = [];
         const overDropped: string[] = [];

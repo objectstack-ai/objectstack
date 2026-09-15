@@ -208,10 +208,11 @@ describe('#17501 — /meta/types serves a real schema for `action`, and moves no
 
         const properties = served!.properties as Record<string, unknown>;
         expect(properties, '`action` must name its properties').toBeDefined();
-        // [#17502] 48 is the key set `action` ACCEPTS, and stays the pinned
-        // authority. The served document no longer carries the three that
-        // admit no instance, so they are added back rather than the constant
-        // being lowered — a live key going missing is still red.
+        // [#17502] 48 is the key set `action` DECLARES — 45 accepted plus the
+        // three that admit no instance and are therefore refused — and that
+        // declared total stays the pinned authority. The served document no
+        // longer carries those three, so they are added back rather than the
+        // constant being lowered — a live key going missing is still red.
         expect(Object.keys(properties).length + retiredTopLevelCount('action')).toBe(48);
         // A sample an author would actually address, and the one #17500's
         // repeater titles need a node to sit on.
