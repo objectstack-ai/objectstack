@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 import type { Plugin, PluginContext } from '@objectstack/core';
 import type { IDataEngine } from '@objectstack/spec/contracts';
 import { MessagingService } from './messaging-service.js';
+import type { MessagingChannel } from './channel.js';
 import { createInboxChannel } from './inbox-channel.js';
 import { SqlNotificationOutbox } from './sql-outbox.js';
 import { SqlHttpOutbox } from './sql-http-outbox.js';
@@ -92,6 +93,40 @@ export interface MessagingServicePluginOptions {
  * await kernel.bootstrap();
  * ```
  */
+/**
+ * A resolve-on-use channel mount (#18050): ask the transport resolver on EVERY
+ * lookup, build the channel object once, announce the bind once.
+ *
+ * The shape is the one `createLazyCounterStore` (plugin-auth) established for
+ * the same hazard and AGENTS.md cites as the cure: nothing is resolved at
+ * start, so plugin order decides nothing. Two properties are deliberate:
+ *
+ * - **The transport presence is re-read every call, never memoised.** That is
+ *   the whole fix — memoising it would restore the one-shot verdict in a new
+ *   place. A transport that appears later mounts the channel; one that goes
+ *   away unmounts it again, which lands on the SAME refusal a composition
+ *   without the transport has always produced.
+ * - **The channel OBJECT is memoised**, so a mounted channel keeps its identity
+ *   (and whatever it holds — template store handles, per-channel state) across
+ *   lookups instead of being rebuilt per delivery row.
+ */
+function lazyChannelMount(opts: {
+    resolveTransport: () => unknown;
+    create: () => MessagingChannel;
+    announce: string;
+    logger: { info(msg: string): void };
+}): () => MessagingChannel | undefined {
+    let channel: MessagingChannel | undefined;
+    return () => {
+        if (!opts.resolveTransport()) return undefined;
+        if (!channel) {
+            channel = opts.create();
+            opts.logger.info(opts.announce);
+        }
+        return channel;
+    };
+}
+
 export class MessagingServicePlugin implements Plugin {
     name = 'com.objectstack.service.messaging';
     /**
@@ -253,24 +288,45 @@ export class MessagingServicePlugin implements Plugin {
             });
         }
 
-        // Email channel (ADR-0030 P3): register when an `email` service is
-        // present. Resolved at kernel:ready so init order with the email plugin
-        // doesn't matter; absent email ⇒ no channel (a notify(channels:['email'])
-        // then reports "not registered" rather than silently no-opping). The
-        // dispatcher looks channels up dynamically, so registering after it is fine.
+        // Email channel (ADR-0030 P3) + SMS channel (#2780): mounted through a
+        // LAZY PROVIDER, so the mount TRACKS the transport service instead of
+        // recording a verdict about it (#18050).
+        //
+        // Both used to read the service registry once, inside this hook, and
+        // register the channel only `if (getEmail())`. The comment on that
+        // guard — "the dispatcher looks channels up dynamically, so registering
+        // after it is fine" — was true of the dispatcher and contradicted by
+        // the guard beneath it: the `if` ran EXACTLY ONCE, at `kernel:ready`,
+        // and nothing revisited it. A transport registered a moment later (a
+        // plugin ordered after this one registering from its own `kernel:ready`
+        // handler, `kernel:bootstrapped`, `kernel:listening`, or any runtime
+        // mount) never got its channel, and every `notify(channels:['email'])`
+        // was refused as "not registered" for the life of the process — the
+        // three-part "Startup registry reads" shape AGENTS.md names, cured here
+        // by its first cure: resolve where it is USED, not where you start.
+        //
+        // ⛔ What this does NOT change: while the transport is absent the
+        // provider answers nothing, so the channel is not mounted and fan-out
+        // refuses it exactly as before — no delivery row, and no
+        // `sys_notification.suppressed_channels` entry, because an absent mount
+        // is a COMPOSITION fact and that column answers "why can this TENANT
+        // not send" (#18041's boundary, pinned in unregistered-channel.test.ts).
+        // Whether a MOUNTED channel can send is the separate question
+        // `isAvailable` answers.
         if (typeof ctx.hook === 'function') {
             const templateStore = new NotificationTemplateStore({ getData });
             ctx.hook('kernel:ready', async () => {
-                if (getEmail()) {
-                    service.registerChannel(createEmailChannel({ getEmail, getData, store: templateStore, getDefaultTemplateLocale }));
-                    ctx.logger.info('[messaging] email channel registered (renders sys_notification_template; notify `template` refs resolve sys_email_template by (name, locale) — resolved per recipient: sys_user.locale, else the deployment default)');
-                }
+                service.registerChannelProvider('email', lazyChannelMount({
+                    resolveTransport: getEmail,
+                    create: () => createEmailChannel({ getEmail, getData, store: templateStore, getDefaultTemplateLocale }),
+                    announce: '[messaging] email channel registered (renders sys_notification_template; notify `template` refs resolve sys_email_template by (name, locale) — resolved per recipient: sys_user.locale, else the deployment default)',
+                    logger: ctx.logger,
+                }));
             });
 
-            // SMS channel (#2780): same pattern as email — register when an
-            // `sms` service (service-sms) is present at kernel:ready; absent
-            // sms ⇒ no channel, so a notify(channels:['sms']) reports "not
-            // registered" rather than silently no-opping.
+            // SMS channel (#2780): same pattern as email — mounted while an
+            // `sms` service (service-sms) is resolvable, unmounted while it is
+            // not, decided per lookup rather than once.
             const getSms = () => {
                 try {
                     return ctx.getService<import('./sms-channel.js').SmsSenderSurface>('sms');
@@ -279,10 +335,12 @@ export class MessagingServicePlugin implements Plugin {
                 }
             };
             ctx.hook('kernel:ready', async () => {
-                if (getSms()) {
-                    service.registerChannel(createSmsChannel({ getSms, getData, store: templateStore, getDefaultTemplateLocale }));
-                    ctx.logger.info('[messaging] sms channel registered (renders sys_notification_template — resolved per recipient: sys_user.locale, else the deployment default)');
-                }
+                service.registerChannelProvider('sms', lazyChannelMount({
+                    resolveTransport: getSms,
+                    create: () => createSmsChannel({ getSms, getData, store: templateStore, getDefaultTemplateLocale }),
+                    announce: '[messaging] sms channel registered (renders sys_notification_template — resolved per recipient: sys_user.locale, else the deployment default)',
+                    logger: ctx.logger,
+                }));
             });
         }
 

@@ -74,7 +74,6 @@
     "dashboard/globalFilters",
     "dashboard/header",
     "dashboard/widgets.chartConfig.annotations",
-    "dashboard/widgets.chartConfig.aria",
     "dashboard/widgets.chartConfig.interaction",
     "dashboard/widgets.chartConfig.series",
     "dashboard/widgets.chartConfig.xAxis",

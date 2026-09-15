@@ -32,6 +32,11 @@
  * first. Both table SHAPES are detected — the space-separated string this file
  * replaced and the array literal a re-typing would more likely produce.
  *
+ * "Non-test source" means every CARRIER the toolchain follows, not every `.ts`
+ * file. That distinction is the file's third measured falsification and it is
+ * argued at {@link runtimeSources}: a JSON array of the 249 codes read the
+ * package green through all seven assertions below.
+ *
  * ## What each check does and does not cover — measured, not claimed
  *
  * The absence checks are a source scan, so they see shapes. Two mutations were
@@ -47,6 +52,17 @@
  * `value-domains.ts` may import from `@objectstack/spec/shared` and nothing
  * else, so a table anywhere in the tree is inert while nothing here can name
  * it, and a relative specifier is how it would be named.
+ *
+ * ⚠️ That pin reads the DOOR, and only the door — a fact worth stating because
+ * it reads like a package-wide guarantee and is not one. No caller-side
+ * equivalent is possible in the same shape: `settings-service.ts` legitimately
+ * imports dozens of modules, so there is no one-specifier whitelist to assert
+ * against it. For a CALLER the shape scans are the instrument, which is why
+ * their SCOPE is pinned instead — the last assertion in this file states that
+ * no runtime source can relatively name a module the walk does not open, so
+ * "scanned" and "reachable" cannot drift apart silently. A table reached by a
+ * BARE package specifier stays outside both, for the door and the caller
+ * alike; it is in the NOT-covered list below and stays there.
  *
  * A judge STANDING IN FRONT OF THE DOOR is closed by the package-wide density
  * scan, and that distinction is a measured falsification, not a design
@@ -88,7 +104,14 @@
  *   complement is infinite. The trap corpus seeds the plausible members of
  *   that complement rather than pretending to close it.
  * - **A table reached through a BARE package specifier** rather than a
- *   relative one would pass the import pin.
+ *   relative one would pass the import pin, and passes the scope pin too: both
+ *   read relative specifiers, which is how a module inside this repo is named.
+ * - **A data carrier in a shape no scan knows**, `.json` included: the walk
+ *   now OPENS every carrier, so the array shape is caught wherever it lives,
+ *   but `{ "AD": 1, … }` in a JSON file is the same object-key map already
+ *   listed two bullets up — quotes and a colon push the separator past two
+ *   characters. Admitting the extension buys the ARRAY and SPACED shapes, not
+ *   a new shape class.
  * - Two further routes are closed by the toolchain rather than by a pin here,
  *   and are recorded because a toolchain is not a guarantee: the suite's
  *   module resolution, and the `tsup` es2020 target.
@@ -99,7 +122,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { join, relative } from 'node:path';
+import { dirname, extname, join, relative, resolve } from 'node:path';
 // The repo's ONE answer to "is this span a comment, or code?" — a private
 // stripper here would be the drift its header records (and
 // `check:comment-mask-adoption` refuses one). `stripComments` is the right
@@ -117,12 +140,48 @@ const SRC = fileURLToPath(new URL('.', import.meta.url));
 const DOOR = join(SRC, 'value-domains.ts');
 
 /**
- * Every non-test `.ts` under this package's `src/`, RECURSIVELY, as
+ * Every module extension a table can be CARRIED in — the walk's admission list.
+ *
+ * It read `.ts` alone until a JSON carrier was measured against it. The
+ * mutation: the 249 codes as a JSON array in `src/`, imported by the door's
+ * CALLER (`import ALPHA2 from './zz-alpha2.json' with { type: 'json' }` in
+ * `settings-service.ts`) and judging `iso_3166_alpha2` itself at the
+ * `validatePatch` refusal, falling through to the shared predicate for the
+ * other two. Every instrument in this file was green — 7/7 — and so was the
+ * package: 139/139 in `settings-service.test.ts`, `tsc --noEmit` exit 0
+ * (`resolveJsonModule` is on at the root) and `tsup` exit 0. Deleting one code
+ * from the JSON turned two behavioural cases red, so it was live code deciding
+ * the `value_domain` FieldError, not decoration.
+ *
+ * ⚠️ It was ONE walk away from being seen the whole time: the shapes below
+ * catch a JSON array of quoted codes on their existing spelling. Nothing was
+ * missing but the file's extension.
+ *
+ * `.mts` and `.cts` were blind for exactly the same reason and had never been
+ * separately measured, so they are admitted in the same edit rather than left
+ * behind as the next carrier; `.js`, `.mjs` and `.cjs` follow because the
+ * argument is about what the bundler opens, not about which language the table
+ * is typed in. The cost is measured, not assumed: this package's `src/` is 64
+ * files and 100% `.ts`, so the admission adds zero files HERE, and the
+ * repo-wide census in the density check below is unchanged by it.
+ *
+ * ⛔ Not a deny-list of "everything that is not a test": a `.md` or a fixture
+ * snapshot is prose, and a scan that reports on prose is how a ratchet earns
+ * the reputation that gets it deleted.
+ */
+const CARRIER_EXTENSIONS = ['.ts', '.mts', '.cts', '.js', '.mjs', '.cjs', '.json'];
+
+/**
+ * Every non-test carrier under this package's `src/`, RECURSIVELY, as
  * `[path-relative-to-src, source]`.
  *
  * Recursive because `readdirSync` is not: `src/manifests/` and
  * `src/translations/` exist today, and a table placed in either passed an
  * earlier draft of this pin green.
+ *
+ * The test exclusion is spelled per-STEM rather than as `.test.ts`, so it
+ * covers each admitted extension: `foo.test.mts` is evidence for the same
+ * reason `foo.test.ts` is.
  */
 function runtimeSources(dir: string = SRC): Array<[string, string]> {
   const out: Array<[string, string]> = [];
@@ -130,9 +189,12 @@ function runtimeSources(dir: string = SRC): Array<[string, string]> {
     const full = join(dir, entry.name);
     if (entry.isDirectory()) {
       out.push(...runtimeSources(full));
-    } else if (entry.name.endsWith('.ts') && !entry.name.endsWith('.test.ts')) {
-      out.push([relative(SRC, full), readFileSync(full, 'utf8')]);
+      continue;
     }
+    const ext = extname(entry.name);
+    if (!CARRIER_EXTENSIONS.includes(ext)) continue;
+    if (/\.(test|spec)$/.test(entry.name.slice(0, -ext.length))) continue;
+    out.push([relative(SRC, full), readFileSync(full, 'utf8')]);
   }
   return out;
 }
@@ -218,9 +280,15 @@ describe('no membership table anywhere in this package', () => {
     // FieldError on every alpha-2 save.
     //
     // The false-positive exposure is a census, not a hope: this pattern hits
-    // 1 of 1,885 runtime `.ts` files repo-wide (49 `src` roots, comments
-    // masked) — the shared module `value-domain.zod.ts` in the spec package,
-    // i.e. the table itself, which is the one place the definition belongs.
+    // exactly 1 runtime file repo-wide — the shared module
+    // `value-domain.zod.ts` in the spec package, i.e. the table itself, which
+    // is the one place the definition belongs. Re-measured when the walk
+    // admitted the six carriers beside `.ts`, because a widened scan that
+    // changes that number owes an explanation: over every tracked non-test
+    // carrier under a `src` root the count is 2,503 files and the same 1 hit
+    // (2,495 files at `.ts` alone), and over every tracked carrier in the
+    // repository, `src` root or not, 3,583 files and still that 1 hit. SPACED
+    // agrees with DENSE on that file; ARRAY hits nothing anywhere.
     // (Named without a repo-relative path on purpose: this test does not READ
     // that file, and `check:cross-package-test-inputs` reads a spelled path as
     // a declared input. Its scan is source text, comments included.) Quoted
@@ -247,5 +315,35 @@ describe('no membership table anywhere in this package', () => {
     // scans exist beside the behavioural pins rather than instead of them.
     const callers = runtimeSources().filter(([, src]) => stripComments(src).includes('isValueDomainMember('));
     expect(callers.map(([name]) => name)).toEqual(['value-domains.ts']);
+  });
+
+  it('names no module the walk does not open — scanned and reachable cannot drift apart', () => {
+    // The scope half of the shape scans, and the only caller-side answer to the
+    // question the door's import pin answers for the door. Every check above is
+    // "this text is not in the files I read"; none of them says anything about
+    // a file NOT read. A carrier one directory above `src/` would be named
+    // relatively and opened by the toolchain while this walk never sees it —
+    // the same failure the JSON carrier had, moved from the extension to the
+    // path.
+    //
+    // `rootDir: src` already makes this nearly true, and that is the reason to
+    // pin it rather than to skip it: this file's own NOT-covered list ends by
+    // recording two routes "closed by the toolchain rather than by a pin here,
+    // and … because a toolchain is not a guarantee". A `tsconfig.json` edit is
+    // not a reviewable event in a card about country codes.
+    //
+    // Relative specifiers only, in every shape that names one — static `from`,
+    // `import(…)` and `require(…)` — with the same delimiter-agnosticism the
+    // import pin above had to learn. A BARE specifier reaches outside by
+    // design and is in the NOT-covered list, unchanged.
+    const RELATIVE = /(?:\bfrom\s*|\b(?:import|require)\s*\(\s*)(['"])(\.[^'"]*)\1/g;
+    const escaping: string[] = [];
+    for (const [name, src] of runtimeSources()) {
+      for (const [, , specifier] of stripComments(src).matchAll(RELATIVE)) {
+        const landed = relative(SRC, resolve(dirname(join(SRC, name)), specifier));
+        if (landed.startsWith('..')) escaping.push(`${name} -> ${specifier}`);
+      }
+    }
+    expect(escaping).toEqual([]);
   });
 });

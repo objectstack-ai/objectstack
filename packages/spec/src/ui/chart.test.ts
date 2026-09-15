@@ -256,13 +256,47 @@ describe('Chart I18n Integration', () => {
   });
 });
 
-describe('Chart ARIA Integration', () => {
-  it('should accept chart with ARIA attributes', () => {
-    expect(() => ChartConfigSchema.parse({
+// This block used to assert the OPPOSITE — that a chart config ACCEPTS an
+// `aria` block — and it is inverted rather than deleted because the acceptance
+// it pinned is exactly what #17751 removed (ADR-0049 enforce-or-remove;
+// maintainer decision batch #118 item 2, recommendation C). A fixture that pins
+// the branch a retirement deletes cannot simply be respelled: there is no
+// spelling of `aria` this shape accepts any more. Left alone it would have gone
+// red here, which it did; deleted, the file would have lost the one statement it
+// makes about this key. The FAMILY pin — that the prescription names only live
+// `AriaProps` carriers, and that the two former alias spellings refuse instead of
+// renaming onto the tombstone — lives with its siblings in
+// `aria-carrier-tombstones.test.ts`; this one holds the local fact that the door
+// on THIS shape is shut.
+describe('Chart ARIA Integration — retired (#17751)', () => {
+  it('refuses an ARIA block and carries the upgrade in the rejection', () => {
+    const result = ChartConfigSchema.safeParse({
       type: 'pie',
       title: 'Revenue by Region',
       aria: { ariaLabel: 'Pie chart showing revenue by region', role: 'img' },
-    })).not.toThrow();
+    });
+    expect(result.success, '`chartConfig.aria` is a tombstone — a passing parse means the key came back').toBe(false);
+
+    // `retiredKey()` is a Zod `never` whose issue carries the guidance as its
+    // message, so here the wording IS the whole contract — there is no ADR-0112
+    // code/status envelope on this rejection class (the same note
+    // `aria-carrier-tombstones.test.ts` opens with).
+    const message = result.error!.issues.map((i) => i.message).join('\n');
+    expect(message).toContain('`ChartConfig.aria`');
+    expect(message).toContain('was removed');
+    expect(message, 'the rejection must name the channel that IS applied').toContain('`description`');
+  });
+
+  it('still accepts the accessible name that the renderer really applies', () => {
+    // The positive control, and the reason the key could be REMOVED rather than
+    // enforced: `description` is lowered onto the chart graphic as `role="img"`
+    // plus `aria-label`. Without this leg the test above would pass just as well
+    // on a shape that had lost its accessibility story altogether.
+    expect(ChartConfigSchema.safeParse({
+      type: 'pie',
+      title: 'Revenue by Region',
+      description: 'Pie chart showing revenue by region',
+    }).success).toBe(true);
   });
 });
 
