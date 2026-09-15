@@ -1,6 +1,6 @@
 {
   "type": "action",
-  "_note": "ActionSchema. Seeded from docs/audits/2026-06-actionschema-property-liveness.md. Renderers live in objectui (evidence cited as prose, not framework paths); framework-side: service-ai action-tools, runtime body-runner/http-dispatcher. Containers (params/resultDialog/ai/aria) classified at top level — no divergent sub-statuses in the audit. ⚠ EVIDENCE LIVES IN CLOUD/EE: the `cloud: packages/service-ai/...` paths cited below are the closed `@objectstack/service-ai` runtime in the CLOUD repo, NOT git-tracked framework code. 2026-08-30 (#13272): the previous wording of this sentence was false in BOTH halves. (a) It called the framework's own service-ai tree “a stale build artifact with no src/” — there is no tree at all: `packages/services/` holds every sibling service EXCEPT service-ai, and `git ls-files | grep -ic service-ai` returns 0. Absent, not stale. (b) The citations spelled `packages/services/service-ai/...`, a path present in NEITHER repo; cloud's real layout, measured at cloud@15f55df (#13042), is `packages/service-ai/...`. Every citation below now carries the explicit `cloud` realm marker, so it is attributed by the marker `scanEvidence` reads rather than riding the `FOREIGN_PATH_PREFIXES` special case that silently exempted the stale spelling from resolution — which is why 22 dead pointers sat green. ⚠ NOT RE-VERIFIED: this repair corrected the package root from that recorded measurement ONLY. No consumer below was re-read against a cloud checkout, so no `verifiedAt` was stamped and no `#symbol` anchor was added — the gate never resolves a foreign anchor, so an unchecked one would re-create the unfalsifiable pointer this repair removes. Re-verifying these consumers against a live cloud checkout is still open (#13272). These props are `live` because that cloud runtime consumes them; the OPEN framework edition does not — see content/docs/ai for the open/cloud boundary. 2026-07-30 (#3896 close-out sweep): the dead authoring keys were REMOVED — tombstoned at the schema with prescriptions (retiredKey) and stripped by the protocol-17 close-out conversions; entries deleted per the #3715 precedent.",
+  "_note": "ActionSchema. Seeded from docs/audits/2026-06-actionschema-property-liveness.md. Renderers live in objectui (evidence cited as prose, not framework paths); framework-side: service-ai action-tools, runtime body-runner/http-dispatcher. Containers (params/resultDialog/ai/aria) classified at top level — no divergent sub-statuses in the audit. ⚠ EVIDENCE LIVES IN CLOUD/EE: the `cloud @<sha>: packages/service-ai/...` paths cited below are the closed `@objectstack/service-ai` runtime in the CLOUD repo, NOT git-tracked framework code. 2026-08-30 (#13272): the previous wording of this sentence was false in BOTH halves. (a) It called the framework's own service-ai tree “a stale build artifact with no src/” — there is no tree at all: `packages/services/` holds every sibling service EXCEPT service-ai, and `git ls-files | grep -ic service-ai` returns 0. Absent, not stale. (b) The citations spelled `packages/services/service-ai/...`, a path present in NEITHER repo; cloud's real layout, measured at cloud@15f55df (#13042), is `packages/service-ai/...`. Every citation below now carries the explicit `cloud` realm marker, so it is attributed by the marker `scanEvidence` reads rather than riding the `FOREIGN_PATH_PREFIXES` special case that silently exempted the stale spelling from resolution — which is why 22 dead pointers sat green. ✅ RE-VERIFIED 2026-09-15 (#13272): the re-verification half this entry parked is discharged. All three cloud consumers cited below were re-read in a cloud checkout at cloud @cb8ee7ff60c097cc21a584fe9caf8ef4391cc0e8 and all three are CONFIRMED; every row now carries `verifiedAt`, `evidenceScope: cross-repo`, and `#symbol` anchors pinned to the consuming functions instead of a line number — the one cited line (`action-tools.ts:535`) had already drifted to 545 in a 961-line file that is actively edited. The anchors are the load-bearing half, and they are why the DATE matters: `scanEvidence` never collects an anchor while a foreign realm marker is in force, so CI cannot re-derive a single one of the cloud anchors — each rests on that dated reading alone. ⛔ Never re-stamp `verifiedAt` here without re-reading cloud; a bare re-stamp restores exactly the unfalsifiable pointer this entry's history is made of. These props are `live` because that cloud runtime consumes them; the OPEN framework edition does not — see content/docs/ai for the open/cloud boundary. 2026-07-30 (#3896 close-out sweep): the dead authoring keys were REMOVED — tombstoned at the schema with prescriptions (retiredKey) and stripped by the protocol-17 close-out conversions; entries deleted per the #3715 precedent.",
   "props": {
     "name": {
       "status": "live",
@@ -18,7 +18,9 @@
     },
     "objectName": {
       "status": "live",
-      "evidence": "cloud: packages/service-ai/src/tools/action-tools.ts:535",
+      "verifiedAt": "2026-09-15",
+      "evidenceScope": "cross-repo",
+      "evidence": "cloud @cb8ee7ff: packages/service-ai/src/tools/action-tools.ts#buildParametersSchema — materialises the record-id parameter and its description for a row-context action; cloud @cb8ee7ff: packages/service-ai/src/tools/action-tools.ts#actionToToolDefinition — carried onto the tool definition; cloud @cb8ee7ff: packages/service-ai/src/tools/action-tools.ts#createActionToolHandler — the object the invocation targets.",
       "note": "action dispatch + AI bridge."
     },
     "icon": {
@@ -81,7 +83,9 @@
     },
     "params": {
       "status": "live",
-      "evidence": "cloud: packages/service-ai/src/tools/action-tools.ts",
+      "verifiedAt": "2026-09-15",
+      "evidenceScope": "cross-repo",
+      "evidence": "cloud @cb8ee7ff: packages/service-ai/src/tools/action-tools.ts#buildParametersSchema — each declared param becomes one JSON Schema property on the exposed tool.",
       "note": "field/objectOverride/defaultFromRow/options/placeholder/helpText/defaultValue/required all consumed."
     },
     "variant": {
@@ -141,7 +145,9 @@
     },
     "ai": {
       "status": "live",
-      "evidence": "cloud: packages/service-ai/src/tools/action-tools.ts",
+      "verifiedAt": "2026-09-15",
+      "evidenceScope": "cross-repo",
+      "evidence": "cloud @cb8ee7ff: packages/service-ai/src/tools/action-tools.ts#actionToToolDefinition — ai.exposed is the gate, and ai.category plus ai.outputSchema ride onto the definition; cloud @cb8ee7ff: packages/service-ai/src/tools/action-tools.ts#actionRequiresApproval — ai.requiresConfirmation overrides the destructive-by-default rule; cloud @cb8ee7ff: packages/service-ai/src/tools/action-tools.ts#actionSkipReason — refuses an unexposed or undescribed action; cloud @cb8ee7ff: packages/service-ai/src/tools/action-tools.ts#buildParametersSchema — ai.paramHints annotate the generated schema.",
       "note": "full AI bridge (exposed/description/category/paramHints/outputSchema/requiresConfirmation)."
     },
     "recordIdParam": {
