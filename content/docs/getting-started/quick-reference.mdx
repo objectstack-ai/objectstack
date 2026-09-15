@@ -80,7 +80,7 @@ Plugin architecture, manifests, and kernel runtime.
 | **[Plugin Validator](/docs/references/kernel/plugin-validator)** | `plugin-validator.zod.ts` | ValidationResult, PluginMetadata | Plugin validation |
 | **[Plugin Versioning](/docs/references/kernel/plugin-versioning)** | `plugin-versioning.zod.ts` | PluginCompatibilityMatrix, DeprecationNotice | Version compatibility |
 | **[Service Registry](/docs/references/kernel/service-registry)** | `service-registry.zod.ts` | ServiceRegistryConfig, ServiceMetadata | Service discovery |
-| **[Startup Orchestrator](/docs/references/kernel/startup-orchestrator)** | `startup-orchestrator.zod.ts` | StartupOptions, StartupOrchestrationResult | System startup |
+| **[Startup Orchestrator](/docs/references/kernel/startup-orchestrator)** | `startup-orchestrator.zod.ts` | PluginStartupResult | The per-plugin result the kernel returns for every plugin it starts |
 | **[Events](/docs/kernel/events)** ↗ | `events.zod.ts` | Event, EventBusConfig | System event bus — the hand-written guide, outside `references/kernel/` (which splits the same surface across six `events-*` pages) |
 | **[Metadata Loader](/docs/references/kernel/metadata-loader)** | `metadata-loader.zod.ts` | MetadataLoaderContract | Metadata loading |
 | **[Package Registry](/docs/references/kernel/package-registry)** | `package-registry.zod.ts` | InstalledPackage, InstallPackageRequest | Package resolution |
