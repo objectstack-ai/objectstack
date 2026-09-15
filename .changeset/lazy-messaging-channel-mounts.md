@@ -1,5 +1,5 @@
 ---
-'@objectstack/service-messaging': patch
+'@objectstack/service-messaging': minor
 ---
 
 Mount the email and SMS channels per lookup instead of deciding once at `kernel:ready`
@@ -10,6 +10,8 @@ service that registered later in the same boot — from a plugin ordered after t
 `kernel:bootstrapped` / `kernel:listening`, or at runtime — never got its channel, and every
 `notify` naming that channel was refused as "not registered" for the life of the process.
 
+New public surface (which is why this grades `minor` and not `patch`, per the 2026-09-04 ruling
+that a purely additive widening of a published surface takes at least a minor):
 `MessagingService.registerChannelProvider(id, resolve)` mounts a channel that is resolved on
 every lookup, and the plugin now mounts both channels through it: the mount tracks the
 transport instead of recording a verdict about it, and the dispatcher — which has always
