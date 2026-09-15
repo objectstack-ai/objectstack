@@ -5073,10 +5073,10 @@ export function selfTest() {
   t('⛔ so it is not a review of record: the accept set is still exactly one spelling', reviewOfRecord(keyedPair).state === 'absent');
   t('…and the pair is a C6 row, exactly as if nothing had been written', typeof keyedRow === 'string');
   t('⭐ but the row NAMES the spelling, quoting the span the seat actually wrote', says(keyedRow, `\`Head-sha: ${HEAD_9AF9}\``) && says(keyedRow, 'comment 3401'));
-  t('…and says WHERE it read it, so the seat opens the right thread', says(keyedRow, 'PR thread'));
+  t('…and says WHERE it read it, so the seat opens the right thread', says(keyedRow, "the PR thread's comment 3401"));
   t('…and prescribes the fix in the rule\'s own words — key outside, sha in a span of its OWN', says(keyedRow, 'in a span of its OWN') && says(keyedRow, '所审 head sha 独占码段'));
   t('…pointing at the template as the thing to COPY, never a shape to compose', says(keyedRow, '`--template`'));
-  t('⛔ and it is a DIFFERENT sentence from the empty case — the two stopped printing alike', keyedRow !== absentRow && says(absentRow, 'indistinguishable from never reviewing') && !says(absentRow, 'The SPELLING is why'));
+  t('⛔ and it is a DIFFERENT sentence from the empty case — the two stopped printing alike', says(keyedRow, 'The SPELLING is why') && !says(keyedRow, 'indistinguishable from never reviewing') && says(absentRow, 'indistinguishable from never reviewing') && !says(absentRow, 'The SPELLING is why'));
   t('⛔ verdict-agnostic and never writes, exactly like the sentence it stands beside', says(keyedRow, 'PASS half') && says(keyedRow, '自查放行'));
   t('⛔ a heading-less comment carrying the head is the plain absence, not this diagnosis', headSpanHoldsKey(bare({ cardComments: [CLAIM('Clause-②: yes'), SEAT_ACCEPT] })) === null);
   t('⛔ a keyed span naming an OLDER head is the plain absence too — this row speaks about THIS head', headSpanHoldsKey(bare({ prComments: [{ ...KEYED_ROW, body: IN_SPAN.replace(HEAD_9AF9, 'facefeed') }] })) === null);
