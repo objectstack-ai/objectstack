@@ -40,11 +40,10 @@
 - 本仓转 draft 同时掉 auto-merge 与队列成员资格,不自动恢复,转正后重挂;姊妹仓曾保位照合。
 - 补救:转 draft 与 `disable_pr_auto_merge` 都做 —— 本仓 disable 单独不踢队。
 - 出队按队列 ref 阳性探针答不在队向,加未落地;ref 缺席只作旁证,⛔ 永不承载结论。
-- `update_pull_request` 不管传不传都发送 `draft` 位 ⇒ 任何调用必须显式带 `draft: true`。
-- reviewers/title/body/labels 的单字段调用同坑,曾把治理面 draft 发布进合并队列。
+- `update_pull_request` 单字段调用也发送 `draft` 位,曾把治理面 draft 发进队列 ⇒ 锁 1 已拒。
 - 请审专用路 = REST `POST /pulls/{n}/requested_reviewers`,载荷只有 reviewers/team_reviewers。
-- 它不碰 draft 位;门开席位优先走它,MCP-only 席才用 update 加显式 `draft: true`。
-- undraft 两条通道:席位凭据走 `POST .../pulls/{n}/ccr/ready_for_review`,MCP 传 `draft: false`。
+- 它不碰 draft 位 ⇒ 请审恒走它;MCP 兜底已拒。
+- undraft 单通道:席位凭据走 `POST .../pulls/{n}/ccr/ready_for_review`;MCP 兜底已拒。
 - 2026-09-12 两席实调:裸 GraphQL 会话内被拒,建议的 REST 正是 ccr 路 ⇒ 池 0 不再只能等重置。
 - ⛔ 裸 `PATCH /pulls/{n}` 传 `draft: false` 回 200 而无操作(2026-09-11);读回才作数:`GET /pulls/{n}`。
 - `enable_pr_auto_merge` 恒显式传 `mergeMethod: "SQUASH"`;不传静默退回被禁的 merge-commit = 无操作。
@@ -342,7 +341,7 @@
 - ⇒ 失效既依拼写又依载体:评论里验过页脚对 PR 正文什么都没证明。
 - ⇒ PR 正文页脚不带前置横线,且写后回读正文 —— 那是唯一检测手段;评论两形皆可。
 - 署名页脚的写侧变异按通道与输入双重定域,⛔ 不是一条定律。
-- MCP `update_pull_request` 包装器删掉 PR 正文的页脚块。
+- MCP `update_pull_request` 包装器删掉 PR 正文的页脚块;该通道锁 1 已拒,读作历史。
 - 裸 REST `PATCH /pulls` 追加一个裸页脚并保留既有 session-URL 页脚,差恰 58 字节。
 - 同路送无页脚正文存回恰一条(平台裸形)⇒ 该格处方是不送页脚,⛔ 不是不重送正文。
 - 同一 MCP 包装器上有反例:把已带页脚的正文整体重送,两条页脚均逐字节存活。
