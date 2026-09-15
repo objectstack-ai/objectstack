@@ -25,6 +25,10 @@
  *   2. point the fallback at `credentials.json` ⇒ `it('reads the CLOUD store, not
  *      the runtime store')` reds — the two stores are seeded with DIFFERENT ids
  *      under the SAME url, so only the source of the value can tell them apart.
+ *   3. make `os environments create --activate` skip the cloud write ⇒ the
+ *      `create --activate` case reds. There are TWO writers of an active
+ *      environment id, and fixing only `switch` leaves the most natural path
+ *      — create your own dev environment, publish into it — still refusing.
  *
  * ## Why `$HOME` is redirected rather than the modules mocked
  *
@@ -41,6 +45,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import PackagePublish from '../src/commands/package/publish.js';
 import EnvironmentsSwitch from '../src/commands/environments/switch.js';
+import EnvironmentsCreate from '../src/commands/environments/create.js';
 
 const CLOUD_PLANE = 'http://cloud.test';
 const OTHER_PLANE = 'http://self-hosted.test:3000';
@@ -310,6 +315,51 @@ describe('#18265: the active environment publish installs into', () => {
       expect((await readCloud()).activeEnvironmentId).toBeUndefined();
       const runtime = JSON.parse(await readFile(credentialsJson(), 'utf8'));
       expect(runtime.activeEnvironmentId).toBe('env_self_hosted');
+    });
+  });
+
+  // ── The other writer: `os environments create --activate` ────────────────
+  //
+  // `switch` is not the only command that names an active environment, and it
+  // is not the one the card's own scenario starts with. "I created my own cloud
+  // dev environment, now publish to it" is `create --activate` followed by
+  // `publish --install`, with no `switch` anywhere — so a fix that reaches only
+  // `switch` still refuses on the most natural path while reading like a fix.
+  describe('os environments create --activate records the id for the cloud plane too', () => {
+    it('a freshly created environment is immediately a publish target, with no switch in between', async () => {
+      await writeCloud({ url: CLOUD_PLANE, token: 'cloud_tok', createdAt: 'now' });
+      await writeCredentials({ url: CLOUD_PLANE, token: 'runtime_tok', createdAt: 'now' });
+      stubEnvironments({ id: 'env_created', display_name: 'Dev' });
+
+      await EnvironmentsCreate.run(['--org', 'org_1', '--name', 'Dev']);
+
+      expect(
+        (await readCloud()).activeEnvironmentId,
+        'create --activate recorded the new environment in the runtime store only, so the very '
+        + 'next `os package publish --install` cannot see it. That is the same defect as the one '
+        + 'this file guards on `switch`, one command over.',
+      ).toBe('env_created');
+
+      // The runtime store keeps its copy too — `createApiClient` reads THAT one.
+      const runtime = JSON.parse(await readFile(credentialsJson(), 'utf8'));
+      expect(runtime.activeEnvironmentId).toBe('env_created');
+
+      // …and the publish half really resolves it, end to end.
+      const calls = stubCloud();
+      await PackagePublish.run([artifactPath, '--install']);
+      expect(versionBody(calls).install_env_id).toBe('env_created');
+    });
+
+    it('leaves cloud.json alone when the create talked to a different control plane', async () => {
+      await writeCloud({ url: CLOUD_PLANE, token: 'cloud_tok', createdAt: 'now' });
+      await writeCredentials({ url: OTHER_PLANE, token: 'runtime_tok', createdAt: 'now' });
+      stubEnvironments({ id: 'env_self_hosted_new', display_name: 'Local' });
+
+      await EnvironmentsCreate.run(['--org', 'org_1', '--name', 'Local']);
+
+      expect((await readCloud()).activeEnvironmentId).toBeUndefined();
+      const runtime = JSON.parse(await readFile(credentialsJson(), 'utf8'));
+      expect(runtime.activeEnvironmentId).toBe('env_self_hosted_new');
     });
   });
 });
