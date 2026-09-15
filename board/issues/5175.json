@@ -1,0 +1,34 @@
+{
+  "number": 5175,
+  "kind": "issue",
+  "title": "`DashboardWidget.chartConfig` 在 dashboard 元数据面只有 `showLegend` 落地 —— 12 个已声明键里 11 个惰性,liveness 台账那一行高估了证据",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "pm:queue",
+    "repo:objectui",
+    "target:v17"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T07:42:47Z",
+  "updated_at": "2026-08-10T02:11:04Z",
+  "closed_at": "2026-08-10T02:11:04Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5175",
+  "body": "从 #5022 的载体测量中分离出来,**未指派**。#5022 本身在问 `drillDown` 该挂哪儿;测量顺带把 `chartConfig` 这个候选载体整体量了一遍,发现的是一件独立且更大的事。\n\n## 发现\n\n`DashboardWidgetSchema.chartConfig` 声明的是完整的 `ChartConfigSchema`(12 个可写键:`type` / `title` / `subtitle` / `description` / `xAxis` / `yAxis` / `series` / `colors` / `height` / `showLegend` / `showDataLabels` / `annotations` / `interaction` / `aria`)。在 **dashboard 元数据渲染路径**上,落地的只有 **`showLegend` 一个**。\n\n证据(objectui @91757a7):\n\n- `packages/plugin-dashboard/src/DashboardRenderer.tsx` 全文 **0 处** `chartConfig` —— 内联路径构造 component schema 时根本不看它;\n- ADR-0021 正路 `packages/plugin-dashboard/src/DatasetWidget.tsx:595-605` 只取一个键,注释自陈:\n\n  > `chartConfig.showLegend` (#3135). The widget's chart config never reached the renderer — this component read `options` and nothing else … Lower the one flag the renderer already honors; **the rest of `chartConfig` stays unforwarded** (the renderer derives axes/series from the dataset selection).\n\n- 同文件 `:632` 构造出的 chart schema 是 `{ type, chartType, data, xAxisKey, series, isAnimationActive, showLegend?, categoryColors?, categoryOrder? }` —— 没有第二个 `chartConfig` 键。\n\n即:一个 dashboard 作者写 `widget.chartConfig.title` / `.colors` / `.annotations` / `.interaction` / `.xAxis`,全部 parse 通过、全部无效果。ADR-0078 的失效模式,声明侧完整、交付侧只剩 1/12。\n\n## 台账那一行\n\n`packages/spec/liveness/dashboard.json` 里 `widgets.children.chartConfig`:\n\n```\n\"status\": \"live\",\n\"evidence\": \"objectui @91757a7: packages/plugin-dashboard/src/DatasetWidget.tsx:602-603 (chart-config bag forwarded to the chart renderer)\",\n\"note\": \"chart presentation config; read on the dataset-bound chart path.\"\n```\n\n`chart-config bag forwarded` 是不成立的:602-603 行做的是**取出这个 bag**,紧接着的一行只抽 `showLegend`。这一行的形状和 #4956 之前 `widgets` 那一行是同一类 —— 容器判 live,里面的键从没被单独问过。`chartConfig` 今天没有 `children`,所以 12 个键一个都没分类。\n\n⚠️ 注意 `type` 这个键是 **react tier 活的**:`react-blocks.ts` 的 `ObjectChart` 块把 `ChartConfigSchema` 的键作为**扁平 prop** 发布(`dataProps`),react 页面上它们确实到达渲染器。所以这不是「整个 schema 该退休」,而是**同一个 schema 在两个面上命运不同** —— #5011 给 `compareTo` 记过的那一类,只不过这次范围是 11 个键。\n\n## 建议(择一,需要裁决)\n\n1. **给 `chartConfig` 在 liveness 台账里开 `children` 并逐键分类**,把 dashboard 面惰性的键按 ADR-0049 enforce-or-remove 处理 —— 但 react tier 活着,所以 remove 不成立,只能 enforce(在 `DatasetWidget` 落地转发)或**改分类语义**(承认「面相关的 live」这个此前没有的verdict 形状)。\n2. **在 objectui 侧把 `chartConfig` 真正转发进 chart schema**,让 dashboard 面追上声明。注意 `xAxis`/`yAxis`/`series` 在 dataset 形态下是由 dataset selection 推导的,直接转发会冲突 —— 这部分需要设计,不是机械转发。\n3. **收窄 dashboard 面的声明**:`widget.chartConfig` 不再挂完整 `ChartConfigSchema`,只挂 dashboard 真正读的子集。破坏性,但 declared = delivered 由构造保证。\n\n先把台账那一行的证据措辞纠正是无争议的一步(它现在会让下一个人相信整个 bag 都被转发,#5022 的测量就是被它误导了半程)。\n\n## 参考\n\n- #5022(载体测量的出处)\n- #5011(`compareTo` 的 same key, two fates —— 同一失效类,已收口)\n- #4956(widget 子树被 drill 之前,容器 live 掩盖了里面所有键)\n- ADR-0021(dataset 单一形态)、ADR-0081/0082(react tier 契约)"
+}

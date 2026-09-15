@@ -1,0 +1,34 @@
+{
+  "number": 7086,
+  "kind": "issue",
+  "title": "NotifyConfigSchema.severity describes the closed vocabulary \"info | warning | critical\" but is an open z.string() — 'urgent' parses green and is blind-cast downstream",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T14:20:56Z",
+  "updated_at": "2026-08-10T04:02:45Z",
+  "closed_at": "2026-08-10T04:01:59Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7086",
+  "body": "Finding from the axis-① `.describe()` sweep (describe claims vs measured acceptance face — the #6762 class). Recorded unassigned; suggest `domain:spec-surface` for routing. Sibling of the `sourceObject`/`sourceId` finding on the same schema (#7085 — different field, different claim type).\n\n## Anchor\n\n`packages/spec/src/automation/io-node-config.zod.ts`, `NotifyConfigSchema`:\n\n```ts\n/** Severity forwarded to the messaging service. */\nseverity: z.string().optional().describe('info | warning | critical'),\n```\n\n## Described claim\n\nThe describe is nothing but a closed three-value enumeration: `info | warning | critical`. No \"e.g.\", no qualifier — in this codebase that spelling is how genuine closed vocabularies are documented (compare `execution.zod.ts` `regionKind`'s \"loop-body | parallel-branch | try | catch\", where the engine emits exactly those four).\n\n## Measured acceptance face\n\nProbed on `origin/main` @ `2f3e79351` (tsx `safeParse`, sources via `git archive`; controls both sides — same run as #7085, whose unknown-key control rejected):\n\n```\nseverity \"info\"      -> ACCEPTED\nseverity \"warning\"   -> ACCEPTED\nseverity \"critical\"  -> ACCEPTED\nseverity \"urgent\"    -> ACCEPTED\nseverity \"INFO\"      -> ACCEPTED\nseverity \"p1\"        -> ACCEPTED\nseverity \"\"          -> ACCEPTED\n```\n\nThe field is a bare `z.string()` — the vocabulary exists only in the sentence.\n\n## What happens to an out-of-vocabulary value downstream\n\nMeasured on the same checkout — no layer closes the gap, and the types downstream pretend it is closed:\n\n- the notify executor forwards it raw: `const severity = cfg.severity ? String(cfg.severity) : undefined` (`packages/services/service-automation/src/builtin/notify-node.ts`);\n- the messaging dispatcher blind-casts it into the closed union: `severity: (p.severity as Notification['severity']) ?? 'info'` (`packages/services/service-messaging/src/dispatcher.ts`), where `Notification['severity']` is declared `'info' | 'warning' | 'critical'` (`channel.ts`, `messaging-service.ts`).\n\nSo `severity: 'urgent'` parses green, publishes green, and lands in inbox rows under a TypeScript type that says the value cannot exist — every downstream `switch` on the three names silently falls through.\n\n## Why it matters for an authoring reader (ADR-0033)\n\n`content/docs/references/automation/io-node-config.mdx` renders the row as `| **severity** | string | optional | info \\| warning \\| critical |`. The docs read as an enum; the gate is an open string; the runtime is a cast. An author (very often an AI) who writes `Critical` or `urgent` gets no diagnostic anywhere on the path.\n\n## Suggested shape, if triage wants it fixed\n\nEither close the gate — `z.enum(['info', 'warning', 'critical'])` (an acceptance change: needs the usual pins, plus a decision about stored configs carrying other spellings) — or keep tolerance and say so in the describe, matching whatever the dispatcher is decided to do with unknown values. Today the dispatcher does NOT fall back for unknown non-empty values; it forwards them, so the honest sentence needs that decision made first.\n\n## Refs\n\n#6762 (class specimen: closed enumeration in the describe, wider gate in fact), #7085 (sibling finding on this schema), ADR-0033."
+}

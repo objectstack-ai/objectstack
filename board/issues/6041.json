@@ -1,0 +1,32 @@
+{
+  "number": 6041,
+  "kind": "issue",
+  "title": "[决策] 是否给 `app.defaultAgent` 的取值加 lint(平台 agent 名单外即 warning)—— #5985 实测门禁对该类缺陷结构性失明",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T15:29:51Z",
+  "updated_at": "2026-08-10T05:42:38Z",
+  "closed_at": "2026-08-10T05:42:24Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6041",
+  "body": "来源:#5985(skills 语料教 `defaultAgent: 'sales_copilot'` 死绑定)建议 2,分诊裁定「新门禁面,单独立单进决策箱」;语料本身已由 PR #6030 修复。本卡由 devx 座位(会话 `session_01BDmDsu2575gDxeMCxXhDE3`)按分诊指示提交。\n\n## 背景\n\nADR-0063 §2 之后 `app.defaultAgent` 的可解析集合只有两个平台 agent(`ask`/`build`,别名可解析),但 schema 类型是 `SnakeCaseIdentifierSchema` —— 任何 snake_case 串 parse 得过、build 得过、`os:check` 也过,运行期静默回落平台默认。\n\n**新证据(#5985/PR #6030 实测)**:把坏例子 `defaultAgent: 'sales_copilot'` 原样放回后,`check:skill-examples` 仍 208 全绿、EXIT=0 —— **现有门禁对该类缺陷结构性失明**(绿→绿),这正是坏语料当初得以发布的机制。消费端已实测拒收(objectui `surfaceAgent.ts` 的 `isBuiltinAgentName` 限界 + cloud 用例),缺的是**生产侧响亮**。\n\n## 具体问题\n\n要不要建一条 lint:`app.defaultAgent` 取值不在平台 agent 名单(canonical + legacy 别名,名单已存在于 `packages/lint` 的 `PLATFORM_AGENT_NAMES`)内 ⇒ warning(或 error)。\n\n## 可选方案\n\n- **A 建 lint(warning 档)**:声明即检查,表外名字在编写期被点名;误报面 = 未来若恢复自定义 agent 需回收该规则(ADR-0063 已撤回,短期无此风险)。\n- **B 不建**:接受该类缺陷靠 review/语料修复兜底 —— #5985 证明兜底半径是「已发布后被下一单顺带发现」。\n- **C 建 error 档**:比 A 更硬;但 `defaultAgent` 静默回落是运行时既定行为(非崩溃),error 档与实际危害等级不匹配,且惩罚存量元数据的风险未测。\n\n## 建议\n\n**A**。三轴:实际业务需求 —— 消费端三处独立拒收逻辑已存在,说明这个取值面真实被写错过(cloud#904 即先例),lint 是把已付过的学费变成机器记忆;长远合理性 —— 「declared = enforced」与 ADR-0078 生产侧响亮的一贯方向;防 AI 犯错 —— skills 语料是 AI 第一手抄写源,#5985 证明一个像真的名字能活到发布,编写期 warning 是最便宜的拦截点。W 档而非 error:与「静默回落」的危害等级匹配,不惩罚存量。\n\n关联:#5985 / PR #6030(证据来源)、ADR-0063、ADR-0078、cloud#904、`packages/lint/src/validate-ai-agent-authoring.ts`(现有规则只看 `stack.agents` 不看取值 —— 本卡是它的取值半边)。"
+}

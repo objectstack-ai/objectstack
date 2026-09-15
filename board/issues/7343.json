@@ -1,0 +1,34 @@
+{
+  "number": 7343,
+  "kind": "pull_request",
+  "title": "docs(adr): repair 8 dead source-tree links in ADR-0004 / ADR-0020 and empty the link-gate baseline",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-10T07:37:56Z",
+  "updated_at": "2026-08-10T08:58:48Z",
+  "closed_at": "2026-08-10T08:58:47Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-08-10T08:58:47Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/7343",
+  "body": "Fixes #6726\n\nAll 8 dead ADR → source-tree links in ADR-0004 and ADR-0020 are repaired, and `KNOWN_DEAD_TARGETS` in `scripts/check-adr-links.mjs` is now **EMPTY** — the gate from #6592 no longer ships with a grandfather clause. A follow-up may now remove the baseline mechanism entirely if the maintainer wants it gone.\n\n## Premise: all 8 still dead, verified first\n\nEvery one of the 8 targets was re-checked against `origin/main` before any edit — all 8 still missing, and all 8 baseline entries still present. Nothing about this card had gone stale.\n\n## Route taken: option (b), plain unlinked path + provenance\n\nNone of the 8 could be repointed at a live file — in every case the code genuinely left this repository, which git history confirms rather than assumes. So each link became a plain (unlinked) path in a code span, plus a short note recording where the code went. An ADR is a historical record: the path keeps the reader oriented, the note explains why there is nothing to click, and the gate has no unverifiable link to police.\n\n| Record | Target | Provenance (measured from git) |\n| --- | --- | --- |\n| ADR-0004 §2 | `packages/runtime/src/kernel-manager.ts` | moved to `packages/runtime/src/cloud/` on 2026-05-18 (`7dcde27c1`), then the whole `cloud/` tree removed by #1600 |\n| ADR-0004 §2 | `packages/runtime/src/project-kernel-factory.ts` | superseded by `cloud/artifact-kernel-factory.ts` in the same commit, removed by #1600 |\n| ADR-0004 §5 | `apps/studio/src/routes/projects.index.tsx` | `apps/studio/` collapsed 2026-05-22 (`6bacbced2`), migrated to upstream `@object-ui/studio` 2026-05-24 (`06ad57f63`) |\n| ADR-0004 §5 | `apps/studio/src/routes/projects.$projectId.index.tsx` | same migration |\n| ADR-0020 | `packages/spec/src/contracts/workflow-service.ts#L58` | deleted 2026-08-01 by #4451 / #4473, which retired the `workflow` service slot — this closes the `[~]` follow-up ADR-0020 itself left open |\n| ADR-0020 | `examples/app-crm/src/workflows/stale-opportunity.workflow.ts#L19` | removed by ADR-0020's **own** implementation (`23c710717`); the reference describes the pre-ADR state |\n| ADR-0020 | `examples/app-crm/src/flows/high-value-deal.flow.ts` | created by ADR-0020, later dropped 2026-07-05 by `751cf0161` (CRM slimmed to its loading-pipeline core) |\n| ADR-0020 | `examples/app-crm/src/flows/stale-opportunity.flow.ts` | same commit |\n\nProse is otherwise untouched — only link syntax plus the added notes. ADR-0004 is `Superseded` and preserved for historical context; nothing in its body was rewritten.\n\n## Verification\n\n**Forward, in the gate's own enforced direction.** With the 8 links fixed but the baseline still full, `check-adr-links` failed as designed, naming all 8 as stale:\n\n```\n8 stale KNOWN_DEAD_TARGETS entr(y/ies) — the link is no longer broken:\n  docs/adr/0004-cloud-multi-kernel.md  ->  ../../packages/runtime/src/kernel-manager.ts\n  ... (all 8)\n```\n\nThat is the proof each edit removed a *real* dead link rather than merely a link — a repair the gate did not see would not have gone stale. The entries were then deleted in the same change.\n\n**Reverse.** With the baseline empty, one link was restored and the gate went red as a **new** break (expected direction — an empty baseline must not absorb it):\n\n```\n1 broken relative link(s) under docs/adr/:\n  docs/adr/0004-cloud-multi-kernel.md:69  ->  ../../packages/runtime/src/kernel-manager.ts\n      resolves to: packages/runtime/src/kernel-manager.ts (missing)\n```\n\nRestored afterwards; tree clean.\n\n**Green, after merging `origin/main`:**\n\n```\n✅ check-adr-links --self-test: discrimination, census, ADR-0046 pin and baseline staleness all verified\n✅ check-adr-links: 523 relative link destination(s) under docs/adr/ resolve\ncheck-adr-anchors: OK (47 anchored file(s) ...; 20937 citation(s) across 3497 file(s) resolve)\ncheck-nul-bytes: OK (scanned 6739 text file(s) ...; no raw ASCII control bytes)\n```\n\nThe success line no longer carries its ` (N frozen on the shrink-only baseline)` suffix, and the census drops 531 → 523 — exactly the 8 destinations that stopped being links. `eslint` on the touched files: 0 errors.\n\n## Notes\n\n- **Docs-only ⇒ no changeset.** `skip-changeset` is the PM's to apply at acceptance.\n- **Serial constraint cleared:** `origin/main` merged immediately before opening this PR; #7316 (ADR-0107 tombstone) touches a different record and did not touch `scripts/check-adr-links.mjs`.\n- ⛔ **Maintainer-merged only** (#6741): this PR edits `docs/adr/**`. Left as a draft deliberately — no ready-flip, no auto-merge.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01YS2qzDAn3CpWdY7uBX9bFQ)_"
+}

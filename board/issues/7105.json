@@ -1,0 +1,32 @@
+{
+  "number": 7105,
+  "kind": "issue",
+  "title": "A root-level `core` symlink pointing at an absolute container path is tracked on `main`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T15:58:02Z",
+  "updated_at": "2026-08-10T02:32:01Z",
+  "closed_at": "2026-08-10T02:00:00Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7105",
+  "body": "Found while implementing #6984 (PR #7104) — surfaced by that PR's `--list` output, which prints the gate's skipped paths. Out of scope there; filed unassigned.\n\n## Observation\n\nThe repo root carries a tracked **symlink** named `core` whose target is an absolute path inside one particular agent container:\n\n```\n$ git ls-tree origin/main core\n120000 blob 52ffc2becd565598dea5acc5ca4da8d39306d2a1\tcore\n\n$ git cat-file -p $(git rev-parse origin/main:core)\n/tmp/workspace/objectstack-ai/objectstack/packages/core\n```\n\nIt is the only tracked symlink in the repo:\n\n```\n$ git ls-files -s | awk '$1==\"120000\"{print $4}'\ncore\n```\n\nOn any checkout that is not literally at `/tmp/workspace/objectstack-ai/objectstack` the link dangles. In this worktree (`/home/user/objectstack-6984`) it does:\n\n```\n$ ls -la core\nlrwxrwxrwx 1 root root 55 ... core -> /tmp/workspace/objectstack-ai/objectstack/packages/core\n```\n\n## Provenance\n\nAdded 2026-05-25 by `copilot-swe-agent[bot]`, inside a commit whose subject is about something else entirely:\n\n```\n$ git log -1 --format=\"%an %ad%n%s\" --diff-filter=A -- core\ncopilot-swe-agent[bot] Mon May 25 09:50:01 2026 +0000\nfix: update spec package.json exports to nested TypeScript conditions\n```\n\nSo it reads as an artifact of that agent's working directory that got swept up by a `git add -A`, not as a deliberate convenience alias.\n\n## Why this is `finding` and not a defect\n\nNothing resolves through it today. A grep for a root-level `core` path finds only unrelated hits (`packages/objectql`'s `./core` export subpath, `@objectstack/core` package specifiers, `./core.zod` relative imports); no tsconfig path, no workflow, no package manifest names the repo-root `core`. It is not inside any package, so it is not published. `pnpm lint`, the build and the type-check jobs are all green with it dangling, which is the evidence that it is inert rather than the argument that it is harmless.\n\nThe visible effect is cosmetic and single-line: it is the `1 non-regular` in `check:nul-bytes`'s summary, skipped by that gate's rule 1 (`lstat`, not `stat` — a dangling symlink is skipped rather than crashing the run, which is working as designed).\n\nRecording it rather than fixing it in #6984's PR, because a deletion is a `main`-touching change on a path nobody asked me to look at, and because the interesting question is not \"delete it?\" but whether anything upstream relies on repo-root aliases of this shape. If the answer is no, `git rm core` is the whole fix.\n\nRefs #6984, PR #7104.\n"
+}

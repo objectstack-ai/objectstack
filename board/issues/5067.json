@@ -1,0 +1,34 @@
+{
+  "number": 5067,
+  "kind": "issue",
+  "title": "Console: number cell/display renderers hardcode a grouping `Intl.NumberFormat('en-US')` — an ordinal `Field.number` (a year) always renders `2,026`, and no field property can turn it off",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:queue",
+    "repo:objectui"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T01:54:50Z",
+  "updated_at": "2026-08-10T02:09:15Z",
+  "closed_at": "2026-08-10T02:09:15Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5067",
+  "body": "## Summary\n\nEvery numeric field the console renders goes through an `Intl.NumberFormat` that is constructed with **grouping on and the locale hardcoded to `en-US`**, and the only field property it consults is `scale`. There is no authorable way to say *\"this number is an ordinal — do not group it\"*.\n\nThe visible consequence: a four-digit **year** stored as `Field.number` renders as **`2,026`** everywhere — grids, related lists, record headers — in every locale.\n\n## Evidence\n\nMeasured on a fresh database (`@objectstack/console` 17.0.0-rc.1, locale `zh-CN`), the three related lists on one customer record:\n\n```\n{ yearCol: \"年度\", sample: [\"2,026\", \"2,026\", \"2,026\"] }   // crm_competitor_supply\n{ yearCol: \"年度\", sample: [\"2,023\", \"2,025\", \"2,024\"] }   // crm_supply_history\n{ yearCol: \"年度\", sample: [\"2,026\", \"2,026\", \"2,026\"] }   // crm_supply_item\n```\n\nThe field definition that produces this carries everything the spec offers for a discrete integer:\n\n```ts\nyear: Field.number({\n  label: 'Year',\n  required: true,\n  storage: { notNull: true },\n  scale: 0,      // ← the only property the renderer reads\n  min: 1900,\n})\n```\n\n## Mechanism\n\nThe number display renderer in `ui-components` reduces to:\n\n```js\nnew Intl.NumberFormat('en-US', {\n  minimumFractionDigits: scale ?? 0,\n  maximumFractionDigits: scale ?? 20,\n}).format(value)\n```\n\nTwo independent problems in one line:\n\n1. **`useGrouping` is never set**, and it defaults to `true`. `scale: 0` controls fraction digits only; nothing controls the separator.\n2. **The locale is hardcoded to `en-US`** rather than taken from the active i18n locale, so a `zh-CN` or `de-DE` console still groups by the US convention.\n\nThe same construction appears in the grid cell renderer and in the compact `formatNumber` helper, so changing the surface does not change the answer.\n\n## Why \"just store it as text\" is not a fix, only a dodge\n\nThat is what we were forced to do (twice — see below), and it costs real capability:\n\n- The column loses numeric comparison at the driver, so range filters (`year >= 2023`) stop working and have to be re-expressed as string comparisons that only happen to work for zero-free four-digit years.\n- Dataset dimensions must be re-typed `string`, which changes how `service-analytics` sorts and buckets them.\n- Every writer (seed, REST client, test) has to be normalized by hand through a lifecycle hook, because the engine will happily store `2026` and `\"2026\"` as two different values — and if the field is part of an upsert external id, that divergence forks the key.\n\nNone of that is conceptually necessary. The value *is* a number; only its **presentation** is wrong.\n\n## Suggested fix\n\nAny of these closes it; the first is the smallest:\n\n1. Honour an authorable presentation hint on the field — e.g. `useGrouping: false`, or a `format` / `displayFormat` property — and pass it to `Intl.NumberFormat`.\n2. Suppress grouping automatically when `scale === 0` **and** the field has no `currency`, or when the field is flagged as an identifier/ordinal.\n3. Independently of the above: stop hardcoding `'en-US'` and use the active locale, so grouping and decimal marks follow the user's language.\n\n## Downstream impact in our app\n\nWe have now paid for this three times in the same codebase:\n\n- `crm_customer_rating.rating_year` was converted from `Field.number` to `Field.text` for exactly this reason (yinlianghui/hotcrm-heimao#35, #40).\n- `crm_supply_item.year`, `crm_competitor_supply.year` and `crm_supply_history.year` are being converted now (yinlianghui/hotcrm-heimao#59) — which additionally forces three new normalization hooks, three dataset dimension re-types, and a re-check of the cross-object \"common comparison year\" logic that decides a customer's supply share.\n\nEach conversion is a permanent loss of numeric semantics traded for a display detail, and it will keep happening to every app that stores a year, a fiscal period, or any other ordinal integer.\n"
+}

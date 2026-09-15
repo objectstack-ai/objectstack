@@ -1,0 +1,33 @@
+{
+  "number": 7066,
+  "kind": "issue",
+  "title": "objectui: metadata-admin 谓词求值器把 == 右侧的路径当字符串字面量,`data.a == data.b` 恒假且无诊断",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "pm:queue",
+    "repo:objectui"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T13:27:37Z",
+  "updated_at": "2026-08-10T02:12:14Z",
+  "closed_at": "2026-08-10T02:12:14Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7066",
+  "body": "越界发现,来自 objectstack#6936 的开发会话(objectui PR objectstack-ai/objectui#3937)。**不在该 PR 范围内**(#6936 的裁决只覆盖「解析不到的路径 → fail-open + 告警」),单独立单交 PM 分诊;未认领。\n\n## 事实\n\n`packages/app-shell/src/views/metadata-admin/predicate.ts` 的 `==` / `!=` 分支左侧走 `resolveValue`(解析路径),右侧走 `parseLiteral`。`parseLiteral` 对「既不是引号串、也不是数字/布尔/null/数组」的输入**原样返回该字符串**(该函数末尾 `return s;`)。于是右侧写路径时,比较的是路径的**字面文本**,不是它的值。\n\n实测读数(objectui worktree,`origin/main` @ `230ffd8` + PR #3937 分支;临时 vitest 探针,已删):\n\n```\nctx = { data: { a: 'x', b: 'x' } }        // 两侧值相等\n  data.a == data.b   -> false             // 期望 true\n  data.a != data.b   -> true              // 期望 false\nctx = { data: { a: 'x', b: 'y' } }        // 两侧值不等\n  data.a == data.b   -> false             // 恰好\"对\",但理由是错的\n  data.a == 'x'      -> true              // 字面量对照组,正常\n```\n\n即 `data.a == data.b` **恒假**、`data.a != data.b` **恒真**,与两侧实际值无关:`'x' === 'data.b'`。\n\n## 为什么是 observation-class(建议 `finding`,未打 `pm:queue`)\n\n今天没有生产者踩到:安装版 `@objectstack/spec` 17.0.0-rc.5 里 metadata-admin 会渲染的四张表单(`objectForm` / `pageForm` / `viewForm` / `actionForm`)的谓词全部是 `path == 字面量` / `path in [字面量…]` 形状,右侧无路径。文件头也明确写了它只支持一个子集(\"Supported subset (covers everything used in spec `*.form.ts` today)\"),所以严格说这是**已声明的子集边界**,不是违约。\n\n但它与 #6936 刚修掉的那条同族、且**不被** #6936 的新告警覆盖:告警挂在 `resolveValue` 的根标识符检查上,而右侧根本不经过 `resolveValue`。所以一旦将来 spec 下发一条 `data.a == data.b` 形状的谓词,症状仍然是**静默的错误结论**(字段该显示时不显示),控制台一片安静 —— 正是 #6936 花一整张卡换掉的那种不可诊断形状。严重度按 filing-time 判断不可靠,交 PM 分诊定级。\n\n## 可能的方向(不在此单里做决定)\n\n- **A. 右侧也走路径解析**:`parseLiteral` 认不出的裸标识符改为按路径解析,解析不到则复用 #6936 的 fail-open + 告警。风险:`data.type == text` 这种「本意是字符串却漏了引号」的写法从\"恰好能用\"变成 fail-open 判真。\n- **B. 只加诊断,不改语义**:`parseLiteral` 走到末尾那条 `return s` 且输入长得像路径(含 `.` 或匹配标识符文法)时发 dev 告警,点名「右侧被当作字符串字面量」。语义零变化,把子集边界变成可发现的事实。\n- **C. 交给真正的 CEL**:文件头本来就说自己是 `@objectstack/formula` 的临时替身(ROADMAP M9),换成真 CEL 求值器后本条自动消失。\n- **D. 生产端拦住**:发布期校验谓词表达式(#6936 的伴生卡)可以把「右侧是路径」这类超出渲染器子集的写法在授权门口拒掉,契约优先。\n\n倾向 **B + D**(渲染器只把边界说清,语义修正交给 C/D,避免在消费端加宽容),但这是求值语义取舍,应由维护者定。\n\n## 查重说明\n\n搜过 open issues:`evaluatePredicate`(仅命中 #6936 本身)、`parseLiteral predicate.ts` 0 命中、`metadata-admin predicate right-hand identifier` 0 命中、`谓词 求值器 字面量` 仅命中 PM 登记表 #4604、objectui 仓 `predicate literal right side` 0 命中。若有同小时孪生单,按惯例 race-close 本单。\n"
+}

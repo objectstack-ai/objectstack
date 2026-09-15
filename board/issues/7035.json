@@ -1,0 +1,36 @@
+{
+  "number": 7035,
+  "kind": "issue",
+  "title": "finding: `rest-server.ts` 里三个相邻 `/meta` handler 的错误信封是三种不同形状,其中两种不符合 ADR-0112",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-help"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T10:40:23Z",
+  "updated_at": "2026-08-10T05:57:03Z",
+  "closed_at": "2026-08-10T05:57:03Z",
+  "closed_by": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7035",
+  "body": "由 #7019 的区域测量顺带看到(PD #10 另立卡)。**⛔ 不要捎带在能力门 PR 里改** —— 混进去会让那个 PR 的评审面失控。\n\n## 三种形状(全部在 `packages/rest/src/rest-server.ts`,逐条实测)\n\n| handler | 代码 | 信封 |\n| :-- | :-- | :-- |\n| `POST /meta/_migrate-stored` | `:3765-3770` | `{ error: { code: 'FORBIDDEN', message } }` —— **嵌套,符合 ADR-0112** |\n| `DELETE /meta/:type/:name` | `:4697` | `{ error: 'Reset operation not supported by protocol implementation' }` —— **裸字符串,无 `code`** |\n| `PUT /meta/:type/:section/:name` | `:4996` | `{ error: 'Save operation not supported by protocol implementation', code: 'NOT_IMPLEMENTED' }` —— **`code` 是兄弟键,不是嵌套** |\n\n三个 handler 在**同一个文件**里,彼此相隔数百行,同属 `/meta` 前缀。\n\n实测原文:\n\n```\n:4996  res.status(501).json({ error: 'Save operation not supported by protocol implementation', code: 'NOT_IMPLEMENTED' });\n\n:4697  res.status(501).json({\n           error: 'Reset operation not supported by protocol implementation',\n       });\n```\n\n## 为什么这不只是「不好看」\n\n对调用方而言,读 `code` 的客户端代码在这三条路由上要写三种取法:`err.error.code`、(取不到)、`err.code`。**任何一种统一写法都会在另外两条上静默取到 `undefined`** —— 而 `undefined` 走的是「没有 code」分支,不是报错分支。这正是 Prime Directive #12 说的「生产者即契约」被破坏的形状:消费者被迫用 `??` 容忍生产者的不一致。\n\n## 分级建议:`finding`,今天没有用户会撞到\n\n两条不合规的都是 **501 分支** —— 只在 protocol 实现缺方法时才走到。出厂 protocol 实现两个方法都有,所以默认部署上这两个分支不可达。**但**它们是模板:下一个照抄相邻 handler 的人会照抄哪一种,取决于他滚到了哪一行。\n\n## 收口方向(留给 triage,不预设)\n\n1. 只把两条 501 改成 ADR-0112 嵌套形状(最小,不动别处)。\n2. 顺带查 `rest-server.ts` 里其余 `res.status(...).json({ error: ... })` 的全部命中点,一次性收口(规模未测,该文件 8500+ 行 —— 见 #5949)。\n3. 让信封有一个共享构造函数,把手写 `res.status().json()` 从这些路由里消掉(结构性,规模最大)。\n\n## 未实测(勿当事实引用)\n\n- ADR-0112 的**标准错误码目录**里是否有比 `NOT_IMPLEMENTED` 更合适的既有码,以及 `NOT_IMPLEMENTED` 是否已在目录中 —— **未查**。\n- `packages/runtime/src/domains/meta.ts` 的 dispatcher 侧信封形状看起来**又是第三种**(#7023 普查记为 `{code:'PERMISSION_DENIED', httpStatus:403}`,`code` 在顶层且带 `httpStatus`)。**本卡未实测 dispatcher 侧**,只记 REST 侧三条;若要一次收口需先把 dispatcher 侧也量一遍。\n\n## 关联\n\n#7019(本 finding 的来源;那张卡**只**加能力门,**不**改信封)· #6603 / #7027 · ADR-0112(错误信封与标准码目录)· Prime Directive #12 · #5949(`rest-server.ts` 体量)"
+}

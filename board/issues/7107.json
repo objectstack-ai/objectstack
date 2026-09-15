@@ -1,0 +1,32 @@
+{
+  "number": 7107,
+  "kind": "issue",
+  "title": "check-changeset-no-major can read its base side off `.changeset/README.md` on an `R` row (dormant)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T16:10:21Z",
+  "updated_at": "2026-08-10T02:31:42Z",
+  "closed_at": "2026-08-10T02:00:01Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7107",
+  "body": "Found while implementing #7045 (PR #7106), which applies PR #7048's `AMR` pattern to the two sibling gates. Filed per Prime Directive #10, not fixed there — #7106 owns the two siblings, this is the third member's own file. Unclaimed.\n\n## The observation\n\n`scripts/check-changeset-no-major.mjs` reads the branch-point side of an `R` row at the pre-rename path, correctly:\n\n```js\nconst basePath = fields[1];\n...\nconst baseText = status === 'A' ? null : showOrNull(from, basePath, cwd);\nconst already = baseText === null ? [] : majorPackagesIn(baseText);\nconst added = majors.filter((pkg) => !already.includes(pkg));\n```\n\n`basePath` is never checked against `isChangesetFile()`. Git's rename detection pairs by **content**, not by name, and the pathspec is `.changeset/*.md` — which `.changeset/README.md` matches. So an `R` row can arrive as\n\n```\nR100    .changeset/README.md    .changeset/anything.md\n```\n\nMeasured on git 2.43.0, in a temp repo, with the same pathspec the gate uses:\n\n```\n--- name-status, pathspec .changeset/*.md ---\nR100    .changeset/README.md    .changeset/renamed-from-docs.md\nA       .changeset/renamed-from-readme.md\n```\n\n(two identically-bodied files, paired across unrelated names.)\n\nWhen that happens, `already` is computed from README's content. `isChangesetFile()` excludes README at the HEAD side — the file's own self-test has a case pinning that a major-shaped `.changeset/README.md` is documentation, never a changeset — but the exclusion does not reach the BASE side of a rename. A major that README appears to declare would be subtracted from the head file's majors and the head changeset would be reported as exempt rather than introduced.\n\n## Why this is filed as an observation, not a defect\n\n**Dormant.** It needs `.changeset/README.md` to itself parse as declaring a major, and the real file is `# Changesets` boilerplate with no frontmatter fence at all, so `majorPackagesIn()` returns `[]`, `already` is empty and nothing is subtracted. Nobody hits this today, and there is no way to hit it without first committing a major-shaped README — which the gate's own fixtures already treat as documentation.\n\nIt is recorded because the shape is real and because the two siblings no longer have it: PR #7106 added `isChangesetFile(basePath)` to both `check-empty-changeset.mjs` and `check-adr-0087-registration.mjs`, each with a fixture (RED 5 / R16). The family now reads one row three ways, which is the drift #7004 exists to prevent.\n\n## The fix, if it is ever wanted\n\nOne condition and one fixture, mirroring #7106:\n\n```js\nconst baseText = status === 'A' || !isChangesetFile(basePath) ? null : showOrNull(from, basePath, cwd);\n```\n\nplus a self-test case whose base side is `.changeset/README.md`, carrying the same rename control the other `R` cases in that file already carry (a body long enough that git scores `R` rather than degrading to add-plus-delete).\n\nRelated: #7045 / PR #7106 (the two siblings), #7005 / PR #7048 (this file's `AMR` change), #7004 (the family's shared entry regex).\n"
+}

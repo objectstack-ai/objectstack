@@ -1,0 +1,34 @@
+{
+  "number": 18265,
+  "kind": "issue",
+  "title": "cli: `os package publish --install` cannot use the environment you just switched to — `activeEnvironmentId` lives in the runtime credential store, which publish must never read",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "enhancement",
+    "pm:dispatched",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-15T04:59:10Z",
+  "updated_at": "2026-09-15T06:13:18Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/18265",
+  "body": "## What happens\n\n```\nos cloud login\nos environments switch <env-id>       # ✓ Active environment: Dev\nos build\nos package publish --install\n# → `--install` requires `--env <id>`. Skipping auto-install.\n```\n\nThe environment the CLI *just told you* is active — and which `os environments list`\nmarks with a ★ on the very next line — is invisible to the one command that would\ninstall into it. Every publish has to carry the UUID again, by flag or by\n`OS_ENVIRONMENT_ID`. Nobody remembers a UUID.\n\n## Why it is invisible (measured on `origin/main`)\n\nTwo credential stores, two identities. `packages/cli/src/utils/cloud-config.ts`\nstates the split in its own header:\n\n> 1. **Runtime identity** — who you are inside your *own* ObjectOS instance. Stored in\n>    `credentials.json`, written by `os login`.\n> 2. **Cloud identity** — who you are on the official ObjectStack Cloud package\n>    registry. Stored in `cloud.json`, written by `os cloud login`. Used to publish &\n>    install packages …\n>\n> Keeping them in separate files … makes it **impossible to accidentally publish a\n> package with a runtime-scoped token**.\n\n- `os environments switch` writes `cfg.activeEnvironmentId` into **`credentials.json`**\n  (`commands/environments/switch.ts:58`, path at `utils/auth-config.ts:47`, field\n  declared at `utils/auth-config.ts:40`).\n- `os package publish` reads **`cloud.json`** (`utils/cloud-config.ts:50`) and resolves\n  its base URL from *that* file's `url` (`commands/package/publish.ts:501`). It never\n  opens `credentials.json`.\n- The only reader of `activeEnvironmentId` anywhere in the CLI is\n  `utils/api-client.ts:68`, which serves the `data` / `meta` / `environments` families.\n- The refusal itself is `commands/package/publish.ts:661` —\n  `const shouldInstall = flags.install && flags.env;`\n\n## ⛔ The fix is NOT \"let publish read credentials.json\"\n\nThat is precisely the mixing the file header says the split exists to prevent. It is\nalso wrong at runtime, not merely impure:\n\n**The two files carry different servers.** `credentials.json`'s URL falls back to\n`http://localhost:3000` (`utils/api-client.ts:78`); `cloud.json`'s default is\n`https://cloud.objectos.ai` (`utils/cloud-config.ts:30`), and that is the URL the\npublish actually POSTs to. So `credentials.json`'s `activeEnvironmentId` means *\"an\nenvironment on whatever server I am currently pointed at\"*. Handing it to a publish\naimed at cloud.objectos.ai names a UUID belonging to a **different control plane** —\na 404 at best, and the server resolves it with a bare\n`findOne('sys_environment', { where: { id } })`, so there is no name or short-id\nrescue on that path either.\n\n## Shape of the fix\n\n1. Add `activeEnvironmentId?: string` to `CloudConfig` — **next to `activeOrgId`**\n   (`utils/cloud-config.ts:42`), which is already there and already documented as\n   *\"Active organization id chosen for publishing\"*. An organization and an\n   environment are the same kind of thing: control-plane scope selectors, one level\n   apart. The precedent is in the same interface.\n2. `os environments switch` writes to `cloud.json` when the control plane it just\n   talked to **is** `cloud.json`'s `url`; otherwise it keeps writing\n   `credentials.json`. Two files, two control planes, an active environment for each\n   — that is the self-consistent model, and it preserves `os environments` working\n   against a self-hosted server with a runtime token, which is deliberate (see\n   Out of scope).\n3. `os package publish`'s `--env` falls back to `cloud.json`'s `activeEnvironmentId`\n   when both the flag and `OS_ENVIRONMENT_ID` are absent. ⛔ It must never read\n   `credentials.json`.\n4. Migration: existing values live in `credentials.json`. Copy across once, and\n   **only** when the two files' `url`s agree.\n\n## Guards — both must be measured red-before / green-after\n\n- Remove the fallback ⇒ a publish with an active cloud environment and no `--env`\n  fails.\n- **Point the fallback at `credentials.json` ⇒ also fails.** This is the real\n  invariant the card is about. A guard that only pins \"a fallback exists\" would\n  accept the wrong fix, which is the whole reason this card is not the one-line\n  change it looks like.\n\n## Out of scope — ⛔ do not bundle\n\nWhether the whole `os environments` family should move to the cloud identity. It\nauthenticates today from `credentials.json` / `OS_TOKEN` against `OS_CLOUD_URL`\n(defaulting to `localhost:3000`) — right for a self-hosted control plane, odd-looking\nagainst cloud.objectos.ai. Changing it changes which token existing users' commands\nsend. Separate card, separate decision.\n\n---\n\nFound while answering \"how do I deploy a metadata project into my own cloud dev\nenvironment\". The maintainer's words: 「没有人会记得 env_id」. The first fix proposed\nin that conversation was the credentials.json one above; the maintainer rejected it\nwith \"activeEnvironmentId 要写也应该是 cloud.json ?\", and the server-split argument\nabove is what confirmed they were right.\n"
+}

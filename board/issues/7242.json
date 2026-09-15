@@ -1,0 +1,33 @@
+{
+  "number": 7242,
+  "kind": "pull_request",
+  "title": "docs(spec): qualify the four datasource `pool.*` liveness rows by driver (#6214)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-10T03:34:22Z",
+  "updated_at": "2026-08-10T05:11:32Z",
+  "closed_at": "2026-08-10T05:11:30Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-10T05:11:30Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/7242",
+  "body": "The **spec half** of the #5931 ruling. Ledger-only diff — one file, `packages/spec/liveness/datasource.json`, ten lines. Zero behaviour change, no schema change.\n\n## Premise check (fresh `origin/main` @ `f40c5b4`)\n\nBoth halves verified before any edit:\n\n1. **The four rows still lacked the qualification.** `pool.min` / `pool.max` / `pool.idleTimeoutMillis` / `pool.connectionTimeoutMillis` each read `\"status\": \"live\"` with a one-clause note (`\"knex pool floor.\"`, `\"passed through to knex verbatim.\"`, …) and no mention of any driver arm. Not already repaired.\n2. **The #5931 / #5714 landed state is as the card describes, with one addition the card could not have known.** `POOL_UNSUPPORTED_DRIVER_IDS` is `['memory', 'sqlite', 'sqlite-wasm']` — the `memory` arm **did** join the rejection set, so the card's fallback (\"if it did not, name the silent drop\") does not apply to `memory`. It applies to `turso`, which the landed module names itself.\n\n`packages/services/service-datasource/src/__tests__/datasource-pool-support.test.ts` — **40/40 pass**, including the pin `expect([...POOL_UNSUPPORTED_DRIVER_IDS]).toEqual(['memory', 'sqlite', 'sqlite-wasm'])` (`:46`).\n\n## #5931's final state, with file:line evidence\n\nRead off `origin/main`, not paraphrased from the issue bodies:\n\n| arm | what happens to a declared `pool` | evidence |\n| :-- | :-- | :-- |\n| `postgres` | honoured — `buildSqlPool(spec)` → `SqlDriver` | `packages/services/service-datasource/src/default-datasource-driver-factory.ts:188-198`, applied `:403` |\n| `mysql` | honoured — same builder | same, applied `:458` |\n| `mongodb` | **`min` / `max` only** → `minPoolSize` / `maxPoolSize`; nothing else in the block is read | `default-datasource-driver-factory.ts:477-483` |\n| `memory` | loud authoring error (#5931, maintainer ruling 2026-08-07) | `datasource-pool-support.ts:79`, reason `:142-146` |\n| `sqlite` / `sqlite-wasm` | loud authoring error (#5714, ruling 2026-08-06 option B) | `datasource-pool-support.ts:79`, shared reason `:122-126` |\n| `turso` | **still dropped in silence** — needs its own ruling | `datasource-pool-support.ts:90-99` |\n| unknown ids (`com.vendor.snowflake`) | deliberately not judged | `datasource-pool-support.ts:101-105` |\n\nThe rejection is thrown at every door a `pool` block can enter through: the Setup wizard's create/update (`datasource-admin-service.ts:243`, `:314`), the boot-time auto-connect pre-pass (`datasource-connection-service.ts:508`), and the factory's last door (`default-datasource-driver-factory.ts:374`).\n\n## The four rows, before → after\n\nEvery row keeps `\"status\": \"live\"` — the verdict was never wrong, only unqualified. What changes is that each row now states **where** it is live, and the `pool` block gains a container `note` carrying the full record (the `ssl` block's existing precedent in this same file).\n\n| row | before | after (summary) |\n| :-- | :-- | :-- |\n| `pool.min` | `\"knex pool floor. Live only since #4465 …\"` | + honoured on `postgres`/`mysql` (`:191`) and as Mongo's `minPoolSize` (`:482`); authoring ERROR on `memory`/`sqlite`/`sqlite-wasm` (#5714/#5931); silent on `turso` |\n| `pool.max` | `\"knex pool ceiling; also mapped onto the Mongo client's maxPoolSize (#4465).\"` | + same driver qualification as `min` |\n| `pool.idleTimeoutMillis` | `\"passed through to knex verbatim.\"` | + **SQL arms only** — `mongodb` takes `min`/`max` and nothing else, so this key reaches nothing there; authoring ERROR on the three rejected arms; silent on `turso` |\n| `pool.connectionTimeoutMillis` | `\"mapped onto knex's `acquireTimeoutMillis` …\"` | + same qualification as `idleTimeoutMillis` |\n\nTwo deliberate choices worth review:\n\n- **Wording is copied from the landed module, not re-invented.** The `:memory:`-splits-one-datasource-across-several-stores rationale, the \"no connection to pool at all\" rationale, and the three measured rows (`postgres → {min:3,max:9}`, `sqlite → {min:1,max:1}`, `memory → pool undefined`) are the #5931 body's own measurements and `datasource-pool-support.ts`'s own sentences.\n- **Two remaining silent drops are named rather than smoothed over** — `turso` for the whole block, and `mongodb` for the two timeout keys. Both are recorded in the ledger as needing their own ruling, matching how the landed module records the `turso` gap. Filed separately as #7243 rather than fixed here: tightening either is a new rejection on a public authoring surface.\n\nStale `evidence` line numbers were re-cited at the same time — the four rows pointed at `:181-184`, which is now the JSDoc above `buildSqlPool`; the real reader lines are `:191-196`. The liveness gate resolves paths, not lines, so this was silently rotting.\n\n## Gates\n\n| gate | result |\n| :-- | :-- |\n| `packages/spec` `check:liveness` (the liveness author-lint) | ✓ — `datasource 30 classified (live 30)`; 349/349 repo-local evidence paths resolve |\n| `packages/spec` `check:generated` | ✓ — 11/11 artifacts up to date (spec built first, per #7122) |\n| `@objectstack/service-datasource` `datasource-pool-support.test.ts` | ✓ 40/40 (premise evidence) |\n| CI `Spec property liveness` | ✓ |\n\n**No changeset — `skip-changeset` label instead.** Ledger prose releases nothing, which is route 2 of the `Check Changeset` gate's own two routes. The label was missing on the first push and the gate went red for exactly that reason; applied after, per the precedent this PR follows: **PR #7179** (`fix(spec): re-cite measured readers for 11 stale liveness-ledger rows`, #7132/#7133, merged 2026-08-10) landed three ledger files the same way — no changeset, `skip-changeset` label. Route 3 (an empty-frontmatter changeset) is closed under #5471/#4898 and was not taken.\n\n`content/docs/releases/` and `docs/adr/**` untouched. No `.zod.ts` touched — no schema change was needed.\n\nCloses #6214"
+}

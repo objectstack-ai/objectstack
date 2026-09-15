@@ -1,0 +1,34 @@
+{
+  "number": 5428,
+  "kind": "issue",
+  "title": "objectui: dashboard KPI cards drop the translated widget title/description — the self-contained `metric` path bypasses `tWidgetTitle`, and the plugin's private `resolveLabel` never calls `t()`",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:queue",
+    "repo:objectui"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T11:08:19Z",
+  "updated_at": "2026-08-10T02:09:01Z",
+  "closed_at": "2026-08-10T02:09:01Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5428",
+  "body": "Found while re-locating objectstack#5407's item 3. That item's stated premise (dashboard chips / KPI sub-captions are \"console-supplied chrome that no app bundle key reaches\") does not hold — both strings come from app metadata — but the measurement turned up a real renderer defect underneath, filed here.\n\n### 1. `resolveLabel` accepts the `I18nLabel` shape and then ignores it\n\nThree private copies in `packages/plugin-dashboard/src`:\n\n- `MetricCard.tsx` line 15\n- `MetricWidget.tsx` line 118\n- `DashboardRenderer.tsx` line 92\n\nall read `string | { key?, defaultValue? }` and all end with `return label.defaultValue || label.key;` — the `key` is never handed to `t()`. Compare `packages/layout/src/NavigationRenderer.tsx` line 260, whose `resolveLabel` takes a `t` and does translate.\n\nSo a dashboard author who writes the documented localized-label object gets the English `defaultValue` in every locale. The escape hatch is declared but inert: exactly the \"declared = enforced\" gap that makes AI-authored metadata quietly wrong.\n\n### 2. A self-contained `metric` widget never sees the translated title/description at all\n\n`DashboardRenderer.tsx`:\n\n- line ~653: `const isSelfContained = widget.type === 'metric' && !datasetBound;`\n- lines 654-655 compute `resolvedTitle` / `resolvedDescription` via `tWidgetTitle` / `tWidgetDescription` (the working `{ns}.dashboards.{dash}.widgets.{id}.title|description` convention)\n- but the self-contained branch renders no Card header, so **neither value is used**\n- meanwhile line ~525, inside the metric dispatch, builds the card's own label with the untranslated `resolveLabel(widget.title) || widgetType`, and spreads `...options` (carrying `options.description`) straight through\n\nNet effect: a `type: 'metric'` KPI card shows the raw authored English while every other widget type on the same dashboard shows the translated header. That is precisely the \"widget titles/descriptions translate fine, which is what makes the mismatch conspicuous\" observation in objectstack#5407.\n\n### Open design question — please decide before implementing\n\n`options.description` (the metric card's sub-caption) is a different authored field from `widget.description` (the shared card header's). Routing the former through `widgetDescription(dashName, widget.id, fallback)` would give it the same convention key as the latter. For a self-contained metric that collides with nothing today, because `widget.description` is never rendered on that path — but it does conflate two authored fields under one key. Alternatives: give the sub-caption its own convention segment, or make the self-contained metric render the shared header like everything else. Worth settling deliberately rather than in a patch.\n\n### Not in scope here\n\nThe `Owner:` / `Lead Source:` chip prefix in `DashboardFilterBar.tsx` (line 226, `def.label || def.name`) is app metadata — `DashboardFilterDef.label` in `packages/core/src/utils/dashboard-filters.ts` is a plain `string`, with no `I18nLabel` form and no convention resolution. Whether the filter bar should resolve it through `useSafeFieldLabel` (as `DatasetWidget` already does for measure headers) is a separate contract question; the filter def carries no object name to key on, so it cannot simply copy that call.\n"
+}

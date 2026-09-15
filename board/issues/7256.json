@@ -1,0 +1,34 @@
+{
+  "number": 7256,
+  "kind": "issue",
+  "title": "qa(core): the `contains` assertion SILENTLY PASSES when the actual value is neither an array nor a string",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-10T04:00:16Z",
+  "updated_at": "2026-08-10T08:40:36Z",
+  "closed_at": "2026-08-10T08:40:36Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7256",
+  "body": "Recorded while implementing #6247 (PR #7255 — seeding `packages/spec/liveness/qa.json` and enforcing `TestSuiteSchema` at the `os test` load site). Not claiming or fixing here — filing per Prime Directive #10, and deliberately kept out of that PR's scope: the ruling there covers the ledger and the load site, and this is a behaviour change inside the assertion engine.\n\n**Finding.** `TestRunner.assert` (`packages/core/src/qa/runner.ts:171-177`) handles `contains` like this:\n\n```ts\ncase 'contains':\n   if (Array.isArray(actual)) {\n       if (!actual.includes(expected)) throw new Error(…);\n   } else if (typeof actual === 'string') {\n       if (!actual.includes(String(expected))) throw new Error(…);\n   }\n   break;\n```\n\nThere is no `else`. When `actual` is anything else — `undefined` (the overwhelmingly common case: a typo'd `field` path, or a response shape that changed), `null`, a number, or an object — the branch falls through, throws nothing, and **the assertion passes**.\n\nSo a scenario asserting `{ field: \"body.data.items\", operator: \"contains\", expectedValue: \"acme\" }` against a response that has no `body.data.items` at all reports ✅. The assertion that was supposed to be the test *is* the thing that silently disappears.\n\n**Why this one matters more than a normal bug.** Every other unhandled shape in this engine fails LOUD, and that asymmetry is what makes this the odd one out:\n\n- an action type with no adapter branch (`run_script`) throws `Unsupported action type in HttpAdapter` (`http-adapter.ts:38`);\n- an operator with no branch (`not_contains` / `gt` / `gte` / `lt` / `lte` / `error`) throws `Unknown assertion operator` (`runner.ts:186`) — declared in `TestAssertionTypeSchema`, refused at runtime, which is annoying but honest;\n- `is_null` / `not_null` / `equals` / `not_equals` all compare unconditionally.\n\n`contains` is the only path that can decide \"no comparison applies here\" and report success. A test framework whose failure mode is a false green is worse than one that is missing the feature — the whole point of the surface is to be believed by CI.\n\nThis is also the reason it is worth a separate card rather than a note: #6247's ledger records `scenarios.setup`'s sub-keys with `assertions` → `field` / `operator` / `expectedValue` all `live`, and they are. The KEY is live; it is one VALUE of `operator` that is unsound. That distinction is real (the `api.json` `type` precedent) but it means no liveness verdict will ever surface this.\n\n**Options.**\n1. **Throw on the unhandled shape** — `contains` against a non-array/non-string actual is an assertion that cannot be evaluated, so fail it with a message naming the field, the operator and the actual type. Matches the `default:` branch's posture. Fails loudly on suites that are currently (falsely) green, which is the point, and is the only option that closes the false-green.\n2. **Coerce and compare** — `String(actual).includes(String(expected))`. Makes `contains` total, but silently redefines it: `undefined` would then \"contain\" the substring `\"defi\"`, which trades one false green for a weirder one. Not recommended.\n3. Leave it and document — weakest; a documented false green is still a false green.\n\n**Dedup.** No open issue or PR in the three repos names the `contains` assertion or `TestRunner.assert`. Searched before filing."
+}

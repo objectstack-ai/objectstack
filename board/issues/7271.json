@@ -1,0 +1,35 @@
+{
+  "number": 7271,
+  "kind": "pull_request",
+  "title": "fix(plugin-approvals): unify the approval-status vocabulary across the i18n bundles",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-10T04:15:30Z",
+  "updated_at": "2026-08-10T04:58:02Z",
+  "closed_at": "2026-08-10T04:58:01Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-10T04:58:01Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/7271",
+  "body": "Fixes #7232 (problem 4 of #7213: three vocabularies for one request).\n\nMaintainer directive, 2026-08-10 — the glossary itself is decided, not re-opened here:\n\n> 按照你的建议继续，相关任务作为子任务，开始派发并开发。\n\n## Premise: verified on origin/main, both halves hold\n\n- `zh-CN.objects.generated.ts:44` really did say `pending: \"待处理\"`, and `:90` really did say `my_pending` → `\"我的待办\"`, while the Approvals Inbox and `platform-objects` nav (`zh-CN.ts:21`) say 待审批 / 待我审批.\n- `en.objects.generated.ts:43-49` really did ship the raw enum values (`pending`, `approved`, …) as labels.\n\n## Where the labels actually live — the mechanism, measured\n\nThe dispatch hypothesis was that an extraction pipeline upstream owns these strings and the fix belongs at that producer. **That is half wrong, and the measurement says which half.** `os i18n extract` generates the bundle **structure**; the **leaf string values are hand-maintained in these files** and `--merge` preserves them — exactly what the file header states (\"Edit translations in place… Do not hand-edit the structure — only the leaf string values\"). Measured both directions on `pnpm check:i18n`:\n\n| probe | gate |\n| --- | --- |\n| hand-edit a leaf value (en `pending` → `Pending`) | **green** — merge preserves it |\n| drop an option key (`returned`) from the en bundle | **red** — `DRIFTED (1)` |\n\nSo there is no upstream label producer to fix: the bundles are edited directly, and this PR does that. For completeness, the reason en was seeded with raw values is that `Field.select([...APPROVAL_STATUSES])` normalizes each bare string to `{ label: 'pending', value: 'pending' }` — the declared label **is** the value, and the extractor seeds a new key from that source text.\n\n## Changes\n\n- **zh-CN** — `status.options.pending` 待处理 → **待审批**; `my_pending` view 我的待办 → **待我审批**; empty-state title 暂无待办审批 → 暂无待审批的请求. The other four statuses already matched the glossary and were left alone.\n- **en** — `Pending` / `Approved` / `Rejected` / `Recalled` / `Returned`. `my_pending` stays \"My Pending\" per the glossary.\n- **ja-JP / es-ES** — `my_pending` view label aligned to the nav wording: 自分の保留中 → **承認待ち**, \"Mis pendientes\" → **\"Aprobaciones pendientes\"**.\n\nStatus **values** are untouched — display wording only, so no stored data, filter or API payload moves.\n\n## New pin\n\n`src/translations/approval-status-vocabulary.test.ts`. The card asked for pinned label expectations to be flipped; there were **none to flip** — nothing pinned this wording at all, which is how three layers drifted apart in the first place. Two things it deliberately does not do:\n\n- It does not re-read the bundle constants. Every assertion goes through the real resolver (`translateObject` / `resolveViewLabel`) against the real `SysApprovalRequest`, so it also proves the bundle is **reached**. A guard-the-guard case asserts the *declared* option label is still the bare enum value, so a humanized result can only have come from the bundle.\n- It does not pin each locale in isolation. A parity case compares this plugin's `my_pending` label against `platform-objects`' `nav_account_approvals` label for zh/ja/es — the cross-package assertion that goes red if either layer is reworded alone. en is excluded on purpose: its nav reads \"Approvals\" (the destination) and its view reads \"My Pending\" (the filter), a split the glossary keeps.\n\nReverse-verified in the predicted direction: reverting the four bundles and keeping the test turns **5 of 6 cases red** (en options, zh options, the raw-enum ratchet, the per-locale view labels, and the parity case), while the guard-the-guard case stays **green** — it reads the object definition, which this PR does not touch.\n\n`bundle-ownership.test.ts` needed no change: it pins which objects the bundle covers, not label text, and the change stays inside `sys_approval_request`. `approval-vocabularies.test.ts` likewise — it pins option **values** against `@objectstack/spec/contracts`, and those are unchanged.\n\n## Verification\n\n- `pnpm --filter @objectstack/plugin-approvals test` — **20 files / 452 tests passed** (19 files before; the new pin is the 20th).\n- `pnpm --filter @objectstack/plugin-approvals typecheck` — exit 0.\n- `pnpm check:i18n` — exit 0, \"OK (9 packages — all bundles in sync, no undeclared authoring keys)\".\n- `pnpm check:i18n-coverage` — exit 0, \"OK (12 configs, 660 baselined untranslated strings, none new)\". First two runs reported COULD NOT MEASURE for an unbuilt `connector-mcp` / `connector-openapi` in the worktree — an environment prerequisite that compares nothing, not a content verdict; resolved by building the showcase dependency closure.\n- `node scripts/check-nul-bytes.mjs` — exit 0.\n\nChangeset: `.changeset/hip-planes-shake.md` (patch, user-visible wording).\n\n## Scope note\n\nja-JP `status.options.pending` is 保留中 while the same bundle uses 承認待ち elsewhere. #7232's glossary scopes ja/es to the **view label** and says not to invent translations beyond it, so it is left as-is and flagged here rather than changed.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01L9U1G2piXmYrhYQX96XUyv)_"
+}

@@ -1,0 +1,33 @@
+{
+  "number": 3083,
+  "kind": "issue",
+  "title": "ux(setup): 平台 SSO 后落地 Setup System Overview(全 0 审计仪表盘)— 新 builder 应落 /_console/home;Total Users 显示 0",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:queue",
+    "repo:objectui"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-17T00:50:23Z",
+  "updated_at": "2026-08-10T02:11:56Z",
+  "closed_at": "2026-08-10T02:11:56Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3083",
+  "body": "## 现象(staging E2E 2026-07-17,cloud 平台 SSO 进入新环境)\n\n新 builder 通过「Continue with ObjectStack」进入刚创建的环境,落地页是 **Setup 应用的 System Overview**(Platform health / audit 仪表盘)——所有指标为 0,与「开始搭建应用」的心智完全错位。环境的 `/_console/home`(有「用 AI 搭建 / 问 AI / 从模板开始 / Your apps」)才是合适的第一屏。\n\n另:System Overview 的 **Total Users 显示 0**,而环境里至少有 1 个 JIT 用户(统计口径基于审计事件?应基于 sys_user count)。\n\n## 影响\n\nP2 — ADR-0075(post-login landing 由 metadata 声明,「每层的 home = 该层的职责」)在 env 层的落地缺口:SSO callback 后的默认路由解析到了 Setup 仪表盘而非 env home。\n\n## 修复方向\n\n1. 平台 SSO callback 落地 `/_console/home`(或 env 声明的 landing page),不要落第一个 app 的第一个 dashboard。查:callbackURL 的默认值(objectui 登录组件传什么)与 console 默认路由解析顺序。\n2. System Overview「Total Users」改为真实 `sys_user` 计数。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

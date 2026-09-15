@@ -1,0 +1,35 @@
+{
+  "number": 7288,
+  "kind": "pull_request",
+  "title": "feat(cloud-connection,cli): install-local POST reports storageDir, `os package install` quotes it",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-10T05:02:46Z",
+  "updated_at": "2026-08-10T05:57:02Z",
+  "closed_at": "2026-08-10T05:57:01Z",
+  "closed_by": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "merged_at": "2026-08-10T05:57:01Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/7288",
+  "body": "Fixes #6721\n\n## What changed\n\nTwo endpoints of `MarketplaceInstallLocalPlugin` disagreed about one fact, and the\ndisagreement was load-bearing for `os package install`.\n\n**Producer** — `packages/cloud-connection/src/marketplace-install-local-plugin.ts`.\nThe install POST's `data` block now carries `storageDir: this.storageDir`, read from\nthe same field the GET listing (`handleList`) already served. `this.storageDir` is\n`this.ledger.dir`, resolved once in the ctor by `LocalManifestSource` — the host's\nconfigured `storageDir` when it set one, `DEFAULT_INSTALLED_PACKAGES_DIR` when it did\nnot. The change is purely additive: an already-in-hand value put into a response, no\nexisting key touched, no migration, nothing obliged to read it.\n\n**Consumer** — `packages/cli/src/commands/package/install.ts`. The post-install hint\nquotes the reported directory instead of a literal:\n\n```\n  The manifest is cached on the runtime host and re-registers on every\n  boot (survives restarts):\n    /srv/objectstack/state/ledger-packages\n```\n\nWhen the response has no `storageDir` — a runtime older than the producer half — the\nCLI prints **no** directory sentence. There is no fallback. The long `#6643` comment\nblock explaining why the literal had to stay is deleted along with the literal.\n\n## Why one PR across two packages\n\nThe 2026-08-09 seat grade on #6721 ruled this shape, and the reason is the rule itself\nrather than convenience:\n\n- **The producer is the contract.** #6643 measured that no consumer-side answer exists.\n  A constant resolved in the CLI describes the machine typing the command, not the\n  remote host that stored the manifest; it is in any case only the plugin's *default*,\n  wrong the moment a host configures `storageDir`; and a static import of\n  `@objectstack/cloud-connection` would make a pure-HTTP command fail at module load\n  wherever that package is absent or unbuilt. Every CLI reference to that package is a\n  guarded dynamic load for exactly this reason. So the consumer half cannot be correct\n  until the producer half lands — splitting the PR would leave it dangling on a\n  one-line change.\n- **Single consumer.** A repo-wide sweep for `install-local` finds the plugin and\n  `packages/cli/src/commands/package/install.ts`; the other hits\n  (`packages/runtime/src/domains/packages.ts`, `packages/client/src/index.ts`,\n  `packages/objectql/src/plugin.ts`) are prose references to the manifest shape, not\n  readers of this response. Nothing else observes the new field.\n- **Additive field.** Adding a key to a success envelope cannot break a reader that\n  does not know about it, so the producer half carries no compatibility risk of its own.\n\nThe binding delivery criterion from that seat grade, quoted verbatim:\n\n> CLI 那句提示必须引用响应里的真值,**且没有字面量兜底**。若响应缺 `storageDir`(旧版宿主),正确行为是**不打印那句目录说明**,而不是回落到写死的路径 —— 回落就是把刚删掉的缺陷用 `??` 请回来。\n\nThat is why the absent case prints nothing rather than degrading gracefully into the\nold string: a `?? '.objectstack/installed-packages/'` would read as a kindness to older\nhosts and would reinstate precisely the defect Prime Directive #12 forbids and #5996\ndeleted — a consumer inventing a value the producer declined to state. An empty or\nnon-string value is treated as the same \"the host did not state it\" case, not as a\nreason to print a blank path.\n\n## Changeset level\n\n`.changeset/install-local-post-storage-dir.md` bumps `@objectstack/cloud-connection`\n**minor** and `@objectstack/cli` **patch**. The producer half adds a new field to a\npublic HTTP response — additive capability, so minor. The consumer half changes only\nwhat an existing command prints, and changes it from a wrong path to a right one (or\nto silence) — a presentation fix, so patch.\n\n## Tests\n\nNew, both halves:\n\n- `packages/cloud-connection/src/marketplace-install-local-storage-dir.test.ts` — POST\n  `data.storageDir` equals the resolved ledger dir for a host with a **non-default**\n  `storageDir` (the configuration the old literal misreported, and the only one that\n  separates \"quotes the resolved value\" from \"restates the default\"); equals the ctor\n  default when the host configured nothing (run under a `chdir` into a temp dir, since\n  that path genuinely writes relative to `process.cwd()`); and equals the GET listing's\n  value string-for-string, which is the divergence this closes.\n- `packages/cli/test/package-install-storage-dir.test.ts` — the sentence quotes the\n  response value verbatim; the sentence is **absent** when the response omits\n  `storageDir`, and absent for empty / whitespace / null, while the install itself is\n  still reported.\n\n### Reverse verification\n\nPredicted direction before running, and both matched.\n\n- Delete `storageDir` from the POST response ⇒ all 3 producer cases red\n  (`expected undefined to be '/tmp/mil-storage-dir-…'`). Restored.\n- Bolt the literal fallback back on (`|| '.objectstack/installed-packages/'`) ⇒ the 4\n  absence cases red (`expected … not to contain 'cached'`) while the happy path stays\n  green. That is the delivery criterion's teeth: a happy-path-only test would have\n  stayed green through this edit. Restored.\n\n### Local gates\n\n```\npnpm --filter @objectstack/cloud-connection test   Test Files 16 passed (16)  Tests 112 passed (112)\npnpm --filter @objectstack/cli test                Test Files 106 passed (106) Tests 1144 passed (1144)\npnpm --filter @objectstack/cli typecheck           Done\npnpm turbo run build --concurrency=2               Tasks: 72 successful, 72 total\npnpm check:type-check-debt                         OK — none above its recorded number\nnode scripts/check-nul-bytes.mjs                   OK (scanned 6640 text files)\n```\n\nDependency closures were built first (`--filter '@objectstack/cloud-connection^...'`,\n`--filter '@objectstack/cli^...'` — the `^...` suffix, i.e. upstream dependencies, which\nis the direction that matters here since neither change narrows an exported type).\n`check:type-check-debt` was run after the full build closure and raises no ledger entry;\nthe two new test files add no TEST_DEBT.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_0158ZQo7LiHSxGWpYKuPq1wu)_"
+}

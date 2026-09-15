@@ -1,0 +1,35 @@
+{
+  "number": 7341,
+  "kind": "issue",
+  "title": "[batch] PM-skill optimization: maintainer-accepted 9-point plan, consolidated with #5925 item 7 + #6644 L2 + #7055 + #7156",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-help"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-10T07:36:44Z",
+  "updated_at": "2026-08-10T09:42:29Z",
+  "closed_at": "2026-08-10T09:42:29Z",
+  "closed_by": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7341",
+  "body": "Maintainer-accepted optimization batch for `.claude/skills/pm-dispatch/SKILL.md` and its satellite files, consolidated per the maintainer's directive with the two in-flight skill cards. Filed and routed via the maintainer-direct-dispatch channel; authorization quoted verbatim (chat, this seat's session, 2026-08-10):\n\n&gt; 关于项目经理的技能,接受你的优化意见,并和前面两个优化任务集中处理。派发使用云卡片,用 Fable 5 模型\n\n&gt; 项目经理技能还需要考虑的是派任务时使用什么模型,也应该项目经理决定,最低下限 sonnet,最高可以 fable\n\nThe accepted proposal list is the devx seat's 2026-08-10 analysis (delivered in chat); items restated here as the card of record.\n\n## Consolidated scope\n\n**Inherited cards folded in** (their own threads carry the detail):\n- #6644 **L2 only** — \"report at draft-PR time, do not wait for CI\" becomes a standard clause of the step-5 dispatch template, with the matching PM landing duty in step 7. L1/L3/L4/L5 already landed via PR #6799.\n- #5925 **item 7 only** — extract the long incident narratives into `references/incidents.md`; pure move, byte-identical, cut points re-derived from the current file; ⛔ ordered AFTER all textual additions.\n- #7055 — os-dev cleanup prescription drops `--force` (remove `node_modules` first, unforced `git worktree remove`; a refusal then means uncommitted work).\n- #7156 — the idle-poll symptom card of L2; fixed at the role-file layer, not per-prompt.\n\n**Accepted optimization items**:\n1. **SKILL.md restructure**: main file keeps rules + one-line case anchors; Operational notes narratives, incident case law, and the filter compile-surface inventory move to `references/**` loaded on demand; the case-law region becomes append-only; a shrink-only line-count ratchet gate guards the main file's size.\n2. **Half-state sweeper (report-only)**: a mechanical checker enumerating label/assignee invariant violations (`pm:dispatched` with no assignee; assignee with no claim comment; `pm:queue`+`pm:dispatched` both present post-landing; `pm:blocked` without a `Blocked-by:` body line; seat-sticker title/assignee/body triple out of sync). Complements #7239 — its per-instance repairs stay with that card.\n3. **Report-channel unification**: every dev final report also lands as an issue comment (the `os-dev-report` marker), both dispatch modes; the subagent return channel becomes an accelerator, not the source of truth.\n4. **Machine-produced dispatch inputs**: a script mapping a file surface to the gate families that watch it (so \"Local gates for this card\" is generated, not recalled), plus a claim-comment shape checker.\n5. **Role-file precedence audit**: clauses true for every card live in `.claude/agents/os-dev.md` (measured: a per-dispatch prohibition lost to the role file's own prescription — #7055 evidence); per-card variables get explicit interfaces in the role file instead of conflicting defaults.\n6. **Triage emits a size/model suggestion line** consumed by the claim comment; the executor seat may override with a stated reason.\n7. **Multi-account slimming**: rituals that exist only because of the shared-identity era are marked same-account-only; the cross-account rule stays one line (assignee not yours ⇒ taken).\n8. **Decision-card template**: every premise line carries its own re-check command, so refreshing a stale decision card is running commands, not re-research.\n9. **Model-tiering rewrite (maintainer ruling above)**: the dispatch model is the PM's per-card decision; floor `sonnet`, ceiling `fable` (`claude-fable-5`), with `opus` the default judgment tier in between; `model` stays an explicit parameter on every dispatch; tier recorded in the claim comment.\n\n## Delivery shape (ordering is load-bearing)\n\n- **PR A — protocol text batch** (SKILL.md + os-dev.md): items 3/5/6/7/8/9 + #6644 L2 + #7055 + #7156. Per-item checklist in the PR body; `Fixes #6644, #7055, #7156` + `Part of` this card.\n- **PR B — structure extraction** (item 1 + #5925 item 7): pure moves, byte-identical, LAST; `Fixes #5925` + `Part of` this card.\n- **PR C — tooling** (items 2/4): new scripts + gate wiring; `Part of` this card (closes when accepted).\n\n⛔ Constraints: no `docs/adr/**`; English on GitHub; sanitizer discipline on every SKILL.md write (entities for angle brackets, read back after posting); out-of-scope discoveries filed separately per PD #10.\n\nDispatch: cloud card (`create_session`), model `claude-fable-5`, per the authorization above."
+}

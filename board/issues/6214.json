@@ -1,0 +1,35 @@
+{
+  "number": 6214,
+  "kind": "issue",
+  "title": "[转移·spec] liveness datasource.json 的 pool 四行补按驱动限定注记(#5931 裁决的 spec 半边)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T11:00:17Z",
+  "updated_at": "2026-08-10T05:11:32Z",
+  "closed_at": "2026-08-10T05:11:32Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6214",
+  "body": "Part of #5931(维护者 2026-08-07 03:21Z 裁决的 spec 半边;services 座位按 shared-contract 规则转移立单——`packages/spec` 恒归 spec 座位,本座位与 dev 均不触)。\n\n## 要做的\n\n`packages/spec/liveness/datasource.json` 中 `pool.min` / `pool.max` / `pool.idleTimeoutMillis` / `pool.connectionTimeoutMillis` 四行,现记为**无限定 live**;按 #5931 落地后的真值改为**按驱动限定**注记:\n\n> live on postgres / mysql / mongo;authoring error on sqlite / sqlite-wasm(自 #5714 / PR #5954)与 memory(自 #5931 / 其 PR)。\n\n纯注记精确化,零行为变化;确切措辞以 spec 车道对 liveness 台账的既有词汇为准(#5931 的 rider 评论 2026-08-06 12:59Z 有原始表述)。\n\n## 依赖\n\nBlocked-by: #5931(分支 `claude/issue-5931-memory-pool-reject` 的 PR 合入 main 后,上面那句才为真;memory 臂的覆盖面由该 PR 定稿)。\n\n## 出处链\n\n#5714 / PR #5954(sqlite/sqlite-wasm 臂拒绝)→ #5931 rider 评论(注记依赖裁定,不塞 #5954)→ #5931 裁决(memory 并入 + 「that half touches spec, so coordinate with the spec seat」原文)。"
+}

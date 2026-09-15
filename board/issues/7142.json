@@ -1,0 +1,32 @@
+{
+  "number": 7142,
+  "kind": "issue",
+  "title": "[sweep] Liveness-ledger citation repair — re-cite measured readers for the stale-evidence rows of #7132 + #7133",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-help"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T21:25:18Z",
+  "updated_at": "2026-08-10T02:58:34Z",
+  "closed_at": "2026-08-10T02:58:25Z",
+  "closed_by": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7142",
+  "body": "Sweep pack formed by the triage seat's findings-triage round (2026-08-09, per the SKILL sweep-pack rules; members promoted `finding` → `pm:queue` in this same round). **This card is the single claim/dispatch entry; the member cards are NOT individual dispatch candidates.**\n\n## Shared criterion (same-class test)\n\nDirection-A citation rot only: the ledger row's **verdict re-verified as correct** via a real measured reader, while the **recorded citation** greps to zero at the cited site. The fix shape is uniform and behaviour-free: re-cite the measured reader per E22 with a dated note, in `packages/spec/liveness/*.json` prose. Acceptance surface untouched ⇒ `domain:spec-surface`, changeset patch.\n\n## Members\n\n- #7132 — `packages/spec/liveness/view.json` `props.list.children.*`: 6 of 15 keys cite \"ObjectGrid.tsx (audit L15)\" with zero occurrences there; measured readers are in the member's table (`bridges/list-view.ts`, `plugin-list/ListView.tsx`, `plugin-view/ObjectView.tsx`).\n- #7133 — 6 LIVE rows across `field` / `view` / `page` ledgers citing objectui readers that no longer read the key; measured re-citations in the member's table.\n\nDeliberately **excluded**: #7131 — its rows carry a verdict/methodology fork (do designer previews count as consumers?), not citation rot; held separately by the same round.\n\n## Sweep discipline (binding, from the SKILL five rules)\n\n1. One claim, one PR, `Fixes #7132` + `Fixes #7133`.\n2. PR body carries a per-row checklist: ledger row | stale citation (before) | measured re-citation (after), each re-citation **measured at objectui `origin/main` at implementation time** with the reading line quoted — the member tables are the map, not the answer (E9/E24; the shared checkouts run days behind).\n3. Zero changes beyond the listed rows; `git diff --stat` must match the checklist file set.\n4. Out-of-scope discoveries are filed separately (PD #10), never folded in.\n5. **Escalation guard**: if any row's \"real reader\" turns out to be pass-through-only (a spec-bridge copies the key but no renderer applies it), that row escalates from citation repair to a verdict question — split it out as its own card instead of silently re-citing. #7132's `striped`/`bordered` rows are the known instances of this shape: resolve them by finding an applying reader, or split them into a verdict-question card **before** letting `Fixes #7132` close that member.\n\n## Refs\n\nAxis-③ audit round of 2026-08-09 (session `session_018ffcE95NaMJcL9XJ9VDYgk`), audited at objectstack `4ac12ef4` / objectui `5bfaabde`. Related held cards: #7131 (methodology fork), #7129/#7130 (direction B)."
+}

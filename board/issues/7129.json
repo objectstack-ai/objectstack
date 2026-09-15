@@ -1,0 +1,36 @@
+{
+  "number": 7129,
+  "kind": "issue",
+  "title": "finding: liveness dashboard.json `widgets.actionUrl` closure claim (\"Nothing anywhere read `widget.actionUrl`\") no longer measures true — objectui's widget config panel reads and authors the widget-level key",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched",
+    "repo:objectui",
+    "target:v17"
+  ],
+  "assignees": [
+    "os-help"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T19:12:55Z",
+  "updated_at": "2026-08-10T02:42:33Z",
+  "closed_at": "2026-08-10T02:42:33Z",
+  "closed_by": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7129",
+  "body": "Observation-class finding from the axis-③ liveness audit (ledger claims vs measured objectui readers). Filed unassigned for triage; **ledger verdict vs measured reader disagree — this card does not prescribe which side is right** (re-verdict/note refresh OR objectui config-panel cleanup is triage's fork).\n\n## Audited revisions (E24)\n\n- objectstack `origin/main` @ `4ac12ef4cfe4a1925fb7e950c56d7aff0bbc5381`\n- objectui `origin/main` @ `5bfaabde05c3876c9604a2aa47f4822f9e6de8b5`\n\nBoth read via `git fetch` + `git archive` of `origin/main`, not working trees.\n\n## The ledger claim\n\n`packages/spec/liveness/dashboard.json` → `props.widgets.children.actionUrl` (`status: \"dead\"`, `verifiedAt: \"2026-08-04\"`):\n\n> \"CALL GRAPH CLOSED BY HAND 2026-08-03, re-measured 2026-08-04 (objectui @91757a7). All 14 `actionUrl` occurrences in DashboardRenderer.tsx are scoped to `schema.header.actions[]` (…) — that is the DashboardHeaderAction schema, a different shape. **Nothing anywhere read `widget.actionUrl`.**\"\n\nRetired 2026-08-04 via #5010 / ADR-0049 D2 — `retiredKey` tombstone, \"authoring it is now a tsc error and a parse error\".\n\n## Measured reality at objectui @5bfaabd\n\nThe DashboardRenderer half of the claim still holds (all its `actionUrl` reads are `header.actions[]`-scoped). But the closure \"nothing anywhere\" does not:\n\n1. `packages/plugin-dashboard/src/DashboardWithConfig.tsx:114` — widget-level **read**, on the widget found in `liveSchema.widgets`:\n\n```ts\n      actionUrl: widget.actionUrl ?? '',\n```\n\n2. `packages/plugin-dashboard/src/WidgetConfigPanel.tsx:391` — the widget config editor **offers the key** as an authoring field (Behavior group):\n\n```ts\n          {\n            key: 'actionUrl',\n            label: 'Click-through URL',\n            type: 'input',\n            placeholder: 'https://...',\n          },\n```\n\n3. `DashboardWithConfig.tsx` `handleWidgetFieldChange` writes edits back as `{ ...w, [field]: value }` into `liveSchema.widgets` — i.e. the panel **authors** `widget.actionUrl` into the live schema. (Whether the ADR-0021 save scrub drops it again on persist was NOT measured; the save comment claims \"legacy keys scrubbed\" for dataset-shape keys only.)\n\n4. Corroborating type-side drift: `packages/types/src/complex.ts:675-677` (`DashboardWidgetSchema` docblock) still says \"`actionUrl`, `actionType`, `actionIcon` … all flow in from the spec through the `extends` above\" — flowing in from a spec where all three are tombstones.\n\n## Why it matters\n\nThe tombstone's contract is \"authoring it is a tsc error and a parse error\" — yet the Studio widget panel presents a UI field that authors exactly this key. Either the ledger row's closure claim needs re-measuring/annotating, or the panel field is the dangling producer the 2026-08-04 sweep deleted on the renderer side but not on the config side. Not prescribing which.\n\n## Dedup\n\n- objectui#3901 is the known axis-③ specimen (form-view `spec.aria`) — different key, different file.\n- Org-wide open-issue searches for `actionUrl`, `DashboardWithConfig`, `WidgetConfigPanel` return no card about the widget-level key. objectstack#5175 is `chartConfig`, adjacent but distinct.\n\n## Suggested lane\n\nCross-lane: the ledger row is spec-surface; the measured reader is objectui `plugin-dashboard`. Likely wants a paired disposition rather than a single-repo fix.\n\nProvenance: cross-repo read-only audit, session https://claude.ai/code/session_018ffcE95NaMJcL9XJ9VDYgk"
+}

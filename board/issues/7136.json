@@ -1,0 +1,34 @@
+{
+  "number": 7136,
+  "kind": "issue",
+  "title": "Re-annotate plugin-sharing + plugin-audit onto the full `ExecutionContext` and delete the double-casts (identity half of #7070)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T19:26:32Z",
+  "updated_at": "2026-08-09T21:09:03Z",
+  "closed_at": "2026-08-09T21:09:03Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7136",
+  "body": "Identity-lane half of the #7070 split (promotion executed by the triage seat per the split plan recorded on that card, 2026-08-09). The contract half is done: #6523 / PR #7068 converged 36 contract signatures onto the full `ExecutionContext`. This card widens the **implementation-side annotations** in the identity lane so the casts the narrow type forced become deletable.\n\n## File face (verified on `origin/main` @ `445a0c2`)\n\n| file | `SharingExecutionContext` refs |\n|:---|---:|\n| `packages/plugins/plugin-sharing/src/sharing-service.ts` | 21 |\n| `packages/plugins/plugin-sharing/src/sharing-rule-service.ts` | 8 |\n| `packages/plugins/plugin-sharing/src/exec-context-seam.testkit.ts` | 3 |\n| `packages/plugins/plugin-audit/src/comment-access-hooks.ts` | 2 |\n\nThe double-cast specimen, re-verified live: `exec-context-seam.testkit.ts:106` — `return { ...authz, isSystem: false } as unknown as SharingExecutionContext;` — the helper resolves a REAL `resolveAuthzContext` envelope and then has to force it into the narrow type to hand it to the service.\n\n## Scope boundary (both inherited from #7070)\n\n- ⛔ Any `organizationId` spellings stay out — per #5858 / `check:org-identifier` that vocabulary has its own history; this card is annotation widening + redundant-cast deletion only.\n- The removal of the exported `SharingExecutionContext` type itself rides **whichever of the two split halves lands second**. #6523 deliberately left it exported and documented as migration residue precisely to keep these files compiling; once both halves land, it becomes removable — the second-lander deletes it (or files the one-line follow-up if cross-lane timing makes that cleaner).\n\nNo user-visible defect: values are complete at runtime (the #6523 family's damage was type-side). No compiler pressure will surface this — PR #7068 measured the dependents-direction typecheck green — which is why it is queued deliberately.\n\nPart of #7070 (progress view). Sibling: services half (#7135). Refs: #6523, PR #7068, #6206 (ruling), #6430 / PR #6511."
+}

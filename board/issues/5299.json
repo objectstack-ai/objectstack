@@ -1,0 +1,34 @@
+{
+  "number": 5299,
+  "kind": "issue",
+  "title": "driver-memory 与 formula 对「字段没有值」给出三处不同答案:`$notContains`(null 值)、`$exists`(键在值为 null)、`$nin`(缺键)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T16:08:28Z",
+  "updated_at": "2026-08-10T10:18:03Z",
+  "closed_at": "2026-08-10T10:18:03Z",
+  "closed_by": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 21,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5299",
+  "body": "修 #5146 时,为了给 SQL 侧找一个「JS 家族的正确答案」而把两个 JS 后端逐算子跑了一遍,\n顺带测出它们**彼此**在三处不一致。**不在 #5146 范围内**(那单裁定的是 `$not` 在 SQL 上\n的 NULL 语义),按 Prime Directive #10 记录。\n\n## 事实(实测)\n\n两组 fixture,区分「键在、值为 null」与「键不存在」:\n\n- `NULLED`:`3: { stage: null }`、`4: { stage: null }`\n- `MISSING`:`3: {}`(无 stage 键)、`4: {}`\n\n| filter | driver-memory `match`(值为 null) | driver-memory(缺键) | formula(值为 null) | formula(缺键) |\n|---|---|---|---|---|\n| `{ stage: { $notContains: 'w' } }` | 不匹配 | 不匹配 | **匹配** | **匹配** |\n| `{ stage: { $exists: true } }` | **不算存在** | 不算存在 | **算存在** | 不算存在 |\n| `{ stage: { $nin: ['won'] } }` | 匹配 | **不匹配** | 匹配 | 匹配 |\n\n成因都在 `packages/plugins/driver-memory/src/memory-matcher.ts` 的 `checkCondition`:\n\n1. 早退守卫 `if (value === undefined && op !== '$exists' && op !== '$ne' && op !== '$null') return false;`\n   —— 豁免名单里没有 `$nin`,所以**缺键**的记录直接判 `$nin` 不通过,而同一记录若把字段\n   写成 `null` 则通过。formula 的 `evalOp` 两种情况都判「不在集合里」→ 通过。\n2. `case '$notContains': if (typeof value !== 'string' || value.includes(target)) return false;`\n   —— 值不是字符串(null / undefined)一律判否;formula 的\n   `!(typeof actual === 'string' && actual.includes(v))` 判是。\n3. `$exists` 两边读的是不同的东西:driver-memory 读「有没有值」\n   (`value !== undefined && value !== null`),formula 读「键在不在」\n   (`actual !== undefined`)。对「键在、值为 null」这一格必然相反。\n\n## 为什么这不是学术问题\n\n`matchesFilterCondition` 是 RLS **写侧** `check` 的求值器(insert/update 的后像),\n`driver-memory` 的 `match` 是内存驱动的读过滤。同一条策略里写\n`{ notes: { $notContains: 'secret' } }`,一条 `notes` 为 null 的记录在写侧被判「满足」\n而在内存读侧被判「不满足」 —— 而 SQL 侧又是第三个答案(`NOT LIKE` 对 NULL 是 UNKNOWN\n→ 不返回)。#5146 只把 `$not` 这一格统一了,这三格没人裁定过。\n\n顺带说明 PR #5296 在这三格上**没有**顺手做决定:driver-sql 的 `$not` 改写对\n`$notContains` 跟随 formula(理由:那正是该驱动今天已有的答案,不借改写引入一个没人\n裁定的语义),`$exists` 保持 `IS NOT NULL`(SQL 分不出「键不在」和「值为 null」)。\n三个后端的实测答案都已按现状钉在测试里:\n\n- `packages/plugins/driver-memory/src/memory-matcher-not-null-safe.test.ts`\n  的 “known disagreements with formula.matchesFilterCondition” 一节\n- `packages/formula/src/matches-filter-not-null-safe.test.ts`\n  的 “known disagreement with driver-memory” 一节\n\n所以裁定之后,要改的地方是明确的、且改动会立刻被这两组 pin 顶出来。\n\n## 需要拍板的\n\n1. `$notContains` 对「没有值」的字段是否成立?(SQL 侧天然是「不成立」,formula 说\n   「成立」,driver-memory 说「不成立」。)\n2. `$exists` 的语义是「键存在」还是「有值」?两者在 SQL 上不可区分,所以选「有值」能让\n   三家统一,选「键存在」则 SQL 永远无法兑现 —— 按 declared = enforced,倾向前者。\n3. `$nin` 对缺键记录:driver-memory 的早退守卫应把 `$nin`(以及同族的\n   `$notContains`)一并豁免,还是维持?\n\n建议与 #5146 的 spec 半边、#5239 的 `FILTER_LOGIC_CASES` 扩表一并裁定,并把这几格写进\n那张跨后端表 —— 它今天**刻意**不含 null 处理,所以这三处分叉现在没有任何门禁能发现。\n\n## 关联\n\n#5146 / PR #5296(`$not` 的 NULL 语义,已拍板并落地 engine 半边)、#5298(非否定路径上\n`$ne`/`$nin`/`$notContains` 的 SQL vs JS 分叉)、#5240(`{ field: {} }` 的三个答案)、\n#5239(conformance 表)。\n"
+}

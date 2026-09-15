@@ -1,0 +1,36 @@
+{
+  "number": 7121,
+  "kind": "issue",
+  "title": "PageComponentSchema.dataSource 在剩余 object-bound public block 上仍无人消费:object-gantt / object-timeline / object-map / object-pivot / object-master-detail-form / embeddable-form(按 spec 写仍渲染出空)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched",
+    "pm:queue",
+    "repo:objectui"
+  ],
+  "assignees": [
+    "yinlianghui"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T17:46:55Z",
+  "updated_at": "2026-08-09T21:58:16Z",
+  "closed_at": "2026-08-09T21:58:16Z",
+  "closed_by": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7121",
+  "body": "发现于 objectstack#6953 的实施过程。#6953 的验收范围是它正文点名的那 8 个(`element:record_picker` + object-grid/form/kanban/calendar/chart/metric + `record:related_list`),本单是**同一条绑定在剩余 object-bound public block 上仍然无人消费**,单独立单。\n\n`Blocked-by: objectstack#6953`(实现要用它落地的共享件 `useElementDataSourceSchema` / `ElementDataSourceGate`,一 block 一份优先级表是明令禁止的方向)。\n\n## 事实(objectui `claude/issue-6953-datasource-block-wiring` 实测,基线 65bb513dc)\n\n`PUBLIC_BLOCKS`(`packages/core/src/registry/public-blocks.ts`)里声明 `objectName` 必填、且 `PageComponentSchema.dataSource` 同样声明在其上的 block,#6953 之后仍未接线的:\n\n| block | 注册处 | 现状 |\n|---|---|---|\n| `object-gantt` | `packages/plugin-gantt/src/` | 未读 `dataSource` |\n| `object-timeline` | `packages/plugin-timeline/src/` | 未读 |\n| `object-map` | `packages/plugin-map/src/` | 未读 |\n| `object-pivot` | `packages/plugin-dashboard/src/`(`ObjectPivotTable`) | 未读 |\n| `object-master-detail-form` | `packages/plugin-form/src/MasterDetailForm.tsx` | 未读 |\n| `embeddable-form` | `packages/plugin-form/src/index.tsx` | 未读 |\n| `record:line_items` | `packages/plugin-form/src/LineItemsPanel.tsx` | 未读 |\n\n症状与 #6953 修掉的那批完全同形:一张页面上给这些 block 按 spec 写 `dataSource: { object, view }` 而不写 `objectName`,渲染出来是空的 —— 不发查询、不报错。\n\n> 说明:上表是按注册清单与 #6953 的接线覆盖差集列出的**候选面**,每一项在实施时仍要按 #6953 的方法自查该 block 的读点(它读哪些键、`columns`/`sort`/`limit` 有没有读点),而不是照抄映射。#6953 的经验是:8 个 block 里只有 `object-grid` 能无缺口地映射整条绑定,其余各有各的形态缺口。\n\n## 建议范围\n\n逐 block 复用 #6953 的共享件接线,每块两方向钉子(带/不带 `dataSource`),并沿用 #5576 定下的合成语义(view 作基线、显式键覆盖、`filter` 走 `and`、view 解析不到报错不回退全量)。\n\n⛔ **映射只写该 block 真读的键。**#6953 把这条写进了 `ElementDataSourceMapping` 的契约:把合成值写到 block 不读的键上,等于把「声明了却被丢弃」的缺陷往下挪一层、看起来像接好了。哪个键没有读点就留空,并在 `content/docs/guide/data-source.md` 的逐 block 覆盖表里补一行,像 #6953 对 `record:related_list.filter`(objectstack#7118)和 `object-form` 的 `view` 那样明写缺口。\n\n## 与已有单的去重\n\n- objectstack#5576 —— `list-view` + 公共件(已合)。\n- objectstack#6953 —— 本单的父面,8 个 block(在飞/已实施)。\n- objectstack#7118 —— `record:related_list.filter` 无读点,是本单之外的独立缺口。\n"
+}

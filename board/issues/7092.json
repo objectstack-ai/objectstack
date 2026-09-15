@@ -1,0 +1,36 @@
+{
+  "number": 7092,
+  "kind": "issue",
+  "title": "`standalone-stack.test.ts` hand-mirrors `appDefaultPermissionSetName` and calls the copy \"the exact CLI wiring\" — a conformance claim over a duplicate of the rule",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-help"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T14:39:58Z",
+  "updated_at": "2026-08-10T04:42:25Z",
+  "closed_at": "2026-08-10T04:42:25Z",
+  "closed_by": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7092",
+  "body": "Found while implementing #7001 (converging `bootStack` and `objectstack serve` onto one app-default-profile resolution). Filing per Prime Directive #10 — **not** fixed in that PR. Unassigned.\n\nDedup: searched open issues for `standalone-stack`, `appDefaultPermissionSetName`, and the mirror wording — zero hits before filing.\n\n## What\n\n`packages/runtime/src/standalone-stack.test.ts` hand-copies the body of `appDefaultPermissionSetName` (lines 51-65 on `3f7f14e61`) and then asserts, in a case titled *\"the surfaced config drives appDefaultPermissionSetName → the app profile (**the exact CLI wiring**)\"*, that the copy returns the expected name.\n\nThe file is explicit about why:\n\n```\n// Mirrors `appDefaultPermissionSetName` from @objectstack/plugin-security (not a\n// runtime dependency, so the resolution rule is reproduced here)\n```\n\nThe reason is real — `@objectstack/runtime` does not depend on `@objectstack/plugin-security`. But the consequence is that the test proves a **copy** of the rule, not the rule. If the real helper's behaviour changed (last-`isDefault` instead of first, an anchor-safety pre-filter, a shape change), this test would stay green while `objectstack dev`/`serve` did something else — and its own title claims it is pinning \"the exact CLI wiring\".\n\nThe genuinely load-bearing half of the file is separate and unaffected: that `createStandaloneStack` / `createDefaultHostConfig` **surface** `permissions[]`/`positions[]` at the top level of the returned config. That is this file's real subject and it is tested honestly.\n\n## Why observation-class\n\nNothing a user hits today: the mirrored copy is currently character-identical to the helper, so the assertion's verdict is correct right now. It is unexercised drift — a phantom-conformance shape, the same family as the `check:react-declaration-parity` note in AGENTS.md (two declarations compared, neither an implementation). I read it as `finding`-class rather than a defect; labelling left to triage.\n\nPR #7091 makes it one hop staler without making it wrong: the CLI now constructs through `appSecurityPluginOptions(config)`, of which `appDefaultPermissionSetName` is the first half. The mirror still models the first half correctly, so the assertion still holds — it is simply now modelling something one level below what `serve.ts` actually calls.\n\n## Options (for triage, not a ruling)\n\n1. Add `@objectstack/plugin-security` as a **devDependency** of `@objectstack/runtime` and import the real helper in the test. Smallest change; test-only edge, no runtime dependency added. Needs a check that this does not violate a layering gate.\n2. Move the \"the surfaced config drives the CLI's resolution\" assertion to a package that already depends on both — `packages/cli` is the natural home, and it now has `serve-verify-security-parity.contract.test.ts` doing adjacent work.\n3. Keep the mirror but drop the \"exact CLI wiring\" claim from the title/comment, so the file stops promising a conformance it structurally cannot provide.\n\nRecommendation: **2**, because the claim is about what the CLI does, and it should live where the CLI's own dependencies make it checkable against the real helper. **1** is cheaper and also honest.\n\nRefs: #7001, PR #7091, #5491, ADR-0056 D7 / ADR-0090 D5."
+}

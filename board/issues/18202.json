@@ -2,8 +2,8 @@
   "number": 18202,
   "kind": "issue",
   "title": "spec: `defineStack`'s per-stack cross-reference validation refuses `permissions[].objects` and `data[].object` that name an object owned by ANOTHER PACKAGE OF THE SAME ARTIFACT — so ADR-0130's co-owned artifact and the \"permission sets stay whole in the app package\" addendum cannot both hold once the app package owns objects",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "os-elon-musk",
@@ -13,21 +13,21 @@
   "labels": [
     "bug",
     "domain:spec",
-    "needs:contract-review",
-    "pm:dispatched",
     "priority:p1"
   ],
-  "assignees": [
-    "os-elon-musk"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-09-14T14:55:42Z",
-  "updated_at": "2026-09-15T02:26:15Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-15T04:47:09Z",
+  "closed_at": "2026-09-15T04:46:22Z",
+  "closed_by": {
+    "login": "os-elon-musk",
+    "id": 328766734,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 6,
+  "comments": 8,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/18202",
   "body": "## Finding (class b — a declared contract that cannot be satisfied)\n\nADR-0130 D4 lets one artifact carry N packages sharing a namespace, with `dependencies` between them; its 2026-09-02 addendum (objectstack#14487) rules that **permission sets stay whole in the `type: app` package**. On `@objectstack/spec` 17.4.0 those two records cannot both hold as soon as the app package owns objects of its own: `defineStack` validates cross-references **per stack**, and a permission set in the app stack that grants on an object owned by a module stack is refused.\n\nMeasured on `objectstack-ai/hotcrm` branch `claude/issue-1907-sales-app-service-module` (`be11c07`, pin 17.4.0), where sales is the `type: app` package (15 objects) and service is a `type: module` (3 objects, `dependencies: { 'app.objectstack.hotcrm': '^3.1.0' }`), composed with `composeStacks([service, app], { manifest: 'preserve' })`:\n\n```console\n$ pnpm validate\ndefineStack cross-reference validation failed (18 issues)\n  … permission set grants on crm_case / crm_knowledge_article / crm_article_feedback — \"not defined in objects\" (18 grants across 7 sets)\n```\n\n`data[].object` is refused the same way (`Seed data references object crm_case which is not defined in objects`), so the service package had to carry its own seed rows.\n\nWhy the addendum's own measurement did not see this: hotcrm#1449 measured a shape where the app package **declared no objects at all**, which is exactly the case the check early-returns on — `stack.zod.ts` `validateCrossReferences`: `if (objectNames.size === 0) return errors;`. The moment the app package owns one object, the check runs and refuses every grant on a dependency's object. The composed pass (`composeStacks` → `os build`'s union) accepts the identical grants, and the runtime registers both packages, resolves ownership (`GET /api/v1/packages`: 15 + 3 objects), and serves the app correctly — measured on a dev boot with an identical browser walk against main.\n\nThe only local escapes are `strict: false` on the app stack (disables every schema check for the whole package) or splitting the sets per package (contradicts the addendum, and per-package grant composition is objectstack#14488 — filed, not decided). hotcrm's charter forbids routing around a platform defect, so the packaging card waits on this.\n\n## Ask\n\nMake the per-stack check dependency-aware: an object owned by a package named in `manifest.dependencies` (or, more simply, any object present in the composed artifact) counts as defined for `permissions[].objects`, `data[].object` and the other reference classes the check covers — or defer those classes to the composed pass, which already has the union. Either way the addendum's shape becomes authorable. If the intended answer is instead \"a package's grants must be on its own objects\", then the addendum needs re-ruling and #14488 needs deciding — say which.\n\n**The refusal must MOVE, not disappear.** Whatever mechanism is chosen, a reference to an object that **no package in the artifact defines** must still be refused, loudly, at some named pass. A fixture proving that is an acceptance criterion, not a nicety — deleting the check is the one outcome worse than today's false refusal.\n\nDedupe words: permission set, cross-package, defineStack, cross-reference validation, ADR-0130 dependencies, objectNames.size === 0, co-owned artifact.\n\nRelated: objectstack-ai/hotcrm#1904 (epic), objectstack-ai/hotcrm#1907 (the blocked card), #14487 (the addendum), #14488 (per-package grant composition), #18170 / #18171 / #18203 / #18204 (sibling gaps from the same split)."

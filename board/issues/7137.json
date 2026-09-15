@@ -1,0 +1,36 @@
+{
+  "number": 7137,
+  "kind": "issue",
+  "title": "object-timeline / record:line_items 的查询没有 filter/sort 读点:dataSource.view 解析成功却贡献为零(列表可能比它引用的 view 更宽)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched",
+    "pm:queue",
+    "repo:objectui"
+  ],
+  "assignees": [
+    "yinlianghui"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T20:33:50Z",
+  "updated_at": "2026-08-10T00:11:33Z",
+  "closed_at": "2026-08-10T00:11:33Z",
+  "closed_by": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7137",
+  "body": "发现于 objectstack#7121 的实施过程(objectui 分支 `claude/issue-7121-datasource-remaining-blocks`,基线 `5bfaabde0`)。#7121 的验收范围是「把 `PageComponentSchema.dataSource` 映射到每个 block **真读的键**」;本单是这两个 block **根本没有 filter/sort 读点**这件事本身,属于 #7121 之外的独立缺口,单独立单。\n\n与 objectstack#7118 同形(`record:related_list` 声明了 flat `filter` 却无人读),只是这两块连声明都没有 —— 用户可见的后果完全一样:**命名了 saved view,却得到比该 view 更宽的一批行,不报错。**\n\n## 事实(逐条给了读点)\n\n### `object-timeline` —— `packages/plugin-timeline/src/ObjectTimeline.tsx`\n\n整条取数就是一句(第 159-162 行):\n\n```ts\nconst results = await dataSource.find(schema.objectName, {\n    options: { $top: 100 },\n    ...(expand.length > 0 ? { $expand: expand } : {}),\n});\n```\n\n没有 `$filter`、没有 `$orderby`,窗口是**硬编码的 100**(不是作者声明的上限)。全文件对 `schema.filter` / `schema.sort` / `schema.limit` / `pagination` 零引用(已 grep 确认)。\n\n### `record:line_items` —— `packages/plugin-form/src/LineItemsPanel.tsx`\n\n取数(第 92-95 行):\n\n```ts\nconst res = await dataSource.find(schema.childObject, {\n  $filter: { [schema.relationshipField]: parentId },\n  $top: 500,\n});\n```\n\n只按父关系过滤,`$top` 固定 500;同样对 `schema.filter` / `schema.sort` / `schema.limit` 零引用。(这一块的 `columns` 是 `GridColumn[]`(`{ field, type, options, computed, expr, … }`),不是字段名投影,所以 view 的 `columns` 在这里是**形状不对**而不仅是「更宽」,这一条已在 #7121 的实现里写清。)\n\n## 后果\n\n#7121 已把 `dataSource.object` 接到这两块(gantt/map/pivot 连 filter/sort 一起接了),于是现在:\n\n- 在 timeline 或 line_items 上写 `dataSource: { object, view: 'hot' }`:view **名字会被校验**(写错报配置错误,不静默回退),但 view 解析成功后它的 filter/sort 被丢弃 —— 渲染出的行比作者引用的 view 更宽。\n- 在 timeline 上写 `dataSource: { object, filter, sort, limit }`:三个键同样被丢弃。#7121 **刻意不把它们写到没有读点的 schema 键上**(那只是把「声明了却被丢弃」往下挪一层),并把缺口如实写进 `content/docs/guide/data-source.md` 的逐 block 覆盖表 —— 本单就是那张表里两行 `— no read site` 的跟踪单。\n\n#7121 里对这两条各钉了一条**诚实的反向断言**(确认查询里确实没有 filter/orderby),所以缺口一旦被补上,那两条钉子会翻红,提醒同时更新映射与文档。\n\n## 建议范围(两条路,请维护者定向)\n\n1. **给取数补读点**:timeline 的 `find` 加 `$filter: schema.filter` / `$orderby: convertSortToQueryParams(schema.sort)`(与同仓 gantt/map/calendar 的写法一致),并把固定 `$top: 100` 换成 `schema.limit ?? 100`;line_items 在父关系过滤之外 AND 上 `schema.filter`。补完后 `#7121` 的映射只需各加 `filter: true` / `sort: true` / `limit`,绑定即自动生效。\n2. **或明确豁免**:若判定 timeline 永远只渲染固定窗口、line_items 永远只按父关系取数,就在 spec / 文档层把这两块声明为「不支持 view 的 filter/sort 贡献」,并把 #7121 的覆盖表从「缺口」改写成「设计如此」。\n\n倾向 1:两块都已经是 object-bound 的列表形态,`filter`/`sort` 是这类 block 的常规能力,而「命名了 view 却得到更宽的答案」正是 AI 生成的 metadata 最藏得住的一类错误。\n\n## 去重\n\n- objectstack#5576 —— `list-view` + 公共件(已合)。\n- objectstack#6953 / objectui PR #3969 —— 8 个 block 接线(已合)。\n- objectstack#7118 —— `record:related_list` 的 flat `filter` 无读点(同形,不同 block)。\n- objectstack#7121 —— 剩余 7 块接线(本单的发现来源;接线本身不含补读点)。\n"
+}

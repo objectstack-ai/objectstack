@@ -1,0 +1,34 @@
+{
+  "number": 7000,
+  "kind": "issue",
+  "title": "cli/metadata: `os migrate plan` still creates `.objectstack/metadata/` on a fresh project (the residual half of #6743's dry-run write side effect)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T08:24:08Z",
+  "updated_at": "2026-08-10T01:57:36Z",
+  "closed_at": "2026-08-10T01:57:36Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7000",
+  "body": "**Found while implementing #6743** (PR objectstack-ai/objectstack#6997). Out of that card's scope — #6743's ruling and its pin are scoped to `.objectstack/data/`, the database — so this is filed separately and unassigned.\n\nDuplicate search: `migrate plan` / dry-run / `FileSystemRepository` / `.objectstack/metadata` over open issues and open PRs — 0 hits (other than #6743 / #6997 themselves).\n\n## Observation\n\n#6743 removed the database half of the write side effect: after PR #6997, `os migrate plan` on a never-started project leaves no `.objectstack/data/` at all. The **metadata repository** half is untouched and still runs — the same command, on the same fresh project, still brings a directory tree into existence:\n\n```\n$ ls -d .objectstack\nls: cannot access '.objectstack': No such file or directory\n\n$ os migrate plan          # succeeds, prints the plan\n\n$ find .objectstack -maxdepth 3\n.objectstack\n.objectstack/metadata\n.objectstack/metadata/.objectstack\n.objectstack/metadata/.objectstack/.log\n```\n\nSource: `MetadataPlugin` attaches its `FileSystemRepository` at `repoRoot=<projectRoot>/.objectstack/metadata` during the boot that `bootSchemaStack` performs, and the attach creates the root (the boot log line `[MetadataPlugin] FileSystemRepository attached` names it).\n\n## Why it is the same class as #6743, and why it is nonetheless separate\n\nSame class: a command that declares itself a dry run leaves a write side effect behind, and the existence of `.objectstack/` stops being a usable signal for \"this project has never been started\".\n\nSeparate: it is a different subsystem (metadata repository, not the sqlite driver's open mode), the fix would live in `MetadataPlugin` / the standalone boot rather than in `@objectstack/driver-sql`, and #6743's ruling — including its \"same report, byte for byte\" constraint — reasons only about the database. Fixing it inside #6743 would have been scope expansion past a graded card.\n\n## Severity as observed\n\nLow, and deliberately filed as an observation rather than a defect: what is left behind is an empty repository skeleton plus an empty `.log` directory. No user-visible failure has been traced to it. Recording it so the \"dry run leaves nothing behind\" property is either completed deliberately or closed with a reason, rather than left half-done by accident — #6743 exists precisely because the #3917 deferral looked complete and was not.\n\nNote the boot is genuinely read-only in the sense #3917 established (no DDL, no seed rows); the question is only whether attaching a metadata repository should create its root during a command that will never write metadata.\n\n## Related\n\n- #6743 / PR objectstack-ai/objectstack#6997 — the database half, fixed\n- #3917 — established the defer-DDL path both halves sit on\n"
+}

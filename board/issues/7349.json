@@ -1,0 +1,33 @@
+{
+  "number": 7349,
+  "kind": "pull_request",
+  "title": "test(qa): refresh the approvals checklist's entry paths and cover the two new nav entries",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/m",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-10T07:42:25Z",
+  "updated_at": "2026-08-10T08:12:10Z",
+  "closed_at": "2026-08-10T08:12:09Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-10T08:12:09Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/7349",
+  "body": "Fixes #7331\n\nThe card had two halves: **browser-verify** the #7213 entry convergence, and **refresh** the approvals checklist. The verification half produced no product-code change — it is reported on the issue and in the findings below. This PR is the checklist half only.\n\n## The verification, in one line\n\nBooted `examples/app-showcase` against a `packages/console/dist` built by `pnpm objectui:build` at the pinned objectui SHA `8aad9fd50b16` (dist stamp verified equal to `.objectui-sha`; the served `index.html` requests the freshly built `assets/index-Bn6RZIXn.js`), signed in as a **non-admin** business user, and drove all ten checklist items in the issue body. Nine passed. The tenth — the record deep link — is routing-correct and dead-ends for an unrelated record-visibility reason, filed separately.\n\n**The headline check passed.** #7231's unit pin states in its own docblock that it does not assert `main.tsx` performs the side-effect import — \"the one remaining way the key could be missing at runtime\". It does survive bundling: the built entry chunk carries the registration at module scope, immediately before the app bootstrap.\n\n```\nW({ref:`approvals:inbox`,label:`Approvals Inbox`,source:`@object-ui/console`,component:…})\n```\n\nand the account app's Approvals entry renders the full inbox — tabs, list, drawer, decision actions — for a session whose `GET /api/v1/meta/app` returns `showcase_app` and `account` and **not** `setup`.\n\n## What changes here\n\n**Entry paths refreshed** — `revision` bumped, `history` appended on each:\n\n- `approvals.per-group-signoff`, `approvals.inbox-metadata-actions`, `approvals.viewer-gating-submitter-side` all reached the inbox at the bare `/system/approvals` deep link. That route deliberately still works, so nothing was red — but the items were exercising the deep link instead of the path a user takes. They now open the **account app's Approvals nav entry** (the component route) and say why the other route is not the subject here.\n- `approvals.notification-deep-link` keeps `/system/approvals?request=` as its subject — that is what already-delivered notifications and emails carry — and gains a **route-parity** clause: the same link must open the drawer on both routes, and a component-route-only deep link is spelled out as a FAIL.\n\n**Three new items**, none of which had any coverage:\n\n| id | priority | what it pins |\n|---|---|---|\n| `approvals.account-app-entry` | P0 | the registration survives **bundling** (oracle: `build`, greps the built chunk, not source); a non-admin reaches the full inbox; a decision executes under the component mount; `?request=` parity; the record link keeps the current app segment; zh 待我审批 / 待审批 |\n| `approvals.setup-nav-entry` | P2 | Approvals Inbox leads the Setup group, above the raw `sys_approval_request` grid |\n| `approvals.pending-count-surfaces` | P2 | the bell popover's **unclamped** `total · N notifications + M pending approvals` while the button badge clamps at 9+; M agreeing with Home's card; Home's card landing in an app the user can open |\n\nThe bundling clause is written as an oracle-`build` clause on purpose: a source-only grep is explicitly declared not to satisfy it, since that is exactly the assertion the existing unit pin already makes and the one that cannot see the bundle.\n\n## Findings filed, not patched\n\nPer the card's standing discipline — searched first, filed unassigned, no `pm:queue`:\n\n- **#7344** — no shipped permission set grants `sys_inbox_message`, so the Account app's own **Notifications** entry renders \"You don't have access\" for every non-admin, and the notification half of the bell breakdown is structurally 0 for a business user. Adjacent to this epic (same `Inbox` nav group) but a security-baseline decision, so filed rather than fixed.\n- **#7345** — an approver routed a request can be unable to open the record it concerns; the inbox's record link lands on \"Record not found\". The routing was ruled out first: the href carries the correct app segment, object and id, and the same URL shape renders fine for a record the persona can read. The cause is record-level visibility, and the drawer's payload snapshot means the approval itself is not blocked.\n- **#7347** — `check:platform-checklist` is already red on `main` (the new `qa` liveness ledger from #7255 is neither mapped nor waived in `coverage.json`). Reproduced on a pristine tree before touching anything; deliberately not made green here, because picking between authoring a real `qa` item and waiving it is a QA-ledger scoping call.\n- **objectui#4074** (moved from #7266) — **confirmed**, with the browser evidence the card said it lacked. Both anchors reproduce for a non-admin. The symptom is softer than the \"App not available\" guard it guessed at: the shell renders the target inside the *current* app and only the content is refused. Commented there with the measurement, including the note that a routing fix alone will not clear the empty state while #7344 stands.\n\n## Verification of this change\n\n`node scripts/check-platform-checklist.mjs` reports exactly the one pre-existing `coverage.json · qa` problem described in #7347 — the three new items and the four edited ones validate clean. `node scripts/check-nul-bytes.mjs` OK; `node scripts/check-doc-authoring.mjs` clean.\n\nNo changeset: this touches `docs/qa/` only and releases nothing, so the PR carries `skip-changeset`.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01L9U1G2piXmYrhYQX96XUyv)_"
+}

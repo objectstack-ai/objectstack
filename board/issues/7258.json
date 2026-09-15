@@ -1,0 +1,35 @@
+{
+  "number": 7258,
+  "kind": "issue",
+  "title": "Land the #7225 verification probes as regression pins: one persisted-row hook test per example app (app-crm + app-showcase)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-help"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-10T04:01:53Z",
+  "updated_at": "2026-08-10T07:36:36Z",
+  "closed_at": "2026-08-10T07:36:36Z",
+  "closed_by": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7258",
+  "body": "Follow-up filed by the `domain:services` seat (#6021) on closing #7225 as a false alarm. `domain:*` left to the triage seat (expected: `domain:services`, matching the example-corpus precedent of #7036/#7225).\n\n## Why\n\n#7225 concluded that three shipped example hooks were silent no-ops; measurement proved all three work (the declarative flat-input proxy, `packages/objectql/src/hook-wrappers.ts:446`) and that the \"fix\" would have broken the showcase's public web-to-lead insert. The wrong call was cheap to make because **nothing pins these hooks' behaviour** — a careful reader deriving from three source files plus the (incomplete, see #7254) contract table gets it wrong, and the examples are the reference corpus AI authors copy from. One full dispatch was already spent on the false alarm; the pin stops the next one.\n\n## What\n\nLand the probes the #7225 dev already wrote and measured green, as permanent regression tests:\n\n- `examples/app-crm`: real kernel + real driver, insert/update `opportunity` through the app's real object + registered `OpportunityStageHook`, assert the **persisted row** (closed_won → probability 100, closed_lost → 0, non-closed control untouched, handler sees flat `input.stage` bound). Costs two devDeps on app-crm (`@objectstack/objectql`, `@objectstack/driver-sql`) — flagged, deliberate.\n- `examples/app-showcase`: same shape through the real QuickJS body runner (`hookBodyRunnerFactory`), assert persisted inquiry `status=new`/`source=web` and trimmed task title; keep the in-sandbox shape probe (`ctx.input` is the flat record, `hasData=undefined`) as the documented-surface witness.\n\nTest-only; no `src/` behaviour change in either app. The probe transcripts and wiring are described in the #7225 close-out comment and the dev report quoted there.\n\nRefs: #7225 (falsified card + probes), #7254 (the contract-table documentation gap, separate card), #7036 / PR #7222 (app-todo twin where the hook was genuinely unregistered)."
+}

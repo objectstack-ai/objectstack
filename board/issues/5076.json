@@ -1,0 +1,34 @@
+{
+  "number": 5076,
+  "kind": "issue",
+  "title": "Analytics surfaces resolve select-option labels but never apply the i18n bundle — reports and dashboards show English while lists and forms show the translation",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:queue",
+    "repo:objectui"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T02:20:50Z",
+  "updated_at": "2026-08-10T02:08:40Z",
+  "closed_at": "2026-08-10T02:08:40Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5076",
+  "body": "## Summary\n\nReport blocks and dashboard widgets render a `select` field's option label from the **object's hardcoded `label`**, ignoring the locale bundle. The same field on a list view or a form renders the translated label correctly. The result is one screen showing a value two different ways.\n\n## Evidence\n\n| | stored value | analytics surface shows | object `label` | zh-CN bundle |\n|---|---|---|---|---|\n| `sales_channel` | `domestic` | `Domestic` | `'Domestic'` | `'国内'` |\n| `competitor_name` | `cabot` | `Cabot` | `'Cabot'` | `'卡博特'` |\n| `competitor_name` | `orion` | `Orion Engineered Carbons` | `'Orion Engineered Carbons'` | `'欧励隆'` |\n\nThe decisive row is `orion`: the rendered string `Orion Engineered Carbons` bears no resemblance to the stored value `orion`, but matches the object's English `label` **verbatim**. So the analytics path **does** resolve the option label — it simply does not run it through the i18n bundle before display. (`domestic` → `Domestic` differs only in case, which is why this was initially and wrongly diagnosed as \"the report groups by stored value\".)\n\nSame page, same records: the related list renders 卡博特 / 欧励隆 while the chart legend renders `Cabot` / `Orion Engineered Carbons`. The dashboard's global filter control also renders `Sales Channel:` untranslated.\n\n## Reproduce\n\n1. Declare a `select` field with English option labels and provide zh-CN translations for those options.\n2. Put the field on a list view and as a dimension in a report block or dashboard widget.\n3. Load the console with browser locale `zh-CN`. The list shows Chinese; the report/dashboard shows the object's English labels.\n\n## No authoring knob exists\n\n`DatasetDimension` is exactly `{ name, label, field, type, dateGranularity }`, and `type` is `string | number | boolean | date | lookup` — there is no `select`. The report config carries nothing for this either. So an app cannot opt into translated option labels on these surfaces.\n\n## Downstream impact\n\nThe only app-side fix is to write the option labels in Chinese **in the object**, which then renders Chinese for *every* locale — including the ones where the list side currently resolves correctly. That is a real loss, not a no-op, and it is the workaround we have been forced to take.\n\n## Environment\n\n`@objectstack/*` protocol `^17.0.0-rc.1`, console from `@objectstack/console`, driver-sql on SQLite, browser locale `zh-CN`.\n\nFiled from a downstream app (`hotcrm-heimao`), tracked there as issue #55. Likely related to the view/report/dataset label translation gap we filed separately."
+}

@@ -1,0 +1,33 @@
+{
+  "number": 5418,
+  "kind": "issue",
+  "title": "console: the language menu is a hardcoded list of 10 codes — it never asks the app which locales it actually ships",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "pm:queue",
+    "repo:objectui"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T10:44:16Z",
+  "updated_at": "2026-08-10T02:10:15Z",
+  "closed_at": "2026-08-10T02:10:15Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5418",
+  "body": "Found while implementing #5406 (locale persistence). Filing only; not fixed there — out of that issue's scope.\n\n### What\n\n`packages/app-shell/src/layout/LocaleSwitcher.tsx` builds its menu from a module-level `LANGUAGES` constant: exactly the ten codes `@object-ui/i18n` ships built-in packs for (`en zh ja ko de fr es pt ru ar`). The app's own locale set is never consulted, even though the endpoint exists and works — #5406 confirms `GET /api/v1/i18n/locales` lists the app's locales and that short-code resolution works.\n\nTwo consequences, in opposite directions:\n\n- **Unofferable locales.** An app that ships a locale outside those ten (say `th`, or a regional `pt-BR`) has no way to be selected from the console UI. The bundle can be complete and lint clean; the menu simply has no entry for it.\n- **Phantom locales.** An app that ships only `en` + `zh` still shows all ten. Picking 日本語 gives the console's own chrome in Japanese and everything app-authored in the fallback language — a half-translated UI the app author never opted into.\n\n### Why it is worth writing down now\n\nThe fix for #5406 (PR objectstack-ai/objectui#3376) validates a restored language against \"the locales this provider can produce\" — built-in packs plus `config.resources`. That bound is correct today precisely *because* the switcher offers exactly the built-in ten. If the menu grows to the app's real locale list, the restore validation has to grow with it in the same change, or a user-picked app locale becomes the next thing that does not survive a reload.\n\n### Suggested shape (not a decision)\n\nHave the switcher render the intersection (or the union, with the fallback made visible) of the app's `/i18n/locales` response and what the renderer can resolve, with the current hardcoded list as the offline/no-backend fallback. The label metadata (`中文`, `日本語`, …) has to come from somewhere for codes with no built-in pack — `Intl.DisplayNames` is the obvious candidate.\n\nNo user is currently blocked as far as I can tell: the apps in the repo use built-in codes only. Recording it so triage can grade it rather than leaving it in a PR comment.\n"
+}

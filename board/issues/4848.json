@@ -1,0 +1,35 @@
+{
+  "number": 4848,
+  "kind": "issue",
+  "title": "[决策] SDUI 深链「导航即运行动作」（`?runAction=<actionName>`）要不要升格为 spec 声明的正式契约",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T09:53:04Z",
+  "updated_at": "2026-08-10T05:27:17Z",
+  "closed_at": "2026-08-10T05:27:17Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4848",
+  "body": "跨分片提案：`Part of objectstack-ai/cloud#844`（cloud 分片 PM 转入——落点是 `packages/spec` 契约面 + objectui，两者都不在 cloud 分片权限内，且属契约形状提案，按分类进维护者确认通道）。\n\n## 现状：一条两侧都不认识的隐式跨仓契约\n\ncloud#844 的修复链路是这样工作的：\n\n1. cloud 的 welcome 页元数据把环境列表路由传给 SDUI widget `cloud:onboarding-next`；\n2. objectui 的 `CloudOnboardingNext.tsx` 在「无生产环境」分支拼出 `${envsRoute}?runAction=create_environment` 并跳转；\n3. objectui 的 `EnvironmentListToolbar.tsx`（`useAutoRunCreate`）消费一次这个 query 参数，把**按字面量匹配**到的动作标成 `autoTrigger: true`，落地即弹创建对话框。\n\n也就是说：**一个仓库把另一个仓库的元数据标识符（动作名 `create_environment`）编进了 URL 字符串**。query 参数名、消费时机、动作名字面量，全部只存在于 objectui 的两个组件里；spec 里没有任何对应物；cloud 侧（动作名的所有者）此前对「自己在被这样消费」零声明、零测试。\n\ncloud 侧改动作名或挪路由，**两边都不会红**，CTA 静默退回「只导航」——正好是 cloud#844 报的 bug 本身。cloud PR #1048 已用注释 + pin 测试守住 cloud 拥有的那一半（改名会红），但 objectui 侧改 query 参数名仍然无声。\n\n## 提案：spec 里给「深链到某个已声明动作」一个正式表达\n\n方向（具体形状待设计）：导航目标不再是裸 URL 字符串拼接，而是一个可校验的动作引用——例如导航 action 上声明 `runAction: '<objectName>.<actionName>'`，由 spec schema 校验、publish/graph-lint 阶段对不存在的动作名**直接拒收**。\n\n## 两轴评估\n\n- **项目长远合理性**：现状是典型的隐式契约债——没有任何一侧的类型或 schema 认识这条链路，cloud#1048 的做法（注释 + 消费侧命名 pin 测试）只是把债记下来，没有还。深链自动运行动作是通用能力（不只这一处会用），值得一个声明式表达而不是每处一对私有字符串约定。\n- **防 AI 写元数据犯错**：这条轴上差距更大。AI 改元数据时最容易做的操作就是重命名一个动作；正式契约让「引用了不存在的动作」在 publish 时就红（声明即强制），而现状只能靠人记得读注释、或靠 cloud 侧那条只兜一半的 pin 测试。两轴同向。\n\n## 建议\n\n采纳提案方向，但**不在 cloud#844 里顺手做**——它同时动 spec 与 objectui，应由维护者立项后按 contract-first 拆分（spec 先行，objectui / cloud 各自跟进）。在此之前，cloud#1048 的「消费侧命名文档化 + pin 测试」作为过渡措施已落地。\n\n## 关联\n\ncloud#844、cloud PR #1048、objectui `CloudOnboardingNext.tsx` / `EnvironmentListToolbar.tsx`（均在 cloud pin `a8ad6c0f` 内）。"
+}

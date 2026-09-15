@@ -1,0 +1,35 @@
+{
+  "number": 7174,
+  "kind": "issue",
+  "title": "DeliveryPayload.severity is declared 'info' | 'warning' | 'critical' | string — the trailing `| string` collapses the union, so the closed set enforces nothing",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-help"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-10T01:48:49Z",
+  "updated_at": "2026-08-10T08:51:29Z",
+  "closed_at": "2026-08-10T08:51:29Z",
+  "closed_by": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7174",
+  "body": "Observation-class finding, noticed while closing the `NotifyConfigSchema.severity` gate for #7086 (PR pending). Recorded unassigned. Type-level only — no user-visible failure today, which is why it carries `finding` and no `pm:queue`.\n\n## Anchor\n\n`packages/services/service-messaging/src/outbox.ts`, `DeliveryPayload`:\n\n```ts\n/** Rendered content snapshot carried on the delivery row for dispatch. */\nexport interface DeliveryPayload {\n    title?: string;\n    body?: string;\n    severity?: 'info' | 'warning' | 'critical' | string;\n    actionUrl?: string;\n    [k: string]: unknown;\n}\n```\n\n## The defect\n\n`'info' | 'warning' | 'critical' | string` is **exactly `string`** to TypeScript — a\nliteral union member is absorbed by the wider primitive it is unioned with. The three\nnames therefore contribute nothing but an editor hint; `severity: 'urgent'` type-checks\nhere with no error, and so does `severity: ''`.\n\nThe result is a type that *reads* as the closed vocabulary while enforcing the open one —\nthe same declared-vs-enforced shape as #7086, one layer down and in the type system\nrather than in Zod. It sits in the package that also owns the genuinely closed\ndeclarations, which is what makes it easy to misread:\n\n- `messaging-service.ts:64` — `readonly severity?: 'info' | 'warning' | 'critical';`\n- `channel.ts:40` — `readonly severity?: 'info' | 'warning' | 'critical';`\n- `inbox-message.object.ts:88` — a `Field.select` offering exactly those three\n\nso `DeliveryPayload` is the one member of that family that is silently open.\n\n## Why it matters\n\n`DeliveryPayload` is the rendered snapshot carried on the delivery row. Anything that\nbuilds or mutates one gets no compiler signal when it writes an out-of-vocabulary\nseverity, and the value then reaches `inbox-channel.ts`'s `severity: n.severity ?? 'info'`\nand the `sys_inbox_message.severity` select column, whose options are the three names.\nNothing today is measured to write a bad value — this is a missing guard-rail, not a\nlive bug — but it is the guard-rail that would have made #7086's `'urgent'` visible to\n`tsc` instead of only to a probe.\n\n## Suggested shape, if triage wants it fixed\n\nDrop the `| string` so the union means what it says. If some caller genuinely needs to\ncarry an unvalidated severity through, that is a real decision worth stating explicitly\n(e.g. a named `string & {}` escape or a comment recording the tolerance), not something\nthe current spelling communicates — as written it looks like a closed set and behaves\nlike an open one, which is the worst of both.\n\nWorth checking in the same pass whether other `'a' | 'b' | string` unions exist in the\nservices layer; this one was found by eye, not by a sweep.\n\n## Refs\n\n#7086 (the Zod-side twin, being closed now), #6762 (the describe-claims-closed class)."
+}

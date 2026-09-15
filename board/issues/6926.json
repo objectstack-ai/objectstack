@@ -1,0 +1,35 @@
+{
+  "number": 6926,
+  "kind": "issue",
+  "title": "finding: `FormViewSchema.groups` is declared as \"alias to sections\" but nothing folds it — every consumer reads only `sections`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T04:23:19Z",
+  "updated_at": "2026-08-09T19:46:10Z",
+  "closed_at": "2026-08-09T19:46:10Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6926",
+  "body": "Found while implementing #6601 (which narrows the public-form schema to the fields `sections` declares — that made me check what else can declare fields on a form). Filed, not fixed: the fix belongs at the producer (`packages/spec`), which is outside #6601's lane, and #6601's dispatch explicitly forbade touching `packages/spec`.\n\nGraded observation-class (`finding`, no `pm:queue`): no shipped app authors `groups` today, so nothing a user hits right now. The hazard is authoring-time, and specifically AI-authoring-time.\n\n## What was measured\n\n`packages/spec/src/ui/view.zod.ts:1673-1674` declares both keys on `FormViewSchema`:\n\n```ts\nsections: z.array(FormSectionSchema).optional(), // For simple layout\ngroups: z.array(FormSectionSchema).optional(),   // Legacy support -> alias to sections\n```\n\nThe comment promises an alias. Nothing performs the fold — `FormViewSchema`'s `.superRefine` at :1821 iterates both arrays for the `section.pane` check (so the key is *validated*), and there is no `.transform()` that moves `groups` onto `sections`. Grepping the framework for a consumer of `form.groups`:\n\n- `packages/rest/src/rest-server.ts` — all three public-form routes read `match.form?.sections` only (schema narrowing at :7126, submit whitelist at :7236, lookup `fieldCfg` scan at :7333).\n- `packages/runtime`, `packages/metadata-protocol` — no `.groups` read on a form at all (the `.groups` hits there are navigation trees and `book.groups`, different surfaces).\n- `packages/spec/src/system/i18n-resolver.ts:1802` is the one place that handles it, and only for translation (`next.groups = form.groups.map(translateSection)`), which is what makes the key look alive from a grep.\n\nSo a form authored with `groups:` parses clean, translates, and is then read by nobody.\n\n## Why it matters\n\nThis is the \"accepted but ignored\" shape this repo rejects on principle — the same argument that retired `form.aria` in the #3896 audit close-out (\"an ACCESSIBILITY claim that is merely accepted is false compliance\"). It is worse than a plain inert key because the inline comment actively tells an author the key works: an agent authoring metadata reads `// Legacy support -> alias to sections`, writes `groups`, gets a green parse, and ships a form that renders nothing.\n\nOn the public-form surface specifically it degrades into three separate silent failures at once, which is how I found it. For a `groups`-authored public form:\n\n- `GET /forms/:slug` publishes an empty schema after #6601 (before #6601 it published the whole object, i.e. it hit exactly the bug #6601 fixes);\n- `POST /forms/:slug/submit` has an empty `allowedFields` and therefore accepts every non-anchor key (see #6920);\n- `GET /forms/:slug/lookup/:field` finds no `fieldCfg` and answers `403 LOOKUP_NOT_PUBLIC` for every field.\n\n## Suggested disposition\n\nContract-first: fix at the producer, not by teaching each consumer a second key to read. Two options, in the ADR-0049 enforce-or-remove frame:\n\n- **Enforce** — fold `groups` onto `sections` in a `.transform()` on `FormViewSchema` so the declared alias becomes true for every consumer at once (this is what `aliases:` already does for scalar renames elsewhere in the file; a whole-array alias just needs the transform). Cheapest way to make the comment honest.\n- **Remove** — retire `groups` via the ADR-0087 registry with a `retiredKey` message pointing at `sections`, the way `form.aria` went. Defensible if the liveness ledger says no authored metadata uses it, which is what my grep suggests.\n\nI have no evidence of business pull for `groups` as an authoring spelling, so removal looks like the smaller surface — but the ledger check and the ADR-0087 conversion are the retirement playbook's, not mine to assert from a grep.\n\n⛔ Whichever is chosen, do NOT fix this by adding `?? match.form?.groups` in `rest-server.ts`. A lenient consumer is where AI-authored metadata errors hide, and it would leave the other consumers still blind.\n\nRelated: #6601 (found during), #6920 (the submit-side degeneration this compounds), #3896 (the `form.aria` retirement precedent), ADR-0049, ADR-0087.\n"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 6931,
+  "kind": "issue",
+  "title": "finding: the ADR-0010 envelope-declaration gate cannot see `UNREGISTERED_KIND_SCHEMAS` — the blind spot that let #6362 survive #6245",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T04:28:16Z",
+  "updated_at": "2026-08-09T19:09:42Z",
+  "closed_at": "2026-08-09T19:09:42Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6931",
+  "body": "Split out of #6362 (PR #6900). Recording only — not claimed, not queued.\n\n## The observation\n\n`metadata-type-schemas.test.ts` holds the ADR-0010 invariant that every metadata\ntype either declares `...MetadataProtectionFields` or is named on an explicit\ndebt list. `UNDECLARED_ENVELOPE` is currently **empty**, and its own comment\ncalls that \"the end state\", so the gate reads as total coverage.\n\nIt is not. The gate iterates `listMetadataTypeSchemaTypes()`, which returns\n`Object.keys(BUILTIN_METADATA_TYPE_SCHEMAS)` plus runtime extras — and\ndeliberately **not** `UNREGISTERED_KIND_SCHEMAS`. That exclusion is documented\nand intentional (the trailing comment in `metadata-type-schemas.ts` explains\nthat enrolling `webhook` / `connector` / `sharing_rule` there would claim a KIND\nstatus #6245 was careful not to grant, leaving #2657's B/C decision open).\n\nThe side effect was not intended, though: those three names are bound as real\nparse doors — #6245 wired them to `PUT /api/v1/meta/:type/:name` — while the\ninvariant that exists to catch \"declares no envelope\" never runs over them.\n\n## Evidence that this is the actual cause, not a theory\n\n`connector` sat in exactly that gap and the gate stayed green throughout:\n\n- `sharing_rule` was `.strict()`, so its undeclared envelope produced a hard 422\n  and #6245 caught it by hitting the failure, not by the gate reporting it.\n- `connector` is a plain `z.object`, so it silently stripped all seven keys —\n  no 422, no gate finding, nothing. It needed a **separate hand-written card**\n  (#6362) and a hand-written probe to surface, roughly a day later.\n- `webhook` happened to be fine, but only because #4001 batch 11 had given it\n  the spread for unrelated reasons. Nothing verified that; #6362 had to measure\n  it by hand to find out, which is precisely what a gate is for.\n\nSo all three were judged one at a time, by hand, for a property the repo already\nhas an automated structural walker for.\n\n## Why this is observation-class, not a defect\n\nNothing a user hits today: as of PR #6900 all three bound kinds declare the\nenvelope, so the gap is currently empty of bugs. The exposure is prospective —\na **fourth** entry added to `UNREGISTERED_KIND_SCHEMAS` inherits the same\nsilence, and the next one may be non-strict too, in which case the failure is\nagain a silent strip rather than a 422.\n\n## Possible directions (deliberately not chosen here)\n\n1. Give the existing suite a second `it.each` over `Object.keys(UNREGISTERED_KIND_SCHEMAS)`\n   asserting only the envelope-declaration property — **without** enrolling them\n   in `listMetadataTypeSchemaTypes()`, so none of the other KIND obligations\n   (create seeds, `MetadataTypeSchema` membership, the campaign count) attach and\n   #2657 stays unprejudged.\n2. Export the bound-kind names so the walk derives the set rather than\n   hand-listing it.\n3. Leave as-is and rely on review, if the set is expected to stay at three.\n\nDirection 1 looks like the cheap one and appears to preserve every boundary\n#6245 drew, but it is a decision about a contract surface's coverage rules, so\nit should be triaged rather than assumed.\n\nRefs: #6362 / PR #6900 (connector, the silent-strip case), #6245 (bound the three\ndoors; fixed sharing_rule's 422 case), #4001 batch 11 (webhook's spread),\n#2657 (the open B/C kind-promotion decision), ADR-0010.\n"
+}

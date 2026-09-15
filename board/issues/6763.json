@@ -1,0 +1,34 @@
+{
+  "number": 6763,
+  "kind": "issue",
+  "title": "No gate reads spec TSDoc `@example` strings, so an expression example that stops compiling is invisible — #6641 was found by hand",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-help"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T14:29:13Z",
+  "updated_at": "2026-08-10T02:40:09Z",
+  "closed_at": "2026-08-10T02:40:09Z",
+  "closed_by": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6763",
+  "body": "Out-of-scope finding from #6641 / PR #6729. Recorded per Prime Directive #10, unassigned.\n\n## Observation\n\n#6641 was a `@example` in `packages/spec` that did not compile, and shipped that way. The reason it survived is structural rather than accidental: **a TSDoc `@example` is not reachable from any import, so no ordinary test can go red on it, and no gate reads it.**\n\nMeasured while fixing #6641 (`origin/main` @ `cfeb9a071`):\n\n- `check:doc-formula-expressions` (`packages/lint`) does judge expression examples against `@objectstack/formula` — but its scope is `content/docs/**` TypeScript blocks (`22 record-scoped formula example(s) across 378 files / 1397 TS blocks` on a green run). It never reads `packages/spec/src/**` TSDoc.\n- `check:docs` / `gen:docs` render a property's `.describe()` and the module-level docblock into `content/docs/references/**`, never a property's `@example` — so a wrong `@example` does not even reach the docs corpus the gate above scans. It ships only in the published bundle's retained comments and in the schema source an author reads.\n\nSo the class is: **any `@example` in a spec schema whose value is an expression the runtime must compile.** #6641 was one instance, found by hand during #6132's reachability measurement.\n\n## What PR #6729 already covers\n\nThat PR pins the RLS pair specifically — every `@example` on `RowLevelSecurityPolicySchema`'s `using` and `check` is read out of the source and pushed through the ADR-0056 D4 shape gate, with an anti-vacuity guard. It is deliberately scoped to that one file, because that was the card's surface.\n\n## What is not covered, and is unmeasured\n\nWhether other spec schemas carry expression-valued `@example`s in the same shape — candidates worth enumerating rather than assuming: sharing-rule `condition`, validation-rule `condition`, formula fields, flow-node expressions. **I did not measure these**, so this issue claims a coverage gap, not a second live defect. The honest framing is: the class had no guard until #6729 added a file-local one, and nobody has checked the rest.\n\n## Two shapes triage could pick from\n\n1. **Generalize the pin** — one test that enumerates expression-valued `@example`s across `packages/spec/src/**` and compiles each. Needs a way to know which `@example`s are expressions (and in which dialect), which is the real design question: guessing by regex would either miss cases or false-red on prose examples.\n2. **Extend `check:doc-formula-expressions`' scope** to spec TSDoc, reusing the admission logic it already has for deciding what is a record-scoped formula and what is not (its self-test already distinguishes cron `expression`, flattened decision branches, and validation-rule `condition` slots — that judgement is the hard part and it already exists).\n\nOption 2 looks cheaper and reuses the existing admission rules rather than inventing a second set; option 1 is more targeted. Not adjudicating — recording both so the decision is made once with the trade-off visible.\n\n## Related\n\n#6641 / PR #6729 (the instance), ADR-0056 D4, ADR-0058 D1."
+}

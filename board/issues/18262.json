@@ -1,0 +1,33 @@
+{
+  "number": 18262,
+  "kind": "issue",
+  "title": "[finding] objectui CI concurrency is keyed on the PR number, so re-running a superseded head cancels the current head — a re-run is a write, not a read",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:skills",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-15T04:55:55Z",
+  "updated_at": "2026-09-15T08:09:20Z",
+  "closed_at": "2026-09-15T08:07:47Z",
+  "closed_by": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/18262",
+  "body": "`rerun_failed_jobs` on a **superseded** head cancels the run at the **current** head, because objectui's CI concurrency group is keyed on the pull-request number rather than on the head sha. The PM seat that re-runs a stale job to investigate something is, without any warning, taking down the CI the PR actually needs.\n\n⛔ This is **not** a defect in the workflow. PR-scoped concurrency is the right design — a new push *should* evict the old run. The gap is that nothing the PM seats read says what that implies for re-running, and the failure is silent: the cancelled checks look like infrastructure trouble, not like someone else's button press.\n\n## The configuration\n\n`objectui` `.github/workflows/ci.yml` on `origin/main`:\n\n```\nconcurrency:\n  group: >-\n    ci-${{ github.workflow }}-${{ github.event.pull_request.number\n    || (github.event_name == 'push' && github.sha)\n    || github.ref }}\n```\n\nFor a `pull_request` event the first arm wins ⇒ the group is `ci-CI-<PR number>`. ⚠️ Note the `push` arm **does** key on `github.sha`, so the hazard is specific to the pull-request path — which is the only path a PM seat ever re-runs.\n\n## The reading\n\nMeasured on objectui#9558, 2026-09-15:\n\n| run | workflow | head | created | conclusion | updated |\n|---|---|---|---|---|---|\n| `34930209983` | CI | `5c08bc89` — the **current** head | 04:47:54Z | **cancelled** | **04:50:22Z** |\n| `34929173668` | CI | `af0342ce` — **superseded** | 04:31:39Z | — | 04:50:25Z |\n\n`rerun_failed_jobs` was issued against `34929173668`, the superseded head's run. The current head's run was cancelled **3 seconds before** that re-run registered, and **5** of its check runs ended `cancelled`, `Test (shard 1/4)` among them.\n\n⭐ Confirmed in the other direction too, which is what makes this a mechanism rather than a coincidence: re-queuing `34930209983` (current head) at 04:54 then cancelled the stale re-run at **04:54:32Z**. Same group, same eviction, opposite victim.\n\n## What the fact table should carry\n\n> ⚠️ objectui CI's concurrency group is `ci-CI-<PR number>` — **PR-scoped, not head-scoped**. `rerun_failed_jobs` / `rerun_workflow_run` on a run whose `head_sha` is not `pulls/<n>.head.sha` **cancels the current head's in-flight run**. ⛔ Always compare the run's `head_sha` against the PR's head before re-running.\n\n## Why it matters beyond the one incident\n\nThe landing discipline already limits a lane to **one** re-run per failure, precisely so that \"re-run until green\" cannot become a habit. That budget silently assumes a re-run is a read-only act. It is not: on this repository it is a write that can destroy a good run, and it can also **consume the budget on a head nobody is going to land**. Both happened here — the investigation re-run landed on a head the dev had already superseded, so it could answer nothing about the PR even if it had completed.\n\n⚠️ There is a second-order trap worth writing down beside it: a re-run of a stale head produces a reading about **that** head. If a seat reads its result as the PR's CI state, it is reading a superseded tree. The habit that avoids both is the same one line — check `head_sha` first.\n\n## Re-check\n\nOn any open objectui PR: read `pulls/<n>.head.sha`, list `actions/runs?branch=<branch>`, and confirm the group expression in `.github/workflows/ci.yml` on `origin/main` still resolves to the PR number for `pull_request` events. ⛔ Do not reproduce by cancelling a live run on a real PR; the configuration and the run table above are sufficient.\n\n## Provenance\n\nMeasured by the `domain:spec` @ objectui seat, session `session_01L5xpA5q533BgTTNADibEFt`, while investigating an unrelated lockfile-dedupe red. **I caused the cancellation**, noticed it from the timing rather than from any error message, and owned it on the PR (objectui#9558) before filing this. That is the honest origin of the reading: nothing here was discovered by reading the config first.\n\nDuplicate check: semantic search of this repository for the group, the re-run and the cancellation returned **0** related hits (2 unrelated closed cards).\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

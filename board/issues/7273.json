@@ -1,0 +1,35 @@
+{
+  "number": 7273,
+  "kind": "pull_request",
+  "title": "feat(lint): widen flow-trigger-unroutable to the omission shape (#7215)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-10T04:21:50Z",
+  "updated_at": "2026-08-10T05:43:09Z",
+  "closed_at": "2026-08-10T05:43:08Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": "2026-08-10T05:43:08Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/7273",
+  "body": "Fixes #7215\n\n## What changed\n\n`flow-trigger-unroutable` (#6637) previously fired only on the **contradiction** shape:\n`config.triggerType` present but the engine routes it to no trigger (`triggerType: 'onCreate'`).\n\nPer #7215's maintainer-delegated ruling (disposition 1, \"take it now\" — see the RULED comment on\nthat issue), this PR widens the same rule to also fire on the **omission** shape: `type:\n'record_change'` with no `triggerType` key at all. Both shapes fall through\n`AutomationEngine.resolveTriggerBinding`'s same branch chain to `undefined`, and both are equally\ninvisible to `getTriggerBindingAudit` (which skips a flow with no resolved binding as \"manual —\nnothing to bind\"). They are two spellings of one defect, so they share the same rule id and the\nsame `error` severity rather than getting a new id.\n\nThe rule's other exclusion is unchanged: a `record_change` flow that declares something the engine\n*does* route (`config.schedule`, `triggerType: 'api'`, a `config.timeRelative` object) still binds\nand fires — on the wrong trigger's terms — and is a different defect this rule does not speak to.\n\n## Corpus count (measured before landing, per the dispatch's stop condition)\n\nRan the widened criterion over every `type: 'record_change'` flow definition found by content\nsearch across `examples/`, `apps/`, and `packages/` (excluding test fixtures and the CLI's\nscaffold-string template, which produces a different, non-`record_change` shape). The tree has\nexactly **two** real `record_change` flows:\n\n- `examples/app-todo/src/flows/task.flow.ts` — `TaskCompletionFlow`, repaired by #7039 to declare\n  `triggerType: 'record-after-update'`.\n- `examples/app-showcase/src/automation/flows/index.ts` — `UrgentTaskAlertFlow`, declares\n  `triggerType: 'record-after-write'`.\n\nBoth already declare an explicit, valid `triggerType`. Verified programmatically (not just by\ngrep) by importing both flow modules and running `validateFlowTriggerReadiness` against them\ndirectly:\n\n```\nTOTAL_OMISSION_INSTANCES=0\n```\n\n**Omission instances found: 0.** The widening ships green on the whole tree — no baseline entry,\nno example-app churn, no new vocabulary.\n\n## Test changes\n\n`validate-flow-trigger-readiness.test.ts` contained a scope-boundary pin\n(`an ABSENT triggerType — dead too, deliberately deferred (#6637 corpus)`) whose own comment said\nwidening \"is a deliberate edit that has to delete this test, not a side effect.\" That test is\ndeleted, per #7215, and replaced with:\n\n- a test that the omission shape now fires (`FLOW_TRIGGER_UNROUTABLE`, `error`, same path shape as\n  the contradiction case),\n- a test that the rule id/severity/path are identical whether the token is wrong or missing,\n- a test that an omission with a routed sibling key (`config.schedule` / `config.timeRelative`)\n  still stays silent — the \"mis-bound, not un-bound\" exclusion applies to the omission shape too,\n- a test that non-`record_change` flow types (`autolaunched`, `screen`, `schedule`, `api`, no\n  `type` at all) stay silent even with `triggerType` absent — enumerated from the code's exact\n  `flow.type === 'record_change'` guard, not guessed.\n\nAll of the contradiction shape's pre-existing tests are untouched and still pass.\n\nProvenance comments were updated in both files (the rule's own scope-boundary comment above the\n1f block, and the exported `FLOW_TRIGGER_UNROUTABLE` JSDoc) to record the widening's history —\nkept in historical form per the PR #7172 discipline, with the forward-pointer to \"the still-open\nwidening question\" now resolved to #7215 rather than deleted outright.\n\n## Reverse verification\n\nTemporarily restored the pre-widening rule file (`git show origin/main:… >`, no `git stash`) and\nre-ran the new tests against it: all 4 new omission-shape tests went **red**, while the other 61\npre-existing tests (contradiction shape, severity map, etc.) stayed **green** — confirming the new\ntests are non-vacuous and the existing scope is untouched. Restored the widened file and re-ran;\nback to 65/65 green.\n\n## Verification\n\n```\npnpm --filter '@objectstack/lint^...' build          # deps (spec, formula) — OK\ncd packages/lint && npx vitest run                    # 69 files, 1808 passed\ncd packages/lint && npx tsc --noEmit                   # clean\ncd packages/cli && npx vitest run test/authoring-rule-command-parity.test.ts test/doctor-refs.test.ts\n                                                        # 2 files, 19 passed\nnode scripts/check-nul-bytes.mjs                       # OK\n```\n\n## Changeset\n\nAdded `.changeset/lint-flow-trigger-unroutable-omission.md` (`@objectstack/lint`: minor) — a\nfunctional widening of a published lint rule's gating criterion, precedent PR #7214.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01F8q5J1MQyocgtNspb15fSn)_"
+}

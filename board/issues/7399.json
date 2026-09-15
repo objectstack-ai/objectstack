@@ -1,0 +1,30 @@
+{
+  "number": 7399,
+  "kind": "issue",
+  "title": "QA run · records-forms (api subset) · a86db175 · 2026-08-10 · 2/2 PASS",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-10T09:42:19Z",
+  "updated_at": "2026-08-10T10:28:24Z",
+  "closed_at": "2026-08-10T10:28:24Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7399",
+  "body": "**Selector** `area:records-forms` → the **`api`-surface subset (2 of 32 runnable items)** — the part that runs without the vendored console dist. **Result: ✅ 2/2 PASS.**\n\n_Partial-area run per the one-issue-per-run model (results stay out of the repo tree; convention label `qa-run`). The other **30 browser/mixed items are NOT-RUN** here — they need the vendored console dist built + real Chromium driving (a separate, larger sweep). **1 item blocked** (fixture): `records-forms.import-job-undo-cancel`._\n\n### Environment\n| | |\n|---|---|\n| framework | `a86db175` — branch `claude/platform-test-checklist-ocwugl` (PR #7304) |\n| app · driver | showcase · SqlDriver(better-sqlite3) · db `file:/tmp/qa-rf-run/data.db` (isolated, fresh) · port 3468 |\n| persona | admin@objectos.ai · when 2026-08-10T09:39Z |\n\n### Item verdicts\n| item | rev | verdict | notes |\n|---|---|---|---|\n| `records-forms.validation-rule-type-matrix` (P1) | 1 | ✅ pass | 4/4 acceptance clauses; negative malformed-CEL sub-case not exercised (no stock fixture) |\n| `records-forms.named-import-mapping` (P2) | 1 | ✅ pass | 3/3 acceptance clauses + negative (no duplicate re-import) |\n\n### validation-rule-type-matrix — evidence\nAll six rule types enforce on the write path with the exact ledgered code, each targeting its declared field; **no rejected write persisted** (projects 6→7 = only the happy create); every happy twin landed 2xx.\n\n```\nvariant                         result\ninvalid_initial_state (project) 400  field=status          code=invalid_initial_state\ninvalid_transition (account)    400  field=status          code=invalid_transition\ninvalid_format regex (tax_id)   400  field=tax_id          code=invalid_format\ninvalid_format named-email      400  field=billing_email   code=invalid_format\njson_schema_violation           400  field=support_config  code=json_schema_violation\ninvalid_json (string blob)      400  field=support_config  code=invalid_json\nrule_violation cross_field      400  field=start_date      code=rule_violation\nrule_violation script(budget)   400  field=_record         code=rule_violation\nrule_violation conditional      400  field=_record         code=rule_violation\nhappy twins (×5)                2xx  (planned create / valid tax_id / valid email / valid support_config / legal prospect→active)\n```\n\n### named-import-mapping — evidence\n- **Mapped, not positional:** `Full Name → name`, `Channel` value-mapped `Webform → website` / `Partner Referral → referral`, `E-mail → email`, `Company → company`. Read-back: `name=\"Jane Doe\" source=\"website\"`, `name=\"John Roe\" source=\"referral\"`.\n- **Idempotent:** import #1 `created:2` (inquiry 3→5); import #2 same file → count still **5**, no duplicates (upsert on `email`).\n- **Unknown mapping fails loudly:** `mappingName:\"no_such_mapping\"` → `404 MAPPING_NOT_FOUND` — _\"No mapping artifact named \\\"no_such_mapping\\\" is registered\"_ (no silent positional fallback).\n\n### Not-run in this run (need a separate browser sweep)\n30 items on `browser`/`mixed` surfaces (e.g. `crud-roundtrip` P0, `field-type-matrix`, `list-view-capabilities`, `object-hook-lifecycle`, `cascading-options`, …) require the vendored console dist + Chromium driving. 1 blocked (`import-job-undo-cancel`, fixture).\n\n### Screenshots\nNone — both items are `api` oracles (server truth); report is text-only per RUNNER.md."
+}

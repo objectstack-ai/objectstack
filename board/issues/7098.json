@@ -1,0 +1,32 @@
+{
+  "number": 7098,
+  "kind": "issue",
+  "title": "[finding] the ADR-0032 §1c hydration retry re-interprets sub-comparisons that already evaluated cleanly — `hydrateOverloadStrings`'s docblock claims it cannot",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T15:06:58Z",
+  "updated_at": "2026-08-10T02:19:51Z",
+  "closed_at": "2026-08-10T02:19:51Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7098",
+  "body": "Out-of-scope finding measured while pinning #6679 / PR #7097. Recorded per Prime Directive #10, unassigned. That card was scoped to the retry's **trigger**; this is about what the retry **does** once armed, so it was deliberately not folded in.\n\n## The fact\n\n`packages/formula/src/cel-engine.ts`, the docblock on `hydrateOverloadStrings`:\n\n> Used only on the `isNumericOverloadError` retry path, so it can **never change a comparison that already evaluated cleanly** — it only rescues one that already faulted.\n\nThat claim does not hold. The retry knows only that the **whole expression** faulted, not that each sub-comparison did. `hydrateOverloadStrings` then rewrites the entire scope and the entire expression is re-evaluated, so a sub-comparison that evaluated cleanly in evaluation 1 can be re-interpreted against the hydrated value.\n\nMeasured on `origin/main` @ `4e6ca32`, through `celEngine.evaluate`, with a **genuine** cel-js `no_such_overload` arming the retry (i.e. this reproduces after PR #7097 lands):\n\n```text\nrecord.n >= 4 && record.s == \"5.0\"\n  record = { n: \"7\", s: \"5.0\" }        ->  { ok: true, value: false }\n\nrecord.n >= 4 ? record.s == \"5.0\" : false\n  record = { n: \"7\", s: \"5.0\" }        ->  { ok: true, value: false }\n```\n\nWalkthrough of the first: evaluation 1 faults on `record.n >= 4` (`dyn<string> >= int`) — the fault ADR-0032 §1c exists for. The retry hydrates, and `record.n` correctly becomes `7`, so `7 >= 4` is true. But `record.s` was also a numeric string and it became `5` too, so `record.s == \"5.0\"` — a string equality the author wrote deliberately, which was **true** in evaluation 1 — becomes `5 == \"5.0\"`, which CEL answers `false` across types. The expression returns `false`.\n\nThe hydration is unconditional and scope-wide; only the operand that faulted needed it.\n\n## Impact\n\nA string-equality or `in`-style test against a numeric-looking string silently flips to `false` whenever *some other* field in the same expression triggers §1c. `Field.rating` → `\"5.0\"`, `Field.currency` → `\"250000.00\"`, and `Field.percent` are exactly the fields that both trip §1c and get compared as strings, so the two halves of the hazard are drawn from the same pool. Flow conditions and RLS predicates are where compound expressions of this shape live.\n\nNo production report is attached to this and none is claimed — the trigger is measured, the frequency is not.\n\n## Class\n\nObservation-class with a demonstrated wrong value, filed for triage to grade. Two shapes are plausible if promoted and they are quite different in cost, so the grading should probably decide between them rather than inherit one:\n\n1. **Narrow the hydration to the operands that faulted** — correct, and much more than a three-line change: the fault carries the operand types in its message, not a path into the scope.\n2. **Correct the docblock** and accept the behaviour as the documented price of §1c — cheap, and honest, but leaves the wrong value.\n\n## Related\n\n#6679 / PR #7097 (the trigger side of the same retry — narrows *when* it arms, not *what it rewrites*; this reproduces independently of it). #1530 / #1534 (why the retry exists). ADR-0032 §1c.\n"
+}

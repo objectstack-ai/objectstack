@@ -1,0 +1,36 @@
+{
+  "number": 7130,
+  "kind": "issue",
+  "title": "finding: `permission.rowLevelSecurity.priority` is a retiredKey tombstone, but objectui's PermissionAdvancedFacets still types it and seeds `priority: 0` on every newly added RLS policy",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched",
+    "repo:objectui",
+    "target:v17"
+  ],
+  "assignees": [
+    "os-help"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T19:13:16Z",
+  "updated_at": "2026-08-10T02:43:14Z",
+  "closed_at": "2026-08-10T02:43:14Z",
+  "closed_by": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7130",
+  "body": "Observation-class finding from the axis-③ liveness audit (ledger claims vs measured objectui readers). Filed unassigned for triage; **ledger/tombstone verdict vs measured objectui producer disagree — this card does not prescribe which side is right** (acknowledging the producer in the ledger row vs dropping the seed/type in the facets is triage's fork).\n\n## Audited revisions (E24)\n\n- objectstack `origin/main` @ `4ac12ef4cfe4a1925fb7e950c56d7aff0bbc5381`\n- objectui `origin/main` @ `5bfaabde05c3876c9604a2aa47f4822f9e6de8b5`\n\nBoth read via `git fetch` + `git archive` of `origin/main`, not working trees.\n\n## The ledger claim\n\n`packages/spec/liveness/permission.json` → `props.rowLevelSecurity.children.priority` (`status: \"dead\"`, `verifiedAt: \"2026-07-30\"`):\n\n> evidence: \"packages/spec/src/security/rls.zod.ts (retiredKey tombstone — **authored values REJECT with the prescription**; z.input types the key never)\"\n> note: \"REMOVED 2026-07-30 … Not merely unimplemented: under OR-combination the promised 'conflict resolution' semantics cannot exist, so it went straight to the #3715/#3950 remove disposition inside the v17 breaking window.\"\n\n## Measured reality at objectui @5bfaabd\n\n`packages/app-shell/src/views/metadata-admin/PermissionAdvancedFacets.tsx`:\n\n- `:49` — the local policy shape still carries the key:\n\n```ts\ninterface RlsPolicy {\n  name?: string;\n  object?: string;\n  operation?: string;\n  using?: string;\n  check?: string;\n  enabled?: boolean;\n  priority?: number;\n}\n```\n\n- `:368` — the \"Add policy\" button **seeds it on every new policy**:\n\n```ts\nsetPolicies([\n  ...policies,\n  { name: '', object: '*', operation: 'all', using: '', enabled: true, priority: 0 },\n])\n```\n\n- `:30-39` docblock says the facets are \"persisted by the editor's existing whole-record Save\" and that \"Shapes mirror the framework spec (sampled from live data): RLS policies `{name,object,operation,using,check,enabled,priority}`\" — a mirror sampled before the 2026-07-30 removal. No `priority` strip was found on the facets' save path (grep for `priority` in the file yields only the three sites above; a scrub elsewhere on the save pipeline was not measured).\n\n## Why it matters\n\nThe tombstone's contract is \"authored values REJECT\". The Studio facets author the key on every policy added through the UI, so a permission saved after using the structured RLS editor carries a parse-rejected key. This is the same producer/tombstone shape as the axis-③ specimen objectui#3901, but on the write path rather than a dormant read.\n\n## Dedup\n\n- Org-wide open-issue searches for `rowLevelSecurity priority` and `PermissionAdvancedFacets` return nothing.\n- The ledger's own 2026-07-30 correction pass looked at these facets (the sibling `rls.label` row cites \"PermissionAdvancedFacets edits policies\") but recorded no verdict on the `priority: 0` seed.\n- objectui#3901 is a different key/file; not a dup.\n\n## Suggested lane\n\nCross-lane: spec/security ledger row + objectui metadata-admin (Studio) editor.\n\nProvenance: cross-repo read-only audit, session https://claude.ai/code/session_018ffcE95NaMJcL9XJ9VDYgk"
+}

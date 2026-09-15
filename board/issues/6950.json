@@ -1,0 +1,33 @@
+{
+  "number": 6950,
+  "kind": "issue",
+  "title": "Finding: a `record:highlights` chip clips multi-element cell renderers with NO ellipsis (the residue of #5066)",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "finding",
+    "repo:objectui"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T06:13:43Z",
+  "updated_at": "2026-08-10T02:14:17Z",
+  "closed_at": "2026-08-10T02:14:17Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6950",
+  "body": "## What this is\n\nObservation-class finding split out while fixing #5066 (objectui PR for the percent renderer). Filed unassigned, no `pm:queue` — nothing here is known to be hit by a user today, and the one instance that WAS hit is fixed by #5066.\n\n## The mechanism #5066 fixed only one instance of\n\n`HeaderHighlight` (objectui `packages/plugin-detail/src/HeaderHighlight.tsx`) wraps every cell renderer's output in a single clipping span:\n\n```\nblock min-w-0 truncate text-sm font-semibold\n```\n\n`truncate` is `overflow:hidden` + `text-overflow:ellipsis` + `whitespace-nowrap`. The ellipsis half only draws for text in the block's own inline formatting context. When the renderer returns a **block-level flex row** instead of text, an overflowing flex item is simply cut — no ellipsis, and nothing in the accessible name. #5066 measured exactly that (79px clip box, 32px text node, 25px overflow, `33%` reading as `3`), so the \"clips silently\" half of the mechanism is empirical, not inferred.\n\n#5066 fixes the percent renderer from the renderer side: the number gets shrink priority and the decorative bar shrinks away. It deliberately did **not** take that issue's third suggested route (make the chip itself tolerant of renderers that are not single-line text, or measure before clipping), so the chip-side mechanism is untouched and still applies to every other multi-element renderer.\n\n## Candidates, and how far the analysis actually goes\n\nClass-level reading of `packages/fields/src/index.tsx` only — **no browser measurement**, because the container this ran in has no Chromium binary. So treat the list as leads, not verdicts:\n\n- `GeolocationCellRenderer` — an `inline-flex` row: a 14px `MapPin` plus text like `31.2304, 121.4737` (~110px). In a chip squeezed toward `min-w-[7rem]` (~72px of content) the tail goes. Because the text sits inside the atomic inline-flex box rather than the chip's own inline context, no partial ellipsis is expected.\n- `ColorSwatchCellRenderer` — same shape, 14px swatch plus a 7-char hex. Marginal (~64px), probably fits; listed for completeness.\n- The percent renderer's own floor after #5066: below roughly 40px of content the bar has collapsed to nothing and the number starts clipping like any other single-line cell. That floor is intrinsic to a self-contained renderer fix — the chip's width is a function of how many chips the record has, so the strip's `@container` cannot see it.\n\nRenderers whose text carries its own `truncate` / `min-w-0` (lookup, user, file, select-dot — the objectui#3466 family) are NOT affected: the ellipsis draws inside the label.\n\n## If someone picks this up\n\nTwo shapes, both objectui-only:\n\n1. Chip-side: stop putting a bare `truncate` around arbitrary renderer output — e.g. keep the clip but let the renderer opt into its own overflow handling, so a multi-element row is responsible for the ellipsis it can actually draw.\n2. Renderer-side, per renderer: give the value text `min-w-0 truncate` so it ellipsizes in place (the #3466 convention), which is the cheap local version.\n\nWorth deciding once at the chip, rather than re-litigating per renderer as each one turns up in a highlights strip.\n\nVerification note for whoever takes it: a DOM-only probe reports this surface healthy — the DOM always carries the full value. It needs `getBoundingClientRect()` plus a screenshot, the way #5066 was measured.\n"
+}

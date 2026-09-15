@@ -1,0 +1,32 @@
+{
+  "number": 7393,
+  "kind": "pull_request",
+  "title": "docs(spec): document the declarative flat-record surface on the HookContext.input contract table (#7254)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "labels": [
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-10T09:09:34Z",
+  "updated_at": "2026-08-10T10:03:20Z",
+  "closed_at": "2026-08-10T10:03:18Z",
+  "closed_by": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "merged_at": "2026-08-10T10:03:18Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/7393",
+  "body": "Fixes #7254\n\n## What\n\nThe contract table on `HookContextSchema.input` (`packages/spec/src/data/hook.zod.ts`) documented exactly one shape — the raw envelope the engine builds — while addressing readers who only ever meet the other surface. This adds the declarative surface to the same table, as its own rows, and reframes the existing rows as the `engine.registerHook` view rather than the default.\n\n**Prose only.** No behaviour change, no proxy change, no convergence proposal. The legal metadata set is byte-identical before and after (`domain:spec-surface`). `packages/objectql/src/hook-input-shape-contract.test.ts` — which pins the RAW envelope — is untouched, as required.\n\n## The three facts the table now states\n\n| surface | `input.field` | `input.data.field` |\n| --- | --- | --- |\n| raw `engine.registerHook` handler | not the record | the record |\n| declarative code `handler` | **the record** | also works (proxy passes `data` through) |\n| declarative sandboxed `body` | **the record** | **TypeError** — no `data` key at all |\n\nSo there is no single spelling that works everywhere, and the table now says which is correct where.\n\n## Verified against origin/main\n\nMechanism line positions re-verified (all unmoved): `installFlatInput` at `hook-wrappers.ts:446` / helper `:502`; `buildSandboxContext` at `body-runner.ts:314`; `unwrapProxyToPlain` at `:387`.\n\nPremise re-checked before implementing: `grep -i \"declarative|bindHooks|installFlatInput|flat|sandbox|proxy\"` over the file returns nothing in the `input` block — #7101's revision did not add these rows. Premise valid.\n\n**Measured** with a throwaway probe (real `ObjectQL` kernel + `bindHooksToEngine`, deleted before commit; the probe applied `Object.fromEntries(Object.entries(input))`, i.e. exactly what `unwrapProxyToPlain` does to build the body snapshot):\n\n```\nbeforeInsert  snapshotKeys=[status,title]  snapshot.data=undefined  proxy.data=object     proxy.title=\"hello\"\nbeforeUpdate  snapshotKeys=[status]        snapshot.data=undefined  proxy.data=object     proxy.id=string\nbeforeFind    snapshotKeys=[]              snapshot.data=undefined  proxy.data=undefined  proxy.options=object\nbeforeDelete  snapshotKeys=[]              snapshot.data=undefined  proxy.data=undefined  proxy.id=string\nprevious:     beforeUpdate/beforeDelete -> [id,status,title]; absent on insert/find\n```\n\nThat adds three facts beyond the card's table, all now documented: a body sees no `id` / `options` / `ast` either; on `find` and `delete` the whole snapshot is `{}`; and a body that needs the row reads `ctx.previous` (pre-image, `id` included). The `input.data` TypeError itself is already pinned on main by #7258 at `examples/app-showcase/test/hook-body-persisted-writes.test.ts:174` — `KEYS[email,message,name] hasData=undefined` — which this PR cites rather than re-pinning.\n\n## Render-input check: TSDoc, not `.describe()` — no reference-page regen\n\nThe table lives in the **TSDoc block** above the property; the `.describe()` is only `'Mutable input parameters'`. Confirmed empirically rather than assumed:\n\n```\n$ pnpm --filter @objectstack/spec gen:docs\n✅ Generated 231 files\n$ git status --short\n M packages/spec/src/data/hook.zod.ts        # zero artifact drift\n```\n\n`content/docs/references/data/hook.mdx` and `packages/spec/json-schema/**` carry only the describe string, so no consumer surface is reached ⇒ **no changeset**, `skip-changeset` applied.\n\n## Composition with the same-file churn\n\n`#7101` (per-row vs record dispatch) and `#7235` (the `@example` line) both landed on this file. The new rows are additive and orthogonal; three `rows above` back-references in the following paragraphs were narrowed to `envelope rows above` so #5997's and #7101's statements still resolve unambiguously past the inserted block. One clause explicitly composes with #7101's D3: on a bulk write the flat spelling writes the same batch-scoped payload, so it scopes a rewrite no better than `input.data.field` did.\n\n## Gates\n\n```\npnpm --filter @objectstack/spec test        -> 362 files / 9476 tests passed\npnpm --filter @objectstack/spec typecheck   -> OK (incl. check:test-typecheck)\npnpm --filter @objectstack/spec check:docs  -> ✅ 231 generated files in sync\npnpm --filter @objectstack/spec check:liveness -> ✓ green\nnode scripts/check-nul-bytes.mjs            -> OK (6757 files, no raw control bytes)\n```\n\n`contracts/scoped-context.test.ts` — which extracts the `Usage in hooks` example from this file's own JSDoc — stays green, so the E14/E23 pin sweep is honest: no test pins the table's literal text, and the one source-reading pin is unaffected.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_016R9de1FqP7NvwKvqXi92Gh)_"
+}

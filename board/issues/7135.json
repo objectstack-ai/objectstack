@@ -1,0 +1,36 @@
+{
+  "number": 7135,
+  "kind": "issue",
+  "title": "Re-annotate plugin-approvals + plugin-reports onto the full `ExecutionContext` and delete the now-redundant casts (services half of #7070)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-help"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T19:26:19Z",
+  "updated_at": "2026-08-10T03:19:41Z",
+  "closed_at": "2026-08-10T03:19:41Z",
+  "closed_by": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7135",
+  "body": "Services-lane half of the #7070 split (promotion executed by the triage seat per the split plan recorded on that card, 2026-08-09). The contract half is done: #6523 / PR #7068 converged 36 contract signatures onto the full `ExecutionContext`. This card widens the **implementation-side annotations** in the services lane so the casts the narrow type forced become deletable.\n\n## File face (verified on `origin/main` @ `445a0c2`)\n\n| file | `SharingExecutionContext` refs |\n|:---|---:|\n| `packages/plugins/plugin-approvals/src/approval-service.ts` | 27 |\n| `packages/plugins/plugin-reports/src/report-service.ts` | 14 |\n| `packages/plugins/plugin-approvals/src/approval-node.ts` | 2 |\n\nCasts that become deletable, all re-verified live:\n\n- `approval-service.ts:661` — `const posture = (context as any).posture;` feeding `isOverrideActor()`; the doc comment above it already names the derived `posture` (ADR-0095) as the intended read, and the contract now declares the field. This is the load-bearing one: an unchecked cast on an enforcement input.\n- `approval-service.ts:2773, 2813, 3259` — `SYSTEM_CTX as unknown as SharingExecutionContext`\n- `approval-node.ts:174` — `} as unknown as SharingExecutionContext);`\n\n## Scope boundary (both inherited from #7070)\n\n- ⛔ `(context as any).organizationId` (`approval-service.ts:1465`, `:3649`, `:3916`) is a **separate question** — `organizationId` is not on `ExecutionContext` at all; per #5858 / `check:org-identifier` that spelling has its own history. Do not fold it in.\n- The removal of the exported `SharingExecutionContext` type itself rides **whichever of the two split halves lands second** — do not remove it here if the identity half (sibling card) is still open.\n\nNo user-visible defect: values are complete at runtime (the #6523 family's damage was type-side). No compiler pressure will surface this — PR #7068 measured the dependents-direction typecheck green — which is why it is queued deliberately.\n\nPart of #7070 (progress view). Sibling: identity half. Refs: #6523, PR #7068, #6206 (ruling), #6430 / PR #6511."
+}

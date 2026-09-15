@@ -1,0 +1,32 @@
+{
+  "number": 6546,
+  "kind": "issue",
+  "title": "objectql/protocol-batch-atomic.test.ts mock driver advertises the retired `supports.transactions` bit — invisible because the mock is `: any`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T03:49:25Z",
+  "updated_at": "2026-08-10T05:27:17Z",
+  "closed_at": "2026-08-10T05:27:17Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6546",
+  "body": "Found while fixing #4782 (PR #6545). Recorded, not fixed there: #4782's file surface is\n`packages/metadata/src/loaders/database-loader.test.ts` only.\n\n## Observation\n\n`packages/objectql/src/protocol-batch-atomic.test.ts:46`:\n\n```ts\nconst driver: any = {\n    name: 'snapshot',\n    version: '0.0.0',\n    supports: { transactions: true },\n    ...\n```\n\n`transactions` was RETIRED by #4634 and is tombstoned in `DriverCapabilitiesSchema` as\n`retiredKey(...)`, i.e. `never`. Authoring it is meant to fail `tsc` at the authoring site\nand to be rejected by a parse with the removal prescription.\n\nNeither channel fires here, and the reason is the annotation: the literal is `: any`, so\nit is never compared against `IDataDriver`, and nothing in this test parses the driver\nthrough `DriverInterfaceSchema`. The bit is inert — transaction use gates on METHOD\npresence (`driver.beginTransaction`), which this mock does implement, so the test passes\nfor the right reason and would pass identically with the bit deleted.\n\nThis is the same family as #4782 but a different failure mode, which is why it is worth a\nseparate line: #4782's block was at least partly VISIBLE to `tsc` (its four retired keys\nwere four real TS2322 in the `@objectstack/metadata` DEBT ledger). Here the `: any` erases\nthe diagnostic entirely.\n\n## Why this is observation-class, not a defect\n\nNothing a user hits, no gate is red, and no behaviour depends on it. The concrete harm is\nthe one #4782 names: it is a mock, and mocks get copied. A future author who copies this\none inherits a retired bit plus the `: any` that hides it.\n\nDeliberately NOT flagged: `packages/spec/src/data/driver.test.ts:317` spells\n`supports: { transactions: true, streaming: true }` on purpose — it is the rejection\nfixture (`it('REJECTS a driver whose supports still authors a retired bit')`) and asserts\nthe tombstone prescription. That one is correct as written.\n\n## Suggestion\n\nDrop the bit (`supports: {}`), and consider whether `const driver: any` should be\n`const driver: IDataDriver` — the `any` is what turned a compile error into silence, so\nthe annotation is the part that actually prevents recurrence. Whether that retyping is\ncheap depends on how the rest of the literal lines up with `IDataDriver`; it was not\nmeasured here.\n\nA repo-wide grep for other `supports:` literals spelling retired or invented capability\nkeys found no further instances in `packages/` or `examples/` beyond this one, #4782's,\nand the spec rejection fixture above.\n"
+}

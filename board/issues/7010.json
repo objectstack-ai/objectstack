@@ -1,0 +1,32 @@
+{
+  "number": 7010,
+  "kind": "issue",
+  "title": "Publish-time validation of predicate path references — a spec-delivered predicate naming a nonexistent path should fail at authoring, not evaluate to a guess at render (#6936 companion)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T08:44:19Z",
+  "updated_at": "2026-08-10T04:02:05Z",
+  "closed_at": "2026-08-10T04:01:37Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7010",
+  "body": "Spun out of #6936's ruling (maintainer 2026-08-09, Option C: the objectui evaluator goes fail-open-with-warning). That ruling fixes the **renderer's** posture; this card is the producer-side fix the #6936 filing itself identified as the long-term answer: 「谓词表达式应在发布期被校验(引用的路径必须存在于对应 schema),而不是让渲染器在运行期猜」.\n\n## Deliverable\n\nAn authoring-time check (landing point to be established by the implementing dev — the AUTHORING_RULES family in `metadata-protocol`, or `packages/lint`, following where the existing predicate-shape validations live): a metadata-delivered predicate (`visibleWhen` / `requiredWhen` / metadata-admin conditional fields — enumerate the actual carriers as step 1) whose identifier paths do not resolve against the target schema's scope (`data.*` after objectstack#6254's spelling correction) is refused or warned **at publish/validate time**, naming the unresolvable path.\n\n## Sequencing / evidence base\n\n- objectstack#6254 fixed 16 bare-spelling predicates in `object.form.ts` — the corpus that would have been caught by this check; use it as the fixture base.\n- objectstack#6331 made metadata-admin actually read spec-delivered predicates, which is what made the evaluation semantics observable at all.\n- The check must corpus-count before enforcing (standard widening discipline): run over the shipped spec metadata first, report the would-be-refused count in the PR body; a non-trivial hit count is a STOP.\n\n## Not in scope\n\nThe objectui evaluator change (#6936, ruled C) — independent, already queued in its own card.\n\nNo `domain:*` label applied — routing is the triage seat's.\n\nRefs: #6936 (ruling + measurements), objectstack#6254, objectstack#6331, #5149 (fail-open family)."
+}

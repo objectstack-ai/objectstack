@@ -1,0 +1,39 @@
+{
+  "number": 7381,
+  "kind": "issue",
+  "title": "[showcase][approvals] Approving the Invoice Dual Sign-off demo strands its flow run — `notify_cleared` reads `{record.account.owner}` with no `expand` on the start node",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "approvals",
+    "bug",
+    "domain:services",
+    "pm:dispatched",
+    "pm:queue",
+    "target:v17"
+  ],
+  "assignees": [
+    "os-help"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-10T08:19:52Z",
+  "updated_at": "2026-08-10T10:03:20Z",
+  "closed_at": "2026-08-10T10:03:20Z",
+  "closed_by": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7381",
+  "body": "Found while browser-verifying the #7213 epic's converged approvals surface. Unrelated to that epic — this is a defect in the showcase example's own flow authoring — but it makes the showcase's marquee approval demo dead-end at the moment it is supposed to pay off.\n\n## What happens\n\nOn a fresh `examples/app-showcase` boot, `registerShowcaseApprovalDemo` launches three real pending requests so the Approvals Inbox has something to act on. Approving **Invoice Dual Sign-off (parallel approval)** (`INV-1010`) from the inbox produces this error toast:\n\n> the approve decision was recorded on request `areq_6e629dda-…` but its flow run `run_bbf65df7-…` could not be resumed and is now stranded: resume of run `run_bbf65df7-…` failed: Node `notify_cleared` failed: notify: at least one recipient is required, but every recipient template resolved to nothing: `{record.account.owner}`. A flow template reads the trigger record as it was written — a relation field holds a scalar id, not an expanded record, so `{record.<lookup>.<field>}` resolves to nothing. Add the relation to the start node's `config.expand` so the engine hydrates it, or address the id directly (`{record.<lookup>}`).\n\nThe decision itself lands — `GET /api/v1/data/sys_approval_request` shows `\"status\": \"approved\"` on the request — and the inbox count drops 3 → 2. The **flow run** is what is left stranded, so the invoice never reaches `end_ok` and the \"Notify: Cleared\" inbox message the demo promises is never delivered.\n\n## Cause\n\n`examples/app-showcase/src/automation/flows/index.ts:1095`:\n\n```ts\n{\n  id: 'notify_cleared',\n  type: 'notify',\n  config: {\n    recipients: ['{record.account.owner}'],   // ← account is a scalar FK here\n    …\n  },\n},\n```\n\nThe `start` node (`index.ts:1071`) declares `objectName` / `triggerType` / `condition` and **no `config.expand`**, so `record.account` is the raw id. The request's own stored payload confirms it:\n\n```json\n\"account\": \"h8AhbJyB-W2ZgO81\",\n\"owner\": \"grace@example.com\",\n```\n\nThe engine's diagnostic is exact and already names both fixes; nothing about the runtime behaviour is in question here.\n\n## Suggested shape (not prescriptive)\n\nTwo candidate fixes, and they are not equivalent for a *showcase*:\n\n1. Add `expand: ['account']` to the start node's config — keeps `{record.account.owner}` and demonstrates the `config.expand` hydration path, which is arguably the thing a kitchen-sink example should be teaching.\n2. Address the invoice's own `owner` field (`{record.owner}`) — simpler, but then the flow no longer exercises relation hydration at all.\n\nWhichever is chosen, the same pattern is worth a sweep across the other showcase flows before closing: the failure only surfaces at *resume* time, well after `pnpm verify` and after the seed, so a second instance of it would sit undetected in exactly the same way.\n\n## Why this went unnoticed\n\nNothing static catches it. `pnpm typecheck` and the coverage test see a well-formed `notify` node; the seed loader suppresses record-change flows (#2661), so the request is opened imperatively by the demo bootstrap and the node in question is only reached when a human approves. It takes a real click in a real browser — which is how it was found.\n\n## Environment\n\n- objectstack `main` @ `88154bee1`, `@objectstack/*@17.0.0-rc.5`, vendored console at objectui `8aad9fd50b16`, `objectstack dev --ui --seed-admin` on a fresh sqlite DB, zh-CN, dev admin (who holds `finance` + `legal`, so one click satisfies both `unanimous` slots and drives the run straight into `notify_cleared`).\n"
+}

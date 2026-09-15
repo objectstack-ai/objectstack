@@ -1,0 +1,32 @@
+{
+  "number": 6966,
+  "kind": "issue",
+  "title": "#5574's per-row `before*` dispatch binds `input.id` on every context, silently changing the semantics of every \"no id ⇒ skip, this is a bulk write\" hook guard",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T06:28:18Z",
+  "updated_at": "2026-08-09T20:28:21Z",
+  "closed_at": "2026-08-09T20:28:21Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 9,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6966",
+  "body": "> **Re-authored in English on claim** by the `domain:engine-core` seat (#6019), per `AGENTS.md` §Communication and the maintainer's 2026-08-08 ruling in #6692 — flagged by the identity-lane seat at 06:44Z. Every `file:line` anchor, count and claim is carried over unchanged; nothing was added to or removed from the original measurement. Original author: the dev seat that found this while measuring #6656.\n\nObservation-class finding, promoted to `pm:queue` and routed `domain:engine-core` by triage (06:45Z). No user hits this today, but it is a semantic drift that will mislead the next author, and it has already turned one hook into dead code on every path.\n\n## Mechanism\n\nBefore #5574, a predicate (`multi: true`) write dispatched `before*` **once**, and that context's `input.id` was present-but-`undefined`. So \"`input.id` is empty\" was a reliable \"this is a bulk write\" signal, and several hooks depended on it.\n\nAfter #5574 (`packages/objectql/src/engine.ts:1806`, `dispatchPerRowBeforeHooks`), predicate writes dispatch **per row**, and every per-row context carries that row's `input.id`. The signal is gone — but the guards that depended on it were not updated.\n\n## Three confirmed sites\n\n1. **`packages/services/service-storage/src/file-reference-lifecycle.ts:642`** — a `beforeDelete` hook that pre-resolves the id list for where-shaped deletes and stashes it in `ctx[STASH_KEY]` so `afterDelete` can release file ownership. Its guard is `if (asIdList(ctx?.input?.id)) return; // afterDelete can read it directly`. Now: a single delete has an id ⇒ early return (as it always should have); a predicate delete's per-row context **also** has an id ⇒ early return too. **This hook no longer does anything on any path.**\n\n   There is no functional regression, but only by luck: the `afterDelete` side reads `const ids = stashed ?? asIdList(ctx?.input?.id)`, and #5038's per-row `afterDelete` context carries an id too, so the fallback branch happens to catch it. The cost is that one batched `engine.find('sys_file', { ref_id: { $in: [...] } })` became one call per row.\n\n2. **`packages/plugins/plugin-audit/src/audit-writers.ts`** — `captureBefore`'s `if (!id) return; // bulk update/delete — too costly to snapshot every row here` likewise no longer fires, so the plugin pays N `ql.findOne` calls for an N-row predicate write **and not one consumer ever sees the result** (`__previous` lands on the per-row *before* context, while the per-row *after* context is spread from the batch context). This is #6656's own subject; recorded here only as the second instance of one mechanism.\n\n3. **Stale comments (no behavioural impact)** — `packages/plugins/plugin-sharing/src/rule-hooks.ts:98` says \"predicate (`multi: true`) writes never populate `input.id`\", and `packages/plugins/plugin-sharing/src/bulk-recompute.ts:16` says \"`ObjectQL.update()` only populates `input.id` for a scalar `where.id`\". Neither holds for the `before*` phase any more. That package's own guard was already deleted in #4779 (which was the opposite defect: bulk writes being skipped entirely), so this is text drift only.\n\n## Why it was filed as observation rather than defect\n\nSite 1 is caught by the fallback branch, site 2 is #6656's subject, site 3 is comments only. No user-visible failure reproduces today. But site 1 is declared-yet-dead code, which is exactly the shape ADR-0049 enforce-or-remove cares about: either make it useful again (e.g. decide on the batch context rather than the per-row context), or retire it and record the bulk-release intent explicitly on the `afterDelete` side.\n\n## Triage's deliverable (06:45Z)\n\n> the deliverable is an explicit per-row/bulk marker on the dispatch contract and the three guards updated to it.\n\n## Constraint on the shape\n\nThe engine currently exposes no dispatch discriminator, and the plugin side **must not** hand-copy `options.multi` to rebuild the ladder — `asScalarId` is deliberately not exported precisely to prevent that (#4434 / #4550). So the marker has to come from the engine side.\n\nRefs: #5574 (the change), #5038 (per-row `afterDelete`), #6656 (site 2), #4779, #4434, #4550, ADR-0049."
+}

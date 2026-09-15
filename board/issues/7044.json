@@ -1,0 +1,32 @@
+{
+  "number": 7044,
+  "kind": "issue",
+  "title": "objectui-changeset-digest's frontmatter parser never got #6923's leading-blank-line fix — a changeset opening with a blank line drops out of the release digest",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T11:33:45Z",
+  "updated_at": "2026-08-10T03:02:37Z",
+  "closed_at": "2026-08-10T02:46:33Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7044",
+  "body": "Found while fixing #7004 (family-wide trailing-comment gap). **Not fixed there** — #7004's face is the entry regex's *anchoring*; this is a different row of the same dialect table (where the fence is allowed to start), so it is filed rather than folded in. Unclaimed, unassigned.\n\n## The observation\n\n`scripts/objectui-changeset-digest.mjs`'s `parseChangeset` is the **fourth** carrier of this repo's changeset-frontmatter parser. #7004 aligned its entry regex with the three gates. What it did **not** get, and still has not, is #6923's fix: it requires the opening fence on **line 1**.\n\n```js\n// scripts/objectui-changeset-digest.mjs\nif (lines[0]?.trim() === '---') {\n```\n\nThe three gates all skip leading blank lines first:\n\n```js\nwhile (i < lines.length && lines[i].trim() === '') i++; // tolerate leading blank lines\nif (lines[i]?.trim() !== '---') ...\n```\n\nMeasured on the #7004 branch, by extracting the shipped function and loading it standalone (no top-level main executed):\n\n```\ndigest  (leading blank line): {}\ndigest  (control, no blank) : {\"@object-ui/layout\":\"major\"}\n```\n\n`@changesets/parse@0.4.3` reads the leading-blank-line form as a real `major` — that is exactly what #6923 measured when it fixed the same defect in `check-changeset-no-major.mjs`.\n\n## Consequence — a silent DROP from the release record\n\nThis file is not a gate, so it neither reds nor greens. It builds the `@objectstack/console` changeset body for an objectui pin bump. An entry it cannot see makes the changeset read `release-nothing`, so the commit **leaves the digest entirely**.\n\nThat is #4731's harm reached by a third route. #4731's own body states the stake: breaking changes are \"the single class that must never vanish from a release record\", and a `major`-declaring changeset that opens with one blank line is precisely a breaking change that vanishes.\n\n## Why this survived three passes\n\nNothing mechanical connected this file to the other three. #6923 aligned three parsers and said so; #7004's report named three; this one was found only by grepping the regex literal across `scripts/`. #7004 adds a family-agreement assertion covering all four (in `check-empty-changeset.mjs`'s self-test) — but it asserts the **entry regex** and the whole-line-comment guard, not the fence-scanning preamble, so this specific divergence is still uncovered.\n\n## Suggested fix\n\nGive it the same preamble the three gates carry, and extend #7004's family assertion to cover the leading-blank-line skip as well, so the fourth carrier cannot drift again on this row either.\n\n## Impact, stated honestly\n\n- **No known instance.** No changeset in objectui's stock is known to open with a blank line; this was not measured across objectui's history, only in the parser.\n- The digest runs on demand at a pin bump, not in CI, so the blast radius is one release record rather than a gate verdict.\n- Reachable by an ordinary authoring act (an editor or a template leaving a leading newline).\n\nRelated: #6923 (the same fix, in the first carrier), #7004 (the entry-regex half, all four carriers), #4731 (why a dropped commit matters), #6099.\n"
+}

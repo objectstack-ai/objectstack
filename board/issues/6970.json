@@ -1,0 +1,35 @@
+{
+  "number": 6970,
+  "kind": "issue",
+  "title": "An action param's `defaultValue` is typed `z.unknown()`, so a default that can never satisfy the param's own value contract is accepted at authoring time and only 400s at submit",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T06:42:36Z",
+  "updated_at": "2026-08-09T19:18:00Z",
+  "closed_at": "2026-08-09T19:17:59Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6970",
+  "body": "在实现 objectstack#5061(objectui 侧 datetime action 参数提交形状)时发现的相邻缺口,与该单**各自独立闭环**,不是它的子问题:#5061 的完成范围是 Console 提交侧的形状,这一条是 spec 授权时的校验缺口。\n\n## 缺口\n\n`ActionParamSchema.defaultValue` 声明为 `z.unknown().optional()`(`packages/spec/src/ui/action.zod.ts:262`),即**任何 `type` 的参数都接受任何形状的默认值**。而自 17.0 起,dispatcher 在 handler 之前用 `validateActionParams`(`packages/spec/src/ui/action-params.zod.ts`,ADR-0104 D2)按同一个 `valueSchemaFor` 校验实际提交的 bag。两者不相交时,授权期静默通过、提交期 400。\n\n最容易触发的具体例子(datetime):\n\n```\nparams: [{ name: 'start', type: 'datetime', defaultValue: '2026-08-10T15:00' }]\n```\n\n- 授权/发布:通过,没有任何告警。\n- 用户打开对话框:控件把该值显示出来(`datetime-local` 接受这个形状)。\n- 用户**不改这个字段**直接提交 → `InstantValueSchema` 拒绝:\n  `Action param \"start\" (datetime): expected an ISO-8601 instant with explicit zone (e.g. 2026-03-15T14:30:00.000Z)`\n\n报错文案指向参数名,但**不指向真正的原因**(作者写的默认值),用户看到的是一个自己没碰过的字段导致提交失败。\n\n同一个洞对其他类型同样成立,datetime 只是最刺眼的一个:`type: 'number'` 配 `defaultValue: 'abc'`、`type: 'select'` 配一个不在自己 `options` 里的 `defaultValue`、`multiple: true` 配一个标量默认值,都是授权期通过、提交期 400。\n\n## 为什么不在 Console 侧兜\n\nobjectstack#5061 的修复(objectui PR,见下)刻意**没有**在渲染器里把无时区默认值归一化,理由记录在 `serializeParamValues` 的注释里:\n\n1. 语义上是歧义元数据 —— 一个不带时区的墙上时钟,按谁的时区解释?按浏览者时区归一化会让**同一份元数据对不同用户产生不同 instant**,而元数据从未声明这个语义。\n2. 更糟的是分裂:UI 里\"能用了\",而 REST / MCP 提交同一个字面量依旧 400。这是最难排查的一种不一致。\n\n按 contract-first(AGENTS.md #0.1),正确的位置是**生产端在授权时被拒绝**,而不是消费端容忍。\n\n## 建议修向\n\n`ActionParamSchema` 的 `defaultValue` 不再是 `z.unknown()`,而是用参数自身的 `type` / `multiple` / `options` 走同一个 `valueSchemaFor(..., 'stored')` 校验 —— 即让\"声明即强制\"对默认值也成立,复用已有的 D1 值形状契约,不新增第二套规则。字段级 `defaultValue` 是否有同样的洞值得一并核实。\n\n对 AI 生成的元数据尤其重要:这类默认值是 AI 作者最容易写错的地方之一(写成人类可读的墙上时钟),而当前唯一的反馈是运行期一条不指向原因的 400。授权期硬拒绝能让这个错误在写下的那一刻就暴露。\n\n## 关联\n\n- objectstack#5061 —— Console 侧提交形状(已修,objectui PR 见该单)。本单是它注释里点名的后续,不与之合并。\n- objectui#3127 / objectui#3565 —— `DateTimeField` 两向 ISO 基准的由来。\n\n发现于 objectstack#5061 的实现过程(objectui 仓),按 Prime Directive #10 未认领入档。\n"
+}

@@ -1,0 +1,34 @@
+{
+  "number": 7230,
+  "kind": "issue",
+  "title": "plugin-audit: renderTrackedChangeSummary never receives the translator, and displayFieldValue prints raw lookup ids — sys_activity.summary ships `Rating Owner: ∅ → oBK25…` onto every feed surface (re-routed from objectui#4055)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-10T03:20:10Z",
+  "updated_at": "2026-08-10T05:43:10Z",
+  "closed_at": "2026-08-10T05:43:10Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7230",
+  "body": "Re-routed from objectstack-ai/objectui#4055 (originally #5142, migrated 2026-08-10 under the #7167 file-at-destination ruling). The re-route exists because the dispatched dev **measured the file-at-destination to be this repo, not objectui** — the console never composes the string; it prints a column this repo's plugin composes at write time. Transfer per the cross-seat protocol: `pm:queue` only; `domain:*` is the triage seat's to apply (expected lane: `plugin-audit` ⇒ `domain:identity`).\n\n## Measured mechanism (objectui#4055 dev run, 2026-08-10, against objectui `59df371f7` + this repo's checkout)\n\n- The template `${label}: ${from} → ${to}` with `∅` for empty lives at `packages/plugins/plugin-audit/src/audit-writers.ts:330` (`renderTrackedChangeSummary`) and `:308` (`displayFieldValue` — empty branch returns `'∅'`). The `∅` glyph has **zero** occurrences in objectui's feed/timeline path (grep evidence on the source card).\n- **Label half**: the single call site (`audit-writers.ts:882`) passes `(getFieldDefs(ctx.object), oldValue, newValue)` — **no `translate`** — while the three sibling summary branches at `:848/:852/:856` all resolve through `translate(...)` / `displayLabelFor(ctx.object, translate)`. The tracked-change branch is the one branch never handed the locale-bound translator: a plain oversight against ADR-0053 / #3039's write-time localization.\n- **Value half**: `displayFieldValue` resolves select/picklist option labels only; a `Field.lookup(...)` value falls through to `String(value)` — the raw 32-char id.\n- objectui side is a pass-through with nothing to fix (`RecordDetailView.tsx:1482` maps `body: row.summary`; `RecordActivityTimeline.tsx:473-477` prints it as text). The record HISTORY tab is a different, already-correct path.\n- Blast radius of the producer fix: every consumer of `sys_activity.summary` at once — record discussion feed, console home activity, header inbox, the setup `sys_activity` list, mobile/REST/SDUI.\n\n## Scope (adopting the dev's recommendation A — restore-invariant, both halves in one file)\n\n1. Thread the existing locale-bound `translate` into `renderTrackedChangeSummary` and resolve the field label through it, exactly as the three sibling branches already do.\n2. Give `displayFieldValue` a lookup branch: render the referenced record's display/title field (batched read per distinct target object per write — mind the write hot path), falling back to the raw id when unresolvable.\n3. The `∅ →` notation stays as-is. Unit tests in plugin-audit for both halves.\n\n## Explicitly OUT of scope (needs its own ruling if ever wanted)\n\n- **Per-viewer locale on historical rows** (the objectui-side re-composition route): it would redefine `sys_activity.summary` from \"the user-facing display string\" (the contract #6656's masking and ADR-0053 assume) to \"a fallback for client recomposition\", and it fixes one of four consumer surfaces. If per-viewer locale is judged a requirement, that is a framework-contract change to decide explicitly — not to smuggle into this bug fix.\n- Historical rows keep their write-time composition; only new writes improve. This is accepted under this card.\n\n## Release-board note (for the triage seat, not self-applied)\n\nThe user-visible symptom (untranslated label + raw id at the bottom of an otherwise fully-localized zh-CN page) was measured on a shipped deployment; objectui#4055 carried `bug`. Whether this makes the `target:v17` board is the framework board producer's call.\n\nRefs: objectstack-ai/objectui#4055 (evidence + full dev report), #5142 (original thread), ADR-0053, #3039, #6656."
+}

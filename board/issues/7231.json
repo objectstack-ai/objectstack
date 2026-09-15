@@ -1,0 +1,36 @@
+{
+  "number": 7231,
+  "kind": "issue",
+  "title": "[approvals][console] Register an `approvals:inbox` component-registry key and de-hardcode the Approvals Inbox entry links",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "approvals",
+    "pm:dispatched",
+    "repo:objectui"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-10T03:22:53Z",
+  "updated_at": "2026-08-10T04:10:25Z",
+  "closed_at": "2026-08-10T04:10:25Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7231",
+  "body": "Part of #7213 (entry convergence — see the triage comment there for the full plan and the boundary with objectui#2762 / objectui#2763).\n\n## Facts (verified on objectui origin/main, 2026-08-10)\n\n- The Approvals Inbox page is `apps/console/src/pages/system/ApprovalsInboxPage.tsx`, routed as the relative route `system/approvals` inside the `systemRoutes` fragment (`apps/console/src/AppContent.tsx:161-228`), which is passed as BOTH `extraRoutes` and `extraRoutesNoApp` (`AppContent.tsx:261`). So `/apps/{ANY_APP}/system/approvals` already resolves — the page is not actually bound to the `setup` app.\n- No navigation metadata anywhere points at the page. All entries are hardcoded:\n  - `packages/app-shell/src/console/home/HomePage.tsx:429` — `onOpenApprovals={() =&gt; navigate('/apps/setup/system/approvals')}` hardcodes `setup`; business users may lack access to the setup app;\n  - `packages/app-shell/src/layout/InboxPopover.tsx:117-121` already uses the current app prefix (correct);\n  - server notification deep links use relative `/system/approvals?request={id}` and get app-prefixed by `InboxPopover.tsx:157-158` (correct).\n- The component registry (`packages/app-shell/src/services/componentRegistry.ts`; registrations in `apps/console/src/registerDeveloperComponents.tsx:37-68` etc.) has NO `approvals:*` key (grep verified).\n\n## Scope\n\n1. Register `approvals:inbox` in the component registry, resolving to `ApprovalsInboxPage` (follow the `registerDeveloperComponents.tsx` pattern; lazy-load like the route does). After this, a nav item `{ type: 'component', componentRef: 'approvals:inbox' }` in any app renders the full inbox via the `component/:ns/:name` route (`packages/app-shell/src/console/AppContent.tsx:790-791`).\n2. Fix `HomePage.tsx:429` to navigate to the inbox under the **current** app (same approach as `InboxPopover.tsx:117-121`) instead of the hardcoded `setup` path.\n3. Verify (and adjust if needed) that the page behaves correctly when mounted via the component route: `useParams().appName` for record deep links (`ApprovalsInboxPage.tsx:461-464`) and the `?request={id}` deep-link drawer. The existing `system/approvals` route MUST stay — notification and email deep links depend on it; the component ref is additive.\n\n## Why a component ref (not a `type: 'url'` shortcut)\n\nobjectui#2763 (approved epic, on hold until after v17) will rebuild the approval surface on standard SDUI renderers and delete this bespoke page (its B3). The registry key is the stable indirection: the objectstack-side nav metadata (follow-up sub-issue of #7213, blocked by this one) points at `approvals:inbox`, and the v18 rebuild only repoints the key — zero nav-metadata churn.\n\n## Acceptance criteria\n\n- `approvals:inbox` resolves in the component registry; `/apps/{app}/component/approvals/inbox` renders the inbox with working tabs, drawer, decision actions, and record deep links using `{app}`.\n- The Home \"pending approvals\" card navigates within the current app (no hardcoded `setup`).\n- `/apps/{app}/system/approvals?request={id}` still deep-links into the drawer.\n- Tests updated/added where the touched code already has coverage.\n\n## Out of scope\n\nPage polish (objectui#2762), SDUI rebuild (objectui#2763), bell-badge count breakdown (separate sub-issue), objectstack-side nav metadata (follow-up sub-issue)."
+}

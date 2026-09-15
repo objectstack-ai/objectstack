@@ -1,0 +1,34 @@
+{
+  "number": 6986,
+  "kind": "pull_request",
+  "title": "test(rest): restore the #5821 ghost-path pin, whose input set had silently become empty (#6894)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T07:47:09Z",
+  "updated_at": "2026-08-10T01:44:22Z",
+  "closed_at": "2026-08-10T01:44:21Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": "2026-08-10T01:44:21Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/6986",
+  "body": "Fixes objectstack-ai/objectstack#6894\n\n## Step 1 — re-measurement (the card's stop condition)\n\nThe card required re-measuring before implementing, and stopping if `stale` turned out to be non-empty today. It is empty. Measured on this branch through the **same `loadOpenApiSpec` seam the pin uses**, not by reading the file:\n\n```\nPROBE artifact top-level keys: openapi, info, servers, components, security\nPROBE has own `paths` key: false\nPROBE #5821 pin input set (stale paths): [] -> size 0\nPROBE loop body executions: 0\nPROBE cached object identity === returned: true\n```\n\nThis reproduces #5969's recorded measurement exactly, so the card stands as an implementation rather than a wording-only fix. Confirmed at the producer too — `packages/spec/scripts/build-openapi.ts` on `origin/main` states it deliberately emits no route section, and the artifact has no `paths` key at all (absent, not empty).\n\n## What changed\n\nOnly `packages/rest/src/rest-openapi-route.test.ts`. No production source touched.\n\nThe pin read the artifact's own `paths` and looped over them. That was the right input while spec still emitted a route section; #5744 removed the emission — correctly, ADR-0076, a section can only be produced by the package that mounts the routes — and the pin's input silently became the empty set.\n\nThe fix feeds the pin a constructed section rather than waiting for the producer to re-emit a removed defect, which would amount to requiring a production-side bug to keep a test alive:\n\n- `staleArtifactPaths()` rebuilds the section the artifact carried until #5744, from the existing `PHANTOM_PATHS` list, including the historical `PUT` on a record so the fixture is the shape that really shipped.\n- The discard case plants it on the object `loadOpenApiSpec` caches, then **reads the input back through the loader and requires it to be non-empty**. That assertion is the one that would have caught this bug: it turns \"the loop found nothing to check\" from a silent pass into a failure.\n- The three surviving assertions (`components.schemas` key set, `securitySchemes` deep-equal, `info.title`) move into their own case, unchanged. They still bite and were never the problem.\n\n## Bidirectional proof (the card's hard delivery criterion)\n\nPrediction stated before running: the regression this pin exists to catch is the merge that #5588 ruling C forbids, so mutating `enriched.paths = builtin.paths` into `enriched.paths = { ...(spec.paths ?? {}), ...builtin.paths }` should turn **exactly one** case red — every other case serves the real path-less artifact, where a merge is a no-op.\n\n**GREEN** (fixed test, unmutated production):\n\n```\nTest Files  1 passed (1)\n     Tests  13 passed (13)\n```\n\n**RED** (fixed test, merge regression in `rest-server.ts`):\n\n```\n× ... > discards a `paths`-carrying artifact instead of merging it 22ms\n  → stale artifact path '/api/{object}' leaked into the served document: expected { get: { …(2) } } to be undefined\nTest Files  1 failed (1)\n     Tests  1 failed | 12 passed (13)\n```\n\nOne red, on the intended case, as predicted.\n\n**CONTROL — the same regression against the OLD test file** (`git checkout origin/main -- packages/rest/src/rest-openapi-route.test.ts`, mutation still in place):\n\n```\n✓ ... > discards the static artifact section even though spec still emits it 5ms\nTest Files  1 passed (1)\n     Tests  12 passed (12)\n```\n\nThis is the measurement that matters most. Under an identical, real leak the old pin reports green — direct evidence that the layer was dead, not merely narrow. The new pin catches what the old one could not.\n\n**GREEN again** after reverting the mutation: 13 passed. The mutation was transient and never committed; `git diff origin/main -- packages/rest/src/rest-server.ts` is empty and the PR diff is one file.\n\nNote on the file-surface boundary declared in the claim: the fix needed no production edit and made none. The production mutation above exists only as the reverse-verification's temporary experiment, applied and reverted inside this isolated worktree, and is not part of the diff.\n\n## Wording that had expired\n\n- Case title `discards the static artifact section even though spec still emits it` — spec no longer emits it.\n- Comment `Leg 2 (#5744) removes the spec-side generation. Until it lands, ...` — it landed.\n\nBoth are rewritten to today's state, with the re-measurement recorded in the fixture's doc comment so the next reader sees why the input is a fixture.\n\n## Verification\n\n- `pnpm --filter @objectstack/rest test` — 73 files / 1143 tests passed.\n- `pnpm --filter @objectstack/rest typecheck` — clean. Note this package's `tsconfig.json` excludes `*.test.ts`, so that run does not cover the edited file; measured separately with tests included, branch vs `origin/main` under identical conditions: **152 total errors both sides, the same 2 pre-existing TS2835 in this file both sides — delta 0**, so the `@objectstack/rest` `TEST_DEBT: 163` ratchet cannot move.\n- All 34 gate steps in the ESLint job of `.github/workflows/lint.yml`, run one by one: all PASS (includes `check:nul-bytes`, `check:route-envelope`, `check:error-code-casing`, `check:engine-double-contract`).\n- Type-check job gates: 19 PASS. Four (`check:type-check-debt`, `check:i18n`, `check:i18n-coverage`, `check:app-nav-i18n`) refused to run without a full workspace build, each self-reporting \"Nothing was checked/measured\"; CI builds first. The debt one is covered by the delta measurement above.\n- `node scripts/check-nul-bytes.mjs` plus a control-byte self-scan of the edited file: clean.\n\n## Changeset\n\nDeliberately none. Test-only, no user-visible effect, nothing released — this takes the `skip-changeset` route.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01USNUyHEr7uaU6MoEWXitei)_"
+}

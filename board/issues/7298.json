@@ -1,0 +1,35 @@
+{
+  "number": 7298,
+  "kind": "pull_request",
+  "title": "feat(approvals): point the account app's Approvals nav at the inbox component (#7234)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-10T05:25:15Z",
+  "updated_at": "2026-08-10T05:55:14Z",
+  "closed_at": "2026-08-10T05:55:12Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-10T05:55:12Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/7298",
+  "body": "Fixes #7234\n\nEntry C of #7213: the account app's **Approvals** entry opened the raw `sys_approval_request` grid. That surface cannot show an approver a single decision button — all eight actions on the object gate on `record.viewer.can_act || record.viewer.can_override`, and the `viewer` block is computed and attached only by the approvals REST path (`approval-service.ts`, `attachViewers()`), never by the generic data API an object route reads. The result was a correct-looking, completely inert list of rows nobody could act on.\n\n**The entry point does not move.** Same id, same label, same icon, in every locale — which is also what keeps #7271's cross-package parity pin (`my_pending` view label === `nav_account_approvals` label, zh/ja/es) green. Only the destination changes.\n\n## What changed\n\n- **`account.app.ts`** — `nav_account_approvals` becomes `{ type: 'component', componentRef: 'approvals:inbox' }`, gated by `requiresService: 'approvals'`.\n  - `requiresObject` was the right gate for an object route and is not a gate at all for a component one — it names the object the entry routes to. The capability that must actually be present is the approvals **service** (`ctx.registerService('approvals', …)`), which is also what backs the REST path the inbox reads. Verified rather than assumed: `requiresService` lives on `BaseNavItemSchema`, which `ComponentNavItemSchema` spreads, and `filterAppForUser`/`filterNav` reads `e.requiresService` variant-agnostically (`rest-server.ts:2731`/`:2744`, ADR-0057 D10) — `packages/rest/src/meta-app-area-nav-gate.test.ts:34` already pins that a `type: 'component'` item is stripped this way. Without the gate the entry would render a dead component route wherever `plugin-approvals` is absent.\n  - No `requiredPermissions` added anywhere — the account app deliberately has none, and the inbox enforces its own data access through the approvals REST path.\n- **`approvals-plugin.ts`** — a new `nav_approvals_inbox` component entry at the **top** of `group_approvals`. Order is array order (`applyNavContributions` does `group.children.push(...c.items)`), so its position in the array is the assertion, not a by-product. The three raw tables are untouched and stay behind `group_approvals`' `manage_platform_settings` gate as the admin/diagnostic surface.\n- **Translations** — `nav_approvals_inbox` in all four locales (en `Approvals Inbox`, zh-CN `审批中心`, ja-JP `承認センター`, es-ES `Centro de aprobaciones`). `nav_account_approvals` deliberately untouched.\n- **Docs** — `content/docs/automation/approvals.mdx`: \"The approver finds it in their queue\" now names the Approvals Inbox as the canonical approver surface and explains, in a callout, why the raw table is not it; plus a new **\"Mount the approvals inbox in your app\"** section with the one-entry snippet. `content/docs/ui/setup-app.mdx`'s `group_approvals` row now enumerates the entries.\n- **Changeset** — `.changeset/approvals-nav-points-at-inbox.md` (minor, both packages; user-visible navigation change).\n\n## Tests\n\n- **New** `packages/platform-objects/src/apps/account-approvals-nav.test.ts` (7 cases). The two shapes are one keyword apart and both parse `AppSchema` cleanly, so nothing else in the repo could see a regression back to `type: 'object'`.\n- **Extended** `nav-contribution.test.ts`. The old case opened with a `.map(…).sort()` over `objectName` — a set-shaped assertion that cannot see ordering, and putting the working surface below three raw tables is most of what #7213 reported. It now pins the id order, the inbox's component shape, that it carries no object gate, and that the raw tables are unchanged and still gated.\n\n### Reverse verification\n\nBoth new gates were taken out and confirmed red, in the predicted direction:\n\n- Reverted `account.app.ts` to `origin/main` → 5 of the 7 new cases fail (`expected 'sys_approval_request' to be undefined`, `expected undefined to be 'approvals'`, …). The 2 that stay green are the deliberate ones: the label/icon pin (unchanged by design) and the `AppSchema.parse` case — **both shapes are valid metadata**, which is precisely why the rest of the file exists.\n- Dropped the zh-CN `nav_approvals_inbox` label → `check:app-nav-i18n` goes red naming exactly that id: `apps.setup.navigation — locale 'zh-CN' has no label for 1 runtime-merged nav id(s): nav_approvals_inbox contributed by @objectstack/plugin-approvals`. This proves the new Setup entry really is merged and judged by the gate, not merely declared.\n\n### Local results\n\n```\npnpm --filter @objectstack/platform-objects --filter @objectstack/plugin-approvals typecheck   Done (both)\nplatform-objects  test:  Test Files 12 passed (12) | Tests 296 passed (296)\nplugin-approvals  test:  Test Files 20 passed (20) | Tests 452 passed (452)\ncheck:app-nav-i18n:  OK (10 contributors, 54 merged `setup` nav ids, 4 locales, every id labelled in every locale)\ncheck:doc-authoring: 374 files clean\ncheck-nul-bytes:     OK (6650 text files)\n```\n\n`plugin-approvals`' `approval-status-vocabulary.test.ts` — including the cross-package parity case #7271 added today — is inside that green 452 and was run explicitly against this change.\n\n## Not in this PR\n\n- **The console pin bump** (`.objectui-sha`) is tracked separately as #7268. `approvals:inbox` resolves in the console registry as of objectui#4071 (objectui main `28c38567b`), but end-to-end browser behavior needs that pin bump — deliberately not ridden here.\n- Attaching `viewer` on the generic data API (objectui#2763 A1) and the vocabulary alignment (#7232, merged as #7271) stay out of scope.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01L9U1G2piXmYrhYQX96XUyv)_\n"
+}

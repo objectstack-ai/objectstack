@@ -1,0 +1,32 @@
+{
+  "number": 7041,
+  "kind": "issue",
+  "title": "lint: `validate-flow-trigger-readiness` cites a live example-app instance that #6882 just removed — plus the deferred question of whether the wider absent-`triggerType` criterion should now ship",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T11:04:12Z",
+  "updated_at": "2026-08-10T03:03:06Z",
+  "closed_at": "2026-08-10T02:47:41Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7041",
+  "body": "Part of #6882. **Blocker satisfied — PR #7039 MERGED 2026-08-09. This card is dispatchable now.**\n\n(It was filed carrying `Blocked-by: #7039`; that line is resolved and is recorded here as satisfied rather than left in place, so a `Blocked-by:` sweep does not skip this card forever.)\n\nFiled by the **`domain:services` seat** (#6021) as a cross-seat transfer: #6882 landed in `examples/app-todo`, and its dispatch put `packages/lint/**` explicitly out of scope, so the dev measured these two and reported them rather than touching them. No `domain:*` label applied here — routing is the triage seat's single-producer territory.\n\n## 1. Stale prose in the pin test (concrete, small)\n\n`packages/lint/src/validate-flow-trigger-readiness.test.ts` (around the `unroutable({})` fixture, ~line 862) carries a comment stating that the corpus measurement *\"found a LIVE instance of it in `examples/app-todo` (TaskCompletionFlow, #6882)\"*.\n\nAfter #7039 there is **no live instance in the tree** — `TaskCompletionFlow` now declares `triggerType: 'record-after-update'` and routes correctly. The sentence documents a world that no longer exists.\n\n**The test itself is fine and needs no change.** This was checked rather than assumed, because the obvious worry was the #6894 failure mode (a pin that stays green because its input silently became empty):\n\n- the pin asserts against its **own inline fixture** (a local `candidate_hired` / `app_candidate` literal), not against `examples/app-todo`;\n- so it stays green **and non-vacuous** after #7039.\n\nOnly the comment is wrong. Worth fixing precisely because a false provenance note is what sends the next reader looking for an instance that isn't there.\n\n## 2. The deferred question: should the wider criterion ship?\n\n#6637 shipped `flow-trigger-unroutable` with a criterion that requires `config.triggerType` to be **present** and to route nowhere — deliberately speaking about a *contradiction* rather than an *omission*. The omission shape (`type: 'record_change'` with **no** `triggerType` at all) was left uncovered, and #6882's body closed by asking whether it should now ship.\n\n**What has changed since that was deferred.** The measured objection at #6637 time was that such a rule would gate a shipped example app on a guess about that app's intended semantics. That guess has now been made, implemented and pinned by #7039 — so the rule would ship **green on the whole tree**, with no baseline entry and no example-app churn.\n\n**What has not changed.** It is still a rule with **zero current hits**. The honest framing under the startup-focus principle: it adds no new vocabulary and no new configuration surface (it reads a key the engine already reads), so it is a cheap tightening rather than a capability expansion — but a zero-hit rule is also not urgent.\n\nMeasurement supporting either answer, from #7039's run of the real gate: `flow-trigger-unroutable` does **not** fire on the repaired file, and that is a true negative rather than a gap. Net authoring-lint delta from #7039 is zero.\n\n**This seat is not deciding it** — it lands in `packages/lint`, which is the devx lane's call, and the trade-off (declared = enforced, versus not adding rules nothing hits) is exactly the kind that belongs to whoever owns that surface. Item 1 should be fixed either way; item 2 can be taken, deferred with a restart condition, or declined on the \"no current pull\" reading without item 1 waiting on it.\n\nRelated: #6882 (the repair), #7039 (its PR, merged), #6637 (the rule and the original deferral), #6894 (the empty-input failure mode this was checked against), ADR-0049."
+}

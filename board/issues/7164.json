@@ -1,0 +1,35 @@
+{
+  "number": 7164,
+  "kind": "issue",
+  "title": "check-changeset-no-major's older `R` control asserts only that the output starts with `R`, not which two paths git paired",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-help"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-10T01:33:38Z",
+  "updated_at": "2026-08-10T08:12:10Z",
+  "closed_at": "2026-08-10T08:12:10Z",
+  "closed_by": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7164",
+  "body": "Found while implementing #7107 (PR #7157). Filed per Prime Directive #10, not fixed there — #7157 owns the base-side guard and its own fixture, and re-spelling a neighbouring case's control is a different change. Unclaimed.\n\n## The observation\n\n`scripts/check-changeset-no-major.mjs` now contains two spellings of the same control — \"git must really have scored this as a rename\".\n\nThe rename fixture #7048 added checks the raw output like this:\n\n```js\nconst raw = git(['diff', '--name-status', base, 'HEAD', '--', '.changeset/*.md'], dir);\nassert(/^R\\d/.test(raw.trim()), 'control: git must really report this as a rename, ...');\n```\n\nThat asserts the output **begins** with the letter `R` followed by a digit. It does not pin *which two paths* git paired, and if the fixture's diff ever grew a second row the assertion would still be satisfied by the first one alone.\n\nThe family standard is a whole-row match. Both siblings define a `renameRow` helper and match `/^R\\d+\\told\\tnew$/` against each line (`check-empty-changeset.mjs` for RED 4 / GREEN 6 / GREEN 7 / RED 5, `check-adr-0087-registration.mjs` for R15 / G10 / R16), and PR #7157 brought the same helper into this third file for its own case. So this file now reads one diff row two ways internally, which is the drift #7004 exists to prevent, in miniature.\n\n## Why this is filed as an observation, not a defect\n\n**Not currently wrong.** In that fixture the diff has exactly one row and the pairing is unambiguous, so the weaker assertion and the stronger one give the same verdict today. Nothing a user or an author hits; nothing CI would catch differently. What it costs is specificity if the fixture is ever extended, and consistency for the next reader comparing the three files.\n\n## The fix, if it is ever wanted\n\nRe-spell that one control through the `renameRow` helper PR #7157 already added a few lines above it, matching the shape the two siblings use, and delete the now-unused `raw` binding. No behaviour change, one fixture line, no ratchet moves.\n\nRelated: #7107 / PR #7157 (the base-side guard and the helper), #7005 / PR #7048 (the fixture this control belongs to), #7004 (the family's shared-reading principle).\n"
+}

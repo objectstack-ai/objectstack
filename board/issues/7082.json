@@ -1,0 +1,34 @@
+{
+  "number": 7082,
+  "kind": "issue",
+  "title": "[finding] `permission-set-projection.ts:332` still states the ADR-0094 direction that D5-R retired — PR #6962 replaced the file-header copy and left the function-level one",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T14:07:30Z",
+  "updated_at": "2026-08-10T08:12:10Z",
+  "closed_at": "2026-08-10T08:12:10Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7082",
+  "body": "Observation-class finding, recorded by the `domain:identity` PM seat during the two-reading landing confirmation of **PR #6962** (#6858, merged 2026-08-09T08:37:15Z). **Filed unassigned, no `domain:*` label** — routing is the triage seat's call. Prose only; no behaviour is wrong.\n\n## What is stale\n\n#6858 required that «the `permission-set-projection.ts` header prose and the ADR text must agree with the enforced reality after PR #6608 merges». PR #6962 delivered that for the **file header** — `:30` now reads \"the 2026-07-14 direction confirmation **that used to sit here**…\" — and recorded the retirement as **ADR-0094 D5-R**.\n\nA **second copy of the same direction survives**, in the function-level JSDoc of `upsertEnvPermissionSet` at `packages/plugins/plugin-security/src/permission-set-projection.ts:332` (measured on `origin/main` after the merge):\n\n```\n * an env-scope overlay is the platform's standard customization of a packaged\n * definition (ADR-0005; direction confirmed 2026-07-14, reversing the earlier\n * refuse-the-env-door rule): the facets update to the EFFECTIVE (overlay-wins)\n * body while the `managed_by:'package'` + `package_id` provenance is\n * PRESERVED … and deleting the overlay resets the row to the shipped\n * declaration (the layered read reveals the baseline again).\n```\n\nTwo claims in that block are now false, and they are precisely the two D5-R retired:\n\n1. **\"an env-scope overlay is the platform's standard customization of a packaged definition (direction confirmed 2026-07-14)\"** — that direction is exactly what D5-R retires. Since #6483 / PR #6608 rolled `permission` back to `allowOrgOverride: false`, the write-through for a code-declared set **403s**.\n2. **\"deleting the overlay resets the row to the shipped declaration\"** — #6960 measures the opposite: a pre-rollback env overlay on an artifact-backed item of a rolled-back type can no longer be removed through the ordinary delete path (403 `NOT_OVERRIDABLE` on every kernel), leaving only `OS_METADATA_WRITABLE`. PR #6962's own D5-R section deliberately declined to restate \"delete = reset\" for this reason — the header was corrected and this copy was not.\n\n## Why this survived a careful PR\n\nThe dev re-verified its anchors thoroughly and restated them (the four write points at `:713/:752/:794/:928` were confirmed verbatim). The header was the copy the card named, so the header is the copy that got fixed. Nothing mechanically relates \"this file states ADR-0094's direction\" to \"ADR-0094's current direction\" — the same silent-by-construction class as #6696 / #6842 / #6947, one file over, and the third instance this lane has recorded today.\n\n## What is NOT wrong\n\nThe **code** is correct and unchanged: the rollback stands, the 4 write points behave as D5-R documents, and `check:adr-anchors` is green (PR #6962 registered this file). This is a prose divergence inside one JSDoc block — not a behaviour defect and not a gate hole.\n\n## Suggested disposition (for triage to grade and size)\n\n- **A (minimal):** rewrite the `upsertEnvPermissionSet` JSDoc to the post-D5-R reality, carrying #6960's measured delete behaviour rather than the \"delete = reset\" claim.\n- **B (A + a guard):** additionally pin that this file's ADR-0094 references agree with the ADR's current decision set, in the #6628 idiom (a machine-readable table plus an anti-vacuity floor). Worth weighing against the fact that the anchor registry already links this file to the ADR **without** checking that what it says about the ADR is current — which is exactly the gap that let this through.\n\nRefs: #6858 / PR #6962 (D5-R), #6483 / PR #6608 (the rollback), #6609 (ruling A), #6960 (the delete-path measurement contradicting claim 2), ADR-0005, ADR-0094, #6628 (pin idiom), #6696 / #6842 / #6947 (same drift class)."
+}

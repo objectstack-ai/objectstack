@@ -1,0 +1,35 @@
+{
+  "number": 7300,
+  "kind": "issue",
+  "title": "finding: `GET /api/v1/automation/:name/runs?limit=abc` coerces to NaN and reaches `listRuns({ limit: NaN })` — the same unvalidated query coercion #6928 fixed on the notifications route",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-help"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-10T05:27:37Z",
+  "updated_at": "2026-08-10T08:27:52Z",
+  "closed_at": "2026-08-10T08:27:52Z",
+  "closed_by": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7300",
+  "body": "Found while fixing #6928 (PR #7299). Out of that card's declared file surface (`packages/runtime/src/domains/notifications.ts`), so filed rather than fixed there. Observation-class, `finding` disposition, unassigned.\n\n## Mechanism\n\n`packages/runtime/src/domains/automation.ts`, the `GET /:name/runs` branch (line ~434 as of `origin/main` @ `1da1f32`; relocate by content, the line will drift):\n\n```ts\nconst options = query ? { limit: query.limit ? Number(query.limit) : undefined, cursor: query.cursor } : undefined;\nconst runs = await automationService.listRuns(name, options);\n```\n\nThis is character-for-character the coercion #6928 was filed against — `Number(query.limit)` with nothing checking the result — so `?limit=abc` yields `NaN` and `listRuns` is called with `{ limit: NaN }`. Whether that then reaches a driver as `find({ limit: NaN })` depends on the automation service's own handling of the option and was **not** traced here; only the coercion point is verified. Never a 400 either way.\n\nSame family as #6361 / #6928 (declared ≠ enforced on a raw-HTTP query parameter). Exposure is raw-HTTP callers only, on the same reasoning as #6928: a typed caller cannot hand a string to a `number`.\n\n## Why it is a separate card and not part of PR #7299\n\n#6928's dispatch fixed one file by ruling. The refusal helpers PR #7299 added (`invalidQueryParam` plus the three per-parameter parsers) are deliberately **module-local** to `notifications.ts`, because one consumer does not justify a shared module. A second consumer does, so whoever takes this one should decide whether to hoist them next to `validationFailure` in `packages/runtime/src/validation-failure.ts` rather than copy them — a second hand-rolled refusal for the same condition is the thing #6928's card warned against.\n\n## Suggested shape, if promoted\n\nThe shape PR #7299 landed, reused rather than re-derived:\n\n- refuse with the house `validationFailure(...)` (400 `VALIDATION_FAILED` + `details.fields[]`, #3918) and an ADR-0114 `FieldErrorCode` naming the parameter — no new spec spelling needed, `VALIDATION_FAILED` is already a registered ledger code for `@objectstack/runtime`;\n- preserve every value that has a defensible answer today, byte for byte, and pin that with tests — including whatever the automation service does with an out-of-range number, which is its declared behaviour and not this layer's business;\n- `cursor` on this route is passed through unchecked as well, so it is worth the same probe while in there — unlike the notifications route, where `cursor` is a spec-tombstoned key that is merely ignored.\n\n## Dedup\n\nSearched open issues for `automation NaN limit`, `domains/automation.ts query`, and `limit Number query coercion` — no hits. #6928 (this defect's twin, being fixed in PR #7299) and #6361 (family root, closed) are the neighbours; neither covers this file.\n"
+}

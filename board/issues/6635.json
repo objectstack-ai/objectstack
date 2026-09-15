@@ -1,0 +1,30 @@
+{
+  "number": 6635,
+  "kind": "issue",
+  "title": "[finding] Gate idea: flag a retired symbol whose retirement issue number appears in SOME but not ALL of its mentions within one file — the partial-update signal that found #6630 mechanically",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T07:51:13Z",
+  "updated_at": "2026-08-10T07:35:12Z",
+  "closed_at": "2026-08-10T07:35:12Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 11,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6635",
+  "body": "Tooling-class finding from the 2026-08-08 spec text-surface truth-sweep (audited at main `1f65bfc39`). Filed unassigned for triage; no labels applied. Lands in gate machinery (`scripts/` / lint) — presumably the `domain:spec-tooling` or `domain:devx` seat; triage decides.\n\n## The observed signal\n\n#6630 (six sites still teaching the #6414-deleted `ETLPipeline.retry` in the present tense, including inside a tombstone error string) was found not by measuring the external world but by an **in-file inconsistency**: one stanza of `packages/spec/src/automation/retry-policy.zod.ts` carried the #6414 update while five neighbouring stanzas did not. The audit's method note, verbatim:\n\n> The highest-yield signal was not \"is this claim false\" but \"was this file partially updated\" — the in-file inconsistency is stronger evidence than the external measurement, and it is cheap to detect.\n\nThis is also the third specimen of the class today: #6146 (docs taught a root the evaluator never bound), #5781 (tombstone evidence stale while its correction lived elsewhere in the same package), #6630. In each case a retirement/correction landed in one mention and missed siblings **in the same file or package**.\n\n## The proposed gate (shape, not implementation)\n\nFor each retired-symbol name that appears in prose/comments of a file:\n- if at least one mention in that file is annotated with the retirement's issue/ADR number (i.e. someone updated it), and\n- at least one other mention of the same name in the same file carries no such annotation and reads in the present tense,\n\nthen flag the file: a retirement pass touched it and provably missed siblings. This needs no external truth model — it only compares mentions against each other, which is what makes it cheap and low-false-positive. Historical framings (\"was removed in\", \"before #N\") count as annotated.\n\n## Known boundaries to design around\n\n- Tombstone error strings intentionally NAME the retired key (that is their job) — the gate keys on annotation-presence, not name-presence, so tombstones pass as long as they cite their retirement.\n- The word-boundary/quoted-name disciplines from the repo's retirement playbook apply (bare-name grep matches surviving families).\n- Advisory first: per the repo's gate-introduction norms, land it observing before it blocks (#5617's required-set lesson).\n\n## Provenance\n\nTruth-sweep audit agent, spec-surface seat session `session_018ffcE95NaMJcL9XJ9VDYgk`; sibling filings from the same sweep: #6628 / #6630 / #6631 / #6634. Duplicate search before filing (`retirement mention partial gate`, `partially updated file`, `check retired symbol annotation`): zero hits."
+}

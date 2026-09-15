@@ -1,0 +1,33 @@
+{
+  "number": 5666,
+  "kind": "issue",
+  "title": "objectui: pivot bucket id 把 null 维度值编码成占位符 U+2205,与「值恰好等于该占位符」的行仍会撞",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "pm:queue",
+    "repo:objectui"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T23:32:08Z",
+  "updated_at": "2026-08-10T02:16:14Z",
+  "closed_at": "2026-08-10T02:16:14Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5666",
+  "body": "objectstack#5473(PR objectui#3414)把 pivot 的 row id / cell key 换成 `JSON.stringify` 之后,残留的最后一处「靠约定不撞」的编码。刻意留在那个 PR 之外(它的文件面是 cell key,且改这个会连带动列小计的 key),按观察项记录。\n\n### 位置\n\n`packages/plugin-dashboard/src/DatasetWidget.tsx` `buildPivot()`,以及 `packages/plugin-report/src/DatasetReportRenderer.tsx` 的 `bucketId()`(后者的其它问题见另一单):\n\n```\nString(row[d] ?? EMPTY_PLACEHOLDER)\n```\n\n其中占位符是单个字符 U+2205(EMPTY SET,`∅`)。\n\n### 后果\n\n维度值为 `null`/`undefined` 的行,与维度值**字面等于**该占位符字符的行,编码成同一个 bucket id —— 合并成一格,后写覆盖先写,和 #5473 的症状一致(显示另一行的度量值,drill-through 同 index 钻错)。\n\n### 触发面(如实说)\n\n要求用户数据里真的出现 U+2205 这个数学符号作为维度值,现实中基本不会。**今天没有用户会撞到**,所以按 observation 记,不按缺陷记;放上来只是因为 #5473 的教训正是「靠数据不会包含某字符」这个假设本身不可靠 —— 同一个函数里其余编码都已不再依赖该假设,只剩这一处还依赖。\n\n### 若要处理\n\n把空值编码成 JSON 的 `null` 而不是字符串占位符(`JSON.stringify` 天然区分 `null` 与字符串 `\"∅\"`)。注意半径:列桶 id 目前是裸字符串,`colTotalById` 用同一表达式建 key,列小计与列头必须同时改,否则会制造出 PR objectui#3414 刚收敛掉的「同一个 id 两套编码」。显示层不受影响 —— 这两个占位符只进 id,不进标签(标签走 `formatDimensionValue`)。\n\n发现来源:objectstack#5473 / PR objectui#3414(代码里已就近留注释指向本单)。\n"
+}

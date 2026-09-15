@@ -1,0 +1,35 @@
+{
+  "number": 7161,
+  "kind": "pull_request",
+  "title": "fix(objectql): put `having`'s operator refusals inside the ADR-0112 envelope (#7047)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-10T01:27:19Z",
+  "updated_at": "2026-08-10T02:13:41Z",
+  "closed_at": "2026-08-10T02:13:39Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-10T02:13:39Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/7161",
+  "body": "Closes #7047.\n\n## The defect\n\n`having-filter.ts`'s `unknownOperator()` returned a bare `new Error(...)` from **both** of its branches — the RETIRED spellings (`$regex`, `$options`) and the unknown ones (`$nand`, `$median`, a mistyped `$icontain`). `code` and `status` were both `undefined`, so `rest` served the refusal through the unclassified-fault branch and a **400-class author mistake reached the client 500-shaped**.\n\n`having` is the fifth of five filter-refusal faces and the only one that disagreed. Re-measured by EXECUTING each face (#6993's method, not grep):\n\n| face | `code` / `status` before | after |\n|:--|:--|:--|\n| driver-sql, driver-sqlite-wasm, driver-turso (local + remote) | `INVALID_FILTER` / 400 | unchanged |\n| driver-memory (`filter-refusal.ts`), driver-mongodb | `INVALID_FILTER` / 400 | unchanged |\n| **objectql `having`** | **`undefined` / `undefined`** | **`INVALID_FILTER` / 400** |\n\nProbe output, both branches, before → after:\n\n```\nretired  $regex   :: THROW code=undefined status=undefined  →  code=INVALID_FILTER status=400\nretired  $options :: THROW code=undefined status=undefined  →  code=INVALID_FILTER status=400\nunknown  $median  :: THROW code=undefined status=undefined  →  code=INVALID_FILTER status=400\nunknown  $nand    :: THROW code=undefined status=undefined  →  code=INVALID_FILTER status=400  (logical position)\nunknown  $icontain:: THROW code=undefined status=undefined  →  code=INVALID_FILTER status=400  (operator typo)\n```\n\nBoth branches deliberately: enveloping only the retired path would leave every operator typo — the more likely of the two — arriving 500-shaped, the same defect one operator name away.\n\n## The change\n\n- `unknownOperator()`'s two returns go through `invalidFilterError`. The **messages are unchanged** — the retired branch already printed `RETIRED_FILTER_OPERATORS[op].why` verbatim like the four driver faces. Only the envelope was missing, which is the half of #5324 a refusal does not fix on its own and the half `FilterTextRejectionCase.code` exists to pin.\n- The code is `INVALID_FILTER` because this **joins** the contract the other four already speak; no new code is invented. A caller swapping HAVING for a driver-side `where` must not have to catch two shapes for one mistake.\n- `invalidFilterError` is **exported from `filter-comparand-shape.ts`** (this package's other filter-refusal site) rather than copied into a third private definition — the drift `filter-refusal.ts`'s own doc blocks are written about.\n\n**Client-visible change**, hence the changeset: code catching a `having` refusal by message substring, or branching on `err.code` being absent, now sees `INVALID_FILTER` / 400. Over HTTP the status moves 500 → 400, which is the point.\n\n## Tests\n\nThe rejection assertions in `having-filter.test.ts` were `toThrow(/message/)` only — green whether or not the error carries an envelope (the #6142/#6050 hole). That is precisely how this survived the PR that wrote those messages. They now pin `code` + `status` + the verbatim `RETIRED_FILTER_OPERATORS[op].why`, on both branches, in both positions, and through `applyHaving` (the entry point `engine.aggregate()` calls, so the envelope is asserted on the error that actually leaves the module).\n\nNew `having-filter-text-conformance.test.ts` drives this face against **`FILTER_TEXT_CASES`** — the standard the driver suites answer and which `packages/objectql` imported nowhere. `having` had no conformance-table coverage at all (`check-driver-conformance.mjs` scopes to `packages/drivers/*`), which is why both of the last two defects on it (#5905 and this one) were found by a hand-run census rather than by CI.\n\n**Reverse-verified**: restored the pre-fix source with the new tests in place, predicted 9 red / 39 green, ran it — exactly the 9 predicted failed (3 retired refusals, 2 unknown-operator, 1 `applyHaving`, 3 fixture retired-rejection rows), 39 passed. No deviations. Restored → 48/48 green.\n\n## Two findings outside this card's fence — filed, not folded in\n\n1. **#7158 — `having` has no `$icontains` comparand-shape gate.** Driving the fixture surfaced that 2 of its 5 rejection rows are not refused by this face at all: an **empty `$icontains` comparand is evaluated and matches ALL NINE rows** (a predicate that constrains nothing — the widening of #3948), and a non-string one is answered \"no rows\". Closing that means refusing filters this face evaluates today — a behaviour change beyond an envelope card. The two rows are therefore **not enrolled**, and are pinned as *measured exclusions* so the gap goes red the day someone adds the gate, instead of reading as coverage.\n\n2. **#7159 — `scripts/check-driver-conformance.mjs` FILTER_TEXT requirement-3 is stale.** It calls driver-mongodb's arm \"the last place a bare `new Error` escaped the ADR-0112 envelope\". That was already false when written (`having` was a sixth place), and after this PR the claim becomes true while attributing it to the wrong site. Not edited here — a conformance-script edit riding on a behaviour fix is exactly what this card's fence excludes.\n\nRefs #7047, #6993, #5324, #5905, ADR-0112.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01EKyLQeEhLoFJQcFhJXTF8g)_"
+}

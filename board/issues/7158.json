@@ -1,0 +1,34 @@
+{
+  "number": 7158,
+  "kind": "issue",
+  "title": "objectql `having` has no `$icontains` comparand-shape gate — an empty comparand matches EVERY row (2 of 5 `FILTER_TEXT_CASES` rejection rows unenrollable)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-help"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-10T01:24:19Z",
+  "updated_at": "2026-08-10T04:16:36Z",
+  "closed_at": "2026-08-10T04:16:36Z",
+  "closed_by": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7158",
+  "body": "Found while closing #7047 (the ADR-0112 envelope on `having`'s refusals), by driving the `having` face against `FILTER_TEXT_CASES` for the first time. Out of #7047's fence — that card is about the ENVELOPE on refusals that already happen; this is a refusal that does not happen at all.\n\n## Measured (2026-08-10, `origin/main` @ `3e8e669`, by execution)\n\n`FILTER_TEXT_CASES` declares five `expectRejection` rows. Driven against `matchesHaving` / `applyHaving` over `FILTER_TEXT_ROWS`:\n\n| row | `having` |\n|:--|:--|\n| `$regex` is REFUSED | refused (enveloped by #7047) |\n| `$regex` + `$options` refused as one mistake | refused (enveloped by #7047) |\n| a dangling `$options` is REFUSED | refused (enveloped by #7047) |\n| **an empty `$icontains` comparand is REFUSED** | **NOT refused — evaluated, matched ALL NINE rows** |\n| **a non-string `$icontains` comparand is REFUSED** | **NOT refused — evaluated, matched none** |\n\n```\nmatchesHaving({ name: 'ACME Corp' }, { name: { $icontains: '' } })  // => true\napplyHaving(FILTER_TEXT_ROWS, { name: { $icontains: '' } })         // => all 9 rows\nmatchesHaving({ name: 'ACME Corp' }, { name: { $icontains: 42 } })  // => false\n```\n\n## Consequence\n\nThe empty-comparand row is the sharp one. Every string contains the empty substring, so the predicate constrains NOTHING — a filter that compiles to nothing does not narrow a query, it **widens** it (#3948). The author wrote a constraint and got the unfiltered aggregate back, with no error.\n\nThe non-string row is the quieter half: `42` is answered `false` — \"no rows\" — for a comparand the declared type (`StringOperatorSchema`: `$icontains: z.string()`) does not permit, which is the silent-wrong-answer shape #4706 retired `$regex` over.\n\n## What the other faces do\n\nThe driver faces get this from a comparand gate `having` has never had:\n\n- `driver-memory` — `filter-refusal.ts` `icontainsComparandError()`, both rejections in one constructor, `INVALID_FILTER` / 400.\n- `driver-sql` — the twin `icontainsComparandError`, word for word.\n\n`having` is the sixth JS evaluation face of the same vocabulary (#6520 gave it the shared ASCII fold) and the only one with no comparand gate.\n\n## Why this is not #7047\n\nClosing this means REFUSING filters this face evaluates today — a behaviour change beyond an envelope card, with its own changeset and its own client-visible effect. #7047 kept the same fence #6993 kept before it.\n\n## Current state of the coverage\n\n`packages/objectql/src/having-filter-text-conformance.test.ts` (added by #7047) enrolls the 13 rows cases and the 3 retired-operator rejection rows, and **pins these two exclusions as measurements** — asserting that the face does not refuse them, and that the empty comparand matches all nine rows. So the gap is red-on-change rather than a silent hole: adding the gate turns those pins red and forces the two rows into the enrolment.\n\nUpdate that file's `UNENROLLED_REJECTION_CASES` block when closing this."
+}

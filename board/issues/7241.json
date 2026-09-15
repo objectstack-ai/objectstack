@@ -1,0 +1,34 @@
+{
+  "number": 7241,
+  "kind": "pull_request",
+  "title": "docs(spec,drivers): managed-datasource read-only is a database privilege, not a platform gate (#4584)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-10T03:33:52Z",
+  "updated_at": "2026-08-10T04:56:13Z",
+  "closed_at": "2026-08-10T04:56:12Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-10T04:56:12Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/7241",
+  "body": "Executes the standing #4584 ruling verbatim. Docs-only — **no platform gate is built**, and no schema shape changes.\n\n## The ruling\n\nFrom [comment 5163028174](https://github.com/objectstack-ai/objectstack/issues/4584#issuecomment-5163028174) (2026-08-03), quoted untranslated:\n\n> **裁决**(PM 代决,维护者可否决):**方案 B —— 不建平台层只读闸门,文档明确记录**。\n>\n> 两轴理由:\n> - **长远合理性**:一个只拦 ObjectQL 写路径、拦不住直连/迁移/DDL 的位,是「看起来存在的能力」——#4583 刚删掉的 `capabilities.readOnly` 就是这个形状,不再造第二遍。真只读属于数据库账号权限(GRANT SELECT),那里没有绕行面。\n> - **防 AI 犯错**:假闸门比没有闸门更危险 —— AI(和人)设了就以为安全,而真正的写入路径在闸门之外。诚实的「没有此能力,去数据库侧做」让错误预期无处生根。\n>\n> 执行(docs-only,一并处理):\n> 1. datasource 文档明确「managed 库只读 = 数据库账号权限」,并写入 #4479 的对偶结论(读副本 = 代理端点,平台不路由);\n> 2. 清理 `examples/app-crm/src/datasources/crm.datasource.ts` 文件头「等 #4584 裁决」的注释。\n\n## Premise check (verified on fresh `origin/main`, `f40c5b4`)\n\n| Premise | Verdict |\n| :--- | :--- |\n| The hand-written datasource docs lack the ruled statement | **Holds.** No `GRANT SELECT` / database-privilege statement anywhere in `content/docs/data-modeling/`; the only read-only mentions are the federation gate and a UI-readonly row. |\n| `crm.datasource.ts` still waits on #4584 | **Holds.** `Whether a managed datasource should have a read-only gate at all is #4584 — until that is answered…` |\n| The gap the ruling describes is real | **Holds.** `ObjectQLEngine.assertWriteAllowed` (`packages/objectql/src/engine.ts:3397`) returns early on `!ds.schemaMode \\|\\| ds.schemaMode === 'managed'`, before it reads `external.allowWrites`. |\n\nOne thing the premise check turned up that the dispatch did not anticipate: `packages/spec/src/data/driver/common.zod.ts` (`READ_ONLY_BELONGS_ON_DATASOURCE`) **already** carries the ruled sentence — \"grant the connection SELECT-only at the database instead, which is a real boundary rather than an application-layer flag (#4584)\". The spec-side prose was ahead of the docs; only the docs were missing it, which is what this PR fixes.\n\n## Changes\n\n**`content/docs/data-modeling/drivers.mdx`** — two new sections under *Multi-Datasource*:\n\n- **Read-only: grant it at the database, not in metadata.** A managed datasource has no platform read-only gate; read-only is a database account privilege. Includes a worked PostgreSQL `GRANT SELECT` role, the matching `defineDatasource` (credentials in `config` — the parse rejects an `external` block on a `managed` datasource), the DDL consequence a read-only account carries (no boot-time schema sync, no migrations), *Why the platform does not offer the flag* citing the exact `capabilities.readOnly` shape #4583 removed, *The one enforced write gate is federation-only*, and a table of what actually enforces what.\n- **Read replicas: the platform does not route.** The #4479 dual conclusion: no query path separates reads from writes, so there is nothing to route. Put replicas behind pgpool-II / ProxySQL / an RDS reader endpoint and point `config` there — the correct answer, not a stopgap.\n\n**`content/docs/data-modeling/external-datasources.mdx`** — §5 *Writes (double opt-in)* now states that the gate is federation-only and cross-links; *See also* links both new sections.\n\n**`packages/spec/src/data/datasource.zod.ts`** — the `capabilities.readOnly` tombstone said `Tracked in #4584.` It now carries the answer. **Prose inside a guidance string only** — no key, shape, default or validation behaviour changed, nothing pins the string, and `check:docs` confirms no generated page moves. Flagged here because the dispatch scoped this PR away from `.zod.ts` edits beyond prose; leaving a resolved issue described as \"tracked\" would have contradicted the docs this PR adds.\n\n**`examples/app-crm/src/datasources/crm.datasource.ts`** — the `crm_analytics` header comment records the ruling instead of waiting on it.\n\n**`.changeset/managed-datasource-readonly-documented.md`** — `@objectstack/spec` patch + `@objectstack/example-crm` patch. Added because the diff changes a published package's author-facing rejection message; the repo's `changeset-check` enforces on every unlabelled PR.\n\n## Gates\n\n| Gate | Result |\n| :--- | :--- |\n| `pnpm --filter @objectstack/spec build` | ✅ (run before regen — stale-dist trap #7122) |\n| `pnpm --filter @objectstack/spec check:docs` | ✅ 231 generated files in sync |\n| `node scripts/check-doc-authoring.mjs` | ✅ 374 files clean |\n| `vitest run src/data/datasource` (spec) | ✅ 41 passed |\n| `vitest run src/conversions` (spec) | ✅ 199 passed |\n| `vitest run lint-liveness-properties` (lint) | ✅ 28 passed |\n| `tsc --noEmit` (`@objectstack/example-crm`) | ✅ |\n| `check-empty-changeset` / `check-changeset-no-major` / `check-changeset-fixed` | ✅ |\n\n## Not touched\n\n`content/docs/releases/**` and `docs/adr/**` — untouched, per the standing rule. No schema shape change, no acceptance change, no platform gate built.\n\nCloses #4584\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01UdrNJcqv3XrDWbF3qWpkyv)_"
+}

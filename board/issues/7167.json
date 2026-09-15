@@ -1,0 +1,34 @@
+{
+  "number": 7167,
+  "kind": "issue",
+  "title": "One-time migration: transfer non-seam repo:objectui / repo:cloud cards from the objectstack backlog to their target repos",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-10T01:36:26Z",
+  "updated_at": "2026-08-10T04:52:34Z",
+  "closed_at": "2026-08-10T02:19:29Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7167",
+  "body": "## Maintainer ruling (2026-08-10)\n\n「同意」— ruling on the PM's proposal that execution cards live in the repo where the fix lands, with the existing transfer-lane stock migrated via GitHub issue transfer. Full ruling context and the standing-rule amendment are in #7165. **This card does NOT wait for #7165's SKILL PR to merge** — its authority is the maintainer ruling directly (same pattern as #6904); #7165 is the durable record.\n\n## Scope\n\nAll OPEN issues in objectstack-ai/objectstack labeled repo:objectui or repo:cloud, EXCEPT seam cards. Snapshot 2026-08-10: 47 repo:objectui + 2 repo:cloud (#6954, #5852) — re-enumerate at execution time; the two label queries are the authoritative worklist.\n\n**Seam criterion (stay in objectstack)**: the card's content is the cross-repo ordering itself — contract-first chains (a spec/contract change whose objectui/cloud adaptation must wait on an objectstack PR), console-bump linkage chores (#6162 family), anything whose Blocked-by line against an objectstack artifact is the substance. Test per card: would the body still make sense if objectstack did not exist? Yes = transfer; no = seam, stays. Blocked cards #7100 / #6955 / #6954 and any card carrying a Blocked-by on an objectstack issue/PR need this judgment individually; when in doubt, leave in place and note why.\n\n## Mechanics\n\n- GitHub issue transfer within the org (GraphQL transferIssue mutation, e.g. via gh api graphql; the MCP toolset has no transfer tool). Requires issues enabled on target — they are.\n- Thread, assignees and same-named labels carry over (pm:queue / finding / needs-user-decision / pm:blocked / target:v17 all exist in objectui and cloud). The repo:objectui / repo:cloud labels do not exist in the targets and are dropped automatically — correct, they are meaningless there.\n- Transferred issues get NEW numbers; old URLs redirect permanently, so existing references keep resolving.\n- Post-transfer checks: (a) spot-check open PRs whose bodies reference transferred numbers with closing keywords (Fixes #N) — repoint to the full new reference if the keyword must still auto-close; (b) verify no transferred card kept a dangling Blocked-by pointing at a same-repo shorthand number that now means something else — rewrite such lines to full owner/repo#number form.\n\n## Post-transfer grading\n\nThe objectui and cloud whole-repo seats grade the arrivals into their own backlogs — including the target:v17 four-class check per #6903's one-producer-per-backlog clause. Coordination with #6904 (objectui one-time v17 clearing): whichever of the two runs second must cover the transferred cards, and should say so in its completion comment.\n\n## Executor\n\nTriage seat (transfer is a routing action — single-producer territory), with the sibling seats doing post-transfer grading. Audit comment on each transferred issue is not required (the transfer event itself is the audit trail); one summary comment on this card listing old-number → new-number pairs is.\n\nNo domain:* label on this card — routing is the triage seat's single-producer territory."
+}

@@ -1,0 +1,35 @@
+{
+  "number": 7311,
+  "kind": "pull_request",
+  "title": "test(examples): pin the #7225 measurement — one persisted-row hook probe per example app (#7258)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "labels": [
+    "dependencies",
+    "size/l",
+    "skip-changeset",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-10T06:24:31Z",
+  "updated_at": "2026-08-10T07:36:36Z",
+  "closed_at": "2026-08-10T07:36:34Z",
+  "closed_by": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "merged_at": "2026-08-10T07:36:34Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/7311",
+  "body": "Fixes #7258\n\nLands the #7225 verification probes as permanent regression pins — one persisted-row hook test per example app. **Test-only: no `src/` change in either app.**\n\n## Why\n\n#7225 read the three shipped example hooks against `HookContextSchema.input`'s contract table (`insert` → `{ data, options }`, so the record lives at `ctx.input.data`), concluded all three silently no-op, and prescribed re-spelling them. Measurement answered the other way: all three work, and the prescribed fix would have turned the showcase's public web-to-lead insert into a hard refusal. One full dispatch was spent on that false alarm, and it was cheap to make because **nothing pinned these hooks' behaviour** — these are the reference-corpus apps AI authors copy from.\n\nThe missing link is `installFlatInput` (`packages/objectql/src/hook-wrappers.ts:446`, helper `:502`): `bindHooks` wraps every declarative hook in a Proxy presenting a **flat record view** over the envelope. The contract table describes the raw-engine surface accurately; an authored hook only ever meets the declarative one. That documentation gap is #7254, separately.\n\n## What\n\n- **`examples/app-crm/test/opportunity-stage-hook.test.ts`** — real `ObjectQL` over a real `SqlDriver` (better-sqlite3), the app's real `crm_opportunity` object and real `OpportunityStageHook`, bound the way `AppPlugin` binds it. Asserts the **persisted row**: insert closed_won → probability 100, insert closed_lost → 0, update into closed_won → 100, non-closed control untouched; plus a flat-`ctx.input` shape witness and an unbound-hook fixture.\n- **`examples/app-showcase/test/hook-body-persisted-writes.test.ts`** — the same stack plus the real `QuickJSScriptRunner` behind `hookBodyRunnerFactory`, i.e. the AppPlugin production wiring (`packages/runtime/src/app-plugin.ts`). Asserts persisted inquiry `status=new` / `source=web`, the trimmed task title, the \"caller supplied a value\" guard, and keeps the **in-sandbox shape probe** as the #7254 witness.\n\nAssertions land on rows read back out of the database. \"The handler ran and had no effect\" — the defect #7225 believed in — is invisible to anything that watches the handler instead of the row.\n\n**Cost, flagged and deliberate:** `examples/app-crm` gains two workspace devDeps (`@objectstack/objectql`, `@objectstack/driver-sql`) to host its harness; the showcase already had everything it needed (verified, not assumed). Lockfile diff is 6 lines, both `link:` entries.\n\n## The pins bite — reverse-verified, both apps, both directions\n\nEvery direction below was **measured**, then restored; `git diff` against `examples/*/src` is empty on this branch.\n\n**app-crm** (7 cases green on main):\n\n| local break | result |\n| --- | --- |\n| `allHooks = []` (hook unregistered) | **4 red** — the three probability cases + the bundle-registration case. `expected 50 to be 100`, `expected 90 to be +0`, `expected 40 to be 100`, `` `opportunity_stage_probability` must be in defineStack({ hooks }) `` |\n| `'closed_won'` → `'CLOSED_WON_TYPO'` | **2 red** — exactly the two closed_won cases; closed_lost stays green |\n| handler re-spelled to `ctx.input.data` (the #7225 prescription) | **7 green — unchanged** |\n\nThat last row is an **inverted direction, and it is honest rather than a hole**: on the code-handler path `data` is a wrapper key the proxy passes straight through, so both spellings really do work there. The spelling is only fatal inside a sandboxed `body`. The file says so in its header and points at its pair.\n\n**app-showcase** (6 cases green on main):\n\n| local break | result |\n| --- | --- |\n| both body hooks removed from `allHooks` | **4 red** — `expected null to be 'new'`, `expected '   spaced out   ' to be 'spaced out'`, the shape witness, the bundle-registration case |\n| `StampInquiryDefaultsHook` re-spelled to `ctx.input.data` (the #7225 prescription) | **3 red**, and with the #7225 signature verbatim: `hook 'showcase_stamp_inquiry_defaults' threw: TypeError: cannot read property 'status' of undefined` — the insert is refused, zero rows persisted |\n\nSo the showcase pin is the one that catches the spelling regression, which is the half that was a live public-form outage. Two cases stay green under unregistration by construction — the \"caller supplied a value\" guard and the unbound-hook fixture both assert an **absence**.\n\n## Premise check\n\nVerified at the branch point (`8fbed3b`) before implementing, per the same-day churn note: `examples/app-crm/src/hooks/opportunity.hook.ts` and `examples/app-showcase/src/data/hooks/index.ts` are live and unchanged from what #7225 measured, and all three hooks still work. No probe failed against current main, so there was nothing to report as a regression.\n\n## Changesets\n\nNo changeset. Test-only, and both example packages are `private: true` — this PR releases nothing, which is the textbook `skip-changeset` case (#4898). The `examples/app-crm/package.json` edit adds workspace-only devDeps consumed by the new test and by nothing that ships. `skip-changeset` applied on this PR.\n\n## Verification\n\n```\npnpm --filter @objectstack/example-crm --filter @objectstack/example-showcase test\n  examples/app-crm       Test Files 2 passed (2)   Tests  27 passed (27)\n  examples/app-showcase  Test Files 16 passed (16) Tests 164 passed (164)\n\npnpm --filter @objectstack/example-crm --filter @objectstack/example-showcase typecheck\n  examples/app-crm typecheck: Done\n  examples/app-showcase typecheck: Done\n\nnpx eslint (both new test files)       exit 0\nnode scripts/check-nul-bytes.mjs       OK (scanned 6672 text files)\n```\n\nBuild closure (`--filter ' PKG ^...' build`, suffix form) ran first in a fresh worktree, before typecheck or test.\n\nRefs: #7225 (the falsified card these probes come from), #7254 (the contract-table documentation gap), #7036 / #7222 (the app-todo twin, where the hook was genuinely unregistered).\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_015fkdTyGmMD5s8ZtEifvuGy)_"
+}

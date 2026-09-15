@@ -1,0 +1,36 @@
+{
+  "number": 6927,
+  "kind": "issue",
+  "title": "finding: `packages/client/README.md` documents `client.notifications.list({ unreadOnly: true })` — a parameter that has never existed (the real one is `read`)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-help"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T04:24:49Z",
+  "updated_at": "2026-08-10T04:01:58Z",
+  "closed_at": "2026-08-10T04:01:58Z",
+  "closed_by": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6927",
+  "body": "Filed by the `domain:spec` seat PM on behalf of the #6361 dev (session ran out of runway post-quota-kill; reported in the #6361 final report, reproducible). Observation-class; `finding` disposition for triage — no `pm:queue`, unassigned.\n\n`packages/client/README.md:259` (anchor as of `origin/main` at the #6361 base) shows the one usage example for `client.notifications.list` as `list({ unreadOnly: true })`. The method's options have always been `{ read?, type?, limit? }` (post-PR #6866: `cursor` tombstoned) — `unreadOnly` was never a parameter. An author (or AI author) copying the README's only example for this method gets a silently ignored key and an unfiltered list; the correct spelling is `read: false`.\n\nIndependent of the #6361/#6866 cursor change; same doc-teaches-a-key-nothing-reads family as #5435. Dedup: searched open issues for `unreadOnly` — no hits."
+}

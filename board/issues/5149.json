@@ -1,0 +1,36 @@
+{
+  "number": 5149,
+  "kind": "issue",
+  "title": "Conditional-visibility predicates (`visibleWhen` / `visibleOn`) fail OPEN and silently — a broken predicate is indistinguishable from no predicate",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "pm:queue",
+    "repo:objectui",
+    "target:v17"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T06:27:01Z",
+  "updated_at": "2026-08-10T02:13:09Z",
+  "closed_at": "2026-08-10T02:13:09Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 9,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5149",
+  "body": "## Summary\n\nWhen a form field's `visibleWhen` / `visibleOn` predicate cannot be evaluated, the console renders the field **visible**, with no error, no `console.warn`, and no diagnostic anywhere. Since \"visible\" is also what you get with no predicate at all, **a predicate that never works looks exactly like a predicate that was never written** — including to the author who just wrote it and is looking at the screen.\n\nThe natural consequence is that conditional-visibility bugs are undetectable by inspection and survive indefinitely. We found two live instances in one app in one afternoon, one of them shipped and unnoticed for months.\n\nMeasured 2026-08-04 against `@objectstack/console` shipped with `17.0.0-rc.1`, zh-CN console, fresh database, object create dialog (`type: 'tabbed'` form view with authored `sections`).\n\n## The failing-open path\n\nIn `framework-*.js`:\n\n```js\nfunction A(e, t, n, r, i) {                       // (predicate, values, DEFAULT, previous, extra)\n  if (e == null || (typeof e === 'string' && !e.trim())) return n;\n  try {\n    let o = a.evaluate(Ie(e), { record: t, previous: r, ... });\n    return o.ok ? o.value === true : n;            // not-ok  -> DEFAULT\n  } catch { return n; }                            // throw   -> DEFAULT\n}\n```\n\nand both call sites pass `true` as that default:\n\n```js\n// ui-components-*.js, per-field renderer\nif (!C.visible || (m != null && !x(m, L, /* default */ true))) return null;\n// framework-*.js\nvisible: e.visibleWhen == null || A(e.visibleWhen, t, /* default */ true, r, i)\n```\n\nSo *every* evaluation failure — parse error, unbound identifier, type error — resolves to \"show it\".\n\n## Repro 1 — an unbound identifier fails open (and the docs invite you to write one)\n\nValues are bound under **`record`**. A predicate written with bare field names therefore references unbound identifiers and never works:\n\n```ts\n// src/views/<object>.view.ts\nsections: [{ label: '审批', fields: [\n  // deliberately IMPOSSIBLE — this can never be true\n  { field: 'status', visibleOn: 'rating_number == \"__never__\"' },\n]}]\n```\n\n**Expected:** field never rendered.\n**Actual:** field rendered on every form, create and edit. Nothing logged.\n\nAdd the prefix and it works correctly:\n\n```ts\n{ field: 'status', visibleOn: 'record.rating_number != null && record.rating_number != \"\"' }\n```\n\n→ hidden on create (autonumber still empty), shown on edit. Correct, and this is the behaviour we now depend on.\n\nThe bare-name spelling is not a strawman — it is what a reader would infer, and we had **five** of them shipped in one view file (`disqualification_reason`, three duplicate-link lookups, a rating gate), all silently inert, so a lead create dialog was unconditionally showing four fields that were supposed to be conditional. Nobody noticed because the screen looks identical to \"not implemented yet\".\n\n## Repro 2 — a shipped, correctly-prefixed object-level predicate also fails open on an empty create form\n\n`crm_account.listed_market` declares, on the **object**:\n\n```ts\nvisibleWhen: P`has(record.is_listed_company) && record.is_listed_company`\n```\n\nThis survives to the wire intact — `GET /api/v1/meta/objects/crm_account` returns:\n\n```json\n\"listed_market\": { \"...\": \"...\", \"visibleWhen\": { \"dialect\": \"cel\", \"source\": \"has(record.is_listed_company) && record.is_listed_company\" } }\n```\n\n**Expected:** on the create dialog, with `是否上市公司` unchecked, `上市板块` is hidden.\n**Actual:** it renders, unconditionally.\n\nWe did not confirm the evaluator's internal failure, so treat this part as a hypothesis: the renderer seeds every rendered field name to `null` before merging form values, so on a blank create form `record.is_listed_company` is `null` rather than `false`, and CEL rejects a null in a boolean position — which lands in the same fail-open branch. If that is right, then **every `has(record.x) && record.x` predicate over a boolean is inert on create forms**, which is the single most obvious way to write one.\n\n## What we would like\n\n1. **Do not fail open.** For visibility specifically, a predicate that cannot be evaluated should either default to *hidden* or, better, be surfaced rather than swallowed. A field that wrongly disappears gets reported in minutes; a field that wrongly appears gets shipped.\n2. **Say something.** At minimum `console.warn` once per predicate with the source text and the evaluation error. The current `catch { return n }` discards the only evidence that anything is wrong.\n3. **Validate predicates at build time.** `objectstack validate` already walks expressions (ADR-0032). An identifier that resolves to nothing in the `{ record, previous, extra }` scope is statically detectable, and would have caught all five of our inert predicates before they shipped.\n4. **Document the binding.** `record.<field>` is the contract; the `FormFieldSchema` doc block does not say so, and nothing steers an author away from the bare name.\n5. Decide and document what a null-valued field means in a boolean position on a create form — `null` vs `false` is the difference between working and inert for the most common predicate shape there is.\n\nRelated, on the unification of these keys: #2642, #2902, #2904."
+}

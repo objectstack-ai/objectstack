@@ -1,0 +1,35 @@
+{
+  "number": 6530,
+  "kind": "issue",
+  "title": "[finding] `quick-reference.mdx` 的「Data Protocol (17 schemas)」是策展子集，而 `references/data/` 实有 29 个 schema 页；计数门只自校验、看不到这个差",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:devx"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T03:19:15Z",
+  "updated_at": "2026-08-10T06:12:59Z",
+  "closed_at": "2026-08-10T06:10:51Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6530",
+  "body": "在做 #6373（给 Postgres / Mongo Driver 两行补链接，PR #6519）时**顺带**发现，**非该单范围**，按 Prime Directive #10 独立记录。⛔ 未自我认领。\n\n## 观察\n\n`content/docs/getting-started/quick-reference.mdx` 的小节标题写作 `## Data Protocol (17 schemas)`，读起来是「Data Protocol 一共有 17 个 schema」。但 `content/docs/references/data/` 实际有 **30 个 `.mdx`**，除去分类索引页 `index.mdx` 外是 **29 个 schema 参考页**。\n\n以 `origin/main`（`e6a7e26`）实测，在该小节里**没有任何一行**指向的 data 参考页有 12 个：\n\n```\ncontext-tokens   date-macros      driver-common    driver-memory\ndriver-mysql     driver-sqlite    external-catalog feed\nfield-value      hook-body        seed             seed-loader\n```\n\n（`driver-postgres` / `driver-mongo` 原本也在这个未覆盖名单里，已由 #6373 / PR #6519 补上，故不计入。）\n\n其中 `driver-common` / `driver-memory` / `driver-mysql` / `driver-sqlite` 与刚补上的那两行是**同一个 driver 家族**、同一条 `build-docs.ts` 拍平规则产出的页，只是没有进表。\n\n## 为什么现有的门发现不了\n\n`scripts/check-quick-reference-counts.mjs` 校验的是「标题里的 `(N schemas)` 是否等于**它自己下面那张表**的行数」——是一个**自指**的一致性检查。表里少列 12 个页时，标题跟着写 17 就依然是绿的：\n\n```\n✓ content/docs/getting-started/quick-reference.mdx: 13 section(s), every \"(N schemas)\" heading matches its table.\n```\n\n也就是说，这张表与 `references/data/` 真实面之间的漂移，**没有任何门在看**。\n\n## 影响面（据实，不夸大）\n\n不会导致任何运行时错误，也不会产生坏链 —— 已列出的行都是对的。代价有两处：\n\n1. 标题的 `(17 schemas)` 对读者是**误导**：它描述的是这张策展表的行数，不是 Data Protocol 的 schema 数；\n2. 那 12 个页在这张「fast lookup」里拿不到入口。\n\n## 需要决定的是「意图」，不是「补行」\n\n⚠️ 这张表**可能本来就是策展子集**（只列常用协议），那样的话它没有 bug，只是标题措辞该改；也可能它的意图是完整索引，那样就是漏了 12 行。两种读法对应完全不同的动作：\n\n| | 若意图 = 策展子集 | 若意图 = 完整索引 |\n| :--- | :--- | :--- |\n| 动作 | 改标题措辞（例如去掉数字，或写成「常用 17 个」） | 补齐 12 行 |\n| 计数门 | 维持自指校验即可 | 应改为对 `references/{category}/` 实际面校验 |\n\n**不自评级别、不预设结论**，留待分诊判断意图。\n\n## 与已在分诊手上的 `connector-auth` 的关系\n\n#6373 正文辨明过 `connector-auth` 是「schema 存在但参考页不存在」，需要写一整页，处置留待分诊。本单方向**又不一样**：这 12 个是**参考页存在、表里没有行**。三者可以一起在同一轮里定「这张表到底该是什么」，但它们不是同一件事。\n"
+}

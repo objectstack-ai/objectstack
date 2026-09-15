@@ -1,0 +1,34 @@
+{
+  "number": 7282,
+  "kind": "issue",
+  "title": "metadata-fs watcher tests are merge-queue flaky, and #7208's 20s deadline hardening did NOT fix it — the event is suppressed, not late",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-10T04:47:55Z",
+  "updated_at": "2026-08-10T08:11:42Z",
+  "closed_at": "2026-08-10T08:11:42Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7282",
+  "body": "Filed from PR #7261 (an unrelated `packages/objectql` test-only change) after a merge-queue ejection.\nUnassigned — recording, not claiming.\n\n## The signature\n\n```\nFAIL test/fs-behavior.test.ts > FileSystemRepository — on-disk semantics\n     > chokidar: external file change emits an update event\n```\n\nConfirmed flaky per the triage bot's checklist item 2 — the same signature has now ejected **two\ndifferent PRs**, one of which does not touch `packages/metadata-fs` at all:\n\n| when (UTC) | PR | queue run | signature |\n|---|---|---|---|\n| 03:16 | #7208 | [31351599963](https://github.com/objectstack-ai/objectstack/actions/runs/31351599963) | `fs-behavior.test.ts` › chokidar external edit |\n| 03:42 | #7208 | [31352802812](https://github.com/objectstack-ai/objectstack/actions/runs/31352802812) | `watch-dot-root.test.ts` › dot-rooted external edit |\n| **04:33** | **#7261** | [31355694872](https://github.com/objectstack-ai/objectstack/actions/runs/31355694872) | `fs-behavior.test.ts` › chokidar external edit |\n\n## The part that matters: the hardening was already in place\n\n#7208's third-attempt patch (`3a9f5b880`, merged as `684ab22` at **04:12:38**) raised every positive\nwatcher wait to `EVENT_WAIT_MS = 20_000`, and its own comment set a standing rule: *\"if this attempt\nejects again on a watcher-timing signature… the flaky-family card gets filed.\"* This is that card.\n\nPR #7261's queue build was based on `b8e9fe27` (04:19:50), which **has `684ab22` as an ancestor**\n(verified with `git merge-base --is-ancestor`). Reading the file as actually built in the queue's\nmerge commit `5c6a299d`:\n\n```\n$ git show 5c6a299d:packages/metadata-fs/test/fs-behavior.test.ts | grep -n EVENT_WAIT_MS\n33:const EVENT_WAIT_MS = 20_000;\n125:    await Promise.race([collectorDone, sleep(EVENT_WAIT_MS)]);\n```\n\n**The test failed with a 20-second deadline.** So the diagnosis behind the hardening — \"queue load\nmakes the event late\" — is now falsified. A 6.7× deadline increase changed nothing, which is the\nsignature of an event that is **never delivered**, not one that is slow.\n\n## A mechanism that fits (read from source; not executed)\n\nTwo constants interact badly, and they are in production code rather than in the test:\n\n```ts\n// repository.ts — watcher\nusePolling: true, interval: 1000, awaitWriteFinish: { stabilityThreshold: 50, pollInterval: 20 }\n\n// repository.ts — self-write suppression, on every put()\nthis.selfWrites.add(file);\nsetTimeout(() => this.selfWrites.delete(file), 200);   // fixed wall-clock timer\n```\n\nThe test does `put()` (a self-write), sleeps 300ms to clear the 200ms suppression, then edits the\nfile externally and expects exactly one event.\n\nWith **polling at 1000ms**, chokidar does not observe the two writes separately — it compares state\nonce per tick, so a `put()` at t≈0 and an external edit at t≈300ms are both visible as *one* change\nat the t≈1000ms poll. Whether that single event is delivered or dropped depends on whether `file` is\nstill in `selfWrites` when the poll lands. Under queue load the 200ms `setTimeout` is a wall-clock\ntimer on a saturated event loop — if it fires late (or the poll lands early), the coalesced event is\n**suppressed as a self-write**, and because it was the only event the external edit will ever\nproduce, no later event exists to wait for.\n\nThat explains the 20s result exactly: waiting longer cannot recover an event that was swallowed.\n\nPredictions worth checking before trusting this: the failure should be all-or-nothing rather than\nmarginal (it is — `collected` is empty, not late), and it should get *more* likely as `interval`\n(1000ms) grows relative to the 200ms suppression window.\n\n## Suggested directions\n\nDeadline widening is already spent; these attack the actual coupling:\n\n1. **Make suppression content-keyed, not time-keyed** — clear `selfWrites` when the hash the watcher\n   reads matches the hash we wrote, so an external edit can never be mistaken for our own write no\n   matter how the timers land. Removes the race rather than widening it.\n2. **Have the test await the self-write's own settling** before making the external edit, instead of\n   `sleep(300)` guessing at the 200ms timer.\n3. **Lower `interval`** for tests so poll granularity stops coalescing distinct writes — narrows the\n   window but does not close it.\n4. Failing all that, quarantine the watcher-timing family so it stops ejecting unrelated PRs from the\n   merge queue.\n\n(1) looks like the real fix; (2) is the cheap one that would stop the bleeding.\n\n## Blast radius\n\nThis is not confined to `metadata-fs`'s own PRs — it ejected #7261, a one-file test-only change in\n`packages/objectql` with no dependency path to `metadata-fs` (which depends only on\n`@objectstack/metadata-core` and `chokidar`). Every ejection rebuilds every PR behind it in the\nqueue; the bot recorded **7 failed queue builds in 24h**."
+}

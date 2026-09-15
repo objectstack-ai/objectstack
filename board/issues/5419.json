@@ -1,0 +1,33 @@
+{
+  "number": 5419,
+  "kind": "issue",
+  "title": "console: the tenant's server-side `locale` (`/auth/me/localization`) is fetched but never seeds the UI language — first login is always browser-or-`en`",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "pm:queue",
+    "repo:objectui"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T10:44:33Z",
+  "updated_at": "2026-08-10T02:09:38Z",
+  "closed_at": "2026-08-10T02:09:38Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5419",
+  "body": "Found while implementing #5406 (locale persistence). Filing only; deliberately out of that issue's scope — #5406's ruling was localStorage-only, with server-side preferences left for a separate decision.\n\n### What\n\n`apps/console/src/LocalizationFetchProvider.tsx` already calls `GET /api/v1/auth/me/localization` (ADR-0053) and reads `{ currency, locale, timezone }` off the response — but it feeds only `LocalizationProvider`, i.e. currency/number/date **formatting**. The `locale` value never reaches the i18n layer, so the console's UI language is decided entirely client-side (after #5406: stored choice → browser language → `en`).\n\nPractical effect: a tenant whose configured locale is `zh-CN` still gets an English console on a new device / new browser profile / after clearing site data, until each user switches manually and re-establishes the local preference. The server already knows the answer at that moment and is asked for it on every boot.\n\nSpec side, `sys_user_preference` exists as a declared system object — `SystemObjects.USER_PREFERENCE`, documented as \"user preferences (theme, locale, etc.)\" — so a per-user server-side home for this is contemplated by the platform, but `@objectstack/client` exposes no read/write API for it today.\n\n### Why it is not just \"do it\"\n\nThis is a contract question, not a bug fix, which is why it is a separate issue:\n\n- **Precedence.** Does a server-side locale outrank a local explicit choice, or lose to it? (Reasonable reading: an explicit in-session choice wins for that browser; the server value seeds the first visit and syncs new devices.)\n- **Where it is stored.** Reusing `sys_user_preference` means a new client API surface (read at boot, write on switch) and a decision about whether the boot read blocks first paint — it would have to, or the flash-of-English it is meant to remove comes back. `/auth/me/localization` is currently a *cosmetic, never-fail-closed, retried-in-the-background* fetch precisely because nothing waits on it.\n- **Write path.** There is no endpoint today for a user to persist their own locale; that is a platform addition, not a console change.\n\nRecording it so the maintainer can decide whether cross-device language sync is wanted, rather than having a dev infer it from the adjacent code.\n"
+}

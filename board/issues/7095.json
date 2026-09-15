@@ -1,0 +1,32 @@
+{
+  "number": 7095,
+  "kind": "issue",
+  "title": "`engine.find()` still drops a `formula` ORDER BY silently — decide whether the engine refuses or keeps its internal-caller tolerance",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T14:51:11Z",
+  "updated_at": "2026-08-10T10:03:20Z",
+  "closed_at": "2026-08-10T10:03:20Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7095",
+  "body": "Filed from #6994's implementation (PR pending). Recorded, **not claimed**. Routing suggestion: `domain:engine-core` — this is a contract decision about `engine.find`, not a gate fix.\n\n## What #6994 closed, and what it did not\n\n#6994 refuses a non-dotted `orderBy` naming a `formula` field at **ingress** (`assertSortFieldsExist`, `400 INVALID_SORT`). That covers everything reaching `findData`: the REST list route, `POST /data/:object/query`, the export route (its `$orderby` funnels through `findData`), and the RPC dispatcher.\n\nIt does **not** cover a caller that reaches `engine.find()` directly — hooks, flows, reports, expand sub-reads. Measured on the #6994 branch **with the fix in place**, one script, real `SqlDriver` (better-sqlite3, on-disk) + real `ObjectQL` + the real protocol on top, five rows inserted `C A E B D`, `sort_key` a formula over `record.title`:\n\n```\nPROTOCOL  {\"sort\":\"sort_key\"}          REFUSED 400 INVALID_SORT: … a formula field on 'repro_contact' …\nPROTOCOL  {\"orderBy\":[\"sort_key\"]}     REFUSED 400 INVALID_SORT\nPROTOCOL  {\"sort\":\"-sort_key\"}         REFUSED 400 INVALID_SORT\n\nFORMULA   orderBy sort_key asc         [\"C\",\"A\",\"E\",\"B\",\"D\"]   engine.find direct — still silent\nFORMULA   orderBy sort_key desc        [\"C\",\"A\",\"E\",\"B\",\"D\"]\n   asc === desc (byte-identical)?      true\n```\n\nBoth halves in one run: the door refuses, the direct path still answers 200 in arbitrary order. PR for #6994 carries a test explicitly labelled `RECORD OF A KNOWN HOLE` pinning this — it records the **unfixed** behaviour and says it should go red the day this issue is closed.\n\n## The decision, not the patch\n\nThis is deliberately not filed as \"add the same check to the engine\", because the engine's posture here is documented and load-bearing in the opposite direction. `assertProjectionFieldsExist` states it in the protocol source: the engine's tolerance \"guards INTERNAL callers (hooks, flows, expand sub-reads, registry-less hosts) that never pass through this ingress\". `planFormulaProjection` acts on the same posture — it **drops** virtual formula names from `ast.fields` rather than refusing them. So making `engine.find` refuse is a new posture, not an extension of an existing one.\n\nOptions, all real:\n\n1. **`engine.find` refuses an unmaterializable `orderBy`.** One place, every driver and every caller covered. Cost: reverses a documented tolerance; any internal caller that currently sorts by a formula field starts throwing where it used to silently under-deliver. Needs a sweep of internal callers first.\n2. **`engine.find` drops it the way it drops virtual names from the projection, but observably** — e.g. via the existing `DroppedFieldsEvent` channel rather than silently. Keeps the tolerance, removes the invisibility. Cheaper, and consistent with `planFormulaProjection`'s existing behaviour.\n3. **Leave it at ingress.** The external door is the one an author can hit by hand; internal callers are `tsc`-covered code we own. Cost: the two halves of one contract answer differently, which is exactly the split #4226 was filed about on the other axis.\n\n⚠️ One trap worth writing down before anyone reaches for it: the engine *could* sort post-hoc, after `applyFormulaPlan` evaluates the formulas. That looks like \"make formula sorting work\" and is a trap — `driver.find` has already applied `limit`/`offset`, so post-sorting reorders an arbitrary page. It would appear to work on small result sets and be wrong the moment pagination is involved.\n\n## Also worth deciding here: one spelling of \"virtual\"\n\n\"Which field types materialise no column\" is currently spelled in six places, none of them `packages/spec`: `driver-sql`'s `fieldHasColumn` and `createColumn`, `driver-turso`'s `remote-transport`, `objectql`'s `planFormulaProjection` and `search-companion`, `plugin-audit`'s `VIRTUAL_FIELD_TYPES` — and now `metadata-protocol`'s `UNMATERIALIZED_SORT_TYPES` (#6994 added the sixth deliberately, local and documented, rather than opening a cross-package spec edit for one string). Note the spec's `COMPUTED_VALUE_TYPES` (`formula`/`summary`/`autonumber`) is **not** this set — it is the write contract, and `summary`/`autonumber` both get real columns and sort correctly. Consolidating is a cross-package change (#6298 cross-seat declaration) and is a candidate to fold into whichever option above wins.\n\nRefs: #6994 (the ingress half, PR pending), #6924 (the dotted hint text), #6673 (the SEARCH axis), #3821 (the backstop that swallows it), #4226 / #4256 (the family)."
+}

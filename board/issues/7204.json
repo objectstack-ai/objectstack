@@ -1,0 +1,36 @@
+{
+  "number": 7204,
+  "kind": "issue",
+  "title": "plugin-reports' `executeReport` rebuilds a 5-field subset of the execution envelope, dropping `accessible_org_ids` — a `group`-posture report silently under-reports",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-help"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-10T02:37:19Z",
+  "updated_at": "2026-08-10T05:41:33Z",
+  "closed_at": "2026-08-10T05:41:33Z",
+  "closed_by": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7204",
+  "body": "Out-of-scope observation from implementing #7135, filed rather than fixed — that card was bounded to annotation widening plus redundant-cast deletion, and the change below is a RUNTIME change with an enforcement consequence. This is the plugin-reports twin of #7141 (the plugin-audit one), same shape, different consequence.\n\n## Fact\n\n`packages/plugins/plugin-reports/src/report-service.ts` — `executeReport()` does not forward the caller's execution envelope to the engine read that produces the report. It rebuilds a five-field projection of it:\n\n```\n    const rows = await this.engine.find(report.object_name, {\n      where: q.filter,\n      fields: q.fields,\n      orderBy: q.orderBy,\n      limit,\n      // Reports execute with the caller's identity so sharing rules\n      // (if installed) apply. Falls back to system bypass only when\n      // the report definition was created by a system writer.\n      context: {\n        userId: context.userId,\n        tenantId: context.tenantId,\n        positions: context.positions ?? [],\n        permissions: context.permissions ?? [],\n        isSystem: context.isSystem ?? false,\n      },\n    });\n```\n\nThat comment states the intent exactly — the report must see the rows the caller would see interactively — and the projection is what stops it. #7135 widened this method's parameter ANNOTATION to the full `ExecutionContext` (so `context` here now genuinely holds the whole envelope); the body was deliberately left alone, because changing it is not inert.\n\n## The field that matters: `accessible_org_ids`\n\n`packages/objectql/src/engine.ts:2181` reads it straight off the execution context to widen the driver's native tenant scope:\n\n```\n    if (hasTenant && opts.tenantIds === undefined && this.tenancyPostureProvider?.() === 'group') {\n      const set = (execCtx as any)?.accessible_org_ids;\n      if (Array.isArray(set) && set.length > 0) {\n        opts.tenantIds = set.map(String);\n      }\n    }\n```\n\n`accessible_org_ids` is not in the projection, so `opts.tenantIds` is never set for a report. Per the ADR-0105 D2 comment immediately above that block, an absent set makes drivers \"fall back to equality: fail toward isolation, never toward exposure\".\n\n**So the direction here is under-reporting, not a leak** — and that is worth stating plainly, because it makes this a correctness bug rather than a security one. Under the `group` tenancy posture a user's read reach is their whole membership set; the same query returns that union in an interactive list view and collapses to active-org equality inside a saved or scheduled report. The report is silently short rows, with no error and nothing in the output saying so.\n\n`posture` (ADR-0095 D2), `org_user_ids`, `systemPermissions`, `onBehalfOf` and `timezone` are dropped by the same projection. `timezone` is read two lines up in the same engine method (`hasTz`), which governs date-dependent driver generation.\n\n## What I could not establish\n\nWhether any deployment currently runs the `group` posture with saved reports in use — I did not trace `tenancyPostureProvider` back to a real configuration, so the blast radius is unmeasured. What is definite is that the projection drops a field the engine reads by name, in a method whose own comment promises the caller's identity is what executes. Grading is triage's call — filed unlabeled.\n\n## Why the naive fix may not be right\n\n`context: context` is the obvious change, and #7141 records why that direction needs its own evidence in the sibling package: plugin-security's middleware MUTATES the operation context in place (`sc.__readScope = ...`), so a forwarded envelope can carry access DEPTH resolved for a different object. For reports the object of the operation IS `report.object_name`, so that specific hazard may not apply here — but the `isSystem` fallback in the projection (`context.isSystem ?? false`) is doing real work and must survive whatever replaces it, and `assertExportAllowed` runs against the un-projected context just above. Worth its own card and its own reverse verification rather than a rider.\n\n## Dedup\n\nSearched open issues for `executeReport` / report-service context projection, `accessible_org_ids` + projection, and plugin-reports + RLS: no hits. #7141 is the same shape in plugin-audit and is closed; it does not cover this file. Not inside #7135's completion scope — that card is annotation widening plus redundant-cast deletion with implementation bodies untouched, exactly as #6523's contract half separated from its consumer half. Standalone rather than a sub-issue.\n\nRelated: #7135 (where the annotation was widened and this was deliberately not folded in), #7141 (plugin-audit twin), #7070, #6523, #6206 (ruling).\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_015fkdTyGmMD5s8ZtEifvuGy)_"
+}

@@ -1,0 +1,36 @@
+{
+  "number": 7112,
+  "kind": "issue",
+  "title": "notify node form descriptor still says \"Requires sourceId.\" / \"Requires sourceObject.\" — the Studio form face of the #7085 describe drift",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-help"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T17:05:56Z",
+  "updated_at": "2026-08-10T03:11:03Z",
+  "closed_at": "2026-08-10T03:11:03Z",
+  "closed_by": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7112",
+  "body": "Out-of-scope finding from the #7084/#7085 sweep pack (PR #7111). Recorded unassigned — a different card class (form-descriptor face, `service-automation`), explicitly fenced out of that PR's scope.\n\n## Anchor\n\n`packages/services/service-automation/src/builtin/notify-node.ts:166` and `:170` (measured on `origin/main` @ `f5a9bc2f3`), the hand-written `configSchema` literal that drives the Studio form:\n\n```\ndescription: 'Object name of the record the notification links to (writes sys_notification.source_object). Requires sourceId.',\n...\ndescription: 'Record id the notification links to (writes sys_notification.source_id). Requires sourceObject. The inbox synthesizes a `/{object}/{id}` deep-link from these.',\n```\n\n## Why it is the same defect as #7085, on a different face\n\n#7085 fixed the spec Zod `.describe()` strings (PR #7111): the schema deliberately accepts the half pair and the executor DROPS a half-specified click-through target at execute time (the module JSDoc's recorded contract in `io-node-config.zod.ts`), so \"Requires ...\" was a phantom requirement. The descriptor literal carries the same phantom \"Requires ...\" wording and reaches a different reader — the Studio form author — where it is just as wrong: a half pair saves green, publishes green, and the link silently never renders (#2675's invisible-failure shape).\n\n## Why PR #7111 did not sweep it\n\n- The reconciliation gate (`io-node-form-zod-ledger.test.ts`) compares KEY SETS off `.shape`, not description strings — so the two faces do not fail any gate by disagreeing, and the descriptor was already drifted before #7111 (its `sourceId` description carries an extra deep-link sentence the Zod describe never had).\n- The dispatch fence for the sweep pack was exactly two fixes; copies on other faces were to be reported, not swept.\n\n## Suggested shape\n\nAlign the two descriptor `description` strings with the vocabulary PR #7111 borrowed from the module JSDoc (\"Only takes effect together with sourceId — a half-specified click-through target is dropped at execute time, so the inbox never renders a dead link.\"), keeping the descriptor's extra deep-link sentence if wanted. String-only; no key/type/required change, so the form-Zod key-set ledger is untouched.\n\n## Refs\n\n#7085 (the spec-face fix, PR #7111), #6762 (class specimen), #2675 (pair-only click-through), #4045 (form/Zod provenance split)."
+}

@@ -1,0 +1,35 @@
+{
+  "number": 4584,
+  "kind": "issue",
+  "title": "managed datasource 没有任何只读闸门：external.allowWrites 只管联邦库，本地库声明只读无处可写（#4583 移除 capabilities.readOnly 后的正式立项位）",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-02T08:57:15Z",
+  "updated_at": "2026-08-10T04:56:13Z",
+  "closed_at": "2026-08-10T04:56:13Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4584",
+  "body": "从 #4583 拆出，照 #4479 的先例：**退役 PR 负责删掉假合规的键，不负责就地发明一个机制。**\n\n## 背景\n\n`datasource.capabilities.readOnly` 在 #4583 里被移除——它读起来像安全属性，实际没有任何写路径读它，一个标着「只读副本」的 datasource 照常接受写入。\n\n移除时给作者的处方是 `external.allowWrites: false`。**但那个处方只覆盖一半场景。**\n\n## 缺口\n\n`ObjectQLEngine.assertWriteAllowed`（`packages/objectql/src/engine.ts`）：\n\n```ts\nconst ds = this.datasourceDefs.get(dsName);\n// No recorded definition, or an explicitly managed one ⇒ allow.\nif (!ds || !ds.schemaMode || ds.schemaMode === 'managed') return;\n\nconst dsAllows = ds.external?.allowWrites ?? false;\nconst objAllows = object?.external?.writable ?? false;\n```\n\n闸门在第一个 `if` 就对 **managed**（以及没声明 `schemaMode` 的）datasource 直接放行。`external.allowWrites` 是**联邦所有权**闸门——它回答的是「这个外部库归谁写」，不是「这个连接是不是只读」。\n\n所以对一个本地的、managed 的 datasource：\n\n- `capabilities.readOnly` —— 已删除，从来没生效过\n- `external.allowWrites: false` —— 不生效（在 managed 分支就返回了）\n- **没有第三个选项**\n\n`examples/app-crm` 里那个 `crm_analytics`（sqlite、无 `schemaMode`、label 写着 \"CRM Analytics Read Replica\"）就是这个形状：#4583 之后它不再**声称**自己只读，但也依然**无法**只读。\n\n## 要请的是决策\n\n**A. 建闸门。** 让 `assertWriteAllowed` 认一个与联邦无关的只读位。设计要点：位放在哪（datasource 顶层 `readOnly`？复用 `schemaMode`？）、和 `external.allowWrites` 的关系（两个都要过，还是短路）、以及 **isSystem / 迁移 / DDL 是否豁免**——一个连 schema sync 都拦的只读库多半不是作者想要的。\n\n**B. 不建，明确记录。** 承认「只读连接」不是平台提供的能力，只读靠数据库账号权限做（GRANT SELECT），并把这句话写进 datasource 文档。这也是一个诚实的答案——而且很可能是**更**诚实的那个：数据库侧的只读账号是真闸门，应用层的布尔位不是。\n\n我倾向 **B，除非有明确需求要应用层拦截**。理由是 #4583 的教训本身：`readOnly` 之所以危险，不是因为它不存在，而是因为它**看起来存在**。再造一个只拦 ObjectQL 写路径、拦不住直连 / 迁移 / DDL 的位，会重演同一个形状——只是这次带着一个能跑的测试当背书。\n\n如果选 A，请先回答「它拦不住什么」，并把答案写进 describe()，而不是等下一次审计来问。\n\n## 参考\n\n- #4583 —— 移除 `capabilities.*`（本 issue 的来源）\n- #4479 —— 同样形状的先例：`readReplicas` 移除后另立读写分离立项\n- #4410 / #4465 —— 把 `readOnly` 从 `config` 挪进 `capabilities` 的那两次搬家，都没让它生效\n- ADR-0049 enforce-or-remove / ADR-0015（schemaMode 所有权）\n\n未指派 —— 这是决策而非补丁，认领前先在下面说结论。"
+}

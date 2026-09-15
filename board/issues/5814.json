@@ -1,0 +1,34 @@
+{
+  "number": 5814,
+  "kind": "issue",
+  "title": "plugin-auth: `convertWhere()` 整体忽略 better-auth 的 `Where.mode: 'insensitive'`(SCIM 会发它)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T06:11:47Z",
+  "updated_at": "2026-08-09T18:44:45Z",
+  "closed_at": "2026-08-09T18:44:45Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5814",
+  "body": "实测于 `origin/main@1624f4a`,在实施 #5710 时发现。\n\nBlocked-by: #5702(`$icontains` 的执行面;今天写 `$icontains` 会被五个 driver 全部拒收/丢弃)\n\n## 测到的东西\n\nbetter-auth 1.7 的 `Where` 有第四个字段(`@better-auth/core/src/db/adapter/index.ts:324-343`):\n\n```ts\nmode?: \"sensitive\" | \"insensitive\" | undefined;   // @default \"sensitive\"\n```\n\n`packages/plugins/plugin-auth/src/objectql-adapter.ts` 的 `convertWhere()` 只读 `condition.field` / `operator` / `value`,**从不读 `mode`**。默认值是 `\"sensitive\"`,所以绝大多数调用不受影响 —— 但显式要求不敏感的调用,其要求被静默丢弃,实际大小写行为退化成「当前 driver 恰好怎么做」。\n\n## 谁会发 `mode: 'insensitive'`\n\n`@better-auth/scim`(`dist/index.mjs:566-576`):对 `caseExact === false` 的 SCIM 属性,解析出的 where 条件会带上 `mode: \"insensitive\"`。`userName` 正是这样一个属性(SCIM 的 `userName` 按 RFC 7643 是大小写不敏感的),而 SCIM 今天只映射 `eq`(`SCIMFilterOperatorMap = { eq: \"eq\" }`)。\n\n后果:身份提供方用 `userName eq \"Alice@example.com\"` 查一个以 `alice@example.com` 存下的用户时,匹配与否取决于 driver —— 在大小写敏感的后端上查不到,而 SCIM 语义要求查得到。SCIM 的典型消费路径是「先查、查不到就建」,所以症状是**重复用户**而不是报错。\n\n作用域:SCIM 默认关闭(`OS_SCIM_ENABLED`),所以今天只有开了 SCIM 的部署会碰到。\n\n## 为什么现在还修不了\n\n不敏感的**包含**匹配对应的算子是 `$icontains`,它今天是**纯声明面**:不在 `FILTER_OPERATORS`(`packages/spec/src/data/filter.zod.ts:1066-1081` 写明这是刻意分期),五个 driver 均不执行。所以在 #5702 给出执行面之前,adapter 无处可译。\n\n更麻烦的一半:SCIM 发的是 **`eq` + insensitive**,而词表里**没有**「大小写不敏感的相等」算子 —— `$icontains` 是包含不是相等。所以本单落地时需要先回答一个契约问题:\n\n1. 加一个 `$ieq`(词表扩张,要有真实业务拉动);\n2. 或者把 `eq + insensitive` 降为 `$icontains` 再在应用层收窄(语义不等价,会多命中);\n3. 或者判定「大小写不敏感的相等」由 SCIM 侧规范化(比如 `userName` 一律小写存储)来解决,adapter 侧不引入新算子。\n\n个人倾向 3 → 1 的顺序:先看 SCIM 的实际部署是否已经靠规范化解决;只有在真实业务拉动出现时才扩词表(初创聚焦原则)。这需要维护者裁决,不是实施细节。\n\n## 相关\n\n- #5710(同一函数的 `contains` 支译成裸 `$regex`;已修)\n- #5701 Q1=A(`$icontains` = ASCII-only 不敏感)/ Q2=A(`$contains` 家族大小写敏感)\n- #5702(driver 侧下译 + `$icontains` 执行面)\n"
+}

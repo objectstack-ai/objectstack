@@ -1,0 +1,30 @@
+{
+  "number": 6995,
+  "kind": "issue",
+  "title": "An `object` overlay write over a packaged object is silently discarded by `registerObject`'s ownership rule while `saveMetaItem` reports success",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T08:10:46Z",
+  "updated_at": "2026-08-10T09:36:22Z",
+  "closed_at": "2026-08-10T09:36:22Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6995",
+  "body": "Out-of-scope finding measured while scoping #6853 (registry heal / map-vs-contributors split). **Recorded, not claimed. Pre-existing.**\n\n## Fact (measured on `origin/main` @ `51f2bb8c3`)\n\n`applyObjectRegistryMutation` (`packages/metadata-protocol/src/protocol.ts:7870`) mirrors an accepted `object` overlay write into the registry with:\n\n```ts\nthis.engine.registry.registerItem(request.type, request.item, 'name');\ntry {\n    this.engine.registry.registerObject(\n        { ...(request.item as Record< string, unknown >), _provenance: 'org' } as any,\n        request.packageId || 'sys_metadata',\n    );\n} catch (err: any) {\n    console.warn(`[Protocol] registerObject failed for ${request.name}: ${err?.message ?? err}`);\n}\n```\n\n(generics spaced so the GitHub body sanitizer does not eat them)\n\n`SchemaRegistry.registerObject` (`packages/objectql/src/registry.ts:1148`) **throws** when an `own` contributor from a *different* package already holds the name. So whenever the row's `package_id` does not equal the packaged owner's package id — including the ordinary package-less row, which normalises to the `sys_metadata` sentinel — the second half of the write is thrown away, warn-logged, and the save still reports success.\n\nThe two registry views then disagree permanently:\n\n- `metadata['object'][name]` (written by `registerItem`) holds the **overlay** body, so `GET /api/v1/meta/object/:name` serves it;\n- `objectContributors` still holds the **package** body, and that is what `registry.getObject` resolves — the surface `assertObjectRegistered` and every data-CRUD dispatch reads.\n\nMeasured with the `protocol-delete-object-registry-heal.test.ts` harness (real `SchemaRegistry`, real `SysMetadataRepository`), a packaged `myapp_invoice` owned by `app.myapp` plus a package-less overlay save carrying only `name` + `overlay_only`:\n\n```\n[save warning] [Protocol] registerObject failed for myapp_invoice: Object \"myapp_invoice\" is already\n               owned by package \"app.myapp\". Package \"sys_metadata\" cannot claim ownership.\n[contributors] packageId=app.myapp ownership=own provenance=package\n               fields=[ ... name, amount, packaged_only ]      <- the PACKAGE body, untouched\n[metadata map] plain key \"myapp_invoice\" present               <- the OVERLAY body\n[getObject]    fields=[ ... name, amount, packaged_only ]      <- data plane never saw the overlay\n```\n\nThe save's own receipt reports success, and nothing in the response says the runtime discarded half of it.\n\n## Reachability\n\n- **Save path**: needs the documented operator escape hatch (`OS_METADATA_WRITABLE=object`) or an equivalent door, because both the protocol gate (`protocol.ts:8434`) and `SysMetadataRepository.assertAllowed` (`sys-metadata-repository.ts:1037`) refuse an overlay over an artifact-backed `object` otherwise (measured: `NOT_OVERRIDABLE`/403 on both tenant and control-plane kernels).\n- **Boot path**: `loadMetaFromDb` (`protocol.ts:11753`) makes the same `registerObject` call for every stored `object` row. There the throw *is* counted — `errors++` plus a `Failed to hydrate` warning (`protocol.ts:11789`) — so the boot leg is at least honest about it; the save leg is not.\n\n## Dispositions worth pricing (no recommendation forced)\n\n1. **Fail the save.** Turn the swallowed throw into a named refusal (the overlay cannot claim ownership of a name another package owns) so declared = enforced and the caller learns the write will not take effect. Cost: a write that \"worked\" before now 4xx-es; needs an error code + wording decision.\n2. **Register the overlay as a distinct contributor** rather than as a competing `own`, so the ownership rule is never reached and both layers coexist. This subsumes the finding but is the same contributor-model contract change #6853 is escalating — see that card's option set.\n3. **Document the split and leave it.** Cheapest; leaves a success receipt for a write the runtime ignores.\n\n## Related\n\n- #6853 (the delete-side half of the same map-vs-contributors split; this was measured while scoping it)\n- #6725 (`MetadataFacade.register('object', …)` writing where its own reads do not look)\n- #6808 / PR #6818, #6687, ADR-0029, ADR-0005\n"
+}

@@ -1,0 +1,36 @@
+{
+  "number": 6743,
+  "kind": "issue",
+  "title": "cli/driver-sql: `os migrate plan` 自称 dry-run,却仍会在全新项目上创建空数据库文件(#6469 的残余写副作用)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T13:55:59Z",
+  "updated_at": "2026-08-10T01:49:42Z",
+  "closed_at": "2026-08-10T01:49:42Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6743",
+  "body": "**发现于** #6469 的实施(PR 见下方链接)。#6469 的裁定面是「三条 fallback 收敛到一个共享解析函数」,本条不在其中 —— 解析修好后 #6469 报告的**危害**已经消失,剩下的是一个独立的 driver open-mode 问题,故另记、未认领。\n\n查重:按 `migrate plan` / dry-run / 空库 / `fileMustExist` / sqlite open mode 在本仓 open issues 与 open PR 中检索,0 命中(#6469 自身除外)。\n\n## 现象\n\n`os migrate plan` 自称 dry-run,#3917 之后连 boot 时的建表 DDL 与 artifact seed 都改成了「报告而不执行」。但它仍然会**在磁盘上创建数据库文件本身** —— sqlite driver 以默认的「不存在就建」模式打开目标路径。\n\n在 #6469 修复之前,这条是那个 bug 的放大器:`plan` 解析到一个谁都没在用的 `standalone.db`,把它建出来,然后在这个空库上报告全量 drift;第二次跑,磁盘上已经真有这么个文件,假报告看起来更像既定事实。\n\n#6469 落地后,`plan` 指向的是服务真正在用的库,所以**原报告的那条危害路径已经死了**。剩下的残余是:在一个**全新的、还没跑过任何东西的项目**里跑 `os migrate plan`,会留下一个 0 表的 `.objectstack/data/objectstack.db`(以及可能的 `-wal`/`-shm`)。\n\n复现(全新项目,从未 start/dev 过):\n\n```bash\nos build\nls .objectstack/data/ 2>/dev/null   # 不存在\nos migrate plan\nls .objectstack/data/               # 多出 objectstack.db —— 一个只读命令的写副作用\n```\n\n## 为什么仍值得记一笔\n\n危害等级比 #6469 低得多(不再有假报告,只是一个空文件),但性质没变:**一个声明为 dry-run 的命令留下了写副作用**。它同时让「这个项目还没有数据库」这个状态变得不可区分 —— 下一个命令看到文件存在,就不会再走首次初始化的判断。\n\n## 修复方向(未裁)\n\n核心问题是 sqlite driver 的 open 模式在「只读探测」与「正常 boot」之间没有区分:\n\n- **A** 给 `bootSchemaStack({ deferSchemaDdl: true })` 这条路径一个 read-only / `fileMustExist` 语义,目标文件不存在时**不建**,而是明确报告「这个项目还没有数据库,`plan` 无从 diff」(#3917 已经确立了 defer 这条路径,这里是把 defer 从 DDL 延伸到 open 本身);\n- **B** 在 CLI 层先 `existsSync` 探一次,不存在就短路成一条说明性输出,不 boot stack。代价是这个判断会与 driver 真正的 open 语义分成两处,容易漂移;\n- **C** 不动 open 模式,只在 plan 结束时清理自己刚建的空文件。最不推荐 —— 「建了再删」在崩溃/中断时留下残骸,而且掩盖了根因。\n\n倾向 A(修在 driver 的能力边界上,一处语义),但这牵涉 `@objectstack/driver-sql` 的公开 open 行为,应由维护者裁。\n\n相关:#3917(defer DDL / 占用守卫)、#6469(默认库解析统一)。"
+}

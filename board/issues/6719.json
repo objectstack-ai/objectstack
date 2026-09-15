@@ -1,0 +1,35 @@
+{
+  "number": 6719,
+  "kind": "issue",
+  "title": "`/data` domain 的 DomainHandlerDeps 替身答的不是 ADR-0112 信封，该架子测不出任何 error.code / httpStatus 缺陷",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-help"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T13:29:11Z",
+  "updated_at": "2026-08-10T08:31:23Z",
+  "closed_at": "2026-08-10T08:31:23Z",
+  "closed_by": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6719",
+  "body": "**来源**：#6649（`/share-links` catch 只读 `err.status`，PR #6718）实施时的越界发现。**观察类，未评级——交分诊**，只给实读事实。今天没有用户命中：这是覆盖盲区，不是错误答复。\n\n## 事实（核于 `origin/main` `d6d1a50be`）\n\n`packages/runtime/src/domains/data-path-object.test.ts` 构造 `DomainHandlerDeps` 替身时，三个错误出口给的都不是生产信封：\n\n```\nerror: (message: string, code = 500) => ({ status: code, body: { error: message } }),\nrouteNotFound: (route: string) => ({ status: 404, body: { route } }),\nerrorFromThrown: (e: any) => ({ status: e?.statusCode ?? e?.status ?? 500, body: { error: e?.message } }),\n```\n\n生产侧这三个出口都经 `packages/runtime/src/error-envelope.ts` 的 `apiErrorResponse` / `buildApiError`，答的是 `{ success: false, error: { code, message, httpStatus, details? } }`（ADR-0112 / #3842）。替身答的 `body.error` 是一条**裸字符串**，既没有 `success`，也没有 `code`，也没有 `httpStatus`。\n\n后果：凡是经这个架子驱动的 `/data` 域用例，**任何**信封层缺陷都观测不到——错误的 `error.code`、丢掉的 `httpStatus`、`details.code` 没被提升、乃至 `success` 字段整个缺失，在这里都不可能让用例变红。断言只能落到 `status` 与那条裸 message 上。\n\n## 与 #6649 的关系（同族，不同表面）\n\n#6649 修的是 `/share-links` 手写 catch 与共享映射器 `errorFromThrown` 分叉。修它的时候，`/share-links` 的架子（`share-links-enforcement-context.test.ts`）用的是**真** `apiErrorResponse` 和从真 `HttpDispatcher` 借来的**真** `errorFromThrown`，所以那边的 `code` + `status` 断言测的是生产规则。`/data` 这个架子是同一契约的另一份替身，走的是相反的方向。两者互不覆盖。\n\n对照物已存在：`packages/runtime/src/error-envelope.conformance.test.ts` 的 `expectConformantError` 把每个信封过 `BaseResponseSchema` / `ApiErrorSchema` / `envelopeViolations`；`makeDispatcher()` 也演示了如何从真 dispatcher 上取真方法，无需手写副本。\n\n## 为什么记为观察类\n\n替身的低保真度不会让任何请求答错——它只是让 `/data` 域的信封回归**无法被这套用例发现**。是否值得收敛（换成真 `apiErrorResponse` + 借真 `errorFromThrown`，或按 #4984 的\"幻影检查\"家族判定这些断言测的是替身而非生产），交分诊席判。\n\n*未指派、未 `pm:queue`——由 triage 席分诊。*"
+}

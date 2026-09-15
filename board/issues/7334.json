@@ -1,0 +1,35 @@
+{
+  "number": 7334,
+  "kind": "pull_request",
+  "title": "refactor(driver-sql): read the autonumber default from the contract, not a hardcoded fallback (#7263)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-10T07:21:59Z",
+  "updated_at": "2026-08-10T08:40:36Z",
+  "closed_at": "2026-08-10T08:40:35Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-10T08:40:35Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/7334",
+  "body": "Closes #7263. Execution half 3/3 of the maintainer's route-3 ruling on #6555.\n\n## What changed\n\n`{0000}` became a declared contract default in `@objectstack/spec/data`\n(`DEFAULT_AUTONUMBER_FORMAT` / `resolveAutonumberFormat`, landed by #7265), so\ndriver-sql stops writing the default down for itself.\n\n| Site | Final line |\n|:--|:--|\n| `sql-driver.ts` — import (symbol added to the existing `@objectstack/spec/data` import) | `:11` |\n| `sql-driver.ts` — `initObjects` | `:5356` |\n| `sql-driver.ts` — external-object registration path | `:5433` |\n\nBoth sites spelled the same four lines by hand; both are now\n`const fmt = resolveAutonumberFormat(field);`. No new dependency — `@objectstack/spec`\nwas already in `dependencies` and the subpath was already imported. Site 2's `#1603`\ncomment about honouring both spellings is retired to the resolver's own docstring,\nwhich carries it.\n\n## Exactness proof\n\nThe review question here is narrow: is the substitution *exact*? A differential\nharness ran the removed expressions and `resolveAutonumberFormat` over **484 field\ndocuments** — both spellings across 22 value shapes (absent key, `undefined`, `null`,\n`''`, non-empty strings, `'0'`, whitespace, numbers, `NaN`, booleans, arrays, objects,\na boxed `String`, `Symbol`, function, `BigInt`, null-prototype object).\n\n**484/484 identical.** Including the cases the card asked to be proven rather than\nassumed: `format: ''`, `autonumberFormat: ''`, both empty, `autonumberFormat: ''` beside\na real `format`, and non-string values in either key — all resolve to `{0000}` under\nboth old and new, and `DEFAULT_AUTONUMBER_FORMAT === '{0000}'` exactly.\n\nOne shape differs: a **`null`/`undefined` field** threw `TypeError` before and returns\nthe default now. It is unreachable — both sites evaluate `const type = field.type || 'string'`\nseveral branches earlier, which throws on a null field before the autonumber branch is\nentered. No behaviour change reaches a caller.\n\n## Gates\n\n| Gate | Result |\n|:--|:--|\n| Eight driver-sql autonumber suites | **8 files / 64 tests passed**, unedited |\n| `autonumber-seed-cross-side-parity.integration.test.ts` | **1 file / 5 tests passed** |\n| Full driver-sql package suite | **81 passed / 4 skipped (85 files), 1156 passed / 48 skipped** |\n| `typecheck` (`@objectstack/driver-sql`) | pass |\n| `eslint` (touched files) | pass |\n| changeset gates (empty / ADR-0087 / no-major) | pass |\n\nNo test was weakened: no case deleted, no assertion loosened, no retry, no `skip`. The\nonly test-file change is the one bounded prose exception — `sql-driver-autonumber-suffix.test.ts`\n`:167-173`, comment-only (mechanically verified: every changed line in that file starts\nwith `//`). It re-points at the declared default and **keeps** its note that the engine\nstill emits a bare `11`, which stays true until #7262.\n\n## Reverse verification\n\nThree faults injected at both call sites, predictions stated before measuring:\n\n| Fault | Predicted | Measured |\n|:--|:--|:--|\n| **A** — default dropped (undeclared → `''`) | 1 red: suffix `'11'` vs `'0011'` | ✅ exactly that — 1 failed / 63 passed |\n| **B** — `format` shorthand branch lost | broad red, ~7 of 8 files | ⚠️ **8 of 8 files**, 45 failed / 19 passed |\n| **C** — truthiness rule → bare `typeof` (the engine's `??`) | **no red** — no suite declares `format: ''` | ✅ 8 files / 64 tests still passed |\n\nFault B was redder than predicted: my survey grep missed the ES6 shorthand\n`{ type: 'autonumber', format }` in the suffix helper, so all eight suites exercise the\nshorthand spelling, not seven. The fixture was wrong, not the code.\n\nFault C is the load-bearing result: the subtlest wrong substitution — the one that\ndiffers from the driver's rule *only* on the empty string — leaves all 64 tests green.\nThe suites cannot see that case, which is exactly why the exactness claim rests on the\n484-document harness rather than on the suite.\n\n## Not in this PR\n\nThe engine half is #7262 (engine-core); `applyAutonumbers` and `packages/objectql` are\nuntouched. #6555 stays open until both halves land.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01TcsV4ES5JJjCZ9BLrfhTy8\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01TcsV4ES5JJjCZ9BLrfhTy8)_"
+}

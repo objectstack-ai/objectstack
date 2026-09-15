@@ -1,0 +1,32 @@
+{
+  "number": 7296,
+  "kind": "issue",
+  "title": "[finding] `@objectstack/verify` harness never reads `config.permissions` — an app's declared `isDefault` permission set is invisible to `bootStack`, so dogfood apps cannot test the #5491-prescribed baseline",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "finding"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-10T05:15:19Z",
+  "updated_at": "2026-08-10T05:30:46Z",
+  "closed_at": "2026-08-10T05:29:50Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7296",
+  "body": "Found and measured during cloud#1219 (the consumer-side fallout of #5491's `member_default` wildcard removal). Filed unassigned as a finding; the maintainer's cloud#1219 ruling (2026-08-10) names this as the upstream half that must exist for the migration prescription to be testable.\n\n## The fact\n\n#5491's Migration section prescribes: *\"Ship an app default profile. Mark a permission set `isDefault: true`…\"*. The CLI honors it — `packages/cli/src/commands/serve.ts:2008` reads `appDefaultPermissionSetName(config.permissions)` and passes `new SecurityPlugin({ fallbackPermissionSet })`.\n\nThe verify harness does not: `packages/verify/src/harness.ts` constructs a vanilla `new SecurityPlugin()` and never reads `config.permissions`.\n\nVerified empirically on cloud's `apps/ee-group-showcase` (cloud#1219): adding `definePermissionSet({ isDefault: true, … })` + `permissions:` to the app changed **nothing** — the same 6 of 37 acceptance cases still failed at the object gate.\n\n## The consequence\n\nAny dogfood app that follows #5491's own migration prescription cannot see its declared baseline take effect under `bootStack` — the only workaround is hand-constructing a `SecurityPlugin` in each suite, which is itself the \"custom security code\" the dogfood posture forbids. The prescribed migration is therefore untestable through the harness that exists to test app postures.\n\n## Suggested shape (for triage, not binding)\n\n`verify`'s harness resolves the app default profile the same way `serve.ts` does — one shared resolution helper, so the two cannot drift. A pin: an app declaring an `isDefault` set must observe it enforced under `bootStack`.\n\nRefs: cloud#1219 (measurement + ruling), #5491 / #5492 (the narrowing and its migration prescription), cloud#880 / #3541 (ADR-0105 dogfood posture)."
+}

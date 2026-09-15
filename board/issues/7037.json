@@ -1,0 +1,36 @@
+{
+  "number": 7037,
+  "kind": "issue",
+  "title": "examples/app-todo: `task_completion`'s recurrence branch writes a literal `DATEADD(...)` string into `due_date` — the function exists nowhere in the repo, so `create_record` is refused by the driver",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-help"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T10:43:58Z",
+  "updated_at": "2026-08-10T03:45:55Z",
+  "closed_at": "2026-08-10T03:45:55Z",
+  "closed_by": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7037",
+  "body": "Found while implementing #6882 (arming the `task_completion` record-change flow). Filed standalone: it is inside a node body, not the trigger wiring, and repairing it needs a decision about which authoring surface should compute the next due date.\n\n## The defect\n\n`examples/app-todo/src/flows/task.flow.ts`, `TaskCompletionFlow` node `create_next_task`:\n\n```ts\nconfig: {\n  objectName: 'todo_task',\n  fields: {\n    ...\n    due_date: 'DATEADD({completedTask.due_date}, {completedTask.recurrence_interval}, \"{completedTask.recurrence_type}\")',\n    ...\n  },\n},\n```\n\nTwo independent facts:\n\n1. **`DATEADD` does not exist.** `git grep -n DATEADD origin/main -- packages` returns nothing, and `packages/formula` registers no such function under any casing. It is not a CEL builtin here and it is not an ObjectStack formula function.\n2. **A `create_record` node's `fields` values are TEMPLATE-interpolated, not formula-evaluated.** The `{completedTask.x}` holes are filled and the surrounding text is passed through verbatim, so what reaches the engine is the literal string `DATEADD(2026-08-10, 1, \"daily\")`.\n\nThe write is then refused by the field's own coercion.\n\n## Measured\n\nReal kernel (ObjectQL + automation + record-change trigger + sqlite) with the #6882 repair applied, one **recurring** task transitioned into `completed`:\n\n```\n[record-change] bound flow 'task_completion' -> afterUpdate on 'todo_task'\n[automation] run flow=task_completion run=run_4e766d69... status=failed durationMs=70 selected=1 acted=0 skipped=0\nERROR Trigger-fired run of flow 'task_completion' failed (trigger 'record_change')\n  {\"error\":\"Node 'create_next_task' failed: create_record(todo_task) failed: Due Date must be a valid date (ISO-8601)\"}\n```\n\nThe non-recurring path is unaffected and runs green end to end (`start:success -> get_task:success -> check_recurring:success -> create_next_task:skipped`, run status `completed`), because edge `e4` routes past this node when `is_recurring != true`.\n\n## Reachability changed with #6882, the defect did not\n\nBefore #6882 the flow never bound, so this node never executed and the dead function text was inert. After #6882 the flow fires on every completion, so a **recurring** task's completion now produces a failed run with the message above instead of silently doing nothing. That is strictly more informative than the previous state (a run that never happened, reported nowhere), but the recurrence feature the node exists for still does not work.\n\n## Shape of the fix (the decision)\n\nThe flow needs \"previous due date plus N units\", and it is not obvious which surface should own it:\n\n- **A `script` node** (`config.function`, registered in `defineStack({ functions })`) computing the next date and handing it to `create_next_task` through a variable — this is the shape the showcase uses for computed values in a flow (`summarizeCompletedTask`), and a flow function is PURE (takes `inputs`, returns a value) with a later declarative node persisting it (#4396).\n- **An `assignment` node** — only if the expression dialect available there can do date arithmetic; needs checking against what `packages/formula` actually registers.\n- **A `formula` field on `todo_task`** (`next_due_date`) that the flow simply reads — moves the arithmetic to the schema, where it is also visible to list views.\n- **Drop the recurrence spawn** — if per-completion recurrence is not a semantic the example wants to demonstrate, the whole `create_next_task` node plus edge `e3` goes and the flow ends at `check_recurring`.\n\nWhichever it is, `DATEADD` should not survive in any of them: an invented function name in a shipped example app is exactly the shape an AI author copies.\n"
+}

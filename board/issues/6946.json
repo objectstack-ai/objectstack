@@ -1,0 +1,35 @@
+{
+  "number": 6946,
+  "kind": "issue",
+  "title": "[spec] Retire three zero-reader UI keys per maintainer ruling: PageHeaderProps.icon, PageCardProps.actions, RecordDetailsProps.layout (objectui#3829 / objectui#3818)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T05:42:39Z",
+  "updated_at": "2026-08-09T19:11:47Z",
+  "closed_at": "2026-08-09T19:11:47Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6946",
+  "body": "Maintainer ruling 2026-08-09 (decision-inbox round, 「全部接受」): objectui#3829 ruled route (c) — retire `PageHeaderProps.icon` and `PageCardProps.actions` upstream; objectui#3818 ruled the removal direction — retire `RecordDetailsProps.layout`. All three are spec-declared keys with **zero renderer read points** measured in objectui (see those cards for the full evidence), making them the ADR-0049 declared-but-unenforced shape on the platform contract.\n\n## Deliverable (spec-property-retirement playbook, one PR)\n\nFor each of the three keys, in `packages/spec`:\n\n1. `retiredKey()` tombstone (prescription sentence per the #6856 ruling: `to rewrite existing sources automatically.`);\n2. protocol-17 conversion (all three are authorable page/component metadata — stored sources must convert; `RecordDetailsProps.layout` additionally had published `auto|custom` semantics that were never implemented, so its conversion is a pure strip);\n3. ADR-0087 registry entries; regenerate baselines / forms / reference docs; liveness-ledger discipline per the playbook.\n\nPrecedent: #3809 (`PageCardProps.body`) — same objects, same shape.\n\n## Sequencing\n\n- objectui#3829 (drop the two parity-gate exemptions) and objectui#3818 (delete the `layout` input + the dead `inline|compact` branch) are **Blocked-by this card** and proceed on the next objectui pin bump after it lands.\n- ⚠️ The ADR-0087 registry edits make the implementing PR **maintainer-merged only** per the standing `docs/adr/**` discipline — no auto-merge, no agent queue entry.\n\nNo `domain:*` applied — routing is the triage seat's. (Expected lane: `domain:spec`.)\n\nRefs: objectui#3829, objectui#3818, #3809, ADR-0049, ADR-0087."
+}

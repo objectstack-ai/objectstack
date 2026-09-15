@@ -2,8 +2,8 @@
   "number": 17598,
   "kind": "issue",
   "title": "`AnalyticsDateRangeSchema`'s array arm admits shapes every consumer now refuses, and the one shared refusal sentence is false for them",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "claude[bot]",
@@ -13,8 +13,6 @@
   "labels": [
     "bug",
     "domain:spec",
-    "needs:contract-review",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -23,11 +21,15 @@
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-09-11T01:49:53Z",
-  "updated_at": "2026-09-15T02:23:40Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-15T03:30:30Z",
+  "closed_at": "2026-09-15T03:30:01Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 16,
+  "comments": 18,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/17598",
   "body": "⛔ **Filed by the `domain:services` execution PM seat** (#6021), session `session_01ToDPcx9AESFubJkDiFMtKW`, 2026-09-11T01:49Z. Both landing points are `packages/spec/src/data/analytics.zod.ts` ⇒ this is the **`domain:spec`** seat's. ⛔ Filed unlabelled: grading and routing are triage's, and an execution seat does not write `domain:*`. ⛔ Not claimed, ⛔ not dispatched.\n\n**Surfaced by the `os-dev` on #17124**, which reported both to the seat rather than filing them, because they sit behind that lane's `packages/spec` red line. PR **#17593** (from #17124) fixes the service-side divergence; these are the two halves it could not touch. Two items, one file, one lane — filed together deliberately, because the second is **caused** by the first being left as it is.\n\n## ① After PR #17593, the schema door is strictly LOOSER than every consumer\n\n`AnalyticsDateRangeSchema` (`packages/spec/src/data/analytics.zod.ts:326`) is a `z.union` whose array arm is a plain `z.array(z.string())` — **no length constraint**. So `['2026-01-01']`, `[]`, `['a','b','c']` and `[null,null]` are all schema-valid and reach the consumers.\n\nPR #17593 made **all four** analytics faces refuse anything that is not exactly two string bounds (`ObjectQLStrategy`, `NativeSQLStrategy`, the draft-preview evaluator, `DatasetExecutor.runCompare`), with one shared rule and the ADR-0112 `ANALYTICS_DATE_RANGE_UNRECOGNIZED` / 400 envelope. ⇒ **The shape now passes the contract door and is refused by every reader behind it.**\n\n⚠️ Tightening the Zod arm narrows a published accept set at the contract, which is the **maintainer's manual floor**, not a seat decision. This card is the place to take that decision, ⛔ not a request to make it.\n\n⭐ And the contract already states the rule in prose, which is what makes the gap a mismatch rather than an open question: `analyticsDateRangeRefusalMessage` says verbatim that *\"an explicit window is the two-element array `[start, end]` of ISO dates or `{date-macro}` tokens\"*, and #16322's **shipped** migration table instructs authors to write a single day as `['2026-01-20','2026-01-20']`. ⇒ Only the **type** is weaker than the sentence in the same file.\n\n## ② The one shared refusal sentence is FALSE for an array input refused behind the door\n\n`analyticsDateRangeRefusalMessage` (`packages/spec/src/data/analytics.zod.ts:284`) is the single shared wording. For an **array** input it returns *\"received an array with a non-string bound\"* and ends *\"Refused at the schema\"*. For `['2026-01-01']` refused by a face, **both clauses are false**: every bound present is a string, and it was refused *past* the schema, not at it.\n\n⇒ This is why PR #17593 reuses the shared **constructor** (so code and HTTP status keep one origin) but writes its **own sentence**, documented at the call site. That is the correct in-lane workaround and it is ⛔ not a fix: the repo now has one refusal vocabulary with two wordings, and the shared one is wrong for a case that is now reachable.\n\n⇒ Fixing the wording is a `packages/spec` write, and it folds naturally into ① — whoever tightens the arm decides what the sentence should say for each refusal origin.\n\n## Why the two belong on one card\n\nIf ① is taken (the schema refuses the shape), ② largely dissolves: *\"Refused at the schema\"* becomes true again and the array clause can be stated accurately for the remaining cases. If ① is declined (the shape stays schema-valid by design), ② becomes **more** important, because the shared sentence then permanently describes a refusal origin it does not have. ⇒ The two answers are coupled; splitting them would invite a wording fix that contradicts a later schema decision.\n\n## Dedup\n\nOne targeted semantic search over this repository including closed issues: **8 results**, none covering either item. The instrument discriminates — it returned the whole adjacent family: #17124 (the parent), #17596 (the conformance-kit gap, filed by the same dev), #17341 (a *different* prose-truth defect in `analytics-date-range.ts`, `domain:engine`, open), and the closed #16041 / #16178 / #8690 / #3650 / #14933. ⚠️ Stated with its limit: one semantic query on one channel is not a proof of absence.\n\n## Refs\n\n#17124 / PR #17593 (the service-side refusal, and the measurements behind both items) · #17596 (the conformance kit has no arity case — five faces platform-wide) · #16322 (the string arm's refusal and its shipped migration table) · #3650 (closed — the original \"no error, just every row ever recorded\") · `packages/spec/src/data/analytics.zod.ts:284` and `:326`\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"

@@ -1,0 +1,36 @@
+{
+  "number": 7038,
+  "kind": "issue",
+  "title": "finding: `TEST_DEBT['@objectstack/rest']` 的 note 仍写着 \"Also in DEBT\",但 #6905 已把 DEBT 条目删了",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-help"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T10:44:15Z",
+  "updated_at": "2026-08-10T04:35:41Z",
+  "closed_at": "2026-08-10T04:35:40Z",
+  "closed_by": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7038",
+  "body": "复核 #6905 落地情况时实测发现的残留。observation 级 —— 不影响任何门禁的判定,只误导读账的人。\n\n## 实测\n\n`scripts/check-type-check-coverage.mjs`(`origin/main`):\n\n```\n310:  const DEBT = {          → @objectstack/rest 已不在其中(#6905 按卡删除,正确)\n463:  const TEST_DEBT = {\n505:    '@objectstack/rest': {\n506:      errors: 163,\n507:      note: 'TS2835 x67 (NodeNext extensions), TS7006 x57, TS2554 x13, TS2550 x10. Also in DEBT. ...'\n                                                                              ^^^^^^^^^^^^^^^\n```\n\n`DEBT` 块(310–462 行)里**已无** `@objectstack/rest` —— 这正是 #6905 的交付项之一,做对了。但 `TEST_DEBT` 那条的 note 里仍留着 **\"Also in DEBT.\"**,这句话现在是假的。\n\n## 为什么值得记\n\n`TEST_DEBT` 的 note 是**给下一个来给这个包降账的人读的**。他会照着 \"Also in DEBT\" 去找一条不存在的 DEBT 条目,然后要么以为自己看错了账,要么以为有人误删了条目。#6905 的卡本身特意警告过**两本账不要互相污染**,而这句残留正是一处污染。\n\n同类先例:#6270(`errorResponseBase` 文件头把 `details.code` 说成线上位置)—— 同样是「代码没错,描述代码的那句话过期了」。\n\n## 修法\n\n删掉 note 里的 \"Also in DEBT. \" 一句即可(或改成 \"Graduated from DEBT in #6905.\"，把历史保留下来 —— 该 note 其余部分本来就是历史读数序列,后者更贴合这份 note 的写法)。**其余一字不动**,`errors: 163` 尤其不要碰(#6905 明令不动 TEST_DEBT)。\n\n## 关联\n\n#6905(删除 DEBT 条目的那张卡,已 closed-completed)· #4311(类型检查覆盖率总账)· #5278(TEST_DEBT 棘轮)· #6270(同类:过期的描述性事实)"
+}

@@ -1,0 +1,34 @@
+{
+  "number": 5852,
+  "kind": "issue",
+  "title": "ADR-0057 hierarchy DEPTH: the resolver's tenant isolation never engages — plugin-sharing passes `organizationId: null` while the active org rides in `tenantId`",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "pm:queue",
+    "repo:cloud",
+    "target:v17"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T08:11:58Z",
+  "updated_at": "2026-08-10T10:24:37Z",
+  "closed_at": "2026-08-10T02:12:39Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5852",
+  "body": "发现于 cloud#919 的 group-posture dogfood 探针（framework pin `06ba036270af1167345620954866aa0c8fbd1ecd`，真实 HTTP boot，`OS_TENANCY_POSTURE=group` + `@objectstack/organizations`）。**未提 PR——修复面在 spec 契约与 plugin-sharing 调用点，不在 cloud 的 showcase。**\n\n## 现象（实测，不是推断）\n\n`SharingService.resolveOwnerScopeIds` 这样调用可插拔的 hierarchy resolver：\n\n```ts\n// packages/plugins/plugin-sharing/src/sharing-service.ts\nconst ids = await resolver.resolveOwnerIds(\n  {\n    userId: me,\n    organizationId: (context as any).organizationId ?? null,\n    tenantId: (context as any).tenantId ?? null,\n  },\n  scope,\n);\n```\n\n在 resolver 位置挂一个 spy 转发到真实实现，抓到真实请求传进来的 context 是：\n\n```json\n{ \"userId\": \"LpwtDbO4c91DvsUl5xy5Yei7a50Ly92B\",\n  \"organizationId\": null,\n  \"tenantId\": \"97579948-c31a-4b55-a817-b2cfb4a86508\" }\n```\n\n即：**活动组织始终落在 `tenantId`，`organizationId` 恒为 null**——框架的 ExecutionContext 本来就以 `tenantId` 承载活动组织（`ExecutionContextLike { userId, tenantId, timezone }`；plugin-security 的 RLS 也是从 `ExecutionContext.tenantId` 取 `current_user.organization_id`）。\n\n而企业版 resolver（cloud `packages/security-enterprise/src/hierarchy/resolver.ts`）**只读 `context.organizationId`**：\n\n```ts\nconst org = context.organizationId != null ? String(context.organizationId) : null;\nconst ids = await this.computeOwnerIds(me, scope, org);\n```\n\n`org == null` 时它文档里写得很清楚的\"belt-and-braces 租户隔离\"整条链路被跳过：`withOrg()` 不加谓词、`unitsInOrg()` 直接透传、subtree BFS 不再限定 org。结果是 **owner set 跨组织构建**，与该 resolver 自己声明的语义（\"In multi-tenant it is the caller's active org, so the owner set is built ONLY from this tenant's units/positions/members\"）相反。\n\n## 造成的越权（实测）\n\n`group` 姿态、两个组织 A/B、对象 `sharingModel: 'public_read'`：\n\n| 主体 | 配置 | `POST /data/:obj/:idB/shares`（B 组织的记录） |\n|---|---|---|\n| 普通成员 + `writeScope: 'unit_and_below'`，BU 锚在 A，BU 树有跨 org 的 parent 链 | 联合可见 | **201（授予成功）** |\n| 同一主体，**去掉 BU 锚**（其余不变） | 联合可见 | 403 `PERMISSION_DENIED … requires record ownership or Modify All Data (ADR-0111 D1)` |\n\n对照行是关键：**翻转结果的正是 DEPTH 分支**，不是别的旁路。也就是说 ADR-0111 D1 DEPTH 在 `group` 姿态下把「跨组织墙的共享管理权」发了出去——而这恰是 ADR-0111 D1/D2 与 ADR-0105 D2 组合起来要挡住的东西（union 可见 ≠ 可管理，见 cloud#921 已落地的断言）。\n\n另一组实测（组织图完全良构、没有跨 org parent 链，只是同一个人在两个厂各有一个 placement）：\n\n```\nowner set, org A scoped  -> [lead]\nowner set, org B scoped  -> [lead, plantB]\nowner set, UNSCOPED      -> [lead, plantB]   <- 运行时实际走的这条\n```\n\n即使组织图良构，运行时的 owner set 也**不随活动组织变化**，恒为所有 placement 的并集。\n\n爆炸半径不止共享管理：`resolveOwnerScopeIds` 同样喂给 `matchesOwnerScope` → `canEdit` / `canDelete` / `buildWriteFilter`。在探针那个 app 里数据面写入另被 `member_default` 的 `owner_only_writes`（keyed on `created_by`）挡下，所以只观测到共享管理这一路；但凡权限集不带这条 owner-only RLS 的部署，跨组织的 edit/delete 同样会被放行。\n\n## 为什么它没被现有测试抓到\n\nresolver 自己的单测（cloud `packages/security-enterprise/src/hierarchy/resolver-org.test.ts` 等）**手工构造 `{ userId, organizationId }`**，喂进去的是运行时从不产生的形状，所以隔离逻辑绿着；framework 侧 `canManageShares` 的 DEPTH 单测用 stub resolver，也看不到这一层。跟 framework#3695（authority-less gate context）同一族：单测喂的 context 与真实 seam 产生的 context 不是一个东西。\n\n## 根因判断与修复方向（建议，未实施）\n\n契约本身是含糊的——`HierarchyScopeContext` 同时声明 `organizationId?` 和 `tenantId?`，**没有说哪一个是权威**，于是 producer 只填了 `tenantId`、consumer 只读了 `organizationId`，两边各自\"符合契约\"。\n\n建议按 contract-first 修在 spec + producer，而不是在 consumer 加 `?? tenantId` 兜底（那正是宽容消费者模式：契约仍然含糊，下一个 resolver 实现还会踩）：\n\n- **A（推荐）**：`HierarchyScopeContext` 明确单一权威字段并写进 doc（保留另一个作为 deprecated 别名或直接删掉），`resolveOwnerScopeIds` 按该字段填充（`context.tenantId` 是框架里真实承载活动组织的那个）。同时给 plugin-sharing 补一条断言：真实 exec context 进来时 resolver 收到的 org 非空。\n- **B**：cloud `HierarchyScopeResolver` 读 `organizationId ?? tenantId`。一行修好当下的洞，但契约仍然含糊——不推荐单独做。\n\n无论走哪条，cloud 侧 `@objectstack/security-enterprise` 需要同步；建议把「resolver 实际收到的 org 非空」做成门，否则这条隔离再次静默失效时没人会知道。\n\nRefs: framework ADR-0057、ADR-0111 D1 DEPTH、ADR-0105 D2/D6；cloud#919、cloud#921。\n"
+}

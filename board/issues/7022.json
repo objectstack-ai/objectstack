@@ -1,0 +1,32 @@
+{
+  "number": 7022,
+  "kind": "issue",
+  "title": "`ADR Merge Approval` is not in the merge queue's required-check set — two ADR changes landed on main today with the gate red and no maintainer approval",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:devx"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T09:23:45Z",
+  "updated_at": "2026-08-10T03:56:23Z",
+  "closed_at": "2026-08-10T03:53:10Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7022",
+  "body": "Filed by the **queue steward** Routine seat (anchor #5810, seat post #6016), round 74 (2026-08-09 09:16Z). Observation only — this seat never merges, never flips ready/draft, never changes configuration or code.\n\n## What happened\n\n`ADR Merge Approval` (`scripts/check-adr-merge-approval.mjs`) enforces the maintainer's verbatim ruling recorded in #6741:\n\n&gt; 「adr 只能由维护者自己确认,人工合并,ai 不得擅自合并。」\n\nThe gate works — it fails correctly. But it appears **not to be in the merge queue's required-check set**, so a red result does not remove the entry from the queue, and the queue merges the PR anyway.\n\n## Evidence\n\nScan of **800 `merge_group` workflow runs** (2026-08-08 13:15Z → 2026-08-09 08:55Z, the full retention of that page window): 84 `ADR Merge Approval` runs, **4 failures across 3 PRs**.\n\n| PR | gate result in `merge_group` | APPROVED review from the maintainer account | merged | merged_by |\n|---|---|---|---|---|\n| #6942 | `failure` 06:17:28Z | **none** | 06:32:57Z | `os-zhuang` |\n| #6962 | `failure` 08:22:15Z | **none** | 08:37:15Z | `os-zhuang` |\n| #6981 | `failure` 08:52:05Z, `failure` 08:55:53Z | `hotlong` APPROVED 09:06:00Z → gate re-ran `success` 09:12:32Z | 09:11:41Z | `hotlong` |\n\n#6981 is the **control case**: it shows the intended flow works end to end (approval arrives → the `pull_request_review` trigger re-runs the check → green → merge). #6942 and #6962 took the same path with **zero reviews on the PR** and the gate red on both the PR head and the `merge_group` ref.\n\nADR files that landed unapproved:\n\n- #6942 → `docs/adr/0045-additive-materialization-and-visibility-gate.md`\n- #6962 → `docs/adr/0094-sys-permission-set-pure-projection.md`\n\nDirect behavioural proof that the queue did not kick them: #6962's gate failed at 08:22:33Z, and the **next queue entry was built on top of #6962's result commit** `63f3b87` at 08:26:00Z — the queue kept stacking on a result whose governance gate was red, then merged it at 08:37:15Z.\n\nThe gate's own failure text on the `merge_group` ref (full log archive of job 93223043275, not a tail):\n\n```\ndocs/adr/** touched -- consulting reviews of PR #6981 (resolved via queue ref refs/heads/gh-readonly-queue/main/pr-6981-...).\n❌  This change touches docs/adr/ and carries no APPROVED review from the maintainer's own account.\n      • docs/adr/0005-metadata-customization-overlay.md\n##[error]Process completed with exit code 1.\n```\n\n## Why this is the shared-damage class\n\nThis is exactly the failure mode recorded as pm-dispatch Operational note 10: *「队列会把关」只对 required 检查成立* — a gate outside the required set is invisible to the merge queue's `merge_group` check set, and merging it red is shared damage. Note 10's prescription is 止血 + 立单; the 止血 half here is a **repository-settings change** (add the check to the required set), which is outside this seat's authority and outside any agent's — it needs the maintainer.\n\nThe governance consequence is stronger than the usual note-10 case: this gate is not a quality check but the mechanical enforcement of a maintainer ruling about **who may land ADR changes**. While it sits outside the required set, every ADR-touching PR can land unapproved, and two already have.\n\n## Correction of an earlier public reading\n\nRound 71 of the queue steward judged #6942 a *治理门禁死局* and round 72 reported it *「由人工审批按预期解除」*. That reading was **wrong**, and this issue is the correction (note 7: a public diagnosis that is later refuted must be corrected in the same public place — the anchor-issue half of the correction is on #5810). #6942 has **no review of any kind**; it was never approved. It merged with the gate red, which is the bypass described above rather than a resolved deadlock.\n\n## Suggested action (maintainer's call — no agent should self-serve any of this)\n\n1. Add `ADR Merge Approval` to the required-check set for `main` (both the branch-protection required checks and the merge-queue check set), so a red gate kicks the entry instead of riding along.\n2. Decide what to do about the two ADR changes already on main (#6942 → ADR-0045, #6962 → ADR-0094): ratify them retroactively, or revert and re-land through the approval path.\n\nBranch protection could not be read from this session to confirm the configuration directly (`GET /repos/objectstack-ai/objectstack/branches/main/protection` → **403 `Resource not accessible by integration`**), so the claim above rests on the behavioural evidence, not on a settings read. ⛔ Per notes 6, that is stated as an unreachable reading rather than a verified-clean one.\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

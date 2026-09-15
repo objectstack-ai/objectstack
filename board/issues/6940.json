@@ -1,0 +1,34 @@
+{
+  "number": 6940,
+  "kind": "issue",
+  "title": "[finding][spec] `strictness-ledger.test.ts`'s `z.object(…).strict()` fixture is a borrowed live site on a treadmill — it has moved three times in three PRs, and the #4001 campaign's own direction is to convert every remaining carrier",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-help"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T05:09:01Z",
+  "updated_at": "2026-08-10T04:16:36Z",
+  "closed_at": "2026-08-10T04:16:36Z",
+  "closed_by": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6940",
+  "body": "Observation-class. Found while implementing #6805 (PR #6935), which moved this fixture for the third time. Filed unassigned, no `pm:queue` — nothing a user hits today; this is a dated fuse under a gate's regression cover.\n\n## The mechanism\n\n`packages/spec/scripts/strictness-ledger.test.ts` has a case named *\"reads the OLDER `z.object(…).strict()` spelling as strict too\"*. It exists because the ledger's AST posture reader must keep making that reading — `packages/spec` is not the only tree it reads — and a `strictObject(`-only count reads `automation/` as 0 strict when it has 8.\n\nTo make the reading, the test picks a **real live site** in the tree and asserts its `posture`/`idiom`. That site is borrowed, not owned. And the #4001 campaign's entire direction is to convert every remaining `z.object(shape, { error }).strict()` carrier to `strictObject`. So each conversion wave evicts the fixture:\n\n| Fixture | Evicted by |\n|---|---|\n| `security/permission.zod.ts` (four sites) | #5593 migrated all four |\n| `TenancyConfigSchema` (`data/object.zod.ts`) | #6619 / PR #6804 folded its map |\n| `ObjectCapabilities` (same file) | #6805 / PR #6935 folded its map |\n| `PerOperationRequiredPermissionsSchema` (same file) | — current |\n\nThree moves in three PRs. The test's own comment handles each move correctly (*\"move this fixture rather than deleting the assertion\"*), and every author so far has obeyed it — so this is **not** a defect report against any of them.\n\n## Why it is still worth recording\n\nTwo properties make the treadmill different from ordinary churn:\n\n1. **The instruction's cost rises as the population falls.** Today `data/object.zod.ts` still has other `z.object(…).strict()` sites. The campaign's stated goal leaves fewer each wave. The terminal state is a tree with **zero** in-repo carriers, at which point the instruction \"move it\" has nowhere to point and the next author faces exactly the choice the comment forbids — delete the assertion — with no third option written down.\n2. **The current carrier is better but not immune.** `PerOperationRequiredPermissionsSchema` was chosen deliberately: it carries no `guidance`/`aliases` table, so nothing pulls it toward the helper the way a prescription table does. That is a reason it is *unlikely* to be converted, not a reason it cannot be. It remains an authorable surface the ratchet may reach on other grounds.\n\n## Shape of a fix (non-binding)\n\nThe reading under test is a property of the **reader** (`scripts/lib/strictness-ledger.ts`), not of any file in the tree. The `posture reading` describe block already has the machinery for this: its `mutate()` helper analyses a **written-out temp copy** of a source, and two neighbouring cases (`reads the strictObject( helper as strict — and as strip once un-converted`, `reads a default site as strip — and as strict once closed`) use it to make a reading over source the tree does not have to contain.\n\nSo the same case could read a small **owned fixture** (a temp file, or a `__fixtures__` source) spelling `z.object(shape, { error }).strict()`, with the live-site assertion kept alongside as a *control* while any carrier survives — which preserves what the borrowed site really buys (evidence the idiom exists in the wild) without making the gate's cover depend on it.\n\n⚠️ Explicitly NOT proposing to drop the live-site reading. That reading is what connects the instrument to reality; the point is only that it should not be the **sole** carrier of the assertion.\n\n## Not in scope / dedup\n\n- Not a defect in #5593, #6619/PR #6804, or #6805/PR #6935 — each moved the fixture as instructed and each added or kept a control.\n- Duplicate search before filing (`strictness ledger fixture z.object strict`, `strictness-ledger.test.ts posture reader fixture`, `strictness ledger fixture borrowed site`): zero open hits.\n- Routing note: the file lives under `packages/spec/scripts/`, and the suggested change is to gate machinery rather than to an authoring surface — hence `domain:spec-tooling`. Triage decides.\n\n## Provenance\n\nMeasured at PR #6935's head while relocating the fixture; the eviction history above is read from the test's own comment chain plus the #5593 / #6619 / #6805 diffs."
+}

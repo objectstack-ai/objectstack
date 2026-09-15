@@ -1,0 +1,35 @@
+{
+  "number": 7213,
+  "kind": "issue",
+  "title": "[approvals][console] 「待我审批」有三个并存入口、三套不同 UI —— 其中 sys_approval_request 原生视图是无决策动作的开发者原始表",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "approvals",
+    "enhancement"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-10T02:59:30Z",
+  "updated_at": "2026-08-10T08:20:24Z",
+  "closed_at": "2026-08-10T06:48:21Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7213",
+  "body": "在应用项目（v17.0.0-rc.5，Console + plugin-approvals）实测中发现：同一个「我有待审批的事」在 Console 里同时存在**三个入口**，三套完全不同的 UI、不同的词表、不同的能力，其中一个入口是**没有任何决策动作的开发者原始数据表**。终端用户无法判断哪个才是\"正确\"的入口。\n\n下面按入口逐一列事实（同一条待审批记录，同一个账号）。\n\n---\n\n## 入口 A —— 首页「待办事项 → N 条待审批」→ 审批中心\n\n路由：`/_console/apps/setup/system/approvals`\n\n- 标题「审批中心 / 查看并处理审批请求」，tabs：`待我审批(8) | 我发起的 | 全部`，带搜索 + 流程/对象筛选 + 排序。\n- 列表列：**审批事项**（流程节点中文名，如「QIF 质量信息反馈单审批 / 质检部部长审批」）、**记录**（业务编号 + 对象中文名）、**申请人**、**状态**（`待审批`）、**提交时间**。\n- 点行开右侧抽屉：记录摘要字段 + 节点进度条（① 质检部部长审批 → ② 多部门并行会审 → ③ 工厂长审批）+ 「等待以下审批人」+ 审批动态 + 回复框 + 决策按钮 + 「上一条 / 下一条」翻页。\n\n这是三者中唯一完整、且面向业务语义的一套。**但它挂在 `setup` 应用（系统设置）下面** —— 而日常审批是业务用户的高频操作，业务角色一般不会开放系统设置应用的访问权；也没有办法把这个页面挂到业务应用自己的导航里。\n\n## 入口 B —— 首页待办里的通知 →（业务对象）记录页\n\n路由：`/_console/apps/&lt;app&gt;/&lt;object&gt;/record/&lt;id&gt;`\n\n- 记录页头出现「批准 / 驳回」按钮；页头字段区有「审批状态 = 审批中」。\n- 阶段条是**流程节点**：`① 质检部部长 | ② 多部门并行会审 | ③ 工厂长 | 归档 | 审批驳回`。\n- 详情区另有「审批中·可编辑」「撤回审批」。\n\n第三套视觉与信息组织，和入口 A 的抽屉不共用摘要/决策组件。\n\n## 入口 C —— 账户应用 → 审批请求 → 「我的待办」\n\n列表路由：`/_console/apps/com.objectstack.account/sys_approval_request/view/my_pending`\n\n这是 `sys_approval_request` 的**原生对象列表**，呈现的全是开发者视角的原始值：\n\n| # | 来源 | 对象 | 记录 ID | 当前步骤 | 提交人 |\n|---|------|------|---------|----------|--------|\n| 1 | `flow:qif_approval` | `os_..._qif` | `-2kQ8hM_wiI5xPrC` | `lv1_qc_director` | marchtian |\n\n点进记录页 `/_console/apps/com.objectstack.account/sys_approval_request/record/areq_&lt;uuid&gt;`：\n\n- 标题是 `flow:qif_approval · -2kQ8hM_wiI5xPrC`；\n- 状态显示 `待处理`；阶段条是**请求状态**：`待处理 | 已批准 | 已拒绝 | 已撤回 | 已退回修改`；\n- 字段：`请求 ID = areq_…`、`当前步骤索引 = 0`、`FLOW RUN = run_&lt;uuid&gt;`、`FLOW NODE = lv1_qc_director`；\n- 「待审批人」渲染成**裸用户 ID**（`airUFxCipivl1VYMACC…`），同 #4365 的形态；\n- **整页没有批准 / 驳回 / 任何决策入口** —— 用户从「待我审批」点进来后只能原路退出。\n\n---\n\n## 汇总的问题\n\n1. **入口分裂**：同一件事有 3 个并存入口（首页待办、setup 下的审批中心、账户应用的审批请求），命名各异（「审批中心」/「待我审批」/「审批请求 · 我的待办」/「待办事项」），没有一个是被平台明确指定的\"正确入口\"。\n2. **唯一完整的入口在管理后台里**：审批中心位于 `setup` 应用，业务用户通常没有该应用的访问权；也无法挂到业务应用导航。\n3. **`sys_approval_request` 的原生视图直接面向终端用户暴露**：显示流程 id / 对象 API 名 / 记录 ID / 节点 id / 裸用户 ID，且记录页无决策动作，是一条死路。如果这张表定位为系统内部实例表，它不应该出现在终端用户的「待我审批」导航里；如果它要面向用户，就得渲染人类可读标签并带上决策动作。\n4. **词表不统一**：同一条请求，审批中心显示 `待审批`，`sys_approval_request` 显示 `待处理`；阶段条一处是流程节点、一处是请求状态，同样的横条控件表达两种完全不同的轴。\n5. **计数分散**：首页「8 条待审批」、审批中心 `待我审批 8`、铃铛 `9+`，用户侧同时看到多个不一致的数字。\n\n## 期望（方向，不指定实现）\n\n- 收敛出**单一**「我的审批待办」入口，并允许挂载到任意业务应用的导航，而不是只存在于 `setup`；\n- 三处（待办卡片 / 审批中心抽屉 / 业务记录页头）复用同一套「记录摘要 + 节点进度 + 决策」组件；\n- 状态、阶段的词表跨入口统一；\n- `sys_approval_request` 的可见性与呈现按上面第 3 点明确定位。\n\n## 环境\n\n- `@objectstack/*@17.0.0-rc.5`，Console 预览版，zh-CN。\n- 来自应用项目的实测；截图在内部工单里，需要的话可以补贴（对象/流程名已在上文脱敏为通用形式）。\n\n---\n\n## PM epic registration (`pm:epic`) — ✅ CLOSED OUT 2026-08-10\n\n- **Epic PM session**: `session_01L9U1G2piXmYrhYQX96XUyv` — registered 2026-08-10, maintainer-directed dispatch (plan in the triage comment below).\n- **Queue**: five sub-issues, all merged and closed — #7231 #7232 #7233 #7234 #7268. Outcome and residuals are in the close-out comment at the end of this thread.\n- **Declared file territory** (released — this subtree is no longer excluded from other seats' candidate fetches):\n  - objectstack: `packages/platform-objects/src/apps/**` (account/setup nav + app translations), `packages/plugins/plugin-approvals/**` (nav contributions + i18n bundles), `content/docs/automation/approvals.mdx`, `content/docs/ui/setup-app.mdx`, `.objectui-sha`\n  - objectui: `apps/console/src/**` (component registration/wiring), `packages/app-shell/src/console/home/HomePage.tsx`, `packages/app-shell/src/layout/InboxPopover.tsx`, `packages/app-shell/src/hooks/useHomeInbox.ts`\n- **Not this epic's territory**: objectui#2762 (polish, queued) and objectui#2763 (SDUI rebuild epic, on hold) remain their own tracks.\n- **Closure**: done — summary comment posted, parent closed, `pm:epic` removed, this section marked closed out.\n\n(Note: the two route examples in 入口 B / 入口 C above now spell their placeholders as HTML entities so this body survives GitHub's sanitizer on rewrite; the wording is otherwise unchanged from the original report.)"
+}

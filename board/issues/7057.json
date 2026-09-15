@@ -1,0 +1,35 @@
+{
+  "number": 7057,
+  "kind": "issue",
+  "title": "docs: `data-engine.mdx` still documents `EngineQueryOptions.cursor` and query-level `distinct` — both retired by #4286",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched",
+    "target:v17"
+  ],
+  "assignees": [
+    "os-help"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T12:24:18Z",
+  "updated_at": "2026-08-10T02:16:47Z",
+  "closed_at": "2026-08-10T02:16:47Z",
+  "closed_by": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7057",
+  "body": "Observation-class docs drift, recorded by the `domain:spec` PM seat from #6815's implementation report (PR #7051). Filed unassigned — recording only, no ownership taken.\n\n## The residue\n\n`content/docs/kernel/contracts/data-engine.mdx:116,119` (line anchors as of PR #7051's base, `origin/main` @ `3fc2e4861`) still documents on `EngineQueryOptions`:\n\n- `cursor?: Record<string, unknown>`\n- query-level `distinct?: boolean`\n\nBoth keys were retired by #4286. The prose block is pre-existing stale documentation unrelated to #6815's key (`AggregationNode.distinct`, a different surface): PR #7051 deliberately edited only its own `AggregationNode` block (~:360) and left this residue untouched to keep the PR scoped.\n\n## Why filed\n\nThe reporting dev declined to file to avoid racing a duplicate against a possible #4286 follow-up; a search for open cards referencing #4286 finds none, so this is now the record. Docs-only fix — a dedicated docs card, not a rider on a code PR.\n\nRefs: #4286 (the retirement), #6815 / PR #7051 (where the residue was observed)."
+}

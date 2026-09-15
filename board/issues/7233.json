@@ -1,0 +1,36 @@
+{
+  "number": 7233,
+  "kind": "issue",
+  "title": "[approvals][console] Bell badge sums unread notifications + pending approvals into one opaque number — surface the breakdown",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "approvals",
+    "pm:dispatched",
+    "repo:objectui"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-10T03:23:18Z",
+  "updated_at": "2026-08-10T04:41:47Z",
+  "closed_at": "2026-08-10T04:41:47Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7233",
+  "body": "Part of #7213 (problem 5: scattered counts). Independent display fix — not part of the entry-convergence train.\n\n## Facts (verified 2026-08-10)\n\n- The bell badge formula is `totalBadge = deduped unread (topic,title) count + pendingApprovalsCount` (`packages/app-shell/src/hooks/useHomeInbox.ts:127-138`; `packages/app-shell/src/layout/InboxPopover.tsx`). The approvals half has no dedicated count API — it is the `total` of `GET /api/v1/approvals/requests?status=pending&amp;approverId=…`.\n- The home \"pending approvals\" card and the inbox tab count share that same source, so home says 8 while the bell says 9+ (#7213's measurement) — users cannot reconcile the numbers, and #7213 reads this as \"counts disagree\".\n\n## Scope (minimal display fix)\n\nKeep the total, but make the popover show the two components as labelled rows/sections (\"Notifications N\" / \"Pending approvals M\") so the badge is explainable. Verify the current popover layout first; if it already sections the two lists, the fix may be as small as rendering per-section counts.\n\n## Acceptance criteria\n\n- A user seeing bell \"9+\" can see in the popover that it is N notifications + M pending approvals, with M matching the home card / Approvals Inbox tab count."
+}

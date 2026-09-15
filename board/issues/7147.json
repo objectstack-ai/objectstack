@@ -1,0 +1,33 @@
+{
+  "number": 7147,
+  "kind": "issue",
+  "title": "object-kanban 的行上限写在 `options: { $top: 100 }` 里 —— 这个键不属于 QueryParams,没有任何 adapter 读它,窗口从未上线",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "pm:queue",
+    "repo:objectui"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T23:49:46Z",
+  "updated_at": "2026-08-10T02:08:11Z",
+  "closed_at": "2026-08-10T02:08:11Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7147",
+  "body": "发现于 objectstack#7137 的实施过程(objectui 分支 `claude/issue-7137-timeline-lineitems-filter-sort`,基线 `f3b2874e1`)。#7137 的范围是 `object-timeline` / `record:line_items` 两个 block 的 filter/sort/limit 读点,本单是**同一形状的死键嵌套出现在别的 block 上**,与 #7137 的验收范围无交集,单独立单。\n\n## 事实(逐条给了文件:行)\n\n`QueryParams`(`packages/types/src/data.ts:42-103`)声明的分页键是**顶层** `$top` / `$skip`。它带一个 `[key: string]: any` 索引签名,所以任何拼错的键都能通过类型检查。仓内唯一消费 `find` 参数的两处实现都只读顶层:\n\n- `packages/data-objectstack/src/index.ts:2408` —— `if (params.$top !== undefined) options.top = params.$top;`\n- `packages/core/src/adapters/ApiDataSource.ts` —— 同理,不读 `params.options`。\n\n`git grep 'params.options'` 在 `packages/*/src` 下**零命中**(除了断言用的测试)。也就是说 `options: { $top: N }` 这个写法把上限放在了一个谁都不读的位置。\n\n现存两处:\n\n1. **`packages/plugin-kanban/src/ObjectKanban.tsx:191-195`** —— 用户可见的那处:\n\n   ```ts\n   const results = await dataSource.find(schema.objectName, {\n       options: { $top: 100 },\n       $filter: schema.filter,\n       ...(expand.length > 0 ? { $expand: expand } : {}),\n   });\n   ```\n\n   `$filter` 在顶层(生效),`$top` 在 `options` 里(不生效)。后果:看板对一个大对象取数时**没有任何行上限**,拉回服务端愿意给的全部行,再在客户端分组渲染成泳道 —— 大对象上是一次不必要的全表读 + 一屏渲染不完的 DOM。作者写下 100 的意图从未上线。\n\n   连带一处文档失真:`content/docs/guide/data-source.md` 的逐 block 覆盖表里 `object-kanban` 的 `limit` 一栏写着「— fixed window」(固定窗口),按上面的事实这句是不成立的 —— 它不是固定窗口,是**没有窗口**。\n\n2. **`packages/fields/src/index.tsx:230-233`** —— 同样的嵌套,但**实际无害**,一并记录以免下次 grep 到时重新论证一遍:\n\n   ```ts\n   const result = await (dataSource as any).find(referenceTo, {\n     $filter: { id: value },\n     options: { $top: 1 },\n   });\n   ```\n\n   `$filter: { id: value }` 是主键等值,最多一行,所以 `$top: 1` 生不生效都一样。属于观察类,不是缺陷。\n\n## 与 #7137 的关系\n\n#7137 的 `object-timeline` 走的是**同一个坑**:它整条取数就是 `find(objectName, { options: { $top: 100 } })`,三个键(filter/sort/limit)全缺读点,其中 limit 是「写了但落在死键上」。#7137 的 PR 把 timeline 改成顶层 `$top: schema.limit ?? 100`,并在 changeset 里写明了这条行为变化。本单是把同一处理搬到 kanban(以及记录 fields 那处无害实例),**不属于** #7137 的 completion scope(不同 block、不同验收),所以标准独立单。\n\n## 建议范围\n\n- `ObjectKanban` 的 `options: { $top: 100 }` 换成顶层 `$top`(是否顺便接 `schema.limit` 由分诊定 —— kanban 当前的 dataSource 映射刻意没映 `limit`,理由是「固定窗口」,而这个理由本身就是本单要修正的那句)。\n- `data-source.md` 里 `object-kanban` 的 `limit` 单元格按事实改写。\n- 顺手考虑一条机械防线:`options` 作为 `find` 参数的键在本仓没有任何合法用途,一条 lint 规则(或 `check:*` 脚本)能让第三次出现直接 CI 红。`QueryParams` 的索引签名意味着类型系统永远抓不到这一类拼错。\n- `packages/fields/src/index.tsx` 那处按观察类处理即可(改成顶层 `$top: 1` 是无成本的一致性清理,不改也不影响任何人)。\n\n## 去重\n\n已搜过 open issues(关键字 `options` / `$top` / `ObjectKanban` / `QueryParams` + 文件路径),无同题单。相关但不同:objectstack#7137(timeline / line_items 的 filter/sort 读点,本单发现来源)、objectstack#7121(dataSource 逐 block 接线)、objectstack#7118(`record:related_list` 的 flat filter 无读点)。\n"
+}

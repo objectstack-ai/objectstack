@@ -1,0 +1,34 @@
+{
+  "number": 5150,
+  "kind": "issue",
+  "title": "Create dialog ignores a field's `defaultValue` — a required select with a default renders empty and forces a manual choice",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:queue",
+    "repo:objectui"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T06:27:24Z",
+  "updated_at": "2026-08-10T02:11:53Z",
+  "closed_at": "2026-08-10T02:11:53Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5150",
+  "body": "## Summary\n\nA field that declares `defaultValue` and `required: true` renders in the create dialog with **no value selected** and a required marker, so the user is forced to pick something the system already knows. The default is served to the console; the create form just does not apply it.\n\nMeasured 2026-08-04, `@objectstack/console` shipped with `17.0.0-rc.1`, zh-CN console, fresh database, object create dialog from an object list page.\n\n## Repro\n\nField declaration:\n\n```ts\nstatus: Field.select({\n  label: 'Status',\n  required: true,\n  defaultValue: 'draft',\n  options: [\n    { label: 'Draft',            value: 'draft',    default: true },\n    { label: 'Pending Approval', value: 'pending'  },\n    { label: 'Approved',         value: 'approved' },\n    { label: 'Rejected',         value: 'rejected' },\n  ],\n}),\n```\n\nNote both spellings are present — the option's `default: true` **and** the field's `defaultValue`.\n\nThe default reaches the console intact. `GET /api/v1/meta/objects/crm_customer_rating`:\n\n```json\n\"status\": {\n  \"label\": \"Status\", \"type\": \"select\", \"required\": true,\n  \"defaultValue\": \"draft\",\n  \"options\": [{ \"label\": \"Draft\", \"value\": \"draft\", \"default\": true }, \"...\"]\n}\n```\n\n**Expected:** the create dialog opens with `Draft` preselected.\n**Actual:** the select shows its placeholder (`请选择` / `Select…`) with a required asterisk. Nothing is preselected; the form cannot be submitted until the user opens the dropdown and picks a value by hand.\n\nThe server side is fine — a create that omits the field entirely is accepted and stored as `draft`:\n\n```console\n$ curl --noproxy '*' -b cookies.txt -H 'Origin: http://localhost:4001' \\\n    -X POST http://localhost:4001/api/v1/data/crm_customer_rating \\\n    -H 'Content-Type: application/json' \\\n    -d '{\"crm_account\":\"...\",\"rating_year\":2026}'\n{\"record\":{\"...\":\"...\",\"status\":\"draft\"}}\n```\n\nSo this is purely the create form not seeding its default values from the object schema.\n\n## Why it matters beyond ergonomics\n\nFor a status-like field the forced choice is not neutral — every option is one click away and some of them have side effects. In our app choosing `Approved` at creation time immediately publishes a grade onto the parent customer record from a scorecard with no facts entered yet. The safe value is the declared default; the UI just refuses to use it.\n\nMore generally: `defaultValue` + `required` is a normal, correct way to model \"this has a sensible starting value\". Right now that combination produces the *worst* create-form experience of any modelling choice — strictly worse than declaring no default at all.\n\n## Note\n\nThere is code in `plugin-form-*.js` that builds default values from the object schema —\n\n```js\nObject.keys(l.fields).forEach(t => {\n  let n = l.fields[t];\n  n.defaultValue !== void 0 && (e[t] = n.defaultValue);\n});\n```\n\n— but the object create dialog does not appear to go through it. If that is a component-wiring gap rather than a missing feature, it may be a small fix.\n\n## Workaround we shipped\n\nWe removed the field from the create form entirely (via a `visibleWhen` predicate keyed on the record's autonumber being empty) and let the server apply the default. That works, but it is a workaround for the form not honouring metadata it already has — and it only works because conditional visibility happens to be usable here; see #5149 for the ways it is not."
+}

@@ -1,0 +1,35 @@
+{
+  "number": 6520,
+  "kind": "issue",
+  "title": "JS 求值面全体拒收 `$icontains`(driver-memory 两面 / driver-mongodb / objectql `having` / formula）—— SQL 族已实现,同一 filter 在内存 double 上抛错",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T03:08:07Z",
+  "updated_at": "2026-08-09T19:07:38Z",
+  "closed_at": "2026-08-09T19:07:38Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6520",
+  "body": "Part of #4706。从 #5702 实施期实测拆出:#5702 在 **SQL 族**(driver-sql / driver-sqlite-wasm / driver-turso 的 local + remote 两面)实现了 `$icontains`,**JS 求值面一个都没有**。\n\n## 现状(实测,#5702 落地后)\n\n| 面 | `{ name: { $icontains: 'acme' } }` |\n|:--|:--|\n| driver-sql / -sqlite-wasm / -turso(local+remote) | ✅ 求值,ASCII-only 折叠 |\n| driver-memory 查询路径 + 分析面 | ❌ `INVALID_FILTER` / 400(`SUPPORTED_FIELD_OPERATORS` 由 spec `FILTER_OPERATORS` 派生,该表刻意未收 `$icontains`) |\n| driver-memory 参考匹配器 | ❌ 同上(同一道 shape gate) |\n| driver-mongodb | ❌ `default:` 拒收 |\n| objectql `having` | ❌ `CONDITION_OPERATORS` 不含它 |\n| `@objectstack/formula` `matchesFilter` | ❌(未在 #5702 范围内核过实现,但它不在任何 `$icontains` 分支里) |\n\n拒收是 **fail-closed**,不是静默放宽 —— 这是刻意的方向,不是缺陷本身。缺陷是**同一条 filter 在两类后端上给两个答案**:一个返回行,一个抛 400。\n\n## 用户可见后果\n\n应用测试跑内存 double、生产跑 SQL 是本仓的常见形态(`plugin-auth` 的 `auth-contains-filter.test.ts` 就是这个形状)。一条用 `$icontains` 的 filter 会**在测试里抛错、在生产里正常**,或者反过来 —— 正是 #4706 对 `$regex` 的原始指控(「the divergence only shows up when the app's tests run on the memory double and production runs SQL」),换了个算子重演。\n\n下游 #5814(better-auth `Where.mode: 'insensitive'`)一旦落地就会踩到:认证查询在内存 double 上会 400。\n\n## 为什么 #5702 没做\n\n- **driver-memory / driver-mongodb** 属 #5499 冻结族,#5702 正文明确「`$icontains` 实现半边属语义补齐投入,默认挂起」;\n- **objectql `having` / formula** 不在 `domain:drivers` 车道;\n- 关键约束:**把 `$icontains` 加进 spec 的 `FILTER_OPERATORS` 是这些实现的前提,也是它们的风险**。该数组是运行时 allowlist(`driver-memory` 的 shape gate 与 `service-analytics` 的 `objectql-echo-operator-coverage.test.ts` 都从它派生),#5701 实测过:提前加入会让 driver-memory 从「响亮拒收」翻成「静默放宽」(谓词被丢弃 → 匹配每一行 → RLS 读作用域上是权限绕过,#3948)。所以词表纳入必须与 **driver-memory + service-analytics 的实现同 PR**,不能先加词表。\n\n## 建议范围\n\n1. `packages/spec` 的 `FILTER_OPERATORS` 收入 `$icontains`,同 PR 更新 `filter-operator-vocabulary.test.ts` 的差集 pin(该 pin 现在钉死差集恰为 `{ $icontains }`);\n2. driver-memory 两面 + driver-mongodb 的实现(**ASCII-only 折叠**,不是 `toLowerCase()` —— 契约以 `FILTER_TEXT_CASES` 的非 ASCII 不折 pin 为准);\n3. `service-analytics` 的 `compileScopedFilterToSql` 补一条臂(否则 echo 覆盖测试判红);\n4. objectql `having` 与 formula 同批;\n5. 清 `scripts/check-driver-conformance.mjs` 里 driver-memory / driver-mongodb 两行 `FILTER_TEXT_CASES` DEBT 的 requirement-1 半边。\n\nmemory 侧实现本身是平凡的(真正则引擎已在,ASCII 折叠即可);贵的是词表纳入牵动的 allowlist 消费者。"
+}

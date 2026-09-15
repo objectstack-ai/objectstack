@@ -1,0 +1,36 @@
+{
+  "number": 6939,
+  "kind": "issue",
+  "title": "[finding][devx] `@objectstack/rest` 的 DEBT 毕业后,TEST_DEBT 仍带 12 条余量 —— 且它现在是该包测试层唯一的看门人",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-help"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T05:05:10Z",
+  "updated_at": "2026-08-10T04:35:40Z",
+  "closed_at": "2026-08-10T04:35:40Z",
+  "closed_by": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6939",
+  "body": "在实施 #6905(PR #6937,`@objectstack/rest` 从 DEBT 台账毕业)时实测发现,按 PD #10 记录备查。**观察类,不挂 `pm:queue`,请分诊轮定级。本卡明确不动 TEST_DEBT,所以只记不修。**\n\n## 实测读数\n\n在 `main` 合并后的树上跑 `pnpm check:type-check-debt`(先做全闭包 `turbo run build` 72/72):\n\n```\nℹ @objectstack/rest: TEST_DEBT records 163, tsc now reports 151 (-12) -- the entry can be lowered.\ncheck-type-check-coverage --re-measure: OK — 33 ledger entr(ies) re-measured in 274.9s,\n  1764 raw tsc error(s) total, none above its recorded number.\n  surplus: 306 raw error(s) across 12 entr(ies) sit BELOW their recorded ceiling\n```\n\n163 这个数字本身是 #5278 option A 的 **bootstrap margin**(+10 over 153),ledger 的 note 自己写着 *\"tighten via the ℹ hint immediately after landing\"* —— 也就是说它从落地那天起就是一条待收紧的 worklist,而不是稳态。今天实测 151,余量 12。\n\n## 为什么值得单独记一笔(而不是并进 #6376)\n\n#6376 已经关闭,它交付的是**工具**(`--lower`、余量报告),不是把条目抹平;抹平被留成了每次 re-measure 都打印的 ℹ worklist。这里要记的是一个**因 #6905 而改变的事实**:\n\n`@objectstack/rest` 的 `tsconfig.json` 仍然 `exclude` 了 `**/*.test.ts`,而 PR #6937 新加的 `typecheck` 脚本只点名 `tsconfig.json`,所以 `pnpm typecheck` **看不见这个包的测试层**。毕业前后对比:\n\n| 层 | 毕业前谁在看 | 毕业后谁在看 |\n|:--|:--|:--|\n| `rest/src` | DEBT 条目(记 2) | `turbo run typecheck`(PR #6937 已实证:注入 2×TS2345 → 退出码 2) |\n| `rest` 的测试层(151 条) | TEST_DEBT 条目(记 163) | **仍然只有** TEST_DEBT 条目(记 163) |\n\n也就是说 src 那半边现在有了真正的编译器盯着,测试层那半边**没有任何变化**,依旧由这条带 12 条余量的 ledger 独家看守 —— 正是 #6376 用 `driver-mongodb` 那 33 条余量论证过的形态(余量吞掉一次真实签名回退,门禁全绿)。12 比 33 小,但性质相同:在抹平前,不超过 12 条的新增错误可以静默落地。\n\n## 不是缺陷,别当缺陷派\n\n今天没有人踩:高于记录值仍会变红,ℹ 提示每次 re-measure 都打印、不静默。这是**被削弱的灵敏度**,不是活体缺陷 —— 判级请按观察类走。\n\n## 如果要做\n\n`pnpm check:type-check-debt --lower` 会替人把实测值写回去,不需要手敲数字。两个已知的坑,做之前值得读:\n\n1. `@objectstack/rest` 是两本账里**漂得最快**的条目(ledger note 自己这么写),#5278 自己的 PR 就在它上面红过两次 —— 因为 `pull_request` 跑的是\"你的分支 merge 进 main\"的树。抹平要**测完立刻推**,别和别的活攒在一起。\n2. 抹平后 note 里那段 \"RECORDED 163 is a bootstrap margin (+10 over 153…)\" 的说明要跟着改写,否则组成描述会和数字对不上 —— #5278 记过 composition drift 这个坑。\n\n另一个方向是干脆按 #5286 的路子给它加 sibling `tsconfig.test.json` 并在 `typecheck` 里点名,让测试层真的进 tsc,那样 TEST_DEBT 条目可以整个删掉;但那是 151 条的工程量,和\"抹平余量\"是两件事,值得分开定级。\n\n关联:#5278(棘轮)、#6376(余量,已关闭)、#5286(sibling tsconfig 路线)、#6905 / PR #6937(本次 DEBT 毕业)。\n\n会话:`session_017uFVNMmTxLpmfQYiuKM1Yx`(实施 #6905 期间发现,未认领)"
+}

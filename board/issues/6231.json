@@ -1,0 +1,35 @@
+{
+  "number": 6231,
+  "kind": "issue",
+  "title": "[finding][drivers] `DriverQuery` 已经存在，但几处驱动调用方仍在用 `as any` / `as QueryAST` 兜住冗余的 `object` —— 连带把 where/orderBy/fields 的检查一起关掉",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "finding",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T11:22:33Z",
+  "updated_at": "2026-08-10T02:28:22Z",
+  "closed_at": "2026-08-10T02:28:22Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6231",
+  "body": "在 #6075（PR #6210）做**下游消费半径清扫**时实测发现，记录备查。**观察类，不挂 `pm:queue`，请分诊轮定级。**\n\n## 现状\n\n#5181 造 `DriverQuery` 的动机之一，就是消灭「调用方手上只有 `where`，却叫不出类型的名字，于是 `as any`」这个口子 —— 它那条 changeset 记过代价：cloud#1053 实测 20 处，cloud#1030 的 `$like` 就是从这里活到运行时的。\n\n`DriverQuery` 现在有了（#6076 已合），#6075 也让五个驱动的实现跟上了。但仍有几处调用方保持原样，因为它们藏在 cast 后面、**编译器看不见**（全仓 `pnpm typecheck` 125/125 全绿的前提下依然存在）：\n\n| 位置 | 现状 |\n|:--|:--|\n| `packages/metadata/src/loaders/database-loader.ts:233` | `this.driver!.find(table, { object: table, ...query } as any)` |\n| `packages/metadata/src/loaders/database-loader.ts:240` | `this.driver!.findOne(table, { object: table, ...query } as any)` |\n| `packages/metadata/src/loaders/database-loader.ts:247` | `this.driver!.count(table, { object: table, ...query } as any)` |\n| `packages/objectql/src/engine.ts:3317` | `secretDriver.find('sys_secret', { object: 'sys_secret', where: { id } } as QueryAST)` |\n| `packages/objectql/src/lifecycle/lifecycle-service.ts:772` | `driver.count(obj.name, { object: obj.name })`（无 cast，靠形参松） |\n\n（行号取自 `origin/main` @ `80f7dc6` 之后的分支，会漂。）\n\n## 为什么是一笔账\n\n两层，第二层才是重点：\n\n1. **冗余**：第一个实参已经是对象名，`object` 又写一遍 —— 就是 #5181 消掉的那个冗余，只是它活在 cast 后面躲过了 `TS2353`。\n2. **`as any` 把整个 query 的检查关掉**：不只是 `object`，`where` / `orderBy` / `fields` 一并失去检查。这正是 #5181 的 changeset 点名的那笔账，而 `database-loader` 是元数据加载的主读路径。\n\n`as QueryAST`（engine.ts:3317）好一些但同理：它只是为了满足 `object` 必填而存在，删掉键之后这个 cast 本身也就不需要了。\n\n## 不是缺陷，别当缺陷派\n\n今天没有人踩：这些站点传的 `object` 与第一个实参**逐字相同**（已逐处核对），且 `git grep 'query\\.object' -- 'packages/drivers/*/src'` 在 `main` 上仍是**零命中**，没有任何驱动读它。所以这是**休眠的冗余 + 自愿放弃的检查**，不是活体缺陷。\n\n## 如果要做\n\n`database-loader` 那三处大概是这个形状（`query` 本身若已是 `DriverQuery` 形，连展开都不需要）：\n\n```ts\n// FROM\nreturn this.driver!.find(table, { object: table, ...query } as any);\n// TO —— 键和 cast 一起消失，where/orderBy/fields 重新受检\nreturn this.driver!.find(table, query);\n```\n\n⚠️ **逐处核对相等性，别无脑 sweep。** 同一次扫描里还撞到一个**故意不相等**的站点：`packages/objectql/src/engine-unknown-option.test.ts:183` 的 `engine.find('task', { object: 'person' } as any)` 是一条拒绝测试，按「见 `object:` 就删」的批量清扫会直接毁掉它。另外 `expand` 条目里的 `object` 命名的是**关联对象**、以及 `syncSchemasBatch([{ object, schema }])` 里的 `object` 是被真实读取的必填键，两者都不能删。\n\n参考 PR #6210 里的删键办法：用带反向引用的模式，只在值与第一个实参逐字相同时才匹配，等价性由模式本身保证。\n\n会话：`session_01WyvqvKMG6asi9aXjKE6xtx`（#6075 下游清扫期间发现，未认领）\n"
+}

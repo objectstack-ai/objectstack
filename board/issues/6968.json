@@ -1,0 +1,33 @@
+{
+  "number": 6968,
+  "kind": "issue",
+  "title": "objectui: `AddressField` 的 `AddressValue` 只覆盖 spec `AddressValueSchema` 七个部件里的五个 —— `countryCode` / `formatted` 既不可类型化,`formatted` 还会在编辑后留成旧值(当前休眠)— observation",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "finding",
+    "repo:objectui"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T06:33:27Z",
+  "updated_at": "2026-08-10T02:13:39Z",
+  "closed_at": "2026-08-10T02:13:39Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6968",
+  "body": "## 观察\n\n修 objectstack-ai/objectstack#5143(邮编键错配)时顺手核对了 `@objectstack/spec` 的地址契约,发现 objectui 侧的类型只覆盖了它的一部分。\n\n`@objectstack/spec@17.0.0-rc.5` 的 `AddressValueSchema`(`packages/spec` 侧,`address` 字段类型的**强制**值契约,`$strip` 语义)声明七个部件:\n\n```\nstreet, city, state, postalCode, country, countryCode, formatted\n```\n\nobjectui `packages/fields/src/widgets/AddressField.tsx` 导出的 `AddressValue` 在 #5143 修好键名之后声明五个,缺 `countryCode` 与 `formatted`。\n\n## 两个后果,严重度不同\n\n1. **`countryCode` 不可类型化(纯类型缺口)。** widget 不渲染它是合理的(UI 上只给 `country` 一个框),但引用 `AddressValue` 的应用代码没法给这个 spec 合法的部件写类型。运行时无损:widget 写回时 `{...address}` 整体透传,未知键不会被它丢掉。\n\n2. **`formatted` 编辑后会留成旧值(数据一致性,当前休眠)。** widget 的只读渲染自己用 `street / city / state postalCode / country` 拼显示串,完全不读存储里的 `formatted`;编辑任一部件时也既不更新也不清除它。所以一旦有生产者(geocoder / 导入)写过 `formatted`,改完街道保存,记录里的 `formatted` 仍是改前那句话,而任何**优先读 `formatted`** 的消费方会显示旧地址,与同一条记录的 `street` 自相矛盾。\n\n## 为什么标 observation 而不是缺陷\n\nobjectui 仓内目前**没有**任何 `formatted` / `countryCode` 的生产者或消费者(`git grep formatted origin/main -- packages/` 无地址相关命中,`packages/plugin-map` 源码零 address 命中),所以今天没有用户能碰到第 2 条 —— 它要等平台侧的 geocoding 真的落地 `formatted` 才会活过来。是否要 widget 承担 `formatted` 的维护(编辑时清掉、让服务端重算),还是契约上就规定 `formatted` 为服务端派生、客户端只读,是个契约问题,不该由渲染器自行决定 —— 这也是我没有在 #5143 的 PR 里顺手改它的原因(那个 PR 只动邮编键)。\n\n## 建议的处理方向(留给 triage)\n\n- 短期:`AddressValue` 补齐 `countryCode` / `formatted` 两个可选部件,与 spec 一比一(纯类型,零行为变化);\n- 需决策:`formatted` 的所有权。若定为服务端派生,则 widget 在写回时应显式清除它(让服务端重算),并在 spec 上写明\"客户端不得写入\";若定为客户端可写,则 widget 需要在编辑时重算。两条路都要先在 spec 上说清,再改渲染器。\n\n## 相关\n\n- objectstack-ai/objectstack#5143 —— 同一 widget 的 `postalCode` 往返修复(已提 PR objectstack-ai/objectui#3928);本条是该 PR 明确留在范围外的部分。\n- objectstack-ai/objectstack#5075 —— 同一字段在详情页渲染成 raw JSON。\n- objectstack-ai/objectstack#5083 —— 同一 widget 的子标签/placeholder 硬编码英文。\n\n发现于 objectui worktree `claude/issue-os5143-address-postalcode`,base `5e524950d1d2bd062010cde9207adf14b247e85e`。\n"
+}

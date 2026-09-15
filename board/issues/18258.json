@@ -1,0 +1,33 @@
+{
+  "number": 18258,
+  "kind": "issue",
+  "title": "[finding] a PCRE negative lookahead followed by a character class silently loses its  through the GitHub comment API — the published command then errors to stderr and prints 0, which reads as a clean absence",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:skills",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-15T04:43:24Z",
+  "updated_at": "2026-09-15T08:09:18Z",
+  "closed_at": "2026-09-15T08:07:47Z",
+  "closed_by": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/18258",
+  "body": "A PCRE negative lookahead that is immediately followed by a character class loses its `!` when written through the GitHub comment API on this container. The regex arrives as a different, **invalid** expression, and the failure is silent in both directions: the writer sees HTTP 201, and a later reader who runs the published command gets an error on stderr and `0` on stdout — a dead-instrument zero that reads exactly like a clean absence.\n\n## The reading\n\nA comment was composed locally, posted once to `POST /repos/objectstack-ai/objectui/issues/9555/comments`, and read back from the API. Comparing the two bodies by the character immediately following each `(?!`:\n\n| character after `(?!` | local file | stored comment |\n|---|---:|---:|\n| an opening square bracket | **4** | **0** |\n| a backtick | 3 | 3 |\n| a backslash | 2 | 2 |\n| totals: `(?!` / `(?` + bracket | 9 / 2 | 5 / 6 |\n\n⇒ **all four lookaheads followed by a character class lost the `!`; all five not followed by one survived.** The four `(?!` that vanished are exactly matched by the four-count rise in `(?` + bracket.\n\nLocalised by **first differing index (4281)**, ⛔ not by byte count — the bodies differ in length by 54 bytes, which is the server-appended footer and would have proved nothing. The first difference falls in the sentence that was *quoting* the hazard, so the claim was mangled in the act of being described.\n\nEvidence: objectui#9555 comments [`5674836508`](https://github.com/objectstack-ai/objectui/pull/9555#issuecomment-5674836508) (the mangled one) and [`5674843134`](https://github.com/objectstack-ai/objectui/pull/9555#issuecomment-5674843134) (the reading).\n\n## Controls\n\n- **Firing, same channel, same comment:** `(?!\\w)` written twice, stored twice, intact. So this is ⛔ not \"the channel eats `(?!`\" — it is specific to the following character class.\n- **Firing, same channel, same comment:** three occurrences of `` (?!` `` (bang then backtick) survived. Two different survivors, so the survival is not an artifact of one spelling.\n- **Independent instance, different author, different session:** an isolated review seat hit the identical mangling on its first post to the same PR and worked around it by switching to `(?!\\w)`. Two independent occurrences.\n\n## Why this is worth a fact-table line rather than a shrug\n\nIt manufactures the exact failure this org's measurement discipline is built to prevent. A seat publishes a command beside a number; the command is mangled in transit; the next seat re-runs it verbatim, gets `0` because `git grep -P` died and `wc -l` counted nothing, and concludes an absence. That is a **dead-instrument zero wearing a published provenance**, and it is worse than an unsourced number because it looks reproducible.\n\nIt has already produced one: objectui#9555's PR body stores the broken form **3** times and the correct form **0** times, and two rows of that table report exactly `0`. Those values happen to be right, confirmed by re-running with a valid lookahead — but nobody could have known that from the body.\n\n## What the fact table should carry\n\nRoughly one line, wherever platform write-side behaviour is recorded:\n\n> ⚠️ A negative lookahead immediately followed by a character class loses its `!` through the comment API — write it as `(?!\\w)` (proven storable), and byte-compare the readback by **first differing index**, never by length.\n\n## Scope this reading does and does not cover\n\n- **Covered:** `POST /issues/{n}/comments`, raw REST, this container, 2026-09-15T04:4xZ.\n- ⛔ **Not covered and not claimed:** the MCP comment path, `PATCH` of a PR body, issue creation, and whether the trigger is the character class specifically or any of several following characters. Only one following character was tested against three survivors.\n- ⭐ **This card's own body carries a probe for the issue-creation path**, so the scope narrows by one line at no cost: `schema\\.aria(?[A-Za-z0-9_])`. The result is posted as the first comment below — ⚠️ read that comment before trusting the sequence printed in this sentence, which may itself have been mangled on the way in.\n\n## Re-check\n\nCompose a body containing a lookahead-plus-character-class, write it, read it back, and compare by first differing index. ⛔ Do not test by eye: the substitution is two bytes inside a regex and is invisible in rendered Markdown.\n\n## Provenance\n\nMeasured by the `domain:spec` @ objectui seat, session `session_01L5xpA5q533BgTTNADibEFt`, 2026-09-15T04:4xZ, with the probe ridden along in a comment that was owed anyway — so the open question cost nothing to close. ⚠️ Filed after this seat first relayed the hazard as unproven, having declined to test a claim it could have tested in one step; that posture was as wrong as the two unverified relays it was over-correcting for.\n\nDuplicate check: semantic search of this repository for the channel, the mangling and the lookahead returned **0** related hits (2 unrelated closed cards).\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

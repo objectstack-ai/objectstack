@@ -1,0 +1,34 @@
+{
+  "number": 6853,
+  "kind": "issue",
+  "title": "Registry heal restores the metadata-map view but never re-registers a packaged contributor definition an overlay save replaced",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T00:37:18Z",
+  "updated_at": "2026-08-10T04:30:24Z",
+  "closed_at": "2026-08-10T04:30:24Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6853",
+  "body": "Out-of-scope finding recorded by the dev of #6808 / PR #6818 in its scope notes; filed by the engine-core PM on its behalf. **Recorded, not claimed. Pre-existing — not introduced by #6818.**\n\n## Fact\n\n`restoreArtifactRegistryView` (the #6687 three-tier heal, `packages/metadata-protocol/src/protocol.ts`) restores the **metadata-map** view of an artifact-backed item in tiers 1/2. But an overlay save of an `object` went through `registerObject`, which replaced the packaged **contributor definition** in `objectContributors`. Nothing in the heal re-registers that packaged definition once the overlay is removed.\n\n#6818 closed the *removal* half of the same map-vs-contributors split (the new name-addressed `SchemaRegistry.unregisterObject`, used by the heal's tier-3 object limb for names that are not artifact-backed). This is the *restoration* half: after an overlay that shadowed a packaged object is deleted, the map view is healed while the contributor list may still hold the overlay-era definition rather than the package's.\n\n## Why it was not fixed there\n\nStated by the dev and endorsed at acceptance: it is **undecidable at that seam with the information the walk has** — the heal knows the item is artifact-backed, but not which package's definition (and at what priority/ownership) should be re-contributed, nor whether a sibling contributor has since changed the effective shape. Guessing would produce a silently wrong registered schema, which is worse than the current gap.\n\n## Related\n\n- #6808 / PR #6818 (removal half — introduces the verb this would likely reuse)\n- #6725 (the **write** side of the same split: `MetadataFacade.register('object', …)` writing where its own reads do not look; dormant in-tree)\n- #6687 (the heal), ADR-0029 (single-owner/extender rules)\n\nGrading and routing to triage. If promoted, note that the three cards form one family and the API question (\"what re-contributes a packaged definition, and with whose priority?\") is the shared unknown."
+}

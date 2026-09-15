@@ -1,0 +1,35 @@
+{
+  "number": 5925,
+  "kind": "issue",
+  "title": "[skill] pm-dispatch:spec 车道 08-05/06 任期沉淀的 7 条 SKILL 更新建议(34 单 MERGED / 0 返工 / 一次交接全程即兴)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-help"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T12:11:22Z",
+  "updated_at": "2026-08-10T09:06:24Z",
+  "closed_at": "2026-08-10T09:06:24Z",
+  "closed_by": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 9,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5925",
+  "body": "来源:spec 车道前任 PM 会话 `session_018fxLGQdatPbBUvCgiVxg6D` 的任期复盘(2026-08-05~06,34 单 MERGED / 0 返工 / 两次 P0 插队闭环 / 一次完整交接),维护者 2026-08-06 指令立单(「创建 issue 更新这个 skills」)。目标文件:`.claude/skills/pm-dispatch/SKILL.md`。\n\n⚠️ **同文件族协调**:#5741(三条 operational note)、#5845(队列管家座位协议)、#5885(services 车道 10 条)同改此文件。**四单合并实施或严格串行**,分开并行合会互相冲掉(SKILL.md 不在 os-regen 驱动清单里,吞并形态是普通文本冲突,但四单同段落追加几乎必然相交)。与 #5885 的重叠已剔除:配额纪律成章归 #5885 第 3 条,本单第 3 条只补它没有的三个具体陷阱。\n\n## 高优先级(本任期内已实际付出代价或全靠即兴)\n\n### 1. 交接协议缺失 —— 座位退场清单入册\n\n**现状**:座位表协议只有一句「接管/移交 = 改行 + 审计评论」,没有退场序列。2026-08-06 维护者下交接令后,整套收尾是前任现场即兴的,下一次交接会再即兴一遍,漏任何一步都给接任者留残缺现场。\n\n**建议**:在「座位表协议」下加一节「交接收尾」,固化实测过的序列:\n1. ⛔ 立即停止新派发(交接令生效即冻结);\n2. 在手工件清零(在飞 dev 收单、已 ACCEPT 的 PR 跟到 MERGED 或明确移交);\n3. 全量枚举本车道队列 + 决策箱 + findings,形成接任台账;\n4. #4604 座位行改写为「⏳ 待认领」+ 完整台账(前任会话 ID、注销时间、账面、队列快照、跨车道备忘);\n5. 审计评论存档(session ID + 接任指引:`/pm-dispatch 接手` + 先读座位行);\n6. `list_triggers` 清理本会话**全部**自设定时器(不再重挂,守夜随座位移交);\n7. 向维护者交最终报告。\n\n### 2. #4604 正文编辑是「整体替换」—— 并发整写互相吞行,协议没写这个陷阱\n\n**现状**:协议说「就地编辑你那一行」,但 issue body 更新是**全文覆盖**:从过期 fetch 出发编辑 = 静默回滚其它座位的行。08-06 当日实测多次并发整写互相冲掉(identity 席补人、队列管家席新增,都曾被别的座位的旧快照覆盖)。与 os-regen 静默吞并同形:操作成功、零冲突标记、丢一侧改动。\n\n**建议**:座位表协议加硬规则:「**每次编辑前必重新 fetch body;只重写自己那一行,其余行逐字保留;写后回读核对自己行与相邻行**」。(#5885 第 9 条的「发出后回读校验」是它的姊妹条,可同段落落地。)\n\n### 3. 三个 API 层硬陷阱入 Operational notes(均为本任期实测)\n\n- **MCP `list_issues` 的多标签过滤是 OR 不是 AND**:查 `domain:spec`+`pm:queue` 拿到的是并集,队列读数直接错;必须手工求交集或走 REST search(`label:a label:b` 才是 AND)。notes 6「命令没在回答你以为的问题」家族的新样本。\n- **`issue_write` 的 `labels` 参数是整组替换不是追加**:不先取现值合并再写,会静默剥掉 `priority:p0` / `domain:*`。与 label discipline「标签即状态机」直接冲突,值得单列一行。\n- **REST core 配额在共享身份下同样会打满**(notes 3 只写了 GraphQL),且恢复是**整点重置**:重试应对齐 :00,不是指数退避(实测一次盲退避白等半窗口)。配额纪律的成章归 #5885 第 3 条,此处只补这一句判据。\n\n## 中优先级(发生过、协议零覆盖)\n\n### 4. P0 插队(`priority:p0`)零文档\n\n本任期两次插队(#5701、#5248)均闭环,但协议通篇没有 `priority:p0`,违反其自身的「a label exists iff something reads it」。建议 step 3 补三句:P0 可超 `batch` 上限、可打破轮次节奏立即派发;**不豁免**同文件串行;**不豁免**认领协议全套。\n\n### 5. 「Stop conditions」与常设座位模型矛盾 —— 补「待命姿态」\n\n协议写「queue 空 → 停循环并报告」,但双射座位制下队列清空≠退场。建议加一段:队列空 = 巡检间隔放宽到 60-70 分钟(与探活五条的待命节奏一致),待命职责五项 —— findings 分诊、`pm:blocked` 解锁扫描、在飞/已入队 PR 跟到 MERGED、决策箱提醒(仅轮报中列出,不 nag)、跨车道备忘跟进。\n\n### 6. PM 工具 PR 的流程自相矛盾\n\nGuardrails 说 PM「never its own PRs」,ACCEPT 节说「PM 工具 PR 留给维护者」,但 #5597、#5872 实际均为维护者授权后**由 PM 自行挂队合入**。建议把例外写明:「维护者明示授权的 `.claude/` 工具 PR,PM 可自行走队;授权记录须在 PR 正文引用」。\n\n## 结构性(维护者拍板,建议单独 PR)\n\n### 7. 文件已 1571 行 / ~43k tokens,逼近每轮加载成本临界\n\n每个座位会话、每次 Routine fire 都要整读。可把 Operational notes 与「入队与落地」的长案例叙述抽到 `references/incidents.md`(skill 支持按需加载),主文件每条留「规则 + 一行案例锚点」。代价是「规则与教训同屏」的教学效果打折 —— 纯取舍。**注意**:#5741/#5845/#5885 与本单前 6 条全部落地后体量还会再涨,这条的紧迫度只增不减;但动静大,⛔ 不与前 6 条同 PR。\n\n## 处置\n\n- 前 6 条为 docs-only 增补(`.claude/` 内部工具文档,`skip-changeset` 适用),建议与 #5741 / #5845 / #5885 **同批实施或严格串行**,walkthrough 归维护者;\n- 第 7 条独立成 PR,先由维护者裁 take/hold;\n- 请分诊座位路由(同族先例:#5885 → `domain:devx`)。"
+}

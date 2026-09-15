@@ -1,0 +1,35 @@
+{
+  "number": 7332,
+  "kind": "issue",
+  "title": "driver-sql: `introspectIndexes` swallows every error and returns a partial index list, which the drift differ then reports as missing indexes",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-10T06:59:16Z",
+  "updated_at": "2026-08-10T10:16:13Z",
+  "closed_at": "2026-08-10T10:16:13Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7332",
+  "body": "Finding, filed unassigned — recording only, no ownership taken. Surfaced while measuring #6522 and **verified independently** by the drivers seat against `origin/main` @ `88154bee1`.\n\n⚠️ **This is a code-shape finding, not an observed incident.** Nothing here was reproduced. It is filed because the mechanism is exact, cheap to state, and would be invisible if it ever fired.\n\n### The shape\n\n`SqlDriver.introspectIndexes` (`packages/drivers/driver-sql/src/sql-driver.ts:6781`) wraps its **entire** dialect dispatch — the SQLite, Postgres and MySQL branches alike — in one bare catch:\n\n```ts\n    } catch {\n      // Best-effort — fall through and let creation handle conflicts.\n    }\n    return [...byName.values()];\n  }\n```\n\n`sql-driver.ts:6861`. On *any* throw, `byName` is returned in whatever half-built state it reached: partial, or empty. The caller cannot distinguish \"this table genuinely has no such index\" from \"introspection failed and I am guessing\".\n\nThe comment justifies the swallow with *\"let creation handle conflicts\"* — which is sound for the **creation** path, where a wrong-but-optimistic reading is corrected by the database rejecting a duplicate. It is not sound for the **drift-detection** path, which consumes the same function and has no such backstop.\n\n### Why the downstream matters\n\n`diffManagedIndexes` (`packages/drivers/driver-sql/src/schema-drift.ts`) takes the declared-index-missing branch on exactly this input:\n\n```ts\n    const p = byName.get(e.name);\n    if (!p) {\n      out.push({ kind: 'index_mismatch', … actual: '(absent)', severity: 'warning', … });\n```\n\nSo a transient failure — SQLite busy, a WAL read landing mid-flush, any I/O hiccup — is not surfaced as an error. It is laundered into a confident, specific, **false** report that the database is missing indexes the metadata declares.\n\n### Why this was worth pulling out of #6522\n\nIn #6522 the `stays silent on the SECOND boot…` case is the **only** case in its file backed by a real on-disk database (`tempDbFile()` has exactly one call site, `sql-driver-overlay-index-drift.test.ts:158`); every other case is `:memory:`. It is therefore the only one exposed to WAL and real file I/O, and the mechanism above produces precisely its reported symptom — a non-empty `drift` under an assertion demanding `[]`.\n\nThat makes it a better-shaped explanation for that flake than the shared-ledger story the card originally proposed (which is **false by construction** — `runtimeCreatedIndexes` is a per-instance field, `sql-driver.ts:4511`). But it is a defect in **production driver code**, not in a test, so it does not belong inside a flake card. #6522 stays where it is; this is the separable half.\n\n### What a dev should measure before changing anything\n\n1. **Who consumes drift, and does anything act destructively on a false `(absent)`?** `severity: 'warning'` suggests not, but that needs measuring rather than assuming — the neighbouring case *\"never points `--allow-destructive` at an index the framework created\"* exists because this area has had teeth before.\n2. **Does the creation path actually still need the swallow?** If yes, the fix is to keep it there and let the detection path see the error — not to remove it wholesale.\n3. **Distinguishing failure from absence** likely means returning an explicit outcome (or letting detection callers opt into throwing) rather than an ambiguous array. Worth pricing both.\n\n⛔ Not a `#5499` card — `driver-sql` is outside that freeze. ⛔ Ungraded on purpose; grading is triage's call."
+}

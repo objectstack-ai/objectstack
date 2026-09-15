@@ -1,0 +1,30 @@
+{
+  "number": 7326,
+  "kind": "issue",
+  "title": "QA run · platform-core.seed-integrity · a86db175 · 2026-08-10 · PASS",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-10T06:44:32Z",
+  "updated_at": "2026-08-10T06:59:28Z",
+  "closed_at": "2026-08-10T06:59:28Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7326",
+  "body": "**Selector** `platform-core.seed-integrity` → 1 item (surface `api`, revision 1) · app **showcase**\n**Result: ✅ PASS (5/5 clauses)**\n\n_First real end-to-end run of the `checklist-test` skill (introduced in #7304), recorded per the one-issue-per-run model — results stay out of the repo tree. Convention label for these is `qa-run` (not yet created in this repo; add `bug` when a run fails)._\n\n### Environment\n| | |\n|---|---|\n| framework | `a86db175` — branch `claude/platform-test-checklist-ocwugl` (PR #7304) |\n| app · driver | showcase · SqlDriver(better-sqlite3) |\n| db | `file:/tmp/qa-seed-run1/data.db` (isolated, fresh boot → restart against same DB) |\n| port | 3467 · seed `--seed-admin` (admin@objectos.ai) |\n| when | 2026-08-10T06:39Z |\n\n### Per-clause verdicts\n| # | clause | verdict | oracle evidence (text) |\n|---|---|---|---|\n| 1 | every seeded object's row count equals the authored seed count | ✅ pass | 18/18 objects: API `total` == re-derived seed count; **0 mismatches** (table below) |\n| 2 | seed VALUES land verbatim | ✅ pass | Specimen — Full: `f_multiselect [\"red\",\"green\"]`; `f_json {\"nested\":{\"k\":\"v\"},\"list\":[1,2,3]}`; `f_lookup` \"Northwind\" → resolved to real account id `wIetZ1J9twPOdROY` (exact match) |\n| 3 | boot log reports every seed load as success | ✅ pass | `[Seeder] Seed loading complete {\"inserted\":130,\"updated\":0,\"skipped\":0,\"errored\":0}` — no rejection line |\n| 4 | seed replay is idempotent | ✅ pass | restart same DB: `{\"inserted\":0,\"updated\":122,\"skipped\":8,\"errored\":0}`; count sweep 1 ≡ sweep 2 (identical) |\n| 5 | deliberately-unseeded fields stay unseeded | ✅ pass | `f_secret` / `f_user` / `f_users` / `task.cover` all null — recorded expected-absent, not findings |\n\n**Negative traps ruled out:** no nav-visible object at count 0; no count grew on restart.\n\n### Count table (expected == actual, first sweep ≡ restart sweep)\n```\nshowcase_account             14 == 14      showcase_invoice             12 == 12\nshowcase_announcement         2 ==  2      showcase_invoice_line         5 ==  5\nshowcase_business_unit        9 ==  9      showcase_preference           1 ==  1\nshowcase_category             4 ==  4      showcase_product              4 ==  4\nshowcase_contact             32 == 32      showcase_project              5 ==  5\nshowcase_expense_line        13 == 13      showcase_project_membership   3 ==  3\nshowcase_expense_report       4 ==  4      showcase_task                10 == 10\nshowcase_field_zoo            2 ==  2      showcase_team                 2 ==  2\nshowcase_inquiry              3 ==  3      sys_business_unit             5 ==  5\n```\n18 objects · 130 rows total.\n\n### Note — checklist drift (NOT a platform defect)\nThe item's authored baseline reads `showcase_contact = 33 (9 named + 24 bulk prospects)`, but the current seed module (`examples/app-showcase/src/data/seed/index.ts`) declares **32**, and the server serves 32. Re-derived per the item's own step-1 rule (\"re-derive rather than trusting a stale list if seeds changed\"), so the run used 32 as expected and passed. → refresh the item baseline `33 → 32` on the next `checklist-test` item revision. No platform action.\n\n### Screenshots\nNone. Every clause here is an `api`/`log` oracle (server truth); per RUNNER.md the report is text-only — screenshots are live judgment aids that never enter the record. A reproduction rule is included only for failures; this run had none."
+}

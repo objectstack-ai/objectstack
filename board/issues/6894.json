@@ -1,0 +1,36 @@
+{
+  "number": 6894,
+  "kind": "issue",
+  "title": "`rest-openapi-route.test.ts` 的 #5821 幽灵路径钉子已静默失效 —— `for (const path of stale)` 输入集合实测为空集,循环一次都不跑",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T03:09:08Z",
+  "updated_at": "2026-08-10T01:44:22Z",
+  "closed_at": "2026-08-10T01:44:22Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6894",
+  "body": "从 **#5969** 的「同族小尾巴」一节拆出立卡(`domain:cli` 座位分诊,2026-08-09)。#5969 主体(路由注册携带 body 契约以恢复 `$ref`)按 ADR-0049 **保持封存、不入队** —— 那是需要真实拉力的新能力面。本卡只取那条已经失效的钉子,它是可以现在就修的。\n\n## 事实(数据来自 #5969 的实测,须由实施者复测)\n\n`packages/rest/src/rest-openapi-route.test.ts` 里 #5821 留下的钉子形如:\n\n```ts\nfor (const path of stale) {\n  // 断言服务出的文档里不出现这些幽灵路径\n}\n```\n\n`#5744` 合入(spec 侧不再 emit 静态 `paths` 段)之后,`stale` 的**输入集合变成空集** —— #5969 实测记录为:\n\n```\n#5821 pin input set (stale paths): [] -> size 0\n```\n\n**循环体一次都不执行。** 「服务出的文档不许泄漏静态产物的幽灵路径」这层语义因此静默失效,而测试照绿、CI 照过、没有任何信号。\n\n同一处的措辞也已经过期,同属本卡:\n\n- 用例标题:`discards the static artifact section even though spec still emits it` —— **spec 已不再 emit**;\n- 注释:`Leg 2 (#5744) removes the spec-side generation. Until it lands, the bundled artifact really does carry /api/{object} & co.` —— **它已经 land 了**。\n\n## 这不是整体空洞化 —— 先读清楚再改\n\n⚠️ 文件**没有**变成幻影测试,不要按「删掉了事」处理。循环之后的三条断言仍然咬合:`components.schemas` 键集逐字相等、`securitySchemes` 深等、`info.title` 相等 —— 它们今天钉的是「**spec 拥有的那半边原样穿过 serve 期**」,是真实且有价值的。\n\n失效的只有循环那一层。所以本卡的目标是**补回那一层**,不是清场。\n\n## 修法方向(#5969 已给,非强制)\n\n要保住「不许泄漏」的语义,得换一条**幸存段仍能触及**的输入 —— 例如构造一份带 `paths` 的 artifact 喂给 `loadOpenApiSpec` 的缓存,让钉子重新有东西可断言 —— 而**不是**依赖静态产物继续发错段来供货(那等于要求生产侧保留一个已被正确移除的缺陷,来喂一个测试)。\n\n实施者可以另提更好的形状,但必须满足**交付判据**。\n\n## 交付判据(硬)\n\n**必须证明钉子重新会红。** 具体地:构造/恢复输入之后,故意让服务出的文档泄漏一条幽灵路径,展示该用例**变红**;再撤掉,展示变绿。⛔ 只把 `size 0` 改成 `size N` 而不做这个双向实证,等于用另一个绿灯换掉当前这个绿灯 —— 本卡就白做了。\n\n若复测发现 `stale` 今天**并非**空集(#5969 的测量点在 `main` 的某个较早状态,可能已漂移),**立即停手并在卡上如实报告**,不要为了让卡成立而制造一个红。那种情况下本卡应当降级为纯措辞修正。\n\n## 不在范围\n\n- #5969 主体的 `$ref` / body 契约恢复 —— 封存中,需要真实拉力(有人照文档生成客户端并被泛 `object` 挡住)。\n- #5821 当年的取舍(「不编造」)—— 仍然正确,本卡不重开。\n\n关联:#5969(来源)、#5821(钉子出处)、#5744(使其失效的那一棒)、#5588、#4984(幻影检查家族)、ADR-0049。"
+}

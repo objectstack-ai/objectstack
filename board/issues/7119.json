@@ -1,0 +1,33 @@
+{
+  "number": 7119,
+  "kind": "issue",
+  "title": "object-grid 的 inputs 声明 `filters`(复数),渲染器只读 `filter`(单数):按已发布词汇写筛选条件静默无效",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "needs-user-decision",
+    "repo:objectui"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T17:46:03Z",
+  "updated_at": "2026-08-10T02:10:38Z",
+  "closed_at": "2026-08-10T02:10:38Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7119",
+  "body": "发现于 objectstack#6953 的实施过程(objectui 分支 `claude/issue-6953-datasource-block-wiring`),不在该单范围内,单独立单。\n\n## 事实(objectui origin/main @ 65bb513dc 实测)\n\n`object-grid`(以及同一渲染器的 `view:grid` 别名)的注册 `inputs` 声明的是复数 `filters`:\n\n```\npackages/plugin-grid/src/index.tsx\nComponentRegistry.register('object-grid', ObjectGridRenderer, {\n  inputs: [\n    { name: 'objectName', ... },\n    { name: 'columns', ... },\n    { name: 'filters', type: 'array', label: 'Filters' },   // ← 复数\n  ]\n});\n```\n\n而渲染器读的是单数 `filter`:\n\n```\npackages/plugin-grid/src/ObjectGrid.tsx:440  const schemaFilter = schema.filter;\npackages/plugin-grid/src/ObjectGrid.tsx:615  params.$filter = schemaFilter;\n```\n\n`schema.filters` 在 `ObjectGrid.tsx` 里 grep 不到任何读点(唯一命中是文件头注释里的一句 \"Search, filters, pagination\")。同一仓的 `list-view` 声明的是单数 `filter`,与它自己的读点一致 —— 两个同族 block 对外发布了两种拼写,只有一个是真的。\n\n## 症状\n\n作者(或 AI)按 `object-grid` 已发布的 `inputs`/manifest 写 `filters: [...]`,查询里没有 `$filter`,拿到全表 —— 不报错,SDUI 保存门也不会报 `unknown-prop`(`filters` 是已声明键)。反过来,写真正生效的 `filter` 时,`filters` 才是被 manifest 承认的那个名字,于是「发布的词汇」和「运行时读的键」指向相反。objectstack#4413 的形状,叠加 objectui#3407 那种「声明与读点拼写不一致」的变体。\n\n## 为什么现有门禁看不见\n\n- `check:react-declaration-parity` 比的是两侧**声明**(spec zod props ↔ 本仓 `inputs`),不观察渲染器。\n- `apps/console/src/__tests__/public-block-binding-reach.test.tsx` 只问一个问题:声明了 `objectName` 的 block 有没有把对象名送到数据层。`object-grid` 送到了,所以它在那里是绿的 —— 该测试的文档也明确写了它**不是**「每个声明的 input 都被消费」的检查。\n\n## 建议范围(需要判一次方向,别直接猜)\n\n两条路,选哪条会落进公开契约,建议由维护者定:\n\n- **A(推荐)**:把 `inputs` 改成单数 `filter`,与 `list-view`、与 spec 词汇、与渲染器读点三方对齐;`filters` 作为从未生效过的错误拼写直接去掉(它没有任何读点,不存在「已在野的可用写法」需要兼容)。\n- **B**:让渲染器额外读 `filters`。⛔ 这会把一个错误拼写固化成第二套 de-facto 契约(AGENTS.md #0.1),不建议。\n\n无论哪条,需要一条钉子:按 `inputs` 声明的名字写筛选条件时,`$filter` 必须出现在查询里。\n"
+}

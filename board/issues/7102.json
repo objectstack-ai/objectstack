@@ -1,0 +1,36 @@
+{
+  "number": 7102,
+  "kind": "issue",
+  "title": "A predicate update writing a file field gives N records one file id under an exclusive-ownership model",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-help"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T15:52:35Z",
+  "updated_at": "2026-08-10T03:45:55Z",
+  "closed_at": "2026-08-10T03:45:55Z",
+  "closed_by": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7102",
+  "body": "Observation-class finding, split out of #6966 (PR #7101) rather than folded into it — it is older and wider than that card's dispatch-contract subject, and it belongs to the `service-storage` surface.\n\nFiled unassigned; this seat is only recording it.\n\n## The invariant\n\n`file-reference-lifecycle.ts` states exclusive ownership in its module header:\n\n> at most ONE (object, record, field) slot owns a file. Writing an already-owned id into a second slot COPIES the bytes into a fresh `sys_file` instead of sharing the row.\n\nand gives the reason it matters:\n\n> Copying a private record's file id into a world-readable record — the sort of thing generated code does without any visible mistake — cannot widen who can read the bytes, because the second record gets its own copy.\n\n## What a predicate update actually does\n\n`engine.update(obj, { avatar: 'fileX' }, { multi: true, where: … })` matching rows R1..R3 on an object with a file-class field:\n\n- `beforeUpdate` copy-on-claim resolves ONE copy (`fileX'`) — there is one batch payload, and `driver.updateMany` takes one `SET` clause for N rows;\n- the driver writes `avatar = fileX'` to **all three** rows;\n- `afterUpdate` (per row since #5038) claims `fileX'` for R1; `claimFile` never steals, so R2 and R3 log `already owned by …/R1.avatar — not transferring` and move on.\n\nEnd state: three records reference `fileX'`, one owns it. Read authorisation for those bytes derives from R1 alone, so two records reference a file whose readability is decided by a third record — precisely the widening the copy-on-claim design exists to prevent. Two warnings per bulk update are the only signal.\n\nThis is **not** a regression from #5574 or #5038. Before them the same write produced a different broken end state (three records referencing a copy that *nobody* owned). Both predate the dispatch change; bulk update was never really supported on this surface, and the guard's own comment said so — \"only a single-record update can own one. Copy-on-claim needs a definite owner, so skip\".\n\n## Why #7101 did not fix it\n\n#7101 corrects the *dispatch* question (`beforeUpdate` copy-on-claim now runs once per write instead of once per row, which is behaviour-identical here and removes N−1 `sys_file` reads plus an out-of-contract row-conditioned rewrite of a shared `SET` clause). It deliberately leaves `afterUpdate` claiming per row, because the alternative is worse: restoring the \"skip on bulk\" intent would leave `fileX'` owned by nobody while three records reference it, and an unowned file is what the release/tombstone path may eventually collect. Turning a broken ownership record into potentially-deleted bytes is not an improvement, and choosing between them is a `service-storage` decision, not a dispatch-contract one.\n\nThe reasoning is recorded in place at the `afterUpdate` guard in `packages/services/service-storage/src/file-reference-lifecycle.ts`.\n\n## The shape of an answer (not a recommendation)\n\nRoughly three, and picking among them needs the owning seat:\n\n1. **Refuse** — reject a predicate update that writes a file-class field, the way ADR-0104's other declared-vs-enforced gaps were closed. Honest, and a visible behaviour change for anyone doing it today.\n2. **Copy per row** — give each matched record its own copy. Honours the invariant exactly; costs N copies per bulk write and needs a per-row payload, which the batch `SET` clause does not have (ADR-0058 Addendum II D3 names a row-conditioned rewrite as out of contract, so this cannot be done from the `before*` hook as things stand).\n3. **Record it as a documented boundary** — say in the module header that field-reference ownership is single-record, name the bulk outcome, and leave the behaviour. Cheapest, and at least stops the header claiming an invariant the code does not hold.\n\n## Repro\n\nNo test pins the current outcome. `packages/services/service-storage/src/file-reference-lifecycle.test.ts` gained a per-row multi-**delete** driver in #7101 (`driveDelete`); a per-row multi-**update** driver of the same shape is what this needs, and does not exist yet.\n\nRefs: #6966, PR #7101, #5038, #5574, ADR-0104 D3 wave 2, ADR-0058 Addendum II, ADR-0049."
+}

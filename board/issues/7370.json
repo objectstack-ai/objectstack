@@ -1,0 +1,34 @@
+{
+  "number": 7370,
+  "kind": "pull_request",
+  "title": "docs(pm-dispatch): extract incident case law into references/ — pure byte-identical move (#5925 item 7, #7341 PR B)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-10T08:05:39Z",
+  "updated_at": "2026-08-10T09:06:24Z",
+  "closed_at": "2026-08-10T09:06:23Z",
+  "closed_by": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "merged_at": "2026-08-10T09:06:23Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/7370",
+  "body": "Fixes #5925\nPart of #7341\n\nPR B of the three-PR #7341 batch. **Stacked on PR A's branch** (#7357) per the batch card's load-bearing ordering — the extraction's cut points are re-derived from the post-A file, so this diff shows A+B until A merges; the B-only commits are `c187173` (the extraction) and merge `724b810` (propagating A's item-10 follow-up).\n\n## What moved (pure move, byte-identical)\n\n**9,941 bytes of narrative moved verbatim** into two new on-demand reference files; at every cut point the main file keeps the rule + a one-line anchor + a pointer naming the exact section:\n\n| # | Block | From (main-file section) | To |\n|---|---|---|---|\n| 1 | Deleted-timer delivery incidents ×2 (spec-surface / devx seats) | Operational notes 3, 定点文本纪律 | `references/incidents.md` §定点文本两例实录 |\n| 2 | `domain:spec-tooling` history — two superseded rulings + the 2026-08-09 refutation evidence | Domain lanes | §domain:spec-tooling 沿革 |\n| 3 | Re-pricing four-directions record (#5375/#5431/#5374) | step 3 | §重新定价四方向实录 |\n| 4 | Compile-surface three missed-face cases (#5146→#5903, #5326/#5335, #5905) | step 5 standard clause | §编译面清单三次漏面 |\n| 5 | Cheap-option falsifications (#6865 / #6893) | step 5 three-block partition | §便宜选项两次证伪 |\n| 6 | os-regen second-copy drift record (#6492) | 入队与落地 A | §os-regen 清单第二份拷贝 |\n| 7 | Dead-verdict baseline sample table + two same-day misjudgments | step 6 | §判死基线样例与两次误判 |\n| 8 | The filter compile-surface inventory (5-面 table + maintenance discipline + pre-dispatch re-check string) | step 5 standard clause | `references/compile-surfaces.md` |\n\n`references/incidents.md` opens with the **append-only note**: new case law lands there by default, existing entries are never rewritten, section titles are the pointer anchor texts — the main file's growth rate for narrative goes to zero (the #5925 ruling's stated intent).\n\n## Numbers\n\n- Bytes moved verbatim: **9,941** (script-verified, see below)\n- Main file at the extraction commit: **3,098 → 2,997 lines** (235,023 → 226,325 bytes); net −8,698 bytes after ~1.2 KB of new anchor/pointer text\n- After PR A's item-10 follow-up merged through (`724b810`), the same pair reads **3,112 → 3,011 lines** (236,095 → 227,397 bytes) — the extraction itself is unchanged; item 10 touches sections no chunk came from\n- New files: `incidents.md` 140 lines, `compile-surfaces.md` 27 lines\n- Bytes remaining in main (current branch head): 227,397\n\n## Purity discipline and its verification\n\nChunks were **script-extracted, not retyped**: an extraction script sliced each block out of the file by unique start/end anchors and wrote it to disk; the assembly script pasted those exact bytes into the reference files. A verification script then asserted, for every chunk: (1) contiguous byte-identical presence in the **pre-move** blob (PR A's HEAD), (2) contiguous presence in exactly one reference file, (3) absence from the post-move main file. **8/8 OK.**\n\nKept-side adjustments (declared — these are the anchor/pointer lines, outside the moved bytes): each cut point's lead-in sentence had its dangling colon or \"下表/见下\" deixis re-pointed at the reference section; no moved byte was reworded. Two blocks were cut at sentence boundaries inside a paragraph (blocks 3 and 5), so the kept halves rejoin with a pointer sentence.\n\n**Deliberately NOT moved**, per the \"IF and only if the move can stay pure\" condition: the Operational-notes bodies at large (rule and evidence interleave at sentence level — a pure move cannot separate them), and the step-5 two-blindness explainer (#6371/#6218), whose own governing sentence declares it the PM's step-7 review-question basis; moving it would have required rewriting that kept sentence's meaning, failing the pure-move test.\n\nThe line-count ratchet goes in **PR C**, not here: this PR is a pure move by discipline, and the ratchet is tooling + workflow wiring (C's class), which also lets the ceiling be set against the landed post-B count.\n\n## Maintainer authorization (verbatim, untranslated)\n\n> 关于项目经理的技能,接受你的优化意见,并和前面两个优化任务集中处理。派发使用云卡片,用 Fable 5 模型\n\n#5925 item 7's own approval (maintainer, 2026-08-06, recorded on #5925): 主文件留「规则 + 一行案例锚点」,只把长叙述案例抽到 `references/incidents.md`;**纯搬移零改写**;排在全部文本增补之后。The \"单独成 PR\" half was superseded by the 2026-08-10 batch directive above (recorded on #5925's claim-supersession comment); ordering-after-text-additions is honored via the A→B stack.\n\n## Verification\n\n- Byte-identity script: 8/8 chunks OK (pre=true, ref=true, removed=true), 9,941 bytes\n- `node scripts/check-nul-bytes.mjs` — OK\n- `pnpm check:skill-frame-sync` — 4 copies isomorphic (the escalation frame stayed in main, untouched)\n- `pnpm check:skill-compatibility` — 11 files reconciled\n- `pnpm check:agent-model-declared` — os-dev.md → opus\n- Dangling-deixis grep for 「下表 / 那张表」: both remaining hits point at tables still in main\n\n`.claude/`-only ⇒ no changeset; `skip-changeset` applied.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01QrT21cGQfFVDWtVJysRtXo)_"
+}

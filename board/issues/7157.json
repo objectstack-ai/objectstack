@@ -1,0 +1,32 @@
+{
+  "number": 7157,
+  "kind": "pull_request",
+  "title": "fix(scripts): guard the base side of an `R` row against `.changeset/README.md` in check-changeset-no-major",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-10T01:22:26Z",
+  "updated_at": "2026-08-10T02:00:01Z",
+  "closed_at": "2026-08-10T02:00:00Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": "2026-08-10T01:59:59Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/7157",
+  "body": "Fixes #7107\n\n## What was wrong\n\n`scripts/check-changeset-no-major.mjs` applied `isChangesetFile()` to the **head** path only:\n\n```js\nconst basePath = fields[1];\nif (!file || !isChangesetFile(file)) continue;\n```\n\n`basePath` — the pre-rename name an `R` row is read at, and the whole reason `R` is readable — was then handed straight to `git show` with no guard of its own. Git pairs renames by **content**, not by name, and the pathspec is `.changeset/*.md`, which `.changeset/README.md` matches. So an `R` row can legitimately arrive as `.changeset/README.md` paired with `.changeset/x.md`, and the majors README appears to declare get subtracted from the head file's majors — reporting a brand-new whole-stack major as **exempt** rather than introduced. That is this gate's expensive direction.\n\nThe two siblings PR #7106 fixed (`check-empty-changeset.mjs`, `check-adr-0087-registration.mjs`) already carry `isChangesetFile(basePath)` explicitly. This file is the third member of the family; the gap was not a missing helper but a guard applied to one of the two paths.\n\n## The change\n\nOne condition, transcribed from the siblings rather than invented:\n\n```js\nconst baseText = status === 'A' || !isChangesetFile(basePath) ? null : showOrNull(from, basePath, cwd);\n```\n\nFor `M` the guard is a no-op — `basePath` is the path already accepted on the line above. Only `R` can reach it with a different name.\n\n## The fixture, and why it is not vacuous\n\n**This defect is dormant.** The real `.changeset/README.md` is boilerplate with no frontmatter fence, so `majorPackagesIn()` returns `[]` on it and nothing is subtracted today. A careless fixture would therefore pass with or without the guard and would *certify* the hole. So the new self-test case:\n\n1. commits a **major-shaped** `.changeset/README.md` at the branch point, so the unguarded path really has something to subtract;\n2. asserts git actually emitted `R`, matching the whole row against `/^R\\d+\\told\\tnew$/` via a new `renameRow` helper (the same shape both siblings use) — too small a body and git degrades the pair to add-plus-delete, and the case would silently be testing an ordinary `A`;\n3. keeps both sides byte-identical, so the only thing that could excuse the head file's major is a major read off README.\n\nMeasured control, git 2.43.0:\n\n```\nR100\t.changeset/README.md\t.changeset/was-the-readme.md\n```\n\n## Ablation (direction predicted before running)\n\nPrediction: removing the guard makes `already` become `['@objectstack/spec']`, `added` empties, and the row flips from `introduced` to `exempt` — so exactly the three new assertions go red and nothing else moves.\n\nWith the guard (this PR):\n\n```\n✓ check-changeset-no-major --self-test: 117 assertions (frontmatter dialects measured\n  against @changesets/parse + the pre/exit exemption switch in both directions +\n  the #7005 diff scoping over real temp git repos + the #4690 pins + the wiring).\nexit 0\n```\n\nWith the guard deleted (the one-line revert, run on a copy of the script so the real file stayed untouched):\n\n```\n✗ check-changeset-no-major --self-test — 3 failure(s)\n\n  • #7107: a changeset paired with a major-shaped README.md by rename detection inherits NOTHING — got []\n  • #7107: ... and it is certainly not exempt — got [\".changeset/was-the-readme.md\"]\n  • #7107: ... so with pre-mode exited that PR is RED\nexit 1\n```\n\nPredicted direction confirmed, including the `exempt` value the defect produces. Assertion count 113 on `origin/main` to 117 here — the four assertions added, no case re-spelled or removed.\n\n## Verification\n\n- `pnpm check:changeset-gate-self-tests` (the exact step lint.yml runs) — all three family gates green: 105 / 142 / 117 assertions.\n- `pnpm check:nul-bytes` — 75 self-test assertions plus a clean 6592-file scan.\n- `npx eslint scripts/check-changeset-no-major.mjs --no-inline-config` — exit 0.\n- `node scripts/check-changeset-no-major.mjs --base origin/main` on this branch — `✓ This diff introduces no major bump.`\n\n## Changeset\n\nNone, deliberately: a `scripts/`-only diff releases no package. `skip-changeset` applied instead, matching the precedent of #7048, #7104 and #7106.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01F8q5J1MQyocgtNspb15fSn)_"
+}

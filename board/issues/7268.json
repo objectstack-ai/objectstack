@@ -1,0 +1,35 @@
+{
+  "number": 7268,
+  "kind": "issue",
+  "title": "chore: bump the console pin to pick up objectui#4071 (`approvals:inbox` component ref)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-10T04:11:49Z",
+  "updated_at": "2026-08-10T06:45:42Z",
+  "closed_at": "2026-08-10T06:45:42Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7268",
+  "body": "Linkage chore per the multi-repo coordination rule (accepted `repo:objectui` PR ⇒ file the console bump in the consuming repo).\n\nobjectstack-ai/objectui#4071 is **merged** (objectui main `28c38567b`): it registers the `approvals:inbox` component-registry key and de-hardcodes Home's approvals entry (Part of #7213, closes #7231).\n\n## Task\n\nRun the standard console refresh (`scripts/bump-objectui.sh` / `pnpm objectui:refresh` per repo convention) and land the `.objectui-sha` + `packages/console` bump so the bundled console carries the `approvals:inbox` registration.\n\n## Why it matters beyond routine freshness\n\n#7234 (account-app nav → `{ type: 'component', componentRef: 'approvals:inbox' }`) is metadata-side and can merge independently, but its end-to-end behavior in the bundled console appears only after this bump. No ordering hazard — the nav item renders the component-not-found empty state until the console catches up — but the #7213 epic's acceptance wants both landed.\n\nStandard pin-bump discipline applies: dedicated PR, no riders; `.objectui-sha` is a shared file — take the whole regen (hono override + lockfile) through the script.\n\nNote for triage: no `domain:*`/`repo:*` label applied — routing labels are the triage seat's single-producer territory. Only `pm:queue` is set here. Single-card cap checked: no other open console-bump card exists at filing time (search 2026-08-10)."
+}

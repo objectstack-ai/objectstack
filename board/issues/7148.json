@@ -1,0 +1,33 @@
+{
+  "number": 7148,
+  "kind": "issue",
+  "title": "gantt / map / calendar 各自内联一份 `convertSortToQueryParams`(三份逐字副本),已有 `@object-ui/core` 的共享 sink 可迁移;副本会丢掉不带 order 的 sort 项",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "finding",
+    "repo:objectui"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T23:51:08Z",
+  "updated_at": "2026-08-10T02:07:28Z",
+  "closed_at": "2026-08-10T02:07:28Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7148",
+  "body": "发现于 objectstack#7137 的实施过程(objectui 分支 `claude/issue-7137-timeline-lineitems-filter-sort`,基线 `f3b2874e1`)。观察类 —— 今天没有用户能踩到它,记录以免下次有人再复制第五、第六份。\n\n## 事实\n\n`sort → $orderby` 的下降逻辑在三个 object-bound block 里各内联了一份**逐字相同**的私有函数:\n\n- `packages/plugin-gantt/src/ObjectGantt.tsx:315`\n- `packages/plugin-map/src/ObjectMap.tsx:113`\n- `packages/plugin-calendar/src/ObjectCalendar.tsx:111`\n\nobjectstack#7137 给 `object-timeline` 和 `record:line_items` 各补了 sort 读点,要是照抄就是第五、第六份,所以那个 PR 把这份逻辑提到了 `@object-ui/core`(`packages/core/src/utils/sort-query.ts`,导出 `convertSortToQueryParams`,带单测)。三份私有副本**没有动** —— 迁移不在 #7137 的范围内,故立此单。\n\n迁移本身是机械的:删掉本地函数、从 `@object-ui/core` 导入(三个包都已经依赖它)。\n\n## 一处行为差异,迁移时会一并被修掉\n\n共享版有两点与私有副本不同,都是更贴合已声明的契约,而不是新增容忍:\n\n1. **不带 `order` 的数组项按升序处理,而不是丢弃。** 私有副本要求 `item.field` 与 `item.order` 两个键都在,否则跳过该项 —— 于是 `sort: [{ field: 'amount' }]` 会**静默丢掉整个排序**(全部项都缺 order 时 reduce 出 `{}`)。同一份副本在**字符串**写法上却已经把「只有字段名」当升序(`\"amount\"` → `{ amount: 'asc' }`),所以这是两种写法之间的不一致,不是刻意的严格。`QueryParams.$orderby` 自己声明的数组成员也是 `{ field: string; order?: 'asc' | 'desc' }`(order 可选),`@object-ui/data-objectstack` 的 `serializeOrderBy` 同样按升序处理缺失的方向。\n2. **无可排序内容返回 `undefined`,不返回 `{}`。** 空对象是个 truthy 值,只是恰好被 adapter 的序列化器当成「无排序」;`undefined` 是把这件事说出来。\n\n可达性说明(免得把严重度判高):`SortConfig.order` / `ElementDataSourceSort.order` 在 objectui 自己的类型里都是**必填**,所以类型化的调用方写不出缺 order 的项;能走到这一步的只有未类型化的已存视图元数据(`ElementSavedView` 声明为 `Record< string, unknown >`,按设计是松的)。这也是本单标 `finding` 而不是缺陷单的原因。\n\n(注:上一版正文里 `Record< string, unknown >` 的泛型参数被 GitHub 的正文清洗器当成 HTML 标签吃掉了 —— `<` 紧跟字母会被就地剥掉。此处按仓内约定在 `<` 后留空格重写。)\n\n## 建议范围\n\n- 三处 `import { convertSortToQueryParams } from '@object-ui/core'`,删掉本地副本。\n- 三个 block 现有的 sort 测试即为回归网;如果 gantt/map/calendar 里已有钉住「缺 order 项被丢弃」的 fixture,按 #7137 的 fixture 三分法处理(重拼 / 补声明 / 整例替换),别为了让测试保持绿而把共享版改回丢弃语义。\n- 一并考虑要不要给 `packages/plugin-view/src/ObjectView.tsx:448` 那条**直接透传** `$orderby: sort` 的路径也统一走这个 sink(它是 list-view 容器路径,目前依赖 adapter 端的 `serializeOrderBy` 兜住四种形状 —— 也能工作,只是仓里就有了两种形态)。\n\n## 去重\n\n已搜过 open issues(`convertSortToQueryParams` / `$orderby` / 重复 + 文件路径),无同题单。相关:objectstack#7137(共享 sink 的引入者)。\n"
+}

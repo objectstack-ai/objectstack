@@ -1,0 +1,32 @@
+{
+  "number": 7006,
+  "kind": "issue",
+  "title": "[finding] An unreadable `.changeset/` makes `check-changeset-no-major.mjs` print a tick and exit 0 (#4690 shape)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T08:37:04Z",
+  "updated_at": "2026-08-10T00:13:30Z",
+  "closed_at": "2026-08-10T00:13:30Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7006",
+  "body": "Measured while adding `--self-test` fixtures to that script (#6923). **Not fixed there** — flipping an exit code in the enforcing half on the eve of the window where that half re-arms is a behaviour change, not a fixtures change. Filed per Prime Directive #10. Unclaimed. Observation class.\n\n## The observation\n\n```js\ntry {\n  entries = readdirSync(changesetDir);\n} catch {\n  console.log('No .changeset directory found — nothing to check.');\n  process.exit(0);\n}\n```\n\nA gate that could not read its input reports as \"no violations\" in every checks list. That is the #4690 anti-pattern by its own definition, and the family's other members go the other way: `check-empty-changeset.mjs` exits 1 on an unresolvable base ref and writes several paragraphs about why.\n\nThe distinction #4690 turns on is between **zero input** and **could not read the input**. This script handles the first correctly — an existing but empty `.changeset` yields no offenders and a legitimate tick. It is only the second, the `catch`, that is the shape.\n\n## What #6923's PR did and did not do\n\nIt did **not** change the behaviour. It did make the two facts distinguishable, which is the prerequisite for changing it: `readChangesets()` now returns `null` for \"could not read\" and an empty `Map` for \"read it, found nothing\", and `judge()` turns those into two separate verdicts (`no-changeset-dir` vs `clean`). Both are pinned by fixtures, and the pin on the exit code is written to be flipped together with the behaviour rather than deleted:\n\n```\n'RESIDUAL pinned, not endorsed: an unreadable .changeset still exits 0 (#4690 shape).\n Filed for triage — flip this assertion together with the behaviour, never alone'\n```\n\n## Impact, stated honestly\n\n- **No known instance and no plausible one.** The directory is resolved from the script's own location (`resolve(__dirname, '..')`), not from the cwd, so \"missing\" means `.changeset/` was deleted from a full checkout — which would also break `check-changeset-fixed.mjs`, `pre.json`, `config.json` and the release pipeline, all more loudly than this.\n- Graded observation class for exactly that reason: it is a correctness inconsistency with the family's stated rule, not something a user hits.\n- Recorded so the inconsistency is a decision rather than an oversight, since the file now says in its own header that it is one.\n\n## Candidate dispositions (no conclusion presumed)\n\n1. Exit 1 with a message naming the unreadable path, matching `check-empty-changeset.mjs`. One line plus the fixture flip.\n2. Leave it and keep the header's RESIDUAL note as the record — a documented, argued exception rather than an accident.\n3. Fold it into whatever PR settles #7005, since both are about what this guard does when its input is not what it expects.\n\nLeaning 1 for consistency with the family, but it is genuinely small and disposition 2 is defensible. Left to triage."
+}

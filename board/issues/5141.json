@@ -1,0 +1,34 @@
+{
+  "number": 5141,
+  "kind": "issue",
+  "title": "Report charts render the raw dataset measure `name` as the axis title, ignoring the measure's `label` — the same measure on a dashboard chart resolves correctly",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:queue",
+    "repo:objectui"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T06:02:35Z",
+  "updated_at": "2026-08-10T02:07:05Z",
+  "closed_at": "2026-08-10T02:07:05Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5141",
+  "body": "## Summary\n\nA dataset-bound **report** chart labels its measure axis with the measure's `name` (`potential_upside_tons`) instead of its authored `label` (`可抢吨位(吨)`). The **table** in the very same report resolves the same measure's label correctly, and a **dashboard** chart bound to the same dataset and measure also resolves it correctly — so this is the report chart renderer specifically, not a missing label and not a dataset problem.\n\nThe visible result on a Chinese console is a snake_case English identifier printed under an otherwise fully-translated chart.\n\n## Evidence\n\n`@objectstack/*` 17.0.0-rc.1, fresh database, browser locale `zh-CN`.\n\n**Dataset** (`heimao_account_metrics`) — the measure carries a label:\n\n```ts\n{ name: 'potential_upside_tons', label: '可抢吨位(吨)', aggregate: 'sum', field: 'competitor_supply_volume', format: '0,0' }\n```\n\n**Report** (`heimao_key_account_attack_list`):\n\n```ts\nchart: {\n  type: 'horizontal-bar',\n  title: '各客户可抢吨位',\n  showLegend: false,\n  xAxis: 'account_name',\n  yAxis: 'potential_upside_tons',\n}\n```\n\nRendered, on one screen:\n\n| element | renders |\n|---|---|\n| chart title | `各客户可抢吨位` ✅ (chart's own `title`) |\n| chart **measure-axis title** | `potential_upside_tons` ❌ |\n| summary-table column header for the same measure | `可抢吨位(吨)` ✅ |\n\nThree reports, three measures, same failure — the axis always prints `name`, the table always prints `label`:\n\n| report | measure | axis renders | table renders |\n|---|---|---|---|\n| `heimao_key_account_attack_list` | `potential_upside_tons` | `potential_upside_tons` | `可抢吨位(吨)` |\n| `heimao_customer_grade_distribution` | `account_count` | `account_count` | `客户数` |\n| `heimao_annual_supply_trend` | `shipped_volume_tons` | `shipped_volume_tons` | `发货量(吨)` |\n\n## The contrast that localizes the bug\n\nA **dashboard** widget bound to the same dataset family resolves the label without any extra authoring:\n\n```ts\n{\n  id: 'hm_annual_supply_trend',\n  type: 'bar',\n  dataset: 'heimao_supply_history_metrics',\n  dimensions: ['year'],\n  values: ['shipped_volume_tons'],   // no label authored here\n}\n```\n\nrenders its axis as `发货量(吨)` — the dataset measure's label. Same measure name, same dataset layer, correct resolution. So the measure catalog is reachable at render time; the report chart path just does not consult it.\n\n## `series[].label` does not help\n\n`ReportChartSchema` documents a `series` array with an optional `label`, which reads like the intended override. It has no effect:\n\n```ts\nchart: {\n  type: 'horizontal-bar',\n  xAxis: 'account_name',\n  yAxis: 'potential_upside_tons',\n  series: [{ name: 'potential_upside_tons', label: '可抢吨位(吨)' }],   // ← added\n}\n```\n\nRebuilt, restarted, re-measured: the axis still renders `potential_upside_tons`. Verified for all three reports above. The change was reverted in our tree rather than left in, since it is inert metadata.\n\nThat leaves an app with **no** authorable way to control this string — neither the dataset measure label nor the chart's own series label reaches it.\n\n## Suggested fix\n\nIn the report chart renderer (`DatasetReportRenderer` / `useDatasetRows` path), resolve the axis/series display name the way the summary table already does:\n\n1. `chart.series[].label` when the measure is named there, then\n2. the bound dataset's `measures[].label`, then\n3. the measure `name` as a last resort.\n\nHonouring (1) alone would unblock apps immediately; (2) is what makes the default correct without per-chart authoring, and is what the dashboard renderer already does.\n\n## Related\n\n- objectstack-ai/objectstack#4854 — view / report / dataset labels have no live translation path. Adjacent but distinct: this one is not about i18n bundles at all, it is the **authored** label being dropped.\n- objectstack-ai/objectstack#5076 — analytics surfaces resolve select-option labels but skip the i18n bundle.\n\nFiled from a downstream app (`hotcrm-heimao`), tracked there as issue #60.\n"
+}

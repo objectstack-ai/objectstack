@@ -1,0 +1,32 @@
+{
+  "number": 7261,
+  "kind": "pull_request",
+  "title": "test(objectql): type the batch-atomic driver double as `IDataDriver`, dropping the retired `supports.transactions` bit",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-10T04:03:22Z",
+  "updated_at": "2026-08-10T05:27:17Z",
+  "closed_at": "2026-08-10T05:27:16Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-10T05:27:16Z",
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/7261",
+  "body": "Closes #6546. Test-only.\n\n## What was wrong\n\nThe snapshot driver in `packages/objectql/src/protocol-batch-atomic.test.ts` authored\n`supports: { transactions: true }` — a capability key **retired by #4634** and tombstoned in\n`DriverCapabilitiesSchema` as `retiredKey(...)`.\n\nBoth enforcement channels were off:\n\n- the literal was annotated `const driver: any`, so it was never compared against `IDataDriver`;\n- nothing in this file parses the double through `DriverInterfaceSchema`.\n\nSo the bit was inert. Transaction use gates on **method presence** (`driver.beginTransaction`),\nwhich this double implements — the suite passed for the right reason and would have passed\nidentically with the key deleted.\n\n## What changed, and why it is not just a deletion\n\nThe card distinguishes this from its sibling #4782: there the retired keys were at least *visible*\nto `tsc` as real TS2322 entries in the debt ledger. Here `: any` erased the diagnostic entirely.\nDeleting the key alone would close the instance and leave the class open — mocks get copied, and a\ncopy of this one inherited both the retired bit and the `any` that hid it.\n\nSo the double is now annotated **`IDataDriver`**, which puts the tombstone back in front of `tsc`\nat the authoring site.\n\n**Verified, not assumed.** Re-authoring the key under the new annotation:\n\n```\nsrc/protocol-batch-atomic.test.ts(60,21): error TS2322: Type 'true' is not assignable to type 'undefined'.\n```\n\nBefore this PR the same line compiled silently.\n\n### Cost of typing it — measured, no cascade\n\nThree `IDataDriver` members these tests never reach needed stubs (`upsert`, `syncSchema`,\n`dropTable`). Each throws rather than returning a plausible value, so a future test cannot mistake\na silent no-op for an exercised path. That is the whole cost; there is no cast cascade, and the\ndouble remains free of `as any`.\n\n`@objectstack/objectql` excludes its own tests from `tsc`, so the relevant number is its\n`TEST_DEBT` entry. Measured with the gate's own procedure (a sibling tsconfig that drops the test\nglobs), against a built workspace:\n\n| | errors |\n|---|---|\n| baseline (`origin/main` @ `0caf122`) | **340** |\n| this branch | **340** |\n\nUnchanged, and well under the recorded ceiling of 355. The only errors remaining in this file are\nthree pre-existing `TS2554` (`registerObject` arity) that predate this change and are out of scope\nhere.\n\n## Evidence the suite passes for the right reason\n\nThe file already carried half the proof — a test that removes `beginTransaction` and asserts the\nengine refuses with `501 NOT_IMPLEMENTED`. Note that this passed *while the mock still advertised*\n`supports: { transactions: true }`, which is the direct demonstration that the bit decided nothing.\n\nThis PR makes both halves explicit so the next reader does not have to re-derive them:\n\n- a new pin asserts the transactional path runs end to end (`begin` + `commit` observed) against an\n  **empty** `supports`, with `beginTransaction` present;\n- the companion test now states that removing the **method** alone is what makes the engine refuse.\n\n`delete plain.driver.beginTransaction` became `TS2790` under the annotation (the member is required\non `IDataDriver`), so it is now `Reflect.deleteProperty(...)` — identical at runtime, and it avoids\nreintroducing a cast.\n\n`pnpm exec vitest run src/protocol-batch-atomic.test.ts` → **7 passed** (6 pre-existing + the new pin).\n\n## Gates run locally\n\n| gate | result |\n|---|---|\n| `check:driver-conformance` | OK — 36 covered cells, 4 DEBT, 0 exempt |\n| `check:engine-double-contract` | OK — 128 pinned, 133 DEBT, 2 exempt |\n| `check:type-check-coverage` | OK — 63/77 packages type-checked |\n| `check:empty-changeset` | OK — 0 declaring changesets added |\n| `check:changeset-gate-self-tests` | OK — 377 self-test assertions |\n| `eslint` on the changed file | clean |\n\n## Changeset\n\n**None, deliberately** — this needs the `skip-changeset` label rather than a changeset file.\n\nThe diff is a single `*.test.ts` file: no `src`, no published surface, no behaviour change, so there\nis nothing for a CHANGELOG entry to attach to. `check-empty-changeset.mjs` is explicit that an empty\nchangeset is never the route here — it buys nothing the label does not and uniquely risks #4898\n(`changesets/action` takes its `hasChangesets && !hasNonEmptyChangesets` branch and silently\npublishes nothing). Nothing is declared breaking, so no ADR-0087 disposition applies.\n\n## Scope note\n\nA repo-wide sweep for other `supports:` literals spelling retired keys found **none** beyond the two\ndeliberate rejection fixtures (`packages/spec/src/data/driver.test.ts:317` and\n`datasource.test.ts:60`), which are correct as written. The sweep did surface a broader class —\n~64 `any`-annotated driver doubles in `packages/objectql` whose tombstone diagnostic is off for the\nsame reason this one's was. None currently authors a retired bit, so nothing is red today. Filed\nseparately rather than folded in here.\n\nRefs #6546, #4634, #4782.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_013oQBbBKaypak259s41pF2A)_"
+}

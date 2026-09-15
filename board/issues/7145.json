@@ -1,0 +1,36 @@
+{
+  "number": 7145,
+  "kind": "issue",
+  "title": "service-storage's attachment kit carries the same 5-field `callerContext` projection #7141 fixed for comments",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-help"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T21:54:45Z",
+  "updated_at": "2026-08-10T03:14:48Z",
+  "closed_at": "2026-08-10T03:14:48Z",
+  "closed_by": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7145",
+  "body": "Out-of-scope observation from implementing #7141 (PR #7143), filed rather than fixed — that card is bounded to `packages/plugins/plugin-audit`.\n\n## Fact\n\n`packages/services/service-storage/src/attachment-access-hooks.ts:70` —\n`callerContext()` rebuilds the identical five-field projection of the caller's\nexecution envelope:\n\n```\nfunction callerContext(ctx: any): Record<string, unknown> {\n  const exec = ctx?.input?.options?.context;\n  if (exec && typeof exec === 'object') {\n    return {\n      userId: exec.userId,\n      tenantId: exec.tenantId,\n      positions: exec.positions,\n      permissions: exec.permissions,\n      isSystem: exec.isSystem,\n    };\n  }\n  ...\n}\n```\n\nThe result is handed to `sharing.canEdit(parentObject, parentId, …)` from two\nsites (the `beforeInsert` parent gate and the multi-row `authorizeRows` loop).\nThis is the kit `comment-access-hooks.ts` was derived from, so the defect is the\nsame one, one package over:\n\n- **`onBehalfOf`** is dropped, so `ISecurityService.hasWriteBypass` — documented\n  to fail CLOSED on a delegated context, implemented by reading exactly\n  `context?.onBehalfOf?.userId` (`plugin-security/src/security-plugin.ts:704-707`)\n  — cannot fire on the attachment path either. The field is populated on a live\n  path (`runtime/src/security/resolve-execution-context.ts:191`, OAuth agent\n  principals on `/mcp`).\n- **`principalKind`** is dropped, so `resolvePermissionSetsForContext`\n  (`security-plugin.ts:3024-3034`) resolves an ADR-0090 D10 agent principal **as\n  a human** and appends the deployment's additive baseline to the agent's\n  scope-derived ceiling.\n- `systemPermissions`, `accessible_org_ids`, `posture`, `audience` and\n  `rlsMembership` go with them.\n\nThe **middleware-key stripping half of the projection is correct and must\nsurvive** any fix here too — plugin-security mutates the operation context in\nplace (`sc.__readScope = …`, `security-plugin.ts:1159`), so the arriving context\ncarries the depth resolved for `sys_attachment` while the gate asks about the\nparent record's object.\n\n## Suggested shape\n\nThe same one #7141 landed: forward the envelope minus the operation-private keys,\ndropped by the `__` **prefix** (which also covers `__expandRead`, the marker that\nwaives the object-level CRUD check, and `__referentialFieldClear`). See PR #7143\nfor the fix and its reverse-verification evidence, including the measurement that\nthe `/mcp` agent ceiling sets cannot themselves carry `modifyAllRecords` — so the\ndropped bypass guard is latent rather than exploitable with the built-in\npermission sets, while the dropped ceiling rule widens unconditionally.\n\n## Dedup\n\nSearched open issues for `attachment-access-hooks`, `sys_attachment` + sharing,\nand the `onBehalfOf` family: only the #7070 group (#7135, #7136) and #7141, none\nof which covers `service-storage`.\n"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 7178,
+  "kind": "issue",
+  "title": "`EngineQueryOptionsSchema.search` rejects the bare query string that ADR-0061 D1 calls canonical — so every engine caller that wants it must `as any`, losing the whole query's checking",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-10T01:56:26Z",
+  "updated_at": "2026-08-10T05:27:17Z",
+  "closed_at": "2026-08-10T05:27:17Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7178",
+  "body": "Surfaced while implementing #6231 (metadata seat). Filed unassigned and **unlabeled** for triage grading. Not fixed there: the fix is in `packages/spec`, which that card's dispatch declared a STOP boundary (cross-seat declaration on #6298).\n\n## The divergence\n\nTwo sibling schemas in `packages/spec` describe the same key and disagree.\n\n`packages/spec/src/data/query.zod.ts` — `BaseQuerySchema` (hence `QueryAST`, hence `DriverQuery`):\n\n```ts\nsearch: z.union([z.string(), FullTextSearchSchema]).optional()\n```\n\nwith a doc comment that is unusually explicit about which spelling is canonical:\n\n> The bare string IS the canonical Tier-1 contract (ADR-0061 D1: \"the client sends only the query text; the server resolves which fields to search from object metadata\") — it is what every surface sends and what the dogfood HTTP proof (`showcase-search.dogfood.test.ts`) pins.\n\n`packages/spec/src/data/data-engine.zod.ts:119` — `EngineQueryOptionsSchema`, the options type of `IDataEngine.find` / `findOne`:\n\n```ts\n/** Full-text search configuration */\nsearch: FullTextSearchSchema.optional(),\n```\n\nStructured form only. The canonical bare string is **not** accepted.\n\n## Why this is a live cost, not dormant drift\n\nThe runtime serves the string — it is the engine's own tests that prove it, and they prove the workaround at the same time. `packages/objectql/src/engine-findone-contract.test.ts` passes the canonical spelling five times, each behind a cast:\n\n```ts\nconst row = await engine.findOne('crm_account', { search: 'Two' } as any);\nconst rows = await engine.find('crm_account', { search: 'Two' } as any);\n```\n\nSo the type forbids what the runtime serves and what the ADR declares canonical, and callers pay the standard price: `as any` on the query argument, which does not suppress `search` alone — it switches off checking for `where` / `orderBy` / `fields` in the same literal. That is exactly the account #5181's changeset opened and that #6231 has just been closing at five other call sites (cloud#1053 measured 20 such sites; cloud#1030's `$like` reached runtime through one).\n\nNote the shape of the trap: `EngineQueryOptionsSchema` is not `.strict()`, and `check:query-options-erasure`'s own rationale spells out the consequence — an unknown key is **silently dropped**. So the cast that works around this divergence is precisely the cast that ratchet exists to stop.\n\nThere is a same-family precedent for the repair. The identical drift once existed on the *query* side and was fixed, and `query.zod.ts` records why:\n\n> The union is schema-side drift REPAIR, not a new dialect: the schema declared only the object form while the executor and the ADR's own conformance ledger served the string — surfaced the moment #3899 started validating request bodies against this schema.\n\n`EngineQueryOptionsSchema` is the same drift, unrepaired.\n\n## How it surfaced\n\nIn #6231, `DatabaseLoader`'s three read helpers were retyped from `Record< string, unknown >` to the driver contract's `DriverQuery`. The driver branch then compiled with no cast at all. The **engine** branch did not:\n\n```\nsrc/loaders/database-loader.ts(230,38): error TS2345: Argument of type 'DriverQuery' is not\nassignable to parameter of type '{ ... }'.\n  Types of property 'search' are incompatible.\n    Type 'string | { query: string; ... } | undefined' is not assignable to\n    type '{ query: string; ... } | undefined'.\n      Type 'string' is not assignable to type '{ query: string; ... }'.\n```\n\n`DriverQuery` is `Omit< QueryAST, 'object' >`, so it inherits the union; `EngineQueryOptionsParsed` does not have it. Concretely: **`DriverQuery` is not assignable to `EngineQueryOptionsParsed`, purely because of `search`.** Nothing else differs.\n\nInteresting asymmetry worth keeping: `IDataEngine.count` takes `EngineCountOptions`, which is a `z.input` type, and it accepts the same value fine. Only `find` / `findOne` — which take the `z.infer` (parsed) type — reject it.\n\n#6231's PR therefore left the three engine-branch `as any` casts exactly as `main` had them, with a comment naming this issue, rather than narrowing the cast or restoring a wider one.\n\n## Suggested direction (for triage, not a decision I am making)\n\nAlign `EngineQueryOptionsSchema.search` with `BaseQuerySchema.search` — the same `z.union([ z.string(), FullTextSearchSchema ])` — on the grounds that the ADR, the executor, the HTTP surface and the dogfood proof all already agree on the string, so the engine option schema is the only outlier. That would additionally let the three `database-loader` engine-branch casts be deleted, which is real `where`/`orderBy`/`fields` checking recovered on the metadata main read path.\n\nWorth confirming before acting, since it is a spec change and I did not verify it: whether any consumer relies on `EngineQueryOptionsParsed['search']` being narrowed to the object form (e.g. reading `.query` off it without a `typeof` guard). If some do, they need the guard added in the same PR.\n\nSession: `session_01W6bLax4KMrSfnE1ydFU8Dw` (found during #6231, unclaimed)"
+}

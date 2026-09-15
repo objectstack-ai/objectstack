@@ -1,0 +1,35 @@
+{
+  "number": 7234,
+  "kind": "issue",
+  "title": "[approvals] Point the account app's Approvals nav at the inbox component; contribute a Setup inbox entry; document mounting the inbox in business apps",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "approvals",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-10T03:23:37Z",
+  "updated_at": "2026-08-10T05:55:13Z",
+  "closed_at": "2026-08-10T05:55:13Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7234",
+  "body": "Part of #7213.\nBlocked-by: #7231\n\n(#7231 — the objectui half, registering the `approvals:inbox` component-registry key — carries the `repo:objectui` routing label. This issue is dispatchable only after #7231's PR merges. End-to-end console behavior additionally requires the next console pin bump, which is a separate standing chore — NOT a rider on this issue.)\n\n## Facts (verified on origin/main, 2026-08-10)\n\n- Entry C of #7213 is exactly one metadata declaration: `packages/platform-objects/src/apps/account.app.ts:100-108` (`nav_account_approvals`, `type: 'object'`, `sys_approval_request` / `my_pending`). The account app declares no `requiredPermissions` (`account.app.ts:52-56`), so every authenticated user sees the raw engine-owned table.\n- Its record page shows NO decision actions because the 8 declared actions gate on `record.viewer.can_act || record.viewer.can_override` (`packages/plugins/plugin-approvals/src/sys-approval-request.object.ts:252-407`) and the `viewer` block is only attached on the approvals REST path (`approval-service.ts:4012-4023`, `attachViewers()`), never on the generic data API. Converting the nav entry — not patching the data API — is the v17 fix; the data-source contract is objectui#2763 A1 (deliberately out of scope here).\n- plugin-approvals contributes three raw-table Setup entries (`approvals-plugin.ts:85-96`) into `group_approvals`, gated by `manage_platform_settings` (`setup.app.ts:80-87`) — correctly positioned as an admin/diagnostic surface; they stay.\n- zh labels for these nav items live in `packages/platform-objects/src/apps/translations/zh-CN.ts` (`:21` 待我审批, `:74-78`).\n\n## Scope\n\n1. `account.app.ts`: change `nav_account_approvals` to `{ type: 'component', componentRef: 'approvals:inbox' }` — label/icon/position unchanged; the entry point stays, the destination becomes the full Approvals Inbox. Suggestion (verify, optional): add `requiresService: 'approvals'` so the entry hides when plugin-approvals is not installed (`requiresObject` no longer applies to a component item).\n2. `approvals-plugin.ts` navigationContributions: add an \"Approvals Inbox\" `type: 'component'` item (componentRef `approvals:inbox`) at the top of `group_approvals`, above the three raw tables, so admins reach the full UI from Setup too; keep the raw-table entries as-is.\n3. Translations for the new/changed nav items in `packages/platform-objects/src/apps/translations/*` (zh 审批中心 for the Setup entry; the account entry keeps 待我审批) — respect the `check:app-nav-i18n` gate.\n4. Docs (`content/docs/automation/approvals.mdx`): update \"The approver finds it in their queue\" to name the Approvals Inbox as the canonical approver surface, and add a short \"Mount the approvals inbox in your app\" snippet (`{ type: 'component', componentRef: 'approvals:inbox', label: 'Approvals' }`). Touch `content/docs/ui/setup-app.mdx`'s group_approvals row if it names the entries.\n5. Update `packages/plugins/plugin-approvals/src/nav-contribution.test.ts` and any pinned nav expectations; changeset (user-visible).\n\n## Acceptance criteria\n\n- The account app's Approvals entry renders the full inbox (component route) instead of the raw `sys_approval_request` grid — end users get decision actions, business vocabulary, node progress, and the drawer.\n- Setup → Approvals shows an \"Approvals Inbox\" entry above the raw tables.\n- The raw tables remain reachable only under Setup (admin-gated); `sys_approval_request` is no longer surfaced raw to end users anywhere.\n- Docs updated; `check:app-nav-i18n`, nav-contribution tests, and affected package suites green.\n\n## Out of scope\n\nConsole pin bump (separate chore); attaching `viewer` on the generic data API (objectui#2763 A1); vocabulary alignment (#7232)."
+}

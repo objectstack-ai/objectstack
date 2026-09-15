@@ -1,0 +1,34 @@
+{
+  "number": 4118,
+  "kind": "issue",
+  "title": "[P2] objectui: every package type-checks its tests or declares why not — and guards must prove they can fail (measured: 355 errors across 19 packages)",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:queue",
+    "priority:p2",
+    "repo:objectui"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-30T10:24:01Z",
+  "updated_at": "2026-08-10T02:10:16Z",
+  "closed_at": "2026-08-10T02:10:16Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4118",
+  "body": "Generalizes objectui#3009 from one package to the repo, with the scope **measured rather than estimated**. Companion to #4115 (which prevents new forks; this one makes existing guards actually run).\n\n## Why\n\nobjectui#3009 found that `packages/types`' spec-derivation guards — the `satisfies` checks meant to stop a vocabulary re-fork — were compiled by nothing: package tsconfigs exclude test files (correctly, they are build configs), and no other `tsc` invocation reads them. Reverting a derived alias produced **zero** errors; after #3009, `TS1360` on the exact line.\n\nTests are where agents encode their understanding of a contract. Unchecked tests let wrong understanding accumulate silently and then **read as evidence**: `p2-spec-exports.test.ts` type-imported eight names whose absence its own sibling guard asserts, green the whole time; `p1-spec-alignment.test.ts` passes six \"should accept ⟨shape⟩\" claims the type rejects. An agent citing a green suite as proof of a contract is the #2901 backwards-premise incident again.\n\n## Measured scope (2026-07-30, objectui `main` @ a045a32)\n\nMethod: per package whose tsconfig excludes test globs, a temp tsconfig lifting only the test exclusion (emit off), `tsc`, errors classified **config-tier** (fixable in the test tsconfig: `paths`/rootDir leakage TS6059, `lib` too low TS2550, missing `types: [\"node\"]`, cross-package dist TS2307) vs **code-tier** (real).\n\n| package | test files | code-tier errors | dominant codes |\n|---|---|---|---|\n| core | 54 | **80** | TS2741×32, TS2322×17, TS2304×10 |\n| react | 28 | **76** | TS2339×49, TS2769×9 |\n| sdui-parser | 3 | **50** | TS2304×47 (likely env globals — verify) |\n| app-shell | 240 | **37** | TS2339×8, TS2345×6, TS2739×6 |\n| plugin-list | 12 | **20** | TS2739×6, TS2740×6, TS2741×5 |\n| plugin-form / i18n / permissions / auth | 25/16/3/8 | 15/13/13/10 | mixed |\n| plugin-dashboard, components, plugin-kanban, plugin-detail, plugin-calendar, plugin-gantt, plugin-map, layout, plugin-chatbot, plugin-grid | — | 8…2 each | mixed |\n| mobile, plugin-designer, plugin-markdown, plugin-report, plugin-timeline, plugin-tree, react-runtime, runner | 17 | **0** | already clean |\n\n**Totals: 27 packages, 612 test files, 355 code-tier errors in 19 packages; 8 packages are free wins.** (5 further packages — `fields`, `cli`, `data-objectstack`, `plugin-charts`, `plugin-editor` — already include tests in `tsc --noEmit` and are covered today.)\n\nThe two dominant codes are not random: **TS2741/TS2739** (\"missing required properties\") is the input-vs-output confusion #3009 fixed in `p2-spec-exports` (authoring fixtures typed as parsed output whose `.default()` fields are required), and **TS2339/TS2353** (\"property does not exist\") is the implementation-wider-than-type dialect problem (#4074's `sharing { visibility, enabled }` shape). The per-package cleanup will mostly be those two playbooks applied repeatedly.\n\n## The ask\n\n**1. Coverage ratchet.** Extend the `check-type-check-coverage.mjs` pattern (already the repo's best governance: declared, reasoned, shrink-only, #2911): every package either type-checks its tests (a `tsconfig.test.json` chained from `type-check`, per objectui#3009's template) or carries a DEBT entry with the measured error count and an issue link. Start by converting the 8 clean packages (pure plumbing, zero fixes), then burn down the table above.\n\n**2. Discrimination proof for guards.** A guard PR shows the guard failing against the pre-fix code (one pasted run in the PR description). This is what exposed the inert `satisfies` checks, an already-vacuous \"prefer canonical over alias\" test (objectui#2990), and the tautological \"should accept\" suite — three cases in one day of applying it. Cheap for agents to execute mechanically; catches the exact failure mode (\"test passes for the wrong reason\") that review reliably misses.\n\n**3. Config-tier template.** The per-package `tsconfig.test.json` should standardize: `noEmit`, `composite: false`, `paths: {}` (kills the TS6059×100 source-leak noise), `lib` matching what tests actually use, `types: [\"node\"]` where tests touch fs. objectui#3009's `packages/types/tsconfig.test.json` is the reference, comment included.\n\nSame meta-rule as #4115: this lands as CI, not prose.\n\nRefs objectui#3009, #4115, #4074, objectui#2911, #2901.\n"
+}

@@ -1,0 +1,33 @@
+{
+  "number": 7120,
+  "kind": "issue",
+  "title": "ListViewBlock 仍带一份 dataSource 合成优先级的私有副本,与 #6953 落地的 ElementDataSourceGate 重复(漂移风险)",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "finding",
+    "repo:objectui"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T17:46:26Z",
+  "updated_at": "2026-08-10T02:10:05Z",
+  "closed_at": "2026-08-10T02:10:05Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7120",
+  "body": "发现于 objectstack#6953 的实施过程。观察类(observation-class):今天没有用户能碰到的错误行为 —— 两份实现当前语义一致,是**未来漂移**的风险面,故只打 `finding`、不入队。\n\n## 事实\n\nobjectstack#5576 在 `packages/plugin-list/src/ListViewBlock.tsx` 内联写了「binding 覆盖组件键 / view 只作基线 / `filter` 走 `and` 合成 / 空 `columns` 视作未声明 / limit 落 `pagination.pageSize` / `viewType` 仅在未声明时取」这套优先级表。\n\nobjectstack#6953 为其余 8 个 block 接线时,把同一张表提到了 `@object-ui/react` 的共享件里(`packages/react/src/element-data-source/ElementDataSourceGate.tsx` 的 `useElementDataSourceSchema` + `ElementDataSourceGate`),因为一 block 一份就是「additional filter criteria」变成两种方言的路径。#6953 **没有**顺手改 `ListViewBlock` —— 那是 #5576 已合的落地代码,在一个接线 PR 里重构它是范围外的回归面。\n\n于是现状是:同一张优先级表存在两份实现,`list-view` 用私有副本,其余 8 个 block 用共享件。\n\n## 为什么是 finding 而不是 defect\n\n两份当前语义等价(#6953 的共享件是照着 `ListViewBlock` 的规则写的,#5576 的整套测试在该 PR 下全绿:`packages/plugin-list/` 60 文件 826 例通过)。用户今天碰不到任何差异。风险是下一次改语义的人只改一边 —— 这类漂移在本仓有前情(声明与读点各改一边)。\n\n## 建议范围\n\n把 `ListViewBlock` 收敛到共享件:\n\n```\nconst LIST_VIEW_DATA_SOURCE = {\n  columns: true, filter: true, sort: true,\n  limit: 'pagination.pageSize', viewType: true,\n};\n```\n\n配 `ElementDataSourceErrorPanel` / `ElementDataSourceLoadingPanel`(共享面板的 `testId` 前缀取 `list-view` 时,产出的 `list-view-datasource-error` / `list-view-resolving-view` 与 #5576 现有断言逐字符一致,面板文案用 `errorTitle` 传原句即可)。删掉 `ListViewBlock` 里的 `useMemo` 映射块(约 45 行)。\n\n验收就是 #5576 那套测试不动一行仍全绿 —— 若有任何一例需要改断言,说明两份实现本来就有差异,那才是真 defect,应当在那时改判等级。\n"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 6964,
+  "kind": "issue",
+  "title": "`member_default`'s removed wildcard is still named as live fact in `platform-objects`, `qa/dogfood` and the permissions doc — the #6842 family, four packages further out",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched",
+    "target:v17"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T06:25:56Z",
+  "updated_at": "2026-08-10T01:42:10Z",
+  "closed_at": "2026-08-10T01:42:10Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6964",
+  "body": "Found while implementing #6842 (PR #6958). Filed unassigned for the triage round to grade — **most of it is observation-class prose drift, but Part 2 may not be**, so it is deliberately left unlabeled rather than pre-graded as `finding`.\n\n## Context\n\n#6842 framed the drift as \"three separate pieces of prose went stale when #5491 (PR #6684) removed `member_default`'s plain `'*'` wildcard grant\" — the `packages/spec` JSDoc (fixed by #6696 / PR #6846) and two `it()` titles in `plugin-security` (fixed by PR #6958). Grepping the whole repo for `member_default` co-occurring with wildcard language shows the count was **not** three. At least six more live sites survive in three other packages plus the published docs, and they carry **two** distinct expired premises:\n\n- **(a)** `member_default` has a `'*'` object grant — removed by #5491.\n- **(b)** `member_default` ships a wildcard `tenant_isolation` RLS policy — retired by ADR-0095 D1 in favour of the Layer 0 tenant wall (`plugin-security/tenant-layer.ts`).\n\nMeasured on `origin/main` @ `68feaadd6`, probing the real imported `defaultPermissionSets`: `member_default.objects['*']` is `undefined`, and its object keys are 23 explicitly named `sys_*` tables plus `sys_user_preference` — no wildcard.\n\nCHANGELOG files and `content/docs/releases/` also match the grep and are **correctly** frozen: they are historical records of what was true then. They are not part of this finding.\n\n## Part 1 — stale prose in live source (observation-class)\n\n`packages/platform-objects/src/identity/sys-scim-provider.object.ts:40` — premise (a):\n\n> without it, the `member_default` wildcard `'*': allowRead` would expose SCIM connections to every authenticated user\n\n`packages/platform-objects/src/identity/sys-sso-provider.object.ts:38` — premise (b) — and `:43` — premise (a):\n\n> without it, the `member_default` wildcard `tenant_isolation` RLS denies every row\n> without it, tenancy-disabled + `member_default`'s `'*': allowRead` would leak providers to every authenticated user\n\n`packages/qa/dogfood/test/rls-multitenant.dogfood.test.ts:7` — premise (b):\n\n> `member_default` scopes rows with a wildcard `tenant_isolation` policy\n\nThese are load-bearing rationale comments, not decoration: each one justifies **why a `requiredPermissions` gate exists** by naming the exposure it prevents. A reader who checks the named exposure finds it absent and may conclude the gate is redundant. The gates are almost certainly still right for other reasons (ADR-0066 D3 admin-only config), but the stated reason has expired — the `validate-security-posture.ts` hazard #6628 cites, one layer out.\n\n`content/docs/permissions/index.mdx:47` states as current fact:\n\n> The default `member_default` set ships the wildcard tenant-isolation RLS (`organization_id == current_user.organization_id`)\n\nwhich **contradicts** `content/docs/releases/implementation-status.mdx:294` and `:435` in the same repo, both of which say that policy \"was retired\". A published doc asserting the opposite of the status page is worth more than a naming fix.\n\n## Part 2 — two dogfood tests whose stated proof may now be vacuous\n\nThis is the part that may not be observation-class, and the reason this issue is unlabeled.\n\n`packages/qa/dogfood/test/showcase-default-profile.dogfood.test.ts:50` and `packages/qa/dogfood/test/showcase-d7-default-profile.dogfood.test.ts:55` are both titled `and NOT by the built-in member_default wildcard (...)`, and both carry the same inline rationale:\n\n> `member_default` has a wildcard grant → would be 200. The declared default grants only announcement → this object is denied, proving D7 is in effect.\n\nThe assertion is `expect(r.status).not.toBe(200)`. Its evidential value rests entirely on the named counterfactual: the object is denied **despite** a baseline that would otherwise have allowed it. Since #5491 that baseline grants nothing on app objects at all, so a non-200 is now the trivially expected outcome whether or not the app's declared default profile is in force — which is the exact thing these tests exist to prove. If that reading is right, both tests still pass while no longer demonstrating D7, and the fixture would need replacing rather than re-wording (the #5046 \"replace wholesale\" disposition: the assertion keeps passing *because nothing is produced*, not because the logic is right).\n\n**Not verified by running them** — the dogfood suite needs a live stack and this was out of scope for #6842's PR. The reading above is from the source and the measured array only, and it should be confirmed before being acted on. If it is wrong, Part 2 collapses into Part 1 and this is all prose.\n\n## Why it stayed silent\n\nThe same reason #6842 gives: nothing mechanically relates \"prose names set X as having shape Y\" to what `defaultPermissionSets` ships. PR #6958 adds a pin for that relation in `plugin-security`, but it deliberately watches only two surfaces (`audience-anchors.test.ts` and the `describeHighPrivilegeBits` JSDoc), because those were the two #6842 named. Its `watchedSurfaces()` is a one-line-per-surface list and any of the files above could be added to it — but whether the pin *should* grow a repo-wide surface, and whether `platform-objects` / `qa` should depend on `plugin-security` to get one, is a scoping decision for triage rather than something to assume.\n\nRelated: #6842 and PR #6958 (this issue's origin), #6696 / PR #6846 (the spec half), #5491 / PR #6684 (cause (a)), ADR-0095 D1 (cause (b)), #6628 (the pin idiom).\n\n---\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01BM1tNf5U3nEbHKR4fo5qVQ"
+}

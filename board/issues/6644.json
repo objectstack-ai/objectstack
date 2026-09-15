@@ -1,0 +1,35 @@
+{
+  "number": 6644,
+  "kind": "issue",
+  "title": "[skill] pm-dispatch: 5 lessons from the domain:metadata seat's first term (8 cards MERGED / 0 rework / 4 dev-side falsifications)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-help"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T08:16:50Z",
+  "updated_at": "2026-08-10T08:50:23Z",
+  "closed_at": "2026-08-10T08:50:23Z",
+  "closed_by": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6644",
+  "body": "Handoff deliverable from the `domain:metadata` seat's first term (2026-08-07 15:29Z → 2026-08-08 08:1xZ, session `session_01KDU3qAuJyajAQm3GkUXdfA`, seat sticker #6367). Per the SKILL's handoff checklist step 7, distilled and deduped before filing.\n\n**Dedup done first**: checked #5925 (spec lane's 7 lessons), #6490 (unlock fan-out ordering), #6492 (os-regen path drift), #6465 (re-verify at the merged ref), #6207 (auto-merge tool behavior). None of the five below duplicates those; #4 is adjacent to #6465 and the delta is stated in-line.\n\n---\n\n## 1. `Part of` vs `Fixes` is the PM's call, and it must be checked BEFORE the queue\n\nWhen a dispatch returns `needs_decision` but ships an implementable half (the pre-authorized part), the resulting PR must open with **`Part of #N`**, never `Fixes #N` — otherwise merging silently closes a card that is sitting in the maintainer's decision inbox, and `needs-user-decision` only filters open issues.\n\nMeasured this term: #6190's dev shipped the loud-log half as PR #6600 with a `Fixes` line; caught at review, corrected before the queue (dev edited and read back: `Fixes objectstack` 0 occurrences). Had it merged, the two-question contract decision would have vanished from the inbox with no reader ever knowing.\n\n**Suggested SKILL change** — step 7's ACCEPT paragraph: *a partial-landing PR (its card stays in the decision inbox, or another half is deliberately out of scope) opens with `Part of`, and the PM verifies the first line before flipping ready.*\n\n## 2. \"Report at draft-PR time, do not wait for CI\" belongs in the standard dispatch prompt\n\nThe cli seat's round-2 note (#6024) records four devs dying while waiting for CI to converge — no work lost, up to two hours idle. This seat adopted the fix mid-term (from #3682 onward the prompt says: open the draft PR, report immediately; the PM owns convergence, ready-flip and queueing) and ran **five consecutive dispatches** (#3682, #6190, #6548, #6347, #6563) under it with zero stalls and zero lost reports.\n\nIt is currently only a lane-local operational note. **Suggested SKILL change** — make it a standard clause of the step 5 prompt template, and state the matching PM duty (own the flip-timer + queue) in step 7's landing section, which is where the work moved to.\n\n## 3. Hot-file serial queues deserve a named section on the seat sticker\n\n`packages/metadata-protocol/src/protocol.ts` carried **five** cards this term (#6215 → #6190 → #6563 → #6479 → #5079, plus another seat's #5839 claim on a third region). Batch independence is decided per-round, but a single hot file's ordering is a **standing** fact that outlives any round and must survive a handoff — the incoming PM needs to know the queue, not re-derive it from claim comments.\n\n**Suggested SKILL change** — the seat-sticker protocol (\"座位贴协议\") lists a recommended `热文件串行队` section: file → ordered card list → which region each claim covers. This seat used one ad hoc and it is what made three consecutive same-file dispatches collision-free.\n\n## 4. The PM's own unlock/narrowing judgment is a falsifiable assumption, and its correction is public\n\n#6465 already says a card unblocked by a merge must re-verify **its carded files** at the merged ref. This is the other half: the PM's **narrative** judgment about what an upstream ruling did to a card is itself an assumption a dev can refute.\n\nMeasured: this seat's unlock comment on #6190 asserted the card was \"materially narrowed\" by PR #6478. The verification-first dispatch **disproved it** — #6478 closed the overlay tier only, while the `allowRuntimeCreate` tier still mints org-scoped rows, so the original symptom was intact. Correction was posted on the same card in the open (SKILL notes 7's rule applied to a PM judgment rather than a diagnosis).\n\n**Suggested SKILL change** — step 8 / the unlock-sweep paragraph: when a PM writes \"this ruling narrows/closes the card\", that framing goes into the dispatch as a **PM assumption to be verified**, not as a premise; if the dev refutes it, the PM corrects it on the same card before re-triaging.\n\n## 5. An L-card's exit sweep produces a finding *batch* — group it in the ACCEPT comment\n\n#3682 (ADR-0106, L, `mode:cloud`) produced in one dispatch: 3 findings from its D5 exit audit (#6599, #6601, #6603), 1 cross-seat transfer card (#6622), and 1 decision-inbox escalation — plus 3 exits the ADR itself never named, fixed in-PR. The SKILL's step 7 only says the PM verifies out-of-scope findings exist; at this volume the triage seat needs them **as a set**, with the sweep's own criterion, or they arrive as five unrelated cards over an hour.\n\n**Suggested SKILL change** — step 7: when a card's deliverable includes a systematic sweep (D5-style exit audit, consumption-radius grep, corpus scan), the ACCEPT comment lists the sweep's products as one block, and names the sweep criterion so triage can grade them consistently rather than one at a time.\n\n---\n\nTerm evidence for the above: 8 cards MERGED and closed (#4782, #6043, #4513, #5309, #6215, #6548, #6347, #3682) plus PR #6600 (Part-of) and PR #6642 in the queue; **zero rework rounds, every PR through the merge queue on the first attempt**; 4 dev-side falsifications of PM-supplied mechanism assumptions, all accepted (#6215 route-B unsafe, #6190 unlock judgment wrong, #6563 registry-writethrough claim untrue today, #6347 reverse-verification count 8 not 6)."
+}

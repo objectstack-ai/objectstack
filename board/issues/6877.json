@@ -1,0 +1,35 @@
+{
+  "number": 6877,
+  "kind": "issue",
+  "title": "`packages/rest` 的其它 `req.query.*` 读取点同样把 `string | string[]` 当字符串用(#6307 的未扩大部分)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-help"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T02:17:45Z",
+  "updated_at": "2026-08-10T07:13:48Z",
+  "closed_at": "2026-08-10T07:13:48Z",
+  "closed_by": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6877",
+  "body": "观察类发现,来自 #6307(PR 修的是 `package-routes.ts` 两个 handler)。按 Prime Directive #10 单独立单,**未认领**,#6307 的 PR 刻意没有扩大范围。\n\n**今天没有用户会撞到**:需要客户端重复传同一个查询参数才会触发,而生产用的 Hono 适配器在 handler 之前就把重复值折叠成第一个值(见姊妹单)。\n\n## 事实\n\n`IHttpRequest.query` 的契约是 `Record<string, string | string[]>`(`packages/spec/src/contracts/http-server.ts`)。`packages/rest/src` 里非测试的 `req.query` 读取点共 **61** 处(不含 `package-routes.ts`),其中只有 **9** 处用 `typeof req.query?.x === 'string'` 做了守卫 —— 那 9 处是安全的:数组会落到 `undefined`,行为退化但不会把数组喂进下游。\n\n其余读取点按可观察后果分三类(行号为本单撰写时的 `main`,已知会漂移,**按内容定位**):\n\n**1. 数组原样流进下游**(与 #6307 同形)\n- `rest-server.ts` `const layeredPackageId = req.query?.package || undefined;`\n- `rest-server.ts` `const packageId = req.query?.package || undefined;`(4 处)\n- `rest-server.ts` `const forceRaw = req.query?.force;` / `const packageRaw = req.query?.package;`(2 处)\n- `rest-server.ts` `req.query?.toVersion` / `parseV(req.query?.from ?? req.query?.fromVersion)`\n- `rest-server.ts` `const { select, expand } = req.query || {};`\n- `rest-server.ts` `object: req.query?.object`\n\n**2. 被 `String()` 静默拼接**(`['a','b']` → `\"a,b\"`,一个不存在的名字)\n- `String(req.query.object)`、`String(req.query?.q ?? req.query?.query ?? '')`、`String(req.query?.status)`、`String(req.query?.packageId)`\n\n**3. 被 `Number()` 变成 `NaN`**\n- `Number(req.query.sinceSeq)`、`Number(req.query.limit)`(2 处)、`Number(req.query?.perObject)`\n\n## 为什么没有被门禁抓到\n\n同 #6307:`packages/rest` 没有 `typecheck` 脚本,是 `scripts/check-type-check-coverage.mjs` 的 DEBT 条目(#4311)。注意 —— 这些**不在**那两条 `TS2345` 里:它们要么流进 `any`/宽松形参,要么被 `String()`/`Number()` 吸收,`tsc` 一条都不报。也就是说这批比 #6307 那两条更隐蔽:修完 #6307 后 `packages/rest` 的 DEBT 计数是 **0**,而这批仍在。\n\n## 处置建议(留给分诊)\n\n#6307 的 PR 已经在 `package-routes.ts` 里落了一个可复用的形状:`readSingleQueryValue()` —— 规则是**次数**而非形状(至多传一次;单元素数组算一次;重复则 `400 VALIDATION_ERROR` 拒收)。若分诊认为该规则应推广,它已经写好、有测试、有 ADR-0112 的取码依据;真正的工作量在于逐个判断哪些参数确实是单值语义(`select`/`expand`/`objects` 可能天生是多值,不能一刀切)。\n\n⚠️ 立单时 `rest-server.ts` 正被 #6535 / #6714 两个 PR 持有,动它之前先确认。\n\n## 查重\n\n搜过 open issue 的 `req.query` / `string[]` / `packages/rest`,除 #6307(本单的来源,范围仅两个 handler)外无同题单。#4311 是类型检查覆盖率总账,本单是其中一类行为面,且如上所述这批**不在**它的计数里。"
+}

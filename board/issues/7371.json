@@ -1,0 +1,35 @@
+{
+  "number": 7371,
+  "kind": "pull_request",
+  "title": "test(spec,objectql): pin the `IMetadataService` `register` → `get` round-trip across every shipped implementation (#7223)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-10T08:05:39Z",
+  "updated_at": "2026-08-10T08:55:53Z",
+  "closed_at": "2026-08-10T08:55:51Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-10T08:55:51Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/7371",
+  "body": "Closes #7223.\n\n## The gap\n\n`register(type, name, data)` and `get(type, name)` are the contract's first two CRUD members, and the round-trip between them was exercised in exactly **one** place — `packages/spec/src/contracts/metadata-service.test.ts`, against a hand-rolled `Map`-of-`Map`s double written inside the test itself. No **shipped** implementation was held to it.\n\nThat is the hole #6725 fell through: `MetadataFacade.register('object', …)` wrote into a map none of its own reads consulted, every read answered `undefined`, and the full `packages/objectql` suite plus all 64 `lint.yml` gates stayed green while a shipped, exported implementation of the platform's central metadata contract could not perform its own most basic round-trip.\n\n## The shape\n\nOne table, a thin driver per implementation — the same shape `data/filter-logic-conformance.ts` already uses for filter backends.\n\n**`METADATA_ROUNDTRIP_CASES`** (`@objectstack/spec/contracts`, new file) — 15 cases, each a short sequence of writes followed by exactly one read: plain round-trip on an object-typed and a non-object-typed write, the miss shape on both, re-registration, type scoping in both directions, name case sensitivity (exact hit + lowercased miss), the `data.name`-vs-argument keying question, the plural `objects` spelling, a primitive `data` value, and an after-`unregister` control.\n\nTwo drivers run it:\n\n| Driver | Subjects |\n|---|---|\n| `packages/spec/src/contracts/metadata-service-roundtrip-conformance.test.ts` | the contract's own reference double |\n| `packages/objectql/src/metadata-service-roundtrip-conformance.test.ts` | `MetadataManager` (registry only), `MetadataManager` (writable `datasource:` loader), `createMemoryMetadata`, `MetadataFacade` |\n\n`packages/objectql` hosts the shipped-implementation half because it is the only package that can see all three at once — the same argument `metadata-service-getobject-equivalence.test.ts` (#6745) already makes for living there. `packages/spec` cannot host it: the contract has no runtime and spec is the dependency root.\n\n**The pre-existing Map double in `metadata-service.test.ts` is untouched.** It pins the contract's *type* surface and its own inline round-trip, independent of any implementation; the new spec-side driver pins the *table's* reference answers so a typo in `expected` cannot silently redefine conformance for every subject at once.\n\n`MetadataManager` appears twice because its `register` writes the in-memory registry **and** persists to every writable `datasource:` loader — a loader-less subject never executes the second half.\n\n## Divergences — pinned, not resolved\n\nThree cases get different answers from `MetadataFacade` than from the other implementations and the reference double. **No shipped behaviour changes in this PR.** Each answer is pinned as measured under a `// DIVERGENCE` marker; which answer is correct is a separate ruling, filed as its own card.\n\n| Case | `MetadataManager` / `createMemoryMetadata` / reference | `MetadataFacade` |\n|---|---|---|\n| `key-is-the-name-argument-object` / `-nonobject` | keyed by the `name` **argument** — readable back | keyed by **`data.name`** — `get` `undefined`, `exists` `false`, `listNames` reports the other spelling |\n| `plural-objects-type-is-its-own-store` | `objects` and `object` are two stores — invisible under the singular | plural **aliased** to singular — visible through `get('object', n)` |\n| `primitive-data-roundtrips` | value stored against the key, handed straight back | **silently dropped** — `register` accepts, no member reads it back |\n\nThe first is the most consequential: `register(t, n, d)` → `get(t, n)`, the exact proposition this card is about, does not hold on `MetadataFacade` whenever `d.name !== n`. The contract TSDoc names the parameter on both members and says nothing about `data.name`, so nothing in-tree currently rules which is right.\n\n## Anti-vacuity\n\nVerified by re-introducing the #6725 split locally (dropping the contributor write from `MetadataFacade.registerObjectBothPlaces`): **four rows go red**, including the plain object round-trip. Reverted before commit. Dropping any single divergence override also goes red, and two wiring tests guard the override map from both directions — a stale override key, and a case no subject is held to.\n\n`MetadataFacade` is asserted with a recursive-subset match rather than exact equality, because it answers the **runtime-effective** object (system fields injected by `SchemaRegistry`) rather than the stored document — exactly as #7223 predicted. That weaker match is scoped to the one subject that needs it via a declared `documentFidelity`; every other subject is held to exact equality, and all four get the same key/visibility assertions.\n\n## Changeset\n\nNon-empty, `@objectstack/spec: patch`. This is not the tests-only `skip-changeset` case: the PR adds **5 public exports** to `@objectstack/spec` (`METADATA_ROUNDTRIP_CASES` + 4 types), which third-party implementors can import to check their own backend — the `FILTER_LOGIC_CASES` precedent, which is likewise on spec's public surface. `check:api-surface` recorded **0 breaking, 5 added**; `api-surface/contracts.json` and `export-origins/contracts.json` are regenerated, each new name resolving to one origin in the new file (no re-homing, no dual source). Nothing breaking ⇒ no ADR-0087.\n\n## ⚠️ Cross-seat\n\n**This PR touches `packages/spec/src/contracts/**`** — one new file plus four lines in `contracts/index.ts`. Flagged for the #6017 cross-seat declaration.\n\nRefs #7223, #6725, PR #7211, #6745, #6505 / PR #6723.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_0193R6tMZqgrdFrCSnaogFc4\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_0193R6tMZqgrdFrCSnaogFc4)_"
+}

@@ -1,0 +1,36 @@
+{
+  "number": 6953,
+  "kind": "issue",
+  "title": "PageComponentSchema.dataSource 在 list-view 之外仍无人消费:element:record_picker 丢 view,object-grid/form/kanban/calendar 等整条绑定不读(按 spec 写 dataSource 渲染出空)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched",
+    "pm:queue",
+    "repo:objectui"
+  ],
+  "assignees": [
+    "yinlianghui"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T06:20:47Z",
+  "updated_at": "2026-08-09T18:50:05Z",
+  "closed_at": "2026-08-09T18:50:05Z",
+  "closed_by": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6953",
+  "body": "发现于 objectstack#5576 的实现过程(objectui PR,把 `dataSource` 接到 `list-view`)。#5576 的完成范围只到 `list-view` + `resolveElementDataSource`,本单是**同一条绑定在其余 page component 上仍然无人消费**,单独立单;实现要用 #5576 落地的公共 helper,故 `Blocked-by: objectstack#5576`。\n\n## 事实(objectui origin/main + #5576 分支实测)\n\n`PageComponentSchema.dataSource`(`ElementDataSourceSchema`)声明在**每一个** page component 上 —— 它不是 list-view 专属键。但整仓只有两处读它:\n\n```\npackages/components/src/renderers/basic/record-picker.tsx:71   const ds = (schema?.dataSource ?? {}) as { object?; filter?; sort?; limit? }\npackages/plugin-list/src/ListViewBlock.tsx                     (#5576 新增)\n```\n\n由此两个仍然存在的缺口:\n\n### 1. `element:record_picker` 读了 4 个键、丢掉 `view`\n\n`record-picker.tsx:71-80` 显式取 `object` / `filter` / `sort` / `limit`,**没有 `view`**。作者写 `dataSource: { object: 'account', view: 'hot' }` 得到的是**未过滤的全量选择器**,而不是 saved view 选出的行 —— 与 #5576 在 list-view 上修掉的是同一个「声明了但丢弃」形状,只是换了个 block,且症状更隐蔽(它不报错,只是答案更宽)。\n\n### 2. 其余 object-bound public block 整条绑定都不读\n\n`object-grid` / `object-form` / `object-kanban` / `object-calendar` / `object-chart` / `object-metric` / `record:related_list` 等都没有把 `dataSource.object` 映射到自己读的 `objectName`。一张页面上给 `object-grid` 按 spec 写 `dataSource: { object, view }` 而不写 `objectName`,渲染出来是空的(`objectName` 未设 → 不发查询)。\n\n补充一条容易误读的:在 #5576 之前这些 block 写 `dataSource` 会直接**坏掉**(`SchemaRenderer` 把 schema 的 `dataSource` spread 成 prop,遮蔽了宿主注入的适配器 → `dataSource.find is not a function`)。#5576 已在 `SchemaRenderer` 侧把该键移出 prop spread,所以**崩溃面已经消除**;剩下的是本单的「读不到 = 静默空」。\n\n## 建议范围\n\n复用 #5576 落地的公共件,不要各 block 再写一遍:\n\n- `@object-ui/core`:`isElementDataSourceConfig` / `collectSavedViews` / `resolveSavedView` / `composeElementDataSource`\n- `@object-ui/react`:`useElementDataSource(schema, dataSource?)`(已含 saved view 抓取 + 「view 名解析不到就报错、不回退全量」的语义)\n\n逐 block 接线 + 每个 block 两方向各钉一条(带/不带 `dataSource`),并沿用 #5576 定下的合成语义(`filter` 为 additional 走 `and` 合成;`sort`/`limit` 显式键覆盖 view;view 提供基线、组件自身显式键覆盖 view)。\n\n## 为什么不并进 #5576\n\n#5576 的验收线是 list-view 的两方向复现 + `resolveElementDataSource` 不再丢 `view`;把 7 个以上 block 的接线并进去会让那个 PR 的回归面无法逐块论证。分开做,每个 block 有自己的钉子。"
+}

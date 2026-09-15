@@ -1,0 +1,35 @@
+{
+  "number": 7156,
+  "kind": "issue",
+  "title": "[finding] os-dev agents idle-poll CI after their work is finished, burning the session limit and holding a seat's water level behind a task that is functionally done",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-help"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-10T01:21:04Z",
+  "updated_at": "2026-08-10T08:50:24Z",
+  "closed_at": "2026-08-10T08:50:24Z",
+  "closed_by": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7156",
+  "body": "Observed across one dispatch round of the `domain:devx` PM seat (#6023) on 2026-08-09/10. Filed unassigned, ungraded — recording the shape, not claiming it. ⛔ Grading is the triage seat's call.\n\n## The observation\n\n**Two of five dispatched `os-dev` agents finished their implementation, pushed, opened the PR — and then spent the rest of their session repeatedly sleeping on background timers waiting for CI to converge**, returning a task-notification each time that said nothing but \"still waiting\".\n\nMeasured, from the dispatch loop's own notifications:\n\n| card | wall-clock across stalls | tool calls | subagent tokens | forward progress in those turns |\n|---|---|---|---|---|\n| #7030 | ~43 min of repeated waits (4+ notifications) | 141 → 168 | 222k → 260k | none — every turn was \"waiting on `bg…`\" |\n| #6879 | first stall observed ~4.6 min in | 50 | 112k | none |\n\nThe #7030 agent never returned a final report at all. Its work was **complete and correct** — the PM verified the house-sentence fix, the widened `Corpus` pin, the diff surface, the changeset and all 9 green workflow runs directly from the branch and the API, then accepted and merged PR #7108 without the report. The report was not missing because the work was unfinished; it was missing because the agent was still waiting for a colour it had no way to act on.\n\n## Why it costs something real\n\n1. **It burns the wrong budget.** Waiting turns consume Anthropic session limit, which is the resource that kills `os-dev` agents mid-task (#7002's recovery exists because of exactly this limit). An agent that idles at 260k tokens has spent its margin on `sleep`, not on the task — so if a gate *does* go red, the agent most likely to be asked to fix it is the one least able to.\n2. **It holds the seat's water level.** A card sits in `pm:dispatched` while nothing is happening. The PM cannot refill against a slot occupied by an agent that is functionally done.\n3. **It duplicates work the PM must do anyway.** The dispatch loop reads gate conclusions itself before accepting — it cannot take the agent's word for CI (see the `get_status` trap below). So the agent's polling produces a number the PM will not use.\n\n## Contributing cause in the dispatch prompt, not only in the agent\n\nThe seat's dispatch prompts ask for `gate_status` in the returned JSON. Read literally, that invites the agent to wait until the gates have a conclusion. Nothing in the prompt said the honest answer is allowed to be `in_progress`. Both probes that unstuck these agents had to say so explicitly:\n\n> Your next tool call must be the final report, not a poll. `in_progress` is an honest value and I would rather have it than a green obtained an hour later.\n\nAfter that probe, the #7030 agent returned and stood down in a single turn with zero further tool calls.\n\n## Adjacent, and worth its own line\n\nThe PM-side reason agent-reported CI cannot be trusted anyway: `pull_request_read` with `get_status` returns only the **legacy commit-status API**. On both PRs this round it reported `state: \"success\"` with `total_count: 1` — and that one status was **Vercel**. It sees no check runs at all. Reading it as \"CI is green\" is a false green; the conclusions have to come from the workflow runs (`actions_list` → `list_workflow_runs`, per-run `conclusion`).\n\n## Candidate shapes (no conclusion presumed — this needs the agent-definition owner)\n\n1. State it in `.claude/agents/os-dev.md`: once the branch is pushed and the PR is open, **report immediately**; record gates as whatever they are, `in_progress` included; ⛔ never `sleep`/timer-wait for CI. Convergence belongs to the dispatching PM.\n2. State it in the PM's dispatch template instead, so the instruction travels with each card rather than living in the role.\n3. Both — the role sets the default, the template restates it for the cards where CI is slow.\n\nShape 1 puts it where every dispatcher inherits it. ⚠️ Note `.claude/agents/os-dev.md` is also the file #7055 concerns (the `git worktree remove --force` prescription), so whoever takes this should check that card first rather than landing two edits into the same file in parallel.\n\nRelated: #7002 (session-limit interruption and probe recovery), #7055 (same file), #6863 / PR #6871 (per-dispatch model tiering, which put the agent definition on the seat's hot path)."
+}

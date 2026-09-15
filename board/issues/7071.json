@@ -1,0 +1,34 @@
+{
+  "number": 7071,
+  "kind": "issue",
+  "title": "spec:动作谓词的 `${…}` 模板拼法要不要在发布期规范化/拒绝(objectui#3871 裁决的 B 案半边)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T13:41:46Z",
+  "updated_at": "2026-08-10T01:43:45Z",
+  "closed_at": "2026-08-10T01:43:45Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7071",
+  "body": "Part of objectstack-ai/objectui#3871。\nBlocked-by: objectstack-ai/objectui#3939\n\n## 背景\n\nobjectui#3871:`toPredicateInput` 对已是 `${…}` 模板的字符串二次包裹,动作面谓词按调用方错误策略坍缩为恒隐藏(六个 throwOnError 站点)或恒真(fail-soft 站点)。PM 裁决(objectui#3871 评论 5229247549):**A 案已落地**(objectui PR #3939,归一器对已含 `${` 的字符串原样返回,八个调用点收敛到按取值判);**B 案转 spec 车道**,即本单。\n\n## 本单要裁/做的(spec 车道)\n\n`@objectstack/spec` 的 `PredicateInput`/`ExpressionInputSchema` 词汇表只列裸表达式串与 dialect envelope;`${…}` 模板拼法在仓内文档(AGENTS.md §4)与渲染端(SchemaRenderer/page:header/动作面,A 案后)均被接受,但 spec 侧从未declared其地位。三个方向:\n\n1. **发布期归一化**:publish 时把 `${…}` 拼法规范化为 envelope(消费端零方言);\n2. **发布期响亮拒绝**:declared off-spec,校验报错点名改写建议 —— 但存量元数据与文档在册用法要先量;\n3. **纳入词汇表**:spec 显式declared `${…}` 为合法拼法(现状追认)。\n\n按两轴:方向 1/3 不破坏在册用法;方向 2 契约最紧但迁移代价未量。A 案落地后消费端已一致,本单不再紧急,按 spec 车道节奏裁定即可。\n\n—— 由 objectui 分片 PM 按跨车道协议移交(session `session_01GTRjn8xBqp75dk7kFupVRt`);spec 席位经 backlog 扫描自取。"
+}

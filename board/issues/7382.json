@@ -1,0 +1,35 @@
+{
+  "number": 7382,
+  "kind": "pull_request",
+  "title": "fix(service-messaging): close DeliveryPayload.severity to its declared vocabulary",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-10T08:20:57Z",
+  "updated_at": "2026-08-10T08:51:29Z",
+  "closed_at": "2026-08-10T08:51:28Z",
+  "closed_by": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "merged_at": "2026-08-10T08:51:28Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/7382",
+  "body": "Fixes #7174\n\n`DeliveryPayload.severity` was declared `'info' | 'warning' | 'critical' | string`.\nTypeScript absorbs a literal union member into the wider primitive it is unioned\nwith, so this was **exactly `string`** — the three names read as a closed\nvocabulary but enforced nothing. `severity: 'urgent'` (and `severity: ''`)\ntype-checked with no error, while three sibling declarations of the same\nconcept in this package were already closed:\n\n- `messaging-service.ts:64` — `EmitInput.severity: 'info' | 'warning' | 'critical'`\n- `channel.ts:40` — `Notification['severity']: 'info' | 'warning' | 'critical'`\n- `inbox-message.object.ts:88` — a `Field.select` offering exactly those three\n\n## Premise re-verification (before implementing)\n\nConfirmed on fresh `origin/main`: `outbox.ts:25` still reads\n`severity?: 'info' | 'warning' | 'critical' | string;`. Probed the index\nsignature (`[k: string]: unknown`) does **not** swallow the named property's\nnarrower type — a standalone `tsc` check confirms `severity: 'urgent'`\nagainst the narrowed interface is rejected (`TS2322`), so the fix is a\nreal compiler gate, not a no-op. Premise valid — proceeded.\n\n**Same-day churn check (#7086):** its PR (#7192, the Zod-side twin —\n`NotifyConfigSchema.severity`) is already merged, closing to the same\n`info | warning | critical` vocabulary. No conflict; vocabularies match.\n\n**Sweep for other `'a' | 'b' | string` collapses in the services layer**\n(the card's suggested pass): grepped `packages/services/**/*.ts` for the\npattern — `outbox.ts:25` was the only hit. No further filings needed.\n\n## Change\n\n`packages/services/service-messaging/src/outbox.ts` — drop the trailing\n`| string`, so `DeliveryPayload.severity?: 'info' | 'warning' | 'critical'`.\n\n**No runtime behaviour change.** Traced every construction site of a\n`DeliveryPayload` in-package:\n- `messaging-service.ts` (`enqueueDeliveries`, `emit`'s inline fan-out path,\n  the L2 event write) all write `input.severity ?? 'info'`, where\n  `input: EmitInput` and `EmitInput.severity` is *already* the closed union —\n  so these sites type-check identically before and after.\n- `dispatcher.ts:265` reads `p.severity as Notification['severity']) ?? 'info'`\n  — an explicit cast, unaffected by narrowing the source type it casts from.\n- No downstream package (`cli`, `runtime`, `plugin-webhooks`, `dogfood`,\n  the driver packages) references `DeliveryPayload`, `NotificationDeliveryRecord`,\n  `EnqueueDeliveryInput`, or `INotificationOutbox` by name — the narrowing is\n  fully contained to `service-messaging`. Consumer sweep direction used:\n  `pnpm --filter '...@objectstack/service-messaging'` (downstream prefix).\n\n## Reverse verification (predicted before running)\n\nAdded `outbox-delivery-payload-severity.test.ts` — this package's tsconfig\ndoes not exclude `*.test.ts`, so `tsc --noEmit` (the `typecheck` script)\nreads it directly; no separate `.pin.ts` needed (PR #7140/#7206 convention).\n\n| Pin | Predicted | Measured |\n|:---|:---|:---|\n| `@ts-expect-error` on `severity: 'urgent'`, pre-fix (`outbox.ts` restored from `origin/main` via `git checkout origin/main -- <path>`, never `git stash`) | unused-directive error (TS2578) — the collapsed union accepts `'urgent'` | `error TS2578: Unused '@ts-expect-error' directive.` — as predicted |\n| Same pin, post-fix | clean | `tsc --noEmit` exits 0 — as predicted |\n\n## Gates (local, scoped — full farm left to CI)\n\n```\npnpm --filter '@objectstack/service-messaging^...' build     pass (dependency closure)\npnpm --filter @objectstack/service-messaging typecheck        pass\npnpm --filter @objectstack/service-messaging test              Test Files 17 passed | Tests 201 passed\nnpx eslint <changed files>                                       clean\nnode scripts/check-nul-bytes.mjs                                 OK (6741 files scanned)\n```\n\n## Changeset\n\n`patch` on `@objectstack/service-messaging`, following the #7140 precedent:\na type-side-only tightening with no runtime behaviour change still gets a\nchangeset because it narrows a publicly exported type — a consumer directly\nassigning an out-of-vocabulary literal to `DeliveryPayload.severity` would\nnewly fail to compile.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_015fkdTyGmMD5s8ZtEifvuGy)_"
+}

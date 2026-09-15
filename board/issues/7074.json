@@ -1,0 +1,33 @@
+{
+  "number": 7074,
+  "kind": "issue",
+  "title": "objectui: 39 个普通 button 元素缺 `type=\"button\"`(objectui#3344 家族的总体面);已一次一个修了三轮,建议用 lint 规则收口 —— observation",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "pm:queue",
+    "repo:objectui"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T13:50:13Z",
+  "updated_at": "2026-08-10T02:11:30Z",
+  "closed_at": "2026-08-10T02:11:30Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7074",
+  "body": "发现于 objectstack#6952 的实施(objectui PR #3948,给 `UserFilters` 三处补 `type=\"button\"`)。**不阻塞那一单**,它已按范围修完;这是顺手量出来的家族总体面,单独立案。\n\n## 事实(实测脚本逐个解析 JSX 开标签,非阅读推断)\n\nobjectui `origin/main` = `ebb579dbb`。统计口径:`packages/*/src` + `apps/*/src` 下的 `.tsx`,排除 `__tests__/`、`*.test.tsx`、`src/ui/`(Shadcn 上游禁改区);把每个 `button` 开标签完整收集到第一个深度为 0 的 `>`,剔除注释行里谈论 button 的文字(`SelectField.tsx` 那段 #3306 注释就会被误计),再判断有无 `type=`。\n\n**普通 button 元素、完全没有 `type` 的:39 处**\n\n| 文件 | 行 |\n|---|---|\n| `apps/console/src/pages/developer/ApiConsolePage.tsx` | 236, 285, 312, 323, 358, 391, 440, 470, 481, 497 |\n| `packages/app-shell/src/views/studio-design/StudioDesignSurface.tsx` | 913, 1658, 1720, 2279, 2333, 3000, 3044, 3486 |\n| `apps/console/src/components/schema/objectDetailWidgets.tsx` | 150, 158, 173, 475 |\n| `apps/console/src/components/PerformanceDashboard.tsx` | 132, 166, 173 |\n| `packages/app-shell/src/views/MetadataInspector.tsx` | 92, 105 |\n| `packages/components/src/debug/DebugPanel.tsx` | 275, 288 |\n| `packages/plugin-designer/src/components/ConfirmDialog.tsx` | 84, 90 |\n| `packages/components/src/renderers/overlay/drawer.tsx` | 38 |\n| `packages/components/src/renderers/data-display/tree-view.tsx` | 48 |\n| `packages/components/src/custom/navigation-overlay.tsx` | 528 |\n| `packages/plugin-designer/src/components/PropertyEditor.tsx` | 86 |\n| `packages/plugin-designer/src/components/VersionHistory.tsx` | 94 |\n| `packages/app-shell/src/console/organizations/OrganizationsPage.tsx` | 237 |\n| `packages/app-shell/src/console/organizations/manage/InvitationsPage.tsx` | 152 |\n| `packages/app-shell/src/console/organizations/manage/OrganizationLayout.tsx` | 94 |\n\n另有 **2 处**是 Radix `*Trigger asChild` 的子元素、自己没声明 `type`(`apps/console/src/pages/developer/ApiConsolePage.tsx:274`、`packages/app-shell/src/layout/AppSwitcher.tsx:49`)—— 见下节,这两处今天由 Radix 兜住,风险等级与上表 39 处不同。\n\n## 顺带纠正一个家族内流传的错误机制说法(这条对下一张卡最有用)\n\nobjectstack#6952 正文(以及 objectui PR #3926 在 `filter-tab-add` 上的注释)称「Radix 的 PopoverTrigger 不 preventDefault,所以触发器保持 HTML 的 submit 默认」。**实测不成立**:`PopoverTrigger` 渲染的是 `Primitive.button` 且自带 `type: \"button\"`(`@radix-ui/react-popover@1.1.23`,`dist/index.mjs:89`),Slot 会把它并到「自己没声明 type」的子元素上。把 `type=\"button\"` 从 `UserFilters` 两个 PopoverTrigger 子元素上撤掉,渲染出来**仍然**是 `type=\"button\"`;只有普通 button 撤掉后读到 `null`。\n\n推论,直接影响 objectstack#6952 里被「另裁」的那半张卡(让 `@object-ui/components` 的 `PopoverTrigger` 原语自带默认 `type`):**Radix 今天已经这么做了**,那张卡若只针对 Popover 触发器基本是 no-op。真正没人兜底的是普通 button —— 也就是上表那 39 处。`packages/components/src/custom/combobox.tsx:74-80` 的注释本来就把这件事写准了(「Radix … happens to supply type=\"button\" via its Slot today, but that is an upstream implementation detail — declare the contract locally」),是后续引用把它改错了。\n\n## 为什么标 observation、不进 pm:queue\n\n**没有证明任何一处今天被用户踩到。** 这 39 处的可达性是逐点的,我没有逐点验证「它此刻确实渲染在 form 元素内部」。分两档,交给 triage 定级:\n\n- **`apps/console` / `app-shell` / `plugin-designer` 的页面级按钮(30 处)**:挂载点固定,和 objectstack#6952 里 `UserFilters` 的处境类似 —— 除非有人把那块组合进 form,否则休眠。\n- **`@object-ui/components` 的 renderer(`drawer.tsx:38`、`tree-view.tsx:48`、`navigation-overlay.tsx:528`)**:这三处的休眠论据明显更弱。它们是**由 JSON 元数据任意组合**的渲染器 —— schema 作者完全可以把 tree-view 或 drawer 放进一个 form 里,而这正是 objectstack#6952 预告的「组合变化即触发」。这一档我倾向于比页面级按钮更值得看一眼,但同样没实测,不自己定级(objectstack#4949:立单时的严重度判断两个方向都不可靠)。\n\n## 修的话是什么形状(两个选项,取舍归维护者)\n\n一次一个地补属性已经走了三轮(objectui#3344 的 combobox → objectstack#5236 / PR #3926 的 add 触发器 → objectstack#6952 / PR #3948 的三处),每轮都只覆盖当时被看见的那几个,population 还剩 39。所以问题不在这 39 个属性,而在**没有任何机制阻止第 40 个被写出来**。\n\n- **A. 机械强制(推荐):** 加一条 lint 规则,把「button 元素必须声明 type」变成 error。本仓已有自己的插件与配套 RuleTester(`eslint-rules/`,如 `no-synthetic-event-trigger.js`、`no-dynamic-import-in-test-hook.js`),照那个形状写一条即可;也可以直接引 `eslint-plugin-react` 的 `button-has-type`(注意:本仓目前**只装了** `eslint-plugin-react-hooks` / `-refresh`,基座 `eslint-plugin-react` 没装,引它是新增依赖)。规则落地后 39 处一次性修完、且第 40 个写不出来。\n- **B. 只补这 39 处属性:** 便宜,但把「不犯错」继续押在作者记性上 —— 第四轮同类立单只是时间问题。\n\n两轴评估:**长期健康度**上 A 才消除缺陷类,B 只消除缺陷实例;**让 AI 写的代码难写错**上差距更大 —— 这些 UI 是 AI 大量生成的,lint error 在写出来的那一刻就拒绝,而 B 依赖每个作者(人或 AI)记得一个不在类型系统里的 HTML 冷知识。A 的成本是一条规则 + 一次 39 处的机械修改,B 之后还会再付一次。\n\n## 参考\n\n- 家族原型:objectui#3344(combobox 触发器,含 `packages/components/src/__tests__/combobox-trigger-type.test.tsx`)\n- 第二轮:objectstack#5236 / objectui PR #3926(`filter-tab-add`)\n- 第三轮:objectstack#6952 / objectui PR #3948(`UserFilters` 三处;那条 PR 里也钉了一条扫描式断言,两种模式下渲染出的每个 button 都必须是 `type=\"button\"` —— 可作为 A 落地前的局部替代形状)\n"
+}

@@ -1,0 +1,33 @@
+{
+  "number": 4075,
+  "kind": "issue",
+  "title": "[P3] objectui `ActionDef`'s `[key: string]: any` absorbs every retired and misspelled action key — removing a spec key produces no compile error",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:queue",
+    "repo:objectui"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-30T08:22:35Z",
+  "updated_at": "2026-08-10T02:11:30Z",
+  "closed_at": "2026-08-10T02:11:30Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 11,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4075",
+  "body": "> ## ⚠️ 状态头(2026-08-06 更新——**派发者读这里,不要按下文的 staged plan 派单**)\n> - **Step 1**(构造点清查 + dev-mode 未识别键警告)✅ **已完成**:objectui#3032(2026-07-30 合并,`@object-ui/core` 17.1.0;`actionKeys.ts` + AST 再派生 pin 测试)\n> - **Step 2**(合法键位提升为显式字段)✅ **已完成**:objectui#3190(2026-08-02 合并,17.2.0;18 个 spec 键全部提升)\n> - **Step 3**(删除索引签名)🟡 **已裁决、待上游**:维护者 2026-08-06 裁定 `visible` / `disabled` 统一收敛为 `boolean | string(CEL) | {dialect,source}`,spec 侧先行(#5970);合并后 objectui 按 spec 派生类型收敛两键、删索引签名、删 `DeclaredActionsBar.tsx` 的 `(action as any).disabled` 强转(裁决全文见 2026-08-06 PM 裁决评论,分析见验收评论 5156971051)。\n> - 本单曾两次被按下文 staged plan **误派 step 1**(2026-08-02、2026-08-06,均由 premise 检查拦下)——下文正文是立单时的计划,**不再是现状**,以本状态头为准。\n\nBlocked-by: #5970\n\n---\n\nSplit out of #3856 / objectui#2990, which hit this directly and documented it rather than working around it silently.\n\n## The mechanism\n\n`ActionDef` (`packages/core/src/actions/ActionRunner.ts:277`, interface at `:78`) ends with:\n\n```ts\n  /** Any additional properties */\n  [key: string]: any;\n```\n\nat `ActionRunner.ts:185`. So `ActionDef` accepts **any** key of **any** type. Concretely, in objectui#2990:\n\n- deleting `ActionDef.execute` produced **zero** compile errors, even though the field had just been removed from the interface;\n- stale metadata still authoring `execute: 'markDone'` continues to type-check today;\n- the same deletion on `@object-ui/types`' `ActionSchema` — which has no index signature — correctly produced `TS2353` at the authoring site.\n\nThat asymmetry is the whole issue: one of the two readers is capable of catching a retired key, the other is structurally incapable.\n\nBecause the compiler couldn't help, objectui#2990 had to add a **runtime** branch to keep the removal audible — `executeScript` now returns the rename prescription when it finds only the retired key, rather than a bare \"No script provided\". That branch exists solely to compensate for this index signature. Binding no handler silently is the #2169 \"Mark Done does nothing\" shape, so the compensation was necessary — but it is compensation.\n\n## Not the same as `ActionContext`'s\n\n`ActionContext` has an index signature too (`ActionRunner.ts:53`) and it should keep it: it is a runtime data bag whose keys are genuinely open (`data`, `record`, `pageVariables`, `user`, plus whatever a host passes). `ActionDef` is the opposite — it is a **declared metadata contract** that mirrors `@objectstack/spec`'s `ActionSchema`. An open key set on a contract is what lets a typo (`targt`, `exectue`) and a tombstoned key (`execute`) both sail through to a runner that then silently does nothing.\n\n## Why it can't just be deleted\n\nThe runner deliberately accepts shapes wider than current spec, and `ActionDef` already enumerates a lot of them explicitly (`actionType` \"legacy action type field\", `api` as `string | ApiConfig`, `onClick` \"legacy\", `navigate?: any`). Some callers likely pass keys not declared anywhere. A bare removal would surface as a wall of `TS2353` across `components` / `plugin-*` / host apps, some legitimate.\n\nStaged narrowing is the realistic path:\n\n1. Inventory what is actually passed — grep the repo's `ActionDef` construction sites and any `action[...]` dynamic reads, and add a dev-mode warning on unrecognized keys (the \"declared, warned, lintable shim\" form AGENTS.md PD #12 asks for, instead of a bare open type).\n2. Promote every legitimate key found into an explicit optional field, keeping the legacy ones marked `@deprecated`.\n3. Remove the index signature. At that point `tsc` catches both typos and retired spec keys, and #2990's runtime prescription branch can eventually retire with it.\n\nStep 1 is independently useful and non-breaking: it turns an invisible failure into a warning without changing types.\n\n## Relation to #3903\n\n#3903 established that the spec contract stops at authored source — stored `sys_metadata` rows are rehydrated unparsed. This is the same \"declared ≠ enforced\" pattern on the *type* channel rather than the parse channel: `@object-ui/core` is the reader that consumes those unparsed rows (`runner(action)`), and its type accepts anything they contain. The two issues bound the same gap from opposite ends; fixing #3903 alone would still leave a reader that cannot describe what it accepts.\n\nRefs #3856 (objectui#2990), #3903, #2169, #3855, #3883, AGENTS.md PD #12."
+}

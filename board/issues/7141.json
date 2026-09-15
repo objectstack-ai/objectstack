@@ -1,0 +1,34 @@
+{
+  "number": 7141,
+  "kind": "issue",
+  "title": "plugin-audit's `callerContext` rebuilds a 5-field subset of the execution envelope, dropping `onBehalfOf` before the sharing gates that are documented to fail closed on it",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T20:45:34Z",
+  "updated_at": "2026-08-09T22:10:22Z",
+  "closed_at": "2026-08-09T22:10:22Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7141",
+  "body": "Out-of-scope observation from implementing #7136 (PR #7140), filed rather than fixed — that card was bounded to annotation widening plus redundant-cast deletion, and the change below is a RUNTIME change with an enforcement consequence.\n\n## Fact\n\n`packages/plugins/plugin-audit/src/comment-access-hooks.ts` — `callerContext()` does not forward the caller's execution envelope. It rebuilds a five-field projection of it:\n\n```\nfunction callerContext(ctx: any): ExecutionContext {\n  const exec = ctx?.input?.options?.context;\n  if (exec && typeof exec === 'object') {\n    return {\n      userId: exec.userId,\n      tenantId: exec.tenantId,\n      positions: exec.positions,\n      permissions: exec.permissions,\n      isSystem: exec.isSystem,\n    };\n  }\n  ...\n}\n```\n\nThe result is handed to `ISharingService.buildReadFilter` / `canEdit` / `canDelete`, whose contract since #6523 declares the FULL envelope and whose doc block states callers \"MUST NOT rebuild a subset of it\" (the #6206 ruling). PR #7140 widened this function's return ANNOTATION to `ExecutionContext`; the body was deliberately left alone, because changing it is not inert.\n\n## The field that matters: `onBehalfOf`\n\n`ISecurityService.hasWriteBypass` — the `modifyAllRecords` super-user probe the sharing write gates consult — is documented to fail CLOSED on a delegated context, and implements it by reading exactly that field (`packages/plugins/plugin-security/src/security-plugin.ts:704`):\n\n```\nhasWriteBypass: async (object, context) => {\n  if (context?.isSystem) return true;\n  if (!context?.userId) return false;\n  if (context?.onBehalfOf?.userId) return false;   // no ADR-0090 D10 intersection on this path\n  ...\n}\n```\n\n`onBehalfOf` is not in the projection, so on the comment path that guard can never fire. It is **not** dormant vocabulary: `packages/runtime/src/security/resolve-execution-context.ts:191` populates it for OAuth agent principals on the `/mcp` surface —\n\n```\nctx.principalKind = 'agent';\nctx.onBehalfOf = { userId: authz.userId, principalKind: 'human' };\n```\n\nso an MCP agent touching `sys_comment` reaches these gates with the delegation link already stripped, and `hasWriteBypass` evaluates it as an ordinary direct call. `principalKind: 'agent'`, `systemPermissions`, `accessible_org_ids` and `posture` are dropped by the same projection.\n\n**What I could NOT establish**, and it bounds the severity honestly: whether the agent's scope-derived permission ceiling (`scopesToAgentPermissionSets`) can actually carry `modifyAllRecords`. If it cannot, `hasSuperuserWriteBypass` returns `false` anyway and the stripped guard is currently redundant in practice. What is definite is that a documented fail-closed invariant is not honoured on this path, and that it is load-bearing only because of a second predicate nobody wired the two together deliberately. Grading this is triage's call, not mine — filed unlabeled.\n\nThe same projection also drops `__delegatorReadScope` / `__delegatorWriteScope`, so the ADR-0090 D10 delegator intersection that `sharing-plugin.ts` re-runs on the ordinary CRUD path does not happen for comment reads on the parent record.\n\n## Why the naive fix is wrong\n\n`return exec;` is NOT the fix. plugin-security's middleware MUTATES the operation context in place (`sc.__readScope = …`, `security-plugin.ts:1159`), so the context arriving here carries the access DEPTH resolved for **`sys_comment`** — the object of the operation — while these gates ask the sharing service about the **parent record's** object. Forwarding it whole would hand one object's depth to another object's owner-match: a WIDENING input applied to the wrong object. That is the precise leak `resolveWriteScopeForSharing` was extracted to prevent (\"Always returned (even as `undefined`) so the caller can write the key unconditionally and a stale value can never leak in through a spread\", `security-plugin.ts:2516`).\n\nSo the projection is currently doing two jobs at once — stripping the middleware keys (correct, and the safe direction) and stripping the principal fields (not correct). Any fix has to separate them, e.g. forward the envelope minus the middleware-private keys, or resolve the parent object's own depth the way `resolveWriteScopeForSharing` does.\n\n## Dedup\n\nSearched open issues for `onBehalfOf` + delegator + sharing bypass, `comment-access-hooks` / `sys_comment`, and `SharingExecutionContext`: no hits other than the #7070 family (#7135, #7136), none of which covers this. Not inside #7136's completion scope — that card is annotation widening plus redundant-cast deletion, with implementation bodies untouched, exactly as #6523's contract half separated from its consumer half. Standalone rather than a sub-issue.\n\nRelated: #7136 / PR #7140 (where the annotation was widened and this was deliberately not folded in), #6523, #6206 (ruling), #7070.\n"
+}

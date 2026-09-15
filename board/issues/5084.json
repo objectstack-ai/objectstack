@@ -1,0 +1,34 @@
+{
+  "number": 5084,
+  "kind": "issue",
+  "title": "Console: list-view chrome (`Grid` / `Gallery` switcher, `Avg:` / `Sum:` aggregate footer) and the form dialog's a11y fallback text are hardcoded English",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:queue",
+    "repo:objectui"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T03:00:27Z",
+  "updated_at": "2026-08-10T02:07:39Z",
+  "closed_at": "2026-08-10T02:07:39Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5084",
+  "body": "## Summary\n\nA handful of console chrome strings are hardcoded English literals rather than bundle lookups, so they stay English on every non-English console. They are small individually, but they sit on the two screens a user looks at most — the list view and the create/edit dialog — and there is nothing an app can author to change them.\n\n## Evidence\n\nFresh database, `@objectstack/console` 17.0.0-rc.1, browser locale `zh-CN`, admin user, every app-owned label correctly Chinese. Harvested by walking the DOM and keeping text nodes that contain Latin letters and no CJK, with `getBoundingClientRect()` used to separate visible text from screen-reader-only text:\n\n### Visible\n\n| string | where |\n|---|---|\n| `Grid` | list-view mode switcher |\n| `Gallery` | list-view mode switcher |\n| `Avg: 39%` | list footer aggregate, on a `percent` column |\n| `Sum: 119,200` | list footer aggregate, on a `number` column |\n\nThe aggregate footer is the interesting one: the **number** is formatted, but the **prefix** is a hardcoded `Avg: ` / `Sum: `. The aggregate kind is already known to the renderer, so this is a bundle lookup away.\n\n### Screen-reader-only (still worth fixing — it is what assistive tech announces)\n\n| string | where |\n|---|---|\n| `Complete the form fields, then submit or cancel.` | `plugin-form` modal + drawer, when the form declares no `description` |\n| `Close` | dialog close button `sr-only` label |\n\nFor the record, the form-dialog string is **not** visible — we verified it is clipped (`sr-only`), correcting an earlier assumption on our side that it was a visible subtitle. It is emitted as:\n\n```jsx\ne.description\n  ? <Description>{e.description}</Description>\n  : <Description className=\"sr-only\">Complete the form fields, then submit or cancel.</Description>\n```\n\nso an app can only displace it by authoring a `description`, which makes a **visible** subtitle appear on every dialog. Adding visible UI to every form in order to remove an invisible untranslated string is not a trade an app should have to make — the fallback should come from the bundle.\n\n## Why an app cannot work around any of these\n\nNone of them corresponds to authorable metadata. They are not object labels, field labels, view labels or action labels — there is no key in `TranslationData` that reaches them. The console's own bundle already ships zh-CN, ja-JP, es-ES, de, fr, pt, ru, ko and ar and translates hundreds of neighbouring strings (`detail.highlightFields` → 「关键字段」, `detail.sortBy` → 「排序」, and so on), so these are omissions from an otherwise complete bundle rather than a missing capability.\n\n## Suggested fix\n\nMove all five through the existing console bundle:\n\n- the view-mode switcher labels,\n- the aggregate-footer prefixes (keyed by aggregate kind, so `Avg` / `Sum` / `Min` / `Max` / `Count` all land),\n- the form dialog's `sr-only` description fallback,\n- the dialog close button's `sr-only` label.\n\nFiled from a downstream app (`hotcrm-heimao`), tracked there as issue #60.\n"
+}

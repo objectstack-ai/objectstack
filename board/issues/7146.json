@@ -1,0 +1,33 @@
+{
+  "number": 7146,
+  "kind": "issue",
+  "title": "objectui 的 eslint 没开 no-console:模块作用域遗留调试输出没有任何自动化拦网(#7139 靠人工发现)",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "pm:queue",
+    "repo:objectui"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T23:18:02Z",
+  "updated_at": "2026-08-10T02:08:48Z",
+  "closed_at": "2026-08-10T02:08:48Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7146",
+  "body": "观察类(不影响当前用户:唯一已知实例已由 objectstack#7139 / objectui PR #4007 删除)。发现于 objectstack#7139 的实施过程。\n\n## 事实\n\nobjectui 仓根 `eslint.config.js` **没有配置 `no-console` 规则**(全仓 grep `no-console` 零命中)。因此 objectstack#7139 那句位于模块作用域、加载即打印的 `console.log('Registering object-map...')` 从落库到被发现,一路没有任何自动化环节报过它 —— `pnpm lint` 对它完全沉默,是靠人工阅读发现的。\n\n修 #7139 时顺带核实过:`packages/plugin-*/src/index.tsx` 19 个文件里,这类会执行的遗留调试输出目前只有那一处(`plugin-editor` 的命中是 `defaultProps.value` 示例代码字符串)。也就是说**现在**仓库是干净的,这条单纯粹是「拦网缺失」,不是「有 bug 待修」。\n\n## 为什么不在 #7139 的 PR 里顺手开\n\n开 `no-console` 是影响多个包的**策略决定**,不是 XS 单能顺带夹带的改动,至少要先答三个问题:\n\n1. **有意保留的诊断怎么豁免。** 仓里存在大量刻意的 `console.warn` / `console.error` 运行时诊断,例如 `packages/plugin-map/src/ObjectMap.tsx` 三处(无效 map 配置、API provider 未实现、取 schema 失败),以及 `packages/core/src/registry/Registry.ts` 里 `register()` 按设计发的缺 namespace / 裸名 fallback 冲突告警。合理形态大概是 `no-console: ['error', { allow: ['warn', 'error'] }]`,但这需要确认「debug 噪音走 log/info/debug、诊断走 warn/error」是否就是本仓想要的约定。\n2. **是否该有 debug 通道。** #7139 原文提过「或按需换成 debug 通道」。如果仓里应有统一的 debug 输出设施(`packages/core/src/utils/debug-collector.ts` 似乎已有相关设施,未细看),规则应该配合它一起定,而不是只堵不疏。\n3. **落地成本与噪音量未测。** 开启前需要跑一遍全仓看现存命中数,决定是 `error` 一次性清干净,还是先 `warn` 逐步收敛。示例代码、脚本(`scripts/**`)、测试文件通常要单独 override。\n\n## 建议\n\n由 PM 分诊决定要不要做、以什么范围做。若要做,建议独立 PR:先统计全仓命中,再定 allow 列表与 overrides,附一条针对「模块作用域 debug 输出」的说明。真正想守的不变量是「import 一个包不该往使用者控制台写噪音」—— PR #4007 已用 `packages/plugin-map/src/index.registration.test.tsx` 把这条钉在 plugin-map 上(spy log/info/debug 后 `vi.resetModules()` 再 import,断言零输出),那个测试形态可以直接复制到其他 plugin,是比 lint 规则更贴近意图的另一条路,两者不互斥。\n\n相关:objectstack#7139(缺陷本体)、objectui PR #4007(修复 + 单包钉子)。\n"
+}

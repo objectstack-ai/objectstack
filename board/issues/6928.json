@@ -1,0 +1,36 @@
+{
+  "number": 6928,
+  "kind": "issue",
+  "title": "finding: `GET /api/v1/notifications?limit=abc` coerces to NaN and flows through listInbox's clamp into `data.find({ limit: NaN })` — unvalidated query coercion on the notifications route",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-help"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T04:24:55Z",
+  "updated_at": "2026-08-10T05:57:03Z",
+  "closed_at": "2026-08-10T05:57:02Z",
+  "closed_by": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6928",
+  "body": "Filed by the `domain:spec` seat PM on behalf of the #6361 dev (session ran out of runway post-quota-kill; reported in the #6361 final report with the exact mechanism, reproducible). Observation-class; `finding` disposition for triage — no `pm:queue`, unassigned.\n\nMechanism (anchors as of the #6866 base): `packages/runtime/src/domains/notifications.ts:108` does `const limit = query?.limit ? Number(query.limit) : undefined`, so a raw HTTP caller sending `?limit=abc` yields `NaN`; `MessagingService.listInbox` then computes `Math.min(Math.max(NaN, 1), 200)` = `NaN` and passes it straight into `data.find({ limit: NaN })`. Driver-dependent behavior from there; never a 400. The typed SDK cannot produce this (its `limit` is `number`), so exposure is raw-HTTP callers only.\n\nSame route and same declared≠enforced family as #6361, but a behavior change (validation) was explicitly out of #6866's ruled scope (wire behavior pinned unchanged there), so it needs its own card. Any fix should decide refusal shape per ADR-0112 rather than ad-hoc clamping. Dedup: searched open issues for `limit NaN notifications` — no hits."
+}

@@ -1,0 +1,30 @@
+{
+  "number": 7052,
+  "kind": "issue",
+  "title": "[drivers] `driver-mongodb`'s local `AggregationInput` still declares `distinct?: boolean` after the spec key was retired (#6815)",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T11:51:45Z",
+  "updated_at": "2026-08-10T00:13:09Z",
+  "closed_at": "2026-08-10T00:13:09Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7052",
+  "body": "Filed unassigned from the #6815 lane (PR #7051). Observation-class: nothing a user hits today.\n\n## The finding\n\n`packages/drivers/driver-mongodb/src/mongodb-aggregation.ts` declares its own hand-mirrored copy of the spec's aggregation-node shape:\n\n```ts\nexport interface AggregationInput {\n  function: string;\n  field?: string;\n  alias: string;\n  distinct?: boolean;\n  filter?: unknown;\n}\n```\n\n`distinct` has no reader in that file. `buildAccumulator(agg)` (same file, lines 120-154) switches on `agg.function` and reads `agg.field`; nothing consults `agg.distinct`. It was already inert before #6815 — that is exactly why `driver-mongodb` appeared in that issue's table as a face that **ignored** the flag.\n\nAs of #6815 the spec key it mirrors is retired: `AggregationNodeSchema.distinct` is a `retiredKey()` tombstone, and `data/AggregationNode:distinct` is registered in `RETIRED_KEYS_BY_MAJOR[17]`. So this line is now a local declaration of a key the protocol has withdrawn — an orphaned surface in the #3950 sense: a reader who finds it has every reason to think the driver accepts the flag.\n\n## Why it was not fixed in PR #7051\n\nTwo reasons, both deliberate:\n\n1. **#5499 freezes this driver's investment.** The retirement PR made zero changes to `driver-mongodb` precisely because zero changes were already compliance on the runtime axis.\n2. **The maintainer ruling of 2026-08-09 scoped the removal**: \"removal costs the in-memory fallback's `collectValues` flag and nothing else.\" That sentence was written from the card's notes, which did not know about this local mirror — so this is new information for the ruling rather than a contradiction of it, and it belongs in triage rather than smuggled into the retirement PR.\n\n## Suggested disposition\n\nDelete the `distinct?: boolean` line (and, at whoever's discretion, `filter?: unknown`, which mirrors a key still marked `[EXPERIMENTAL — not enforced]` and is likewise unread here). It is a one-line deletion with no runtime effect and no dependents — `AggregationInput` is exported but nothing outside the file constructs one with `distinct`.\n\nWorth deciding as a class rather than a line: whether a frozen driver's hand-mirrored input interfaces should track spec retirements at all, or whether the honest fix is for this interface to be derived from `AggregationNode` instead of restated. The second is the contract-first answer and is the reason this is filed rather than patched.\n\nRefs: #6815, PR #7051, #5499, #3950, ADR-0049.\n"
+}

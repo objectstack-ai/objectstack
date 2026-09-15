@@ -1,0 +1,35 @@
+{
+  "number": 6437,
+  "kind": "issue",
+  "title": "`DroppedFieldsEvent.reason` 只有 readonly / readonly_when 两值,写路径上新增的合法剥离对 `onFieldsDropped` / `strictReadonlyWrites` 不可见",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T18:34:07Z",
+  "updated_at": "2026-08-09T19:49:11Z",
+  "closed_at": "2026-08-09T19:49:11Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6437",
+  "body": "观察类发现(`finding`,不入队),来自 #6262 / PR #6433 的实施过程(PD #10)。**不是今天用户会撞到的缺陷**,是一处「声明的可观测面比实际剥离面窄」的漂移,记录下来免得只活在一条代码注释里。\n\n## 事实\n\n`packages/spec/src/data/data-engine.zod.ts:228` 起,`DroppedFieldsEventSchema.reason` 是闭合枚举:\n\n```ts\nreason: z.enum(['readonly', 'readonly_when'])\n```\n\n而 `#3407` 给这个 seam 的定位是通用的 —— 「写路径上被合法剥掉的、调用方提交过的字段」,因为调用方(典型是 flow 的 `update_record` 步骤)会**逐字段汇报成功**,而库里那一列根本没变(#4632 的二等形状:调用方以为落库了,数据库不同意,服务端日志是唯一痕迹)。`#5126` 的 `strictReadonlyWrites` 是同一 seam 的响亮那一半:要么静默可观测,要么整笔拒绝。\n\nPR #6433 在 update 的 multi 分支新增了一次剥离(把派发已裁定「不是主键」的 `data.id` 从 SET 载荷去掉)。它**是**一次调用方提交过的、被引擎合法丢弃的字段,但它既不是 `readonly` 也不是 `readonly_when`,所以:\n\n- `onFieldsDropped` 监听器**收不到**这次剥离;\n- `strictReadonlyWrites: true` 的调用方**不会**因此被拒,它仍拿到一个成功返回。\n\nPR #6433 里刻意没有硬塞进那两个值里(那会让 reason 说谎),改为记一条 `warn`,并把理由写在注释里:扩这个词表是 `packages/spec` 的改动,有 `packages/spec/src/api/batch.zod.ts` 与 `.../api/protocol.zod.ts` 两处协议响应消费者,不该搭引擎修复的车。本 issue 就是那条注释的外化。\n\n## 为什么标 `finding` 而不是入队\n\n- 今天**没有**用户因此受损:该剥离在 PR #6433 之前根本不存在(载荷原样进 SET,那才是 #6262 的数据损坏);剥离之后行为是正确的,只是少一路机器可读信号,`warn` 日志在。\n- 只影响主动订阅了 `onFieldsDropped` / 开了 `strictReadonlyWrites` 的调用方,且只在「作者把非 id 的东西写进 `data.id` 又声明 multi」这一种作者错误上。\n- 真要动,涉及的是**词表设计**(新增一个值?还是把 reason 拆成 `category` + 具体原因?)以及两处协议响应的兼容,属于需要先想清楚再做的那类,不适合当作一个小修派发。\n\n## 若将来处理,面在哪\n\n1. `packages/spec/src/data/data-engine.zod.ts` —— `DroppedFieldsEventSchema.reason` 枚举 + 其 describe;\n2. `packages/spec/src/api/batch.zod.ts` / `packages/spec/src/api/protocol.zod.ts` —— 三处 `droppedFields` 响应字段的消费者;\n3. `packages/objectql/src/engine.ts` —— update 的 `reportDroppedFields` 调用点(by-id 与 multi 各一组),以及 PR #6433 新增剥离块里那段「刻意不上报」的注释(改了要一并删);\n4. 生成物:`packages/spec` 的 api-surface / JSON schema 基线随枚举变动重生成。\n\n关联:#3407(`onFieldsDropped` 的由来)、#5126(`strictReadonlyWrites`)、#4632(二等形状)、#3042 / #2948(现有两个 reason)、#6262 / PR #6433(触发本条的新剥离)。\n"
+}

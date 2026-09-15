@@ -1,0 +1,34 @@
+{
+  "number": 6889,
+  "kind": "issue",
+  "title": "Inline (page-element) actions bypass `defineStack`'s action cross-reference validation entirely — a dangling `type: 'modal'` target builds clean",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T02:59:41Z",
+  "updated_at": "2026-08-10T10:03:32Z",
+  "closed_at": "2026-08-10T10:03:20Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6889",
+  "body": "Found while working #6739, via a probe against `defineStack`. Filed separately — #6739 is one showcase corpus line; this is the validator's reach.\n\nBlocked-by: #6739 — the *content* of the widened rule depends on #6739's contract answer (may a modal `target` name an object, or only a page?). The *hole* below is real under either answer.\n\n## What\n\n`packages/spec/src/stack.zod.ts:972-1006` validates action cross-references by iterating **`config.actions`** — the registered action list — only. Actions authored **inline** on a page element (`element:button` → `properties.action`, an `InlineActionSchema`) are never walked, so none of their targets are checked.\n\n## Measured\n\nProbe: five minimal stacks, one `defineStack` call each, same object (`probe_task`) and page (`probe_home`) in all five.\n\n```\nA registered modal -> object  :  REJECTED -> Action 'probe_new_task' references page 'probe_task' (via modal target) which is not defined in pages.\nB registered modal -> page    :  ACCEPTED\nC registered modal -> nothing :  REJECTED -> Action 'probe_new_task' references page 'probe_nowhere' (via modal target) which is not defined in pages.\nD inline     modal -> object  :  ACCEPTED\nE inline     modal -> nothing :  ACCEPTED\n```\n\n**Row E is the defect on its own terms**: `target: 'probe_nowhere'` names neither a page nor an object nor anything else in the stack. Authored on a registered action it is a build error (row C). Authored inline on a button it builds clean, ships, and fails only when a user clicks — objectui's `useActionModal` `modalHandler` answers\n\n```\nModal target \"probe_nowhere\" matches no page or object — a modal action's `target` names the page to open.\n```\n\n…i.e. a silent-until-clicked dead button, which is exactly the class row C exists to prevent.\n\nThe D/A split is the second half, and is #6739's question rather than this one's: the same `type` + the same `target` string gets opposite verdicts depending only on *where the action was declared*.\n\n## Reproduction\n\nSelf-contained, no repo fixtures — `defineStack` from `@objectstack/spec` with a manifest, one object, one page, and the action authored each way. The inline shape is the one PR #6737 shipped for the showcase home CTA (`examples/app-showcase/src/ui/pages/index.ts:95`).\n\n## Why it matters\n\nInline actions are the shape the AI-authoring path emits most readily — a button with its behaviour written right there, no separate registry entry. That is precisely the surface that most needs authoring-time rejection, and it is the one surface the cross-reference walk does not visit. \"Declared = enforced\" currently holds for registered actions and not for inline ones.\n\n`flow` targets have the same hole (the same loop checks `action.type === 'flow'`), so an inline flow action naming a nonexistent flow is also unvalidated.\n\n## Direction\n\nWalk page/region/component trees for inline actions and subject them to the same cross-reference checks as registered ones — same rule, same message, one more traversal. What the modal branch should *accept* comes from #6739."
+}

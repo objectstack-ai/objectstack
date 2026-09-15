@@ -1,0 +1,35 @@
+{
+  "number": 5678,
+  "kind": "issue",
+  "title": "ADR-0117 D1 声明面:ownership 枚举扩展 'business_unit'(须与列注入同 PR 或严格后置)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T23:49:48Z",
+  "updated_at": "2026-08-10T05:27:18Z",
+  "closed_at": "2026-08-10T05:27:18Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5678",
+  "body": "**Blocked-by:** #5677(引擎侧 `wantOwner` 翻正面清单 + 列注入)\n**Blocked-by:** #5675(ADR-0117 scoped 接受)\n\nADR-0117 已按 `Accepted (D1/D3 scoped)` 落地名字面(#4611 / PR #5675),`owning_business_unit_id` 的规范名已登记。本单补上 D1 的**作者可见声明面**:`ownership` 枚举的第四档 `'business_unit'`。\n\n## ⛔ 顺序约束(本单存在的唯一理由)\n\n**本单不得先于 #5677 落地,也不建议与之分开。** `packages/objectql/src/registry.ts` 的 `wantOwner` 是排除式判定,在它翻成正面清单之前,新增的 `'business_unit'` 会被照常注入 `owner_id` —— 与 ADR-0117 D1 表格相反,属 ADR-0049 禁止的「声明而不执行」。PR #5675 正是因此刻意没有扩展枚举;#4611 上有实测证据。\n\n最稳妥的落地方式是**与 #5677 合并为同一个 PR**;若确要分开,本单必须严格后置,且合并前需确认 #5677 已在 `main` 上。\n\n## 工作面\n\n1. `packages/spec/src/data/object.zod.ts:1152` —— `z.enum(['user', 'org', 'none'])` 扩展为四值,并同步其 `error` 文案与 `describe()`(两处都逐字列出了合法值)。\n2. 同文件 `ownership` 的 JSDoc 与 `systemFields` 段落 —— 补上新档位与 `owning_business_unit_id` 的注入规则。\n3. **改写 `packages/spec/src/data/object.test.ts` 中的 `#4611` pin**。该 pin 目前钉住「`business_unit` 被拒绝且错误信息列出三个合法值」,并在注释里写明:**它失败正是本单到来的预期信号,应改写而非删除**——改成断言新值被接受、且第五个非法值仍被拒绝并列出四个合法值。\n4. **CLI 消费半径**(易漏,PR #5046 同型教训):`packages/cli/test/commands.test.ts:83` 断言 `os explain object` 的类型串 token 集合**恰好等于** `{'user','org','none'}`(#3244 的目录精度钉子)。枚举扩展必须同步该断言,否则 CI 在 `packages/cli` 红 —— 一个只扫 `packages/spec` 的改动看不见它。\n5. 生成物走生成器:`ownership` 是 authorable 键,`packages/spec/authorable-surface.base.json:3590` 有其条目,新增枚举值**可能合法移动** authorable-surface / spec-changes。逐行解释每处生成物 diff 与本改动的对应关系(#5358 纪律)。\n6. changeset:`@objectstack/spec` minor(新增枚举成员,作者可见)。\n\n## 不在本单范围\n\nD2 盖章策略与其默认值、D3 运行时校验、D4 守卫、D8 迁移与启用门、D6 契约变更 —— 均为 ADR-0117 的未决或后续项,其中 **D2 默认值 / D5 / D8 粒度 / D4 权限位这四项尚未裁定**,不得在本单顺手选定。"
+}

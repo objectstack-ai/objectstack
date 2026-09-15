@@ -1,0 +1,35 @@
+{
+  "number": 4805,
+  "kind": "issue",
+  "title": "`ERROR_CODE_LEDGER` 没有任何 cloud 包条目 —— cloud 服务想要 service-specific error code 只能违反 `ApiErrorSchema`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T07:53:58Z",
+  "updated_at": "2026-08-09T19:09:42Z",
+  "closed_at": "2026-08-09T19:09:42Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4805",
+  "body": "跨分片移交：`Part of objectstack-ai/cloud#930`（cloud 分片 PM 转入 —— 落点是 `packages/spec`，属契约面，按分片规则归主 backlog）。**不阻塞 cloud#930**，那边已用标准目录绕开。\n\n## 缺口\n\nADR-0112 D3 把 `error.code` 定为两层词表：闭合的 `StandardErrorCode`，加上 `ERROR_CODE_LEDGER` 里**按所属包登记**的扩展码；`ApiErrorSchema.code` 校验的是二者的并集，未登记的 code 解析失败（`packages/spec/src/api/contract.zod.ts:19`）。\n\n但账本今天登记的包**全部是 framework 包**：\n\n```\n@objectstack/rest, runtime, service-storage, service-i18n, plugin-auth, plugin-sharing,\nmetadata-protocol, metadata-core, objectql, core, hono, service-messaging, trigger-api,\ncloud-connection, service-settings, service-automation, service-analytics,\nservice-datasource, plugin-audit, plugin-approvals, plugin-security, spec, driver-mongodb\n```\n\n`objectstack-ai/cloud` 仓的服务包（`@objectstack/service-ai`、`service-cloud`、`service-tenant`、`objectos-runtime`、`security-enterprise`、`organizations` …）一个都不在。\n\n## 后果\n\n一个 cloud 服务需要 service-specific code 时，只有两条路：\n\n1. **用标准目录**——多数情况下这是对的，ADR-0112 自己就写着「If the condition is generic … use the standard catalog instead of registering a synonym」。cloud#930 正是这么解决的（`ai_quota_exhausted` → `QUOTA_EXCEEDED`）。\n2. **发一个未登记的 code**——它会**通过** cloud 侧只检查「`error.code` 是字符串」的信封守卫，却**无法通过** `ApiErrorSchema.safeParse`。也就是说：cloud 的一致性套件想把词表钉死时，唯一能钉的就是\"别用自己的词\"。\n\n真正缺的是第三种情况：cloud 有一个**确实不 generic** 的条件（举例：EE 许可类拒绝、控制面环境供给的特定失败态），标准目录里没有对应语义，而它**没有任何合法途径**把这个 code 登记进权威集合 —— 跨仓 PR 到 `packages/spec` 是唯一出口，而 cloud 仓的开发流程里没有这一步。\n\n## 为什么值得单独裁决\n\n这不是「给账本加几行」的活，是一个**协议归属问题**：`ERROR_CODE_LEDGER` 要不要接纳非 framework（闭源 / 商业）包的条目？两个方向都自洽：\n\n- **接纳**：账本成为跨仓的单一权威词表，cloud 的 code 同样被 Zod 兜住；代价是开源 spec 里出现闭源包名，且每次 cloud 加 code 都要一次 spec PR + pin bump。\n- **不接纳**：cloud 侧永远只用 `StandardErrorCode`；代价是 cloud 无法表达真正专有的语义，长期会有人绕过校验发明 code（今天已经在发生 —— `auth-proxy-plugin.ts` 的 lowercase 码就是这么长出来的，且被 cloud#944 ratchet 收编）。第三条路是给 cloud 自己一份账本并让 `ApiErrorSchema` 可扩展校验，但那要改 spec 的校验形状。\n\n按 ADR-0112 自己的「no silent fourth state」原则，现状恰恰是那个静默的第四态：**声明了闭合集合，却有一整个仓的产出者无法进入这个集合**。\n\n## 建议\n\n先做判定（接纳 / 不接纳 / 可扩展校验），再谈实现。若判定为\"不接纳\"，建议至少在 `error-code-ledger.zod.ts` 的文件头注释里写明「本账本只登记 framework 包；其它仓一律使用标准目录」—— 让约束变成显式的，而不是靠读列表推断。\n\n## 关联\n\n- 来源：objectstack-ai/cloud#930（service-ai 十一处裸串错误方言的信封改造，实施中撞到此缺口）\n- ADR-0112 D3、ADR-0049、ADR-0078\n- cloud#944（cloud 侧 `/api/v1` 方言 ratchet）\n\n未指派 —— 记录的 finding，谁开工谁认领。"
+}

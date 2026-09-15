@@ -1,0 +1,35 @@
+{
+  "number": 6739,
+  "kind": "issue",
+  "title": "showcase's registered `showcase_new_task` action targets a PAGE, so the global_nav \"New Task\" command opens the home page in a dialog instead of creating a task",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-help"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T13:51:24Z",
+  "updated_at": "2026-08-10T04:16:36Z",
+  "closed_at": "2026-08-10T04:16:36Z",
+  "closed_by": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6739",
+  "body": "Found while implementing #6597 (PR #6737). Same action name, different surface — filed separately rather than fixed there, because #6597's scope is the one corpus line on the button.\n\n## What\n\n`examples/app-showcase/src/ui/actions/index.ts:177`:\n\n```ts\n/** global nav command-palette action. */\nexport const NewTaskAction = defineAction({\n  name: 'showcase_new_task',\n  label: 'New Task',\n  icon: 'plus',\n  objectName: task,\n  type: 'modal',\n  target: 'showcase_component_gallery',   // ← a PAGE, not the task object\n  locations: ['global_nav'],\n  refreshAfter: true,\n});\n```\n\n`target` names the showcase **home page**, not the `showcase_task` object. objectui's `useActionModal.resolveModalTarget` resolves a `type: 'modal'` string target **page first, then object** (deliberately — framework#3530), and `showcase_component_gallery` is a page, so it wins.\n\n## Measured\n\nI ran exactly this dispatch in a real browser while deciding #6597's fix — the button under test carried `type: 'modal'` + `target: 'showcase_component_gallery'`, i.e. this action's own shape:\n\n```\nafter click — dialogs: 1\ndialog title: \"Component Gallery\"\ndialog text: \"Component Gallery ObjectStack Showcase Every metadata type, every view, every chart — in one workspace. Explore … Create Task Close\"\ndialog form controls: 0\n```\n\nThe dialog renders the home page inside itself. Zero form controls — nothing to create a task with. Swapping the target to `showcase_task` opened the real Task create form (7 controls) and actually created a record, which is what PR #6737 ships for the button.\n\nSo a command-palette entry labelled **\"New Task\"** with a `plus` icon opens the welcome page in a dialog. Not an error, not a crash — just a label that does not describe what happens.\n\n⚠️ Scope note on the evidence: I measured the *dispatch* (this `type`+`target` pair through the same `resolveModalTarget` path), not the global_nav command-palette entry point itself. Whoever picks this up should confirm the palette invocation before/after, the way #6597 asked for a real click-through.\n\n## Why it is worth fixing\n\nThe showcase is the reference corpus — it gets read and copied, by humans and by AI authoring metadata apps. Right now `showcase_new_task` means two things in one corpus after #6737 lands: the button dispatches to the task object, this registry entry dispatches to a page.\n\nSuggested fix is one key: `target: 'showcase_component_gallery'` → `target: 'showcase_task'`.\n\nCoverage is not lost by that change — `showcase_quick_view` (line 98) is a second `type: 'modal'` action carrying the *same* page target at `list_item`, and there the \"open a dialog/page\" semantics match its \"Quick View\" label. So the modal-targeting-a-page specimen the coverage matrix wants stays exercised."
+}

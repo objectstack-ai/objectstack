@@ -1,0 +1,32 @@
+{
+  "number": 6678,
+  "kind": "issue",
+  "title": "[finding] parse-cel-to-ast.test.ts still documents the #6133 defect as live — the comment tells the next reader an unbalanced paren is graded `runtime`, which PR #6202 fixed",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T10:23:06Z",
+  "updated_at": "2026-08-10T03:30:59Z",
+  "closed_at": "2026-08-10T03:30:59Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6678",
+  "body": "Out-of-scope finding from #6223 / PR #6677. Recorded per Prime Directive #10, unassigned.\n\n## The drift\n\n`packages/formula/src/parse-cel-to-ast.test.ts` carries two comments that describe `classifyError`'s pre-#6202 behaviour as if it were current.\n\n`:135-144`, inside `classifies the common syntax fault as `parse``:\n\n> NOT asserted for `((record.a)`: cel-js phrases an unbalanced delimiter as `Expected RPAREN, got EOF`, which `classifyError`'s /parse|unexpected|syntax/i does not match, so a genuine syntax fault is reported to the author as `runtime`. Pre-existing, out of scope for #4812, filed separately — asserting it here would enshrine it.\n\nAnd `:116-118`:\n\n> The parity claim is the accept/reject verdict itself. `compile`'s error *classification* is asserted separately below — cel-js does not phrase every syntax fault the same way, and `classifyError` reads the phrasing.\n\nBoth were accurate when written. Neither is now:\n\n- PR #6202 (#6133) made the `ParseError` arm structural, so `((record.a)` has been graded `parse` since it merged — `cel-error-classification.test.ts` pins exactly that fixture.\n- PR #6677 (#6223) removed the last keyword branch, so `classifyError` does not read *any* phrasing.\n\nThe `/parse|unexpected|syntax/i` regex quoted in the first comment no longer exists in the codebase.\n\n## Why it is worth a ticket rather than nothing\n\nThe comment does not merely go stale, it **instructs**: it tells the next author that asserting `((record.a) -> parse` here \"would enshrine it\", i.e. that the correct verdict is a bug not to be pinned. That is the opposite of the current contract. The second comment gives a live reason (\"`classifyError` reads the phrasing\") for a test-design decision whose premise is gone, so a reader deciding whether to tighten that parity test is reasoning from a false fact about the classifier.\n\n## Class\n\nObservation-class: comments only, no runtime behaviour, nothing a user hits. Filed plainly and left for triage to grade — the fix is a comment rewrite in one file, and possibly promoting the `((record.a)` case from \"deliberately not asserted\" to an ordinary assertion now that the verdict is stable.\n\n## Related\n\n#6133 / PR #6202 (the parse arm). #6223 / PR #6677 (the type / runtime arms, where this was noticed). #4812 (the issue the file was written for).\n"
+}

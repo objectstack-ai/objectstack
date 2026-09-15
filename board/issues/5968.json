@@ -1,0 +1,33 @@
+{
+  "number": 5968,
+  "kind": "issue",
+  "title": "shadcn-sync 的 registry 请求没有超时:连接被黑洞时 `pnpm shadcn:check` 会一直挂着(46 次串行请求)",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "pm:queue",
+    "repo:objectui"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T13:27:09Z",
+  "updated_at": "2026-08-10T02:08:52Z",
+  "closed_at": "2026-08-10T02:08:52Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5968",
+  "body": "观察类发现,来自 objectstack#5803 的实现过程(objectui PR #3496),**不在该 issue 范围内,未在本 PR 中修**。\n\n## 现象\n\n`objectui/scripts/shadcn-sync.js` 的 `fetchUrl` 用 `https.get` 发起请求,只监听 `error` 与 `end`,**没有设置任何超时**(既没有 `req.setTimeout`,也没有 socket/连接超时)。\n\n- 连接被丢包黑洞掉(SYN 无响应),或 TCP 已建立但服务端永不返回,请求就一直挂着。\n- `--check` 是 **46 次串行**请求,任何一次挂住,整条命令就停在那里。\n- `.github/workflows/shadcn-check.yml` 里跑的正是这条命令,挂住会一路耗到 job 超时才失败,日志上看不出原因。\n\nPR #3496 之后,基于**响应**的失败(非 2xx、非 JSON)都会立刻 reject 并带上原因;**没有响应**是这条取数路径上剩下的唯一一种静默失败。\n\n## 现状影响\n\n今天没人踩到:沙箱/CI 的 egress 拦截是立刻返回 403,不是黑洞。因此打 `finding` 标签、不进 `pm:queue`,由 PM 定级。\n\n## 修的话需要决定的事\n\n1. 超时值(单次请求 10s?整体预算?)。\n2. 超时后是重试一次还是直接算 fetch 失败(现在的错误路径已经能优雅承接:`--check` 标 error 且退出码不变,`--update` 拒绝写文件)。\n\n`req.setTimeout(ms, () => req.destroy(new Error(...)))` 一行即可,但值和重试策略是产品决定,所以单独开。\n\n## 备注\n\n按 objectstack#4949 的纪律先搜了开放 issue(`shadcn-sync timeout`、`shadcn registry fetch timeout hang`)均 0 命中;更宽的 `shadcn-sync` 查询因共享账号触发 GitHub API 限流没能跑完,如与既有 issue 重复请直接关掉本条。"
+}

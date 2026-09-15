@@ -1,0 +1,34 @@
+{
+  "number": 7144,
+  "kind": "issue",
+  "title": "Decision needed: should the `sys_comment` parent gates run the parent's owner-match at the caller's real write DEPTH, or stay at `own`?",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T21:54:32Z",
+  "updated_at": "2026-08-10T06:15:07Z",
+  "closed_at": "2026-08-10T06:15:07Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7144",
+  "body": "Split out of #7141 (PR #7143) rather than decided there, because it is a **widening** and the two candidate shapes that card named diverge here — on nothing else.\n\n## The fact\n\n`ISharingService.canEdit` widens its owner-match by the access DEPTH the caller\nholds on the probed object, read from the middleware-private `__writeScope` key\n(`plugin-sharing/src/sharing-service.ts` — `matchesOwnerScope`, and\n`if (writeScope === 'org') return true`). plugin-security supplies that key\nexplicitly for the object it is probing, via the private\n`resolveWriteScopeForSharing` (`security-plugin.ts:2516`).\n\nThe `sys_comment` gates in `plugin-audit` supply **no** depth. The five-field\nprojection #7141 removed never carried one, and PR #7143 deliberately kept it\nthat way: an absent depth leaves the owner-match at its narrowest (`own`), which\nis the safe direction and is byte-for-byte what the projection produced.\n\n## The consequence, stated as behaviour\n\nA caller whose write depth on the PARENT object is `unit` / `unit_and_below` /\n`org` can edit that parent record directly through the CRUD path (where the\nmiddleware stamps the depth for that object) but is **refused** when they try to\nedit or delete a comment on it, because this gate asks the same service the same\nquestion with the depth omitted. It is a divergence in the *restrictive*\ndirection — no data leaks — between the comment gate and the parent's real edit\nauthority. Whether that is correct or is a bug depends on what the comment gate\nis meant to mean, which is a product decision, not a code reading.\n\n## Why it was not simply fixed in #7143\n\nThe tool a package outside `plugin-security` has for this is the published\n`ISecurityService.resolveWriteScope`. It fails **open** on one input:\n`getEffectiveScope` returns `'org'` when no permission set matches the object\n(`permission-evaluator.ts:255`), and the service's own doc block flags that\n`'org'` as \"non-authoritative on its own\". Passed to `canEdit` as `__writeScope`\nit becomes fully authoritative, and `matchesOwnerScope` then returns `true` for\n**any owned row** of an unmatched object — a real widening, not a theoretical\none. Taking that route needs either a narrower contract method (one that\ndistinguishes \"org depth\" from \"nothing matched\") or the gate resolving depth\nsome other way.\n\nNote this is the same question for `service-storage`'s attachment kit, which\ngates on `canEdit` the same way.\n\n## What a decision would look like\n\n1. **Keep `own`** (today, and #7143's behaviour) — the comment gate is\n   deliberately tighter than the parent's edit authority. Then say so in the\n   contract's doc block, so the next reader does not \"fix\" it.\n2. **Resolve the parent's depth** — the comment gate inherits the parent's real\n   edit authority. Needs a depth primitive that does not fail open on an\n   unmatched object before it can be wired.\n\nRelated: #7141, PR #7143, #6523, #6206, ADR-0057 D1, ADR-0111 D1.\n"
+}

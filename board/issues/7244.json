@@ -1,0 +1,34 @@
+{
+  "number": 7244,
+  "kind": "issue",
+  "title": "[finding] schema.mdx ships two `defaultValue` samples that are wrong today — a bare CEL source string stored verbatim (and emitted as a column DEFAULT), and a currency object literal the engine stores but the SQL DDL silently drops",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-help"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-10T03:37:42Z",
+  "updated_at": "2026-08-10T08:37:51Z",
+  "closed_at": "2026-08-10T08:37:51Z",
+  "closed_by": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7244",
+  "body": "Docs-only finding, split out of the #7127 measurement dossier (comment 5235337746 there, §1f) so it does not wait on that card's pending design ruling — both samples are wrong under **today's** contract, independent of any future gating. Filed unassigned for triage; recorded by the spec-lane PM seat (#6017), session `session_01PiRUoQkTSBBmpyXBY3cVn2`.\n\n## The two samples\n\nBoth in `content/docs/protocol/objectql/schema.mdx` (hand-written page, not generated), measured on `main` @ `55da611`:\n\n**1. Line ~399 — `datetime` + bare CEL source string:**\n\n```yaml\ndue_datetime: {type: datetime, defaultValue: \"daysFromNow(7)\"  # 7 days from now (CEL)}\n```\n\nThe comment says CEL, but this is a **bare source string**, not the `{dialect, source}` envelope. Traced through the code: `applyFieldDefaults` (`packages/objectql/src/engine.ts:2412`) recognises an envelope only by `dv.dialect && typeof dv.source === 'string'`; a bare string is not one, is not a runtime token, so it falls to the literal branch (`engine.ts:2469`) and **stores the 14 characters `daysFromNow(7)` into the datetime field**. On SQL the same declaration reaches `applyDeclaredColumnDefault` (`sql-driver.ts:8934-8944`), fails all three guards, and is emitted as `col.defaultTo('daysFromNow(7)')` — a physical column DEFAULT of that string. Probe: `valueSchemaFor({type:'datetime'},'stored').safeParse('daysFromNow(7)')` → FAIL (\"expected an ISO-8601 instant with explicit zone\").\n\nCorrect sample: `defaultValue: { dialect: 'cel', source: 'daysFromNow(7)' }` (ROADMAP §M9.9b shape).\n\n**2. Line ~385 — `currency` + object literal:**\n\n```yaml\nrevenue: {type: currency, defaultValue: { value: 0, currency: 'USD' }}\n```\n\n`currency` is in `NUMERIC_VALUE_TYPES`, so the stored contract is `z.number().finite()`. Probe → FAIL (\"expected number, received object\"). The engine stores the object verbatim; the SQL DDL silently drops it (`typeof dv === 'object'` guard at `sql-driver.ts:8942`) — the two layers disagree about what the column defaults to.\n\nCorrect sample: `defaultValue: 0` (currency fields store the numeric amount).\n\n## Why it matters\n\nThis is the reference page metadata authors (very often AI) copy from. Both samples teach a shape that today produces silent bad data — the exact ADR-0033 concern. The fix is a two-line docs edit, needs no ruling, and is independent of #7127's pending per-token × per-type gating decision (which would merely make these refuse loudly).\n\n## Dedup\n\nOpen-issue search for `schema.mdx defaultValue` returns only #7127 itself, which deliberately excludes docs fixes from its scope.\n\nRefs: #7127 (dossier §1f — full trace), #6970 / PR #7126 (the action-param default gate this contract language comes from), ADR-0033."
+}

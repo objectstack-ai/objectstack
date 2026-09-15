@@ -1,0 +1,36 @@
+{
+  "number": 7232,
+  "kind": "issue",
+  "title": "[approvals] Unify the approval-status vocabulary across i18n bundles (zh \"待处理\"→\"待审批\", my_pending view label; humanize the en status options)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "approvals",
+    "domain:services",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-10T03:23:08Z",
+  "updated_at": "2026-08-10T04:58:02Z",
+  "closed_at": "2026-08-10T04:58:02Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7232",
+  "body": "Part of #7213 (problem 4: three vocabularies for one request).\n\n## Facts (verified on origin/main, 2026-08-10)\n\n- Object-metadata bundle (plugin-approvals; served to every surface that renders `sys_approval_request`): `packages/plugins/plugin-approvals/src/translations/zh-CN.objects.generated.ts:44` has `pending: \"待处理\"`; the `my_pending` view is named \"我的待办\" (around `:88-95`). The Approvals Inbox (objectui `approvalsInbox.*`) and the account-app nav label (`packages/platform-objects/src/apps/translations/zh-CN.ts:21`) say 待我审批 / 待审批 for the same things — three vocabularies with no shared keys.\n- The en bundle ships raw enum values as labels: `en.objects.generated.ts:43-49` (`pending: \"pending\"`, `approved: \"approved\"`, …) — unhumanized, unlike zh/ja/es.\n- These files are `.generated.ts`; there is an extraction config at `packages/plugins/plugin-approvals/scripts/i18n-extract.config.ts`, and `check:i18n` / `check:i18n-coverage` / `check:app-nav-i18n` run in lint.yml. Work through the pipeline if it is the source of truth (verify first); if the files turn out to be hand-maintained despite the name, edit directly and record the evidence in the PR body.\n\n## Canonical glossary (align to the Approvals Inbox wording)\n\n- zh-CN status options: `pending: 待审批` (the change); `approved: 已批准`, `rejected: 已拒绝`, `recalled: 已撤回`, `returned: 已退回修改` (verify current values; keep whatever already matches).\n- zh-CN `my_pending` view label: `待我审批` (was 我的待办); align the empty-state wording accordingly.\n- en status options: `Pending` / `Approved` / `Rejected` / `Recalled` / `Returned`; en `my_pending` label stays \"My Pending\".\n- ja-JP / es-ES: align the view label with the nav wording where it diverges (`ja-JP.ts:21` 承認待ち, `es-ES.ts:21` Aprobaciones pendientes); do not invent translations beyond this glossary.\n\n## Acceptance criteria\n\n- A `sys_approval_request` row rendered through the generic object surfaces uses the same zh status word (待审批) as the Approvals Inbox — problem 4 of #7213 closed at the bundle level.\n- en no longer shows raw enum values as labels.\n- `translations/bundle-ownership.test.ts`, `approval-vocabularies.test.ts`, and any pinned label expectations updated (flipped pins keep bearing load — assert the new wording, do not delete assertions); `check:i18n` / `check:i18n-coverage` green; changeset present (user-visible).\n\n## Out of scope\n\n- Sharing one key-space across the three layers (that is the objectui#2763 rebuild's outcome); objectui-side `approvalsInbox.*` wording (already the canonical wording); nav-metadata changes (separate sub-issue of #7213)."
+}

@@ -1,0 +1,36 @@
+{
+  "number": 7139,
+  "kind": "issue",
+  "title": "plugin-map 在模块作用域 console.log('Registering object-map...'):每次加载该 plugin 都往控制台打一行",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched",
+    "pm:queue",
+    "repo:objectui"
+  ],
+  "assignees": [
+    "yinlianghui"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T20:34:29Z",
+  "updated_at": "2026-08-10T00:08:29Z",
+  "closed_at": "2026-08-10T00:08:29Z",
+  "closed_by": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7139",
+  "body": "发现于 objectstack#7121 的实施过程(objectui 分支 `claude/issue-7121-datasource-remaining-blocks`,基线 `5bfaabde0`)。观察类:纯噪音,不影响行为。\n\n`packages/plugin-map/src/index.tsx` 第 24 行(注册调用之前)有一句遗留的调试输出:\n\n```ts\nconsole.log('Registering object-map...');\nComponentRegistry.register('object-map', ObjectMapRenderer, { … });\n```\n\n它在模块作用域,所以**只要这个 plugin 被加载就会打印**(console 里 `register-plugins` 一加载即触发,生产 bundle 同样保留)。同仓其余 plugin 的注册处都没有这类输出 —— 这一句是孤例。\n\n建议直接删掉(或按需换成 debug 通道)。#7121 只在同文件接了 `dataSource` 绑定,刻意没有顺手改它:与本单无关的清理不该混进那个 PR。\n"
+}

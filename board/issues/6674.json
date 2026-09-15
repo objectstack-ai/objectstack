@@ -1,0 +1,35 @@
+{
+  "number": 6674,
+  "kind": "issue",
+  "title": "A virtual formula field declared in searchableFields clears lint and the #4254 gate, then silently matches nothing — the same fail-open shape #4254 closed one axis over",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T10:13:41Z",
+  "updated_at": "2026-08-09T18:48:07Z",
+  "closed_at": "2026-08-09T18:48:07Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6674",
+  "body": "Out-of-scope finding from #4840 / PR #6670 (measured by that dev, filed by the engine-core PM on its behalf). Recorded, not claimed. Behavior-change proposal — needs triage grading and, if promoted, a deliberate accept/reject ruling (it narrows what a declaration is allowed to say).\n\n## Fact (origin/main, 2026-08-08, measured via `resolveSearchFieldResolution`)\n\n```\nAUTO:          {\"allowed\":[\"name\",\"project_name\"],\"source\":\"auto\"}          // lookup + formula excluded from the auto-default\nDECL-FORMULA:  {\"allowed\":[\"name\",\"project_name_formula\"],\"source\":\"declared\"}  // admitted verbatim\nDECL-TEXT:     {\"allowed\":[\"name\",\"project_name\"],\"source\":\"declared\"}\n```\n\nThe auto-default set deliberately excludes formula fields — but a **declared** `searchableFields` entry naming a formula field is admitted verbatim. It then passes `validate-searchable-fields` (the field exists) and the #4254 ingress gate (same reason), and every search against it matches nothing: the field is virtual, no driver has a column for `$contains` to scan (`engine.ts:568-573`, `schema-drift.ts:337`, `remote-transport.ts:1224`).\n\nSo the declaration reads as coverage and delivers none — silent wrong-result, the exact failure family #4254 was filed to close on the unknown-name axis, surviving on the known-but-virtual axis. The current hint strings actively steer authors into it (separate wording finding filed alongside).\n\n## Direction if promoted (not presumed)\n\nRefuse (or at minimum warn) a formula entry in `searchableFields` at lint and/or ingress, consistent with the auto-default's own judgment that formula fields are not scannable. Landing would span `packages/lint` and possibly the ingress assertion; whether refusal is a breaking change for existing metadata needs the usual measured sweep first.\n\nRefs: #4840, PR #6670, #4254; wording half filed separately."
+}

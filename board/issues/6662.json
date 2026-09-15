@@ -1,0 +1,32 @@
+{
+  "number": 6662,
+  "kind": "issue",
+  "title": "[finding][lint] After #6381 converged the view ladder, two SMALLER helpers are still triplicated across the same view-walking rules — `collectionEntries` and the `objectName -> object -> data.object` binding ladder",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T09:13:10Z",
+  "updated_at": "2026-08-10T03:03:21Z",
+  "closed_at": "2026-08-10T02:51:54Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6662",
+  "body": "Filed unassigned from #6381 / PR #6657. **Record only — no commitment to a fix.**\nObservation class: nothing a user hits today. All copies agree, and the PR that\nfound them deliberately did **not** fold them in, for reasons given below.\n\n## Facts, measured at `3e028ce37` (the #6381 branch, post-convergence)\n\n#6381 converged the \"views[] entry to its real form/view sites\" **descent** onto\none shared walker (`packages/lint/src/view-walk.ts`). Two smaller helpers used by\nthe very same rules were left at three copies each.\n\n**1. `collectionEntries` — 3 copies.** Coerces a collection authored either as an\narray or as a name-keyed map into records carrying their config path.\n\n| file | line |\n| --- | --- |\n| `validate-form-layout.ts` | 81 |\n| `validate-translatable-sections.ts` | 143 |\n| `validate-visibility-predicates.ts` | 290 |\n\nSemantically identical. Not *byte*-identical: the visibility copy open-codes\n`!!v && typeof v === 'object' && !Array.isArray(v)` inline where the other two\ncall a local `isRec`. Each carries its own docblock making the same argument\n(findings are edit targets, so a map-shaped collection must not report a\nsynthetic index) — `validate-form-layout.ts:76` even says out loud \"Same helper,\nsame reasoning as `validate-visibility-predicates.ts` and\n`validate-translatable-sections.ts`\", i.e. the duplication is already\nacknowledged in-tree.\n\n**2. The view binding ladder `objectName -> object -> data.object` — 3 copies.**\nByte-identical bodies, two different names:\n\n| file | line | name |\n| --- | --- | --- |\n| `validate-form-layout.ts` | 142 | `boundObject` |\n| `validate-translatable-sections.ts` | 130 | `viewObjectName` |\n| `validate-translation-references.ts` | 347 | `viewObjectName` |\n\nThe card that spawned this (#6381) named the binding resolution as \"three\nspellings\" and correctly excluded `lint-view-refs.ts`'s deeper ladder\n(`name -> id -> object -> list.data.object -> form.data.object`) as reasoned\ndifference rather than drift. These three are the other kind: the same four\nlines, three times.\n\nNote what does NOT differ: only the *base ladder* is duplicated. How each rule\n**composes** it differs on purpose (form-layout falls back to the container;\ntranslatable-sections falls back to the container and then to the default\n`list`'s binding), and #6657 preserved that deliberately.\n\n## Why #6657 did not fold them in\n\nTwo reasons, both worth keeping on the record:\n\n1. **Scope.** #6381's ruling scoped the work to \"one shared implementation of\n   the descent\". A refactor whose entire evidentiary claim is \"verdicts are\n   byte-identical\" is worth more when its diff is exactly the thing it claims to\n   have merged.\n2. **One of the three binding copies is in a file that is currently off-limits.**\n   `validate-translation-references.ts` holds `collectViewRecord`, and **#6422 is\n   held in the maintainer decision box** with that file as its subject. Any\n   convergence that reaches all three copies has to touch it. Folding two of\n   three would reproduce the exact shape #6381 exists to prevent — the next\n   author fixes one copy and leaves another behind.\n\nSo the natural window for this is **after #6422 is decided**, at which point the\ndescent, the binding ladder and `collectionEntries` can move together, in one\npass over the same set of files.\n\n## Why record it at all\n\n#6381's own signal argument applies unchanged: the ladder there was found broken\nin two different files in two consecutive issues, and the copy count was the\nevidence a single source was owed. These two helpers have the same copy count\nand the same consumer set. Recording them now means the next person to open one\nof these files sees the other two, which is the cost this class of finding is\nabout.\n\nRefs: #6381 / PR #6657 (the descent, converged), #6422 (held — blocks the\nbinding-ladder half), #6248 / #6251 / #6128 (the two-time hole that made the\ncase), #3583 (`page-walk.ts`, the shared-walker precedent).\n"
+}

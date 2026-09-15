@@ -1,0 +1,35 @@
+{
+  "number": 6726,
+  "kind": "issue",
+  "title": "[finding] 8 dead ADR -&gt; source-tree links in ADR-0004 and ADR-0020 — targets left this repository, and they are what forces #6592's gate to ship with a baseline",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-help"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T13:42:20Z",
+  "updated_at": "2026-08-10T08:58:48Z",
+  "closed_at": "2026-08-10T08:58:48Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6726",
+  "body": "Found while implementing #6592 (the `docs/adr/` link gate). Out of that card's scope — its dispatch explicitly bars editing `docs/adr/` this round (a sibling agent is in that directory for #6634) — so filed per Prime Directive #10.\n\n## Fact\n\nTwo decision records carry 8 relative links into the source tree whose targets do not exist. Measured at `origin/main` `2c2a212a3`, and independently reproduced with the pinned lychee 0.24.2 (`lycheeverse/lychee-action@v2`) over `docs/adr/**/*.md`:\n\n```\n[docs/adr/0004-cloud-multi-kernel.md]:\n[ERROR] .../apps/studio/src/routes/projects.$projectId.index.tsx (at 94:19) | File not found\n[ERROR] .../apps/studio/src/routes/projects.index.tsx            (at 93:17) | File not found\n[ERROR] .../packages/runtime/src/kernel-manager.ts               (at 67:24) | File not found\n[ERROR] .../packages/runtime/src/project-kernel-factory.ts       (at 68:38) | File not found\n\n[docs/adr/0020-state-machine-converge-and-enforce.md]:\n[ERROR] .../examples/app-crm/src/flows/high-value-deal.flow.ts             (at 138:240) | File not found\n[ERROR] .../examples/app-crm/src/flows/stale-opportunity.flow.ts          (at 138:327) | File not found\n[ERROR] .../examples/app-crm/src/workflows/stale-opportunity.workflow.ts  (at  48:108) | File not found\n[ERROR] .../packages/spec/src/contracts/workflow-service.ts               (at  43:23)  | File not found\n```\n\nAll 8 are prose links, not illustrative examples: each is written as the reader's way to go look at the implementation the record is describing (`**KernelManager** ([...](../../packages/runtime/src/kernel-manager.ts)): LRU+TTL cache of ...`).\n\n## Why each is ambiguous rather than a filename typo\n\nNone is a near-miss that a rename would fix, so #6592 did not guess:\n\n- `apps/studio/**` — `apps/` in this repository now contains only `docs/`. Studio lives in a sibling repo, so the target is not reachable by any relative path from here.\n- `packages/runtime/src/kernel-manager.ts`, `packages/runtime/src/project-kernel-factory.ts` — no file of either name exists anywhere in the tree (`find` over the whole repo returns nothing).\n- `packages/spec/src/contracts/workflow-service.ts` — no `workflow-service*` under `packages/spec/src`.\n- `examples/app-crm/src/workflows/` — the directory does not exist; `examples/app-crm/src/` has `flows/` but not these two files.\n\nSo the fix is a decision per link, not a sweep: repoint at wherever the code went, replace the link with a plain (unlinked) path, or drop the reference because the code left this repo. That is ADR-editing work and wants an author who can say which.\n\n## Why it matters now\n\nPR for #6592 lands `scripts/check-adr-links.mjs`, and these 8 are frozen individually on its `KNOWN_DEAD_TARGETS` shrink-only baseline so the gate can be green on arrival instead of red on every PR from day one. The baseline is shrink-only and enforced in both directions: fixing a link here makes its baseline entry fail as **stale**, so whoever fixes the record must delete the entry in the same change — the gate names each one for you.\n\nNote the direction of the pressure: this is the only reason the gate ships with a baseline at all. The ADR-to-ADR surface (the class #6592 was filed for) is completely clean today — 527 relative destinations under `docs/adr/` resolve, 0 cross-record breaks, after #6593 fixed ADR-0057's.\n\n## Severity\n\nObservation-class as filed: no user path, no runtime behaviour. The cost is agent navigation — PD #13 sends the next author to go read the decision, the decision points at a file, the file is not there. Labelled `finding`, no `pm:queue`; severity is the PM's to grade.\n"
+}

@@ -1,0 +1,34 @@
+{
+  "number": 6843,
+  "kind": "issue",
+  "title": "A test named \"getObject should be shorthand for get('object', name)\" never calls `get('object', …)`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-help"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T00:07:09Z",
+  "updated_at": "2026-08-10T03:45:55Z",
+  "closed_at": "2026-08-10T03:45:55Z",
+  "closed_by": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6843",
+  "body": "Observation-class finding, filed per Prime Directive #10 while implementing #6745 (PR #6839). Unassigned, `finding`, deliberately **not** queued — nothing a user hits; the hazard is aimed at the next agent reading this area.\n\n## The fact (read on `origin/main`)\n\n`packages/metadata/src/metadata-service.test.ts:131-136`:\n\n```ts\ndescribe('getObject / listObjects', () => {\n    it('getObject should be shorthand for get(\"object\", name)', async () => {\n      await manager.register('object', 'account', { name: 'account', label: 'Account' });\n      const result = await manager.getObject('account');\n      expect(result).toEqual({ name: 'account', label: 'Account' });\n    });\n```\n\nThe case name states the `getObject(n)` = `get('object', n)` equivalence. The body never calls `get` — it compares `getObject`'s answer against the object literal that was just registered. There is no pair in it, so it cannot go red on a divergence between the two members: rewrite `getObject` to resolve some other way and, as long as it still returns the registered document, this stays green.\n\nIts sibling two cases down has the same shape (`listObjects should be shorthand for list(\"object\")` asserts only `toHaveLength(2)`).\n\n## Why it is worth a line\n\nThis is the shape that makes a *coverage* claim without carrying it. #6745 exists because PR #6723 documented the `getObject` / `get('object', …)` equivalence on the contract and left it ungated; a reader grepping for prior art lands on this case name first and can reasonably conclude the equivalence is already pinned somewhere. It is not — the assertion under that name is about a different fact (that `getObject` returns what was registered).\n\nNot a defect in shipped behaviour: the equivalence itself **holds** today in all three implementations, measured under #6745, and PR #6839 now gates it (`packages/objectql/src/metadata-service-getobject-equivalence.test.ts`, four subjects covering MetadataManager under both of its resolution paths, createMemoryMetadata and MetadataFacade).\n\n## Dispositions worth pricing (no recommendation forced)\n\n1. Rename the two cases to what they actually assert (`getObject returns the registered document`) — cheapest, removes the false prior-art signal, adds no coverage.\n2. Add the missing `get('object', name)` call and compare the pair, making the name true for this one implementation — note PR #6839 already covers MetadataManager on both paths, so this would be a deliberate local duplicate rather than new coverage.\n3. Leave it and rely on #6839 being discoverable — leaves a case whose name outruns its body.\n\nRefs #6745, PR #6839, #6505, PR #6723.\n"
+}

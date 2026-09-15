@@ -1,0 +1,32 @@
+{
+  "number": 7266,
+  "kind": "issue",
+  "title": "[console] Four remaining inbox/activity entries still hardcode `/apps/setup/...`, so a business user without setup access has no working \"all notifications\" or \"all activity\" link",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "repo:objectui"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-10T04:08:11Z",
+  "updated_at": "2026-08-10T04:33:19Z",
+  "closed_at": "2026-08-10T04:33:19Z",
+  "closed_by": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7266",
+  "body": "Found while implementing objectstack-ai/objectstack#7231 (PR objectstack-ai/objectui#4071). Filed rather than fixed there — #7231's scope is the approvals entry only.\n\n## The finding\n\n#7231 fixed one producer that hardcoded the `setup` app in a navigation target. Four siblings with the same shape were left in place, all reached by the same non-admin users:\n\n- `packages/app-shell/src/console/home/HomePage.tsx:464` — `onOpenNotification={(n) =` `> navigate(n.actionUrl || '/apps/setup/sys_inbox_message?view=mine')}` (the fallback branch, taken whenever a notification carries no `action_url`)\n- `packages/app-shell/src/console/home/HomePage.tsx:472` — `HomeActivity onViewAll` → `/apps/setup/sys_activity`\n- `packages/app-shell/src/layout/InboxPopover.tsx:129` — `goToAllNotifications` → `/apps/setup/sys_inbox_message?view=mine`\n- `packages/app-shell/src/layout/InboxPopover.tsx:137` — `goToAllActivity` → `/apps/setup/sys_activity`\n\nThe last two are the notable pair: the same component's `goToApprovals` (line 119) and `handleNotificationClick` (line 142) already resolve `currentAppName ?? params.appName` and prefix with it. The two \"see all\" drills sitting between them do not — they were written as deliberate exceptions, and the comment above `goToAllNotifications` says why: \"Route through the setup app's `sys_inbox_message` list view — the canonical full-page inbox (ADR-0030 L5), outside per-app sidebars.\"\n\n## Why it is still worth a look\n\nThat comment argues the OBJECT is app-independent, which is true, and then picks `setup` as the app to render it in, which does not follow — `sys_inbox_message` and `sys_activity` are framework-owned objects reachable at `/apps/{any app}/{object}` exactly like `system/approvals` was. A business user with no access to the setup app therefore has a dead \"see all\" on both the bell popover and Home, while the approvals row directly above it now works.\n\nI did **not** verify the failure end-to-end in a browser against a non-admin session, so the user-visible symptom (shell \"App not available\" guard vs. something softer) is inferred from the routing, not measured.\n\n## Deliberately excluded from this report\n\n`/apps/setup/system/marketplace` (`HomePage.tsx:395`, `HomeAppsStrip onBrowseMarketplace`) and `/apps/setup/system/apps` are admin-scoped surfaces where `setup` is a defensible target rather than an oversight. They are listed here only so a fix does not sweep them in without a decision.\n\n## Suggested shape\n\nIf it is taken up: the same resolution #7231 introduced in `HomePage` (last-open app re-checked against the live active-app list, then first active app, `setup` last) applied to all four, or — better, if the four are agreed to be one surface — a single shared helper the popover and Home both call, which the #7231 PR deliberately did not create because it was out of scope there.\n"
+}

@@ -1,0 +1,33 @@
+{
+  "number": 7138,
+  "kind": "issue",
+  "title": "ObjectMap 把 schema.filter 当地图配置的容器读(getMapConfig 读 filter.map / filter.map.style):filter 是过滤器,不是配置槽",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "pm:queue",
+    "repo:objectui"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T20:34:18Z",
+  "updated_at": "2026-08-10T02:09:24Z",
+  "closed_at": "2026-08-10T02:09:24Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7138",
+  "body": "发现于 objectstack#7121 的实施过程(objectui 分支 `claude/issue-7121-datasource-remaining-blocks`,基线 `5bfaabde0`)。观察类:今天没有用户会踩到(它要求作者用一个未文档化的 legacy 形状),但它是一处「宽容消费者」缺陷,而且与刚接上的 per-element 绑定有明确的相互作用,所以按 Prime Directive #10 如实记录。\n\n## 事实\n\n`packages/plugin-map/src/ObjectMap.tsx` 的 `getMapConfig()`:\n\n```ts\nconst style: string | undefined =\n  (schema as any).style || (schema as any).mapStyle\n  || (schema.filter as any)?.map?.style || (schema as any).map?.style;   // ← 第 143-145 行\n\n// …\nif (schema.filter && typeof schema.filter === 'object' && 'map' in schema.filter) {\n  config = (schema.filter as any).map as MapConfig;                      // ← 第 163-164 行\n}\n```\n\n即:**任何 `filter` 对象都会被探一次 `map` 键**,命中就把它当地图配置(经纬度字段、标题字段、zoom、style)使用。\n\n而 `filter` 在同一个组件里的另一个身份是查询过滤器(第 412-414 行 `$filter: schema.filter`),`object-map` 注册处声明的配置输入是 `{ name: 'map', type: 'object' }` —— 也就是说**规范的书写位置是 `schema.map`**,`filter.map` 是一条早于该 input 的遗留读法。\n\n## 为什么现在记录\n\nobjectstack#7121 把 `dataSource` 绑定接到了 `object-map`,`filter` 是它映射的键之一(该块确有 `$filter` 读点)。于是:\n\n- 绑定/view 带来的 filter 与作者写的 `schema.filter` 会经 `mergeFilterNodes` 合成成 `and` 节点 → 合成后的对象上**没有** `map` 键 → 用 legacy 形状写地图配置的页面会**静默回落到默认地图配置**(默认经纬度字段名),标记全部消失。\n- 没有发生合成时(只有作者自己的 filter,或压根没有 filter),`schema.filter` 原样透传,legacy 读法照旧生效 —— 所以这不是回归,是两条本就互斥的语义第一次撞上。\n\n#7121 已在映射旁把这条注意写进注释,并**不依赖** legacy 形状;这里只登记根因。\n\n## 建议范围\n\n把 `getMapConfig` 里读 `schema.filter.map` / `schema.filter.map.style` 的两处删掉,只保留声明过的 `schema.map`(及顶层 `locationField`/`latitudeField` 那一支与 `style`/`mapStyle`)。若仓外仍有 legacy 页面,先做一轮 grep;真需要过渡就在删除前加一条明确的 deprecation 警告,而不是继续无声接受 —— 「声明的是 `map`、消费的是 `filter.map`」正是 AI 生成的 metadata 最容易分叉的地方。\n\n顺带:同文件对 `filter` 的这种重载会让「filter 到底是什么」在一个 block 内有两种答案,契约优先的方向是消费端不再宽容,由 producer/schema 负责。\n"
+}

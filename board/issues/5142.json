@@ -1,0 +1,34 @@
+{
+  "number": 5142,
+  "kind": "issue",
+  "title": "Record activity feed prints the untranslated English field label and the raw lookup ID (`Rating Owner: ∅ → oBK25BVuz…`)",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:queue",
+    "repo:objectui"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T06:03:01Z",
+  "updated_at": "2026-08-10T02:14:50Z",
+  "closed_at": "2026-08-10T02:14:50Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5142",
+  "body": "## Summary\n\nThe record detail page's activity feed (「讨论」 → 「全部动态」) renders field-change entries with\n\n- the field's **English** label, ignoring the translation bundle that the rest of the same page honours, and\n- the **raw lookup ID** as the new value, where every other surface on that page renders the user's display name.\n\nBoth halves are visible on the demo route of a Chinese deployment, at the bottom of a screen that is otherwise entirely Chinese.\n\n## Evidence\n\n`@objectstack/*` 17.0.0-rc.1, fresh database, browser locale `zh-CN`, admin user.\n\nCustomer-rating detail page, one screen, DOM text:\n\n```\n评级概览\n  评级编号        RT-2025-0003\n  评级负责人      Dev Admin          ← same field, translated label + resolved name\n…\n所有者           Dev Admin\n讨论 (1)\n全部动态\n  系统  2分钟前\n  Rating Owner: ∅ → oBK25BVuzyGBLkdUXD8M7pnYR62WyBbQ   ← feed entry\n```\n\nThe account detail page shows the identical pattern for its own owner field:\n\n```\nAccount Owner: ∅ → oBK25BVuzyGBLkdUXD8M7pnYR62WyBbQ\n```\n\nSo on one page the same field appears twice: once as 「评级负责人 / Dev Admin」 (correct) and once as `Rating Owner: ∅ → oBK25…` (wrong on both counts).\n\n## Mechanism\n\nTwo independent misses in the feed renderer:\n\n1. **Label.** `objects.crm_customer_rating.fields.owner.label` is `评级负责人` in the zh-CN bundle and resolves correctly everywhere else — the detail section, the list column, the form. We verified against `/api/v1/meta/object/crm_customer_rating` under `Accept-Language: zh-CN`: the served label is `评级负责人`. The feed is using the object's authored English `label` (`Rating Owner`) rather than the translated document.\n\n2. **Value.** The field is `Field.lookup('sys_user', …)`. The detail chip resolves it to `Dev Admin`; the feed prints the stored ID verbatim. A 32-character opaque string is not a change description a user can read, in any locale.\n\nThe `∅ →` arrow notation for \"was empty\" is fine and readable — it is only the two operands that are wrong.\n\n## Why an app cannot work around it\n\nThe feed is rendered entirely by the console from the audit trail. There is no authorable metadata for it: no key in `TranslationData` targets feed entries, and there is no per-object switch for how a lookup change is formatted. Nothing in the app's translation bundle, object definition or page definition reaches these strings.\n\n## Suggested fix\n\n1. Resolve the field label from the same translated object document the detail page already uses, instead of the raw authored label.\n2. Render lookup values through the existing lookup display resolver (the one the detail chip uses) so the feed shows `Dev Admin`, falling back to the ID only when the referenced record cannot be resolved.\n\n## Related\n\n- objectstack-ai/objectstack#5076 — analytics surfaces resolve option labels but skip the i18n bundle. Same shape of defect (a renderer reading authored metadata instead of the translated document) on a different surface.\n\nFiled from a downstream app (`hotcrm-heimao`), tracked there as issue #60.\n"
+}

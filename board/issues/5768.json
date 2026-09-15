@@ -1,0 +1,33 @@
+{
+  "number": 5768,
+  "kind": "issue",
+  "title": "Studio 在代码定义的包里把「只读」一刀切到所有类型：运行时实测接受其中 15 类的 overlay 写入，同屏还并存「可写」徽标与全部禁用的控件",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:queue",
+    "repo:objectui"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T04:31:30Z",
+  "updated_at": "2026-08-10T02:10:00Z",
+  "closed_at": "2026-08-10T02:10:00Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5768",
+  "body": "Studio dogfood 时发现（最新 main `5e3c83bd0` + objectui `5a24ad9cb89c`，showcase 实例，`/_console/studio/com.example.showcase/*`）。\n\n先说清楚：**「代码定义的包不给在 Studio 里改」很可能是有意的产品策略**（提示语「请切换或新建可写软件包后再编辑」读起来就是一条策略）。本条真正想请判定的是：这条策略与运行时的实际能力、以及 Studio 自己在同一屏上的其它显示，**三者对不上**。\n\n## 三处证据\n\n### 1）运行时明确接受其中 15 类的 overlay 写入\n\n对同一个包 `com.example.showcase`：\n\n```\nPUT /api/v1/meta/object/showcase_account   → 403\n{\"error\":\"[NOT_OVERRIDABLE] 'object' is not allowOrgOverride in the registry.\n  Overlay-allowed: view, page, dashboard, app, action, report, dataset, flow,\n  translation, email_template, book, permission, position, tool, skill. ...\",\n \"code\":\"NOT_OVERRIDABLE\"}\n```\n\n`object` 被正确挡住了 —— **服务端闸门是真的，不是只在 UI 上禁用**（这点值得肯定，我专门验了）。但同一条报错里，服务端自己列出了 15 个 overlay-allowed 类型。挑其中一个实测：\n\n```\nPUT /api/v1/meta/view/showcase_task.in_progress   → 200\n{\"success\":true,\"seq\":1,\"state\":\"active\",\n \"message\":\"Saved customization overlay (env-wide, state=active) — type=view, name=showcase_task.in_progress [seq=1]\"}\n```\n\n**写进去了。** （我已把 label 改回 `进行中` 还原。）\n\n### 2）Studio 对这 15 类一律禁用\n\n`/_console/studio/com.example.showcase/interfaces`（视图 / 页面 / 看板 / 应用 —— 全是 overlay-allowed 类型）：\n\n```json\n{\"保存草稿\": {\"disabled\": true, \"title\": \"只读软件包 — 请切换或新建可写软件包后再编辑。\"},\n \"发布\":     {\"disabled\": true, \"title\": \"只读软件包 — 请切换或新建可写软件包后再编辑。\"}}\n```\n\n也就是：**运行时接受的写入，Studio 不让你发起。**\n\n### 3）同一屏上并存「可写」徽标与全部禁用的控件\n\n`/_console/studio/com.example.showcase/access`，权限集 `showcase_contributor` 的标题行渲染成：\n\n```\n权限集 · showcase_contributor · 安全 · 可写 · 已授权对象 5 · 字段覆盖 3 · 历史\n                                      ^^^^\n```\n\n而同一个屏幕上：207 个权限勾选框**全部 disabled**，`发布` 也 disabled，理由写着「只读软件包」。**一个贴着「可写」的对象，它的每一个控件都是灰的。**\n\n顺带同类的一处：`数据 → 表单` 标签页在这个只读包里显示\n\n```\n布局 · 预览 · 草稿布局 · 含未保存改动\n```\n\n—— 在一个什么都改不了、`保存草稿` 是灰的包里，声称「含未保存改动」。（该处 `[draggable=true]` 数量为 0，拖拽本身确实被正确禁用了，所以这纯粹是文案与实际状态不符。）\n\n## 请判定的问题\n\n**A. 代码定义的包里，overlay-allowed 的那 15 类到底该不该在 Studio 里可编辑？**\n\n- 若**该**：`interfaces` / `access` 的禁用是过度保守 —— Studio 藏起了运行时真的提供的能力（AGENTS.md Prime Directive #10 反过来的那一面：declared ≠ enforced 的镜像，这里是 delivered ≠ offered）。禁用应当按类型判定，而不是按包一刀切。\n- 若**不该**（策略优先，避免代码包与运行时 overlay 产生漂移）：那么 2 是对的，需要修的是 1 和 3 —— 服务端为什么还接受这条写入？以及「可写」徽标不该出现在这里。\n\n**B. 无论 A 怎么判，3 都是要改的**：「可写」徽标和「含未保存改动」在全禁用的界面上是误导性 affordance。\n\n## 复现\n\n```\n1. pnpm dev（showcase），登录 admin@objectos.ai / admin123\n2. 打开 /_console/studio/com.example.showcase/interfaces\n   → 保存草稿 / 发布 均为 disabled，title「只读软件包 — 请切换或新建可写软件包后再编辑。」\n3. 浏览器控制台：\n   fetch('/api/v1/meta/view/showcase_task.in_progress',{credentials:'include'})\n     .then(r=>r.json()).then(v=>{v.label='PROBE';\n       return fetch('/api/v1/meta/view/showcase_task.in_progress',\n         {method:'PUT',credentials:'include',headers:{'content-type':'application/json'},\n          body:JSON.stringify(v)}).then(r=>r.status)})\n   → 200（记得改回 '进行中'）\n4. 打开 /_console/studio/com.example.showcase/access，选 showcase_contributor\n   → 标题行有「可写」徽标，下方 207 个勾选框全部 disabled\n```\n\n## 本轮一并验过、确认没问题的（避免后续重复排查）\n\n- Studio 四个面（数据 / 自动化 / 界面 / 权限）都正常渲染真实内容：对象列表 23 个、flow 列表带启用状态、导航树、权限矩阵 23×CRUD + 字段覆盖。\n- `数据` 的内层页签（记录 / 表单 / 验证 / 钩子 / 操作 / API / 设置）可切换；表单设计器正确渲染 12 个字段及其类型（TEXT/SELECT/CURRENCY/URL/LOCATION/DATE/JSON）。\n- 打开条目时的 `GET /api/v1/meta/<type>/<name>?state=draft` → 404 `{\"code\":\"NO_DRAFT\"}` 是**有意设计**（错误码明确、UI 正确降级），不是缺陷。唯一可议的是不存在的条目也返回同一个 `NO_DRAFT`，无法区分「没有草稿」与「这个条目根本不存在」—— 单独提一句，不作为本条主张。\n- 服务端对 `object` 的 `NOT_OVERRIDABLE` 拦截是真闸门，报错信息给了可执行的下一步（`OS_METADATA_WRITABLE`）。\n\n## 影响面\n\nStudio 编辑面。不影响已发布应用的运行时行为，也不影响数据。属于「能力可达性 + 界面自洽性」问题。\n"
+}

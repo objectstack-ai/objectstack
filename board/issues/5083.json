@@ -1,0 +1,34 @@
+{
+  "number": 5083,
+  "kind": "issue",
+  "title": "Console: `AddressField` sub-labels and placeholders are hardcoded English literals — an address field is untranslatable on any non-English console",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:queue",
+    "repo:objectui"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T03:00:07Z",
+  "updated_at": "2026-08-10T02:08:12Z",
+  "closed_at": "2026-08-10T02:08:12Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5083",
+  "body": "## Summary\n\n`Field.address()` renders through the console's `AddressField`, whose five sub-labels are **English string literals with no `t()` call and no i18n key**. On a Chinese console every address field shows five English labels in the middle of an otherwise fully translated form. An app has no way to change them: the labels do not correspond to any authorable field, so there is nothing for a translation bundle to key on.\n\n## Evidence\n\nFresh database, `@objectstack/console` 17.0.0-rc.1, browser locale `zh-CN`. The 「地址与位置」 tab of the new-account dialog, measured with `getBoundingClientRect()` so screen-reader-only text is excluded — every one of these is **visibly rendered**:\n\n```\nVISIBLE \"Street Address\"     @(89,390)  w=86\nVISIBLE \"City\"               @(89,466)  w=23\nVISIBLE \"State / Province\"   @(806,466) w=92\nVISIBLE \"ZIP / Postal Code\"  @(89,542)  w=98\nVISIBLE \"Country\"            @(806,542) w=46\n```\n\nEvery other label on that dialog is Chinese — the tab strip, the field labels, the buttons — because those go through `objects.<name>.fields.<field>.label` in the translation bundle, which works correctly. These five do not.\n\n## Mechanism\n\n`AddressField` in `ui-components`:\n\n```jsx\n<Label htmlFor=\"street\" className=\"text-xs\">Street Address</Label>\n<Input id=\"street\" placeholder=\"123 Main St\" … />\n…\n<Label htmlFor=\"city\" className=\"text-xs\">City</Label>\n<Input id=\"city\" placeholder=\"San Francisco\" … />\n…\n<Label htmlFor=\"state\" className=\"text-xs\">State / Province</Label>\n```\n\nNo `useTranslation`, no key lookup — the strings are inline JSX children.\n\nThe **placeholders** are worse than untranslated, they are US-specific: `123 Main St` and `San Francisco` are shown to a Chinese user entering a Chinese address.\n\nThe read-only branch has the same problem in a different form — it joins the parts as `street, city, state zipCode, country`, which is US address order and produces a wrong-looking address for locales that order it differently.\n\n## Why an app cannot work around it\n\n- The sub-labels are not fields on the object. `billing_address` is a single `address` column; there is no `billing_address.street` for a bundle to translate.\n- There is no `subLabels` / `partLabels` property on `Field.address()`.\n- Replacing the widget is not possible from metadata.\n\nThe only \"workaround\" available to us is to stop using `Field.address()` and author five separate text fields, which loses the structured value, the geocoding, and the map view.\n\n## Suggested fix\n\n1. Route the five labels through the console's own i18n bundle (keys like `fields.address.street`, `.city`, `.state`, `.postalCode`, `.country`). The bundle already ships zh-CN, ja-JP, es-ES, de, fr, pt, ru, ar, ko — the translations for these five words are trivial.\n2. Localize or drop the US-specific placeholders.\n3. Make the read-only formatter locale-aware rather than hardcoding US part order.\n\n## Related\n\n- objectstack-ai/objectstack#5075 — the same field rendering as raw JSON (`[Object]`) on the detail page. Different symptom, same widget.\n\nFiled from a downstream app (`hotcrm-heimao`), tracked there as issue #60.\n"
+}

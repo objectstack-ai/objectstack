@@ -1,0 +1,34 @@
+{
+  "number": 7277,
+  "kind": "issue",
+  "title": "Implement ADR-0029 D9 — register a tenant object overlay as its own contributor layer instead of splicing out the packaged owner",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-10T04:33:06Z",
+  "updated_at": "2026-08-10T09:34:56Z",
+  "closed_at": "2026-08-10T09:34:56Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7277",
+  "body": "Implementation card for **ADR-0029 D9**, which was ratified when PR #7087 merged (`fb5ebc5df`, 2026-08-10). Filed by the `domain:metadata` PM seat as the designed follow-on to #6853; the design question is settled, this card is the code.\n\n## Why this exists\n\nThe maintainer's 2026-08-09 ruling on #6853 approved direction **B** in principle but required its semantics to be **designed in an amendment, not guessed**. That amendment is now merged as ADR-0029 **D9**. Nothing in this card re-opens the design — read D9 and implement it.\n\nMeasured today (see #6853's dev report, and #7012 which shipped the stop-the-bleed half): when an overlay row's `package_id` equals the packaged owner's id, `registerObject` **splices the packaged contributor out**, so the packaged definition is destroyed at write time rather than shadowed, and `loadMetaFromDb` replays that destruction on every boot with no gate and no log.\n\n## What D9 specifies\n\n- A tenant overlay registers as a **third, NON-owning `overlay` contributor kind** with **replace semantics on the base layer** — not a new ownership kind, and not an extender.\n- Resolution becomes `base = overlay ?? own`, with extenders folding on top exactly as today. This is **bit-for-bit what the current splice already produces**: the resolved schema, `_provenance: 'org'` included, does not move. Only what the registry *remembers* changes.\n- **`assertSingleOwnerPerObject` is unchanged, literally** — overlays are not owners, so D3's sentence keeps holding with no exemption clause (ADR-0028 D5/D6 depend on D3 being unconditional). One new violation class: an orphan overlay with no owner.\n- **`computeFQN` untouched** (identity today); the layer shares the owner's key.\n- **Priority stays descriptive.** A constant between owner (100) and extender (200) keeps list order, but **base selection asks the kind, never \"highest priority wins\"** — author-declared extender priority must not be able to re-rank which layer is the base.\n\n## Three things a naive implementation gets wrong — all named in D9\n\n1. **`getArtifactItem`'s object branch must read the OWNER contributor**, not the merged object. The merged body deliberately keeps `_provenance: 'org'`, so `isArtifactBacked` only stops lying if artifact identity is read from the owner's layer. This clause is *not* implied by the layering change and has to be done deliberately.\n2. **`provisionPrimary` / `provisionSearchCompanion` are gated on `own`** — that gate must become \"is this the BASE layer\", or `nameField` changes on every overlaid object. D9 carries a measured blast-radius table of every `.ownership` read site; work from it rather than from grep alone.\n3. **#6995 is subsumed and must be implemented as ruled**: the row's `package_id` is provenance on the layer, never an ownership claim — same package normal, package-less sentinel **accepted** (today's throw was an artefact of the borrowed slot), different package **refused loudly at the producer**. The reason for the last one is in D9: the overlay-uniqueness index can hold two rows for one `(type, name)` bound to two packages, which the object registry can never represent because `computeFQN` is identity.\n\n## Cost that is already accepted in the record\n\nWith the predicate honest, `saveMetaItem` refuses an overlay write to a packaged object with `NOT_OVERRIDABLE` **every time**, not only the first — `object` declares `allowOrgOverride: false`. Today the first write is refused and, by destroying the evidence, admits every later one through the `allowRuntimeCreate` tier. This is the declared contract enforced consistently rather than a new restriction, but **a deployment living in the post-first-write state will feel it**. D9.6 carries this with its migration note; do not soften it without a new ruling.\n\n## Left open by D9 on purpose\n\n- **Late install** — a package registering an object a tenant `sys_metadata` row already owns under the sentinel still hits \"already owned by\". D9 records the recommendation (the code layer becomes owner, the tenant contribution re-classified as its overlay layer) but explicitly leaves it to this card **with its own measurement**, because it is a second discriminator.\n- **ADR-0005's \"Amended by\" cross-reference** was deliberately not written while D9 was a proposal, since that line asserts acceptance. **D9 is now accepted**, so the one-line pointer is in scope here.\n\n## Family\n\n- #6853 (the finding + the ruling), PR #7087 (D9 itself)\n- #7012 / PR #7093 — the stop-the-bleed guard already landed; D9 is what makes its accepted cost unnecessary, so check whether that guard can be narrowed or retired once `isArtifactBacked` stops lying\n- #6725 — the write side of the same split, dormant in-tree; **`domain:engine-core`'s surface**, so coordinate rather than absorb\n- #6808 / PR #6818 — the removal half, merged; its `unregisterObject` is the verb the overlay-layer removal reuses"
+}

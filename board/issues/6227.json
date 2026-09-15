@@ -1,0 +1,35 @@
+{
+  "number": 6227,
+  "kind": "issue",
+  "title": "[finding][spec] ViewFilterRuleSchema.value 不按算子约束形状 —— 集合算子配标量在发布期通过,直到运行时才拿到 400",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T11:17:16Z",
+  "updated_at": "2026-08-09T19:38:06Z",
+  "closed_at": "2026-08-09T19:38:06Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6227",
+  "body": "来自 PR #6209(#5869)实施期的范围外观察,按 PD #10 记录,**未认领、未入队**,交分诊定级。查重:全仓 open issue 仅 #5869 自身命中(其修的是运行时半边)。\n\n## 事实\n\n`ViewFilterRuleSchema`(packages/spec)对 `value` 不按算子约束形状:`['stage', 'not_in', 'won']`(集合算子 + 标量比较值)是 spec 合法的 ViewFilterRule,发布期校验通过。#5869/PR #6209 之后,这类形状在**运行时**收到带点名信息的 400 INVALID_FILTER(改前是 500)—— 运行时半边已收口。\n\n## 缺口\n\n「发布通过 → 运行时 400」仍是两段式:作者在发布期得不到反馈,要到查询真正执行才知道写错。对照:`FieldOperatorsSchema` 在 `$` 算子层早已声明形状(`$in`/`$nin` 为数组、`$between` 为二元组)—— 缺的是 view-filter 创作面(三元组语法)按第二元(算子)约束第三元(value)的发布期校验。\n\n## 方向(供 spec 席判断,不预裁)\n\nspec 侧对 `ViewFilterRuleSchema` 做按算子的 value 形状精化(discriminated union 或 superRefine)。属**创作面收紧**一类(同族先例:#5931 的裁量边界),影响所有 view 元数据的发布路径,量级与兼容性(存量已发布的越形 view 怎么办)需要 spec 席评估 —— 这正是 #6209 按纪律不做 rider 的原因。\n\nRefs:#5869、PR #6209(「范围之外」段)、#5348/#5346(点名措辞口径)。"
+}

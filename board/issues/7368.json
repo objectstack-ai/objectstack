@@ -1,0 +1,34 @@
+{
+  "number": 7368,
+  "kind": "pull_request",
+  "title": "docs(spec,lint): record the intentional `code` divergence between the two name-like sets (#6734)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-10T08:05:06Z",
+  "updated_at": "2026-08-10T09:25:34Z",
+  "closed_at": "2026-08-10T09:25:33Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-10T09:25:33Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/7368",
+  "body": "Closes #6734\n\n## The ruling this executes\n\nMaintainer ruling on #6734, [comment 5237222790](https://github.com/objectstack-ai/objectstack/issues/6734#issuecomment-5237222790) (2026-08-10), quoted verbatim:\n\n> **Maintainer ruling (2026-08-10, directed in session `session_01BPWqbmEFU8gJepBJTHESXd`): document the gap, no behavior change.**\n>\n> The two \"name-like\" sets (lint R9's title faces, spec's ADR-0079 derivation keys) stay as they are; the undocumented difference — `code` counting for one and not the other — gets written down where both sets are defined, each pointing at the other. R9 is suggestion-severity, so the stakes do not justify moving either set; the defect was that the divergence was invisible, not that it exists.\n>\n> `needs-user-decision` → `pm:queue` (docs-note card).\n\n## Premise check — both sets still diverge by exactly `code`\n\nVerified on `origin/main` @ `f188ed6`, before any edit. Both definitions quoted as they stand (and as they still stand after this PR — neither moves):\n\n`packages/lint/src/data-model-rules.ts:36`\n\n```ts\nconst NAME_LIKE_FIELDS = ['name', 'title', 'subject', 'label', 'full_name', 'display_name', 'code'];\n```\n\n`packages/spec/src/data/display-name.ts:134-136`\n\n```ts\nconst NAME_ISH_EXACT: ReadonlySet<string> = new Set([\n  'name', 'title', 'subject', 'label', 'full_name', 'display_name',\n]);\n```\n\nSet difference is exactly `{'code'}`, in the lint direction. The premise holds.\n\n## The three notes\n\n**1. `packages/lint/src/data-model-rules.ts` — above `NAME_LIKE_FIELDS`.** States that R9 asks the looser *\"will records be anonymous?\"* question, that `code` therefore deliberately counts here and deliberately does **not** count in spec's derivation set, and points at `display-name.ts`. Records that a `code`-only object can still be derived — but at tier 3 (\"first title-eligible field by declaration order\"), by a different rule and a different priority, so the two are not equivalent even where they agree on the outcome.\n\n**2. `packages/spec/src/data/display-name.ts` — above `NAME_ISH_EXACT`.** The mirror: derivation asks *\"what IS the title?\"*, an identifier is not a title, `code` is deliberately absent, points back at the lint set, and notes the divergence is intentional per the 2026-08-10 ruling on #6734.\n\n**3. `skills/objectstack-data/SKILL.md`** — the rules table row for `object/missing-name-field` (the card cited `:1091`; re-anchored by content, it is `:1104` on current `main`) taught the lint spelling as *the* contract, so the drift was being taught, not merely implemented. It gains the same distinction as a callout under the table, ending with the actionable form: don't read the R9 list as the derivation contract — set `nameField` explicitly when the title matters.\n\nBoth code comments carry the same closing line: do not \"fix\" either set into the other without a ruling that supersedes this one.\n\n## Zero behavior change\n\n`git diff --stat` — 3 files, 64 insertions, 1 deletion (the one deletion is the single-line docblock above `NAME_ISH_EXACT`, replaced by the longer one):\n\n```\n packages/lint/src/data-model-rules.ts  | 26 ++++++++++++++++++++++++++\n packages/spec/src/data/display-name.ts | 25 ++++++++++++++++++++++++-\n skills/objectstack-data/SKILL.md       | 14 ++++++++++++++\n```\n\nFiltering the diff's added lines to those that are **not** comment or blockquote prose returns **nothing** — no executable line is added, removed or moved, no test file is touched, no generated output changes. Both sets are byte-identical to `main`.\n\n## Gates\n\n| Gate | Result |\n|---|---|\n| `packages/lint` — `pnpm test` | **70 files / 1852 tests passed** |\n| `packages/spec` — `pnpm test` | **362 files / 9468 tests passed** |\n| `tsc --noEmit` (lint + spec) | clean |\n| `pnpm check:changeset-gate-self-tests` | pass (118 + 142 + 117 assertions) |\n| `pnpm check:skill-frame-sync` / `-freshness` / `check:skill-compatibility` | pass |\n| `pnpm check:doc-authoring` | pass — 374 files clean |\n| `pnpm check:role-word`, `pnpm check:nul-bytes` | pass |\n\nUntouched-test-file proof: the diff touches exactly the three files listed above; no `*.test.ts` appears in it, so the two green suites ran against unmodified test code.\n\n## Changeset\n\n**None — `skip-changeset` applies.** AGENTS.md §1018 requires a changeset for feature or functional work; pure bug fixes do not need one, and this PR is neither — it ships no behavior and therefore declares no release of its own, which is the exemption's own wording in `pr-automation.yml` (\"this PR declares no release of its own\"). The gate has no path-based auto-exemption, so the `skip-changeset` label is the mechanism; the gate's self-tests were run and pass, confirming which branch applies.\n\n## ADR boundary — deliberately not touched\n\n⛔ `docs/adr/**` is untouched. ADR-0079 records this divergence as its **open question 4**, and closing that ledger entry is a maintainer-merged ADR edit (PD #14) — not something this PR may do. **The maintainer can update ADR-0079's open-question ledger separately**; these three notes stand on their own and do not presuppose how that entry is eventually closed.\n\nAlso untouched, per the binding rules: `content/docs/releases/`.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_0134HYRJ1tNpjhi7gy8LRKx3)_"
+}

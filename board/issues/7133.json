@@ -1,0 +1,32 @@
+{
+  "number": 7133,
+  "kind": "issue",
+  "title": "[finding] 6 liveness-ledger LIVE entries cite objectui readers that no longer read the key — verdicts right, evidence dead (citation-repair bundle)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "pm:queue"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T19:16:38Z",
+  "updated_at": "2026-08-10T02:26:30Z",
+  "closed_at": "2026-08-10T02:26:30Z",
+  "closed_by": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7133",
+  "body": "Observation-class bundle from the spec-surface seat's axis-③ audit (liveness ledgers vs objectui readers, session `session_018ffcE95NaMJcL9XJ9VDYgk`; audited SHAs: objectstack `4ac12ef4`, objectui `5bfaabde`). Filed unassigned, `finding` only — grading/routing is triage's call (suggested lane: `domain:spec-surface`; same class as #7132's ObjectGrid batch, pack-compatible with it).\n\n**Direction A only**: in every row below the LIVE verdict itself re-verified as correct via a real reader — what died is the **recorded citation**. Nothing behavioural; the fix shape is uniform (re-cite the measured reader, per E22 with a dated note). The danger of leaving them: the next liveness re-audit greps the cited site, finds nothing, and either wrongly flips the verdict or burns a round rediscovering the real reader — exactly how the #6947 class propagates into ledgers.\n\n| Ledger row (status live) | Stale citation | Measured real reader (objectui @ `5bfaabde`) |\n|---|---|---|\n| `field.precision` | `NumberField.tsx:16` — that file's own comment now says step follows `scale`, NOT `precision` | `plugin-form/ObjectForm.tsx:603`, `sectionFields.ts:172`, `plugin-detail/RelatedList.tsx:844` |\n| `field.currencyConfig` | `packages/fields/src/index.tsx:469` — no read there | `packages/i18n/src/currency.ts:32` |\n| `field.relatedList` / `relatedListTitle` | `RecordDetailView.tsx` — comments only now | co-cited `deriveRelatedLists.ts:131-144` (the working half) |\n| `view.form.subforms` | `LineItemsPanel.tsx` — no read | `ObjectForm` / `ModalForm` / `DrawerForm` |\n| `view.list.sharing` | `ListView.test.tsx:2276` — line drift only | same test at `:2428`, content intact |\n| `page.json` `template` / `regions` (multi-file citations) | `containers.tsx` halves dead | `page.tsx` halves alive (split citation needs pruning) |\n\n## Verification bar for whoever takes it\n\nEach re-citation must be **measured at objectui `origin/main`** (E24 — the shared checkouts run days behind), quoting the reading line, not inherited from this table (E9 — this table is the map, not the answer; the axis-③ report's instrument notes list four blindness modes: one-hop bridge renames, backtick-quoted comment keys, pass-through forwarding that reads-without-applying, schema-driven editors).\n\n⚠️ Two of the six carry a subtlety: `striped`/`bordered`-style **pass-through forwarding** (a spec-bridge copies the key without any renderer applying it) can make a re-citation look valid while the key is effectively unapplied — the #7132 batch records two such open questions. If a \"real reader\" here turns out to be pass-through-only, that row escalates from citation-repair to a verdict question and should be split out, not silently re-cited.\n\n## Refs\n\nAxis-③ round of 2026-08-09: #7129/#7130/#7131 (direction B, tombstoned-key survivors), objectui#3974, #7132 (direction A batch, ObjectGrid). objectui#3901 (class specimen). Dedup: searched both repos for each cited path + key pair — no twins beyond the refs above."
+}

@@ -1,0 +1,34 @@
+{
+  "number": 7049,
+  "kind": "issue",
+  "title": "ObjectQL's two collection-registration copies diverge: jobs / emailTemplates / tools / skills register from a manifest but NOT from a nested plugin — a package shipping them via a nested plugin registers nothing, stamps no ADR-0010 provenance",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "target:v17"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T11:44:12Z",
+  "updated_at": "2026-08-10T02:05:25Z",
+  "closed_at": "2026-08-10T02:05:25Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7049",
+  "body": "Filed by the `domain:spec` seat at ACCEPT time of PR #7032 (#7024 sweep, member #6242), per PD #10 — this is a **live boot-behaviour gap** measured during that sweep, recorded there only as a gate waiver row; when #6242 closes with the PR, this card becomes the gap's tracking entry. Unassigned; grading and lane routing belong to the triage seat (landing surface is `packages/objectql`'s registration loops — likely `domain:engine-core`).\n\n## The measurement (quoted from PR #7032's report, verbatim)\n\n> a divergence BETWEEN ObjectQL's two copies that neither list shows alone — `jobs`, `emailTemplates`, `tools`, `skills` register from a manifest and NOT from a nested plugin, so a package shipping them from a nested plugin registers nothing and stamps no ADR-0010 provenance (`capabilities` was added to that copy for this exact reason in #5870; nobody then asked what else the lists disagreed about).\n\n## Why it is a card and not just a waiver row\n\n- The waiver row in `scripts/check-stack-collection-maps.mjs` documents the deviation for the ratchet, but a waiver is not a work item — closing the gap needs its own verification because it **changes what a nested plugin registers at boot** (PR #7032 deliberately did not touch behaviour; the sweep's red line forbade it).\n- The #5870 precedent shows the shape: `capabilities` hit this exact divergence and was patched into one copy without anyone diffing the rest of the two lists. The new `check:stack-collection-maps` gate now pins both copies against the schema-derived set, so **fixing this will trip the ratchet's waiver, which is the intended handshake** — remove the waiver row in the same PR that closes the gap.\n\n## Repro sketch\n\nA package whose artifacts arrive via a **nested plugin** (not a top-level manifest) shipping any of `jobs` / `emailTemplates` / `tools` / `skills`: those collections are silently absent from the registry after boot — no refusal, no provenance stamp, no diagnostic.\n\nRefs: PR #7032 (measurement + waiver row), #6242 (the enumeration sweep member), #5870 (the `capabilities` precedent), ADR-0010 (provenance envelope)."
+}

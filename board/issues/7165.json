@@ -1,0 +1,35 @@
+{
+  "number": 7165,
+  "kind": "issue",
+  "title": "SKILL amendment: issues live where the fix lands — narrow the repo:* transfer lane to seam cards, adopt file-at-destination filing",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-10T01:36:07Z",
+  "updated_at": "2026-08-10T03:30:59Z",
+  "closed_at": "2026-08-10T03:30:59Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7165",
+  "body": "## Maintainer ruling (2026-08-10)\n\nThe maintainer questioned the central-backlog design —「我还是不懂，既然每次分诊也要看 objectui 的仓库，为什么相关的 issue 不能直接提交到 objectui 仓库？ cloud也是。」— and then ruled「同意」on the PM's proposal:\n\n- Execution cards live in the repo where the fix lands (file-at-destination).\n- Exception A: the maintainer keeps filing everything into objectstack without pre-routing; the triage seat transfers such cards out to the target repo instead of only labeling them.\n- Exception B: seam cards stay in objectstack — cards whose content IS the cross-repo ordering (contract-first chains: a spec/contract change with downstream objectui/cloud adaptation, console-bump linkage chores, anything whose Blocked-by ordering across repos is the substance).\n\nRationale accepted with the ruling: the original reasons for \"one main backlog\" have partly expired — objectui and cloud now run their own whole-repo seats and real local backlogs (127 / 47 open at the 2026-08-10 snapshot), and #6903 already establishes \"exactly one producer per backlog\". The double-track (a repo:objectui lane of ~47 cards in objectstack beside objectui's 127 local cards) produced the v17 producer gap, double bookkeeping, and two-query release inventory.\n\n## Task: amend .claude/skills/pm-dispatch/SKILL.md\n\n1. **Multi-repo coordination rule 1** (\"One main backlog\"): rewrite to \"issues live where the fix lands\", with exceptions A and B above stated verbatim as the two allowed deviations.\n2. **Filing discipline** (os-dev definition + Prime Directive 10 filing rules): a cross-repo discovery made while working in one repo is filed directly into the repo where the fix lands, with a body backlink to the discovery context — no repo:* transfer card for pure sibling-repo fixes.\n3. **Triage seat charter** (rule 4 bijection): for maintainer-filed cards that land in objectui/cloud, the routing action becomes TRANSFER to the target repo (GitHub issue transfer, same org — thread preserved, old URL redirects), not a repo:* label. The seat remains the only producer of routing decisions on the objectstack backlog.\n4. **repo:objectui / repo:cloud label semantics**: narrowed to seam cards only. Do not delete the labels; update their descriptions.\n5. **Consumers to update in the same PR**: the seat-roster rows for the sibling whole-repo seats (unchanged in ownership, but their intake now includes transferred cards); the sweep disjunction notes if any reference the old rule-1 wording; the release-inventory wording stays two-query per #6906 (unchanged by this amendment).\n\n## Coordination\n\n- Same SKILL sections as #6903 (v17 producer clause) — whoever lands second rebases; landing both in one PR by the same seat is acceptable.\n- #6904 (objectui one-time v17 clearing) and #6907-family are unaffected but the executor should read this card before sweeping.\n- The one-time migration of the existing transfer-lane stock is a separate execution card (filed alongside this one) and does NOT wait for this SKILL PR — its authority is the maintainer ruling quoted above; this card is the durable record.\n\n## Guardrails\n\n- This is a .claude/ protocol change: the PR needs review by another seat or a maintainer walkthrough — no self-merge.\n- No domain:* label on this card — routing is the triage seat's single-producer territory."
+}

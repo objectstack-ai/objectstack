@@ -1,0 +1,35 @@
+{
+  "number": 7272,
+  "kind": "pull_request",
+  "title": "feat(lint): validate app.defaultAgent value against platform agent roster (#6041)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-10T04:18:51Z",
+  "updated_at": "2026-08-10T05:42:24Z",
+  "closed_at": "2026-08-10T05:42:22Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": "2026-08-10T05:42:22Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/7272",
+  "body": "Fixes #6041\n\n## What changed\n\n`validate-ai-agent-authoring` gains the **value half**: it already scanned `stack.agents` for withdrawn agent declarations (ADR-0063 §2), but never looked at `app.defaultAgent`'s *value*. Because the Zod type is a plain `SnakeCaseIdentifierSchema`, any snake_case string parses, builds, and passes `os:check` — while the runtime only resolves the platform agent roster (`ask`/`build` and legacy aliases `data_chat`/`metadata_assistant`, ADR-0063 §2) and silently falls back to the platform default for anything else. #5985 measured the blind spot directly: replaying the bad example `defaultAgent: 'sales_copilot'` left `check:skill-examples` at 208 green, EXIT=0.\n\nNew logic in `validateAiAgentAuthoring`: for every `stack.apps[]` entry whose `defaultAgent` is a non-empty string not present in the existing `PLATFORM_AGENT_NAMES` set (reused, not duplicated), emit a **warning** finding (`rule: 'default-agent-outside-roster'`) naming the offending value and the allowed roster. Warning tier per the maintainer's ruling (2026-08-07, reaffirmed 2026-08-09, option A): the failure mode is a silent runtime fallback, not a crash, and the schema itself is intentionally left alone (`SnakeCaseIdentifierSchema` stays — narrowing to an enum was explicitly rejected as a breaking authoring change ADR-0063 already walked back once).\n\n## Sequencing requirement (2026-08-09 ruling, verbatim constraint)\n\nPer the ruling, the existing-metadata hit count was measured **before** landing:\n\n- Repo-wide content search for `defaultAgent` (all extensions, excluding `node_modules`/`dist`/`.turbo`), narrowed to actual value assignments (`defaultAgent: '<value>'`).\n- Only one real assignment exists in-repo: `packages/platform-objects/src/apps/studio.app.ts` — `defaultAgent: 'metadata_assistant'` (a legal legacy platform alias).\n- Cross-validated by building `@objectstack/platform-objects` and running the new check programmatically against every exported platform app (`account`, `setup`, `studio`, `system_overview`) — **0 findings**.\n- `apps/app-crm`, `apps/app-showcase`, `apps/app-todo`, and the `skills/` corpus were also swept; the only other literal match is a **commented-out** doc example in `skills/objectstack-ui/SKILL.md` (`// defaultAgent: 'build'`), itself an in-roster value.\n\n**Hit count: 0.** The \"does not punish existing metadata\" premise of the warning tier is verified, not assumed — consistent with the expectation that PR #6030 already fixed the one known bad corpus instance.\n\n## Tests\n\nAnti-vacuous coverage added to `packages/lint/src/validate-ai-agent-authoring.test.ts`:\n\n- A roster-outside value (`sales_copilot`) plants a finding and the test asserts the exact `rule`/`severity`/`where`/`path`, plus that the message names both the offending value and the full allowed roster.\n- Every canonical name (`ask`, `build`) and every legacy alias (`data_chat`, `metadata_assistant`) is asserted to produce **zero** findings (reverse case).\n- Absent / empty-string / non-string `defaultAgent` stays silent.\n- Multiple apps report independently with stable `apps[n].defaultAgent` paths, alongside the pre-existing `agents[]` limb.\n- Junk app shapes don't throw.\n\n## Notes\n\n- `packages/lint/src/index.ts`: added `DEFAULT_AGENT_OUTSIDE_ROSTER` to the existing barrel re-export block for `validate-ai-agent-authoring.js` (required by this repo's own `rule-id-barrel-exports.test.ts` gate — every declared rule id constant must be reachable from a published barrel). This is not a registry/wiring change: the rule (`validateAiAgentAuthoring`) was already registered in `reference-integrity-suite.ts`; only the new constant's export needed adding.\n- No changes to `SnakeCaseIdentifierSchema`, `authoring-rules.ts`, or `validate-flow-trigger-readiness.*` (parallel-safety per dispatch note).\n\n## Changeset\n\nReal changeset added (`@objectstack/lint`: minor) — a functional addition to a published package.\n\n## Verification\n\n```\npnpm --filter '@objectstack/lint' test -- --run --maxWorkers=2\n Test Files  69 passed (69)\n      Tests  1805 passed | 4 skipped (1809)\n\npnpm --filter '@objectstack/lint' typecheck   # clean, no output\n\nnpx eslint packages/lint/src/index.ts packages/lint/src/validate-ai-agent-authoring.ts packages/lint/src/validate-ai-agent-authoring.test.ts --no-inline-config   # clean, no output\n\nnode scripts/check-nul-bytes.mjs   # OK\n```\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01F8q5J1MQyocgtNspb15fSn)_"
+}

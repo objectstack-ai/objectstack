@@ -1,0 +1,34 @@
+{
+  "number": 7203,
+  "kind": "pull_request",
+  "title": "test(formula): correct the stale #6133 comment in parse-cel-to-ast.test.ts (#6678)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-10T02:36:58Z",
+  "updated_at": "2026-08-10T03:30:59Z",
+  "closed_at": "2026-08-10T03:30:58Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-10T03:30:57Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/7203",
+  "body": "Closes #6678.\n\n`packages/formula/src/parse-cel-to-ast.test.ts` carried two comments describing `classifyError`'s pre-#6202 behaviour as if it were current. The first does not merely go stale, it **instructs**: it tells the next author that asserting `((record.a) -> parse` \"would enshrine it\", i.e. that today's correct verdict is a bug not to be pinned.\n\n## What I measured, before rewriting anything\n\nPer the card, the current grading was established by **running the case**, not by paraphrasing PR #6202. Temporary probe on this branch calling `celEngine.compile` over the whole `SYNTAX_REJECTED` list (probe removed before the commit):\n\n```text\nMEASURED | \"((record.a)\"     -> kind=parse | message[0]=\"Expected RPAREN, got EOF\"\nMEASURED | \"record.budget >\" -> kind=parse | message[0]=\"Unexpected token: EOF\"\nMEASURED | \"record.a $$ 1\"   -> kind=parse | message[0]=\"Unexpected character: $\"\nMEASURED | \"record.a ?? 3\"   -> kind=parse | message[0]=\"Unexpected token: QUESTION\"\n\n Test Files  1 passed (1)\n      Tests  4 passed (4)\n```\n\nTwo things fall out of that, and only one of them was in the card:\n\n1. The **grading** claim in the comment is false — `((record.a)` grades `parse`, not `runtime`.\n2. The **wording** claim in the same comment is still true — cel-js does still phrase it `Expected RPAREN, got EOF`. What changed is that the phrasing no longer decides anything: `classifyCelFault` now branches on `err instanceof ParseError` (#6133 / PR #6202), and the keyword table was deleted outright by #6223 / PR #6677. The rewritten comment keeps the measured wording and corrects the mechanism, rather than deleting both.\n\nConfirming the regex the comment quotes is gone: the only occurrence of `parse|unexpected|syntax` anywhere under `packages/formula/src/` was the stale comment itself.\n\n## Were the surrounding assertions stale too?\n\n**No — checked, and this is the one part of the card that resolves in the reassuring direction.** Nothing in the file asserts `runtime` for any source; the only `runtime` on line 142 was inside the prose. The old grading was never *pinned*, it was *omitted* — the test asserted `record.budget >` and deliberately said nothing about `((record.a)`. So there is no second half to file: the fix is text plus closing the omission the text was rationalising.\n\n## Changes\n\n- `:115-121` — the parity note now says classification is independent of wording and cites the two PRs that made it so.\n- `:135-144` — the \"NOT asserted / would enshrine it\" note is replaced by an `it.each` that asserts **both** wordings grade `parse`, promoting `((record.a)` to an ordinary assertion now that its verdict is stable. The comment records both measured messages and points at `cel-error-classification.test.ts` as the exhaustive per-wording matrix, so the two suites do not read as rival sources of truth.\n\n## Changeset\n\n**None added; this PR needs the `skip-changeset` label.** Read from the gates rather than assumed:\n\n- `changeset-check` in `pr-automation.yml` has **no path-based exemption** — it counts `.changeset/*.md` added against the merge base whatever the diff touches. Its only two exemptions are the `skip-changeset` label and the `changeset-release/main` PR.\n- So a test-only change has exactly two routes, and an empty-frontmatter changeset is not one of them: `check:empty-changeset` (#5471) rejects an empty changeset a PR newly introduces, and `lint.yml` is explicit that the label and an empty file are not equals downstream — the label produces no input for `changesets/action`, an empty changeset produces a real one.\n- This PR releases no package, which `lint.yml:372-375` calls the textbook `skip-changeset` case.\n\nWorth noting for the lane: taking that label means `changeset-check` is skipped **wholesale**, so the changeset-family self-tests do not run from there. They are covered anyway — `lint.yml`'s `Changeset-family gate self-tests` step is deliberately unconditional (#6509).\n\n## Verification\n\n```text\npnpm --filter @objectstack/formula exec vitest run \\\n  src/parse-cel-to-ast.test.ts src/cel-error-classification.test.ts\n\n Test Files  2 passed (2)\n      Tests  82 passed (82)\n```\n\nRelated: #6678, #6133 / PR #6202, #6223 / PR #6677, #4812.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01KbH3tZeQe1R4U8Z64eAF1m)_"
+}

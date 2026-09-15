@@ -1,0 +1,36 @@
+{
+  "number": 7036,
+  "kind": "issue",
+  "title": "examples/app-todo: a normal user can never mark a task complete — `completed_date` is `readonly` (stripped on update) and `completed_date_required` then refuses the write, so the app's own `completeTask` action always fails",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-help"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T10:43:29Z",
+  "updated_at": "2026-08-10T04:30:24Z",
+  "closed_at": "2026-08-10T04:30:24Z",
+  "closed_by": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7036",
+  "body": "Found while implementing #6882 (arming the `task_completion` record-change flow). Filed standalone: it is in the object + action metadata, not in the flow's trigger wiring, and it is independent of that repair.\n\n## The defect\n\n`examples/app-todo/src/objects/task.object.ts` declares:\n\n```ts\ncompleted_date: Field.datetime({\n  label: 'Completed Date',\n  readonly: true,          // <-- write is STRIPPED on the update path\n}),\n```\n\nand, in the same object's `validationRules`:\n\n```ts\n{\n  name: 'completed_date_required',\n  message: 'Completed date is required when status is Completed',\n  condition: P`record.status == \"completed\" && isBlank(record.completed_date)`,\n}\n```\n\nThe two are mutually unsatisfiable on the update path. `ObjectQL.update` runs the static-`readonly` strip **before** `evaluateValidationRules` (`packages/objectql/src/engine.ts`, the `reportDroppedFields(preRo, ..., 'readonly')` call sits immediately above the `evaluateValidationRules(updateSchema, ...)` call). So a payload carrying both keys loses `completed_date`, and the rule then sees a blank one and rejects the whole write.\n\nThe app's own completion action writes exactly that pair — `examples/app-todo/src/actions/task.handlers.ts`:\n\n```ts\nexport async function completeTask(ctx: ActionContext): Promise<void> {\n  const { record, engine } = ctx;\n  await engine.update('todo_task', record.id as string, {\n    status: 'completed',\n    completed_date: new Date().toISOString(),\n  });\n}\n```\n\nso \"Complete task\" is non-functional for an ordinary user, and the same applies to `completeAllTasks`.\n\n## Measured\n\nReal kernel (ObjectQL + `@objectstack/driver-sql` better-sqlite3 `:memory:`) with app-todo's real `Task` object, one row inserted as `status: 'not_started'`:\n\n```\nupdate status+completed_date (user ctx):    REJECTED -> Completed date is required when status is Completed\nupdate status only (user ctx):              REJECTED -> Completed date is required when status is Completed\nupdate status+completed_date (isSystem):    OK  -> status=completed completed_date=2026-08-09T10:00:00.000Z\ninsert already-completed:                   OK  -> completed_date=2026-08-09T10:00:00.000Z\n```\n\nTwo escapes exist and neither is the user path: an elevated (`isSystem`) write bypasses the readonly strip, and an INSERT may legitimately seed a read-only field (the engine's create path exempts readonly seeds on purpose). Every ordinary user update is refused.\n\n## Why it was not noticed\n\nThe status transition is also the trigger for `task_completion`, which was itself dead until #6882 — so nothing downstream of a completion ever ran, and nothing pointed at the transition being impossible in the first place. #6882's regression test works around this by seeding `completed_date` on CREATE, which is the one route the engine allows; that workaround is deliberate and is commented as such, but it is not a fix.\n\n## Shape of the fix (needs a decision, hence not a drive-by)\n\nAt least three readings, and they are not equivalent:\n\n- **`completed_date` should not be `readonly`** — it is a value the completion path legitimately writes, and `readonly` was meant as \"users do not type this into a form\", which is a form concern (`readonly` on the field's form binding) rather than a write-path one.\n- **A `beforeUpdate` hook should stamp it** — the object already ships `task.hook.ts` with a `beforeInsert` leg that defaults `priority`/`status`; stamping `completed_date` on the transition there makes the rule satisfiable without any caller writing the field, and makes `completeTask` a one-key update.\n- **The validation rule is the wrong instrument** — if the field is genuinely system-maintained, requiring it of the caller is asking for something the caller is forbidden to supply.\n\nThe second reads like the intended design (the object's own trailing comment already says `actions/task.handlers.ts` \"stamps `completed_date` on completion\"), but which one ships is an app-semantics call.\n"
+}

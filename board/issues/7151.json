@@ -1,0 +1,35 @@
+{
+  "number": 7151,
+  "kind": "issue",
+  "title": "`member_default`'s removed wildcard is still live fact in a PUBLISHED customer skill and in `plugin-security/README.md` — the two sites outside #6964's named file face",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched",
+    "target:v17"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-10T01:14:14Z",
+  "updated_at": "2026-08-10T02:17:03Z",
+  "closed_at": "2026-08-10T02:17:03Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7151",
+  "body": "Found while implementing #6964 (PR #7149), by sweeping the same two expired premises across their whole consumption radius rather than only the packages that card named. Filed **unassigned** and **unlabeled** — deliberately not pre-graded, for the same reason #6964's filer declined to pre-grade: one of these two is ordinary prose drift and the other is published customer-facing security guidance, and that difference is triage's call, not the filer's.\n\n## The two premises (identical to #6964)\n\n- **(a)** `member_default` has a `'*'` object grant — removed by #5491 (PR #6684).\n- **(b)** `member_default` ships a wildcard `tenant_isolation` RLS policy — retired by ADR-0095 D1 in favour of the Layer 0 tenant wall (`plugin-security/tenant-layer.ts`).\n\nBoth re-measured on `origin/main` @ `3e8e669c0` against the real imported `defaultPermissionSets`: `member_default.objects['*']` is `undefined`, and its `rowLevelSecurity` carries no `tenant_isolation` entry — only `owner_only_writes` / `owner_only_deletes` (`update`/`delete`) and the `*_self` per-object carve-outs.\n\n#6964 named `platform-objects`, `qa/dogfood` and `content/docs/permissions/index.mdx`, and its dispatch drew that file face explicitly. These two sites are outside it and were not fixed by PR #7149.\n\n## 1. `skills/objectstack-data/SKILL.md` — a PUBLISHED customer skill, both premises\n\nThis is the sharper of the two: not an internal comment but shipped guidance, and it does not merely *mention* the wildcard — it **builds a recommendation on it**.\n\n`:764` asserts premise (b) as current:\n\n> - The default `member_default` ships a **wildcard `tenant_isolation` RLS** (`organization_id == current_user.organization_id`). Any row whose `organization_id` is **null or absent** (common for adapter-written rows that never get the tenant stamp) is **denied** — the list renders empty.\n\n`:781` asserts premise (a), inside a warning callout:\n\n> ⚠️ **Don't use either flag alone.** `tenancy.enabled:false` *by itself* drops the wildcard RLS, and `member_default`'s `'*': allowRead` then **leaks every row to all authenticated users**.\n\nThe recommended recipe itself (`tenancy: { enabled: false }` + `requiredPermissions`) is still correct, so this is not a wrong instruction — but every reason given for it has expired, and one of them names a leak that cannot happen. A reader who checks the stated hazard finds it absent and may drop half the recipe. The `viewAllRecords` sentence at `:768` is also now imprecise in the same region: under ADR-0095 **W2** the superuser bit alone no longer crosses the tenant wall at all — that takes a true `PLATFORM_ADMIN` (superuser bit **and** a platform-exclusive capability), which is a stricter rule than \"posture-gated\".\n\nNote this file is a `skills/` artifact, so it is in scope for the skill-frame gates; any fix should re-run `check:skill-frame-sync` / `check:doc-authoring`.\n\n## 2. `packages/plugins/plugin-security/README.md:51` — premise (b)\n\n> - **Service present** → keeps the wildcard `tenant_isolation` RLS policy (`organization_id = current_user.organization_id`) shipped with the default `member_default` / `viewer_readonly` permission sets.\n> - **Service absent** → strips those wildcard policies so single-tenant deployments aren't filtered to zero rows.\n\nThe described mechanism is the pre-ADR-0095 one. Tenant scope is now Layer 0, and it is inert under the `single` posture *by construction* (`computeTenantLayer0Filter` returns `null` when `postureEnforcesWall` is false) rather than by the org-scoping probe stripping policies. This is the plugin's own README describing its own retired behaviour.\n\nWorth checking in the same pass whether `viewer_readonly` still ships such a policy — the sentence names it alongside `member_default`, and #6964 only ever measured `member_default`.\n\n## Verified correct — explicitly NOT part of this finding\n\nThese matched the same grep and were checked individually:\n\n- `content/docs/permissions/access-recipes.mdx:65` — already says \"tenant isolation is now the Layer 0 tenant wall in `tenant-layer.ts`, ADR-0095 D1\". Correct.\n- `packages/cli/src/commands/serve-verify-security-parity.contract.test.ts:18` — \"It stayed invisible until #5491 removed `member_default`'s `'*'` wildcard\". Correctly historical.\n- `packages/plugins/plugin-approvals/src/lifecycle-hooks.ts:423` — \"`member_default`'s wildcard `created_by == current_user.id` RLS\" is a **grep false positive**: \"wildcard\" there means the policy's `object: '*'`, and `owner_only_writes` / `owner_only_deletes` still ship exactly that. Do not \"fix\" it.\n- `CHANGELOG.md` files, `content/docs/releases/`, and the two pending `.changeset/*.md` entries — correctly frozen or correctly descriptive.\n- `packages/plugins/plugin-security/audience-anchor-set-claims.pin.test.ts` — the #6958 pin, correct; its `watchedSurfaces()` deliberately watches only two surfaces. Whether it should grow more is the open scoping question #6964 already raised and triage has not ruled on.\n\n## Why it stayed silent\n\nSame reason #6842 and #6964 give, and the reason this keeps recurring: nothing mechanically relates \"prose names set X as having shape Y\" to what `defaultPermissionSets` actually ships. The #6958 pin closes that loop for two named surfaces only. If triage ever does want the pin to grow a repo-wide surface, these two files are the concrete argument for it — this is now the third filing in the same family.\n\nRelated: #6964 / PR #7149 (this issue's origin), #6842 / PR #6958, #6696 / PR #6846, #5491 / PR #6684 (cause (a)), ADR-0095 D1 (cause (b)), #6628 (the pin idiom)."
+}

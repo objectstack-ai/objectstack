@@ -1,0 +1,35 @@
+{
+  "number": 6888,
+  "kind": "issue",
+  "title": "`global_nav` action location renders nowhere in the running app — the ⌘K palette never reads action metadata, but Studio previews a command-palette frame for it",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "target:v17"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T02:59:22Z",
+  "updated_at": "2026-08-10T07:55:21Z",
+  "closed_at": "2026-08-10T07:54:53Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6888",
+  "body": "Found while working #6739. Filed separately: #6739 is about one showcase action's `target`; this is about the `locations` value that action declares.\n\n## What\n\n`global_nav` is a canonical `ACTION_LOCATIONS` member (`packages/spec/src/ui/action.zod.ts:454,463`), documented as:\n\n- `packages/spec/src/ui/action.zod.ts:454` — \"`global_nav` — global navigation/command-palette level actions.\"\n- `content/docs/protocol/objectui/actions.mdx:224` — \"Global navigation / command-palette actions\"\n- `content/docs/ui/actions.mdx:192` — \"App-level navigation\"\n\n**No running-app surface renders it.** Measured against the exact objectui commit this repo vendors — `.objectui-sha` = `b1204af0a1f7256514bab4479f5e9c915fb91449`:\n\n```\n$ git grep -n \"global_nav\" b1204af0a1f7256514bab4479f5e9c915fb91449 -- packages apps | grep -v \"\\.test\\.\"\n…/metadata-admin/inspectors/ActionDefaultInspector.tsx:132:  global_nav: 'Global nav / command palette',\n…/metadata-admin/previews/ActionPreview.tsx:581:      {locations.includes('global_nav') && (\n…/metadata-admin/previews/ActionPreview.tsx:582:        Frame label=\"global_nav\"\n…/metadata-admin/previews/block-config.ts:366:        { value: 'global_nav', label: 'Global nav' },\n…/components/src/renderers/action/action-bar.tsx:19: * list_item, record_more, record_related, and global_nav locations.\n```\n\nFour of those five are the **Studio designer**; the fifth is a doc comment. The console's ⌘K palette — `packages/app-shell/src/chrome/CommandPalette.tsx` — builds its groups from nav items, objects, dashboards, pages, reports, recent items, record search and theme. Its seven `CommandGroup` headings at that SHA:\n\n```\nobjects · dashboards · pages · reports · switchApp · preferences · actions\n```\n\n…and the `actions` group is hard-coded chrome (one \"open full search\" item). The file has **no** reference to `global_nav`, `actionRendersAt`, or any action-metadata source. So a `locations: ['global_nav']` action never reaches a user.\n\n## The sharp edge\n\n`metadata-admin/previews/ActionPreview.tsx:581` draws the author a mock frame:\n\n```\n⌘K · Command palette\n   [ New Task ]\n```\n\nThe designer **promises a surface the product does not have**. An author declares `global_nav`, sees it previewed, ships it, and it renders nowhere — the ADR-0078 \"declares, 'renders', reports success, and does nothing\" shape, arriving through the location vocabulary rather than through a missing `locations` key.\n\n## Who is hit today\n\n- `examples/app-showcase/src/ui/actions/index.ts` — two actions declare it: `showcase_new_task` and `showcase_portfolio_snapshot`. (The latter is still reachable over REST/MCP as an object-less action, so only its UI surface is dead.)\n- `docs/qa/platform-checklist/areas/records-forms.json` — item `records-forms.action-location-matrix` has a `global_nav` variant (\"showcase_new_task in the command palette / global nav\") and a step \"new_task from the palette\". **That step cannot pass**; the checklist item is unrunnable as written.\n\n## Why no existing rule catches it\n\n`packages/lint/src/validate-action-locations.ts:44-46` names this class and explicitly declines it:\n\n> Scope note: this rule asks only \"did anyone place this action?\". It deliberately does NOT check that a declared location is one a renderer actually serves […] distinct classes with their own rules.\n\nThe distinct rule does not exist. So this is a **known-and-deferred gap, not a blind rule** — the existing rule is correct about its own scope.\n\n## Directions (not a recommendation — needs triage)\n\n1. **Serve it** — teach `CommandPalette.tsx` to read `global_nav` actions and dispatch them through the normal action runtime. Makes the docs, the designer preview and the checklist item all true. (objectui-side.)\n2. **Retire it** — drop `global_nav` from `ACTION_LOCATIONS` under ADR-0087, and the designer frame with it. Cheapest, and consistent with \"a declared surface with no pull is handled implementation-first\". Costs the object-less-action story its only UI home.\n\nEither way `docs/qa/platform-checklist/areas/records-forms.json`'s `global_nav` variant needs updating, and the designer preview frame must stop drawing a surface that does not exist."
+}

@@ -1,0 +1,35 @@
+{
+  "number": 6878,
+  "kind": "issue",
+  "title": "两个 `IHttpServer` 适配器对「重复的查询参数」给出不同形状:Hono 折叠成第一个值,node:http 给数组",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-help"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T02:18:12Z",
+  "updated_at": "2026-08-10T10:18:42Z",
+  "closed_at": "2026-08-10T10:18:42Z",
+  "closed_by": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6878",
+  "body": "观察类发现,来自 #6307 的适配器实测。按 Prime Directive #10 单独立单,**未认领**。\n\n**今天没有用户会撞到**:需要客户端重复传同一个查询参数才会触发。\n\n## 事实(实测,真实 socket,非推断)\n\n同一个请求 `GET /probe?version=1.0.0&version=2.0.0&single=9`,两个 `IHttpServer` 实现交给 handler 的 `req.query` 不同:\n\n```\n[NodeHttpServer]  {\"version\":[\"1.0.0\",\"2.0.0\"],\"single\":\"9\"}   // 数组\n[HonoHttpServer]  {\"version\":\"1.0.0\",\"single\":\"9\"}             // 折叠成第一个值\n```\n\n- `packages/qa/http-conformance/src/adapter.ts` 用 `url.searchParams.getAll(key)`,`length > 1` 时给数组。\n- `packages/plugins/plugin-hono-server/src/adapter.ts` 用 `c.req.query()`,Hono 该方法每个 key 只返回**第一个**值(`c.req.queries()` 才给数组)。实测 hono@4.12.34。\n\n两者都**没有违反契约**:`IHttpRequest.query` 是 `Record<string, string | string[]>`,联合的两支都合法,`Record<string,string>` 可赋值给它。所以这不是某一边的 bug。\n\n## 为什么仍然值得记\n\n契约允许两支,意味着**平台对「重复查询参数」的回答取决于哪个 server 启动了** —— 而 `packages/qa/http-conformance` 的存在意义正是\"经 `IHttpServer` 注册的一切在非 Hono server 上原样运行\"。这条差异恰好落在它的 cross-adapter 套件没有钉住的地方:套件没有任何一个用例传重复参数。\n\n后果是可观察的,而且方向相反:\n- 在 Hono 上,重复参数被**静默取第一个**,handler 永远看不到歧义;\n- 在 node:http 上,handler 拿到数组 —— #6307 就是这么把 `['1.0.0','2.0.0']` 喂进 `PackageService.delete(id, version?: string)`,并因此跳过了 `protocol.deletePackage` 的完整卸载分支。\n\n#6307 的修复(`readSingleQueryValue`,重复即 `400 VALIDATION_ERROR`)因此在两个适配器上**不等价**:node:http 上会拒收,Hono 上根本走不到那条分支。消费方按契约处理声明过的形状是对的,但\"同一请求两种答案\"这件事本身没有被任何门禁记录。\n\n## 处置建议(留给分诊)\n\n三条路,都是决策而非实现细节,所以本单不动手:\n\n1. **给 conformance 套件加一条重复参数用例**,把差异**钉成已知**(最小、最诚实,但不消除差异);\n2. **收紧契约**为\"重复参数一律是数组\",让 Hono 适配器改用 `c.req.queries()` 并按 `length` 归一 —— 这会改变 Hono 上现有的、依赖\"取第一个\"的读取点(需先普查,见 #6877);\n3. **收紧契约**为\"永远是单值,重复取第一个\",让 node:http 适配器折叠 —— 代价是消费方再也无法察觉歧义,#6307 那类静默错答就不可修了。\n\n倾向 2 或 1;3 与 #6307 已落地的取向冲突。\n\n## 查重\n\n搜过 open issue 的 `IHttpServer` / `adapter` / `query`,无同题单。#6307 是本单的来源(范围仅 `package-routes.ts` 两个 handler),#6877 是同批的另一条(rest 内其它 `req.query` 读取点),三者互不重复。"
+}

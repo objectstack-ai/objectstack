@@ -1,0 +1,34 @@
+{
+  "number": 5144,
+  "kind": "issue",
+  "title": "Analytics: a dataset dimension on a dotted relationship path (`crm_account.industry`) renders raw stored values — the same field as a local dimension renders its option labels",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:queue",
+    "repo:objectui"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T06:05:10Z",
+  "updated_at": "2026-08-10T02:14:05Z",
+  "closed_at": "2026-08-10T02:14:05Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5144",
+  "body": "## Summary\n\nA `DatasetDimension` whose `field` is a **dotted relationship path** gets no select-option resolution at all: the chart plots the raw stored values (`education`, `finance`, `manufacturing`). The **same underlying field**, reached as a **local** dimension on the object that owns it, resolves to its option labels (`Education`, `Finance`, `Manufacturing`).\n\nBoth render side by side on one dashboard, so the inconsistency is visible without leaving the screen.\n\n## Evidence\n\n`@objectstack/*` 17.0.0-rc.1, fresh database, admin user. One dashboard (`executive_dashboard`), two widgets, both grouping on `crm_account.industry`:\n\n**Widget A — joined dimension → raw values**\n\n```ts\n{ id: 'revenue_by_industry', type: 'donut',\n  dataset: 'opportunity_metrics', dimensions: ['account_industry'], values: ['total_amount'] }\n```\n\nwhere the dataset declares\n\n```ts\n{ name: 'account_industry', label: 'Account Industry', field: 'crm_account.industry', type: 'string' }\n```\n\nrenders its legend as:\n\n```\neducation   finance   healthcare   manufacturing   software   technology\n```\n\n**Widget B — local dimension → option labels**\n\n```ts\n{ id: 'accounts_by_industry', type: 'table',\n  dataset: 'account_metrics', dimensions: ['industry'], values: ['annual_revenue_sum', 'account_count'] }\n```\n\nwhere the dataset declares\n\n```ts\n{ name: 'industry', label: 'Industry', field: 'industry', type: 'string' }\n```\n\nrenders its rows as:\n\n```\nEducation   Energy & Utilities   Finance   Healthcare   Logistics   Manufacturing   Software / SaaS   Technology\n```\n\nSame field, same dashboard, same request. The only difference is `field: 'crm_account.industry'` vs `field: 'industry'`.\n\nThe option values on `crm_account.industry` are `education` / `finance` / … with labels `Education` / `Finance` / …, so widget A's output is exactly the stored column, unresolved.\n\n## Mechanism\n\nThe label resolver appears to look the select options up on the dataset's **own** object. For a dotted `field`, the options live on the **related** object (`crm_account`), the lookup misses, and the renderer falls through to the stored value. Nothing errors, so the widget just quietly displays database enum values to end users.\n\n`DatasetDimension` has no key to help here — its whole surface is `{ name, label, field, type, dateGranularity }` and `type` has no `select` member — so the dataset cannot declare \"this dotted path is a picklist, resolve it against `crm_account`\".\n\n## Why this is not a duplicate of #5076\n\nobjectstack-ai/objectstack#5076 is about analytics surfaces resolving option labels **and then not applying the i18n bundle** — the label is found, it is just the English one. That is widget B's behaviour.\n\nThis issue is the layer below: for a joined dimension the label is **never resolved at all**. Fixing #5076 alone would leave widget A still printing `education`, because there is no label in hand to translate.\n\n## Impact\n\nRaw enum values reach end users on a dashboard. On a non-English deployment it is worse than English — `education` is neither the user's language nor a word they have ever seen in the UI, since every form and list shows the translated label.\n\n## Suggested fix\n\nWhen a dimension's `field` is a dotted path, resolve the select options against the **target** object of the relationship rather than the dataset's base object, then apply the same option-label (and, per #5076, i18n bundle) resolution the local-dimension path already uses.\n\n## Related\n\n- objectstack-ai/objectstack#5076 — analytics surfaces resolve option labels but skip the i18n bundle.\n- objectstack-ai/objectstack#5141 — report charts drop the dataset measure's `label`.\n- objectstack-ai/objectstack#4854 — view / report / dataset labels have no live translation path.\n\nFiled from a downstream app (`hotcrm-heimao`), tracked there as issue #69.\n"
+}

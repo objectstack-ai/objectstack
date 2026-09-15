@@ -1,0 +1,35 @@
+{
+  "number": 7153,
+  "kind": "pull_request",
+  "title": "fix(objectql): a nested plugin registers `jobs` / `emailTemplates` / `tools` / `skills` — the two registration copies become one enumeration (#7049)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-10T01:15:12Z",
+  "updated_at": "2026-08-10T02:05:26Z",
+  "closed_at": "2026-08-10T02:05:24Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-10T02:05:24Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/7153",
+  "body": "Closes #7049.\n\n## The defect\n\n`packages/objectql/src/engine.ts` reaches the ADR-0010 provenance-stamping seam — `registerItem` → `applyProtection`, the **only** place `_packageId` / `_provenance` are written — from two entry points: a manifest (`registerApp()`) and a nested plugin (`registerPlugin()`, reached via `manifest.plugins[]`). Each carried its **own copy** of the collection list, and the two copies had drifted by four collections:\n\n`jobs`, `emailTemplates`, `tools`, `skills` — registered from a manifest, **not** registered from a nested plugin.\n\nA package shipping any of the four via a nested plugin therefore registered **nothing**: no refusal, no diagnostic, no provenance stamp. The measured symptom, from the reverse-verification below: `expected [] to deeply equal [ 'nightly_invoice' ]`.\n\n## The shape decision, and the measurement behind it\n\nThe obvious fix is to copy the four names into the nested loop. **That is precisely what #5870 did for `capabilities`** — and this card exists because that patch-one-name approach left the rest of the two lists undiffed. Hand-adding four more names closes this instance while reproducing its cause.\n\nSo the two loops were measured against each other rather than chosen between by taste:\n\n| Aspect | Manifest seam | Nested-plugin seam | Does it require different collection lists? |\n|---|---|---|---|\n| Object read | `manifest[key]` | `plugin[key]` | No — a parameter |\n| Package id stamped | `id` | `ownerId` (`= parentId`) | No — **both resolve to the same parent package**; a nested plugin contributes under its parent's ownership |\n| Per-key `debug` line | yes | no | No — loop body |\n| Aggregated-view expansion (ADR-0017) | yes | **no** | No — loop body |\n| Warn on non-derivable name | yes | **no** (silent skip) | No — loop body |\n| Ordering / error handling | list order; no local `try` | identical | No |\n\n**Every difference lives in the loop body; not one of them is expressible in, or caused by, which collections are enumerated.** So the key list is not where the two seams legitimately differ — it is only where nobody was looking. The enumeration is hoisted to one module-scope `METADATA_ARRAY_KEYS` that both seams read, which makes this class of divergence *unrepresentable* rather than merely unnoticed.\n\n**Why the next divergence is caught**, since \"nobody diffed the two lists\" is the documented root cause:\n\n1. There is no second list to diff — TypeScript resolves one identifier at both seams.\n2. `engine-nested-plugin-collections.test.ts` pins the seams' agreement as a **property over every comparable collection** (23 of them), not over the four that happened to diverge: ship one item through a manifest and the same item through a nested plugin, and the two registries must agree, in both directions. A collection added to one seam only cannot pass it. Collections excluded from the sweep are listed **with the reason each is excluded**, and that list is itself pinned.\n3. `check:stack-collection-maps` still reconciles the (now single) enumeration against `ObjectStackDefinitionSchema` in both directions.\n\n## The waiver handshake (atomic, per #6242's ratchet)\n\n`scripts/check-stack-collection-maps.mjs` treats its waiver list as a **ratchet** (`:53`), and states `⛔ A waiver is NOT permission` (`:323`). The row recording this divergence — `keys: ['jobs', 'emailTemplates', 'tools', 'skills']` — is removed in this same PR, along with the now-empty second ObjectQL site. Both halves were verified to be genuinely coupled:\n\n| | Result |\n|---|---|\n| Gate on `origin/main`, before | `✓ 8 enumerations reconciled against 32 declared collections (19 waiver rows)` |\n| Gate after the fix | `✓ 7 enumerations reconciled against 32 declared collections (16 waiver rows)` |\n| **New gate script vs. pre-fix `engine.ts`** | `✗ METADATA_ARRAY_KEYS — could not extract the enumeration` — red, as the handshake requires |\n| `--self-test` | `✓ 11 assertions over synthetic sources` (unchanged) |\n\nThe gate's own header prose and the `sliceBody(from)` docblock, which both described ObjectQL as \"declaring its list twice\", are updated to say what is true now and to record what the removed row recorded.\n\n## Reverse-verification\n\nPredictions were written before the run: restoring `origin/main`'s `engine.ts` under the new tests should fail exactly 13 of 34 — the 4 `registers …`, the 4 `stamps …`, `registers all four at once`, and the 4 property cases for `jobs` / `tools` / `skills` / `emailTemplates`; everything else green.\n\nMeasured: **13 failed | 21 passed**, matching test-for-test. No deviation. With the fix restored: **34 passed**. Full `@objectstack/objectql` suite: **166 files / 2883 tests, all passing**.\n\n## Behaviour change (stated plainly in the changeset)\n\nPackages that already ship today and declare any of the four via a nested plugin now register them. `/meta/job`, `/meta/email_template`, `/meta/tool` and `/meta/skill` begin answering for such a package; the email plugin's `sys_email_template` materializer (#4509) begins seeing its templates. Anything that has been compensating for the silence — a duplicate top-level declaration, a hand-seeded row — will now find the collection already registered.\n\n## Out of scope, filed rather than folded in — #7163\n\nThe manifest seam expands an aggregated view container into per-view items (ADR-0017) and the nested seam does not. Measured while closing this card: one container registers `['account', 'account.all_accounts', 'account.form']` from a manifest and `['account']` from a nested plugin. That is the same silent-under-registration *class* one layer in, but it is a loop-**body** difference this card did not measure and it changes what a nested plugin serves. Filed as #7163 and recorded in the test file's exclusion list with the measured values, so the exclusion is falsifiable rather than asserted.\n\nThe seven waivers at `:406` and `:523` naming overlapping key sets were left alone, per the card's scope fence.\n\nRefs: #7049, #7032 (measurement + waiver row), #6242 (enumeration sweep), #5870 (`capabilities` precedent), #4509, #7163, ADR-0010, ADR-0017."
+}

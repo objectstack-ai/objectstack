@@ -1,0 +1,34 @@
+{
+  "number": 7223,
+  "kind": "issue",
+  "title": "Nothing pins `register(type, name, d)` → `get(type, name)` across the shipped `IMetadataService` implementations — the hole #6725 fell through",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-10T03:06:20Z",
+  "updated_at": "2026-08-10T08:55:53Z",
+  "closed_at": "2026-08-10T08:55:53Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7223",
+  "body": "Observation-class finding, filed per Prime Directive #10 while implementing #6725 (PR #7211). Unassigned, deliberately **not** queued. This is a test-coverage gap, not a defect in shipped behaviour — filed separately rather than folded into #6725 because the fix is a conformance suite, not a line of engine code.\n\n## The fact (read on `origin/main` @ `55da611`)\n\n`IMetadataService.register` and `.get` are the contract's first two CRUD members, and the round-trip between them is exercised in exactly one place:\n\n`packages/spec/src/contracts/metadata-service.test.ts` — \"should register and retrieve metadata items asynchronously\":\n\n```ts\nconst store = new Map<string, Map<string, unknown>>();\nconst service: IMetadataService = {\n  register: async (type, name, data) => { …store.get(type)!.set(name, data); },\n  get: async (type, name) => store.get(type)?.get(name),\n  …\n};\nawait service.register('object', 'account', objectDef);\nexpect(await service.get('object', 'account')).toEqual(objectDef);\nexpect(await service.getObject('account')).toEqual(objectDef);\n```\n\nEvery subject in that file is an **inline literal written in the test itself**. The suite asserts that a `Map` behaves like a `Map`. It is a type-conformance file — which is the right thing for `packages/spec` to host, since the contract has no runtime and spec is the dependency root — but it means the round-trip is pinned against **no shipped implementation at all**.\n\nThe cross-implementation pin that does exist,\n`packages/objectql/src/metadata-service-getobject-equivalence.test.ts` (#6745), covers a *different* proposition — `getObject(name)` ≡ `get('object', name)` — and seeds every subject through `registry.registerObject` / `manager.register`, explicitly **not** through the facade's own write. Its header says so, and says why: seeding the facade the other way produced `undefined` on both members.\n\nSo: no test anywhere asserts that writing through an implementation's `register` makes the item readable through that same implementation's `get`.\n\n## Why this is worth a card\n\nThat is precisely the hole #6725 fell through. `MetadataFacade.register('object', …)` wrote into a map none of its own reads consult; every read answered `undefined`; the full `packages/objectql` suite (167 files, 2917 tests) stayed green, and so did all 64 `lint.yml` gates. A shipped, exported implementation of the platform's central metadata contract could not perform its own most basic round-trip, and nothing in the repo was positioned to notice.\n\n`packages/objectql` is again the only package that can see all three implementations at once — it depends on `@objectstack/metadata` (`MetadataManager`) and `@objectstack/core` (`createMemoryMetadata`) and owns `MetadataFacade` — which is exactly the argument #6745's header already makes for living there.\n\n## Shape worth pricing (no recommendation forced)\n\nA `describe.each` over the same implementation table #6745 builds, asserting the CRUD contract per implementation and per metadata type: `register` → `get` / `exists` / `list` / `listNames`; `unregister` → all four answer absent; re-`register` replaces rather than duplicates. At minimum one object type and one non-object type, since the `object` type is special-cased on the read side of `SchemaRegistry` and the generic types are not — the asymmetry that produced #6725.\n\nTwo things to decide before writing it:\n\n- **Whether to share the table with #6745's file or start a sibling.** Sharing risks turning one pin into a general-purpose suite whose failures no longer name one proposition; a sibling duplicates the fixture.\n- **How much the implementations are allowed to differ.** `MetadataManager` has loader fallback, `MetadataFacade` answers the *runtime-effective* object rather than the stored document (#6505 / PR #6723) — so `toEqual(input)` is the wrong assertion for at least one subject, and picking the right one per member is most of the work.\n\nRefs #6725, PR #7211, #6745, #6505 / PR #6723.\n"
+}

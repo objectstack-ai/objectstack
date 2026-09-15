@@ -1,0 +1,34 @@
+{
+  "number": 7281,
+  "kind": "issue",
+  "title": "checkAuthoredRowWrite abstains on every `private`-OWD cross-owner row, so #5493's by-id widener deferral is inert on the posture it was filed for — and its unit test cannot see it (fake engine bypasses middleware)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-10T04:37:05Z",
+  "updated_at": "2026-08-10T10:21:30Z",
+  "closed_at": "2026-08-10T10:21:30Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7281",
+  "body": "Measured while running the #6736 bulk-path probe (PR #7274). Filed unassigned, out of that PR's scope, for triage.\n\n## What was measured\n\n`ISecurityService.checkAuthoredRowWrite` resolves its verdict by re-reading the target row through the **caller's own** execution context:\n\n```\nconst parts = [{ id: recordId }, ...(layer0 ? [layer0] : []), layer1];\nconst row = await this.ql.findOne(object, { where: { $and: parts }, context });\nreturn row ? 'admit' : 'abstain';\n```\n\n`packages/plugins/plugin-security/src/security-plugin.ts`, in `checkAuthoredRowWrite`.\n\nThat `findOne` re-enters the middleware chain, so `plugin-sharing`'s **read** filter applies. `buildReadFilter` scopes a `private`-OWD object to owner-match OR shares — so a cross-owner row is invisible to the caller, `findOne` returns null, and the verdict is `abstain` rather than `admit`. The middleware's refusal then stands and the write is refused 403, even though the app declared a widener that admits the row by name.\n\nMeasured end-to-end on the real stack (`bootStack` + real SecurityPlugin + real SharingServicePlugin + real ObjectQL engine). Two objects, identical in every respect except the OWD, same app-authored widener (`operation: 'update'`, `using: \"stage == 'open'\"`), same principal, same cross-owner row shape:\n\n| object | OWD | `checkAuthoredRowWrite` on the cross-owner admitted row | by-id PATCH |\n|---|---|---|---|\n| `probe_note` | `public_read` | `admit` | **200**, row changes |\n| `probe_secret` | `private` | **`abstain`** | **403**, row unchanged |\n\nControl ruling out an inert or mis-parsed widener: on the **same `private` object**, `checkAuthoredRowWrite` for the caller's **own** open row answers `admit`. The declaration is live there; it is the cross-owner read that removes it.\n\n## Why this matters\n\n`private` is the posture the widener surface was built for. #5493's own measured defect is described as occurring exactly where record sharing enforces — *\"a `private`/`public_read` OWD and an `owner_id` field\"* — and the sharing middleware's deferral comment says the probe exists so that gate does not refuse a row an app-authored widener admits. On `private`, it still refuses: the deferral is asked, and structurally cannot answer `admit` for any row the caller cannot already read.\n\nSo the shipped by-id half functions on read-open objects and stands down on read-closed ones — discriminated by a property the widener's author never mentions, which is the same shape #5493 was filed about one layer up.\n\n## The second half: the unit test cannot see this\n\n`packages/plugins/plugin-security/src/row-write-widener-composition.test.ts` asserts\n\n```\nawait expect(\n  stack.security.checkAuthoredRowWrite('crm_opportunity', OPP_THEIRS.id, 'update', WIDENED_CTX),\n).resolves.toBe('admit');\n```\n\non `crm_opportunity`, which is declared `sharingModel: 'private'` — the posture that answers `abstain` in production. It passes because that file's `makeEngine()` fake implements `find` as a direct row filter with **no middleware chain**, so the re-read inside `checkAuthoredRowWrite` is never scoped by the sharing read filter. The double is looser than the producer on precisely the axis the method's verdict depends on, so the test is green over behaviour the real stack does not have.\n\nThis half is actionable regardless of how the first half is ruled: if the abstention is **intended** (fail-closed, \"you may not write what you cannot read\"), the unit test is asserting the opposite of the contract and should be inverted plus the intent written into the method's doc; if it is **not** intended, the test is why it shipped unnoticed.\n\n## Two readings, offered honestly\n\nI measured behaviour, not intent, and both readings are defensible:\n\n1. **Intended fail-closed.** Resolving the verdict under the caller's own scope is a deliberate refusal to let a write reach rows the caller cannot see. Then the gap is documentation plus the misleading test — and app authors need to be told that an update-widener on a `private` object requires matching read widening (`viewAllRecords`, a read policy, or a share) to do anything.\n2. **Unintended.** The verdict is meant to answer \"does the declaration admit this row\", which is a question about the row and the policy, not about the caller's read scope; re-reading under the caller's context silently folds a read decision into a write decision. Then the read should be resolved under a scope that can actually see the row while the write decision stays with the pre-image gate.\n\nDeliberately not choosing here — the difference is a contract question about what `checkAuthoredRowWrite` means, which belongs to the maintainer, not to the agent that tripped over it.\n\n## Repro\n\nThe measurement was taken with a throwaway variant of the probe added in PR #7274 (a second object identical except `sharingModel: 'private'`, plus a case logging both verdicts and both HTTP statuses). It was deliberately **not** committed — that PR is scoped to the bulk path. The committed harness in `packages/qa/dogfood/test/bulk-widener-probe.dogfood.test.ts` is two dozen lines away from re-taking it."
+}

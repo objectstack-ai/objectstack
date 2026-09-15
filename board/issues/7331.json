@@ -1,0 +1,36 @@
+{
+  "number": 7331,
+  "kind": "issue",
+  "title": "[approvals][qa] Browser-verify the #7213 entry convergence end to end, and refresh the approvals checklist's entry paths",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "approvals",
+    "pm:dispatched",
+    "tests"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-10T06:50:48Z",
+  "updated_at": "2026-08-10T08:12:10Z",
+  "closed_at": "2026-08-10T08:12:10Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7331",
+  "body": "Follow-up to the #7213 epic (closed 2026-08-10, five sub-issues merged: #7231 #7232 #7233 #7234 #7268). Everything there was verified by unit tests, gates and CI. **Nothing in it was ever driven in a browser**, and parts of it are structurally invisible to the tests that shipped. This card closes that gap.\n\nThe blocker is gone: `main` now pins the console at `8aad9fd50b16` (#7308), which carries the `approvals:inbox` registration (objectui#4071), the bell-badge breakdown (objectui#4073), and the retirement of the record page's hard-coded approve/reject path (objectui#3055).\n\n## Why a browser, specifically\n\nThree things the shipped tests deliberately do not cover:\n\n1. **Does the registration survive bundling?** #7231's test imports the registration module directly and stubs the page at its module boundary. Its own docblock states it does **not** assert that `main.tsx` performs the side-effect import — \"the one remaining way the key could be missing at runtime\". Unit tests run source; users run `packages/console/dist`. Only a real load closes this.\n2. **Can a non-admin actually reach it?** That is the premise of the whole epic — business roles have no `setup` access. No test ran a real session through `filterAppForUser`'s nav gating; they asserted metadata shape and URL strings.\n3. **Do the decision actions render under the component mount?** The component-route case used a stub page echoing two router inputs. The real page's data fetching, `DeclaredActionsBar` driven by server-computed `viewer.can_act`, the drawer, node progress — none of that has been exercised on that path.\n\n## Scope\n\nBoot a real example app (`examples/app-showcase` or `app-crm`) against a real backend with seeded approval requests, and drive it. `packages/console/dist` is not built in a fresh checkout — build it first (`pnpm objectui:build`, which clones objectui at the pin).\n\nVerify, as a **non-admin business user** unless noted:\n\n- [ ] The account app's **Approvals** entry appears and opens the full inbox (tabs, list, drawer) — not a component-not-found empty state.\n- [ ] Decision actions (approve / reject / reassign / …) render in the drawer for a request where the user is a pending approver, and at least one decision actually executes and moves the request.\n- [ ] `?request=<id>` deep-links straight into that request's drawer, on both the component route and `/system/approvals` (notification and email links carry the latter — it must still work).\n- [ ] Record deep links from the inbox land on the right business record under the current app.\n- [ ] Home's \"pending approvals\" card navigates within an app the user can open (no `/apps/setup/...`).\n- [ ] The bell popover shows `total · N notifications + M pending approvals`, unclamped, with M matching Home's card. Seed enough to exceed 9 so the clamp case is the one exercised.\n- [ ] zh-CN wording reads 待审批 / 待我审批 consistently across the inbox, the nav entry and any Setup-side view.\n- [ ] As an **admin**: Setup → Approvals lists **Approvals Inbox** above Requests / Action History / Delegations, and it opens the same inbox.\n- [ ] Record page (entry B): the approve/reject buttons come from the server-declared actions (objectui#3055), not the retired hard-coded pair.\n- [ ] **Confirm or refute #7266** — it was filed as routing-level inference and explicitly *not* browser-verified. The bell's and Home's \"see all notifications / activity\" links are the subject; a non-admin session answers it for free while you are here.\n\n## Also in scope: the checklist has drifted\n\n`docs/qa/platform-checklist/areas/approvals.json` drives every case through `/system/approvals` (lines 29, 182, 257 among others). That route deliberately still works, so nothing goes red — but the checklist now exercises the deep-link route rather than the path a real user takes, and the **two new nav entries have no coverage at all**. Refresh the entry paths and add cases for the account-app and Setup entries. Follow `RUNNER.md` and the checklist's own authoring conventions.\n\n## Reporting\n\nFindings get filed per the standing discipline (search first, `finding` label, unassigned). Fix in place only what is small and unambiguously in scope; anything architectural or cross-repo gets an issue, not a patch. A run that finds nothing is a valid outcome — record the run."
+}

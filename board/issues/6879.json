@@ -1,0 +1,32 @@
+{
+  "number": 6879,
+  "kind": "issue",
+  "title": "finding: check-agent-model-declared's header describes model resolution as three steps and omits CLAUDE_CODE_SUBAGENT_MODEL, which outranks all three",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T02:19:22Z",
+  "updated_at": "2026-08-10T01:42:48Z",
+  "closed_at": "2026-08-10T01:42:10Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6879",
+  "body": "Observation-class finding, filed unassigned from the #6863 / PR #6871 work. **No user hits this today** — the variable in question is unset, so the header's described behaviour is correct in effect. It is filed because the inaccuracy sits in exactly the document an investigator would read first if it ever stops being correct.\n\n## What\n\n`scripts/check-agent-model-declared.mjs`'s WHY-THIS-EXISTS header states:\n\n> The Agent tool resolves a subagent's model in three steps: an explicit `model` argument on the dispatch call → the agent definition's frontmatter → **inherit from the parent session**.\n\nThe real resolution has **four** steps. Verified 2026-08-09 against the Claude Code subagent documentation (\"Claude Code resolves the subagent's model in this order\"):\n\n1. the `CLAUDE_CODE_SUBAGENT_MODEL` environment variable, when set\n2. the per-invocation `model` parameter on the Agent call\n3. the agent definition's `model:` frontmatter\n4. the main conversation's model\n\nThe omitted step is the one that **outranks everything the repo controls**.\n\n## Why it is worth a line rather than nothing\n\nThe gate's whole thesis is that a role's tier must be a property of the role, not of whoever dispatched it. `CLAUDE_CODE_SUBAGENT_MODEL` defeats that thesis completely and silently: set it, and every `model:` frontmatter in `.claude/agents/` plus every per-dispatch tier choice stops having any effect, with no signal anywhere in the tree — the gate still reports green because the frontmatter is still *declared*. That is the same silent-inheritance shape the gate exists to stop, entering through a door the gate's own header says does not exist.\n\nThis matters more now that #6863 / PR #6871 has landed per-dispatch model tiering (S-class mechanical cards on sonnet, everything else on opus): the tier is now a live, per-dispatch decision, so an env var that silently overrides all of them is worth being able to find.\n\nChecked at filing time: `CLAUDE_CODE_SUBAGENT_MODEL` is **not set** in the dispatch container, and there is no reference to it anywhere under `.claude/`.\n\nA second, smaller omission in the same paragraph's neighbourhood: a value blocked by the org's `availableModels` allowlist falls back to the **inherited** model, not to the frontmatter pin — so a blocked tier lands in the failure mode the pin was written to prevent, rather than being caught by it.\n\n## Suggested fix (small, comment-only)\n\nCorrect the header to the four-step order and note the allowlist fallback. ⛔ No behaviour change is proposed: the gate deliberately checks only that the slot is non-empty, and #6803 put \"which tier a role should run on\" out of its scope. Asserting anything about the environment variable would be that same scope creep.\n\n## Why not fixed in PR #6871\n\nOut of that card's declared file surface — #6863 scopes to `.claude/skills/pm-dispatch/SKILL.md` + `.claude/agents/os-dev.md`, and `scripts/` is neither. The correct four-step order **is** written into `.claude/agents/os-dev.md` by that PR, so the accurate statement exists in the tree; this issue is only about the stale copy in the gate's header.\n\nDedup: searched open issues for `CLAUDE_CODE_SUBAGENT_MODEL` — zero hits.\n\nNo `pm:queue`: this is dormant documentation drift, not a defect anyone is hitting. Left for the triage seat to grade.\n"
+}

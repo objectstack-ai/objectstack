@@ -1,0 +1,34 @@
+{
+  "number": 7252,
+  "kind": "pull_request",
+  "title": "test(runtime): pin standalone-stack's app-default resolution against the real helper, not a copy of it",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-10T03:58:13Z",
+  "updated_at": "2026-08-10T04:42:25Z",
+  "closed_at": "2026-08-10T04:42:24Z",
+  "closed_by": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "merged_at": "2026-08-10T04:42:24Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/7252",
+  "body": "Fixes #7092\n\n`packages/runtime/src/standalone-stack.test.ts` hand-copied the body of\n`appDefaultPermissionSetName` and asserted against the copy in a case titled\n\"the surfaced config drives appDefaultPermissionSetName → the app profile\n(**the exact CLI wiring**)\". A conformance claim over a duplicate of the rule:\ngreen through any change to the real helper, while `objectstack dev`/`serve`\ndid something else.\n\n## The mirror's stated reason had already expired\n\nThe comment justified the copy as:\n\n> Mirrors `appDefaultPermissionSetName` from @objectstack/plugin-security (not a\n> runtime dependency, so the resolution rule is reproduced here)\n\nMeasured on the merge base, that is false:\n\n- `packages/runtime/package.json` carries `\"@objectstack/plugin-security\": \"workspace:*\"`\n  in **`dependencies`** — not `devDependencies`, a plain runtime edge.\n- Another test in the same package already imports from it:\n  `packages/runtime/src/domains/share-links-enforcement-context.test.ts:55`\n  imports `PermissionDeniedError, SecurityPlugin`.\n- No cycle: `@objectstack/plugin-security` depends only on `core`, `formula`,\n  `platform-objects`, `spec`.\n- No layering/dependency gate exists in the check farm to forbid the edge.\n\nSo the card's option 1 needed no `package.json` change at all — the edge it\nproposed adding is already there. **Zero dependency edges added by this PR.**\n\n## What this PR does\n\nDeletes the mirror and imports the real helpers. The anchor is\n`appSecurityPluginOptions` rather than the bare name helper, because that is\nwhat `serve.ts` calls today (#7001):\n`new SecurityPlugin(appSecurityPluginOptions(config))` — which closes the\n\"one level below what serve.ts actually calls\" staleness the card notes.\n\nThe fixture now **discriminates**: the non-default `app_contributor` set sits\n**first** in the artifact's `permissions[]`, so the resolution cases disagree\nwith \"take `permissions[0]`\" instead of accidentally agreeing with it. And the\nsurfaced-order assertion is no longer `.sort()`ed — declaration order is the\nprecondition the first-`isDefault` rule depends on, and surfacing it faithfully\nis this package's half of that rule. That invariant was previously unpinned.\n\n### Why the assertion stays in `packages/runtime` (not moved to `packages/cli`)\n\nThe card recommended option 2. Measured, the CLI side of the claim is already\npinned and moving would duplicate cost without adding a claim:\n\n- `packages/cli/src/commands/serve-verify-security-parity.contract.test.ts`\n  already pins that `serve.ts` constructs `SecurityPlugin` exactly once via\n  `appSecurityPluginOptions(config)`, and that it agrees with `bootStack`.\n- `packages/plugins/plugin-security/src/app-default-permission-set.test.ts`\n  already pins the rule's substance against the real helper: first-`isDefault`\n  wins, the `undefined` vs `{ fallbackPermissionSet: undefined }` distinction,\n  top-level-only reads, and that the option lands on the plugin's baseline\n  service.\n\nWhat **neither** can see — and what this file uniquely owns — is the\ncomposition: that the config `createStandaloneStack` / `createDefaultHostConfig`\nactually return is a config that resolution reads correctly. Moving it to\n`packages/cli` would mean either re-running the 60s standalone boot there, or\nhand-building a config — i.e. replacing a mirror of the rule with a mirror of\nthe surfacing. Cross-references to all three homes are now in the file's header.\n\n## Reverse verification (predicted direction: red — and it is)\n\nAblated the **real** helper in `plugin-security` (dropped the\n`ps.isDefault === true` discrimination), rebuilt its dist, and ran the case:\n\n```\n× the surfaced config feeds the REAL appSecurityPluginOptions → the app profile\nAssertionError: expected { Object (fallbackPermissionSet) } to deeply equal { Object (fallbackPermissionSet) }\n Tests  1 failed | 17 skipped (18)\n```\n\nThen, **with the same ablation still in place**, restored the pre-fix test file\nfrom `origin/main` and ran its `exact CLI wiring` case:\n\n```\n Test Files  1 passed (1)\n      Tests  1 passed | 17 skipped (18)\n```\n\nThat is the defect, measured rather than argued: the old case is **green** over\na real helper whose resolution has been deleted; the new case is **red**. Both\nfiles and the helper were restored afterwards (via `git checkout`, never\n`git stash`), and the suite re-run green.\n\n## Verification\n\n- `pnpm --filter '@objectstack/runtime^...' build` — build closure first, green.\n- `@objectstack/runtime` full suite: **118 test files, 1837 tests passed**.\n- `pnpm --filter @objectstack/runtime typecheck` — clean.\n- `pnpm check:type-check-debt` (`--self-test && --re-measure`, after\n  `turbo run build`): **OK**, 33 entries re-measured, \"none above its recorded\n  number\". `@objectstack/runtime` measures **225** against a recorded ceiling of\n  227 — unchanged by this PR: reproducing the gate's own sibling-tsconfig\n  measurement on the branch and on `origin/main`'s version of the file gave\n  **225 both ways**, with **0** errors attributable to\n  `src/standalone-stack.test.ts` in either. The ledger is not raised.\n- `node scripts/check-nul-bytes.mjs` — OK; plus a wider self-scan\n  (`grep -naP '[\\x00-\\x08\\x0b\\x0c\\x0e-\\x1f\\x7f]'`) over the touched file, no hits.\n- `npx eslint packages/runtime/src/standalone-stack.test.ts` — clean.\n\n## Scope\n\nOne file changed: `packages/runtime/src/standalone-stack.test.ts`. No\n`package.json` edit, no production code, no changeset — tests-only, nothing\nuser-visible ships. Needs `skip-changeset`.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_0158ZQo7LiHSxGWpYKuPq1wu)_"
+}

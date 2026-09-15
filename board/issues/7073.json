@@ -1,0 +1,34 @@
+{
+  "number": 7073,
+  "kind": "issue",
+  "title": "validateExpression 把方言处方 trailer(「predicates are bare CEL…」)逐字节复用到越界类错误上 —— 教作者改方言,改了必然回退(全部 ~10 个表达式槽位)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-help"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T13:49:54Z",
+  "updated_at": "2026-08-10T03:30:59Z",
+  "closed_at": "2026-08-10T03:30:59Z",
+  "closed_by": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7073",
+  "body": "出自 #6833 的测量派发(会话 `session_01AZgRyPVwi1jLb1mNNuUQ9o`,座位贴 #6018);该单前提被证伪关单,本卡是其测量中幸存的**真缺陷**,由座位按 dev 的 needs_decision 建议转立。**未认领、未定级**(定级归分诊)。\n\n## 缺陷(实测,`origin/main` `2c7e62d5f`)\n\n`packages/formula/src/validate.ts` 的 `validateExpression`,`celEngine.compile` 失败分支:\n\n```ts\nerrors.push({\n  source,\n  message:\n    `invalid CEL ${role}: ${compiled.error.message}` +\n    (hint ? ` — ${hint}` : ` — ${role}s are bare CEL (e.g. \\`record.rating >= 4\\`).`),\n});\n```\n\ntrailer 不区分失败类别。对一条**语法完美、可下推、只是超出平台预算**的 CEL(如 80 项合取,`Exceeded maxAstNodes (256)`),作者收到的完整消息是:\n\n> invalid CEL predicate: Exceeded maxAstNodes (256) — predicates are bare CEL (e.g. `record.rating >= 4`).\n\n前半句(来自 `parseCelToAstWithReason` 的 reason-carrying 消息)是对的;**后半句教作者去检查方言**——他改方言不可能修好,只会回退。对 AI 作者尤其危险:模型会服从最后一句处方。\n\n## 影响面\n\n`validateExpression` 是 ADR-0032 的**共享**验证器,覆盖全部 ~10 个表达式槽位(build / 元数据注册 / `validate_expression` 工具),不只 `sharingRules[].condition`。一处修好,全槽位受益。\n\n## 与既有工作的关系\n\n- **#6778 / PR #6831**(RLS 侧):同一缺陷家族在**消费者门**的实例,已用 `parseCelToAstWithReason` 的 `kind: 'bounds'` 载荷分流出 `rls-predicate-over-budget`。本卡是**生产者侧**的对应物——在消息产地修一次,而不是每个消费者各修一遍。\n- **修法方向(不主张)**:compile 失败后问同一入口 `parseCelToAstWithReason` 是否 `kind: 'bounds'`;是则换用越界处方(点名界与取值,给 shrink/split/denormalise 一类补救——#6831 的 hint 语料可参考,但注意各槽位的组合语义不同,RLS 那句「拆顶层 `&&` 会放大权限」不一定可移植)。生产者自己的 docblock(`cel-engine.ts:282`)已声明 `validateExpression`「同时报语法错与越界错」——本卡只是让那句话在**处方**层面也成立。\n\n## 顺带折入:`cel-pushdown-limits.ts` docblock 的完备性缺口(建议只修文字)\n\n其 docblock 称「Nothing else needs to move at GA. In particular `@objectstack/lint`'s two enforceability gates need no edit … cannot drift from it」。对它点名的两个门成立,但**不完备**:第三个门 `validateStackExpressions` 覆盖同一 `sharingRules[].condition` 字段且 **mode-agnostic**(`validateExpression` 从不读 GA 开关)——宽限窗口内 lint 严于运行时。#6833 的测量判定该分歧**良性且 GA 时自愈**(收紧方向,安全侧),放松 lint 去追运行时反而会制造 #6833 担心的那个缺陷。故建议:**行为不动,只补 docblock 那句「nothing else」的完备性**。\n\n## 查重\n\n`validateExpression` bounds message / `expression-invalid` over-budget / CEL bounds trailer 标题扫描:开放单零命中(#6833 的 dev 与座位各查一遍)。#6778/#6831 已关/已合并,是先例不是重复。\n\n## 出处\n\n#6833 线程载有完整测量表(两个 GA 开关位置 × 五类输入的「谁报什么」对照)。"
+}

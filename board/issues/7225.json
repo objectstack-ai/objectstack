@@ -1,0 +1,32 @@
+{
+  "number": 7225,
+  "kind": "issue",
+  "title": "examples/app-crm + app-showcase: every authored hook reads the record off `ctx.input` instead of `ctx.input.data`, so each one silently does nothing at runtime",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-10T03:07:23Z",
+  "updated_at": "2026-08-10T04:01:42Z",
+  "closed_at": "2026-08-10T04:01:42Z",
+  "closed_by": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7225",
+  "body": "Found while implementing #7036 (`examples/app-todo`'s completion stamp). Filed standalone and unassigned: #7036 repairs only app-todo's own hook, and the same mistake is live in the other two example apps under a different owner.\n\n## The defect\n\n`HookContext.input` is an **envelope**, never the record. The contract table on `HookContextSchema.input` (`packages/spec/src/data/hook.zod.ts`), pinned against the real engine in `packages/objectql/src/hook-input-shape-contract.test.ts`, says:\n\n```\ninsert (one context per row): { data, options }\nupdate (single id):          { id, data, options }\n```\n\nSo the record is at `ctx.input.data`. Assigning to `ctx.input.<field>` sets a key on the envelope that no write path reads — the engine dispatches the driver write from `hookContext.input.data`.\n\nThree shipped hooks do exactly that, and all three are registered (`hooks: allHooks`), so they run and have no effect:\n\n1. `examples/app-crm/src/hooks/opportunity.hook.ts` — `OpportunityStageHook`, events `beforeInsert` + `beforeUpdate`:\n   ```ts\n   const input = ctx.input as { stage?: string; probability?: number };\n   if (input.stage === 'closed_won') input.probability = 100;\n   ```\n   `input.stage` is `undefined` on every call, so probability is never pinned.\n\n2. `examples/app-showcase/src/data/hooks/index.ts` — `StampInquiryDefaultsHook`, `beforeInsert` on `showcase_inquiry`:\n   ```js\n   if (!ctx.input.status) ctx.input.status = 'new'; if (!ctx.input.source) ctx.input.source = 'web';\n   ```\n   The web-to-lead defaults are never stamped.\n\n3. Same file — `NormalizeTaskTitleHook`: `if (ctx.input.title) ctx.input.title = ctx.input.title.trim();` — never trims.\n\n## Script bodies get the same envelope — no flattening anywhere\n\nWorth stating because 2 and 3 are sandboxed `body` hooks rather than code handlers, so one might expect the runner to hand them the record. It does not. `buildSandboxContext` (`packages/runtime/src/sandbox/body-runner.ts`) sets `input: unwrapProxyToPlain(engineCtx?.input) ?? {}` — a snapshot of the envelope, unchanged. Its own comment is explicit that `input` is \"the engine's own spelling, and the only one\", and #5906 removed the alias limbs precisely so there would not be a second de-facto contract.\n\nThe `after*` hooks in that file (`AuditTaskCompletionHook`, `WarnOverBudgetHook`) read `ctx.result || ctx.input` and are not obviously affected — `ctx.result` is bound on after events. They are worth a look but are not the claim here.\n\n## Why it matters more than the three behaviours\n\nThese are reference-corpus apps. An AI author asked to write a hook copies the shape it sees, and every shape it can see in this repo's examples is the broken one. #7036 is the same mistake in app-todo, where it had been invisible because that hook was never registered at all.\n\n## Not verified\n\nI did not run either app — the reading is from the contract table, the engine's dispatch site, and `buildSandboxContext`. A one-line probe per app (assert the persisted row) would confirm before fixing.\n"
+}

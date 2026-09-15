@@ -1,0 +1,33 @@
+{
+  "number": 6975,
+  "kind": "issue",
+  "title": "objectui: no gate diffs the action renderers' forward whitelists against the keys the runtime actually reads — every new spec action key is silently dropped until five lists are edited",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "needs-user-decision",
+    "repo:objectui"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T07:03:40Z",
+  "updated_at": "2026-08-10T02:12:58Z",
+  "closed_at": "2026-08-10T02:12:58Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6975",
+  "body": "Carried out of objectstack#6938 (`bodyShape`), whose body proposed this and whose triage marked it a **non-binding** candidate for the implementing dev. Filed standalone so the suggestion survives #6938 closing, and deliberately **not** implemented in objectui PR objectstack-ai/objectui#3932 — the reasons are the substance of this card.\n\n## The recurring shape\n\nEvery action renderer forwards an **explicit whitelist** of keys to the `ActionRunner`. That is a deliberate design, not an oversight: a key no renderer honours must not look wired. Its cost is that a NEW spec key stays invisible until five separate lists are edited, and **nothing fails while they are not** — the key parses, publishes, and reads as honoured.\n\nConfirmed instances, same face each time:\n\n- `bodyExtra` — objectstack#6837, objectui PR #3924. Payload dropped one hop before the runner.\n- `bodyShape` — objectstack#6938, objectui PR #3932. Declared `{ wrap: 'data' }` sent a flat body.\n- `openIn`, `resultDialog`, `undoable`, `locations` — each carries an in-comment note at its forward site recording its own instance.\n\nFour of the six were found by a human reading the lists side by side. There is no gate.\n\n## Why PR #3932 did not land the proposed pin\n\nThe proposal — diff the renderers' forwarded key sets against the spec keys the runtime actually reads — needs two inputs, and only one of them is mechanically derivable.\n\n**Derivable:** the forwarded key sets. AST-read the object literal each renderer passes to `execute(...)`. `packages/core/src/actions/__tests__/actionKeys.pin.test.ts` already does this class of walk (it reads `ActionDef`'s members off the interface with the `typescript` compiler API), so the technique is established in-repo.\n\n**Not derivable:** \"the keys the runtime reads\". The read sites span `packages/core` (`ActionRunner`) and `packages/app-shell` (`useConsoleActionRuntime.apiHandler`, `RecordDetailView.apiHandler`), and a `git grep 'action\\.'` over them returns a large set of `action.name` / `action.objectName` / `action.api` / `action.method` hits with no way to separate \"body-path key a renderer must forward\" from \"mechanic the runner resolves itself\". Grepping produces a false-positive list, not a contract.\n\n**And the omissions are load-bearing, not noise.** `recordIdParam` is forwarded by none of the five and that is **correct** — #6938 checked it: the `apiHandler` reads it only under `if (rowRecord && action.recordIdParam)`, and `rowRecord` arrives only from the spread-based hosts (`DeclaredActionsBar` / `RelatedRecordActionsBridge` / `ObjectGrid`), which carry `recordIdParam` too. It is unreachable on the declared renderers, not broken. `element:button`'s omission of `bodyShape` is likewise correct and deliberate: its list mirrors spec's `InlineActionSchema` pick list, which does not include the key.\n\nSo a mechanical diff needs a hand-maintained justified-omission registry beside it — which is itself the drift-prone list this whole thread is about, one level up. That is a design decision about where the contract for \"which keys each renderer surface owes the runtime\" should live, not a test to bolt on, and it wants a maintainer's call rather than a dev's guess mid-fix.\n\n## Directions worth weighing (not a recommendation to implement as-is)\n\n- **A — declare the surface, generate the lists.** Put the per-surface key set in one declared table (`declared-action` surfaces vs `inline` surfaces, mirroring `ActionSchema` / `InlineActionSchema`), have the renderers forward off it, and let the pin re-derive both halves. Removes the five hand-maintained lists entirely rather than testing them. Highest cost, and the only option that makes the failure structurally impossible instead of merely loud.\n- **B — pin cross-renderer agreement only.** AST-read the four declared renderers' lists and assert they agree on their shared subset. No omission registry needed (the renderers are compared against each other), and it catches the real recurrence mode of \"added to one list, forgotten in three\". Does not catch a key missing from all four — which is exactly how `bodyExtra` and `bodyShape` presented.\n- **C — spec-side.** Have the spec's `ActionSchema` mark which keys are renderer-forwardable and publish that as data the pin consumes. Puts the contract at the producer, where #0.1 says it belongs; needs a spec change and cross-repo sequencing.\n\nB is cheap and partial; A and C address the actual failure but are contract-shaping. #6938's PR deliberately made no guess between them.\n\n## Grade\n\nObservation-class: nothing a user hits today that is not already tracked by the per-key cards. This is preventive infrastructure for the **next** key — `finding`, no `pm:queue`, unassigned for triage.\n"
+}

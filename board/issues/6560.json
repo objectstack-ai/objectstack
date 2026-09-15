@@ -1,0 +1,35 @@
+{
+  "number": 6560,
+  "kind": "issue",
+  "title": "决策:自增号「计数器反解」规则是否作为 renderAutonumber 的逆进 packages/spec(PR #6553 的 open question,维护者裁)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T04:44:33Z",
+  "updated_at": "2026-08-10T05:44:00Z",
+  "closed_at": "2026-08-10T05:44:00Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6560",
+  "body": "来自 PR #6553(#6468,已验收落地)dev 报告的 open question,由 engine-core 席落成决策卡免得随合并蒸发。**实施侧无人受阻 —— 这是可选的结构加固,不是缺陷。**\n\n## 问题\n\n`{prefix}{零填充序号}{suffix}` 的**组合**规则由 `packages/spec/src/data/autonumber-format.ts` 的 `renderAutonumber` 单点持有(文件头自陈:shared by the ObjectQL engine and the SQL driver so both paths render identical record numbers)。PR #6553 修复播种解析后,**反解**(从存量值读回计数器)的定位参数同样取自 `renderAutonumber`,但「应用这对字符串」的 ~4 行在 engine 与 driver-sql 两侧各有一份,靠 `packages/runtime` 的跨侧一致性测试钉住不漂。\n\n## 两案(dev 报告原文要点)\n\n- **A —— 维持现状**:两侧各 ~4 行应用逻辑 + runtime 跨侧 parity 测试守护。对本缺陷已完整;弱点是未来单侧改动不被强制跑第三包的守护测试。\n- **B —— spec 增加一个纯函数导出**(如 `readAutonumberCounter(value, prefix, suffix)`),两侧共同调用。非 authorable 面、无 Zod、无新词汇;理由:本缺陷的实测成因正是「同一组合规则的两份手写读法给出两个不同错误答案」,而 core 在 spec 之上、不存在两侧共同可依赖的更低包 —— spec 是唯一落点。dev 推荐 B 但按「本单 spec 只读」的分诊红线未擅动。\n\n## 为什么挂 needs-user-decision\n\nspec 是发布契约面,增导出属维护者权限(哪怕是纯函数);且分诊在 #6468 明文记录 \"no spec change is implied by the default route\",单方面扩面即程序越界。批 B 则为普通小改动单(spec 席或 engine-core 席执行皆可);批 A 则关卡即可。\n\nRefs:PR #6553(convergence_design 与 open_questions 节)、#6468(缺陷与分诊裁定)、#6555(同区域 render 默认值分叉,另单在分诊)。"
+}

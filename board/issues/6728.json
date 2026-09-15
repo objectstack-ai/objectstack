@@ -1,0 +1,36 @@
+{
+  "number": 6728,
+  "kind": "issue",
+  "title": "`os login --json` in a non-TTY shell writes the bare prompt `Email: ` to stdout, then exits 13 with no payload",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T13:44:22Z",
+  "updated_at": "2026-08-10T01:44:22Z",
+  "closed_at": "2026-08-10T01:44:22Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6728",
+  "body": "Found while implementing #6531 (`os login --json` → NDJSON). **Unclaimed, unassigned.** Different path, different decision, same stdout-purity harm class — filed separately rather than widened into PR #6727.\n\n## Observation\n\n#6531 covers the **device flow** (`stdin.isTTY` true). The path *below* it is broken in a different way. `packages/cli/src/commands/login.ts`, the non-TTY fallback:\n\n```ts\n// --- Non-TTY fallback: prompt for email/password ---\nconst rl = readline.createInterface({ input, output });   // output === process.stdout\nif (!email) email = await rl.question('Email: ');\nrl.close();\nif (!password) password = await promptPassword('Password: ');\n```\n\n`readline` writes the prompt to the `output` stream, which is `process.stdout` — **unconditionally, including under `--json`**. `promptPassword` does the same (`process.stdout.write(promptText)` on its own non-TTY branch).\n\n## Measured (unmodified `origin/main` @ `b230e5efd`)\n\n```\n$ HOME=<tmp> os login --json --url http://127.0.0.1:1 < /dev/null > out.txt 2> err.txt\nexit=13\n$ cat -A out.txt\nEmail: $            # ← no trailing newline; this is the ENTIRE stdout\n```\n\nSo the whole of stdout under a declared machine-readable flag is the string `Email: `. Not a JSON document, not NDJSON, no payload at all. stderr carries only `Warning: Detected unsettled top-level await`.\n\nThe exit code is the second half: `readline` gets EOF from the closed stdin, the question promise never settles, and Node tears the process down through the unsettled-top-level-await path — **exit 13**, which is neither the CLI's `0` nor its `1` (`CliExitCode` in `utils/format.ts` deliberately admits only those two). A CI step judging success by exit status sees a code the CLI does not define.\n\n## Why it matters\n\nThis is the path a **CI runner actually takes**: no TTY, and `--email`/`--password` not passed (forgotten, or the secret failed to interpolate). The audience `--json` exists for gets `Email: ` on stdout and exit 13, with nothing naming the real problem (\"email and password are required in a non-interactive shell\").\n\n## Why it is not part of #6531 / PR #6727\n\nPR #6727 makes `os login --json` a declared NDJSON stream and routes every `--json` write through one compact emitter, so the *payload* side of this command is now uniform. It deliberately does **not** touch this path, because the fix turns on a contract question that PR cannot answer on its own:\n\n**Should `os login --json` interactively prompt at all?** Plausible shapes, undecided:\n\n1. **Refuse.** Under `--json` with no `--email`/`--password` and no TTY, emit `{\"success\":false,\"error\":\"…\"}` with exit 1 and never prompt. Treats `--json` as \"non-interactive by definition\".\n2. **Prompt on stderr.** Keep the prompt, move it off stdout. Preserves today's behaviour for a human piping stdout to a file, but puts a non-diagnostic on the diagnostic stream (the objection that sank route 3 in #6531).\n3. **Reserve stdout.** Apply #6217's `reserveStdoutForJson()` seam here, which forwards the prompt to stderr as a side effect. Same end state as 2, reached structurally.\n\nOption 1 also fixes the exit-13 half; 2 and 3 leave it. Recommendation is not mine to make — this is a `--json` contract decision like #6531's was.\n\nSeparately and regardless of the shape chosen, the unsettled-await exit 13 is a defect on its own: an EOF on stdin should produce a defined `CliExitCode`, not a Node teardown artifact.\n\nRefs #6531, #6217, PR #6727."
+}

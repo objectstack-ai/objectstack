@@ -1,0 +1,32 @@
+{
+  "number": 7215,
+  "kind": "issue",
+  "title": "[decision] Should `flow-trigger-unroutable` widen to the absent-`triggerType` (omission) shape — #7041 item 2, decide together with #6041",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-10T03:02:52Z",
+  "updated_at": "2026-08-10T05:43:19Z",
+  "closed_at": "2026-08-10T05:43:09Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7215",
+  "body": "Carrier card for the undecided half of #7041, filed because that card auto-closed when PR #7172 landed its item 1 (the stale provenance comment) — leaving item 2 with no open, queryable tracker. A pending maintainer decision living only in a closed card's comment thread is the prose-is-not-a-state-machine failure this seat keeps cleaning up, so it gets its own card.\n\n## The question\n\n`flow-trigger-unroutable` (#6637) currently fires only on the **contradiction** shape: `config.triggerType` is *present* and routes nowhere. Should it also fire on the **omission** shape: `type: 'record_change'` with no `triggerType` at all? Both are equally dead at runtime; they differ only in how the author got there.\n\n## Why it is decidable now (what changed since #6637 deferred it)\n\n- The measured objection at #6637 time: the rule would have gated a shipped example app (`examples/app-todo`'s `TaskCompletionFlow`, a live omission instance) on a guess about that app's intended semantics.\n- **#7039 made, implemented, and pinned that guess** — `TaskCompletionFlow` now declares `triggerType: 'record-after-update'`. There is no live omission instance in the tree (verified in #7041's filing and re-pinned by PR #7172's durable comment).\n- So the wider rule would ship **green on the whole tree**: no baseline entry, no example-app churn, no new vocabulary, no new configuration surface (it reads a key the engine already reads).\n\n## Why it still needs a decision rather than a default\n\nIt is a rule with **zero current hits**. Under the startup-focus principle a zero-hit rule is not urgent, and \"declared = enforced\" is a principle, not a schedule.\n\n## ⛔ The pairing constraint (why this is not the devx seat's call)\n\n**#6041 is the structurally identical question about a different key** — whether `app.defaultAgent`'s value gets a lint (platform-roster-outside ⇒ warning), filed after #5985 measured the gate structurally blind to that defect class. It sits in this same decision box. Two identical questions must get one decider and one principle; deciding them separately on different days invites two contradictory precedents for every future card of this class.\n\n## The three dispositions (all defensible)\n\n1. **Take both now** — ship the wider criterion while the tree is green for it, and the `app.defaultAgent` warning under the same principle. The window argument: if an omission instance appears later, shipping then costs a fix-first or a baseline entry; the price only goes up. (The seat's lean, previously stated.)\n2. **Defer both with restart conditions written on the cards** — e.g. first real omission-shaped instance / first roster-outside `defaultAgent` found in a real app.\n3. **Decline both** on the zero-hit reading.\n\nMechanical note for whichever way it goes: the scope-boundary pin in `validate-flow-trigger-readiness.test.ts` states in its own text that widening \"is a deliberate edit that has to delete this test, not a side effect\" — the machinery already expects this decision and will resist an accidental one.\n\nRefs: #7041 (item 2's origin, closed), #6637 (the rule and the original deferral), #7039 (the repair that opened the window), #6041 (the sibling decision), #5985, PR #7172."
+}

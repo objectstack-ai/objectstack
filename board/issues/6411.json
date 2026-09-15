@@ -1,0 +1,33 @@
+{
+  "number": 6411,
+  "kind": "issue",
+  "title": "Studio Part A quick wins: wire the already-registered `action` and `dataset` previews into the Interfaces pillar rail (#2657 ruling)",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "pm:queue",
+    "repo:objectui"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T17:03:02Z",
+  "updated_at": "2026-08-10T02:06:59Z",
+  "closed_at": "2026-08-10T02:06:59Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6411",
+  "body": "Follow-up filed from the 2026-08-07 maintainer ruling on #2657 (decision batch accepted via the PM session). Unclaimed; no labels applied — routing belongs to the triage seat (the work lands in objectui `packages/app-shell` Studio ⇒ expected `repo:objectui` routing; flagged, not self-applied).\n\n## Ruling context\n\n#2657 Part A (surfacing already-registered metadata types in Studio, per the pillar placement plan in its body) was **approved**; Part B (promoting un-typed concepts) stays blocked on #6234 / #6245 and is not this card.\n\n## Scope — the two quick wins only\n\n`action` and `dataset` are registered types with Zod schemas whose previews are **already registered** in `metadata-admin/previews`; per the #2657 audit, only the Interfaces-pillar rail load is missing. Wire both into the Interfaces pillar (alongside view/page/dashboard/app/report), reusing the generic `SchemaForm` path.\n\nExplicitly out of scope: the other Part A placements (job / role / seed / mapping / datasource, new AI pillar, new System pillar) — those are follow-on cards once this pattern lands; and everything in Part B.\n\n## Acceptance\n\n- Studio's Interfaces pillar lists and opens `action` and `dataset` items with the standard editor surface; no framework/spec change required (per the audit, spec is already complete for both).\n- Verify against current objectui main first — the audit is from July; re-check the rail/preview registration state before implementing (stale-premise discipline).\n\nRefs: #2657 (ruling comment 2026-08-07), objectui `packages/app-shell` `metadata-admin/previews`."
+}

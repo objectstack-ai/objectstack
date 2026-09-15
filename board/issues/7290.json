@@ -1,0 +1,34 @@
+{
+  "number": 7290,
+  "kind": "issue",
+  "title": "plugin-audit: `activityMilestones` summary templates still interpolate raw lookup ids — `{owner_id}` renders `oBK25…` after #7230",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-10T05:06:52Z",
+  "updated_at": "2026-08-10T08:27:52Z",
+  "closed_at": "2026-08-10T08:27:52Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7290",
+  "body": "Found while implementing #7230 (`packages/plugins/plugin-audit/src/audit-writers.ts`). Filed rather than fixed — the fix has a hot-path cost that #7230's shape deliberately avoids, so it needs its own decision.\n\n## Mechanism\n\n`matchMilestone` (ADR-0052 §5b.2) interpolates `{token}` in an author-written milestone summary from the after-row:\n\n```ts\nconst summary = m.summary.replace(/\\{(\\w+)\\}/g, (_match, key) => {\n  const v = after[key];\n  if (v === null || v === undefined || v === '') return '';\n  const field = fields ? fields[key] : undefined;\n  return field ? displayFieldValue(field, v) : String(v);\n});\n```\n\n`displayFieldValue` is called with **no title map**, so a `lookup` / `master_detail` / `user` token falls through to `String(value)` — the raw id. A milestone declared as\n\n```ts\nactivityMilestones: [{ field: 'stage', value: 'closed_won', summary: 'Deal won by {owner}' }]\n```\n\nrenders `Deal won by oBK25…`.\n\nThe milestone branch takes **precedence** over the tracked-change branch #7230 fixed, so on objects that declare milestones this is the string users actually see.\n\n## Why #7230 did not fix it\n\n#7230 resolves reference titles from a read plan built off the **diff**, and only after `matchMilestone` has declined — so a write that moves no tracked reference field issues no read at all. That gate is what keeps #6656 / PR #6977's retirement of the redundant pre-image read (2 → 1 per single-id write, 3 → 0 per predicate write) from being handed back.\n\nResolving milestone tokens cannot reuse that gate. The tokens are read from the whole after-row, and whether a milestone fires is only known *after* `matchMilestone` runs, so the read would have to happen either:\n\n- **before** `matchMilestone`, on every update of a milestone-declaring object — including the majority where no milestone fires and the read is wasted; or\n- **after** it fires, keyed on the tokens that actually appear in the matched template — one read per distinct target object, paid only on the transition. Cheaper, and the transition is by construction rare (`before !== value && after === value`), but it needs `matchMilestone` to become async.\n\nThe second looks right, and is the one worth costing out. Either way the trade belongs to the maintainer, not to #7230's implementer.\n\nAnchors at `a768f81a1` (pre-#7230): `matchMilestone` `audit-writers.ts:355`, the interpolation `:368-375`, its call site `:872`.\n\nRefs: #7230, #6656 / PR #6977, ADR-0052 §5b.2."
+}
