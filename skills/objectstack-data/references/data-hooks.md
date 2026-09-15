@@ -44,9 +44,10 @@ ObjectStack provides **8 lifecycle events** organized by operation type:
 > bulk write hands hooks **no** row-scoping predicate: it lives on the engine-internal
 > `OperationContext.ast`, so the RLS / sharing filters composed onto it bind
 > the driver call itself, where no handler can widen them — scope a batch through
-> `options.where` at the caller. The `after*` events instead dispatch **once per
-> matched row**, each on a single-record-shaped context whose `input.id` names that
-> row. And there is no `beforeCount`/`beforeAggregate`: read authorization and
+> `options.where` at the caller. Both phases dispatch **once per matched row**,
+> each on a single-record-shaped context whose `input.id` names that row and
+> whose `previous` is that row's pre-image (ADR-0058 Addendum II). And there is
+> no `beforeCount`/`beforeAggregate`: read authorization and
 > row filtering belong to **RLS / permission rules**, and field masking to
 > **field-level metadata** — declarative mechanisms that apply everywhere, rather than
 > a hook every author must remember to re-attach.
@@ -238,14 +239,20 @@ in neither). So:
   pre-write row, made total over the same declared fields, and it is the same
   binding a validation predicate reads.
 - **`previous` is UNBOUND where there is no prior state**, and a reference to an
-  unbound root makes the whole condition unevaluable. Two cases: insert events
-  (`beforeInsert` / `afterInsert`) — write those over `record` alone — and the
-  **`before*` dispatch of a predicate (`multi: true`) write**, which fires **once
-  for the whole batch**: a `before*` hook may still rewrite the shared payload and
-  one batch carries one payload, so there is no single prior record to bind.
-  (`record` is that bare payload there too, so a *declared* field this write does
-  not set is unevaluable as well.) Reading `previous` on that dispatch is rejected
-  **by name**, and the rejection points you at the after-type event.
+  unbound root makes the whole condition unevaluable. One case: insert events
+  (`beforeInsert` / `afterInsert`) — write those over `record` alone. The
+  `before*` dispatch of a predicate (`multi: true`) write is **not** a second
+  case: `beforeUpdate` / `beforeDelete` dispatch once per matched row, each on a
+  single-record-shaped context whose `previous` is that row's pre-image and whose
+  `input.id` names the row (ADR-0058 Addendum II, D1/D2), so a transition
+  condition evaluates there exactly as on a single-record write, and `record` is
+  that row's state, stored ⊕ payload. Only the *payload* stays batch-scoped (D3):
+  every row's dispatch carries the one payload, so a rewrite made on any row
+  applies to every matched row, and a rewrite *decided* per row must assign the
+  same key set on every row, in place (`ctx.input.x = …`, never a replaced
+  object) — the engine refuses the batch whole, before any write, when two rows'
+  key sets differ (`MULTI_UPDATE_HOOK_KEY_DIVERGENCE`, status 400; ADR-0058
+  Amendment II.3).
 - **`after*` hooks fire PER ROW, so a bulk write needs no special
   condition.** A predicate (`multi: true`) update/delete dispatches its `after*`
   hooks **once per matched row**, each on a single-record-shaped context —
@@ -272,10 +279,9 @@ platform could not work out what the condition says" are now different outcomes
 and the second one is loud.
 
 Practical consequence when authoring: spell keys against the object's **declared**
-fields, and put a condition that reads `previous` on an **after-type** event —
-never on an insert event, and never on a `before*` hook that can fire on a
-`multi: true` write. That mistake used to cost you a hook that quietly never ran,
-and now costs you every write the hook is attached to.
+fields, and put a condition that reads `previous` on an update or delete event —
+either phase — never on an insert event. That mistake used to cost you a hook
+that quietly never ran, and now costs you every write the hook is attached to.
 
 #### `onError` — Error Handling
 

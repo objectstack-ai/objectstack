@@ -305,7 +305,7 @@ roots — one scope, one meaning, whichever surface reads it.
 | Insert events (`beforeInsert` / `afterInsert`), validation rule on insert | **unbound** — there is no prior state |
 | **`after*` hook `condition` / record-change flow trigger on a predicate (`multi: true`) write** | **that row's pre-write row** — a bulk write fires after-hooks once PER MATCHED ROW |
 | Validation rule on a predicate bulk update | that row's pre-write row — per row |
-| `before*` hook `condition` on a predicate (`multi: true`) write | **unbound** — a `before*` hook fires ONCE for the whole batch (it may still rewrite the shared payload), so there is no single prior record. `record` is the bare payload here too, so a *declared* field this write does not set is unevaluable as well |
+| `before*` hook `condition` on a predicate (`multi: true`) write | **that row's pre-write row** — `beforeUpdate` / `beforeDelete` dispatch once PER MATCHED ROW too, each on a single-record-shaped context whose `input.id` names the row (ADR-0058 Addendum II, D1/D2); `record` is that row's state, stored ⊕ payload, as on any update. Only the *payload* stays batch-scoped — see below the table |
 
 ⚠️ **An unevaluable condition ABORTS the operation.** Referencing
 `previous` where it is unbound — like a typo'd key (`record.stauts`), a retired
@@ -317,8 +317,8 @@ runs). A condition that does not even **compile** aborts the same way. So write
 insert-event conditions over `record` alone.
 
 **A transition condition needs no special handling for bulk writes.**
-Write it once, on an `after*` event, and it means the same thing whether the
-write carries an id or a predicate:
+Write it once, on a `before*` or an `after*` event, and it means the same thing
+whether the write carries an id or a predicate:
 
 ```ts
 // Fires once per row that ACTUALLY transitioned — on `update(id)` and on
@@ -329,14 +329,21 @@ P`previous.status != 'done' && record.status == 'done'`
 A predicate (`multi: true`) write is N record changes, so every record-scoped
 declaration on it is evaluated **per row** — `previous` is that row's own
 pre-write state, `record` its real state, not the bare payload (ADR-0058,
-bulk-write addendum). Record-change flow triggers ride the same dispatch. The
-one exception is the `before*` row of the table above, and it is not a bug to be
-fixed later: put transition conditions on `after*`, and keep `before*`
-conditions to the incoming payload (`record.<field this write sets>`).
+bulk-write Addenda I and II). Record-change flow triggers ride the same
+dispatch. `before*` is no exception to the *condition*; the asymmetry is what a
+`before*` handler WRITES: one `updateMany` takes one SET clause, so every row's
+dispatch carries the one payload and a rewrite made on any row applies to every
+matched row (D3). A rewrite *decided* per row must assign the same key set on
+every row, in place — assigned onto the payload object, never a replaced one —
+because the engine records the keys each row's chain wrote and refuses the
+batch whole, before any write, when two rows disagree
+(`MULTI_UPDATE_HOOK_KEY_DIVERGENCE`, status 400; ADR-0058 Amendment II.3).
 
-Above ~10 000 matched rows the platform refuses a predicate write on an object
-with after-hooks rather than fan out that many handler runs inside one write —
-paginate the write. It is a refusal, never a silent downgrade to one hook call.
+Above 10 000 matched rows the platform refuses a predicate write on an object
+with per-row hooks in either phase — one ceiling for `before*` and `after*`,
+checked before the first dispatch (ADR-0058 Addendum II, D6) — rather than fan
+out that many handler runs inside one write; paginate the write. It is a
+refusal, never a silent downgrade to one hook call.
 
 ---
 
@@ -364,10 +371,10 @@ When migrating Salesforce-flavor metadata, apply these rules in order:
 | `MONTH_DIFF`, `MID`, `LEFT`, `RIGHT`, `SUBSTITUTE` | _not in stdlib — propose addition_ |
 
 > ⚠️ `OLD.x` and `ISCHANGED(x)` both land on `previous.x`, which exists only
-> where `previous` is **bound** — see §5. On an insert event, or in a `before*`
-> hook condition on a `multi: true` predicate write, it is not; that
-> does not quietly skip the hook, it **fails the write**. On `after*` events it
-> IS bound, per matched row, on bulk and single-record writes alike.
+> where `previous` is **bound** — see §5. On an insert event it is not; that
+> does not quietly skip the hook, it **fails the write**. On update and delete
+> events it IS bound, per matched row, in `before*` and `after*` alike, on bulk
+> and single-record writes.
 
 > ⚠️ **Flow conditions are the exception to row 1.** The automation engine
 > spreads the record's variables to top level, so a bare `status` resolves in a
