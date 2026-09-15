@@ -103,8 +103,10 @@
  * CONTENT. A second declaration of that surface here would be a hand copy of a
  * register — the exact drift `check:pm-governed-prose` exists to stop one
  * family over. C1–C4 are all derivable from the declaration and the two
- * carriers alone, and none of them costs a changed-file listing. C7 costs none
- * either: it reads a line out of a comment the C6 pass already fetched.
+ * carriers alone, and none of them costs a changed-file listing. C7 reads a
+ * line out of a comment: free beside a gate clear, where the C6 pass already
+ * fetched the thread, and ONE read per pair on the `--pair` path since #18174,
+ * where the record is judged on every pair that has one.
  *
  * ⭐ C5 (#16448) is the one row that reads a DIFF, and it is still not limb ①.
  * Limb ① asks "does this card's file surface suggest the contract tier?" and
@@ -187,9 +189,10 @@
  * recognition shared with C6 (#17346, `isVerdictComment`). C6 (#17302) reads
  * that a review of record EXISTS on the
  * current head — H51's heading and head-sha facts, plus a `Reviewed-by:` line —
- * on a pair whose gate was already cleared. C7 (#17915) reads the third
+ * on a pair whose gate was already cleared. C7 (#17915, widened by #18174)
+ * reads the third
  * provenance line, `Served-tier:` — WHAT served the round that produced the
- * verdict, which the reviewing seat reads out of its own transcript's
+ * verdict, on EVERY pair that carries a record rather than only beside a clear, which the reviewing seat reads out of its own transcript's
  * harness-stamped `model` field, ⛔ never off the dispatch `model` parameter,
  * which is configuration and not a reading — and refuses a clearance whose
  * token is not EXACTLY the NAME `CONTRACT_REVIEW_TIER`, the identifier-free
@@ -463,8 +466,10 @@
  *                         — the SAME bag, keyed by the PR NUMBER, carries the
  *                         PR's own thread (a PR is an issue at that endpoint),
  *                         owed by a pair in the COMPLETED state for C6
- *                         (#17302); omitting it there reads `null` → the pair
- *                         is UNJUDGED, never a missing record.
+ *                         (#17302) and — on the `--pair` path — by EVERY pair,
+ *                         whose record C7 judges (#18174); omitting it there
+ *                         reads `null` → the pair is UNJUDGED, never a missing
+ *                         record.
  *             "events":   { "13476": the `/issues/N/events` rows }  — optional
  *             "commits":  { "HEAD-SHA": { commit: { committer: { date } } } }
  *                         — optional
@@ -492,21 +497,26 @@
  * carriers' event streams (one page each on this board) and — only once both
  * read cleared — one commit: ≤5 reads for a candidate pair, 2 for every other.
  * A pair whose card declares `Clause-②: no` adds ONE more — its changed-file
- * listing, for C5 (#16448) — and a pair in the COMPLETED state adds one more,
- * in BOTH modes: its PR's own comment thread, for C6 (#17302), cached per PR so
- * a two-card PR pays once. The sweep pays the listing once and the same
- * per-pair cost for every pair it derives. ⇒ a `--pair` run costs 3–8 requests,
+ * listing, for C5 (#16448). Its PR's own comment thread is one read too, cached
+ * per PR so a two-card PR pays once, and it is owed by two different
+ * populations: in BOTH modes by a pair in the COMPLETED state, for C6 (#17302),
+ * and on the `--pair` path by EVERY pair, because C7 judges the record wherever
+ * one exists (#18174). The sweep pays the listing once and the same
+ * per-pair cost for every pair it derives. ⇒ a `--pair` run costs 4–9 requests,
  * while a 29-PR sweep costs about 60 — which is exactly GitHub's documented
  * anonymous hourly budget, one more reason the run prints the remaining count
  * instead of assuming it.
  *
- * ⭐ That last read is `--pair` ONLY, and the asymmetry is deliberate. Paying it
- * per sweep pair would push a routine sweep past the anonymous budget it
- * already sits on, and a widening tell on somebody else's pair is a board fact
+ * ⭐ Those two reads are `--pair` ONLY, and the asymmetry is deliberate. Paying
+ * either per sweep pair would push a routine sweep past the anonymous budget it
+ * already sits on, and an adverse fact on somebody else's pair is a board fact
  * rather than a verdict about the PR that happens to run CI next — the same
  * call the sweep/`--pair` split already makes for every other row here. In a
- * sweep `pair.files` is therefore `undefined`, which no row reads; `null` means
- * a read that WAS owed came back short, and that is UNJUDGED.
+ * sweep `pair.files` is therefore `undefined`, which no row reads, and a
+ * non-gated pair's `prComments` is undefined too, which the locator reports as
+ * a gap nobody asked it for — so the `--pair` path alone asks
+ * (`locatedRecordUnjudged`). `null` means a read that WAS owed came back short,
+ * and that is UNJUDGED.
  *
  * ## Exit codes — the refusal to read as clean, in one table
  *
@@ -552,14 +562,18 @@
  *      rendering an ADVERSE verdict as 0, and this reading is not one.
  *   2  also the answer when a C3 candidate's event stream or head commit could
  *      not be read, when a `Clause-②: no` pair's changed-file listing could
- *      not be, or when a COMPLETED pair's PR thread could not be (C6): an unread
+ *      not be, or when a PR thread could not be — a COMPLETED pair's, which C6
+ *      owes (#17302), or, on the `--pair` path, ANY pair's, whose record C7
+ *      judges (#18174): an unread
  *      stream is not a never-hung gate, an unread diff is not a narrow one and
  *      an unread thread is not a missing record, so all are UNJUDGED rather
  *      than either verdict.
  *   4  they do not — or, since #16448, the declaration reads `no` while the
  *      diff carries a widening tell (row C5) — or, since #17302, the gate was
  *      cleared on both carriers and no review of record names the head (row
- *      C6). One exit code with several
+ *      C6) — or, since #17915 and on every pair carrying a record since #18174,
+ *      the record's `Served-tier:` line does not read at the declared tier (row
+ *      C7). One exit code with several
  *      adverse reasons is the shape this table already had: the ROW says which,
  *      and the exit says only "a verdict about this pair, adverse".
  *      Deliberately NOT 3: a verdict about the PAIR must be
@@ -690,7 +704,8 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the three read paths: ordered, offline-capable, and named in every refusal': 24,
   'C5: the direction claim checked against the diff (#16448)': 16,
   'C6: the review of record on this head, and the carrier the rule text names (#17302)': 40,
-  'C7: the tier that SERVED the verdict the strip stands on (#17915)': 42,
+  'C7: the tier that SERVED the verdict the strip stands on (#17915)': 43,
+  '#18174: the `Served-tier:` reading on EVERY pair that has a record, never only beside a gate clear': 28,
   'the exit register is distinct in every direction it must be': 6,
   'the argv contract and the board provenance (#16623)': 42,
   '#17366: the correction comment — the self-solvable exit, and the three things it is not': 65,
@@ -706,8 +721,9 @@ const SELF_TEST_BATTERIES = Object.freeze({
 // #17302 adds, and again by exactly the one #17366 adds, so the roster's
 // existing slack is preserved rather than tightened or loosened as a side
 // effect, and once more by the one #17149 adds, by the one #17098 adds, by the
-// one #17915 adds, by the one #17959 adds, and by the one #18042 adds.
-const SELF_TEST_BATTERY_FLOOR = 22;
+// one #17915 adds, by the one #17959 adds, by the one #18042 adds, and by the
+// one #18174 adds.
+const SELF_TEST_BATTERY_FLOOR = 23;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -2202,18 +2218,28 @@ export function readVerdictAuthorship(text, headSha) {
  * 0 of 3 — so a card-only C4 stays silent on the live board however good its
  * discriminator is.
  *
- * ⛔ It buys NO read. `pair.prComments` is filled by `gather`'s fourth pass for
- * the COMPLETED pairs and nobody else (`needsRecordRead`), so this union is
- * opportunistic by construction: on a completed pair C4 reads card + PR, and
- * on every other pair state it reads the card thread alone — the same set C2
- * already fetched, at the same cost.
+ * ⛔ It buys NO read, and it reads whatever IS in hand. `pair.prComments` is
+ * filled by `gather`'s fourth pass — for the COMPLETED pairs in both modes
+ * (`needsRecordRead`), and for EVERY pair on the `--pair` path since #18174,
+ * where C7 judges the record wherever one exists — so this union is
+ * opportunistic by construction: it reads card + PR wherever the PR thread was
+ * bought, and the card thread alone everywhere else — the same set C2 already
+ * fetched, at the same cost.
  *
- * ⚠️ The declared LIMIT that follows, stated rather than bought: a verdict on
- * a PENDING pair's PR thread is INVISIBLE here. That population is a pair whose
- * gate is still hung — the review is in flight — and buying a thread per open
- * pair to reach it would double this file's read budget for a fact that the
- * completed state re-reads a moment later anyway. ⛔ Not a fetch class; the
- * boundary is the honest answer.
+ * ⭐ So the reach of C4 follows the reads the run makes, and #18174 widened it
+ * on the landing path as a CONSEQUENCE rather than as a second decision: a
+ * verdict on a pending or non-gated pair's PR thread, previously invisible, is
+ * now judged by `--pair` for the independence pair it declares. That direction
+ * only ever adds verdicts to a reading whose newest-governs rule already lets a
+ * later independent verdict displace an older self-review, so it relaxes
+ * nothing — and it is pinned in both directions rather than left to be
+ * discovered.
+ *
+ * ⚠️ The declared LIMIT that survives, stated rather than bought: in a SWEEP a
+ * verdict on a non-completed pair's PR thread is INVISIBLE here, because the
+ * sweep buys no thread for it — doing so per open pair would double this
+ * file's read budget for a fact the landing check reads a moment later anyway.
+ * ⛔ Not a fetch class; the boundary is the honest answer.
  *
  * A card thread that could not be READ is `null` and stays `null` — an unread
  * thread is never an absent verdict (#4690). A PR thread that was owed and came
@@ -2468,6 +2494,12 @@ export function wideningUnjudged(pair, repo) {
  * state, so it can only be true once the event streams and the head commit
  * have been read -- the record pass in `gather` follows the history pass by
  * construction.
+ *
+ * ⚠️ It is C6's population, not the record READ's, since #18174. The `--pair`
+ * path buys the PR thread for every pair, because C7 judges the record wherever
+ * one exists; what this predicate still decides is who OWES a record (and so
+ * whose absence is a finding), who gets the thread in a SWEEP, and which gap
+ * `pairUnjudged` accounts for as against `locatedRecordUnjudged`.
  */
 export function needsRecordRead(pair) {
   return gateBindingState(pair).state === 'completed';
@@ -2767,8 +2799,27 @@ export function contractReviewTemplateLines(values = {}) {
 }
 
 /**
- * The review of record for one pair -- read from the PR's thread AND the card's,
- * because the rule lets it live on either.
+ * LOCATE the review of record for one pair -- read from the PR's thread AND the
+ * card's, because the rule lets it live on either -- WITHOUT asking what state
+ * the gate is in.
+ *
+ * ⭐ The gate-independent half, split out by #18174. `reviewOfRecord` below is
+ * this function under C6's population gate, and the two readings had been one
+ * function: a pair that owed no record answered `not-owed` BEFORE any thread
+ * was read, so every row downstream of it inherited C6's scope whether or not
+ * the fact it judges has that scope. C7's does not -- 「无此行不成裁决」 is a
+ * property of a RECORD, on whatever pair carries one -- and the consequence was
+ * measured on one board in one day: record 5661052272 (PR #18157 / card #17991,
+ * non-gated) carried `Served-tier: 2433/2444, then `CONTRACT_REVIEW_TIER``, a
+ * spelling this file's own reader answers `unreadable` for, and `--pair`
+ * answered 0; the SAME spelling on objectui PR #9486 / card #9191 (record
+ * 5662548425) was refused exit 4 -- because that pair's gate had been hung and
+ * cleared. One rule, two answers, decided by a fact the rule does not mention.
+ *
+ * ⛔ The split moves no recognition. Every fact below -- the heading, the head
+ * sha, the `Reviewed-by:` line, the newest-governs choice -- is the same one
+ * C6 read before, in the same order; what moved is WHERE the population gate
+ * sits, and it now sits on C6's own row rather than under both of them.
  *
  * ## The recognition shape, and why it is H51's and not a new one
  *
@@ -2794,14 +2845,12 @@ export function contractReviewTemplateLines(values = {}) {
  * ⛔ Not read: the verdict WORD (the file's boundary, and the corpus already
  * spells it two ways) and the ①②③ items (prose the seat reads).
  *
- * @returns {{ state: 'not-owed' }
- *          | { state: 'unreadable', gaps: string[] }
+ * @returns {{ state: 'unreadable', gaps: string[] }
  *          | { state: 'absent', read: { pr: number, card: number } }
  *          | { state: 'unsigned', where: 'PR'|'card', id: number|null, sha: string, at: string|null }
  *          | { state: 'found', where: 'PR'|'card', id: number|null, sha: string, at: string|null }}
  */
-export function reviewOfRecord(pair) {
-  if (!needsRecordRead(pair)) return { state: 'not-owed' };
+export function locateReviewOfRecord(pair) {
   const gaps = [];
   if (!Array.isArray(pair?.prComments)) gaps.push(`PR #${pair?.pr}'s comment thread`);
   if (!Array.isArray(pair?.cardComments)) gaps.push(`card #${pair?.card}'s comment thread`);
@@ -2834,6 +2883,29 @@ export function reviewOfRecord(pair) {
   };
   const signed = String(row?.body ?? '').split(/\r?\n/).some((line) => REVIEWED_BY_LINE.test(line));
   return signed ? { state: 'found', ...found } : { state: 'unsigned', ...found };
+}
+
+/**
+ * The review of record C6 judges -- the locator above, under C6's population.
+ *
+ * ⭐ ONE extra state, `not-owed`, and it is the whole difference: C6's row is a
+ * fact about a CLEARANCE (`needsRecordRead`'s completed state), so a pair that
+ * never hung the gate owes no record and is never refused for lacking one.
+ * That scope is the ruling's own and #18174 leaves it exactly where it was --
+ * what that card moved is C7, which reads the locator directly because the fact
+ * IT judges belongs to the record rather than to the clear.
+ *
+ * ⛔ Both rows still read ONE comment, chosen once, by one recognition: this
+ * function adds a gate in front of `locateReviewOfRecord` and changes nothing
+ * about which comment comes back, so C6 and C7 can no more disagree about the
+ * governing record than they could when they shared a function body.
+ *
+ * @returns {{ state: 'not-owed' }
+ *          | ReturnType<typeof locateReviewOfRecord>}
+ */
+export function reviewOfRecord(pair) {
+  if (!needsRecordRead(pair)) return { state: 'not-owed' };
+  return locateReviewOfRecord(pair);
 }
 
 /**
@@ -2892,23 +2964,41 @@ export function c6NoReviewOfRecord(pair) {
 }
 
 /**
- * The C6-RECORD note -- the record WAS found, and here is what to cite.
+ * The C6-RECORD note -- the record WAS found, and here is what it says.
  *
  * A note rather than silence, for the landing seat's next act: the rule makes
  * the provenance comment name the record's id and the head it judged, and the
  * run has both in hand. ⚠️ Existence, not the verdict.
+ *
+ * ⭐ It reads the LOCATOR since #18174, for the reason C7 does: what a record
+ * declares is a fact about the record. So a pair that owes no clear -- the
+ * ordinary `Clause-②: no` pair -- and that nevertheless carries a record on its
+ * head now PRINTS what that record says, instead of answering 0 with the record
+ * unmentioned. ⛔ A reader of exit 0 must be able to tell "the record was read
+ * and its `Served-tier:` stands" from "no record was ever looked at", and until
+ * this note was widened those two printed identically.
+ *
+ * ⛔ The CITATION half stays C6's, because the act it names is C6's: only a
+ * pair in the completed state has a provenance comment beside a clear to cite
+ * the record in. On every other pair the note says what the record IS and what
+ * it declares, and prescribes nothing -- a note never invents an act its pair
+ * does not owe.
  */
 export function c6RecordNote(pair) {
-  const v = reviewOfRecord(pair);
+  const v = locateReviewOfRecord(pair);
   if (v.state !== 'found') return null;
   return (
     `review of record on this head: ${v.where} thread, ${v.id ? `comment ${v.id}` : 'a comment carrying no readable id'} ` +
     `(${v.at ?? 'undated'}) is a \`## Contract review\` comment naming \`${v.sha}\` and carrying a \`Reviewed-by:\` line -- ` +
-    'cite it in the provenance comment beside the clear (「凡清标同笔留 provenance 评论,引记录 id 与所判 head」). ' +
+    (needsRecordRead(pair)
+      ? 'cite it in the provenance comment beside the clear (「凡清标同笔留 provenance 评论,引记录 id 与所判 head」). '
+      : '⛔ This pair owes no clear, so nothing is prescribed here: the record is reported because it EXISTS on this head, and what it declares is judged wherever it exists. ') +
     (servedTierStands(v.served)
       ? 'Its `Served-tier:` names the tier constant' +
         (v.served.stamps ? ` on a stamp control of ${v.served.stamps.atTier}/${v.served.stamps.total}` : '') +
-        ', so the strip stands on C7 as well as on this row. '
+        (needsRecordRead(pair)
+          ? ', so the strip stands on C7 as well as on this row. '
+          : ', so it reads at tier on C7 as well as on this row. ')
       : 'Its `Served-tier:` does NOT stand — C7 says what it reads, and this pair is adverse. ') +
     '⚠️ Existence, not the verdict: whether it reads PASS is precondition ① of the landing check and stays human.'
   );
@@ -2942,21 +3032,48 @@ export function c6RecordNote(pair) {
  * is. Writing it into the verdict turns a per-seat habit into a carrier, and
  * this row is the only consumer that habit now needs.
  *
- * ## The population -- exactly C6's, and that is the ruling's own scope
+ * ## The population -- EVERY pair that has a record, and why it stopped being C6's (#18174)
  *
- * A CLEARANCE JUDGMENT OF A HUNG CARRIER: `needsRecordRead`'s completed state
- * -- declared `yes`, the gate BOUND and CLEARED on both carriers, head unmoved.
- * That is the pair whose `needs:contract-review` came off, which is the only
- * act this ruling gates. Three shapes are therefore deliberately untouched:
+ * The first spelling of this row read `reviewOfRecord`, whose `not-owed` gate
+ * is C6's -- the completed state, declared `yes`, the gate bound and CLEARED on
+ * both carriers. So the reading was performed beside a gate clear and nowhere
+ * else, and the rule it carries says nothing about a gate: 「无此行不成裁决」 is
+ * a property of a RECORD. Measured on one board in one day, one spelling, two
+ * answers: record 5661052272 (objectstack PR #18157 / card #17991, `Clause-②`
+ * never declared `yes`, gate never hung) carried `Served-tier: 2433/2444, then
+ * `CONTRACT_REVIEW_TIER`` -- `unreadable` to this file's own reader -- and
+ * `--pair` answered **0**, so it stood as the review of record for a landing on
+ * `origin/main`; record 5662548425 (objectui PR #9486 / card #9191), the SAME
+ * spelling, was refused **4** with this row's text -- because THAT pair's gate
+ * had been hung and cleared. ⇒ declared ≠ enforced, one path of two.
  *
- *   1. **A `Clause-②: no` pair that never carried the label** owes no verdict
- *      at all, and is ⛔ never refused for lacking the line. It is not in the
- *      candidate shape, so the row cannot reach it.
- *   2. **A pair still carrying the gate** owes nothing yet -- the review is
- *      pending, not below tier -- exactly as C6 reads it.
- *   3. **An absent or unsigned record** is C6's row already, and no row owns a
- *      fact twice. C7 speaks only about a record C6 FOUND: the two rows read
- *      one comment, chosen once, by one recognition.
+ * ⭐ So the population is now every pair whose record `locateReviewOfRecord`
+ * FINDS on the head: the gate's state decides whether a record is OWED (C6's
+ * question), never whether the one in hand READS. Two shapes stay untouched,
+ * and they are the ones that have no record rather than the ones that never
+ * hung a gate:
+ *
+ *   1. **A pair with NO record on this head** is ⛔ never refused for lacking
+ *      the line -- on a `Clause-②: no` pair that owes none this is the ordinary
+ *      case and it stays silent (C6's 「not-owed」 is untouched), and on a pair
+ *      that OWES one the absence is C6's row.
+ *   2. **An absent or unsigned record** is C6's row where C6 is owed, and no
+ *      row owns a fact twice. C7 speaks only about a record the locator FOUND
+ *      -- signed, on this head -- so the two rows read one comment, chosen
+ *      once, by one recognition, and can never both fire.
+ *
+ * ⚠️ A pair STILL CARRYING the gate is now reachable, and that is the ruling's
+ * own moment rather than an overreach: the rule text puts this reading 「清标前」
+ * -- BEFORE the clear -- so a record already posted on this head is judged while
+ * the gate is still on, which is the only ordering in which exit 4 can stop
+ * anything. A pair whose review is genuinely pending has no record yet and
+ * stays in shape 1.
+ *
+ * ⛔ What did NOT move: the accept set (one token, the constant's NAME), the
+ * exactness, the refusal of a missing line, and the remedy -- re-post the
+ * record in the identifier-free live shape; the NEWEST heading comment on the
+ * head governs. This row is widened in POPULATION only, in the direction its
+ * own rule text already named.
  *
  * ## The refusal, and what it is NOT
  *
@@ -2995,12 +3112,24 @@ export function c6RecordNote(pair) {
  * missing one is still a refusal, and the accepted token is still exactly one.
  */
 export function c7ServedTierBelow(pair) {
-  const v = reviewOfRecord(pair);
+  // ⭐ The LOCATOR, not `reviewOfRecord` (#18174): what a record declares about
+  // the tier that served it is a fact about the record, so it is judged on
+  // every pair that has one and not only on the pair that owed one.
+  const v = locateReviewOfRecord(pair);
   if (v.state !== 'found') return null;
   if (servedTierStands(v.served)) return null;
 
+  // ⭐ WHICH act the record is standing under is read from the gate, not
+  // assumed (#18174): on the completed state it is the clearance the ruling
+  // gates, and on every other pair it is the record itself, judged 「清标前」 or
+  // on a pair that owes no clear at all. The refusal is the same refusal; a
+  // sentence naming a clear that never happened would be the row's own text
+  // telling the reader something untrue about their pair.
+  const standsOn = needsRecordRead(pair)
+    ? 'the verdict the clear stands on'
+    : 'the review of record on this head (no clear rides on it -- the line is judged because the RECORD carries it)';
   const where =
-    `PR #${pair?.pr}${pair?.draft ? ' (draft)' : ''} / card #${pair?.card}: the verdict the clear stands on -- ` +
+    `PR #${pair?.pr}${pair?.draft ? ' (draft)' : ''} / card #${pair?.card}: ${standsOn} -- ` +
     `${v.where} thread, ${v.id ? `comment ${v.id}` : 'a comment carrying no readable id'} ` +
     `(${v.at ?? 'undated'}), naming head \`${v.sha}\``;
   const stamps = v.served.stamps ?? null;
@@ -3052,6 +3181,37 @@ export function c7ServedTierBelow(pair) {
 }
 
 /**
+ * C7's own #4690 half -- a thread this file could not READ is not a pair
+ * without a record (#18174).
+ *
+ * ⭐ The gap C6's accounting cannot own. `pairUnjudged` reports the
+ * review-of-record read for the pairs that OWE one, and a pair that owes none
+ * is `not-owed` there whatever its threads say -- correct for C6, and silence
+ * for C7 the moment C7 stopped sharing C6's population. So the landing check
+ * asks this question separately: the record read was BOUGHT for this pair, and
+ * if the threads or the head could not be read, the pair is UNJUDGED rather
+ * than clean.
+ *
+ * ⛔ Called from the `--pair` path ONLY, exactly as `wideningUnjudged` is, and
+ * for the same reason: the sweep does not buy the thread for a pair that owes
+ * no record (the budget paragraph in this file's header is the authority), so
+ * a sweep asking this would report every non-gated pair as UNJUDGED for a read
+ * it was never going to make. A pair that owes the read is skipped here and
+ * accounted for by `pairUnjudged`, so no gap is reported twice.
+ */
+export function locatedRecordUnjudged(pair) {
+  if (needsRecordRead(pair)) return null;
+  const v = locateReviewOfRecord(pair);
+  if (v.state !== 'unreadable') return null;
+  return (
+    `pair PR #${pair?.pr} / card #${pair?.card} owes no review of record, and whether it HAS one ` +
+    `could not be read: ${v.gaps.join(', ')}. A record on this head is judged for what its ` +
+    '`Served-tier:` line declares wherever it exists (「无此行不成裁决」), so an unread thread here is a ' +
+    'missing reading, never a pair without a record.'
+  );
+}
+
+/**
  * Every FINDING row for one pair, in reporting order.
  *
  * `pairs` — the derived set this pair came from — is optional and defaults to
@@ -3076,10 +3236,12 @@ export function pairRows(pair, pairs = null) {
   if (selfReview) rows.push({ code: 'C4', text: selfReview });
   const record = c6NoReviewOfRecord(pair);
   if (record) rows.push({ code: 'C6', text: record });
-  // ⭐ After C6 and never instead of it: C6 asks whether a record EXISTS on this
-  // head, C7 asks what served the round that wrote it. One comment, chosen once
-  // by `reviewOfRecord`, so the two rows can never disagree about which verdict
-  // the clear stands on -- and an absent record earns exactly one row, C6's.
+  // ⭐ After C6 and never instead of it: C6 asks whether a record was OWED and
+  // exists on this head, C7 asks what served the round that wrote the record in
+  // hand. One comment, chosen once by `locateReviewOfRecord` -- C6 reads it
+  // under its own population gate and C7 reads it directly (#18174) -- so the
+  // two rows can never disagree about which verdict is being read, and an
+  // absent or unsigned record earns exactly one row, C6's, where C6 is owed.
   const servedTier = c7ServedTierBelow(pair);
   if (servedTier) rows.push({ code: 'C7', text: servedTier });
   return rows;
@@ -3239,9 +3401,12 @@ export function pairUnjudged(pair) {
     const authorship = verdictAuthorship(verdictThreadRows(pair), pair?.headSha);
     if (authorship.state === 'unreadable') gaps.push(`pair PR #${pair?.pr} / card #${pair?.card}'s verdict authorship (${authorship.reason})`);
   }
-  // C6's own #4690 half: the record read is owed by the COMPLETED state only,
-  // and an unread PR thread there is not an absent record. Reached only once
-  // the binding state itself read, so a stream gap above is never doubled.
+  // C6's own #4690 half: the record is OWED by the COMPLETED state only, and an
+  // unread PR thread there is not an absent record. Reached only once the
+  // binding state itself read, so a stream gap above is never doubled. ⛔ The
+  // other half -- a pair that owes no record but whose thread the `--pair` path
+  // bought anyway -- is `locatedRecordUnjudged`, asked from that path alone, so
+  // a sweep never reports a gap in a read it was never going to make.
   if (gaps.length === 0) {
     const record = reviewOfRecord(pair);
     if (record.state === 'unreadable') gaps.push(...record.gaps.map((g) => `${g} (the review-of-record read)`));
@@ -3708,8 +3873,16 @@ export function pairJsonRepoConflict(docRepo, repo) {
  * whatever those name — no open-issue listing is paged for it. That keeps the
  * sweep's cost at one PR listing plus two reads per pair, plus — for the C3
  * candidates ALONE — their two event streams and one head commit.
+ *
+ * `landingReads` is the `--pair` path's extra budget, and it buys exactly two
+ * things a report-only sweep does not: the changed-file listing C5 reads
+ * (#16448) and, since #18174, the PR's own comment thread for a pair that owes
+ * no record but may carry one. Both are one read per pair on a run that judges
+ * ONE pair, and both would push a 29-pair sweep past the anonymous hourly
+ * budget it already sits on — the same sweep/`--pair` split every other row
+ * here makes.
  */
-async function gather(repo, prFilter = null, reader = NETWORK_READER, { readFiles = false } = {}) {
+async function gather(repo, prFilter = null, reader = NETWORK_READER, { landingReads = false } = {}) {
   const pulls = (await reader.listOpenPulls(repo)).filter((pr) => (prFilter ? pr.number === prFilter : true));
   const pairs = [];
   for (const pr of pulls) {
@@ -3759,25 +3932,34 @@ async function gather(repo, prFilter = null, reader = NETWORK_READER, { readFile
   // the same call the sweep/`--pair` split already makes everywhere else in
   // this file. `pair.files` is therefore `undefined` in a sweep, which no row
   // reads, and `null` only when a read that WAS owed came back short.
-  if (readFiles) {
+  if (landingReads) {
     for (const pair of pairs) {
       if (!needsWideningRead(pair)) continue;
       pair.files = await reader.readPullFiles(repo, pair.pr);
     }
   }
 
-  // Fourth pass -- the review of record, for the COMPLETED pairs and nobody
-  // else (#17302). The PR's own thread is the same endpoint the card's is
-  // (`/issues/N/comments` -- a PR is an issue there), read through the same
-  // `readCardComments`, so the offline document carries it in the same
-  // `comments` bag keyed by the PR NUMBER and no reader grows a seventh method.
-  // One read per completed pair, in BOTH modes: the population is the narrow
-  // window between a clear and a landing, and a cleared gate with no record
-  // behind it is precisely the board fact the filing sweep measured five
-  // times. Cached per PR, so a two-card PR (#16304) pays once.
+  // Fourth pass -- the review of record. The PR's own thread is the same
+  // endpoint the card's is (`/issues/N/comments` -- a PR is an issue there),
+  // read through the same `readCardComments`, so the offline document carries
+  // it in the same `comments` bag keyed by the PR NUMBER and no reader grows a
+  // seventh method. Cached per PR, so a two-card PR (#16304) pays once.
+  //
+  // Two populations, one pass:
+  //   · in BOTH modes, the COMPLETED pairs (#17302) -- the narrow window
+  //     between a clear and a landing, where a cleared gate with no record
+  //     behind it is precisely the board fact the filing sweep measured five
+  //     times over;
+  //   · on the `--pair` path, EVERY pair (#18174) -- because what a record's
+  //     `Served-tier:` line declares is a fact about the record, judged on
+  //     whatever pair carries one, and the pair that carried the measured
+  //     defect (PR #18157, record 5661052272) never hung the gate at all.
+  //     ⛔ Not bought per sweep pair: the budget paragraph above says why, and
+  //     `locatedRecordUnjudged` is called from the same `--pair` path, so the
+  //     set that owes this thread and the set that gets one cannot drift apart.
   const prThreads = new Map();
   for (const pair of pairs) {
-    if (!needsRecordRead(pair)) continue;
+    if (!landingReads && !needsRecordRead(pair)) continue;
     if (!prThreads.has(pair.pr)) prThreads.set(pair.pr, await reader.readCardComments(repo, pair.pr));
     const rows = prThreads.get(pair.pr);
     pair.prComments = Array.isArray(rows) ? rows : null;
@@ -3837,9 +4019,15 @@ function renderPair(pair, repo, pairs = null) {
   const wideningRow = c5WideningTell(pair, repo);
   if (wideningRow) rows.push({ code: 'C5', text: wideningRow });
   const wideningGap = wideningUnjudged(pair, repo);
+  // ⭐ The record read this path BUYS for a pair that owes none (#18174), and
+  // its gap, kept beside C5's for the same reason: `pairUnjudged` accounts for
+  // the reads a SWEEP makes, and these two are the landing check's own.
+  const recordGap = locatedRecordUnjudged(pair);
   if (rows.length === 0) {
-    if (wideningGap) {
-      console.error(`✗ check-clause2-carriers --pair: ${wideningGap}`);
+    if (wideningGap || recordGap) {
+      for (const g of [recordGap, wideningGap]) {
+        if (g) console.error(`✗ check-clause2-carriers --pair: ${g}`);
+      }
       return EXIT_INCOMPLETE;
     }
     for (const note of notes) console.error(`ℹ️  ${note.code} — ${note.text}`);
@@ -3876,6 +4064,7 @@ function renderPair(pair, repo, pairs = null) {
   // An adverse row OUTRANKS a gap -- a tell that WAS read is a fact about this
   // pair whatever else could not be read -- but the gap is still printed, or a
   // reader would take the rows below for the whole reading.
+  if (recordGap) console.error(`⚠️  ${recordGap}`);
   if (wideningGap) console.error(`⚠️  ${wideningGap}`);
   console.error(
     `check-clause2-carriers: PR #${pair.pr} / card #${pair.card} is NOT clause-② legible ` +
@@ -4845,10 +5034,15 @@ export function selfTest() {
   t('the line is read anywhere in the comment — the rule asks the AUTHOR for the top, the reader refuses nobody over placement', c7ServedTierBelow(bare({ prComments: [RECORD(HEAD_9AF9, [...TIER_LINES(CONTRACT_REVIEW_TIER_NAME).slice(0, 2), '', 'some prose', ...TIER_LINES(CONTRACT_REVIEW_TIER_NAME).slice(2)])] })) === null);
   t('the NEWEST record on this head governs — a corrected record clears the row without touching the carrier', c7ServedTierBelow(bare({ prComments: [SERVED(BELOW), SERVED(CONTRACT_REVIEW_TIER_NAME, '2026-09-01T08:53:00Z', 3403)] })) === null);
   // the populations this row must never reach
-  t('⛔ a `Clause-②: no` pair that never carried the label is NEVER refused for lacking the line', c7ServedTierBelow(pair({ cardComments: [CLAIM('Clause-②: no')] })) === null);
-  t('⛔ a pair still carrying the gate owes nothing yet — the review is pending, not off tier', c7ServedTierBelow(pair({ prLabels: [L], cardLabels: [L], cardComments: [CLAIM('Clause-②: yes')] })) === null);
-  t('⛔ a never-hung gate is C3\'s row and reaches this one not at all', c7ServedTierBelow(declaredYes({ cardEvents: [], prEvents: [] })) === null);
-  t('⛔ a gate whose head MOVED after the clear is the 重挂 row, not this one', c7ServedTierBelow(bare({ prComments: [SERVED(BELOW)], headCommittedAt: '2026-09-01T10:30:00Z' })) === null);
+  // ⚠️ Since #18174 this row's population is every pair that HAS a record, so
+  // each case below pins the shape it names -- a pair with NO record, threads
+  // READ and empty -- rather than passing because the thread was never fetched.
+  // The other half of each, the same pair WITH a record, is the #18174 battery.
+  t('⛔ a `Clause-②: no` pair with NO record on its head is NEVER refused for lacking the line', c7ServedTierBelow(pair({ headSha: HEAD_9AF9, prComments: [], cardComments: [CLAIM('Clause-②: no')] })) === null);
+  t('⛔ a pair still carrying the gate, with no record yet, owes nothing — the review is pending, not off tier', c7ServedTierBelow(pair({ headSha: HEAD_9AF9, prComments: [], prLabels: [L], cardLabels: [L], cardComments: [CLAIM('Clause-②: yes')] })) === null);
+  t('⛔ a never-hung gate with no record is C3\'s row and reaches this one not at all', c7ServedTierBelow(declaredYes({ headSha: HEAD_9AF9, prComments: [], cardEvents: [], prEvents: [] })) === null);
+  t('⛔ …and a record naming an OLDER head is not this head\'s record, on any pair', c7ServedTierBelow(pair({ headSha: HEAD_9AF9, prComments: [SERVED(BELOW, '2026-09-01T08:50:00Z', 3405)].map((r) => ({ ...r, body: r.body.replace(HEAD_9AF9, '0ldhead00') })) })) === null);
+  t('a gate whose head MOVED after the clear keeps its 重挂 row AND earns this one — two facts, two remedies', pairRows(bare({ prComments: [SERVED(BELOW)], headCommittedAt: '2026-09-01T10:30:00Z' })).map((r) => r.code).join(',') === 'C3,C7');
   t('⛔ an ABSENT record earns C6 and nothing else — one fact, one row', pairRows(bare({})).map((r) => r.code).join(',') === 'C6');
   const unsignedCodes = pairRows(bare({ prComments: [RECORD(HEAD_9AF9, ['- **Implemented-by:** `claude/issue-13657-x`'], '2026-09-01T08:50:00Z', 3404)] })).map((r) => r.code);
   t('⛔ an UNSIGNED record likewise — C7 speaks only about a record C6 FOUND', unsignedCodes.includes('C6') && !unsignedCodes.includes('C7'), JSON.stringify(unsignedCodes));
@@ -4877,6 +5071,80 @@ export function selfTest() {
   t('the control is judged by ONE predicate the row and the note both read', servedStampsHold({ atTier: 5, total: 5 }) && !servedStampsHold({ atTier: 5, total: 6 }) && !servedStampsHold({ atTier: 0, total: 0 }));
   t('⛔ a below-tier value with a PERFECT control is still refused — the control never substitutes for the tier', typeof c7ServedTierBelow(bare({ prComments: [SERVED('99/99 example-below-tier')] })) === 'string');
   t('the reference fixture itself carries the live shape, so the clean pair is clean for the right reason', says(RECORD_ON_9AF9.body, '121/121') && pairRows(completed).length === 0);
+
+  // -- #18174: the reading is a fact about the RECORD, not about the clear ---
+  //
+  // ★ The defect, measured on one board in one day and one spelling: record
+  // 5661052272 (objectstack PR #18157 / card #17991, never declared `Clause-②:
+  // yes`, gate never hung) carried the continuation form below, which this
+  // file's own `readServedTier` answers `unreadable` for -- and `--pair`
+  // answered 0, so it stood as the review of record for a landing on
+  // `origin/main`. The SAME spelling on objectui PR #9486 / card #9191 (record
+  // 5662548425) was refused exit 4 with C7's text, because THAT pair's gate had
+  // been hung and cleared. One rule, two answers, decided by a fact the rule
+  // (「无此行不成裁决」) does not mention.
+  //
+  // ⛔ The pins below move no accept set and no recognition: every case reads
+  // the SAME `readServedTier`, the SAME heading/head-sha recognition and the
+  // SAME one accepted token. What they pin is the POPULATION -- and, beside it,
+  // the three things that did NOT widen: C6's row, the sweep's read budget and
+  // the note's prescription.
+  battery('#18174: the `Served-tier:` reading on EVERY pair that has a record, never only beside a gate clear');
+  const MEASURED_SPELLING = `2433/2444, then \`${CONTRACT_REVIEW_TIER_NAME}\``;
+  // A NON-GATED pair: `Clause-②: no`, bare on both carriers, no event stream --
+  // `needsRecordRead` false, which is exactly the pair the old reader skipped.
+  const nonGated = (rows) => pair({ pr: 18157, card: 17991, draft: false, headSha: HEAD_9AF9, prComments: rows });
+  const MEASURED_RECORD = SERVED(MEASURED_SPELLING, '2026-09-14T08:17:29Z', 3501);
+  const measuredRow = c7ServedTierBelow(nonGated([MEASURED_RECORD]));
+  t('⭐ THE MEASURED PAIR — a NON-GATED pair whose record carries the continuation spelling is a C7 row, where it answered 0', typeof measuredRow === 'string');
+  t('…and the reading behind it is `unreadable`, the same one the gated pair was refused on', readServedTier(`Served-tier: ${MEASURED_SPELLING}`).state === 'unreadable');
+  t('⇒ ONE spelling now reads the SAME on a gated and a non-gated pair — the defect was one rule with two answers', typeof c7ServedTierBelow(bare({ prComments: [MEASURED_RECORD] })) === 'string');
+  t('…and the row names the record rather than a clear this pair never had', says(measuredRow, 'no clear rides on it') && !says(measuredRow, 'the verdict the clear stands on'));
+  t('…while the completed pair\'s row still names the clear it really does stand under', says(c7ServedTierBelow(bare({ prComments: [SERVED(BELOW)] })), 'the verdict the clear stands on'));
+  t('…and it quotes the rule text and the remedy unchanged — widened in POPULATION only', says(measuredRow, '无此行不成裁决') && says(measuredRow, 'The NEWEST heading comment on this head governs'));
+  t('⭐ the LIVE shape on the same non-gated pair earns NO row — the reader refuses the defect, not the record', c7ServedTierBelow(nonGated([RECORD_ON_9AF9])) === null);
+  t('…including the minimum the ruling permits, the tier alone with no stamp control', c7ServedTierBelow(nonGated([SERVED(`\`${CONTRACT_REVIEW_TIER_NAME}\``, '2026-09-15T02:55:31Z', 3502)])) === null);
+  // the populations that did NOT widen
+  t('⛔ a non-gated pair with NO record is silent on BOTH rows — C6\'s 「not-owed」 is untouched', c7ServedTierBelow(nonGated([])) === null && c6NoReviewOfRecord(nonGated([])) === null);
+  t('…and is not UNJUDGED either: nothing was owed, and nothing was missing', locatedRecordUnjudged(nonGated([])) === null && pairUnjudged(nonGated([])) === null);
+  t('⛔ C6 does not follow C7 into the widened population — an absent record on a pair that owes none is no row', c6NoReviewOfRecord(nonGated([])) === null && reviewOfRecord(nonGated([])).state === 'not-owed');
+  // Neither authorship line, so C4 reads it as the legacy verdict it is and
+  // stays silent: what this fixture isolates is the record's own state.
+  const UNSIGNED_OFF_TIER = RECORD(HEAD_9AF9, [TIER_LINES(BELOW)[2]], '2026-09-14T08:17:29Z', 3503);
+  t('⛔ an UNSIGNED record on a non-gated pair is judged by neither row — C7 speaks only about a record the locator FOUND', pairRows(nonGated([UNSIGNED_OFF_TIER])).length === 0, JSON.stringify(locateReviewOfRecord(nonGated([UNSIGNED_OFF_TIER])).state));
+  t('…and the same unsigned record on a pair that OWES one is C6\'s row, exactly as before', pairRows(bare({ prComments: [UNSIGNED_OFF_TIER] })).map((r) => r.code).join(',') === 'C6');
+  t('⇒ C6 and C7 can never both fire on the widened population either', [nonGated([]), nonGated([RECORD_ON_9AF9]), nonGated([UNSIGNED_OFF_TIER]), nonGated([MEASURED_RECORD])].every((x) => pairRows(x).filter((r) => r.code === 'C6' || r.code === 'C7').length <= 1));
+  // 「清标前」 — the moment the rule text puts this reading at
+  const stillHung = (rows) => pair({ headSha: HEAD_9AF9, prLabels: [L], cardLabels: [L], cardComments: [CLAIM('Clause-②: yes')], prComments: rows });
+  t('a pair STILL CARRYING the gate, with a record already on the head, IS a row — the rule reads 「清标前」', typeof c7ServedTierBelow(stillHung([SERVED(BELOW, '2026-09-01T08:50:00Z', 3504)])) === 'string');
+  t('…and one whose review is genuinely pending has no record yet and stays silent', c7ServedTierBelow(stillHung([])) === null);
+  // the note: it prints on the widened population, and prescribes nothing there
+  const ungatedNote = pairNotes(nonGated([RECORD_ON_9AF9]));
+  t('the C6-RECORD note prints on a non-gated pair, so exit 0 says WHICH record was read', ungatedNote.map((n) => n.code).join() === 'C6-RECORD' && says(ungatedNote[0]?.text, 'comment 3301'));
+  t('…and prescribes no clear this pair does not owe', says(ungatedNote[0]?.text, 'owes no clear') && !says(ungatedNote[0]?.text, '凡清标同笔留'));
+  t('…while the completed pair still gets the citation half — that act is C6\'s and stays C6\'s', says(pairNotes(completed)[0]?.text, '引记录 id 与所判 head'));
+  // the read the landing path BUYS, and the gap that read owes
+  t('a non-gated pair whose PR thread could not be read is UNJUDGED on the landing path, never clean', says(locatedRecordUnjudged(nonGated(null)), 'comment thread') && c7ServedTierBelow(nonGated(null)) === null);
+  t('…and a head sha too short to match is a gap there too, never an absent record', says(locatedRecordUnjudged(pair({ headSha: 'abc', prComments: [] })), 'head sha'));
+  t('⛔ a pair that OWES the record is skipped there — `pairUnjudged` owns that gap, so no gap is reported twice', locatedRecordUnjudged(bare({ prComments: null })) === null && says(pairUnjudged(bare({ prComments: null })), 'review-of-record read'));
+  t('⛔ and the SWEEP\'s cost bound is unmoved — a non-gated pair still owes no thread there', needsRecordRead(nonGated([MEASURED_RECORD])) === false);
+  // ⚠️ The CONSEQUENCE for C4, pinned in both directions rather than left to
+  // be discovered: the landing path now has the PR thread for every pair, and
+  // `verdictThreadRows` reads what is in hand, so a verdict that was invisible
+  // there is judged for the independence pair it declares. Nothing about C4
+  // moved; what moved is which threads a `--pair` run has read.
+  const SELF_RECORD = RECORD(HEAD_9AF9, [
+    `- **Implemented-by:** \`${RECORD_SESSION}\``,
+    `- **Reviewed-by:** \`${RECORD_SESSION}\``,
+    TIER_LINES(CONTRACT_REVIEW_TIER_NAME)[2],
+  ], '2026-09-14T08:17:29Z', 3505);
+  t('⚠️ a SELF-REVIEWED record on a non-gated pair is now C4\'s row on the landing path — the thread is in hand, so it is read', pairRows(nonGated([SELF_RECORD])).map((r) => r.code).join(',') === 'C4', JSON.stringify(pairRows(nonGated([SELF_RECORD])).map((r) => r.code)));
+  t('…and the INDEPENDENT record on the same pair stays clean — the live control\'s own shape, whole', pairRows(nonGated([RECORD_ON_9AF9])).length === 0 && pairUnjudged(nonGated([RECORD_ON_9AF9])) === null);
+  t('⛔ and a SWEEP still cannot see it: with no PR thread bought, C4 reads the card thread alone, exactly as before', c4VerdictSelfReview(pair({ headSha: HEAD_9AF9 })) === null);
+  // one comment, chosen once, by one recognition
+  const bothRead = bare({ prComments: [RECORD_ON_9AF9] });
+  t('the locator and the gated reader choose ONE comment — same id, same head span, on the pair where both answer', JSON.stringify([locateReviewOfRecord(bothRead).id, locateReviewOfRecord(bothRead).sha]) === JSON.stringify([reviewOfRecord(bothRead).id, reviewOfRecord(bothRead).sha]));
+  t('⛔ and off that population the gated reader still answers `not-owed` — C6\'s scope is unmoved by the split', reviewOfRecord(nonGated([MEASURED_RECORD])).state === 'not-owed' && locateReviewOfRecord(nonGated([MEASURED_RECORD])).state === 'found');
 
   battery('the exit register is distinct in every direction it must be');
   const codes = [EXIT_OK, EXIT_USAGE, EXIT_INCOMPLETE, EXIT_PREREQUISITE_NOT_MET, EXIT_PAIR_ADVERSE];
@@ -5493,6 +5761,9 @@ export function selfTest() {
       + 'with the controls that keep exit 4 reachable, the 2026-08-31 seven-pair replay, the four gate-binding states ' +
       'replayed from the 2026-09-01 clear, the verdict-authorship pair and its legacy silence, ' +
       'the review of record on the completed state with the two shapes that are not one, ' +
+      'the `Served-tier:` reading judged on EVERY pair that carries a record — the measured ' +
+      'non-gated spelling beside the live one, with C6\'s population, the sweep\'s read budget ' +
+      'and the note\'s prescription pinned unmoved — ' +
       'the correction comment that supersedes a claim declaration with the five measured prose ' +
       'spellings held out as negatives, ' +
       'the three read paths with their offline reader, the argv contract with its usage and its '
@@ -5808,7 +6079,7 @@ async function main(argv) {
 
   let swept = 0;
   try {
-    const { pulls, pairs } = await gather(repo, only, reader, { readFiles: only !== null });
+    const { pulls, pairs } = await gather(repo, only, reader, { landingReads: only !== null });
     swept = pairs.length;
     if (only !== null) {
       if (pairs.length === 0) {
