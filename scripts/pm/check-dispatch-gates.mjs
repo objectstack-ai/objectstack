@@ -316,7 +316,23 @@ if (child !== TOOL) {
 }
 
 const started = Date.now();
-const result = spawnSync(process.execPath, [resolve(ROOT, child), '--self-test'], { stdio: 'inherit' });
+/**
+ * ⛔ The production spawn names TOOL DIRECTLY, and it has to keep doing so.
+ *
+ * The tool's derivation follows this call as a RUN edge, which is how this gate
+ * inherits TOOL's own watch hints — the workflow tree among them — so that a
+ * card touching only `.github/workflows` derives this gate at all. That scan
+ * refuses a REBOUND program component on purpose, so collapsing both spawns
+ * into one `resolve(ROOT, child)` silently cuts the edge. Measured when this
+ * file's self-test was first written that way: five cases of the tool's own
+ * battery red, and a workflows-only derivation stopped naming this gate
+ * entirely. The substituted child therefore gets its OWN call, and the
+ * production one is byte-for-byte the expression that was here before.
+ */
+const result =
+  childAt < 0
+    ? spawnSync(process.execPath, [join(ROOT, TOOL), '--self-test'], { stdio: 'inherit' })
+    : spawnSync(process.execPath, [resolve(ROOT, child), '--self-test'], { stdio: 'inherit' });
 /**
  * What the battery cost on THIS box, printed rather than frozen anywhere.
  *
