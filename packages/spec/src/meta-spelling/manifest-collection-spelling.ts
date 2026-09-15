@@ -104,12 +104,48 @@ export const SINGULAR_TO_PLURAL: Record<string, string> = Object.fromEntries(
   Object.entries(PLURAL_TO_SINGULAR).map(([plural, singular]) => [singular, plural]),
 );
 
+// ───────────────────────────────────────────────────────────────────────────
+// The own-property guard both folds below carry
+// ───────────────────────────────────────────────────────────────────────────
+//
+// Both tables sit on `Object.prototype`, so a bare index resolves its members
+// for an off-vocabulary `key`: `constructor` handed the `Object` FUNCTION, and
+// `toString` / `valueOf` their prototype methods, out of a signature that
+// declares `string`. The `??` never fires on those, because the inherited
+// member is truthy. `key` is uncontrolled: these folds sit at the boundary
+// where manifest fields and `/meta/:type` path segments — both author- and
+// client-supplied — are fed into the metadata registry.
+//
+// `SINGULAR_TO_PLURAL` is built by `Object.fromEntries` rather than written as
+// a literal, which changes nothing here: `Object.fromEntries` returns an
+// ORDINARY object, measured to carry `Object.prototype` on its chain exactly as
+// `PLURAL_TO_SINGULAR` does. It is the same defect, and it takes the same fix.
+//
+// The refusal value is each function's own declared one — `key` returned
+// verbatim, which is what an unmapped word already gets. The guard only
+// narrows: every declared spelling is an own key, and `check:stack-collection-maps`
+// pins that key set from the other side.
+//
+// ⛔ Not a null-prototype table, for the reason `src/data/type-compat.ts`
+// records: a `__proto__: null` object literal does not type-check against the
+// `Record<…>` annotation at all (TS2353), and the
+// `Object.assign(Object.create(null), …)` spelling that does compile silently
+// COSTS the annotation's exhaustiveness check. ⛔ Not a list of prototype
+// member names either — a guard that names words does not survive the next
+// prototype member.
+
 /** Convert a plural manifest field name to its singular metadata type name. Returns the input unchanged if no mapping exists. */
 export function pluralToSingular(key: string): string {
-  return PLURAL_TO_SINGULAR[key] ?? key;
+  if (Object.prototype.hasOwnProperty.call(PLURAL_TO_SINGULAR, key) && PLURAL_TO_SINGULAR[key]) {
+    return PLURAL_TO_SINGULAR[key];
+  }
+  return key;
 }
 
 /** Convert a singular metadata type name to its plural manifest field name. Returns the input unchanged if no mapping exists. */
 export function singularToPlural(key: string): string {
-  return SINGULAR_TO_PLURAL[key] ?? key;
+  if (Object.prototype.hasOwnProperty.call(SINGULAR_TO_PLURAL, key) && SINGULAR_TO_PLURAL[key]) {
+    return SINGULAR_TO_PLURAL[key];
+  }
+  return key;
 }

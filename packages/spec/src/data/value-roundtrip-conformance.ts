@@ -112,16 +112,28 @@ export type ValueRoundTripColumn = 'v_json' | 'v_multi' | 'v_string' | 'v_number
  * single fixture is one `create()` per row on every driver, and it keeps the
  * collision pairs — which span classes — expressible in one read.
  *
- * `v_multi` is `multiple: true` on an ordinary string field. That is the
- * #11535 shape and it is not a synonym for `v_json`: on the SQL family
- * `multiple` decides the column type **before** the type switch runs, so a
- * multi-value string and a declared `json` reach the JSON storage path by two
- * different routes and can diverge independently.
+ * `v_multi` is `multiple: true` on a `lookup`. That is the #11535 shape and it
+ * is not a synonym for `v_json`: on the SQL family multi-value decides the
+ * column type **before** the type switch runs, so a multi-value reference and a
+ * declared `json` reach the JSON storage path by two different routes and can
+ * diverge independently. `lookup` carries that route because it is NOT itself a
+ * JSON-class type — a single-value `lookup` is a plain string column.
+ *
+ * ⚠️ [#17469] It used to be `{ type: 'string', multiple: true }`, and that
+ * shape no longer exists. The maintainer ruling of 2026-09-13 gives
+ * "multi-valued" ONE definition — `isMultiValueField` — which the driver's
+ * storage decision now derives from, and `FieldSchema` refuses `multiple: true`
+ * on every type outside it. A driver alias such as `string` is not even an
+ * authorable `FieldType`, so the old spelling reached the JSON route by a door
+ * the protocol had closed. The route under test is unchanged; only the type
+ * that carries it is one the protocol recognises. ⛔ Do not restore the old
+ * spelling to "keep the fixture ordinary" — it would pin a branch the writer no
+ * longer has.
  */
 export const VALUE_ROUNDTRIP_FIELDS = {
   label: { type: 'string' },
   v_json: { type: 'json' },
-  v_multi: { type: 'string', multiple: true },
+  v_multi: { type: 'lookup', multiple: true },
   v_string: { type: 'string' },
   v_number: { type: 'number' },
   v_boolean: { type: 'boolean' },

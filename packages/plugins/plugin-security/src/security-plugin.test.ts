@@ -1233,7 +1233,7 @@ describe('SecurityPlugin', () => {
       expect(harness.findOne).not.toHaveBeenCalled();
     });
 
-    // ADR-0024 / cloud#551 — `managedBy: 'better-auth'` identity tables get the
+    // ADR-0135 D4 / cloud#551 — `managedBy: 'better-auth'` identity tables get the
     // SAME posture-gated superuser bypass as private/non-tenant objects (their
     // rows are written without a tenant stamp, so the wildcard tenant_isolation
     // would otherwise hide every row from a platform admin).

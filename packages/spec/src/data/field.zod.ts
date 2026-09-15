@@ -27,7 +27,7 @@ import {
   discriminateDefaultValueShape,
   suggestDefaultValueToken,
 } from './default-value-shape';
-import { AddressSchema } from './field-value.zod';
+import { AddressSchema, FILE_REFERENCE_TYPES, MULTI_CAPABLE_TYPES, MULTI_OPTION_TYPES, REFERENCE_VALUE_TYPES } from './field-value.zod';
 // #7918 — the ISO 4217 / CLDR fraction-digit contradiction check (maintainer
 // ruling 2026-08-12, Option A). One shared verdict for both anchors: the
 // field-level `precision` key and `CurrencyConfigSchema.precision`.
@@ -168,6 +168,44 @@ export const BOUNDED_STRING_FIELD_TYPES: ReadonlySet<string> = new Set([
 export const VALUE_DOMAIN_FIELD_TYPES: ReadonlySet<string> = new Set([
   'text',
 ] as const satisfies readonly FieldType[]);
+
+/**
+ * The types on which `multiple: true` is DECLARABLE — `MULTI_CAPABLE_TYPES` ∪
+ * `MULTI_OPTION_TYPES`, derived from the two sets rather than re-listed
+ * (#12017 two-copies failure shape; the #11875 lesson that a hand-written
+ * enumeration goes one revision stale).
+ *
+ * Package-internal on purpose: it is the superRefine's membership test, not a
+ * third answer to "is this field multi-valued". That question has exactly one
+ * answer — `isMultiValueField` (`field-value.zod.ts`) — and both of the sets
+ * this one unions stay untouched.
+ *
+ * ⚠️ Computed on FIRST USE, never at module top level. `field-value.zod` reaches
+ * back into this module through `shared/strict-object` → `shared/suggestions.zod`,
+ * so on the import orders that enter `field-value.zod` first its `const` bindings
+ * are still in the temporal dead zone while THIS module body runs — measured as
+ * `TypeError: MULTI_CAPABLE_TYPES is not iterable` in six spec suites. Spreading
+ * the sets inside the refinement (which runs at parse time, long after every
+ * module has settled) is the same discipline `lazySchema` applies above.
+ */
+let multiDeclarableTypes: ReadonlySet<string> | undefined;
+function multiDeclarableTypeSet(): ReadonlySet<string> {
+  return (multiDeclarableTypes ??= new Set([...MULTI_CAPABLE_TYPES, ...MULTI_OPTION_TYPES]));
+}
+
+/**
+ * What the refusal offers as a remedy: the declarable set MINUS `radio`.
+ *
+ * `radio` is multi-CAPABLE by the value contract — `isMultiValueField` still
+ * promotes it, which is the #11437 ruling's untouched half — and is refused at
+ * the authoring seam by that same ruling's own check. Offering it here would
+ * send the author from one refusal straight into another, so it is filtered
+ * out mechanically instead of by a second hand-written list.
+ */
+let multiDeclarableRemedyTypes: readonly string[] | undefined;
+function multiDeclarableRemedyTypeList(): readonly string[] {
+  return (multiDeclarableRemedyTypes ??= [...multiDeclarableTypeSet()].filter((t) => t !== 'radio'));
+}
 
 /**
  * Field types whose value is edited in a MULTILINE text editor whose inline
@@ -1043,7 +1081,7 @@ export const FieldSchema = lazySchema(() => {
    * branch. Same ruling: `required` on a multi-value lookup means non-empty
    * array (see `required` above).
    */
-  multiple: z.boolean().default(false).describe('Allow multiple values (Stores as Array/JSON). Applicable for select, lookup, file, image. An emptied multi-value lookup reads back as `[]`, never `null` — the rule binds every writer (cascade repair, form clears, API writes), not just cascade repair (maintainer ruling 2026-08-18).'),
+  multiple: z.boolean().default(false).describe('Allow multiple values (Stores as Array/JSON). Declarable ONLY on the multi-capable types — select, lookup, user, file, image — and redundantly on the inherently-multi option types (multiselect, checkboxes, tags); `multiple: true` on any other type is REFUSED at parse (maintainer ruling 2026-09-13), and on `radio` by the narrower 2026-08-22 ruling. An emptied multi-value lookup reads back as `[]`, never `null` — the rule binds every writer (cascade repair, form clears, API writes), not just cascade repair (maintainer ruling 2026-08-18).'),
   // `true` = unique WITHIN the tenant on a tenant-scoped object (composite
   // `(tenantField, field)` index); `'global'` = platform-wide single-column
   // unique. See {@link UniqueScopeSchema} for the scope vocabulary (ADR-0120).
@@ -1977,6 +2015,53 @@ export const FieldSchema = lazySchema(() => {
         'ever produce: declared multi, rendered single. Use a multi-choice type instead: `checkboxes` ' +
         '(all options visible, radio-like layout), `multiselect` (dropdown), or `tags` (free-form ' +
         'values). For a single-choice field, drop `multiple`.',
+    });
+  }
+
+  // [#17469] (maintainer ruling 2026-09-13, decision batch #128 item 5, option
+  // 1′ — the #11437 radio rule GENERALISED): an authored `multiple: true` is
+  // refused on every type outside MULTI_DECLARABLE_TYPES
+  // (`MULTI_CAPABLE_TYPES` ∪ `MULTI_OPTION_TYPES`).
+  //
+  // "This cell holds several values at once" has business meaning only on
+  // multi-select, multi-record / multi-user and multi-file fields — exactly
+  // what the spec already declares. A child record with several masters, a
+  // tree node with several parents, or a text box holding several texts has no
+  // business meaning on any mainstream platform. Today such a declaration is
+  // ACCEPTED silently, the UI renders a single-value control, driver-sql builds
+  // a JSON ARRAY column for it (`isJsonField`), and the related list's equality
+  // filter then answers the user a 400 — because `isMultiValueField` says "not
+  // multi-value" for the same field the storage layer arrayified. One
+  // definition of multi-valued, enforced at the entrance; the driver half of
+  // the ruling makes storage derive from that same predicate.
+  //
+  // `MULTI_CAPABLE_TYPES` / `isMultiValueField` (field-value.zod.ts) stay
+  // UNTOUCHED, exactly as in #11437: at-rest data keeps its read path and the
+  // ADR-0087 semantic entry (`field-multiple-non-capable-type-refused`) carries
+  // the hand-migration for any stored field that predates this. `multiple`
+  // materializes `.default(false)` above, so `true` here is always AUTHORED —
+  // this check can never fire on a defaulted value, and `parse(parse(x))` stays
+  // stable (#9689 class; pinned in field.test.ts).
+  //
+  // `radio` is INSIDE the set and is therefore never refused here — its own
+  // narrower #11437 check above owns that pair, so the two never double-fire.
+  if (field.multiple === true && !multiDeclarableTypeSet().has(field.type)) {
+    const alternative = REFERENCE_VALUE_TYPES.has(field.type)
+      ? 'a `lookup` with `reference` naming the same object (`multiple: true` there stores several related records)'
+      : FILE_REFERENCE_TYPES.has(field.type)
+        ? 'a `file` or `image` field, both of which take `multiple: true` for several attachments'
+        : '`multiselect` (dropdown), `checkboxes` (all options visible) or `tags` (free-form values) for several ' +
+          'option codes, or a `lookup` with `multiple: true` for several related records';
+    ctx.addIssue({
+      code: 'custom',
+      path: ['multiple'],
+      message:
+        `Field "${field.name ?? '<unnamed>'}": \`type: '${field.type}'\` cannot be combined with ` +
+        '`multiple: true` — a cell holding several values at once is declared only on ' +
+        `${multiDeclarableRemedyTypeList().map((t) => `\`${t}\``).join(', ')}, and \`${field.type}\` is not ` +
+        'one of them: the declaration would parse while the widget renders a single value, the SQL ' +
+        'driver builds a JSON array column for it, and every `=` filter against that column is then ' +
+        `answered 400. Use ${alternative}. For a single value, drop \`multiple\`.`,
     });
   }
 

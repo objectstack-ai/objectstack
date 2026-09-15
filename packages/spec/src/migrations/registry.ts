@@ -5779,6 +5779,63 @@ const step18: MigrationStep = {
         + '`dimension`/`granularity`/`dateRange`. Declared keys parse byte-identically to before.',
     },
     {
+      id: 'analytics-date-range-array-two-bounds-required',
+      // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
+      // code span already, and a nested backtick would close it.
+      surface:
+        'the ARRAY arm of timeDimensions[].dateRange on an analytics query — '
+        + 'AnalyticsQuerySchema / the POST /analytics/query and /analytics/sql bodies, a dataset '
+        + 'selection\'s timeDimensions, and any AnalyticsQuery a host passes to '
+        + 'AnalyticsService.query in-process — authored with anything other than EXACTLY two '
+        + 'string bounds: a one-element window such as ["2026-01-01"], the empty array [], and '
+        + 'three or more bounds such as ["2026-01-01", "2026-01-31", "2026-02-28"]',
+      replacement:
+        'exactly two string bounds — `[start, end]`. A ONE-ELEMENT window is that day written as '
+        + 'BOTH bounds: `[\'2026-01-01\']` becomes `[\'2026-01-01\', \'2026-01-01\']`, the shape '
+        + 'the shipped #16322 migration table already prescribes for a single day, and the shape '
+        + 'all four analytics faces have selected that one day with since PR #17593. ⛔ The EMPTY '
+        + 'array and THREE-OR-MORE bounds have NO replacement that can be derived from what was '
+        + 'written: an empty array names no window at all, and a 3+ array names no pair — decide '
+        + 'the window the widget was meant to show and write its two bounds, or drop the '
+        + 'dateRange entirely (the field is optional, and absent means the query is not '
+        + 'time-bounded). A relative window is a preset name from the closed vocabulary '
+        + '(`\'last_7_days\'`) or a date-macro pair (`[\'{7_days_ago}\', \'{today}\']`).',
+      reason:
+        'Maintainer ruling A on #17598 (decision batch #117 item 3, 2026-09-12, re-affirmed '
+        + '2026-09-13): the array arm was a bare `z.array(z.string())` with NO length constraint, '
+        + 'while the refusal sentence in the same source file said verbatim that "an explicit '
+        + 'window is the two-element array [start, end]" and #16322\'s shipped migration table '
+        + 'told an author to write a single day as `[\'2026-01-20\', \'2026-01-20\']`. So only the '
+        + 'TYPE was weaker than the prose beside it, and #17124 measured what that bought: one '
+        + 'authored `[\'2026-01-01\']` meant a point window on ObjectQLStrategy, NO time clause at '
+        + 'all on NativeSQLStrategy (the whole of history), an unbounded-above window in the '
+        + 'draft-preview evaluator, and a shifted point window in DatasetExecutor.runCompare — the '
+        + 'same document, four backends, four different numbers, no error on any of them. PR '
+        + '#17593 made all four faces refuse it with the ADR-0112 envelope `400 '
+        + 'ANALYTICS_DATE_RANGE_UNRECOGNIZED`, which left the contract door LOOSER than every '
+        + 'reader behind it; this narrowing closes that gap at the door. ⚠️ No D2 conversion and '
+        + 'no stored-metadata rewrite, deliberately: rewriting `[\'2026-01-01\']` to the same day '
+        + 'twice at load would be the platform deciding, silently, that the author meant one day '
+        + 'rather than a window whose end they forgot — and for the empty array and 3+ bounds '
+        + 'there is nothing to decide FROM. The blast radius is the WIDGET, not the page: a stored '
+        + 'dashboard carrying a now-refused range loses that widget with the accurate refusal '
+        + 'shown, and the dashboard still loads. Since PR #17593 every such stored range already '
+        + 'failed at QUERY time with the same code and status, so this adds no new class of '
+        + 'breakage — it moves the refusal to authoring time and states it accurately. '
+        + 'ADR-0049 / ADR-0087 / ADR-0112.',
+      acceptanceCriteria:
+        'Grep every authored `timeDimensions[].dateRange` ARRAY — dashboard widget datasets, saved '
+        + 'analytics queries, SDK / MCP callers, in-process `AnalyticsService.query` calls — and '
+        + 'count its bounds. Two string bounds parse byte-identically to before, as do every preset '
+        + 'name and an absent `dateRange`; anything else now answers one prescriptive issue at '
+        + '`timeDimensions.N.dateRange` naming the arity it received, so `AnalyticsQuerySchema.'
+        + 'safeParse` and `POST /analytics/query` both make the sweep mechanical. ⚠️ Do not trust '
+        + 'the numbers a one-element window used to produce: the four analytics faces disagreed '
+        + 'about what it meant, so a widget that showed a plausible figure may have been reading '
+        + 'all of history on one backend and a single day on another. Re-check what each converted '
+        + 'widget was supposed to show against its two explicit bounds.',
+    },
+    {
       id: 'analytics-time-dimension-date-range-vocabulary-closed',
       // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
       // code span already, and a nested backtick would close it.
@@ -7970,6 +8027,57 @@ const step18: MigrationStep = {
         + 'character — the author decides whether to delete or re-declare the integer they '
         + 'meant; a wanted minimum is re-declared as a positive integer and enforced by the '
         + 'write-time validator from the next write on.',
+    },
+    {
+      id: 'field-multiple-non-capable-type-refused',
+      surface: 'object.fields.<name>.multiple — an authored `multiple: true` on a field whose '
+        + '`type` is outside MULTI_CAPABLE_TYPES (`select` / `radio` / `lookup` / `user` / `file` / '
+        + '`image`) union MULTI_OPTION_TYPES (`multiselect` / `checkboxes` / `tags`) — e.g. '
+        + '`master_detail`, `tree`, `text`, `boolean`, `datetime`, `avatar`',
+      replacement: 'a multi-capable type that actually holds several values: `multiselect` / '
+        + '`checkboxes` / `tags` for several option codes, a `lookup` with `multiple: true` for '
+        + 'several related records (the replacement for a multi-valued `master_detail` / `tree`), '
+        + '`file` / `image` with `multiple: true` for several attachments — or, where the field '
+        + 'really does hold one value, dropping the `multiple` key. `MULTI_CAPABLE_TYPES` and '
+        + '`isMultiValueField` are unchanged, so every field that was ALREADY multi-valued by that '
+        + 'predicate keeps its declaration, its storage and its read path verbatim.',
+      reason:
+        '#17469 (maintainer ruling 2026-09-13, decision batch #128 item 5, option 1′ — the #11437 '
+        + 'radio rule generalised): two definitions of "multi-valued" disagreed. `FieldSchema` '
+        + 'accepted `multiple: true` on ANY type; driver-sql\'s `isJsonField` read it raw '
+        + '(`|| !!field.multiple`) and built a JSON ARRAY column; `isMultiValueField` — the spec '
+        + 'predicate consumers shape queries from — answered "not multi-value" for the same field. '
+        + 'A related list therefore composed `=` against a JSON array column and the driver answered '
+        + 'the user a 400 (objectui#8886 pinned the divergence on the consumer side; objectui#8937 '
+        + 'recorded it as owed and not filed). There is NO lossless conversion: the column was '
+        + 'physically built as a JSON array, so the stored value is an array while the replacement '
+        + 'type may want one scalar, several ids, or several option codes — which of those the author '
+        + 'meant is a business judgment the chain cannot make. Hence a structured TODO rather than an '
+        + 'auto-rewrite (ADR-0087 D3 "never silence", ADR-0032 "no silent failure"). Population '
+        + 'measured at ruling time: 0 in-tree and 0 in HotCRM (shallow clone c716a2c) — every '
+        + '`multiple: true` there is on `lookup` / `select`; re-measured on origin/main 689d606f '
+        + 'by AST sweep, still 0. '
+        + 'WIDER THAN THE JSON-COLUMN DECISION ALONE: every site in driver-sql that asked '
+        + '`field.multiple` "is this value multi-valued" now asks `isMultiValueField` \u2014 the DDL '
+        + 'writer, the read-side deserializer, the varchar-width mirror, the cross-field '
+        + 'comparison class, the four scalar read-coercion registries on both of their fills, '
+        + 'the two MySQL temporal-widening candidate sets, and the schema differ. So a stored '
+        + 'field in the retired shape also LEAVES the JSON read path and ENTERS the scalar one: '
+        + 'its column is no longer deserialized as JSON, the declared-type text-operator gate '
+        + 'applies to it, and a `$contains` against it answers the declared no-match instead of '
+        + 'a membership test.',
+      acceptanceCriteria:
+        'Every field in the stack parses: `ObjectSchema.parse()` / `objectstack validate` report no '
+        + 'issue on the `multiple` path. For each field the refusal names — the message states the '
+        + 'object-qualified field name and its `type` — the author has either dropped `multiple` or '
+        + 'moved the field to a multi-capable type AND migrated the stored column, because the two '
+        + 'storages differ: the old column holds a JSON array, the new one holds a scalar (dropping '
+        + '`multiple`) or a differently-shaped array (changing `type`). Prove the data half by '
+        + 'reading one migrated row back through the API and asserting the value shape the new '
+        + 'declaration promises; `=` filters against the field answer rows instead of a 400, and a '
+        + '`$contains` against it answers by member rather than the declared no-match. Fields '
+        + 'already multi-valued by `isMultiValueField` need no change and must read back '
+        + 'byte-identically.',
     },
     {
       id: 'field-scale-precision-integer-refused',

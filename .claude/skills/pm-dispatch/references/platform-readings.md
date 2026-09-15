@@ -126,7 +126,7 @@
 - ⇒ MCP 限流先探 REST 再定退避,⛔ 不据一侧限流把整个平台的写都停掉。
 - MCP 的读限流与写限流彼此独立,两向各有实测 ⇒ 一侧被拒 ⛔ 不推另一侧也不可用。
 - REST 档以本班 repo-scoped 探针绿为前提;403 会话改按降级梯读。
-- 容器 curl 的 REST 通道 = App installation token,core 15,000/时,与 GraphQL 池独立计。
+- 容器 curl 的 REST 通道令牌按会话定:installation(`claude[bot]`)或 user-to-server(用户),core 15,000/时。
 - GraphQL 池 5000/时,只留给没有 REST 对应物的几件。
 - 那几件 = draft 翻转、auto-merge 挂载、语义 `/search/*`、Projects field_values、`issue transfer`。
 - 逐操作通道归属、写侧配方与队列路由三读法见 `rest-channel.md`,⛔ 不在本表复述。

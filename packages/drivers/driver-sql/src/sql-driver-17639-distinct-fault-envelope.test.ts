@@ -5,7 +5,7 @@
  *
  * ## The measurement this suite is built from
  *
- * `driver-sql` stores every `multiple: true` column as `json`, and PostgreSQL's
+ * `driver-sql` stores every MULTI-VALUED column as `json`, and PostgreSQL's
  * `json` type defines no equality operator, so `SELECT DISTINCT` over one is
  * refused by the backend. Until this card, `SqlDriver.distinct` awaited the
  * builder BARE — no `try`/`catch`, no envelope — so the refusal left the driver
@@ -18,9 +18,20 @@
  *                               could not identify an equality operator for type json
  * ```
  *
- * Class-wide across every JSON column — `toggle`, `boolean` and `number` with
- * `multiple: true`, and `tags` — with a scalar `boolean` column in the same
- * table answering `[false, true]` as the lit control. A raw `42883` is on no
+ * Class-wide across every JSON column, with a scalar `boolean` column in the
+ * same table answering `[false, true]` as the lit control.
+ *
+ * ⚠️ [#17469] The original measurement named `toggle`, `boolean` and `number`
+ * carrying `multiple: true` as three of those columns. The maintainer ruling of
+ * 2026-09-13 gives "multi-valued" ONE definition (`isMultiValueField`) and
+ * derives this driver's storage from it, so those three declarations are
+ * ordinary SCALAR columns now and are not this card's population any more. The
+ * fixture below carries the same class — what its members share is the `json`
+ * STORAGE, never the declared type — re-spelled onto `select` / `lookup` /
+ * `user` with `multiple: true`, plus `tags`. The retired shape stays in the
+ * table as the ruling's own control: it ANSWERS, because it is a real
+ * `boolean` column. Nothing about the ENVELOPE this card is fenced to has
+ * moved. A raw `42883` is on no
  * list `@objectstack/rest` reads, so `status` was `undefined` and an ordinary
  * caller shape (list the distinct values of this column) was logged as an
  * UNHANDLED server fault rather than served as a declared `DATABASE_ERROR` 500.
@@ -294,7 +305,7 @@ for (const cell of DIALECT_CELLS) {
 // carried and #11635 fired.
 //
 // ⛔ Postgres only, and not for convenience: the divergence IS the dialect.
-// SQLite stores a `multiple: true` column as TEXT and MySQL's `json` compares,
+// SQLite stores a multi-valued column as TEXT and MySQL's `json` compares,
 // so `SELECT DISTINCT` answers on both; PostgreSQL's `json` defines no equality
 // operator and refuses. Asserting the refusal on the other two cells would pin
 // a fiction. The envelope invariant itself is measured on every cell by the
@@ -314,22 +325,37 @@ if (PG_CELL) {
           {
             name: JSON_TABLE,
             fields: {
-              toggles: { type: 'toggle', multiple: true },
-              flags: { type: 'boolean', multiple: true },
-              nums: { type: 'number', multiple: true },
+              // [#17469] The three columns here were `toggle` / `boolean` /
+              // `number` carrying `multiple: true`, and THAT SHAPE NO LONGER
+              // EXISTS. The maintainer ruling of 2026-09-13 gives
+              // "multi-valued" one definition (`isMultiValueField`), refuses
+              // the flag at the authoring entrance on every type outside it,
+              // and derives this driver's storage from the same predicate — so
+              // those declarations are ORDINARY SCALAR COLUMNS now, and writing
+              // `[false]` into one is a `boolean` column rejecting an array.
+              // What the card measures is the `json` STORAGE, which this
+              // fixture's own comment below already says, so the three columns
+              // are re-spelled onto multi-capable types that still reach it.
+              picks: { type: 'select', multiple: true },
+              refs: { type: 'lookup', multiple: true },
+              people: { type: 'user', multiple: true },
               tags_: { type: 'tags' },
               scalar_flag: { type: 'boolean' },
+              // [#17469] The retired shape, kept as the ruling's own control:
+              // a scalar `boolean` column, which ANSWERS `distinct` instead of
+              // refusing it.
+              retired_flags: { type: 'boolean', multiple: true },
             },
           },
         ]);
         await driver.create(
           JSON_TABLE,
-          { id: 'j1', toggles: [true], flags: [false], nums: [1], tags_: ['a'], scalar_flag: true },
+          { id: 'j1', picks: ['alpha'], refs: ['r1'], people: ['u1'], tags_: ['a'], scalar_flag: true, retired_flags: true },
           { bypassTenantAudit: true },
         );
         await driver.create(
           JSON_TABLE,
-          { id: 'j2', toggles: [false], flags: [true], nums: [2], tags_: ['b'], scalar_flag: false },
+          { id: 'j2', picks: ['beta'], refs: ['r2'], people: ['u2'], tags_: ['b'], scalar_flag: false, retired_flags: false },
           { bypassTenantAudit: true },
         );
       });
@@ -341,7 +367,7 @@ if (PG_CELL) {
 
       // Every declared shape the card measured, class-wide rather than
       // per-field-type: what they share is the `json` STORAGE, not the type.
-      for (const column of ['toggles', 'flags', 'nums', 'tags_']) {
+      for (const column of ['picks', 'refs', 'people', 'tags_']) {
         it(`distinct over '${column}' leaves as the envelope, not as pg's DatabaseError`, async () => {
           const err = await caught(() => driver.distinct(JSON_TABLE, column));
           expect(err.code, 'code').toBe('DATABASE_ERROR');
@@ -359,6 +385,20 @@ if (PG_CELL) {
       it('CONTROL a scalar column in the SAME table answers normally', async () => {
         const values = await driver.distinct(JSON_TABLE, 'scalar_flag');
         expect([...values].sort(), 'scalar_flag').toEqual([false, true]);
+      });
+
+      /**
+       * ⭐ [#17469] The ruling's own control, on the one cell that can see it.
+       * A `boolean` carrying `multiple: true` is NOT multi-valued, so it is a
+       * real `boolean` column here — not a `json` one — and `SELECT DISTINCT`
+       * therefore ANSWERS over it rather than raising 42883. This row is what
+       * turns red if the storage half of the ruling is reverted, and it is the
+       * second half of the fixture control: the refusals above are a property
+       * of `json` storage, not of the suite.
+       */
+      it('[#17469] CONTROL a RETIRED `multiple` boolean is a scalar column now — it ANSWERS', async () => {
+        const values = await driver.distinct(JSON_TABLE, 'retired_flags');
+        expect([...values].sort(), 'retired_flags').toEqual([false, true]);
       });
     });
   });

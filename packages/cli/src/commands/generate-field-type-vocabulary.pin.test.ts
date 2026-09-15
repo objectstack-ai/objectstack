@@ -443,7 +443,12 @@ describe('#14828 — the SQL answers are the platform’s, not this file’s inv
     // The second statement of the same rule, in the differ.
     const at = SCHEMA_DRIFT_SOURCE.indexOf('export function fieldHasColumn(');
     expect(at, 'fieldHasColumn moved or was renamed in driver-sql').toBeGreaterThan(0);
-    expect(SCHEMA_DRIFT_SOURCE.slice(at, at + 200)).toContain("!== 'formula'");
+    // [#17469] 600, not 200: `fieldHasColumn`'s first line is a call to
+    // `isMultiValueField(...)` with its argument object spelled out now, three
+    // times the width of the `field?.multiple` read it replaced. A window sized
+    // to the old spelling stops reaching the `formula` arm, and this assertion
+    // would then fail for a reason that has nothing to do with `formula`.
+    expect(SCHEMA_DRIFT_SOURCE.slice(at, at + 600)).toContain("!== 'formula'");
   });
 
   it('neither migration generator emits a column for a virtual field', () => {

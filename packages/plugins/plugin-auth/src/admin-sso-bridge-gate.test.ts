@@ -20,7 +20,7 @@
  *     org-scoped provider. A member who registered an org-less provider can
  *     drive its domain verification end to end.
  *
- *   The `auth-manager.ts` before-hook on `/sso/register` (ADR-0024) narrows
+ *   The `auth-manager.ts` before-hook on `/sso/register` (ADR-0135 D6) narrows
  *   the first bullet on ObjectStack deployments, but it admits org
  *   owners/admins — who are NOT platform admins under ADR-0068 — and until
  *   this card nothing pinned any of it: with SSO off (the stock boot) every
@@ -35,7 +35,7 @@
  *
  * The gate WRAPS the existing mounts: paths are unchanged and the admitted
  * path still re-dispatches through `authManager.handleRequest`, so better-auth
- * hooks keyed on the INNER paths (`/sso/register` — the ADR-0024 before-hook
+ * hooks keyed on the INNER paths (`/sso/register` — the ADR-0135 D6 before-hook
  * in auth-manager.ts) keep firing exactly as before. No better-auth hook is
  * keyed on `/admin/sso/*` itself (better-auth never serves those paths). The
  * "platform admin is delegated" cases below pin that delegation survives.

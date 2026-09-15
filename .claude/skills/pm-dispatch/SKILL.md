@@ -88,12 +88,14 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 - 维护者明示召唤是仲裁:有简报径直坐席;无简报才走保守确认,确认终止即坐席。
 - 互斥清 ⇒ fetch 后读三章程文件(本文、core-rules、本席章程)在 `origin/main` 的最新触碰 sha。
 - 异于上一开轮标记即先重读;留开轮标记(session ID + fire 时刻 + 该触碰,注明重读)再跑轮。
+- 同读 harness 载入面 `.claude/{settings.json,agents/*.md,hooks/*}` 的最新触碰是否已在共享检出 HEAD。
+- 否 ⇒ 收班、换新会话再派,⛔ 不推进共享检出;读数走 `scripts/pm/check-harness-current.mjs`。
 
 ## 全体座位的不变量
 
 - 状态只经 GitHub 标签、assignee、正文行与 `pm:seat` 座位贴读写;循环须能从全新会话恢复。
-- 用户账号仅三用:assignee、授权批准、维护者亲手;⛔ 席位与 dev 永不以用户账号写内容。
-- 内容恒经 REST 代理(`claude[bot]`);批准账号永不跑席位、不作席位 claude.ai 的关联用户。
+- 用户账号仅三用:assignee、授权批准、维护者亲手;批准账号永不跑席位或作其关联用户。
+- 内容写只走 REST 代理,⛔ 无 MCP 写;`user.login` 记令牌不记席位,归属 = 文本里的 session ID。
 - GitHub 上一切新内容用英文;中文只留四通道(维护者速读、轮报、裁决引文、四维分析)。
 - 裁决引文照抄不译;四维中文只管新记录,存量英文块 ⛔ 不迁移;存量中文 ⛔ 不追溯改写。
 - 一座位一车道双射:域 X 谁管、PM Y 管什么,各恰好一个答案。
@@ -190,7 +192,7 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 - 单车道仓 `cloud`、`objectos`、`hotcrm`、`www.objectos.ai`;未来新仓默认此类。
 - 单车道仓 `repo:*` 席自理机械三务,⛔ 不产 `domain:*`;决策卡入本仓收件箱,不落 objectstack。
 - 机械三务 = 自扫 sweep、自打 `type`、自做 `finding` 首触定级。
-- 新仓登记是一张清单:座位贴、标签、类别归属、门禁盘点。
+- 新仓登记是一张清单:座位贴、标签、类别归属、门禁盘点、写身份锁移植(deny + hooks)。
 - 新仓准入判据一句:这个仓真的需要常设席位吗。
 - hotcrm 收卡判据与宪章见 `references/lanes/hotcrm.md`。
 - objectui 卡按修复落点分流三流,`domain:ui` 是唯一新增标签。
@@ -469,9 +471,9 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 - 同笔 `Release:` 行点名已落项与余项去向;余项需换道/拆分加 `pm:retriage`,自队列重新认领。
 - 派发前按序执行原子对:① Assign @me,并把 `pm:dispatched` 与摘 `pm:queue` 放进同一次标签写入。
 - step ① 之后获得 assignee 的直接弃出本批。
-- ② 认领评论(英文),固定形状见 模板与表 节;首行以字面 `Claim:` 开头是机器判据。
-- 巡查谓词只认 `Claim:` 这一个拼写且保持严格,修法是全舰队向它收敛,⛔ 不放宽谓词。
-- session ID 不可省;`mode:subagent` 的 dev 与 PM 同会话同 ID,甄别身份是分支。
+- ② 认领评论(英文)照抄 模板与表 节:`Claim:` 首行,`Branch:`、`Clause-②:` 各占一行且行首。
+- 条款②入队闸门只读认领评论且只读行首键:句中提及与另发评论皆读不到,卡即不可读。
+- 谓词保持严格、⛔ 不放宽;session ID 不可省,`mode:subagent` 下 dev 与 PM 同 ID,身份看分支。
 - `Clause-②: yes | no` 恰这两种拼写,恒英文机器判据;判据:本卡放宽接受集或扩大公开面吗。
 - Container & model 行的档位引当次 `node scripts/pm/dispatch-gates.mjs --tier <paths>` 输出,⛔ 不凭记忆。
 - 末行 Serial constraints cleared 是落在评论里的读数,同包在飞单不点名等于没查。
@@ -532,8 +534,8 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 - 标准非协商条款 ⛔ 不抄进派发词:hook 已机械强制段与 os-dev.md 已载通用段砍掉。
 - ⛔ 不砍卡类特有约束:ADR 类 draft-only、tier 推导引用、棘轮实况、释义纪律。
 - 无条件条款只住角色文件,冲突时它胜、错了修那里,⛔ 不靠派发词临时覆盖。
-- 终报要求随派发词带一句:只收机器可核字段,⛔ 复述 PR body 叙事。
-- 机器可核字段 = gates / line_budget / deviations / files_changed。
+- 终报要求随派发词带一句:只收机器可核字段(gates / line_budget / deviations / files_changed)。
+- 派发令恒带 `Writes:` 行:只走 REST 代理、写预算(端点清单)、`mcp_calls` 计数,dev 两数都报。
 - 清单、路径、行号在派发那一刻从树上取,⛔ 不从卡片/上次派发/记忆抄。
 - 门禁清单取 `dispatch-gates.mjs --commands` 逐条跑,退出码先落盘,`--ran` 对账;⛔ 不抓人读输出。
 - 点名单是线索不是规格,dev 对实际改动重取补跑;行级断言转述前必须自己重验。
@@ -551,8 +553,7 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 - 翻转公开语义的裁决随卡带全仓 pin 清扫,两句缺一不可,原文见 runbook。
 - 拒收用例 ⇒ `code`+`status` 最低断言;过滤/谓词语义 ⇒ 编译面清单逐面申报,⛔ 静默略过。
 - 资源与后端:S 级机械 + M ⇒ `mode:subagent`;S 级但不机械(判断面在设计不在门禁)按 M 待遇。
-- `mode:cloud` 只保留给 L/XL、必须活过 PM 会话的工作、浏览器/dogfood 验证。
-- build 重的 M 卡逐卡判断是否上云。
+- `mode:cloud` 只保留给 L/XL、活过 PM 会话的工作、浏览器/dogfood 验证;build 重的 M 卡逐卡判。
 - 归档义务只落在云卡;OOM 死的单独重派;判定连同档位写进认领评论。
 - 一次性云卡用 `create_session`,⛔ 不用 create_trigger+fire;trigger 流只留给定时/重复型。
 - 云会话 `SendMessage` not-reachable 是设计非故障,⛔ 不复测。
@@ -563,8 +564,7 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 
 - 报告通道统一:GitHub 是两种模式共用的真相源;dev 终报先落 issue 评论、再作返回消息。
 - 收集先扫 GitHub,标记评论在 = 报告完整;两处皆无才进探活/判死。
-- 标记两种拼写等效:HTML 注释形与首行纯文本 `os-dev-report`。
-- ⛔ 仅凭 HTML 注释形式缺失永不读作报告未达;⛔ 永不把没收到失败通知读作还在跑。
+- 标记两种拼写等效(HTML 注释形、首行 `os-dev-report`);⛔ 永不把没收到失败通知读作还在跑。
 - 探活是每轮巡检的固定动作;完成通知不可靠,缺席什么都不证明。
 - ① 巡检首动作 `list_triggers` 确认 Routine 启用,在飞重挂加速器;唤醒归 Routine,漏挂不断链。
 - ② 在飞期间主巡检间隔 ≤45 分钟,待命期 60–70;节奏维护者明示可改。
@@ -599,6 +599,7 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 - 触 `skills/**` 的 PR 加问整包价值密度:从整包加载的客户 agent 座位读,⛔ 不从作者座位读。
 - 超派发预算或小功能大扩写 ⇒ REWORK,⛔ 不因已经写好了放行。
 - 判决 ACCEPT:issue 英文短评论,核对清单结论 + 抽查读数 + 偏差,链接 PR,⛔ 不复述其叙事。
+- `mcp_calls` 点名写工具(`settings.json` deny 清单 + `update_pull_request`)⇒ 拒收,⛔ 不带注放行。
 - 判决 REWORK:逐项反馈,同认领重派;补丁轮优先 SendMessage 续派原 dev;最多 2 轮,第三次升级。
 - 判决 ESCALATE:见 升级与决策 节。
 - **ACCEPT 之后的路径分叉**:翻 ready / 挂 auto-merge / 入队前先取一次 PR 的路径面。
@@ -771,8 +772,7 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 
 ## 报告契约
 
-- 终报 JSON 的权威形状住 `.claude/agents/os-dev.md` 终报消息节,字段与拼写以那里为准。
-- ⛔ 本文不抄终报形状的第二份。
+- 终报 JSON 的权威形状住 `.claude/agents/os-dev.md` 终报消息节,⛔ 本文不抄第二份。
 - `premise_still_valid: false` + `pr: null` 是合法终报,当再分诊输入复核,永不当失败派发。
 - `status: needs_decision` 时 `open_questions` 必须非空。
 - `out_of_scope_findings` 只列三类立卡与 `noted, not filed`;立卡附查重词、归挂、立在修复仓。

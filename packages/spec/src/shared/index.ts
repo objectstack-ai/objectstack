@@ -38,3 +38,11 @@ export * from './value-domain.zod';
 // rather than in a gate ledger: a key whose value is this schema is an instant,
 // not a duration, and `check:duration-unit-keys` recognises it structurally.
 export * from './epoch.zod';
+// [#18122] The closed DURATION vocabulary (`DurationMs` / `DurationSeconds`),
+// the counterpart of the instant above and step ① of ruling A on #18115: a
+// duration declares its unit either on its VALUE (one of these types) or as a
+// token in its KEY NAME, and `check:duration-unit-keys` learns to read the
+// first channel in step ② (#18123). Declared beside `epoch.zod` and exported
+// the same way, so both reach consumers on the `@objectstack/spec/shared`
+// subpath and neither widens the root entry.
+export * from './duration.zod';

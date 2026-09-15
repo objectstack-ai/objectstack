@@ -57,7 +57,7 @@
  */
 
 import { describe, it, expect, afterEach } from 'vitest';
-import { FieldType, FILE_REFERENCE_TYPES } from '@objectstack/spec/data';
+import { FieldType, FILE_REFERENCE_TYPES, MULTI_CAPABLE_TYPES } from '@objectstack/spec/data';
 import { SqlDriver } from './sql-driver.js';
 import { diffManagedTable, JSON_COLUMN_FIELD_TYPES, type PhysicalColumn } from './schema-drift.js';
 import { dialectCell } from './live-dialect-matrix.testkit.js';
@@ -93,6 +93,17 @@ const declaredOn = (moved: boolean): string[] =>
   [...JSON_COLUMN_FIELD_TYPES, ...(moved ? [] : FILE_REFERENCE_TYPES)];
 
 const MEDIA = [...FILE_REFERENCE_TYPES].sort();
+/**
+ * [#17469] The media family splits on `multiple` now. `file` / `image` are
+ * MULTI_CAPABLE_TYPES members, so `multiple: true` really does declare a list
+ * of ids there and the column is json on every deployment. `avatar` / `video` /
+ * `audio` are not — the 2026-09-13 ruling refuses the flag on them at the
+ * authoring entrance, and the driver's storage derives from the same predicate,
+ * so they are SINGLE-VALUE media columns and follow the ADR-0104 arm like any
+ * other. Both halves are read from the spec sets rather than listed.
+ */
+const MEDIA_MULTI_CAPABLE = MEDIA.filter((t) => MULTI_CAPABLE_TYPES.has(t));
+const MEDIA_SINGLE_ONLY = MEDIA.filter((t) => !MULTI_CAPABLE_TYPES.has(t));
 
 describe('the JSON-class predicate the differ reads is the one the writer reads (#15771)', () => {
   let driver: WriterProbe;
@@ -140,13 +151,23 @@ describe('the JSON-class predicate the differ reads is the one the writer reads 
       expect(gained).toEqual([]);
       expect(MEDIA).toHaveLength(5);
 
-      // A `multiple: true` media field is a LIST of ids — a json column on
-      // every deployment, and the one member of the family the arm must NOT
-      // move. `createColumn` short-circuits on `multiple` above its type
-      // switch, so a driver that keyed the arm too high would break it here.
-      for (const type of MEDIA) {
+      // A MULTI-VALUED media field is a LIST of ids — a json column on every
+      // deployment, and the one shape of the family the arm must NOT move.
+      // `createColumn` short-circuits on the multi-value predicate above its
+      // type switch, so a driver that keyed the arm too high would break it
+      // here. [#17469] "Multi-valued" is `isMultiValueField`, so this holds for
+      // `file` / `image` — and NOT for `avatar` / `video` / `audio`, whose
+      // `multiple: true` the protocol refuses: those stay single-value media
+      // columns and move with the arm like every other member.
+      expect(MEDIA_MULTI_CAPABLE).toEqual(['file', 'image']);
+      expect(MEDIA_SINGLE_ONLY).toEqual(['audio', 'avatar', 'video']);
+      for (const type of MEDIA_MULTI_CAPABLE) {
         expect(unmoved.asksJson(type, { type, multiple: true }), type).toBe(true);
         expect(moved.asksJson(type, { type, multiple: true }), type).toBe(true);
+      }
+      for (const type of MEDIA_SINGLE_ONLY) {
+        expect(unmoved.asksJson(type, { type, multiple: true }), type).toBe(true);
+        expect(moved.asksJson(type, { type, multiple: true }), type).toBe(false);
       }
 
       // The differ moves with it, by name, over the same declarations.
@@ -212,7 +233,12 @@ describe('the JSON-class predicate the differ reads is the one the writer reads 
     // trues and real falses rather than passing over a uniform answer.
     expect(differReports({ type: 'file' }, moved)).toBe(!moved);
     expect(differReports({ type: 'file', multiple: true }, moved)).toBe(true);
-    expect(differReports({ type: 'string', multiple: true }, moved)).toBe(true);
+    // [#17469] A multi-valued LOOKUP is the `multiple`-only json route now —
+    // `string` is a driver alias the spec predicate does not recognise, so
+    // `{ type: 'string', multiple: true }` is a plain varchar column and is the
+    // negative control on the line below it.
+    expect(differReports({ type: 'lookup', multiple: true }, moved)).toBe(true);
+    expect(differReports({ type: 'string', multiple: true }, moved)).toBe(false);
     expect(differReports({ type: 'string' }, moved)).toBe(false);
     expect(differReports({ type: 'integer' }, moved)).toBe(false);
   });

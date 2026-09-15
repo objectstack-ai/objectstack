@@ -96,7 +96,10 @@ describe('diffManagedTable — multi-value field over a stale textual column (#1
   });
 
   it('fires on a stale TEXT column, not only varchar — a text column takes the stringified literal just as happily', () => {
-    const out = diffTags({ type: 'string', multiple: true }, staleColumn('text'), 'postgres');
+    // [#17469] `lookup`, not `string`: "multi-valued" is `isMultiValueField`
+    // now, so only a multi-capable type reaches the json column by the
+    // `multiple` route — and `string` is not even an authorable FieldType.
+    const out = diffTags({ type: 'lookup', multiple: true }, staleColumn('text'), 'postgres');
     expect(out).toHaveLength(1);
     expect(out[0].actual).toBe('text');
   });
@@ -267,7 +270,7 @@ describe('diffManagedTable — multi-value field over a stale textual column (#1
     // returns at its `multiple` branch before `maxLength` is read, so the
     // emitter never asks for that width and the differ must not either.
     for (const dialect of ['postgres', 'mysql'] as const) {
-      const out = diffTags({ type: 'string', multiple: true, maxLength: 50 }, staleColumn('character varying', 255), dialect);
+      const out = diffTags({ type: 'lookup', multiple: true, maxLength: 50 }, staleColumn('character varying', 255), dialect);
       expect(out.map((d) => d.op.type)).toEqual(['manual_column_type_change']);
     }
   });
@@ -484,7 +487,10 @@ describe('diffManagedTable — a SINGLE-VALUE JSON-class field over a stale text
 
 const TABLE = 'os11535_task';
 const singleValueMeta = [{ name: TABLE, fields: { name: { type: 'string' }, tags: { type: 'string' } } }];
-const multiValueMeta = [{ name: TABLE, fields: { name: { type: 'string' }, tags: { type: 'string', multiple: true } } }];
+// [#17469] `tags` is a multi-valued LOOKUP, not a multi-valued `string`: the
+// driver's storage decision derives from `isMultiValueField`, so the old
+// spelling is a plain varchar column and would not exercise this fixture.
+const multiValueMeta = [{ name: TABLE, fields: { name: { type: 'string' }, tags: { type: 'lookup', multiple: true } } }];
 
 class DriftProbeDriver extends SqlDriver {
   /**
@@ -558,7 +564,7 @@ function declareBaseTypeDriftSuite(cell: DialectCell): void {
       // stale rather than simply correct.
       const fresh = `${TABLE}_fresh`;
       await driver.execute(`drop table if exists ${fresh}`).catch(() => {});
-      await driver.initObjects([{ name: fresh, fields: { tags: { type: 'string', multiple: true } } }] as any);
+      await driver.initObjects([{ name: fresh, fields: { tags: { type: 'lookup', multiple: true } } }] as any);
       const freshType = (await driver.columnsOf(fresh)).find((c) => c.name === 'tags')!.type;
 
       // [#12738] INVERTED on SQLite only, and the inversion REINFORCES this

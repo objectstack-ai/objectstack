@@ -86,12 +86,20 @@
  * ## Why this file is not beside its siblings in `packages/cli/test/`
  *
  * That directory was held by another in-flight card while this one was written,
- * so it was read-only to this change. `src/` turns out to be the stronger of the
- * two homes anyway, and deliberately so for the same reason
- * `utils/format.exit-code.test.ts` gives for living here: `packages/cli/
- * tsconfig.json` includes `src`, so `pnpm typecheck` compiles this file, while
- * no tsc program reads `packages/cli/test/`. `tsconfig.build.json` excludes
- * `src/**\/*.test.ts`, so nothing here ships.
+ * so it was read-only to this change. `src/` is still the home, for the reason
+ * `utils/format.exit-code.test.ts` gives: `packages/cli/tsconfig.json` includes
+ * `src` and excludes nothing, so `pnpm typecheck`'s first leg (`tsc --noEmit`)
+ * compiles this file. `tsconfig.build.json` excludes `src/**\/*.test.ts`, so
+ * nothing here ships.
+ *
+ * ⚠ The second half of that sentence — that no tsc program reads
+ * `packages/cli/test/` — is FALSE on this tree, and is corrected here rather
+ * than dropped because it is the half that would be copied. `typecheck` is
+ * `tsc --noEmit && pnpm check:test-typecheck`, and the second half runs
+ * `--project tsconfig.test.json`, whose `include` names `test/**\/*`: 181
+ * files under that directory are in that program, measured with
+ * `tsc --listFiles`. Neither home is a phantom; they differ only in which leg
+ * of `typecheck` reads them.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';

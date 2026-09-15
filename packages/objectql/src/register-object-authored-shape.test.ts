@@ -3,9 +3,15 @@
 /**
  * #5543 — runtime half of the `registerObject` authored-shape contract.
  *
- * The compile-time half lives in `register-object-authored-shape.pin.ts` (it has
- * to: this file is excluded from every tsc program the `typecheck` script runs,
- * so a `@ts-expect-error` written here would never be evaluated). What this file
+ * The compile-time half lives in `register-object-authored-shape.pin.ts`, which
+ * is where the `.pin.ts` convention puts it — ⚠ NOT because nothing compiles
+ * this file. That parenthesis used to read "this file is excluded from every
+ * tsc program the `typecheck` script runs", and it is FALSE on this tree:
+ * `typecheck`'s last leg (`pnpm check:test-typecheck`) runs
+ * `--project tsconfig.test.json`, whose `include` is `src/**\/*` with no test
+ * exclusion, and this file is in that program (measured with
+ * `tsc --listFiles`; the build program, which does exclude `**\/*.test.ts`, is
+ * the firing control at 0). What this file
  * adds is the other direction — that the literal which now *compiles* also
  * *registers*, unparsed, and comes back out with the authored keys intact and
  * without the `.default(...)` products fabricated on the way through. That is

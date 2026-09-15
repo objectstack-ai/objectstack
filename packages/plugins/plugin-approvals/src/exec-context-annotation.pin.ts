@@ -38,14 +38,22 @@
  * against it. A re-narrowing is then red twice over, and neither check depends
  * on the retired export coming back.
  *
- * WHY A `.pin.ts` AND NOT A `*.test.ts`: `packages/plugins/plugin-approvals/
- * tsconfig.json` excludes `**\/*.test.ts` (measured on this card, and the same
- * exclusion `plugin-sharing` carries — see #7136 / PR #7140), so no tsc
- * program the `typecheck` script runs would ever read a pin written in a test
- * file here: it would be a phantom check that stays green however this file is
- * broken (AGENTS.md, #5286's `PINS_CHECKED`). This file IS in that program. It
- * is imported by nothing, so tsup (entry `src/index.ts`) never bundles it into
- * `dist`.
+ * WHY A `.pin.ts` AND NOT A `*.test.ts`, stated to today's tree: a `.pin.ts`
+ * is not a test file, so `packages/plugins/plugin-approvals/tsconfig.json`'s
+ * exclusion of `**\/*.test.ts` does not reach it and `typecheck`'s
+ * unconditional first leg (`tsc --noEmit`) compiles it. It is imported by
+ * nothing, so tsup (entry `src/index.ts`) never bundles it into `dist`.
+ *
+ * ⚠ The old ground for this file — that the exclusion left "no tsc program
+ * the `typecheck` script runs" able to read a pin written in a test file here
+ * — is FALSE on this tree, and is corrected rather than deleted because the
+ * wrong version is what a sibling package copies. `typecheck` is
+ * `tsc --noEmit && tsc --noEmit -p tsconfig.scripts.json &&
+ * pnpm check:test-typecheck`, and the last leg runs
+ * `--project tsconfig.test.json`, whose `include` is `src/**\/*` with no test
+ * exclusion: 42 of this package's `src` test files are in that program,
+ * measured with `tsc --listFiles`. `plugin-sharing` carries the same exclusion
+ * and the same correction (see its `exec-context-annotation.pin.ts`).
  */
 
 import type { ApprovalService } from './approval-service.js';

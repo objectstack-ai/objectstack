@@ -8,7 +8,7 @@ import { ObjectSchema, Field } from '@objectstack/spec/data';
  * Backed by `@better-auth/sso`'s `ssoProvider` model. Each row is an external
  * IdP that THIS environment federates LOGIN to (the relying-party / client
  * side) — e.g. the customer's Okta / Entra / Google Workspace. This is the
- * per-environment SSO **mechanism** (ADR-0024): OPEN, configured in the env,
+ * per-environment SSO **mechanism** (ADR-0135 D6): OPEN, configured in the env,
  * and cloud-free for self-host.
  *
  * better-auth stores the protocol detail as a JSON blob in `oidc_config`
@@ -31,7 +31,7 @@ export const SysSsoProvider = ObjectSchema.create({
   icon: 'shield-check',
   isSystem: true,
   managedBy: 'better-auth',
-  // ADR-0024 — env-global, ADMIN-ONLY identity config. Two orthogonal controls,
+  // ADR-0135 D6 — env-global, ADMIN-ONLY identity config. Two orthogonal controls,
   // both re-premised in #6964 because the mechanisms they used to name expired:
   //   • `tenancy.enabled: false` — the env IS the tenant; providers are env-wide,
   //     not org-partitioned. What this marks out of the way is now the ADR-0095
@@ -61,7 +61,7 @@ export const SysSsoProvider = ObjectSchema.create({
   // ADR-0010 §3.7 — managed by better-auth; tenants may not edit schema.
   protection: {
     lock: 'full',
-    reason: 'Identity table managed by better-auth (@better-auth/sso) — see ADR-0024.',
+    reason: 'Identity table managed by better-auth (@better-auth/sso) — see ADR-0135 D6.',
     docsUrl: 'https://objectstack.ai/docs/references/shared/protection',
   },
   description: 'External SSO identity providers (OIDC / SAML) this environment federates login to',
@@ -148,7 +148,7 @@ export const SysSsoProvider = ObjectSchema.create({
       locations: ['list_item', 'record_header'],
       type: 'api',
       method: 'POST',
-      // ADR-0024 ② (opt-in OS_SSO_DOMAIN_VERIFICATION). Asks @better-auth/sso
+      // ADR-0135 D6 (opt-in OS_SSO_DOMAIN_VERIFICATION). Asks @better-auth/sso
       // for a one-time DNS-TXT challenge and reveals the ready-to-paste record
       // ONCE via `resultDialog`. Routed through the env bridge (plugin-auth /
       // cloud AuthProxyPlugin) which reshapes the `{domainVerificationToken}`
@@ -184,7 +184,7 @@ export const SysSsoProvider = ObjectSchema.create({
       locations: ['list_item', 'record_header'],
       type: 'api',
       method: 'POST',
-      // ADR-0024 ②. Re-checks the DNS-TXT record and flips `domain_verified`
+      // ADR-0135 D6. Re-checks the DNS-TXT record and flips `domain_verified`
       // on success. Routed through the env bridge, which maps @better-auth/sso's
       // empty 204 / 502 into a clear success/error toast.
       target: '/api/v1/auth/admin/sso/verify-domain',
@@ -269,7 +269,7 @@ export const SysSsoProvider = ObjectSchema.create({
       defaultValue: false,
       readonly: true,
       description:
-        'Whether DNS ownership of the email domain has been proven (ADR-0024 ②). Set by “Verify Domain” after the DNS TXT record resolves. Managed by better-auth — not directly editable. Only enforced when domain verification is enabled for the environment.',
+        'Whether DNS ownership of the email domain has been proven (ADR-0135 D6). Set by “Verify Domain” after the DNS TXT record resolves. Managed by better-auth — not directly editable. Only enforced when domain verification is enabled for the environment.',
       group: 'Identity',
     }),
 

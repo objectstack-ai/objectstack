@@ -70,7 +70,12 @@ describe('[#8197] target-field refusals × filter-subtree provenance', () => {
           stage: { type: 'text', name: 'stage' },
           // `multiple: true` ⇒ stored as a JSON TEXT column, which is what makes
           // the #7398 gate — the most reachable member of this family — fire.
-          [POLICY_JSON_COL]: { type: 'text', name: POLICY_JSON_COL, multiple: true },
+          // [#17469] On `select`, not `text`: "multi-valued" has one definition
+          // (`isMultiValueField`) and the driver's storage decision derives from
+          // it, so only a MULTI-CAPABLE type reaches the JSON column by this
+          // route — `text` + `multiple: true` is refused at the authoring
+          // entrance now and is a plain varchar column here.
+          [POLICY_JSON_COL]: { type: 'select', name: POLICY_JSON_COL, multiple: true },
           [POLICY_NUM_COL]: { type: 'number', name: POLICY_NUM_COL },
         },
       } as any,

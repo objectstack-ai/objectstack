@@ -37,8 +37,18 @@
  *   - vitest's default `include` collects `*.test.ts`, so a shared helper named
  *     that way is collected as a suite with no tests in it;
  *   - `packages/objectql/tsconfig.json` excludes `**\/*.test.ts`, so a helper
- *     named that way would be type-checked by no program the `typecheck` script
- *     runs. This file IS in that program.
+ *     named that way would be out of the BUILD program — `typecheck`'s
+ *     unconditional first leg. A plain `.ts` is in it.
+ *
+ * ⚠ That second reason used to read "type-checked by no program the
+ * `typecheck` script runs", which is FALSE on this tree and is corrected rather
+ * than deleted because the wrong version is what a sibling file copies:
+ * `typecheck`'s last leg (`pnpm check:test-typecheck`) runs
+ * `--project tsconfig.test.json`, whose `include` is `src/**\/*` with no test
+ * exclusion, and 299 of this package's `src` test files are in that program
+ * (measured with `tsc --listFiles`; 0 in the build program). The first reason
+ * — vitest collecting the file as an empty suite — is unaffected and is on
+ * its own sufficient.
  *
  * It is not reachable from `src/index.ts` or `src/core.ts`, so `tsup` never
  * bundles it and it is never published.

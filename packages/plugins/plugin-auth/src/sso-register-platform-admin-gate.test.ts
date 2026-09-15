@@ -5,7 +5,7 @@
  *
  * ## What this file pins, and why it exists at all
  *
- * `@better-auth/sso`'s own endpoint is served by the catch-all, and the ADR-0024
+ * `@better-auth/sso`'s own endpoint is served by the catch-all, and the ADR-0135 D6
  * before-hook in `auth-manager.ts` is the only thing deciding authorization on
  * it. Until this card that hook admitted *platform admin OR org owner/admin*,
  * while the `/admin/sso/*` bridges (#9653) admitted platform admins only — two
@@ -311,7 +311,7 @@ const postRegister = (send: (r: Request) => Promise<Response>, cookie?: string) 
     }),
   );
 
-describe('[#10009] direct /sso/register — the ADR-0024 before-hook admits platform admins only', () => {
+describe('[#10009] direct /sso/register — the ADR-0135 D6 before-hook admits platform admins only', () => {
   it('① an org OWNER who is not a platform admin is REFUSED 403 SSO_REGISTER_FORBIDDEN', async () => {
     const engine = await bootEngine();
     const manager = makeManager(engine);

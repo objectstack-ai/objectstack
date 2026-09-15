@@ -244,13 +244,20 @@ describe('#16322 — a string outside the vocabulary is REFUSED, not widened', (
         expect(thrown!.status).toBe(400);
     });
 
-    it('speaks the SPEC\'s wording — one condition, one sentence (#5240)', () => {
+    it('speaks the SPEC\'s wording for its OWN origin — one condition, one sentence (#5240)', () => {
         // ⛔ Not a second convention: the schema door answers this same text,
         // so an author correcting the value reads the same prescription
-        // wherever the refusal reached them.
+        // wherever the refusal reached them. [#17598 ②] What differs between
+        // the two doors is the one clause neither the input nor the wording
+        // can supply — WHERE it was refused — so the origin is asked for by
+        // name here. Passing `'schema'` instead would reproduce the defect this
+        // pins against: a refusal raised past the schema claiming it was the
+        // schema's.
         for (const bad of OUTSIDE) {
             expect(analyticsDateRangeUnrecognizedError(bad).message)
-                .toBe(analyticsDateRangeRefusalMessage(bad));
+                .toBe(analyticsDateRangeRefusalMessage(bad, 'runtime'));
+            expect(analyticsDateRangeUnrecognizedError(bad).message)
+                .not.toBe(analyticsDateRangeRefusalMessage(bad, 'schema'));
         }
     });
 

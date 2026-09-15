@@ -37,7 +37,12 @@
 
 // `.js` on the relative imports: without it `moduleResolution: nodenext` does
 // not resolve them, every imported symbol degrades to `any`, and the callbacks
-// below turn into a TS7006 pile in this package's TEST_DEBT entry.
+// below turn into a TS7006 pile. ⚠ That pile used to be described as landing
+// "in this package's TEST_DEBT entry"; no such entry exists on this tree —
+// `packages/rest/test-typecheck-debt.json` has `entries: {}` and
+// `scripts/check-type-check-coverage.mjs` holds no `@objectstack/rest` key in
+// either ledger literal. The layer is at ZERO, so the pile would be red on the
+// PR that introduced it rather than absorbed.
 import { describe, it, expect, vi } from 'vitest';
 import { RestServer } from './rest-server.js';
 import { mountAndRecordDirectRoutes } from './direct-mount-composition.js';

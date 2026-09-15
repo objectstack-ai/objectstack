@@ -14,7 +14,7 @@ import {
   type CurrencyValue,
 } from './field.zod';
 import { ObjectSchema } from './object.zod';
-import { MULTI_CAPABLE_TYPES, isMultiValueField } from './field-value.zod';
+import { MULTI_CAPABLE_TYPES, MULTI_OPTION_TYPES, isMultiValueField } from './field-value.zod';
 
 describe('FieldType', () => {
   it('should accept valid field types', () => {
@@ -2073,6 +2073,136 @@ describe('FieldSchema — authored `radio` + `multiple: true` is REFUSED (#11437
     // silently.
     expect(MULTI_CAPABLE_TYPES.has('radio')).toBe(true);
     expect(isMultiValueField({ type: 'radio', multiple: true })).toBe(true);
+  });
+});
+
+describe('FieldSchema — authored `multiple: true` on a NON-MULTI-CAPABLE type is REFUSED (#17469, maintainer ruling 2026-09-13, decision batch #128 item 5, option 1′)', () => {
+  // The #11437 radio rule generalised. `multiple` used to parse cleanly on
+  // every type: the UI rendered a single value, driver-sql built a JSON ARRAY
+  // column (`isJsonField`'s `|| !!field.multiple` clause), and `isMultiValueField`
+  // answered "not multi-value" for the same field — so a consumer that shaped
+  // its query from the spec predicate composed `=` against a JSON column and
+  // the driver answered 400. One definition of multi-valued, enforced here.
+
+  const NON_DECLARABLE = ['text', 'textarea', 'number', 'boolean', 'date', 'datetime',
+    'master_detail', 'tree', 'json', 'avatar', 'video', 'audio', 'formula', 'signature'] as const;
+
+  it('REJECTS every non-declarable type, naming the field, the type and the illegal pair on the `multiple` path', () => {
+    for (const type of NON_DECLARABLE) {
+      const def: Record<string, unknown> = { name: 'several', type, multiple: true };
+      if (type === 'master_detail' || type === 'tree') def.reference = 'account';
+      const r = FieldSchema.safeParse(def);
+      expect(r.success, `\`${type}\` + multiple: true must be REFUSED`).toBe(false);
+      if (!r.success) {
+        const issue = r.error.issues.find((i) => i.path.join('.') === 'multiple');
+        expect(issue, `\`${type}\` must raise its issue on the \`multiple\` path`).toBeDefined();
+        expect(issue!.message).toMatch(/"several"/);
+        expect(issue!.message).toContain(`'${type}'`);
+        expect(issue!.message).toMatch(/multiple: true/);
+      }
+    }
+  });
+
+  it('the rejection carries a remedy naming a multi-capable alternative (the ruling\'s own prescription)', () => {
+    const text = FieldSchema.safeParse({ name: 'labels', type: 'text', multiple: true });
+    expect(text.success).toBe(false);
+    if (!text.success) {
+      const message = text.error.issues.map((i) => i.message).join('\n');
+      expect(message).toMatch(/`multiselect`/);
+      expect(message).toMatch(/`checkboxes`/);
+      expect(message).toMatch(/`tags`/);
+      expect(message).toMatch(/`lookup`/);
+    }
+    // A reference type gets the reference-shaped remedy instead of the option list.
+    for (const type of ['master_detail', 'tree']) {
+      const r = FieldSchema.safeParse({ name: 'parents', type, reference: 'account', multiple: true });
+      expect(r.success).toBe(false);
+      if (!r.success) {
+        const message = r.error.issues.map((i) => i.message).join('\n');
+        expect(message).toMatch(/`lookup`/);
+      }
+    }
+    // A media type gets the media-shaped remedy.
+    const avatar = FieldSchema.safeParse({ name: 'faces', type: 'avatar', multiple: true });
+    expect(avatar.success).toBe(false);
+    if (!avatar.success) {
+      const message = avatar.error.issues.map((i) => i.message).join('\n');
+      expect(message).toMatch(/`file`/);
+      expect(message).toMatch(/`image`/);
+    }
+  });
+
+  it('the remedy enumeration is DERIVED from the two sets, and never offers `radio` (which its own rule refuses)', () => {
+    // #12017 two-copies failure shape: a hand-written enumeration goes stale.
+    const r = FieldSchema.safeParse({ name: 'labels', type: 'text', multiple: true });
+    expect(r.success).toBe(false);
+    if (!r.success) {
+      const message = r.error.issues.find((i) => i.path.join('.') === 'multiple')!.message;
+      for (const t of [...MULTI_CAPABLE_TYPES, ...MULTI_OPTION_TYPES]) {
+        if (t === 'radio') continue;
+        expect(message, `the remedy list must name \`${t}\``).toContain(`\`${t}\``);
+      }
+      // `radio` + `multiple: true` is refused by #11437, so offering it would
+      // send the author from one refusal straight into another.
+      expect(message).not.toContain('`radio`');
+    }
+  });
+
+  it('every DECLARABLE type still accepts `multiple: true` — the negative control', () => {
+    for (const type of [...MULTI_CAPABLE_TYPES, ...MULTI_OPTION_TYPES]) {
+      if (type === 'radio') continue; // its own #11437 refusal, pinned above
+      const def: Record<string, unknown> = { name: 'several', type, multiple: true };
+      if (type === 'lookup') def.reference = 'account';
+      if (['select', 'multiselect', 'checkboxes'].includes(type)) {
+        def.options = [{ label: 'Alpha', value: 'alpha' }, { label: 'Beta', value: 'beta' }];
+      }
+      const r = FieldSchema.safeParse(def);
+      expect(r.success, `\`${type}\` + multiple: true must stay ACCEPTED`).toBe(true);
+    }
+  });
+
+  it('`multiple: false` and an absent `multiple` stay accepted on a non-declarable type', () => {
+    // The refusal reads only the AUTHORED `true`; `multiple` materializes
+    // `.default(false)`, so this check can never fire on a defaulted value.
+    expect(FieldSchema.parse({ name: 'body', type: 'text' }).multiple).toBe(false);
+    expect(FieldSchema.parse({ name: 'body', type: 'text', multiple: false }).multiple).toBe(false);
+  });
+
+  it('parse(parse(x)) is stable on a non-declarable type — the materialized `false` re-parses cleanly (#9689 class)', () => {
+    const once = FieldSchema.parse({ name: 'body', label: 'Body', type: 'text' });
+    expect(FieldSchema.parse(once)).toEqual(once);
+  });
+
+  it('fires through ObjectSchema too — the publish path an object document crosses', () => {
+    const r = ObjectSchema.safeParse({
+      name: 'crm_lead',
+      label: 'Lead',
+      fields: { notes: { type: 'text', label: 'Notes', multiple: true } },
+    });
+    expect(r.success).toBe(false);
+    if (!r.success) {
+      expect(r.error.issues.map((i) => i.message).join('\n')).toMatch(/multiple: true/);
+    }
+  });
+
+  it('`radio` keeps its OWN narrower message — the two refusals never double-fire', () => {
+    const r = FieldSchema.safeParse({ name: 'severity', type: 'radio', multiple: true });
+    expect(r.success).toBe(false);
+    if (!r.success) {
+      const onMultiple = r.error.issues.filter((i) => i.path.join('.') === 'multiple');
+      expect(onMultiple).toHaveLength(1);
+      expect(onMultiple[0].message).toMatch(/a radio group is single-choice by definition/);
+    }
+  });
+
+  it('UNTOUCHED-HALF PIN — the ruling leaves `MULTI_CAPABLE_TYPES` and `isMultiValueField` alone', () => {
+    // Item 1 of the ruling states both are untouched: at-rest data keeps its
+    // read path, and the entrance is where the shape is refused. A "cleanup"
+    // that widens either to match the old driver behaviour trips this.
+    expect([...MULTI_CAPABLE_TYPES].sort()).toEqual(['file', 'image', 'lookup', 'radio', 'select', 'user']);
+    expect(isMultiValueField({ type: 'text', multiple: true })).toBe(false);
+    expect(isMultiValueField({ type: 'master_detail', multiple: true })).toBe(false);
+    expect(isMultiValueField({ type: 'tree', multiple: true })).toBe(false);
   });
 });
 describe('FieldSchema — `placeholder` is a DECLARED key (#9019, ruled Option C on objectui#4676)', () => {

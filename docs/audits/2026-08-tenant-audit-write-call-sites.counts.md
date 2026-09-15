@@ -52,14 +52,14 @@ holds still. They are required to be HERE and to say WHEN they were true;
 their values are not compared. The reasoning, and the measurement behind it,
 are in `scripts/check-tenant-audit-census.mjs`.
 
-Measured on 2026-09-13 at `f62bc2d0a`.
+Measured on 2026-09-14 at `d4554d4f5`.
 
 | corpus scale (not enforced) | count |
 | :--- | ---: |
-| tracked non-test sources scanned | 567 |
+| tracked non-test sources scanned | 568 |
 | engine-shaped types recognised | 61 |
-| declared objects in the registry | 300 |
-| same-named calls subtracted as non-engine | 138 |
+| declared objects in the registry | 117 |
+| same-named calls subtracted as non-engine | 140 |
 
 ## Every site
 

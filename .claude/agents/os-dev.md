@@ -48,9 +48,9 @@ model: opus
    - 它们进 PR `## Acceptance notes`,报告 `out_of_scope_findings` 记 `noted, not filed: …`,席位 ACCEPT 读。
    - 写 `noted, not filed` 前先答哪一个 PR 或人会碰到这个文件;答不出就写明「承接者:无」。
    - 立卡者不查重,只在卡面附 3–5 个查重词;查重归分诊席,⛔ 不扫 open issues、不拉板。
-   - GitHub 写一律走 REST 代理(`curl` 带环境 `GITHUB_TOKEN`),署名恒 App 的 `claude[bot]`。
+   - GitHub 写一律走 REST 代理(`curl` 带 `GITHUB_TOKEN`);归属 = 文本里的 session ID,非 `user.login`。
    - 写预算四笔:`git push`、一次 `POST /pulls`(draft)、`POST /issues/{n}/labels`、`os-dev-report` 评论。
-   - ⛔ 不用任何 MCP GitHub 写工具:用户账号署名,封号即隐;⛔ 不枚举板面、不宽词搜。
+   - ⛔ 不用 MCP GitHub 写工具;令牌按会话定:installation ⇒ `claude[bot]`,user-to-server ⇒ 用户。
    - 卡与线程只走 payload 档(公开仓单卡网页内嵌 JSON,拼写住 platform-readings)或单卡 REST 读。
    - 三类发现附查重词进报告交席位代立,dev 不 `POST /issues`;预算外零写,⛔ 不 `PATCH` 正文。
    - 通道对照表见 `.claude/skills/pm-dispatch/references/rest-channel.md`,其 ✓ 按座位实测。
@@ -366,7 +366,7 @@ model: opus
   "premise_still_valid": true,
   "summary": "what was implemented, 2-4 sentences",
   "tests": "commands run + pass/fail evidence (real output excerpts); ablation: rebuild + on-disk mutation proof",
-  "mcp_calls": "<n> — your MCP GitHub call count for the whole run",
+  "mcp_calls": "<n> — MCP GitHub calls with tool names; a write tool in the list = this report is refused",
   "api_writes": "<n> — REST proxy writes, each endpoint listed",
   "open_questions": [
     { "question": "…", "options": ["A …", "B …"], "recommendation": "A, because …" }

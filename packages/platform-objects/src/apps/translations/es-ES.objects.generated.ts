@@ -1774,7 +1774,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       domain_verified: {
         label: "Dominio verificado",
-        help: "Si se ha probado la propiedad DNS del dominio de correo (ADR-0024 ②). Lo establece «Verificar dominio» tras resolverse el registro DNS TXT. Gestionado por better-auth: no editable directamente. Solo se aplica cuando la verificación de dominio está habilitada para el entorno."
+        help: "Si se ha probado la propiedad DNS del dominio de correo (ADR-0135 D6). Lo establece «Verificar dominio» tras resolverse el registro DNS TXT. Gestionado por better-auth: no editable directamente. Solo se aplica cuando la verificación de dominio está habilitada para el entorno."
       },
       oidc_config: {
         label: "Configuración OIDC",
