@@ -55,6 +55,7 @@
 - ⇒ 落地方法读分支规则,⛔ 永不读 auto-merge 请求;树上每 PR 一个 squash 提交。
 - `auto_merge_enabled` webhook 载荷同报 `merge` ⇒ 三个载体一致也不作数,判据是落地提交的父数。
 - squash 落地重写署名 trailer:作者行按提交作者身份改拼,`Claude-Session:` 原样存活。
+- squash 的 committer date 是入队时刻,快进不改 ⇒ 落地时刻读 `merged_at`/`merged`,不读 `git log`。
 - `enable_pr_auto_merge` 对已 `mergeable_state: clean` 的 PR 照样成功,与工具描述的优雅失败相反。
 - 回显两向不可靠,空回显不等于未挂上 ⇒ ⛔ 不拿它当任何方向的证据、不为它空转。
 - 配额枯竭时 `enable_pr_auto_merge` 回成功而挂载根本没发生 ⇒ 验效果,不验回应。
@@ -393,8 +394,8 @@
 - required checks 的名单是每仓事实,objectstack 七个:
   `TypeScript Type Check` · `Lint & Repo Gates` · `Test Core` · `Dogfood Regression Gate` ·
   `Build Core` · `Temporal Conformance (live PG + MySQL)` · `Governed Surface Queue Guard`。
-- ⭐ 本表的 `mustName` 不要求排他 ⇒ 第七个加注册行不会让本表变红。
-- ⇒ ⛔ 门绿不是本行已对的读数:计数行只能手跟改。
+- ⭐ 本表的 `mustName` 声明 `statesTheSet` ⇒ 必须逐字等于注册表,加注册行不跟改本表即红。
+- ⇒ 门绿即名单逐字齐全的读数;⛔ 但数量词未钉:实测 七→六 照绿,只能手跟改。
 - `in_progress` 不是过;advisory 门禁红进 main 是共享损伤,照样止血立单。
 - ⛔ 聚合命令同样不作判定:`check:type-check-debt` 可在包级 typecheck 绿时红。
 - `check:i18n` 以 PREREQUISITE NOT MET(workspace CLI 未 build)退 3,不是漂移。
@@ -424,7 +425,7 @@
 - `check-governed-merges` 浅克隆上拒答而非少报,并报未审计仓数;补救 `git fetch --shallow-since=`。
 - ⛔ 不越过该拒答自行枚举:短清单读作合规;加深日期取窗口起点之前,不猜深度。
 - 前台 `sleep` 被 harness 拒 ⇒ 等待写成带 until 条件的前台阻塞等待,⛔ 不写 sleep 轮询循环。
-- `check:pm-dispatch-gates` 逾容器 600 秒前台上限 ⇒ detach 加 `tail --pid` 前台等;超时不是读数。
+- `check:pm-dispatch-gates` 单机 430–450 秒贴调用方容器上限 ⇒ detach 加 `tail --pid`;超时非读数。
 - `check-half-states.mjs` 连 `--help` 都跑整仓 I/O ⇒ 早读到的输出文件是空的,不是干净的。
 - 后台工具调用里再 `nohup … &` 会让包装器报假 `exit 0`,而真活还在跑。
 - 分支删除被拒有第二形态:代理回 403,与既有 send-pack 断连同处置 ⇒ 不可删,⛔ 不重试。
