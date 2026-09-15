@@ -2155,6 +2155,13 @@ export function branchNameTarget(ref) {
  * not narrow it here to serve H8: that would make the live half invisible to
  * the rows that exist to see it.
  *
+ * ⭐ And ⛔ not to serve H31 either (#18229). That row needs a stronger question
+ * — "does this PR CLOSE the card", because the gate's clearing stroke rides the
+ * landing — and it asks it of `bindingClosesCard` as a filter over the
+ * population THIS relation hands it. The narrowing is the READER's and lives
+ * beside the row that needs it; the relation stays wide, so H8, H31, H35 and
+ * H53 still cannot disagree about which PR delivers which card.
+ *
  * ## The boolean is DERIVED from `deliveryEvidence`, and stays byte-identical
  *
  * The verdict is now one `!== null` over `deliveryEvidence` below rather than a
@@ -3015,11 +3022,23 @@ export const PM_STATE_LABELS = [
 ];
 
 /**
+ * The ruling-anchor state: a card that stays OPEN by design, so nothing that
+ * fires on a CLOSURE ever fires on it. H9's header carries the measurement
+ * (`Restart-when: closed …#5499` parked a card forever because #5499 is one of
+ * these), and H31 reads it for the same structural reason — a gate hung on a
+ * card nothing closes is never cleared by the stroke that clears gates.
+ *
+ * One spelling, two readers: a second literal here is exactly the drift that
+ * lets one reader move and the other keep answering the old way.
+ */
+export const TRACKING_ANCHOR_LABEL = 'tracking';
+
+/**
  * Labels whose NORMAL shape is domain-without-pm-state, excluded by the
  * sweep's own protocol text (SKILL.md, Backlog sweep): flagging them would
  * report the protocol's design as a defect.
  */
-export const H13_EXEMPT_LABELS = ['tracking', 'status:parked', 'qa-run'];
+export const H13_EXEMPT_LABELS = [TRACKING_ANCHOR_LABEL, 'status:parked', 'qa-run'];
 
 /**
  * H13 threshold — "one sweep cycle": the triage Routine fires HOURLY and its
@@ -6045,6 +6064,44 @@ export function h30QueueRotting(issue, nowMs = Date.now()) {
 // governs enqueue and landing while the PR is open, and a merged carrier is a
 // closed-out stroke rather than a live half-write.
 //
+// ## Which binding makes a CARRIER PAIR (#18229)
+//
+// The comparison needs two carriers of ONE gate, and the gate is cleared by the
+// stroke that lands the increment. So the binding that puts a card into it is
+// the one that makes that landing reach the card: a CLOSING KEYWORD. A
+// `Part of #N` line is the opposite declaration — it says the PR is a MEMBER of
+// what #N tracks — and an epic tracker is by construction a card no PR closes.
+//
+// Measured, anchor #9857's 2026-09-14T19:45Z sweep: card #14122 (`tracking`, the
+// one-artifact/N-packages epic) drew a row saying the gate was missing from the
+// card half of a dual carrier, while the two PRs the row named — #18212 and
+// #18213 — each carried `Fixes` for their OWN card (#18202, #18204), each of
+// which carried the gate, and each said in the same line the predicate read that
+// #14122 is a tracker that stays open. Both real dual carriers were intact. The
+// row's own remedy text is action-shaped, so acting on it means hanging
+// `needs:contract-review` on a card nothing closes: the clearing stroke never
+// arrives and the gate sits there as a permanent false blocker. This false
+// positive costs a WRITE nothing later removes, and every correctly gated
+// sub-PR re-manufactures it on every sweep, forever.
+//
+// ⛔ The shared relation is NOT narrowed — `prDeliversCard`'s docblock forbids
+// that, and H8's open side, H35's sibling resolver, `claimDelivery` and the
+// pairing `check-clause2-carriers` derives all still read it wide. The narrowing
+// is H31's OWN, one filter over the population THIS row judges, so the rows
+// still agree about which PR delivers which card and differ only about which
+// binding makes a carrier pair — which is a question only this row asks.
+//
+// ## …and every other binding is DECLINED, never silently dropped
+//
+// A silent drop would be #4690 in this row's own uniform: a split that was never
+// judged would render exactly like a board whose two carriers agree, and this is
+// the one row that can tell 「被剥」 from 「从未挂过」. So a weak-bound delivering PR
+// whose carrier DISAGREES with the card's still produces a row — one that names
+// both carriers and the binding it read, says the comparison is not answerable
+// from that binding, and prescribes NOTHING. A weak-bound PR whose carrier
+// AGREES produces nothing, exactly as before: there is no split to report, and a
+// standing row per tracker per sweep is the disease above, not its cure.
+//
 // Report-only, and emphatically: this is a GATE. ⛔ Never a label written from
 // this script — a sweeper that hung or cleared a review gate would be issuing
 // the review verdict, and the one thing the whole clause-② chain forbids is
@@ -6055,8 +6112,42 @@ export function h30QueueRotting(issue, nowMs = Date.now()) {
 export const CONTRACT_REVIEW_LABEL = 'needs:contract-review';
 
 /**
+ * Does this PR's binding to card `n` make GitHub CLOSE the card on merge — the
+ * binding H31's carrier comparison needs (#18229)?
+ *
+ * One read of `deliveryEvidence`'s grading, ⛔ never a second keyword parser:
+ * that function grades the closing keyword FIRST and never lets position
+ * downgrade it, so a body carrying both `Fixes #N` and `Part of #N` answers
+ * `true` here — which is exactly what GitHub does on merge. The three weaker
+ * kinds answer `false`: `part-of` and `part-of-inline` declare MEMBERSHIP, and
+ * `branch-name` is a body that declared nothing at all, so neither says the
+ * landing reaches this card.
+ *
+ * ⚠️ It answers "does this PR CLOSE #n", never "does this PR deliver #n" —
+ * `prDeliversCard` owns the second question and stays wide for the readers that
+ * need a half in flight to be visible. ⛔ Do not substitute one for the other.
+ *
+ * Exported because the sibling shape is live one file over: the clause-② dual
+ * carrier that `check-clause2-carriers --pair` demands on an epic tracker
+ * reached through a `Part of` line (#18214) is the same question, and that fix
+ * wants this predicate rather than a second copy of it.
+ */
+export function bindingClosesCard(pr, n) {
+  return deliveryEvidence(pr, n) === 'closing-keyword';
+}
+
+/**
  * H31 — null when the two carriers agree (or the comparison is not yet
- * possible), else the finding sentence.
+ * possible), else the finding sentence, else — for a delivering PR bound to
+ * this card by something other than a closing keyword — the DECLINED sentence.
+ *
+ * Three outcomes, never two (#18229). A closing-keyword binding is adjudicated
+ * exactly as before, byte for byte. A weaker binding is never adjudicated and
+ * never silently dropped: it produces a row only when the two carriers actually
+ * differ, and that row states that it declined and prescribes no write. The
+ * declined row is deliberately NOT marked `UNJUDGED_MARKER`: that marker buys
+ * trim priority ahead of judged rows, and a decline must never sort ahead of a
+ * real carrier split in the same `gate` band.
  *
  * A PR row whose `labels` is not an array is one this sweep could not read, and
  * it is EXCLUDED from the comparison rather than counted as unlabelled: reading
@@ -6076,8 +6167,15 @@ export function h31ContractReviewCarrierSplit(issue, openPrs) {
   );
   if (delivering.length === 0) return null; // card-side-first is legal — see the header note.
   const cardGated = labelNames(issue ?? {}).includes(CONTRACT_REVIEW_LABEL);
-  const gatedPrs = delivering.filter((pr) => labelNames(pr).includes(CONTRACT_REVIEW_LABEL));
-  const barePrs = delivering.filter((pr) => !labelNames(pr).includes(CONTRACT_REVIEW_LABEL));
+  // The population split the header argues for (#18229): only a closing keyword
+  // makes a landing that reaches THIS card, so only those PRs are a carrier pair
+  // with it. The rest are reported below, never judged, and never dropped.
+  const judged = delivering.filter((pr) => bindingClosesCard(pr, n));
+  const declined = delivering.filter((pr) => !bindingClosesCard(pr, n));
+  const gatedIn = (prs) => prs.filter((pr) => labelNames(pr).includes(CONTRACT_REVIEW_LABEL));
+  const bareIn = (prs) => prs.filter((pr) => !labelNames(pr).includes(CONTRACT_REVIEW_LABEL));
+  const gatedPrs = gatedIn(judged);
+  const barePrs = bareIn(judged);
   // With its evidence (#16706) — this row names a PR as DELIVERING the card,
   // and a reader clearing a gate off it needs to know whether that rests on a
   // closing keyword or on a `Part of` that sat mid-line.
@@ -6107,7 +6205,33 @@ export function h31ContractReviewCarrierSplit(issue, openPrs) {
       `demonstrably still live one carrier over. ${contract}`
     );
   }
-  return null;
+  // Nothing adjudicable, or the adjudicable pair agrees. What is left is the
+  // weak-bound half: a PR this sweep believes delivers the card on evidence
+  // that does not close it. A DIFFERENCE there is still reportable — silence
+  // would render it identically to agreement, which is the one confusion this
+  // row exists to end — but it is not adjudicable, so the row says exactly that
+  // and asks for no write. Agreement here stays silent, as it was before.
+  const unjudgeable = cardGated ? bareIn(declined) : gatedIn(declined);
+  if (unjudgeable.length === 0) return null;
+  const anchorClause = labelNames(issue ?? {}).includes(TRACKING_ANCHOR_LABEL)
+    ? ` The card carries \`${TRACKING_ANCHOR_LABEL}\` — a ruling-anchor state that stays OPEN by design, the ` +
+      'same property that keeps a `Restart-when: closed …#N` exit from ever firing on one — so no PR will ' +
+      'close it, a gate hung here would never be reached by the stroke that clears gates, and it would sit ' +
+      'as a permanent blocker on a card whose sub-PRs are gated correctly one level down. '
+    : ' ';
+  const direction = cardGated
+    ? `the CARD carries \`${CONTRACT_REVIEW_LABEL}\` while the open PR ${list(unjudgeable)} does NOT`
+    : `\`${CONTRACT_REVIEW_LABEL}\` is on the open PR ${list(unjudgeable)} while the CARD does NOT carry it`;
+  return (
+    `${direction} — and this row DECLINES to judge that pair, which is NOT the same as reporting it ` +
+    'clean. The binding between the two is the one printed beside the PR number, and it is not a closing ' +
+    'keyword: a `Part of` line declares MEMBERSHIP in what this card tracks and a branch-name fallback ' +
+    'declares nothing at all, so neither says this PR\'s landing closes this card — and the gate\'s clearing ' +
+    `stroke rides that landing.${anchorClause}⛔ The row prescribes NOTHING: do not hang the gate on the ` +
+    'card and do not clear it off the PR on the strength of it. What is owed first is a reading of the PR ' +
+    'body — decide which card that PR actually delivers; only if a real half-write is behind it does anyone ' +
+    `write a carrier, and then it is the review's owner writing both in one stroke. ${contract}`
+  );
 }
 
 // ---------------------------------------------------------------------------
