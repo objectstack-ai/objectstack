@@ -25927,7 +25927,8 @@ async function selfTest() {
   t('H31: a PR row whose labels could not be read is not judged as bare', h31ContractReviewCarrierSplit(gateCard([CONTRACT_REVIEW_LABEL]), [{ ...bare, labels: undefined }]), null);
   t('H31: …and one readable bare PR alongside it still fires', typeof h31ContractReviewCarrierSplit(gateCard([CONTRACT_REVIEW_LABEL]), [{ ...bare, labels: undefined }, gatePr(11845, [])]), 'string');
   // The delivery relation is H8's, shared rather than re-derived.
-  t('H31: the branch-name fallback delivers a body-silent PR', typeof h31ContractReviewCarrierSplit(gateCard([CONTRACT_REVIEW_LABEL]), [{ ...bare, body: '' }]), 'string');
+  t('H31: the branch-name fallback still produces a row for a body-silent PR', typeof h31ContractReviewCarrierSplit(gateCard([CONTRACT_REVIEW_LABEL]), [{ ...bare, body: '' }]), 'string');
+  t('H31: …but it is the DECLINED one — a body that declared nothing does not close the card (#18229)', says(h31ContractReviewCarrierSplit(gateCard([CONTRACT_REVIEW_LABEL]), [{ ...bare, body: '' }]), 'DECLINES to judge'), true);
   t('H31: …and H8 reads the same PR as delivering the same card', prDeliversCard({ ...bare, body: '' }, '11427'), true);
   t('H31: a CLOSED card is out of scope', h31ContractReviewCarrierSplit(gateCard([CONTRACT_REVIEW_LABEL], { state: 'closed' }), [bare]), null);
   t('H31: a missing issue does not crash', h31ContractReviewCarrierSplit(undefined, [bare]), null);
@@ -25948,6 +25949,89 @@ async function selfTest() {
   // …and #10025, the other live carrier: gated, `pm:blocked`, no open PR at
   // all — the shape this row deliberately does NOT report.
   t('H31 live: #10025 (gated, no PR carrier yet) -> clean', h31ContractReviewCarrierSplit({ ...gateCard(['domain:services', 'pm:blocked', CONTRACT_REVIEW_LABEL]), number: 10025 }, [live11844]), null);
+
+  // -- H31: which binding makes a CARRIER PAIR (#18229) -----------------------
+  // The defect, byte-shaped from anchor #9857's 2026-09-14T19:45Z sweep: PR
+  // #18212 carries `Fixes #18202` (its own card, gated) AND a `Part of #14122`
+  // line naming the epic tracker, and H31 read the second as a delivery — so a
+  // correctly gated sub-PR manufactured an action-shaped row against a card no
+  // PR will ever close.
+  const pr18212 = (labels = ['documentation', 'size/l', 'tests', 'tooling', CONTRACT_REVIEW_LABEL]) => ({
+    number: 18212,
+    merged_at: null,
+    draft: true,
+    body:
+      'Fixes #18202\n\nPart of #14122 — the epic tracking the one-artifact/N-packages family. ' +
+      'That tracker stays open.',
+    head: { ref: 'claude/issue-18202-crossref-dependency-aware' },
+    labels: labels.map((name) => ({ name })),
+  });
+  const card18229 = (number, labels) => ({
+    number,
+    state: 'open',
+    labels: labels.map((name) => ({ name })),
+    assignees: [],
+    body: '',
+    title: '',
+  });
+  const tracker14122 = card18229(14122, ['priority:p2', TRACKING_ANCHOR_LABEL, 'domain:spec']);
+  const delivered18202 = card18229(18202, ['bug', 'priority:p1', 'pm:dispatched', 'domain:spec']);
+
+  // The binding predicate itself, both directions on ONE body.
+  t('#18229: a closing keyword closes the card it names', bindingClosesCard(pr18212(), '18202'), true);
+  t('#18229: a `Part of` line on the SAME body does not', bindingClosesCard(pr18212(), '14122'), false);
+  t('#18229: nor an inline `Part of`', bindingClosesCard({ number: 1, body: 'see part of #7918 above' }, '7918'), false);
+  t('#18229: nor the branch-name fallback', bindingClosesCard({ number: 1, body: '', head: { ref: 'claude/issue-9834-x' } }, '9834'), false);
+  t('#18229: a keyword outranks an inline `Part of` for the SAME card, exactly as GitHub does', bindingClosesCard({ number: 1, body: 'Fixes #7918\n\nsee part of #7918 above' }, '7918'), true);
+  t('#18229: a PR bound to no card at all closes nothing', bindingClosesCard({ number: 1, body: 'no declaration' }, '9999'), false);
+  t('#18229: a missing PR does not crash', bindingClosesCard(undefined, '1'), false);
+  // ⛔ The SHARED relation is untouched — the narrowing is H31's own filter.
+  t('#18229: ⛔ `prDeliversCard` is NOT narrowed — the tracker is still a delivery to H8/H35/H53', prDeliversCard(pr18212(), '14122'), true);
+  t('#18229: …and the evidence kind H8 prints is unchanged', deliveryEvidence(pr18212(), '14122'), 'part-of');
+
+  // The PIN: the tracker's row no longer prescribes a write.
+  const row14122 = h31ContractReviewCarrierSplit(tracker14122, [pr18212()]);
+  t('#18229 pin: the `Part of`-only tracker still produces a row — ⛔ not a silent skip', typeof row14122, 'string');
+  t('#18229 pin: …and the row says it DECLINED rather than reporting clean', says(row14122, 'DECLINES to judge'), true);
+  t('#18229 pin: …naming the binding it read', says(row14122, '#18212 (draft, via a `Part of` declaration)'), true);
+  t('#18229 pin: …and why a tracker can never clear a gate', says(row14122, 'ruling-anchor state that stays OPEN by design'), true);
+  t('#18229 pin: …the row prescribes NOTHING', says(row14122, 'prescribes NOTHING'), true);
+  t('#18229 pin: …it is ⛔ NOT the action-shaped sentence any more', says(row14122, 'more dangerous half'), false);
+  t('#18229 pin: …nor does it ask anyone to hang the gate on the card', says(row14122, 'do not hang the gate on the'), true);
+  t('#18229 pin: a decline is not a LOUD row', isLoudFinding(row14122), false);
+  t('#18229 pin: …and ⛔ not an UNJUDGED-ranked one either — it must never sort ahead of a real split', isUnjudgedFinding(row14122), false);
+  t('#18229 pin: the decline still carries the dual-carrier contract', says(row14122, 'READ-BACK'), true);
+
+  // The CONTROL: the card that PR actually closes is judged exactly as before.
+  const row18202 = h31ContractReviewCarrierSplit(delivered18202, [pr18212()]);
+  t('#18229 control: a closing-keyword binding whose card lacks the gate — the row STANDS', typeof row18202, 'string');
+  t('#18229 control: …and it is the unchanged action-shaped sentence', says(row18202, 'more dangerous half'), true);
+  t('#18229 control: …which is ⛔ not a decline', says(row18202, 'DECLINES to judge'), false);
+  t('#18229 control: …and the gated card half agrees -> clean', h31ContractReviewCarrierSplit(card(18202, ['bug', CONTRACT_REVIEW_LABEL]), [pr18212()]), null);
+
+  // Agreement on a weak binding stays SILENT — a standing row per tracker per
+  // sweep is the disease this fix cures, not the cure.
+  t('#18229: weak binding, both carriers gated -> clean', h31ContractReviewCarrierSplit(card(14122, [TRACKING_ANCHOR_LABEL, CONTRACT_REVIEW_LABEL]), [pr18212()]), null);
+  t('#18229: weak binding, neither carrier gated -> clean', h31ContractReviewCarrierSplit(tracker14122, [pr18212(['documentation', 'size/l'])]), null);
+
+  // The decline is about the BINDING; the anchor clause is the extra the label
+  // buys. A weak-bound ordinary card still reports, without that clause.
+  const weakOrdinary = h31ContractReviewCarrierSplit(card18229(14122, ['priority:p2']), [pr18212()]);
+  t('#18229: a weak-bound card with NO `tracking` still reports the split', says(weakOrdinary, 'DECLINES to judge'), true);
+  t('#18229: …without the ruling-anchor clause, which the label is what buys', says(weakOrdinary, 'ruling-anchor state'), false);
+
+  // Precedence: an adjudicable split outranks a decline, and names only the PR
+  // that can actually close the card.
+  const mixedCard18229 = card18229(11427, ['pm:dispatched']);
+  const mixed18229 = h31ContractReviewCarrierSplit(mixedCard18229, [gatePr(11844, [CONTRACT_REVIEW_LABEL]), { ...pr18212(), body: 'Part of #11427' }]);
+  t('#18229 precedence: a real carrier split wins over a decline', says(mixed18229, 'more dangerous half'), true);
+  t('#18229 precedence: …and names the closing-bound PR', says(mixed18229, '#11844'), true);
+  t('#18229 precedence: …⛔ never the `Part of`-bound one', says(mixed18229, '#18212'), false);
+
+  // One spelling of the ruling-anchor state, two readers (H13's exemption list
+  // and H31's clause) — a second literal is the drift this constant prevents.
+  t('#18229: the ruling-anchor label has ONE spelling', TRACKING_ANCHOR_LABEL, 'tracking');
+  t("#18229: …and H13's exemption list reads that same constant", H13_EXEMPT_LABELS.includes(TRACKING_ANCHOR_LABEL), true);
 
   // -- The window arithmetic (#11118) ----------------------------------------
   // The derivation is executable so that a cap and the sentence justifying it
