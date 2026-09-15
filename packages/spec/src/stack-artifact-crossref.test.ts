@@ -44,13 +44,16 @@
  * The compatibility statement that holds is not "nothing can newly fail". It
  * is two statements:
  *
- * - an input that passed the strict `defineStack` parse cannot newly fail at
- *   composition — its references already resolved against its own objects, a
- *   subset of the composed set;
+ * - an input that passed the strict `defineStack` parse AND did not opt in
+ *   cannot newly fail at composition — its references already resolved against
+ *   its own objects, a subset of the composed set. An opted-in input also
+ *   passed that parse, but it resolved against its own objects plus the names
+ *   it listed, and checking a listed name is what this pass is for — the
+ *   `ArtifactPass` block below is that refusal;
  * - an input that BYPASSED the strict parse (`strict: false`, a hand-built
  *   stack object) is checked for these two rules at composition for the FIRST
  *   time, and a dangling reference in it is refused where it previously
- *   composed.
+ *   composed with no diagnostic at all.
  *
  * The second is a narrowing, it is deliberate, and the three blocks at the
  * bottom of this file pin it as declared behaviour: the refusals themselves,

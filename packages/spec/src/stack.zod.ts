@@ -3804,10 +3804,15 @@ function assemblePackageBody(stack: ObjectStackDefinition): AssembledPackageBody
  * narrower than "nothing can newly fail", and the narrower statement is the
  * true one:
  *
- * - **An input that passed the strict `defineStack` parse cannot newly fail
- *   here.** Its references already resolved against its own objects, and its
- *   own objects are a subset of the composed set — so re-running the two rules
- *   over a superset is a no-op.
+ * - **An input that passed the strict `defineStack` parse and did NOT opt in
+ *   cannot newly fail here.** Its references already resolved against its own
+ *   objects, and its own objects are a subset of the composed set — so
+ *   re-running the two rules over a superset is a no-op. The qualifier is not
+ *   decoration: an input that DID opt in also passed the strict parse, but its
+ *   references resolved against its own objects PLUS the names it listed, and
+ *   a listed name is exactly what this pass exists to check. Redeeming that
+ *   claim against the real artifact is the whole point, so an opted-in input
+ *   can and does fail here — that is the `ArtifactPass` fixture, not a gap.
  * - **An input that BYPASSED the strict parse is checked for these two rules
  *   here for the first time.** `defineStack(config, { strict: false })` returns
  *   before {@link validateCrossReferences} runs at all, and a hand-built stack
