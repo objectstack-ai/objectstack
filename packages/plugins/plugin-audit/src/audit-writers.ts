@@ -726,8 +726,17 @@ function renderMilestoneSummary(
  * A code that is absent, or is not a scalar, collapses to ONE bucket rather
  * than growing one: an uncoded fault is "the uncoded fault on this object", and
  * a thousand of them is still one `error` line.
+ *
+ * ⚠️ [#17452] EXPORTED, for `auth-event-audit.ts`. That file carried a second,
+ * independent copy of the process-wide boolean this key replaced, and it now
+ * imports this one instead of re-spelling it — a second copy of the key is
+ * precisely how the defect reached that file, so a third spelling would be the
+ * same mistake again. Same seam as its `createFieldPresenceProbe` import.
+ * ⛔ Deliberately NOT re-exported from the package barrel: the sharing is
+ * internal to `@objectstack/plugin-audit` and the published surface is
+ * unchanged by it.
  */
-function auditFailureCauseKey(object: string, err: unknown): string {
+export function auditFailureCauseKey(object: string, err: unknown): string {
   const code = (err as { code?: unknown } | null | undefined)?.code;
   const bounded = typeof code === 'string' || typeof code === 'number' ? String(code) : '(no code)';
   // JSON rather than a separator character: an object name and a driver code
@@ -743,8 +752,11 @@ function auditFailureCauseKey(object: string, err: unknown): string {
  * the line printed a fixed remedy and never looked at `err`. The code is what
  * makes two failures the same failure (see {@link auditFailureCauseKey}), so it
  * leads; the message is what makes this one legible.
+ *
+ * ⚠️ [#17452] Exported alongside {@link auditFailureCauseKey} and for the same
+ * reason — the two are one shape, and the auth-event sink needs both halves.
  */
-function auditFailureCauseSummary(err: unknown, detail: string): string {
+export function auditFailureCauseSummary(err: unknown, detail: string): string {
   const code = (err as { code?: unknown } | null | undefined)?.code;
   return typeof code === 'string' || typeof code === 'number' ? `${String(code)}: ${detail}` : detail;
 }

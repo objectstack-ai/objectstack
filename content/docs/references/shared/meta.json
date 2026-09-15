@@ -1,6 +1,7 @@
 {
   "title": "Shared Protocol",
   "pages": [
+    "duration",
     "enums",
     "epoch",
     "expression",
