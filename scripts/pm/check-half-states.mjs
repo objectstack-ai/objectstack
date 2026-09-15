@@ -16039,8 +16039,9 @@ export function summaryLine(counts, findingCount) {
     `Untimestamped readings (H44): ${counts.readingComments ?? 0} comment(s) across ` +
     `${counts.readingThreads ?? 0} thread(s) ALREADY in hand were read for the five artefact shapes, ` +
     `and the seat leg widened the fetch to ${counts.readingSeatRead ?? 0} of ` +
-    `${counts.readingSeatCandidates ?? 0} HELD seat post(s) — every held seat, whatever its lane ` +
-    'spelling, which is wider than H32\'s own population and deliberately so. A seat post\'s window is ' +
+    `${counts.readingSeatCandidates ?? 0} seat post(s) — every HELD seat whatever its lane spelling, ` +
+    'PLUS the TRIAGE post whether or not it is held, which is wider than H32\'s own population in both ' +
+    'directions and deliberately so. A seat post\'s window is ' +
     `its NEWEST comment page, not the oldest one a page-less request returns: ${counts.readingSeatNewest ?? 0} ` +
     'of those post(s) had that page LOCATED from the carrier\'s own `comments` count and the rest fell ' +
     'back to page 1, one request per seat post either way and shared with H56, H64 and H65. ⛔ A verdict posted on a ' +
@@ -29078,7 +29079,12 @@ Mutual exclusion: \`get_comments\` page 747 → \`[]\`, page 746 = my own R+117 
   t('H44: no code is left unregistered by this change', familyRegistryCoverage().missing.length, 0);
   t('H44: every count key rides the enumerated forwarding contract', ['readingThreads', 'readingComments', 'readingSeatCandidates', 'readingSeatRead'].every((k) => SWEEP_COUNT_KEYS.includes(k)), true);
   t('H44 summary: the corpus pair is reported', saidBy('h44Readings', summaryLine({ readingComments: 411, readingThreads: 37 }, 0)).includes('411 comment(s) across 37 thread(s)'), true);
-  t('H44 summary: …and the widened seat leg with it', saidBy('h44Readings', summaryLine({ readingSeatRead: 10, readingSeatCandidates: 10 }, 0)).includes('10 of 10 HELD seat post(s)'), true);
+  // ⚠️ REWRITTEN (#18324), not deleted: this pin read `'10 of 10 HELD seat
+  // post(s)'` while the leg's population was held seats alone. The triage post
+  // is in it now whatever its holder, so a clause still saying HELD would have
+  // described the count wrongly on every run — the count itself is unchanged.
+  t('H44 summary: …and the widened seat leg with it', saidBy('h44Readings', summaryLine({ readingSeatRead: 10, readingSeatCandidates: 10 }, 0)).includes('10 of 10 seat post(s)'), true);
+  t('H44 summary: …and the clause names BOTH legs, so the count is readable', saidBy('h44Readings', summaryLine({ readingSeatRead: 10, readingSeatCandidates: 10 }, 0)).includes('every HELD seat whatever its lane spelling, PLUS the TRIAGE post whether or not it is held'), true);
   t('H44 summary: the PR residual is declared on EVERY run, not just interesting ones', saidBy('h44Readings', summaryLine({}, 0)).includes('PULL REQUEST is NOT in this corpus'), true);
   t('H44 summary: …and says the counts are a lower bound', saidBy('h44Readings', summaryLine({}, 0)).includes('LOWER BOUND'), true);
   t('H44 summary: a bare line renders numbers, never `undefined`', saidBy('h44Readings', summaryLine({}, 0)).includes('undefined'), false);
