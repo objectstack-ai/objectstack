@@ -662,16 +662,16 @@ describe('manifest.id — reverse-domain identifier', () => {
     // The point of the shared constant: one verdict, two surfaces. A future
     // edit to either regex literal would have to break this table to pass.
     const cases = ['com.acme.crm', 'org.apache.superset', 'blank', 'com.example.my_app', 'Com.App', 'a.b'];
+    // Judged per FIELD, not on whole-object success: the two schemas require
+    // different neighbours, so an overall verdict would be measuring those.
+    const fieldRefused = (schema: typeof ManifestSchema | typeof PackageSchema, key: string, value: unknown) => {
+      const r = schema.safeParse({ [key]: value } as never);
+      return r.success ? false : r.error.issues.some((i) => i.path[0] === key);
+    };
     for (const id of cases) {
-      const authoring = ManifestSchema.safeParse({ id, version: '1.0.0', type: 'app', name: 'X' }).success;
-      const registry = PackageSchema.safeParse({
-        id: '00000000-0000-4000-8000-000000000000',
-        manifestId: id,
-        name: 'X',
-        type: 'app',
-      }).success;
-      expect(registry, `registry verdict for ${id}`).toBe(authoring);
-      expect(MANIFEST_ID_PATTERN.test(id), `pattern verdict for ${id}`).toBe(authoring);
+      const refused = !MANIFEST_ID_PATTERN.test(id);
+      expect(fieldRefused(ManifestSchema, 'id', id), `manifest.id verdict for ${id}`).toBe(refused);
+      expect(fieldRefused(PackageSchema, 'manifestId', id), `manifestId verdict for ${id}`).toBe(refused);
     }
   });
 });
