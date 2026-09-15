@@ -227,6 +227,18 @@ describe('the `aria` tombstones name only live `AriaProps` carriers (#6756)', ()
     // retirement registers TWO keys, `ui/ChartConfig:aria` and
     // `ui/ReportChart:aria`. If the extension ever stopped carrying it, a report
     // author would meet a bare unrecognized-key error with no upgrade in it.
+    //
+    // ⚠️ Read the second key as ARITHMETIC, not as scope. Exactly ONE property
+    // on exactly ONE schema was retired; `ReportChart:aria` is not a second
+    // decision and is not separable from the first, because there is no second
+    // declaration to leave alone — the extension has no `aria` of its own to
+    // keep. The build gate says so before any author does: tombstoning the one
+    // property fails `build-schemas.ts` check (b) with *"2 key(s) were
+    // tombstoned with no registered retirement"* naming BOTH, and stays red
+    // until both are registered. Same shape as `shared/FieldMapping:transform`,
+    // where one tombstone produced three keys; `RETIRED_KEYS_BY_MAJOR`'s own
+    // docblock states the rule — registered per key, nothing radiating from the
+    // base.
     const message = messageOf(ReportChartSchema.safeParse(reportChartWithAria));
     expect(message).toContain('`ChartConfig.aria`');
     expect(message).toContain('`report.blocks[].chart.aria`');
