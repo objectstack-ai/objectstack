@@ -1796,7 +1796,7 @@ spells them, so one consumer reads both commands.
 | `os environments list` | List environments visible to the current session |
 | `os environments show <id>` | Show one environment |
 | `os environments create` | Provision a new environment |
-| `os environments switch <id>` | Set the active environment for later CLI calls |
+| `os environments switch <id>` | Set the active environment for later CLI calls. Recorded in `~/.objectstack/cloud.json` as well when the control plane it talked to is the one `os cloud login` recorded, so [`os package publish --install`](#os-package-publish) can use it |
 | `os environments bind <id>` | Bind a compiled local artifact to an existing environment |
 
 #### Create an environment from a local artifact
@@ -1853,6 +1853,7 @@ os package publish                                        # dist/objectstack.jso
 os package publish --manifest-id com.acme.crm --version 1.2.0
 os package publish dist/objectstack.json --visibility org --note "first cut"
 os package publish --env env_abc123 --install             # publish, then install into an environment
+os package publish --install                              # into the active environment (os environments switch)
 OS_CLOUD_URL=http://localhost:4000 os package publish     # against a local control plane
 ```
 
@@ -1862,6 +1863,16 @@ OS_CLOUD_URL=http://localhost:4000 os package publish     # against a local cont
 `~/.objectstack/credentials.json` — that is the runtime identity
 [`os login`](#os-login) writes, and the two are different accounts. With no
 token at all the command exits `1` and tells you to run `os cloud login`.
+
+**The install target follows the same split.** `--install` with no `--env` uses
+the environment `os environments switch` recorded **in `cloud.json`**, and that
+id is only used when `cloud.json`'s `url` is the control plane this publish is
+POSTing to. It is never read out of `credentials.json`: the two files name
+different servers (`credentials.json` defaults to `http://localhost:3000`), so
+an id taken from there can belong to a different control plane — and the server
+resolves an install target by bare id, with no name or short-id rescue. A value
+written by an older CLI into `credentials.json` is copied across once, and only
+when both files' `url`s agree.
 
 **Options:**
 
@@ -1877,8 +1888,8 @@ token at all the command exits `1` and tells you to run `os cloud login`.
 | `--category <slug>` | — | Marketplace category slug (`crm`, `hr`, `devtools`, …) |
 | `--visibility <level>` | — | `org` (default, installable across your organization) · `private` (explicit grants only) · `marketplace` (public after review) |
 | `--org <id>` | `OS_ORG_ID` | `owner_org_id`. Required with a bearer key in service mode; ignored in user mode |
-| `--env <id>` | `OS_ENVIRONMENT_ID` | Environment to install the new version into |
-| `--install` | — | Auto-install into `--env` after publishing. Passed without `--env` it reports the mistake and publishes without installing |
+| `--env <id>` | `OS_ENVIRONMENT_ID` | Environment to install the new version into. Defaults to the environment [`os environments switch`](#cloud-environments) recorded **for this control plane** in `~/.objectstack/cloud.json` |
+| `--install` | — | Auto-install into `--env` after publishing. With no `--env`, no `$OS_ENVIRONMENT_ID` and no active environment for this control plane, it reports that and publishes without installing |
 | `--seed-sample-data` | — | Include sample data in that auto-install |
 | `--pre-release` | — | Mark the version as a pre-release (also inferred — see below) |
 | `--submit` | — | Submit the new version for marketplace review. Needs `--visibility marketplace` and a complete listing |

@@ -136,6 +136,9 @@ os package publish
 
 # explicit artifact + install into an environment in one step
 os package publish ./dist/objectstack.json --env env_prod --install
+
+# no --env: installs into the environment `os environments switch` last selected
+os package publish --install
 ```
 
 The CLI:
@@ -154,8 +157,14 @@ Common flags:
 | `--version`, `-v` | — | Semver version (default: `artifact.manifest.version`) |
 | `--visibility` | — | `org` (default) · `private` · `marketplace` |
 | `--org` | `OS_ORG_ID` | Owner org id (service mode) |
-| `--env` | `OS_ENVIRONMENT_ID` | Environment to install the new version into |
+| `--env` | `OS_ENVIRONMENT_ID` | Environment to install the new version into. Defaults to the environment `os environments switch` recorded for this control plane in `~/.objectstack/cloud.json` |
 | `--install` | — | Auto-install the new version into `--env` after publishing |
+
+The `--env` default is read from the **cloud** credential store only, and only
+when that file's `url` is the control plane being published to. It is never
+taken from `~/.objectstack/credentials.json`: that file records the runtime
+identity's server (`http://localhost:3000` by default), so an environment id
+from there can name an environment on a different control plane.
 
 In user mode the package is owned by your active organization; in service mode
 (bearer key) pass `--org`. See [Packages](/docs/plugins/packages) for the package model.
