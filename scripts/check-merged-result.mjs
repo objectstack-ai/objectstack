@@ -91,15 +91,17 @@
  *     precisely because it is the one the outbound placement is structurally
  *     blind to.
  *   - **Its failure mode is under-reporting.** It needs a live GitHub read at
- *     gate time — measured on this board: 1 list call plus one file-listing call
- *     per open PR, 13 calls at 12 open PRs, against a gate population that is
+ *     gate time. Re-measured on this board the day this landed: 1 list call plus
+ *     one file-listing call per open PR — 14 calls for 13 open PRs, 6.6 s wall,
+ *     4 of those 13 touching a ratcheted path — against a gate population that is
  *     deliberately hermetic and token-free. A read that fails answers "no
  *     affected PRs", which is the very reading — clean because it was never
  *     looking — this card is about.
  *
  * Both are recorded rather than argued: the probe below needs no network, no
- * credentials and no token, and runs offline in 194 ms of materialisation plus
- * the gate's own time when scoped with `--path`.
+ * credentials and no token. Measured here against `origin/main` with the line
+ * ratchet as the gate: 0.9 s end to end scoped with `--path` (both trees
+ * materialised, both gate runs included), 3.7 s materialising the whole tree.
  *
  * ## Where it runs
  *
@@ -109,6 +111,12 @@
  * stale for the same reason the PR's own CI was; and the merge queue already
  * runs the real thing at the one moment it is authoritative. This probe is the
  * cheap early reading between those two, which is exactly what was missing.
+ *
+ * `pnpm check:merged-result` is therefore this file's `--self-test` and nothing
+ * else — it grades the instrument, ⛔ never a tree. Wiring that self-test into CI
+ * is one workflow step and is NOT done here: this card's claim did not extend to
+ * `.github/workflows/**`, so until a maintainer adds it, the instrument is
+ * protected by whoever runs it.
  *
  * ## The reading discipline this probe holds itself to
  *
@@ -124,7 +132,12 @@
  * machines: under `mawk` — Debian's and this image's `/usr/bin/awk` — `length`
  * is byte-based in EVERY locale, so dropping `LC_ALL=C` changes nothing and the
  * bug ships to whoever runs `gawk`, where a UTF-8 locale counts CHARACTERS and a
- * 3-byte-per-character corpus under-reports threefold. A byte budget measured by
+ * 3-byte-per-character corpus under-reports threefold. Measured on this image,
+ * both halves separately: `mawk` and `/usr/bin/nawk` each answer 9 for three Han
+ * characters with `LC_ALL` unset and with `LC_ALL=C` — so the guard is a no-op
+ * HERE and its absence is unfalsifiable HERE; no `gawk` is installed, so the
+ * divergent half is documented behaviour rather than a local reading, which is
+ * exactly why it must not be left to `awk` at all. A byte budget measured by
  * `awk` is therefore a budget whose meaning depends on the operator's `awk`; the
  * self-test's Chinese positive control pins the byte reading through a fixture
  * line that is legal by characters and illegal by bytes.
@@ -645,7 +658,13 @@ export function selfTest() {
   for (const c of failed) console.error(`  ✗ ${c.name}${c.detail ? ` — ${c.detail}` : ''}`);
   if (failed.length) {
     console.error(`✗ ${TAG} self-test: ${failed.length} of ${cases.length} case(s) failed.`);
-    return 1;
+    // ⛔ Not `return 1`. The handshake at the dispatch fires whenever the flag is
+    // unset, and a RED verdict is still a verdict: returning here prints "never
+    // reached its verdict" on top of a self-test that finished and said so, which
+    // teaches the reader to discount the one line that means the instrument broke.
+    // Exiting from the failure branch is the landed shape — see
+    // `scripts/check-agent-model-declared.mjs`, which every self-test here copies.
+    process.exit(1);
   }
   console.log(
     `✓ ${TAG} self-test: ${cases.length} cases pass over a real git fixture `
