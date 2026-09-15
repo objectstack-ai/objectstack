@@ -40,6 +40,14 @@ export interface CloudConfig {
   userId?: string;
   /** Active organization id chosen for publishing. */
   activeOrgId?: string;
+  /**
+   * Active environment id **on this control plane**, recorded by
+   * `os environments switch` and read back by `os package publish` as the
+   * `--env` fallback. It sits here, beside this file's own `url`, because an
+   * environment id is only resolvable on the server it was chosen on — see
+   * `active-environment.ts`, which owns that gate.
+   */
+  activeEnvironmentId?: string;
   /** ISO timestamp when the credential was created. */
   createdAt: string;
   /** ISO timestamp of last use (best-effort). */
