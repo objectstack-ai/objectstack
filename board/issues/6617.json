@@ -1,0 +1,36 @@
+{
+  "number": 6617,
+  "kind": "issue",
+  "title": "spec: JobHandler 增加可选的「跑完但没干成」回报通道 —— #5548 裁决(B-minimal)的契约半边,可加性,Promise&lt;void&gt; handler 零改动",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:dispatched",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T07:24:55Z",
+  "updated_at": "2026-08-09T12:27:24Z",
+  "closed_at": "2026-08-09T12:27:24Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6617",
+  "body": "Part of #5548(维护者 2026-08-08 批复 services 座位三轴分析,采纳 **B-minimal**)。按 shared-contract 规则(`packages/spec` 恒归 spec 座位)contract-first 拆分:spec 半边先行,services 半边(#5548,DbJobAdapter 映射)Blocked-by 本单。\n\n## 裁决要点(不再重开)\n\n- **A(让这类 handler 抛错)被否**:改变 `JobHandler`/`IJobService` 失败语义,第三方实现可能据 throw 重试——#5529 当时已明确拒绝顺手这么做;\n- **C(文档化「status = 没抛异常」)被否**:把审计面的静默合法化,违背「fail-open/fail-closed 都可裁,静默不可裁」(#5146/#4936/#4761 一脉);\n- **B-minimal 采纳**:给 handler 一个**可选、可加**的「跑完但没干成」回报方式;`sys_job_run` 得以表达第三态。\n\n## spec 侧要做的(API 形状由 spec 座位定夺)\n\n`packages/spec/src/contracts/job-service.ts` 的 `JobHandler`(现返回 `Promise<void>`,只有 throw / 不 throw 两态)增加可选的 degraded-outcome 回报通道。候选形状(spec 座位择一或另断,以下仅供起点):\n\n- handler 可选返回值:`Promise<void | JobRunOutcome>`,`JobRunOutcome = { outcome: 'completed' | 'degraded'; reason?: string }`;\n- 或 ctx 回调:`ctx.reportOutcome({ degraded: true, reason })`。\n\n**硬约束(裁决的可加性条款)**:existing `Promise<void>` handler 逐字节不动、语义不变;不回报 = 现状(没抛错 ⇒ success)。TSDoc 必须写明三态语义与「这不是失败,不触发重试」——第三方 `IJobService` 实现的兼容性是本单验收关键。\n\n## 消费预告(services 半边,#5548,⛔ 不在本单实现)\n\n`DbJobAdapter.wrap()` 把回报映射为区别于 `success` 的 `sys_job_run.status`(如 `degraded`),`bumpJob` 同步;首个真实消费者是 #5529 的 wait 唤醒 handler(`STORE_UNAVAILABLE` 打空那一枪)。Studio 作业界面读此面——枚举扩展的向后兼容按 spec 车道纪律处理。\n\n## 佐证\n\n#5548(实测:打空的唤醒在 `sys_job_run` 上与成功唤醒完全一样)、#5529(刻意不抛错的原始决定)、`db-job-adapter.ts` L161-176 / L277-299、`job-service.ts`(`JobHandler` 现契约)。\n\n来源座位:services(会话 `session_01USNUyHEr7uaU6MoEWXitei`);`domain:spec` 归 spec 座位派发,本单不认领。"
+}

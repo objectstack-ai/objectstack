@@ -1,0 +1,36 @@
+{
+  "number": 6815,
+  "kind": "issue",
+  "title": "[spec/drivers] `AggregationNode.distinct` is honoured by the in-memory fallback and ignored by every SQL face — one query, two numbers (ADR-0049)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:dispatched",
+    "target:v17"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T22:28:05Z",
+  "updated_at": "2026-08-09T12:38:29Z",
+  "closed_at": "2026-08-09T12:38:29Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6815",
+  "body": "Filed unassigned from the #6409 lane. Found while lowering `count_distinct`; adjacent to it, not created by it.\n\n## The finding\n\n`AggregationNodeSchema` (`packages/spec/src/data/query.zod.ts`) declares a per-aggregation flag:\n\n```ts\ndistinct: z.boolean().optional().describe('Apply DISTINCT before aggregation'),\n```\n\nExactly one consumer reads it. `packages/objectql/src/in-memory-aggregation.ts`:\n\n```ts\nconst values = collectValues(rows, field, !!agg.distinct);\n```\n\nNothing else in the repo does — measured by grepping every consumer of `aggregations[]`:\n\n| Face | Reads `agg.distinct`? |\n|---|---|\n| `objectql` in-memory fallback | **yes** — deduplicates before applying the function |\n| `driver-sql` `SqlDriver.aggregate` | no |\n| `driver-turso` `RemoteTransport.aggregate` | no |\n| `driver-mongodb` `buildAggregationStage` | no |\n| `driver-memory` `computeAggregate` | no |\n| `service-analytics` `AGGREGATE_SQL` | no |\n\nSo `{ function: 'sum', field: 'amount', distinct: true }` returns a **deduplicated** sum when the engine falls back in memory and an **ordinary** sum on every SQL datasource. Same query, two numbers, chosen by which backend answered — the divergence class #6203 and #5907 each closed on the aggregate axis, still open on this key. And unlike those, the wrong answer here is a plausible number rather than a refusal, so nothing surfaces it.\n\nThe key was NOT covered by #4286, which swept the request surface: that issue dispositioned `QueryAST.distinct` (the query-level one, since retired) and `AggregationNode.filter` (marked `[EXPERIMENTAL — not enforced]`). `AggregationNode.distinct` is neither — it is declared plainly, has a real consumer, and reads as supported.\n\n## Why it is worth a decision now rather than later\n\n#6409 lowered `count_distinct` on the SQL family, which changes what this key looks like to an author. `count_distinct` is now a working, portable, deduplicated count; `distinct: true` beside it is the affordance that reads as \"…and the same for `sum`/`avg`\". One of the two now works everywhere and the other works in one place, which is a sharper false affordance than it was yesterday.\n\n## Two legs, per ADR-0049\n\n**ENFORCE.** `SELECT SUM(DISTINCT col)` is standard SQL and supported by SQLite, PostgreSQL and MySQL, so the lowering exists and is portable — the same argument that kept `count_distinct` declared at #6188. `driver-sql`'s and `driver-turso`'s lowering tables already carry a `distinct` flag as of #6409, so the emitters have the shape; what they lack is reading it off the NODE as well as off the function. `driver-memory`/`driver-mongodb` are #5499-frozen, which is the usual constraint on this leg.\n\n**REMOVE.** `count_distinct` covers the only spelling anyone has measured demand for, `SUM(DISTINCT …)` / `AVG(DISTINCT …)` are near-universally a modelling mistake, and the key has no stored-metadata authoring surface — `QueryAST` is the client SDK builder's output and the `POST /data/:object/query` body, so there is no conversion to write (the #4286 note on the request surface applies verbatim). Removal costs the in-memory fallback its `collectValues` flag and nothing else.\n\nNo recommendation offered — this is the maintainer's call, in the same shape as #6188's.\n\n## What is NOT in scope of this issue\n\n`count(distinct *)` and friends: `count_distinct` with no `field` is refused with `INVALID_QUERY` / 400 as of #6409, on both SQL faces. Separately, `sum`/`avg`/`min`/`max` written with no `field` still emit `sum(*)` and die as a dialect syntax error with no ADR-0112 envelope — a real but distinct gap, and one #6409 deliberately did not widen its refusal surface to cover.\n\nRefs: #6409, #6188, #4286, ADR-0049, #5499.\n"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 6884,
+  "kind": "pull_request",
+  "title": "feat(lint): 新增 gating 规则 flow-trigger-unroutable —— record_change flow 声明了引擎无法路由的 triggerType (#6637)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T02:30:44Z",
+  "updated_at": "2026-08-09T03:08:42Z",
+  "closed_at": "2026-08-09T03:08:41Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": "2026-08-09T03:08:41Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/6884",
+  "body": "Fixes #6637\n\n`type: 'record_change'` 的 flow 若在 start 节点写下引擎无法路由的 `triggerType`（`onCreate`、`on_update`、`['onCreate']` 等），会被悄悄降级成手动 flow：声明得像装好了，`os validate` 通过、启动通过，然后永远不触发。本 PR 在 `validate-flow-trigger-readiness.ts` 里加一条 gating 规则 `flow-trigger-unroutable`（`error`，`surfaces: CLI_AND_RUNTIME`，随该文件既有注册项一起生效）。\n\n## 一、先测量退化，再写诊断\n\nissue 的措辞「silently degrades」是概括，而诊断信息必须为真，所以先按 file:line 把真实路径量出来：\n\n| 位置 | 行为 |\n| --- | --- |\n| `service-automation/src/engine.ts:1625-1719` `resolveTriggerBinding` | 用字面量 `startsWith('record-')` 认领 record-change flow；落空后依次试数组形式、`timeRelative`、`config.schedule` / `flow.type === 'schedule'`、`flow.type === 'api'` / `triggerType === 'api'`，全不匹配则在 **:1718 返回 `undefined`** |\n| `engine.ts:1729` `activateFlowTrigger` | 以 `if (!resolved) return;` 开头 —— flow 从未绑定，也不写一行日志 |\n| `engine.ts:2387-2400` `getTriggerBindingAudit` | 专为「悄悄没绑上」而建的审计，调用**同一个** resolver，以 `if (!resolved) continue; // manual / screen flow — nothing to bind` 跳过它 |\n| `service-automation/src/plugin.ts:907-910` | `kernel:bootstrapped` 的告警循环遍历上面这份审计 → 一条都不发 |\n| `cli/src/commands/serve.ts:3428` | 启动摘要的 `unbound` 列表同样来自该审计 → 空 |\n| `cli/src/commands/serve.ts:3435-3441` | 摘要里的「死对象」检查要求 `s.bound && s.triggerType === 'record_change'` → 也跳过 |\n\n唯一痕迹：`getFlowRuntimeStates` 确实以 `bound: false` 报出该 flow，但它只汇入 banner 的计数行（flow 总数比 bound 数多一），**没有名字、没有原因**。\n\n所以规则的 message 写的是「没有任何地方**点名**它」，而不是「完全没有信号」—— 后者会差一个计数。这条差别是刻意的：`flow-trigger-unknown-event` 的 flow 是**会**绑定、**会**有 bind-time warn 的，只说「never fires」两者就分不开了。\n\n## 二、判据与范围\n\n判据逐字镜像引擎的路由链，只在其**之外**说话：\n\n```ts\nconst routesToSomeTrigger =\n  isRecordTriggered || isArrayRecordTriggered || isTimeRelative ||\n  config.schedule != null || flow.type === 'schedule' ||\n  flow.type === 'api' || triggerType === 'api';\nif (start && flow.type === 'record_change' && config.triggerType != null && !routesToSomeTrigger) { … }\n```\n\n**为什么必须收窄到 `type: 'record_change'`**：落空到无绑定本身也正是一个 flow 合法地成为手动 flow 的机制 —— `lint-flow-patterns.test.ts` 已经为邻近规则钉了一条 `does NOT flag record_change` 判例。只按落空判定会误伤世上每一个手动 flow。而 `autolaunched` / `screen` 才是手动 flow 声明的类型，二者都到不了这里，这正是它在编写期可判定的原因。\n\n**新 id 而非复用 `flow-trigger-unknown-event`**：沿用 `timeRelative` 家族 `-invalid` / `-unroutable` 的同一条分界 —— 引擎是否**路由**该值。带 `record-` 前缀正是「被路由」的充要条件，所以两个 id 对死 token 构成划分，永不同时命中同一个值（有测试钉住）。\n\n**两种形状刻意不归本规则**，各由测试钉住，避免日后被顺手放宽：\n\n1. `triggerType` **完全缺失** —— 同样必死，但属于遗漏而非自相矛盾，且语料实测在 `examples/app-todo` 有活实例（见下）。判据要求该键**存在**。\n2. 同时声明了引擎**能**路由的东西（`config.schedule`、`triggerType: 'api'`）—— 这类 flow 会绑定并触发，只是按错误的 trigger 语义。是另一种缺陷（错绑，而非未绑），有它自己的严重级论证要做。\n\n## 三、严重级：`error`，以及唯一需要实测的那一步\n\n按 #5762 的家族判据（本 stack 是否足以判定该 flow 已死）取 `error`。这一条是家族里**唯一需要实测而非假定**的：插件确实可以提供 trigger 实现，所以「装个包就好了」对它是个真假设。\n\n实测为假 —— `registerTrigger` 以**解析后**的类型为键（`record_change` / `schedule` / `time_relative` / `api`），而「作者写的 token → 解析后类型」这张表是 `resolveTriggerBinding` 里一串写死的 `startsWith` / `typeof` 判断，全链路没有任何注册表查询。没有任何包能教会引擎一个新的作者 token；而且该 flow 根本走不到「向谁要 trigger」那一步。\n\n## 四、语料实测（`origin/main`，三个 example app 共 34 个 authored flow）\n\n机械跑了一遍（同时跑本 PR 判据与放宽判据）：\n\n- `flow.type` 分布：`autolaunched` 24 · `schedule` 4 · `screen` 3 · `record_change` 2 · `api` 1\n- **本 PR 判据命中：0** —— authored 语料上一条都不触发，因此没有加任何基线豁免\n- 放宽判据（允许 `triggerType` 缺失）命中：**1** —— `examples/app-todo` 的 `task_completion`\n\n`record_change` 类型共 2 个，`showcase_urgent_task_alert` 接线正确（`record-after-write`）。那唯一的死 flow 已单独立卡 #6882（它的谓词还写在没人读的 `triggerCondition` 键上，所以「补个 token」并不是它的修法，需要对该 example app 的语义做判断）—— 按 dispatch 的约束，**没有**用基线条目把它压掉。\n\n## 五、Fixture 三分法：就地改写，不加豁免\n\n仓库内两处 fixture 写了本规则所判之形状，均属「改写拼写」一类：\n\n- `packages/cli/test/authoring-rule-command-parity.test.ts` 的 `triggerType: 'onCreate'`（issue 点名的那一处）—— 该用例的植入缺陷是审批表达式，trigger token 只是顺带；留着会让用例靠一个它并不针对的 finding 通过。改为 `record-after-create`。\n- `packages/lint/src/lint-flow-patterns.test.ts` 把 flow 类型回写进 trigger 槽的 `triggerType: 'record_change'` —— 那不是一个作者 token，该 fixture 描述的是一个永不触发的 flow。改为 `record-after-update`（与同一文件里相邻的守卫用例一致）。\n\n改写后，tracked tree 上本规则所判之形状为零。\n\n## 六、消融验证（先写预测，再测）\n\n新规则没有「改前」行为，所以方向就是常规的红向；三次消融各自预测并实测：\n\n| 消融 | 预测 | 实测 |\n| --- | --- | --- |\n| A. 删掉整个 1f finding | 红：4 条 `flags…`、severity map 的非空性守卫、以及每条 `does NOT flag` **配对的**植入坏值那一半 | **红，10 failed / 51 passed**，与预测一致 |\n| B. 去掉 `flow.type === 'record_change'` 收窄 | 红，且应落在手动 flow 判例上 | **红，恰好 1 failed** —— `a genuinely manual flow — autolaunched/screen` |\n| C. 去掉 `config.triggerType != null` 存在性守卫 | 包内红在 `ABSENT triggerType` 那一条；语料上应命中 `examples/app-todo` | **红，恰好 1 failed**；语料探针独立确认命中且**仅**命中 `task_completion` |\n\nB 有一点值得单独记下：既有的 `does not flag non-record triggerTypes (schedule/api/manual)` 用例在消融 B 下**仍然是绿的** —— 它只断言 `FLOW_TRIGGER_UNKNOWN_EVENT` 不出现，对新 id 是盲的。真正拦住这次越界的是本 PR 新加的手动 flow 判例。\n\n每条「这是合法的」断言都配了同一 fixture 上的植入坏值（如 `record-after-update` → `record_after_update`、`autolaunched` → `record_change`、删键 → 补键），所以绿不是空跑 —— 消融 A 下这些配对半边全部转红即为证据。\n\n## 七、门禁\n\n- `pnpm --filter @objectstack/lint test` → **67 files / 1759 passed**\n- `pnpm --filter @objectstack/lint typecheck`、`pnpm --filter @objectstack/cli typecheck` → clean\n- `packages/cli` `authoring-rule-command-parity.test.ts`（真实 spawn CLI 的消费者）→ **11 passed**\n- `packages/metadata-protocol` 五个 record_change flow 发布闸门用例 → **65 passed**\n- `node scripts/check-nul-bytes.mjs` → OK；改动文件控制字符自扫 → clean\n- `eslint` 改动文件 → clean\n\n## 八、刻意没做\n\n- **不动运行时 trigger 分发**（dispatch 明确划出范围）。#3481 的 runtime 半边仍悬着：值得考虑的最小动作是让 `getTriggerBindingAudit` 能看见「声明了 `record_change` 却没解析出绑定」的 flow —— 目前它按 `!resolved` 跳过，恰恰把这一类漏掉。留给维护者与 #3481 一起裁决。\n- **不碰 `docs/adr/**`**。\n- **不加任何基线豁免**；`examples/app-todo` 的死 flow 立卡 #6882，未在本 PR 修。\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01F8q5J1MQyocgtNspb15fSn)_"
+}

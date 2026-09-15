@@ -1,0 +1,36 @@
+{
+  "number": 17739,
+  "kind": "issue",
+  "title": "[finding] `check-test-typecheck` signatures embed an ABSOLUTE path, so the same TS6059 reports as both ARRIVED and VANISHED and `typecheck` reds on pristine main in any checkout whose package src path is 32 chars or fewer",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-bill",
+    "id": 324100929,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:devx",
+    "priority:p2"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-12T01:21:27Z",
+  "updated_at": "2026-09-14T13:48:47Z",
+  "closed_at": "2026-09-14T11:34:13Z",
+  "closed_by": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17739",
+  "body": "Filed by the `domain:spec` execution seat on behalf of the #17595 round (PR #17737), which measured it and **could not file it itself**: this session's REST `/search/*` returns 403 and MCP `search_issues` is rate-limited, and filing without a dedupe read is not allowed. ⛔ The seat did not relay the report — the mechanism below is **re-measured from source** at `origin/main` @ `431c757120`, 2026-09-12T01:21Z. No severity asserted, no `domain:*` asserted.\n\n## The defect: a gate signature that changes with the checkout's PATH LENGTH\n\n`scripts/check-test-typecheck.mts:316`, `:324`–`:331`:\n\n```ts\n/** Longest quoted span kept verbatim; beyond this it is a type blob, not a name. */\nconst STABLE_QUOTED_SPAN = 32;\n\nexport function normalizeMessage(message: string): string {\n  return message\n    .replace(/'([^']*)'/g, (whole, inner: string) =>\n      inner.length <= STABLE_QUOTED_SPAN && !/[{<(\\[]/.test(inner) ? whole : \"'…'\",\n    )\n```\n\nA **TS6059** message is `File '…' is not under 'rootDir' 'ABS_PATH'`. The first span is long and masks. **The second span is an absolute filesystem path** — it contains none of `{ < ( [`, so the ONLY thing deciding whether it survives verbatim is **its length**:\n\n```\n/tmp/wt-17595/packages/lint/src            31 chars  ≤ 32  ⇒ survives VERBATIM  ⇒ unledgered signature\n/home/user/objectstack/packages/lint/src   40 chars  > 32  ⇒ masked to '…'      ⇒ the ledgered signature\n```\n\n⇒ the same diagnostic gets **two different signatures depending on where the repo is checked out**. The ledger was recorded in a long-path checkout, so in a short-path one the gate reports the identical errors as **ARRIVED** (signature not in the ledger) *and* **VANISHED** (ledgered signature absent) at once, and `pnpm --filter @objectstack/lint typecheck` exits **1 on pristine `origin/main`**.\n\n### ⭐ It contradicts the function's own stated invariant\n\nIts docblock, `:318`–`:323`, says exactly which spans are allowed to survive:\n\n> *\"A quoted span survives only when it is short AND free of the structural punctuation that makes tsc print a whole shape — i.e. when it is **a name, a dotted path, or a small literal type**, all of which **change only when the error does**.\"*\n\nAn absolute checkout path is **none of those three**, and it changes when the **checkout** moves, ⛔ not when the error does. ⇒ this is not only a reproducible defect, it is a declared invariant contradicted by the code that declares it.\n\n### Reproduce\n\n```\ngit worktree add /tmp/wt-short <any-ref>     # any path whose <pkg>/src is ≤ 32 chars\ncd /tmp/wt-short && pnpm --filter @objectstack/lint typecheck\n  → exit 1, 5 ARRIVED/VANISHED lines for 6 TS6059 errors in\n    validate-jsx-pages.production-witness.test.ts and validate-translatable-sections.test.ts\n```\n\n**The #17595 round's control**: the same command at the **base** commit `431c7571`, same worktree, reds **identically** — so it is the checkout path, ⛔ not that PR's diff. Its `tsc --noEmit` on the src layer exits **0**.\n\n### ⚠️ Why this is worse than a noisy gate\n\nThe ARRIVED text instructs the reader that the self-serve fix is to repair errors that are **not actually new**. ⇒ an agent or contributor in a short-path worktree is told, by the gate, to go change code that is fine. A gate that mis-instructs is worse than one that is merely wrong.\n\n## ⛔ What this does NOT claim\n\n- ⛔ No claim about the right fix. Masking every path, raising the threshold, or excluding TS6059 from signature normalisation are all shapes; ⛔ this seat picks none — and note the ledger is a **maintainer-gated shrink-only ratchet**, so touching it is not free.\n- ⛔ No claim that the 6 TS6059 errors themselves are new or wrong — they are the ones the shrink-only ledger already records.\n- ⛔ No claim about other diagnostic codes. Only TS6059 was measured to carry an absolute path in a quoted span; ⚠️ whether others do was **not** swept and ⛔ must not be read as clean.\n- ⛔ No claim about CI, whose checkout path is long enough to mask. ⇒ ⚠️ this reds **locally and in short-path agent worktrees only**, which is exactly why it survived.\n\n**Dedupe.** Open issues enumerated by REST pages ⇒ **559** titles (base 2026-09-12T00:38Z, topped up with `since=2026-09-12T00:30Z` at 2026-09-12T01:21Z). Grepped: `check-test-typecheck` **0**, `rootDir` **0**, `TS6059` **0**, `absolute path` **0**, `typecheck` **2**, `shrink-only` **2**, `ratchet` **10**. Nearest neighbours read and judged **not** duplicates: **#12511** (a type error in a ledgered package's tests invisible to its own `typecheck` — a coverage hole, not a signature that moves with the checkout) and **#17715** (six carriers of #16742's false `typecheck`/ledger **premise** in prose — about what documents say, not about `normalizeMessage`). Lit controls on the same corpus: `finding` → **187**, `gate` → **56**. Dark control: `qqzzxx-nonword` → **0**. ⚠️ **Declared scope limit: TITLES only — bodies were not searched** (REST `/search/*` 403, MCP `search_issues` rate-limited).\n\n⚠️ Suggested lane, ⛔ not asserted: `scripts/**` gate whose SUBJECT is code quality ⇒ reads as `domain:devx` rather than `domain:skills`. Triage decides.\n\n**Refs**: #17595 / PR #17737 (where it was measured) · #12511 · #17715 · `scripts/check-test-typecheck.mts:316`.\n\n<sub>`domain:spec` execution seat · `session_01MkQhmuuJAVDjmeWNixwDDH` · re-measured from source and filed 2026-09-12T01:21Z on `origin/main` @ `431c757120`</sub>\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

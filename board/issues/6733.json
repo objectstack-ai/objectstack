@@ -1,0 +1,33 @@
+{
+  "number": 6733,
+  "kind": "issue",
+  "title": "ARCHITECTURE.md links to docs/adr/0001-metadata-service-architecture.md, deleted 2026-02-11 — the link 404s",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:queue"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T13:47:47Z",
+  "updated_at": "2026-08-09T02:43:34Z",
+  "closed_at": "2026-08-09T02:43:34Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6733",
+  "body": "Found while implementing #6634 (the ADR-0079 dangling-pointer fix); out of that PR's scope, filed unassigned.\n\n## The fact\n\n`ARCHITECTURE.md:653` carries a markdown **link**, not a bare mention:\n\n```\n- [ADR-0001: Metadata Service Architecture](docs/adr/0001-metadata-service-architecture.md) - Explains why both ObjectQL and MetadataPlugin can provide metadata service and how they work together\n```\n\nThat file was **deleted on 2026-02-11** in `9da8e3e72` (\"feat(docs): add comprehensive analysis of Permission Protocol...\") together with `docs/adr/0002-database-driven-metadata-storage.md` and `docs/adr/README.md`. Verified against the full history (the working clone is shallow by default — this needs `git fetch --deepen` before `git log --diff-filter=D -- 'docs/adr/*'` says anything true).\n\nSo a reader of ARCHITECTURE.md who follows the repo's most prominent pointer to \"why both ObjectQL and MetadataPlugin can provide metadata service\" reaches a 404.\n\n## Why it is not fixed in #6634's PR\n\nDifferent defect, different fix. #6634 is about a number cited with no record; this is a **link to a path that was removed**, and fixing it means deciding what the correct target is (the explanation may have moved into another ADR, or may need re-homing) — a docs judgement, not a mechanical repoint.\n\nThe other two `ADR-0001` sites in the tree are fine and should not be touched:\n\n- `docs/adr/0002-environment-database-isolation.md:122` — \"already discarded in v3.4's ADR-0001\", legitimate history.\n- `examples/app-showcase/src/ui/pages/{project-detail,project-workspace}.page.ts` — these cite **ObjectUI** ADR-0001, a different repo's registry.\n\n## Interaction with #6634's gate widening\n\nThe PR for #6634 extends `check:adr-anchors` to assert every cited ADR number resolves, and puts `0001` on a shrink-only `UNRESOLVED_ADR_CITATIONS` allowlist (deleted record, cited as history). The entry's comment names this broken link explicitly and says the allowlist does not bless it — the allowlist is per-number and cannot distinguish \"history\" from \"broken link\" at that granularity. Fixing this issue does not require removing the allowlist entry (ADR-0002's historical mention keeps it earning its place).\n\nNote `.github/workflows/check-links.yml` (advisory lane, repo-internal links, restored 2026-08-07) would plausibly have caught this — worth checking why it does not, but that file is under active work elsewhere and is not part of this report.\n"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 6898,
+  "kind": "pull_request",
+  "title": "docs(skills): objectstack-ui 补 searchableFields 章节 —— 工具栏搜索的收窄语义与失败边界 (#6675)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "skip-changeset",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T03:15:50Z",
+  "updated_at": "2026-08-09T03:47:12Z",
+  "closed_at": "2026-08-09T03:47:11Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": "2026-08-09T03:47:11Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/6898",
+  "body": "Fixes #6675\n\n## 背景\n\n`skills/objectstack-ui/SKILL.md` 对 `searchableFields` 零覆盖。该键在这个 skill 里唯一出现的位置是**生成的** `references/react-blocks.md`(由 `packages/spec` 生成,手改会顶掉 `check:skill-refs`)。而列表视图工具栏的搜索框,正是 view 级收窄(ADR-0061)和 #4254 点号路径 400 真正打到 UI 作者身上的地方。\n\nPR #6670 已经把 docs 侧补上了(`content/docs/ui/views.mdx` 的表格行),skill 侧仍然是空的 —— 而 skill 才是 AI 作者在授权时真正加载的东西。\n\n前提复核:在 `origin/main` @ `e5bd76859` 上 `git grep searchableFields -- skills/objectstack-ui/SKILL.md` 仍为零,反向对照(`skills/objectstack-data/`、`skills/objectstack-query/`)有命中,扫描器是好的。卡片前提成立。\n\n## 改了什么\n\n新增 **\"Toolbar Search (`searchableFields`, ADR-0061)\"** 一节,落在 `## Configuring a List View` 既有结构里(End-User Quick Filters 之后、Sorting 之前),两个 `os:check` 例子 + 边界表 + 逐字错误文案。\n\n按派单要求,**不只教 happy path**;每条边界都实测,不是推断。\n\n### 1. 允许集由对象决定,判据是集合成员而不是字段类型\n\n| 对象 | 允许集 |\n|:--|:--|\n| 声明了 `searchableFields` | **就是那份清单本身** —— 按存在性过滤,不看类型 |\n| 没声明 | auto-default:name 字段 + 文本类列(text / email / phone / url / autonumber / textarea / markdown / select / status) |\n\n实测:对象声明 `searchableFields: ['subject', 'account_id']`(`account_id` 是 lookup)时,view 收窄到 `['account_id']` **放行**,引擎拿到 `searchFields = [\"account_id\"]`;同一个对象上收窄到对象没列进去的 `account_name`(一个 `text` 列)反而 **400 INVALID_FIELD**。一个 lookup 通过、一个 text 被拒 —— 类型判据在这里是反的。\n\n### 2. 一条坏 entry 会让该列表的每一次搜索 400\n\n客户端把这份声明逐字回显为 `$searchFields`,入口门 `assertSearchFieldsAreSearchable` 在引擎之前就拒。炸的是整个搜索框,不是\"变窄的结果\"。\n\n| 写法 | `os validate` | 运行时 |\n|:--|:--|:--|\n| 允许集的子集 | 干净 | 只扫这几列 |\n| 不写这个 key | 干净 | 扫对象的完整允许集 |\n| `searchableFields: []` | 干净 | 与不写完全相同 |\n| 改过名 / 拼错的列 | `searchable-field-unknown` | `400 INVALID_FIELD` |\n| 点号路径 | `searchable-field-unknown` | `400 INVALID_FIELD` |\n| 允许集之外的真实列 | `searchable-field-unsearchable` | `400 INVALID_FIELD` |\n\n两条诊断都是 **error**,`os validate` 直接失败 —— 章节里逐字给出了作者真正会撞到的两条文案。\n\n### 3. `searchableFields: []` 不是\"关掉搜索\"\n\n三层都把空数组当作**缺省**:客户端整个不发这个 key(长度守卫),入口门把零长度覆盖当没覆盖直接 return,引擎回落到对象的允许集。所以写 `[]` 比写 `['subject']` 搜得**更宽**,与字面直觉正好相反 —— 这是作者最需要、也最容易猜错的一条。真要去掉搜索框是 `userActions: { search: false }`,另一个键,附了可粘贴的例子。\n\n### 4. 相关记录标题\n\n点号路径永远被拒(搜索轴不解析 traversal)。只能用**存储的**镜像字段;完整处方(镜像字段、维护它的两条 hook、为什么 formula 不行)指向 objectstack-data,不在此重述。注意本节只引用诊断的 `message`,没有引用其 `hint` —— 后者的 \"text/formula\" 措辞正是 #6673 在处理的问题。\n\n## 验证:例子是按真正解析它的 schema 校验的\n\n这是发布给客户的 skill,不是内部笔记,所以每个例子都要能粘贴即用。\n\n- **类型层**:`check:skill-examples` 把两个 `os:check` 块抽出来对着构建产物 `@objectstack/spec` 的 `.d.ts` 跑 `tsc --noEmit` —— `✅ 208 prose examples type-check`,其中 `skills/objectstack-ui/SKILL.md:354` 与 `:437` 就是这两块。\n- **运行时 schema 层**(tsc 证明不了的那一半):把两块**逐字**抽出来喂给真正解析它们的 schema —— `defineView` → `ViewSchema` → `ObjectListViewSchema`(`packages/spec/src/ui/view.zod.ts`,即 `ListViewSchema` 去掉 `userFilters`)。确认 `searchableFields` 与 `userActions.search` 都穿过 parse 存活(`['case_number','subject']` / `false`),不是被 strip 掉。\n\n## 测试\n\n`packages/lint/src/validate-searchable-fields.test.ts` 新增一组 skill-parity 用例。skill 经 `npx skills add` 发给第三方,措辞漂了而没人回看 skill,发出去的就是平台已经没有的规则 —— 与 `validate-rls-predicate-enforceability.test.ts` 钉住 data skill 打印的 RLS 谓词同一个理由。\n\n覆盖:逐字钉住两条诊断文案;三条边界;以及**两个方向都钉** —— 对象声明集内的 lookup 放行 / 集外的 text 被拒,和它的镜像(对象没声明时,auto-default 的类型清单才说了算)。\n\n`[]` 那条的承重断言**刻意不放在 lint 上**:`checkSearchableFieldList` 对零长度数组提前返回,就算删掉那个提前返回,entry 循环也没东西可迭代 —— \"lint 干净\"是因为什么都没产出,不可能因回归转红。所以承重断言放在 `resolveSearchFields`(入口门与引擎共用的那一份 resolution)上。\n\n**反向验证**(方向事先预判 —— 两条都预判为红,两条实测也都红):\n\n1. 把规则里 `is outside object` 改成 `is not within object` → 逐字断言转红。\n2. 把 `resolveSearchFields` 的空数组回落收窄(`requested.filter(...)` 直接返回)→ `[]` 那条承重断言转红,`expected [] to deeply equal [ 'subject', 'case_number', …(1) ]`。\n\n第 2 条第一次跑是**绿的**,因为 `@objectstack/spec/data` 解析到 `dist/`,改 `src/` 根本没生效(AGENTS.md §9 陈旧产物陷阱)。重新 build spec 后才转红 —— 记在这里,因为\"改了源码测试还绿\"在这个 workspace 里默认要先怀疑没重建。\n\n## 兄弟 skill 排查(派单要求,未扩大 diff)\n\n| skill | `searchableFields` 覆盖 |\n|:--|:--|\n| `objectstack-data` | ✅ 有(对象级 canonical set + 镜像字段处方) |\n| `objectstack-query` | ✅ 有(查询级 `search.fields` 收窄 + 400) |\n| `objectstack-ui` | ❌ 本 PR 补上 |\n| 其余 8 个 | 不拥有这个面 —— `objectstack-api` 只在 API 方法表里提到 derived 的 `search` 动词,两个 skill 都没有文档化 `$` 前缀参数族,属于另一个面而非同类缺口 |\n\n结论:同类缺口只有 `objectstack-ui` 一处,已补;未改动任何兄弟 skill。\n\n## 顺带发现(未在本 PR 修)\n\n已另开 **#6897**(未认领):`content/docs/ui/views.mdx:106` 那行说 view 的 `searchableFields` 里 lookup \"is refused\",实测只在对象的允许集排除它时才拒 —— 对象声明了它就放行。文档把集合成员判据写成了类型判据,会让作者删掉一份能用的配置。本 PR 范围只在 skill,按 Prime Directive #10 不夹带。\n\n## 门\n\n- `check:skill-examples` ✅ / `check:skill-frame-sync` ✅ / `check:skill-compatibility` ✅ / `check:skill-frame-freshness` ✅\n- `check:doc-authoring` ✅ / `check:nul-bytes` ✅ / `check:role-word` ✅ / `check:adr-anchors` ✅ / `check:quick-reference-counts` ✅ / `check:org-identifier` ✅ / `check:published-files` ✅\n- `pnpm --filter @objectstack/lint test` → 67 files / 1753 tests 全绿;`typecheck` 绿\n- test 层类型错误数 19 → 19(与 `origin/main` 同口径对比),TEST_DEBT 账本零增量\n\n## 无 changeset\n\n只改 `skills/**` 与一个测试文件,不发布任何包 —— 与同类前例一致(PR #6670 本身、#6233、#6030、#5989 均无 changeset)。已打 `skip-changeset`。\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01F8q5J1MQyocgtNspb15fSn)_"
+}

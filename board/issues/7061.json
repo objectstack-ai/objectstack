@@ -1,0 +1,34 @@
+{
+  "number": 7061,
+  "kind": "pull_request",
+  "title": "docs(spec): close 14 protocol-17 tombstone prescriptions with the house `os migrate meta` sentence (#6914)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T12:44:14Z",
+  "updated_at": "2026-08-09T13:18:22Z",
+  "closed_at": "2026-08-09T13:18:20Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": "2026-08-09T13:18:20Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/7061",
+  "body": "Fixes objectstack-ai/objectstack#6914\n\n## 做了什么\n\n对 14 个确有 ADR-0087 v17 转换覆盖的 `retiredKey()` 处方,在 guidance **字符串字面量末尾**追加 #6856 裁定 D 的 house 句式:`` Run `os migrate meta --from 16` to rewrite existing sources automatically. ``。句子前的处方正文逐字节未动;不改任何 key/类型/refinement。没有转换(或转换不覆盖该 key)的站点**一律不加句**,按 `data/driver.zod.ts:108` 先例保持刻意沉默。\n\n## 重新推导的普查(E9:自己的清单、自己的命令)\n\nfiler 在 `2672f855f` 报 35 站点 / 18 文件。复测:\n\n- **在 filer 自己的 ref 上重跑其查询**(非测试 `*.zod.ts` 中 `retiredKey(` grep 命中 ∩ 文件内无 `os migrate meta`):得 **37 / 19 文件** —— filer 的 35/18 漏掉了 `stack.zod.ts` 的 2 个命中,尽管其抽查表里有 `stack.api.requireAuth`。\n- **在 fresh main(`3fc2e4861`,后合并至 `3f7f14e61`)上**,同一朴素查询得 40 命中 / 19 文件;**剥掉注释行后真实调用点为 29 个 / 14 文件** —— filer 清单中的 `kernel/plugin.zod.ts`、`system/http-server.zod.ts`、`ui/i18n.zod.ts`、`ui/sharing.zod.ts`、`ui/widget.zod.ts` 如今只有注释里的 `retiredKey()` 提及,没有真实墓碑。\n- **在场/缺席对照**:同一扫描(按字面量归属判定,常量定义归到引用它的站点)同时找回了**已带句子的 30 个墓碑字面量**;类 pin 的判定语料(含 guidance map、转换注记等全部处方句)为 **54**,与 pin 注释的 sweep 计数一致。\n\n普查单位修正:`QUERY_CURSOR_REMOVED` / `QUERY_DISTINCT_REMOVED` 定义在 `data/query.zod.ts`(文件级查询看不见),被 `api/protocol.zod.ts:614`、`data/data-engine.zod.ts:116/141` 共享 —— 判定按**字面量**而非文件。\n\n## 逐站点裁决表(29 站点,全部实测 `spec-changes.json` v17 `converted` + `conversions/registry.ts` 的 `apply()`)\n\n### 加句(14)—— 转换完整覆盖该 key,house 单句形态\n\n| 站点 | key | conversion id | apply() 裁决 |\n|---|---|---|---|\n| `ai/skill.zod.ts:195` | `skill.triggerPhrases` | `skill-trigger-phrases-removed` | `stripKeys` 全键剥除 |\n| `automation/flow.zod.ts:364` | `flow.nodes[].outputSchema` | `flow-inert-keys-removed` | `mapFlowNodes` 全键剥除 |\n| `automation/flow.zod.ts:433` | `waitEventConfig.timeoutMs` | `flow-node-wait-timeout-keys-removed` | 整值搬移 `timerDuration`(加引号)/已占则剥除,均自动 —— 非 MIXED |\n| `automation/flow.zod.ts:442` | `waitEventConfig.onTimeout` | `flow-node-wait-timeout-keys-removed` | 全键剥除 |\n| `automation/flow.zod.ts:629` | `flow.template` | `flow-inert-keys-removed` | 全键剥除 |\n| `automation/flow.zod.ts:651` | `flow.active` | `flow-inert-keys-removed` | 全键剥除 |\n| `automation/flow.zod.ts:785` | `flow.errorHandling.fallbackNodeId` | `flow-inert-keys-removed` | 全键剥除 |\n| `api/rest-server.zod.ts:125` | `api.requireAuth`(stack.api 的转发副本) | `stack-api-require-auth-removed` | 同一授权面,同一键,全键剥除 |\n| `security/rls.zod.ts:432` | `rowLevelSecurity[].priority` | `permission-rls-priority-removed` | 全键剥除 |\n| `stack.zod.ts:349` | `stack.api.requireAuth` | `stack-api-require-auth-removed` | 全键剥除 |\n| `ui/view.zod.ts:1285` | `view.list.responsive` | `view-inert-keys-removed` | 形态限定 list,全键剥除 |\n| `ui/view.zod.ts:1289` | `view.list.performance` | `view-inert-keys-removed` | 同上 |\n| `ui/view.zod.ts:1710` | `view.form.defaultSort` | `view-inert-keys-removed` | 形态限定 form,全键剥除 |\n| `ui/view.zod.ts:1807` | `view.form.aria` | `view-inert-keys-removed` | 同上(list 的 `aria` 存活,与转换的 shape-scope 一致) |\n\n无一处命中 MIXED(部分值转换)形态,`dashboard.zod.ts` `compareTo.offset` 两分句形态本 PR 未用到。\n\n### 正确沉默(15)—— 任何 major 均无转换(逐一对过全部 63 条 converted 记录)\n\n| 站点 | key | 为何无转换 |\n|---|---|---|\n| `api/analytics.zod.ts:51/:57` | `query` / `format` | API 请求键,非存储源 |\n| `api/batch.zod.ts:91` | `validateOnly` | 同上 |\n| `api/errors.zod.ts:387` | `fieldErrors` | API 响应键 |\n| `api/protocol.zod.ts:614` | `query.distinct`(经 `QUERY_DISTINCT_REMOVED`) | 查询载荷键 |\n| `api/protocol.zod.ts:1231/:1237` | notifications `cursor`(共享常量) | 路由请求/响应键 |\n| `api/rest-server.zod.ts:515` | `openApi31` | #4579 移除,无转换登记 |\n| `automation/node-executor.zod.ts:342` | `isAsync` | 运行时描述符,非授权面源 |\n| `data/data-engine.zod.ts:116/:141` | `cursor`/`distinct`(共享常量) | 引擎选项 |\n| `data/hook.zod.ts:584` | `session.roles` | 字面量自述 \"Nothing to migrate … never stored\" |\n| `system/environment-artifact.zod.ts:127/:134/:141` | `functions`/`manifest`/`payloadRef` | 站点上方注释明言 \"No ADR-0087 conversion is registered\"(传输壳) |\n\n合并 `origin/main`(#7051)后新到的 `data/query.zod.ts:271` `aggregations[].distinct` 亦复查:无转换登记 → 正确沉默,不加句。\n\n## 验证(方向先定后跑)\n\n- **类 pin 判定数:54 → 68(+14,恰等于加句数),全绿** —— `retired-key-migrate-sentence.test.ts` 6/6 通过。\n- **植红实验**:将 `ui/view.zod.ts` responsive 的新句改成退役拼法 `to rewrite it automatically.` → pin **红**,报错精确点名 `ui/view.zod.ts:1288` 并回显违规摘录;随后回退,复绿。除 pin 外无其他门因本改动变红/变绿(#6753:如实说)。\n- **逐字节围栏**:`gen:schema` 后 `authorable-surface/**`、`json-schema.manifest/**`、`authorable-defaults/`、`authorable-surface.base.json`、`api-surface/**`、`spec-changes.json` **零 diff**(guidance 字面量不投影进这些工件)。\n- `check:generated` 十门全绿(合并 main 后重建复跑);`check:upgrade-guide` **未再生成而绿**(未触碰 migrations 账本)。\n- 再生成页面(仅 6 页,机械追加):`content/docs/references/` 下 `ai/skill.mdx`、`api/automation-api.mdx`、`api/rest-server.mdx`、`automation/flow.mdx`、`security/rls.mdx`、`ui/view.mdx`。`stack.zod.ts` 的 api 块不投影 references 页,无页面 diff。\n- 全量 spec 套件:**354 文件 / 9224 用例全绿**;`pnpm --filter @objectstack/spec typecheck` 绿;`test-typecheck-debt.json` 前后未动(58 文件 / 266 错,shrink-only 持平)。\n- `node scripts/check-nul-bytes.mjs` 绿。\n\n## 变更集\n\n`.changeset/tombstone-migrate-sentence-completion.md` —— `@objectstack/spec: patch`(处方字符串随 npm 包发布,用户可见;非 breaking,无需 ADR-0087 标记)。\n\n## 范围外发现\n\n同缺陷类、但在**已含句子文件**里的 15 个字面量(`ai/agent.zod.ts` knowledge、`ui/action.zod.ts` shortcut/bulkEnabled、`ui/app.zod.ts` 7 处、`ui/dashboard.zod.ts` 5 处)各自确有 v17 转换而句子缺失 —— 在 #6914 的文件级普查定义之外,已按规程另行立卡(见 issue 链接),本 PR 不扩围。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_018ffcE95NaMJcL9XJ9VDYgk\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_018ffcE95NaMJcL9XJ9VDYgk)_"
+}

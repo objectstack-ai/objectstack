@@ -1,0 +1,34 @@
+{
+  "number": 18204,
+  "kind": "issue",
+  "title": "cli: `os build` / `os dev` per-package author-time rules refuse an action param's record-picker `reference` to a dependency's object (`object-reference-unknown`), while the composed pass accepts it and ADR-0130 R1 accepts the field-level equivalent",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-elon-musk",
+    "id": 328766734,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-14T14:56:11Z",
+  "updated_at": "2026-09-15T01:19:58Z",
+  "closed_at": "2026-09-15T01:18:21Z",
+  "closed_by": {
+    "login": "os-elon-musk",
+    "id": 328766734,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/18204",
+  "body": "## Finding (class b — two passes give one reference opposite verdicts)\n\nIn an ADR-0130 multi-package artifact, `os build` runs the author-time rules twice: once over the composed union (accepts) and once **per package** (refuses). An action declared by a module package whose param carries a record-picker `reference` to an object owned by the app package the module depends on is refused in the per-package pass with `object-reference-unknown`, whose text claims the reference is \"inert at runtime\". It is not: the composed artifact resolves it and the picker works.\n\nMeasured on `objectstack-ai/hotcrm` branch `claude/issue-1907-sales-app-service-module` (`be11c07`, pin 17.4.0): the service module's three `crm_case` activity actions (`log_call`, `log_meeting`, `schedule_meeting`, instantiated from the shared factory in the app package) carry `attendee_contacts` with `reference: 'crm_contact'` — an app-package object, and the module declares `dependencies: { 'app.objectstack.hotcrm': '^3.1.0' }`:\n\n```console\n$ pnpm build   # with the per-stack permission refusal (objectstack#18202) probed away\nAuthor-time rules failed inside the artifact's packages (6 issues)\n  object-reference-unknown … reference 'crm_contact' … (log_call / log_meeting / schedule_meeting on crm_case, attendee_contacts)\n```\n\nThe composed pass immediately before reports nothing for the same references. A `Field.lookup('crm_contact')` on a module-owned object is accepted by both passes (ADR-0130 R1, measured in #14122 §4) — so the platform accepts a cross-package reference at the field level and refuses the same reference at the action-param level, in the same build.\n\n## Where it lives\n\n`packages/cli/src/commands/compile.ts` runs the per-package pass:\n\n```ts\nconst asStack = packageBodyAsStack(pkg.body, artifactPackageEntries);\nconst pkgFindings = runAuthoringRules('build', { normalized: asStack, parsed: asStack, … })\n```\n\n`packageBodyAsStack` already receives `artifactPackageEntries` — the hook for making the per-package stack dependency-aware exists; the composed pass's own fold is `authoringRuleUnionStack` (`packages/cli/src/utils/stack-collections.ts`). The rule itself (`packages/lint/src/validate-object-references.ts`) may need no change.\n\n## Ask\n\nThe per-package pass should resolve references against the package's declared dependency closure (or the whole artifact), like the composed pass does; the field-level and action-param-level rules should agree. **The refusal must move, not disappear**: a reference to an object no package in the artifact defines must still be refused, with a fixture proving it. Same root as objectstack#18202 and #18203: per-package author-time rules treating one package of a co-owned artifact as a closed world.\n\nDedupe words: object-reference-unknown, per-package author-time rules, action param reference, record picker reference, module dependency, ADR-0130 R1, packageBodyAsStack.\n\nRelated: objectstack-ai/hotcrm#1907 (blocked card), #18202, #18203, #17069 (the earlier empty-stack shape of the same two-pass problem), #14122 (the ADR-0130 tracker)."
+}

@@ -1,0 +1,35 @@
+{
+  "number": 6795,
+  "kind": "issue",
+  "title": "[decision] `data.find` is `@deprecated` while `QueryOptionsV2` still calls itself \"the recommended interface for data.find() queries\" — the canonical source contradicts itself; pick a direction",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T17:49:17Z",
+  "updated_at": "2026-08-09T08:56:27Z",
+  "closed_at": "2026-08-09T08:56:27Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6795",
+  "body": "Spun out of #6323 / PR #6784 at acceptance, by the devx PM seat. The docs half is done — the `services.data` page now reports both faces accurately with attribution, so it survives either ruling. What remains is the **source-side convergence in `packages/client`**, which is a maintainer call. Filed unassigned; ⛔ not dispatchable until ruled.\n\n## The contradiction, measured (all on `origin/main` @ `64d764e76`)\n\n- `packages/client/src/index.ts:4202` — `data.find` carries `@deprecated Use data.query() with standard QueryAST parameters instead`, and the built `dist/index.d.ts:2687` ships the tag, so every consumer's editor strikes `find` through at the call site.\n- `packages/client/src/index.ts:162-164` — `QueryOptionsV2` simultaneously names itself **\"the recommended interface for data.find() queries\"**: a recommended vocabulary for a deprecated method.\n\nSupporting facts from the #6323 investigation:\n\n- `data.query()` exists on both `ObjectStackClient.data` (:4190) and `ScopedProjectClient.data` (:4913), ships untagged, and has a dedicated `POST /data/:object/query` route (rest-server.ts:5694).\n- The tag is recorded direction, not an accident: #986 ruled \"deprecate the legacy-parameter entries, promote data.query(AST)\"; the tag landed in 17dca1326 (QueryAST unification) and was deliberately kept when c463c2334 added `QueryOptionsV2`.\n- `query` is strictly more capable on this surface: `search`, nested `expand` detail, `having` — and `find`'s own nested-expand refusal error routes callers to `query`.\n- Real consumers already moved: the CLI's `data query` command and objectui's data adapter both call `data.query()`; objectui's adapter comments record concrete `find` pain (forced raw-HTTP workarounds).\n- The heavy in-repo `find` usage is `IDataEngine.find` — a different, lower surface, not this one.\n\n## Options\n\n- **A — Uphold #986**: keep the tag; `find` eventually exits; make the one-line convergence edit now — reword `QueryOptionsV2`'s self-description to something like \"the vocabulary `find` still accepts\", so it stops reading as an endorsement of a deprecated method.\n- **B — Withdraw the deprecation**: remove `@deprecated` from `data.find` (and the `QueryOptions` entry), accepting `find` as a permanent stable simplified entry beside `query`. Overrules #986's recorded direction.\n\n## Recommendation (dev and PM seat concur): **A**\n\nThe deprecation is implemented product direction with consumers already migrated; the only defect is the stale self-description, which is a one-line edit. B would overrule a recorded ruling to preserve a sentence.\n\nIf A is ruled, the implementing change is small (JSDoc wording in `packages/client`, plus a changeset since published source changes) and can ride any normal dispatch round.\n\nRelated: #6323 / PR #6784 (docs half, has the full measurement), #986 (the direction ruling), 17dca1326 / c463c2334 (tag history)."
+}

@@ -1,0 +1,35 @@
+{
+  "number": 6893,
+  "kind": "issue",
+  "title": "[finding][devx] Docs Drift Check is package-granular, so any PR touching @objectstack/spec lists ~112 docs — an advisory that large is one every reader learns to skip",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T03:06:07Z",
+  "updated_at": "2026-08-09T10:38:16Z",
+  "closed_at": "2026-08-09T10:38:15Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6893",
+  "body": "Filed by the devx PM seat (`session_01F8q5J1MQyocgtNspb15fSn`), unassigned, for triage. Observation-class: nothing a user hits, but it degrades the review signal on every spec-touching PR. Searched open issues first (`docs drift check granularity package`, `docs-drift-check affected-docs advisory`) — no existing card.\n\n## Measured, twice in one hour\n\n| PR | packages changed | docs listed |\n|---|---|---|\n| #6885 | `@objectstack/service-storage`, `@objectstack/spec` | **113** |\n| #6892 | `@objectstack/spec` | **112** |\n\nThe two lists are near-identical because the second package contributes almost nothing: touching `@objectstack/spec` **at all** pulls in essentially the whole of `content/docs/`. A third instance the same night, #6884 (`@objectstack/lint`), listed 3 — so the check is useful at other granularities and degrades specifically on the packages that everything depends on.\n\n## Why this is a defect and not just verbosity\n\nThe comment's own instruction is *\"may need an implementation-accuracy re-verification … run the `docs-accuracy-audit` workflow scoped to these files\"*. Scoped to 112 files that is not a re-verification, it is a re-audit of the documentation set — which nobody runs per PR, so the advisory's prescribed action is never taken.\n\nWhat it costs is not the reading time; it is that **an advisory nobody can act on trains readers to skip the advisory**. Three separate dev agents last night independently judged a Docs Drift comment \"fired on package paths, not semantics — not actionable here\" and moved on. Each of those judgements was individually correct. The failure mode is the day one of them is wrong and the comment looks exactly the same.\n\nThere is also a second-order hazard already observed: one of these lists included `content/docs/releases/v17.mdx`, a file no code PR may edit (CLAUDE.md, release notes are written centrally). An advisory that names it invites exactly the edit the repo forbids. The dispatch guardrails caught it; the advisory should not have suggested it.\n\n## Where it comes from\n\n`node scripts/docs-audit/affected-docs.mjs origin/main` maps changed **packages** → docs that reference that package. For a leaf package that mapping is informative; for `@objectstack/spec` it is close to `true`, because the spec is the contract every doc describes.\n\n## Directions (not chosen here — triage/maintainer's call)\n\n1. **Symbol-granular for the hub packages.** Map changed *exported symbols* rather than the package name, at least for `@objectstack/spec`. Highest fidelity, most work, and needs a story for changes with no exported-symbol delta (a TSDoc edit).\n2. **Cap and summarise.** Above N docs, print the count plus the top few by reference density and link the full list, so the comment stops looking like a checklist. Cheap; keeps the signal honest about being coarse.\n3. **Suppress on hub packages, and say so.** If the mapping cannot discriminate for `@objectstack/spec`, printing nothing is more honest than printing everything — with one line naming why, so the silence is a decision rather than a hole.\n4. **Filter to docs the diff can plausibly affect** — e.g. only those whose own `docs-audit` frontmatter names a symbol in the diff.\n\n⚠️ Whichever direction is taken, **`content/docs/releases/**` should be excluded from the output entirely**: those pages are release-owned and read-only to code PRs, so listing them can only ever prompt a forbidden edit."
+}

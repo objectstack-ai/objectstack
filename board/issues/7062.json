@@ -1,0 +1,34 @@
+{
+  "number": 7062,
+  "kind": "issue",
+  "title": "[spec] 15 more `retiredKey()` prescriptions over v17 conversions lack the `os migrate meta` sentence — hidden from #6914's census because their FILES already contain the sentence elsewhere",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "finding"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T12:45:01Z",
+  "updated_at": "2026-08-09T15:16:57Z",
+  "closed_at": "2026-08-09T15:16:02Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7062",
+  "body": "Found while implementing #6914 (PR #7061). Filed unassigned, out of #6914's scope by its own census definition.\n\n## Why #6914 could not see these\n\n#6914's corpus was file-level: \"`retiredKey(` sites in files with **no** `os migrate meta` sentence anywhere\". That query is blind to a site whose neighbor in the same file carries the sentence. Re-running the census per **guidance literal** (constants resolved to their definitions, comment lines stripped) on `main` @ `3f7f14e61` finds 15 sites in 4 files that (a) lack the sentence in their own literal and (b) sit over a registered v17 conversion whose `apply()` covers exactly their key:\n\n| site | key | conversion id |\n|---|---|---|\n| `ai/agent.zod.ts:248` | `agent.knowledge` | `agent-knowledge-removed` |\n| `ui/action.zod.ts:992` | `action.shortcut` | `action-inert-keys-removed` |\n| `ui/action.zod.ts:999` | `action.bulkEnabled` | `action-inert-keys-removed` |\n| `ui/app.zod.ts:1253` | `app.version` | `app-dead-authoring-keys-removed` |\n| `ui/app.zod.ts:1393` | `app.objects` | `app-dead-authoring-keys-removed` |\n| `ui/app.zod.ts:1399` | `app.apis` | `app-dead-authoring-keys-removed` |\n| `ui/app.zod.ts:1425` | `app.sharing` | `app-dead-authoring-keys-removed` |\n| `ui/app.zod.ts:1431` | `app.embed` | `app-dead-authoring-keys-removed` |\n| `ui/app.zod.ts:1443` | `app.mobileNavigation` | `app-dead-authoring-keys-removed` |\n| `ui/app.zod.ts:1481` | `app.aria` | `app-dead-authoring-keys-removed` |\n| `ui/dashboard.zod.ts:379` | `widgets[].actionUrl` | `dashboard-widget-action-aria-removed` |\n| `ui/dashboard.zod.ts:380` | `widgets[].actionType` | `dashboard-widget-action-aria-removed` |\n| `ui/dashboard.zod.ts:381` | `widgets[].actionIcon` | `dashboard-widget-action-aria-removed` |\n| `ui/dashboard.zod.ts:910` | `dashboard.aria` | `dashboard-inert-keys-removed` |\n| `ui/dashboard.zod.ts:915` | `dashboard.performance` | `dashboard-inert-keys-removed` |\n\n(The `ui/dashboard.zod.ts:379-381` sites are one shared-constant family — see `ACTION_URL_RETIRED` and siblings around `:300`; the literal is what needs the sentence, so it may be fewer than 15 EDITS. Line numbers as of `3f7f14e61`; re-derive before editing.)\n\nConversion ids verified against `spec-changes.json`'s from-16 `converted` list; each `apply()` in `conversions/registry.ts` strips the named key wholesale (`stripKeys` / dedicated walkers). None is a MIXED (partial-value) conversion at these keys.\n\n## What does NOT belong here\n\nPer-literal sites without the sentence that have **no** conversion stay correctly silent (the `data/driver.zod.ts:108` precedent): the 32 driver capability bits, `data/query.zod.ts` `cursor`/`joins`/`windowFunctions`/`distinct` and the new `aggregations[].distinct` (#7051, no conversion registered), notifications `cursor`, engine options, `environment-artifact` envelope keys, `HookContext.session.roles`.\n\n## Fix shape\n\nSame as PR #7061: append the #6856 route-D house sentence as the final sentence of each qualifying literal — `` Run `os migrate meta --from 16` to rewrite existing sources automatically. `` — prose before it byte-identical. The class pin (`shared/retired-key-migrate-sentence.test.ts`) judges every new sentence automatically; expect its judged count to rise by exactly the number of edited literals.\n\n## Dedup\n\nSearched open issues: `migrate sentence tombstone`, `retiredKey \"os migrate meta\"` — only #6914 (whose census definition excludes these by construction) and its PR #7061."
+}

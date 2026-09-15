@@ -1,0 +1,35 @@
+{
+  "number": 6867,
+  "kind": "issue",
+  "title": "[finding] 10 more dead relative links + 2 stale path references in ARCHITECTURE.md — nothing gates that file's links",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T01:52:45Z",
+  "updated_at": "2026-08-09T08:09:52Z",
+  "closed_at": "2026-08-09T08:09:52Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6867",
+  "body": "Found while implementing #6733 (the dead `docs/adr/0001-…` link in `ARCHITECTURE.md`). Out of that card's scope — its dispatch scopes the diff to the ADR-0001 pointer — so filed per Prime Directive #10, unassigned.\n\nDistinct from #6726: that card is about links written **inside** `docs/adr/` pointing at the source tree. This is `ARCHITECTURE.md`'s own outbound links. No overlap, no `Blocked-by:`.\n\n## The fact\n\nMeasured at `origin/main` `659526212`, with #6733's fix applied (so the ADR-0001 entry is already gone). A census of every relative Markdown link in `ARCHITECTURE.md`: **12 links, 1 resolved**. After #6733 it is 12 links, 2 resolved — the remaining **10 are dead**:\n\n```\nL582  [content/docs/introduction/architecture.mdx](content/docs/introduction/architecture.mdx)\nL679  [Metadata Flow Documentation](docs/METADATA_FLOW.md)\nL716  [Quick Reference Guide](./QUICK-REFERENCE.md)\nL717  [Package Dependency Graph](./PACKAGE-DEPENDENCIES.md)\nL719  [Studio Roadmap](./apps/studio/ROADMAP.md)\nL720  [MicroKernel Architecture Guide](./content/docs/developers/micro-kernel.mdx)\nL721  [Plugin Ecosystem Architecture](./content/docs/developers/plugin-ecosystem.mdx)\nL722  [Writing Plugins](./content/docs/developers/writing-plugins.mdx)\nL723  [Three-Layer Stack](./content/docs/introduction/architecture.mdx)\nL724  [Design Principles](./content/docs/introduction/design-principles.mdx)\n```\n\nThe whole `## Related Documentation` section (L716–L724) is dead except `./ROADMAP.md`.\n\n## Triage per link — three dispositions, not one sweep\n\n**Moved, repointable but ambiguous:**\n- `content/docs/introduction/architecture.mdx` (cited twice, L582 + L723) — no `introduction/` dir; **two** candidates exist, `content/docs/concepts/architecture.mdx` and `content/docs/kernel/architecture.mdx`. Which one \"Three-Layer Stack\" meant is an authoring call.\n- `content/docs/introduction/design-principles.mdx` → `content/docs/concepts/design-principles.mdx`. Unambiguous single candidate.\n\n**Target left the tree entirely (needs a decision, not a repoint):**\n- `content/docs/developers/{micro-kernel,plugin-ecosystem,writing-plugins}.mdx` — no file of any of those names anywhere under `content/`.\n- `docs/METADATA_FLOW.md`, `./QUICK-REFERENCE.md`, `./PACKAGE-DEPENDENCIES.md` — absent.\n- `./apps/studio/ROADMAP.md` — `apps/` now contains only `docs/`; Studio lives in a sibling repo, so no relative path from here can reach it (same shape as #6726's `apps/studio/**` entries).\n\n**Bare (unlinked) path references in prose that also no longer resolve:**\n- `ARCHITECTURE.md:406` — `packages/spec/src/system/plugin-capability.zod.ts`; the file is real but at `packages/spec/src/kernel/plugin-capability.zod.ts` (`system/` → `kernel/`). A one-word fix.\n- `ARCHITECTURE.md:271` — `packages/plugins/plugin-msw/`; nothing named `msw` exists anywhere in the repo.\n- (Not a defect: `ARCHITECTURE.md:3` cites `.changeset/v5-project-to-environment-rename.md`, which is legitimately consumed at release time.)\n\n## Why it survived — the gap is real and named\n\nNothing checks this file:\n\n- `.github/workflows/check-links.yml` (lychee, advisory lane) runs over exactly `content/**/*.md`, `content/**/*.mdx`, `README.md`. `ARCHITECTURE.md` is not in the globs.\n- `scripts/check-adr-links.mjs` (#6592) resolves relative links **under `docs/adr/`** only — verified green on `main` at 531 destinations while all 11 of these were dead.\n- `scripts/check-adr-anchors.mjs` audits ADR *numbers*, not link targets, so a cited number can resolve while its link 404s — exactly the ADR-0001 case #6733 fixed.\n\nSo `ARCHITECTURE.md` — the repo's most prominent architecture entry point, and the file PD #13 sends a new agent to first — has had zero link coverage throughout. Adding `ARCHITECTURE.md` (or root `*.md`) to the lychee globs would surface all 10 at once, but that lane is advisory-first by design (#6028) and turning it red on day one is the failure mode `check-adr-links`'s header explicitly warns against; whoever picks this up should fix the links first, then extend the glob.\n\n## Severity\n\nObservation-class as filed: no user path, no runtime behaviour, no product contract. The cost is agent and contributor navigation — the same cost #6726 records, on the file with the widest readership. Labelled `finding`, no `pm:queue`; severity is the PM's to grade.\n\n## Provenance\n\nDev seat session `session_01F8q5J1MQyocgtNspb15fSn`, while implementing #6733 (branch `claude/issue-6733-architecture-dead-adr-link`). Duplicate search before filing: `ARCHITECTURE.md links` over open issues — only #6733 itself and the PM seat issue."
+}

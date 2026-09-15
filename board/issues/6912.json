@@ -1,0 +1,34 @@
+{
+  "number": 6912,
+  "kind": "pull_request",
+  "title": "docs(runtime): `errorResponseBase` 文件头不再把 `details.code` 说成线上位置 (#6270)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T03:41:16Z",
+  "updated_at": "2026-08-09T04:12:37Z",
+  "closed_at": "2026-08-09T04:12:36Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": "2026-08-09T04:12:36Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/6912",
+  "body": "Fixes #6270\n\n## 这是什么\n\n**纯注释改动，零行为变更。** 没有一行运行时代码被触碰；线上响应体与本次改动前逐字节相同，也没有任何新断言被写出来。这是 observation-class 的记录修正 —— 今天没有用户会撞到它，它伤的是**下一个改 `errorResponseBase` 的人**。请不要把它读成对某个用户可见缺陷的修复。\n\n改的是 `packages/runtime/src/dispatcher-plugin.ts` 文件头 doc block 里的两句假话，以及同一 block 里一段 JSON 示例的时态。\n\n## 假在哪\n\n原文（`:467`-`:469`）：\n\n> The code still travels: `details.code` (#3842, below) carries\n> `READ_SCOPE_COMPILE_FAILED` **to the client** untouched, so **what a machine reads** is\n> unchanged and only the prose is withheld — into `errorReporter` and the log.\n\n括号里的 `(#3842, below)` 指同函数下方那段 `const details = …` 的**本地暂存**，这半句是对的。错的是两个加粗处 —— 它们讲的都是**线上位置**，而 #5811 之后线上位置不是 `details.code`：\n\n1. `errorResponseBase` 把 code 暂存进一个本地 `details` 对象，交给 `buildApiError`；\n2. `buildApiError` 跑 `splitSemanticCode`（`packages/runtime/src/error-envelope.ts`），把 `code` 取走**提升**进 `ApiErrorSchema` 声明的 `error.code` 字段；\n3. `rest` 为空，`splitSemanticCode` 于是返回 `details: undefined`，`buildApiError` 里那个条件展开被跳过 —— **`details` 键整个从 body 中消失**。\n\n所以机器读到的是：\n\n```json\n{\"success\":false,\"error\":{\"code\":\"READ_SCOPE_COMPILE_FAILED\",\n \"message\":\"Internal server error\",\"httpStatus\":500}}\n```\n\n`error.details.code` 根本不存在可读。危害方向比同族前三处更陡：这一处的读者**就站在做暂存的那个函数里**，读到「details.code carries it to the client」会直接把**本地变量名**当成**线上契约**。新注释因此明写了一句 `Do not mistake the local variable name for the wire contract`。\n\n## 与 #6123 / PR #6264 的关系：措辞对齐，不是第四种说法\n\n同一句漂移共四处。#6123（PR #6264）修了前三处（#5367 的 changeset、`service-analytics/src/read-scope-sql.ts` 文件头、#5811 正文），并明文把 `dispatcher-plugin.ts` 划为 ⛔ 只读参考面 —— 所以第四处按 PD #10 单独立单，就是本单。\n\n本 PR 刻意**复用 PR #6264 的措辞骨架**（`⚠️ At error.code — NOT error.details.code` / `only STAGES` / `splitSemanticCode` / `PROMOTES` / `returns the now-empty details as undefined` / `never present to read` / 实测 body / `Pinned end-to-end in analytics-query-read-scope-withhold.test.ts`），只把「谁在暂存」改成本文件视角（#6264 说 `errorResponseBase` only STAGES，这里说 the `details` assembly below only STAGES）。**这里的价值是四处同一句话，不是第四种独立表述。**\n\n## 顺带：JSON 示例的时态（issue 点名要核的第二项）\n\n`:452`-`:457` 那段 `POST /analytics/query → 500 {…}` 展示的是 #5811 **修复之前**的泄漏形态（RLS 策略字段名原样落在 body 里）。它的形状本身没错，`code` 也确实直接挂在 `error` 下 —— 恰恰因为形状对，和新补的当前 body 并排读**极易被当成今天的线上形态**。\n\n判断：**它没有已经是明确过去时**。领头句 “It never saw … and those messages name …” 是现在时，fence 里的 `→ 500` 更像一次实况。所以按 issue 的建议加时态说明，**不删**：这段示例在做「我们曾经泄漏过什么 / 这条 `[#5811]` 条目关掉了什么」的正经工作。fence 顶部现在有一行\n\n```\n⚠️ PAST TENSE — the leak this entry CLOSED, not what this exit answers today.\n   For the current body see the corrected shape at the end of this block.\n```\n\n标注放在 fence **内部**是有意的：读者眼睛会直接跳进 fence，放在外面的引导句会被跳过。\n\n## 验证：没有可制造的红\n\n**这里没有 before/after 可测。** 零运行时行为被改动，注释没有失败态 —— 硬造一个 red 只会是伪证。新措辞为真的证据是**既有**锚点断言，`packages/runtime/src/analytics-query-read-scope-withhold.test.ts:218`（真 `AnalyticsService` ＋真挂载路由）：\n\n```\nexpect(res.body.error.code).toBe('READ_SCOPE_COMPILE_FAILED');\n```\n\n它旁边 `:211`-`:217` 的注释本来就把同一件事说清楚了 —— `errorResponseBase` puts `err.code` in `details`, and the shared builder (`buildApiError` → `splitSemanticCode`) then PROMOTES it into the declared `error.code` field, leaving `details` empty and therefore omitted —— 也就是说，**本 PR 是把 doc block 的说法对齐到测试早已钉住的事实**，而不是主张任何新事实。\n\n跑过：\n\n- `pnpm --filter '@objectstack/runtime^...' build` → exit 0\n- `pnpm --filter '@objectstack/runtime' typecheck` → `tsc --noEmit`，无输出\n- `npx eslint packages/runtime/src/dispatcher-plugin.ts` → exit 0，零 finding\n- `pnpm exec vitest run src/analytics-query-read-scope-withhold.test.ts` → `Test Files 1 passed (1) / Tests 10 passed (10)`\n- `pnpm check:nul-bytes` → OK（6410 文件，无裸控制字节）；`check:error-code-casing` / `check:route-envelope` / `check:doc-authoring` / `check:role-word` 全 PASS\n\n## 第五处？没有\n\n按 `details.code` 全仓扫了一遍源码。同族其余落点（`http-dispatcher.ts` 三处、`error-envelope.ts`、`domain-handler-registry.ts`、`packages/client`）**都已经把 `details.code` 正确描述为「被 `buildApiError` 提升进 `error.code` 的载体」**，不是同一句漂移；CHANGELOG 里的历史条目属于已发布记录，不动。**没有需要另立的第五处。**\n\n## Changeset\n\n`.changeset/dispatcher-plugin-error-code-doc-drift.md`，`@objectstack/runtime: patch`。空 frontmatter 形式在本仓由 `scripts/check-empty-changeset.mjs` 明令拒收（#5471/#4898），所以走 `patch` 而非 “releases nothing” 形式；changeset 正文同样如实写明「纯注释改动，零行为变更」。\n\n---\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_017uFVNMmTxLpmfQYiuKM1Yx\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_017uFVNMmTxLpmfQYiuKM1Yx)_"
+}

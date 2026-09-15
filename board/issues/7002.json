@@ -1,0 +1,35 @@
+{
+  "number": 7002,
+  "kind": "issue",
+  "title": "[finding] data-service.mdx quotes the pre-#6795 \"recommended interface\" sentence verbatim — stale after #6795's convergence edit",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T08:31:58Z",
+  "updated_at": "2026-08-09T13:44:09Z",
+  "closed_at": "2026-08-09T13:44:09Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7002",
+  "body": "Spun out of #6795 (PR TBD) at implementation time — filed unassigned per that card's boundaries (`packages/client` was the only face in scope there; docs pages are explicitly out of it).\n\n## The fact, measured\n\n`content/docs/kernel/runtime-services/data-service.mdx` quotes `QueryOptionsV2`'s JSDoc self-description **verbatim, twice**, attributed to the canonical source:\n\n- line 60: `the Canonical source still names \\`QueryOptionsV2\\` *\"the recommended interface for \\`data.find()\\` queries\"*`\n- line 101: `\\`QueryOptionsV2\\` is *\"canonical query options using Spec protocol field names … the recommended interface for \\`data.find()\\` queries\"*`\n\n#6795's convergence edit (maintainer ruling, Option A, 2026-08-09) reworded that JSDoc — `packages/client/src/index.ts:164` no longer says \"the recommended interface for `data.find()` queries\"; it now says `QueryOptionsV2` is \"the vocabulary `data.find()` still accepts\" and is not a recommendation. The two quotes above are therefore no longer verbatim quotes of the source they cite — same class of defect as #6925 (\"Two verbatim-quoted lint hint blocks go stale after #6673 — re-quote the corrected wording\"), just on a different pair of files.\n\n## Why this isn't in #6795's PR\n\n#6795's dispatch scoped the face to `packages/client` + `.changeset/`, with docs pages explicitly called out as belonging to a separate card (two other lanes — #6923, #6893 — were working `scripts/`/docs-drift tooling in parallel at the same time). Re-quoting is a small, mechanical fix, but it is still a `content/docs/**` edit outside that face.\n\n## Suggested fix\n\nRe-quote both spots with the new sentence (\"the vocabulary `data.find()` still accepts\", or paraphrase without quote marks if exact-quote maintenance is a burden going forward). Low priority / mechanical — `finding` class, not a functional defect: nothing a user hits differently today, the page's surrounding prose already describes the tension accurately in its own words, only the literal quoted fragment is now stale.\n\n## Related\n\n- #6795 (the source-side convergence this quote is now behind)\n- #6323 / PR #6784 (the docs-page rewrite that added these two quotes)\n- #6925 (same-class precedent: verbatim quote gone stale after a wording fix)\n\nUnassigned, unlabeled — PM triage.\n"
+}

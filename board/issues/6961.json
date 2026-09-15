@@ -1,0 +1,33 @@
+{
+  "number": 6961,
+  "kind": "issue",
+  "title": "spec: `UserFiltersSchema.allowAddTab` 的 `.describe()` 从「仅承诺渲染入口」升回真实语义(#5236 A1 落地后的联动半边)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:queue"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T06:25:08Z",
+  "updated_at": "2026-08-09T14:13:50Z",
+  "closed_at": "2026-08-09T14:13:50Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6961",
+  "body": "Part of objectstack-ai/objectstack#5236。\nBlocked-by: objectstack-ai/objectui#3926\n\n## 背景\n\n#5073 把 `allowAddTab` promote 进 `UserFiltersSchema` 时,`.describe()` 按 PD#10 刻意收窄为「仅承诺渲染入口」(*Render an \"add tab\" affordance after the presets…*),因为当时按钮实测无行为。\n\n维护者已在 #5236 裁决 **A1**(2026-08-06,评论 5200253516),objectui 半边已实现并验收:objectstack-ai/objectui#3926 —— 点击弹命名输入、快照当前筛选为新 tab、会话级(组件态,零 `sys_metadata` 写入,ADR-0047 合规)、会话 tab 带删除入口。\n\n## 本单要做的(spec 车道)\n\n`packages/spec/src/ui/view.zod.ts` `UserFiltersSchema.allowAddTab` 的 `.describe()` 升级为真实交付语义,要点:\n\n- end user 可通过该入口新增 tab:命名 + 快照当前已应用筛选;\n- **session-scoped**:新 tab 只存活于当前挂载,从不写入元数据(ADR-0047 措辞对齐);\n- 仍保留 #5073 原 describe 的适用面陈述(Page lists only — object views use `listViews` for named presets)。\n\n裁决原文确认渲染器不依赖该文案,故本单纯文档语义,零运行时改动;JSON Schema 基线与文档站生成物随 describe 变更同步再生。\n\n## 依赖\n\nobjectui PR #3926 已 ready + auto-merge;合入后本单解除 Blocked-by。\n\n—— 由 objectui 分片 PM 按跨车道协议移交(session `session_01GTRjn8xBqp75dk7kFupVRt`);spec 车道座位经其 backlog 扫描自取,勿跨席认领。"
+}

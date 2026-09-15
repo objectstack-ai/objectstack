@@ -1,0 +1,33 @@
+{
+  "number": 6615,
+  "kind": "issue",
+  "title": "[finding] The Postgres `\"x\" of relation \"y\"` phrase is now open-coded in three packages, each repairing the same superstring hole separately — `@objectstack/types` is the established home",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:queue"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T07:11:54Z",
+  "updated_at": "2026-08-09T10:07:37Z",
+  "closed_at": "2026-08-09T10:07:37Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6615",
+  "body": "Observation-class. Nothing a user hits today: all three copies are individually correct after PR #6613. This records that the *question* is now answered in three places, and that a home for it already exists.\n\n## What was measured\n\nWhile fixing #6347 (PR #6613) I swept the repo for the Postgres sub-object phrase. Three sites carry it, none imports another:\n\n| site | shape | purpose |\n|:---|:---|:---|\n| `packages/rest/src/rest-server.ts:831` (`mapDataError`, #5352) | strict: `column` + a snake_case identifier + `of relation` + `does not exist`, with a capture group | **extract** the column name, so a 42703 comes back as `400 INVALID_FIELD` rather than `404 object_not_found` |\n| `packages/services/service-analytics/src/analytics-service.ts:141` (`MISSING_COLUMN_OF_RELATION`, #6035 / PR #6346) | the same regex, copied verbatim | keep a missing-column failure hard instead of degrading to an empty grid |\n| `packages/metadata/src/utils/schema-sync-errors.ts` (`MISSING_TABLE.excludes`, #6347 / PR #6613) | deliberately wider: any sub-object, any quoted identifier, any verdict | **exclude** the phrase before the missing-table test |\n\nThe three are not copies of one intent: two extract, one excludes, and the exclusion is wider on purpose (a miss on extraction costs a vaguer message; a miss on exclusion restores a data-corruption verdict). That difference is real and is documented at each site. The observation is one level up: **the same Postgres phrasing quirk has now been taught to the repo three times, by three PRs, in three packages** — and twice it was taught only *after* the same superstring hole had already shipped somewhere else (#6035 in service-analytics, then #6347 in metadata, same family).\n\n## Why this is worth recording rather than fixing now\n\nA home for exactly this class already exists, and it was created for exactly this reason. #6250 moved \"is this driver error a unique-constraint violation?\" into `@objectstack/types` (`packages/types/src/unique-violation.ts`) after finding **four** hand-written, mutually different answers to that one question. Its own docblock cites `isMissingTableError` (#5841) as \"the same move, and the same reason\", and its stated rationale for the home is that \"every consumer of the question already depends on it, so adopting the predicate never adds an edge\" — worth re-checking for all three sites above.\n\nSo the candidate shape is a named export in `@objectstack/types` along the lines of `matchMissingColumnOfRelation(message)` plus a wider `isRelationSubObjectPhrase(message)`, with all three callers reading the one home. Not done in PR #6613 because that PR's file surface was one file plus its test, and because a one-line phrase copy carrying a comment that names its siblings is cheaper than a cross-package edge until there is a third *reason*, not merely a third *copy*. There is now a third copy.\n\n## What a fix would need to weigh\n\n- Extraction and exclusion want different widths. A shared home has to expose both honestly (a strict extractor plus a wide detector), not collapse them into one regex that is wrong for one caller — collapsing them would be the real risk of doing this carelessly.\n- `packages/metadata` does not import `@objectstack/types` for this today; check the dependency direction before assuming \"never adds an edge\" transfers.\n- Related but distinct scattered answers live in the same neighbourhood (`packages/drivers/driver-turso/src/remote-transport.ts:896`, `packages/services/service-analytics/src/analytics-service.ts:190`, `packages/objectql/src/transaction-errors.ts`). Whether they belong in the same sweep is a scoping decision, not a given.\n\nNo `pm:queue`: nothing is broken today, and the value is in doing it once, deliberately, rather than as a rider on unrelated work.\n"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 7059,
+  "kind": "pull_request",
+  "title": "fix(driver-sql): a merge-path upsert no longer rewrites an existing row's autonumber (#7011)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T12:41:29Z",
+  "updated_at": "2026-08-09T13:17:20Z",
+  "closed_at": "2026-08-09T13:17:19Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": "2026-08-09T13:17:18Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/7059",
+  "body": "Fixes #7011.\n\n## The ruling this PR implements (triage, 2026-08-09, quoted per the dispatch)\n\n> an autonumber is an immutable business identifier once assigned — the fix **excludes auto_number columns from `mergeColumns`** so a merge never rewrites an existing row's number; the pre-burn half (a number consumed before insert-vs-merge is known) belongs to #6943's reseed family and is explicitly out of scope here. If implementation finds any consumer relying on merge-overwrite, STOP and report.\n\n## Premise re-verified on the branch base (`main` @ `3fc2e48`, healthy counter, one row)\n\nThe new pin file was run **before** the fix, and went red with exactly the filing's values:\n\n```\ncreate                      → CASE-00001    last_value 1\nupsert same id (1st time)   → CASE-00002    last_value 2   (asserted CASE-00001, received CASE-00002)\nupsert same id (2nd time)   → CASE-00003    last_value 3\n```\n\nOne row throughout; its `case_number` was rewritten twice. Cause, as filed: `fillAutoNumberFields` reserves a number before the statement knows whether it will insert or merge, and the autonumber column sat in `mergeColumns`, so the `ON CONFLICT … DO UPDATE` branch wrote the fresh reservation over the row's existing number.\n\n## The fix\n\n`SqlDriver.upsert()` now derives its merge column list through a new `insertOnlyUpsertColumns(object)` helper: `created_at` (the pre-existing exclusion, byte-identical behavior) plus every `auto_number` column of the object, resolved under the same object-name/table-name lookup `fillAutoNumberFields` uses and mapped to **physical** column names (external objects can remap logical fields via `external.columnMap`, and the merge list is derived from the `applyWriteColumnMap`-processed row).\n\nThe exclusion is **unconditional**: an explicit autonumber value in the upsert payload does not renumber an existing row on the merge branch either — `update()` writes what it is given and remains the deliberate renumbering path. Insert-path upserts still assign fresh numbers, and every non-autonumber column (including `updated_at`) merges exactly as before.\n\n## Consumer check (the STOP condition) — no consumer relies on merge-overwrite\n\nEvery driver-level `upsert` caller in the monorepo was enumerated:\n\n- **Lifecycle Archiver** (`packages/objectql/src/lifecycle/lifecycle-service.ts:1110`, `cold.upsert(object, row, ['id'])`) — copies full hot rows carrying their autonumber values explicitly. The merge branch only re-fires when an interrupted sweep re-copies the **same unchanged row** (archived rows are hot-deleted after copy), so the excluded column's payload value equals the stored value and the exclusion is observably a no-op there.\n- **`packages/runtime/src/sandbox/body-runner.ts:276`** guards on `typeof ql.upsert === 'function'` — `ObjectQLEngine` exposes no `upsert` method, so this path routes to `ql.insert` today.\n- **REST import's `writeMode: 'upsert'`** is find-then-create-or-update at the engine level (`import-runner.ts` `findExisting`) and never calls driver `upsert`.\n\nNo fixture outside the three driver packages combines driver `upsert` with autonumber (swept by grep over every `@objectstack/driver-sql`-importing test).\n\n## Faces\n\n| face | conclusion | basis |\n|:---|:---|:---|\n| `SqlDriver` | fixed | primary; new pin file |\n| `SqliteWasmDriver` | inherits (`upsert` not overridden) | new merge-path pin in its existing #6943 upsert test file |\n| `TursoDriver` local/replica | overrides `upsert`, routes to `super` | new LOCAL merge-path pin in its existing #6943 test file |\n| `TursoDriver` remote | neither defect nor fix | `RemoteTransport.upsert` never enters `fillAutoNumberFields` (#6999's table; unchanged) |\n\n`driver-memory` / `driver-mongodb` are #5499-frozen and untouched — neither declares `supports.autonumber`; both use the engine fallback (#6806's surface), per the card's own boundary note.\n\n## Out of scope, measured for #6943's card (the pre-burn reading the dispatch asked for)\n\nPost-fix, on a healthy counter: the row keeps `CASE-00001` through both merge-upserts, but `last_value` still walks **1 → 2 → 3** — the reservation still happens before insert-vs-merge is known, so a merge-only upsert still consumes one sequence value per call. The next insert-path row gets `CASE-00004`, i.e. `CASE-00002`/`CASE-00003` are now **permanent gaps** rather than rewrites. Deferring the reservation is #6943-family work; no test in this PR asserts `last_value` on the merge path, so that future fix cannot turn this PR's pins red.\n\nExisting rows already renumbered by past merges cannot be restored from the driver side (as the filing noted).\n\n## Reverse verification (direction predicted before running)\n\nPredicted: restoring the deleted limb (autonumber exclusion off) turns **exactly the merge-path pins** red, with the filing's own values; insert-path and non-autonumber-merge cases stay green. Measured: driver-sql pin file 4 failed / 1 passed (`expected 'CASE-00002' to be 'CASE-00001'`, `'TKT-0002'` vs `'TKT-0001'`), sqlite-wasm file 1 failed / 2 passed (only the new #7011 pin), turso file 1 failed / 3 passed (only the new LOCAL #7011 pin). Fix restored: 5/3/4 all green.\n\n## Tests\n\n- `pnpm --filter @objectstack/driver-sql test` — 80 files passed, 4 skipped (1147 tests passed, 48 skipped)\n- `pnpm --filter @objectstack/driver-sqlite-wasm --filter @objectstack/driver-turso test` — 23 files / 308 tests and 32 files / 912 tests, all passed\n- `tsc --noEmit` (typecheck) green on all three packages; ESLint clean on the four touched files\n- Changeset: `@objectstack/driver-sql` patch (user-visible behavior fix)\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01LGRN2cSRfggfX9B2L83bQc\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01LGRN2cSRfggfX9B2L83bQc)_"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 17768,
+  "kind": "issue",
+  "title": "docs(i18n): the i18n standard page teaches two incompatible bundle-key conventions, and declares one of them the only one",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "priority:p2"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-12T03:44:31Z",
+  "updated_at": "2026-09-14T13:48:31Z",
+  "closed_at": "2026-09-14T13:15:30Z",
+  "closed_by": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17768",
+  "body": "Found while implementing #16251, which states both authorized `I18nLabel` forms on\n`content/docs/protocol/kernel/i18n-standard.mdx`. Filed unassigned and unlabelled —\ntriage owns `domain:*` and the grading. This is **not** a defect in that card's PR:\nnone of the lines below were edited by it.\n\n## The gap\n\nMeasured on `origin/main` at `aaacf1d5c5`, the same page describes two different,\nincompatible bundle-key conventions for the same field, and says of one of them that\nit is the only one.\n\n`### Object-First Convention` (`:166`), at `:174`:\n\n> There is exactly **one** shape. A file-authored bundle is a map of locale code →\n> `TranslationData` … The resolvers, `os i18n extract`, `os i18n check`, and the\n> Studio editor all read the same keys.\n\n`### Orphan Keys and Option Keys` then tabulates those keys as `objects.{object}`,\n`objects.{object}.fields.{field}`, `objects.{object}._views.{view}`, and so on.\n\n`## ObjectQL Integration` (`:730`) and `## ObjectUI Integration` (`:784`) teach the\nother convention:\n\n```\n:742    label: 'account.label',           // Translation key\n:748    label: 'account.fields.name',     // Translation key\n:795    label: 'account.list.title',      // Translation key (i18n label)\n```\n\nwith a bundle file `i18n/en/account.json` holding `{ \"label\": \"Account\", \"fields\":\n{ \"name\": \"Account Name\" } }` — a flat per-namespace file, not the object-first\n`objects.account.label` the same page declares normative. The prose at `:780`\nasserts:\n\n> The raw label value stored on the metadata is the translation key; the rendered\n> locale is supplied by the request's resolved locale.\n\n## Why that sentence is the load-bearing one\n\n`packages/spec/src/system/i18n-resolver.ts` derives the key from the label's\n**position**, never from its value:\n\n> Developers author plain English `label`s in metadata (`*.view.ts`, `*.actions.ts`);\n> these helpers translate at render time using the standardized keys:\n> `objects.<object>._views.<view_key>.label` …\n\n> Lookup order: requested locale → each entry of `fallbackChain` → literal `label`\n> from the metadata — except that a request for the deployment's `defaultLocale`\n> never walks the chain: the authored label IS the default locale's text (#15711)\n\nThe page already states that half itself, at `### Locale Fallback` (`:155`): \"the\ninline `label:` authored on the metadata **is** the default locale's text\". So one\npage carries both \"the authored label IS the default locale's text\" and \"the raw\nlabel value stored on the metadata is the translation key\", about the same field.\n\n## What was NOT measured\n\nobjectui's `translateLabel` lives in the sibling repo and was **not** measured here,\nso this card does not claim the examples fail at runtime — only that the page\ncontradicts itself and its own normative sections. Whoever picks it up should measure\n`translateLabel` first, and then decide which of the two is true: the\nObjectQL/ObjectUI examples need rewriting to the object-first convention, or the flat\nconvention is a second live route and the \"exactly one shape\" sentence is the one\nthat is wrong.\n\n## Why it was left out of the #16251 PR\n\nThat decision needs the objectui measurement and would rewrite two sections plus their\ncode samples — outside a card whose subject is the missing second label form. The\n#16251 PR repaired only the one adjacent sentence its own addition made\nself-contradictory (`os i18n check` \"runs in one direction — which keys the metadata\nexpects that no bundle carries\", which is not how a gap on a map-authored prop is\nclosed).\n\nRelated: #16251, #15984, #14749, #5377."
+}

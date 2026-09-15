@@ -1,0 +1,36 @@
+{
+  "number": 17712,
+  "kind": "issue",
+  "title": "finding: random changeset filenames collide silently across parallel agents — a round overwrote a sibling PR's `minor` changeset and every gate stayed green",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-bill",
+    "id": 324100929,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:devx",
+    "priority:p2"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-11T17:17:11Z",
+  "updated_at": "2026-09-14T09:04:39Z",
+  "closed_at": "2026-09-14T07:19:46Z",
+  "closed_by": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 10,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17712",
+  "body": "**Filed by the `domain:spec` execution seat, 2026-09-11T16:5xZ, from a NEAR MISS that a round self-caught in #17400 and reported rather than quietly repairing.** ⛔ No `domain:*` and no priority from me.\n\n## What happened, measured\n\nA round wrote its changeset with a **changesets-style random word-pair filename** — `.changeset/plain-donkeys-repeat.md`. That file **already existed on `origin/main`**: it is a **sibling PR's `minor` changeset**. The round **overwrote it and committed the overwrite**.\n\nIt was caught by one thing only: `git status` printed **`M`** where an `A` was expected.\n\nRepaired completely and provably — the sibling file restored from `origin/main` and shown byte-identical by `git hash-object` (`ee8dfe6a85…` == `ee8dfe6a85…`), the round's own changeset renamed to an issue-scoped name, and the sibling path **absent from the final diff vs `origin/main`** (0 matches). ⇒ ⛔ **Nothing was actually lost.** This card is about the mechanism, not the incident.\n\n## ⭐ Why this is worth a card\n\n**Nothing mechanical would have stopped it.** Walk the failure that almost shipped:\n\n1. A changeset filename is content-free — `plain-donkeys-repeat.md` says nothing about what it releases, so a collision looks like nothing.\n2. Overwriting it produces a **valid** changeset file. `check:empty-changeset` and `check-changeset-no-major` both still pass — the file parses, it just now says something else.\n3. The sibling PR's release note is **silently replaced** by this PR's. The sibling stays green; its own CI never re-runs on this change.\n4. The loss surfaces at **release time**, in the generated CHANGELOG, by which point the authoring PR is merged and the evidence is gone.\n\n⇒ A `minor` release note for a shipped package could be deleted by an unrelated PR, with **every gate green on both sides**. That is a release-integrity hazard, not a working-style preference.\n\n⚠️ And the exposure is structural here: this repo runs **many agents in parallel**, each creating changesets, all drawing from the same small random-word space. The collision rate is not hypothetical — it happened today on the first round that used a random name.\n\n## The cheap mechanical fix (⛔ a direction, not a prescription)\n\nEvery other round today named its changeset **issue-scoped** — `.changeset/17187-…md`, `.changeset/16875-…md` — and those cannot collide by construction. Options a taker might weigh:\n\n- **A** — a gate refusing a changeset filename that is not issue-scoped (or refusing a diff whose changeset entry is `M` rather than `A`). ⭐ The `M`-not-`A` shape is exactly what caught this one, so it is already known to be detectable.\n- **B** — an `os-dev` rule in `.claude/agents/os-dev.md` mandating the issue-scoped name. Cheaper, but prose, so it binds only rounds that read it.\n- **C** — nothing: treat it as working discipline.\n\n⚠️ **A and B are not equivalent**, and the difference is the whole point of this card: **B is the same class of protection that just failed.** The round that collided was following its dispatch faithfully — the dispatch simply had not told it to scope the name. Another prose rule protects only the rounds that happen to be told.\n\n⛔ I am not choosing: a new gate is gate strength, which is the maintainer's floor.\n\n## An adjacent hazard from the same round, recorded not filed\n\nOn this container's **shallow** clone, `git log -- PATH` attributes **every** file to the graft-boundary commit `dea214f818`, so path provenance is unusable without `--unshallow`. That round noticed and **declined to rely on it**. ⛔ Not a repo defect — a property of the checkout — but it is the kind of thing that turns into a false \"this file has not changed since\" reading.\n\n### Duplicate check — completed to the limit this session allows\n\n⛔ REST `/search/*` is refused for this session and MCP `search_issues` is rate-limited. Completed: enumeration of **569 open issues** grepped by **TITLE** — `random` 0, `overwrite` 0, `plain-donkeys` 0; `changeset` 6 and `collision` 3, each a different subject on inspection (#17296 an ADR-0049 question, #17281 a retirement's trailing edges, #17229 a false gate line, #17026 stale claims inside a queued changeset, #14290 a dispatch-gates traversal gap). Lit control `spec` = 75. ⚠️ **Titles only; bodies were not searched.** Close as duplicate if one surfaces.\n\nRelated: #17400 / PR #17711 (where it happened and was repaired) · #17026 (a different way a changeset's content goes wrong after it is written)\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

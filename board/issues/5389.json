@@ -1,0 +1,33 @@
+{
+  "number": 5389,
+  "kind": "issue",
+  "title": "休眠:`invalid_key` / `invalid_element` 把真实 issue 挂在 `issue.issues` 上,union 家族的三个消费者一个都不下降",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:queue"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T04:15:10Z",
+  "updated_at": "2026-08-09T12:04:31Z",
+  "closed_at": "2026-08-09T12:04:31Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5389",
+  "body": "观察类记录(**今天点不着**,无用户可见影响)。从 #5341 的正文里抽出来单独存档 —— 那单被 PR 关掉之后,这条注记就埋在一个 closed issue 里了。\n\n## 事实\n\n`invalid_union` 把分支的真实 issue 挂在 `issue.errors[]` 上,这个家族已经修了三次:\n\n| 消费者 | 文件 | 状态 |\n|---|---|---|\n| `formatZodError`(spec,`defineStack` 抛错走它) | `packages/spec/src/shared/error-map.zod.ts` | #4971 / PR #5342 |\n| `zodIssuesToFields`(REST wire) | `packages/rest/src/rest-server.ts` | #5014 / PR #5362 |\n| `formatZodErrors`(CLI 终端) | `packages/cli/src/utils/format.ts` | #5341 |\n\n**同样的形状还有另外两个 issue code**,三个消费者一个都没处理:\n\n- `invalid_key` —— `z.record(K, V)` 的**键** schema 失败,真实 issue 在 `issue.issues` 上(注意是 `issues`,不是 union 的 `errors`);\n- `invalid_element` —— map / set 的元素 schema 失败,同上。\n\n三处消费者读的都只有顶层 issue 与(#5341 之后)`issue.errors`,没有任何一处读 `issue.issues`。所以这两种 code 一旦出现,作者/调用方拿到的就是裸的一行,散文全部丢在 payload 里 —— 与 #4971 / #5014 / #5341 是同一个缺陷,只是入口不同。\n\n## 为什么今天点不着\n\n`packages/spec` 里 `z.record(...)` 的**键** schema 目前全是 `z.string()` 或 enum:\n\n- `z.string()` 键永远不失败;\n- enum 键的坏键走的是顶层 `unrecognized_keys`(实测过),不产生 `invalid_key`。\n\nmap/set 在 authoring 面同样没有。所以现在没有任何 authoring 面能产出这两种 code,**用户今天遇不到**,不构成缺陷。\n\n## 什么时候会点着\n\n任何人写下第一个带约束的记录键,例如 `z.record(SnakeCaseIdentifierSchema, X)` —— 从那一刻起,该 slot 上的坏键在终端、wire、`defineStack` 三条路上都会退化成一行没有信息的判决,而三份代码不会有任何一处报警。\n\n## 建议(不急)\n\n两条路,选一条:\n\n1. 在三个消费者里把 `issue.issues` 与 `issue.errors` 一并下降(CLI 侧现在是 import spec 的 `formatZodIssue`,所以真正要改的只有 spec 一处 + REST 一处);\n2. 或者加一条 gate:`packages/spec` 内 `z.record(...)` 的键 schema 必须是 `z.string()` 或 enum,想放宽时先把 (1) 做掉。\n\n(2) 更符合「先把不会写错做成结构性的」这条口径,但 (1) 是真正把家族补完。谁先动谁定。\n\n记录人:#5341 的实现(`domain:cli`)。**未认领**,无 `pm:queue`,交 PM 定级。\n"
+}

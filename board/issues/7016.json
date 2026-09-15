@@ -1,0 +1,36 @@
+{
+  "number": 7016,
+  "kind": "issue",
+  "title": "objectui:DatasetWidget 把 chartConfig 中「chart 块实际兑现且不与 dataset 推导冲突」的呈现键真正转发(#5175 的 enforce 半边,PM 裁定)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "pm:queue",
+    "repo:objectui",
+    "target:v17"
+  ],
+  "assignees": [
+    "yinlianghui"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T09:11:39Z",
+  "updated_at": "2026-08-09T09:56:52Z",
+  "closed_at": "2026-08-09T09:56:52Z",
+  "closed_by": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7016",
+  "body": "Part of objectstack-ai/objectstack#5175(enforce 半边;收窄半边与台账 verdict 形状仍在 #5175 等维护者)。\n\n## PM 裁定(objectui 分片,session `session_01GTRjn8xBqp75dk7kFupVRt`,2026-08-09,restore-invariant 类,免升级,否决窗开放)\n\n`DashboardWidgetSchema.chartConfig` 声明完整 `ChartConfigSchema`,dashboard 元数据路径只落地 `showLegend` 一个键(#5175 实测,DatasetWidget.tsx :595-605 注释自陈)。react tier 上同一批键作为扁平 prop 发布且到达渲染器(ADR-0081/0082),说明**底层 chart 块本身兑现这些键** —— dashboard 面惰性纯粹是 DatasetWidget 构造 component schema 时不转发。恢复 declared = enforced,与 #6331(谓词首次生效)同形,先例充分。\n\n## 转发判据(机械,两条都满足才转发)\n\n1. **底层 chart 块实际兑现该键**(逐键实证:react tier 的 ObjectChart dataProps 已列的键是强先验,但要在 dashboard 路径端到端验证到视觉效果,不许「转发到一个忽略它的 prop」—— 那是把 declared ≠ enforced 下沉一层);\n2. **不与 dataset 推导冲突**(`xAxis`/`yAxis`/`series` 由 dataset selection 推导,⛔ 一律不转发,归收窄半边)。\n\n预期入围:`title`/`subtitle`/`description`/`colors`/`height`/`showDataLabels`(与既有 `showLegend` 并列)。`type` 不碰(dataset 路径已有 chartType 通道)。`annotations`/`interaction`/`aria` 由 dev 按判据 1 逐键实测定夺:兑现则转发并钉住,不兑现则记入报告的「收窄候选清单」交回 #5175。\n\n## 验收线\n\n- 每个转发键一条测试:dashboard 元数据写该键 → 渲染结果有对应视觉/DOM 效果;\n- 不转发键(xAxis 等)一条负向钉:写了仍被忽略(现状即契约,待收窄半边裁决);\n- 报告必须带**逐键判定表**(键 → 转发/不转发 → 依据),作为 #5175 收窄半边的输入。\n\n落点:`packages/plugin-dashboard/src/DatasetWidget.tsx`(:595-605 取键、:632 构造 schema)+ 测试;⛔ 不碰 `packages/spec`(收窄半边归 spec 车道)、不碰 DashboardRenderer 内联路径(0 处 chartConfig 是另一个面,不在本单)。"
+}

@@ -1,0 +1,33 @@
+{
+  "number": 6773,
+  "kind": "issue",
+  "title": "`spec/liveness/field.json` 的 `Field.widget` 存活记录把 `capability-multiselect` 记作 sys_permission_set 在用 —— 该 widget 名从未在活路径注册,现已退役",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:queue"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T16:21:32Z",
+  "updated_at": "2026-08-09T16:19:42Z",
+  "closed_at": "2026-08-09T16:19:42Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6773",
+  "body": "在实施 objectui#3308 的引用面扫描中顺带发现(`objectstack origin/main` 上 `git grep -nw \"capability-multiselect\"` 的**唯一**命中)。与该 issue 的修复面无关,单独记录。\n\n## 事实\n\n`packages/spec/liveness/field.json:109`,`Field.widget` 的 note:\n\n> objectui generic form widget override. ObjectForm (packages/plugin-form/src/ObjectForm.tsx) threads `field.widget` into the renderer; form.tsx resolves `widget || type` and looks it up as `field:` + widget in the ComponentRegistry (renderFieldComponent). Used to render pick-not-type controls for sys_sharing_rule (object-ref / filter-condition / recipient-picker) and **sys_permission_set (capability-multiselect)**. Degrades to the `type` renderer when the widget is unregistered.\n\n加粗那半句从未成立,现在则是明确错的:\n\n1. **没有生产方 stamp 过它。** ADR-0056 P1 经 `ObjectStackAdapter.getObjectSchema` 的单一 choke point(objectui `packages/data-objectstack/src/index.ts` 的 `applyFieldWidgetOverrides`),给 `sys_permission_set` 六个 facet —— 含 `system_permissions` —— stamp 的是 `permission-facet-link`,不是 `capability-multiselect`。\n2. **该 widget 名在活路径上从未注册。** `field:capability-multiselect` 只由 objectui 已废弃、仅文档站调用的 `registerFields()` 注册;活路径 `registerAllFields()` 遍历的 `fieldWidgetMap` 里没有它。\n3. **现已退役。** objectui#3308(维护者裁决:删除,ADR-0049 enforce-or-remove)已删掉注册面与最后一个 hint 消费方 —— objectui PR #3793。\n\nnote 里另一半(`sys_sharing_rule` 的 object-ref / filter-condition / recipient-picker)是准确的:这三个键确实在 `fieldWidgetMap` 里。\n\n## 为什么值得记一笔(observation class)\n\n今天没有用户会撞到它:这是存活账本里的一条 note,不进任何运行时判断。但它是**给下一个读账本的人(和 AI)的错误权威**——一条被登记为「在用」的证据,指向一个从来渲染不出来的 widget 名。objectui#3308 的病根正是同一类(注释承诺不存在的能力),而存活账本恰恰是用来判定「某属性是死是活」的地方,一条失真的用例证据会让下一轮 enforce-or-remove 判断建立在假前提上。\n\nnote 的最后一句(`Degrades to the type renderer when the widget is unregistered`)反而是**准确且有用的**——它正是 objectui#3308 里删掉 hint 分支后所依赖的既定行为。\n\n## 建议处置\n\n把 `sys_permission_set (capability-multiselect)` 改为 `sys_permission_set (permission-facet-link)`,并核一遍 `permission-facet-link` 的注册处(objectui `packages/plugin-detail/src/index.tsx:466`,经 `withFieldCarrier`)以确认新写法确有活路径支撑。顺手可复核该 note 提到的其余 widget 名是否都还在 `fieldWidgetMap` 里。\n\n## 参考\n\n- objectui#3308(裁决与实施)、objectui PR #3793\n- objectui `docs/adr/0056-permission-editing-studio.md` P1 / P2\n- ADR-0049 enforce-or-remove\n"
+}

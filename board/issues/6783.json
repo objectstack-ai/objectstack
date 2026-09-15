@@ -1,0 +1,34 @@
+{
+  "number": 6783,
+  "kind": "issue",
+  "title": "plugin-sharing: INFO line when isSystem writes cover an active sharing rule but materialise zero grants (demand 3 of #4707, maintainer-ruled 2026-08-06)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T17:29:50Z",
+  "updated_at": "2026-08-09T07:04:39Z",
+  "closed_at": "2026-08-09T07:04:39Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6783",
+  "body": "Part of #4707. Execution sub-card cut by the triage seat per the maintainer's 2026-08-06 ruling recorded on that thread (demand 3 = do).\n\n## Task\n\nWhen a seed run (or any `isSystem` write batch) writes rows to an object covered by an **active** sharing rule and materialises **zero** grants because the record-write hooks skip `isSystem` sessions, emit **one INFO line** naming the behaviour and the remedy, per the ruling's wording: include the guidance \"sharing materialisation skipped for isSystem writes; re-evaluate rules or restart to backfill\".\n\n## Anchors (re-verified on `origin/main` @ `e1e7629`)\n\n- The skip itself: `packages/plugins/plugin-sharing/src/rule-hooks.ts:157`, `:165`, `:180`, `:194` — each record-write hook returns early on `(ctx?.session as any)?.isSystem`.\n- The eventual heal the INFO line should point at: the boot backfill (`sharing-plugin.ts`, whose own comment at `:47` documents that seed rows are written with `isSystem` and the hooks deliberately skip them).\n- The original symptom (hotcrm#640): fresh install, 9 active rules, 9 matching accounts, `sys_record_share` empty — every visible layer said \"configured\", nothing said \"inert\".\n\n## Shape notes for the dev (from the parent card, not a ruling)\n\n- The signal must be **one line per seed run/batch**, not per row — the failure mode being fixed is silence, not verbosity.\n- Behaviour is otherwise correct (boot backfill heals it); ⛔ do not change the skip itself, and do not make the INFO an error/warn — the ruling asked for INFO.\n- Demand 2 of the parent is decided (the flag is NOT being split); this card must not introduce any new switch.\n\n## Scope\n\n`packages/plugins/plugin-sharing` only (identity lane).\n\nRefs: #4707 (anchor card — closure rides on the sub-cards landing), hotcrm#640 / PR hotcrm#652, sibling devx sub-card for demand 1."
+}

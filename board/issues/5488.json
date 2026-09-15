@@ -1,0 +1,37 @@
+{
+  "number": 5488,
+  "kind": "issue",
+  "title": "`api` 注册表条目声明 allowRuntimeCreate: true,但运行时创建的端点匹配器永远看不见 —— 声明的能力运行时不兑现(真实 boot 实测)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:spec",
+    "pm:dispatched",
+    "target:v17"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T14:06:30Z",
+  "updated_at": "2026-08-09T11:35:57Z",
+  "closed_at": "2026-08-09T11:35:57Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 14,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5488",
+  "body": "发现于 #5224 / PR #5487 的前提重核(真实 showcase boot,`objectstack dev --fresh`,47 plugins)。不在该单文件面内,按 Prime Directive #10 单独立项。这就是 #5224 body 里列的**方向一(收敛取数源)**,PM 在 #5224 的解锁裁定里明确留作「更大的架构统一,另行立项」。\n\n## 事实\n\n`DEFAULT_METADATA_TYPE_REGISTRY` 里 `api` 的条目声明:\n\n```\npackages/spec/src/kernel/metadata-plugin.zod.ts:760\n{ type: 'api', label: 'API Endpoint', ..., allowRuntimeCreate: true, ... }\n```\n\n`allowRuntimeCreate: true` = 平台**声明允许**在运行时(Studio / 元数据写入口)创建一条 `api`。实测确实允许:\n\n```\nPUT /api/v1/meta/api/e8_backdoor  {...}  → HTTP/1.1 200 OK\n   {\"success\":true,\"version\":\"sha256:9ad721f4...\",\"seq\":1,\"state\":\"active\",\n    \"message\":\"Saved customization overlay (env-wide, state=active) — type=api ...\"}\n```\n\n但这条端点**永远不会被服务**:\n\n```\nGET /api/v1/apps/showcase/backdoor   (匿名)  → 404\nGET /api/v1/apps/showcase/backdoor   (已鉴权) → 404\n```\n\n而且**不是被门拒的** —— 整轮 dev 日志里没有 `[EndpointMatcher] ... EXCLUDED` 那一行(#5189/#5203 的 E7b 装载期门压根没被走到)。\n\n## 原因(与 #5224 同一条断链,另一个方向)\n\n服务判据的持有者是 `IMetadataService.matchEndpoint` → `EndpointMatcher` → `MetadataManager.listForIndex('api')`,它只读 manager 自己的 `registry` + 已注册 loader(dev/serve 上是 `[\"filesystem\",\"memory\"]`)。运行时写入落的是 `sys_metadata`,**不在这两者之中**,所以匹配器的索引里根本不存在这一条。\n\n#5224 修的是「面不许谎报」(PR #5487 已让两个面只宣告匹配器会服务的集合)。**本单是反方向**:注册表声明了「可以运行时创建」这一能力,而运行时不兑现它。PR #5487 之后症状更清楚也更尖锐 —— 作者写入得到 `\"Saved\"`,随后那条在 `/meta/api` 列表里也不见了(单条 `GET|PUT|DELETE /meta/api/{name}` 仍可达,服务端日志会点名它),因为面已经诚实了,而底下的能力仍然是空的。\n\n## 三种可能的收口(不预设结论,判据不同)\n\n1. **收敛取数源**:让 `matchEndpoint` 与 `getMetaItems` 读同一个库(一条路由一个所有者的元数据版本)。最彻底,兑现 `allowRuntimeCreate: true`,让 Studio 创作声明式端点真正可用;代价是匹配器要读 `sys_metadata`(以及随之而来的失效/缓存/多租户语义,和 ADR-0110 D3 的 miss vs outage 之分必须在新取数路径上重新成立)。\n2. **`allowRuntimeCreate: false`**:承认 17.x 的声明式端点只能由 stack artifact / `publishPackage` 落地,注册表如实声明,写入口按 #5086 的既有机制拒收。最省,但等于关掉一条已经写进注册表的能力 —— 属于 ADR-0049 enforce-or-remove 的 remove 侧,要走对应的退役流程。\n3. **保持现状但让写入口大声拒绝**:与 #5206 同侧(它的领地是 `publishPackageDrafts` 的 E7 门 + Studio 直写校验),把「你可以存,但它永远不会生效」在写入的那一刻就说清楚。\n\n三条的长期代价不同,请维护者裁决。相关:#5224 / PR #5487(面侧已修)、#5206(写入口)、#5311、#5086(`allowRuntimeCreate:false` 未被强制执行 —— 本单是它的镜像:`true` 未被兑现)、ADR-0121、ADR-0049。\n\n## 复现\n\n```\npnpm dev:showcase -- --fresh -p 39720 --seed-admin\n# 登录取 token\ncurl -X PUT .../api/v1/meta/api/e8_backdoor -d '{\"name\":\"e8_backdoor\",\"path\":\"/api/v1/apps/showcase/backdoor\",\"method\":\"GET\",\"type\":\"object_operation\",\"target\":\"showcase_task\",\"objectParams\":{\"object\":\"showcase_task\",\"operation\":\"find\"},\"authRequired\":false}'   # → 200\ncurl .../api/v1/apps/showcase/backdoor    # → 404,且日志中无 EXCLUDED 行\n```"
+}

@@ -1,0 +1,37 @@
+{
+  "number": 5066,
+  "kind": "issue",
+  "title": "Console: `percent` display renderer's fixed-width progress bar clips the value in a record-highlights chip (33% renders as `3`)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:queue",
+    "repo:objectui",
+    "target:v17"
+  ],
+  "assignees": [
+    "yinlianghui"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T01:53:26Z",
+  "updated_at": "2026-08-09T06:24:58Z",
+  "closed_at": "2026-08-09T06:24:58Z",
+  "closed_by": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5066",
+  "body": "## Summary\n\nIn the record-highlights strip (`record:highlights`), a `Field.percent()` column renders a **fixed-width progress bar plus the numeric text**, but the chip that contains them is narrow and clips with `truncate`. The bar wins the space and **the number — the thing the chip exists to show — is cut off**.\n\nMeasured on a fresh database (`@objectstack/console` 17.0.0-rc.1, Chromium 1194, viewport 1440×900, locale `zh-CN`):\n\n| | |\n|---|---|\n| stored value | `33.33` |\n| DOM text | `33%` |\n| **on screen** | **`3`** |\n| clipping box width | 79px |\n| text node width | 32px |\n| text overflow past the clipping box | **25px** |\n\nThe chip's label reads 「供应量占比(%)」 and the chip shows a bar followed by a lone `3`.\n\nReproduced with a Playwright `getBoundingClientRect()` probe **and** a screenshot, because reading the DOM alone gives the wrong answer — the DOM carries the correct `33%`; the loss is purely visual:\n\n```\n{ label: \"供应量占比(%)\", domText: \"33%\", hasBar: true,\n  cellW: 144, valueW: 79, textW: 32, textOverflowRight: 25 }\n```\n\n## Why this matters\n\nThis is a silently wrong number, not a cosmetic glitch. A supply share of 33% presented on screen as `3` is a value someone reads out loud in front of a customer. There is no error, no ellipsis in the accessible name, nothing that signals truncation — the chip just shows a smaller, plausible number.\n\n## Mechanism\n\nTwo platform pieces combine:\n\n1. **The percent display renderer** (`ui-components`, the `percent` / `progress` entry of the field-display map) always emits:\n\n   ```jsx\n   <div className=\"flex items-center gap-2\">\n     <div className=\"h-1.5 w-16 rounded-full bg-muted … shrink-0\" role=\"progressbar\" …>\n       <div className=\"h-full rounded-full bg-primary\" style={{ width: `${clamped}%` }} />\n     </div>\n     <span className=\"tabular-nums whitespace-nowrap\">{formatted}</span>\n   </div>\n   ```\n\n   The bar is `w-16` (64px) **and `shrink-0`**; the value span is not.\n\n2. **The record-highlights chip** (`plugin-detail`, the highlights panel) wraps whatever the renderer returns in a clipping box:\n\n   ```jsx\n   <div className=\"group flex flex-col gap-1 min-w-[7rem] px-5 … basis-[9rem] max-w-[16rem]\">\n     …\n     <span className=\"block min-w-0 truncate text-sm font-semibold …\">{renderer}</span>\n   </div>\n   ```\n\n   `basis-[9rem]` (144px) minus `px-5` (40px) ≈ 104px of content, and the chips shrink toward `min-w-[7rem]` (112px → ~72px of content) as more chips are added. Bar (64) + `gap-2` (8) = 72px, so the value gets between ~0 and ~32px, and `truncate` silently removes the remainder.\n\nNothing about this is specific to our app's metadata: any `percent` field in any highlights strip hits it, and the more highlight chips a record has, the worse it gets.\n\n## Reproduce\n\n1. Author an object with a `Field.percent()` column holding a two-digit value with decimals (e.g. `33.33`).\n2. Put it in a `record:highlights` slot alongside 5+ other fields.\n3. Open the record in the console at 1440px and screenshot the strip.\n\nExpected: `33%` (or `33.33%`) legible.\nActual: a 64px bar and a clipped `3`.\n\n## Suggested fixes (any one closes it)\n\n- Give the value span priority: `shrink-0` on the text and let the bar shrink (`min-w-0 flex-1` on the bar wrapper) — the bar is decorative, the number is the content.\n- Drop the bar below a container-width threshold (`@container` is already on the highlights `<section>`, so a container query is available).\n- Let the highlights chip opt out of `truncate` for renderers that are not single-line text, or measure before clipping.\n\n## Application-side workaround we were forced into\n\nWe override the field's render type in the page's highlights slot so the platform picks the plain **number** renderer instead of the percent one:\n\n```ts\nproperties: { fields: [ …, { name: 'supply_share', type: 'number' }, … ] }\n```\n\nThis works because `record:highlights` normalizes each entry to `{name, label, icon, type}` and the chip resolves `type ?? schemaField.type`. The cost is that we lose the `%` glyph and the bar entirely, and we have to carry the unit in the field label instead. Downstream tracking: yinlianghui/hotcrm-heimao#59.\n"
+}

@@ -1,0 +1,32 @@
+{
+  "number": 6984,
+  "kind": "issue",
+  "title": "`pnpm check:nul-bytes` enumerates `git ls-files`, so a brand-new file reads green locally until it is staged",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T07:42:33Z",
+  "updated_at": "2026-08-09T18:33:37Z",
+  "closed_at": "2026-08-09T17:20:18Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6984",
+  "body": "Found while implementing #6728 (PR pending). Out of scope there — filed unassigned.\n\n## Observation\n\n`scripts/check-nul-bytes.mjs` builds its scan set from tracked files only:\n\n```js\nconst files = execFileSync('git', ['ls-files', '-z'], { … });   // line 416\n```\n\n`git ls-files` with no `--others` lists the index, so a file that has been\n**written but not yet `git add`-ed** is not scanned at all. The gate then exits\n0 and prints its usual success line, which reads as \"this tree has no raw\ncontrol bytes\" rather than \"the file you just wrote was not looked at\".\n\n## Measured (this worktree, `origin/main` @ `73bff86` + one new untracked file)\n\nA new test file had a raw `0x1b` (ESC) materialized into it at write time —\nthe accident AGENTS.md describes, where an editing tool turns the escape text\ninto the byte precisely when you are writing *about* control characters:\n\n```\n$ node scripts/check-nul-bytes.mjs > /dev/null 2>&1; echo \"exit=$?\"\nexit=0                       # untracked — not scanned\n\n$ grep -naoP '[\\x00-\\x08\\x0b\\x0c\\x0e-\\x1f\\x7f]' packages/cli/test/<new file>.ts | od -c\n0000000   2   2   0   :  033  \\n     # the byte was there the whole time\n\n$ git add -A && node scripts/check-nul-bytes.mjs > /dev/null 2>&1; echo \"exit=$?\"\nexit=0                       # after the byte was removed; staging is what makes it visible\n```\n\nThe self-scan in AGENTS.md (`grep -naP …`) found it; the gate did not, and the\nonly difference was the index.\n\n## Why it is `finding` and not a defect\n\nCI is unaffected: a PR's tree is fully tracked by the time any workflow runs,\nso the gate's coverage there is complete, and #5157's widened byte surface\nworks exactly as documented. The harm is local and one-directional — the run\nAGENTS.md tells you to make *before pushing* (\"Run `node scripts/check-nul-bytes.mjs`\nbefore pushing\") is the run most likely to be looking at a file that is new,\ni.e. the one case the gate skips. So the pre-push check is green for a reason\nunrelated to the bytes, on exactly the file most likely to carry one, since a\nnewly-authored file is where an editing tool materializes an escape.\n\n## Possible shapes (not a recommendation — this needs the gate owner)\n\n1. Add `--others --exclude-standard` to the `ls-files` call so untracked,\n   non-ignored files are scanned too, and say so in the gate's summary line.\n2. Leave enumeration alone and have the gate *report* the count it skipped\n   (\"N untracked file(s) not scanned — stage them or pass `--all`\"), so the\n   green is honest about its scope.\n3. Do nothing and treat the AGENTS.md self-scan as the pre-push instrument,\n   with the gate scoped to committed state by design.\n\nShape 1 changes what a bare local run means; shape 2 keeps the gate's contract\nand closes the false-confidence half only. Either way the two-line self-scan in\nAGENTS.md stays the belt to this gate's braces.\n\nRefs #4890, #5140, #5157.\n"
+}

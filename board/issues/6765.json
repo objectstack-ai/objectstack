@@ -1,0 +1,33 @@
+{
+  "number": 6765,
+  "kind": "issue",
+  "title": "spec: 后端第一个 `I18nLabel → string` 共享解析器 —— #6761 裁决 B 的契约半边(须与 objectui `pickLocalized` 同规则,否则同一个 map 两端渲染不同)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:dispatched"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T14:30:43Z",
+  "updated_at": "2026-08-09T04:33:00Z",
+  "closed_at": "2026-08-09T04:33:00Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6765",
+  "body": "Part of **#6761**(维护者 2026-08-08 裁决 **B**:内联 locale map 由**服务端**解析成字符串下发,解析器放**共享位**而非某个服务内部)。按 shared-contract 规则(`packages/spec` 恒归 spec 座位)contract-first 拆分:spec 半边先行,services 半边(#6761)`Blocked-by` 本单。\n\n## 裁决口径(不再重开)\n\n- **A(在 `service-analytics` 内部写一份 `pickLocalized` 孪生)被否**:后端今天**零个**内联 map 解析器(#6761 已全仓核实),第一个若以私有分叉的形式诞生,下一个生产者就抄这份复制品(PD#12);\n- **C(把 `AnalyticsResult.fields[].label` 拓宽成 `I18nLabel`,交客户端解析)被否**:为一致性付出两个仓的线型变更,而服务端解析已能拿到同样结果;\n- **B 采纳**:一个共享解析器,生产端调用,线上仍是**解析后的字符串**(两端既有声明都是 `label?: string`,详见 #6761 的实测)。\n\n## spec 侧要做的(API 形状由 spec 座位定夺)\n\n在 `packages/spec` 放一个 `I18nLabel → string` 解析器,与 `ui/i18n.zod.ts` / `system/i18n-resolver.ts` 同侧。候选签名仅供起点,不构成约束:\n\n```\nresolveI18nLabel(label: I18nLabel | undefined, locale: string, fallback?: string): string | undefined\n```\n\n**验收关键(这条比 API 形状重要)**:它必须与 objectui 的 `pickLocalized` **同规则** —— 回落链、大小写/区域变体处理(`zh-CN` vs `zh`)、以及「都不命中时返回什么」三处必须一致。两端对同一个 map 给出不同答案,就是本仓反复付学费的那类分叉:同一份 metadata,服务端渲染的表头与客户端渲染的表头不一样,而且没有任何一端会报错。请以 objectui 的实现为准对齐,并把这条一致性**钉成测试**(同一批 map 输入,两端同答案),而不是写在注释里。\n\n## 消费预告(services 半边,#6761,⛔ 不在本单实现)\n\n`AnalyticsService.queryDataset` 的两处富化(measures / dimensions)与 `dataset-compiler.ts:374/406` 改调它;后者今天的 `typeof d.label === 'string' ? d.label : d.name` 会把 map 替换成**机器名**,使 `/analytics/meta` 把 `owner` 当展示标题发布,这一处必须一并盖掉。\n\n## 为什么现在需要它(实测,非断言)\n\ndataset 声明 `label: { en:'Owner', 'zh-CN':'负责人' }` 时,两个策略下发的 `fields[]` **完全没有 `label`**(实测见 #6761),而三个渲染端(`DatasetWidget` / `DatasetPreview` / `DatasetReportRenderer`)都把 `fields[].label` 排在第一顺位。内联 map 自 #5728 起被 `I18nLabelSchema` 授权,平台自己的三个已发布页面就有 31 处在用 —— 中文部署照规范写,拿到的是没有标签。\n\n来源座位:services(会话 `session_01USNUyHEr7uaU6MoEWXitei`);`domain:spec` 归 spec 座位派发,本单不认领。\n\nRefs:#6761(裁决与全部测量)、#5199(出处,已关闭)、#5728(内联 map 的授权)、#5141 / #5076(相邻但不同机制)。"
+}

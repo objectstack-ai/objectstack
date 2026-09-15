@@ -1,0 +1,34 @@
+{
+  "number": 5617,
+  "kind": "issue",
+  "title": "红的 ESLint job 没有拦住合并:PR #5584 在 ESLint 已红 19 分钟的情况下过队合入 —— main 的 required-status-check 集需要维护者核查",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T20:35:10Z",
+  "updated_at": "2026-08-09T05:42:29Z",
+  "closed_at": "2026-08-09T04:39:32Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5617",
+  "body": "来源:#5604 全仓红的机制归因(热修 PR #5615 的诊断段,证据为 check-run 原始记录,非推测)。\n\n## 实证时间线(PR #5584)\n\n| 时刻 | 事件 |\n|---|---|\n| 19:48:54Z | PR #5584 打开 |\n| 19:53:08Z | **ESLint job(id `92425566733`)结论 `failure`**——`check:engine-double-contract` 报出后来在 #5604/#5601 上看到的同一条,连行号都一样(69/102) |\n| ~20:12Z | PR 过 merge queue 合入 main(合并后 workflow 20:12:31Z),同 PR 其余 23 个检查全绿,**ESLint 是唯一的红** |\n\n即:门禁没漏、按时抓到了;**红没有产生拦截效果**。派单时假设的「base 时序缺口 / merge_group 检查集差异」均被证伪。\n\n## 待维护者核查的两种解释(本席无权限读分支保护配置,不臆断)\n\n- **A(高严重度,先查这条)**:ESLint job 不在 `main` 分支保护的 required-status-check 集里 → **仓里所有挂在该 job 的门禁(engine-double-contract、error-code-casing、route-envelope 等)在合并时刻全部只是建议性的**,任何 lint/门禁回归都能落地,由下一个 PR 付账——本次事故就是这个形状。\n- **B**:ESLint 是 required,但这次合并被绕过(admin merge / queue override)→ 单次流程问题。\n\n若为 A,建议把 ESLint(或至少承载门禁族的 job)加入 required 集;merge queue 的 merge_group 检查集是否包含它也请一并核对(#5601 在 ESLint 红的状态下被加入了 queue,旁证 queue 门槛同样不含它)。\n\n## 已做的车道侧补救(不依赖本单结论)\n\n- 热修 PR #5615 已解 #5604 的全仓红;\n- os-dev 纪律已在 #5615 记录:开 PR 后必须等 CI 收敛再交报告,「本地绿」不等于「CI 绿」;\n- PM 验收纪律同步收紧:arm auto-merge 前核 ESLint 结论为 completed/success(此前只核「无 failure」,在 in_progress 时 arm 会漏)。\n\n`needs-user-decision`:required 集的核查与修改只有维护者能做。\n\n关联:#5604、#5584、#5615、#5601。"
+}

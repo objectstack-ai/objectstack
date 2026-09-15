@@ -1,0 +1,34 @@
+{
+  "number": 6993,
+  "kind": "issue",
+  "title": "[finding] Three more expired post-#5702/#5710 status claims in `packages/spec/src/data` — including \"`$icontains` … implemented by nobody\" in the very file #6947's fix points `@see` at",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "finding"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T08:02:23Z",
+  "updated_at": "2026-08-09T13:01:07Z",
+  "closed_at": "2026-08-09T13:00:59Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6993",
+  "body": "Observation-class finding, found by a completeness sweep while implementing #6947 (PR #6987). **Filed unassigned, no `domain:*` label** — routing is the triage seat's call. Nothing a user hits today: all four sites are prose. Each is the **same drift class** #6947 names (a status sentence names a future issue as the gap; that issue lands; nothing relates the two), but each needs its **own measurement**, which is why they were left out of #6987 rather than word-swapped inside it.\n\nAnchors read on `origin/main` @ `30283263` — re-locate by text, not by line.\n\n## 1. `packages/spec/src/data/filter-text-conformance.ts:39-46` — the twin of the sentence #6947 fixed\n\n```\n * This is the contract half of the #4706 ruling (#5701). `$icontains` is\n * declared by `StringOperatorSchema` (`filter.zod.ts`) and implemented by nobody; the\n * `$contains` family's case-sensitivity is declared and honoured by two of five\n * backends. Every driver therefore carries a measured DEBT row in\n * `scripts/check-driver-conformance.mjs`, pointing at **#5702**, which is the\n * issue that writes the lowerings and deletes the rows.\n```\n\n**Sharpest of the four**, because #6987's corrected docblock points straight here: its `@see FILTER_TEXT_CASES — the conformance standard for every operator here` lands the reader on \"implemented by nobody\".\n\nBoth numbers in it are now wrong, and in opposite directions:\n\n- «`$icontains` … **implemented by nobody**» — measured for #6987 by executing all five: **three answer** (`driver-sql`; `driver-sqlite-wasm`, inherited, on the sql.js engine; `driver-turso` on both transports), two refuse with `INVALID_FILTER` / 400 (`driver-memory`, `driver-mongodb` — #6520).\n- «`$contains` family … honoured by **two of five** backends» — after #6518 the SQL family is case-exact, i.e. **three of five** drivers, plus `formula` / objectql `having` / both `service-analytics` compilers which were already compliant. The two left are `driver-memory` and `driver-mongodb` (#6682).\n- «Every driver therefore carries a measured DEBT row» — the ledger now carries **two** `FILTER_TEXT_CASES` DEBT rows, not five; #6518 deleted the three SQL-family rows.\n\nWhoever fixes it must re-measure rather than copy the numbers above.\n\n## 2. `packages/spec/src/data/filter-text-conformance.test.ts:4-8`\n\n```\n * `FILTER_TEXT_CASES` is a standard no backend answers yet (#5701 is the\n * contract half of the #4706 ruling; #5702 writes the lowerings).\n```\n\nThree backends answer it today; `driver-sqlite-wasm`, `driver-sql` and `driver-turso` all import the whole case-set (that import is what `scripts/check-driver-conformance.mjs` reads as coverage). The paragraph's *argument* still stands — the file executes the table against a reference evaluator so the table cannot be quietly wrong — only its premise sentence expired.\n\n## 3. `packages/spec/src/data/filter.zod.ts:1305-1313` — the `$regex` retirement block (a DIFFERENT subject, same class)\n\n```\n * Wiring them to it is **#5702**, deliberately not this PR: `$regex` still has\n * one live producer (`plugin-auth`'s ObjectQL adapter, on the authentication\n * path), so a refusal landing before #5710 flips that producer would break\n * sign-in. Hard order: **#5710 flips the producer, then #5702 turns these\n * strings into refusals.**\n```\n\nBoth gates fired: **#5710 closed** (the producer was flipped to `$contains`; `driver-memory/src/filter-refusal.ts` records the whole-repo re-scan finding no other live producer) and **#5702 closed**, with requirement 3 done on all five faces per the conformance ledger. So a paragraph written as a future plan now describes shipped state, and its \"hard order\" warning is advice about a sequencing risk that no longer exists. #6987 deliberately did not touch this block: its subject is `$regex`, not `$icontains`, and stating the post-#5702 state honestly needs a **five-face refusal census** (does each site print `RETIRED_FILTER_OPERATORS[op].why` verbatim, in the ADR-0112 envelope) — a real measurement, not a word swap.\n\n## 4. Same file, `:227`\n\n```\n  // `$options: 'i'` are #5702's work.\n```\n\nReads as pending; mongo's hard-coded `$options: 'i'` is in fact **still there** (measured: `translateFilter({ name: { $contains: 'acme' } })` returns `{\"name\":{\"$regex\":\"acme\",\"$options\":\"i\"}}`), but its owner is now **#6682**, not #5702. So this one is stale by *attribution* rather than by verdict — the least urgent of the four and the easiest to get subtly wrong.\n\n## Why these were not folded into PR #6987\n\n#6987 already discloses two scope extensions beyond its card (the `$icontains` `.describe()`, which is the rendered surface, and the `FILTER_OPERATORS` staging sentence, so the file does not contradict itself). Extending further would have meant shipping **three new censuses** — the `$contains`-family scoreboard, the `FILTER_TEXT_CASES` coverage count, and the five-face `$regex` refusal audit — inside a card scoped to one paragraph. #6947's dispatch was explicit that the general recurrence gate is #6635's design space and that its own scope was one instance. Filing beats a rushed word-swap: #6947 exists precisely because someone once wrote a status sentence they had not measured.\n\n## Suggested disposition\n\nOne card covering sites 1, 2 and 4 (all `FILTER_TEXT_CASES` scoreboard facts, one measurement pass answers all three) and, if triage prefers, site 3 separately since it is the `$regex` axis. Both are prose-only, `domain:spec-surface`-shaped, and neither changes behaviour.\n\nDuplicate search before filing (`filter-text-conformance stale`, `implemented by nobody`, `$regex retirement status 5702`, `5710 flips the producer`): zero hits.\n\nRefs: #6947 / PR #6987 (the instance just fixed), #6520 (`$icontains` on the JS faces), #6682 (the `$contains` family on memory + mongodb), #6518 (case-exactness on the SQL family), #5710 (the flipped producer), #6635 (the general gate, on hold), #6842 / #6696 (earlier specimens of this class)."
+}

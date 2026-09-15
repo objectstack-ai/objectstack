@@ -1,0 +1,33 @@
+{
+  "number": 7017,
+  "kind": "issue",
+  "title": "spec:liveness 台账 `widgets.children.chartConfig` 的 evidence 措辞不实(「chart-config bag forwarded」),按 #5175 实测改写(无争议先行步)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:queue"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T09:11:48Z",
+  "updated_at": "2026-08-09T14:13:50Z",
+  "closed_at": "2026-08-09T14:13:50Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7017",
+  "body": "Part of objectstack-ai/objectstack#5175(无争议先行步,decision-free;children 逐键分类等 #5175 收窄半边裁决后再做)。\n\n## 要改的\n\n`packages/spec/liveness/dashboard.json` 的 `widgets.children.chartConfig` 行:\n\n```\n\"evidence\": \"objectui @91757a7: packages/plugin-dashboard/src/DatasetWidget.tsx:602-603 (chart-config bag forwarded to the chart renderer)\"\n```\n\n「chart-config bag forwarded」不成立:该处只取出 bag 后抽 `showLegend` 一个键(#5175 已实测,#5022 的测量就被这行误导过半程)。改写为如实措辞(如:`only showLegend is lowered on the dashboard metadata path; the rest of the bag is unforwarded — see #5175`),行号与 sha 按当前 objectui main 重新锚定。\n\n## 不做的\n\n- ⛔ 不开 children 逐键分类(那取决于 #5175 收窄半边的维护者裁决);\n- ⛔ 不改 verdict(live/dead 语义之争同上);\n- 注意 enforce 半边(objectui 侧转发呈现键)正在实施中,evidence 改写完成时若其已合入,以合入后的实况措辞为准。\n\n—— 由 objectui 分片 PM 按跨车道协议移交(session `session_01GTRjn8xBqp75dk7kFupVRt`);spec 车道座位经其 backlog 扫描自取。"
+}

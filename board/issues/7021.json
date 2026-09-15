@@ -1,0 +1,36 @@
+{
+  "number": 7021,
+  "kind": "pull_request",
+  "title": "refactor(types,rest,metadata,analytics): Postgres `\"x\" of relation \"y\"` 短语收归 @objectstack/types 一处",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T09:23:11Z",
+  "updated_at": "2026-08-09T10:07:37Z",
+  "closed_at": "2026-08-09T10:07:36Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": "2026-08-09T10:07:36Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/7021",
+  "body": "Fixes #6615\n\n## 普查结果（先测量，再动手）\n\n卡片说三处，**实测也是三处**生产站点，另有**第四份拷贝在测试里**（同一条短语，按 scope 规则一并收编）：\n\n| # | 站点 | 形状 | 用途 |\n|:--|:---|:---|:---|\n| A | `packages/rest/src/rest-server.ts` `mapDataError`（#5352） | 严格，带捕获组 | **提取**列名 ⇒ 42703 答 `400 INVALID_FIELD` 而非 `404` |\n| B | `packages/services/service-analytics/src/analytics-service.ts` `MISSING_COLUMN_OF_RELATION`（#6035） | **与 A 逐字节相同** | **扣除**，让缺列保持硬失败 |\n| C | `packages/metadata/src/utils/schema-sync-errors.ts` `MISSING_TABLE.excludes`（#6347） | 刻意更宽 | **排除**，在缺表判定前先出局 |\n| D | `service-analytics/src/__tests__/missing-column-phrase-hard-failure.test.ts:200` | 又一份 A 的拷贝 | 守护 fixture「别和 REST 面漂移」 |\n\n**它们一致吗？** A 与 B 逐字节相同；C 刻意不同，且站点注释已写明理由。所以不是「三处不一致、要挑一个最好抽的」——而是**两种宽度都对**，取决于每处哪个方向的误差安全：A/B **提取**，过宽会把真缺表变成硬失败、回退 #5033 的宽容，漏匹配只是消息含糊；C **排除**，过宽只是把良性判定变响亮，漏匹配会让 `event_seq` 从 1 重启撞进有行的历史表。故按分诊要求做成**两个独立导出**，未合并。\n\nD 是最值得记的一处：它为「两张面孔别对不上」而写，却把断言打在其中一面的**私有复述**上——它本身就是它要防的漂移。现改为直接问共享解析器，并顺带断言取出的列名。\n\n## 卡片正文的两处更正（实测，均已按更正后的事实实施）\n\n卡片正文有两处与 `origin/main` 不符，都在动手前测出，本 PR 按实测结果而非卡片结论实施：\n\n1. **「`packages/metadata` 不依赖 `@objectstack/types`」——错。** `packages/metadata` 与 `packages/rest` 的 `dependencies` 里**都已有** `@objectstack/types`；真正没有这条边的是 **`packages/services/service-analytics`**（其 deps 仅 `@objectstack/core` + `@objectstack/spec`）。卡片把「需要检查依赖方向」的警告挂错了包，因此下面「新依赖边」一节讨论的是 service-analytics，而不是卡片点名的 metadata。\n2. **援引 `isMissingTableError`（#5841）作为「选家先例」——错。** 它并不在 `@objectstack/types`，而在 `packages/metadata/src/utils/schema-sync-errors.ts`，经 `@objectstack/metadata/errors` 再导出。#6250 的 docblock 引用它指的是「命名一个共享判定」这个**动作**先例，不是**落户位置**先例。types 里真正的同类先例是 `unique-violation.ts`（#6250，驱动错误串解析）与 `module-not-found.ts`（framework#3265，「single shared owner … so the parallel loaders cannot drift apart」）——本 PR 依据的是这两个。\n\n## 改动\n\n`packages/types/src/relation-sub-object.ts`（新，不 import 任何东西）：\n- `matchMissingColumnOfRelation(message)` —— 严格提取器，返回列名\n- `isRelationSubObjectPhrase(message)` —— 宽检测器，无捕获组（故意，使其无法被误用来提取）\n\n两条模式与原站点**逐字节相同**，行为逐字保持。\n\n## 反向验证（预测先写盘，三轮）\n\n⚠️ 先说清楚：**「把一个消费者改回开码形式、看测试变红」单独做不出红**，因为抽取在构造上就是保行为的（A/B 与严格式逐字节相同，C 与宽式逐字节相同）。照那样报一个红是伪造。可得的真红是**差分**——破坏共享定义，看谁跟着动。\n\n| 轮次 | 操作 | 预测 | 实测 |\n|:--|:---|:---|:---|\n| 1 | 只废掉严格提取器 | `types` 红 / `rest` 红 / `analytics` 红 / **`metadata` 绿（对照）** | ✅ 全中：6 红、2 红（正是 `→ 400 INVALID_FIELD` 那条）、4 红、**588 全绿** |\n| 2 | 保持破坏，**把 B 改回开码正则** | B 行为测试转绿，只剩那条直接 import 的守护测试红 | ✅ 4 红 → **1 红**，幸存者正是该守护测试 |\n| 3 | 只废掉宽检测器 | `metadata` 红 / `rest`+`analytics` 绿（镜像对照） | ✅ 3 红 / 1126 全绿 + 1415 全绿 |\n\n轮 1 的 `metadata` 全绿与轮 3 的镜像，共同钉住**两种宽度仍是两条**——合并成一条正是卡片记录在案的风险。轮 1 红 + 轮 2 同一包转绿，才是「B 确实在读这个家」的证明；任一轮单独都不是。\n\n超串洞本身在 `relation-sub-object.test.ts` 里被显式钉住：`column \"label\" of relation \"sys_team\" does not exist` **逐字包含**合法的 `relation \"sys_team\" does not exist`，且后者能被两处都在用的 postgres 锚点匹配——所以这不是能靠收紧正则绕开的擦边。\n\n## 一条新依赖边 —— **经 PM 裁定 A 保留**\n\n> **依赖边经 PM 裁定 A 保留，理由见 #6615 评论。** 该裁定为架构判断（包依赖走向，非产品或访问面决策），未上抛维护者。\n\n`@objectstack/metadata` 与 `@objectstack/rest` **本来就**依赖 `@objectstack/types`；**只有 `@objectstack/service-analytics` 需要新增**这条边。#6250 立下的「每个消费者都已依赖它，所以采纳从不加边」的条件在这里**不成立**，故当初显式上报而非默认通过：\n\n- **无环，可证**：`@objectstack/types` 的依赖闭包是 `{@objectstack/spec}`，而 `spec` 无仓内依赖 ⇒ 除 `spec` 自身外，任何包都不可能因依赖 `types` 成环。这不是判断，是可证的否。\n- **不罕见**：仓库 73 个包中 25 个、16 个 service 中 5 个已带同一条边。\n- **替代方案更差**：三者共同已有的家只有 `core` 与 `spec`；把一个 Postgres 驱动错误串解析器放进 `spec`（authorable-metadata 的 zod 规范）是范畴错误，放进 `core` 则把它与它所仿照的兄弟 `unique-violation.ts` 拆开——那才是「绕道」。仅收敛 rest + metadata、把 service-analytics 留在开码状态，等于把漂移恰好留在最近一次踩到这个洞的那个包里（#6035）。\n\n回滚成本：1 行 `package.json` + 1 行 import。\n\n## 验证\n\n- `@objectstack/types` 9 files / 230 tests、`@objectstack/metadata` 28 / 588、`@objectstack/service-analytics` 71 / 1440、`@objectstack/rest` 73 / 1142 —— 合并 `origin/main`（落后 36 commits）后重装重建复测，全绿。\n- 四包 `build` 全过（这三个消费者无 `typecheck` 脚本，类型检查走 tsup `dts`）。\n- `pnpm lint` 绿；`check:error-code-casing` / `check:route-envelope` / `check:engine-double-contract` / `check:spec-parsed-alias` / `check:published-files` / `check:type-check-coverage` / `check:nul-bytes` / `check:empty-changeset` 全 PASS。\n- `check:api-surface` 经核查仅覆盖 `@objectstack/spec` 自身 subpath 基线（无基线提及 `@objectstack/types`），本 PR 未触碰 `packages/spec`，故不涉及。\n- 控制字节自查（NUL 之外）clean。\n\n## Changeset\n\n`@objectstack/types` minor（新增导出、纯追加），三个消费者 patch（内部实现，行为逐字不变）。\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_017uFVNMmTxLpmfQYiuKM1Yx)_"
+}

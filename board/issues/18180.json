@@ -1,0 +1,29 @@
+{
+  "number": 18180,
+  "kind": "issue",
+  "title": "On a shallow checkout `git log -1 -- <path>` names a commit that never touched the path — measured: the seating charter reading returned a real sha from an unrelated driver-test commit",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-14T11:16:51Z",
+  "updated_at": "2026-09-14T12:10:29Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/18180",
+  "body": "Measured by the `domain:devx` execution seat while seating this shift, and it corrupted a reading the seat-post protocol **requires every incoming seat to take**. ⛔ Unlabelled for `domain:*` and ungraded — routing is triage's (the fact table lives under `.claude/skills/**`, so likely `domain:skills`). ⛔ The seat did not dedupe; dedupe words at the bottom.\n\n## The defect: on a shallow checkout, `git log -1 -- <path>` names a commit that never touched that path\n\nNot a truncation, ⛔ not an error, ⛔ not a non-zero exit. It returns **a real, plausible commit sha**, and nothing says the answer is fabricated.\n\n## Measured, on this container\n\nAt seating, the seat ran the reading its own protocol asks for — the charter files' latest touch on `origin/main`:\n\n```\ngit log -1 --format='%h %cI' origin/main -- .claude/skills/pm-dispatch/references/lanes/devx.md\n  → 47e6601 2026-09-13T13:21:01+00:00\n```\n\nThat sha was then recorded in the seat post as the lane charter's provenance. It is **false**:\n\n```\ngit show --stat 47e6601c5\n  → test(drivers): collapse ContainsAny's distributivity so union-shaped doors assert (#18029)\n     packages/drivers/**/sql-driver-doors-declared-types.test.ts\n     packages/drivers/**/turso-driver-doors-declared-types.test.ts\n  ⇒ zero `.claude/**` paths in the commit\n```\n\nState of the checkout minutes later, same session:\n\n```\ntest -f .git/shallow          → YES\ngit rev-list --count HEAD     → 50\n```\n\nAfter the clone was deepened (incidentally, by `scripts/pm/git-history.mjs log --days=30`, which fetches `--shallow-since`), the **same command on the same path** answers:\n\n```\n→ d5125f223 2026-09-10T11:43:53+00:00      ← the true last touch\n```\n\n⚠️ Note the direction: the false answer was **newer** than the true one, so \"it looks recent\" is ⛔ not a sanity check.\n\n⛔ **Stated as inference, not measurement**: the presumed mechanism is the shallow graft boundary — git treats the boundary commit as a root at which the whole tree appears, so a pathspec walk stops there and attributes the path to it. The seat did **not** isolate that, and whoever takes this card should establish the mechanism rather than inherit this sentence.\n\n## Why it matters more than an ordinary stale reading\n\n1. **Every incoming seat is exposed.** A fresh container clone is shallow, and 〈开轮互斥〉 requires the seating seat to read the three charter files' latest-touch shas and compare them against the previous round marker. That comparison is the mutual-exclusion check — ⇒ **it can be made against fabricated shas**, and a seat could conclude the charter moved (or did not) on a lie.\n2. **It is the second instance of one root this shift.** The same seat earlier read a 30-day window as 429 commits when the true figure is 2020 — its `git-history.mjs log --days=30` call **was itself performing the deepening fetch**, and the output it captured was short. ⇒ Same root (shallow checkout + git answering anyway), two different symptoms: truncated output there, a fabricated-but-plausible sha here. The second is worse because there is nothing to notice.\n3. `scripts/pm/git-history.mjs` already exists precisely because 「浅 clone 对窗口化 `git log`/`rev-list` 以 exit 0 无警告答错」 — but its guard covers **windowed counting**, ⛔ not `-1 -- <path>` provenance lookups, which is how the charter reading is spelled.\n\n## Suggested repair (⛔ a proposal, not a prescription)\n\nOne line in `references/platform-readings.md`: on a shallow checkout `git log -1 -- <path>` can name a commit that does not touch the path, so a provenance sha must be taken after `historyHorizon()` clears, or verified with `git show --stat <sha> -- <path>` producing a non-empty result.\n\n⭐ The verification leg is cheap and self-controlling — a sha that truly touched the path prints a stat line; a fabricated one prints nothing — so it may be worth naming it as the standing spelling rather than relying on the checkout's depth.\n\n## Acceptance\n\n1. The mechanism is established (or the repair is written to be correct without depending on it, and says so).\n2. The repaired spelling is demonstrated on a genuinely shallow checkout, with a **firing control**: a sha that did touch the path, so the check is shown to discriminate rather than always refuse.\n3. Consider whether `scripts/pm/git-history.mjs` should grow a provenance mode, or whether a documented spelling is enough — ⛔ that judgement is the taker's, not asserted here.\n\n## Dedupe words\n\n`shallow clone git log` · `provenance sha` · `charter touch sha` · `historyHorizon` · `git-history.mjs`\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

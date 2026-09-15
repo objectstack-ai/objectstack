@@ -1,0 +1,36 @@
+{
+  "number": 7033,
+  "kind": "issue",
+  "title": "finding: `/packages` 域整体没有授权判据 —— `discard-drafts`(破坏性)、`export`、`GET /packages` 零能力调用方均实测 200,#7023 只是其中一条",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:queue",
+    "target:v17"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T10:39:08Z",
+  "updated_at": "2026-08-09T15:33:10Z",
+  "closed_at": "2026-08-09T15:33:10Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7033",
+  "body": "由 #7023 的只读普查顺带量出(PD #10 另立卡,不在那条卡里修)。#7023 记的是 `POST /packages/:id/publish-drafts` 一条路由;**本卡记的是它所在的整个域没有授权这一结构事实** —— `publish-drafts` 只是最先被看见的那一条。\n\n## 结构事实(实测)\n\n- `packages/runtime/src/domains/packages.ts` 全文 **739 行,授权判据命中数为 0**。\n- `/packages` **不在** `authz-conformance.matrix.ts` 的**任何**条目里。\n- `/packages` 域**没有** `shouldDenyAnonymous`;而 `/meta`、`/actions`、`/automation`、`/ai`、`/security` **五个域都有**。\n\n第三条的后果比「零能力」更强一档:走完整 `dispatch()` 管线、**连 `userId` 都没有**(身份解析产出 `principalKind:'guest'`)的调用方,`publish-drafts` 仍得 **200**。\n\n## 四条实测路由(调用方 `{userId:'u_portal', systemPermissions:[]}`,零能力已认证)\n\n| 路由 | 实测 | 性质 |\n| :-- | :-- | :-- |\n| `POST /packages/:id/discard-drafts` | **200**,`discardPackageDrafts` 被调用 | **破坏性** —— 丢掉该 package 名下**每一条** pending draft |\n| `GET /packages/:id/export` | **200** | 整包读出,27 种 metadata 类型 |\n| `GET /packages` | **200** | package id **枚举面** |\n| `POST /packages/:id/publish-drafts` | **200**,目标函数被调用 | 已由 #7023 记录 |\n\n对照组(同一调用方、同一次运行):`POST /metadata/_migrate-stored` 得 **403**,且目标函数**一次没进**(信封 `{code:'PERMISSION_DENIED', httpStatus:403}`)。所以这不是「平台还没有能力门」,而是**同一套机制在隔壁域用了、在这个域没用**。\n\n## 为什么值得作为一条卡而不是四条\n\n四条共用**同一个根因**(域级无授权 + 不在 conformance matrix 里)和**同一个修法**(补域级判据 + 补 matrix 条目)。拆成四条会让四个 PR 各自在 `packages.ts` 里加一段形状略有差异的门 —— 这正是 #6345 / #6969 反复在收口的那种发散。\n\n另注 **`GET /packages` 是这条链的第一步**:枚举出 id 之后,`export` / `discard-drafts` / `publish-drafts` 都不需要任何 UI 即可到达。单独看是「只读列表」,合起来看是攻击链入口。\n\n## ⛔ 不预设门的选择\n\n维护者对 #7023 的现行指令是**先普查、不落门**。本卡同样**不选门**,只记录实测。#7023 上已给出三条候选门各自会 403 掉谁的实测对照,那份分析对本卡四条路由同样适用(同域同调用方)。\n\n## 已知覆盖缺口\n\n`cloud` 仓在普查会话中**未挂载**(`add_repo objectstack-ai/cloud` 两次被拒,22:27Z 与 05:2xZ),因此调用方普查**不覆盖该仓**。任何门的决定都继承这个缺口 —— 落门前应先在 `cloud` 里补一次调用方普查,否则可能 403 掉未知调用方。\n\n## 关联\n\n#7023(同域 `publish-drafts`,`target:v17`,本卡的来源)· ADR-0045(发布门)· `authz-conformance.matrix.ts` · `packages/runtime/src/domains/meta.ts` 的 `shouldDenyAnonymous` 与路由级 `manage_metadata` 门(可照抄的先例)\n\n**给 triage 的提示**:#7023 是 `target:v17`。本卡与它同根因,维护者可能希望把它一并拉进 v17 —— 但**本席不擅自扩大 v17 范围**,故未加该标签。\n\n## 未实测(勿当事实引用)\n\n- 真实 server 全中间件下,匿名请求是否会被更前面的中间件拦掉(普查用的是 `dispatch()` 管线,不是完整 server)。\n- `discardPackageDrafts` 真实落库的删除行数(测试 double 缺 `metadata.getObject`)。"
+}

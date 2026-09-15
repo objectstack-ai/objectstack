@@ -1,0 +1,32 @@
+{
+  "number": 6856,
+  "kind": "issue",
+  "title": "[finding][spec] Tombstones over STRIP-only conversions say `os migrate meta --from 16` will \"rewrite it\" — the corpus is split between two verbs for one behaviour",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "finding"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T01:03:54Z",
+  "updated_at": "2026-08-09T11:04:15Z",
+  "closed_at": "2026-08-09T11:03:14Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6856",
+  "body": "Observation-class, filed unassigned. Found while fixing #6756 (PR #6854), which had to decide the verb for one tombstone's `os migrate meta` sentence and discovered the corpus disagrees with itself.\n\n## The observation\n\n`retiredKey()` prescriptions close with a sentence telling the author what `os migrate meta --from 16` will do. Two idioms are in use for the **same** underlying behaviour:\n\nMeasured on `main` @ `c32944d6`, `git grep -oh \"os migrate meta --from 1[0-9]\\`[^']*\" -- packages/spec/src`:\n\n| phrasing | sites |\n|---|---|\n| `to rewrite it automatically.` | 32 |\n| `to rewrite existing sources automatically.` | 6 |\n| `to remove it.` | 4 |\n| `to remove it automatically.` | 2 |\n| (`rewrites …` variants) | ~10 |\n\nThe `remove` spellings live in `data/datasource.zod.ts:89,97,101,108` and `ui/component.zod.ts:770,781`.\n\n## Why it may matter\n\nFor a conversion that **strips** the key, \"rewrite it\" is readable two ways: \"the tool rewrites your source files\" (true) or \"the tool rewrites this key into something\" (false — the value is deleted). An author who reads the second way expects their block to be converted, and it is not.\n\nTwo adjacent specimens in one object literal, both pure strips, both currently saying \"rewrite\":\n\n- `packages/spec/src/ui/dashboard.zod.ts:591-600` — `widgets[].responsive`. Conversion `dashboard-widget-responsive-removed` (`conversions/registry.ts:2302`) calls `stripKeys(w, ['responsive'], …)` at `:2314`.\n- `packages/spec/src/ui/dashboard.zod.ts:620-628` — `widgets[].aria`. Conversion `dashboard-widget-action-aria-removed` (`:2373`) calls `stripKeys(w, ['actionUrl','actionType','actionIcon','aria'], …)` at `:2390`; the fixture `after` (`:2416-2421`) shows the widget with all four keys gone.\n\nPR #6854 changed the **second** one to `to remove it automatically.` (in-corpus phrasing, not new) because #6756's dispatch asked specifically whether the sentence describes what the conversion really does. It deliberately did **not** sweep the first — that is a different key and out of that issue's scope — which leaves those two neighbours currently inconsistent. That inconsistency is the concrete trigger for this filing.\n\n## Not asserting a defect\n\nThis is filed as `finding`, not `pm:queue`, on purpose. I did not audit which of the ~40 \"rewrite\" sites sit over strip conversions versus genuine rewrites — that classification is the actual work, and it may well conclude \"rewrite\" is the intended house term for \"the tool rewrites your sources\", in which case the right fix is the opposite sweep (normalise the 6 `remove` sites to `rewrite`) or a note in `shared/retired-key.ts` fixing the term. Either way the corpus should pick one.\n\n`shared/retired-key.ts:27-32` is the reason it is worth a look at all: that string \"IS the migration doc for anyone who hits it\", so its verb is contract rather than prose — the same argument #6630 and #6756 were graded on.\n\n## Suggested direction (non-binding)\n\n1. Decide the term in `shared/retired-key.ts`'s docblock (it currently gives no guidance on this sentence).\n2. Sweep to it, mechanically. Acceptance-neutral in every case — `retiredKey()` returns `z.never({ error: () =\\> guidance }).optional()` regardless of the string.\n3. Regenerate `content/docs/references/**` + `docs/protocol-upgrade-guide.md`, both of which re-emit these strings.\n\n## Dedup\n\nSearched before filing: `is:open \"migrate meta\" rewrite strip tombstone verb` and `is:open \"rewrite it automatically\"` — both return only #6756 itself. #6630 (`retryDelayMs`, fixed) and #6756 (this PR) are about which *surfaces* a prescription names, not the migrate verb."
+}

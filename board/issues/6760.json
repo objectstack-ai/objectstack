@@ -1,0 +1,35 @@
+{
+  "number": 6760,
+  "kind": "issue",
+  "title": "ADR-0048 addendum Phase A1: `namespace` travels on the publish payload (PackageSchema / CreatePackageRequestSchema + CLI publish)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T14:27:03Z",
+  "updated_at": "2026-08-09T02:22:40Z",
+  "closed_at": "2026-08-09T02:22:40Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6760",
+  "body": "Part of #1825 (maintainer ruling 2026-08-08, recorded in #1825 comment 5226117769: ADR-0048 addendum ACCEPTED as drafted, incl. D2 and D3 rule 2; addendum landed via PR #6671, merged). Filed by the triage seat per the ruling's own assignment: \"Phase A1 … is the first implementation card; it changes the spec acceptance face, so it belongs to the `domain:spec` lane via triage.\"\n\n## What\n\nThe enterprise-side publish-time namespace exclusivity gate (Phases A2/A3, bound by §A.5's hard activation precondition) can check nothing until the namespace actually leaves the artifact. Today it does not:\n\n- `PackageSchema` (`packages/spec/src/cloud/package.zod.ts:157`) has **no `namespace` field at all**;\n- `CreatePackageRequestSchema` (same file, `:252`) does not accept one;\n- `packages/cli/src/commands/package/publish.ts` transmits `manifest_id` only (`:338`).\n\n(All three measured on `origin/main` @ `3172831`, re-confirming the #1825 dev report's measurement at `f123670`.)\n\n## The work (open side, this repo — per the addendum's Phase A1)\n\n- `PackageSchema` and `CreatePackageRequestSchema` gain a `namespace` field (shape per the addendum: bare-namespace granularity, no version-range);\n- the CLI publish command reads the namespace off the artifact's manifest and sends it on the publish payload;\n- conformance/pin coverage for the new acceptance face per spec-lane conventions.\n\nOut of scope, per the ruling: A2/A3 (enterprise-side registry + uniqueness enforcement — separate cards when cut, bound by §A.5), A4 (rename/transfer, stays deferred and is explicitly not a precondition), and any change to the install-time gate (`NamespaceConflictError`, `packages/objectql/src/registry.ts`).\n\n## Acceptance\n\nA published artifact's namespace is present on the publish request accepted by `CreatePackageRequestSchema`, and `PackageSchema` declares it — so the enterprise gate has an input to check when A2 lands.\n\nRefs: ADR-0048 addendum (PR #6671, §A.2 phasing / §A.5 activation precondition), #1825, #1810 (install-time gate)."
+}

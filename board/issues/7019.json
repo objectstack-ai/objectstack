@@ -1,0 +1,36 @@
+{
+  "number": 7019,
+  "kind": "issue",
+  "title": "#6603's gate does not close #6603: the same masked-schema round-trip deletion is still reachable through the compound-name PUT and the dispatcher PUT (plus an ungated DELETE)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:queue",
+    "target:v17"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T09:21:55Z",
+  "updated_at": "2026-08-09T11:58:56Z",
+  "closed_at": "2026-08-09T11:58:56Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7019",
+  "body": "Filed from the #6603 implementation (maintainer ruling `5225531464`, reaffirmed `5229988826`). #6603 gates **one** door — `PUT /api/v1/meta/:type/:name` — because that is what the ruling named and what the dev's region allowed. This card is the measurement that the **threat model is not closed by that gate**.\n\n## The main point, measured\n\nWith #6603's `manage_metadata` gate **in place**, the identical GET → edit → PUT data loss is still reproducible by using the *compound-name* door instead. Driven through the real `RestServer` routes (restricted caller `{ userId: 'u_portal', systemPermissions: [] }`, security double answering `getMetadataReadableFields -> ['id','name']`, an object schema in the store carrying all four ADR-0106 contract fields):\n\n```\ncompound GET status : 200\ncompound GET fields : id, name                                  <- masked, ADR-0106 D5(4) projection runs\nSTORE before PUT    : bonus_formula, id, name, salary_grade\ncompound PUT status : 200                                       <- NO capability gate\nsaveMetaItem calls  : 1\nSTORE after PUT     : id, name                                  <- the two masked fields DELETED\n```\n\nSame caller, same object, same loss — one route over. So after #6603 merges the defect is not fixed, it has a different door.\n\n### Honest limits of that measurement\n\n- It ran against a **stub protocol** whose `saveMetaItem` does not validate names, so it proves the **route pair** has no gate and does round-trip the masked document into the store. It does **not** prove a real kernel accepts an *object* schema stored under a compound name (`rest-server.ts`'s own D5(4) comment says \"no object uses one today\"). If a real protocol rejects that name shape, the masking round trip through this door is **latent** rather than live — but see the next bullet, which is live either way.\n- The **ungated write itself** is live regardless of type: this door serves every metadata type through one generic `saveMetaItem`, so \"any authenticated session can clobber any metadata item\" — the hole #6603's ruling also set out to close — remains open here for every type.\n\n## The three doors (same shape, same fix, same criterion — deliberately one card)\n\n1. **`PUT /api/v1/meta/:type/:section/:name`** — `packages/rest/src/rest-server.ts`, the compound-name save, registered just below the route #6603 gates. **Measured above.** Its GET twin already runs the ADR-0106 projection on purpose, with a comment that reads as an argument for gating the write side too: *\"this route serves EVERY type through one generic `getMetaItem`, so the question it answers for `object` is the same question the single-item route answers ... leaves no exit whose coverage depends on a naming convention holding.\"* The write side has no such symmetry today.\n\n2. **The runtime dispatcher's own PUT** — `packages/runtime/src/domains/meta.ts:264` (`if (method === 'PUT' && body)`), which calls `protocol.saveMetaItem` with no capability check at all. This is a **second transport** for the same operation, and `packages/runtime/src/domains/meta.ts` carries the ADR-0106 masking on its read side (same `resolveObjectSchemaMaskPosture`, lines 24/73/128/314/518/565) — the exact read/write asymmetry #6603 describes. ⚠️ **NOT MEASURED — must be measured before this card is actioned.** This is a static read of the source only; the #6603 thread has already had one static claim overturned by measurement, so please treat it as a lead, not a fact.\n\n3. **`DELETE /api/v1/meta/:type/:name`** — `packages/rest/src/rest-server.ts`, resets an item to its artifact default by removing the overlay row. **Different in kind, listed separately on purpose:** this is not a round-trip loss, it is an ungated *deletion*. It resolves the protocol and calls `deleteMetaItem` with no capability check — so an authenticated session with no authoring capability can discard any customization overlay. It belongs with the other two only because the fix is the same one line, not because the argument is the same. ⚠️ Also **not measured** — read from source.\n\n## Why not fixed in #6603's PR\n\nRegion discipline: #6603's dispatch scoped the dev to \"`packages/rest/src/rest-server.ts` — the `PUT /meta/:type/:name` route gate only\", with two other devs concurrently holding other regions of the same file (#6599 `/meta/_drafts`, #6920 `POST /forms/:slug/submit`). Filing rather than fixing is AGENTS.md Prime Directive #10, not a judgement that these are lower severity.\n\n## Suggested disposition (not a decision)\n\nIf the ruling's intent is the one written in `5225531464` — \"whoever can write a schema can see the full schema\", as an **enforced** invariant — then it is not enforced while these doors are open, and the same gate on all three is the smallest way to finish the job. ⛔ Deliberately **not** proposing which capability set the gate should demand; see the sibling card on the read-exemption / write-capability mismatch, and leave that to the maintainer.\n\nRelated: #6603 (the ruled single-door gate), #3682 / ADR-0106 D1 + D5(4), ADR-0066 D1 (`manage_metadata`), #4326 (the GET → PUT round-trip invariant).\n\nFiling note: the duplicate search over open issues was run once (no hits for \"meta capability gate\" in title) and then blocked by a GitHub API rate limit, so the usual keyword + file-path sweep is incomplete. Please race-close if this twins an existing card."
+}

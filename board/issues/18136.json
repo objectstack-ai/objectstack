@@ -1,0 +1,34 @@
+{
+  "number": 18136,
+  "kind": "pull_request",
+  "title": "ci(board-snapshot): sync the snapshot directory so the R2 mirror matches the documented prefix",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "ci/cd",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-14T05:52:19Z",
+  "updated_at": "2026-09-14T06:41:06Z",
+  "closed_at": "2026-09-14T06:41:04Z",
+  "closed_by": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "merged_at": "2026-09-14T06:41:04Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/18136",
+  "body": "Fixes #18049\n\n## What this changes\n\nOne line in the R2 sync step of `.github/workflows/board-snapshot.yml`, plus the comment in that step that described the old source.\n\nThe step synced the archive worktree ROOT (`aws s3 sync archive/ \"$mirror\"`) while the snapshot is written to `archive/board` (`SNAPSHOT_ARGS: --out=archive/board`, near line 237). With `mirror=\"s3://${R2_BUCKET}/objectstack/board/\"`, that maps `archive/board/X` onto `objectstack/board/` + `board/X`, so the whole mirror sat one segment deeper than the `mirror` prefix on the line above it documents — the `objectstack/board/board/...` layout the card measured from the bucket side (10912 of 10913 objects, run 34765639736). Syncing `archive/board/` maps `archive/board/X` to `objectstack/board/X`.\n\n## Migration: `--delete` does it, and the target is deliberately not widened\n\n`--delete` is kept, and it is what migrates the bucket: the stale `objectstack/board/board/` tree is inside the new sync target and has no local counterpart, so the first scheduled run after this merges removes it. No cleanup step is needed.\n\nThe target is NOT widened to `objectstack/` to reach the same mapping — that spelling would put `objectstack/snapshots/` inside a `--delete` target and eat the daily tarballs, which is the failure the step's own comment already warns about. The daily tarball step is untouched: it writes its own key from `-C archive .` and still carries `./board/...`, self-describing.\n\nNo secret name or value is touched, no secret is added, and the workflow's `permissions:` block is unchanged.\n\n## The two `.git` excludes are dropped, and why\n\nThey are dead after this change, not merely redundant. `archive/` is a linked worktree, so its `.git` is a FILE at `archive/.git`; aws-cli filter patterns are matched against each path relative to the SOURCE directory, and with the source now `archive/board/` that file is outside the source entirely. Nothing under `archive/board/` is or can be named `.git` — the snapshot script writes the board tree there.\n\nDropping them is behaviour-neutral. Keeping them would have left a live-looking guard whose accompanying comment describes a path this step no longer reads, inside the very step whose comment/code disagreement is what this card is about. The tarball step's own `--exclude=.git` still applies to `-C archive .` and is left as it is.\n\n## Acceptance, both directions\n\nMeasured in the worktree at `9dfcfb46a`:\n\n| reading | before | after |\n|---|---|---|\n| `grep -n 'aws s3 sync archive/board/' .github/workflows/board-snapshot.yml` | 0 hits (exit 1) | 1 hit, line 364 |\n| `grep -c 'aws s3 sync archive/ ' .github/workflows/board-snapshot.yml` | 1 | 0 |\n| literal control, `grep -n 'mirror=' ...` | line 340 | line 340, byte-unchanged |\n| `git diff --stat origin/main` | — | 1 file changed, 21 insertions, 4 deletions |\n\nA `yaml.safe_load` of the file parses; the job still has 9 steps and every `if:` guard is byte-unchanged. The `set +e` / `code=$?` / `set -e` shape around the sync is byte-identical, so the step's exit-code capture is untouched.\n\n## Verification the maintainer can run, once\n\nThe bucket cannot be re-measured from this container (no R2 credentials), so the post-change layout is NOT MEASURED here. After the next scheduled run (`7 2,8,14,20 * * *`), one `ListObjectsV2` against prefix `objectstack/board/` should show `manifest.json`, `comments/`, `issues/` and `reviews/` at the top level of that prefix and no `board/` subtree under it, while `objectstack/snapshots/` still holds the daily tarballs. That first run's `deleted` count in the step summary should be roughly the object count of the old tree.\n\n## Not reachable at PR time\n\nThe R2 step is guarded by `if: github.event_name != 'pull_request'`, as are the archive checkout and the commit/push steps. A `pull_request` run therefore exercises the snapshot on a real runner (`--out=board --dry-run --limit=5 --max-requests=25`) and never touches the bucket. The changed line cannot be proven green by this PR's own CI; it is covered by the greps above and by the one-run verification described above.\n\n## Gates\n\nDerived with `node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` (no paths — it takes its own change set from the merge base) and run in the foreground, each exit code captured before any pipe: 36 derived families, 35 exit 0, reconciled with `--ran`.\n\n`pnpm check:pm-dispatch-gates` is NOT MEASURED here: its self-test suite streamed thousands of passing assertions and zero failures, but did not terminate inside a 520 s budget in this shared container. It runs in CI's required `Lint & Repo Gates` job.\n\n## Changeset\n\n`skip-changeset`: no package's `files[]` ships `.github/**`, so this diff publishes nothing from any released package.\n\n## Acceptance notes\n\n- Noted, not filed: the prose block above the step still reads \"this step mirrors the archive CHECKOUT\". It stays accurate in substance, because `board/` is the only entry the archive branch tree holds, but after this change the sync mirrors that subtree rather than the tree root. Left as written — rewriting it is prose polish, not a defect, and this card's surface is the sync step itself.\n\n_Generated by [Claude Code](https://claude.ai/code/session_01DAcomhvR9kKizeYgg89Vo8)_\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01DAcomhvR9kKizeYgg89Vo8)_"
+}

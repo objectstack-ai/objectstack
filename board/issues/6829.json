@@ -1,0 +1,32 @@
+{
+  "number": 6829,
+  "kind": "pull_request",
+  "title": "docs(rest): openapi-endpoints 的 requestBody 注释改写为实测状态——服务出的文档里 $ref 为 0 (#6797)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T23:35:36Z",
+  "updated_at": "2026-08-09T06:05:20Z",
+  "closed_at": "2026-08-09T06:05:19Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": "2026-08-09T06:05:19Z",
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/6829",
+  "body": "Fixes #6797\n\n`packages/rest/src/openapi-endpoints.ts` 的 `requestBody` 分支上那句「**且六个内置 `$ref` 可以解析**」在 #5588(ruling C)/ #5744 之后已经失真。本 PR 只把这一段注释按**本次实测**的状态重写,**不改任何代码**。\n\n## 为什么值得改:这是承重散文\n\n那句话被用来论证紧邻的自由形态 `type: object` 决策。失真之后,下一个读者会继承一个错误的心智模型——以为文档内存在一套可解析的引用关系,可以拿来挂 per-object 的 body schema。实际上没有。\n\n## 本次实测(不转述单据里的数字)\n\n**① 服务出的文档** —— 用真实 `RestServer` + `registerRoutes()` 驱动**已注册的** `GET /api/v1/openapi.json` handler(即生产同一条 handler、同一套装配链路、同一份从磁盘读入的静态产物),对整个响应体做 `JSON.stringify` 后同时做文本计数与结构化遍历(逐个 key 名为 `$ref` 的节点):\n\n| 配置 | paths | components.schemas | `$ref` 文本 | `#/components/schemas/` 指针 | 结构化 `$ref` key |\n|:---|---:|---:|---:|---:|---:|\n| A 空载(无 object、无 api 元数据) | 67 | 9 | **0** | **0** | **0** |\n| B 注册 object(`{object}` 展开生效)+ 一条被匹配器真正服务的 POST 端点(`requestBody` 分支生效) | 88 | 9 | **0** | **0** | **0** |\n\n两种配置下,九个 schema 的**入边逐个为 0**:\n`CreateRequest=0 UpdateRequest=0 SingleRecordResponse=0 ListRecordResponse=0 DeleteResponse=0 ApiError=0 BulkRequest=0 BulkResponse=0 BaseResponse=0`\n\n配置 B 里那条端点产出的 requestBody 正是这段注释所辖的代码(引号以单引号书写,避开 GitHub 正文消毒器把双引号转义成实体):\n\n```\n'requestBody': { 'required': true,\n                 'content': { 'application/json': { 'schema': { 'type': 'object' } } } }\n```\n\n**② 静态产物** —— `pnpm --filter @objectstack/spec gen:openapi` 生成后直接测(该产物 gitignore,不在树上):`$ref` 文本 **0**、结构化遍历 **0**、`components.schemas` **9** 个、**没有 `paths` 键**(与 #5744 leg 2 一致)。\n\n**③ 为什么是结构性的,而不是某一次 boot 的巧合** —— 装配链路上**没有任何一步会发射 `$ref`**。对三个模块 grep 字面量 `$ref`,只剩两处,且**都是散文**:`openapi-builtin-paths.ts:100`(旧段那些指向 `CreateRequest`/`UpdateRequest` 的 `$ref` 对 wire shape 的判断是错的)与本次修改的 `openapi-endpoints.ts:261`。`rest-server.ts` 的 handler 区段一处都没有。所以这个 0 不依赖某一次 boot 的路由规模。\n\n顺带确认了单据点名的邻近事实仍然成立:`openapi-builtin-paths.ts` 明写 `CreateRequest`/`UpdateRequest` 这两个信封(`{ data }`)**并不描述路由实际接受的 wire shape**(路由收的是裸记录)。新注释因此特意不去暗示相反的意思。\n\n## 测量口径的诚实声明\n\n服务出的文档来自**进程内驱动已注册的真实 handler**,不是 `objectstack dev` 起 HTTP 之后 `curl`——后者需要全工作区构建。两者的差别只在路由表规模与真实元数据,而由 ③ 可知 `$ref` 计数与路由表规模无关。静态产物是**直接读产物**,与服务出的文档是两个独立的断言,上面分开列出。\n\n## 变更范围\n\n`git diff -U0` 过滤掉所有 `//` 开头的增删行后**为空**——单文件、纯注释、零代码变更:\n\n```\n packages/rest/src/openapi-endpoints.ts | 26 +++++++++++++++++++-------\n 1 file changed, 19 insertions(+), 7 deletions(-)\n```\n\n⛔ 未搭 #5757 的车(未加门禁、未动 `check-generated.ts`),⛔ 未改 `requestBody` 形状 / schema 发射 / 端点逻辑。\n\n## 验证\n\n- `pnpm --filter @objectstack/rest test` → **69 files / 1097 tests passed**\n- `npx eslint packages/rest/src/openapi-endpoints.ts --no-inline-config` → clean\n- `node scripts/check-nul-bytes.mjs` → OK\n- `packages/rest` 无 `typecheck` script(在 `scripts/check-type-check-coverage.mjs` 的 DEBT 账本里有实测条目),非本次改动所致\n\n## Changeset\n\n纯注释改动,不发布任何东西 → 不写 changeset,改用 `skip-changeset` 标签(建 PR 后立即打上,已回读确认在 PR 上)。\n\n---\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

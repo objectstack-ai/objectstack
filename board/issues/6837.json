@@ -1,0 +1,36 @@
+{
+  "number": 6837,
+  "kind": "issue",
+  "title": "objectui: element:button forwards `bodyExtra` to the ActionRunner; the object-form `params` arm becomes a deprecation window (#5777 objectui half)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:queue",
+    "repo:objectui",
+    "target:v17"
+  ],
+  "assignees": [
+    "yinlianghui"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T23:42:20Z",
+  "updated_at": "2026-08-09T05:39:17Z",
+  "closed_at": "2026-08-09T05:39:17Z",
+  "closed_by": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6837",
+  "body": "Blocked-by: #6819\n\nPart of #5777 (maintainer ruling 2026-08-06, direction A — spec half landed via PR #6819). This is the objectui half the ruling split out: «objectui `ActionRunner` 兼容窗(弃用告警下继续接受旧 object-params 一个版本窗口)拆 objectui 子单,`Blocked-by:` spec 半边». Filed by the `domain:spec` seat at ACCEPT time per multi-repo rule 3; routing label (`repo:objectui`) left to the triage seat — single-producer territory, only `pm:queue` set here.\n\n## The measured contract (from the spec-half dev's report — verified sites, not guesses)\n\n**The blocking hop is NOT the ActionRunner** — it is `packages/components/src/renderers/basic/elements.tsx`: the `element:button` click handler builds an EXPLICIT forward whitelist of action keys (type/name/label/description/target/openIn/endpoint/method/navigate/to/opensInNewTab/confirmText/successMessage/errorMessage/refreshAfter) mirroring the old spec pick list. It must gain `bodyExtra: action.bodyExtra`. Everything below that hop is already wired:\n\n- `ActionRunner`'s `ActionDef` already declares `bodyExtra?: SpecActionInput['bodyExtra']`;\n- `useConsoleActionRuntime`'s `apiHandler` already does `Object.assign(body, resolvePageVarTokens(action.bodyExtra, pageVars))` — `{{page.*}}` tokens resolve exactly as they did under the old object-form `params`.\n\n**The compat window the ruling ordered** lives at `ActionRunner`'s existing `Array.isArray(action.params)` fork: keep treating a NON-array `params` as the static payload for one version window, emit a deprecation warning naming `bodyExtra`, then delete that arm. The discriminator stays `Array.isArray`; the two keys read as payload = `{...bodyExtra}` merged last over collected params.\n\n**Two secondary sites for the same card:**\n- `ActionRunner.executeAPI`'s no-custom-handler fallback (`body = JSON.stringify(action.params || context.data || {})`) never reads `bodyExtra` at all;\n- `packages/types/src/ui-action.ts`'s inline-action prop type.\n\n## Why it matters now\n\nUntil this lands, the divergence window documented in PR #6819 is open: a page authored with `bodyExtra` (or an old-key page rewritten by the ADR-0087 conversion at load) validates and publishes, then is dropped one hop before the runner. Direction: spec accepts ahead of the renderer — never the reverse — but the window should be short.\n\n## Boundary\n\n⛔ Object-form `params` on a `type:'url'` inline action is a THIRD meaning (`interpolateTarget`'s `${param.X}` scope, `executeUrl`'s `params.newTab`) — out of scope here, tracked as finding #6828; do not fold a rewrite of it into the deprecation arm.\n\nRefs: #5777 (ruling), PR #6819 (spec half, incl. the divergence-window section), #6828 (url third meaning, held finding)."
+}

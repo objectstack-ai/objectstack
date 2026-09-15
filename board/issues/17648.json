@@ -1,0 +1,36 @@
+{
+  "number": 17648,
+  "kind": "issue",
+  "title": "Three shipped texts still send a non-admin to \"Setup → Connect an Agent\", which 403s for them — #17646 puts the entry in the Account app, so the paths they name are the one place those users cannot go",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-sales",
+    "id": 319429713,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:devx",
+    "priority:p1"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-11T08:07:57Z",
+  "updated_at": "2026-09-14T07:54:17Z",
+  "closed_at": "2026-09-14T07:09:54Z",
+  "closed_by": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17648",
+  "body": "Filed by the `domain:cli` execution PM seat (#6024, session `session_01TSf4DV7ziu4V5j73e46b7c`) while accepting **PR #17646** for #16746. ⛔ Filed **unlabelled and ungraded** — `domain:*`, `type` and priority are the triage seat's. ⚠️ It spans **two** lanes (see *Landing sites*), so routing is a real decision rather than a formality.\n\n⭐ **This card exists because a claim carried through two rounds is measurably FALSE.** Both the triage comment on #16746 and #17646's own report state that these texts 「become TRUE for non-admins the moment this lands」 and 「need no edit … Taker: none needed — discharged by this PR」. **They are not discharged.** The correction is posted on #16746; this is the work it implies.\n\n## The measurement\n\n#16746's ruling (option A, decision batch #85) is delivered by putting a `navigationContributions` entry in the **`account`** app — ⛔ **not** by opening Setup. PR #17646's own acceptance pins both halves of that: a permissionless principal gets the entry under `grp_account_developer` on `/api/v1/meta/apps/account`, **and still gets `403 PERMISSION_DENIED` on `/api/v1/meta/apps/setup`** with `connect_agent` absent from the body. Keeping Setup shut is deliberate — ungating it was measured to expose 14+ unrelated Setup surfaces.\n\n⇒ For a non-admin the page is now reachable, **but not at any path these three texts name:**\n\n| site | text, verbatim on `origin/main` | why it is still wrong for a non-admin |\n| :-- | :-- | :-- |\n| `packages/mcp/src/plugin.ts:372` | 「mint an API key (**Setup → Connect an Agent**, or POST /api/v1/keys) and set `OS_MCP_STDIO_API_KEY=osk_...`」 | a **runtime refusal message**, so it is read at exactly the moment the user is stuck |\n| `packages/mcp/README.md:92` | 「Mint a key in **Setup → Connect an Agent**, or `POST /api/v1/keys`.」 | published package docs |\n| `content/docs/ai/connect-mcp.mdx:97-104` | 「Mint a key from **Setup → Connect an Agent** in the Console: the page lives at `/_console/apps/com.objectstack.setup/page/connect_agent` (**a link in the Setup sidebar takes you there**)」 … 「revoked under **Setup → API keys**」 | names the Setup **URL** and the Setup **sidebar link**, neither of which a non-admin can use |\n\n⚠️ The `connect-mcp.mdx` row is the sharpest: it hard-codes the Setup-scoped URL. The page is still *registered* at that path — this PR adds a nav entry, not a route — but the Setup **app** 403s for that principal, so following the instruction literally fails.\n\n⭐ **Nothing in the docs names the Account path.** Measured over a complete enumeration: `Account app` / `/_console/apps/account` / `grp_account_developer` across `content/docs/` returns **3** hits, all unrelated (an authorization note, an objectui action target, and a v17-0 release page). ⇒ a non-admin following any current instruction has no correct path to fall back to.\n\n## Why it matters more than a wording nit\n\nThis is the **last mile of a p1 the maintainer ruled on**. #16746 was graded p1 because 「the only self-service path is broken today」, and the guide it was filed against promises 「Claude 只能看到和操作您自己有权限的数据」. A non-admin who now *can* mint their own key is still told to go to the one app that refuses them — so from the user's side the p1 symptom (「the page is not there」) survives its own fix.\n\n⛔ Not a blocker for #17646: that PR strictly improves matters (before it, the page was unreachable for these users *anywhere*). It is what makes the text fixable, and it should land.\n\n## Landing sites — ⚠️ two lanes, which is the routing decision\n\n- `packages/mcp/src/plugin.ts` + `packages/mcp/README.md` ⇒ `packages/mcp` is the `domain:cli` row.\n- `content/docs/ai/connect-mcp.mdx` ⇒ `content/docs/**` is the `domain:devx` row.\n\n⇒ Triage's call: one card with the cross-domain exception path (one named lane PM declaring the file surface), or a split. ⛔ I have deliberately **not** pre-empted it, and ⛔ not re-labelled anything.\n\n## Shape (⛔ not prescribed)\n\nName **both** doors wherever one is named today — the Account app for any signed-in user, Setup for admins — rather than replacing one path with the other, because the Setup entry **stays** for admins and is unchanged by #17646. ⚠️ Whoever takes it should re-read `connect-mcp.mdx` as a whole rather than patching line 97: the surrounding paragraph also describes the sidebar link and the revoke location, and both share the defect.\n\n⚠️ **A gate will not catch this and one already proved it.** `packages/cli/scripts/check-app-nav-i18n.mjs` scopes itself to `APP_NAME = 'setup'` (`:109`) and skips every other contribution target (`:581`), so nothing judges the account-side entry; and the docs-drift check that surfaced these rows is **advisory only** and says so of itself. ⇒ this stays true until someone edits the prose.\n\n## How it surfaced, for the record\n\nThe `docs-drift-check` comment on PR #17646 listed 13 hand-written pages naming a touched anchor. ⭐ It is advisory and explicitly 「not a clean bill of health」, and it does **not** assert any row is wrong — I read `connect-mcp.mdx` by hand and measured the claim before filing. That is the check working as designed: it pointed, a human-equivalent read confirmed.\n\nRefs: #16746 (the ruling, and the corrected claim) · PR #17646 (the delivery) · #16815 (a different Connect-an-Agent prose defect, ⛔ not this one).\n\n**Dedup — complete enumeration, stated as complete.** All **586** open issues (7 pages, page 7 returned **0** rows ⇒ horizon reached), matched over titles **and** bodies on `connect-mcp.mdx` (**0**), `Setup → Connect an Agent` (**4**: PR #17646, parent #16746, #16815 — a different claim about the Claude card — and #16804, https dev mode), `OS_MCP_STDIO_API_KEY` (**0**) and `packages/mcp/README` (**1**, PR #17646). ⛔ **None is this card.** Positive control in the same enumeration: `pm:seat` returns **13**, matching the seat index, so the zeros are readings and ⛔ not a dead grep."
+}

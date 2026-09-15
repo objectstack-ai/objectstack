@@ -1,0 +1,33 @@
+{
+  "number": 6886,
+  "kind": "pull_request",
+  "title": "docs(pm-dispatch): write down the domain:* label vocabulary and the seat roster (#5469)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T02:44:42Z",
+  "updated_at": "2026-08-09T06:49:38Z",
+  "closed_at": "2026-08-09T06:49:37Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-08-09T06:49:37Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/6886",
+  "body": "Part of #5469\n\n**Not `Fixes`**: this card stays open by the maintainer's own instruction (\"本单摘 `needs-user-decision`,保留开放至存量重标清点完成\"), and the half that would close it — the `domain:spec-tooling` / `domain:devx` boundary — is escalated, not implemented. This PR lands the half that needed no ruling: the vocabulary, written down where a PM reads it.\n\n## Re-measurement first (2026-08-09) — the card is four days old and both claims moved\n\n| Claim in #5469 | Measured now | Verdict |\n|:--|:--|:--|\n| `domain:ui` — one instance, duplicates `repo:objectui` | **0 issues**, open + closed | Executed. Nothing left to relabel. |\n| `domain:spec-tooling` — in use, unlisted, file surface fully overlapping devx | **10 open / 67 closed**, seated PM, still being applied 2026-08-08 | Still true, and **diverged** — see below |\n\nOpen issues carrying `domain:spec-tooling`: #6833, #6797, #6751, #6635, #6350, #6232, #6221, #5828, #5757, #5163. Two of them (#6797, #6350) are `pm:dispatched` — in flight right now.\n\n**The overlap has diverged, so this is a listing problem, not a merging problem.** The lane now has a file surface devx never claimed (`packages/spec/scripts/**`, `packages/spec/docs/**`, per seat card #6018), which is why it cannot simply be folded into devx. But the three contested paths are still contested, and no longer only on paper — both lanes are landing in `packages/lint` in the same week: `domain:spec-tooling`'s #6778 landed entirely in `packages/lint/src/` (PR #6831), while `domain:devx` carries #5957 / #5330 / #6381 in the same package.\n\n## Why the 2026-08-06 ruling could not simply be executed\n\nThe ruling (recorded verbatim in the file, untranslated) judged the lane temporary and due for retirement after its stock was relabelled. Three facts measured against `origin/main` and the live backlog say that premise did not hold:\n\n1. Seat card #6018 was opened at **15:03Z on 2026-08-06 — about 9 hours after the 05:42Z ruling** — and the seat is still occupied, through one handover, with 9 PRs landed in a single term.\n2. The **maintainer-approved 2026-08-07 `spec` split** (seat card #6298) wrote the `spec-surface` / `spec-tooling` boundary criterion into this very file. The maintainer's own next-day text treats the lane as live.\n3. Triage kept applying the label: #6833 and #6797 were labelled on **2026-08-08**, two days after the \"retires\" ruling.\n\nSo the file now records the ruling *and* the facts that overtook it, rather than reporting an execution that never happened. Per the dispatch's own rule — diverged means list it, not merge it — the lane is listed as an in-circulation lane, and the package-family table deliberately still gives it no row, because giving it one while the three paths are unruled would break the anchoring rule (\"every package belongs to exactly one domain\") on the spot.\n\n## What changed\n\n1. **A `domain:*` roster** under \"Domain lanes\": 10 in-circulation lanes mapped to their seat cards, plus a retired table (`domain:engine`, `domain:ui`) that triage must never apply again. The package-family table answers \"which domain owns this package\"; nothing answered \"which labels exist and who is seated\" — that gap is what let two entries grow outside the table for four days.\n2. **`domain:spec-tooling` recorded as an in-circulation lane** with the ruling quoted verbatim, the three overtaking facts, its two uncontested paths, and its three contested ones. Cards landing in the contested three now route to **FLAG back to #5469**, explicitly not to a triage-side coin flip.\n3. **The one-time setup block now creates the `domain:*` labels.** It previously created `pm:*` / `finding` / `needs-user-decision` / `repo:*` and **zero** `domain:*` — while label discipline in the same file makes `domain:*` the triage seat's only machine-readable output and forbids claiming an unlabelled issue. The vocabulary was load-bearing with no executable text producing it, so the roster and the real label set drifted independently. That root cause was filed onto #5469 from #5472's worksite; this closes it. Retired labels are deliberately excluded from the loop.\n\n## Residue the PM has to execute (dev has no label-deletion tool)\n\nBoth retired labels are at 0 issues but **both label objects still exist** in the repo label set, so both are still selectable in GitHub's autocomplete. Both retirement instructions said to delete (\"清零后删除旧标签\" for #5472; \"即日退役\" for `domain:ui`) and both stopped at \"stop applying it\". Zeroed is not retired — deleting the label object is a separate step.\n\n## Relabelling: none done, and why\n\n`domain:ui` needs none (0 issues). The `domain:spec-tooling` stock was **not** relabelled: those 10 issues belong to a seated lane (#6018) with two cards in flight, and moving them would pull work out of another seat's filter mid-flight — flagged rather than done, per the dispatch.\n\n## Gates\n\n`check:nul-bytes`, `check:doc-authoring`, `check:skill-frame-sync`, `check:skill-compatibility-version`, `check:role-word` — all pass; control-byte self-scan clean. Docs-only change under `.claude/`, so no changeset (`skip-changeset`).\n\nRoster verified against reality: the 100 most-recently-updated open issues carry exactly 10 distinct `domain:*` labels, matching the roster row for row, with no `domain:ui` and no `domain:engine` among them.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01F8q5J1MQyocgtNspb15fSn)_"
+}

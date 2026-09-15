@@ -1,0 +1,32 @@
+{
+  "number": 5757,
+  "kind": "issue",
+  "title": "gen:openapi 产物被运行时读盘但无任何门禁——缺失时 /openapi.json 静默 503,check:generated 自报「Generated but ungated」",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T04:02:40Z",
+  "updated_at": "2026-08-09T06:45:58Z",
+  "closed_at": "2026-08-09T05:42:01Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 9,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5757",
+  "body": "观察类记录(finding),发现于 #5679 实施过程(PR #5743),按 Prime Directive #10 单独登记,未在该 PR 内处理。\n\n## 事实(全部实测)\n\n1. `check:generated` 自报:**「Generated but ungated (2): gen:openapi, gen:sbom — nothing verifies these are current」**——工具链自己声明这两个生成器无新鲜度校验。\n2. 其中 `gen:openapi` 的产物 `packages/spec/json-schema/openapi.json` 是 **gitignore 的、且被运行时读盘消费**:`packages/rest/src/rest-server.ts:3388` 的 `/openapi.json` 路由在请求时从磁盘读取该文件。\n3. **缺失时的失败形态是静默 503**,不是构建期报错。实证:#5679 实施期间 `check:authorable-surface` 重跑 `build-schemas.ts`(不含 `gen:openapi`)清掉了该文件,`packages/rest` 随即 8 条 OpenAPI 用例以 503 判红——失败形态与「你的改动弄坏了什么」无法区分,定位耗时后才确认是生成顺序副作用(`gen:openapi` 重跑即恢复 755/755)。\n4. CI 的 build 序列(`gen:schema && gen:openapi && tsup`)目前顺序正确,所以线上未爆——该缺口是**潜在**的:任何单跑部分生成器的本地/脚本路径都会复现。\n\n## 为什么值得记\n\n- 一个被运行时消费的产物没有「是否新鲜/存在」的门禁,违反本仓 check-generated 机制自己的完备性主张(该机制的价值正在于「生成物不新鲜必被机器发现」);\n- 失败形态(运行时 503)与根因(构建期产物缺失)相距两层,已经造成一次真实的误诊成本(见上第 3 条)。\n\n## 相邻工作\n\n`gen:sbom` 同报无门禁,但无运行时消费者,严重度不同。与 #5040 / #5078(check-generated 机制族)相邻,修法大概率是给 `check:generated` 补两条 freshness/existence 条目或把 openapi.json 改为 build 产物内嵌。\n\n不预设修法,交分诊分级。"
+}

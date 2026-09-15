@@ -1,0 +1,34 @@
+{
+  "number": 6714,
+  "kind": "issue",
+  "title": "`@objectstack/client` 仍有一族绕过 `getRoute()` 的硬编码 API base:`email.send`、`cloud.environments.*`、`ScopedProjectClient` 的 scope 前缀",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:queue",
+    "target:v17"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T13:19:17Z",
+  "updated_at": "2026-08-09T03:28:06Z",
+  "closed_at": "2026-08-09T03:28:06Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6714",
+  "body": "out-of-scope 发现,来自 #6633 的实施(PD #10 单独立单,**未认领**)。#6633 / PR #6712 只覆盖其四车道(spec `ApiRoutes` 键 / protocol 映射 / rest 通告 / client `packages.*` + `external.*`),本单记录 client 里**其余**绕过 `getRoute()` 的硬编码面。\n\n## 事实(全部实测,`origin/main` = `d6d1a50be`,`packages/client/src/index.ts`)\n\n`ObjectStackClient` 的路由派生机制是 `getRoute(key)`(优先 `discoveryInfo.routes[key]`,fallback convention)。#6633 落地后,以下面**仍不经过它**,discovery 通告任何非默认 base 均不跟随:\n\n1. **`email.send`** — :1049 硬编码 `` `${this.baseUrl}/api/v1/email/send` ``。服务端 `registerEmailEndpoints(bp)` 挂在 `RestServer.getApiBasePath()` 下(**跟随 `apiPath`**),所以设 `apiPath` 的部署服务端已搬走、client 打旧前缀 → 404。`ApiRoutes` 无 `email` 键(spec 变更,需单独裁定 —— 同 #6633 的 `datasources` 键先例)。\n2. **`cloud.environments.*` 全族** — :1383-1657 约 20 处 `` `${this.baseUrl}/api/v1/cloud/...` `` 模板串。无 `cloud` 路由键。(该面由哪个宿主挂载、是否随 `apiPath` 移动,未在本单测量;分诊时请勿臆断归属。)\n3. **`ScopedProjectClient.scope()`** — :4827 硬编码 `` `/api/v1/environments/${id}` `` 前缀,scoped 面的全部 `meta` / `data` / `batch` / `packages` URL 由它拼出。服务端 scoped 挂载点 = `getScopedBasePath(getApiBasePath())`(**跟随 `apiPath`**)。\n4. **非缺陷,勿「修」**:`connect()` 的 bootstrap 探针(:522 `/api/v1/discovery`、`.well-known/objectstack` fallback)是发现机制自身的鸡生蛋条目,convention 正是其存在意义。\n\n## 后果\n\n与 #6633 同类:非默认 base 部署(`apiPath`,或程序化 `basePath` / `version`)上这些面打错前缀。其中面 1、3 的服务端挂载**已经**跟随 `apiPath`,即 #6306 落地前它们就是现活的 404(不是「碰巧能用」)。\n\n## 方向(留给分诊,不预设)\n\n- 面 1:`ApiRoutes` 增 `email` 键(spec 裁定)+ rest 通告 + client 走 `getRoute('email')` —— 完整复刻 #6633 的四车道模式。\n- 面 3:scoped 前缀可从 discovery 的 `scoping` 块或 `routes.data` 的 base 推导;改动需 both-copy 纪律(其 `packages` 命名空间同改)。\n- 面 2:先测量挂载归属再定方向。\n\n## 查重\n\nopen issues 已搜 `email send hardcode` / `email/send` / `ScopedProjectClient` / `client hardcode route discovery`,除 #6633(本单来源)外无同题。相关:#6306(9 条直挂路由移 base,server 侧)、#6633 / PR #6712(同模式的 packages / datasources 面,已实施)。"
+}

@@ -1,0 +1,38 @@
+{
+  "number": 4829,
+  "kind": "issue",
+  "title": "rest: filterAppForUser treats app hidden flag as builder-only access gate — built-in account app returns 404 for all normal users",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:spec",
+    "pm:dispatched",
+    "protocol:breaking",
+    "target:v17"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T09:13:38Z",
+  "updated_at": "2026-08-09T06:32:59Z",
+  "closed_at": "2026-08-09T06:32:59Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 14,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4829",
+  "body": "## 现象(17.0.0-rc.1,真机 A/B 实测)\n\n`@objectstack/rest` 的 `filterAppForUser()`:\n\n```\nif (item.hidden === true && !sysPerms.has('studio.access') && !sysPerms.has('setup.access')) return null;\n```\n\n把应用的 `hidden`(语义=不进应用切换器的**导航呈现开关**)当成了「builder-only / 未发布」的**访问开关**。而平台内置 account(账户)应用按设计就是 `hidden: true`(`@objectstack/platform-objects` 的 `ACCOUNT_APP`,注释:「Surface via the avatar dropdown, not the App Switcher」;console 头像菜单也特判 `e.name !== 'account'` 单独给它「个人资料」入口)。\n\n结果:\n- 普通用户 `GET /api/v1/meta/app` 中 account 应用被整个抹掉,点头像 →「个人资料」→ 整屏「App not available — it may still be publishing」;改密码/头像/已关联账户/活动会话/收件箱全部不可达;\n- 持 setup.access 的管理员一切正常(只挂 Unpublished 黄条)→ 极易被当成偶发故障,长期无人发现。\n\n## 期望\n\n`hidden` 只影响导航呈现(应用切换器/我的应用),**不参与访问判定**;或给内置 account 应用豁免。\n\n## 复现\n\n1. 空库启动 17.0.0-rc.1,建任意普通用户(无 studio/setup.access);\n2. 普通用户登录 console,点头像 → 个人资料 → App not available;同会话 `GET /api/v1/meta/app` 无 account。\n\n## 下游临时对策(修复后可整体删除)\n\nos-project-titanwind-ehr 登记 PLAT-DEF-040,PR steedos-labs/os-project-titanwind-ehr#745:启动插件以系统身份幂等下发 `{hidden:false}` 的 env 级 overlay(即 UI「Publish」按钮做的事)。副作用是「账户」出现在应用切换器——正因如此更说明 hidden 的两个语义(导航 vs 访问)必须拆开。"
+}

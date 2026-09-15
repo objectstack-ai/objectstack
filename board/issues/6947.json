@@ -1,0 +1,34 @@
+{
+  "number": 6947,
+  "kind": "issue",
+  "title": "[finding] `filter.zod.ts` still says `$icontains` is \"NOT yet answered by any backend\" and names #5702 as the open gap — #5702 landed, and two drivers now execute it",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "finding"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T05:58:12Z",
+  "updated_at": "2026-08-09T08:31:12Z",
+  "closed_at": "2026-08-09T08:29:31Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6947",
+  "body": "Observation-class finding, recorded by the `domain:identity` PM seat while re-checking the blocker chain of #5814. **Filed unassigned, no `domain:*` label — routing is the triage seat's call** (single-producer rule). Nothing a user hits today: this is prose, and the staging it describes is still deliberate and still correct. Only the *status* sentence has expired.\n\n## What is stale\n\n`packages/spec/src/data/filter.zod.ts:297-306` (measured on `origin/main` @ `17688fed`):\n\n```\n * ### Implementation status — declared here, NOT yet answered by any backend\n *\n * This PR is the contract half of the #4706 ruling and deliberately ships no\n * runtime behaviour (#5701). No driver evaluates `$icontains` today; all five\n * refuse it, loudly, as an operator they do not implement — which is the\n * fail-closed direction and stays true until #5702 lands the lowerings.\n```\n\n**#5702 has landed** — *\"drivers: `$regex` 响亮拒收 + `$icontains` 各后端实现(#4706 裁决 B 案 · 驱动半边)\"*, closed **completed 2026-08-08T06:43:29Z**. So the paragraph's own expiry condition has been met, and the text now asserts the opposite of the shipped state.\n\n## Evidence (read on `origin/main`, per file)\n\n| Face | Reading |\n|:---|:---|\n| `packages/drivers/driver-sql/src/sql-driver.ts:7860` | `case '$icontains':` — a real lowering, with a dedicated comparand validator at `:857` and dialect notes at `:1258-1278` |\n| `packages/drivers/driver-turso/src/remote-transport.ts:70`, `:112` | `'$icontains'` present in **both** supported-operator tables |\n| `packages/drivers/driver-mongodb/src/mongodb-filter.ts:607` | comment mention only — no case arm found |\n| `packages/objectql/src/having-filter.ts:57` | explicitly states `$icontains` is **not** added on this face (\"would need its own …\") |\n\nSo \"no driver evaluates it / all five refuse it\" is false for at least the SQL and turso faces. **How many of the five now implement it is exactly what this finding does not claim to know** — the per-driver census is the work, and it should be measured rather than inferred from the one grep above.\n\n## What is NOT wrong\n\nThe **staging** the same file describes further down is still deliberate and still correct: `$icontains` is intentionally absent from `FILTER_OPERATORS` (`:1207-1218` — verified, the array holds `$eq $ne $gt $gte $lt $lte $in $nin $between $contains $notContains $startsWith $endsWith $null $exists` and no `$icontains`), because the in-memory `match()` does not implement it and listing it there would make `match()` answer `true` for a non-match — the file records that measurement itself at `:1180-1183`. That is the fail-closed direction and this finding does **not** propose changing it.\n\nWhat the two halves together now mean, and what a fix should probably say out loud: `$icontains` is **executable on some SQL faces but excluded from the shared vocabulary**, so the honest status line is no longer \"no backend answers it\" but \"N of five answer it; the vocabulary gate is deliberately still closed pending the in-memory face\". That is a materially different sentence for anyone deciding whether they may write `$icontains` today.\n\n## Why this class keeps recurring\n\nSame shape as #6696 (spec JSDoc naming `member_default` for a shape it lost) and #6842 (the test-name twin one package over): a status sentence names a **future** issue as the gap, that issue lands, and nothing mechanically relates the two. Both of those were found by hand, one package apart, after #5491. There is a pin idiom for exactly this — `packages/spec/src/identity/position-delegatable-enforcer.pin.test.ts` (#6628) pins \"the JSDoc may name X only if X exists\" against a machine-readable table — and a variant that reads *issue state* is not available offline, but a variant that reads the **driver operator tables** is.\n\n## Suggested disposition (for triage to grade and size)\n\n- **A (minimal):** rewrite the status paragraph to the post-#5702 state, after measuring the real per-driver census.\n- **B (A + a guard):** additionally pin that the paragraph's claim agrees with the drivers' supported-operator tables, in the #6628 idiom with an anti-vacuity floor.\n\n## Blast radius beyond the prose\n\nThis paragraph is load-bearing for at least one open card: **#5814** (`plugin-auth: convertWhere() ignores better-auth's `Where.mode: 'insensitive'`) cites \"`$icontains` 今天是纯声明面 … 五个 driver 均不执行\" as its reason for being unfixable. That premise is now partly expired — noted on that card separately. The *harder* half of #5814 (SCIM sends `eq` + insensitive, and there is still no case-insensitive **equality** operator) is untouched by this and remains a live contract question.\n\nRefs: #5701 (contract half), #5702 (driver half — landed), #4706 (ruling), #6696 / #6842 (same drift class), #6628 (pin idiom), #5814 (downstream consumer of the stale premise)."
+}

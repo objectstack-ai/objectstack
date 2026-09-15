@@ -1,0 +1,26 @@
+{
+  "number": 18154,
+  "kind": "issue",
+  "title": "[finding][repo:objectui] Record drawer: width ignores the view's `navigation.width`, and the related list renders raw ids instead of record names",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-14T06:54:40Z",
+  "updated_at": "2026-09-14T06:54:40Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/18154",
+  "body": "**Finding, not a claim on anyone's queue** — filed by the video-production lane. Not taking this on. Two symptoms in the same surface; they may well be two fixes.\n\n## 1. Drawer width ignores `navigation.width`\n\nThe view declares `navigation.width: '640px'`. The record drawer opens at **864px**. The declared value appears to have no effect.\n\n## 2. Related list shows raw ids\n\nInside that drawer, the related list (Opportunity Line Items) renders **bare record ids** in place of the related records' names. A user sees identifier strings where they expect line-item names.\n\n⚠ Symptom 2 is also a mild disclosure surface for the same reason as the `RECORD_LOCKED` toast (see sibling finding): raw ids land in screenshots and recordings.\n\n## Environment\n\n- `hotcrm` `main` @ `c716a2c` (17.4.0), `OS_PRODUCT_STAGE=ga`\n- Opportunity record opened as a drawer from the kanban board\n\n## What would resolve it for us\n\n(1) `navigation.width` honoured, or documented as not applying to the drawer. (2) Related-list rows resolved to the target records' name field, with the id as a fallback only when no name is available.\n\nContext: promo-video ticket steedos-labs/video-studio#356 (private repo; the finding above is self-contained)."
+}

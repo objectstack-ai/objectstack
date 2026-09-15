@@ -1,0 +1,32 @@
+{
+  "number": 6833,
+  "kind": "issue",
+  "title": "分享侧：GA 翻转后越界的 sharing `condition` 在 enforceability 门下根本不报（让渡给 `validateStackExpressions`，而它按语法说话）",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T23:38:09Z",
+  "updated_at": "2026-08-09T13:50:03Z",
+  "closed_at": "2026-08-09T13:50:03Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6833",
+  "body": "观察类 finding，来自 #6778 / PR #6831 的实施（该 PR 有意把这一侧排除在外，理由见下）。**未认领，不构成派单请求。**\n\n## 事实（`origin/main` `c32944d67` 实测）\n\n`packages/lint/src/validate-sharing-rule-enforceability.ts:197`：\n\n```ts\nconst result = compileCelToFilter(input, { variables: {} });\nif (result.ok) return;\n// 语法归 validateStackExpressions\nif (result.reason === 'parse-error') return;\n```\n\n下推编译器**有意**把 `DEFAULT_LIMITS` 越界折叠进 `reason: 'parse-error'`（`cel-to-filter.ts:133-138` 写明理由：这是每个消费者都已经路由到拒绝路径的 reason）。于是 v17 GA 翻转（`CEL_PUSHDOWN_LIMITS_MODE` 由 `rc-grace` 改为 `fail-closed`）之后，一条**语法完美但超出平台解析预算**的 `sharingRules[].condition`：\n\n- 在 `validateSharingRuleEnforceability` 里走到上面这行 `return`，**一条都不报**；\n- 规则本身在 boot 时会被 `bootstrapDeclaredSharingRules` 跳过（不写 `sys_sharing_rule`，不产生任何 `sys_record_share` 授权），只留一行 boot WARN。\n\n即：声明了一条分享规则，它什么也不授予，而 enforceability 门对此沉默。\n\n## 与 #6778 的区别（为什么 PR #6831 没有顺手一起改）\n\n#6778 的缺陷形状是**贴错标签**：RLS 侧确实报了，但报在 `rls-predicate-unparseable` 名下，提示语讲 SQL 与 CEL 的方言混淆。分享侧的形状是**让渡**：它不报错 id，而是有意不报，把语法交给 `validateStackExpressions`。二者不是同一个缺陷在两个入口，因此 #6778 的「同样的输入照样被拒，只是说对话」这一无行为变更口径，不能原样套到这里。\n\n要修就得先回答：越界是否应当停止让渡给 `validateStackExpressions`？那会改变「哪条规则报某个输入」，且 `validateStackExpressions` 覆盖全栈每一条 CEL 表达式，不止 `sharingRules`——是一个比 #6778 大一档的面。\n\n## 未验证的相邻问题（留给分诊，本 finding 未测）\n\n`validateStackExpressions` 在越界时具体说什么、是否也按语法口径措辞，本次没有测量。若它同样按语法说话，那这条 finding 的实际用户影响会比「只是沉默」更大一些。\n\n## 为什么是观察类而非缺陷\n\n翻转尚未发生（`cel-pushdown-limits.ts:75` 当前为 `'rc-grace'`），宽限窗口内越界 condition 仍被放行并编译，所以今天没有用户会撞上。严重度按 #4949 的口径交由分诊轮评级，不在此自行判定。\n\nRefs: #6778、PR #6831（RLS 侧的对应修复）、#6132 / PR #6766（GA 开关的来源）\n"
+}

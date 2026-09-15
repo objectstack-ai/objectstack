@@ -1,0 +1,35 @@
+{
+  "number": 6972,
+  "kind": "pull_request",
+  "title": "fix(objectql): hook `retryPolicy` 的默认值从 schema 派生,解析/未解析两条路径给同一个数 (#6832)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T06:52:07Z",
+  "updated_at": "2026-08-09T07:38:35Z",
+  "closed_at": "2026-08-09T07:38:34Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-09T07:38:34Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/6972",
+  "body": "Closes #6832. Precedent: #4247 (`flow.errorHandling` 上的同一形状). 依据: ADR-0049 (declared = enforced).\n\n## 缺陷\n\n`hook.retryPolicy` 的两个键都有两个答案,取决于元数据有没有过 `HookSchema`:\n\n| 键 | 声明 `packages/spec/src/data/hook.zod.ts:264-265` | 读取 `packages/objectql/src/hook-wrappers.ts:311-312` |\n|---|---|---|\n| `maxRetries` | `z.number().default(3)` | `?? 0` |\n| `backoffMs`  | `z.number().default(1000)` | `?? 0` |\n\n已解析路径(`defineStack` / `PUT /meta` / Studio)得 `3 / 1000`;未解析路径(公开导出 `wrapDeclarativeHook`,以及 `hook-binder.ts:221` 仓内既有调用点)得 `0 / 0`。危害静默且反向:schema、生成的参考文档、Studio 表单三处都告诉作者「重试 3 次」,执行器给 0 次 —— 不报错、不打日志、不红测试,只是把作者以为配好的恢复能力弄丢。\n\n## 形状选择的测量依据\n\n候选 (a) 让 `wrapDeclarativeHook` 自己解析 / 只收已解析 meta;(b) 让执行器侧的兜底**从 schema 派生**。**选 (b),并且 (a) 是被实测排除的,不是凭口味。**\n\n对 `HookSchema.safeParse` 逐形状实测(`origin/main` @ `73bff86`),结果是**它拒绝四种 binder 今天照常绑定的形状**:\n\n| 形状 | `HookSchema` |\n|---|---|\n| `{ ...base, nope: 1 }`(未知键) | ⛔ REFUSED — `Unrecognized key(s) on this hook: nope` |\n| `{ events: ['beforeFrobnicate'] }` | ⛔ REFUSED — `Invalid option` |\n| `{ retryPolicy: { maxRetries: 'x' } }` | ⛔ REFUSED — `expected number, received string` |\n| `{ retryPolicy: { retries: 2 } }` | ⛔ REFUSED — `Unrecognized key(s) on this hook's retryPolicy` |\n| 内联函数 handler / 字符串 handler / 无 handler / `_packageId` | ✅ PARSES |\n\n若走 (a),这四种今天「绑上并运行」的 hook 会变成「绑不上」—— 非 strict 下被 binder 的 catch 记为 skip,strict 下直接 throw 掉启动。**爆炸半径大于缺陷本身。**\n\n这与 `hook-binder.ts` 里 `normalizeObjects` 上方 #4001 注释写下的裁决一致 —— 本仓遇到完全同构的问题时的答案是「约束必须在执行器/binder 这边也成立」,而不是「逼调用方先解析」:\n\n> `HookSchema` now refuses those shapes at parse time, but this binder accepts unparsed `Hook` input, so the guard has to hold here too.\n\n(b) 的另一个好处:**一个机制同时覆盖两个键**,而且是「读」不是「重述」—— 日后给 `hook.retryPolicy` 加第三个键,执行器这边不需要跟着改。实现上取 `HookSchema.shape.retryPolicy.unwrap().parse({})`(实测:lazySchema 的 Proxy 对 `.shape` 访问是透明的),首次使用时求值并缓存,不在模块加载期分配 —— `lazySchema` 存在的理由正是这个。\n\n## ⛔ 边界:只修一半,另一半必须原样保住\n\n`retryPolicy` 整块是 `.optional()` 且**没有** `.default({})`,所以「整块缺失」与「块在、键省略」是两种不同的声明:\n\n- **整块缺失** → 解析后仍 `undefined` → 0 次重试。**这是对的,不动。**\n- **块在、键省略**(`retryPolicy: {}` / `{ backoffMs: 500 }`)→ 解析得 `3 / 1000`,未解析得 `0 / 0`。**只有这一半是缺陷。**\n\n把 #4247 的答案照抄成 `?? 3` 会让**每一个从没写过 `retryPolicy` 的 hook** 从「不重试」变成「重试 3 次」—— 给每个现存作者改行为,比原缺陷严重。测试把这条边界钉死。\n\n## 逆向验证(预测 vs 实际)\n\n`packages/objectql/src/hook-retry-policy-default.test.ts` 共 13 例。把 `hook-wrappers.ts` 还原成 `origin/main` 后跑:\n\n**预测 7 红 / 6 绿;实际 6 红 / 7 绿。** 唯一偏差解释在下:\n\n| 用例 | 预测 | 实际 |\n|---|---|---|\n| schema 仍声明 3 / 1000 | 绿 | ✅ 绿 |\n| ① 整块缺失 → 1 次尝试 | 绿 | ✅ 绿 |\n| ① 已解析路径 `retryPolicy` 为 `undefined` | 绿 | ✅ 绿 |\n| ② 空块 → 重试 `maxRetries` 次 | 红 | ✅ 红(1 vs 4) |\n| ② 空块 → 线性 backoff `[1000, 2000, 3000]` | 红 | ✅ 红(`[]`) |\n| ③ 省略 `maxRetries`(只写 `backoffMs`) | 红 | ✅ 红(1 vs 4) |\n| ③ 省略 `backoffMs`(只写 `maxRetries`) | 红 | ✅ 红 |\n| ③ 显式写的值仍然全胜(含显式 `0`) | 绿 | ✅ 绿 |\n| ④ 整块缺失:两路径一致 | 绿 | ✅ 绿 |\n| ④ 空块:两路径一致 | 红 | ✅ 红 |\n| ④ 半填(只 `backoffMs`):两路径一致 | 红 | ✅ 红 |\n| ④ 半填(只 `maxRetries`):两路径一致 | **红** | ❌ **绿** |\n| ④ 全写:两路径一致 | 绿 | ✅ 绿 |\n\n**偏差说明:** ④ 的断言只比较**重试次数**。`{ maxRetries: 1 }` 里 `maxRetries` 是写死的,未解析路径的 `?? 0` 根本不触发,次数两边都是 2 —— 这一格的发散只在 `backoffMs` 上,而 ④ 不看 backoff。该发散由 ③ 的 `省略 backoffMs` 一例覆盖(实测红)。是我的预测漏算了断言的观察面,不是代码行为出乎意料。\n\n修复后:**13/13 绿**。`packages/objectql` 全量 **161 文件 / 2777 例全绿**,无回归。\n\n## 跑过的门禁(本地,现场枚举 `.github/workflows/lint.yml` = **44** 个 `pnpm check:`)\n\n| 门 | 结果 |\n|---|---|\n| `check:spec-parsed-alias`(ADR-0122) | ✅ PASS(18 self-test;1517 bare aliases / 823 pinned / 694 paired) |\n| `check:engine-double-contract` | ✅ PASS(118 pinned / 133 debt / 2 exempt) |\n| `check:kernel-hook-pairs` | ✅ PASS |\n| `check:driver-memory-census` | ✅ PASS(本 PR 未新增 driver-memory import) |\n| `check:type-check-coverage` / `check:type-check-debt` | ✅ PASS |\n| `check:published-files` / `check:nul-bytes` / `check:meta-type-normalized` | ✅ PASS |\n| `pnpm --filter @objectstack/objectql typecheck` | ✅ PASS |\n| `eslint --no-inline-config`(改动文件) | ✅ PASS |\n\n## 明确未做\n\n- **未改 `packages/spec`** —— 结论不需要动 `hook.zod.ts`,所以不触发 #6532 / #5586 的跨座位声明流程。\n- 线性 backoff(`backoffMs * attempt`)维持现状 —— 与声明形状一致,是更小的合同不是漂移的合同(已在卡上裁定)。\n- `packages/spec/src/shared/retry-policy.test.ts:174` 那句夸大的注释未动 —— #6630 车道。\n- 未重新论证 `hook.retryPolicy` 是否该并入 `RetryPolicySchema` —— 那是合同决策。\n- 未碰 `packages/drivers/**`(#5499 冻结)、未碰 `content/docs/releases/`。\n\n## 文件\n\n- `packages/objectql/src/hook-wrappers.ts` — 从 schema 派生默认值,只在块存在时应用。\n- `packages/objectql/src/hook-retry-policy-default.test.ts` — 新增,13 例。\n- `.changeset/hook-retry-policy-declared-defaults.md` — patch,写清行为修正及其边界(尤其「整块缺失仍不重试」)。\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01S182oxejCaui6gg76z7Zq7)_"
+}

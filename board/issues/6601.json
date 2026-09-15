@@ -1,0 +1,36 @@
+{
+  "number": 6601,
+  "kind": "issue",
+  "title": "finding: a section-less public form publishes EVERY field of its target object to anonymous callers",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:queue",
+    "target:v17"
+  ],
+  "assignees": [
+    "qq9340100"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T06:38:31Z",
+  "updated_at": "2026-08-09T05:44:19Z",
+  "closed_at": "2026-08-09T05:44:19Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6601",
+  "body": "Filed from the ADR-0106 D5(4) implementation-time outlet audit (#3682). Out of scope there — this is an anonymous, author-declared publication surface, not a per-caller FLS projection, so its fix is a different shape.\n\n## What was measured\n\n`GET /api/v1/forms/:slug` (`packages/rest/src/rest-server.ts`) embeds the target object's schema alongside the form so an anonymous front-end can render without an auth-protected `/meta` lookup. The narrowing is the set of fields the form's sections declare:\n\n```ts\nconst allowed = new Set<string>();\nfor (const sec of match.form?.sections ?? []) {\n  for (const f of sec?.fields ?? []) { /* … collect */ }\n}\nconst fields: Record<string, any> = {};\nfor (const [name, def] of Object.entries(obj.fields)) {\n  if (PUBLIC_FORM_SERVER_MANAGED_FIELDS.has(name)) continue;\n  if (allowed.size === 0 || allowed.has(name)) {\n    fields[name] = def;\n  }\n}\n```\n\n`allowed.size === 0` — a form with **no declared sections**, or sections that declare no fields — falls through to *every* non-server-managed field of the object, published **anonymously**, complete with labels, types and picklist option values. The `safeForm` stripping below it only filters the form's own `sections` (lookups without `publicPicker`); it does not narrow `objectSchema.fields`, which is a separate key on the same response.\n\nThe comment above the block says the schema is \"limited to fields referenced by the form\" and notes the submit handler enforces the field whitelist server-side. The first half is not true in the zero-sections case, and the second half is about **writes** — this is a disclosure, so the submit-side whitelist is not the backstop it reads as.\n\n## Why it matters after ADR-0106\n\nADR-0106 (#3682) just made the platform able to state one complete sentence: *a field the caller cannot read does not exist for that caller, on any plane.* This route is the remaining counterexample, and the caller here is anonymous. ADR-0106's own Context section is the argument: field names answer \"what does this company record\", picklist option sets are operational taxonomies, and a formula expression is pricing/scoring IP. A section-less public form is a plausible authoring state (an author creates the form and wires sections later), so this is not an exotic configuration.\n\n## Suggested disposition\n\nThe \"zero sections means all fields\" expansion is the whole finding — everything else about this route is a deliberate, declared publication. Options, roughly in order of preference:\n\n- **Make the expansion explicit rather than implicit.** A form that declares no fields publishes no schema (`fields: {}`), and an author who really wants the whole object says so with an explicit opt-in on the form. Publication should be a declaration, not the default that falls out of an empty set (AGENTS.md \"Explicit composition over default magic\").\n- **Or** narrow the expansion to the fields the submit route would actually accept, so the disclosure surface and the write surface are the same set by construction rather than by coincidence.\n\nWhichever is chosen, pin it: the `allowed.size === 0` branch currently has no test asserting what it publishes.\n\n## Repro sketch\n\n```\n# a public FormView with `sections: []` (or omitted) targeting `account`\ncurl /api/v1/forms/<slug> | jq '.objectSchema.fields | keys'\n# → every non-server-managed field of `account`, unauthenticated\n```\n\nRelated: #3682 (ADR-0106 implementation), #3022 (server-managed anchors on the public form surface), ADR-0056 (public form grant).\n"
+}

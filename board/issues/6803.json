@@ -1,0 +1,36 @@
+{
+  "number": 6803,
+  "kind": "issue",
+  "title": "[agents] `os-dev.md` declares no `model`, so every dev agent silently inherits whatever model the PM session happens to be on",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:queue",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T18:16:24Z",
+  "updated_at": "2026-08-09T01:30:59Z",
+  "closed_at": "2026-08-09T01:30:59Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6803",
+  "body": "Filed by the devx PM seat after the maintainer observed that dispatched dev agents should all be running Opus. Verified: they are not guaranteed to be, and nothing in the repo says which model they should run.\n\n## The mechanism\n\n`.claude/agents/os-dev.md`'s frontmatter carries `name` and `description` and **no `model` field**. The Agent tool's resolution order is: explicit `model` argument on the dispatch → the agent definition's frontmatter → **inherit from the parent session**. With the first two absent, every `os-dev` agent runs on whatever model the PM session was on **at the moment of the spawn call**.\n\nThat makes the dev tier a function of the PM's session state rather than a declared property of the role — and it changes without any signal, mid-term, invisibly. A PM that switches model for its own reasons silently re-tiers every dev it dispatches afterwards.\n\n## Measured instance from today's term\n\nThe devx PM session's model was changed twice during rounds 6-9. At least one dispatch provably landed on the wrong side of a switch: the **PR #6731 merge-conflict resolution agent** was spawned while the session was on `claude-fable-5`, so it inherited that tier rather than Opus. (Its output was in fact strong — correct conflict resolution, both semantic traps checked, CI green, accepted — so this card is about the *uncontrolled* variable, not about a bad outcome. A silent tier change that happens to be harmless once is still a silent tier change.)\n\nTwo further exposures worth stating because they are not obvious:\n\n1. **Revived agents.** Four devs were killed by a session usage limit at ~14:47Z and revived from transcript via `SendMessage` during the same window. Whether a resumed agent keeps its original model or picks up the session's current one is not something this seat can determine from outside — which is exactly the problem: the tier of a running dev is unobservable to the PM dispatching it.\n2. **Cloud cards.** `create_session` also defaults to the calling session's model. Today's #4251 B5 cloud card happened to be created while the session was Opus (the API response confirms `claude-opus-5`), but that was luck, not design.\n\n## Fix\n\n1. **Declare `model` in `.claude/agents/os-dev.md` frontmatter** — the durable half. This is the repo's own \"declared = enforced\" doctrine applied to its agent definitions: the dev tier is a property of the role, and a role's requirements belong in the role's file, not in the caller's ambient state.\n2. **Check whether sibling agent definitions under `.claude/agents/` have the same gap** and fix them in the same pass, or state explicitly which ones intentionally inherit and why.\n3. **A line in the pm-dispatch SKILL** stating that dispatches pass the model explicitly rather than relying on inheritance, so the two layers agree and neither silently depends on the other. ⚠️ `.claude/skills/pm-dispatch/SKILL.md` is the repo's hottest serialization surface — PR #6799 is in flight on it right now. Either wait for #6799 to land or split this item into a follow-up; ⛔ do not race it.\n\nWorth considering while implementing: whether a gate can assert that every agent definition under `.claude/agents/` declares a model, in the family of `check:skill-frame-sync` / `check:skill-compatibility` which already read this file tree. A declaration nothing checks is the shape this repo keeps filing issues about. If a gate is disproportionate here, say so with the reasoning rather than leaving it unmentioned.\n\n⛔ Out of scope: changing which model any agent runs beyond making the current intent explicit — if the right tier is anything other than Opus for `os-dev`, that is a maintainer call, not this card's.\n\nRelated: #6586 / PR #6740 (the os-dev termination contract — same file, landed), #6692 / PR #6742 (same file, language policy), #6801 (the AGENTS.md propagation gap — same class of failure: a rule that lives in the wrong file reaches the wrong readers)."
+}

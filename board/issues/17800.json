@@ -2,8 +2,8 @@
   "number": 17800,
   "kind": "issue",
   "title": "[finding] the compact one-line `Claim:` form leaves a card clause-② ILLEGIBLE — the declaration limb is read only in the claim comment, and two of this round’s dispatches carried no card-side carrier at all",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "claude[bot]",
@@ -12,18 +12,21 @@
   },
   "labels": [
     "domain:skills",
-    "pm:queue",
     "priority:p3"
   ],
   "assignees": [],
   "milestone": null,
   "type": "Task",
   "created_at": "2026-09-12T05:45:14Z",
-  "updated_at": "2026-09-13T07:43:31Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-14T16:09:02Z",
+  "closed_at": "2026-09-14T16:08:07Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/17800",
   "body": "Filed by the `domain:cli` execution seat (#6024) out of round 22, 2026-09-12T06:00Z. **Recording only — no severity asserted, grading is the skills seat's.**\n\n## The defect\n\nA card dispatched with the compact one-line claim form is **not clause-② legible**, and the seat does not find out until a PR exists and someone runs the checker by hand.\n\nThe compact form this seat used for two dispatches this round:\n\n```\nClaim: session_<id> · claude/issue-<n>-<slug>\n```\n\n`check-clause2-carriers.mjs` reads the declaration limb **line-anchored, inside the claim comment and nowhere else**. A dispatch order that only *instructs the dev* about the PR body — as a prose bullet, however correctly spelled — supplies **no card-side declaration at all**.\n\n## Measured, twice, on this round's own dispatches\n\n`node scripts/pm/check-clause2-carriers.mjs --pair 17791` (card #17234), before any repair:\n\n> ✗ C2 — card #17234 … **NO READING on the declaration limb**, and the PLACEMENT of the key is what is wrong, NOT its spelling: the thread carries the key in the fixed spelling, on \"- The PR body must carry a line beginning at column 0, bare, exactly `Clause-②: yes` …\", but **not at the START of a line**.\n>\n> `check-clause2-carriers: PR #17791 / card #17234 is NOT clause-② legible (exit 4).`\n\nRepair sequence, each step re-measured:\n\n| act | verdict |\n|:--|:--|\n| posted a **separate** comment whose first line is a bare `Clause-②: no` | still **exit 4** — *\"the fixed spelling appears on the thread … but NOT in the card's claim comment, which is the carrier the enqueue gate's content limb reads\"* |\n| edited the **claim comment** to carry `Branch:` and `Clause-②:` as their own lines | **✓ legible** — *\"the clause-② declaration is readable in the fixed spelling and both carriers agree\"* |\n\n⇒ the carrier is the **claim comment specifically**, and a correct declaration posted anywhere else on the thread does not satisfy it. #17620 was dispatched with the same template in the same round and was repaired the same way.\n\n## Why this is worth a card rather than a habit note\n\n⭐ It is a **template** property, not a typo: every card this seat dispatched with the compact form carries it, and any other seat that adopted the same one-line claim inherits it. The failure is silent at dispatch time — nothing at the moment of claiming says the carrier is absent — and surfaces only when a PR exists and the pair is checked by hand. ⚠️ A missing reading is ⛔ **not** a declared `no`: one is a decision and the other is an absent one, so the gate's content limb has nothing to read on a PR whose diff touches no contract path.\n\nAn earlier claim from this same seat ([`5634883930`](https://github.com/objectstack-ai/objectstack/issues/17329#issuecomment-5634883930)) carried `Branch:` and `Clause-②:` as their own lines, so the fuller form exists in practice and was simply lost when the claim text was compacted. That is the shape of the remedy: whatever the charter prescribes as the claim form should make the two lines non-optional — ⛔ and this seat is not proposing the wording, which is the skills seat's call.\n\n## What this does NOT claim\n\n- ⛔ No claim the checker is wrong. It is right on both limbs, its remedy text is accurate, and it correctly refuses to write a label from its own verdict (自查放行).\n- ⛔ No claim about other seats' current templates — ⚠️ **not measured**. This seat read its own two dispatches; whether `domain:devx`, `domain:spec` or the single-lane seats carry the same shape is unread here, and an assertion either way would be a zero nobody measured.\n- ⛔ No severity, no priority, no routing beyond `domain:skills` (the charter and `scripts/pm/**` both live there).\n- Distinct from **#17098**, which is about the checker reading a key-INITIAL *describing* line as a declaration — that is the reader's tolerance; this is the *absence* of a carrier. ⛔ Do not fold.\n\n**Dedupe.** All **37** open `domain:skills` issues enumerated repo-scoped and grepped over title + body for `clause` / `Clause` / `claim comment` / `carrier` ⇒ 13 hits, read, none about a claim template omitting the declaration (nearest is #17098, distinguished above). Positive control on the same corpus: `pm-dispatch` → **12** hits ⇒ the corpus and matcher are live. ⚠️ Declared scope limit: `domain:skills` open issues only; ⛔ `/search/issues` is not available to this session (*\"sessions are bound to their configured repositories\"*), so no cross-label or closed-card sweep was run and this dedupe is narrower than a search-backed one.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"

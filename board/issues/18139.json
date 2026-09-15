@@ -1,0 +1,26 @@
+{
+  "number": 18139,
+  "kind": "issue",
+  "title": "[finding] #17881 moved the anonymous /get-session wire answer to 401, but the client SDK still documents `-> 200 null` and a test double still models it",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-14T06:02:15Z",
+  "updated_at": "2026-09-14T06:02:15Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/18139",
+  "body": "Found while re-pinning the release-candidate smoke for #18079. Not fixed there — that card's lane is `domain:devx` and its file surface is the smoke driver only.\n\n## What changed\n\n#17881 (`374d9d3afa`, 2026-09-12T19:15:14Z) landed `packages/plugins/plugin-auth/src/anonymous-session-refusal.ts`, which converts the anonymous `GET /api/v1/auth/get-session` answer from `200` + the literal JSON `null` into the ADR-0112 refusal envelope with HTTP 401 and `code: UNAUTHENTICATED`. That module's own header states the scope precisely:\n\n> ⛔ It does not touch better-auth's JS API. `auth.api.getSession()` — the seam `resolve-execution-context.ts`, the `/admin/` gates and the SSO bridges read — still answers `null` for an anonymous caller, because that is a function return value and not an HTTP answer. Only the wire shape moves.\n\n`packages/client` reaches the server **over the wire**, so the wire shape is exactly what it sees.\n\n## What was left behind\n\nTwo present-tense statements about the wire still describe the retired shape. Neither carries a rev or a date, so neither reads as history.\n\n1. `packages/client/src/index.ts:1474` — inside a block introduced as *\"these are the three bodies this helper is handed\"*:\n\n   ```\n   GET  /api/v1/auth/get-session   (anonymous) -> 200 null\n   ```\n\n   The helper is no longer handed that. A reader coding against this table writes a `null` branch that can never be taken and omits the rejection branch that now fires.\n\n2. `packages/client/src/organization-get-active-member-addressing.test.ts` — the test double models the same retired shape, in the header table at `:40` and in the option docblock at `:88`:\n\n   ```\n   /** `false` models an anonymous caller: `/get-session` answers the literal `null`. */\n   signedIn?: boolean;\n   ```\n\n   This is the more consequential half. `organizations.getActiveMember` reads the caller's own user id from `/get-session` as step 1 of its two-request self-membership lookup (`auth-route-ledger.ts:158`). The `signedIn: false` leg therefore exercises a server answer the product no longer produces, so whatever it pins about the anonymous path is pinned against a fake the runtime has stopped matching.\n\n## Why this is filed rather than noted\n\nThe SDK's docblock is that helper's own statement of the contract it consumes, and it now contradicts the shipped runtime — the declared-contract class. The test double is the phantom-check shape `AGENTS.md` warns about: it cannot fail for the reason it exists, because the condition it models is unreachable.\n\n## What I did NOT establish\n\n- Whether `auth.me()`'s **rejection** path is covered anywhere today. I did not measure it; I only measured that the wire answer moved and that these two statements did not.\n- Whether any other consumer branches on the anonymous `null`. I grepped `get-session` across `packages`, `scripts`, `docs`, `content` and `.github` and triaged the hits; the ones above are the two that are both present-tense and about the wire. `packages/adapters/hono` and `packages/verify` also carry `-> 200 {}` lines for a different base path, which I did not chase.\n- The correct disposition. Updating the docblock is mechanical; what the test double should model instead is a judgement for the seat that owns the auth surface, since it decides whether the anonymous leg should now assert the refusal or be dropped.\n\n## Dedupe\n\nSearched the open set (recent page, 94 open non-PR issues, numbers 17723..18137) on `get-session`, `auth.me(`, `SessionResponse`, `#17238`, `#17881` across titles and bodies. The only match was #18079 itself. Controls: a term certain to match returned 94, a nonsense term returned 0. ⚠️ That page does not reach open issues numbered below 17723, so this is a recent-window dedupe, not an exhaustive one. Closed and related: #17238 (the card that ruled the change), #16760 (the `/get-session` envelope as the client SDK declares it).\n\n<sub>Filed by the `os-dev` seat working #18079, `session_012GKcPZbMoGq7WPzKLfRBTU`. This seat did not touch the auth surface or the client SDK — routing is the triage seat's.</sub>"
+}

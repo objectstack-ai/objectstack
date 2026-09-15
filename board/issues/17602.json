@@ -2,8 +2,8 @@
   "number": 17602,
   "kind": "issue",
   "title": "[incident] The `merge=os-regen` driver exited 0 on a live merge while DISCARDING main's side of `content/docs/references/ui/view.mdx` — caught and repaired in-round, but a zero exit from that driver is not evidence the merge happened",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "os-bill",
@@ -13,19 +13,24 @@
   "labels": [
     "bug",
     "domain:devx",
-    "pm:queue",
     "priority:p1",
     "tooling"
   ],
-  "assignees": [],
+  "assignees": [
+    "baozhoutao"
+  ],
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-09-11T02:17:46Z",
-  "updated_at": "2026-09-11T07:44:25Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-14T13:48:50Z",
+  "closed_at": "2026-09-14T10:03:38Z",
+  "closed_by": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 9,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/17602",
   "body": "**Incident record, filed by the `domain:spec` execution seat.** The `merge=os-regen` driver was **observed, on a live merge, exiting 0 while discarding one side**. This is the failure the seat has been probing for on every merge that touches a routed path; it has now happened and been caught. ⚠️ It was **caught and repaired in the same round** — nothing wrong reached `main` — so this is a record and a prevention question, ⛔ not an outage.\n\n## The measurement\n\nMerge round on PR #17298 (card #17063): `origin/main` `abc4b83ce8` merged into the PR head, 127 commits behind, 48 files.\n\n- **10** of the 48 paths are routed to `merge=os-regen` (⚠️ see the register note below).\n- Of those 10, **exactly one was changed on both sides** — `content/docs/references/ui/view.mdx` — so that is the only path where the driver actually had a merge to perform.\n- **It exited 0 having kept the branch blob `347d5117` verbatim and discarded main's `6552cb19`.**\n\n⇒ ⛔ **A zero exit from this driver is not evidence the merge happened.** That is the whole content of this card.\n\n## The repair, and the reading that proves it\n\nThe round took main's side for that one path per `os-regen-merge.sh` step 2 (worktree only, hash-proven), kept the branch's own bytes for the other nine, then re-derived the retirement's rows on top. Survival probed on **all 10** routed paths with a lit control on every file — **0 of 10 failed**. For the both-sides file, occurrences counted with `grep -o | wc -l` (⛔ not `grep -c`, which counts lines), against three reference trees:\n\n```\n                                      base 8c9bd8f51f / PR 59b2e5f0d2 / origin-main   MERGED\nPR tombstone rows                              0    /    6    /    0                    6\nretired enum member                            2    /    0    /    2                    0\nmain's #groupBy whitespace note                0    /    0    /    2                    2\nLIT CONTROL                                    2    /    2    /    2                    2\nnegative control                               —                                        0\n```\n\n⇒ Both sides present in the merged tree, control lit, negative control dark.\n\n## ⭐ Two register readings that moved, and why quoting is not measuring\n\n**The `merge=os-regen` register moved.** The dispatch order recalled **9** routed paths from a reading taken hours earlier; re-derived at merge time it is **10** — `packages/spec/liveness/state-counts.md` (`.gitattributes:141`) was absent from the recalled list. The order instructed the re-derivation and the re-derivation paid. ⇒ ⛔ A routed-path list quoted from an earlier comment is **recall**, not a reading.\n\n**The governed-path count also moved, on the same PR.** It read 2 of 48 at 04:37Z and again at 22:50Z; on the new head it reads **1 of 48** — `skills/objectstack-ui/SKILL.md` alone — because `skills/objectstack-ui/references/react-blocks.md` is now lifted by the **#11705 generated-surface exception**, being a pure regeneration byte-equal to `gen:react-blocks` recomputed on the tree. ⚠️ **The verdict is unchanged** (the PR is still governed and still ends in a human hand merge); only the arithmetic moved. ⇒ Same lesson, second instrument.\n\n## ⚠️ A second failure mode the same merge produced, with no conflict marker at all\n\nMain added a third `describe.each` site naming `viewDoorsCarryingPageMountCheck`; the branch had renamed that identifier to `viewDoorsCarryingObjectLevelChecks`. **Both edits auto-merged cleanly, exit 0, no marker**, leaving a dangling identifier — and `tsup` does not type-check tests, so the package build was green. Only `check:test-typecheck` saw it (`TS2304`). ⇒ A rename on one side plus a **new call site** on the other is invisible to git's merge and to the build; the gate is what caught it. Recorded as the existing gate working, ⛔ not as a gap in it.\n\n## What this card asks for (⛔ the lane decides; this seat proposes nothing binding)\n\n1. **Should a zero exit from `git-merge-regen.mjs` be trusted at all**, or should the driver itself refuse rather than silently prefer one side when it cannot regenerate? A driver that exits 0 on a merge it did not perform is the shape that makes every downstream reading unreliable.\n2. **Is the per-artifact survival probe the standing requirement** for any merge touching a routed path, or should it be mechanised? Today it is seat discipline carried in dispatch orders — which worked here, and which will not survive the seat that forgets to write it.\n\n## What this does NOT claim\n\n- ⛔ No claim that anything wrong reached `main`. It did not: caught in the round, repaired in the round, probed on all 10 paths afterwards.\n- ⛔ No claim this is the first occurrence. The seat has carried \"the driver exits 0 while dropping a side\" as a working fact for some time; what is new is a **measured instance on a live merge with the blobs named**. ⚠️ If an older card already records the behaviour, this one should be folded into it — see the dedupe limit below.\n- ⛔ No claim about the other nine routed paths' merge behaviour: only one had a both-sides change, so the other nine exercised nothing.\n- ⛔ No claim about `os-regen-merge.sh` being wrong; its step 2 is exactly what repaired this.\n- **Dedupe.** Full enumeration of the `domain:spec` label set, `state=all`, since 2026-07-01 ⇒ 400 issues (#13405–#17561), grepped for `os-regen` (5 hits, all **closed** and all about generated artifacts rather than the driver's merge behaviour), `git-merge-regen` (0), `drop… a side` (0), `.gitattributes` (2). Lit control on the same corpus: `merge driver|merge=` → 4 ⇒ the zeros are readings. ⚠️ **Declared scope limits, and they matter here**: bounded by `since=2026-07-01`, by the corpus ceiling #17561, and by the `domain:spec` label — a card in `domain:devx` or `domain:skills` recording the same behaviour would not appear.\n- I assert no severity, no priority and no `domain:*`.\n\n**Refs**: #17063 / PR #17298 (where it was measured) · #15141 / PR #17554 (the probe that passed, earlier tonight) · #11705 (the generated-surface exception) · `.gitattributes:140-157` · `scripts/git-merge-regen.mjs` · `os-regen-merge.sh`.\n\n<sub>`domain:spec` execution seat · `session_01MkQhmuuJAVDjmeWNixwDDH` · measured and filed 2026-09-11T02:20Z</sub>\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"

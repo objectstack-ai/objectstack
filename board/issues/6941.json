@@ -1,0 +1,35 @@
+{
+  "number": 6941,
+  "kind": "pull_request",
+  "title": "test(http-conformance): 「重复查询参数」的跨适配器分歧落锁为已知事实 (#6878 路线 1)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T05:11:01Z",
+  "updated_at": "2026-08-09T05:44:37Z",
+  "closed_at": "2026-08-09T05:44:35Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": "2026-08-09T05:44:35Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/6941",
+  "body": "Part of #6878\n\n⛔ **本 PR 只做路线 1,不关闭 #6878。** 路线 2 / 3 是契约决策,本 PR 不做、也无权做:两个适配器的真实行为一行未改,`packages/spec/src/contracts/http-server.ts` 一字未动。#6878 的主决策保持 open。\n\n## 一、我自己重新实测的结果(不是照抄卡上的表)\n\n按席位的 ⚠️ 要求重测。worktree 基于 `origin/main` @ `9d425a94d`,解析到的 hono 版本 **4.12.34**(`packages/plugins/plugin-hono-server/node_modules/hono/package.json`),真实 socket,走两个适配器各自的公开入口:\n\n```\nGET /probe?version=1.0.0&version=2.0.0&single=9\n\n[NodeHttpServer] req.query {\"version\":[\"1.0.0\",\"2.0.0\"],\"single\":\"9\"}\n[HonoHttpServer] req.query {\"version\":\"1.0.0\",\"single\":\"9\"}\n```\n\n**与卡上的表一致,无需更正。** 另外多测了一层,这是路线 2 会用到的数据:\n\n```\n[raw hono] c.req.query()   {\"version\":\"1.0.0\",\"single\":\"9\"}\n[raw hono] c.req.queries() {\"version\":[\"1.0.0\",\"2.0.0\"],\"single\":[\"9\"]}\n```\n\n即 `c.req.queries()` 对**每一个** key 都给数组,单值 key 也不例外。所以路线 2 不能是把 `query()` 直接换成 `queries()` —— 必须带按 `length` 的归一,否则 `single` 会从 `'9'` 变成 `['9']`,把所有现存读取点一起改掉。这一点在下面的反向验证里被独立地测到了。\n\n**两者都没有违反契约**:`IHttpRequest.query` 声明为 `Record< string, string | string[] >`,重复 key 落在联合的哪一支都合法。这不是谁的 bug。\n\n## 二、对卡上一句话的修正(不影响结论)\n\n卡里说「套件没有任何一个用例传重复参数」。**严格说不准确**,值得记一笔:\n\n- `packages/qa/http-conformance/src/adapter.test.ts` 的 `routes :param and multi-value query` **已经**传了 `?a=1&b=x&b=y` 并断言数组 —— 但它在 `describe('NodeHttpServer (live socket)')` 里,是 **node 适配器的本地单测**,永远不碰 Hono。\n- 真正为空的是**跨适配器**那一侧:两个 `describe.each(ADAPTERS)` 套件(`conformance.integration.test.ts`、`fallback-seam.conformance.test.ts`)里没有任何一个用例重复过参数。\n\n所以缺的不是「node 会不会给数组」,而是 **Hono 那一半 + 两者并排比较**。路线 1 的前提成立,只是缺口的形状比卡上描述的更精确。\n\n消费方的测试也补不上这个缺口:`packages/rest/src/package-routes-query-multiplicity.test.ts`(#6307)是手工构造 `query: { version: [...] }` 直接喂 handler 的,断言的形状**没有任何适配器有义务产出**。手搓的 double 想造什么形状都行 —— 这正是套件今天全绿的原因。\n\n## 三、加了什么\n\n新增 `packages/qa/http-conformance/src/query-multiplicity.conformance.test.ts`(6 个用例),沿用同目录 `fallback-seam.conformance.test.ts` 已有的跨适配器 harness 形状(裸 `NodeHttpServer` + `HonoHttpServer`、手工注册路由、真实 socket、`ADAPTERS` 表驱动),**没有另造 harness**。\n\n它是一份**分歧记录,不是契约**:\n\n- `ADAPTERS` 每一行带上该适配器**实测**到的 `measuredQuery`(是记录下来的,不是选出来的),按精确形状断言,重复 key 和单值 key 都钉住;\n- 单独一个 `describe` 把「同一个请求,两个 server,不是同一个答案」这件事**在一处**说出来 —— 否则两行 per-adapter 断言会被读成两个互不相干的事实;\n- 单值 key `single` 是**对照组**,把「重复才给数组」和「什么都给数组」分开;\n- 文件头注释写明:两支**当前都合法**,本用例的目的是让分歧**可见**而不是给它背书,并且预期在 #6878 路线 2/3 裁决落地后**收紧成单一期望**。\n\n⚠️ **这个文件在分歧被消除的那天会变红,这是故意的。** 注释里写清了那抹红是提醒而非回归,以及届时该怎么改(把 per-adapter 的 `measuredQuery` 合成一份共享期望、删掉 divergence describe)。\n\n## 四、反向验证(预测先写,再跑)\n\n预测写在动手之前(见报告)。把 Hono 适配器**临时**改成 node 的行为,看用例是否真的在观察形状、而不是空过。\n\n**变体 A —— 路线 2 的真实形状**(`c.req.queries()` + 按 `length` 归一)。预测:hono 的 `measuredQuery` 行在 `version` 上红;hono 的 `single` 对照组**保持绿**(归一保住了它);node 两行不动;divergence describe 红。实跑:\n\n```\n✓ node > hands the handler its measured query shape\n✓ node > leaves a single-valued key a plain string (the control)\n× hono > hands the handler its measured query shape\n✓ hono > leaves a single-valued key a plain string (the control)\n× node ↔ hono > agrees on a single-valued key and DISAGREES on a repeated one\n× node ↔ hono > a consumer reading the FIRST value gets a different operand on each adapter\nTests  3 failed | 3 passed (6)\n\nAssertionError: expected [ '1.0.0', '2.0.0' ] to be '1.0.0'\n```\n\n**完全命中。**\n\n**变体 B —— 裸 `c.req.queries()` 交换**(不归一)。预测:除 A 的三条外,hono 的 `single` 对照组**额外**独立变红(`'9'` → `['9']`)。实跑:\n\n```\n× hono > hands the handler its measured query shape\n× hono > leaves a single-valued key a plain string (the control)\nTests  4 failed | 2 passed (6)\n\nAssertionError: expected { single: [ '9' ] } to deeply equal { single: '9' }\n```\n\n**也完全命中。** 对照组独立抓到了「路线 2 少了归一」这个错法 —— 这就是它存在的理由。\n\n改动已还原,`git diff` 对 `packages/plugins/plugin-hono-server` 为空(逐字节回到 `origin/main`),并已重新 build + 全绿复跑。\n\n## 五、第三个 `IHttpRequest` 实现?\n\n**没有第三个真实(socket-backed)实现。** 全仓 `implements IHttpServer` 只有两个类会从真实 URL 构造 `IHttpRequest`:`NodeHttpServer` 与 `HonoHttpServer`。\n\n两条仍然值得记的事实:\n\n1. **`HonoHttpServer` 有两个 `IHttpRequest` 构造点**,不是一个:路由 handler 那一处(`adapter.ts:299`)和 `use()` 中间件缝(`adapter.ts:743`),两处都是 `c.req.query()`。**路线 2 要改的是两个点,不是一个。**\n2. 其余 `implements IHttpServer` 全是只做捕获的 `MockHttp` 测试 double(service-settings ×2、plugin-sharing ×2、runtime.test.ts 等),它们从不解析 query string —— `query` 由测试手写。加上上面 #6307 那个 harness,这类 double **可以造出任何形状**,这正是\"绿灯\"在这件事上一直不构成覆盖率的原因。\n\n## 六、验证\n\n- `pnpm --filter @objectstack/http-conformance test` → `Test Files 4 passed (4) / Tests 70 passed (70)`(合并 `origin/main` 之后复跑同样结果)\n- `pnpm --filter @objectstack/http-conformance typecheck` → 通过\n- `eslint packages/qa/http-conformance/src/query-multiplicity.conformance.test.ts --no-inline-config` → exit 0\n- 本地跑过 `check:nul-bytes` / `check:empty-changeset` / `check:route-envelope` / `check:error-code-casing` / `check:wildcard-fallthrough` / `check:engine-double-contract` / `check:published-files` / `check:type-check-coverage` → 全 OK\n\n## 七、changeset\n\n`patch`,落在 `@objectstack/http-conformance` 一个包上。依据是本包自己的先例:#6143 的 changeset 原话是「`minor` rather than the `patch` the test file alone would earn」—— 那个 PR 之所以 `minor`,是因为它同时给参考适配器加了新能力;本 PR 是**纯测试**,零源码改动,按同一句话就是 `patch`。因此不需要 `skip-changeset` 标签。\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_017uFVNMmTxLpmfQYiuKM1Yx)_"
+}

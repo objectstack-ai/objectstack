@@ -1,0 +1,35 @@
+{
+  "number": 5864,
+  "kind": "issue",
+  "title": "check:dev-prereqs 只判 dist 存在性,#5726 的「陈旧 dist」那半边仍无门禁 —— 而绿灯现在会提供反向保证",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "finding"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T09:48:55Z",
+  "updated_at": "2026-08-09T03:36:07Z",
+  "closed_at": "2026-08-09T03:36:07Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5864",
+  "body": "观察类发现(`finding`),记录自 #5795 / PR #5863 的实现过程,**不建议**现在就动手 —— 先留档,免得下一个人踩。\n\n## 背景\n\nPR #5863 给根 `dev` / `dev:*` 加了构建完整性前置 `check:dev-prereqs`:凡工作区包声明在 `dist/` 下的入口不在盘上,就判「工作区未构建」并给一句 `pnpm build`。判据是**存在性**,这是刻意选的(见下)。\n\n但 #5726 的成因是**两半**:\n\n1. `packages/drivers/*` 的 dist 缺失 —— PR #5863 已拦住。\n2. `packages/spec/dist` **陈旧**(文件在,内容旧)—— 仍无门禁。这半边正是 #5726 里那 20+ 条「看起来非常像真实类型契约漂移」的假错误的来源:`isAppResolvedDefaultToken` 在 `src/` 里好好导出着,只是不在陈旧的 dist 里。\n\n## 为什么 PR #5863 刻意不做陈旧判定\n\n比对 `src/` 与 `dist/` 的 mtime 会在**每次** `git worktree add` 之后对所有人误报 —— 检出会重写源文件 mtime,于是 src 一律「比 dist 新」。一个开局就误报的门禁会被立刻学会忽略,比没有门禁更糟。所以 PR #5863 把陈旧明确写成非目标,并在文件头注明这半边由 AGENTS.md §9 的常备处方(`pnpm install --frozen-lockfile && pnpm build`)承担。\n\n## 为什么仍值得记一笔\n\nPR #5863 之前,`dev` 对构建状态**什么都不说**;之后它会打出 `✓ Workspace is built — 67 package build artifacts present.`。对陈旧 dist 的场景,这行绿灯是**反向保证**:开发者刚被告知工作区没问题,于是更倾向于把随后的假漂移当成真 bug 去「修」—— 也就是 #5726 明确警告过的那个失败模式(在正确的代码上改出真的 bug),只是现在多了一句绿灯替它作证。\n\n换句话说:PR #5863 让缺失那半边不可能再误导人,同时轻微**加剧**了陈旧那半边的误导性。净效果仍是正的(缺失是远更常见的形态),但这个副作用是新增的,不记下来就没人知道。\n\n## 可能的方向(实现者自选,均未验证)\n\n- **构建时打戳,而不是比 mtime。** turbo 本来就为每个包算输入 hash;若 build 把它写进 `dist/.build-input-hash`,陈旧判定就退化成一次字符串比较,与 mtime 无关,也不受 `git worktree add` 影响。`check-console-sha.mjs` 已经是这个形状的先例(`dist/.objectui-sha` 对 `.objectui-sha`),可以照抄它的判定与「无戳则只警告」的降级。\n- **只对少数放大器包做陈旧判定**(`packages/spec` 首当其冲 —— AGENTS.md §9 的表格里它是唯一被点名两次的),把成本压到一两个 stat。\n- **什么都不做**,依赖 AGENTS.md §9 的纪律 —— 但那就该在 `check:dev-prereqs` 的绿灯措辞里说清它保证的是「产物存在」而非「产物最新」,别让绿灯替陈旧背书。(三条里这条最便宜,也可能就够。)\n\n## 影响面\n\n纯本地与 worktree 首启 DX,**无用户可见行为变化**,CI 不受影响(CI 一律先构建,且检出即新鲜,跑不出这个形态)—— 与 #5726 / #5217 同族。\n\n## 参考\n\n- #5726(现场 + 假漂移疫苗留档)、PR #5789(惰性 import,消掉 12 段噪音那半边)\n- #5795 / PR #5863(存在性前置本体;文件头写明陈旧为非目标)\n- AGENTS.md §9(陈旧产物如何伪装成「你的改动弄坏了别人的导出」)\n- `scripts/check-console-sha.mjs`(构建时打戳 + 无戳降级的现成形状)"
+}

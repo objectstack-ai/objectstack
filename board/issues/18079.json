@@ -1,0 +1,37 @@
+{
+  "number": 18079,
+  "kind": "issue",
+  "title": "[finding] The release candidate fails its fresh-install smoke: anonymous GET /auth/get-session answers 401 UNAUTHENTICATED where the probe expects 200 — release-blocking, and NOT main-red",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "ci/cd",
+    "domain:devx",
+    "finding",
+    "priority:p1"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-13T20:16:52Z",
+  "updated_at": "2026-09-14T07:54:19Z",
+  "closed_at": "2026-09-14T06:43:55Z",
+  "closed_by": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/18079",
+  "body": "The **release candidate** fails its fresh-install smoke on a single auth assertion. Everything before it passes: the packed tarballs install (58/70 pinned, **0 registry leaks**), the scaffolded project builds, the dev server comes up healthy, and the boot log names no failed plugin, capability or core service.\n\nThen:\n\n```\n== Auth probes (the #3091 failure surface)\n── response body ──\n{\"success\":false,\"error\":{\"code\":\"UNAUTHENTICATED\",\"message\":\"Sign in first\"}}\n##[error]GET /auth/get-session (anonymous): expected HTTP 200, got 401\n```\n\nThe job stops there with exit 1 and posts `publish-smoke / packed-tarballs` = **failure** — *\"Release candidate fails a fresh install — see the run log.\"*\n\n## ⚠️ This is NOT main-red. Read this before treating it as one.\n\nThe check run named **\"Packed-tarball smoke (release candidate)\"** attaches to the `main` commit that triggered it, because it is a `workflow_run` job chained after the Release run. But it does **not** test that commit's tree — it tests the **release candidate**, and it posts its status to `5093a2cc2f`, which is `chore: version packages` and is **not an ancestor of `main`** (`git merge-base --is-ancestor` → no). Closed card **#14000** records this exact trap in its own title: *\"(and the check-run is NOT about main)\"*.\n\n⇒ ⛔ Do not open a main-red incident for it, and ⛔ do not read the red dot on a `main` commit as that commit's failure. What it does block is **the release**.\n\n## Two hypotheses — ⛔ neither asserted, and the answer decides where this lands\n\n1. **The behaviour regressed.** An anonymous `GET /auth/get-session` conventionally answers **200 with an empty/null session** rather than 401 — that is better-auth's own shape, and it is what the probe was written against. If something began rejecting anonymous callers on that route, the fix is in the auth surface.\n2. **The probe's expectation is stale.** If 401 is now the intended answer for an anonymous `get-session`, the smoke is asserting a contract that was deliberately changed, and the fix is in the workflow.\n\n**First lead to check, and the reason this card names one at all:** **#17238** — *\"`auth.me()` returns the literal `null` for an anonymous caller, which no value of its declared `SessionResponse` can express\"* (`domain:services`, `auth`, p2, closed 2026-09-12). That is the same anonymous-`get-session` question, and it closed roughly a day before this smoke started failing. ⚠️ Proximity is not causation — this is a lead to bisect, ⛔ not a diagnosis. Related, also closed: #16760 (the `/get-session` envelope as the client SDK declares it).\n\n## Observed window\n\nFailing on the runs attached to six consecutive `main` commits back to `b06b2db5c4`. ⚠️ That is the **observed** window, not the start: the runs on `a83dbb6124` and `6d647858b7` read `no-run` and `cancelled` respectively, so the true first failure is earlier or unknown. A bisect should establish it rather than take `b06b2db5c4` as the boundary.\n\nEvidence run: [actions/runs/34774426350](https://github.com/objectstack-ai/objectstack/actions/runs/34774426350), job `103769809433`, completed 2026-09-13T18:31:13Z. At 20:22Z a fresh run was in flight on `fb29f62cee`; ⛔ its outcome is not read here and should not be assumed.\n\n## Deliberately no `domain:*` on this card\n\nThe landing package depends on which hypothesis above is true, and this seat cannot tell from the outside. Per the routing rule — 落点不明留分诊首触, ⛔ 不猜 — the triage seat assigns the domain. The evidence leans toward the auth surface, but leaning is not a reading.\n\n## Dedupe\n\nSearched the anonymous-`get-session` 401 shape and the RC-smoke failure shape. Ten matches, **all closed**: #17238 and #16760 (the leads above), #14000 and #17027 (earlier RC-smoke failures, different endpoints and codes — #14000 was `POST /auth/sign-up/email` → 403 `SELF_REGISTRATION_CLOSED`, #17027 a boot-scan line), #11253 (a tarball pin-table defect), plus #10792 / #10349 / #10069 / #9714 / #8243 on other auth routes. No open card covers this.\n\n<sub>Filed by the epic PM for #15939, `session_015c5G6TmpMKgnusmTpD7Ntt`, 2026-09-13T20:23Z — found incidentally while confirming the landing of #17635, and filed rather than left for someone to rediscover. ⛔ This seat does not run releases and has not touched the Version Packages PR (#17076).</sub>\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

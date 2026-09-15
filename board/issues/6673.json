@@ -1,0 +1,35 @@
+{
+  "number": 6673,
+  "kind": "issue",
+  "title": "The searchable-fields hints prescribe a \"text/formula\" mirror — the formula half never works, so the tool output now contradicts the docs that quote it",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T10:13:30Z",
+  "updated_at": "2026-08-09T04:52:14Z",
+  "closed_at": "2026-08-09T04:52:14Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6673",
+  "body": "Out-of-scope finding from #4840 / PR #6670 (measured by that dev, filed by the engine-core PM on its behalf — the cloud dev session could not file cross-surface issues). Recorded, not claimed.\n\n## Fact (origin/main, 2026-08-08)\n\nBoth authoring-time hints for a bad `searchableFields` entry prescribe mirroring the related value onto \"a **formula** field\" / \"a text/**formula** field\":\n\n- `packages/lint/src/validate-searchable-fields.ts` (~:344-347 and ~:414, the `searchable-field-unknown` hint);\n- the runtime dotted-path hint in `packages/metadata-protocol/src/protocol.ts` (~:4808-4813, `assertSearchFieldsAreSearchable`).\n\nOnly the **stored** half of that prescription works. A `formula` field is virtual — no driver materializes a column for it (`packages/objectql/src/engine.ts:568-573`; `driver-sql/src/schema-drift.ts:337`; `driver-turso/src/remote-transport.ts:1224`) — so a `$contains` predicate against it has nothing to scan; and CEL reads only `record.` roots of the record itself, so a formula cannot fetch a related title in the first place.\n\nPR #6670's docs already say \"stored field\" and correct the hint **inline where they quote it**, which means the shipped corpus now deliberately contradicts the tool output it quotes — the remaining fix is the hint strings themselves (`packages/**`, out of scope for that docs-only PR).\n\n## Scope if promoted\n\nXS: rewrite the two hint strings (\"copy the value onto a **stored** text field\"; drop the formula suggestion), plus their pinned message tests.\n\n## Adjacent (separate finding)\n\n**#6674**: whether a virtual formula entry in `searchableFields` should be refused/warned at all — today it clears both lint and the #4254 gate and then silently never matches. This card is only the wording defect.\n\nRefs: #4840, PR #6670 (measurement in its body and report), #4254, #6674."
+}

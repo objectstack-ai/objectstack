@@ -1,0 +1,35 @@
+{
+  "number": 7054,
+  "kind": "pull_request",
+  "title": "docs(spec): 重测并改写 src/data 四处过期的 post-#5702/#5710 状态句(#6993)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T11:55:08Z",
+  "updated_at": "2026-08-09T13:00:59Z",
+  "closed_at": "2026-08-09T13:00:58Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": "2026-08-09T13:00:58Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/7054",
+  "body": "Fixes objectstack-ai/objectstack#6993\n\n四处站点均为 #6947 命名的失效类:状态句把某个未来 issue 写成缺口,issue 落地后没人回来改句子。本 PR 每个替换数字都来自本分支上**执行**的测量(E20:执行,不 grep —— `driver-sqlite-wasm` 继承编译器、自身零 case 臂,任何文本扫描都会少算),卡片上标注「待重测」的数字一个都没有照抄。**纯注释/文本改动,行为零变化。**\n\n## 普查 (a):`$icontains` + `$contains` 族记分板\n\n命令:每包一个临时 vitest probe(`probe-6993.census.test.ts`,已删除,未随 PR 提交),fixture 两行 `{id:'1',name:'ACME CORP'}` / `{id:'2',name:'acme corp'}`,在场对照 `$eq:'acme corp'` → `['2']`,缺席对照 `$contains:'zzz'` → `[]`(所有面对照全过);完整 JSONL 输出 68 行,附于 dev 报告。\n\n| 面 | `$icontains:'acme'` | `$contains:'acme'` | `$contains:'ACME'` |\n|:--|:--|:--|:--|\n| driver-sql(better-sqlite3 :memory:) | 答 `['1','2']` | `['2']`(精确) | `['1']` |\n| driver-sqlite-wasm(sql.js 引擎,继承) | 答 `['1','2']` | `['2']` | `['1']` |\n| driver-turso local | 答 `['1','2']` | `['2']` | `['1']` |\n| driver-turso remote(stub 传输,独立编译器) | 答 `['1','2']` | `['2']` | `['1']` |\n| driver-memory 查询路径 | 拒 `INVALID_FILTER`/400 | `['1','2']`(全 Unicode 折叠) | `['1','2']` |\n| driver-memory 参考匹配器 | 拒 `INVALID_FILTER`/400 | 敏感(false/true) | — |\n| driver-mongodb `translateFilter` | 拒 `INVALID_FILTER`/400 | 降为 `$regex`+`$options:'i'`(**硬编码仍在**) | — |\n| objectql `having` | 拒(裸 Error,见普查 c) | 敏感 | — |\n| formula `matchesFilterCondition` | **静默 `false`**,非拒收(已评论至 #6520) | 敏感 | — |\n| service-analytics `compileScopedFilterToSql` | 拒 `READ_SCOPE_COMPILE_FAILED`/500 fail-closed | 编译为 `LIKE ? ESCAPE ?`(PG 上精确) | — |\n\n→ 五驱动中**三个**应答 `$icontains`;`$contains` 族在 SQL 三族精确、memory 查询路径 + mongodb 仍折叠(#6682)。\n\n## 普查 (b):`FILTER_TEXT_CASES` 覆盖与 DEBT 行\n\n命令:`node scripts/check-driver-conformance.mjs`(判据 = 各驱动 suite **import** 整张 case-set):FILTER_TEXT 列 `ok` = driver-sql / driver-sqlite-wasm / driver-turso;`DEBT` = driver-memory、driver-mongodb(**两行**,均指 #6682);合计 `36 covered / 4 DEBT(其中 FILTER_TEXT 2 行)/ 0 exempt`。改写正文按 E17 **指向该 gate 台账**(它对 import 双向 RECONCILED),不再手写「N of five」。\n\n## 普查 (c):五面 `$regex` 拒收审计\n\n对每面执行 `{ $regex:'ac.*' }`、`{ $regex,$options }`、悬空 `{ $options:'i' }`,读 `code`/`status`,并用 `RETIRED_FILTER_OPERATORS[op].why` 做全文包含比对:\n\n| 面 | `code`/`status` | `why` 全文逐字 |\n|:--|:--|:--|\n| driver-sql | `INVALID_FILTER`/400 | 是($regex 与 $options 各自的 why 均逐字) |\n| driver-sqlite-wasm(继承) | `INVALID_FILTER`/400 | 是 |\n| driver-turso local / remote | `INVALID_FILTER`/400 | 是(remote 为独立 emitter,前缀 `[RemoteTransport]`) |\n| driver-memory | `INVALID_FILTER`/400 | 是 |\n| driver-mongodb | `INVALID_FILTER`/400 | 是 |\n| objectql `having` | **undefined / undefined(裸 `Error`)** | 是 |\n\n→ 五面全部逐字打印处方;信封半边四个驱动面齐,`having` 缺 —— 超出本卡围栏(行为改动),已立 **#7047**,站点 3 的改写如实点名。\n\n## 四站点改写(E22:日期化再验证 + 显式证伪标记)\n\n1. **`filter-text-conformance.ts` Status 节**:旧「NO backend answers this table yet / implemented by nobody / two of five / every driver carries a DEBT row」→ 引述旧句 + 「was true in the #5701 era and has since been falsified by #5702 (closed 2026-08-08) and #6518 (re-verified 2026-08 … #6993)」,记分指向 conformance 台账;`$regex` 顺序约束段改为已发生的历史(#5710 已翻转生产者);`@see` 标签同步(5702 landed;补 6520/6682)。\n2. **`filter-text-conformance.test.ts` 头部**:旧「a standard no backend answers yet … nothing executes it」→ 「landed as … That premise was true when this file was written and has since been falsified … (re-verified 2026-08, #6993)」;参考求值器的论证保留(它现在仍是驱动运行之间守表的 oracle)。\n3. **`filter.zod.ts` `RETIRED_FILTER_OPERATORS` 退役块**:旧「Wiring them to it is #5702 … Hard order: #5710 flips the producer, then #5702 …」→ 「Both gates have fired since … shipped history, not pending advice」+ 普查 (c) 的逐面结果(四驱动面信封齐、`having` 裸 Error → #7047)。\n4. **`filter-text-conformance.ts` `$contains` 族 case 注释**(卡片写的 `filter.zod.ts:227`,实际在本文件 :227 —— 报告中已更正锚点):归属改 #6682,事实保留 —— mongo 的 `$options:'i'` 折叠**仍在**(执行 `translateFilter` 验证,见表 a)。\n\n**披露的最小扩展**(实施前已评论在 #6993):同文件两条 case `note:` 与改写正文直接矛盾,一并修正 —— 「On SQLite/turso **today** LIKE folds ASCII and returns both」(#6518 后为假)与「#5710 flips that producer **BEFORE** …」(改过去时)。仅 note 文本;`filter`/`expected`/`mustMention`/`code` 未动,pin 扫描(字面 + `toMatch(/…/)` 两种拼法,#6854)确认无测试钉住旧句。\n\n## 渲染输入核查(逐站点,实测)\n\n`grep -rln \"RETIRED_FILTER_OPERATORS|Hard order|5710 flips|implemented by nobody|no backend answers\" content/docs/` → 唯一命中 `content/docs/protocol/objectql/query-syntax.mdx`(手写页,仅提及常量名,未引用任何过期句)。四站点均不落入 `content/docs/references/**`(站点 2 为测试文件、站点 4 为行内注释;站点 1/3 文本在生成树中零命中),`check:docs` 与全部生成物 gate 复核通过 → **无需再生成**。\n\n## 验证\n\n- `pnpm --filter @objectstack/spec build && check:generated` → **10/10 生成物 gate 全绿**(`authorable-surface/**`、`json-schema.manifest/**`、`authorable-defaults/`、`.base.json`、`api-surface/`、`content/docs/references/**` 逐字节不变 —— 验收围栏)。\n- `pnpm --filter @objectstack/spec test`(maxWorkers=2)→ **351 文件 / 9131 测试全过**。\n- `pnpm --filter @objectstack/spec typecheck` → OK;`test-typecheck-debt.json` 前后 `diff` 为空(58 files / 266 errors,不变)。\n- `node scripts/check-nul-bytes.mjs` → OK;被改文件控制字节自扫 clean。\n- **反向验证方向,先判后测**:预测 —— 纯注释改动,正反两个方向都不该有红(#6753:如实说明);实测一致 —— 改动前后同套断言全绿,证据是上面三张普查表与 pin 扫描,不是某个翻红的测试。\n\n## 范围外产出\n\n- **#7047**(新立,未指派):objectql `having` 拒收 retired/unknown 算子缺 ADR-0112 信封(裸 `Error`)—— 五面普查的直接发现,修复属行为改动。\n- **#6520 评论**:formula 面对 `$icontains`/`$regex` 是静默 `false` 而非响亮拒收,与该卡现状表的「❌」不同类,建议实现臂时一并定夺。\n\nChangeset:`.changeset/filter-text-status-claims-remeasured.md`(`@objectstack/spec: patch`)。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_018ffcE95NaMJcL9XJ9VDYgk\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_018ffcE95NaMJcL9XJ9VDYgk)_"
+}

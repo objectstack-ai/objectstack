@@ -1,0 +1,35 @@
+{
+  "number": 6750,
+  "kind": "issue",
+  "title": "[docs] `content/docs/automation/flows.mdx:977` still teaches an ETL pipeline's `retry` as a live retry surface after #6414 retired the L2 layer",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T14:13:14Z",
+  "updated_at": "2026-08-09T02:05:55Z",
+  "closed_at": "2026-08-09T02:05:55Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6750",
+  "body": "Found while implementing #6630 part 2 (PR for `packages/spec/src/automation/flow.zod.ts`). Filed unassigned for triage, **not fixed in that PR**: #6630 explicitly scopes `content/docs/**` out — *\"pages that may have inherited these sentences via doc generation — flagging them as likely downstream, but that is the docs seat's surface, not this finding's.\"*\n\n## The defect\n\n`content/docs/automation/flows.mdx` is a **hand-written** guide page, not a generated one (the generated tree is `content/docs/references/**`; this file has authored frontmatter, prose and `Callout` components). It inherited the same sentence #6630 is correcting in `flow.zod.ts`, and still carries it in the present tense at **`:975-977`**:\n\n```\nThe retry knobs are the **one** retry policy the platform has (`RetryPolicySchema`),\nshared with `job.retryPolicy`, a `try_catch` node's `retry` and an ETL pipeline's\n`retry`. A spelling learned on any one of them is correct on all of them.\n```\n\n#6414 removed `automation/etl.zod.ts` outright — `ETLPipeline`, `ETLPipelineRun`, their source/destination/transformation vocabulary, four enums and the `ETL` factory (9 defs, 27 exported names). The absence is pinned in `packages/spec/src/automation/sync-retirement.test.ts:147-158`.\n\nSo the published Flow Metadata guide tells an author that an ETL pipeline's `retry` is a live place to apply what they just learned about `backoffMs`. Acting on it means `tsc` TS2724/TS2305 on names the docs site just recommended — the same authoring-path harm #6630 documents for the `retryDelayMs` tombstone, one surface further out.\n\nMeasured live surfaces: `retryPolicyShape()` / `RetryPolicySchema` have exactly three consumers on `origin/main` @ `61282f906` — `system/job.zod.ts:141` (`job.retryPolicy`), `automation/control-flow.zod.ts:318` (a `try_catch` node's `retry`) and `automation/flow.zod.ts:722` (`flow.errorHandling`). Three, not four.\n\n## Adjacent, same cause\n\n`content/docs/data-modeling/formulas.mdx:52` names both retired layers as `cron` consumers:\n\n```\n| `cron`     | recurring schedules (Job, ETL, sync, exports, jobs)  | `` cron`...` `` |\n```\n\nL1 \"Simple Sync\" (`automation/sync.zod.ts`) was retired in #4738 and L2 ETL in #6414, so two of the five items in that parenthetical no longer exist. Lower harm than the flows.mdx one — it is a dialect-selection table, not a prescription — but same retirement, same partial sweep, so it belongs in the same pass.\n\n**Not a defect, checked:** `content/docs/protocol/knowledge.mdx:49` (\"Records become documents automatically, with no ETL\") uses ETL as the generic industry term, not as a reference to the retired `ETLPipeline` surface. Leave it.\n\n## Suggested direction\n\nNon-binding: one text-only pass over the two sites, matching the wording landed in `packages/spec` by PR #6701 and #6630's part-2 PR — enumerations name only surviving surfaces; a retired mention becomes explicitly historical rather than being silently deleted.\n\n## Not in scope\n\n- Re-litigating #6414 or #4738. Both retirements are settled; this is only text that outlived them.\n- `packages/spec` source prose — that is #6630, already in flight and about to close.\n- `content/docs/references/**`, which is generated and already correct on this point.\n\n## Dedup searches run before filing\n\n- `is:open flows.mdx ETL retry` — 1 hit, the PM triage Routine #6015, unrelated.\n- `is:open \"content/docs/automation\" ETL` — 0 hits.\n- `is:open 6414 ETL docs prose retired` — 3 hits: #6630 itself (spec source only, scopes docs out), #6015 and #4604, both PM tracking issues.\n- Full sweep of `content/docs/**` excluding `references/` and `releases/` for a word-boundary `ETL`: 3 hits, all three triaged above.\n\n## Provenance\n\nMeasured on `origin/main` @ `61282f9066288e5289089d3fdb0bbc67078bd834`.\n"
+}

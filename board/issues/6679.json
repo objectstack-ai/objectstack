@@ -1,0 +1,32 @@
+{
+  "number": 6679,
+  "kind": "issue",
+  "title": "[finding] `isNumericOverloadError` is the last author-text read left in cel-engine.ts — it arms the ADR-0032 §1c hydration retry off `/no such overload/i`, and our own `matches()` binding can put that phrase in a native error",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T10:23:28Z",
+  "updated_at": "2026-08-09T16:05:18Z",
+  "closed_at": "2026-08-09T16:05:18Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6679",
+  "body": "Out-of-scope finding from #6223 / PR #6677. Recorded per Prime Directive #10, unassigned. The card was frozen to `classifyError`, so this sibling was measured but deliberately not touched.\n\n## The fact\n\n`packages/formula/src/cel-engine.ts`:\n\n```ts\nfunction isNumericOverloadError(err: unknown): boolean {\n  const message = err instanceof Error ? err.message : String(err);\n  return /no such overload/i.test(message);\n}\n```\n\nIt is the trigger for the ADR-0032 §1c hydration retry in `celEngine.evaluate`: on a fault it decides whether to coerce string-serialized numeric / date fields and re-evaluate once (#1530, #1534).\n\nAfter PR #6677, `classifyError` reads only the cel-js error class and its structured `code`. This predicate is the one function left in the file that still matches on `message` — and cel-js puts the author's own source line into `message` (`formatErrorWithHighlight`, `lib/errors.js`), which is the mechanism behind both #6133 and #6223.\n\nThe phrase is also reachable from a **native** throw, not only from cel-js. Measured on `origin/main` while auditing #6223: `matches()` is an ObjectStack stdlib binding over `new RegExp(...)`, so an uncompilable pattern escapes cel-js unwrapped as a native `SyntaxError` whose message echoes the pattern verbatim. So `matches(record.name, \"no such overload(\")` — or the same pattern read off a row via `matches(record.name, record.re)` — produces a native error that this predicate answers `true` for.\n\n## Impact, stated honestly and NOT inflated\n\nToday the consequence appears to be nil. The retry re-evaluates with hydrated strings; for the trigger above the regex is still uncompilable, so the retry throws again and the `catch` deliberately rethrows the **original** error, which is then classified correctly. No wrong value, no wrong `kind`.\n\nWhat is unmeasured is whether any input exists where a spuriously-armed retry **succeeds** and returns a value where the original fault was the right answer. Hydration only turns numeric strings into numbers and ISO strings into Dates, so the window is narrow, and no such input was found. Not asserting there is none.\n\n## Why file it anyway\n\nTwo reasons, neither of them \"it might be a bug\":\n\n1. **The structured answer now exists and is free.** `EvaluationError` carries `code`, and the fault this predicate wants is exactly `code === 'no_such_overload'`. `err instanceof EvaluationError && err.code === 'no_such_overload'` is the same three lines with no text read, matching what `classifyCelFault` already does one function below.\n2. **It narrows the trigger to what ADR-0032 §1c is about.** The hydration retry is a cel-js overload accommodation. Arming it on native throws that merely contain the phrase is scope it never claimed, and it is the kind of consumer-side tolerance Prime Directive #12 asks us to remove rather than keep.\n\nThe change is behaviour-affecting in one direction (a native error containing the phrase would stop arming the retry), so it wants its own pricing and its own pin rather than riding #6223.\n\n## Class\n\nObservation-class: no user-visible symptom demonstrated. Filed plainly for triage to grade — severity judged at filing time is unreliable in both directions, and the measurement above is all that is claimed.\n\n## Related\n\n#6133 / PR #6202, #6223 / PR #6677 (same file, same defect family — reading a message the author controls). #1530 / #1534 (why the retry exists). ADR-0032 §1c.\n"
+}

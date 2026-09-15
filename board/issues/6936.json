@@ -1,0 +1,35 @@
+{
+  "number": 6936,
+  "kind": "issue",
+  "title": "objectui: metadata-admin 谓词求值器对「无法解析的路径」静默判假(fail-CLOSED),与文件自述的 fail-open 承诺相反",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "pm:queue",
+    "repo:objectui"
+  ],
+  "assignees": [
+    "yinlianghui"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T04:56:48Z",
+  "updated_at": "2026-08-09T13:30:10Z",
+  "closed_at": "2026-08-09T13:30:10Z",
+  "closed_by": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6936",
+  "body": "越界发现,来自 objectstack#6331 的开发会话(objectui PR objectstack-ai/objectui#3923)。**不在该 PR 范围内**,单独立单交 PM 分诊;未认领。\n\n## 事实\n\n`packages/app-shell/src/views/metadata-admin/predicate.ts` 的文件头明确承诺:\n\n> On any parse error → returns `true` (fail-open): better to show a field than to silently hide it.\n\n`evaluatePredicate` 的 try/catch 确实对**抛错**兜成 `true`。但「标识符解析不到」不走抛错路径:`resolveValue` 从 ctx 根开始逐段下钻,取不到就返回 `undefined`,然后\n\n- `path in ['a','b']` → `['a','b'].includes(undefined)` → **false**\n- `path == 'x'` → `undefined === 'x'` → **false**\n\n于是一条引用了不存在路径的谓词把字段**静默隐藏**,与文件自述的方向正好相反。文档承诺 fail-open,实现是 fail-closed。\n\n## 为什么现在才可观测\n\n在 objectstack#6331 修好之前,metadata-admin 根本没读到过任何 spec 下发的谓词(五个站点只读已被 ADR-0089 归一化掉的 `visibleOn`),所以这条求值语义从来没有被执行到。#6331 的读取器修复让它第一次可达。\n\n具体的踩法(objectui PR #3923 已用浏览器探针两向实测):谓词必须写成 `data.` 作用域才能对着草稿求值(objectstack#6254 修正了 `object.form.ts` 里 16 处裸拼法)。若后端仍在下发 #6254 之前的裸拼法 `type in ['text',...]`,而前端已带 #6331 的读取器修复,则求值器把裸 `type` 在 `{ data: row }` 作用域里解析成 `undefined` → 判假 → Studio 对象字段列表里那 16 个类型相关子字段(Min / Max / Precision / Scale / Max Length / Min Length / reference / deleteBehavior / expression / returnType / autonumberFormat / language …)**全部消失**。实测读数:\n\n```\nB1 objectForm fields(#6254 后的 data. 拼法)\n   row currency → Min, Max, Precision, Scale          （正确)\n   row text     → Max Length, Min Length              （正确)\nB2 objectForm fields(安装版 spec 17.0.0-rc.5 的裸拼法)\n   row currency → 16 条条件子字段一条都不出\n   row text     → 16 条条件子字段一条都不出\n```\n\n也就是说这是一个**版本错配窗口内的静默功能消失**:v17 前后端同步升级时不会命中,前端先于后端升级时会命中,而症状是「配置项不见了」,用户无从判断是权限、是类型不支持、还是 bug。\n\n## 为什么不在 #6331 的 PR 里顺手改\n\n改动求值语义是有后果的取舍,不该由读取器修复夹带:\n\n- **A. 未解析路径 → 判真(与文件承诺一致)**:配置项恒显,与修复前的现状同向,坏谓词不再致命 —— 但真正想隐藏的字段在拼错时也会露出来。\n- **B. 未解析路径 → 判假(现状)**:拼错即静默隐藏,最难诊断。\n- **C. 未解析路径 → 判真 + 一条开发期 `console.warn` / 诊断项**:既不静默,也不吞配置项。\n\n倾向 C(与 objectstack#5149 fail-open 一族的处理方向一致,且把「谓词引用了不存在的路径」变成可发现的事实而不是不可见的行为),但这是 metadata 表单渲染语义,应由维护者定。真正的长期解法在生产端:谓词表达式应在发布期被校验(引用的路径必须存在于对应 schema),而不是让渲染器在运行期猜 —— 那属于另一个更大的口子,这里只记录读数。\n\n## 关联\n\n- objectstack#6331 / objectui PR #3923 —— 读取器修复,让本条第一次可达。\n- objectstack#6254 —— spec 侧 16 处裸谓词改 `data.` 拼法;两边都落地后本条的踩法关闭。\n- objectstack#5149 —— fail-open 静默一族。**不是重复**:#5149 是「谓词抛错 → 静默显示」,本条是「谓词路径解析不到 → 静默隐藏」,方向相反、代码路径不同(catch 分支 vs `resolveValue` 返回 `undefined`)。\n- objectstack#6318 —— 同为 ADR-0089 别名丢弃的第三消费者,与本条无关。\n\n## 查重说明(如实记录局限)\n\n按关键词 + 文件路径搜过 open issues:`evaluatePredicate` 0 命中、`predicate.ts metadata-admin unresolved identifier hidden` 0 命中;继续搜时 GitHub search API 触发本座位限流(`API rate limit already exceeded`),未能完成更宽的关键词面。#6331 的分诊评论此前对三仓 463 个 open issue 做过全量 REST 分页并列出邻居,其中没有本条。若 PM 发现同小时的孪生单,按惯例 race-close 本单。"
+}

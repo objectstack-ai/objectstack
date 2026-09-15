@@ -1,0 +1,34 @@
+{
+  "number": 6797,
+  "kind": "issue",
+  "title": "openapi-endpoints.ts 的注释仍宣称「六个内置 $ref 可解析」——实测服务出的文档里 $ref 总数为 0(#5588 之后已失真)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T17:56:49Z",
+  "updated_at": "2026-08-09T06:05:20Z",
+  "closed_at": "2026-08-09T06:05:20Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6797",
+  "body": "观察类记录(finding),发现于 #5757 的测量任务(该卡是「先测量」卡,本条不在其范围内,按 Prime Directive #10 单独登记)。\n\n## 事实(实测,`origin/main` @ `e1e762971`)\n\n`packages/rest/src/openapi-endpoints.ts:259`–`:262` 的注释写道:\n\n> 自 #5168 起 `components.schemas` 不再为空 —— 它携带九个契约 schema,**且六个内置 `$ref` 可以解析** ……\n\n**实测:服务出的 `GET /api/v1/openapi.json` 文档里 `$ref` 出现次数为 0。**\n\n测量方式:在 `packages/rest` 内用真实 `RestServer` + `registerRoutes()` 驱动已注册的 `GET /api/v1/openapi.json` handler,对整个响应体做 `JSON.stringify` 后正则统计:\n\n- 文档内 `$ref` 总数:**0**\n- 指向 `#/components/schemas/` 的 `$ref`:**0**\n- 文档 `paths` 条目:67(全部由 `buildBuiltinPaths` 在服务期从 `routeManager` 生成)\n- `components.schemas`:9 个\n\n顺带实测:产物 `packages/spec/json-schema/openapi.json` **自身内部**的 `$ref` 数量也是 0 —— 九个 schema 互不引用,各自自洽展开。\n\n## 为什么失真\n\n那六个 `$ref` 属于**静态产物携带的内置路由段**。#5588(ruling C)之后该段由 `packages/rest` 在服务期自己产生,并且**丢弃**产物携带的 `paths`;#5744 进一步让生成器不再发射 `paths`。`buildBuiltinPaths` 明确不发任何 `$ref` —— 同文件 `openapi-builtin-paths.ts:100`–`:106` 正是这么写的:旧段那些指向 `CreateRequest`/`UpdateRequest` 的 `$ref`「对 wire shape 的判断是错的」,所以新段一个都不发。\n\n于是注释描述的是 #5588 之前的世界。今天 `components.schemas` 是一座**无入边的孤岛**:文档里没有任何东西指向它。\n\n## 危害等级\n\n纯注释失真,无运行期后果 —— 故记为 `finding`,不加 `pm:queue`。但它不是无害的措辞问题:该句被用来论证「所以这里发一个空 `type: object` 是可以接受的」(紧邻的 `requestBody` 决策),下一个读者会据此以为文档内存在可解析的 schema 引用关系。修法大概率就是把那一句改写成实测状态(0 个 `$ref`,孤岛),不需要动代码。\n\n## 相邻\n\n与 #5757(`gen:openapi` 产物门禁)同现场但**不是同一件事**:那张卡问的是产物的存在性/新鲜度门禁,本条只是注释与实现脱节。不建议搭车修。\n"
+}

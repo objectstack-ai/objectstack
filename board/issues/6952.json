@@ -1,0 +1,35 @@
+{
+  "number": 6952,
+  "kind": "issue",
+  "title": "objectui: `UserFilters` 里三个 button 元素缺 `type=\"button\"`(objectui#3344 家族,当前休眠)—— observation",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "pm:queue",
+    "repo:objectui"
+  ],
+  "assignees": [
+    "yinlianghui"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T06:17:06Z",
+  "updated_at": "2026-08-09T14:02:59Z",
+  "closed_at": "2026-08-09T14:02:59Z",
+  "closed_by": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6952",
+  "body": "发现于 objectstack#5236 的实施(给 `allowAddTab` 按钮接上会话级行为,objectui PR #3926)。**不阻塞那一单**,它已经给自己新加的 add 触发器显式写了 `type=\"button\"`;这是顺手看到的既有面,单独立案。\n\n## 事实(实测,非阅读推断)\n\n`objectui/packages/plugin-list/src/UserFilters.tsx` 里的 button 元素,按 `git grep` 逐个数(行号取自 objectui `origin/main` = `5e524950d`):\n\n| 行 | 是什么 | `type` |\n|---|---|---|\n| `:511` | DropdownFilters 里的 chip / clear 按钮 | 无 |\n| `:672` | `user-filters-more` 溢出 **PopoverTrigger** | 无 |\n| `:855` | tabs 模式的预设 tab 按钮(`filter-tab-*`) | 无 |\n\nHTML 里 button 元素在 form 元素内部默认 `type=\"submit\"`,而 Radix 的 `PopoverTrigger` 不 `preventDefault` —— 这正是 objectui#3344 的形态:combobox 触发器因此在对象表单里「点一下下拉就把表单提交了」,那一单的修法是给触发器显式声明 `type=\"button\"`(并留了 `type` 透传给显式覆盖的人)。上表三个是同一家族里没被那一单覆盖到的同类面。\n\n## 为什么标 observation、不进 pm:queue\n\n**今天用户碰不到**:`UserFilters` 的实际挂载点是 `ListView` 的工具条(`ListView.tsx` 的 `data-testid=\"user-filters\"` 那一格),不在 form 元素里;要触发得有人把 ListView 组合进一个 form 里渲染。所以这是休眠的潜在缺陷,不是在线 bug —— 按 objectstack#4949 的分诊纪律标 `finding`,严重度交给 PM 的 triage 轮判,我不自己定级。\n\n## 修的话是什么形状\n\n三处各加 `type=\"button\"`,与 objectui#3344 同款;若要一次性防回归,更结实的做法是在 `@object-ui/components` 侧让 `PopoverTrigger` 这类原语自带默认 `type`(#3344 已经在 combobox 上开了这个先例),否则每个新写的触发器都得靠作者记得 —— 那是「靠人不犯错」而不是「结构上不可能犯错」。两种形状的取舍归维护者。\n\n## 参考\n\n- 家族原型:objectui#3344(combobox 触发器 `type=\"button\"`,含 `packages/components/src/__tests__/combobox-trigger-type.test.tsx` 那三条钉子)\n- 本次实施:objectstack#5236 / objectui PR #3926(新加的 `filter-tab-add` 触发器已带 `type=\"button\"`,注释里引了 #3344)\n\n---\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01GTRjn8xBqp75dk7kFupVRt\n"
+}

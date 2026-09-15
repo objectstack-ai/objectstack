@@ -1,0 +1,35 @@
+{
+  "number": 6820,
+  "kind": "pull_request",
+  "title": "fix(objectql,service-analytics): 报告对象「实际所在」的 datasource,而非它声明的那个 (#5288)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T23:01:23Z",
+  "updated_at": "2026-08-09T06:05:20Z",
+  "closed_at": "2026-08-09T06:05:19Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": "2026-08-09T06:05:19Z",
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/6820",
+  "body": "Closes #5288\n\n## 问题\n\n`plugin.ts` 把 analytics 的探针接成了对象**声明**的值:\n\n```\ngetObjectDatasource: (objectName) => dataEngine()?.getObject?.(objectName)?.datasource\n```\n\n这是 `ObjectQL.getDriver` 五步解析顺序里的**第 1 步**。而 `ObjectSchema.datasource`\n带 `.default('default')`,`'default'` 在引擎里的含义恰恰是「没有显式绑定,继续往下查」,\n不是「主库」。于是被 `datasourceMapping` 规则、ADR-0057 §3.6 生命周期分流、或所属\npackage 的 `defaultDatasource` 路由走的对象,探针一律回答 `'default'`。\n\n`sys_audit_log` 就是活标本:靠 `lifecycle.class: 'audit'` 落到 `telemetry`,全程没有\n任何声明可读。#5033 那条查询期诊断存在的唯一意义就是点名「表不在哪个库」,而它点错了:\n\n```\n改前: table \"account\" is not on datasource \"default\",   which is where its base object \"sys_audit_log\" lives\n改后: table \"account\" is not on datasource \"telemetry\", which is where its base object \"sys_audit_log\" lives\n```\n\n(两条都是本 PR 新增测试里实测抓下来的完整文案,不是手写示意。)\n\n## 改动\n\n**1. `packages/objectql/src/engine.ts` —— 新增 `resolveEffectiveDatasource(objectName)`。**\n\n`getDriver` 的解析顺序抽成一份私有的 `resolveDatasourceBinding()`(返回「名字 + 是哪一步\n定的」),`getDriver` 改为消费它并负责「名字 → driver」以及驱动缺失时的两条诊断;公开的\n`resolveEffectiveDatasource()` 只取名字。**顺序只存在一份,不是两份** —— 这正是 #4462\n抽出 `resolveMappedDatasource` 的理由,本 PR 在同一个文件里照着同一个形状写。\n\n`getDriver` 行为逐条不变:优先级不变;声明 / 映射到的 datasource 没有活驱动时仍然拒绝\n回落默认库(#4462),两条文案一字未改;第 3/4/5 步仍然只在驱动已注册时才成立;两行\ndebug 日志留在「它描述的那个决定」上,但改由 `getDriver` 发出,好让解析器保持无副作用\n—— 探针问一次名字不应该在日志里留下一条从未发生的路由事件。\n\n**什么都没绑定、纯粹骑着部署默认驱动的对象,访问器答 `undefined`**,这是刻意的:默认驱动\n保留自己的自然名(#3826,`drivers.has('default')` 按构造为 false),那是**驱动名**,不是\n谁把这个对象绑上去的 datasource;而 `undefined` 也正是消费方早就写在文档里的口径\n(`analytics-service.ts`: \"bound to, or `undefined` when it rides the default one\")。\n需要默认驱动名字的调用方仍然有 `getDefaultDriverName()`。顺带把「探针答案取决于对象有没有\n被 Zod parse 过」这个隐患也消掉了:parse 过的对象带 `'default'`,没 parse 的带 `undefined`,\n现在两者都归一到 `undefined`。\n\n**2. `packages/services/service-analytics/src/plugin.ts` —— 探针改问引擎。** 只此一行。\n路由规则**没有**在 analytics 侧重算 —— 那正是本单存在的意义。\n\n**3. 注释订正(dataset-compiler.ts / analytics-service.ts)。** #5115 的闸门注释原文写着\n「判据只认显式的 `object.datasource`……那些规则在这里看不见」,输入换了之后这句话就不成立了。\n判据一字未改,注释改成如实描述新的输入,并写清楚**还是**看不见什么。\n\n## 测试\n\n- `packages/objectql/src/engine-effective-datasource.test.ts`(新增,12 例):第 2/3/4 步\n  各一例(mapping 规则 / 生命周期分流 / package 默认值)—— 都是探针以前答错的;显式声明这一\n  例保持不变;每一例都同时断言 `getDriverForObject` 挑的就是同名驱动(一份顺序,两种形状的\n  答案);「什么都没绑定」答 `undefined`;未注册对象答 `undefined`;Zod parse 过的对象声明\n  值是 `'default'` 而访问器答 `'telemetry'`;绑定的 datasource 没有驱动时**报出名字而不抛**\n  (`getDriver` 该抛还是抛)。\n- `packages/services/service-analytics/src/__tests__/effective-datasource-probe.test.ts`\n  (新增,6 例):走**真实的 plugin 接线**,engine double 把「声明了什么」和「引擎路由到哪」\n  分开作答 —— 缺陷就活在这个混同里,任何让 double 直接声明自己路由的测试都看不见它。含 (a)\n  的钉子、显式绑定的不变性、以及引擎不实现该访问器时退回 pre-#5288 文案的分级。\n- 消费半径清扫:`raw-sql-object-routing.test.ts` 的 engine double 只实现了 `getObject()`,\n  改动后它答不上新问题 —— 按「补声明」处置(它的 `routing` map 本来就是有效路由,`execute`\n  就是按它选库的),而不是改断言。这一条是 CI 之前本地就跑红并修好的。\n\n```\npnpm --filter @objectstack/objectql test           → 154 files, 2668 passed, 0 failed\npnpm --filter @objectstack/service-analytics test  →  70 files, 1421 passed, 0 failed\neslint(7 个改动文件)                              → 0 problems\ncheck:nul-bytes / engine-double-contract / error-code-casing /\nroute-envelope / spec-parsed-alias / verify-stand-in / type-check-coverage → 全绿\n```\n\n## 反向验证(先写预测,再跑)\n\n把探针从访问器上摘掉(恢复成读声明值),预测:analytics 那 6 例里**红 4 绿 2** ——\n两条「点名 telemetry」的钉子红;「引擎答不上时退回默认文案」那条也红,但**方向是反的**\n(旧探针答 `'default'` 而新探针答 `undefined`,所以它红在文案变成了 `datasource \"default\"`,\n不是红在没退回);编译期拒绝那条红。绿的两条:显式绑定的不变性(第 1 步本来就对),以及\n「一侧只是骑默认驱动就不判」(这条**是为了错的理由而绿**——旧探针整个答不上)。引擎那 12 例\n不动,因为摘的是探针不是访问器。\n\n实测:`Tests 4 failed | 2 passed`,红的正是预测的那 4 条,断言消息逐条对上。恢复后 6/6 绿。\n\n## 关于 #5115 的闸门(报告,不动手)\n\n判据没改。变的是它的输入:现在**两侧都被绑定**(无论是显式、mapping、生命周期还是 package\n默认值)且不同名时,编译期就能拒绝 —— 以前只有双方都**显式**声明才拒,这类 join 照样执行\n不了,只是晚一点炸。而催生 #5115 的那个场景(被绑定的对象 join 一个只是骑默认驱动的对象)\n**仍然看不见**:后者答 `undefined`,而未作答的一侧永远不拒。要覆盖它,闸门得把「骑部署默认」\n当成一个答案,那是 #5115 后续单的事,本 PR 只把边界钉成了测试。\n\n停止条件(18:29Z 分诊 re-anchor)未触发:访问器是 `getDriver` 既有解析步骤之上的薄公开包装,\n只算名字、不取 driver、无缓存、无新语义、顺序未变;`packages/spec` 未触碰。\n\n`engine.ts` 冲突面复核:#5272 已关闭;当前 5 个 open PR 无一触及 `packages/objectql/src/engine.ts`;\nmain 上该文件最近一次提交是 4fedb11,已在本分支基线内。\n\n---\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01USNUyHEr7uaU6MoEWXitei)_"
+}

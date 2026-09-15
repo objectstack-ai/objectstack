@@ -1,0 +1,35 @@
+{
+  "number": 6781,
+  "kind": "issue",
+  "title": "service-storage: restore prefix enumeration cursor-shaped — `list(prefix, { cursor, limit })` + adapter-conformance cases (cloud is the first-party caller the retirement could not see, twice)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T17:22:10Z",
+  "updated_at": "2026-08-09T03:16:42Z",
+  "closed_at": "2026-08-09T03:16:42Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6781",
+  "body": "Part of objectstack-ai/cloud#1203 — **maintainer ruling 2026-08-08: option B**. Filed by the `repo:cloud` seat per the cross-seat transfer protocol; `pm:queue` only, routing label left to the triage seat (note the two-surface shape below — this card may want the contract-first split).\n\n## Why\n\n#5540 removed `list?(prefix)` from `IStorageService` and #5541 removed the adapter implementations, both on the measurement \"Nothing in the repo called either\". True for this repo; false one repo over: **cloud has two production callers** the measurement could not see —\n\n1. `packages/service-cloud/src/environment-storage-cleanup.ts:92` — tenant attachment reclamation on environment delete (TS2339 compile-red at any post-retirement pin; cloud#935 is the incident where this sweep silently did nothing, orphaning deleted tenants' uploads forever);\n2. `packages/service-cloud/src/storage-service-blob-store.ts:78` — marketplace snapshot GC (structural type, so it breaks at **runtime** instead: `TypeError` swallowed into a warning; delisted package detail blobs stay fetchable at the Worker edge).\n\nThis blocks cloud#1197 (the `.objectstack-sha` bump that lands the #5852 cross-org escalation producer fix in deployment): the retirement and the #5852 fix landed the same morning, so no commit on main has one without the other. Full option analysis (A: cloud hand-rolls S3 pagination — recreates the retired defect one repo over; C: tracked-keys sweeps — right end-state for the env sweep but its backfill itself needs enumeration once) is on cloud#1203; the ruling chose **B**: restore it upstream, correctly shaped.\n\n## The shape — already prescribed, not invented here\n\nBoth the retirement note and #5266's option 2 reserved this route word for word: *\"if a first-party caller ever needs real bucket enumeration it returns cursor-shaped — `list(prefix, { cursor, limit })` — with adapter-conformance cases proving both backends agree before it ships.\"* Cloud is that first-party caller, twice.\n\n1. **Contract** (`packages/spec/src/contracts/storage-service.ts` — ⚠️ spec surface, one-owner rule applies): `list(prefix: string, opts?: { cursor?: string; limit?: number })` returning `{ items: StorageFileInfo[]; nextCursor?: string }`. Cursor-shaped so callers must handle pagination explicitly — the silent-1000-cap and the one-level-vs-recursive dialect split (#5266's two measured defects in the OLD signature) become unrepresentable.\n2. **Both adapters, consistent semantics**: recursive prefix match, paginated. Local: `readdir` recursive, directory entries skipped (never stat'd into results); S3: `ListObjectsV2` + `ContinuationToken` loop honoring `limit`.\n3. **Adapter-conformance cases** proving Local and S3 agree — at minimum the three #5266 named: nested keys (`a/b/c` visible under `list('a')`), directory entries excluded, >1000 objects fully enumerated via cursor.\n4. `SwappableStorageService` pass-through restored.\n5. `storage-adapter-list-retirement.test.ts` **flips to pin the new contract** (both adapters implement it, signatures match the spec) — flipped pins keep bearing load; do not just delete the retirement pins.\n6. Changeset **minor** (new public API surface).\n\n## Consumer side (not this card)\n\nCloud picks the capability up by moving the pin — cloud#1197 / PR #1205 (parked draft) re-targets to a SHA covering this, and cloud-side **behaviour-level** tests for both callers are tracked under cloud#1203 (measured there: cloud's deploy pipeline cannot see this class of break — `OS_SKIP_DTS=1` skips the only typechecking pass — so type-level red alone is not a regression guard). A follow-on cloud card (option C: tracked-keys reclamation for the environment sweep, using this `list` once for backfill) is filed after cloud#1197 lands.\n\nRefs: cloud#1203 (ruling + analysis), cloud#935, #5266 (the dialect measurement; `tracking`), #5540, #5541, cloud#1197 / cloud PR #1205."
+}

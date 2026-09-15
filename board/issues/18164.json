@@ -1,0 +1,26 @@
+{
+  "number": 18164,
+  "kind": "issue",
+  "title": "spec: a shared picklist (global value set) metadata kind — option lists reused across objects and packages are TypeScript constants today",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-elon-musk",
+    "id": 328766734,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-14T08:48:04Z",
+  "updated_at": "2026-09-14T08:48:04Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/18164",
+  "body": "## Gap\n\nThere is no metadata kind for an option list that several objects share. Checked on `@objectstack/spec` 17.4.0's `dist/index.d.ts` and `dist/data/index.d.ts`: no `globalPicklist`, `valueSet`, `picklists` or equivalent key. An app that wants `industry`, `lead_source`, `salutation`, `opportunity_stage` or `territory` to mean the same thing on several objects keeps them as exported TypeScript arrays and spreads them into each `Field.select({ options: [...] })`.\n\n## Evidence (hotcrm, `origin/main` `c716a2c`)\n\n- `src/objects/_picklists.ts` — ~3,001 authored tokens; imported by 17 files: seven objects (`account`, `contact`, `lead`, `opportunity`, `task`, `event`, `event_attendee`, plus `contract` and `quote`), two views, a flow, an action, a dashboard, an import mapping and a locale bundle.\n- Under the ADR-0130 package split (objectstack-ai/hotcrm#1904) those consumers sit in three packages (sales, revenue, and the app's own dashboards and translations), so the file becomes cross-package source that every module must import from the app package — the shape a metadata kind would replace with a reference by name.\n- The same lists are what a customer overlay most often wants to extend (a customer-specific industry or lead-source value), and today that is a source edit in the app, not an overlay (ADR-0005 has nothing to overlay).\n\n## Ask\n\nA `picklists` (or `valueSets`) stack collection: `{ name, label, options: SelectOption[] }`, owned by a package like any other metadata, referenced from a select field by name (`Field.select({ picklist: 'crm_industry' })`), translatable through the locale packs the way field options are, and extensible by an org overlay (ADR-0005) so a customer can add a value without forking the object. Salesforce Global Value Sets and Dataverse global option sets are the reference shape.\n\nDedupe words: global picklist, value set, shared select options, _picklists.ts, picklist metadata kind."
+}

@@ -1,0 +1,35 @@
+{
+  "number": 6969,
+  "kind": "issue",
+  "title": "`--database-driver` 的 oclif 白名单改为从共享驱动表推导 —— 裁定第 3 项「一个词表、一处推导」的后半(阻塞于 PR #6910)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T06:42:31Z",
+  "updated_at": "2026-08-09T10:25:02Z",
+  "closed_at": "2026-08-09T10:25:02Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6969",
+  "body": "由 `domain:cli` 座位立卡。这是 **#6345 维护者裁定第 3 项「一个词表、一处推导」的后半**,#6910 的 Follow-ups 第 1 项,以及本席在 #6860 验收评论里的承诺。\n\n⚠️ **立卡缘由值得写下来**:这条跟进项此前只活在 #6910 与 #6913 两份 PR 正文里,而 PR 正文在合并后就从视野消失。本席今晚已因同一原因补立过 #6905,并且在这条上**来回错了两次** —— 先误以为 dev 已在 #6910 内完成推导而宣布作废,再由 git 实测推翻(见 #6860 评论 5230141673、#6345 评论 5230143630)。现在提前立卡,不依赖任何人的记忆。\n\n## ⛔ 阻塞:等 PR #6910(#6345)合入\n\n它带来的单一驱动表与 `resolveDatabaseDriverId` 是本卡的前提。开工第一步先确认它在 `main` 上:\n\n```\ngit log origin/main --grep '#6345' --oneline\n```\n\n## 现状(须实测,以下为立卡时读数)\n\n`packages/cli/src/commands/start.ts` 与 `dev.ts` 各自用**手写字面量数组**声明 `--database-driver` 的 oclif `options:`。实测确认两个文件在 #6910 中**未被触碰**:\n\n```\ngit diff origin/main...<6910-head> --stat -- packages/cli/src/commands/start.ts packages/cli/src/commands/dev.ts  →  空\n```\n\n所以合入后仓里会有**两处**驱动词表定义:`packages/spec` 的共享表,以及 CLI 里这两份手写副本。**这正是 #6535(`IMPORT_JOB_MAX_ROWS` 两份定义)的形状,挪了一个包。**\n\n## 交付面\n\n从共享表导出一个「CLI flag 可以提供的 builtin id 集合」(排序以稳定 help 输出),两条命令改为消费它,删掉两个字面量数组。\n\n⚠️ **不是所有 builtin id 都一定该出现在 flag 上** —— 若存在有意不作为启动选项暴露的 id,推导必须**显式表达这个例外**并写明理由,而不是让集合恰好相等。先读 #6910 落地的表结构(`id` / `aliases` / `contractOnlyAliases` / `hasLocalDefault`)再决定推导取哪一列。\n\n## ⚠️ 与 #6860 钉子的关系 —— 开工前必读\n\n`packages/cli/src/commands/database-driver-allowlist.pin.test.ts` **已经**断言「白名单 ↔ `resolveStorageDefinition` 推导出的驱动种类」相等,两侧都推导、拒绝复述列表。\n\n**所以本卡不是为了「防止漂移」—— 那件事钉子已经在做,而且它在 #6345 落地当天就抓到过一次真回归。本卡是为了消除第二份定义,让漂移在构造上不可能发生。** 请在 PR 正文里如实这么写,不要把它包装成修复一个用户会撞到的缺陷(没有用户会撞到)。\n\n⚠️ **钉子的推导链路很敏感,别顺手改它。** 它拿 `resolveStorageDefinition` 当裁判,并读 `UnsupportedDriverError` 的 `recognized` 判别位(该判别位由 #6910 新增,默认 `true` 以保住既有调用点语义)。#6345 的教训原话值得记住:\n\n> **一条从异常里读取值来做推导的链路,会继承那个异常将来的每一种含义。**\n\n## 交付判据\n\n1. **推导落地后,钉子仍然会红。** 故意破坏一致性(例如从推导结果里剔除一个 id、或给某条命令单独加一个 flag 选项),展示钉子变红,再撤销。预测写在跑之前。\n2. **仓内 `packages/cli` 不再有任何手写的驱动 id 列表** —— 用 `git grep` 自证,把搜法和结果写进 PR。\n3. `os start --help` / `os dev --help` 的选项输出在改动前后**逐字相同**(除非第 1 点的例外声明有意改变它)——若不同,说明推导取错了列,停手报告。\n\n## Changeset\n\n若 help 输出与可接受值集合都不变 ⇒ 纯内部重构,`patch`,并在正文说明「无行为变更」。若集合确有变化(例如补齐了某个此前被漏掉的 id)⇒ `minor`,并说明新增了哪些。⚠️ 不得使用空 frontmatter changeset(`check-empty-changeset.mjs` 拒收新增的,#5471/#4898)。⛔ 不得 `major`,不得编辑 `content/docs/releases/`。\n\n## 关联\n\n#6345(裁定来源)· PR #6910(共享表与 `recognized` 判别位)· #6860 / PR #6913(钉子)· #6535(同形的两份定义,已闭环)"
+}

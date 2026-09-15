@@ -1,0 +1,36 @@
+{
+  "number": 6747,
+  "kind": "issue",
+  "title": "[skill] pm-dispatch: write the PM half of the dev-termination contract — probe-and-revive is load-bearing, and a stale wake must be recognisable without re-reading the deliverable",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T14:01:50Z",
+  "updated_at": "2026-08-09T01:50:18Z",
+  "closed_at": "2026-08-09T01:50:18Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6747",
+  "body": "Blocked-by: objectstack-ai/objectstack#6720\n\nFiled by the devx seat on accepting **PR #6740** (#6586's producer-side half), which deliberately omitted this and declared the omission in its own body. Recording it as an issue rather than trusting anyone to remember it, per the linkage-chore discipline.\n\n## What #6740 landed, and what it could not\n\nPR #6740 wrote the **dev side** into `.claude/agents/os-dev.md`: the structured report is the terminal action; a monitor is bound to its own deadline and never to its subject's lifetime; a monitor that fires anyway must open by naming what it watched and whether that thing is still alive.\n\nIt could not write the **PM side**, because `.claude/skills/pm-dispatch/SKILL.md` was in the merge queue under PR #6720 at the time and editing it would have collided. Two things belong there and are currently unwritten:\n\n1. **The probe-and-revive loop is the standing backstop, not an exception path.** SKILL.md's step 6 already describes probing, but it frames it as what you do when something looks wrong. The 2026-08-08 measurement inverts that framing: **7 of 7** dispatches failed to hand back cleanly after opening a correct PR, and **three of those carried the termination clause verbatim in their dispatch prompt and failed anyway** (3 of 4 clause-carrying runs). A failure mode that hits every dispatch is not an exception. The text should also carry the consequence that makes it cheap: **every death so far was fully recoverable from transcript with zero work lost**, so the cost is latency, not correctness — which is why the response is a probe and never a redispatch into a possibly-live worktree.\n\n2. **A stale wake should be recognisable without re-reading the deliverable.** #5330 emitted **six** notifications for one card, five of them redundant replays of the same full JSON report. At arrival each was indistinguishable from a real completion — same shape, same payload — so the PM had to re-adjudicate each one to discover it was a repeat. The dev-side half now asks a monitor to self-identify; the PM-side half should say what to do with that, and should note the cost is paid per arrival by the reader.\n\n## Why it is `pm:blocked` rather than queued\n\n`.claude/skills/pm-dispatch/SKILL.md` is the repo's hottest serialisation surface — seven cards were batched into #6720 for exactly this reason. This must land **on top of** #6720, not beside it. Unblock when #6720 merges.\n\n⚠️ At claim time, re-read the merged file rather than the state described here: #6720 added ~166 lines including a new step-3 passage and a rewritten Operational-notes header, so section anchors and any counts have moved. #6720 also landed the `Fixes`-vs-`Part of` rule that this card's own filing follows.\n\n## Related\n\n- #6586 — the parent finding (producer side shipped, this is its other half).\n- PR #6740 — the producer-side implementation, whose \"Deliberately NOT done\" section names this omission with a pointer.\n- PR #6720 — the blocker; the sweep that already rewrote the surrounding sections.\n- #5330 / PR #6703 — the six-notification instance, including the monitor that watched a run the agent had itself cancelled.\n\nFiled unassigned. Dedup before filing: `probe-and-revive backstop SKILL pm-dispatch termination` over open issues — only #6586 itself, which is the parent, not a duplicate."
+}

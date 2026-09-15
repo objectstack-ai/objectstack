@@ -1,0 +1,33 @@
+{
+  "number": 7004,
+  "kind": "issue",
+  "title": "A trailing YAML comment hides a bump entry from all three changeset frontmatter parsers",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:queue"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T08:36:10Z",
+  "updated_at": "2026-08-09T12:21:52Z",
+  "closed_at": "2026-08-09T12:21:52Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7004",
+  "body": "Measured while adding `--self-test` fixtures to `scripts/check-changeset-no-major.mjs` (#6923). **Not fixed there** — it is a family-wide change across three scripts with a different consequence in each, so it is out of that PR's fix face. Filed per Prime Directive #10. Unclaimed.\n\n## The observation\n\nAll three changeset frontmatter parsers share one entry regex:\n\n```js\n/^\\s*[\"']?([^\"':]+)[\"']?\\s*:\\s*([A-Za-z]+)\\s*$/\n```\n\nThe bump group is anchored `([A-Za-z]+)\\s*$`, so anything after the bump word defeats the match. A trailing YAML comment is the reachable case.\n\nMeasured on `origin/main` @ `d3e53f2d8`, by extracting each function's real source text and loading it standalone (no top-level main executed), so this is the shipped code and not a re-implementation:\n\n```\n■ '\"@objectstack/spec\": major # keep'\n    check-empty-changeset.declaredBumpsIn  : {\"fenced\":true,\"packages\":[]}   <== judged EMPTY-FRONTMATTER\n    check-adr-0087.parseChangeset          : []\n    check-changeset-no-major.majorPackagesIn : []\n■ control, the same line without the comment\n    check-empty-changeset.declaredBumpsIn  : {\"fenced\":true,\"packages\":[\"@objectstack/spec\"]}\n    check-adr-0087.parseChangeset          : [{\"pkg\":\"@objectstack/spec\",\"bump\":\"major\"}]\n    check-changeset-no-major.majorPackagesIn : [\"@objectstack/spec\"]\n```\n\nAnd the ground truth it is measured against — `@changesets/parse@0.4.3`, the version this repo resolves:\n\n```\ntrailing comment  => [{\"name\":\"@objectstack/spec\",\"type\":\"major\"}]\n```\n\nSo changesets reads it as a real `major`. All three gates read it as nothing.\n\n## Why it is three different bugs, not one\n\n| script | what it misses | direction |\n|---|---|---|\n| `check-changeset-no-major.mjs` | the `major` itself | **false GREEN** — a whole-stack major promoted past a guard that printed a tick |\n| `check-empty-changeset.mjs` | the whole declaration ⇒ the file reads as empty-frontmatter | **false RED** — a PR that added a perfectly valid changeset is rejected under #5471 |\n| `check-adr-0087-registration.mjs` | signal (1) `major` in `breakingDeclaration` | partial — signals (2) `**BREAKING` and (3) the `!` summary can still carry it |\n\nThe false-RED one is the likelier to be hit first (an author writes a comment, the gate tells them their changeset is empty), and the false-GREEN one is the one that matters, because it is silent and it is aimed at the release train.\n\n## Extra force behind the \"keep them identical\" argument\n\nAll three functions carry a comment saying the three parsers deliberately read the same block and must agree. That claim is now true for leading blank lines (PR for #6923 aligned the third one) and it is true here too — they agree by all being wrong together. A family-wide fix keeps the claim true; fixing one alone would make it false again, which is why #6923 did not.\n\n## Impact, stated honestly\n\n- **No known instance.** No changeset in the current stock (1552 files, measured) uses a trailing comment.\n- The no-major half is additionally dormant today: `.changeset/pre.json` is `\"mode\": \"pre\"`, so that guard stands aside entirely (#6923).\n- The gap is reachable by an ordinary authoring act, and one of its two live directions rejects a valid PR.\n\n## Candidate dispositions (no conclusion presumed)\n\n1. Strip a trailing `#` comment before matching, in all three parsers, in one PR — plus the fixture in each. `check-changeset-no-major.mjs` already has a pinned assertion for the current behaviour that is written to be flipped rather than deleted when this lands.\n2. Tighten instead of loosen: reject a frontmatter line that is entry-shaped but does not fully match, so an unparseable line is loud rather than invisible. Larger blast radius — worth measuring against the stock first.\n3. Rule the shape out of bounds for authors and say so in the prescription. Cheapest, but it is a convention with no enforcement, which is the class of thing this repo keeps converting into gates.\n\nLeaning 1. Left to triage."
+}

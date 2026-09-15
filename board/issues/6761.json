@@ -1,0 +1,36 @@
+{
+  "number": 6761,
+  "kind": "issue",
+  "title": "[决策] dataset 的 dimension/measure 声明成内联 locale map 的 `label` 被生产端整个丢弃 —— 三个渲染端在等,而 schema 授权的形状发不出去",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T14:27:55Z",
+  "updated_at": "2026-08-09T07:05:25Z",
+  "closed_at": "2026-08-09T07:05:25Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6761",
+  "body": "Filed by the services-lane PM (`session_01USNUyHEr7uaU6MoEWXitei`) out of **#5199**, whose two successive scopes were both **disproven by measurement**. This card carries the one gap that survived both, with fresh evidence. #5199 is closed as falsified; see its closing comment for the chain.\n\n**2026-08-08 裁决落地(维护者批复 B)**:本单收窄为 **services 半边**——`queryDataset` 两处富化 + `dataset-compiler.ts:374/406` 改调共享解析器,并盖掉 `d.name` 替换。契约半边(共享 `I18nLabel → string` 解析器)见 **#6765**,归 spec 座位。裁决全文见下方评论。\n\nBlocked-by: #6765\n\n## 已测量的事实(全部实测,非推断)\n\n在 `origin/main` (`a5d2573`) 的专用 worktree 上直接跑查询,两个策略各测:\n\n| dataset 声明的 `label` | 实测下发的 `fields[]` |\n|---|---|\n| `label: 'Owner'`(字符串) | `[{name:'owner',type:'string',label:'Owner'}, …]` —— 两个策略一致 |\n| `label: { en:'Owner', 'zh-CN':'负责人' }`(内联 map) | `[{name:'owner',type:'string'}, …]` —— **`label` 整个不见了**,两个策略一致 |\n| 不声明 | 同上,无 `label` |\n\n**成因**:`AnalyticsService.queryDataset` 的两处富化(measures ~`:1095-1130`、dimensions ~`:1161-1177`)以 `typeof … === 'string'` 为门槛,非字符串一律跳过;再往上一层 `dataset-compiler.ts:374` / `:406` 的 `label: typeof d.label === 'string' ? d.label : d.name` 把它替换成**机器名**,于是 `/analytics/meta` 还会把 `owner` 当作展示标题发布出去。\n\n**消费端早已就位**:三处渲染器都经 `buildDatasetFieldHelpers` 把 `fields[].label` 排在第一顺位 —— objectui `plugin-dashboard/src/DatasetWidget.tsx:563`、`app-shell/.../previews/DatasetPreview.tsx:128`、`plugin-report/src/DatasetReportRenderer.tsx:440/703/845`。\n\n**内联 map 不是假想形状**:`I18nLabelSchema` 自 #5728 起授权它,平台自己的三个已发布页面就有 31 处在用。中文部署照着写,拿到的是**没有标签**。\n\n## 线型约束(实施时的硬边界)\n\n线上仍是**解析后的字符串**,这是被两端声明钉死的:`packages/spec/src/contracts/analytics-service.ts:40` 写 `fields[].label?: string`,objectui 的 `DatasetResultField.label?: string` 与之匹配,且 `headerLabel` 把它当**纯字符串** fallback 喂给 `fieldLabel(...)` —— 该路径上没有 `pickLocalized`,原样塞一个 map 会渲染成 `[object Object]`。\n\n⚠️ **必须一并覆盖 `dataset-compiler` 的 `d.name` 替换**,否则 `/analytics/meta` 继续拿机器名当展示标题。\n\n⚠️ 另一处已知陷阱(#5199 的 dev 实测):下游富化带 `if (f.label == null)` / `if (f.label != null) continue` 守卫,所以任何在上游写入占位值的做法都会**永久顶掉**文档提供的真标签 —— 这正是 #5199 route A 被判定为「有害而非冗余」的原因。\n\n## 决策记录(已裁,存档)\n\n修法必须回答「谁来解析、解析器住在哪」,而这个仓**今天后端零个内联 map 解析器**(已全仓 grep 核实:除 `packages/spec` 文档与 objectui 外无命中)。三个选项 A(服务内私有孪生)/ B(spec 共享解析器)/ C(拓宽线型交客户端)的完整权衡见下方裁决评论;**维护者裁 B**。\n\n## 相邻卡(不同机制,非重复)\n\n- **#5141** —— report 渲染器拿到 measure label 却不用(**渲染端**;其前提预设了下发,与本次测量一致);\n- **#5076** —— analytics 面上 i18n bundle 未被应用(select 选项的**行值**,另一机制);\n- **#5199** —— 本卡出处,已关闭(两次范围均被证伪)。\n\n来源:#5199 的 dev 实测回报(会话 `session_01USNUyHEr7uaU6MoEWXitei` 派发)。测量探针留在 worktree `/home/user/objectstack-issue-5199/packages/services/service-analytics/src/__tests__/zz-probe-5199.test.ts`(未跟踪),可复跑。"
+}

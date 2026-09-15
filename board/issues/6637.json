@@ -1,0 +1,36 @@
+{
+  "number": 6637,
+  "kind": "issue",
+  "title": "A non-`record-`-prefixed flow `triggerType` silently degrades the flow to manual — no lint, no runtime signal (spun out of #5957)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "needs-user-decision",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T07:53:17Z",
+  "updated_at": "2026-08-09T03:08:42Z",
+  "closed_at": "2026-08-09T03:08:42Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6637",
+  "body": "Observation-class. Spun out of #5957 / PR #6636, whose ruling put this family explicitly **out of scope**: it is a different shape and a different question (a lint-capability judgement), so it is filed standalone rather than folded into that card. **Unassigned, for triage. Nobody is hitting it today.**\n\n## The shape\n\n`flow-trigger-unknown-event` only ever looks at tokens that already start with `record-`. The engine's binding resolver decides that first:\n\n```ts\n// packages/services/service-automation/src/engine.ts, resolveTriggerBinding\nconst triggerType = typeof config.triggerType === 'string' ? config.triggerType : undefined;\nif (triggerType && triggerType.startsWith('record-')) {\n  return { triggerType: 'record_change', binding: { /* ... event: triggerType */ } };\n}\n// ... array form, time_relative, schedule, api ...\n// falls through: the flow is simply not record-triggered\n```\n\nSo the two families fail differently:\n\n| authored token | engine verdict | diagnostic today |\n| --- | --- | --- |\n| `record-created` (in-prefix, out-of-grammar) | binds to record-change, maps to zero hook events, never fires | `flow-trigger-unknown-event`, **error** since #5762 |\n| `onCreate` (out-of-prefix) | never binds at all — silently a manual flow | **none, at any layer** |\n\nThe second row is the strictly quieter failure of the two, and it is the one with no diagnostic. An author who writes `onCreate` gets a flow that looks authored, validates clean, boots clean, and simply never runs.\n\n## Measured census (`origin/main` at the time of filing)\n\n`git grep` over the tracked tree finds 4 non-`record-`-prefixed `triggerType` tokens. They sit in **three different positions**, and only one is the shape above — worth stating, because #5957's body counted them as one group and only a third of that count is actionable:\n\n1. **A genuine flow start node — the real instance.**\n   `packages/cli/test/authoring-rule-command-parity.test.ts:60`\n   `config: { objectName: 'parity_task', triggerType: 'onCreate' }` on a `type: 'record_change'` flow. This is exactly the silent-degradation shape. (The fixture's subject is `approval-expression-invalid` parity, so its own assertions do not depend on the token.)\n\n2. **The `FlowRuntimeState` inventory shape — a different field that happens to share the name.** `packages/runtime/src/domain-handler-registry.test.ts:663` and `:670`, `triggerType: 'on_create'` inside `{ name, enabled, bound, status, triggerType, object }`. That position carries the *resolved* trigger kind (`record_change` / `schedule` / `time_relative` / `api`), not an authored token. The test is a pass-through assertion (`toEqual` against the same literal), so the value is arbitrary by construction.\n\n3. **A deliberately-invalid literal — correct as written, do not touch.** `packages/spec/src/data/object.test.ts:1003`, `workflows: [{ name: 'stamp', triggerType: 'on_update', actions: [] }]`. This is the #1535 unknown-key rejection test; the whole `workflows` key is rejected on purpose and the literal carries a `@ts-expect-error`. Not a flow start node at all.\n\nSo: **1 site of the described shape**, not 4.\n\n## The question for triage\n\nShould a non-`record-`-prefixed `triggerType` on a `type: 'record_change'` flow produce a diagnostic?\n\nThe tension is real in both directions, which is why this is filed rather than fixed:\n\n- **For:** it is a strictly quieter failure than the one #5762 raised to `error`, on the same authoring surface, and \"declared = enforced\" says a flow that declares a trigger and binds to nothing should say so. A `record_change` flow whose start node names a trigger the engine cannot route is not an ambiguous intent.\n- **Against:** the prefix check is also the mechanism by which a flow legitimately *is* manual, and `lint-flow-patterns.test.ts` already carries a deliberate `does NOT flag record_change — undecidable at authoring time, caught at run time` case. A new rule here risks flagging the intentional shape. There may also be no business pull: nothing in the example apps authors this, and the only in-repo instance is one CLI test fixture.\n\nA narrower framing worth considering instead of a new rule: the check could be scoped to flows that declare `type: 'record_change'` **and** a start-node `triggerType` that resolves to no binding at all — which is decidable at authoring time and cannot catch a genuinely manual flow, because a manual flow does not declare `record_change`.\n\nIf triage decides yes, the `runtime` half (#3481 established the precedent that a silently-dead trigger form deserves a signal at *some* layer) and the `lint` half should be decided together.\n\nRelated: #5957 / PR #6636 (origin), #5762 (the severity upgrade that made the in-prefix family loud), #3427 / #3457 / #3481 (the three sources of `flow-trigger-unknown-event`).\n"
+}

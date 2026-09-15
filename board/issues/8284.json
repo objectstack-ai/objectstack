@@ -1,0 +1,33 @@
+{
+  "number": 8284,
+  "kind": "issue",
+  "title": "The i18n catalog is resolved ahead of the document, so a tenant's own Studio rename never reaches either `/meta/object` read — and neither do extension scalar overrides",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:spec"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-13T03:01:04Z",
+  "updated_at": "2026-09-14T09:23:12Z",
+  "closed_at": "2026-08-14T10:13:09Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8284",
+  "body": "**Filed by the PM on behalf of the #8037 dev agent**, which measured this but could not file it — GitHub API 403 for its whole session. It invented no issue number anywhere in its commit; this is the first number attached to this defect.\n\n⚠️ **This supersedes #8037's framing.** #8037 asked for a `label` leak \"in the object-extension fold\". **The fold is correct on all six properties.** The defect is one layer down, in i18n resolution — and its more severe half has nothing to do with extensions at all.\n\n## The mechanism\n\n`translateObject` (`packages/spec/src/system/i18n-resolver.ts`) resolves `label` / `pluralLabel` / `description` as **`catalog ?? document`**. The catalog is keyed by object name and consulted **first**, so it overwrites whatever the resolution produced.\n\n`GET /meta/object` (list) and `GET /meta/object/:name` are translated. **`?layers=true` is deliberately untranslated** — its own comment says so: *\"Not translated and not cached, both deliberately: this is a diagnostic.\"* That is the entire reason #8037 presented as \"onto `?layers=true` only\".\n\nTraced live, showing the fold is uniform and the loss is downstream:\n\n```\n[BYNAME] fold(showcase_account) baseLabel=\"Account\" -> outLabel=\"Account (Success Overlay)\"\n[BYNAME] served label = \"Account\"          ← discarded downstream\n[LAYERS] fold(showcase_account) baseLabel=\"Account\" -> outLabel=\"Account (Success Overlay)\"\n[LAYERS] served code=\"Account (Success Overlay)\" effective=\"Account (Success Overlay)\"\n```\n\n## ⛔ The severe half — a tenant's rename is silently discarded\n\nThe extension-override case (#8037) is **the milder one**. Because the catalog is keyed by object name and wins unconditionally, it also defeats **the tenant's own customisation**. Measured on a deployment-shaped boot, renaming via the ordinary Studio round-trip (`PUT /meta/object/showcase_account` → **200 OK**):\n\n| Surface | Label |\n|---|---|\n| `GET /meta/object` (list) | `Account` |\n| `GET /meta/object/:name` | `Account` |\n| `layers.overlay` | **`Customer`** ← what the tenant actually saved |\n| `layers.effective` | `Account (Success Overlay)` |\n\n**The tenant's rename reaches neither read that a writable form derives from.** One object serves three different labels, and the only surface showing the saved value is the one explicitly documented as a diagnostic.\n\n⭐ This is another instance of this lane's recurring shape — **a 200 that means nothing happened** (now the sixth: #7893, #8018, `reassignOrphanedMetadata`, #7823, #7736, this).\n\n## Scope: three scalars, one mechanism\n\nFrom the enumeration landed in `3a27c46edb` (PR #8258) — `mergeObjectDefinitions` touches six keys in three merge kinds, and the fold has **zero** divergences across all of them:\n\n| Property | Merge kind | Reads agree? |\n|---|---|---|\n| `fields` | key-keyed spread (idempotent) | ✅ |\n| `validations` | concatenated (not idempotent, #8027) | ✅ |\n| `indexes` | concatenated (not idempotent, #8027) | ✅ |\n| **`label`** | scalar, last-writer-wins | ❌ **diverges** |\n| `pluralLabel` | scalar, last-writer-wins | ⚠️ same exposure, not triggered on `main` |\n| `description` | scalar, last-writer-wins | ⚠️ same exposure, not triggered |\n\nAll three scalars share **one** mechanism; `label` is simply the only one the shipped showcase catalog currently triggers (`showcase_account` has a catalog `label`, no catalog `description`).\n\n## ⛔ Why the obvious fix is a regression in disguise\n\nThe dev reverse-verified the card's proposed \"easy half\" (make the fold drop scalars) as **arm B**, and it is the load-bearing row:\n\n| Case | Arm A (revert #8045) | **Arm B (card's \"fold drops scalars\")** | Arm C (revert #7556 fold) |\n|---|---|---|---|\n| New sweep (19 cases) | 🔴 3 | 🔴 **1 (anti-vacuity only)** | 🔴 7 |\n| #8015 agreement pin | 🟢 | 🟢 | 🔴 2 |\n| #8045 fold pin | 🔴 2 | 🟢 | 🔴 4 |\n\n**Arm B is invisible to both existing pins** — caught only by the new anti-vacuity case. It makes the symptom disappear by **deleting a documented `ObjectExtensionSchema` feature**, and leaves the tenant-rename defect completely untouched. ⛔ That is why no behavioural change was shipped.\n\n## The ruling needed\n\n**Should the catalog lose to an explicit override** — which requires carrying scalar **provenance** through the fold, so \"this value was explicitly set\" is distinguishable from \"this value is the packaged default\" — **or should the untranslated diagnostic be reconciled with the translated reads?**\n\nBoth candidate directions change behaviour well outside #8037's declared region, which is why this is a decision card rather than a dispatch.\n\n## Reproduction\n\nPinned in `packages/qa/dogfood/test/showcase-object-extension-scalar-divergence.dogfood.test.ts` (landed in `3a27c46edb`): **two `it.fails` cases that turn red when this is fixed.** ⛔ Do not \"repair\" them to green — inverting them is the signal the fix worked.\n\n## Related\n\n#8037 (the card this came from; premise corrected) · PR #8258 = `3a27c46edb` (the enumeration + repro pins) · #7556/#8015 · #8027/#8045 · #8268 (`nameField`, a scalar in the same last-writer-wins class — ⚠️ read together) · ADR-0029 D9.2"
+}

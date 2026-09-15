@@ -1,0 +1,36 @@
+{
+  "number": 5236,
+  "kind": "issue",
+  "title": "objectui: `allowAddTab` 渲染出的「新增 tab」按钮没有 click handler —— 契约刚声明的能力只交付了一半",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "pm:queue",
+    "repo:objectui",
+    "target:v17"
+  ],
+  "assignees": [
+    "yinlianghui"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T11:45:35Z",
+  "updated_at": "2026-08-09T06:24:57Z",
+  "closed_at": "2026-08-09T06:24:57Z",
+  "closed_by": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5236",
+  "body": "发现于 #5073 的实施(promote `userFilters.allowAddTab` 进 spec 契约)。**不阻塞 #5073**,那条的裁定与落地都成立;这是落地时实测到的、渲染器一侧的独立缺口。\n\n## 事实(实测,非阅读推断)\n\n`objectui/packages/plugin-list/src/UserFilters.tsx` 的 `TabFilters`:同一个 `return` 里,**预设 tab 按钮有 `onClick`,新增 tab 按钮没有**。\n\n预设 tab(`:727` 起):\n\n```tsx\n< button\n  key={tabId}\n  data-testid={`filter-tab-${tabId}`}\n  onClick={() => handleTabChange(tabId)}\n  …\n> {tab.label} < /button >\n```\n\n`allowAddTab` 渲染的那个(`:742` 起):\n\n```tsx\n{allowAddTab && (\n  < button\n    className=\"… hover:text-foreground hover:bg-muted shrink-0\"\n    data-testid=\"filter-tab-add\"\n    title=\"Add filter tab\"\n  >\n    < Plus className=\"h-3.5 w-3.5\" / >\n  < /button >\n)}\n```\n\n没有 `onClick`,组件里也没有任何 `onAddTab` / `addTab` 入参或回调(全仓 grep `filter-tab-add` / `onAddTab` 只命中这两行)。它带 hover 态和 `title=\"Add filter tab\"`,**看起来完全可点**,点下去什么都不发生。\n\n注意别与 `app-shell/src/views/metadata-admin/widgets.tsx:1431` 的 `addTab` 混淆 —— 那是 Studio **编辑期**的 tabs 编辑器(`data-testid=\"filter-mode-add-tab\"`),与运行期渲染器的这个按钮无关。\n\n## 为什么现在值得立案\n\n#5073 把 `allowAddTab` 提升进了 `packages/spec` 的 `UserFiltersSchema`,它因此进了 JSON Schema、Studio SchemaForm 和参考文档 —— **能力从此可被发现**,AI 作者会照着 schema 写它。\n\n那条 PR 的 `.describe()` 已经刻意收窄到只承诺渲染入口:\n\n> Render an \"add tab\" affordance after the presets (tabs element). Page lists only — object views use `listViews` for named presets\n\n这是按 PD#10 写的(不宣传运行时不交付的能力),所以契约本身没有说谎。但作者写 `allowAddTab: true` 的**意图**显然是「让终端用户能加 tab」,而交付的是一个死按钮 —— 一个可见、可 hover、有 tooltip 却无行为的控件,比没有这个按钮更糟:它把「没实现」伪装成「点了没反应的 bug」。\n\n## 需要裁定的是方向,不是补丁\n\n- **A. 实现它** —— 给按钮接上回调,新增的 tab 是**会话级**的(与 `userFilters` 的既有语义一致:ADR-0047 说 end-user 的筛选选择 session-scoped、从不落成元数据),还是要写回 `sys_metadata`?后者会把渲染器变成元数据写入方,牵扯权限与 ADR-0047 的作用域承诺,不能顺手做。\n- **B. 移除按钮**,并在 #5073 刚落地的 spec 声明上做对应处理(tombstone / 收窄 describe / 退役该键)—— 但该键在存量配置里是被写过的,退役要走 spec-property-retirement 那套。\n\n两个方向都动到已发布契约,所以**立案不猜**,按 #5022 之后的规矩交给维护者。\n\n## 参考\n\n- spec 侧声明:`packages/spec/src/ui/view.zod.ts` `UserFiltersSchema.allowAddTab`(#5073)\n- 渲染器:`objectui/packages/plugin-list/src/UserFilters.tsx:669`(prop)、`:182`(传入)、`:742`(渲染)"
+}

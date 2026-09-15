@@ -1,0 +1,37 @@
+{
+  "number": 5061,
+  "kind": "issue",
+  "title": "Console renders a datetime action param as zone-less `datetime-local` and posts it raw — the runtime validator then rejects every UI submission with 400",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:queue",
+    "repo:objectui",
+    "target:v17"
+  ],
+  "assignees": [
+    "yinlianghui"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T01:28:00Z",
+  "updated_at": "2026-08-09T07:01:45Z",
+  "closed_at": "2026-08-09T07:01:45Z",
+  "closed_by": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5061",
+  "body": "在 hotcrm 的 dogfood 浏览器验证(objectstack-ai/hotcrm#592 / PR objectstack-ai/hotcrm#670,17.0.0-rc.2)中实测发现;对任何声明 `type: 'datetime'` 参数的 action 均成立,与具体 app 无关。\n\n## 症状\n\naction 参数声明为 `type: 'datetime'` 时,Console 把它渲染成 `<input type=\"datetime-local\">`(其值天然**无时区**),提交时原样 POST:\n\n```\nPOST /api/v1/actions/crm_opportunity/schedule_meeting\n{\"recordId\":\"cUwJQOIREpOsdccQ\",\"params\":{\"subject\":\"…\",\"start\":\"2026-08-10T15:00\",\"duration\":45}}\n\n→ HTTP 400\n{\"code\":\"VALIDATION_ERROR\",\"message\":\"Invalid action params: Action param \\\"start\\\" (datetime):\n expected an ISO-8601 instant with explicit zone (e.g. 2026-03-15T14:30:00.000Z)\"}\n```\n\n**没有任何用户可输入的值能通过校验** —— 渲染器产出的形状与校验器要求的形状不相交。用户看到一条错误 toast,对话框关闭,零记录写入。已在两个不同入口复现(list-view 行菜单与 record header),同一 400。\n\n## 为什么这是平台缺陷而不是 app 缺陷\n\n- 渲染 `datetime-local` 的是 Console 的参数表单生成器;\n- 拒绝其输出的是 runtime 的 action-param 校验器(要求带时区的 ISO instant);\n- 两者都是平台组件,app 作者在两者之间没有任何可作用的缝隙 —— 声明一个 `datetime` 参数就注定该 action 在 UI 上不可用。这是「声明即强制」的反面教材:平台允许声明一个自己 UI 无法履约的参数类型。\n\n## 两个候选修法(择一,建议前者)\n\n1. **Console 侧**:提交前把 `datetime-local` 的值按用户/浏览器时区序列化为带时区的 ISO instant(`2026-08-10T15:00` → `2026-08-10T15:00:00.000+08:00` 或 UTC 换算)。语义最正确,一次修复惠及所有 app。\n2. **Runtime 侧**:校验器接受无时区形状并按组织时区归一化。较宽松,但把「时区在哪」变成隐式约定,不建议。\n\n## 影响与临时绕行\n\n受影响面 = 所有带 `datetime` 参数的 action 的全部 UI 提交路径。hotcrm 侧的临时绕行(在 objectstack-ai/hotcrm#670 的返工里落地)是把 action 参数改为可被 Console 实际产出的形状并在 body 内归一化 —— 平台修复落地后应回退该绕行。\n\n环境:17.0.0-rc.2,`objectstack dev`,Chromium(Playwright)。完整截图与网络记录见 hotcrm PR #670 的 dogfood 记录。"
+}

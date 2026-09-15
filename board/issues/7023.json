@@ -1,0 +1,36 @@
+{
+  "number": 7023,
+  "kind": "issue",
+  "title": "finding: `POST /packages/:id/publish-drafts` 整包 draft 批量转正,零能力的已认证调用方即可调用(实测 200 vs 同族 `_migrate-stored` 403)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:queue",
+    "target:v17"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T09:27:18Z",
+  "updated_at": "2026-08-09T15:35:59Z",
+  "closed_at": "2026-08-09T15:33:11Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7023",
+  "body": "在 #6599 的消费方普查里撞到的（那张卡问的是「谁在调 `/meta/_drafts`」；顺着 `usePublishAllDrafts` 的 Publish 动作走到了这条写面）。**未修，按 PD #10 立卡。**\n\n## 实测：一个零能力的已认证调用方能做什么\n\n不是「没看到能力门禁」这种静态观察 —— 直接驱动 dispatcher 量的。调用方上下文 `{ userId: 'u_portal', systemPermissions: [] }`，一个会话、一条能力都没有：\n\n```\n### zero-capability caller context ### {\"userId\":\"u_portal\",\"systemPermissions\":[]}\n### HTTP status ### 200\n### publishPackageDrafts invoked? ### 1\n### drafts promoted to ACTIVE ### [\"app.hr:account\",\"app.hr:salary_review\"]\n### body ### {\"success\":true,\"data\":{\"success\":true,\"publishedCount\":2,\"failedCount\":0,\n              \"published\":[{\"type\":\"object\",\"name\":\"account\"},\n                           {\"type\":\"object\",\"name\":\"salary_review\"}],\"failed\":[]}}\n```\n\n同一个调用方，打隔壁那条同族路由 `POST /metadata/_migrate-stored`：\n\n```\n### _migrate-stored status for the SAME caller ### 403\n### migrateStoredMetadata invoked? ### 0\n```\n\n**同一个调用方、同一次运行、同一类操作 —— 一条 200 并真的把整包 draft 转正，一条 403 且被调函数一次都没进。**\n\n## 代码面\n\n`POST /packages/:id/publish-drafts` → `packages/runtime/src/domains/packages.ts:160`。\n\n整个 `packages.ts`（739 行）里 `systemPermissions` / `isSystem` / `manage_metadata` / `FORBIDDEN` / `403` 的命中数是 **0**。挂载侧 `mountPackagesRoute`（`packages/runtime/src/dispatcher-plugin.ts:984`）也只是 `dispatcher.dispatch(...)` 的转发，没有包任何门禁。所以这条路由之上除全局 `requireAuth` 外没有任何判据。\n\n对照物就在同一个 dispatcher 里：`_migrate-stored`（`domains/meta.ts`）显式判 `ec?.isSystem || systemPermissions.has('manage_metadata')`，并且在解析 protocol **之前**判，理由写在注释里（不让调用方拿 501/200 的差别去探测）。\n\n## 这条路由做的事\n\n`publishPackageDrafts` 把该 package 名下**每一条** pending DRAFT 行提升为 `active`；`seed` 类型的 draft 被发布即意味着**装载数据行**（路由里 `applyPublishedSeeds` 那段）；随后还会清掉 ADR-0045 的发布门 —— #4829 / PR #6942 刚把它挪到机器管理键 `app._unpublished`，由 publish-drafts 置 `false`。也就是说这一次调用同时是「schema 生效」「数据落库」「半成品应用对真实用户可见」。ADR-0045 自己写过这个门的失败方向判断：门**失败开放**会把半成品应用静默暴露给真实用户，比过度限制严格更糟（`docs/adr/0045-...md:192`）。\n\n## 为什么它值得单独一张卡\n\n它和 **#6603** 是同一形状 —— 而 #6603 刚被维护者裁为需要 `manage_metadata`，判词是「能写 schema 的人就该是能看见完整 schema 的人」（评论 `5225531464`）。#6603 管的是**单条** `PUT /meta/:type/:name`；这条是**整包批量转正**，按同一条判据赌注更大，却是两条里没有门禁的那条。\n\n同族参照：#6920（匿名 mass assignment）、#6599（`_drafts` 读面，其所述字段级泄露已实测证伪，见 PR #7014）。\n\n## 不在本卡里替维护者选修法\n\n至少有「照 #6603 判 `manage_metadata`」和「按 package 所有权/作者身份判」两种读法，成本与语义不同；而且 `/packages` 域下同样裸奔的还有 `discard-drafts` / `revert` / `rollback` / `enable` / `disable`，要不要一起收口是域级决定，不是这条路由的局部决定。留给分诊与维护者。\n\n## 复现\n\n驱动 `HttpDispatcher.handlePackages('/app.hr/publish-drafts', 'POST', {}, {}, { request: {}, executionContext: { userId: 'u_portal', systemPermissions: [] } })`，protocol 侧放一个 `publishPackageDrafts` 双档记录被提升的条目；同一上下文再驱动 `handleMetadata('_migrate-stored', ctx, 'POST', {}, {})` 作对照。上面两段输出即为该探针的原始 stdout。\n\n## 立卡时的查重说明\n\n开卡前的 issue 关键词查重被账号级 REST 速率限制挡住（本班次共享身份，多次退避重试仍 `API rate limit already exceeded`）。改用本地信号做的查重：`git log -i --grep=publish-drafts` 与全仓 `publish-drafts` + 权限关键词交叉搜索，命中的都是发布**语义**（ADR-0045 可见性、seed 装载、org 作用域、端点发布门），**没有一条关于这条路由的授权**。若分诊发现已有同族卡，按重复合并即可。\n"
+}

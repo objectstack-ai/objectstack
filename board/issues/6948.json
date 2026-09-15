@@ -1,0 +1,35 @@
+{
+  "number": 6948,
+  "kind": "pull_request",
+  "title": "docs(mcp): `diagnoseEmptyRead` 的 TSDoc 更正一句被证伪的事实 —— `MetadataFacade.getObject` 就是 `get('object', n)`",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T06:04:44Z",
+  "updated_at": "2026-08-09T08:29:31Z",
+  "closed_at": "2026-08-09T08:29:29Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": "2026-08-09T08:29:29Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/6948",
+  "body": "Fixes #6724\n\n## 这张卡改的是什么\n\n`packages/mcp/src/mcp-server-runtime.ts` 里 `diagnoseEmptyRead` 的 TSDoc(#6055,由 PR #6051 落地)为一次**刻意的设计选择**给出了两条理由:不把 `object_schema` 的解析器从 `getObject(name)` 换成 `getDiagnosed('object', name)`,而是在空答案之后再跑一次仅取结论的探针。\n\n两条理由里,**事实那一条是错的**:\n\n> `getObject` is its own member of `IMetadataService` with no documented equivalence to `get('object', name)`, and the equivalence does not hold in general: `MetadataManager.getObject` delegates to `get('object', name)`, but `MetadataFacade.getObject` (objectql) returns `registry.getObject(name)` — **a different shape from its own `get()`**.\n\n同一句话在 `mcp-server-runtime.metadata-outage.test.ts` 里被复述过一次。两处都改了,**只改注释,零行为变化**。\n\n## 卡片上每一条继承来的事实,都在今天的 `main` 上重新测过\n\n| 卡片上的说法 | 复现结果 |\n|:---|:---|\n| TSDoc 在 `mcp-server-runtime.ts:164` | 行号已漂移,按内容定位到 `:162-165`(函数体在 `:187`);内容逐字一致 |\n| 复述在 `...metadata-outage.test.ts:286` | 行号一致,`:285-287` 那段注释,内容逐字一致 |\n| `SchemaRegistry.getItem` 特判 object 类型,在 `registry.ts:1536` | **行号已漂移到 `:1680`**,分支体在 `:1682-1684`:`if (type === 'object' \\|\\| type === 'objects') { return this.getObject(name) ... }` |\n| `MetadataFacade.get` 之后跟着 `item?.content ?? item` 解包 | 复现,`metadata-facade.ts:51-53`;`getObject` 在 `:104-105` 直接 `return this.registry.getObject(name)` |\n| 解包是空操作(merged `ServiceObject` 没有 `content` 键) | 实测复现,见下 |\n\n还做了一次全仓搜索,确认这句话**只有这两处**(`does not hold in general` / `different shape from its own` / ``is NOT `get(``),没有第三个落点要另外开 issue。\n\n## 运行时探针(临时,测完即删)\n\n临时 vitest 用例 `packages/objectql/src/tmp-6724-probe.test.ts`,用 `registry.registerObject` 播种一个对象,然后同时问 facade 的两个成员。**已删除**,不在本 PR 的 diff 里。\n\n```\n[probe] typeof viaGetObject      = object\n[probe] keys(viaGetObject)       = [\"name\",\"label\",\"fields\",\"nameField\",\"_packageId\",\"_provenance\"]\n[probe] \"content\" in viaGetObject= false\n[probe] viaGetObject === viaGet  = true\n[probe] miss viaGetObject        = undefined\n[probe] miss viaGet              = undefined\n\nTest Files  1 passed (1) / Tests  2 passed (2)\n```\n\n三件事同时成立,而且是最强的形式:\n\n1. 命中时两个成员交回**同一个对象引用**(`===`,不只是深相等);\n2. 返回对象的键里**没有** `content`,所以 `item?.content ?? item` 确实是空操作;\n3. 未命中时双方都是 `undefined`。\n\n顺带印证了 PR #6723 契约 TSDoc 里的 \"runtime-effective object\" 说法:回来的键含 `nameField` / `_packageId` / `_provenance`,是物化接缝(`registerObject` → `resolveObject`)加上去的。\n\n## 已落地的证据:PR #6839\n\n不重新推导 —— PR #6839(为 #6745,`a8b66ea`,已于 01:50Z 合并进 `main`,merge commit `7a5ef0008`)新增了 `packages/objectql/src/metadata-service-getobject-equivalence.test.ts`,把这条等价关系在**三个实现**(`MetadataManager` 的注册表命中与 loader 回退两条路径、`createMemoryMetadata`、`MetadataFacade`)上钉成了门禁,断言用的是 `toBe`(引用相等)而不是深相等,命中与未命中两条路径都覆盖。更正后的措辞直接引用这个文件,而不是引用我自己的一次性探针。\n\n## 反向验证:这里没有红可制造,也不该造一个\n\n**观察类改动,零行为变化。** 改的是两段注释,没有任何可执行语句改变,因此:\n\n- 不存在\"撤掉本次改动就变红\"的方向 —— 注释不参与求值,任何声称的红都只能是伪造的;\n- 也不该为它新写一个\"断言注释文本\"的测试:那会把一段散文钉成契约,而它不是契约,只会在下一次合理改写时挡路;\n- 真正能防止这条事实再次腐化的门禁**已经存在**,就是 PR #6839 那个文件 —— 哪个实现让这对成员分歧,它会先变红。本 PR 让注释与那道门禁、以及 PR #6723 的契约 TSDoc 三者说同一句话。\n\n因此本 PR 交付的验证是:上面的运行时探针 + #6839 的引用 + `packages/mcp` 的干净门禁。\n\n## 保留了仍然成立的那半条理由\n\n更正**不是**\"所以当初应该换解析器\"。原 TSDoc 的另一半是站得住的,原样保留并写得更清楚:`getObject` 是 `IMetadataService` 自己的成员,**在 #6055 当时它并没有被文档化的等价关系**,在消费端擅自假定一条,正是 Prime Directive #12 禁止的私有方言。所以解析器当初没有被换掉,这个判断本身没有被本次更正推翻。\n\n新的措辞额外交代了时间线,免得读者把它读成与契约矛盾:那条等价关系自 PR #6723(#6505)起已经写进 `IMetadataService.getObject` 的 TSDoc,所以\"没有文档化\"是关于 #6055 那时仓库的事实,不是今天的。\n\n⛔ **本 PR 明确不作出下一个判断**:那个 miss 路径上的额外读究竟该留还是该换成 `getDiagnosed('object', name)`,是一次独立的取舍(多一次未命中读 vs. 换一个解析器),由接手的人按其自身利弊去做。更正记录与作出决定是两件事,这里只做前一件 —— 正文里也是这么写的。\n\n同一段末尾那条 \"on a host that implements `getDiagnosed` *and* a `getObject` resolving somewhere else\" 的残余风险项没有删,但补了一句:自 PR #6723 起契约已经用声明排除了这种宿主,所以它读作\"针对一次契约违反的残余风险\",而不是\"今天真有这么一个实现\"。\n\n## 门禁(真实输出)\n\n- `pnpm --filter @objectstack/mcp typecheck` → `tsc --noEmit`,无输出\n- `pnpm --filter @objectstack/mcp test --maxWorkers=2` → `Test Files 10 passed (10)` / `Tests 114 passed (114)`(合并 `origin/main` 之后重跑过一遍,数字不变 —— 本 PR 不增删用例)\n- `pnpm lint` → 无输出\n- `check:nul-bytes` → `OK (scanned 6440 tracked text file(s); … no raw ASCII control bytes)`\n- `check:empty-changeset` → `✓ No empty-frontmatter changeset introduced by this diff (1 declaring changeset(s) added)`\n- `check:slot-lookup` / `check:route-envelope` / `check:error-code-casing` / `check:engine-double-contract` / `check:doc-authoring` / `check:published-files` / `check:release-notes` / `check:release-body` → 全部 PASS\n\n## changeset\n\n`patch`,`@objectstack/mcp`。TSDoc 会随包一起发布进 `.d.ts`,一句被证伪的事实是消费者看得见的东西,所以按卡片要求写了 changeset(非空 frontmatter),没有走 `skip-changeset`。\n\n## 刻意没做\n\n- 没有动 `packages/spec` 的契约 TSDoc:那半边由 PR #6723 负责,#6505 的裁定把范围划在那里。\n- 没有动 `objectql` 的任何实现或测试:等价关系的门禁由 PR #6839 承担,本 PR 只引用它。\n- 没有碰解析器本身,也没有碰 miss 路径上那次额外读的行为。\n\nRefs #6505, #6055, #6745, PR #6051, PR #6723, PR #6839.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_017uFVNMmTxLpmfQYiuKM1Yx\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_017uFVNMmTxLpmfQYiuKM1Yx)_"
+}

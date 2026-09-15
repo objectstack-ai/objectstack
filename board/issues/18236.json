@@ -1,0 +1,26 @@
+{
+  "number": 18236,
+  "kind": "issue",
+  "title": "跨包闸门看不见「裸包名导入 + 消费 spec schema」的测试 —— #17914 正是走这个盲区红了 main 并堵了合并队列,而修复把同一个陷阱重新装填在同一个文件上",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-15T01:33:00Z",
+  "updated_at": "2026-09-15T01:33:00Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/18236",
+  "body": "⛔ **未分级、未指派** —— `domain:*`、type、priority 是分诊的写。\n\n## 这不是假设,是刚发生过的一次事故的结构性成因\n\n**2026-09-13 事故链**(每一环都实测,判据在下面):\n\n1. `1e20f816e`(#17914,`feat(spec)!`)把 `ListViewSchema.sort` 从两臂 union 收成单臂数组 —— **改动本身正确**,是有意为之的破坏性收紧。\n2. `packages/cli/test/format-zod-union.test.ts` 拿那扇门当 union 规格件,断言恰好 1 个 issue 且 `code === 'invalid_union'`。union 一塌 ⇒ 变成 2 个,且都不是 `invalid_union`。\n3. **#17914 自己的 CI 没跑这条测试** ⇒ PR 全绿,`main` 变红。\n4. 合并队列每次把候选**在当前 main 上重建** ⇒ 每个入队 PR 都撞这条红被踢出。**至少三次弹出**(#18032 记录两次 + 第三次是 #18035)。\n5. 队列分诊 workflow 自动立了 #18032,命名为 **`queue-flake anchor`**。它按日志里的失败文件路径计数,自己写明「This issue is a NAME, not a diagnosis」。⇒ **「flake」这个框架邀请人等,而不是查。** 卡上三条自动化评论还在做 shard 组成 / vitest worker 数的相关性推测,修复席位实测后逐条推翻:红在裸 main、无 PR、无队列、无分片的本地一次就复现。\n\n## 根因:闸门有一个**它自己写下来的**盲区,而这条测试正落在里面\n\n`scripts/check-cross-package-test-inputs.mjs` 的导入侧边界,逐字:\n\n> ⚠️ The boundary that makes this safe: only specifiers that START RELATIVE (`./`, `../`) are read. **A BARE specifier (`@objectstack/verify`, `node:fs`) is an installed dependency** resolved through `node_modules` …\n>\n> ⛔ NOT `@objectstack/<pkg>` // a BARE specifier is an installed dependency, **never a repo source input**\n\n而 `format-zod-union.test.ts` 正是 `import { ObjectStackDefinitionSchema } from '@objectstack/spec'` —— **裸包名**。⇒ 它对 spec schema 的真实依赖,对受影响子集过滤器与 turbo 缓存**双双不可见**。\n\n实测(真 glob 语义,非 substring):\n\n```\npackages/cli 声明的跨包输入共 33 条\n能匹配 packages/spec/src/ui/view.zod.ts 的: ⛔ 零条\n其中所有 packages/spec 相关声明只有两条:\n  - packages/spec/src/system/translation.zod.ts\n  - packages/spec/src/data/field.zod.ts\n```\n\n⚠️ 这恰恰是闸门文件头自己描述的 **#7802** 形态:*\"a test whose real inputs are wider than its package is invisible to BOTH the affected-subset filter and the turbo cache, so it can go red on `main` while every PR reports green.\"* —— **闸门预言了这件事,并且明确把这一类排除在自己视野之外。**\n\n## ⭐ 而修复把同一个陷阱重新装填在**同一个文件**上\n\n#18043 的修法是对的(把规格件重指到一扇仍是 union 的门,保住 #5341 的保证,⛔ 没有把断言改成迎合现状)。但实测新规格件 `views[].list.gantt.tooltipFields[]` 的声明位置:\n\n```\ntooltipFields 所在文件: packages/spec/src/ui/view.zod.ts     ← 与 #17914 改的是同一个文件\ncli 声明能匹配它的:      ⛔ 零条\n```\n\n⇒ **下一个触及 `view.zod.ts` 的 `feat!`(很可能就是同一条 sort seam 的 CONSUMER 半边)会原样复现整条事故链:绿 PR → 红 main → 队列逐个踢 → 再立一张「flake anchor」。**\n\n## 可选修法(⛔ 建议,非裁决)\n\n1. **给 `packages/cli` 的 roster 补声明**:把它测试真正消费的 spec 面(至少 `packages/spec/src/ui/**`)加进跨包输入。最小、最直接,但**治标**:下一个走裸包名消费 spec 的测试仍然隐形,而且这是一份「要记得更新的清单」—— 闸门文件头自己说过,「a list you must remember to update is exactly the failure mode that produced #7802」。\n2. **让闸门认识这一类**:裸 `@objectstack/*` 导入在**本仓 workspace 内**并非普通 installed dependency,它是 `workspace:` 链接、指向仓内源码。可以把「裸包名 → 该 workspace 包的 src」作为一条可识别的读,要求声明或至少**报告**。⚠️ 这会把总体扩大很多,需要先量规模再决定是拒绝还是只报告。\n3. **只改分诊叙事**:让 queue-flake anchor 在**同一文件连续 N 次**弹出时改称「确定性回归候选」并强制定因。最便宜,不防复发但能把「躺着」的时间从数天压到一轮。\n\n⚠️ 我倾向 2 > 1 > 3,但**没有量过路 2 的总体规模**,所以这只是排序不是建议。承接席位应先测:全仓有多少测试通过裸 `@objectstack/*` 消费另一个 workspace 包的源码?\n\n## 判据复跑\n\n```bash\n# 盲区:cli 的 roster 匹配不到 view.zod.ts\nnode -e \"import('./scripts/cross-package-test-inputs.mjs').then(m=>{ /* 见卡内 glob 匹配片段 */ })\"\n# 测试确实走裸包名\ngrep -n \"from '@objectstack/spec'\" packages/cli/test/format-zod-union.test.ts\n# 新规格件与 #17914 改的是同一文件\ngit grep -ln tooltipFields origin/main -- 'packages/spec/src/**/*.zod.ts'\ngit show --stat 1e20f816e -- 'packages/spec/src/ui/view.zod.ts'\n```\n\nRefs: #18032(被误判为 flake 的那张)· #18043(修复)· #17914(触发)· #7802(闸门存在的理由)· #18035 / #18039(被队列踢的受害者)\n"
+}

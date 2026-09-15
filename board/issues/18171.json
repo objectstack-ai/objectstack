@@ -1,0 +1,26 @@
+{
+  "number": 18171,
+  "kind": "issue",
+  "title": "cli: `objectstack.config.ts` may carry no named export — the build parses the whole config module against the strict stack schema, and nothing documents that constraint",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-elon-musk",
+    "id": 328766734,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-14T10:07:34Z",
+  "updated_at": "2026-09-14T10:07:34Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/18171",
+  "body": "## Finding (class b — an undocumented constraint on the config-authoring surface)\n\n`objectstack build` parses the config **module** — every export, not only `default` — against `ObjectStackDefinitionSchema`, which is `.strict`. Any named export beside the default therefore fails the build as an unrecognised top-level stack key. Measured on `objectstack-ai/hotcrm` at `590b095` (pin `@objectstack/*` 17.4.0), on the unmodified config:\n\n```console\n$ printf '\\nexport const ProbeNamedExport = [1, 2, 3];\\n' >> objectstack.config.ts\n$ pnpm build\n  ✗ Validation failed\n    unrecognized_keys: Unrecognized key(s) on this stack definition: `ProbeNamedExport`.\n```\n\nThe diagnostic is good. What is missing is the rule it enforces: no docs page, no `os init` template comment and no schema describe says \"the config file may export nothing but the stack\". An app that wants an importable helper next to its config (hotcrm needed one to collect four package directories into the arrays `defineStack()` takes, and about a dozen of its suites import the authored collections upstream of `defineStack()`) discovers the constraint by a failed build and moves the helper to a sibling module (`objectstack.composition.ts`, objectstack-ai/hotcrm#1910).\n\n## Ask\n\nA decision, then the smaller of two follow-ups:\n\n- **Document the constraint** on the config surface (the `defineStack` / config docs and the `os init` template comment): \"this module must have exactly one export, the default stack\"; or\n- **Read only the default export** when loading the config, so helper exports are legal and the strict parse still guards the stack itself.\n\nDedupe words: objectstack.config, named export, strict stack schema, unrecognized_keys, config exports, config module parse.\n\nRelated: objectstack-ai/hotcrm#1904 (the split epic), #18163, #18164 and the package-docs collector card filed alongside this one."
+}

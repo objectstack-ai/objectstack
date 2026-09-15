@@ -1,0 +1,35 @@
+{
+  "number": 7027,
+  "kind": "pull_request",
+  "title": "feat(rest): PUT /meta/:type/:name 要求 manage_metadata 能力 (#6603)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T09:51:00Z",
+  "updated_at": "2026-08-09T10:48:01Z",
+  "closed_at": "2026-08-09T10:48:00Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": "2026-08-09T10:47:59Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/7027",
+  "body": "Fixes #6603\n\n按 2026-08-08T09:33Z 维护者裁决(Option B —— 拒绝写入,评论 `5225531464`)与 2026-08-09T05:39Z 复核(`5229988826`)实施。四条路线不再论证。\n\n## 1. 调用方普查(裁决采纳的实施第一步)\n\n⚠️ **结论:没有 in-repo 调用方会因这道门新吃 403。** 下面是证据(搜了什么、在哪搜、找到什么,**包括看了但没找到的地方**),不是结论复述。\n\n**搜索面**:`objectstack` 与 `objectui` 两仓,`saveMetaItem` / `saveItem` / `saveMetadataItem` / `method: 'PUT'` 交叉 `meta`,覆盖 `.ts/.tsx/.js/.vue`,排除 `node_modules` 与 `dist`。\n\n| 调用方 | 位置 | 落在门内吗 |\n| :-- | :-- | :-- |\n| SDK `meta.saveItem` | `packages/client/src/index.ts:698`、`:4963` | 唯一的 in-repo HTTP 客户端;能力随登录会话 |\n| CLI `os meta register` | `packages/cli/src/commands/meta/register.ts:76` | 走 SDK;实际以 dev admin 运行 |\n| console 对象/字段设计器 | objectui `apps/console/src/services/MetadataService.ts:139/149/164/178/210`、`components/schema/objectDetailWidgets.tsx:204/341/360` | ✅ Studio 内 |\n| console 公开表单页 | objectui `apps/console/src/pages/developer/PublicFormsPage.tsx:190/253`(`view`) | ✅ Studio 内 |\n| 应用设计器 | objectui `packages/plugin-designer/src/pages/{CreateAppPage,EditAppPage}.tsx`(`app`) | ✅ Studio 内 |\n| app-shell 元数据服务 / 导航同步 | objectui `packages/app-shell/src/services/MetadataService.ts:139/149`、`hooks/useNavigationSync.ts:216` | ✅ 仅由页面/仪表板 CRUD 触发,即 Studio 内 |\n| in-repo QA | `packages/qa/dogfood/test/dashboard-designer-roundtrip.dogfood.test.ts:54` | ✅ `stack.signIn()` = dev admin |\n\n**看了但没有找到调用方的地方**(同样是证据):`apps/`、`examples/`、`core/` 全部无 `/meta` PUT 调用;Setup 应用的导航贡献(`packages/platform-objects/src/apps/setup-nav.contributions.ts`)只有数据面 `object` 项与只读 `developer:packages`,**没有任何 `/meta` 写入面**;`packages/metadata/src/loaders/remote-loader.ts:125` 的 `RemoteLoader.save()` 虽从 `packages/metadata/src/index.ts:19` 导出,但仓内无消费者(库面,非调用方);`packages/runtime/src/domains/packages.ts:246` 是进程内直调 `protocol.saveMetaItem`,不经这条路由。\n\n**为什么这些都在门内 —— 关键测量**:所有元数据编写面都在 **Studio** 应用里(`packages/platform-objects/src/apps/studio.app.ts:54`,`requiredPermissions: ['studio.access']`),而仓内**唯一**带 `studio.access` 的权限集是 `admin_full_access`,它同时带 `manage_metadata`(`packages/plugins/plugin-security/src/objects/default-permission-sets.ts:120-129`)。\n\n另注:objectui 的导航同步**已经**把这条路由的 403 当作正常可处理情况(`isNavigationSyncableApp` 的注释:写保护应用「would 403 every PUT — skip them instead of spraying failure toasts」),所以即便有边角调用方吃到 403,也不是崩溃路径。\n\n## 2. ⚠️ 必须写明:本 PR 建立的**不是**裁决理由里那句话\n\n裁决的理由句是「能写 schema 的人就是能看见完整 schema 的人」。**本 PR 建立的是「能写者需持 `manage_metadata`」—— 这两句不是同一个集合,不变量本身没有被建立。**\n\n- ADR-0106 D4 豁免集是 `OBJECT_SCHEMA_MASK_EXEMPT_CAPABILITIES = ['studio.access','setup.access']`(`packages/metadata-core/src/object-schema-fls.ts:72`),**不含 `manage_metadata`**;\n- 于是 `organization_admin`(`['manage_org_users','setup.access','setup.write']`)是 D4 豁免、从来没有往返丢失风险,却被这道门 403;\n- 反过来,只持 `manage_metadata` 的调用方能写,**但读仍被掩码**,它自己的往返仍会丢字段;\n- 两者只在 `admin_full_access` 上重合 —— 让不变量在默认部署里成立的是**权限集的巧合**,不是这道门。\n\n门**照裁决落 `manage_metadata`,不动**(它在第二条理由上独立成立:关掉「任何已认证会话都能覆写任意 schema」这个与掩码无关的旧洞)。这条差已按实测钉进测试矩阵,并另立 #7020 记录,不在本 PR 替维护者选对齐方向。\n\n## 3. 真红:先写下预测,再跑\n\n预测写在实施前(方向:**RED**,三条断言应同时翻)。实测(去掉门,同一往返,真实路由 + 真实内存库):\n\n```\nGET served fields   : id, name\nSTORE before PUT    : bonus_formula, id, name, salary_grade\nPUT status          : 200\nsaveMetaItem calls  : 1\nSTORE after PUT     : id, name          (两个被掩码字段被真删)\n```\n\n加门后:`403` + `{ error: { code: 'FORBIDDEN' } }`,`saveMetaItem` **零调用**,库中四个字段完好、`label` 未变。整份新测试在删门后 **6/12 转红**,方向与预测一致,无反转、无「诊断增多」情形。\n\n**钉的是丢失本身,不只是状态码** —— 断言直接读库(`storedFields()`),因为「先写了再 403」正是最值得防的失败形态,只断言状态码看不见它。拒绝类断言一律同时断 `code` 与 `status`(ADR-0112 信封);这条路由是**发送**而非抛出,`toThrow` 形状的断言在这里分不清「拒绝但信封错」与「根本没拒绝」。\n\n**豁免调用方**:`admin_full_access` 形状的调用方往返无损(读不被掩码、写 200、库中四字段完好)。⚠️ 该用例**加门前后都绿**,所以它是**护栏,不是证据** —— 按要求明说。\n\n## 4. ⚠️ 本 PR 关的是**一扇门**,缺陷没有被关闭\n\n**已实测**:同一次 GET → 改 → PUT 的数据丢失,在本门落下后仍可经**复合名路由** `PUT /meta/:type/:section/:name` 原样复现(`compound GET fields : id, name` → `compound PUT status : 200` → `STORE after PUT : id, name`)。此外 dispatcher 自己的 `/meta` PUT(`packages/runtime/src/domains/meta.ts:264`)与无门的 `DELETE /meta/:type/:name` 同形。\n\n三处**同族出口按 PD #10 归档为 #7019,不在本 PR 修** —— 区域纪律:本卡与 #6599 / #6920 并发占用同一文件的不同区域。#7019 正文已写明「#6603 落地后缺陷仍可复现,只是换一扇门」,复合名那条是实测,dispatcher 与 DELETE 两条**明标未实测、须实测**,没有用静态观察冒充实测。\n\n## 5. 改了什么\n\n- `packages/rest/src/rest-server.ts` —— `PUT /meta/:type/:name` 处理器开头加能力门,**复用 `POST /meta/_migrate-stored` 的同一机制**(`!ctx?.isSystem && !held.has('manage_metadata')` → 403 `FORBIDDEN`),不另造第二种写法。门在 `resolveProtocol` **之前**,所以未授权调用方无法用 501-vs-200 探测内核能力,且拒绝时**什么都没写**。\n- `packages/rest/src/meta-item-save-capability-gate.test.ts` —— **新建**文件(不碰任何共享测试文件),12 例。\n- `packages/rest/src/rest-route-ledger.ts` —— 该行补 `note`,与 `_migrate-stored` 的记法一致。\n- `.changeset/meta-save-manage-metadata-gate.md` —— `minor`,写明**谁开始吃 403、需要什么**(给权限集加 `manage_metadata`),以及尚未关闭的部分。\n\n### 5.1 另有 5 个既有测试文件各改 1–4 行 —— 为什么**必须**改\n\n`rest.test.ts`(4 处)、`rest-meta-save-receipt-envelope.test.ts`、`rest-unknown-object-heuristic.test.ts`、`rest-5xx-message-sanitization.test.ts`、`rest-4xx-message-truncation.test.ts`。\n\n**这不是「顺手修了几个测试」,是同一处行为变更的必然连带。** 这些用例测的是本路由的**机制**(If-Match 转发、保存收据信封、4xx 截断与 5xx 脱敏),但它们的 boot 桩把 `resolveExecCtx` 打成只带一个 `userId` 的调用方 —— 也就是把「**只要有 session 就能写元数据**」当作既成前提。而**这个前提正是本 PR 要消灭的东西**。门落下后,这些请求在到达被测机制之前就先被 403 拦住,断言全部失效:不改它们,PR 一落地 `@objectstack/rest` 即红(实测:14 例失败)。\n\n因此改动**只**给 boot 桩补上 `systemPermissions: ['manage_metadata']`,让调用方合法地到达被测代码;**被测机制、断言、期望值一字未动**。每处都留了一行说明:`// [#6603] this route now demands manage_metadata — an authoring capability, not just a session.`\n\n> 关于范围:这几处一度被本 PR 记为「超出区域」,**已由协调人裁定在范围内** —— 它们是行为变更的必然连带,不是越界。`rest.test.ts` 是并发共用文件,若与 #6599 / #6920 冲突,按本车道惯例由后推者重并。\n\n## 6. 本地验证\n\n- `pnpm --filter @objectstack/rest test` → **74 文件 / 1154 例全绿**(先建了 `@objectstack/types` 等依赖)\n- `pnpm --filter @objectstack/rest typecheck` → 通过\n- `check:route-envelope` / `check:error-code-casing` / `check:empty-changeset` / `check:meta-type-normalized` / `check:spec-parsed-alias` / `check:nul-bytes` → 全部 PASS\n\n⚠️ CI 的 `ESLint`(含更多族门)与 `TypeScript Type Check`(含 `check:api-surface`)本地不覆盖,交 PM。"
+}

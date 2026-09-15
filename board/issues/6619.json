@@ -1,0 +1,32 @@
+{
+  "number": 6619,
+  "kind": "issue",
+  "title": "[spec] Fold the three hand-written unrecognized_keys error maps into `strictObject` guidance — requires a set-keyed guidance form, and closes the alias-integrity gate's blind spot (#6416 direction 2)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T07:25:36Z",
+  "updated_at": "2026-08-09T05:40:57Z",
+  "closed_at": "2026-08-08T22:42:07Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6619",
+  "body": "Follow-up card for #6416's **direction 2**, deliberately split out of that card by triage (2026-08-07T17:54:18Z: \"Direction 2 is a bigger card, not this one … a shared-mechanism change and deserves its own card rather than arriving as scope creep on the reorder\"). Direction 1 (the in-place reorders) landed as PR #6453 (`bf0ae9976`).\n\n## What this card does\n\nMigrate the three hand-written `$ZodErrorMap`s to the shared `strictObject` / `strictUnknownKeyError` machinery, deleting the hand-maintained template copies:\n\n- `packages/spec/src/shared/visibility.ts` — `strictVisibilityError` (the `visibleWhen` alias pointer)\n- `packages/spec/src/ui/dashboard.zod.ts` — `strictWidgetAnalyticsError` (three prescription branches)\n- `packages/spec/src/data/object.zod.ts` — `strictTenancyError` (per-key tombstone bullets)\n\n## The real decision inside it (why it is not mechanical)\n\n`dashboard.zod.ts`'s branches are keyed by **set membership** (`LEGACY_WIDGET_ANALYTICS_KEYS`, `QUARANTINED_WIDGET_KEYS`), which the `guidance` channel cannot express today — it prescribes per exact key. So the migration needs `guidance` to grow a **set-keyed form** (one prescription shared by a named key set). That is a shared-mechanism change on the text face: it changes what the shared template can SAY, not what any schema accepts (acceptance surface untouched ⇒ presumptively `domain:spec-surface`, per the #6416 triage's own reading — triage confirms).\n\n## Why it is worth doing (the gate blind spot)\n\n`alias-integrity.test.ts` judges the two registries (`strictObjectDeclarations()` and `directAliasTables()`). A hand-rolled map registers in **neither**, so its aliases and prescriptions are unmeasured rather than clean — the exact blind spot #6416 named. Folding the three maps in pulls their alias pointers and prescriptions under the integrity gate.\n\n**#5593 has now landed (PR #6595, `e0f300ba5`) and it sharpens this card rather than absorbing it.** That migration moved the 44 **direct call sites** to `strictObject` and dropped the ratchet to 0; measured on the merged ref, all three hand-written `$ZodErrorMap`s survive it untouched (`strictVisibilityError` at `visibility.ts:113`, `strictWidgetAnalyticsError` in `dashboard.zod.ts`, `strictTenancyError` at `object.zod.ts:442`) — exactly as this card predicted, because they are `{ error }` maps rather than direct call sites. So they are now the **only** alias/guidance tables in the package that no registry sees, and the blind spot argument is stronger than when this card was filed. Re-price against the landed shape at dispatch: `alias-table-registry.ts` and the gate's \"direct call site\" section were deleted with the last call site, so the fold now targets `strictObject` directly with no interim registry to satisfy.\n\n## Inherited guardrails (do not re-derive)\n\n- PR #6453 left **13 order pins** across `view.test.ts` / `dashboard.test.ts` / `object.test.ts` asserting front-matter → fix channels → explanatory sentence last, plus full-message pins on the no-fix branches. **They migrate with the code, never get deleted** — they are the ready-made acceptance criteria for this migration.\n- All seven message variants were measured byte-identical under the reorder (PR #6453's parity table) — the migration may change bytes (template assembly differs), but the emission ORDER contract those pins encode must hold.\n- `data/object.zod.ts`'s lazily-built table (`objectUnknownKeyErrorImpl ??= …`, the TDZ workaround #5593's own card flagged as trap 1) is in this file: check how #5593 resolved it there before assuming this card's fold is mechanical.\n\n## Provenance\n\n- #6416 (body: the three-site inventory + the set-membership gap analysis) · its triage comment 2026-08-07T17:54:18Z (the split ruling) · PR #6453 (direction 1 landed, pins in place) · #5013 / #5483 / #5593 (the registries and the migration that ended them).\n- Duplicate search before filing (`guidance set-keyed strictObject fold`, the three file paths, `alias-integrity blind spot`): no open card."
+}

@@ -1,0 +1,35 @@
+{
+  "number": 6775,
+  "kind": "issue",
+  "title": "conversions:page-component 改写只走 regions[].components[] —— slots.* 与容器嵌套(lint 的 walkPageComponents 会下钻)全部漏改,`page-header-subtitle-alias` 因此覆盖不到 spec-valid 的 header 节点",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T16:42:10Z",
+  "updated_at": "2026-08-09T12:04:30Z",
+  "closed_at": "2026-08-09T12:04:30Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6775",
+  "body": "发现于 objectui#3789 的测量阶段(退役 objectui `PageHeader` 的 `subtitle ?? description` 回退)。该单的门是「证明每一条 page-header 元数据路径都经过执行改写的 loader」。**门没过**,原因在上游:conversion 层的 page-component 走查面比同仓 lint 层的走查面窄一大截,`page-header-subtitle-alias` 因此改不到一批 **spec-valid** 的 header 节点。\n\n## 两个走查器,覆盖面不同\n\n| | 位置 | 覆盖 |\n|---|---|---|\n| conversion 层 | `packages/spec/src/conversions/walk.ts:193` `mapPageComponents` | 只有 `pages[].regions[].components[]`,一层,到此为止 |\n| lint 层 | `packages/lint/src/page-walk.ts` `walkPageComponents` | `regions[].components[]` **加** `page.slots.*`、`properties.children[]`、`properties.items[].children[]`(tabs/accordion)、`properties.body[]` / `properties.footer[]`(card),深度递归 |\n\n`page-walk.ts` 的模块注释把这件事说得很清楚:`PageComponentSchema` 是 `.strict()`,组件自身没有 children 键,**子树都在无类型的 `properties` 包里**,所以递归必须手写。lint 手写了;conversion 没有。`walk.ts:222-236` 把这个边界写成了刻意选择(「Region level is the whole surface a page-component conversion can reach」),但它成立的前提是「嵌套处的键会被 tombstone 在 parse 期挡掉」——`description` 不在 `PageHeaderProps` 里被 tombstone,而 `properties` 是自由 bag,所以什么都没挡。\n\n## 实测(objectui 实装的 `@objectstack/spec@17.0.0-rc.5`)\n\n`applyConversionsToStoredItem('pages', row)` + `PageSchema.safeParse(row)`:\n\n| 形状 | spec-valid | 被 `page-header-subtitle-alias` 改写 |\n|---|---|---|\n| `regions[].components[].properties.description` | 是 | **是**(基线,正常) |\n| `slots.header.properties.description`(`regions: []`) | 是 | **否** |\n| `regions[].components[]` 里 `page:card` 的 `properties.children[].properties.description` | 是 | **否** |\n\n第二行是最严重的一条:那正是 objectui 文档里**推荐的**定制 record 页头的写法(objectui `content/docs/guide/slotted-pages.md`,slot 表第一行 `header` → `page:header`,示例显式写 `regions: []`「slotted pages don't author regions」)。slotted 页把 `regions` 留空,`mapPageComponents` 于是一个节点都不访问。\n\n复现片段(节点用 `properties` bag,因为 `PageComponentSchema` 是 strict,内联键会报 `unrecognized_keys`):\n\n```js\nconst slotted = {\n  name: 'account_detail_page', label: 'Account Detail',\n  type: 'record', object: 'account', kind: 'slotted',\n  regions: [],\n  slots: { header: { type: 'page:header', properties: { title: '{name}', description: 'x' } } },\n};\nPageSchema.safeParse(slotted).success                     // => true\napplyConversionsToStoredItem('pages', slotted)            // => properties.description 原样留存,零 notice\n```\n\n## 影响\n\n1. **`page-header-subtitle-alias` 的退役承诺兑现不了。** 该条目的 doc 写「objectui#3226 deletes its `??` once this ships」,但 slots / 容器嵌套两处它改不到。objectui 侧删掉 `subtitle ?? description` 会让这些页面**静默丢副标题**(标题照渲染,第二行消失,不报错)—— 正是该条目选 conversion 而非 deletion 所要避免的那个失败形状。objectui#3789 据此停在 needs_decision。\n2. **不止这一条。** 任何建在 `mapPageComponents` 上的 page-component conversion 都有同一个洞。其它几条靠 tombstone 兜底(嵌套授权点 `tsc` 会红),`page-header-subtitle-alias` 没有 tombstone 可靠 —— `PageHeaderProps` 里没有 `description`,而 `properties` 不按 `type` 校验,所以 `properties.description` 在**任何**位置都 parse 通过。\n3. **授权期也没有信号。** `validateComponentProps` 是 advisory + CLI_ONLY,且跑在 `normalized` 上(`authoring-rules.ts:538-575` 注释里明说:靠 conversion 先改写,所以改写过的别名「is never reported as undeclared」)。改不到的那些位置,conversion 不报、lint 不报(它虽然下钻得到,但 advisory 且只在 CLI)、schema 不报。三层皆无。\n\n## 建议方向(留给 triage 定档)\n\n倾向把 conversion 的走查面对齐 lint 已经写好的那一份 —— 让 `mapPageComponents` 复用 / 收敛到 `page-walk.ts` 同形的下钻(`slots.*` + `properties.children` / `items[].children` / `body` / `footer`),而不是在消费端加容忍。理由:\n- **契约优先**:声明的覆盖面应当等于渲染器实际服务的面。现在「同一个 `description`,放 region 一层就规范化、放 slot 里就不规范化」是位置决定语义,这条规则没人记得住。\n- **让 AI 写的元数据难写错**:slotted 页与容器嵌套恰恰是模型生成 page 元数据最常用的两种形状(`apps/console` 的 preview-samples 注释自己也写了「these samples are copied — increasingly by models generating metadata」)。位置敏感的规范化是这类错误的藏身处。\n- 该条目本身已按 `PAGE_HEADER_COMPONENT_TYPES` 做了 type gate,所以下钻不会碰到 `element:text_input` 那类另有真 `description` 的组件 —— `walk.ts` 划这条边界时担心的跨组件误伤,在这一条上已被 type gate 挡住。\n\n另一条可行路线是把 `description` 在 `PageHeaderProps` 上做成 tombstone,让嵌套授权点在 parse 期被点名拒绝(与 record-picker 三键同构),但那会让 `properties` 需要按 `type` 真正校验,是更大的一步(与 #4001 相邻)。\n\n## Refs\n\nobjectui#3789(被本单阻塞的退役单)、objectui#3226(原裁定)、#4827(本 conversion 的登记单)、#5509、#5511(`mapPageComponents` 收敛单)、#5068 / #4001(`properties` 无门的历史)、ADR-0087 D2。\n\n—— 由 objectui#3789 的测量阶段发现,未在该单改任何代码。\n"
+}

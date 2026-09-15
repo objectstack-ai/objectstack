@@ -1,0 +1,36 @@
+{
+  "number": 6792,
+  "kind": "issue",
+  "title": "[finding][drivers] `SqlDriver.findWithWindowFunctions` and `analyzeQuery` skip `applyTenantScope` — a row-returning read door outside the driver's \"single chokepoint\" for tenant isolation",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched",
+    "pm:queue",
+    "target:v17"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T17:45:27Z",
+  "updated_at": "2026-08-09T04:08:22Z",
+  "closed_at": "2026-08-09T04:08:22Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6792",
+  "body": "Found while implementing #6577 (the `limit: 0` presence fix), whose file surface was these exact two methods. Out of that card's scope — a different defect with a different blast radius, and folding a tenant-isolation fix into a `limit: 0` PR would bury it — so filed rather than fixed, per Prime Directive #10.\n\n## Fact (located by inspection on `origin/main` @ `3172831`, not executed)\n\n`applyTenantScope` says of itself, verbatim:\n\n> This is the **single chokepoint for read-side tenant isolation** in the SQL driver; **every CRUD method routes through it**.\n\nIt is called at 13 sites in `packages/drivers/driver-sql/src/sql-driver.ts` — `findRows` (the door `find()` uses), the readbacks, `count`, `distinct`, the write paths. It is **not** called by two:\n\n- `findWithWindowFunctions(object, query, options)` — the live window-function read door (#4286). Builds via `getBuilder(object, options)`, applies `where` / window functions / `orderBy` / pagination, and returns rows. **No `applyTenantScope`.**\n- `analyzeQuery(object, query, options)` (and `explain()`, which forwards to it). Same omission.\n\nSo the declared invariant is false as written: two doors bypass the chokepoint.\n\n## Why the two are not equally severe\n\n- **`findWithWindowFunctions` returns ROWS.** On a deployment where `applyTenantScope` would have added a predicate — i.e. `options.tenantId` is set and the object has a tenant field — this door returns rows from **every** tenant. That is cross-tenant read exposure at the driver layer, the same class as #3724, not a cosmetic inconsistency.\n- **`analyzeQuery` returns a PLAN**, not rows. Lower severity, but it is the same defect this method was just fixed for in #6577: a plan is only worth reading if it explains the statement `find()` would actually run, and a missing tenant predicate makes it a plan for a different query (different selectivity, different index choice).\n\n## What is NOT claimed here\n\nNot measured end-to-end. I did not build a multi-tenant fixture and read another tenant's rows through this door — this is located by reading the call sites and the method's own contract, and it is stated at that strength deliberately. What reaches `findWithWindowFunctions` in practice needs checking before grading severity: it is **not** on `IDataDriver` (it is callable only on a SQL driver instance, per its own docstring), so the exposure depends on who calls it and whether they pass `options.tenantId`. A grader should measure that reachability first — it is the difference between a latent trap and a live P0.\n\nAlso note the layers above: ADR-0021 RLS and the Layer 0 authorization wall may or may not already constrain the callers of this door. \"The layer above catches it\" is a reason to grade lower, not a reason for the driver's own stated chokepoint to have a hole.\n\n## Suggested shape of a fix (not prescriptive)\n\nAdd `this.applyTenantScope(builder, object, options)` to both, beside the `getBuilder` call, as every other door does. The interesting question is not the two lines but the missing enforcement: nothing makes a **new** read door route through the chokepoint, which is exactly how these two got out. A gate that asserts every method taking `(object, …, options)` and returning rows calls `applyTenantScope` would be the durable version — the `check:`-script shape this repo already uses for the same class of claim.\n\n## Dedup\n\nSearched `applyTenantScope`, `findWithWindowFunctions`, and tenant-scope/read-door phrasings across the repo's issues. Nearest neighbours are all closed and different: #3724 (driver-mongodb has no row-level isolation at all), #3249 / #2754 (tenant scope hiding NULL-org platform rows — the opposite direction), #4286 (window-function door liveness, not its tenancy). No open card covers this.\n\nFiled unassigned, `finding` posture."
+}

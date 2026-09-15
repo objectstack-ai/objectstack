@@ -1,0 +1,33 @@
+{
+  "number": 6242,
+  "kind": "issue",
+  "title": "Six independent enumerations of the stack-collection set, none answerable to `stack.zod.ts` — one is mis-aimed and two still list retired kinds",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:queue"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T11:47:45Z",
+  "updated_at": "2026-08-09T12:04:30Z",
+  "closed_at": "2026-08-09T12:04:30Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6242",
+  "body": "Found while running the read-only two-repo coverage audit for #6234 / #2657. Not fixed there (audit card, no code PR). Filed unassigned.\n\nAll line numbers are `origin/main` @ `8e2bbba24f76d56daad166b6b776c69d8c3ac0dc`.\n\n## The shape\n\n`ObjectStackDefinitionSchema` (`packages/spec/src/stack.zod.ts`) is the source of truth for which collections a stack may declare. **Six** other places re-enumerate that same set, each hand-maintained, and **nothing compares any of them to the schema or to each other**. They have drifted independently:\n\n| # | enumeration | site | observed drift |\n|---|---|---|---|\n| 1 | `ObjectStackDefinitionSchema` | `packages/spec/src/stack.zod.ts` | — (the source of truth) |\n| 2 | `PLURAL_TO_SINGULAR` / `MAP_SUPPORTED_FIELDS` | `packages/spec/src/shared/metadata-collection.zod.ts:80`, `:110` | carries `ragPipelines` → `rag_pipeline`; `stack.zod.ts` declares no `ragPipelines` |\n| 3 | `metadataArrayKeys` (generic registration) | `packages/objectql/src/engine.ts:2283`, duplicated at `:2459` | lists `workflows`, `approvals`, `roles`, `profiles`, `policies`, `ragPipelines` — none of which `stack.zod.ts` declares (ADR-0019 / ADR-0020 / ADR-0088 / ADR-0090 retirements) |\n| 4 | `ARTIFACT_FIELD_TO_TYPE` | `packages/metadata/src/plugin.ts:60` | see \"the concrete part\" below |\n| 5 | `MetadataCategoryEnum` | `packages/spec/src/kernel/package-artifact.zod.ts:49` | lists retired `triggers` and `workflows`; omits ~12 live collections (`hooks`, `mappings`, `docs`, `books`, `jobs`, `positions`, `sharingRules`, `webhooks`, `connectors`, `emailTemplates`, `datasources`, `capabilities`) |\n| 6 | `STACK_COLLECTION_COVERAGE` | `examples/app-showcase/src/coverage.ts:181` | tracks 3 of ~9 non-kind collections, and — unlike its sibling `KIND_COVERAGE` — is **not ratcheted** against anything |\n\n## The concrete part — `ARTIFACT_FIELD_TO_TYPE`\n\nTwo distinct problems in `packages/metadata/src/plugin.ts:60-93`:\n\n**(a) `data: 'dataset'` is mis-aimed.** The stack key `data:` is the **seed** collection (`stack.zod.ts:510` — `z.array(SeedSchema)`; the runtime reads it as seeds at `packages/runtime/src/app-plugin.ts:927`). It is mapped here to `'dataset'`, which since ADR-0021 is the **analytics semantic layer** kind — the exact collision the registry entry warns about in prose (`metadata-plugin.zod.ts:620`: *\"NOTE: distinct from the (analytics-bound) `dataset` name\"*).\n\nHonest scoping: this entry is **provably inert today**, not a live mis-registration. `SeedSchema` is a `strictObject` with no `name` key (`packages/spec/src/data/seed.zod.ts:33`), and the ingest loop skips any item without one (`plugin.ts:667-674`, `if (!name) continue;`) — the file's own comment at `:718` says so: *\"seeds under `data` have no `name`\"*. So it is a dead entry aimed at the wrong kind, which would begin mis-registering the day either side moves.\n\n**(b) Five live collections are absent from the map** — `datasets`, `jobs`, `datasources`, `translations`, `capabilities`. This is exactly the regression class that `packages/metadata/src/plugin.test.ts:114-121` pins for `docs`:\n\n> a compiled artifact carries package docs in a top-level `docs: DocSchema[]` array. The artifact loader registers only the metadata fields enumerated in `ARTIFACT_FIELD_TO_TYPE`; `docs` was omitted, so the bundle's docs were silently dropped and `GET /meta/doc` returned an empty list even though the package shipped docs.\n\nFor four of the five, `AppPlugin` handles the *functional* consumption directly off the bundle (`app-plugin.ts:503` datasources, `:825` jobs, `:927` seeds, `:1421` translations), so this is not a boot breakage — the gap is that they never register as **metadata items**, so under `bootstrap: 'artifact-only'` (edge / serverless / immutable-image, `metadata-plugin.zod.ts:505-511`) `GET /meta/job`, `/meta/translation`, `/meta/datasource` and `/meta/dataset` would answer empty for a package that ships them. `datasets` has no `AppPlugin` handling at all in that path. **Not measured on a real artifact-only boot** — that verification is part of the fix, not of this filing.\n\n## Why file it as one issue\n\nEach row above looks like a one-line typo in isolation, and each has been fixed one-line-at-a-time before (`docs` in `ARTIFACT_FIELD_TO_TYPE`, `roles` → `positions` in the same map, `capabilities` in `metadataArrayKeys` — every one of those carries a \"this key was missing and it silently dropped X\" comment today). The cause is structural: `KIND_COVERAGE` is answerable to `DEFAULT_METADATA_TYPE_REGISTRY` and fails CI when a kind is added without an entry (`examples/app-showcase/test/coverage.test.ts:96-104`), and the liveness ledger is answerable to the same registry (`packages/spec/scripts/liveness/check-liveness.mts:145-153`). **The collection-key maps have no such gate.** A check that compares each of these six against `stack.zod.ts` — declared-here-not-there and there-not-here, with an explicit waiver list for the deliberate omissions (`views` has no `name`, `data` seeds key by `object`, `translations` is a record) — would have caught all of the above and every future instance.\n\n## Relevance to in-flight work\n\nDirectly relevant to #2657: promoting any declared collection to a registered metadata kind means hand-editing several of these maps, with no gate to catch a miss. PR #5312 (`api`) had to touch them by hand.\n\n## Suggested scope\n\n1. A `scripts/check-stack-collection-maps.mjs`-style gate comparing all six against `stack.zod.ts`, with a named-waiver list carrying a reason per exemption (the `KIND_COVERAGE` / liveness-ratchet pattern).\n2. Fix the drift the gate then reports — including deciding whether `data:` should map to `seed`, be removed, or stay waived.\n\nFiled per AGENTS.md Prime Directive #10 while auditing for #6234. Not assigned; no PR.\n"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 7025,
+  "kind": "issue",
+  "title": "sweep(spec): 2-item \"validation diagnostics don't reach the real defect\" sweep — one claim, one PR, per-item checklist (#6391 #5389)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T09:29:02Z",
+  "updated_at": "2026-08-09T12:15:52Z",
+  "closed_at": "2026-08-09T12:15:52Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7025",
+  "body": "Sweep card per the findings-round bundling discipline (#6243 / PR #6288 precedent), packaged by the `domain:spec` seat with the maintainer's approval (2026-08-09 「同意」, chat). **This card is the claim object**; the member cards keep `pm:queue` but are NOT dispatch candidates while this sweep is open.\n\n## Shared criterion (what makes these one sweep)\n\nBoth members are cases where **a validation failure's diagnostic cannot reach the real defect**: the refusal fires, but the structure of the error hides which element/key actually failed. Both fixes improve the DIAGNOSTIC face only. **The acceptance face must not move**: every input that parsed before parses after, every input refused before is refused after — pinned in both directions in the PR. (A discriminator added to a union changes error SHAPE, not membership — assert exactly that; if a member turns out to require a membership change, DROP it from the sweep and report.)\n\n## Members (read each card in full before touching it; premise-first per member)\n\n1. **#6391** — `ViewMetadataSchema`'s union has no discriminant and its container members are unexported, so a consumer diagnosing a failure can only index nested `errors` by member position. Fix: discriminated dispatch where the schema family supports it + export the member schemas, so diagnostics name the branch.\n2. **#5389** — `invalid_key` / `invalid_element` hang the real issues on `issue.issues`, and the union family's three consumers do not descend into them — the surfaced message is the generic wrapper. Fix: the consumers descend (or the issue is lifted), so the author sees the leaf diagnosis.\n\n## Sweep rules (binding on the PR)\n\n- One PR, body carries a **per-item checklist**: one row per member — 落点 | before | after (with a real before/after error-output sample per member).\n- `Fixes #6391` / `Fixes #5389` only for members actually completed; dropped members get `Part of` + reason.\n- **Zero changes outside the N items**, self-certified: `git diff --stat` maps 1:1 onto the checklist.\n- Rejection-face pins keep asserting `code` + `status` (ADR-0112) — improving a diagnostic never weakens the envelope (#6142).\n- Out-of-scope discoveries filed separately (PD #10).\n\nRefs: #6243 (sweep pilot), ADR-0112 (error envelope)."
+}

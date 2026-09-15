@@ -1,0 +1,34 @@
+{
+  "number": 6762,
+  "kind": "issue",
+  "title": "rls.zod.ts `using`'s .describe() still advertises \"the four compiler-supported forms\" (SQL-style) after ADR-0058 widened the lowered subset",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "finding"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T14:28:52Z",
+  "updated_at": "2026-08-09T06:06:12Z",
+  "closed_at": "2026-08-09T06:05:21Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6762",
+  "body": "Out-of-scope finding from #6641 / PR #6729 (not fixed there — that PR's surface was the `check` clause's one `@example` line). Recorded per Prime Directive #10, unassigned.\n\n## Observation\n\n`packages/spec/src/security/rls.zod.ts`, the `using` property's `.describe()`:\n\n```\nFilter condition for SELECT/UPDATE/DELETE. One of the four compiler-supported forms:\n`field = current_user.<prop>`, `field = 'literal'`, `field IN (current_user.<array>)`,\nor `1 = 1`. Optional for INSERT-only policies.\n```\n\nTwo things about that sentence look stale against the code that enforces it:\n\n1. **\"the four ... forms\" is narrower than what compiles.** `isSupportedRlsExpression` in `packages/formula/src/rls-predicate.ts` says so in its own comment: *\"This is broader than the historical 4 forms — comparisons (`amount > 100`) and `==` now ENFORCE (the compiler lowers them), so the gate correctly reports them supported.\"* Measured on `origin/main` @ `cfeb9a071`, `amount > 100`, `region != null` and `a == 1 && b == 2` are all `true` through the gate, and `rls-predicate.test.ts` already pins exactly that.\n2. **All four spellings shown are the SQL-ish dialect**, which ADR-0058 D1 declares transitional and `sqlPredicateToCel` marks `@deprecated`. The canonical dialect is CEL, so the schema's own field description steers authors toward the form that is being retired.\n\n## Why this is recorded rather than fixed\n\nUnlike #6641 this direction **under**-promises: nothing an author writes from this text fails. Copying it produces a working policy in the deprecated dialect, not a fail-closed one. So it is an accuracy/steer problem, not a defect a user hits today.\n\nIt is not invisible, though — unlike a TSDoc `@example`, a `.describe()` string **does** reach the published reference docs. It is rendered verbatim in `content/docs/references/security/rls.mdx`, in the `RowLevelSecurityPolicy` property table (measured while verifying #6641: `gen:docs` renders `.describe()` and the module docblock, never a property's `@example`).\n\n## Suggested shape, if triage wants it fixed\n\nRestate the description in terms of what the compiler actually lowers, in canonical CEL, and let the SQL spellings be named as the transitional bridge rather than as the definition. The scope would be a `.describe()` string plus the regenerated `rls.mdx` — no key, type, or accepted value changes.\n\n## Related\n\n#6641 / PR #6729 (the `check` clause's uncompilable `@example`), ADR-0058 D1 (CEL is canonical), ADR-0056 D4 (the RLS predicate shape gate)."
+}

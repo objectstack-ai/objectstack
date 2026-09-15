@@ -1,0 +1,35 @@
+{
+  "number": 6754,
+  "kind": "issue",
+  "title": "[finding][drivers] 27 dead `{ bypassTenantAudit: true } as any` options-gate casts in driver-sql / driver-sqlite-wasm tests — unlike turso's, these sit on a REAL typed gate",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "finding",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T14:21:16Z",
+  "updated_at": "2026-08-09T07:42:08Z",
+  "closed_at": "2026-08-09T07:42:08Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6754",
+  "body": "Measured during #6394 (removing the single `as never` on `date-bucket-parity.test.ts`'s `driver.create` options gate). The dispatch for #6394 asked for a same-shape scan of other drivers' test options-gate casts as **read-only** — this is that scan's result, filed rather than fixed. **Observation-class, no `pm:queue`, please grade in a triage round.**\n\n## The inventory\n\nSame shape as #6394's cast, spelled `as any` instead of `as never`, on `driver.create(…)` / `driver.find(…)` options arguments in test files:\n\n| Package | Sites |\n|:--|--:|\n| `driver-sqlite-wasm` | 17 |\n| `driver-sql` | 10 |\n| **Total** | **27** across 12 files |\n\n(`driver-turso` has 2 more, in `turso-temporal-conformance.test.ts` — see the split below for why they are a different animal.)\n\nReproduce the inventory:\n\n```\ngrep -rnE \"\\{ *bypassTenantAudit: true *\\} as (any|never)\" packages/drivers/*/src --include=*.test.ts\n```\n\n## Measured: all 27 are dead\n\nBaseline `origin/main` @ `64d764e`, dependency closures built first so the verdict is not read off stale `dist/*.d.ts`. Stripped all 27 casts, then:\n\n```\n@objectstack/driver-sql        typecheck → EXIT=0\n@objectstack/driver-sqlite-wasm typecheck → EXIT=0\n```\n\nZero output both. `bypassTenantAudit` is a declared key on `DriverOptionsSchema` (`packages/spec/src/data/driver.zod.ts:99`), so no cast was ever needed — identical to #6394's finding on the `as never`.\n\n## Why this is worth more than #6394 was\n\nThese 27 sit on a **genuinely typed** gate, and #6394's does not. That is the whole point of filing it separately.\n\n`SqlDriver.create` declares `options?: DriverOptions` (`packages/drivers/driver-sql/src/sql-driver.ts:2961`), and `SqliteWasmDriver` does not override it, so both inherit real checking. Removing a cast there **restores** it — measured, by misspelling one key after the strip:\n\n```\nsrc/sql-driver-runtime-token-default.test.ts(111,73): error TS2561: Object literal may only\nspecify known properties, but 'bypassTenantAuditt' does not exist in type '{ transaction?:\nunknown; timeout?: number | undefined; … bypassTenantAudit?: boolean | undefined; }'.\nDid you mean to write 'bypassTenantAudit'?\n```\n\n`TursoDriver`, by contrast, overrides `create` with `options?: any` (see #6402 and my comment there), so at #6394's call site the same typo compiles clean **with or without** the cast. That is why #6394 was correctly graded a noise removal with no restored check, and why these 27 are not the same trade.\n\nSo the ordering matters: **fixing these 27 buys real compile-time checking today**, whereas the turso family (#6402) has to narrow `options?: any` first before its casts are worth touching.\n\n## Not a defect\n\nNo known bug has come out of this. Every affected suite is green; the cost is dormant — a misspelled or wrong-typed options key in these 27 test call sites goes unreported. Nobody has tripped on it.\n\n## If it gets done\n\nMechanical: delete ` as any` at the 27 sites, then `pnpm --filter @objectstack/driver-sql typecheck` and `pnpm --filter @objectstack/driver-sqlite-wasm typecheck`. Both were measured green with the casts already gone, so the change is expected to be zero-error. Tests-only, no changeset.\n\nWorth doing in one pass across both packages rather than piecemeal, for the reason #6402 gives about its own five: a partial fix reads to the next reader as a judgment about the sites left behind.\n\n## Related\n\n- #6394 — the single `as never`, same shape, different gate (turso's `options?: any`); this scan came out of its dispatch\n- #6402 — `TursoDriver`'s `options?: any` overrides, the reason turso's casts are a separate problem\n- #6212 — same family (declared-but-unread shapes)\n"
+}

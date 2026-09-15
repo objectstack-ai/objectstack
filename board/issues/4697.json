@@ -1,0 +1,36 @@
+{
+  "number": 4697,
+  "kind": "issue",
+  "title": "A flow variable cannot be declared with a default, so \"always bound\" is not expressible in metadata",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:dispatched",
+    "target:v17"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-02T18:59:03Z",
+  "updated_at": "2026-08-09T09:11:42Z",
+  "closed_at": "2026-08-09T09:11:42Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4697",
+  "body": "Reported from HotCRM (objectstack-ai/hotcrm#643, PR #649), where it forced a workaround for a defect that reproduces end-to-end.\n\n## What we hit\n\n`AutomationEngine.evaluateCondition` evaluates strict CEL, so reading an **unbound** flow variable aborts the whole predicate. Measured on 17.0.0-rc.1:\n\n| expression | X unbound | X = null | X = {} | X = {f:1} |\n| --- | --- | --- | --- | --- |\n| `X.f == 1` | ABORT `Unknown variable: X` | ABORT `No such key: f` | ABORT `No such key: f` | ok |\n| `vars.X.f == 1` | ABORT `No such key: X` | ABORT `No such key: f` | ABORT `No such key: f` | ok |\n| `has(X.f)` | **ABORT `Unknown variable: X`** | `false` | `false` | `true` |\n| `has(vars.X)` | `false` | `true` | `true` | `true` |\n\n(Worth noting on its own: the natural guard spelling `has(X.f)` does **not** survive an unbound variable. Only the `vars.`-scoped form does.)\n\nThe concrete failure: a screen flow collects a checkbox into `createOpportunity`. The runner only returns fields the user actually touched, so on the untouched path the variable is never bound, the outgoing edge aborts, and the flow stops — in HotCRM's case a lead conversion that persisted nothing at all.\n\n## The gap\n\nThe obvious remedy is to declare the variable with a default so it is bound on every path. That is not expressible:\n\n```ts\n// packages/spec — FlowVariableSchema\n{ name, type, isInput, isOutput }   // strict object; no defaultValue key\n```\n\nand `execute` binds a declared input only when `context.params[name] !== undefined`. So **declaring a variable does not bind it** — the declaration is documentation, not a guarantee. There is no metadata form that says \"this variable always has a value\".\n\n## What we had to do instead\n\nInsert an `assignment` node before the screen that binds the variable to `false`, mirroring the screen field's own `defaultValue`. It works, and it has the virtue of making bindedness a property of the graph rather than of the client — but it is a node added to satisfy a missing declaration, and every flow that collects optional screen input needs the same ceremony.\n\nThe alternative an author reaches for first — wrapping the read in `has(...)` — is worse: it silently encodes \"unanswered means no\" into the predicate and leaves the graph defect in place.\n\n## Suggested direction\n\nAdd `defaultValue` to `FlowVariableSchema` and have `execute` bind declared variables to it when no parameter supplies one. That makes \"declared\" mean \"bound\", which is what an author already assumes, and it removes the incentive to reach for a guard that hides a graph defect.\n\nIf defaults are deliberately out of scope for flow variables, then the docs should say plainly that a declared variable may be unbound at runtime, and the guidance for reading one should name the `vars.`-scoped `has()` form — because the bare form does not work and nothing currently says so."
+}

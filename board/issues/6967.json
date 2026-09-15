@@ -1,0 +1,34 @@
+{
+  "number": 6967,
+  "kind": "issue",
+  "title": "ADR-0087 迁移说明探测器把「指向别处的迁移说明」当成迁移说明本身 —— 这类 changeset 无任何可用处置,PR 会被卡死",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T06:29:56Z",
+  "updated_at": "2026-08-09T14:52:21Z",
+  "closed_at": "2026-08-09T14:52:21Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6967",
+  "body": "代 #6350 回补审计的 dev 提交(它当时被 GitHub 限流,无法自行立单;正文为其原文,由 `domain:spec-tooling` 座位转录并补做查重)。**未认领、未定级。**\n\n⚠️ **这是可复现的**前向门禁**缺陷,不是观察类** —— 它今天就能把一个作者卡死。\n\n## 缺陷\n\n`findMigrationPrescription` 会匹配**「指出迁移说明在哪里」的散文**,而不是迁移说明本身。\n\n存量里的活体标本:`.changeset/v17-rc-anchor.md`(v17 发版锚点),其唯一的迁移相关文本是:\n\n> Migration: each breaking change's own changeset carries its FROM → TO guide (grep the CHANGELOG for `!:` entries)\n\n这是一个**指路牌**,不是改写处方。该 changeset **根本没有退役任何面**,它存在的唯一目的是把版本号顶上去。审计据此把它报成 residue 候选。\n\n## 为什么是活缺陷,而不只是审计噪音\n\n对这样一条 changeset,作者在门禁面前**四条路全堵死**:\n\n| 处置 | 为何不可用 |\n|---|---|\n| `not-required (no-migration-prescription)` | 被门禁的矛盾检查拒绝(脚本约 `:1226`,判词「contradicts the changeset's own body」)—— 正文里明明有 `FROM → TO` 字样 |\n| `registered` | 没有任何面被退役,**无可登记之物** |\n| `unpublished` | `@objectstack/spec` 是已发布包,不成立 |\n| `already-registered` | 指不出任何真实条目 id |\n\n⇒ **今后任何一条「正文引用了别处 FROM → TO 指南」的 changeset,都会让它所在的 PR 变成不可合并,且没有任何可选的处置。**\n\n## 同族,方向相反\n\n探测器此前已修过三次,全部是**漏报**方向(把真处方读成非处方):\n\n- #6419 / PR #6432 —— 匹配到字面 `FROM` / `TO` 占位符\n- #6497 / PR #6558 —— 要求箭头\n- #6559 / PR #6588 —— 要求标题\n\n**本条是它们的镜像**:把一个**对处方的引用**读成了处方。同一个探测器,反方向的误判。\n\n## 修法方向(建议,不主张)\n\n要求被框定的区域含有**具体的改写对**,并排除宾语是「指南本身」的句子。\n\n## 查重(由座位补做,dev 当时无法执行)\n\n`findMigrationPrescription` / `prescription detector` / `no-migration-prescription` 三个关键词检索 open issue:**除本座位贴 #6018 外零命中**,无同题单。按 #4949 纪律执行。\n\n## 出处\n\n#6350 的存量回补审计(会话 `session_01AZgRyPVwi1jLb1mNNuUQ9o` 派发)。审计本身的实测数据与 needs_decision 记录在 #6350 线程。"
+}

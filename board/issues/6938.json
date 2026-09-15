@@ -1,0 +1,36 @@
+{
+  "number": 6938,
+  "kind": "issue",
+  "title": "objectui: `bodyShape` is read by the console apiHandler but forwarded by ZERO action renderers — a declared `wrap` is silently dropped",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "pm:queue",
+    "repo:objectui",
+    "target:v17"
+  ],
+  "assignees": [
+    "yinlianghui"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T05:03:51Z",
+  "updated_at": "2026-08-09T08:51:07Z",
+  "closed_at": "2026-08-09T08:51:07Z",
+  "closed_by": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6938",
+  "body": "Found while implementing objectstack#6837 (`bodyExtra` forwarding, objectui PR objectstack-ai/objectui#3924). **Not** fixed there — different key, and #6837's scope was `bodyExtra`.\n\n## The defect\n\n`bodyShape` is the spec's body-wrapping declaration for a `type: 'api'` action — `'flat'` (default) or `{ wrap: key }` to nest the collected params under a key. The console `apiHandler` **reads it**, unconditionally, on its absolute-HTTP branch:\n\n`packages/app-shell/src/hooks/useConsoleActionRuntime.tsx:277`\n```\nconst wrap = action.bodyShape && typeof action.bodyShape === 'object' && action.bodyShape.wrap\n  ? action.bodyShape.wrap\n  : undefined;\nconst body = wrap ? { [wrap]: resolvedParams } : { ...resolvedParams };\n```\n\nBut **no action renderer forwards it.** Measured on objectui `origin/main` @ `99ba5fbd` (counter-probe: `confirmText` is present in all five whitelists, so the greps are live):\n\n| renderer | forwards `bodyShape`? |\n|---|---|\n| `packages/components/src/renderers/basic/elements.tsx` (`element:button`) | no |\n| `packages/components/src/renderers/action/action-button.tsx` | no |\n| `packages/components/src/renderers/action/action-group.tsx` | no |\n| `packages/components/src/renderers/action/action-icon.tsx` | no |\n| `packages/components/src/renderers/action/action-menu.tsx` | no |\n\nSo an author who declares `bodyShape: { wrap: 'data' }` on an action rendered by any of these gets a **flat** body instead of a wrapped one — the endpoint receives the params at the top level and the declaration reads as honoured because it parses and publishes.\n\n## Reachability\n\nReachable on the **declared-action** renderers (`action:button` and friends), which is where `bodyShape` is authorable. It is NOT reachable through `DeclaredActionsBar` / `RelatedRecordActionsBridge` / `ObjectGrid`: those spread the whole ActionDef (`{ params: rawParams, ...rest }`) and carry the key through — which is exactly why the gap survived, since the record-header path works.\n\nNote `element:button` is arguably correct to omit it: spec's `InlineActionSchema` pick list does not include `bodyShape`, so it is not inline vocabulary. The defect is the four **declared**-action renderers.\n\n## Sibling key, checked and NOT a defect\n\n`recordIdParam` is also forwarded by none of the five, but the `apiHandler` only reads it under `if (rowRecord && action.recordIdParam)`, and `rowRecord` arrives only from the spread-based hosts above — which also carry `recordIdParam`. So that one is unreachable, not broken. Recorded here so the next reader does not re-derive it.\n\n## Why this class keeps recurring\n\nThe explicit forward whitelist is a deliberate design (a key no renderer honours must not look wired), but it makes every NEW spec key invisible until five separate lists are edited, with nothing failing when they are not. `bodyExtra` was the same shape (#6837) and `openIn` / `resultDialog` / `undoable` / `locations` each have an in-comment note recording their own instance of it. Worth considering a pin test that diffs the renderers' forwarded key sets against the spec keys the runtime actually reads, so the next key fails loudly instead of silently.\n\nFiled unassigned for triage.\n"
+}

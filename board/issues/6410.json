@@ -1,0 +1,35 @@
+{
+  "number": 6410,
+  "kind": "issue",
+  "title": "[skill] pm-dispatch: semantic-ruling template must carry a compiler-face checklist — process half of the #5930 ruling",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T17:02:53Z",
+  "updated_at": "2026-08-09T05:45:38Z",
+  "closed_at": "2026-08-07T23:47:52Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6410",
+  "body": "Follow-up filed from the 2026-08-07 maintainer ruling on #5930 (decision batch accepted via the PM session). Unclaimed; no labels applied — routing belongs to the triage seat (landing site is `.claude/skills/pm-dispatch/SKILL.md` ⇒ devx per the domain table's `skills/**` row… flagged, not self-applied).\n\n## Ruling context\n\n#5930 measured that one `FilterCondition` semantics is implemented by 5 mutually independent compilers/evaluators, so every semantic ruling costs ×5 and misses recur (#5146 missed face 2 → became #5903; #5326/#5335 each spent a lap re-aligning faces 3/4). The maintainer ruled: the lowering-layer convergence investigation goes `pm:on-hold` (restart condition recorded on #5930); the **process half lands now** — this card.\n\n## Scope\n\nAdd to the pm-dispatch SKILL, in the dispatch-prompt guidance (step 5 area), a standing clause:\n\n- Every **filter/predicate semantic ruling** dispatched for implementation must enumerate the full compiler-face checklist in the dispatch prompt, and the dev's PR must state per face: changed / already conformant / explicitly out of scope (with reason).\n- The five faces as of today (from #5930): driver-sql (`sql-driver.ts`, inherited by wasm/turso-local), turso RemoteTransport (`buildWhereSQL`), service-analytics read-scope-sql, service-analytics filter-normalizer, formula `matchesFilterCondition`. Plus the half-face: objectql `having-filter.ts` (#5905). driver-memory/mongodb: frozen, pin-annotate instead of flip (#5499).\n- Model text: #5298 §1's cost inventory is the reference shape.\n\n## Acceptance\n\n- SKILL.md carries the clause with the face list and the \"per face: changed / conformant / out-of-scope\" reporting requirement.\n- The clause notes the list itself is maintained by PR when faces are added/removed (same discipline as the domain table).\n\nRefs: #5930 (ruling + hold record), #5298 §1 (model), #5903 / #5905 (misses this clause prevents)."
+}

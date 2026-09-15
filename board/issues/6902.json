@@ -1,0 +1,35 @@
+{
+  "number": 6902,
+  "kind": "issue",
+  "title": "SKILL(pm-dispatch): 八条单班实测教训 —— 派发令模板、跨包落点、云卡归档、拆分卡标签继承",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T03:20:03Z",
+  "updated_at": "2026-08-09T13:03:35Z",
+  "closed_at": "2026-08-09T13:03:35Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6902",
+  "body": "交班交付物,**不认领、不自派**。来源:`domain:engine-core` 座位(#6019)2026-08-08 08:46Z → 08-09 03:2xZ 单班,15 张 PR MERGED、决策箱 4 张全批全执行的过程中实测出来的八条。每条都附**触发事件**,便于反查与证伪 —— 未附事件的条目不应进 SKILL。\n\n路由留给分诊:SKILL 本体在 `.claude/skills/pm-dispatch/SKILL.md`(沿革 PR #5885 / #5925 / #6301),看着像 `domain:devx` 或 `domain:spec-tooling`,由 #6015 定。\n\n## 一、「先推分支再开 draft PR,再等 CI」必须是派发令的固定条款\n\n**事件**:单班内两次全账号 token 断粮(~11:0x-12:10Z、~16:0x-17:1x),四个 dev agent 在飞中途死亡。四张卡**零信息损失** —— 因为该条款已在派发令里,四个 agent 都已把分支推上去并开了带完整证据的 PR,PM 走「直接验收路径」(报告丢失 ≠ 验收停摆:PR body 即为报告)照常收口。\n\n**要写进 SKILL 的**:这不是效率优化,是**保险**。agent 的死亡是常态而非异常,派发令必须假定它会在任意时刻死。配套:PM 侧要有「会话已死 + PR 在 ⇒ 直接验收」的明文路径,否则 PM 会误判为需要重派。\n\n## 二、派发令的文件面要写「预期落点 + 生产者在别包时怎么办」\n\n**事件**:#5586 的派发令把文件面锚在**消费者** `packages/core/src/utils/filter-tokens.ts`,而语法的**生产者**在 `packages/spec/src/data/context-tokens.zod.ts`。dev 正确地在生产者侧修,因而突破了申报的文件面。PM 判偏离成立,按 #6532 先例补了事后跨席声明(#6017)。\n\n**要写进 SKILL 的**:文件面写成「预期落点是 X;若实测表明真正的生产者在别包,按 A 处置(报备后跨,PM 补跨席声明)而非 B(在消费者侧打补丁)」。只写一个路径名的派发令,是在要求 dev 在「守约」与「修对」之间二选一。\n\n## 三、代执行他人指令的关闭/作废,必须带指令出处评论\n\n**事件**:#6668 被兄弟席位无说明关闭,本席误判为误扫,重开并发跨席询问;维护者随后说明那是**他本人的指令**。本席按原话重新关闭并把出处附在卡上。\n\n**要写进 SKILL 的**:多席位并发下,一个没有出处的关闭动作与一次误操作**在证据上不可区分**。代执行必须留出处,否则下一个 PM 花在「查这是不是误操作」上的时间,比写那行出处贵一个数量级。\n\n## 四、门禁清单必须现场枚举,⛔ 不凭记忆\n\n**事件**:单班之内门禁清单**增长两次** —— #6672 加 `check:kernel-hook-pairs`,#6661 加 `check:app-nav-i18n`。凭记忆写进派发令的清单当天就过期。\n\n**要写进 SKILL 的**:派发令写「从 `.github/workflows/lint.yml` 现场枚举」,不写具体清单。\n\n## 五、同文件多卡并行的替代纪律(维护者豁免串行时)\n\n**事件**:#5543 / #6457 / #5929 三张卡同时改 `packages/objectql/src/engine.ts`,维护者豁免了同文件串行。四条纪律换来**三卡零冲突**:① 互斥区域申报;② 开 PR 前合 `main`;③ 兄弟卡落地后再合一次;④ 冲突交由合并队列仲裁而非 PM 手动排序。\n\n## 六、PM 的机制假设写进派发令时必须标注「须实测、鼓励证伪」\n\n**事件**:同一班内被证伪**两次**,两次都换来更好的落点。#4776 —— PM 设想的规则会与 `check:startup-registry-verdict` 重叠并另造一套词表,dev 改取补集;#5543 —— PM 以为注解那半还活着,实测 ADR-0122 phase 2(#6083)已让它自动成真,dev 转而挖出 137 处 cast / 46 文件里的 4 个真缺陷。\n\n**要写进 SKILL 的**:PM 的机制判断与 dev 的实测**不对称** —— PM 读的是 issue 与记忆,dev 读的是代码。派发令里未标注的假设会被 dev 当作已裁定的约束遵守,于是错误被忠实执行。\n\n## 七、云卡片合并后必须 `archive_session`\n\n**事件**:维护者点出「派出的云卡片合并以后是否应该关闭」时,本席已累积 **11 个**已完成但未归档的空转容器。\n\n**要写进 SKILL 的**:把归档写进 ACCEPT 收尾的固定动作序列 —— PR MERGED 或卡作废 ⇒ `archive_session` + 退订 PR 订阅,与「flip / 跟到 MERGED」同级,而不是可选的清理。\n\n## 八、拆分卡必须继承父单的发版标签\n\n**事件**:#6806 是 `target:v17` 的 #5495 拆出的引擎侧残余。拆分把**工作**移出去了,却把**发版目标**留在原地 —— 于是真正兑现 v17 义务的那一半在发版板上不可见,而板上留着的父单其剩余范围已被裁定 parked。查 `label:target:v17` 的人会同时看到一张不动的卡和看不到一张在动的卡。\n\n**要写进 SKILL 的**:拆分/分票时,`target:*` 一类发版标签随**工作**走,不随票号留;若判定不该继承,要在卡上写明理由(可证伪),而不是默认不带。\n\n---\n\n附:本班另有两条**已在别处成文、不重复**的沿革 —— 门禁判绿只认 job 结论 `completed: success`(⛔ `in_progress` 不算绿,聚合状态不作数,MCP 分页返空时改走 REST 逐 job 读),以及 GitHub sanitizer 会吞掉裸 `&lt;x&gt;` 片段(即使在反引号内)故必须实体转义 + 写后回读。两条都已落在 #6019 的运维注记里。"
+}

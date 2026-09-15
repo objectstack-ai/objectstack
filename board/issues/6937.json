@@ -1,0 +1,33 @@
+{
+  "number": 6937,
+  "kind": "pull_request",
+  "title": "chore(rest): `@objectstack/rest` 从 #4311 的 DEBT 台账毕业 —— 接进 turbo typecheck (#6905)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "dependencies",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T05:03:19Z",
+  "updated_at": "2026-08-09T05:44:19Z",
+  "closed_at": "2026-08-09T05:44:18Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": "2026-08-09T05:44:18Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/6937",
+  "body": "Fixes #6905\n\n## 前置条件:自查通过\n\nPR #6895(#6307)已合入 `main`:`293476148 fix(rest): refuse a repeated ?version= on GET/DELETE /packages/:id (#6307) (#6895)`。\n\n**自己复测的读数**(全闭包 `turbo run build` 72/72 之后跑 `pnpm check:type-check-debt`,不采信卡里的数字):\n\n```\nℹ @objectstack/rest: DEBT records 2, and tsc now reports 0 -- graduation candidate.\n  Onboard it (add \"typecheck\": \"tsc --noEmit\", or drop the test exclusion, and delete\n  the ledger entry in the same PR). `--lower` deliberately leaves this one alone: 0 is\n  not a lower ceiling, it is a graduation…\n```\n\n实测 **0**,与卡一致。\n\n## 两条路为什么选\"加脚本\"\n\n门禁的提示把两条路并列,但它们属于**两本不同的账**,`scripts/check-type-check-coverage.mjs` 的头注写得很清楚:\n\n- DEBT(`src 没被检查`)的毕业方式是 —— *\"add `\"typecheck\": \"tsc --noEmit\"` to its package.json, and delete its entry here in the same PR\"*;\n- TEST_DEBT(`src 检查了、测试被藏起来`)的毕业方式才是 —— *\"drop the exclusion from tsconfig.json and delete the entry here in the same PR\"*。\n\n本卡是 **DEBT** 卡,所以走加脚本这条。三条佐证:\n\n1. **仓库惯例**:`packages/*` 里 16 个 `typecheck` 脚本,12 个逐字就是 `tsc --noEmit`;放在 `test` 之后也是多数写法(lint / verify / formula / mcp / objectql)。\n2. **同族先例**:`lint`、`mcp`、`objectql`、`runtime`、`formula`、`verify` 六个包**同时**持有 TEST_DEBT 条目、且用的就是朴素的 `tsc --noEmit` —— 直接证明这条路不会扰动另一本账。\n3. **去掉 test exclusion 会撞别的门禁**:`ci.yml` 有一条\"测试文件不得进入发布产物\"的闸门,头注也点名 build config 保留该 exclusion 是有理由的;真要修 TEST_DEBT,支持的做法是 #5286 的 sibling `tsconfig.test.json`,那是另一张卡的事。\n\n机制上也确认了不会污染:新脚本只点名 `tsconfig.json`,而它仍然 `exclude` 了 `**/*.test.ts`,所以 `testsInvoked` 依旧为空,TESTS_COVERED 依旧要求 `TEST_DEBT['@objectstack/rest']` 存在 —— 该条目原封不动。\n\n## 改了什么\n\n- `packages/rest/package.json`:加 `\"typecheck\": \"tsc --noEmit\"`;\n- `scripts/check-type-check-coverage.mjs`:删掉 DEBT 里的 `@objectstack/rest` 条目。\n\n两者必须在同一个 PR:只删条目会挂 COVERED,只加脚本会挂 RECONCILED。\n\n## 实测数字(全部自测,非引用)\n\n| | before | after |\n|---|---|---|\n| 门禁总账 | `62/77 workspace packages type-checked`,15 in DEBT(457 frozen) | `63/77`,14 in DEBT(455 frozen) |\n| 声明了 `typecheck` 脚本的 turbo 任务 | 62 | **63** |\n| `turbo run typecheck` 实际执行的任务总数(含 `^build` 依赖) | 125 | **126** |\n| `rest` 的 typecheck 命令 | `< NONEXISTENT >` | `tsc --noEmit` |\n| TEST_DEBT | 19 包 / 1615 frozen | 19 包 / 1615 frozen(未动) |\n\n> 卡里预估 120→121;我实测的基线是 125→126(`turbo run typecheck` 执行的任务数),另一种数法\"声明了脚本的包数\"是 62→63。两个数都列在这里,以免下一个人对不上。\n\n`pnpm --filter @objectstack/rest typecheck` 干净退出 0。\n\n## 双向实证:门禁真的开始看着这个包了\n\n**预测先写、再跑**(记录在案)。注入的不是随手造的类型错,而是**把 PR #6895 删掉的那条肢体原样装回去** —— `packages/rest/src/package-routes.ts` 的 GET / DELETE 两处,还原成 `const version = req.query?.version || 'latest'` 与 `const version = req.query?.version`。`req.query?.version` 是 `string | string[] | undefined`,而 `packageService.get/delete` 收 `version?: string`。这正是被删掉的台账条目所记的那笔债。\n\n**预测 A** —— 复现台账记的组成(`errors: 2, note: 'code-tier 2 (TS2345).'`),数量和错误码都对得上。**实测:**\n\n```\nsrc/package-routes.ts(271,55): error TS2345: Argument of type 'string | string[]' is not assignable to parameter of type 'string | undefined'.\nsrc/package-routes.ts(346,61): error TS2345: Argument of type 'string | string[]' is not assignable to parameter of type 'string | undefined'.\n      2 error TS2345\n```\n\n命中。(另有 2 条 TS6133 —— 我的还原手法把 `readSingleQueryValue` / `repeatedQueryParamMessage` 两个辅助函数留在原地成了未引用;那是注入手法的副产物,不属于原缺陷,如实记在这里。code-tier 那一档是精确的 2×TS2345。)\n\n**预测 B** —— `turbo run typecheck` 变红。**实测红,退出码 2:**\n\n```\n@objectstack/rest:typecheck: src/package-routes.ts(346,61): error TS2345: ...\n Tasks:    17 successful, 18 total\nFailed:    @objectstack/rest#typecheck\n ERROR  run failed: command  exited (2)\n```\n\n这条红是有效力的:`lint.yml` 的 \"Type check workspace packages\" 步跑的正是 `turbo run typecheck --filter='./packages/*' …`,`packages/rest` 在其中。\n\n**预测 C(与卡里的括号相反,先写下来的)** —— `pnpm check:type-check-coverage` **不会**变红,实测确实**保持绿(退出 0)**。它是门禁的**结构**那一半(头注自称 \"structural, sub-second\"),COVERED / REAL / RECONCILED / TESTS_COVERED / PINS_CHECKED / RUNNABLE 读的全是 package.json、tsconfig 与 workflow 文本,从不启动编译器,所以任何类型错都推不动它。跑编译器的是 `check:type-check-debt`(`--re-measure`),而它只编译**有台账条目**的包 —— 本 PR 删掉 rest 的 DEBT 条目后,它也不再编译 rest 的 src。\n\n**这恰好是\"加脚本\"不可省的理由,也是本卡最该说清的一句话:** 毕业前,看着 `rest/src` 的是台账条目(记 2,实测 4 就会超顶变红);毕业后,看着它的唯一东西就是 `turbo run typecheck`。所以只删条目、不加脚本,才真的会把这个包从\"记录在案的欠债\"挪成\"没人检查\"——而加了脚本之后,上面那条退出码 2 的红就是接管完成的证据。\n\n**预测 D** —— 撤掉注入后恢复绿。**实测 `turbo run typecheck --force` 18/18,退出 0**,工作区 `git status` 干净;注入自始至终只在工作区,从未提交。\n\n⚠️ 全程没有碰 `packages/rest/src/rest-server.ts`(#6601 的同事正在那里)。注入落在 `package-routes.ts`。\n\n## 合并后复跑(main 当时又前进了 6 个提交)\n\nmerge → 重建全闭包(72/72)→ 复测,一趟连续做完:\n\n```\ncheck-type-check-coverage: OK — 63/77 workspace packages type-checked (plus the root), 14 in the DEBT ledger (455 frozen raw errors), 1 exempt.\ncheck-type-check-coverage --re-measure: OK — 33 ledger entr(ies) re-measured in 274.9s, 1764 raw tsc error(s) total, none above its recorded number.\n```\n\n台账条目 34 → 33,rest 的 DEBT graduation-candidate 提示行消失;rest 的 TEST_DEBT 行仍在、数字未动。\n\n## changeset:不加,走 `skip-changeset`\n\n纯构建/工具改动:没有任何运行时行为变化,`scripts/` 不发布,`package.json` 里新增的 `typecheck` 脚本对使用者没有语义。\n\n先例是 #4311 同族里最贴近的一次 —— PR #5045 给 `@objectstack/runtime` 做同样的毕业,它的 changeset 是为 `@objectstack/spec` 的真实类型契约变更而写的,并在正文里**明说**毕业这半件事不发布:\n\n> `@objectstack/runtime` itself is not released by this change — it gains a `typecheck` script and loses its `check-type-check-coverage` DEBT entry\n\n本 PR 只有那\"半件事\",没有随附的 spec/源码改动(rest 已零错,无债可修),所以按同一句话的口径,没有可发布的东西。另一条先例 #6376 / PR #6510(纯改这个门禁脚本)同样没有 changeset。\n\n按 #5471 / #4898,空 frontmatter 的 changeset 是禁止的,所以这里用 `skip-changeset` 标签而不是空文件。\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_017uFVNMmTxLpmfQYiuKM1Yx)_"
+}

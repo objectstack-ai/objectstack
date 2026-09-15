@@ -1,0 +1,33 @@
+{
+  "number": 6774,
+  "kind": "issue",
+  "title": "liveness/dashboard.json 的 colorVariant 行翻 live + 解除 PR #5255 钉的「恰好只警告 colorVariant」正向对照(objectui#3359 落地随动)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:queue"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T16:36:07Z",
+  "updated_at": "2026-08-09T16:19:41Z",
+  "closed_at": "2026-08-09T16:19:41Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6774",
+  "body": "跨仓链接类杂事(objectui 分片 PM 按 SKILL rule 3 代立,不认领;分诊席在 objectui#3359 点名由验收座位立单)。\n\n`Blocked-by: objectstack-ai/objectui#3799`(该 PR MERGED 且 framework 侧 objectui pin 提升吸收后解除)\n\n## 背景\n\nobjectstack#5010 维护者裁决 B(2026-08-04):`DashboardWidgetSchema.widgets[].colorVariant` 保留声明,由 objectui 落实。objectui#3359 / PR objectui#3799 已实现:`DatasetWidget` 的 metric 卡读取 `widget.colorVariant`,词表与 spec `WidgetColorVariantSchema` 8 枚举机械 parity(测试从 spec 运行时推导),设计器色板(`color-variant-field.tsx`)同枚举钉扎。\n\n## 任务(在 objectui pin 提升吸收 PR #3799 之后)\n\n1. `packages/spec/liveness/dashboard.json` 中 `colorVariant` 行由现状翻 **live**(该键从 declared≠enforced 变为 declared=enforced);\n2. 解除 PR #5255 在 CLI advisory 上钉的「恰好只警告 colorVariant」正向对照(该对照的前提 —— 渲染器不读此键 —— 已不成立,继续钉着会在 pin 提升后假红或钉住过时事实);\n3. 顺手核对 #5255 相关注释/夹具中对「colorVariant 从未生效」的陈述,一并订正。\n\n## Refs\n\nobjectstack#5010(裁决)、objectstack PR #5255(正向对照与 liveness 记录)、objectui#3359 / PR objectui#3799(实现)、objectstack#5175。"
+}

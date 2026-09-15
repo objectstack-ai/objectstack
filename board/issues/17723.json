@@ -2,8 +2,8 @@
   "number": 17723,
   "kind": "issue",
   "title": "[finding] nothing holds `content/docs/deployment/cli.mdx`'s two enumerations equal to their source declarations — three measured under-inclusive drifts, all repaired by hand",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "claude[bot]",
@@ -12,19 +12,24 @@
   },
   "labels": [
     "domain:devx",
-    "pm:queue",
     "priority:p2",
     "tooling"
   ],
-  "assignees": [],
+  "assignees": [
+    "baozhoutao"
+  ],
   "milestone": null,
   "type": "Task",
   "created_at": "2026-09-11T20:03:32Z",
-  "updated_at": "2026-09-12T02:43:14Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-14T17:01:42Z",
+  "closed_at": "2026-09-14T16:59:02Z",
+  "closed_by": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/17723",
   "body": "Filed by the `domain:cli` execution PM seat (#6024, session `session_01TSf4DV7ziu4V5j73e46b7c`), round R73, **2026-09-11T20:03Z**, as the carrier for the mechanism question **#16892** raised and could not answer inside its own fence. ⛔ Left unlabelled beyond `finding` — triage owns `domain:*`, type and priority. ⛔ **Not a defect in what #16892 landed** (PR #17722): that PR documents all eleven flags, all three scripts and the `--manifest-id` condition correctly. This card exists because the *next* drift has nothing to stop it.\n\n## The problem, stated as a record rather than a worry\n\n`content/docs/deployment/cli.mdx` states two enumerations whose sources live in code, and nothing holds either equal to its source. Measured drift, three times:\n\n- **#8965** — an earlier under-inclusive drift on this same page.\n- **#16892 item ①** — the scaffolded-scripts sentence said *\"these\"* (three commands) and named **two** scripts. Under-inclusive since #16330, and for all four scaffolders since #16350 / PR #16888.\n- **#16892 item ②** — `os lint` declares **11** flags and the page documented **4**. Seven undocumented, including `--include-platform`, which the command **names in its own hint**, so a reader following that hint arrived at a page that did not mention it.\n\n⇒ three drifts, all in the same direction (under-inclusive), all repaired by hand. ⛔ Hand repair is what produces `4 of 11` in the first place.\n\n## The routes, and the seat's recommended direction\n\n**A — GENERATE the flag table from the declaration**, so the hand-typed form stops being a spelling anyone can get wrong; gate only what generation cannot reach.\n**B — A NEW GATE** in the exact shape of `scripts/check-docs-spec-enumerations.mjs` (#17388), keyed on `Object.keys(Command.flags)` per documented command section, refusing if the declaration moves rather than deriving an empty set.\n**C — leave it hand-maintained.**\n\n⭐ **Recommended direction: A, then B for the residue.** The standing repair order is 「失效修法按序取:先删容许出错的构造,再让正确形态成唯一拼写,最后才加检查」 — a check is the **last** step. Option A *is* the \"make the correct form the only spelling\" step, and it has not happened here. ⛔ **C is rejected on the measured record above.**\n\n⚠️ **The dispatching seat deliberately did NOT charter this.** A new mechanism is a new validation surface and sat outside #16892's fence; the choice between A and B belongs to the receiving lane or the maintainer, not to the seat that noticed.\n\n### ⚠️ Three constraints the dispatched dev measured, which any route must respect\n\n1. ⛔ **The obvious cheaper route cannot work.** `scripts/check-cli-examples-parity.mjs` already holds one fence on this very page — measured green here: *\"5 `os package publish` invocation(s) in `publish.ts` (examples) == 5 in the block at `content/docs/deployment/cli.mdx:1759`\"*. But `os lint` **declares no `examples`**, and an example set and a flag set are **different populations**: a flag need not appear in any example, so that gate is structurally blind to a missing flag. ⇒ extending it is not the cheap win it looks like.\n2. ⛔ **No enumeration route covers item ③.** A *condition* is not an enumeration, and the precedent gate says so in its own non-coverage list — verified at source by this seat, `scripts/check-docs-spec-enumerations.mjs:92`-`:93`: *\"mentions a namespace, explains one, or links to one is not an enumeration and is held to nothing.\"* ⇒ whatever is built covers ① and ② only; ③ stays prose and stays unheld.\n3. ⭐ **Item ①'s SOURCE side is already held** by `packages/cli/test/scaffold-ci-script-parity.test.ts`. What nothing holds is **the doc sentence that names them**. ⇒ the gap is one-sided, which narrows the work considerably.\n\n## ⭐ The precedent, and it landed\n\n**#15373** (closed, `domain:devx`, `priority:p2`) — *\"no gate reads the CLI transcripts embedded in `content/docs` — a number quoted from a live registry drifts silently, and four published pages carried a stale one.\"* It produced `scripts/check-docs-transcript-drift.mjs`, which PR #17722 measured **green** on this very page (*\"4 declared transcript value(s) across 402 page(s) … equal what the registry derives today\"*).\n\n⇒ a docs figure held to its source by a gate is **already an accepted shape in this repo**, on this page, for a different figure family. This card asks for the same treatment of the two enumeration families beside it. ⭐ That precedent is why this is a proposal with a known cost rather than a new idea.\n\n## Dedupe\n\nRepo-scoped semantic search returned **7** results; the channel fired rather than going silent, so the absence of a duplicate is a reading.\n\n- **#16892** (open, closing on PR #17722) — the card that raised the question. Its three items are **fixed**; this card is only the mechanism. ⛔ Not a duplicate.\n- **#15373** (closed, landed) — the precedent above, a *different* figure family (live-registry transcript values, not declared enumerations). ⛔ Adjacent, not this.\n- **#13482** (closed) — source line numbers no gate resolves. Same disease, different artefact.\n- #11394, #7648, #12016, #14350 — CLI-gate and checklist findings, all unrelated subjects.\n\n⛔ No open card proposes a generator or gate for CLI docs enumerations.\n\n## ⚠️ What this card is NOT\n\n- ⛔ Not a reproducible defect, a violated declared contract, or an AI-metadata trap — it is **prevention**. The dispatched dev noted exactly that and correctly left the filing decision to the seat. It is filed under the 换班报告 mechanizable channel (「可机械化项 → 门禁/脚本卡,⛔ 不是散文」) rather than as one of the three defect classes, and it should be graded on that footing.\n- ⛔ Not a claim that #17722's page is wrong today. It is correct today; the question is what keeps it correct.\n\nRefs: #16892 (PR #17722) · #15373 · #17388 · #8965 · #16330 · #16350 (PR #16888)\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"

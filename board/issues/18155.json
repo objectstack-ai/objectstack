@@ -1,0 +1,26 @@
+{
+  "number": 18155,
+  "kind": "issue",
+  "title": "[finding][repo:objectui] Kanban card renders a currency field's amount with no currency symbol",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-14T06:54:48Z",
+  "updated_at": "2026-09-14T06:54:48Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/18155",
+  "body": "**Finding, not a claim on anyone's queue** — filed by the video-production lane. Not taking this on.\n\n## What we observed\n\n`amount` is declared as a **currency** field. On the kanban card it renders as a bare number — **no currency symbol, no currency code**.\n\nThe same value carries its symbol elsewhere in the UI, so the card renderer appears not to apply the currency formatter that the field type implies.\n\n## Why it mattered to us\n\nCard amounts are on screen for most of our promo film. A bare number reads as a quantity rather than money, which quietly weakens what the shot is showing.\n\n## Environment\n\n- `hotcrm` `main` @ `c716a2c` (17.4.0), `OS_PRODUCT_STAGE=ga`\n- Opportunity kanban, `amount` currency field on the card\n\n## What would resolve it for us\n\nThe card renderer formatting currency fields the way the field type declares, same as other surfaces.\n\nContext: promo-video ticket steedos-labs/video-studio#356 (private repo; the finding above is self-contained)."
+}

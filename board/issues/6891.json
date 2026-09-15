@@ -1,0 +1,33 @@
+{
+  "number": 6891,
+  "kind": "pull_request",
+  "title": "docs(permissions): isSystem 行为全集权威表 —— 按普查而非回忆构建 (#6782)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T03:00:21Z",
+  "updated_at": "2026-08-09T03:28:06Z",
+  "closed_at": "2026-08-09T03:28:05Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": "2026-08-09T03:28:04Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/6891",
+  "body": "Fixes #6782\nPart of #4707\n\n（`Fixes` 只锁本执行子单；#4707 按裁决留作锚点，待 #6783 一并落地后关闭。）\n\n## 做了什么\n\n新增 `content/docs/permissions/system-context.mdx`，作为 `ExecutionContext.isSystem` 的**唯一权威页**。\n\n⛔ 纯文档，无任何行为变更；未碰 `docs/adr/**`，未碰 `content/docs/releases/`。\n\n## 普查，不是回忆\n\n本单的价值在于「穷尽」，所以表是**普查出来的**：全仓 `isSystem` 逐处过一遍并分类，分类脚本显式列出每个 file:line，可复算。\n\n| 口径 | 数量 |\n|:---|---:|\n| 全仓 `isSystem` 出现次数（ts/tsx/js，排除 node_modules 与 dist） | **1179** |\n| ├─ 测试文件内 | 588 |\n| └─ 源码文件内 | 591 |\n| 源码中：类型/schema 声明 | 16 |\n| 源码中：生产者（`isSystem: true` 传参，本身不是行为） | 240 |\n| 源码中：**消费者**（读取点） | **121** |\n\n121 个消费者再分类：\n\n| 类别 | 数量 | 说明 |\n|:---|---:|:---|\n| **flag —— 真正改变行为的读取点** | **80** | 表中每一行的来源，横跨 **18 个包** |\n| metadata | 12 | 读的是**同名但无关**的 `Object.isSystem` / `EmailTemplate.isSystem` / `Environment.isSystem` |\n| namePrefix | 11 | `isSystemObjectName()` 一族，按 `sys_` 前缀判断，与该 flag 无关 |\n| propagate | 5 | 只把 flag 往下传，自身无行为 |\n| noise | 13 | 生成的 i18n bundle、form 声明、`.describe()` 文案、JSON schema 声明 |\n\n80 个行为点按包分布（数量最多的几个）：plugin-sharing 19、plugin-security 11、plugin-approvals 10、runtime 9、objectql 7、plugin-reports 6、plugin-audit 4、service-storage 3，其余 10 个包各 1—2。\n\n## 表怎么写的\n\n按你要求的口径：**说清作者得到什么、失去什么，而不只是代码在哪**。每行都带 file:line 锚点，分五个车道：授权与作用域（12 行）、写入管线与完整性（9 行）、sharing（10 行）、审批·报表·附件·评论·知识（8 行）、action·元数据面·provenance（8 行）。\n\n另加两节，与表同等重要：\n\n- **`isSystem` 不做什么** —— 7 条反向条目，每条带锚点。最贵的一条：`isSystem` **不抑制触发器**，只有 `skipTriggers` 抑制（`seed-loader.ts:1310`—`1313`，#3760 曾因此在首次启动自触发死锁）。其余：不跳过状态机、不跳过校验规则、不保留 `updated_at`、不 stamp `created_by`、**不豁免 last-admin 闸门**（`last-admin-guard.ts:247` 明写「applies to EVERY context, isSystem included」）、不可由客户端设置。\n- **已知粗糙处** —— 记录而不抹平，见下。\n\n原单三行也在表内，但**锚点更正了一处**（见下）。\n\n## ⛔ 发现的矛盾与可疑处（不抹平）\n\n1. **原 issue 的第 1 行锚点归因错了。** 原文写 `packages/objectql/src/registry.ts`（`applySystemFields`）。实测 `applySystemFields`（`registry.ts:307`）是**schema 侧的列供给**（决定对象带哪些列），对执行上下文 `isSystem` 的读取次数为 **0** —— registry.ts 全文只有一处注释提到它。真正被跳过的写时 `owner_id` stamp 在 **plugin-security** 的安全中间件里（`security-plugin.ts:1466`—`1560` 的 3.5 步），而该中间件在 `security-plugin.ts:825` 因 `isSystem` 整体短路。行为描述成立，归因不成立，表里按实测锚点写。\n\n2. **`owner_id` 缺口有两处彼此独立的补偿，且没有共享机制。** 自动化流程的数据节点内联补 stamp（`runtime-identity.ts:279`，由 `crud-nodes.ts:309` 调用，其注释自陈原因：「the security middleware that stamps it short-circuits on isSystem — so the writer fills it here」）；种子数据则靠启动期扫描补（`plugin-security/src/claim-seed-ownership.ts`）。**第三条系统写入路径两者都拿不到。** 这更像设计缺口而非设计，已在页面点名。\n\n3. **strict 写入可观测性在提权下静默失效。** 调用方主动要求「丢字段就报错」，得到的却是沉默 —— 因为 strip 根本没跑，什么都没丢。「按对的方式豁免」与「可观测性坏了」从外部无法区分（`engine.ts:6098`、`readonly-strict-errors.ts:44`）。\n\n4. **`revoke()` 在 system 分支绕过了自己的冲突闸门。** `sharing-service.ts:884` 直接删除并 return，走不到 `:908` 那条「该 grant 由规则物化、下次 reconcile 会被静默重新授予」的 `CONFLICT` 提示。对规则评估器是对的，对其他调用方是意外。\n\n5. **四个同名 `isSystem` 声明的碰撞是真风险，不是命名洁癖。** `Object.isSystem` 改的是对象**默认 sharing 为 public**，`ExecutionContext.isSystem` 改的是**sharing grant 是否物化** —— 搜「isSystem sharing」两个都命中，而它们是无关的决定。页面开头专门用一张表消歧。\n\n## ⚠️ 在飞工作\n\n- **#6783（诉求 3 同族单）**：给「isSystem 写入覆盖活跃 sharing 规则却零物化」加 INFO 行。**尚未落地**，所以页面把第 22 行明确写成「目前静默」，并注明该 INFO 行是 queued 状态 —— 不把未来态写成现状。\n- **PR #6880（#6827）**：改 `state-machine.mdx` 的 `preserveAudit` create/update 不对称叙述。与本页不冲突：它收敛的正是「`isSystem` 是 create 侧唯一豁免」这一点，本页第 16 行与之一致，且用链接而非复述指向 `security.mdx`。\n- 全量翻了当前 open PR 与 open issue，**没有任何在飞工作改动 `isSystem` 语义本身**。\n\n## 裁决入表\n\n按 #4707 2026-08-06 维护者裁决，「⛔ 不拆分该 flag」作为**已知决定**写进页面（已发布语义 / 无业务拉动 / 三开关组合面对 AI 作者更易错），并写明所接受的取舍：提权只能是粗粒度的；需要更窄豁免时，平台的做法是在 `isSystem` **旁边**加显式选项（`skipTriggers`、`preserveAudit`、`skipStateMachine`、`runAs`），而不是细分这个 flag。\n\n## 顺带改动\n\n- `content/docs/permissions/meta.json`：注册新页。\n- `content/docs/permissions/authorization.mdx`、`content/docs/protocol/objectql/security.mdx`：各加一处指向权威页的交叉链接（security.mdx 那处点明「readonly strip 只是 80 个行为之一」）。\n- `.claude/workflows/docs-accuracy-audit.js`：由 `node scripts/docs-audit/check-audit-scope.mjs --write` 生成 —— 这是 `check:docs-audit-scope` 闸门要求的登记，不是手改。\n\n## 验证\n\n```\ncheck-nul-bytes: OK (scanned 6408 tracked text file(s); no raw ASCII control bytes).\n✓ doc authoring guard: 374 files clean — no bare metadata literals.\ncheck-role-word: OK (44 baselined file(s), no new occurrences).\n✓ check-quick-reference-counts: 13 section(s), every heading matches its table.\n✓ docs-accuracy-audit scope is in sync with content/docs/: 179 hand-written doc(s).\n```\n\n`check:docs-audit-scope` 首跑是**红**的（新手写页未登记），`--write` 后转绿 —— 闸门确实抓到了东西，记录在此。\n\n无 changeset：纯文档 + `.claude/`，不发布任何包，改挂 `skip-changeset`。\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01F8q5J1MQyocgtNspb15fSn)_"
+}

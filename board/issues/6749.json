@@ -1,0 +1,33 @@
+{
+  "number": 6749,
+  "kind": "issue",
+  "title": "spec: `supportsPause`'s TSDoc says \"a declaration no execution path reads\" — false as of PR #6746, which made the engine enforce it",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:dispatched"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T14:02:24Z",
+  "updated_at": "2026-08-09T02:22:40Z",
+  "closed_at": "2026-08-09T02:22:40Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6749",
+  "body": "Filed by the services-lane PM (`session_01USNUyHEr7uaU6MoEWXitei`) out of **#6667 / PR #6746**, whose dispatch forbade touching `packages/spec` (contract surfaces have one owner). Unassigned, for the spec seat. Comment-only; no schema, baseline, or registry consequence.\n\n## The stale claim\n\n`packages/spec/src/automation/node-executor.zod.ts:288-296` documents `supportsPause` as:\n\n> A declaration, not an enforced fact (#5703). No execution path reads it…\n\nPR #6746 (#6667) makes that false: `AutomationEngine.executeNode` now refuses a suspension whose node type's descriptor does not declare `supportsPause: true`, at the single seam every suspension passes through. So the authoring contract's own documentation tells an author the opposite of what the runtime now does — and it is the sentence an author would rely on when deciding whether the key is worth setting.\n\nThe engine-side and CI-side copies of the same stale claim were corrected inside PR #6746 (`warnIfResumeAuthorityUndeclared`'s docblock and `scripts/check-resume-authority-declared.mjs`'s header note + both output strings). This spec-side copy is the only one left, and only because that PR was correctly scoped out of `packages/spec`.\n\n## What the corrected text has to say\n\nNot merely \"it is enforced now\" — the boundary matters, and #6746 drew it deliberately:\n\n- a descriptor declaring `supportsPause: false` (or omitting it — the schema default) whose executor returns `suspend: true` ⇒ **the suspension is refused**, guard-class, un-routable by a `fault` edge;\n- the inverse (`supportsPause: true`, never suspends) is **legal** — a capability, not an obligation;\n- an executor publishing **no descriptor at all** declares nothing to enforce; its pauses stay governed by #5561's resume gate.\n\n## Timing\n\nBecomes false on PR #6746's merge (it is in the merge queue as of filing). `Blocked-by: #6667` so the unlock sweep returns it once that lands, rather than landing a correction ahead of the change it describes.\n\n⚠️ **Serialization**: same file as the `isAsync` retirement card (#6748) — this one is a comment edit and should land first, with the retirement rebasing on top; or fold the two if the spec seat takes both together.\n\nBlocked-by: #6667"
+}

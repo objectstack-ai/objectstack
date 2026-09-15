@@ -1,0 +1,36 @@
+{
+  "number": 5227,
+  "kind": "issue",
+  "title": "TS 作者写不出「省略 authRequired」这个安全形状:`ApiEndpoint` 是输出类型,`authRequired` 在上面是必填",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:dispatched",
+    "target:v17"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T11:05:34Z",
+  "updated_at": "2026-08-09T01:50:19Z",
+  "closed_at": "2026-08-09T01:50:19Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5227",
+  "body": "观察类发现(`finding`,不进分发池),来自 #5112(#5040 E8 收官验收)写 fixture 时被 `tsc` 拦下。\n\n## 事实\n\n升级指南 `declarative-apis-endpoints-live` 的核心安全论断是:\n\n> Its schema default is `true`, so an omission is SAFE and needs no review; an EXPLICIT `authRequired: false` is the only thing that opens anonymous access.\n\n这在运行时完全成立(#5112 的 e2e 实测:省略键的端点对匿名调用返回 401)。但一个用 TypeScript 写 stack 的作者**无法表达那个省略**:\n\n```\ntest/fixtures/endpoint-policy-fixture.ts(66,14): error TS2741:\n  Property 'authRequired' is missing in type '{ name: ...; method: \"GET\"; ... }'\n  but required in type '{ ...; authRequired: boolean; ... }'.\n```\n\n因为 `export type ApiEndpoint = z.infer<typeof ApiEndpointSchema>`(`packages/spec/src/api/endpoint.zod.ts:83`)是**输出**类型 —— `.default(true)` 已被物化,该键是必填。省略只能通过 `ApiEndpointInput`(第 84 行,`z.input<...>`)表达。\n\n## 为什么值得记一笔\n\n指南教人「不写就是安全的」,而最常见的写法(`const X: ApiEndpoint = { … }`)会强迫作者把 `authRequired` 显式写出来。显式写 `true` 无害;但一旦作者被迫开始考虑这个键,写错成 `false` 的概率就不再是零 —— 而 `false` 是这条线上唯一不可挽回的错误。对 AI 作者尤其如此:它会照着类型报错补上缺的键,而不是去换类型。\n\n今天没有用户被这个坑到(showcase 的两条都显式 `true`),所以按观察类归档。可能的方向,不预设结论:\n\n- `apis:` 的作者面统一暴露 `ApiEndpointInput`(与 `ApiEndpointSchema.create` 已经用 `z.input` 的做法一致);\n- 或在指南里点名这一点,让「省略」的建议附上可用的类型注解写法。\n\n关联:#5112、`packages/spec/src/api/endpoint.zod.ts:80-84`、ADR-0121 D6。"
+}

@@ -1,0 +1,38 @@
+{
+  "number": 5620,
+  "kind": "issue",
+  "title": "pr-automation.yml 的 allow-major 步骤仍从事件载荷读标签:#5580 同款竞态的孪生体(pre-mode 期间休眠)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "ci/cd",
+    "domain:devx",
+    "pm:blocked",
+    "pm:queue",
+    "tooling"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T20:39:55Z",
+  "updated_at": "2026-08-09T02:45:48Z",
+  "closed_at": "2026-08-09T02:45:48Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5620",
+  "body": "实现 #5580(changeset-check 的 `skip-changeset` 标签改为 job 内实时读)时在同一个 job 里发现的孪生体。查重先行:`allow-major label payload` 与 `in:body \"allow-major\"` 两轮检索 0 命中。\n\n## 签名\n\n`.github/workflows/pr-automation.yml` 的 `Guard against accidental major bumps (launch window)` 步骤:\n\n```yaml\nif: \"!contains(github.event.pull_request.labels.*.name, 'allow-major')\"\n```\n\n与 #5580 修掉的是**同一个读法、同一个后果**:\n\n- 载荷是事件触发那一刻的快照 → 开 PR 后再补 `allow-major` 标签,`opened` 事件的 run 看不见 → `check-changeset-no-major.mjs` 照跑 → 红;\n- `rerun_failed_jobs` 复用原载荷(pm-dispatch Operational notes 5)→ 该红 run **永久红**,只能靠一次新的真实事件顶掉。\n\n#5580 只授权改 `skip-changeset` 的读取时机,故本条按边界留在原样,未在 PR 中一并改。\n\n## 为什么标 `finding` 而不是排队\n\n**当前休眠**:仓库处于 changesets pre-release 模式(`.changeset/pre.json` 的 `\"mode\": \"pre\"`、`\"tag\": \"rc\"`),而 `scripts/check-changeset-no-major.mjs` 在 pre-mode 下**整体让位**(见其头注 RC EXEMPTION),因此 `allow-major` 标签目前根本用不上,这条竞态今天没有任何人会撞到。\n\n但它会在 `changeset pre exit` 的那一刻**自动重新武装**——恰好是全栈 major 讨论最密集、`allow-major` 最可能被现场补标签的时候。所以值得记一笔,而不是等它在退出 RC 的当天被人当新 bug 重新诊断一遍。严重度请 PM 按 triage 轮判定,不必信本段的自我评估。\n\n## 修法(与 #5580 落地形状一致,可直接复用)\n\n#5580 的 PR 已在该 job 的第一个步骤里实时读回标签集并产出 `steps.labels.outputs.skip`。同一个步骤只需多产出一个 `allow-major` 判定(同一次 `gh api` 调用,零额外请求),该步骤的 `if:` 改读它即可。注意容忍方向须与 #5580 一致:**读不到标签 = 执行守卫**(#4690 反模式),不能读失败就发豁免。\n\n## 关联\n\n- #5580 / 其 PR(`skip-changeset` 侧的实时读)\n- #5292 / PR #5467(该 job 文案修正,竞态首次被记录)\n- pm-dispatch Operational notes 5(rerun 复用原载荷的语义)"
+}

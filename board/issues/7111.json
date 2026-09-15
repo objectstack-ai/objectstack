@@ -1,0 +1,35 @@
+{
+  "number": 7111,
+  "kind": "pull_request",
+  "title": "docs(spec): align GroupingConfig.fields & NotifyConfig sourceObject/sourceId describes with the measured acceptance face (#7084, #7085)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T17:05:15Z",
+  "updated_at": "2026-08-09T17:41:00Z",
+  "closed_at": "2026-08-09T17:40:58Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": "2026-08-09T17:40:58Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/7111",
+  "body": "Fixes objectstack-ai/objectstack#7084\nFixes objectstack-ai/objectstack#7085\n\n按 #7084 / #7085 两条 16:24Z 分诊结论打包的 axis-① describe 对齐卡(#6918 逐项清单评审模式):两处均为纯文案对齐,验收面逐字节不变(`domain:spec-surface`),不加任何 bound、不加 refine。\n\n## Item 1 — #7084 `GroupingConfigSchema.fields`\n\n- **Before**: `Fields to group by (supports up to 3 levels)`\n- **After**: `Fields to group by, in nesting order — the first entry is the outermost group and each later entry nests one level deeper (at least one field)`\n\n逐项核对:\n- [x] 锚点在 fresh main @ `f5a9bc2f3` 复核:`packages/spec/src/ui/view.zod.ts:562`,`.min(1)` 无上界,原句仍在。\n- [x] 探针矩阵在 fresh main 重跑,与卡片一致:0 层 rejected `[too_small]`、未知键 rejected `[unrecognized_keys]`(双侧对照),1/3/4/5/10/50 层全部 ACCEPTED。\n- [x] E17 硬规则:新文案不含任何固定数字上限(\"up to N\" 类同缺陷),只陈述形状(数组顺序=嵌套顺序、首项最外层、至少一个字段,与 `.min(1)` 一致)。\n- [x] 消费端实测(objectui @ `origin/main` = `65bb513`,只读):`packages/plugin-grid/src/useGroupedData.ts` `buildLevel` 唯一停止条件是 `depth >= fields.length`,递归条件 `depth + 1 < fields.length`,无 slice、无深度上限 —— 渲染器渲染全部配置层级,数组下标即嵌套深度。\n- [x] \"3 levels\" 语料普查(双仓、双向):objectstack 侧仅命中锚点本身与其生成页 `content/docs/references/ui/view.mdx:343`(本 PR 一并再生);无手写文档副本。objectui 侧无 grouping 相关 \"3 levels\" 主张(CONTRIBUTING.md 的 \"max 3 levels\" 是代码嵌套风格规则,无关)。另测得:objectui 的**编辑器** `grouping-editor.tsx` 默认 `maxLevels = 3`(`ViewSettingsPopover.tsx:203` 传 `maxLevels={3}`)—— 这是 authoring UI 的加号按钮上限,不是接受面或渲染上限;新文案对此不作任何主张,已记入报告。\n- [x] Pin(`view.test.ts`,#7084 用例):非空 arm 在前;/nesting order/、/outermost/、/at least one/ 语义 arm;负向 arm 断言不得回归固定计数(`\\bup to \\d+\\b`、`\\b\\d+\\s+levels?\\b`、`max N` 三种拼法)。\n\n## Item 2 — #7085 `NotifyConfigSchema.sourceObject` / `sourceId`\n\n- **Before**: `… (writes sys_notification.source_object). Requires sourceId.` / `… (writes sys_notification.source_id). Requires sourceObject.`\n- **After**: `… Only takes effect together with sourceId — a half-specified click-through target is dropped at execute time, so the inbox never renders a dead link.`(sourceId 侧对称)\n\n逐项核对:\n- [x] 锚点在 fresh main @ `f5a9bc2f3` 复核:`io-node-config.zod.ts:163/:166` 仍是 \"Requires …\";同文件模块 JSDoc(:133-136)与 `NOTIFY_KEY_GUIDANCE`(:114)记录的真实契约是\"成对才生效、半对在执行期被丢弃、schema 有意不 refine\"。\n- [x] 探针矩阵在 fresh main 重跑(E9),与卡片一致:full pair ACCEPTED、未知键 rejected `[unrecognized_keys]`、sourceObject-only ACCEPTED、sourceId-only ACCEPTED。\n- [x] 新文案词汇全部借自 JSDoc/guidance(\"only takes effect together\"、\"half-specified click-through target is dropped\"、\"the inbox never renders a dead link\"),未发明第三种拼法(#6881)。\n- [x] 不加 refine(⛔ 分诊红线):两个半对探针在改动后依旧 ACCEPTED,并由新 pin 以 `safeParse(...).success === true` 活体钉住。\n- [x] Pin(`io-node-config.test.ts`,#7085 用例):非空 arm 在前;/only takes effect together/、包含对侧键名、/dropped at execute time/ 语义 arm;负向 arm `not.toMatch(/\\brequire[sd]?\\b/i)`。\n\n## 反向验证(方向先于运行预测,#6918 模板)\n\n- **Arm A**(`git checkout origin/main --` 恢复两个 zod 旧文案,pin 不动)→ **预测:两条 pin 各自 RED** → 实测 RED:item 1 首个失败 arm `/nesting order/i`,item 2 首个失败 arm `/only takes effect together/i`;其余 236/238 用例保持绿。\n- **Arm B 反空洞**(三处 `.describe('')`)→ **预测:恰经非空 arm RED**(负向 arm 对 `''` 空洞通过)→ 实测 RED,失败信息即非空 arm 自带标签:`fields .describe() must not be empty`、`sourceObject .describe() must not be empty`。\n- Pin 覆盖预检(#6854,字面量 + `toMatch` 两种拼法检索):此前无任何针对这两段 describe 的既有 pin,新增即全部覆盖。\n\n## Lane admission(验收面逐字节不变)\n\n`pnpm --filter @objectstack/spec build && check:generated`:`check:authorable-surface`(含 `authorable-surface/**`、`authorable-defaults/`、`.base.json`、JSON schemas)与 `check:api-surface`(`api-surface/**`)全绿零 diff;两段 describe 字符串本就不落入上述任何验收工件(grep 验证)。git status 亦仅四个源/测试文件 + 两个再生 mdx + changeset。\n\n## 生成物\n\n恰好两个引用页变更(与预期一致,生成器输出直接提交,未手改):\n- `content/docs/references/ui/view.mdx`(1 行)\n- `content/docs/references/automation/io-node-config.mdx`(2 行)\n\n未触碰 `content/docs/releases/`。\n\n## 验证汇总\n\n- `pnpm --filter @objectstack/spec test`:355 files / **9273 passed**(含 2 条新 pin)。\n- `pnpm --filter @objectstack/spec typecheck`:绿。\n- `pnpm --filter @objectstack/spec check:generated`:**11/11 up to date**(含 `check:docs`、`check:test-typecheck`)。\n- Ledger `test-typecheck-debt.json` 前后不变:`src/ui/view.test.ts: 8`(新 pin 曾引入第 9 个 tsc error,已通过收窄类型断言修复回 8,而非改账本);`io-node-config.test.ts` 不在账本(0 错误)且保持 0。\n- `node scripts/check-nul-bytes.mjs`:OK。\n- Changeset:`.changeset/grouping-notify-describe-align.md`(`@objectstack/spec: patch`,非 breaking,无需 ADR-0087 标记)。\n\n## 界外发现(不在本 PR 修)\n\n- Studio 表单描述符 `packages/services/service-automation/src/builtin/notify-node.ts:166/:170` 携带同样的 \"Requires sourceId.\" / \"Requires sourceObject.\" 文案(表单面,`io-node-form-zod-ledger.test.ts` 只对账键集不对账 description,故与本修不冲突)—— 已按 Prime Directive #10 另行建档,不在本卡范围。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_018ffcE95NaMJcL9XJ9VDYgk\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_018ffcE95NaMJcL9XJ9VDYgk)_"
+}

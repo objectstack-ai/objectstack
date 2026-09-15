@@ -1,0 +1,38 @@
+{
+  "number": 4796,
+  "kind": "issue",
+  "title": "flaky: `spec/src/cloud/tenant.test.ts` 的 #4739 导出面用例贴着 5s 超时 —— 今晚已两次把不相干的 PR 踢出合并队列",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "ci/cd",
+    "domain:spec",
+    "pm:dispatched",
+    "tests"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T06:59:06Z",
+  "updated_at": "2026-08-09T16:21:40Z",
+  "closed_at": "2026-08-09T16:21:40Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 9,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4796",
+  "body": "## 现象\n\n`packages/spec/src/cloud/tenant.test.ts` 这条用例非确定性超时:\n\n```\nFAIL src/cloud/tenant.test.ts > [#4739] `TenantPlan(Schema)` resolves to the ./cloud declaration\n  everywhere > resolves the export surface: only ./cloud declares `TenantPlan(Schema)`; …\nError: Test timed out in 5000ms.\n\nTest Files  1 failed | 292 passed (293)\n     Tests  1 failed | 7350 passed (7351)\n```\n\n7350 条过,唯一一条红,而且是**超时不是断言失败**。\n\n## 它是 flaky 的硬证据(不是回归)\n\n同一份 spec 代码,14 分钟内一过一红:\n\n| 时刻 | 上下文 | 结果 |\n|:--|:--|:--|\n| 06:33–06:36 | PR #4788 的 PR 分支,`Test Core (1/2)` `(2/2)` | ✅ 全绿 |\n| 06:47 | 同一个 PR 变基进合并队列(`gh-readonly-queue/main/pr-4788-941dec4c…`) | ❌ 本条超时 |\n\nPR #4788 只改 `packages/plugins/plugin-auth` 和 `docs/adr/0069`,**碰不到 `packages/spec` 的任何文件**。中间也没有任何 spec 侧改动进入 —— 后来排队的 #4783(base 更新)CI 是绿的,main 没坏。\n\n## 为什么这不是「重跑一次就行」\n\n**今晚这是第二次了**,两次都打在**不相干的 PR** 上:\n\n1. 第 1 次:PR #4755(#4669,permission-set backfill,改 `packages/metadata-protocol`)—— `Test Core` 红。我当时误判为 DTS 构建 OOM,是 dev 深挖才定位到本条测试贴着 5s 超时,归属 #4739 / #4752 车道。\n2. 第 2 次:PR #4788(#4772,改 `plugin-auth`)—— 直接被**踢出合并队列**(`CI_FAILURE`),需要人工重新入队。\n\n代价不是「多等一轮」,而是:\n\n- **它让每个作者去诊断一个自己没碰过的包的失败。** 我第一次就诊断错了方向,烧掉的是真实的排查时间。合并队列的失败信息不挂在 PR head 上,还得去翻 `gh-readonly-queue/*` 分支的 run,门槛更高。\n- **它训练人「红了就重跑」。** 一条稳定误报的检查,和 #4771 / #4772 修的那类误报是同一种病:信号无法区分真假,于是所有人开始忽略它。区别只是这条更贵——它卡的是合并队列。\n- 按今晚约 18 次合并/天的节奏,一条随机命中的 flaky 会持续抽税。\n\n## 建议方向\n\n这条用例叫 `resolves the export surface`,做的是导出面解析(很可能是逐个动态 import / 模块解析),天然比普通断言慢,5s 是个偏紧的默认值。两条路:\n\n1. **给这条(或整个文件)一个符合其真实工作量的 timeout** —— 最省事,但要先量一下它正常耗时多少,确认 5s 是\"偏紧\"而不是\"刚好\"。如果正常就要 4.5s,那放宽到 10s 只是把下次踩雷推后。\n2. **让它别在测试里做重解析** —— 把导出面解析的结果做成构建期产物(spec 已经有 `authorable-surface.json` 一类的生成物基线),测试只比对,不现场解析。这条更符合仓内既有做法,也顺带让这个检查变快、变确定。\n\n倾向 2,但**先测量再决定** —— 不要在不知道它正常耗时的情况下直接调大数字。\n\n## 车道归属\n\n⚠️ 落点在 `packages/spec/**`,按 #4604 登记表归 **spec 车道**(`session_0176qgxgCXTJCUv4YFLtusP9`),**本会话(主 backlog PM)不派发**。\n\n但它影响的是**所有车道的合并队列**,所以优先级建议高于普通 spec 清账单 —— 它每命中一次,成本就落在一个完全无关的 PR 作者头上。这条 issue 由主 backlog PM 代为立单,正是因为受害者在我这一侧。\n\n## 关联\n\n- #4739 / #4752 —— 引入本用例的双源清账车道\n- PR #4755(第 1 次命中)、PR #4788(第 2 次命中,被踢出合并队列)\n- #4250 —— `Test Core` 中途卡死的既有 issue(现象不同:那条是卡住无输出,本条是单用例超时;但同属\"Test Core 的稳定性在抽税\"这一类,建议一并看)"
+}

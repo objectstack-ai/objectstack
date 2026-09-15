@@ -2,8 +2,8 @@
   "number": 17818,
   "kind": "issue",
   "title": "spec: three more Object.prototype fall-through lookups (normalizeFilterOperator, resolveDiscoveryEnvironment, pluralToSingular), found by an index-expression-keyed survey and measured",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "os-bill",
@@ -13,18 +13,23 @@
   "labels": [
     "bug",
     "domain:spec",
-    "pm:queue",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-warren"
+  ],
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-09-12T08:44:02Z",
-  "updated_at": "2026-09-13T04:50:09Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-15T01:38:31Z",
+  "closed_at": "2026-09-15T01:35:14Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 8,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/17818",
   "body": "Found while landing the #17456 / #17762 round, which fixed three members of this family (`canonicalizeSqlType`, `suggestDefaultValueToken`, `classifyFilterToken`). Out of scope there: that round's file face is exactly those three files, and its triage comment states the fence — «two files, two functions, plus the second half of the line» — so these are filed rather than ridden.\n\n> Note: generic type brackets are written with **square** brackets throughout (`Record[string, X]` stands for the angle-bracket spelling) so the body survives GitHub's body sanitiser intact.\n\n## Why a new survey found them, which is the point\n\n#17456's survey was keyed on the spelling `return TABLE[key];` and found four candidates. #17762's self-correction comment (`5643173721`) established that this keying is structurally narrower than the defect, and the triage comment on #17456 (`5643176858`) asked the implementing round to **re-run the survey keyed on the index expression itself**, and to report the count.\n\nThat was done. Keyed on «a table annotated `Record[string, X]` — the WIDEST key type, so no union narrowing can make the index total — that is a plain object literal, indexed with a non-literal key», over the 944 non-test `.ts` files in `packages/spec/src`:\n\n- **76** object-literal tables annotated `Record[string, X]`\n- **44** of them carry at least one runtime-key index site\n- ⭐ **The answer is NOT five.** The count the triage asked for is reported here rather than as a zero.\n\nMost of the 44 are locally-built accumulators (`out`, `next`, `merged`, `defs`) that are *written* through the index, not read, and are not this family. What follows is the shortlist that is: a module-level constant lookup table, read with a runtime key, whose result leaves through a declared signature.\n\n## Measured — three that are live\n\nDriven by importing the **BUILT artifact** (`packages/spec/dist/{ui,api,meta-spelling}/index.mjs`) on the repo's Node 22 baseline (v22.22.2), built from `b280ae299a`. Population fixed at five, each row carrying a lit control.\n\n**1. `normalizeFilterOperator`** — `packages/spec/src/ui/view.zod.ts`, `return VIEW_FILTER_OPERATOR_ALIASES[op] ?? VIEW_FILTER_OPERATOR_ALIASES[op.toLowerCase()] ?? op;`. Declared return `string`.\n\n| argument | result | `typeof` |\n|:--|:--|:--|\n| `eq` (lit control) | `'equals'` | `string` |\n| `constructor` | the `Object` **function** | **`function`** |\n| `toString` | the `Object` **function** | **`function`** |\n| `valueOf` | the `Object` **function** | **`function`** |\n| `__proto__` | `Object.prototype` | **`object`** |\n| `nope` | `'nope'` | `string` |\n\n⚠️ **This one is worse than any member of the landed round.** The three fixed sites let `toString` / `valueOf` through quietly only because they lower-case the key first, so those two spellings name nothing. This site indexes the table **twice** — once raw, once lower-cased — so the case-folding accident that protected the others does not exist here, and all three prototype methods come back.\n\n**2. `resolveDiscoveryEnvironment`** — `packages/spec/src/api/discovery.zod.ts`, `return NODE_ENV_TO_DISCOVERY_ENVIRONMENT[spelling] ?? 'development';`. Declared return `DiscoveryEnvironment`, and its own docblock says, verbatim: `@returns a value guaranteed to satisfy {@link DiscoveryEnvironmentSchema}`.\n\n| argument | result | `typeof` |\n|:--|:--|:--|\n| `production` (lit control) | `'production'` | `string` |\n| `constructor` | the `Object` **function** | **`function`** |\n| `__proto__` | `Object.prototype` | **`object`** |\n| `toString` / `valueOf` / `nope` | `'development'` | `string` |\n\n⭐ The docblock is the contract text: a value the function **guarantees** parses under `DiscoveryEnvironmentSchema`, and for `constructor` it returns a Function. The `??` never fires because the inherited member is truthy.\n\n**3. `pluralToSingular`** — `packages/spec/src/meta-spelling/manifest-collection-spelling.ts`, `return PLURAL_TO_SINGULAR[key] ?? key;`. Declared return `string`.\n\n| argument | result | `typeof` |\n|:--|:--|:--|\n| `objects` (lit control) | `'object'` | `string` |\n| `constructor` / `toString` / `valueOf` | the `Object` **function** | **`function`** |\n| `__proto__` | `Object.prototype` | **`object`** |\n| `nope` | `'nope'` | `string` |\n\n## Measured — one that is SAFE, and it is the useful control\n\n**`suggestFieldType`** (`packages/spec/src/shared/suggestions.zod.ts`, `const alias = FIELD_TYPE_ALIASES[normalized];`) answers an **array** for all five probe words and for the lit control `txt`. The inherited member is reached, but it is only truthiness-tested and then discarded into a `[alias]` wrapper that never escapes the declared `string[]`, so nothing off-contract leaves. Reporting it alongside the three is the point: a probe that flagged every `Record[string, X]` index would not be discriminating.\n\n## Shape\n\nSettled by three landed cards (#15315, #16903) and this round's fix: an `Object.prototype.hasOwnProperty.call` guard at the lookup, returning **each function's own already-declared refusal value** — here the `?? fallback` each one already writes (`op`, `'development'`, `key`), which is exactly the answer each gives for `nope` today.\n\n⛔ **Not a null-prototype table.** #16903 measured that a `__proto__: null` object literal does not type-check against a `Readonly[Record[...]]` annotation at all (TS2353), and that the `Object.assign(Object.create(null), ...)` spelling that does compile **silently loses** the annotation's exhaustiveness check (TS2741 stopped firing for a table missing a member). ⛔ Not a list of prototype member names either, which the next prototype member defeats.\n\nEach fix wants a pin whose POPULATION is `constructor`, `toString`, `valueOf`, `__proto__` and a plain unknown word, plus a lit control proving the real vocabulary still answers. The existing pins for all three iterate canonical vocabulary only — precisely the population that behaves, and why all three sit green today.\n\n## ⛔ What is NOT claimed\n\n- ⛔ Not prototype pollution: every index here is a **read**, never an assignment.\n- ⛔ Not claimed that any caller currently misbehaves on the bad value. **NOT MEASURED** — nobody has enumerated the consumers of these three returns. A zero there needs a lit control like any other.\n- ⛔ Not claimed the remaining 41 runtime-key tables are clean. **NOT MEASURED** — they were triaged by shape (accumulator vs lookup table) and only the four above were driven. The survey method is written down above so the next pass can start from it rather than re-deriving it.\n\nFiled unassigned and unlabelled for triage.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"

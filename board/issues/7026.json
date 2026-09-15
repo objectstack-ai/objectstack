@@ -1,0 +1,36 @@
+{
+  "number": 7026,
+  "kind": "issue",
+  "title": "objectui:ChartContainer 的 min-size 兜底被 `{...props}` 覆盖掉 —— `...props.style` 那次合并是死代码",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched",
+    "pm:queue",
+    "repo:objectui"
+  ],
+  "assignees": [
+    "yinlianghui"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T09:48:54Z",
+  "updated_at": "2026-08-09T17:06:13Z",
+  "closed_at": "2026-08-09T17:06:13Z",
+  "closed_by": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7026",
+  "body": "观察类发现,顺手记录,不在任何在办单的范围内(实测于 objectstack#7016 / objectui PR #3934 的 harness 里)。\n\n## 现象\n\n`packages/plugin-charts/src/ChartContainerImpl.tsx:157-165`:\n\n```\n        className={cn(\n          \"block w-full h-[350px] …\",\n          className\n        )}\n        // Guarantee a non-zero box for Recharts' ResponsiveContainer even when\n        // the consumer-supplied className overrides our h-[350px] …\n        // Without this min-size the chart computes width/height = -1 and\n        // renders invisibly.\n        style={{ minHeight: 280, minWidth: 0, ...props.style }}\n        {...props}\n```\n\n`style` 是显式属性,`{...props}` 在它**之后**展开,而 `props` 里就含 `style`(它是 `React.ComponentProps[\"div\"]` 解构剩下的 rest,只摘掉了 `id`/`className`/`children`/`config`/`disableSettleRemount`)。JSX 里后写的同名属性覆盖先写的,所以只要调用方传了 `style`,整个 `style` 对象就被 `props.style` **整体替换** —— `minHeight: 280` 与 `minWidth: 0` 一起消失,而 `...props.style` 那次合并从来没有执行过。它是死代码。\n\n## 实测证据\n\n`AdvancedChartImpl` 的 `containerProps`(`:293-300`)在声明了 `ChartConfig.height` 时会带上 `style`。在一个 dashboard chart widget 上写 `chartConfig.height: 420`,渲染出的属性恰好是:\n\n```\nstyle=\"height: 420px;\"\n```\n\n没有 `min-height`,没有 `min-width` —— 注释承诺的兜底不在。\n\n## 为什么标 finding 而不是缺陷\n\n今天没有用户会撞到坏图:唯一会传进来的 `style` 就是 `height`,而一个显式高度**本身**就提供了那个兜底想保证的盒子(反过来说,当前这个覆盖顺序还恰好让 `height: 100` 这类小于 280 的显式高度真的生效了,若按注释的原意合并,`min-height: 280` 反而会盖掉作者写的高度 —— 所以\"直接改成先展开 props\"也不是无脑正确,得想清楚 min-size 与显式 height 的优先级)。\n\n值得记下来的是两点:\n\n1. 那次 `...props.style` 合并**看起来**在工作、实际从未运行,读代码的人会以为有兜底;\n2. 以后任何一个容器级 style prop(宽度、margin、aspect-ratio……)只要走同一条 `containerProps` 路径,就会静默把 min-size 兜底一起带走 —— 而那个兜底是当年为\"dashboard widget 把 chart 塞进 flex/grid、chart 量到 -1 渲染不出来\"专门加的。\n\n## 可能的修法(留给 triage 定)\n\n- 把 `{...props}` 挪到 `style` **之前**,让合并真的生效;同时决定显式 `height` 小于 `minHeight` 时谁赢(倾向作者的 height 赢 —— 那时 `minHeight` 应当只在没有显式高度时兜底)。\n- 或者把 `style` 从 rest 里解构出来单独合并,让\"谁覆盖谁\"在代码里显式写出来,而不是靠 JSX 属性顺序这种一眼看不出来的机制。\n\n无论哪条,都值得配一条钉:传入 `style` 的容器仍保有 min-size 兜底(或明确记录不保有)。\n\n发现于:objectstack#7016(dashboard `chartConfig` 呈现键转发)的 DOM 实测。⛔ 未在那个 PR 里顺手改 —— 不在其范围内。\n"
+}

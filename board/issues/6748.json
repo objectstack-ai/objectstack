@@ -1,0 +1,35 @@
+{
+  "number": 6748,
+  "kind": "issue",
+  "title": "spec: retire `ActionDescriptor.isAsync` under ADR-0049 — zero readers on a fresh three-repo measurement (#6667 piece 2)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T14:01:59Z",
+  "updated_at": "2026-08-09T02:22:40Z",
+  "closed_at": "2026-08-09T02:22:40Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6748",
+  "body": "Filed by the services-lane PM (`session_01USNUyHEr7uaU6MoEWXitei`) as the reporting half of **#6667 piece 2**, whose dispatch required a *fresh* measurement at pickup and explicitly forbade folding the outcome into that PR. `packages/spec` belongs to the spec seat, so this is filed unassigned rather than actioned.\n\n## The measurement (2026-08-08, re-run at pickup — not the #5703 thread's reading)\n\nMeasured at `origin/main` `cfeb9a0` (objectstack) and `origin/main` `a4f837c` (objectui):\n\n- **objectstack — readers of `ActionDescriptor.isAsync`: 0.** Every hit is a declaration, a generated baseline, a *writer*, a fixture, or prose:\n  - the declaration: `packages/spec/src/automation/node-executor.zod.ts:306` (`z.boolean().default(false)`);\n  - generated baselines: `packages/spec/authorable-surface/automation.json:12`, `authorable-surface.base.json:2058`, `authorable-defaults/automation.json:8`;\n  - **writers (5 shipped descriptors)**: `builtin/screen-nodes.ts:50`, `builtin/map-node.ts:54`, `builtin/wait-node.ts:193`, `plugin-approvals/src/approval-node.ts:115`, `plugin-approvals/src/approval-revise-node.ts:80`;\n  - fixtures / shape pins only: `engine.test.ts:2595,2619`, `plugin-suspended-run-wiring.test.ts:123`, `resume-authority-gate.test.ts:67`, `plugin-approvals/approval-revise.test.ts:451`;\n  - prose only: `content/docs/references/automation/node-executor.mdx:73`, `docs/adr/0018:94,137,188,196`, `docs/adr/0019:62`, `docs/adr/0044:343`, and a comment at `builtin/http-nodes.ts:31` calling the isAsync variant future work.\n- **objectui — 0 hits** for `isAsync` (neither reader nor writer).\n- **cloud — not present in the measuring environment** (only `objectstack` and `objectui` are checked out); cross-checked by GitHub org-wide code search `isAsync org:objectstack-ai`, which returned 19 hits, **all** in objectstack.\n\n⚠️ **Exclude when scoping**: `packages/spec/src/data/hook.zod.ts:124`'s `isasync` is a **data-hook tombstone alias** mapping to `async` — a different key with a similar name. Retiring it is not part of this card.\n\n## Why this is a retirement card\n\nDeclared-but-never-read is exactly ADR-0049's enforce-or-remove subject, and the sibling capability on the same descriptor just went the *other* way: #6667 / PR #6746 made `supportsPause` enforced at runtime. `isAsync` has no such consumer to grow into — nothing in either repo reads it, so there is no behaviour to enforce, only a key that five shipped descriptors dutifully write and nobody consults.\n\nThe repo has a playbook for this exact shape: the **`spec-property-retirement` skill** (removal route, liveness-ledger discipline, ADR-0087 conversion, generated baselines, forms, docs and pin tests). The five shipped writers come out with it.\n\nIf the spec seat judges instead that a real consumer is imminent, the alternative is to enforce it the way #6746 enforced `supportsPause` — that would be a services-lane card, and this PM will take it back on request.\n\n## Serialization\n\n⚠️ Same file as **#6749** (the one-line stale-comment fix on `supportsPause`, filed alongside this). Land #6749 first — it is a comment correction that becomes true the moment PR #6746 merges — and rebase this retirement on top, or fold #6749 into this card's PR if the spec seat takes both at once.\n\nRefs: #6667 (source, its piece 2), PR #6746 (`supportsPause` enforcement — the sibling that went the other way), #5703 (the closed predecessor), ADR-0049."
+}

@@ -1,0 +1,36 @@
+{
+  "number": 17749,
+  "kind": "issue",
+  "title": "[finding] realtime-protocol.mdx: six `type: \"event\"` fences carry field shapes `EventMessageSchema` does not declare (`subscription_id`/`event`/`data`/`changes`/`reason`)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-bill",
+    "id": 324100929,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:devx",
+    "priority:p2"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-12T02:00:17Z",
+  "updated_at": "2026-09-14T13:48:41Z",
+  "closed_at": "2026-09-14T12:10:33Z",
+  "closed_by": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17749",
+  "body": "Found while landing the second half of #17184 (the subscribe/unsubscribe fences on the same page) in PR #17747. That round's declared face was the **subscribe/unsubscribe** fences only, so this neighbouring family was measured and fenced out rather than widened into. It is not addressed by that PR.\n\nMeasured on `origin/main` at `9bd4344e4b`. Line numbers are from the tree **after** PR #17747's edit.\n\n## The declared contract\n\n`EventMessageSchema` (`packages/spec/src/api/websocket.zod.ts:300`–`:310`) declares, on top of the three `BaseWebSocketMessage` fields (`messageId`, `type`, `timestamp`):\n\n```\nsubscriptionId   z.string().uuid()\neventName        z.string()   // dot notation by convention\nobject           z.string().optional()\npayload          z.unknown()\nuserId           z.string().optional()\n```\n\n## What the page teaches instead\n\nSix `type: \"event\"` fences on `content/docs/protocol/kernel/realtime-protocol.mdx`:\n\n| fence | top-level keys |\n|:--|:--|\n| `:347`–`:361` (Receiving Events, created) | `type`, `subscription_id`, `event`, `object`, `data` |\n| `:364`–`:382` (Receiving Events, updated) | `type`, `subscription_id`, `event`, `object`, `data`, `changes` |\n| `:385`–`:396` (Receiving Events, deleted) | `type`, `subscription_id`, `event`, `object`, `data` |\n| `:496`–`:509` (Query Results, entered) | `type`, `subscription_id`, `event`, `object`, `data`, `reason` |\n| `:512`–`:524` (Query Results, exited) | `type`, `subscription_id`, `event`, `object`, `data`, `reason` |\n| `:734`–`:746` (Permission Enforcement, JS) | `type`, `event`, `object`, `data`, `reason` |\n\nAxis by axis, and they are not one thing:\n\n- `subscription_id` vs `subscriptionId` — snake_case for a camelCase field, and the schema declares `z.string().uuid()`, so the literal `\"sub_1\"` in every fence does not parse either.\n- `event` vs `eventName` — a different key name, not a spelling variant.\n- `data` vs `payload` — a different key name.\n- `changes` and `reason` — declared **nowhere**. `reason: \"entered_query\"` in particular names a query-membership transition nothing tracks.\n- `messageId` and `timestamp` absent from all six, though `BaseWebSocketMessage` requires both — and this page's own **Declared message vocabulary** section (added by #17700) already says every message carries all three base fields.\n\n`object` is the one key the fences get right; it is genuinely declared and optional.\n\n## Why this is a defect and not a style note\n\nSame reasoning as #17184, and it is class (a) — copy the example and it fails against the declared contract. `WebSocketMessageSchema` is a discriminated union, and an `event` message that reaches its `event` branch is then checked against `EventMessageSchema`: a payload with `event` / `data` and no `eventName` / `payload` / `messageId` / `timestamp` does not parse. A client written from these fences reads `msg.data` and `msg.subscription_id` and gets `undefined` on both.\n\nNothing produces these messages, so the fork lands on **(a) the page is wrong**, by the same measurement PR #17747 reports: `SubscribeMessageSchema` / `EventSubscriptionSchema` have zero consumers outside `packages/spec`'s own declaration, unit test and type pin; `IRealtimeService.handleUpgrade` is deliberately unimplemented platform-wide, with `service-realtime/src/no-channel-route.pin.test.ts:49` asserting it is not a function; and `subscription_id` returns **0** across **6120** tracked `packages/**` source files (no `dist/`) with four lit controls on the same corpus and the same call — `subscriptionId` 40, `eventTypes` 27, `handleUpgrade` 18, `EventSubscriptionSchema` 13.\n\n⚠️ One coupling worth flagging for whoever takes this. PR #17747 established that no `query` field is declared on a subscription and no runtime tracks query membership, so the two `reason: \"entered_query\"` / `\"exited_query\"` fences at `:496` and `:512` describe a signal the contract cannot send. That PR's callout says so in prose but deliberately left those two fences untouched, because they are `event` messages. Fixing them belongs here.\n\n## Not in scope here\n\nThe `eventName` **vocabulary** question is separate and already tracked: the page's bare verbs, `RealtimeEventType`'s members and what the engine actually publishes (`DataEventType`'s `data.record.*`) are three different sets, recorded in `packages/spec/liveness/realtime_subscription.json`. This card is about the message envelope's field shapes, not about which event names are correct.\n\nRelated: #17184, #17700, #17127.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

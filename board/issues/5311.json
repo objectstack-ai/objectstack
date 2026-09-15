@@ -1,0 +1,32 @@
+{
+  "number": 5311,
+  "kind": "issue",
+  "title": "`saveMetaItem` 的 direct-active 写入是 `api` 的第三条门外通路 —— 命名空间门(ADR-0121 D1/D2)与去重门在这条路上无人跑",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:blocked"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T17:42:52Z",
+  "updated_at": "2026-08-09T11:35:58Z",
+  "closed_at": "2026-08-09T11:35:57Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5311",
+  "body": "越范围发现,记录于 #5271 实现期,**不在该 PR 内修**(#5271 的范围是注册表与 schema 绑定)。与 #5206 的两步**都不重合** —— 它是两步都落地之后剩下的那条路。\n\n## 事实\n\n`packages/metadata-protocol/src/protocol.ts` 里**没有任何** `endpoint-publish-gate` 的导入(grep `validateApiEndpointDeclarations` / `identityFreeEndpointGateFailure` 在该包内零命中)。而 `saveMetaItem` 明确支持 direct-active 写入(该文件自己的注释:「`saveMetaItem`(draft AND direct-active saves)」)。\n\n于是三条通路的门覆盖是这样的:\n\n| 通路 | 跑哪道门 | 命名空间门(D1/D2) | 去重门 |\n|---|---|---|---|\n| stack 工件(`defineStack({ apis })`) | 全量门(`ObjectStackDefinitionSchema`) | ✅ | ✅ |\n| `publishPackage` / `publishPackageDrafts`(#5189 / PR #5279) | 全量门(有 `manifest.namespace`) | ✅ | ✅ |\n| **`PUT /meta/api/:name`,`state: active`** | **无** | ❌ | ❌ |\n\n第三条路唯一的守卫是装载期兜底(#5189 / PR #5203),而它按设计跑的是**免身份**门 —— 命名空间门与去重门恰恰是它跳过的那两道(门函数自己的 TSDoc 写明了这一点)。\n\n## 后果\n\n一条运行时直写的 active `api` 行,可以声明落在**别的应用**的 carve-out 里的路径(`/api/v1/apps/OTHERAPP/...`)。免身份兜底不看命名空间,所以它会被正常索引;端点步骤只要求路径在 `/apps/` 之下。ADR-0121 D1 的原话是「路由归属靠构造而非靠约定加检查」成立 —— 但这条路上没有任何一处在构造时检查归属。\n\n去重同理:同一 `METHOD + 归一化 path` 的第二条声明,在装载期由 `buildEndpointIndex` 按字典序裁决并 `error` 点名,但没有人在写入当场拒绝。\n\n**#5271 不改变这条路的现状**,它只是给这条路加了一道形状门(422);servability 的判据本来就不在注册表这一层。\n\n## 建议(不预判)\n\n两个方向,取舍留给裁决:\n\n- **A:在 `saveMetaItem` 里对 `api` 跑免身份门 + 可得身份时跑命名空间门。** 难点正是 #5189 记录过的那条:直写路径**没有** manifest 身份。是否可以从 `packageId`(该请求已经带)反查包的 `manifest.namespace`,需要确认。\n- **B:承认直写 active 的 `api` 行不是「发布」,要求它走 draft → publish。** 与 ADR-0121「publish 拒绝」的原文最贴,但会改变一条现有通路的语义。\n\n判据不应产生第二份 —— 无论走哪条,跑的都得是 `endpoint-publish-gate.ts` 里那个 `firstFailure`。\n\n## 关联\n\n#5206(父单)、#5271(step 1,出处)、PR #5279(step 2)、#5189 / PR #5203(装载期兜底,门函数导出)、ADR-0121 D1/D2。\n"
+}

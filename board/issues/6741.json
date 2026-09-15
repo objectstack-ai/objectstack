@@ -1,0 +1,35 @@
+{
+  "number": 6741,
+  "kind": "issue",
+  "title": "⛔ Discipline: ADRs are confirmed and merged by the maintainer only — no AI seat may merge, queue, or auto-merge a `docs/adr/**` PR",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T13:52:57Z",
+  "updated_at": "2026-08-09T15:15:43Z",
+  "closed_at": "2026-08-09T15:15:19Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6741",
+  "body": "Maintainer ruling, 2026-08-08, verbatim:\n\n> **adr 只能由维护者自己确认,人工合并,ai 不得擅自合并。**\n\nFiled to turn that ruling into enforced text. It is already binding by record (quoted on PR #6668 and #4585 today); this card makes it readable by every future agent that has only the repo to read.\n\n## The rule\n\n**No AI seat — PM, `os-dev`, a Routine, or the queue steward — may merge, add to the merge queue, or arm auto-merge on a pull request that adds or modifies `docs/adr/**`.** An ADR PR is authored by an agent at most; confirming it and landing it are the maintainer's, by hand.\n\nReviewed, approved and fully green **does not** change this. The rule is structurally identical to the version-release guardrail (maintainer 2026-08-07, #6170): a class of change whose landing is a human act regardless of how green the machinery looks. In both cases the existence of a mechanical path — a queue button, an `auto_merge` call — is not authorization to use it.\n\n## Why an ADR specifically\n\nAn ADR is not documentation about a decision; under Prime Directive #13 it **is** the decision, and an accepted one binds every later agent until a superseding ADR says otherwise. That makes merging an ADR the act of adopting a governance position — the one category of change where \"CI is green\" carries no information at all. Today's #6668 is the worked example: a thorough, fully-green, correctly-measured ADR draft for a capability **nobody had requested**, which the maintainer closed on demand grounds that no gate could have evaluated.\n\nThe repo has already been bitten by the inverse (commit `ba252da0b` reversed an accepted ADR's whitelist for nine metadata types with no ADR of its own — #6191, #6483, still being unwound). Both directions share one root: ADR-weight changes moving without a human decision.\n\n## Required changes\n\n**1. `AGENTS.md`** — repo-wide, because `os-dev` agents author ADR PRs too and read AGENTS.md, not this SKILL. Add to the Prime Directives (natural home: alongside PD #13, which already governs ADR authority) a clause stating: an agent may draft and push an ADR PR; ⛔ it may never merge, queue, or arm auto-merge on one; the maintainer confirms and merges by hand.\n\n**2. `.claude/skills/pm-dispatch/SKILL.md`** — Guardrails section, next to the release guardrail it mirrors. State it in the same shape: the prohibited actions named explicitly (merge / queue / `enable_pr_auto_merge`), the \"green does not override\" clause, and that the PM's ACCEPT verdict on an ADR PR ends at the review comment — it does not proceed to the queue.\n\n**3. The step-7 ACCEPT path needs the carve-out spelled out.** ACCEPT currently reads 「review passed + CI green ⇒ merge」 and then drives to the queue. For a `docs/adr/**` PR the terminal state is: review recorded, PR left for the maintainer, and the round report names it as awaiting a human merge. Without this the general rule and the guardrail contradict each other, and the general rule is the one a PM reads first.\n\n## Acceptance\n\n- Both files carry the rule; the SKILL cross-references AGENTS.md as the binding source (AGENTS.md wins on conflict, per the existing precedence line).\n- The ACCEPT verdict text in step 7 carries the ADR carve-out, so the two do not disagree.\n- Worked example cited (#6668) so the next reader sees why a green ADR PR is still not mergeable by an agent.\n- ⛔ Out of scope: any change to `docs/adr/**` itself, and any tooling/gate work. **If a mechanical guard is wanted later (a check that fails when an ADR PR is queued), that is a separate card** — do not invent it here; this card is the written rule.\n\nRefs: maintainer ruling 2026-08-08 (this card, PR #6668, #4585); #6170 (the release guardrail this mirrors); Prime Directive #13; #6191 / #6483 (the inverse failure, still being unwound)."
+}

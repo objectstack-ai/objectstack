@@ -1,0 +1,35 @@
+{
+  "number": 7005,
+  "kind": "issue",
+  "title": "`check-changeset-no-major.mjs` judges the whole `.changeset` stock, not the PR's diff — at `changeset pre exit` it reds every unrelated PR (171 files measured)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "target:v17"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T08:36:39Z",
+  "updated_at": "2026-08-09T15:41:08Z",
+  "closed_at": "2026-08-09T15:39:05Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7005",
+  "body": "Measured while adding `--self-test` fixtures to that script (#6923). **Not fixed there** — #6923's dispatch explicitly ruled that changing what the enforcing half does, or the release mode it keys off, is a triage decision and not a fix to improvise inside a fixtures card. Filed per Prime Directive #10. Unclaimed.\n\n## The observation\n\n`check-changeset-no-major.mjs` reads the entire `.changeset` directory (`readdirSync`, no branch point) and fails if **any** pending changeset declares `major`. Its sibling `check-empty-changeset.mjs` is diff-scoped by design — it judges only what the PR introduces, computed from `merge-base(base, head)`, and the whole #6129 note in that file argues why. This one is stock-scoped, so its verdict is a function of what **main** carries, not of what the author wrote.\n\nThat is invisible today, because the guard stands aside for the whole pre-release window. It stops being invisible at `changeset pre exit`.\n\n## The measurement\n\nOn `origin/main` @ `d3e53f2d8`:\n\n```\ntotal .changeset/*.md (excl README):  1552\noffender FILES declaring major:        171\ntotal major package entries:           222\npre.mode: pre | pre.tag: rc | pre.changesets recorded: 1279\n```\n\nThe 171 are still on disk because pre-mode `changeset version` does not delete consumed changesets — it records them in `pre.json.changesets` (1279 of them) so the final release can re-apply them. They are deleted only by the **post-exit** `changeset version`.\n\nSo the sequence is:\n\n1. `changeset pre exit` rewrites `pre.json` to `\"mode\": \"exit\"` (`@changesets/pre@2.0.2`, `changesets-pre.cjs.js:117`) and that commit lands on main.\n2. From that moment, every PR's `pull_request` merge ref carries `mode: exit` **and** the 171 major-declaring changesets.\n3. `pr-automation.yml`'s `Guard against accidental major bumps (launch window)` step runs `node scripts/check-changeset-no-major.mjs` on every PR, exempted only by `skip-changeset` or `allow-major`.\n4. Every unlabelled PR therefore goes red, listing 171 files it never touched, and the only route out is `allow-major` — a label whose stated meaning is \"a whole-stack major is genuinely intended **here**\", which is false for a PR fixing a typo.\n5. The window closes when the Version PR merges and deletes them.\n\nThe Changesets release PR itself is fine: `changeset-check` exempts `changeset-release/main` at the job level. The exposure is ordinary PRs open across that window.\n\n## Why this is #6129 in this script's own shape\n\n#6129 is \"judge the author for what main gained while their PR was open\". `check-empty-changeset.mjs` was fixed for exactly that and carries a long note about it. `check-changeset-no-major.mjs` has the same property by a different route — not a frozen base ref, but no base ref at all — and it has never been noticed because the guard has been dormant for the whole pre-release window.\n\nNote the direction is not obviously wrong in every case: at `pre exit`, a whole-stack major *is* intended, and the guard's escape hatch exists for that. What is wrong is that the cost falls on authors of unrelated PRs rather than on the release, and that `allow-major` then means something different from what its own error message says.\n\n## Impact, stated honestly\n\n- **No known instance, and none possible today** — the guard exits 0 on every run while pre-mode holds.\n- It is not dormant drift either: it is a scheduled event. The imminent v17 window is the trigger, and it is the first time this half has ever executed.\n- Bounded in time (until the Version PR merges), unbounded in breadth (every open PR in that window).\n\n## Candidate dispositions (no conclusion presumed)\n\n1. **Scope it to the diff**, like its sibling: judge only changesets the PR added or modified against `merge-base`. Keeps the guard's purpose (an author must not *introduce* a major) and removes the collateral entirely. Costs the script a git dependency it currently does not have.\n2. **Exempt the changesets already on the merge base**, which is disposition 1 phrased as \"absent-or-non-major at base\" — the same shape #5471 used to exempt the stock without a hardcoded roster.\n3. **Sequence it in the release runbook**: run `changeset pre exit` and the final `changeset version` close enough together that no PR observes the window. Cheapest, but it is a convention protecting against a gate, held by hand, on the busiest release day.\n4. Accept it and document the `allow-major`-for-everyone window in the exit checklist.\n\nLeaning 1/2 — they are the same fix and the sibling already carries the merge-base machinery and the argument for it. But this decides what the guard *means* (does it police the author, or the tree?), which is a contract call rather than a code call, so it is left to triage.\n\nRelated: #6923 (the fixtures card that measured this), #6509 / PR #6917 (the family's wiring), #6129 (the direction)."
+}

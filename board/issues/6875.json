@@ -1,0 +1,35 @@
+{
+  "number": 6875,
+  "kind": "pull_request",
+  "title": "docs(spec): D3 账本 resumeAuthority 一条不再要求手工排查 supportsPause 不一致 (#6844)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T02:12:09Z",
+  "updated_at": "2026-08-09T02:46:05Z",
+  "closed_at": "2026-08-09T02:46:03Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": "2026-08-09T02:46:03Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/6875",
+  "body": "Fixes #6844\n\n## 前提实测(三条,均在 fresh `main` @ `f22da7026` 上验证)\n\n1. **陈旧 ⚠️ 子句仍在**:`packages/spec/src/migrations/registry.ts:2756-2759`(文本搜索定位;分诊评论记的 2746-2748 是 `93fcd02` 时的行号,main 已前移)。跨字符串拼接行,单行 grep 打不中。\n2. **`refuseUndeclaredSuspension` 确实接线在暂停必经路径上** —— 读的是调用点,不只是声明:\n   - 声明:`packages/services/service-automation/src/engine.ts:3186`\n   - 调用:`engine.ts:4981`,位于 `executeNode` 内 `if (result.success && result.suspend === true)` 分支\n   - 「唯一接缝」自查:`engine.ts` 内 `executor.execute()` 只有 4925/4930 两处(同一 try 的超时/非超时分支),ADR-0018 别名执行器(`engine.ts:1543`)是 `return target.execute(...)` 委托、结果照样回到 4930;`resume()` 与 region 体均经 `executeNode` 重入。\n3. **确为 guard-class**:`refuseNode`(`guard-refusal.ts:57`)返回 `errorClass: 'guard'`;`engine.ts:5009` 处 `result.errorClass === 'guard' ? undefined : flow.edges.find(... 'fault')` —— `fault` 边确实路由不了。\n\n三条全部成立,故按建议方向改写。\n\n## 一处前提修正(诚实报告)\n\nissue 说该字符串被投影进**两个**发布通道。实测只有**一个**:`packages/spec/spec-changes.json` 根本不含 `acceptanceCriteria` 字段(`grep -c` 为 0),其对 semantic 迁移的投影只有 `migrationId` / `rationale` / `replacement` / `surface` / `toMajor`。所以 `gen:spec-changes` 重跑后 `spec-changes.json` 逐字节未变 —— 这一「无 diff」本身就是证据,不是漏跑。缺陷本身(已发布指令现在是错的)成立,承载它的通道是 `docs/protocol-upgrade-guide.md`。\n\n## 改动\n\n`acceptanceCriteria` 结尾 ⚠️ 子句:\n\n- **改前**:``⚠️ `supportsPause` is a declaration nothing enforces (#5703), so an executor whose `execute()` returns `suspend: true` while leaving `supportsPause` false is warned about by NEITHER channel — check those by hand against the same rule.``\n- **改后**:``⚠️ `supportsPause` is no longer the declaration nothing enforced (#5703, closed by #6667): an executor whose `execute()` returns `suspend: true` while leaving `supportsPause` false is still warned about by neither warning channel, but `AutomationEngine.refuseUndeclaredSuspension` now refuses that suspension at the one seam every suspension passes through — a guard-class failure no `fault` edge routes — so it needs no hand-check. The residue that does: an executor registering NO descriptor declares nothing for either warning or the refusal to read, so its pauses are still created and refused only later, on the resume route (#5561).``\n\n**刻意不过度更正**。两条告警通道(启动告警 `warnIfResumeAuthorityUndeclared`(`engine.ts:1476` 以 `supportsPause !== true` 提前返回)、`check-resume-authority-declared.mjs`(脚本注释第 64 行自陈「an executor that suspends while leaving `supportsPause` false is invisible」))**仍然**都不覆盖这一类,所以「不被任何告警通道覆盖」这半句保留,变的是它现在会在运行时被拒绝。同时守卫明确**不判**「完全未注册描述符」的执行器(engine.ts:3178-3184 \"What it does NOT judge → Silence\",由 `supports-pause-runtime-enforcement.test.ts:284-303` 钉住:暂停照常创建,只在 resume 时 403),这一真实残留写进了新文案 —— 「什么都不用查了」会是方向相反的同一种过度断言。\n\n## 生成产物\n\n`pnpm --filter @objectstack/spec gen:spec-changes && gen:upgrade-guide`(未手改任何生成文件):\n\n- `docs/protocol-upgrade-guide.md`:**第 395 行**(issue 记的 396 是旧行号)\"Done when\" 行整行替换,全文件仅此 1 行变化。\n- `packages/spec/spec-changes.json`:重跑后无变化,原因见上。\n\n## 反向验证(方向先判后跑)\n\n**改前基线:没有红方向。** 全仓扫过字面短语(`NEITHER channel` / `declaration nothing enforces` / `check those by` / `hand against the same rule`)与**正则拼法**(`toMatch(/…/)`,`migrations.test.ts` 里本就是这个惯用法)—— 该串在 `registry.ts` 与两个生成物之外无任何 pin,`migrations.test.ts` 中也无一处提及 `resumeAuthority` / `supportsPause` / `5561`。所以改前**不存在**会变红的既有断言;红方向是我新增 pin 之后才有的。\n\n新增 pin 后(仿 `migrations.test.ts:129-155` 的 #5781 区块惯用法,按 idiom 匹配而非逐字):\n\n| 探针 | 预判 | 实测 |\n|---|---|---|\n| 把 `registry.ts` 还原成 `origin/main`(旧文案) | RED | **RED** —— 4 条中 3 条失败(`refuseUndeclaredSuspension` / `NO descriptor` 等未匹配);anti-vacuity 那条正确保持绿,因为条目仍在且仍讲 `resumeAuthority`,那正是它该守的东西 |\n| **anti-vacuity**:把条目 `id` 改成 `…-VANISHED`,使 `.find()` 返回 `undefined` | RED(含全部否定断言,否则它们在 `undefined` 上会真空为绿) | **RED —— 4 条全红** |\n\n## 校验\n\n- `pnpm --filter @objectstack/spec test`:`Test Files 347 passed (347)` / `Tests 8922 passed (8922)`\n- `pnpm --filter @objectstack/spec typecheck`:`tsc --noEmit` + `check:scripts-typecheck` + `check:test-typecheck` 全过\n- 生成门:`check:spec-changes` / `check:upgrade-guide` / `check:generated` / `check:docs` / `check:api-surface` 均 PASS\n- `node scripts/check-nul-bytes.mjs`:OK(6403 文件);另对三个改动文件自查 `grep -naP '[\\x00-\\x08\\x0b\\x0c\\x0e-\\x1f\\x7f]'` 无命中\n\n**per-file `test-typecheck-debt.json` 账本(#5286 棘轮)**:改前后均为 **58 files / 266 errors**,文件本身未改动;`src/migrations/migrations.test.ts` 改前不在账本、改后仍不在(即零错误 —— 按账本 `_comment`,未列出的文件不得有任何错误),新增 57 行未使其进账。\n\n## 车道\n\n`domain:spec-surface`,受理面逐字节未变:改动仅落在一个字符串字面量内(见 `registry.ts` diff),未触碰任何 conversion 的 `steps`、key 集合或 Zod 类型;`authorable-surface/` 与 `json-schema.manifest/` 基线均无变化(`check:generated` PASS 佐证)。未触碰 `content/docs/releases/`。\n\nChangeset:`.changeset/d3-resume-authority-supportspause-enforced.md`(`@objectstack/spec: patch` —— 该串随包 dist 发布并投影进升级指南,属用户可见)。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_018ffcE95NaMJcL9XJ9VDYgk\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_018ffcE95NaMJcL9XJ9VDYgk)_"
+}

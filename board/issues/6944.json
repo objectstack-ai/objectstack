@@ -1,0 +1,34 @@
+{
+  "number": 6944,
+  "kind": "issue",
+  "title": "TursoDriver remote 面根本不生成自增号:RemoteTransport.create 自建 INSERT,auto_number 只是个 TEXT 列",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T05:36:07Z",
+  "updated_at": "2026-08-09T15:34:40Z",
+  "closed_at": "2026-08-09T15:34:40Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6944",
+  "body": "## 一句话说明\n\n`TursoDriver` 在 `transportMode === 'remote'` 下把 `create` 覆写为 `RemoteTransport.create`,该实现**自建 INSERT 语句,根本不进 `fillAutoNumberFields`**。因此 remote 面上 `auto_number` 字段**从不被生成** —— 它在那边只是一个映射到 `TEXT` 的列类型。\n\n由 #5495(PR #6932)的两张脸申报中测得。这是一个**先在的功能缺口**,与该单要修的\"序列陈旧\"无关,故未随车。\n\n## 为什么单独开\n\n#5495 修的是\"计数器落后于数据表 → 撞号风暴\"。remote 面**没有这个缺陷,也不接受这个修复** —— 因为它压根不走发号路径。两者是不同的事:一个是号发错了,一个是号没发。\n\n#6932 已经把这个**缺席写成断言**(探测 `RemoteTransport` 原型上不存在任何 autonumber / sequence 方法),这样将来把 autonumber 接进 remote 传输时,不会静默继承 `turso-autonumber-resync.test.ts` 的绿。所以本卡即便不立即动,也已经有一道防止\"悄悄变成半实现\"的护栏。\n\n## 待定夺\n\n同 #3724 当年的二选一形态,请分诊/维护者定级:\n\n- **A. 在 remote 传输上实现自增号** —— 与 local/replica 面对齐。\n- **B. 显式声明该面不支持** —— 例如 remote 模式下遇到带 `auto_number` 字段的对象时**明确失败**,而不是静默写入空值/NULL。\n\n⚠️ 现状是**静默不生成**,与 #3724 当年判定\"不该保留\"的形状同类(能在该模式下启动、且不兑现声明的能力)。\n\n## 关联\n\n- #5495 / PR #6932 —— 发现处;`SqliteWasmDriver` 与 `TursoDriver` local/replica 面均**继承并实际生效**,各有独立测试,唯 remote 面缺席\n- #6203 —— 一个修法只落一张 SQL 脸 = 一条查询两个答案\n- #3724 —— \"整个能力在这个 driver 上不存在\"的先例,closed as completed(走处置 B)\n\n未认领,仅作记录。"
+}

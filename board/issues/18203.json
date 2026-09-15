@@ -1,0 +1,26 @@
+{
+  "number": 18203,
+  "kind": "issue",
+  "title": "lint: `translation-target-unknown` reads `apps[].navigation` only, so every locale key for a CONTRIBUTED navigation item (`navigationContributions`) is a false positive whose advice deletes a translation the runtime honours",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-elon-musk",
+    "id": 328766734,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-14T14:55:51Z",
+  "updated_at": "2026-09-14T14:55:51Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/18203",
+  "body": "## Finding (class c — a trap that makes an author delete metadata the runtime honours)\n\n`os build` and `os validate` run the `translation-target-unknown` rule over each app's `navigation` array. A navigation item contributed by another package through `manifest.navigationContributions` (ADR-0029 D7, ADR-0130) is not in that array, so every locale key for it is reported as naming an item \"which app X does not declare\", with the advice *\"Match the key to the navigation item's id, or drop it\"*.\n\nMeasured on `objectstack-ai/hotcrm` branch `claude/issue-1907-sales-app-service-module` (`be11c07`, pin 17.4.0): the service module contributes five items (`nav_case`, `nav_knowledge`, `nav_service_dashboard`, `nav_my_cases`, `nav_report_sla`) into the app `crm_enterprise`; the app's locale packs carry their labels; `os build` emits **15 warnings** (5 items × 3 non-default locales). At runtime `GET /api/v1/meta/app?id=crm_enterprise` returns all five items **with their zh-CN labels resolved from the app's pack** — the translations work. Following the rule's advice would delete five working translations per locale.\n\n## Ask\n\nLet the rule read the merged navigation (the app's own `navigation` plus every package's `navigationContributions` targeting that app) — the same fold the runtime applies (`applyNavContributions`) — before deciding a key names nothing. Until then the rule's advice is wrong for any multi-package artifact.\n\nDedupe words: translation-target-unknown, navigationContributions, contributed navigation translation, false positive, applyNavContributions.\n\nRelated: objectstack-ai/hotcrm#1907, #14925 / #16507 (the `group` docblock cards, same surface), #18170 / #18171 and the permission-set cross-reference card filed alongside this one."
+}

@@ -1,0 +1,32 @@
+{
+  "number": 6857,
+  "kind": "pull_request",
+  "title": "refactor(runtime): 删除沙箱 ctx.user 的 `?? session?.user` 死支 (#6316)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T01:24:30Z",
+  "updated_at": "2026-08-09T01:55:27Z",
+  "closed_at": "2026-08-09T01:55:26Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": "2026-08-09T01:55:26Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/6857",
+  "body": "Fixes #6316\n\n## 这是观察类,不是缺陷\n\n**今天的行为完全正确。** `packages/runtime/src/sandbox/body-runner.ts` 的两条 `??` 链里,第一支在两条真实路径上都能解析,第二支永远得到 `undefined` 然后被丢弃。删掉一条不可达的支路**按构造是行为保持的** —— 没有任何用户可见的变化。这是 #4984 的死支家族(以及本文件里 #5906 的同族)。\n\n改的是**读法**,不是行为:那条 `?? session?.user` 向下一个读者宣告了一个从未存在过的第二数据源。\n\n- `buildSandboxContext` — `user: engineCtx?.user ?? engineCtx?.session?.user`\n- `buildActionSandboxContext` — `user: actionCtx?.user ?? actionCtx?.session?.user`\n\n两个写入方的形参都是 `any`,所以 tsc 从来没对这两支说过任何话。\n\n## 前提复核(在合并后的树上重新证明)\n\n`origin/main` 在本分支闲置期间推进了 27 个提交(其中若干在 `packages/runtime` / `packages/objectql`),已重新合并,**此前一切测量作废,全链条在合并结果上重跑**。逐面证明:\n\n**1. 契约不声明 `user`**\n\n| 形状 | 声明的键 | `user`? |\n|---|---|---|\n| `HookContext['session']`(`packages/spec/src/data/hook.zod.ts`) | `userId` `actor` `organizationId` `accessToken` `isSystem` `skipTriggers` `skipAutomations` `positions` `preserveAudit`(+ 已退休的 `roles` 墓碑) | ❌ |\n| `ActionSession`(`packages/spec/src/ui/action-params.zod.ts`) | `userId` `organizationId` `positions` `roles` | ❌ |\n\n**2. 唯一生产者不写**\n\n- `ObjectQLEngine.buildSession()`(`packages/objectql/src/engine.ts:1921`)逐字段构造,一个 `user` 都没有 —— 引擎里 5 处 HookContext 装配点(`:5551` `:5685` `:5992` `:6479` `:7317`)全部经过它。\n- `buildActionSession()`(`packages/runtime/src/action-execution.ts:811`)只写四个键。两处 action ctx 装配点(`action-execution.ts:1047` MCP `run_action`、`domains/actions.ts:333` REST `/actions`)都用它,且两处都把 `user` 写在 **ctx 顶层**(活着的第一支),session 里没有。\n\n**3. 全工作区扫第三个写入方**\n\n`any` 缝意味着第三个写入方对类型不可见,所以按内容扫而不是只看两个点名的生产者:全仓无 `session.user = ` 形式的赋值;多行扫 `session: { … user … }` 字面量,唯一命中的非本 PR 测试是 `http-dispatcher.mcp-oauth.test.ts` —— 那是 better-auth 的 `sessionData` 形状(`resolve-session-principal.ts` 读它抽 `userId`),**另一条缝**,不是本缝的生产者。\n\n**4. 第三条调用路径原样不动**\n\nObjectQL 的 `ScopedRepo.execute()`(`engine.ts:8494`)传 `{...params, userId, tenantId, roles}` —— 既无 `user` 也无 `session`。改动前后 `ctx.user` 都是 `undefined`,这也是正确语义:那条路径不携带调用者身份。已用测试钉住。\n\n**结论:没有任何生产者写这个键,支路是死的。**\n\n## 为什么是路线 1(删除)而不是路线 2\n\n一条\"以防万一\"的第二支正是 Prime Directive #12 点名的**消费端容忍**:它把一个错误约定硬化成第二个事实契约。如果 session 将来真该携带 user,那是要在 session 契约上**声明**的东西(路线 2,属于 `packages/spec` 的新增,需要自己的裁决),不是在消费端用 `??` 预支。路线 2 **不在本单范围**,`packages/spec` 的 session 契约一行未动。\n\n## 反向验证 —— 预测 vs 实测\n\n**先说清楚:正向没有红,这是诚实答案而不是没找到红。** 删除不可达支路按构造行为保持,所以\"改回去看它变红\"的朴素方向对既有测试**必然零红**。同族单 #6536 撞到同样的形状,如实报告而没有制造红 —— 这里照做。\n\n能钉住的是**可达性主张**。新增 6 个用例(每面 3 个),预测与实测**完全一致**:\n\n| 方向 | 预测 | 实测 |\n|---|---|---|\n| 正向(删除后,既有测试) | 零红 | ✅ 零红 —— runtime 全量 115 文件 / 1739 用例全绿 |\n| 反向(把两支改回去,保留新测试) | **恰好 2 红**,每面 1 个否定用例 | ✅ **2 failed / 30 passed** —— 正是那两个否定用例 |\n\n反向红的正是:\n- hook 面 `does NOT fall back to \\`session.user\\` — no producer writes that key`\n- action 面 `does NOT fall back to \\`session.user\\` — ActionSession has no such key`\n\n**两个肯定用例在任何方向都不会动**,这一点写进了测试注释:真值键在旧链里排**第一**,删掉第二支动不了它 —— 它们不是本次改动的回归护栏。**两个\"无键\"用例**(hook 空 ctx / action 的 `ScopedRepo.execute()` 形状)同样两向皆绿:它们根本不带 `session`,恢复的支路和它的缺席一样得到 `undefined`。\n\n所以承重的只有**否定用例**,而且它们的 ctx 是**刻意合成的** —— 没有任何生产者能造出携带 `user` 的 session,这正是本单的发现。它们钉的是**规则**(\"`session.user` 不是数据源\"),不是任何真实路径展现的行为;而规则恰恰是未来一次编辑会打破、类型又抓不住的东西(两个写入方都吃 `any`)。\n\n## #5521 / PR #6295 的 `ScriptUser` docblock —— 检查结果\n\n**确实已经在描述被删掉的代码,已更新。** 原文写的是那条支路\"is left in place here because this change types a seam and does not get to re-decide a runtime expression; the limb is filed separately\" —— 本 PR 落地后这句话就假了。改写为:#5521 测出不可达但按纪律没动,#6316 重跑全生产者扫描、确认、删除;并补上\"若 session 将来该携带 user,去 session 契约上**声明**,而不是在这里恢复消费端 `??`\"。\n\n## 关于 changeset —— 明确不加,并说明理由\n\n**结论:不需要 changeset,已加 `skip-changeset` 标签**(不是静默加的,理由在此)。\n\nAGENTS.md §976 的规则是:changeset 用于 **feature 或功能改进**,纯 bug fix 不需要。本改动**三者都不是** —— 它是行为保持的死代码删除 + 测试 + 注释。没有任何消费者可观察的变化,`CHANGELOG.md` 里没有可写的东西;硬写一条会向升级者宣告一个他们无法观察、也无需响应的\"变更\"。\n\n## 门禁(合并后的树上的真实输出)\n\n| 门禁 | 结果 |\n|---|---|\n| `pnpm lint` | ✅ 干净 |\n| `pnpm --filter @objectstack/runtime typecheck` | ✅ 干净 |\n| `pnpm --filter @objectstack/runtime test` | ✅ **115 文件 / 1739 用例全通过** |\n| `turbo run build --filter='./packages/*' --filter='./packages/*/*'` | ✅ 70/70 |\n| `lint.yml` 全套 `check:*`(42 项) | ✅ **42/42 通过,零失败** |\n| TEST_DEBT | ✅ 未上升(`check:type-check-debt` 通过) |\n\n两条同僚今天实测的操作注记已照做:`check:type-check-debt` 与 `check:i18n-coverage` **没有完整 build 闭包就拒绝测量**,所以先按 `lint.yml` 的做法跑了全量 build 再跑它们(否则会把\"拒绝测量\"误读成红);全程串行,没有并发的 `tsc` 打同一个 `tsconfig.debt-remeasure.json`。\n\n## 范围\n\n- 改动面:`packages/runtime/src/sandbox/body-runner.ts` + `body-runner.test.ts` + `script-runner.ts` 的 docblock。\n- ⛔ `packages/spec` 的 session 契约一行未动(那是路线 2)。\n- ⛔ `packages/objectql/src/engine.ts` 只读未改。\n- ⛔ `content/docs/releases/` 未动。\n- ⛔ `packages/rest` 未动(#6535 由另一位 agent 持有)。\n\n---\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_017uFVNMmTxLpmfQYiuKM1Yx\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_017uFVNMmTxLpmfQYiuKM1Yx)_"
+}

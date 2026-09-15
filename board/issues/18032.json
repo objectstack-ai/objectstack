@@ -18,7 +18,7 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-09-13T13:15:04Z",
-  "updated_at": "2026-09-13T15:30:35Z",
+  "updated_at": "2026-09-15T01:33:20Z",
   "closed_at": "2026-09-13T15:23:54Z",
   "closed_by": {
     "login": "hotlong",
@@ -26,7 +26,7 @@
     "type": "User"
   },
   "merged_at": null,
-  "comments": 13,
+  "comments": 14,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/18032",
   "body": "`test/format-zod-union.test.ts` has ejected **2 pull requests** from the merge\nqueue within a rolling 24 hours — **2 independent hits** once\nGitHub's speculative stacking is accounted for. This issue is the single place for\nthat conversation; it is refreshed by the merge-queue-triage workflow on every\nfurther ejection.\n\n| PR | stack | queue build |\n|---|---|---|\n| #17982 | independent | [34759517090](https://github.com/objectstack-ai/objectstack/actions/runs/34759517090) · [34758691525](https://github.com/objectstack-ai/objectstack/actions/runs/34758691525) |\n| #18014 | independent | [34756944488](https://github.com/objectstack-ai/objectstack/actions/runs/34756944488) |\n\n**This issue is a NAME, not a diagnosis.** The workflow that files it reads the\nfailing test file path out of the job logs and counts PRs; it does not\nknow whether this is a flake, a load/timing cliff, a semantic conflict between\nqueued PRs, or a real regression, and it does not act on any of those. No test is\nskipped, quarantined or re-queued by it, and no PR is labelled by it — weakening\na gate stays a human act.\n\nWhat to do with it: read one victim PR's triage comment for the failure REASON\nline beside the FAIL line (a timeout and an assertion are the same FAIL line and\nopposite diagnoses), decide the cause, and close this issue with the fix or with\nthe reason it is not one.\n\nLast refreshed by queue build [34759517090](https://github.com/objectstack-ai/objectstack/actions/runs/34759517090) (PR #17982).\n\n---\n_Filed by the merge-queue-triage workflow (#4859, aggregation #10128)._\n\n<!-- queue-signature-anchor:test/format-zod-union.test.ts -->"

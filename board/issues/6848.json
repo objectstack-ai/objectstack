@@ -1,0 +1,34 @@
+{
+  "number": 6848,
+  "kind": "issue",
+  "title": "[finding] classifyIndexFailure's dialect arm reads only the OUTER message — a wrapped dialect refusal loses the `unsupported` verdict, and with it overlay-index's fallback index",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T00:27:24Z",
+  "updated_at": "2026-08-09T08:21:33Z",
+  "closed_at": "2026-08-09T08:21:33Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6848",
+  "body": "Recorded while implementing #6699 (PR #6845). Deliberately out of that card's lane — its ruling scoped the migration to the FIRST arm and said the dialect arm stays as-is — so this is filed rather than fixed.\n\n## What\n\n`packages/metadata-protocol/src/migrations/partial-index-probe.ts`, after #6699:\n\n```ts\nexport function classifyIndexFailure(error: unknown): PartialIndexStatus {\n    if (isUniqueViolationError(error)) return 'conflict';        // walks code / errno / message / cause\n    if (/partial|where clause|near \"where\"|near 'where'|functional|syntax/i\n        .test(indexFailureText(error))) return 'unsupported';    // outer message ONLY\n    return 'failed';\n}\n```\n\nThe two arms now read different depths. `isUniqueViolationError` follows `error.cause` up to four levels, because pool and query-builder layers re-throw with the original attached. `indexFailureText` deliberately does not: it returns `err.message` and stops.\n\nSo a dialect refusal arriving behind a wrapper — outer prose `Write failed` or `pool query failed`, the actual `near \"WHERE\": syntax error` one step down `cause` — is classified `failed` instead of `unsupported`.\n\n## Why it is observation-class, not a live defect\n\nNothing in the repo produces that shape today. `IndexExec` is `driver.raw(sql)` or `driver.execute(sql)`, and the drivers actually shipped hand knex's own error straight back with the dialect text on the outer message, which is why every existing test case matches on the first read. The asymmetry is dormant, not wrong.\n\nIt is also **not a regression** from #6699. Before that change the classifier received `err.message` as a string, so the dialect arm read exactly the same single channel. What #6699 changed is that the first arm now reads deeper, which is what makes the difference visible by contrast.\n\n## Consequence if a wrapping driver ever lands\n\nNot merely a wording difference, which is why it seems worth writing down. The two consumers of the verdict diverge:\n\n- `view-definition-active-index.ts` — `unsupported` and `failed` both keep the previous index and both log at `error`. Only the wording differs (a named dialect limitation versus a cause we do not understand).\n- `overlay-index.ts` — the `unsupported` branch additionally builds the composite **fallback lookup index** (`buildOverlayFallbackIndexSql`), offered precisely because a dialect that cannot take the partial form should still get the lookup. Under a `failed` verdict that branch never runs, so the fallback is silently not attempted and `fallback` is reported as `not-attempted` rather than `ensured` / `refused`.\n\n## Possible dispositions\n\n1. Give the dialect arm the same bounded `cause` walk the predicate has, so both arms read the same depth. Cheap, symmetric, and testable with a wrapped error.\n2. Leave it, and say in the doc comment that the second arm is outer-message-only by design — the current state, just undocumented, so the next reader does not have to re-derive whether the asymmetry is deliberate.\n\nNo recommendation offered here; the choice depends on whether the platform expects to take a wrapping raw-SQL driver at all, which is a question for triage rather than for this finding.\n\nRelated: #6699 / PR #6845 (the first arm's migration onto `@objectstack/types`), #6250 (the shared predicate), #6418 (where the classifier and the probe-first order moved to).\n"
+}

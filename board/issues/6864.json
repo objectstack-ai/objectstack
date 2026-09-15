@@ -1,0 +1,35 @@
+{
+  "number": 6864,
+  "kind": "pull_request",
+  "title": "feat(spec,cli): carry the package namespace on the publish payload (ADR-0048 addendum Phase A1)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T01:45:46Z",
+  "updated_at": "2026-08-09T02:22:40Z",
+  "closed_at": "2026-08-09T02:22:39Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-09T02:22:38Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/6864",
+  "body": "Fixes objectstack-ai/objectstack#6760\n\nADR-0048's addendum (merged in #6671, accepted as drafted by the maintainer on 2026-08-08) defines a publish-time namespace exclusivity registry. Its Phase A2 gate is enterprise-side and could not be built, because the namespace never left the artifact. This is **Phase A1**, the open-side half that gives that gate an input.\n\n## The ruled shape, and where each choice comes from\n\nThe addendum text is the ruling, so every decision below is quoted from it rather than invented here.\n\n**Optional on both schemas.** §A.2's algorithm opens with `if (namespace is absent) -> allow  # namespace is optional today`, and `manifest.namespace` is itself optional. A package that declares no namespace makes no reservation and is not gated. This was the one point the dispatch flagged as possibly under-specified; it is not — the algorithm's first line answers it, so no decision was guessed.\n\n**Mirrors `manifest.namespace` exactly** — same `/^[a-z][a-z0-9_]{1,19}$/` rule, same optionality — per §A.2's \"`PackageSchema` / `CreatePackageRequestSchema` gain a `namespace` field mirroring `manifest.namespace`\". A parity test judges the manifest field and both payload fields against one table of values, so §A.7's \"two gates, one vocabulary\" is enforced rather than asserted.\n\n**Read off the compiled artifact**, per §A.2's \"the CLI reads it off the artifact the way it already reads `manifest.id`\" — i.e. `artifact.manifest.namespace`, the same place `deriveManifestId` reads `artifact.manifest.id`.\n\n## What the CLI does, by case\n\n| artifact `manifest.namespace` | behaviour |\n| :--- | :--- |\n| present, well-formed | travels on the `POST /cloud/packages` body as `namespace`; echoed in the publish summary |\n| absent | key omitted entirely — not `null`, not `\"\"` |\n| malformed | publish refused before any network call, naming the rule and the fix |\n\nTwo deliberate non-features, both following from \"a reservation is only meaningful if it names the object-name prefix the package really ships\":\n\n- **No `--namespace` flag, and `objectstack.manifest.json` cannot override it.** `manifestId` is overridable by both; namespace is not. A second declaration surface would let a publisher reserve `foo` while installing `bar_*` objects — and the A2 gate would then be checking a string the artifact does not use.\n- **`TemplateManifestSchema` omits the field** rather than inheriting it through its `.omit()` projection of `CreatePackageRequestSchema`, for the same reason. Its on-disk descriptor keeps exactly the surface it has today.\n\nOut of scope per the ruling and untouched here: A2/A3 (the enterprise registry and gate), A4 (rename/transfer), the install-time gate (`NamespaceConflictError`, `packages/objectql/src/registry.ts`), and the ADR-0112 codes `NAMESPACE_ALREADY_RESERVED` / `NAMESPACE_RESERVED_PLATFORM` — the addendum places their registration with the gate that raises them, which is A2.\n\n## What A2 receives\n\nField `namespace`, `string | undefined`, optional on both `PackageSchema` and `CreatePackageRequestSchema`, pattern `/^[a-z][a-z0-9_]{1,19}$/`. Provenance: the compiled artifact's `manifest.namespace`, transmitted verbatim, never flag- or descriptor-overridable. The wire spelling is `namespace` in both the CLI's snake_case body and the camelCase schema — one word, so no case mapping is involved. Absent means the publisher declared no namespace, which §A.2 allows.\n\n## Verification\n\nReverse verification with the direction predicted first, then measured. Sources taken back to `origin/main` with `git checkout` (never `git stash`), tests kept:\n\n- spec pin: **7 of 10 cases red**. With no field declared, the valid case is silently stripped (`expected undefined to be 'crm'`) and the malformed cases **invert** — an unknown key is dropped, not refused, so `safeParse` starts succeeding (`expected true to be false`).\n- CLI pin: **4 of 5 cases red**, including the refusal case (`expected undefined to be 1` — no exit code, because nothing refuses).\n- **3 spec + 1 CLI case stay green on the revert, and that is correct**: they are the \"absent namespace\" pins, which assert a key is *not* added. An absence pin cannot go red when the feature is removed. Reporting that rather than claiming a clean sweep.\n\nGates run one by one, enumerated from `.github/workflows/lint.yml`: all 33 ESLint-job gates green; TypeScript-job gates green. `check:docs` initially failed — a real miss, the generated `content/docs/references/cloud/package.mdx` was stale — fixed by `gen:schema && gen:docs` (second commit) and green on recheck, as are `check:authorable-surface` and `check:generated --reconcile-only`. `packages/spec/authorable-surface/cloud.json` gains exactly two entries (`cloud/Package:namespace`, `cloud/CreatePackageRequest:namespace`); `authorable-surface.base.json` is untouched.\n\n`pnpm test` and `pnpm typecheck` pass for both affected packages in full.\n\nChangeset: `.changeset/publish-payload-namespace.md` (spec minor, cli minor).\n\nFiled out of scope while working here: #6861 — `objectstack.manifest.json` ships a live `namespace` key that `TemplateManifestSchema` does not declare (`finding` label, unassigned).\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_011sGk4SKHqGRgmmqUok1P8M)_"
+}

@@ -1,0 +1,32 @@
+{
+  "number": 6945,
+  "kind": "issue",
+  "title": "Refresh the gen:openapi exemption `why` in check-generated.ts with #5757's measured facts (one line, no gate)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T05:42:24Z",
+  "updated_at": "2026-08-09T06:46:00Z",
+  "closed_at": "2026-08-09T06:46:00Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6945",
+  "body": "Spun out of #5757's closure (maintainer ruling 2026-08-09, route A: close not planned, refresh the exemption text — 「全部接受」). This card is the documentation half only. ⛔ **No gate is to be built** — the measurement on #5757 established that a gate at this landing site would be green by construction (CI runs `check:generated` with `--reconcile-only` only, and a full run would sit after `pnpm build` checking a just-regenerated artifact).\n\n## Deliverable\n\nUpdate the `gen:openapi` entry's `why` string in `packages/spec/scripts/check-generated.ts` to carry the two measured facts, replacing the now-stale reasoning:\n\n1. staleness cannot outlive one build of its own package — `gen:openapi`'s inputs are a subset of the `build` task's inputs (`build: gen:schema && gen:openapi && tsup`, and `json-schema/**` is a turbo build output);\n2. the served document contains **0 `$ref`s** into `components.schemas` (post-#5744 it describes no routes to reconcile).\n\nKeep the existing #5168/#5744 citations; add #5757 as the measurement source. One string, no behaviour change, no new checks.\n\n## Acceptance\n\n`check:generated` output unchanged except the refreshed `why`; no new gate entries; the #5757 thread cross-linked.\n\nRefs: #5757 (measurement + ruling), #5371, #5744, #5168."
+}

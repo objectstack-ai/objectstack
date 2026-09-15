@@ -1,0 +1,33 @@
+{
+  "number": 17991,
+  "kind": "issue",
+  "title": "[finding] a constant-only import inherits the exporter's whole watch surface — `inherited-population` is per-module, so no caller can decline a fabricated lead",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:skills",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-13T09:52:31Z",
+  "updated_at": "2026-09-14T08:42:54Z",
+  "closed_at": "2026-09-14T08:42:06Z",
+  "closed_by": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17991",
+  "body": "`inherited-population` — the declared remedy for a followed module contributing a population its caller never opens — is keyed on the **MODULE**, while whether the contribution is fabricated is a property of the **CALLER**. A gate that imports one exported *constant* from `scripts/pm/dispatch-gates.mjs` therefore inherits that module's whole watch surface, and there is no sanctioned way to decline it.\n\n## Measured, on the live tree\n\n`scripts/pm/check-clause2-carriers.mjs` gained one line — `import { CONTRACT_REVIEW_TIER } from './dispatch-gates.mjs';` — and nothing else that names a path. Ablation, both legs on the committed tree, restoring by blob hash:\n\n```\nbase (no import)   -> check:pm-clause2-carriers hints: []\nhead (with import) -> check:pm-clause2-carriers hints: [\".github/workflows\"]\n```\n\n`entry.imports` for the family reads `[\"scripts/pm/dispatch-gates.mjs\"]`, and `entry.hintOrigin` is `{}`. The gate never opens `.github/workflows`; its CI step runs the checker's own `--self-test`.\n\n## Why that is the shape the derivation says it refuses\n\n`firstPartyImportTargets`' own docblock states the direction, verbatim:\n\n> The refusal costs recall in one direction and that is worth naming … and a missing lead costs one card one CI round — the side this file's header errs on everywhere.\n\nand `declaredInheritedPopulation`'s states the harm the marker exists against:\n\n> It is wrong for a module whose literals are join bases it builds paths from, or a declaration table it exports for some other purpose: the importer never opens those trees, so every pair they contribute is **a fabricated lead in the column a dispatch prompt pastes**.\n\nThat is exactly this case, and the marker cannot reach it: the same module's globs **are** a real population for `check:pm-widening-tells`, which imports `SUSPECT_TIER_GLOBS` and reads them. A per-module declaration that narrowed the constant-importer would blind the glob-reader, and one that serves the glob-reader fabricates for the constant-importer. ⛔ One declaration cannot be both.\n\n## The guard that exists does not fire here, and that is a second reading\n\n`discoverFamilies` already carries `if (entry.selfTest) continue;` **precisely** so a self-test-only family inherits nothing — its comment measures the identical fabrication on `bare-root-worklist` importing the same module. But `entry.selfTest` is read off the **workflow** argv:\n\n```js\nselfTest: Boolean(argv) && argv.args.split(/[ \\t]+/).includes('--self-test'),\n```\n\n`lint.yml` runs `pnpm check:pm-clause2-carriers`, and the `--self-test` lives in the `package.json` script body (`node scripts/pm/check-clause2-carriers.mjs --self-test`). So the flag is invisible to the derivation, `entry.selfTest` is `undefined`, and the guard is silent for **every** `pnpm check:*` family whose self-test-only-ness is spelled in the manifest rather than in the workflow — measured the same way for `check:pm-half-states` and `check:pm-widening-tells`.\n\n## Why this is not #11556 again\n\n#11556 (closed) measured the same class from `bare-root-worklist` and landed `inherited-population` as the remedy. That remedy is live and correct for what it was built for. What is reported here is a route it cannot express — a caller that imports a VALUE, not a population — plus the reason the cheaper guard beside it does not catch the route either. ⛔ Not a request to revert #11556's follow.\n\n## Consequence today\n\nOne live fabricated lead, in a column a dispatch prompt pastes: a card touching `.github/workflows/**` is told to run `pnpm check:pm-clause2-carriers`. Cheap to run and wrong to believe. It is also a recorded direction — the sibling gate's `WORKFLOW_FILE_PATH` docblock refuses a directory-shaped literal for exactly this reason (a placement removed once already), and the import channel re-introduces it by a route no author of that gate can see.\n\n## Shapes, offered ⛔ not asserted\n\nThree, unmeasured and unranked: make the `selfTest` reading resolve a `pnpm` script through `package.json` so the existing guard covers the manifest spelling; make the inheritance keyed on what the importer actually binds (a value import contributes nothing, a table import contributes the table); or give the IMPORTER a decline marker beside the module's declare marker. ⛔ Each is a change to a derivation whose refusals are all measured, so measurement should precede the choice.\n\n## Provenance\n\nFound while landing the served-tier strip gate. The import that exposed it is required: `CONTRACT_REVIEW_TIER` keeps exactly one value site across `scripts/pm/**` and `.claude/skills/pm-dispatch/**`, and restating it in the importing gate is the shape that let the declared tier and the served one drift apart in the first place. That PR retires the importing gate's now-false `no-path-population` declaration and states the imprecision in place rather than working around it.\n\n⛔ Filed bare and ungraded — no `domain:*`, no `priority:*`; both are the triage seat's production.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

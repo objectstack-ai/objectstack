@@ -1,0 +1,34 @@
+{
+  "number": 6881,
+  "kind": "issue",
+  "title": "[观察] `ExecutionContextSchema.preserveAudit` 无 `.describe()` —— 生成的 reference 行描述为空（#6827 刻意划出的那半）",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "finding"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T02:23:46Z",
+  "updated_at": "2026-08-09T06:06:02Z",
+  "closed_at": "2026-08-09T06:05:20Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6881",
+  "body": "## 性质\n\n观察类（`finding`），不加 `pm:queue`：影响是一格**空的文档单元格**，没有运行时后果。单独立卡只为不让它随 #6827 关闭而丢失。\n\n## 事实\n\n`packages/spec/src/kernel/execution-context.zod.ts:356`：\n\n```ts\n  preserveAudit: z.boolean().optional(),\n```\n\n语义完整地写在它上方 `:326-355` 的块注释里（UPDATE 侧白名单、系统列仍剥离、opt-in 且服务端构造），但块注释不进生成器，于是 `content/docs/references/kernel/execution-context.mdx:69` 的这一行是：\n\n```\n| **preserveAudit** | `boolean` | optional |  |\n```\n\n—— 描述列为空。对照同族的 `packages/spec/src/data/driver.zod.ts`（`DriverOptions.preserveAudit` 有 `.describe()`），`content/docs/references/data/driver.mdx:99` 那一行就有描述。\n\n## 为什么单独立卡，而不是并入 #6827\n\n#6827（`state-machine.mdx` 的 create 半边旧说法）在正文里顺带记录了这一处，并把「是否合并处理」交给分诊。分诊评论的裁决是**显式拆开**：\n\n> the optional second half (adding a `.describe()` to `ExecutionContextSchema.preserveAudit`) is `domain:spec-surface` territory (text-only, acceptance byte-identical, triggers a docs regeneration ride) — if pursued, it should go through the spec-surface seat's sweep pipeline rather than riding this docs card; noted here so the split is a decision, not an accident.\n\nPR #6880 按该裁决把它排除在 file surface 之外。#6827 关闭后这条记录就没有落脚点了，所以在这里存档。\n\n## 修的时候要注意\n\n#6640 的裁决（维护者 2026-08-08）之后，这条 `.describe()` 正好是写下收窄后契约的地方 —— 措辞应与已合入的两处保持一处口径：\n\n- `packages/spec/src/data/field.zod.ts` 的 `FieldSchema.readonly`（PR #6823 已改）；\n- `content/docs/protocol/objectql/security.mdx:271` 的 callout（同一 PR）。\n\n即：**豁免仅在 UPDATE 路径成立；INSERT 侧只认 `context.isSystem`，非 system 的 create 请求 `preserveAudit` 会被剥离并 WARN。**\n\n改动是 text-only、acceptance surface 逐字节不变，但会带动 `check:docs` 的整体重新生成（`content/docs/references/kernel/execution-context.mdx` 须随生成器一起更新）。\n\n⛔ 不认领，仅记录。会话：`session_01F8q5J1MQyocgtNspb15fSn`"
+}

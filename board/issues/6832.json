@@ -1,0 +1,34 @@
+{
+  "number": 6832,
+  "kind": "issue",
+  "title": "[finding] `hook.retryPolicy.maxRetries` has two answers: schema `.default(3)` vs executor `?? 0` — the #4247 shape, one surface over",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "target:v17"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T23:37:17Z",
+  "updated_at": "2026-08-09T07:38:35Z",
+  "closed_at": "2026-08-09T07:38:35Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6832",
+  "body": "Found while implementing #6750 (docs pass over `content/docs/automation/flows.mdx`'s retry-policy prose). Filed unassigned, **not fixed in that PR** — #6750 is text-only over `content/docs/**` and this is runtime/spec.\n\n## The observation\n\n`hook.retryPolicy` is a live, enforced retry surface with its **own** two-key shape, separate from the converged `RetryPolicySchema`. Its retry count is declared and defaulted in two places that disagree:\n\n- **Declared** — `packages/spec/src/data/hook.zod.ts:265`\n  ```\n  maxRetries: z.number().default(3).describe('Maximum retry attempts on failure'),\n  ```\n- **Read** — `packages/objectql/src/hook-wrappers.ts:311`\n  ```\n  const retryMax = Math.max(0, Number(meta.retryPolicy?.maxRetries ?? 0));\n  ```\n\nThat is verbatim the pattern #4247 removed from flow `errorHandling`, recorded in `packages/spec/src/automation/flow.zod.ts:651-656`:\n\n> `retryExecution` used to carry `errorHandling.maxRetries ?? 3` beside a schema that said `.default(0)`, so \"how many times does an under-specified flow retry?\" had two answers and the winner depended on whether that flow had been through `FlowSchema` (0) or hand-built and fed to the engine directly (3). One contract, one number.\n\nHere the two answers are 3 (parsed) and 0 (unparsed), i.e. the same defect with the numbers swapped.\n\n## Why this is `finding` and not a queued defect — what I measured\n\nOn the **authoring path the default is delivered**, so no author hits this today:\n\n- `hook` is a registered metadata type — `packages/spec/src/kernel/metadata-type-schemas.ts:89` (`hook: HookSchema`) — so `defineStack({ hooks })`, `PUT /meta` and the Studio form all parse through `HookSchema` and `maxRetries` arrives as `3`. The `?? 0` never fires on that path.\n- The reachable-but-dormant half: `wrapDeclarativeHook` is a **public export** (`packages/objectql/src/index.ts:125`, `packages/objectql/src/core.ts:59`), and `packages/objectql/src/hook-binder.ts` does not itself parse (its own comment at `:277` notes `HookSchema` refuses shapes \"at parse time\" while \"this binder accepts\" them). A host handing hand-built hook meta to that export gets `0` where the published contract, the generated reference page and the Studio form all say `3`.\n\nSo: dormant on every path an author uses, live on the public API. Severity graded at filing time is unreliable in both directions — recording it plainly rather than sitting on it.\n\n## Adjacent, same read, deliberately NOT filed as defects\n\nBoth are noted so the next reader does not re-derive them:\n\n- The hook backoff is **linear**, not exponential — `retryBackoffMs * attempt` at `packages/objectql/src/hook-wrappers.ts:351`. That matches the declared shape exactly (no `backoffMultiplier` / `maxRetryDelayMs` / `jitter` on `hook.retryPolicy`), so it is a smaller contract, not a drifted one.\n- `packages/spec/src/shared/retry-policy.test.ts:174` comments that \"Adding a fifth retry surface without wiring `retryPolicyShape()` fails here\" (and `:189` the same for a fourth). The block's `surfaces()` list is hand-enumerated, so a new surface fails it only once someone adds it to the list. The comment overstates the guarantee; the assertions themselves are correct. Cosmetic, spec-prose, and `packages/spec` source prose is #6630's lane.\n\n## Not in scope of this finding\n\n- Re-litigating whether `hook.retryPolicy` *should* be the converged `RetryPolicySchema`. It deliberately is not (`packages/spec/src/data/datasource.zod.ts:86` warns authors off renaming keys between them), and that is a contract decision, not a bug.\n\n## Dedup searches run before filing\n\n- `is:open hook retryPolicy maxRetries default` — 0 hits.\n- `is:open hook-wrappers retry backoff` — 0 hits.\n- `is:open retry policy convergence hook` — 1 hit, PM seat Routine #6015, unrelated.\n- `is:open \"two answers\" default engine fallback` — 1 hit, #6015 again.\n\n## Provenance\n\nMeasured on `origin/main` @ `e120a5a1d`.\n"
+}

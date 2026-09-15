@@ -1,0 +1,35 @@
+{
+  "number": 7024,
+  "kind": "issue",
+  "title": "sweep(spec): 3-item \"self-descriptions answerable to reality\" sweep — one claim, one PR, per-item checklist (#6242 #4895 #4837)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T09:28:52Z",
+  "updated_at": "2026-08-09T12:15:51Z",
+  "closed_at": "2026-08-09T12:15:51Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7024",
+  "body": "Sweep card per the findings-round bundling discipline (#6243 / PR #6288 precedent), packaged by the `domain:spec` seat with the maintainer's approval (2026-08-09 「同意」, chat). **This card is the claim object**; the member cards keep `pm:queue` but are NOT dispatch candidates while this sweep is open — selection excludes them via this member list.\n\n## Shared criterion (what makes these one sweep)\n\nEvery member is a **self-description that stopped being answerable to reality** — an enumeration, ledger verdict, or tombstone prose that asserts something the code no longer (or never) backed. Every fix re-anchors the description to a verifiable source of truth. No acceptance-face changes anywhere in this sweep — the legal-metadata set must be byte-identical before/after (that is the sweep's red line; a member that turns out to need an acceptance change is DROPPED from the sweep and reported, not smuggled).\n\n## Members (read each card in full before touching it; premise-first per member)\n\n1. **#6242** — Six independent enumerations of the stack-collection set, none answerable to `stack.zod.ts`; one is mis-aimed and two still list retired kinds. Fix: make each enumeration derive from (or be pinned against) the schema's own set.\n2. **#4895** — The #4667 liveness-verdict cross-repo coverage audit: two directions each with one measured counter-example; plus the homePageId tombstone prose correction the card carries. Fix half = corrections + re-dated verdicts with evidence; findings beyond the card's own scope are filed separately (PD #10), not fixed here.\n3. **#4837** — The liveness ledger counts \"a consumer read site exists\" as `live` evidence, which misses producer-less dead keys (`Seed.env` was the specimen). Fix: the methodology note/criterion so a `live` verdict requires evidence on the producer side too, and re-verify the verdicts the old criterion demonstrably over-graded (re-grade with evidence; do not mass-flip).\n\n## Sweep rules (binding on the PR)\n\n- One PR, body carries a **per-item checklist**: one row per member — 落点 | before | after — reviewed row by row.\n- `Fixes #6242` / `Fixes #4895` / `Fixes #4837` only for members actually completed; a dropped member gets a `Part of` note and the reason.\n- **Zero changes outside the N items**, self-certified: `git diff --stat` file list must map 1:1 onto the checklist.\n- Out-of-scope discoveries are filed as separate unassigned issues (PD #10), never folded in.\n- A member whose premise died (main moves ~18 merges/day) is dropped with evidence — that is a good outcome, not a failure.\n\nRefs: #6243 (sweep pilot), #4667 (liveness base), objectstack#4949 (filing discipline)."
+}

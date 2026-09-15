@@ -1,0 +1,30 @@
+{
+  "number": 6988,
+  "kind": "issue",
+  "title": "[finding] The #6947 guard (route B) is NOT buildable as specified — the fact it would pin is non-textual on 3 of 5 driver faces, and an executing pin needs spec → driver deps",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T07:52:15Z",
+  "updated_at": "2026-08-09T11:13:53Z",
+  "closed_at": "2026-08-09T11:13:53Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6988",
+  "body": "Observation-class finding, recorded from implementing #6947 (PR #6987). Filed unassigned, no `domain:*` label — routing is the triage seat's call. **Nothing a user hits**: this records a NEGATIVE measurement so the next seat does not re-derive it, and it is deliberately not a request to build anything.\n\n#6947 was dispatched with two routes: **A** (rewrite the expired status paragraph in `packages/spec/src/data/filter.zod.ts` from a measured census) and **B** (A + a pin asserting that the paragraph's per-driver claim agrees with the drivers' supported-operator tables, in the #6628 `position-delegatable-enforcer.pin.test.ts` idiom). The dispatch asked for B's cost to be measured before choosing. It was, and B came back **not reachable** — for a reason that is not cost.\n\n## What actually blocks B\n\n**1. On three of the five faces the fact is not present as text, so a source-scanning pin pins the WRONG number.**\n\nMeasured on `origin/main` @ `30283263`:\n\n```\ngrep -n \"case '\\$icontains'\"  →  driver-sql/src/sql-driver.ts:8107\n                                 driver-turso/src/remote-transport.ts:1979        (2 packages)\n\nCONTROL, same grep, an operator every SQL face answers:\ngrep -n \"case '\\$contains'\"   →  driver-sql:8098, driver-turso/remote-transport:1972,\n                                 driver-mongodb/mongodb-filter.ts:530,\n                                 driver-memory/memory-matcher.ts:212              (4 packages)\n\ngrep -c \"case '\\$contains'\\|case '\\$icontains'\"  driver-sqlite-wasm/src/sqlite-wasm-driver.ts  →  0\n```\n\nThe control proves the grep works (it finds `$contains` in four packages) **and** that it is blind in `driver-sqlite-wasm`, which carries no text case arm of any kind — `SqliteWasmDriver extends SqlDriver` (`sqlite-wasm-driver.ts:67`) and inherits the compiler. Executed, that package answers `$icontains` on the sql.js engine. `driver-turso`'s local transport is inherited the same way (`turso-driver.ts:175`). And `driver-memory` / `driver-mongodb` do not carry an absence marker either — their refusal is *derived*, `SUPPORTED_FIELD_OPERATORS = new Set([...FILTER_OPERATORS])` (`filter-refusal.ts:178`) and a `default:` arm (`mongodb-filter.ts:590`).\n\nSo a textual pin counts **2 of 5**; execution counts **3 of 5**. A pin that enshrines 2 would be worse than no pin — and the alternative, hardcoding \"sqlite-wasm inherits driver-sql\", makes the pin assert the very assumption it exists to check. (This is not hypothetical: #6947's own triage comment, written from the same grep, says \"two drivers execute, three refuse\".)\n\n**2. A pin that MEASURES rather than greps has to execute the drivers, and `packages/spec` is upstream of all five.** Every driver has `\"@objectstack/spec\": \"workspace:*\"` in `dependencies`; adding any of them to `packages/spec`'s devDependencies is a workspace cycle. The pin would have to live downstream (a driver package, or a cross-driver suite) and read the spec docblock — the opposite direction from the one the dispatch proposed.\n\n## Two hazards the dispatch flagged that measured CLEAN, recorded so nobody re-prices them\n\n- **Cross-package file reads from `packages/spec` are fine.** The #6628 idiom already does exactly this: `position-delegatable-enforcer.pin.test.ts:54-56` resolves `REPO_ROOT` via `import.meta.url` and reads `packages/lint`'s source. A *filesystem* read creates no build-graph edge. What is impossible is an `import`, not a read.\n- **The `import.meta` ratchet cost is ZERO here, not 2.** `packages/spec/tsconfig.test.json` sets `module: esnext` + `moduleResolution: bundler` precisely so the test layer is checked the way vitest runs it, and its header says the build config's NodeNext is what reports TS1470 on `import.meta`. Consistently, `position-delegatable-enforcer.pin.test.ts` is **not** in `packages/spec/test-typecheck-debt.json` — i.e. it carries no errors. The \"2 tsc errors\" figure (attributed to #6729) does not reproduce under the test program.\n\n## What IS left, if anyone wants a guard for this class\n\nOnly one mechanically-checkable relation survives the above, and it is weaker than what B promised: **a spec docblock must not name an issue as an OPEN gap when that issue is closed.** That needs issue state, which the offline gates cannot read — the same wall #6947's filing already named. The in-file variant of this class is #6635's design space (`needs-user-decision`), and #6947's dispatch explicitly fenced that off; this card does **not** propose competing with it.\n\n## Disposition suggested\n\nRecord-only. If triage wants a guard, the honest shape is a **driver-side** conformance assertion (downstream reading the spec's claim), not a spec-side pin reading drivers — and it should be graded against #6635 rather than added beside it.\n\nDuplicate search before filing (`filter.zod status paragraph guard`, `icontains pin docblock driver`, `spec pin driver operator table`): zero hits.\n\nRefs: #6947 (the card this came out of), PR #6987 (route A, landed the measured census), #6628 (the pin idiom), #6635 (the in-file general gate, on hold), #6520 (the JS faces that still refuse `$icontains`)."
+}

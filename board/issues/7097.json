@@ -1,0 +1,35 @@
+{
+  "number": 7097,
+  "kind": "pull_request",
+  "title": "fix(formula): arm the CEL hydration retry off cel-js's structured code (#6679)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T15:06:08Z",
+  "updated_at": "2026-08-09T16:05:18Z",
+  "closed_at": "2026-08-09T16:05:16Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-09T16:05:16Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/7097",
+  "body": "Closes #6679.\n\n## What changed\n\n`packages/formula/src/cel-engine.ts` — `isNumericOverloadError`, the predicate that decides whether `celEngine.evaluate` runs the ADR-0032 §1c hydration retry, no longer reads the error's prose:\n\n```diff\n-  const message = err instanceof Error ? err.message : String(err);\n-  return /no such overload/i.test(message);\n+  return err instanceof EvaluationError && err.code === CEL_NO_SUCH_OVERLOAD_CODE;\n```\n\nThis was the last `message`-text read in the file that armed behaviour after #6223 / PR #6677 deleted the keyword table in `classifyError`. The structured answer already lived one function below — `classifyCelFault` does `err instanceof EvaluationError` and reads `err.code` — so this is the same rule applied to the one place still exempt from it.\n\n## What was measured\n\nAgainst cel-js `8.0.0` as installed, not against the card:\n\n| Claim | Measured |\n|---|---|\n| The §1c fault is an `EvaluationError` | `err.constructor.name === 'EvaluationError'`, `instanceof` true |\n| Its code | `'no_such_overload'` (raised from `lib/operators.js`) |\n| `matches()` escapes cel-js unwrapped | `matches(record.name, \"no such overload(\")` → `Invalid regular expression: /no such overload(/: Unterminated group` — a native `SyntaxError`, no cel-js source highlight |\n| …and from a row too | `matches(record.name, record.re)` with `re` off the record — same message |\n\nThe pinning against cel-js is itself a test, so an upstream re-code or re-class goes red here rather than silently disarming the retry.\n\n## The behaviour change, and a correction to the filing\n\nThe change is one-directional, as filed: a native throw whose message merely contains the phrase stops arming the retry. Genuine `no_such_overload` faults are untouched.\n\nThe filing recorded this as observation-class — *\"Today the consequence appears to be nil… What is unmeasured is whether any input exists where a spuriously-armed retry **succeeds**\"* — and triage graded it not `target:v17` on that basis. **Measuring it for the fix found such an input**, so the pricing here is a fix rather than a tolerance removal:\n\n```text\nrecord.s == \"5.0\" ? matches(record.name, \"no such overload(\") : false\n  { s: \"5.0\", name: \"x\" }   ->  was: { ok: true, value: false }   now: the regex fault\nrecord.s == \"5.0\" ? matches(record.name, \"(\") : false\n  { s: \"5.0\", name: \"x\" }   ->  the regex fault                   (unchanged)\n```\n\nEvaluation 1 takes the `matches(...)` branch and throws natively; the phrase armed the retry; hydration made `record.s` the number `5`, so `5 == \"5.0\"` went false, the ternary took the *other* branch, `matches` was never called, and the retry returned `false`. Two expressions differing only in whether a regex literal happens to contain the phrase disagreed about whether they fault at all. The same shape reproduces with `&&` and with a date field. This does not change the grading ask — the exposure still needs an expression that short-circuits around the throwing call — but the honest description is no longer \"no user-visible symptom\".\n\nFaults are otherwise unchanged: a native throw carries no cel-js contract, so it is still `runtime` (#6223).\n\n## Tests\n\nNew file `packages/formula/src/cel-overload-retry-trigger.test.ts`, 7 pins, both directions. Arming is observed without an export by counting record reads — hydration walks the live scope with `Object.entries` before re-evaluating, so an armed retry always re-reads the record.\n\n**Reverse-verification** — the pins were written before the fix, run against the unmodified file, with red/green predicted per case:\n\n| Case | Predicted | Actual |\n|---|---|---|\n| native throw + phrase does not re-evaluate | red | red (`reads` 2, expected 1) |\n| pattern from a ROW does not re-evaluate | red | red (`reads` 2, expected 1) |\n| spuriously-armed retry could SUCCEED | red | red (`ok` true, expected false) |\n| native throw without the phrase unchanged | green | green |\n| numeric-string field still hydrates (#1534) | green | green |\n| date-string field still hydrates (#1530) | green | green |\n| the fault is `EvaluationError` / `no_such_overload` | green | green |\n\nNo deviation. All 7 green after the fix.\n\n## Scope\n\nDeliberately **not** touched: `UNSOUND_OVERLOAD_RE` (`cel-engine.ts:632`, consumed at `:767` off `result.error?.message`). It is a different mechanism with its own docblock, parsing operands and an operator out of the text rather than testing for a phrase — triage's *\"whether `:632` deserves the same treatment is a separate measurement\"* still holds, and this PR does not make it.\n\nOne finding measured while pinning this and **filed separately rather than folded in**: `hydrateOverloadStrings`'s docblock claims the retry *\"can never change a comparison that already evaluated cleanly\"*. That is false independently of this card — on a **genuine** `no_such_overload` fault, a sibling sub-comparison that evaluated cleanly can still be re-interpreted (`record.n >= 4 && record.s == \"5.0\"` with `{ n: \"7\", s: \"5.0\" }` returns `false`, because hydration makes `record.s` the number `5`). This PR neither causes nor fixes it.\n\n## Gates\n\n`pnpm lint` (ESLint) and `pnpm typecheck` clean. `check:empty-changeset`, `check:changeset-gate-self-tests`, `check:adr-anchors`, `check:error-code-casing`, `check:nul-bytes`, `check:doc-authoring`, `check:published-files`, `check:objectui-changeset`, `check:docs-audit-scope`, `check:required-contexts` all pass. Suites: `@objectstack/formula` 568, `@objectstack/objectql` 2786, `@objectstack/lint` 1771, `@objectstack/service-automation` 885 — all passing.\n\n## Related\n\n#6679 · #6677 / #6223 (same file, same defect family) · #1530 / #1534 (why the retry exists) · ADR-0032 §1c\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01CkomWBsADMsq174GmqhxhC)_"
+}

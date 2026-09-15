@@ -1,0 +1,37 @@
+{
+  "number": 5288,
+  "kind": "issue",
+  "title": "analytics 的 getObjectDatasource 报告的是「声明值」而非「有效 datasource」:#5033 的诊断会点错库,#5115 的编译期闸门看不见隐式路由的对象",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:services",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T15:54:03Z",
+  "updated_at": "2026-08-09T06:05:20Z",
+  "closed_at": "2026-08-09T06:05:20Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5288",
+  "body": "## 现象\n\n`AnalyticsServiceConfig.getObjectDatasource` 在 `plugin.ts` 里是这样接出来的:\n\n```ts\ngetObjectDatasource: (objectName: string) = dataEngine()?.getObject?.(objectName)?.datasource,\n```\n\n它读的是对象**声明**的 `object.datasource`。但真正决定这个对象的行落在哪个库的是 `ObjectQL.getDriver` 的五步解析顺序:\n\n1. 显式的 `object.datasource`(且不等于 `'default'`)—— 直接短路;\n2. `datasourceMapping` 规则;\n3. ADR-0057 §3.6 生命周期分流:`lifecycle.class` 为 `audit` / `telemetry` / `event` 的对象,在 `telemetry` datasource 已注册时路由过去;\n4. 所属 package manifest 的 `defaultDatasource`;\n5. 全局默认 driver。\n\n也就是说,**探针只覆盖第 1 步**。`ObjectSchema.datasource` 带 `.default('default')`,所以一个由 2/3/4 步路由到别处的对象,探针照样回答 `'default'` —— 而 `'default'` 在 `getDriver` 里恰恰表示「没有显式绑定,继续往下查」,不是「主库」。\n\n## 今天就能碰到的后果\n\n**(a) #5033 的查询期诊断会点错库。** `analytics-service.ts` 的 missing-source 分诊用这个探针拼错误文案:\n\n```\ntable \"X\" is not on datasource \"Y\", which is where its base object \"B\" lives\n```\n\n`sys_audit_log` —— 也就是 #5033 那条 issue 的主角 —— 是靠 `lifecycle.class: 'audit'` 被分流到 `telemetry` 的,不是靠显式字段。于是这句话会说它在 `datasource \"default\"`(或「the default datasource」),把读的人指向一个它根本不在的库。文案的意义就是「点名真实原因」,这里点名的是错的。\n\n**(b) #5115 的编译期闸门覆盖不到隐式路由的对象。** #5115(PR #5287)在编译期拒绝跨 datasource 的 join,判据只能收窄到「双方都**显式**声明了 `datasource` 且不同」—— 因为把 `'default'` 当成主库会误拒那些被 mapping 规则落到同一个库的 dataset(误拒 = 升级后看板变白)。结果是:**催生 #5115 的那个真实场景(audit 对象靠生命周期分流跨库)对该闸门是不可见的。**\n\n## 建议方向(未实现,留给分诊)\n\n在引擎侧补一个权威的「对象的有效 datasource **名字**」访问器 —— 相当于把 `getDriver` 的解析顺序抽出来只算名字、不取 driver,然后让 `plugin.ts` 的探针改接它。`resolveMappedDatasource`(#4462)已经为「不要在别处重写一遍路由规则」开了先例,`datasource-connection-service` 里也明确写着第二份实现必然漂移 —— 同样的理由适用于这里:analytics 侧**不应该**自己重算生命周期分流和 package 默认值。\n\n补上之后:\n\n- #5033 的诊断文案自动点对库;\n- #5115 的判据可以在**不引入误拒**的前提下扩到隐式路由的对象(因为那时 `'default'` 之外的答案才是真的「有效值」);\n- 发布闸门那一单(lint 侧,见 #5115 的调研结论)在运行期侧也有了对照实现。\n\n## 注意\n\n改动落点大概率是 `packages/objectql/src/engine.ts`,该文件目前有在飞单(#5272),排期时留意冲突面。\n\n出处:实现 #5115 时观察到(PR #5287),该 PR 已把这条限制写进代码注释、changeset 与 PR 正文,行为上以「证明不了就不拒绝」的方式规避,不依赖本单。"
+}

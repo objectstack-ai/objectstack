@@ -1,0 +1,33 @@
+{
+  "number": 6391,
+  "kind": "issue",
+  "title": "spec/ui: ViewMetadataSchema 的 union 无判别式且容器成员未导出——消费方做失败诊断只能按成员序索引嵌套 errors",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:queue"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T16:23:34Z",
+  "updated_at": "2026-08-09T12:04:30Z",
+  "closed_at": "2026-08-09T12:04:30Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6391",
+  "body": "finding,未认领,不指派 — 来自 objectui 车道的实测记录(objectui#3606 / PR objectui#3624),供 spec 车道分诊。\n\n## 背景\n\nobjectui 的 metadata-admin 编辑路按 objectstack#5316 的裁决用 `ViewMetadataSchema` 做 wire 门。该 schema 失败时 Zod 只产出一条根级 `invalid_union`,逐字段真实 issue 埋在嵌套 `errors` 里。objectui#3624 已在消费侧把它展开(按 body 判别式选成员),但展开的实现只能**按成员序索引**嵌套 errors — 顺序是 spec 内部细节,消费侧用 CANARY 测试兜住了这层耦合。\n\n## 实测(@objectstack/spec 17.0.0-rc.5,objectui#3624 实施期间测量)\n\n`ViewMetadataSchema` = `z.pipe(transform, union)`,union 4 成员:\n\n- `[0]` **恒等于**导出的 `ViewItemWireSchema`(同一对象;其本身是按 `viewKind` 判别的 discriminated union,判别值合法时 issues 平铺带字段路径)— 这一成员消费方可以契约化引用;\n- `[1]` 容器成员:shape 与导出的 `ViewSchema` 逐键相同、行为相同,但**不是同一个对象** — 手工维持的相似,消费方无法契约化引用;\n- `[2]`/`[3]` list/form 扁平 overlay,均未导出。\n\n`stripViewConsoleDecorations` 与 `expandViewContainerWithDiagnostics` 已导出(消费方可复用 preprocess 语义)。\n\n## 记录的问题\n\n消费方要把 union 失败还原成逐字段诊断,目前只有两条路:按成员序索引嵌套 errors(耦合内部顺序),或自行复刻各成员(耦合更深,objectui#3624 已实测否决)。最小的 spec 侧改进,二选一:\n\n1. 导出容器成员与 overlay 成员本体(或保证 `[1]` 恒等于导出的 `ViewSchema`),让消费方能按判别式契约化选成员;\n2. 让 union 自带 discriminator(或导出一个「按 body 选成员」的诊断入口),消费方不必知道成员顺序。\n\n不改的话,现状可用(CANARY 兜底),只是每次 spec 重排/增删成员,objectui 的金丝雀会响一次、跟一次 — 成本记在这里,由 spec 车道权衡。\n\n相关:objectstack#5316、objectstack#5074、objectui#3606、objectui#3624、objectui#3626(嵌套 union `config.columns` 同类塌陷,先于此存在)。"
+}

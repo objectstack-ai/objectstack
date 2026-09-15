@@ -1,0 +1,33 @@
+{
+  "number": 6883,
+  "kind": "issue",
+  "title": "pr-automation.yml 的 consumer 钉子只在 changeset-check job 内执行,而改这个文件的 PR 按处方一律带 skip-changeset —— 钉子结构性地跑不到",
+  "state": "closed",
+  "state_reason": "duplicate",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "ci/cd",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T02:28:08Z",
+  "updated_at": "2026-08-09T03:30:12Z",
+  "closed_at": "2026-08-09T03:29:40Z",
+  "closed_by": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6883",
+  "body": "实现 #5620(PR #6876)时撞到的门禁盲区。查重先行:`check-empty-changeset consumer pin skipped` 与 `pr-automation.yml gate 自己 不跑 skip-changeset` 两轮检索,除 PM 座位 Routine 外 0 命中。\n\n## 签名\n\n`scripts/check-empty-changeset.mjs` 的 `--self-test` 里有一整块 **consumer 断言**(约 `scripts/check-empty-changeset.mjs:671` 起),是**全仓库唯一**断言 `.github/workflows/pr-automation.yml` 形状的地方 —— #6129 的 merge-base 起点、#6378 的两次标签读与结算条件、#6434 的 `base_error` 裁决位置、以及 #5620 新增的 allow-major 实时读,统统钉在这里。\n\n而这个 self-test 的**唯一执行点**是 `pr-automation.yml` 自己的 `changeset-check` job:\n\n```\n$ grep -rn \"check-empty-changeset\" --include=*.yml --include=*.json .\n.github/workflows/pr-automation.yml:681:          node scripts/check-empty-changeset.mjs --self-test\n.github/workflows/pr-automation.yml:682:          node scripts/check-empty-changeset.mjs --base \"$MERGE_BASE\"\npackage.json:67:    \"check:empty-changeset\": \"node scripts/... --self-test && node scripts/...\"\n```\n\n`lint.yml` 的 ESLint job 跑了 35 个 `check:*`,**没有 `check:empty-changeset`**。\n\n于是闭环成这样:\n\n1. 改 `.github/workflows/pr-automation.yml` 的 PR 什么也不发布;\n2. 按该文件**自己写的处方**(route 2:`.github/`、`.claude/`、`skills/`、`docs/` …)必须打 `skip-changeset`;\n3. 打了 `skip-changeset`,`changeset-check` job 的每个步骤都跳过 —— 包括跑 self-test 的那一步;\n4. 所以**保护这个文件的钉子,恰好在最可能破坏它的那类 PR 上不执行**。\n\n## 现场(可直接复核)\n\nPR #6876 就是活标本:它给 consumer 块**新增了 5 条断言**,自身带 `skip-changeset`,其 `Check Changeset` job(run `31289894461` / job `93185167327`)结论 `success`、耗时 44s —— 实时读标签步骤命中后整个 job 短路,`Reject an empty-frontmatter changeset added by this PR` 那一步(即跑 self-test 的那一步)**没有执行**。也就是说,该 PR 新加的钉子从未在 CI 上跑过一次;本地跑过(53 assertions,含反向验证),但 CI 没有。\n\n同理:任何人把 #6129 的 merge-base 改回 `base.sha`、或把 #6378 的结算读删掉,只要那个 PR 带 `skip-changeset`(它一定带),CI 都不会红。\n\n## 为什么不是「顺手在 PR #6876 里修掉」\n\n修法有两个方向,都超出 #5620 的授权范围,且**选哪个是要拍板的**:\n\n- **A. 把 `check:empty-changeset` 加进 `lint.yml` 的 ESLint job**。最小、与其余 35 个门禁同构。代价:self-test 之外那次真实扫描需要 `--base`(merge base),而 ESLint job 的 checkout 是 `fetch-depth: 0`,基准可解;但这会让同一个脚本在两个 job 各跑一次,失败签名变两处。也可以只在 lint.yml 跑 `--self-test`(纯静态,零基准依赖),真实扫描继续留在 changeset-check —— 我倾向这个变体。\n- **B. 让 `changeset-check` 的 self-test 步骤不受 `skip-changeset` 豁免**。语义上更准(self-test 不判 PR,只验门禁自己),但直接违反该 job 现行「每个可失败步骤必须同时尊重两次标签读」的不变量,以及 `check-empty-changeset.mjs` 自己 `chunks.length === 5` 那条断言 —— 等于要重划那条边界,属于该 job 的架构决定。\n\n严重度与方向请 PM 按 triage 轮判定,别信本段的自我评估(#4949 的纪律:filing time 的严重度判断两个方向都不可靠)。\n\n## 关联\n\n- #5620 / PR #6876(发现处;其新增钉子正是没跑到的那批)\n- #6129 / #6378 / #6434(既有钉子全在同一块里,同样跑不到)\n- #4690(读不到输入的门什么也没验证 —— 这里是「压根没运行的门读起来像绿」的同族)"
+}

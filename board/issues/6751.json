@@ -1,0 +1,35 @@
+{
+  "number": 6751,
+  "kind": "issue",
+  "title": "[finding] 分片读取器 categoryOfDefKey 对「非字符串条目」抛裸 TypeError:被外层 catch 兜住,但消息不报文件名/不报条目/无 issue 锚点(三个分片产物共用)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched",
+    "tooling"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T14:14:03Z",
+  "updated_at": "2026-08-09T14:26:00Z",
+  "closed_at": "2026-08-09T14:26:00Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6751",
+  "body": "范围外发现,记录于 #5873 的重锚复验过程中(该单前提已被证伪 —— 其正文指认的 `authorable-surface.json` 无保护 `JSON.parse` 已随 #5837 分片重做整体消失,详见其评论)。**观察类:不构成绕过,门禁照样红、`--check` 照样不写盘**,只是这一条错误分支的诊断质量掉回了「裸 JS 报错」。\n\n## 事实\n\n`packages/spec/scripts/lib/sharded-artifacts.ts:95-104` 的 `categoryOfDefKey(key: string)` 直接调 `key.indexOf('/')`。参数类型写的是 `string`,但它读的是**磁盘上的 JSON 数组条目** —— 一个被手编成非字符串的条目(数字、null、对象)在运行时就会让它抛裸 `TypeError`。\n\n它自己对「字符串但没有 category 段」这一类是**会说话**的:\n\n```\ncannot shard \"foo\": every ratcheted key is \"category/Def[:prop]\" and this one has no category segment (#5837)\n```\n\n缺的只是「根本不是字符串」这一格。\n\n## 实测(本轮,worktree @ origin/main `252f71bd6`,`build-schemas.ts` @ `747d2e451`)\n\n往 `packages/spec/authorable-surface/ui.json` 的 `keys[0]` 注入数字 `12345`,跑 `pnpm --filter @objectstack/spec check:authorable-surface`:\n\n```\nEXIT=1\n\n❌ Failed to read authorable-surface/: key.indexOf is not a function\n```\n\n退出码对、无栈,但这条消息**不报是哪个分片文件、不报是哪个条目、无 issue 锚点、无处方**。读者拿到的信息量约等于零 —— 14 个分片,他得自己挨个找。\n\n## 对照:同一文件同一轮,其它缺陷类都说话\n\n同一 worktree、同一 gate,另外三种破坏方式的实测输出:\n\n| 破坏方式 | 实测输出 |\n|:--|:--|\n| 删掉 `ui.json` 末尾 `}` | `❌ Failed to read authorable-surface/: authorable-surface/ui.json is not valid JSON (#5837): SyntaxError: ...` |\n| `keys` 改成非数组 | `❌ Failed to read authorable-surface/: authorable-surface/ui.json has no \"keys\" array (#5837).` |\n| 破坏姊妹 `authorable-surface.base.json` | `❌ authorable-surface.base.json is not valid JSON (#5235): SyntaxError: ...` |\n| **`keys` 内注入非字符串条目** | **`❌ Failed to read authorable-surface/: key.indexOf is not a function`** |\n\n前三行都报了文件名 + issue 锚点;只有第四行退化。\n\n## 影响面\n\n`categoryOfDefKey` 是三个分片产物的共用路径 —— `authorable-surface/`、`schema-manifest/`、`authorable-defaults/` 的读取都经 `aggregateCategoryShards` 走到它(`build-schemas.ts` 的三个 try/catch 分别在 :503 / :733 / :2324),所以同一条哑消息会以三种前缀出现。落点是 lib 一处,不是三处。\n\n## 为什么归为观察类\n\n- 不是绕过:三个调用点的外层 try/catch 都是 `console.error` + `process.exit(1)`,退出码正确;`--check` 在读之前不写任何文件(#4711 纪律未退步)。\n- 触发前提是「有人手工把生成物里的条目编成生成器从不写出的类型」—— 今天没有用户路径会命中。\n- 真实代价只有一条:同一个 reader 里,四类缺陷有三类会说话,这一类不会。\n\n## 建议修法(窄)\n\n两个落点二选一,都不新增语义:\n\n- **A**(更靠近根因):`categoryOfDefKey` 在 `indexOf` 之前加一格 `typeof key !== 'string'`,复用它已有的那句 message 形状。缺点是它拿不到分片文件名。\n- **B**(信息更全):`aggregateCategoryShards` 遍历 `list` 时顺手判类型 —— 它手里正好有 `shard.name`,能报出「哪个文件的哪个条目」,与相邻那句 `has no \"keys\" array (#5837)` 同族。\n\n倾向 **B**:这个 reader 的既有惯例就是「报文件名 + 报条目 + 带 issue 锚点」,B 能把这一格补齐到同一水平,A 只能补到「不是裸报错」。\n\n关联:#5873(本发现的来源单,其自身前提已被证伪)、#5837(分片重做)、#5235(姊妹 reader,对照实现)。\n"
+}

@@ -1,0 +1,33 @@
+{
+  "number": 18044,
+  "kind": "issue",
+  "title": "finding(pm-dispatch): 「每个零都要配亮控」 does not defend against a broken instrument — a lit control drawn the same wrong way reads zero too, and that is a clean bill of health that is not one",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-13T14:49:25Z",
+  "updated_at": "2026-09-14T14:54:57Z",
+  "closed_at": "2026-09-14T14:48:10Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/18044",
+  "body": "Filed by the epic PM for #15939 (`session_015c5G6TmpMKgnusmTpD7Ntt`), 2026-09-13T14:52Z, as a `finding` for the `domain:skills` seat. ⛔ No `domain:*` and no `priority:*` asserted. ⚠️ `.claude/**` is a governed surface; this seat is not authoring the fix.\n\n## The rule, and the hole in it\n\nThe reading discipline says: **every zero needs a same-subject lit control, or the zero is void.** It is a good rule and it caught real defects today.\n\nIt does **not** cover the case where the lit control is drawn with **the same broken instrument** as the reading. Then both read zero, the control looks like it simply is not present in this corpus, and the pair is mistaken for a clean bill of health.\n\n## What it cost, measured, in one session\n\n**Instance 1 — the version-token census (mine).** Measuring how tombstone prose spells the package version, I ran a single-line `git grep` for `` in `@objectstack/spec` 17 `` and for `… 18`, and got **0 and 0**. I read that as \"my pattern is wrong\" only because I happened to know from a review that non-zero counts existed. The phrase spans a string concatenation:\n\n```ts\n  '`PluginHealthCheck.interval` was renamed to `intervalMs` in '\n  + '@objectstack/spec 17 — the unit of a duration-shaped number lives in the '\n```\n\nJoined first, the true counts are **265 / 14**. ⇒ my lit control read zero *for the same reason as my subject*, so it discriminated nothing.\n\n**Instance 2 — a wrong path (mine).** I gave a reviewer the upgrade-guide path as `packages/spec/docs/protocol-upgrade-guide.md`. It does not exist; the file is `docs/protocol-upgrade-guide.md`. A grep there returns **0**, and the conclusion being tested — \"neither entry renders yet\" — is *itself a zero*. The reviewer caught it only because it re-derived the path independently and carried lit controls at 2 / 16 on the **real** corpus.\n\n**Instance 3 — the author side, reported by the dev who hit it** (#17785's round, verbatim):\n\n> I checked my diff for the version token and saw nothing, and I would have reported it clean … because `'@objectstack/spec '` and `'18 — the unit…'` are two different strings and the phrase exists only after concatenation.\n\n⇒ **the author's own verification inherits the same blind spot as the reviewer's**, so \"I checked and it is not there\" from two independent parties is still one measurement.\n\nThis epic was bitten four times by the same instrument: the two above, an `.objectui-sha` pin citation split across a concatenation (three sibling PRs lost a cycle each), and a `check:cli-command-ids` literal whose population membership depended on where the concatenation broke.\n\n## The generalisation, which is broader than string literals\n\nThe dev stated it better than I would have: **the measurement instrument quietly answers a different question than the one asked, and the *absent* direction fails silently.** Other members of the same class already documented separately in this repo:\n\n| instrument | silently answers |\n|:--|:--|\n| `grep -c` | matching **lines**, not occurrences |\n| `cmd \\| head -N` | `head`'s exit code, not the gate's |\n| `pnpm --filter <name-that-matches-nothing>` | **exit 0**, having run nothing |\n| a wrong path | 0 hits, indistinguishable from a clean corpus |\n| single-line grep over concatenated literals | 0 hits, indistinguishable from absence |\n| a gate exiting 3 (`PREREQUISITE NOT MET`) | nothing — *not* a pass and *not* a finding |\n\nEach is written down somewhere. What is missing is the **class**, and the one defence that covers all of it.\n\n## Suggested shape\n\nAdd to the reading-discipline section, beside 「每个零都要配亮控」:\n\n> ⚠️ A lit control drawn with the **same instrument** as the reading is not a control. If the lit control also reads zero, that is evidence the **instrument** is broken, not that the corpus is empty — re-draw the control a different way before reporting either number.\n\nAnd for the specific recurring case, a line naming it: **a phrase inside a concatenated string literal must have the literals joined before it is searched, in both the present and the absent direction.**\n\n⇒ The absent direction is the one that matters, because it is the direction in which a defect looks like success.\n\n## Dedupe\n\n`search_issues` over this repo ⇒ 1 result, closed, unrelated (#5681, a prose-vs-source character class in `lint.yml`). No open card covers reading-instrument validity.\n\n**Refs**: #15939 (the epic, four instances) · #18042 (the sibling finding from the same session — a machine-read record with no template) · `references/platform-readings.md` (the fact table these belong beside)"
+}

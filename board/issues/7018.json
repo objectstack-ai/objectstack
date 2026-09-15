@@ -1,0 +1,35 @@
+{
+  "number": 7018,
+  "kind": "issue",
+  "title": "runtime: thread the session's organization into `saveMetaItem` only for types declaring `allowOrgOverride` — the #6190 ruling's runtime half, lands FIRST",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched",
+    "target:v17"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T09:13:04Z",
+  "updated_at": "2026-08-09T13:44:09Z",
+  "closed_at": "2026-08-09T13:44:09Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7018",
+  "body": "Part of #6190 (maintainer ruling 2026-08-09 ~08:51Z, second STOP resolved — **Option A, runtime half first**). Filed by the `domain:spec` seat as the ruling-mandated linkage card, under the maintainer's live v17 acceleration; **ownership is already ruled**: the `domain:metadata` seat's offer to take this card was accepted in the ruling — that seat claims it (cross-seat declaration discipline applies: `packages/runtime` is outside its package family, so the claim declares the full file surface). Routing/domain labels left to the triage seat; `target:v17` carried over from #6190's board membership (this card is that card's landing prerequisite).\n\n## The ruling, verbatim (from #6190 comment 5230671098)\n\n> 1. **`packages/runtime` half, first**: `domains/meta.ts` (and the ADR-0045 visibility flip in `domains/packages.ts`) thread the session's active organization into `saveMetaItem` only when the target type declares `allowOrgOverride: true`; otherwise the write lands env-wide — the same row a no-active-org session already produces today. This is independently correct and fixes the live phantom-write defect on its own (the runtime is already minting rows boot never reads).\n> 2. **PR #6973 second**: after the runtime half merges, rebase (it predates #6710's landing and shares `protocol.platform-schedule-org-gate.test.ts`) and land as the declared=enforced backstop.\n> 4. **Option B (scope parameter) rejected** — public vocabulary with no pull, and a knob an AI author can get wrong; **Option C rejected** as unshippable.\n\n## What to change (measured anchors from PR #6973's blocking finding — re-verify, lines drift)\n\n- `packages/runtime/src/domains/meta.ts:270-271` — currently threads `session.activeOrganizationId` into `saveMetaItem` **unconditionally**; make it conditional on the target type's registry declaration (`allowOrgOverride: true`), else omit (write lands env-wide, identical to today's no-active-org session).\n- `packages/runtime/src/domains/packages.ts:231` — the ADR-0045 publish visibility flip threads the same org into `saveMetaItem({type:'app'})`; same predicate applies (`app` declares `allowOrgOverride: false`, so the flip must write env-wide — today's org-scoped write is already a phantom that reverts on restart).\n- Predicate derived from the registry (the existing `OVERLAY_ALLOWED_TYPES` / `isOverlayAllowed` family) — no parallel allowlist.\n\n## Measured evidence (PR #6973, end-to-end through the real `handleMetadataRequest`)\n\n```\nsession WITH activeOrganizationId -> status 403, NOT_OVERRIDABLE, 0 rows written   (after #6973 alone)\nsession with NO active org        -> status 200, row lands organization_id = null\n```\n\nToday (before either half): the org-threaded write for a non-overridable type mints a row boot never reads — `flow` silently stops firing after restart, `object` 404s every record. This card is independently correct: it fixes the live phantom-write defect even before #6973 lands, and it is what makes #6973 mergeable (the refusal's remedy becomes reachable).\n\n## Sequencing\n\n- This card lands **first**. **PR #6973 (#6190) is blocked by this card** — its HOLD note says so; after this merges, #6973 rebases (it predates #6710's landing and shares `protocol.platform-schedule-org-gate.test.ts`) and lands second.\n- The runtime suite's existing green is **not** evidence here — its dispatcher tests never populate `session.activeOrganizationId` (PR #6973's measurement). New tests must drive sessions **with** an active org through both write sites, both directions (overridable type keeps the org; non-overridable lands env-wide).\n\nRefs: #6190 (ruling + full evidence chain), PR #6973 (implementation of the protocol half + the blocking finding), #6710 (the authoring-channel precedent the ruling cites as the A1 shape), ADR-0005, ADR-0045."
+}

@@ -1,0 +1,36 @@
+{
+  "number": 5495,
+  "kind": "issue",
+  "title": "Autonumber counter neither syncs to MAX(existing) per tenant nor re-checks on collision — warm-DB creates 409 in bursts, each failure burning a number (25 retries observed)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched",
+    "target:v17"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T14:17:46Z",
+  "updated_at": "2026-08-09T06:03:32Z",
+  "closed_at": "2026-08-09T06:03:32Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 10,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5495",
+  "body": "Part of objectstack-ai/hotcrm#698\n\nFound during HotCRM's 17.0 GA acceptance sweep on `@objectstack/*` **17.0.0-rc.2**, action-sweep phase.\n\n## Symptom\n\n`POST /api/v1/data/crm_case {...}` (no `case_number` supplied — it's an autonumber field) returns **409 UNIQUE_VIOLATION** repeatedly. The server log shows the attempted number climbing by one per failed insert:\n\n```\nUNIQUE constraint failed: crm_case.organization_id, crm_case.case_number\n```\n\nattempted `CASE-00010` → 409 → `CASE-00011` → 409 → … → succeeded at **`CASE-00039` after 25 attempts**.\n\nTwo compounding defects:\n\n1. **The counter does not sync to existing rows.** The DB already held cases with much higher numbers (seeded + prior data), but the counter started at 10. It should initialize to `MAX(existing) + 1` per tenant on boot/seed, or the insert should re-check on collision instead of failing the request.\n2. **Every failed create burns a number.** The counter advances on failure, so the eventual success lands far past the collision zone and the sequence gap is permanent. A caller without a retry loop simply cannot create a record.\n\n## Repro guidance (important)\n\nSame-day follow-up measurement: once the counter has ground past the seeded range, the storm stops (later creates succeeded on attempt 1). So this is a **one-time storm per database** — reproduce on a **fresh DB with seeded rows**, not one already ground past the seeds.\n\n## Impact\n\nAny integration or UI path creating autonumbered records on a warm database hits bursts of 409s and, without client-side retry, hard failures.\n\n## Prior related issues (checked, none open on this defect)\n\n- #3696 (closed) — per-tenant autonumber vs global unique index contradiction\n- #1603 (closed) — DB-native autonumber sequence for multi-instance correctness\n- #3152 / #3172 (closed) — double-consumption in batch downgrade rewrites\n\nApp-side aggravator (seed rows carrying `organization_id = NULL`, putting them outside the unique-index partition) is tracked on the HotCRM side in objectstack-ai/hotcrm#698 and interacts with the NULL-stamping defect filed as a sibling from the same sweep (see the automation `create_record` NULL-stamps issue, \"Part of hotcrm#700\")."
+}

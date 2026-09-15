@@ -1,0 +1,37 @@
+{
+  "number": 6979,
+  "kind": "issue",
+  "title": "objectui: ContextSelectors.persist.test.tsx 的 query 首用例与 auto-select-first 竞速 —— 点击在 auto-select 落定前发出,pick 被过期闭包覆盖回首项(两次 CI 同签名红,拦住 v17 收尾 PR)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:queue",
+    "repo:objectui",
+    "target:v17"
+  ],
+  "assignees": [
+    "yinlianghui"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T07:29:09Z",
+  "updated_at": "2026-08-09T08:16:08Z",
+  "closed_at": "2026-08-09T08:16:08Z",
+  "closed_by": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6979",
+  "body": "## 症状(两次 CI 实证,同签名)\n\nobjectui PR #3932(#6938 的 bodyShape 收尾件,v17 最后一单)的 Test shard 1/4 连续两跑红在**同一条与其文件面无交集的用例**上:\n\n- run 31300257091(07:03Z,head `ba2ed1e06`)与 run 31300688250(07:14Z,update-branch 后新 merge ref)\n- `packages/app-shell/src/layout/__tests__/ContextSelectors.persist.test.tsx > persist: 'query' — the URL query string, and nothing else > writes the pick to the URL and leaves sessionStorage untouched`\n- `AssertionError: expected 'billing' to be 'crm_core'`,DOM 快照 `data-current=\"billing\"`\n\n该用例随 objectui#3922(objectstack#5994)于今日合入;此后 PR 3923/3924/3926/3927/3928/3929/3930 的 CI 它全绿。#5994 的 dev 交单时如实报过一次本目录满并行下的无名 waitFor 超时偶发红(3 连跑未复现,无名未立单)—— 现在它有名字了。PR #3932 新增两个测试文件改变了 shard 打包组合,把这条竞态变成了该组合下的稳定红。\n\n## 机理(读用例即可复核)\n\n```\nmount(QUERY_SEL);\nawait optionsReady();\nfireEvent.click(screen.getByTestId('opt-crm_core'));   // ← 立即点击\nawait waitFor(() => expect(query().get(URL_KEY)).toBe('crm_core'));\n```\n\n空 URL 挂载时,SelectorControl 的 **auto-select-first** effect 会选中首项 `billing` 并导航。用例在 `optionsReady` 后立即点击 `crm_core`,与该 effect 竞速:高负载 worker 下 effect **后发**,带着过期闭包(捕获的 search 仍为空)把 URL 导航到 `billing`,覆盖掉用户 pick → waitFor 直到超时都读到 `billing`。\n\n同文件第三个用例(`ignores a stale storage entry`)是正确写法的现成对照:它**先** `await waitFor(query → 'billing')` 等 auto-select 落定,**再**做后续断言。\n\n## 修向\n\n1. **测试侧(主修,必做)**:首用例(以及同形的 default 用例,逐一排查全文件)在点击前先等 auto-select 落定(`await waitFor(() => expect(query().get(URL_KEY)).toBe('billing'))`),再点击 `crm_core` 并断言覆盖成功 —— 这同时让用例多钉一个此前没钉的事实:用户 pick 必须能覆盖 auto-select。\n2. **组件侧(顺带评估,不强制)**:auto-select-first 若在 fire 时重读当前 params(而非依赖闭包快照)/或在已有值时放弃导航,这个竞态在生产端(用户在选项加载瞬间点击、慢设备)也不可达。若改动小且语义唯一就一并修并各自钉住;若有歧义只记 finding。\n\n## 阻塞关系\n\n本单**拦着** objectui PR #3932(v17 收尾件,内容已验收、19/20 绿)入队 —— 修入 main 后 #3932 update branch 重跑即可。\n\n两次红的 job:[93211791025](https://github.com/objectstack-ai/objectui/actions/runs/31300257091/job/93211791025) / [93212855614](https://github.com/objectstack-ai/objectui/actions/runs/31300688250/job/93212855614)"
+}

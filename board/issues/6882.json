@@ -1,0 +1,36 @@
+{
+  "number": 6882,
+  "kind": "issue",
+  "title": "examples/app-todo `task_completion` declares `type: 'record_change'` with no `triggerType` — the flow is dead, and its trigger condition is written to a key nothing reads",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T02:27:28Z",
+  "updated_at": "2026-08-09T11:19:21Z",
+  "closed_at": "2026-08-09T11:19:21Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6882",
+  "body": "Found while measuring the corpus for #6637 (PR for that card adds `flow-trigger-unroutable`). Filed standalone rather than fixed there, because the repair is a judgement about this example app's intended semantics, not a lint decision — and #6637's dispatch forbids silencing a new rule's hit with a baseline entry.\n\n## The defect\n\n`examples/app-todo/src/flows/task.flow.ts:118-131` — `TaskCompletionFlow`:\n\n```ts\nexport const TaskCompletionFlow: Flow = {\n  name: 'task_completion',\n  type: 'record_change',\n  nodes: [\n    { id: 'start', type: 'start', label: 'Start', config: { objectName: 'todo_task', triggerCondition: 'record.status != previous.status && record.status == \"completed\"' } },\n    ...\n```\n\nTwo independent problems on one start node:\n\n1. **No `triggerType` at all.** `AutomationEngine.resolveTriggerBinding` (`packages/services/service-automation/src/engine.ts:1625-1719`) claims a record-change flow only when the authored token starts with `record-`; with the key absent, every later branch also misses (`timeRelative`, `config.schedule`, `flow.type === 'schedule'`, `flow.type === 'api'`, `triggerType === 'api'`) and the method returns `undefined` at :1718. `activateFlowTrigger` then returns at :1729 without binding. The flow declares itself record-triggered and is, at runtime, a manual flow that never fires.\n2. **`triggerCondition` is not a key anything reads.** The start node's trigger gate is `config.condition` (see every showcase flow, and `resolveTriggerBinding`'s `condition: config.condition`). A node `config` is an open slot by design (ADR-0018), so the schema accepts the misspelling silently. Even once (1) is fixed, this predicate would not gate anything — the flow would fire on every write.\n\nThe expression itself also uses a `record.` / `previous.` prefix, while the showcase flows write bare field names (`priority == 'urgent' && (previous == null || previous.priority != 'urgent')`), so the repair needs someone to decide the intended dialect too. That is why this is a card and not a drive-by fix.\n\n## Why nothing catches it today\n\nMeasured, not assumed — every named channel keys off the same resolver that already gave up:\n\n- `getTriggerBindingAudit` (`engine.ts:2387-2400`) skips it: `if (!resolved) continue; // manual / screen flow — nothing to bind`.\n- Its two consumers therefore say nothing — the automation plugin's `kernel:bootstrapped` warn loop (`packages/services/service-automation/src/plugin.ts:907-910`) and the CLI startup summary's `unbound` list (`packages/cli/src/commands/serve.ts:3428`).\n- The summary's dead-object check (`serve.ts:3435-3441`) requires `s.bound && s.triggerType === 'record_change'`, so it skips it too.\n- Only trace anywhere: the banner's count line reads one more flow registered than bound, with no name and no reason.\n\n#6637's new `flow-trigger-unroutable` deliberately does NOT cover this shape — its criterion requires `config.triggerType` to be PRESENT, so the rule speaks about a contradiction rather than an omission. That boundary is pinned by a test in `packages/lint/src/validate-flow-trigger-readiness.test.ts` naming this issue, so widening it is a deliberate edit rather than a side effect.\n\n## Corpus measurement (`origin/main`, 34 authored flows across app-todo / app-showcase / app-crm)\n\n`flow.type` census: `autolaunched` 24 · `schedule` 4 · `screen` 3 · `record_change` 2 · `api` 1.\n\nOf the two `record_change` flows, `showcase_urgent_task_alert` is correctly wired (`record-after-write`). **`task_completion` is the only dead one — 1 of 34.**\n\n## Suggested shape of the fix\n\nDecide the intent, then either:\n\n- arm it — `triggerType: 'record-after-update'` plus the predicate moved to `config.condition` in the dialect the showcase uses; or\n- if the flow is meant to be invoked by hand, declare `type: 'autolaunched'` and drop the trigger keys.\n\nWhichever way, a companion decision is whether the wider lint criterion (a `record_change` flow that resolves to no binding at all, `triggerType` absent) should then ship — with this instance repaired, it would fire on nothing in the tree.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01F8q5J1MQyocgtNspb15fSn)_"
+}

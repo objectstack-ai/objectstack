@@ -1,0 +1,35 @@
+{
+  "number": 6155,
+  "kind": "issue",
+  "title": "Schedule 触发器不携带任何 org 上下文——定时 runAs:'system' 清扫在多组织部署里仍会产出 organization_id=NULL 的行(#5494 的用户缺席半边)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "target:v17"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T03:52:15Z",
+  "updated_at": "2026-08-09T05:49:28Z",
+  "closed_at": "2026-08-09T05:49:28Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6155",
+  "body": "PR #6153(修 #5494)把 `runAs:'system'` 运行的三列染色收口到「引擎知道就染」:触发上下文带 user/org 的运行(手动触发、record-change、带鉴权的 api 触发)三列全染。**但 schedule 触发器本身不供给任何 org**:\n\n```ts\n// packages/triggers/trigger-schedule/src/schedule-trigger.ts(handler 内)\nconst ctx: AutomationContext = {\n    event: 'schedule',\n    params: { jobId, flowName, schedule },\n};\n```\n\n没有 `tenantId`,引擎无从染 `organization_id`。于是 #5494 Impact 一节点名的主形态——**定时**清扫(生产里 sweep 是按 schedule 火的,不是手动)——在多组织部署里仍会把行生在组织分区之外:`(organization_id, …)` 唯一索引跨 NULL 不生效,org 作用域查询看不见(hotcrm#698 的重复编号证据即此类)。`created_by`/`owner_id` 在无用户运行下保持 NULL 是 ADR-0118 D1 的既定表示(PR #6153 已论证并钉住),**org 不同**:org 不是 actor 列,「这行属于哪个组织」对定时清扫是有真实答案的,只是当前没有任何声明面能把答案交给触发器。\n\n需要一个设计裁决:定时流程的 org 从哪来。候选:\n\n1. flow 元数据的存储 org(org overlay 的流程天然归属其 org;平台级流程无 org → 维持不染);\n2. schedule 绑定面新增显式 org 声明(作者声明,publish 校验);\n3. 每-org 各火一次(Salesforce 式 per-org scheduling,改动最大);\n4. 维持现状 + lint:多组织部署里,含 create_record 的 schedule 流程若未在 `fields` 显式给 `organization_id` / `owner_id`,发布时警告或拒绝(不新增运行时语义,author-time 收口,与 #2308/#5378 的既有 lint 面同族)。\n\n单组织部署不受影响(org 列本就 NULL 语义)。与 ADR-0073 M2(automation principal,管 actor 不管 org)正交。\n\nRefs:#5494、PR #6153(修复边界在测试 `runas-system-stamping.integration.test.ts` 的 user-less 用例里显式钉住)、ADR-0118 D1/D5、ADR-0073 D2/D3、hotcrm#698。查重:仓内无既有单(搜 `schedule org tenantId` / `organization_id schedule flow NULL` 均无命中)。\n\n---\n\n**裁决后拆解(2026-08-07,维护者批复 Q1=B / Q2=A / Q3=A,记录见评论 5217380634)**:方案 1 不实施(前提被探针证伪,见评论 5215848740/5215882772);余下工作全部转移,本单转 `pm:blocked` 等两单落地后关闭:\n\nBlocked-by: #6283\nBlocked-by: #6285"
+}

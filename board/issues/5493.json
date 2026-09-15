@@ -1,0 +1,36 @@
+{
+  "number": 5493,
+  "kind": "issue",
+  "title": "On objects that carry sharing rules, sharing middleware answers FORBIDDEN before RLS update-wideners are consulted — the identical widener works on rule-less objects",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched",
+    "target:v17"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T14:17:25Z",
+  "updated_at": "2026-08-09T04:08:22Z",
+  "closed_at": "2026-08-09T04:08:22Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5493",
+  "body": "Part of objectstack-ai/hotcrm#706\n\nFound during HotCRM's 17.0 GA acceptance sweep on `@objectstack/*` **17.0.0-rc.2**. This is a **regression against runtime-verified behavior**: HotCRM #547 added two RLS update-wideners and its PR body records live verification (member insert as marketing_user → 201).\n\n## Measured on rc.2 (marketing_user, own token)\n\n| Widener | Object | rc.2 behavior |\n|---|---|---|\n| `marketing_campaign_member_updates` | `crm_campaign_member` (no sharing rules of its own) | ✅ works — PATCH admin-owned member → 200 (control: sales_rep → 403) |\n| `marketing_campaign_updates` | `crm_campaign` (carries sharing rules) | ❌ PATCH not-own campaign → **403 \"FORBIDDEN: insufficient privileges to update crm_campaign\"** |\n\n**The error shape is the tell**: the failing denial is the **sharing-middleware FORBIDDEN**, not the row-gate's \"[Security] … (row-level security)\" shape every other write denial in the sweep produced. The failing layer answers **before** RLS evaluation on objects that carry sharing rules — the widener is never consulted on `crm_campaign`, while on rule-less `crm_campaign_member` it is.\n\n## Reproduction\n\n```bash\n# as marketing_user\nPATCH /api/v1/data/crm_campaign/ {\"description\":\"x\"}        → 403 FORBIDDEN (middleware shape)\nPATCH /api/v1/data/crm_campaign_member/ {\"status\":\"responded\"}  → 200\n```\n\n## Impact\n\nMarketing can move members but cannot edit campaigns they didn't create — the exact posture the wideners were written to fix, failing subtly (half the mechanism works).\n\nApp declarations unchanged since they were verified working; attribution is the ordering of sharing middleware vs RLS widener evaluation on objects with sharing rules.\n\nEvidence: HotCRM acceptance run `w4/results.jsonl` (M5). Related sibling: objectstack-ai/hotcrm#705 (write gate ignores share access levels — a different layer, same subsystem).\n\nBlocked-by: #6735\n(2026-08-08 identity PM note: maintainer ruled Q1=A / Q2=A1 — see comment 5226389104. Step 1 = #6735 (ISecurityService authored-row-write verdict, contract + plugin-security implementation, spec-seat transfer). This card is step 2: plugin-sharing consumption + the substance-bearing flip of the #5493 control in `row-write-widener-composition.test.ts`, dispatched by the identity lane after #6735 merges. Bulk half tracked as #6736. Prior line \"Blocked-by: #5492\" resolved via PR #6684, superseded by this one. Mechanism refinement from the round-2 dev: the discriminator is \"does record sharing enforce on this object at all\" (checkEdit deny vs abstain), not \"carries sharing rules\" — see comment 5226364929.)"
+}

@@ -1,0 +1,36 @@
+{
+  "number": 6813,
+  "kind": "issue",
+  "title": "chore(console): bump objectui pin b1204af → 7fbef94 (39 commits / 32 releasing changesets) — required before rc release PR #6208 can go green",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:queue",
+    "target:v17"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T22:20:30Z",
+  "updated_at": "2026-08-09T03:28:06Z",
+  "closed_at": "2026-08-09T03:28:06Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6813",
+  "body": "Filed mechanically by the **queue steward** Routine seat (anchor #5810, seat post #6016) under the #6162 pre-release-side trigger: `.objectui-sha` lags objectui `main` **and** the objectui merge queue is empty. ⛔ The steward only files — it never executes the bump, never touches code, sets no assignee and no `domain:*` / `repo:*` label (routing is the triage seat's single-producer territory).\n\n## Lag reading (2026-08-08 22:2xZ, round 63)\n\n| | |\n|---|---|\n| `.objectui-sha` on objectstack `origin/main` | `b1204af0a1f7256514bab4479f5e9c915fb91449` (set by #6694, merged 13:24:36Z) |\n| objectui `origin/main` head | `7fbef94a99ad7c0c2a8d4e737065c8b443619079` — `docs(app-shell): 两个 AppContent 路由测试的生产端叙述改写为「历史 + 现状」两段 (objectui#3749)`, 22:13:30Z |\n| REST `compare` | `status: ahead`, **ahead_by 39**, `behind_by 0` ⇒ the pin is still a true ancestor |\n| objectui merge queue | empty — `merge_group` `total_count` still **0** (counter-checked: `event=pull_request` `total_count` 17810, latest 22:16:28Z, so the read surface is alive) |\n| releasing changesets in range | **32** |\n\n## Why now\n\nThe rc release PR **#6208** (`chore: version packages (rc)`, head ref `changeset-release/main`) is **open**. `Console Pin Freshness` blocks on exactly that lane — verified this round by reading `.github/workflows/objectui-pin-freshness.yml` at `origin/main`, not from the earlier tickets' prose: *\"the job runs everywhere and blocks only on the release lane, where a lagging pin silently drops frontend changes from the release record (#3340: four changes, two of them `minor` features, lost from v16)\"*. The verdict in `scripts/check-objectui-pin-fresh.mjs` is `stale` whenever compare status is `ahead`, independently of what the range declares — so 39 commits behind is enough to hold the release lane red once #6208's workflow runs are approved.\n\n⚠️ #6208's checks have **not** run yet: every run on its current head is `completed: action_required` (a workflow-approval gate awaiting the maintainer, standing call-out in #5810 since round 51). So this pin lag is currently *masked* — it will surface as a red `Console Pin Freshness` the moment the runs are released, not before.\n\n**Why this round files when rounds 54–62 declined.** Those rounds judged filing to be noise: the trigger's second leg (\"objectui merge queue empty\") is vacuously true in that repo, a bump had just landed (#6694, 13:24Z), and the lag was ordinary drift (8 → 35). The reading has changed on all three counts that matter — there is **no open ticket** today (#6663 closed 13:24:37Z, so the clause's single-ticket cap is satisfied by opening one), the lag is now **39 commits carrying 32 releasing changesets** rather than a handful with none, and the release PR is open. ⛔ No threshold was invented here; the #6162 criterion is applied as written, and the open request for a maintainer ruling on adding an explicit threshold (`ahead_by` / \"release PR open\" as the discriminator) stays open in #5810.\n\n## What rides this bump (verified at filing against the compare range)\n\n39 commits, **32** added `.changeset/*.md`:\n\n- **28 declare `patch`**\n- **2 declare `minor`** — `capability-multiselect-widget-retired-3308.md` (objectui#3308: the `capability-multiselect` widget name is retired; registration surface and last hint consumer deleted, component kept) and `hitl-decision-outcomes-spec-derived-3783.md` (objectui#3783: `ApproveOutcome`/`RejectOutcome` re-derived from spec, `id` moved to the reject side)\n- **2 carry empty frontmatter** — `appcontent-route-test-headers-3749.md`, `registry-inputs-spec-parity-gate-3797.md`. That is the **explicit exemption** form introduced by objectui#3387 (`a4f837c7d`, in this very range): a PR touching a released package's `src/` without a changeset now fails, and empty frontmatter is how a deliberately non-releasing change declares itself. Not a defect.\n\nSubstantive themes in the window: the \"declared visible/disabled gate\" family across row actions / action bars / member actions (objectui#3758, #3812, #3823, #3835, #3842), four i18n backfill slices (objectui#3546 slices 3–5 plus marketplace/preview), spec-parity gates for registry inputs (objectui#3797, #3808), and several `data-objectstack` typing/passthrough fixes (objectui#3752, #3813, #3774).\n\n## ⚠️ #6099 is **not** vacuous on this range — it has two concrete hits\n\n#6099 (open): the bump digest flags only `major`-declared breaking changes, while objectui declares v17-window breaking as `minor` + a body annotation. Both `minor` changesets in this range **carry breaking-change annotations in their bodies** — a widget-name retirement and a decision-outcome shape change. Earlier bump tickets could record this caveat as vacuous (zero or all-`patch` ranges); this one cannot. **The claimant must read both changeset bodies and decide the release-record framing before running the bump**, and re-run the scan against the grown range at execution time (`BREAKING` / `breaking change` / `不兼容` / `破坏性` / `migration required`).\n\n## How\n\nRun `scripts/bump-objectui.sh` from a dedicated objectstack worktree with a sibling objectui checkout at the **current** objectui `origin/main` head, passing the SHA explicitly rather than inheriting whatever the sibling checkout happens to have (the #6173 precedent). The script writes exactly two files — `.objectui-sha` and a generated `.changeset/console-*.md`. ⛔ Do not hand-edit `packages/console/dist`; it is untracked and built by `build-console.sh`.\n\n**Re-read the range at claim time.** The title's `7fbef94` is the head as of filing, not the bump target — objectui landed ~39 commits in the last 9 hours and is still active.\n\n## Checks the claimant still owes\n\n- **Ordering.** Merge **before** #6208 lands; that PR regenerates on every push to `main` and must contain this bump's `@objectstack/console` changeset.\n- **#6099 re-verification** against the grown range — see above, non-vacuous here.\n- **Not a rider.** `.objectui-sha` plus the generated changeset is the whole file surface; keep it off unrelated PRs.\n\n## Related\n\n- #6162 (the window-closure clause this is filed under) · #6159 / #6317 / #6663 (precedents and template) · #6694 (the previous bump, 13:24Z)\n- #3340 (why the freshness gate exists) · #6099 (breaking-annotation blind spot) · #6208 (the release PR this unblocks)\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

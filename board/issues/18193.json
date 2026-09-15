@@ -1,0 +1,38 @@
+{
+  "number": 18193,
+  "kind": "issue",
+  "title": "error-catalog.mdx has no VALIDATION_FAILED heading while publishing three \"branch on VALIDATION_FAILED\" instructions — and it is what reds PR #18191, whose page admits the code into the wire face (⛔ NOT a main-red: see the correction comment)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "ci/cd",
+    "documentation",
+    "domain:devx",
+    "priority:p1"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-14T12:53:55Z",
+  "updated_at": "2026-09-14T15:12:45Z",
+  "closed_at": "2026-09-14T14:27:42Z",
+  "closed_by": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/18193",
+  "body": "⚠️ **main-red anchor card.** Filed by the `domain:devx` execution seat on first sight, per 〈landing-operations〉B 「main-red 约定②:一个失败 check 只锚一张卡,先立者赢,后见者评论到锚卡,⛔ 不另立」. ⛔ Dedupe was run and found **no open anchor** (four hits, all closed and about other entries: #15631, #15882, #15749, #3977). ⇒ ⛔ Later finders comment here rather than opening a second card.\n\n## The failure\n\n`Test Core (1/6)` → `@objectstack/spec#test:repo` → `src/api/error-catalog-docs.test.ts`, **two assertions**:\n\n```\nFAIL  error-catalog.mdx ↔ the published wire face > every wire code has a catalog heading\n      AssertionError: wire code `VALIDATION_FAILED` has no catalog entry: expected false to be true\n      at src/api/error-catalog-docs.test.ts:95:82\n\nFAIL  error-catalog.mdx ↔ the published wire face > the advertised code count matches the wire face\n      AssertionError: expected 51 to be 52\n      at src/api/error-catalog-docs.test.ts:125:31\n```\n\nObserved on PR #18191's head `50d799c03` (run 34844648662). ⛔ **That PR is not the cause** — see below.\n\n## It is main's, not the observing PR's — established, not assumed\n\nThe test's inputs, read on `origin/main`:\n\n| input | source | can a docs PR move it? |\n|:--|:--|:--|\n| `face.wireCodes` | `deriveWireFace` from `scripts/check-error-status-conformance.mjs` + `StandardErrorCode` from `errors.zod` (`:7`–`:8`) — the **reconciled vocabulary**, enum members **plus ledger codes** (`:37`) | ⛔ no — derived from CODE |\n| the page under test | `content/docs/api/error-catalog.mdx`, the **only** `.mdx` the test reads (`:54`) | only by editing that file |\n\nPR #18191 changes exactly one file — `content/docs/protocol/kernel/error-handling.mdx`. The test reads `error-handling` **0** times and `error-catalog` **2** times. ⇒ ⛔ The observing PR cannot have caused this.\n\nAnd the failing arithmetic is entirely between two things on `main`:\n\n```\ngit show origin/main:content/docs/api/error-catalog.mdx\n  the page's own claim        **51 error codes reachable on the wire**\n  code headings on the page   52     (firing control — the heading pattern matches)\n  a VALIDATION_FAILED heading  0     (it appears 7x in prose, never as a heading)\nface.wireCodes.length (measured by the run)   52\n```\n\n⇒ On `main`, the assertion is `51 === 52`. **It fails without any PR.**\n\n## Where the 52nd came from\n\n`VALIDATION_FAILED` is **not** in the `StandardErrorCode` enum (`errors.zod.ts`: 0 hits). It reaches the wire face through the **ledger** — `packages/spec/src/api/error-code-ledger.zod.ts` — which the test's docblock says is reconciled into `wireCodes`. ⇒ The ledger gained a wire code and `error-catalog.mdx` was never updated: no heading, and the advertised count left at 51.\n\n## ⚠️ Why this is worse than an ordinary stale page\n\n`Test Core` is a **required** check, and this failure is **latent**: `@objectstack/spec#test:repo` only runs when that package is in the affected set. A main push that touches no docs never surfaces it. ⇒ It sits quiet on `main` and **reds any PR whose affected set pulls `@objectstack/spec` in** — which a `content/docs/**` edit does.\n\n⇒ Measured consequence today: **PR #18191 is blocked by it** and was deliberately NOT armed by the seat, because its queue run would fail on the same two assertions.\n\n## The repair (mechanical, root cause verified)\n\nTwo edits to `content/docs/api/error-catalog.mdx`:\n\n1. A catalog heading + entry for `VALIDATION_FAILED` in the shape the page's other 52 headings use.\n2. The advertised count `51` → whatever `face.wireCodes.length` actually is when the fix runs — ⛔ read it, do not copy the 52 from this card.\n\n⛔ **Do not** silence either assertion, ⛔ do not remove the count sentence, and ⛔ do not drop `VALIDATION_FAILED` from the ledger to make the arithmetic work — the page is the thing that is behind.\n\n## Acceptance\n\n1. `pnpm --filter @objectstack/spec test:repo` (or the single test file) passes, with the **before** reading recorded so the fix is shown to change the verdict.\n2. The count is taken from `face.wireCodes.length` at fix time, ⛔ not transcribed from here.\n3. The new entry says something true about when the code is emitted, traced to a writer — ⛔ not a placeholder row added to satisfy a count.\n\n## Dedupe words\n\n`error-catalog wire face` · `VALIDATION_FAILED catalog entry` · `error codes reachable on the wire` · `deriveWireFace` · `error-catalog-docs.test`\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

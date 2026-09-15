@@ -1,0 +1,35 @@
+{
+  "number": 6827,
+  "kind": "issue",
+  "title": "docs: `state-machine.mdx` 仍称 preserveAudit 的 readonly 白名单让 upsert「不再静默丢弃」—— create 半边不成立（#6640 收窄后的残留）",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T23:29:40Z",
+  "updated_at": "2026-08-09T02:59:25Z",
+  "closed_at": "2026-08-09T02:59:25Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6827",
+  "body": "## 事实\n\n`content/docs/protocol/objectql/state-machine.mdx:113` 关于 `treatAsHistorical` / `preserveAudit` 的那条 bullet，把 `readonly` 白名单豁免描述成对 upsert 的**两半**都成立：\n\n> …and (2) admits a **whitelist** through the static-`readonly` write strip: the audit/timestamp family plus author-declared business `readonly` fields (`closed_at`, `resolved_by`, …), **so an `upsert` refresh no longer silently drops them**.\n\n实际只有 update 那一半为真。create 半边走的是 DataProtocol 入口剥离（`packages/metadata-protocol/src/protocol.ts` 的 `stripReadonlyForInsert`，#3043），它只认 `context.isSystem`，从不读 `preserveAudit`。一次 `treatAsHistorical` 的 upsert 导入，因此在它**更新**的行上保留 `closed_at`，在它**新建**的行上照旧剥掉。\n\n这正是 #6640 记录的那句话（其正文里已点名这条 state-machine 文案），但 #6640 的 file surface 只覆盖 `security.mdx` 的 preserveAudit 段、`field.zod.ts` 的 describe 与重新生成的 reference 文档，**没有** `state-machine.mdx`，所以 PR #6823 按纪律没有动它 —— 留下这一处仍与收窄后的契约相抵触。\n\n## 影响\n\n维护者 2026-08-08 对 #6640 的裁决（option 2 + loudness rider）已把契约收窄为「豁免仅在 UPDATE 路径成立」，并由 PR #6823 落到 `.describe()` 与 `security.mdx`。这条 bullet 是同一主张在文档里剩下的最后一处旧说法：读者据此设计一次历史 upsert 导入，会预期新建行也保留 `closed_at`，而实际拿到的是被剥掉的列（现在附带一条 WARN）。\n\n顺带记录第二处、更轻的一处：`content/docs/references/kernel/execution-context.mdx:69` 的 `preserveAudit` 行**描述为空**，因为 `packages/spec/src/kernel/execution-context.zod.ts:356` 的 `preserveAudit: z.boolean().optional()` 没有 `.describe()`（语义只写在上方 348 行的块注释里）。同一裁决之后，这里正好是写下「UPDATE 路径豁免；INSERT 侧须走 system 上下文」的地方。是否合并处理交由分诊。\n\n## 建议修法\n\n1. 把 bullet (2) 的主张限定到 update 半边，并点明 create 半边只认 `isSystem`（措辞可直接沿用 PR #6823 在 `security.mdx` 里落的 callout，保持一处口径）；\n2. 可选：给 `ExecutionContextSchema.preserveAudit` 补一条 `.describe()`，让生成的 reference 行不再为空（会触发 `check:docs` 的重新生成，须整体重跑生成器）。\n\n`Blocked-by:` PR #6823（objectstack-ai/objectstack#6640）—— 收窄后的规范措辞以那条 PR 落地的 `security.mdx` callout 为准；在它合并前改这里会有两套说法。\n\n⛔ 不认领，仅记录。会话：`session_01W6bLax4KMrSfnE1ydFU8Dw`\n"
+}

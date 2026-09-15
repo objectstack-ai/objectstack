@@ -1,0 +1,35 @@
+{
+  "number": 7043,
+  "kind": "pull_request",
+  "title": "feat(rest,runtime): 元数据写入的其余三扇门同样要求 manage_metadata (#7019)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T11:30:48Z",
+  "updated_at": "2026-08-09T11:58:56Z",
+  "closed_at": "2026-08-09T11:58:54Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": "2026-08-09T11:58:54Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/7043",
+  "body": "Fixes #7019\n\n从**含 #7027 门的 main**(`623d00897`)开分支,三条肢体各自照抄所在文件的既有先例,不引入新写法。推送前已 `git merge origin/main`(至 `08863dd18`)。\n\n## 0. 先更正卡里/评论里的两处坐标 —— 都自己实测过\n\n| 说法 | 出处 | 实测 |\n| :-- | :-- | :-- |\n| dispatcher 无门 PUT 在 `meta.ts:264` | 卡正文 | ✅ **对的** |\n| 「`:264` 是错的,真正的写在 `:152-159`」 | PM 评论 `5231054845` | ❌ **这条更正本身是错的** |\n\n在 PM 指名的那个 commit `91cefb849` 上(以及 `c3f491626`、当时的 main),`packages/runtime/src` 里**唯一**的 `method === 'PUT'` 就是 `domains/meta.ts:264`;`:152-159` 落在 `maskObjectSchemaList` / `handleMetadataRequest` 开头。**结论的实质不变**(dispatcher 确有一条无能力门的 PUT),错的只是那条更正。\n\n`meta.ts` 既有 `manage_metadata` 门的坐标(两个互相矛盾的读数,卡里要求自己定位):落地前该文件共 **602** 行,门在 **`:464-476`**(`_migrate-stored`)。`:331-339` 与 `:460-476` 都不对。\n\n## 1. 三条肢体的 before / after\n\n| 肢体 | before | after |\n| :-- | :-- | :-- |\n| `PUT /meta/:type/:section/:name`(复合名) | `resolveProtocol` 后直落 `saveMetaItem`,无任何能力检查 | 门在 `resolveProtocol` **之前**,403 `{error:{code:'FORBIDDEN'}}` |\n| `DELETE /meta/:type/:name` | 同形无门,`?dropStorage=true` 还会拆掉对象物理表 | 同上,message 为 `Resetting a metadata item requires ...` |\n| dispatcher `PUT`(`runtime/src/domains/meta.ts`) | `if (method === 'PUT' && body)` 直接 `resolveService('protocol')` → `saveMetaItem` | 门在解析 protocol **之前**,`deps.error(msg, 403)` |\n\n两个包的 403 **code 不同,是刻意的**:REST 侧照抄 `_migrate-stored` 与 #7027,写死 `FORBIDDEN`;dispatcher 侧照抄**同文件**的 `_migrate-stored` 门,走 `deps.error(msg, 403)`,code 由 `standardErrorCodeForHttpStatus(403)` 派生为 `PERMISSION_DENIED`。统一两种拼写是契约变更,不属于本卡。\n\n## 2. 真红:预测先写后跑\n\n**动手前**写下的预测(方向 **RED**),与实测对照:\n\n| 预测 | 实测 | 对否 |\n| :-- | :-- | :-- |\n| dispatcher 门 → `http-dispatcher.test.ts` 约 8 例转红 | **正好 8 例**,行号也对上 | ✅ |\n| 复合名 PUT → 无既有测试转红(仓内无人驱动该路由) | 确实 0 例 | ✅ |\n| DELETE → 无既有测试转红,**但只因为 #7027 先落地**(它已给 `rest-5xx-message-sanitization.test.ts` 的 `mountRest` 补了 `manage_metadata`) | 确实 0 例,该文件我一行没碰 | ✅ |\n| 只有 `http-dispatcher.test.ts` 一个文件受连带 | ❌ **预测漏了 2 个文件 / 6 例** | ❌ |\n\n**预测错的那一处,如实记下**:我用 `grep \"'PUT'\"` 扫测试文件来估连带面,漏掉了两个经 `dispatcher.dispatch(...)`(而非 `handleMetadata`)驱动的文件 —— `http-dispatcher.error-leak.test.ts`(4 例)与 `domains/error-passthrough.test.ts`(2 例)。合计连带 **14 例 / 3 文件**,不是预测的 8 例 / 1 文件。\n\n### 反向验证(删门重跑),方向与预测一致\n\n- `packages/rest` 新钉:**18 例中 10 例转红**\n- `packages/runtime` 新钉:**9 例中 5 例转红**\n\n没转红的那些是**护栏而非证据**,按要求明说:`isSystem` 旁路、持 `manage_metadata` 放行、匿名 401、读路径不受影响 —— 这几例加门前后都绿。\n\n### 缺陷本身的前后实测(不是只看状态码)\n\n复现 PM 量到的那条链路(真实路由 + 真实内存库,受限调用方 `{userId:'u_portal', systemPermissions:[]}`):\n\n```\n                      加门前                       加门后\ncompound GET status : 200                          200\ncompound GET fields : id, name                     id, name\nSTORE before PUT    : bonus_formula, id, name,     bonus_formula, id, name,\n                      salary_grade                 salary_grade\ncompound PUT status : 200                          403\nsaveMetaItem calls  : 1                            0\nSTORE after PUT     : id, name        ← 两字段被删   bonus_formula, id, name, salary_grade\n```\n\n## 3. 钉的是「没进去」,不只是状态码\n\n每条肢体都断言 **`status` + `code`(ADR-0112 信封)** 且**目标函数一次没进**(spy),并**直接读库**:\n\n- 复合名 PUT:`saveMetaItem` 零调用 + 库中四字段完好 + `label` 未变;\n- `DELETE`:`deleteMetaItem` 零调用 + **覆盖层仍在**,`?dropStorage=true` 变体单独一例 ——「先删了再 403」正是最值得防的失败形态,只断状态码看不见;\n- dispatcher:`saveMetaItem` 零调用 + 库不变;另钉 `MetadataService` 回退分支(门必须在分支**之前**,否则第二个 writer 仍无门)与复合名形式。\n\n这些路由是**发送**而非抛出,`toThrow` 形状的断言在这里分不清「拒绝但信封错」与「根本没拒绝」。\n\n## 4. 连带修改的 3 个既有测试文件 —— 为什么是必然连带\n\n与 #7027 第 5.1 节同一类:这些用例的 boot 桩把「**只要有 session 就能写元数据**」当作既成前提,而**这正是本 PR 要消灭的东西**。门一落,请求在到达被测机制**之前**就被 403 拦住。\n\n| 文件 | 例数 | 只改了什么 |\n| :-- | :-- | :-- |\n| `http-dispatcher.test.ts` | 8 | 新增 `METADATA_AUTHOR()`(与该文件既有 `AUTHED_CALLER` 同款,#5519 立的先例),**只替换驱动 PUT 的 8 处**;GET 用例一处未动 |\n| `http-dispatcher.error-leak.test.ts` | 4 | `makeDispatcher` 里覆写 `timedResolveExecutionContext` |\n| `domains/error-passthrough.test.ts` | 2 | `putMetaViaMetadataService` 里同上 |\n\n后两个文件走 `dispatch()`,而 `dispatch()` 会**重新解析**执行上下文(覆盖调用方传入的),这两个桩没有 objectql,解析出的调用方不持任何能力 —— 实测确认传入 `systemPermissions` 无效。覆写 `timedResolveExecutionContext` 是这个类在 dispatcher 侧的写法,对应 REST 套件用的 `(rest as any).resolveExecCtx = ...`。**被测机制、断言、期望值一字未动。**\n\n## 5. 改了什么\n\n- `packages/rest/src/rest-server.ts` —— 复合名 `PUT` + `DELETE` 两处门\n- `packages/runtime/src/domains/meta.ts` —— dispatcher `PUT` 的门\n- `packages/rest/src/meta-compound-save-and-reset-capability-gate.test.ts` —— **新建**,18 例\n- `packages/runtime/src/domains/meta-save-capability-gate.test.ts` —— **新建**,9 例\n- `packages/rest/src/rest-route-ledger.ts` —— 两行补 `note`,记法与 #7027 一致\n- `.changeset/meta-write-doors-manage-metadata-gate.md` —— `minor` × 2 包\n- 上述 3 个既有测试文件的 boot 桩\n\n## 6. 本地验证\n\n- `pnpm --filter @objectstack/rest test` → **76 文件 / 1187 例全绿**\n- `pnpm --filter @objectstack/runtime test` → **116 文件 / 1753 例全绿**(合并 main 后复跑)\n- `pnpm --filter @objectstack/rest --filter @objectstack/runtime typecheck` → 通过\n- `check:route-envelope` / `check:error-code-casing` / `check:empty-changeset` / `check:authz-resolver` / `check:adr-anchors` / `check:meta-type-normalized` / `check:nul-bytes` → 全部 PASS\n- 改动文件 `eslint --no-inline-config` → 无输出\n\n## 7. 不属于本卡(未捎带)\n\n三个相邻 handler 的**错误信封三形状**(`{error:{code,message}}` / 裸 `{error:'...'}` / `{error:'...',code:'...'}` 兄弟键)按派单要求**一律未改** —— 我新加的 403 一律用正确的嵌套形状,但既有的 501 出口原样保留。\n\n#7020 记录的「门要求的能力集 ≠ ADR-0106 D4 掩码豁免集」仍然成立,本 PR 不替维护者选对齐方向。\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_017uFVNMmTxLpmfQYiuKM1Yx)_"
+}

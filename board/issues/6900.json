@@ -1,0 +1,35 @@
+{
+  "number": 6900,
+  "kind": "pull_request",
+  "title": "fix(spec): `connector` preserves the ADR-0010 protection envelope instead of silently stripping it (#6362)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T03:16:30Z",
+  "updated_at": "2026-08-09T04:49:50Z",
+  "closed_at": "2026-08-09T04:49:49Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-09T04:49:49Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/6900",
+  "body": "Fixes objectstack-ai/objectstack#6362\n\n## Premise — re-verified at `origin/main`, and it held\n\n`ConnectorSchema` is still a non-strict `z.object` with no ADR-0010 protection\nenvelope. Measured before any edit, by round-tripping a loader-stamped catalog\ndescriptor through the schema the metadata registry actually resolves for\n`connector`:\n\n```\nconnector:    kept=[] lost=[_lock,_lockReason,_lockSource,_provenance,_packageId,_packageVersion,_lockDocsUrl]  => DROPPED (all)\nwebhook:      kept=[all 7] lost=[]                                                                              => PRESERVED\nsharing_rule: kept=[all 7] lost=[]                                                                              => PRESERVED\n```\n\nAll seven keys gone, `success: true`, no error anywhere. Tolerate is not\npreserve.\n\n## Why this one outlived its two siblings\n\nBoth metadata load paths call `applyProtection` on **every** type, so a\npackage-loaded connector carries the envelope by the time anything re-parses\nit — and since #6245 bound `DeclarativeConnectorEntrySchema` to\n`PUT /api/v1/meta/connector/:name`, something re-parses it on every write.\n\nThe pair splits by posture, and the quiet half is the one that survived:\n\n| | posture | undeclared envelope is… | visibility |\n|---|---|---|---|\n| `sharing_rule` | `.strict()` | **rejected** — hard 422 | loud; fixed in #6245 |\n| `connector` | plain `z.object` | **accepted, then stripped** | silent; this PR |\n\nEvery downstream reader of `extractProtection` / `resolveLockState` therefore\nsaw an unlocked, unattributed, `org`-provenance connector where the loader had\nstamped a locked, package-owned one.\n\n## The fix\n\nOne `...MetadataProtectionFields` spread on `ConnectorSchema` — the shape\n#6245's dev verified on `sharing_rule`. Pure-additive and internal: every key\nis `_`-prefixed and optional, no author-facing field changes, and nothing that\nparsed before stops parsing. `ConnectorSchema` stays non-strict (subtypes\n`.extend()` it), so the spread adds seven **named** keys, not a passthrough —\nan undeclared underscore key is still stripped, and that is pinned.\n\n## MANDATORY: the `webhook` measurement — **PRESERVED, no drop, no spread applied**\n\nThe card asked whether `webhook` had the same defect and to apply the same\nspread only if it did. It does not, so nothing was applied there.\n\n**Probe** — the same round-trip used for `connector` above, driven through\n`getMetadataTypeSchema('webhook')` (the `/meta` write door #6245 bound) with a\nfully populated seven-key envelope, asserting the parse **output** key by key:\nall seven survive. Reading confirms it: `WebhookSchema` has carried\n`...MetadataProtectionFields` since #4001 batch 11, and the generated\n`integration/WebhookConfig:_packageId` baseline entry already recorded it.\n\nThat reading is now a **pin**, not a note in a closed report\n(`webhook.test.ts`, `[#6362] PRESERVES all seven envelope keys — measured, not\nassumed`), so it cannot regress unobserved. The pre-existing #4001 test asserted\nonly two keys and only that the envelope was *accepted* — enough for \"accepts\",\nnot for \"preserves\", and an accepts-shaped assertion is exactly what was green\non `connector` throughout.\n\n## Reverse verification — direction predicted first, then measured\n\nPrediction: removing the spread turns the new preservation pins **red** while\nevery pre-existing `connector` assertion stays **green**. That asymmetry *is*\nthe defect's signature — the unfixed schema parses the stamped body perfectly\nwell, so only an assertion over the parse **output** can see it.\n\nMeasured (spread removed via `git checkout origin/main -- connector.zod.ts`,\nrestored from the commit afterwards):\n\n```\n × ConnectorSchema PRESERVES every stamped envelope key through a parse\n × the /meta write door (DeclarativeConnectorEntrySchema) preserves it too\n × the schema the metadata registry resolves for `connector` preserves it\n × a provider-bound instance keeps the envelope alongside the §3/§5 rules\n × declaring the envelope did not open the schema to arbitrary `_` keys\n\nAssertionError: expected { _lock: undefined, …(6) } to deeply equal { _lock: 'no-overlay', …(6) }\nAssertionError: expected [] to deeply equal [ '_lock', '_lockDocsUrl', …(5) ]\n\n Test Files  1 failed | 2 passed (3)\n      Tests  5 failed | 186 passed (191)\n```\n\n5 red, 186 green — including all pre-existing `connector` tests and both\n`webhook` envelope tests. Exactly the predicted direction.\n\n## Tests\n\nNew `describe('ADR-0010 protection envelope (#6362)')` in\n`connector.test.ts`, driving the round-trip at all three levels, because the\nbase schema carrying the spread is only half an answer if the bound door drops\nit:\n\n- `ConnectorSchema` — all seven keys asserted **by value**;\n- `DeclarativeConnectorEntrySchema` — the `/meta` write door #6245 bound;\n- `getMetadataTypeSchema('connector')` — the registry lookup, so a future\n  rebinding to a third shape cannot pass the first two and still strip in\n  production;\n- a provider-bound instance, so the envelope is not a casualty of the ADR-0097\n  §3/§5 cross-field rules;\n- the non-strict converse — an undeclared underscore key still does not survive;\n- `WebhookConfigSchema`, so the inherited behaviour cannot regress through a\n  future `.extend()`/`.omit()` on the connector side.\n\nNo new test files, so the type-check coverage ledger is untouched.\n\n## Generated baselines\n\n`packages/spec/authorable-surface/integration.json` gains the seven\n`integration/Connector:_*` keys, regenerated by the spec build — matching what\n#6245 recorded for `security/SharingRule` and `security/CriteriaSharingRule`.\n`authorable-surface.base.json` was not rewritten.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_011sGk4SKHqGRgmmqUok1P8M)_"
+}

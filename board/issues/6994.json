@@ -1,0 +1,34 @@
+{
+  "number": 6994,
+  "kind": "issue",
+  "title": "A non-dotted `orderBy` naming a `formula` field answers 200 in arbitrary order — the sort is silently dropped (measured on driver-sql + driver-memory)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T08:10:26Z",
+  "updated_at": "2026-08-09T17:16:50Z",
+  "closed_at": "2026-08-09T17:16:50Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6994",
+  "body": "Found while measuring #6924's premise (the SORT-axis hint text). Recorded, **not claimed**. Routing suggestion: `domain:engine-core` — this is an engine/driver refusal question, not hint text, and #6924's dispatch explicitly scoped it out rather than absorbing it.\n\n## The defect\n\n`assertSortFieldsExist` (`packages/metadata-protocol/src/protocol.ts`) refuses a **dotted** `orderBy` (`?sort=account.company_name`, #4256) and an **unknown** field (#4226). It does not refuse a **known, non-dotted** field that happens to be `formula`-typed — a `formula` field is in `schema.fields`, so it is in `gate.known` and passes.\n\nIt then reaches a driver that has no column for it, and the sort is silently dropped. Query succeeds, all rows present, order arbitrary — the exact failure mode #4226/#4256 exist to stop, on a shape no gate covers.\n\n## Measurement\n\nReal `SqlDriver` (better-sqlite3, on-disk) and real `InMemoryDriver`, both wired to a real `ObjectQL` engine, with `ObjectStackProtocolImplementation` on top for the ingress half. Object carries a `formula` field `sort_key` (expression `record.title`). Five rows inserted `C A E B D` so \"sorted\" and \"insertion order\" are distinguishable.\n\n**driver-sql (better-sqlite3):**\n\n```\nrepro_contact physical columns: [\"id\",\"created_at\",\"updated_at\",\"title\",\"seq\",\"account_id\",\"child_total\"]\nformula col `sort_key` present: false\n\nCONTROL   orderBy title asc     -> [\"A\",\"B\",\"C\",\"D\",\"E\"]        a real column really sorts\nCONTROL   orderBy title desc    -> [\"E\",\"D\",\"C\",\"B\",\"A\"]\nBASELINE  no sort               -> [\"C\",\"A\",\"E\",\"B\",\"D\"]        insertion order\n\nFORMULA   orderBy sort_key asc  -> [\"C\",\"A\",\"E\",\"B\",\"D\"]   5 rows, 200\n                sort_key values -> [\"C\",\"A\",\"E\",\"B\",\"D\"]\nFORMULA   orderBy sort_key desc -> [\"C\",\"A\",\"E\",\"B\",\"D\"]   direction-blind\n\nRAW SQL   order by sort_key     -> sqlite: \"no such column: sort_key\"\n\nPROTOCOL  ?sort=sort_key        -> 200, 5 records, [\"C\",\"A\",\"E\",\"B\",\"D\"]\nPROTOCOL  ?orderBy=[\"sort_key\"] -> 200, 5 records, [\"C\",\"A\",\"E\",\"B\",\"D\"]\n```\n\n**driver-memory:**\n\n```\nCONTROL   orderBy title asc     -> [\"A\",\"B\",\"C\",\"D\",\"E\"]\nBASELINE  no sort               -> [\"C\",\"A\",\"E\",\"B\",\"D\"]\nFORMULA   orderBy sort_key asc  -> [\"C\",\"A\",\"E\",\"B\",\"D\"]\nFORMULA   orderBy sort_key desc -> [\"C\",\"A\",\"E\",\"B\",\"D\"]\n```\n\n`asc` and `desc` returning the **same** order is what makes this a dropped sort rather than a coincidence.\n\n## Mechanism\n\n- `SqlDriver.createColumn` — `case 'formula': return; // Virtual — no column`. `schema-drift.ts`'s `fieldHasColumn()` agrees: `formula` is the only type with no physical column.\n- `engine.find` rewrites `ast.fields` to drop virtual formula names and inject their dependencies (`planFormulaProjection`), but leaves `ast.sort` / `ast.orderBy` **untouched**; formulas are evaluated post-query by `applyFormulaPlan`, after `driver.find` has already returned.\n- sqlite rejects the `ORDER BY`; the #3821 unknown-column backstop retries **without the sort**.\n\nThe response even carries the `sort_key` values in plain view — `C, A, E, B, D` — in a column the caller asked to be sorted ascending, so the answer visibly contradicts the request and still reports success.\n\nWorth noting for scoping: `summary`/`rollup` is **not** affected. It gets a real, maintained column (`case 'summary': col = table.float(name)`) and sorts correctly — measured `orderBy child_total desc -> E D C B A` over values `5 4 3 2 1`. Only `formula` is virtual.\n\n## Why it is not fixed in #6924\n\n#6924's scope is the refusal **hint text** (`domain:metadata`) — it stopped the hint prescribing a `formula` field, since following that advice landed the author in this defect one step after being refused for the dotted form. The remaining question is a different decision on a different seat:\n\n1. **Refuse at ingress** — `assertSortFieldsExist` rejects an `orderBy` naming a field whose type materializes no column (`400 INVALID_SORT`), consistent with how it already treats dotted paths. Cheap, and it keeps the whole #4226 family on one door.\n2. **Refuse at the driver** — the driver reports that it cannot order by the column instead of letting the #3821 backstop swallow it. Catches internal callers reaching `engine.find()` directly, which the ingress gate deliberately does not cover.\n3. **Materialize** — actually give formula fields a stored column. Much larger, and probably contradicts the \"formula is virtual\" contract the codebase states in several places.\n\nOption 1 has a wrinkle worth flagging before anyone implements it: the gate reads `gate.fields[...]`, so it can see the type — but the refusal would need to name the same remedy the corrected #6924 hint gives (\"a stored field\"), or the two doors will disagree again.\n\nRefs: #6924 (the hint text, in flight), #6673 (same correction, search axis), #4226, #4256, #3821 (the backstop that swallows it)."
+}

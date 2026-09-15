@@ -1,0 +1,33 @@
+{
+  "number": 6905,
+  "kind": "issue",
+  "title": "`@objectstack/rest` 已可零错编译,应从 #4311 的 DEBT 台账毕业 —— 加 `typecheck` 脚本 + 删台账条目(阻塞于 PR #6895)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:queue"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T03:24:34Z",
+  "updated_at": "2026-08-09T05:44:19Z",
+  "closed_at": "2026-08-09T05:44:19Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6905",
+  "body": "由 `domain:cli` 座位在复核 PR #6895(#6307)时立卡。**dev 明确点名此事并按指示没有顺手做** —— 它不是那张卡的表面,而门禁自己要求它独立成 PR。若不立卡,PR #6895 合入后这个状态就从视野里消失了。\n\n## 事实(来自 PR #6895 的实测,须复测)\n\n`scripts/check-type-check-coverage.mjs` 的输出:\n\n```\nℹ @objectstack/rest: DEBT records 2, and tsc now reports 0 -- graduation candidate.\n  Onboard it (add \"typecheck\": \"tsc --noEmit\", or drop the test exclusion, and delete\n  the ledger entry in the same PR). `--lower` deliberately leaves this one alone: 0 is\n  not a lower ceiling, it is a graduation…\n```\n\n台账记 `DEBT['@objectstack/rest'] = 2`(`code-tier 2 (TS2345)`),实测 **0**。那两条 `TS2345` **正是 #6307 修掉的那个缺陷** —— 重复查询参数把 `string[]` 喂进 `version?: string`。缺陷一修,该包就零错编译了。\n\n⚠️ **`--lower` 不会自动处理它**,门禁明说这是**毕业**而不是降低天花板,所以它会一直停在这个状态直到有人动手。\n\n## ⛔ 阻塞:必须等 PR #6895 合入\n\n那个 `0` 是在 #6895 的分支上测到的。**在它合入 `main` 之前本卡不可开工** —— 在 `main` 上测仍是 2。\n\n开工第一步:确认 #6895 已合入,然后**自己复测** `pnpm check:type-check-debt`,以自己的读数为准。若复测不是 0,立即停手如实上报,不要为了让卡成立而调整测量方式。\n\n## 交付面\n\n按门禁自己的说明,**同一个 PR 内**完成:\n\n1. `packages/rest/package.json` 加 `\"typecheck\": \"tsc --noEmit\"`(或去掉 test exclusion —— 两条路择一,读 `scripts/check-type-check-coverage.mjs` 判哪条符合本仓惯例,并在 PR 里说明理由);\n2. 删掉 `DEBT` 里的 `@objectstack/rest` 条目;\n3. 确认 `turbo run typecheck` 把这个新脚本纳入(数量应从 120 变 121,须实测)。\n\n## 交付判据\n\n**证明门禁真的开始看着这个包了。** 故意在 `packages/rest` 里引入一处类型错误,展示 `turbo run typecheck` / `check:type-check-coverage` **变红**,再撤掉。⛔ 只加脚本 + 删条目而不做这个双向实证,等于把一个包从\"记录在案的欠债\"挪成\"没人检查\",比原状更糟。\n\n⚠️ `TEST_DEBT['@objectstack/rest']` 是**另一本账**(记 163,PR #6895 时实测 `main` 上 153 / 该分支 151),**本卡不动它**。#5278 的棘轮重测会掀掉包自身 tsconfig 的 `*.test.ts` exclude,行为与 DEBT 不同;混做会让两笔账互相污染。\n\n关联:#4311(类型检查覆盖率总账)、#6307 / PR #6895(使其归零的修复)、#5278(TEST_DEBT 棘轮)、#6376(`check:type-check-debt` 需先建全闭包)。"
+}

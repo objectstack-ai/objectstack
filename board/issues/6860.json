@@ -1,0 +1,36 @@
+{
+  "number": 6860,
+  "kind": "issue",
+  "title": "`--database-driver mysql` 与 `--database-driver sqlite-wasm` 在 flag 解析阶段被拒 —— oclif 的 options 白名单漏了两个能用的驱动",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T01:33:52Z",
+  "updated_at": "2026-08-09T06:24:38Z",
+  "closed_at": "2026-08-09T04:28:50Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6860",
+  "body": "自 #6345 的 fork 3 拆出(维护者 2026-08-09 裁定拆卡先修)。**这是现活的用户可见缺陷**,不是文档滞后 —— #6345 原文把它记成「help 文案漏项」,实测推翻了这个定性。\n\n## 事实(由 #6345 的实施 agent 实测)\n\n`--database-driver` 在 `packages/cli/src/commands/start.ts` 与 `dev.ts` 上是 oclif 的 **`options:` 强制白名单**,不是自由文本加一段 help 描述。白名单当前是:\n\n```\nsqlite | turso | postgres | mongodb | memory\n```\n\n漏了 **`mysql`** 与 **`sqlite-wasm`** —— 两者都是能正常工作的驱动(`packages/cli/src/utils/storage-driver.ts` 的 `resolveStorageDefinition` 认得它们,`OS_DATABASE_DRIVER` 环境变量路径也认)。\n\n后果:`os start --database-driver mysql` 与 `os dev --database-driver sqlite-wasm` **在参数解析阶段就被 oclif 拒掉**,连命令体都进不去。操作者拿到的是 oclif 的通用「expected one of」错误,而不是任何来自本仓的解释。同一个驱动改用 `OS_DATABASE_DRIVER=mysql` 却能用 —— 同一件事,两个答案。\n\n## 文档面同样漏\n\n- `content/docs/deployment/cli.mdx`(两处表格)与白名单同样漏项;\n- `content/docs/deployment/environment-variables.mdx` 列的是**全集**(含 `mysql`)。\n\n三份清单,三种答案 —— 这是 #6345 记录的原始症状,但根因在白名单而非文案。\n\n## 处置\n\n窄修:把两个缺失项补进两处 `options:` 白名单,并把两处文档表格对齐到实际接受的集合。\n\n⚠️ **与 #6345 主体的关系**:#6345 的裁定是让白名单将来**由共享别名表推导**,届时本卡补的这几行会被重构掉。这是**明知并接受**的返工 —— 维护者的原话是「两个驱动今天用不了」的代价更高。本卡不做任何词表收敛,不碰 `packages/spec`,不碰 `standalone-stack.ts`。\n\n## 验收要点\n\n- 钉住 `--database-driver` 的白名单与 `resolveStorageDefinition` 实际接受的集合**一致**(这条不一致正是本缺陷);\n- 两条命令(`start` / `dev`)都要覆盖 —— 白名单在两处各写了一份;\n- 前提复现:改动前 `os start --database-driver mysql` 被 oclif 拒;改动后进入命令体并按 mysql 解析。\n\nRefs #6345(来源与裁定存档)。"
+}

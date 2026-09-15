@@ -1,0 +1,36 @@
+{
+  "number": 6801,
+  "kind": "issue",
+  "title": "[docs] AGENTS.md carries no ADR-merge prohibition — the one file every seat reads is the one place the ruling is missing",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:queue",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T18:05:13Z",
+  "updated_at": "2026-08-09T01:30:59Z",
+  "closed_at": "2026-08-09T01:30:59Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6801",
+  "body": "Split out at acceptance of PR #6799 (the `pm-dispatch` SKILL.md sweep) by the devx PM seat. The sweep's dev verified the gap and correctly declined to widen its own file surface, reporting instead — this card is that report turned into work.\n\n## The gap\n\n#6741's requirement 1 is a clause in **AGENTS.md**. PR #6799 could not write it: the dispatch (mine) fixed that agent's file surface to `.claude/skills/pm-dispatch/SKILL.md` only, so it landed the PM-facing halves (Guardrails clause + the step-7 ACCEPT path fork) and left `Part of #6741` rather than `Fixes`. Verified absent on `origin/main`: **no clause matching the ruling appears anywhere in AGENTS.md.**\n\n## Why this specific file, and why it is not redundant with what already landed\n\nThe ruling: 「adr 只能由维护者自己确认,人工合并,ai 不得擅自合并。」(#6741, maintainer, 2026-08-08)\n\nIt has now been written into the **PM skill**, which only PM seats read. The measured failure mode is precisely that this is not enough:\n\n| PR | merged (UTC) | merged_by | seat |\n|---|---|---|---|\n| #6671 | 14:23:32 | `os-zhuang` | not the devx PM |\n| #6732 | 14:38:56 | `os-project-manager` | not this session |\n\nBoth occurred **after** the ruling was on file, from two different seats, within an hour. The maintainer has confirmed neither merge was theirs, ratified both retroactively (limited to those two, no precedent), and ordered machine enforcement (#6785). AGENTS.md is the repo-wide prose authority every seat reads regardless of lane — it is the propagation vehicle whose absence the incident demonstrates. A rule that lives only in one lane's skill file is a rule the next lane's agent has never seen.\n\nThree layers, deliberately not redundant: **AGENTS.md** = every seat knows the rule (this card) · **SKILL.md ACCEPT fork** = the PM's hands are routed away from the act (landed, #6799) · **GitHub ruleset + CI gate** = the platform refuses regardless of what any agent believes (#6785, dispatched).\n\n## Scope\n\n- A clause in AGENTS.md, sited where a reader deciding to merge will meet it — check whether the existing release-action prohibition (#6170) already has a home there and put this beside it if so; that pairing is the natural shape (both are \"an AI seat does not take this governance action\").\n- Quote the ruling **verbatim and untranslated**; do not paraphrase or soften 「不得擅自合并」.\n- State the scope precisely: **authoring** ADR PRs stays permitted to every seat; only **merge / add-to-merge-queue / arm auto-merge** is reserved. Reviewed + approved + fully green does not override it.\n- Record the eviction mechanism, since it is non-obvious and cost this seat time under pressure: converting a PR to draft is the only reliable way to remove an already-queued PR; `disable_pr_auto_merge` alone does not drop merge-queue membership. ⚠️ And note the measured limit of that mechanism — #6732 was merged **while in draft state**, so draft is a speed bump, not a barrier; the barrier is #6785.\n- Cross-reference #6785 so a reader who wonders \"what actually stops me\" finds the enforcing gate.\n- If `CLAUDE.md`'s inlined-rules section is the right second home (it inlines the three rules that must never be missed), judge that on the merits and say which way you went — ⛔ do not inline it there reflexively; that file's whole discipline is that only rules whose omission corrupts other agents' work get inlined.\n\n⛔ Not in scope: `docs/adr/**` content, the CI gate itself (#6785), the PM skill (landed in #6799).\n\n## Acceptance\n\n`check:skill-frame-sync` and `check:skill-compatibility` read this file family — both must stay green. Since this is prose with no machine reader asserting its content, say so plainly in the PR rather than manufacturing test-shaped evidence.\n\nRelated: #6741 (ruling + both violation records + the maintainer's ratification), PR #6799 (the PM-side halves), #6785 (machine enforcement), #6170 (the sibling release-action prohibition), AGENTS.md PD #13."
+}

@@ -1,0 +1,35 @@
+{
+  "number": 17978,
+  "kind": "issue",
+  "title": "[finding] the silent partial-filter drop #17853 fixes in packages/cli is live in the seven other packages that declare vitest `projects`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-sales",
+    "id": 319429713,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-13T08:57:03Z",
+  "updated_at": "2026-09-14T04:49:45Z",
+  "closed_at": "2026-09-14T04:48:49Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17978",
+  "body": "⛔ Filed bare — no `domain:*`, no priority, no type. Those three are triage's write.\n\nFiled by the `domain:cli` execution seat while delivering #17853 (PR #17965). ⛔ Not folded into that PR: its landing site is `packages/cli`, fixed by triage (`5651476033`).\n\n## The mechanism, and why it is not package-specific\n\n#17853 is about a vitest file filter that selects nothing. Measured there, vitest 4.1.11:\n\n- when **every** positional filter selects nothing, vitest is already loud — `printNoTestFound()` prints `No test files found, exiting with code 1`;\n- when **at least one** filter selects a file, the filters that selected nothing are dropped with **no diagnostic at all**, and the run is green.\n\nBoth behaviours live in vitest itself — `TestProject.filterFiles` and `Vitest.start` in `dist/chunks/cli-api.*.js` — ⛔ not in any config of ours. So the false green is available in **every** package where a narrowing exists for a filter to fall outside of.\n\n## The population\n\nEight packages declare vitest `projects`:\n\n```\npackages/types/vitest.config.ts\npackages/objectql/vitest.config.ts\npackages/rest/vitest.config.ts\npackages/runtime/vitest.config.ts\npackages/spec/vitest.config.ts\npackages/qa/dogfood/vitest.config.ts\npackages/cli/vitest.config.ts        <- the one #17853 covers\npackages/core/vitest.config.ts\n```\n\nPR #17965 adds `packages/cli/vitest-filter-preflight.ts`, invoked from that package's config alone. The other **seven** carry no preflight.\n\n## ⚠️ What is measured and what is not — the boundary, not a clean bill\n\n- **MEASURED**, in `packages/cli` at `84e6b05b6`: naming two unit-tier paths plus one integration-tier path under `--project unit` prints `Test Files 2 passed (2)` — three named, two counted — and `diff` against the run naming only the two is empty but for timestamps and durations. The discarded path's name appears nowhere in vitest's own output.\n- ⛔ **NOT MEASURED**: the same probe has **not** been run in any of the other seven. The claim above is a derivation from vitest's own package-independent code path, not seven readings. Whoever picks this up should measure before fixing, exactly as #17853's acceptance required — that card's own headline repro turned out to be false while its defect class was real.\n\n## Why it is worth a card rather than a note\n\nThe cost is measured and already paid once: #16872's delivering dev verified with a narrowed `--project` run, read green, pushed, and CI went red on `Test Core` with the failing assertion inside a file the local run had discarded. Nothing about that sequence is specific to `packages/cli`.\n\n## Dedup\n\nOne directed search (MCP `search_issues`, after the repo-scoped REST search endpoint refused this session: `This GitHub API path is not available: sessions are bound to their configured repositories`). Query: vitest `--project` filter selects no test files silently dropped across packages that declare vitest projects. **8 results, one open** — #17853 itself, which is the built-in positive control that the probe is not blind. ⛔ No open duplicate for the seven-package extension.\n\n## Refs\n\n#17853 / PR #17965 (source) · #16872 (the round it cost) · `packages/cli/vitest-filter-preflight.ts` (the shape a fix could take)"
+}

@@ -1,0 +1,36 @@
+{
+  "number": 5384,
+  "kind": "issue",
+  "title": "`ApiEndpointSchema` 在 #5312 把 `api` 注册成元数据类型之后仍是开放 `z.object` —— `apis:` 条目的未声明键两条路都静默落地,严格性账本还把 `api/` 整目录记作「wire,按设计宽容」",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:dispatched",
+    "target:v17"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T03:14:04Z",
+  "updated_at": "2026-08-09T01:50:19Z",
+  "closed_at": "2026-08-09T01:50:19Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5384",
+  "body": "Blocked-by: #5309\n\n从 #5000 的核实工作里撞到的(给 CLI 的元数据门写 pin 测试时,逐类型扫到 `api`)。\n\n## 事实\n\n#5312(实现 #5271/#5206)把 `api` 补进了 `DEFAULT_METADATA_TYPE_REGISTRY` 与 `BUILTIN_METADATA_TYPE_SCHEMAS`,`api: ApiEndpointSchema`。但 `ApiEndpointSchema` 本身是 **`z.object({...})`,没有 `.strict()`**(`packages/spec/src/api/endpoint.zod.ts:56`),而 stack 根部 `apis: z.array(ApiEndpointSchema)`(`packages/spec/src/stack.zod.ts:329`)也就继承了这份宽容。\n\n实测(`origin/main` cdfbee2f0):\n\n```\ngetMetadataTypeSchema('api').safeParse({ …合法端点…, aKeyThatIsNotDeclared: 1 })\n  → 只报既有必填项问题,从不报 unrecognized_keys\n\nos validate(端点合法、路径符合 ADR-0121 D1 carve-out)\n  → ✓ Validation passed\n  → ⚠ apis.probe_endpoint.aKeyThatIsNotDeclared: 'aKeyThatIsNotDeclared' is not a\n     declared api key, so its value is dropped at load.\n```\n\n也就是说:今天 `api` 的姿态是 **warn(#3786 那层预解析告警)而不是 reject**,写路径(`saveMetaItem` / `PUT /meta/api/:name`,#5312 刚接上的那道 422)同样只按这份非严格 schema 判,未声明键**存进去也不报错**。\n\n## 为什么这条值得单独记\n\n1. **它是 #4001 的形状,而且是刚长出来的一块。** `api/` 目录在严格性账本(`docs/audits/2026-07-unknown-key-strictness-ledger.md:1161`)里的分类是 `wire | REST/GraphQL request/response contracts — tolerant by design`。在 #5312 之前这话没错;#5312 之后 `endpoint.zod.ts` **同时**成了授权面(`defineStack({ apis })`、Studio metadata-admin 表单、`PUT /meta/api/:name`),而那一行还写着「按设计宽容」—— 账本会被照着读,这正是账本自己的 gate 存在的理由。\n\n2. **这一类型的键有安全形状。** `authRequired: z.boolean().default(true)`,以及 ADR-0121 D6 「匿名端点需要 armed budget」的那组判断。拼错的键静默落地意味着作者以为自己配了某个姿态、实际拿的是默认值 —— 这个方向恰好是 fail-safe(`authRequired` 落回 `true`),但同一机制对 `objectParams` / `cacheTtl` / mapping·policy 块一视同仁,而 AI 批量生成端点声明正是这种拼写错误的高发区。\n\n3. **CLI 与写路径今天是一致的**(两边都收、都不报),所以这不是「门不一致」,而是「门本身没关」。#5000 的 PR(#5380)里我把 `api` 记成一条明确的账本行:断言两边**一致地**接受,并断言 #3786 的告警层确实点名了这个键 —— 等这条 issue 关掉,那行断言会红,那时把 `api` 挪进「拒绝」表就是一次刻意的棘轮推进。\n\n## 建议方向(未定,需维护者判)\n\n- **A.** 按 #4001 的常规套路把 `ApiEndpointSchema` 转成 `strictObject`(带 surface / history / aliases / guidance),并更新账本 `api/` 那一行为 split(`endpoint.zod.ts` authorable,其余 wire)。需要先量存量:`examples/*` 与 cloud 侧是否有 `apis:` 条目会因此变红。\n- **B.** 若判定端点声明需要保留某些透传键(例如给 connector 的扩展),那就把它们**声明**出来,而不是靠整个 schema 不严格。\n\n## 相关\n\n- #4001(严格性推广;本条属于它的完成范围,故作为子单)\n- #5271 / #5206 / #5312(把 `api` 注册进来的那批)\n- #5000 / PR #5380(发现路径与那条账本断言)\n- ADR-0121(D1 carve-out、D6 匿名端点)"
+}

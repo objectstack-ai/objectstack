@@ -1,0 +1,34 @@
+{
+  "number": 6924,
+  "kind": "issue",
+  "title": "assertSortFieldsExist's dotted-path SORT hint also prescribes an unmaterializable \"formula or rollup\" denormalization — same defect class as #6673, different axis",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T04:22:46Z",
+  "updated_at": "2026-08-09T08:40:02Z",
+  "closed_at": "2026-08-09T08:40:02Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6924",
+  "body": "Split out of #6673 while verifying its premise (comment: https://github.com/objectstack-ai/objectstack/issues/6673#issuecomment-5229741789). Recorded, not claimed.\n\n## What #6673 actually found vs. what this is\n\n#6673 fixed two `packages/lint` hints that told authors to mirror a related record's value onto a **formula** field for `searchableFields` — a fix that can't work because a `formula` field is virtual (no driver materializes a column for it) and CEL only reads the record's own fields.\n\nWhile re-verifying #6673's third named target (`protocol.ts:4780`, claimed to be inside `assertSearchFieldsAreSearchable`), I found that text actually lives in a **different function**: `assertSortFieldsExist` (`packages/metadata-protocol/src/protocol.ts:4745`), guarding the **SORT** axis (`#4226`/`#4256`), not `searchableFields`/`#4254` at all.\n\n## The text, and why it may be the same defect\n\n`protocol.ts:4780` (in `assertSortFieldsExist`, for a dotted-path `orderBy` like `?sort=account.company_name`):\n\n```\nhint: ` Denormalise the value onto '${object}' (a formula or rollup field that`\n    + ' copies it into a real column) and sort by that.',\n```\n\nThis claims a `formula`/`rollup`(`summary`) field \"copies it into a real column\". By the same argument #6673 already established for `formula`: it's virtual, no driver materializes a column for it (`packages/objectql/src/engine.ts:568-573` computes it post-query, in-memory; `driver-sql/src/schema-drift.ts`; `driver-turso/src/remote-transport.ts`). `summary`/`rollup` fields are likewise excluded from real-column treatment elsewhere in this same file (the clone copy-exclusion at `protocol.ts:5941`, \"computed formula/summary fields\"). So `ORDER BY <formula-or-rollup-field>` looks structurally like it should hit the exact same silent-degradation path `#3821`'s backstop already covers for other unknown-column ORDER BYs: query succeeds, rows are all there, order is arbitrary — the very failure mode `#4226`/`#4256` exist to stop.\n\n**Not independently reproduced** — I didn't run a live repro (formula field named directly, non-dotted, in `orderBy`) proving the driver silently drops the sort; this is inferred from the codebase architecture (post-query formula evaluation, the `#3821` backstop, the `summary`/`rollup` copy-exclusion), not measured. Flagging for someone to verify before dispatch.\n\n## Why this is not simply \"the same fix\"\n\n- It's a **different function and axis** (`assertSortFieldsExist`, SORT, not `assertSearchFieldsAreSearchable`, SEARCH).\n- It's **not a leftover** — `#4256` (same filer as #6673, `os-zhuang`, closed `completed`) explicitly proposed and got this exact wording as its chosen remedy for dotted-path sort.\n- Its own documentation (`content/docs/protocol/objectql/query-syntax.mdx:533-534`, the \"Sorting on Related Fields\" callout) **still says the same thing today** — code and docs currently agree, unlike the `searchableFields` case #6673 fixed where docs had already moved to \"stored\" and the tool hadn't. Fixing this without also revisiting that doc would just move the contradiction rather than remove it.\n- Its pinned test lives in a third package, `packages/objectql/src/query-expression-conformance.test.ts:455` (`.rejects.toThrow(/follows the relationship 'project_id'[\\s\\S]*formula or rollup/)`), crossing into `domain:engine-core` territory (per the `domain:metadata` seat's own scope note: \"ObjectQL 编译/查询执行、formula、core runtime 归 domain:engine-core\").\n\n## Scope if promoted\n\nNeeds a decision first, not just a rewording: is \"denormalise onto formula/rollup and sort by that\" actually broken (verify with a real repro — plain non-dotted `orderBy` naming a `formula`-typed field, check whether it silently drops the sort or throws), and if so, what's the right prescription (a stored/mirrored field, same as #6673's fix) — touching `protocol.ts` (`assertSortFieldsExist`), its pinned test in `packages/objectql`, and the still-current doc at `query-syntax.mdx:533-534` together, so code and docs move in the same PR this time.\n\nRefs: #6673, #4256 (the SORT-axis dotted-path decision, closed), #4226, #3821."
+}

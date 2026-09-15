@@ -1,0 +1,34 @@
+{
+  "number": 7007,
+  "kind": "pull_request",
+  "title": "fix(devx): docs drift check —— dev-only manifest 改动不再点亮整包文档，release 页改为只读分区 (#6893)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "ci/cd",
+    "documentation",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T08:39:10Z",
+  "updated_at": "2026-08-09T10:38:16Z",
+  "closed_at": "2026-08-09T10:38:14Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": "2026-08-09T10:38:14Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/7007",
+  "body": "Fixes #6893\n\nDocs Drift Check 在两类 PR 上给出的建议无法执行：只改了 `packages/spec/package.json` 里一行 build 脚本的 PR 被报出 113 篇文档；而列表里还混着 `content/docs/releases/**` —— 代码 PR 明令禁止编辑的路径。两处改动，**都不缩小真正的告警面**。\n\n## 先测量，再决定\n\n复现了卡片上的全部数字（3 / 112 / 113 / 3），然后查了两件卡片没写的事。\n\n**一、112 的最大单个样本根本不是 spec 的实现改动。** #6892 在 `packages/` 下唯一的改动是 `packages/spec/package.json` 的 `scripts.build` 一行。这是 #4183 那次修复的残余 —— 当时排除了 check 脚本本身，却保留了注册它的 `package.json` 那一行，于是同一类 PR 换个入口照样点亮整包文档。\n\n400 个 merged commit 的扫描：`packages/` 下唯一实现改动是 `package.json` 的共 5 个，**5 个全部只动了 `scripts` 或 `devDependencies`**，合计误报 152 行：\n\n| commit | 改动的 key | 报出文档 |\n|:--|:--|--:|\n| `df0605ba5` | `scripts` | 12 |\n| `2672f855f` | `scripts` | **113** —— 卡片的头条数字 |\n| `a64315556` | `devDependencies` | 10 |\n| `77d9001c7` | `devDependencies` | 13 |\n| `466bd9285` | `devDependencies` | 4 |\n\n后三个是 `test(...)` commit：正是「测试文件例外」要消灭的那一类，从 manifest 漏了出来。\n\n**二、「排除 `releases/**`」是 #4920 已经否决过的选项。** 同一套工具链上一层的 `check-audit-scope.mjs` 会因为 release 页离开审计范围而直接失败，理由写在脚本里：\n\n> Release pages are meant to be IN scope and READ-ONLY (#4920): audited, never edited, findings filed as issues. An empty set means either the pages moved, or they were excluded from the scope — the option that ruling rejected, because it leaves the most-read pages in the docs unaudited with nothing to say so.\n\n所以这里采用 #4920 的形状而不是它否决的那个：**页面留在集合里，分叉的是交付物**。\n\n## 改动\n\n**1. dev-only manifest 例外 —— 字段级，不是文件级。** `< packageRoot >/package.json` 若改动的**顶层 key** 全部落在 `{scripts, devDependencies}`，则不计入变更包。`exports` / `main` / `dependencies` / `files` / `version` 仍然计入。allowlist 而非 denylist：未知或新发明的 key 一律落在「计入」一侧；无法解析、新增、删除的 manifest 同样计入。\n\n分类器是**按文件**的：PR 只要同时改了该包的 `src/**`，包根照样由那些文件推导出来 —— 这一支只在「manifest 是该包唯一改动」时才起作用，结构上无法吞掉真实改动。\n\n**2. release 页改为分区，不是过滤。** `docs` 仍是全集（审计范围依赖它），新增 `releaseOwnedDocs` 作为它的**子集**（`releaseOwnedDocs ⊆ docs` 恒成立），PR 评论把这些行放进单独的 ⛔ 只读段落，明确写「file an issue，不要在这里改」。\n\n`RELEASE_OWNED_PREFIX` 因此有了第三份字面副本。保持副本而不抽公共模块，是因为审计 workflow 在沙箱 VM 里求值、无法 import —— 抽出去只会让它成为唯一没有锚定的那份。`check-audit-scope.mjs` 改为遍历 `RELEASE_OWNED_CONSUMERS`，任何一份与 AGENTS.md guardrail 行不一致即红。\n\n## 验证：真实 PR 上的 before / after\n\n| PR | BEFORE | AFTER |\n|:--|:--|:--|\n| **#6892**（spec，卡片头条） | 112 | **0** |\n| **#6921**（卡片钉住的样本） | 3 | 2 editable + 1 read-only |\n| **#7003**（一行 JSDoc） | 14 | 11 editable + **3** read-only |\n| **#6885**（真实 spec src 改动） | 113 | **113** = 106 editable + 7 read-only |\n\n最后一行是关键：**真实实现改动一篇都没少**。这次改的是分区与误报，不是覆盖面。\n\n5 个 manifest-only commit 全部 152 行 → 0（`devOnlyManifestsSkipped: 1`，跳过的事实照常写进 summary，不静默）。\n\n#6921 渲染出来的评论（用 harness 直接跑 workflow 里那段真实脚本，不是重写一份）：\n\n```\n**2** hand-written doc(s) reference the affected code and may need an implementation-accuracy re-verification:\n\n- `content/docs/automation/hook-bodies.mdx`  _(via @objectstack/lint)_\n- `content/docs/permissions/authorization.mdx`  _(via @objectstack/lint)_\n\n⛔ **1** release-owned page(s) also reference the affected code. These are **read-only**:\n\n- `content/docs/releases/v17.mdx`  _(via @objectstack/lint)_\n\n> ... 若确实有错，**file an issue** 或单独开 docs-only PR；不要在这里改。\n```\n\n## 反向验证：预测方向在先\n\n**工具层。** 在 `packages/spec/package.json` 上构造应当被报出的改动：\n\n- 加一个 `exports` 条目 → 仍报 **113** 篇（`devOnlyManifestsSkipped: 0`）✅\n- 同一文件只加 `scripts` 条目 → **0** 篇（`skipped: 1`）✅\n- `scripts` 条目**外加**一处 `src/**` 改动 → 仍报 **113** 篇，manifest 本身照常记为 skipped ✅ —— 按文件分类的直接证据\n\n**self-test 层。** 5 处变异全部按预测转红（每处都先确认变异真的应用上了，避免空绿）：allowlist 放宽到 `dependencies`、不可解析当作「无改动」、去掉包根路径闸、新增/删除 manifest 当作 dev-only、release 前缀放宽到全部文档。\n\n**锚定层。** 把 `affected-docs.mjs` 的前缀改成 `content/docs/release-notes/` → `check:docs-audit-scope` 转红并点名该文件；改回即绿。\n\n## 关于 #7003 指出的「两种边」\n\n12 行来自包名（`via @objectstack/client`），2 行来自路径（`via packages/client`）。这里不存在「只修一半」的风险：只读分区是按**文档自身路径**算的，从不读产生它的那条边。已验证 —— 该样本 3 行 release 全是包名边、全部正确分区，2 行路径边全部正确留在可编辑列表。\n\n## 没做什么，为什么\n\n**没有做符号级 / 导出级的边收窄**（卡片方向 2）。#6885 的 106 篇是真实的粒度问题，但收窄边意味着在「包」和「符号」之间重新定义什么算引用，而 `affected-docs.mjs` 现有的设计原则明写着 over-inclusion 优先于漏报、周期性全量审计是兜底 —— 改这条原则是设计决策，不该顺手塞进这张卡。已另开卡片承接，附 #7003 与 #6885 两个样本。\n\n**没有加封顶/摘要。** 封顶只有作为粒度问题的答案才有意义，N 取多少、按什么排序都属于那张卡的设计范围；现在做半个会先把那个决定占掉。\n\n⚠️ 本告警仍然是 **advisory-only，不阻塞任何构建** —— 本 PR 没有改变这一点。\n\n## Gates\n\n`pnpm lint`（含全部 family gate）、`pnpm check:docs-audit-scope`、`check:nul-bytes`、`check:doc-authoring`、`check:empty-changeset` 均绿。\n\n无 changeset：改动只涉及 CI 工具与其 README，不发布任何包 —— 故打 `skip-changeset`。\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01F8q5J1MQyocgtNspb15fSn)_"
+}

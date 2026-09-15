@@ -1,0 +1,30 @@
+{
+  "number": 6715,
+  "kind": "issue",
+  "title": "[finding] `validateEmptyCombinators` gates the runtime publish path for `flow` only — the other filter-carrying metadata types reach the same door ungated",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T13:22:00Z",
+  "updated_at": "2026-08-09T07:51:12Z",
+  "closed_at": "2026-08-09T07:51:12Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6715",
+  "body": "Filed unassigned by the devx PM seat from the #5330 implementation (PR #6703). The implementing dev raised it deliberately rather than deciding it, and it is recorded here so the reasoning is not confined to a subagent report nobody else can read. **Observation class — the rule ships correct as written; this is about the breadth of one of its two doors.**\n\n## The shape\n\nPR #6703 registered `validateEmptyCombinators` in `AUTHORING_RULES` as `gating`, which covers `os validate` / `os build` / `os lint` for **everything**. Its runtime half is narrower: `runtimeTypes: ['flow']`, so the **runtime publish gate** — the door a Studio tenant, a REST `/meta` client and an MCP/AI author all write through — enforces it on `flow` writes only.\n\nThe other filter-carrying metadata types (`object`, `view`, `page`, `dashboard`) therefore reach that door with a literal `{$or: []}` or `{}` unrefused. The CLI catches them; a publish that never touches the CLI does not.\n\nThis is the \"declared = enforced\" split the repo pays for repeatedly, in its milder form: the rule is not wrong and nothing is silently miscomputed — the runtime identity reduction (#5322) still applies, so the metadata behaves exactly as `reduceFilterVerdict` says. What is missing is the loud authoring-time refusal on the path that AI and UI authors actually use, which is the entire motivation of the card that produced the rule.\n\n## Why the dev did not simply widen it\n\nCorrect call, and worth preserving: the rule needs no resolution context (it judges a filter literal in isolation), so `RUNTIME_NEEDS_FULL_SNAPSHOT` does not apply to it — meaning widening is *mechanically* a one-line `runtimeTypes` edit. But doing so decides how much authority this rule carries on the runtime path, which is **#4463's P2 question**, not something to settle inside a card scoped to authoring-time refusal. The reason is recorded at the registry entry in the PR.\n\nSo the cost of the narrow setting is one line; the cost of getting the authority question wrong is a gate refusing publishes on surfaces nobody agreed it should govern. That asymmetry is why this is filed rather than fixed.\n\n## What to measure before acting\n\n1. Confirm the current `runtimeTypes` value and which types actually carry authorable filters (the four named above are from the implementing dev's reading — re-measure, this repo's type list moves).\n2. Whether the other filter-carrying types are gated by *any* comparable authoring rule on the runtime path today, or whether this is the general shape rather than one rule's gap. If it is general, this card is mis-scoped and the broader one should replace it.\n3. #4717 is the open `#4463` follow-through card (advisory findings into the response + the docs \"the gate\" fourth column). This finding is adjacent to it and may belong under it — triage's call; I have deliberately not attached it as a sub-issue, since only a dependency exists rather than membership in that card's completion scope.\n\n## Provenance\n\nDiscovered during #5330 / PR #6703, devx lane, PM seat `session_01F8q5J1MQyocgtNspb15fSn`. Dedup before filing: `runtimeTypes authoring rule publish gate coverage` (0 hits) and `4463 in:body runtime publish` (1 hit, #4717, adjacent not duplicate). Unlabeled beyond `finding` — grading and `domain:*` routing are the triage seat's single-producer territory."
+}

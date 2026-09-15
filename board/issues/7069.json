@@ -1,0 +1,35 @@
+{
+  "number": 7069,
+  "kind": "issue",
+  "title": "sweep(spec): 2-item liveness-ledger follow-through sweep III — one claim, one PR, per-item checklist (#6774 #6773)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T13:36:52Z",
+  "updated_at": "2026-08-09T16:41:54Z",
+  "closed_at": "2026-08-09T16:41:54Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7069",
+  "body": "Sweep card per the findings-round bundling discipline (#6243 / #7024 / #7056 precedents), packaged by the `domain:spec` seat under the maintainer's cloud-bundling approval (2026-08-09 「同意」, chat) and today's second batch-acceleration instruction (「又可以加速派一批了，包括云卡」). **This card is the claim object**; the member cards keep `pm:queue` but are NOT dispatch candidates while this sweep is open.\n\n## Shared criterion\n\nBoth members are **liveness-ledger records that stopped being answerable to reality after objectui implementations landed** — follow-through corrections, not new judgments. The ledger is the evidence base for enforce-or-remove verdicts; a stale row/note mis-steers the next audit (the #5175 lesson, cited by both members' triage). **No acceptance-face changes**: the legal-metadata set is byte-identical before/after. (Member 1 additionally releases a pinned ADVISORY contrast — a test-expectation change on a CLI advisory face, not a schema acceptance change; assert exactly that.)\n\n## Members (read each card + its full comment thread before touching it; premise-first per member)\n\n1. **#6774** — `packages/spec/liveness/dashboard.json` `colorVariant` row flips **live** (objectui#3799 merged AND absorbed by the framework's `.objectui-sha` pin `09987b68` — the unlock sweep on the card verified `git merge-base --is-ancestor`; re-verify on current main). Plus: release PR #5255's pinned \"exactly-one-warning colorVariant\" positive contrast on the CLI advisory (its premise — renderer doesn't read the key — no longer holds), and correct any #5255-adjacent comments/fixtures still asserting \"colorVariant never took effect\". Refs on the card: #5010 ruling B, #5175.\n2. **#6773** — `packages/spec/liveness/field.json:109` `Field.widget` note: replace `sys_permission_set (capability-multiselect)` with `sys_permission_set (permission-facet-link)`. The cross-pin measurements are already on the card (2026-08-09 comment): `capability-multiselect` was never registered on any live path and is now retired (objectui#3308 / PR #3793); the actual widget is `permission-facet-link`, registered at objectui `plugin-detail/src/index.tsx:563` on the current pin — verify that anchor read-only against `/home/user/objectui` at the pinned SHA and record the reading. Also spot-check the note's other widget names (`object-ref` / `filter-condition` / `recipient-picker`) are still in `fieldWidgetMap`.\n\n## Sweep rules (binding on the PR)\n\n- One PR, per-item checklist (落点 | before | after), `Fixes #6774` / `Fixes #6773` only for completed members; dropped member ⇒ `Part of` + evidence.\n- **Zero changes outside the 2 items**; `git diff --stat` maps 1:1 onto the checklist.\n- Existing schema acceptance tests pass unchanged; the released #5255 contrast is the only test-expectation change and belongs to member 1's row.\n- Out-of-scope discoveries filed separately unassigned (PD #10).\n- A dead premise drops the member with evidence — good outcome, not failure.\n\nRefs: #6243 (pilot), #7024/#7056 (predecessors), #5175 (why ledger truth matters), #5010 (colorVariant ruling B)."
+}

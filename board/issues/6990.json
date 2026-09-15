@@ -1,0 +1,32 @@
+{
+  "number": 6990,
+  "kind": "issue",
+  "title": "finding: `check:skill-frame-freshness` (#5866) is invoked by nothing — not CI, not a git hook, not another script",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T08:00:41Z",
+  "updated_at": "2026-08-09T11:13:51Z",
+  "closed_at": "2026-08-09T11:13:51Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6990",
+  "body": "Observation-class. Found while enumerating root `check:*` wiring for #6865 (PR #6983); not carried in that PR.\n\n## Fact\n\n`check:skill-frame-freshness` exists in the root `package.json` and its script is real and working, but **no in-repo entry point runs it**. Measured on `origin/main` at 55011afa3 — every reference to it anywhere in the tree, excluding the script's own file:\n\n```\nscripts/check-skill-frame-sync.mjs:103:   * EXPORTED for scripts/check-skill-frame-freshness.mjs (#5866), which asks the\npackage.json:42:    \"check:skill-frame-freshness\": \"node scripts/check-skill-frame-freshness.mjs --self-test && ...\"\n```\n\nThat is one prose mention in a sibling's comment, plus the alias itself. Nothing in `.github/workflows/**`, nothing in `.githooks/**`, and no other `package.json` script chains it. Its sibling gate is wired — `.github/workflows/lint.yml:964` runs `pnpm check:skill-frame-sync` — so the asymmetry is visible side by side.\n\nThe script runs clean today (`EXIT=0`), so this is not a latent red; it is a gate with no path on which it can ever go red for anyone.\n\n## Why it is worth recording\n\n#5866 wrote this gate against a **measured, still-live** channel: dispatch prompts are assembled from a working tree on disk, and on 2026-08-06 a shared PM checkout 173 commits behind handed every dispatched dev agent the pre-#5130 two-axis decision frame — the axis #5130 ruled *changes verdicts* (#5021 vs #4936). The script's own header calls that \"a lying green light\". A gate written against a live channel and then reachable from no entry point is the #4690 phantom-check shape one level over: it reads as coverage in the ledger and in the script list, and covers nothing.\n\n## ⚠️ Wiring it into CI is probably the WRONG fix — do not treat that as the obvious answer\n\nThe question this gate asks is \"is **this working tree** current with `origin/main`\". A CI runner checks out fresh, so on CI the answer is trivially yes and the gate is green by construction — the #4177/#4232 dormant-gate class. The channel #5866 is about is a **seat's local checkout at dispatch time**, which CI never observes.\n\nSo the real dispositions look like:\n\n1. a documented, enforced invocation at the point that matters (a pm-dispatch preflight step), so the gate runs where its input actually varies;\n2. retirement, if the drift is now covered another way — with the reason recorded, since the channel is measured and was live as recently as the gate's own authoring;\n3. keep as an on-demand tool, but say so **in the script header and in the dispatch playbook**, so \"runnable, deliberately not run by CI\" is a stated classification rather than something the next reader has to infer from absence. `packages/spec`'s `check:generated` ledger already draws exactly this distinction (`NO_GENERATOR` = \"runnable, deliberately not run here\" vs `EXTERNAL_INPUT_REQUIRED` = \"cannot run here\"), and its header records that conflating the two is what #4690 cost.\n\nNo recommendation between these — the choice depends on whether the dispatch preflight is a place the maintainer wants a gate.\n\n## Adjacent, recorded so it is not re-derived\n\nRoot `check:*` scripts have **no** coverage ledger. `packages/spec` has one (`check:generated --reconcile-only`, wired into lint.yml, which reconciles in both directions and fails when a gate drops out of coverage), but it reads `packages/spec/package.json` only — the 56 root-level `check:*` scripts are outside its program entirely. That is why this orphan could exist silently. Whether root gates deserve the same reconciliation is a separate question from this one card.\n"
+}

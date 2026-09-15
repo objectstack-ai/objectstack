@@ -1,0 +1,35 @@
+{
+  "number": 7031,
+  "kind": "pull_request",
+  "title": "fix(spec): one house sentence for every os-migrate-meta prescription (#6856 route D)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T10:13:22Z",
+  "updated_at": "2026-08-09T11:03:14Z",
+  "closed_at": "2026-08-09T11:03:13Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": "2026-08-09T11:03:12Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/7031",
+  "body": "Fixes objectstack-ai/objectstack#6856\n\n按维护者裁决(路线 D,issue 评论 5230787187,2026-08-09)全量落地:所有 strip 与 rewrite 类退役处方的 `os migrate meta` 句统一为 house 句式 **`to rewrite existing sources automatically.`**;歧义在宾语不在动词 —— \"rewrite it\" 的 \"it\" 有两个先行词(键 / 你的源文件),\"existing sources\" 只有一个。键的下场留在正文散文(\"Delete the key…\" / \"Rename the key to…\"),句子不再复述。\n\n## 重新普查(fresh `origin/main` @ `0f539bdc9`,phase-1 表 @ `2672f855f` 仅作地图)\n\n同方法对比:phase-1 提交点 53 处处方句字面量 → 本次 54 处,**delta = +1**(#6868 新增的 `page:tabs.type` 墓碑),零删除。分类按转换代码实测(读 `conversions/registry.ts` 各 `apply()`,不读散文):**44 STRIP / 8 REWRITE / 2 MIXED**(按字面量计;phase-1 的 45/8/2 = 55 按\"处方\"计 —— `array_agg`/`string_agg` 共享一个句字面量,故 STRIP 侧差 1;新增的 tabs `type` 是第 9 个 REWRITE)。\n\n普查前分布:33× `to rewrite it automatically.`、4× `to remove it.`、3× `to remove it automatically.`、1× `rewrites it for you.`(retry-policy)、12× 已是 house、1× MIXED 两分句(dashboard `compareTo.offset`)。\n\n## 改动\n\n- **41 处句子收敛**,14 个 schema 文件:`ai/agent`、`automation/schemaless-node-config`、`data/{datasource,field,hook-body,object,query}`、`integration/connector`、`shared/{mapping,retry-policy}`、`ui/{action,component,dashboard,theme}`。其中 40 处 → house 句式,1 处(script `config.actionType`,MIXED)→ 两分句精确形态:\"rewrite the shorthand case into `config.function` automatically; the stub and marker values are removed.\"(与 `removeScriptBranchKeys` 实际行为逐分支对齐)。dashboard `compareTo.offset`(两分句模板本尊)保持原句。601/629 邻居对已一致。\n- **`agent.tools` 正文补一句显式删除说明**(45 处 strip 里唯一正文没写 \"delete\" 的站点;预先披露的正文改动):\"This is NOT a rename — there is no key the value moves to: the migration DELETES the key…\",与 `registry.ts` `agent-tools-to-skills` docblock 自述对齐。\n- **House 规则写入 `shared/retired-key.ts` 模块 docblock**(根缺陷:那里从未就这句话给过指导),`@example` 同步带上 house 句式(下一位作者的复制源)。\n- **类级机械 pin**:`packages/spec/src/shared/retired-key-migrate-sentence.test.ts` —— 源码扫描全部字符串字面量里的 `os migrate meta --from N` 处方句,断言 house 句式或 MIXED 两分句**形状**(按形状,无逐站点豁免名单;`migrations/registry.ts` 是账本散文,按语料边界整体不在扫描面,test 内有说明)。句子还必须是字面量的**末句**(句号后即闭引号),埋在中段也红。\n- **回扫 #6854 的 aria pin**(裁决已知成本):`aria-carrier-tombstones.test.ts` 的 `toMatch(/to remove it/)` → house 句式 + 补 `Delete the key.` 正文断言。\n- **PM 指令修正(评审后新增,8ae7aa989)**:`integration/connector.zod.ts` 模块 docblock 里的 \"`os migrate meta --from 16` rewrites it.\"(盖在纯 STRIP `field-mapping-transform-removed` 上,phase-1 即判 agrees=NO)→ \"rewrites existing sources automatically — the key itself is removed.\"。对照组 `ui/action.zod.ts:422`(\"rewrites it for you\")**刻意不动**:它盖在 `action-execute-to-target` 真改名上,散文是准确的 —— 判据是\"盖在 strip 上误导\",不是注释一律化。实测:模块 docblock 是渲染输入(build-docs 取文件首个 JSDoc 作参考页 blurb),`check:docs` 变陈旧,`connector.mdx` 重渲染一页 —— 与\"注释不进渲染\"的预期相反,以实测为准。\n\n## 验证(方向先行)\n\n- **(a) aria pin**:预测扫后 RED —— 实测 RED(`aria-carrier-tombstones.test.ts:101`,收到的 message 以 house 句式收尾,旧断言不匹配);更新后 GREEN。这条 RED 本身就是扫描到位的反向验证证据。\n- **(b) 类 pin**:扫后树 GREEN(54 处全判);**实物种植**反证 —— 把 `data/hook-body.zod.ts` 一处改回 `to rewrite it automatically.` → pin RED 并点名 `data/hook-body.zod.ts:21` 带原句摘录;还原后 GREEN。防空转:pin 对空句(`Run ... --from 16.`)、非 Run 形(`rewrites it for you`)、埋中段句全 RED(fixture 用例),另有 floor 断言(≥50)防扫描器致盲。\n- **(c) 其余**:除上述外无任何红 —— 普查表即证据(#6753 式如实陈述)。\n- 双拼写搜全仓:pin 覆盖只有 aria 一处(literal 与 escaped-regex 均查);`packages/lint/src/validate-expressions.ts:771` 有一处域外同型句子,按范围栅栏未扫入,已单独立卡 **#7030**。\n\n## 生成物 / 准入\n\n- 接收面逐字节不变:`check:authorable-surface`(authorable-surface/** + authorable-defaults/ + .base.json + json-schema manifest)与 `check:api-surface` 在扫后源上直接 GREEN,零 diff —— `retiredKey()` 无论字符串内容如何都返回同一 schema。\n- `content/docs/references/**` 重新生成,**14 页**(agent、control-flow、schemaless-node-config、external-lookup、field、object、connector、shared/mapping、job、action、component、dashboard、theme,+ PM 指令修正再渲染 connector 的模块 blurb;job 页的变化来自共享 retry-policy 形状,已核对非漂移)。`docs/protocol-upgrade-guide.md`:`check:upgrade-guide` GREEN 无需重生成 —— 它投影的是 migrations 账本,本 PR 未触。⛔ 未触 `content/docs/releases/`。\n- `pnpm --filter @objectstack/spec test`:两轮全绿(扫后 351 文件 / 9121 用例;PM 修正后复跑 351 文件 / 9126 用例,增量来自合入的 main);`typecheck` exit 0;`test-typecheck-debt.json` 前后逐字节相同(58 文件 / 266 债)。`check:generated` 合并 fresh main(`d5863663c`)后复跑 GREEN。`scripts/check-nul-bytes.mjs` OK。\n- Changeset:`.changeset/migrate-meta-sentence-house-form.md`(`@objectstack/spec: patch`,非 breaking,无需 ADR-0087 标记)。\n\n## 范围栅栏(遵守)\n\n⛔ #6914(35 处缺句墓碑)未动 —— 本 PR 落地后解除阻塞,那 35 句直接复制 house 句式。⛔ 无键/类型/refinement 移动;正文散文改动仅两处且均经授权(预披露的 `agent.tools` + PM 指令的 connector 模块 blurb;sweep 误触 `action.zod.ts:422` 描述性注释一处,已还原并经 PM 确认应保留原样)。⛔ 散文中无新固定计数(pin 的 floor 是防空转下限,非普查数,注释已说明)。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_018ffcE95NaMJcL9XJ9VDYgk"
+}

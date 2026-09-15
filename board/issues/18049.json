@@ -1,0 +1,33 @@
+{
+  "number": 18049,
+  "kind": "issue",
+  "title": "board-snapshot: the R2 mirror lands at `objectstack/board/board/…`, one segment deeper than the workflow documents",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-13T15:42:44Z",
+  "updated_at": "2026-09-14T06:41:54Z",
+  "closed_at": "2026-09-14T06:41:05Z",
+  "closed_by": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/18049",
+  "body": "The R2 secrets were configured on this repository on 2026-09-13 and the first\nconfigured run is green: [run 34765639736](https://github.com/objectstack-ai/objectstack/actions/runs/34765639736)\nreports `R2: synced 10912 object(s), deleted 0; daily tarball written for 2026-09-13`.\n\nThe mirror works. Its **prefix is one segment deeper than this workflow's own\ncomment says it is**, and that gap is only visible from the bucket side.\n\n## What the comment promises vs. what is in the bucket\n\n`.github/workflows/board-snapshot.yml` documents the mirror as `objectstack/board/…`.\nAn independent S3 `ListObjectsV2` against the bucket (not the run log) returns:\n\n```\nobjectstack/board/board/manifest.json\nobjectstack/board/board/comments/…\nobjectstack/board/board/issues/…\nobjectstack/board/board/reviews/…\nobjectstack/snapshots/2026-09-13.tar.gz\n```\n\n`board/board/`. 10912 of the 10913 objects sit under it.\n\n## Cause\n\nTwo lines that are each correct alone:\n\n- the snapshot writes into `archive/board` (`SNAPSHOT_ARGS: --out=archive/board`)\n- the sync source is the worktree ROOT (`aws s3 sync archive/ \"$mirror\"`, with\n  `mirror=\"s3://${R2_BUCKET}/objectstack/board/\"`)\n\nSo `archive/board/X` maps to `objectstack/board/` + `board/X`.\n\n## Why it is worth fixing even though nothing reads the archive\n\nNothing does read it — that invariant is stated in the file and still holds. The\ncost is paid exactly once, in the situation the whole workflow exists for: a\nrestore driven from the documented path looks in `objectstack/board/` and finds\none directory instead of a manifest. The daily tarball is unaffected (it is\nwritten to its own key from `-C archive .`, so it carries `./board/…` and is\nself-describing).\n\n## Fix\n\nEither spelling works; the first keeps the documented layout:\n\n```\naws s3 sync archive/board/ \"$mirror\" …\n```\n\nNote that the migration needs no cleanup step: with `--delete`, the stale\n`objectstack/board/board/` tree is inside the new sync target and has no local\ncounterpart, so the first run after the change removes it. That is also the\nreason not to fix it by widening the target to `objectstack/` instead — that\nspelling puts `objectstack/snapshots/` inside a `--delete` target and would\neat the daily tarballs, which is the failure the existing comment already\nwarns about.\n\nFound while configuring the four R2 secrets; no code change made.\n"
+}

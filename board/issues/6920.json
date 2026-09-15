@@ -1,0 +1,36 @@
+{
+  "number": 6920,
+  "kind": "issue",
+  "title": "finding: a section-less public form accepts ANY non-anchor field from an anonymous visitor (the write-side twin of #6601)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:queue",
+    "target:v17"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T04:21:15Z",
+  "updated_at": "2026-08-09T10:05:36Z",
+  "closed_at": "2026-08-09T10:05:36Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6920",
+  "body": "Found while implementing #6601 (the read-side disclosure on the same route pair). Filed rather than fixed: #6601's lane is the **read** surface, this is the **write** surface, and the current behaviour is deliberately pinned by an existing test, so changing it is its own decision.\n\n## What was measured\n\n`POST /api/v1/forms/:slug/submit` (`packages/rest/src/rest-server.ts:7236-7260`) narrows the visitor-suppliable keys to the fields the matched FormView's `sections` declare — and then degenerates exactly the way #6601's read side did:\n\n```ts\nconst allowedFields = new Set();\nfor (const section of match.form?.sections ?? []) { /* … collect … */ }\n…\nfor (const [k, v] of Object.entries(rawBody)) {\n  if (PUBLIC_FORM_SERVER_MANAGED_FIELDS.has(k)) continue;\n  if (k === '__proto__' || k === 'constructor' || k === 'prototype') continue;\n  if (allowedFields.size === 0 || allowedFields.has(k)) filteredData[k] = v;\n}\n```\n\nMeasured on `origin/main` @ `970bb4c8`, driving the real registered handler with a public FormView whose `sections` is `[]`, anonymously:\n\n```\nsubmit accepted = [\"email\",\"internal_margin\",\"internal_tier\",\"not_even_a_field\",\"status\",\"subject\"]\n```\n\nEvery key survived except the `PUBLIC_FORM_SERVER_MANAGED_FIELDS` anchors — including `not_even_a_field`, which is not a field of the target object at all. So the accepted set for a section-less public form is not \"every field of the object\"; it is **every key the caller sends**, minus the anchors and the three prototype keys.\n\n## Why it matters\n\n#3022 closed the ownership-forging half of this fall-through (anchors can no longer be supplied) and pinned the remainder as intentional — `public-form-routes.test.ts`, `zero declared sections: business fields fall through, anchors do NOT`. What that pin leaves open is anonymous **mass assignment** of ordinary business columns: `status`, a workflow stage, an internal tier, an amount — anything the object declares and the form did not.\n\nThe trigger is the same plausible authoring mid-state #6601 turns on: an author creates the public form, wires its sections later. Between those two edits the form is anonymously writable across its whole object. `publicFormGrant` (ADR-0056) scopes the insert to create-on-that-object, so this is not a cross-object hole — it is an unbounded column surface on the one object the form targets.\n\nAfter #6601 the two surfaces disagree in a way worth naming: a section-less form now publishes **no** schema and still accepts **every** key. #6601's dispatch ruling considered aligning read to write and rejected it precisely because this write set is not narrower than \"everything\" — which is this card.\n\n## Suggested disposition\n\nSymmetry with #6601 is the obvious candidate: drop the `allowedFields.size === 0 ||` limb so a form that declares no fields accepts no fields, and the submit answers a 400-class refusal naming the empty declaration rather than inserting a blank row. That makes \"the form declares what it collects\" one rule on both planes, with no new authorable key.\n\nTwo things a fixer must weigh, which is why this is not folded into #6601:\n\n1. **It is a live pinned behaviour.** The #3022 test above asserts the fall-through. Removing it re-judges that pin rather than adding to it.\n2. **It changes a shipped success path into a refusal.** Any deployment currently relying on a section-less public form to collect submissions starts getting errors. That is arguably correct (such a form cannot render either — after #6601 it publishes no schema) but it is a behaviour change with a release note, not a silent tightening.\n\n## Repro sketch\n\n```\n# a public FormView with `sections: []` (or omitted) targeting `ticket`\ncurl -X POST /api/v1/forms/SLUG/submit \\\n  -d '{\"subject\":\"x\",\"internal_tier\":\"strategic\",\"not_even_a_field\":\"accepted\"}'\n# → 201; every key above reaches createData\n```\n\nRelated: #6601 (read-side twin, same two lines apart), #3022 (server-managed anchors on this surface), ADR-0056 (public form grant).\n"
+}

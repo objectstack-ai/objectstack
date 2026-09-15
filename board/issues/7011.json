@@ -1,0 +1,34 @@
+{
+  "number": 7011,
+  "kind": "issue",
+  "title": "upsert 每次「合并到既有行」都烧一个自增号,并覆写该行已有的业务号(健康计数器上实测,与陈旧无关)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "target:v17"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T08:49:44Z",
+  "updated_at": "2026-08-09T13:31:41Z",
+  "closed_at": "2026-08-09T13:17:20Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7011",
+  "body": "## 一句话说明\n\n`SqlDriver.upsert()` 在**成功路径**上无界烧号:每一次「合并到既有行」都会先取一个新的自增号,然后把它**写进那一行**,覆盖掉该行原有的业务标识符。与计数器陈旧**无关** —— 在完全健康的计数器上就能复现。\n\n由 #6943(PR #6999)的范围审计中实测发现,**刻意未顺手修**(PD #10):修它需要一个语义裁决,不是那张卡的裁向。\n\n## 实测(健康计数器,单行,全程只有 1 行)\n\n```\ncreate                        → CASE-00001     last_value 1\nupsert 同一个 id(第一次)      → CASE-00002     last_value 2\nupsert 同一个 id(第二次)      → CASE-00003     last_value 3\n```\n\n表里始终只有一行,而它的 `case_number` 被改写了两次。\n\n## 成因\n\n`fillAutoNumberFields` 在语句**知道自己会 insert 还是 merge 之前**就已经跑完了 —— 它发生在构建 `ON CONFLICT … DO UPDATE` 之前。而自增号列在 `mergeColumns` 里,所以合并分支会把这个新取的号一并写入。\n\n两个后果,第二个更重:\n\n1. **无界烧号**:每次 upsert 消耗一个号,即使一行也没新增。这与 #5495 / #6943 处理的「陈旧导致的一次性风暴」不是同一件事 —— 那些是有界的、每库一次的;这个是**每次调用都发生**,永不停止。\n2. **改写业务标识符**:自增号通常是对外可见的单据号(`CASE-00001`)。一次以更新为目的的 upsert 会**静默更换它**,而调用方并没有要求改号。留空洞是一回事,改写已发出的标识符是另一回事。\n\n## 需要裁决的问题(不预设答案)\n\n这正是当初把 #6943 从 #5495 拆出来的那一类语义问题,请分诊/维护者定夺:\n\n- **更新型 upsert 应当保留原有自增号吗?** 直觉上应当 —— 号是那一行的身份。\n- **它应当在合并路径上取号吗?** 若不应当,那么取号必须推迟到「确定要 insert」之后,或者在合并分支上把该列从 `mergeColumns` 里排除。\n- **既有数据怎么办?** 已经被改写过的行无法从驱动侧还原。\n\n## 边界(与相邻卡的关系)\n\n- **不是 #5495 / #6943 的缺陷**:那两张卡处理的是计数器落后于数据表导致的碰撞;本卡在计数器完全健康时就成立,且发生在**成功**路径而非失败路径。\n- **PR #6999 已做的守卫**:它的重试循环不会把一次 merge 变成 insert。仅此而已,本卡的烧号与覆写照旧。\n- `driver-memory` / `driver-mongodb` 不声明 `supports.autonumber`,走 engine 兜底路径(**#6806** 的面),与本卡无关。\n\n## 关联\n\n- #6943 / PR #6999 —— 发现处;批次与 upsert 的陈旧重播种\n- #5495 / PR #6932 —— 自增号序列重播种,三态碰撞路由\n- #1603 —— DB 原生自增号序列\n\n未认领,仅作记录,定级交分诊。"
+}

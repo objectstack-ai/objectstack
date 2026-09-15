@@ -1,0 +1,35 @@
+{
+  "number": 7056,
+  "kind": "issue",
+  "title": "sweep(spec): 2-item \"self-descriptions answerable to reality\" sweep II — one claim, one PR, per-item checklist (#7017 #6961)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T12:19:09Z",
+  "updated_at": "2026-08-09T14:41:11Z",
+  "closed_at": "2026-08-09T14:41:11Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7056",
+  "body": "Sweep card per the findings-round bundling discipline (#6243 / PR #6288 precedent; #7024 / PR #7032 is the immediate predecessor of this same criterion family), packaged by the `domain:spec` seat under the maintainer's cloud-bundling approval (2026-08-09 「同意」, chat) and today's batch-dispatch instruction. **This card is the claim object**; the member cards keep `pm:queue` but are NOT dispatch candidates while this sweep is open — selection excludes them via this member list.\n\n## Shared criterion (what makes these one sweep)\n\nBoth members are **self-descriptions that are no longer answerable to reality** — prose (a liveness-ledger evidence sentence, a `.describe()` contract note) asserting something the code does not back, or understating something the code now delivers. Every fix re-anchors the description to a verifiable, already-measured source of truth. **No acceptance-face changes anywhere in this sweep** — the legal-metadata set must be byte-identical before/after (the sweep's red line; a member that turns out to need an acceptance change is DROPPED and reported, not smuggled).\n\n## Members (read each card in full before touching it; premise-first per member)\n\n1. **#7017** — `packages/spec/liveness` ledger entry `widgets.children.chartConfig`: the evidence wording (\"chart-config bag forwarded\") is not what was measured. Rewrite evidence/note per the #5175 measurements (the card marks this the uncontroversial first step — 无争议先行步). Scope is the ledger entry's prose only.\n2. **#6961** — `UserFiltersSchema.allowAddTab`'s `.describe()` still carries the downgraded \"仅承诺渲染入口\" wording. #5236 A1 has landed and objectui#3926 is MERGED (unblock comment on the card, objectui main `cf5be4ec2`, two readings), so the describe is upgraded back to the real semantics. Read the #5236 A1 ruling for the exact promised behavior; quote it in the PR. Note: `.describe()` text flows into generated JSON-schema/docs artifacts — regenerate (`gen:schema` / `gen:docs`) and commit `content/docs/references` deltas (PR #6998 lesson).\n\n## Sweep rules (binding on the PR)\n\n- One PR, body carries a **per-item checklist**: one row per member — 落点 | before | after — reviewed row by row.\n- `Fixes #7017` / `Fixes #6961` only for members actually completed; a dropped member gets a `Part of` note and the reason.\n- **Zero changes outside the 2 items**, self-certified: `git diff --stat` file list must map 1:1 onto the checklist (generated-artifact deltas from `gen:schema`/`gen:docs` count as part of #6961's row).\n- Acceptance-face byte-identity asserted: existing schema acceptance tests all pass unchanged; no test expectations edited.\n- Out-of-scope discoveries are filed as separate unassigned issues (PD #10), never folded in.\n- A member whose premise died (main moves ~18 merges/day) is dropped with evidence — that is a good outcome, not a failure.\n\nRefs: #6243 (sweep pilot), #7024 (criterion-family predecessor, closed today via PR #7032), #5175 (the #7017 measurement source), #5236 / objectui#3926 (the #6961 semantics source)."
+}

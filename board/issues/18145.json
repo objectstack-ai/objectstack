@@ -1,0 +1,34 @@
+{
+  "number": 18145,
+  "kind": "pull_request",
+  "title": "docs(pm): the ui lane names the objectui label/assignee write channel",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/xs",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-14T06:23:14Z",
+  "updated_at": "2026-09-14T07:09:55Z",
+  "closed_at": "2026-09-14T07:09:53Z",
+  "closed_by": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "merged_at": "2026-09-14T07:09:53Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/18145",
+  "body": "Fixes #18120\n\nUnder lock 1 an objectui session cannot write a label or an assignee through MCP `issue_write` (its `.claude/settings.json` on `origin/main` denies the tool), and nothing an objectui seat reads said what to use instead: `.claude/skills/pm-dispatch/references/lanes/ui.md` carried no `label` line at all. The channel already exists and already takes the repository — the objectstack checkout's `scripts/pm/label-write.mjs --repo owner/name`, with the four steps and the read-back built in — so this card is one rule line in the lane register, not a mechanism.\n\n## The rule line — `lanes/ui.md` :23, 118 bytes (cap 120)\n\n```text\n- 本仓标签/assignee 写走 objectstack `label-write.mjs --repo`,⛔ 不 MCP `issue_write`;被拒转有通道席。\n```\n\nIt sits next to :22 「`scripts/pm/**` 单写手恒在 objectstack 侧 ⇒ 本席的工具需求走上游卡带 `Blocked-by:` 回链。」 — the channel is that objectstack-side single writer. It deliberately does not restate `references/rest-channel.md` :38–:39, which already carry the four steps, the read-back and the prohibition for objectstack cards:\n\n```text\n- 标签/assignee 写恒经 `scripts/pm/label-write.mjs`:四步内建、回读、回退整组 PATCH 回传 assignees。\n- ⛔ 永不 MCP `issue_write`(锁 1 已拒);会话分类器拒改动 ⇒ 无通道,交有通道席位立卡。\n```\n\nWhat is new here is the cross-repository half — `--repo` — plus the hand-off when a session's classifier refuses the write.\n\n## Line budget — net 0, paid by a deletion, not by a re-wrap\n\n`lanes/ui.md` is pinned at 38 lines with zero headroom (`check:pm-skill-ratchet`). Payment is the deletion of :15 「症状位置不改流向,docs 随所记录的面走,两条同上节,⛔ 不在此另抄。」 — a pointer-only line that says as much itself.\n\n**Where the deleted rule survives:** `.claude/skills/pm-dispatch/SKILL.md` :198, inside 〈多仓协调〉 (heading at :185) — 「其余(发布库与 apps)归 `domain:ui` 执行席;症状位置不改流向,docs 随所记录的面走。」 The lane file already points at that section from :3 and from :13, so the rule stays reachable for the seat that reads the lane. No ceiling raised, no line re-wrapped, no other file touched.\n\n## Acceptance — both directions, measured on `bb9e97d3f`\n\n- `git grep -c label-write -- .claude/skills/pm-dispatch/references/lanes/ui.md` → **1** (0 before the edit); the literal control 「单写手」 still hits, now at :22.\n- `wc -l` → **38** lines, unchanged; the ratchet prints `✓ check-skill-line-ratchet: .claude/skills/pm-dispatch/references/lanes/ui.md is 38 lines (ceiling 38; headroom 0).`\n- `LC_ALL=C awk 'length($0)>120'` over the file prints nothing; the new line measures 118 bytes.\n- `git diff --name-only a90a9f267..HEAD` prints exactly one path — so `references/rest-channel.md` is untouched, and no `permissions.allow` text is added anywhere.\n- objectui `AGENTS.md` is untouched by construction: that file lives in the sibling repository and is not in this diff's repo at all.\n- `grep -naP` control-byte self-scan over the edited file: no hits (`check:nul-bytes` green over 8,652 files).\n\n## Gates — derived, run in the foreground, reconciled\n\n`node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` derived 15 families from the working-tree change set; all 15 ran with the exit code captured before any pipe, and all exited 0:\n\n```text\n✓ dispatch-gates --ran: 15 derived famil(ies) accounted for — 15 run, 0 NOT-MEASURED\n  (a DERIVED zero — all 15 recorded an exit code and none of them is 3).\n```\n\nNamed in the dispatch and green here: `check:pm-skill-ratchet`, `check:pm-skill-id-lint` (27 files clean), `check:nul-bytes`, `check:skill-frame-sync`, `check:pm-governed-merges`, plus `check:pm-governed-prose` (not in the derived set — it scores `silent` as an artifact roster — run anyway: 2 instruction surfaces name all 5 registered governed surfaces).\n\nSix of the fifteen first exited **3 PREREQUISITE NOT MET** on a fresh worktree (`node_modules` absent; one also needed `@objectstack/formula` + `@objectstack/lint` built). That is not a verdict: `pnpm install`, then the build under `scripts/pm/os-verify-lock.sh` (`VERDICT command-exit 0 · held the lock 2s · waited 0s`), then a re-run — all 0.\n\n## Changeset\n\n`skip-changeset` label, applied through the additive endpoint and read back. `.claude/**` publishes nothing: no package `files[]` ships it, and the fast-track list names `.claude/**` directly.\n\n## Deviation from the dispatch's suggested route\n\nThe suggested wording measured **171 bytes** against the 120-byte cap, so it could not land as written; the shipped line is a compressed spelling of the same three clauses (channel + `--repo`, ⛔ MCP `issue_write`, hand-off on refusal). The suggested payment (dropping :15) measured correct and is what was used.\n\n## 维护者速读(草稿)\n\n**改了什么** — objectui 车道岗位说明加一行:objectui 卡的标签/assignee 写,走 objectstack 检出里的 `label-write.mjs --repo`,不走 MCP;会话被拒就把卡交给有通道的席位。同一文件删掉一行纯指针句(它的两条规则逐字住在 SKILL.md 〈多仓协调〉:198),行数 38 不变。\n\n**为什么改** — 锁 1 已在两仓落地,objectui 会话的 MCP 写标签能力被拒。通道是有的(objectstack 侧那一个脚本,已在 objectui 卡上实跑过),但 objectui 席位读的文件没有一处写着它。席位找不到通道时会把状态记在散文里,而不是记在标签上——这正是同一失败形态在第二个仓的复发。\n\n**风险与代价(含回滚)** — 风险低:纯指令面一行,无代码、无发布物。代价是删掉的那行指针句;它的规则在 SKILL.md 仍在,车道文件 :3 与 :13 都指向该节。回滚 = revert 本 PR 一次提交,文件回到 38 行原样。\n\n**席位意见** — (待席位定稿)\n\n**你要做的** — 读一下新增那行的措辞是否符合你的口径(尤其「被拒转有通道席」这半句),然后人工合并:本 PR 触 `.claude/**`,属受管面,只能由你手工落地。另:objectui 会话真正键入的那条命令要不要进 `permissions.allow`(前缀拼写在 objectui 会话里不一样),仍等你的裁决,本卡按 out of scope 处理。\n\n_Generated by [Claude Code](https://claude.ai/code/session_01DAcomhvR9kKizeYgg89Vo8)_\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01DAcomhvR9kKizeYgg89Vo8)_"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 6401,
+  "kind": "issue",
+  "title": "[finding][drivers] `GroupByNode.alias` 只有内存分桶认，三个 SQL 面一律忽略 —— 同一个 aggregate 走下推与走回退拿到不同的列键",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T16:57:17Z",
+  "updated_at": "2026-08-09T01:30:59Z",
+  "closed_at": "2026-08-09T01:30:59Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6401",
+  "body": "在 #6212 批 B（`aggregate` 收窄）实施期间实测发现，记录备查。**观察类，不挂 `pm:queue`，请分诊轮定级。**\n\n## 事实\n\n`GroupByNodeSchema` 声明的结构化条目有三个键：`field` / `dateGranularity?` / `alias?`，其中 `alias` 的 describe 是 \"Alias for the projected group value\"（默认回落到 `field`）。\n\n**读它的只有内存分桶那一条路：**\n\n| 位置 | 是否读 `alias` |\n|:--|:--|\n| `packages/objectql/src/in-memory-aggregation.ts:89` | ✅ `const fieldName = typeof g === 'string' ? g : (g.alias ?? g.field);` |\n| `packages/drivers/driver-sql/src/sql-driver.ts` `aggregate()` 的 groupBy 循环 | ❌ 两条分支都只用 `g.field`（带 granularity 的按 `g.field` 起别名；不带的 `groupBy(g.field)` + `select(g.field)`） |\n| `packages/drivers/driver-sqlite-wasm` | ❌ 整个继承上面那份 |\n| `packages/drivers/driver-turso` 本地 / 远端两面 | ❌ 同上（远端面在 #6212 批 B 之后开始编结构化条目，也刻意不读 `alias`，以免只在一面读而造出新分叉） |\n\n## 后果\n\n同一份 `groupBy: [{ field: 'closed_at', dateGranularity: 'month', alias: 'qtr' }]`：\n\n- 引擎判定可下推（驱动发布了该 granularity）⇒ 走 `driver.aggregate` ⇒ 结果行的列键是 **`closed_at`**；\n- 引擎判定不可下推（能力位缺该 granularity、或 `timezone` 非 UTC 强制走内存）⇒ 走 `find()` + `applyInMemoryAggregation` ⇒ 列键是 **`qtr`**。\n\n也就是说**同一条查询的结果列名取决于引擎当次选了哪条路**，而选路依据是驱动能力位与时区 —— 调用方看不见的东西。`packages/objectql/src/in-memory-aggregation.test.ts:45` 正是拿 `alias: 'qtr'` 写的，所以内存那一半有覆盖，下推那一半没有，两半也从没被放在一起比过。\n\n## 这是 ADR-0049 的形状\n\n`alias` 是**已声明、部分执行**的键：写了它，一半的执行路径认，另一半静默忽略。enforce-or-remove 两条路都摆着，且分别有代价：\n\n- **enforce**：三个 SQL 面都读 `alias`（`SELECT … AS \"qtr\"`，GROUP BY 仍按 `field`）。要顺带确认 `presentReadColumns` 的 `presentedOutput` 映射改按 alias 记（`sql-driver.ts` 里那张 map 现在以列名为键），以及 `having` 的 post-filter（它按「聚合别名 + groupBy 投影」判定）跟着改口径。\n- **remove**：删 `GroupByNodeSchema.alias`（走 ADR-0087 墓碑 + 转换层），代价是内存那一半现有行为要改，且要先量一量非测试书写者。\n\n⚠️ 我**没有**量过 `alias` 的真实生产者（showcase / CRM / 图表配置面是否有人写），定级前需要补这一量 —— 这正是 #5021「能力扩张要有真实业务牵引」那条轴要问的。\n\n## 与 #6212 批 B 的关系\n\n批 B 只做了「不加剧」：远端 turso 开始编结构化 groupBy 条目时，**刻意不读** `alias`，与 `SqlDriver.aggregate` 保持一致 —— 只在一面读会是新分叉而不是修复。本分歧既非批 B 造成、也不在批 B 范围内，故单独记账。\n\n关联：#6212、ADR-0049。\n"
+}

@@ -1,0 +1,33 @@
+{
+  "number": 6876,
+  "kind": "pull_request",
+  "title": "fix(ci): allow-major 改为求值时刻实时读标签,红 run 不再永久红 (#5620)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "ci/cd",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T02:13:23Z",
+  "updated_at": "2026-08-09T02:45:48Z",
+  "closed_at": "2026-08-09T02:45:47Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": "2026-08-09T02:45:47Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/6876",
+  "body": "Fixes #5620\n\n`.github/workflows/pr-automation.yml` 的 `Guard against accidental major bumps (launch window)` 步骤,第三个 clause 一直是载荷快照读法:\n\n```yaml\nif: \"!contains(github.event.pull_request.labels.*.name, 'allow-major')\"\n```\n\n与 #5580 修掉的是**同一个读法、同一个后果**:载荷是事件触发那一刻的快照,开 PR 后再补 `allow-major`,该 run 看不见;而 `rerun_failed_jobs` 复用同一份载荷(pm-dispatch Operational notes 5),于是这个红 run 按构造重跑不成绿,只能等一次新的真实事件顶掉。\n\n## 参照:#5580 落地的形状,直接复用\n\n`a9c7e6ba0`(PR #5625,`fix(ci): Check Changeset 实时读 skip-changeset 标签`)在同一个 job 新增了一个实时读标签步骤:\n\n- `.github/workflows/pr-automation.yml:194`(当前 `main`)—— `- name: Re-read this PR's labels live (the event payload can predate them)` / `id: labels`\n- `.github/workflows/pr-automation.yml:208` —— `gh api \"repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER\" --jq '.labels[].name'`\n- `.github/workflows/pr-automation.yml:222` —— `grep -qxF 'skip-changeset'` 整行精确匹配,here-string 喂入\n- 产出 `steps.labels.outputs.skip`,由下游每个步骤的 `if:` 消费\n\n本 PR 照抄这个形状:新增 `id: allow_major` 步骤,**同一个端点、同一个整行精确匹配、同一个 here-string、同一个 #4690 容忍方向**(读不到标签判 `allow=false`,即照常执行守卫 —— 读不到输入的门什么也没验证,据此发一张全栈 major 的豁免正是那个反模式),守卫步骤第三个 clause 改读 `steps.allow_major.outputs.allow != 'true'`。\n\n## 两处刻意分歧(均因本标签在 job 末尾被消费,而非开头)\n\n**1. 不保留载荷 fast-path。** #5580 保留它,是因为载荷里已经有 `skip-changeset` 时可以跳过整个 job(checkout、install 全免)换一次 API 调用。这里下游只剩一条 `node scripts/check-changeset-no-major.mjs`,fast-path 省不下任何东西,却会一并保留 #5580 自己承认的那个反向 stale 格(事件后被**移除**的标签仍豁免本 run)。去掉它之后,豁免只能由「真的观测到的标签」建立。\n\n**2. 不加 #6378 式结算窗口** —— 按残留记录,不当作已解决。#6378 的等待只能记在「注定要红」的 PR 头上;而这里的「注定要红」= 「声明了 major 且没有标签」,只有 `check-changeset-no-major.mjs` 知道,且它以 exit 1 表达。要据此设条件,就得把脚本跑两遍、或吞掉输出再回放 —— 即改变该守卫的报错形状。而本步骤的**位置**已经把窗口收窄:它排在 checkout + setup-node + `pnpm install --frozen-lockfile` + 计数 + 两个 `check-*.mjs` 之后,而 job 开头那次 fast-path 读位于开 PR 后约 +10s(#6378 实测 run 31204438874),标签落地延迟实测 +10..45s(#6310、#6358)。更关键的是:与 #5580 的方向不同,这里的首红**有救** —— 因为读是实时的,补标签后 `rerun_failed_jobs` 即收敛为绿。消掉「永久红」正是 #5620 记的那笔。\n\n## 休眠不作为依据\n\n`check-changeset-no-major.mjs` 在 changesets pre-release 窗口整体让位(其 RC EXEMPTION 头注),`.changeset/pre.json` 现为 `\"mode\": \"pre\"` / `\"tag\": \"rc\"`,所以该守卫今天不可能红,`allow-major` 也用不上。\n\n**让它重新武装的是 `changeset pre exit`** —— 那一刻守卫自动恢复,而那恰是全栈 major 讨论最密集、`allow-major` 最可能被人在 `gh pr create` 之后几秒手工补上的窗口。休眠是一个会结束的条件,不是把修法做浅的理由;文件内注释把这句话写在了步骤上方。\n\n## 验证\n\n工作流无法本地运行,所以验证分三层,每层都先声明预期方向再跑:\n\n**A. 门禁(真实输出)**\n\n| 命令 | 改前 | 改后 |\n|:--|:--|:--|\n| `pnpm check:empty-changeset` | PASS(48 assertions) | PASS(**53** assertions) |\n| `pnpm check:workflow-status-functions` | PASS | PASS(22 workflows / 41 jobs / 24 job-level `if:`) |\n| `pnpm check:node-version` | PASS | PASS(25 setup-node,全部 Node 22) |\n| `pnpm check:nul-bytes` | PASS | PASS(6398 files,无裸控制字节) |\n| `pnpm exec eslint scripts/check-empty-changeset.mjs --no-inline-config` | — | PASS |\n\n`check:workflow-status-functions` 做的是**真 YAML parse**(非 grep),它绿即证明改后的工作流仍能被解析;`check:node-version` 绿即证明没有碰到 setup-node 矩阵。**未新增/未重命名任何 job**(只新增一个 step),所以必需检查的 context 名不受影响 —— 这是 #5617 点名的那个风险面。\n\n**B. 反向验证(预期方向:红)** —— 只把工作流回退到载荷读法、保留新钉子,`check-empty-changeset --self-test` 应转红并点名 #5620。实跑 exit=1,5 条失败,首条即:\n\n```\n- consumer: the allow-major exemption must never be read from\n  `github.event.pull_request.labels` -- that snapshot is frozen when the event\n  fires and `rerun_failed_jobs` replays it, so the red it produces cannot be\n  re-run green (#5620)\n```\n\n还原后 exit=0。\n\n**C. shell 层:用 stub `gh` 驱动 YAML 里抽出来的真实脚本**(与 PR #5625 同法)—— 用 `yaml` 解析工作流、取出 `id: allow_major` 步骤的 `run` 原文(914 bytes,含 YAML 块标量去缩进),因此跑的是将要上 CI 的字节,不是手抄件。9 场景 x 2 方言(`bash -e`,以及 `bash -eo pipefail`)= **18/18 通过**:\n\n| 场景 | 期望 |\n|:--|:--|\n| 标签实时在位(载荷曾为空)—— 本次修的那格 | `allow=true` |\n| 标签在列表中间,非首行 | `allow=true` |\n| 无任何标签 / 有别的标签但无 `allow-major` | `allow=false` |\n| 近似名 `allow-major-audit` / `not-allow-major` | `allow=false` |\n| `gh api` 失败(403) | `allow=false` + warning |\n| 事件无 PR 号 | `allow=false` + warning |\n| 401 个标签、`allow-major` 在最后(pipefail 下的 SIGPIPE 压力) | `allow=true` |\n\n该 harness 自身能不能红,也做了两次 ablation 证明(预期方向:红):把 `grep -qxF` 削成 `grep -qF` → 两条近似名场景 x 2 方言共 4 例转红;把「标签读不到」分支的 `allow=false` 改成 `allow=true` → 403 场景 x 2 方言共 2 例转红。还原后 18/18。\n\n**决策真值表(改前 -> 改后)**,4 格里变 2 格,两格都朝实时真相走 —— 注意它**不是**单向放宽:\n\n| 载荷有标签 | 实时有标签 | 改前 | 改后 |\n|:--:|:--:|:--|:--|\n| 是 | 是 | 豁免 | 豁免 |\n| 是 | 否(事件后被移除) | 豁免(**凭快照放行**) | **执行守卫**(收紧) |\n| 否 | 是(事件后补上) | 执行守卫(**即本 bug**) | **豁免**(放宽,正是修法) |\n| 否 | 否 | 执行守卫 | 执行守卫 |\n\n`rerun_failed_jobs` 那一格单列:改前载荷被复用 -> 永久红;改后实时读重跑 -> 收敛为绿。\n\n**仍未被证明的部分,明说**:GitHub Actions 的表达式求值、`steps.allow_major.outputs.allow` 的实际串接、以及 `gh` 在 runner 上的真实行为,只有在 runner 上才能验;更麻烦的是本条**处于休眠**,`check-changeset-no-major.mjs` 在 pre-mode 下不会失败,所以**任何 CI run 都不会走到「守卫真的执行并判定」那一步**,直到 `changeset pre exit`。B 层的静态钉子正是为这个空窗准备的 —— 它不依赖守卫被执行。\n\n## 回归钉\n\n`scripts/check-empty-changeset.mjs` 的 consumer 自测块(该仓库唯一断言本 job 标签读取形状的地方,#6129/#6378/#6434 都钉在这里)新增 5 条断言:工作流内不得再出现 `allow-major` 的载荷读法;恰好一处实时 `grep -qxF 'allow-major'`;守卫必须消费 `steps.allow_major.outputs.allow`;实时读须同时尊重两处 skip-changeset 读(被豁免的 PR 不该为一个不会跑的守卫买一次 API 调用);`allow=true` 只能写一次且必须在真正观测到标签的 grep **之后**(容忍方向按**位置**钉,不按分支计数)。\n\n放在这里而不是另起门禁,理由与休眠同源:这一格现在**没有任何 CI run 能执行到**,所以静态钉子是它唯一的守护,而把它放在已经钉着同一个 job、同一批标签读的那个自测块里,下一个读者只需要记住一个地方。\n\n## 边界\n\n⛔ 未动:job 名与既有 step 命名约定(无新增 job)、计数逻辑、`BASE_SHA` / merge-base、`docs/adr/**`、release 与 pre-mode 策略、`check-changeset-no-major.mjs` 本身。\n\n本 PR 只改 `.github/` 与仓库根 `scripts/`(均不随任何 npm 包发布),不发布任何东西,故取 `skip-changeset` 标签而非 changeset(工作流自身处方的 route 2)。\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01F8q5J1MQyocgtNspb15fSn)_"
+}

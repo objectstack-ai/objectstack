@@ -1,0 +1,34 @@
+{
+  "number": 6842,
+  "kind": "issue",
+  "title": "`audience-anchors.test.ts` still names `member_default` as the plain-wildcard shape — the same stale illustration #6696 fixes, one package over",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T00:04:58Z",
+  "updated_at": "2026-08-09T07:01:16Z",
+  "closed_at": "2026-08-09T07:01:16Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6842",
+  "body": "Observation-class finding, found while implementing #6696. **Nothing a user hits today** — a test *name* and a comment; every assertion involved passes and is correct. No `pm:queue`; filed for the triage round to grade.\n\n## What\n\n#6696 fixes the `describeHighPrivilegeBits` JSDoc in `packages/spec/src/security/high-privilege.ts`, which cited `member_default` as the worked example of a plain-`'*'` grant after #5491 (PR #6684) removed that set's wildcard entirely. The **same stale illustration** survives one package over, in the behavioural pin for that very function:\n\n`packages/plugins/plugin-security/src/audience-anchors.test.ts:65`\n\n```\nit(\"a plain '*' wildcard without D5 bits is anchor-safe for everyone (#2753 — member_default's shape)\", () => {\n```\n\nThe fixture on the next line is `{ objects: { '*': { allowRead: true, allowCreate: true, allowEdit: true } } }`. That is no longer `member_default`'s shape — measured against the shipped `defaultPermissionSets` array on `origin/main` @ `c32944d67`, `member_default`'s `objects['*']` is `undefined`.\n\nA secondary, weaker instance sits at line 103, `it('allowExport:false / unset stays anchor-safe (member_default keeps binding)')`. That title is **still true** (`member_default` still carries no `allowExport` and still resolves anchor-safe), but its line 107 assertion is again a wildcard shape the set no longer has, so the name and the fixture have drifted apart.\n\n## Evidence\n\nProbe against the real imported array plus the real predicates (not a transcription):\n\n```\n=== member_default ===\n  has '*' entry:         false\n  describeHighPrivilegeBits          -> null\n  describeAnchorForbiddenBits(everyone) -> null\n\n=== viewer_readonly ===\n  has '*' entry:         true\n  '*' value:             {\"allowCreate\":false,\"allowRead\":true,\"allowEdit\":false,...}\n  describeHighPrivilegeBits          -> null\n  describeAnchorForbiddenBits(everyone) -> null\n  describeAnchorForbiddenBits(guest)    -> \"a '*' wildcard grant (guest bindings admit explicit objects only)\"\n```\n\n## What is NOT wrong\n\nThe assertions are right and the rule is right. D5 genuinely does not flag read/create/edit on `'*'`, so the fixture pins the correct predicate; only the set *named* alongside it is stale. This is naming drift, not a coverage hole — which is exactly why it stayed green through #5491.\n\n## The wider gap this exposes\n\nNothing mechanically relates \"prose names set X as having shape Y\" to what `defaultPermissionSets` actually ships, so this drift is silent by construction: #5491 changed the set and three separate pieces of text went stale without a single gate moving. The repo already has the idiom for this class — `packages/spec/src/identity/position-delegatable-enforcer.pin.test.ts` (#6628) pins \"the JSDoc may name a lint rule only if that rule exists\" against a machine-readable rule table, with an explicit anti-vacuity guard.\n\nA pin was deliberately **not** added in #6696's PR: that card is scoped `domain:spec-surface` (text face, `packages/spec` only), and the authority such a pin must read — the `defaultPermissionSets` array — lives in `plugin-security`, which `packages/spec` cannot import without inverting the dependency graph. The natural home is therefore beside `audience-anchors.test.ts`, which can import the array directly and read spec's source text the way #6628's pin reads `packages/lint`.\n\n## Suggested disposition\n\nTwo candidate sizes, for triage to pick:\n\n- **A (minimal):** re-word the two test names so they stop naming `member_default` for a shape it no longer has — e.g. name `viewer_readonly`, or drop the set name and describe the shape.\n- **B (with a guard):** A, plus a pin in `plugin-security` asserting that any default permission set a nearby doc/test names as a plain-wildcard example actually carries `objects['*']`, with an anti-vacuity floor and a synthetic self-test in the #6628 idiom.\n\nRelated: #6696 (the spec-side half, fixed), #5491 / PR #6684 (the cause), #6628 (the pin idiom).\n"
+}

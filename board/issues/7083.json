@@ -1,0 +1,35 @@
+{
+  "number": 7083,
+  "kind": "pull_request",
+  "title": "feat(runtime,rest): /packages 域补齐授权门 —— 写要 manage_metadata、读要 D4 读集、全域匿名门,两 transport 各一份 (#7033) (#7023)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/xl",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T14:17:30Z",
+  "updated_at": "2026-08-09T15:33:11Z",
+  "closed_at": "2026-08-09T15:33:09Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": "2026-08-09T15:33:09Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/7083",
+  "body": "Fixes #7033\nFixes #7023\n\n## 背景\n\n`/packages` 是最后一个**零授权判据**的路由域(`packages.ts` 739 行授权命中数 0,且不在 `authz-conformance.matrix.ts`,也没有其五个同族域都有的 `shouldDenyAnonymous`)。#7023 的只读普查实测:一个连 `userId` 都没有(身份解析产出 `principalKind: 'guest'`)的调用方,对下面四条路由一律 **200** 并真的调进目标函数,其中两条**破坏性**。本 PR 按维护者 2026-08-09 裁定,**单 PR 关掉两卡**。\n\n## 门的位置(在解析之前)\n\n所有门都在 `deps.resolveService(_context, 'protocol')` / metadata 服务解析**之前**,且在改动 registry 之前。原因两条:(1) 拒绝时**不写不删**——「先删后拒」是本域最该防的形态;(2) 不让未授权调用方拿 501-vs-200 / 401-vs-503 的差别去指纹探测部署装了哪些能力。`isSystem`(不可从线上伪造)旁路,CORS `OPTIONS` 放行。\n\n## 四路由 × 每 transport 的 before/after\n\n零能力已认证调用方 `{userId:'u_portal', systemPermissions:[]}`,及匿名调用方:\n\n| 路由 | transport | before(匿名 / 零能力) | after(匿名 / 零能力) |\n| :-- | :-- | :-- | :-- |\n| `GET /packages`(枚举面) | dispatcher | 200 / 200 | 401 / 403(需 studio.access 或 setup.access) |\n| `GET /packages/:id/export`(整包 27 类) | dispatcher | 200 / 200 | 401 / 403(读集) |\n| `POST /packages/:id/discard-drafts`(破坏性) | dispatcher | 200 / 200 | 401 / 403(需 manage_metadata) |\n| `POST /packages/:id/publish-drafts`(#7023) | dispatcher | 200 / 200 | 401 / 403(manage_metadata) |\n| 其余写/破坏性(install/enable/disable/publish/commit-revert/rollback/revert/adopt-orphans/duplicate/manifest-PATCH/DELETE) | dispatcher | 无门 | 401 / 403(manage_metadata) |\n| `GET /packages/:id/commits` | dispatcher | 无门 | 401 / 403(读集) |\n| `POST /api/v1/packages/publish` | REST direct-mount | 无门 | 401 / 403(manage_metadata) |\n| `GET /api/v1/packages` | REST direct-mount | 无门 | 401 / 403(读集) |\n| `GET /api/v1/packages/:id` | REST direct-mount | 无门 | 401 / 403(读集) |\n| `DELETE /api/v1/packages/:id` | REST direct-mount | 无门 | 401 / 403(manage_metadata) |\n\n**两 transport 各一份门**(别重演 `/meta` 早期只加一侧):\n- dispatcher:`runtime/src/domains/packages.ts` —— 全域 `shouldDenyAnonymous` 为 `handlePackagesRequest` 第一条语句 + 每路由 `requireManageMetadata` / `requireReadCapability`。\n- REST direct-mount:`rest/src/package-routes.ts` 的 `refusePackageRequest`,经 `RestServer.resolvePackageRouteExecutionContext`(与 `/meta` REST 门同一身份解析)取上下文;**缺 resolver 失败即关(401)**,不留裸露回退。\n\n**读集引用常量,不复制**:`requireReadCapability` 引用 `OBJECT_SCHEMA_MASK_EXEMPT_CAPABILITIES`(`{studio.access, setup.access}`,ADR-0106 D4),使 package 读 cohort 不会与 metadata 掩码豁免集漂移。\n\n**信封**:dispatcher 走 `deps.error(...)`(wrapped `{success:false, error:{code, message, httpStatus}}`);REST direct-mount 该面 DECLARES 的是 wrapped BaseResponseSchema,故 401/403 均经共享 `sendError` 发出(`check:route-envelope` 把该模块钉在**零手写 body**),不是 flat `ANONYMOUS_DENY_BODY`。两者都断 `status` + `code`(ADR-0112)。\n\n## pin 覆盖(每路由 × 每 transport)\n\n- dispatcher:`runtime/src/domains/packages-capability-gate.test.ts`(76 例)—— 匿名 401 且 registry/目标 spy 未进、OPTIONS 不被误判 401、写门每路由(零能力 403 且目标 spy **未进**、读集 cohort 403、`manage_metadata` 放行、`isSystem` 放行)、读门每路由、两 cohort 互不越界;`discard-drafts` **直接读库断言草稿未删**(零能力 403 与匿名 401 两档,drafts 数组不变)。\n- REST direct-mount:`rest/src/package-envelope.conformance.test.ts` 的 `packages authz` describe —— 四路由 × 匿名 401 / 缺 resolver 失败即关 / 零能力 403 / 错 cohort 403 / 对 cohort 放行 / `isSystem` 放行,拒绝断 `status`+`code` 且 service spy **未进**。\n- **反向验证**:禁用 dispatcher 三处门 → 该测 76 例中 40 例(拒绝类)转红;禁用 REST `refusePackageRequest` → conformance 44 例中 16 例(拒绝类)转红;allow-path 保持绿。方向如预期(usual RED)。\n- matrix:`authz-conformance.matrix.ts` 加 `anonymous-deny-packages` 行 + `authz-conformance.test.ts` 加 probe(`shouldDenyAnonymous` 命中 → key)+ high-risk;dogfood `showcase-anonymous-deny-surfaces.dogfood.test.ts` 加四条匿名 401 + member teeth(该 showcase **无 package 服务**,`/packages` 由 dispatcher 服务,故归 wrapped 族)。\n\n## 收尾侧\n\n- 既有测试 boot 桩:`http-dispatcher.test.ts` / `domain-handler-registry.test.ts` / `dispatcher-validation-error(.real).test.ts` / `error-passthrough.test.ts` 原以匿名 `{request:{}}` 驱动 `/packages`,现注入持能力调用方(经 `timedResolveExecutionContext` 或直传 `executionContext`),使其继续命中各自 pin 的路由/错误映射,未削弱。\n- 前 dev 中断遗留的 3 个 REST 测试(`package-routes-query-multiplicity` / `direct-mount-base-follows-apipath` / `discovery-advertised-direct-mounts.parity`)驱动被门路由却未过门:composition 侧注入门放行 resolver 恢复 200;plugin-boot 侧(真实 resolver、无 auth 服务)匿名探针如实断 401(路由仍已挂载)。\n- changeset:两包 `minor`。\n\n## 盲区(明说)\n\n`cloud` 仓在本会话与前序普查会话中**均未挂载**(`add_repo` 两次被拒),调用方普查**不覆盖该仓**。若 `cloud` 内存在直打 `/api/v1/packages/*` 或 dispatcher `/packages`、且今天不持 `manage_metadata` / D4 读集的生产调用方,本门可能将其 403 —— 落地后需在 `cloud` 补一次调用方普查复核。`#7020` 记录的「门能力集 ≠ D4 掩码豁免集」对齐方向仍归维护者,本 PR 不动。\n\n## 验证\n\n- `pnpm --filter @objectstack/runtime test` → 117 files / 1829 passed;`--filter @objectstack/rest test` → 76 / 1218 passed。\n- `typecheck` runtime + rest 均 0 error。\n- `check:route-envelope` / `check:authz-resolver` / `check:error-code-casing` / `check:empty-changeset` / `check:nul-bytes` 均 pass;`authz-conformance.test.ts` 9 passed;eslint 改动文件 0 问题。\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_017uFVNMmTxLpmfQYiuKM1Yx)_"
+}

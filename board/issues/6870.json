@@ -1,0 +1,34 @@
+{
+  "number": 6870,
+  "kind": "pull_request",
+  "title": "docs(agents): 版本发布禁令写入 AGENTS.md —— PD #15 + 合流点的第二类 PR (#6830)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T01:55:31Z",
+  "updated_at": "2026-08-09T02:45:48Z",
+  "closed_at": "2026-08-09T02:45:47Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": "2026-08-09T02:45:47Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/6870",
+  "body": "Fixes #6830\n\n#6170(维护者 2026-08-07 拍板)的发版禁令此前只存在于 `.claude/skills/pm-dispatch/SKILL.md:2458-2468` —— 一个**只有 PM 车道会加载**的文件,而它自己的措辞约束的是「任何 AI 座位(PM / dev / Routine / 队列管家)」。约束所有座位的规则必须所有座位都读得到。本 PR 把它写进 `AGENTS.md`,与 PR #6834 刚落地的 PD #14(ADR 合并禁令)并列。\n\n## 前提复核(动手前)\n\n在本 worktree 的 `origin/main` @ `659526212` 上实测,issue 的前提成立:\n\n```\n$ grep -inE \"release action|发版|changeset publish|npm publish|version tag|workflow_dispatch|版本发布|version packages\" AGENTS.md\n(zero hits)\n$ grep -inE \"Prime Directives\" AGENTS.md      # 反向探针:扫描器本身有效\n115:## Prime Directives\n```\n\n## 改了什么(两处,均在 `AGENTS.md`)\n\n**1. Prime Directive #15**(`AGENTS.md:152-162`)—— 形态照抄 PD #14:\n\n- **维护者原话逐字、未翻译**引用。已按码点逐字符核对过与 #6170 评论中的原文一致:两个逗号是 U+002C(ASCII,非全角)、`ai` 保持小写、`rc.4` 前有空格、句号是 U+3002。**没有做任何标点或大小写规范化** —— 这正是「verbatim and untranslated」的意思。\n- **边界划清**:发布**周边**工作(发版板、`.objectui-sha` pin bump、版本对账 #6149/#6169、写 changeset、用 `npm view` / `git ls-remote --tags` **核验**发布状态)照旧归座位;**发布动作本身**不归任何座位 —— `changeset publish` / `pnpm run release`、推版本 tag、出 GitHub Release、推运行时镜像、`workflow_dispatch` 触发发布类 workflow、以及合并 Version Packages PR。另附:发现无人下令的发布痕迹按事故立案,⛔ 不跑「补救性发布」。\n- **#6169 先例**:2026-08-07 `release.yml` 的 `on: push` 通道在 run `31146224227`(event `push`,actor `github-merge-queue[bot]`)下完整发出 rc.4 —— 69 个包上 npm、69 个 tag、GitHub Releases、运行时镜像,**无人点过任何按钮**。四天前 rc.3 同一机制(#6135)。结论一句话:**机械通道的存在不构成授权** —— 与 PD #14 关于队列按钮的那句同构。\n- **#6208 点名**:Version Packages PR(`chore: version packages`)是那一个「永远不由 AI 座位合并」的 PR。并说明它为什么危险 —— 它是 bot 开的、按设计长期敞开、每次 push 到 main 都重新生成,所以「绿、最新、没人反对」是它的**常态**,不是「该合了」的信号。\n\n**2. Multi-agent discipline §7**(`AGENTS.md:304-311`)—— PD #14 在此留下的「**One** class of PR never enters this path」在 PD #15 之后已不准确,改为两类(a: `docs/adr/**`;b: Version Packages PR / 任何合并即发布的 PR),并把挂队前的检查从「看文件面」扩成「看文件面**和作者**」—— 因为 b 类是靠作者认出来的,不是靠路径。\n\n## 一个编辑判断(card 让我自己定的)\n\nissue 问:两条禁令合成一条「AI 座位不做的治理动作」总 directive,还是两条相邻?**选了两条相邻**,理由三条:\n\n1. 两份维护者原话必须各自附在自己的规则下(issue 自己也要求「verbatim quotes 必须分开且不翻译」);合并成一条会把两段引文塞进同一个伞下,读者要自己拆哪句管哪件事。\n2. PD #14 的**编号已经被 `AGENTS.md` 两处正文引用**(§7、Post-Task Checklist)。合并会动这两处已合入的引用。\n3. PD #14 自己就把发版禁令写成了「structurally identical to ...」的**外部引用**,即它落地时就预设了对方是**另一条**规则。本 PR 因此不改 PD #14 一个字,只补反向链接方向的内容。\n\n## 验证 —— 说实话:这是散文,没有机器读者断言它\n\n**⛔ 不为这个 PR 编造测试形状的证据。** 改动是 `AGENTS.md` 的纯散文:仓库里**没有任何 gate 解析** Prime Directive 的条目、编号或正文,所以「新增/更新测试」对本 PR 不成立,写一个也只会是断言我自己刚写下的字符串。能跑的、和这次改动真实相关的只有下面这些:\n\n```\n$ node scripts/check-nul-bytes.mjs\ncheck-nul-bytes: OK (scanned 6398 tracked text file(s); skipped 5 binary,\n1 non-regular; no raw ASCII control bytes).\n\n$ grep -naP '[\\x00-\\x08\\x0b\\x0c\\x0e-\\x1f\\x7f]' AGENTS.md\n(clean — 改动引入 CJK 与 emoji,自查超出 gate 扫描面)\n\n$ pnpm check:skill-frame-sync\n✓ check-skill-frame-sync self-test: 12 cases pass.\n✓ check-skill-frame-sync: 4 copies of the decision frame are structurally\n  isomorphic across 3 files ... EXIT=0\n\n$ pnpm check:skill-compatibility\n✓ check-skill-compatibility-version self-test: 18 cases pass.\n✓ check-skill-compatibility-version: 11 SKILL.md file(s) reconciled against\n  77 workspace packages ... EXIT=0\n\n$ pnpm check:docs-audit-scope\n✓ docs-accuracy-audit scope is in sync with content/docs/: 178 hand-written doc(s).\n✓ release-owned pages are in scope and read-only: 9 page(s) ... EXIT=0\n```\n\n### 一个我自己提出、又自己证伪的怀疑(写在这里,免得复核者重走一遍)\n\nPD #15 最初直接跟在 PD #14 末段缩进段落之后、**中间没有空行**。我怀疑这触发 CommonMark 的 lazy continuation —— 有序列表项只有编号为 `1.` 时才能打断段落,于是 `15.` 会被吞进上一段、整条指令渲染成 PD #14 的续写。\n\n**这个怀疑是错的**,而且我在据此立单之前用真解析器验掉了。那条限制只作用于「**列表的第一项**打断段落」的情形;PD 列表此时早已打开,后续项不受编号限制:\n\n```\n$ python3 -c \"…markdown_it('commonmark') 渲染 AGENTS.md 的真实切片 141-153,两个版本…\"\nWITH blank line (current file):        3 li elements; PD15 text in li index [2]\nWITHOUT blank line (my original edit): 3 li elements; PD15 text in li index [2]\n```\n\n两种写法渲染**完全一致**。空行保留下来了,但理由只是源码可读性,**不是**修了任何渲染缺陷 —— 本 PR 不声称修过。\n\n同一个怀疑一度也指向 `AGENTS.md:441`(§7 那张列表的第 11 条),我已经准备按 Prime Directive #10 立一张 finding 单;**同样验掉了**,第 11 条本来就渲染为独立列表项:\n\n```\nli[3]: CI on the PR, and then the merge queue on its rebuilt genera\nli[4]: Generated artifacts don't text-merge — a driver defers them\nRule 11 rendered as its own list item: True\n```\n\n所以**那张单没有立** —— 没有缺陷可立。记在这里是因为「查过、是虚惊」本身对下一个读到这段缩进的人有用。\n\n## 刻意**没有**做的事\n\n- ⛔ 没动发版工具链(`.github/workflows/release.yml`、`scripts/`、`.changeset/`)—— card 明确划为 out of scope。本 PR 只写规范,不改机器。\n- ⛔ 没动 `docs/adr/**`(既是 card 的 out of scope,也会让这个 PR 落进 PD #14 那一类不可由座位合并的 PR)。\n- ⛔ 没动 `content/docs/releases/`。\n- **没改 PD #14 一个字** —— 它刚由 #6834 合入,且已自带指向发版禁令的前向引用;只在 §7 那处它留下的「one class」上做了必要的事实性更正。\n- **没有**在 Post-Task Checklist 第 2 条(PD #14 在那里加了 `docs/adr/**` 例外)追加发版例外:那一条讲的是「你自己这次任务的 PR 挂队」,而 Version Packages PR 由 github-actions[bot] 开,从构造上不会是任何座位「自己任务的 PR」。加在那里是噪音,真正的分叉点在 §7,已改。\n- **没有加 changeset**:纯内部 agent 流程文档,不进任何 npm 包。与同族 PR #6834(同样只改 `AGENTS.md`、无 changeset)一致 —— 本 PR 打 `skip-changeset`。\n\n## 留给复核的判断\n\n用 **`Fixes`** 而非 `Part of`:issue #6830 要的就是「AGENTS.md 里有这条规则」,本 PR 完整交付。但**机器强制**那一半(对应 ADR 侧的 #6785 —— 例如给 `release` environment 配 required reviewers、或把 Version Packages PR 纳入 CODEOWNERS)是**另一件事**,#6170 已把它记为维护者的一次性 Settings 操作。PD #15 末段对此说了实话:`workflow_dispatch` 挡得住 push / merge queue / bot token / schedule 四种事件,**挡不住一个带认证的座位直接调 Actions API** —— 那正是这条散文规则要补的洞。"
+}

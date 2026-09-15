@@ -1,0 +1,35 @@
+{
+  "number": 6897,
+  "kind": "issue",
+  "title": "content/docs/ui/views.mdx states a lookup in a view's searchableFields is always refused — measured, it is accepted whenever the object declares it",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T03:12:53Z",
+  "updated_at": "2026-08-09T04:52:29Z",
+  "closed_at": "2026-08-09T04:52:29Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6897",
+  "body": "Out-of-scope finding from #6675 (skill-side `searchableFields` coverage). Recorded, not claimed — filed unassigned.\n\n## Fact (origin/main @ `e5bd76859`)\n\n`content/docs/ui/views.mdx:106` (the `searchableFields` row, landed by PR #6670) says:\n\n> Entries must be the object's **own** columns: a lookup (`project_id`) or a dotted path (`project_id.name`) is refused, and every toolbar search on the list then returns `400 INVALID_FIELD` (#4254)\n\nThe dotted-path half is correct. The **lookup** half is not: the boundary is membership in the object's server-resolved *allowed set*, and field **type** is consulted only on the auto-default branch — i.e. only when the object declares no `searchableFields` at all.\n\n## Measured, both layers\n\nObject `support_case` declaring `searchableFields: ['subject', 'account_id']`, where `account_id` is `{ type: 'lookup', reference: 'crm_account' }`:\n\n| view narrows to | `validateSearchableFields` (packages/lint) | `assertSearchFieldsAreSearchable` (packages/metadata-protocol) |\n|:---|:---|:---|\n| `['account_id']` — a lookup, declared | `[]` (clean) | **ACCEPTED**, engine `searchFields = [\"account_id\"]` |\n| `['account_name']` — a `text` column, NOT declared | `searchable-field-unsearchable` | `400 INVALID_FIELD` |\n\nSo a `text` column is refused and a `lookup` is accepted, on the same object — the exact inverse of a type-based reading. The runtime rule is `resolveSearchFieldResolution` (`packages/spec/src/data/search-fields.ts`): the declared branch is `searchableFields?.filter((f) =-> all[f])`, filtered by **existence, never by type**; the type list (`SEARCHABLE_TEXTUAL_TYPES` / `SEARCHABLE_ENUM_TYPES`) is reached only by `autoDefaultFields`, i.e. the no-declaration branch.\n\n`packages/lint/src/validate-searchable-fields.ts` already says this in its own module note, and deliberately does not flag a lookup declared on the object:\n\n> The OBJECT's own `searchableFields` stays existence-only: the runtime's declared branch filters by existence, never by type, so a json or lookup column declared THERE is a choice the engine executes (a `$contains` over the raw column), not a 400. Flagging it would reject metadata the runtime accepts — the false finding that makes authors stop trusting the linter (ADR-0072 D1).\n\n## Why it matters\n\nThe row reads as a prohibition on a configuration the platform supports. An author who has legitimately declared a lookup searchable (a `$contains` over the stored id — narrow, but the engine executes it) would read this row and delete a working narrowing; an AI author following the docs would refuse to emit one. It also teaches the wrong mental model for the boundary, which is what makes the *real* refusal (a column outside the declared set — including a `text` one) surprising when it lands.\n\n## Scope if promoted\n\nXS: correct the `views.mdx:106` row to state the rule as set-membership — \"must be in the set the object allows: its declared `searchableFields` if it has one, otherwise the auto-default text-like columns\" — keeping the dotted-path clause as-is. Check the sibling prose landed by the same PR (`content/docs/data-modeling/schema-design.mdx`, `content/docs/api/data-api.mdx`, `content/docs/protocol/objectql/query-syntax.mdx`, `content/docs/data-modeling/queries.mdx`) for the same type-based phrasing before editing.\n\nNot fixed in PR for #6675 — that PR is scoped to `skills/objectstack-ui/SKILL.md`, whose new section states the set-membership rule and pins both directions in `packages/lint/src/validate-searchable-fields.test.ts`.\n\nRefs: #6675, PR #6670, ADR-0061, #4254, #4830."
+}

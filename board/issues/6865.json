@@ -1,0 +1,33 @@
+{
+  "number": 6865,
+  "kind": "issue",
+  "title": "finding: lint.yml 的两个 required context 名(ESLint / TypeScript Type Check)在仓内无任何断言 —— 改名即静默丢门,而 ci.yml 的同类名字有 check:shard-attestation 守着",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:queue"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T01:51:24Z",
+  "updated_at": "2026-08-09T12:04:36Z",
+  "closed_at": "2026-08-09T08:13:43Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6865",
+  "body": "观察级发现(observation-class:今天没人被咬,是一条潜伏的改名陷阱)。核 #5617 时量到,单独立案不夹带在任何 PR 里。\n\n## 事实\n\n#5617 的设置面已于 2026-08-07 落地:`ESLint` 与 `TypeScript Type Check` 现在是 `main` 分支保护的 required context。这两个名字是 **job 级 `name:` 的值**,不是 workflow 名、也不是 rollup:\n\n- `.github/workflows/lint.yml:24-25` — job id `lint` → `name: ESLint`(承载 25 条 `check:*` 门禁族)\n- `.github/workflows/lint.yml:506-507` — job id `typecheck` → `name: TypeScript Type Check`\n\n也就是说这两行字面量**就是**分支保护的契约。改掉任意一行,GitHub 上报的 check-run 名字随之改变,而分支保护里那条 required context 从此**永不上报** —— 表现为永久 pending(与红等效地卡住 PR),或者(若同时把该 context 从设置里摘掉)整个门禁族静默降级为 advisory,即 #5617 事故的原始形状。\n\n## 为什么说这是缺口:同类风险在 ci.yml 那侧是**有守的**\n\nci.yml 的两个聚合门禁名有机器断言:\n\n- `scripts/check-shard-attestation.mjs:106-107`\n  ```js\n  /** The gate jobs that carry a branch-protection-required context. */\n  const REQUIRED_GATE_JOBS = ['test-gate', 'dogfood-gate'];\n  ```\n- 同文件 `:410-412` 在 job 消失/改名时判红:`job '...' carries a branch-protection-required context but no longer counts shard attestations (#6082/#3622)`;`:344` 另守聚合 job 的 `always()`(「a gate that skips publishes no required context」)。self-test `:655` 里有 `test-gate` → `test-gate-renamed` 的改名用例,方向明确。\n\nci.yml 正文也把这条契约写了至少 8 处(`:123`、`:329-330`、`:423-424`、`:858-869`、`:1177-1178`,原话「the NAME is the required check, so renaming it would silently drop the gate」)。\n\n**lint.yml 的两个名字享受不到其中任何一条**:`check:shard-attestation` 只读 ci.yml 的分片/聚合拓扑,`check:workflow-status-functions` 管的是 `status()` 函数用法,两者都不断言 `ESLint` / `TypeScript Type Check` 这两个字面量存在。lint.yml 里也没有对应的契约注释(它只在 `:10-13` 说明了 `merge_group` 触发器的必要性,没说 job 名是契约)。\n\n## 可能的处置(留给分诊定,本人不预设)\n\n1. 把 lint.yml 的两个 job 名加进一条 `check:*` 的字面量断言(最小改动:在 `check-shard-attestation.mjs` 之外新开或扩一条,断言 `lint.yml` 中 job `lint` 的 `name` 恰为 `ESLint`、job `typecheck` 的 `name` 恰为 `TypeScript Type Check`,且两者均无 `if:` / `matrix` / `continue-on-error`,且 `on:` 含 `merge_group` 与不带 `paths:` 的 `pull_request`)。\n2. 仅补注释(与 ci.yml 同形的 doc block),不加机器断言。\n3. 不做 —— 认为改这两个名字的概率足够低。\n\n⚠️ 无论走哪条,都有一个**结构性限制**必须先说清:**任何 agent 座位都读不到分支保护配置**(实测 `GET /repos/objectstack-ai/objectstack/branches/main/protection` 返回 HTTP 403 `GitHub access is not enabled for this session`),所以这类 check 只能断言「仓内这一侧的名字没变」,**不能**断言「它确实在 required 集里」。前者可测、有价值;后者只能靠维护者核对(#5617 的剩余项正是如此)。把它写成「断言 required 集」会是一道读不到自己声称要读的东西的门。\n\n关联:#5617(required 集缺口与审计表)、#6082 / #3622(同族的分片改名陷阱)。\n"
+}

@@ -1,0 +1,32 @@
+{
+  "number": 6243,
+  "kind": "issue",
+  "title": "sweep(spec-surface): 5-item description-surface truth sweep — one claim, one PR, per-item checklist review (#6085 #6081 #6137 #6065 #5676)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "qq9340100"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T11:48:45Z",
+  "updated_at": "2026-08-09T10:29:40Z",
+  "closed_at": "2026-08-09T10:29:40Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6243",
+  "body": "First bundled trivia sweep (maintainer 2026-08-07: PM coordinates same-class trivia into one card — economy of a drive-by fix WITHOUT losing the state machine). One dev, one claim, one PR closing all seven via multiple `Fixes` lines; review is a per-item checklist.\n\n## Membership rule (why exactly these seven)\n\nSame class: **spec description-surface text that lies or drifted** — JSDoc/describe/ledger prose corrections with ZERO open semantic forks (each is either truth-restoration or already ruled). No behavior changes; regen + existing pin conventions carry the verification.\n\n## The seven (fix direction per item — each already carries an audit/triage comment)\n\n| # | file | fix |\n|---|---|---|\n| #6085 ★ | `expression.zod.ts` dialect table (renders verbatim to the published ref page) | remove retired `js` row (says \"mapping\"), add missing `template`; align with the enum 12 lines below; regen; pin per retirement-docs convention |\n| #6081 ★ | `stack.zod.ts:396` skills JSDoc | drop \"trigger phrases for intent matching\" copy — `triggerPhrases` retired in #3896; point authors at the current spelling; keep the existing pin test honest |\n| #6161 | strictness ledger prose (`.md`, hand-written half) | the two `no gate` exemplars were re-verdicted (#5020/#5068); refresh the classification-table exemplars to current population (tree-wide `no gate` = 0) |\n| #6137 | `theme.zod.ts` / `chart.zod.ts` | delete the two obsolete \"no doc block above this\" `//` warnings (#5059 made them wrong) |\n| #6065 | `ApiEndpointSchema`/`ApiMappingSchema` `.describe()` ×3 | ruled 2026-08-07 direction B: pure describe copy — stop advertising whole-key rejection the publish gate doesn't do; vocabulary stays frozen (#5040) |\n| #5676 | `DiscoverySchema.environment` (3) vs `EnvironmentTypeSchema` (7) | ruled remaining scope: docs cross-reference both ways + a subset pin test; explicitly NO contract change |\n| #5886 | `packages/spec/src/data/hook.test.ts:422` | re-spell the insert fixture `input: { doc: … }` to the engine's real shape (spec half of #5671) |\n\n**Excluded on same-file serialization**: #6094 (`flow.zod.ts` tombstone) collides with in-flight #4415 (flow schema family) — it rides the NEXT sweep after #4415 lands.\n\n## Discipline\n\n- ⛔ Nothing beyond the seven listed fixes — a sweep with riders defeats its own review model.\n- Spec regen: the sweep touches TSDoc that feeds generated reference pages — expect `content/docs/references/**` regen. **Landing order**: in-flight #4415 also regenerates spec artifacts; whichever PR lands second follows the generated-artifacts resync four-step (merge main → checkout generated from main → commit the merge → full regen → assert sibling entries survived).\n- PR body: per-item checklist mirroring the table, each with before/after one-liner.\n- All seven members are assigned + marked \"riding this sweep\" — they close via the PR's `Fixes` lines."
+}

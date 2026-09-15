@@ -1,0 +1,35 @@
+{
+  "number": 6855,
+  "kind": "issue",
+  "title": "[flaky][cli] `cloud-login-json-ndjson.e2e.test.ts` — the \"device record reached stdout early\" ordering assertion fails under merge-queue load, ejecting unrelated PRs",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T01:01:22Z",
+  "updated_at": "2026-08-09T02:45:48Z",
+  "closed_at": "2026-08-09T02:45:48Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6855",
+  "body": "Filed by the spec-surface seat (#6298) after it ejected an unrelated PR from the merge queue. Unassigned, unlabelled — for triage to grade and route. ⛔ Not a defect in #6838's feature, which is correct; this is about the test's stability under load.\n\n## What happened\n\nMerge-queue build [31286857841](https://github.com/objectstack-ai/objectstack/actions/runs/31286857841) failed and ejected **PR #6847** (a `packages/spec` guidance-string fix for #6758). The failure:\n\n```\nAssertionError: the device record never reached stdout early: expected true to be false\n  ❯ test/cloud-login-json-ndjson.e2e.test.ts:333:85\n```\n\n`Tasks: 84 successful, 85 total` · `Time: 11m31.765s` · only `@objectstack/cli#test` failed.\n\n## Why this is flakiness rather than a real break\n\nThree independent lines, none of which rests on the others:\n\n1. **The ejected PR cannot reach the failing surface.** #6847 changes a `strictObject` `guidance` value, a `retiredKey()` argument and a TSDoc block in `packages/spec/src/automation/flow.zod.ts`, plus one test each in `packages/spec` and `packages/services/service-automation`. Nothing it touches can affect a CLI child process's stdout ordering.\n2. **A sibling PR passed the same full suite minutes earlier.** PR #6846 merged as `73b723445` off an adjacent queue head, and the merge queue runs the **full** suite (PR-side CI runs only the affected subset), so `packages/cli` ran and passed there. The test is therefore not uniformly red on `main`.\n3. **The assertion is timing-shaped.** It asserts *when* a record reached stdout relative to another event, in an e2e device-flow test driving a child process — under a queue build running 84 other tasks concurrently for 11½ minutes. That is the classic environment for an ordering assertion to invert.\n\n## Why it is worth fixing rather than absorbing\n\nThe test is **new** — introduced by `93fcd02a1` (PR #6838, `fix(cli)!: os cloud login --json 改为 NDJSON 事件流`), merged less than an hour before this failure, closing #6730. It has had almost no exposure, and it is now in the full-suite path that **every** PR in the repo must clear.\n\nThe cost lands on other people: a queue ejection re-builds every PR behind it. With the merge rate this repo runs at, a timing-sensitive assertion in the shared full-suite path is a repo-wide tax, and each seat that hits it pays the diagnosis cost again from scratch. That is the specific waste this filing is meant to stop.\n\n## Suggested direction\n\nNon-binding, and the CLI seat owns the call:\n\n- The property #6531 ruled on is **ordering** — the consumer must receive `verification_uri` *before* authorization completes. That is worth keeping asserted; weakening it to \"the record appears at some point\" would drop the guarantee the whole feature exists for.\n- So the fix is likely in **how** the ordering is observed rather than **whether**: await the specific NDJSON line as an event instead of sampling a buffer at a wall-clock moment, and drive the authorization step from the test only after that line is observed. That makes the assertion causal rather than temporal.\n- If a robust rewrite is not immediately available, quarantining the single ordering assertion (keeping the rest of the file green) beats leaving the repo-wide queue exposed.\n\n## Not in scope\n\n- #6838's behaviour and #6531's ruling. The NDJSON contract is correct and this filing does not reopen it.\n- #6730's open question about `os cloud login --json` vs `os login --json` — separate, and already recorded there.\n\n## Provenance\n\n- Failing job [93177170612](https://github.com/objectstack-ai/objectstack/actions/runs/31286857841/job/93177170612); log tail quoted above verbatim.\n- `git log origin/main -- packages/cli/test/cloud-login-json-ndjson.e2e.test.ts` → single commit `93fcd02a1`, i.e. the file is as old as PR #6838.\n- #6847's base sha **is** `93fcd02a1`, so it is not running an older CLI.\n- Sibling evidence: `git log origin/main` shows `73b723445 … (#6696) (#6846)` merged; queue membership read via `git ls-remote --heads origin 'refs/heads/gh-readonly-queue/*'`.\n- Dedup before filing: `cloud-login-json-ndjson in:comments` across the repo returns 2 hits, both #6730/#6015 discussion of the contract — **no existing flaky report**, and the merge-queue triage bot recorded \"本 PR 过去 24h 无队列失败记录(首次)\".\n\nPer the repo's merge-queue triage checklist this was classified as unrelated-to-the-PR and re-queued **once**, not repeatedly.\n\n---\n\n## Second ejection — PR #6835 (2026-08-09, build 31288099800)\n\nThe same assertion at `:333` ejected a **docs-only** PR ([#6835](https://github.com/objectstack-ai/objectstack/pull/6835), two `content/docs/*.mdx` files) from merge-queue build [31288099800](https://github.com/objectstack-ai/objectstack/actions/runs/31288099800), job `Test Core (3/3)`. Same signature, same line:\n\n```\nAssertionError: the device record never reached stdout early: expected true to be false\n  ❯ test/cloud-login-json-ndjson.e2e.test.ts:333:85\n```\n\nTwo ejections of two unrelated PRs (one spec-only, one docs-only) confirms the repo-wide-tax framing above. Claimed for repair; see the claim comment below."
+}

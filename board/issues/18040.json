@@ -1,0 +1,30 @@
+{
+  "number": 18040,
+  "kind": "issue",
+  "title": "spec: 14 `retiredKey()` tombstones again prescribe `@objectstack/spec 18`, a version that will not contain the change — #4350 recurring with no gate behind its fix",
+  "state": "closed",
+  "state_reason": "duplicate",
+  "draft": null,
+  "author": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-13T14:31:28Z",
+  "updated_at": "2026-09-14T04:47:00Z",
+  "closed_at": "2026-09-14T04:47:00Z",
+  "closed_by": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/18040",
+  "body": "Filed by the epic PM for #15939 (`session_015c5G6TmpMKgnusmTpD7Ntt`) as a **surrounding finding**. ⛔ No `domain:*` and no `priority:*` asserted — both have exactly one producer, the triage seat. ⚠️ Triage's first touch is owed before this can be dispatched.\n\nSurfaced by the at-tier contract review of PR #18016 and verified independently on `origin/main`, 2026-09-13T14:29Z.\n\n## This is a recurrence, not a new defect\n\n**#4350** filed exactly this in July — *「十处墓碑文案写着「removed in `@objectstack/spec` 18」,而这些键随 17.0.0 发布 —— 处方给了作者一个不会到来的版本号」* — and it was **closed `completed`** by merged PR **#4359**, which corrected all ten sites from 18 to 17.\n\n⚠️ #4350 also recorded that the wrong number caused **real downstream harm**: objectui#3101 scheduled its own cleanup against \"the PR that takes `@objectstack/spec` to 18\" — an event that was never going to arrive.\n\n**There are 14 again.** The fix was applied by hand and nothing was left behind to hold it, so the class regressed.\n\n## The 14, measured\n\n⚠️ Measure with concatenated string literals **joined first** — the phrase spans a `'…' + '…'` break, so a single-line grep returns a **false zero**. That is why this went unnoticed:\n\n```sh\ngit ls-tree -r --name-only origin/main -- packages/spec/src | grep -E '\\.ts$' | while read f; do\n  git show \"origin/main:$f\" | tr '\\n' ' ' | sed \"s/' *+ *'//g\" | grep -o -E \"@objectstack/spec 18\"\ndone | wc -l\n```\n\n| file | count |\n|:--|--:|\n| `packages/spec/src/kernel/plugin-lifecycle-advanced.zod.ts` | **5** |\n| `packages/spec/src/system/disaster-recovery.zod.ts` | 2 |\n| `packages/spec/src/system/cache.zod.ts` | 2 |\n| `packages/spec/src/api/export.zod.ts` | 2 |\n| `packages/spec/src/ui/view.zod.ts` | 1 |\n| `packages/spec/src/integration/connector.zod.ts` | 1 |\n| `packages/spec/src/automation/execution.zod.ts` | 1 |\n| **total** | **14** |\n\nLit control on the same corpus and method: **88 files** say `@objectstack/spec 17`; tree-wide the split is 238 tombstones saying 17 against these 14. Dark control 0.\n\n## Why 17 is the right number\n\nEstablished independently by the at-tier review, from primary sources rather than from the majority:\n\n- **`retiredKey()`'s own docblock** says the guidance names *\"the version that removed it\"*, and its worked example is `17.0.0` — **a package version**.\n- The package is at **17.4.0** with 37 pending `minor` changesets and **0 `major`**, so every one of these tombstones **first refuses in 17.5.0**. A reader who hits one is on 17.x, and \"18\" names a version that does not exist.\n- `PROTOCOL_VERSION` is pinned in lockstep with the package major (`protocol-version.test.ts`), so it cannot be moved to 18 unilaterally either.\n- **`MigrationStep.major` is documented as \"the protocol major this step migrates *into*\"** — a different axis by design. `RETIRED_KEYS_BY_MAJOR[18]` being 18 is correct and is not evidence that the prose should say 18. Conflating the two axes is the whole error.\n\nThis reproduces #4350's own reasoning, which reached 17 by the same route in July.\n\n## Scope note: 5 of the 14 are days old\n\n`plugin-lifecycle-advanced.zod.ts`'s five arrived with **PR #17986** (#17780), part of the #15939 epic, merged 2026-09-13. That file is **internally mixed** — its own `HEALTH_CHECK_INTERVAL_RETIRED` says 17 — so the round followed the half it happened to read. ⇒ the class is not static; it is actively growing, which is the argument for a gate rather than a second hand-sweep.\n\nFor the record: the same defect was caught **before** landing on the epic's last card (#17785 / PR #18016) and corrected there, so the epic's remaining cards are clean. Only #17986's five got through.\n\n## Suggested shape — enforce-or-remove, not a third hand-sweep\n\n1. Correct the 14. Mechanical: the number, nothing else.\n2. **Add the gate #4359 did not.** A rule that a `retiredKey()` prescription may not name a package major greater than `package.json`'s current major is checkable from the tree alone and needs no release knowledge. ⚠️ It must join the concatenated literals before matching, or it will read the same false zero this defect has been hiding behind since July.\n\n⇒ Without step 2 this is the third occurrence waiting to happen. Recorded as `declared ≠ enforced`: the rule is real, was ruled on in #4350, and has nothing holding it.\n\n## Dedupe\n\n`search_issues` over this repo for the tombstone-version shape ⇒ 7 results, **0 open**. #4350 is the direct predecessor (closed `completed` by #4359). #16277, #15437, #15332 are adjacent version-prose defects on other surfaces; #12772, #6914, #7062 are other tombstone-content classes. ⚠️ Declared limit: semantic search, not an exhaustive title enumeration.\n\n**Refs**: #4350 (predecessor) · PR #4359 (its fix) · objectui#3101 (the downstream harm it recorded) · PR #17986 (source of 5 of the 14) · #15939 (the epic that surfaced the recurrence)"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 6622,
+  "kind": "issue",
+  "title": "Declare `metadata.maskObjectFields` on MetadataEndpointsConfigSchema and `getMetadataReadableFields` on ISecurityService (ADR-0106 follow-through)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T07:29:35Z",
+  "updated_at": "2026-08-09T03:32:46Z",
+  "closed_at": "2026-08-09T03:32:46Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6622",
+  "body": "Part of objectstack-ai/objectstack#3682 (ADR-0106 metadata-plane FLS, implemented in PR #6612). Filed by the accepting seat per the linkage-chore rule; `packages/spec` is the spec seat's surface, so the implementing PR deliberately did NOT touch it and shipped both members honoured-but-undeclared. This card is the declaration half.\n\n## What ships undeclared today (deliberate, precedented — see PR #6612's report on #3682)\n\n1. **`metadata.maskObjectFields`** (ADR-0106 D8, default on): read via `(metadata as any).maskObjectFields` in `packages/rest`'s `normalizeConfig`, following the existing `(api as any).enableOpenApi` / `(api as any).enableSearch` precedent. Needs a declared seat on `MetadataEndpointsConfigSchema` — `maskObjectFields: z.boolean().default(true)` — so the key is type-safe in `objectstack.config.ts`.\n2. **`ISecurityService.getMetadataReadableFields`** (ADR-0106 D7): implemented in `plugin-security` and registered as an explicit `Object.assign` extension of the typed service literal (visible, commented), feature-detected by the dispatch layers with fallback to `getReadableFields`. Needs the optional member declared on `packages/spec/src/contracts/security-service.ts` — same precedent as `loadDiagnosed`/`getDiagnosed` (#4127 batch 4 / #6051: call sites and implementation already agree, only the contract is missing).\n\nOne spec PR closes both. Acceptance-surface note for the spec seat: declaring an optional member and a defaulted boolean key are additive; whether either needs the strictness-ledger treatment is the spec seat's judgment.\n\nBlocked-by: objectstack-ai/objectstack#3682\n\n(The `Blocked-by` clears when #3682 closes on PR #6612's merge — the members being declared must exist on main first.)"
+}

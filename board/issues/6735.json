@@ -1,0 +1,36 @@
+{
+  "number": 6735,
+  "kind": "issue",
+  "title": "ISecurityService gains a fail-closed authored-row-write verdict (contract + plugin-security implementation) — #5493 ruling, step 1",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:dispatched",
+    "target:v17"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T13:49:05Z",
+  "updated_at": "2026-08-09T01:22:49Z",
+  "closed_at": "2026-08-09T01:22:49Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6735",
+  "body": "Part of #5493 (maintainer ruling 2026-08-08, recorded in #5493 comment 5226377985 and the chat ruling it links: **Q1 = A, Q2 = A1**).\n\n## Why (one measurement carries the whole card)\n\n#5493's fix requires the sharing middleware to defer, before hard-refusing a by-id write, to \"an **app-authored** RLS update-widener admits this row by declaration\". No reachable surface answers that today, and the cheap proxy is measurably a security hole: probe E-A (#5493 comment 5226364929) shows a **creator-but-no-longer-owner** is admitted by the platform `created_by` floor and refused by sharing with an envelope **byte-identical** to #5493's — a deferral keyed on \"composed RLS admits\" would hand transferred records back to their former creators. Separating the two requires policy **provenance** (`isPlatformOwnershipFloorPolicy`), which is deliberately private to plugin-security (`platform-ownership-policies.ts`, ADR-0105 D3 keying).\n\n## What (ruled shape — Q1 = A, Q2 = A1)\n\n`packages/spec/src/contracts/security-service.ts` (`ISecurityService`) gains a **verdict-shaped, by-id** method:\n\n- `checkAuthoredRowWrite(object, recordId, operation, context)` returning `'admit' | 'abstain'` (exact name/signature per contract conventions — implementer's call, trade-offs in the PR body);\n- **`admit`** iff at least one applicable **non-floor** (app-authored) RLS policy matches the row for this operation;\n- **`abstain`** in every other case — including a missing method, an unresolvable probe, or a throw. **Fail-closed: a deployment without this method behaves byte-for-byte as today.** (Same discipline #6564 pinned for `SharingWriteVerdict`: a failure is never a widening.)\n- `packages/plugins/plugin-security/src/security-plugin.ts` implements it on the registered service, reusing the private provenance split #6684 landed (`computeRlsFilter` internals / `RlsFilterOptions.dropPlatformOwnershipFloor` / `platform-ownership-policies.ts`) — no second implementation of RLS evaluation anywhere.\n- **Semantic pin the implementation must carry** (the E-A hole, as a test): a principal matching **only** the platform floor (creator of a since-transferred row, no authored policy) gets `abstain`, never `admit`.\n- Q2 note, ruled: verdict-shaped by-id ONLY. The bulk-path half of the family is deliberately excluded and tracked separately (see the sibling card filed alongside this one); do not widen this surface toward filters.\n\n## Ordering (contract-first, the #6428 chain shape)\n\nThis card is the head: **this lands → #5493 step 2** (plugin-sharing consumption + the control-pin flip in `row-write-widener-composition.test.ts`) dispatches in the identity lane. #5493 carries `Blocked-by:` pointing here.\n\n## Boundaries\n\n- ⛔ No `plugin-sharing` edits (that is #5493 step 2, identity lane).\n- Two-seat surface by nature (spec contract + plugin-security implementation). Precedent for keeping them in ONE PR to avoid a declared-but-unimplemented window: #6428 (triage designated a single claimant via the cross-domain exception path). Filed by the identity seat per the cross-seat transfer protocol; `packages/spec` has one owner (`domain:spec` seat) — routing labels left to the triage seat."
+}

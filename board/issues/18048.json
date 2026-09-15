@@ -1,0 +1,30 @@
+{
+  "number": 18048,
+  "kind": "issue",
+  "title": "14 ADR-0049 tombstones tell authors a key was removed in `@objectstack/spec 18` — an npm version that does not exist and, under the 2026-09-13 level ruling, will not be the carrier",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-13T15:33:25Z",
+  "updated_at": "2026-09-14T04:46:58Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/18048",
+  "body": "> **Refiled after data loss.** This replaces card **#18021**, which is unreachable: the account that filed it (`os-musk`) was suspended, and its issues, pull requests and comments now 404. The original is not recoverable through the API, so this card is rebuilt from a fresh measurement rather than from its text — and the measurement came out **larger** than the original reported (14 sites, not six).\n>\n> Filed by the PM seat via the maintainer direct-dispatch channel, `session_01NFSv55L8jzmE9yvi9UwZug`, 2026-09-13. Maintainer instruction, verbatim: 「#18021 现在重立」. ⚠️ `domain:*` is the triage seat's field; the label here follows the anchoring rule (the fix lands in `packages/spec`) and **the triage seat may overrule it without giving a reason**.\n\n## The defect\n\n14 ADR-0049 tombstones name **`@objectstack/spec 18`** as the release that removed a key. `@objectstack/spec` is at **17.4.0** on `main`. There is no npm 18, and under the level ruling recorded in `docs/adr/0087-metadata-protocol-upgrade-contract.md` (Amended 2026-09-13, landed as `a0dd872c1b`) there will not be one as the carrier for a retirement:\n\n> - **Pre-GA, a metadata-facing retirement or break ships `minor`**, carrying the `**BREAKING**` banner and its ADR-0087 disposition entry. […]\n> - **An npm `major` is a planned act** — taken when the window closes and the queued conversions activate together — ⛔ never a side effect of one retirement card, however breaking that card is.\n\n⇒ an author who meets one of these tombstones is told to look for a version that does not exist. The removal reaches them in a `17.x` release.\n\n⚠️ **These tombstones are not wrong about history — they are stale relative to that ruling.** They were written when a `18.0.0` cut was the assumed carrier. The ruling changed the carrier, not the removal. That is why this is a prose-accuracy card and ⛔ not a re-adjudication of any retirement.\n\n## Measurement — `origin/main`, 2026-09-13\n\n`packages/spec/package.json` → `\"version\": \"17.4.0\"`.\n\n`git grep -n \"@objectstack/spec 18\" origin/main -- packages/spec/src` → **14 sites across 8 files**:\n\n| file | lines |\n|:--|:--|\n| `api/export.zod.ts` | 577, 718 |\n| `automation/execution.zod.ts` | 525 |\n| `integration/connector.zod.ts` | 254 |\n| `kernel/plugin-lifecycle-advanced.zod.ts` | 79, 85, 93, 291, 320 |\n| `system/cache.zod.ts` | 177, 207 |\n| `system/disaster-recovery.zod.ts` | 56, 259 |\n| `ui/view.zod.ts` | 2324 |\n\n**Lit control, same corpus, same pass** — the house form `@objectstack/spec 17.<minor>.<patch>` is in wide use: `ai/tool.zod.ts` ×4, `automation/flow.zod.ts` ×6, `data/datasource.zod.ts` ×6, `data/mapping.zod.ts` ×3, plus `ai/agent.zod.ts`, `ai/skill.zod.ts`, `api/analytics.zod.ts` ×2, `api/auth.zod.ts`, `api/batch.zod.ts`, `api/rest-server.zod.ts`, `data/driver.zod.ts` ×2, `data/hook.zod.ts`, `data/object.zod.ts` ×2, `integration/connector.zod.ts` ×2, `kernel/manifest.zod.ts`, `security/rls.zod.ts` and others. ⇒ the 14 above are a **deviation from an established convention**, not the convention itself.\n\n⚠️ **Honest gap**: the dark control in this pass was written badly and returned an ambiguous result; it is **not** relied on here. The lit control above is what makes the 14 a reading.\n\n## Precedent — the correct form is already settled in-tree\n\nA sibling session already corrected one tombstone of exactly this shape from `18` to **`17.5.0`** (commit `89421dc402`, on the `claude/issue-16929-assignedprofiles-removal` branch). ⇒ the target spelling needs no decision; it needs applying to the remaining sites.\n\n## Scope guard — load-bearing\n\n⛔ **Do NOT rewrite references to the metadata PROTOCOL major 18.** That number is real and correct: `toMajor: 18` in `packages/spec/src/conversions/registry.ts`, `step18` in `packages/spec/src/migrations/registry.ts`, and the `PROTOCOL_VERSION` ladder D2/D3 are built on it. The ADR amendment above says so in terms — *\"Every 'major' above means a protocol major […] The level a changeset declares is the npm version of the lockstep `fixed` group, and the two move independently.\"*\n\nThe defect is only where the number is attached to the **package name** (`@objectstack/spec 18`), which reads as an npm release. A tombstone that says \"retired in protocol major 18\" is correct and ⛔ must not be touched.\n\n## Acceptance\n\n- Each of the 14 sites names the npm release that actually carries its removal — ⛔ determined per site from that key's own changeset/CHANGELOG, **not** by pasting `17.5.0` across all 14.\n- ⛔ Zero occurrences of `@objectstack/spec 18` remain in `packages/spec/src`, with the lit control above re-run to prove the probe still fires.\n- ⛔ No protocol-major reference is altered; state the before/after count for `toMajor: 18` / `step18` as the untouched-control.\n- Generated artifacts regenerated where tombstone prose renders into them (`content/docs/references/**` projects `describe()` text — that exact coupling is what reddened `check:docs` on a sibling branch this week).\n- `Clause-②: no` expected — this moves no accept set and adds no key. Confirm rather than assume."
+}

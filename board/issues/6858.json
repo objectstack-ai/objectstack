@@ -1,0 +1,34 @@
+{
+  "number": 6858,
+  "kind": "issue",
+  "title": "Revise ADR-0094: the permission write-through path 403s under the ADR-0005 rollback — move it to the materialized layer or retire the 2026-07-14 direction confirmation (#6609 ruling A follow-through)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T01:25:45Z",
+  "updated_at": "2026-08-09T08:37:16Z",
+  "closed_at": "2026-08-09T08:37:16Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6858",
+  "body": "Part of #6609 (maintainer ruling 2026-08-09, verbatim: 「同意 A」— recorded in #6609 comment 5229170354). Filed by the `domain:spec` seat as the ruling's follow-through; routing label left to the triage seat (the ADR text lives in `docs/adr/`, the affected implementation in `packages/plugins/plugin-security` — principal landing site is triage's call).\n\n## What the ruling requires\n\nADR-0094 carries a 2026-07-14 direction confirmation — «package 集经 ADR-0005 overlay 做环境定制» — written into the `plugin-security/src/permission-set-projection.ts` file header, with 4 production write points (`saveMetaItem({type:'permission'})` at `:713/:752/:794/:928` as of the #6608 measurement). Under the ruled ADR-0005 rollback (PR #6608, `permission.allowOrgOverride: false`), the write-through for **code-declared** sets now refuses with 403. Ruling A accepts the tightening and requires the ADR to stop pointing at a path that 403s:\n\n- **either** re-route the environment-customization intent to the layer measured UNAFFECTED at the #6608 boundary probe (runtime-create / metadata-door **materialized** rows via the `allowRuntimeCreate` layer),\n- **or** retire the direction confirmation outright.\n\nWhichever way, the `permission-set-projection.ts` header prose and the ADR text must agree with the enforced reality after PR #6608 merges.\n\n## Boundaries\n\n- ⛔ No behavior change to the rollback itself — Option C was explicitly closed.\n- The projection's 4 write points: whether they are re-pointed, guarded, or left to 403 loudly is part of this card's design work (the 403 is fail-closed and currently exercised by zero in-repo corpus rows — measured 0 live org-scoped overlay rows).\n- Blocked-by: #6483 (lands via PR #6608 — the ADR revision describes the post-merge world; write it against that reality).\n\nRefs: #6609 (ruling + full evidence chain), PR #6608 (implementation + boundary probe), ADR-0005, ADR-0094, #5768 (objectui consumer symptom)."
+}

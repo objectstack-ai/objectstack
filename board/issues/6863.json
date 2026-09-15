@@ -1,0 +1,36 @@
+{
+  "number": 6863,
+  "kind": "issue",
+  "title": "pm-dispatch token economics: sonnet tier for S-class mechanical cards, scoped local gates (CI runs the full farm), slimmed dispatch prompts with standard clauses sunk into the os-dev definition (maintainer-approved 2026-08-09)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:queue",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T01:40:52Z",
+  "updated_at": "2026-08-09T06:49:38Z",
+  "closed_at": "2026-08-09T06:49:38Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6863",
+  "body": "Maintainer authorization (2026-08-09, in-session, verbatim): 「全部同意,先开任务」— approving the `domain:spec` seat's token-economics assessment (session `session_011sGk4SKHqGRgmmqUok1P8M`). Measured basis: dev subagents ≈80% of the loop's spend (~240–314k tokens per dispatch, 12 dispatches in one shift); the three items below target that 80% plus the duplicated prompt mass.\n\n## Scope — three coupled changes to the dispatch machinery (`.claude/skills/pm-dispatch/SKILL.md` + `.claude/agents/os-dev.md`)\n\n### 1. Model tiering: S-class mechanical cards go to sonnet (policy line change)\n\nThe SKILL's model-split paragraph currently reads \"pass `model: \"opus\"` on every dev dispatch\" (reaffirmed in the 08-08 handover as 「所有派发至少 opus」). Amend: **S-class mechanical cards** (single-file prose/comment fixes, one-spread additions, dead-vocabulary row removals, alias/tombstone bookkeeping — cards whose correctness is enforced mechanically by the gate farm) dispatch on **sonnet**; M/L cards, ruling-implementation cards, multi-face semantic cards, and anything with design judgment stay on opus. The PM's container-assessment line in the claim comment already grades size — extend it to carry the model tier so the choice is auditable. PM review discipline (step 7) unchanged.\n\n### 2. Local gate scoping: targeted gates locally, the full farm is CI's job (os-dev definition + SKILL clauses)\n\nToday every dev runs every `check:*` enumerated from `lint.yml` (55+ gates) locally, then ALSO waits for CI to run the identical farm before reporting — a double payment created when the \"wait for CI convergence\" clause was added on top of the older \"enumerate all gates locally\" rule (#5738 era). Amend both files: local verification = build closure + affected-package suites + the gate-family checks relevant to the card's surface (the dispatch prompt names them); the full farm runs once, in CI, which the dev already waits on. Accepted cost, stated in the rule: an occasional extra push-fix lap when a non-obvious gate reddens in CI — cheaper than paying the full local farm on every dispatch. Keep intact: build-first, prefix-direction consumer sweep, reverse verification, TEST_DEBT re-measure when adding test files, and CI convergence before reporting (that clause is what makes this safe).\n\n### 3. Slimmed dispatch prompts: point at GitHub, sink the boilerplate (SKILL template + os-dev definition)\n\n- The SKILL's dispatch template currently mandates \"paste the full issue body, never a summary\". Amend the default: the prompt instructs the dev to **read the full body + all comments on GitHub** (which premise-first already forces it to do), and pastes only (a) ruling quotes verbatim (Chinese untranslated), (b) the 裁决 vs PM-机制假设 partition, (c) card-specific clauses and same-day-churn lines. Mitigation for the notes-12 read-truncation risk: the prompt requires the dev to verify body completeness (double-read on suspicion). Precedent: the #6776 dispatch ran this way successfully.\n- The standard non-negotiables block (~1.5k tokens repeated verbatim per dispatch: worktree/branch discipline, build-first, filter direction, ADR-0112 rejection assertions, authorable-surface anchor rules, gen:schema MERGE-state ban, foreground posture, English policy, report contract) moves INTO `.claude/agents/os-dev.md` once; dispatch prompts carry only deltas. Producer-side fix per the PD#12 instinct the SKILL itself cites.\n\n## Already in effect (seat practice, recorded here for handover durability — no file change needed)\n\nBatched seat-post refreshes (per round-end, not per event) · terse ACCEPT comments (verdict + link + load-bearing points; the PR body is the detail authority) · race-check re-reads fetch the thread tail, not the full thread · sweep-first batching of same-class S cards extended.\n\n## Implementation notes\n\n- `.claude/` internal tooling PR: per the Guardrails exception this is PM-implementable with the authorization quoted in the PR body (precedents #5597/#5872, #6650); review by another seat or maintainer walkthrough — ⛔ no self-review-self-merge. Authorization for THIS card: the 2026-08-09 in-session approval quoted above.\n- Keep untouched (explicitly out of scope — these carry incident receipts): claim protocol, race checks, premise-first verification, write-after-read, serial landing relay, ≤45min patrol cadence while in flight.\n- Dedup: searched `pm-dispatch token os-dev` open issues — no prior card.\n\nFiled by the `domain:spec` seat; routing label left to the triage seat. Dispatch under the current drain-then-single-concurrency directive."
+}

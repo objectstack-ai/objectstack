@@ -1,0 +1,34 @@
+{
+  "number": 6603,
+  "kind": "issue",
+  "title": "finding: after ADR-0106, a restricted caller's GET → edit → PUT of an object schema DELETES the fields that were masked out of their read",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:queue",
+    "target:v17"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T06:39:35Z",
+  "updated_at": "2026-08-09T10:48:01Z",
+  "closed_at": "2026-08-09T10:48:01Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6603",
+  "body": "Filed from #3682 (ADR-0106 implementation). **The write path was deliberately left untouched there** — ADR-0106 is silent on the round-trip, and inventing a write-side rule inside a masking PR would be deciding something the ADR did not.\n\n## The interaction\n\nADR-0106 D1 removes an unreadable field **whole** from a served object schema. `PUT /api/v1/meta/:type/:name` (`packages/rest/src/rest-server.ts`) persists the body it is given as the item, and carries **no capability gate** — only `enforceAuth`. The neighbouring `POST /meta/_migrate` route's own comment says so explicitly:\n\n> `…so unlike the single-item PUT /meta/:type/:name it demands an explicit capability rather than only a session. manage_metadata is ADR-0066 D1's authoring capability…`\n\nSo for any authenticated caller who is *not* exempt under ADR-0106 D4 (`isSystem`, `studio.access`, `setup.access`):\n\n1. `GET /api/v1/meta/object/account` → schema with `salary_grade` and `bonus_formula` **absent** (correct, that is the whole point);\n2. the caller edits something unrelated — a label, an option order;\n3. `PUT /api/v1/meta/object/account` with that body → the overlay is stored **without** `salary_grade` / `bonus_formula`.\n\nThe fields the caller was never allowed to see are the fields they just deleted, and nothing in the exchange tells them so. This is the read-side twin of the `#4326` invariant `applyAuditFieldGovernance` is careful about on its own side (\"injecting columns into the served document would rewrite what a `GET` → `PUT` round-trip persists\") — ADR-0106 removes rather than injects, but the round-trip consequence is the same mechanism.\n\nBefore ADR-0106 a restricted caller round-tripped the full schema, so this could not happen. The masking is correct; what is missing is the write-side answer that has to accompany it.\n\n## Why it was not decided in #3682\n\nADR-0106 says nothing about writes. Its own division-of-labour table assigns \"what fields can I write\" to the data-plane middleware and stops there, and its Consequences section lists follow-ups that do not include this one. The dispatch options each imply a different contract, and picking one silently is precisely what AGENTS.md Prime Directive #13 warns about:\n\n- **Merge, don't replace.** `saveMetaItem` treats a masked read as a partial document and preserves fields absent from the payload that exist in the stored item and are not readable by the caller. Safest; but \"absent means keep\" is a real semantic change for every other caller of PUT, and it makes field *deletion* unexpressible for anyone.\n- **Refuse the write.** A non-exempt caller cannot `PUT` an object schema at all (`manage_metadata` becomes required, as it already is for `_migrate`). Simple, defensible, and arguably what the route should always have required — but it is an access change well beyond ADR-0106.\n- **Detect and 409.** Refuse a `PUT` whose payload drops exactly the fields the caller's own projection removed, naming them. Most informative, most code.\n- **Accept the loss, documented.** Explicitly out of the question for silent data loss (AGENTS.md's `warn` vs `error` rule names this class).\n\n## Suggested disposition\n\nThis needs a maintainer decision (or an ADR-0106 addendum) before code. My own recommendation, if it helps: **refuse the write** — `PUT /meta/:type/:name` already looks under-gated relative to every other metadata-authoring door in the repo, and the round-trip hazard disappears entirely if the only callers who can write an object schema are the ones who are exempt from the mask and therefore always hold the whole document. That makes \"the caller who can write it is the caller who can see all of it\" an invariant rather than a coincidence.\n\nRelated: #3682, ADR-0106 D1/D4, ADR-0066 D1 (`manage_metadata`), #4326 (the GET → PUT round-trip invariant), #4513.\n"
+}

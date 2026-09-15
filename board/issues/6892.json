@@ -1,0 +1,35 @@
+{
+  "number": 6892,
+  "kind": "pull_request",
+  "title": "feat(devx): 给 check:dev-prereqs 补上「陈旧 dist」判定(内容指纹,非 mtime) (#5864)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/l",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T03:04:54Z",
+  "updated_at": "2026-08-09T03:36:07Z",
+  "closed_at": "2026-08-09T03:36:06Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": "2026-08-09T03:36:06Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/6892",
+  "body": "Fixes #5864\n\n## 问题\n\nPR #5863 给 `pnpm dev` 加了构建完整性前置,判据是**存在性**。这拦住了 #5726 的一半——产物**缺失**,它会大声失败。另一半没拦住:产物**在盘上但陈旧**,它**不失败,它撒谎**,而且撒的是别人代码的谎。#5726 那 20+ 条「看起来非常像真实类型契约漂移」的错误,每一条都是陈旧 `packages/spec/dist` 的假象——`isAppResolvedDefaultToken` 自始至终好好地导出在 `src/` 里。\n\n更糟的是存在性门禁让这半边**更**具误导性:开发者刚被绿灯告知工作区没问题,随后出现的假漂移就更像真 bug。绿灯提供了一个它没挣来的反向保证——这正是本单立单的读数。\n\n今晚 #6371 给这条留了一张新收据:仓库自己的 dev 契约现在开篇就写着「typecheck 前必须先构建依赖闭包,否则 tsc 读到的是别人留下的陈旧 `dist/*.d.ts`,而且它两个方向都会骗人」。\n\n## 陈旧的定义,以及它两个方向各会错在哪\n\n```\nstale(pkg)  ⇔  sha256(pkg 当前的构建输入) ≠ pkg/dist/.build-input-hash 的内容\n```\n\n戳由包**自己的** build 脚本在最后一步写入(`node ../../scripts/check-dev-prereqs.mjs --stamp`),门禁重算后比对。形状照抄 `scripts/check-console-sha.mjs`(`packages/console/dist/.objectui-sha` 对committed `.objectui-sha`)。\n\n**输入集**:`src/` 下全部文件、包清单、包自己的 tsconfig / tsup 配置,以及 turbo.json 的 `globalDependencies`——最后一项是**读**出来的而不是抄一份,所以构建对「什么算全局输入」的声明也就是门禁的声明,两者无法悄悄漂移。缺席的文件按「缺席」入哈希,所以新建一个 tsconfig 也算变更。\n\n**为什么是内容不是 mtime。** PR #5863 拒绝做这半边的理由是:检出会重写源文件 mtime,`src 比 dist 新` 会因为与构建无关的原因触发,而一个开局就误报的门禁会被第一个被它耽误的人关掉。内容指纹对这一切免疫——`git worktree add`、`git checkout`、恢复的备份、时钟偏移、`touch`,没有一个会改变文件字节。\n\n**会误绿(说新鲜,其实不是)** —— 全部写进文件头,不留隐含知识:\n\n- **依赖漂移**。`pnpm-lock.yaml` 刻意不是输入。锁文件几乎每次合并都动,把它入哈希就等于每次合并都强制重建放大器——正是本设计要避免的例行误报;而它能抓到的失败(依赖类型变了但 dist 其余部分是新的)不是 #5726 的形态。那一条仍由 AGENTS.md §9 的常备处方负责。\n- **工具链漂移**。旧版 tsup/tsc 从字节相同的源产出的 dist 读作新鲜。同样的取舍:node_modules 在这个价位不可哈希。\n- **`OS_SKIP_DTS=1`**。该构建只出 JS、留下上一次的 `.d.ts`,然后打戳。JS 确实新鲜,声明文件可能不是。本门禁从来不探 `.d.ts`(dev 启动需要的是 JS),AGENTS.md §9 也已点名这个 flag——记录下来,而不是默默继承。\n- **手改过的 dist**。哈希覆盖的是输入不是输出。\n\n**会误红(说陈旧,其实没事)**:\n\n- **只改注释/格式**也会移动哈希,而产出的 JS 一模一样。接受:补救就是本来就该跑的那次构建,几秒钟;替代方案(比对产出)会让门禁比它守护的构建还贵。\n- **改了放大器再跑 `pnpm dev`** 会红。这条值得说清楚:**它不是误报**——dev 是从 dist 启动工作区的,改了但没重建的 `packages/spec` 确实在提供旧契约。重建,或者按文件头写的那样直接绕过(`pnpm --filter @objectstack/example-showcase dev`)。\n\n**未打戳 = 红,不是警告**,这是本 PR 唯一一处刻意偏离 `check-console-sha` 的降级:后者的主体是**可选**的(CLI 没有它也能降级运行),重建是一次独立且慢的 `pnpm objectui:build`;放大器的 dist 两条都不成立(它的**缺失**本来就是红,补救就是一句 `pnpm build`)。降级成警告还会恰好豁免掉产生 #5726 的那棵树——一个由早于本戳的构建产出的 dist,而那正是本单的全部主题。找不到判据不是 exit 0 的许可(#4690)。\n\n**为什么是声明清单而不是全部包。** 实测:哈希 `packages/spec/src` 约 30ms(687 文件 / 9.7MB),哈希全部包的源约 125ms——所以**成本不是理由**。理由在打戳侧:只有 build 会写戳的包才能被断言新鲜,而把这一行铺进 60+ 个 build 脚本,是在改每个包的构建方式,而那些包的陈旧 dist 是大声失败而不是撒谎。AGENTS.md §9 的表里只有一个 dist 会以**别人的**契约漂移的形态出现,就是 `packages/spec`。\n\n两个方向都锁死,谁也漏不掉:列进 AMPLIFIERS 但 build 脚本不打戳 ⇒ 门禁按覆盖错误报红;从未列入的包调 `--stamp` ⇒ 退出 1。\n\n## 反向验证(先写预测,再记实测)\n\n全仓构建后在**真实树**上做,不是 fixture:\n\n| # | 场景 | 预测 | 实测 |\n|---|---|---|---|\n| A | 刚构建完 | 绿,两行(存在性 + 新鲜度) | ✅ 绿,87ms |\n| B | 再构建一次 | 戳不变(输入未变 ⇒ 确定性) | ✅ `e82ed158…` 两次一致 |\n| C | 往 `packages/spec/src/index.ts` 追加一个导出、不重建 | **红**,state=stale | ✅ 红,列出两个指纹,一条 fix |\n| F | 同一棵陈旧树上跑**改动前**的门禁 | **绿**(这就是缺陷本身) | ✅ 绿,exit 0 |\n| D | 用**相同字节**重写源文件 + mtime 拨快一小时(src 严格新于 dist) | **仍绿**(mtime 门禁会在这里误报) | ✅ 绿 |\n| E | dist 在、戳被移走 | **红**,「无可读构建戳」 | ✅ 红 |\n| G | 全部构建+打戳,但 spec 的 build 脚本悄悄丢掉 `--stamp` | **红**,CoverageError | ✅ 红,并指出「否则本检查将对任意老的 dist 永远放行」 |\n\nC 与 F 是同一棵树上的同一时刻:`grep isAppResolvedDefaultToken5864` 在 `src/index.ts` 命中 1 次、在 `dist/index.mjs` 命中 0 次——旧门禁打印 `✓ 67 package build artifacts present` 并 exit 0,新门禁报红并给出唯一的 fix。绿灯确实在替陈旧背书,这是现场读数而非推理。\n\n## 绿灯措辞:声明范围,不越界\n\n```\n✓ 67 package build artifacts present (existence, not freshness).\n✓ @objectstack/spec built from the sources on disk — the only freshness claim this line makes; everything else above is existence only.\n```\n\n## 刻意没做\n\n- **没给另外 66 个包做新鲜度判定**,理由如上;pass 行用这句话把边界说死,AGENTS.md §9 仍是它们的处方。\n- **没改 dist 由什么构建**:turbo / tsup / build-console.sh 的分工一字未动,只在 spec 的 build 末尾追加了一步打戳。\n- **没碰 `docs/adr/**`**。\n- **没把 `pnpm-lock.yaml` 入哈希**(见上,例行误报)。\n- **没探 `.d.ts`**:本门禁从来不探,这次也没开始。\n\n## 自测\n\n`--self-test` 从 7 例扩到 16 例。新增的钉子里有三个是本设计的要害:第 10 例钉住 **mtime 不是判据**(字节相同、mtime 拨到未来 ⇒ 仍新鲜),第 13 例钉住**声明即执行的双向**,第 16 例钉住**存在性优先于新鲜度**(未构建的工作区只报一个前置条件,而且是构建那个)。\n\n## 变更集\n\n`@objectstack/spec` patch:无 API / 类型 / 运行时变化;发布产物多一个 65 字节的 `dist/.build-input-hash`,是构建自身的输入摘要,只被本仓的 dev 门禁读取。\n\n---\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01F8q5J1MQyocgtNspb15fSn\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01F8q5J1MQyocgtNspb15fSn)_"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 6849,
+  "kind": "pull_request",
+  "title": "feat(drivers,spec)!: `GroupByNode.alias` is honoured by the three SQL faces (#6401)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T00:29:33Z",
+  "updated_at": "2026-08-09T01:30:59Z",
+  "closed_at": "2026-08-09T01:30:57Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-09T01:30:57Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/6849",
+  "body": "Fixes objectstack-ai/objectstack#6401\n\n## The fact, re-verified on `e120a5a`\n\n`GroupByNodeSchema` declares `alias` (\"Alias for the projected group value\",\ndefaulting to `field`). One execution path read it:\n\n| Face | reads `alias`? |\n|---|---|\n| `objectql` in-memory fallback | ✅ `g.alias ?? g.field` |\n| `driver-memory` | ✅ `normalizeGroupBy`, `memory-driver.ts:1068` — **not in the issue's table** |\n| chart category resolver | ✅ `chartAggregateCategoryKey`, `alias ?? field` — **not in the issue's table** |\n| `driver-sql` | ❌ both limbs `g.field` |\n| `driver-turso` local + remote | ❌ |\n| `driver-sqlite-wasm` | ❌ (inherits) |\n| `driver-mongodb` | ❌ — cannot take a structured node at all |\n\nSo one aggregate returned rows keyed `closed_at` under pushdown and `qtr` under\nthe fallback, decided by `engine.ts`'s\n`allStructuredSupported && !tzRequiresInMemory` — a driver capability bit and a\n`timezone`, neither visible to the caller.\n\n## Step one was a measurement, and it chose the leg\n\n**Real non-test producers of `GroupByNode.alias`: ZERO.** Nothing in\n`examples/` (showcase, CRM, todo — the showcase's `ObjectChart` uses the bare\nstring form), nothing in `apps/`, nothing in non-test `packages/`. Writers are\n4 test sites plus 4 *declaring* surfaces (`query.zod.ts`, `chart.zod.ts`,\n`mcp-http-tools.ts`, and the chart `strictObject` alias map that steers `as` /\n`label` → `alias`).\n\nZero producers reads like \"remove\" — but ADR-0049's table does not split on\nproducers, it splits on **whether the feature exists**: a dangling promise is\nremoved, a live one with a missing gate is enforced. `alias` is live on three\nconsumers, and decisively it is **compelled by the publish gate** —\n`validate-react-page-props.ts:491` errors `REACT_CHART_AXIS_UNKNOWN` unless a\nchart's category axis is bound to `alias ?? field`, and tells the author in so\nmany words to \"bind it to\" the alias. A key the build gate makes you write is\nnot dangling. (Its error text meanwhile claims rows are \"keyed by the RAW FIELD\nNAMES\" — the gate and the SQL faces contradicted each other.)\n\nThe zero-producer count is what makes enforcing **safe**, not what argues\nagainst it: no shipped payload changes its result keys.\n\n## What changed — every face, or none\n\n- **`driver-sql`** — both limbs project `alias ?? field`; `?? as ??` only when\n  the name actually moves. `presentedOutput` re-keyed by the OUTPUT column,\n  matching the aggregation branch beside it (an aliased group value went\n  unpresented before).\n- **`driver-turso` REMOTE** — `\"field\" AS \"alias\"`; the alias reaches the\n  statement as a quoted identifier and is therefore held to\n  `assertSafeIdentifier`, like `field`.\n- **`driver-sqlite-wasm`** — inherits, covered by its own suite.\n\n**GROUP BY still keys on the FIELD** on every face — pinned, because SQLite\nresolves output names in `GROUP BY` and a face that grouped by the alias would\nlook correct on SQLite and diverge elsewhere. `having` needed no change:\n`applyHaving` filters on the aggregated row's own keys, so it follows the\nprojection and now means one thing on every path.\n\n## Conformance\n\n`AGGREGATION_CASES` gains a `groupByAlias` axis + 2 cases whose VALUES are an\nexisting case verbatim — they can fail only on the KEY. `objectql`'s in-memory\nfallback is **enrolled** as a fourth face (#6409 open question ②): it is the\nface the SQL three were converged onto, and `applyInMemoryAggregation` turned\nout to be a pure function of rows, so no engine was needed.\n\n## Reverse verification — predicted before running\n\n| Direction | Predicted | Measured |\n|---|---|---|\n| **A** pre-fix state | 1 fail on the named case per SQL face; degenerate `alias === field` green | ✅ `driver-sql` 1/18, `driver-turso` 3/34, `sqlite-wasm` 1/15, `objectql` 0 |\n| **B** group by the alias (copied neighbour) | values blind; only the emitted-SQL pin catches it | ✅ `driver-sql` 18/18 and wasm 15/15 **green**; turso fails on `GROUP BY \"bucket\"` |\n| **C** harness reads `c.groupBy` | all green (false GREEN) | ❌ **prediction wrong** — 1 fail per face |\n\nTwo results recorded rather than tidied away:\n\n- **(C) was wrong.** Reading the field name against a face that *honours* the\n  alias fails loudly. The false green needs **both** mistakes together, measured\n  directly: face reverted + harness reading the field name = **18/18 green**.\n- **`driver-sqlite-wasm`'s suite consumes `driver-sql`'s built `dist`**, not its\n  `src`, so direction A showed a spurious 15/15 green until `driver-sql` was\n  rebuilt. That suite checks its inheritance at BUILD granularity.\n\n## Frozen drivers (#5499) — measured, never flipped\n\n- **`driver-memory`**: **agrees**. It already returned\n  `{ field, alias: node.alias ?? node.field }` — it had reached the enforce\n  answer independently, so no mechanical alignment was needed.\n- **`driver-mongodb`**: DEBT, and **wider than alias**. `buildAggregationPipeline`\n  types `groupBy` as `string[]` and builds `groupId[field] = '$' + field`, so a\n  structured node — aliased or not — becomes the literal key `\"[object Object]\"`.\n  The alias is unreachable rather than ignored. `mongodb-driver.ts:512` passes\n  `(query as any).groupBy`, which is why `tsc` never saw it. Home: #6814.\n\n## Tests & gates\n\n- Faces: `objectql` 2685, `driver-sql` 1097, `driver-turso` 906,\n  `driver-sqlite-wasm` 304 — all green. `spec` 8877, `lint` 1730,\n  `driver-memory` 540, `driver-mongodb` 220 — green.\n- **`lint.yml` gates: 59/59**, run step by step with exit statuses read\n  directly. That includes the three workspace-wide `turbo run build` /\n  `turbo run typecheck` steps that are *not* `check:*` scripts — the omission\n  that took #6409 red in CI — plus `examples`/`downstream-contract` typechecks,\n  and the `check:i18n*` pair run against a built workspace.\n\nChangeset included; no `content/docs/releases/` edits.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01USxSgh1HUGZuh8vuFXKTGQ\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01USxSgh1HUGZuh8vuFXKTGQ)_"
+}

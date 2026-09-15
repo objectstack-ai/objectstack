@@ -1,0 +1,34 @@
+{
+  "number": 7085,
+  "kind": "issue",
+  "title": "NotifyConfigSchema sourceObject/sourceId describes say \"Requires ...\" while the schema deliberately accepts the half pair (executor drops it silently)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "finding"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T14:20:39Z",
+  "updated_at": "2026-08-09T17:41:56Z",
+  "closed_at": "2026-08-09T17:41:00Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7085",
+  "body": "Finding from the axis-① `.describe()` sweep (describe claims vs measured acceptance face — the #6762 class). Recorded unassigned; suggest `domain:spec-surface` for routing. Sibling of the `severity` finding on the same schema (filed separately — different field, different claim type).\n\n## Anchor\n\n`packages/spec/src/automation/io-node-config.zod.ts`, `NotifyConfigSchema`:\n\n```ts\nsourceObject: z.string().optional()\n  .describe('Object name of the record the notification links to (writes sys_notification.source_object). Requires sourceId.'),\nsourceId: z.string().optional()\n  .describe('Record id the notification links to (writes sys_notification.source_id). Requires sourceObject.'),\n```\n\n## Described claim\n\n\"**Requires** sourceId.\" / \"**Requires** sourceObject.\" — to a schema reader, \"requires\" says the half-specified pair is refused at the gate.\n\n## Measured acceptance face\n\nProbed on `origin/main` @ `2f3e79351` (tsx `safeParse`, sources via `git archive`; controls both sides):\n\n```\ncontrol-accept full pair       : ACCEPTED\ncontrol-reject unknown key     : rejected [unrecognized_keys]\nsourceObject WITHOUT sourceId  : ACCEPTED\nsourceId WITHOUT sourceObject  : ACCEPTED\n```\n\nAnd the acceptance is **deliberate** — the same file's module JSDoc, a few lines above, records the opposite of what the describes say:\n\n> `sourceObject`/`sourceId` only take effect as a PAIR — a half-specified click-through target is dropped so the inbox never renders a dead link. **The schema keeps both optional rather than refining, because the executor tolerates (drops) the half-specified shape rather than rejecting it.**\n\nSo the contract is \"tolerated and silently dropped\", and the describe says \"required\". The two sentences sit in one file and cannot both be true.\n\n## Why it matters for an authoring reader (ADR-0033)\n\nOnly the `.describe()` reaches the published reference — `content/docs/references/automation/io-node-config.mdx` renders \"Requires sourceId.\" verbatim in the property table, while the JSDoc paragraph carrying the real semantics does not travel (#6762 measured exactly this asymmetry: `gen:docs` renders `.describe()` and the module docblock, never the property JSDoc). A reader of the docs concludes a half pair will error and can be leaned on as validation; in fact it parses green, publishes green, and the click-through link silently never renders — the invisible-failure shape this repo's own guidance entries repeatedly warn about (#2675, #4923).\n\n## Suggested shape, if triage wants it fixed\n\nMake the describes state the documented tolerance instead of a phantom requirement, e.g. \"Only takes effect together with `sourceId` — a half-specified pair is dropped at execute time (no link is rendered).\" No acceptance change; regenerate `io-node-config.mdx`. (Adding the refine instead would contradict the recorded executor contract and is a bigger decision.)\n\n## Refs\n\n#6762 (class specimen), #2675 (pair-only click-through), #4923 (alias-conversion tolerance on this schema), ADR-0033."
+}

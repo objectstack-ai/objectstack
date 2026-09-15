@@ -1,0 +1,30 @@
+{
+  "number": 6916,
+  "kind": "issue",
+  "title": "[finding][drivers] driver-memory 上 autonumber 碰撞永远落成静默重复 —— 唯一修复(driver 侧唯一性)在 #5499 冻结内,engine 侧替代已实测否决",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T04:01:14Z",
+  "updated_at": "2026-08-09T06:48:25Z",
+  "closed_at": "2026-08-09T06:48:25Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6916",
+  "body": "Observation-class finding,由 #6806 的 dev 在 PR #6907 中实测并**明确移交 PM 立卡**(\"Reported for the PM to file\")。不认领、不入队 —— 这是一张**冻结边界裁决**,归 `domain:drivers` 席位定级。\n\n## 实测事实(PR #6907 §3b 已 pin)\n\n#6806 落地后,engine fallback autonumber 的碰撞防护由两半组成:**adoption**(豁免写入者的号码就地采纳,零查询)+ **collision re-seed**(存储层抛唯一冲突时重播种重发,限 3 次)。第二半依赖存储层**拒绝**重复 —— 而全仓走 fallback 路径的 driver 里,只有 `driver-mongodb` 在字段声明 `unique` 时能抛(`E11000`,单字段唯一索引)。\n\n`InMemoryDriver.create` 是不带任何约束的 `table.push()` —— 其自身 docstring 自 #4065 起就这么写,并同时停止自称 production-ready、改称 **WEAK oracle**。所以在 driver-memory 上:\n\n| 场景 | 结局 |\n|---|---|\n| 豁免写入者(isSystem 回放 / preserveAudit 导入 / beforeInsert 盖章) | ✅ adoption 覆盖,计数器不陈旧 |\n| 进程外写入者撞号 | ⛔ **无错误、无日志的静默重复** —— 违例触发式重试按构造进不来 |\n\nPR #6907 的 `test §(3b)` 把这个静默重复**直接 pin 成断言**(两行同持 `D-0005`、一次 `create`、零报错),使「collisions are handled」在不成立的地方**读不成成立**(PD #10)。所以现状是**已声明、已测试的能力空洞**,不是未知风险。\n\n## 为什么不能在 engine 侧修(已实测否决,勿重推)\n\nPR #6907 明确否决了 engine 侧 pre-issue 存在性探测:每次 insert 多付一次查询(恰是整个 adoption 设计省掉的成本),且 TOCTOU 竞态下只是把静默重复换成**更罕见的静默重复 + 双倍读成本**。⛔ 后来者请勿把这条当未试过的选项重新提出。\n\n## 摆在 drivers 席面前的裁决(两选一,均需具名落档)\n\n1. **接受为永久现状**:driver-memory 保持 WEAK oracle 定位(#4065 自述 + #5499 冻结 2026-08-06 = A 维持冻结),本 finding 关闭为 not_planned,PR #6907 的 §3b pin 即为永久合同 —— 「该 driver 上碰撞防护 = 仅 adoption」。\n2. **窄口解冻**:给 `InMemoryDriver` 加最小唯一性检查(仅 `unique` 声明字段)。⛔ 注意这是对冻结 driver 的**投资**,需要维护者推翻或收窄 2026-08-06 的冻结裁定;且按 #6664 census 纪律,若实现需要新增测试消费者,须走台账处置而非杂务消音。\n\n## 与 #5495 收口的关系\n\n#6806 的评论区已向 drivers 席提出:PR #6907 合并后 #5495 两半(引擎侧=已修;租户分区=2026-08-07 裁定 parked)或已全部交代。**本 finding 是那次收口问答的第三块拼图**:若选处置 1,#5495 可关;若选处置 2,残余工作以本卡为锚,#5495 仍可关(工作已换锚)。\n\nRefs: #6806, PR #6907(§3b pin、成本表、驱动矩阵), #5499(冻结), #5495(父单), #4065(WEAK oracle 自述), #6664(census 台账), #5704(Q2=B)。"
+}

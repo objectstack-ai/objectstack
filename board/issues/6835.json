@@ -1,0 +1,34 @@
+{
+  "number": 6835,
+  "kind": "pull_request",
+  "title": "docs(automation,data-modeling): retire the ETL retry/cron mentions and stop claiming ONE retry policy (#6750)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T23:39:54Z",
+  "updated_at": "2026-08-09T02:22:56Z",
+  "closed_at": "2026-08-09T02:05:54Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": "2026-08-09T02:05:54Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/6835",
+  "body": "Fixes #6750\n\n## 背景\n\n`content/docs/automation/flows.mdx:976` 是**手写**指南页,它把 \"ETL pipeline 的 `retry`\" 教成一个可以套用 `backoffMs` 知识的活体面。#6414 已经整体删掉了 `automation/etl.zod.ts`,照着这句话写的作者只会在 `tsc` 上撞到 TS2724/TS2305 —— 文档站刚推荐过的名字。\n\n## 先验证代码,再改文档\n\n派发要求\"改之前先对着代码验证卡片的断言\"。验证结果:**卡片的前提成立,但只说对了一半。**\n\n### 成立的一半:三个活体面,ETL 不在其中\n\n`retryPolicyShape()` / `RetryPolicySchema` 在 `origin/main` @ `e120a5a1d` 上恰好有三个可授权消费者,每一个都有真实执行器:\n\n| 授权面 | 声明 | 真正实现 retry 的代码 |\n| :--- | :--- | :--- |\n| `job.retryPolicy` | `packages/spec/src/system/job.zod.ts:141` | `packages/services/service-job/src/run-with-policy.ts:77-92`(`delay = min(backoffMs * multiplier^(attempt-1), maxRetryDelayMs)`,`jitter` 在 `:92`) |\n| `try_catch` 节点的 `retry` | `packages/spec/src/automation/control-flow.zod.ts:318` | `packages/services/service-automation/src/builtin/try-catch-node.ts:88-99` |\n| `flow.errorHandling` | `packages/spec/src/automation/flow.zod.ts:723`(`...retryPolicyShape()`) | `packages/services/service-automation/src/engine.ts:2951-2952` 分派 -> `retryExecution` at `:5671-5709` |\n\nETL 一个都没有 —— 它**从来没有执行器**,这正是 #6414 退休它的理由(`packages/spec/src/migrations/registry.ts:2633` 的 `etl-pipeline-layer-retired`)。缺席由 `packages/spec/src/automation/sync-retirement.test.ts:147-158` 钉住,ETL 记在 `RETIRED_DEFS_BY_MAJOR[17]`,与本页既有的 \"17.0.0 breaking\" callout 同一个大版本(spec 当前 `17.0.0-rc.5`)。\n\n### 卡片没看到的一半:同一句话的另一个断言也是错的\n\n原句是 \"the **one** retry policy the platform has\"。这一半与 ETL 无关,而且**危害更大**:\n\n- `hook.retryPolicy` —— `packages/spec/src/data/hook.zod.ts:248-266`,只有 `maxRetries` / `backoffMs` 两个键,`maxRetries` 默认 **3**(本 block 默认 `0`);在 `packages/objectql/src/hook-wrappers.ts:311-312`(`runWithRetry` 在 `:338-363`)真实执行,退避是线性的 `retryBackoffMs * attempt`,没有 multiplier / 上限 / jitter。\n- `connector.retryConfig` —— `packages/spec/src/integration/connector.zod.ts:409-433`(挂载点 `:809`),`maxAttempts` **含首次尝试**,延迟拼作 `initialDelayMs` / `maxDelayMs`。\n\nspec 自己完全知道这件事:`flow.zod.ts` 的 `guidance.maxAttempts` 明确**拒绝**把 `maxAttempts` 做成别名 —— \"renaming the key alone would quietly run one attempt fewer than you asked for\";`datasource.zod.ts:86` 也警告不要在这些 retry block 之间改名搬值。\n\n所以只删掉 ETL 那半句,会留下一个**仍然是假**的断言,而且假在更贵的方向:ETL 会在 `tsc` 上大声失败,借来的 `maxAttempts` 只会安静地少跑一次。因此本 PR 把枚举收敛到三个面,并在属性表之后补一段说明邻居的差异 —— 只写测量到的数字,不做推断。\n\n### 卡片错的一处:`formulas.mdx` 的 \"sync\"\n\n卡片说 `content/docs/data-modeling/formulas.mdx:52` 的 `cron` 行里 \"五项中有两项已不存在(ETL、sync)\"。重新测量 `CronExpressionInputSchema` 的活体消费者:\n\n- `system/job.zod.ts:15`(jobs)、`api/export.zod.ts:555,685`(exports)、`system/cache.zod.ts:154`、`system/disaster-recovery.zod.ts:57,238`(backups)、`automation/execution.zod.ts:387`(scheduled flows)\n- **`integration/connector.zod.ts:255`** —— `'Cron expression for scheduled sync'`\n\n也就是说 **ETL 确实死了,但 \"sync\" 没有**:卡片把它归给了退休的 L1 `automation/sync.zod.ts`(#4738),而 connector 的定时同步是活的。另外 \"Job\" 和 \"jobs\" 在同一行里重复了。这一行按测量结果重写,而不是按卡片预测删两项。\n\n## 改动\n\n- `content/docs/automation/flows.mdx` —— 枚举收敛为三个面;ETL 写成**显式的历史**(而不是静默删除),点明它现在的门是 `tsc`;属性表之后新增一段,列出 `hook.retryPolicy` / `connector.retryConfig` 的键集与默认值差异。\n- `content/docs/data-modeling/formulas.mdx` —— `cron` 行改为测量到的面。\n\n## 没有做的事,以及原因\n\n- **没有碰 `packages/spec` 源码 prose**(包括 `shared/expression.zod.ts:22` 那张 `## Dialects` 表把 `cron` 的用途只写成 \"job schedules\" —— 那是欠枚举,不是错;而且它由 `expression-dialect-docs.pin.test.ts` 钉住、并生成 `content/docs/references/`)。spec prose 是 #6630 的地盘,#6750 正文也明确把它排除。\n- **没有碰 `content/docs/references/`**(生成的,这一点上本来就对)、`content/docs/releases/`、`docs/adr/`。\n- **没有碰 `content/docs/protocol/knowledge.mdx:49`** —— 那里的 \"no ETL\" 是行业通用词,不指退休的 `ETLPipeline`。与 #6750 正文的判断一致。\n- **没有加 changeset** —— 纯文档改动,`packages/` 零改动,发布不出任何东西,因此打 `skip-changeset` 标签。\n\n## Gates(真实输出)\n\n```\n$ node scripts/check-nul-bytes.mjs\ncheck-nul-bytes: OK (scanned 6367 tracked text file(s); skipped 5 binary, 1 non-regular; no raw ASCII control bytes).\n\n$ node scripts/check-doc-authoring.mjs --self-test && node scripts/check-doc-authoring.mjs\n✓ check-doc-authoring self-test: scope wiring ... all hold.\n✓ doc authoring guard: 373 files clean — no bare metadata literals.\n\n$ node scripts/check-adr-links.mjs --self-test && node scripts/check-adr-links.mjs\n✅ check-adr-links --self-test: discrimination, census, ADR-0046 pin and baseline staleness all verified\n✅ check-adr-links: 531 relative link destination(s) under docs/adr/ resolve (8 frozen on the shrink-only baseline)\n\n$ node scripts/docs-audit/check-audit-scope.mjs\n✓ docs-accuracy-audit scope is in sync with content/docs/: 178 hand-written doc(s).\n✓ release-owned pages are in scope and read-only: 9 page(s) under content/docs/releases/ review-only.\n\n$ node scripts/check-role-word.mjs\ncheck-role-word: OK (44 baselined file(s), no new occurrences).\n\n$ node scripts/check-quick-reference-counts.mjs --self-test && node scripts/check-quick-reference-counts.mjs\n✓ check-quick-reference-counts self-test: 9 cases pass.\n✓ content/docs/getting-started/quick-reference.mdx: 13 section(s), every \"(N schemas)\" heading matches its table.\n\n$ node scripts/check-release-notes.mjs\ncheck-release-notes: OK — every released major has a curated, navigable release page.\n```\n\n本 PR 未新增任何链接,`Check Documentation Links`(lychee,仅仓库内链接)不受影响;未新增任何代码 fence,`os:check` 片段检查不受影响。`Docs Drift Check` 只在 `packages/` 触发,本 PR 不触发。\n\n## 顺带发现(未在本 PR 修复)\n\n- **#6832**(`finding`,未指派)—— `hook.retryPolicy.maxRetries` 有两个答案:schema `.default(3)`(`data/hook.zod.ts:265`)对执行器 `?? 0`(`objectql/src/hook-wrappers.ts:311`),正是 #4247 为 flow 消掉的那个形状,数字对调。授权路径上默认值是送达的(`hook` 在 `BUILTIN_METADATA_TYPE_SCHEMAS`,`kernel/metadata-type-schemas.ts:89`),所以今天没有作者会撞上;可达的那一半是公开导出的 `wrapDeclarativeHook`。按观察类归档,交 PM 分级。\n\n## 为什么是 `Fixes` 而不是 `Part of`\n\n#6750 的完成范围就是这两处手写页的文字(正文 \"Suggested direction\" 写的是 \"one text-only pass over the two sites\"),两处都已落地,`packages/spec` prose 与 `references/` 由该 issue 明确排除。没有留尾,因此 `Fixes`。\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01F8q5J1MQyocgtNspb15fSn)_"
+}

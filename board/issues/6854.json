@@ -1,0 +1,35 @@
+{
+  "number": 6854,
+  "kind": "pull_request",
+  "title": "fix(spec): `aria` 墓碑不再指向同一大版本里已退休的落点 (#6756)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T00:42:55Z",
+  "updated_at": "2026-08-09T01:21:23Z",
+  "closed_at": "2026-08-09T01:21:21Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": "2026-08-09T01:21:21Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/6854",
+  "body": "Fixes #6756\n\n## 缺陷\n\n`dashboard.widgets[].aria` 的 `retiredKey()` 提示 —— 也就是升级中的作者实际收到的那个字符串 —— 声称共享的 `AriaProps` 形状「stays live on `app.aria`」。但 `App.aria` 自己就是一个 `retiredKey()` 墓碑，和它在**同一个 17.0.0** 里被 2026-06 app liveness 审计移除。提示把作者送向一扇不存在的门，然后在两行之后递给他们 `os migrate meta --from 16` —— 而 `app-dead-authoring-keys-removed` 这个转换恰好会把 `aria` 从 app 源里**剥掉**。按提示操作的代价是两轮返工外加一次静默的数据丢失。\n\n反向的一半同样是坏的：`App.aria` 的处方说「declare `aria` on the **component/widget**」，widget 那一半指的正是 #5010 退休掉的 `dashboard.widgets[].aria`。两个墓碑互相指向对方已退休的键。\n\n## 实测的锚点（issue 记录的 `252f71bd6` 已过期，全部在 fresh `main` `c32944d6` 上文本检索复测）\n\n| # | 站点 | 复测行号 |\n|---|---|---|\n| 1 | `packages/spec/src/ui/dashboard.zod.ts` import 注释 | `14-17`（claim 在 `15`） |\n| 2 | `packages/spec/src/ui/dashboard.zod.ts` 墓碑上方内联注释 | `602-611`（claim 在 `610-611`） |\n| 3 | `packages/spec/src/ui/dashboard.zod.ts` `retiredKey()` guidance | `612-622`（claim 在 `619-620`，migrate 句在 `621`） |\n| 4 | `packages/spec/src/migrations/registry.ts` protocol-17 迁移记录 | `895-896` |\n| 5 | `packages/spec/liveness/dashboard.json` ledger `note` | `150` |\n| 6 | `packages/spec/src/ui/app.zod.ts` 互指的一半（issue 列为 \"Related, likely the same fix\"） | `1400-1408` |\n\n另外两处 issue 未列、但携带同一 reciprocal 错误、由 sweep 找出并一并修正：`packages/spec/liveness/app.json:253`、`packages/spec/src/ui/app.form.ts:89-91`（均为散文/注释）。\n\n## `AriaProps` 的真实去向（按实测，不按假设）\n\n`git grep \"aria: AriaPropsSchema\" -- packages/spec/src` 得 25 处活声明（component 20 / page 2 / action 1 / chart 1 / view 1）。以仓库自己的 liveness ledger 为判据：\n\n| 面 | ledger 判定 |\n|---|---|\n| `page.aria`、`page.components[].aria` | **live** —— \"ARIA attributes applied by objectui renderers\" |\n| list view 的 `aria` | **live** —— \"objectui: ListView.tsx applies aria-label/-describedby/-live\" |\n| `action.aria` | live，但注明 **PARTIAL**（只有少数 renderer honour，核心 action 按钮/菜单不） |\n| `app.aria` | **dead** —— 即本缺陷 |\n| `dashboard.aria`、`dashboard.widgets[].aria`、form view 的 `aria` | **dead** |\n| `chart.aria` | **无 ledger 行**（`liveness/chart.json` 不存在） |\n\nobjectui 侧佐证：`components/src/renderers/basic/elements.tsx` 四处 `ariaAttrs(props.aria)`、`plugin-list/src/ListView.tsx:2041-2044`、`plugin-detail` 的 record-path / record-quick-actions。\n\n所以处方只列举前三个无歧义的活载体。**刻意不列 `chart.aria`**：它有声明、没 ledger 行、没实测到 renderer 读 —— 把它写进「stays live on」正是在小尺度上重犯本 issue 要修的错。`action.aria` 的 PARTIAL 只写在注释里，不进 parse 可达的处方。\n\n## `os migrate meta --from 16` 的动词\n\n该命令仍然该留 —— 转换确实覆盖这个键。但它做的是**剥离**不是搬迁：`conversions/registry.ts` 的 `dashboard-widget-action-aria-removed` 调用 `stripKeys(w, ['actionUrl','actionType','actionIcon','aria'], …)`，fixture 的 `after` 里 widget 已无 `aria`，`expectedNotices: 4`。故动词由 \"to rewrite it automatically\" 改为 \"to remove it automatically\" —— 后者是仓库既有措辞（`component.zod.ts:770,781`），不是新造。\n\n## `dashboard.mdx`：**生成**，非手写\n\n`content/docs/references/ui/dashboard.mdx:6` 明写 `{/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. */}`。因此未手改，走 `gen:docs` 重新生成；`app.mdx`（同样生成）与 `docs/protocol-upgrade-guide.md`（`gen:upgrade-guide`）随源同步刷新。注意 issue 给的路径 `content/docs/dashboard.mdx` 不存在，实际是 `content/docs/references/ui/dashboard.mdx`。\n\n## 接受集合逐字节不变\n\n改动全部是 `retiredKey()` 的 guidance 参数、注释、或 ledger 的 `note` 散文。`retiredKey()` 无论字符串是什么都返回 `z.never({ error: () => guidance }).optional()`。未触碰任何 key set / Zod 类型 / `superRefine` / optionality。`gen:schema` 独立复核：`authorable-defaults/ verified — 1308 default(s) unchanged`。\n\n## 反向验证（方向在跑之前先行预测）\n\n**预测**：文本一半在还原后转红；结构一半两个方向都绿 —— 因为本 lane 的准入测试就是接受集合不变，它不允许翻转。\n\n**实测**：把两个 guidance 字符串 `git checkout origin/main --` 还原、测试保留修正后的期望：\n\n```\n× REJECTS an authored `aria` with the prescription, naming its surviving homes\n× the widget tombstone still fires, and points at surfaces that survived 17.0.0\n× the App.aria tombstone points at a page component, not at the retired widget surface\n× rejects `aria` with its upgrade prescription\n Test Files  3 failed (3)\n      Tests  4 failed | 150 passed (154)\n```\n\n四条文本断言全红，两条结构断言（`really accepts` / `really rejects`）在 150 passed 之中 —— 与预测完全一致。结构一半不是装饰：它是文本一半被比对的 ground truth，也是**反空转保障**。\n\n**反空转单独取证**：把 `aria: retiredKey(…)` 整条删除（不是改措辞），新 pin 依然转红，且红在预期的那一条上：\n\n```\nAssertionError: the widget `aria` prescription must still be reachable through the parse:\n  expected 'Unrecognized key(s) on this dashboard…' to contain '`dashboard.widgets[].aria` was removed'\n```\n\n即：措辞漂移由枚举断言接住，整条消失由这条接住。\n\n## 既有断言此前把缺陷钉死 —— 重新瞄准而非删除\n\nsweep 发现两处既有测试**要求**保留错误声明，这也是我最初 pin 检索漏掉的（它们写成转义正则，字面量 grep 匹配不到）：\n\n- `packages/spec/src/ui/dashboard.test.ts:588` —— `expect(message).toMatch(/app\\.aria/)`。其注释的**意图**（\"shared shape survives elsewhere\"）是对的，被点名的**实例**是死面。已重新瞄准到活载体，并补上 `not.toMatch(/app\\.aria/i)`。\n- `packages/spec/src/ui/app.test.ts:1046` —— `['aria', { label: 'x' }, 'component/widget']`，期待片段正是错误的那一半。已重新瞄准到 `page.components[].aria`。\n\n两处都保留了原有的守护力，属 fixture triage 的「re-spell / re-aim」而非「删除」。\n\n## 验证\n\n| gate | 结果 |\n|---|---|\n| `vitest run`（`packages/spec` 全量） | ✅ `Test Files 347 passed (347)` / `Tests 8881 passed (8881)` |\n| `pnpm --filter @objectstack/spec typecheck` | ✅ exit 0（`tsc --noEmit` + `check:scripts-typecheck` + `check:test-typecheck`；新测试文件零类型错误，未进 `test-typecheck-debt.json`） |\n| `check:liveness` | ✅ |\n| `check:upgrade-guide` | ✅ `protocol-upgrade-guide.md is up to date.` |\n| `check:spec-changes` | ✅ `spec-changes.json is up to date.` |\n| `check:docs` | ✅ `230 generated files in sync with packages/spec` |\n| `scripts/check-nul-bytes.mjs` | ✅ 6362 文件，无裸控制字节；改动文件另做 `[\\x00-\\x08\\x0b\\x0c\\x0e-\\x1f\\x7f]` 自扫，无命中 |\n| `scripts/check-type-check-coverage.mjs` | ✅ `OK — 62/77 …`。`--re-measure` 需要整棵 build closure 才能跑；但 `packages/spec` 已在 #5286 从 TEST_DEBT 毕业，改为 `test-typecheck-debt.json` 的按文件棘轮（由上面的 `check:test-typecheck` 直接校验），故本改动无法触碰任何 TEST_DEBT 数字。 |\n\n## Changeset\n\n`.changeset/aria-tombstone-dead-carrier.md` —— `@objectstack/spec: patch`。这是 parse 可达的作者可见散文（`retiredKey()` 的 guidance 会原样出现在解析错误里，并被 `gen:docs` 发布到参考文档），不是纯注释改动，所以按 patch 发版而非 `skip-changeset`。\n\n## 路由出本 lane 的发现\n\n`.changeset/dashboard-widget-action-aria-removed.md:58` 与 `packages/spec/CHANGELOG.md:604`、`packages/lint/CHANGELOG.md:295`、`content/docs/releases/v17.mdx` 同样带这句旧声明。均属**历史记录**（CHANGELOG 已消费，releases 按 CLAUDE.md 在代码 PR 中绝不触碰），故未改动，仅在此列出。\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_018ffcE95NaMJcL9XJ9VDYgk)_"
+}

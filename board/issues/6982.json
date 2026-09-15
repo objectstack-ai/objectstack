@@ -1,0 +1,35 @@
+{
+  "number": 6982,
+  "kind": "pull_request",
+  "title": "docs(architecture): fix ARCHITECTURE.md's 10 dead links + 2 stale paths, enroll it in the #6592 link gate",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "ci/cd",
+    "documentation",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T07:37:52Z",
+  "updated_at": "2026-08-09T08:09:52Z",
+  "closed_at": "2026-08-09T08:09:51Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": "2026-08-09T08:09:51Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/6982",
+  "body": "Fixes #6867\n\n## 背景\n\n`ARCHITECTURE.md` 是仓库的前门架构文档，但此前完全不在任何链接门禁的覆盖范围内。issue 里已经做过一次完整普查:12 条相对 Markdown 链接里 10 条死链,外加 2 处不带链接的裸路径引用也已过期。本 PR 复核了这份普查(结论一致,见下方\"复核结果\"),修好这 12 处,并把该文件正式接入 #6592 那一族的链接门禁,堵上\"唯一不被检查的文件\"这个洞。\n\n## 复核结果(origin/main,含 #6733 的修复)\n\n用与 `scripts/check-adr-links.mjs` 同一套「跳过围栏代码块/行内代码」的相对链接抽取方式对 `ARCHITECTURE.md` 重新跑了一遍普查,并额外用 CI 实际使用的 lychee 0.24.2(离线模式,`--root-dir content --fallback-extensions mdx,md --config lychee.toml`)验证:\n\n- 12 条相对链接中,10 条 404,2 条(`./ROADMAP.md`、`docs/adr/0008-...md`)本来就是好的。\n- 2 处裸路径引用确实过期:`packages/spec/src/system/plugin-capability.zod.ts`(应为 `kernel/`)与 `packages/plugins/plugin-msw/`(整个插件已不存在)。\n\n与 issue 描述完全一致,premise 有效。\n\n## 修的内容\n\n**10 条死链,按去向分三类处理**(不臆造新去向 —— 目标真的没了的,就删除/改写成陈述事实,不指向猜测出来的文件):\n\n1. **可以确定改指现存文件(2 条)**:\n   - `content/docs/introduction/architecture.mdx` → `content/docs/concepts/architecture.mdx`(这条被 L582 和「Related Documentation」的 \"Three-Layer Stack\" 各引用一次;`concepts/architecture.mdx` 标题是 \"Protocol Architecture\",正文明确讲的就是 Data/System/UI 三层协议如何协作,与 ARCHITECTURE.md 这两处引用的语境完全对得上;另一个候选 `content/docs/kernel/architecture.mdx` 讲的是 ObjectKernel 的 bootstrap 生命周期,不是「三层协议栈」,排除)。\n   - `content/docs/introduction/design-principles.mdx` → `content/docs/concepts/design-principles.mdx`(唯一候选,无歧义)。\n\n2. **目标已彻底离开代码树,直接删除并留一句真话(6 条)**:`./QUICK-REFERENCE.md`、`./PACKAGE-DEPENDENCIES.md`、`docs/METADATA_FLOW.md`、`./apps/studio/ROADMAP.md`(Studio 现在活在独立的 `objectui` 仓库,本仓库里没有任何相对路径能到达它)、`content/docs/developers/{micro-kernel,plugin-ecosystem,writing-plugins}.mdx`(`content/` 下任何位置都不存在同名文件)。\"Related Documentation\" 和 \"Component-Specific Documentation\" 两节各留一段说明性文字,交代这些链接曾经指向什么、为什么没有被改指别处。\n\n**2 处裸路径引用**:\n- `packages/spec/src/system/plugin-capability.zod.ts` → `packages/spec/src/kernel/plugin-capability.zod.ts`(一个词的修正,文件确实在 `kernel/` 下)。\n- `#### @objectstack/plugin-msw` 整个小节(含 \"Location\"/\"Role\"/依赖列表)直接删除,而不是只改路径——`git log` 确认该插件连同 MSW 支持在 #2391(v12.0)被整体移除,`packages/plugins/` 下已无此目录,这不是路径漂移,是组件本身不存在了。顺带清理了「Dependency Graph」ASCII 图里残留的同一处引用(`@objectstack/objectql` 下挂的 `plugin-msw` 子节点),同一类缺陷,同一处改动顺手带上。\n\n## 门禁接入(这张卡真正的价值所在)\n\n跟着 #6592 已经跑通的模式:`docs/adr/**` 由专门的 `scripts/check-adr-links.mjs` 覆盖,仓库其余内部文档由 `.github/workflows/check-links.yml` 里的 lychee 离线扫描覆盖,globs 是 `content/**/*.md`、`content/**/*.mdx`、`README.md`。`ARCHITECTURE.md` 在根目录,两边都没覆盖到。\n\n这次直接把 `'ARCHITECTURE.md'` 加进 lychee 的 glob 列表,紧挨着 `'README.md'`——**只是加一条路径,没有动脚本逻辑**:`check-adr-links.mjs` 是按目录扫描 `docs/adr/`,`ARCHITECTURE.md` 是根目录下的单个文件,天然就该走 lychee 那一路(跟 `README.md` 完全同构),不需要改 `sweep()`/`listRecords()` 的目录假设,不算\"真正的门禁手术\"。\n\n## 验证:门禁真的会因为这个理由变红\n\n用 CI 实际固定的 lychee 版本(0.24.2,从 lychee-action 拉的二进制)在本地复现了完整的反向验证:\n\n1. **修之前**:`lychee --offline --root-dir content --fallback-extensions mdx,md --config lychee.toml 'ARCHITECTURE.md'` → 10 个 `[ERROR] ... File not found`,与普查逐条对上。\n2. **修之后**:同一条命令 → `🚫 0 Errors`(`🔍 13 Total ... ✅ 13 OK`)。\n3. **门禁本身有没有真的在读这个文件(预判 + 复现)**:故意把 `./ROADMAP.md` 改成不存在的 `./ROADMAP-TYPO.md`。\n   - 预判:接入前(glob 里没有 `ARCHITECTURE.md`)跑同一条命令应该看不到这处坏链——`exit 0`;接入后(glob 里加了 `ARCHITECTURE.md`,即本 PR 改后的 `check-links.yml` 实际参数)应该报 1 个新增 error,精确指向第 706 行、`ROADMAP-TYPO.md`。\n   - 复现:`content/**/*.md 'content/**/*.mdx' 'README.md'`(不含 ARCHITECTURE.md)→ `exit 0`,`🚫 0 Errors`(证明这条坏链在旧配置下确实是隐形的);加上 `'ARCHITECTURE.md'` 后 → `exit 2`,唯一一条 `[ERROR] file:///.../ARCHITECTURE.md ... ROADMAP-TYPO.md (at 706:3) | File not found`。\n   - 两个方向都和预判一致,之后把链接改回 `./ROADMAP.md` 并重新确认 0 Errors。\n\nlychee 的完整 glob(`content/**/*.md` + `content/**/*.mdx` + `README.md` + `ARCHITECTURE.md`,1731 条链接)也整体跑了一遍,`🚫 0 Errors`,说明这次接入没有连带影响其它文件的扫描结果。\n\n其余相关门禁本地复核均绿:`node scripts/check-adr-links.mjs --self-test && node scripts/check-adr-links.mjs`(未改动,531 条解析,8 条冻结基线不受影响)、`node scripts/check-nul-bytes.mjs`、`node scripts/check-adr-anchors.mjs`、`node scripts/check-role-word.mjs`、`node scripts/docs-audit/check-audit-scope.mjs`——均与本次改动无关但顺手复核过,全部通过。\n\n## 边界\n\n- 未触碰 `docs/adr/**`(#6726 的范围,两边不重叠,issue 里已确认)。\n- 未触碰 `content/docs/releases/**`。\n- 只改了 `.github/workflows/check-links.yml`(Check Links 工作流的 lychee 参数一行),**没有碰 `lint.yml`**——与并行进行的 #6865(钉死 `lint.yml` 的 required context 名单,涉及 `lint.yml` 和 `scripts/`)确认过是两个不同的 workflow 文件,`scripts/check-adr-links.mjs` 本身也未改动,无文件级冲突。\n\n## 是否需要 changeset\n\n这是纯文档 + workflow 改动(`ARCHITECTURE.md` 不是任何发布包的一部分,`check-links.yml` 是仅在 CI 里跑的工作流),不发布任何 npm 包、不影响运行时行为,因此没有加 changeset,并会在 PR 上补 `skip-changeset` 标签。\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01F8q5J1MQyocgtNspb15fSn)_"
+}

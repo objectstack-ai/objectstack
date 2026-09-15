@@ -1,0 +1,35 @@
+{
+  "number": 6921,
+  "kind": "pull_request",
+  "title": "fix(lint): searchable-fields hints prescribe a stored field, not formula (#6673)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T04:21:41Z",
+  "updated_at": "2026-08-09T04:52:14Z",
+  "closed_at": "2026-08-09T04:52:13Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": "2026-08-09T04:52:12Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/6921",
+  "body": "Fixes #6673\n\n## What changed\n\nBoth authoring-time hints for a bad `searchableFields` entry prescribed mirroring a related record's value onto a **formula** field — a fix that can never work: a `formula` field is virtual (no driver materializes a column for it — `packages/objectql/src/engine.ts`, `driver-sql/src/schema-drift.ts`, `driver-turso/src/remote-transport.ts`), so a `$contains` predicate against one has nothing to scan, and a CEL formula only reads the record's own fields (`record.<field>`), so it cannot fetch the related title in the first place.\n\n`packages/lint/src/validate-searchable-fields.ts`:\n- `:347` (dotted-path entry, `searchable-field-unknown`): \"…or copy the value onto **a formula field** here.\" → \"…or copy the value onto **a stored text field** here.\"\n- `:414` (a `lookup`/`master_detail` column outside the allowed set, `searchable-field-unsearchable`): \"…mirror it onto **a text/formula** field here…\" → \"…mirror it onto **a stored text** field here…\"\n\nThis matches the prescription already shipped in `content/docs/data-modeling/schema-design.mdx` and the `objectstack-data` / `objectstack-ui` skills (PR #6670, #6898) — the tool's own hint text now agrees with the corpus that quotes it.\n\nPinned tests in `validate-searchable-fields.test.ts` were strengthened to assert the new wording and reject `\"formula\"`. Reverse-verified: reverting either string to the old wording turns both tests red (confirmed locally before restoring the fix).\n\n## Scope note — the third string does not exist where the issue described it\n\nThe issue also named a third target: `packages/metadata-protocol/src/protocol.ts:4780`, described as \"the runtime dotted-path hint in `assertSearchFieldsAreSearchable`\", currently reading \"a formula or rollup field\".\n\nI verified this against `origin/main` and it does not hold up:\n\n- `assertSearchFieldsAreSearchable` (protocol.ts:4978, the `#4254` SEARCH-FIELDS ingress gate) **has no formula/rollup prescription at all** — its dotted-path hint only says `\"'search' scans this object's own columns; a related record's column cannot be a search target.\"` (protocol.ts:5056). `git log -S \"formula\" -- packages/metadata-protocol/src/protocol.ts` shows the string \"formula\" was **never** present in this function, in the file's entire history.\n- The text at `:4780` (\"Denormalise the value onto '${object}' (a formula or rollup field that copies it into a real column) and sort by that.\") actually lives in `assertSortFieldsExist` (protocol.ts:4745) — the **SORT** axis, `#4226`/`#4256`, an unrelated code path guarding `?sort=`/`orderBy`, not `searchableFields`.\n- That SORT hint is not a stray leftover: it's the deliberate recommendation `#4256` (same author, closed `completed`) asked for and got, and it is still consistent with its own, still-current documentation (`content/docs/protocol/objectql/query-syntax.mdx:533-534`, \"Denormalise the value onto the queried object (for example with a formula or rollup field) when you need to sort by it.\"). Docs and code agree there today — there is no docs-vs-tool contradiction on the SORT axis, unlike the `searchableFields` case this issue is about.\n- Its pinned message test lives in a third package (`packages/objectql/src/query-expression-conformance.test.ts:455`), outside both packages this card named.\n\nSo this PR only touches the two `packages/lint` strings, which are exactly as described and now fixed. I'm leaving `protocol.ts` untouched — filing the (possibly real, but separate and cross-domain) SORT-axis question as its own finding for triage rather than guessing at it here. Details in my report to the dispatching PM.\n\n## Tests\n\n- `pnpm exec vitest run src/validate-searchable-fields.test.ts` (packages/lint) — 33/33 pass.\n- `pnpm exec vitest run` (packages/lint, full suite) — 1762 passed, 4 skipped.\n- `pnpm --filter lint typecheck` — clean.\n- `pnpm exec eslint packages/lint/src/validate-searchable-fields.ts packages/lint/src/validate-searchable-fields.test.ts --no-inline-config` — clean.\n- `node scripts/check-nul-bytes.mjs` — OK.\n- Reverse-verification: reverted both strings to \"formula\" wording → both new assertions failed red as expected; restored → green again (rebuilt-from-src, no stale `dist/`).\n\n## Changeset\n\nAdded `.changeset/searchable-fields-stored-hint.md` (patch, `@objectstack/lint`) — message-text-only fix to a published package's diagnostic output; matches this repo's own precedent for wording-only diagnostic fixes (e.g. `.changeset/fault-edge-tombstone-type.md`, `.changeset/org-axis-dead-alias-branches.md`).\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01F8q5J1MQyocgtNspb15fSn)_"
+}

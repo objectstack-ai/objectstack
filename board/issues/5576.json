@@ -1,0 +1,36 @@
+{
+  "number": 5576,
+  "kind": "issue",
+  "title": "PageComponentSchema.dataSource.view 是声明了但无人消费的绑定:objectui resolveElementDataSource 丢弃 view 键(除测试外零调用方),list-view 上照 spec 写 dataSource 反而运行时报错(17.0.0-rc.2)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "pm:queue",
+    "repo:objectui",
+    "target:v17"
+  ],
+  "assignees": [
+    "yinlianghui"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T19:33:18Z",
+  "updated_at": "2026-08-09T06:51:25Z",
+  "closed_at": "2026-08-09T06:51:25Z",
+  "closed_by": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5576",
+  "body": "发现于 objectstack-ai/hotcrm#771 / PR objectstack-ai/hotcrm#784(Sales Home 标签页内嵌视图的实测过程)。与已关闭的 #4413 同缺陷类——「契约 publish 了渲染器根本不读的绑定」——但 #4413 处理的是 `record:*` 四个 block 的 `objectName`/`recordId`,不含本键,故单独立此单。\n\n## 现象(单变量对照,pinned 17.0.0-rc.2,真实 dev server + Chromium)\n\n同一张 `type: 'home'` 页面上三个 `list-view` 页面组件:\n\n- 不带 `dataSource` 的两个 → 正常渲染真实数据表格;\n- 按 spec 写 `dataSource: { object, view }` 的那个 → 运行时直接失败 **\"Couldn't load records\"**。\n\n两个方向各复现一次(加上即坏、去掉即好)。\n\n## 机理\n\n- `PageComponentSchema.dataSource.view`(`ElementDataSourceSchema` 的 `view` 键)在 spec 里**声明**;\n- objectui 的 `resolveElementDataSource` 把 `view` 键**整个丢弃**;\n- 且该函数**除测试外零调用方**——即「按名字引用 saved view」这条声明的能力在 rc.2 运行时不存在,写了还会把组件弄坏。\n\n## 应用侧的实际代价\n\nhotcrm PR objectstack-ai/hotcrm#784 因此无法按名字引用 saved view,只能从 `src/views/*.view.ts` 读出 columns / filter / sort **内联**进 page 组件(PR body 已记录此取舍与理由)。每个这样做的应用都在为同一个视图维护两份配置的漂移风险——这正是 saved-view 引用本该消灭的问题。\n\n## 验收建议(同 #4413 的结论口径:当前状态不能留)\n\n二选一:\n\n1. objectui 消费 `view` 键——按名字解析 saved view 的 columns/filter/sort 并渲染;或\n2. 从 spec / 公开契约撤下该键,并让 validate **拒绝**它——不再让一个「声明+校验但不执行、用了反而坏」的绑定继续误导作者。\n\n/cc 需要 objectui 侧改动(objectstack-ai/objectui:`resolveElementDataSource`)。"
+}

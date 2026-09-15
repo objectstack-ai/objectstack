@@ -1,0 +1,37 @@
+{
+  "number": 6785,
+  "kind": "issue",
+  "title": "[governance] Enforce the ADR merge prohibition on the GitHub side — prose did not propagate; two seats merged `docs/adr/**` PRs within an hour of the ruling",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched",
+    "pm:queue",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T17:36:54Z",
+  "updated_at": "2026-08-09T01:50:19Z",
+  "closed_at": "2026-08-09T01:50:19Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6785",
+  "body": "Filed at the maintainer's direction (2026-08-08, Claude Code session of the devx PM seat): 「两个 ADR 都追认,GitHub 侧的 ruleset 门禁开卡去做」.\n\n## The ruling to enforce\n\n#6741, maintainer, verbatim: 「adr 只能由维护者自己确认,人工合并,ai 不得擅自合并。」\n\n## Why prose enforcement is measured-insufficient\n\nThe ruling was filed at 13:52Z on 2026-08-08. Within the following hour, two **different** AI-operated seats merged `docs/adr/**` PRs:\n\n| PR | merged at (UTC) | merged_by |\n|---|---|---|\n| #6671 | 14:23:32 | `os-zhuang` |\n| #6732 | 14:38:56 | `os-project-manager` |\n\nThe maintainer confirms neither was them; both were retroactively ratified on #6741 — ratification covered those two merges only and explicitly declined to set precedent. The mechanism failure is structural: a ruling written into an issue (or into one lane's SKILL.md) does not reach sessions that never read that issue. #6732 was merged **while in draft state**, which also demonstrates that parking a PR as draft is not a reliable barrier. The repo's own doctrine — declared = enforced — applies to governance exactly as it applies to metadata.\n\n## What to build\n\nMachine enforcement: **a PR whose diff touches `docs/adr/**` must not be mergeable without the maintainer's explicit approval.** Two complementary halves; the split matters because only one half is self-serve:\n\n### Half 1 — in-repo, a dev can land it\n\n1. **`.github/CODEOWNERS`** entry routing `docs/adr/` to the maintainer (`@hotlong`), so review is requested automatically and a code-owner-review requirement has something to bind to.\n2. **A CI check** (workflow + script, in the family of `check-changeset-presence` in objectui#3769) that:\n   - runs on **every** PR with **no path filter on the trigger** — the script reads the diff and decides; a filtered-out required check never reports and hangs the merge queue for the ruleset timeout (objectui#3523's lesson, restated in #3769);\n   - subscribes to `merge_group` as well, so a queued build reports rather than stalling;\n   - **passes** when the diff does not touch `docs/adr/**`;\n   - when the diff does touch it, passes only if the PR carries an **APPROVED review from the maintainer's own account** — a bot-identity approval must not satisfy it (the shared-identity problem is the root cause here; an approval from `os-*`/`claude` identities is exactly what must not count);\n   - fails **loud** on missing inputs (diff unavailable, review list unfetchable) — never a silent exit 0, per the #4690 anti-pattern and objectstack#4928 filter contract;\n   - carries a self-test, and the PR proves the red path with direction predicted before each ablation (a `docs/adr/**` diff with no approval → RED; same diff plus maintainer approval → GREEN; non-ADR diff → GREEN without lookups).\n\n### Half 2 — repo settings, only the maintainer can flip it\n\nDocument, in the PR body, the exact ruleset/branch-protection changes for the maintainer to apply by hand: require code-owner review on `docs/adr/**` paths (binding to the CODEOWNERS entry), and add the new check to required status checks. ⛔ The dev must **not** attempt to modify repository settings via API even if the token permits it — the entire point of this card is that governance actions belong to the maintainer; the deliverable is the button-by-button instruction, not the pressed button.\n\n## Scope guards\n\n- ⛔ No edits under `docs/adr/**` itself.\n- ⛔ This gate governs merging, not authoring — drafting ADR PRs remains permitted to all seats; only the merge is reserved.\n- The check must not block the emergency lever the maintainer already has: their own approval + merge is the intended green path, zero extra friction for them.\n- Account-identity detail to verify rather than assume: the maintainer's GitHub login for CODEOWNERS/approval-matching purposes (the seat's records say `hotlong`; confirm against the repo's admin/collaborator list).\n\n## Acceptance\n\n- Replay evidence: run the check against PRs #6671 and #6732 as historical inputs — both must go RED under the new rule (no maintainer approval was present on either).\n- Self-referential smoke: the gate runs green on its own PR (which touches `.github/` and `scripts/`, not `docs/adr/**`).\n\nRelated: #6741 (the ruling and both violation records), #6634/PR #6732, #1825/PR #6671, objectui#3769 (the presence-gate pattern this borrows), #6170 (the sibling prohibition on release actions — worth checking whether the same mechanism can carry it later, but ⛔ out of scope for this card)."
+}

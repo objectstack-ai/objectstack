@@ -1,0 +1,32 @@
+{
+  "number": 6914,
+  "kind": "issue",
+  "title": "[spec] 35 `retiredKey()` tombstones over protocol-17 conversions never mention `os migrate meta` — the author is told to hand-edit when a tool exists",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T03:51:13Z",
+  "updated_at": "2026-08-09T13:31:52Z",
+  "closed_at": "2026-08-09T13:18:21Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6914",
+  "body": "Filed unassigned, out of scope for #6856 (that card decides the **verb** of the migrate sentence; this one is about its **absence**). Found while auditing #6856's corpus.\n\n## Measurement\n\nOn `origin/main` @ `2672f855f`, `packages/spec/src`:\n\n- `retiredKey(` call sites in non-test `*.zod.ts`: **123**\n- of those, sites carrying an `os migrate meta` sentence: **55** (the #6856 corpus)\n- sites in files with **no** `os migrate meta` sentence anywhere: **35**, across 18 files:\n  `ai/skill.zod.ts`, `api/analytics.zod.ts`, `api/batch.zod.ts`, `api/errors.zod.ts`,\n  `api/protocol.zod.ts`, `api/rest-server.zod.ts`, `automation/flow.zod.ts` (6),\n  `automation/node-executor.zod.ts`, `data/data-engine.zod.ts` (3), `data/hook.zod.ts`,\n  `kernel/plugin.zod.ts`, `security/rls.zod.ts`, `system/environment-artifact.zod.ts` (3),\n  `system/http-server.zod.ts`, `ui/i18n.zod.ts`, `ui/sharing.zod.ts`, `ui/view.zod.ts` (4),\n  `ui/widget.zod.ts`.\n\n## Why it may matter\n\n`shared/retired-key.ts:27-32` says the guidance string \"IS the migration doc for anyone who\nhits it\". For these 35, that doc omits the one automated remedy that exists — the author\n(very often an AI, ADR-0033) is told to hand-edit every site.\n\nSpot-checked against `spec-changes.json`'s v17 `converted` list — a protocol-17 conversion\n**does** exist for each of these surfaces:\n\n| surface | conversion |\n|---|---|\n| `view.list.responsive`, `view.form.aria` (+2) | `view-inert-keys-removed` |\n| `flow.active`, `flow.template` (+2) | `flow-inert-keys-removed` |\n| `skill.triggerPhrases` | `skill-trigger-phrases-removed` |\n| `stack.api.requireAuth` | `stack-api-require-auth-removed` |\n| `permission.rowLevelSecurity.priority` | `permission-rls-priority-removed` |\n\nVerbatim specimen — `ui/view.zod.ts:1285`, whose key `view-inert-keys-removed` strips:\n\n```\n'`view.responsive` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — ' +\n'no renderer ever read it; the grid is responsive by its own layout rules. Delete the key.'\n```\n\nAll four `ui/view.zod.ts` tombstones end at \"Delete the key\" with no pointer to the tool.\n\n## Not asserting the fix\n\nI did not audit whether every one of the 35 has a conversion (only the 7 spot-checked\nabove), nor whether some deliberately omit the sentence — `data/driver.zod.ts:108` shows\nthe corpus does sometimes say so explicitly (\"No `os migrate meta` line on any of ...\"),\nso a per-site check is needed before any sweep.\n\n**Blocked-by: #6856** — that card decides which idiom the sentence uses. Adding 35 more\nsentences in a to-be-decided spelling would just enlarge the split #6856 exists to close.\n\n## Dedup\n\nSearched open issues before filing: `tombstone prescription \"os migrate meta\" missing`,\n`retiredKey prescription conversion exists no migrate sentence`, `in:title spec tombstone\nmigrate`, `view.zod tombstone \"Delete the key\"` — only #6856 itself comes back.\n"
+}

@@ -1,0 +1,36 @@
+{
+  "number": 6509,
+  "kind": "issue",
+  "title": "观察单：changeset 家族三个 check-*.mjs 的 --self-test 只在可被 skip-changeset 整体豁免的 job 里跑，改这些脚本的 PR 恰好豁免自己的自检",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "ci/cd",
+    "domain:devx",
+    "pm:queue"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T02:44:12Z",
+  "updated_at": "2026-08-09T07:09:56Z",
+  "closed_at": "2026-08-09T07:09:56Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6509",
+  "body": "由 #6434 / PR #6508 的实施过程中测得，**未在该 PR 内修复**（超出其文件面），按 Prime Directive #10 单独立观察单。未认领。\n\n## 现象\n\n以下三个门禁脚本**只**在 `.github/workflows/pr-automation.yml` 的 `changeset-check` job 里被调用，没有任何其它 workflow 引用它们：\n\n- `scripts/check-empty-changeset.mjs`（48 条断言，含钉住 workflow 自身形状的 CONSUMER 断言）\n- `scripts/check-adr-0087-registration.mjs`（67 条断言）\n- `scripts/check-changeset-no-major.mjs`\n\n实测（在 `1fe436d` 上）：\n\n```\n$ for s in empty-changeset adr-0087-registration changeset-no-major; do\n    echo \"--- $s ---\"; grep -rln \"$s\" .github/workflows/ || echo \"  (no workflow references it)\"; done\n--- empty-changeset ---\n.github/workflows/pr-automation.yml\n--- adr-0087-registration ---\n.github/workflows/pr-automation.yml\n--- changeset-no-major ---\n.github/workflows/pr-automation.yml\n```\n\n三者对应的 `check:empty-changeset` / `check:adr-0087-registration` 存在于根 `package.json`，但**没有**接进 `lint.yml`（`lint.yml` 里 35 条 `run: pnpm check:*` 不含这两条）。\n\n## 为什么这构成一格\n\n`changeset-check` 在 PR 带 `skip-changeset` 时**整体豁免**（job 级 `if:` + 每步的两次标签读取）。而「改动 CI 内部脚本」正是最典型的 `skip-changeset` 场景 —— 该类 PR 无对外发布面，按 workflow 自己的处方就该打这个标签。\n\n于是：**一个修改这三个脚本的 PR，通常恰好豁免掉这三个脚本自己的 `--self-test`。** PR #6508 就是活标本：它改写了 `check-empty-changeset.mjs` 的 CONSUMER 断言（4 → 5 条判定步骤，新增三条），而这些断言在它自己的 CI 上一次都没跑过，全部证据来自本地执行。\n\n这属于 #4690 家族：仓库把 `--self-test` 前置于真实检查，正是为了防止「phantom check —— fixture 从不被执行的检查器」；而这里**自检本身可被一个标签跳过**，且跳过它的恰是最该跑它的那类 PR。\n\n## 影响面（据实：今天不咬人）\n\n- 一个写坏的断言不会在引入它的 PR 上暴露，但会在**下一个不带 `skip-changeset` 的 PR** 上暴露 —— 也就是一个与之无关的作者会吃到这个红。检测被推迟并转嫁，但没有永久消失。\n- 反过来，一个**被删掉**的断言（比如有人把 CONSUMER 块整段移除）在带标签的 PR 上静默通过，之后也不会有任何东西提醒它曾经存在 —— 这一半是真的会永久沉默的。\n- 无已知实例。归观察类。\n\n## 候选处置（未预设结论，供分诊定级）\n\n1. 把 `pnpm check:empty-changeset` / `check:adr-0087-registration` 的 **`--self-test` 部分**接进 `lint.yml`，真实检查仍留在 `changeset-check`（它需要 `$MERGE_BASE`，lint job 没有分支点，这正是 #6148 当初把它放进 `pr-automation.yml` 的理由）。成本：多两个 lint 步骤；收益：自检不再可被标签跳过，且与真实检查的豁免语义各归其位。\n2. 只在 PR 触及 `scripts/check-{empty-changeset,adr-0087-registration,changeset-no-major}.mjs` 时才跑自检（paths 过滤）。更省，但引入一条新的「按路径决定跑不跑门禁」的语义。\n3. 维持现状并写明该格是有意的。\n\n倾向 1 —— 它把「自检」与「判决」分开，恰好对应 #6434 刚刚确立的同一条区分（报告 vs 裁决）；但 lint job 的步骤数是有成本的，交分诊权衡。\n"
+}

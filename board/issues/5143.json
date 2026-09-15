@@ -1,0 +1,37 @@
+{
+  "number": 5143,
+  "kind": "issue",
+  "title": "`AddressField` binds its ZIP input to `zipCode` while the stored value uses `postalCode` — the postal code does not round-trip and is silently dropped on edit",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:queue",
+    "repo:objectui",
+    "target:v17"
+  ],
+  "assignees": [
+    "yinlianghui"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T06:03:26Z",
+  "updated_at": "2026-08-09T06:51:25Z",
+  "closed_at": "2026-08-09T06:51:25Z",
+  "closed_by": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5143",
+  "body": "## Summary\n\nThe console's `AddressField` editor reads and writes the address part **`zipCode`**. The value the platform stores (and serves back over `/api/v1/data/**`) uses **`postalCode`**. The two never meet, so:\n\n- opening an existing address for edit shows an **empty** ZIP box even when a postal code is stored, and\n- saving that form writes back an address whose postal code is gone.\n\nEvery other part of the address (`street`, `city`, `state`, `country`) round-trips correctly, which is what makes this easy to miss in review — four of five boxes populate.\n\nThis is a **data-loss** bug, not a cosmetic one.\n\n## Evidence\n\n`@objectstack/*` 17.0.0-rc.1, fresh database, `Field.address()` on `crm_account.billing_address`.\n\nStored value, read back from the REST API:\n\n```json\n{\"street\":\"中策路 1 号\",\"city\":\"杭州\",\"state\":\"浙江\",\"postalCode\":\"310018\",\"country\":\"CN\"}\n```\n\nOpening that record's edit dialog → 「地址与位置」 tab and reading the inputs directly:\n\n```\n  #street   = \"中策路 1 号\"\n  #city     = \"杭州\"\n  #state    = \"浙江\"\n  #zipCode  = \"\"                 ← stored postalCode \"310018\" did not load\n  #country  = \"CN\"\n  #postalCode = (no such input)  ← no input is bound to the stored key\n```\n\nFour parts load, the fifth does not, and there is no other input it could have gone to.\n\n## Mechanism\n\n`AddressField` in `ui-components` refers to `zipCode` and nothing else — the state key, the input `id`, the `onChange` part name and the read-only formatter all use it:\n\n```js\n… jsx(Label, { htmlFor: `zipCode`, children: `ZIP / Postal Code` })\n… jsx(Input,  { id: `zipCode`, value: a.zipCode || ``,\n                onChange: e => o(`zipCode`, e.target.value), placeholder: `94102` })\n… [ … , zipCode].filter(Boolean).join(` `)\n```\n\nThe string `postalCode` does not appear anywhere in that bundle (`grep -c postalCode` → 0), so the mismatch is total rather than a fallback that happens to miss.\n\nConsistent with this, the read-only detail rendering of the same field (objectstack-ai/objectstack#5075, which shows the value as raw JSON) exposes the stored key as `postalCode`.\n\n## Impact\n\nAny user who opens an existing record with an address and saves — for any unrelated reason, e.g. correcting a phone number on another tab of the same dialog — silently loses that record's postal code. There is no warning and no visible cue, because the empty ZIP box looks like a field nobody filled in.\n\n## Why an app cannot work around it\n\nThe part names are internal to the widget. `Field.address()` exposes no key mapping, and an app cannot substitute the widget from metadata. Authoring five separate text fields instead would avoid it, but loses the structured value, geocoding and map view.\n\n## Suggested fix\n\nSettle on one part name and use it on both sides. `postalCode` is the one already in the stored documents and in the API responses, so the lower-risk direction is to change the widget to read/write `postalCode`, plus a read-time fallback to `zipCode` for anything already written by the current build.\n\nWorth a check across the other address consumers (the map view, the geocoder, the export/import mappings) that they agree on the same key.\n\n## Related\n\n- objectstack-ai/objectstack#5075 — the same field rendering as raw JSON on the detail page.\n- objectstack-ai/objectstack#5083 — the same widget's sub-labels and placeholders are hardcoded English. That issue notes `zipCode` appears in the read-only formatter but does not cover this round-trip failure.\n\nFiled from a downstream app (`hotcrm-heimao`), found while sweeping issue #60 there.\n"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 6270,
+  "kind": "issue",
+  "title": "[finding] `errorResponseBase` 文件头是 `error.details.code` 漂移的第四处 —— #6123 修了三处,`dispatcher-plugin.ts:467` 因红线未动",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T12:49:15Z",
+  "updated_at": "2026-08-09T04:12:37Z",
+  "closed_at": "2026-08-09T04:12:37Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6270",
+  "body": "## 观察(observation-class,今天没有用户会撞到)\n\n实施 #6123(PR #6264)时发现:同一句「`err.code` 落在 `details.code`」的说法**还有第四处**,在 `errorResponseBase` 自己的文件头里。#6123 的分诊把范围钉死为三处(#5367 的 changeset、`read-scope-sql.ts` 文件头、#5811 正文),并明文划了 ⛔ 不动 `dispatcher-plugin.ts` 的红线,所以按 PD #10 只记录不修。\n\n## 位置与原文\n\n`packages/runtime/src/dispatcher-plugin.ts:467`-`:469`(实测于 `origin/main` @ `f6609e6ae`,行号仍然是 467):\n\n> The code still travels: `details.code` (#3842, below) carries\n> `READ_SCOPE_COMPILE_FAILED` to the client untouched, so what a machine reads is\n> unchanged and only the prose is withheld — into `errorReporter` and the log.\n\n## 为什么这也是漂移\n\n括号里的 `(#3842, below)` 指的是同函数下方 `:510`-`:513` 那段 `const details = …` 的**本地暂存**,这半句没错。错的是后半句的两个断言:\n\n- 「carries `READ_SCOPE_COMPILE_FAILED` **to the client**」\n- 「**what a machine reads** is unchanged」\n\n两句都在讲**线上位置**,而线上位置不是 `details.code`。`:516` 把这个 `details` 交给 `buildApiError`(`packages/runtime/src/error-envelope.ts:117`),`splitSemanticCode` 取走 `code` 提升进声明字段,`rest` 为空于是返回 `details: undefined`(`error-envelope.ts:112`),`:124` 的条件展开被跳过 —— `details` 键整个消失。机器实际读到的是:\n\n```json\n{\"success\":false,\"error\":{\"code\":\"READ_SCOPE_COMPILE_FAILED\",\n \"message\":\"Internal server error\",\"httpStatus\":500}}\n```\n\n已由 `packages/runtime/src/analytics-query-read-scope-withhold.test.ts:218`(真 `AnalyticsService` + 真挂载路由)钉住。\n\n## 为什么单独立单而不是搭 #6264 的车\n\n1. #6123 的分诊评论把范围枚举为 three sites,并明确 `dispatcher-plugin.ts` 是**只读参考面**;派工单同样把它列为红线。把第四处塞进那个 PR 会越过一条明写的边界。\n2. 这一处的**读者群不同**,值得单独判优先级:前三处的受害者是「读 CHANGELOG / 读 service-analytics 的人」,这一处的受害者是**下一个改 `errorResponseBase` 的人** —— 他就站在做暂存的那个函数里,读到「details.code carries it to the client」会直接把本地变量名当成线上契约。方向上比前三处更容易误导,尽管触达面更窄。\n\n## 为什么按 observation-class 归档(不预判优先级)\n\n- **零行为缺陷**:代码本身是对的,错的只是同文件的一句注释。\n- **不出仓**:这是源码注释,不像 #6123 的 changeset 那样会随 `CHANGELOG.md` 发到 npm。\n- **没有已知消费者被它误导过**。\n\n⚠️ 严重度请分诊自己判 —— 立单时判的严重度两个方向都不可靠(#5347 / cloud#1004 的先例)。这里如实记的是「今天无人撞到」,不是「不值得修」。\n\n## 建议动作(一行注释)\n\n把 `:467`-`:469` 改成 `error.code`,并补一句提升机制 —— 与 PR #6264 给另外两处补的措辞保持一致即可。**顺带值得一并核**:`:452`-`:457` 那段 JSON 示例展示的是 `{\"error\":{\"message\":…,\"code\":…}}`(code 直接挂在 `error` 下),形状其实是**对的**,但它描述的是 #5811 修复**之前**的泄漏状态,与 `:467` 那句并排读容易混淆,可在同一次修里加一句时态说明。\n\n## 参考\n\n- `packages/runtime/src/dispatcher-plugin.ts:467`-`:469`(本单)、`:510`-`:517`(`details` 组装与 `buildApiError` 调用)\n- `packages/runtime/src/error-envelope.ts:117`(`buildApiError`)、`:112`(`splitSemanticCode` 返回 `undefined` 的那一行)\n- `packages/runtime/src/analytics-query-read-scope-withhold.test.ts:218`(实测锚点)\n- 同族:#6123 / PR #6264(前三处的更正)、#5811(第三处所在)、#3842(提升机制的出处)\n\n会话:`session_015a5qkLzpGXhLL2F5gvJ7dD`"
+}

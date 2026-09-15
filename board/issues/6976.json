@@ -1,0 +1,35 @@
+{
+  "number": 6976,
+  "kind": "pull_request",
+  "title": "fix(spec): 把 `$search` 三个类型词表的「互不相交」钉成受检事实，而不是巧合 (#6934)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T07:04:10Z",
+  "updated_at": "2026-08-09T07:37:14Z",
+  "closed_at": "2026-08-09T07:37:12Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": "2026-08-09T07:37:12Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/6976",
+  "body": "Fixes #6934\n\n## 结论：取处置 (2)，保留守卫 + 注释 + 钉子\n\n卡片与分诊都倾向 (1)（退休该行，援引 #6318）。我按要求做了实测再选，测量结果把我推向 (2)。**行为在两个方向上都逐字节不变**，本 PR 不改变任何一次判定。\n\n## 一、集合交集：代码实测，未用肉眼比对\n\n不采信卡片里手抄的三份清单，直接 import 三个常量在代码里求交：\n\n```\nnode_modules/.bin/tsx measure.mts packages/spec/src/data/search-fields.ts BEFORE\n```\n\n```json\n{\n  \"EXCLUDED ∩ TEXTUAL\": [],\n  \"EXCLUDED ∩ ENUM\": [],\n  \"TEXTUAL ∩ ENUM\": [],\n  \"EXCLUDED ∩ (TEXTUAL ∪ ENUM)\": []\n}\n```\n\n三个交集全空，卡片的事实成立。附带测出**第三对**（两个肯定列表之间）也不相交 —— 卡片没提，但它同属一类，见下。\n\n## 二、全类型域 before/after 差分：0 处不同\n\n域 = `FieldType` 枚举 ∪ 三个词表 ∪ 域外探针（`not_a_real_type`、无 type），共 **56** 个类型。每个类型跑 **9** 种调用形态（裸探针、作 displayField、命名为 `name` / `title`、hidden、落在 `SEARCH_AUTO_EXCLUDED_FIELDS` 名单上、declared 分支、带 options、经 override 求交），另加两次「所有类型同时出现在一个对象里」的排序探针。\n\n删掉守卫行 vs 保留，比对全部 **504** 次解析：\n\n```\ndomain size: 56 | whole-payload identical: true\nper-type verdict diffs: 0 (9 probe shapes x 56 types = 504 resolutions)\ncombined identical: true\ncombinedWithLead identical: true\n```\n\n空 diff，不是抽样。源文件 diff 也是纯增量（`124 insertions(+)`, 0 deletions），逻辑一行未动。\n\n## 三、决定处置的那次测量：未来作者构造用例\n\n问题是「未来作者往 `SEARCHABLE_TEXTUAL_TYPES` 加类型时，没人检查他有没有同时写进排除集」。构造：把已在排除集里的 `json` 加进 `SEARCHABLE_TEXTUAL_TYPES`。\n\n| 形态 | 裸探针 | 作 displayField | override 求交 |\n|---|---|---|---|\n| 守卫**在** + 重叠 | `{allowed: [], source: auto}` | `{allowed: [\"other\"]}` | `[]` |\n| 守卫**删** + 重叠 | `{allowed: [\"probe\"], source: auto}` | `{allowed: [\"probe\",\"other\"]}` | `[\"probe\"]` |\n\n两边都没有抛错，都没有诊断。**所以那行守卫并不是在「盖住」这个陷阱 —— 它只是把同一个矛盾往相反方向沉默地裁决了一次。** 卡片问的「是陷阱还是非事件」，答案是第三种：两种处置都留着陷阱，谁都不出声。\n\n但两个沉默不等价：\n\n- 守卫在 = **fail closed**，冲突类型被悄悄踢出扫描，代价是一列搜不到。\n- 守卫删 = **fail open**，肯定列表获胜，该类型不只进自动默认集，还进上一层 #4254 的 ingress allow-list —— `override` 那一列从 `[]` 翻成 `[\"probe\"]`，即 `$searchFields=(该字段)` 从「拒绝」翻成「接受」，正是 #4483 为 `id` 关掉的那类放宽。排除集里写着 `secret` / `password` / `encrypted` / `vector`，fail open 意味着对脱敏列或重量级列做 `$contains` 子串扫描。\n\n既然两种处置都不能让作者听见响声，真正堵住这一类的只能是钉子；而在钉子之外还要选一个平局裁决方向时，选 fail closed。故取 (2)。\n\n补充一条实测事实，修正卡片的一处前提：`SEARCH_AUTO_EXCLUDED_TYPES` 在 `packages/objectql/src/search-filter.ts:46` 处**是一个纯 re-export，不是逻辑读取**。全仓（排除 node_modules / dist）只有三处引用：定义处、该 re-export、以及本守卫行。也就是说取 (1) 会让这个常量在仓内**逻辑消费者归零** —— 把一段惰性分支换成一份惰性词表，形状更差。（导出本身是 `@objectstack/spec/data` 公共 API，按卡片要求未触碰。）\n\n## 四、同类闭合（范围外扩，已披露）\n\n钉子里多加了一对：两个肯定列表之间也必须不相交。理由不是对称性 —— 引擎侧 `fieldClausesForTerm` **先**分支到 `SEARCHABLE_ENUM_TYPES`，同时命中的类型只会走 option label 映射、永远不会按原文 `$contains` 检索。这是三行断言，把「词表重叠」整类关掉而不是关掉其中一对。除此之外未越界：导出、另一个消费者、`declared` 分支均未改动。\n\n## 五、反向验证（方向先预测，后运行）\n\n预测写在运行之前：\n\n| 变体 | 集合断言 | 「排除集成员必被拒」 | 「白名单成员必被纳」 |\n|---|---|---|---|\n| A：重叠 + 守卫在 | 红 | 绿 | **红** |\n| B：重叠 + 守卫删 | 红 | **红** | 绿 |\n| C：无重叠 + 守卫删 | 绿 | 绿 | 绿（什么都不会红） |\n\n实测三条全部命中：\n\n```\n###### A: overlap, guard KEPT\n × no type is both auto-excluded and on a positive allow-list\n ✓ the two positive allow-lists share no type either\n ✓ every auto-excluded type is REJECTED by the auto-default\n × every searchable type is ADMITTED by the auto-default\n      Tests  2 failed | 12 passed (14)\n\n###### B: same overlap, guard DELETED\n × no type is both auto-excluded and on a positive allow-list\n × every auto-excluded type is REJECTED by the auto-default\n ✓ every searchable type is ADMITTED by the auto-default\n      Tests  3 failed | 11 passed (14)\n\n###### C: NO overlap, guard DELETED\n      Tests  14 passed (14)\n```\n\n钉子是 anti-vacuous 且**有方向**的：重叠往哪边落都会红，且没有任何单点放宽能同时压住两个方向。B 的第三条红是 #4483 里 `name: { type: 'json' }` 那例，属于旁证。\n\n变体 C 同时是对处置 (1) 的诚实记录：**在今天的集合上删掉守卫，什么都不会红。** 惰性代码按定义对测试不可见 —— 这正是 #6753 说的、不该为此制造钉子的情形，所以第二节的全域空 diff 才是那一侧的证据。\n\n## 六、账本与门禁\n\n`packages/spec/test-typecheck-debt.json` 前后**逐字节未变**（`git diff` 为空）：\n\n```\ncheck:test-typecheck: OK — 58 file(s) / 266 error(s) held in test-typecheck-debt.json\n```\n\n`src/data/search-fields.test.ts` 本来就不在账本里（即 0 个 tsc error），改动后仍不在。钉子刻意不使用 `import.meta`（在本包记为 2 个 error，#6729 实测），否则会把这个未列文件顶红。\n\n本地：`pnpm --filter @objectstack/spec test` **349 files / 9093 tests 全绿**；`typecheck`（`tsc --noEmit` + `check:scripts-typecheck` + `check:test-typecheck`）绿；`pnpm lint`（全仓）绿；`check:nul-bytes` 绿并另做逃逸自扫；`check:api-surface` 绿（首次是 fresh-worktree 假红 `Is the package built?`，构建 `dist` 后复测通过）。\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_018ffcE95NaMJcL9XJ9VDYgk)_"
+}

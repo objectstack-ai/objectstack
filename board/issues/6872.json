@@ -1,0 +1,35 @@
+{
+  "number": 6872,
+  "kind": "issue",
+  "title": "[finding][cli] `login-json-ndjson.e2e.test.ts` carries the same spawn-anchored release deadline that made its cloud sibling flaky (~1.4x margin measured)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T02:07:36Z",
+  "updated_at": "2026-08-09T05:43:45Z",
+  "closed_at": "2026-08-09T05:43:45Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6872",
+  "body": "Observation-class finding, split out of #6855 rather than fixed there, because it is a different file covering a different command (#6531 `os login`, not #6730 `os cloud login`) and **I could not reproduce a failure in it**. Filed unassigned with no `priority:` label; recording measurements so whoever picks it up does not re-collect them.\n\n## The structural defect\n\n`packages/cli/test/login-json-ndjson.e2e.test.ts` is the harness #6838 copied to build the cloud sibling, and it has the identical anchoring bug that #6855 was filed for:\n\n- `const deadline = setTimeout(..., RELEASE_DEADLINE_MS)` at **:205**\n- `execFile('script', ...)` at **:219**\n\nSo the 20 s escape-hatch budget is armed **before the child is spawned** and therefore charges `script(1)` startup, the `tsx` transform of the oclif command tree, and module loading against a budget that exists to police the emission contract. The assertion it protects is at **:292**, with the same wording the cloud file had:\n\n```\nexpect(ok.releasedByDeadline, 'the device record never reached stdout early').toBe(false);\n```\n\nThat message is a false diagnosis under startup latency: the record does reach stdout early, the budget simply expired while the child was still booting.\n\n## Why this is a finding and not a defect report\n\nI load-tested it exactly as I load-tested the cloud file — 8 concurrent `vitest` processes, 4-core box:\n\n| file | concurrent x8 result |\n|---|---|\n| `cloud-login-json-ndjson.e2e.test.ts` (unfixed) | **2 failed / 8** |\n| `login-json-ndjson.e2e.test.ts` | **0 failed / 8** |\n\nIt did not cross the threshold. The margin, however, is thin — and that is the actionable part:\n\n| file | child runs per file | wall clock under x8 load | approx per child |\n|---|---|---|---|\n| sibling (`os login`) | 2 | 28.2–30.0 s | **~14.5 s** |\n| cloud (`os cloud login`) | 3 | 44.7–49.6 s | ~16 s |\n\nAgainst a 20 s budget that includes startup, ~14.5 s per child is roughly **1.4x headroom**. The cloud file crossed; this one sits just underneath. A busier runner tips it, and then it ejects a PR with a *different* line number, and the next lane pays the #6855 diagnosis cost from scratch.\n\n## The fix, if triage wants it\n\nMechanically identical to the one in the #6855 PR, and test-only:\n\n1. Have the fake endpoint resolve a `deviceCodeIssued` promise (declared `Promise< void >`) when it serves `/api/v1/auth/device/code`.\n2. Arm the deadline from that promise instead of before `execFile`, holding the handle in a `ReturnType< typeof setTimeout >` that may be undefined.\n3. Leave `RELEASE_DEADLINE_MS` at 20 s — the point is re-anchoring what the budget measures, not widening it.\n\nMeasured on the cloud file, that moves the guarded window from ~3 500 ms of startup to the ~20 ms the contract actually governs, and the #6531 ordering assertion still goes red when the buffered-emit defect is restored (verified by reverting the early-emit limb).\n\n## Not in scope\n\n- #6531's and #6730's NDJSON ordering contract. Both are correct; this is purely about how the test observes them.\n\n## Provenance\n\n- Line numbers read live on `origin/main` @ `659526212`.\n- Load figures from 8 concurrent `vitest run` processes per file, `--maxWorkers=1`, on a 4-core / 15 GB container.\n- Sibling relationship: #6838's file header states the harness shape, and both files share `RELEASE_DEADLINE_MS`, `WATCH_MS`, the `releasedByDeadline` field and the `script(1)` PTY approach."
+}
