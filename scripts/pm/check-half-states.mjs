@@ -15045,8 +15045,17 @@ export function h65TierlessRoundArtefact(body) {
   return { shape, reason: 'absent', detail: null };
 }
 
-/** The two legal lines, printed verbatim in every remedy. */
-export const H65_TIER_EXAMPLES = '`Tier: hourly (since <the anchor stamp>)` or `Tier: daily (first fire of the day)`';
+/**
+ * The two legal lines, printed verbatim in every remedy.
+ *
+ * ⛔ The hourly example carries a REAL stamp rather than an angle-bracket
+ * placeholder, and that is not a style choice: this sentence is rendered into a
+ * pinned ISSUE BODY by the patrol workflow, and GitHub mutates body bytes around
+ * angle-bracket-shaped fragments (AGENTS.md, 「spell poison-shaped tokens out in
+ * words」). A remedy that arrives with its own example eaten teaches nothing.
+ */
+export const H65_TIER_EXAMPLES =
+  '`Tier: hourly (since 2026-09-15T13:45Z)` or `Tier: daily (first fire of the day)`';
 
 /**
  * The row. Report-only, and it names the comment so the remedy is an EDIT of a
