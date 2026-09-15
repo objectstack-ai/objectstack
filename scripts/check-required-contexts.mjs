@@ -226,7 +226,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '(10) a `carries` string that embeds a step count': 3,
   'missing input is a failure, never a pass (#4690)': 6,
   'the `on:` key under both YAML schemas': 3,
-  'instruction surfaces (#9491): the stale-name scan': 31,
+  'instruction surfaces (#9491): the stale-name scan': 41,
   'the dispatch-gates declaration (#9979)': 6,
   'the wiring: this gate must actually run on every PR': 28,
   'the live mode stays OFF the required path': 3,
@@ -505,7 +505,14 @@ export const REQUIRED_CONTEXTS = [
  * that states the required set must contain each required literal (current,
  * or ledgered-former while in flight), so replacing a name with garbage or
  * deleting the sentence is red even though the garbage itself is never
- * recognised. RESIDUALS, recorded rather than implied covered: paraphrase
+ * recognised. That half is a FLOOR and says nothing about what a surface
+ * OMITS, which is its own defect shape: enrolling a context grew the registry
+ * while every surface's list stayed legal, so the prose kept calling the new
+ * context advisory-and-rides-through with every gate green (#9677 for the
+ * 2→6 instance, #17798 for the 6→7 one — twice is a mechanism, not an
+ * oversight). Hence `statesTheSet`: an entry that declares it must name the
+ * registry EXACTLY, so the NEXT enrolment cannot land without following the
+ * sentence. RESIDUALS, recorded rather than implied covered: paraphrase
  * drift (naming a context loosely, e.g. "Lint & Type Check" in
  * docs/launch-readiness.md) is invisible to both halves; and after a
  * SHORTENING rename (new name a substring of the old), an old-literal mention
@@ -531,13 +538,16 @@ export const REQUIRED_CONTEXTS = [
 export const INSTRUCTION_SURFACES = [
   {
     // The merge-queue rule ("the queue enforces only the required set"),
-    // naming every blocking context. States the required set ⇒ mustName.
-    // Widened to all six by the #9677 ruling (2026-08-18): the sentence had
-    // named two and called the other four advisory-and-rides-through, which
-    // is the misclassification that puts a PR into the queue to be ejected.
-    // The full set is pinned here so the corrected sentence cannot rot back
-    // — a rename in ANY of the six now reddens this gate instead.
+    // naming every blocking context. States the required set ⇒ statesTheSet.
+    // Widened 2→6 by the #9677 ruling (2026-08-18): the sentence had named
+    // two and called the other four advisory-and-rides-through, which is the
+    // misclassification that puts a PR into the queue to be ejected. Then
+    // 6→7 by #17798 — the same misclassification, one enrolment later and
+    // with every gate green, which is what put the exclusivity rule below in
+    // the judge. The full set is pinned here so the corrected sentence cannot
+    // rot back — a rename in ANY of the seven now reddens this gate instead.
     file: 'AGENTS.md',
+    statesTheSet: true,
     mustName: [
       'Lint & Repo Gates',
       'TypeScript Type Check',
@@ -545,18 +555,25 @@ export const INSTRUCTION_SURFACES = [
       'Dogfood Regression Gate',
       'Build Core',
       'Temporal Conformance (live PG + MySQL)',
+      'Governed Surface Queue Guard',
     ],
   },
   {
     // The review seat's gate-clearance step: confirm both jobs' `conclusion`
-    // before flipping ready / arming / enqueuing. States the required set.
+    // before flipping ready / arming / enqueuing. It names these two as the
+    // required FLOOR a reviewer confirms by hand — its own next line sends the
+    // seat to `true-green.md` for the rest — so it does NOT state the set and
+    // carries no `statesTheSet`. The two literals stay a floor: a rename in
+    // either still reddens here, while the set growing does not falsify a
+    // sentence that never claimed to enumerate it.
     file: '.claude/skills/pm-dispatch/references/review-checklist.md',
     mustName: ['Lint & Repo Gates', 'TypeScript Type Check'],
   },
   {
     // The seat's readings ledger states the required set it reads before a PR
-    // may be enqueued, so it states the required set ⇒ mustName, all six.
+    // may be enqueued ⇒ statesTheSet, the whole registry.
     file: '.claude/skills/pm-dispatch/references/platform-readings.md',
+    statesTheSet: true,
     mustName: [
       'Lint & Repo Gates',
       'TypeScript Type Check',
@@ -566,8 +583,8 @@ export const INSTRUCTION_SURFACES = [
       'Temporal Conformance (live PG + MySQL)',
       // The seventh, enrolled 2026-08-27 (#12427) and pinned here by #15233.
       // The ledger's own count line is hand-followed prose, so it is this
-      // array — asserted against REQUIRED_CONTEXTS.length in `--self-test` —
-      // that makes the seat's copy of the required set non-optional.
+      // array — held equal to the registry by the exclusivity rule in
+      // judgeInstructionSurfaces — that makes the seat's copy non-optional.
       'Governed Surface Queue Guard',
     ],
   },
@@ -590,8 +607,8 @@ export const INSTRUCTION_SURFACES = [
  * own source, and "looks like a path" there means "carries a separator". Five
  * of the six surfaces have one; `AGENTS.md` does not, because a repo-root FILE
  * has no separator to be found by — so an AGENTS.md card derived this gate not
- * at all, while that surface is the one carrying `mustName` for all six
- * required contexts (widened 2→6 by the #9677 ruling). Editing the merge-queue
+ * at all, while that surface is the one carrying `mustName` for all seven
+ * required contexts (widened 2→6 by #9677, 6→7 by #17798). Editing the merge-queue
  * paragraph there is precisely how this gate goes red, and it was reachable
  * only by judgment.
  *
@@ -1148,7 +1165,7 @@ function countOccurrences(text, literal) {
  *
  * @param {{
  *   registry: ReadonlyArray< { workflow: string, job: string, context: string } >,
- *   surfaces: ReadonlyArray< { file: string, mustName: ReadonlyArray<string> } >,
+ *   surfaces: ReadonlyArray< { file: string, mustName: ReadonlyArray<string>, statesTheSet?: boolean } >,
  *   retired: ReadonlyArray< { name: string, replacedBy: string | null, staleSites?: Record<string, number>, renameInFlight?: boolean } >,
  *   files: Map< string, { text?: string, error?: string } >,
  * }} input
@@ -1170,12 +1187,14 @@ export function judgeInstructionSurfaces({ registry, surfaces, retired, files })
   // ── registry-level hygiene: a malformed ledger or scan set tolerates or ──
   // ── bans the wrong thing silently, so each shape is its own named red. ──
   const surfaceFiles = new Set();
+  let statesTheSetCount = 0;
   for (const surface of surfaces) {
     if (surfaceFiles.has(surface.file)) {
       problems.push(`the instruction-surface scan set lists '${surface.file}' twice.`);
     }
     surfaceFiles.add(surface.file);
-    for (const context of surface.mustName ?? []) {
+    const named = surface.mustName ?? [];
+    for (const context of named) {
       if (!currentNames.has(context)) {
         problems.push(
           `'${surface.file}' is required to name '${context}', which is not a registered required context — if the context was ` +
@@ -1184,6 +1203,42 @@ export function judgeInstructionSurfaces({ registry, surfaces, retired, files })
         );
       }
     }
+    // ── EXCLUSIVITY: `mustName` is a FLOOR, `statesTheSet` makes it a CENSUS. ──
+    //
+    // The floor catches a name going stale and is blind to one going MISSING,
+    // which is how the same defect landed twice: the registry grew, every
+    // listed name stayed real, the scan stayed green, and a surface saying
+    // "these are all of them" kept calling the new context advisory. A surface
+    // that states the set therefore has to name the registry EXACTLY — count
+    // and membership, so neither a dropped literal nor a padded duplicate
+    // passes — which puts the red on the enrolment PR, where the registry edit
+    // is already in hand.
+    if (surface.statesTheSet === true) {
+      statesTheSetCount += 1;
+      const missing = registry.map((entry) => entry.context).filter((context) => !named.includes(context));
+      if (missing.length > 0 || named.length !== registry.length) {
+        problems.push(
+          `'${surface.file}' declares statesTheSet: true, so its mustName must be the required set EXACTLY — it lists ` +
+            `${named.length} name(s) against a registry of ${registry.length}` +
+            (missing.length > 0 ? `, missing ${missing.map((context) => `'${context}'`).join(', ')}` : '') +
+            `. A surface that states the set and omits a member keeps calling that context advisory-and-rides-through while ` +
+            `every gate is green — the #9677 defect, repeated. Follow the prose AND this array in the same PR as the ` +
+            `registry row; if this file no longer states the set, drop statesTheSet and leave mustName as the floor it names.`,
+        );
+      }
+    } else if (named.length >= registry.length) {
+      problems.push(
+        `'${surface.file}' lists ${named.length} name(s) against a registry of ${registry.length} without declaring ` +
+          `statesTheSet: true — a list that covers the whole set IS a statement of it, and leaving it undeclared exempts ` +
+          `this surface from the exclusivity check. Declare statesTheSet: true, or drop the names this file does not state.`,
+      );
+    }
+  }
+  if (statesTheSetCount === 0) {
+    problems.push(
+      `no instruction surface declares statesTheSet: true — the exclusivity half of this scan then verifies nothing while ` +
+        `printing a tick (#4690). At least one instruction file states the required set as operative prose; declare it there.`,
+    );
   }
   const seenRetired = new Set();
   for (const row of retiredList) {
@@ -2359,13 +2414,127 @@ async function selfTest() {
     'a retired name written fresh into the readings ledger ⇒ red (the standing ban reaches it through the same entry)',
   );
 
+  // ── exclusivity: the set-stating surfaces are a CENSUS (#17798) ─────────
+  //
+  // The floor half above reds when a listed name goes stale. It is blind to a
+  // name going MISSING, and that blindness is the measured defect: #15233 added
+  // the seventh registry row, both set-stating surfaces kept their six-name
+  // lists, every gate stayed green, and AGENTS.md went on calling the seventh
+  // context advisory-and-rides-through — the #9677 misclassification, one
+  // enrolment later. These cases pin the other direction: the count, the
+  // declaration that opts a surface into it, and the floor under the whole rule.
+  const setStating = INSTRUCTION_SURFACES.filter((s) => s.statesTheSet === true).map((s) => s.file);
+  assert(
+    setStating.length === 2 && setStating.includes('AGENTS.md') && setStating.includes(LEDGER_SURFACE),
+    `the surfaces that state the required set are declared by NAME, never by count — got ${JSON.stringify(setStating)}`,
+  );
+  assert(
+    INSTRUCTION_SURFACES.filter((s) => s.statesTheSet === true).every(
+      (s) =>
+        s.mustName.length === REQUIRED_CONTEXTS.length && REQUIRED_CONTEXTS.every((e) => s.mustName.includes(e.context)),
+    ),
+    `every set-stating surface names all ${REQUIRED_CONTEXTS.length} required contexts, exactly`,
+  );
+  // The review checklist is the counter-example that keeps a PARTIAL list
+  // legal: it names the two required jobs a seat confirms by hand, not the
+  // set, so growing the registry must NOT red it. Pinned, because collapsing
+  // it into the census would force it to enumerate a set it never claimed —
+  // and dropping its mustName instead would silence the floor it does carry.
+  const checklistEntry = INSTRUCTION_SURFACES.find((s) => s.file === CHECKLIST_SURFACE);
+  assert(
+    checklistEntry?.statesTheSet !== true &&
+      checklistEntry.mustName.length > 0 &&
+      checklistEntry.mustName.length < REQUIRED_CONTEXTS.length,
+    `the review checklist keeps a partial mustName and no statesTheSet — got ${JSON.stringify(checklistEntry)}`,
+  );
+  // THE PIN: a set-stating surface one name short of the registry ⇒ red,
+  // naming the surface and the literal it dropped. The FILES are the ones that
+  // ship — AGENTS.md still names all seven — so the floor half sees nothing
+  // and this red can only be the census.
+  const shortOfTheSet = judgeSurfaces({
+    surfaces: INSTRUCTION_SURFACES.map((s) =>
+      s.file === 'AGENTS.md' ? { ...s, mustName: s.mustName.filter((c) => c !== 'Governed Surface Queue Guard') } : s,
+    ),
+  });
+  assert(
+    shortOfTheSet.problems.some(
+      (p) =>
+        p.includes('AGENTS.md') && p.includes("'Governed Surface Queue Guard'") && p.includes('statesTheSet: true'),
+    ),
+    `a set-stating surface listing ${REQUIRED_CONTEXTS.length - 1} of ${REQUIRED_CONTEXTS.length} ⇒ red, naming the omitted literal`,
+  );
+  // Single-variable ablation of exactly that: the same call with the name put
+  // back is green, so the red above is the omission and not the file's text.
+  assert(
+    judgeSurfaces().problems.length === 0,
+    `restoring the omitted name ⇒ green — the red above is the census, isolated; got ${JSON.stringify(judgeSurfaces().problems)}`,
+  );
+  // The NEXT enrolment, end to end — the case this whole rule exists for. An
+  // eighth registry row with every instruction surface left exactly as it
+  // ships: red on EVERY set-stating surface, so the enrolment PR cannot land
+  // without following them. Under the floor alone this was green.
+  const eighth = { workflow: 'ci.yml', job: 'eighth-gate', context: 'An Eighth Required Gate' };
+  const grown = judgeSurfaces({ registry: [...REQUIRED_CONTEXTS, eighth] });
+  assert(
+    setStating.every((f) =>
+      grown.problems.some((p) => p.includes(f) && p.includes("'An Eighth Required Gate'") && p.includes('statesTheSet')),
+    ),
+    'growing the registry without following the set-stating surfaces ⇒ red on every one of them',
+  );
+  // …and the hand-off: following the ARRAYS clears the census red and leaves
+  // the floor demanding the PROSE. Both halves are needed, neither substitutes
+  // for the other, and the remedy the author sees moves from one to the next.
+  const grownFollowed = judgeSurfaces({
+    registry: [...REQUIRED_CONTEXTS, eighth],
+    surfaces: INSTRUCTION_SURFACES.map((s) =>
+      s.statesTheSet === true ? { ...s, mustName: [...s.mustName, eighth.context] } : s,
+    ),
+  });
+  assert(
+    !grownFollowed.problems.some((p) => p.includes('statesTheSet')) &&
+      setStating.every((f) =>
+        grownFollowed.problems.some(
+          (p) => p.includes(f) && p.includes("'An Eighth Required Gate'") && p.includes('no longer names'),
+        ),
+      ),
+    `following the arrays clears the census red and hands off to the naming floor — got ${JSON.stringify(grownFollowed.problems)}`,
+  );
+  // Exclusivity is a COUNT as well as a coverage: a duplicate pads the list to
+  // the registry's length while still covering it, so coverage alone would
+  // pass a surface that has quietly lost a member to a typo.
+  const padded = judgeSurfaces({
+    surfaces: INSTRUCTION_SURFACES.map((s) => (s.file === 'AGENTS.md' ? { ...s, mustName: [...s.mustName, 'Test Core'] } : s)),
+  });
+  assert(
+    padded.problems.some((p) => p.includes('AGENTS.md') && p.includes(`${REQUIRED_CONTEXTS.length + 1} name(s)`)),
+    'a set-stating surface padded past the registry length ⇒ red on the count',
+  );
+  // The declaration cannot be dropped to buy the exemption: a full list with
+  // no `statesTheSet` is still a statement of the set, and says so.
+  const undeclared = judgeSurfaces({
+    surfaces: INSTRUCTION_SURFACES.map((s) => (s.file === 'AGENTS.md' ? { file: s.file, mustName: s.mustName } : s)),
+  });
+  assert(
+    undeclared.problems.some((p) => p.includes('AGENTS.md') && p.includes('without declaring')),
+    'a full list with the declaration dropped ⇒ red (the exemption cannot be taken silently)',
+  );
+  // And the floor under the rule itself: with every declaration ablated the
+  // census checks nothing, which must be a red rather than a tick (#4690).
+  const noneStating = judgeSurfaces({
+    surfaces: INSTRUCTION_SURFACES.map((s) => ({ file: s.file, mustName: s.statesTheSet === true ? [] : s.mustName })),
+  });
+  assert(
+    noneStating.problems.some((p) => p.includes('no instruction surface declares statesTheSet')),
+    'ablating every statesTheSet declaration ⇒ red, never a silent tick (#4690)',
+  );
+
   // ── the dispatch-gates declaration (#9979) ───────────────────────────────
   //
   // Enforcement cannot hold any of these: the declaration is read by another
   // tool entirely, so a wrong or missing entry runs perfectly green here and
   // shows up only as a dev dispatched on an AGENTS.md card with this gate
-  // absent from the brief — on the surface that carries `mustName` for all six
-  // required contexts.
+  // absent from the brief — on the surface that carries `mustName` for all
+  // seven required contexts.
   battery('the dispatch-gates declaration (#9979)');
   assert(
     INSTRUCTION_SURFACES.map((s) => s.file)
