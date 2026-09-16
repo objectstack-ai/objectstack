@@ -121,6 +121,7 @@ export const ENTRY_EXECUTION_CONTEXT_FIELDS = [
   'isSystem',
   'principalKind',
   'onBehalfOf',
+  'performedBy',
   'audience',
   'userId',
   'tenantId',
@@ -315,6 +316,19 @@ function entryFields(
     isSystem: false,
     principalKind: agent ? 'agent' : anonymous ? 'guest' : 'human',
     onBehalfOf: agent ? { userId: authz.userId!, principalKind: 'human' } : undefined,
+    // [ADR-0090 D10 rule 4 — dual attribution] The same `azp` that made this
+    // an agent principal, carried as the PERFORMER so the write is attributable
+    // to the client and not only to the human it acts for. Until now the value
+    // was consumed as a boolean here and dropped: `onBehalfOf` recorded WHO was
+    // delegated FROM, and nothing downstream could name WHO acted, which left
+    // an agent's `sys_audit_log` row byte-identical to the human's own (#17022).
+    //
+    // Attribution, not authorization: `userId` still stays the human above, the
+    // ceiling still travels on `permissions`/`systemPermissions`, and no
+    // security middleware reads this. `agent?.clientId` rather than `agent` is
+    // what narrows the optional away — the guard that made `agent` truthy is
+    // this same property.
+    performedBy: agent?.clientId ? { clientId: agent.clientId } : undefined,
     // [ADR-0090 D10/D11 — P1 shape] No transport resolves an external
     // (portal/partner) audience yet; `undefined` reads as 'internal'. Named
     // here rather than excluded so the gap is visible in the closed set instead
