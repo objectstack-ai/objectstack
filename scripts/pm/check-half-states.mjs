@@ -29426,11 +29426,14 @@ Doubles as the fire's **write self-check** (step 0). \`201\` is not the reading.
   // The rescan seam. ⛔ A shape with no `exclude` is read exactly as before —
   // first match wins, no slicing, which is what keeps the ANCHORED `tableCount`
   // shape on its original reading.
-  t('H44 rescan: the first admissible match is returned with its index', h44AdmittedMatch(tree18385, `session c5c0ce54 then ${TIP_18385}`).matched, TIP_18385);
-  t('H44 rescan: …and its index is the position in the WHOLE paragraph, not the slice', h44AdmittedMatch(tree18385, `session c5c0ce54 then ${TIP_18385}`).index, 22);
-  t('H44 rescan: a paragraph of nothing but excluded candidates has no match', h44AdmittedMatch(tree18385, 'session c5c0ce54 and 会话 5bc2f2727ae'), null);
-  t('H44 rescan: a shape with no exclusion returns its first match untouched', h44AdmittedMatch(H44_READING_FRAGMENTS.find((f) => f.kind === 'count'), 'we hold 12 open cards and 4 PRs').matched, '12 open cards');
-  t('H44 rescan: …and the anchored tableCount shape still reads its row', h44AdmittedMatch(H44_READING_FRAGMENTS.find((f) => f.kind === 'tableCount'), '| objectstack | **2** |').matched.includes('**2**'), true);
+  // ⛔ Read through `?.` — a case that THROWS on a null takes the whole
+  // self-test down before its verdict, hiding every sibling reading with it.
+  const admitted18385 = (kind, paragraph) => h44AdmittedMatch(H44_READING_FRAGMENTS.find((f) => f.kind === kind), paragraph);
+  t('H44 rescan: the first admissible match is returned with its index', String(admitted18385('tree', `session c5c0ce54 then ${TIP_18385}`)?.matched ?? ''), TIP_18385);
+  t('H44 rescan: …and its index is the position in the WHOLE paragraph, not the slice', Number(admitted18385('tree', `session c5c0ce54 then ${TIP_18385}`)?.index ?? -1), 22);
+  t('H44 rescan: a paragraph of nothing but excluded candidates has no match', admitted18385('tree', 'session c5c0ce54 and 会话 5bc2f2727ae'), null);
+  t('H44 rescan: a shape with no exclusion returns its first match untouched', String(admitted18385('count', 'we hold 12 open cards and 4 PRs')?.matched ?? ''), '12 open cards');
+  t('H44 rescan: …and the anchored tableCount shape still reads its row', String(admitted18385('tableCount', '| objectstack | **2** |')?.matched ?? '').includes('**2**'), true);
 
   // -- H45 — reserved and handed over at once (#15667, report-only) ----------
   // Both directions of a pure label intersection. The neighbour cases pin that
