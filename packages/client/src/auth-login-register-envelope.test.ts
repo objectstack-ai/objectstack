@@ -29,15 +29,15 @@
 //
 // - `① the declared envelope is delivered` — the defect proper. The judge is a
 //   PARSE against the declaration, not a key spot-check.
-// - `② the residue is exhaustive` — `SessionResponseSchema` still does not
-//   parse, for one reason that is NOT this card's: `data.user.image` (#17235).
-//   Pinned as the complete issue list so a regression on `success` OR
-//   `data.session` shows up here as an extra issue instead of hiding inside
-//   "it already failed".
+// - `② the parse is exhaustive` — `SessionResponseSchema` parses WHOLE. The
+//   one-time residue `data.user.image` closed with #17235, which widened the
+//   declaration to `z.string().nullish()`. Still pinned as the complete issue
+//   list so a regression on `success` OR `data.session` shows up here as an
+//   issue instead of hiding inside "it already failed".
 // - `③ the instrument can still fail` — the negative control. The same parse,
 //   on the same returned value with `success` taken back out, must report
-//   `success` again (and still report the `data.user.image` residue).
-//   Without it, a green ① could equally mean the assertion broke.
+//   `success` again. Without it, a green ① could equally mean the assertion
+//   broke.
 // - `④ the credential survives byte-identical` — the regression this fix could
 //   most easily have caused. `data.token` is the body's own token, and
 //   `client.token` is still armed from it.
@@ -304,27 +304,30 @@ describe('[#17234] auth.login / auth.register deliver the SessionResponse envelo
     });
   });
 
-  describe('② the residue is exhaustive, and neither `success` nor `data.session` is in it', () => {
-    // ONE issue remains on the FULL declared type, and it is not this card's:
+  describe('② the parse is exhaustive, and neither `success` nor `data.session` is in it', () => {
+    // NO issue remains on the FULL declared type. The one that used to —
     //
-    //   data.user.image — `SessionUserSchema.image` is `z.string().optional()`,
-    //                     which does not admit `null`, and better-auth serves
-    //                     `"image": null` for a user who never set one. Filed
-    //                     as #17235, and NOT specific to these two methods.
+    //   data.user.image — `SessionUserSchema.image` was `z.string().optional()`,
+    //                     which does not admit `null`, while better-auth serves
+    //                     `"image": null` for a user who never set one
     //
-    // Pinned as the EXHAUSTIVE list rather than as "it still fails": if
-    // `success` OR `data.session` ever regress they reappear here as extra
-    // issues and these cases redden. It is the residue's tripwire, not an
-    // acceptance of it.
-    const RESIDUE = ['data.user.image'];
+    // closed with #17235, which widened that declaration to `z.string()
+    // .nullish()` (a string, `null`, or the key absent alike). These two cases
+    // are now #17235's acceptance on the `register()` / `login()` routes.
+    //
+    // Still pinned as the EXHAUSTIVE list rather than as "it passes": if
+    // `success` OR `data.session` ever regress they reappear here as issues
+    // and these cases redden. The list is the tripwire; it is empty because
+    // the residue is closed, not because it stopped checking.
+    const RESIDUE: string[] = [];
 
-    it('register() reports exactly the one issue that is not this card\'s', async () => {
+    it('register() parses as the full declared type', async () => {
       const { res } = await registered();
       const issues = SessionResponseSchema.safeParse(res).error?.issues ?? [];
       expect(issues.map((i) => i.path.join('.'))).toEqual(RESIDUE);
     });
 
-    it('login() reports exactly the one issue that is not this card\'s', async () => {
+    it('login() parses as the full declared type', async () => {
       const { res } = await signedIn();
       const issues = SessionResponseSchema.safeParse(res).error?.issues ?? [];
       expect(issues.map((i) => i.path.join('.'))).toEqual(RESIDUE);
@@ -343,7 +346,7 @@ describe('[#17234] auth.login / auth.register deliver the SessionResponse envelo
         success?: unknown;
       };
       const issues = SessionResponseSchema.safeParse(withoutSuccess).error?.issues ?? [];
-      expect(issues.map((i) => i.path.join('.'))).toEqual(['success', 'data.user.image']);
+      expect(issues.map((i) => i.path.join('.'))).toEqual(['success']);
     });
 
     it('and reports `data.session` again once the fix is taken back out — a fabricated body without a session still fails', async () => {
@@ -359,7 +362,7 @@ describe('[#17234] auth.login / auth.register deliver the SessionResponse envelo
       const { session: _droppedSession, ...dataWithoutSession } = data;
       const issues =
         SessionResponseSchema.safeParse({ ...rest, data: dataWithoutSession }).error?.issues ?? [];
-      expect(issues.map((i) => i.path.join('.'))).toEqual(['data.session', 'data.user.image']);
+      expect(issues.map((i) => i.path.join('.'))).toEqual(['data.session']);
     });
   });
 
