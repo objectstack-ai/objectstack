@@ -148,6 +148,34 @@
 # change where DATA comes from and nothing else; the open escape hatch above is
 # the way to actually skip the guard.
 #
+# OS_GOVERNED_ENQUEUE_SIBLING_ROOT=<dir> is the third, and it moves WHERE a
+# sibling checkout is looked for — never WHAT is accepted as one. The admission
+# rule stays the origin-slug comparison further down: a directory becomes the
+# tree this guard audits only when its own `origin` declares the target
+# `owner/repo`, so a value pointed anywhere wrong resolves NOTHING. It cannot
+# widen the audit, and it cannot soften one either — a sibling that does resolve
+# is judged exactly as it is today.
+#
+#   unset   → `$(dirname "$repo_root")`, the parent of this checkout. Today's
+#             behaviour, to the byte.
+#   empty   → the same as unset. An empty value is an accident (`export VAR=`,
+#             or `VAR="$SOMETHING_UNSET"`), and the safe reading of an accident
+#             is "no override" — never "look nowhere", which would silently
+#             drop a real audit.
+#   a directory carrying no matching checkout, one that does not exist included
+#           → nothing resolves, and the run takes the existing "no checkout of
+#             the target repo is available" fail-open below, with its existing
+#             warning. That is the branch a box WITHOUT the sibling has always
+#             taken; this variable opens no new way out.
+#
+# Why it exists: the self-test's cross-repo case asserts that fail-open, and its
+# premise used to be a fact about the BOX ("objectstack-ai/cloud has no sibling
+# checkout here") rather than about the hook. On a container that does carry a
+# sibling `cloud` checkout the guard resolved it, recomputed the predicate on it
+# and blocked — 54 passed / 1 failed, green in CI only because CI carries no
+# sibling. The matrix now sets this variable and owns its own premise, and the
+# resolved-sibling BLOCK is pinned beside it as the deliberate behaviour it is.
+#
 # Self-test (no network, no build): .claude/hooks/guard-governed-enqueue.selftest.sh
 
 set -uo pipefail
@@ -447,11 +475,20 @@ done < "$work/files.txt"
 
 slug_of() { git -C "$1" remote get-url origin 2>/dev/null | sed -n 's#.*github\.com[:/]\([A-Za-z0-9._-]*/[A-Za-z0-9._-]*\)\(\.git\)\{0,1\}/*$#\1#p'; }
 
+# WHERE a sibling is looked for is injectable (OS_GOVERNED_ENQUEUE_SIBLING_ROOT,
+# header); WHAT is accepted as one is not. The slug comparison below is the whole
+# admission rule and is untouched by it, so the variable can only move the
+# search — a sibling that resolves is audited exactly as before, and a root
+# holding no matching checkout resolves nothing and falls through to the
+# "no checkout available" fail-open, the branch a box without the sibling
+# already takes. Unset or empty ⇒ the parent of this checkout, as always.
+sibling_root="${OS_GOVERNED_ENQUEUE_SIBLING_ROOT:-$(dirname "$repo_root")}"
+
 target_root=""
 if [ "$(slug_of "$repo_root")" = "$owner/$repo" ]; then
   target_root="$repo_root"
-elif [ "$(slug_of "$(dirname "$repo_root")/$repo")" = "$owner/$repo" ]; then
-  target_root="$(dirname "$repo_root")/$repo"
+elif [ "$(slug_of "$sibling_root/$repo")" = "$owner/$repo" ]; then
+  target_root="$sibling_root/$repo"
 fi
 
 test_args=(--test --json)
