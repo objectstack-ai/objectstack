@@ -42,7 +42,7 @@
 - ② 双载体已清,逐对机读 `node scripts/pm/check-clause2-carriers.mjs --pair PR-NUMBER`。
 - 0 = 双肢一致、无放宽 tell、head 上有记录;4 = 任一不成立;3 = 环境答不了,⛔ 不作干净。
 - 放宽 tell 由 `scripts/pm/check-widening-tells.mjs` 判,`no` 撞新键/成员/导出/登记即拒,附 file:line。
-- ③ PR 全部 check 全绿,⛔ 非 required 子集;例外:merge-base 上同名同失败签名的红不计。
+- ③ PR check 全绿,⛔ 非 required 子集;例外:merge-base 同签名的红不计、按设计而红见 SKILL.md。
 - 签名 = 失败步 + 首错行,读 base check runs 的 API ⛔ 不凭口述;主干红止血立单不变。
 - 规则层等维护者的字;受管路径全在 `.claude/skills/pm-dispatch/references/` 者达档过本三条入队。
 
