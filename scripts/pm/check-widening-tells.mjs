@@ -577,6 +577,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '#16943 — the net member/key delta: a replaced line is not a net addition': 23,
   '#17618 — a PARAMETER is not a key, and a closed set RE-SPELLED around fewer values is not a new one': 24,
   '#17300 — the retirement ledger is a record of REMOVALS, not a set that gained a value': 27,
+  '#17955 — a `retiredKey()` tombstone declares a key UNWRITABLE, and never adds a spelling': 19,
   'T3 — a new row in a published entry point': 8,
   'T4 — a new registration in a registry': 10,
   '#16448 acceptance: the four positive controls, each with its file:line': 8,
@@ -1348,6 +1349,47 @@ export function respellsExistingClosedSetKey(text, removedTexts) {
 }
 
 /**
+ * Does this line DECLARE a key unwritable? (#17955)
+ *
+ * `retiredKey()` (`packages/spec/src/shared/retired-key.ts`) returns
+ * `z.never(…).optional()`, and its entire contract is to REFUSE: the key's
+ * `z.input` becomes `never` so `tsc` rejects it at the authoring site, and a
+ * value that reaches the parse is refused carrying the migration prescription.
+ * A line whose value opens it therefore makes the accept set strictly narrower
+ * — the one direction T1's sentence ("the accept set gains a spelling an author
+ * may now write") cannot be true of.
+ *
+ * The evidence is positive, hunk-local and absent by default, the way every
+ * decline in this file is: it is the added line's OWN value, read on the one
+ * line, and a line that does not open the helper is not a tombstone.
+ *
+ * ⛔ The value must OPEN the call — `legacy: z.string().or(retiredKey('x'))`
+ * mentions the helper inside a live schema and is NOT a tombstone. And the key
+ * half is spelled from `SCHEMA_PROPERTY`'s own four spellings rather than a
+ * second pattern, so "the row that fires" and "the row that declines" can never
+ * become two different questions — the drift `memberTellKind` and
+ * `bareElementValue` each exist to prevent one reading over.
+ *
+ * ⚠️ It is deliberately NOT a lookup of the helper's import, and not a check
+ * that the key existed before. #17300 measured that class of reading wrong for
+ * this whole population: a retirement lands in ONE PR, so a seat's worktree is
+ * not the diff's head and resolving anything against it answers about the wrong
+ * commit — in the direction that keeps the false positive.
+ */
+const RETIRED_KEY_TOMBSTONE =
+  /^[ \t]*(?:'[^']+'|"[^"]+"|\[[^\]]+\]|[A-Za-z_$][\w$]*)[ \t]*\??[ \t]*:[ \t]*retiredKey\(/;
+
+/**
+ * @param {string} text — one patch line's text, with its `+` / `-` already stripped
+ * @returns {boolean} true when the line declares a `retiredKey()` tombstone
+ */
+export function declaresRetiredKeyTombstone(text) {
+  const s = String(text ?? '');
+  if (COMMENT_LINE.test(s)) return false;
+  return RETIRED_KEY_TOMBSTONE.test(s);
+}
+
+/**
  * The string a bare list element carries, or `null` if the line is not one.
  *
  * ⛔ The SAME `BARE_STRING_ELEMENT` shape T2 reads, so "the row that fired" and
@@ -1575,6 +1617,13 @@ export function tellsInFile(file, { repo = THIS_REPO, licensed = null } = {}) {
       // deleted PARAMETER was never a key, so it must not buy an added one the
       // right to go unreported.
       if (kind === 'T1' && inParameterList(oldFile, oldAt.get(i))) continue;
+      // #17955 — a REMOVED tombstone buys nothing either, the same way a removed
+      // parameter does not. Un-retiring a key — dropping `legacy: retiredKey(…)`
+      // and putting a live schema back on that spelling — is a real WIDENING,
+      // and letting the tombstone pay for it would trade this file's loud
+      // failure for a silent one on the only diff shape that re-opens an accept
+      // set the tree had already closed.
+      if (kind === 'T1' && declaresRetiredKeyTombstone(r.text)) continue;
       if (kind !== null) budget.set(kind, (budget.get(kind) ?? 0) + 1);
     }
     for (const i of block) {
@@ -1596,6 +1645,26 @@ export function tellsInFile(file, { repo = THIS_REPO, licensed = null } = {}) {
     if (BARE_STRING_ELEMENT.test(text) && fragmentOn(newFile, newAt.get(i))) continue;
     const at = { file: filename, line, text: text.trim().slice(0, 160) };
     const kind = memberTellKind(text, surfaces);
+    // #17955 — a `retiredKey()` tombstone DECLARES a key unwritable. It is read
+    // BEFORE the budget, and that ordering is the whole repair rather than a
+    // detail: a tombstone must neither FIRE nor SPEND.
+    //
+    // An ADR-0087 rename puts three key lines in one change block — the old
+    // spelling removed, the new one added, the tombstone added — so the
+    // REPLACEMENT budget the removal earns is owed to the RENAME. Let the
+    // tombstone spend it and the budget is exhausted by the one line that never
+    // needed it, leaving the rename to fire as the surplus; which of the two
+    // reports then depends on nothing but their order in the patch. Declining
+    // here takes the tombstone out of the arithmetic on both sides, so the
+    // rename is paid for whichever way round the author wrote them.
+    //
+    // ⛔ This is NOT the licence's ordering (#17300), and the difference is the
+    // evidence, not a preference: a licence is minted ELSEWHERE in the diff, so
+    // reading it before the budget would let a tombstone's licence pay for a
+    // genuine member. A tombstone carries its own evidence on its own line and
+    // takes nothing from the block, so a genuine key beside it still has the
+    // full budget to pay with — and fires when it cannot.
+    if (kind === 'T1' && declaresRetiredKeyTombstone(text)) continue;
     // #16943 — a member or key this block REPLACED is not a net addition.
     //
     // ⛔ A line that DECLARES a closed set is never spent against the budget,
@@ -2097,6 +2166,43 @@ const FILE_CLOSED_SET_RESPELLING = {
   ].join('\n'),
 };
 
+// The live instance of #17955, in the bytes PR #17954 actually pushed — the
+// ADR-0087 retirement of `performance.schemaCacheTTL` on
+// `SchemaLevelIsolationStrategy`, one rename with its tombstone in ONE change
+// block.
+//
+// ⭐ The fixture is the CLASS and not one example of it: a tombstone is the
+// AGENTS.md-mandated kit for removing an authorable spec key ("Removing an
+// authorable spec key also requires a tombstone so the rejection itself carries
+// the prescription"), so EVERY ADR-0087 key retirement and every rename that
+// tombstones its old spelling pushes this shape.
+const FILE_RETIREMENT_TOMBSTONE = {
+  filename: 'packages/spec/src/system/tenant.zod.ts',
+  status: 'modified',
+  patch: [
+    '@@ -442,7 +442,22 @@ export const SchemaLevelIsolationStrategySchema = lazySchema(() => z.object({',
+    '     /**',
+    '-     * Schema cache TTL in seconds',
+    '-     */',
+    "-    schemaCacheTTL: z.number().int().positive().default(3600).describe('Schema cache TTL'),",
+    '+     * Schema cache TTL in seconds.',
+    '+     *',
+    '+     * Renamed from `schemaCacheTTL` (#15939 ruling A): the unit lived in this',
+    '+     * JSDoc only, and `.describe()` — the text the reference pages publish —',
+    '+     * carried none. Tombstoned rather than deleted because this nested object',
+    '+     * is not `.strict()`.',
+    '+     */',
+    "+    schemaCacheTtlSeconds: z.number().int().positive().default(3600).describe('Schema cache TTL in seconds'),",
+    '+    schemaCacheTTL: retiredKey(',
+    "+      '`performance.schemaCacheTTL` was renamed to `schemaCacheTtlSeconds` on ' +",
+    "+      '`SchemaLevelIsolationStrategy` in @objectstack/spec 17 — the unit of a duration-shaped ' +",
+    "+      'number lives in the key name, not only in the describe prose.',",
+    '+    ),',
+    "   }).optional().describe('Performance settings'),",
+    ' }));',
+  ].join('\n'),
+};
+
 let selfTestReachedVerdict = false;
 
 export function selfTest() {
@@ -2215,7 +2321,7 @@ export function selfTest() {
   t('an optional-marked key reads too', tells({ filename: 'packages/spec/src/a.zod.ts', patch: patchOf(3, '+  slug?: z.string(),') }).length === 1);
   t('a quoted key reads too — a dotted hook name is a real spelling in this tree', tells({ filename: 'packages/spec/src/a.zod.ts', patch: patchOf(3, "+  'record.beforeInsert': z.array(z.string()),") }).length === 1);
   t('a `*Schema` value reads — the measured non-`z.` vocabulary', tells({ filename: 'packages/spec/src/a.zod.ts', patch: patchOf(3, '+  label: I18nLabelSchema.optional(),') })[0]?.tell === 'T1');
-  t('`retiredKey(` reads — 235 lines in the tree take it', tells({ filename: 'packages/spec/src/a.zod.ts', patch: patchOf(3, "+  legacy: retiredKey('legacy'),") })[0]?.tell === 'T1');
+  t('`retiredKey(` is in the VOCABULARY — 254 key lines in the tree take it — but a tombstone declares a key unwritable, so the row itself declines (#17955)', tells({ filename: 'packages/spec/src/a.zod.ts', patch: patchOf(3, "+  legacy: retiredKey('legacy'),") }).length === 0 && memberTellKind("  legacy: retiredKey('legacy'),", { onContractSource: true }) === 'T1');
   t('`strictObject(` reads', tells({ filename: 'packages/spec/src/a.zod.ts', patch: patchOf(3, '+  nested: strictObject({ a: z.string() }),') })[0]?.tell === 'T1');
   t('`lazySchema(` reads', tells({ filename: 'packages/spec/src/a.zod.ts', patch: patchOf(3, '+  deep: lazySchema(() => z.string()),') })[0]?.tell === 'T1');
   t('⛔ an object-literal boolean is NOT a schema key — 1,655 such lines exist and none is an accept-set member', tells({ filename: 'packages/spec/src/a.zod.ts', patch: patchOf(3, '+  enabled: true,') }).length === 0);
@@ -2467,6 +2573,49 @@ export function selfTest() {
   t('all three roles are declared, and each exactly once — a missing role would silently license nothing', ['table', 'entry', 'conversion'].every((r) => LEDGER_INPUT_SURFACES.filter((s) => s.role === r).length === 1));
   t('every ledger-input row carries a `why` and the repo it applies to', LEDGER_INPUT_SURFACES.every((s) => typeof s.why === 'string' && s.why.length > 10 && typeof s.repo === 'string' && s.repo.includes('/')));
   t('`ledgerSurface` answers for this repo and is inert for another board', ledgerSurface('table')?.glob === LEDGER && ledgerSurface('table', 'objectstack-ai/objectui') === null);
+
+  // -- #17955: a tombstone DECLARES a key unwritable -------------------------
+  //
+  // `retiredKey()` returns `z.never(…).optional()`, so the line it is written on
+  // makes the accept set strictly NARROWER: the key's `z.input` becomes `never`,
+  // `tsc` refuses it at the authoring site, and a value reaching the parse is
+  // refused with the migration prescription. There is no spelling an author
+  // "may now write" — there is one they may no longer write.
+  //
+  // ⭐ Read the FIRING half first, the way #17300's battery is ordered: a
+  // reading that can only suppress is untestable in the direction that matters,
+  // so the decline is bracketed on every side — a genuine key added beside a
+  // tombstone, a value that merely MENTIONS the helper, the same shape on a
+  // registry surface and off the contract surface entirely, and the un-retiring
+  // direction the removed side must not pay for.
+  battery('#17955 — a `retiredKey()` tombstone declares a key UNWRITABLE, and never adds a spelling');
+  const TOMBSTONE_FILE = 'packages/spec/src/a.zod.ts';
+  const tombstoneTells = (...lines) => tells({ filename: TOMBSTONE_FILE, status: 'modified', patch: patchOf(30, ...lines) });
+
+  // -- the firing half: what a tombstone must NOT buy ------------------------
+  t('⛔ a genuinely new key added BESIDE a tombstone still fires — the tombstone buys nothing for its neighbour', tombstoneTells("+  legacy: retiredKey('gone'),", '+  extra: z.string(),').length === 1);
+  t('…and the row it reports is the genuine key, never the tombstone', tombstoneTells("+  legacy: retiredKey('gone'),", '+  extra: z.string(),')[0]?.text === 'extra: z.string(),');
+  t('⛔ a value that merely MENTIONS the helper is not a tombstone — it must OPEN it', tombstoneTells("+  legacy: z.string().or(retiredKey('gone')),").length === 1);
+  t('⛔ nor is a key whose value opens a DIFFERENT helper that ends in the same word', tombstoneTells("+  legacy: buildRetiredKey('gone'),").length === 0 && memberTellKind("  legacy: buildRetiredKey('gone'),", { onContractSource: true }) === null);
+  t('⛔ a tombstone-shaped line on a declared REGISTRY is read as a registration first, and still fires', tells({ filename: 'packages/spec/src/api/error-code-ledger.zod.ts', status: 'modified', patch: patchOf(140, "+    legacy: retiredKey('gone'),") })[0]?.tell === 'T4');
+  t('⭐ CONTROL — un-retiring FIRES: a removed tombstone buys nothing, so the key becoming writable again is reported', tells({ filename: TOMBSTONE_FILE, status: 'modified', patch: "@@ -30,1 +30,1 @@\n-  legacy: retiredKey('gone'),\n+  legacy: z.string()," }).length === 1);
+  t('⛔ CONTROL — a genuinely new key still fires with its own file:line', at(FILE_SCHEMA_KEY)[0] === 'packages/spec/src/kernel/manifest.zod.ts:44');
+
+  // -- the declining half: PR #17954's one row -------------------------------
+  t('⭐ the live pair — the rename and its tombstone in one change block reads no tell', tells(FILE_RETIREMENT_TOMBSTONE).length === 0);
+  t('⭐ …and reads CLEAN end to end, which is the exit code a correct `Clause-②: no` could not reach', wideningRefusal({ declaration: 'no', files: [FILE_RETIREMENT_TOMBSTONE] }).state === 'clean');
+  t('⭐ a LONE tombstone with no paired removal declines too — a key declared unwritable needs no budget', tombstoneTells("+  legacy: retiredKey(").length === 0);
+  t('⭐ the tombstone never SPENDS the budget, so the order of the two added lines cannot decide the verdict', tells({ filename: TOMBSTONE_FILE, status: 'modified', patch: "@@ -30,1 +30,2 @@\n-  schemaCacheTTL: z.number(),\n+  schemaCacheTTL: retiredKey('x'),\n+  schemaCacheTtlSeconds: z.number()," }).length === 0);
+  t('…and the mirror order reads the same — the rename first, the tombstone second', tells({ filename: TOMBSTONE_FILE, status: 'modified', patch: "@@ -30,1 +30,2 @@\n-  schemaCacheTTL: z.number(),\n+  schemaCacheTtlSeconds: z.number(),\n+  schemaCacheTTL: retiredKey('x')," }).length === 0);
+  t('⛔ …but a THIRD genuine key in that block still has nothing to pay with, and fires', tells({ filename: TOMBSTONE_FILE, status: 'modified', patch: "@@ -30,1 +30,3 @@\n-  schemaCacheTTL: z.number(),\n+  schemaCacheTtlSeconds: z.number(),\n+  schemaCacheTTL: retiredKey('x'),\n+  brandNew: z.string()," })[0]?.text === 'brandNew: z.string(),');
+
+  // -- the reader itself -----------------------------------------------------
+  t('`declaresRetiredKeyTombstone` reads a key whose value opens the helper', declaresRetiredKeyTombstone("  legacy: retiredKey('gone'),") === true);
+  t('…in every key spelling `SCHEMA_PROPERTY` admits — quoted, and optional-marked', declaresRetiredKeyTombstone("  'a.b': retiredKey(") === true && declaresRetiredKeyTombstone('  legacy?: retiredKey(') === true);
+  t('⛔ …and declines a value that is not the helper', declaresRetiredKeyTombstone('  legacy: z.string(),') === false);
+  t('⛔ …a bare call that names no key — a tombstone is a PROPERTY, not an expression', declaresRetiredKeyTombstone("  retiredKey('gone'),") === false);
+  t('⛔ …and the same text in a COMMENT', declaresRetiredKeyTombstone("  // legacy: retiredKey('gone'),") === false);
+  t('⭐ the vocabulary is INTACT — `memberTellKind` still classifies a tombstone as a key of kind T1, so both sides of the budget read one question', memberTellKind("  legacy: retiredKey('gone'),", { onContractSource: true }) === 'T1');
 
   // -- T3 --------------------------------------------------------------------
   battery('T3 — a new row in a published entry point');
