@@ -160,7 +160,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'pure decisions': 10,
   'real repos': 15,
   'historyHorizon: the read-only reading the #9902 adopters call': 12,
-  'touch: the provenance reading a shallow clone fabricates': 25,
+  'touch: the provenance reading a shallow clone fabricates': 26,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -1160,6 +1160,15 @@ function selfTest() {
       staleRefusal.code === 2 && staleRefusal.stdout.trim() === ''
         && /OUTLIVED the fetch/.test(staleRefusal.stderr) && !/its diff does not touch/.test(staleRefusal.stderr),
       JSON.stringify(staleRefusal));
+
+    // Last on this clone, because it deepens it: the refusal has to be a step
+    // rather than a dead end. A remedy that cannot clear the state it is
+    // printed for would make the refusal correct and useless at once.
+    const staleRecovered = runCliAllowFail(['touch', '--path=charter.md'], stale);
+    t('and with fetching allowed the SAME clone deepens out of the registered graft and answers the TRUE touch: '
+      + 'the printed remedy clears the state it is printed for',
+      staleRecovered.code === 0 && staleRecovered.stdout.trim() === trueTouch
+        && /fetch --deepen=/.test(staleRecovered.stderr), JSON.stringify(staleRecovered));
 
     const touch5b = join(root, 'touch5b');
     g(['clone', '--quiet', '--depth=5', `file://${up}`, touch5b], root);
