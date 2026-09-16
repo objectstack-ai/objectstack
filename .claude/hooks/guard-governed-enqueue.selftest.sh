@@ -356,7 +356,12 @@ echo "== a generated-exception row on a repo with no checkout to recompute again
 # next to the checkout is not hermetic, whatever the step comment says. It now
 # points the lookup at a directory it created itself and therefore knows is
 # empty, so the "cannot resolve" premise is one this file OWNS on every box.
-F_CROSS_REGEN="$(fixture cross-repo-regen "$(files_of skills/objectstack-data/references/_index.md)" "$NO_REVIEWS")"
+# ONE spelling of the path, read by the fixture the hook is handed AND by the
+# register leg below. Two spellings drift: change the fixture alone and the
+# agreement leg goes on asking about the old path, which is agreement with a
+# question nobody asked.
+CROSS_REPO_PATH=skills/objectstack-data/references/_index.md
+F_CROSS_REGEN="$(fixture cross-repo-regen "$(files_of "$CROSS_REPO_PATH")" "$NO_REVIEWS")"
 NO_SIBLING_ROOT="$root/no-sibling-here"   # under $root: the existing trap removes it
 mkdir -p "$NO_SIBLING_ROOT"
 #
@@ -408,7 +413,7 @@ mkdir -p "$SIBLING_ROOT/cloud"
 git -C "$SIBLING_ROOT/cloud" init -q >/dev/null 2>&1
 git -C "$SIBLING_ROOT/cloud" remote add origin https://github.com/objectstack-ai/cloud >/dev/null 2>&1
 node "$repo_root/scripts/pm/check-governed-merges.mjs" --test --root "$SIBLING_ROOT/cloud" \
-  skills/objectstack-data/references/_index.md >/dev/null 2>&1
+  "$CROSS_REPO_PATH" >/dev/null 2>&1
 sibling_rc=$?
 if [ "$sibling_rc" -eq 0 ]; then
   sibling_want=allow
@@ -421,14 +426,12 @@ printf '  ..   register verdict on the RESOLVED sibling: %s\n' "$sibling_branch"
 expect "$sibling_want" 'a sibling checkout that resolves is audited, never waved through' \
   "$(mcp $AUTO 999 objectstack-ai cloud)" \
   "OS_GOVERNED_ENQUEUE_FIXTURE=$F_CROSS_REGEN" "OS_GOVERNED_ENQUEUE_SIBLING_ROOT=$SIBLING_ROOT"
-# The structural half, and the one that keeps its meaning whichever way the
-# register moves: an allow reached through the no-checkout fail-open is
-# indistinguishable from an allow reached by auditing, so assert that fail-open
-# did NOT fire. This is what actually pins "the sibling was resolved".
-expect_lacks 'no checkout of objectstack-ai/cloud is available' \
-  'the sibling WAS resolved — the no-checkout fail-open did not fire' \
-  "$(mcp $AUTO 999 objectstack-ai cloud)" \
-  "OS_GOVERNED_ENQUEUE_FIXTURE=$F_CROSS_REGEN" "OS_GOVERNED_ENQUEUE_SIBLING_ROOT=$SIBLING_ROOT"
+# ⛔ No companion assertion that the fail-open text is ABSENT here — it was
+# written, and measured to be a phantom: when the sibling does NOT resolve the
+# hook does not print that warning either (it leaves at the cleared-predicate
+# exit with empty stderr, per the case above), so the assertion passed in both
+# worlds and discriminated nothing. The verdict row above is the discriminator,
+# and it is the one that goes red when the sibling stops being resolved.
 
 echo "== the deliberate exception switch =="
 expect allow 'OS_ALLOW_GOVERNED_ENQUEUE=1 on the blocking case' \
