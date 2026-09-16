@@ -6872,6 +6872,15 @@ export function seatDeclaresWait(markerBody) {
  *   `domain:devx @ objectui`      — a lane on a SIBLING board
  *   `repo:cloud` / `skills` / `triage (objectstack-wide)`
  *
+ * plus the free-claim multi-seat shape the protocol added afterwards:
+ *
+ *   `domain:spec · seat 2`        — seat NUMBER 2 of a lane several PMs sit on
+ *
+ * The `· seat N` suffix is a roster axis, not a lane: it is stripped BEFORE the
+ * lane test, so a numbered seat reads as its `domain:*` lane exactly as the
+ * bare post does, and seat 1 keeps the bare title (an absent suffix reads as
+ * seat 1 — every seat post written before the suffix existed is seat 1).
+ *
  * The `foreign` flag is the load-bearing half and it exists for the same reason
  * H19 refuses to guess at a cross-repo 404: this sweep reads ONE repo. A seat
  * whose lane lives in a sibling repo has an inventory this patrol cannot see at
@@ -6881,19 +6890,27 @@ export function seatDeclaresWait(markerBody) {
  * changes. `repo:*`-scoped and lane-less seats (`triage`) are foreign for the
  * same reason: there is no `domain:*` label to count a lane inventory against.
  *
- * @returns {{ lane: string|null, foreign: boolean }}
+ * @returns {{ lane: string|null, foreign: boolean, seat: number|null }} —
+ *   `seat` is the seat number (1 when the title carries no `· seat N`), or
+ *   null when the title does not parse as a seat post at all.
  */
 export function seatLane(issue) {
   const m = /^\[PM seat\]\s*(.*?)\s*—\s*(.*)$/u.exec(issue?.title ?? '');
-  if (!m) return { lane: null, foreign: true };
-  const raw = m[1].trim();
+  if (!m) return { lane: null, foreign: true, seat: null };
+  let raw = m[1].trim();
+  // The `· seat N` suffix (free-claim multi-seat) is a seat NUMBER, wherever
+  // it sits in the lane half; taken out first so the lane test below sees the
+  // same text a bare post would. Absent ⇒ seat 1.
+  const seatM = /\s*·\s*seat\s+(\d+)\b/iu.exec(raw);
+  const seat = seatM ? Number(seatM[1]) : 1;
+  if (seatM) raw = (raw.slice(0, seatM.index) + raw.slice(seatM.index + seatM[0].length)).trim();
   // An `@ <repo>` suffix names the board the lane lives on. Present ⇒ the lane
   // is only READABLE there, whatever its `domain:*` spelling says here.
   const at = /^(.*?)\s*@\s*(\S+)\s*$/u.exec(raw);
   const lane = (at ? at[1] : raw).trim();
   const elsewhere = at ? at[2] !== SWEEP_REPO.repo.split('/')[1] : false;
-  if (!/^domain:[a-z0-9][a-z0-9._-]*$/i.test(lane)) return { lane: null, foreign: true };
-  return { lane, foreign: elsewhere };
+  if (!/^domain:[a-z0-9][a-z0-9._-]*$/i.test(lane)) return { lane: null, foreign: true, seat };
+  return { lane, foreign: elsewhere, seat };
 }
 
 /**
@@ -8479,7 +8496,38 @@ export function seatPostLastEventMs(seat, commentRows) {
 }
 
 /**
- * The newest `Claim:` on a lane, over the dispatched cards this sweep holds.
+ * The `Seat:` line of a claim body — the seat NUMBER the claiming PM sits on
+ * (`Seat: domain:<x>#<n>`, free-claim multi-seat), read with the same key-line
+ * tolerance as `threadReadField` (leading bullet or blockquote, bold or code
+ * decoration around the key).
+ *
+ * Absent ⇒ 1. Every claim written before the line existed belongs to seat 1,
+ * which is the only seat those lanes had, so the default is backward
+ * compatible with every existing claim rather than a guess. A line that is
+ * PRESENT but names no `#<n>` is unreadable and returns null: it matches no
+ * seat, so its claim is invisible to the seat filter below — the file's
+ * under-reporting direction on every unrecognised spelling — and ⛔ never
+ * silently read as seat 1.
+ */
+const CLAIM_SEAT_KEY_LINE = /^[ \t]*(?:[-*+][ \t]+)?>?[ \t]*(?:\*\*)?`?Seat`?(?:\*\*)?[ \t]*:[ \t]*(.*)$/im;
+
+/** @returns {number|null} the seat number, 1 when the line is absent, null when it is present but unreadable. */
+export function claimSeatNumber(body) {
+  const m = CLAIM_SEAT_KEY_LINE.exec(String(body ?? ''));
+  if (!m) return 1;
+  const n = /#(\d+)\b/.exec(String(m[1] ?? ''));
+  return n ? Number(n[1]) : null;
+}
+
+/**
+ * The newest `Claim:` on a lane, over the dispatched cards this sweep holds,
+ * restricted to the claims of ONE seat number.
+ *
+ * Free-claim multi-seat puts several PMs on one lane, one post each. A post is
+ * behind only when a claim of ITS OWN seat outran it — another seat's claim is
+ * that seat's business and would otherwise read every second seat as stale on
+ * every fire. The seat filter narrows the ROWS handed to the shared claim
+ * predicate, so what a claim IS stays `latestClaimComment`'s call (below).
  *
  * ⚠️ The claim predicate is `latestClaimComment` — REUSED, deliberately not
  * re-spelled. The filing card is explicit that the literal `Claim:` marker is
@@ -8499,9 +8547,10 @@ export function seatPostLastEventMs(seat, commentRows) {
  * @param {string} lane — a `domain:*` label.
  * @param {Iterable<any>} issues — open cards this sweep already listed.
  * @param {Map<number, any[]>} commentsByNumber — threads already in the cache.
+ * @param {number} [seat=1] — the seat number whose claims count (`seatLane(post).seat`).
  * @returns {{ number: number, at: number }|null} the newest claim, or null.
  */
-export function newestLaneClaim(lane, issues, commentsByNumber) {
+export function newestLaneClaim(lane, issues, commentsByNumber, seat = 1) {
   let best = null;
   for (const issue of issues ?? []) {
     const labels = labelNames(issue ?? {});
@@ -8509,7 +8558,9 @@ export function newestLaneClaim(lane, issues, commentsByNumber) {
     if (!labels.includes('pm:dispatched') || !labels.includes(lane)) continue;
     const rows = commentsByNumber?.get?.(issue.number);
     if (!rows) continue;
-    const claim = latestClaimComment(rows);
+    // Only this seat's claims: the filter runs on the rows, the predicate is reused.
+    const own = (Array.isArray(rows) ? rows : []).filter((row) => claimSeatNumber(row?.body) === seat);
+    const claim = latestClaimComment(own);
     if (!claim) continue;
     const at = Date.parse(claim.createdAt ?? '');
     if (!Number.isFinite(at)) continue;
@@ -8523,11 +8574,12 @@ export function newestLaneClaim(lane, issues, commentsByNumber) {
  *
  * @param {object} seat — the `pm:seat` post.
  * @param {number|null} seatAt — `T_seat` (`seatPostLastEventMs`).
- * @param {{ number: number, at: number }|null} claim — the newest lane claim.
+ * @param {{ number: number, at: number }|null} claim — the newest lane claim
+ *   OF THIS POST'S SEAT NUMBER (`newestLaneClaim(lane, …, seatLane(seat).seat)`).
  */
 export function h38SeatPostStale(seat, seatAt, claim) {
   if (!labelNames(seat ?? {}).includes('pm:seat')) return null;
-  const { lane, foreign } = seatLane(seat ?? {});
+  const { lane, foreign, seat: seatNo } = seatLane(seat ?? {});
   // A lane this board cannot count has no readable claim population here, so
   // an absent claim would mean "unreadable", not "none" — H32's `foreign`
   // reasoning, and the reason this row declines rather than reporting silence.
@@ -8542,7 +8594,7 @@ export function h38SeatPostStale(seat, seatAt, claim) {
 
   const behindHours = (claim.at - seatAt) / 3_600_000;
   return (
-    `\`pm:seat\` post is STALE — its lane \`${lane}\` carries a \`Claim:\` on #${claim.number} written ` +
+    `\`pm:seat\` post is STALE — its lane \`${lane}\` (seat ${seatNo}) carries a \`Claim:\` on #${claim.number} written ` +
     `${behindHours.toFixed(1)}h AFTER this post's last event (claim ${new Date(claim.at).toISOString()}, ` +
     `post ${new Date(seatAt).toISOString()}). A shift dispatched work and did not record it, so every ` +
     'number the post states — 在飞 / 队列 / 决策箱 / the round number — describes a round that has since ' +
@@ -21256,12 +21308,13 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
   // would put an accusation of staleness on a post that correctly says it is
   // not running a shift.
   for (const { issue, rows } of seatMarkers.values()) {
-    const { lane } = seatLane(issue);
+    const { lane, seat } = seatLane(issue);
     if (!lane) continue;
+    // Free-claim multi-seat: the post is compared against ITS seat's claims only.
     const stale = h38SeatPostStale(
       issue,
       seatPostLastEventMs(issue, rows),
-      newestLaneClaim(lane, seen.values(), commentCache),
+      newestLaneClaim(lane, seen.values(), commentCache, seat),
     );
     if (stale) findings.push([issue, 'H38', stale]);
   }
@@ -28244,6 +28297,41 @@ async function selfTest() {
   t('H38 lane: prose mentioning a claim is not a claim', newestLaneClaim('domain:services', [laneCard(1, ['pm:dispatched', 'domain:services'])], new Map([[1, [{ body: 'the seat should claim: this card', created_at: '2026-08-30T00:00:00Z' }]]])), null);
   t('H38 lane: an em-dash claim stays invisible (malformed by ruling)', newestLaneClaim('domain:services', [laneCard(1, ['pm:dispatched', 'domain:services'])], new Map([[1, [{ body: 'Claim — the skills seat', created_at: '2026-08-30T00:00:00Z' }]]])), null);
   t('H38 lane: an unreadable claim stamp is not an ordering', newestLaneClaim('domain:services', [laneCard(1, ['pm:dispatched', 'domain:services'])], new Map([[1, [{ body: 'Claim: x', created_at: 'nope' }]]])), null);
+
+  // Free-claim multi-seat: several PMs on one lane, one post per seat, and a
+  // post is compared only against claims of ITS seat number. The title suffix
+  // and the claim's `Seat:` line are the two readings; both default to seat 1.
+  const seat2Title = '[PM seat] domain:services · seat 2 — 🟢 os-b (session_y)';
+  t('H38 seat: a `· seat N` title suffix parses as the LANE, not foreign', seatLane(seat38(seat2Title)).lane, 'domain:services');
+  t('H38 seat: …and is not foreign', seatLane(seat38(seat2Title)).foreign, false);
+  t('H38 seat: …and carries the seat number', seatLane(seat38(seat2Title)).seat, 2);
+  t('H38 seat: a bare title is seat 1', seatLane(seat38()).seat, 1);
+  t('H38 seat: a numbered seat on a SIBLING board is still foreign', seatLane(seat38('[PM seat] domain:devx · seat 3 @ objectui — 🟢 os-b')).foreign, true);
+  t('H38 seat: …and still carries its number', seatLane(seat38('[PM seat] domain:devx · seat 3 @ objectui — 🟢 os-b')).seat, 3);
+  t('H38 seat: a numbered seat still buys the H32 comment fetch', h32NeedsSeatComments(seat38(seat2Title)), true);
+  t('H38 seat: an unparseable title has no seat', seatLane(seat38('not a seat title')).seat, null);
+  t('H38 seat: a claim with no `Seat:` line is seat 1', claimSeatNumber('Claim: x\nBranch: `claude/issue-1-a`'), 1);
+  t('H38 seat: `Seat: domain:services#2` reads 2', claimSeatNumber('Claim: x\nSeat: domain:services#2'), 2);
+  t('H38 seat: …backticked too', claimSeatNumber('Claim: x\nSeat: `domain:services#2`'), 2);
+  t('H38 seat: …and behind a bullet or blockquote', claimSeatNumber('> - **Seat**: domain:services#4'), 4);
+  t('H38 seat: a `Seat:` line naming no number is unreadable, not seat 1', claimSeatNumber('Claim: x\nSeat: domain:services'), null);
+  t('H38 seat: prose mentioning a seat is not a `Seat:` line', claimSeatNumber('the seat: domain:services#2 is busy'), 1);
+  const seatRow = (seatLine, iso) => [{ body: `Claim: PM loop round 1\nSession: \`session_x\`\n${seatLine}`, created_at: iso }];
+  const oneCard = [laneCard(1, ['pm:dispatched', 'domain:services'])];
+  const seat2Claim = new Map([[1, seatRow('Seat: `domain:services#2`', '2026-08-30T00:00:00Z')]]);
+  const seat1Claim = new Map([[1, seatRow('Branch: `claude/issue-1-a`', '2026-08-30T00:00:00Z')]]);
+  t('H38 seat: a SAME-seat newer claim is found (seat 2 post, seat 2 claim)', newestLaneClaim('domain:services', oneCard, seat2Claim, 2).number, 1);
+  t('H38 seat: ANOTHER seat\'s claim is not counted (seat 1 post, seat 2 claim)', newestLaneClaim('domain:services', oneCard, seat2Claim, 1), null);
+  t('H38 seat: an absent `Seat:` line is seat 1 — the seat 1 post sees it', newestLaneClaim('domain:services', oneCard, seat1Claim, 1).number, 1);
+  t('H38 seat: …and the seat 2 post does not', newestLaneClaim('domain:services', oneCard, seat1Claim, 2), null);
+  t('H38 seat: the default seat argument is 1, so every pre-existing call reads as before', newestLaneClaim('domain:services', laneIssues, laneComments).number, 13398);
+  t('H38 seat: an unreadable `Seat:` line matches no seat', newestLaneClaim('domain:services', oneCard, new Map([[1, seatRow('Seat: domain:services', '2026-08-30T00:00:00Z')]]), 1), null);
+  t('H38 seat: the newest SAME-seat claim wins over a newer other-seat one', newestLaneClaim('domain:services', oneCard, new Map([[1, [...seatRow('Seat: domain:services#1', '2026-08-29T00:00:00Z'), ...seatRow('Seat: domain:services#2', '2026-08-30T00:00:00Z')]]]), 1).at, at38('2026-08-29T00:00:00Z'));
+  // End to end on the post: a seat-2 post is judged against the claim handed to it, and names its seat.
+  t('H38 seat: a seat-2 post behind a same-seat claim -> finding', typeof h38SeatPostStale(seat38(seat2Title), SEAT_AT_38, claim38(13398, '2026-08-30T07:30:00Z')), 'string');
+  t('H38 seat: …and the finding names the seat', h38row(seat38(seat2Title), SEAT_AT_38, claim38(13398, '2026-08-30T07:30:00Z')).includes('seat 2'), true);
+  t('H38 seat: …while the bare post names seat 1', h38row(seat38(), SEAT_AT_38, claim38(13398, '2026-08-30T07:30:00Z')).includes('seat 1'), true);
+  t('H38 seat: a seat-2 post with no same-seat claim -> clean', h38SeatPostStale(seat38(seat2Title), SEAT_AT_38, newestLaneClaim('domain:services', oneCard, seat1Claim, 2)), null);
 
   // -- H39 — the closed `pm:*` residue census (#13526, report-only) ---------
   //
