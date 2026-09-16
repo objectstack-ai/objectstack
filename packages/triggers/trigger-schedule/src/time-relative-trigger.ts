@@ -753,6 +753,27 @@ export class TimeRelativeTrigger implements FlowTrigger {
      */
     private organizationOfRecord(engine: unknown, objectName: string, record: unknown): string | null {
         if (this.recordOrgResolver?.engine !== engine) {
+            // [#18378] The ONE genuinely invisible way per-record ownership can
+            // fail, said once. `TimeRelativeDataEngine` is a TYPE-level
+            // narrowing — `TimeRelativeTriggerPlugin` resolves the real
+            // `objectql` service and merely types it as this interface, so the
+            // runtime object carries `getSchema` — but a host that mounted a
+            // genuine adapter object instead would hand us one that does not.
+            // The resolver would then answer `null` for every record, every run
+            // would carry no organization, and every tenant-scoped write would
+            // be refused with a message about the WRITE. That reads as "this
+            // flow is broken" and sends the operator to the flow; the cause is
+            // the composition. ⛔ Not an `error` and not a throw: the writes
+            // that matter are still refused loudly by the tenancy guard, so
+            // nothing is silently lost — this is a functional degradation whose
+            // only defect is a misleading diagnosis, which AGENTS.md puts at
+            // `warn`.
+            if (typeof (engine as { getSchema?: unknown } | null)?.getSchema !== 'function') {
+                this.logger.warn(
+                    `[time-relative] the data engine exposes no \`getSchema\` — per-record acting organizations cannot be resolved, so every run this sweep launches will carry none and each tenant-scoped write it makes will be refused. ` +
+                        `Mount the ObjectQL engine itself (service 'objectql' or 'data'), or declare \`organization\` on the flow's start node to bind the sweep to one organization instead.`,
+                );
+            }
             this.recordOrgResolver = { engine, resolver: createRecordOrganizationResolver(engine) };
         }
         return this.recordOrgResolver.resolver.organizationOf(objectName, record);

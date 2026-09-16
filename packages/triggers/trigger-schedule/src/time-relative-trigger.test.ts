@@ -1249,3 +1249,240 @@ describe('TimeRelativeTrigger — switched ON under `single` (#17396)', () => {
         expect(warns.filter((w) => w.includes('does NOT narrow this sweep'))).toHaveLength(0);
     });
 });
+
+/**
+ * [#18378, ruling A′] Per-record acting organizations under `group`.
+ *
+ * ## The discriminating number, stated before the cases
+ *
+ * ⚠️ THE ASSERTION THAT DISCRIMINATES IS THE **SET** OF ORGANIZATIONS ACROSS THE
+ * RUNS ONE TICK LAUNCHED — never "a run was stamped". The defect this replaces
+ * stamped every run in the batch ALIKE (with the declaration, or with nothing),
+ * so a pin reading only "the run carries an organization" passes on the old
+ * behaviour too. The fixture therefore puts matching rows in TWO organizations
+ * and reads the set as `['org_plant_a', 'org_plant_b']`, which is a value no
+ * previous behaviour could produce.
+ *
+ * ## Why the double carries `getSchema`
+ *
+ * `createRecordOrganizationResolver` resolves the organization COLUMN from the
+ * object's registered schema (`tenancy.organizationField`, then
+ * `tenancy.tenantField`, then the default) and answers `null` without one — so
+ * a double lacking `getSchema` would make every case below pass vacuously with
+ * no organization resolved, which is the shape of the defect rather than the
+ * fix. `TimeRelativeDataEngine` is a TYPE-level narrowing; the runtime object a
+ * host mounts is the real engine, which has `getSchema`. The degradation case
+ * is pinned separately, last.
+ */
+describe('TimeRelativeTrigger — switched ON under `group` (#18378)', () => {
+    withScheduledWorkOn('group');
+
+    const DESC = { object: 'contracts', dateField: 'end_date', withinDays: 60 };
+    const orgLess = () => binding(DESC, { organization: undefined, config: { timeRelative: DESC } });
+
+    const PLANT_A = 'org_plant_a';
+    const PLANT_B = 'org_plant_b';
+
+    /** Two plants' contracts, both inside the window. The group-wide dataset. */
+    const twoPlants = (): Row[] => [
+        { id: 'a1', end_date: '2026-07-25T00:00:00.000Z', organization_id: PLANT_A },
+        { id: 'b1', end_date: '2026-07-26T00:00:00.000Z', organization_id: PLANT_B },
+    ];
+
+    /**
+     * The unscoped double plus the `getSchema` the record resolver reads. The
+     * schema declares no `tenancy` block, so the resolver takes its DEFAULT
+     * limb (`organization_id`) — the ordinary case for an app object.
+     */
+    function groupDataEngine(rows: Row[]) {
+        const base = fakeDataEngine(rows);
+        const engine = {
+            ...base.engine,
+            getSchema(name: string) {
+                return name === 'contracts'
+                    ? { name, fields: { id: {}, end_date: {}, organization_id: {} } }
+                    : undefined;
+            },
+        } as TimeRelativeDataEngine;
+        return { engine, calls: base.calls };
+    }
+
+    it('arms an undeclared sweep — it is not refused', () => {
+        const job = fakeJobService();
+        const trigger = new TimeRelativeTrigger(
+            () => job.service,
+            () => groupDataEngine([]).engine,
+            silentLogger(),
+            NOW,
+        );
+        expect(() => trigger.start(orgLess(), async () => {})).not.toThrow();
+        expect(job.jobs.size).toBe(1);
+    });
+
+    it("the sweep's query stays group-wide — no scope key, so every plant's rows match", async () => {
+        // ADR-0105 D1 makes group-wide READ reach inherent to the posture; A′
+        // changes ownership of the WRITES, not the reach of the reads.
+        const job = fakeJobService();
+        const data = groupDataEngine(twoPlants());
+        const trigger = new TimeRelativeTrigger(() => job.service, () => data.engine, silentLogger(), NOW);
+
+        trigger.start(orgLess(), async () => {});
+        await flush();
+        await job.fire('flow-time-relative:renewal_alert');
+
+        expect(data.calls.length, 'control: the sweep really did query').toBeGreaterThan(0);
+        for (const call of data.calls) {
+            expect(call.context?.isSystem, 'the sweep still runs elevated').toBe(true);
+            expect('tenantId' in (call.context ?? {}), 'no scope key on the find context').toBe(false);
+        }
+    });
+
+    it('⇒ each launched run acts as ITS OWN swept record’s organization', async () => {
+        const job = fakeJobService();
+        const data = groupDataEngine(twoPlants());
+        const trigger = new TimeRelativeTrigger(() => job.service, () => data.engine, silentLogger(), NOW);
+        const seen: AutomationContext[] = [];
+
+        trigger.start(orgLess(), async (ctx) => void seen.push(ctx));
+        await flush();
+        await job.fire('flow-time-relative:renewal_alert');
+
+        expect(seen.length, 'both plants’ rows matched — the sweep is group-wide').toBe(2);
+        // ⚠️ THE DISCRIMINATING ASSERTION. Two DIFFERENT organizations from one
+        // tick is a value neither the old `group` behaviour (refused at bind,
+        // zero runs) nor the `single` behaviour (two runs, both org-less) nor a
+        // declaration (two runs, both the declared org) can produce.
+        expect(seen.map((c) => c.tenantId).sort()).toEqual([PLANT_A, PLANT_B]);
+        // …and each run is stamped with the organization of the row it is ABOUT,
+        // not merely with "some organization" — the pairing is the point.
+        expect(
+            seen.map((c) => [(c.record as { id?: unknown }).id, c.tenantId]).sort(),
+        ).toEqual([
+            ['a1', PLANT_A],
+            ['b1', PLANT_B],
+        ]);
+    });
+
+    it('a DECLARED organization still outranks the record — declaring narrows, it does not widen', async () => {
+        // A declaration bounds SELECTION as well as identity, so honouring the
+        // record over it would silently widen a flow the author scoped — the
+        // #16659 defect. Declaration wins, and the sweep sees one plant only.
+        const job = fakeJobService();
+        const base = tenantScopedDataEngine(twoPlants());
+        const engine = {
+            ...base.engine,
+            getSchema: (name: string) =>
+                name === 'contracts' ? { name, fields: { id: {}, end_date: {}, organization_id: {} } } : undefined,
+        } as TimeRelativeDataEngine;
+        const trigger = new TimeRelativeTrigger(() => job.service, () => engine, silentLogger(), NOW);
+        const seen: AutomationContext[] = [];
+
+        trigger.start(binding(DESC, { organization: PLANT_A, config: { timeRelative: DESC } }), async (ctx) =>
+            void seen.push(ctx),
+        );
+        await flush();
+        await job.fire('flow-time-relative:renewal_alert');
+
+        expect(seen.map((c) => (c.record as { id?: unknown }).id)).toEqual(['a1']);
+        expect(seen[0].tenantId).toBe(PLANT_A);
+    });
+
+    it('⛔ a row carrying NO organization stamps nothing — it does not fall back', async () => {
+        // The rejected arm of the card, pinned negatively. A row with no owner
+        // yields a run with no `tenantId` key, and the tenancy guard refuses
+        // its writes downstream; ⛔ it must NOT acquire the bootstrap
+        // organization, the first `sys_organization` row, or a sibling row's.
+        const job = fakeJobService();
+        const data = groupDataEngine([
+            { id: 'orphan', end_date: '2026-07-25T00:00:00.000Z' },
+            { id: 'b1', end_date: '2026-07-26T00:00:00.000Z', organization_id: PLANT_B },
+        ]);
+        const trigger = new TimeRelativeTrigger(() => job.service, () => data.engine, silentLogger(), NOW);
+        const seen: AutomationContext[] = [];
+
+        trigger.start(orgLess(), async (ctx) => void seen.push(ctx));
+        await flush();
+        await job.fire('flow-time-relative:renewal_alert');
+
+        const orphan = seen.find((c) => (c.record as { id?: unknown }).id === 'orphan');
+        const owned = seen.find((c) => (c.record as { id?: unknown }).id === 'b1');
+        expect('tenantId' in (orphan ?? {}), 'the orphan run carries no organization key').toBe(false);
+        // Live control: the SAME tick stamped the owned row, so the negative
+        // above is evidence about the orphan and not about an inert harness.
+        expect(owned?.tenantId).toBe(PLANT_B);
+    });
+
+    it('an object whose tenancy is disabled resolves nothing — the column, not the value, decides', async () => {
+        // `tenancy: { enabled: false }` (ADR-0066) means the object is
+        // platform-global and has no organization of its own, even if a stray
+        // column is present on the row. The shared resolver owns that
+        // precedence; this pin is here so a future local column read fails.
+        const job = fakeJobService();
+        const base = fakeDataEngine([
+            { id: 'g1', end_date: '2026-07-25T00:00:00.000Z', organization_id: PLANT_A },
+        ]);
+        const engine = {
+            ...base.engine,
+            getSchema: (name: string) =>
+                name === 'contracts'
+                    ? { name, tenancy: { enabled: false }, fields: { id: {}, end_date: {}, organization_id: {} } }
+                    : undefined,
+        } as TimeRelativeDataEngine;
+        const trigger = new TimeRelativeTrigger(() => job.service, () => engine, silentLogger(), NOW);
+        const seen: AutomationContext[] = [];
+
+        trigger.start(orgLess(), async (ctx) => void seen.push(ctx));
+        await flush();
+        await job.fire('flow-time-relative:renewal_alert');
+
+        expect(seen).toHaveLength(1);
+        expect('tenantId' in seen[0]).toBe(false);
+    });
+
+    it('says on the BIND line that ownership is per-record, and names the posture', async () => {
+        const job = fakeJobService();
+        const infos: string[] = [];
+        const trigger = new TimeRelativeTrigger(
+            () => job.service,
+            () => groupDataEngine([]).engine,
+            { info: (m: string) => void infos.push(String(m)), warn: () => {}, debug: () => {} },
+            NOW,
+        );
+
+        trigger.start(orgLess(), async () => {});
+        await flush();
+
+        const bindLine = infos.find((l) => l.includes('bound flow'));
+        expect(bindLine).toBeDefined();
+        expect(bindLine).toContain('per-record acting organization');
+        expect(bindLine).toContain("posture 'group'");
+    });
+
+    it('warns ONCE when the engine exposes no `getSchema` — the misleading-diagnosis seam', async () => {
+        // Without `getSchema` nothing resolves, every run carries no
+        // organization and every tenant-scoped write is refused with a message
+        // about the WRITE — which sends the operator to the flow when the cause
+        // is the composition. The degradation is functional (the writes are
+        // still refused loudly, nothing is silently lost), so `warn` is the
+        // level AGENTS.md prescribes.
+        const job = fakeJobService();
+        const warns: string[] = [];
+        const data = fakeDataEngine(twoPlants()); // ⛔ deliberately NO getSchema
+        const trigger = new TimeRelativeTrigger(
+            () => job.service,
+            () => data.engine,
+            { info: () => {}, warn: (m: string) => void warns.push(String(m)), debug: () => {} },
+            NOW,
+        );
+        const seen: AutomationContext[] = [];
+
+        trigger.start(orgLess(), async (ctx) => void seen.push(ctx));
+        await flush();
+        await job.fire('flow-time-relative:renewal_alert');
+
+        const hits = warns.filter((w) => w.includes('no `getSchema`'));
+        expect(hits.length, 'said once per engine, not once per record').toBe(1);
+        expect(hits[0]).toContain('will be refused');
+        for (const ctx of seen) expect('tenantId' in ctx).toBe(false);
+    });
+});
