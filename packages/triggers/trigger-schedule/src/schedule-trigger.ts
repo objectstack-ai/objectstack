@@ -428,6 +428,39 @@ export function refuseMissingOrganization(
 }
 
 /**
+ * [#18378] The clause a BIND line carries about which organization this flow's
+ * runs will act as — one vocabulary, so the two triggers cannot describe the
+ * same deployment differently.
+ *
+ * "Which rows can this flow ever see, and who will own what it writes" is
+ * answerable from the boot log rather than from the metadata, and after ruling
+ * A′ that is three distinct answers rather than two. The third — an undeclared
+ * flow under `group` with nothing to derive from — is the one that earns a
+ * WARNING rather than a fact: it is legal and armed, and it will nonetheless be
+ * refused at its first tenant-scoped write. That refusal is loud and correct,
+ * but it arrives at the first tick; boot is where an operator is reading, so it
+ * is said here too, with the remedy.
+ *
+ * ⛔ `hasRecord` is a fact about the TRIGGER KIND, not about a tick: a
+ * `time_relative` sweep always has a swept record to derive from by
+ * construction, and a plain `schedule` flow never does. It is not "did this
+ * tick match anything".
+ */
+export function describeScheduleRunOwnership(
+    policy: ScheduledWorkPolicy,
+    organization: string | null,
+    opts: { readonly hasRecord: boolean },
+): string {
+    if (organization !== null) return ` as organization '${organization}'`;
+    if (policy.runOwnership === 'per-record') {
+        return opts.hasRecord
+            ? ` with per-record acting organization (tenancy posture '${policy.posture}') — the sweep reads group-wide and each run acts as its own swept record's organization`
+            : ` with NO acting organization (tenancy posture '${policy.posture}') — this flow sweeps no records, so there is nothing to derive one from, and any tenant-scoped row it writes (a notification, an inbox message, its own run history) will be REFUSED at the write. Declare \`organization\` on the start node's config if this flow writes per-organization data`;
+    }
+    return ` with NO acting organization (tenancy posture '${policy.posture}') — the run carries none and the deployment's single organization is resolved beneath each write`;
+}
+
+/**
  * Report a scheduled flow that failed to bind to the job service.
  *
  * **Why this is `error` and not `warn`** — the repo's degradation-log-level
@@ -630,12 +663,25 @@ export class ScheduleTrigger implements FlowTrigger {
         // service is missing", which is a different defect with a different
         // remedy.
         //
-        // [#17396] …and only where the wall makes it answerable. Under
+        // [#17396] …and only where the posture makes it answerable. Under
         // `single` the run carries NO organization and the #8844 guard resolves
         // the deployment's one organization beneath it, so a missing key is not
         // a defect there — `policy.requiresActingOrganization` is the whole of
         // that distinction and it is resolved once, centrally, so this trigger,
         // the sweep trigger and the engine's audit cannot disagree about it.
+        //
+        // [#18378] …nor under `group`, and for a different reason worth keeping
+        // apart from `single`'s. There the key is OPTIONAL, not moot: a
+        // declared flow acts as its declaration exactly as under `isolated`,
+        // while an undeclared one is a legal armed shape whose ownership
+        // follows the record. A PLAIN `schedule` flow has no record, so an
+        // undeclared one here carries nothing and is refused at its first
+        // tenant-scoped write — loudly, by the tenancy guard, with the remedy.
+        // ⛔ That is deliberately NOT converted into a bind refusal: a cron flow
+        // that only reads, or writes only objects declaring
+        // `tenancy: { enabled: false }`, has no write to be refused and must
+        // still run. Refusing it at bind would be ruling G again under a new
+        // name, which is the thing A′ reopened. The bind line says so instead.
         const organization = resolveBindingOrganization(binding);
         if (policy.requiresActingOrganization && organization === null) {
             // Drop any prior binding for this flow FIRST. A hot re-publish that
@@ -749,7 +795,23 @@ export class ScheduleTrigger implements FlowTrigger {
                     `[schedule] bound flow '${binding.flowName}' → ${schedule.type}` +
                         (schedule.expression ? ` '${schedule.expression}'` : '') +
                         (schedule.intervalMs ? ` every ${schedule.intervalMs}ms` : '') +
-                        (schedule.at ? ` at ${schedule.at}` : ''),
+                        (schedule.at ? ` at ${schedule.at}` : '') +
+                        // [#18378] Which organization this flow's runs act as,
+                        // on the BIND line. A plain `schedule` flow has no
+                        // swept record, so `per-record` ownership has nothing
+                        // to derive from and the run carries none — which under
+                        // `group` is a legal, armed shape whose first
+                        // tenant-scoped write is nonetheless refused
+                        // (`walled-posture`). That refusal is correct and
+                        // loud, but it arrives at the first TICK, which may be
+                        // hours away and unattended; boot is where the operator
+                        // is actually reading, so the warning is owed here as
+                        // well. ⛔ Not a reason to refuse the bind: a cron flow
+                        // that only reads, or only writes objects that declare
+                        // `tenancy: { enabled: false }`, is legitimate and must
+                        // still run — which is the whole of what ruling A′
+                        // reopened.
+                        describeScheduleRunOwnership(policy, organization, { hasRecord: false }),
                 );
             })
             .catch((err) => {

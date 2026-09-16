@@ -2942,6 +2942,9 @@ importers:
       '@objectstack/core':
         specifier: workspace:*
         version: link:../../core
+      '@objectstack/metadata-core':
+        specifier: workspace:*
+        version: link:../../metadata-core
       '@objectstack/spec':
         specifier: workspace:*
         version: link:../../spec

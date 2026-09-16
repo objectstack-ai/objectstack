@@ -10,11 +10,22 @@ import type { TimeRelativeTrigger as TimeRelativeDescriptor } from '@objectstack
 import {
     normalizeSchedule,
     reportBindFailure,
+    describeScheduleRunOwnership,
     refuseMissingOrganization,
     refuseScheduledWorkDisabled,
     resolveBindingOrganization,
 } from './schedule-trigger.js';
 import { resolveScheduledWorkPolicy } from '@objectstack/types';
+import type { ScheduledRunOwnership } from '@objectstack/types';
+// [#18378] The ONE resolver for "which organization does this record belong
+// to" — the same precedence (`tenancy.organizationField`, then
+// `tenancy.tenantField`, then the default column) that every sanctioned
+// platform-row writer already shares. ⛔ Never a local column read: see
+// `organizationOfRecord`.
+import {
+    createRecordOrganizationResolver,
+    type RecordOrganizationResolver,
+} from '@objectstack/metadata-core';
 import type { FlowTrigger, FlowTriggerBinding, JobServiceSurface, TriggerLogger } from './schedule-trigger.js';
 
 /**
@@ -269,6 +280,12 @@ export class TimeRelativeTrigger implements FlowTrigger {
     private readonly localClaims = new Map<string, number>();
     /** Whether the in-process-only dedup degradation has been said (once). */
     private claimDegradationWarned = false;
+    /**
+     * [#18378] The record→organization resolver, paired with the engine it was
+     * built over so a kernel rebuild cannot be answered from the previous
+     * kernel's object registry. See {@link organizationOfRecord}.
+     */
+    private recordOrgResolver: { engine: unknown; resolver: RecordOrganizationResolver } | null = null;
 
     constructor(
         getJobService: () => JobServiceSurface | null,
@@ -415,7 +432,14 @@ export class TimeRelativeTrigger implements FlowTrigger {
 
         const handler: JobHandler = async () => {
             try {
-                await this.sweep(binding.flowName, desc, maxRecords, organization, callback);
+                await this.sweep(
+                    binding.flowName,
+                    desc,
+                    maxRecords,
+                    organization,
+                    policy.runOwnership,
+                    callback,
+                );
             } catch (err) {
                 // Error isolation: a sweep failure must not crash the job
                 // runner / ticker. Log and swallow.
@@ -459,9 +483,13 @@ export class TimeRelativeTrigger implements FlowTrigger {
                         // and an operator reading the boot log is owed the
                         // difference between "sees one organization's rows" and
                         // "sees every row this install holds".
-                        (organization !== null
-                            ? ` as organization '${organization}'`
-                            : ` with NO acting organization (tenancy posture '${policy.posture}') — the sweep is unscoped and its runs carry no organization`),
+                        // [#18378] Three answers now, not two — the third is an
+                        // undeclared sweep under `group`, which reads
+                        // group-wide and stamps each run from its own record.
+                        // One shared vocabulary so this trigger and the plain
+                        // schedule trigger cannot describe one deployment
+                        // differently.
+                        describeScheduleRunOwnership(policy, organization, { hasRecord: true }),
                 );
             })
             .catch((err) => {
@@ -497,10 +525,26 @@ export class TimeRelativeTrigger implements FlowTrigger {
          * posture gate refuses one), so an
          * unscoped sweep is not the cross-organization task the ruling forbids
          * — it is the shape a single-organization install had before #16659.
-         * Under a wall `start()` still refuses an undeclared binding, and with
-         * the switch off nothing binds, so `null` cannot arrive from either.
+         * Under `isolated` `start()` still refuses an undeclared binding, and
+         * with the switch off nothing binds, so `null` cannot arrive from
+         * either.
+         *
+         * [#18378] `null` is reachable from a THIRD gate now — the switch on
+         * under `group` — and that one is not unscoped. See `ownership`.
          */
         organization: string | null,
+        /**
+         * [#18378] What a run launched from a matched row acts as when the flow
+         * declared nothing. Resolved once per bind from the deployment
+         * ({@link ScheduledWorkPolicy.runOwnership}) so this trigger, the plain
+         * schedule trigger and the engine's audit cannot disagree.
+         *
+         * Only `'per-record'` changes behaviour here, and only while
+         * `organization === null`: an explicit declaration outranks it, because
+         * a declaration bounds SELECTION as well as identity and silently
+         * widening a flow the author scoped would be the #16659 defect again.
+         */
+        ownership: ScheduledRunOwnership,
         callback: (ctx: AutomationContext) => Promise<void>,
     ): Promise<void> {
         const engine = this.getDataEngine();
@@ -602,22 +646,37 @@ export class TimeRelativeTrigger implements FlowTrigger {
                 deduped++;
                 continue;
             }
+            // [#18378] The acting organization for THIS record's run.
+            //
+            // Order is declaration → record → nothing, and it is the order
+            // `ObjectStoreSuspendedRunStore` already resolves `sys_automation_run`
+            // with (`organizationOf(record) ?? ctx.tenantId`). Before this card
+            // the two disagreed under `group`: the history row was stamped from
+            // the record while the inbox and delivery rows followed an acting
+            // context that could not exist there, so they were refused and the
+            // tick still summarised itself as healthy.
+            //
+            // ⛔ NOT a hand-rolled `record.organization_id` read. The column is
+            // whatever the OBJECT declares (`tenancy.organizationField`, then
+            // `tenancy.tenantField`, then the default), a platform-global object
+            // has none at all, and a second implementation of that precedence
+            // living in a trigger is exactly the drift `createRecordOrganizationResolver`
+            // exists to end — it is the shared resolver all three sanctioned
+            // platform-row writers already hold.
+            const runOrganization =
+                organization ??
+                (ownership === 'per-record'
+                    ? this.organizationOfRecord(engine, desc.object, record)
+                    : null);
             try {
                 const ctx: AutomationContext = {
                     record,
                     object: desc.object,
                     event: 'time_relative',
-                    // [#16659] The declared acting organization — the same key
-                    // a record-change run inherits from its triggering session,
+                    // [#16659] The acting organization — the same key a
+                    // record-change run inherits from its triggering session,
                     // and the one `notify-node.ts` and the run-history writer
-                    // already read. ⛔ Never derived from the swept RECORD's
-                    // own `organization_id`: the sweep runs elevated and can
-                    // match rows in any tenant, so keying on the row would let
-                    // one flow write into organizations it never declared —
-                    // the cross-organization scheduled task the ruling forbids.
-                    // That prohibition is untouched by #17396: the `single`
-                    // branch below omits the key, it does not fill it from the
-                    // row.
+                    // already read.
                     //
                     // [#17396] ⚠️ RETIRED PIN, with its reason — the same one
                     // `ScheduleTrigger`'s handler records. The unconditional
@@ -625,8 +684,26 @@ export class TimeRelativeTrigger implements FlowTrigger {
                     // correct while every time-triggered run owed a
                     // declaration. Under ruling G the absent key is a declared
                     // deployment state (`single` + the switch on), not a
-                    // forgotten one, and it is unreachable from any other gate.
-                    ...(organization !== null ? { tenantId: organization } : {}),
+                    // forgotten one.
+                    //
+                    // [#18378] ⚠️ SECOND RETIRED PIN, and this one names a
+                    // prohibition rather than a spelling. This site carried
+                    // "⛔ Never derived from the swept RECORD's own
+                    // `organization_id`", whose reason was that the sweep runs
+                    // elevated and can match rows in any tenant, so keying on
+                    // the row would let one flow write into organizations it
+                    // never declared. That reason is POSTURE-SPECIFIC and was
+                    // written before `group` was distinguished:
+                    //   - under `isolated` it stands unchanged, and the gate
+                    //     above means an undeclared flow never reaches here;
+                    //   - under `single` there is no second organization to
+                    //     cross to, and the key is still omitted — ⛔ the
+                    //     `'unscoped'` arm does NOT fill from the row;
+                    //   - under `group` "organizations it never declared" is
+                    //     not a boundary violation but the posture's own read
+                    //     reach (ADR-0105 D1), and the row is the only honest
+                    //     owner available. Retired for THAT posture alone.
+                    ...(runOrganization !== null ? { tenantId: runOrganization } : {}),
                     // Expose the record as params too, so flows with named `isInput`
                     // variables matching record fields get them seeded (parity with
                     // the record-change trigger).
@@ -647,8 +724,38 @@ export class TimeRelativeTrigger implements FlowTrigger {
         }
 
         this.logger.debug?.(
-            `[time-relative] flow '${flowName}' swept '${desc.object}' as organization '${organization}': ${matched.length} matched, ${launched} launched, ${deduped} already dispatched, ${failed} failed`,
+            `[time-relative] flow '${flowName}' swept '${desc.object}' ` +
+                (organization !== null
+                    ? `as organization '${organization}'`
+                    : ownership === 'per-record'
+                      ? 'with per-record acting organization'
+                      : 'with no acting organization') +
+                `: ${matched.length} matched, ${launched} launched, ${deduped} already dispatched, ${failed} failed`,
         );
+    }
+
+    /**
+     * [#18378] The swept record's own organization, through the ONE shared
+     * resolver (`@objectstack/metadata-core`) rather than a column read of this
+     * trigger's own.
+     *
+     * The resolver memoizes the column per object internally; this memoizes the
+     * RESOLVER per engine, because a kernel rebuild hands back a different
+     * engine whose object schemas may differ, and a resolver outliving its
+     * engine would answer from the previous kernel's registry. Identity compare
+     * rather than a cache key: the engine object IS the identity.
+     *
+     * `null` — no organization column on this object, no value on this row, or
+     * an engine double without `getSchema` — is a legitimate answer and NOT an
+     * error: the caller omits `tenantId`, and the write that needs one is
+     * refused by the tenancy guard with its own remedy. ⛔ Do not substitute a
+     * fallback here; that is the arm ruling A′ rejected.
+     */
+    private organizationOfRecord(engine: unknown, objectName: string, record: unknown): string | null {
+        if (this.recordOrgResolver?.engine !== engine) {
+            this.recordOrgResolver = { engine, resolver: createRecordOrganizationResolver(engine) };
+        }
+        return this.recordOrgResolver.resolver.organizationOf(objectName, record);
     }
 
     /**
