@@ -31642,6 +31642,93 @@ Doubles as the fire's **write self-check** (step 0). \`201\` is not the reading.
   t('#13544 control: a genuinely unreachable host still refuses', classifyTransportProbe({ token: 'proxy-injected', authed: { networkError: 'ECONNREFUSED' }, transport: describeTransportRoute({ env: { HTTPS_PROXY: 'http://127.0.0.1:1' } }) }).kind, 'host-unreachable');
   t('#13544 control: …and the refusal exit code is still 3', EXIT_PREREQUISITE_NOT_MET, 3);
 
+  // -- CLI surface (#18369): the roster, the usage text, and the refusal -----
+  //
+  // Two layers, pinned separately because they fail separately. The PURE cases
+  // judge `refuseUnknownArgs` and `USAGE`; the SPAWNED ones underneath judge the
+  // ENTRY — which branch runs first, and whether anything reached the network
+  // before it. No in-process call can observe "no request was made", and the
+  // filed defect was precisely an ordering one: `--help` and a flag that
+  // certainly does not exist were byte-identical, and both swept.
+  t('#18369 the standing caller\'s own argv is honoured', refuseUnknownArgs(['--format=markdown', '--provenance=run 1 · commit abc']), null);
+  t('#18369 no argument at all is honoured (the default sweep)', refuseUnknownArgs([]), null);
+  t('#18369 --self-test is honoured', refuseUnknownArgs(['--self-test']), null);
+  t('#18369 --probe is honoured', refuseUnknownArgs(['--probe']), null);
+  t('#18369 --help is honoured', refuseUnknownArgs(['--help']), null);
+  t('#18369 -h is honoured', refuseUnknownArgs(['-h']), null);
+  t('#18369 --provenance with an empty value is honoured', refuseUnknownArgs(['--provenance=']), null);
+  // ⚖️ The NAME is this function's judgement; the VALUE stays `parseOutputOptions`'.
+  // A second format vocabulary here would be a second list to drift.
+  t('#18369 a bad --format VALUE is not this layer\'s refusal', refuseUnknownArgs(['--format=bogus']), null);
+  t('#18369 …and is still refused, by the layer that owns it', typeof parseOutputOptions(['--format=bogus']).error, 'string');
+  // The filer's positive control, and the card's headline case.
+  t('#18369 a flag that certainly does not exist is refused BY NAME', refuseUnknownArgs(['--totally-bogus-flag-xyz']), 'unknown option --totally-bogus-flag-xyz');
+  // The wrong-TARGET token: `--repo=` has never existed here, was silently
+  // dropped, and the sweep then ran against the DEFAULT board.
+  t('#18369 a --repo= this tool never had is refused by name', refuseUnknownArgs(['--repo=objectstack-ai/objectui']), 'unknown option --repo');
+  t('#18369 a near-miss of a real option is refused by name', refuseUnknownArgs(['--formats=markdown']), 'unknown option --formats');
+  t('#18369 a value option spelled with a SPACE is refused, not silently defaulted', String(refuseUnknownArgs(['--format', 'markdown'])).startsWith('--format carries its value in the same token'), true);
+  t('#18369 a bare positional is refused and told where the board comes from', String(refuseUnknownArgs(['objectstack-ai/objectui'])).startsWith('unexpected argument "objectstack-ai/objectui"'), true);
+  // ⛔ Deliberate: the proxy flag is node's, read at process START, so after the
+  // script path it never did anything. Refusing it is how a caller finds out.
+  t('#18369 the proxy flag AFTER the script path is refused (it is node\'s, not ours)', refuseUnknownArgs([PROXY_FLAG]), `unknown option ${PROXY_FLAG}`);
+  t('#18369 the refusal names the FIRST offending token, not the last', refuseUnknownArgs(['--bogus-one', '--bogus-two']), 'unknown option --bogus-one');
+  // The roster is the only source for both halves, so a flag documented and not
+  // honoured — or honoured and not documented — is a case, never a code review.
+  t('#18369 USAGE documents every bare flag on the roster', CLI_FLAGS.filter((f) => !USAGE.includes(f)).join(','), '');
+  t('#18369 USAGE documents every value option on the roster', CLI_VALUE_OPTIONS.filter((o) => !USAGE.includes(`${o}=`)).join(','), '');
+  t('#18369 every format this tool renders is named in USAGE', OUTPUT_FORMATS.filter((f) => !USAGE.includes(f)).join(','), '');
+  t('#18369 USAGE says the board comes from the environment, since no flag names it', USAGE.includes('PM_SWEEP_REPO'), true);
+  t('#18369 USAGE opens with the word a caller greps for', USAGE.startsWith('usage:'), true);
+
+  // -- The entry, spawned — "zero requests" is not observable in-process ------
+  //
+  // `globalThis.fetch` is replaced in the child by one that exits 97, so a fetch
+  // ATTEMPT is a distinct exit code rather than a network result: offline,
+  // deterministic, and unchanged by a container with no token and no route.
+  // ⛔ The proxy env is cleared for the child because `rearmThroughProxy` would
+  // otherwise re-exec a GRANDCHILD without `--import`, where the trap is not
+  // installed — the case would then be answering about a process it never armed.
+  const FETCH_TRAP_EXIT = 97;
+  const FETCH_TRAP =
+    'data:text/javascript,globalThis.fetch=()=>{process.stderr.write("FETCH-ATTEMPTED\\n");' +
+    `process.exit(${FETCH_TRAP_EXIT})};`;
+  const runEntry = (args, env = {}) =>
+    spawnSync(process.execPath, ['--import', FETCH_TRAP, SELF_PATH, ...args], {
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        HTTPS_PROXY: '', https_proxy: '', NODE_OPTIONS: '', NODE_USE_ENV_PROXY: '',
+        GITHUB_TOKEN: '', GH_TOKEN: '', ...env,
+      },
+    });
+  // ⭐ THE CONTROL, and it is what gives every case below it meaning: a trap that
+  // was never installed would let `--help` "pass" with the sweep deleted, or
+  // with this whole battery deleted. The default invocation must still reach the
+  // network, and must say so in an exit code nothing else in this file uses.
+  const trapped = runEntry([]);
+  t('#18369 control: the default sweep still reaches fetch, so the trap is armed', trapped.status, FETCH_TRAP_EXIT);
+  t('#18369 control: …and the trap, not the sweep, is what said so', String(trapped.stderr).includes('FETCH-ATTEMPTED'), true);
+  const helped = runEntry(['--help']);
+  t('#18369 --help exits 0', helped.status, 0);
+  t('#18369 --help issues ZERO requests', String(helped.stderr).includes('FETCH-ATTEMPTED'), false);
+  t('#18369 --help prints the usage block on STDOUT, whole and untruncated', helped.stdout, `${USAGE}\n`);
+  const shortHelp = runEntry(['-h']);
+  t('#18369 -h exits 0 too', shortHelp.status, 0);
+  t('#18369 -h prints the same block', shortHelp.stdout, helped.stdout);
+  // ⭐ Answered BEFORE the `SWEEP_REPO` guard on purpose: a caller asking what
+  // the flags are must get them on the box whose environment is broken, which
+  // is exactly the box where they ask.
+  const helpedBroken = runEntry(['--help'], { PM_SWEEP_REPO: 'not a repository' });
+  t('#18369 --help answers even when the sweep target is malformed', helpedBroken.status, 0);
+  t('#18369 …and still issues zero requests', String(helpedBroken.stderr).includes('FETCH-ATTEMPTED'), false);
+  const refused = runEntry(['--totally-bogus-flag-xyz']);
+  t('#18369 an unknown option exits 2 — this file\'s bad-usage code, not a fourth one', refused.status, 2);
+  t('#18369 an unknown option issues ZERO requests', String(refused.stderr).includes('FETCH-ATTEMPTED'), false);
+  t('#18369 an unknown option is refused by name, in git-history.mjs\'s spelling', String(refused.stderr).startsWith('check-half-states: unknown option --totally-bogus-flag-xyz'), true);
+  t('#18369 …and the refusal carries the usage block with it', String(refused.stderr).includes('usage:'), true);
+  t('#18369 the refusal goes to STDERR, leaving stdout empty', refused.stdout, '');
+
   let failed = 0;
   for (const [name, actual, expected] of cases) {
     const ok = actual === expected;
@@ -31657,8 +31744,147 @@ Doubles as the fire's **write self-check** (step 0). \`201\` is not the reading.
   return SELF_TEST_VERDICT;
 }
 
+// ---------------------------------------------------------------------------
+// CLI surface — the roster, the usage text and the refusal (#18369)
+// ---------------------------------------------------------------------------
+//
+// Until this block, argv was never VALIDATED here. The only membership tests
+// were `includes('--self-test')` and `includes('--probe')`, and
+// `parseOutputOptions` matched two prefixes and dropped every other token
+// silently — so `--help` and a flag that certainly does not exist behaved
+// IDENTICALLY: both fell through into the full sweep, a multi-page,
+// rate-limit-spending read of a live board, and no usage string existed
+// anywhere in the file to print instead.
+//
+// The unanswered `--help` is the cheap half. The expensive half is the mistyped
+// REAL flag: `--format markdown` written with a space, or a `--repo=…` this
+// tool has never had, was IGNORED — and the sweep then ran with the DEFAULT
+// format against the DEFAULT board. That reading is byte-indistinguishable
+// from the run the caller believes they asked for, which is the same failure
+// direction `SWEEP_REPO` below already refuses to take. So argv gets the same
+// answer: refused by name, exit 2, before any request.
+//
+// ## One roster, read by both halves
+//
+// The refusal and the printed usage read the SAME two lists. A tool that
+// refuses what its own usage documents is worse than one that documents
+// nothing, and a second hand-typed list is how that drift arrives — the shape
+// `post-stamped.mjs` settled on next door (`KNOWN_FLAGS`/`KNOWN_OPTIONS`
+// feeding one pure parse), reused rather than reinvented.
+//
+// ## Exit 2, and why not `git-history.mjs`'s 1
+//
+// The refusal WORDING mirrors `git-history.mjs` — `check-half-states: unknown
+// option --foo`, the spelling that file already answers with — but not its exit
+// code. This file's exit vocabulary is pinned by its own header at 0 / 2 / 3,
+// and all three of its pre-existing bad-usage exits (a malformed
+// `PM_SWEEP_REPO`, a malformed `PM_SWEEP_CLOSED_FLOOR`, an unknown `--format=`)
+// are 2. A fourth code for a fourth usage error would make "bad usage" two
+// numbers inside one tool, which is exactly what the header's 2-vs-3 split
+// exists to prevent.
+//
+// ## What is NOT on the roster, deliberately
+//
+// `--use-env-proxy` is node's own flag, read at process START (`rearmThroughProxy`),
+// so it belongs before the script path or in `NODE_OPTIONS` and never in this
+// argv. Spelled after the script path it did nothing before this block and is
+// refused by it now; the usage text carries the spelling that works. There are
+// no positional arguments and never were: the swept board is resolved from the
+// environment by `resolveSweepRepo`, so a bare `owner/name` on the command line
+// is precisely the wrong-target token this refusal exists to catch.
+
+/**
+ * The bare flags this tool honours in its OWN argv.
+ *
+ * ⛔ This list and `CLI_VALUE_OPTIONS` are the ONLY source for both the refusal
+ * and `USAGE`. Adding a flag to the parser without adding it here makes the
+ * tool refuse something it accepts; adding it here without the parser makes it
+ * accept something it ignores. Both directions are the defect this block is.
+ */
+export const CLI_FLAGS = Object.freeze(['--self-test', '--probe', '--help', '-h']);
+
+/**
+ * The `--name=value` options. This owns the NAME; `parseOutputOptions` owns what
+ * a VALUE may be and answers its own usage error for a bad one, so the two do
+ * not duplicate each other's judgement.
+ */
+export const CLI_VALUE_OPTIONS = Object.freeze(['--format', '--provenance']);
+
+/** The usage block. Printed by `--help` on stdout, and beneath every refusal on stderr. */
+export const USAGE = [
+  'usage:',
+  '  node scripts/pm/check-half-states.mjs                     sweep the live board (report-only)',
+  '  node scripts/pm/check-half-states.mjs --format=markdown [--provenance=TEXT]',
+  '                                                            the same sweep, rendered for an issue body',
+  '  node scripts/pm/check-half-states.mjs --probe             can a live sweep run HERE? (no sweep)',
+  '  node scripts/pm/check-half-states.mjs --self-test         verify the predicates offline (no network)',
+  '  node scripts/pm/check-half-states.mjs --help              this text, before any board read',
+  '',
+  'options:',
+  `  --format=FMT          one of: ${OUTPUT_FORMATS.join(', ')} (default ${OUTPUT_FORMATS[0]})`,
+  '  --provenance=TEXT     stamp the caller\'s run identity into a --format=markdown body',
+  '  --probe               report the transport prerequisite and stop',
+  '  --self-test           run the offline predicate/classifier battery and stop',
+  '  --help, -h            print this and exit 0',
+  '',
+  'environment (there is no --repo and no positional argument — the board comes from here):',
+  '  PM_SWEEP_REPO         the board to sweep, `owner/name`; else GITHUB_REPOSITORY, else the default',
+  '  PM_SWEEP_CLOSED_FLOOR the YYYY-MM-DD floor for the closed-card pass',
+  '  GITHUB_TOKEN/GH_TOKEN the credential the sweep reads with',
+  '  NODE_OPTIONS=--use-env-proxy   node\'s proxy flag; it is read at process START, so it goes',
+  '                        in NODE_OPTIONS or before the script path, never in this argv',
+  '',
+  'exit 0 swept or answered (report-only: 0 findings and 40 findings both exit 0)',
+  '     2 bad usage, or a sweep that could not run for an unclassified reason',
+  '     3 transport prerequisite not met — NOTHING was swept, which is not a clean board',
+].join('\n');
+
+/**
+ * Refuse an argv this tool does not honour, by name. Pure, so the self-test
+ * pins every refusal offline — and so the entry can answer before it has spent
+ * a request, a child process, or a page of somebody's rate limit.
+ *
+ * @param {string[]} argv
+ * @returns {string|null} the refusal sentence, or `null` when every token is honoured
+ */
+export function refuseUnknownArgs(argv) {
+  for (const arg of argv ?? []) {
+    if (CLI_FLAGS.includes(arg)) continue;
+    const named = /^(--[A-Za-z0-9][A-Za-z0-9-]*)=/.exec(arg);
+    if (named && CLI_VALUE_OPTIONS.includes(named[1])) continue;
+    // A value option spelled with a SPACE is the silent one: today's parser
+    // matched neither token, kept the default format, and swept anyway.
+    if (CLI_VALUE_OPTIONS.includes(arg)) {
+      return `${arg} carries its value in the same token — spell it \`${arg}=…\`, not \`${arg} …\``;
+    }
+    if (arg.startsWith('-')) return `unknown option ${named ? named[1] : arg}`;
+    return `unexpected argument ${JSON.stringify(arg)} — this tool takes options only, and the board it sweeps comes from PM_SWEEP_REPO/GITHUB_REPOSITORY, never from a positional`;
+  }
+  return null;
+}
+
 const isMain = isEntrypoint(import.meta.url);
-if (isMain) {
+const CLI_ARGV = isMain ? process.argv.slice(2) : [];
+const CLI_HELP = CLI_ARGV.includes('--help') || CLI_ARGV.includes('-h');
+// ⚠️ Every one of these is guarded by `isMain`, and that guard is load-bearing
+// rather than tidy: this module is IMPORTED by half of `scripts/pm/` and by
+// four `scripts/check-*.mjs` gates, several of which take a `--help` of their
+// own. An unguarded read of `process.argv` here would answer THEIR flag, out of
+// a module they imported for one predicate.
+const CLI_REFUSAL = isMain && !CLI_HELP ? refuseUnknownArgs(CLI_ARGV) : null;
+if (CLI_HELP) {
+  // Answered FIRST — before the `SWEEP_REPO` / `CLOSED_FLOOR` guards below,
+  // before the proxy re-exec, before the sweep. Deliberately not just "before
+  // the network": a caller asking what the flags ARE must get an answer on a
+  // box whose environment is misconfigured, which is exactly when they ask.
+  // ⛔ No `process.exit(0)` — the process ends on its own once this write
+  // drains, so the usage cannot be truncated on a platform where stdout to a
+  // pipe is asynchronous. The self-test reads this through a pipe.
+  console.log(USAGE);
+} else if (CLI_REFUSAL !== null) {
+  console.error(`check-half-states: ${CLI_REFUSAL}\n\n${USAGE}`);
+  process.exit(2);
+} else if (isMain) {
   // A malformed sweep target is bad usage (exit 2), refused BEFORE any request
   // — including the probe's, whose second stage is a repo-scoped read of this
   // very string. Silently falling back to the default would sweep a board
