@@ -16,8 +16,8 @@
  * tombstone in a row shape became a column an author is invited to fill and
  * `saveMetaItem` then refuses.
  *
- * Measured on `origin/main` at 1bdbf82cb5 over the whole served registry:
- * **77 tombstone nodes across 15 types**. Five of them are `dashboard.widgets[]`'s
+ * Measured on `origin/main` at 74eaab8614 over the whole served registry:
+ * **80 tombstone nodes across 16 types**. Five of them are `dashboard.widgets[]`'s
  * `actionUrl`, `actionType`, `actionIcon`, `responsive` and `aria` — the row
  * this file pins, and the carrier the card was filed on. ⚠️ They are not the
  * whole reachable set: a repeater row in another type reaches an author the
@@ -289,17 +289,20 @@ describe('#17502 — the served repeater row offers no column the parse door ref
             'dashboard.properties.refreshInterval',
             'dashboard.properties.aria',
             'dashboard.properties.performance',
+            // [#17751, arrived with main] `ChartConfigSchema.aria` retired one
+            // level deeper than the widget row, inside `chartConfig`.
+            'dashboard.properties.widgets.items.properties.chartConfig.properties.aria',
         ].sort());
     });
 
     // ⚠️ This control derives with zod's DEFAULT (output) arm only, which is
-    // 74 nodes across 14 types. The served payload carries 77 across 15: for
+    // 77 nodes across 15 types. The served payload carries 80 across 16: for
     // `action` alone `toJsonSchemaSafe` falls through to the `io: 'input'`
     // retry (#17501), and that arm adds `execute` / `shortcut` / `bulkEnabled`.
-    // The class guard above runs over the SERVED document and covers all 77;
+    // The class guard above runs over the SERVED document and covers all 80;
     // this control deliberately does not re-spell `isDegenerateDerivation`,
     // whose only copy belongs in the emitter.
-    it('control: the class really is non-empty before the strip — 74 nodes across 14 types on the output arm', () => {
+    it('control: the class really is non-empty before the strip — 77 nodes across 15 types on the output arm', () => {
         const byType = new Map<string, number>();
         for (const type of SERVED_TYPES) {
             const before = preStripDerivation(type);
