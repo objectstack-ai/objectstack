@@ -1,0 +1,34 @@
+{
+  "number": 8451,
+  "kind": "issue",
+  "title": "pm-dispatch: fable 强制条款需要额度耗尽豁免 —— 「fable 如果用完了,可以用 opus」(维护者 2026-08-13)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-13T13:36:44Z",
+  "updated_at": "2026-08-14T00:26:59Z",
+  "closed_at": "2026-08-14T00:26:12Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8451",
+  "body": "维护者在 skills 席聊中裁定(2026-08-13,原话逐字,未翻译):\n\n> fable 如果用完了,可以用 opus\n\n## 现行文本与冲突点\n\nSKILL.md「Model tiering」节现写:**⛔ 强制条款(无向下裁量权)两条** —— ① 凡改 `.claude/skills/pm-dispatch/**` 的卡一律 `model: \"claude-fable-5\"`;② 凡改变契约接受/拒绝行为或扩大公开面的卡一律 `claude-fable-5`。\n\n「无向下裁量权」是绝对表述:按字面读,fable 额度耗尽时这两类卡**无路可走** —— 既不能降档,文本也没给别的出口,实际后果是车道停摆。本裁定开的正是这个口:**额度耗尽时 `opus` 是可接受替代**。\n\n## 落地口径(skills 席解释;维护者可在 PR 评审时改)\n\n- 豁免是**条件式的,不是新默认**:仅当 fable 档实际不可用(额度耗尽/被限流)时才允许落到 `opus`;fable 可用时两条强制条款原样生效,⛔ 不给\"图快\"用的裁量空间。\n- **降档必须留痕**:认领评论的「Container & model」行写明实际档位**与降档理由**(哪一档不可用、观测到的信号),使评审能看见这张卡是在降档条件下产出的。\n- 地板是 `opus`,⛔ 不再往下(sonnet 不是这两类卡的可接受档)。\n- ⚠️ **待维护者确认的范围问题**(实施方按此假设推进,评审时一句话即可纠正):裁定原话未区分两条强制条款,本卡按**两条都适用**落地。若只想覆盖条款 ①(pm-dispatch 自身编辑)而条款 ②(spec 契约语义)仍须硬等 fable,请在 PR 评审时指出 —— 契约面的错误代价最高,这是唯一值得区别对待的理由。\n- 相关但已作废:#8181 的 Option B 曾主张「fable-mandatory 卡只延期、永不降级」,该卡已按维护者指令 not planned 关闭、无文本落地;本裁定与之方向相反,且是现行有效的那一条。\n\n## 落地位置与约束\n\n- SKILL.md「Model tiering」节内改写(强制条款那两句就近加豁免子句)。⚠️ SKILL.md 处于 shrink-only 顶格 **686/686**,增行须同 PR 等量抵扣;细则可入 `references/`。\n- ⛔ 技能文本不引 issue 号(`check:pm-skill-id-lint`)。\n- 门禁:`check:doc-authoring`、`check:doc-formula-expressions`、`check:nul-bytes`、`check:pm-skill-id-lint`、`check:pm-skill-ratchet`、`check:skill-frame-sync`。\n- **热文件串行队:本卡排在 #8433 之后** —— #8433(在飞)持有 SKILL.md 派发/队列节,其第 3 项(紧急卡 fable 直接分诊)本身就写模型档位,与本卡文本区域相邻甚至重叠;顶格文件上并行改必冲突。⛔ 不与 #8433 并行派发,待其 PR 落地后再派并 rebase。\n- `model: claude-fable-5` 强制(本卡自身即 pm-dispatch-edit);若届时 fable 不可用,依本裁定用 `opus` 并在认领评论留痕 —— 本卡是该规则的第一个自指用例。\n- ADR-class 三件套:draft PR、⛔ 不自动合并/入队/ready,维护者人工处理。"
+}

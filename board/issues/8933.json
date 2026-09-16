@@ -1,0 +1,35 @@
+{
+  "number": 8933,
+  "kind": "pull_request",
+  "title": "fix(metadata-protocol): resolve the promoted draft under its ADR-0048 package dimension",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-15T21:16:40Z",
+  "updated_at": "2026-08-16T01:40:08Z",
+  "closed_at": "2026-08-16T01:40:07Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-08-16T01:40:07Z",
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/8933",
+  "body": "Fixes #8907\n\n## The defect\n\n`publishPackageDrafts` lists a package's pending drafts with\n`repo.listDrafts({ packageId })` — a `package_id = :packageId` filter — then promotes each\nlisted row through `promoteDraftForPublish` into `repo.promoteDraft`. `promoteDraft`\nre-resolved the row with `whereFor(ref, 'draft')`, which **omits the ADR-0048 `package_id`\ndimension**. Overlay rows are keyed by `(org, type, name, package_id)` precisely so two\ninstalled packages shipping the same name keep separate rows, so that lookup cannot tell\nthem apart.\n\nMeasured consequence, reproduced independently in the new pin: publishing `app.demo`\npromoted **app.other's** unreviewed pending draft to active, drained app.other's draft row,\nrecorded it under app.demo's ADR-0067 commit — and left app.demo's own edit pending, while\nanswering `success: true`. Which of the two rows won was driver-order dependent.\n\n## The fix\n\nThread the listed row's `package_id` from `listDrafts` through `promoteDraftForPublish`\ninto `promoteDraft`, mirroring the existing `draftOrgId` threading for the #3115\norg-partition analogue. `whereFor` already accepted the dimension, so this states a value\nrather than adding a query shape.\n\n**The drain is fixed with it** — the other half of the card's title. `promoteDraft` now\ndrops the row it actually promoted, using that row's own binding. An unscoped drain re-runs\nthe same ambiguous lookup, so it can delete a different package's draft; and when the two\nbodies differ it instead trips the optimistic-lock mismatch that `draftDrainVerdict`\nclassifies as the benign \"a newer draft was saved\" race and silences — leaving the\njust-published draft pending forever. That limb is separately ablated below.\n\nCallers that name no package (`publishMetaItem`) are unchanged: an omitted `packageId`\nkeeps the historical \"match any package\" resolution. `packageId` on the repository's\n`delete` is a local extension exactly as `state` already is — the shared `DeleteOptions`\ncontract in `metadata-core` is untouched, so no other `MetadataRepository` implementation\nis affected.\n\n## Out of scope, deliberately\n\nThe card's question about the **other** \"match any package\" resolving reads (the\nuser-facing `delete` verb, and `restoreVersion` — #6215) is **reported, not acted on**.\n`whereFor`'s comment now records the question instead of asserting the answer it used to.\n\n## Verification\n\nUnion run at HEAD `843ca40aa` (the merge commit, i.e. this branch's final commit).\n\n**The pin can fail — ablated, both limbs:**\n\n- Pre-fix, the new pin failed exactly as the card measured: active row\n  `expected 'app.demo', received 'app.other'`, and the surviving draft\n  `expected 'app.other', received 'app.demo'`.\n- Ablating **only** the drain scoping (leaving the resolving-read fix in place) produced the\n  predicted, different failure: the promote case stayed green and the drain case went red\n  with `expected [ ... ] to have a length of 1 but got 2` — both drafts surviving, i.e. the\n  silent benign-conflict path. That proves the drain limb is independently load-bearing and\n  not a rider.\n\nThe ablation is source-level (the suite imports `./protocol.js`, which vitest resolves from\n`src`), so no `dist` rebuild is involved in it. The `dist`-resolving consumer,\n`packages/qa/dogfood`, ran against a full closure rebuilt after the fix.\n\nSuites, all green at the merged head:\n\n| package | result |\n| --- | --- |\n| `@objectstack/metadata-protocol` (edited) | 106 files / 1512 tests |\n| `@objectstack/objectql` (consumer) | 211 files / 3695 tests |\n| `@objectstack/rest` (consumer) | 119 files / 1962 tests |\n| `@objectstack/runtime` (consumer) | 164 files / 2452 tests |\n| `@objectstack/service-automation` (consumer) | 80 files / 962 tests |\n| `qa/dogfood` (consumer, resolves from dist) | 110 files / 779 tests (1 file, 3 tests skipped) |\n| `@objectstack/metadata` | 31 files / 603 tests |\n| `@objectstack/metadata-core` | 10 files / 162 tests |\n| `@objectstack/client` | 23 files / 301 tests |\n\nConsumers are the **downstream** direction (`pnpm --filter '...@objectstack/metadata-protocol'`,\nprefix form), scoped to the seam's real consumption radius rather than all 44 dependents.\n\nGates, all green at the same HEAD: `check:nul-bytes`, `check:engine-double-contract`\n(the new fake engine is **pinned**, 270 pinned — no ledger entry needed),\n`check:durability-log-level`, `check:cross-package-test-inputs`, `check:filter-alias-parity`,\n`check:query-options-erasure`, `check:type-check-coverage`, `check:type-check-debt --re-measure`\n(33 entries, 1926 raw errors, **none above its recorded number**; `metadata-protocol` stays at\nits recorded 63, so the new test file adds zero tsc errors). The one reported surplus is\n`@objectstack/lint` at -1, pre-existing and untouched by this diff.\n\nThe last four families beyond the dispatch prompt's list were re-derived from the actual\nchanged paths via `node scripts/pm/dispatch-gates.mjs`.\n\n## Declared-region note for the reviewer\n\nThe dispatch declared `protocol.ts` region `promoteDraftForPublish` only. One edit lands\noutside it: the call site in `publishPackageDrafts` that passes `packageId: d.packageId`.\nIt is structurally unavoidable — `listDrafts` is called there, so \"thread the listed row's\n`package_id` from `listDrafts` through `promoteDraftForPublish`\" cannot be done without it,\nand the other two edits are inert dead code without it. It is ~9,200 lines from the one live\nsibling's region (#8855 at `getMetaDiagnostics`), so it keeps the same conflict-safety\nproperty the region declaration exists for. Flagged rather than assumed.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01XeQRiAa7vYRVX5Fog7Zby8)_"
+}

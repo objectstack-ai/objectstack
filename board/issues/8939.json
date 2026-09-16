@@ -1,0 +1,34 @@
+{
+  "number": 8939,
+  "kind": "pull_request",
+  "title": "test(objectql): pin the temporal-comparand door fixture's clock with fake timers (#8937)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "size/m",
+    "skip-changeset",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-16T00:33:42Z",
+  "updated_at": "2026-08-16T01:18:37Z",
+  "closed_at": "2026-08-16T01:18:36Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": "2026-08-16T01:18:36Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/8939",
+  "body": "Part of #8937\n\nStops the bleeding on the p0: from 2026-08-16T00:00Z `engine-temporal-comparand-door.test.ts` failed deterministically on every branch, blocking the merge queue for everyone. It deliberately does **not** decide the card's other half, so it does not close it — see \"What this PR leaves open\".\n\n## What was actually wrong\n\nThe suite pinned its clock at `2026-08-15T09:00:00.000Z`, threaded it through the engine as `{ context: { now } as never }`, and asserted the `{30_days_ago}` floor equalled that instant minus 30 days. That held only while the real date and the fixture date agreed. It armed itself to fail the next day.\n\nThe clock it threaded does not exist:\n\n- `now` is declared on **neither** `ExecutionContextSchema` (`@objectstack/spec`, `kernel/execution-context.zod.ts`) **nor** `ExecutionContextLike` (`@objectstack/core`, `utils/filter-tokens.ts`).\n- Nothing on the engine read path reads it. `filterTokenContextFrom(execCtx, now?)` takes an explicit `now` **argument**, and `engine.resolveWhereTokens` never passes one — so `resolveFilterTokens` falls back to `new Date()`.\n- The `as never` casts on those two call sites were the tell: TypeScript was already refusing the key.\n\nThe issue proposed limb 1 (\"honour the injected `context.now`\") on the grounds that the door's docblock \"declares `now` among its context\". That docblock sentence reads:\n\n> `packages/core`'s `resolveFilterTokens` is field-AGNOSTIC by construction — its context is `now` / `timezone` / `userId` / `orgId` ...\n\n\"its\" is **`resolveFilterTokens`'s** context — `FilterTokenResolutionContext`. The field names settle it: that list ends in `orgId`, which is `FilterTokenResolutionContext`; `ExecutionContextLike` spells the same concept `tenantId`, and `filterTokenContextFrom` is precisely the bridge between the two types. So honouring `context.now` would **add** a caller-injectable clock to the engine's public execution envelope, not restore a declared one.\n\n## What this PR does\n\nIt pins the clock the engine **actually reads** — the process clock — using this package's established convention for exactly this, as used by `engine-cel-default-temporal-shape` and the three `engine-autonumber-*` suites:\n\n```\nvi.useFakeTimers({ toFake: ['Date'] });\nvi.setSystemTime(now);\n```\n\n`toFake: ['Date']` leaves real timers alone, so the engine's async paths are untouched. With that in place the original readable assertion (`floor === '2026-07-16'`) is deterministic forever, and the written dates are honest again: they are what the code under test really sees. The `as never` context injection is gone from the positive control and from the refusal loop, where no clock can participate anyway.\n\nTwo companion cases keep the pin honest rather than merely green:\n\n1. **`resolves {30_days_ago} against the instant it is given, not a constant`** — a pinned clock plus a written-down floor would *also* pass if the resolver ignored its instant and returned a constant. This shows two instants five days apart yield two floors five days apart, plus a month/year-boundary case. Its dates are resolver **inputs**, so nothing in it can rot.\n2. **`does not honour an injected context.now today`** — a characterization pin, not an endorsement. It records the trap as a stated, tested fact instead of a silent one: an injected `now` five years off is ignored and the floor tracks the pinned process clock. If the engine ever gains a declared injectable clock this pin **should** go red — the docblock says to delete it in that PR, deliberately.\n\nAn earlier commit on this branch derived everything from the real clock with bracketed comparisons; it worked, but the fake-timer form matches local precedent, keeps the readable assertions, and needs no bracketing, so it supersedes that.\n\n## What this PR leaves open — why `Part of`, not a closing keyword\n\nWhether the engine should expose a declared, injectable clock is a **public-contract** question: it needs `now` on `ExecutionContextSchema` in `packages/spec` (which this card's dispatch scoped out), and it adds a new caller-settable surface to every data operation. I measured that it *would* work and that it would break no existing caller — zero producers of `context.now` exist, and the wire path `delete options.context` unconditionally, so no client could reach it. But \"it works and breaks nothing\" is not authority to widen a public contract, so it is escalated rather than guessed. Full three-axis analysis in the report on #8937.\n\nBecause that half is undecided, merging this must not close the card — hence `Part of`.\n\n## Verification\n\nAll at commit `34c19e6`.\n\n- Target file: **10 passed (10)** — was 1 failed / 7 passed. Green *today* (2026-08-16) while asserting a 2026-07-16 floor is itself the proof the process clock is overridden; under the old code today's real clock produced 2026-07-17.\n- Full `@objectstack/objectql` suite: **211 files / 3697 tests passed**, up from 210 passed + 1 failed / 3694. `tsc --noEmit` clean.\n- `TZ=Asia/Tokyo` (already the next local calendar day) — 10/10.\n- Gate union re-derived from the changed path via `scripts/pm/dispatch-gates.mjs`, all green: `check-nul-bytes`, `check:durability-log-level`, `check-engine-split-ratio`, `check:query-options-erasure`, `check:type-check-coverage`, and `check:type-check-debt --re-measure` (33 ledger entries, none above its recorded number) on a fully built workspace closure.\n- No runtime code changed, so there is no consumer sweep to run — the diff is one test file. `skip-changeset` applies and is on the PR.\n\nOne process note worth recording: while measuring limb 1 I built `@objectstack/core` with a probe, reverted the source, and re-ran — and the test went **green on the probe's stale `dist/`**, which would have certified the opposite conclusion. A source-level revert is not enough when the consumer resolves from `dist/`; the rebuild is part of the revert.\n\n_Generated by [Claude Code](https://claude.ai/code/session_01Fgvh1iEJfxetei7aNVdtJt)_\n"
+}

@@ -1,0 +1,36 @@
+{
+  "number": 8474,
+  "kind": "issue",
+  "title": "\"ADR-0081 D1\" is cited as the source of the default-active-org session hook, but ADR-0081 is the trusted react page tier — the decision behind `defaultActiveOrg` is anchored to nothing",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:blocking",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "qq9340100"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-13T14:50:11Z",
+  "updated_at": "2026-08-14T00:39:26Z",
+  "closed_at": "2026-08-14T00:39:26Z",
+  "closed_by": {
+    "login": "qq9340100",
+    "id": 313832657,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8474",
+  "body": "Found while implementing #8247 (PRs #8471 / #8473). **Outside both of that card's declared file surfaces** — the fix is a citation correction in files I had no reason to rewrite, and re-pointing a cross-reference is a different change class from the ordering fix — so deliberately not fixed there. Filed unassigned and unlabeled; routing and grading are the triage seat's call.\n\n## The measurement\n\n`packages/plugins/plugin-auth/src/auth-manager.ts` attributes the default-active-org session hook to ADR-0081 D1, twice:\n\n```\n518:   * ADR-0081 D1 — default active-org on session create. When enabled\n4364:  // ADR-0081 D1 — default active-org on session create. Without it, a user\n```\n\n`docs/adr/0081-*` is a different record entirely:\n\n```\n$ head -1 docs/adr/0081-trusted-react-page-tier.md\n# ADR-0081: A trusted `kind:'react'` page tier — real React executed in the main\n  tree, gated by a host capability; and renaming `kind:'jsx'` -> `kind:'html'`\n\n$ grep -ni \"activeOrganization|active org\" docs/adr/0081-trusted-react-page-tier.md\n    (no hits)\n```\n\nThe claim being attributed is real, correct and shipped — `session.create.before` resolving `activeOrganizationId` from the caller's `sys_member` row, owner-preferred. Only the cross-reference is wrong.\n\n## It propagated, and into a governing record\n\n`docs/adr/0093-tenancy-mode-and-membership-lifecycle.md:87` carries the inherited version:\n\n&gt; the ADR-0081-D1 `session.create.before` hook resolves `activeOrganizationId`\n\nThat is the more serious half: ADR-0093 is the record that actually governs membership lifecycle, so a reader who goes there to find the session hook's decision is sent onward to a page about React pages. Two more sites carry it in test/dogfood prose:\n\n```\npackages/qa/dogfood/test/sharing-rule-org-less-caller.dogfood.test.ts:29\npackages/plugins/plugin-auth/src/... (comment blocks referencing \"ADR-0081 D1\")\n```\n\n## Why the ADR-anchor gate does not catch it\n\n`pnpm check:adr-anchors` verifies that every `ADR-NNNN` in a tracked file **names a record that exists** — and `docs/adr/0081-*` does exist. It cannot check that the record says what the citing file claims. So this citation is green today and will stay green: a wrong-but-existing number is exactly the blind spot between the gate's two audits.\n\nThat also makes it worse than a dangling reference, which the gate *would* catch. A reader following it lands on a real, accepted, plausible-looking ADR and has no signal that they are in the wrong document.\n\n## Suggested shape (triage's call)\n\nEstablish which record actually holds the decision and re-point every site to it. Two possibilities, and the first step is deciding between them:\n\n1. **ADR-0093 owns it** — it is the tenancy-mode / membership-lifecycle record and already describes the hook. If so, the sites become `ADR-0093 D<n>` and ADR-0093's own line stops citing 0081.\n2. **The decision was never recorded** — in which case the honest fix is a decision line in ADR-0093 (or its own record), and the code comments point at it. Under Prime Directive #13 an undocumented decision is the thing most likely to be reversed by the next author, and this one governs whether a session may exist with no active organization — the exact surface #8247 just ruled on.\n\nEither way `docs/adr/**` is in the diff ⇒ maintainer-merged PR (Prime Directive #14); the code-comment half could be split onto the normal path if wanted.\n\n## Dedup\n\nSearched open issues by keyword (`ADR-0081`, `defaultActiveOrg`, `session.create.before`, trusted react page tier) and by path — 0 hits. Closest is **#8386** (ADR-0066 crediting ADR-0094 D5 with a claim D5 never makes, inherited by `authorization.mdx`) — the same *family* of defect and worth reading alongside, but different documents, different cause, and not a duplicate. #8247 is the card this was found under and does not cover it.\n\nRefs: #8247 / PRs #8471, #8473 · #8386 (related, not duplicate) · ADR-0081, ADR-0093"
+}

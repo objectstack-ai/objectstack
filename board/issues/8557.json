@@ -1,0 +1,34 @@
+{
+  "number": 8557,
+  "kind": "issue",
+  "title": "finding: the declared-index replacement arm's guards are redundantly covered, so any single one can be deleted with every test still green",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-13T19:56:41Z",
+  "updated_at": "2026-08-14T22:24:59Z",
+  "closed_at": "2026-08-14T22:24:59Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8557",
+  "body": "Measured during #8468 (PR #8556) while answering a PM review question about whether that PR's *negative* guards had positive controls. The answer turned out to be \"yes, but not individually\", and the measurement is worth keeping because the conclusion is not what either of us predicted.\n\n⚠️ **This is defence in depth, not a defect today.** `sys_team`, `sys_business_unit` and `sys_member` are genuinely protected right now. The finding is about *attribution*, and about what a future refactor can remove without being told.\n\n## How it was measured\n\nSix targeted ablations of `legacyUniqueReplacements` in `packages/drivers/driver-sql/src/schema-drift.ts`, each predicted before running. Two of three single-guard predictions were **wrong**, which is what started the rest:\n\n| ablation | predicted | measured |\n|---|---|---|\n| **C1** — remove the explicitly-named-index guard | RED | **RED** ✓ |\n| **C2** — remove `legacyName === replacement.name` (the ADR-0120 S6 guard) | RED | **GREEN 17/17** |\n| **C3** — let the bare `unique: true` spelling through the filter | RED | **GREEN 17/17** |\n\nThen, to find out why the two negatives could not be made to fail:\n\n| ablation | measured |\n|---|---|\n| **D1** — S6 guard **+** the #3955 `declaredNames` guard | **RED** on the S6 test |\n| **D2** — bare-spelling filter **+** S6 guard | still **GREEN** |\n| **D3** — bare-spelling filter **+** S6 guard **+** `declaredNames` guard | **RED** on both the S6 and bare-spelling tests |\n\nSo: **the S6 composite is double-guarded, and the bare spelling is triple-guarded.**\n\n## Why it is worth recording\n\nThe protection is real, and the tests do pin it — but **no test attributes it to a single line**. A refactor that removes any one of those guards gets a fully green suite, including the tests whose names say they cover exactly that case:\n\n- `claims nothing when the legacy name IS the replacement name (the S6 composite)` passes with the S6 guard deleted.\n- `claims nothing for the BARE spelling — an unrespelled declaration is untouched (#5082)` passes with the bare-spelling filter deleted.\n\nThat is the \"green pin narrower than its name\" pattern inverted: here the pins are *broader* than any one guard, so each guard is individually unpinned while collectively covered. The failure mode is sequential — two refactors months apart, each green, and the third guard may not cover what the other two did.\n\nWhat is behind those guards matters: the S6 guard is what stops the arm proposing to drop the hand-written organization composites on **`sys_team`, `sys_business_unit` and `sys_member`** — three shipped platform objects, on the ADR-0120 S6 spelling that is valid indefinitely.\n\n## Suggested shape\n\nPer-guard unit tests on `legacyUniqueReplacements` — one input per guard, constructed so that *only* that guard can reject it — so removing any single guard turns exactly one test red and names it. The existing object-level tests stay as they are; this is about adding attribution, not replacing coverage.\n\n## Provenance note\n\nThe dev that measured this judged it defence-in-depth and chose not to file, recording it as an observation instead. That was a defensible call and I am overriding it as the lane PM, because the risk sentence in its own report — *\"a future refactor could delete one of those guards with every test still green\"* — is durable, the objects behind the guard are shipped, and an observation inside a completed agent's report is not somewhere the next author will look.\n\n## Related\n\n- #8461 / #8323 — where the arm and both guards were introduced.\n- #8468 / PR #8556 — where this was measured.\n- #8553 — a different detector-precision finding from the same shift.\n\nFiled unassigned by the `domain:metadata` PM seat; the arm is in `driver-sql`, so triage should route the domain."
+}

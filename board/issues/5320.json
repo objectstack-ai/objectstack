@@ -1,0 +1,34 @@
+{
+  "number": 5320,
+  "kind": "issue",
+  "title": "`views:` 数组的三个门形状判断不一致:栈级 schema 只收容器、授权 lint 按记录门映射、运行时注册循环全收 —— declared ≠ enforced 的「运行时更宽」向",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec"
+  ],
+  "assignees": [
+    "qq9340100"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-04T19:21:01Z",
+  "updated_at": "2026-08-13T23:32:06Z",
+  "closed_at": "2026-08-13T23:31:36Z",
+  "closed_by": {
+    "login": "qq9340100",
+    "id": 313832657,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 21,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5320",
+  "body": "#4959 前提实测(PR #5319 rider,2026-08-04)的两条残余观察,原单前提已证伪关闭,残余按 finding 纪律归档。实测证据全文见 #5074 验收链与 PR #5319 正文「Rider」节。\n\n## 观察一:授权 lint 与栈级 schema 对同一数组的映射不一致\n\n`metadata-authoring-lint` 把 `views` 集合映射到 `view` **元数据类型** schema(接受 ViewItem 的 union),而 `ObjectStackSchema.views`(`stack.zod.ts:250`)只收**容器**。方向良性(parse 更严且拒绝带处方:「`viewKind` belongs to a single VIEW, not to the container. Wrap it: `defineView({...})`」),但 lint 的预解析告警**够不到**这类拒绝 —— 作者要到 parse 才知道。\n\n## 观察二:运行时比 schema 宽\n\n`objectql/engine.ts`(~:1999)的注册循环把 `views:` 数组里**每一项**都注册为 `view` 类型,仅当 `isAggregatedViewContainer` 为真时额外展开 —— 一个 ViewItem 放进 manifest 的 `views:` 数组在运行时注册成功,而 `defineStack` 会拒。今天无用户可撞(授权门先拒且带处方),但属「声明 ≠ 生效」的运行时更宽向,与 #3950 同型。\n\n## 持有理由\n\n两条今天都无用户可见伤害;观察二在 manifest 绕过 defineStack 的路径上才成立(该路径本身受 #5086/#5311 一族门治理演进影响)。发现分诊轮按过时前提检查后定级。\n\n关联:#4959(已关,前提证伪)、PR #5319(实测)、#5311(直写第三通路)、#3950。"
+}

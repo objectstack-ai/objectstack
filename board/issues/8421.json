@@ -1,0 +1,36 @@
+{
+  "number": 8421,
+  "kind": "issue",
+  "title": "meta-unknown-type-namespace: a `/meta` type name that is not a plural of anything still mints a namespace — `PUT /meta/fieldz/x` answers 200",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched",
+    "target:v17"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-13T12:27:06Z",
+  "updated_at": "2026-08-15T11:10:36Z",
+  "closed_at": "2026-08-15T11:10:36Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 21,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8421",
+  "body": "## Summary\n\n`#7894` closed the case where a plural URL spelling of a **declared** metadata type walked around the two-tier registry gate. This is the residue it deliberately left, filed so it is findable by someone who is not reading PR #8420.\n\nAt the `/meta` boundary a type name that is neither a declared registry type nor any known plural spelling — `fieldz`, `objectt`, any typo — is still treated as a **plugin-registered** type, which every authorization gate is permissive toward by construction. The write is accepted and a `sys_metadata` row is persisted under `type='fieldz'`: a namespace for a metadata type that does not exist and never will.\n\n```\nPUT /api/v1/meta/fieldz/showcase_task.title   → 200, row persisted with type='fieldz'\n```\n\n## How this differs from #7894 — narrower, and NOT an authorization bypass\n\nWorth stating precisely, because the surface looks identical and the severity is not:\n\n- **#7894 was an authorization bypass.** `fields` is a spelling of `field`, a type the registry declares `allowOrgOverride: false`. The plural URL shadowed a **locked** type, so the plural spelling was a door around the singular spelling's lock — `/meta/field/…` answered `403 NOT_OVERRIDABLE` while `/meta/fields/…` answered `200`.\n- **This one shadows nothing.** `fieldz` is not a spelling of any declared type, so there is no lock being walked around and no second namespace *for an existing item*. Nothing is served from `type='fieldz'`, and no gate is being evaded.\n\nWhat it *is* is the same **second-namespace class** #4432 was filed about: a row keyed by a type nothing reads, minted because the boundary forwarded a name it could not honour instead of refusing it. It is accumulation of unreachable rows and a silently-accepted caller error, not an escalation.\n\nRelated: this is also what makes a metadata-type typo silent. An author or an AI writing `PUT /meta/fieldz/...` gets `200 {\"success\":true}` and no indication the type is not real.\n\n## Why #7894 did not close it\n\nThe refusal shipped in #7894 is deliberately **static**, per the maintainer ruling of 2026-08-12 on refusing at the boundary: it fires only when a spelling's singular is a type present in `DEFAULT_METADATA_TYPE_REGISTRY`. That is what makes the positive control hold **by construction** — a genuinely plugin-registered runtime kind can never trip it, whatever it is named and whenever it registers.\n\n`fieldz` does not singularize to any declared type, so by that rule it is indistinguishable from a plugin kind and takes the plugin path.\n\nClosing this needs the **live registered-type set** at the boundary — \"is this type registered right now?\" rather than \"is this a spelling of something declared?\" — and that has a materially different risk profile:\n\n- `canonicalMetaType` / `canonicalizeMetaRequestType` are pure module-level functions today, with no access to live state; a live lookup means threading the registry through the boundary.\n- The failure mode is worse than the defect. A live check that runs before a plugin has registered its kind refuses a **legitimate** type, turning a hygiene fix into a plugin-registration outage. The ordering between plugin registration and the first `/meta` write would become load-bearing where it currently is not.\n- It needs a decision on what \"registered\" means for a type a plugin registers lazily, and on whether the refusal is per-request or per-boot.\n\nSo the remedy is a different change with a different shape, not a widening of the static predicate.\n\n## Pinned, not silent\n\nThe limitation is asserted rather than merely described, so it cannot go quiet:\n\n- `packages/spec/src/shared/metadata-url-spelling.test.ts` — case *\"documents its residue rather than pretending to be total\"*, asserting `unmappedDeclaredTypeSpelling('fieldz')` is `null`.\n- The reasoning lives in the doc comment of `unmappedDeclaredTypeSpelling` in `packages/spec/src/shared/metadata-url-spelling.ts`, under the heading *\"Known residue, deliberately not closed here\"*.\n\n⚠️ If this card is fixed, that test case inverts — it currently asserts the gap. Flip it rather than deleting it, the way #7894 flipped the case #7743 left behind.\n\n## Source\n\nLeft as documented residue by #7894 / PR #8420; filed at the PM's request so a known-unfixed gap has a card as well as a pin.\n"
+}

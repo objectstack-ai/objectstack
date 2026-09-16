@@ -1,0 +1,34 @@
+{
+  "number": 8459,
+  "kind": "issue",
+  "title": "An author-declared `organization_id` withholds the platform's tenant index — the wall's hottest predicate runs unindexed on a multi-tenant deployment",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-13T14:08:05Z",
+  "updated_at": "2026-08-14T01:59:38Z",
+  "closed_at": "2026-08-14T01:59:10Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8459",
+  "body": "**Filed by the #8375 dev agent**, measured while converging the tenant-index stamp across the `/meta` read-exit seam. Unassigned. Out of #8375's scope — that card preserved this behaviour exactly rather than widening it, and this is the behaviour it preserved.\n\n## Symptom\n\n`applySystemFields` (`packages/objectql/src/registry.ts`) declares the tenant-scope index only for an object whose `organization_id` column the PLATFORM provisioned. An author who declares the column themselves gets the column they wrote — which is correct and deliberate, pinned as *\"does NOT overwrite an author-declared organization_id\"* — but **no index on it**, on a multi-tenant deployment:\n\n```\nregistry.getObject('x').fields.organization_id  ==> the author's own declaration\nregistry.getObject('x').indexes                 ==> undefined\n```\n\nThe column is still THE tenant isolation key. SecurityPlugin's RLS layer appends `organization_id = current_user.organization_id` to essentially every read on that object, so the deployment's hottest predicate runs unindexed — the exact condition #6810 landed the `indexes[]` declaration to fix, reached by a different route.\n\n## Why it looks incidental rather than decided\n\nBefore #8375 the index push sat physically nested inside the field-injection branch:\n\n```\nif (wantTenant && !schema.fields?.organization_id) {\n    additions.organization_id = { ...TENANT_SCOPE_FIELD_DEF };\n    if (opts.multiTenant && !declaresTenantIndex(schema)) { ...push the index... }\n}\n```\n\nso \"the author declared the column\" and \"the platform declares no index\" were the same condition by nesting, not by an argued decision. Nothing in #6810's reasoning distinguishes the two cases: its argument is that on a walled deployment the tenant column is filtered on constantly and therefore wants an index, which is true regardless of who typed the column.\n\n#8375 lifted the decision into `provisionTenantScopeIndex` and preserved this behaviour **deliberately and exactly** (via `isInjectedColumnDefinition`), because widening it was outside that card and would have changed what the registry answers. That makes this the right moment to decide it on purpose.\n\n## Reproduction\n\n1. `new SchemaRegistry({ multiTenant: true })`.\n2. Register an object declaring its own `organization_id`, e.g. `{ type: 'lookup', reference: 'sys_organization', label: 'Org' }` — any shape not byte-identical to `TENANT_SCOPE_FIELD_DEF`.\n3. `registry.getObject(name).indexes` is `undefined`; an object that declared nothing gets `[{ fields: ['organization_id'] }]`.\n\n## The decision this needs\n\nNot obviously a straight bug fix — it is a question about whose declaration governs:\n\n- **A.** Index it regardless of who declared the column. Matches #6810's stated intent; the risk is stamping an index on an author's column whose type they chose (a `text` org code, say) where the index may be unwanted.\n- **B.** Keep today's behaviour and say so explicitly in `applySystemFields`' docs — the author who takes the column over takes its indexing too.\n- **C.** Index it when the declared column is still a `lookup` to `sys_organization` (i.e. really the tenant anchor), not merely when it is byte-identical to the platform's definition.\n\nC is the narrowest reading of \"is this actually the tenant key\", but it is a third predicate where #8375 just finished reducing two to one, so it should be weighed against the cost of that.\n\n## Dedup\n\nSearched `applySystemFields organization_id index` / tenant index / author-declared column. Nearest neighbours: **#8323** (tenant-scoped UNIQUE indexes going global — driver DDL normalization, not whether the index is declared at all) and **#6810** (closed; moved the tenant index from a rejected field-level `indexed` key into `indexes[]`, and is the card whose intent this gap sits inside). Neither is a twin.\n\n## Related\n\n#8375 (the read-exit convergence that surfaced this) · #6810 · #6562 · ADR-0049"
+}

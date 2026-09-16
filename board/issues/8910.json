@@ -1,0 +1,36 @@
+{
+  "number": 8910,
+  "kind": "issue",
+  "title": "docs(deployment): rewrite `publish-and-preview` to name both ways a metadata app reaches the platform",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:blocking",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-15T16:26:04Z",
+  "updated_at": "2026-08-16T03:22:41Z",
+  "closed_at": "2026-08-16T03:22:41Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8910",
+  "body": "Card 03 of the deployment restructure. Maintainer question, 2026-08-15: 「元数据应用又是独立的，如何加载到平台？」\n\n## The defect\n\nThere are **two** mechanisms for getting a compiled metadata app onto a running platform. They are documented on **two different pages**, and **neither page mentions the other exists**:\n\n| Mechanism | Documented in | Shape |\n|---|---|---|\n| Catalog install | `content/docs/deployment/publish-and-preview.mdx` (101 lines) | compile → `dist/objectstack.json` → publish a package version → install into an environment |\n| Artifact-pinned boot | `content/docs/deployment/self-hosting.mdx`, under \"Artifact-pinned boot\" | `OS_ARTIFACT_URL` — the runtime fetches the artifact at boot |\n\nA reader who lands on either page has no way to learn the other option exists, let alone which one fits them. There is no page whose subject is *\"a metadata app is a separate thing from the platform; here is how it gets in.\"*\n\n## Scope\n\nRewrite `content/docs/deployment/publish-and-preview.mdx` so it is that page. It must:\n\n1. **Open with the independence** — the app is versioned in your catalog, the platform on our release train; they move on separate clocks. This framing is the whole point of the restructure and this is the page that states it for Axis B.\n2. **Name both mechanisms side by side**, with a stated rule for choosing. The rule is the deliverable, not the enumeration — a reader who finishes the page unsure which one they want has not been served.\n3. Keep the existing compile → publish → install → preview flow. It is correct; it is being framed, not replaced.\n\n`OS_ARTIFACT_URL`'s **operational** detail stays in `self-hosting.mdx` (that is Axis A, and card 04 owns that file — do not edit it here). Reference it; do not move it. If you find the split genuinely unworkable without touching `self-hosting.mdx`, stop and report rather than reaching across the card boundary.\n\n## Verify the mechanisms before writing about them\n\nThe issue text is a clue, not a specification. Read the CLI and runtime sources for how `OS_ARTIFACT_URL` and the catalog install actually behave today — including whether they can be combined, and what happens when both are configured. If the measured behaviour contradicts the framing above, **report it**: `premise_still_valid: false` is a valued outcome here, because a page that documents a choice the runtime does not actually offer is worse than the current split.\n\nRelevant: `content/docs/deployment/cli.mdx` (`## Commands`, lines 68–1283) is the command reference — link to it, do not restate it.\n\n## Independence\n\nTouches only `content/docs/deployment/publish-and-preview.mdx`. No overlap with cards 01, 02, 04. Safe to run in parallel with all three.\n\nDocs-only, `skip-changeset`."
+}

@@ -1,0 +1,28 @@
+{
+  "number": 18460,
+  "kind": "issue",
+  "title": "[finding] 7 of check-bash32-floor's 8 bash-3.2 self-test failures are still unidentified — no container can reach them, and one command on the maintainer's 3.2 host turns the guess into a list",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-try-charles",
+    "id": 313893388,
+    "type": "User"
+  },
+  "labels": [
+    "pm:awaiting-maintainer"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-16T12:25:38Z",
+  "updated_at": "2026-09-16T12:26:34Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/18460",
+  "body": "Filed by the `domain:devx` execution seat, session `session_017ef78bLdybu3AffehKkhfk`, round 6, as the **residual** of card **#17458** — raised by that card's dev while executing it, and filed here rather than re-hung on #17458 so the question is reachable from the decision inbox instead of sitting inside a `pm:queue` card's prose.\n\nMaintainer-action: run `node scripts/check-bash32-floor.mjs --self-test` once on the macOS / bash 3.2 host and post the failing case names — done when this card carries that list (or the run's green output, which closes it the other way).\n\n## The measured gap\n\n**#17458**, filed by the maintainer, records `check-bash32-floor --self-test` as failing **8 of 153** cases on a real macOS / bash 3.2 host.\n\n**PR #18455 fixes 1 of those 8** — the one the card quotes verbatim and prescribes a fix for (*\"the simulated-3.2 harness really removes the builtin (else the next leg proves nothing)\"*). The PM re-derived that independently: under a `PATH`-wrapper simulation (real bash with `mapfile`/`readarray` disabled via `BASH_ENV`), at PR base `b6fe311a9`, `check-bash32-floor --self-test` exits 1 with **1 of 153**, reading taken 2026-09-16T11:5xZ.\n\n⇒ **The other 7 are unidentified.** ⛔ Not \"probably fine\", ⛔ not \"likely the same cause\" — *unobserved*, and unobservable from any container in this fleet, all of which run bash 5.x with `mapfile` present.\n\n## Why nobody here can close it\n\n⛔ The simulation is faithful only to the failure mode #17458 names. A real bash 3.2 additionally lacks `EPOCHSECONDS`, associative arrays, `${var^^}` and more, and **this simulation reproduces none of that** — so it cannot surface a failure that depends on them. Reproducing the remaining 7 needs the platform, not a better wrapper.\n\n## ⚠️ A hypothesis that was raised and then REFUSED — deliberately, and the refusal is the point\n\n#17458's dev proposed that the remaining failures live in the *\"and the probes are real shell, not plausible-looking text\"* battery, which runs `bash -n` over each of the 19 construct probes and whose case text already reads *\"the probe is shell THIS HOST can parse\"*.\n\n⛔ The dev then **declined to act on it**, and was right to: bash 3.2's parser rejects `;;&`, `;&` and `|&`, which accounts for **3–4** of the 19 probes, ⛔ **not 7**. Acting on it would mean building machinery for failures nobody has seen — inside the file whose entire subject is not mistaking an absent measurement for a passing one. ⭐ Recorded so the next reader does not \"rediscover\" the hypothesis and act on it without redoing that arithmetic.\n\n## What closes this card\n\n**One command, on hardware the maintainer already has**, against the branch that carries the fix:\n\n```\ngit checkout claude/issue-17458-bash32-selftest-harnesses    # or origin/main once PR #18455 lands\nnode scripts/check-bash32-floor.mjs --self-test\n```\n\nThe remaining failing **case names** are the deliverable. With them this becomes an ordinary `domain:devx` card with named evidence; without them it can only be guessed at.\n\n⛔ This card asks for a **measurement**, not a decision about product or architecture — it is in the inbox because the person who can take the reading is the only one who can, ⛔ not because anything needs ruling.\n\n⚠️ If the run comes back **green**, that is equally a result and closes this card: it would mean PR #18455 fixed all 8, and the 7 were downstream of the one repaired leg. ⛔ Nobody here can tell those two worlds apart.\n\n## Context, ⛔ not asserted as duplicates\n\n- **#17458** — the origin card (maintainer-filed). It returns to `pm:queue` after PR #18455 lands under `Part of`, carrying a `Release:` line that names this residual.\n- **PR #18455** — the fix for the reproduced failure, reviewed and armed by the `domain:devx` seat.\n- **#17141** — a queued sibling on the same file, ruling on the gate's **BOUNDARY** (userland-binary differences). ⛔ A different axis; it leaves the harness alone and this card does not touch it.\n\n## Dedupe\n\nAll **526** open non-PR issues read via REST (⛔ no `search_issues`), title **and** body grepped, board read 2026-09-16T12:2xZ: `8 of 153|8/153` → **1** (#17458 itself); `bash32.*remain|remaining.*bash.?3\\.2` → **0**; `bash -n|probe.?parse` → **0**. Firing controls on the same corpus: `bash 3\\.2|bash32` → 4 and `check-bash32-floor` → 4 — the same four (#17797, #17458, #17141, #16644), of which #17797 (prose classification in `scripts/**`) and #16644 (throwaway-git-repo builders' environment) merely mention the gate in passing and were read to confirm it. Dark control → **0**. ⇒ the corpus was really read, and there is no prior card.\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

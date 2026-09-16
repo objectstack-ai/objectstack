@@ -1,0 +1,32 @@
+{
+  "number": 6504,
+  "kind": "issue",
+  "title": "IMetadataService.list() presents a known-partial answer as a complete one — the #5840 shape on the plural read",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T02:38:58Z",
+  "updated_at": "2026-08-15T11:30:33Z",
+  "closed_at": "2026-08-15T11:30:33Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 12,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6504",
+  "body": "Found while implementing #6055 (MCP consumer of `getDiagnosed`). Filed per Prime Directive #10, unassigned, severity for PM triage. **Not fixed in PR for #6055** — that PR is scoped to `packages/mcp/src/mcp-server-runtime.ts`, and this needs a contract addition.\n\n## The fact (verified on `origin/main`)\n\n#5840 / PR #6051 closed the singular half of ADR-0110 D3: `MetadataManager.get()` discarded `loadDiagnosed`'s `degraded` verdict, so a MISS and an OUTAGE reached every consumer as the same `undefined`. `getDiagnosed(type, name)` now hands the verdict over.\n\nThe **plural** read has exactly the same shape and was not covered.\n\n`packages/metadata/src/metadata-manager.ts`, `readListUncached(type)` — computes the verdict:\n\n```ts\nlet degraded = false;\nfor (const loader of this.loaders.values()) {\n    try { /* ... loader.loadMany(type) ... */ }\n    catch (e) {\n        degraded = true;\n        this.reportLoaderReadFailure(loader.contract.name, type, e);\n    }\n}\nreturn { items: Array.from(items.values()), degraded };\n```\n\n`list(type)` then consumes `degraded` **only** to pick a cache TTL and returns `items` alone:\n\n```ts\nconst shared: Promise< unknown[] > = this.readListUncached(type).then(({ items, degraded }) => {\n    if (this.inflightListReads.get(type) === shared) {\n        this.cacheListResult(type, items, degraded);\n    }\n    return items;\n});\n```\n\nThe comment right above it (#5184) already names the fact — \"the memoized answer carries the fact that it is known-partial instead of being indistinguishable from a complete one\" — but that fact is carried **inside the cache**, never to a caller. `IMetadataService` declares no `listDiagnosed` counterpart (grep: none exists anywhere in the repo).\n\n## Why this is not merely cosmetic\n\nA consumer receiving a short list has no way to ask whether it is short because that is all anyone declared, or because a loader was down. Two measured consumers, both in `packages/mcp/src/mcp-server-runtime.ts`:\n\n- `objectstack://objects` — `await metadataService.listObjects()` is rendered as `{ objects, totalCount }`. During a loader outage an MCP client is told, positively and with a count, that the environment contains fewer objects than it does.\n- `agent_prompt`'s sibling skill bridge — `(await metadataService.list('skill')) ?? []` becomes the `prompts/list` snapshot.\n\nNeither widens access (both are read surfaces), so like #6055 this is a diagnosis defect rather than a security one. But unlike the singular read, `list` is the one that carries a **count**, and a count is the strongest positive claim a read can make.\n\nThe blast radius is wider than `packages/mcp`: `list`/`listObjects`/`listNames` are read across `metadata-protocol`, `rest`, `runtime` and the plugins. This issue does **not** pre-judge which of those should change behaviour — PR #6051's discipline was to qualify each consumer separately (gating / non-gating / mis-describing) rather than apply one blanket rule, and the same is owed here.\n\n## Decision this needs before any code\n\nAdding `listDiagnosed?(type)` to `IMetadataService` is a public-contract addition, so it is a maintainer call, not a call-site fix. The cheaper alternative worth pricing against it: `list()` already memoizes the verdict, so a `listDiagnosed` would be near-free on the producer, and the cost is entirely in the consumer sweep.\n\nRefs #5840, PR #6051, #6055, ADR-0110 D3, #5184 (where the verdict was first computed), #5253.\n"
+}

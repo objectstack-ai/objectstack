@@ -1,0 +1,33 @@
+{
+  "number": 8963,
+  "kind": "pull_request",
+  "title": "docs: MISSING_REQUIRED_FIELD answers 422 without fields on the surviving controlled_by_parent refusals",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-16T03:07:27Z",
+  "updated_at": "2026-08-16T03:24:26Z",
+  "closed_at": "2026-08-16T03:24:24Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": "2026-08-16T03:24:24Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/8963",
+  "body": "Fixes #8880\n\nDocs-only. Direction 1 of the card, per the maintainer ruling of 2026-08-15: the docs state the exception where it exists and name why the gate answers 422 there. No runtime edits — direction 2 (moving the wire to 400) was declined, and direction 3 (a catalog vs. runtime status conformance gate) stays its own card.\n\n## The mismatch, re-measured on this branch's base\n\n`MISSING_REQUIRED_FIELD` is documented as HTTP 400 carrying `fields`, while `assertControlledByParentWrite` answers `422 MISSING_REQUIRED_FIELD` with no `fields` on four declarable shapes. I verified each half from source rather than taking the card's summary:\n\n**The four shapes** come from `resolveCbpRelation` (`packages/plugins/plugin-security/src/security-plugin.ts`), which sets the one bit the stand-down turns on:\n\n```ts\nomissionRefusedByValidation:\n  def?.type === 'master_detail' && !!def?.required && !def?.readonly && !def?.system,\n```\n\nSo the hand-over to `400 VALIDATION_FAILED` happens only for a `master_detail` that is `required` and neither `readonly` nor `system`. The 422 survives for: a `master_detail` with no `required`; `required` + `readonly`; `required` + `system`; and a `required` `lookup` resolved through the third fallback. All four are pinned in `controlled-by-parent-sharing.test.ts` on `err.status` / `err.statusCode` 422. The stored-row case (an update or delete by id whose persisted FK is null) travels the non-insert branch and keeps the same envelope.\n\n**The 422 and the absent `fields` are confirmed at the door, not assumed.** `MasterReferenceMissingError` declares `code = 'MISSING_REQUIRED_FIELD'`, `status = 422`, `statusCode = 422` (`errors.ts`); `declaredHttpStatus` in `packages/rest/src/error-response.ts` reads `status` then `statusCode`, and its 4xx passthrough arm emits `{ error, code, object }` — no `fields`. `fields` is emitted only for the `VALIDATION_FAILED` duck-type, which this error is not. Both halves of the card check out.\n\n## One claim from the card that I did NOT repeat\n\nThe card, the landed #8879 changeset, and two source comments all state that #8772's publish-time lint refuses these shapes, \"so newly authored metadata cannot reach them\". **That is not true today.** #8772 is still open, `relationship/master-detail-required` is `severity: 'warning'` (`packages/lint/src/data-model-rules.ts:491-499`), and no rule covers the `readonly`, `system`, or fallback-`lookup` shapes at all. Writing that bound into the docs would have documented a guarantee that does not exist, so the pages say instead that these shapes are authorable today. Filed separately as #8959 (sub-issue of #8772) — the stale claim is in landed source comments and a release-note-bound changeset, which is a runtime-adjacent fix and out of scope here.\n\nRelated to the same honesty point: nothing mechanically pins either side of this branch, so both pages tell clients to branch on `code` and read the status off the response rather than deriving it from a table.\n\n## Changes\n\n- `content/docs/protocol/kernel/error-handling.mdx` — the `MISSING_REQUIRED_FIELD` entry carries the exception, the full five-row matrix (which shape is refused by which subsystem, with status, code and whether `fields` rides along), why the gate refuses rather than handing over (the measured fail-open alternative), and the authorable-today note. The 422 row of the HTTP status table now points at it.\n- `content/docs/api/error-catalog.mdx` — the entry's \"Check `fields` for the field name\" line is qualified, a `Callout` carries the same exception in list form, and the status quick reference gains a 422 row marked as an exception to the 400 row rather than a second home for the code. The matrix itself lives in one place only (the protocol page, linked) — duplicating it across two files is the drift this card is about.\n\n## Verification\n\nGate union run **after** the final commit, at `8ead907cd`:\n\n```\npnpm check:docs-audit-scope   ✓ scope in sync with content/docs/: 177 hand-written doc(s)\npnpm check:role-word          ✓ OK (43 baselined file(s), no new occurrences)\npnpm check:nul-bytes          ✓ OK (scanned 5935 text file(s); no raw ASCII control bytes)\npnpm check:error-code-casing  ✓ no lowercase error codes in 4119 scanned file(s)\n```\n\nRe-derived against the actual changed paths with `node scripts/pm/dispatch-gates.mjs` — it returns exactly `check:docs-audit-scope` and `check:role-word` for `content/docs`, adding nothing; `check:nul-bytes` and `check:error-code-casing` were run as the convention-scoped pair. No package builds or tests are implicated: no source file changed.\n\nAnchor and cross-doc link forms were checked against real precedents in the tree (`#letting-a-delegate-invite-delegated_admin` confirms underscores survive slugification; `/docs/protocol/kernel/...` confirms the cross-page path). The exception is rendered as a list rather than a table inside the `Callout`, since no existing `Callout` in `content/docs` contains a markdown table.\n\n`skip-changeset`: docs-only, nothing releasable.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_011RB4waLuNbdruCo6X9oobm)_"
+}

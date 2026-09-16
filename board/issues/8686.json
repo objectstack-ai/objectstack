@@ -1,0 +1,33 @@
+{
+  "number": 8686,
+  "kind": "issue",
+  "title": "Seed loader writes untenanted rows while the REST path stamps an organization — one single-tenant install runs two autonumber scopes and mints duplicate business identifiers, silently (17.0.0 GA)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-14T13:31:28Z",
+  "updated_at": "2026-08-15T06:58:29Z",
+  "closed_at": "2026-08-15T06:57:45Z",
+  "closed_by": {
+    "login": "qq9340100",
+    "id": 313832657,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8686",
+  "body": "Part of objectstack-ai/hotcrm#698 — the residual half of that card after objectstack#5495 → PR #6932 landed. Measured live on `@objectstack/*` **17.0.0 GA**.\n\nSibling-in-family, both closed and neither covering this: #5495 (stale counter / burn-on-failure — **fixed**, re-verified below), #6249 (windowed seeding scan), #5030 (NULL-distinct composite unique — fixed; the index is now `COALESCE`-guarded).\n\n## Symptom\n\nOn a **fresh** database seeded from an app's declared seed data, the first REST create of an autonumbered record mints a number that **already exists**, with no error and no warning.\n\n```\nseeded rows: 38, max=CASE-00038\nsequence last_value BEFORE any API create: 38\nPOST /api/v1/data/crm_case -> 201 case_number=CASE-00001\nPOST /api/v1/data/crm_case -> 201 case_number=CASE-00002\nPOST /api/v1/data/crm_case -> 201 case_number=CASE-00003\nPOST /api/v1/data/crm_case -> 201 case_number=CASE-00004\n\nduplicate case_number values now in DB: [[\"CASE-00001\",2],[\"CASE-00002\",2],[\"CASE-00003\",2],[\"CASE-00004\",2]]\n```\n\nZero 409s. Four duplicated business identifiers on a `unique` record-number field.\n\nNot object-specific — same run, second object:\n\n```\nPOST /api/v1/data/crm_knowledge_article -> 201 article_number=KA-0001\narticle numbers by org:\n  organization_id=null                   KA-0001,KA-0002,KA-0003,KA-0004   (seed)\n  organization_id='org_mssymr19xzd645gv' KA-0001                           (API)\n```\n\n## Mechanism\n\nTwo sequence rows exist for one object, because the two write paths disagree about tenancy:\n\n```\n_objectstack_sequences where object='crm_case':\n  tenant_id='__global__'              last_value=38   <- the SEED loader\n  tenant_id='org_mssymr19xzd645gv'    last_value=6    <- the REST API\n\ncrm_case rows by organization_id:\n  organization_id=null                   38 rows  CASE-00001..CASE-00038\n  organization_id='org_mssymr19xzd645gv'  6 rows  CASE-00001..CASE-00006\n```\n\nand the uniqueness index is partitioned by exactly that column:\n\n```sql\nCREATE UNIQUE INDEX `uniq_crm_case_organization_id_case_number`\n  ON `crm_case` (COALESCE(`organization_id`, '__global__'), `case_number`)\n```\n\n**The boot banner for this install reads `Tenancy: single`.** So a single-tenant stack splits one logical tenant across two partitions of its own uniqueness index, each with an independent counter.\n\nEach counter is *correct within its own scope*, which is why #6249's complete keyset scan does not help: the org-scoped counter scans its own partition, correctly finds it empty on a fresh database, and correctly starts at 1. The defect is upstream of the counter — in **who stamps `organization_id` on a seeded row**.\n\nThe consumer-side symptom is the one that costs: a duplicated `unique` business identifier that no constraint catches, because the two copies live in different partitions. In the reporting app this silently mis-keys idempotence gates that dedupe on the record number, and makes notification copy (`Contract expired: CTR-0001`) ambiguous.\n\n## What a fix has to decide\n\nWhich of these is the contract, stated once and enforced on both paths:\n\n1. **Seed writes carry the organization** the same way API writes do — then both paths share one scope and one counter, and the existing unique index bites across them.\n2. **Seed rows are deliberately untenanted** — then the autonumber scope must not be keyed on `organization_id` for that object, or the `COALESCE(...,'__global__')` partition must not be treated as a peer of a real org, because as it stands \"unique per tenant\" is not true of the rows the platform itself wrote.\n\nOption 1 is the one that makes a declared `unique` mean what it says without the app having to know about the split. Either way the current state — two producers, two scopes, one index, no diagnostic — is the shape that cannot be right.\n\n## Repro\n\nFresh DB, app with seeded rows on an autonumber+`unique` field, `objectstack dev --seed-admin --fresh`; sign in and `POST` one record with no number supplied; read `case_number` **and** `_objectstack_sequences`. Watching status codes will not show it — on a fresh DB that path is entirely green.\n\n## Verified fixed in the same run (recorded so it is not re-opened)\n\n#5495's burn-on-failure half is gone. A taken number no longer produces a failure at all — the allocator skips a contiguous taken band inside one request (`counter at 11`, band `CASE-00012..CASE-00020` planted, one create returned `CASE-00021`, counter 21), and a create rejected by validation leaves the counter unmoved (22 → 22).\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01XAK3brMLjd4ykF4QAhFnuo)_"
+}

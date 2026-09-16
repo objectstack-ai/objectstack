@@ -1,0 +1,36 @@
+{
+  "number": 8909,
+  "kind": "issue",
+  "title": "docs: new `content/docs/upgrading.mdx` in the Build group — state both upgrade halves and give the per-major checklists a door",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:blocking",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-15T16:25:46Z",
+  "updated_at": "2026-08-16T03:24:41Z",
+  "closed_at": "2026-08-16T03:24:41Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8909",
+  "body": "Card 02 of the deployment restructure. **The highest-value card in the set** — the only one that fixes a defect users hit today, and independent of every other card in the group.\n\nMaintainer rulings, 2026-08-15: 「元数据应用需要升级，平台也需要升级」; on placement, 「放进 Build 组（应用开发者本来就在那）」; and on shape, a **single page, not a directory** (see *Shape* below).\n\n## The defect\n\n**The two upgrade lifecycles are never distinguished anywhere in the docs.** They run on separate clocks:\n\n| | Platform runtime | Metadata app |\n|---|---|---|\n| Ships as | Docker image | compiled artifact (`dist/objectstack.json`) |\n| Versioned by | our release train (`17.0.0`) | your own catalog |\n| Upgrade cadence | ours | yours |\n| Upgrade action | move the image tag | `os migrate meta` + republish |\n\nThe hardest evidence is `content/docs/deployment/cli.mdx:821`, which calls `os migrate meta --from 16` **\"the metadata half of the upgrade\"**. The docs already know there are two halves. The other half is written down nowhere, and no page places them side by side.\n\n## The second defect this closes\n\nThe v17 upgrade checklist — **66 actionable bullets**, correctly written for metadata app authors (`allowExport`, `sharedWith.type: 'group'` → `'team'`, RLS `priority`, `agent.tools[]` → `skills`) — sits at **line 3270 of a 3691-line page, 88% down**. Nothing links to it: the first 105 lines of `v17.mdx` never say \"upgrade\" except about semver caret ranges, and `content/docs/releases/index.mdx` offers no entry point. `releases` also sits in the **Platform** sidebar group beside `kernel` and `protocol` — the wrong neighborhood for the audience it is written for. That mismatch is why this page goes in **Build**.\n\n**Cross-version gap:** each release page's checklist has only a `### <major>.0.0` subsection, so upgrading v15 → v17 means reading v16's and v17's and merging them by hand. Mechanically `os migrate meta --from <current major>` already accumulates across majors — the good news the docs never tell anyone. Say it.\n\n## Shape: one page, not a directory\n\n**Create `content/docs/upgrading.mdx`** and list `\"upgrading\"` in the **Build** group of `content/docs/meta.json` (after `api`, or argue a better slot).\n\nThe six existing Build entries are all directories, but that is not a requirement — **`build-without-code` is a single `.mdx` listed directly in the root nav**, so the single-page form is supported and already in use. The content here is one fork plus two halves plus links out: roughly one page. A directory for one page is speculative structure, and under the startup-scope principle every published page is a standing obligation. Promoting a page to a directory later is a cheap migration (one redirect); an empty shell is not free. **Do not create a folder.**\n\nIf while writing you measure that the content genuinely does not fit one page, stop and report rather than silently expanding to a directory — that is a structural decision, not an implementation detail.\n\n## What the page must answer, in order\n\n1. **Which upgrade are you doing?** The fork, stated before anything else.\n2. **Platform runtime** — moving the image tag, what the boot does when metadata and runtime disagree, when a platform move forces an app move.\n3. **Metadata app** — `os migrate meta --from <major>`, the validate/publish/install loop, and that one command accumulates skipped majors.\n4. **Per-major specifics** — link out to each release page's Upgrade checklist. **Link, do not copy.** Those checklists are release-owned and compiled at release time (`CLAUDE.md` forbids editing `content/docs/releases/` outside a dedicated docs-only PR). Duplicating 66 bullets creates a second copy that will silently rot — which is the exact failure class the v17 work just cleaned up.\n\nDo **not** edit anything under `content/docs/releases/`. Do **not** edit `content/docs/deployment/` — cards 01/03/04/05 own that directory.\n\n## Sources (read; do not trust this summary)\n\n- `content/docs/deployment/cli.mdx` — the `os migrate meta` sections, roughly lines 777–860\n- `content/docs/releases/v17.mdx` — the `## Upgrade checklist` section, for the shape of what you are linking to\n- `content/docs/deployment/self-hosting.mdx:85` — \"Upgrades are atomic: replace the artifact file and restart\", currently the section's only upgrade sentence, scoped to one systemd option\n- `content/docs/references/kernel/package-upgrade.mdx` — a **different** concept (app-package upgrade). Decide whether it needs a disambiguating link and say either way.\n\n## Independence\n\nTouches `content/docs/meta.json` (root) and one new file. No overlap with cards #8904, #8910, #8911; card #8913 edits `content/docs/deployment/meta.json`, a different file. Safe to run in parallel.\n\nDocs-only, `skip-changeset`."
+}

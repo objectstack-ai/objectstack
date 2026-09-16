@@ -1,0 +1,34 @@
+{
+  "number": 8528,
+  "kind": "issue",
+  "title": "[finding] `check-half-states.mjs` has a 79-case `--self-test` that no CI job runs — and a blocking gate now imports its predicate",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-13T17:29:58Z",
+  "updated_at": "2026-08-13T19:00:41Z",
+  "closed_at": "2026-08-13T19:00:13Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8528",
+  "body": "Found while implementing #8476 (PR #8527). Filed unassigned; not fixed there, because that card's scope is the H7 blocking check.\n\n## The gap\n\n`scripts/pm/check-half-states.mjs` carries a `--self-test` with **79 cases** — the H1 through H7 predicates, the seat-sticker parser, the transport classifier and its measured container classes. Nothing in CI runs any of them:\n\n```\n$ grep -n \"half-states\" package.json .github/workflows/*.yml\n(no matches)\n```\n\nThere is no `check:*` entry in `package.json` and no workflow step. The self-test executes only when a human or an agent types it, which makes it a check whose coverage is a function of who remembered.\n\nThis is the same shape as three cards already closed this week — the dispatch-gates self-test (#8162), `check:skill-frame-freshness` (#8110) and `check:dev-prereqs` (#8170) — each of which was wired after being found the same way. This file is the remaining member of that family that I tripped over.\n\n## Why it is worth more than it was yesterday\n\nUntil today the sweep was report-only, so a silent break in a predicate degraded a patrol report. As of PR #8527 the H7 predicate (`h7PartOfWithClosingKeyword`, plus `stripMarkdownCode` beneath it) is **imported by a PR-scoped blocking gate**, so a break there now reddens or, worse, silently greens every PR in the repo.\n\nPartial mitigation already landed, and its boundary should be stated so nobody reads it as closure: the new gate's own self-test pins the H7 behaviours it depends on (the three code-formatting arms, the per-card binding, the reused finding sentence), and that self-test **does** run in `lint.yml`. So H7 has incidental CI coverage now. H1 through H6, the seat-sticker parser and the whole transport classifier have none.\n\n## Shape of the fix (not prescriptive)\n\nPresumably a `check:pm-half-states` entry running `--self-test` only, plus an unconditional `lint.yml` step next to the other three pm-tooling gates. The live sweep must **not** be gated — it is deliberately report-only, exits 0 on any completed sweep, and needs API transport that most containers do not have. Whether it wants a thin gate file of its own (the dispatch-gates precedent, which exists because that tool's self-test fixtures are path strings that pollute watch hints) or can be pointed at directly is worth one measurement: this file's fixtures are issue-shaped objects and prose, not paths, so the pollution that forced a separate file there may not apply here.\n"
+}

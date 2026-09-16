@@ -1,0 +1,33 @@
+{
+  "number": 8081,
+  "kind": "issue",
+  "title": "[services half of #7990] Close the datasource/connector credential write/read paths: scrub `getDatasource().config`, fix the false \"credential-stripped\" claim, and write the stored-cleartext-rows migration story",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "security"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-12T14:48:34Z",
+  "updated_at": "2026-08-15T07:12:55Z",
+  "closed_at": "2026-08-15T07:12:55Z",
+  "closed_by": {
+    "login": "qq9340100",
+    "id": 313832657,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 9,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8081",
+  "body": "Filed by the `domain:spec` PM seat (session `session_0123k4cam2jEAkPmbJeoaY3r`) at ACCEPT of PR #8078, executing the maintainer's Option-A ruling on #7990 (comment 5266068845, verbatim): 「Contract-first split: the spec half (schema refusals + guidance) first; the services write/read-path halves (including the false \"credential-stripped\" claim at `datasource-admin-service.ts` and the migration story for existing cleartext rows) as `Blocked-by:` sub-cards in their lanes. The existing-rows migration is in scope of the programme, not optional.」 Lane label set per that ruling's explicit lane naming; provenance also in #7990's claim comment 5266425167.\n\n`Blocked-by:` #8078\n\n## Scope (the ruling's services half)\n\n1. **Read-path scrub**: `getDatasource()` returns driver `config` verbatim (`datasource-admin-service.ts:199`) while `:179` carries a \"credential-stripped\" comment that never covered `config` — the code claims a protection it does not perform (#7990 body, survey-verified). With #8078 landed, new rows cannot carry `config.password`/`config.authToken`, but **stored rows still can** — the read path must stop serving them in cleartext.\n2. **Write-path behavior for legacy inline payloads**: post-#8078 a legacy payload is refused at parse. Verify what each write door (wizard, `PUT /meta`, datasource-admin plugin) actually returns for it, and that the refusal guidance (secret binder / `external.credentialsRef`) surfaces to the caller rather than a generic 500.\n3. **Stored-cleartext-rows migration story** — in scope of the programme, not optional (ruling). No mechanical D2 conversion exists (a cleartext credential cannot be auto-encrypted into `sys_secret` without a decision about the secret's identity); the shape of the migration (admin tooling? one-time script? read-time refusal with re-entry prompt?) is this card's to propose — escalate the chosen shape if it is destructive.\n4. **turso `encryptionKey`** (dev report Q2): credential-shaped, still writable — the binder injects exactly one secret slot and `credentialsRef` resolution cannot target `encryptionKey`. Option B (multi-slot binder) belongs here where the binder lives; until then the spec deliberately left it writable.\n5. **Managed datasources' credential slot** (dev report Q3): `DatasourceSchema` refuses `external` when `schemaMode: 'managed'` (`datasource.zod.ts:550`), yet `datasource-admin-service` writes `external.credentialsRef` onto wizard records regardless of `schemaMode` — a re-parse would refuse managed rows. Dev recommendation A (allow `external.credentialsRef`, or a top-level ref, on managed) matches what the service already does; decide here alongside the write path, and hand the spec-side schema change back to `domain:spec` if A is chosen (contract change = spec seat + fable per the standing model clause).\n\n## Evidence trail\n\n- #7990 (the class card; stays open until this card and the migration land) — dev report comment 5268367568\n- PR #8078 (the spec half: refusals + guidance + ADR-0087 registrations + census migration)\n- #7902 comment 5264546868 (the 26-surface survey)\n- #8075 (two further inline-credential schemas — census toward the parked Option-B boundary guard; separate card, not this one's scope)"
+}

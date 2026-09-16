@@ -1,0 +1,37 @@
+{
+  "number": 8262,
+  "kind": "issue",
+  "title": "reapRotatedSecret deletes the IN-FORCE ciphertext when a SettingsEngine adapter drops `context`, leaving a dangling value_enc and an unreadable setting",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:services",
+    "pm:dispatched",
+    "target:v17"
+  ],
+  "assignees": [
+    "qq9340100"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-13T01:20:06Z",
+  "updated_at": "2026-08-14T14:07:36Z",
+  "closed_at": "2026-08-14T14:07:36Z",
+  "closed_by": {
+    "login": "qq9340100",
+    "id": 313832657,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 9,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8262",
+  "body": "Found while measuring #8103 (report-only orphan classifier, PR #8261). Filed unassigned for triage; not touched in that PR, since the reaping landed in #8063 and re-litigating it was explicitly out of scope there.\n\n## What was measured\n\n`SettingsService.reapRotatedSecret` deletes the handle that `upsertRow` reports as `previousEnc`. It never confirms the repoint it is cleaning up after **actually took effect** — it infers that from `previousEnc !== nextEnc`.\n\nThat inference holds for the shipped adapter, which forwards `context: { isSystem: true }`. It does not hold for an adapter that drops `context` — and `SettingsEngine`'s own doc comment contemplates exactly that reader (\"⛔ An adapter over `IDataEngine` MUST forward this. Dropping it restores the defect silently\").\n\nDriving a real `ObjectQL` over the real `SysSetting` / `SysSecret` schemas with such an adapter, three successive writes of an encrypted specifier give:\n\n| writes | `sys_secret` rows | `sys_setting.value_enc` |\n| --- | --- | --- |\n| pre-#8063 (no reaper, context dropped) | 1 → 2 → 3 | pinned at the first handle |\n| **today's reaper + context dropped** | **1 → 1 → 2** | **pinned at the first handle — which no longer exists** |\n\nSequence on the second write: the new ciphertext `H2` is inserted; the UPDATE has `value_enc` stripped (it is `readonly: true` and the caller is not system), so the row still names `H1`; `upsertRow` returns `previousEnc = H1`; the reaper then deletes `H1` — **the row still in force**.\n\n## Why this is worse than the defect it descends from\n\n`materialiseRow` dereferences the handle, gets nothing back, logs and returns `null`. So the setting silently reads as **empty** and the stored credential is **gone** — not recoverable, since the audit trail records digests rather than handles or ciphertext.\n\nBefore #8063 the same adapter bug was bad but non-destructive: the rotated-away credential merely stayed in force. After it, the same bug destroys the value. The warning in `settings-service.types.ts` still describes only the old consequence (\"the rotated-away credential stays in force\"), so an adapter author reading it will not learn that the failure is now data loss.\n\n## Suggested direction (not a design ruling)\n\nMake the reaper verify rather than infer — re-read the row and delete `previousEnc` only when `value_enc` really is `nextEnc`. That turns a non-forwarding adapter back into a recoverable failure and costs one read on a path that already awaits I/O. The doc comment's consequence sentence wants updating either way.\n\n## Repro\n\n`packages/services/service-settings/src/sys-secret-orphan-report.test.ts` on PR #8261 carries the harness: `boot({ forwardContext: false, withDelete: false })` is the faithful pre-fix instance; flipping `withDelete` back on reproduces the 1 → 1 → 2 table above."
+}

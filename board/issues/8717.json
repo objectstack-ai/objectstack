@@ -1,0 +1,33 @@
+{
+  "number": 8717,
+  "kind": "issue",
+  "title": "docs: the HTTP protocol page's `X-API-Key` example uses a Stripe-shaped `sk_live_…` key that cannot authenticate — ObjectStack keys are `osk_`-prefixed and the prefix is load-bearing",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:queue"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-14T15:54:04Z",
+  "updated_at": "2026-08-15T13:59:21Z",
+  "closed_at": "2026-08-15T13:59:21Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8717",
+  "body": "Split from #8715 at triage (2026-08-14). That card's §1 lands in `packages/spec/src/identity/identity.zod.ts` (`domain:spec`); this half lands in a hand-written docs page in a different lane, so it is carried separately rather than riding the spec PR.\n\n## The defect\n\n`content/docs/protocol/kernel/http-protocol.mdx` shows:\n\n```http\nGET /api/v1/data/task\nX-API-Key: sk_live_abc123...\n```\n\nObjectStack API keys are `osk_`-prefixed (`API_KEY_PREFIX`, `core/src/security/api-key.ts`). The prefix is not cosmetic: `extractApiKey` accepts `Authorization: Bearer …` **only** when the token starts with `osk_`, which is what stops a session Bearer from being read as an API key. A `sk_live_…` value would not authenticate, and cannot be sent in the Bearer form at all.\n\n`content/docs/protocol/**` is hand-written (the generated pages under `content/docs/references/**` carry an `AUTO-GENERATED — DO NOT EDIT` banner and this page does not), so this one is fixed in place.\n\n## Scope\n\nCorrect the example prefix on this page. #8715 screened the rest of the docs tree for API-key vocabulary and recorded the pages that are already accurate (`content/docs/api/index.mdx`, `api/client-sdk.mdx`, `ai/agents.mdx`, `ai/connect-mcp.mdx`, `getting-started/build-with-claude-code.mdx`, `deployment/environment-variables.mdx`, `permissions/authentication.mdx`, `permissions/system-context.mdx`, `permissions/authorization.mdx`) — that screen is recent, but re-run a `sk_live` / `sk_test` grep over `content/docs/**` before closing rather than trusting it, and fix any sibling occurrence in the same PR.\n\nDo **not** touch the `ApiKey` reference table — it is generated, and its content is #8715's subject."
+}

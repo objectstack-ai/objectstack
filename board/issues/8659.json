@@ -1,0 +1,35 @@
+{
+  "number": 8659,
+  "kind": "pull_request",
+  "title": "refactor(spec): one union-branch selection policy, imported by both walks, with a shared-fixture parity pin (#8318)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-14T09:29:04Z",
+  "updated_at": "2026-08-14T13:14:06Z",
+  "closed_at": "2026-08-14T13:14:05Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-14T13:14:05Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/8659",
+  "body": "Fixes #8318\n\nThe union-branch selection policy had two sibling implementations inside `packages/spec`. It now has one, plus the mechanical enforcement the module headers were standing in for.\n\n## What moved\n\n`src/shared/error-map.zod.ts` (the prose renderer, #4971/#5389) and `src/api/zod-issues-to-fields.ts` (the ADR-0114 D3 wire mapper, #8124) each declared the same policy: `isKindMismatchOnly`, `carriesUnknownKey`, `selectUnionBranches`, `CONTAINER_ISSUE_CODES`, the depth limit 3 and the branch cap 3. While the mapper lived in `@objectstack/rest` the fork was forced; #8124 removed that reason, leaving the two one directory apart with nothing but their headers binding them together.\n\nAll of it now lives in `src/shared/union-branch-policy.ts`, imported by both walks.\n\n**⛔ Package-internal, as the card requires.** The module is in no barrel, and no public export moves: `check:api-surface` and `check:export-origins` are both green with a clean tree, and `check:generated` reports all 13 artifacts up to date — zero ledger drift. A test in the parity file asserts directly that none of the seven policy symbols is reachable from the `shared` or `api` entry points, so a future barrel line goes red before the ledger drift reaches a reviewer.\n\n## What deliberately did NOT move\n\nThe two **walks** stay separate implementations. The renderer owns the indent, the glyph, the `(root)` spelling and the trailing \"... and N more branches rejected this value\" line; the mapper owns the D3 code table and the `{field, code, message}` shape.\n\n**The `{selected, omitted}` wrinkle is handled, not papered over.** `selectUnionBranches` returns both; the renderer prints `omitted`, and the mapper destructures `selected` alone at a commented line. The wire dropping the count is now a decision recorded in code rather than an absence you have to infer — and the parity test asserts the asymmetry in both directions (the prose line is present, no `fields[]` entry mentions it) instead of normalising it away silently.\n\n## The parity test\n\n`src/shared/union-branch-policy.parity.test.ts`. One `safeParse` per fixture feeds **both** walks, and their outputs are compared pair for pair after a normalisation that removes exactly three formatting facts (the indent, the glyph, the `(root)` spelling) and nothing else.\n\nThe corpus covers every rule the card named: kind-mismatch drop, the all-kind-mismatch case, fewest-issues ranking, the `unrecognized_keys` tie-break, declaration-order determinism, the depth limit, the branch cap, and container descent for both `invalid_key` and `invalid_element` (#5389), plus a container nested under a union. A guard case asserts the corpus really produces unions, so the parity assertions cannot pass vacuously.\n\nIt is deliberately end-to-end rather than a unit test of the extracted module: a unit test would pass trivially now that there is one implementation. What can still regress is a future author re-inlining a copy, and that is what this catches.\n\n## Reverse verification\n\nPrediction stated first: re-forking the cap in the wire mapper should redden **only** the fixtures that select more than one branch, not the whole file.\n\nMeasured, on the committed tree, by slicing the mapper's selection to one branch:\n\n- **3 red, 25 green** — exactly the three multi-branch cases (`declaration order breaks a full tie`, `the branch cap keeps three of five tied branches`, `both keep exactly the same three branches, cap included`). Direction as predicted.\n- The pre-existing spec-side tests — `src/api/zod-issues-to-fields.test.ts` and `src/shared/error-map.test.ts`, 42 tests — stayed **green** under the same re-fork. That is the measurement that says this file is new coverage rather than a restatement of what was already pinned.\n\nRestored with `git restore --source=HEAD` and proven byte-identical via `git hash-object` against `HEAD` (`232d5349c8…`).\n\n## Behaviour\n\nUnchanged for every issue zod produces. The ranking, both limits and the container-code set are byte-identical to what each walk applied before, and the full spec suite passes unmodified.\n\nOne deliberate widening, stated plainly rather than buried: the shared policy reads a missing or non-array `path` as the root — the wire mapper's already-shipped normalisation, now applied to the renderer too. The renderer previously threw a TypeError on such an issue object, so nothing that used to produce output produces different output. No value satisfying the renderer's own `ZodIssueMinimal` type (whose `path` is a required array) is affected, and zod never emits one that is not.\n\n## Verification\n\nAll at `6097b7846` (the head this PR pushes; the union was run after the final commit).\n\n| | |\n|---|---|\n| `@objectstack/spec` suite | 398 files / 10555 tests passed |\n| `@objectstack/rest` suite (the wire consumer) | 115 files / 1903 tests passed |\n| `@objectstack/spec` typecheck | green, incl. `check:scripts-typecheck` + `check:test-typecheck` (debt ledger unchanged) |\n| `check:generated` | all 13 artifacts up to date — **no ledger drift** |\n| `check:dual-source-exports`, `check:exported-any` | green (4912 names / 16 entry points, unchanged) |\n| named gates | `check:doc-formula-expressions`, `check:error-code-casing`, `check:merge-driver`, `check:spec-parsed-alias`, `check:type-source-resolution`, `check:nul-bytes` — all green |\n| re-derived via `dispatch-gates.mjs` | `check:objectui-changeset`, `check:query-options-erasure`, `check:type-check-coverage`, `check-changeset-no-major`, `check-empty-changeset` — all green |\n\nTwo gates are red **on pristine `origin/main` as well**, verified in a comparison worktree at `189a73225` and already filed by others: #8654 (`check-changeset-no-major --self-test` control) and #8658 (`check-adr-0087-registration` input assertion). Both are the post-release-cut drained-`.changeset` condition, not this diff. `check-dev-prereqs` needs the whole workspace built (43 of 67 packages unbuilt here) and is a property of the worktree, not of this change.\n\nSynced with `origin/main` at `189a73225` (clean merge, no `packages/spec` incoming).\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01E5tUwGM3LQoqErTfkvRW7W)_"
+}

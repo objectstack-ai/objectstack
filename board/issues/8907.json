@@ -1,0 +1,35 @@
+{
+  "number": 8907,
+  "kind": "issue",
+  "title": "publishPackageDrafts can promote (and drain) ANOTHER package's draft row — the promote resolves the draft without the ADR-0048 package dimension",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-15T16:23:49Z",
+  "updated_at": "2026-08-16T01:40:08Z",
+  "closed_at": "2026-08-16T01:40:08Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8907",
+  "body": "Measured while verifying #8858's premise (a different concern in the same method), at `origin/main` `8664a2c99`. Not fixed there: outside that card's declared region and a different defect class.\n\n## What was measured\n\n`publishPackageDrafts` lists the package's drafts with `repo.listDrafts({ packageId })` (`sys-metadata-repository.ts:876` — filters `package_id = :packageId`), then promotes each through `promoteDraftForPublish` → `repo.promoteDraft(ref, …)`. `promoteDraft` resolves the row it is about to promote with\n\n```ts\nconst draftRow = await this.engine.findOne('sys_metadata', {\n    where: this.whereFor(ref, 'draft'),\n});\n```\n\nand `whereFor` (`sys-metadata-repository.ts:1385`) omits the `package_id` dimension when the caller passes no `packageId` — deliberately, per its own comment: *\"the package dimension is left out so the query keeps its historical 'match any package' behaviour — which is what the RESOLVING reads want (delete/promote/restore each locate the one row whatever it is bound to)\"*. ADR-0048 keys overlay rows by `(org, type, name, package_id)` precisely so that two installed packages shipping the same name each get their OWN row, so \"the one row\" is an assumption the key model does not guarantee.\n\nMeasured with the real `SysMetadataRepository` and the real protocol over a stub engine — two ordinary singular `object/shared_ticket` drafts, one bound to `app.other`, one to `app.demo`, then `publishPackageDrafts({ packageId: 'app.demo' })`:\n\n```\nresponse:   { success: true, publishedCount: 1,\n              published: [{ type: 'object', name: 'shared_ticket' }] }\nactive row: { type: 'object', name: 'shared_ticket', package_id: 'app.other', label: 'FROM_OTHER' }\ndraft row:  { type: 'object', name: 'shared_ticket', package_id: 'app.demo',  label: 'FROM_DEMO' }   ← still pending\naudit row:  { type: 'object', name: 'shared_ticket', outcome: 'allowed', code: 'ok' }\n```\n\nPublishing `app.demo` promoted **app.other's** pending draft to active, drained that package's draft row, recorded it under `app.demo`'s ADR-0067 commit and its ADR-0010 audit row — and left `app.demo`'s own edit pending, while answering `success: true`.\n\nNo legacy residue is involved: both rows are ordinary drafts a normal `saveMetaItem(..., mode: 'draft')` produces.\n\n⚠️ **Which of the two rows wins is UNSPECIFIED, not \"always the other package\".** The stub returns the first match in insertion order; a real driver's `findOne` has no defined order without an `ORDER BY`. The defect is that the query cannot distinguish the rows, not the particular winner — so on a real driver this is a coin toss, per publish.\n\nTwo adjacent shapes, also measured: a legacy plural-typed draft row (`type = 'objects'`) bound to package A promotes the singular twin bound to package B, or a package-less singular twin — which is also how the batch's all-or-nothing `NO_DRAFT` abort for at-rest plural rows can be walked around.\n\n## Why it is a defect\n\n- A publish of package A can silently publish package B's unreviewed pending change, attributed to A's commit id.\n- A's own draft stays pending while the response reports the item as published: the author sees \"published\" and the environment does not have the edit.\n- ADR-0048 exists so two packages shipping the same name stay separate; this lookup re-merges them at the one door that writes `active`.\n\n## Suggested disposition\n\nResolve the draft under the same key the caller listed it by: thread the row's `package_id` from `listDrafts` through `promoteDraftForPublish` into `promoteDraft`, exactly as `PromotedDraft.draftOrgId` already threads the draft's own org scope for the analogous org-partition bug (#3115). `whereFor` already accepts a `packageId` argument (`string` → eq, `null` → IS NULL), so this is threading a value, not a new query shape. The same question should be asked of the other \"match any package\" resolving reads that comment names (delete / restore).\n\nRelated: #6215 (the same package-binding blind spot one verb over, in `restoreVersion`'s parent lookup).\n\nBacklink: #8858 (the measurement that surfaced this).\n"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 8376,
+  "kind": "issue",
+  "title": "The `/meta` read exits materialize the FOLDED object, the registry materializes the BASE — so an extended title-less object gets a `__search` column the registry never provisioned",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-13T10:00:22Z",
+  "updated_at": "2026-08-14T02:35:37Z",
+  "closed_at": "2026-08-14T02:35:37Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8376",
+  "body": "**Filed by the #8268 dev agent**, measured while enumerating the stamps that cross the `/meta` read-exit materialization seam. Unassigned. This is a **position** defect of that seam, not a missing stamp — which is why #8268 did not fix it and deliberately preserved the existing behaviour rather than re-spelling it.\n\n## Symptom\n\nAn object whose BASE layer has no title-eligible field, extended by an `extend` contributor that adds one, is served a `__search` companion column by **both** `/meta` reads while `registry.getObject(name)` has none:\n\n```\nregistry.getObject(name).fields  => project, seats, nickname, ...      (no __search)\nGET /meta/object/:name  .fields  => project, seats, nickname, __search, ...\nGET /meta/object        .fields  => project, seats, nickname, __search, ...\n```\n\n## The measurement\n\nReproduces on the **`absent` host — no `metadata` service at all**, so the read falls through to the registry. That is the tell: this is **not** the artifact-ingest seam #8038/#8268 are about. Both `/meta` reads disagree with the registry on an object the registry itself produced.\n\n```\nabsent host, untitled base + extend contributor adding a text field:\n  byName vs registry  diverge on keys: fields\n  listed vs registry  diverge on keys: fields\n  differing key: __search   byName: present   registry: absent\n```\n\nControl, same run: a base that **does** carry a title-eligible field agrees on every key with an extender present (`diverge on keys: (none)`), so the divergence tracks the base-vs-folded distinction specifically and not the presence of extenders.\n\n## Root cause\n\nThe two run the same provisioning at **different points in the pipeline**:\n\n- `SchemaRegistry.registerObject` materializes the **BASE layer** — the ADR-0079 gate is `ownership === 'own' || 'overlay'`, and the comment there says it outright: *\"extensions must not redesignate the owner's title\"*. `resolveObject` then folds `extend` contributors on afterwards and **never re-materializes**.\n- The `/meta` read exits apply the convergence at the EXIT, by which point `foldObjectExtendersFromRegistry` has already folded the extenders on. So `provisionSearchCompanionOnto` resolves its source field over the **folded** field set and finds the extension's text column.\n\nSo the registry answers \"this object has no title, therefore no companion\" and the read answers \"this object has a title contributed by an extension, therefore a companion\".\n\n## Why #8268 did not fix it\n\n#8268's dispatch scoped the work to the read-exit stamps and explicitly forbade re-spelling the mechanism #8038 built. Relocating the convergence from the exit to the pre-fold position is exactly that re-spelling, and it has real blast radius: the OVERLAY list path depends on the exit-side convergence (`meta-object-search-companion-agreement.test.ts` pins that the list read converges an overlay row, and says a revert makes that case alone go red in the `listed` half). So it needs its own card.\n\n#8268 did make sure it does not GROW the problem: its `nameField` convergence **withholds** a designation the registry itself declined, precisely so the title stamp does not acquire this defect too. `materializeServedObjectOnto`'s docstring records that asymmetry and points here.\n\n## Which answer is right — worth ruling explicitly\n\nBoth readings are defensible and the fix differs:\n\n- **The registry is right** (materialize the base, extensions never contribute a title or a companion): then the read exits must materialize BEFORE the fold, and the `__search` column disappears from these objects.\n- **The read is right** (the resolved object genuinely has a searchable text column, so it should have a companion): then `resolveObject` must re-materialize after folding, and the registry — and therefore the driver's `syncSchema`, which creates the real column — gains one.\n\n⚠️ The second option is schema-migration-bearing (ADR-0045): it would materialize a real DB column on objects that do not have one today. The first is not. That asymmetry probably decides it, but it should be decided rather than fallen into.\n\n## Where (anchored on function names, not line numbers)\n\n- `packages/objectql/src/registry.ts` — `registerObject` (materializes the base), `resolveObject` / `foldExtendersOntoDefinition` (folds afterwards, no re-materialization), `materializeServedObjectOnto` (the read-exit replay, and the docstring recording this gap).\n- `packages/metadata-protocol/src/protocol.ts` — `foldObjectExtendersFromRegistry` runs before `governServedObject` at each exit; that ordering is the defect.\n\n## Reproduction\n\n1. `new SchemaRegistry({ searchCompanion: true })`; register a junction object whose fields are only `lookup` + `number` as `ownership: 'own'`.\n2. Register a second contributor for the same name as `ownership: 'extend'` carrying one `text` field.\n3. Read `GET /meta/object/:name` (no `metadata` service needed) and compare with `registry.getObject(name)`.\n4. The served body carries `__search`; the registry's does not.\n\nPinned as an EXPECTED divergence in `packages/rest/src/meta-object-materialization-agreement.test.ts` (`MEASURES the companion over-provisioned on an extended title-less base`), so a fix here turns that pin red and should update it in the same PR.\n\n## Dedup\n\nGitHub search over open issues for companion provisioning / extender fold / registry disagreement found no twin (nearest: **#3955**, closed, migrate-CLI vs dev-runtime companion disagreement — a different pair of producers). `nameField` on this seam is #8268; the multi-tenant `indexes` stamp is its sibling finding.\n\n## Related\n\n#8268 · #8038 (installed the exit-side convergence) · #7556 / #8027 (the extender fold at the read exits) · ADR-0029 D9 · ADR-0045 · ADR-0079\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_012WMpuAfA2KSdDjGF6tm1bH)_"
+}

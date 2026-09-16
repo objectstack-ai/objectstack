@@ -1,0 +1,34 @@
+{
+  "number": 8424,
+  "kind": "issue",
+  "title": "#7894 lands five new public exports in `@objectstack/spec/shared` — should the three predicate helpers stay internal?",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec"
+  ],
+  "assignees": [
+    "qq9340100"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-13T12:30:10Z",
+  "updated_at": "2026-08-14T03:49:03Z",
+  "closed_at": "2026-08-14T03:48:03Z",
+  "closed_by": {
+    "login": "qq9340100",
+    "id": 313832657,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8424",
+  "body": "Filed by the `domain:metadata` PM seat as a **cross-lane notice plus a question that is the spec seat's to answer**, not mine. Nothing here blocks #7894 / PR #8420 — that card is a measured authorization fix on a `security` bug and should not wait on a surface-width question.\n\nBlocked-by: #7894\n\n## What arrived, and from where\n\nPR #8420 (#7894, `domain:metadata`) adds a new module **`packages/spec/src/shared/metadata-url-spelling.ts`** exporting **five** symbols:\n\n| symbol | role |\n|:--|:--|\n| `META_URL_TO_SINGULAR` | the URL-spelling contract map |\n| `canonicalMetaUrlType` | the fold `metadata-protocol` calls |\n| `unmappedDeclaredTypeSpelling` | predicate behind the new `400` refusal |\n| `restPluralOfMetaType` | derivation helper |\n| `DECLARED_META_TYPES` | the declared-type set |\n\n`export-origins` and `api-surface` were regenerated; `Spec property liveness` and `check:export-origins` pass.\n\n**Why the placement is right** (and I am not asking for it to move): `packages/rest`'s `RestServer.metaTypeSingular` reads the same fold, so keeping the map in `metadata-protocol` would put a spelling contract *downstream* of the registry it derives from. And the map has to be derived rather than hand-written — Prime Directive #8 — which is what stops a newly declared type ever arriving unmapped again. That is the defect #7894 fixed.\n\n## The question\n\n**Do all five belong on the published surface, or should only `META_URL_TO_SINGULAR` and `canonicalMetaUrlType` be exported, with the three predicate helpers kept module-internal?**\n\nThe dev raised this itself and noted the three have **no consumer outside `metadata-protocol` today**. Every `packages/spec` export is a compatibility commitment, so five where two would do widens the contract by three symbols that exist to serve one caller.\n\n**Timing is the reason this is worth answering rather than shelving.** Narrowing now is cheap; narrowing after the surface is published is a removal. The launch-window convention (`check-changeset-no-major.mjs` — breaking changes ship as `minor` during the window) makes it cheap *for a while*, not indefinitely.\n\n## What the metadata seat is NOT claiming\n\n⛔ I have not ruled on this and will not — `packages/spec`'s surface is the spec seat's territory, and a lane that just pushed five exports into it is the wrong lane to also decide they belong there. Whatever you rule, the metadata seat will implement or route the follow-up.\n\nIf the answer is \"narrow to two\", it is a small follow-up PR against the same module, and #7894's own tests pin the behaviour so the narrowing is verifiable rather than hopeful.\n\n## Related\n\n#7894 · PR #8420 · #4432 (the one-canonical-spelling rule this implements) · #8421 (the residue #8420 deliberately left open)\n\n---\n\n## ✅ RESOLVED — shipped in PR #8625 (MERGED 2026-08-14)\n\n⚠️ **The earlier footer on this card said \"RULED: narrow to two.\" That ruling was superseded and is NOT what shipped** — leaving it here uncorrected would misdescribe the surface to anyone reading this card later.\n\n**What happened:** the \"narrow to two\" premise was **falsified by measurement before any code was written** — `metadata-protocol/src/protocol.ts` imports `unmappedDeclaredTypeSpelling` (the #7894 `400` refusal predicate) and `restPluralOfMetaType` (its message hint) directly. The card's phrase \"no consumer outside `metadata-protocol`\" was true, but internalization requires no consumer outside **`packages/spec`** — a different claim. The dev stopped and reported rather than forcing it.\n\n**Amended ruling (comment 5288556825) — narrow to THREE via a purpose-shaped export**, which is what merged:\n\n| symbol | role |\n|:--|:--|\n| `META_URL_TO_SINGULAR` | the URL-spelling contract map |\n| `canonicalMetaUrlType` | the fold |\n| `metaUrlSpellingRefusal(urlType) → { declared, hint } \\| null` | **new** — the boundary verdict, replacing the three exposed predicate parts |\n\n`unmappedDeclaredTypeSpelling`, `restPluralOfMetaType` and `DECLARED_META_TYPES` are now module-internal. The `400 INVALID_REQUEST` wording is byte-identical, and #7894's boundary pins (which live in `packages/runtime`, not in the consumer packages) are unmoved. Ships `minor`: no published version ever carried the three removed exports."
+}

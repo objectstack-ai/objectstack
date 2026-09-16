@@ -1,0 +1,33 @@
+{
+  "number": 8667,
+  "kind": "issue",
+  "title": "[Epic] v17 bug focus — Seat A: platform bugs (objectstack)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "target:v17",
+    "tracking"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-14T10:58:22Z",
+  "updated_at": "2026-08-15T07:05:59Z",
+  "closed_at": "2026-08-15T07:05:59Z",
+  "closed_by": {
+    "login": "qq9340100",
+    "id": 313832657,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 18,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8667",
+  "body": "Theme charter for the post-v17 priority regime. Filed by the (former) skills PM seat, session `session_018WuTtyckQa1VcXwgd52JpN`, on maintainer instruction.\n\n## Authority (maintainer, 2026-08-14, verbatim, untranslated)\n\n> v17 版本发布了，我下一步不想再追求每个车道任务清零，而是应该按照任务优先级选择重点任务先开发。\n\n> 所以我现在希望集中处理 bug，应该怎么安排。\n\n> 先只考虑 objectstack 和 objectui 仓库\n\n> 可以继续用 target:v17\n\n> 把两张主题卡（epic）开出来\n\n## Scope\n\nAll open `bug`-labeled cards in **objectstack** (37 at filing), every domain — EXCEPT cards already in flight under the two live lane seats: `domain:devx` (#6023) and `domain:spec` (#6017). Console-facing cards (`repo:objectui`) belong to the sibling theme, Seat B (see the epic filed immediately after this one; the two cards cross-reference in the comments).\n\n**Workability rule (the default flip):** a card is workable under this theme only when it carries `target:v17`. Everything else stays frozen stock — no lane-clearing. The PM nominates second-batch candidates with a short list on this epic; the maintainer approves by labeling (or one-word ruling), and only then do they enter the queue.\n\n## First batch (workable now or pending one maintainer ruling)\n\n- #8193 — OIDC SSO registration broken end-to-end (`pm:blocking`)\n- #8617 — tenant-less reconciler row serves every tenant (security, `target:v17`)\n- #8262 — reapRotatedSecret deletes the in-force ciphertext (`target:v17`)\n- #8154 — /meta/datasources serves cleartext credentials (security, `target:v17`)\n- #7987 — sys_account stores live OAuth tokens in plain columns (security, `target:v17`)\n- #8287 — API keys carry no organization (security, P0) — **pending the maintainer's P0 ruling**\n\nP0 rulings pending on the maintainer's desk (fix-in-17.x / defer-v18 / void): #8500, #8282, #8096, #8270 (those four are Seat B surface), #8287. Decision-gated bugs pending one-sentence rulings: #8629, #8586, #8421.\n\n## Before dispatching anything: orphan re-verification\n\nFormer lane PMs stood down without closing out. Verify the true state (PR? merged? labels?) of each and either close out or re-dispatch under this theme:\n\n- `domain:identity` ledger named #7807, #8049, #7809 as dev-in-flight (2026-08-12) — none appear in the current `target:v17` listing, so they may have landed or lost their labels\n- `domain:drivers` ledger named #7929 as in flight\n- `domain:cli` ledger named #8373 (draft PR open) and #8388 (ACCEPT awaiting landing)\n\n## Operating rules\n\n- WIP cap: **≤3 dev agents in flight**.\n- Pull order inside the theme: `priority:p0` > `pm:blocking` > `security` > age.\n- Bug-fix PRs ride the **normal merge queue** (auto-merge allowed). Exception: any diff touching `.claude/skills/**`, `skills/**`, `.claude/agents/os-dev.md`, or `AGENTS.md` is ADR-class — draft + human merge, per standing rules.\n- Standard discipline unchanged: claim-before-code with session + branch, per-task worktrees, os-dev dispatch protocol, model tiering (default opus; fable where the mandatory clauses apply), union-after-final-commit with quoted HEAD.\n- Reporting: round reports on this epic (not per-lane); decisions surfaced to the maintainer via `needs-user-decision` or the round report.\n- Lane seat posts stay ⏳ vacant; the PM session taking this theme registers here with a claim comment (session ID + scope) and de-registers on stand-down.\n\n## Out of scope (by ruling)\n\n`hotcrm` and `cloud` repos. Boundary note for the maintainer: hotcrm's four P0s (e.g. #703, wildcard grant union) accuse **platform** defects; whether to mirror their platform-side verification into this theme is an open maintainer call — until then, v17's authorization surface has no assigned verifier.\n\n## Done means\n\nEvery in-scope `target:v17` bug is closed (fixed, or ruled defer/void with the ruling recorded); the five P0s all carry an explicit maintainer disposition."
+}

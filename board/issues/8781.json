@@ -1,0 +1,34 @@
+{
+  "number": 8781,
+  "kind": "issue",
+  "title": "os-dev: a bounded in-place exemption to the never-fix-out-of-scope rule — four conditions, or file it",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-15T01:18:06Z",
+  "updated_at": "2026-08-15T02:34:46Z",
+  "closed_at": "2026-08-15T02:23:29Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8781",
+  "body": "Filed and dispatched on direct maintainer instruction (2026-08-14, verbatim, untranslated): 「把上面四条豁免固化进 skill」, answering the seat's analysis of why a one-leaf translation fix became a filed card instead of a same-PR change.\n\n## The measured instance\n\nA dev repairing the es-ES half of an ADR-0090 rename found the identical stale leaf in the ja-JP bundle — same defect class, adjacent file, one string value, correct form already pinned by the file's own sibling field and by the English source. Current rule said file it, so it was filed with a full repo-wide bounding sweep behind it. Result: a 1-line fix now needs the whole pipeline (triage, claim, worktree, dispatch, gate union, PR, review, merge), and the chance to close the CLASS was lost — the consistency guard added in the es-ES PR deliberately omits a ja-JP rule *because* the instance was still open, so the two changes could have been one.\n\n## What the current rule says, and what it is really protecting\n\n`.claude/agents/os-dev.md` (the out-of-scope clause, near the top of the role's scope section): out-of-scope findings are filed as **unassigned** issues and listed in `out_of_scope_findings` — **never fixed in this PR**. Absolute by construction.\n\nIt protects two real things and must keep protecting both: **file-surface serialization** between parallel agents (a drive-by edit to a file another claim holds is a collision), and **unreviewable scope creep** (\"while I was here I also…\"). What it does not distinguish is a mechanical same-class leaf from a module refactor.\n\n## Deliverable — the exemption, in `.claude/agents/os-dev.md`\n\nAmend the out-of-scope clause so that in-place repair is licensed when **all four** hold:\n\n1. the finding is in the **same defect class** as the card being worked;\n2. the change is **mechanical** — no semantic judgment, the correct form already pinned by existing evidence (source of truth, sibling declaration, or a landed ruling);\n3. the target file is **held by no other claim**;\n4. it is covered by the **same gate families** — no new verification surface.\n\nObligations when the exemption is taken (part of the rule, not optional): the claim's declared file surface is **amended in the same round**; the PR body **names the extra fix and carries its evidence** (a bounding sweep belongs in the PR body, not lost); and where the same PR can extend an existing guard to cover the class rather than the instance, that is the preferred form. Any condition unmet ⇒ the existing behavior is unchanged: file unassigned, list in `out_of_scope_findings`, do not touch.\n\nReviewer's half, only if it fits the ceiling: one line in `references/review-checklist.md` — an in-place adjacent fix is checked against the four conditions plus the amended surface and the named evidence. If the ceiling cannot fund it without cutting a norm, skip it and say so; the dev-side rule is the load-bearing half.\n\n## ⛔ Ratchet constraint — this is the first card to land under the full-surface ratchet\n\nEvery covered file is at **headroom 0**: `os-dev.md` **399/399**, `review-checklist.md` **82/82**, SKILL.md 686/686 untouched. Additions must be **funded line-by-line in the PR body**, exactly as SKILL.md edits have been all along. Compression to pay for the new text must follow the rule that landed with the ratchet: verbatim rulings keep, stories compress to one line, ⛔ marks and norms survive. ⛔ Raising a ceiling is not an option here — no maintainer ruling authorizes it, and this card is not one.\n\nSurface is `.claude/agents/os-dev.md` (+ optionally one `references/**` line) ⇒ **fable-mandatory** dispatch, **ADR-class** merge path (draft PR, human merge, auto-merge never armed). Gate union after the final commit with quoted HEAD."
+}

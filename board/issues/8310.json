@@ -1,0 +1,34 @@
+{
+  "number": 8310,
+  "kind": "issue",
+  "title": "[3 of #7891] Flip the registration: `runtimeTypes` gains `object` + `permission`/`book` — whole rule families cross the publish door",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec"
+  ],
+  "assignees": [
+    "qq9340100"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-13T04:23:11Z",
+  "updated_at": "2026-08-14T05:41:51Z",
+  "closed_at": "2026-08-14T05:40:59Z",
+  "closed_by": {
+    "login": "qq9340100",
+    "id": 313832657,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 11,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8310",
+  "body": "Programme slice of #7891 (split by the `domain:spec` seat, session `session_01Euoy6wyfzgiWtgCg4s6JK2`). Final slice — the actual strictness flip.\n\nBlocked-by: #8308\nBlocked-by: #8309\n\n## Scope\n\nWith blocker A repaired (#8308) and the `permission`/`book` wiring in place (#8309), flip the `validateSecurityPosture` registration so the remaining rule families enforce at the runtime publish door (`runtimeTypes` gains `object`, `permission`, `book`), with pins recording each family's crossing. The ADR-0091 seed pair will already have crossed via #8307.\n\n## Constraints (inherited from the parent, binding)\n\n- ⛔ **No partial `security-role-word` wiring** — it judges six collections; it crosses whole or stays behind, stated explicitly either way (the #7220 failure shape is one rule id split across the wall).\n- The #4001 rollout discipline applies: each step must demonstrate zero breakage empirically (shipped corpus: showcase + CRM + todo + blank), not by inference — `packages/lint/src/validate-security-posture.runtime-surface.test.ts` is the executable measurement to extend.\n- Acceptance-surface change at the publish door ⇒ `claude-fable-5` clause applies at dispatch.\n\n## Re-price on unblock (standard)\n\nWhen #8308/#8309 close, re-verify this card's file surface on the merged ref before dispatch — the upstream landings are the most likely thing to have absorbed or reshaped this slice.\n\nPart of #7891."
+}

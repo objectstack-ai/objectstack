@@ -1,0 +1,35 @@
+{
+  "number": 8695,
+  "kind": "pull_request",
+  "title": "feat(spec): analytics authorable strictness + the data/ mixed(p) verdicts (#4001 data batch D)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-14T14:18:05Z",
+  "updated_at": "2026-08-14T15:16:18Z",
+  "closed_at": "2026-08-14T15:16:16Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-14T15:16:16Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/8695",
+  "body": "Part of #4001 (data batch D — the per-schema read for the 22 unresolved `mixed (p)` sites; the campaign umbrella stays open).\n\n## What this is\n\nThe dispatch's mandated per-site door measurement (carrier + BFS with positive AND negative controls in the same run + parse-site probes) over the whole `data/` remainder: `seed-loader.zod.ts` (12), `analytics.zod.ts` (8), `field-value.zod.ts` (2). Pre-change ledger regeneration confirmed zero drift (the freshness proof), so the 22-site premise held; the verdicts split three ways:\n\n### `analytics.zod.ts` — authorable on both halves, all 8 sites CLOSED\n\n- **Doors, measured**: `defineCube()` parses an author literal (the showcase example authors through it) and `defineStack({ analyticsCubes })` carries every cube through the stack parse. BFS from the 26 metadata-type roots + `ObjectStackSchema` (6689 nodes): the cube family resolves REACHABLE, with `ObjectSchema` as positive control, a fresh uncarried shape as negative control, and a synthetic-carrier flip proving the walker sees carriers — same run.\n- **The live behaviour change is a NESTED site**: `/analytics/query`'s top level has been strict since #3878 (`AnalyticsQueryRequestSchema`), but top-level strictness does not recurse. Measured on `main`: `timeDimensions: [{ dimension, granuarity: 'day' }]` rode through the strict wrapper with the typo silently stripped — the query bucketed the whole range as one group under an ordinary 200. The nested item now rejects with the rename in the message.\n- Pre-close probes on the cube family: `publik`, a metric `title`, a join `relationshipp` (falling back to `many_to_one` — a different join than authored, under a successful parse), `refreshKey.sqll` — all parsed clean and vanished. All reject now, each with a curated prescription; every alias claim is anchored to the declaration that makes it true and pinned in the batch test.\n- **ADR-0010 envelope deliberately NOT declared**, with the measurement: no protected item re-parses through these schemas (`CubeRegistry.register` takes typed objects without a parse; `analytics_cube` resolves no `getMetadataTypeSchema` entry so `saveMetaItem` never parses one; artifact ingest parses the compiled definition BEFORE `applyProtection` stamps). Pinned in the test so the day that flips, the envelope question is re-asked.\n- **Producer sweep (the Batch 20 standing discipline)**: zero cube/analytics-vocabulary producers in objectui/cloud; objectui's `data-objectstack` sends only declared keys (`cube`/`measures`/`dimensions`/`where`) to `/analytics/query`.\n\n### `seed-loader.zod.ts` — re-verdicted `wire` (12 sites; the provisional \"authored\" half did not survive measurement)\n\nThe old split claimed `SeedLoaderConfig` / `SeedIdentity` / `ReferenceResolution` are authored. Enumerated: every producer is framework code — `runtime/app-plugin.ts` ×3, `runtime/domains/packages.ts`, `metadata-protocol` `applySeedBodies` + `validate()`, `cloud-connection` marketplace install — all parsing config LITERALS written in code. `ReferenceResolution` is BUILT by `buildDependencyGraph` from field metadata; `SeedIdentity` is server-constructed by declaration. The authored half of seeding is `SeedSchema` (already strict, a registered type) — it enters only as the `seeds[]` VALUE, so author typos in seed files are rejected TODAY through the nested strict parse. Internal service contract (`ISeedLoaderService`), same class as `data-engine.zod.ts`. No schema change.\n\n### `field-value.zod.ts` — re-verdicted `open` (2 sites; the row's own prediction, now measured)\n\n`LocationValueSchema` / `AddressSchema` are ADR-0104 record-data VALUE contracts: consumed validation-only (`record-validator` stores the value verbatim — `.strip` never actually strips anything), written by end users / devices / geocoders whose extras are legitimate data (`heading`/`speed` on a GPS payload, `district` on a geocoded address — exactly the openness sibling `FileValueSchema` declares with `z.looseObject`). Enforcement posture belongs to ADR-0104's evidence-gated warn-first rollout, not this ratchet. One caveat recorded rather than glossed: a `location`/`address` field's authored `defaultValue` literal validates through the same contract, so an author's extra key there is admitted silently — splitting the contract strict-for-defaults/open-for-records would fork ADR-0104's one contract. No schema change.\n\n## Ledger\n\nProse verdicts hand-written; **all numbers via `gen:strictness-ledger` regeneration** (zero pre-change drift, regenerated post-change): `data/` unresolved **22 → 0**, `data/` strip 90 → 82, global strip 132 → 124, global authorable strip stays **2** (the deliberately parked `FormFieldBaseSchema` + held `IndexSchema`). `analytics.zod.ts`'s remaining-strip row leaves the map by reaching zero (the reverse pin demands the deletion). `check:strictness-ledger` green AND reverse-verified in the predicted direction (Class cell flipped back → gate red, counts not current → restored from commit → green).\n\n## Post-cut changeset clause (the PR #8666 precedent)\n\nAcceptance-narrowing after the v17.0.0 cut: changeset `minor` + **BREAKING** body annotation + ADR-0087 disposition marker (`registered analytics-authorable-unknown-keys-refused`) + semantic migration entry under the protocol-18 step (entry FILE added; `registry.ts` regenerated via `gen:migration-registry`, never hand-edited).\n\n## Verification\n\nSee the report comment on #4001 for the full command list with evidence; headline: spec suite green at HEAD; consumer pins green with **zero fixture edits** (service-analytics 1675, driver-memory 752, runtime dispatcher+seed pins 341, rest analytics 30, objectql aggregation/having/meta 142); `objectstack validate` green on showcase (its real authored cube is the positive control); `check:generated` 13/13; gate union derived from the actual diff via `dispatch-gates.mjs` and run locally — final HEAD quoted in the report comment.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01E5tUwGM3LQoqErTfkvRW7W)_"
+}

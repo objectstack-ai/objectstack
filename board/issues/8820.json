@@ -1,0 +1,34 @@
+{
+  "number": 8820,
+  "kind": "issue",
+  "title": "`ensureObjectStorage`'s `'objects'` limb is now dormant — a spelling-tolerant lookup one layer below the `/meta` fold",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-15T04:50:41Z",
+  "updated_at": "2026-08-15T13:25:49Z",
+  "closed_at": "2026-08-15T13:25:49Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8820",
+  "body": "Blocked-by: #8769\n\nObservation recorded while implementing #8769. Dormant code, not a defect — filed so the sweep is on record rather than acted on.\n\n## What was measured\n\n`packages/metadata-protocol/src/protocol.ts:11291`:\n\n```ts\nprivate async ensureObjectStorage(type: string, name: string): Promise {\n    if (type !== 'object' && type !== 'objects') return;\n```\n\nIt has exactly two call sites, and after #8769 both stand behind the `/meta` boundary fold:\n\n- `:12135` — inside `saveMetaItem`, which folds at `:11375`.\n- `:12966` — inside `runPublishSideEffects`, reached only from `publishMetaItem`, which folds at `:12703` as of #8769.\n\nSo `type` is canonical at both, and the `type === 'objects'` limb can no longer be reached. Before #8769 the second call site could still deliver `'objects'` — which is why the limb was doing real work there and why its removal was not correct to fold into that PR.\n\n## Why it is worth recording rather than leaving\n\nIt is precisely the shape `canonicalMetaType`'s header rejects, in that header's own words:\n\n> Do not \"fix\" a future instance of this by teaching a predicate one layer down (`isNestedArtifactField` and friends) to accept a plural. That is the spelling-tolerant lookup this comment has rejected since #4432.\n\nA tolerant predicate below a boundary that already folds is not merely dead — it is a standing invitation to address the layer directly and conclude that tolerance one level down is the house style. #7894's four manifest-absent types are what that habit costs when the tolerance and the fold disagree about which map is authoritative.\n\n## Suggested disposition\n\nDrop the `&& type !== 'objects'` limb, leaving `if (type !== 'object') return;`. No behaviour change is expected (see the reachability measurement above), so the pin that matters is the existing publish/save coverage staying green, not a new one.\n\n⚠️ Verify the reachability claim on the tree of the day before removing: a new caller added between now and then would make the limb live again, and this finding's whole basis is that there are exactly two callers and both fold.\n\nBacklink: #8769 (which added the second fold and left this comment in place at `:12685`).\n"
+}

@@ -1,0 +1,33 @@
+{
+  "number": 8691,
+  "kind": "issue",
+  "title": "spec: `record:reference_rail` has no ComponentPropsMap row — an entry `filter` parses, typechecks, validates, ships, and silently does nothing",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:spec"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-14T13:34:33Z",
+  "updated_at": "2026-08-14T18:21:37Z",
+  "closed_at": "2026-08-14T18:20:48Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8691",
+  "body": "Measured on `@objectstack/spec` **17.0.0 GA** and `@objectstack/console` 17.0.0 GA, statically **and** on a rendered page in a browser. Downstream at objectstack-ai/hotcrm#986 (GA close-out probe objectstack-ai/hotcrm#1154).\n\nScope note up front: the downstream card records three gaps in `record:reference_rail`. This mirror carries **only the first** — the missing spec declaration. The other two (rail title cannot reach `pluralLabel`; title is an untranslatable literal) are console renderer behaviour and genuine capability expansion, so they belong to the console seat and to a maintainer ruling on business pull; they are named at the bottom, not folded in here.\n\n## The gap\n\n```\nComponentPropsMap (@objectstack/spec/ui, 17.0.0 GA)\n  total component keys = 37\n  record:* keys = [\"record:details\",\"record:related_list\",\"record:highlights\",\n                   \"record:activity\",\"record:chatter\",\"record:path\"]\n  has record:reference_rail = false\n```\n\n`grep reference_rail dist/ui/index.d.ts` → 0 hits; there is no `ReferenceRailEntry` type either. With no row in the map, `PageComponent.properties` stays an open bag (`z.record(z.string(), z.unknown())`) and nothing on any path parses a rail entry.\n\nThe rail actually consumes only `objectName` / `relationshipField` / `limit` / `title` (plus `icon`, `displayField` for row rendering), issuing one query per entry:\n\n```\nfind(objectName, { $filter: { [relationshipField]: parentId }, $top: limit ?? 3, $count: true })\n```\n\n## Why it matters: the authored key is accepted everywhere and honoured nowhere\n\nReverse verification on a real app, with the expected direction fixed before running. Planted on a rail entry whose object has 3 related rows, 2 of them not `completed`:\n\n```ts\nfilter: [{ field: 'status', op: 'neq', value: 'completed' }]\n```\n\n| stage | result |\n|---|---|\n| `tsc --noEmit` | **exit 0** |\n| `objectstack validate` | **passed** — `reference_rail` appears **0 times** in the output |\n| `objectstack build` | **exit 0** — `reference_rail` appears **0 times** |\n| shipped artifact | filter present **verbatim** in `dist/objectstack.json` |\n| rendered rail | **badge unchanged at 3; the `completed` row still listed** |\n\nThe contrast is the finding: the *same* build run emits loud `component-props-unknown-key` / `component-props-invalid` warnings for `record:related_list`, `record:activity` and `page:accordion` in the very same file — because those components have rows in `ComponentPropsMap`. The rail is silent purely because it is undeclared.\n\nControl confirming the mechanism rather than assuming it: `ComponentPropsMap['record:related_list'].safeParse({ … bogus key … })` rejects.\n\nSo an author — most importantly an **AI author** — can add `filter` to a rail entry, watch it pass typecheck, `validate`, build and publish, and ship source that claims to filter while the badge keeps counting everything. This is the failure shape #4001 was closed to eliminate, still open on this one component.\n\n## Suggested fix\n\nAdd a strict `record:reference_rail` row to `ComponentPropsMap` describing the shape the renderer actually reads (`objectName`, `relationshipField`, `limit`, `title`, `icon`, `displayField`, and the component-level `hideEmpty`). This **tightens an existing shape rather than expanding the authorization surface**: it needs no judgement about whether a rail filter has business pull, and it converts today's silent no-op into a loud publish-time rejection. If a rail `filter` is later granted, the row is where it gets declared and enforced.\n\n## Explicitly not in this card\n\n- rail title resolves `objects.*.label`, never `pluralLabel`, on a card that carries a total-count badge (cosmetic);\n- rail `title` is rendered as a raw React child, so unlike `record:alert` it cannot take an inline translation map — the only options are \"omit\" or \"a literal that overrides every locale\".\n\nBoth are console-side and both are capability expansion; the downstream card notes the only consumer found by a repo-wide grep is a single rail on one detail page, so the pull question is genuinely open. Recommend splitting them to the console seat only if the maintainer rules there is pull.\n\nDownstream: objectstack-ai/hotcrm#986 (see also hotcrm#972, hotcrm#733)."
+}

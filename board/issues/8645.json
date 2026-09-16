@@ -1,0 +1,33 @@
+{
+  "number": 8645,
+  "kind": "issue",
+  "title": "finding: the class-name limb of Serve.providesCapability's identity registries never matches the SHIPPED build for a self-referencing plugin class",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-14T07:09:48Z",
+  "updated_at": "2026-08-15T11:57:24Z",
+  "closed_at": "2026-08-15T11:56:54Z",
+  "closed_by": {
+    "login": "qq9340100",
+    "id": 313832657,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8645",
+  "body": "Observation-class finding from #8357. No measured user impact today — filed so it is not rediscovered as a mystery later.\n\n`Serve.providesCapability` (`packages/cli/src/commands/serve.ts`) decides whether a host already supplied a capability's provider by comparing, by EQUALITY, both a loaded plugin's `name` and its `constructor.name` against a declared identity list. Every identity registry in that file therefore declares two spellings per provider: the registered `plugin.name` id, and the exported class name.\n\n**Measured: for `MarketplaceProxyPlugin` the class-name spelling never matches the built package.**\n\n```\n$ node -e \"console.log(require('@objectstack/cloud-connection').MarketplaceProxyPlugin.name)\"\n_MarketplaceProxyPlugin\n```\n\nThe cause is in the emitted bundle, not in the source. `packages/cloud-connection/src/marketplace-proxy-plugin.ts` references the class by name inside its own body — `MarketplaceProxyPlugin.prototype.version`, twice, building the outbound proxy User-Agent — and esbuild rewrites a class that self-references into a named class expression so the inner reference binds to the class binding rather than the outer `var`:\n\n```\npackages/cloud-connection/dist/index.js:151\nvar MarketplaceProxyPlugin = class _MarketplaceProxyPlugin {\n```\n\nThe emitted class's `.name` is therefore `_MarketplaceProxyPlugin`. The other three plugins in that package (`MarketplaceInstallLocalPlugin`, `RuntimeConfigPlugin`, `CloudConnectionPlugin`) do not reference themselves and keep their names — so this is not a package-wide build setting, it is a per-class consequence of one source idiom.\n\n## Why there is no impact today\n\nEvery guard that names this plugin also declares its registered id (`com.objectstack.runtime.marketplace-proxy`), which the instance carries as a plain field and which no bundler touches. The `name` limb fires, the guard works, and #8357's cloud-arm precedence check is correct as landed. What is dead is the redundancy: the class-name limb is a second, independent way for the guard to recognise a provider, and for this plugin it recognises nothing. A guard running on one limb it does not know it is running on is one rename away from failing OPEN — and failing open here means silently mounting a second instance over a host's own.\n\n## Why nothing caught it\n\n`packages/cli/test/serve-capability-identity.test.ts` is the drift guard for these registries, and it is careful — but its class-name assertion is `expect(identities).toContain(exportName)`, comparing the registry against the **string in the registry spec**, not against `Ctor.name`. It then asserts the constructed instance's `name` is declared. So the class-name limb is never compared to what the class is actually called at runtime, for any entry in `CAPABILITY_PROVIDERS` or the four marketplace identity lists. #8357's new drift test compares `constructor.name` modulo one leading underscore, which is what surfaced this — but that is a local accommodation in one test file, not a check.\n\n## Suggested direction\n\nNot obvious which end should move; both are defensible and the choice is worth a grading round rather than a guess:\n\n1. **Fix the source idiom** — replace the self-reference with `this.version` / a module-scope constant in `marketplace-proxy-plugin.ts`, so esbuild has nothing to rename. Narrow, restores the limb, and leaves nothing to remember, but it only fixes the instances someone happens to find.\n2. **Make the drift guard read `Ctor.name`** — assert every declared class-name identity equals the runtime class name of the export it names, across all the registries in `serve.ts`. This turns the whole class of drift into a red test the day it appears, and would have caught this one. It also makes the bundler idiom a build-time contract, which may be a stronger claim than the repo wants to hold.\n3. **Both** — the guard is what makes (1) stay fixed.\n\nWorth noting for whoever grades it: the same idiom in any other plugin class produces the same silent result, and nothing enumerates it. A one-off grep is not the remedy; whichever option is chosen, the question is whether the repo wants a mechanical check here or accepts the registered-id limb as the only load-bearing one and drops the class-name limb's claim to redundancy.\n\nBacklink: #8357.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01P7vaLs7bhBPi9m3JyzkhDj)_\n"
+}

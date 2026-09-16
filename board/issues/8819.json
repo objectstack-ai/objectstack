@@ -1,0 +1,35 @@
+{
+  "number": 8819,
+  "kind": "issue",
+  "title": "rollback-verb-skips-the-canonical-fold: `rollbackMetaItem` addresses around the ADR-0010 overlay `_lock` when spelled with a plural",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-15T04:50:27Z",
+  "updated_at": "2026-08-15T12:53:19Z",
+  "closed_at": "2026-08-15T12:53:19Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8819",
+  "body": "Measured while implementing #8769 (not fixed there — out of that card's declared region, which is `publishMetaItem`).\n\n## What was measured\n\n#8769 routed `publishMetaItem` through `canonicalizeMetaRequestType`, making it the seventh `/meta` entry point to funnel through the boundary fold. `rollbackMetaItem` is an **eighth** entry point on the same URL family, and it does not funnel through it either.\n\nMeasured on `origin/main` @ `60ade586e`:\n\n- `packages/metadata-protocol/src/protocol.ts:15298` — `async rollbackMetaItem(request: { type, name, toVersion, ... })`; no `canonicalizeMetaRequestType` call in its body. The seven that do fold are `getMetaItems` (:5048), `getMetaItem` (:5445), `getMetaItemLayered` (:5852), `getMetaItemCached` (:8835), `saveMetaItem` (:11375), `publishMetaItem` (:12703, added by #8769) and `deleteMetaItem` (:15621).\n- `:15320` — `const singularType = PLURAL_TO_SINGULAR[request.type] ?? request.type`, the MANIFEST-collection map, i.e. the exact lookup #7894 replaced at the boundary.\n- `:15331` — the ADR-0010 gate is called with **`type: request.type`, raw**, while every row operation below it (`:15358`, `:15362`, `:15374`, `:15393`) uses the folded `singularType`.\n\nThat asymmetry is the same one #8769 pinned one verb over. `assertLockAllowsWrite` delegates to `getEffectiveLock`, whose **artifact limb folds and whose overlay limb does not** — it queries `sys_metadata` with the raw `type` (`:10310`). So for a type present in the manifest map, a rollback addressed with the plural spelling looks the lock up under a `type` no row carries, gets `'none'` back — which is not a neutral value, it is the verdict \"the author declared no protection\" (#5706) — and then performs the write against the folded key, which resolves the protected row perfectly.\n\nReachable from the wire: `POST /api/v1/meta/:type/:name/rollback` is a registered route with a caller-supplied `:type` (`packages/rest/src/rest-route-ledger.ts:183`, handler at `packages/rest/src/rest-server.ts:6510`).\n\n## Why this is filed rather than fixed in #8769\n\n#8769's dispatch declared its file surface as `publishMetaItem` and its region; this is a different method. It is also not merely the same fix pasted: `rollbackMetaItem` writes a new active row from history rather than promoting a draft, so the fold's blast radius there (the `not_revertable` refusal sentence at `:15323`, the receipt at `:15380`, the conflict message at `:15385`) wants its own measurement and its own pin.\n\n## Severity, stated at its real width\n\nSame preconditions #8769 measured for the publish verb, so the window is narrow and should not be rounded up: it needs an environment kernel (`lockWriteRefusal` and `assertLockAllowsWrite` both open with `if (this.environmentId === undefined) return null`, skipping the gate wholesale otherwise), and a lock carried by a **stored overlay row** rather than a packaged artifact (the artifact limb folds, so an artifact `_lock` is found under either spelling).\n\nWithin that window it is a lock gate that can be addressed around from the wire, and \"a lock gate must not fail open\" is the rule `getEffectiveLock` already carries in its own header.\n\n## Suggested disposition\n\nRoute `rollbackMetaItem` through `canonicalizeMetaRequestType` like the seven siblings, with a pin in the shape #8769 used (`packages/objectql/src/protocol-publish-canonical-fold.test.ts` group C — canonical spelling refused by the lock, plural spelling refused by the SAME lock, and the protected body unchanged).\n\nWorth deciding at the same time whether the durable fix is at `getEffectiveLock` instead: folding its overlay limb would close this class at the producer for every present and future caller, rather than once per entry point. That is the contract-first shape, but it is a change to a shared gate and wants a maintainer's call rather than a dev's.\n\nBacklink: #8769 · the boundary fold's rationale is #7894 · the fail-open-is-not-neutral rule is #5706.\n"
+}

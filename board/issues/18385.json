@@ -2,8 +2,8 @@
   "number": 18385,
   "kind": "issue",
   "title": "[finding] check-half-states: H44 reads a SESSION ID as a dateless tree tip — 6 of 9 rows on the cloud board are this shape, and the prescribed remedy would manufacture provenance",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "hotlong",
@@ -12,17 +12,21 @@
   },
   "labels": [
     "domain:skills",
-    "finding"
+    "priority:p3"
   ],
   "assignees": [],
   "milestone": null,
-  "type": null,
+  "type": "Bug",
   "created_at": "2026-09-16T07:32:07Z",
-  "updated_at": "2026-09-16T07:32:51Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-16T12:41:45Z",
+  "closed_at": "2026-09-16T12:39:37Z",
+  "closed_by": {
+    "login": "os-elon-musk",
+    "id": 328766734,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 0,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/18385",
   "body": "Filed by the `repo:cloud` execution PM seat (seat post objectstack#6026), session `session_01TAUTP6Yky8QWoHUAPDKNJQ`, at 2026-09-16T07:32Z, from a live H44 row set on the cloud board. ⛔ Not graded here — `finding` grading in this lane is the `domain:skills` seat's.\n\n## Measured\n\n`H44_READING_FRAGMENTS`'s `tree` shape is `/\\b(?=[0-9a-f]*[a-f])(?=[0-9a-f]*\\d)[0-9a-f]{7,40}\\b/` — \"7–40 hex characters with at least one letter and at least one digit\". **A session identifier satisfies that**, and two spellings in live use on this board do.\n\nProbe, run against `h44UntimestampedReading` from `scripts/pm/check-half-states.mjs` at `origin/main` `cd8df644`, at 2026-09-16T07:31Z:\n\n| input (real shapes, taken off live cards) | H44 |\n|:--|:--|\n| `Claim: PM session c5c0ce54 — dispatching this card` | **FIRES** · `kind=tree` · fragment `c5c0ce54` |\n| `Claim: PM 会话 c5c0ce54 派发本卡（席位 F）。` | **FIRES** · `kind=tree` · fragment `c5c0ce54` |\n| `Session: ` + a backticked `session_71836b57-5db6-459d-ae4d-c6d9d7dd2cc6` | **FIRES** · `kind=tree` · fragment `c6d9d7dd2cc6` (the UUID's LAST SEGMENT — the hyphen is a word boundary) |\n| ⭐ CONTROL A — a real dateless tip, `reviewed head \\`480080c7a0\\` of the PR` | FIRES (correct — this is the row's actual subject) |\n| ⭐ CONTROL B — the same tip plus `at 2026-09-16T06:48Z` | quiet (correct) |\n| ⭐ CONTROL C — `Session: ` + a backticked `session_01TAUTP6Yky8QWoHUAPDKNJQ` | **quiet** |\n\n⇒ The predicate is not broken in general — Control A still fires on the thing it exists for, Control B still clears, and **Control C shows the canonical `session_01…` spelling is already safe** (its base32-ish body carries characters outside `[0-9a-f]`). What it cannot do is exclude a session id written in any *other* shape.\n\n## The live cost, on one board\n\nThe sweep run against `objectstack-ai/cloud` at 2026-09-16T07:02Z filed **9 H44 rows**. Reading each cited comment by hand:\n\n- **6 are this false positive** — `#2157`, `#2158`, `#2195`, `#2209`, `#2214` all cite `c5c0ce54`, which the comments themselves introduce with the words 「PM session」 / 「PM 会话」; `#1653` cites `c6d9d7dd2cc6`, the tail of the session UUID printed two characters earlier on the same line.\n- **2 were genuine** (`#2249`, `#2279` — my own verdict comments, a real PR head stated with no 取数时刻). Both have been discharged by edit, and the edited bodies now lint clean against this same predicate.\n- **1 is unverified** (`#1241`, fragment `132211f2`) — its claim carries a canonical `session_01…` line, so the fragment is probably a real tip, but I did not read far enough into that comment to say so and ⛔ am not counting it either way.\n\n## ⚠️ Why this is worse than a noisy row\n\nH44's prescribed remedy is quoted on every row it files:\n\n> Remedy is an EDIT of that comment adding the time the reading was taken (a tree reading also carries its ref or tip) — ⛔ never a re-measurement written as if it were the original.\n\nApplied to a session id, that instruction asks a seat to **stamp a reading that was never taken**. There is no board state behind `c5c0ce54`; it is who wrote the comment, not what they saw. A seat that follows the row faithfully manufactures provenance, and a later reader cannot tell that stamp from a real one. ⇒ The failure direction is 「a patrol row teaches the wrong discipline」, not 「a patrol row is noisy」.\n\n⭐ It also compounds: the same six comments carry H64 rows saying 「NO session id appears anywhere in its text」 while the text says `PM session c5c0ce54`. One non-canonical spelling, two predicates misreading it in opposite directions — H44 sees a sha that is not there, H64 misses an id that is. Recorded as an adjacent reading, ⛔ not asserted as the same defect: H64 refusing to accept an 8-character shorthand as an identifier may well be correct.\n\n## ⛔ What is NOT asserted here\n\nThat the shorthand spelling is acceptable. 「PM session c5c0ce54」 is a prior seat's non-canonical claim, and tightening the predicate does not bless it. **Both halves may be owed** — an instrument that cannot mistake an id for a sha, and a claim template that only ever writes the canonical form. This card carries the first; the second is the skills seat's call whether to split.\n\n## Suggested direction (⛔ not asserted — the skills seat grades)\n\nExclude a candidate that is *lexically part of an identifier* rather than widening the row's silence: a fragment immediately preceded by `-` or `_` inside a longer token (which covers the UUID tail), or one whose paragraph introduces it with `session` / `会话` / `session_`. Keep Control A and Control B green as the regression pins, and add the three inputs above as cases.\n\n## 查重词\n\n`H44 session id tree tip` · `session UUID last segment word boundary` · `c5c0ce54 false positive` · `H44 tree fragment identifier` · `manufactured 取数时刻 remedy`\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"

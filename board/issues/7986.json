@@ -1,0 +1,35 @@
+{
+  "number": 7986,
+  "kind": "issue",
+  "title": "[security] webhook custom `headers` are still cleartext in two JSON blobs — the sibling of #7799 that PR #7901 did not close",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "security"
+  ],
+  "assignees": [
+    "huangyiirene"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-12T09:30:57Z",
+  "updated_at": "2026-08-13T20:46:32Z",
+  "closed_at": "2026-08-13T20:46:10Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 9,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7986",
+  "body": "Filed by the `domain:services` PM seat from the #7902 credential-persistence survey (report: comment 5264546868 on #7902). Unassigned, no `pm:queue` — **for triage to grade**, per the single-producer rule.\n\n## The finding\n\n#7799 moved the webhook **signing secret** out of `sys_webhook.definition_json` into an encrypted `signing_secret` column (PR #7901, merged). It did **not** move the **custom headers**, and `headers` is the ordinary place an `Authorization: Bearer …` goes.\n\nTwo blobs carry them in cleartext, both reachable through the ordinary data API:\n\n| # | Object · column | Evidence | Who reads it back |\n|---|---|---|---|\n| ①-a | `sys_webhook.definition_json` | `sys-webhook.object.ts:181-186` (column, documented as \"headers/timeout config\"); `webhook.zod.ts:195` — `headers: z.record(z.string(), z.string())` | `auto-enqueuer.ts:376` → `defn.headers` |\n| ①-b | `sys_http_delivery.headers_json` | `sql-http-outbox.ts:109` — `JSON.stringify(input.headers)`, no redaction; `http-delivery.object.ts:126` | `sql-http-outbox.ts:276` → `http-sender.ts` |\n\n⚠️ **`sys_webhook` declares no `enable` block at all** (`sys-webhook.object.ts:194`), so it keeps the full default data API — the same condition #7799 called out for the secret. `sys_http_delivery` declares `apiMethods: ['get','list']`.\n\n## Why this is worth its own card rather than a footnote on #7799\n\n**#7799 was framed as \"the signing secret is in cleartext,\" and it was fixed exactly as framed.** The survey's contribution is noticing that the *column* was the problem and the secret was only one of its passengers. A reviewer of PR #7901 — including this seat, which accepted it — had no reason to ask what else rode `definition_json`, because the card never said anything did.\n\nThat makes this a **scope-of-the-original-fix** finding, not a regression: nothing PR #7901 did made this worse, and the exposure predates it. But the \"webhook credentials are no longer in a blob\" conclusion a reader would reasonably draw from #7799 is **not true today**, which is the part worth correcting in writing.\n\n## Shape of a fix, if wanted (⛔ not decided here)\n\nNot obviously the same shape as the secret's. A signing secret is one opaque value with one consumer; `headers` is an open-ended `Record<string,string>` where **only some entries are credentials** and the platform cannot tell which. Options a card would have to choose between:\n\n- move the whole map behind `Field.secret()` — simple, but encrypts non-sensitive headers too and makes them unreadable in the admin UI;\n- split declared-sensitive header names into a secret-backed side channel, leaving the rest in the blob — needs an authoring surface change (`packages/spec/src/automation/webhook.zod.ts`) and therefore the **spec seat**;\n- redact on read rather than at rest — cheaper, but leaves cleartext at rest, which is the property #7799 was about.\n\nThe middle option touches the authoring envelope, so per the #7799 dispatch's own STOP fork that piece would transfer to `domain:spec`.\n\n## Explicitly NOT claimed\n\n- **No regression from PR #7901.** The header exposure is unchanged by it, in either direction.\n- **No live leak is demonstrated** — this is a reachable-cleartext finding, not an incident report. Whether any deployment actually puts a bearer token in webhook headers is unmeasured.\n- **The signing secret itself is fixed** and stays fixed; `sys_webhook.signing_secret` is `Field.secret()`-backed and verified clean by the same survey.\n\n## Evidence\n\nMeasured 2026-08-12 by the dev on #7902 (read-only survey, `pr: null`), file:line evidence as cited above. Full verdict table for 26 surfaces in comment 5264546868 on #7902.\n\n## Source\n\nSplit out of objectstack-ai/objectstack#7902 (the survey), which was itself split out of #7799 / PR #7901."
+}

@@ -1,0 +1,34 @@
+{
+  "number": 8785,
+  "kind": "pull_request",
+  "title": "docs(agents): license a bounded in-place fix for same-class adjacent defects",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-15T01:38:00Z",
+  "updated_at": "2026-08-15T02:23:29Z",
+  "closed_at": "2026-08-15T02:23:28Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-08-15T02:23:28Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/8785",
+  "body": "Fixes #8781\n\nThe `os-dev` out-of-scope rule was absolute: every finding filed as an unassigned card,\nnever repaired in the PR that found it. That is right for a module refactor and wrong for a\nmechanical same-class leaf — a one-string repair whose correct form is already pinned by its\nown sibling field then costs a full pipeline (triage, claim, worktree, dispatch, gate union,\nPR, review, merge), and the chance to close the **class** with one guard is lost while the\ninstance stays open.\n\n## What changed\n\n`.claude/agents/os-dev.md`, ground rule 3 — the prohibition stays the default; a bounded\nexemption is added under it, licensed only when **all four** hold: ① same defect class as\nthe card; ② mechanical, the correct form already pinned by existing evidence (source of\ntruth, sibling declaration, landed ruling); ③ the file held by no other claim; ④ same gate\nfamilies, no new verification surface.\n\nTaking it owes what the default protects, so both protections stay legible in the text:\nthe claim's declared file surface **amended the same round** (that list is what serializes\nparallel agents — condition ③ plus this obligation is the file-surface half) and the PR body\n**naming the fix with its evidence**, bounding sweep included (an unnamed drive-by is the\nunreviewable creep the default exists to stop). Where one guard can close the class,\nextending it is preferred over patching the instance. Any condition unmet leaves the old\nbehavior exactly as it was: file unassigned, list it, do not touch.\n\nReviewer's half, in `references/review-checklist.md`: one bullet checking the four\nconditions, the amended surface and the named evidence — it fit the ceiling without cutting\na norm (see the accounting).\n\n## Ratchet accounting — net zero per file, funded line by line\n\nBoth files sit at headroom 0, so every added line is paid for. No ceiling is raised.\nCompression rule followed as it landed with the ratchet: verbatim maintainer rulings keep,\nmeasured-story narrative compresses to one line, every stop mark and norm survives.\n\n### `.claude/agents/os-dev.md` — 399 → 399 (ceiling 399)\n\n| Site | Lines | Δ | What paid for it |\n| --- | --- | --- | --- |\n| ground rule 3 — the exemption | +9 | **+9** | the new rule |\n| frontmatter `model:` comment | 11 → 8 | −3 | pure reflow: the block was wrapped at 78 cols in a file that wraps at 95, and the comment delimiters now share the text lines. **Zero words removed** |\n| resource rule 4 (worktree cleanup) | 6 → 5 | −1 | reflow; \"something in there is not committed\" → \"something there is not committed\". Also restores the missing space before the stop mark |\n| local-verification ④ | 8 → 7 | −1 | \"a same-day, carefully taken list still misses families. After the named families pass\" → \"even a carefully taken same-day list misses families, so once the named ones pass\" |\n| \"Run the union AFTER your final commit\" | 8 → 7 | −1 | the closing restatement (\"An unquoted HEAD makes a green union unreviewable, so quote it even when…\") folded into the opening sentence as a parenthetical — same norm, stated once |\n| terminating rule 2 | 4 → 3 | −1 | reflow; \"on the strength of a wake alone\" → \"on a wake alone\" |\n| terminating rule 3 | 5 → 4 | −1 | story to one clause: \"every such death so far was fully recoverable with zero work lost. The cost is latency, not correctness\" → parenthetical on the same sentence |\n| terminating rule 4 | 7 → 6 | −1 | reflow; \"The report is never a violation of this check\" → \"The report never violates it\"; \"The only wait you may end a turn on\" → \"The only turn-ending wait\" |\n| **net** | **399 → 399** | **0** | |\n\nNo stop mark was dropped, so none needs a surviving home named: the count is **11 on `main`\nand 11 at this head**. \"measured\" markers 8 → 8; maintainer rulings unchanged (3 `maintainer\nruling` + 1 `maintainer-decided` + 1 `maintainer,`).\n\n### `.claude/skills/pm-dispatch/references/review-checklist.md` — 82 → 82 (ceiling 82)\n\n| Site | Lines | Δ | What paid for it |\n| --- | --- | --- | --- |\n| new bullet — four conditions, amended surface, named evidence | +2 | **+2** | the reviewer's half |\n| `PR 形态` bullet | 5 → 4 | −1 | reflow only |\n| `范围检查` bullet | 5 → 4 | −1 | reflow only |\n| **net** | **82 → 82** | **0** | |\n\nBoth reflows are provably pure — with the new bullet removed, the file is character-identical\nto `main` modulo whitespace (`norm(current minus new bullet) === norm(main)` returns true).\n\n## Gate union — after the final commit, at HEAD `675f7bb7e6`\n\nFamilies derived from the actual changed paths with `node scripts/pm/dispatch-gates.mjs`;\nthe derivation returned exactly the six named in the dispatch plus\n`check:doc-formula-expressions`, which is run below.\n\n```\n✓ check:pm-skill-ratchet          os-dev.md 399 lines (ceiling 399; headroom 0)\n                                  review-checklist.md 82 lines (ceiling 82; headroom 0)\n✓ check:pm-skill-id-lint\n✓ check:agent-model-declared      1 definition, os-dev.md → opus; 0 justified inherits\n✓ check:skill-frame-sync          4 copies of the decision frame isomorphic across 3 files\n✓ check:doc-authoring             377 files clean\n✓ check:nul-bytes                 5803 text files, no raw ASCII control bytes\n✓ check:doc-formula-expressions   22 examples / 1410 TS blocks clean (after formula build)\n```\n\n`check:doc-formula-expressions` needed the formula build closure first in the fresh\nworktree. Working tree clean at that HEAD.\n\n## Merge path\n\nADR-class: **draft**, human merge, auto-merge never armed. `skip-changeset` — agent-protocol\nfiles only, nothing published changes.\n\nOne note for the reviewer: this card's own rule would have licensed folding the motivating\none-leaf translation fix into its originating PR. That instance stays filed and is\ndeliberately untouched here — this PR is the rule, not the instance.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_018WuTtyckQa1VcXwgd52JpN)_"
+}

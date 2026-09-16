@@ -1,0 +1,33 @@
+{
+  "number": 18398,
+  "kind": "pull_request",
+  "title": "fix(pm): git-history's touch leg reads the graft, not just the parent's presence",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-elon-musk",
+    "id": 328766734,
+    "type": "User"
+  },
+  "labels": [
+    "size/m",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-16T08:45:27Z",
+  "updated_at": "2026-09-16T09:41:24Z",
+  "closed_at": "2026-09-16T09:41:23Z",
+  "closed_by": {
+    "login": "os-elon-musk",
+    "id": 328766734,
+    "type": "User"
+  },
+  "merged_at": "2026-09-16T09:41:23Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/18398",
+  "body": "Fixes #18355\n\n`touchIsProvable` proved leg 1 by asking whether every parent the commit OBJECT names is present locally. A later fetch — of another ref, or of one sha — brings that parent into the object store **without moving the shallow boundary**, so the graft stays registered and git's traversal goes on treating the commit as parentless. Leg 1 then passed, `diff-tree` diffed the commit against its EMPTY grafted parent list and printed nothing, and the verdict came back:\n\n```\n{ provable: false, boundary: false, reason: \"SHA has its parent(s) locally but its diff does not touch PATH\" }\n```\n\nThe refusal is correct (no caller is handed the sha) and both the `boundary` flag and the sentence beside it were wrong: an operator was told the file was simply untouched, when a grafted walk is what answered. Which of the two sentences came out depended on when the last fetch ran.\n\n## The discriminator, and why it is not the shallow file\n\nLeg 1 now reads the graft where git applies it, per sha. `git rev-parse SHA^@` lists the parents the TRAVERSAL uses — the `--max-parents=0` reading asked of ONE commit — and an object naming a parent that list does not carry is grafted, whether or not that parent is in the store. New export `isGraftBoundary(cwd, sha, parents?)` compares the two lists; `touchIsProvable` fails leg 1 on it and returns `boundary: true` with a reason that names the outlived registration.\n\nThe card named two candidate discriminators (shallow-file membership, or `rev-list --max-parents=0`). Both were measured; `SHA^@` is the same traversal fact, asked per sha:\n\n| reading | cost (20 runs, this checkout) | notes |\n|---|---|---|\n| `git rev-parse SHA^@` | **2.6 ms / call** | answers without walking — same cost on a complete clone |\n| `git rev-list --max-parents=0 SHA` | 15 ms / call | walks the ancestry; costs more the more history is present |\n| shallow-file membership | — | needs the common dir resolved (it prints a RELATIVE `.git` from a repo root) and the sha normalised to 40 hex; misses a graft from any other source |\n\nA real root still passes leg 1 (its object names no parent, so the two lists agree) and an ordinary commit still answers — the case a `--max-parents=0` count on its own cannot tell apart, which is why this compares two lists instead of counting one.\n\n## No behaviour change beyond the flag and the sentence\n\nThe refusal itself, the `--deepen` doubling to `--unshallow`, exit 2 and the empty stdout are untouched. A grafted commit's `diff-tree` prints nothing in every case, so no reading that used to be `provable: true` can become a refusal here.\n\n## Tests\n\n- `node scripts/pm/git-history.mjs --self-test` — **62 cases, exit 0** (was 54). Eight new cases in the `touch` battery, floor 17 to 25.\n- `node scripts/pm/check-harness-current.mjs --self-test` — the consumer, **14 cases, exit 0**, unedited. It prints `boundary` where it used to print `unprovable` for this state, which is the point of the card.\n- **Fixture, constructed not described**: clone `--depth=5`, then a plain `git fetch origin PARENT_SHA` (no `--deepen`, so nothing rewrites the shallow list) with `uploadpack.allowAnySHA1InWant` on the upstream. The case READS THE STATE FIRST — shallow list still names the boundary, parent object present, walk still roots there, clone still shallow — because a case asserting on a state that did not form proves nothing.\n- **Ablation** (leg reverted to parent-presence only, on the committed tree, restored with `git checkout HEAD --` under a trap, blob hash compared both ways): **3 cases red**, then byte-identical restore and green again.\n\n```\nPRE : hash-object=1239050079c6d4507a65e8cf3af16f3f2cdfc5d7 == HEAD:scripts/pm/git-history.mjs\nPOST: removed-marker=0 removed-leg=0 injected=1 hash=188314847512759d24fa11310b86c5d3d4bdb815\nABLATED SELF-TEST EXIT=1 · git-history --self-test: 3 FAILED.\nRESTORED: hash=1239050079c6d4507a65e8cf3af16f3f2cdfc5d7 (HEAD=1239050079c6d4507a65e8cf3af16f3f2cdfc5d7) git-diff-HEAD-empty=yes\nRESTORED SELF-TEST EXIT=0 · all cases passed.\n```\n\n## Acceptance notes\n\n- The first spelling of the CLI-refusal case tested stderr for `graft boundary` and stayed GREEN under ablation: the refusal boilerplate prints that phrase on every refusal, so the case was pinning a constant. The ablation is what found it; the case now pins the reason clause and the absence of the misleading sentence, and its own history is written into the case name.\n- One wording-only second commit: a neighbouring case title still called the predicate \"the parent's presence\". The assertion is unchanged.\n- `skip-changeset`: `scripts/pm/**` is not in any package's `files[]` — nothing publishes.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01Bz6hxDBqK62NP2W1LATvnt\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01Bz6hxDBqK62NP2W1LATvnt)_"
+}

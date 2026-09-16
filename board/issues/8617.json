@@ -1,0 +1,38 @@
+{
+  "number": 8617,
+  "kind": "issue",
+  "title": "The audience-binding-suggestion reconciler writes with a tenant-less system context, so one organization-less row serves every tenant — the second half of the #8577 install-path dead end",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "auto-adjudicated",
+    "bug",
+    "pm:dispatched",
+    "security",
+    "target:v17"
+  ],
+  "assignees": [
+    "qq9340100"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-14T02:31:30Z",
+  "updated_at": "2026-08-14T13:29:35Z",
+  "closed_at": "2026-08-14T13:29:35Z",
+  "closed_by": {
+    "login": "qq9340100",
+    "id": 313832657,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8617",
+  "body": "Found while implementing #8577 (scoping `sys_audience_binding_suggestion`'s declared unique index per organization), by measuring the **install path end to end through the real reconciler** rather than stopping at the driver-level 409/201 oracle. Filed separately because #8577's scope is exactly the two index respellings; nothing here is fixed there.\n\n## What #8577 fixes, and what it does not\n\n#8577 makes the storage able to hold one suggestion row per organization: `(package_id, permission_set_name, anchor)` stops being an installation-wide key. Measured with a tenant-threaded execution context on a real `ObjectQL` + `SqlDriver` engine, driving the real `syncAudienceBindingSuggestions`:\n\n```\nPRE-fix   org_jia sync -> created 1 | org_yi sync -> created 0, org_yi sees 0 rows\nPOST-fix  org_jia sync -> created 1 | org_yi sync -> created 1, each sees its own\n```\n\nBut the **shipped call path never threads a tenant.** `packages/plugins/plugin-security/src/suggested-audience-bindings.ts` reads and writes through a module-level constant:\n\n```ts\nconst SYSTEM_CTX = { isSystem: true };\n```\n\nand `security-plugin.ts` invokes the reconciler with the bare engine at boot and after a package-door `permission` publish. `listAudienceBindingSuggestions` gates on the caller's identity but then reconciles with `SYSTEM_CTX` too.\n\n## Measured on a real engine (better-sqlite3, `OS_MULTI_ORG_ENABLED=true`, `OS_TENANCY_POSTURE=isolated`)\n\n| | measurement |\n|---|---|\n| insert under `{ isSystem: true }` | stores `organization_id` **NULL** |\n| insert under `{ isSystem: true, tenantId: X }` | stores `organization_id` = X |\n| find under `{ isSystem: true }` | sees **every** organization's rows |\n| find under `{ isSystem: true, tenantId: X }` | sees X's rows **and** the NULL-organization rows |\n\nThe last row is the platform's declared behaviour, not a surprise: the driver expands a tenant predicate to `organization_id = :tenant OR organization_id IS NULL` (ADR-0120 D3's platform bucket).\n\nRunning the reconciler exactly as shipped, twice, on the **post-#8577** schema:\n\n```\nfirst  sync -> { created: 1 }\nsecond sync -> { created: 0 }\nstored rows -> [ { org: NULL, key: com.acme.crm/sales_readonly/everyone, status: pending } ]\n```\n\nIdentical before and after #8577. So on a shared-runtime multi-organization installation the surface holds **one organization-less row that every tenant reads**, and its consequences are:\n\n1. The **first** tenant admin to confirm or dismiss flips that single row. Every other tenant's console then shows a resolved suggestion and never prompts them — while `confirmAudienceBindingSuggestion` created the actual `sys_position_permission_set` binding with the **caller's** context, i.e. in the confirming tenant's organization only. So for every other tenant the package's default permission set is still not bound, and the surface says it is.\n2. `findAnchorPositions` resolves `sys_position` by name under the same tenant-less context with `limit 1`, so the `everyone` anchor a suggestion is checked against is whichever organization's row the driver returns first.\n3. `bindingExists` therefore answers a question about some other tenant's binding.\n\nThis is the same functional dead end #8577 describes — the second organization's admin is never prompted — reached by a second, independent road. Fixing the index is necessary (without it even a correctly tenant-scoped write is refused) but it is not sufficient on this deployment shape.\n\n## Suggested shape (not a decision — the tenancy question is the maintainer's)\n\nTwo readings, and they lead to different architectures, so this needs the ruling before code:\n\n- **A. The suggestion surface is per-organization** (what the object's own header says: rows are \"resolved when a tenant admin confirms\", and `organization_id` is injected with no tenancy opt-out). Then the reconciler must run per organization with that organization's context, and every read in it must be tenant-scoped. This is the reading #8577's respelling assumes.\n- **B. The suggestion surface is installation-wide** (one row per package x set x anchor, deliberately organization-less). Then the object should declare a tenancy opt-out and its index should be an explicit `unique: 'global'` — and the per-tenant prompt has to live somewhere else, because one row cannot carry N tenants' decisions.\n\nB contradicts the object's declared shape and ADR-0090 D5/D9's per-tenant confirm gate, so A looks right, but the choice is a public-contract question about the object.\n\n## Pinned, not just described\n\n`packages/plugins/plugin-security/src/suggested-audience-bindings-install-path.test.ts` (added by #8577) records today's behaviour in its section 3, `the shipped SYSTEM_CTX call path is tenant-blind (recorded, not endorsed)`. Those two assertions are a record, not an endorsement: **the fix for this issue must DELETE them**, and if they still pass afterwards the fix did not work.\n\n## Related\n\n- #8577 — the index respelling, where this was measured. Not addressed there.\n- #7677 — the earlier suggested-binding-loop defect on the same surface (auto-bound at boot, then skipped).\n- #8323 / #8461 / #8468 / #8554 — the tenant-scoped declared unique index class.\n\nFiled unassigned, unlabeled for triage. Found by session `session_012WMpuAfA2KSdDjGF6tm1bH` (dev seat for #8577)."
+}

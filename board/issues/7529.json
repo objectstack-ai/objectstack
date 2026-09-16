@@ -1,0 +1,36 @@
+{
+  "number": 7529,
+  "kind": "issue",
+  "title": "The metadata door accepts a dashboard widget dataset binding that names nothing — 200 on both save and publish, referential integrity enforced only at runtime",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:devx",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-11T05:00:19Z",
+  "updated_at": "2026-08-15T17:01:49Z",
+  "closed_at": "2026-08-15T17:01:49Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 19,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7529",
+  "body": "## Symptom\n\nA dashboard widget can declare a **dataset binding that names nothing** — a dataset reference with no corresponding dataset anywhere — and the metadata door takes it without complaint:\n\n- **save** &rarr; `200`\n- **publish** &rarr; `200`\n\nNothing at author time, build time, or publish time notices that the reference resolves to nothing. Referential integrity for this binding is enforced **only at runtime**, at which point the widget surfaces a visible error in the rendered board.\n\nRecorded as a `finding` rather than a `bug` because the runtime failure is honest and loud — the widget does show an error rather than rendering blank or silently empty, which is why the negative clause it sits inside still passed. The gap is the *timing*: a dangling reference ships all the way to a live board before anyone learns about it.\n\n## Root cause\n\nNot root-caused in this run — the observation is behavioural (both the save and the publish arm answer 200). What is established is the shape of the gap: whatever validates a widget's dataset binding at the metadata door does not resolve the reference against the set of datasets that actually exist, so a name that matches nothing is indistinguishable from a name that matches something.\n\nThe natural place to look is the metadata validation seam that save and publish share — `packages/metadata*` — since both arms behave identically, which suggests one shared validator (or one shared absence of one) rather than two independent oversights.\n\nWorth deciding alongside this: whether the reference should be refused at the door, refused only at **publish** (letting a draft hold a forward reference to a dataset not yet authored), or surfaced as a build-time warning. The \"declared = enforced\" posture argues for refusing at publish at the latest — a published board with a dangling binding is a broken board with no signal until a user opens it.\n\n## Reproduction\n\n1. Boot the showcase.\n2. Author a dashboard widget whose dataset binding names a dataset that does not exist.\n3. Save the metadata &rarr; observe `200`.\n4. Publish &rarr; observe `200`. No error, no warning, no located message on either arm.\n5. Open the board &rarr; the widget renders a visible runtime error, confirming the reference is genuinely unresolvable and was never checked earlier.\n\n## Source\n\nExtracted from the QA run objectstack-ai/objectstack#7515 (framework a86db175). Recorded there under \"Smaller observations\"."
+}

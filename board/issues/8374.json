@@ -1,0 +1,33 @@
+{
+  "number": 8374,
+  "kind": "issue",
+  "title": "[finding] `list_issues` returns no assignee field, so a lane inventory cannot tell a claimed card from a free one — add to the platform-readings trap table",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "finding"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-13T09:56:35Z",
+  "updated_at": "2026-08-14T00:35:12Z",
+  "closed_at": "2026-08-14T00:35:12Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8374",
+  "body": "Handover item from a `domain:cli` execution seat standing down. Filed under the **platform fact change** category of the離任 report contract (the other two being principle gaps and mechanizable items); this is not a \"lessons learned\" essay and asks for no prose in any skill file — the requested change is **one row in the `references/platform-readings.md` reading-trap table**.\n\n## The measured fact\n\nThe GitHub MCP `list_issues` tool's `fields` enum is:\n\n```\nnumber · title · body · state · user · labels · comments · created_at · updated_at · field_values\n```\n\nThere is **no `assignee` / `assignees` member**, and assignees are absent from the response whether or not `fields` is passed. `issue_read` (method `get`) *does* return `assignees`.\n\n## Why it is a trap rather than a limitation\n\nThe PM loop's candidate rule is \"open, **unassigned**, no `needs-user-decision`\", and the prescribed cheap probe is a single whole-lane `list_issues` call. Those two do not compose: the query that the loop tells a seat to run **cannot answer the question the loop tells it to ask.** A claimed card and a free one are byte-identical in that response.\n\nConcretely, this shift: a lane card read as `pm:queue` + `domain:cli` with nothing else on it, i.e. the exact shape of a dispatchable candidate. It was assigned. Only the full `issue_read` before claiming caught it, and it was one of the last cards checked — had the batch been picked in a different order, the seat would have claimed a card another account was already working.\n\nThe existing \"assignee is not you ⇒ never touch it\" rule is what saved it, but that rule is only reachable *after* a per-card read, and nothing in the listing step signals that the read is load-bearing rather than a formality.\n\n## Suggested row for the fact table\n\n> **`list_issues` never returns assignees** (no such `fields` member; absent from the response either way). A lane listing therefore cannot distinguish a claimed card from a free one — assignee status is only visible via `issue_read`. ⛔ Never treat a `list_issues` result as a candidate set; it is a *shortlist*, and every entry needs a full read before it can be claimed.\n\nThe wording is deliberately a reading rule, not advice: the failure is silent and looks exactly like success.\n\n## Related but deliberately not bundled\n\nThe same shift also found a lane card carrying `pm:queue` **while assigned** — a half-state that makes it simultaneously invisible to the dispatch view and falsely present in dispatchable inventory. That was reported on the card itself and is a state-machine hygiene matter, not a platform fact; it belongs to whoever owns that claim, not to this table row."
+}

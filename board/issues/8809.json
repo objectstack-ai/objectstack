@@ -1,0 +1,35 @@
+{
+  "number": 8809,
+  "kind": "pull_request",
+  "title": "fix(metadata-protocol): title global-search hits from the canonical nameField, not only the deprecated alias",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-15T03:47:42Z",
+  "updated_at": "2026-08-15T04:21:11Z",
+  "closed_at": "2026-08-15T04:21:09Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-08-15T04:21:09Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/8809",
+  "body": "Fixes #8786\n\n`searchAll` — the global-search (⌘K) palette — resolved a hit's title from a candidate list that opened with `obj.displayNameField` **alone**. Under ADR-0079 `nameField` is the canonical primary-title pointer and `displayNameField` is the deprecated alias, so this was the one consumer a canonical designation could not reach.\n\n## Why it was reachable, not theoretical\n\n`provisionPrimary` — the ADR-0079 designation seat the SchemaRegistry runs on every object at registration — stamps `nameField` **only**, never the alias:\n\n```\npackages/spec/src/data/display-name.ts:301   return { ...objectMeta, nameField: resolved };\npackages/spec/src/data/display-name.ts:314   return { ...objectMeta, fields, nameField: 'name' };\n```\n\nSo an object that declared its primary title canonically, without also carrying the deprecated alias, produced `undefined` for that entry, the entry was filtered out of the candidate list, and the title fell through to `return String(row.id)` — the palette showing a raw record id where the object's own declared, populated title existed.\n\nImpact was bounded to objects whose primary title is **outside** `name` / `full_name` / `title` / `subject` / `label` / `company`; anything in that conventional list already resolved through the later entries, which is why this stayed invisible.\n\n## The change\n\nOne line, plus the doc comment directly above it that described the old order:\n\n```\n-  obj.displayNameField,\n+  obj.nameField ?? obj.displayNameField,\n```\n\nThat is the spelling the rest of the platform already uses — `resolveDisplayField` in `@objectstack/spec`, the #4254 ingress gate, and **this same function's own search-field resolution 44 lines below** (`displayField: obj.nameField ?? obj.displayNameField`). A fourth spelling here would have re-split what those merged.\n\n## Precedence, measured rather than assumed\n\nIf an object carries **both** pointers naming **different** fields, this flips which one wins — so I measured the repo before calling it safe. Scanning every `displayNameField` declaration in `packages`, `examples` and `apps` (52 files, 38 declarations with a co-located `nameField`):\n\n- **33 agree exactly** — every real object carrying both spells them identically, under an `[ADR-0079] canonical primary-title pointer (mirrors deprecated displayNameField)` comment.\n- **5 disagree, and all five are test fixtures** that exist precisely to pin precedence — and every one of them already pins `nameField` as the winner. `resolveDisplayField({ nameField: 'a', displayNameField: 'b' })` returns `'a'`, pinned in `display-name.test.ts` as *\"prefers nameField over displayNameField over derivation\"*.\n\n**No real object is in the disagreeing state**, and the precedence landed on is the platform's existing answer rather than a new one. It is now pinned here too.\n\n## Tests\n\nNew file `packages/metadata-protocol/src/protocol.search-title-namefield.test.ts` — 6 cases. The fixtures use non-conventional title fields (`company_name`, `ref_no`, `ref_code`), since a conventional one would pass identically before and after.\n\n- **the pin** — `nameField: 'company_name'`, no alias, populated row, title is `Acme Industrial` and not `acc_1`;\n- **control** — an object using a conventional `name`, with no pointer at all, still titles correctly (a short-circuit rewrite would pass the pin and break this);\n- **control** — an empty pointer value falls through to the conventional entry, proving the pointer is a *candidate in one ordered list*, not a short-circuit return;\n- the deprecated alias on its own is still honored (deprecated, not withdrawn);\n- both pointers naming different fields: `nameField` wins;\n- `titleFormat` still outranks the pointer.\n\n**Reverse verification**, direction predicted before running and observed as predicted: restoring `obj.displayNameField,` alone turns exactly 2 of 6 red, with the defect's own signature —\n\n```\n× titles from a canonically-designated nameField with no displayNameField\n   → expected 'acc_1' to be 'Acme Industrial'\n× prefers nameField when an object carries BOTH pointers naming different fields\n   → expected 'OLD-11' to be 'TK-77'\nTests  2 failed | 4 passed (6)\n```\n\nThe 4 that stay green are the controls, which by design do not discriminate this fix. The fix was committed before the ablation and restored with `git checkout` from that commit (`git status` clean afterwards).\n\n## Verification\n\nAll at **HEAD `cd974da6e`** (after the merge of `origin/main`, which is the final commit):\n\n- `pnpm --filter @objectstack/metadata-protocol test` — **92 files, 1375 tests, all passing**\n- gate union re-derived against the actual changed paths with `node scripts/pm/dispatch-gates.mjs`, all green: `check:nul-bytes`, `check:cross-package-test-inputs`, `check:durability-log-level`, `check:filter-alias-parity`, `check:changeset-gate-self-tests`, `check:objectui-changeset`, `check:query-options-erasure`, `check:engine-double-contract`, `check:type-check-coverage`, `check:type-check-debt`\n- the re-derivation surfaced four families the dispatch prompt's list did not name (the three `.changeset` families plus `check:query-options-erasure` / the type-check pair, triggered by adding a test file). `check:type-check-debt --re-measure` was run over the **built** workspace closure — `@objectstack/metadata-protocol` sits in the DEBT ledger, so a new test file genuinely moves it: *\"33 ledger entries re-measured, 1926 raw tsc errors total, none above its recorded number.\"*\n\n## Scope\n\nPresentation only. #7643 addressed **recall** (which rows come back) and deliberately left titling alone; that contract stays untouched here, and its pins in `protocol.search-case-fold.test.ts` still pass. Search-field resolution, the object sweep, caps and ordering are unmodified. Region held: `renderTitle` inside `searchAll`. No other region of `protocol.ts` was touched, so the concurrent work in `auditMetaItem` and `diffMetaItem` is unaffected.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01XeQRiAa7vYRVX5Fog7Zby8)_"
+}

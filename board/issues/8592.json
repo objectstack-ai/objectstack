@@ -1,0 +1,35 @@
+{
+  "number": 8592,
+  "kind": "issue",
+  "title": "drivers(sql): what MySQL does with a conflict target it cannot honour is unmeasured — knex compiles the target away, so the refusal cannot arise there",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:blocking",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-14T00:31:20Z",
+  "updated_at": "2026-08-14T03:22:50Z",
+  "closed_at": "2026-08-14T03:19:38Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8592",
+  "body": "Filed out of #8567, which measured Postgres and generalised the unbacked-conflict-target refusal to it. Unassigned. **Observation-class and deliberately unmeasured — the first deliverable of this card is the measurement, not a fix.**\n\n## What #8567 established, without a server\n\n`SqlDriver.upsert` passes `conflictKeys` to knex's `onConflict(...).merge(...)`. On the `mysql2` dialect knex compiles that to `ON DUPLICATE KEY UPDATE`, which takes **no conflict target**:\n\n```\nmysql2 -> insert into `plain` (`email`, `id`, `title`) values (?, ?, ?)\n          on duplicate key update `title` = values(`title`)          <- named keys are gone\npg     -> insert into \"plain\" (...) values ($1, $2, $3)\n          on conflict (\"email\") do update set \"title\" = excluded.\"title\"\n```\n\nThe caller's keys never leave the process, so the server is never asked to find an index for them. **The unbacked-conflict-target condition cannot arise on MySQL**, and `isUnbackedConflictTargetError` correctly carries no MySQL limb.\n\n## The open question this leaves\n\nIf the target is compiled away, MySQL does not refuse — it merges on **whichever unique key the row happens to collide with**. A caller who wrote `conflictKeys: ['email']` on a table whose only unique index is on `tax_id` gets a silent merge against `tax_id` on MySQL, where SQLite and Postgres both refuse. That is a worse failure than the one #8445 and #8567 fixed: those were legible-versus-illegible errors, this is a wrong write with no error at all.\n\n⚠️ **The paragraph above is an inference from the compiled SQL, not an observation.** Nobody has watched a MySQL server do it. #8445's dispatch ruled that describing dialect behaviour from memory or inference is not acceptable evidence, and #8567's dev correctly declined to file this card on that basis — the container has no `mysqld`/`mariadbd` and its docker daemon is unreachable.\n\n## The measurement channel exists — in CI, not on a dev box\n\nThat premise is resolvable. CI already provisions a live MySQL for the conformance job:\n\n```yaml\n# .github/workflows/ci.yml:583\nimage: mysql:8.0\n# .github/workflows/ci.yml:673\nOS_TEST_MYSQL_URL: mysql://root:root@127.0.0.1:3306/conformance\n```\n\nand `packages/drivers/driver-sql/src/live-dialect-matrix.testkit.ts` already reads `OS_TEST_MYSQL_URL`, reporting an un-run cell rather than passing vacuously. `sql-driver-upsert-conflict-target-dialects.test.ts` (landing with #8567) currently declares its MySQL cell un-run for exactly this reason — the file runs under Test Core, which has no such service.\n\n## What this card is, in order\n\n1. **Measure.** On a runner that has the MySQL service: create an object whose unique index is on a column **other** than the one named in `conflictKeys`, upsert with the mismatched key, and record what actually happens — silent merge on the other key, an error, or something else. ⛔ Do not write the answer into a test before observing it.\n2. **Then decide**, and only then. Options range from leaving it (documented, dialect-honest) through refusing pre-flight in `driver-sql` when the dialect cannot honour a named target — the latter *changes the accept set on MySQL*, so it is a `minor` and wants its own argument, not a rider.\n3. Either way the MySQL cell should stop being structurally un-runnable: either wire this file's matrix into a job that has the servers, or state why it belongs where it is.\n\nRelated: #8567 (where the compiled SQL was read), #8445 / #8413 (the two faces that refuse this condition), #8590 (the other finding out of #8567), #5240 (one condition, one wording)."
+}

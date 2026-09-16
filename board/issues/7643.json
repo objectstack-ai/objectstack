@@ -1,0 +1,35 @@
+{
+  "number": 7643,
+  "kind": "issue",
+  "title": "⌘K global-search palette recall is strictly narrower than the `$search` executor (no pinyin/companion recall)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T09:50:08Z",
+  "updated_at": "2026-08-15T02:09:18Z",
+  "closed_at": "2026-08-15T02:09:18Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7643",
+  "body": "## Symptom\n\nThe ⌘K command palette's recall is strictly **narrower** than the `$search` executor's. `hnkj` / `huaningkeji` return **0 hits** from the global endpoint while `POST /api/v1/data/showcase_account/query {search:…}` returns the CJK row; the seeded CJK account is unreachable by `huaning` from the palette. Net user effect: **pinyin recall works in the list quick-search but not in the ⌘K command palette.**\n\nThe rest of the item passes: exactly one `GET /api/v1/search` (no per-object fanout), grouped hits (#3371 does not reproduce), Enter navigates, empty / 1-char input fire zero requests, and the RLS deny side is clean on both API and UI.\n\n## Root cause\n\n`packages/metadata-protocol/src/protocol.ts` `searchAll` builds its **own** filter (`TEXT_TYPES` + `f.searchable===true`, falling back to the title field) instead of calling `resolveSearchFields` / `expandSearchToFilter`, and never ORs the `SEARCH_COMPANION_FIELD` — so full-pinyin / initials recall via the `__search` companion is absent from this path. Its comment claiming *\"case-insensitive substring matching via `$contains`\"* is also stale — the same `$contains` case bug tracked in #7641 (shared `$contains`/case-fold root cause).\n\nConfirmed still present on `origin/main` (`76d74ecb`): `searchAll` (lines ~7177–7291) still constructs its own `TEXT_TYPES` + `searchable===true` filter with the stale `$contains` comment at line 7291, and references neither `SEARCH_COMPANION_FIELD` nor `resolveSearchFields` / `expandSearchToFilter`.\n\n## Reproduction\n\n```\nGET  /api/v1/search?q=hnkj          → 0 hits\nGET  /api/v1/search?q=huaningkeji   → 0 hits\nPOST /api/v1/data/showcase_account/query {\"search\":\"hnkj\"}  → returns the CJK row\n```\n\n## Source\n\nExtracted from the QA run objectstack-ai/objectstack#7629 (framework 92f26f75, console 6314e87f)."
+}

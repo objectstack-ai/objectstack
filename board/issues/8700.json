@@ -1,0 +1,34 @@
+{
+  "number": 8700,
+  "kind": "issue",
+  "title": "pm-dispatch: compress the un-ratcheted instruction surface and extend the line ratchet over it — provenance one line, stories live on cards",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-14T14:40:24Z",
+  "updated_at": "2026-08-14T16:49:20Z",
+  "closed_at": "2026-08-14T16:48:50Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8700",
+  "body": "Filed on maintainer ruling (2026-08-14, verbatim, untranslated): 「8685 字太多了 并且综合审查一下相关的skills是不是应该压缩字数。」 → assessment delivered (numbers below) → 「现在」. Maintainer-pulled, so it outranks the process-class-last ordering rule.\n\n## The measurement that motivates this\n\nOne shift (2026-08-13 13:53Z → 2026-08-14): ratchet-protected `SKILL.md` grew **0** lines (686 → 686) while the un-ratcheted files grew **+31% in one day** — references 555 → 725 (+170), `os-dev.md` 391 → 435 (+44). `dispatch-runbook.md` alone: 155 → 263 (**+70%**). The growth is not junk — every section has a ruling behind it — the bloat is a prose style: multi-line provenance + measured-story narrative around each rule, where the norms themselves are half the lines. The ratchet is the only mechanism with a proven 0%-growth record; nothing else has one.\n\n## Deliverables (one PR)\n\n1. **One-time compression pass** over: `references/dispatch-runbook.md` (primary target, ~263+ → ~170), `references/platform-readings.md` (143), `references/review-checklist.md` (95), `references/landing-operations.md` (86), `references/seat-post-protocol.md` (small), `.claude/agents/os-dev.md` (435 → trim). Compression rule, applied uniformly: **verbatim maintainer quotes keep (governance record, usually one line); measured-story narratives compress to ONE line; every normative bullet, ⛔ mark, and one-line why survives untouched.** Target: references total back to roughly the shift-start level (~560). ⛔ `SKILL.md` untouched (686/686). ⛔ No semantic change to any rule — this is compression, not revision; if a sentence cannot be shortened without changing what it licenses or forbids, it stays.\n2. **Ratchet extension**: extend the existing `check:pm-skill-ratchet` gate to per-file ceilings covering every file in deliverable 1 (plus keeping SKILL.md at 686), ceilings = the post-compression line counts. Same funded-growth discipline: future net additions to any covered file must be paid for in the PR body.\n3. **Authoring style rule, one line**, added to the runbook's card-writing section: provenance is one line; stories live on cards, not in operational text.\n\n## Serial constraint\n\n`dispatch-runbook.md` and `seat-post-protocol.md` are held by PR #8685 (compression rework in flight on it now). **This card dispatches only after #8685 merges**, then compresses the post-merge text including #8685's own halved sections. Claimed now per 「现在」; the dispatch fires on the merge event.\n\n## Constraints\n\nSurface is `.claude/skills/pm-dispatch/references/**` + `.claude/agents/os-dev.md` ⇒ **fable-mandatory** dispatch, **ADR-class** merge path (draft PR, human merge, auto-merge never armed). Gate union after the final commit with quoted HEAD. id-lint discipline holds through the rewrite (no issue numbers in operational text)."
+}

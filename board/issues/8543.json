@@ -1,0 +1,36 @@
+{
+  "number": 8543,
+  "kind": "issue",
+  "title": "check-i18n-bundles merge mode never updates an EXISTING field description, so editing one leaves the en bundle silently stale (and the gate green)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:blocking",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "qq9340100"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-13T18:26:41Z",
+  "updated_at": "2026-08-15T01:47:20Z",
+  "closed_at": "2026-08-14T03:34:04Z",
+  "closed_by": {
+    "login": "qq9340100",
+    "id": 313832657,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 13,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8543",
+  "body": "Observation-class finding, noticed while implementing #8069 (PR #8541). Unassigned, no `pm:queue`.\n\n## What I measured\n\nI edited two field descriptions on `sys_http_delivery` (`packages/services/service-messaging/src/objects/http-delivery.object.ts`):\n\n- `error` — had **no** `description` before; gained one.\n- `attempts` — **already had** one; its text changed.\n\n`pnpm check:i18n` went red, and `node scripts/check-i18n-bundles.mjs --write` regenerated. The result, per locale bundle, was `2 insertions, 1 deletion` — only the `error` entry:\n\n```\n       error: {\n-        label: \"Error\"\n+        label: \"Error\",\n+        help: \"Why this row is not a delivered callout: the last transport error, or — on a row with 0 attempts — why the delivery could never be prepared (#8069).\"\n       },\n```\n\n`attempts` in `en.objects.generated.ts` still reads `help: \"Number of attempts made so far\"` — the pre-edit text — while the source now says something else. The gate then reports **OK**.\n\nThat is the documented merge behaviour, printed by the script itself: *\"Merge mode is on, so no existing translation is overwritten — new schema keys are added filled with the source text.\"*\n\n## Why it is worth recording anyway\n\nFor `zh-CN` / `ja-JP` / `es-ES` the rule is obviously right: a regeneration must not clobber a human translation with English source text.\n\nFor **`en`** the same rule produces a different outcome, because `en` is not a translation — it is a copy of the source. So there, merge mode means:\n\n- an author edits a field `description`,\n- the gate passes,\n- the change never reaches the bundle the UI renders,\n- and nothing anywhere says the two disagree.\n\nThe source of truth and the served text drift apart silently, permanently, and by one commit at a time. It is the `declared != enforced` shape the repo keeps filing cards about, in the one place a gate is already looking.\n\n## What this finding does NOT claim\n\n- ⛔ Not that any specific user-visible help text is currently wrong. I measured one instance, mine, and did not sweep for pre-existing drift. **The size of the existing gap is unknown and is the first thing worth measuring** — a scan comparing every authored `description` against its `en` bundle `help` would grade this immediately, and would also decide whether this is a one-line fix or a backlog.\n- Not that merge mode is wrong for translated locales. It is right for them; the question is only whether `en` belongs in the same channel.\n- Not urgent: help text going stale is a documentation degradation, not a durability one — nothing is lost, something is merely out of date while looking current.\n\n## Repro\n\nEdit any field that already carries a `description` on any object in a package owning an `i18n-extract.config.ts`, run `node scripts/check-i18n-bundles.mjs --write`, and diff `**/translations/en.objects.generated.ts` — the entry is unchanged, and `pnpm check:i18n` is green.\n"
+}

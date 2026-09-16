@@ -1,0 +1,32 @@
+{
+  "number": 8764,
+  "kind": "issue",
+  "title": "platform-objects: the `pages.*` third of the hand-authored bundles is outside the new default-locale parity walk — its sources live in other packages, so nothing compares them at all",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-14T21:11:54Z",
+  "updated_at": "2026-08-15T05:48:00Z",
+  "closed_at": "2026-08-15T05:47:14Z",
+  "closed_by": {
+    "login": "qq9340100",
+    "id": 313832657,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8764",
+  "body": "Observation filed while implementing #8721 (the default-locale content-parity assertion for the hand-authored `apps` / `dashboards` half). Not fixed there — out of that card's fence, and the fix is a different mechanism. Filed unassigned for triage.\n\n## What is covered after #8721, and what is not\n\n`packages/platform-objects/src/apps/translations/en.ts` has exactly three top-level sections. The parity assertion added in #8721 walks two of them:\n\n| section | source of truth | compared against `en.ts`? |\n|:--|:--|:--|\n| `apps.*` | `setup.app.ts`, `studio.app.ts`, `account.app.ts` — same package | yes, verbatim |\n| `dashboards.*` | `dashboards/system_overview.dashboard.ts` — same package | yes, verbatim |\n| `pages.*` | **other packages** (see below) | **no — by nothing, in any locale** |\n\nThe three `pages.*` entries and where their strings are really authored:\n\n- `marketplace_installed` — `packages/cloud-connection/src/marketplace-ui.ts`\n- `cloud_connection_settings` — `packages/cloud-connection/src/cloud-connection-ui.ts`\n- `connect_agent` — `packages/mcp/src/connect-ui.ts`\n\nThe #8721 assertion cannot reach them, and the reason is structural rather than an oversight: `platform-objects` does not depend on `@objectstack/cloud-connection` or `@objectstack/mcp` and must not, so a static walk in that package's own test has nothing to compare to. The test states the exclusion deliberately; this issue is the tracking half of that statement.\n\n## Why it is worth a card even though nothing is stale today\n\nChecked at the time of filing — all three are currently in parity with their sources, e.g. `connect_agent` serves `Connect an Agent` plus the same subtitle sentence `connect-ui.ts` declares. So this is an unexercised hole, not a live defect.\n\nWhat makes it worth tracking is that it is the **same shape as the defect #8721 was filed for**, in the same file, one section over: a leaf value copied by hand from a source in another file, with no gate comparing the two. #8721 happened because a widget was converted and its four bundles kept the pre-conversion string under a fully green build. A page header edited in `cloud-connection` or `mcp` would do exactly that here, and would additionally do it in **all four** locales including `en`, which is now the one locale the rest of this bundle guarantees.\n\n## Candidate shapes (not decided here)\n\n1. Extend `pnpm check:app-nav-i18n` — it already boots the real composition to judge the merged nav tree, so it is the one existing gate that can see pages contributed by other packages. Comparing `pages.*` default-locale values against the composed page metadata would sit naturally beside what it already does.\n2. Move the three `pages.*` entries into bundles owned by the packages that author the strings, so each one is a same-package comparison. Larger, and it touches how the merged translation data is assembled.\n\nOption 1 looks much cheaper and needs no ownership change; option 2 removes the class rather than gating it. Sizing is triage's call.\n\nBacklink: #8721.\n"
+}

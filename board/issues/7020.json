@@ -1,0 +1,34 @@
+{
+  "number": 7020,
+  "kind": "issue",
+  "title": "finding: the ADR-0106 D4 read-exemption set and #6603's write-capability gate are different sets, so \"whoever can write a schema can see all of it\" is not actually enforced",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-help"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T09:22:16Z",
+  "updated_at": "2026-08-15T10:10:41Z",
+  "closed_at": "2026-08-15T10:10:41Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7020",
+  "body": "Filed from the #6603 implementation. #6603's ruling (`5225531464`) justifies the gate by making an invariant out of a coincidence — *\"whoever can write a schema is whoever can see the full schema\"*. The gate it names demands **`manage_metadata`**. This card records the measurement that those are **two different sets**, so the gate as ruled does not by itself establish that invariant.\n\n⛔ This is a record of a mismatch, **not** a proposal to change #6603's gate. The maintainer's mechanism was ruled twice and is independently justified by its second reason (closing the pre-existing \"any authenticated session can clobber a schema\" hole). Which way to align the two sets — if at all — is the maintainer's call, and this card deliberately does not choose.\n\n## The three measured facts\n\n`packages/metadata-core/src/object-schema-fls.ts:72`:\n\n```\nexport const OBJECT_SCHEMA_MASK_EXEMPT_CAPABILITIES: readonly string[] = ['studio.access', 'setup.access'];\n```\n\n`manage_metadata` is **not** in it. Consequences, all measured against the shipped permission sets in `packages/plugins/plugin-security/src/objects/default-permission-sets.ts`:\n\n1. **`organization_admin` is D4-exempt but gate-refused.** It carries `['manage_org_users', 'setup.access', 'setup.write']` (`:190`) — `setup.access` makes it exempt from the mask, so its GET was never masked and it **never had the round-trip hazard #6603 exists to close**; yet it holds no `manage_metadata`, so #6603's gate refuses its writes. (Arguably correct on its own terms — the set's own comment says a tenant does not mutate shared metadata — but it is refused for a reason unrelated to the ruling's stated rationale.)\n\n2. **A `manage_metadata`-only caller passes the gate and still reads masked.** Nothing in the D4 exemption reads `manage_metadata`, so such a caller's GET is projected — and their GET → edit → PUT still deletes the fields they could not see. The hazard #6603 closes for everyone else stays open for exactly the callers the gate lets through. Pinned as measured behaviour in `packages/rest/src/meta-item-save-capability-gate.test.ts` (the `it.each` capability matrix).\n\n3. **The two sets meet only on `admin_full_access`**, which carries `manage_metadata` + `studio.access` + `setup.access` (`:120-129`) and is the only shipped set holding `studio.access`. That co-occurrence — not the gate — is what makes the invariant hold in a default deployment. A hand-authored permission set granting one without the other separates them immediately, in either direction.\n\n## Why this is `finding`-class rather than a defect\n\nNothing a user hits on a default deployment today: the shipped sets do not separate the two capabilities on any path that reaches a metadata-authoring surface (verified in the #6603 caller survey — every in-repo `PUT /meta/:type/:name` caller runs under Studio, which requires `studio.access`, or as the dev admin). It is filed because the **stated rationale of a merged ruling is not what the merged code enforces**, and that gap is invisible to anyone reading either one alone. Severity graded at filing time is unreliable in both directions — please re-grade at triage.\n\nRelated: #6603 and its ruling `5225531464`; ADR-0106 D4; ADR-0066 D1 (`manage_metadata`); the sibling card on the doors #6603's gate leaves open.\n\nFiling note: the duplicate search over open issues was run once and then blocked by a GitHub API rate limit, so the usual sweep is incomplete. Race-close if this twins an existing card."
+}

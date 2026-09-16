@@ -1,0 +1,33 @@
+{
+  "number": 8681,
+  "kind": "issue",
+  "title": "[security] org-admin sets ship object_permissions['*'].allowExport = true, so the 17.0 export gate cannot be denied for an org admin — and the sets are not_overridable (17.0.0 GA)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "security"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-14T13:11:16Z",
+  "updated_at": "2026-08-15T11:57:22Z",
+  "closed_at": "2026-08-15T11:56:54Z",
+  "closed_by": {
+    "login": "qq9340100",
+    "id": 313832657,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8681",
+  "body": "Part of objectstack-ai/hotcrm#707 (never mirrored until now). Measured on `@objectstack/*` **17.0.0 GA** during HotCRM's GA close-out sweep (hotcrm#1150 / #1152), 40 export probes, 5 principals x 8 objects, real Bearer tokens.\n\n## The good half — the gate works\n\nFor every non-admin principal the 17.0 export inversion is exact. Every declared-allowed cell returns 200 with read-derived rows; every declared-denied cell returns 403 `EXPORT_NOT_PERMITTED`. `modifyAllRecords` does not substitute for `allowExport`. This is not asserted from a single call — the gate is shown to be ENFORCING three ways:\n\n- **C1** the same token that is refused on `crm_quote` exports `crm_lead` 200 on the same route (so the 403 is the gate, not the token);\n- **C2** granting `allowExport` on `crm_quote` at runtime flips that 403 to 200;\n- **C3** revoking it flips it back to 403.\n\n## The hole\n\nThe org owner (holding `admin_full_access` + `organization_admin_no_bypass`) exports `crm_quote` (9 rows), `crm_campaign` (13 rows) and `crm_task` (15 rows) with 200 and full data — objects on which **no** app permission set grants `allowExport`.\n\n## Attribution, measured rather than guessed\n\nhotcrm#707 guessed a `canExport` admin bypass. It is not that. Both platform admin sets ship a wildcard export grant:\n\n```\nadmin_full_access['*'].allowExport             = true\norganization_admin_no_bypass['*'].allowExport  = true\nmember_default['*']                            = undefined\n```\n\nand a wildcard export grant is honoured — proven on a principal with no admin status at all, `crm_quote`, one grant shape per row:\n\n| grant shape on a plain org member | READ | EXPORT |\n|---|---|---|\n| S1  `'*'.allowExport = true` | 200 | **200** |\n| S2  `crm_quote.allowExport = true` | 200 | 200 |\n| S2b `'*'.allowExport = true` + `crm_quote.allowExport = false` | 200 | **403** |\n\nSo the admin's 200 is the wildcard doing exactly what it says, not a bypass — and S2b shows the platform already honours a more-specific per-object `false` over the wildcard, i.e. a supported opt-out shape exists.\n\n## Why the app cannot use it\n\n1. The wildcard lives in code-package metadata. Editing it answers\n   `403 [not_overridable] Metadata item 'permission/admin_full_access' is provided by a code package`.\n2. The org admin holds no app-authored permission set, so the app has nowhere to author the per-object `false` that S2b proves would win.\n\nConsequence: an app can declare \"this object is exportable by nobody\" and the platform will still export it for any org admin, with no supported way to opt out. That is the same shape hotcrm#703 raised about the old `member_default` create/read/edit wildcard — which was resolved by removing the wildcard (#5491 / PR #6684). The export axis kept its wildcard.\n\n## The card's own open question, now closed\n\nhotcrm#707 recorded a caveat that a pure app `system_admin`-set holder was not constructible in that run, so the finding might be \"org-owner bypasses\" rather than \"the admin set bypasses\". Constructed here by binding the app's `system_admin` set to a plain member through `sys_user_permission_set`:\n\n```\ncrm_quote     declared allowExport=false -- export 403 EXPORT_NOT_PERMITTED\ncrm_campaign  declared allowExport=false -- export 403 EXPORT_NOT_PERMITTED\ncrm_task      declared allowExport=false -- export 403 EXPORT_NOT_PERMITTED\ncrm_account   declared allowExport=true  -- export 200 rows=19\ncrm_lead      declared allowExport=true  -- export 200 rows=25\n```\n\nAn app admin set gets exactly the declared posture. The hole is specific to the platform org-admin sets and the wildcard they ship.\n\n## Suggested direction\n\nEither drop `allowExport` from the `'*'` entry of the shipped admin sets (matching what #5491 did for the CRUD axes), or give apps a supported way to author a per-object export denial that reaches an org admin. A design decision either way, which is why this is filed rather than patched.\n\nEvidence: hotcrm#1152 probes `40-707.mjs`, `45-707-decisive2.mjs`, `46-707-sysadmin.mjs`; readings posted on hotcrm#707.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01XAK3brMLjd4ykF4QAhFnuo)_\n"
+}

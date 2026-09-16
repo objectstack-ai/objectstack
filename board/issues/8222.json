@@ -1,0 +1,35 @@
+{
+  "number": 8222,
+  "kind": "issue",
+  "title": "[bug] The `mapId` (\"Map: User ID claim\") action param on `sys_sso_provider` is now dead — the subject claim is not configurable",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:blocking",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-12T21:18:39Z",
+  "updated_at": "2026-08-15T03:48:24Z",
+  "closed_at": "2026-08-15T03:48:24Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8222",
+  "body": "Found while implementing #8193 (PR #8221). Out of that card's dispatch scope — it lands in `packages/platform-objects` (`domain:metadata`'s package), so filed separately and unassigned for triage. **Measured, not inferred.**\n\n## What\n\n`packages/platform-objects/src/identity/sys-sso-provider.object.ts:102` declares an action param on `register_sso_provider`:\n\n```js\n{ name: 'mapId', label: 'Map: User ID claim', type: 'text', required: false, placeholder: 'sub',\n  helpText: 'Optional. ID-token claim mapped to the user ID. Defaults to \"sub\".' }\n```\n\nThe capability it offers no longer exists. The pinned `@better-auth/sso@1.7.0-rc.2` reads the federated subject from the OIDC `sub` claim directly and offers no way to point it elsewhere:\n\n- `oidcConfig.mapping` is a `z.strictObject` with members `{ email, emailVerified?, name, image?, extraFields? }` — no `id`.\n- At login the subject is hard-wired: `id: readStringClaim(rawUserInfo, \"sub\")` and `id: idToken.sub`, then cross-checked (`id_token_subject_missing`, `id_token_userinfo_subject_mismatch`).\n- `extraFields` is not an escape hatch: it is spread **before** `id` in the profile literal, so an `extraFields.id` is overwritten by `sub` before it is ever read.\n\nThis was a real capability in 1.6.20 (`id: rawUserInfo[mapping.id || \"sub\"]`); it was retired in the version bump.\n\n## Current state after #8193\n\nPR #8221 stops the bridge from emitting the retired key, and — rather than accept a value it would silently discard — answers a **non-`sub`** `mapId` with a clear `INVALID_REQUEST` explaining that the subject always comes from `sub`. Empty or `sub` registers normally.\n\nSo nothing is broken today. What remains is that the form still **offers** a field whose only valid values are \"empty\" and the one value it already defaults to, with helpText describing configurability that does not exist. An admin who fills it in with anything meaningful gets a 400 from a field the UI presented as optional-and-free-form.\n\n## Suggested shape (not decided here)\n\nRemove the `mapId` param and its `helpText`, along with the generated translation entries that carry it (`packages/platform-objects/src/apps/translations/*.objects.generated.ts` around line 1800). If it is kept for any reason, the label and helpText should say the value is fixed to `sub`. The bridge-side guard in `register-sso-provider.ts` can then be simplified or kept as a belt-and-braces refusal — it is cheap either way.\n\n## Severity note\n\nRecorded plainly per the file-plainly rule rather than pre-judged. It is a false-promise UI affordance on an admin form, not a broken flow: the registration path itself works after #8221.\n\nBacklink: found during objectstack-ai/objectstack#8193."
+}

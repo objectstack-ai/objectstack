@@ -1,0 +1,29 @@
+{
+  "number": 18397,
+  "kind": "issue",
+  "title": "[seam -> repo:objectui] Re-seed / Purge throw the error CODE away — `readApiError(payload, res).message` renders the withheld 5xx constant while `ENVIRONMENT_KERNEL_UNAVAILABLE` arrives unread",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "repo:objectui"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-16T08:42:01Z",
+  "updated_at": "2026-09-16T08:42:25Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/18397",
+  "body": "Filed by the `repo:cloud` execution PM seat (seat post objectstack#6026), session `session_01TAUTP6Yky8QWoHUAPDKNJQ`, at 2026-09-16T08:42Z, as the **consumer half** of cloud#2072. ⛔ Not graded or routed beyond the lane label — that is the objectui seat's.\n\n⚠️ Filed in this repo rather than in `objectstack-ai/objectui` because that repository is not reachable to this session's credential; this is the established seam carrier for that case (objectstack#18377, objectstack#18387 are the same shape).\n\n## The gap, measured\n\ncloud#2072 was ruled by the maintainer (director batch #79, 2026-09-08, verbatim 「其他同意」): re-seed / purge on a control plane that holds no environment kernels must earn a real error **code** — `ENVIRONMENT_KERNEL_UNAVAILABLE` — while the HTTP **status stays 500**, because 「the code is the one thing that crosses the cloud#1145 5xx sentence-withholding, so the Console can render a true sentence without any client seeing a different status」.\n\n**The producer half lands in cloud PR #2303. The consumer half throws the code away**, measured at `.objectui-sha` `efead6c6` by the cloud#2072 dev and reported rather than inferred:\n\n- `packages/app-shell/src/console/marketplace/marketplaceApi.ts:571` (`reseedSampleData`) and `:592` (`purgeSampleData`) return **`readApiError(payload, res).message`**.\n- ⇒ The `code` member never reaches the caller. The refusal still renders the withheld generic 5xx sentence, exactly as it did before cloud#2072.\n\n⇒ **The whole user-visible payoff of that ruling is blocked here.** The control plane now says *which* fault occurred; the Console still says nothing.\n\n## Why it matters more than one string\n\nThe two faults are not interchangeable, and the difference is what the user should do next:\n\n| fault | what it means | the right next step |\n|:--|:--|:--|\n| `ENVIRONMENT_KERNEL_UNAVAILABLE` | this control plane registers **no `kernel-manager`** — a composition fact | ⛔ **never retry**; go to the environment's own runtime |\n| `INTERNAL_ERROR` | the environment kernel or its engine could not be reached **right now** | a retry may well work |\n\n⇒ A Console that collapses both into one sentence sends a user to retry a button that **cannot ever** succeed on that deployment. cloud#2303's docs page says so in as many words: 「a client that sees `ENVIRONMENT_KERNEL_UNAVAILABLE` should say so and stop offering the retry」.\n\n## ⚠️ And the buttons ARE reachable on that deployment — measured, narrowly\n\nThe same round discharged the ruling's carried question 「nobody measured whether the Console even renders the reseed / purge buttons on a kernel-manager-less composition」. Reading at `.objectui-sha` `efead6c6`:\n\n- `MarketplacePackagePage.tsx:762` renders the menu when `!localInstall && cloudInstall && !getRuntimeConfig().cloudUrl`.\n- `createCloudStack` serves `cloudUrl: ''` with `installLocal: false` (cloud `cloud-stack.ts:354-359`), so conjuncts 1 and 3 hold **on the control plane**; the hidden case is the TENANT runtime.\n- `cloudInstall` is `null` on page load (no `defaultEnvironmentId` is sent, so `getCloudInstallationInfo` takes its empty-id early return) but **is set by the post-install refresh** at `MarketplacePackagePage.tsx:313-321`.\n\n⇒ An org admin who just installed an app **is** offered Re-seed / Purge, in that session, on the one deployment where they cannot work. This is not a hypothetical surface.\n\n## What this card asks\n\nSurface the code on those two calls so the Console can branch on it, and render the composition fact as a terminal refusal rather than a retryable error. ⛔ Do not change the status handling and ⛔ do not invent copy for codes that do not arrive — read `error.code` and branch; the two sentences are already written in cloud `docs/design/installation-action-refusals.md`.\n\n⚠️ Check `readApiError`'s other callers before changing its shape: if it drops `code` for every consumer, this is a wider fix than two lines and the objectui seat should scope it that way.\n\n## Provenance\n\ncloud#2072 (the ruling) · cloud PR #2303 (the producer half) · cloud#2043 (the stop-and-report fork this came from) · cloud#1145 (the 5xx sentence-withholding that makes `code` the only channel).\n\n## 查重词\n\n`marketplaceApi readApiError code` · `reseedSampleData purgeSampleData error code` · `ENVIRONMENT_KERNEL_UNAVAILABLE console` · `withheld 5xx sentence console` · `re-seed purge terminal refusal`\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

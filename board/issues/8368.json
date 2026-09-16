@@ -1,0 +1,35 @@
+{
+  "number": 8368,
+  "kind": "issue",
+  "title": "Artifact-pinned boot: OS_ARTIFACT_URL (+ OS_ARTIFACT_SHA256) — boot a stack from a published artifact by reference",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "priority:p0"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-08-13T09:45:24Z",
+  "updated_at": "2026-08-13T20:01:17Z",
+  "closed_at": "2026-08-13T19:45:31Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8368",
+  "body": "## Context\n\n`objectstack start` today boots from the project's local `dist/objectstack.json`. There is no way to point a runtime at an artifact **by reference** — an HTTP(S) URL or an explicit file location — via an environment variable.\n\nThat capability is the missing half of a deployment model where the runtime image and the app artifact are **two independent release axes**: a fixed runtime container + one env var naming the artifact = a running app; upgrading the app is an env change + restart, never an image rebuild. The motivating case is the cloud's unified SaaS run mode for hosted marketplace apps (EE image + artifact ref + `OS_TENANCY_POSTURE=isolated`, see objectstack-ai/cloud#1292), but the mechanism benefits every self-host/community deployment equally: \"run any marketplace app anywhere with one env var.\"\n\n**Boundary note (\"open mechanism, closed intelligence\"):** fetching and booting an artifact is a mechanism and belongs in the open framework. The commercial gate is unaffected — walled tenancy postures remain entitled via `@objectstack/organizations` regardless of how the artifact arrives. Registry-based resolution (`OS_PACKAGE_REF`, signing enforcement, entitlements) is deliberately **not** part of this issue.\n\n## Requirement\n\n**One env var, one value — no companion knobs:**\n\n- `OS_ARTIFACT_URL=https://…/hotcrm-2.2.2.json` — fetched at boot.\n- `OS_ARTIFACT_URL=file:///…/objectstack.json` — read directly (volume-mount workflow).\n- **Optional integrity pin, SRI-style, inside the URL fragment:** `…/hotcrm-2.2.2.json#sha256=<hex>`. Fragments are client-side by standard (never sent to the server); when present, the runtime verifies the content hash before booting. There is deliberately **no** separate `OS_ARTIFACT_SHA256` variable.\n\nHonored by the production boot path (`objectstack start` / `serve`); when set, it overrides the implicit `dist/objectstack.json` lookup.\n\nMVP posture: verification only happens when the fragment is present. The recommended production discipline (immutable version-named objects, CI-only write access to the artifact host, hash pinned via fragment) is documentation, not code.\n\n## Acceptance\n\n1. A runtime container + `OS_ARTIFACT_URL` boots the referenced artifact with no project checkout present.\n2. No `#sha256=` fragment → no verification; a fetch/read failure fails the boot loudly (container orchestration retries). No cache-fallback logic.\n3. `#sha256=` fragment present → content hash verified before boot; mismatch → refuse loudly, naming expected vs actual. A fetch failure MAY fall back to a locally cached copy **only** when the cache matches the pinned hash (loud warning).\n4. The artifact's `engines.protocol` is validated against the runtime; incompatible → refuse loudly (the safety belt of the two-axis split).\n5. Migration policy: safe migrations run at boot; a destructive migration (`os migrate --allow-destructive` class) → refuse to boot with a clear operator message. Never skip silently.\n6. Secrets discipline: the URL may carry auth material (pre-signed URLs) — never echoed into logs or HTTP responses unredacted.\n\n## Out of scope\n\n- `OS_PACKAGE_REF` (marketplace registry resolution, signature enforcement, entitlements) — a later layer on top of this one; adds a boot-time marketplace dependency.\n- Multi-tenant fleet / hostname-routing concerns — this is the single-instance boot path.\n- Cloud-side adoption (EE image docs, retiring the dev/test `OS_ARTIFACT_PATH` knob in `apps/objectos-ee`) — tracked in objectstack-ai/cloud#1292.\n\nEstimated effort: 1–1.5 days."
+}

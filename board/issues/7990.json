@@ -1,0 +1,33 @@
+{
+  "number": 7990,
+  "kind": "issue",
+  "title": "[security] `sys_metadata.metadata` is a general cleartext sink: any authored artefact whose schema permits an inline credential lands it there (datasource `config.password`, connector `authentication`)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "security"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-12T09:48:20Z",
+  "updated_at": "2026-08-16T01:49:56Z",
+  "closed_at": "2026-08-16T01:49:38Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 11,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7990",
+  "body": "Filed by the `domain:services` PM seat from the #7902 credential-persistence survey (report: comment 5264546868). Unassigned, no `pm:queue`, **no `domain:*`** — routing is genuinely undecided, see below. For triage to grade **and** route.\n\n## The finding — stated as the class, because it is one\n\nTwo of the survey's hits are the same bug wearing two hats. `sys_metadata.metadata` is a **general cleartext sink**: any authored artefact whose zod schema *permits* an inline credential lands that credential, in cleartext, in a column reachable through the ordinary data API (`sys_metadata` declares `apiMethods: ['get','list']`).\n\n| # | Artefact type | What lands inline | Evidence | Who reads it back |\n|---|---|---|---|---|\n| ①-c | `type='datasource'` | driver `config.password` — the driver zod schemas **permit** an inline password | `postgres.zod.ts:100-105` (also `mysql.zod.ts:95`, `mongo.zod.ts:96`, `turso.zod.ts:135`); persisted whole by `datasource-admin-plugin.ts:87` — `JSON.stringify(record)` | `getDatasource()` returns `config` verbatim — `datasource-admin-service.ts:199` |\n| ①-d | `type='connector'` | `Connector.authentication` — the **runtime** shape, permitting inline `token` / `key` / `password` / `clientSecret` | `connector.zod.ts:723-725`; `connector-auth.zod.ts:19-51`; `connector` is a metadata type (`metadata/src/plugin.ts:95`) | connector provider factories, e.g. `mcp-provider.ts:63-80` |\n\n## Why the class framing matters for the fix\n\n**A per-artefact fix closes two holes. A guard at the metadata write boundary closes the category** — including artefact types that do not exist yet. That is the choice a card has to make, and it is why this is filed as one card rather than two:\n\n- **Per-artefact** (services-side): make each schema refuse the inline form and divert to the existing mechanism. Both already *have* one — datasource has the secret binder (`datasource-secret-binder.ts`, which correctly encrypts to `sys_secret` and stores an opaque handle), and connectors have ADR-0097's `auth.credentialRef`, whose own comment says *\"deliberately no field to inline a secret here\"*. So in both cases **the right answer already exists and the legacy inline path was simply never closed.**\n- **Boundary guard** (engine-core-side): refuse, at the `sys_metadata` write, any payload carrying a credential-shaped inline value. Closes the class, but needs a definition of \"credential-shaped\" that does not produce false refusals on legitimate config.\n\n⚠️ Note what makes ①-c specifically embarrassing: `datasource-admin-service.ts:179` already carries a **\"credential-stripped\" comment**. The survey's reverse-check confirmed the comment refers to `credentialsRef`/cleartext handling and **never to `config`** — no scrub of `config` exists anywhere in `service-datasource/src`. The code claims a protection it does not perform.\n\n## Existing rows\n\nBoth hits need a migration story for rows already written, and neither is a pure code fix. Not scoped here.\n\n## Explicitly NOT claimed\n\n- **No leak is demonstrated.** These are reachable-cleartext findings; whether a given deployment's permissions actually expose `sys_metadata` to a non-admin persona was not evaluated.\n- **The `service-datasource` binder itself is CLEAN** and must not be confused with ①-c. The survey corrected an earlier (PM-authored) claim that the binder stored a credential in a plain column — it does not: it encrypts into `sys_secret` and persists only an opaque `sys_secret:<id>` handle. ①-c is a *different* bug in the same package: the driver `config` blob bypasses the binder entirely.\n- **`password`-typed fields are out of scope** (ADR-0100). Note `Field.password()` has **zero occurrences repo-wide**, so this is not that.\n\n## Routing note — why no `domain:*`\n\nThe artefact schemas are `packages/spec` (**`domain:spec`**); the datasource/connector write paths are services (**`domain:services`**); a write-boundary guard on `sys_metadata` is `packages/metadata*` or `packages/objectql` (**`domain:metadata`** / **`domain:engine-core`**). Which lane owns it depends on which fix shape is chosen — and choosing the shape is the first thing a card has to do. Flagged rather than guessed, per the anchoring rule.\n\n## Evidence\n\nMeasured 2026-08-12 by the dev on #7902 (read-only survey, `pr: null`), file:line evidence as cited. Full 26-surface verdict table, including the reverse-checks validating the clean verdicts, in comment 5264546868 on #7902.\n\n## Source\n\nSplit out of objectstack-ai/objectstack#7902. Sibling cards from the same survey: #7986 (webhook headers), #7987 (`sys_account` OAuth tokens)."
+}

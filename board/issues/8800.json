@@ -1,0 +1,35 @@
+{
+  "number": 8800,
+  "kind": "pull_request",
+  "title": "fix(platform-objects): drop the dead `mapId` param from `register_sso_provider` — the OIDC subject claim is not configurable",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-15T03:19:24Z",
+  "updated_at": "2026-08-15T03:48:25Z",
+  "closed_at": "2026-08-15T03:48:23Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-08-15T03:48:23Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/8800",
+  "body": "Fixes #8222\n\n## What\n\nThe `register_sso_provider` action on `sys_sso_provider` offered an optional **\"Map: User ID claim\"** text field (`mapId`), helpText *\"Optional. ID-token claim mapped to the user ID. Defaults to `sub`.\"*\n\nThat capability was retired **upstream** in `@better-auth/sso@1.7.0-rc.2`:\n\n- `oidcConfig.mapping` is a `z.strictObject` with members `{ email, emailVerified?, name, image?, extraFields? }` — no `id`;\n- the federated subject is hard-wired to the OIDC `sub` claim (`id: readStringClaim(rawUserInfo, \"sub\")` / `id: idToken.sub`), then cross-checked;\n- `extraFields` is not an escape hatch — it is spread **before** `id` in the profile literal, so an `extraFields.id` is overwritten by `sub` before anything reads it.\n\n`1.6.20` did honour `mapping.id`; the version bump deleted the member. So the field's only accepted values were \"empty\" and the `sub` it already defaulted to — and since PR #8221 anything else answers `INVALID_REQUEST`. The form was advertising a free-form optional field that 400s on anything meaningful. **Removing it restores declared = enforced**; the runtime accept set does not move.\n\n## Changes\n\n- **`sys-sso-provider.object.ts`** — the `mapId` param is removed, replaced by a comment recording why the capability is gone so it is not re-added from the upstream 1.6.20 docs.\n- **Four `*.objects.generated.ts` bundles** — **regenerated** via `node scripts/check-i18n-bundles.mjs --write`, never hand-edited. Only the four `mapId` blocks moved; the other eight owning packages regenerated to no-change.\n- **`plugin-auth/register-sso-provider.ts`** — **doc comment only.** The guard code is untouched and both of its pins still run. See the note below.\n- Changeset added (user-visible: an admin form loses a field).\n\n`mapEmail` / `mapName` are untouched — they map to live `oidcMappingSchema` members.\n\n## The bridge guard is kept, deliberately\n\nThe card called this optional. I kept it: the admin form is only **one** caller, and a direct API client, a script, or a stale cached console bundle can still put `mapId` on the wire. Telling those callers plainly still beats discarding the value in silence. **No coverage was dropped** — `register-sso-provider.test.ts` still pins that a non-`sub` value is refused with `INVALID_REQUEST` and never reaches the handler. Only the JSDoc changed, to stop describing `mapId` as a field the form sends.\n\n## Live-reader sweep (why removal is safe)\n\nEvery `mapId` occurrence in the repo, plus the sibling repos, was enumerated before removing. Outside CHANGELOG history the only readers were the object definition, the four generated bundles, and the bridge guard + its test. In `objectui` — where the console lives — there are **zero** hits for both `mapId` and `register_sso_provider` (counter-probe: 335 files there match `sso`, so the search is real, not a broken pattern); the admin form is rendered generically from the action's `params`. No SDK surface, no migration, and no stored row shape changes: the param was only ever a transient form input, and under rc.2 no provider row could ever have been written with a mapped `id` in the first place.\n\n## Verification\n\nReverse verification, **direction predicted before running**: restoring the param into the source *only* should turn the two param pins red while leaving the over-removal guard and the i18n pin green — the bundle is a separate artifact, so source-only drift is owned by `check:i18n`, not by that test. Observed exactly that: `2 failed | 392 passed`, the two failures being `declares no mapId param` and `offers no param that collects a user-ID / subject claim under ANY spelling`. The fix was committed first, so restoring was a checkout from a real commit; the tree afterwards is byte-identical to that commit (`git status` clean).\n\nThe new i18n pin carries a counter-probe asserting `mapEmail` **is** present in each bundle — which earned its place immediately: it caught my first lookup path (`actions` instead of `_actions`) that would otherwise have made the whole assertion pass vacuously against `{}`.\n\nGate families derived with `node scripts/pm/dispatch-gates.mjs` against the actual changed paths, then run at final HEAD `c30414aa8` (tree clean, nothing committed after the runs):\n\n- `pnpm --filter @objectstack/platform-objects test` — 22 files, 394 passed\n- `pnpm --filter @objectstack/plugin-auth test` — 53 files, 1220 passed\n- `typecheck` on both packages — clean\n- `check:i18n` — 9 packages, all bundles in sync\n- `check:changeset-gate-self-tests`, `check:objectui-changeset`, `check:test-source-alias`, `check:type-source-resolution`, `check:query-options-erasure`, `check:type-check-coverage`, `check-nul-bytes` — all green\n- `check:type-check-debt` — the ledger number was re-measured directly (temp tsconfig with the test exclusion lifted, outside the repo): **3**, matching the frozen `TEST_DEBT` entry for `platform-objects` exactly by class (TS2339 x2, TS7006 x1), all in a pre-existing file and **zero** in the new test. The full gate invocation needs a whole-workspace build that lost the shared verification lock repeatedly; CI runs it.\n\n## Notes for the PM\n\n`#8193` remains open. Its one outstanding half is this PR — the two cards were pointing at each other, and this is the half that breaks the cycle. Routing that card is the identity lane's call, not mine, so I have not touched it.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01XeQRiAa7vYRVX5Fog7Zby8)_"
+}

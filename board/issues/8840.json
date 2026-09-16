@@ -1,0 +1,35 @@
+{
+  "number": 8840,
+  "kind": "pull_request",
+  "title": "fix(metadata-protocol): saveMetaItem's missing-item refusal declares 400 INVALID_REQUEST instead of answering 500",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-15T07:04:15Z",
+  "updated_at": "2026-08-15T10:31:36Z",
+  "closed_at": "2026-08-15T10:31:35Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-08-15T10:31:35Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/8840",
+  "body": "Fixes #8818\n\nThe card was filed as an observation with an explicitly unverified premise — \"read from source, no victim measured\" — and its own honest outcomes included *\"unreachable, leave it alone\"* and *\"a programming-error guard, not an authoring refusal\"*. **The reachability probe was run first, against a real server. Both of those outcomes are false, and the cost is larger than filed.**\n\n## The probe (measured end to end, before a line was changed)\n\n`pnpm dev:crm -- --fresh`, authenticated as the seeded platform admin, driving the real `PUT /api/v1/meta/view/:name`:\n\n| request body | reaches the guard? | answered **before** | answered **after** |\n|---|---|---|---|\n| *(no body at all)* | no | 422 `INVALID_METADATA` | unchanged |\n| `null` | no | 422 `INVALID_METADATA` | unchanged |\n| `{}` | no | 422 `INVALID_METADATA` | unchanged |\n| `{\"item\": null}` | **yes** | **500 `INTERNAL_ERROR`** | **400 `INVALID_REQUEST`** |\n| `{\"metadata\": null}` | **yes** | **500 `INTERNAL_ERROR`** | **400 `INVALID_REQUEST`** |\n\nThe mechanism is precise. The route unwraps the `{ item }` / `{ metadata }` envelope shapes before calling the protocol, so an explicitly-null envelope arrives as `item: null` and lands on the guard. A missing, empty or literal-`null` **body** folds to `{}`, which is truthy, and is refused downstream by the per-type Zod parse — so the guard's entire reachable population is caller-authored JSON. Every internal caller passes a concrete document. It is an **authoring refusal**, reachable from the wire.\n\nServer log confirming the guard is the source, with no `code` and no `status` (contrast the 422 immediately below it, which carries both):\n\n```\n[REST] Unhandled error: Error: Item data is required\n    at _ObjectStackProtocolImplementation.saveMetaItem (.../metadata-protocol/dist/index.js:8078:13)\n```\n\n**The cost was bigger than the card predicted.** The card expected the sentence to degrade to a consumer's generic fallback. What the wire actually did was answer `500 INTERNAL_ERROR` — `handleRouteError` has no status to read and defaults to a server fault. A 500 does not merely tell the author less; it tells them something false: that the server broke and the request is worth retrying, when it can never succeed unchanged.\n\n## The fix\n\nOne declared refusal, replacing the bare throw:\n\n```\n[invalid_request] saveMetaItem requires an 'item' body for 'view/probe_c'. Send the\nmetadata document as the request body, or wrap it as {\"item\": {...}} / {\"metadata\": {...}}.\nAn explicitly null item is refused rather than persisted as an empty document.\n```\n\n**`INVALID_REQUEST`/400, not `INVALID_METADATA`/422 — and no code is minted.** Both are already registered to this package in the ADR-0112 ledger (D3). The 422 sites all describe a body that *exists* and failed the per-type parse, and every one carries structured `issues`; here there is no body to validate and no issues to report, so a 422 would misdescribe the failure and break that convention. The structural twin is `rollbackMetaItem`'s own opening guard — same class, same position, a malformed *request envelope* rather than an off-spec document — which is already `[invalid_request]`/400.\n\nThis deviates from the two codes the dispatch suggested; it is called out in the report rather than taken silently.\n\n## Verification bar: the refusal SURVIVES `clientFacingFailureText`\n\nThat is the point of the card, and a test asserting only the new `code` would pass without demonstrating it. `packages/metadata-protocol/src/protocol.save-meta-missing-item.test.ts` asserts the sentence is now quoted back rather than replaced by the caller's fallback — **plus the control that makes it evidence**: the same helper, handed the bare `Error` this guard used to throw, still withholds. Without that control the pin would stay green against a `clientFacingFailureText` that had stopped withholding anything at all.\n\n**Reverse verification** (direction predicted before running): restoring the pre-fix guard turns the file **5 failed / 2 passed** — including `expected 'save failed' not to be 'save failed'`, the card's defect reproduced as a test failure — while the control and the accept-path guard stay green, exactly as predicted. Fix restored byte-identically afterwards (`git status --porcelain` clean, no diff vs HEAD).\n\n`packages/objectql/src/protocol-meta.test.ts` carried the one existing pin, `rejects.toThrow('Item data is required')` — a bare message match that stayed green through the entire defect. It now asserts the envelope.\n\n## Verification\n\nAll of the following run at final HEAD **`2c3492204`**, after the `origin/main` merge that brought #8817:\n\n- `pnpm --filter @objectstack/metadata-protocol test` — **96 files, 1414 tests passed**\n- `pnpm --filter @objectstack/objectql test` — **210 files, 3671 tests passed**\n- Gate families, all PASS: `check:nul-bytes`, `check:error-code-casing`, `check:cross-package-test-inputs`, `check:durability-log-level`, `check:filter-alias-parity`, `check:query-options-erasure`, `check:engine-double-contract`, `check:type-check-coverage`\n- `check:type-check-debt --re-measure` — **OK, 33 entries re-measured, none above its recorded number**; `metadata-protocol`'s TEST_DEBT did not drift, so the new test file typechecks cleanly. (The reported `-1` surplus is `@objectstack/lint`, pre-existing and untouched here.)\n- Gate list re-derived from `scripts/pm/dispatch-gates.mjs` against the actual changed paths, not taken from the prompt alone.\n\nPost-fix wire re-probe was run against a rebuilt `dist/` with the marker confirmed present in the artifact, so the 400 above is the built code answering, not source.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01XeQRiAa7vYRVX5Fog7Zby8)_"
+}

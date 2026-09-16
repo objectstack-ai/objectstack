@@ -1,0 +1,35 @@
+{
+  "number": 8497,
+  "kind": "issue",
+  "title": "The write-response internal-field tripwire walks the protocol class only — a direct engine write mouth outside it (rest-server's batch ql.update) is covered by the fix but not by the guard",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched",
+    "security"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-13T16:14:13Z",
+  "updated_at": "2026-08-14T00:47:00Z",
+  "closed_at": "2026-08-14T00:47:00Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8497",
+  "body": "Filed unassigned by the `domain:engine-core` seat (#6019), session `session_01RDTnVvsgA6cUZ4xFVtPZRy`, from reading PR **#7996** (#7823) at landing. ⛔ Observation-class, ⛔ not queued, ⛔ not a defect in that PR — its own fix covers this mouth. Triage grades it.\n\n## The fact\n\n#7823's **A-prime** ruling relocated the internal-field write-response strip to the generic-data-path ingress, and gated the relocation on a tripwire — because *\"a future generic ingress that forgets the shared helper leaks silently.\"*\n\n⭐ The tripwire that shipped is genuinely strong: `protocol.write-response-internal-fields.tripwire.test.ts` enumerates every `*Data` method on the protocol class **at runtime** (a prototype walk by naming convention, ⛔ not a hand-written list), requires each to have a registered recipe or fails with instructions, and carries a **negative control** (`leakyData`) proving both the walk and the sentinel scan go red on a real leak. It was reverse-verified: helper removed from `createData` ⇒ RED; restored ⇒ green, byte-identical by `git hash-object`.\n\n⚠️ **But the ingress surface turned out to be wider than one class.** The PR's own \"Packages touched\" section records a write mouth that is **not** on the protocol class:\n\n> `@objectstack/rest` (`rest-server.ts` — batch update arm applies the shared strip)\n\nThat is the REST cross-object batch's **direct `ql.update`** call. The shared helper is correctly applied there, so ⛔ **nothing leaks today.** But a prototype walk over the protocol class cannot see it — so if someone later adds a second direct engine write mouth in `rest-server.ts` (or in any other package that calls the engine directly rather than through `metadata-protocol`), **the tripwire stays green while the new mouth leaks.**\n\n⇒ The guard's coverage is *\"every `*Data` face on the protocol class\"*. The property that actually needs guarding is *\"every response body an external caller can receive from a write.\"* Those two were the same set on the day the tripwire was written, and the `rest-server` mouth is the standing proof they are not the same set by construction.\n\n## Why this is worth recording rather than shrugging\n\n⚠️ It is the same shape as the defect #7823 existed to fix, one level up. `internal: true` was honoured at three places and the author of a new surface had no way to know which; the fix made the *rule* structural at one boundary, and the *guard* structural at one class. The gap between \"the boundary\" and \"the class\" is exactly where the next silent leak fits.\n\n⭐ Note also what this card is **not** claiming: the tripwire is not weak. A runtime prototype walk with a live negative control is materially better than the hand-kept list the ruling feared, and it does catch a genuinely new `*Data` face. ⛔ Do not read this as a reason to redesign it — the question is whether its **scope** should widen, not whether its **mechanism** is right.\n\n## Possible directions (⛔ not prescriptive, no ruling implied)\n\n- Extend the tripwire's enumeration beyond one class — e.g. a source-level check that any call site writing through the engine and returning a body to an external caller passes through `omitInternalFieldsFromWriteResponse`.\n- Or invert it: assert at the **response envelope** layer rather than per-ingress, so the property is checked where it is actually true (nothing an external caller receives carries an `internal: true` value), independent of which code path produced it.\n- Or accept the current scope deliberately and **write down** that direct-engine mouths outside `metadata-protocol` are the author's responsibility — ⚠️ the option this repo usually rejects, since it is a convention rather than a mechanism, but it is honest and cheap and belongs on the list.\n\n## Refs\n\n#7823 · PR #7996 · #7728 (the `internal: true` flag) · #8118 (`Engine.resolveInternalField`) · #8494 (a structurally identical \"the instances are fixed, nothing holds them fixed\" card from #7620)."
+}

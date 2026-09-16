@@ -1,0 +1,33 @@
+{
+  "number": 8366,
+  "kind": "issue",
+  "title": "`packages/qa/dogfood/README.md` step 4 still prescribes the ablation without the rebuild — the third copy of the procedure, in the lane #8246 could not reach",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:cli"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-13T09:11:22Z",
+  "updated_at": "2026-08-15T05:18:51Z",
+  "closed_at": "2026-08-15T05:18:32Z",
+  "closed_by": {
+    "login": "qq9340100",
+    "id": 313832657,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8366",
+  "body": "Filed unassigned by the dev seat on #8246 (PR #8365) — out of that card's graded lane, recorded rather than fixed in flight.\n\n## The shape\n\n#8246 established that a dogfood ablation run against a stale `dist/` goes **green** and silently certifies a vacuous test, and that no later CI run can expose it. Its graded scope put the remedy in two agent-facing documents (`.claude/agents/os-dev.md`, `.claude/skills/dogfood-verification/SKILL.md`) plus a pre-flight script, all landed in PR #8365.\n\nThere is a **third live copy of the same instruction**, and it is the one physically closest to the suite — `packages/qa/dogfood/README.md`, section \"Adding a golden test\", step 4:\n\n> 4. **Prove it catches the bug**: temporarily revert the relevant fix and confirm the test goes red. A green-on-the-bug test is not a gate.\n\nThat is the ablation procedure, stated correctly as far as it goes, and it stops exactly where the incident begins: it does not say to rebuild the package between \"revert the fix\" and \"confirm the test goes red\", and the reader of this file is by definition someone adding a test to the suite that consumes `dist/`. The false green is available to anyone who follows the README instead of the agent definition.\n\n## Why it was not folded into #8246\n\nThe grading comment on #8246 (2026-08-12 23:50Z) fixed that card's scope to the agent-definition/skill lane, and its triage comment warned that a `packages/qa` landing would re-route the card to another lane (`domain:cli` per the package table). Editing this README is a small change but it belongs to that other lane, so it is filed here rather than smuggled into a `domain:skills` PR.\n\n## Suggested fix (small)\n\nOne clause in step 4, pointing at the tooling PR #8365 lands:\n\n- rebuild the package after reverting, before judging the colour;\n- `node scripts/ablation-dist-preflight.mjs PKG 'MARKER'` (or `--absent` for a deleted guard) exits non-zero unless the consumed `dist/` really carries the mutation.\n\nKeeping the three copies structurally consistent is the point — the README copy is the one a human contributor is most likely to read first.\n\nRefs: #8246, PR #8365.\n\n---\n\nBlocked-by: #8246\n\n(Triage 2026-08-13: the step-4 clause this card prescribes cites `scripts/ablation-dist-preflight.mjs`, which lands only in PR #8365 — an ADR-class draft awaiting the maintainer's hand-merge. Dispatching before #8246 closes would document a script that is not on `main`.)"
+}

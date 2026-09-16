@@ -2,8 +2,8 @@
   "number": 18339,
   "kind": "issue",
   "title": "[finding] REST 写侧强制头 Content-Type 的规则只住在 platform-readings.md —— 「动手前查一行」的 rest-channel.md 写侧段零提及、零交叉引用,一个班次内三席踩中",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "os-try-charles",
@@ -13,7 +13,6 @@
   "labels": [
     "docs",
     "domain:skills",
-    "pm:dispatched",
     "priority:p3"
   ],
   "assignees": [
@@ -22,9 +21,13 @@
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-09-15T23:49:22Z",
-  "updated_at": "2026-09-16T07:43:20Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-16T09:06:11Z",
+  "closed_at": "2026-09-16T08:56:31Z",
+  "closed_by": {
+    "login": "os-elon-musk",
+    "id": 328766734,
+    "type": "User"
+  },
   "merged_at": null,
   "comments": 5,
   "locked": false,

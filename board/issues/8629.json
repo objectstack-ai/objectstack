@@ -1,0 +1,36 @@
+{
+  "number": 8629,
+  "kind": "issue",
+  "title": "`sys_setting`'s declared row identity is unenforced on every `tenant` and `global` row — `user_id` is NULL there and SQL UNIQUE is NULL-distinct",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched",
+    "target:v17"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-14T04:15:30Z",
+  "updated_at": "2026-08-14T16:58:41Z",
+  "closed_at": "2026-08-14T16:58:41Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8629",
+  "body": "Found while implementing #8555 (which scopes this same index per organization). Filed unassigned and **deliberately separate**: #8555 is a pure relaxation, this one is a **tightening**, and the two need different migration ceremony. Same split #6417 made against #5839, and for the same stated reason.\n\n## The fact\n\n`packages/platform-objects/src/system/sys-setting.object.ts` declares the object's row identity as\n\n```ts\n{ fields: ['namespace', 'key', 'scope', 'user_id'], unique: 'organization' }\n```\n\nand the object's own header calls that the row identity. `user_id` is NULL on every row that is not `scope='user'` — `SettingsService.set` computes it as `scope === 'user' ? ctx.userId ?? null : null` — and SQL UNIQUE treats NULLs as mutually distinct. So the constraint is **void on the `tenant` and `global` limbs**, which are exactly the ones carrying organization-level and platform-level configuration.\n\nThe organization key part is NULL-safe (`COALESCE(organization_id, '__global__')`, ADR-0120 D3). `user_id` is not, and D1's vocabulary scopes the tenant column only — `sys_view_definition`'s declaration says so in its own comment, about its own `owner` column:\n\n> ⚠️ The KEY below is NULL-DISTINCT, which is a second gap the declaration cannot close on its own (#6417) … it scopes the tenant column only — `owner` would stay NULL-distinct.\n\n## Measured, live, on a real engine\n\nReal `SqlDriver`, the real shipped declaration, `OS_TENANCY_POSTURE=isolated`. Identical **before and after** #8555 — this is not something that card introduced or fixed:\n\n```\nscope='tenant', user_id NULL, SAME organization, same (namespace, key)\n  org_jia POST (lifecycle, retention_overrides, tenant, NULL) → 201\n  org_jia POST the SAME AGAIN                                 → 201    ← row identity void\n  rows in table: 2\n\nscope='global', user_id NULL\n  platform POST (mail, smtp_host, global, NULL)               → 201\n  platform POST the SAME AGAIN                                → 201    ← two competing platform defaults\n\ncontrol — the same rows with a NON-NULL user_id\n  org_jia POST (lifecycle, retention_overrides, tenant, usr_1) → 201\n  org_jia POST the SAME AGAIN                                  → 409 UNIQUE_VIOLATION\n```\n\nThe control identifies the mechanism: it is the NULL, not the `scope` value.\n\nPinned as live assertions in `packages/drivers/driver-sql/src/sql-driver-sys-setting-organization-unique.test.ts`, section 4 (\"the NULL-distinct user_id hole\"), written to go **red** when this card lands so a fix must come and flip them rather than leaving a stale comment behind.\n\n## User-reachable consequence\n\n`SettingsService` resolves a layer with `rows.find((r) => r.key === key && r.scope === 'tenant')` — a positional pick over whatever the table returns. With duplicates permitted, which value an organization gets for a tenant-scoped setting is unspecified, and a write through `set()` upserts against `where { namespace, key, scope, user_id }`, which matches an arbitrary one of them. Two rows can therefore disagree indefinitely with no way for an admin to see why the effective value is not the one they set. `lifecycle.retention_overrides` is a live tenant-scoped key, so this reaches real retention behaviour.\n\nSibling objects likely share the shape — `sys_setting_audit` mirrors the same three-value `scope` — but that is unverified and deliberately not asserted here.\n\n## Why it is not a rider on #8555\n\n#8555 respells `unique: true` to `'organization'`. That is a **relaxation**: it admits key pairs previously refused and refuses nothing that previously succeeded, so it cannot fail to apply on any existing database. Verified there against a database deliberately seeded with pre-existing duplicate `tenant`-scope rows — the replacement index builds and every row survives, precisely because it does not tighten `user_id`.\n\nMaking `user_id` NULL-safe is the opposite: it is a tightening that will **fail to create the index** on any installation that has already accumulated duplicates, which the void constraint has been permitting all along. That needs ADR-0120 D4's conflict-row disposition and a duplicate pre-flight in `os migrate plan`. Exactly the tradeoff #6417 recorded, verbatim and untranslated:\n\n> 把键改成 NULL-safe 则相反：那是**收紧**，在已经存在重名活跃共享视图的库上会直接建不出索引……需要 ADR-0120 D4 的冲突行处置口径配套。这是独立的取舍，需要单独拍板。\n\n## Two routes, both with precedent\n\n1. **Runtime migration, the #6417 / PR #6666 route.** `metadata-protocol`'s `ensureViewDefinitionActiveIndex` issues a raw-SQL `CREATE UNIQUE INDEX` at `kernel:ready`, reusing the declared index's name so `syncDeclaredIndexes` (which skips by name) never re-imposes the NULL-distinct form on a later boot. `ensureOverlayIndex` does the same with `COALESCE(package_id, '')` for `sys_metadata`. Proven twice; leaves the declaration unable to say what it means.\n2. **Extend the declared vocabulary** so an author can mark a listed column NULL-safe. Closes the class rather than the instance, and would let the declaration state its own row identity — but it is authorable-surface design and needs its own ADR (or an ADR-0120 amendment), plus `SqlDriver.createNullSafeUniqueIndex`'s existing MySQL functional-key fallback extended to it.\n\nRoute 2 is the ADR-0078 direction (a declaration that cannot express its own constraint is a declared-but-unenforced surface), but route 1 is what has shipped twice. Recording both rather than choosing.\n\n## Decision needed before implementation\n\nFor a duplicate-carrying installation, what happens to the extra rows — refuse to migrate and hand the operator a list, or apply a deterministic keep-one rule (newest `updated_at`)? Settings values are admin-authored configuration, so silently discarding one is a real data decision, not a cleanup.\n\n## Related\n\n- #8555 — the per-organization respelling of this same index (the relaxation half).\n- #6417 / PR #6666 — the same NULL-distinct class on `sys_view_definition`, fixed via route 1.\n- #5030 — the tenant-column instance, fixed by ADR-0120 D3.\n- ADR-0120 (D3 NULL-safe uniqueness, D4 tightening ceremony), ADR-0049 / ADR-0078 (declared-but-unenforced).\n"
+}

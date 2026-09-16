@@ -1,0 +1,30 @@
+{
+  "number": 8430,
+  "kind": "issue",
+  "title": "plugin-sharing's read-path merge is a THIRD read-scope boundary the #8220 provenance mark does not cover — sharing-composed queries withhold the author diagnostic (fail-closed, but restorable)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-13T12:51:02Z",
+  "updated_at": "2026-08-15T02:46:52Z",
+  "closed_at": "2026-08-15T02:46:30Z",
+  "closed_by": {
+    "login": "qq9340100",
+    "id": 313832657,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8430",
+  "body": "Out-of-scope finding from #8220 / PR #8429, measured by its dev (cloud session `session_01AkiE189Csm7aBT2qCVSx3X`) and filed by the dispatching PM on its behalf (the dev's environment had no GitHub API egress — provenance in the `os-dev-report` on #8220). Unassigned, for triage; lands in `packages/plugins/plugin-sharing` (identity lane's family).\n\n## The gap\n\n#8220 declared the filter-subtree provenance mark and set it at TWO read-scope merge boundaries (plugin-security's RLS injection; service-analytics' `withReadScope`). `plugin-sharing`'s read-path merge (`sharing-plugin.ts` `composeAnd` sites, ~:871/:896) is a **third** merge boundary outside that card's declared file surface:\n\n- Its injected sharing filters arrive at the driver **unmarked** ⇒ withheld. That direction is fail-closed and therefore CORRECT — nothing discloses.\n- But an author's own filter on an object with **active sharing rules** loses the identity vouch at the security boundary (by the time plugin-security sees it, `ast.where` has already been rewritten by the sharing composition), so the author's OWN cross-field refusal stays redacted — the exact author-experience cost #8220 existed to remove, surviving on one composition path.\n\n## The fix shape (for whoever takes it)\n\nMark at plugin-sharing with the #8220 spec exports (`markFilterSubtreeProvenance` from `@objectstack/spec/data`): `'policy'` on its injected sharing filters; it can also preserve the author vouch across its rewrite (mark the caller's subtree `'author'` under the same identity-vouch discipline plugin-security uses — a rewritten sibling tree is vouched for nobody). Pins per the #8220 pattern: author names columns / policy withholds / unmarked withholds, at a real driver.\n\n## Constraints inherited from #8220 (binding on any implementation)\n\n- Fail-closed: unmarked/ambiguous ⇒ withheld; the mark is permission to reveal.\n- One mechanism: consume `resolveFilterSubtreeProvenance` — ⛔ do not invent a parallel provenance concept.\n\nRefs: #8220 (the mark + both existing boundaries), PR #8429, #8198 (the B-phase redaction), #7929 (the ruling)."
+}

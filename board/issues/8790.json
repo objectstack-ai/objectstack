@@ -1,0 +1,35 @@
+{
+  "number": 8790,
+  "kind": "issue",
+  "title": "driver-sql: one unresolvable WHERE column, two answers — `find()` silently returns [] while `count()` throws a raw dialect error with no ADR-0112 envelope",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-15T01:54:59Z",
+  "updated_at": "2026-08-16T00:16:26Z",
+  "closed_at": "2026-08-15T23:33:38Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8790",
+  "body": "Found while measuring #8371 (dotted filter keys across the three drivers). Filed separately because it is **independent of that card's verdict decision**: it survives every remedy #8371 could choose, and it is reachable by any unknown WHERE column, not only a dotted one.\n\n## The defect\n\n`SqlDriver.findRows()` carries the #3821 unknown-column recovery ladder. Its retries are built from `buildBase()`, which **always re-applies `query.where`** — so the ladder can drop a projection and can drop an ORDER BY, but it can never drop the clause that actually failed when the unknown column is in the WHERE. Both retries raise the same error, `recovered` stays false, and the method falls to `return []`.\n\n`SqlDriver.count()` runs a separate statement and has no ladder at all, so the identical predicate throws.\n\n## Measured\n\nReal `SqlDriver` on better-sqlite3, one table, one seeded row (`task` with a `title` column):\n\n```\nwhere { 'title.x': 'y' }\n  find()   ->  0 rows, NO ERROR\n  count()  ->  THREW  code=SQLITE_ERROR  status=undefined\n              select count(*) as `count` from `task` where `title`.`x` = 'y' - no such column: title.x\n\nCONTROL  where { title: 'Design' }\n  find()   ->  1 row\n  count()  ->  1\n```\n\nSame through the real engine (`ObjectQL` + real `SqlDriver`): `engine.find` answers 0 rows, `engine.count` throws the same raw `SQLITE_ERROR`.\n\n## Why it is worth a card\n\n1. **The two answers contradict each other on one query.** A list view calls both. The user sees \"no records\" from the rows half and a 500-shaped failure from the total half — or, if the caller only reads rows, a silent empty page. This is the #3821 footgun with the halves swapped: there the page was empty while the total was truthful, here the page is empty while the total explodes.\n2. **The thrown error is not an ADR-0112 envelope.** `code` is the dialect's own `SQLITE_ERROR` and there is no `status`; the message is raw SQL with the bound literal inlined. Every other refusal on this path (e.g. the JSON-column operator refusal) answers `INVALID_FILTER` / 400. The predicate text reaching a caller verbatim is also the disclosure shape #7929 redacted elsewhere.\n3. **Not only dotted keys reach it.** The protocol door refuses an unknown WHERE field, but `assertFilterFieldsExist` returns early when `resolveQueryFields` yields nothing — the unpopulated-registry case the driver's own recovery comment names as the reason the backstop exists (notably the cloud multi-tenant runtime). A dotted key is simply the route that is reachable with a fully populated registry, because it is judged on its head segment only.\n\n## Not proposed here\n\nWhich way to reconcile them is a real decision, not an obvious fix — refuse both (`INVALID_FILTER` / 400 naming the column), recover both (drop nothing, return rows unordered/unfiltered is clearly wrong for a WHERE), or keep `find()` permissive and envelope `count()`. Left for triage. The #3821 ladder's docblock argues \"rows matter more than their order\", which does not transfer to a predicate: dropping a WHERE would return rows the caller excluded.\n\nRepro is the 20-line script in #8371's measurement comment; point its fixture at any column the table lacks."
+}

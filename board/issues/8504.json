@@ -1,0 +1,36 @@
+{
+  "number": 8504,
+  "kind": "issue",
+  "title": "The 2026-08-13 max_nodes ruling's &quot;loud warning&quot; clause has no owner: `os serve` calls the multi-node gate zero-arg, so a partial cap is silent even once the gate can express it",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched",
+    "target:v17"
+  ],
+  "assignees": [
+    "qq9340100"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-13T16:21:15Z",
+  "updated_at": "2026-08-14T15:19:59Z",
+  "closed_at": "2026-08-14T15:19:59Z",
+  "closed_by": {
+    "login": "qq9340100",
+    "id": 313832657,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8504",
+  "body": "Filed **unassigned, observation-class**, by the `domain:services` PM seat (#6021, session `session_01ARidKDYSCD56LaygrvDPnk`) while reviewing PR #8503. ⛔ Not routed or graded by me.\n\n## The ruling has three clauses; two are tracked and one is not\n\nThe maintainer ruled 2026-08-13 (recorded on `objectstack-ai/cloud#1275`) that a licensed `max_nodes` overflow must:\n\n1. **refuse the excess replicas** — needs an atomic slot claim ⇒ tracked at **#8501**\n2. **run up to the paid limit** — same mechanism ⇒ tracked at **#8501**\n3. **warn loudly** — ⚠️ **tracked nowhere**\n\nThis card records clause 3.\n\n## Why clause 3 is not covered by #8501 or by the cloud follow-up\n\n- **#8501** is scoped to the enforcement mechanism (slot claims over `ILock`/`ICounter`/`IKV`, TTL semantics, refusal posture). Its \"What would make it binding\" section does not mention the operator signal.\n- **The cloud follow-up** (`objectstack-ai/cloud#1291` / the EE registration) changes only what the *provider* returns. A provider can return `admitted: 3` all day; nothing renders it.\n- **PR #8503** deliberately scoped itself to `packages/services/service-cluster/src` per its dispatch, and its own report names this as left out.\n\n## Mechanism\n\nThe sole runtime consumer is `packages/cli/src/commands/serve.ts:1234-1247` (measured by the #8367 dev, and consistent with what `content/docs/kernel/cluster.mdx` documents). It calls `checkMultiNodeAllowed()` **zero-arg** and reads only `.allowed` / `.reason`.\n\nTwo consequences, both following by construction from PR #8503's design rather than needing separate measurement:\n\n- Passing no count means `requested` is `undefined`, so a cap-aware provider has nothing to clamp against and the resolved verdict comes back `refused: 0, capped: false`. The partial-cap state is **unreachable from this call site**, not merely unread.\n- Even if it were reachable, the call site reads neither `refused` nor `capped`, so it would render nothing.\n\n⭐ Net: after PR #8503 lands, the gate can *express* \"3 admitted, 2 refused\" and the only program that consults it can neither ask the question nor say the answer.\n\n## Why this is worth its own card rather than a line in #8501\n\n⭐ **Clause 3 is deliverable now, and it does not wait on enforcement.** A warning that says \"license admits 3 nodes; `OS_CLUSTER_REPLICAS` declares 5; the cap is advisory — excess replicas will still join\" is honest, useful to an operator today, and is the *only* part of the ruling reachable before the slot-claim mechanism exists. Folding it into #8501 buries a small independent deliverable behind a large one with open design questions.\n\n⚠️ It also matters that the warning be worded as **advisory** while #8501 is open. A warning phrased as \"2 replicas refused\" would be false — nothing is refused today — and would be the same declared-vs-delivered gap this whole family exists to close.\n\n## Scope sketch (⛔ not a prescription)\n\n`serve.ts` passes the replica count it already resolves (`OS_CLUSTER_REPLICAS`, read for the split-brain guard at `packages/services/service-cluster/src/split-brain-guard.ts:33-34,47-51`) into `checkMultiNodeAllowed(requested)`, then emits on `capped === true`. Note the call site re-declares the return type locally inside a dynamic-import cast, so it will need that local shape updated — it does not inherit the widening implicitly.\n\n⚠️ Whoever takes this should confirm whether `OS_CLUSTER_REPLICAS` is the right input: it is an operator-**declared** desired count, not a live membership count (that distinction is the core of #8501). For an advisory warning a declared count is arguably exactly right — the operator is being told about the configuration they wrote — but that should be a stated decision, not an accident.\n\n## Refs\n\n#8367 / PR #8503 (the seam widening) · #8501 (clauses 1–2, the enforcement mechanism) · `objectstack-ai/cloud#1275` (the ruling) · `objectstack-ai/cloud#1291` (the EE consumer half) · `content/docs/kernel/cluster.mdx` (documents only the deny/downgrade path — an operator has no other place to learn whether a node cap binds)"
+}

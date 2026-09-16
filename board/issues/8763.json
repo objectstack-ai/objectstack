@@ -1,0 +1,34 @@
+{
+  "number": 8763,
+  "kind": "pull_request",
+  "title": "fix(objectql): pin the SEARCH-axis remedy agreement and correct the three word-identity comments (#8648)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "size/m",
+    "skip-changeset",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-14T20:13:24Z",
+  "updated_at": "2026-08-14T20:49:01Z",
+  "closed_at": "2026-08-14T20:49:00Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-08-14T20:49:00Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/8763",
+  "body": "Fixes #8648\n\nThree source comments asserted that the SEARCH-axis refusal is worded **identically** to the SORT/FILTER ones, and one of them further asserted that the conformance pin **enforces** that identity. Measured from the running doors, neither held. This is the repo's declared-≠-enforced family landing on the refusal vocabulary rather than on a metadata key.\n\n## What was measured\n\nTriggered against a real `ObjectQL` plus the protocol on current `main`, each refusal's emitted `message` read verbatim — not from source literals, since a literal in the tree can be dead or shadowed:\n\n| axis | doors | envelope | remedy, as emitted |\n|:--|:--|:--|:--|\n| FILTER | ingress + `engine.find()` | `400 INVALID_FIELD` | `Denormalise the value onto 'showcase_task' (a stored field, written when the source changes) and filter that.` |\n| SORT | ingress + `engine.find()` | `400 INVALID_SORT` | the same sentence, closing `and sort by that.` |\n| SEARCH | ingress | `400 INVALID_FIELD` | `Mirror the computed value onto a stored text field on 'showcase_task' and search that instead.` |\n\nSEARCH cannot match the stem the pin asserted across its four SORT/FILTER doors, so the claim was unpinned in exactly the place where it was false.\n\n## The gap, measured in both directions\n\nReverse verification, with the fix committed first. A **substance-preserving** rewording of the SEARCH message (`Copy the computed value into a stored text column on '...' and search that column.`) was applied at the producer and the artifact rebuilt — the test resolves `metadata-protocol` from built `dist/`, so an unrebuilt ablation runs the pre-mutation build and stays green; the mutation was proved present in `dist/index.js` before each leg.\n\n- **With the old pin** (`origin/main`'s test file, same reworded message): the agreement pin stayed **GREEN** — 170 passed, 1 failed, and the only failure was an unrelated per-door assertion in the #6674 block. That is the defect.\n- **With the new pin**: **RED** on `search-ingress remedy wording`, printing the expected sentence beside the emitted one.\n\n## What changed\n\nComment and test lines only — **no runtime-behaviour lines**, and the shipped SEARCH message is untouched.\n\n1. **The three comments now claim substance-agreement**, which is what actually holds across all three axes: put the value on a stored column of the queried object and query that instead. SEARCH narrows the target to a **text** column, correct for an axis that scans text-like columns. `packages/objectql/src/filter-comparand-shape.ts` carries the same sentence but names only the ingress door, so it is accurate as written and is left alone.\n2. **The agreement pin now covers five doors in three layers**, each catching what the others cannot:\n   - **agreement**, emitted-vs-emitted — the four stem-sharing doors are compared against *each other* via their longest common prefix, which must equal the stem exactly. No single-door drift survives it, and rewording all four together also goes red.\n   - **wording**, per axis including SEARCH — the door the pin used to skip. Rewording any axis now goes red.\n   - **substance**, as a ratchet on those constants — a stored target, named on the queried object, with that axis redirected onto it. When the wording layer goes red and the next author updates the strings, this is what the rewrite cannot quietly walk away from.\n\n   SEARCH's divergence is pinned as **deliberate**, so a future author cannot \"repair\" it into the shared stem while believing the wordings were always meant to be identical.\n\n⛔ **Route 3 was not taken.** Aligning the SEARCH wording onto the shared stem changes a shipped, user-visible error message on an axis that already landed, with zero measured pull, and the `text` narrowing would need somewhere to live. The pin holds without it, so no fork needed escalating.\n\n## Verification\n\nAll at `bc46f3e8a`, the head this PR pushes, after merging `origin/main` (`00ee416`) and rebuilding the closure:\n\n```\npnpm --filter @objectstack/objectql test              206 files / 3629 tests passed\npnpm --filter @objectstack/metadata-protocol test      90 files / 1351 tests passed\npnpm --filter @objectstack/objectql typecheck         exit 0\n```\n\nGate union re-derived against the actual changed paths with `node scripts/pm/dispatch-gates.mjs` and re-run at this head; exit codes read unpiped, all `0`:\n\n`check:nul-bytes` · `check:durability-log-level` · `check:stack-collection-maps` · `check:cross-package-test-inputs` · `check:filter-alias-parity` · `check:query-options-erasure` · `check:type-check-coverage` · `check:type-check-debt` (on the built closure) · `check-engine-split-ratio`\n\nThe derivation surfaced no family beyond the ones dispatch named.\n\n## Changeset\n\nNone — `skip-changeset` applied. The diff is comments plus one test; no user-visible message, behaviour or export changes, so this PR declares no release of its own.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01XeQRiAa7vYRVX5Fog7Zby8)_"
+}

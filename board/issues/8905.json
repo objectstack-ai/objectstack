@@ -1,0 +1,35 @@
+{
+  "number": 8905,
+  "kind": "pull_request",
+  "title": "feat(spec): stamp-only tenancy.organizationField — read-neutral organization declaration for audit stamping (#8778)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-15T16:12:18Z",
+  "updated_at": "2026-08-15T20:20:50Z",
+  "closed_at": "2026-08-15T20:20:49Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": "2026-08-15T20:20:49Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/8905",
+  "body": "Fixes #8778\n\nImplements the maintainer-ruled **option A** (delegated adjudication, issue comment `5299847449`): a read-neutral, **stamp-only** organization declaration — `tenancy.organizationField` — so audit rows can follow the organization a record is ABOUT on objects that must stay unwalled. This is the remaining half of #8707 (the precedence half landed in PR #8777); #8707 stays open for its own seat to verify and unblock — no closing keyword targets it here.\n\n## What changed\n\n- **`packages/spec/src/data/object.zod.ts`** — `TenancyConfigSchema` gains optional `organizationField` with a describe() that states loudly it is stamp-only and does NOT tenant-scope reads. Liveness ledger entry added (`live`, evidence = the audit writer); authorable-surface, reference docs and liveness counts regenerated (`check:generated --fix`, only the proved-stale set).\n- **`packages/plugins/plugin-audit/src/audit-writers.ts`** — `resolveRecordOrganizationField` consults the declaration as **limb 0**, ahead of the ADR-0066 `enabled: false` opt-out (an author declaring it on an unwalled object is stating exactly that the trail follows the record even though no wall does), guarded by the same #5315 field-presence check `tenantField` carries.\n- **`packages/platform-objects/src/identity/sys-api-key.object.ts`** — declares `tenancy: { enabled: false, organizationField: 'active_organization_id' }`. The revocation row now lands behind the wall of the KEY's organization, not the revoker's.\n- **Scope pin honoured**: one stamp-only key; the resolver is its only consumer; the describe(), the schema JSDoc, the ledger note and the resolver doc all state that a second consumer needs its own ruling.\n\n## The pinned-gap test flipped as designed\n\nThe ⛔ KNOWN GAP case in `audit-writers.test.ts:1414` went red exactly as it was written to, and is rewritten to expect `org-key`, plus: the #5315 fall-through case, an `organizationField`-outranks-`tenantField` precedence pin, and a control pinning that WITHOUT the declaration the actor's org is still stamped (no hidden column-name heuristic).\n\n## Read-neutrality — pinned beside each named read path\n\n- **`applyTenantScope` / `injectTenantOnInsert`** (driver-sql): new suite in `sql-driver-tenant-scope.test.ts` — a walled object declaring the key keeps scoping/injecting on `organization_id` (a row whose wall and stamp columns disagree is the discriminating fixture), and the sys_api_key-shaped object stays unwalled with no injection.\n- **`computeTenantLayer0Filter`** (plugin-security): the #8287 suite in `tenant-layer.test.ts` now derives BOTH Layer-0 inputs (`objectHasOrgIdField`, `tenancyDisabled`) from the REAL shipped `SysApiKey` post-declaration — filter stays null in all three postures.\n- **`resolveInjectedSystemColumns`** (spec): new case — the plan is blind to the key on a plain tenant object and on the better-auth shape.\n\n## Declaration-shape measurement (`enabled: false` vs the previous absent block, for sys_api_key)\n\nMeasured on every reader of the `tenancy` block repo-wide:\n\n- `resolveInjectedSystemColumns` bails on `managedBy: 'better-auth'` before tenancy is read — identical plan.\n- `SqlDriver.computeTenantField` / `computeAndRecordTenantField` → null either way (no `organization_id`, no `tenantField`); the sticky opt-out entry only preserves a null that is already null.\n- `computeTenantLayer0Filter` → null either way (`tenancyDisabled` short-circuit vs `objectHasOrgIdField === false` short-circuit).\n- `ObjectQLEngine.buildDriverOptions` now withholds `tenantId` for this object — every downstream reader (`applyTenantScope`, `injectTenantOnInsert`, `auditMissingTenant`) gates on the null tenant field and was already a no-op for it.\n- Memory/Mongo boot guards count only an explicit `enabled: true` — unaffected.\n- `posturePermitsCrossTenant` (plugin-security) is already true via `isBetterAuthManaged` — unaffected.\n- ⚠️ **One corner honestly reported, not silently absorbed**: plugin-security's RLS field-existence net treats a policy targeting `organization_id` on an object lacking it as *deny (fail-closed)* unless the object opted out of tenancy, in which case it *skips*. With `enabled: false`, a hypothetical org-targeting wildcard RLS policy on sys_api_key would now be skipped as \"not applicable on this object\" instead of contributing to the deny sentinel. No shipped policy has this shape (the wildcard tenant policy was retired from the seeds; sys_api_key's Layer 1 is the `user_id`-based self policy), so shipped behavior is identical; the delta direction on custom metadata is the branch's own documented semantics for opted-out objects, and matches #8287's design (the credential table is owner-scoped, never org-walled).\n\n## Verification\n\n- `@objectstack/spec` build + full test suite, `check:generated` (all gates green after regenerating exactly the two proved-stale artifacts).\n- Consumer suites (downstream direction): plugin-audit 16/16 files, 242 tests; platform-objects 23 files, 409 tests; plugin-security 65 files, 1236 tests; driver-sql + objectql runs and per-package typechecks recorded in the dev report on the issue.\n- Reverse verification (fix committed first): reverting the resolver's limb 0 turns exactly the new stamp cases red — direction and counts in the dev report.\n- Gate union re-derived from the actual changed paths via `scripts/pm/dispatch-gates.mjs`; run receipts (with the head SHA) in the dev report.\n\n_Generated by [Claude Code](https://claude.ai/code/session_01Fgvh1iEJfxetei7aNVdtJt)_\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01Fgvh1iEJfxetei7aNVdtJt)_"
+}

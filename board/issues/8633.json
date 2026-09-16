@@ -1,0 +1,36 @@
+{
+  "number": 8633,
+  "kind": "pull_request",
+  "title": "fix(metadata-protocol): a batch row's httpStatus reads the declared status, not one spelling of it (#8570)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/xl",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-14T04:30:02Z",
+  "updated_at": "2026-08-14T05:52:35Z",
+  "closed_at": "2026-08-14T05:52:33Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-14T05:52:33Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/8633",
+  "body": "Fixes #8570\n\n## What was wrong\n\n`toRowApiError` (`packages/metadata-protocol/src/protocol.ts`) set a batch failure row's `httpStatus` from `err.status` alone. Two producers that reach those catches declare a genuine client refusal without that spelling, so their rows shipped with no status at all — while sibling rows of the **same** response carried one:\n\n| producer | code | `.status` | `.statusCode` | validation shape | before | after |\n|---|---|---|---|---|---|---|\n| `rowRequiredIdError` | VALIDATION_FAILED | **400** | — | no | 400 | 400 |\n| `recordNotFoundError` | RECORD_NOT_FOUND | **404** | — | no | 404 | 404 |\n| objectql `ValidationError` | VALIDATION_FAILED | — | — | **yes** | — | **400** |\n| plugin-approvals record lock | RECORD_LOCKED | — | **409** | no | — | **409** |\n| app hook throwing a bare `Error` | — | — | — | no | — | — |\n| driver fault (`SqliteError`, …) | SQLITE_* | — | — | no | — | — |\n\nA caller branching on `httpStatus` to tell \"fix your input\" from \"the server broke\" got an answer for some failure rows and silence for others, with nothing saying which. It is the same single-spelling defect that #7525 repaired at the HTTP door, one layer down.\n\n## The change\n\n`httpStatus` now comes from `resolveThrownHttpError` (`@objectstack/types`) — **imported**, the resolver the HTTP doors answer with and the one the row's `message` limb already delegates to (#8502). No second local chain: this function had three fields and would otherwise have carried three derivations of \"what status is this throw\".\n\n**`declaredStatus`, not `status`.** That resolver answers for every throw, and for an undeclared one its `status` is the caller's fallback, 500. Stamping it would put `httpStatus: 500` on the last two rows of the table above — rows that never carried one — which is an addition to the wire for those populations, not the restoration of a declared value. So `ThrownHttpError` gains `declaredStatus`: the same resolution minus the fallback, absent when the throw declared nothing. `status` is untouched and every boundary that answers with the status itself keeps reading it. The field also replaces a magic-number workaround already in the tree — `resolveThrownHttpError(e, 0).status !== 0` in `packages/rest`'s publish-classification suite asks exactly this question with a sentinel.\n\nTwo deliberate boundaries, both pinned:\n\n- **The gate is declared-ness, not the 4xx band** the `message` limb uses. That limb decides disclosure of free text, where a 5xx must be withheld; this one reports a number the producer authored, and a row already ships `httpStatus: 503` today when the same refusal spells `.status`. Narrowing to 4xx would withdraw a status the wire carries — a different decision from this one.\n- **`code` reads the same resolution**, so a row cannot contradict itself. Deriving `code` from `err.status` while `httpStatus` came from the resolver would answer `{ code: 'INTERNAL_ERROR', httpStatus: 409 }` for a `statusCode`-spelled refusal whose own code the ledger does not know.\n\n## Docs rider (triage, in scope)\n\n`ApiErrorSchema.httpStatus` now documents what **absence** means — \"no claim made\", never a status of its own and never 200 — and what it means where the envelope rides response DATA rather than the response line: on a batch row, present = the throw declared a status, absent = an undeclared server-side fault the caller should treat as a 500.\n\n## Verification\n\nBoth card rows reproduced on the real stack, then ablated in both directions.\n\n- **Real stack, row 1** — `packages/runtime/src/batch-row-http-status-real-driver.integration.test.ts`: a real `ObjectQL` over a real `SqlDriver` (better-sqlite3), the engine's own validator rejecting a 15-character value against `maxLength: 4`, giving the card's row verbatim (`name must be ≤ 4 characters (got 15)`) — now with `httpStatus: 400`. The thrown error is asserted to spell no status in either channel, so the row gains one only through the shape it declares.\n- **Real stack, row 2** — `packages/plugins/plugin-approvals/src/record-lock-batch-row-status.integration.test.ts`: the REAL `bindApprovalLockHook` hook, a real pending `sys_approval_request` row, a real sqlite store, through the real `updateManyData` and `batchData` loops → `{ code: RECORD_LOCKED, message: …, httpStatus: 409 }`. The hook's throw is measured in place (own properties `[stack, message, code, statusCode]`, `status` undefined).\n- **Ablation (a), fix reverted**: 8 pins red across the two metadata-protocol files, each losing exactly the newly-populated status (`expected undefined to be 400 / 409 / 503`); the undeclared-population pins stayed green, as they must.\n- **Ablation (b), over-broad** (`status` stamped unconditionally): the undeclared populations gain `httpStatus: 500` and are caught — 2 pins in `protocol.batch-row-http-status.test.ts` §3 and the real-driver `SqliteError` pin in runtime. This is the direction that separates \"populates the declared refusals\" from \"populates everything\", and it is why §3 exists.\n\nSuites: metadata-protocol 1286, spec 10527, objectql 3579, rest 1895, runtime 2373, types 280, plugin-approvals 462 — all green. Typecheck green for types / spec / runtime / plugin-approvals.\n\n`packages/plugins/plugin-approvals` gains a `vitest.config.ts` aliasing `@objectstack/metadata-protocol` to source: the new integration test imports it as a value, and `check:test-source-alias`'s prescribed fix for that is the alias, never a new entry in its shrink-only registry (`check:test-source-alias` verified green).\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_012WMpuAfA2KSdDjGF6tm1bH)_"
+}

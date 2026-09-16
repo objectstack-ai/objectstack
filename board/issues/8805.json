@@ -1,0 +1,34 @@
+{
+  "number": 8805,
+  "kind": "issue",
+  "title": "[finding] The REST metadata write door stamps every audit row env-wide, so #8747's org scope cannot separate tenants on the REST-authored path",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "security",
+    "target:v17"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-15T03:32:39Z",
+  "updated_at": "2026-08-15T17:26:18Z",
+  "closed_at": "2026-08-15T17:24:50Z",
+  "closed_by": {
+    "login": "qq9340100",
+    "id": 313832657,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8805",
+  "body": "Found while reviewing PR #8803 (the fix for #8747). **Measured on `origin/main`, not inferred.** Filed unassigned and ungraded — routing and grading are the triage seat's.\n\n⚠️ This does **not** argue against landing #8803. That PR implements its ruling correctly and is a strict improvement. What this card records is that **#8747 closing does not, by itself, close the cross-tenant disclosure on the path most deployments actually use** — so the card should not be read as \"the leak is shut\".\n\n## The composition\n\nThree facts, each measured separately, which together leave a hole:\n\n**1. The REST metadata write door passes no organization.** `organizationId` occurs exactly **twice** in the whole of `packages/rest/src/rest-server.ts`, and **both are inside a comment** — the `/published` note at `:6731` and `:6741`:\n\n```\n:6731   // NO `organizationId`, and that is the ONE deliberate\n:6741   // (`request.organizationId ?? null`) writes — so this door\n```\n\nThere is no executable `organizationId` in that file on `main`. The codebase already documents this door as one that writes `null`.\n\n**2. An absent organization is stamped env-wide.** `recordMetadataAudit` (`packages/metadata-protocol/src/protocol.ts:10311`) writes:\n\n```\n:10319   organization_id: entry.organizationId ?? null,\n```\n\nSo every audit row produced by a REST-authored metadata write carries `organization_id = null`.\n\n**3. #8803's scoped read returns own-org PLUS env-wide.** That limb is **required**, not optional — PR #8803 measures that an equality-only filter would blank the audit tab entirely on a REST-authored deployment, and pins the two behaviours apart. It is the correct fix for the read half.\n\n**Compose them:** after #8803, a caller in `org_alpha` sees `org_alpha`'s rows **and every `null`-stamped row**. Since REST-authored writes stamp `null` universally, **every tenant still sees every REST-authored audit row** — with its `actor`, `note`, `lock_state`, `code`, `operation`, `source` and `request_id`.\n\nWhat #8803 **does** close, and this is real: rows that carry an explicit organization are now correctly separated, and the read is fail-closed rather than a skeleton key. The residue is confined to rows the write side never scoped.\n\n## The question this raises, which I am deliberately not answering\n\nIs a REST-authored metadata write **supposed** to be env-wide?\n\n- If the `PUT /meta/:type/:name` door is an environment-admin surface and everything authored there is genuinely environment-wide, then `null` is correct, those rows have no tenant to leak between, and there is nothing to fix beyond documenting it.\n- If a tenant admin holding `manage_metadata` can author metadata for their own organization through that door, then the row belongs to that organization and stamping it `null` is a **write-side defect** that this finding is about.\n\nThe door gates on `manage_metadata` and already resolves an execution context carrying `tenantId` (`resolveExecCtx`, which #8803 now uses for the audit read on the sibling route) — so the information needed to stamp correctly is present at the write site. But whether it *should* be used is a scoping decision about what that door means, not something to infer from availability.\n\n⛔ I have not measured which of the two it is, and I am not guessing. That measurement is the first thing whoever grades this should run.\n\n## Why this is worth a card rather than a line in the PR\n\nThe read-side fix looks complete when read on its own — its tests pass, its reverse verification is sound, and it does exactly what was ruled. The hole is only visible when the read filter is composed with the write stamping, which lives in a different package and a different card's lane (#8707). That is precisely the kind of gap that survives review of either half in isolation.\n\nRelated: #8747 (the read half, PR #8803), #8707 (the write half), and `rest-server.ts:6731-6742`, whose comment records that `packages/rest` deliberately carries no org plumbing — which is the design decision this composition runs into."
+}

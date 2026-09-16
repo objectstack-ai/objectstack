@@ -1,0 +1,35 @@
+{
+  "number": 8558,
+  "kind": "issue",
+  "title": "[security] the same stored-but-unresolvable collapse #8542 fixes for the signing secret is still open on `resolveWebhookHeaders` — the delivery goes out MISSING its authored headers",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "security"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-13T20:42:34Z",
+  "updated_at": "2026-08-13T22:40:54Z",
+  "closed_at": "2026-08-13T22:40:13Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8558",
+  "body": "Found while implementing #8542 (the signing-secret half). **Out of scope there and deliberately not fixed on that branch** — that card is scoped to the #7799 signing invariant on `signing_secret`, and this is the sibling credential. Unassigned, no `pm:queue`, for triage to grade.\n\n## The defect\n\n`resolveWebhookHeaders` (`packages/plugins/plugin-webhooks/src/webhook-headers.ts`) ends the same way `resolveWebhookSecret` used to:\n\n```ts\nconst plain = await resolver.resolveSecretField(object, String(row.id), WEBHOOK_HEADERS_FIELD);\nreturn parseStoredHeaders(plain);\n```\n\n`parseStoredHeaders` returns `undefined` for `null`, for the empty string, and for anything that does not parse as a flat string map — deliberately, and correctly, for its own job. But that `undefined` is then the *same value* the function returns three lines earlier for **\"this webhook stores no headers at all\"**, and `AutoEnqueuer.attachHeaders` acts on that second reading: it returns `true`, the subscription arms, and the delivery goes out **without the header map the author declared**.\n\nThat contradicts the file's own stated intent, in its header comment:\n\n> It does not deliver partially. A row whose stored headers cannot be resolved DROPS the subscription rather than delivering it with the headers missing — see `resolveWebhookHeaders`.\n\nIt does not, today. Only a **throwing** resolver reaches `attachHeaders`'s `catch`; a resolver that answers `null` does not.\n\n## Why this matters, in this seam's own words\n\nThe reasoning is already written down in `attachHeaders`, and it is why this is not merely cosmetic:\n\n> a missing `Authorization` looks self-announcing, since the receiver answers 401 … But that is only the AUTHENTICATED case. Against an endpoint that does not require the header — a routing `X-Tenant-Id`, an `X-Environment: staging` — the delivery SUCCEEDS while quietly deviating from the configuration the author wrote, and nothing anywhere records that it went out incomplete.\n\nSo the failure direction is the same one #8542 is about: **silent and open**, on a row that keeps reading `active: true` with `headers_secret` masked, i.e. still reporting \"custom headers are configured\".\n\n## Evidence and its limits\n\n⚠️ **Traced by reading the call path, not exercised.** The three `null`-producing states were *measured* for the signing-secret field on #8542's branch against a real `ObjectQL` engine, and `resolveSecretField` is field-agnostic — the same three apply here by construction:\n\n1. the `sys_webhook` row is deleted between the enqueuer's cache read and the per-row dereference (`resolveSecretField` opens `if (!row) return null`);\n2. the column holds something that is not a `secret:` ref. Measured as reachable only through a write that BYPASSES the engine (a column edited in SQL, a dump restored without its `sys_secret` rows, a seed script writing at driver level) — the engine's own write path drops an echoed read-mask and re-encrypts cleartext;\n3. the stored value decrypts to the empty string. For `signing_secret` this was measured reachable through the ORDINARY data API, which accepts `\"\"`, encrypts it, and leaves a valid ref behind (filed separately as the objectql half).\n\n⛔ What is **not** measured here: that an unresolvable `headers_secret` actually produces a header-less delivery end to end. That is the first thing whoever takes this card should do, exactly as #8542's dispatch required — the `webhook-secret-at-rest.test.ts` harness (real engine, real write path, production enqueue wiring) already has everything needed, and #8542's `a stored signing secret that resolves to nothing (#8542)` block is a working template.\n\n## Shape of a fix (⛔ not decided here)\n\nThe precedent is now in the tree: #8542 made `resolveWebhookSecret` raise `WebhookSecretUnresolvableError` when presence is established (the masked read proves a value is stored) and the dereference answers nothing, so it reaches `attachSecret` the way a throwing resolver already did — park the subscription, durable record (#8069), say-once remedy-bearing `error` (#8043) carrying the ADR-0112 pair. The same asymmetry holds here: `headersPatch` and `attachHeaders` both already decide presence from `row[WEBHOOK_HEADERS_FIELD] != null`.\n\n⚠️ One thing that is genuinely different and needs a decision rather than a copy: `parseStoredHeaders` also returns `undefined` for a stored value that decrypts fine but is **not a flat string map**. That is a resolvable value the plugin is refusing to use, not an unresolvable one, and it may deserve a different report than \"the credential could not be recovered\".\n\n## Relationship to the neighbouring cards\n\n- **Not** a duplicate of #7986, which is about the headers being **cleartext at rest**; the `sys_webhook.definition_json` half of that has landed (`headers_secret` exists, the boot sweep migrates it) and its remaining surface is `sys_http_delivery.headers_json` in `service-messaging`. This card is about what happens when the encrypted channel it created cannot be read back.\n- Sibling of #8542, same mechanism, different credential. Independent of it: #8542's fix is on `webhook-secret.ts` and does not touch this path.\n"
+}

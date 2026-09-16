@@ -1,0 +1,36 @@
+{
+  "number": 8372,
+  "kind": "issue",
+  "title": "`query-syntax.mdx` documents the denormalise-onto-a-stored-field remedy for SORT and SEARCH but not FILTER — the third axis grew the same refusal in #8296",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:devx",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "qq9340100"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-13T09:47:39Z",
+  "updated_at": "2026-08-14T12:19:10Z",
+  "closed_at": "2026-08-14T12:19:10Z",
+  "closed_by": {
+    "login": "qq9340100",
+    "id": 313832657,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8372",
+  "body": "Filed by the `domain:metadata` execution seat (#6367, session `session_012WMpuAfA2KSdDjGF6tm1bH`) out of #8296's review. **Unassigned and deliberately NOT lane-labelled** — it lands in `content/docs/**`, which is `domain:devx`; triage should route it.\n\nBlocked-by: #8296\n\n## The gap\n\n`formula` is the one field type no driver materialises a column for. Three query axes can name a field, and **as of #8296 all three refuse it with the same remedy**:\n\n| axis | refusal | remedy sentence |\n|:--|:--|:--|\n| SORT | `400 INVALID_SORT` (#6994 ingress, #7095 engine) | \"Denormalise the value onto '<object>' (a stored field, written when the source changes) and **sort by** that.\" |\n| SEARCH | `400 INVALID_FIELD` (#6674) | mirror onto a stored text field |\n| **FILTER** | `400 INVALID_FIELD` (**#8296**, ingress + engine) | \"…and **filter** that.\" |\n\n`content/docs/protocol/objectql/query-syntax.mdx` already teaches this for two of them:\n\n- **line ~602** — *\"**Do not denormalise onto a `formula` field to sort by it.** A `formula` field …\"*\n- **line ~1006** — *\"The mirror must be **stored**: a `formula` …\"* (the search axis)\n\n⇒ **The filter axis is now the only one of the three that refuses without the page saying so.** An author who reads this page learns the rule for sort and search, applies the same mental model to a `where`, and meets a 400 the page never mentioned.\n\n⚠️ **This is an incompleteness, not an inaccuracy** — nothing currently on the page becomes false. ⛔ It is not a blocker for #8296 and was not treated as one.\n\n## Why it is worth a card rather than a rider\n\n#8296 spent real effort making **four doors** (filter-ingress, filter-engine, sort-ingress, sort-engine) share the remedy **word-for-word**, with an agreement pin in `query-expression-conformance.test.ts` that fails if they drift. The page that teaches that remedy to humans is the natural fifth consumer of the same vocabulary, and it is the one that is not covered by that pin.\n\n## Suggested shape (not decided here)\n\nA filter-axis paragraph beside the existing sort one, using the **same wording** the runtime now emits, and ideally noting the two facts that make this axis worse than sort:\n\n- **both directions return nothing** — `{is_open: false}`, which against a stored boolean returns *every* row, silently returned none;\n- the formula **reads correctly in the very same response** that cannot filter on it, so the field is visibly populated and simultaneously unfilterable.\n\n⛔ `summary` and `autonumber` must **not** be described as affected — both get real stored columns and filter correctly; the set is exactly `formula`. #8296 pins both as controls through both doors.\n\nRelated: #8296 · #7095 · #6994 · #6674 · #6924."
+}

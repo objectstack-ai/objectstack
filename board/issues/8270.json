@@ -1,0 +1,36 @@
+{
+  "number": 8270,
+  "kind": "issue",
+  "title": "[finding] workspace owner lacks `manage_metadata` in the EE multi-org deploy, but 构建应用 is a primary home CTA — dead-ends at submit",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched",
+    "priority:p0",
+    "repo:objectui"
+  ],
+  "assignees": [
+    "yinlianghui"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-13T01:35:28Z",
+  "updated_at": "2026-08-14T16:48:56Z",
+  "closed_at": "2026-08-14T16:48:56Z",
+  "closed_by": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8270",
+  "body": "Recording an observation for the platform to rule on.\n\nIn the `objectos-ee-deploy` stack (multi-org, Postgres), the console home page offers **构建应用 / Build an app** as one of its two primary calls to action. A workspace **owner** who follows it, fills in the new-package dialog and submits gets:\n\n> Managing packages requires the `manage_metadata` capability.\n\n(also untranslated in a zh console — same family as #8094).\n\nThe owner's effective grants, from `GET /api/v1/auth/me/permissions`:\n\n```json\n{\n  \"positions\": [\"org_owner\", \"everyone\"],\n  \"permissionSets\": [\"organization_admin\", \"member_default\"],\n  \"systemPermissions\": [\"manage_org_users\", \"setup.access\", \"setup.write\"]\n}\n```\n\nNo `manage_metadata`. So on this deployment the person who created the workspace cannot create a package, an object, or an app — the entire \"build\" half of the product — while the button that starts that flow is the most prominent thing on their home page.\n\n## The decision\n\nPlausibly deliberate: in a hosted multi-tenant deployment you may well not want tenants authoring metadata. If so, the fix is presentational — hide or disable 构建应用 (and 从模板开始, untested) when the capability is absent, and say why, rather than letting the user fill in a dialog and hit a raw capability error at submit time.\n\nIf it is *not* deliberate, `organization_admin` is missing a grant.\n\nEither way the current combination — prominent CTA, full dialog, English capability error at the end — is the worst of both.\n\n## Environment\n\n`objectos-ee-deploy` (Caddy → app → postgres:16) on `http://localhost:8080`, zh locale, org owner `zhangsan@acme-test.com`, observed 2026-08-12. Image commit not verified.\n"
+}

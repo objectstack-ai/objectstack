@@ -1,0 +1,35 @@
+{
+  "number": 8904,
+  "kind": "issue",
+  "title": "docs(deployment): retire the Vercel and ObjectQL-migration pages — delete, re-point their inbound redirects, and fix the prose links into them",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-15T16:11:02Z",
+  "updated_at": "2026-08-16T02:52:33Z",
+  "closed_at": "2026-08-16T02:51:51Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8904",
+  "body": "Card 01 of the deployment-section restructure (maintainer ruling, 2026-08-15). Two pages come out of `content/docs/deployment/`. **They are one card, not two** — both edit `content/docs/deployment/meta.json` and `apps/docs/redirects.mjs`, so splitting them only serialises the same two files across two PRs.\n\n## Rulings (settled — do not re-litigate)\n\n- 「`https://objectstack.ai/docs/deployment/vercel` 已经不需要了。平台通常用 docker 发布。」 → delete `vercel.mdx`, redirect to `self-hosting`.\n- 「`migration-from-objectql` 作废」 → delete `migration-from-objectql.mdx`.\n\n## Why these two, measured\n\n**`vercel.mdx` (195 lines)** documents a path **no CI covers** — `vercel` does not appear anywhere in `.github/workflows`. (The \"Vercel Preview Comments\" check on PRs is the docs site's own hosting, unrelated to deploying a user app.) Meanwhile Docker is the real shipping path: `docker/Dockerfile` plus `.github/workflows/docker-publish.yml`. The page is also already visibly decaying — it carries a `Removed in 11` callout for the MSW mode and the Next.js adapter.\n\n**`migration-from-objectql.mdx` (179 lines)** documents a one-time `@objectql/core` → `@objectstack/objectql` port. It belongs to neither the platform-runtime nor the metadata-app lifecycle the section is being restructured around, and every published page is a standing maintenance obligation.\n\n## ⚠️ The trap: both pages are already redirect TARGETS\n\n`apps/docs/redirects.mjs` currently ends two older URLs **at these very pages**:\n\n```js\n['/docs/guides/deployment-vercel',  '/docs/deployment/vercel'],              // line 95\n['/docs/guides/objectql-migration', '/docs/deployment/migration-from-objectql'], // line 101\n```\n\nDeleting the destinations without touching these leaves two live URLs redirecting into a 404. Next.js serves **one** redirect hop — it does not follow chains — so adding a second entry does not rescue them. **Both existing entries must be re-pointed at the final destination**, not merely supplemented.\n\n## Prose links that must be fixed in the same PR\n\n`content/docs/deployment/self-hosting.mdx` links to the Vercel page **twice**:\n\n- line 11 — `[Vercel guide](/docs/deployment/vercel) and assumes you have read …`\n- line 424 — `- [Deploy to Vercel](/docs/deployment/vercel) — the serverless alternative`\n\nLine 424 is a Related-links entry (delete it). Line 11 is mid-sentence and needs the sentence rewritten, not just the link stripped. `migration-from-objectql` has **no** prose inbound links — only `meta.json` and the redirect above.\n\nThe **Check Documentation Links** gate (`lint.yml`) will catch a missed one, but do not use it as the search: find them first, then let the gate confirm.\n\n## Scope\n\n- Delete `content/docs/deployment/vercel.mdx` and `content/docs/deployment/migration-from-objectql.mdx`.\n- Drop both entries from `content/docs/deployment/meta.json`.\n- In `apps/docs/redirects.mjs`: re-point the two existing entries, and add `/docs/deployment/vercel` → `/docs/deployment/self-hosting`. Choose the `migration-from-objectql` destination and **argue it in the PR** — `/docs/deployment` is the neutral default; there is no successor page.\n- Respect the file's own documented ordering rule: *\"Exact entries come first; wildcard catch-alls for retired sections must stay last (first match wins).\"*\n\nDocs-only, `skip-changeset`. Do **not** touch any other deployment page — the restructure that moves them is a later card.\n\n## Verify\n\n```bash\ngit grep -rn \"deployment/vercel\\|migration-from-objectql\" -- content/ apps/   # expect: only redirects.mjs\npnpm check:docs-audit-scope && pnpm check:release-notes && pnpm check:role-word\n```\n\nThen confirm both retired URLs and both older `/docs/guides/*` URLs each resolve in **one** hop to a page that exists.\n\n## Context\n\nFull IA proposal and the other four cards: this is card 01 of 5, sequenced first because it is the cheapest irreversible move and nothing else depends on it. Cards 02–05 (new Upgrading page, `publish-and-preview` rewrite, Docker promotion in `self-hosting`, index rewrite) follow separately."
+}

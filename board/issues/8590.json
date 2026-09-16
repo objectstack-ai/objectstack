@@ -1,0 +1,35 @@
+{
+  "number": 8590,
+  "kind": "issue",
+  "title": "types: `isUniqueViolationError` claims SQLite's UNBACKED-conflict-target error — a superstring collision on \"UNIQUE constraint\", the exact inversion the predicate's own warning names",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli"
+  ],
+  "assignees": [
+    "qq9340100"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-14T00:12:31Z",
+  "updated_at": "2026-08-14T17:39:23Z",
+  "closed_at": "2026-08-14T17:38:57Z",
+  "closed_by": {
+    "login": "qq9340100",
+    "id": 313832657,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8590",
+  "body": "Found while implementing #8567 (measuring the unbacked-conflict-target condition across dialects). Filed unassigned; not fixed there — the fix moves a shared predicate's verdicts, which is its own blast radius.\n\n## The defect\n\n`isUniqueViolationError` (`packages/types/src/unique-violation.ts`) answers **true** for the error SQLite raises when an `ON CONFLICT` target has **no** backing unique index — i.e. for the exact condition its own docstring warns it must never claim:\n\n> ⚠️ It must stay a **separate** predicate: `isUniqueViolationError` answers the OPPOSITE condition (a unique index exists and the row violated it), and merging them would report a working constraint as a missing one.\n\nMeasured on real driver errors (not fixtures), knex 3.3.0, `@objectstack/types` built from `a3b1d264f`:\n\n```\n===== sqlite (better-sqlite3) =====\nUNBACKED-target error:\n   msg  = \"insert into `xtalk_plain` (`email`, `id`, `title`) values ('a@b.com', '1', 'x')\n           on conflict (`email`) do update set `title` = excluded.`title`\n           - ON CONFLICT clause does not match any PRIMARY KEY or UNIQUE constraint\"\n   isUnbackedConflictTargetError = true\n   isUniqueViolationError        = true      <== WRONG, should be false\n\n===== pg (PostgreSQL 16.13) =====\nUNBACKED-target error:\n   msg  = \"insert into \"xtalk_plain\" (...) values ($1, $2, $3)\n           on conflict (\"email\") do update set \"title\" = excluded.\"title\"\n           - there is no unique or exclusion constraint matching the ON CONFLICT specification\"\n   isUnbackedConflictTargetError = true\n   isUniqueViolationError        = false     <== correct\n```\n\n## Cause\n\nThe vocabulary's message limb is\n\n```ts\nmessage: /unique constraint|unique violation|duplicate key|duplicate entry/i\n```\n\nand SQLite's sentence for the *missing*-index condition ends `...any PRIMARY KEY or UNIQUE constraint`. The words `UNIQUE constraint` sit adjacent inside it, so the `unique constraint` limb matches a sentence that says the constraint is **absent**.\n\nPostgres escapes only by luck of word order: its `unique or exclusion constraint` is not adjacent, so the same limb misses it. That asymmetry is the tell — the limb is matching a word pair, not a condition.\n\nThis is the same bug class `relation-sub-object.ts` already documents for a different phrase pair: \"Postgres' missing-COLUMN spelling contains a legal missing-TABLE phrase as a substring. Three packages had each repaired that superstring hole separately.\" Same shape, different vocabulary, and the one that has a named module was fixed centrally.\n\n## Reachability today: latent, not live — and worth fixing anyway\n\n`SqlDriver.upsert` is the only site in `driver-sql` that compiles a caller-supplied conflict target (`grep -n \"onConflict(\"` returns exactly one hit), and #8445's recognition runs **first** in that catch, so the raw error is enveloped before any unique-violation consumer sees it. The remote face does the same (#8413). So no user-visible 409-instead-of-400 is reachable through the upsert path as it stands.\n\nTwo reasons that is not a close:\n\n1. **A comment in `sql-driver.ts` states the opposite as fact** and reasons from it. At the `upsert` catch:\n\n   ```\n   // It is not an autonumber collision — `collidingAutoNumberReservations`\n   // asks `isUniqueViolationError`, which is false for this error, so the\n   // reservation probe would query the sequences table for nothing and\n   // then rethrow the raw error anyway.\n   ```\n\n   It is **true** for this error, measured above. The ordering is therefore load-bearing in a way the comment says it is not: move the recognition after the retry branch and the reservation probe really does run. (#8567 corrects the comment in place; it does not touch the predicate.)\n\n2. Six other packages consume the predicate — `rest-server.ts` (the 409 `UNIQUE_VIOLATION` mapping), `objectql/engine.ts`, `rest/import-runner.ts`, `service-messaging`, `metadata-protocol/partial-index-probe.ts`. Any of them reached by a raw unbacked-target error gets told a value collided when nothing was ever compared, and 409 is a status an SDK will not retry.\n\n## What a fix has to be careful about\n\nNarrowing the `unique constraint` limb changes verdicts of a predicate whose whole point (#6250) was that four divergent copies disagreed. The limb is inherited **verbatim** from the REST branch it replaced and covers both SQLite's `UNIQUE constraint failed: t.c` and Postgres' `violates unique constraint \"...\"`, so it cannot simply be deleted. A negative-lookahead on the missing-index sentence, or requiring the limb to match a *violation* phrasing (`constraint failed`, `violates`), are both plausible — this needs the same measured-per-dialect treatment #8567 gave the other predicate, including MySQL's `Duplicate entry` path, before anything is changed.\n\n`packages/types/src/unbacked-conflict-target.test.ts` (landing with #8567) already pins the current behaviour in both directions and names this issue, so whichever way the fix goes, the pin points at itself rather than going quietly green.\n\nRelated: #8567 (where this was measured), #6250 / #6543 (the predicate's consolidation), #6615 (the same superstring bug class, already fixed once for a different phrase pair), #8445 / #8413 (the two faces whose ordering currently masks it).\n"
+}

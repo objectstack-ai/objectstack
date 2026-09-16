@@ -1,0 +1,35 @@
+{
+  "number": 8220,
+  "kind": "issue",
+  "title": "[A of #7929] a spec-declared provenance mark set at both read-scope merge boundaries, so the driver can restore the author-facing cross-field diagnostic without re-disclosing policy",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "security"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-08-12T21:12:00Z",
+  "updated_at": "2026-08-14T20:56:56Z",
+  "closed_at": "2026-08-13T14:10:20Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8220",
+  "body": "**This is \"A\" of the maintainer ruling of 2026-08-12 on #7929** (comment `5266067250`, verbatim 「接受你的全部建议。」 — adopting *\"B now, A next\"*). B landed in **#8198** (merged `a5dcb74`, closing #7929 and #7988). This card is the sanctioned follow-up, not a new proposal.\n\n⛔ Filed unassigned — claim it before writing code, per the repo's claim discipline.\n\n## Why A exists\n\nB stopped `driver-sql`'s cross-field `INVALID_FILTER` refusal from echoing its operands, **for every caller**, because the driver genuinely cannot tell an administrator's predicate from an author's. Measured on both merge boundaries: the read scope arrives as a bare `FilterCondition` in `where`, `DriverQuery` is `Omit<QueryAST, 'object'>` with no provenance slot, and the only thing that crosses (`context`) says *who is asking*, never *which subtree they did not write*.\n\nThe accepted cost, stated plainly in B's changeset: **an author debugging their own cross-field filter now gets the redacted message too.** Their diagnostic is relocated to the server log, not destroyed. A is what gives it back — behind a real mark rather than a guess.\n\n## What A has to build\n\n1. **A provenance mark declared in `packages/spec`.** Declared, not conventional — the whole point is that the driver may trust it because the contract defines it.\n2. **Set at BOTH merge boundaries**, or the fix is half-live:\n   - `plugin-security`'s CRUD injection — the `ast.where = ast.where ? { $and: [ast.where, scoped] } : scoped` merge around `security-plugin.ts:2198`;\n   - `service-analytics`' read-scope merge (`ObjectQLStrategy.withReadScope`).\n3. **`driver-sql` consumes it**: a marked (policy-authored) subtree keeps B's redaction; an unmarked, author-written filter gets its full diagnostic back — both columns, the operator, the list index, the boundary `reason`.\n\n### ⚠️ The invariant that must not regress — fail closed\n\n**An unmarked or ambiguous predicate must default to WITHHELD.** The mark is permission to *reveal*, never a requirement to prove secrecy. A driver-side *guess* at provenance is precisely the shape triage rejected on #7929, and an inverted default would silently restore the original disclosure — including the sentence naming which column is the object's tenant-isolation column. Any design where \"the mark is missing\" lands on the disclosing branch is wrong, however convenient.\n\n### ⚠️ One pin A is expected to REWRITE — it is not a regression\n\n`packages/runtime/src/cross-field-refusal-operand-withhold.test.ts` contains a **byte-equality** assertion: an author-written `$field` filter and a policy-injected one must produce *identical* messages. That pin is the strongest available statement of \"the driver cannot tell them apart\" — which is exactly the fact A is chartered to change.\n\n**Whoever implements A must rewrite that assertion deliberately, and say so in the changeset.** ⛔ Do not treat it as a failing test to make green by weakening it, and ⛔ do not delete it — replace it with its successor: *marked and unmarked now differ, and the unmarked-by-default case still withholds.* Left unexplained, this pin reads like a bug to the next agent who runs the suite.\n\n## Scope notes\n\n- **#8197 is probably evidence for this card's scope, not independent work.** It records that refusals *outside* the cross-field family still name the target field, which is admin-authored whenever the predicate came from a read scope. A's mark closes that class without the blanket cost of withholding the target field from every author. ⛔ It is unlabelled and unassigned pending triage — decide the relationship there, don't silently absorb it.\n- **Prior-art lead, UNVERIFIED — check before inventing a second mechanism.** #8116 refers to *\"the #7865 provenance marker\"* in the context of injected anchors on external objects. I have **not** confirmed whether that marker generalises to read-scope filter subtrees; it may be an unrelated mechanism. Read it first — a second, parallel provenance concept in `packages/spec` would be worse than either alone.\n- Sibling drivers: `driver-turso` carries its own copy of the refusal (`RemoteTransport.uncompilableComparand`), fixed in #8198; `driver-sqlite-wasm` inherits from `SqlDriver`. A has the same three-driver surface.\n- ⛔ Out of scope: the REST boundary's 5xx-only withhold (#5367's tiering, #5667's decision) stays untouched — that was ruled out on #7929 and is not reopened by A.\n\n## Done means\n\nAn author's own cross-field filter names its columns again; a policy-injected one does not; an unmarked one does not; and all three are pinned at the two real merge boundaries with a real driver, not a mock."
+}

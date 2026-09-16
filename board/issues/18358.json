@@ -2,8 +2,8 @@
   "number": 18358,
   "kind": "issue",
   "title": "Wire `pnpm check:pm-expected-skips` (PR #18357) into lint.yml beside the other `check:pm-*` steps — a self-test no workflow names is outside `check-self-test-wired`'s population",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "os-zhuang",
@@ -12,18 +12,19 @@
   },
   "labels": [
     "domain:skills",
-    "pm:dispatched",
     "priority:p3"
   ],
-  "assignees": [
-    "os-elon-musk"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-09-16T03:09:27Z",
-  "updated_at": "2026-09-16T07:43:40Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-16T08:43:48Z",
+  "closed_at": "2026-09-16T08:42:42Z",
+  "closed_by": {
+    "login": "os-elon-musk",
+    "id": 328766734,
+    "type": "User"
+  },
   "merged_at": null,
   "comments": 1,
   "locked": false,

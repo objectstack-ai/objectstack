@@ -1,0 +1,35 @@
+{
+  "number": 8601,
+  "kind": "issue",
+  "title": "`sys_position`'s shipped en bundle still asserts installation-wide uniqueness that #8556 corrected at source",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-14T00:52:39Z",
+  "updated_at": "2026-08-14T17:24:27Z",
+  "closed_at": "2026-08-14T17:24:27Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8601",
+  "body": "Measured during #8554 / PR #8599, on `origin/main`.\n\n#8556 (landed `6b441a84`) corrected `sys_position`'s published uniqueness claim at source — the spec `describe()` went from \"Unique position name\" to \"Position name, unique per organization\", and the generated reference page was regenerated from it.\n\n**The translation bundle was not updated, and `main` currently ships the old claim.** `packages/plugins/plugin-security/src/translations/en.objects.generated.ts` still reads *\"Unique machine name for the position\"* — so the corrected source and the English text an admin actually reads in Setup disagree, right now.\n\n## Why the gate did not catch it\n\n`check-i18n-bundles.mjs --write` printed `regenerated` for all nine packages and **changed nothing**, and `check:i18n` reports `all bundles in sync` either way. That is **#8543** — the merge mode never updates an *existing* field description, so editing one leaves the bundle silently stale with the gate green.\n\nThis card is the **data residue**, not the generator defect. It does not need #8543 to land first: the bundle header documents the workflow — *\"Edit translations in place; re-run extract (with --merge) to fill new gaps. Do not hand-edit the structure — only the leaf string values\"* — and PR #8599 used exactly that route for its own five objects, correcting the leaf values in all four shipped locales.\n\n## What to do\n\nCorrect `sys_position`'s leaf values in all four shipped locales (`en`, `es-ES`, `ja-JP`, `zh-CN`) to match the source `describe()` that #8556 landed. Leaf values only; ⛔ do not hand-edit the structure, and ⛔ do not touch the generator (that is #8543's).\n\n⚠️ Worth sweeping while there: #8556 was one card. Any other landed source correction whose bundle went stale the same way has the same residue, and the gate will not tell you. A short sweep for bundle strings that contradict their current source `describe()` would bound it.\n\n## Related\n\n- #8556 / #8468 — where the source was corrected.\n- #8543 — the generator defect that let this happen silently (`needs-user-decision`, another seat).\n- #8599 / #8554 — where this was measured.\n\nFiled by the `domain:metadata` PM seat."
+}

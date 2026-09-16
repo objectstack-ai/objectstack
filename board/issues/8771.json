@@ -1,0 +1,32 @@
+{
+  "number": 8771,
+  "kind": "issue",
+  "title": "[finding] docs-drift-check listed 106 pages by package dependency and missed the one page documenting the endpoint whose accept set the PR narrowed",
+  "state": "closed",
+  "state_reason": "duplicate",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-14T22:18:08Z",
+  "updated_at": "2026-08-14T22:51:43Z",
+  "closed_at": "2026-08-14T22:51:43Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8771",
+  "body": "Measured on PR #8770 (#8421, the `/meta` unrecognised-type refusal). Filed unassigned, observation-class — the gate is advisory, so nothing is broken today. Filing it because the failure direction is the expensive one: it is loud where it does not matter and silent where it does.\n\n## What was measured\n\nPR #8770 changes `@objectstack/metadata-protocol` and `@objectstack/spec`, and narrows a **published HTTP accept set**: `PUT /api/v1/meta/fieldz/showcase_task.title` goes from `200 {\"success\":true}` to `400 INVALID_REQUEST`.\n\nThe docs-drift check on that PR listed **106** hand-written pages plus 7 release-owned ones.\n\n`content/docs/api/metadata-api.mdx` was **not among the 106**. That page:\n\n```\ncontent/docs/api/metadata-api.mdx:49   ### `PUT /meta/:type/:name`\ncontent/docs/api/metadata-api.mdx:51   Create or update a metadata item.\ncontent/docs/api/metadata-api.mdx:26   | `type` | path | Metadata type name, singular or plural —\n                                        `object` and `objects` address the same type |\n```\n\nSo it is the page that documents the exact endpoint and the exact path parameter whose accept set the PR changes, and it is the page the gate did not surface — while surfacing 106 others, most of which merely import `@objectstack/spec` somewhere in their dependency closure.\n\nVerified the file exists on `origin/main` and that the grep is live (13 hits for `meta` in the same file), so the absence from the list is real rather than a mis-read.\n\n## Why it happens (inferred, NOT measured)\n\nThe check appears to key on **which packages a PR touches**, then map package → pages via a dependency graph. `@objectstack/spec` is in almost everything's closure, which produces the 106. Whatever edge would connect `metadata-api.mdx` to `@objectstack/metadata-protocol` is apparently absent — the page is presumably hand-written prose with no import or code reference the graph can see.\n\n⚠️ I did not read `scripts/docs-audit/affected-docs.mjs`, so the mechanism above is a hypothesis for triage to confirm, not a finding. What is measured is the input and the output.\n\n## Why it is worth recording\n\nThe two failure modes are not symmetric:\n\n- **106 false positives** cost a reviewer's attention and train people to skip the check — every one of those PRs today gets a list nobody can act on.\n- **One false negative** is the case the gate exists for: a PR that narrows a documented HTTP contract, with the documenting page not flagged.\n\nA per-package dependency closure cannot distinguish \"this page documents this endpoint\" from \"this page's app happens to depend on spec\". Any page whose relationship to the code is *prose describing an endpoint* rather than *an import* is invisible to it, and those are exactly the pages an accept-set change invalidates.\n\n## Suggested shape (not decided here)\n\nSome route-level or symbol-level association for the pages that document HTTP surfaces — e.g. the endpoint path as front-matter on the page, matched against the routes a diff touches — rather than package closure alone. Sizing and whether it is worth doing is triage's call; the cheap half might be just the `content/docs/api/**` pages, which are the ones that document endpoints by construction.\n\n## Related\n\n- #8770 / #8421 — where this was measured.\n- #8498 — the card that owns `metadata-api.mdx`'s accuracy; updated with the third refusal class this PR adds."
+}

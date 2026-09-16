@@ -1,0 +1,32 @@
+{
+  "number": 8603,
+  "kind": "pull_request",
+  "title": "fix(pm): declare the type-check ledger's root-program coupling so dispatch-gates can derive it (#8551)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-14T01:05:01Z",
+  "updated_at": "2026-08-14T01:42:54Z",
+  "closed_at": "2026-08-14T01:42:52Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-08-14T01:42:52Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/8603",
+  "body": "Fixes #8551\n\n`scripts/check-type-check-coverage.mjs` holds a root ledger entry for `@objectstack/spec-monorepo` recorded at 80 errors, of which `scripts/check-test-typecheck.mts` alone accounts for 29 — the root program has no `types:[\"node\"]`, so in that file every `console.` reference costs one TS2584 and every `process.` reference one TS2591. Editing that script moves a number this gate ratchets.\n\nThe coupling was written down all along, inside the ledger note's prose. `extractWatchHints` accepts a quoted literal only when the **whole** string is path-shaped, so a path named mid-sentence is discarded: the family scored `silent` — neither matched nor undetermined, and therefore printed nowhere at all — and a card editing that script was told no check family names its paths.\n\n## What changed\n\n**Direction B**, per the seat ruling recorded on the card. Two files, no behavioural delta on any gate:\n\n1. `scripts/check-type-check-coverage.mjs` — the coupled path is hoisted into a module-body constant holding the bare path string, in the shape the existing extractor already reads. The ledger note references the constant instead of spelling the path inside its sentence; the 29-of-80 accounting keeps its meaning verbatim.\n2. `scripts/pm/dispatch-gates.mjs` — **self-test section only**: a live pin, reading both real files, that a card editing that script derives `check:type-check-coverage` through the constant. A future deletion of the declaration reddens `check:pm-dispatch-gates` instead of going quietly SILENT again.\n\n⛔ Direction A was declined by the ruling and is not attempted here: `extractWatchHints`' whole-literal rule, `hintCovers` and the masking are untouched, so the false-MATCHED direction the precision work removed stays closed. No gate is weakened anywhere.\n\n## Zero behavioural delta — measured, not asserted\n\n- The note string is **byte-identical**: 950 chars before and after, same sha256 prefix `80a7e1d9f4f3bb45`, evaluated from both file versions with the constant in scope.\n- `errors: 80` is untouched; no ledger number moves. The two edited files are `.mjs` and the root `tsconfig.json` sets no `allowJs`, so neither is in any tsc program at all.\n- `check:type-check-coverage` prints the same line before and after: `64/77 workspace packages type-checked (plus the root), 13 in the DEBT ledger (436 frozen raw errors), 1 exempt` and `20 package(s) ... 867 files hidden ... 1533 frozen raw errors in TEST_DEBT`.\n\n## Verification\n\nRed baseline, re-measured live on `origin/main` @ 8c433a8fd7 (three PRs after the card's own measurement):\n\n```\n$ node scripts/pm/dispatch-gates.mjs scripts/check-test-typecheck.mts\nNo check family names the given paths in its own source.\n```\n\nVia the script's own exported functions: 36 hints extracted, none naming the coupled script, `classifyEntry` verdict `silent`.\n\nAfter:\n\n```\n$ node scripts/pm/dispatch-gates.mjs scripts/check-test-typecheck.mts\nLocal gates for this card (paste into the dispatch prompt):\n  - pnpm check:type-check-coverage   [lint.yml]   matched via scripts/check-test-typecheck.mts ⇢ 'scripts/check-test-typecheck.mts'\n  - pnpm check:type-check-debt   [lint.yml]   matched via scripts/check-test-typecheck.mts ⇢ 'scripts/check-test-typecheck.mts'\n```\n\n37 hints (+1, exactly the new constant; none lost), verdict `matched`, provenance the constant itself. `check:type-check-debt` rides along because it resolves to the same script — a real coupling the card's own gate list already named.\n\n**Reverse verification**, direction predicted before running: removing the constant returns the derivation to SILENT, reddens exactly the two new cases, and leaves the coverage gate's numbers identical. All three confirmed — `✗ dispatch-gates self-test: 2 of 103 case(s) failed`, and the coverage gate printed the same counts and exited 0. Restored from the commit (`git checkout HEAD -- ...`), tree clean, green again.\n\nGates run locally, all green:\n\n| gate | result |\n|:--|:--|\n| `check:pm-dispatch-gates` | `✓ dispatch-gates self-test: 103 cases pass` (was 101; +2 new pins) |\n| `check:type-check-coverage` | `OK — 64/77 ... 13 in the DEBT ledger (436 frozen raw errors), 1 exempt` — identical before and after |\n| `check:type-check-debt` | refused without the built closure, so the closure was built as lint.yml does (`turbo run build --filter=./packages/* --filter=./packages/*/*`, 70 tasks successful) — then `OK — 33 ledger entr(ies) re-measured in 302.4s, 1969 raw tsc error(s) total, none above its recorded number` / `surplus: none — every entry sits exactly at its measurement` |\n| `check:nul-bytes` | `OK (scanned 7740 text file(s) ... no raw ASCII control bytes)` |\n| ESLint | clean on both changed files |\n\nRe-derived against the actual diff (`node scripts/pm/dispatch-gates.mjs scripts/check-type-check-coverage.mjs scripts/pm/dispatch-gates.mjs`): `check:pm-dispatch-gates`, `check:type-check-coverage`, `check:type-check-debt` — the families the dispatch prompt named, and nothing further.\n\n`skip-changeset`: this PR touches `scripts/` only and releases nothing.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_018WuTtyckQa1VcXwgd52JpN)_"
+}

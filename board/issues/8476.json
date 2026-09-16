@@ -1,0 +1,34 @@
+{
+  "number": 8476,
+  "kind": "issue",
+  "title": "Promote the Part-of/closing-keyword contradiction (H7) into a PR-scoped blocking check — and settle the fenced-code reading first",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-13T15:04:04Z",
+  "updated_at": "2026-08-13T18:06:42Z",
+  "closed_at": "2026-08-13T18:06:31Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8476",
+  "body": "Filed by the skills seat (session `session_018WuTtyckQa1VcXwgd52JpN`) under this shift's maintainer card-filing grant, from the Part-of/auto-close investigation's ACCEPT. Left without a `domain:*` label deliberately — routing is triage's call: the check guards the PM partial-delivery protocol (skills-adjacent) but would live in the general gate farm (`scripts/check-*.mjs` + a pr-automation/lint wiring), which is the devx floor. Dedup: the report-only detector H7 already exists in `scripts/pm/check-half-states.mjs` (landing via its own PR); no open card proposes the blocking promotion.\n\n## Why blocking, not just patrol (the implementing dev's argument, endorsed at review)\n\n- **Measured pull**: one half-delivered card was silently closed on merge — by the PR body sentence written to *prevent* that close (GitHub's keyword parser ignores negations/modals). That round alone had two `Part of` cards exposed; the surface is every partial delivery.\n- **Habit is what failed**: the author wrote the warning correctly and still lost the card. Only a mechanical comparison at PR time prevents a mistake that reads as natural English.\n- **Structurally invisible failure**: a closed card reads as finished; the incident was caught only by a post-merge inventory re-pull.\n- **Boundary honored**: unlike the sweep's H1–H6 (shared board state — correctly report-only, must not fail an unrelated PR), H7 is a fact about *the PR being checked*, so a PR-scoped blocking check does not contradict the sweep's own report-only argument. It must be a **separate PR-scoped check**, ⛔ not a mode flip of the report-only sweep. Also measured: the sweep cannot run live in most agent containers (transport class 3), so patrol-only guards nothing where it matters.\n\n## Scope\n\n1. **Settle the fenced-code question with one live reading FIRST** (cheap, decisive, and it fixes the predicate's one stated unknown): a throwaway PR whose body carries a fenced closing keyword + reference to a throwaway issue; read `closed_by_pull_requests` on the target after merge-or-close. Inline spans are already measured (do not fire); if fences DO fire, the strip rule is a false negative and must be revised before the check can block.\n2. **New PR-scoped check** reusing the shipped predicate (`h7PartOfWithClosingKeyword` and friends are exported): fails a PR whose body declares `Part of #N` while carrying a closing keyword bound to the same `#N`. Wire it where PR-body checks run (the pr-automation family); the error message should carry the approved rewordings (\"card N is not addressed here\" / backticks).\n3. ⛔ No weakening of anything existing; the report-only sweep keeps H7 for patrol coverage of the same fact.\n\n## Constraints\n\n- Serial: after the H7 PR merges (predicate is its export), and after the dispatch-gates self-test wiring card establishes where pm-tooling checks hang in CI (convention to follow, not re-invent).\n- ⚠️ **Maintainer veto window**: a new blocking gate touches every contributor — this card was filed `pm:queue` on the seat's three-axis analysis, and the round report flags it; veto or re-scope by comment before dispatch."
+}

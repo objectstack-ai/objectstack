@@ -1,0 +1,35 @@
+{
+  "number": 8615,
+  "kind": "issue",
+  "title": "check-where-matcher-conformance's discovery heuristic misses single-param inline filter closures — 16 files carry the same shape-(b) blind spot, undetected",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "qq9340100"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-14T02:14:09Z",
+  "updated_at": "2026-08-14T12:26:09Z",
+  "closed_at": "2026-08-14T12:26:09Z",
+  "closed_by": {
+    "login": "qq9340100",
+    "id": 313832657,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8615",
+  "body": "Filed while working #8582 (session `session_01RDTnVvsgA6cUZ4xFVtPZRy`), which swept the 78 test-double `matches(row, where)` fakes that `pnpm check:where-matcher` discovered and grandfathered in `scripts/where-matcher-conformance.baseline.json`.\n\n## The gap\n\n`scripts/check-where-matcher-conformance.mjs`'s discovery only considers a candidate matcher when it is a function with **two or more identifier parameters** — see `discoverInSource`'s `params.length >= 2 && params[0] && params[1]` gate. That is deliberate (it is how the control probe stays name-independent), but it has a structural blind spot: a **single-param** `.filter()` callback that closes over `where`/`filter` from its *enclosing* scope, rather than taking it as its own second parameter, is invisible to discovery — even when its body is textually identical to a matcher the gate already knows how to grade.\n\nMeasured on `main` (as of this filing), this exact shape —\n\n```\n.filter((r) => Object.entries(where).every(([k, v]) => r[k] === v))\n```\n\n— or a same-file `filter` variant, appears **17 times across 16 files**, none of them reachable by `pnpm check:where-matcher` and none in its ledger:\n\n- `packages/plugins/plugin-email/src/attachment-reclaim.test.ts:58`\n- `packages/plugins/plugin-email/src/template-locale-resolution.test.ts:67`\n- `packages/plugins/plugin-security/src/bootstrap-declared-positions.test.ts:29`\n- `packages/plugins/plugin-security/src/bootstrap-declared-permissions.test.ts:18`\n- `packages/plugins/plugin-security/src/bootstrap-platform-admin.test.ts:30`\n- `packages/plugins/plugin-auth/src/admin-import-users.test.ts:36`\n- `packages/core/src/security/api-key.test.ts:20`\n- `packages/metadata-protocol/src/migrations/recorded-by-sentinel.test.ts:76`\n- `packages/core/src/utils/migration-journal.test.ts:84`\n- `packages/rest/src/import-runner-selfref.test.ts:47`\n- `packages/rest/src/import-runner-idempotency.test.ts:56`\n- `packages/services/service-storage/src/lax-deviation-reclamation-gate.test.ts:61` and `:88` (two instances)\n- `packages/services/service-storage/src/file-reference-lifecycle.test.ts:237` (a **second, undiscovered** instance in a file #8582 already fixed a *different*, discovered matcher in)\n- `packages/runtime/src/migration-recovery-plugin.test.ts:48`\n- `packages/runtime/src/http-dispatcher.keys.test.ts:28`\n- `packages/runtime/src/http-dispatcher.test.ts:3947`\n\nEach treats `where`/`filter` as an ordinary field bag via `Object.entries(...).every(([k,v]) => r[k] === v)` with no `$or`/`$and` branch — the identical failure shape (b) #8494/#8582 exist to catch. Whether each is *live* (a suite actually hands it a `$or`/`$and`) is unmeasured — same as #8582's worklist was before it was swept — but the shape itself is not in question; it is byte-for-byte the pattern the gate already grades everywhere it CAN see it.\n\n## Why this is worth a decision, not a silent tolerance\n\n`check-where-matcher-conformance`'s own header states discovery is \"self-verifying: membership is decided by behaviour, not by a name\" — true for the matchers it finds, but the two-param requirement means a whole authoring STYLE (inline `.filter()` capturing an outer `where`) sits entirely outside its authority. A gate that cannot see a class of instance cannot grade it green OR red; \"not in the ledger\" reads as \"conforming\" to anyone skimming `check:where-matcher`'s output, which is exactly backwards for these 17.\n\n## Options (not investigated further — this is the finding, not the fix)\n\n1. **Extend discovery** to also match a single-param `.filter`/`.some`/`.every` callback whose body reads `Object.entries(<name>)` where `<name>` resolves (via the same `visibleDeclarations` walk already built for extraction) to an enclosing parameter or destructured option — i.e., loosen the \"must be its own 2nd parameter\" requirement to \"the where-shaped identifier must resolve to *something* in scope,\" while keeping the behavioural control probe as the real filter against false positives.\n2. **Manually audit and fix** the 17 sites the same way #8582 did its 78 — cheaper per-instance, but does not close the gate's blind spot for the *next* one someone writes in this style.\n\nEither way the two are not mutually exclusive; 2 without 1 leaves the hole open for new code.\n\nRefs: #8582 (the sweep that surfaced this), #8494 (the gate this extends), #7620 (the original 16-file $or short-circuit finding).\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01RDTnVvsgA6cUZ4xFVtPZRy)_\n"
+}

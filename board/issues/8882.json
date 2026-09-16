@@ -1,0 +1,35 @@
+{
+  "number": 8882,
+  "kind": "issue",
+  "title": "docs(releases): v17.0.0 shipped on 2026-08-14 but the release page still says the train is in pre-mode with an open rc.6 window",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-15T14:05:32Z",
+  "updated_at": "2026-08-15T15:33:51Z",
+  "closed_at": "2026-08-15T14:39:30Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8882",
+  "body": "`content/docs/releases/v17.mdx` was compiled **for** the GA cut (#8642, `259f211f0`) and then never updated **after** it. The cut landed the same day, so the published page tells a third-party developer that 17.0.0 has not shipped yet.\n\n## What actually happened, in order\n\n| commit | subject |\n|---|---|\n| `259f211f0` | `docs(releases): compile the v17 release page for the 17.0.0 cut (#8642)` — wrote the page as *preparing to ship* |\n| `2c2afa544` | `chore(release): exit changesets rc pre mode for the 17.0.0 GA cut (#8643)` |\n| `24c1b91e4` | `chore: version packages (#6208)` — the GA version commit, consumed 2079 changeset files |\n| tags | `@objectstack/spec@17.0.0`, `create-objectstack@17.0.0`, … published **2026-08-14T08:00–08:02Z**, `prerelease: false`, `draft: false` |\n\nNothing came back to the page afterwards, so all three \"not yet shipped\" claims below are now false.\n\n## The stale surfaces\n\n**1. `content/docs/releases/v17.mdx` — the release-status blockquote (currently lines 15–21).** Four false claims in one paragraph:\n\n- \"development is complete and the train is **preparing to ship**\"\n- \"The latest published pre-release is **17.0.0-rc.6**\" — the latest published version is 17.0.0\n- \"one window of 374 changesets is **still open on `main`**\" — that window was consumed by the GA cut\n- \"**Until `changeset pre exit`**, the 17.0.0 train ships through Changesets pre-mode … nothing reaches the `latest` tag\" — `pre exit` ran in `2c2afa544`; `.changeset/pre.json` no longer exists on `main`\n\nThe rest of that blockquote (the `^16.x` caret-range paragraph explaining why the train is a major) is still accurate and should survive.\n\n**2. `content/docs/releases/v17.mdx` — the `## Landed since 17.0.0-rc.6` opener (currently lines 2850–2857).** Says \"This window is **open** … these changes roll into the cut that exits Changesets pre-mode … **374 pending** — 11 `major`-class, 99 `minor`, 264 `patch` … These numbers move until the cut; once it lands the package changelogs are authoritative.\" The cut has landed. Close this window against what GA actually released, the same way #8642 closed the `rc.5` window against the `rc.6` cut.\n\nThe ~400 lines of *substance* in that section (the credential story, driver-text disclosure, per-organization uniqueness, `$field`, …) are fine — it is the framing that is stale, not the content.\n\n**3. `content/docs/releases/index.mdx` line 21** ends `(current series: 17.0.0-rc.N, pre-release)`. Every shipped sibling on that list reads `(final release: 15.1.1)` / `(final release: 14.8.0)`. v17 should join them.\n\n## Counting the GA window — one trap\n\nDo **not** report 2079 as the window's size. In Changesets pre-mode, changesets are not consumed at each rc — they accumulate and the whole train's set is consumed at `pre exit`, so the version commit deletes every changeset back to `rc.0`. The window number this section wants is the delta since the `rc.6` cut, counted the way the page counts every other window: across the `## 17.0.0` sections of the package changelogs at `24c1b91e4`. Verify the number you print rather than inheriting the drafted 374.\n\n## Scope\n\nDocs-only, `skip-changeset`. Three files at most (`v17.mdx`, `index.mdx`). Sweep the rest of `v17.mdx` for any other forward-looking tense that the cut falsified — the two spots above are the ones found, not a guarantee there is no third. Do not rewrite the historical per-window sections (`Landed since rc.0` … `rc.5`): those are correct records of what each cut released and are frozen by design. Package `CHANGELOG.md` files are generated — leave them alone.\n\n## Re-check commands\n\n```bash\ngit fetch origin main\ngit show origin/main:.changeset/pre.json            # expect: does not exist (pre-mode over)\ngit show origin/main:content/docs/releases/v17.mdx | sed -n '15,21p'\ngit show origin/main:content/docs/releases/v17.mdx | sed -n '2850,2857p'\ngit show origin/main:content/docs/releases/index.mdx | sed -n '21p'\ngh release list --repo objectstack-ai/objectstack --limit 5   # 17.0.0 tags, prerelease=false\n```\n\n## Notes\n\nPer `CLAUDE.md`, `content/docs/releases/` is never touched by a code PR — this is the sanctioned dedicated docs-only route, and it is the release-time compile step the GA cut was owed.\n\nReported by the maintainer, 2026-08-15: 「v17 已经正式发布了，但是文档是不是没有更新对。 docs/releases/v17」"
+}

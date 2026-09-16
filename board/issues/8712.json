@@ -1,0 +1,34 @@
+{
+  "number": 8712,
+  "kind": "pull_request",
+  "title": "chore(pm): compress the un-ratcheted instruction surface and extend the line ratchet over it",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/xl",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-14T15:40:39Z",
+  "updated_at": "2026-08-14T16:48:51Z",
+  "closed_at": "2026-08-14T16:48:49Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-08-14T16:48:49Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/8712",
+  "body": "Fixes #8700\n\nADR-class merge path per the card: draft PR, human merge, auto-merge never armed.\n\n## Deliverable 1 — one-time compression pass\n\nUniform rule applied: verbatim maintainer quotes keep (one line where the quote allows); measured-story narratives compress to ONE line; every normative bullet and stop-mark survives — removals below are pure duplicates whose statement survives in the named home file, under the existing cross-pointer convention (SKILL.md keeps the principle statement, references keep only the delta: quotes, parameters, full clause texts, execution steps).\n\n| file | lines before | after | stop-marks before | after |\n| --- | --- | --- | --- | --- |\n| references/dispatch-runbook.md | 291 | 216 | 39 | 29 |\n| references/platform-readings.md | 143 | 121 | 15 | 15 |\n| references/review-checklist.md | 95 | 82 | 9 | 8 |\n| references/landing-operations.md | 86 | 82 | 12 | 12 |\n| references/seat-post-protocol.md | 114 | 101 | 15 | 14 |\n| .claude/agents/os-dev.md | 435 | 399 | 11 | 11 |\n| SKILL.md (untouched) | 686 | 686 | — | — |\n\nReferences five-file total: 729 → 602. The two sections freshly compressed by the preceding PR (结论当轮执行, 座位贴活性巡查) are kept as-is per the card.\n\n**Stop-mark accounting.** Every removed stop-mark is a pure duplicate; the statement survives verbatim-equivalent at the named home:\n\ndispatch-runbook.md (10 removed):\n1. 不手工维护 (pm:blocking) — SKILL.md 标签纪律 carries 「⛔ 不手工挂」 twice\n2. 不定级、不改标签 (lane evidence) — SKILL.md 发现分诊轮 carries 「⛔ 不定级不改标」 incl. the skills-lane exception\n3. 不用 create_trigger+fire — SKILL.md 云卡四课 intro carries it verbatim with the 2026-08-07 ruling\n4. 不持续等待 (cross-lane takeover) — SKILL.md 跨车道简单阻塞项 carries it verbatim\n5. 不等任何静默阈值 (stall reset) — SKILL.md 失报与停摆 carries it verbatim\n6. 不能写成「派发词写全了就可以不探」 — SKILL.md 失报与停摆 carries it verbatim\n7. 到达不读作「还活着」/不到达也不读作「已死」 — SKILL.md 通知重放 carries it verbatim\n8. 标准非协商条款不抄进派发词 — SKILL.md 派发词原则 carries it verbatim (whole bullet was a near-verbatim duplicate; dropped)\n9. 不靠派发词临时覆盖 — same SKILL.md bullet\n10. 不从卡片/上次派发/记忆抄 — same SKILL.md bullet (the runbook keeps the un-duplicated 不让 dev 枚举全 farm)\n\nreview-checklist.md (1 removed): the gerund-parser fact (closing/fixing are not keywords) — statement home is platform-readings 闭合关键词解析, which the checklist bullet now points to.\n\nseat-post-protocol.md (1 removed): 永不散文 (three-type shift report) — SKILL.md 全体座位的不变量 carries 「⛔ 不是散文」.\n\n**Honest miss on the numeric target**: the card aimed the runbook at ~170 (prompt: 170–190); it landed at 216. The compression exhausted what the no-semantic-change rule allows: what remains is norms, verbatim ruling quotes, one-line whys, the full clause texts SKILL.md points to, and the two kept-as-is sections. Pushing to 190 would have meant deleting norms rather than prose. Ceilings are set at the achieved counts; a further thinning can lower them any time.\n\n## Deliverable 2 — ratchet extension\n\nscripts/pm/check-skill-line-ratchet.mjs goes from the single SKILL.md ceiling to a per-file CEILINGS map covering all seven files above, ceilings = the exact post-compression counts (headroom 0 everywhere, SKILL.md stays 686). Output style and the funded-growth rule (raising requires a maintainer ruling quoted in the raising PR) are kept; the red message now also names the authoring rule. Self-test extended (7 → 11 cases: per-file map coverage, message names file/remedy/authoring-rule). The watch-hint pins in scripts/pm/dispatch-gates.mjs are re-pointed: the ratchet now claims each covered file by full-path literal (positive pin added) and still does not claim all of references/.\n\n## Deliverable 3 — authoring style rule\n\nOne line added to the runbook's 落卡与裁决记录细则: 出处一行(日期 + 原话);实测叙事至多压成一行 —— 故事住在卡上,不进操作文本。 (counted inside the runbook budget above).\n\n## Verification\n\nUnion run AFTER the final commit at HEAD `c0ecfc6ab2`, all green:\n\n- check:pm-skill-ratchet — new per-file ceilings, self-test 11 cases, all 7 files at headroom 0\n- check:pm-skill-id-lint — 9 files clean (zero issue-IDs survived the rewrite)\n- check:agent-model-declared — os-dev.md → opus\n- check:skill-frame-sync — 4 copies isomorphic, 3 axes, binding sentence present (os-dev.md frame untouched)\n- check:doc-authoring — 377 files clean\n- check:nul-bytes — 5732 files clean\n- check:doc-formula-expressions — after formula closure build; 1410 TS blocks clean\n- check:pm-dispatch-gates — 107 self-test cases (derivation addition beyond the prompt's named list, surfaced by re-deriving over the actual changed paths: this PR edits dispatch-gates.mjs watch-hint pins)\n\nGate families re-derived post-change with node scripts/pm/dispatch-gates.mjs over the 8 changed paths; the derivation now shows each references file matching check:pm-skill-ratchet via its own full-path literal — the extension is visible to the derivation itself.\n\nskip-changeset: docs + pm tooling only, nothing releases (per precedent).\n\n_Generated by [Claude Code](https://claude.ai/code/session_018WuTtyckQa1VcXwgd52JpN)_\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_018WuTtyckQa1VcXwgd52JpN)_"
+}

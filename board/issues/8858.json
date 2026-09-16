@@ -1,0 +1,34 @@
+{
+  "number": 8858,
+  "kind": "issue",
+  "title": "publishPackageDrafts' ADR-0010 audit row records the raw stored type spelling — the #8769 fold closed this for `publishMetaItem` only",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "bug"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-15T11:22:02Z",
+  "updated_at": "2026-08-15T16:28:48Z",
+  "closed_at": "2026-08-15T16:28:48Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8858",
+  "body": "Observation recorded while measuring #8820 (which is about a different consumer of the same unfolded value). Not fixed there: the audit site is outside that card's declared region.\n\n## What was measured\n\nAt `origin/main` `fd6bdf89f`, `packages/metadata-protocol/src/protocol.ts:13845`:\n\n```ts\nfor (const p of promoted) {\n    await this.recordMetadataAudit({\n        type: p.d.type,\n        name: p.d.name,\n```\n\n`p.d` is the draft row as `SysMetadataRepository.listDrafts` returned it. That method applies no type fold — it selects on `state`/`organization_id` and maps `type: row.type` straight through (`sys-metadata-repository.ts:914-918`) — so `p.d.type` is the **raw stored** `sys_metadata.type`.\n\n`promoteDraftForPublish` folds internally (`:12944`, `PLURAL_TO_SINGULAR[request.type] ?? request.type`) and that folded value is kept separately as `p.singularType`; the raw spelling stays on `p.d.type` (`:13640`).\n\n## Why it is a defect\n\n`publishMetaItem`'s audit row at `:12862` reads `request.type` **after** the boundary fold at `:12832`, so it records the canonical singular. The batch route records whatever spelling the stored row carries. The in-file comment at `:12814` describes precisely this failure mode as something the fold fixed:\n\n> the ADR-0010 audit row and the receipt sentence, which both read `request.type` and so recorded the CALLER's spelling for a row written under the canonical one — a compliance query on `type = 'view'` missed a publish addressed `/meta/views/…`.\n\nThat is still true one route over: a compliance query on `type = 'object'` misses a batch publish of a legacy plural-typed draft row. Legacy plural rows at rest are real — `canonicalMetaType`'s own header (`:158`) states that rows written under a plural `type` before that fix are real and nothing rewrites them on upgrade, which is the reason `promoteDraftForPublish` carries its own fold at all.\n\nScope note: new rows are written folded (`saveMetaItem` persists `singularTypeForRepo`, `:12173`/`:12226`), so this is a data-at-rest concern, not a newly-minted one.\n\n## Suggested disposition\n\nRecord the canonical spelling — `p.singularType` is already in hand at that site and is what the neighbouring `applyRegistryWriteThrough` call uses. Worth confirming against the ADR-0010 intent first: if the audit trail is meant to record the caller's literal spelling, then `publishMetaItem` is the site that is wrong and the two should be reconciled the other way. Either way the two routes should not disagree.\n\nBacklink: #8820 (the measurement that surfaced this; a different consumer of the same unfolded `p.d.type`).\n"
+}

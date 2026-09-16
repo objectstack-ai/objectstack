@@ -2,7 +2,7 @@
   "number": 18381,
   "kind": "pull_request",
   "title": "fix(lint): field-no-consumers reads the synthesized layout and the upsert identity",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
   "draft": false,
   "author": {
@@ -20,10 +20,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-09-16T06:55:58Z",
-  "updated_at": "2026-09-16T08:17:30Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-09-16T08:41:31Z",
+  "closed_at": "2026-09-16T08:41:29Z",
+  "closed_by": {
+    "login": "os-try-charles",
+    "id": 313893388,
+    "type": "User"
+  },
+  "merged_at": "2026-09-16T08:41:29Z",
   "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/18381",

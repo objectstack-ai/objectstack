@@ -1,0 +1,37 @@
+{
+  "number": 7987,
+  "kind": "issue",
+  "title": "[security] `sys_account` stores live third-party OAuth access/refresh/id tokens as plain columns, and the object is API-readable",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched",
+    "security",
+    "target:v17"
+  ],
+  "assignees": [
+    "qq9340100"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-12T09:31:21Z",
+  "updated_at": "2026-08-14T14:07:36Z",
+  "closed_at": "2026-08-14T14:07:36Z",
+  "closed_by": {
+    "login": "qq9340100",
+    "id": 313832657,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7987",
+  "body": "Filed by the `domain:services` PM seat from the #7902 credential-persistence survey (report: comment 5264546868 on #7902). Unassigned, no `pm:queue`, **no `domain:*`** — the landing lane is genuinely uncertain (see routing note). For triage to grade **and** route.\n\n## The finding\n\n`sys_account` holds each user's **live third-party OAuth credentials** for linked providers (Google, GitHub, …) as plain `Field.textarea()` columns, on an object that declares `apiEnabled: true, apiMethods: ['get','list']`.\n\n| Column | Evidence |\n|---|---|\n| `access_token` | `sys-account.object.ts:181-194` |\n| `refresh_token` | ” |\n| `id_token` | ” |\n| (object's API surface) | `sys-account.object.ts:238-245` |\n\nThese are not hashes and not platform-internal credentials: they are **bearer credentials for someone else's service**, and a refresh token in particular is long-lived.\n\n## Why the existing collectors do not catch it\n\nThe survey's structural result — this is the interesting half:\n\n`maskSecretFields` masks `secret`-typed fields **and** `password`-typed fields, but it **exempts objects with `managedBy: 'better-auth'`** (`packages/objectql/src/secret-fields.ts:104-119`). `sys_account` is one of those. So the one collector that might have masked these columns is exempt from them by construction — and the columns are plain `textarea` anyway, which no type-keyed collector would reach even without the exemption.\n\nIts sibling `sys_api_key.key` took the other route: `internal: true`, which makes `omitInternalFields` **omit** the field rather than mask it (`engine.ts:4763-4766`, landed by #7728). `sys_account`'s token columns carry no such flag.\n\n## Shape of a fix, if wanted (⛔ not decided here)\n\n**`Field.secret()` is probably the wrong tool.** better-auth owns the writes to this object; routing them through the engine's encrypt-on-write path would sit between better-auth and its own adapter, which is where this gets hard rather than where it gets safe.\n\n**`internal: true` is the plausible route** — it is exactly what #7728 did for `sys_api_key.key`, it needs no cooperation from better-auth, and it removes the columns from API responses entirely rather than masking them. The load-bearing question a card must answer first: **does any login/refresh path read these values off a result row** (as opposed to reading them from the store directly)? If one does, omitting them breaks it, and that is the whole risk of the change.\n\n## Explicitly NOT claimed\n\n- **No leak is demonstrated.** This is reachable-cleartext plus an exempt collector; whether any persona in a shipped deployment can actually GET these rows depends on permissions this survey did not evaluate.\n- **`sys_account.password` / `previous_password_hashes` are NOT part of this finding.** They hold better-auth one-way hashes — ADR-0100's third channel. A hash is not a reversible outbound credential. They are flagged separately in the survey as the same *class* #7728 addressed, worth a look, but they are not this card.\n- **No ADR-0100 conflict.** No `Field.password()` field exists anywhere in the repo (0 occurrences, reverse-checked), so the ADR-0100 carve-out has zero hits here.\n\n## Routing note — why no `domain:*`\n\nThe columns are declared in `packages/platform-objects`, which is **`domain:metadata`** by the lane table; the masking/omission machinery is in `packages/objectql` (**`domain:engine-core`**); and the consumer that would break is better-auth's adapter under `plugin-auth` (**`domain:identity`**). The survey ran in the services lane, but this card does not obviously land there. Triage's call — flagged rather than guessed, per the anchoring rule (label by the package the fix lands in, never by where it was found).\n\n## Evidence\n\nMeasured 2026-08-12 by the dev on #7902 (read-only survey, `pr: null`). Full 26-surface verdict table, including the reverse-checks that validate the clean verdicts, in comment 5264546868 on #7902.\n\n## Source\n\nSplit out of objectstack-ai/objectstack#7902."
+}

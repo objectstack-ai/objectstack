@@ -1,0 +1,35 @@
+{
+  "number": 8554,
+  "kind": "issue",
+  "title": "Five more instances of the #8323 class: admin- and user-authored names on tenant-scoped objects still carry installation-wide unique indexes",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "security"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-13T19:40:54Z",
+  "updated_at": "2026-08-14T01:28:37Z",
+  "closed_at": "2026-08-14T01:27:50Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8554",
+  "body": "Found while implementing #8468 (the third instance), running the real lint rule over every platform object rather than reading declarations by eye. **Not fixed there** — #8468's scope is `sys_position` alone. Filed unassigned.\n\nPer the maintainer ruling of 2026-08-13 on #8468, an instance of this shape **inherits that answer and goes straight to the lane queue** rather than back to the decision box. None of the five below carries a semantic argument for an installation-wide namespace; where one might exist I have filed separately instead (see \"Related\").\n\n## Why this contradicts the \"closed set\" claim on #8468\n\nThe #8468 triage comment stated that the sweep behind it had bounded the rest of the platform's objects, so *\"whatever is ruled here closes the class for the platform's own metadata rather than leaving a tail.\"* That is not the case. The original sweep was a source read; this one executes `lintUnscopedDeclaredIndexes` from `packages/lint/src/data-model-rules.ts` over all 76 loadable `*.object.ts` definitions and cross-references each finding against `resolveInjectedSystemColumns` — i.e. the rule's own verdict, filtered by whether `organization_id` is actually injected.\n\nThe rule fires on the **spelling alone** and deliberately does no tenancy inference, so its raw output includes many legitimately-global better-auth objects. The tenancy filter is what separates them.\n\n## The five instances\n\nAll are tenant-scoped (`organization_id` injected, no `tenancy` opt-out) and declare a bare `unique: true` on a **declared** index over authored content — the positional spelling of `'global'`, i.e. the listed columns verbatim.\n\n| object | package | declared index | `managedBy` | authored by |\n|---|---|---|---|---|\n| `sys_permission_set` | `plugin-security` | `{ fields: ['name'], unique: true }` | `config` | admins, in Setup |\n| `sys_sharing_rule` | `plugin-sharing` | `{ fields: ['name'], unique: true }` | `config` | admins, via the Studio criteria builder |\n| `sys_webhook` | `plugin-webhooks` | `{ fields: ['name'], unique: true }` | `config` | admins, from the UI |\n| `sys_email_template` | `platform-objects` | `{ fields: ['name', 'locale'], unique: true }` | `config` | admins |\n| `sys_notification_preference` | `service-messaging` | `{ fields: ['user_id', 'topic', 'channel'], unique: true }` | `system-data` | per-user toggles |\n\n`sys_permission_set` is the strongest case and the most awkward one: it sits in the **same directory** as the two objects already fixed, and together with `sys_capability` and `sys_position` it is the third leg of the ADR-0090 RBAC triad. Its own header comment reads *\"tenants may add custom rows (created via UI / API) but the schema itself is locked\"* — the same sentence that made `sys_position` a defect. Two organizations cannot both have a permission set named `sales_readonly`.\n\n`sys_notification_preference` is the near-exact analogue of the already-ruled `sys_user_preference`: same archetype (a per-user K/V row), same defect shape. Note that `sys_user_preference` is `managedBy: 'system-data'` too, so `managedBy` is not the discriminator — the ruling's phrase is *admin-authored content*, which is about provenance of the rows, not the management mode of the object.\n\n## Expected consequence\n\nThe same one measured on #8468 and #8323: a per-value `409` on a row the caller cannot read (a cross-tenant existence oracle over another organization's naming), plus a functional dead end — the second organization simply cannot use the name and the refusal does not say why. For `sys_notification_preference` the shape matches `sys_user_preference`'s measured symptom instead: a user in two organizations cannot hold independent per-topic toggles.\n\n⚠️ **Not yet measured live per object.** #8468 established that the static read is reliable for this shape by reproducing the oracle on a real engine, but the ruling's own discipline is that the probe comes first. Whoever takes this should run the 409/201 probe per object before migrating, exactly as #8468 did.\n\n## Fix shape (unchanged from #8461 / #8468, and free)\n\n1. Respell each to `unique: 'organization'`.\n2. The `replace_unique_index` migration arm generalized to declared indexes by #8461 covers these unchanged — verified on `sys_position` in #8468 with no modification to `schema-drift.ts`.\n3. Check each object's published text for a uniqueness claim, as #8468 had to (`describe()` plus the generated reference page).\n4. ⚠️ The pin must exercise the **deployed-installation** migration path, not only a fresh database. Respelling changes the index's generated name, so on a deployed database drift otherwise reads as two findings — composite missing (safe) and old global index orphaned (destructive) — and an operator applying only the safe half keeps the defect while the plan reads as applied.\n\n## Related\n\n- #8323 / #8461 — the class, ruled and fixed for `sys_user_preference` and `sys_capability`.\n- #8468 — the third instance (`sys_position`), where the ruling's standing consequence was recorded.\n- #5082 — parked v18 D2 (bare `true` becomes `'global'` plus a loud refusal).\n- #8379 — the publish-time advisory that would catch this at authoring time.\n\nFound by session `session_012WMpuAfA2KSdDjGF6tm1bH`.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_012WMpuAfA2KSdDjGF6tm1bH)_"
+}

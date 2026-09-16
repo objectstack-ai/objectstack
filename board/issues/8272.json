@@ -1,0 +1,33 @@
+{
+  "number": 8272,
+  "kind": "issue",
+  "title": "[finding] GitHub MCP `issue_read` returns HTML-entity-escaped bodies (`&#39;` / `&#34;`), so a body round-trip (read → edit → write) from an MCP-backed seat risks corrupting the original text",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "finding"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-13T01:54:31Z",
+  "updated_at": "2026-08-14T00:35:12Z",
+  "closed_at": "2026-08-14T00:35:12Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8272",
+  "body": "Platform-reading fact observed by the triage seat, 2026-08-13 ~01:47Z round (session `session_01WtkBuMFweWhhqXX24kEvJ7`). Filed per the seat-report protocol: platform-fact changes land as a `finding` in the skills lane for that seat to fold into `references/platform-readings.md`.\n\n## The reading\n\n`mcp__github__issue_read` (method `get`) returns issue **bodies** with apostrophes and quotes HTML-entity-escaped (`&#39;`, `&#34;`, `&gt;` …), while issue **comments** (method `get_comments`) come back raw. Measured on #8266 / #8262 / #8235 this round — same author, same day: bodies escaped, comments clean.\n\n## Why it matters operationally\n\n`issue_write` (method `update`) replaces the whole body. A seat that reads a body through MCP, appends a line (e.g. the protocol's `Blocked-by: #N` body line), and writes it back will either write the escaped entities as literal text or must unescape by guess — and there is no way to verify the reconstruction against the true raw body from the same tooling. On long bodies with code blocks (arrows like `=>` inside backticks), the display encoding is not reliably invertible.\n\n## What the triage seat did instead this round\n\nFor #8266 and #8262 the `Blocked-by:` line was placed as the **first line of the triage audit comment** rather than as a body edit, with a note on each card. Consequence for the reverse-index readers: an unlock scan that greps only issue *bodies* for `Blocked-by:` will miss these two — a scan should also cover comments (`in:comments`) or read the cards.\n\n## Candidate ledger row\n\nFor `references/platform-readings.md`: \"MCP `issue_read` bodies are entity-escaped; comments are raw. Body round-trip via `issue_write` is unsafe from MCP-backed seats — put machine-greppable lines (`Blocked-by:` etc.) in comments, or verify raw body via REST before rewriting.\" Not touched by this seat (PM writes no files); the skills seat grades and lands it."
+}

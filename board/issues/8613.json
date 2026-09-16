@@ -1,0 +1,35 @@
+{
+  "number": 8613,
+  "kind": "issue",
+  "title": "`sys_permission_set.active` and `sys_position.active` are unenforced too — both Deactivate dialogs promise access stops, and it does not",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "security",
+    "target:v17"
+  ],
+  "assignees": [
+    "qq9340100"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-14T02:03:35Z",
+  "updated_at": "2026-08-14T16:58:19Z",
+  "closed_at": "2026-08-14T16:57:36Z",
+  "closed_by": {
+    "login": "qq9340100",
+    "id": 313832657,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 9,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8613",
+  "body": "Found while implementing #8535 (which withdraws the identical false claim on `sys_capability` only). Filed unassigned — **out of scope for #8535's PR**, which deliberately touches nothing but `sys_capability`.\n\n#8535 established that `sys_capability.active` is read by nothing while its Deactivate dialog claims grants stop resolving. The same shape exists on the **other two RBAC catalogue objects**, and on those it is worse: a permission set and a position are the **grant** itself, not a catalogue entry.\n\n## The claims\n\n`sys-permission-set.object.ts`, `deactivate_permission_set`:\n\n> Deactivate this permission set? Existing assignments stay in place but stop granting access until re-activated.\n\n`sys-position.object.ts`, `deactivate_position`:\n\n> Deactivate this position? Users keep their assignment but the position stops granting permissions until re-activated.\n\nBoth ship translated into all four locales.\n\n## What actually happens (measured on `b45c71e85a`)\n\nNothing filters on `active` anywhere in the resolution chain:\n\n- `SecurityPlugin.resolvePermissionSetsForContext` (`security-plugin.ts:3626`) builds `requested` from `context.positions` + `context.permissions` plus the additive baseline. No `active` check.\n- `PermissionEvaluator.resolvePermissionSets` (`permission-evaluator.ts:398`) matches metadata sets by `name`, then bootstrap sets by `name`, then falls through to the DB loader. No `active` check in any of the three sources.\n- The DB loader (`security-plugin.ts:812`) queries `sys_permission_set` with `where: { name: { $in: names } }` — **no `active` predicate** — and the row is mapped to a `PermissionSet` that does not carry `active` at all, so nothing downstream could filter on it even if it wanted to.\n- Every non-test `sys_position` row read (`delegated-admin-gate.ts`, `security-plugin.ts`, the bootstrap seeders) looks up by `name` or `id`. None reads `active`.\n\nSo `active: false` on a permission set or a position changes a column value and a badge in Setup. The assignments keep granting.\n\n## Why this is worth its own card\n\nSame direction of falsehood as #8535, higher blast radius. An admin revoking a compromised or over-broad permission set is told in a confirmation dialog that access stopped; it did not. The admin's likely next action is to *not* do the thing that would actually work (delete the set, or remove the assignments).\n\nNote `sys_position` was partially touched by #8556/#8601, but that was different text — the `deactivate_position` dialog above is still on `main` making the claim.\n\n## Not a recommendation\n\nThe direction is the same contract decision the maintainer already ruled on for `sys_capability` (2026-08-13, ADR-0049 enforce-or-remove, option B: withdraw the claim rather than put the registry on the authorization hot path). Whether that ruling extends to these two is **not** something this finding assumes: unlike a capability catalogue, a permission set's `active` flag has a plausible real enforcement point (the DB loader's `where`, one predicate) and a plausible real business pull (switching a grant off without deleting it). Both options are live and the trade-off is different from #8535's. Needs triage, not a rider."
+}

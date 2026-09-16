@@ -1,0 +1,35 @@
+{
+  "number": 8619,
+  "kind": "pull_request",
+  "title": "fix(plugin-security): withdraw the sys_capability Deactivate dialog's false grant-revocation claim (#8535)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-14T02:33:48Z",
+  "updated_at": "2026-08-14T02:57:55Z",
+  "closed_at": "2026-08-14T02:57:54Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-14T02:57:54Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/8619",
+  "body": "Fixes #8535\n\nA shipped confirmation dialog declared behaviour no code path enforces. This withdraws the claim.\n\n## The claim, and why it was false\n\n`deactivate_capability` told the admin, verbatim:\n\n> Deactivate this capability? Grants and resource requirements that reference it stop resolving until re-activated.\n\nRe-verified on `origin/main` at `b45c71e85a` (measured, not inherited from the card):\n\n- `PermissionEvaluator.getSystemPermissions()` unions `permissionSets[].systemPermissions` — plain strings — and a resource's `requiredPermissions` is matched against that string set. Neither loads a `sys_capability` row.\n- The table's only two production readers are seeders (`bootstrap-system-capabilities.ts:214/291`, `bootstrap-declared-capabilities.ts:210`). Both **write** `active: true` on insert; neither reads it back. No reader of `active` exists anywhere.\n- The authoring lint resolves capability names against `PLATFORM_CAPABILITY_NAMES`, stack declarations and seed rows — never the table.\n\nThe direction of the falsehood was the dangerous one: an admin withdrawing a capability was told the withdrawal took effect and it silently did not. The escalation is what they believed they had prevented.\n\n## Shape taken: reword (option B default), not the retirement playbook\n\nPer the maintainer ruling of 2026-08-13 (ADR-0049 enforce-or-remove). Enforcement was rejected there and is not attempted here.\n\nRemoval was considered and rejected. The `spec-property-retirement` playbook governs authorable **`packages/spec`** properties — liveness ledger, ADR-0087 conversion, `retiredKey()` tombstones, the eight generated artifacts. `sys_capability.active` is none of those: it is a shipped database column with its own index on a plugin-owned system object, written by two seeders. Removing it is a data migration plus two action deletions, not a spec retirement — heavier, and it would touch `bootstrap-system-capabilities.ts`, which #8470 landed in and which this PR deliberately leaves untouched.\n\n## What changed\n\nAll presentation and text. There is no behaviour change because there was no behaviour.\n\n- **Dialog** now states the non-effect outright rather than merely omitting the promise — an admin who remembers the old wording has to be told it was wrong, not left to infer it.\n- **All four shipped locales** corrected (`en`, `es-ES`, `ja-JP`, `zh-CN`). See the note below.\n- **`active` gains a `description`** it never had. Its absence is precisely how the dialog became the only place the field's meaning was stated — and that statement was false.\n- **Demoted from prominence**, the ruling's other half: out of `highlightFields`, out of the `danger` variant, out of the two scoped list views. It stays in `all_capabilities`, the full-catalogue view — hiding a flag the product still lets an admin set is the opposite error, not a stronger fix.\n\n## The translation-bundle trap, confirmed live\n\nEditing the source object does **not** rewrite shipped bundles. Running `node scripts/check-i18n-bundles.mjs --write` printed `regenerated` and, measured against a before-snapshot:\n\n- it **added** the new `fields.active.help` key to all four bundles (filled with the English string in the three non-`en` locales);\n- it left the **changed** `confirmText` stale in all four bundles, `en` included.\n\nSo the eight leaf values were corrected by hand, per the bundle header's own documented workflow. `check:i18n` reports \"in sync\" either way, so that gate is **not** evidence here — the sweep test below is.\n\n## Verification\n\nThe deliverable is that no surface makes the claim, so the test is a **sweep**, not a pin. It walks every string in the object definition and in all four locale bundles and applies two independent checks: a **negative** one (the withdrawn claim's own words, per locale, appear nowhere) and a **positive** one (every locale's dialog and field help actually state the non-effect — catching the cheap non-fix of deleting the sentence and leaving the admin to infer the rest). 19 cases.\n\nAblations, each with the colour predicted before running, all matching:\n\n| Ablation | Predicted | Measured |\n|---|---|---|\n| old English text back in the **source** only | 2 red, all bundle cases stay green | exactly that |\n| old ja-JP text back in the **bundle** only | 2 red (ja-JP only), source + other locales green | exactly that |\n| `active` back in `highlightFields` | 1 red | exactly that |\n\nThe first two are the ones that matter: they prove the bundle assertions read the bundle files independently of the source, which is exactly the blind spot that let a corrected source ship beside a stale `en` bundle in the #8601 case. Harness non-vacuity is further pinned by the case count — 1+4+1+4+1+4+1+2+1 = 19 — so no `it.each` silently expanded to zero.\n\nLocal gates green after the final commit: `check:i18n` (on a built CLI — it reports a meaningless prerequisite failure otherwise), `check:nul-bytes` plus a control-byte self-scan of every touched file, `check:cross-package-test-inputs`, `check:test-source-alias`, `check:type-source-resolution`, `check:changeset-gate-self-tests`, `check:objectui-changeset`, `check:pm-dispatch-gates`, `check:query-options-erasure`, `check:type-check-coverage`, `check:type-check-debt` (plain, `--self-test`, `--re-measure` — `surplus: none`, no ledger growth), `check-adr-0087-registration`, `check-changeset-no-major`, `check-empty-changeset`, and `plugin-security` in full: 57 files / 1103 tests passed, `tsc --noEmit` clean.\n\n## Adjacent finding, filed not fixed\n\n#8613 records the same unenforced-`active` shape on `sys_permission_set` and `sys_position` — both Deactivate dialogs promise access stops, and no `active` predicate exists anywhere in the resolution chain. On those two it is worse, since a permission set is the grant itself. Filed unassigned; deliberately out of scope here, and its direction is not assumed to follow this card's ruling.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_012WMpuAfA2KSdDjGF6tm1bH)_"
+}

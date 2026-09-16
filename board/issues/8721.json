@@ -1,0 +1,34 @@
+{
+  "number": 8721,
+  "kind": "issue",
+  "title": "platform-objects: `widget_recent_events` serves its pre-#7862-era title in all four locales — the hand-authored dashboard/app translation half has no source-vs-translation gate at all",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-14T16:28:06Z",
+  "updated_at": "2026-08-14T22:00:25Z",
+  "closed_at": "2026-08-14T22:00:25Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8721",
+  "body": "Found while removing the `permission_change` tile from the same board (#8148). Not fixed there — out of that card's scope, and the underlying gap is wider than the one string. Filed unassigned for triage.\n\n## The concrete defect\n\n`system_overview.dashboard.ts` declares `widget_recent_events` with:\n\n```\ntitle: 'Audit Events by Action'\n```\n\nAll four hand-authored locale bundles serve a different title, the one the widget had *before* it was converted from a raw recent-events record list into an ADR-0021 dataset-bound by-action breakdown:\n\n| locale | served title | file |\n|:--|:--|:--|\n| `en` | `Recent Audit Events` | `src/apps/translations/en.ts` |\n| `zh-CN` | `最近审计事件` | `src/apps/translations/zh-CN.ts` |\n| `ja-JP` | `最近の監査イベント` | `src/apps/translations/ja-JP.ts` |\n| `es-ES` | `Eventos de Auditoría Recientes` | `src/apps/translations/es-ES.ts` |\n\nThe translation is what renders, so **every user in every locale sees the stale name** — the declared string reaches nobody. The in-file comment on that widget records the conversion deliberately (\"ADR-0021 single-form: a dataset-bound breakdown of events by action. The raw recent-events record list belongs in a ListView on `sys_audit_log`\"), so the source title is the correct one and the four bundles are the drift.\n\nSecond-order symptom worth noting: the board now has **two** tiles whose declared title is `Audit Events by Action` (`widget_events_by_type`, a pie, and `widget_recent_events`, a table). Today they look distinct in the UI only because one of them is serving a stale translation. Whoever fixes this should give the two tiles distinguishable names rather than shipping the same label twice.\n\n## Why nothing caught it, which is the more useful half\n\nThis package's i18n splits in two, and only one half is gated on content:\n\n- `objects` / `metadataForms` are GENERATED into `*.generated.ts` and gated by `pnpm check:i18n`, which re-extracts and fails on drift. For those, `en` is rewritten from the source on every run, so this class of drift cannot survive.\n- `apps` / `dashboards` / `pages` are HAND-AUTHORED in `en.ts` / `zh-CN.ts` / `ja-JP.ts` / `es-ES.ts` and have to stay that way (`scripts/i18n-extract.config.ts` explains why: Setup is composed at runtime, so regenerating over it would delete ~40 live nav translations per locale).\n\nFor that second half there is **no check anywhere that a translation still says what the source says**. The gates that exist judge presence and ownership, never content:\n\n- `app-nav-translation-parity.test.ts` — asserts every declared widget/nav id *has* a translation, and (as of #8148) that no translation outlives its declaration. Both are key-set claims. A key whose value is stale satisfies both.\n- `pnpm check:i18n-coverage` — ratchets *untranslated* declared labels; a translated-but-wrong label counts as covered.\n- `pnpm check:app-nav-i18n` — boots the real composition to judge the merged app, but for nav labels.\n\nSo a source-string edit to any `apps.*` / `dashboards.*` label silently leaves four bundles behind it, under a fully green build. #8543 fixed the analogous hole on the generated side (merge mode never updating an existing description); this is the same shape on the side that cannot be regenerated.\n\n⚠️ The fix is **not** \"regenerate these bundles\" — that is precisely what the extract config forbids for this half. The candidate shapes are a content-parity assertion for the **default locale only** (`en.ts` must match the declared source string exactly, since it is a copy rather than a translation — this is the invariant the generated side already enforces by rewriting `en` every run), plus, for translated locales, some form of stale-marking when the source string changes. The second is a real design question and probably wants a maintainer call; the first is cheap and would have caught this one.\n\n## Scope note\n\n`packages/platform-objects/src/apps/translations/*.ts` (the four hand-authored bundles) and whatever gate is chosen. The `description` strings on this same widget were corrected in #8148's PR (they named a retired audit action, which is that card's subject); the **titles** were deliberately left alone as unrelated drift, which is this issue.\n\nBacklink: #8148."
+}

@@ -1,0 +1,32 @@
+{
+  "number": 4953,
+  "kind": "issue",
+  "title": "#4649 的「记录对已声明字段全量」只落在两个接缝上 —— 另外三处求值仍是稀疏绑定",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T17:04:13Z",
+  "updated_at": "2026-08-15T14:04:02Z",
+  "closed_at": "2026-08-15T14:04:01Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 16,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4953",
+  "body": "Filed unassigned from #4811 / PR #4951,那里为了给 null-guard 闸门定判据把这几处逐一实测了一遍。**本单只记录发现,不含修法承诺。**\n\n## 背景:为什么全量性是个契约,而不是实现细节\n\n实测 `@marcbachmann/cel-js`,同一条谓词在两种绑定下语义**恰好相反**:\n\n| 谓词 | 全量绑定 `{a: null}` | 稀疏绑定 `{}` |\n|:--|:--|:--|\n| `has(record.a)` | `true` | `false` |\n| `record.a &lt; record.b` | FAULT `no such overload` | FAULT `No such key: a` |\n| `record.a != null` | `false` | FAULT `No such key: a` |\n\n#4649/#1871 之所以引入 `materializeDeclaredFields`,正是为了让 `record.x == null` / `!= null` 这类写法**可用**:在全量绑定下它返回布尔值,在稀疏绑定下它**自身就 fault**。\n\n所以「记录是否全量」不是某个求值点的内部选择 —— 它决定了**作者被允许写什么**。同一个 `record.x != null`,在一处是正确守卫,在另一处是必然 fault。\n\n## 发现:全量化只做在两个接缝上\n\n已物化:\n\n- `packages/objectql/src/validation/rule-validator.ts` —— `evaluateValidationRules` 的 `merged` 与 `previous`(校验规则 + 字段 `requiredWhen` + option `visibleWhen`)\n- `packages/objectql/src/hook-wrappers.ts` —— 生命周期 hook 的 `record` / `previous`\n\n**未物化的三处**,各自都在对可空已声明字段求值 CEL:\n\n1. **字段 `readonlyWhen`** —— `rule-validator.ts` 里的 `stripReadonlyWhenFields` 合并 `{ ...previous, ...data }` 后直接求值,从不物化。与**同一个字段**上的 `requiredWhen` 结论相反,而 `requiredWhen` 就在同一个文件里物化过。且它 fail-open(`readonlyWhen for 'x' failed to evaluate — change allowed through`),所以谓词 fault 时字段**不再只读**,改动照常写入。\n\n2. **flow 触发记录** —— `packages/triggers/trigger-record-change/src/record-change-trigger.ts` 把记录播种为 `{ ...(inputDoc ?? {}), ...after }`。注释本身就写明「fields the driver did not echo back」,即**明确知道** `after` 不保证带全列。start / edge condition 与 `{record.x}` 插值都读它。\n\n3. **action `visible` / `disabled` 的客户端绑定** —— 绑定是客户端已取到的那条记录;`objectui` 该路径上不存在任何物化步骤(`ActionEngine` / `toPredicateInput` / `useCondition` 全链只读已有 record)。列表行只带视图投影列,所以同一条谓词在 `record_header` 与 `list_item` 上看到的键集都不同。\n\n## 后果\n\n- 作者无法用一条写法同时正确覆盖两类绑定:全量处要 `!= null`,稀疏处 `has()` 才对、`!= null` 会 fault。而元数据里**没有任何东西**标明某个 slot 属于哪一类。\n- 这直接卡住了 #4811:null-guard 闸门只能接全量绑定的面,上面三处因此被排除(理由与实测表记在 `packages/lint/src/validate-null-guards.ts` 的台账里)。把这三处补齐,那三面就可以一并纳入闸门。\n- `readonlyWhen` 与 flow condition 两处都是 fail-open / 静默分支,属于「看起来生效、实则什么都没做」这一族。\n\n## 需要的决定(不是实现细节)\n\n三处是否都应当补上 `materializeDeclaredFields`,从而把「谓词看到的记录 = 对象声明的形状」变成**平台层面的统一保证**?还是其中某几处刻意保持稀疏(例如 action 绑定跨进程,全量化意味着 REST 读取要补齐所有声明列)?\n\n无论结论如何,**结论本身需要被写下来并可引用** —— 现状是两个接缝物化了、三个没有,而没有任何文档或注释说这是有意的。\n\n## 复现\n\n```js\nconst { evaluate } = require('@marcbachmann/cel-js');\nevaluate('record.a != null', { record: { a: null } });  // false\nevaluate('record.a != null', { record: {} });           // throws: No such key: a\n```\n"
+}

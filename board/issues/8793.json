@@ -1,0 +1,36 @@
+{
+  "number": 8793,
+  "kind": "issue",
+  "title": "Refuse the declared relative-date preset vocabulary as a bare temporal comparand at publish time — the ruled C half of #8690, carved out for the spec seat",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:spec",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-15T02:03:01Z",
+  "updated_at": "2026-08-15T23:20:11Z",
+  "closed_at": "2026-08-15T23:20:11Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8793",
+  "body": "**Cross-seat transfer from the `domain:metadata`/`engine-core` seat** (PM session `session_01XeQRiAa7vYRVX5Fog7Zby8`). Filed here rather than kept in-lane because it lands in `packages/spec` + `@objectstack/lint`, and `packages/spec` routes to the `domain:spec` seat regardless of who needs it.\n\nSource: **#8690**, and specifically its maintainer ruling `5299879288` (delegated adjudication; delegation 2026-08-15 verbatim 「决策你直接帮我做」, batch confirmed 「同意」). This is not a new proposal — the decision is already made and this card exists only to put the ruled work in the right seat's queue at the right tier.\n\n## What was ruled\n\n> **Ruled: Option B as the contract answer, with Option C shipped alongside. Explicitly not A.**\n>\n> **C** — refuse the declared preset vocabulary (`last_7_days`/`last_30_days`/`last_90_days` as bare strings in a temporal filter) at publish time, `packages/spec` + `@objectstack/lint`. Strongest AI-error-resistance win, ships even though not sufficient alone.\n\n**This card is the C half only.** The B half (refuse at the ObjectQL engine's filter collection point, plus a `NativeSQLStrategy.canHandle` decline via a new `StrategyContext` hook) is dispatched separately on #8690 and lands in `packages/objectql` + `service-analytics`. They are two refusals at two boundaries, not one refusal split across packages — the ruling lists them as separate deliverables, and the ruling's own ⛔ against \"splitting the refusal across packages\" applies **within** each half, not between them.\n\n## ⚠️ Mandatory model tier\n\nThe ruling's closing line: *\"C narrows an accept set on a published authoring surface ⇒ **`claude-fable-5` tier mandatory** for the C half.\"* That is the standing non-discretionary clause, not a suggestion. The only sanctioned downgrade is the maintainer's 2026-08-13 quota exemption (「fable 如果用完了,可以用 opus」) — and only when fable is *measurably* unavailable, with the tier and reason recorded in the claim comment.\n\n## The defect this closes\n\n`last_7_days` / `last_30_days` / `last_90_days` are **real, declared preset names in the dashboard schema**. The shipped console lowers them to `{N_days_ago}` / `{today}` macros before they reach the query API, so the console path is safe. Any other caller that has the preset name in hand — a saved report, an integration, an MCP client, an AI-authored query — sends the **name itself**.\n\nMeasured end-to-end on `InMemoryDriver` with a declared `datetime` field, 51 rows seeded / 38 in-window:\n\n```\n$gte \"last_30_days\"        HTTP 200  count=0      <- the defect: silent zero\n$gte \"not-a-date-at-all\"   HTTP 200  count=0\n$gte \"{30_days_ago}\"       HTTP 200  count=38     <- positive control\n$gte \"{TODAY}\"             REFUSED   code=FILTER_TOKEN_UNKNOWN status=400\n$gte \"{not_a_token}\"       REFUSED   code=FILTER_TOKEN_UNKNOWN status=400\n```\n\nSo the vocabulary is **declared in one layer and unrecognised in the next, with no error at the boundary** — a `{placeholder}` the resolver does not know is rejected loudly with a list of resolvable tokens, while a declared preset name is bound as-is and compares false against every row.\n\nC is the half that closes this **at authoring time**, where an AI-generated dashboard is actually produced, rather than tolerating it at consume time. It does **not** close the ad-hoc integration/MCP path — that is what B is for.\n\n## ⛔ Scope boundary carried from the ruling\n\n> The **empty-string cell stays its own card** — B and C scope to non-empty strings and must not decide it in passing.\n\nMeasured: `$gte \"\"` binds as `''`, and because every canonical UTC text sorts at or above it, the predicate is satisfied by every non-null row — **51 of 51**. (#8690's body table records 38 for that row; that is a transcription error. Its prose, *\"silently drops the constraint and returns everything\"*, is the correct account.) Leave that cell exactly as it is.\n\n## Why this is repair, not a feature\n\nBy the mechanical boundary test the accept set moves **inward**, restoring `declared = enforced`: a vocabulary the platform itself declares becomes refused at the layer that cannot interpret it, instead of silently producing an empty result. The loud path already exists one branch over (`FILTER_TOKEN_UNKNOWN`), so this reuses a settled refusal identity rather than minting one.\n\n## Suggested verification\n\nPin that a bare preset name in a temporal filter is refused at publish with a message naming the macro spelling that *does* work (`{30_days_ago}`), and keep a discriminating control in the same test — a legitimate temporal comparand still publishing cleanly. A refusal pin with no positive control cannot show the rule is selective rather than blanket.\n\nOrigin: carved out of #8690 by the dispatching seat under that card's ruling, so the mandatory tier and the `packages/spec` ownership rule are both honoured rather than folded into an opus engine-core dispatch."
+}

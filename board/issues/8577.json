@@ -1,0 +1,37 @@
+{
+  "number": 8577,
+  "kind": "issue",
+  "title": "Two MORE clean inheritors of the #8323 class the #8554 sweep missed: sys_notification_subscription and sys_audience_binding_suggestion — both measured live",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:blocking",
+    "pm:dispatched",
+    "security"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-13T23:01:24Z",
+  "updated_at": "2026-08-14T04:30:12Z",
+  "closed_at": "2026-08-14T04:30:12Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8577",
+  "body": "Found while implementing #8554 (the five-instance batch), by re-running that card's own executed sweep and then **probing every tenant-scoped finding** instead of eyeballing which ones looked like authored names. **Not fixed there** — #8554's R5 fixes its scope at exactly five objects, so these are filed rather than folded in.\n\nPer the maintainer ruling of 2026-08-13 on #8468, both objects below are the ruled shape — tenant-scoped, no tenancy opt-out, bare `unique: true` on a declared index over authored content — so they **inherit that answer and go straight to the lane queue**. Neither carries a semantic argument for an installation-wide namespace. The judgement cases the same sweep turned up are filed separately.\n\n## Both are measured, not read\n\nReal engine (`SqlDriver`, better-sqlite3), `OS_TENANCY_POSTURE=isolated`, driving the **real shipped declarations** loaded from source.\n\n### 1. `sys_notification_subscription` — `packages/services/service-messaging/src/objects/notification-subscription.object.ts`\n\n```\nindexes: [{ fields: ['topic', 'principal'], unique: true }, { fields: ['topic'] }]\n\nmaterialized: uniq_sys_notification_subscription_topic_principal on (topic, principal)\n\norg_jia creates (billing.invoice, role:sales_manager)  → 201\norg_yi  creates the SAME pair                          → 409 UNIQUE_VIOLATION\norg_yi  creates (billing.invoice, role:only_yi)        → 201   ← control\norg_yi  creates (billing.invoice, user:u1)             → 201   ← control\norg_yi  GET on the colliding pair                      → total 0\n```\n\nThis is the **direct sibling of `sys_notification_preference`**, one of #8554's five: same package, same directory, same ADR-0030 Layer 3, same `managedBy: 'system-data'`, same archetype. Its own header says the rows are *\"Admin/user-writable DATA on a platform-defined schema: authored from the Setup 'Notification Subscriptions' grid\"* — admin-authored content by the ruling's own phrase.\n\n`principal` is `role:x` / `team:x` / `user:id` / a bare user id. Note what that means now: **role and position names are per-organization** (#8461, #8556), so `role:sales_manager` denotes a *different* principal in each organization while colliding on one installation-wide key. And a user in two organizations cannot subscribe to the same topic in both — the exact symptom measured on `sys_user_preference` in #8323.\n\n### 2. `sys_audience_binding_suggestion` — `packages/plugins/plugin-security/src/objects/sys-audience-binding-suggestion.object.ts`\n\n```\nindexes: [{ fields: ['package_id', 'permission_set_name', 'anchor'], unique: true }, …]\n\nmaterialized: uniq_sys_audience_binding_suggestion_79a05fef\n              on (package_id, permission_set_name, anchor)      ← hash-suffixed, name is over 60 chars\n\norg_jia creates (com.acme.crm, sales_readonly, everyone)  → 201\norg_yi  creates the SAME triple                           → 409 UNIQUE_VIOLATION\norg_yi  creates (com.acme.crm, other_set, everyone)       → 201   ← control\n```\n\n⚠️ **This one is worse than a naming oracle, and I think it is the most serious finding in the whole #8323 lineage so far.** The key is not a name two tenants happen to choose alike — it is `package_id` + the package's OWN permission-set name + anchor, i.e. **exactly the same triple for every tenant that installs the same package**. The row is per-tenant by construction (the object's header: rows are produced when a package's declaration is observed, and *\"resolved when a tenant admin confirms\"*).\n\nSo the consequence is not an enumeration side channel, it is a **functional dead end on the package-install path**: the second and every later organization to install a package **silently never gets its binding suggestion row**, so its admin is never asked to bind the package's default permission set to the `everyone` anchor, and its users never receive that set. ADR-0090 D5/D9 exists precisely so this is never auto-bound; the effect here is that for every tenant after the first, it is never bound *at all* and nothing says so.\n\nThis does not depend on #8554 landing — package-declared set names are identical across tenants today. #8554 widens the collision surface (admin-authored set names become per-organization and may now legitimately repeat), but the dead end above is live on `main` right now.\n\n## Fix shape (unchanged from #8461 / #8468 / #8554)\n\n1. Respell each to `unique: 'organization'`, spelled explicitly.\n2. #8461's `replace_unique_index` arm covers both unchanged — verified on the five of #8554 without touching `schema-drift.ts`, including a 3-column composite and a hash-suffixed replacement name.\n3. ⚠️ The pin must exercise the **deployed-installation** migration path, not only a fresh database — respelling changes the index's generated name, so drift otherwise reads as two findings and an operator applying only the safe half keeps the defect while the plan reads as applied.\n4. Check published text for uniqueness claims. Neither object's declaration carries one in its own field text; the generated reference pages should be re-checked at fix time.\n\n⚠️ `sys_audience_binding_suggestion`'s replacement index name is **hash-suffixed** (`buildIndexName` truncates past `INDEX_NAME_MAX = 60`), as `sys_notification_preference`'s is in #8554. That is handled by the existing arm — measured — but it is the case where a name-based assumption would hide.\n\n## Related\n\n- #8323 / #8461 — the class, ruled and fixed for `sys_user_preference` and `sys_capability`.\n- #8468 / PR #8556 — the third instance, where the ruling's standing consequence was recorded.\n- #8554 — the five-instance batch this was found from. Neither object here is addressed there.\n- #8555 — `sys_setting`, the judgement case.\n- #5082 — parked v18 D2. #8379 — the publish-time advisory that would catch this at authoring time.\n\nFiled unassigned. Found by session `session_012WMpuAfA2KSdDjGF6tm1bH`.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_012WMpuAfA2KSdDjGF6tm1bH)_"
+}

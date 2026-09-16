@@ -1,0 +1,35 @@
+{
+  "number": 8211,
+  "kind": "issue",
+  "title": "[finding] `@objectstack/rest` registers four generic synonyms the standard catalog already covers (`CONFLICT`, `NOT_FOUND`, `FORBIDDEN`, `INTERNAL`) — contract call, not a cleanup",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "auto-adjudicated",
+    "domain:spec"
+  ],
+  "assignees": [
+    "qq9340100"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-12T20:33:19Z",
+  "updated_at": "2026-08-13T17:44:49Z",
+  "closed_at": "2026-08-13T17:44:41Z",
+  "closed_by": {
+    "login": "qq9340100",
+    "id": 313832657,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8211",
+  "body": "Found while converging the record-sharing family onto the ADR-0112 D5 envelope (#8111, PR pending). Filing unassigned — this needs a maintainer contract ruling, not a sweep.\n\n## What was measured\n\n`respondSharingError`'s 409 arm emits `code: 'CONFLICT'`. That value was registered in **neither** `StandardErrorCode` (`packages/spec/src/api/errors.zod.ts`) nor `ERROR_CODE_LEDGER` (`packages/spec/src/api/error-code-ledger.zod.ts`), while `ErrorCode` — what `ApiErrorSchema.code` parses against — is exactly their union. So the 409 body could not have parsed as the declared envelope: ADR-0112's \"silent fourth state\", live on the wire and documented at `content/docs/kernel/runtime-services/sharing-service.mdx`.\n\nThe arm is live, not dormant: `packages/plugins/plugin-sharing/src/sharing-service.ts:1042` throws it for `revoke` on a rule-materialised share.\n\n#8111 registered the existing value under `@objectstack/rest`, which keeps the wire byte-identical (renaming it would change what clients read, and that card was explicitly not licensed to move a code VALUE).\n\n## The finding\n\nRegistering it is consistent with what that block already does, and that is the part worth a ruling. `@objectstack/rest` now registers **four** codes whose condition the standard catalog already covers generically:\n\n| ledger entry | standard-catalog member for the same condition |\n| :--- | :--- |\n| `CONFLICT` | `RESOURCE_CONFLICT` (409) |\n| `NOT_FOUND` | `RESOURCE_NOT_FOUND` (404) |\n| `FORBIDDEN` | `PERMISSION_DENIED` (403) |\n| `INTERNAL` | `INTERNAL_ERROR` (500) |\n\nThe ledger's own header rule says the opposite should happen:\n\n> If the condition is generic (not found / permission / validation / rate limit), use the standard catalog instead of registering a synonym.\n\nThat rule is **prose only**. The mechanical admission gate (`error-code-ledger.test.ts`, \"no registered code shadows the standard catalog\") rejects only a code that is *literally* a `StandardErrorCode` member, so every synonym above passes — which is why four accumulated without anyone deciding to allow them.\n\n## Why this is a contract call and not a cleanup\n\nEach of the four is on the wire today, so consolidating any of them onto the standard member is a **breaking change for clients branching on `err.code`** — the SDK surfaces it verbatim (`packages/client/src/index.ts`, `error.code`). The options are not equal-cost:\n\n- **A — leave them registered.** Zero client impact. Cost: the closed vocabulary carries two words per condition permanently, and the prose rule is dead letter, so the next author copies the pattern.\n- **B — consolidate onto the standard catalog, one card per code, with a deprecation window.** Cost: a real wire change per code, needing consumer sweeps across `objectui` and `cloud`.\n- **C — keep them but make the rule mechanical** (extend the admission gate to reject a *semantic* synonym of a standard member unless explicitly waived with a reason). Cost: one gate change; stops the fifth from landing without deciding the fate of the existing four.\n\nRecommendation: **C now, B only if a specific code proves confusing in practice.** C is the option that makes the mistake structurally hard to repeat (the AI-authored-metadata axis) without paying a breaking change for vocabulary tidiness that no user is currently hitting — and it converts the header's prose into something enforced, which is what \"declared = enforced\" asks for. A is the status quo the prose already rejects, and B spends real client breakage on a problem that is presently cosmetic.\n\nNot urgent: after #8111 every one of the four is registered, so nothing emits an unparseable body today. The exposure is future drift, which is why this is filed as a finding rather than queued.\n"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 8542,
+  "kind": "issue",
+  "title": "[security] a stored webhook signing secret that resolves to null is treated as \"authored unsigned\" — the subscription arms and delivers UNSIGNED",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "security"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-13T18:26:22Z",
+  "updated_at": "2026-08-13T21:25:04Z",
+  "closed_at": "2026-08-13T21:24:11Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8542",
+  "body": "Found while implementing #8069 (PR #8541). **Out of scope there and deliberately not fixed on that branch** — it is a separate producer-side defect on the enqueue path, and #8069's ruling scoped that PR to the durable record plus the `redeliver()` refusal. Unassigned, no `pm:queue`, for triage to grade.\n\n## The defect\n\n`resolveWebhookSecret` (`packages/plugins/plugin-webhooks/src/webhook-secret.ts`) collapses two different outcomes onto the same return value:\n\n```ts\nconst plain = await resolver.resolveSecretField(object, String(row.id), WEBHOOK_SECRET_FIELD);\nreturn typeof plain === 'string' && plain.length > 0 ? plain : undefined;\n```\n\n`undefined` means **\"this webhook has no stored key\"**, and its caller `AutoEnqueuer.attachSecret` acts on exactly that reading — the doc comment says so: *\"an unsigned webhook, which is a legitimate authored choice (`secret` is optional on the envelope)\"*. So the subscription **arms** and every delivery goes out unsigned.\n\nBut `resolveSecretField` also returns `null` while a key IS stored. From `packages/objectql/src/engine.ts`:\n\n- `if (!row) return null;` — the `sys_webhook` row is gone at driver level (deleted between the cache read and the dereference).\n- `resolveSecret(ref)` opens `const id = parseSecretRef(ref); if (!id) return null;` — the stored value is not a `secret:...` ref. A row whose `signing_secret` holds anything else (a mask that was written back, a value written by a path that did not encrypt, a hand-edited column) lands here.\n- A provider that decrypts to an empty string is filtered by the `length > 0` test into the same `undefined`.\n\nThe presence check three lines earlier proves the caller can tell the difference — `if (stored == null || stored === '') return undefined;` already establishes that a value IS stored, because a set secret comes back from the generic read path as the engine's mask. The function then discards that knowledge.\n\n## Why this matters\n\nIt is the #7799 invariant failing open, on the path #7799 exists to protect. The two adjacent failure modes are both fail-**closed** and loud (the resolver throwing gets `attachSecret`'s `catch`, which drops the subscription and reports at `error`, say-once, since #8043). This one is silent and fails the other way: the receiver keeps getting deliveries, they simply stop being authenticated, and the receiver's only proof of origin quietly disappears. Nothing logs, nothing drops, `sys_webhook` still reads `active: true`.\n\nAn unsigned delivery that keeps arriving is exactly the shape #7799 called \"invisible\", versus a dropped subscription that \"is visible and gets investigated\".\n\n## Evidence and its limits\n\n⚠️ **Measured by reading the call path, NOT by exercising it.** I traced `resolveWebhookSecret` → `ObjectQL.resolveSecretField` → `ObjectQL.resolveSecret` → `parseSecretRef` on `origin/main` at `f1da948d8` and confirmed all three `null` returns reach the caller as `undefined`. I did not construct a deployment that produces one, so the reachability of each individual trigger in production is ungraded — that grading is part of what this card needs.\n\nWhat IS exercised: the same ambiguity on the **redeliver** side is now closed in PR #8541, and there it is covered by a test (`refuses a stored secret that resolves to nothing, not just one that throws`). That guard asks *\"is a value stored and did nothing come back?\"* rather than relying on a throw, which is the shape a fix here would take. It closes the read; it does not close this write path, and #8541 says so.\n\n## Sketch of a fix (⛔ not decided here)\n\nDistinguish the two outcomes at the seam rather than at each caller — a stored-but-unresolvable key should reach `attachSecret` the way a throwing resolver does, so the subscription is parked and the operator gets the existing remedy-bearing `error`. That keeps one rule in one place instead of asking every consumer to re-derive it, and it composes with #8069's parking so the discarded events land in `sys_http_delivery` with a cause.\n"
+}

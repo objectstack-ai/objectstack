@@ -1,0 +1,33 @@
+{
+  "number": 8962,
+  "kind": "pull_request",
+  "title": "docs(deployment): rewrite publish-and-preview to name both ways a metadata app reaches the platform",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-16T03:07:20Z",
+  "updated_at": "2026-08-16T03:22:41Z",
+  "closed_at": "2026-08-16T03:22:40Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": "2026-08-16T03:22:40Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/8962",
+  "body": "Fixes #8910\n\n`content/docs/deployment/publish-and-preview.mdx` documented catalog publish/install and never mentioned `OS_ARTIFACT_URL`; `self-hosting.mdx` documented the artifact-pinned boot and never mentioned the catalog. A reader landing on either page could not learn the other option existed. This rewrites this page as the one whose subject is *\"a metadata app is a separate thing from the platform; here is how it gets in.\"*\n\n## What the page now does\n\n1. **Opens with the independence** — the app compiles to its own versioned artifact and is released by you; the platform is released on its own train. The only place the two clocks touch is the artifact's declared `engines.protocol` range.\n2. **Names both mechanisms side by side** in one comparison table, then states the rule for choosing. The rule is the deliverable, not the table:\n\n   > **Is this app the reason the runtime exists?** Yes ⇒ pin the artifact — the deployment *defines* the app. No ⇒ install from the catalog — the runtime is a platform that *receives* apps.\n\n   Plus three tie-breakers (auditable bytes ⇒ pin; no-restart / several apps ⇒ install; air-gapped ⇒ both work, so decide on the first two).\n3. **Keeps compile ⇒ publish ⇒ install ⇒ preview.** The flow is correct and is framed, not replaced. Section 3 now names both install targets (a Cloud environment, and a running runtime via `os package install`), because \"install\" was the half the choosing rule needed defined.\n\n`OS_ARTIFACT_URL`'s operational detail stays in `self-hosting.mdx` (Axis A, owned by #8911) and is linked via the stable `#artifact-pinned-boot-os_artifact_url` anchor — the same anchor `cli.mdx` and `environment-variables.mdx` already use. No `Option N` heading text is referenced. Nothing was moved across the card boundary; `self-hosting.mdx` is untouched here.\n\n## Measured before writing (the issue text was treated as a clue, not a spec)\n\nThe card asked whether the two mechanisms can be combined and what happens when both are configured. Read from source, not inferred:\n\n- **They can coexist.** The install surface is mounted on its own conditions (`resolveCloudUrl()`, or the offline arm) in `packages/cli/src/commands/serve.ts` — never gated on the artifact-pinned boot resolved earlier in the same file. A runtime booted from `OS_ARTIFACT_URL` still accepts catalog installs of *other* apps.\n- **Same manifest id is a refusal, not a merge.** `findConflict` in `packages/cloud-connection/src/marketplace-install-local-plugin.ts` returns `user-code` for any manifest id present in the engine registry at `kernel:ready` before ledger rehydration — where a booted artifact's app lands — and the install answers **409 `MANIFEST_CONFLICT`**. Pinned by `marketplace-install-local-conflict.test.ts`.\n- **Artifact-source precedence** is `--artifact` ⇢ `OS_ARTIFACT_URL` ⇢ `OS_ARTIFACT_PATH` ⇢ `cwd/dist/objectstack.json`, and `OS_ARTIFACT_URL` also outranks a local `objectstack.config.ts`.\n- **A catalog address is not an artifact URL.** The catalog/R2 manifest endpoints answer with a `{ success, data }` API envelope; the artifact resolver unwraps only the `{ schemaVersion, metadata }` build envelope. Called out in a callout so nobody pastes one into the other.\n- **`engines.protocol` incompatibility is a refusal on every seam** — boot (artifact-pinned), load/install (`assertProtocolCompat` throws), rehydrate (package skipped).\n\nThe card's framing holds; `premise_still_valid: true`.\n\n## Verification\n\nGates run at the pushed head `b46c28da8`:\n\n- `pnpm check:docs-audit-scope` — scope in sync, 177 hand-written docs\n- `pnpm check:role-word` — 43 baselined files, no new occurrences (this page carries 0)\n- `pnpm check:nul-bytes` — 5935 files scanned, no raw control bytes\n- `pnpm check:doc-anchors` — 218 internal fragment links across 395 files all resolve (not in the dispatched list; re-derived and run because this change adds anchor links)\n\n`node scripts/pm/dispatch-gates.mjs content/docs/deployment/publish-and-preview.mdx` re-derived exactly the dispatched families and added none.\n\nDocs-only ⇒ `skip-changeset`.\n\n_Generated by [Claude Code](https://claude.ai/code/session_011RB4waLuNbdruCo6X9oobm)_\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_011RB4waLuNbdruCo6X9oobm)_"
+}

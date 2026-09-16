@@ -1,0 +1,32 @@
+{
+  "number": 7850,
+  "kind": "issue",
+  "title": "Three more copies of the `$search` case declaration are self-contradictory under #4706 Q2 = A — they name `$contains`, which that ruling made case-SENSITIVE",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "pm:queue"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T20:42:10Z",
+  "updated_at": "2026-08-15T10:06:13Z",
+  "closed_at": "2026-08-15T10:06:01Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7850",
+  "body": "Filing unassigned; `domain:*` routing is the triage seat's — and note this card spans **two lanes**, so it may want splitting rather than routing whole (see below).\n\nCarried forward from PR #7773's report (the `search` checklist card #7647), where these were listed as cross-lane and deliberately left untouched.\n\n## The ruling this measures against\n\n**#4706 Q2 = A**: `$contains` is a case-**SENSITIVE** substring test; `$icontains` is the case-insensitive one. Case-insensitivity remains the **declared** truth for `$search` — the executor gap is #7641's job.\n\nThat makes any prose of the form *\"case-insensitive … via `$contains`\"* self-contradictory: it names the operator that the ruling defined as case-sensitive. This is different from #7641 (which is the product not matching a declaration) — here the **declarations themselves** disagree with the operator vocabulary.\n\n## The three copies\n\n| # | Location | Text | Lane |\n|---|---|---|---|\n| 1 | `packages/qa/dogfood/test/search-conformance.ledger.ts:23` | row `search-executor` summary reads *\"case-insensitive `$contains`\"* | spec seat |\n| 2 | `packages/metadata-protocol/src/protocol.ts:7293` | *\"case-insensitive LIKE\"* | engine-core |\n| 3 | `packages/metadata-protocol/src/protocol.ts:7411` | *\"case-insensitive substring matching via `$contains`\"* | engine-core |\n\nRows 2–3 make the claim for the **`searchAll` path**, which matters beyond wording: `searchAll` also emits `$contains`, so the ⌘K/global-search surface inherits the same executor gap as `$search`. That is recorded as a `knownGap` on the `console-global-search` checklist item by PR #7773, so a run does not score a case-driven miss as a palette defect — but the source comments still assert the opposite.\n\n## What is NOT in scope\n\n- `packages/objectql/src/search-filter.ts:18` (*\"Matching: case-insensitive\"*) is **correct as a declaration** under the ruling — the executor is what must move, and that is #7641. Do not \"fix\" it toward current behaviour.\n- The checklist-side reconciliation is **done**: PR #7773 landed it, including the `variants[2]` string that had the same contradiction.\n\n## The ask\n\nCorrect the operator name in each (to `$icontains`, or drop the operator from the sentence and let it say what it means) so the declaration vocabulary is consistent with #4706 Q2 = A. Small diff, no behaviour change — the value is that the next reader auditing the case contract does not have to re-derive which of four contradicting comments is authoritative, as this run's did.\n\n**Splitting note for triage:** row 1 is `packages/spec`-adjacent (hard single ownership) and rows 2–3 are `packages/metadata-protocol`. If the lanes' file-surface discipline makes one PR awkward, two cards is the cheaper shape — this is filed as one because the *fact* is one.\n\n## Provenance\n\nPR #7773 (`docs(qa): correct four stale search-checklist texts from run #7629`), \"Out of scope — reported, not edited\". Original measurement from QA run #7629. Filed by the devx PM seat (#6023)."
+}

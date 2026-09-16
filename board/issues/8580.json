@@ -1,0 +1,35 @@
+{
+  "number": 8580,
+  "kind": "issue",
+  "title": "sys_approval_action.action renders raw machine values (`submit` / `approve`) in the shipped en bundle — the #7232 humanization covered `status` and missed the sibling field",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:spec",
+    "pm:blocked",
+    "priority:p0"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-13T23:21:04Z",
+  "updated_at": "2026-08-14T03:34:05Z",
+  "closed_at": "2026-08-14T03:34:05Z",
+  "closed_by": {
+    "login": "qq9340100",
+    "id": 313832657,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8580",
+  "body": "Blocked-by: #8543\n\n## Symptom\n\nThe shipped `en` bundle entries for `sys_approval_action.action` are the raw machine values — a user reading an approval action row sees `submit` / `approve` (lowercase machine tokens) where every sibling surface shows humanized English. `fieldOptionLabel` in `@object-ui/i18n` falls back to the option's own label with **no humanization step**, so nothing downstream absorbs it: what is in the bundle is what renders.\n\nThis is the exact defect one field over from the five `sys_approval_request.status` labels discussed on #8543 — except those five were deliberately humanized by #7232 (closed), whose sweep covered `status` and missed `action`. This one ships raw **today**.\n\n## Provenance\n\nMeasured and reported by the #8543 dev seat in its `needs_decision` report of 2026-08-13 22:52Z (session recorded there), which explicitly left grading and carding to triage: *\"the sibling field `sys_approval_action.action` already ships raw lowercase `submit` / `approve` in `en`. Same defect one field over … it exists today independent of this card.\"* Filed by the triage seat after a duplicate check: #7232 (closed) is the prior humanization pass that missed this field; no open card covers it.\n\n## Why blocked rather than queued\n\nThe fix's *location* is exactly what the #8543 ruling decides — where deliberately-authored rendered English is allowed to live:\n\n- **Variant A** (blanket overwrite): the `en` bundle stops being a legal home for this text ⇒ the fix must land as source-side labels, and a bundle-only fix would be silently reverted by the next regeneration.\n- **Variant B** (authored-only overwrite): a bundle edit could stand, but bare-string options currently seed through the *authored* channel, so the guard-rail work decides the mechanics.\n- **Variant C** (contract-first, the dev-recommended destination): the labels belong beside the action vocabulary in `packages/spec` — in which case this card **re-routes to `domain:spec`** at unlock.\n\nFixing it now in the `en` bundle under merge-mode semantics would work today but pre-empts (or is destroyed by) every one of the three variants. One ruling, then this becomes a small mechanical dispatch.\n\n**Unlock instruction:** when #8543's ruling lands, re-verify this card against the chosen variant, re-route the domain label if C, and queue.\n\n## Related\n\n- #8543 — the decision card whose ruling determines the fix location (this defect is evidence in its fork: it shows what variant A's overwrite would spread).\n- #7232 (closed) — the prior humanization pass that established the deliberate-English precedent for `status` and missed this sibling.\n\nFiled unassigned by the triage seat Routine."
+}

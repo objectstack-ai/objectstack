@@ -1,0 +1,35 @@
+{
+  "number": 8616,
+  "kind": "pull_request",
+  "title": "fix(objectql): refuse empty-string writes to secret and password fields",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-14T02:24:49Z",
+  "updated_at": "2026-08-14T04:25:36Z",
+  "closed_at": "2026-08-14T04:25:35Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-14T04:25:35Z",
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/8616",
+  "body": "Closes #8559\n\n## What\n\nThe credential write door now refuses `\"\"` (maintainer ruling recorded on the card — option 2, loud refusal over silent reinterpretation):\n\n- **secret arm** — `encryptSecretFields` refuses before any crypto side effect: no `sys_secret` row is minted and no CryptoProvider is consulted, so the verdict is about the payload, never about what crypto happens to be wired.\n- **password arm** — its own seam, `refuseEmptyPasswordFields`, guards the same doors (single/bulk insert, single-id update, multi update) without routing plaintext-at-rest fields through the encryption path. Scope is the new `collectMaskedPasswordFields` collector, kept beside the read-mask collector so the two cannot drift: `managedBy: 'better-auth'` objects are exempt, mirroring the read mask — with no mask there, the \"reads as set, holds nothing\" contradiction cannot arise, and that write path belongs to the auth subsystem.\n\nThe refusal is a located ADR-0112 envelope: `EmptyCredentialWriteError` with `code: 'VALIDATION_ERROR'` (standard catalog member — no ledger entry needed) and `status: 400`, message naming the field (`object.field`) and the correct spellings — write `null` to clear the stored credential, omit the field to leave it unchanged. The class, its `EMPTY_CREDENTIAL_REFUSAL_CODE` / `EMPTY_CREDENTIAL_REFUSAL_STATUS` pair, and `collectMaskedPasswordFields` are exported from the package root so consumers branch on `code`/`status` rather than message text.\n\nOn the per-row outcome path (`insertMany`), the refusal is reported per row and surviving rows land with their own cipher rows.\n\nRows that already decrypt to `\"\"` are historical and stay reachable — this closes the door, it does not migrate history; the consumer-side defenses (#8542, #8558) remain load-bearing.\n\n## Pin inventory (the card's measured contrast table)\n\nPinned unchanged alongside the refusal, all in `packages/objectql/src/secret-fields.test.ts`:\n\n| shape | pin |\n|---|---|\n| echoed read-mask dropped (secret + password) | pre-existing pins, untouched |\n| cleartext re-encrypts into a fresh ref | pre-existing pin, untouched |\n| `null` clears — stored null, reads report null (now truthfully) | new pins, both arms |\n| better-auth password column takes `\"\"` unjudged | new pin (deliberate scope edge) |\n\nNew refusal pins (8): insert / update / multi update on both arms, each asserting the full envelope (class, `code`, `status`, `object`/`field`/`fieldType`, located first sentence, null prescription) plus no-side-effect facts (no business row, no `sys_secret` row, zero encrypt calls); a payload-verdict pin (refusal fires with NO CryptoProvider wired, not the fail-closed crypto error); and a per-row `insertMany` outcome pin. The stub driver gained `updateMany` (affected-count contract) so the multi:true path exists on the double at all — it reuses the file's existing grandfathered matcher; `check:where-matcher-conformance` verified: no new matcher, baseline key set unchanged.\n\n## Reverse verification\n\nFix committed first, then `git checkout origin/main -- packages/objectql/src/engine.ts`, suite re-run. Predicted direction: the 8 refusal pins go red (writes accepted again), everything else stays green. Observed exactly that — 8 failed / 28 passed; the failing set is precisely the new refusal pins (both arms' insert, update, multi update, the no-CryptoProvider payload-verdict pin, and the per-row `insertMany` pin). Fix restored from the commit: 36/36 green.\n\n## Verification\n\n- `pnpm --filter @objectstack/objectql test` — 202 files, **3571/3571 pass**\n- `pnpm --filter @objectstack/objectql typecheck` — clean\n- eslint over the four changed source files — clean\n- Gates, derived from actual changed paths via `scripts/pm/dispatch-gates.mjs` plus convention: `check:where-matcher-conformance` ✓ · `check:durability-log-level` ✓ · `check:nul-bytes` ✓ · `check:error-code-casing` ✓ · `check:changeset-gate-self-tests` ✓ · `check:objectui-changeset` ✓ · `check:stack-collection-maps` ✓ · `check-adr-0087-registration` ✓ (non-breaking changeset) · `check-changeset-no-major` ✓ · `check-empty-changeset` ✓ · `check-engine-split-ratio` ✓ (informational) · `check:query-options-erasure` ✓ (at ceiling, none added) · `check:type-check-coverage` ✓ · `check:type-check-debt --re-measure` ✓ with the full package closure built — no ledger entry above its recorded number, i.e. the new test code adds zero test-layer type errors to the hidden-test package.\n\n## Notes for review\n\n- `check:objectui-pin-fresh` is red as pre-existing repo state (#3340) and fires on any `.changeset/*` touch — deliberately not addressed here; #3340 remains open.\n- #8566 is not addressed here (same ruling batch, disjoint files); this PR lands first so that shape hook never needs an empty-string special case. #8566 remains open.\n- Changeset: `patch` on `@objectstack/objectql` — fix-typed acceptance narrowing at the data API, following the `action-body-write-not-found-gate` precedent.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01RDTnVvsgA6cUZ4xFVtPZRy)_"
+}

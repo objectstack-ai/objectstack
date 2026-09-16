@@ -1,0 +1,35 @@
+{
+  "number": 8787,
+  "kind": "pull_request",
+  "title": "fix(metadata-protocol): route searchAll through the engine's $search expansion so the ⌘K palette recalls what the executor recalls",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-15T01:40:14Z",
+  "updated_at": "2026-08-15T02:09:18Z",
+  "closed_at": "2026-08-15T02:09:16Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-08-15T02:09:16Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/8787",
+  "body": "Fixes #7643\n\n## What was wrong\n\n`searchAll` (which serves `GET /api/v1/search`) resolved its own searchable set and compiled its own AND-of-OR, instead of going through the engine's ADR-0061 `$search` expansion that serves `POST /api/v1/data/:object/query {search}`. Two producers, and the palette's was a strict subset of the executor's.\n\nRe-measured on current `main` before implementing — the card confirmed this at `76d74ecb` and `main` has moved a long way since. The premise holds, but **every line number in the card is stale**: `searchAll` is now at `protocol.ts:8520-8700`, not `~7177-7411`.\n\n## Mechanism — one producer, not two callers of one helper\n\nThe dispatch assumed routing `searchAll` through `resolveSearchFields` / `expandSearchToFilter`. Half of that is impossible and the other half turned out to be the weaker form:\n\n- `expandSearchToFilter` lives in `@objectstack/objectql`, which **depends on** `@objectstack/metadata-protocol`. Importing it would close a package cycle.\n- So the routing happens one level up: `searchAll` hands `engine.find` the query TEXT (`search: q`, a declared `find` option) per object and the engine expands it. That leaves **one** producer of search clauses rather than two agreeing by maintenance.\n\nNo per-object assumption blocked this. The concern that a cross-object sweep could not satisfy a per-object helper does not arise: the sweep was already a loop of per-object `engine.find` calls, so the per-object expansion fits exactly where the old per-object filter sat. Only the cross-object half stays local (which objects are swept, caps, ranking, title/snippet).\n\n`resolveSearchFieldResolution` (from `@objectstack/spec/data`, already imported here for the #4254 ingress gate) is still consulted — but for the skip guard and the snippet source fields, not to build a filter.\n\n## What a caller observes changing\n\nThree widenings and one narrowing, all detailed in the changeset:\n\n1. **Pinyin recall arrives on this endpoint.** `hnkj` / `huaningkeji` now return the CJK row that `POST /data/showcase_account/query {search}` already returned.\n2. **Field resolution follows the object.** Declared `searchableFields`, else the auto-default — not the field-level `searchable: true` flag, which `$search` has never read. `searchableFields`' own spec description already named global search as one of its three consumers; this makes that true.\n3. Enum columns match by option label; virtual `formula` fields are excluded.\n4. **Narrowing, and found by the ablation:** the old fallback chain ended in \"the first text-typed field\", which on an object whose only text column is its PK selects `id` — so every keystroke ran `{id: {$icontains: term}}` against system/junction/log tables. That is #4483's defect, which the executor had fixed and this path had not. Such objects are now skipped.\n\nUnchanged: object sweep and opt-outs, caps, ordering, RLS/RBAC, response shape. **The `$search` executor path is untouched** — pinned, not merely asserted (below).\n\n## Folding in #7850 rows 2-3\n\nRow 3 (`\"case-insensitive substring matching via $contains\"`) was **already corrected on `main`** by #7641's landing — the card's own root-cause paragraph naming it as stale is itself now stale. Row 2 (`\"case-insensitive LIKE\"`) was still present and is corrected here: `LIKE` names no operator in this vocabulary and, since #6518's LIKE→GLOB change, not even the SQL the compilers emit.\n\nLeft alone as instructed: #7850 row 1 (`search-conformance.ledger.ts:23`, spec seat — #7850 stays open for it) and `objectql/src/search-filter.ts:18`, which is correct as a declaration under #4706 Q2 = A.\n\n## Verification\n\nUnion re-run **after** the final commit, at `663d95e1b`.\n\nNew suite `packages/objectql/src/global-search-palette-recall.test.ts` (13 cases) — it lives in `objectql` because that is the only package where both real implementations meet. The load-bearing assertion is **parity**, not \"the palette finds pinyin\": a palette widened by narrowing the executor would satisfy the latter and is a failure. Each probe compares both paths against each other AND against a written expectation, and the per-object filter both paths hand the driver is compared tree-to-tree.\n\n**Reverse verification**, direction predicted before running: revert `protocol.ts`, rebuild, expect 5 red / 8 green. Measured **6 red / 7 green** — the extra red was the `id`-scan finding above, which is how that fourth axis was found. The first ablation attempt came back all-green and was invalid: this suite resolves `@objectstack/metadata-protocol` through its built `dist/`, so the ablation only bites after a rebuild. Both legs were re-run with `scripts/ablation-dist-preflight.mjs` proving the mutation reached the artifact (`--absent` on the way out, present on the way back), and the restore was byte-identical (`git status` clean against the commit).\n\n- `@objectstack/metadata-protocol` — 90 files / 1352 tests pass\n- `@objectstack/objectql` — 207 files / 3642 tests pass\n- `@objectstack/rest` — 116 files / 1921 tests pass · `@objectstack/runtime` — 157 files / 2391 tests pass (downstream consumers, prefix filter)\n- Gate union from `scripts/pm/dispatch-gates.mjs` against the real changed files: all 13 derived families pass, plus `check:nul-bytes`\n- `check:type-check-debt --re-measure` (the ratchet) initially caught a **+1 in my own new test** — `Array.prototype.at` is outside this package's tsc `lib`. Fixed rather than raised; ledger flat at 1968, none above recorded\n\n`origin/main` merged immediately before opening. Stayed clear of PR #8770's regions (`canonicalizeMetaRequestType` at `:211`, its call sites, the `saveMetaItem` door) — no conflict.\n\n## Out of scope, filed not fixed\n\n#8786 — `renderTitle` in this same function reads only the deprecated `displayNameField`, never the canonical `nameField`, and `provisionPrimary` stamps only the latter. Titling, not recall; left alone deliberately.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01XeQRiAa7vYRVX5Fog7Zby8)_"
+}

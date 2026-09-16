@@ -1,0 +1,35 @@
+{
+  "number": 6533,
+  "kind": "issue",
+  "title": "[showcase] 内嵌子表 time 列没有真机夹具：两个 inlineEdit 网格都无自然落脚点，且都已顶到 6 列预算",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "qq9340100"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-08T03:22:56Z",
+  "updated_at": "2026-08-14T12:19:57Z",
+  "closed_at": "2026-08-14T12:19:57Z",
+  "closed_by": {
+    "login": "qq9340100",
+    "id": 313832657,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6533",
+  "body": "## 背景\n\nobjectui#3569 拆开了内嵌子表里 `date` / `datetime` / `time` 三种字段类型被折叠成同一个 `date` 网格列的缺陷。修复（objectui 分支 `claude/issue-3569-grid-datetime-column`）**三种控件都实现了**：\n\n- `datetime` → `input[type=datetime-local]`，读写配对走 `toDateTimeInputValue` / `fromDateTimeInputValue`\n- `time` → `input[type=time]`，原样往返存储的 `HH:mm[:ss]`\n- `date` → 不变\n\n`datetime` 那条已经在 showcase 里落了长期夹具（`showcase_expense_line.incurred_at`，见 objectstack 分支 `claude/issue-3569-showcase-datetime-fixture`）并做了真机 BEFORE/AFTER 实测。\n\n## 缺口\n\n**`time` 列没有任何 showcase 真机夹具** —— 它只有单元测试覆盖，没有在运行中的 app 里被走过一遍。\n\nshowcase 目前只有两个 `inlineEdit: 'grid'` 的子对象，两个都没有合适的时间字段落脚点：\n\n- `showcase_expense_line`（`src/data/objects/expense-report.object.ts`）—— 已经有 `incurred_at`(datetime) + `incurred_on`(date)。再加一个纯 `time` 与 `incurred_at` 语义重复，参考应用里不该出现这种冗余字段。\n- `showcase_invoice_line`（`src/data/objects/invoice.object.ts`）—— T&M 服务行的「服务开始时间」勉强自然，但……\n\n而且两个网格**都已经踩到 6 列的内嵌列预算上限**（objectui `DEFAULT_MAX_INLINE_COLUMNS`），再加一列会把一个现有夹具列挤进列选择器：\n\n- invoice_line 加一列 → `receipt`（file 列，objectui#2360 的夹具）从默认可见掉进选择器；\n- expense_line 再加一列 → 又一个列被挤下去。\n\n也就是说，硬塞一个 time 字段的代价是**降级另一个夹具的默认可见性** —— 这才是把它排除在 #3569 之外的真实原因，不是懒。\n\n`time` 类型平台是支持的：`packages/spec/src/data/field.zod.ts` 有 `'time'`，`field-value.zod.ts` 按 `HH:mm[:ss]` 校验，`showcase_field_zoo.f_time` 已经种了 `'14:30'`（但 field_zoo 不是内嵌网格子对象，走不到这条渲染路径）。\n\n## 建议\n\n给 `time` 列一个**自然的**内嵌网格落脚点，二选一：\n\n1. 新开一个语义上本来就需要时间的 master-detail 子对象（如「排班行 / shift line」：日期 + 开始时间 + 结束时间 + 时长），顺便把 `date` + `time` 两种形态在同一个网格里演示掉；\n2. 或者在 `showcase_invoice_line` 上加 `service_start`(time)，并同时用 `inlineColumns` 显式声明列集合，避免把 `receipt` 挤进选择器。\n\n无论哪种，seed 值要给非零、可辨认的时钟（如 `'09:15'`），并在注释里写明它是 #3569 的 time 夹具。\n\n## 出处\n\nobjectui#3569 实施时按范围纪律排除的同族面。控件本身已随该 PR 落地并有单元测试（`packages/fields/src/widgets/GridField.test.tsx`，「renders a time column as a time control and round-trips HH:mm verbatim」）。\n"
+}

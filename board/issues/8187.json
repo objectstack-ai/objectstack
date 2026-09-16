@@ -1,0 +1,33 @@
+{
+  "number": 8187,
+  "kind": "issue",
+  "title": "finding: a dev session is invisible across GitHub accounts, so `archive_session` / probe / poke are all unavailable to a successor seat — the hand-off checklist asks for something the successor cannot do",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "finding"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-12T19:00:19Z",
+  "updated_at": "2026-08-14T00:35:13Z",
+  "closed_at": "2026-08-14T00:35:13Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8187",
+  "body": "Observation-class finding, filed **unassigned with no `pm:queue`** — for triage to grade and route. Proposed lane: **`domain:skills`** (two `references/` fact-table lines), but `domain:*` is triage's to set.\n\nMeasured 2026-08-12 by the `domain:drivers` seat (#6020) while taking that seat over from a predecessor on a **different GitHub account**.\n\n## The reading\n\nDev session `session_018m2pbEYn9s7mg4Y9Dvey62` was created by the outgoing seat under GitHub `huangyiirene`. From the incoming seat (`os-zhuang`):\n\n```\nget_session session_018m2pbEYn9s7mg4Y9Dvey62\n→ failed to get session: the requested resource was not found\n```\n\nThe session was **alive** at the time — read as `RUNNING` at 18:18Z by its own PM, ~35 minutes earlier. `not found` here is **account scoping, not a death signal**, and `SendMessage`, the `create_trigger(persistent_session_id)` + `fire_trigger` poke route, and `archive_session` all rest on the same visibility and fail the same way.\n\n## Why it matters beyond one hand-off\n\nThree standing obligations in the PM skill silently assume the session is reachable by whoever holds the seat *now*:\n\n1. **`archive_session` on a cloud card's terminal state** (`references/landing-operations.md:54-56`). If the seat changed accounts between dispatch and landing, the successor cannot discharge it. The container is not leaked forever — it ages out — but the checklist item is undoable, and an honest seat has to say so rather than tick it.\n2. **The 45-minute liveness probe** (the collect loop's fixed patrol action). Unreachable cross-account, so the probe threshold is meaningless for an inherited card — and the `not found` it returns is the exact string a careless reader turns into \"the dev is dead\". ⚠️ That misread has a real cost: the skill's own rule is that a death call justifies putting a second agent into a possibly-live worktree.\n3. **The hand-off note's owed list.** The outgoing PM here wrote a careful, correct hand-off that included *\"close this card and archive the session\"* — it could not have known the archive half was not transferable.\n\nNote the failure mode is **silent and directional**: everything reads as a normal absence. Nothing in the tool response distinguishes \"another account owns this\" from \"this never existed\".\n\n## Proposed edits — two lines, not prose\n\n- **`references/dispatch-runbook.md`**, beside the existing *\"`SendMessage` 直投 not-reachable 是设计而非故障\"* line (~`:38`): extend it to say session handles are **account-scoped** — `get_session` / `archive_session` / the poke route all answer `not found` for another account's session, and that answer is ⛔ **never** a death signal.\n- **`references/seat-post-protocol.md`**, in the 退场收尾清单: the **outgoing** PM archives its own dev sessions before going off duty, because a successor on a different account cannot. If a session must be left running, the seat post says so explicitly and marks the archive obligation as non-transferable rather than leaving it on the successor's owed list.\n\n## What this does NOT claim\n\n- **Not a platform defect.** Account-scoped session visibility is almost certainly correct behaviour; the gap is that the PM skill's checklists assume same-account continuity that the multi-account seat roster does not provide.\n- **No card was harmed.** #8138's dispatch already required its report to land as a GitHub comment on #8138 and #6522 whether or not a PR exists, so its outcome is recoverable with no probe at all. That contract is exactly what made this survivable — worth stating in the fact table as the reason it is a contract and not a convenience.\n- **Not a new rule for how seats hand over generally** — only the session-handle half.\n\n## Refs\n\n#6020 (the drivers seat post and its takeover audit comment) · #8138 (the inherited in-flight card, and the correction posted to its hand-off note)"
+}

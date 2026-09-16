@@ -1,0 +1,34 @@
+{
+  "number": 8861,
+  "kind": "pull_request",
+  "title": "docs(platform-objects): refresh stale pages.* exclusion comment",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-15T11:42:40Z",
+  "updated_at": "2026-08-15T12:13:04Z",
+  "closed_at": "2026-08-15T12:13:02Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-08-15T12:13:02Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/8861",
+  "body": "Fixes #8828\n\n## What\n\n`app-nav-translation-parity.test.ts` carries a block comment above its\ndefault-locale `describe` explaining why `pages.*` is out of that file's\nwalk. Two sentences went stale once PR #8826 merged (05:47:13Z on\n2026-08-15) and closed the card that comment was pointing at:\n\n- `That leaves the third of this bundle with no source comparison in ANY\n  locale, en included` — no longer true. `check:app-nav-i18n` now compares\n  all three `pages.*` entries against the composed page metadata in the\n  default locale.\n- `Tracked as #8764; the gate that can see those pages is\n  check:app-nav-i18n, which already boots the real composition` — a\n  forward reference to a card that is now closed.\n\nThis PR is a comment-only refresh, following the four bounded moves from\ntriage:\n\n1. **Kept** the structural explanation — the reason `pages.*` is out of\n   *this* walk (the sources live in `@objectstack/cloud-connection` /\n   `@objectstack/mcp`, packages `platform-objects` does not and must not\n   depend on) is unchanged.\n2. **Replaced** the stale \"no source comparison\" sentence with a pointer\n   to the assertion that now exists, in\n   `packages/cli/scripts/check-app-nav-i18n.mjs`, and named specifically\n   what it checks (the `en` copy of `pages.*` — label, description, and\n   every `page:header` title/subtitle — against the composed page\n   metadata, verbatim, default locale only).\n3. **Retired** the `Tracked as #8764` forward reference.\n4. **Preserved the honest remainder**: per-locale coverage of those\n   `pages.*` keys in `zh-CN` / `ja-JP` / `es-ES` remains unasserted\n   anywhere in this repo — I read `check-app-nav-i18n.mjs` end to end to\n   confirm this before writing the sentence; the gate's own coverage\n   verdict (`missingLabels`) walks merged Setup **nav** ids, not the\n   `pages.*` bundle, and its `pages.*` verdict (`defaultLocalePageDrift`)\n   is explicitly gated to the default locale only (`DEFAULT_LOCALE = 'en'`).\n\nNo behaviour, gate, or assertion change. Test count is unchanged (only\ncomment lines 182-193 of the file moved).\n\n## Verification, at HEAD `fe920978a`\n\n```\npnpm --filter '@objectstack/platform-objects^...' build      EXIT=0\n\npnpm --filter '@objectstack/platform-objects' test -- --maxWorkers=2\n  Test Files  22 passed (22)\n       Tests  394 passed (394)\n\npnpm --filter '@objectstack/platform-objects' typecheck      EXIT=0\n\npnpm check:query-options-erasure\n  ✓ query-options-erasure ratchet holds: 67 unswept non-test site(s) in\n    17 file(s), none new.\n\npnpm check:type-check-coverage\n  check-type-check-coverage: OK — 64/77 workspace packages type-checked\n  (plus the root), 13 in the DEBT ledger, 1 exempt.\n\npnpm exec turbo run build --filter='./packages/*' --filter='./packages/*/*'\n  70 successful, 70 total\n\npnpm check:type-check-debt --re-measure\n  check-type-check-coverage --re-measure: OK — 33 ledger entr(ies)\n  re-measured in 164.3s, 1926 raw tsc error(s) total, none above its\n  recorded number.\n  (Informational only, pre-existing and unrelated to this change: the\n  re-measure surfaces a lowerable @objectstack/lint TEST_DEBT entry\n  (recorded 20, measured 19) and 1 raw error sitting below its recorded\n  ceiling elsewhere — both pre-date this PR and are outside its file\n  surface, so left untouched per scope.)\n\npnpm check:i18n\n  check-i18n-bundles: OK (9 package(s) — all bundles in sync, no\n  undeclared authoring keys). platform-objects: in sync (8 bundle(s)).\n\nnode scripts/check-nul-bytes.mjs\n  OK (scanned 5861 text file(s) -- 5861 tracked, 0 untracked-not-ignored;\n  skipped 5 binary; no raw ASCII control bytes).\n```\n\nGate families re-derived against the actual changed path with\n`node scripts/pm/dispatch-gates.mjs`: no family names this path in its own\nsource; the two convention-triggered families named by the dispatch\nprompt (test-file edit; i18n-extract.config.ts-owning package) are exactly\nthe ones the derivation surfaces — no additional family implicated.\n\n## Notes\n\n- Backlinks: #8828 (this card), #8826 (the PR that fired the condition),\n  #8764 (the closed card the removed forward reference pointed at).\n- No changeset: comment-only change in a test file, nothing user-visible.\n  `skip-changeset` applied.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01XeQRiAa7vYRVX5Fog7Zby8)_"
+}

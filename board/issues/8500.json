@@ -1,0 +1,34 @@
+{
+  "number": 8500,
+  "kind": "issue",
+  "title": "详情页**页头动作**的 `visible` CEL:当前用户与 lookup 字段比不出来,且求值抛错静默 fail-open —— `RecordDetailView` 的求值面没被 #5149 的响亮化覆盖(17.0.0-rc.6)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "priority:p0",
+    "repo:objectui"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-13T16:15:34Z",
+  "updated_at": "2026-08-14T15:22:09Z",
+  "closed_at": "2026-08-14T15:22:09Z",
+  "closed_by": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8500",
+  "body": "## 现象\n\n平台版本 `@objectstack/*@17.0.0-rc.6`。\n\n记录详情页**页头动作**的 `visible` CEL 无法表达「只有本记录的某个责任人才看得见这颗按钮」这个最常见的诉求。以一个 lookup 字段 `manager` 为例:\n\n- 能跑通的写法(`os.user.id == record.manager`)对**本人**也恒为 false —— 按钮谁都看不见;\n- 直觉写法(`os.user.id == record.manager.id`)求值**抛错**,而该处 `catch` 返回 `true` —— 按钮不是消失,而是**对所有人显示**,且无任何告警。\n\n两条路都不通,且失败方向恰好相反:一条恒关,一条恒开。\n\n## 复现与实测\n\n每组重启服务,两个账号对照。`manager` 是 `lookup(sys_user)`;账号 A = 本记录的 manager,账号 B = 非 manager 但有读权。\n\n| 谓词 | A | B | 结论 |\n|---|---|---|---|\n| `os.user.id != null` | 显示 | — | `os.user` 已绑定 |\n| `os.user.id == 'A 的 uid 字面量'`(直接写死 A 的 uid) | 显示 | — | `os.user.id` 即会话用户 id,左侧正常 |\n| `os.user.id == record.manager` | 隐藏 | 隐藏 | 对本人也**恒 false**(干净求值成假) |\n| `os.user.id == record.manager.id` | 显示 | 显示 | **求值抛错 → fail-open,两人都可见** |\n\n排除项:\n\n- 同一条记录经 REST 取回时,`manager` 是与会话 uid **逐字相同的裸字符串** —— 已断言 `String(uid) === String(rec.manager)` 为 true。所以「值不相等」不成立,页头作用域下 `record.manager` 的取值形态与 REST 不一致;\n- 已排除「无读权导致 expand 静默降级成裸 id」:账号 B 能 200 读到 A 的用户记录,`?$expand=manager` 仍返回裸串。\n\n**fail-open 是代码级事实**,不是推断 —— console bundle(`RecordDetailView-*.js`)中该处为:\n\n```js\ntry { return n.evaluateCondition(e.visible) } catch { return true }\n```\n\n谓词一旦抛错,按钮对全体显示,console 里没有任何输出。\n\n下游项目已在自己仓库记录了完整实测过程:steedos-labs/os-project-titanwind-ehr#874(私有仓,此处仅作实测记录索引)。\n\n## 影响\n\n页头动作是「只有责任人可见」这类权限收敛最自然的落点,而这条路径当前**没有任何可用写法**。更糟的是错误写法的失败方向是 fail-open:作者写完看到按钮在,会认为谓词生效了 —— 实际上它对所有人都在。静默使得这类问题按检视无法发现。\n\n## 期望\n\n1. **取值形态对齐**:页头作用域下 lookup 字段的取值与 REST 一致,或提供一个稳定的 `record.某lookup字段.id` 取法,并写进文档;\n2. **不要静默 fail-open**:`visible` 求值异常改为 fail-closed,或至少在 console 输出告警。\n\n## 与既有裁决 / 相邻单的关系(非重复)\n\n- #5149(已迁至 objectstack-ai/objectui#4051)处理的是 `evalFieldPredicate` 这条 funnel —— 字段级 / section 级 / page 组件级的 `visibleWhen`。其 2026-08-06 裁决明确:**fail-open 或 fail-closed 都可以裁,静默不可以**,并已在 rc.5 给该 funnel 加上每谓词一次的实名 warn。\n- 本单是**另一个求值面**:页头动作的 `visible`,走的是 `RecordDetailView` 里的 `evaluateCondition`,上面那段 `catch { return true }` 说明 #5149 的响亮化**没有覆盖到这里** —— 按既有裁决的口径,这一处仍然处在「不可以」的状态。\n- 另外本单还有 #5149 完全没有的一半:lookup 字段在该作用域下的取值形态问题(表格第 3、4 行),这半边与 fail-open 无关,单独修 fail-open 也不能让谓词写得出来。"
+}

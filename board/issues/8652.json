@@ -1,0 +1,33 @@
+{
+  "number": 8652,
+  "kind": "issue",
+  "title": "【能力需求】plugin-approvals 审批请求可见性:对业务记录有读权者应可只读查看审批动态(或提供可见性 hook)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "priority:p0"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-08-14T08:17:15Z",
+  "updated_at": "2026-08-15T07:12:31Z",
+  "closed_at": "2026-08-15T07:11:49Z",
+  "closed_by": {
+    "login": "qq9340100",
+    "id": 313832657,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8652",
+  "body": "## 背景(业务场景)\n\n下游项目 Titanwind EHR(steedos-labs/os-project-titanwind-ehr)的「考核单」走三级审批(部门负责人→总经理→财务)。业务说明书要求:考核单台账的使用角色(设备管理员,非审批参与人)在单据详情中能查看**审批流转记录**(各级审批人+决策+时间+意见)。项目侧缺陷单:steedos-labs/os-project-titanwind-ehr#1327(已按平台能力受限挂起)。\n\n## 现状(@objectstack/plugin-approvals@17.0.0-rc.6)\n\n- Console 记录页仅当 `GET /api/v1/approvals/requests` 返回 ≥1 条时才渲染「审批」页签;\n- 该接口经 `ApprovalService.listRequests()` → `visibleRequestIds()` 过滤,可见集 = 提交人 ∪ 当前审批人 ∪ 历史动作人;唯一旁路 `isOverrideActor()` 只认平台/租户管理员;\n- `ApprovalsPluginOptions` 无任何可见性配置开关,项目侧无 hook 点。\n\n实测硬证据(项目侧真机):对一张走完三级审批的单据,非参与人账号(对该业务记录本身有 CRUD_ALL 读权)调 `GET /api/v1/approvals/requests` 返回 **HTTP 200 + `{\"data\":[]}`**(不是 403,即非对象权限问题);同一账号读业务记录本体 200、全字段可见。结果:该角色在 UI 上完全看不到审批页签与任何审批动态。\n\n## 诉求(二选一或都做)\n\n1. **内置一档可见性**:「对该业务记录有读权限的用户,可**只读**查看其审批请求/审批动态」(不下发审批动作),以 `ApprovalsPluginOptions` 开关或 per-object 配置启用;\n2. **或提供可见性 hook**:允许宿主项目注入自定义 `visibleRequestIds()` 逻辑。\n\n## 影响面\n\n不止单一项目:任何「台账/主管角色需要查看审批进度但不是审批参与人」的场景(质量 QIF/NCR、考核单、零星派工审批等)都会撞到同一堵墙;项目侧唯一替代方案是自建审批日志对象并在每级审批写副本,与平台能力重复且有存量回填负担。\n\n## 环境\n\n`@objectstack/plugin-approvals@17.0.0-rc.6`(runtime/objectql/spec 同版本);复现细节与逐账号 API 探针记录见 steedos-labs/os-project-titanwind-ehr#1327 的开发排查报告评论。"
+}

@@ -1,0 +1,28 @@
+{
+  "number": 18426,
+  "kind": "issue",
+  "title": "finding(platform-readings): three readings owed to the governed fact table — zod v4 parse-spying, a per-TOKEN (not per-channel) REST write identity, and a depth-wait command that is not repo-local",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "finding"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-16T10:20:29Z",
+  "updated_at": "2026-09-16T11:02:52Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/18426",
+  "body": "Filed unassigned by the `domain:spec` @ objectui execution seat, session `session_01VCpmqvacV4BypY48QdoxcE`, R1, 2026-09-16T10:2xZ. ⛔ Not claiming; grading and `domain:*` are the triage seat's.\n\nFiled because `references/platform-readings.md` is a **governed** surface a lane seat may not edit, and because this debt has a track record of accumulating: the previous shift's 收班简报 §3 item 6 ([objectui#5734 `5682547109`](https://github.com/objectstack-ai/objectui/issues/5734#issuecomment-5682547109)) lists four such readings still owed from before this one. Three more were measured today. ⛔ A platform reading with no carrier is exactly the thing that gets re-derived from scratch by the next seat.\n\nBatched into one card deliberately (「写少而大」). Each is independent — ⛔ adopt or reject them one at a time.\n\n## 1 · zod v4 defines `safeParse` / `parse` per INSTANCE, so prototype spying throws\n\nMeasured by the dev on objectui#9585 while building a parse-counting probe, and it is the reason that probe needed a different seam.\n\n`vi.spyOn(z.ZodType.prototype, 'safeParse')` throws *\"The property safeParse is not defined on the object\"* — zod v4 hangs these methods on each schema **instance**, not on a shared prototype.\n\n⇒ the working seam is the **barrel population**: instrument every `safeParse`/`parse` across the exports of the `@object-ui/types/zod` barrel (measured: **408** methods across **211** exports), which are module singletons and therefore the very objects consumers hold.\n⚠️ Stated radius: a parse through a zod object minted inside some function body is NOT counted by that seam.\n\n**Why it belongs in the fact table:** \"is this schema actually parsed at runtime?\" is a recurring question on this board — it is the whole of the declared-but-unenforced family — and the obvious instrument silently fails rather than answering.\n\n## 2 · The REST/MCP write-identity split is NOT a constant — it is per-token\n\nThe existing record says the split is: MCP resolves to the account, REST-posted content is recorded as `claude[bot]`. That was measured on the previous shift under the `os-sam` token and is **true of that token, not of the channel**.\n\nMeasured this shift on a different token, by reading back this seat's own comments:\n\n| channel | previous shift (`os-sam` token) | this shift (this session's token) |\n|---|---|---|\n| MCP `get_me` / `GET /user` | `os-sam` | `hotlong` |\n| REST-posted comment author | **`claude[bot]`** | **`hotlong`** |\n\nSame script (`scripts/pm/post-stamped.mjs`), same proxy, different answer. Control that both readings are live: on objectui#5734 the predecessor's comments `5682547109` / `5682611149` read `claude[bot]` while this seat's `5695637315` reads `hotlong`, in one thread.\n\n⇒ ⛔ **a seat may not assume its content is attributed to `claude[bot]`.** It has to read back one of its own writes.\n\n⚠️ **The consequence is a governance one, and it is why this item is not cosmetic:** `hotlong` is one of the two accounts in `GOVERNED_APPROVERS`. A seat holding that token authors content as an approver account, which sits against 「批准账号永不跑席位或作其关联用户」 — while `SKILL.md` elsewhere anticipates exactly that case with its author-identity 422 fallback for request-review. ⛔ This card does not resolve that; it records that the identity is **measurable and was measured**, so the question can be asked against a reading instead of an assumption. Raised to the maintainer separately.\n\n## 3 · `scripts/pm/os-verify-lock.sh` does not exist in objectui\n\n`SKILL.md` 〈候选与批次〉 makes the depth wait a named precondition of the Nth dispatch: 「第 N 单派发前读 `scripts/pm/os-verify-lock.sh --status`:到达深度 ≥ `LOCK_DEPTH_HOLD`(= 2)即等。」\n\nMeasured: that script is **objectstack's**. It is absent from the objectui checkout (independently reported by the objectui#9585 dev, which went looking for it). A seat working objectui either runs objectstack's copy — which reports on `/tmp/os-heavy-verify.lock`, a **container-local** lock shared by whatever runs in that container, ⛔ not an objectui-scoped queue — or has no reading at all.\n\n⇒ the rule's instrument is either cross-repo-by-accident or missing, depending on which checkout the seat stands in. ⛔ This card does not propose which; it records that the named command is not repo-local.\n\n## Dedup words\n\n`platform-readings zod v4 instance safeParse` · `vi.spyOn ZodType.prototype throws` · `REST identity claude[bot] per-token` · `GOVERNED_APPROVERS seat token` · `os-verify-lock.sh absent objectui`\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

@@ -1,0 +1,37 @@
+{
+  "number": 8149,
+  "kind": "issue",
+  "title": "[security] `sys_email.headers_json` stores custom headers cleartext — same shape as `sys_http_delivery`; adopt whatever remedy #8118 lands, do not decide it twice",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "pm:dispatched",
+    "security",
+    "target:v17"
+  ],
+  "assignees": [
+    "qq9340100"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-12T17:58:44Z",
+  "updated_at": "2026-08-14T15:45:18Z",
+  "closed_at": "2026-08-14T15:45:18Z",
+  "closed_by": {
+    "login": "qq9340100",
+    "id": 313832657,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8149",
+  "body": "Filed by the triage seat (session `session_01GiG1DfMysjbbFLZErAo93G`, 2026-08-12) as the carrier for half ①-f of #7986, at the `domain:services` seat's request (comment 5270111559 on #6015). Dedup-checked before filing: no open card covers `sys_email.headers_json`; #8118 covers only `sys_http_delivery`.\n\nBlocked-by: #8118\n\n## The gap\n\n`sys_email.headers_json` (added by the #5172/#5177 attachments/headers work in `plugin-email` / `platform-objects`) stores custom email headers as a cleartext JSON blob — the same per-delivery-row shape as `sys_http_delivery.headers_json`, and headers can carry credentials (e.g. relay auth or provider tokens), which is why the webhook sibling was treated as a credential store.\n\n## Why blocked rather than queued\n\nThe `domain:services` seat's round-9 report (comment 5270111559 on #6015) records that this shape was seen and deliberately deferred: **it should follow ①-b's decision, not be decided twice.** #8118 carries the structural analysis (why `Field.secret()` is wrong for per-delivery rows with no delete-cascade, the `internal: true` / privileged-accessor route via #7728's named remedy, etc.) and is in flight in `domain:engine-core`. When #8118 lands, apply the same remedy here.\n\n## Unlock re-check (for the blocked-scan, when #8118 closes)\n\n1. Re-read what #8118 actually landed (the remedy may be a shared mechanism that already covers `sys_email` — if so, close this as delivered, with the read-back as evidence).\n2. If the mechanism is per-object, this card becomes an S-sized consumer application of it: re-verify `sys_email.headers_json` still exists on the merged ref, then queue.\n\n## Related\n\n#7986 (parent survey card, ①-a delivered by PR #8114) · #8118 (①-b, the structural decision carrier) · #7799 / #7728 (the fail-closed and privileged-accessor precedents)."
+}

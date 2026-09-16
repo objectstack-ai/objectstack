@@ -1,0 +1,34 @@
+{
+  "number": 8370,
+  "kind": "issue",
+  "title": "The FILTER-axis formula refusal (#8296) shipped without the ADR-0087 semantic entry its SORT-axis twin (#7095) carries — the upgrade guide will not mention it",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-13T09:46:28Z",
+  "updated_at": "2026-08-14T13:14:33Z",
+  "closed_at": "2026-08-14T12:45:39Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8370",
+  "body": "Filed from PR #8369 (#8296). Unassigned; the fix lands in `packages/spec`, which that card's dispatch deliberately fenced off (\"if implementation requires a *change* — not just a read — to `packages/spec`, stop and route that slice to the spec seat\").\n\nBlocked-by: #8296\n\n## The asymmetry\n\nPR #8369 gives the FILTER axis its unmaterializable verdict at both doors: a `where` on a `formula` field is now `400 INVALID_FIELD` instead of 200-with-zero-rows, at the REST ingress **and** at the engine seam that saved reports / flows / dashboards reach directly.\n\nIts SORT-axis twin, #7095, made exactly the same kind of change — an engine-boundary refusal for a `formula` field that used to answer 200 — and paired it with an ADR-0087 **semantic migration entry**:\n\n- `packages/spec/src/migrations/entries/semantic/17.engine-find-formula-order-by-refused.ts`\n- registered in `packages/spec/src/migrations/registry.ts`\n- surfaced through `spec-changes.json` and the generated `docs/protocol-upgrade-guide.md`\n\nThe FILTER refusal has no such entry. Its entry would be `id: engine-find-formula-filter-refused` (or similar) with the same three fields the sort entry carries — `surface` (a `where` naming a `formula` field, at both doors), `replacement` (denormalise onto a stored field, written when the source changes, and filter that; `summary` / `autonumber` need no action), and `acceptanceCriteria` (grep saved reports, flows, dashboards and view filters for a filtered field whose object declares it as a `formula`).\n\n## Why it matters\n\nThat entry is the only notification channel for this class. The sort entry says so in as many words: this is a code-path API with no `sys_metadata` row for the D2 chain to rewrite, so the ledger IS the notification. `objectstack migrate meta`, `spec-changes.json` and the upgrade guide all read the registries, so an unregistered behaviour change is a silent gap on the upgrade path — the #6148 shape.\n\nIt matters slightly MORE here than on the sort axis: a refused sort returns the same rows in a different order, while a refused filter changes the row SET, and the surfaces that break are author-written (`sys_saved_report.query.filter`, flow node filters, dashboard widget filters), not code.\n\n## Why PR #8369 did not include it\n\nNot an oversight and not a judgement that it is unnecessary — the dispatch fenced `packages/spec` changes to the spec seat, and adding an entry means touching `entries/semantic/`, `registry.ts` and two regenerated artifacts. The changeset there is therefore `minor` for both packages with no `**BREAKING**` declaration (the launch-window convention, and what #6994 — the same refusal class at ingress — shipped as), so the ADR-0087 changeset gate is not triggered and nothing currently asks the question.\n\n## Not for this issue to decide\n\nWhether the entry is genuinely required, or whether `not-required (no-migration-prescription)` is the honest disposition, is a real question: no key, symbol or stored value moves, and no mechanical rewrite exists in either direction (the platform cannot invent the stored column, and it must not filter post-hoc — `driver.find` has already applied `limit` / `offset`, so a post-hoc predicate would filter an arbitrary PAGE). The sort axis answered \"register it anyway\" for the identical shape, which is the strongest available precedent.\n\nRelated: #8299 (the disposition catalog has no category for published runtime surfaces with no metadata surface) is the general form of the same question."
+}

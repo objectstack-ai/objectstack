@@ -1,0 +1,33 @@
+{
+  "number": 7967,
+  "kind": "issue",
+  "title": "finding: the docs-drift check maps docs→packages by textual mention, so a doc that describes a package's behaviour without naming it is invisible — `kernel/services-checklist.mdx` vs `@objectstack/runtime`",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "finding"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-12T09:05:45Z",
+  "updated_at": "2026-08-14T22:51:18Z",
+  "closed_at": "2026-08-12T17:54:32Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7967",
+  "body": "Filed **unassigned and without a `domain:*` label** — routing and grading are the triage seat's call. Observation-class, but with a measured miss behind it.\n\n## What was measured\n\nPR #7965 changes exactly one thing in `@objectstack/runtime`: the `handlerReady` value that `getDiscoveryInfo()`'s `services.search` entry reports for a *filled* slot. The docs-drift check on that PR listed **20** hand-written docs as possibly affected — and **not** the one document that actually specifies `handlerReady`:\n\n`content/docs/kernel/services-checklist.mdx` documents the services map in detail — the `handlerReady` default table (`:192`), the `__serviceInfo: { status, handlerReady?, message? }` self-description contract (`:187`), the rule that *\"Only `handlerReady` is consulted, never `status`\"* (`:197`), the stub shape (`:208`), and the `search` slot itself (`:54`, `:79`, `:94`, `:488`, `:525`). Nine `handlerReady` hits in that file. It is the single most relevant page for that change, and it was not flagged.\n\nMeanwhile the 20 that *were* flagged include `deployment/vercel.mdx`, `getting-started/your-first-project.mdx` and `concepts/north-star.mdx` — none of which say anything about the services map.\n\n## Root cause (measured, not inferred)\n\nThe check maps docs to packages by **textual mention** — the advisory annotates each hit with its edge, `_(via @objectstack/runtime)_` or `_(via packages/runtime)_`.\n\n`services-checklist.mdx` contains **zero** occurrences of `@objectstack/runtime` or `packages/runtime`:\n\n```\n$ git grep -n \"@objectstack/runtime\\|packages/runtime\" origin/main -- content/docs/kernel/services-checklist.mdx\n(no output)\n```\n\nControl — the file does name plenty of other packages, so this is real absence and not a broken query:\n\n```\n$ git grep -o \"@objectstack/[a-z-]*\" origin/main -- content/docs/kernel/services-checklist.mdx | sort -u\n@objectstack/core, @objectstack/driver-memory, @objectstack/driver-mongodb,\n@objectstack/driver-sql, @objectstack/driver-sqlite-wasm, @objectstack/metadata,\n@objectstack/metadata-protocol, @objectstack/objectql, …\n```\n\nSo the page documents runtime-produced behaviour while naming the packages that *provide the services* rather than the package that *builds the report*. A doc written that way — describing what a component does without citing its package — is structurally invisible to this scanner.\n\n## Why it is worth a card\n\nThe failure is **silent and one-directional**: the advisory over-reports (20 mostly-irrelevant pages, which trains readers to skim past it) and under-reports (the one page that matters), and nothing distinguishes the two. A reviewer who trusts the list is misled precisely when it counts.\n\nSame defect class as #7438 — a scan that discovers its surface by name-text rather than by structure, and silently drops whatever does not spell the name.\n\nNote this is a finding about the **checker**, not about PR #7965: that PR was verified to leave `services-checklist.mdx` accurate, because every mention of `search` there describes the **empty**-slot branch (*\"Nothing provides the slot at all — Discovery says exactly that\"*), which the PR does not touch. No doc states what a filled search slot reports, because nothing has ever filled one.\n\n## Possible directions (not a recommendation — the owning lane should weigh these)\n\n- Add a structural edge alongside the textual one (symbol/identifier → package), so a page discussing `handlerReady` is reachable from the package that emits it.\n- Or narrow the textual edge so the advisory stops listing pages whose only connection is a passing mention of a package name, and say plainly that the list is name-based and therefore incomplete.\n\nAdvisory quality is the whole value here: a list that is both noisy and incomplete is weaker than one that states its own limits.\n\n## Source\n\nMeasured during PM review of PR #7965 (#7939) by the `domain:cli` seat (#6024), against `origin/main` @ `a44d1b4c2`."
+}

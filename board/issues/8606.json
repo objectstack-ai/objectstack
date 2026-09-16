@@ -1,0 +1,35 @@
+{
+  "number": 8606,
+  "kind": "pull_request",
+  "title": "docs(changeset): annotate #8296's changeset as breaking",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "skip-changeset",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-14T01:14:00Z",
+  "updated_at": "2026-08-14T01:48:42Z",
+  "closed_at": "2026-08-14T01:48:41Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-14T01:48:41Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/8606",
+  "body": "Fixes #8411\n\n## What changed\n\nAdded an explicit breaking-change annotation to `.changeset/filter-formula-field-refusal.md` (landed `edff010c`, PR #8369) so the release-digest tooling can classify it correctly. The bump stays `minor` for both `@objectstack/metadata-protocol` and `@objectstack/objectql` — unchanged, per `scripts/check-changeset-no-major.mjs`'s launch-window convention. One file touched.\n\nTwo additions to the changeset body:\n\n1. A `**BREAKING**`-opening paragraph explaining the public-contract change (a `where` on a `formula` field used to succeed with the wrong answer; it now throws `400 INVALID_FIELD` from every call site that reaches `assertFilterIsMaterializable` — `find` / `findOne` / `count` / `aggregate` / `update` / `delete`), and stating why the bump is graded `minor` rather than `major`.\n2. An `<!-- adr-0087: not-required (no-migration-prescription) ... -->` disposition marker — a mechanical consequence of (1): once a changeset is recognised as declaring a breaking change, `scripts/check-adr-0087-registration.mjs` (per AGENTS.md's Post-Task Checklist §3) requires exactly one ADR-0087 disposition marker. This is a runtime query-validation change, not a spec/metadata key rename, so there is nothing to register in the migration ledger.\n\n## Where the marker form came from\n\nDerived from the code, not invented, per the card's instruction:\n\n- The issue names **#6099** as precedent. That PR taught `scripts/objectui-changeset-digest.mjs` to recognise a breaking change declared as `minor` + body annotation (its header, \"WHY 'BREAKING' IS BROADER THAN THE DECLARED LEVEL (#6099)\", documents this at length). Its `hasBreakingAnnotation()` looks for a block or emphasis run that **opens** with the word \"breaking\" (`BREAKING_EMPHASIS_LABEL` / `BREAKING_BLOCK_OPENER`), and its exported `BREAKING_MARKER` constant is the literal string `**BREAKING**` — which is exactly what `markBreaking()` prefixes onto a breaking entry's text.\n- This repo's own `scripts/check-adr-0087-registration.mjs` (`breakingDeclaration()`) reads the **same** signal for changesets in *this* repo (not objectui's): `/\\*\\*BREAKING/i.test(body)` is one of its three union'd signals (alongside a `major` bump and a conventional-commit `!`).\n- I also pulled a live specimen from the `objectui` sibling checkout (`.changeset/mapdensity-dead-rowheight-spellings-4352.md`) showing the convention in practice: `**Breaking semantics, deliberately graded \\`minor\\`** (this repo never publishes \\`major\\`...)`.\n\nBoth readers agree on the same marker shape, so I used the canonical `**BREAKING**` form.\n\n## Verification\n\n- Confirmed the changeset was still **unconsumed** at `origin/main` before editing (`git show origin/main:.changeset/filter-formula-field-refusal.md` — present).\n- `node scripts/check-changeset-no-major.mjs` — `✓ This diff introduces no \\`major\\` bump.` (unchanged by this PR, as required)\n- `node scripts/check-empty-changeset.mjs` — `✓ No empty-frontmatter changeset introduced by this diff (1 declaring changeset(s) added).`\n- `node scripts/check-adr-0087-registration.mjs` — **before** my edit: \"this PR adds no declared-breaking changeset\". **After**: `✓ 1 declared-breaking changeset(s), each carrying an ADR-0087 disposition` — `.changeset/filter-formula-field-refusal.md [BREAKING] not-required (no-migration-prescription)`. This is a live, mechanical demonstration that a real gate in this repo now classifies the changeset as breaking.\n- `pnpm check:changeset-gate-self-tests` (bundles the three changesets gates' self-tests) — all green (118 + 153 + 117 assertions).\n- `pnpm check:objectui-changeset` (self-test) — all green, unaffected by this edit (it exercises fixture data, not this repo's real `.changeset/` stock).\n- `node scripts/check-nul-bytes.mjs` — OK, no raw control bytes.\n- Directly imported `scripts/objectui-changeset-digest.mjs`'s pure functions and ran them against the real (edited) changeset body: `hasBreakingAnnotation(body)` → `true`; against the **original** unannotated body at `origin/main` → `false`. Confirms the direction of the fix on the exact function #6099 introduced, even though that script's own CLI processes objectui's changesets rather than this repo's.\n- `node scripts/pm/dispatch-gates.mjs .changeset/filter-formula-field-refusal.md` — derived `check:changeset-gate-self-tests`, `check:objectui-changeset`, `check-adr-0087-registration.mjs`, `check-changeset-no-major.mjs`, `check-empty-changeset.mjs` for this path (worth noting: contrary to #8410's finding that the derivation may not name `.changeset/`-path gates, this run did surface them — I ran the explicitly-named gates regardless, per the card's instruction).\n\n## Scope note\n\nThis PR is exactly what #8411 asks for: the annotation on #8296's changeset, nothing else. It does **not** address whether the framework side has a general gate requiring every breaking-`minor` changeset to carry this annotation (that's the separate, broader question #8411 explicitly excludes, adjacent to #8410). I did not find such a gate to exist beyond the ADR-0087 disposition gate (which only fires once a changeset is *already* recognised as breaking) — I have **not** filed a new issue for this, since #8410 already covers adjacent territory and the card says to file only if I found the gap and wanted to flag it; happy to file separately if you'd like it tracked distinctly from #8410.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_012WMpuAfA2KSdDjGF6tm1bH)_"
+}

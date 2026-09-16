@@ -1,0 +1,35 @@
+{
+  "number": 8555,
+  "kind": "issue",
+  "title": "`sys_setting`'s unique key is installation-wide on a tenant-scoped object — but unlike the #8323 class it has a real argument for staying that way",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-13T19:41:24Z",
+  "updated_at": "2026-08-14T04:57:56Z",
+  "closed_at": "2026-08-14T04:57:56Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8555",
+  "body": "Found while implementing #8468, sweeping every platform object with the real lint rule. Filed unassigned and **deliberately separate** from #8554 (the five clean inheritors), because the ruling of 2026-08-13 says an instance goes straight to the queue *unless it carries a genuine semantic argument for an installation-wide namespace, which must then be stated explicitly*. This one does, so it is stated below rather than queued.\n\n## The declaration\n\n`packages/platform-objects/src/system/sys-setting.object.ts`:\n\n```ts\nindexes: [\n  // Primary lookup path: (namespace, key, scope, user_id?) is what\n  { fields: ['namespace', 'key', 'scope', 'user_id'], unique: true },\n  ...\n]\n```\n\nMeasured, not read: `organization_id` **is** injected (`resolveInjectedSystemColumns` reports `tenant: true`, no `tenancy` opt-out), and a declared index's bare `unique: true` is the positional spelling of `'global'` — the listed columns verbatim. So the physical key is installation-wide on a tenant-scoped object, and `organization_id` is not part of it.\n\n## Why it is not simply a sixth inheritor\n\n`managedBy: 'engine-owned'`, and the object's header comment says the Setup grid is *\"a diagnostic surface only; all writes flow through `SettingsService.set()` so the resolver stays the single source of truth.\"* So the rows are not admin-authored in the sense the ruling used, and the settings resolver may legitimately want one installation-wide row per `(namespace, key, scope, user_id)` — a platform default that every organization resolves against.\n\n**The argument for keeping it global:** if settings resolution is layered (platform default, then organization override, then user override) and the `scope` column is what distinguishes those layers, then the key is already carrying its own scoping and the organization dimension may be intentionally absent.\n\n**The argument against:** if `scope` does *not* encode the organization, then two organizations can never hold different values for the same `(namespace, key)` at the same scope — the second write is refused by a row it cannot read. That is both a cross-tenant oracle and a hard functional ceiling on per-organization configuration, which is a capability a multi-tenant platform is normally expected to have.\n\nI did not resolve which reading is correct: it turns on what `scope` means to `SettingsService`, and answering it properly means reading the resolver rather than the declaration. That is the work this card is asking for, and it is why I am not asserting a defect.\n\n## What to do\n\nRead `SettingsService`'s resolution order and the `scope` vocabulary first. Then either:\n\n- **`scope` already encodes tenancy** → spell the index `unique: 'global'` explicitly and say why in a comment, so the next sweep stops re-raising it (this is what ADR-0120 wants in either direction — the current bare spelling states no scope at all); or\n- **`scope` does not encode tenancy** → this is a sixth instance of the #8323 class, and it inherits the 2026-08-13 ruling like the rest: respell to `'organization'`, reusing the `replace_unique_index` arm.\n\nEither way the end state should not be a positional default. Whoever takes it should run the live 409/201 probe first, per the ruling's discipline on #8468.\n\n## Also worth a look, same sweep, not asserted\n\nThese carry a bare declared `unique: true` on tenant-scoped objects but are plausibly intentional (identifiers/tokens that are meant to be globally unique, or composites of already-unique ids). Listing them so a future sweep does not have to re-derive the triage:\n\n- `sys_job` `['name']` — engine-owned; job names are probably platform-defined.\n- `sys_notification` `['dedup_key']`, `sys_http_delivery` `['source', 'dedup_key']` — dedup keys likely already embed their scope.\n- `sys_audience_binding_suggestion` `['package_id', 'permission_set_name', 'anchor']` — package-scoped suggestion rows.\n- `sys_notification_subscription` `['topic', 'principal']` — the one I am least sure about in this group.\n- `sys_share_link` `['token']`, `sys_presence` `['session_id']` — tokens/ids, legitimately global.\n\nObjects that already list `organization_id` in their index fields (`sys_metadata`, `sys_metadata_history`, `sys_view_definition`, `sys_user_permission_set`, `sys_user_position`, `sys_business_unit`) are the ADR-0120 S6 hand-written composite and are valid indefinitely — not findings.\n\n## Related\n\n- #8554 — the five clean inheritors from the same sweep.\n- #8468 / #8461 / #8323 — the class and its ruling.\n\nFound by session `session_012WMpuAfA2KSdDjGF6tm1bH`.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_012WMpuAfA2KSdDjGF6tm1bH)_"
+}

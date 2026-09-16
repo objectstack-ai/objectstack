@@ -1,0 +1,35 @@
+{
+  "number": 8264,
+  "kind": "issue",
+  "title": "`rest-server.ts`'s `looksLikeMissingRelation` matches unquoted prose, where the shared leak predicate now requires the driver's quoted template",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-13T01:24:35Z",
+  "updated_at": "2026-08-14T08:31:23Z",
+  "closed_at": "2026-08-14T08:31:23Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8264",
+  "body": "Observation, found while implementing #8132 (PR #8263). Not fixed there: #8132's ruling scopes it to the shared predicate in `packages/types`, and this line sits in `packages/rest/src/rest-server.ts`, where #8039 lands next round. Filed unassigned so the two do not collide.\n\n## What was measured\n\n#8132 taught the shared `looksLikeInternalErrorLeak` the Postgres missing-relation phrasing, anchored on the template Postgres actually emits — a QUOTED identifier:\n\n```\n/\\b(?:relation|column)\\s+[\"'`][^\"'`]+[\"'`]\\s+does not exist/i\n```\n\nThe anchor is load-bearing: without it, `does not exist` is ordinary business English and the predicate would start replacing legitimate answers with `Internal server error`. Two negative cases in `packages/types/src/error-leak.test.ts` pin that.\n\n`rest-server.ts:1337` answers a closely related question with the loose form instead:\n\n```ts\nconst looksLikeMissingRelation =\n    lower.includes('no such table') ||\n    (lower.includes('relation') && lower.includes('does not exist')) ||\n    lower.includes('table not found');\n```\n\nThose two conjuncts need not be the same sentence, so a message merely containing both words matches. `This relation does not exist in the diagram` is a concrete example — it is one of the negative cases the new predicate deliberately rejects, and the same string is a positive here.\n\n## Why it may matter\n\n`looksLikeMissingRelation` gates a 404-vs-500 decision. A match with `missingRelationIsObject(raw, object)` false returns `DATA_STORE_FAULT()` — a sanitised 500 `DATABASE_ERROR`. So a business message that happens to use both words could be re-labelled a data-store fault rather than getting its real verdict.\n\n## Deliberately NOT asserted\n\nI did not measure a reachable production path that produces such a message at this call site, and the branch's own comment (#5462) explains that the loose reading is a legacy safety net whose primary producer is the registry gate far above. So this is drift between two spellings of one question, not a demonstrated live bug — the severity call belongs to triage, not to me.\n\nWhoever picks this up should decide whether the two questions should share the anchored helper at all, or whether the exclusion-direction width is correct here on purpose (`relation-sub-object.ts` documents exactly that \"two widths, on purpose\" reasoning for a neighbouring pair).\n\nBacklink: #8132, PR #8263.\n"
+}

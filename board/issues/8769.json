@@ -1,0 +1,34 @@
+{
+  "number": 8769,
+  "kind": "issue",
+  "title": "meta-publish-verb-skips-the-canonical-fold: `publishMetaItem` is the one `/meta` entry point that reads the MANIFEST map instead of the URL map",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-14T22:14:20Z",
+  "updated_at": "2026-08-15T05:53:58Z",
+  "closed_at": "2026-08-15T05:53:58Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8769",
+  "body": "Observation recorded while implementing #8421 (not fixed there — out of scope, and fail-closed today).\n\n## What was measured\n\n`canonicalizeMetaRequestType` is documented as the single request boundary — *\"all six `/meta` entry points funnel through it\"* — and #7894 moved that fold off `PLURAL_TO_SINGULAR` (the manifest-collection map) onto `META_URL_TO_SINGULAR` (the URL-spelling map) precisely because four registry types are legitimately absent from the manifest map.\n\n`publishMetaItem` is a **seventh** entry point on the same URL family, and it does not funnel through it. Measured on `f59a135f0`:\n\n- `packages/metadata-protocol/src/protocol.ts:12538` — `async publishMetaItem(request: { type, name, ... })`; no `canonicalizeMetaRequestType` call anywhere in its body.\n- `:12699` — the draftability check folds through **`PLURAL_TO_SINGULAR[request.type] ?? request.type`**, i.e. the manifest map, which is the exact lookup #7894 replaced at the other six.\n- `:12720`, `:12730` — the row lookup and the receipt use `request.type` raw.\n\nThe verb is reachable with a caller-supplied spelling: the publish family is routed as `/api/v1/meta/:type/:name/published` (`packages/rest/src/meta-published-overlay.test.ts:50`).\n\n## Why this is an observation and not a defect report\n\nIt is **fail-closed** today, which is why it is filed rather than fixed. Drafts are written through `saveMetaItem`, which does fold, so a draft only ever exists under the canonical singular; a publish addressed as `/meta/views/x` looks for a row under `type='views'`, finds none, and errors. Nothing is minted and nothing is bypassed.\n\nWhat it costs is coherence, in the shape Prime Directive #12 names: the same URL spelling that `PUT` accepts and folds, `publish` does not resolve — one contract, two dialects, decided by which verb you used. It also means the four types the manifest map omits (`field`, `seed`, `external_catalog`, `translation`) reach the draftability check at `:12699` as unrecognised, taking the permissive plugin branch of that check rather than their real registry entry — the #7894 shape, one verb over, with no measured consequence today because the row lookup fails first.\n\n## Suggested disposition\n\nRoute `publishMetaItem` through `canonicalizeMetaRequestType` like its six siblings, which is a one-line change plus a pin. Worth checking at the same time whether `publishPackageDrafts` and `deletePackage` need it (both iterate rows that are already canonical, so probably not).\n\nNot attached as a sub-issue of #8421: that card is closed by the mint-path refusal and this is a separate seam.\n"
+}

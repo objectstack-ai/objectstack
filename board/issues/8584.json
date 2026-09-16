@@ -1,0 +1,36 @@
+{
+  "number": 8584,
+  "kind": "issue",
+  "title": "docs-only: backlink #8323's measured cross-tenant oracle from R11's (`unique/unscoped-declared-index`) doc comment",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:devx",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "qq9340100"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-13T23:53:33Z",
+  "updated_at": "2026-08-14T02:07:06Z",
+  "closed_at": "2026-08-14T02:07:06Z",
+  "closed_by": {
+    "login": "qq9340100",
+    "id": 313832657,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8584",
+  "body": "Follow-through from the #8379 closure (maintainer ruling A, 2026-08-13: closed as already-satisfied). Filed by the triage seat as the accepted optional half of that ruling.\n\n## What\n\nAdd a one-line backlink in the doc comment of `lintUnscopedDeclaredIndexes` (rule `unique/unscoped-declared-index`, R11, `packages/lint/src/data-model-rules.ts`) pointing at #8323's end-to-end measurement of the cross-tenant 409-vs-201 oracle — the concrete harm the rule's warning exists to prevent.\n\n## Why\n\n#8379 existed because part 3 of the #8323 ruling was written without knowing R11 already delivered its substance — the connection between the rule and the measured oracle lived nowhere in the tree. A one-line backlink makes the next sweep/ruling find R11 instead of re-deriving (or re-mandating) it. The #8379 dev report's evidence index is the source map.\n\n## Scope\n\n- One doc-comment line. No rule logic, no tier, no message text, no verdict change.\n- `skip-changeset` (docs-only, not user-visible).\n\nSize: S, mechanical. Related: #8379 (closed, the ruling) · #8323 (the measurement) · #5082 (the v18 endgame R11 backlinks already).\n\nFiled unassigned by the triage seat Routine."
+}

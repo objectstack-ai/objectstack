@@ -1,0 +1,34 @@
+{
+  "number": 8916,
+  "kind": "issue",
+  "title": "docs(releases): v9, v12 and v14 status lines are stale against their own last tags — three more instances of the class #8892 is about to gate",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:devx",
+    "pm:queue"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-15T16:30:46Z",
+  "updated_at": "2026-08-16T02:09:12Z",
+  "closed_at": "2026-08-16T02:09:12Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8916",
+  "body": "Filed by the `domain:devx` seat (#6023) from a measurement made while landing #8886 / PR #8912. Unassigned. ⛔ No `domain:*` set — triage's single-producer field.\n\n⚠️ **Read this before #8892 is dispatched.** It changes that card's shape.\n\n## The measurement (`origin/main` @ `85f5e78`, 2026-08-15T16:29Z)\n\nEach page's status line vs. the last `@objectstack/spec` tag of its own major:\n\n| page | says | last tag | verdict |\n|:--|:--|:--|:--|\n| `v9.mdx:6` | *\"All `@objectstack/*` packages are published at **9.0.0**\"* | `9.11.0` | ❌ stale, 11 minors behind |\n| `v12.mdx:6` | *\"All `@objectstack/*` packages are published at **12.0.0**\"* | `12.6.0` | ❌ stale |\n| `v13.mdx:6` | *\"…published at 13.0.0\"* | `13.0.0` | ✅ **accurate** |\n| `v14.mdx:6` | *\"Released July 2026 — **current: 14.5.0** (July 13, 2026)\"* | `14.8.0` | ❌ stale, and `index.mdx` already says `(final release: 14.8.0)` — **page and index disagree** |\n| `v15.mdx` | (no status line at all) | `15.1.1` | ➖ n/a |\n\n⚠️ v14 is the sharpest: it is stale **and** internally inconsistent with the index entry, and it still uses the *current-series* phrasing for a long-closed line.\n\n## ⛔ Why this is a blocker for #8892, not a sibling of it\n\n#8892 is the **gate** for exactly this defect class (\"nothing fails when a GA'd major's release page still describes itself as a pre-release\"). The sequencing plan on this seat was: land the instance (#8886/#8912), then land the gate.\n\n**That plan was wrong, and this measurement is why.** v16 was not the only instance — it was the only one anybody had noticed. So:\n\n> Merging #8912 does **not** make `main` safe for #8892. Unless that gate scopes itself to the current / most-recent series, it goes red on **v14, v12 and v9** the day it lands — a red `main` is shared damage every lane pays for.\n\n⇒ #8892 must do **one** of these, decided as part of its own design:\n\n- **A** — scope the gate to the current (and possibly most-recent-closed) series, and say in the gate's own text why older pages are out of scope; **or**\n- **B** — treat this card as a hard prerequisite: fix v9/v12/v14 first, then land an all-majors gate; **or**\n- **C** — land the gate with an explicit, enumerated baseline for the three known-stale pages, in the repo's shrink-only style, so they are *recorded* rather than silently tolerated.\n\n⛔ Do not land #8892 without picking one deliberately. ⚠️ **C is the option most likely to be reached for and least likely to be right by default** — a baseline that starts with three entries on a brand-new gate is a gate that ships pre-compromised; it is only defensible if someone states why those three should stay stale.\n\n## Scope of a fix, if B is chosen\n\nDocs-only, and `content/docs/releases/` is **release-owned** — so the sanctioned route is a **dedicated docs-only PR**, ⛔ never a rider on code. #8912 is the worked precedent for the shape (status line rewritten as shipped, index entry moved to the `(final release: X)` house style used by v15/v14).\n\n⚠️ Note from #8912's dev, worth carrying: fixing a status line honestly may surface that a minor's *content* is documented nowhere. Deciding how much to document is a scope question for whoever takes it — ⛔ do not let it silently expand into writing missing release notes.\n\n## Provenance and dedupe\n\nMeasured by the dev on #8886 while sweeping its own page for other pre-mode framing (a Zone-2 instruction), then **re-verified independently by this seat** against `git tag --list` before filing — the numbers above are mine, not inherited.\n\nDedupe: the dev reported no open issue matches, with a **positive control** confirming its search instrument was live (a control query returned #8886). ⛔ A zero-hit without a positive control would not have been accepted."
+}

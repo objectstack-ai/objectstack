@@ -1,0 +1,35 @@
+{
+  "number": 8666,
+  "kind": "pull_request",
+  "title": "feat(spec): refuse `${…}` placeholder syntax in memory persistence.path / persistence.key at publish (#8495)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-14T09:45:26Z",
+  "updated_at": "2026-08-14T12:05:09Z",
+  "closed_at": "2026-08-14T12:05:07Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-14T12:05:07Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/8666",
+  "body": "Fixes #8495\n\nThe #8336 defect one surface over: a `${…}` placeholder in the memory driver's `persistence.path` (file persistence and the `auto` override) or `persistence.key` (localStorage and the `auto` override) is resolved by nothing — the driver would create and write a literal `./${DATA_DIR}/…` path, or write under the literal placeholder-bearing localStorage key, with no error naming the unresolved placeholder. Inherited parent adjudication from #8336 (recorded by the triage comment on the card): refuse loudly at authoring time; these two keys are config-material like the connection keys, not record data.\n\n## What changed\n\n- `packages/spec/src/data/driver/memory.zod.ts`: the shared `placeholderFree` judgment (the #8336 single-mechanism construction from `common.zod.ts`) applied to the four persistence string keys — `file.path`, `local.key`, `auto.path`, `auto.key` — labelled `persistence.path` / `persistence.key` so the refusal message names the authored key. Same helper, same error-prose class as PR #8457.\n- `initialData` stays deliberately **unjudged** (the mother ruling's exclusion reached exactly as far as its reason: record values, where a literal `${…}` may be legitimate data) — now pinned by a test so the exclusion cannot erode silently.\n- Tests in `driver-placeholder-refusal.test.ts` (the family's home): 4-way refusal pins (pathed at `persistence.path`/`persistence.key`, `code: 'custom'`, message substance), byte-identical acceptance pins for literal paths/keys, near-miss pins (`$VAR`, `{name}`, unclosed `${`), the `initialData` unjudged pin, and a `DatasourceSchema` re-path pin (`config.persistence.path`).\n- Reverse verification (fix committed first, schema restored from origin/main): exactly the 5 refusal pins went red, acceptance pins stayed green — direction as predicted (red).\n\n## Changeset class and ADR-0087 (the post-cut fork, resolved)\n\nSibling precedent #8336 / PR #8457 shipped as `@objectstack/spec: minor` with a voluntary D3 semantic entry under step 17 — its refusal first shipped exactly at the v17.0.0 major boundary, so plain minor was semver-honest. This card lands **after** the v17.0.0 cut (commit `24c1b91`), so the same narrowing first ships on the 17.x line: the changeset is `minor` (the launch-window no-major guard is active; no pre-mode) **with a `BREAKING` body annotation**, which makes `check-adr-0087-registration` demand a disposition — satisfied by `registered memory-persistence-placeholder-refused`.\n\nThe semantic entry goes under a new **protocol 18 step** (this refusal is NOT in v17.0.0): `composeMigrationChain` filters `m ≤ toMajor` (default `PROTOCOL_MAJOR` = 17), so the step is inert for every default caller until the major reaches 18, and `check:generated` confirms all 13 artifacts (spec-changes.json, upgrade guide included) are current with the step present — the v17 projections deliberately exclude it. The step block follows the generator's own prescription for a first entry under a new major.\n\n## Verification (union re-run at head `d016ab89f`, after the final commit — the merge of origin/main)\n\n- `@objectstack/spec` full suite: **397 files / 10541 tests passed** (includes the new pins).\n- `@objectstack/driver-memory` (consumer, ⛔ not modified — investment freeze respected, tests only run): **25 files / 752 tests passed**.\n- `pnpm --filter @objectstack/spec typecheck`: green. `check:generated`: all 13 artifacts up to date.\n- Gates green at `d016ab89f`: `check:cross-package-test-inputs` (pnpm + node forms), `check:merge-driver`, `check:spec-parsed-alias`, `check:type-source-resolution`, `check:doc-formula-expressions`, `check:dev-prereqs`, `check:objectui-changeset`, `check:query-options-erasure`, `check:type-check-coverage`, `check:type-check-debt --re-measure` (none above recorded), `check-adr-0087-registration` (1 declared-breaking changeset, disposition valid), `check-changeset-no-major`, `check-empty-changeset`, `check:nul-bytes`.\n- Known pre-existing red, not from this diff: `check:changeset-gate-self-tests` fails on pristine origin/main (`56724c5`) because today's v17 cut emptied the `.changeset` stock and removed `pre.json`, which the self-test's control assertions require — tracked as #8654 (and sibling #8658), both already filed. #8654 is not addressed here; it remains open.\n- Re-measured the card's \"zero occurrences\" claim: no `${…}` inside persistence config anywhere in `examples/` or fixtures (the only `${` hits are TS template literals in code).\n\n_Generated by [Claude Code](https://claude.ai/code/session_01E5tUwGM3LQoqErTfkvRW7W)_\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01E5tUwGM3LQoqErTfkvRW7W)_"
+}

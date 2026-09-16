@@ -1,0 +1,34 @@
+{
+  "number": 8411,
+  "kind": "issue",
+  "title": "#8296's changeset ships a breaking engine-API change as `minor` with no breaking annotation — the release digest cannot classify it",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-13T11:38:54Z",
+  "updated_at": "2026-08-14T01:49:08Z",
+  "closed_at": "2026-08-14T01:48:42Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8411",
+  "body": "Filed by the `domain:metadata` PM seat from the #8296 dev's closing report, which falsified a PM mechanism assumption. Docs-only follow-up; the code that landed is correct and is **not** in question.\n\n## The bump is right — the annotation is missing\n\n`.changeset/filter-formula-field-refusal.md` landed with `edff010c` (PR #8369) declaring `minor` for `@objectstack/metadata-protocol` and `@objectstack/objectql`. It is still unconsumed, so it can be edited.\n\n`minor` is **correct and should not change**. `scripts/check-changeset-no-major.mjs` is a launch-window guard whose header states the convention verbatim — *\"During the launch window we ship breaking changes as `minor` (pre-1.0 semantics …)\"* — because every publishable package sits in the Changesets `fixed` lockstep group, so a single `major` promotes the whole stack (~70 packages).\n\nWhat is missing is the other half of that convention.\n\n## Why this one is genuinely breaking\n\n#8296 made a `where` on a virtual `formula` field answer `400 INVALID_FIELD` instead of `200` with zero rows, at **both** doors. The engine half runs inside `lowerWhereFilterArray`, so a previously-succeeding call to `engine.find` / `findOne` / `count` / `aggregate` / `update` / `delete` now throws. That is a public API surface and six verbs.\n\nThe closest precedent says so explicitly. The dev enumerated how the sibling axes actually shipped, and they did **not** ship uniformly:\n\n| card | axis | bump |\n|:--|:--|:--|\n| #6994 | sort, ingress | `metadata-protocol` **minor** |\n| #6674 | search | `metadata-protocol` / `spec` / `lint` all **patch** |\n| **#7095** | **sort, ENGINE seam** | **`@objectstack/objectql` MAJOR, `!` title** |\n\n#7095 is this PR's exact shape — the engine seam, a previously-succeeding call beginning to throw — and it shipped `major` *because* of that. It predates the no-major guard and is currently masked by the RC exemption (`.changeset/pre.json`, mode `pre`, tag `rc`). So the guard, not the precedent, decides the bump; but the precedent is evidence that the breakingness is real and was previously considered worth a major.\n\n## The repo already has the answer\n\n**#6099** (closed) is the same shape on the objectui side: the generated console changeset carried *zero* annotation for breaking changes because the digest only recognises the `major` declaration level, while objectui declares breaking changes inside the v17 window as **`minor` + 正文标注 (body annotation)**. That is the established convention, and it is the half #8296's changeset is missing.\n\n## The ask\n\nAdd an explicit breaking-change annotation to `.changeset/filter-formula-field-refusal.md`'s body, in whatever marker form the release digest reads, so the change is classified correctly when pre-mode exits and the notes are compiled.\n\n⚠️ **Do not change the bump to `major`** — that requires the `allow-major` label and would promote the entire stack. The bump is not the defect.\n\nThe changeset already carries the remedy (*\"denormalise the value onto the object … and filter that\"*) and a migration instruction (*\"grep your saved reports, flows, dashboards and view filters for a filtered field whose object declares it as a `formula`\"*). Substantively the guidance is there; what is absent is the marker that lets tooling separate a breaking `minor` from an ordinary one.\n\n## Scope note\n\n⛔ This card is about **#8296's changeset only**. Whether the framework side enforces the #6099 convention generally — i.e. whether any gate requires a breaking `minor` to carry the annotation — is a broader tooling question and is **not** claimed here. If a taker finds there is no such gate, file that separately rather than widening this card; #8410 is already open in adjacent territory (`dispatch-gates.mjs` does not derive `Check Changeset` for `.changeset/` paths).\n\n## Related\n\n#8296 · #8369 (`edff010c`) · #7095 (the engine-seam precedent that shipped `major`) · #6994 · #6674 · **#6099** (the `minor` + body-annotation convention) · #8410"
+}

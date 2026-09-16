@@ -1,0 +1,35 @@
+{
+  "number": 8479,
+  "kind": "issue",
+  "title": "docs: the autonumber contract ruled on #8283 (unique + monotonic, NOT gapless) is absent from the author-facing pages — a driver TSDoc cannot stop the mis-promise it exists to prevent",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "qq9340100"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-13T15:20:39Z",
+  "updated_at": "2026-08-13T18:13:53Z",
+  "closed_at": "2026-08-13T18:13:53Z",
+  "closed_by": {
+    "login": "qq9340100",
+    "id": 313832657,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8479",
+  "body": "Filed unassigned and unlabelled for triage to grade and route — I believe this is **`domain:devx`** (`content/docs/**` by the domain table), which is why the drivers seat is not taking it. Split off from **#8283** while claiming that card's drivers half.\n\n## The ruling\n\nThe maintainer ruled on #8283 (2026-08-13, comment `5281698511`) — **Option 1**: the autonumber contract is stated explicitly as **unique and monotonic per scope, NOT gapless** — any rejected write may consume the number it reserved. Its stated purpose: *\"stops anyone promising a customer a gapless series.\"*\n\nIts scope line reads *\"state the contract **where an author looks for autonumber behaviour**\"*, and then names the SQL driver's `an autonumber is an immutable business identifier` sentence as the natural neighbour. Those are two different locations.\n\n## Measured on `origin/main` @ `03b5f81`\n\n| Location | Lane | Status |\n|---|---|---|\n| `packages/drivers/driver-sql/src/sql-driver.ts:4827` (the named neighbour, a TSDoc) | `domain:drivers` | **claimed on #8283, in progress** |\n| `content/docs/data-modeling/**` — `fields.mdx`, `field-types.mdx`, `field-type-decision-tree.mdx`, `schema-design.mdx`, `indexing.mdx`, `validation-rules.mdx` all carry autonumber material | `domain:devx` | **this card** |\n\n`grep -niE 'gapless|no gaps|gap'` across `content/docs/data-modeling/*.mdx` returns only capability-gap language about aggregation operators, plus one unrelated sentence. **Nothing on any author-facing page says a rejected write consumes its number.**\n\n## Why the driver TSDoc is not sufficient on its own\n\nAn app author does not read `packages/drivers/driver-sql/src/sql-driver.ts`. Neither does an AI writing an ObjectStack app — it reads the docs site and the field-type reference. A contract recorded only in driver source is a *decision log*, not a *guardrail*: it documents what the platform chose without reaching the person about to promise a finance team a gapless invoice series.\n\nThat is the ruling's own fourth prism — *\"an explicitly documented 'unique, monotonic, not gapless' contract is precisely the shape an AI app-author cannot mis-promise\"* — and it only holds where the AI app-author actually reads.\n\n## Suggested content (not proposing the wording)\n\nThe ruling supplies the substance; this card is about placement. It needs the contract sentence (unique + monotonic per scope, gaps possible) plus the plain-language cause the ruling asked for: **a rejected write — a unique violation on another field, a validation rule, a throwing `beforeInsert` — consumes the number it had reserved.** ⚠️ Worth stating the corollary explicitly for the finance case, since that is who asks: an autonumber is not a legally gapless document number.\n\n⛔ Not proposing which page is primary — `field-types.mdx`'s `auto_number` entry and `fields.mdx` are both plausible anchors, and that is a devx judgement about their docs' structure.\n\n⚠️ **Anchor by phrase, not line number** — #8283 records that line numbers in this area drift within hours, and this session measured that three times today.\n\nRelated: #8283 (the ruling and the drivers half), #8269 (the pathological sibling whose merge left this as the whole remaining question)."
+}

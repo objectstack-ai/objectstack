@@ -1,0 +1,35 @@
+{
+  "number": 8275,
+  "kind": "issue",
+  "title": "[finding] `packageService.delete`'s driver fault is answered as `400 PACKAGE_DELETE_FAILED` — the same mislabelling #8131 fixed for `publish`, on the sibling route",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:services"
+  ],
+  "assignees": [
+    "qq9340100"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-13T02:09:55Z",
+  "updated_at": "2026-08-14T16:58:36Z",
+  "closed_at": "2026-08-14T16:57:36Z",
+  "closed_by": {
+    "login": "qq9340100",
+    "id": 313832657,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8275",
+  "body": "Found while implementing #8131 (the `publish` half of the package door's returned-failure classification). Recorded rather than fixed: #8131's card names `POST /packages/publish` and the `DELETE` *partial-failure* array, and this is a **third** returning path it does not name — a distinct route with its own acceptance test. Filed unassigned; nobody is on it.\n\n## The gap\n\n`packageService.delete` swallows a driver error and reports failure by returning, exactly as `publish` did before #8131 (`packages/services/service-package/src/index.ts`):\n\n```js\n} catch (error) {\n  logger.error('Failed to delete package', error as Error);\n  return { success: false };\n}\n```\n\nand the handler answers **400** (`packages/rest/src/package-routes.ts`, the version-scoped `DELETE` branch):\n\n```js\nsendError(\n  res,\n  400,\n  'PACKAGE_DELETE_FAILED',\n  `Failed to delete ${packageId}${version ? `@${version}` : ''}.`,\n);\n```\n\nThe statement that failed is `DELETE FROM sys_packages WHERE id = ? [AND version = ?]`. A driver failure there — a missing table, a lock timeout, a foreign-key restriction — is a **server** fault answered as a client error: it invites the caller to fix a request that was never the problem, and it hides a real fault from every dashboard that buckets by status. This is the same class #8016 fixed for the throw path and #8131 fixed for `publish`, in mirror image.\n\n## What is NOT wrong here\n\n**There is no disclosure.** Unlike `publish`, this path never interpolated the driver text — the producer returns a bare `{ success: false }` and the handler writes its own sentence. So this is a **status-classification defect only**, and it is not a security finding.\n\nThat is also why it was left out of #8131 rather than swept in: the two halves have different acceptance tests, and #8136 explicitly asks that status-classification work not be folded across cards without a triage ruling.\n\n## Why it is small but worth doing\n\n#8131 converted `publish` and left `delete` in the older shape, so `service-package` is now a **partially converted** producer — the state `package-envelope.conformance.test.ts`'s own header calls \"arguably worse than untouched\", because the same service answers two different classifications for the same kind of fault.\n\n## Suggested shape (matching what #8131 landed)\n\nThe remedy is the one already in the file next door, and it is roughly three lines:\n\n- `delete`'s catch re-throws a throw that **declares its own status** (so a coded refusal from below keeps it, via the door's existing mapping) — `declaresHttpAnswer` already exists in this module after #8131;\n- an undeclared throw stays a returned failure, and the door answers it **5xx** instead of 400.\n\n⛔ Note the discriminant must be the **status** channel, not `.code`: every SQL driver populates a string `code` (`ERR_SQLITE_ERROR`, `42P01`, `ER_NO_SUCH_TABLE`), and #8131 measured that reading it re-throws genuine driver faults into a 500 whose message the leak heuristic does not withhold. `packages/services/service-package/src/publish-driver-fault.test.ts` pins that per dialect.\n\nAcceptance should assert **both** `code` and `status` per ADR-0112, and keep a pin that a *declared* refusal on this route still answers 4xx.\n\n## Related\n\n#8131 (the `publish` half, landed) · #8016 · #8086 · #8136\n"
+}

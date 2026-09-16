@@ -1,0 +1,34 @@
+{
+  "number": 8683,
+  "kind": "issue",
+  "title": "pm-dispatch: make close-out debt mechanical — same-round verdict-execution clause, H8 merged-but-dispatched detector, seat-title liveness sweep for the triage Routine",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-14T13:14:38Z",
+  "updated_at": "2026-08-14T14:58:13Z",
+  "closed_at": "2026-08-14T14:57:14Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8683",
+  "body": "Filed and dispatched on direct maintainer instruction (2026-08-14, verbatim, untranslated): the maintainer asked whether 「合并即关账」 and 「下班即改贴」 should be codified into the skill; the seat's assessment was that both rules already exist as text and today's failures were execution failures, so the fix is one clause plus two mechanizations; the maintainer ruled 「现在开工派发」. Maintainer-pulled, so it outranks the process-class-last ordering rule.\n\n## Measured evidence (one day's worth)\n\n- Seven `pm:seat` posts corrected in one day for the same failure: the seat's own stand-down/handover was written in comments while the title stayed 🟢 (registry desync; two of today's corrections were themselves race-error re-corrections).\n- ~13 hotcrm rc-era cards carried explicit \"recommends closing\" retest comments — some for 9 days — that nobody executed; a 34-row verdict table sat unapplied for 3 days.\n- A theme-seat pre-work audit found five cards whose delivering `Part of` PR had MERGED with the protocol's paired write (drop `pm:dispatched`, re-grade the remainder) never made.\n\n## Deliverables (three, one PR)\n\n1. **Runbook clause** — `.claude/skills/pm-dispatch/references/dispatch-runbook.md`: a verdict executes in the round that produces it. Writing \"recommends closing\" (or any re-test verdict) without performing the close/label write in the same round is itself a half-state, on the same footing the half-states family already names — record-and-walk-away is prohibited; if the actor lacks authority to execute, the verdict must name who does and carry the state to their inbox, not sit in a comment. Fit the runbook's existing style; ⛔ no issue numbers in operational text (id-lint).\n2. **H8 detector** — `scripts/pm/check-half-states.mjs`: a new report-only half-state: a card's delivering PR is MERGED while the card still carries `pm:dispatched`. Follow H7's shape (exported predicate + report-only wiring); extend the self-test suite accordingly; keep the existing export pattern so gates can reuse the predicate.\n3. **Triage-Routine patrol clause** — first establish where the triage Routine's prompt lives: if it is versioned in-repo, patch it; if it is platform-side (trigger config), deliver the exact clause text in the report for the PM to apply. Clause: each patrol, scan `pm:seat` titles showing 🟢 against the incumbent's own recent activity; a seat silent beyond threshold is demoted to ⏳ vacant with an evidence comment (today's seven hand-corrections are the precedent and the template).\n\n## Constraints\n\n- Surface includes `.claude/skills/pm-dispatch/references/**` ⇒ **fable-mandatory** dispatch and **ADR-class** merge path: draft PR, human merge, auto-merge never armed.\n- `SKILL.md` untouched (686/686, headroom 0 — nothing in this card needs it).\n- Union of gates runs after the final commit with `git rev-parse --short HEAD` quoted in the report and PR body, per the contract that landed today."
+}

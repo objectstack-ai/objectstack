@@ -1,0 +1,36 @@
+{
+  "number": 8586,
+  "kind": "issue",
+  "title": "`additionalTypes` on `MetadataPluginConfig` is authorable, documented as THE way a plugin declares a metadata type, and has no reader — a plugin cannot declare a kind at all",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:spec",
+    "target:v17"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-14T00:05:06Z",
+  "updated_at": "2026-08-14T15:55:49Z",
+  "closed_at": "2026-08-14T15:55:19Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8586",
+  "body": "## Summary\n\n`MetadataPluginConfig.additionalTypes` is a declared, authorable, documented surface with **no consumer anywhere in the repo**. A plugin author who follows the published instructions writes it, gets no error, and nothing happens.\n\nFound while measuring #8421 (which needs a live registered-type set at the `/meta` boundary). It is not that card's defect, so it is filed separately.\n\n## Measured\n\nGrepped every file type across `packages`, `apps`, `examples`, `docs`, `content`. Every occurrence of `additionalTypes` is a **declaration or a mention** — never a read:\n\n| site | what it is |\n|:--|:--|\n| `packages/spec/src/kernel/metadata-plugin.zod.ts:479` | the Zod declaration |\n| `packages/spec/authorable-surface/kernel.json:397` | `kernel/MetadataPluginConfig:additionalTypes` — on the authorable surface |\n| `packages/spec/authorable-surface.base.json:4507` | same, in the anchor |\n| `content/docs/plugins/adding-a-metadata-type.mdx` (lines 18, 71, 133, 235) | documents it as the plugin's type-declaration path, including a release checklist item |\n| `content/docs/references/kernel/metadata-plugin.mdx:98` | reference table entry |\n| `packages/metadata/src/metadata-manager.ts:2470` | a comment claiming the live registry \"covers built-ins AND plugin-contributed `additionalTypes`\" |\n| `packages/metadata-protocol/src/protocol.ts:4266` | a comment claiming the type set \"grows later (artifact load, `additionalTypes`)\" |\n\nThe only production writer of the manager's type registry is `packages/metadata/src/plugin.ts:272`:\n\n```ts\nthis.manager.setTypeRegistry(DEFAULT_METADATA_TYPE_REGISTRY);\n```\n\n`setTypeRegistry` (`metadata-manager.ts:585`) **replaces** the array outright and is called exactly once outside tests. Nothing ever merges `additionalTypes` into it.\n\nMeasured against the real `MetadataManager` (vitest, real class, `MemoryLoader`):\n\n```\ndeclared count = 27 | live count = 27\ngetRegisteredTypes() sorted === DEFAULT_METADATA_TYPE_REGISTRY types sorted   → true\n```\n\nSo `typeRegistry` in production is exactly `DEFAULT_METADATA_TYPE_REGISTRY`, always.\n\n## Why the two source comments are wrong, not just stale\n\nBoth comments above are load-bearing for readers reasoning about the metadata type set — one of them is the doc comment a future author will read when deciding whether a live type check is safe. They assert a growth path that does not exist. (`artifact load` in the protocol.ts comment is real; `additionalTypes` is not.)\n\n## Corroborating evidence that no kind-declaration channel exists\n\n`registerMetadataTypeSchema`'s own doc comment (`packages/spec/src/kernel/metadata-type-schemas.ts`) says it plainly:\n\n> NOTE — registering a schema alone does not make a type appear in the listing. `getMetaTypes()` enumerates types from the engine registry and the metadata service, then decorates each with its schema; a type present here but in neither of those is not reached. **Register the type as well as its schema.**\n\n\"Register the type as well\" points at `additionalTypes` — the inert key. #6245 then bound schemas for `webhook` / `connector` / `sharing_rule` *without* registering the kinds, which is consistent with there being no working channel to register them through.\n\nThere is prior art for this exact failure shape on this exact surface: #4212 found these same docs telling plugins to use `onInstall`, a hook with no invocation site, so plugins \"registered nothing and got no error\". This is the same silence one level down.\n\n## Consequence\n\nA plugin can only get its kind into the live type set as a **side effect of registering an item** of that kind (`SchemaRegistry.registerItem` / `MetadataManager.register`). There is no way to say \"this kind exists but has no items yet\". That is what blocks #8421: every candidate live registered-type set is an item-population set rather than a declared-kind set.\n\n## Disposition\n\nADR-0049 enforce-or-remove: either wire `additionalTypes` into `setTypeRegistry` (making it the real plugin kind-declaration channel, which also unblocks #8421), or remove it and correct the four docs pages plus the two source comments. Not a judgement call this seat should make.\n\nRelated: #8421 (blocked by this), #6245, #4212.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_012WMpuAfA2KSdDjGF6tm1bH)_"
+}

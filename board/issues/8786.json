@@ -1,0 +1,35 @@
+{
+  "number": 8786,
+  "kind": "issue",
+  "title": "`searchAll`'s title rendering reads only the deprecated `displayNameField`, so a canonically-designated primary title never titles a ⌘K hit",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-15T01:39:29Z",
+  "updated_at": "2026-08-15T04:21:11Z",
+  "closed_at": "2026-08-15T04:21:11Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8786",
+  "body": "Filing unassigned; `domain:*` routing is the triage seat's. Found while implementing #7643 (which fixed the RECALL half of `searchAll` and deliberately left titling alone — different concern, same function).\n\n## The defect\n\n`packages/metadata-protocol/src/protocol.ts`, `searchAll`'s `renderTitle`, resolves a hit's title from this candidate list:\n\n```ts\nconst candidates = [\n    obj.displayNameField,\n    'name', 'full_name', 'title', 'subject', 'label', 'company',\n].filter((c) =&gt; typeof c === 'string' &amp;&amp; hasField(c));\n```\n\nUnder ADR-0079, `nameField` is the CANONICAL primary-title pointer and `displayNameField` is the deprecated alias. This list reads only the alias.\n\n## Why it is reachable rather than theoretical\n\n`provisionPrimary` — the ADR-0079 designation seat the SchemaRegistry runs on every object at registration (`materializeBaseLayer`, `objectql/src/registry.ts`) — writes **`nameField` only**:\n\n```\npackages/spec/src/data/display-name.ts:301   return { ...objectMeta, nameField: resolved };\npackages/spec/src/data/display-name.ts:314   return { ...objectMeta, fields, nameField: 'name' };\n```\n\nIt never stamps `displayNameField`. So for an object that declares `nameField` (or has one designated) and does not also carry the deprecated alias, `obj.displayNameField` is `undefined`, the entry is filtered out, and title resolution falls through to the conventional-name list.\n\nImpact is confined to objects whose primary title is NOT one of `name` / `full_name` / `title` / `subject` / `label` / `company`. For those, a ⌘K hit falls all the way through to `return String(row.id)` — the palette shows a raw id where the object's own declared primary title exists and is populated. Objects using a conventional name are unaffected, which is why this has stayed invisible.\n\n## The fix\n\nRead the same precedence every other consumer of this pointer already uses — `obj.nameField ?? obj.displayNameField` — as the first candidate. Three call sites in this file already spell exactly that (the #4254 ingress gate at `assertSearchFieldsAreSearchable`, the engine's `expandSearchOnAst`, and, since #7643, `searchAll`'s own search-field resolution one screen above `renderTitle`). This would make the fourth, in the same function as the third.\n\nSuggested test: an object declaring `nameField: 'company_name'` with no `displayNameField`, seeded with a populated `company_name`, must produce a hit whose `title` is that value rather than the record id.\n\n## Scope note\n\nNot fixed in PR for #7643 on purpose: that card is about RECALL (which rows come back), this is about PRESENTATION (what the returned row is called). They share a function but not a contract, and #7643's file surface was declared region-limited while another PR was open on the same file.\n"
+}

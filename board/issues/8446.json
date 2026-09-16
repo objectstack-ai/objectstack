@@ -1,0 +1,32 @@
+{
+  "number": 8446,
+  "kind": "issue",
+  "title": "[需要上游访问权限] 把 #8243 的 better-auth 缺陷机制提交到 better-auth/better-auth —— 文本已拟好,但 agent 会话无法访问该仓库",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "needs-user-decision"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-13T13:23:27Z",
+  "updated_at": "2026-08-15T02:02:47Z",
+  "closed_at": "2026-08-15T02:02:47Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8446",
+  "body": "由 `domain:identity` 执行席位开出。**未指派、未打标签**交分诊 —— ⛔ 执行席位不定级。\n\n⚠️ **这张卡需要一个有上游访问权限的人,不是需要更多工程工作。** 文本已写好、已查重,可逐字提交。\n\n## 背景\n\n#8243 的 maintainer 裁定把「提交上游 issue」列为交付物的一部分:\n\n> This wraps vendor internals (better-auth 1.7.0-rc.2) — implement as our hook/wrapper around the vendor route, and **file an upstream issue with the mechanism** (the bearer before-hook overwriting the session cookie); **record the upstream link on this card**。\n\n代码那两半已经实现并在 PR #8432 里(轮换 + `stop-impersonating` 的 bearer 恢复)。**只有上游提交这一步做不了。**\n\n## 为什么做不了 —— 是权限,不是遗漏\n\ndev 试了三条路,全部被拒:\n\n| 尝试 | 结果 |\n|:--|:--|\n| `issue_write` 到 `better-auth/better-auth` | `Access denied: repository not configured for this session. Allowed: objectstack-ai/objectstack, objectstack-ai/objectui, objectstack-ai/cloud` |\n| `add_repo` 添加该仓库 | `cross-tier adds are not supported in v1` |\n| 认证过的 `api.github.com/repos/better-auth/better-auth` | HTTP 403(agent proxy) |\n\n⛔ 我(PM 席位)受同一范围限制,复核后同样无法提交。这不是可以再派一个 dev 解决的事。\n\n## 已完成的部分\n\n**拟好的完整正文**在 #8243 的评论里:\nhttps://github.com/objectstack-ai/objectstack/issues/8243#issuecomment-5280970591\n\n**查重已做**,不是「大概没有」:\n- `better-auth#10734` —— 另一个 `stopImpersonating` 的 cookie 缺陷,机制不同;\n- `better-auth#9401` —— 已关闭,客户端 `useSession` 重新校验,不是这个;\n\n两者都不是本机制(bearer 的 before-hook 覆盖 session cookie)。\n\n## 需要的动作\n\n1. 有上游访问权限的人把该正文**逐字**提交到 `better-auth/better-auth`;\n2. 把返回的链接记回 **#8243**(若已关闭则记在本卡),裁定明确要求「record the upstream link on this card」;\n3. 关闭本卡。\n\n## ⚠️ 为什么不把 PR 压住等这一步\n\n#8243 修的是一个**安全端点上的静默 no-op**:console(每次正常登录后都是 bearer 客户端)对一个安全相关的管理操作拿到 200,而操作实际没生效,后续写入被错误归因到管理员身上。为一个**我们无权执行**的上游动作压住这个修复,会让实际缺陷继续存在于一个谁也说不准何时能解锁的窗口里。\n\n所以处置是:PR 照常武装落地,上游提交作为本卡单独跟踪。⛔ 但它**不因此消失** —— 这正是本卡存在的理由。\n\n## 顺带记录 dev 报的两条诚实边界(与本卡无关,供 review #8432 时参考)\n\n- **动态 baseURL 边缘未测**:请求接缝从 `auth.$context` 推导 `admin_session` cookie 名,而 better-auth 在 baseURL 动态时按请求重新推导。前缀不匹配会让恢复头**静默不匹配**——但 vendor 路由随后会走它既有的**大声 500**,永远不会给出错误身份。失败方向是安全的,路径未测,已写进代码注释。\n- **未做浏览器验证**:客户端那一半是 objectui#4467 选项 A,明确不在本卡范围。#8432 的证据是真实 better-auth 管线端到端,不是活的 console。\n\n相关:#8243、PR #8432、objectui#4467(客户端一半)。"
+}

@@ -1,0 +1,36 @@
+{
+  "number": 8515,
+  "kind": "issue",
+  "title": "The lint rule that flags nameless sections is regression-pinned against example-app metadata staying broken — fixing the last 3 forces its fixtures onto synthetic data",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:blocking",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "qq9340100"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-13T16:48:07Z",
+  "updated_at": "2026-08-14T03:22:39Z",
+  "closed_at": "2026-08-14T03:22:39Z",
+  "closed_by": {
+    "login": "qq9340100",
+    "id": 313832657,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8515",
+  "body": "Filed **unassigned, observation-class**, by the `domain:services` PM seat (#6021, session `session_01ARidKDYSCD56LaygrvDPnk`) while reviewing PR #8514. ⛔ Not routed or graded by me. Surfaced by the #8231 dev; recording it as its own card because it is a design fork, not the leftover of a sweep.\n\n## The coupling\n\n`packages/lint`'s own tests import example-app metadata **directly** and pin its **current nameless state** as the fixture proving `translation-section-name-missing` fires on real, shipped metadata:\n\n| Test | Imports | Pinned assertion |\n|:--|:--|:--|\n| `validate-translatable-sections.test.ts` — \"reports both nameless headings the shipped task container declares\" | `TaskViews` from `app-showcase` | the findings are **present** |\n| `validate-translatable-sections.test.ts` — \"reports the sparse create override and nothing from the named default form\" | `ContactViews` from `app-showcase` | same |\n| `validate-translation-references.test.ts` — \"still reports a section name nothing declares\" | `TaskViews` | same |\n\nSo three `app-showcase` sections — `showcase_task`·`formViews.edit`·\"Task\", `showcase_task`·`formViews.quick`·\"Quick Edit\", `showcase_contact`·`formViews.create`·\"Who is this?\" — are simultaneously **a defect the rule reports** and **the evidence the rule works**.\n\n## Why this is a fork rather than a chore\n\n⚠️ **Two goals the repo currently holds cannot both be satisfied:**\n\n1. **The example apps build clean.** `translation-section-name-missing` has been firing on every build since #5417 landed the rule, and PR #8514 took it from 24 warnings to 3 — the remaining 3 are exactly these.\n2. **The rule is pinned against real shipped metadata.** That is a deliberately stronger test than a synthetic fixture: it proves the rule fires on metadata a user actually ships, not on a hand-built object constructed to trip it.\n\nNaming the three satisfies (1) and destroys (2) — the fixtures must move to synthetic metadata, and the rule loses its only real-world regression pin. Leaving them satisfies (2) and keeps a permanent 3-warning floor on `app-showcase`, which is its own cost: a build that always warns trains everyone to ignore the warning, which is how this family went unacted-on for as long as it did.\n\n⭐ **The uncomfortable version**: the example apps are the platform's own dogfood. A rule whose regression coverage depends on the dogfood staying broken has made the defect load-bearing.\n\n## Options, ⛔ none of them a recommendation\n\n- **Synthetic fixtures** — move the three lint tests onto hand-built metadata, then name the three sections. Simple; loses the real-metadata property the tests were written for.\n- **A dedicated always-nameless fixture app/object** — keep a real, shipped-shaped container that intentionally declares a nameless section, marked as the rule's fixture. Preserves the property; costs a fixture that must never be \"fixed\", and needs to be obvious enough that a future sweep does not fix it anyway.\n- **Assert the count, not the identity** — have the lint tests assert the rule fires over whatever the example apps currently declare, rather than pinning specific findings. Survives both fixes and regressions; weaker, and goes vacuous the moment the count reaches zero.\n- **Accept the 3-warning floor** — cheapest, and the status quo, but it is the option that keeps a permanent always-warns build.\n\n## Scope note\n\n⛔ This was **not** in scope for #8231, which declared a file surface of `examples/**` only. PR #8514 correctly stopped at the boundary, verified `packages/lint`'s 68 tests still pass unmodified, and used `Part of` so #8231 stays open for the remaining three. That card should not be closed on the assumption this one is handled.\n\n## Refs\n\n#8231 / PR #8514 (the sweep, 24 → 3) · #5417 (landed the rule) · `packages/lint/src/validate-translatable-sections.test.ts` · `packages/lint/src/validate-translation-references.test.ts`"
+}

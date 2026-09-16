@@ -1,0 +1,32 @@
+{
+  "number": 8379,
+  "kind": "issue",
+  "title": "publish-time advisory: bare `unique: true` on a tenant-scoped object under group/isolated postures — point authors at the explicit 'organization' | 'global' choice",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-13T10:07:31Z",
+  "updated_at": "2026-08-13T23:52:19Z",
+  "closed_at": "2026-08-13T23:50:44Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8379",
+  "body": "Filed by the triage seat executing the maintainer's 2026-08-13 ruling on #8323 (part 3 of that ruling — see its ruling comment). This is the authoring-guidance half pulled forward as an **advisory**; the accept set does not change.\n\n## What\n\nWhen a tenant-scoped object declares a field with bare `unique: true` and the deployment/authoring context is a tenant-walled posture (`group` / `isolated`), publish-time validation emits a **warning** (not a refusal): the bare spelling materializes a **global** unique index, which under a tenant wall both leaks a 409-vs-201 oracle for other tenants' values and blocks legitimate same-value rows across organizations (measured end-to-end on #8323). The guidance names the two explicit spellings and what each means:\n\n- `unique: 'organization'` — unique within the tenant (`(organization_id, field)` index, ADR-0120 D1);\n- `unique: 'global'` — deliberately global, with the cross-tenant collision signal that implies.\n\n## Why a warning and not a refusal\n\nParked #5082 (v18 D2) already rules the endgame: bare `true` → `'global'` + loud refusal of the ambiguous spelling. This card pulls only the *guidance* forward so that the v18 flip hardens an existing warning instead of introducing a refusal cold, and so AI-authored apps are pushed toward the explicit spelling today. ⛔ Do not implement the refusal or any posture-aware reinterpretation of bare `true` here — both are explicitly reserved to #5082 by the #8323 ruling (\"Option 1 rejected for now\").\n\n## Landing\n\nThe posture-aware publish validation surface in `packages/spec` (the `validateSecurityPosture` family is the neighbouring pattern, cf. #7891). Warning text must state the mechanism (\"bare `unique: true` materializes a GLOBAL unique index\"), not just the preference.\n\n## Acceptance\n\n- Tenant-scoped object + bare `unique: true` + group/isolated context ⇒ warning present, publish still succeeds (accept set unchanged — pin both halves).\n- Explicit `'organization'` or `'global'` ⇒ no warning.\n- Non-tenant-scoped objects and `single` posture ⇒ no warning.\n\nRefs: #8323 (ruling + measurements) · #5082 (v18 endgame, parked) · ADR-0120 D1."
+}

@@ -1,0 +1,33 @@
+{
+  "number": 8951,
+  "kind": "pull_request",
+  "title": "docs(scripts): state the ablation-on-dist hazard by its true condition, not as a dogfood property",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-16T02:35:06Z",
+  "updated_at": "2026-08-16T03:07:25Z",
+  "closed_at": "2026-08-16T03:07:23Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": "2026-08-16T03:07:23Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/8951",
+  "body": "Fixes #8706\n\nHeader prose only, in `scripts/ablation-dist-preflight.mjs`. **Every changed line is a `//` comment; the executable code is byte-identical** (`git diff -U0 | grep -vE '^[+-]//'` returns nothing).\n\n## What was wrong\n\nThe header opened by framing the ablation-on-dist false green as a property of one suite:\n\n> `packages/qa/dogfood` resolves the code under test from each package's built `dist/`…\n\nThat is an instance, not the condition. The hazard belongs to **resolution**: any test whose subject resolves through the dependency's `exports` — which point at that package's built `dist/` — with no vitest alias redirecting the specifier back to source. A guard whose stated scope is narrower than its hazard gets trusted where it proves nothing.\n\n## What the header now says\n\n**1. The true condition, with the enumerable list.** The set is already enumerated: `KNOWN_UNALIASED_TEST_IMPORTS` in `scripts/check-test-source-alias.mjs`, the measured shrink-only ledger of exactly those package-dependency pairs — **61 packages, 305 pairs**, re-measured on this branch rather than carried from the card. `packages/qa/dogfood` is named as the most familiar instance, not the definition. Both measured pairs are cited: `plugin-email` ⇢ `platform-objects` (375 passes on an ablated field, 4 red once rebuilt) and `plugin-auth` ⇢ `core`.\n\n**2. Why this is worse than an uninformative green** — a new sub-section, because it is the part a reader acts on. When the ablation's purpose was to prove a *new gate is capable of failing*, an un-rebuilt run returns \"the gate did not fire\", which reads as evidence the **gate** is broken rather than the harness. A dev acting on it hunts a fix that is not needed, or weakens a working gate until it \"fires\" — destroying the thing the ablation was written to certify. The false green points confidently the wrong way.\n\n**3. Both halves of the mechanical rule.** The existing restore-leg paragraph is amended (not duplicated) into an explicit two-line statement: mutate ⇒ rebuild ⇒ prove the marker is IN `dist/`; restore ⇒ rebuild ⇒ prove it is GONE. The restore half is the one that gets skipped — rebuilding after mutating is obvious, remembering that *restoring* also needs a rebuild before the next measurement is trustworthy is not.\n\n**4. The measured limitation of the whole-package scan** — new section, adjacent to the existing sourcemap-fidelity one, because it is a different topic from the hazard itself. A marker the package also writes elsewhere breaks **both** modes in **opposite** directions: `--absent` reports surviving hits that were never yours (false red), and the default mode passes on a sibling's hit alone (false green — the very failure this script exists to stop, reintroduced through the marker choice). The worked example is kept close to verbatim from the filing measurement: the `internal: true` case on `sys_email`, and the `node -e` property read that is exact where a substring scan cannot be.\n\nThe section states plainly that **there is no per-symbol mode** and prescribes the property read as the fallback. It makes no design commitment either way — whether the preflight should grow such a mode was raised and deliberately left unsettled on the card, and stays out of this PR.\n\n## Scope notes\n\n- **The card's stated file surface was half wrong, and the PM had already re-scoped it.** Both the card and its triage grading say to fix *\"the AGENTS.md ablation clause\"*. **There is no such clause** — re-verified here on this branch: `AGENTS.md` reads at 927 lines (positive control) and `grep -inE 'ablat|mutat|rebuild.*dist'` over it returns only the worktree/stash directives at `:170` and `:208`. The real second and third locations are the ones the script itself names, which are the skills root and another seat's lane; #8949 carries that half, human-merge only. Nothing under `.claude/` is touched here.\n- **One bounded in-place correction, named rather than smuggled.** The header's \"keep those two … in step\" list was factually incomplete: `packages/qa/dogfood/README.md` step 4 is a **third** live copy of the procedure and now carries the full rebuild instruction. The list is corrected to three and marked as stating the procedure *scoped to dogfood*, against the resolution condition at the top. Same file, same defect class (the header understating its own scope), evidence pinned by grep; no file outside the declared surface is edited.\n\n## Verification — union run at `09469effa` (the final commit)\n\n`node scripts/pm/dispatch-gates.mjs scripts/ablation-dist-preflight.mjs` re-run on the real diff: **no check family names this path in its own source** (exit 0) — expected for dev-side agent tooling that is deliberately not a `check:*` gate.\n\n| check | exit |\n| --- | --- |\n| `check:nul-bytes` (any edit) | **0** — 5934 text files scanned, no raw control bytes |\n| `node scripts/ablation-dist-preflight.mjs --self-test` | **0** — all 13 cases pass |\n| usage path (no args) | **2**, as designed |\n| real invocation against an unbuilt `dist/` | **1**, as designed |\n\nJudged by exit status, not by grepping the output. A control-byte self-scan beyond the gate (`grep -naP` over the edited file) also returns no hits — the diff discusses markers and mutation, which is exactly when escapes get materialised into real bytes.\n\nNo changeset: `scripts/` is not published package source and nothing user-visible changes. Labelled `skip-changeset` at PR creation.\n\n_Generated by [Claude Code](https://claude.ai/code/session_011RB4waLuNbdruCo6X9oobm)_\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_011RB4waLuNbdruCo6X9oobm)_"
+}

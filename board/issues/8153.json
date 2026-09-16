@@ -1,0 +1,36 @@
+{
+  "number": 8153,
+  "kind": "issue",
+  "title": "Every wizard-created datasource with a password is badged invalid today — the service writes external.credentialsRef onto rows whose schemaMode defaults to 'managed', which the schema refuses",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:spec",
+    "priority:p0"
+  ],
+  "assignees": [
+    "qq9340100"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-12T18:16:11Z",
+  "updated_at": "2026-08-14T00:53:40Z",
+  "closed_at": "2026-08-14T00:53:23Z",
+  "closed_by": {
+    "login": "qq9340100",
+    "id": 313832657,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8153",
+  "body": "Split out of #8081 scope item 5 by the `domain:services` PM seat. ⛔ Not graded by me; **no `domain:*` label** — the fix is in `packages/spec` (⇒ likely `domain:spec` + fable per the standing contract-change clause), but the routing is triage's call.\n\nPromoted out of #8081's proposal surface because the measurement **changed its nature**: it was carried there as a theoretical inconsistency, and it is neither theoretical nor an edge case.\n\n## Measured — it is the default happy path\n\n```\nPOST /api/v1/datasources {name:'good_pg', driver:'postgres',\n                          config:{host,database,username}, secret:'hunter2'}   → 201\npersisted:  {name:'good_pg', config:{…}, origin:'runtime',\n             external:{credentialsRef:'sys_secret:bound'}}        // no schemaMode\n\ncomputeMetadataDiagnostics('datasource', <that row>)\n  → {valid:false, errors:[{path:'external',\n      message:\"'external' settings only apply when schemaMode != 'managed'.\"}]}\n```\n\n`DatasourceSchema.schemaMode` **defaults to `'managed'`** (`datasource.zod.ts:502`), and `createDatasource` writes `external.credentialsRef` without consulting `schemaMode`. So **every wizard-created datasource that has a password** — the ordinary way an operator adds one — is badged `_diagnostics.valid:false` in the Studio metadata list right now, and `PUT /meta` on that row answers **422 for a shape the service itself wrote**.\n\n**Blast radius, measured:** it does **not** break connect (the connect path never re-parses) and does **not** break the datasource-admin routes. The damage is the invalid badge plus the `PUT /meta` 422. So this is a correctness-of-the-contract defect, not an outage — which is why it survived unnoticed.\n\n## ⚠️ The obvious fix is wider than the problem\n\n#8081 recorded the dev recommendation as \"A — allow `external.credentialsRef`, or a top-level ref, on managed\". The implementing dev then corrected that framing, and I think the correction is right:\n\n> \"Allow `external` on managed\" is wider than the problem. The refinement's *intent* is sound — federation settings genuinely do not apply to a managed datasource — and blanket-allowing `external` discards a real check to unblock one key.\n\n**The narrow shape: allow `credentialsRef` (and only it) on managed; keep refusing the federation keys.** That preserves the refinement's meaning and matches what the service already writes. ⛔ \"A as written\" would trade a live check away for free.\n\nThe alternative direction — make `createDatasource` stop writing `external.credentialsRef` on managed rows and put the ref somewhere else — is not obviously worse, but it moves a shipped persisted shape and every reader of it. Whoever takes this should weigh both rather than inherit the first.\n\n## Sequencing — ⚠️ this blocks #8081's migration story\n\n#8081 item 3's migration writes `external.credentialsRef` onto existing rows. Running it before this is settled would convert every affected managed datasource from *\"invalid because it holds cleartext\"* to *\"invalid because it holds a `credentialsRef`\"* — a migration whose entire output lands in the shape that fails re-parse. **Settle this first.**\n\n## Constraints\n\n- ⛔ The `packages/spec` change is a contract change; it does not land from the services lane.\n- ⛔ Do not \"fix\" it by removing the `schemaMode != 'managed'` refinement outright — the federation half of it is doing real work.\n- The connect path never re-parses, so a fix must not assume re-parse is the enforcement point.\n\nProvenance: #8081 dev report (comment 5269923121, §⑤) and my ACCEPT receipt (#8081 comment 5270102954). Related: #7990, #8078, #8081."
+}

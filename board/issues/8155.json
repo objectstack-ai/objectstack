@@ -1,0 +1,37 @@
+{
+  "number": 8155,
+  "kind": "issue",
+  "title": "Migration story for stored cleartext datasource credentials: operator-initiated re-homing into sys_secret (blocked by the managed-schemaMode refusal)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "pm:dispatched",
+    "security",
+    "target:v17"
+  ],
+  "assignees": [
+    "qq9340100"
+  ],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-08-12T18:16:54Z",
+  "updated_at": "2026-08-14T15:01:31Z",
+  "closed_at": "2026-08-14T15:01:31Z",
+  "closed_by": {
+    "login": "qq9340100",
+    "id": 313832657,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8155",
+  "body": "Split out of #8081 scope item 3 by the `domain:services` PM seat. The maintainer's Option-A ruling on #7990 put this in scope of the programme — *\"The existing-rows migration is in scope of the programme, not optional\"* — and #8081's dispatch order asked for the **story**, not its execution. This card carries the proposal the dev produced. ⛔ Not graded by me; **no `domain:*` label**.\n\n`Blocked-by:` #8153\n\n## An inventory already exists, and it is free\n\n`/meta` re-parses every stored row and badges it `_diagnostics: {valid:false, errors:[…]}` carrying the full refusal message. **Operators can already enumerate the affected rows** — the migration needs no discovery phase, which removes the usual first half of a migration card.\n\n⚠️ That also creates a coupling worth stating: #8154 (redacting the `/meta` read path) must not strip or break `_diagnostics`, or this inventory disappears.\n\n## Recommended shape — (b) admin tooling, per-datasource, operator-initiated\n\nA Setup action — *\"Move credential to the secret store\"* — that reads the stored cleartext, binds it through the **existing** `SecretBinder.bind()`, writes `external.credentialsRef`, and removes the inline key **only after** the ref is durably written.\n\n**Is it destructive? No, and deliberately so.** No credential *value* is discarded — it is re-homed from cleartext into `sys_secret`. The inline key is deleted only once the encrypted row exists. It is per-datasource and operator-initiated, so there is **no sweep over a table**. That matters: the ruling's \"escalate if destructive\" clause is what this shape is designed to stay clear of.\n\n## Rejected, with reasons\n\n- **(c) one-time boot script** — decides the secret's identity with **no operator present** and mutates rows at boot. That is precisely the destructive-sweep shape #8103 split out of #8030 for the same reason. The ruling's escalate-if-destructive clause points straight at it.\n- **(a) read-time refusal + re-entry prompt** — non-destructive, but it **breaks working datasources** in order to prompt a human, and it is unnecessary once (b) exists. Worth keeping only as a fallback for rows (b) cannot bind.\n\n## ⚠️ Sequencing — this is blocked, and running it early makes things worse\n\nThe migration's entire output is `external.credentialsRef` on an existing row. Per **#8153**, writing that onto a row whose `schemaMode` defaults to `'managed'` is exactly the shape that fails re-parse.\n\n⇒ Running this before #8153 is settled would convert every affected managed datasource from *\"invalid because it holds cleartext\"* to *\"invalid because it holds a `credentialsRef`\"* — a migration that moves rows from one invalid state to another while appearing to succeed. **#8153 first.**\n\n## Constraints\n\n- ⛔ No sweep over the credential table without an operator. If the shape drifts back toward (c), it needs escalation per the ruling, not a lane decision.\n- The ref must be durably written **before** the inline key is removed — a crash between the two must leave the row working, not credential-less.\n- ⚠️ Re-running must be idempotent and must not mint a second `sys_secret` row for an already-migrated datasource (the orphan-accumulation failure mode measured in #8103 and guarded in PR #8114's `headersPatch`).\n- Rows (b) cannot bind need a stated outcome — that is where fallback (a) earns its place.\n\nProvenance: #8081 dev report (comment 5269923121, §③), #7990 maintainer ruling (comment 5266068845), my ACCEPT receipt (#8081 comment 5270102954). Related: #8103 (the same destructive-sweep boundary, for `sys_secret` orphans), #8154, #8152."
+}

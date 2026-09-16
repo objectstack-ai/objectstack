@@ -1,0 +1,34 @@
+{
+  "number": 8131,
+  "kind": "issue",
+  "title": "The package door's 4xx paths still ship raw driver text — a returned failure never meets the 5xx withhold, and is mislabelled a client error",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:services",
+    "security"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-12T17:26:00Z",
+  "updated_at": "2026-08-14T15:14:33Z",
+  "closed_at": "2026-08-14T15:14:33Z",
+  "closed_by": {
+    "login": "qq9340100",
+    "id": 313832657,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 10,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8131",
+  "body": "Found while implementing #8086 (the 5xx message withhold on the same door, PR #8130). Recorded rather than acted on: #8086's ruling scoped the fix to **5xx messages only**, and these are 4xx, so the sanitizer landing there deliberately does not touch them. Filed unassigned; nobody is on it.\n\n## The gap\n\n#8086 closed the disclosure on `sendThrownError` — the exit a **thrown** error leaves by. Two other paths in the same registrar report failure by **returning** rather than throwing, so neither `resolveThrownHttpError` (#8016) nor the new withhold (#8086) ever sees them. Both answer **400** and both carry raw driver text.\n\n### 1. `POST /api/v1/packages/publish`\n\n`packageService.publish` swallows the driver error and hands the message back as data (`packages/services/service-package/src/index.ts`):\n\n```js\n} catch (error) {\n  logger.error('Failed to publish package', error as Error);\n  return { success: false, error: (error as Error).message };\n}\n```\n\nand the handler puts it straight on the wire (`packages/rest/src/package-routes.ts`):\n\n```js\nsendError(res, 400, 'PACKAGE_PUBLISH_FAILED', result.error ?? `Failed to publish ${manifest.id}.`);\n```\n\nThe statement being run is `INSERT INTO sys_packages (...) ON CONFLICT(id, version) DO UPDATE SET ...`, so a driver failure there produces exactly the family of text #3867's predicate exists to withhold — a constraint dump naming `sys_packages` and its columns, or a `SQLITE_ERROR` / `SQLSTATE` line.\n\n**Two defects, not one.** The disclosure is the obvious half. The other is that a driver fault is being reported as **400** — a client error, inviting the caller to fix a request that was never the problem, and hiding a real server fault from every dashboard that buckets by status. This is precisely the class #8016 fixed for the throw path (`a caller who was refused was told the platform had broken`), in mirror image: here the platform breaks and the caller is told they made a mistake.\n\n### 2. `DELETE /api/v1/packages/:id` — the partial-failure detail\n\n`protocol.deletePackage` collects per-item failures with their raw messages:\n\n```js\n} catch (e: any) {\n    failed.push({ type: row.type, name: row.name, error: e?.message ?? 'delete failed', ... });\n}\n```\n\nand the handler ships that array as structured detail on a 400:\n\n```js\nsendError(res, 400, 'PACKAGE_DELETE_PARTIAL',\n  `Deleting ${packageId} left ${result.failedCount} item(s) behind.`,\n  { details: { failed: result.failed, cleanups: result.cleanups } });\n```\n\nEach `failed[].error` is whatever `deleteMetaItem` threw — including its `Failed to delete customization overlay: ${err.message}` re-wrap, which interpolates the driver line. Note this leaks through **`details`**, not `message`, so even a message-level withhold at this door would not reach it.\n\n## Why this is not just \"extend #8086 to 4xx\"\n\nIt must not be. A 4xx message is caller-facing by design and #8086's PR pins that on purpose — the protocol's `[tenant_scope_required]` refusal names the exact parameter to pass, a `409 DESTRUCTIVE_CHANGE` names the remedy. Blanket-sanitizing 4xx would destroy the self-correcting messages #4277 exists for.\n\nThe honest fixes are the other two:\n\n- **Classify correctly.** A driver fault surfacing through `publish` is a 5xx, and once it is, the #8086 withhold covers it with no new rule. This is the contract-first reading: the status is wrong, and the disclosure is downstream of the wrong status.\n- **Fix at the producer** — the option C of #8086. `service-package` returning `(error as Error).message` as a caller-visible string is the same producer-side defect as `metadata-protocol` interpolating driver text, and it wants the same remedy: the driver text goes to the log (it already does — `logger.error` is right there), and the caller gets a stable sentence.\n\n## Evidence\n\nRead from code, with the reachability of the sibling 5xx path measured. The #8086 reproduction drove a **throwing** `publish` through this handler (confirming the catch-all exit), and separately walked a real `ObjectQL` engine + real `ObjectStackProtocolImplementation` failure through `DELETE`, capturing the driver line on the wire. **What was NOT driven end to end** is the real `service-package` `publish` catch above — its return-shaped path is read from source, not reproduced. Whoever takes this should force an `INSERT INTO sys_packages` failure and record the actual 400 body before fixing, the same way #8086 was made to earn its premise.\n"
+}

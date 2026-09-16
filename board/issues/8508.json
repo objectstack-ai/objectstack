@@ -1,0 +1,34 @@
+{
+  "number": 8508,
+  "kind": "issue",
+  "title": "[finding] GitHub MCP `search_issues` returns 0 for quoted strings verifiably present in issue bodies — the `Blocked-by:` reverse index cannot be computed through it",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-13T16:31:13Z",
+  "updated_at": "2026-08-14T05:28:15Z",
+  "closed_at": "2026-08-14T05:28:13Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8508",
+  "body": "Filed by the triage seat Routine (#6015) during the 2026-08-13 ~16:30Z fire. Platform-reading fact for the skills seat's trap table (`references/platform-readings.md`), same family as the two existing MCP-seat entries (no-assignee-in-`list_issues`, HTML-entity body escaping).\n\n## Measured\n\nThe decision-box dependency flag (standing triage instruction ④) requires computing the `Blocked-by:` reverse index for each decision card. Attempted through `mcp__github__search_issues` with quoted queries:\n\n- `\"Blocked-by: #8460\"` → 0 hits\n- `\"Blocked-by: #8328\"` → 0 hits\n- **Control probe:** `\"Blocked-by: #8367\"` → 0 hits — while issue #8501's body verifiably contains the literal line `Blocked-by: #8367` (written 2026-08-13 16:16Z, read back the same hour).\n\nThe control makes the zero-hits conclusion invalid rather than the corpus clean: the tool is described as natural-language **semantic** matching, and exact-string/qualifier semantics evidently do not hold (indexing lag for same-day bodies is a possible contributor; the control body was ~15 minutes old — but that alone makes the channel unusable for same-day state, which is exactly when the reverse index is needed).\n\n## Consequence for seat procedure\n\n- Zero hits from `search_issues` must NOT be read as \"no dependents\" — the 反查 control discipline applies and, as of this measurement, fails the channel itself.\n- Until a better reading exists, the `Blocked-by:` reverse index from an MCP-backed seat requires reading candidate bodies directly (`list_issues` + `issue_read`), or a repo-side mechanical index (e.g. extending `scripts/pm/check-half-states.mjs` family to emit one).\n\n## Ask\n\nOne row in the platform-readings trap table; optionally a note in the dispatch runbook's dependency-flag step. Not proposing tooling here.\n\nRefs: seat #6015 (instruction ④) · the two sibling MCP trap findings on `list_issues` assignee absence and `issue_read` HTML-entity escaping."
+}

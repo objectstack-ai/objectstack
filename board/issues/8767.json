@@ -1,0 +1,35 @@
+{
+  "number": 8767,
+  "kind": "pull_request",
+  "title": "fix(platform-objects): restore the declared title on the System Overview by-action table and pin the default-locale bundle to the source",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-14T21:28:48Z",
+  "updated_at": "2026-08-14T22:00:25Z",
+  "closed_at": "2026-08-14T22:00:24Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-08-14T22:00:24Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/8767",
+  "body": "Fixes #8721\n\n`widget_recent_events` was converted into an ADR-0021 single-form — a dataset-bound breakdown of `sys_audit_log` events by action — but all four hand-authored locale bundles kept serving the title the widget had **before** that conversion. The translation is what renders, so the declared string reached nobody in any locale. Its `description` had drifted the same way, one field over.\n\n## What changed\n\n**1. The four stale bundle values.** Leaf-value edits only — this half is hand-authored and regenerating it would delete roughly 40 runtime-contributed nav translations per locale (`scripts/i18n-extract.config.ts` documents why).\n\n| locale | was | now |\n|:--|:--|:--|\n| `en` | Recent Audit Events | Event Volume by Action |\n| `zh-CN` | 最近审计事件 | 按操作统计的事件量 |\n| `ja-JP` | 最近の監査イベント | アクション別イベント件数 |\n| `es-ES` | Eventos de Auditoría Recientes | Volumen de Eventos por Acción |\n\n**2. The duplicate the stale translation was hiding.** With the source string restored, the board carried the same label twice: `widget_events_by_type` (a pie) and `widget_recent_events` (a table) both declared `Audit Events by Action`, over the same dataset and the same dimension. They looked distinct in a running instance only because one of them was serving a stale translation — so the duplicate was invisible in the UI and visible only in the source.\n\nThe pair now splits on what each one adds: the pie keeps `Audit Events by Action` (the share picture), the table becomes `Event Volume by Action` (the exact per-action count, which is what its `values: ['event_count']` produces and what its description already said). The pie is left untouched deliberately, so this PR does not re-translate three bundles' worth of strings that were never stale. All nine widget titles on the board are now distinct, in all four locales.\n\nWidget **ids are unchanged**, so no translation key, persisted widget state or dataset binding moves.\n\n**3. The gate that would have caught it.** Every pre-existing claim over this half is a **key-set** claim — `app-nav-translation-parity.test.ts` asserts a translation exists and does not outlive its declaration, `check:i18n-coverage` ratchets *untranslated* labels, `check:app-nav-i18n` judges the merged nav tree. A key whose value is stale satisfies all of them.\n\nThat test now also asserts the **default locale's content**: every statically declared app label, description and nav label, plus the dashboard's label, description and every widget title/description, must appear in `en.ts` **verbatim**. The claim is available for `en` alone because `en` is a copy of the source rather than a translation of it — the same invariant the generated half of this package's i18n already enforces by rewriting its `en` bundle on every extract.\n\n## Positive control — the assertion is shown to fail\n\nAn assertion that cannot fail is worse than none, so it was broken three ways at the committed state and restored from the commit each time (never `git stash`):\n\n| mutation | result |\n|:--|:--|\n| `en.ts` widget title dragged back to `Recent Audit Events` | RED on `dashboards.system_overview.widgets.widget_recent_events.title` |\n| the **source** moved instead (`widget_events_by_user.description`) | RED on that path — the claim is symmetric, not one-sided |\n| an `en.ts` app nav label suffixed with `(stale)` | RED on `apps.account.navigation.grp_account_inbox.label` |\n\nEach run reported **1 failed, 23 passed**: the 23 pre-existing key-set claims stayed green under every stale value, which is exactly the blindness this card was filed for, reproduced and then caught.\n\n## Verification\n\nGate union re-run **after** the final commit, at `aefb22fe5` — all green:\n\n`platform-objects` test (20 files, 380 tests) and `typecheck`; `check:i18n`, `check:i18n-coverage`, `check:app-nav-i18n`; `check:changeset-gate-self-tests`, `check:objectui-changeset`, `check-adr-0087-registration`, `check-changeset-no-major`, `check-empty-changeset`; `check:query-options-erasure`; `check:nul-bytes`; `check:type-check-coverage` and the `check:type-check-debt` ratchet over the built closure — this package's `tsconfig.json` excludes `**/*.test.ts`, so the new test code's types are verified by that re-measure (it lifts the exclusion) rather than by `pnpm typecheck`, and its exact `TEST_DEBT` of 3 is unmoved.\n\n## Deliberately not done here\n\nStale-marking for **translated** locales when a source string changes — a product decision on what a stale translation should do, excluded by this card's triage fence. Filed as #8765 rather than designed here, with the observation that pinning `en` sharpens the asymmetry rather than reducing it: the drift stops being uniform across four bundles and becomes locale-specific, invisible to any reviewer reading the product in English.\n\nAlso filed: #8764 — the `pages.*` third of these bundles mirrors page metadata authored in other packages, so it is outside this walk in **every** locale including `en`. Nothing is stale there today; the two deliberate gaps are now cross-referenced from the test's own comments instead of being argued and tracked nowhere.\n\nNeither is addressed in this PR.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01XeQRiAa7vYRVX5Fog7Zby8)_"
+}

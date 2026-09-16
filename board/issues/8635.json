@@ -1,0 +1,34 @@
+{
+  "number": 8635,
+  "kind": "pull_request",
+  "title": "docs(agents,pm-dispatch): bind a gate-union run to a commit — run it after the final commit and quote HEAD",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-14T04:40:05Z",
+  "updated_at": "2026-08-14T05:25:42Z",
+  "closed_at": "2026-08-14T05:25:40Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-08-14T05:25:40Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/8635",
+  "body": "Fixes #8550\n\nShapes 1 and 3 composed per the recorded seat ruling; shape 2 (a mechanical sha-stamping wrapper) is deferred by that same ruling and no machinery is built here.\n\n## The gap\n\nThe dev-seat contract said **which** gates to run and never **when**. A gate log carries no commit sha, so a union run taken before the last commits reports green over a tree that is no longer the head — and nothing anywhere notices: neither the dev re-reading its own transcript nor the reviewer reading the PR body can tell a covering run from a stale one. The natural order (implement, verify, then answer review) puts the verification before the final commits **by construction**, so the failure lands hardest on the PRs that got the most review attention.\n\n## What changed\n\n**`.claude/agents/os-dev.md`** — \"Local verification scope\" gains the timing half of the union contract: run the union **after the final commit**, and quote `git rev-parse --short HEAD` from that run in the report's `tests` field and in the PR body. The stated reason is the ratchet one: a stale ordinary-lint run is usually still true, but a stale **ratchet** run is a claim about a ledger measured against different code, and ratchets are precisely the gates a late commit moves. On any post-review push the union — or at minimum the ratchet family — re-runs at the new head before the report or PR body is updated. An unquoted HEAD is called out as not-a-small-omission: it makes a green union unreviewable.\n\nThe engine-double trap bullet also gains one sentence recording the third remedy the gate's own message does not name — override the file's existing double instead of declaring a second one, so there is no new double to pin and no ledger to touch. Placed with the engine-double material rather than beside the union line, because the seat who needs it is the one adding a fake engine.\n\n**`.claude/skills/pm-dispatch/references/review-checklist.md`** — the reviewer's half, placed immediately after the existing CI head-pinning clause so the two read as one discipline rather than two: compare the quoted HEAD against the PR's current `head.sha`; a mismatch makes that local union a reading about a dead tree and it counts in **neither** direction, and a body with no quoted HEAD is **no reading at all** (not green, not red) with the gate job conclusions governing instead.\n\n## Path surface — human merge\n\nDiff touches `.claude/agents/**` (agent-definition text) and `.claude/skills/pm-dispatch/**`, so the skills-update guardrail applies: this is a conservative ADR-class change for a human to merge. Left as **draft**, auto-merge not armed, not queued. Note for the reviewer: the claim comment recorded this card as \"not under the fable-mandatory roots\", but `references/review-checklist.md` does live under `.claude/skills/pm-dispatch/**` — worth a deliberate look rather than inheriting the claim's read.\n\n`skip-changeset`: docs/agent-protocol only, nothing published changes.\n\n## Verification\n\nUnion run **after the final commit**, at `HEAD=99cc617bfe` — practicing the clause this PR writes. All eight exit 0:\n\n```\n=== UNION RUN AT HEAD=99cc617bfe ===\n[exit=0] pnpm check:agent-model-declared\n[exit=0] pnpm check:doc-authoring\n[exit=0] pnpm --filter @objectstack/lint run check:doc-formula-expressions\n[exit=0] pnpm check:nul-bytes\n[exit=0] pnpm check:pm-skill-id-lint\n[exit=0] pnpm check:pm-skill-ratchet\n[exit=0] pnpm check:skill-frame-sync\n[exit=0] node scripts/check-skill-frame-freshness.mjs\n=== UNION AT HEAD=99cc617bfe overall_fail=0 ===\n```\n\nRe-derived against the actual changed paths (`node scripts/pm/dispatch-gates.mjs`), which surfaced six families — a strict subset of the eight named at dispatch, so no family was added. `check:pm-skill-ratchet` and `check-skill-frame-freshness.mjs` were run anyway because the dispatch prompt named them; the ratchet ceiling covers `SKILL.md` only, which this diff does not touch (686 lines, headroom 0, unchanged).\n\nOne red on the first pass was environmental, not a defect: `check:doc-formula-expressions` died on a missing `@objectstack/formula/dist/index.mjs` in a fresh worktree. Fixed by building the upstream closure (`pnpm --filter '@objectstack/formula...' build`) and re-running; the log above is the post-build run.\n\nBoth edited files self-scanned for raw control bytes and for issue-ID citations (`#` followed by three or more digits) — clean in both, which the id-lint gate independently confirms.\n\n_Generated by [Claude Code](https://claude.ai/code/session_018WuTtyckQa1VcXwgd52JpN)_\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_018WuTtyckQa1VcXwgd52JpN)_"
+}

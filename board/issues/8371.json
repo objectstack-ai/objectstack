@@ -1,0 +1,35 @@
+{
+  "number": 8371,
+  "kind": "issue",
+  "title": "[finding] The FILTER axis has no DOTTED-path verdict — `where: { project_id.name: 'x' }` rides its head segment past both doors, where SORT refuses the same spelling (#4256)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-13T09:46:48Z",
+  "updated_at": "2026-08-16T02:05:38Z",
+  "closed_at": "2026-08-16T02:05:38Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 11,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8371",
+  "body": "Filed from PR #8369 (#8296) as an observation, not a defect claim — the driver-side half is genuinely unmeasured and one backend may support the spelling natively. No `pm:queue`.\n\n## The gap, as a code fact\n\n`assertFilterFieldsExist` (`packages/metadata-protocol/src/protocol.ts`) judges a filter key on its **head segment only** — deliberately, and its docblock says why: `{ owner: { region: 'NA' } }` is a legitimate nested-relation condition whose inner keys belong to a different object. So `where: { 'project_id.name': 'Apollo' }` clears the unknown check because `project_id` is a real field, and #8369's new virtual verdict deliberately skips dotted keys too (documented in both doors' scope notes: this axis has one verdict, and inventing a dotted one for the formula-headed case alone would answer two spellings of one unjudged shape differently).\n\nThe SORT axis does not leave it there. #4256 gave it a dedicated verdict — a dotted path is refused because \"sort reaches only columns of this object itself\", with a denormalise-onto-a-stored-field remedy — and #7589 did the same for the PROJECTION axis at both doors. FILTER is now the only one of the four axes with no answer for a dotted name.\n\n## What is NOT established\n\nWhether this is a defect at all depends on the backend, and that is the part nobody has measured:\n\n- `driver-mongodb` supports dotted paths natively (`{'owner.region': 'NA'}` is ordinary Mongo), so a refusal could remove a working feature;\n- `driver-sql` renders it as a column against a table that was never joined — the #3821 \"no such column\" ladder, whose recovery path decides whether the answer is zero rows, every row, or an error;\n- `driver-memory` resolves the path against the row itself, where a foreign key is a scalar id.\n\nThree backends, possibly three answers, which is the same shape #5869 documented for comparands — but unlike that one it has not been measured here. The right first step is a measurement across the three drivers, not a gate.\n\n## Why file it now\n\nThe three sibling axes each closed this and the FILTER one was never asked. If the drivers really do disagree, this is the fail-open shape #4181 / #4254 / #7589 each closed one axis over; if Mongo genuinely serves it, the answer may be a capability declaration rather than a refusal. Either way the question deserves to exist somewhere other than a scope note inside a docblock.\n\nSibling context: #4256 (sort, dotted), #7589 (projection, dotted, both doors), #7534 (filter, unknown), #8296 (filter, unmaterializable).\n"
+}

@@ -1,0 +1,37 @@
+{
+  "number": 8154,
+  "kind": "issue",
+  "title": "[security] GET /api/v1/meta/datasources still serves stored cleartext credentials — the metadata read path has no per-type redaction hook",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched",
+    "security",
+    "target:v17"
+  ],
+  "assignees": [
+    "qq9340100"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-12T18:16:33Z",
+  "updated_at": "2026-08-14T13:14:06Z",
+  "closed_at": "2026-08-14T13:14:06Z",
+  "closed_by": {
+    "login": "qq9340100",
+    "id": 313832657,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 10,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8154",
+  "body": "Blocked-by: #8300\n\n⚠️ **Scope grew on measurement — read the PM review (comment `5275779695`) before implementing.** Three rulings are settled there and are ⛔ not re-litigable: the fix is **one PR** carrying the hook, the datasource redactor, the read-exit application, the `getMetaItemLayered` exit **and** the `saveMetaItem` write-path carry-forward; the registry seam itself is split out to **#8300** (`packages/spec`, another lane) and this card consumes it. Second, non-dependency gate: **#8136 must land first** (`protocol.ts` serialisation).\n\n⛔ **The read scrub may NOT ship alone.** Measured, not argued: `saveMetaItem` *accepts* a redacted datasource body and persists the credential away, so a read-path redaction without the write-path inverse converts today's loud `422` into **silent credential deletion** on an ordinary GET-edit-PUT round trip.\n\n---\n\nSplit out of #8081 by the `domain:services` PM seat. The implementing dev hit this, **stopped, and reported it** rather than fixing it, per the dispatch order's STOP rule — the fix leaves the services lane. ⛔ Not graded by me; **no `domain:*` label**.\n\n## What is still open after PR #8126\n\nPR #8126 stopped `DatasourceAdminService.getDatasource()` serving stored credentials. **One door over, the platform still does.**\n\n`decorateMetadataItem` returns `{...item, _diagnostics}` — the **whole stored body**. So after #8126:\n\n- `GET /api/v1/datasources/:name` → clean\n- `GET /api/v1/meta/datasources` → **still serves the stored cleartext**\n\n#8078's own refusal text asserts this door exists, in as many words: *\"the datasource is persisted whole into `sys_metadata`, which is served back by the ordinary data API.\"*\n\n✅ **Re-measured on `origin/main` `a7e94e990` and CONFIRMED, on three exits**, not one: a legacy `datasource` row is served with `config.password: \"hunter2\"` **and** the password embedded in `config.url` by `getMetaItems` (the door this card names), by `getMetaItem`, and by `getMetaItemLayered` in **both** its `overlay` and `effective` layers.\n\n## ⚠️ This bounds what #8081 item 1 is allowed to claim\n\nThe honest statement after #8126 is: **the datasource-admin read path no longer serves stored credentials.** It is *not* \"the surface is closed.\" The dev said so unprompted, which is the reason this card exists rather than a false sense of closure:\n\n> I would rather you hear that now than read \"item 1 done\" and believe the surface is closed.\n\nRecording it prominently because this is the **third** time in this programme that a partially-closed credential surface read as fully closed — #7799 → #7986 (webhook headers), #7986 ①-a → #8118 (delivery rows), and now #8126 → this card. The pattern is the same each time: a fix lands on the door that was measured, and the reading generalises past what was measured.\n\n## Why it needs its own lane\n\n- The surface is `packages/metadata-protocol` / `packages/rest`, not `service-datasource`.\n- It needs a **generic per-type redaction hook** on the metadata read path — **datasource is not the only type that could hold a secret**, so a datasource-shaped patch here would be the narrow fix that leaves the next type exposed.\n- The blast radius is every metadata type, which is why it did not belong as a rider on a card scoped to one service.\n\n## Constraints for whoever takes it\n\n- ⛔ Do not solve it by redacting `datasource` specifically. The hook is the deliverable; the datasource case is its first consumer.\n- ⚠️ `_diagnostics` is load-bearing for the migration story (#8081 item 3 uses the `valid:false` badge as its free inventory of affected rows). A redaction that also strips or breaks `_diagnostics` would remove the operator's only enumeration path.\n  - ⭐ **Now measured, and it fixes the ordering**: diagnostics MUST be computed on the **raw stored body BEFORE** redaction. Computing them after flips `valid:false` → `valid:true` and destroys the badge. Reverse-verified in the predicted direction.\n- The connect path reads the raw record; a read-path redaction must not reach it (same discipline PR #8126 followed — the stored record is never mutated).\n- ⚠️ A read-path scrub with no inverse is a **data-loss bug**, not a fix: whatever edit surface patches this data back needs the same carry-forward PR #8126 added to `updateDatasource`. This was learned the expensive way on #8126 — do not rediscover it.\n  - ⭐ `config.url` makes this unavoidable rather than a masking choice: the URL-embedded password is schema-**accepted** (#8078 pinned that boundary as fact), so dropping it round-trips to deletion and masking it round-trips to storing the mask as the literal password.\n- Not yet measured, and owed by whoever implements: `SysMetadataRepository.getByHash` / `restoreVersion`. `getMetaItemCached` inherits the leak **by construction** (it delegates to `getMetaItem`) and needs no separate hook.\n- The data-API plane over `sys_metadata` serves the same bytes on a plane no metadata-read-path hook can reach — that is **#7990**'s, verified open and correctly deduped. ⛔ Do not file it again.\n\nProvenance: #8081 dev report (comment 5269923121, *\"A residual this PR does NOT close — STOP, leaves the lane\"*) and my ACCEPT receipt (#8081 comment 5270102954). Related: #7990, #8078, #8081, #8118, #8300."
+}

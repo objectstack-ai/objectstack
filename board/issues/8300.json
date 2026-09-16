@@ -1,0 +1,35 @@
+{
+  "number": 8300,
+  "kind": "issue",
+  "title": "A per-type metadata redaction seam belongs in `@objectstack/spec/kernel` — no service package can reach a registry in `metadata-protocol`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "security"
+  ],
+  "assignees": [
+    "qq9340100"
+  ],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-08-13T03:57:27Z",
+  "updated_at": "2026-08-13T21:11:19Z",
+  "closed_at": "2026-08-13T21:10:47Z",
+  "closed_by": {
+    "login": "qq9340100",
+    "id": 313832657,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8300",
+  "body": "Filed by the `domain:metadata` execution seat (#6367, session `session_012WMpuAfA2KSdDjGF6tm1bH`) out of #8154's dev report. **Unassigned and deliberately NOT lane-labelled** — it lands in `packages/spec`, so triage should route it to `domain:spec` (#6017), the single owner of that package.\n\n## Why this card exists\n\n#8154 asks for a **generic per-type redaction hook** on the metadata read path (`GET /api/v1/meta/datasources` serves stored cleartext credentials; datasource is the first consumer, not the fix). Its dev measured that the hook's *registry* cannot live in `packages/metadata-protocol`, and that measurement is the whole content of this card.\n\n**The dependency graph forbids it.** The type owners that must register a redactor are service packages — `service-datasource` today, and #8009's SSO seat next. **No service or connector package depends on `@objectstack/metadata-protocol`.** Verified independently by the PM before filing:\n\n```\ngit grep -l \"@objectstack/metadata-protocol\" origin/main \\\n    -- 'packages/services/*/package.json' 'packages/connectors/*/package.json'\n  → (no matches)\n\n# control — the packages that DO depend on it resolve normally:\ngit grep -ln \"PLURAL_TO_SINGULAR\" origin/main -- packages/\n  → packages/metadata-protocol/… , packages/metadata/… , packages/objectql/… , packages/lint/…\n```\n\n⇒ a registry in `metadata-protocol` is **unreachable from the packages that must call it**. `@objectstack/spec/kernel` is the seam every type owner already imports, alongside `registerMetadataTypeSchema` and `registerMetadataTypeActions` — this is the same shape, not a new concept.\n\n## The ask\n\n1. **A per-type redaction registration seam** in `@objectstack/spec/kernel`, beside the two existing `registerMetadataType*` functions.\n2. **One definition of \"what is a credential key.\"** PR #8126 already built `datasource-config-redaction.ts` in `service-datasource`, deriving the refused keys from each driver's own `z.never()` contract plus the pre-#8078 alias list and turso's still-writable `encryptionKey`. The derivation half should move to `@objectstack/spec/data`, leaving `service-datasource` re-exporting it and keeping `restoreRedactedConfig`. `service-datasource` and `metadata-protocol` share **no** dependency except `@objectstack/spec`, so spec is the only place one definition can live.\n\n⛔ **Two alternatives were considered and rejected on measured grounds — do not re-derive them:**\n\n- **Two implementations, both derived from the driver contracts** — duplicates a *security* list across two doors that must agree. That drift is a cost this repo keeps paying.\n- **Register the redactor from `DatasourceAdminServicePlugin.init`** (the seam that already calls `registerMetadataTypeActions`) — ⛔ **fail-open, and measured to be so.** That plugin is **opt-in**: the runtime does not install it; only tests, apps and the CLI do. `sys_metadata` rows and the `/meta` read exits exist regardless. So a host storing datasource rows without that plugin would serve them in cleartext **with the hook installed and looking healthy** — the worst available outcome, because it reads as protected.\n\n## ⚠️ Model tiering — no downward discretion\n\nThis card **widens `@objectstack/spec`'s public surface** (a new registration seam, plus a moved export). Under the seat rule that is the `domain:spec` semantic lane ⇒ **`claude-fable-5`**, not opus. An error in the one contract package poisons every downstream consumer.\n\n## Consumer, and the ordering\n\n**#8154 consumes this** and is `Blocked-by:` it — contract-first: the seam lands here, the metadata read path consumes it. #8154 additionally carries a write-path carry-forward whose absence is a **data-loss bug**, measured on the consumer side: `saveMetaItem` *accepts* a redacted datasource body and persists the credential away, so a read scrub with no inverse converts today's loud `422` into silent credential deletion on an ordinary GET-edit-PUT round trip. That half stays on #8154; this card is only the seam.\n\nRelated: #8154 · #8126 · #8081 · #8078 · #8009 · #7990."
+}

@@ -1,0 +1,35 @@
+{
+  "number": 8559,
+  "kind": "issue",
+  "title": "objectql accepts `\"\"` into a `secret` field: it encrypts the empty string, mints a `sys_secret` row for it, and every read path then reports \"a secret is set\"",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched",
+    "security"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-13T20:43:02Z",
+  "updated_at": "2026-08-14T04:25:36Z",
+  "closed_at": "2026-08-14T04:25:36Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8559",
+  "body": "Found while implementing #8542 (measured, not traced). **Out of scope there and deliberately not fixed on that branch** — #8542's file surface is `packages/plugins/plugin-webhooks`, and this is one layer down in the engine. Unassigned, no `pm:queue`, for triage to grade.\n\n## The defect\n\n`ObjectQL.encryptSecretFields` (`packages/objectql/src/engine.ts`) treats the empty string as an ordinary value:\n\n```ts\nif (value === null || typeof value === 'undefined') continue; // clear\nif (isSecretRef(value)) continue;                             // already a ref\n```\n\n`\"\"` is neither, so it falls through to `cryptoProvider.encrypt(\"\")`, a `sys_secret` row is created with an empty ciphertext, and the business column is rewritten to a **valid** `secret:` ref. From that moment on:\n\n- `maskSecretFields` masks the column on every read, because the stored value is non-null — so `GET /api/v1/data/:object` reports the field as `••••••••`, i.e. **\"a secret is set\"**;\n- `resolveSecretField` dereferences it perfectly and returns `\"\"`;\n- there is a real orphan-able cipher row backing a credential with no content.\n\nThe result is a row whose read surface and whose actual content disagree, with nothing anywhere recording that they do.\n\n## Evidence — measured, on a real engine\n\nReproduced against a real `ObjectQL` engine (in-memory driver double, reversible test crypto, the real `sys_webhook` schema whose `signing_secret` is `Field.secret()`), on `origin/main` at `116c0d95b`:\n\n```\nupdate(sys_webhook, { signing_secret: '' }) threw = undefined        # accepted\nrow at rest                                = \"secret:sec_2\"          # a valid ref\nsys_secret row                             = { key: \"signing_secret\", ciphertext: \"\" }\nread back through engine.find()            = \"••••••••\"              # reports \"set\"\nresolveSecretField(...)                    = \"\"                      # resolves to nothing\n```\n\nFor contrast, the two adjacent write shapes are both defended and behaved exactly as documented in the same run: an **echoed read-mask** is dropped (the stored ref survives untouched) and **cleartext** is re-encrypted into a fresh ref.\n\n## Why it is worth fixing rather than tolerating\n\nIt manufactures the contradictory state that consumers then have to guess about. It is precisely how the third trigger of #8542 is reached from the **ordinary data API with no privileged access** — a webhook whose `signing_secret` was set to `\"\"` reported as signed on every surface an operator can see while its dereference returned nothing. #8542 fixes the consumer's half (the webhook seam now refuses rather than delivering unsigned), and that fix stands on its own; this card is about not creating the state in the first place.\n\nNote the asymmetry that makes it a decision rather than an oversight: `null` already has a defined meaning on this path (**clear the secret**), and `\"\"` is the spelling a form control most naturally submits for \"I emptied this field\".\n\n## Options (⛔ not decided here)\n\n1. **Treat `\"\"` as a clear**, i.e. fold it into the `null` branch. Matches what a user emptying a field almost certainly means, costs no cipher row, and leaves the column `null` so every read reports \"not set\" — which is then true. Risk: it silently reinterprets a write rather than refusing it, and a caller that genuinely meant to store an empty credential gets something else.\n2. **Refuse it**, with a located ADR-0112 `VALIDATION_ERROR` naming `null` as the way to clear. Loudest and most contract-first; makes the authoring mistake visible at the door instead of at the consumer. Costs a rejection where today there is silent acceptance, so it is a behaviour change for any caller currently sending `\"\"`.\n3. **Leave it and fix consumers** — what #8542 had to do anyway. ⛔ Weakest: it leaves every future `secret`-typed consumer to rediscover the same trap, which is exactly the \"one rule, N places\" shape #8542's seam fix rejected.\n\nA decision here should also say what `password`-typed fields do with `\"\"`, since they share the read mask and the same echoed-mask drop but not the encryption path.\n\n## Explicitly NOT claimed\n\n- **No live leak.** Nothing is exposed by this; the failure is a credential that is advertised as present and is empty.\n- **Not a regression.** The behaviour is as old as the `secret` channel; nothing recent changed it.\n- **Whether any deployment has such a row is unmeasured.**\n"
+}

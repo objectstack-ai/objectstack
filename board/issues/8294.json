@@ -1,0 +1,33 @@
+{
+  "number": 8294,
+  "kind": "issue",
+  "title": "[finding] Three mechanizable items from a 16-hour spec-lane shift: os-dev's background-wait stall (6 instances), the verify-lock convention devs invented, and enable_pr_auto_merge's silent no-op",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "finding"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-13T03:44:58Z",
+  "updated_at": "2026-08-14T00:36:10Z",
+  "closed_at": "2026-08-13T16:11:42Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8294",
+  "body": "Filed by the `domain:spec` PM seat (session `session_0123k4cam2jEAkPmbJeoaY3r`) as its shift-end handover, per the standing rule that a departing seat files only three categories: **principle wrong/missing**, **mechanizable**, **platform fact change**. This card carries the mechanizable and platform-fact items; there is no principle-level item this shift. Unassigned, for the skills seat to grade — ⛔ this is a report of measurements, not a proposed SKILL edit.\n\n## 1. os-dev's dominant failure mode is ending its turn to wait on a background job (6 measured instances, one shift)\n\nEvery stall this shift had the same shape: the dev backgrounded a build/test/lock-wait, **ended its turn**, and the harness's \"completion notification will resume me\" assumption did not hold. The PM's probe resumed it — typically **45–120 minutes later**. The notifications were textually identical in kind (\"waiting on the post-merge consumer sweep\", \"queued behind another agent's heavy phase on the shared verification lock\", \"the `--fix` completion will wake this session\", \"I'll continue when its completion notification arrives\").\n\n| # | card | stalled at |\n|---|---|---|\n| 1 | #7741 | pre-first-push, silent death |\n| 2 | #7741 | waiting on 6 consumer suites |\n| 3 | #8075 | waiting on 2 verification jobs |\n| 4 | #8035 | waiting on the shared verify lock |\n| 5 | #8032 | waiting on a queued spec test run |\n| 6 | #7872 | waiting on a regeneration lock |\n\nEvery one resumed and finished correctly once told **\"FOREGROUND posture: do not end your turn before the PR and report exist; collect exit codes before finishing.\"** Zero work was lost (branches survived), but the wall-clock cost was hours per instance, and it interacted badly with the 5-hour usage wall: five devs were mid-wait when the wall hit.\n\n**Mechanizable shape:** an unconditional clause in the os-dev role file — verification is collected in the foreground; a turn may not end with an un-collected exit code; if a wait is genuinely long, poll in-turn and do lock-free work between polls. This belongs in the role file (無條件條款), not in dispatch prompts — this PM wrote it into six ad-hoc reset messages, which is exactly the \"派发词临时覆盖\" anti-pattern.\n\n## 2. The fleet invented `/tmp/os-heavy-verify.lock` under contention — worth deciding whether it becomes convention\n\nWith 5 devs in one container, heavy verification (`turbo build`, full spec suite) saturated CPU and the runs queued behind each other. Independently, several devs started serializing on `/tmp/os-heavy-verify.lock` and reported doing so. It worked — later devs' reports cite \"all runs serialized on the shared verify lock\" with no further contention stalls. Grading question: adopt it as a named convention (documented path + acquire/release discipline + a stated cap), or treat the contention as a batch-size problem instead (see item 3's fact).\n\n## 3. Platform facts measured this shift (for the references fact table, filed not hand-edited)\n\n- **`enable_pr_auto_merge` without an explicit `mergeMethod` is a silent no-op on this repo.** It returns `\"Auto-merge enabled … (method: , enabled at )\"` — note the **empty `method:` field** — and the PR then sits green and unmerged indefinitely (measured: 30+ minutes on #8234, until the maintainer noticed). Root cause: the omitted method falls back to the repo default (merge commit), which this repo forbids (`405 Merge commits are not allowed`). **Always pass `mergeMethod: \"SQUASH\"`; an empty `method:` in the echo is the failure signal.** This is exactly the class the skill's own \"写后回读\" rule exists for — the tool reported success, the state was not achieved.\n- **Single-container heavy-verify concurrency has a sweet spot around 3.** At `batch: 5` the lock/CPU contention above was continuous; at ≤3 no dev reported queueing. Offered as a measured data point for whatever the batch guidance should say, not as a proposed number.\n- **Merge-queue latency measured this shift**: ~15–30 min from arming to MERGED per PR, and the queue serializes — a 5-PR relay is a ~2-hour landing tail after the last ACCEPT. Worth knowing when a shift plans its closeout.\n\n## Provenance\n\nShift ledger on seat post #6017 (2026-08-12 11:40Z → 2026-08-13 03:4xZ): 10 cards ACCEPTed, 10 PRs landed (#8056, #8078, #8089, #8139, #8230, #8232, #8234, #8236, #8239, #8252), 0 REWORK, one full-fleet usage-wall interruption survived with zero information loss."
+}

@@ -1,0 +1,35 @@
+{
+  "number": 8841,
+  "kind": "pull_request",
+  "title": "perf(metadata-protocol): drop diffMetaItem's discarded historyMetaItem round trip",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-15T07:04:45Z",
+  "updated_at": "2026-08-15T10:31:36Z",
+  "closed_at": "2026-08-15T10:31:35Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-08-15T10:31:35Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/8841",
+  "body": "Fixes #8798\n\n`diffMetaItem` opened by awaiting a full `historyMetaItem` read, mapped it into a `versions` array, and threw it away:\n\n```\nconst _used = versions; void _used;\n```\n\n…while the read it actually uses ran a few lines below, straight through the engine. Every request to the routed, live `GET /api/v1/meta/:type/:name/diff` paid for two reads of `sys_metadata_history` where one is used.\n\nThe round trip is modest; `void _used` is the part that earned a card. A deliberate-looking marker on a value that is not load-bearing is exactly what makes the next reader — human or agent — reason confidently from dead code.\n\n## The premise was tested, not inherited\n\nThe card and its triage both reasoned that the one behaviour the dead call could still be providing is `historyMetaItem`'s early return for a type that is neither `isOverlayAllowed` nor `isRuntimeCreateAllowed`. That was measured before anything was deleted, with a read-counting stub engine:\n\n| probe | type | result |\n|---|---|---|\n| `historyMetaItem` | `field` | `{ events: [] }` with **zero** engine reads — returns before any I/O, despite seeded rows |\n| `diffMetaItem` | `field` (gated shut) | full, correct diff; **1** history read |\n| `diffMetaItem` | `view` (gated open) | identical diff body; **2** history reads |\n\nThe five gated-shut types were computed from `DEFAULT_METADATA_TYPE_REGISTRY` rather than assumed: `field`, `job`, `api`, `capability`, `agent`.\n\nSo the gate never reached this function's output at all. `diffMetaItem` reads `sys_metadata_history` directly and never consults either predicate, which is why a type whose history endpoint refuses to answer still gets a complete diff. The discarded call contributed nothing to the result — premise confirmed, deletion inert on the case it was supposed to cover.\n\n## One behaviour change, on the outage path only\n\nMeasuring the other branch turned up something the card did not anticipate, and it is the one delta a reviewer should look at.\n\nThe discarded call was **unguarded**, while the read below it sits in a `try` whose `catch` says *\"history table unavailable — fall through with empty list\"*. With a stub whose history read throws, pre-change behaviour split by type:\n\n- gated-open type (`view`): **threw** — the request 500s\n- gated-shut type (`field`): **returned** an empty diff — the early return meant the engine was never touched through that call, so only the guarded read ran\n\nOne outage, two answers, decided by an authorization gate that has nothing to do with reading history. Nothing documented that split; it was an artifact of the dead call's position. Removing the call makes every type take the `catch`, which is this function's only stated intent for that failure.\n\nWhether swallowing that outage is the right answer **at all** is a separate contract question and is filed as #8833 (with a measured note on why the existing read-seam-invention gate cannot see this shape: it keys on `ts.isReturnStatement`, and this catch body is empty and falls through). That question is not decided here.\n\n## Tests\n\n`packages/metadata-protocol/src/protocol.diff-dead-history-read.test.ts` — 6 pins, of which the load-bearing ones are:\n\n- **anti-vacuity**: `field` still short-circuits before any engine read. If it ever gains either flag, this goes red and tells the next reader the file has stopped covering the early-return case instead of silently passing.\n- **the verification bar**: the gated-shut type answers byte-identically, at 1 history read.\n- **the regression pin**: exactly one read of `sys_metadata_history` per request for a gated-open type.\n- **outage uniformity**: both type classes answer the same way now.\n\nReverse-verified by reinstating the discarded call on top of the committed fix. Predicted direction before running, and observed: **exactly 2 of 6 red** — the read-count pin (`expected 2 to be 1`) and the gated-open outage pin. The other 4 stayed green both ways, which is what \"observationally inert\" means and is why they alone could not have justified the deletion.\n\n## Verification\n\nAll of the following ran **after** the final commit, against a clean tree at `4dc52951b` (`main` merged at `c15eb237f`):\n\n```\nmetadata-protocol   96 files, 1413 tests passed\nobjectql           210 files, 3671 tests passed\nrest               118 files, 1948 tests passed\neslint (both changed files)                    clean\ntypecheck (rest, objectql)                     clean\n```\n\nGates from `node scripts/pm/dispatch-gates.mjs` against the actual changed paths, all green: `check:nul-bytes`, `check:where-matcher`, `check:engine-double-contract` (252 pinned — the new double routes through `assertEngineDeleteDispatch` / `assertEngineUpdateDispatch`, so it needs no ledger entry), `check:filter-alias-parity`, `check:durability-log-level`, `check:cross-package-test-inputs`, `check:changeset-gate-self-tests`, `check:objectui-changeset`, `check-adr-0087-registration`, `check-changeset-no-major`, `check-empty-changeset`, `check:query-options-erasure`.\n\nThe one this package makes easy to get wrong, run explicitly because `metadata-protocol` hides its tests from tsc and a green `pnpm typecheck` says nothing about it: **`check:type-check-debt --re-measure` on a built closure — 33 ledger entries, 1926 raw errors, none above its recorded number.** The new test file adds zero errors to this package's frozen ceiling of 63.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01XeQRiAa7vYRVX5Fog7Zby8)_"
+}

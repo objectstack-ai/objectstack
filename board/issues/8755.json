@@ -1,0 +1,34 @@
+{
+  "number": 8755,
+  "kind": "issue",
+  "title": "drivers(sql): on MySQL an upsert still merges on a unique key the caller never named — even when the named conflict target IS backed",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-14T18:36:27Z",
+  "updated_at": "2026-08-15T04:20:54Z",
+  "closed_at": "2026-08-15T04:20:54Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8755",
+  "body": "Found while implementing #8621 (the pre-flight refusal for an UNBACKED conflict target on MySQL). Filed rather than fixed: it is a different condition with a different fix, and #8621 deliberately does not move it.\n\n## The condition\n\n`#8621` refuses a `conflictKeys` upsert on MySQL when no PRIMARY KEY or UNIQUE index backs the named target. That closes the case #8592 measured. It does **not** close the general one, because `ON DUPLICATE KEY UPDATE` carries no conflict target **at all** — so once the statement is accepted, *any* unique index on the table can absorb the conflict, including one the caller never named.\n\nA properly declared, properly indexed conflict target is therefore still not honoured as a target on MySQL whenever the table carries a second unique index.\n\n## Measured — live MySQL 8.0.46\n\nUbuntu noble `mysql-server`, `mysqld --daemonize`, `default_time_zone='+08:00'`, driven through the same knex + `mysql2` path `SqlDriver.upsert` takes. Both business columns declared `unique: true`, so the named target `email` is backed and the pre-flight from #8621 passes it:\n\n```\nCREATE TABLE `probe_two_unique` (\n  `id` varchar(255) NOT NULL, `email` varchar(255) DEFAULT NULL,\n  `tax_id` varchar(255) DEFAULT NULL, `title` varchar(255) DEFAULT NULL,\n  PRIMARY KEY (`id`),\n  UNIQUE KEY `uniq_probe_two_unique_email` (`email`),\n  UNIQUE KEY `uniq_probe_two_unique_tax_id` (`tax_id`)\n)\n```\n\n```\nseed  upsert({email:'a@b.com',     tax_id:'T-1', title:'first'},  ['email'])\n      -> RESOLVED. [{id:'tU0Pal1GHDzBHcOg', email:'a@b.com', tax_id:'T-1', title:'first'}]\n\nB     upsert({email:'other@b.com', tax_id:'T-1', title:'second'}, ['email'])\n      -> RESOLVED. [{id:'tU0Pal1GHDzBHcOg', email:'other@b.com', tax_id:'T-1', title:'second'}]\n         ONE row. `email` — the key the caller named, and a backed one — did NOT\n         collide; `tax_id` did, and MySQL merged on it.\n```\n\nThe identical call on SQLite and Postgres inserts a **second row**: `ON CONFLICT (email)` names an arbiter index, so a `tax_id` collision is not absorbed by that statement — it raises a unique violation instead, which is a legible error rather than a silent merge across two different `email` values.\n\nSo the dialect divergence #8621 narrows is narrowed, not removed: after #8621, MySQL refuses the calls SQLite and Postgres refuse, but it can still merge where they would not.\n\n## Why it was not folded into #8621\n\nRefusing this shape means refusing every `conflictKeys` upsert on any MySQL table carrying more than one unique index — an accept-set change far wider than the one #8621's ruling covers, and one that would refuse calls which are *correct* whenever no second index can actually collide. The remedies are also not accept-set-neutral in the way #8621's is, and they differ in kind:\n\n- **A — refuse at pre-flight** when the table carries any unique index outside the named target. Loud and cheap; refuses a large set of calls that work today, most of which are fine in practice.\n- **B — compile a target-honouring statement on MySQL** (e.g. probe-then-write, or `INSERT ... ON DUPLICATE KEY UPDATE` guarded by a transaction plus a `SELECT ... FOR UPDATE` on the named key). Preserves the capability; costs a round trip and needs its own concurrency argument.\n- **C — declare it a documented dialect limit** and reject `conflictKeys` naming a non-primary key on MySQL outright.\n\nEach is a real decision about MySQL's accept set, so this needs adjudication rather than a dev picking one.\n\nRelated: #8621 (the unbacked-target pre-flight), #8592 (the original live-MySQL measurement), #8567 (the compiled-SQL read that shows the target is dropped), #5240 (one condition, one wording).\n"
+}

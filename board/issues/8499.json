@@ -1,0 +1,36 @@
+{
+  "number": 8499,
+  "kind": "issue",
+  "title": "`userActions.edit.visibleWhen` 对详情页页头内建【编辑】不生效 —— 同一份声明里 `delete` 生效、`edit` 不生效(17.0.0-rc.6)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched",
+    "repo:objectui"
+  ],
+  "assignees": [
+    "yinlianghui"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-13T16:15:04Z",
+  "updated_at": "2026-08-15T06:18:34Z",
+  "closed_at": "2026-08-15T06:18:34Z",
+  "closed_by": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8499",
+  "body": "## 现象\n\n平台版本 `@objectstack/*@17.0.0-rc.6`。\n\n同一份对象级 `userActions` 声明中,两个动作用**完全同形**的谓词,收敛结果却不一致:`delete.visibleWhen` 生效,`edit.visibleWhen` 在**记录详情页页头的内建【编辑】按钮**上不生效。\n\n逐字的对象声明:\n\n```ts\nuserActions: {\n  edit:   { visibleWhen: P`os.user.id != record.executor` },\n  delete: { visibleWhen: P`os.user.id != record.executor` },\n},\n```\n\n## 复现与实测\n\n以目标角色账号(即该记录 `executor` 本人)登录 Console,打开该记录的详情页:\n\n| 入口 | 实测 | 是否符合谓词 |\n|---|---|---|\n| 列表行入口的【删除】 | 已按谓词隐藏 | ✅ |\n| 页头「⋯」溢出菜单里的【删除】 | 已按谓词隐藏 | ✅ |\n| 页头内建【编辑】 | **仍然显示** | ❌ |\n\n点开页头【编辑】得到的是可编辑表单;提交时被服务端权限 / RLS 拒绝,数据未发生变更 —— 所以这不是数据完整性问题,是纯粹的 UI 入口收敛问题。\n\n**A/B 对照(用于排除项目侧写法问题)**:同一构建、同一账号、同一会话下,两个不同业务对象使用**同一形态**的 `userActions` 声明,表现完全一致 —— 均为「`delete` 生效、页头 `edit` 不生效」。因此不是单个对象的声明写错。\n\n## 影响\n\n业务上「某角色对该记录只读」这类需求,UI 入口收不干净:只能依赖服务端拦截,用户会**先看到入口、点进去、填完再被拒**。体验之外,合规审计也会把「能看到编辑入口」记为缺陷 —— 每轮 QA 都会重复报同一条。\n\n## 期望\n\n1. `userActions.edit.visibleWhen` 对详情页头的内建【编辑】按钮同样生效,与 `delete`(以及列表行入口)行为一致;\n2. 若设计上「页头内建入口不受该谓词约束」是有意为之,请在文档中明示这条边界,并提供一个可用的收敛方式 —— 目前没有任何其他杠杆可以隐藏这颗按钮。\n\n## 相邻单(非重复)\n\n- #3076 给 `edit` / `delete` 加了 per-record CEL 谓词 —— 本单是该能力在**详情页头**这一渲染面上的缺口;\n- #7692 是同一族的另一个缺口(`create` 根本不接受谓词),已由 #7758 合并解决,与本单不同面。"
+}

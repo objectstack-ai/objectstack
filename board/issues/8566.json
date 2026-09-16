@@ -1,0 +1,35 @@
+{
+  "number": 8566,
+  "kind": "issue",
+  "title": "`sys_webhook.headers_secret` has a required plaintext SHAPE that no write path enforces — the ordinary data API accepts any string, and the author only finds out at the next delivery",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:services"
+  ],
+  "assignees": [
+    "qq9340100"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-13T21:51:24Z",
+  "updated_at": "2026-08-14T18:24:56Z",
+  "closed_at": "2026-08-14T18:24:31Z",
+  "closed_by": {
+    "login": "qq9340100",
+    "id": 313832657,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 9,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8566",
+  "body": "Found while implementing #8558 (**measured**, not traced). **Out of scope there and deliberately not fixed on that branch** — #8558 is scoped to the consumer seam (`resolveWebhookHeaders` must not fold \"stored but unusable\" onto \"no headers authored\"), and this is about not creating the state at the door. Unassigned, no `pm:queue`, for triage to grade.\n\n## The defect\n\n`sys_webhook.headers_secret` is a `Field.secret()` whose plaintext is **not** an opaque blob: it is a serialized header map with a required shape — a flat JSON object of string values — and `parseStoredHeaders` is the only reader.\n\nNothing validates that shape on the way in. The ordinary data API accepts any string, encrypts it like any other secret, mints a real `sys_secret` row, and leaves the column holding a perfectly valid `secret:` ref that reads back as the mask with `active: true`.\n\nThat field is directly admin-authorable, and its own description tells the author what to type into it:\n\n> Custom HTTP headers sent with each delivery, as a JSON object ({\"Authorization\": \"Bearer …\"}). Encrypted at rest into sys_secret; reads return a mask, never the headers.\n\nSo the product asks for a JSON object, accepts anything, and stores it.\n\n## Evidence — measured on a real engine\n\nReproduced against a real `ObjectQL` engine (in-memory driver double, reversible test crypto, the real `sys_webhook` schema), on `origin/main` at `719a21bfc`, through `engine.update()` — the ordinary data API, no privileged access:\n\n| written to `headers_secret` | write | column at rest | read back | resolves to |\n| --- | --- | --- | --- | --- |\n| `{}` | accepted | valid `secret:` ref | mask, `active: true` | `{}` |\n| `[]` | accepted | valid `secret:` ref | mask, `active: true` | `[]` |\n| `{\"X-Count\":5}` | accepted | valid `secret:` ref | mask, `active: true` | `{\"X-Count\":5}` |\n| `{\"X-Team\":{\"name\":\"crm\"}}` | accepted | valid `secret:` ref | mask, `active: true` | the nested object |\n| `{X-Team: crm}` (a typo) | accepted | valid `secret:` ref | mask, `active: true` | the typo, verbatim |\n\nEvery one of them is a value the plugin can never use.\n\n## Why it is worth fixing rather than tolerating\n\n**Before #8558** this was silent and open: the subscription armed and the delivery went out missing its entire authored header map, correctly signed, `status: 'success'`, nothing logged.\n\n**After #8558** it fails closed and loudly — the subscription parks, the discarded event lands in `sys_http_delivery`, and the operator gets a remedy-bearing `error`. That is the right consumer behaviour and it is not in question here.\n\nWhat remains is **when** the author learns. Today the answer is \"at the next matching record change\", which is an unbounded time after the mistake and in a completely different surface from the one where it was made. The mistake is a typo in a form field; the report is a parked subscription and a log line. A rejection at the write door would put the diagnosis where the author is standing.\n\nThis is also the shape the repo's own contract-first rule names: a lenient door plus a strict consumer is exactly where AI-authored metadata errors hide, since an agent writing `headers_secret` from a template has no feedback that the value it produced is unusable until a delivery is missed.\n\n## Options (⛔ not decided here)\n\n1. **Validate at the plugin's write paths** (`bootstrapDeclaredWebhooks` / `headersPatch` / the migration sweep). Cheapest, entirely inside `plugin-webhooks`. ⛔ But it does **not** cover the road that actually matters: a direct `PATCH /api/v1/data/sys_webhook` never goes through them, and that is the measured trigger above.\n2. **A validation hook on `sys_webhook`** that parses `headers_secret` before the engine encrypts it, refusing with a located ADR-0112 `VALIDATION_ERROR` that names the required shape. Covers the ordinary data API, which is the point. Cost: the check has to run on the plaintext, i.e. before `encryptSecretFields`, and has to skip an echoed mask.\n3. **A general capability on the `secret` channel**: let a `secret`-typed field declare a plaintext validator, so any field whose ciphertext has a required shape gets the same door. Most principled and the only one that generalizes past webhooks; also the largest, and it is a spec/engine surface rather than a plugin one.\n\nA decision here should probably be taken together with #8559, which asks the adjacent question about the same door — what a `secret` field should do with `\"\"`. The empty-string case reaches `headers_secret` too, identically (measured: accepted, encrypted, valid ref, resolves to `\"\"`), so #8559's verdict decides one row of the table above and this card decides the rest.\n\n## Explicitly NOT claimed\n\n- **No live leak.** Nothing is exposed; the failure is a stored credential-bearing value that can never be used.\n- **Not a regression.** As old as #7986's encrypted header channel.\n- **Not still silent.** #8558 made the consumer half fail closed and loud; this card is only about moving the diagnosis to the door.\n- **Whether any deployment holds such a row is unmeasured.**\n\nRelated: #8558 (the consumer seam, fixed), #8559 (the same door, `\"\"` half), #7986 (the channel this field lives on).\n"
+}

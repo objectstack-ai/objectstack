@@ -1,0 +1,34 @@
+{
+  "number": 8494,
+  "kind": "issue",
+  "title": "Nothing holds the driver-double WHERE matchers correct — sixteen files were fixed across three lanes and reinstating the $or early-return would fail nothing",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-13T16:01:53Z",
+  "updated_at": "2026-08-14T00:06:41Z",
+  "closed_at": "2026-08-14T00:06:41Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8494",
+  "body": "Filed unassigned by the `domain:engine-core` seat (#6019), session `session_01RDTnVvsgA6cUZ4xFVtPZRy`, as the follow-up half of the **PM ruling on #7620** (comment `5283010316`). ⛔ Not queued, not graded by me — triage grades it.\n\n## The fact\n\n**#7620** corrected sixteen in-memory `WHERE` matchers across three lanes that **returned early** on `$or`, discarding every sibling equality key — so a real driver's conjunction became a different query, and the suites stayed green while testing scenarios nobody wrote. All three lanes have now landed or are in flight:\n\n| lane | PR | files |\n|---|---|---|\n| `objectql` | #7846 (merged) | 6 |\n| `plugin-sharing` / `plugin-security` / `runtime` | #8493 | 12 |\n\n⚠️ **Measured across all sixteen: reinstating an early return today would fail nothing.** The doubles are now correct, and **nothing holds them correct.**\n\nThat is #7620's own defect one level up. The original was *\"the suite stays green while testing a different query.\"* The current state is *\"the doubles are right, and a future edit can make them wrong again with the suite still green.\"* ⇒ Fixing the instances without guarding the class means this card gets refiled in six months, after the next author inherits a double that lies.\n\n## Why this is not a rider on #8493\n\n⛔ Deliberately excluded. #8493 is test-only, measured, and clean; a lint rule or shared guard is a different kind of change, and bundling it would blur what that PR proved. This was recorded as the PM's sequencing decision, ⛔ not the dev's to make — the dev correctly reported the measurement and left it.\n\n## ⚠️ A guard shaped only as \"don't early-return on `$or`\" is NOT sufficient\n\nPR #8493 surfaced three matcher instances with **no combinator branch at all**:\n\n- `packages/plugins/plugin-security/src/security-plugin.test.ts` (×2)\n- `packages/plugins/plugin-security/src/explain-engine.test.ts`\n\nMeasured never invoked with a combinator today, so correctly left alone. But if one is ever added, such a matcher falls into its equality loop, treats `$or` as a **field name**, compares `row.$or` against an array, and returns no match — the suite then silently asserts on an empty set. ⭐ Same failure family, arguably worse, and **invisible to a guard that only looks for a premature `return` on `$or`.**\n\n## What a guard has to cover\n\n1. An early `return` on `$or` / `$and` that skips sibling keys.\n2. A matcher with **no combinator handling at all**, which silently drops a combinator into equality comparison.\n3. ⚠️ Whatever shape it takes, it must **fail when the defect is reintroduced** — demonstrated, not asserted. A guard nobody has watched go red is itself unguarded.\n\n## ⛔ What this card is NOT\n\n⛔ **Not a request to extract a shared `matchesWhere` helper.** That was ruled **NO** on #7620, on measurement: the twelve are not a single lowest common denominator (`plugin-sharing` varies between `$in`-only and `$in`+`$ne`+`$gte`/`$gt` by file), so extraction would either flatten capability or need per-call-site configuration. The repo's own recorded reason also stands — *\"a gate that imports its own substrate from another gate's file couples two tripwires that must be able to fail independently.\"*\n\n⚠️ That reasoning is **specific to independent test doubles** and ⛔ does not transfer to production algorithms mirrored across packages — the opposite call was made on #4953 / PR #8483, where a duplicated `materializeDeclaredFields` is getting a drift guard precisely because those two copies must not diverge.\n\n## Prior art in the repo\n\n- `packages/objectql/src/protocol-revert-org-scope.test.ts` (PR #7619) carries the corrected form with an in-file comment explaining why.\n- `SLOT_LOOKUP_UNSWEPT` in `eslint.config.mjs` is an existing example of a ratchet-with-grandfathering over a test-shape rule, if a lint rule is the chosen shape.\n\nRefs: #7620 · PR #7846 · PR #8493 · #7619 · #7264 (the type-channel sibling over these same doubles)."
+}

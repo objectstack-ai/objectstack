@@ -1,0 +1,32 @@
+{
+  "number": 7891,
+  "kind": "issue",
+  "title": "Move `validateSecurityPosture` onto the runtime publish surface — a measured strictness rollout (#7576's remainder, #4001 pattern)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-12T02:30:17Z",
+  "updated_at": "2026-08-14T08:22:14Z",
+  "closed_at": "2026-08-14T08:22:01Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7891",
+  "body": "Escalated from #7576 / PR #7886, which fixed the block's false `surfaceReason` but deliberately did **not** move the surface. Filed unassigned by the `domain:spec-tooling` seat (session `session_01WocN37om5bw81JDoEEMA2e`); ⛔ grading and routing are the triage seat's — this spans at least three lanes and likely wants a contract-first split.\n\n## What is owed\n\n12 of `validateSecurityPosture`'s 13 rules are enforced at **no runtime door** while `os build`/`os lint` refuse the same shapes — and the runtime publish path is the only door a Studio tenant, a REST `/meta` client or an AI author has. The registry now says this honestly (PR #7886) instead of claiming phantom coverage; the move itself remains.\n\n## Measured facts to inherit (PR #7886, all re-runnable via `packages/lint/src/validate-security-posture.runtime-surface.test.ts`)\n\n- **The shipped corpus is clean**: showcase + CRM + todo + `blank` template — zero `error` findings at both surfaces (13-rule table in PR #7886). The #4001 rollout pattern is engaged by the *platform's own write path*, not by shipped apps.\n- **Blocker A — `object` half is a strictness rollout**: declaring `object` in `runtimeTypes` makes `security-owd-unset` refuse the platform's own minimal create body. `METADATA_CREATE_SEEDS.object` (`packages/spec/src/kernel/metadata-create-seeds.ts`) carries no `sharingModel`; measured fallout is 26 refusals → 48 failing tests across 8 files of `@objectstack/metadata-protocol`'s suite, all from that single rule id. Repair sites: the spec seed (a `packages/spec/src` semantic-face change — the authoritative create body gains an authored OWD or an explicit decision not to) + those 8 test files.\n- **Blocker B — `permission`/`book` need a fuller snapshot**: `RuntimeStackContext` carries `objects` only, so the three cross-collection rules judge against a missing collection (measured: 38 phantom `security-master-detail-ungranted` findings per-write vs 4 whole-stack). This is the existing `RUNTIME_NEEDS_FULL_SNAPSHOT` gap, already tracked as **#4463 P2** — reference it, do not duplicate it. `permission`/`book` also have no `TYPE_TO_STACK_KEY` entries (pinned).\n- **Ready first slice**: the ADR-0091 seed pair (`security-grant-expired-at-authoring`, `security-delegation-missing-reason`) reads only `stack.data[]`, trips nothing, and the `seed → data` stack key was corrected under #7886 — a one-line `runtimeTypes: ['seed']` edit crosses the whole sub-family. Deliberately left here so the block crosses by one decision, not by drift.\n- ⛔ **No partial `security-role-word` wiring**: it judges six collections; wiring only `position`/`app` splits one rule id across the wall (the #7220 failure shape).\n- The PM premise correction from #7886's measurement: the gate's plumbing *reaches* non-object collections (generic snapshot builder, `allowRuntimeCreate` on all six types); what it lacks is the sibling collections three rules compare against. Inherit the corrected premise.\n\n## Shape (suggestion, not a decision)\n\nLikely a contract-first split: ① spec-side decision on `METADATA_CREATE_SEEDS.object` gaining a `sharingModel` (or an explicit default-OWD ruling) — semantic face; ② metadata-protocol suite repair + snapshot enrichment (#4463 P2); ③ the `runtimeTypes`/split registration edit in `packages/lint` last, blocked by ① and ②, with the seed-pair slice available as an early independent step.\n\n## Pointers\n\n- #7576 (the measurement card) · PR #7886 (the honesty fix + executable measurements) · #4463 P2 (`RUNTIME_NEEDS_FULL_SNAPSHOT`) · #4001 (strictness-rollout pattern) · #7220 / PR #7479 (the axis's prior six-rule move) · #7474 (the runtime refusal proving the gap is real)"
+}

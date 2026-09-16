@@ -1,0 +1,34 @@
+{
+  "number": 8400,
+  "kind": "issue",
+  "title": "publishPackageDrafts writes no audit rows — Studio's \"publish whole app\" leaves the audit trail empty",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-13T11:04:36Z",
+  "updated_at": "2026-08-14T02:06:53Z",
+  "closed_at": "2026-08-14T02:06:21Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8400",
+  "body": "## What\n\n`publishPackageDrafts` (behind Studio's \"publish whole app\", `POST /packages/:id/publish-drafts`) promotes every draft in a package and writes **no `sys_metadata_audit` rows at all** — neither the allowed-outcome `publish` rows nor the `denied` row for a refusal.\n\nFound while implementing #7748, which fixed the same gap on the **single-item** routes (`publishMetaItem`, `rollbackMetaItem`, and all four 409 `METADATA_CONFLICT` sites). Not fixed there, deliberately — see below.\n\n## Why it was left out of #7748\n\n`publishPackageDrafts` calls `promoteDraftForPublish` directly (not `publishMetaItem`), and it does so inside **one `engine.transaction()`** — the ADR-0067 D2 \"a commit cannot half-land\" invariant. That makes the batch case a genuinely different contract from the three sites #7748 touched:\n\n- Both pre-existing allowed-outcome audit sites (`save`, `delete`) write **after** their repository transaction has closed. #7748's new `publish` / `rollback` rows were placed to match that.\n- An audit row written inside the batch transaction would **roll back with the batch**. For an allowed publish that is arguably right; for the refusal that *caused* the rollback it is exactly wrong — the trail would once again record nothing about a refused write, which is the defect #7748 exists to close.\n\nSo the correct placement for the batch path is Phase 2 (after the transaction commits), driven off the `promoted[]` array — a different edit from #7748's, with its own test, rather than something to smuggle into that card.\n\n## Repro sketch\n\n1. Stage two or more drafts in one package.\n2. `POST /packages/:id/publish-drafts` — answers 200, drafts go active.\n3. `GET /api/v1/meta/:type/:name/audit` for any published item — no `publish` row.\n\n(Compare: after #7748, the same item published one-at-a-time **does** get its row.)\n\n## Notes for whoever takes this\n\n- The `sys_metadata_audit` schema already declares `publish` as an `operation` option — no schema work needed.\n- ⛔ Beware the vacuity trap #7748 documented: most multi-table fake engines in this repo open `insert` with `if (table === 'sys_metadata_audit') return { id: 'audit_skip' };`, which makes every audit assertion pass for the wrong reason. `packages/metadata-protocol/src/protocol.lifecycle-audit-rows.test.ts` has a harness that genuinely persists audit rows and separates \"attempted\" from \"landed\" — reuse its shape.\n- Best-effort semantics (ADR-0010 §3.6) mean a failed audit write is swallowed, so \"row missing\" and \"write failed\" are indistinguishable to a caller unless the test observes the attempt separately.\n\nBacklink: #7748 (single-item routes, fixed).\n"
+}

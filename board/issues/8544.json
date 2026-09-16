@@ -1,0 +1,35 @@
+{
+  "number": 8544,
+  "kind": "pull_request",
+  "title": "test(pm): run the half-state sweeper self-test in CI",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "ci/cd",
+    "dependencies",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-13T18:28:01Z",
+  "updated_at": "2026-08-13T19:00:13Z",
+  "closed_at": "2026-08-13T19:00:12Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-08-13T19:00:12Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/8544",
+  "body": "Fixes #8528\n\n`scripts/pm/check-half-states.mjs` carried a 79-case `--self-test` — the H1 through H7 predicates, the seat-sticker parser, the transport classifier and its measured container classes — that no CI job ran. It executed only when a human or an agent typed it, which makes it a check whose coverage is a function of who remembered. Fourth member of the same family as the dispatch-gates self-test, `check:skill-frame-freshness` and `check:dev-prereqs`, and the one with a blocking consumer: since the part-of/closing-keyword guard landed, a PR-scoped **blocking** check imports this file's `h7PartOfWithClosingKeyword` predicate (and `stripMarkdownCode` beneath it), so a break there now reddens — or silently greens — every PR in the repo.\n\n## What lands\n\n- `check:pm-half-states` in the root `package.json`, running the **self-test only**.\n- One unconditional named step in `lint.yml`, beside the other pm gates: no `if:`, no label read, no paths filter, and the `lint` job itself carries none either (verified by parsing the workflow, not by reading the diff).\n\nThe live sweep stays out of CI deliberately. It reads a shared board over the GitHub API, is report-only by design (a completed sweep exits 0 whether it found 0 or 40 half-states), and its non-zero exits classify the **environment** — no token, exhausted quota, unreachable host — which is not a verdict about whichever PR happens to run it. The script's own header argues both halves. The self-test is offline: no network, no token, ~0.05s.\n\n## The one measured decision: direct entry, no thin gate file\n\n`check:pm-dispatch-gates` needs its own gate file because that tool's self-test fixtures are path strings, which become watch hints and fabricate MATCHED leads across most of the tree. The card asked whether the same applies here rather than copying the answer. Measured on this tree, under the module-body masking that now blanks comments and self-tests before the scan:\n\n| script | non-blank module-body lines after masking | watch hints |\n|---|---|---|\n| `scripts/pm/dispatch-gates.mjs` | 344 | 4 (`.github/workflows`, `packages/plugins`, `packages/drivers`, `packages/services`) |\n| `scripts/pm/check-half-states.mjs` | 422 | **1** (`objectstack-ai/objectstack`) |\n\nThe single hint is the repo slug in the API base (`process.env.PM_SWEEP_REPO ?? …`). It is not a repo path, and `hintCovers` cannot pair it with any repo-relative input. The issue-shaped fixtures and prose specimens all sit inside the masked self-test. So the pollution that forced a separate file next door does not exist here, and the entry is pointed straight at the script — the same shape as `check:partof-closing-keyword` one line down.\n\nVerified by derivation rather than by argument, after wiring:\n\n- family census 93 to 94 — the new family is discovered from the workflow;\n- identity derivation works, so a card editing the script now derives its own gate automatically: `pnpm check:pm-half-states [lint.yml] matched via scripts/pm/check-half-states.mjs`;\n- eight probe paths spanning `packages/spec`, `packages/objectql`, `packages/rest`, `packages/plugins`, `.changeset`, `.claude/agents`, `.claude/skills` and `content/docs` derive **zero** half-states leads;\n- the undetermined bucket stays at 35, so the family did not land there either.\n\n## Reverse verification\n\nDirection predicted before running: the new gate red, the pre-existing coverage green — because the point of the card is that the pre-existing coverage is bounded to H7.\n\nAblating `h3QueueAndDispatched` (`&&` to `||`) from the committed state:\n\n```\npnpm check:pm-half-states         -> exit 1   x check-half-states self-test: 1 of 79 case(s) failed.\npnpm check:partof-closing-keyword -> exit 0   check-partof-closing-keyword self-test: 28 cases pass.\n```\n\nBoth halves as predicted: the new gate has teeth, and the incidental H7 coverage is blind to H3 — the gap this PR closes is real, not a formality. Restored with `git checkout` from the commit; 79/79 green again.\n\n## Gates\n\nDerived against the actual diff (`node scripts/pm/dispatch-gates.mjs package.json .github/workflows/lint.yml`) and run as the union with the dispatch list — all green: `check:node-version`, `check:required-contexts`, `check:shard-attestation`, `check:workflow-status-functions`, `check:nul-bytes`, `check:filter-alias-parity`, `check:type-source-resolution`, `check:changeset-gate-self-tests`, `check:type-check-coverage`, `check:type-check-debt` (after `turbo run build` over the packages closure, as `lint.yml` does before that step), `check:pm-dispatch-gates`, `check:pm-half-states`, plus `check-changeset-no-major.mjs`, `check-empty-changeset.mjs`, `check-shard-attestation.mjs`. The re-derivation surfaced no family the dispatch list had missed.\n\nNo changeset: workflow plus a root-private script entry releases nothing, matching the dispatch-gates wiring PR that shipped the identical surface. `skip-changeset` applied. The `packages/spec` gate-to-generator ledger reconciles that package's own `package.json`, not the root's, so a root `check:` entry is out of its scope.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_018WuTtyckQa1VcXwgd52JpN)_"
+}

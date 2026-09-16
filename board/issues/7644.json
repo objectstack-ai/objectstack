@@ -1,0 +1,35 @@
+{
+  "number": 7644,
+  "kind": "issue",
+  "title": "[finding] create-objectstack: non-blank remote templates fail first `npm run build` on published 16.1.0 — fix is at HEAD, needs 17.0.0 release + canary verification",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "target:v17"
+  ],
+  "assignees": [
+    "qq9340100"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T09:50:11Z",
+  "updated_at": "2026-08-14T13:02:41Z",
+  "closed_at": "2026-08-14T13:02:41Z",
+  "closed_by": {
+    "login": "qq9340100",
+    "id": 313832657,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7644",
+  "body": "## Symptom\n`create-objectstack@16.1.0` (current npm `latest`) scaffolds a project from any non-blank published remote template, and its very first `npm run build` exits 2 with a namespace-prefix validation error. Reproduced on 4 independent templates in the QA run — `todo` / `compliance` / `content` / `contracts` (2 / 4 / 5 / 3 issues respectively); `procurement` was `blocked(environment)` (codeload 503/403 in the sandbox). The `blank` template is clean end to end. This triggers for any project name whose sanitized namespace differs from the template's own — i.e. every real user, and CI's own `canary-app`.\n\n## Root cause\nLocated, and **already fixed at repo HEAD** — the residual action is a release, not a repair.\n\n- Published `16.1.0` rewrites `namespace:` in `objectstack.config.ts` to the sanitized project name but **not** the object-name literals, because it reads the template's original namespace from `objectstack.manifest.json` only. A remote template's manifest is the template-**registry** document, which has no `namespace` key, so the guard falls through and the literal rewrite is silently skipped (config says namespace `tpl_todo` while the object literal still says `name: 'todo_task'`).\n- The fix is present on `origin/main` (confirmed at filing time): `packages/create-objectstack/src/rewrite-identity.ts` makes `objectstack.config.ts` the authority and self-verifies via `findStaleNamespacePrefixes`, wired in at `packages/create-objectstack/src/index.ts:311`. The file's own comment names the prior incident #4902 (\"all five published remote templates failed this way, and the nightly registry canary had been red on every one of them for weeks with nobody watching\"). Pin `packages/create-objectstack/src/rewrite-identity.test.ts` is present (10/10 pass per the run).\n- Related prior code-bug issue: #4926 (closed).\n\n## Reproduction\n```\nnpx -y create-objectstack@latest canary-app -t todo --skip-skills --skip-install\ncd canary-app &amp;&amp; npm install &amp;&amp; npm run build\n```\nExpected exit 0. Actual (with published 16.1.0) exit 2:\n```\ndefineStack namespace-prefix validation failed (2 issues):\nObject todo_label is missing the package namespace prefix.\nRename it to canary_app_todo_label (namespace = canary_app)\n```\n\n## Residual asks (release-verification, not code repair)\n1. Confirm the `rewrite-identity.ts` fix ships in the `create-objectstack@17.0.0` release — npm `latest` is still `16.1.0`, so every new user picking a non-blank template today gets a project that fails first build.\n2. Confirm the nightly registry canary goes green once 17.0.0 is published.\n\n## Source\nExtracted from the QA run objectstack-ai/objectstack#7628 (framework 92f26f75, console 6314e87f)."
+}

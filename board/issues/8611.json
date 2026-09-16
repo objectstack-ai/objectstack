@@ -1,0 +1,33 @@
+{
+  "number": 8611,
+  "kind": "pull_request",
+  "title": "fix(pm): name the ratchet invocation CI runs in dispatch-gates' test-file entry",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "size/m",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-14T01:57:33Z",
+  "updated_at": "2026-08-14T02:32:01Z",
+  "closed_at": "2026-08-14T02:32:00Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-08-14T02:32:00Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/8611",
+  "body": "Fixes #8545\nFixes #8604\n\nNo gate is weakened and no invocation is removed from CI. What changes is what the DERIVATION prints.\n\n## The mismatch\n\n`CHANGE_KIND_GATES`'s test-file entry emitted `check:type-check-coverage` under a rationale describing the TEST_DEBT ratchet. The ratchet is the `--re-measure` half, and only `check:type-check-debt` passes it — both resolve to one script, `scripts/check-type-check-coverage.mjs`. Measured on the merged ref: lint.yml runs `pnpm check:type-check-coverage` at line 1021 and `pnpm check:type-check-debt` at line 1449, the latter immediately after a `pnpm exec turbo run build` step that builds the ledgered packages' closure.\n\n## What the entry emits now\n\nBoth invocations, each stating the question it answers:\n\n- `check:type-check-coverage` — the structural half. A package whose test files sit outside every tsc program accounting for it must carry a TEST_DEBT entry, so a new test file no tsconfig reaches moves it. It re-measures no count.\n- `check:type-check-debt` — the ratchet half, and the invocation CI runs for it. Carries the built-closure prerequisite inline, with the exact build command lint.yml runs before that step, and says the cold-worktree refusal means NOT MEASURED, never \"not applicable to me\".\n\nA new `How these entries stay honest` bullet writes down the general rule: every `name` in that table is an INVOCATION, not a script.\n\n## The class sweep the card asked for\n\nSwept over the merged ref: the workflows discover 96 check families resolving to 73 distinct script files; 8 of those files are reached by more than one family. Seven of the eight are a different shape — a root `check:` script beside a direct `node scripts/check-x.mjs` step in a second workflow (the three changeset gates, cross-package-test-inputs, objectui-pin-fresh, partof-closing-keyword, shard-attestation). The derivation already discovers each of those direct invocations as its own family and prints it with its own runnable invocation, so nothing is misdirected there. `check-type-check-coverage.mjs` is the only file whose two CI invocations are two ROOT SCRIPTS differing by a flag, and the only one this table names. **One-off today; the rule is what generalises, not the fix.**\n\n## Pins\n\nThe self-test grows from 103 to 106 cases. All three convention gates are pinned on the rendered delimiters (`- pnpm x   —`), never a bare substring, and the STALE branch is pinned per NAME (`⚠ x: STALE`) so the pair sharing one script is reported apart. One further case holds the ratchet line's prerequisite text (the built-closure condition plus a runnable `turbo run build`), because an unexplained throw is what reads as \"not applicable\".\n\nReverse verification, direction predicted before running, from the committed state:\n\n- rename both gates to `-v2`: exactly the 4 anchored cases go red, both COUNT pins stay green (that blindness is why the anchors exist), and the live run prints both names as STALE — the STALE branch works for both printed names.\n- delete the ratchet entry (the pre-fix shape): 5 cases red, including both count pins.\n\nRestored from the commit afterwards, byte-identity confirmed with `git hash-object` against `HEAD:scripts/pm/dispatch-gates.mjs`.\n\n## Rider, #8604 — comment-only, no executable change\n\n`scripts/pm/check-dispatch-gates.mjs`'s header justified its unquoted repo paths with \"watch-hint extraction ... does not skip comments\". `extractWatchHints` has opened with `maskComments` since #8478, and that function's docblock names this file as the specimen it retires.\n\nMeasured with `extractWatchHints`, every repo path in the header rewritten into backticks: **1 hint** under today's extractor (the module-body constant, the same single hint the file ships with) against **10** under the pre-masking extractor, reaching spec, objectql, plugins, drivers, `.claude/agents` and `.changeset` exactly as the incident describes. Comment masking alone accounts for the difference; masking self-test bodies instead changes nothing here, because this file has none. So the premise holds: the convention is no longer load-bearing. The incident is kept as history, the `⚠️` instruction line is dropped, and the rule that survives is stated — a module-body literal is what masking cannot reach.\n\nThe separate-gate-file argument in the same header gets today's numbers too: the tool's own source yields 4 hints, not the 49 the header records, and three of them (`packages/plugins`, `packages/drivers`, `packages/services`) are directory bases the package resolver really probes and wide enough that a directly-wired gate would still fabricate leads — so that decision stands, on narrower grounds than the text claimed.\n\nOne measured detail worth keeping: the ratchet line's remedy command spells its `--filter` values unquoted (and says to quote them for the shell) because a `why` string is a MODULE-BODY literal that masking cannot reach — the shell-quoted spelling adds both glob values to this file's own hint set, inert today only because `hintCovers` rejects a hint collapsing to a bare top-level directory.\n\n## Verification\n\n- `pnpm check:pm-dispatch-gates` — 106/106 pass\n- `pnpm check:nul-bytes` — OK, 7757 files scanned; plus a targeted control-byte self-scan of both changed files\n- `pnpm exec eslint` on both changed files — clean\n- re-derived with `node scripts/pm/dispatch-gates.mjs` against the actual changed paths: `check:pm-dispatch-gates` only, nothing beyond the dispatched list\n\nDev tooling only (`scripts/pm/`), releases nothing — `skip-changeset`.\n\nRelated: #8442 / #8533 (where the misdirection cost a CI lap), #8478 (the masking), #6376 (why `--re-measure` demands a built closure), #5278 (the shrink-only rule). #8538 is a different finding about the same script family and remains open; it is not addressed here.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_018WuTtyckQa1VcXwgd52JpN)_"
+}

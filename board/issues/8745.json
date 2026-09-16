@@ -1,0 +1,35 @@
+{
+  "number": 8745,
+  "kind": "pull_request",
+  "title": "feat(spec): declare `record:reference_rail` in ComponentPropsMap — undeclared rail keys refused (#8691)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-14T17:45:38Z",
+  "updated_at": "2026-08-14T18:20:48Z",
+  "closed_at": "2026-08-14T18:20:46Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-14T18:20:46Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/8745",
+  "body": "Fixes #8691\n\n## What\n\nAdds the strict `record:reference_rail` row to `ComponentPropsMap` (37 → 38 keys), so the #5068 component-props gate's dispatch reaches the rail: the issue's planted entry `filter` — which passed tsc, `objectstack validate`, `objectstack build`, and shipped verbatim while rendering nothing — is now a loud `component-props-unknown-key` refusal with a prescription, and the shape the renderer actually reads is accepted byte-identically.\n\n## Key set — measured, not transcribed (one PM mechanism assumption falsified)\n\nThe dispatch card listed the renderer consuming `objectName / relationshipField / limit / title / icon / displayField` + component-level `hideEmpty`. Verified against the actual console renderer at the repo's `.objectui-sha` pin (`665661ab…`, which is exactly what the local objectui checkout was at — `plugin-detail/src/renderers/record-reference-rail.tsx`):\n\n- **`icon` is falsified as a read point**: it appears in the renderer's TS interface and the page synthesizer emits it, but no render path reads it — the rail card has no icon slot (grep: the only hit in the renderer is the interface declaration). Declaring it would be declared-but-unenforced surface, the exact defect class this row closes. It is a `guidance` refusal instead (\"read by nothing — remove it\"), not a declared key.\n- **`title` is `z.string()`, not `I18nLabelSchema`**: the renderer paints it as a raw React child, so an inline locale map would render as a broken object literal. The inline-map capability question stays with the console seat (explicitly out of scope per the card); refusing the map spelling makes no pull judgement.\n- `limit` / `hideEmpty` are optional with **no schema default** (the `maxVisible` principle at `record:details`): the renderer's `3` / `true` fallbacks stay the renderer's facts.\n- Everything else confirmed: entry `objectName` (required), `relationshipField` (required), `displayField?`, component-level `entries` (min 1) + `hideEmpty?`. `className` stays a component-NODE key per `COMPONENT_LEVEL_GUIDANCE`.\n- Aliases (neighbouring-surface spellings): `items` / `related` → `entries`; `object` → `objectName`; `label` → `title`. Guidance: `filter` (points at `record:related_list`, where `filter` is real), `icon`, entry-level `hideEmpty` (wrong layer).\n\n## Pins, both directions\n\n- `packages/spec/src/ui/component-reference-rail.test.ts`: planted `filter` refused with the prescription; real shape accepted byte-identically (deep-equal round-trip, no defaults materialized); `icon` / locale-map `title` / entry-level `hideEmpty` refused; aliases named; min-1 entries; derived react record-context-gate coverage.\n- `packages/lint/src/validate-component-props.test.ts`: the end-to-end dispatch pin — the planted filter produces exactly one `component-props-unknown-key` finding naming the rail, and the real shape stays silent.\n\n## Reverse verification (direction fixed before running: red = silence restored)\n\nCommitted the fix first, then ablated only the map row, rebuilt `packages/spec` and proved the mutation reached `dist/` (`Object.keys(ComponentPropsMap)` → rail absent, **37 keys — the card's own measured count**). The lint dispatch pin then failed with `expected [] to have a length of 1 but got +0`: the planted filter finding dropped 1 → 0, the pre-fix silence, exactly as predicted. Restored from the commit; the restored build's input hash matched the original fix build (`3305e437…`).\n\n## Changeset and registration\n\nAcceptance-narrowing after the v17.0.0 cut ⇒ changeset `minor` + BREAKING body + `adr-0087: registered ui-reference-rail-unknown-keys-refused`; semantic entry under protocol-18 (`18.ui-reference-rail-unknown-keys-refused.ts`), `registry.ts` regenerated via `gen:migration-registry` (the PR #8666 / PR #8695 precedent). ADR-0122: both new schemas are default-free, so they pin isomorphic (`Iso845` / `Iso846`) rather than declaring `Parsed` aliases.\n\n## Verification at HEAD `e347bbe0f` (post-merge of origin/main, final commit)\n\n- `@objectstack/spec`: 401 test files / **10603 passed**, typecheck green (incl. `check:test-typecheck`)\n- `@objectstack/lint` (the map's direct consumer — downstream direction): 72 files / **2026 passed**, `tsc --noEmit` green after building the lint dependency closure\n- `check:generated`: **13/13 up to date** (api-surface, export-origins, docs references, strictness ledger regenerated via `--fix`, only the four proved stale; authorable-surface anchor rewrite kept as generated)\n- Derived gate battery (`scripts/pm/dispatch-gates.mjs` over the actual changed paths — additions beyond the prompt's list: `check:spec-parsed-alias`, the test-file convention trio): `check:nul-bytes`, `check:changeset-gate-self-tests`, `check:doc-authoring`, `check:docs-audit-scope`, `check:merge-driver`, `check:objectui-changeset`, `check:quick-reference-counts`, `check:role-word`, `check:spec-parsed-alias`, `check:type-source-resolution`, `check:cross-package-test-inputs`, `check:query-options-erasure`, `check:type-check-coverage`, `check:type-check-debt --re-measure` (none above recorded), `check-adr-0087-registration`, `check-changeset-no-major`, `check-empty-changeset`, `check-dev-prereqs`, `check:doc-formula-expressions` — all green\n- `check:react-declaration-parity` cannot run here (needs objectui's sdui.manifest, pin-bump-triggered by settled ruling)\n\n## Out of scope\n\nThe two console-side items the card excludes (rail title vs `pluralLabel`; untranslatable literal title) are not addressed here and remain with the console seat. Sibling finding filed as #8744 (`record:alert` / `record:quick_actions` / `record:history` have no row — same mechanism); #8744 remains open and is not part of this PR.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01E5tUwGM3LQoqErTfkvRW7W)_"
+}

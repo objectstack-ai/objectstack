@@ -1,0 +1,34 @@
+{
+  "number": 8449,
+  "kind": "issue",
+  "title": "pm-dispatch: the findings pipeline is structurally under-drained — switch the metric to UNGRADED count, add first-touch grading, auto-concentrated rounds, and codify the lane-evidence protocol",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-13T13:31:06Z",
+  "updated_at": "2026-08-14T04:27:48Z",
+  "closed_at": "2026-08-14T04:27:16Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8449",
+  "body": "Filed by the triage seat Routine on the maintainer's direct instruction (2026-08-13, live session on the triage fire). Maintainer's words, verbatim:\n\n> 「Finding 很多,是否建议集中分诊」 … 「按照你的建议」 … 「还有这个积压时常态,是否应该优化。」\n\nThe first two authorize domain-batched concentrated finding rounds (executing from 2026-08-13); the third asks for the structural fix — this card is that fix, scoped to `.claude/skills/pm-dispatch/**`.\n\n## Measured state (2026-08-13)\n\n- 47 open `finding` cards vs the ~15 insertion trigger — the stock has been ~3× the trigger for days, i.e. the trigger fires every round and has stopped carrying information.\n- Inflow ~10/day (dev seats' `out_of_scope_findings`, by design — 发现快于关闭是循环在工作; do NOT suppress inflow).\n- Historical outflow: 0–5 grades/round, discretionary; several rounds did 0–1.\n- The stock is heterogeneous and the raw count conflates three very different populations: **ungraded** (~15 today — never had a first verdict; premise accuracy decays in days), **actively-held** (graded, restart conditions live, needs periodic re-verification), and **stable-ruled holds** (maintainer-ruled or verdict-stable; e.g. the card ruled deliberate-defer on 08-11 was explicitly exempted from per-round re-verification on 08-12 because four consecutive passes returned identical results against an unchanged file).\n\n## Root causes\n\n1. **The metric counts the wrong thing.** Total open findings includes stable holds that are *correctly* parked; a healthy holding pen reads as a crisis, and a real ungraded pile hides inside it.\n2. **No first-touch SLA.** A new finding is only read when a findings round happens to pick it up; time-to-first-grade is unbounded, and stale premises are the single biggest per-card cost (re-verification archaeology).\n3. **Re-verification of stable holds eats the budget** that ungraded cards need — the 08-12 exemption precedent fixed this for one card; it is a pattern, not a one-off.\n4. **Grading is a single-seat bottleneck by design** (single-producer is correct), but lane seats already produce the expensive half (evidence, premise re-checks) informally — the drivers-seat evidence comment that completed a promotion this week is the model. Uncodified, it happens by luck.\n\n## Proposed skill changes (4 clauses, for the dev to land in the skill text)\n\n1. **Metric swap**: the round brief's finding-health line reports **ungraded count** (open `finding` with no triage-verdict comment) and **median age of ungraded**; total stock becomes a parenthetical. Stable-ruled holds get an explicit exemption comment naming re-open triggers (the 08-12 pattern) and leave the per-round polling surface.\n2. **First-touch grading**: every round (not every ~5), the sweep grades findings with zero triage comments, budget 3–5, prioritized over re-verifying old holds. Re-verification of active holds keeps its existing cadence.\n3. **Auto-concentrated mode**: ungraded >15, or non-exempt stock >30 ⇒ the next fire runs a domain-batched concentrated round (15–20 cards, grouped so same-family cards are read in one context; the sweep-打包晋级 five-condition rule applies). Standing authorization: maintainer 2026-08-13 (quoted above) — no per-instance ask needed.\n4. **Lane-evidence protocol, codified**: lane seats MAY attach evidence/premise re-checks to findings in their lane (⛔ no grade, no label change — grading stays triage's); the skills-lane carve-out (that seat grades its own lane's findings) is unchanged and should be stated where the findings-round text lives, so repo-wide triage doesn't double-produce there.\n\n## Constraints for the implementing dev\n\n- ⛔ `scripts/pm/check-skill-line-ratchet.mjs`: SKILL.md only shrinks. New clauses need compensating trims in the same area (the existing 发现分诊轮 paragraph is the natural host — this is a rewrite of its trigger/budget sentences, not an addition), or a maintainer ratchet-raise quote in the PR body.\n- ⛔ No issue-number references in operational text (`check:pm-skill-id-lint`) — the exemption/evidence patterns must be described self-contained, not cited.\n- Mandatory model clause applies: this card edits `.claude/skills/pm-dispatch/**` ⇒ dispatch with `claude-fable-5`, no downward discretion. Resulting PR is human-merge class (skills root): reviewed on-issue, left visibly unmerged, listed as awaiting a human merge.\n\nDedup: searched open cards for finding-backlog/threshold/concentrated-round shapes — the shift-end/hot-handover card and the dispatch-strategy-four-items card are adjacent but neither touches the findings pipeline; no overlap."
+}

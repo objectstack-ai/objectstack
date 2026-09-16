@@ -1,0 +1,34 @@
+{
+  "number": 8282,
+  "kind": "issue",
+  "title": "console: accept-invitation page names neither the organization nor the role — the routed implementation is the thin duplicate, while the detailed one ships unrouted",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "priority:p0",
+    "repo:objectui"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-13T02:56:47Z",
+  "updated_at": "2026-08-14T15:30:28Z",
+  "closed_at": "2026-08-14T15:30:28Z",
+  "closed_by": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8282",
+  "body": "The invitation-accept screen tells the invitee nothing about what they are accepting. Observed page (zh), in full:\n\n> **接受组织邀请**\n> 您受邀加入一个组织。\n> [ 接受邀请 ] [ 拒绝 ]\n\nNo organization name, no inviter, no role being granted, no expiry. The user is asked to join \"an organization\" and cannot tell which one, from whom, or as what — a decision they have no basis to make, and a soft phishing surface (anyone who can send an invite can get a click on an anonymous \"join\" button).\n\n## The twist: a page that shows all of it already exists and is not routed\n\nTwo implementations of the same route live in the tree:\n\n| file | fetches invitation? | shows |\n|---|---|---|\n| `apps/console/src/pages/auth/AcceptInvitationPage.tsx` | no | accept / decline only — **this is the one mounted** |\n| `packages/app-shell/src/console/organizations/manage/AcceptInvitationPage.tsx` | yes (`getInvitation`) | org name, role, expiry, plus a proper error state |\n\nThe router mounts the thin one:\n\n```tsx\n// apps/console/src/App.tsx:65,188\nimport { AcceptInvitationPage } from './pages/auth/AcceptInvitationPage';\n…\n<Route path=\"/accept-invitation/:invitationId\" element={<AcceptInvitationPage />} />\n```\n\nwhile the richer one renders exactly the missing block:\n\n```tsx\n{t('organization.accept.description', {\n  defaultValue: 'You have been invited to join {{orgName}} as {{role}}.',\n  orgName: invitation.organizationName ?? invitation.organizationId,\n  role: invitation.role,\n})}\n…\nOrganization / Role / Expires rows\n```\n\nIt is exported (`DefaultAcceptInvitationPage` from `packages/app-shell/src/index.ts:199`, and from `console/organizations/index.ts`) but nothing in `apps/console` imports it. The locale files carry both key families and the comment in every locale already notes the split:\n\n> `// Distinct from `organization.accept.*` (app-shell's richer page, same route).`\n\nSo the strings for the good page are translated in 10+ locales and shipped, for a page the console never renders.\n\n## Expected\n\nThe invitee sees at least the organization name and the role being granted before accepting. Inviter would be a further improvement.\n\n## Suggested fix\n\nRoute the app-shell page (`DefaultAcceptInvitationPage`) and delete the thin duplicate, or port the detail block into the routed one and retire the unused export + its translation keys. Either way one implementation should survive — two pages for one route with different information density is how this drifted.\n\n## Environment\n\n`objectos-ee-deploy` on `http://localhost:8080`, zh locale, invitee `lisi@acme-test.com` accepting an invitation to 测试组织甲, observed 2026-08-12. Source references are the current `objectui` main checkout, where the routing above still stands — this is not a stale-image artifact.\n\nRelated: #8090 (the link that reaches this page is itself broken), #8094 (untranslated strings in the same flow).\n"
+}

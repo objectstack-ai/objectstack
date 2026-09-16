@@ -1,0 +1,34 @@
+{
+  "number": 7751,
+  "kind": "issue",
+  "title": "A typo'd key inside a page component's `properties` is accepted in silence — the props bag is a passthrough record and the SDUI props gate has no schema to dispatch for `object-*` blocks",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec"
+  ],
+  "assignees": [
+    "qq9340100"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T12:27:53Z",
+  "updated_at": "2026-08-13T19:42:24Z",
+  "closed_at": "2026-08-13T19:42:01Z",
+  "closed_by": {
+    "login": "qq9340100",
+    "id": 313832657,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7751",
+  "body": "## Symptom\n\nAn author writes a misspelled key inside a page component's `properties`, and nothing anywhere complains: the spec parses it clean, it is stored, the renderer ignores it, and the author gets a success receipt for configuration that does nothing.\n\nThe live specimen from this run is the showcase's personal work queue (#7750): `object-grid` authored with `filters:` (plural) where the renderer reads `filter`. The wire carried no `$filter` and the grid listed every row. But the specimen is incidental — this card is about the class.\n\n## Scope, stated precisely\n\nCarried verbatim from the run, because the specimen is easy to over-escalate:\n\n> **Scope, stated precisely: this is not an authorization bypass.** The unfiltered read is still RLS-constrained, so the caller sees only rows they may see (admin sees all because admin may see all). The defect is that a declared personal-scope filter **silently never applies** — and that a typo'd key is accepted without complaint. The second half is the more general problem.\n\n## Root cause — two layers, both open for this block family\n\n**1. The schema does not judge the bag.** `PageComponentSchema.properties` is `z.record(z.string(), z.unknown())`. `PageComponentSchema` itself has been `.strict()` since ADR-0089 D3a, but strictness does not recurse: it closes the component node's own keys and leaves everything under `properties` unjudged. This is documented, not accidental — see `packages/spec/src/stack.zod.ts:817` (\"Containers nest through a loose record\") and the header of the lint below.\n\n**2. The gate that exists cannot see this block.** ADR-0078 / #5068 added `packages/lint/src/validate-component-props.ts`, which dispatches on the component's `type` and judges `properties` against that type's props schema. Two reasons it is silent here:\n\n- It is **warning-only by design**, pending an inventory — its own header explains why (\"Wiring the parse is the precondition for enforcement, not the enforcement\").\n- More decisively, it **skips unregistered types silently**:\n\n```\nconst schema = PROPS_SCHEMAS[type];\nif (!schema) continue;   // \"Unregistered type — skipped silently … the majority\n                         //  of authored nodes are SDUI blocks this map does not carry.\"\n```\n\nAnd `ComponentPropsMap` (`packages/spec/src/ui/component.zod.ts:987-1033`) carries **31 entries, none of them an object-bound block**: `page:*`, `record:*`, `nav:*`, `global:*`, `ai:*` and `element:*` are declared; `object-grid`, `object-metric`, `object-kanban`, `object-calendar` and the rest of the `object-*` family are absent. The string `object-grid` does not appear anywhere in `packages/spec`.\n\nSo for the block family that carries the platform's data-bound authoring surface, **both** layers are open: the schema passes the bag through, and the lint has nothing to dispatch.\n\n**Stale-premise check:** re-verified on `objectstack` `origin/main` (`00e9196`) — the passthrough record, the silent-skip branch, and the 31-entry map without any `object-*` key are all present as described.\n\n## Why this is filed as a finding rather than a fix\n\nThe direction is a real choice and it touches a published surface:\n\n- **A — declare the `object-*` blocks in `ComponentPropsMap`.** Gives the existing lint something to dispatch and gets did-you-mean suggestions for free (`filters` → `filter` is exactly the rename shape the walker already emits). Cost: the spec takes on props schemas for blocks whose implementation lives in objectui, and the two must then be kept in parity — the same coupling `check:react-declaration-parity` already manages for other surfaces.\n- **B — leave the map as-is and close the loop on the objectui side**, where the block's `inputs` are declared. objectui#4041 already did this for `object-grid` specifically (the plural spelling was retired and a spelling pin added), but that is per-block work with no gate making it exhaustive.\n- Either way, the warning→error upgrade for `component-props-unknown-key` remains gated on the inventory #5068 describes.\n\nNeither should be picked by an implementer without a ruling — recorded here so the decision is made once for the whole block family rather than one typo at a time.\n\n## Reproduction\n\n1. Author any page whose component is an `object-*` block and add an undeclared key inside `properties` (e.g. `filters:` on `object-grid`).\n2. Build / publish — no error, no warning: `PageComponentSchema` parses the bag, and `validateComponentProps` skips the type.\n3. Render the page — the key is spread onto the renderer and ignored there.\n4. Control: put the same undeclared key one level **out** (on the component node rather than inside `properties`) — ADR-0089 D3a strictness rejects it, proving the gate exists and stops at the bag's edge.\n\n## Source\n\nExtracted from the QA run objectstack-ai/objectstack#7695 (framework 92f26f75, console 09987b680)."
+}

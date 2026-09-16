@@ -1,0 +1,34 @@
+{
+  "number": 8912,
+  "kind": "pull_request",
+  "title": "docs(releases): record the 16.0.0 GA cut and the closed v16 line",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-15T16:26:37Z",
+  "updated_at": "2026-08-15T16:54:19Z",
+  "closed_at": "2026-08-15T16:54:17Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": "2026-08-15T16:54:17Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/8912",
+  "body": "Fixes #8886\n\n`content/docs/releases/` is release-owned, so this is a **dedicated docs-only PR** — the sanctioned remedy for a factual error on a release page. Two files, no code, no changeset (`skip-changeset`).\n\n## What actually shipped\n\nRe-measured in the worktree; tags are the authority on what shipped:\n\n| tag | date |\n| :-- | :-- |\n| `@objectstack/spec@16.0.0-rc.0` | 2026-07-19 |\n| `@objectstack/spec@16.0.0-rc.1` | 2026-07-20 |\n| `@objectstack/spec@16.0.0` | 2026-07-21 |\n| `@objectstack/spec@16.1.0` | 2026-07-22 |\n\nThe v16 series went GA, took a minor, and closed when 17.0.0 shipped on 2026-08-14. The page and its index entry still described the train as published as `16.0.0-rc.0` — two releases behind its own last tag, and the second entry on the index claiming to be the current series.\n\n## Four stale surfaces on `v16.mdx`, not one\n\n1. **The release-status blockquote** — rewritten as shipped, following the shape #8882 set for v17. The \"section headings say 16.0.0 for brevity\" sentence is dropped: it explained a pre-mode convention that no longer exists. **The trailing 15.1.1 clause is kept verbatim** — it is still true, and it is a cross-reference rather than pre-mode framing.\n2. **\"Console vs. pin\"** said the pin \"has since advanced to `af1b0db` on `main`\". That advance released — changeset `1965549` bundles `af1b0db96e44` as `@objectstack/console` 16.0.0-rc.1.\n3. **\"Console changes after the `rc.0` pin\"** carried the same unreleased-on-`main` framing for the same pin move.\n4. **The `Landed since 16.0.0-rc.0` window was left open** (\"roll into the next 16.0 RC\"), the way v17's rc.6 window was. It is now closed against what actually released it, in the shape the v17 windows use.\n\n### How the window close was measured\n\nEvery entry in that window maps to a changeset consumed at the `16.0.0-rc.1` cut, matched by changeset id across the `## 16.0.0-rc.1` sections of the package changelogs:\n\n| window entry | changeset | package |\n| :-- | :-- | :-- |\n| #3308 `aiStudio`/`aiSeat` alias removal | `06ff734` | spec/cli |\n| #3306 date arithmetic + formula gaps | `7125007` | formula |\n| #3350 `checkboxes` per-option `visibleWhen` | `674457a` | objectql |\n| #3343 `engine-owned` bucket | `62a2117` | metadata-core |\n| #3344 approvals `viewer` gating | `8efa395` | plugin-approvals |\n| #3332 approvals decision attachments | `e412fb6` | plugin-approvals |\n| #3298 `transactionalBatch` discovery bit | `bfa3c3f` | client |\n| #3347 action `resultDialog` i18n | `6289ec3` | spec/cli |\n| #3354 collaboration-notification i18n + routes | `ee0a499` | plugin-audit |\n| Console pin `94d4876` to `af1b0db` | `1965549` | console |\n\nOnly `16.0.0-rc.0` and `16.0.0-rc.1` were ever cut, so rc.1 is the train's last RC; and the `## 16.0.0` GA sections re-list the rc.0 and rc.1 entries — the signature of `changeset pre exit` — so the window shipped in 16.0.0. That is what the closed opener now states.\n\nCorrection to one of my own intermediate readings, recorded because it is an easy trap: a text search for `#3354` hits several **17.0.0** changelog entries, but those are **objectui**'s issue numbering, not this repo's. Matching by content (`assignedToYou` / `mentionedYou`) puts framework#3354 in `16.0.0-rc.1`, where the page already places it.\n\n## `index.mdx`\n\nThe v16 entry moves from `(current series: 16.0.0-rc.0)` to `(final release: 16.1.0)`, matching the closed-series house style that v15 (`final release: 15.1.1`) and v14 (`final release: 14.8.0`) already use, each against its own last tag. Both files are in one PR deliberately: fixing only the index would leave the page and its entry disagreeing.\n\n## 16.1.0 is named, not documented\n\nThe page does not mention `16.1` anywhere, and 16.1.0's content (8 changesets; the headline is #3366, the CLI `requires` provider preflight) is documented on no release page at all. Documenting it is out of this PR's scope, so the blockquote names 16.1.0 as the line's final release and says plainly that the minor is not covered here — enough for the page and its index entry to agree without smuggling in a release-notes section. Reported to the PM rather than expanded into here.\n\n## Verification\n\nGate union re-derived from the real changed paths with `node scripts/pm/dispatch-gates.mjs content/docs/releases/v16.mdx content/docs/releases/index.mdx`, and run at `a0c2d9b21` — the head commit of this branch. Judged by exit status:\n\n| gate | exit |\n| :-- | :-- |\n| `pnpm check:docs-audit-scope` | 0 — release-owned pages in scope and review-only |\n| `pnpm check:release-notes` | 0 — every released major has a curated, navigable page |\n| `pnpm check:role-word` | 0 — 44 baselined files, no new occurrences |\n| `pnpm check:nul-bytes` | 0 — 5894 text files, no raw control bytes |\n| `pnpm check:doc-anchors` | 0 — 216 internal fragment links all resolve |\n| `pnpm check:doc-authoring` | 0 — 377 files, no bare metadata literals |\n| `pnpm check:quick-reference-counts` | 0 |\n\n`check:doc-anchors` was added beyond the dispatch's named set because this diff sits next to two `#landed-since-1600-rc0` fragment links; the heading they target is unchanged. The dispatch expected a `check:doc-links` family — no such gate exists in this repo; `check:adr-links` is the only link gate and it covers `docs/adr/` only. The one new link added here, `/docs/releases/v17`, is the same target form `index.mdx` already uses for its v17 entry.\n\n## Ordering\n\n#8892 is the gate for this same defect class and is deliberately held behind this PR: were the gate to land first, `main` would go red on this very page. Nothing from #8892 is implemented here. `v17.mdx` is untouched — it was compiled by #8882 and a `chore: version packages` PR is open.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_011RB4waLuNbdruCo6X9oobm)_"
+}

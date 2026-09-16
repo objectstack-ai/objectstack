@@ -1,0 +1,35 @@
+{
+  "number": 8892,
+  "kind": "issue",
+  "title": "gate: nothing fails when a GA'd major's release page still describes itself as a pre-release — the gap that let v17 and v16 both ship with stale status",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-15T15:12:12Z",
+  "updated_at": "2026-08-16T02:52:36Z",
+  "closed_at": "2026-08-16T02:52:36Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8892",
+  "body": "`scripts/check-release-notes.mjs` verifies that every released major **has a curated, navigable page**. It does not verify that the page **says the release happened**. That gap has now produced the same defect twice:\n\n- **v17** (#8882, fixed by #8888) — the page was compiled *for* the GA cut (#8642) and never updated *after* it. Published for a day saying \"development is complete and the train is preparing to ship\".\n- **v16** (#8886, still open) — page says \"the 16.0.0 train is currently published as `16.0.0-rc.0`\". 16.0.0 and 16.1.0 both shipped, 16.1.0 on **2026-07-22**. Stale for over three weeks, and it was found by a human reading the page, not by CI.\n\nBoth times CI was fully green. The defect is invisible to every existing gate, so it is only ever caught when someone happens to read the page — which is exactly the failure mode a ratchet exists to remove.\n\nMaintainer authorized filing this on 2026-08-15 after reviewing #8882: 「立卡」.\n\n## What to build\n\nA gate that fails when a major has a **GA (non-prerelease)** release and its release page or index entry still describes the train as unreleased.\n\nTwo assertions, per GA'd major:\n\n1. **`content/docs/releases/v<major>.mdx`** — the release-status blockquote must not carry pre-mode framing (`is currently published as`, `preparing to ship`, `pre-mode`, `nothing reaches the latest tag`, `Until \\`changeset pre exit\\``, a bare `<major>.0.0-rc.N` presented as the current version).\n2. **`content/docs/releases/index.mdx`** — that major's entry must not end in a pre-release parenthetical (`(current series: <major>.0.0-rc.N, pre-release)`).\n\n## Three design constraints — these are where this gate will go wrong\n\n**(a) The GA predicate must exclude prereleases, and the existing helper does not.** `check-release-notes.mjs`'s `releasedMajors()` uses:\n\n```js\nfor (const m of text.matchAll(/^##\\s+(\\d+)\\.\\d+\\.\\d+/gm))\n```\n\nThat pattern is **unanchored at the end**, so `## 17.0.0-rc.0` also matches and yields major 17. Harmless for the existing check (a page should exist during the RC window too) but **actively wrong here**: reusing it would demand that v18's page claim to be released the moment `18.0.0-rc.0` publishes — inverting the defect. This gate needs its own predicate: a `## <major>.<minor>.<patch>` heading in `packages/spec/CHANGELOG.md` with **no** prerelease suffix. Consider whether `releasedMajors()` should be split into `releasedMajors()` / `gaMajors()` rather than duplicated.\n\n**(b) Do not scan the whole page.** `v17.mdx` contains hundreds of legitimate `rc.N` mentions — the entire `Landed since 17.0.0-rc.0` … `rc.6` history, `better-auth 1.7.0-rc.2`, pin-chain enumerations. A naive page-wide grep for `rc.` is all false positives and would be reverted within a week. Scope the scan to the **status blockquote** (the first `>` block after the frontmatter — where both v16 and v17 put the claim) plus the **single `index.mdx` line** for that major.\n\n**(c) Prove it catches the real defect.** The gate must go red against the v16 page as it stands today. **Sequencing:** #8886 fixes v16 and may land first — if it has, verify against the pre-fix ref (`git show <ref>:content/docs/releases/v16.mdx`) rather than concluding the gate works because everything is green. A gate whose only evidence is \"green on a clean tree\" has not been tested. Verify against v17 pre-#8888 as a second positive.\n\n## House conventions\n\n- Self-test first, like its siblings: `check:role-word` and `check:docs-audit-scope` both run `--self-test` before the real check. Follow that shape.\n- Wire into `.github/workflows/lint.yml`, where `check:release-notes` (line ~541) and `check:role-word` (line ~293) already run.\n- Whether this is a new script or an extension of `check-release-notes.mjs` is the implementer's call — argue it in the PR. Extending keeps one CHANGELOG parse; splitting keeps each gate's failure message specific.\n\n## Out of scope\n\nFixing v16 (that is #8886) and re-checking v17 (already landed in #8888). This card is the gate only. If the gate is red on `main` because #8886 has not landed yet, say so in the PR and coordinate — do not fix the page here, and do not weaken the gate to make it pass.\n\n## Re-check\n\n```bash\ngit fetch origin main\ngit show origin/main:scripts/check-release-notes.mjs        # current gate: page EXISTS, not page IS CORRECT\ngit show origin/main:content/docs/releases/v16.mdx | sed -n '14,22p'   # the live positive\ngit grep -n \"check:release-notes\" origin/main -- .github/workflows\n```"
+}

@@ -1,0 +1,36 @@
+{
+  "number": 8621,
+  "kind": "issue",
+  "title": "drivers(sql): MySQL silently merges an upsert on a unique key the caller never named, and rewrites the merged row's primary key — measured, and it is a wrong write with no error",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "auto-adjudicated",
+    "bug",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-14T02:41:41Z",
+  "updated_at": "2026-08-14T20:00:34Z",
+  "closed_at": "2026-08-14T20:00:34Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8621",
+  "body": "Filed out of #8592, which was dispatched to **measure** this and is scope-guarded to the measurement only. Step 2 of that card — changing MySQL's accept set — was ruled a `minor` with its own argument, so here it is. Unassigned.\n\n## The measurement (this is now an observation, not an inference)\n\nLive **MySQL 8.0.46** (Ubuntu noble `mysql-server`, `mysqld --daemonize`, `default_time_zone='+08:00'`), driven through the same knex + `mysql2` path `SqlDriver.upsert` takes. Table: `email` is the column named in `conflictKeys` and has **no** unique index; `tax_id` carries the only unique index.\n\n```\nCREATE TABLE `os8592_mismatched` (\n  `id` varchar(255) NOT NULL, `email` varchar(255) DEFAULT NULL,\n  `tax_id` varchar(255) DEFAULT NULL, `title` varchar(255) DEFAULT NULL,\n  PRIMARY KEY (`id`),\n  UNIQUE KEY `uniq_os8592_mismatched_tax_id` (`tax_id`)\n)\n```\n\n```\nseed  upsert({email:'a@b.com',     tax_id:'T-1', title:'first'},  ['email'])\n      -> RESOLVED. rows=[{id:'VBjOQwQp3uTtewte', email:'a@b.com', tax_id:'T-1'}]\n\nB     upsert({email:'other@b.com', tax_id:'T-1', title:'second'}, ['email'])\n      -> RESOLVED. rows=[{id:'RnSaXzGO69OKkP_D', email:'other@b.com', tax_id:'T-1'}]\n         ONE row: merged on `tax_id`, across two DIFFERENT `email` values.\n         And the surviving row's PRIMARY KEY changed.\n\nD     seed, then upsert({email:'a@b.com', tax_id:'T-2'}, ['email'])\n      -> RESOLVED. TWO rows, both email='a@b.com'.\n```\n\nReproduced across two independent runs. The compiled statement is the cause, and #8567 already pinned it with no server: knex compiles `onConflict(['email']).merge(...)` on `mysql2` to `ON DUPLICATE KEY UPDATE`, which takes no conflict target — the named keys are dropped before the statement leaves the process.\n\n## Three consequences, and the middle one is the sharpest\n\n1. **No refusal.** The identical call is `VALIDATION_ERROR` / 400 on SQLite (#8445) and Postgres (#8567). On MySQL it resolves.\n2. **The merged row's primary key is replaced.** `id` sits in the merge set, so the statement carries `id = values(id)` and the stored row's identity is overwritten with the fresh nanoid minted for the insert that lost. Every external reference to the old `id` dangles, and nothing reports an error. (This is the general form of a defect filed separately — it is not MySQL-specific.)\n3. **The named key is not honoured at all.** Two rows with the same `email` coexist after a caller explicitly asked to merge on `email`.\n\nSo MySQL fails in both directions at once: it merges where the other two dialects refuse, and it does not merge where it was told to.\n\n## What this card has to decide\n\nThe behaviour is pinned as a **characterization** in `sql-driver-upsert-conflict-target-dialects.test.ts` (landing with #8592), loudly marked as recording a defect. Those pins go red when this card lands and must be rewritten to the refusal, not relaxed.\n\nOptions, for the argument this deserves:\n\n- **A — pre-flight refusal in `driver-sql`.** Before compiling, check that a PRIMARY KEY or UNIQUE index backs `conflictKeys`; refuse with the existing `VALIDATION_ERROR` wording (#5240: one condition, one wording) when it does not. Makes all three dialects answer the same sentence for the same mistake, and turns a silent wrong write into a legible refusal. **Changes MySQL's accept set** — calls that \"worked\" (wrongly) now throw, which is why this is a `minor` and not a patch rider.\n- **B — leave it, document the dialect divergence.** Cheapest, and dishonest in the way that matters: the failure is a wrong write with no error, which is strictly worse than the illegible-error problem #8445 and #8567 both judged worth fixing.\n\nRecommendation is **A**, on the AI-authored-metadata axis in particular: a mismatched `conflictKeys` is exactly the kind of error a generated metadata app produces, and a consumer-side silent merge is where it hides and multiplies. The driver already knows the declared indexes — the check belongs at the producer, not as a tolerant parse at the consumer.\n\nRelated: #8592 (the measurement), #8567 (compiled SQL read, Postgres measured), #8445 / #8413 (the two faces that refuse), #5240 (one condition, one wording)."
+}

@@ -1,0 +1,34 @@
+{
+  "number": 8866,
+  "kind": "pull_request",
+  "title": "docs(tests): restate the package-author carve-out on the channel, not on validateSecurityPosture's reach",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-15T11:56:26Z",
+  "updated_at": "2026-08-15T12:25:31Z",
+  "closed_at": "2026-08-15T12:25:30Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-08-15T12:25:30Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/8866",
+  "body": "Fixes #8547\n\nTwo test comments justified the `package-author` carve-out with a claim about\n`validateSecurityPosture`'s **reach**, and that claim has now rotted twice. This PR restates both\nin terms of the decision that actually landed, and re-founds them on the fact that does not move.\n\n## What was false\n\n- `packages/metadata-protocol/src/protocol.runtime-authoring-gate.test.ts:524` claimed the rule is\n  `CLI_ONLY` in `AUTHORING_RULES`. Measured on this branch: the entry declares\n  `surfaces: CLI_AND_RUNTIME` with `runtimeTypes: ['seed', 'permission', 'book', 'object']`\n  (`packages/lint/src/authoring-rules.ts:1175`). Untrue since PR #8390; the `object` limb landed\n  with PR #8600.\n- `packages/rest/src/meta-object-owd-gate.test.ts:472` had already lost the words `CLI_ONLY`, but\n  still concluded package authoring is \"gated at build time **instead**\" — contradicting its own\n  file header (`:12`) and its sibling comment 214 lines above (`:258`), both of which say the rule\n  *now runs for* `object` writes at that very door. That site disagreed with itself inside one\n  file, so the correction there is reconciliation rather than deletion.\n\n## What the corrected prose says\n\nNot a word swap on `CLI_ONLY` — the word is absent from both files now, and is deliberately not\nreintroduced as archaeology either, since that would keep the grep hit alive for the next audit.\n\n**The carve-out itself is intact and was never the defect.** Both doors skip the `package-author`\nchannel on purpose: `assertRuntimeAuthoringRules` returns early on it at every call site\n(`protocol.ts:3818`), and the single `runAuthoringGate` call is guarded by the same check\n(`protocol.ts:12264`). What was wrong was the *reason attached to it*. The corrected sentences rest\nthe carve-out on the **channel** instead of on the rule's reach, and say so explicitly — the reach\nmoves with every #7891 slice, the channel does not, so the same sentence cannot rot the same way a\nthird time.\n\nPer the ruling set as landed:\n\n- the rule answers at the runtime publish door for `object`, so \"gated at build time instead\"\n  becomes \"judged at build time by the same rules, before anything is published\";\n- **door order and ADR-0094's R1-stays / R2-retired outcome are pointed at, not restated.** They are\n  already pinned in the rest file's own header (`:8`-`:29`) and in\n  `packages/plugins/plugin-security/src/object-posture-gate.ts`. Restating them in a second file is\n  how the drift this card removes gets recreated;\n- where the corrected prose describes reach, it records the carve-out that survived:\n  `security-owd-unset` exempts `isSystem` / `sys_*` objects, so such an object with an unauthored\n  `sharingModel` stays effectively PUBLIC at runtime. Recorded as fact with a pointer to #8641,\n  which remains open — this PR takes no position on whether that exemption should change.\n\nOne observation that sharpened the rest-side sentence: the body the `package-author` case sends\n(`private` / `public_read`) is byte-identical to the one the `security-external-wider-than-internal`\ncase at the top of the same file refuses with a 422. What differs is the channel, not the posture —\nthe docblock now says exactly that.\n\n## Scope\n\nComment prose only, across two packages in one PR (triage designated this a cross-domain single-PR\ncard so the two comments cannot drift apart). No behaviour, assertion, pin or test-count change:\nthe diff touches only `//` and ` *` lines, verified mechanically rather than by eye —\n\n```\ngit diff -U0 | grep -E '^[+-]' | grep -vE '^(\\+\\+\\+|---)' | grep -vE '^[+-]\\s*(\\*|//)'\n⇒ no output\n```\n\nNo changeset: test comments release nothing. `skip-changeset` applied.\n\n## Verification — run at HEAD `dd0d626e6` (after the final commit, which is the `main` merge)\n\n`main` moved twice during this card (`fd6bdf89f` → `b69d0f5e4` → `51bb277ef`), so the whole union\nwas retaken at the merged head; the ratchet numbers below are measured against the tree that is\nactually being proposed.\n\n| check | result |\n| :-- | :-- |\n| `pnpm check:nul-bytes` | PASS |\n| `pnpm check:cross-package-test-inputs` | PASS |\n| `node scripts/check-cross-package-test-inputs.mjs` | PASS |\n| `pnpm check:durability-log-level` | PASS |\n| `pnpm check:query-options-erasure` | PASS |\n| `pnpm check:type-check-coverage` | PASS |\n| `pnpm check:type-check-debt --re-measure` | PASS — 33 ledger entries re-measured in 164.5s, 1926 raw errors, **none above its recorded number** |\n| `pnpm --filter @objectstack/rest --filter @objectstack/metadata-protocol typecheck` | PASS |\n| `@objectstack/metadata-protocol` full suite | 101 files / **1483 tests** passed |\n| `@objectstack/rest` full suite | 118 files / **1948 tests** passed |\n\nThe debt ratchet was re-measured on a **built** workspace (`turbo run build` over\n`./packages/*` + `./packages/*/*`, 70/70 successful) — `metadata-protocol` hides its tests from\ntsc, so a green package `typecheck` alone would carry no information about TEST_DEBT.\n\nGate list re-derived against the actual changed paths with `scripts/pm/dispatch-gates.mjs`; it\nreturned exactly the families the dispatch named, nothing additional.\n\n_Generated by [Claude Code](https://claude.ai/code/session_01XeQRiAa7vYRVX5Fog7Zby8)_\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01XeQRiAa7vYRVX5Fog7Zby8)_"
+}

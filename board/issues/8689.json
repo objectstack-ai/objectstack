@@ -1,0 +1,35 @@
+{
+  "number": 8689,
+  "kind": "issue",
+  "title": "A record-change flow's start condition is not evaluated on the re-entrant dispatch its own write causes — the loop-breaker is the only thing stopping the loop, and it says so itself (17.0.0 GA)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:services"
+  ],
+  "assignees": [
+    "qq9340100"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-14T13:32:46Z",
+  "updated_at": "2026-08-14T17:38:08Z",
+  "closed_at": "2026-08-14T17:37:48Z",
+  "closed_by": {
+    "login": "qq9340100",
+    "id": 313832657,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8689",
+  "body": "Part of objectstack-ai/hotcrm#701. Measured live on `@objectstack/*` **17.0.0 GA**, user-driven REST writes against a booted dev server.\n\nSearched first: #4862 (predicate bulk writes: `previous` unbound, `record` a bare payload) is closed and is a different path — this is the ordinary single-record `record-after-update` path.\n\n## Symptom\n\nA record-change flow whose start condition, **as authored, evaluates false on the flow's own write**, is nevertheless re-dispatched for the same record; the engine's last-resort loop-breaker catches it and logs:\n\n```\n2026-08-14T13:14:39.075Z WARN [automation] flow 'case_escalation' re-entered for the\nsame record while still running — breaking self-trigger loop; the triggering record's\nid is in this record's meta. Its start condition did not suppress the re-fire; if it\nguards on a boolean field (e.g. `is_escalated != true`), note booleans persist as 0/1\non SQLite/libsql and CEL `1 != true` is true.   {\"recordId\":\"v5_h-3H_CbMj6jag\"}\n```\n\nThe message's own words are the report: *\"Its start condition did not suppress the re-fire.\"*\n\n## Why the guard should have held — measured, not asserted\n\nThe reporting app's `case_escalation` gates on `status` **strings** and a `null` check, not on the boolean the WARN's hint is about, so the SQLite `1 != true` explanation does not apply here:\n\n```\ncondition: has(record.priority) && record.priority == \"critical\"\n  && (!has(record.escalated_date) || record.escalated_date == null)\n  && (!has(record.status)\n      && record.status != \"escalated\" && record.status != \"resolved\" && record.status != \"closed\")\n```\n\nRecord state at the moment of the re-fire, read back from the API:\n\n```\nstatus=escalated  is_escalated=true  escalated_date=2026-08-14T13:14:38.628Z\n\n  record.status != \"escalated\"   -> false\n  record.escalated_date == null  -> false\n```\n\nBoth terms false. The condition as written cannot be true on that dispatch, yet the dispatch happened and only the breaker stopped it.\n\n## Probe design (so a green could not be vacuous)\n\nThree things asserted together, because \"the flow terminated\" cannot distinguish the two mechanisms:\n\n1. the flow **actually fired** (record reached `status=escalated`) — otherwise a missing WARN proves nothing;\n2. a loop-breaker WARN **carrying that record's id** (the log is filtered by the probe's own id, so unrelated WARNs cannot be miscounted);\n3. the guard terms evaluated at the re-fire.\n\n## Second flow, same shape\n\n```\ncreated crm_opportunity RnrCSh-5GvgPkzSM  amount=1000\nPATCH amount=250000 (crosses the large-deal threshold) -> HTTP 200\n  approval_status=pending\nloop-breaker WARNs naming RnrCSh-5GvgPkzSM: 1\n  WARN [automation] flow 'opportunity_approval' re-entered for the same record while\n  still running — breaking self-trigger loop; ...\n```\n\nIts gate excludes deals already `pending`; its own write sets `approval_status = pending`; the breaker still fires.\n\nAlso reproduced **unprompted** during the platform's own seed sweep on a fresh boot — three occurrences on `case_escalation` (record ids `foDLsXSrb6CKOKbe`, `hIICKFaqJ1q_DuZD`, `hN6omYKfEla8E9EV`). Not user-context specific.\n\n## Why it matters even though nothing runs away today\n\nThe breaker holds — one WARN per occurrence, no runaway, no corruption. The defect is that **the guard flow authors write is not the mechanism preventing the loop**, and nothing tells them so at authoring time. Every author using a status-based re-fire guard is relying on a safety net they do not know they depend on, and the net's scope is narrow by construction: it is keyed on `flowName::recordId` *while still running*. Anything outside that window — a cross-record chain, a delayed re-fire, a re-entry after the first run completes — has no second line of defence, because the first line was never actually running.\n\nTwo candidate readings, both worth naming since they need different fixes:\n\n- the re-entrant dispatch **skips** condition evaluation, or\n- evaluation **aborts** and the abort is counted as a fire.\n\nEither way the observable contract — \"a record-change flow fires only when its start condition is true\" — does not hold on the dispatch a flow's own write causes.\n\n## Repro\n\nAny `record-after-update` flow whose data node writes a field its own start condition excludes. Create a record outside the condition, `PATCH` it into the condition, and watch the server log for `[automation] … re-entered … breaking self-trigger loop` naming that record id while the record shows the flow's own write applied.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01XAK3brMLjd4ykF4QAhFnuo)_"
+}

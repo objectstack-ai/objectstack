@@ -1,0 +1,37 @@
+{
+  "number": 8096,
+  "kind": "issue",
+  "title": "[finding] single-org users have no UI path to the workspace manage pages — the `?manage=1` avatar-menu entry the code describes does not exist",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched",
+    "priority:p0",
+    "repo:objectui"
+  ],
+  "assignees": [
+    "yinlianghui"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-12T15:15:52Z",
+  "updated_at": "2026-08-14T15:19:47Z",
+  "closed_at": "2026-08-14T15:19:47Z",
+  "closed_by": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8096",
+  "body": "Recording an observation for the platform to rule on.\n\nA user who belongs to exactly **one** organization appears to have no UI path to the workspace management pages (`/organizations/<slug>/members` · `/invitations` · `/settings`). Three mechanisms that are each individually reasonable close every door at once:\n\n1. **`/organizations` auto-skips.** Deliberate, and documented as such:\n   > UX P0-1: auto-skip the picker when the user belongs to exactly one organization. […] We still mount the page (so direct navigation to `/organizations` works) but redirect once orgs have finished loading.\n   (`packages/app-shell/src/console/organizations/OrganizationsPage.tsx`)\n\n   Confirmed empirically: with one org, `GET /_console/organizations` lands on the last app page; after creating a second org, the same URL renders the picker.\n\n2. **The workspace switcher is hidden with a single org.** Verified: the top bar shows no workspace control until the user has ≥2 organizations, at which point the switcher (with its **Manage members** item) appears. Sensible on its own — but it is the only entry point to the manage pages.\n\n3. **The avatar menu has no \"My Organizations\" item.** The comment right above the auto-skip explains that this is what should reopen the picker:\n   > Two deliberate ways to reach this page (vs the auto-skipping post-login redirect): `?manage=1` (avatar menu \"My Organizations\") shows the picker; `?create=1` (avatar menu \"Create workspace\") additionally opens the create dialog directly. Both suppress the single-org auto-skip below so a single-org user can actually reach \"New organization\" / the dialog.\n\n   Observed avatar menu (zh, both a single-org and a two-org user): 个人资料 / 创建工作区 / 主题 / 语言 / 注销. `创建工作区` is the `?create=1` entry and works; there is **no** `?manage=1` entry.\n\nNet effect: a single-org owner cannot reach *Members / Invitations / Organization settings* without hand-typing `/_console/organizations?manage=1`. Inviting still works from Setup → Users → **Invite user**, so the workspace is not unusable — but role changes, invitation cancellation, renaming the org and deleting it are all only in those pages.\n\n## The decision\n\nEither restore the `?manage=1` avatar-menu item the comment describes, or show the workspace switcher unconditionally (a one-org switcher is a bit redundant but carries **Manage members**), or point Setup at the manage pages. If single-org users are intentionally not meant to reach these pages at all, the stale comment should go instead.\n\n## Environment\n\nLocal dev server `http://localhost:8080`, multi-org enabled, zh locale, observed 2026-08-12. The server was started by the maintainer and its exact commit is not verified; the source quoted is the current `objectui` main checkout.\n"
+}

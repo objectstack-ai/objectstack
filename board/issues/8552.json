@@ -1,0 +1,34 @@
+{
+  "number": 8552,
+  "kind": "issue",
+  "title": "[Decision] When a curated capability name is already held in the platform bucket, should the seeder keep declining — or adopt, backfill, or refuse the collision at authoring time?",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-13T19:04:06Z",
+  "updated_at": "2026-08-14T03:11:37Z",
+  "closed_at": "2026-08-14T03:11:37Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8552",
+  "body": "Surfaced while reviewing #8470 / PR #8537. **Not blocking that PR** — it lands with the conservative behaviour and reports the collision loudly. This card is the policy question the PR deliberately declined to answer, and it is filed because the dev was right to decline it, not because anything is wrong with the fix.\n\n## The state the question is about\n\nAfter #8537, the curated seeder looks up `{ name, managed_by: 'platform', organization_id: null }` — the row the platform owns. If that matches nothing **and** the insert is then refused by the unique key, the platform's curated definition is missing from `sys_capability` installation-wide, and the seeder counts it (`blockedCurated`) and warns on every boot.\n\nIt declines to resolve the collision, for two stated reasons: adopting a differently-stamped row into the platform's identity would reverse **#5876**'s ruling that \"not provably ours\" resolves to leave-it-alone, and backfilling a stamp is a data migration. Both are calls above the implementer's pay grade, so neither was made.\n\n## What was measured, not assumed\n\nTwo of the three non-platform provenances in that bucket are **reachable**, and one is ordinary rather than exotic:\n\n- **`managed_by: 'admin'` — reachable and ordinary.** `organization_id` auto-stamping lives in the enterprise `@objectstack/organizations` runtime, which is also what activates every walled posture. A deployment without it is `single` posture **with no stamper**, so every Setup-authored capability row lands in the NULL-organization bucket. That is the default community shape.\n- **`managed_by: 'package'` — reachable via name promotion, with real instances.** `bootstrapDeclaredCapabilities` refuses a name in `PLATFORM_CAPABILITY_NAMES`, but a package that declared a name *before* the platform curated it left a `managed_by: 'package'` row there. **`setup.write` and `manage_sharing` were both added to the curated set after the fact.**\n- **no `managed_by` at all — NOT engine-reachable.** The field is `required: true` with `defaultValue: 'admin'`, and `applyFieldDefaults` resolves defaults on insert before the beforeInsert hooks, so an insert omitting it stores `'admin'`. (The diagnostic still handles it, because a message must not assert what it cannot observe.)\n\n## Why this is a decision and not a follow-up bug\n\nFor the `package` case specifically, #8537 **changes** the outcome on already-upgraded installations rather than only fixing a defect:\n\n| | before #8537 | after #8537 |\n|---|---|---|\n| installation where a package declared `setup.write` before it was curated | the seeder found that row by `{ name }`, took the update branch, and **overwrote it with the platform copy** — so the platform definition effectively existed | the scoped lookup matches nothing, the insert is refused, and the platform definition is **absent installation-wide**, with a warning every boot |\n\nNeither state is good. The new one is the one ADR-0066 D1 implies (do not clobber another author) and it is honest about itself, which is why it is the right thing to ship *now*. But whether it is the right long-term answer on the two deployment shapes above is a product call.\n\n## The options, stated without a recommendation\n\n1. **Keep declining** — the shipped behaviour. The platform definition stays absent on colliding installations; the operator sees a warning naming the blocking row's provenance and has to resolve it by hand.\n2. **Adopt** a platform-bucket row into the platform's identity when nothing else claims it. Reverses #5876's \"not provably ours → leave alone\" for this specific bucket.\n3. **Backfill** the `managed_by` stamp for known-curated names in the NULL bucket. A data migration, and it decides on the operator's behalf that those rows were the platform's.\n4. **Refuse the collision at authoring time** — stop Setup from creating a `sys_capability` row whose name is in `PLATFORM_CAPABILITY_NAMES`, so the state cannot arise going forward. Does nothing for installations already carrying one, so it likely pairs with 1 or 3.\n\n⛔ I am not answering this on the maintainer's behalf, and I have deliberately not ranked the options. I will note only that option 4 is the one that matches the standing principle recorded 2026-08-12 — *\"if the platform cannot honour a declaration, refuse it at the latest checkpoint that can see the whole picture, name the offending key path, and never answer 200\"* — because authoring a curated name in Setup is precisely a declaration the platform later cannot honour. Whether that principle should govern here is the question, not the answer.\n\n## Related\n\n- #8470 / PR #8537 — the fix that makes this state observable and names it.\n- #8536 — the DERIVED half has the same unseeded-bucket shape, on the half #8470's ruling excluded.\n- #5876 — the \"not provably ours resolves to leave-it-alone\" ruling that option 2 would reverse.\n- ADR-0066 D1 — the platform DEFINES, admins EXTEND.\n\nFiled unassigned by the `domain:metadata` PM seat."
+}

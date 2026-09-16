@@ -1,0 +1,37 @@
+{
+  "number": 8747,
+  "kind": "issue",
+  "title": "auditMetaItem's `organizationId` is dead on both ends — the audit read returns every org's rows for a (type, name), while its comment describes a scope filter that is not in the query",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched",
+    "security",
+    "target:v17"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-14T17:50:41Z",
+  "updated_at": "2026-08-15T04:19:56Z",
+  "closed_at": "2026-08-15T04:19:56Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 11,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8747",
+  "body": "## What\n\n`ObjectStackProtocolImplementation.auditMetaItem` (`packages/metadata-protocol/src/protocol.ts`)\ndeclares `organizationId?: string | null` in its request type and **never reads it**. The\nquery it builds is:\n\n```ts\nconst where: Record[string, unknown] = {\n    type: singular,\n    name: request.name,\n};\n```\n\nDirectly above that `where`, the method's own comment describes filtering that is not\nthere:\n\n> Org-scoped lookup: include rows for the specific org AND env-wide (organization_id IS\n> NULL) rows so the editor sees both tenant overlays and env-level package writes.\n\nThat sentence describes an `$or` on `organization_id`. No such clause is built, and\n`request.organizationId` is referenced nowhere in the method body.\n\nIt is dead on the **caller** side too: the only production caller,\n`GET /api/v1/meta/:type/:name/audit` (`packages/rest/src/rest-server.ts`), passes `type`,\n`name`, `environmentId` and `limit` — never `organizationId`. So the parameter is\nunreachable from the wire as well as unused in the body.\n\n## Why it matters\n\n`sys_metadata_audit` rows carry a real `organization_id` (the write path is careful about\nit — an env-wide draft audits env-wide, a tenant overlay audits to its org). The read door\nthen discards that dimension: for a given `(type, name)` it returns **every org's rows**,\nincluding `actor`, `note` and `lock_state`. Studio's audit-log tab serves from exactly this\nmethod.\n\nTwo readings, and I could not settle which applies without going outside this card's scope:\n\n1. **Real disclosure** — a tenant admin viewing the audit tab for a metadata item whose\n   name also exists in another tenant sees that tenant's audit events.\n2. **Compensated lower down** — the engine/driver applies tenant scoping to `find` such\n   that the protocol-level omission is invisible in practice, and the defect is then a\n   comment that over-claims plus a parameter that should be deleted or wired.\n\nEither way the current state is declared-not-enforced (AGENTS.md Prime Directive #10): the\nsignature and comment both advertise org scoping that the code does not perform. Which\nreading holds decides whether this is a security fix or a cleanup, so it is worth\nmeasuring rather than assuming.\n\n## Suggested resolution\n\nMeasure reading 1 first (two orgs, same `(type, name)`, one audit read). Then either wire\nthe `$or` the comment describes and thread `organizationId` from the REST route, or delete\nthe parameter and correct the comment. A pin either way — the comment has been describing\nabsent behaviour for long enough that the next reader will believe it.\n\n## Not in scope of\n\nFound while verifying the reader for #8595 (PR #8746), which needed to know exactly what\n`auditMetaItem` keys on. #8595 only adds rows on the publish pre-flight path and does not\ntouch this query. Related but distinct: #8707 is about how audit rows are **stamped** at\nwrite time; this one is about the **read** discarding the stamp.\n"
+}

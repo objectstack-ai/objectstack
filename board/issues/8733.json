@@ -1,0 +1,34 @@
+{
+  "number": 8733,
+  "kind": "pull_request",
+  "title": "docs(protocol): correct the X-API-Key example to the real osk_ prefix",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-14T16:41:27Z",
+  "updated_at": "2026-08-14T17:03:56Z",
+  "closed_at": "2026-08-14T17:03:54Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-14T17:03:54Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/8733",
+  "body": "Part of #8715\n\nCarries **only §2** of the card. **§1 is escalated, not implemented** — it is not the\ndocs correction the card assumed, and the reason is measured below. Deliberately `Part of`\nrather than a closing keyword: this PR does not finish #8715, whose main half sits in the\ndecision box. (Wording note: an earlier draft of this line used a bare closing keyword in\na negated sentence — GitHub's parser ignores the negation, so `Part-of PR must not also\nclose its card` correctly refused it. Reworded, not re-argued.)\n\n## What changed (§2 — the `osk_` prefix)\n\n`content/docs/protocol/kernel/http-protocol.mdx` showed a Stripe-shaped\n`sk_live_abc123...` value in the `X-API-Key` example. Corrected to `osk_abc123...`, and\nsince the surrounding prose was silent on the prefix, added a short paragraph saying why\nit is load-bearing.\n\nTraceable to source: `API_KEY_PREFIX = 'osk_'` and `extractApiKey` in\n`packages/core/src/security/api-key.ts`, whose own comment states the mechanism — Bearer\nis accepted only for prefixed api-keys, never for session tokens, because a better-auth\nsession token never starts with `osk_`.\n\nSwept `content/docs/**` for `sk_live` / `sk_test` / `pk_live` / `os_pk_` as #8717 asks.\nTwo other hits are correct as written and were left alone: `automation/connectors.mdx`\n(an OUTBOUND bearer token for a third-party API) and `protocol/kernel/config-resolution.mdx`\n(`OS_CRM_API_KEY`, a third-party CRM credential). Neither is an ObjectStack inbound key.\n\n#8717 is the split-out card for this same example and remains open — the PM decides\nwhether it is served by this PR or should carry its own.\n\n## Why §1 is not in this PR\n\nThe card asks for the `ApiKey` reference table to be rebuilt from the real `sys_api_key`\ncolumn set. Three findings say that cannot be a docs change:\n\n1. **The page is generated.** `content/docs/references/identity/identity.mdx` carries the\n   `AUTO-GENERATED — DO NOT EDIT` banner and names its source,\n   `packages/spec/src/identity/identity.zod.ts`. Hand-editing it is barred and would be\n   undone by the next `gen:docs`. The table is a faithful rendering of `ApiKeySchema`,\n   which really does declare `start`, `lastRefetchAt`, `enabled`, `rateLimitEnabled`,\n   `rateLimitTimeWindow`, `rateLimitMax`, `remaining`, `permissions`, `metadata`,\n   `organizationId`. The doc is not the defect; the schema is.\n\n2. **Fixing the schema is an ADR-0049 retirement, not a JSDoc edit.** All 19\n   `identity/ApiKey:*` keys are in `packages/spec/authorable-surface.base.json`. Removing\n   ten of them needs the ADR-0087 conversion plus the exact-key `RETIRED_KEYS_BY_MAJOR`\n   entry, the liveness ledger, regenerated baselines, forms, i18n, pin tests and a\n   **major** changeset for `@objectstack/spec`. That is the opposite of this card's stated\n   `skip-changeset`, docs-only disposition.\n\n3. **The card's prescribed replacement column set is ahead of `main`.** It lists\n   `active_organization_id`, which `sys_api_key` does not have on `main` —\n   `packages/platform-objects/src/identity/sys-api-key.object.ts` declares no such field,\n   and `resolveApiKeyPrincipal` still reads `row.organization_id ?? row.organizationId`.\n   The column arrives with PR #8709, still an **open draft**. Documenting it today would\n   re-commit the same PD #10 sin the card was filed about.\n\nThe real column set on `main`, each traceable to `sys-api-key.object.ts`:\n`name, prefix, user_id, scopes, expires_at, last_used_at, revoked, key, id, created_at,\nupdated_at` — eleven, not the card's twelve.\n\nThere is also a disposition question the dev seat should not settle alone: `ApiKeySchema`\nhas **zero consumers** anywhere in the monorepo (only its own test, the export-surface\nsnapshots and this generated page), so \"delete it and let the platform object be the one\ndeclaration\" is a live alternative to rebuilding it. Full analysis in the report on #8715.\n\n## Verification\n\nGate union run **after** the final commit, at `f82c72acd`, all PASS:\n\n`check:nul-bytes` · `check:doc-authoring` · `check:doc-anchors` · `check:docs-audit-scope`\n· `check:role-word` · `check:adr-links` · `check:empty-changeset` ·\n`check:changeset-gate-self-tests`\n\nRe-derived against the actual changed path with `scripts/pm/dispatch-gates.mjs`, which\nsurfaced `check:role-word` — a family the dispatch prompt did not name. The prompt also\nnamed `check:doc-formula-expressions`, which exists as no script in the root\n`package.json`. `check:generated` is not implicated: no generated artifact moved, because\nthe generated page is untouched.\n\n`check:doc-anchors` failed on the first pass purely for a missing `github-slugger` — the\nworktree had no `pnpm install` yet. It passes after installing.\n\nDocs-only prose, releases nothing, so no changeset and the `skip-changeset` label;\n`check:empty-changeset` passes on this diff in that shape.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01E5tUwGM3LQoqErTfkvRW7W)_"
+}

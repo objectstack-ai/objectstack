@@ -1,0 +1,36 @@
+{
+  "number": 8287,
+  "kind": "issue",
+  "title": "[finding] API keys carry no organization — under the isolated posture a minted key reads no org data at all (no leak, but the key surface is inert)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "priority:p0",
+    "security",
+    "target:v17"
+  ],
+  "assignees": [
+    "qq9340100"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-13T03:12:44Z",
+  "updated_at": "2026-08-14T19:05:34Z",
+  "closed_at": "2026-08-14T19:04:41Z",
+  "closed_by": {
+    "login": "qq9340100",
+    "id": 313832657,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 14,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8287",
+  "body": "Recording an observation for the platform to rule on.\n\n**Good news first:** an API key does not leak across tenants. Every probe below stayed empty or 404 — there is no cross-organization exposure here.\n\nThe finding is the other side of that: on a deployment running `OS_TENANCY_POSTURE=isolated`, a minted key appears unable to read **any** organization's data, which makes the key surface effectively inert while the console still offers minting.\n\n## Measured\n\nMinted as the owner of 测试组织甲, from a session whose active organization was that org:\n\n```\nPOST /api/v1/keys  {\"name\":\"probe-key-orgA\"}\n→ 201 {\"success\":true,\"data\":{\"id\":\"…\",\"prefix\":\"osk_…\",\"key\":\"osk_…\"}}\n```\n\nThen, `credentials: 'omit'` so only the key authenticates:\n\n| request (header `x-api-key`) | result |\n|---|---|\n| no auth at all (control) | `401 UNAUTHENTICATED` |\n| `GET /data/sys_user` | `200`, **total 1** — only the key's own owner |\n| `GET /data/sys_team` | `200`, **total 0** (the org has 1 team) |\n| `GET /data/sys_team/<orgA team id>` | `404` |\n| `GET /data/sys_team/<orgB team id>` | `404` |\n| `GET /auth/me/permissions` | `200` with an empty body — no `tenantId`, no `positions` |\n\nAttempts to give the key an organization, all ineffective:\n\n- minting with `{\"organizationId\": \"<orgA>\", \"organization_id\": \"<orgA>\"}` → key created, still `sys_team` total 0\n- request headers `x-organization-id`, `x-org-id`, `organization-id` → still total 0\n\n## Why it lands this way\n\n`sys_api_key` has no organization column at all — its declared fields are `name, prefix, user_id, scopes, expires_at, last_used_at, revoked, key, id, created_at, updated_at` (`packages/platform-objects/src/identity/sys-api-key.object.ts`). Key auth therefore establishes a user but no active organization, and the `isolated` wall is `organization_id = activeOrganizationId` (`packages/spec/src/security/tenancy-posture.ts:15`) — with no active org, no row can match. `sys_user` is the exception only because it is walled by an enumerated member-id list rather than by the org column.\n\n## The decision\n\n1. **Intended** — keys are a user-level surface, org-scoped automation is meant to use something else. Then the console's API-keys entry should say so, because today a tenant admin can mint a key, get a valid-looking secret, and discover only at call time that it reads nothing.\n2. **Gap** — keys should carry an organization (minted against the active org, or with an explicit org + membership check at mint time), and key auth should establish that org as the request's active organization.\n\nOption 2 is the one that makes the existing UI honest, but it is a real security-surface decision (a long-lived credential pinned to a tenant), so it should be made deliberately rather than by patching the symptom.\n\n## Environment\n\n`objectos-ee-deploy` (Caddy → app → postgres:16, `NODE_ENV=production`, `OS_TENANCY_POSTURE=isolated`) on `http://localhost:8080`, observed 2026-08-13. Two probe keys were minted during this test and are still present on the owner account (`probe-key-orgA`, `probe-key-bound`) — they carry no org access, but delete them if the environment is kept.\n\nRelated: #8286 (the same isolation wall, described back to callers in analytics SQL).\n"
+}

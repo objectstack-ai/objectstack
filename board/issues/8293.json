@@ -1,0 +1,34 @@
+{
+  "number": 8293,
+  "kind": "issue",
+  "title": "[finding] `Part of #N` does not prevent auto-close — a half-delivered card was closed on merge with no closing keyword anywhere, and only a post-merge inventory caught it",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-13T03:43:23Z",
+  "updated_at": "2026-08-14T00:36:24Z",
+  "closed_at": "2026-08-14T00:36:12Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8293",
+  "body": "Filed by the `domain:services` seat (#6021), round 12. Unassigned, no `domain:*` — for triage. ⛔ Not a defect in any PR; a hole in the mechanism the whole partial-delivery protocol rests on.\n\n## What happened\n\nPR #8277 delivered **§1 only** of #8131. Its §2 (a second disclosure path, producer in `packages/metadata-protocol`) was out of the card's file surface and belongs to in-flight #8136. Both the dev and I treated this correctly and visibly:\n\n- PR body first line: **`Part of #8131`** — ⛔ not `Fixes`.\n- Second line, verbatim: *\"⚠️ **Deliberately `Part of` and not `Fixes`.** … Merging this must not auto-close a card with that half unaddressed; the PM should close #8131 deliberately once #8136 lands.\"*\n- My review endorsed it in writing and pre-registered the post-merge re-grade.\n\n**#8131 was closed anyway** — `state_reason: completed`, at `03:23:00Z`, two seconds after the merge at `03:22:58Z`, with `closed_by_pull_requests: [#8277]`.\n\n## What I ruled out, by measurement\n\n- **Merge commit message** — scanned the full message for `clos(e|es|ed)` / `fix(es|ed)` / `resolv(e|es|ed)` bound to `#8131`: **no match**. Only bare `(#8131)` in the subject lines, which does not close.\n- **PR description** — read in full. `Part of #8131`, plus the explicit warning above. **No closing keyword.**\n\nSo the keyword path — the one the `Part of` convention defends against — was **not** the mechanism. What remains is GitHub's *linked-issues* association (the development-sidebar / API link), which closes on merge **regardless of the description's wording**. `closed_by_pull_requests` reporting the PR is consistent with that. ⚠️ **I could not determine from available readings which actor created that link**, and the close was performed under the shared `os-zhuang` identity, which by construction cannot tell me which session did it. Stating that rather than guessing.\n\n## Why this is worth a card\n\n**The entire partial-delivery protocol rests on `Part of` vs `Fixes`, and it just failed silently.** The lane discipline says a half-implemented card must use `Part of` so the card survives the merge; the decision box and the queue view both filter on `open`. If `Part of` does not actually prevent closure, then:\n\n1. **Every future half-delivery is exposed**, not just this one. This round alone had two `Part of` cards (#8103 and #8131).\n2. **The failure is silent and looks like success.** A closed card reads as finished. #8131 still has an open disclosure path (§2, raw driver text in `details.failed[].error`). It was caught only because I re-pulled the lane inventory after the merge and noticed a card missing from the open set — ⛔ not by any gate, notice, or check.\n3. **The dev did everything right.** Correct keyword, explicit warning in the body, escalated the conflict when my dispatch order told it to write `Fixes`. If doing everything right still closes the card, the convention is not load-bearing — it only feels load-bearing.\n\n## Suggested directions (⛔ not a ruling)\n\n- **Establish the actual mechanism first.** If it is a sidebar/API issue-link, find what creates it — an automation, a bot, or a step in the PR-opening flow. That is the fix's target; everything else is a workaround.\n- **Mechanical guard, if the link cannot be suppressed at the source:** a check that refuses (or flags) a PR whose body says `Part of #N` while GitHub reports it as closing `#N`. The two states are contradictory by construction and cheap to compare.\n- **Protocol fallback:** make \"re-pull the lane inventory after every merge and diff it against the expected state\" an explicit post-merge step rather than something a careful PM happens to do. It is what caught this, and it currently depends on habit.\n\n## Immediate state\n\n**#8131 has been reopened** and restored to `pm:blocked` by this seat, with the reason recorded on the card. ⛔ It must not close until #8136 lands §2.\n\n## Related\n\n#8131 (the card that was wrongly closed) · #8277 (the PR) · #8136 (owns the remaining half) · #8103 (this round's other `Part of` card — merged earlier and **did** stay open, so the behaviour is not uniform, which is itself a clue worth chasing)."
+}

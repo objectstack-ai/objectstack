@@ -1,0 +1,35 @@
+{
+  "number": 8571,
+  "kind": "pull_request",
+  "title": "fix(driver-sql): envelope the unbacked-conflict-target upsert refusal",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-13T22:14:06Z",
+  "updated_at": "2026-08-13T22:53:03Z",
+  "closed_at": "2026-08-13T22:53:02Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-13T22:53:02Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/8571",
+  "body": "Fixes #8445\n\nThe local twin of #8413's remote-face refusal. `SqlDriver.upsert` let SQLite's error escape exactly as raised when `conflictKeys` named columns with no backing PRIMARY KEY or UNIQUE index.\n\n## Premise verified before implementing\n\nMeasured on this branch's base (`origin/main` @ `719a21bf`), local face, knex + better-sqlite3:\n\n```\nupsert('plain', { email: 'a@b.com', title: 'x' }, ['email'])\n  -> THREW name=SqliteError code=SQLITE_ERROR status=undefined\n     ownProps=[stack, message, code]\n     msg=insert into `plain` (`created_at`, `email`, `id`, `title`, `updated_at`)\n         values ('2026-08-13T…', 'a@b.com', 'ib21mSZ…', 'x', '2026-08-13T…')\n         on conflict (`email`) do update set … - ON CONFLICT clause does not\n         match any PRIMARY KEY or UNIQUE constraint\n```\n\nThe card's premise holds exactly as filed. One detail it did not record, and the fix depends on it: knex builds the message as *statement*, then ` - `, then SQLite's own sentence — so SQLite's text, the only channel that can discriminate this condition, survives to this face and the remote twin's recognition applies here unchanged.\n\n## What changed\n\n`packages/drivers/driver-sql/src/sql-driver.ts` only:\n\n- `isUnbackedConflictTargetError` — a narrow match on SQLite's sentence. Not `code`: SQLite raises a plain `SQLITE_ERROR`, the same generic code a syntax error carries, so a code-based test would swallow every other statement failure. Deliberately not `isUniqueViolationError`, which answers the opposite condition (an index exists and the row violated it).\n- `refuseUnbackedConflictTarget` — `VALIDATION_ERROR` / 400, original error kept as `cause`.\n- One line in `upsert`'s catch, placed **before** the autonumber retry branch: the condition is never an autonumber collision (`collidingAutoNumberReservations` asks `isUniqueViolationError`, false here, so the probe would query the sequences table for nothing and rethrow raw), it is never transient, and it is the only placement that envelopes both exits — a recognition after the branch still escapes raw whenever `mayRetry` is false.\n\n**The payload was the larger half.** `mapDataError` builds the envelope from `code`/`status`; with neither set it falls through and serves the thrown message as the whole body — the statement, bound values inlined. So the pins assert the leak as well as the envelope.\n\n## The judgment call triage delegated: narrow, by measurement\n\nSQLite-recognition-first at the `driver-sql` call site, **not** a shared dialect-spanning predicate in `@objectstack/types`. Ground: this container has no Postgres or MySQL server, so their wording for this condition could not be measured, and transcribing it from memory is the guesswork the dispatch ruled out. MySQL is not even obviously the same condition — knex compiles `onConflict().merge()` there to `ON DUPLICATE KEY UPDATE`, which takes no conflict target. Postgres and MySQL therefore keep exactly the behaviour they have today. Measuring them, and deciding whether the predicate then belongs beside `isUniqueViolationError`, is tracked on #8567 (unassigned).\n\n## Wording\n\n#8413's remote refusal, verbatim, first sentence for first sentence (#5240 — one condition, one wording). `TursoDriver` picks its face from `url`, so a second wording would make the answer a property of the connection string. The remote text is right for this face as written, including its \"table created before its `unique` declaration was emitted as DDL\" clause: this face does create declared indexes, but it cannot create one over a table already holding duplicates, so the same table arrives here with the same missing index.\n\nThe wording pin here is one-way by construction — it catches a reword of this face, not of the remote one. The two-way runtime comparison needs a package that can import both faces, which is `driver-turso`; that is outside this card's declared file surface, so it is filed as #8568 (`finding`) rather than added here.\n\n## Tests\n\nNew: `sql-driver-upsert-conflict-target-envelope.test.ts` — 6 pins. Envelope (`code` **and** `status`, never a bare `toThrow()` — the un-fixed driver threw for this input too); leak (statement and bound values absent from the caller-visible message, still reachable via `cause`); wording; and three controls that must not have moved — the same `conflictKeys` upsert **merges** when a declared `unique: true` backs it, the default `id` merge key still works, and an unrelated statement failure is not swallowed as this refusal.\n\n```\npnpm --filter @objectstack/driver-sql test      → 91 files | 1463 passed | 52 skipped\npnpm --filter @objectstack/driver-sql typecheck → clean\npnpm --filter @objectstack/driver-turso test    → 37 files | 984 passed\n```\n\nReverse verification, direction predicted before running: with the call-site line removed, the envelope pin goes red on its **first** assertion (not through an \"it resolved\" branch — this input was always refused), the leak and wording pins red with it, and the three controls stay green. Measured: `3 failed | 3 passed`, first failure `expected 'SQLITE_ERROR' to be 'VALIDATION_ERROR'`. Restored with `git checkout` from the commit.\n\n## Scope\n\nNo change to what `upsert` accepts or rejects — the same calls fail, they fail legibly. Hence `patch`, not `minor`: #8413's `driver-turso` half was `minor` because it *started refusing writes accepted before*, which this does not. Untouched: #8441's batch-verb `code` limb, and `schema-drift.ts` (#8557).\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01VoxQqG5FiUHZKCST7KDoZC)_"
+}

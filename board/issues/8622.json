@@ -1,0 +1,35 @@
+{
+  "number": 8622,
+  "kind": "issue",
+  "title": "drivers(sql): an upsert that merges on a non-PK conflict key silently REWRITES the existing row's primary key — measured on SQLite and MySQL alike",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-14T02:41:59Z",
+  "updated_at": "2026-08-14T18:17:51Z",
+  "closed_at": "2026-08-14T18:17:51Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8622",
+  "body": "Found while measuring #8592. Unassigned. **Not MySQL-specific, and not about conflict-target validity** — this reproduces on a perfectly well-formed upsert whose conflict target IS backed by a unique index.\n\n## What was measured\n\nTable with `email` declared `unique: true` — the conflict target is properly backed, so this is the *supported* path, not an error path. Two upserts merging on `['email']`:\n\n```\nupsert({email:'x@b.com', title:'first'},  ['email'])\nupsert({email:'x@b.com', title:'second'}, ['email'])\n```\n\nObserved — one row throughout, as intended, but watch the `id`:\n\n```\n[sqlite] before=[{id:'rSxhabt0nVz-9RsL', title:'first'}]\n         after =[{id:'hXqcSC45F3IXFr5k', title:'second'}]   idPreserved=false\n[mysql]  before=[{id:'euKyrh1dzHE153eC', title:'first'}]\n         after =[{id:'Ycqn7yHaGHvUXi-c', title:'second'}]   idPreserved=false\n```\n\nSQLite (in-process) and live MySQL 8.0.46 both rewrite it. Postgres was not raised for this run, so it is deliberately NOT claimed here — the mechanism below is dialect-independent and predicts the same result, but that is an inference and wants the conformance runner to confirm it rather than a third row in the table above.\n\n## Why it happens\n\n`SqlDriver.upsert` mints an `id` whenever the caller does not supply one:\n\n```ts\n} else if (toUpsert.id === undefined) {\n  toUpsert.id = nanoid(DEFAULT_ID_LENGTH);\n}\n```\n\nand then builds the merge set as *everything not insert-only*:\n\n```ts\nconst insertOnlyColumns = this.insertOnlyUpsertColumns(object);\nconst mergeColumns = Object.keys(formatted).filter((c) => !insertOnlyColumns.has(c));\n```\n\n`insertOnlyUpsertColumns` covers `created_at` and `auto_number` columns (#7011) — **not `id`**. So `id` travels in the merge set:\n\n```sql\ninsert into `t` (…) values (…)\n  on conflict (`email`) do update set …, `id` = excluded.`id`, …\n```\n\nWhen the conflict key IS the primary key (the default `['id']` path) that clause is a no-op — the value is identical, which is why this has stayed invisible. The moment `conflictKeys` names anything else, the losing insert's freshly minted nanoid overwrites the winning row's identity.\n\n## Why it matters\n\n`id` is the platform's stable row identity: it is what relationships, audit records, external id mappings and any client-held reference point at. A merge-path upsert on a business key is the ordinary way to ingest external data — and today every such call silently re-identifies the row it merged into. No error is raised on any dialect.\n\nThis is the same argument #7011 already accepted for `auto_number` — *\"the number is an externally visible business identifier once assigned\"* — and the primary key is the strongest instance of it.\n\n## Likely fix\n\nTreat the primary key as insert-only on the merge path, i.e. add `id` to `insertOnlyUpsertColumns`, exactly as `created_at` and `auto_number` already are. Wants checking against the `_id` alias branch, and against any caller that deliberately re-keys a row (`update()` is the deliberate path, per #7011's reasoning).\n\nExisting coverage does not catch it: the control in `sql-driver-upsert-conflict-target-dialects.test.ts` asserts row count and `title` after a backed merge, never the `id`.\n\nRelated: #7011 (the same exclusion argument, for `auto_number`), #8592 (where this surfaced), #8621, #8567."
+}

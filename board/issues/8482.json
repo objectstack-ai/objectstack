@@ -1,0 +1,34 @@
+{
+  "number": 8482,
+  "kind": "issue",
+  "title": "trigger-record-change: RecordChangeDataEngine.getObjectConfig is declared but never implemented — the hydration schema-gate is dead code",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-13T15:30:38Z",
+  "updated_at": "2026-08-13T19:17:38Z",
+  "closed_at": "2026-08-13T19:15:47Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8482",
+  "body": "Filed unassigned — an observation surfaced while implementing #4953's services half (PR TBD, `packages/triggers/trigger-record-change/src/record-change-trigger.ts`). Recording only; no fix bundled here.\n\n## What's declared\n\n`RecordChangeDataEngine` (the structural interface `RecordChangeTrigger` uses to avoid a build-time dependency on `@objectstack/objectql`) declares an optional method:\n\n```ts\ngetObjectConfig?(object: string): { fields?: Record<string, { type?: unknown } | undefined> } | undefined;\n```\n\n`objectHasFormulaField` uses it as a schema gate: when present, it skips `hydrateComputedFields`'s re-read (`findOne`) for objects that declare no `formula` field — the only thing that re-read adds. When absent, it falls back to `true` (\"re-reads unconditionally — correctness over the optimization\").\n\n## What's measured\n\n```\ngrep -rn \"getObjectConfig\" packages/  →  only trigger-record-change's own interface + its own test file\n```\n\nThe concrete ObjectQL engine (`packages/objectql/src/engine.ts`) has **no method named `getObjectConfig`**. It does have a public `getObject(name): ServiceObject | undefined` (an alias for `getSchema`), which the trigger already uses for a different purpose (the \"silent miss\" object-existence probe), and whose returned `ServiceObject.fields` would serve the same purpose — but nothing wires it into `objectHasFormulaField`.\n\n`RecordChangeTriggerPlugin.resolveDataEngine` hands the trigger the REAL engine straight from `ctx.getService('objectql')` — there is no adapter layer where a `getObjectConfig` shim could be quietly attached either.\n\n## Consequence\n\nIn production, `typeof this.engine.getObjectConfig === 'function'` is always `false`, so `objectHasFormulaField` always takes its `true` fallback and `hydrateComputedFields` **always** re-reads via `findOne` on every `afterInsert`/`afterUpdate` dispatch — including for the very common case of an object with no `formula` field at all, where the re-read (per the code's own doc comment) adds nothing. The \"schema gate\" the doc comment describes (`packages/triggers/trigger-record-change/src/record-change-trigger.ts`, `hydrateComputedFields`'s doc block) is not a bug in the sense of wrong output — the documented fallback is explicitly \"correctness over the optimization\" — but it is unreachable in the one place that matters, so it reads as a working optimization that in fact never engages.\n\nOnly the trigger's OWN test file (`record-change-trigger.test.ts`, `describe('RecordChangeTrigger computed-field hydration guards (#3426 follow-up)')`) exercises the gate — by hand-attaching a `getObjectConfig` mock via `Object.assign(engine, { getObjectConfig })`. Those tests pass and are true statements about the trigger's OWN logic; they just never run against anything the real engine provides, so the gate's \"measured on a real engine\" claim implicit in the #3445 changelog entry doesn't hold.\n\n## Why this is a finding, not a fix in #4953's PR\n\nOut of scope for #4953 (services half): that card is about the seeded `record`/`previous` CEL bindings being total over declared fields, not about hydration's re-read performance. Fixing this (presumably: reuse `getObject` — already correctly wired, and already used by `buildContext` for materialization since #4953 — inside `objectHasFormulaField` too, retiring `getObjectConfig`) is a real but separate, perf-only change with its own blast radius (every afterInsert/afterUpdate dispatch's query count in production, not just this one seam), so it should land as its own card and its own measurement rather than ride along.\n\n## Suggested fix shape (not prescriptive)\n\nPoint `objectHasFormulaField` at `this.engine.getObject?.(object)?.fields` (the same accessor #4953's materialization now uses) instead of `getObjectConfig`, and retire the `getObjectConfig` interface member + its doc comment once nothing references it. Whoever picks this up should measure the actual query-count delta on a real engine before/after (a `findOne` spy count, same style as the existing hydration tests) rather than assume the fix is free.\n"
+}

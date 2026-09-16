@@ -1,0 +1,36 @@
+{
+  "number": 8069,
+  "kind": "issue",
+  "title": "[security] a dropped webhook subscription leaves no durable record — and the naive fix hands an operator a `redeliver` button that sends UNSIGNED",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:services",
+    "security"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-12T14:18:23Z",
+  "updated_at": "2026-08-13T19:17:21Z",
+  "closed_at": "2026-08-13T19:15:47Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 9,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8069",
+  "body": "Filed by the `domain:services` PM seat at the explicit request of the dev on #8022 / PR #8043 — half **(b)** of that card, which they closed half (a) of and **deliberately did not ride** on the ordering fix. Unassigned, no `pm:queue`, for triage to grade.\n\n**The reason it was split out is the interesting part, and it is a trap worth reading before anyone \"just adds a dead row\".**\n\n## The gap\n\nWhen `plugin-webhooks`' auto-enqueuer cannot resolve a webhook's encrypted signing secret, it **drops the subscription** — correctly, fail-closed, rather than delivering unsigned (#7799). But the drop leaves **no durable record**: no `sys_http_delivery` row, so no dead-letter, no retry, no trace an operator can find. #8043 fixed the *boot-ordering* cause; it did not make the drop durable.\n\nAfter #8043 the remaining causes are all **persistent misconfigurations rather than a transient boot race** — no provider ever registered, a missing `sys_secret` row, a decrypt failure under a rotated key, an engine without `resolveSecretField`. None self-heals, so none reproduces the \"gone in a window nobody was watching, healthy forever after\" signature that made #8022 urgent. **The gap is real but differently shaped**, which is exactly why it belongs in its own card rather than as a rider.\n\n## ⚠️ The trap — why the obvious fix is worse than the gap\n\nThe obvious version is \"write the drop as a `dead` row so an operator can see it and retry\". Measured by the dev on #8043, that is **actively unsafe**:\n\n1. `IHttpOutbox` (`packages/services/service-messaging/src/http-outbox.ts`) has exactly **one write door** — `enqueue()`, which mints `pending`.\n2. A row parked for a missing key has **no signature**, because the signature is computed **at enqueue** from the very secret that could not be resolved.\n3. `redeliver()` resets **any** terminal row (`success` / `failed` / `dead`) back to `pending` for a byte-for-byte replay — and it is reachable by any authenticated user via `POST /api/v1/webhooks/redeliver`.\n\n⇒ A `dead` row for an unresolvable-key drop gives an operator a button that **delivers the webhook unsigned**, reopening #7799 through a door nobody would think to audit. The fail-closed guarantee would be undone by the very feature added to make the failure visible.\n\n## What a correct fix needs (⛔ not decided here)\n\n- A **never-sendable** state for such a row — a new column on the `sys_http_delivery` platform object, so **migration-visible**; and\n- a **`redeliver()` refusal** for any row that requires a signature and does not have one.\n\nThat is a design decision inside `service-messaging`, touching the exact `redeliver` path that #8022's source retest verified working (signature verified on a `redeliver` replay). It wants review on its own merits.\n\n## Interim state — observability, ⛔ not durability\n\n#8043 did make the drop **loud** rather than silent, cheaply and in-file: it now reports at `error` level with the consequence and the remedy in the message, carrying an ADR-0112 `code`/`status` pair (`INTERNAL_ERROR` / 500) in its metadata — the same pair the seeder's refusal for the same cause already used. Said **once per outage per webhook** (not every 60 s forever) per AGENTS.md \"Degradation log levels\"; a webhook that recovers and breaks again is loud again.\n\nThat is **observability, not durability** — the dev said so explicitly and it does not substitute for this card. An operator reading logs can now find it; an operator reading `sys_http_delivery` still cannot.\n\n## Explicitly NOT claimed\n\n- **Not a regression of #8043** — #8043 closed the cause that made this reachable on every boot; this card is the residue.\n- **No fail-closed weakening is proposed.** Any fix here must keep \"never deliver unsigned\" intact — that is the constraint that makes the naive shape wrong.\n- **Not urgent in the #8022 sense.** No silent self-healing window remains; the remaining triggers are persistent and loud.\n\n## Evidence\n\nMeasured 2026-08-12 by the dev on PR #8043 (`<!-- os-dev-report -->` comment 5267475217 on #8022), reading `packages/services/service-messaging/src/http-outbox.ts` and the `redeliver` path.\n\n## Source\n\nSplit out of objectstack-ai/objectstack#8022 (PR #8043) at the implementing dev's request — half (b), deliberately not ridden on the ordering fix."
+}

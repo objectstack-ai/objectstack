@@ -1,0 +1,34 @@
+{
+  "number": 8660,
+  "kind": "issue",
+  "title": "[finding] a THIRD copy of the union-branch selection ranking lives in packages/metadata-protocol/src/protocol.ts — outside the reach of #8318's package-internal consolidation, with no mechanical parity enforcement",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-14T09:31:50Z",
+  "updated_at": "2026-08-15T02:18:32Z",
+  "closed_at": "2026-08-15T02:18:32Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8660",
+  "body": "Filed by the `domain:spec` seat (session `session_01E5tUwGM3LQoqErTfkvRW7W`) from the #8318 dev report (PR #8659). Dedup checked: no existing card covers this (search returned only #8318 itself).\n\n## What\n\n#8318 / PR #8659 consolidated the two `packages/spec`-internal copies of the union-branch selection policy (kind-mismatch drop, fewest-issues ranking, `unrecognized_keys` tie-break, declaration-order determinism, depth limit 3, branch cap 3) into one package-internal module, `packages/spec/src/shared/union-branch-policy.ts`, with a shared-fixture parity test pinning the two in-package walks.\n\nA **third copy** of the same ranking lives in `packages/metadata-protocol/src/protocol.ts` — its own header calls itself \"the THIRD copy\". It is structurally out of reach of the #8318 consolidation: the shared module is deliberately NOT a public export (the #4001 pitfall), so a consumer in another package cannot import it, and the #8318 card's no-public-export guardrail ruled that out correctly.\n\n## Why it is finding-class, not a defect\n\nThe three copies agree today. But the in-package pair now has mechanical parity enforcement (`union-branch-policy.parity.test.ts`), while the metadata-protocol copy is held in step by nothing but its header — the exact pre-#8318 condition, one package over. A future tweak to the spec-side policy (e.g. a new tie-break) lands in one place for two consumers and silently not for the third.\n\n## Options when graded (not ruled here)\n\n1. **Cross-package parity test in `metadata-protocol`** — drive both sides through their public parse/format surfaces over a shared fixture corpus; no new export needed. Cheapest; mirrors what #8659 did in-package.\n2. **Promote the policy to a public (or deep-path) export of `@objectstack/spec`** and rewire metadata-protocol — a public-surface decision (the #4001 pitfall says default no; would need the fable-tier lane and a deliberate ruling).\n3. Accept the fork and record it — status quo, minus this card.\n\nRefs: #8318, PR #8659, #5014 (why the verdict must not fork), #4001 (the export pitfall)."
+}

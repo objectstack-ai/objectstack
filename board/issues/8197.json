@@ -1,0 +1,35 @@
+{
+  "number": 8197,
+  "kind": "issue",
+  "title": "driver-sql: the #7929 withhold covers the cross-field family only — every other INVALID_FILTER refusal still names the target field, which is admin-authored on a read-scope predicate",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched",
+    "security"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-12T19:51:12Z",
+  "updated_at": "2026-08-15T07:19:00Z",
+  "closed_at": "2026-08-15T07:19:00Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 12,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8197",
+  "body": "Filed **unassigned, unlabeled** for triage to grade and route — a concrete defect measured while implementing #7929's ruling B (`driver-sql` stops echoing `$field` operands), deliberately NOT fixed in that PR because it is outside what B rules on.\n\n## What B closed, and what it did not\n\nB's ruling is operand-shaped: *\"`driver-sql`'s `INVALID_FILTER` refusal stops echoing `$field` operands\"*. Implemented, that covers the three cross-field builders plus five operators whose own comparand-shape gates rendered a reference into their message. It does **not** touch the rest of the `INVALID_FILTER` family, and every one of those still names the **target field** of the refused constraint.\n\nThat matters for exactly the reason #7929 exists. The predicate a driver refuses is frequently not the caller's: the security middleware ANDs an administrator's compiled CEL rule into `opCtx.ast.where` (`plugin-security/src/security-plugin.ts`, the `$and` merge), and the driver cannot tell the two subtrees apart. On such a predicate the **target column is as admin-authored as the referent** — which is the argument B accepted for withholding both operands of a cross-field comparison. The same argument applies one step out, to every refusal that names a column.\n\n## Measured\n\nReal `SqlDriver` (better-sqlite3, `:memory:`), one object declaring `secret_policy_col` as `multiple: true`, driven through `driver.find`. Each of these is a predicate an RLS rule can plausibly produce, and each answers `INVALID_FILTER` / 400 naming the column:\n\n```\nREFUSED | JSON column + $in    code=INVALID_FILTER  names target? true\n  Operator \"$in\" on field \"secret_policy_col\" WAS NOT APPLIED: \"secret_policy_col\" is a\n  multi-value (or otherwise JSON-valued) field, stored by this driver as a JSON TEXT column …\n\nREFUSED | empty field constraint    code=INVALID_FILTER  names target? true\n  Field constraint at filter.secret_policy_col carries zero operators\n  ({ \"secret_policy_col\": {} }). …\n\nREFUSED | unbindable comparand    code=INVALID_FILTER  names target? true\n  Operator \"$gt\" on field \"secret_policy_col\" requires a single comparable value, but received\n  an object ({\"a\":1}), which cannot be bound as a SQL parameter. …\n```\n\nThe first is the most reachable of the three: a CEL permission rule over a multi-select field lowers to a membership test on a JSON-stored column, and #7398's gate refuses it — correctly — while naming the column the administrator wrote.\n\nOne residual inside the cross-field family itself, for completeness: a MALFORMED reference (`{ \"$gt\": { \"$field\": 42 } }` — not a `FieldReferenceSchema`, so the cross-field arm does not recognise it) falls to the generic unbindable-comparand refusal, which prints the target column and the comparand's JSON. No column name is disclosed by the comparand there, but the target is.\n\n## Explicitly NOT claimed\n\n- **Not a regression, and not a defect in B's implementation.** B did what it was ruled to do; this is the boundary of what it was ruled to do. Every message above predates it.\n- **The exposure is narrower than #7929's.** These refusals fire on MALFORMED or type-incompatible policy predicates, not on the well-formed cross-field references `compileCelToFilter` routinely emits — so the reachable set is \"an administrator wrote a rule the driver cannot compile for a reason other than cross-field\".\n- **No remedy is proposed.** The obvious ones are not equivalent: withholding the target field from every `INVALID_FILTER` would cost every author of every malformed filter their diagnostic (a much wider version of the cost B already accepted), while the provenance mark #7929's follow-up card (A) declares would let the driver withhold only for policy-authored subtrees — and would close this class as a side effect, without the blanket cost. That makes this card look like **evidence for A's scope** rather than independent work, which is triage's call and not the dev seat's.\n\n## Refs\n\n- #7929 (ruling B: withhold `$field` operands at the driver; the follow-up card A is the provenance mark)\n- #7988 (the CRUD merge boundary, covered by B's PR)\n- #5367 (the withhold adjudication whose invariant this class touches)\n- #7398 (the JSON-column operator gate whose message is the most reachable case above)\n\nBlocked-by: #8220"
+}

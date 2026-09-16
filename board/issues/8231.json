@@ -1,0 +1,33 @@
+{
+  "number": 8231,
+  "kind": "issue",
+  "title": "i18n: 24 form/page sections in examples/app-crm + app-showcase have a label but no name — translation-section-name-missing fires on every build, nothing has acted on it",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:services"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-12T21:30:12Z",
+  "updated_at": "2026-08-14T19:38:17Z",
+  "closed_at": "2026-08-14T19:35:39Z",
+  "closed_by": {
+    "login": "qq9340100",
+    "id": 313832657,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 15,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8231",
+  "body": "## What was measured\n\nBuilding both example apps emits the `translation-section-name-missing`\nauthor-time warning repeatedly, on every build, and nothing has fixed the\nunderlying sections:\n\n```\npnpm --filter @objectstack/example-crm build\n```\n9 instances — `crm_activity` (3 sections), `crm_lead` (5 sections across\n`default` and `web_to_lead` form views), `crm_opportunity` (1 section).\n\n```\npnpm --filter @objectstack/example-showcase build\n```\n15 instances — spread across several objects' form views and page\nsections.\n\nSample warning text (repeated per section, only the object/section name\nchanges):\n\n```\n⚠ object \"crm_activity\" · formViews.default · section \"Activity Details\":\n  Section \"Activity Details\" declares a label but no `name`. Headings\n  resolve through `objects.crm_activity._sections.<name>.label`, so a\n  section with no name has no key a bundle can carry — this heading can\n  never be translated and renders in the source locale in EVERY locale.\n  Object \"crm_activity\" IS translated, which is what makes the hole\n  invisible: every neighbouring label resolves and only the heading stays\n  behind. The i18n coverage report cannot see it either — it walks\n  `sections[].name`, and a nameless section contributes nothing to walk.\n  rule: translation-section-name-missing  at views[0].formViews.default.sections[0]\n```\n\n## Why this is a real gap, not decoration\n\nThe lint rule itself (`translation-section-name-missing`, closed out by\n#5417) exists precisely to catch this — a form section with a `label` but\nno `name` renders in the source locale in every locale, permanently,\nwhile every neighbouring field label on the same object translates fine.\nBoth example apps ARE translated (crm ships en + zh-CN), which is exactly\nwhat makes the hole invisible in normal use: nothing else in the UI looks\nuntranslated. The platform's own i18n coverage report cannot see it\neither (it walks `sections[].name`, and a nameless section contributes\nnothing to walk) — this build-time warning is the only signal that exists\nfor this defect today, and it has been firing, unacted on, since at least\n#5417 landed the rule.\n\n## Suggested fix\n\nFor each flagged section, give it a stable `name` (snake_case) and add\nthe corresponding `objects.<object>._sections.<name>.label` key to each\nlocale bundle — the fix pattern is already documented in the warning's own\nhint text. Two example apps, 24 sections total; mechanical once someone\nwalks the list the build already prints.\n\n## Not fixed here\n\nFound as build-noise while implementing #8164 (a permission-set grant,\nunrelated to i18n). Cosmetic/author-time-only (does not gate the build,\ndoes not affect runtime correctness) — filed as an observation, unassigned,\nfor triage rather than fixed inline to keep #8164's PR scoped to\n`examples/app-crm/security/**`.\n"
+}

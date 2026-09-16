@@ -1,0 +1,32 @@
+{
+  "number": 7675,
+  "kind": "issue",
+  "title": "audit-log-browser: 4 of 10 declared sys_audit_log actions have no writer anywhere (login/logout/permission_change/config_change/export/import never materialize)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "bug"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T10:13:11Z",
+  "updated_at": "2026-08-16T01:19:32Z",
+  "closed_at": "2026-08-16T01:19:32Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 9,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7675",
+  "body": "## Symptom\nOnly CRUD actions ever materialize in `sys_audit_log`. On a fresh boot:\n1. Sign up + sign in a member, then as admin `GET /api/v1/data/sys_audit_log?$filter={\"action\":\"login\"}` → **total 0**; the only trace is an **unattributed** `update sys_user` row (`user_id` null) diffing `last_login_at`.\n2. `PUT /api/settings/branding {\"workspace_name\":\"X\"}` → 200, then filter `{\"action\":\"config_change\"}` → **total 0**; the event went to `sys_setting_audit` with action `set` instead.\n\nBoth reproduced twice. Action census over all 57 rows: `{'create':48,'update':7,'delete':2}`. The delete half is correct (full `old_value`, actor, tenant).\n\nNet effect: four enum values (`login`, `logout`, `permission_change`, `config_change`; also `export`/`import`), two shipped list views (`auth_events`, `config_changes`) and two dashboard widgets (`system_overview.dashboard.ts` L89 + L109) are permanently empty. The console makes it worse by listing `login`/`config_change` in its own `ACTION_OPTIONS` — it offers filters for rows the server never writes.\n\nThe tamper-proofing half is solid: POST/PATCH/DELETE to `sys_audit_log` all 405 `OBJECT_API_METHOD_NOT_ALLOWED`, list total unchanged.\n\n## Root cause\nLocated by the run. `packages/plugins/plugin-audit/src/audit-writers.ts` subscribes **only** to the ObjectQL wildcard `before*`/`after*` CRUD lifecycle events, so it can emit `create/update/delete/restore` and nothing else. A repo-wide search finds **no writer** for `login`, `logout`, `permission_change`, `config_change`, `export` or `import`, though all are declared in the action enum of `sys-audit-log.object.ts`. Settings writes are audited by `settings-service-plugin.ts:315` into `sys_setting_audit`, never `sys_audit_log`, while `settings-service.types.ts:16` documents the service as *\"Emit sys_audit_log rows for every successful write.\"*\n\nConfirmed on `origin/main`: audit-writers.ts docblock still states it subscribes to the `before*`/`after*` lifecycle; settings-service-plugin.ts still inserts into `sys_setting_audit` (~L320) while settings-service.types.ts:16 still carries the contradicting doc line.\n\n## Reproduction\n1. Fresh boot; sign up + sign in a member.\n2. As admin `GET /api/v1/data/sys_audit_log?$filter={\"action\":\"login\"}` → total 0.\n3. `PUT /api/settings/branding {\"workspace_name\":\"X\"}` → 200; filter `{\"action\":\"config_change\"}` → total 0 (the row is in `sys_setting_audit`, action `set`).\n\n## Suggested fix\nEither add writers for the declared non-CRUD actions (auth, permission, config, export/import) into `sys_audit_log`, or reconcile the declared enum, the two list views, the two widgets, and the console `ACTION_OPTIONS` with what is actually written — and reconcile `settings-service.types.ts:16`'s contract with the `sys_setting_audit` destination.\n\n## Source\nExtracted from the QA run objectstack-ai/objectstack#7637 (framework 92f26f75, console 09987b680)."
+}
