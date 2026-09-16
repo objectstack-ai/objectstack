@@ -470,6 +470,67 @@ expect "$sibling_want" 'a sibling checkout that resolves is audited, never waved
 # worlds and discriminated nothing. The verdict row above is the discriminator,
 # and it is the one that goes red when the sibling stops being resolved.
 
+echo "== an exception row with NO tree to recompute it on takes the fail-open =="
+# The branch neither case above reaches, and the reason it needs a third fixture
+# rather than a third root: with nothing resolved the register is asked WITHOUT
+# `--root`, so it answers about THIS tree, and a path this tree's generator owns
+# is LIFTED there — the cleared-predicate `exit 0`, several branches ABOVE the
+# fail-open. To reach it the payload must carry a path that stays GOVERNED with
+# an exception row wherever the register is asked: a `skills/**` path that no
+# generator declares. The hook then holds an exception row and no right tree to
+# recompute its provenance on, which is the whole of this branch's premise.
+#
+# The injected root is the EMPTY one the case above already built — same
+# injection, and the path shape is the only thing separating the cleared exit
+# from this warning. Reused rather than re-created so the two cases cannot drift
+# into asking about different emptiness.
+#
+# ⛔ Do not "fix" the path to a real skill. A declared path is byte-exact
+# against its own output here and is lifted, which would turn this case into a
+# silent second copy of the one above — green forever over a branch nothing
+# reaches, the exact failure this file was repaired for once already.
+#
+# Hermetic in both directions and both were measured: with `node_modules`
+# present the register answers "does not write … not among the 9 file(s) that
+# generator declared on this tree"; without it, "the generator declared no
+# output set (the generator's own --check exited 254)". Two reasons, one
+# precondition — exit 3 carrying an exception row — and that precondition is all
+# this branch reads, so the case holds on an installed worktree and on the bare
+# one this file documents itself as running under.
+UNGENERATED_PATH=skills/zz-no-such-skill/references/_index.md
+F_UNGENERATED="$(fixture ungenerated-exception-row "$(files_of "$UNGENERATED_PATH")" "$NO_REVIEWS")"
+# Printed, never asserted: the rows below pin the HOOK's branch, not a register
+# verdict, so copying one in would make this matrix a second register again.
+# It is here so a dead premise — the register no longer answering governed with
+# an exception row for this shape — reads as one line instead of as two
+# mysteriously red text assertions.
+node "$repo_root/scripts/pm/check-governed-merges.mjs" --test --json "$UNGENERATED_PATH" \
+  > "$root/ungenerated-verdict.json" 2>/dev/null
+ungenerated_rc=$?
+printf '  ..   register verdict on THIS tree for the ungenerated path: exit %s with %s exception row(s)\n' \
+  "$ungenerated_rc" "$(jq '.exceptions | length' < "$root/ungenerated-verdict.json" 2>/dev/null || printf '?')"
+expect allow 'an exception row with no checkout to recompute it on is waved through, not refused' \
+  "$(mcp $AUTO 999 objectstack-ai cloud)" \
+  "OS_GOVERNED_ENQUEUE_FIXTURE=$F_UNGENERATED" "OS_GOVERNED_ENQUEUE_SIBLING_ROOT=$NO_SIBLING_ROOT"
+expect_says 'no checkout of objectstack-ai/cloud' 'the fail-open names the repo it could not resolve' \
+  "$(mcp $AUTO 999 objectstack-ai cloud)" \
+  "OS_GOVERNED_ENQUEUE_FIXTURE=$F_UNGENERATED" "OS_GOVERNED_ENQUEUE_SIBLING_ROOT=$NO_SIBLING_ROOT"
+expect_says 'recompute its provenance' 'the fail-open names the reading that was missing' \
+  "$(mcp $AUTO 999 objectstack-ai cloud)" \
+  "OS_GOVERNED_ENQUEUE_FIXTURE=$F_UNGENERATED" "OS_GOVERNED_ENQUEUE_SIBLING_ROOT=$NO_SIBLING_ROOT"
+# THE FIRING CONTROL, and it is what keeps the two rows above from being the
+# phantom this file has already paid for once: the same payload with the sibling
+# RESOLVED (the throwaway built above — one, not two) recomputes on that tree
+# and never reaches the branch, so the sentence must be ABSENT there. Measured
+# in both directions before it was written: unresolved prints it and allows,
+# resolved prints the ordinary governed refusal and blocks. Point either `says`
+# row at this root and it goes red — which is the proof a text assertion owes,
+# and the reading the companion assertion on the resolved-sibling case could not
+# give, since nothing prints that sentence in EITHER of the two worlds it saw.
+expect_lacks 'no checkout of' 'the same payload with the sibling RESOLVED never claims a missing checkout' \
+  "$(mcp $AUTO 999 objectstack-ai cloud)" \
+  "OS_GOVERNED_ENQUEUE_FIXTURE=$F_UNGENERATED" "OS_GOVERNED_ENQUEUE_SIBLING_ROOT=$SIBLING_ROOT"
+
 echo "== every spelling of that same origin URL resolves to that same sibling =="
 # The other half of this card's defect. `git clone` hands out
 # `https://github.com/objectstack-ai/cloud.git`, and until `slug_of` stripped that

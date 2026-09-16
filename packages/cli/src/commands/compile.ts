@@ -13,7 +13,7 @@ import {
   formatUnknownAuthoringKey,
   type ConversionNotice,
 } from '@objectstack/spec';
-import { loadConfig } from '../utils/config.js';
+import { loadConfig, namedExportRejectionHints } from '../utils/config.js';
 import { lowerCallables } from '../utils/lower-callables.js';
 import { authoringRuleUnionStack } from '../utils/stack-collections.js';
 import { artifactPackages, packageBodyAsStack } from '../utils/artifact-packages.js';
@@ -185,7 +185,7 @@ export default class Compile extends Command {
     try {
       // 1. Load Configuration
       if (!flags.json) printStep('Loading configuration...');
-      const { config, absolutePath, duration } = await loadConfig(args.config);
+      const { config, absolutePath, duration, namedExports } = await loadConfig(args.config);
 
       if (!flags.json) {
         printKV('Config', path.relative(process.cwd(), absolutePath));
@@ -300,6 +300,17 @@ export default class Compile extends Command {
         console.log('');
         printError('Validation failed');
         formatZodErrors(result.error as unknown as ZodError);
+        // [#18171] …and, when one of those unrecognised top-level keys got
+        // there by being a NAMED EXPORT of the config module rather than a key
+        // the author wrote inside `defineStack()`, the rule that makes it one.
+        // Text face only: the `--json` branch above is untouched, so no field
+        // is added to a published envelope.
+        for (const line of namedExportRejectionHints(
+          (result.error as unknown as ZodError).issues,
+          namedExports,
+        )) {
+          console.log(chalk.dim(line));
+        }
         this.exit(1);
       }
 
