@@ -1,5 +1,291 @@
 # @objectstack/service-messaging
 
+## 17.5.0
+
+### Minor Changes
+
+- a370073: `sys_inbox_message` rows now carry **`actor_id`** — who caused the notification — and the actor travels there end to end from the `emit()` that raised the event.
+  
+  Until now an inbox row could not answer "did I cause this?". The actor stopped one layer upstream on `sys_notification.actor_id`, and the shipped default permission sets grant a member no read on `sys_notification`, so the value was behind an FK hop into an object the reader cannot open. Consumers implementing the standard "do not notify me of my own action" rule had nothing to compare, and the visible failure was the notification that says *you* just did the thing you just did.
+  
+  The path, one leg per seam, no new read anywhere:
+  
+  - **`Notification.actorId?: string`** (`channel.ts`) — the per-recipient unit every channel implementation consumes gains an optional member, with the same semantics as `sys_notification.actor_id`.
+  - **`emit()`** projects `EmitInput.actorId` onto that unit on the P0 inline path, and **`enqueueDeliveries`** snapshots it into the delivery row's payload on the P1 outbox path — beside the rendered title/body, under the rule the enqueue path already states in its own comment: an event edited after enqueue cannot rewrite an in-flight send. `DeliveryPayload.actorId?: string` is declared rather than left to that type's index signature.
+  - **The dispatcher** reads it back off that snapshot in `processRow`. It deliberately does **not** re-read `sys_notification`, which would cost one read per delivery and break the snapshot rule.
+  - **The inbox channel** writes `actor_id: n.actorId ?? null`, and `sys_inbox_message` declares `actor_id` as a `sys_user` lookup.
+  
+  **A digest row keeps `actor_id` null by construction.** A collapsed group has no single actor, so asserting "you caused this" over a message that also carries other people's events would be wrong; `processDigestGroup` sets no actor and the object's own description says so.
+  
+  **Existing rows read `actor_id` null**, which a consumer's `row.actor_id === currentUserId` evaluates as "not mine" — the pre-change behaviour for rows written before this release. Nothing is backfilled: the value was never captured on those rows, so any backfill would be invented.
+- 690f083: `NotificationDispatcher` reaps once per tick instead of once per claim, backs off while the outbox is idle, and `emit()` wakes it (#17610)
+  
+  **What an idle dispatcher cost.** Against an EMPTY `sys_notification_delivery` outbox every tick walked `partitionCount` partitions (default 8) and ran `claim()` and `claimDigest()` in each — and each of those opened with the environment-wide visibility-timeout reap before its candidate SELECT. Measured on a real `ObjectQL` + `SqlDriver`: **32 statements a tick, 16 of them the identical reap UPDATE**, on a fixed 500 ms interval that never let up, one loop per warm kernel. On remote Turso every statement is an HTTP round trip.
+  
+  **Now:**
+  
+  - **The reap runs once per tick**, before any claim — an idle tick is `1 + 2 × partitionCount` = 17 statements. Its predicate names no partition, so one run returns every claim that had expired when the tick began; a claim that expires during the tick is returned by the next one. A crashed node's `in_flight` rows are still recovered within one tick of `claimTtlMs` passing, and a claim is still never re-taken before its TTL.
+  - **The loop backs off while idle.** Every tick that claims nothing doubles the delay to the next, from `intervalMs` up to `maxIdleIntervalMs` (default 30 s; `MessagingServicePlugin` option `dispatchMaxIdleIntervalMs`). A tick that claims work snaps back to `intervalMs`. With the defaults, ten idle minutes are 24 ticks instead of 1,201.
+  - **`emit()` wakes the dispatcher.** `MessagingService.setOutbox(outbox, { onEnqueued })` fires once per `emit()` that enqueued at least one delivery; the plugin points it at the new `NotificationDispatcher.wake()`, which ticks immediately — or once more, right after a tick already in flight.
+  
+  **Latency bound.** A notification emitted in the process that runs the dispatcher goes out on the tick `wake()` starts, no later than before. While idle, work nobody announces is noticed within one backed-off interval, at most `maxIdleIntervalMs` (30 s by default): a deferred delivery coming due (retry schedule, quiet hours, digest window), a row enqueued by a process that does not run this dispatcher, and a crashed node's expired claim (recovered within `claimTtlMs` + `maxIdleIntervalMs`). Set `dispatchMaxIdleIntervalMs` to `dispatchIntervalMs` to keep the fixed interval.
+  
+  **Contract additions — all optional, nothing to change on upgrade.** `INotificationOutbox` gains an optional `reap(opts: ReapOptions)` — the visibility-timeout recovery `claim()` / `claimDigest()` already open with, as a method of its own — and `ClaimOptions` gains an optional `skipReap`. Both built-in stores (`SqlNotificationOutbox`, `MemoryNotificationOutbox`) implement them. A custom outbox without `reap()` keeps working as it is: the dispatcher probes for the method and, when it is absent, lets each claim reap as before — correct, at the old per-claim cost; implementing `reap()` and honouring `skipReap` is what earns the once-per-tick cost. Direct callers of `claim()` / `claimDigest()` are unaffected: without `skipReap` they reap exactly as before. Also new: `NotificationDispatcher.wake()`, the dispatcher's `maxIdleIntervalMs` option, and `MessagingService.setOutbox`'s optional second argument.
+- e7fea46: `sys_notification_delivery` reaps its terminal-failure rows after **7 days** instead of 90 (#17611)
+  
+  **⚠️ Operational consequence, stated plainly: `dead` and `suppressed` delivery rows are now deleted 7 days after they were created.** Any report, SLA reading, dashboard or manual investigation that consulted them — "which notifications failed to send, and why" — must now read inside that window. Before this change those rows survived for 90 days. Nothing else about the table changes: `pending`, `in_flight` and `success` rows keep the same 90-day window they have always had, and no row is reaped sooner than before except the two terminal-failure statuses.
+  
+  **What was wrong.** Fan-out writes one delivery row per `(event × recipient × channel)`. A tenant with no transport configured for one of those channels dead-letters that channel's row on its **first** attempt, and every `notify` writes another one. Measured on a production tenant: 2,876 `email`/`dead` rows against 2,876 `inbox`/`success` rows, `max(attempts) = 1`, zero pending, growing +316 rows/day. Those rows carry no work — nothing ever claims, retries or acks them again — but they sat in the table the dispatcher's claim query reads on every hop for the full 90-day window, so the cost of every claim rose linearly with time.
+  
+  **The change** is one declaration on the object, using spec keys that already ship and are already consumed by the platform Reaper:
+  
+  ```ts
+  lifecycle: {
+      class: 'telemetry',
+      ttl: { field: 'created_at', expireAfter: '90d' },
+      retention: {
+          maxAge: '7d',
+          onlyWhen: { status: { $in: ['dead', 'suppressed'] } },
+      },
+  },
+  ```
+  
+  `retention.onlyWhen` scopes the short window to the terminal-failure statuses — the same shape `sys_job_queue`, `sys_automation_run` and `sys_upload_session` already declare. No channel interface member, no new status value, no change to fan-out.
+  
+  The `ttl` leg is not new behaviour: it restates the 90-day bound the object has always declared. `lifecycle.retention` is a single block, so scoping it to terminal rows would otherwise have left `pending` / `in_flight` / `success` with **no age bound at all** — unbounding the larger half of this table's growth on the very change that exists to bound it. Both legs run: `LifecycleService.reapObject` takes `ttl` and `retention` in independent branches. `success` is deliberately outside the scope; delivery history stays at the table window.
+  
+  **If you override this object's lifecycle windows through the `lifecycle` settings namespace, re-read your configuration.** `retention_overrides.maxAge` for `sys_notification_delivery` used to move the whole table's window; it now moves the **terminal-failure** window only, and `expireAfter` moves the table window. An override left in place keeps parsing and keeps applying — to a narrower set of rows than it did before.
+  
+  **⚠️ This is worth nothing where the Reaper does not run.** The whole benefit is delivered by `LifecycleService`, which `OS_LIFECYCLE_DISABLED=1` or the plugin switch turns off. A deployment with lifecycle disabled kept these rows forever before this change and keeps them forever after it; a declaration is not a sweeper. Check that the Reaper is enabled before reading this entry as a bound on your table.
+- a9096af: `HttpDispatcher` reaps once per tick instead of once per partition, backs off while `sys_http_delivery` is idle, and `enqueueHttp()` / `redeliverHttp()` wake it (#17623)
+  
+  **What an idle dispatcher cost.** Against an EMPTY `sys_http_delivery` outbox every tick walked `partitionCount` partitions (default 8) and ran `claim()` in each — and each claim opened with the environment-wide visibility-timeout reap before its candidate SELECT. Measured on a real `ObjectQL` + `SqlDriver`: **16 SQL statements a tick, 8 of them the identical reap UPDATE**, on a fixed 500 ms `setInterval` that never let up, one loop per warm kernel. It is the shape #17610 removed from `NotificationDispatcher`, still running beside it. On remote Turso every statement is an HTTP round trip.
+  
+  **Now:**
+  
+  - **The reap runs once per tick**, before any claim — an idle tick is `1 + partitionCount` = 9 statements. Its predicate names no partition, so one run returns every claim that had expired when the tick began; a claim that expires during the tick is returned by the next one. A crashed node's `in_flight` rows are still recovered within one tick of `claimTtlMs` passing, and a claim is still never re-taken before its TTL.
+  - **The loop backs off while idle.** Every tick that claims nothing doubles the delay to the next, from `intervalMs` up to `maxIdleIntervalMs` (default 30 s, the notification dispatcher's default). A tick that claims work snaps back to `intervalMs`. With the defaults, ten idle minutes are 24 ticks and 216 statements instead of 1,201 ticks and 19,216.
+  - **`MessagingServicePlugin`'s `dispatchMaxIdleIntervalMs` sets the ceiling for both dispatchers**, the way `dispatchIntervalMs` and `partitionCount` already govern both.
+  - **Writes in this process wake the dispatcher.** `MessagingService.setHttpOutbox(outbox, { onEnqueued })` fires after an `enqueueHttp()` that enqueues a delivery — not one that parks an undeliverable record, which is `dead` on arrival — and after a `redeliverHttp()`. The plugin points it at the new `HttpDispatcher.wake()`, which ticks immediately, or once more right after a tick already in flight.
+  
+  **Latency bound.** A delivery enqueued or redelivered in the process that runs the dispatcher goes out on the tick `wake()` starts. While idle, work nobody announces is noticed within one backed-off interval, at most `maxIdleIntervalMs` (30 s by default):
+  
+  - a retry coming due is attempted less than `min(its delay + intervalMs, maxIdleIntervalMs)` late, because the backoff restarts from `intervalMs` at the attempt that scheduled it;
+  - a row enqueued by a process that does not run this dispatcher;
+  - a crashed node's expired claim, recovered within `claimTtlMs` + `maxIdleIntervalMs` (about 35 s at defaults, where it was about 5.5 s).
+  
+  Set `dispatchMaxIdleIntervalMs` to `dispatchIntervalMs` to keep the fixed interval.
+  
+  **Contract additions — all optional, nothing to change on upgrade.** `IHttpOutbox` gains an optional `reap(opts: HttpReapOptions)` — the visibility-timeout recovery `claim()` already opens with, as a method of its own — and `HttpClaimOptions` gains an optional `skipReap`. Both built-in stores (`SqlHttpOutbox`, `MemoryHttpOutbox`) implement them. A custom outbox without `reap()` keeps working as it is: the dispatcher probes for the method and, when it is absent, lets each claim reap as before — correct, at the old per-claim cost. Direct callers of `claim()` are unaffected: without `skipReap` they reap exactly as before. Also new: `HttpDispatcher.wake()`, the dispatcher's `maxIdleIntervalMs` option, the `HttpReapOptions` type, and `MessagingService.setHttpOutbox`'s optional second argument.
+  
+  **One loop, not two copies.** The timer loop — idle backoff, collapsing wakes into one follow-up tick, `stop()` — moved out of `NotificationDispatcher` into a module both dispatchers share. `NotificationDispatcher`'s behaviour and public surface are unchanged; its #17610 tests pass as they were.
+- 4be4e04: `IHttpOutbox.ack()` takes an optional third argument, the claim credential, and `HttpDispatcher` now always passes it (#17634). A late ack from a claim the visibility-timeout reap had taken back — a send that outran `claimTtlMs` while another dispatcher re-claimed the row — used to write its outcome by row id over that dispatcher's live attempt: a delivery still in progress could be marked `dead`, or one attempt's outcome overwrite another's. Handed the credential, `SqlHttpOutbox` and `MemoryHttpOutbox` perform the compare-and-set `INotificationOutbox.ack()` has performed since #11859: the outcome is written only while the row is still `in_flight` under the same (`claimedBy`, `claimedAt`) pair `claim()` stamped on it. A lost claim writes nothing and throws the new `HttpAckError` (`DELIVERY_NOT_ELIGIBLE`, the code this package already raises for a delivery row in the wrong state); the dispatcher logs `http-dispatcher: ack refused, claim no longer held`, carries on with the rest of its batch, and whoever holds the row re-drives the delivery.
+  
+  Nothing written against the two-argument `ack(id, result)` has to change. An `IHttpOutbox` implementation that does not read the third argument compiles and works as before, and a caller that does not pass it gets the by-id write it always got — that arity is deprecated, because it checks no ownership. New exports: `HttpClaimCredential` and `HttpAckError`. A subclass that overrides a built-in store's `ack()` should forward the third argument to `super.ack()`, or its dispatcher acks keep the old unchecked write.
+- a2c2852: Notification fan-out asks a channel whether the tenant can send on it before writing anything, so a channel with no transport no longer produces `sys_notification_delivery` rows that exist only to dead-letter (#17732).
+  
+  `MessagingChannel` gains one **optional** member, `isAvailable(ctx, { organizationId })`, answering `{ available: true }` or `{ available: false, reason }` from the closed vocabulary `CHANNEL_UNAVAILABLE_REASONS` (today: `transport_not_configured`). `emit()` consults it once per channel per emit — availability is a property of `(tenant × channel)`, not of a recipient — and a channel that answers unavailable gets no delivery row and no `send()` call on either the outbox (P1) or the inline (P0) path.
+  
+  - **Optional means available.** A channel that does not implement the member is treated exactly as before. Every existing implementation, in this repo and in yours, keeps working unchanged with no edit; the same is true of a channel that is registered but unknown to this version. ⛔ There is no way to configure the opposite default.
+  - **The suppression is recorded, not swallowed.** `sys_notification` gains one key, `suppressed_channels` — `[{ channel, reason }]`, `NULL` when nothing was suppressed — written in the *same* insert that creates the event row, so the feature costs no additional write. `EmitResult` gains the matching `suppressed` array, so a caller is never handed a delivery count that silently omits a channel it asked for.
+  - **The `email` channel answers from the transport it was handed** — a service-registry lookup, no I/O, nothing cached. Mail configuration in this tree is the `mail` settings namespace at `scope: 'global'`, materialised into a single in-memory transport that the settings change bus hot-swaps, so there is no per-tenant row to read and a memoized answer would survive the settings save that fixed it. The query still takes the tenant context so a future tenant-scoped transport needs no interface change.
+  - **A probe that throws is treated as available** and logged at `warn`: a broken availability check degrades into today's behaviour, never into a silent notification outage.
+  - ⚠️ **Unchanged on purpose**: a channel named in `channels` that is not *registered* at all keeps its existing path — the inline fan-out reports it as a failed delivery, the outbox enqueues a row the dispatcher dead-letters. It has no implementation to ask, and widening this ruling to cover it is filed separately.
+- e07eecf: Mount the email and SMS channels per lookup instead of deciding once at `kernel:ready`
+  
+  The messaging plugin registered its email and SMS channels behind `if (getEmail())` /
+  `if (getSms())` inside a `kernel:ready` hook. That guard ran exactly once, so a transport
+  service that registered later in the same boot — from a plugin ordered after this one, from
+  `kernel:bootstrapped` / `kernel:listening`, or at runtime — never got its channel, and every
+  `notify` naming that channel was refused as "not registered" for the life of the process.
+  
+  New public surface (which is why this grades `minor` and not `patch`, per the 2026-09-04 ruling
+  that a purely additive widening of a published surface takes at least a minor):
+  `MessagingService.registerChannelProvider(id, resolve)` mounts a channel that is resolved on
+  every lookup, and the plugin now mounts both channels through it: the mount tracks the
+  transport instead of recording a verdict about it, and the dispatcher — which has always
+  looked channels up dynamically — picks up a late transport without a restart. A composition
+  that never registers the transport is unchanged: the channel is not mounted, fan-out refuses
+  it, no delivery row is written, and nothing is recorded in
+  `sys_notification.suppressed_channels`.
+
+### Patch Changes
+
+- 920f887: `DbQueueAdapter` backs off while `sys_job_queue` is idle instead of polling flat at 1 s, and the loop that does it is now published from `@objectstack/core` as `DispatchLoop` (#17612).
+  
+  A registered-but-idle queue issued **3600 candidate reads an hour, per queue**, whatever was in the table — on a remote driver, 3600 HTTP round trips an hour of pure idle cost. Measured over one simulated idle hour on the engine boundary the adapter really talks to: **3601 reads before, 124 after**, with the flat-poll number re-measured on the same harness as a control so the new one is a reading about the backoff rather than about a loop that stopped ticking.
+  
+  - **One mechanism, not a third copy.** The idle-backoff loop was written for `NotificationDispatcher` (#17610), shared with `HttpDispatcher` (#17623), and lived unexported inside `@objectstack/service-messaging`. `DbQueueAdapter` was the third polling worker needing it. It moves to `@objectstack/core` — the package all three already depend on — because it is a timing primitive owned by neither the messaging domain nor the queue domain, and having `service-queue` depend on `service-messaging` to reach it would invert the dependency direction. **New export from `@objectstack/core`: `DispatchLoop`, `DispatchLoopOptions`, `DEFAULT_MAX_IDLE_INTERVAL_MS`.**
+  - **Nothing published moved.** `@objectstack/service-messaging` exports only its `index`, which never carried the loop; its two dispatchers now import it from `@objectstack/core` and its own surface is byte-unchanged.
+  - **New option `DbQueueAdapterOptions.maxIdleIntervalMs`** (default 30 s). Each tick that claims nothing doubles the delay to the next from `pollIntervalMs` up to this ceiling; anything claimed, and every wake, snaps it straight back. **Setting it at or below `pollIntervalMs` restores the flat poll exactly.**
+  - ⚠️ **What the backoff costs, and what it does not.** Work published through this adapter now wakes the loop, so a due `publish()` and `replay()` are picked up at the base interval as before — the ceiling is never on their latency path. What it does cost is up to `maxIdleIntervalMs` of extra latency on work this process was never told about: a row another node wrote, a deferred row coming due, a crashed worker's lease expiring. A deferred `publish()` deliberately does **not** wake the loop, since that tick would claim nothing and would throw the backoff away.
+- 7010085: fix(service-messaging): the durable fan-out refuses a channel nobody registered instead of writing a delivery row for it
+  
+  `MessagingService.emit()` on the reliable-delivery (outbox) path wrote one
+  `sys_notification_delivery` row per recipient for a channel the composition had
+  never registered, and the dispatcher dead-lettered every one of them on attempt
+  one. The inline path had always refused this case; only the durable path wrote
+  the rows, so a deployment whose flows notify on `['inbox','email']` without an
+  email plugin accumulated guaranteed-dead rows in the hot delivery table.
+  
+  The durable path now reports the same failed delivery outcome the inline path
+  reports — `ok: false`, `error: "channel '<id>' not registered"`, counted in
+  `EmitResult.failed` — and writes no row. The refusal is logged once per channel
+  per emit with the number of rows it refused, not once per recipient.
+  
+  The refusal is deliberately **not** recorded in
+  `sys_notification.suppressed_channels`: that key answers "why can this tenant not
+  send on this channel", and an unregistered channel is a composition fact,
+  identical for every tenant in the process. The event row's column set is
+  unchanged.
+- Updated dependencies [863c7c4]
+- Updated dependencies [0f95f43]
+- Updated dependencies [825d70f]
+- Updated dependencies [7f62536]
+- Updated dependencies [abc4b83]
+- Updated dependencies [7382c5d]
+- Updated dependencies [ea2940d]
+- Updated dependencies [245f360]
+- Updated dependencies [324968e]
+- Updated dependencies [4844840]
+- Updated dependencies [fe71032]
+- Updated dependencies [74eaab8]
+- Updated dependencies [482d34d]
+- Updated dependencies [305e7fc]
+- Updated dependencies [6059b29]
+- Updated dependencies [88a072e]
+- Updated dependencies [9c577c1]
+- Updated dependencies [d4a1a28]
+- Updated dependencies [baf9745]
+- Updated dependencies [d34f9b6]
+- Updated dependencies [57343f7]
+- Updated dependencies [1e20f81]
+- Updated dependencies [38472ce]
+- Updated dependencies [aaacf1d]
+- Updated dependencies [6548118]
+- Updated dependencies [146c291]
+- Updated dependencies [e0e4a56]
+- Updated dependencies [7aae005]
+- Updated dependencies [bdb247d]
+- Updated dependencies [d5c91dd]
+- Updated dependencies [48203ff]
+- Updated dependencies [ada2869]
+- Updated dependencies [d88a47d]
+- Updated dependencies [2f1a6f6]
+- Updated dependencies [23fc5d6]
+- Updated dependencies [2d34f32]
+- Updated dependencies [9e3c485]
+- Updated dependencies [e1796ad]
+- Updated dependencies [c9eb773]
+- Updated dependencies [4342c99]
+- Updated dependencies [132dd13]
+- Updated dependencies [d285bf0]
+- Updated dependencies [dfeba25]
+- Updated dependencies [0a88a80]
+- Updated dependencies [0252320]
+- Updated dependencies [2eb4724]
+- Updated dependencies [e04a0af]
+- Updated dependencies [6b97a20]
+- Updated dependencies [e7ff9c2]
+- Updated dependencies [75237a9]
+- Updated dependencies [920f887]
+- Updated dependencies [8a017af]
+- Updated dependencies [758ac40]
+- Updated dependencies [a2c2852]
+- Updated dependencies [2bf6ef1]
+- Updated dependencies [c744c0a]
+- Updated dependencies [98bd798]
+- Updated dependencies [cbcae14]
+- Updated dependencies [8261ff7]
+- Updated dependencies [24489f1]
+- Updated dependencies [fc28c1d]
+- Updated dependencies [6d64785]
+- Updated dependencies [00c332b]
+- Updated dependencies [b3b43b6]
+- Updated dependencies [134b410]
+- Updated dependencies [84e6b05]
+- Updated dependencies [cb1f274]
+- Updated dependencies [a83dbb6]
+- Updated dependencies [68fea8b]
+- Updated dependencies [fe0ae5c]
+- Updated dependencies [4c42fd1]
+- Updated dependencies [5f392f0]
+- Updated dependencies [0da638c]
+- Updated dependencies [041d9fd]
+- Updated dependencies [f03f6c7]
+- Updated dependencies [b8ec127]
+- Updated dependencies [cf79182]
+- Updated dependencies [929d9e3]
+- Updated dependencies [8a5240a]
+- Updated dependencies [c1d54db]
+- Updated dependencies [c7af6bd]
+- Updated dependencies [1f0b565]
+- Updated dependencies [23aa83c]
+- Updated dependencies [357f499]
+- Updated dependencies [80aef80]
+- Updated dependencies [c3ebe4a]
+- Updated dependencies [65ad77d]
+- Updated dependencies [a61ae59]
+- Updated dependencies [a54ecaa]
+- Updated dependencies [854639b]
+- Updated dependencies [44c917a]
+- Updated dependencies [613d35a]
+- Updated dependencies [0ee32ed]
+- Updated dependencies [58b36fa]
+- Updated dependencies [4792049]
+- Updated dependencies [53ec0b1]
+- Updated dependencies [71629a1]
+- Updated dependencies [f8e5790]
+- Updated dependencies [d2c1d19]
+- Updated dependencies [681871e]
+- Updated dependencies [54e8234]
+- Updated dependencies [288fe9c]
+- Updated dependencies [d127f9b]
+- Updated dependencies [4bbf766]
+- Updated dependencies [c17b494]
+- Updated dependencies [d414e2b]
+- Updated dependencies [af98a04]
+- Updated dependencies [43cbe14]
+- Updated dependencies [6e3462d]
+- Updated dependencies [c4d1759]
+- Updated dependencies [f7a9740]
+- Updated dependencies [9cdffbe]
+- Updated dependencies [331a1a2]
+- Updated dependencies [9788f1e]
+- Updated dependencies [5f9f846]
+- Updated dependencies [5a95b0e]
+- Updated dependencies [5d527f7]
+- Updated dependencies [5bf2330]
+- Updated dependencies [9165d5c]
+- Updated dependencies [d9e1587]
+- Updated dependencies [07150b3]
+- Updated dependencies [143c715]
+- Updated dependencies [d2badf7]
+- Updated dependencies [d64bcb6]
+- Updated dependencies [d4f5232]
+- Updated dependencies [396eae3]
+- Updated dependencies [ecdfc94]
+- Updated dependencies [de1a611]
+- Updated dependencies [db76982]
+- Updated dependencies [3b1dab9]
+- Updated dependencies [1555ed4]
+- Updated dependencies [776d64c]
+- Updated dependencies [ab450f4]
+- Updated dependencies [025588a]
+- Updated dependencies [f3e3d59]
+- Updated dependencies [9bd4344]
+- Updated dependencies [4215417]
+- Updated dependencies [51efbf1]
+- Updated dependencies [9c44eed]
+- Updated dependencies [bbca441]
+- Updated dependencies [7cd5874]
+- Updated dependencies [7887077]
+- Updated dependencies [29dd1a6]
+  - @objectstack/spec@17.5.0
+  - @objectstack/platform-objects@17.5.0
+  - @objectstack/core@17.5.0
+  - @objectstack/types@17.5.0
+
 ## 17.4.0
 
 ### Patch Changes

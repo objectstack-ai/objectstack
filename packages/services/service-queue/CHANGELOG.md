@@ -1,5 +1,174 @@
 # @objectstack/service-queue
 
+## 17.5.0
+
+### Minor Changes
+
+- 920f887: `DbQueueAdapter` backs off while `sys_job_queue` is idle instead of polling flat at 1 s, and the loop that does it is now published from `@objectstack/core` as `DispatchLoop` (#17612).
+  
+  A registered-but-idle queue issued **3600 candidate reads an hour, per queue**, whatever was in the table — on a remote driver, 3600 HTTP round trips an hour of pure idle cost. Measured over one simulated idle hour on the engine boundary the adapter really talks to: **3601 reads before, 124 after**, with the flat-poll number re-measured on the same harness as a control so the new one is a reading about the backoff rather than about a loop that stopped ticking.
+  
+  - **One mechanism, not a third copy.** The idle-backoff loop was written for `NotificationDispatcher` (#17610), shared with `HttpDispatcher` (#17623), and lived unexported inside `@objectstack/service-messaging`. `DbQueueAdapter` was the third polling worker needing it. It moves to `@objectstack/core` — the package all three already depend on — because it is a timing primitive owned by neither the messaging domain nor the queue domain, and having `service-queue` depend on `service-messaging` to reach it would invert the dependency direction. **New export from `@objectstack/core`: `DispatchLoop`, `DispatchLoopOptions`, `DEFAULT_MAX_IDLE_INTERVAL_MS`.**
+  - **Nothing published moved.** `@objectstack/service-messaging` exports only its `index`, which never carried the loop; its two dispatchers now import it from `@objectstack/core` and its own surface is byte-unchanged.
+  - **New option `DbQueueAdapterOptions.maxIdleIntervalMs`** (default 30 s). Each tick that claims nothing doubles the delay to the next from `pollIntervalMs` up to this ceiling; anything claimed, and every wake, snaps it straight back. **Setting it at or below `pollIntervalMs` restores the flat poll exactly.**
+  - ⚠️ **What the backoff costs, and what it does not.** Work published through this adapter now wakes the loop, so a due `publish()` and `replay()` are picked up at the base interval as before — the ceiling is never on their latency path. What it does cost is up to `maxIdleIntervalMs` of extra latency on work this process was never told about: a row another node wrote, a deferred row coming due, a crashed worker's lease expiring. A deferred `publish()` deliberately does **not** wake the loop, since that tick would claim nothing and would throw the backoff away.
+
+### Patch Changes
+
+- 8a017af: `sys_job_queue`'s claim path no longer sorts the whole queue on every poll, and a job's due time is now a SQL predicate instead of a filter applied after `LIMIT` (#17612).
+  
+  `DbQueueAdapter.claimBatch` — the 1s poll every `DbQueueAdapter` runs — read the queue as `WHERE queue = ? AND status = 'pending' ORDER BY priority ASC, scheduled_for ASC`, while `sys_job_queue` declared `['queue','status','scheduled_for']`. The sort's **first** key, `priority`, was in no declared index at all, so the equality prefix seeked and the planner then built a sorter over every pending row in the queue, every tick. Measured on both Turso faces:
+  
+  ```
+  SEARCH sys_job_queue USING INDEX idx_sys_job_queue_queue_status_scheduled_for (queue=? AND status=?)
+  USE TEMP B-TREE FOR ORDER BY
+  ```
+  
+  - **The declared index becomes `['queue','status','priority','scheduled_for']`**, replacing `['queue','status','scheduled_for']` — the table still declares three. The full-queue sort is gone on both faces; what remains is a sorter bounded to rows tying on the whole indexed prefix, because a paged read carries one ORDER BY term the caller never writes — the unique tie-breaker of the deterministic-paging contract (ADR-0053 D-A1), here `id`. ⛔ That last term is deliberately **not** closed by appending `id` to the index: `id` is an unbounded `Field.text`, and a text column a declared index keys on without a `maxLength` makes MySQL reject the index DDL outright (`check:keyed-text-bounds`, ER_BLOB_KEY_WITHOUT_LENGTH).
+  - **Due-ness moved into `where`** as `$or: [{ scheduled_for: null }, { scheduled_for: { $lte: now } }]`, the same shape `SqlOutboxStore.claim` uses. It had been a JS filter applied to rows `LIMIT` had already chosen, so a window full of not-yet-due high-priority jobs hid already-due work behind it indefinitely: at the default `batchSize: 10` (candidate window 30), 30 future-dated `priority: 1` rows plus one due `priority: 100` row claimed **0** per poll, forever. It now claims 1.
+  - **`priority` still decides claim order.** The alternative — dropping it from the sort — would have left a declared, documented field (`Lower = higher priority`) with no runtime effect at all.
+  - ⚠️ **On an existing database the superseded index is not dropped.** The retrofit adds `idx_sys_job_queue_queue_status_priority_scheduled_for` and leaves `idx_sys_job_queue_queue_status_scheduled_for` in place (measured: 3 indexes before, 4 after, no row touched), so a provisioned table carries one redundant index until an operator drops it through the migrate-plan path. A freshly created table gets three.
+- Updated dependencies [863c7c4]
+- Updated dependencies [0f95f43]
+- Updated dependencies [825d70f]
+- Updated dependencies [abc4b83]
+- Updated dependencies [7382c5d]
+- Updated dependencies [ea2940d]
+- Updated dependencies [245f360]
+- Updated dependencies [324968e]
+- Updated dependencies [4844840]
+- Updated dependencies [fe71032]
+- Updated dependencies [74eaab8]
+- Updated dependencies [482d34d]
+- Updated dependencies [305e7fc]
+- Updated dependencies [6059b29]
+- Updated dependencies [88a072e]
+- Updated dependencies [9c577c1]
+- Updated dependencies [d4a1a28]
+- Updated dependencies [baf9745]
+- Updated dependencies [d34f9b6]
+- Updated dependencies [57343f7]
+- Updated dependencies [1e20f81]
+- Updated dependencies [38472ce]
+- Updated dependencies [aaacf1d]
+- Updated dependencies [6548118]
+- Updated dependencies [146c291]
+- Updated dependencies [e0e4a56]
+- Updated dependencies [7aae005]
+- Updated dependencies [bdb247d]
+- Updated dependencies [d5c91dd]
+- Updated dependencies [48203ff]
+- Updated dependencies [ada2869]
+- Updated dependencies [d88a47d]
+- Updated dependencies [2f1a6f6]
+- Updated dependencies [23fc5d6]
+- Updated dependencies [2d34f32]
+- Updated dependencies [9e3c485]
+- Updated dependencies [e1796ad]
+- Updated dependencies [c9eb773]
+- Updated dependencies [4342c99]
+- Updated dependencies [132dd13]
+- Updated dependencies [d285bf0]
+- Updated dependencies [dfeba25]
+- Updated dependencies [0a88a80]
+- Updated dependencies [0252320]
+- Updated dependencies [2eb4724]
+- Updated dependencies [e04a0af]
+- Updated dependencies [6b97a20]
+- Updated dependencies [e7ff9c2]
+- Updated dependencies [75237a9]
+- Updated dependencies [920f887]
+- Updated dependencies [8a017af]
+- Updated dependencies [a2c2852]
+- Updated dependencies [2bf6ef1]
+- Updated dependencies [c744c0a]
+- Updated dependencies [98bd798]
+- Updated dependencies [cbcae14]
+- Updated dependencies [8261ff7]
+- Updated dependencies [24489f1]
+- Updated dependencies [fc28c1d]
+- Updated dependencies [6d64785]
+- Updated dependencies [00c332b]
+- Updated dependencies [b3b43b6]
+- Updated dependencies [134b410]
+- Updated dependencies [84e6b05]
+- Updated dependencies [cb1f274]
+- Updated dependencies [a83dbb6]
+- Updated dependencies [68fea8b]
+- Updated dependencies [fe0ae5c]
+- Updated dependencies [4c42fd1]
+- Updated dependencies [5f392f0]
+- Updated dependencies [0da638c]
+- Updated dependencies [041d9fd]
+- Updated dependencies [f03f6c7]
+- Updated dependencies [b8ec127]
+- Updated dependencies [cf79182]
+- Updated dependencies [929d9e3]
+- Updated dependencies [8a5240a]
+- Updated dependencies [c1d54db]
+- Updated dependencies [c7af6bd]
+- Updated dependencies [1f0b565]
+- Updated dependencies [23aa83c]
+- Updated dependencies [357f499]
+- Updated dependencies [80aef80]
+- Updated dependencies [65ad77d]
+- Updated dependencies [a61ae59]
+- Updated dependencies [a54ecaa]
+- Updated dependencies [854639b]
+- Updated dependencies [44c917a]
+- Updated dependencies [613d35a]
+- Updated dependencies [0ee32ed]
+- Updated dependencies [58b36fa]
+- Updated dependencies [4792049]
+- Updated dependencies [53ec0b1]
+- Updated dependencies [71629a1]
+- Updated dependencies [f8e5790]
+- Updated dependencies [d2c1d19]
+- Updated dependencies [681871e]
+- Updated dependencies [54e8234]
+- Updated dependencies [d127f9b]
+- Updated dependencies [4bbf766]
+- Updated dependencies [c17b494]
+- Updated dependencies [d414e2b]
+- Updated dependencies [af98a04]
+- Updated dependencies [43cbe14]
+- Updated dependencies [c4d1759]
+- Updated dependencies [f7a9740]
+- Updated dependencies [9cdffbe]
+- Updated dependencies [331a1a2]
+- Updated dependencies [9788f1e]
+- Updated dependencies [5f9f846]
+- Updated dependencies [5d527f7]
+- Updated dependencies [5bf2330]
+- Updated dependencies [9165d5c]
+- Updated dependencies [d9e1587]
+- Updated dependencies [07150b3]
+- Updated dependencies [143c715]
+- Updated dependencies [d2badf7]
+- Updated dependencies [d64bcb6]
+- Updated dependencies [d4f5232]
+- Updated dependencies [396eae3]
+- Updated dependencies [ecdfc94]
+- Updated dependencies [de1a611]
+- Updated dependencies [db76982]
+- Updated dependencies [3b1dab9]
+- Updated dependencies [1555ed4]
+- Updated dependencies [776d64c]
+- Updated dependencies [ab450f4]
+- Updated dependencies [025588a]
+- Updated dependencies [f3e3d59]
+- Updated dependencies [9bd4344]
+- Updated dependencies [4215417]
+- Updated dependencies [51efbf1]
+- Updated dependencies [9c44eed]
+- Updated dependencies [bbca441]
+- Updated dependencies [7cd5874]
+- Updated dependencies [7887077]
+- Updated dependencies [29dd1a6]
+  - @objectstack/spec@17.5.0
+  - @objectstack/platform-objects@17.5.0
+  - @objectstack/core@17.5.0
+
 ## 17.4.0
 
 ### Patch Changes
