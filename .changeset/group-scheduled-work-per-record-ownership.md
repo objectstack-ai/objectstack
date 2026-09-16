@@ -6,9 +6,21 @@
 
 feat(spec,types,triggers)!: `group` runs package-authored scheduled work without a declaration, owning each run's writes per record (#18378)
 
-<!-- adr-0087: registered (amends-existing-entry) This amends the EXISTING ADR-0087 semantic entry 18 (`schedule-flow-acting-organization-required`) rather than adding one: the same authorable key, the same deployment switch, the same surface. Nothing is renamed, retired or re-typed — the start node's `config` is an open record (ADR-0018) and every flow that parses today parses byte-identically after the change. What moves is the BIND-time accept set (it WIDENS: a `group` flow that declared nothing was refused and now binds) and the RUN-time organization such a flow's writes carry. The entry's `surface`, `replacement`, `reason` and `acceptanceCriteria` all gained their `group` rows, including the rejected bootstrap-organization arm, recorded because it is the one a later reader will re-propose. -->
+<!-- adr-0087: already-registered schedule-flow-acting-organization-required -->
 
 `Clause-②: yes (widening)`
+
+**ADR-0087 disposition — `already-registered`, and why not `registered`.** This
+amends the EXISTING semantic entry `schedule-flow-acting-organization-required`
+(entry 18) rather than adding one: same authorable key, same deployment switch,
+same surface, and the entry predates this diff at the merge base. Nothing is
+renamed, retired or re-typed — the start node's `config` is an open record
+(ADR-0018) and every flow that parses today parses byte-identically afterwards.
+What moves is the BIND-time accept set (it WIDENS) and the RUN-time organization
+such a flow's writes carry. The entry's `surface`, `replacement`, `reason` and
+`acceptanceCriteria` each gained their `group` row, the rejected
+bootstrap-organization arm included — recorded because it is the one a later
+reader will re-propose.
 
 **Nothing that worked stops working, and nothing that was admitted becomes
 refused.** The accept set widens in one cell.
