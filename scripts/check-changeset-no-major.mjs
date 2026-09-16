@@ -1268,8 +1268,19 @@ export function packagesTouched({ cwd, from, head }) {
  * declaration line — so a seat that hangs the gate without writing the line,
  * which is what #16044 did, is still read.
  *
+ * ## The DIRECTION ARM (#16421)
+ *
+ * `arm` travels beside the value, from the same `readClause2Line`, and is `null`
+ * for every declaration written before the arm existed. The level axis reads it
+ * for one reason: a declared `narrowing` is a BREAKING change, and during the
+ * launch window a breaking change ships `minor` — the same grade a declared
+ * widening owes, for a different reason. ⛔ The arm is NOT folded into `value`:
+ * "this widens" and "this narrows" are different facts, the readings quote both,
+ * and a PR that declares `no (narrowing)` must not be reported as having
+ * declared `yes`.
+ *
  * @param {{ labels?: ({ name?: string }|string)[], body?: string }|null} pr
- * @returns {{ value: 'yes'|'no'|null, payload: boolean, readings: string[] }}
+ * @returns {{ value: 'yes'|'no'|null, arm: 'widening'|'narrowing'|null, payload: boolean, readings: string[] }}
  */
 export function declarationFromPullRequest(pr) {
   const readings = [];
@@ -1278,7 +1289,7 @@ export function declarationFromPullRequest(pr) {
     // "no pull request to read" and "a pull request that declared nothing" are
     // different facts about different runs, and #16776 is the card about two
     // facts sharing one exit code. `judgeLevel` routes on this flag.
-    return { value: null, payload: false, readings: ['no `pull_request` payload was available to read a declaration from'] };
+    return { value: null, arm: null, payload: false, readings: ['no `pull_request` payload was available to read a declaration from'] };
   }
 
   const labels = Array.isArray(pr.labels)
@@ -1300,9 +1311,20 @@ export function declarationFromPullRequest(pr) {
   else if (line?.kind === 'near-miss') readings.push(`declaration line: a near miss, not a declaration — ${line.line}`);
   else readings.push('declaration line: the PR body carries no `Clause-②:` line');
 
-  if (carrier || (line?.kind === 'declared' && line.value === 'yes')) return { value: 'yes', payload: true, readings };
-  if (line?.kind === 'declared' && line.value === 'no') return { value: 'no', payload: true, readings };
-  return { value: null, payload: true, readings };
+  // #16421. The arm is reported on its own line whichever way it reads, INCLUDING
+  // its absence on a declaration that carries one: "this PR declared no
+  // direction" and "nothing about direction was read" are the same distinction
+  // the value axis makes above, and the reader is told which one happened.
+  const arm = line?.kind === 'declared' ? (line.arm ?? null) : null;
+  if (line?.kind === 'declared') {
+    readings.push(arm === null
+      ? 'direction arm: none declared — the declaration names no widening and no narrowing'
+      : `direction arm: \`${arm}\`${arm === 'narrowing' ? ' — a BREAKING change; during the launch window it ships `minor`' : ''}`);
+  }
+
+  if (carrier || (line?.kind === 'declared' && line.value === 'yes')) return { value: 'yes', arm, payload: true, readings };
+  if (line?.kind === 'declared' && line.value === 'no') return { value: 'no', arm, payload: true, readings };
+  return { value: null, arm, payload: true, readings };
 }
 
 /**
@@ -1314,7 +1336,8 @@ export function declarationFromPullRequest(pr) {
  *   no-pull-request       not a PR run at all (RC cut, local run)      -> exit 0
  *   not-measured-moot     no declaration, and nothing a `yes` could have refused -> exit 0
  *   not-measured-material no declaration, and a `yes` WOULD have refused  -> exit 1
- *   not-declared          the declaration reads `no`                   -> exit 0
+ *   not-declared          the declaration reads `no` and names no
+ *                         `narrowing` arm (#16421)                     -> exit 0
  *   clean                 declared `yes`, no moved package graded `patch` -> exit 0
  *   discharged            declared `yes`, a moved package IS graded `minor`+,
  *                         and others are graded `patch`                -> exit 0
@@ -1335,7 +1358,7 @@ export function declarationFromPullRequest(pr) {
  * @param {{
  *   levels: { file: string, entries: { pkg: string, bump: string }[] }[] | null,
  *   touched: { packages: string[], unreadable: string[] },
- *   declaration: { value: 'yes'|'no'|null, readings: string[], payload?: boolean },
+ *   declaration: { value: 'yes'|'no'|null, arm?: 'widening'|'narrowing'|null, readings: string[], payload?: boolean },
  *   prEvent?: boolean,
  * }} input
  */
@@ -1420,7 +1443,15 @@ export function judgeLevel({ levels, touched, declaration, prEvent = false }) {
       ? { verdict: 'not-measured-material', offenders, raised, readings, unreadable }
       : { verdict: 'not-measured-moot', offenders, raised, readings, unreadable };
   }
-  if (declaration.value === 'no') return { verdict: 'not-declared', offenders: [], raised: [], readings, unreadable };
+  // #16421. A `no` stands the axis down — UNLESS it carries the narrowing arm.
+  // `no (narrowing)` is a truthful `no` to the widening question and a breaking
+  // change at the same time, and the grade a breaking change owes inside the
+  // launch window is the grade this axis enforces. ⛔ The arm is read, never
+  // inferred from the value: `no` alone keeps standing the axis down, which is
+  // what every declaration written before the arm existed says.
+  if (declaration.value === 'no' && declaration.arm !== 'narrowing') {
+    return { verdict: 'not-declared', offenders: [], raised: [], readings, unreadable };
+  }
 
   // An unread manifest can only ever hide an offender, so it cannot be reported
   // under a tick: every green below states it, and the reader is told what was
@@ -2608,6 +2639,25 @@ function selfTest() {
         renderLevel(declaredNo).stdout.join('\n') !== renderLevel(notMeasuredMoot).stdout.join('\n'),
         'a decision and a missing reading must not print the same thing — collapsing them is the defect #16055 records',
       );
+
+      // ── The DIRECTION ARM on the level axis (#16421) ──────────────────────
+      //
+      // ⭐ BOTH arms, and the arm-less `no` beside them. One direction alone
+      // would be satisfied by a reader that answered `narrowing` to everything:
+      // the widening row and the bare-`no` row are what make the narrowing row
+      // a reading. Same tree, same levels, same `touched` — only the declaration
+      // moves, so the verdicts differ for exactly one reason.
+      const armDecl = (body) => declarationFromPullRequest({ labels: [], body });
+      const armVerdict = (body) => judgeLevel({ levels: levelsFor(PATCH_HEAD), touched: touchedCli, declaration: armDecl(body) }).verdict;
+      assert(armDecl('Clause-②: no (narrowing)\n').arm === 'narrowing' && armDecl('Clause-②: no (narrowing)\n').value === 'no', 'the arm travels beside the value and does NOT overwrite it — `no (narrowing)` is still a truthful `no`');
+      assert(armVerdict('Clause-②: no (narrowing)\n') === 'enforce', `a declared narrowing is breaking, so it owes the same grade a widening owes — got ${armVerdict('Clause-②: no (narrowing)\n')}`);
+      assert(armVerdict('Clause-②: yes (widening)\n') === 'enforce', 'the widening arm is read and the value still carries the axis');
+      assert(armVerdict('Clause-②: no\n') === 'not-declared', '⛔ CONTROL: a bare `no` still stands the axis down — every declaration on the board the day this landed is this shape');
+      assert(armDecl('Clause-②: no\n').arm === null, '⛔ CONTROL: a bare `no` names NO arm, and says so rather than defaulting to one');
+      assert(armVerdict('Clause-②: no (nothing published moves)\n') === 'not-declared', '⛔ CONTROL: ordinary parenthetical reasoning is not an arm');
+      assert(armDecl('Clause-②: no (narrowing)\n').readings.some((r) => /direction arm: `narrowing`/.test(r)), 'the arm is PRINTED, so a reader of the log can see which fact moved the verdict');
+      assert(armDecl('Clause-②: no\n').readings.some((r) => /direction arm: none declared/.test(r)), 'and an absent arm is printed too — a decision and a silence must not look alike here either');
+      assert(judgeLevel({ levels: levelsFor(MINOR_HEAD), touched: touchedCli, declaration: armDecl('Clause-②: no (narrowing)\n') }).verdict === 'clean', 'a declared narrowing graded `minor` is clean — the arm asks for the grade, it does not refuse the PR');
 
       // The two contexts that are NOT a pull request, and the one that only
       // looks like it. `cut-rc.yml` runs this script on a `workflow_dispatch`

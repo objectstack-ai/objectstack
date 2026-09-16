@@ -1040,8 +1040,8 @@ registry? Add it to `OPEN_CAPABILITY_REGISTRIES` in the same PR that fixes it.
 3. **Add a changeset for anything that publishes.** Feature, functional improvement or fix — run `pnpm changeset`
    (or add a `.changeset/*.md` entry) describing it before committing. A bug fix in a released package takes a
    **`patch`** changeset — never none, and ⛔ never `skip-changeset`: that label is for a diff that publishes
-   nothing from any released package. A PR that declares `Clause-②: yes` takes at least **`minor`** instead —
-   the widening it declares is what makes it more than a patch, whatever else the diff fixes.
+   nothing from any released package. The declaration is `Clause-②: yes|no` plus at most one arm from the closed pair
+   `(widening)`/`(narrowing)`: `yes` takes at least **`minor`**, `(narrowing)` is BREAKING, `no (widening)` malformed.
    **Breaking changesets must carry their migration.** If the change removes or renames anything an author can write (a
    spec key, an export, a config field), the changeset body must state the FROM → TO mapping and the one-line fix —
    this text ships to consumers as `CHANGELOG.md` inside the npm package and is what an upgrading agent greps after the
@@ -1051,9 +1051,9 @@ registry? Add it to `OPEN_CAPABILITY_REGISTRIES` in the same PR that fixes it.
    schema is `.strict()`. The changeset is one of fourteen surfaces a retirement touches — follow the
    `spec-property-retirement` skill (`.claude/skills/`) rather than reconstructing the kit, and note the two routes
    imply **opposite** liveness-ledger dispositions.
-   **A breaking changeset must also state its ADR-0087 disposition, in writing** — exactly one marker in the
-   changeset body, enforced by `pnpm check:adr-0087-registration` (CI step *Require an ADR-0087 disposition on a
-   declared-breaking changeset*). ⛔ The categories are NOT copied here — the gate prints the full set when it fails.
+   **A breaking changeset must also state its ADR-0087 disposition, in writing** — exactly one marker in the changeset
+   body, which also carries the PR's `Clause-②` line: `pnpm check:adr-0087-registration` reads the arm there. ⛔ The
+   categories are NOT copied here — the gate prints the full set when it fails.
 4. **A removal that breaks the pinned sibling checkout ships together with the sibling fix and the pin bump — or it
    does not ship.** The `Console Pin Gate` job builds objectui at the pinned `.objectui-sha` against **current** `main`,
    so a removal or rename the pinned sibling still imports turns `main` red for every PR in the repo the moment it
