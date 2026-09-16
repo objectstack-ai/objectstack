@@ -54,7 +54,7 @@
 - `auto_merge_enabled` webhook 载荷同报 `merge` ⇒ 三个载体一致也不作数,判据是落地提交的父数。
 - squash 落地重写署名 trailer:作者行按提交作者身份改拼,`Claude-Session:` 原样存活。
 - squash 的 committer date 是入队时刻,快进不改 ⇒ 落地时刻读 `merged_at`/`merged`,不读 `git log`。
-- 回显两向不可靠,空回显不等于未挂上 ⇒ ⛔ 不拿它当任何方向的证据、不为它空转。
+- 回显两向不可靠:全绿加 `clean` 即吞进队列不存记录 ⇒ 空回显是成功常态,⛔ 不空转。
 - 回读 `auto_merge` 非空本接口给不了:`pull_request_read` 与 `fields` 枚举都无该成员。
 - 效果读数 = 下列阳性探针、timeline 入队事件、最终落地;队列分支仅在场时算。
 - 队列 ref 答 BUILD 不答成员资格:`gh-readonly-queue/*` 只在存在时有意义,即有 build 在跑。
@@ -131,7 +131,7 @@
 - 用户类写绑作者:封号则其评论与卡按作者 404,标签/状态/标题/正文存活。
 - ⇒ 耐久算按令牌类重算,⛔ 不假定署名恒 `claude[bot]`;用户类下请 PR 作者复审回 422。
 - GraphQL 池 5000/时,只留给没有 REST 对应物的几件。
-- 那几件 = draft 翻转、auto-merge 挂载、语义 `/search/*`、Projects field_values、`issue transfer`。
+- 那几件 = `rest-channel.md`〈不可迁移〉那三件;draft 翻转与 auto-merge 挂载有 ccr 路、不在内。
 - 逐操作通道归属、写侧配方与队列路由三读法见 `rest-channel.md`,⛔ 不在本表复述。
 - MCP list/search 家族整个走 GraphQL 稀缺池,`issue_write` 连查找半边都吃。
 - 配额红时认领类动作排队,评论走 REST 桶先行把结论发出去。
@@ -139,8 +139,8 @@
 - porcelain 家族(`gh issue view` / `gh pr list`)与 `gh pr create` 走 GraphQL,当场回限流。
 - 同批事实改走 `gh api` 的 REST 路径照常返回,含开 draft PR;容器无 `gh`,本条只对本机席适用。
 - 红窗调度:守候只给上面那几件 GraphQL-only 的,⛔ 其余一切不为配额空等。
-- 走队列的仓落地必经 auto-merge ⇒ 红窗里无退路;直合仓有,合并本身有 REST 端点。
-- MCP 侧限流下,draft 翻转与 auto-merge 挂载整窗不可得。
+- 走队列的仓落地仍必经 auto-merge,红窗里照样走 ccr REST 挂载;直合仓合并本身有 REST 端点。
+- 红窗里 draft 翻转与 auto-merge 挂载照常走 ccr REST,⛔ 不为它们守候。
 - 被挡住的翻转是在等窗口,不是关于该 PR 的信号 ⇒ ⛔ 不据它重挂、不据它改判状态。
 - 其余动作(评论、标签、请审、读、timeline)照常走 REST。
 - 报文里的 user ID 只是报文:据它推 MCP 池跨席共享与本节首条冲突,⛔ 未裁不写成事实。
