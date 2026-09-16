@@ -361,6 +361,10 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isEntrypoint } from './invoked-as.mjs';
 import { maskComments, maskCommentsAndLiterals } from './js-comment-mask.mjs';
+// #16421 — the DIRECTION ARM, read through the fleet's one declaration reader.
+// ⛔ Not re-implemented here: the ruling's condition on the arm is that it has a
+// single legal spelling read in a single place, and every reader imports it.
+import { readClause2Line } from './pm/check-clause2-carriers.mjs';
 
 // ── The self-test's own battery roster and floor (#13489) ──────────────────
 //
@@ -553,18 +557,51 @@ export function parseChangeset(text) {
 /**
  * Does this changeset DECLARE a breaking change?
  *
- * Three spellings are in live use in this repo and all three count, because the
+ * FOUR spellings are in live use in this repo and all four count, because the
  * gate's subject is the author's own declaration and an author who used any of
  * them has declared it:
  *
  *   1. a `major` bump in the frontmatter                (118 of 1304 in stock)
  *   2. a `**BREAKING` marker in the body                 (52)
  *   3. a conventional-commit `!` in the summary line     (175)
+ *   4. a `Clause-②` declaration whose ARM reads `narrowing`   (#16421)
  *
- * The union is 213. Narrowing to any one of them would drop real declarations:
- * #6048's changeset used (1) and (2) and NOT (3), while the launch-window guard
- * `check-changeset-no-major.mjs` pushes breaking changes to `minor` outside
- * pre-mode, which would leave (2)/(3) carrying the signal alone.
+ * The union of the first three is 213. Narrowing to any one of them would drop
+ * real declarations: #6048's changeset used (1) and (2) and NOT (3), while the
+ * launch-window guard `check-changeset-no-major.mjs` pushes breaking changes to
+ * `minor` outside pre-mode, which would leave (2)/(3) carrying the signal alone.
+ *
+ * ## Signal (4), and the hole it closes (#16421)
+ *
+ * Signals (1)–(3) are all things an author REMEMBERS to type, and (2) — the one
+ * that carries breaking-ness during the launch window, when (1) is forbidden
+ * outright — is FREE-FORM PROSE. Measured: **#16296** narrowed
+ * `sys_job.timezone` / `sys_report_schedule.timezone` to the IANA value domain
+ * and shipped to consumers with no banner, no `major` and no `!`, so this gate
+ * classified it non-breaking, asked for no ADR-0087 disposition, and every gate
+ * in the repo was green. **#14238** did the same one surface earlier. An
+ * accept-set narrowing is exactly the change a consumer needs told about, and it
+ * was the change with the weakest carrier.
+ *
+ * Signal (4) replaces "remember the banner" with the declaration the PM protocol
+ * already requires on every card and PR: the direction ARM. The author copies
+ * one line they have already written into the changeset body, and the gate reads
+ * a CLOSED TOKEN rather than a phrase.
+ *
+ * ⛔ The arm is read through `readClause2Line`, IMPORTED — there is no second
+ * parser here, and the ruling made that a condition rather than a preference:
+ * one legal spelling, read in one place, by every reader.
+ *
+ * ⚠️ `widening` adds NO signal, and that is the half of the arm this gate has to
+ * get right. A widening is not a break; classifying both arms as breaking would
+ * make the reading indistinguishable from a constant, and the self-test pins
+ * both directions for exactly that reason.
+ *
+ * ⛔ Signal (2) is KEPT, not replaced. Dropping the banner while 52 changesets in
+ * stock carry it and nothing else would un-declare every one of them — the same
+ * "narrowing to any one of them drops real declarations" this docblock has
+ * refused since it was written. Signal (4) is the carrier that does not depend on
+ * prose; (2) stays the one that already works where it was used.
  *
  * @param {ReturnType<typeof parseChangeset>} parsed
  * @returns {{ breaking: boolean, signals: string[] }}
@@ -575,6 +612,12 @@ export function breakingDeclaration(parsed) {
   if (/\*\*BREAKING/i.test(parsed.body) || /^\s*BREAKING[ -]CHANGE/mi.test(parsed.body)) signals.push('BREAKING');
   const summary = (parsed.body.trim().split(/\n/)[0] || '').replace(/^\*\*|^#+\s*/, '');
   if (/^[a-z]+(\([^)]*\))?!:/.test(summary)) signals.push('bang');
+  // (4) The direction arm. A `malformed` or `near-miss` reading declares
+  // nothing HERE and must not: this gate judges changesets, and the states that
+  // send a seat to fix an unreadable declaration are `check-clause2-carriers`'s
+  // rows, on the carriers that own them.
+  const decl = readClause2Line(parsed.body);
+  if (decl?.kind === 'declared' && decl.arm === 'narrowing') signals.push('clause-②-narrowing');
   return { breaking: signals.length > 0, signals };
 }
 
@@ -1860,10 +1903,24 @@ export function assertInputs({ cwd, head }) {
     ['a `**BREAKING**` body marker', "---\n'@objectstack/spec': minor\n---\n\na summary\n\n**BREAKING**: something changed\n"],
     ['a `BREAKING CHANGE:` body line', "---\n'@objectstack/spec': minor\n---\n\na summary\n\nBREAKING CHANGE: something changed\n"],
     ['a conventional-commit `!` summary', "---\n'@objectstack/spec': patch\n---\n\nfeat(spec)!: drop a key\n"],
+    // #16421, signal (4) — the ARM, pinned in BOTH directions across these two
+    // lists. `narrowing` here, `widening` in the inverted list below: an arm
+    // reading that classified both as breaking would satisfy this list alone
+    // while telling a consumer nothing, so neither fixture means anything
+    // without the other. The `minor` bump and the banner-free body are the
+    // point — this is the exact shape #16296 shipped in, and the three older
+    // signals are all absent from it on purpose.
+    ['the `narrowing` ARM with no banner, no `major` and no `!` (#16421)', "---\n'@objectstack/spec': minor\n---\n\na summary\n\nClause-②: no (narrowing)\n"],
+    ['the `narrowing` arm beside a `yes` value — a diff that widens AND narrows', "---\n'@objectstack/spec': minor\n---\n\na summary\n\nClause-②: yes (narrowing)\n"],
   ];
   const MUST_NOT_MATCH_BREAKING = [
     ['a plain `patch` changeset', "---\n'@objectstack/spec': patch\n---\n\nfix a typo\n"],
     ['a `minor` changeset whose prose merely contains the word breaking', "---\n'@objectstack/spec': minor\n---\n\nnothing groundbreaking here\n"],
+    // The OTHER direction of signal (4). A widening is not a break.
+    ['the `widening` ARM — the arm reads, and reads as NOT breaking (#16421)', "---\n'@objectstack/spec': minor\n---\n\na summary\n\nClause-②: yes (widening)\n"],
+    ['a bare `Clause-②: no` — the shape every declaration on the board carries', "---\n'@objectstack/spec': patch\n---\n\na summary\n\nClause-②: no\n"],
+    ['a bare `Clause-②: yes` — a widening declared through the value alone', "---\n'@objectstack/spec': minor\n---\n\na summary\n\nClause-②: yes\n"],
+    ['prose merely NAMING the arm — the reader takes a token, never a phrase', "---\n'@objectstack/spec': minor\n---\n\nthis is a narrowing of nothing at all\n"],
   ];
   for (const [label, text] of MUST_MATCH_BREAKING) {
     if (!breakingDeclaration(parseChangeset(text)).breaking) {
@@ -6186,14 +6243,44 @@ function selfTest() {
     };
     const copy = 'scripts/check-adr-0087-registration.mjs';
     w(copy, readFileSync(fileURLToPath(import.meta.url), 'utf8'));
-    // EVERY `./`-relative sibling this file imports travels with the copy, or the
-    // fixture dies on ERR_MODULE_NOT_FOUND -- which reads as "I1 is broken" rather
-    // than "the fixture is incomplete". Adding an import to this gate means adding
-    // it here, and `js-comment-mask.mjs` (#12881) is the case that proved the list
-    // has to be a list: it arrived after `invoked-as.mjs` and took both I-cases red
-    // on a fixture problem that had nothing to do with what they assert.
-    for (const sibling of ['invoked-as.mjs', 'js-comment-mask.mjs']) {
-      w(`scripts/${sibling}`, readFileSync(new URL(`./${sibling}`, import.meta.url), 'utf8'));
+    // EVERY first-party module this file imports, TRANSITIVELY, travels with the
+    // copy, or the fixture dies on ERR_MODULE_NOT_FOUND -- which reads as "I1 is
+    // broken" rather than "the fixture is incomplete". `js-comment-mask.mjs`
+    // (#12881) is the case that proved the closure has to be computed: it
+    // arrived after `invoked-as.mjs` and took both I-cases red on a fixture
+    // problem that had nothing to do with what they assert.
+    //
+    // ⭐ DERIVED, not listed (#16421). It was a two-name list while this gate's
+    // imports were two leaves. Signal (4) added an edge to
+    // `pm/check-clause2-carriers.mjs`, whose own closure is nine modules deep and
+    // includes `pm/dispatch-gates.mjs` -- a file under constant change. A hand
+    // list against that graph is a trap that springs on whoever adds an import
+    // over there, in a gate over here, with an error message about neither. The
+    // walk reads the same edges Node will resolve, so the fixture cannot drift
+    // from the real module graph by construction.
+    //
+    // ⛔ Statement-shaped matches ONLY -- the two spellings that reach a
+    // line-start `from`, a single-line `import … from '…'` and the closing brace
+    // of a multi-line one. A bare regex over the source harvests every specifier
+    // sitting inside a STRING in a self-test fixture, which is how a walk of this
+    // tree ends up chasing `./does-not-exist.mjs`.
+    const EDGE_PATTERNS = [
+      /^[ \t]*(?:import|export)[^'"\n]*from[ \t]*['"](\.[^'"\n]+)['"]/gm,
+      /^[ \t]*\}[ \t]*from[ \t]*['"](\.[^'"\n]+)['"]/gm,
+    ];
+    const staged = new Set([copy]);
+    const stage = (rel) => {
+      if (staged.has(rel)) return;
+      staged.add(rel);
+      const src = readFileSync(join(REPO_ROOT, rel), 'utf8');
+      w(rel, src);
+      for (const pattern of EDGE_PATTERNS) {
+        pattern.lastIndex = 0;
+        for (const m of src.matchAll(pattern)) stage(join(dirname(rel), m[1]));
+      }
+    };
+    for (const m of readFileSync(fileURLToPath(import.meta.url), 'utf8').matchAll(EDGE_PATTERNS[0])) {
+      stage(join('scripts', m[1]));
     }
     w(
       'importer.mjs',

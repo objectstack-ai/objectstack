@@ -756,6 +756,43 @@ export const EXIT_PAIR_ADVERSE = 4;
 export const CLAUSE2_VALUES = Object.freeze(['yes', 'no']);
 
 /**
+ * The DIRECTION ARM — the closed pair a declaration may name after its value.
+ *
+ * ## Why an arm exists at all (#16421)
+ *
+ * The value answers ONE question: 「本卡放宽接受集或扩大公开面吗」. A diff that
+ * NARROWS a published accept set answers it `no` truthfully — and a narrowing is
+ * a breaking change. So `no` was carrying two facts that need opposite handling,
+ * and the one needing the most was the one nothing could see: measured on
+ * #16296, a value-domain narrowing shipped to consumers with every gate green,
+ * because `check-adr-0087-registration.mjs` read breaking-ness out of a
+ * `**BREAKING**` PROSE BANNER the author simply did not type. Maintainer ruling,
+ * director summon #17, decision batch #2 item 1, option B, verbatim 「同意」.
+ *
+ * ## The arm is OPTIONAL, and that is a measurement, not a kindness
+ *
+ * Every declaration on the board the day this landed reads `Clause-②: no` with
+ * no parenthetical arm (5 of 13 open PRs carry a declaration; all five read
+ * `no`, and #18268's carries trailing em-dash reasoning and still no paren). A
+ * mandatory arm would have invalidated all five overnight. An ABSENT arm
+ * therefore declares NO DIRECTION — the reading a body written before this
+ * change gets, byte-identically to what it got before it existed.
+ *
+ * ## The four combinations, and the one that is refused
+ *
+ *   `yes` / `yes (widening)`  — a widening. The second spelling is the first,
+ *                               said out loud; both take at least `minor`.
+ *   `yes (narrowing)`         — a diff that widens one surface and narrows
+ *                               another. Both facts are true and both are read.
+ *   `no (narrowing)`          — NOT a widening, but breaking. This is the whole
+ *                               point of the arm.
+ *   `no (widening)`           — ⛔ MALFORMED. The value says "this does not
+ *                               widen" and the arm says it does; a reader that
+ *                               picked either one of the two would be guessing.
+ */
+export const CLAUSE2_ARMS = Object.freeze(['widening', 'narrowing']);
+
+/**
  * The key, and the decoration tolerated around it.
  *
  * Tolerated because a seat writes it without meaning anything by it, and
@@ -874,13 +911,77 @@ function hasInlineClause2Key(line) {
  * allows may contain a pipe anywhere later — a table column, a shell
  * pipeline — and is untouched.
  */
-function readValueToken(raw) {
+function matchValueToken(raw) {
   const rest = String(raw ?? '').replace(/^[ \t]+/, '');
   // Built from CLAUSE2_VALUES so the closed set is declared once: adding a
   // third reading would have to be a deliberate edit to that constant.
   const token = new RegExp(`^(?:\\*\\*)?(?:\`)?[ \\t]*(${CLAUSE2_VALUES.join('|')})(?![A-Za-z0-9_])(?![ \\t]*\\|)`);
   const m = token.exec(rest);
-  return m ? m[1] : null;
+  // `after` is the REST OF THE LINE, handed on so the arm is read from the same
+  // single pass. ⛔ Not a second parser: the arm reader below never sees the key,
+  // the colon or the value — only what this match did not consume.
+  return m ? { value: m[1], after: rest.slice(m[0].length) } : null;
+}
+
+function readValueToken(raw) {
+  return matchValueToken(raw)?.value ?? null;
+}
+
+/**
+ * The ARM token, read immediately after the value. (#16421)
+ *
+ * ## The shape, and the one calibration it inherits
+ *
+ * The arm is a PARENTHETICAL opened as the next non-blank thing after the value
+ * — `Clause-②: no (narrowing)` — and the arm word is the FIRST token inside it.
+ * That is `readValueToken`'s own calibration, one slot along: the token comes
+ * first and what follows it is the seat's argument, which this file does not
+ * read. So `no (narrowing — the IANA zone domain)` reads the arm and keeps the
+ * reason, exactly as `no — …` keeps trailing reasoning today.
+ *
+ * ⚠️ The closing decoration is stripped first, and that is not cosmetic:
+ * `**\`no\`** (narrowing)` closes the backtick and the bold AFTER the value, so
+ * a reader that looked for `(` at position 0 would miss the arm on the exact
+ * spelling this file's own remedy sentence teaches.
+ *
+ * ## Three outcomes, because a near miss must not read as an absence
+ *
+ *   `{ arm: 'widening'|'narrowing' }` — the fixed spelling, exactly.
+ *   `{ arm: null }`                   — no parenthetical, or one that is plainly
+ *                                       reasoning (`no (nothing published
+ *                                       moves)`). The overwhelming live shape.
+ *   `{ bad: <token> }`                — ⛔ the parenthetical OPENS with a word of
+ *                                       the arm family and is not one of the two
+ *                                       spellings: `(narrowed)`, `(Narrowing)`,
+ *                                       `(widen)`, and the unfilled template
+ *                                       `(widening|narrowing)`. Read as ABSENT
+ *                                       these fail OPEN — a declared narrowing
+ *                                       silently stops being declared, which is
+ *                                       the defect the arm exists to remove. The
+ *                                       caller turns this into `malformed`, the
+ *                                       state this file already owns for "the
+ *                                       slot holds something ungradeable".
+ *
+ * ⛔ The alternation refusal is `readValueToken`'s, for `readValueToken`'s
+ * reason: `(widening|narrowing)` is a MENU, and a seat that pasted the template
+ * without choosing has not declared a direction.
+ *
+ * @param {string} after — the line remainder `matchValueToken` did not consume.
+ * @returns {{ arm: 'widening'|'narrowing'|null, bad?: string }}
+ */
+function readArmToken(after) {
+  // Closers come off in the mirror order the value's openers went on: the value
+  // pattern consumed `**` then a backtick, so a decorated value closes backtick
+  // then `**`.
+  const rest = String(after ?? '').replace(/^`?(?:\*\*)?[ \t]*/, '');
+  if (!rest.startsWith('(')) return { arm: null };
+  const exact = new RegExp(`^\\([ \\t]*(${CLAUSE2_ARMS.join('|')})(?![A-Za-z0-9_])(?![ \\t]*\\|)`);
+  const hit = exact.exec(rest);
+  if (hit) return { arm: hit[1] };
+  // Not the fixed spelling. Only a word of the arm FAMILY is a near miss; any
+  // other parenthetical is ordinary reasoning and is left alone.
+  const near = /^\([ \t]*(?:\*\*)?`?[ \t]*([A-Za-z|]+)/.exec(rest);
+  return near && /widen|narrow/i.test(near[1]) ? { arm: null, bad: near[1] } : { arm: null };
 }
 
 /**
@@ -973,7 +1074,7 @@ function quoteLine(line, cap = 160) {
  * Read the declaration limb out of ONE comment or body.
  *
  * @param {string} text
- * @returns {{ kind: 'declared', value: 'yes'|'no', line: string }
+ * @returns {{ kind: 'declared', value: 'yes'|'no', arm: 'widening'|'narrowing'|null, line: string }
  *          | { kind: 'malformed', value: string, line: string }
  *          | { kind: 'near-miss', reason: 'describing'|'inline-key'|'spelling', line: string }
  *          | null}
@@ -981,6 +1082,13 @@ function quoteLine(line, cap = 160) {
  * Four-valued on purpose. `declared` and `malformed` are different facts about
  * a line that IS the key; `near-miss` is a fact about a line that is not. Any
  * collapse of these into "no" is the defect #13914 filed.
+ *
+ * ⭐ `arm` (#16421) is the DIRECTION the declaration names, from
+ * {@link CLAUSE2_ARMS}, and `null` when it names none — which is what every
+ * declaration written before the arm existed says, and says unchanged. It is the
+ * ONE spelling of the direction in this fleet: `check-adr-0087-registration.mjs`
+ * and `check-changeset-no-major.mjs` import this reader rather than growing a
+ * parser each, which is the ruling's own condition on the change.
  *
  * The near miss carries a REASON because the shapes owe different remedies:
  * `spelling` is a line that does not carry the fixed key at all; `inline-key`
@@ -1017,9 +1125,19 @@ export function readClause2Line(text) {
         continue;
       }
       if (read !== null) continue;
-      const value = readValueToken(m[3]);
-      read = value !== null
-        ? { kind: 'declared', value, line: quoteLine(line) }
+      const hit = matchValueToken(m[3]);
+      // #16421. The arm is read in the SAME pass, from what the value match did
+      // not consume, and two shapes collapse into the `malformed` this file
+      // already owns rather than growing a state each:
+      //   * a near-arm spelling (`readArmToken`'s `bad`), and
+      //   * the CONTRADICTION `no (widening)` — "does not widen" beside "widens".
+      // Both are a value slot nobody can grade, which is what `malformed` means
+      // here, and both fail CLOSED. ⛔ Neither may read as an absent arm: that is
+      // the direction a declared narrowing disappears in.
+      const armRead = hit === null ? { arm: null } : readArmToken(hit.after);
+      const contradiction = hit?.value === 'no' && armRead.arm === 'widening';
+      read = hit !== null && armRead.bad === undefined && !contradiction
+        ? { kind: 'declared', value: hit.value, arm: armRead.arm, line: quoteLine(line) }
         : { kind: 'malformed', value: quoteLine(m[3], 60), line: quoteLine(line) };
       continue;
     }
@@ -4218,6 +4336,26 @@ export function selfTest() {
   t('…including the bold-wrapped, parenthesised form seats actually write', readClause2Line('**Clause-②: no**(仅移动 import/注释)')?.value === 'no');
   t('⛔ but a word merely STARTING with the token is not the token', readClause2Line('Clause-②: nope')?.kind === 'malformed' && readClause2Line('Clause-②: not applicable')?.kind === 'malformed');
   t('the closed set is read from CLAUSE2_VALUES, so a third reading needs an edit there', CLAUSE2_VALUES.length === 2 && CLAUSE2_VALUES.every((v) => readClause2Line(`Clause-②: ${v}`)?.value === v));
+  // -- the DIRECTION ARM (#16421) — both arms, both directions -----------------
+  //
+  // ⭐ Both directions are pinned for each arm, because one direction alone
+  // cannot tell a reading from a constant: `narrowing` must READ, and `widening`
+  // must NOT read as a narrowing — a gate that classified both as breaking would
+  // pass an arm test that only ever asked "did something come back?".
+  t('ARM: `no (narrowing)` reads the arm — the shape the whole card exists for', readClause2Line('Clause-②: no (narrowing)')?.arm === 'narrowing');
+  t('ARM: `yes (widening)` reads the OTHER arm, and is not a narrowing', readClause2Line('Clause-②: yes (widening)')?.arm === 'widening');
+  t('ARM: `yes (narrowing)` — a diff may widen one surface and narrow another', readClause2Line('Clause-②: yes (narrowing)')?.value === 'yes' && readClause2Line('Clause-②: yes (narrowing)')?.arm === 'narrowing');
+  t('ARM: ⛔ `no (widening)` CONTRADICTS itself and is malformed, never a silent pick', readClause2Line('Clause-②: no (widening)')?.kind === 'malformed');
+  t('ARM: a near-arm spelling is malformed, ⛔ never an absent arm — that direction fails OPEN', ['(narrowed)', '(Narrowing)', '(widen)', '(narrowings)'].every((p) => readClause2Line(`Clause-②: no ${p}`)?.kind === 'malformed'));
+  t('ARM: the unfilled template `(widening|narrowing)` is a MENU, not a choice', readClause2Line('Clause-②: no (widening|narrowing)')?.kind === 'malformed');
+  t('ARM: decoration closes AFTER the value, so the taught spelling still carries an arm', readClause2Line('- **`Clause-②`**: **`no`** (narrowing)')?.arm === 'narrowing');
+  t('ARM: the arm keeps its reasoning, the same calibration the value has', readClause2Line('Clause-②: no (narrowing — the IANA zone domain)')?.arm === 'narrowing');
+  t('ARM: the closed pair is read from CLAUSE2_ARMS, so a third arm needs an edit there', CLAUSE2_ARMS.length === 2 && CLAUSE2_ARMS.every((a) => readClause2Line(`Clause-②: yes (${a})`)?.arm === a));
+  // ⛔ CONTROLS. The arm is OPTIONAL and every declaration on the board the day
+  // this landed had none; if these flip, five in-flight PRs lost their reading.
+  t('⛔ CONTROL: the two bare spellings are byte-identical reads carrying NO arm', CLAUSE2_VALUES.every((v) => readClause2Line(`Clause-②: ${v}`)?.value === v && readClause2Line(`Clause-②: ${v}`)?.arm === null));
+  t('⛔ CONTROL: an ordinary parenthetical is reasoning, not a malformed arm', readClause2Line('Clause-②: no (nothing published moves)')?.value === 'no' && readClause2Line('Clause-②: no (nothing published moves)')?.arm === null);
+  t('⛔ CONTROL: #18268\'s live em-dash reasoning still reads `no` with no arm', readClause2Line('Clause-②: no — this diff adds an optional field (`CloudConfig`) and a flag fallback.')?.value === 'no');
   t('a very long claim line is quoted back CAPPED, so one row cannot swamp the report', (readClause2Line(`Clause-②: maybe ${'x'.repeat(400)}`)?.line ?? '').length < 200);
   t('a card that never mentions the clause reads null', readClause2Line('Claim: whatever\nBranch: x') === null);
   t('⛔ the reader never invents a value from an adjacent word', readClause2Line('this card is clause 2 yes in substance')?.kind !== 'declared');
