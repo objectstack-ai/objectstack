@@ -193,11 +193,12 @@ and secret handling run: `packages/plugins/plugin-auth/src/register-sso-provider
 model bridged at the adapter layer (`packages/plugins/plugin-auth/src/auth-schema-config.ts`
 records why the bridge sits there and not on the plugin's `schema` option).
 
-**Domain verification is opt-in** — the clause this repository's code cites as `ADR-0024 ②`. When
-the environment turns it on, `@better-auth/sso` mounts a DNS-TXT proof-of-ownership challenge and
-refuses a login through a provider whose email domain is not proven, which stops an organization
-admin from registering a provider for a domain they do not control. It is off by default, because
-turning it on changes the register-then-login flow. The surface is
+**Domain verification is opt-in** — `cloud ADR-0024`'s clause ②, which this repository's code now
+cites as `ADR-0135 D6`. When the environment turns it on, `@better-auth/sso` mounts a DNS-TXT
+proof-of-ownership challenge and refuses a login through a provider whose email domain is not
+proven, which stops an organization admin from registering a provider for a domain they do not
+control. It is off by default, because turning it on changes the register-then-login flow. The
+surface is
 `packages/platform-objects/src/identity/sys-sso-provider.object.ts#request_domain_verification`,
 `#verify_domain` and `#domain_verified`.
 
@@ -245,7 +246,7 @@ this repository that means one of them must keep citing `cloud ADR-0024`:
 ⚠️ Consequence for [#14361](https://github.com/objectstack-ai/objectstack/issues/14361): a bare
 `ADR-0024` citation in this tree is **not** mechanically re-pointable at this record. Some of
 today's citations mean a clause above — `packages/plugins/plugin-auth/src/auth-manager.ts` cites
-`ADR-0024 V1` for the SSO default-role provisioning — and those keep the `cloud ADR-0024`
+`cloud ADR-0024 V1` for the SSO default-role provisioning — and those keep the `cloud ADR-0024`
 spelling. The re-pointing is per-site and semantic.
 
 ## What this record does NOT settle

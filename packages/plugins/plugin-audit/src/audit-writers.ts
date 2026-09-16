@@ -1256,6 +1256,19 @@ export function installAuditWriters(
         ? (ctx as any).provenance.attributedUserId
         : undefined;
     const userId: string | undefined = sess.userId ?? attributedUserId;
+    // [#17022, ADR-0090 D10 rule 4] The AGENT that performed this write, when
+    // an MCP OAuth client acted for the human above. A THIRD channel, and the
+    // reason it is a separate one: `session.userId` is the delegator — the
+    // write authorizes as them and the record stays theirs (ADR-0073 D3) — so
+    // before this the delegated row was byte-identical to a row that human
+    // wrote in the Console, and 「这是 AI 代替人类执行」 was not recoverable
+    // from the ledger at all. Stamped from `provenance`, never from `session`,
+    // because no caller-gating hook may read the client as the caller.
+    const performedByClientId: string | undefined =
+      typeof (ctx as any).provenance?.performedByClientId === 'string' &&
+      (ctx as any).provenance.performedByClientId.trim()
+        ? (ctx as any).provenance.performedByClientId.trim()
+        : undefined;
     // Principal label for attribution. Prefer the real user id; otherwise fall
     // back to a service/automation principal the host put on the context
     // (`ExecutionContext.actor`, e.g. `svc:<name>`). This is what makes a
@@ -1366,6 +1379,29 @@ export function installAuditWriters(
     // rationale as organization_id: older audit tables predate the column.
     if (objectHasField('sys_audit_log', 'actor')) {
       auditRow.actor = actorLabel;
+    }
+    // [#17022] ADR-0090 D10 rule 4's dual attribution, recorded ADDITIVELY.
+    //
+    // Present ONLY on a delegated write, so the two shapes are distinguishable
+    // by ABSENCE rather than by guesswork: no key ⇒ the principal in `user_id`
+    // performed the write itself.
+    //
+    // ⛔ Deliberately NOT `actor`. ADR-0118 D1/D5 keeps that column
+    // two-valued — a `sys_user` id, or `null` for the system — and rules that
+    // "which non-user acted" is answered by an ADDED attribution field, never
+    // by a second actor vocabulary (「不在 actor 上重复表达——那是双源」). Nor
+    // `user_id`, which stays the human so the row keeps joining to `sys_user`
+    // and historical rows keep reading the same way.
+    //
+    // `on_behalf_of` is written from the same `userId` that lands in the
+    // `user_id` column rather than from a second carrier: rule 4 asks for both
+    // sides on the row, and one source for one fact is what keeps them from
+    // ever disagreeing.
+    if (performedByClientId) {
+      auditRow.metadata = safeStringify({
+        performed_by: performedByClientId,
+        on_behalf_of: userId ?? null,
+      });
     }
 
     // [#6656] Masked, but computed fields KEPT: `recordLabel` reads

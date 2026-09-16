@@ -3997,6 +3997,31 @@ jobs:
       - name: Shard partitioner self-test
         run: node scripts/partition-test-shards.mjs --self-test
 
+      # A self-test that RUNS but cannot fail anything (#17097) — the sibling of
+      # the defect above, one turn further out. `scripts/report-test-timings.mjs`
+      # ships a real self-test: 61 cases across 4 batteries, a naive prefix-only
+      # reference parser plus three controls that assert it gets the answer WRONG
+      # exactly where the real parser gets it right. ci.yml names it, so
+      # `check:self-test-wired` was green. But every `Test Core` step that runs
+      # that script carries `continue-on-error: true`, and MUST: #16454 rules the
+      # timing feature report-only, and #14469 is the measured cost of an
+      # unguarded diagnostics step there (a FinalizeArtifact 403 on a 313-byte
+      # upload evicted a fully green shard from the merge queue). So the guard
+      # that makes the feature safe was the same guard that disarmed its
+      # self-test — the verdict was produced and then discarded, and the wiring
+      # gate was satisfied by an invocation that could not fail.
+      #
+      # ⇒ the self-test runs HERE, where it has teeth, and ⛔ is no longer
+      # invoked from ci.yml: ONE enforcing run, not one enforcing and one
+      # decorative. ci.yml's own `continue-on-error` on the capture and merge
+      # steps is untouched by this — the report-only property belongs to that
+      # workflow, not to this script.
+      # Invoked as `node` rather than through a `pnpm check:*` alias for the same
+      # reason as the steps above: see the GATE INVOCATION IDIOM note at the top
+      # of this file. In-process fixtures, no IO, milliseconds.
+      - name: Test-timing parser self-test
+        run: node scripts/report-test-timings.mjs --self-test
+
       # Hand-written `.d.mts` mirrors (#10549). `scripts/js-comment-mask.mjs`
       # and `scripts/check-regen-pending.mjs` are untyped `.mjs` that each ship
       # a hand-written declaration beside them, and both files say "keep this in
