@@ -271,9 +271,11 @@ import type * as M185 from './shared/epoch.zod.js';
 // [#18122] The closed duration vocabulary beside that instant — new module,
 // next free index (M186 is `automation/schedule-organization.zod.ts`).
 import type * as M187 from './shared/duration.zod.js';
+// [#18451] The build-progress PHASE vocabulary -- new module, next free index.
+import type * as M188 from './ai/build-progress.zod.js';
 
 // ---------------------------------------------------------------------------
-// 783 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
+// 785 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
 //
 // That number is machine-checked, not hand-kept. The runtime companion at the
 // bottom of this file recomputes the pin count from the source and asserts that
@@ -1026,6 +1028,18 @@ export type Iso868 = Assert<Eq< z.input< typeof M185.EpochMs >, z.infer< typeof 
 export type Iso873 = Assert<Eq< z.input< typeof M187.DurationMs >, z.infer< typeof M187.DurationMs > >>;
 export type Iso874 = Assert<Eq< z.input< typeof M187.DurationSeconds >, z.infer< typeof M187.DurationSeconds > >>;
 
+// ai/build-progress.zod.ts -- the closed build-progress PHASE vocabulary
+// (#18451, cloud#2172 ruling A) and the frame that carries it. The enum has
+// no default and no transform; the frame is a `z.looseObject` whose three
+// members are a bare enum and two plain optionals, so both are the (RISE)
+// case. The frame pin is the load-bearing one: it is deliberately a FLOOR
+// that passes the consumer's own panel fields through untouched, and the day
+// someone gives `phase` or `hop` a `.default()` to 'help' a producer that
+// omits it, author state and parsed state part company -- this is the line
+// that says so by name.
+export type Iso875 = Assert<Eq< z.input< typeof M188.BuildProgressPhaseSchema >, z.infer< typeof M188.BuildProgressPhaseSchema > >>;
+export type Iso876 = Assert<Eq< z.input< typeof M188.BuildProgressFrameSchema >, z.infer< typeof M188.BuildProgressFrameSchema > >>;
+
 // shared/value-domain.zod.ts — the ONE standard-domain vocabulary (#14168);
 // `SpecifierValueDomainSchema` (Iso758) is an alias of it, so both pins hold
 // or fall together. A `z.enum` has no default or transform, the (RISE) case.
@@ -1664,7 +1678,7 @@ describe('ADR-0122 type-alias convention', () => {
   // this title and the section header above the pin list — are now asserted
   // against the recomputed count below, so neither can go stale without a red
   // test naming it.
-  it('still declares all 783 isomorphic pins', () => {
+  it('still declares all 785 isomorphic pins', () => {
     // The truth of each pin is proved by tsc, not here — an `Assert<Eq<...>>`
     // that stops holding is a compile error with the alias named. What tsc
     // cannot notice is a pin that was DELETED: removing the assertion removes
@@ -2227,7 +2241,18 @@ describe('ADR-0122 type-alias convention', () => {
     // `startTime: durationMs`-style `.default()` or a `.transform()` that
     // fills one member from another, this pin is the line that says the alias
     // has gained a second shape.
-    expect(pins).toHaveLength(783);
+    // 783 -> 785 is #18451's build-progress PHASE vocabulary
+    // (ai/build-progress.zod.ts, new module slot M188): `BuildProgressPhase`
+    // and `BuildProgressFrame`, the (RISE) case twice. The enum is a bare
+    // `z.enum` like the `ConnectorActionEffectSchema` pin that first taught
+    // this count to rise; the frame is a `z.looseObject` of one enum and two
+    // plain optionals. Neither carries a default or a transform, so no
+    // `XParsed` is declared and both come here instead. +2 added.
+    //
+    // Note the number is the same 783 -> 785 the DURATION block above records,
+    // arrived at from the same 783 after #16059's retirement took it back down.
+    // The two entries are different movements that share a pair of endpoints.
+    expect(pins).toHaveLength(785);
 
     // The count is stated in PROSE twice as well — this case's title and the
     // section header above the pin list — and until #6605 nothing read either

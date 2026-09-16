@@ -128,7 +128,7 @@ export const BuildProgressFrameSchema = lazySchema(() => z.looseObject({
 }));
 
 /** A phase from the closed {@link BUILD_PROGRESS_PHASES} vocabulary. */
-export type BuildProgressPhase = z.infer<typeof BuildProgressPhaseSchema>;
+export type BuildProgressPhase = z.input<typeof BuildProgressPhaseSchema>;
 
 /** The `data` payload of a `data-build-progress` frame. */
 export type BuildProgressFrame = z.input<typeof BuildProgressFrameSchema>;
