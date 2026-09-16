@@ -1254,10 +1254,17 @@ const FRAMING_TAIL_RE =
  * strip is a wider claim and would need its own measurement.
  *
  * ⚠️ The pattern is not word-anchored (`MIGRATION_FRAMING_RE` is; this one is not),
- * so `sys_migration FROM → TO` strips to `sys_`. That reading is UNCHANGED by the
- * right-trim, and cannot be changed by it: with no whitespace before the framing
- * word there is no whitespace left behind to trim. The repair keys on the SPACE, so
- * it reaches exactly the shape where the framing word is a word of its own.
+ * so it strips a framing word out of an IDENTIFIER: `sys_migration FROM → TO`
+ * strips to `sys_`. That reading is UNCHANGED by the right-trim and cannot be
+ * changed by it -- with no whitespace before the framing word there is no
+ * whitespace left behind to trim -- so the repair keys on the SPACE and reaches
+ * exactly the shape where the framing word is a word of its own. The identifier
+ * shape is a SEPARATE false positive, stated rather than hidden and out of this
+ * repair's reach: `the sys_migration FROM → TO is documented elsewhere` is governed
+ * by `the` and still reads as a label, because what the strip exposes is `_` rather
+ * than the letter that was there. Word-anchoring this pattern changes WHICH
+ * prefixes are stripped at all, which is a wider claim than transparency and needs
+ * its own measurement over the changeset stock before it is believed.
  *
  * @param {string} prefix the text left of the placeholder, already right-trimmed
  */
