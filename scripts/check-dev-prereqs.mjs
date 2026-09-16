@@ -136,9 +136,37 @@
  *       `dist/.build-input-hash-dts`, which it skips under this flag exactly so
  *       that a `.d.ts` reader can tell the two builds apart. Nothing here reads
  *       it; see DTS_STAMP_BASENAME and `declarationStampState` below.
+ *       ⚠ That conditionality is on the FLAG, not on the EMIT — measured: a run
+ *       that emitted nothing at all, with the flag unset, refreshes BOTH files.
+ *       The entry below is the one that answers that shape.
+ *     - A RUN THAT EMITTED NOTHING. NARROWED, and the residue is stated rather
+ *       than inherited (#16529). `--stamp` is an ASSERTION about the tree, not
+ *       an OBSERVATION of the build, and its preconditions were "this package is
+ *       an amplifier" and "a `dist/` DIRECTORY exists". Measured on the real
+ *       tree: `--stamp` into an EMPTY `dist/` exited 0 and wrote both stamps,
+ *       which then read `match` over a dist holding nothing at all. It now also
+ *       requires the entry point the package's own manifest declares — the same
+ *       criterion the EXISTENCE half applies to all 68 packages — and the
+ *       coverage check below requires the invocation to be the build script's
+ *       LAST step, reached through `&&`, so every SCRIPTED path to a stamp runs
+ *       after a step that emitted and succeeded.
+ *       WHAT REMAINS, deliberately: a HAND-RUN `--stamp` against an
+ *       already-built dist whose sources have since moved still writes a stamp
+ *       that reads fresh. That is not observable from the artifact side — the
+ *       bytes it would inspect are real, merely old — so it is the same class as
+ *       the hand-edited dist below rather than a build shape. ⛔ Nor is it
+ *       closed by "refuse when the output bytes did not change": an idempotent
+ *       rebuild legitimately emits byte-identical output, so that rule would red
+ *       the very build this gate exists to ask for.
  *     - A HAND-EDITED dist. The hash covers inputs, not outputs. Nothing here
  *       can see someone editing `dist/index.mjs` directly, and nothing should
  *       have to.
+ *     - A TURBO CACHE HIT is NONE of the above, measured rather than assumed:
+ *       the build script does not run, so `--stamp` does not run either, and
+ *       `dist/**` — the stamp included, which is why it lives there — is
+ *       restored as one set, so the pair stays consistent. ⚠ The replayed log
+ *       still PRINTS the `✓ …/.build-input-hash ← …` line from the cached run,
+ *       so a build log is never evidence that a stamp was written.
  *
  *   FALSE RED — says stale, is fine:
  *     - A COMMENT-ONLY or formatting-only edit under `src/` changes the hash
@@ -178,6 +206,13 @@
  *   at the end of its build script — and NEITHER half can be forgotten, because
  *   a listed package whose build script does not stamp fails this gate as a
  *   coverage error, and `--stamp` from an unlisted package exits 1.
+ *   ⚠ "At the end" is now MECHANICAL and not a convention (#16529). The
+ *   coverage error used to be `buildScript.includes(STAMP_INVOCATION)` while its
+ *   own text said "no longer ends with" — so `tsup ; node …--stamp` (stamps
+ *   after a FAILED tsup), `tsup || node …--stamp` (stamps only when tsup failed)
+ *   and `node …--stamp && tsup` (stamps before anything is emitted) all passed.
+ *   That laxity is exactly what scaling this list multiplies, which is why it is
+ *   closed BEFORE the list grows: see `stampStepOrderProblem`.
  *
  * ── WHAT IT DELIBERATELY DOES NOT CHECK ─────────────────────────────────────
  *   - Freshness of the other ~60 packages. Existence only, as before; the pass
@@ -217,7 +252,9 @@
  *   node scripts/check-dev-prereqs.mjs             # gate the workspace
  *   node scripts/check-dev-prereqs.mjs --self-test # prove it can go both ways
  *   node scripts/check-dev-prereqs.mjs --stamp     # write dist/.build-input-hash
- *                                                  # for the package in cwd
+ *                                                  # for the package in cwd —
+ *                                                  # the LAST '&&' step of its
+ *                                                  # own build, never by hand
  *   pnpm check:dev-prereqs                         # self-test, then gate
  *
  * WHY THE `dev` CHAIN CALLS THIS WITH `node` AND NOT `pnpm check:dev-prereqs`
@@ -242,7 +279,10 @@
  *      a dist entry point — nothing to verify)
  *   1  not built; or an amplifier's dist is stale/unstamped; or the workspace
  *      layout, an amplifier or its build inputs could not be read (a gate that
- *      cannot enumerate members must fail loudly, not pass vacuously — #4690)
+ *      cannot enumerate members must fail loudly, not pass vacuously — #4690);
+ *      or, under `--stamp`, this package is not a declared amplifier, has no
+ *      `dist/`, or has a `dist/` without the artifact its manifest declares —
+ *      a build that emitted nothing does not get to record that it did
  */
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
