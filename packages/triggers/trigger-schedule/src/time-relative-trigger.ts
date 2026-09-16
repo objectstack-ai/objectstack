@@ -776,7 +776,11 @@ export class TimeRelativeTrigger implements FlowTrigger {
             }
             this.recordOrgResolver = { engine, resolver: createRecordOrganizationResolver(engine) };
         }
-        return this.recordOrgResolver.resolver.organizationOf(objectName, record);
+        // Read through a local: a mutable class property does not stay narrowed
+        // across the assignment above, and `!` would assert away the one thing
+        // worth keeping honest here.
+        const cached = this.recordOrgResolver;
+        return cached ? cached.resolver.organizationOf(objectName, record) : null;
     }
 
     /**
