@@ -112,9 +112,24 @@ function setup(perms: string[], apps: any[] = ALL_APPS, serviceExists?: (name: s
             const t = String(type ?? '');
             return t === 'app' || t === 'apps' ? JSON.parse(JSON.stringify(apps)) : [];
         }),
+        // [#18066] The MISS answers what the live producer answers, not
+        // `undefined`. `metadata-protocol`'s `getMetaItem` resolves the
+        // protection envelope AROUND a `item: undefined` for a name it cannot
+        // find — `lock` / `editable` / `deletable` / `resettable` come from
+        // `resolveLockState` unconditionally — so `undefined` was a shape no
+        // deployment produces. That mattered: the door read `envelope?.item`,
+        // which is `undefined` for both, and then fell through to `res.json`
+        // with the envelope, so the criterion-3 case below was passing over a
+        // stub that could not exhibit the defect the live provider had. The
+        // reject-path case further down keeps its own override, so both
+        // producer shapes reach this route from this file.
         getMetaItem: vi.fn(async ({ name }: any) => {
             const found = apps.find((a: any) => a.name === name);
-            return found ? { type: 'app', name, item: JSON.parse(JSON.stringify(found)) } : undefined;
+            return {
+                type: 'app', name,
+                item: found ? JSON.parse(JSON.stringify(found)) : undefined,
+                lock: 'none', editable: true, deletable: true, resettable: false,
+            };
         }),
         findData: vi.fn().mockResolvedValue([]),
     };
@@ -447,15 +462,46 @@ describe('#8013 — by-name: a permission denial is REPORTED, absence still is n
             expect(missing.statusCode).not.toBe(403);
             expect(refusal(missing.body).code).not.toBe('PERMISSION_DENIED');
             expect(JSON.stringify(missing.body ?? {})).not.toContain('PERMISSION_DENIED');
+
+            // [#18066] The POSITIVE half, which this case did not state and
+            // which is what let the route answer `200` with an item-less
+            // envelope for years while every assertion above stayed green:
+            // "not the denial" was satisfied by a SUCCESS just as well as by an
+            // absence. ADR-0112 — `status` and `code`.
+            expect(missing.statusCode).toBe(404);
+            expect(refusal(missing.body).code).toBe('RESOURCE_NOT_FOUND');
+            expect(missing.body?.item).toBeUndefined();
+            expect(missing.body?.lock).toBeUndefined();
         }
     });
 
-    it('criterion 3: …and the real producer miss is still the 404 it has always been', async () => {
-        // The fixture's `getMetaItem` answers `undefined` for an unknown name;
-        // `metadata-protocol` REJECTS with a declared `RESOURCE_NOT_FOUND` /
-        // `status: 404` (pinned in `rest-meta-outage-vs-miss.test.ts`). Both
-        // reach this route, so the criterion is stated against the production
-        // shape too rather than against the stub's alone.
+    it('criterion 3: …and it is the SAME answer the unpublished app gets, byte for byte', async () => {
+        // [#18066] ADR-0045 §3 makes an unpublished app externally
+        // unobservable, and this suite's partition note states the contract as
+        // absence and nonexistence being indistinguishable. Over the live
+        // producer shape they were not: `production_management` answered this
+        // 404 while `no_such_app` answered a 200 envelope, so the pair
+        // enumerated which app names exist-but-are-unpublished. Compared as
+        // whole bodies rather than field by field, because a single extra key
+        // on either side is the entire signal.
+        const unpublished = await getItem(setup(['manage_users'], GATED_APPS).rest, 'production_management');
+        const absent = await getItem(setup(['manage_users'], GATED_APPS).rest, 'no_such_app');
+
+        expect(absent.statusCode).toBe(unpublished.statusCode);
+        expect(absent.body).toEqual(unpublished.body);
+        expect(absent.statusCode).toBe(404);
+    });
+
+    it('criterion 3: …and the REJECTING producer shape reaches the same status and code', async () => {
+        // The other producer shape this door must survive: a protocol
+        // implementation that REJECTS with a declared `RESOURCE_NOT_FOUND` /
+        // `status: 404` (`rest-meta-outage-vs-miss.test.ts` pins the rendering).
+        // ⚠️ Its body is the FLAT `{ error: '<message>', code }` that
+        // `resolveErrorResponse`'s declared-status passthrough produces, not the
+        // nested ADR-0112 envelope the in-route refusals emit — so this case
+        // asserts `body.code`, and the case above asserts `body.error.code`, on
+        // purpose. Both reach this route, so the criterion is stated against
+        // both rather than against one stub's.
         const { rest, protocol } = setup([], GATED_APPS);
         protocol.getMetaItem = vi.fn().mockRejectedValue(Object.assign(
             new Error('Metadata item app/no_such_app not found'),

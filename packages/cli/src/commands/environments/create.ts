@@ -5,6 +5,7 @@ import { printError, emitJson, isExitSignal, errorCodeFields } from '../../utils
 import { createApiClient, requireAuth } from '../../utils/api-client.js';
 import { formatOutput } from '../../utils/output-formatter.js';
 import { readAuthConfig, writeAuthConfig } from '../../utils/auth-config.js';
+import { recordCloudActiveEnvironmentId } from '../../utils/active-environment.js';
 
 /**
  * `os environments create` — provision a new environment.
@@ -19,7 +20,15 @@ import { readAuthConfig, writeAuthConfig } from '../../utils/auth-config.js';
  *
  * On success, optionally activates the new environment for the current session
  * and persists `activeEnvironmentId` into `~/.objectstack/credentials.json`
- * (unless `--no-activate` is passed).
+ * (unless `--no-activate` is passed). When the control plane it just talked
+ * to IS the one `~/.objectstack/cloud.json` records, the same id is written
+ * there as well, so `os package publish --install` can install into the
+ * environment you just created without repeating the uuid.
+ *
+ * `os environments switch` records it through the SAME helper. An environment
+ * id is only meaningful against the server that issued it, and that gate is
+ * written once, in `utils/active-environment.ts` — two copies of it is how
+ * one of them stops gating.
  */
 export default class EnvironmentsCreate extends Command {
   static override description = 'Provision a new environment';
@@ -66,7 +75,7 @@ export default class EnvironmentsCreate extends Command {
     const { flags } = await this.parse(EnvironmentsCreate);
 
     try {
-      const { client, token } = await createApiClient({ url: flags.url, token: flags.token });
+      const { client, token, baseUrl } = await createApiClient({ url: flags.url, token: flags.token });
       requireAuth(token);
 
       // Resolve the artifact to an absolute path so the server can read it
@@ -97,9 +106,20 @@ export default class EnvironmentsCreate extends Command {
         ...(metadata ? { metadata } : {}),
       });
 
+      let recordedForCloud = false;
       if (flags.activate && res?.environment?.id) {
         try {
           await client.environments.activate(res.environment.id);
+
+          // Cloud store first, for the reason `os environments switch` writes
+          // it first: the server session is already switched by the call above,
+          // so the publish-side record must not be lost to a failure in the
+          // runtime store below (a user who only ran `os cloud login` has no
+          // `credentials.json` at all). The url gate inside the helper decides
+          // whether this id belongs in the cloud store; this call must not grow
+          // a second copy of it.
+          recordedForCloud = await recordCloudActiveEnvironmentId(res.environment.id, baseUrl);
+
           const cfg = await readAuthConfig().catch(() => null);
           if (cfg) {
             cfg.activeEnvironmentId = res.environment.id;
@@ -121,6 +141,9 @@ export default class EnvironmentsCreate extends Command {
         console.log(`\n✓ Environment created: ${p.display_name ?? p.id} (${p.id})`);
         if (flags.activate) {
           console.log(`  active environment set to ${p.id}`);
+          if (recordedForCloud) {
+            console.log('  (also recorded in cloud.json — `os package publish --install` will use it)');
+          }
         }
         console.log('');
       }

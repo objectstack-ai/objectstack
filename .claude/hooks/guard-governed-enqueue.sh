@@ -284,6 +284,31 @@ url_target() { # url_target <word> -> "owner repo pull" or empty
   printf '%s %s %s' "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}" "${BASH_REMATCH[3]}"
 }
 
+# The `owner/repo` a checkout's `origin` names, or nothing. ONE reader with two
+# call sites — the bare `gh pr merge <n>` target derivation just below, and the
+# sibling admission rule further down — because the two inlined copies it
+# replaces agreed on a defect: the path character class owns `.` and is greedy,
+# so the optional `\(\.git\)` group matched EMPTY and
+# `https://github.com/objectstack-ai/cloud.git` read as the slug
+# `objectstack-ai/cloud.git`, which equals no `owner/repo` this guard is ever
+# asked about. A sibling cloned with the conventional URL therefore never
+# resolved, and a bare `gh pr merge <n>` in such a clone derived a slug the API
+# answers 404 for — this guard's fail-open, on the clone URL `git clone` hands
+# out by default.
+#
+# The suffix is stripped AFTER the match rather than carved out of the class:
+# the class still has to own `.` (a repository may legitimately be called
+# `objectstack.ai`), and which of the two the class-vs-group race gives it up to
+# is exactly the kind of thing GNU and BSD sed are free to disagree about. A
+# trailing `.git` is removed by the shell either way, and nothing legitimate is
+# lost with it — GitHub refuses a repository name that ends in `.git`.
+slug_of() { # slug_of <checkout dir> -> owner/repo, or empty
+  local slug
+  slug="$(git -C "$1" remote get-url origin 2>/dev/null \
+    | sed -n 's#.*github\.com[:/]\([A-Za-z0-9._-]*/[A-Za-z0-9._-]*\)/*$#\1#p')"
+  printf '%s' "${slug%.git}"
+}
+
 # The enqueue-class target one shell segment names, or nothing.
 segment_target() { # segment_target <segment> -> "owner repo pull" or empty
   local seg="$1"
@@ -354,8 +379,7 @@ segment_target() { # segment_target <segment> -> "owner repo pull" or empty
     return 1
   fi
   if [ -z "$slug" ]; then
-    slug="$(git -C "$repo_root" remote get-url origin 2>/dev/null || true)"
-    slug="$(printf '%s' "$slug" | sed -n 's#.*github\.com[:/]\([A-Za-z0-9._-]*/[A-Za-z0-9._-]*\)\(\.git\)\{0,1\}/*$#\1#p')"
+    slug="$(slug_of "$repo_root")"
   fi
   [ -n "$slug" ] || return 1
   printf '%s %s %s' "${slug%%/*}" "${slug#*/}" "$num"
@@ -473,8 +497,8 @@ done < "$work/files.txt"
 # has to be the target repo's own tree. Resolve a checkout whose origin actually
 # declares owner/repo — never audit one repo's paths against another's files.
 
-slug_of() { git -C "$1" remote get-url origin 2>/dev/null | sed -n 's#.*github\.com[:/]\([A-Za-z0-9._-]*/[A-Za-z0-9._-]*\)\(\.git\)\{0,1\}/*$#\1#p'; }
-
+# `slug_of` is defined once, up beside the Bash pass that shares it.
+#
 # WHERE a sibling is looked for is injectable (OS_GOVERNED_ENQUEUE_SIBLING_ROOT,
 # header); WHAT is accepted as one is not. The slug comparison below is the whole
 # admission rule and is untouched by it, so the variable can only move the

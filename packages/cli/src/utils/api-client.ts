@@ -34,6 +34,12 @@ export interface ApiClientResult {
   client: ObjectStackClient;
   token?: string;
   environmentId?: string;
+  /**
+   * The control-plane URL this client actually talks to, after the precedence
+   * below has been applied. Returned so a caller never has to re-derive it —
+   * a second copy of that precedence is how the two drift apart.
+   */
+  baseUrl: string;
 }
 
 /**
@@ -85,7 +91,7 @@ export async function createApiClient(options: ApiClientOptions = {}): Promise<A
     debug: options.debug || false,
   });
 
-  return { client, token, environmentId };
+  return { client, token, environmentId, baseUrl };
 }
 
 /**
