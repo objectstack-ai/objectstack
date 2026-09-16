@@ -17,6 +17,11 @@
  * it declares only what these two functions call, so it cannot drift into a
  * second, competing description of the whole engine. Widen it by adding the door
  * you actually use, never by re-exporting the engine interface.
+ *
+ * ⛔ And deliberately PACKAGE-PRIVATE -- the same restraint one layer out. The
+ * census reads the type declared at the RECEIVER, in this source tree; it never
+ * reads the package's public entry, so exporting this bought the placement
+ * nothing and only widened a published surface. ⛔ Do not add it to `index.ts`.
  */
 
 import type { ServiceObject } from '@objectstack/spec/data';
