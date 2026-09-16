@@ -2853,15 +2853,24 @@ const warnedEmailTemplateFloors = new Set<string>();
  *
  * ## What goes wrong without this
  *
- * `IEmailService.sendTemplate` matches `(name, locale)` EXACTLY and retries
- * exactly one rung — the literal `en-US`. There is no language-subtag folding,
- * so a bundle whose English row is tagged `en` is unreachable from `en-US` and
- * from every other tag it does not itself carry: each such delivery raises
- * `TEMPLATE_NOT_FOUND`, which classifies **permanent**, so it dead-letters with
- * no retry. `sys_user.locale` is user-editable free-text BCP-47 and is NOT
- * constrained to `supportedLocales`, so the locales that can reach the lookup
- * are not the ones the author enumerated — a recipient can break their own mail
- * by setting a legal tag.
+ * `IEmailService.sendTemplate` matches `(name, locale)` EXACTLY and, for a call
+ * that NAMES a locale, retries exactly one rung — the literal `en-US` — and
+ * stops. There is no language-subtag folding, so a bundle whose English row is
+ * tagged `en` is unreachable from `en-US` and from every other tag it does not
+ * itself carry: each such delivery raises `TEMPLATE_NOT_FOUND`, which
+ * classifies **permanent**, so it dead-letters with no retry. `sys_user.locale`
+ * is user-editable free-text BCP-47 and is NOT constrained to
+ * `supportedLocales`, so the locales that can reach the lookup are not the ones
+ * the author enumerated — a recipient can break their own mail by setting a
+ * legal tag.
+ *
+ * ⛔ A call that names NO locale is the other case, and it does not fail: it
+ * starts at `en-US` by name and, when the bundle carries no `en-US` row, drops
+ * to that bundle's lowest locale tag and renders it silently. So one floorless
+ * bundle dead-letters the recipients whose locale was named and quietly fills
+ * for the ones whose was not. The full three-rung ladder is on
+ * `SendTemplateInput.locale` in `packages/spec/src/contracts/email-service.ts`
+ * and is not restated here.
  *
  * ⭐ The trap is that the author does the CONSISTENT thing: a stack declaring
  * `defaultLocale: 'en'` whose English row says `locale: 'en'` agrees with
@@ -2884,6 +2893,37 @@ const warnedEmailTemplateFloors = new Set<string>();
  * not be reported — the reader below mirrors that default rather than relying
  * on the call site for it, so the two agree wherever this is called from.
  * Warn-once per bundle, keyed by name plus the tags it actually carries.
+ *
+ * ## What this deliberately does NOT examine
+ *
+ * Two shapes leave here silently and both can still ship a floorless bundle.
+ * They are written down because the summary line above is the only place the
+ * scope was ever stated, while the hazard section reads as a promise to catch
+ * every floorless bundle — which this does not do:
+ *
+ *  1. **A stack whose `i18n.supportedLocales` is absent or empty.** Measured:
+ *     `i18n` is optional but `supportedLocales` is REQUIRED inside it, so the
+ *     absent arm is reached only by a stack carrying no `i18n` block at all,
+ *     and the empty arm only by a literal `supportedLocales: []`. Either way
+ *     there is nothing to measure "carries rows for this stack's own supported
+ *     locales" against, so the function returns before building anything.
+ *     ⚠️ This early return is not a second scope decision: with no supported
+ *     set every bundle's `declared` list below is empty and shape 2 would skip
+ *     it anyway, so what the return actually buys is not reading `.map` off
+ *     `undefined`.
+ *  2. **A bundle whose tags are ALL outside `supportedLocales`.** `declared` is
+ *     empty, so the bundle is skipped one line after the floor check
+ *     established that it carries no floor row. A stack supporting `en-US`
+ *     whose bundle is tagged `en` alone is exactly that case: floorless, and
+ *     silent here.
+ *
+ * ⚠️ Whether either shape SHOULD warn is the ADR-0049 enforce-or-remove
+ * question, and it is deliberately not answered here: widening a `defineStack`
+ * diagnostic is a behaviour change on an authoring surface, which the posture
+ * note above puts on a scheduled migration rather than behind a lint. What is
+ * closed is the silence being UNDECLARED — both shapes are pinned in
+ * `stack-email-template-locale-floor.test.ts` against a warning control, so
+ * neither can start or stop returning without a test saying so.
  */
 function warnEmailTemplateLocaleFloor(data: ObjectStackDefinition): void {
   const supported = data.i18n?.supportedLocales;
@@ -2914,11 +2954,13 @@ function warnEmailTemplateLocaleFloor(data: ObjectStackDefinition): void {
     warnedEmailTemplateFloors.add(key);
     console.warn(
       `defineStack: emailTemplates '${name}' carries rows for ${declared.map((t) => `'${t}'`).join(', ')} ` +
-      `but none tagged '${EMAIL_TEMPLATE_FLOOR_LOCALE}', so this bundle has no fallback floor. ` +
-      `sendTemplate matches (name, locale) exactly and retries only the literal ` +
-      `'${EMAIL_TEMPLATE_FLOOR_LOCALE}' — there is no language-subtag folding, so every recipient ` +
-      `locale this bundle does not carry a row for raises TEMPLATE_NOT_FOUND, which is permanent ` +
-      `(dead-letter, no retry). Your stack's own i18n.defaultLocale is the wrong tag here unless ` +
+      `but none tagged '${EMAIL_TEMPLATE_FLOOR_LOCALE}', so this bundle has no fallback floor for a ` +
+      `send that names a locale. sendTemplate matches (name, locale) exactly and retries only the ` +
+      `literal '${EMAIL_TEMPLATE_FLOOR_LOCALE}' — there is no language-subtag folding, so every ` +
+      `recipient locale this bundle does not carry a row for raises TEMPLATE_NOT_FOUND, which is ` +
+      `permanent (dead-letter, no retry). A send naming NO locale does not fail: it drops to this ` +
+      `bundle's lowest tag and renders that silently, so one gap is loud for some recipients and ` +
+      `invisible for others. Your stack's own i18n.defaultLocale is the wrong tag here unless ` +
       `it is spelled '${EMAIL_TEMPLATE_FLOOR_LOCALE}': tag the English row '${EMAIL_TEMPLATE_FLOOR_LOCALE}' ` +
       `and keep the other tags beside it.`,
     );
