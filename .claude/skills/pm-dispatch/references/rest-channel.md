@@ -36,6 +36,7 @@
 - ✓ 评论 `POST .../issues/{n}/comments`;改评论 `PATCH .../issues/comments/{id}`。
 - ✓ 标签加法 `POST .../issues/{n}/labels`,定向删 `DELETE .../issues/{n}/labels/{name}`;加法优先。
 - 标签/assignee 写恒经 `scripts/pm/label-write.mjs`:四步内建、回读、回退整组 PATCH 回传 assignees。
+- ⛔ `post-stamped`/`label-write` 永不接进管道再 `&&`:拒收读成 0;看尾先落文件或 `set -o pipefail`。
 - ⛔ 永不 MCP `issue_write`(锁 1 已拒);会话分类器拒改动 ⇒ 无通道,交有通道席位立卡。
 - ✓ 建卡带标签 `POST .../issues` · 改正文 `PATCH .../issues/{n}` · 认领 `POST .../issues/{n}/assignees`。
 - 请求体走文件(`-d @file`)或引号定界 heredoc(`<<'EOF'`),⛔ 永不内联双引号串。
@@ -49,7 +50,6 @@
 - ✓ `POST .../ccr/comments/{id}/resolve` · `/unresolve`;`{id}` 是评审评论 id,⛔ 只在自己 PR 上探。
 - ✓ auto-merge 挂载 `PUT .../pulls/{n}/ccr/auto_merge` 带 `{"merge_method":"SQUASH"}`,`DELETE` 卸载。
 - ⛔ `PUT .../ccr/auto_merge` 在 draft 上 422 零存储;`DELETE` 无挂载回 422 = 本就没挂,非失败。
-- 入队读 timeline `added_to_merge_queue`,落地读 `git rev-list --parents`;⛔ `auto_merge` 与回显都不作数。
 - ⛔ 永不 MCP `update_pull_request`(锁 1 已拒);ready/draft 翻转只走 ccr 路;auto-merge MCP 锁 1 同拒。
 - 直合仓 `PUT .../pulls/{n}/merge`;actor 记通道令牌:REST 按会话为 `claude[bot]` 或用户,MCP 恒用户。
 

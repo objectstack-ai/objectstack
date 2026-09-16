@@ -62,6 +62,24 @@
  * `{{NOW}}` is never refused — so mixed alone would not have caught the
  * recorded failure, whose comments carried no token at all.
  *
+ * ## ⛔ Never pipe this tool, then `&&` the write that follows
+ *
+ * The exit register above is worth exactly what the caller reads. A pipeline's
+ * status is its LAST command's, so the habitual seat idiom
+ * `post-stamped … | tail -3 && label-write …` hands the `&&` tail's 0 and the
+ * refusal is gone: the audit comment is REFUSED, the label lands anyway, and the
+ * card is left graded with nothing on it saying why — the half-state the
+ * comment-before-label ordering exists to prevent, and the direction of it that
+ * nobody can recover from a later read. Measured on a live card, where the seat
+ * noticed eight seconds on; a turn that had ended there would have left it.
+ *
+ * So read the output without spending the code — redirect first, then capture:
+ *
+ *   node scripts/pm/post-stamped.mjs … > /tmp/p.log 2>&1; EXIT=$?; tail -3 /tmp/p.log
+ *
+ * or arm `set -o pipefail` before the pipeline. The rule is the caller's, not
+ * this tool's, so it covers every writer beside it — `label-write.mjs` included.
+ *
  * ## The quoted route has a DIRECTION, not only a shape (#17763)
  *
  * Checking that a `{{WAS:…}}` value is shaped like a stamp leaves the estimate
