@@ -208,7 +208,8 @@ The query result is presentation-ready — authors do not format dimension or
 measure values by hand:
 
 - **Dimensions** — a `select` dimension returns its option **label** (not the
-  stored value), a `lookup` / `master_detail` dimension returns the related
+  stored value), a **reference** dimension (any field whose stored value is
+  another record's id, a `user` person axis included) returns the related
   record's **display name** (not the FK id), and a `date` dimension with a
   `dateGranularity` returns a human bucket label (`month` → `2026-04`,
   `quarter` → `2026-Q2`, `year` → `2026`). Unresolved values pass through

@@ -81,15 +81,6 @@
         ]
       },
       {
-        "matcher": "mcp__github__enable_pr_auto_merge|mcp__github__merge_pull_request",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "\"$CLAUDE_PROJECT_DIR/.claude/hooks/guard-governed-enqueue.sh\""
-          }
-        ]
-      },
-      {
         "matcher": "Bash",
         "hooks": [
           {
@@ -99,10 +90,6 @@
           {
             "type": "command",
             "command": "\"$CLAUDE_PROJECT_DIR/.claude/hooks/guard-process-kill.sh\""
-          },
-          {
-            "type": "command",
-            "command": "\"$CLAUDE_PROJECT_DIR/.claude/hooks/guard-governed-enqueue.sh\""
           },
           {
             "type": "command",
