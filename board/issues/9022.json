@@ -1,0 +1,35 @@
+{
+  "number": 9022,
+  "kind": "issue",
+  "title": "The `--confirm-global-uniques` attestation records `attestedAt` / `attestedBy`, but nothing ever surfaces them — and install.ts's comment says `os doctor` does",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-16T06:36:10Z",
+  "updated_at": "2026-08-16T23:18:57Z",
+  "closed_at": "2026-08-16T23:18:57Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9022",
+  "body": "Found while documenting `os package install` for #8965 (PR #9021). Filed unassigned; not fixed there — out of that card's file surface (docs only).\n\n## The gap\n\n`packages/cli/src/commands/package/install.ts` justifies the shape of `--confirm-global-uniques` with this comment:\n\n> Deliberately NOT default-on and deliberately not named `--force`: it records an affirmative fact (\"these constraints are genuinely platform-wide\") into the install manifest, where `os doctor` can later show who affirmed it and when.\n\nMeasured on `origin/main` at `b849d9e33`, the last clause does not hold. `os doctor` reads the attestation, but only to **subtract** already-answered findings:\n\n```ts\n// packages/cli/src/commands/doctor.ts\nconst findings = collectGlobalUniques(entry?.manifest?.objects);\n// Subtract what the install ceremony already answered for — an attested\n// install must not be re-reported, or the advisory becomes the recurring\n// nag the gate exists to avoid.\nfor (const finding of unconfirmedGlobalUniques(findings, entry?.globalUniqueAttestation, posture)) {\n  out.push({ source: `installed package '${entry?.manifestId ?? entry?.packageId}'`, finding });\n}\n```\n\n`unconfirmedGlobalUniques` (`packages/types/src/unique-scope-install-gate.ts`) reads only `attestation.posture` and `attestation.confirmed`. Nothing anywhere reads `attestedAt` or `attestedBy`.\n\n## Why it is worth recording\n\nThe record is deliberately built to answer \"who and when\" — `GlobalUniqueAttestation` declares both, and `recordGlobalUniqueAttestation` maintains them:\n\n```ts\nexport interface GlobalUniqueAttestation {\n  readonly posture: TenancyPosture;\n  readonly confirmed: readonly string[];\n  /** ISO timestamp of the most recent confirmation. */\n  readonly attestedAt: string;\n  /** Identity of the confirming installer, when the seam knows one. */\n  readonly attestedBy?: string | null;\n}\n```\n\nSo this is two small things, not one:\n\n1. **A comment that over-claims a capability the runtime does not deliver** (Prime Directive #10). It is the kind of input that makes the next author reason confidently from a behaviour that does not exist — and it sits in the file whose flag the reader is trying to understand.\n2. **Two fields written on every affirmation and read by nobody.** The affirmation is a governance act — someone asserted that an app's installation-wide constraints really are platform-wide on this deployment. `attestedAt` / `attestedBy` are exactly the audit trail that act wants, and today the only way to see them is to read the install manifest by hand.\n\nNothing is broken: the suppression behaviour is correct and is the thing the gate needs in order not to nag. This is a declared-but-unsurfaced capability plus a stale comment.\n\n## Two independent dispositions, either order\n\n- **Fix the comment** so it describes what `os doctor` does today (suppresses re-reporting the affirmed constraints). Cheap, and it is the half that actively misleads.\n- **Decide whether `os doctor` should surface who/when** on affirmed constraints — a line per attested package under the tenancy report. If the answer is no, the fields are candidates for the liveness question rather than a display feature; if yes, the data is already there and the change is display-only.\n\nRecording rather than choosing: which of the two is right is a product call about whether that audit trail has a real consumer, and this was found while writing docs, not while working the tenancy surface.\n\nContext: the docs added in PR #9021 deliberately state only the measured behaviour, so `content/docs/deployment/cli.mdx` does not inherit the over-claim and is not blocked on this."
+}

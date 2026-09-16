@@ -1,0 +1,35 @@
+{
+  "number": 9104,
+  "kind": "pull_request",
+  "title": "test(spec): harden the build-schemas check-mode fixture repos against the merge-queue lifetime race",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/m",
+    "skip-changeset",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-16T10:08:58Z",
+  "updated_at": "2026-08-16T11:04:30Z",
+  "closed_at": "2026-08-16T11:04:28Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-16T11:04:28Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/9104",
+  "body": "Fixes #9068\n\nTest-harness hardening only. No `*.zod.ts`, no strictness-ledger file, no behaviour\nchange to `build-schemas.ts`, and all 60 assertions in the file are preserved verbatim —\nwhat changes is how the fixture repositories are built and insulated, never what is\nasserted.\n\n## What the harness actually looked like (measured, not assumed)\n\nThree of the card's premises were checked against `origin/main` before anything was edited:\n\n- **Tmpdir collision between concurrent test files — falsified.** All four fixture repos in\n  this file already use `fs.mkdtempSync` (`build-schemas-check-`, and three `box` prefixes),\n  `packages/spec` has exactly one vitest project, and vitest isolates test files into\n  separate processes. No concurrently running file can name one of these directories.\n- **\"The git helper shells out per fixture\" — confirmed, and that was the hole.** It passed\n  `cwd` and two `-c user.*` args and inherited *everything else*: the ambient global and\n  system git config, `init.templateDir`, and every `GIT_*` environment variable. So did the\n  generator runs, and `build-schemas.ts` shells out to git itself (`merge-base`, `cat-file`,\n  a `--depth=1` fetch).\n- **Serializing the three git-topology blocks (the card's fallback ③) is a no-op.** They are\n  already serial: vitest runs one test at a time within a file. Not implemented, and the\n  reason is recorded in the file.\n\n## The mechanism, reproduced\n\nThree describe blocks (#5370, #5847, #6452 — exactly the three that failed) deliberately\nwrite `.git/shallow` into the **shared** sandbox, because that is the environment they\nmodel: CI checks out `--depth=1`. Inside that window every commit behind the graft point is\nunreachable *by definition*, so a `git gc` arriving there prunes the fixture's own history\nand leaves the refs pointing at objects that are gone. On a five-commit fixture in exactly\nthat state:\n\n```\n$ git gc --quiet                     # ambient [gc] pruneExpire/reflogExpire = now\n$ git merge-base HEAD 538d7ec0…      # a commit made moments earlier\nfatal: Not a valid commit name 538d7ec0ac80c958841f3606d567dee02bdbc1b1\n```\n\nThat is the reported signature. The control — same commits, same gc, **no** `.git/shallow`\n— keeps every object.\n\n## The fix\n\nTwo layers, because they fail differently:\n\n1. **`HERMETIC_ENV`** on every git this file runs *and* on the generator spawns, so ambient\n   config and leaked `GIT_*` pointers (`GIT_DIR`, `GIT_INDEX_FILE`, `GIT_OBJECT_DIRECTORY`,\n   `GIT_ALTERNATE_OBJECT_DIRECTORIES`, …) cannot reach a fixture or its children.\n2. **`initFixtureRepo`** writes `gc.auto=0`, `gc.autoDetach=false`, `maintenance.auto=false`,\n   `gc.pruneExpire=never`, `gc.reflogExpire*=never`, `core.logAllRefUpdates=true` into each\n   repo's own config. This is the layer that survives a gc **this file never launched**:\n   local config outranks global. Measured A/B — identical outside `git gc` with a hostile\n   global config, in the shallow window: unhardened repo loses the commit, hardened repo\n   keeps it.\n\nPlus the card's preferred ①, applied where it is load-bearing: the three git-topology blocks\neach take **their own** fixture repo (`createSandbox` / `mountSandbox` / `releaseSandbox`).\nThey fork branches, reset them every `beforeEach`, leave merges uncommitted and truncate\nhistory; sharing one repo is why a single lost object read as ten failures spread over three\nblocks, with the block that caused it invisible. A `scripts/` copy is 1.8 MB and the\ngeneration cost is per run, not per sandbox.\n\nFinally, a fixture git failure now names the repo and its state (`HEAD`, `main`,\n`origin/main`, shallow, and whether `main`'s object still exists) instead of a bare sha —\nthe whole first triage lap on this card went into establishing that the sha belonged to no\ntree of this repository.\n\n## Verification — every run below at `c0740f996`, the head of this branch\n\n**Stability, since a hardening PR should demonstrate it rather than assert it:**\n\n| run | scope | result | duration |\n| --- | --- | --- | --- |\n| 1 | whole file | 60 passed (60) | 278.7 s |\n| 2 | whole file | 60 passed (60) | 274.7 s |\n| 3a / 3b | the three git-topology blocks, **two instances concurrently** | 13 passed each | 60.3 s / 60.6 s |\n\nRun 3 is the parallel-pressure reading: two processes driving the same fixture-building code\nat the same moment, which is the shape the merge queue applies.\n\n**Reverse verification**, direction predicted (red) before it was run. Same subset\n(`-t 'a shallow checkout re-anchors'`, 5 tests), same hostile environment — `GIT_DIR` aimed at\na decoy repository plus a global config carrying `gc.pruneExpire/reflogExpire = now`:\n\n- `origin/main`'s harness → **5 failed / 5**\n- this branch's harness → **5 passed / 5**\n\n**Gates.** Re-derived from the actual changed path with `node scripts/pm/dispatch-gates.mjs`;\nit named exactly the dispatched set, nothing beyond. Green here: `check:merge-driver`,\n`check:type-source-resolution`, `check:query-options-erasure`, `check:type-check-coverage`,\n`check:engine-double-contract`, `check:where-matcher`, `check:nul-bytes`, and\n`check:scripts-typecheck` (the zero-error-budget program this file belongs to).\n\nTwo are **not measured locally, deliberately**: `check:type-check-debt` and\n`check-dev-prereqs.mjs` both refuse on a worktree with no built closure — the ratchet says so\nitself (\"measuring now would not fail, it would silently measure a DIFFERENT WORLD\"). Their\npopulation is `src/**/*.test.ts` and workspace `dist/`, neither of which this diff touches, so\na full 55-package build here buys no information the CI job will not produce. CI is the\nauthority on both.\n\n`skip-changeset`: tests-only, nothing published.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01225pUjnCKWqxcc1PeqKFUq)_\n"
+}

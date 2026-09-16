@@ -1,0 +1,34 @@
+{
+  "number": 9076,
+  "kind": "pull_request",
+  "title": "docs(deployment): list mysql:// on self-hosting's OS_DATABASE_URL row with a caveat pointer",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/xs",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-16T08:27:42Z",
+  "updated_at": "2026-08-16T08:58:27Z",
+  "closed_at": "2026-08-16T08:58:26Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": "2026-08-16T08:58:26Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/9076",
+  "body": "Fixes #9053\n\nThe 2026-08-15 ruling on #8739 made MySQL a supported deployment target, and #9029 / PR #9052 published its three dialect caveats at the three sites where MySQL is offered. `content/docs/deployment/self-hosting.mdx` is the fourth site and the one a production deployer actually reads, but its `OS_DATABASE_URL` row still listed only `postgres://`, `mongodb://`, `libsql://` and `file:`. A deployer on the self-hosting path therefore never met MySQL as an option — and so never met the caveats published for exactly that decision.\n\n## The change\n\nOne row, one page:\n\n- The row's \"Use …\" list gains `mysql://…`, placed next to `postgres://…` since both are served by the same `SqlDriver`.\n- A one-sentence pointer follows, in the shape the row already uses for MongoDB's single-tenant restriction: name the scheme, one clause of why, link to the section that holds the substance.\n\nThe pointer's wording is **character-identical** to the one PR #9052 landed on the sibling deployment page (`environment-variables.mdx`, the `OS_DATABASE_DRIVER` row) — deliberately, so the two cannot drift into two divergent statements of the same caveat. The substance stays in `drivers.mdx`; this PR is the route to it, not a second copy.\n\n## Re-derived, not copied\n\n- **Location.** The card measured the row at `self-hosting.mdx:37`; `content/docs/**` took several merges today. Found by content, and it is still line 37 on `2cb69c31c`.\n- **Link target.** Read what #9052 actually landed (`2a20b99ad`) rather than assuming: the anchor is `### MySQL dialect caveats` at `drivers.mdx:304`, reached as `/docs/data-modeling/drivers#mysql-dialect-caveats`. That heading says **three** caveats, not two — the pre-existing `upsert` conflict-target limit plus the two new ones — so the pointer says three.\n\n## `mysql2://` is deliberately not listed\n\nThe card flagged this as a thing to check, and the check changed the answer's basis. `drivers.mdx` has two tables: the **URL → Driver Inference Table** (line 49) does list `mysql://…`, `mysql2://…` as schemes, while the **Supported Drivers** table lists `mysql` \\| `mysql2` as `OS_DATABASE_DRIVER` values, which are not schemes. `mysql2://` is genuinely accepted by the runtime — `detectDriverFromUrl` in `packages/runtime/src/standalone-stack.ts` matches `/^mysql2?:\\/\\//i`.\n\nIt still does not belong in this row, because this row names **one canonical scheme per target** and never spells an alias: it says `postgres://…` for the `postgres`/`postgresql`/`pg` family, `mongodb://…` and not `mongodb+srv://`, `libsql://…` and not the `*.turso.io` http form, `file:…` and not `sqlite:`. Adding `mysql2://` here would make MySQL the only target on the page whose aliases are enumerated. The exhaustive alias list is the inference table, which this row already links.\n\n## Scope\n\n- Docs prose only. No source file, config or driver behaviour is touched.\n- Neither degradation is restated or relitigated — both are deliberate, documented decisions.\n- **No sweep.** #9029's fence on a general `content/docs/**` dialect-parity audit still stands, and this PR does not widen it. One adjacent gap I met while verifying where my own pointer sends a deployer is **filed, not fixed**: #9075 (`environment-variables.mdx`'s `OS_DATABASE_URL` example list omits `mysql://`) — filed unassigned and labelled `finding`, since that list is explicitly `e.g.` and states nothing untrue.\n- The optional extra the card left to the docs owner — growing the page a MySQL Compose example the way Postgres has one — is **out of scope here**; #9053 covers the row, and the Compose question is a separate call.\n- No changeset: docs-only, nothing user-visible ships. `skip-changeset` applied.\n\n## Verification\n\nGate families derived after the diff was final, not recalled:\n\n```\nnode scripts/pm/dispatch-gates.mjs content/docs/deployment/self-hosting.mdx\n  - pnpm check:docs-audit-scope   [lint.yml]\n  - pnpm check:docs-redirects     [lint.yml]\n  - pnpm check:role-word          [lint.yml]\n```\n\nRan that union plus two the derivation did not place but the diff plainly implicates — `check:doc-anchors`, because the edit adds a `#fragment` link, and `check:nul-bytes`, which any edit owes. All five green **at the final commit `9d1c23539`**, on a clean tree:\n\n```\n✓ docs-accuracy-audit scope is in sync with content/docs/: 178 hand-written doc(s).\ncheck-docs-redirects: OK (apps/docs/redirects.mjs: 92 entries -- 89 page destination(s) resolved …)\ncheck-role-word: OK (43 baselined file(s), no new occurrences).\n✅ check-doc-anchors: 240 internal #fragment link(s) across 396 source file(s) all resolve to a real heading\ncheck-nul-bytes: OK (scanned 5960 text file(s) … no raw ASCII control bytes).\n```\n\n`check:doc-anchors` is the one that actually proves the new link: it resolves `#mysql-dialect-caveats` against a real heading. The page-path half (`/docs/data-modeling/drivers`) belongs to the `Check Documentation Links` job, which runs lychee in CI; locally the target file's existence is confirmed, and #9052 already landed the identical path from two other files through that gate.\n\nDraft and unqueued — the merge queue is the PM's to arm.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_011RB4waLuNbdruCo6X9oobm)_"
+}

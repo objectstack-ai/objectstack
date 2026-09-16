@@ -1,0 +1,33 @@
+{
+  "number": 9193,
+  "kind": "issue",
+  "title": "The `/meta` spelling refusal is documented NOWHERE — nine verbs have thrown it since #7894 and `error-catalog.mdx` has no entry",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:queue"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-17T00:22:03Z",
+  "updated_at": "2026-08-17T06:35:05Z",
+  "closed_at": "2026-08-17T06:35:05Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9193",
+  "body": "Filed unassigned by the `domain:metadata` execution seat (#6367), PM session `session_01NTKPDRoynY8i3HmdSFUxFj`. Measured on PR #9191 (#9157) during a whole-corpus `content/docs/**` sweep. Duplicate-searched by envelope text and by file.\n\n## What was measured\n\n`metaUrlSpellingRefusal`'s `INVALID_REQUEST` / *\"not a recognised spelling\"* envelope is documented **nowhere in `content/docs/**`**, for any verb. `content/docs/api/error-catalog.mdx` has **no entry** for it.\n\nNine `/meta` verbs have been able to throw it since **#7894**.\n\n## Why it is worth a card\n\n⭐ **A refusal is a wire-visible contract face.** A caller that sends a spelling the platform declines gets a status and a code it cannot look up — the platform refuses, correctly, and then declines to say so anywhere a caller would read.\n\nThat is the **inverse** of the drift class this repo has been closing all week. #8739, #9164, #9175, #9181 are all *\"a document asserts something the code does not do.\"* This is *\"the code does something no document asserts.\"* Same gap, opposite sign — and it is the one an author cannot discover by reading, only by hitting it.\n\nIt also has a concrete consumer today: **PR #9191 makes three more verbs able to throw it**, and #9180's steps ② and ③ would extend the family further. Each of those makes the undocumented surface larger without anyone deciding to.\n\n## Scope — deliberately NOT part of #9157\n\nThe #9157 dev found this and correctly declined to fix it there: the absence **predates that change** and covers the whole family, not the three verbs it touched. Folding it in would have been a docs rider on a behaviour PR, and would have implied the gap was #9157's to own.\n\n⚠️ It is also **not** simply step ③ of #9180. Step ③ rewrites `metadata-api.mdx:26`'s spelling statement; this is a missing **error-catalog** entry for a refusal that already ships. Filing it separately so it survives whatever the maintainer decides about #9180 — that ruling is currently being re-weighed after a false premise in its analysis was corrected (`5310461296`), and this gap is true regardless of how it lands.\n\n## Not claimed\n\n- ⛔ **No defect in the refusal itself.** It is correct behaviour; only its documentation is absent.\n- ⛔ **The \"nine verbs\" figure is inherited** from #9157's mechanical re-derivation, not re-measured here.\n- ⛔ **No sweep for other undocumented refusals.** One envelope, found incidentally. The class — *wire-visible refusals with no catalog entry* — is plausibly larger and was not measured. Treat this as a sample, and note that the sample was found by accident, which is the same discovery mechanism this seat has flagged as unreliable in #9171, #9182 and #9192.\n\nBacklinks: PR #9191 / #9157 · #7894 (where the refusal began) · #9180 (the ruling whose steps enlarge the surface)."
+}

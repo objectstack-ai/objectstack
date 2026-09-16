@@ -1,0 +1,34 @@
+{
+  "number": 8489,
+  "kind": "issue",
+  "title": "plugin-sharing re-derives materializeDeclaredFields instead of importing it — a second copy of the declared-field binding contract, already diverged",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-13T15:40:29Z",
+  "updated_at": "2026-08-17T11:23:16Z",
+  "closed_at": "2026-08-17T11:23:16Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 12,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8489",
+  "body": "Filed unassigned from the `domain:services` seat (#6021) while reviewing PR #8483 against the maintainer's 2026-08-06 ruling on #4953. **⛔ This records a finding only — no fix commitment, no `pm:queue`.**\n\n## What is there\n\n`packages/plugins/plugin-sharing/src/share-link-service.ts` defines its own declared-field binder:\n\n```ts\nfunction bindDeclaredFields(record: Record<string, unknown>, schema: any): Record<string, unknown> {\n  const declared = schema?.fields;\n  if (!declared || typeof declared !== 'object') return record;\n  const bound: Record<string, unknown> = { ...record };\n  for (const name of Object.keys(declared)) {\n    if (!(name in bound)) bound[name] = null;\n  }\n  return bound;\n}\n```\n\nIts own doc comment names what it is a copy of:\n\n> \"The same materialisation the two server-side CEL gates in `@objectstack/objectql` do (`materializeDeclaredFields`, behind the validation and hook-condition evaluators).\"\n\nIt is used by `assertEligible` to bind the record before evaluating `publicSharing.eligibility`.\n\n## Why this is a finding rather than a style nit\n\n**It could have imported the real helper.** `plugin-sharing/package.json` lists `@objectstack/objectql` as a **runtime `dependencies` entry** (not a devDependency), and `materializeDeclaredFields` is exported from `packages/objectql/src/declared-fields.ts`. There is no structural obstacle here — unlike `trigger-record-change`, where objectql is dev-only.\n\n**The repo has already written down why duplication is the failure.** `packages/objectql/src/cel-fault.ts`:\n\n> \"the only durable way to keep two messages worded alike is to stop writing them twice — the same argument that put `declared-fields.js#materializeDeclaredFields` in front of every server-side evaluator\"\n\n**It has already diverged.** The local copy early-returns `record` **unchanged** when `schema.fields` is absent or not an object. The shared helper is not reached that way by its callers, which gate on the `groundTruth` rule instead (fetch-the-prior-row, \"do not fabricate\"). So the two answer differently in at least one input class today.\n\n⚠️ **The live exposure is the pinned `!has(...)` reversal.** PR #6454 deliberately changed what `!has(record.{declared field})` means once bindings are materialised, pinned by two tests, on the grounds that `has()` guards an UNDECLARED key and never an empty value (the `declared-fields.ts` contract since #4649). A hand-rolled mirror does not inherit that change, nor the next one. The entire point of the seam programme in #4953 is that one predicate means one thing on every server-side surface.\n\n## Blast radius, stated honestly\n\n⭐ **This is not a live security hole, and it should not be graded as one.** `assertEligible` fails **closed**: an unevaluable predicate raises `ELIGIBILITY_UNEVALUABLE` and refuses to mint the link. So the divergence's current worst case is a **refused** share link, not a leaked one. The `bindDeclaredFields` bail on a missing schema lands in the same safe direction.\n\nThe cost is drift, not breach: this is the surface where a future change to the shared contract silently fails to apply, in a gate whose verdicts are security-relevant.\n\n## Suggested shape (⛔ not a prescription — the owning lane decides)\n\nThe convergent option, which also resolves the same question now open on PR #8483: move `materializeDeclaredFields` into **`@objectstack/core`**, which `objectql`, `plugin-sharing` and `trigger-record-change` all already depend on **at runtime**, and re-export from `objectql` for compatibility. That lets all three seams share one copy without promoting any dependency.\n\nCounting the seams for whoever picks this up: objectql has 2 importers (`hook-wrappers.ts`, `validation/rule-validator.ts`); this file is copy #2 of the pattern; PR #8483 proposes copy #3.\n\n## Related\n\n- #4953 — the seam programme and its 2026-08-06 ruling (decision anchor; ⛔ already ruled, do not re-open)\n- PR #6454 — the `readonlyWhen` seam and the `!has(...)` pin\n- PR #8483 — the flow-trigger seam, where the same duplication question is live\n- #6458 — the seam-ledger staleness this family keeps producing\n\nVerified by reading `share-link-service.ts` and both `package.json` files on `main`, not by code search alone."
+}

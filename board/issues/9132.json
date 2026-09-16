@@ -1,0 +1,35 @@
+{
+  "number": 9132,
+  "kind": "pull_request",
+  "title": "fix(service-automation): sys_automation_run reads the declared tenantId, and pin the org-attribution defect with its negative control (cloud#1395)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-16T13:07:46Z",
+  "updated_at": "2026-08-17T05:24:10Z",
+  "closed_at": "2026-08-17T05:24:09Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-17T05:24:09Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/9132",
+  "body": "Part of objectstack-ai/cloud#1395. This lands the half that is unambiguous and pins the half that is not; the write-side repair needs a maintainer ruling (see \"The open question\" below).\n\n## What was measured\n\ncloud#1395 reported, from under the wall on a walled single-database HotCRM SaaS boot, that `sys_approval_request` (27/27) and `sys_automation_run` (31/31) store `organization_id = NULL` while naming records owned by specific customers — on a boot where `sys_audit_log` (1669 rows) is correctly attributed.\n\nThe card's first question was whether the column is **declared but unwritten** or **absent entirely**. Neither, exactly:\n\n- Both objects **declare** `organization_id` as a `sys_organization` lookup, and both writers **do** write it.\n- They write it from the **acting context** only — `ctxOrg` in `ApprovalService.openNodeRequest`, `ctx.tenantId` in `ObjectStoreSuspendedRunStore.serialize`, `record.organizationId` in `recordTerminal`.\n- That context carries no organization on the schedule, time-relative and api triggers. None of them sets a tenant at all, and that is correct by construction: a scheduled sweep has no one acting organization. So the NULL is not an edge case — it is every run those triggers produce.\n\nThe negative control explains itself once you read the third writer: `plugin-audit` resolves the organization from **the record the row is about**, with the session only as fallback (`resolveRecordOrganizationField`, #8707 honouring #8287's ruling). Two writers read the actor; a third reads the subject. **That disagreement is the defect** — not \"platform tables do not carry an organization\".\n\nSemantically the answer is unambiguous: an approval request **does** belong to an organization. It is read through the organization wall by the approvals inbox, and on a shared database a row carrying none is not filtered by that wall — it is either invisible to everyone or visible to everyone, decided by whichever filter each surface happens to apply rather than by the data.\n\n## What this PR changes\n\n**1. A phantom alias, and the reason nobody caught this.** `serialize()` read `ctx.organizationId ?? ctx.tenantId`. `AutomationContext` declares `tenantId` and **not** `organizationId`, and no producer writes the latter — `RecordChangeTrigger.buildContext` maps the hook session's organization onto `tenantId`, the runtime's automation domain sets `tenantId` directly. The dead limb was worse than inert: the **one** test covering this column fed the phantom key, so the column's only coverage exercised a path production cannot reach. Limb removed, fixture moved to the declared contract, and the absence is now asserted so restoring the alias goes red.\n\n**2. Both declarations document the measured defect and the negative control**, so the next reader cannot conclude \"platform tables just don't carry an organization\". Comments only — the `description` strings are extracted into the generated i18n bundles, so their reword rides the write-side fix and its regeneration pass rather than arriving as silent bundle drift here.\n\n**3. The current behaviour is PINNED, not specified.** `PINNED: a tenant-less trigger context persists organization_id = NULL beside a record that HAS an organization` asserts what the writer does today, and says in its own comment that the fix must **promote** it, never repair it. Its sibling is check `a4` in cloud's `verify-hotcrm-saas.mjs`, which carries the same instruction.\n\n## The open question — why the write-side repair is not here\n\nThe repair is to resolve the organization from the record the row describes, exactly as the audit writer does. Reusing that resolver is blocked by an explicit scope pin in `packages/spec/src/data/object.zod.ts`:\n\n> Scope-pinned by the #8778 ruling: this is ONE stamp-only declaration key, not the opening move of a general field-roles mechanism — a consumer other than audit stamping needs its own ruling before reading it.\n\nThe fork is real, not procedural. `tenancy.organizationField` answers \"which column says who this row is ABOUT\"; `tenantField` / `organization_id` answers \"what is this object WALLED by\". For ordinary business objects they coincide. For `sys_api_key` they deliberately do not — and an approval row and an audit row about the same record would then land in **different** organizations, which is the same two-tables-disagree pathology this card exists to end. Picking a side silently is what I declined to do; the options and a recommendation are in the report on cloud#1395.\n\n## Verification\n\nUnion re-derived against the actual changed paths with `node scripts/pm/dispatch-gates.mjs`, and run at the head below.\n\n```\ngit rev-parse --short HEAD  ->  e9daa7f9e\n\npnpm --filter @objectstack/service-automation --filter @objectstack/plugin-approvals test\n  service-automation   Test Files  80 passed (80)   Tests  965 passed (965)\n  plugin-approvals     Test Files  23 passed (23)   Tests  486 passed (486)\n\npnpm --filter @objectstack/plugin-approvals typecheck   ->  clean\ncheck:nul-bytes / check:engine-double-contract / check:where-matcher\ncheck:test-source-alias / check:empty-changeset          ->  PASS\nnode scripts/check-i18n-bundles.mjs  ->  OK (9 packages, all bundles in sync)\n```\n\n`check:i18n` was named by the derivation for the plugin-approvals edit and is green — which is the check on the comments-only decision above.\n\n**Reverse verification.** Predicted direction: restoring the alias limb turns exactly the absence assertion red and leaves everything else green — an ablation that reddened the whole group would have meant the fixture change, not the limb, was carrying the tests.\n\n```\nablated (const org = ctx.organizationId ?? ctx.tenantId ?? null):\n  x  does NOT read a `context.organizationId` - the key is undeclared and has no producer\n  Tests  1 failed | 25 passed (26)\nrestored: git diff --quiet -> byte-identical\n```\n\n_Generated by [Claude Code](https://claude.ai/code/session_0137TnZzVmkSjXxoSVgPFS6S)_\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_0137TnZzVmkSjXxoSVgPFS6S)_"
+}

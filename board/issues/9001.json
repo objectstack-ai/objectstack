@@ -1,0 +1,34 @@
+{
+  "number": 9001,
+  "kind": "issue",
+  "title": "Complete the spec-lane merge: fold `domain:spec-surface` / `domain:spec-tooling` into a single `domain:spec` lane in the SKILL.md domain table",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-16T05:21:35Z",
+  "updated_at": "2026-08-16T06:27:52Z",
+  "closed_at": "2026-08-16T06:27:23Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9001",
+  "body": "Maintainer direct-ruling card, filed and claimed by the skills seat (session `session_017TNzEetykdh7ceZGwuAPLq`). Provenance (2026-08-16, live PM session, verbatim, untranslated): the maintainer asked 「domain:spec-tooling domain:spec-surface 不是说要合并车道吗？合并完成了吗？为什么还有新任务」; presented with A (full merge into one `domain:spec`, bijection restored) vs B (keep three labels, note single-seat stewardship), the maintainer ruled:\n\n> A\n\n## Measured state (2026-08-16, this seat's probes)\n\n- **Seat layer merged** (2026-08-14): both seat posts read 「🔀 merged into #6017」; #6017 runs as \"domain:spec (+surface/tooling)\".\n- **Table layer NOT merged**: the SKILL.md domain table still carries independent `domain:spec-surface` / `domain:spec-tooling` rows (L189-190 at `86e68c26e`), the 一包三席 section (L199 area), and per-sub-lane tier references in Model tiering (L395 area).\n- **Label layer still circulating**: triage stamps labels from the table (sole producer), so new cards keep arriving — `spec-tooling` 5 open, `spec-surface` 3 open, newest queued 2026-08-15 (post-seat-merge).\n\n## Deliverable (one PR, shape A)\n\n1. **Domain table**: merge the three spec rows into one `domain:spec` row covering the whole `packages/spec` surface (semantic + text + machine faces); the row keeps the essential routing facts (`packages/spec` sole contract; tooling-vs-devx boundary per the 2026-08-09 ruling stays as a clause of this row or the devx row).\n2. **一包三席 section → in-seat dispatch reference**: the operative judgments survive as guidance for the single spec seat, not as lane-routing law — the surface/semantic boundary test (合法元数据集合变没变), surface-changeset-恒-patch, tooling's ⛔ zones (`*.zod.ts`, strictness 台账), 产物随源走. State explicitly that the labels are retired and the seat dispatches internally by these criteria.\n3. **Model tiering section**: fold the per-sub-lane tier lines into single-lane guidance (text-face cards sonnet/opus; tooling default opus, gate-semantics design fable) — ⚠️ the **fable-mandatory clause for contract accept/reject-behavior cards stays verbatim in force**, unchanged in strength.\n4. **`scripts/pm/ensure-pm-labels.sh`**: retire both labels per the script's own convention (退役车道刻意不在脚本里 — remove from the vocabulary, record the retirement reason + date in the script header, which is the authority).\n\nHouse constraints: `claude-fable-5` mandatory (verify with `node scripts/pm/dispatch-gates.mjs --tier` over your changed paths — eat the new tool's cooking); per-file ratchet 686 net non-increasing (a three-into-one merge should net-shrink); id-lint (no issue numbers in operational text); new/reworded text in Chinese, machine literals English; ADR-class ⇒ draft PR, human merge only.\n\n## Declared follow-up (NOT the dev's job)\n\nAfter the PR merges, the seat relabels the 8 open stock cards to `domain:spec` (one notification comment on the spec seat post as the audit anchor; label writes trace to this ruling via this card) and confirms triage produces only `domain:spec` thereafter. In-flight cards keep their claims — only the label changes."
+}

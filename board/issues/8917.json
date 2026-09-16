@@ -1,0 +1,36 @@
+{
+  "number": 8917,
+  "kind": "issue",
+  "title": "docs(releases): the v16 line has two content gaps — 16.1.0 is documented on no page at all, and two changesets released at the 16.0.0 GA cut appear nowhere",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:devx",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-15T16:31:33Z",
+  "updated_at": "2026-08-16T07:45:48Z",
+  "closed_at": "2026-08-16T07:45:47Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8917",
+  "body": "Filed by the `domain:devx` seat (#6023) from measurements made while landing #8886 / PR #8912. Unassigned. ⛔ No `domain:*` set — triage's field.\n\nBoth gaps were found by the dev on #8886 and **deliberately not fixed there**: the card's surface was the status line and the index entry, and writing missing release notes on a release-owned page is a different act with a different owner. PR #8912 is careful to leave the page *not false* about either — it names 16.1.0 as the line's final release and says plainly that the minor is not covered there.\n\n## Gap 1 — `16.1.0`'s content is documented on no release page\n\n`16.1.0` shipped **8 changesets** (5 minor, 3 patch). The headline is **#3366** — the CLI/spec preflight that every `requires` capability has an installable provider in the current edition.\n\n`v16.mdx` documents the 16.0.0 content and does not mention `16.1` anywhere. There is no v16.1 page. So a released minor with a real user-facing feature has no release notes at all.\n\n⚠️ This is a **policy question before it is a docs task**, which is why it is filed rather than fixed: does a minor get folded into its major's page (the shape v15 used — *\"15.1 adds …\"* in its index entry), or does it not get documented, deliberately? The v15 precedent says folded. ⛔ Whoever takes this should settle that first, because the answer decides whether this is a paragraph or a section.\n\n## Gap 2 — two changesets released at the 16.0.0 GA cut appear nowhere on the page\n\nMeasured as the changeset-id set present in the `## 16.0.0` changelog sections but absent from **both** `## 16.0.0-rc.0` and `## 16.0.0-rc.1`:\n\n| changeset | content |\n|:--|:--|\n| `db34d54` | Console refreshed to `9a5f016f7d5c` — a further pin move past `af1b0db` |\n| `8ff9210` | spec: enforce the `ViewFilterRule` operator enum, with legacy-alias handling |\n\n⚠️ `8ff9210` is the more interesting one: **enforcing an operator enum is an accept-set narrowing on a published surface**, which is the class this repo treats most carefully, and it shipped in a GA with no release-note line.\n\n⛔ **The page is not made false by these omissions** — PR #8912's closed window opener makes no claim either way about them, deliberately. This is a completeness gap, not a factual error, and it should not be conflated with #8916 (which *is* factual staleness).\n\n## Constraints for whoever takes this\n\n- `content/docs/releases/` is **release-owned**: release notes are written centrally at release time. ⇒ a **dedicated docs-only PR**, ⛔ never a rider on code. #8912 is the worked precedent for shape.\n- ⚠️ Adding content to a release page is closer to *writing release notes* than to *correcting a fact*. It may warrant the maintainer's call on whether an AI seat should author it at all — flagging that rather than assuming either way.\n- Related but distinct: **#8916** (v9/v12/v14 status lines factually stale, and a prerequisite question for the #8892 gate). ⛔ Do not merge these two cards — one is completeness, the other is correctness.\n\n## Provenance\n\nBoth measured by the dev on #8886 via changeset-id set arithmetic across the package changelogs' `## 16.0.0*` sections; reported to this seat rather than filed by the dev, per that dispatch's (mistaken — see #8886 thread) instruction. Dedupe: reported unfiled with a positive control confirming the search instrument was live."
+}

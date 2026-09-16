@@ -1,0 +1,33 @@
+{
+  "number": 9032,
+  "kind": "pull_request",
+  "title": "docs(tooling): keep the read-seam rule's repaired #8845 exhibit as history and record the blind-spot measurement",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-16T07:15:52Z",
+  "updated_at": "2026-08-16T07:33:12Z",
+  "closed_at": "2026-08-16T07:33:11Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": "2026-08-16T07:33:11Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/9032",
+  "body": "Fixes #9004\n\nComment-only change to `scripts/check-durability-degradation-log-level.mjs`. The gate's behaviour, vocabulary, scan roots and baselines are untouched — the diff is 53 added / 6 removed lines, every one of them a comment line.\n\n## The problem\n\nThe header block *\"Measured and DELIBERATELY NOT added — the FALL-THROUGH / empty-accumulator criterion (#8845)\"* named `cascadeDeleteRelations` in the present tense, twice, as a live fail-open instance. That seam was repaired by #8895 (`a751f7d4f`), so the block taught a repaired defect as a current one.\n\nBoth failure modes were live:\n\n- **deleting** the exhibit would destroy the evidence for a decision still in force — the block exists so the next author reads the numbers before re-proposing the criterion, and #8901 cites it as the authority for exactly that;\n- **leaving it** would send the next reader to a seam they will find already repaired, from which the whole measurement reads stale.\n\nSo the exhibit is kept **as history**, with its tense made true.\n\n## Does the measurement's conclusion survive? Yes — and #8895 strengthens it\n\nChecked leg by leg. The conclusion (\"this shape does not need a looser invention criterion; it needs a declared failure-propagation vocabulary\") rests on six supporting arguments. Five are untouched by #8895. The sixth — the jump-only narrowing that \"buys its number by exempting three REAL instances\" — needs at least one genuine instance to stand, and still has two.\n\nTwo ways #8895 is evidence *for* the conclusion, both now recorded in the block:\n\n1. **The gate's output is byte-identical before and after the repair** — `67 read seam(s) … (7 … discriminated) (1 pass … through) (1 baselined)` on both trees. Measured by ablating the repair back to its pre-#8895 `catch { continue }` and re-running, with the ablation's diff scope proven to be the single intended hunk.\n2. **The shape of the repair is the direction the block argues for** — it discriminates through a *declared* predicate (`isMissingTableError`) rather than a hand-rolled code test. That is the \"declared, checkable fact\" the block asks for, applied by hand at one seam because no gate could ask for it.\n\nI went one step past the filed measurement: planting a `return []` in that same catch turns the gate **red**, naming `engine.ts:10084 (in cascadeDeleteRelations())`. So the seam sits **in** the census throughout — reported clean while it was broken, and reported clean now that it is repaired. What decides visibility is the *shape of the exit*, never whether the seam is correct. Surveyed, cleared, harmful: the #6116 shape a fourth time.\n\n## The number question — anchored, not decremented\n\nNo census number is changed. The block already anchors every count to `origin/main` @ `8664a2c`, and I verified that anchor is real rather than decorative: the gate answers **66 read seams** at `8664a2c` and **67** on today's `main`. The extra seam was gained after that commit, and is *not* from #8895 — the ablation moves nothing.\n\nDecrementing by hand would have been arithmetic standing in for a census. Re-deriving the whole census against today's tree would have swapped a reproducible number for an undated one, and re-done #8845's work inside a documentation-accuracy card. Instead the anchoring is made explicit and load-bearing, so the numbers stay checkable by anyone who runs the gate at that commit.\n\n## Each exhibit verified independently\n\nNot assumed to have moved together with #8895:\n\n| exhibit | state |\n|:--|:--|\n| `cascadeDeleteRelations` (objectql) | **repaired** by #8895 — discriminates, then rethrows |\n| `searchAll` (metadata-protocol) | unchanged, live — silent per-object `continue` |\n| `findReferencesToMeta` (metadata-protocol) | unchanged, live — silent valueless `return` |\n| `checkGovernance` (objectql lifecycle) | unchanged, live — #8906 remains open |\n\n## Verification\n\nUnion re-run **after** the final commit, at `80fdecc9d`, clean tree:\n\n- `pnpm check:durability-log-level` — pass, including its 35-case read-seam self-test. Its output is identical to the pre-edit baseline, which is the direct proof the change is inert.\n- `pnpm check:cross-package-test-inputs` — pass. Not named in my dispatch prompt; picked up by re-deriving `node scripts/pm/dispatch-gates.mjs` against the actual changed path.\n- `node scripts/check-nul-bytes.mjs` — pass, plus a control-character self-scan over the edited file, since the change discusses code shapes.\n\n`skip-changeset`: `scripts/`-only and comment-only, so nothing user-visible is released.\n\n## Out of scope\n\n- #8897 (`pm:on-hold`) names this file as its restart trigger. Its three-way is answered on that card: **declined here and re-held on the same trigger**, with the hold's premise re-verified (the one live injected-logger seam still invents no answer, so the misclassification remains unreachable). It is not addressed in this PR.\n- #8901 remains open and #8906 remains open. Neither is touched here.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_011RB4waLuNbdruCo6X9oobm)_"
+}

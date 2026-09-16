@@ -1,0 +1,35 @@
+{
+  "number": 8908,
+  "kind": "issue",
+  "title": "A draft row stored under a manifest-absent plural (`fields`, `seeds`, `external_catalogs`, `translations`) is promotable by publishPackageDrafts and lands ACTIVE in the second namespace",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-15T16:24:13Z",
+  "updated_at": "2026-08-16T05:21:31Z",
+  "closed_at": "2026-08-16T05:21:31Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8908",
+  "body": "Measured while verifying #8858's premise, at `origin/main` `8664a2c99`. Filed rather than fixed: the fix is a producer-side decision, not a line inside #8858's declared region.\n\n## What was measured\n\n`promoteDraftForPublish` folds the stored draft's type through the **manifest** map (`PLURAL_TO_SINGULAR[request.type] ?? request.type`, `protocol.ts:13198`) — the map #7894 moved the `/meta` URL boundary OFF, because four registry types are legitimately absent from it (`field`, `seed`, `external_catalog`, `translation`; they are not stack collections). The batch route is not a URL boundary: its input is `sys_metadata` rows **at rest**, so #7894's fix never reaches it.\n\nTwo consequences, measured with the real repository and the real protocol over a stub engine:\n\n1. **A manifest-ABSENT plural row at rest promotes successfully.** With one draft row at rest carrying `type = 'fields'` (residue minted through the pre-#7894 plural URL door, which nothing rewrites on upgrade):\n\n```\npublishPackageDrafts({ packageId: 'app.demo' })\n  → { success: true, publishedCount: 1, published: [{ type: 'fields', name: 'legacy_field' }] }\nactive row: { type: 'fields', name: 'legacy_field', package_id: 'app.demo' }\naudit row:  { type: 'fields', name: 'legacy_field', outcome: 'allowed', code: 'ok' }\n```\n\nIdentical result for `translations`. The fold is a no-op for these four, so the lookup key equals the stored spelling and the row is found.\n\n2. **Contrast the manifest-PRESENT class** (`objects`): the fold turns it into `object`, `whereFor` emits that spelling with no at-rest fallback, the promote raises `NO_DRAFT` and the all-or-nothing batch aborts — already pinned in `protocol.publish-side-effects-canonical-type.test.ts` and re-measured here. So the four manifest-absent types are exactly the class this route still lets through.\n\nDownstream of the promote, `runPublishSideEffects` receives `singularType = 'fields'`, so the registry write-through registers the item under the plural key as well — the #4432 shadowing shape, minted at publish time instead of at the URL. The ADR-0010 audit row records `'fields'` too: `recordMetadataAudit` re-folds through `PLURAL_TO_SINGULAR` (`protocol.ts:10577`), which covers manifest-present plurals and misses these four — a fact `rollbackMetaItem`'s own header already states.\n\n## Why it is a defect\n\n- The publish mints (or refreshes) an ACTIVE row in a namespace `PUT /meta/field/…` answers 403 NOT_OVERRIDABLE for — the door #7894 closed, reopened from data at rest.\n- Every registry read and every compliance query on `field` misses an item the platform just reported as published.\n- It is the one remaining route by which a pre-#7894 row can be re-promoted rather than migrated.\n\n## Suggested disposition — a decision, not a one-line fold\n\nFolding at the producer through the URL/registry map (`canonicalMetaUrlType`) would make these four behave like `objects` — i.e. the row becomes **unpromotable** (`NO_DRAFT`) and the whole batch aborts on it. That is fail-closed but it strands the residue with an unhelpful verdict. So the real question is what a legacy second-namespace row at rest should DO on publish:\n\n- **(a)** refuse loudly at the pre-flight, naming the row and pointing at the stored-migration path (fail-closed, actionable, batch-atomic — the shape the namespace-prefix gate already uses); or\n- **(b)** migrate it (`_migrate-stored` / a boot reconciliation step) so the residue is converted once rather than refused forever.\n\nBoth are producer-side and neither is a rider on another card.\n\n**Note for triage:** #8858 proposes a related-looking one-line change to this method's ADR-0010 audit row (`p.d.type` → `p.singularType`). That change is a provable no-op — see the dev report on #8858 — and it does **not** touch this class, because `p.singularType` is folded through the same manifest map that misses these four. If #8858 is re-scoped toward the producer rather than closed as not-a-defect, THIS issue is the shape that re-scope should take: merge them rather than running both.\n\nRelated: #7894 (the URL door, one layer above), #8868 (`diffMetaItem` — same manifest-absent class, different verb), #8858 (the measurement that surfaced this).\n"
+}

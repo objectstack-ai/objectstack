@@ -1,0 +1,35 @@
+{
+  "number": 9117,
+  "kind": "issue",
+  "title": "scaffold-e2e's docker leg only exercises the --skip-install shape, so the pinned Dockerfile users actually get has no e2e coverage",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-16T11:14:22Z",
+  "updated_at": "2026-08-16T14:56:59Z",
+  "closed_at": "2026-08-16T14:56:59Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9117",
+  "body": "Observation found while implementing #9017 (PR #9115). Not a defect in that PR — recording it because the gap is invisible from either file alone.\n\n## What is covered, and what is not\n\n`.github/workflows/scaffold-e2e.yml` scaffolds with `--skip-install`:\n\n```\nnode \"$GITHUB_WORKSPACE/packages/create-objectstack/bin/create-objectstack.js\" e2e-app --skip-install --skip-skills\n```\n\nand the workflow then runs `npm install` itself, so the generated project is installed but the **scaffolder's own** post-install step never runs.\n\nPR #9115 makes the scaffolder pin the Dockerfile's runtime image tag to the `@objectstack/cli` version the project resolved — and that pin happens **after** the scaffolder's install, which `--skip-install` suppresses. So:\n\n- the shape the e2e builds and boots is the **unpinned** one (`FROM ghcr.io/objectstack-ai/objectstack:latest`);\n- the shape a real `npx create-objectstack` user ships is the **pinned** one;\n- the docker leg's own comment says it \"exercises the exact Docker path a real `npm create objectstack` user ships\", which is now true only of the `--skip-install` variant.\n\nThe pinned shape is covered by `packages/create-objectstack/src/runtime-image.test.ts`, which asserts on scaffolded output, so this is a missing **end-to-end** leg rather than an untested behaviour.\n\n## Why it is not simply fixed in that PR\n\nLetting the e2e scaffold without `--skip-install` is not a one-line swap: the workflow's install step carries the unpublished-version fallback (it rewrites the app's `@objectstack/*` ranges to `latest` when the repo version is not yet on the registry, then re-stamps `engines.protocol`), and moving the install into the scaffolder would move that fallback too. That is a deliberate design worth its own card rather than a rider.\n\n## Possible shapes\n\n- Scaffold a second, small project **without** `--skip-install` purely to assert the emitted Dockerfile is pinned — cheap, no docker build needed.\n- Or teach the existing leg to run the scaffolder's install path, and relocate the unpublished-version fallback accordingly.\n\nNeither is obviously right; the first is much cheaper and covers the actual regression risk (the pin silently not happening).\n\nRelated: #9017, PR #9115."
+}

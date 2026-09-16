@@ -1,0 +1,36 @@
+{
+  "number": 9058,
+  "kind": "issue",
+  "title": "[finding] ADR-0076 OQ#9's D11 worklist records outcomes for items (1)(2)(3) but never for (4) — the env-resolution seam landed and the ADR does not say so",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:devx",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-16T07:46:50Z",
+  "updated_at": "2026-08-16T14:54:14Z",
+  "closed_at": "2026-08-16T14:54:14Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9058",
+  "body": "Filed unassigned by the dev seat on #9024 (session `session_011RB4waLuNbdruCo6X9oobm`) while re-deriving figures for the ADR-0076 D11 revision — PR #9057. Out of that card's scope, so recorded here rather than ridden along. Searched open and closed issues by keyword and by ADR/file path first; the near neighbour is #2462 (the OQ#9 audit itself, closed), no duplicate.\n\n## The observation\n\n`docs/adr/0076-objectql-core-tiering.md` Open Question 9 sets a four-item D11 worklist:\n\n> D11 worklist: (1) kill or delegate the dead callable branches; (2) give packages + discovery a single owner; (3) extract per-domain handlers; (4) unify env-resolution on the injected `KernelResolver` seam.\n\nThree of the four have their outcome recorded under that entry — **(2) shipped**, **(1) re-scoped**, then **(1)+(3) VERDICT (2026-07-27, #2462 series)** absorbing (1) into (3). **Item (4) is never mentioned again**, in OQ#9 or anywhere else in the ADR.\n\n## Measured against `origin/main` @ `dc280d326`\n\nItem (4) looks landed, which is what makes the silence worth recording rather than shrugging at:\n\n- `packages/runtime/src/http-dispatcher.ts:145` declares `interface KernelResolver`, and the dispatcher holds one (`private kernelResolver?: KernelResolver`, resolved from `options.kernelResolver` or the `kernel-resolver` service).\n- The constructor's old environment-registry parameter is explicitly retired in favour of it:\n\n```\n * @param _envRegistryIgnored — RETIRED (ADR-0006 Phase 5). Environment\n * resolution moved behind the host's {@link KernelResolver}; the\n * positional parameter is kept so existing 3-arg callers keep compiling,\n * but its value is ignored.\n```\n\n- `packages/runtime/src/domain-handler-registry.ts` reads the same seam for the direct-caller kernel swap.\n\nSo the seam exists, env resolution went behind it, and it is attributed to **ADR-0006 Phase 5** in the source — while ADR-0076, which asked for it as D11 worklist item (4), records nothing.\n\n## Why this is worth a card rather than nothing\n\nAn unrecorded worklist item reads identically to an unmet one. This is the same defect class #9024 was filed for one level down: D11's rest-server half was a decision that existed only in an issue thread, so the ADR kept reading as an open obligation and the next calibration round would have re-litigated it. Item (4) is the cheaper version — the work landed, and the only artefact that asked for it does not know.\n\n## Not asserted here\n\n⛔ Whether item (4) is *fully* discharged by the ADR-0006 Phase 5 seam, or only partly. I measured that the seam exists and owns env resolution in the dispatcher; I did not audit every env-resolution call site against what OQ#9 meant by \"unify\". Whoever takes this should settle that before writing a status line — an ADR status line asserting more than was measured is the failure mode, not the fix.\n\n⛔ Not a defect in behaviour: nothing here is broken at runtime. Observation class, hence `finding` and no `pm:queue`.\n\nRelated: #2462 (the OQ#9 audit that produced the worklist) · #9024 / PR #9057 (the D11 revision, where this was noticed) · ADR-0006 Phase 5 (the seam's recorded owner in source)."
+}

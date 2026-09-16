@@ -1,0 +1,30 @@
+{
+  "number": 8169,
+  "kind": "issue",
+  "title": "`_diagnostics.valid=true` and `editable`/`deletable` are asserted for metadata rows no consumer reads — the envelope has no \"in effect\" axis",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-12T18:35:37Z",
+  "updated_at": "2026-08-17T12:01:04Z",
+  "closed_at": "2026-08-17T12:01:04Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8169",
+  "body": "Restart-when: closed objectstack-ai/objectstack#7893 — re-read on the merged ref; if inert-but-valid rows remain representable, promote via a maintainer decision card covering this + #7656 + #8154 together\n\nSplit from #7893. **Filed by the PM on behalf of the dev agent**, which measured it but could not file it: GitHub REST returned 403 on every call from its container (git transport works, the API does not). Full text preserved verbatim from its handover; the wording below is the dev's.\n\nUnassigned, `finding` — grading belongs to the findings-triage round, not to the filer.\n\n## The observation\n\n`GET /api/v1/meta/field/<object>.<name>` on a runtime-created field returns:\n\n```json\n{\"type\":\"field\",\"name\":\"showcase_task.zz_probe\",\n \"item\":{\"name\":\"zz_probe\",\"label\":\"Probe\",\"type\":\"text\",\n         \"_diagnostics\":{\"valid\":true}},\n \"lock\":\"none\",\"editable\":true,\"deletable\":true}\n```\n\nfor a row that reaches no object's `fields`, and therefore no ObjectQL query, no physical column, and no `GET /meta/object/:name`.\n\n## ⛔ `valid` is correctly computed and should NOT simply be flipped\n\n`computeMetadataDiagnostics` (`packages/metadata-protocol/src/metadata-diagnostics.ts`) resolves the type's Zod schema and `.safeParse()`s the document, so `valid: true` asserts *this document is well-formed* — which is true.\n\nThe same function **deliberately** backs both the save path's 422 and the read path's diagnostics, so that — per its own doc comment — *\"a document's verdict cannot depend on whether it was being saved or being opened.\"* **That property is worth preserving**, and it is why the fix here is not \"make it say false\".\n\n## The actual defect\n\n**Well-formed is the only axis the envelope has, and consumers read it as in-effect.**\n\n`MetadataValidationResult` already models a third state on a *different* axis: `computeMetadataDiagnostics` returns `undefined` when a type has no registered schema, and its contract requires callers to treat that as *\"no opinion — not as 'valid'\"*. **There is no equivalent state for \"well-formed but consumed by nothing.\"**\n\n`lock` / `editable` / `deletable` compound it: they are computed elsewhere (not traced in this investigation) and positively advertise the row as a live, editable, deletable item.\n\n## Ask\n\nWhichever way #7893 is decided, decide **separately** what a read-time diagnostic owes a caller about *effectivity*. If a type can persist rows that no read path consumes, the envelope should either distinguish \"well-formed\" from \"in effect\", or state plainly that it does not model effectivity at all.\n\nThis is the same false-compliance shape ADR-0049 forbids, one layer down from #7893 — **and it survives #7893 either way**: under the implement-write-through option it disappears for `field` but remains for any future fragment type; under the retire-the-channel option the rows already written stay in `sys_metadata`, still reporting `valid: true`.\n\n## Reproduction\n\nRebuild the four-arm probe from `packages/runtime/src/meta-field-overlay-lock.test.ts`'s harness — `PUT /field/showcase_task.zz_probe`, then `GET` the same path.\n\n⚠️ **Read the body at `body.data.item`.** The dev's first run asserted against `body.item`, which returns `[]`, and a defect assertion passed against an empty read. Any arm here needs an anti-vacuity control.\n\n## Dedup\n\nSearched open issues for `_diagnostics` and for `valid`/effectivity wording before filing; the only hit is **#7656**, which is a **distinct** defect in the same envelope and worth reading alongside this one:\n\n- **#7656** — `_diagnostics.valid:**false**` when it should be true (the read injects `_draft`, then validates it).\n- **this card** — `_diagnostics.valid:**true**` when nothing consumes the row.\n\nBoth say the envelope's verdict is computed over the wrong subject; they point in opposite directions and have different fixes. ⚠️ Whoever takes either should read the other first — a change to what `computeMetadataDiagnostics` is fed could easily fix one and deepen the other.\n\n## Related\n\n#7893 (parent) · #7656 (same envelope, opposite direction) · #7743 · ADR-0049\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

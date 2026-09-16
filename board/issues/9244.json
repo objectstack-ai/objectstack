@@ -1,0 +1,35 @@
+{
+  "number": 9244,
+  "kind": "issue",
+  "title": "[finding] `check:error-status-conformance` excludes ledger codes on the premise that no doc page publishes their status — `error-catalog.mdx` now does, and that status is reconciled by nothing",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-17T05:55:05Z",
+  "updated_at": "2026-08-17T08:58:53Z",
+  "closed_at": "2026-08-17T08:58:53Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9244",
+  "body": "Filed unassigned by the dev seat implementing #9193 (session `session_01Y26DJEHSBhhAQ6wwfsHNza`). Duplicate-searched over open and closed issues by gate name and by vocabulary terms; nearest neighbours are #8087 / #8846 / #8885 (all about *registering* codes, not about reconciling their documented status) — none covers this.\n\n## What was measured\n\n`scripts/check-error-status-conformance.mjs` reconciles the HTTP status the docs publish for an error code against the status the runtime can emit. It bounds its own vocabulary, in its header, verbatim:\n\n> Reconciled vocabulary: `StandardErrorCode` members ONLY. Those are the codes both pages publish a status for. Registered ledger codes (`ERROR_CODE_LEDGER`) are derived and counted, but **neither page publishes their status, so there is nothing to reconcile them against.**\n\nA green run states the same bound as a number:\n\n```\nscope: 53 StandardErrorCode members reconciled; ... 42 registered ledger code(s) derived but NOT reconciled\n       (neither doc page publishes their status).\n```\n\n**The PR for #9193 falsifies that premise.** It adds an `INVALID_REQUEST` entry to `content/docs/api/error-catalog.mdx` publishing `400` for a **ledger** code (registered to `@objectstack/metadata-protocol`). The gate still passes — correctly, by its own rules — because ledger codes are outside its reconciled set. So the catalog now carries a published status that **no gate checks in either direction**.\n\n## Why it is worth recording\n\nThis is the declared-vs-enforced shape the repo keeps closing: a status statement on a public error contract, with no tripwire. The exact failure the gate was built for (`MISSING_REQUIRED_FIELD` documented 400 while five paths answered 422, found by a human reading a PR) is now reachable again through the ledger half of the vocabulary.\n\nThe premise was **true when written** — it is this PR that changes it. Filing rather than fixing, per #9193's scope discipline.\n\n## Options, not a recommendation\n\n- Extend the reconciler to ledger codes **that a doc page actually publishes a status for** — keeps the derivation honest and the population small; the deriver already finds producers for ledger codes (it counts 42).\n- Or leave the bound and make it self-checking: fail if a doc page publishes a status for a code outside the reconciled set, so the stated scope cannot silently become false again.\n\nThe second is the smaller change and closes the *class*; the first closes the instance.\n\n## Not claimed\n\n- ⛔ **No defect in the gate as built.** Its bound is stated, printed on every run, and was accurate until now. This is drift *into* its blind spot, not a bug in it.\n- ⛔ **Not measured**: whether any other doc page already publishes a status for a ledger code. `ui/forms.mdx` and `automation/webhooks.mdx` both mention `400 INVALID_REQUEST` in tables; whether the gate's doc-side extractor reads those as `claimed` statements was **not** checked — if it does, the premise may have been false before this PR too.\n\nBacklinks: #9193 (the PR that publishes the first such status) · #8087 / #8846 (the ledger-registration work that built the two-tier vocabulary)."
+}

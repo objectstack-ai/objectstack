@@ -1,0 +1,36 @@
+{
+  "number": 18476,
+  "kind": "pull_request",
+  "title": "fix(pm): drop the re-seat prescription — check-harness-current and SKILL.md:92 become a seat-post reading",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-16T14:46:03Z",
+  "updated_at": "2026-09-16T15:52:48Z",
+  "closed_at": "2026-09-16T15:52:46Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-09-16T15:52:46Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/18476",
+  "body": "Fixes #18468\n\nMaintainer ruling D on the card, verbatim: 「D:整个去掉「重开」处方」\n\n## What changed\n\n- `.claude/skills/pm-dispatch/SKILL.md:92` re-keyed in place: 812/812 lines, the edited line is 119 bytes, `:91` is byte-identical to base. The prescription 「否 ⇒ 收班、换新会话再派,⛔ 不推进共享检出」 is gone; the line now reads 「否 ⇒ 记座位贴,自然收班时换会话,⛔ 不中断批次;读数走 `scripts/pm/check-harness-current.mjs`。」 — the reading stays a reading and the pointer stays.\n- No twin in `references/core-rules.md`. `grep -n -e check-harness-current -e 收班 -e 换新会话 -e 不推进共享检出 -e harness .claude/skills/pm-dispatch/references/core-rules.md` hits only :19, :20 and :76 — the shift-handover readings, none of them a twin of :92. Repo-wide, the prescription strings lived only in SKILL.md:92 and this script (its header, verdict and self-test).\n- `scripts/pm/check-harness-current.mjs`:\n  - (a) STALE verdict re-keyed from prescription to report: `…: note it on the seat post and pick it up at the seat's next natural shift boundary; ⛔ never interrupt a batch for it`. Exit codes 0/1/2 unchanged; the per-path `-- STALE` / `-- UNDECIDED` line-terminal markers and their positions unchanged (the file's own provenance contract); the CURRENT and UNDECIDED strings byte-identical.\n  - (b) Header docblock: the load-moment claim is narrowed to what was measured, `.claude/settings.json` (the deny-roster measurement); the load moment of `.claude/hooks/*` and `.claude/agents/*.md` is stated as UNMEASURED and the tool asserts neither; the sentence naming re-seating as the remedy is gone.\n  - (c) `--self-test`: the byte-for-byte STALE summary expectation is re-keyed to the new wording; one case is added pinning that the summary names the seat post and the shift boundary and names neither a re-seat nor advancing the shared checkout; `SELF_TEST_CASE_FLOOR` rises 14 → 15 so the added case cannot silently stop running. The ✗-line regex is unchanged because the ✗ line is unchanged. No assertion deleted or weakened.\n- Untouched, by ruling: the `settings.json` deny roster, `.claude/hooks/*`, `.claude/agents/*.md`, every other SKILL.md line.\n\n## Readings\n\nSelf-test, three exit codes (the PM's mechanism hypothesis, confirmed):\n\n- baseline at `8fe5cb8e` (origin/main at branch time): exit 0, 14 cases\n- after (a)+(b), before (c): exit 1 — exactly one failure, `and its summary line is the STALE one, byte for byte`\n- after (c): exit 0, 15 cases\n\nAblation, one-shot from the committed state (taken at `c67c0df1`; the two files are byte-identical at the rebased head `6f008921`): the verdict line was mutated back to the old prescription (on-disk grep: injected clause 1 hit; the new wording left in the self-test expectation only, 1 hit) → `--self-test` exit 1 with exactly the two STALE pins failing (`byte for byte` and `a report, not a prescription`); restore via `git checkout HEAD -- PATH` → `git hash-object` equals the HEAD blob `616f53f6…`, `git diff HEAD` empty, `git status --porcelain` empty; control run on the restored tree exit 0, 15/15. Trap-guarded, absolute path.\n\nGates: `node scripts/pm/dispatch-gates.mjs --commands` with no paths (changeset from merge-base) derives 40 families; all 40 were run with each exit code redirected to a file before any pipe, and `--ran` with per-command exit codes reconciles `40 derived, 40 run, 0 NOT-MEASURED, 0 UNRUN` (a DERIVED zero). One first-run reading was not a measurement: `pnpm --filter @objectstack/lint run check:doc-formula-expressions` exited 3 `PREREQUISITE NOT MET` (unbuilt `@objectstack/formula` and `@objectstack/lint`); those two were built under `scripts/pm/os-verify-lock.sh` (VERDICT command-exit 0, held 194s) and the gate rerun: exit 0. `pnpm check:skill-frame-freshness` was also run, exit 0 (not derived; the PM asked for it).\n\nThe 40-run was taken at `c67c0df1`; `origin/main` then moved by one comment-only commit (`0fe38a92`, `scripts/check-bash32-floor.mjs`, a derived family), so the branch was rebased onto it (no PR existed; the branch was unshared), the derivation re-run at `6f008921` (identical 40 families, no stale-tree warning) and these families rerun at `6f008921`, all exit 0: `check:bash32-floor`, `check:pm-skill-ratchet` (SKILL.md 812 lines, ceiling 812, headroom 0), `check:pm-skill-id-lint`, `check:skill-frame-sync`, `check:nul-bytes`, and the self-test.\n\nChangeset: `skip-changeset` — `.claude/**` and `scripts/pm/**` publish nothing; no released package's `files[]` content moves.\n\nWrites: REST only — `git push` ×2 (initial, then the lease-pinned rebase push), `POST /pulls` ×1, `POST /issues/N/labels` ×1 (`skip-changeset`), `POST /issues/18468/comments` ×1 (the os-dev-report). MCP GitHub write tools: 0.\n\n## Acceptance notes\n\n- noted, not filed: the self-test keeps one total floor (`SELF_TEST_CASE_FLOOR`) rather than the per-battery roster AGENTS.md's self-test section prescribes; the floor was raised to cover the added case, and the roster shape is not this card's surface. 承接者:无。\n- `needs:contract-review` is the seat's to hang or strip; this PR neither hangs nor strips it.\n\n## 维护者速读(草稿)\n\n**改了什么**:把「共享检出上的 harness 文件落后于 origin/main」这条读数,从「必须收班、换新会话再派」的处方,改成「记在座位贴、到自然收班时再换会话、不打断当前批次」的报告。落在三处:SKILL.md 第 92 行原地改(812 行不变),`check-harness-current` 脚本的判决文案与头部说明,以及它的自测期望。退出码不变,调用它的席位无感。\n\n**为什么改**:裁决 D,原文「D:整个去掉「重开」处方」。今天同一个钩子返工三次,每次都让在岗的七个 PM 会话同时重开;而重开所防的缺口(旧 deny 清单少三个 MCP 写工具)整班一次都没被踩到,并且 ACCEPT 核验仍旧拒收任何点名 MCP 写工具的报告。\n\n**风险与代价(含回滚)**:接受的残余是维护者原话:容器早于 deny 清单变更的席位,到下次自然收班前仍持有那几个被拒的工具;若席位违规,可用绑定账号改一次 PR 状态——可回退,受管 PR 仍由队列规则集与你的点击把守。行数代价为零(812/812)。回滚 = revert 这两个 commit,脚本自测随之回到旧文案,无数据迁移、无配置变更。\n\n**席位意见**:\n\n**你要做的**:本 PR 触受管面(`.claude/**`),保持 draft,等你一句批准后由归属席位落地;随后 PR #18447 按裁决 D 在同一批准窗口跟进(先规则、后钩子),一次收班顶两次。\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01Wj1HUjzyeiBQ8atRf1ZhaL)_"
+}

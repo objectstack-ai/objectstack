@@ -1,0 +1,36 @@
+{
+  "number": 9050,
+  "kind": "issue",
+  "title": "Docs spell the internal form-action mount `/console/forms/:name`, but the same page's own example targets use `/_console/`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:devx",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-16T07:32:10Z",
+  "updated_at": "2026-08-16T11:09:47Z",
+  "closed_at": "2026-08-16T11:09:47Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9050",
+  "body": "Flagged by the dev implementing #7245's cleanup half, recorded per that card's instruction rather than fixed there (\"fixing a subset would make it worse\").\n\n## Measured (on `origin/main`, current worktree)\n\n```\n$ grep -rn \"console/forms/\" content/docs skills | grep -v \"_console\" | wc -l\n14\n```\n\n14 occurrences across `content/docs/ui/forms.mdx`, `content/docs/protocol/objectui/actions.mdx`, and `skills/objectstack-ui/SKILL.md` spell the console-internal form-action mount as `/console/forms/:name` (no underscore).\n\nMeanwhile the **same file**, `content/docs/protocol/objectui/actions.mdx`, uses the underscore-prefixed form in its own worked examples:\n\n```\ncontent/docs/protocol/objectui/actions.mdx:87:  target: /_console/dashboards/sales_overview\ncontent/docs/protocol/objectui/actions.mdx:92:  target: '/api/v1/auth/sign-in/social?provider=${param.provider}&callbackURL=${ctx.origin}/_console/apps/account/sys_account'\n```\n\nSo `/_console/…` is the spelling this repo's own docs use elsewhere for a live console path, while the form-action mount is consistently documented without the underscore — a 14-vs-2 split inside one page. (Prior triage on #7245 measured the *live* URL directly in a browser as `/_console/forms/...`, which is consistent with the `/_console/` examples above, not with the 14 unprefixed spellings.)\n\n## Why worth a card rather than a quick fix in-place\n\nFixing a subset (e.g. the 2 lines touched by whatever card is nearby) would leave the page internally *more* inconsistent, not less — a reader hitting the unfixed instances would reasonably conclude the fixed ones were the typo. This needs one pass across all matching spellings, plus a decision on whether the canonical documented form should be `/console/…` (with the docs then explaining the underscore is server/proxy-internal) or `/_console/…` (matching what a browser actually navigates to) — a decision distinct from the mechanical fix.\n\n## Suggested fix\n\nPick the canonical spelling (recommend `/_console/…`, since that is what a live browser session actually resolves to and what the page's own dashboard/auth examples already use), then sweep all 14 occurrences plus verify no other doc page carries the other spelling for this same route.\n\nNo `domain:*` label applied — routing is triage's territory.\n\nRefs: #7245 (where this was measured and deferred)."
+}

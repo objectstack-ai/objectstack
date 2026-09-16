@@ -1,0 +1,35 @@
+{
+  "number": 8913,
+  "kind": "issue",
+  "title": "docs(deployment): rewrite the section index around the two lifecycles and re-order `meta.json` — lands last",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-15T16:26:43Z",
+  "updated_at": "2026-08-16T05:12:30Z",
+  "closed_at": "2026-08-16T05:12:30Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8913",
+  "body": "Blocked-by: #8904\nBlocked-by: #8909\nBlocked-by: #8910\nBlocked-by: #8911\n\nCard 05 — the keystone of the deployment restructure, and **deliberately the last to land**. Maintainer ruling, 2026-08-15: restructure the section around the two lifecycles.\n\n## ⛔ Why this one waits\n\nThe index is the only page whose correctness depends on **every other page already being where it claims**. Writing it first creates a window where the section's front door describes a structure the repo has not reached — which is precisely the defect class that produced #8882 (the v17 release page was compiled *for* a state that had not landed, and shipped saying the release had not happened). Do not repeat it one directory over.\n\nAll four blockers must be **merged**, not merely approved, before this starts. Re-read every page on the merged ref: the four cards ahead of this one move content between pages, and this card's job is to describe where it ended up.\n\n## The defect\n\n`content/docs/deployment/index.mdx` (183 lines) is titled **\"Deployment Modes\"** and forks on *venue*:\n\n| Mode | Runs from this repo | Environment selection | Typical use |\n|---|---|---|---|\n| Local example | Yes | one active `OS_ENVIRONMENT_ID` | framework dev |\n| Standalone app | Yes | one compiled artifact | self-hosted backend |\n| Cloud-managed environment | runtime seams only | Cloud control plane | SaaS |\n\nThat is a *where do you host it* fork. A reader arrives with a **lifecycle** in hand instead:\n\n- **Axis A — platform runtime.** \"I operate ObjectStack.\" Ships as a Docker image, versioned by our release train, upgraded on our cadence.\n- **Axis B — metadata app.** \"I build an app that runs on it.\" Ships as a compiled artifact, versioned in your catalog, upgraded on yours.\n\nThe two are genuinely independent — a deployment can move from platform 16 to 17 without touching its app, and publish twelve app versions without moving the platform. Venue (Docker / Compose / Kubernetes) is a detail *inside* Axis A, not a peer of it.\n\n## Scope\n\n- Rewrite `content/docs/deployment/index.mdx` as the lifecycle fork. The existing local/standalone/cloud content is not all wrong — local-vs-cloud environment selection is real and still needs saying — but it belongs **under** an axis, not as the top-level split.\n- Re-order `content/docs/deployment/meta.json` to match: Axis A pages, Axis B pages, then shared reference (`cli`, `environment-variables`, `troubleshooting`).\n- **Point Axis B readers at the new `content/docs/upgrading/` section** (#8909), which lives in the **Build** group by maintainer ruling. This is the one cross-group link that makes the split navigable — an app developer reading the deployment index must be able to reach the upgrade path from here.\n\nPage assignment as proposed (verify each against the merged tree; disagree in the PR if a page has moved):\n\n- **Axis A** — `self-hosting`, `production-readiness`, `backup-restore`, `tenancy-modes`, `single-project-mode`\n- **Axis B** — `publish-and-preview`, `validating-metadata`\n- **Reference** — `cli`, `environment-variables`, `troubleshooting`\n\n`cli.mdx` is 1398 lines of which `## Commands` spans 68–1283 — **87% is a command reference**. It belongs to neither axis. Cross-link it from both; **do not split it**, and do not let it become an Axis A page by default.\n\n`single-project-mode` (111 lines) is a candidate to fold into `self-hosting` later. **Not this card** — flag it in the PR if the merged state makes the case stronger, and it becomes its own follow-up.\n\nDocs-only, `skip-changeset`."
+}

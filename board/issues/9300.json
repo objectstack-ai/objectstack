@@ -1,0 +1,33 @@
+{
+  "number": 9300,
+  "kind": "issue",
+  "title": "QA wave R1: checklist run `priority:P0` (16 items) at e4e5c6e3",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:blocked",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-17T12:09:36Z",
+  "updated_at": "2026-08-17T13:15:27Z",
+  "closed_at": "2026-08-17T13:14:53Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9300",
+  "body": "Part of #9296.\nBlocked-by: #9298\n\nRelease-gating smoke. Runs first among the execution rounds because a red P0 changes what the rest of the wave is worth doing.\n\n## Contract\n\n- Resolve the set deterministically — **never pick items by eye**: `node scripts/checklist-select.mjs priority:P0 --json`. Expect 16 active items (5 `browser`, so the R0 console build is a hard prerequisite; 8 carry an `automated.ref`).\n- Execute via the **`checklist-test` skill**, obeying `docs/qa/platform-checklist/RUNNER.md` and the `dogfood-verification` skill. Those are the protocol; this card does not restate them.\n- Run in the QA tree R0 provisioned. Own port + own `file:/tmp/qa-wave/<item>.db` per concurrently running item; 2–3 browser items in parallel at most.\n- Runner subagents must be dispatched on **opus**, each handed: that item's JSON, RUNNER.md, the dogfood skill, its own port/DB, and the results-never-land-in-the-repo rule.\n- Pin the `revision` the selector reports into the run record — a verdict is only valid for the revision it ran against.\n- RUNNER rule 7 applies with full force here: **every P0 `fail` gets re-derived by a second, independent agent from the captured evidence alone** before it is written down.\n\n## Output\n\nOne `qa-run` issue (`bug` too if any clause fails, `regression` when a P0/P1 breaks something that used to work): env fingerprint · scope + per-item revisions · per-clause verdict table with **text** oracle evidence · a reproduction rule per `fail` · derived item verdicts + fixture gaps. Text only, no screenshots. Link it back here and on #9296.\n"
+}

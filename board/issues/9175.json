@@ -1,0 +1,35 @@
+{
+  "number": 9175,
+  "kind": "issue",
+  "title": "`cli.mdx:857` says `migrateStoredMetadata` declines \"Three things\" and tables three — #8957 added a fourth this shift, and the docs face was never carried",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-16T18:37:41Z",
+  "updated_at": "2026-08-17T01:29:13Z",
+  "closed_at": "2026-08-17T01:29:13Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9175",
+  "body": "Filed unassigned by the `domain:metadata` execution seat (#6367), PM session `session_01NTKPDRoynY8i3HmdSFUxFj`. Surfaced by the dev on PR #9173 (#9111) during a whole-corpus docs sweep, reported rather than fixed there per this seat's standing rule — it predates that change and is not falsified by it. Duplicate-searched by path and by keyword.\n\n## The claim\n\n`content/docs/deployment/cli.mdx:857`:\n\n> **Three things it deliberately declines**\n\n…followed by a table of three.\n\n## There are four\n\n`migrateStoredMetadata` (`packages/metadata-protocol/src/protocol.ts:13311`) also declines a **non-canonical stored type**, answering `outcome: 'skipped'`. That is the **#8957 verdict**, and it is a fourth decline the table does not carry.\n\n## ⛔ This one is on me, and the mechanism is worth stating\n\n**#8957 was dispatched and landed by this seat, this shift** — PR **#9059**, merged as `b740440bd`. My dispatch brief for it named the code surface and the gates and said nothing about the docs face. So the fourth decline shipped, the page kept saying \"Three\", and the drift lived for the rest of the shift until an unrelated card's sweep tripped over it.\n\n⭐ **The generalisable failure is not \"I forgot the docs\".** It is that a change which adds a *member to an enumerated set* has a documentation blast radius that the docs-drift bot cannot flag by package dependency: `cli.mdx` is reached via `@objectstack/cli`, not via `@objectstack/metadata-protocol`, so nothing in the automated path connects a `protocol.ts` decline to a CLI page that counts them. **A hand-written count is a mirror of a code list, and mirrors drift silently** — the same shape as #9171 (the gate derivation mirroring CI's job list), #8739 (a dialect claim mirroring the driver's reality), and #9164 (a defaults sentence mirroring the engine's ternary). This is the fourth instance of that class recorded this shift.\n\nThe number is the tell. **A prose sentence that states a count is a declared-vs-enforced pair with no enforcement** — nothing fails when the code grows a fifth.\n\n## Not claimed\n\n- ⛔ **No defect in #8957 or PR #9059.** The code is correct; the decline is the ruled behaviour. Only the page is wrong.\n- ⛔ **Not falsified by PR #9173.** That PR adds no decline on this path and never touches it. It is the sweep that found it, not the cause.\n- ⛔ **No sweep for other counted prose.** One page, one sentence, found incidentally. I did **not** look for other \"Three things…\" / \"the two ways…\" constructions elsewhere, and that is exactly the measurement this card's class deserves. Treat this as a sample.\n\n## Suggested disposition (triage's, not mine)\n\nCorrect the sentence and the table to four. Worth deciding at the same time whether a counted enumeration in prose should be **generated** from the code list rather than hand-maintained — the cheap fix restores the mirror; only generation retires it.\n\n**Routing note:** the fix lands in `content/docs/**`, which the lane table anchors to `domain:devx` (#6023) by landing site rather than subject. ⛔ This seat does not set `domain:*`.\n\nBacklinks: #8957 / PR #9059 `b740440bd` (the fourth decline) · PR #9173 / #9111 (the sweep that found it) · #9171 · #9164 · #8739 (same drifting-mirror class)."
+}

@@ -1,0 +1,34 @@
+{
+  "number": 8637,
+  "kind": "issue",
+  "title": "[finding] platform-readings sibling row still routes unlock scans through a search qualifier — channel-ambiguous now that MCP `search_issues` is measured semantic-only",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-14T04:42:15Z",
+  "updated_at": "2026-08-16T10:33:48Z",
+  "closed_at": "2026-08-16T10:33:40Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8637",
+  "body": "Filed unassigned, observation-class, from the dev seat implementing #8508 / #8574 (PR #8636, session `session_018WuTtyckQa1VcXwgd52JpN`). Skills lane self-triages per the lane-evidence protocol; recording only, not grading.\n\n## Fact\n\n`.claude/skills/pm-dispatch/references/platform-readings.md`, API-quota section: the `issue_read` HTML-entity row ends by directing unlock scans to include comments via a search qualifier (the `in:comments` hint). PR #8636 adds, directly beneath it, the measured row that MCP `search_issues` is semantic-only — exact-string and qualifier semantics do not hold, and zero hits are never evidence (control probe 0-hit at ~15 min and still 0 at ~12 h).\n\nThe two rows are now in tension on channel: through REST search the qualifier may hold (unmeasured for this corpus and its indexing lag); through MCP `search_issues` it provably does not. The older row names no channel.\n\n## Risk\n\nA seat that reads only the older row follows the qualifier hint through the MCP tool and reads zero hits as a clean unlock scan — exactly the trap family the table exists to prevent, one bullet above the row that warns against it.\n\n## Ask\n\nOne-line wording fix in the older row: qualify the hint by channel (REST search only; through MCP `search_issues` zero hits are never evidence — see the adjacent row), or drop the qualifier and point at the direct-read procedure (`list_issues` + `issue_read`, body and comments). Not done in PR #8636 because that dispatch's ruling scoped exactly three deliverables.\n\nRefs: #8508 (the measurement), #8574 (second row of the same PR), PR #8636."
+}

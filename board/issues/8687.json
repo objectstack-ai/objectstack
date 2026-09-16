@@ -1,0 +1,36 @@
+{
+  "number": 8687,
+  "kind": "issue",
+  "title": "An unknown top-level stack key is named but still not rejected — and the diagnostic is not a warning, so `objectstack validate --strict` cannot catch it either (17.0.0 GA)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:spec",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-14T13:31:51Z",
+  "updated_at": "2026-08-17T00:54:50Z",
+  "closed_at": "2026-08-17T00:54:50Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8687",
+  "body": "Blocked-by: #4001\n\nPart of objectstack-ai/hotcrm#1141 — the residual half after the naming diagnostic shipped. Measured on `@objectstack/spec` **17.0.0 GA**.\n\nSearched first: #5005 (`composeStacks` drops non-array top-level keys) and #6242 (six enumerations of the stack-collection set) are both closed and neither covers this.\n\n## What is already fixed\n\n`defineStack` now names every dropped top-level key, with a did-you-mean on a near miss. Confirmed at the source:\n\n```\ndefineStack: stack.objectz: 'objectz' is not a declared stack key, so its value is\n  dropped at load — did you mean 'objects'?\ndefineStack: stack.approvalProcesses: 'approvalProcesses' is not a declared stack key,\n  so its value is dropped at load.\n```\n\nThat closes the \"silently\" half of the original report.\n\n## What is still live\n\n**1. The schema is not strict at the top level.** `ObjectStackDefinitionSchema` accepts 43 top-level keys; an unknown one parses successfully and is dropped:\n\n```\n  approvalProcesses     parse succeeded: true   key kept in data: false\n  objectz               parse succeeded: true   key kept in data: false\n  flow (singular)       parse succeeded: true   key kept in data: false\n  totallyBogusTopLevelKey  parse succeeded: true   key kept in data: false\n\npositive control (valid stack, no stray key): parse succeeded = true\n```\n\n`defineStack` does not throw on any of them.\n\n**2. And the diagnostic is not part of `validate`'s diagnostic accounting**, which is the part that has not been recorded before. Two runs against copies of one real app config, identical except for three injected bogus top-level keys:\n\n| run | exit | result |\n|---|---|---|\n| baseline | **0** | `✓ Validation passed` |\n| + 3 bogus top-level keys | **0** | `✓ Validation passed` |\n| baseline `--strict` | 1 | `✗ Strict mode: warnings treated as errors` |\n| + bogus keys `--strict` | 1 | `✗ Strict mode: warnings treated as errors` |\n\nThe `--strict` failures are **not** caused by the bogus keys — the baseline fails `--strict` identically on that app's pre-existing author-time warnings. Controlling for it shows the real result:\n\n```\nwarnings in baseline run : 88\nwarnings in bogus-key run: 88\ndiff of the two warning sets -> IDENTICAL warning sets\n```\n\nThree dropped keys add **zero** warnings. The `defineStack:` lines are printed at load, outside the warning tally, so `--strict` (\"treat warnings as errors\") cannot promote them. **There is no flag today that turns a dropped top-level key into a non-zero exit.**\n\n## Why this is worth closing rather than filing under \"already warned\"\n\nThe failure mode is a typo or a stale key, and the symptom is a metadata family that is simply **absent at runtime**, debugged from the far end:\n\n- `approvalProcesses` is the name a reader would try; the standalone `approvals` field was removed in 7.4, so an app still carrying it has been shipping an artifact missing that block ever since.\n- Singular/plural is one character — `flow` for `flows`, `view` for `views`, `report` for `reports`. Each drops an entire family out of the build with a green exit code.\n\nAn AI author gets no corrective signal at all here, because the tool it would learn from reports success and exits 0. That is the \"make AI-written metadata hard to get wrong\" axis running in the direction that fails quietly, and a printed line that no gate can act on does not change the CI outcome that an author's pipeline actually reads.\n\n## Two shapes, ascending cost\n\n1. **Count the drop as a warning** so `--strict` (and therefore CI) fails on it. Cheapest, non-breaking for default runs, and it makes the diagnostic that already exists actionable. This is the smaller half and would close the practical gap on its own.\n2. **`.strict()` at the top level**, with the near-miss resolver already written, matching how the spec treats every other authoring surface. Breaking for any stack carrying a stray key — which is exactly the population that is currently silently broken.\n\nRecording the measurement; the route is a maintainer call.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01XAK3brMLjd4ykF4QAhFnuo)_"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 7245,
+  "kind": "issue",
+  "title": "A `type: 'form'` action leaves the console shell for a bare `/forms/:name` page and ends on a generic \"Thanks!\" panel instead of the created record (observation)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-10T03:43:01Z",
+  "updated_at": "2026-08-16T08:00:52Z",
+  "closed_at": "2026-08-16T08:00:52Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 9,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7245",
+  "body": "Found while browser-verifying #6739 / PR #7237 (the ruled `type: 'modal'` → `type: 'form'` re-work of `showcase_new_task`). Filed separately, unfixed: it is pre-existing behavior that #6739's fix newly routes the showcase home page's primary CTA through, and it is not that card's scope.\n\nObservation-class: nothing crashes, nothing is refused, and the record is created correctly. What is off is where the user ends up.\n\n## Measured\n\nReal browser (Chromium 141), showcase booted with `objectstack dev --ui --seed-admin`, console served from `packages/console/dist` built by `scripts/build-console.sh` at the pinned `.objectui-sha` `09987b680d53801c79f67d969b14e9bb732b8a22`. Full journey — start on the showcase home page, click the \"Create Task\" CTA:\n\n```\nhome heading: ObjectStack Showcase\nurl after CTA click: http://localhost:3458/_console/forms/showcase_task.edit\ndialogs: 0 | controls: 7\nurl after submit: http://localhost:3458/_console/forms/showcase_task.edit\nRECORD QUERY total: 1\nCREATED RECORD: {\"id\":\"FUUCrcN0iO7hM1Dj\",\"title\":\"#6739 browser-verified …\",\"status\":\"todo\",\"project\":\"SLJCKJy1_3RYDiI1\"}\n```\n\nThe record IS created. Two things about the surface it happens on:\n\n**1. The form route sits outside the console shell.** In objectui `apps/console/src/App.tsx` (pinned SHA, line ~233) `/forms/:name` is a top-level route, a sibling of the app-shell routes rather than a child:\n\n```\n{/* Internal authed form — same renderer, different submit path. */}\nRoute path=\"/forms/:name\" element={ ProtectedRoute + FormPage mode=\"internal\" }\n```\n\nSo the rendered page has no sidebar, no app navigation, no breadcrumb — screenshotted and confirmed visually, not inferred from the DOM. A user who clicks a record-create CTA on an app page is dropped onto an unchromed page with no way back except the browser's Back button.\n\n**2. The post-submit panel is the anonymous-form confirmation.** `FormPage` resolves `const behavior = loaded?.form?.submitBehavior ?? { kind: 'thank-you' }`, so any form view that does not declare `submitBehavior` — including `showcase_task.edit` — renders:\n\n> **Thanks!**\n> Your submission has been received.\n\nThat is the right default for the public `/f/:slug` anonymous path the same component also serves. For an authed internal action it reads as a contact-form receipt: the user just created a Task and is told a submission was received, with no link to the record and no return to where they were.\n\n## Why it is worth recording\n\n`type: 'form'` is the platform's validated, first-class way to open an object's form — the maintainer ruling on #6739 (2026-08-09) makes it *the* shape for this, retiring the `type: 'modal'` object fallback. So this is the surface every such action lands on, not a corner. `showcase_log_time` already ships on it; #6739 adds the home page's primary CTA and PR #6737's button.\n\nThe reference corpus therefore now teaches: \"the sanctioned way to open a create form navigates out of your app and confirms with a generic receipt.\" Worth a decision even if the answer is \"working as intended\".\n\n## Shape of the question (not decided here)\n\n- Should `ActionRunner.executeForm` navigate at all, or render the form view in a dialog the way the `modal` path does? A route keeps deep-linking; a dialog keeps context.\n- If it stays a route, should `/forms/:name` in `mode=\"internal\"` be nested inside the console shell layout?\n- Should an internal submit default to `{ kind: 'redirect' }` to the created record rather than `thank-you`, leaving `thank-you` as the public-mode default? Or should `showcase_task.edit` simply declare a `submitBehavior` (a corpus fix rather than a platform one)?\n\nThe renderer code is in objectui (`packages/core/src/actions/ActionRunner.ts` `executeForm`, `apps/console/src/App.tsx`, `apps/console/src/components/FormPage.tsx`); filed here because the question is what the spec's `type: 'form'` contract should mean, and because #6739's ruling thread lives here. Re-route if the answer is purely a renderer change.\n\nNo `pm:queue` — observation, for triage to grade.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_016R9de1FqP7NvwKvqXi92Gh)_\n"
+}

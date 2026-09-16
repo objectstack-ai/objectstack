@@ -1,0 +1,35 @@
+{
+  "number": 9130,
+  "kind": "issue",
+  "title": "[finding] `os meta resync`'s CLI docblock never mentions the `admin`-owned skip class, which after #8692 is the permanent shape on every pre-existing install",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-16T12:57:22Z",
+  "updated_at": "2026-08-17T00:04:39Z",
+  "closed_at": "2026-08-17T00:04:39Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9130",
+  "body": "Observation-class, filed unassigned while implementing #8692 (PR #9129). Nothing here is broken; the gap is that the operator-facing text does not describe the outcome operators will actually see.\n\n## The shape\n\n`packages/cli/src/commands/meta/resync.ts` (docblock, ~line 52) enumerates the rows resync leaves alone:\n\n> Business data is never touched — only `sys_permission_set` definition rows. A row an admin has taken over in Setup (`managed_by:'user'`) or a package owns (`'package'`) is an intentional override and is left alone.\n\nIt names `'user'` and `'package'`. It does not name **`'admin'`**, which is the value the tri-state vocabulary actually uses (`sys-permission-set.object.ts` describes `'user'` as the *legacy* spelling, normalized to `'admin'` by `normalizeManagedByVocab`).\n\n## Why it matters more after #8692\n\nThe maintainer ruling on #8692 (2026-08-15) is **forward-stamp only**: the seeder now stamps `managed_by: 'platform'` on new rows, and existing `'admin'`-stamped rows are deliberately **never** migrated, because a stored `'admin'` cannot be told apart from a genuine Setup takeover. That is the right call, and PR #9129 pins it.\n\nThe consequence for operators: on **every install created before that ruling**, `os meta resync` will report something like `resynced 0 / skipped 8` — permanently, by design. The command's own documentation gives no way to understand that outcome, since the one provenance value responsible for it is the one value the docblock does not list. The reasoning now exists in `bootstrap-platform-admin.ts`'s docblock (added by #9129), but that is a plugin internal, not what an operator running the CLI reads.\n\n## Not fixed in #9129, deliberately\n\nThat PR declares the file surface `packages/plugins/plugin-security/src/**`, and this file is in `packages/cli`. It also fails the in-place exemption on gate families — a `packages/cli/**` edit pulls a different set — so it is filed rather than ridden along. The sentence quoted above is **incomplete, not false**: `'user'` and `'package'` rows genuinely are intentional overrides.\n\n## Suggested shape of a fix\n\nAdd `'admin'` to the enumeration and one sentence on the pre-#8692 legacy case, in the docblock and wherever the command surfaces its skip count to the operator. Whether the CLI's *runtime output* should also explain a nonzero skip count (rather than only the docblock) is a product call worth deciding at the same time — that is the part an operator actually sees.\n\n## Reference\n\n- `packages/cli/src/commands/meta/resync.ts` (docblock, ~line 52)\n- `packages/plugins/plugin-security/src/bootstrap-platform-admin.ts` (the seeder docblock #9129 added, which carries the reasoning)\n- Backlink: found while implementing #8692 / PR #9129"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 9109,
+  "kind": "issue",
+  "title": "[finding] Two more test harnesses build git fixture repos that inherit ambient git config and GIT_* env — the #9068 exposure class, minus the shallow window",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-16T10:29:13Z",
+  "updated_at": "2026-08-16T19:08:50Z",
+  "closed_at": "2026-08-16T19:08:50Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9109",
+  "body": "Filed unassigned while implementing #9068 (PR #9104). Observation-class: no failure has been\nmeasured in these two files. Recording it so the class is closed deliberately rather than one\nmerge-queue incident at a time. Duplicate-searched — no prior card carries this signature.\n\n## What #9068 established\n\n`packages/spec/scripts/build-schemas-check-mode.test.ts` built its fixture repositories with\nnothing but `cwd` and two `-c user.*` args, inheriting the ambient global/system git config,\n`init.templateDir`, and every `GIT_*` environment variable. PR #9104 closes that for that file:\na hermetic env on every git invocation (and on the generator spawns, since `build-schemas.ts`\nshells out to git itself) plus repo-local `gc.auto=0` / `gc.pruneExpire=never` /\n`gc.reflogExpire*=never`, which is the layer that survives a gc the test never launched\nbecause local config outranks global.\n\n## The two files with the same shape\n\nFound by walking every test file in the repo that runs `git init` against a temp directory:\n\n- `packages/spec/scripts/sharded-artifacts.test.ts` (helper at ~:404, `git init` at :417)\n- `packages/create-objectstack/src/template-consistency.test.ts`\n\nBoth spawn git with `cwd` and `-c user.name` / `-c user.email` only.\n\n## Why this is lower severity than #9068, stated honestly\n\nThe mechanism #9068 measured needs two ingredients, and these files have only one. Neither\nwrites `.git/shallow`, and it was the shallow window that made a prune catastrophic: inside it\nevery commit behind the graft point is unreachable by definition, so a gc arriving there\ndeletes live fixture history. Without it, an ordinary gc leaves fresh reachable objects alone.\n\nWhat remains reachable here is the other half — a leaked `GIT_DIR`, `GIT_INDEX_FILE`,\n`GIT_OBJECT_DIRECTORY` or `GIT_ALTERNATE_OBJECT_DIRECTORIES`, or an ambient `[gc]` / hook\nconfig, pointing a fixture's git somewhere other than the directory it was handed. That failure\nmode is not a flake, it is a test that silently measures another repository.\n\n## Suggested shape if this is promoted\n\nThe three helpers are now the same helper written three times. The version in #9104\n(`HERMETIC_ENV`, `FIXTURE_GIT_ARGS`, `initFixtureRepo`, `gitIn`) is deliberately written as\nfree functions over a `cwd`, so lifting it into a shared test util and pointing all three at it\nis mechanical. Whether that is worth a card is triage's call, not this note's.\n\nLands in `packages/spec/scripts` + `packages/create-objectstack/src`.\n"
+}

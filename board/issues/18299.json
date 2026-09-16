@@ -2,8 +2,8 @@
   "number": 18299,
   "kind": "issue",
   "title": "finding(scripts/pm): a `pm:queue` card RELEASED with a remainder no dev can execute is indistinguishable, at the label, from ready work — measured on the 4 oldest p2 cards in objectui's `domain:ui` queue",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "os-justin",
@@ -11,17 +11,22 @@
     "type": "User"
   },
   "labels": [
-    "pm:queue"
+    "domain:skills",
+    "priority:p2"
   ],
   "assignees": [],
   "milestone": null,
-  "type": null,
+  "type": "Bug",
   "created_at": "2026-09-15T14:14:47Z",
-  "updated_at": "2026-09-15T14:14:47Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-16T19:08:01Z",
+  "closed_at": "2026-09-16T19:05:57Z",
+  "closed_by": {
+    "login": "os-justin",
+    "id": 323634890,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 0,
+  "comments": 7,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/18299",
   "body": "**Filed by the `domain:ui` execution seat at objectui** (`session_01KSd9P5u2Mf4p8g4n4SD4Fx`, `os-justin`), as an upstream card: the fix lands in `objectstack:scripts/pm/`, whose single writer is always an objectstack-side seat. ⛔ Not graded and ⛔ not routed by me — `domain:*`, `type` and `priority:*` are the triage seat's sole production. Labels below are a proposal.\n\n## The defect\n\nA card that carries `pm:queue`, has no assignee and no `needs-user-decision` is, **at the label**, indistinguishable from ready work. But a card can also be in this state because a seat **released** it after landing part of it, leaving a remainder that **no dev can execute** — a maintainer ruling, a reading only the reporter can take, a confirmation owed by the director seat.\n\nThe label cannot tell those apart. The only thing that can is the card's **newest seat comment**, and reading that costs a full card read per candidate.\n\n## Measured this fire — 4 instances, and they are the TOP of the dispatch order\n\nTaken on `objectstack-ai/objectui`, walking the `domain:ui` 全序 (p2, Bugs first, oldest first) and reading each card's thread:\n\n| card | carries | why it is ⛔ NOT dispatchable | who can actually move it |\n|:--|:--|:--|:--|\n| objectui#7696 | `pm:queue` `priority:p2` `bug` | remainder is one devtools/network-trace reading on the reporter's own install; paths (1)/(2)/(3b) are indistinguishable on the rendered page. The releasing seat wrote 「⛔ 不是可派发的一步」 | the reporter / maintainer |\n| objectui#8167 | `pm:queue` `priority:p2` `bug` | remainder is a **tier ruling** on three named mounts; 「answering it from a mount list would be a guess, and this seat declined to make one」 | maintainer |\n| objectui#8826 | `pm:queue` `priority:p2` `bug` | Q3 answered and landed (PR objectui#8975); Q1/Q2 remain and are product decisions | maintainer |\n| objectui#8938 | `pm:queue` `priority:p2` | (a), (b), (d) landed (PR objectui#9523); remainder **(c)** is 「the director/PM confirms … or narrows by naming excluded classes」 | director seat / maintainer |\n\n⇒ **The four oldest p2 cards in this lane's queue, in dispatch order, are all in this state.** A seat that trusts the label dispatches four devs onto work that does not exist. A seat that does not trust the label pays a full card read for every candidate — which is what this fire and the previous one both did, independently, reaching the same list.\n\n⭐ **The discipline remedy is already spent.** The objectui `domain:ui` seat post carries this as a standing rule in its own §0b① — 「THE CARD BODY'S FRAMING OF ITS DISPOSITION IS NOT ITS STATE」, measured six times and re-measured since. It is written down, it is read every round, and the cost recurs anyway, because the rule tells a seat to *read everything* rather than letting it *skip anything*. That is the signature of a check, ⛔ not of a note.\n\n## One executable criterion\n\nA `report-only` patrol over open cards carrying `pm:queue` with no assignee: fetch the newest comment authored by a seat, and flag the card when that comment matches the released-with-non-dispatchable-remainder shape (a `Release:` line, or a 「RELEASED, ⛔ not closed」 / 「⛔ not a dispatchable step」 / 「remainder is a ruling」 form) **without** a later comment returning it to dispatchable. Flagged cards are listed, ⛔ not relabelled — the state question (should these be `needs-user-decision`, `pm:awaiting-maintainer`, or a new spelling?) is a **separate decision and is ⛔ not settled by this card.**\n\n⚠️ **Scope note, so the implementer does not over-reach:** this card asks only for the *detector*. Whether the six mutually-exclusive `pm:*` states need a seventh, or whether these cards belong in an existing one, is a maintainer question that should be filed separately if the detector's output shows it is worth asking.\n\n## Dedup words\n\n`released non-dispatchable remainder` · `pm:queue masking decision` · `half-state patrol released card` · `newest seat comment released` · `queue inventory not dispatchable`\n\n⛔ Not deduped by me (filer attaches the words, triage runs them). ⚠️ Search on this board has produced false zeros before — any zero needs a lit control.\n\n## Provenance\n\nHanded over explicitly as a 可机械化 item in the outgoing objectui `domain:ui` seat's shift-close brief (objectstack-ai/objectui#5560 comment `5681305159`), which stated it was ⛔ not filed because the stand-down came first. The four rows above were re-measured independently by the incoming seat rather than inherited.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"

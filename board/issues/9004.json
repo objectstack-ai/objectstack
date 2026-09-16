@@ -1,0 +1,36 @@
+{
+  "number": 9004,
+  "kind": "issue",
+  "title": "finding(tooling): the read-seam rule's #8845 measurement block cites `cascadeDeleteRelations` as a live fail-open instance — #8895 fixed it, so the header now teaches a repaired example as current",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched",
+    "tooling"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-16T05:32:42Z",
+  "updated_at": "2026-08-16T07:33:12Z",
+  "closed_at": "2026-08-16T07:33:12Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9004",
+  "body": "Found while implementing #8895. Filed unassigned, not a claim. The #8895 PR deliberately does not touch `scripts/` — its declared file surface was `packages/objectql/src/engine.ts` (the dependents-probe `catch`) plus a new pin file.\n\n## What goes stale\n\n`scripts/check-durability-degradation-log-level.mjs`, in the block *\"Measured and DELIBERATELY NOT added — the FALL-THROUGH / empty-accumulator criterion (#8845)\"*, argues against a proposed criterion partly on this ground (present tense, verbatim):\n\n> Narrowing further — also exempting a catch whose only statement is a jump — cuts the red set to 2, but buys that by exempting three REAL instances: `searchAll`'s per-object `continue` …, `findReferencesToMeta`, and `cascadeDeleteRelations`, where a failed dependents probe skips a `restrict` guard altogether.\n\nand again a few lines down:\n\n> `cascadeDeleteRelations` and `checkGovernance` have no accumulator at all, only a skipped guard.\n\n`cascadeDeleteRelations` is repaired by #8895: its `catch` now discriminates with `isMissingTableError` and rethrows everything else. The block's *argument* survives intact — the other cited instances are untouched and the reasoning never depended on the count — but one of its three named exhibits is now a fixed seam, which is exactly the kind of detail the next author re-measuring this criterion would take at face value.\n\n## Measured, so the record is complete\n\nThe gate's own numbers are **byte-identical before and after** the #8895 fix, on the same tree:\n\n```\n✓ read-seam invention (#5186 + #6451, 3 package roots): 67 read seam(s), none invents an\n  unreported answer (7 answer on a type-discriminated benign branch) (1 pass an input\n  through, reported) (1 baselined).\n```\n\nThat is the documented blind spot behaving exactly as the header says it does: the benign branch still exits **valuelessly** (`continue`), so neither invention criterion sees it, and the seam is neither counted as discriminated nor flagged. No baseline entry moves and nothing about the fix is visible to CI — which is the whole reason #8895 had to be fixed on its own terms rather than by waiting for a gate.\n\n## Suggested disposition\n\nDocumentation-accuracy only; no behaviour, no baseline, no verdict changes. Either mark the `cascadeDeleteRelations` exhibit as repaired-by-#8895 while keeping it as the worked example (it is a good one — the harm is easy to state), or swap in another live instance from the same census. Whoever takes it should also record the \"identical numbers before and after\" measurement above, since it is the cleanest available demonstration of the blind spot the block exists to document.\n\nRelated: #8845 (the measurement), #8895 (the repair), #5186 (the rule).\n"
+}

@@ -1,0 +1,34 @@
+{
+  "number": 8972,
+  "kind": "pull_request",
+  "title": "docs(skills): translate the wave-1a internal instruction-surface stock to Chinese",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/xl",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-16T03:24:29Z",
+  "updated_at": "2026-08-16T04:20:56Z",
+  "closed_at": "2026-08-16T04:20:55Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-16T04:20:54Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/8972",
+  "body": "Part of #8958 — wave 1a of the Chinese-stock translation. The card stays open for waves 1b and 2.\n\n**ADR-class: human merge only.** Skills updates are ADR-level (maintainer ruling 2026-08-11: 「所有 skills 的更新和adr 类似,需要人工审核」) — do not merge, queue, or arm auto-merge; the maintainer's merge is the veto window.\n\n## Provenance (2026-08-16, verbatim, untranslated)\n\n> 我建议存量你一次性处理为中文。\n\n> .claude/skills/** 用中文，给客户的 skills 不要改。\n\n## What changed\n\nSemantics-preserving translation only — no rule changes meaning, scope, strength, or ordering. Machine anchors (frontmatter blocks, commands, script/gate names, paths, JSON keys, enum values, labels, title formats, code blocks) stay English byte-stable; frontmatter md5-verified identical for all four SKILL.md files. One commit per file for bisectability.\n\n| file | before | after | note |\n|---|---|---|---|\n| .claude/skills/checklist-author/SKILL.md | 61 | 55 | body translated |\n| .claude/skills/checklist-test/SKILL.md | 137 | 127 | body translated |\n| .claude/skills/dogfood-verification/SKILL.md | 157 | 142 | body translated |\n| .claude/skills/spec-property-retirement/SKILL.md | 389 | 328 | body translated |\n| .claude/skills/pm-dispatch/references/compile-surfaces.md | 26 | 26 | already fully Chinese — untouched |\n| .claude/skills/pm-dispatch/references/dispatch-runbook.md | 216 | 216 | already fully Chinese — untouched |\n| .claude/skills/pm-dispatch/references/landing-operations.md | 82 | 82 | already fully Chinese — untouched |\n| .claude/skills/pm-dispatch/references/platform-readings.md | 121 | 121 | one residual English parenthetical translated |\n| .claude/skills/pm-dispatch/references/review-checklist.md | 82 | 82 | one residual English sentence translated |\n| .claude/skills/pm-dispatch/references/seat-post-protocol.md | 101 | 101 | already fully Chinese — untouched |\n\n**Scope note (card premise, partially invalid):** six of the ten files in the card's table were already Chinese-dominant at the fetched head; four of them carried zero English narrative and were left byte-identical (no padding, per the ratchet clause). The real stock was the four standalone SKILL.md files plus two one-line residuals.\n\n## Translation judgment calls\n\n1. **review-checklist.md** — \"You are the reviewer of record\" translated as 记录在案的复核人 with the English term kept as a parenthetical gloss: pm-dispatch/SKILL.md (wave 2) still carries the same English sentence, so the gloss preserves the cross-file echo until wave 2 converges both.\n2. **platform-readings.md** — the aside \"(the file, not the history, is the operand)\" rendered as a Chinese restatement (操作数是文件本身,不是历史).\n3. **dispatch-runbook.md** — the parenthetical \"(record-and-walk-away)\" kept in English: the Chinese name 记录后离场 immediately precedes it; the parenthetical is a named-anti-pattern handle, not untranslated prose. Same for \"Definition of done\", which names a section anchor in the os-dev agent definition.\n4. **spec-property-retirement** — pre-existing issue/PR citations preserved verbatim (semantics-preserving; verified this file is outside check:pm-skill-id-lint's scan set, which covers only .claude/skills/pm-dispatch, the os-dev definition, and AGENTS.md). The ledger note template blockquote, the guidance-string literal fragments, and the bash gate loop stay byte-stable English — they are artifact templates and message literals that get pasted into English-language surfaces, not narrative.\n5. **checklist-author** — the hunter output-contract column names (surface | evidence path | coverage verdict | proposed id | sketch | fixture?) stay English: they define subagent report fields.\n6. **checklist-test** — selector literals, verdict enums (blocked/partial/pass and their parenthesized reasons), labels (qa-run, bug, regression) and the QA-run issue-title format stay English byte-stable.\n7. **dogfood-verification** — the beforeunload JS escape hatch, all commands/env vars/URLs, and the drifted-build citation stay byte-stable.\n8. Terminology converged on pm-dispatch/SKILL.md's established vocabulary (门禁/台账/墓碑/退役/把门/假红/假绿/立单/复核/认领/派发…).\n\n**Falsified PM mechanism assumption (for the record):** check:skill-frame-sync's four decision-frame copies live in pm-dispatch/SKILL.md, the os-dev definition, and the published skills/objectstack-pm-dispatch/SKILL.md — references/review-checklist.md carries no copy of the frame (read from scripts/check-skill-frame-sync.mjs COPIES). The gate was run anyway: green.\n\n## Verification\n\nUnion run **after the final commit, at head `ec2334d5d`** (gate list derived via scripts/pm/dispatch-gates.mjs from the actual changed paths — same five families as dispatched, nothing added):\n\n```\ncheck:doc-authoring            PASS\ncheck:pm-skill-id-lint         PASS\ncheck:pm-skill-ratchet         PASS\ncheck:skill-frame-sync         PASS\ncheck:skill-frame-freshness    PASS\ncheck:nul-bytes                PASS\ncheck:doc-formula-expressions  PASS   (pnpm --filter @objectstack/lint)\n```\n\nControl-byte self-scan of all changed files: clean. Frontmatter md5 identical to origin/main for all four SKILL.md files, so template-consistency's internal-marker enforcement is unaffected.\n\n`.claude/`-only diff — releases nothing; `skip-changeset` applied.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_017TNzEetykdh7ceZGwuAPLq)_"
+}

@@ -1,0 +1,36 @@
+{
+  "number": 9019,
+  "kind": "issue",
+  "title": "spec: declare `placeholder` on FieldSchema — four objectui render surfaces already honour the key the producer refuses (ruled Option C on objectui#4676)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:blocking",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-08-16T06:18:45Z",
+  "updated_at": "2026-08-16T11:56:52Z",
+  "closed_at": "2026-08-16T11:56:52Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9019",
+  "body": "## Provenance\n\nFiled by the PM session (`session_01NYgmGheCzM6NrHZN436Cxf`) recording a **maintainer ruling of 2026-08-16** on objectui#4676. The maintainer reviewed the decision-inbox report and approved the contract-coherence group's recommendations verbatim: 「主线1 3 4：同意」— for objectui#4676 the approved recommendation was **Option C: add `placeholder` to `FieldSchema` in objectstack (the producer moves)**.\n\n## Why (measured, not inferred)\n\nobjectui#4676's dispatched measurement (report comment [5301288148](https://github.com/objectstack-ai/objectui/issues/4676#issuecomment-5301288148), probes with sensitivity controls, `origin/main` @ `9ce096fb0`) found an object-field-level `placeholder` is **read and applied at render time** in four packages plus `apps/console`, none of them the designer preview:\n\n- `plugin-form`: `ObjectForm.tsx:601`, `sectionFields.ts:122` (`fromObjectSchema`), `ModalForm.tsx:425`, `DrawerForm.tsx:350`\n- `plugin-detail`: `RecordDetailDrawer.tsx:253` (inline edit)\n- `app-shell`: `resolveActionParams.ts:512` — field-backed action params inherit `placeholder`, documented in the module header as intended behaviour\n- `apps/console`: `FormPage.tsx:343` (`override.placeholder ?? def.placeholder`), rendered at `:830`\n- underneath, `@object-ui/fields` widgets read `field.placeholder` off the metadata carrier\n\nMeanwhile `FieldSchema` rejects the key by name (`unrecognized_keys`, prescription text says \"never a FieldSchema key. Author hint text through `inlineHelpText` or `description`\"), so the ObjectStack path 422s on `PUT /api/v1/meta/object/:name` for a key the designer's own preview renders — the classic preview-renders/save-refuses trap, hitting mostly AI authors.\n\nThis is the #7176 doctrine satisfied from the consumer side: the consumers are written, shipped, and reachable; the **declaration** is what is missing.\n\n## The work\n\n1. Add `placeholder` as a declared optional string key on `FieldSchema` (`packages/spec/src/data/field.zod.ts`), with the semantics the renderers already implement (in-input placeholder text; distinct from `inlineHelpText`).\n2. Remove/replace the now-false \"never a FieldSchema key\" guidance prose and any alias-table entry steering authors away from it.\n3. Consumer-package fixture triage per standing rule: run the consumer packages' tests (rest/meta routes, objectql validation fixtures) — a spec accept-set change can flip sibling-package fixtures.\n4. Changeset: minor (accept-set expansion on a published surface).\n\n## Dispatch notes\n\n- **`model: claude-fable-5` mandatory** — this changes contract accept behaviour (standing 2026-08-12 tiering rule).\n- Routes to the `packages/spec` **semantic** lane (accept-set change); `domain:*` left for the triage seat to stamp (single-producer rule).\n- Downstream: objectui#4676 carries `Blocked-by:` this card; once this lands and the objectui pin covers it, the designer trap closes with zero objectui code change (controls stay as they are).\n\nRefs: objectui#4676 (ruling + measurement) · #7176 (doctrine) · #4001 (silent drop → loud rejection)."
+}

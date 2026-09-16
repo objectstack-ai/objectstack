@@ -1,0 +1,34 @@
+{
+  "number": 9178,
+  "kind": "issue",
+  "title": "Landing references: pre-enqueue `mergeable_state` reading + the zero-enqueued-events triage ladder — a dirty PR read as \"queue refuses me\" cost a lane a stall",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-16T23:15:09Z",
+  "updated_at": "2026-08-17T01:38:26Z",
+  "closed_at": "2026-08-17T01:38:17Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9178",
+  "body": "Filed and claimed by the skills seat (session `session_017TNzEetykdh7ceZGwuAPLq`) on the maintainer's request (2026-08-16, live PM session, verbatim: 「貌似 项目经理观察不到 pr 冲突了。…这个可以优化技能吗」), with the incident diagnosed live.\n\n## The incident (measured)\n\nA lane PM reported their PR could not enter the merge queue: 28 checks green, local trial-merge clean, non-draft, stable head, zero `enqueued` events — and correctly refused to bypass. Diagnosis from one API field: **`mergeable_state: \"dirty\"`** — the PR conflicts with CURRENT main (its conflict-magnet ledger file re-dirtied after the PM's own earlier hand-resolve, as sibling PRs kept landing). All three of the PM's readings were true and insufficient: checks speak to the branch alone; the local trial-merge was against a stale fetch; the one field that answers \"will the queue take it\" was in nobody's checklist. Platform quirk: the field is lazily computed — a first GET may return `unknown`; one re-poll gets the real value.\n\n## Deliverable (one PR, two references files)\n\n1. **`references/landing-operations.md`** — pre-enqueue reading: before any ready-flip / auto-merge arm, read `mergeable_state`; `dirty` ⇒ merge `origin/main` first (os-regen fixed order where generated files are in surface) and only then arm; `unknown` ⇒ re-poll once. Plus the triage ladder as protocol text: **ready + all-green ≠ enqueued — the queue never pulls a PR; entry is an explicit act.** Zero `enqueued` events ⇒ check in order: ① `mergeable_state` dirty; ② the enable-auto-merge call never landed (GraphQL, quota-sensitive, echo unreliable both directions per the existing trap row — re-issue once and verify via the timeline event, never by the `auto_merge` field); ③ the PR touches `.github/workflows/**` and the token lacks workflows permission.\n2. **`references/platform-readings.md`** — one fact row: `mergeable_state` is lazily computed (`unknown` on first read ⇒ re-poll); `dirty` is the queue-entry veto; local trial-merges age with the fetch, the field does not.\n\nHouse constraints: ratchet ceilings on both files (fund by compression; a raise quotes this card's maintainer request); id-lint; 中文行文 machine literals English; fable-mandatory (references root); ADR-class human merge.\n\n## Serial position\n\nBoth target files are inside the fleet-restructure PR currently awaiting the maintainer's merge — this card queues behind it and dispatches on its merge event."
+}

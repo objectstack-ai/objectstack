@@ -1,0 +1,35 @@
+{
+  "number": 8959,
+  "kind": "issue",
+  "title": "Landed comments and changeset state that a publish-time lint refuses the surviving `controlled_by_parent` master shapes — it does not, so the documented blast-radius bound is false today",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched",
+    "target:v17"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-16T03:03:12Z",
+  "updated_at": "2026-08-16T04:38:34Z",
+  "closed_at": "2026-08-16T04:38:34Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8959",
+  "body": "Found while implementing #8880 (docs-only, direction 1). Filed unassigned — recording it, not claiming it. No runtime behaviour is wrong here; the **stated bound on that behaviour** is.\n\n## The claim\n\nThree landed artifacts assert, in the present tense, that a publish-time lint refuses the declarable shapes on which `assertControlledByParentWrite` still answers `422 MISSING_REQUIRED_FIELD`:\n\n- `packages/plugins/plugin-security/src/security-plugin.ts:5113` — *\"The residual envelope asymmetry is confined to exactly those shapes, which #8772's lint now refuses at publish time.\"*\n- `packages/plugins/plugin-security/src/errors.ts:182` — *\"#8772's lint refuses those shapes at publish time; until an app is …\"*\n- `.changeset/cbp-missing-master-insert-validation-envelope.md:64` — *\"…precisely the shapes #8772's lint now refuses at publish time. An app that publishes cleanly sees one envelope\"* — this one is **release-note-bound**, so the false claim is scheduled to ship to users.\n\nThe card #8880 repeats it as the reason its blast radius is bounded: *\"these shapes are what #8772's lint refuses at publish, so newly authored metadata cannot reach them.\"*\n\n## What is actually true on `main`\n\n#8772 is **open** (`pm:queue`) — no lint landed. Measured on `main` at `d6e80b28b`:\n\n| surviving 422 shape | publish-time lint verdict today |\n|---|---|\n| `master_detail`, no `required` | `severity: 'warning'` — `relationship/master-detail-required`, `packages/lint/src/data-model-rules.ts:491-499` |\n| `master_detail` + `required` + `readonly` | **nothing** — no rule reads `readonly` in `data-model-rules.ts` |\n| `master_detail` + `required` + `system` | **nothing** — no rule reads `system` in `data-model-rules.ts` |\n| required-`lookup` fallback relation | **nothing** — `validate-security-posture.ts:313` only refuses a `controlled_by_parent` object with *no* resolvable relation at all |\n\n```ts\n// packages/lint/src/data-model-rules.ts:489-499 — the only rule in the family\nif (type === 'master_detail') {\n  if (def.required !== true) {\n    issues.push({\n      severity: 'warning',\n      rule: 'relationship/master-detail-required',\n```\n\nA warning does not gate `os compile`, and three of the four shapes are not reported at all.\n\n## Why it matters\n\nThe sentence is load-bearing, not decorative. It is the reason the residual envelope asymmetry reads as acceptable in the landed rationale: a residue confined to shapes nobody can newly author is a shrinking legacy tail, while a residue any new app can declare today is a live, growing surface. Only the second is true. Concretely, a freshly authored object that declares `master_detail` + `required` + `readonly` publishes clean — no warning, no error — and its inserts answer `422 MISSING_REQUIRED_FIELD` with no `fields[]`, against a catalog that documents that code as 400-with-`fields[]`.\n\nThis also means #8772 is not merely a hardening nicety; it is the precondition the already-landed reasoning assumes.\n\n## Directions (for triage, not a recommendation)\n\n1. Correct the three artifacts to the conditional/future tense they actually mean (*\"the shapes #8772 proposes to refuse\"*), so the landed rationale stops claiming a bound that does not exist. Cheapest, and independent of how #8772 is ruled.\n2. Land #8772 (any of its directions 1–2), which makes the present tense true and retires this card with it.\n3. Both — 1 now, since the changeset is release-note-bound and ships before #8772 can plausibly land.\n\nNote the changeset is already merged, so direction 1 there is a correction to a pending release note rather than to an unreleased file.\n\nRelated: #8772 (the unlanded lint this text presumes) · #8880 (the docs card that surfaced it; its docs prose is being written against the *measured* state, not this claim) · #8688 / PR #8879 (where the text landed)."
+}

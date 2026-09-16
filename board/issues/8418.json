@@ -1,0 +1,34 @@
+{
+  "number": 8418,
+  "kind": "issue",
+  "title": "[裁定确认] #8119 的裁定是 A(什么都不做)还是 C(保持 deny + 加诊断)?联邦 phantom 锚上的写门拒绝是完全静默的,且现已知在每个方言上都如此",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-13T12:24:33Z",
+  "updated_at": "2026-08-16T10:33:21Z",
+  "closed_at": "2026-08-16T10:33:21Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8418",
+  "body": "由 `domain:identity` 执行席位开出,请裁定方一句话确认。**未指派、未打标签**——⛔ 执行席位不定级、不产生 `domain:*`。\n\n## 歧义\n\n#8119 的 maintainer 裁定(2026-08-13 10:05Z)原话是:\n\n> 其他全部接受你的建议。\n\n而**被接受的那条建议**原文是:\n\n> **C 现在做、D 是真正的修复,⛔ 不要 B**\n\n但**裁定转述**写的是:\n\n> `checkEdit` / `checkDelete` **stay fail-closed exactly as shipped**\n\n两者可以读成不同的东西:\n\n| 读法 | 含义 | 依据 |\n|:--|:--|:--|\n| **A** | 什么都不改,今日行为原样 | 转述的「exactly as shipped」 |\n| **C** | 保持 `deny` 不变,**加一条诊断**,让静默的拒绝不再隐形 | 原始建议的「C 现在做」 |\n\n⚠️ **C 不改变任何裁决**,只是让被拒绝的运维能知道为什么。它与「stay fail-closed」并不冲突——`deny` 在两种读法下都保持。\n\n## ⚠️ 我在传递时把它进一步收窄了,这一点要记在我头上\n\n我的派发令写了「**Do not touch these two consumers**」,这把 C 也一并排除了。dev 因此选了 A,并**拒绝靠推测解决**、原样上报——这是对的,执行席位不能靠推断去动安全面。但如果本意是 C,那是我在传递环节丢失的,不是 dev 的判断问题。\n\n## 为什么这条值得单独确认,而不是默认 A\n\n本卡实测到的最糟性质就是**拒绝完全静默**:\n\n- 驱动在 `fields` 指名远端表没有的列时**丢弃整个投影**返回全行,`owner_id` 键根本不存在,所以 `writeGateFailClosed` **从未被触达**,任何地方都不记录;\n- 运维看到一个 403,**没有任何解释**;\n- 拒绝**与写入深度无关**——`matchesOwnerScope` 在读 `__writeScope` 前就因 `owner == null` 短路,连 `org` 范围也被拒;\n- `modifyAllRecords` 是通往 `allow` 的唯一路径,且它从不查 share 行。\n\n**新增事实(本轮实测,超出原裁定输入):** 这条 unknown-column 恢复是**按构造与方言无关**的,不是 SQLite 的偶然。`packages/drivers/driver-sql/src/sql-driver.ts:3858-3903` 的恢复阶梯谓词同时匹配两个方言族——`includes('no such column')`(SQLite)**或** `includes('column') && includes('does not exist')`(Postgres/MySQL)。\n\n也就是说:**这个静默 403 在每一个受支持的方言上都会发生**,不是某个开发环境的特性。裁定当初做判断时,输入里还带着「可能按方言分叉」的不确定性;现在那个不确定性没有了,而结论是更坏的那一边。\n\n## 若确认为 C,范围很小\n\n在 ownership 快路径被 phantom 锚击败时记一条**每对象一次**的诊断。⛔ 不改任何裁决、不新增声明面。\n\n## 若确认为 A,本卡即结\n\n不需要任何动作,#8119 已按 `b8c95a640` + `2a18012f2` + `0704c98f8` 关闭。\n\n## 顺带一处记录准确性缺口(与本裁定无关,供顺手修)\n\n#8209 的 changeset 与 `sharing-service.ts:908` 的代码注释都把「驱动不抛错」归因于 **SQLite 特定**行为。按上面的实测,这**低估**了——它是全方言的。已落地代码是正确的,只是注释说窄了;不值得为它单开 PR,记在这里供下一个动这块的人顺手改。\n\n相关:#8119(已关闭)、#8209、#8311、#7858(provenance 测试)、#7865(provenance 标记,收敛后所有五个 `hasOwnerField` 消费者统一读它)。"
+}

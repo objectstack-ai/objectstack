@@ -1,0 +1,35 @@
+{
+  "number": 7941,
+  "kind": "issue",
+  "title": "[Decision] Should `X-Actor` keep outranking the authenticated identity on `/meta` writes? (surfaced by #7749)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-12T07:05:48Z",
+  "updated_at": "2026-08-16T12:33:05Z",
+  "closed_at": "2026-08-16T12:33:04Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7941",
+  "body": "Split out of #7749 so it is decided deliberately rather than inherited. #7749's fix (PR #7940) deliberately left this ordering untouched — that was the dispatch instruction, and this card is the other half of it.\n\n## Background\n\nThe five `/meta` write sites resolve the recorded actor as, in effect:\n\n```\nX-Actor header  ??  the authenticated identity\n```\n\nUntil PR #7940 the second limb never produced anything (`req.user` / `req.userId` are never set on this transport), so the ordering was **inert**: the header was the only limb that ever resolved. #7940 fixed that producer, which makes the precedence **live and load-bearing for the first time**.\n\n**The consequence:** an authenticated caller who holds `manage_metadata` can attribute a metadata write to somebody else by sending `X-Actor: <someone-else>`. The `sys_metadata_audit.actor` and `sys_metadata_history.recorded_by` rows will name that other person. Today's behaviour is pinned by a test in `packages/rest/src/meta-write-actor-identity.test.ts` that is explicitly labelled as *the test to change when this is ruled on*.\n\n⚠️ This is not a live regression introduced by #7940 — the header behaved this way before. What changed is that it now sits in front of a limb that actually produces a value, so it is a real precedence rather than a theoretical one.\n\n## Premises (each with its re-check)\n\n- **Precedence is header-first**: `git grep -n \"resolveMetaWriteActor\" origin/main -- packages/rest/src` and read the method — a well-formed string header returns before `resolveExecCtx` is consulted.\n- **The consumer census** (who sets `X-Actor`, and whether anything depends on it out-ranking the session) was requested from #7749's dev and reported in its `<!-- os-dev-report -->` on that issue. ⚠️ I am citing that report, not an independent census of my own — **re-read it before ruling**, and re-run `git grep -rn \"X-Actor\\|x-actor\" origin/main` plus the console side, since it is the load-bearing input for option B.\n- **Audit rows are the compliance trail**: `sys_metadata_audit.actor` defaults to `'system'`, `sys_metadata_history.recorded_by` to `NULL` (`recordMetadataAudit`, #4556).\n\n## The question\n\nShould `X-Actor` continue to outrank the authenticated identity when stamping `/meta` write audit and history rows?\n\n## Options\n\n- **A — Authenticated identity wins; `X-Actor` is ignored (or accepted only for machine/system callers).** The audit trail then always names the principal the request was actually authorized as, and cannot be self-reported. Strongest audit integrity. **Risk:** breaks any legitimate delegation/impersonation flow that relies on the header today — which is exactly what the census must establish before this is safe.\n- **B — Keep header-first (status quo), and document it as an intended delegation feature.** Zero migration risk. **Cost:** the audit trail is self-reported by any caller who can already write metadata, so it answers \"who *claimed* to change this\", not \"who changed this\" — which is the question #7749 was filed to make answerable.\n- **C — Header-first, but gated.** Honour `X-Actor` only from callers holding a dedicated capability (an impersonation/service grant), otherwise fall back to the authenticated identity. Preserves a real delegation path while closing self-attribution for ordinary admins. **Cost:** a new capability and its enforcement — the largest change of the three.\n\n## Recommendation: **A if the census is empty, otherwise C**\n\nIf nothing legitimate sets `X-Actor` today, A is the honest default and the cheapest: an audit field that any writer can spoof is weaker than it looks, and #7749 exists precisely because the trail could not answer \"who changed this\". If something *does* depend on it, C keeps that flow working without leaving every `manage_metadata` holder able to sign someone else's name. ⛔ I would not pick B silently — status quo is defensible, but only as a stated decision, because \"the header wins\" is currently an accident of ordering that nobody chose.\n\n## Four-lens block\n\n1. **Platform long-term coherence** — A and C make the audit trail mean one thing (\"the authorized principal\"); B leaves two meanings behind one column, resolved by whichever caller spoke last. C adds a capability, i.e. a small amount of special-case surface, in exchange for keeping delegation expressible.\n2. **Measured business pull** — the pull for *fixing attribution* is measured and real (#7749 came from a QA run: every normal console write recorded `system`). The pull for *keeping header-first* is unmeasured pending the census — that is the input that decides A vs C, and it is the reason this is a decision rather than a dispatch.\n3. **AI-agent error-resistance** — A is strongest: an agent cannot mis-attribute a write by copying a header from an example. B is weakest — an audit field that is self-reported reads to an agent (and an auditor) as authoritative when it is not. C sits between, and makes the delegation path explicit rather than ambient.\n4. **Startup scope discipline** — A is a deletion (remove a limb); B is zero work; C is declare-and-maintain (a new capability is a permanent obligation). Discipline favours A over C unless the census forces C.\n\nRelated: #7749 (the producer fix, PR #7940), #7748 (publish/rollback writes no audit row — inherits whatever is decided here), `packages/rest/src/meta-write-actor-identity.test.ts` (the test that pins today's ordering and should change with the ruling)."
+}

@@ -1,0 +1,34 @@
+{
+  "number": 8891,
+  "kind": "issue",
+  "title": "pm-dispatch: no publish-capability preflight — a dev can finish gate-green work before discovering the container has no git-write route",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-15T14:56:47Z",
+  "updated_at": "2026-08-16T04:22:36Z",
+  "closed_at": "2026-08-16T04:22:28Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8891",
+  "body": "Incident-sourced skill finding, filed unassigned for the skills-lane seat to triage. Recording only — no claim, no dispatch from the filing seat.\n\n## Incident (2026-08-15, measured)\n\nA dev dispatched against #8830 completed the full deliverable — surgical edit, entire gate family green at its head (`check:pm-skill-ratchet` 686/686, id-lint, frame-sync, freshness, nul-bytes, doc-authoring, formula-expressions) — and only THEN discovered the container had no git-write route to this repo: anonymous `git push` → 403 across 8 attempts over ~2h, `add_repo access:push` → `already_present` without minting git credentials, MCP `create_branch`/`create_or_update_file` → 403 \"Resource not accessible by integration\". The work was durable only in that container's object store; publication dead-ended and the card had to be re-routed (its comment thread carries the full trail).\n\nTwo failures compounded: the dispatch itself was a lane violation by the dispatching seat (the objectui whole-repo seat dispatching an objectstack card — SKILL.md's 一人一车道双射 rule already forbids this unambiguously, so **that half needs no text change**; it is recorded on the card). This issue is about the half the skill does NOT cover.\n\n## The gap\n\nNeither `SKILL.md` nor `references/dispatch-runbook.md` mentions verifying a **publish route** anywhere in the dispatch or dev contract (grep for push/凭据/credential/写权限: zero hits in both). The dev contract's deliverable is a pushed branch + draft PR, yet nothing requires establishing that a push can succeed until the work is already done. The runbook already acknowledges credential asymmetry exists (its roster note: un-attached sister repos are unreachable for report delivery) but draws no dispatch-time conclusion from it. Remote/cloud containers demonstrably hold asymmetric credentials — the incident container could push to one org repo and got 403 from another — so even a fully lane-legal dispatch can hit this.\n\n## Suggested amendment (for the skills seat to shape; one candidate)\n\nMake the dev contract's **first action after creating the branch** a push of the empty branch (`git push -u origin <branch>` before any edit): it doubles as the claim's branch marker and as a write-route probe, converting a 2-hour-late hard failure into a minute-one fail-fast the PM can re-route immediately. A dispatch-side alternative (PM verifies write capability before dispatching) costs the PM a probe per target repo per container lifetime; the dev-side probe is cheaper and self-locating. Constraint for the amendment text per house style: no issue IDs in operational text; ratchet applies."
+}

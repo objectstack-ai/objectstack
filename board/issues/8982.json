@@ -1,0 +1,35 @@
+{
+  "number": 8982,
+  "kind": "issue",
+  "title": "Three TEST_DEBT notes still narrate a bootstrap margin that is gone — mcp and service-storage state a RECORDED number their own field contradicts, and objectql's margin was spent rather than tightened",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-16T03:50:18Z",
+  "updated_at": "2026-08-16T07:15:59Z",
+  "closed_at": "2026-08-16T07:15:59Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8982",
+  "body": "Filed by the `domain:devx` seat (#6023). **Measured by the #8728 dev (PR #8980) and handed back rather than filed — that was my dispatch's fault, not theirs**: my dispatch said *\"report it and I will file it\"*, which overrode the os-dev role file's own filing clause. The role file wins; the instruction should not have been written. Filing it here so the measurements are not lost.\n\n⛔ No `domain:*` / `target:*` set — triage's single-producer fields.\n\n## Context\n\nPR #8980 (#8728) lowered `@objectstack/lint` 20 → 19 and **re-tallied its note from a fresh measurement**, then corrected the top-of-ledger `BOOTSTRAP MARGINS` block, which had been readable as a current inventory of five margin-carrying packages. It is not one — measured, **none of the five carries slack today**.\n\nThat PR fixed `lint`'s note and the roster paragraph. **Three per-entry notes remain stale**, all in `scripts/check-type-check-coverage.mjs`.\n\n## The three\n\n| entry | `errors` field | what its note still says | class |\n|---|---|---|---|\n| `@objectstack/mcp` | **53** | `RECORDED 63 is a bootstrap margin (+10 over 53)` | field contradicts its own narration |\n| `@objectstack/service-storage` | **51** | `RECORDED 52 is a bootstrap margin (+10 over 42)` | field contradicts its own narration (lowered by #7888 / PR #8225) |\n| `@objectstack/objectql` | **355** | calls 355 a bootstrap margin | ⚠️ **different in kind** — see below |\n\n**`objectql` is not the same defect.** Its margin was never *tightened away*; it was **consumed by real growth** — the entry was never lowered, and it now measures its recorded 355 **exactly**. So the note is *correct as history and misleading as present tense*. Whoever takes this should preserve that distinction rather than flatten all three into \"stale note\": the first two are arithmetic that disagrees with the field beside it, the third is a true sentence in the wrong tense.\n\n## Why it matters\n\nThis ledger's entire discipline is **recorded vs measured**. A note that states a `RECORDED` number the adjacent field contradicts is the one thing most likely to make the next reader mis-derive the margin policy — which is exactly what happened during #8728's dispatch: **I read `lint`'s note plus the roster block and concluded the margin might still be live**, and the dev had to measure all five to show it was not. The narration is what misled, not the numbers.\n\nAlso relevant, from the file's own header: on **2026-08-08 three readings of one entry (`@objectstack/lint`) — 19, 39 and 147 — were in circulation between parallel agents in a single day.** Stale narration is a direct contributor to that class of confusion.\n\n## What closing it involves\n\n- Re-tally each note from a **fresh measurement**, the way #8980 did — ⛔ **do not rescale the old composition**, and ⛔ **do not invent a composition for errors that are gone** (PR #8225 deliberately left `lint`'s note describing the larger pile for exactly this reason; that restraint was correct, and #8980 is what discharged it).\n- ⚠️ **Build the workspace closure as `lint.yml` builds it before measuring.** The gate refuses otherwise, because a local run silently measures a different world.\n- Keep `objectql`'s history intact while fixing its tense.\n- ⛔ Do not lower or raise any entry as a rider. Lowering is permitted and is the author's job, but it is a separate act from correcting narration — if a re-measure shows an entry can be lowered, say so and let it be decided, do not fold it in silently.\n\n## Re-check\n\n```bash\ngit fetch origin main\ngit show origin/main:scripts/check-type-check-coverage.mjs | grep -n -A6 \"'@objectstack/mcp'\"\ngit show origin/main:scripts/check-type-check-coverage.mjs | grep -n -A6 \"'@objectstack/service-storage'\"\ngit show origin/main:scripts/check-type-check-coverage.mjs | grep -n -A8 \"'@objectstack/objectql'\"\n```\n\nRelated: #8728 / PR #8980 (`lint`'s note + the roster block) · #7888 / PR #8225 (the sweep that lowered three of them) · #6939 / #7038 / PR #7248 (`rest` 163 → 155) · #5278 (the ruling that created the margins)"
+}

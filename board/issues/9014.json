@@ -1,0 +1,36 @@
+{
+  "number": 9014,
+  "kind": "issue",
+  "title": "ci(docs): nothing verifies apps/docs/redirects.mjs destinations resolve — the table can rot with CI fully green",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched",
+    "tooling"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-16T06:10:35Z",
+  "updated_at": "2026-08-16T07:43:21Z",
+  "closed_at": "2026-08-16T07:43:21Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9014",
+  "body": "Follows from #8948, where three entries in `apps/docs/redirects.mjs` were found aiming at pages that do not exist — live URLs answering a permanent 308 into a 404. Those three destinations are repaired on the #8948 branch; **this card is about the blind spot that let them rot unnoticed**, not the three entries.\n\n## The blind spot, measured\n\n`apps/docs/redirects.mjs` is verified by nothing:\n\n- `node scripts/pm/dispatch-gates.mjs apps/docs/redirects.mjs` → *\"No check family names the given paths in its own source\"*, over 98 discovered families.\n- `git grep -l 'redirects.mjs' -- scripts .github` → 0 hits. Its only consumer is `apps/docs/next.config.mjs`.\n- `Check Documentation Links` (`check-links.yml`) runs `lychee --offline` over `content/**` plus the two root markdown files. The redirect table is outside that surface, and a redirect *destination* is not a link in any file lychee reads.\n\nSo the failure is silent in the worst way: the rot is invisible to CI **and** invisible to the docs-links lane that looks like it would cover it.\n\n## What a gate would assert\n\nA dependency-free resolver over the exported `docsRedirects`, run in Node with no install step. Three assertions, all of which have already been exercised by hand on the #8948 branch:\n\n1. **Every destination resolves to a real page**, the way Fumadocs routes it: `/docs/x` → `content/docs/x.mdx`, `content/docs/x.md`, `content/docs/x/index.mdx`, or `content/docs/x/index.md`; bare `/docs` → `content/docs/index.mdx`.\n2. **Wildcard destinations resolve to a real directory.** `/docs/kernel/runtime-services/:path*` cannot be resolved as a page — assert the target directory exists so a rewritten path can land on something.\n3. **No chains.** A destination that is itself matched by a source in the table costs the old URL a second round trip, and every hop is SEO signal lost. The rule is already written into the table's own comments (maintainer ruling 2026-08-15, the retired-deployment-pages block) — it is currently enforced by nothing but reviewer attention. Matching must follow Next's own semantics: `'/a/:path*'` matches `/a` **and** `/a/deep/path`, exact sources otherwise, first match wins.\n\nScale for context: 92 entries today.\n\n## Where it hooks in\n\n`scripts/check-docs-redirects.mjs` + a `check:docs-redirects` script in the root `package.json`. Two candidate lanes, and the choice is a real decision rather than an obvious one:\n\n- **`lint.yml`'s required `TypeScript Type Check` job** — where the other `check:*` families live, no paths filter, so it cannot go dormant. Correct home if the gate is meant to block.\n- **`check-links.yml`** — topically the right neighbour, but that lane is deliberately **advisory** and carries no `merge_group` trigger; its header warns that promoting it into the required set without adding `merge_group` in the same change stalls the queue. Landing there means the gate does not block.\n\nRecommendation: the required lane. This class of defect reaches users directly and the check is cheap (pure filesystem, no deps, no network, milliseconds).\n\n## How it would be proven capable of failing\n\nThis is the part that matters — a resolver that silently resolves everything is exactly the failure mode being fixed, and a table that is currently 100% green cannot distinguish a working gate from a no-op one. Both directions were already measured by hand while fixing #8948, and both belong in a `--self-test` in the script itself (the `check-nul-bytes.mjs` / `check-role-word.mjs` pattern — a self-test over a temp fixture that runs the real code path, ahead of the real scan):\n\n- **Dead detection**: a genuine red → green transition on the same script — 3 dead reported against `main`, 0 after the repair, same 92 entries. Not a constructed case; it is the defect the card was filed for.\n- **Chain detection**: has never fired against the real table, so it needs a positive control. Pointing one entry at `/docs/guides/skills` — a URL that is itself a source at line 79 — produced `DEAD/CHAIN … [CHAIN -> matched by source '/docs/guides/skills']`, `chained: 1`, exit 1. Reverted afterwards.\n- **The wildcard limb** needs its own control too: it is the one assertion with no live failing example, so a fixture whose wildcard destination names a missing directory should be part of the self-test rather than trusted on inspection.\n\nA gate whose chain and wildcard limbs have never been observed to fire is two-thirds a no-op, whatever its exit code says.\n\n## Note for whoever picks this up\n\nThe ~30-line resolver used on #8948 is in that PR's description as the verification method, not as shipped code — the card was scoped to the three destinations deliberately. Reimplementing it here as a self-tested gate is the work.\n\n_Generated by [Claude Code](https://claude.ai/code/session_011RB4waLuNbdruCo6X9oobm)_"
+}

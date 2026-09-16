@@ -1,0 +1,34 @@
+{
+  "number": 9009,
+  "kind": "issue",
+  "title": "`getEffectiveLock`'s overlay limb still queries the raw `type` — the follow-up card `protocol.ts` promises does not exist",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-16T05:36:28Z",
+  "updated_at": "2026-08-16T17:05:03Z",
+  "closed_at": "2026-08-16T17:05:03Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9009",
+  "body": "Observation recorded while tracing #8862 (the `applyRegistryWriteThrough` caller set). ⚠️ Reachability is **NOT measured** — filing it plainly rather than grading it, and it was outside that card's file surface.\n\n## What was measured\n\n`packages/metadata-protocol/src/protocol.ts`, in `rollbackMetaItem`'s `canonicalizeMetaRequestType` comment (around `:15926` on `origin/main` @ `ab4bb08b9`), states its own residue and says a card holds it:\n\n```\n⛔ This does NOT close the class at its producer. `getEffectiveLock`'s\noverlay limb still queries the raw `type`, so a future caller that\nreaches the gate without folding first re-opens the same door. Folding\nthere instead is the contract-first shape and is deliberately left\nopen as its own card with its own blast-radius measurement — not\nanswered here, and not a rider on this fix.\n```\n\nI searched open issues for that card by symbol and by keyword and found none. The only `getEffectiveLock` issue in the tracker is #5706, which is **closed** and is about a different defect on the same limb (a bare `catch` making the gate fail-open on a store outage, not the type-key spelling).\n\nSo the promised follow-up appears never to have been filed. The comment reads as though it is tracked, which is the part worth correcting either way: a residue documented as \"held elsewhere\" and held nowhere is invisible to the backlog.\n\n## Why this is an observation and not a defect claim\n\nThe door the comment describes is **latent**, not demonstrated open. Every `/meta` entry point folds through `canonicalizeMetaRequestType` today, so no current caller reaches `getEffectiveLock` with an unfolded `type`. The concern is exactly the one the comment states — a *future* caller — and that is a structural argument, not a measurement.\n\n⚠️ I did not measure it. Deciding it needs the blast-radius measurement the comment itself asks for: enumerate `getEffectiveLock`'s callers, trace each to where `type` is produced, and check whether the artifact limb and the overlay limb can disagree for any of them. That was outside #8862's declared file surface.\n\n## Suggested disposition\n\nTriage decides whether this is worth a card at all. Two honest outcomes:\n\n1. **File the fold** — move the overlay limb onto the canonical key at its producer, which is the contract-first shape the comment prefers.\n2. **Retire the promise** — if the boundary fold is judged sufficient, amend the comment so it stops pointing at a card that does not exist.\n\nEither way the mismatch between the comment and the tracker should not survive.\n\nBacklink: #8862 (the trace that surfaced this), #8819 (the card that folded `rollbackMetaItem`'s boundary and wrote the comment), #5706 (the closed, different `getEffectiveLock` defect).\n"
+}

@@ -2,8 +2,8 @@
   "number": 18468,
   "kind": "issue",
   "title": "[Decision] check-harness-current's prescription is all-or-nothing — one reworked hook forced every live PM session to re-seat three times in nine hours; narrow it by which path the harness actually loads at start",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "hotlong",
@@ -11,20 +11,21 @@
     "type": "User"
   },
   "labels": [
-    "domain:skills",
-    "pm:dispatched"
+    "domain:skills"
   ],
-  "assignees": [
-    "hotlong"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-09-16T14:06:13Z",
-  "updated_at": "2026-09-16T14:15:11Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-16T15:53:43Z",
+  "closed_at": "2026-09-16T15:52:47Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/18468",
   "body": "Filed by the director seat (summon #24, `session_01Wj1HUjzyeiBQ8atRf1ZhaL`) from the maintainer's direct channel, 2026-09-16 ~11:5xZ, after the `domain:spec` seat's root-cause reading was forwarded to the director. ⛔ No `domain:*` set by the filer; the change lands in `scripts/pm/check-harness-current.mjs` + `SKILL.md:91–92` (governed), so triage will name `domain:skills`.\n\nDedup terms: `check-harness-current` · `harness-loaded path` · `re-seat in a fresh session` · `never advance the shared checkout` · `guard-governed-enqueue churn`\n\n## What happened today (measured by the director on `origin/main`, first-parent, since 2026-09-12)\n\n| reading | value |\n|---|---|\n| touches on the three watched paths (`.claude/settings.json`, `.claude/agents/*.md`, `.claude/hooks/*`) | **11** |\n| touches on all of `.claude/**` | 54 (42 of them under `references/**`, which the gate does not watch) |\n| touches on the watched paths **today** | **4** — `ceb6b5fb` 01:55 settings deny roster (#18317); `8b81ab60` 06:41, `40eaf755` 09:14, `b9598e9c` 10:37 — **all three the same hook, `guard-governed-enqueue.sh`** (#18365 #18390 #18423) |\n| the gate itself landed | `8c657f7d` 2026-09-14 23:24 (#18216); fixed once `1411cf2c` 09-16 02:50 |\n| its prescription, verbatim | 「STALE … close the shift and re-seat in a fresh session; ⛔ never advance the shared checkout in place」 |\n\nEvery one of today's four landings invalidated every live PM session at once (`SKILL.md:91–92`: a stale harness path ⇒ 收班、换新会话再派). Seven seats re-seated repeatedly; the maintainer's words on the channel: 「今天一直有项目经理要重开,我要烦死了」. A fourth edit of the same hook, PR #18447, is open and would do it again.\n\n## What the risk of a stale session actually is (spec seat's measurement, director-confirmed in shape)\n\nA container that loaded `.claude/settings.json` before `ceb6b5fb` lacks three `deny` rows (`update_pull_request`, `enable_pr_auto_merge`, `disable_pr_auto_merge`) — MCP write tools that every seat is already forbidden to call by protocol and that the spec seat measured itself calling **0** times across a full shift (7 devs, 0 MCP writes, all CCR REST). A container running the older `guard-governed-enqueue.sh` runs the older fail-open/slug logic on a hook that is a client-side belt; the braces (`check-governed-merges --pr N`, the server-side queue ruleset, the approver's click) are unchanged. ⇒ the gap is real and narrow; the prescription is wide.\n\n## The one premise nobody has measured\n\nWhich of the three paths the harness reads **at session start** (so only a fresh container picks up a change) versus **at each use** from the checkout (so a fast-forward of the shared checkout picks it up). Permissions/deny in `settings.json` are start-loaded; hook *scripts* are executed from disk per call; agent definitions may be either. ⛔ Not asserted here — it is the first commit of whichever option is ruled.\n\n## Options\n\n| | what | cost |\n|---|---|---|\n| **A** | **Per-path prescription.** Measure the load moment per path (one commit, a test that shows it). Only a start-loaded path (`settings.json`; agents if measured so) forces a re-seat. For per-call paths (hook scripts) the seat fast-forwards the shared checkout to `origin/main` under a stated safe procedure — worktree-first already guarantees nobody edits there — and re-runs the hook self-test; `SKILL.md:91–92` re-keyed accordingly | a measurement + a narrower rule; the 「⛔ never advance the shared checkout」 line becomes conditional, which is the sentence to get exactly right |\n| **B** | **Keep all-or-nothing, batch the landings.** Governed harness-path PRs (`settings.json`, `hooks/*`, `agents/*.md`) land in one daily window; a PM re-seats at most once a day | zero code; a standing courtesy the skills seat and the approver keep; does nothing about a genuinely urgent settings fix |\n| **C** | Status quo | seven re-seats per hook rework |\n\n## 四棱\n\n<!-- os-decision-facets -->\n① 项目长远合理性:A 让处方跟着**真实的载入时机**走,缩小特例(一条规则、按路径分支);B 是流程约定,不改机制;C 留着一个把 42 次无关触碰之外的每一次都当核弹的门。\n② 实际业务拉动:今天七席反复重开,维护者亲口的成本;真实缺口(三条 deny、一个兜底钩子)一次都没被触发。\n③ 防 AI 犯错:A 的失败方向响亮 —— 载入时机测错会让自测红;⚠️ 但「推进共享检出」这句一旦写宽,就回到 worktree-first 要防的那类事故,所以 A 的安全程序必须写成机械判据(检出干净、无 worktree 借用、fast-forward only)。B 与 C 不动任何判据。\n④ 创业阶段不扩散:A 不加标签不加门,只把一条门的处方分支;B 零文本改动。\n\nPrior rulings read: `check-harness-current` / `harness-loaded` / `shared checkout` → SKILL.md:91–92 (the binding lines), #18216 (the gate), the worktree-first rule in cloud `CLAUDE.md` and objectstack `AGENTS.md` (why the shared checkout is not advanced). None rules the per-path question.\n\n**推荐:A**,并以 B 为常设礼节(受管 harness 路径的落地成组、不逐 PR);回退 B。自检行:只看①选 A;②③④ 是否翻转:否。置信缺口:⛔ 三条路径的载入时机未测,是 A 的第一个 commit。\n\n## Immediate, ruling-free\n\nPR #18447 (the fourth edit of the same hook today) is **held** until this card is ruled, then lands in the same window as the gate change — one re-seat instead of two. Director's call under 「技术任务间顺序与依赖」; recorded on #18447.\n\nRefs #18216 · #18317 · #18365 · #18390 · #18423 · PR #18447\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"

@@ -1,0 +1,35 @@
+{
+  "number": 8498,
+  "kind": "issue",
+  "title": "`metadata-api.mdx` documents `PUT /meta/:type/:name` as \"create or update\" without saying some types refuse creates — now two of them",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-13T16:14:27Z",
+  "updated_at": "2026-08-17T13:55:54Z",
+  "closed_at": "2026-08-17T13:55:54Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8498",
+  "body": "Surfaced by the #7893 dev while sweeping docs for that retirement. **Deliberately not folded into PR #8496** — it is pre-existing, generic, and as much about `job` as about `field`, so widening the retirement PR to cover it would have been scope creep. Filing instead.\n\n## The gap\n\n`content/docs/api/metadata-api.mdx:49` documents:\n\n> `PUT /meta/:type/:name` — **\"Create or update a metadata item\"**\n\nwith no mention that **some types refuse the create half**. The page names no type, so it is not wrong *about* any particular one — it is incomplete about the verb.\n\n## Why it matters more now than it did\n\nThis was already incomplete: **#4509 retired `job`'s runtime create the same way.** #7893 makes it **two** types (`field` joins `job`), and the mechanism is now an established pattern rather than a one-off — `allowRuntimeCreate: false` on a `DEFAULT_METADATA_TYPE_REGISTRY` entry means `PUT` answers `403 NOT_CREATABLE` for a brand-new name while still accepting updates to an existing one.\n\nSo a reader following this page hits a 403 the page gives them no way to anticipate, and the refusal message is the first place they learn the rule. The refusal messages are good — #7893 gave `field` a remedy naming the route that actually works — but a reference page should not require you to fail first.\n\n## Suggested fix\n\nOne caveat sentence on that entry: creates are gated per type by `allowRuntimeCreate`, some types accept updates but refuse brand-new names, and the refusal names the working route. Point at wherever the per-type flags are readable rather than enumerating types inline, so the sentence does not go stale the next time one is retired.\n\n⛔ **Do not enumerate `field` and `job` by name** unless the enumeration is generated — a hand-written list of retired types is the same shape that goes stale, and this card exists because the page did not track a change.\n\n## Explicitly NOT in scope\n\n- ⛔ `content/docs/releases/v17.mdx` — it carries a `job` retirement row and no `field` row. That is correct and untouched: release notes compile centrally from changesets, and #7893's changeset is the input. Do not edit it.\n- The refusal messages themselves. #7893 shipped `NESTED_TYPE_REMEDY` so `field`'s refusal names `PUT /api/v1/meta/object/:object`; that is working as intended and is not what this card is about.\n\n## Verified while filing\n\nThe #7893 sweep found the surviving route **is** documented in two places, so this is a completeness gap rather than a dead end for readers: `content/docs/api/metadata-api.mdx:49` itself carries an object-typed body example, and `content/docs/concepts/metadata-lifecycle.mdx:114` now states explicitly that writing the object with the field in `fields` is how a field is added.\n\n## Related\n\n#7893 · PR #8496 · #4509 (the `job` retirement that made this incomplete first) · ADR-0049"
+}

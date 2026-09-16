@@ -1,0 +1,34 @@
+{
+  "number": 9154,
+  "kind": "issue",
+  "title": "finding(objectql): the roll-up summary index's registry read swallows into an empty index — and CACHES the invented emptiness, so every parent roll-up silently stops recomputing",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-16T15:38:47Z",
+  "updated_at": "2026-08-17T13:15:03Z",
+  "closed_at": "2026-08-17T13:15:03Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9154",
+  "body": "Found while implementing #9002 (the delete-cascade path's two registry-read swallows). Filed unassigned, not a claim. #9002's PR deliberately does **not** touch this — its declared file surface was the two cascade seams, and the ruling that governs them was scoped to the delete-cascade path.\n\nMeasured on `origin/main` @ `3851f87f0`, located by symbol (line numbers in `engine.ts` move constantly).\n\n## The seam\n\n`packages/objectql/src/engine.ts`, `ObjectQL.buildSummaryIndex()`, first statement:\n\n```ts\nlet objects: any[] = [];\ntry { objects = (this._registry as any).getAllObjects?.() ?? []; } catch { objects = []; }\n```\n\n`buildSummaryIndex()` walks every registered object for `type: 'summary'` fields and builds the two roll-up indexes (`byChild`, `byParent`). Those indexes are what `recomputeSummaries()` consults after every insert / update / delete to decide which parent roll-ups a child write must recompute.\n\nAn empty `objects` therefore means **no roll-up is ever recomputed** — every parent summary field silently keeps a stale value, with nothing logged and every write reporting success. Same shape as #9002's two seams and #8895's probe: a read that could not run is answered with an invented \"there is nothing here\", where \"nothing\" and \"unreadable\" have opposite consequences.\n\n## The extra property this one has: the invented emptiness is CACHED\n\n`ensureSummaryIndexes()` rebuilds only when the registry's `objectRevision` has moved since the index was built:\n\n```ts\nconst revision = (this._registry as unknown as { objectRevision?: number })?.objectRevision;\nconst stale = typeof revision === 'number' && revision !== this.summaryIndexRevision;\nif (!this.summaryIndex || !this.summaryIndexByParent || stale) { … }\n```\n\nSo a single failed read does not degrade one write — it installs an empty index and **stamps it with the current revision**, and every subsequent write reads that cached emptiness until some unrelated registry change bumps the revision. The `?? []` on the optional call has the same effect for a registry that does not implement the method at all.\n\nThat is the same failure the `ensureSummaryIndexes` docblock already records as a shipped incident from the other direction (an index built before a published object existed, so a roll-up shipped empty over correct metadata — cloud#970). The `catch` re-opens that outcome through a different door.\n\n## Why this is filed as an observation, not a defect card\n\nSame dormancy argument #9002 was graded on, re-derived here: `SchemaRegistry.getAllObjects()` is a walk over in-memory `Map`s calling `resolveObject()`, which returns `undefined` on every failure branch it models and never throws; the fold below it (`foldExtendersOntoDefinition` to `mergeObjectDefinitions`, `scalarOverridesPackagedBase`) is spreads and comparisons. No I/O, no driver, no `throw` on the measured path — so there is no measured way to make this `catch` fire from a running deployment today.\n\nOne caveat worth recording, because #9002 measured it: the `catch` also absorbs **structural** failures, not just thrown ones. A registry double that omits `getAllObjects` reaches this seam as a `TypeError` — and that is not hypothetical, `engine-middleware-operation-vocabulary.test.ts` ships exactly such a double, and its omission was invisible until #9002 removed the two cascade swallows (three tests went red at once). Here the `?.()` swallows the same omission without even needing the `catch`.\n\n## Suggested disposition (triage's call, not mine)\n\nNot obviously the same answer as #9002's. There the ruling was *propagate, because an unreadable registry is never truthfully \"no relations\"* and the seam guards referential integrity, so failing the write is the truthful outcome. A roll-up index is a **derived aggregate**, not an integrity guard, and \"fail every write because the summary index could not be built\" is a genuine judgement call rather than a mechanical consequence — which is why #9002 left it alone rather than riding it in. The cheaper half is uncontroversial regardless of that call: the invented emptiness must not be **cached** as if it were a measured answer, and it must not be silent.\n\nRelated: #9002 (the two cascade seams, same file, same class), #8895 (the dependents-probe fix that ruled the family *discriminate or propagate*), #8845 (the gate blind spot that keeps this shape invisible to `check:durability-log-level`).\n\nDeliberately **not** included: `announceMigrationGates()`'s walk over `getAllObjects()` in the same file also sits inside a `try`/`catch`, and that one is judged benign here rather than left unexamined — it emits a one-shot advisory log at `kernel:bootstrapped` and writes nothing, so a swallowed failure costs an advisory and no data.\n"
+}

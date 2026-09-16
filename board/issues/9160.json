@@ -1,0 +1,34 @@
+{
+  "number": 9160,
+  "kind": "issue",
+  "title": "objectql: the value-bearing-diagnostic list in `driver-fault-redaction.ts` has one entry and no way to notice a second is missing (observation)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-16T16:20:28Z",
+  "updated_at": "2026-08-17T10:10:45Z",
+  "closed_at": "2026-08-17T10:10:45Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9160",
+  "body": "Filed unassigned from #8823's implementation (PR pending). Observation-class: nothing here is measured off a thrown error, which is exactly why it is a card and not a patch. Duplicate-searched first (keyword + file path over open issues): no existing card.\n\n## What #8823 established\n\n`redactStatementFromMessage` (`packages/objectql/src/driver-fault-redaction.ts`) keeps the database's diagnostic after the statement cut, on the premise that the diagnostic names **identifiers**. #8823 measured one family where that premise is false — MySQL's `ER_DUP_ENTRY` (1062) inlines the conflicting **value** — and its fix redacts that one value slot while keeping the index name.\n\nThat fix introduces a small list of value-bearing templates. **It has exactly one entry**, and the source states the rule for adding a second: a dialect's spelling goes in once measured off a thrown error, never from a reading of the manual (the standing rule in `packages/types/src/unique-violation.ts`).\n\n## The gap this records\n\nThe list is correct and the rule is right. What does not exist is any way to **notice** a missing entry. Nothing measures whether a diagnostic a driver produced carries a value; the single entry got there because a human read one template closely, and the next one will need the same accident.\n\nTwo families that read like candidates, both **from the manual and therefore deliberately NOT added** by #8823's PR:\n\n- MySQL `ER_TRUNCATED_WRONG_VALUE_FOR_FIELD` (1366) — `Incorrect integer value: 'abc' for column 'age' at row 1`. The first slot is the caller's value; the second is an identifier.\n- Postgres `invalid input syntax for type integer: \"abc\"` — a caller value on `error.message`, unlike the unique-violation case where Postgres' value sits on `error.detail` and is saved only by `Logger` not serializing that field.\n\n⛔ Neither is a claim that these leak. Neither has been raised off a live server here, so under the standing rule neither may be added, and both may be phrased differently in practice than the manual says.\n\n## What would actually close this\n\nNot \"add the two above\". Probably one of:\n\n- a probe that raises each candidate family against the live MySQL/Postgres services CI already stands up, and records the real phrasing — which converts these from manual-reading to measurement and makes them addable;\n- or a decision that the redactor's contract should invert for this one slot (keep an allowlist of identifier-shaped tails rather than a denylist of value-bearing ones) — a wider contract change with its own cost, since over-matching deletes the diagnostic an operator came for.\n\nThe second is a real design question and is **not** something #8739's ruling covers, which is why this is filed rather than decided.\n\n## Related\n\n- #8823 — the card this came out of; its scope was the one measured phrasing.\n- #8682 / PR #8737 — the cut, and the debuggability property it deliberately kept.\n- #8739 / PR #9030 — MySQL as a supported deployment target, and the leak predicate's MySQL limbs (a different predicate; it answers \"is this a dump?\", not \"which span is a value?\").\n"
+}

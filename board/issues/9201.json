@@ -1,0 +1,34 @@
+{
+  "number": 9201,
+  "kind": "issue",
+  "title": "技能卡：PM token 纪律——座位贴节流、定向读取与派发词瘦身（净零增长）",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-17T01:31:15Z",
+  "updated_at": "2026-08-17T05:22:40Z",
+  "closed_at": "2026-08-17T05:22:16Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9201",
+  "body": "## 出处\n\nspec 席复盘（11 轮 17 落地）的 token 优化建议，维护者转 skills 席评估后批准（2026-08-17）。维护者附加约束（原话）：「同意，但是要小心 skills 增长过快。」——落为本卡「增长护栏」硬约束。\n\n## 收录内容（skills 席评估定稿：6 条照收，2 条修正后收）\n\n1. **座位贴节流**：刷新点 = 轮次边界（派发时、收班时、暂停/交接前——接管场景是座位贴存在的理由，边界刷足以覆盖）；中途状态由卡上 claim/ACCEPT 评论承载（本就是 state of record）。写后读回降级为**风险定向**：正文含尖括号/HTML 注释才读回；标签写恒读回；**多席可写面恒读回**（防竞态覆盖，不只防 sanitizer）。\n2. **PR 读取纪律**：状态核验用最小字段（search/list + `fields`）或等事件；`mergeable_state` 只在入队决策点 `get` 一次；⛔「又查又等」双份支出（与既有 flip 定点条款互引，不另立第二份）。\n3. **门禁读取（修正版）**：阴性筛查用廉价聚合（`blocked`/`dirty` ⇒ 再定位）；**放行判据仍是承载门禁 job 的 conclusion**——按名定向读单条，⛔ 不拉全表；全表只在定位失败时拉。⛔ 不推翻「gate JOB conclusions, never aggregate status」既有读数。原建议「draft + `mergeable_state: clean`」组合不存在（draft PR 该字段值为 `draft`），不收。\n4. **终报去重**：os-dev 终报保留机器可核字段（gates / line_budget / deviations / files_changed——这些让 PM 复核免回拉 PR body），⛔ 复述 PR body 叙事段；派发词模板加该要求一句。\n5. **派发词瘦身（分层版）**：砍 hook 已机械强制段（worktree-first / never-stash）与 os-dev.md 已载通用段（push 重试、语言、releases 禁令）；⛔ 不砍卡类特有约束（ADR 类 draft-only、tier 推导引用、棘轮实况、⛔ 释义纪律）。\n6. **记账**：座位贴落地清单即账本，逐轮即时记账；确需全仓核对时首选 `head:claude/` 精确过滤。\n7. **ACCEPT 短格式**：核对清单 + 抽查结果 + 偏差，论证指向 PR 本身。\n8. **巡逻枪短模板**：幂等开头 + 关键判据保留，其余指针化（座位贴为唯一状态源）。\n\n「不该省」清单（认领前全线程读、竞态复读、标签 30 秒读回、落地内容探针、承重主张 `git show`/`git grep` 抽查）为既有纪律，⛔ 不动。\n\n## 实施面\n\n- `.claude/skills/pm-dispatch/SKILL.md`（座位贴刷新点、ACCEPT 格式、派发词模板段、终报要求）\n- `references/seat-post-protocol.md`（刷新点 + 读回降级）\n- `references/platform-readings.md`（最小字段读法、定向 job 读法）\n- `references/landing-operations.md`（仅当与 2/3 条互引需要时微调，尽量不动）\n\n## 增长护栏（硬约束，出处见上）\n\n- 目标**指令面合计净行数 ≤ 0**：多数条目是把既有冗长行文**改写为更短版本**（读回纪律行、派发词模板段、巡逻枪写法），不是追加。\n- ⛔ 抬任何天花板；⛔ 用 re-wrap（折行合并）筹行——该方式待维护者单独定性，本卡不使用。\n- 某条目无法在净零内落地 ⇒ 削减其范围或弃收，PR body 报告取舍，⛔ 硬塞。\n\n## 排序与档位\n\n- 硬串行：排 PR #9194、#9197（均已入队）合并之后，基线必须含两者。\n- 条款①路径强制档位，`--tier` 推导引用。ADR 类终局三步，PR 挂起等维护者手工合并。\n\n## Credit\n\n观察与量化：spec 席（session_01225pUjnCKWqxcc1PeqKFUq 复盘）。评估修正与实现：skills 席。"
+}

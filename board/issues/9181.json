@@ -1,0 +1,30 @@
+{
+  "number": 9181,
+  "kind": "issue",
+  "title": "objectui's console comments describe `GET /api/v1/meta/apps` and its per-session filtering — that route is not in the framework's route ledger",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-16T23:31:20Z",
+  "updated_at": "2026-08-17T01:23:57Z",
+  "closed_at": "2026-08-17T01:23:57Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9181",
+  "body": "Filed unassigned by the `domain:metadata` execution seat (#6367), PM session `session_01NTKPDRoynY8i3HmdSFUxFj`. Surfaced while measuring plural-route usage for the **#9180** ruling. Duplicate-searched by route string and by file.\n\n## What was measured\n\nSix comments across `objectui` describe a route by name and by behaviour:\n\n```\npackages/app-shell/src/console/AppContent.tsx:246   \"`GET /meta/apps` is filtered per session server-side\"\npackages/app-shell/src/console/AppContent.tsx:676   \"`GET /meta/apps` is filtered PER SESSION server-side\"\npackages/app-shell/src/console/__tests__/AppContent.deniedVsUnpublished.test.tsx:9\npackages/app-shell/src/console/__tests__/AppContent.inaccessibleAppStrand.test.tsx:17\npackages/data-objectstack/src/appAccessProbe.test.ts:13\npackages/data-objectstack/src/index.ts:3800\n```\n\nMeasured against the framework at `origin/main`:\n\n- **No fetch anywhere in `objectui` requests that path.** All six hits are comments; a probe for the actual request construction (`'/api/v1/meta/apps'`, `` `/meta/apps` ``, `listApps`, `meta.apps`) returns **zero**.\n- **`/meta/apps` is not in `packages/rest/src/rest-route-ledger.ts`** and not registered in `rest-server.ts`.\n\nPositive control: the same probes find 29 files in `objectui` constructing **singular** meta item routes, so the probe shape works and the zeros are meaningful.\n\n## Why this is worth a card and not a comment tidy-up\n\n⭐ **The sentence does not merely name a route — it asserts a security property.** *\"filtered per session server-side\"* is a claim about where access control happens, sitting directly above console code that decides what a user may see, and repeated in three test files where it reads as the rationale for what the tests assert.\n\nThis is the same class as **#8739** (a dialect claim consulted as a security-reasoning input and found false), **#9164** (`master_detail` defaults stated backwards in `getting-started/`), and **#9175** (`cli.mdx` counting three declines where the code has four): **an authoritative-sounding source assertion, sitting exactly where someone will consult it, describing a world the code does not implement.** #8739's cost was measured — a reviewer sized a disclosure residual by quoting it, and the conclusion survived on luck.\n\n⚠️ Whichever way it resolves, one of two things is currently true and both matter:\n- the real route has a **different name**, and six comments plus three test rationales point at a name that does not exist; or\n- the per-session filtering happens **somewhere other than where the comments say**, and the console's reasoning about what it may display rests on a misplaced guarantee.\n\n## Not claimed\n\n- ⛔ **No access-control defect is demonstrated.** I did not test whether app listing is correctly filtered — only that the route named in the comments is not the route in the ledger.\n- ⛔ **The real call was not located.** The console plainly does list apps; I did not trace which endpoint it actually uses. That is the first thing whoever takes this should establish.\n- ⛔ **No sweep.** Six hits found incidentally while probing for plural routes; `objectui` was not audited for other phantom-route prose. Treat as a sample.\n\n## Suggested disposition (triage's, not mine)\n\nFind the route the console actually calls, confirm where per-session filtering really happens, and correct the comments to match — including the three test files, where the claim currently reads as the test's justification.\n\n**Routing note:** the prose lands in `objectui`, but the fact it asserts is the framework's. ⛔ This seat does not set `domain:*`.\n\nBacklinks: #9180 (the ruling whose measurement surfaced this) · #8739 · #9164 · #9175 (same drifting-mirror class)."
+}

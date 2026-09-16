@@ -1,0 +1,36 @@
+{
+  "number": 9055,
+  "kind": "issue",
+  "title": "`realtime-protocol.mdx` says the authz conformance matrix \"enforces this in CI\" for per-recipient realtime authorization — the tripwires force classification, they cannot check the re-check exists",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:devx",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-16T07:40:29Z",
+  "updated_at": "2026-08-16T09:17:51Z",
+  "closed_at": "2026-08-16T09:17:51Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9055",
+  "body": "Filed **unassigned and unlabelled for triage routing** by the dev seat on #9028 (session `session_011RB4waLuNbdruCo6X9oobm`), branch `claude/issue-9028-authz-doc-overstatement`. Not a claim — found while sweeping `content/docs/**` for the same overstatement class #9028 fixes on `authorization.mdx`. Out of that card's file surface (it lands in `content/docs/permissions/`, this is `content/docs/protocol/kernel/`), so recording rather than fixing.\n\n## The claim\n\n`content/docs/protocol/kernel/realtime-protocol.mdx:15`, inside the v1 implementation-status callout, after stating the admission requirement:\n\n> **Identity admission (framework#2992, ADR-0096 D4):** … Before any client transport ships, delivery must re-check each subscriber's authority (RLS/FLS/tenant) per event — the subscribe-time permission check shown below is *not* sufficient — or switch to id-only payloads with client re-fetch. **The authz conformance matrix (`realtime-delivery-authz` row + transport tripwires) enforces this in CI.**\n\n\"this\" is the antecedent sentence: the per-recipient RLS/FLS/tenant re-check on delivery.\n\n## Measured against `origin/main` at `2ce1eb41b`\n\nNothing in CI can check that requirement, and the matrix says so itself.\n\n1. **The row is `experimental`, not `enforced`.** `packages/qa/dogfood/test/authz-conformance.matrix.ts:166` — `state: 'experimental'`, one of only two experimental rows in the file. Its summary is the *absence* of the property: \"realtime delivery fan-out has NO per-recipient authorization — trusted server-internal subscribers only\".\n\n2. **The tripwires force a classification decision, they do not verify an implementation.** The row's own note (`:168`) states the mechanism precisely:\n\n   > The transport tripwire probes in authz-conformance.test.ts turn a wired transport into an UNCLASSIFIED surface → red CI **until this row is upgraded with the enforcement site.**\n\n   So wiring a WebSocket/SSE transport reddens CI because a new key appears with no `covers` — a demand that somebody classify it. Upgrading the row with an enforcement site turns CI green again. Whether the per-recipient re-check was actually written is judged by the human editing the row, not by the gate.\n\n3. **The tripwire population is 5 named files**, not the realtime surface generally — `in-memory-realtime-adapter.ts` (`handleUpgrade`), `realtime-service-plugin.ts` (`handleUpgrade` / `WebSocketServer` / `text/event-stream`), `http-dispatcher.ts` (`handleRealtime|Upgrade|Subscribe`), `client/realtime-api.ts` (`WebSocket` / `EventSource`), `rest-server.ts` (a `/realtime` route literal). A transport wired in any other file produces no key and no failure.\n\n4. The one non-tripwire key the row does carry, `realtime:in-memory-realtime-adapter.ts:publish(trusted-fan-out)`, is pinned by `/async\\s+publish\\s*\\(/` — it pins that the method exists, not that any authorization runs in it.\n\n## Why it is worth a card\n\nSame shape as #9028 one page over, and arguably worse-placed: this sentence sits inside a callout whose whole job is to tell a reader \"do not trust the sections below as shipped\". A reader who accepts the callout's honesty about the transport being unbuilt will equally accept its claim that CI is holding the line on delivery authorization — and that is the one sentence in the callout that measurement does not support. The audience is the person deciding whether it is safe to wire a realtime transport.\n\nSuggested direction (not a ruling): say what the tripwires do — a wired transport turns into an unclassified surface and reddens CI *until the row is upgraded with its enforcement site*, which forces the decision in front of a reviewer rather than proving the re-check exists. That preserves the genuine anti-regression value (the tripwire really does fire) without promising a check nobody wrote.\n\n⛔ Prose only — no gate, row or tripwire behaviour should change to close this.\n\nRelated: #9028 (the same class on `authorization.mdx`, in flight) · PR #9026 (the internal narrowing under the #8711 Option A ruling) · #8711 · ADR-0096 D4 · framework#2992."
+}

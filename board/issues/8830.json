@@ -1,0 +1,34 @@
+{
+  "number": 8830,
+  "kind": "issue",
+  "title": "pm-dispatch: the wave-checkpoint rule gates the next wave on a maintainer-executed /compact — over-broad for remote sessions; keep the flush, drop the human gate",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-15T05:53:34Z",
+  "updated_at": "2026-08-16T04:31:37Z",
+  "closed_at": "2026-08-16T04:31:31Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8830",
+  "body": "Filed and claimed by the `repo:objectui` seat (session `session_01RnQd8iMMUwXQEV1crFmQiQ`, 2026-08-15) under the maintainer direct-command channel — the maintainer challenged this rule in the live PM session. Verbatim provenance (untranslated, 2026-08-14/15, this session):\n\n> 「继续，加快进度，最多并发5个子任务」\n> 「哪里来的波次纪律？为什么要等我执行压缩，你乱说的吧？」\n> 「你说你承认\"在本环境里执行得过于机械\"，以后还会遇到这种问题等我而中断？」\n\n## The defect\n\n`.claude/skills/pm-dispatch/SKILL.md`, section 轮次报告与节奏, sub-section **波次收工点(维护者 2026-08-09 裁定)** prescribes: ① 收工点 = 在飞归零 → ② 存档 flush → ③ `/compact` 由维护者执行 → ④ 压缩后再派下一波,⛔ 不抢派.\n\nSteps ③④ were written for terminal PM sessions, where `/compact` is human-only and a mid-review auto-compaction can lose in-context judgments. Applied literally in a **remote session** (auto-summarized, often unattended), they convert a safety checkpoint into an idle stop waiting for a human who is not watching — measured in this seat's session: the seat halted at in-flight-zero on 2026-08-14 until the maintainer asked why it had stopped, twice.\n\n## The amendment (direction, for the drafting dev)\n\n- **Keep** ① and ② unchanged — the in-flight-zero checkpoint and the flush-judgments-to-GitHub obligation are correct everywhere (they are what makes ANY compaction, manual or automatic, lossless).\n- **Replace** ③④: after the flush, the seat **proceeds to the next wave immediately**. A maintainer-executed `/compact` at a flush point remains a terminal-session optimization the maintainer may perform, never a dispatch precondition. ⛔ Waiting for it is removed.\n- Preserve the existing provenance format: the 2026-08-09 ruling stays cited as superseded-in-part by the 2026-08-14/15 ruling quoted above.\n\n## Constraints (binding, from the skill's own guardrails)\n\n- The skill's line-count ratchet (`check:pm-skill-ratchet`) only goes down — the rewrite must be net non-increasing.\n- No issue numbers in operational text (`check:pm-skill-id-lint`).\n- Any card touching `.claude/skills/pm-dispatch/**` runs on `claude-fable-5` (mandatory tiering clause).\n- Skills changes are ADR-class: the PR is drafted and pushed by the dev, reviewed by this seat on the card, and **left hanging for the maintainer's manual merge** — the AI never merges/queues it. That merge is the maintainer's veto window on this very amendment."
+}

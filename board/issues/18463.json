@@ -2,7 +2,7 @@
   "number": 18463,
   "kind": "pull_request",
   "title": "docs(pm-skill,checklist-test): the --tier instruction lines carry --repo so a not-yet-written path derives a tier",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
   "draft": false,
   "author": {
@@ -20,10 +20,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-09-16T13:00:44Z",
-  "updated_at": "2026-09-16T14:18:00Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-09-16T14:39:56Z",
+  "closed_at": "2026-09-16T14:39:54Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-09-16T14:39:54Z",
   "comments": 1,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/18463",

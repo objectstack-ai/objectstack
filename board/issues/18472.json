@@ -1,0 +1,30 @@
+{
+  "number": 18472,
+  "kind": "issue",
+  "title": "[audit] gate census — every check-*.mjs, check:* script, hook and required job on one table: what it guards, real catches since landing, blast radius — and the retirement list (maintainer ruling F)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-16T14:37:05Z",
+  "updated_at": "2026-09-16T16:15:55Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/18472",
+  "body": "Filed and dispatched by the director seat (summon #24, `session_01Wj1HUjzyeiBQ8atRf1ZhaL`) under the maintainer's ruling **F** on the direct channel, 2026-09-16 ~14:4xZ — question, verbatim: 「现在有各种门禁的开发在浪费我的各种时间,我们的项目是不是门禁用的太重了。有这个必要吗?」; reply to the three-part proposal, verbatim: 「F」. ⛔ No `domain:*` set by the filer: the deliverable is a report under `docs/audits/**` (无固定归属,按落点分诊) — triage names the lane; the director dispatches directly under the order.\n\nDedup terms: `gate census` · `门禁普查` · `check-*.mjs inventory` · `retirement list` · `zero-catch gate`\n\n## The readings that produced the ruling (director, origin/main, 2026-09-16)\n\n| reading | value |\n|---|---|\n| `package.json` `check:*` scripts | **164** |\n| `scripts/**/check-*.mjs` files | **182** · `.github/workflows/lint.yml` **6,599 lines** · 37 workflows · 12 `.claude/hooks/*` |\n| first-parent merges on main, last 7 days | **597**, of which **255 (42%)** are gate/process-shaped (pm, hooks, ratchets, self-tests, dispatch, governed audits) |\n| `dispatch-gates.mjs` families | 52, of which **13 run only their own `--self-test`** and cannot judge a diff |\n| protocol asymmetry | `SKILL.md:391` puts **weakening** a gate on the human floor; **adding** one is free (具名不升级类「门禁内部参数与扫描器盲区修复(加强,非削弱)」) ⇒ a one-way ratchet toward more gates |\n\n## Deliverable — ONE table, report-only, no gate removed in this PR\n\n`docs/audits/gate-census-2026-09.md`, one row per gate, where a gate = each `scripts/**/check-*.mjs` (and `packages/*/scripts/check-*.mjs`), each `package.json` `check:*` script that is not a thin alias of one of those, each `.claude/hooks/*`, and each job/context in main's `required_status_checks` (read via `GET /repos/objectstack-ai/objectstack/rules/branches/main`). Columns:\n\n1. **name** (path or script)\n2. **class** — `contract` (validates a published `packages/spec` contract or generated artefact) · `correctness` (typecheck, unit/integration tests, build) · `process` (PM loop, hooks, ratchets, governed audits, checker self-tests, labelers)\n3. **guards** — the published contract path, the incident/card number that produced it, or `none`\n4. **required** — is it (or the job that runs it) in main's required contexts? does its failure red a whole-repo job (`Lint & Repo Gates` style) or a path-scoped one?\n5. **real catches since landing** — count of PR CI failures attributable to THIS check on PRs other than the one that introduced/edited it, excluding its own `--self-test`; method: Actions runs (`event=pull_request`, `conclusion=failure`) since the gate's landing commit, job annotations / first error line naming the check (MCP `get_job_logs` read tool is allowed; the REST log redirect is proxied 403). Where the count cannot be taken in the budget, write `unmeasured (<why>)` — ⛔ never a guessed number.\n6. **verdict** — `keep` (contract or correctness, or a process gate with ≥1 real catch that names a published contract) · `report-only` (advisory today, no fail-closed role) · `retire` (process class, zero real catches, guards no published contract)\n\nPlus three sections: **retirement list** (the `retire` rows, each with the files to delete and the rosters/workflow lines to update), **report-only list**, and **method + limits** (what was sampled, what was not).\n\n## Rules of the census\n\n- Zod validation inside `packages/spec` and the runtime is the PRODUCT, not a gate — out of scope, and the report says so in one line.\n- The merge_group governed guard (`check-governed-queue-guard.mjs`) is the maintainer's approval mechanism — `keep`, by ruling.\n- Fixture files, mirrors and generated baselines are counted as what they serve, not as gates.\n- The first retirement instance is already ruled: objectstack#18095 → E (`check-reference-carrier-shape` retires; its one real defect class moves to the reader's fail-loud). List it as `retire (ruled)`.\n- ⛔ No removals in this PR; the retirement batch follows as its own card(s) after the maintainer's one-word 「认可」 on the table (the director presents it as a governed-audit batch).\n\n## Acceptance\n\n- The table's row count equals the union of the four inventories (state the four counts and the union; a row missing from the union is a defect).\n- Every `retire` row has `catches = 0` or `unmeasured (<why>)` AND `guards = none`; every `keep` row states why in column 3 or 5.\n- Normal PR (docs path); `skip-changeset`.\n\nRefs #18468 · #18470 · #18095 · the protocol-flip card filed alongside\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

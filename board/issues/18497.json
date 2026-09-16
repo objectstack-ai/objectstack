@@ -1,0 +1,32 @@
+{
+  "number": 18497,
+  "kind": "pull_request",
+  "title": "docs(audits): gate census 2026-09 — 225 rows on one table, retirement list, report-only (ruling F)",
+  "state": "open",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-16T16:04:41Z",
+  "updated_at": "2026-09-16T16:49:24Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/18497",
+  "body": "Fixes #18472\n\n`skip-changeset`: the diff is one file under `docs/audits/`, which no released package's `files[]` ships.\n\n## What this is\n\nThe gate census the maintainer's ruling **F** asked for, verbatim 「F」 on 「现在有各种门禁的开发在浪费我的各种时间,我们的项目是不是门禁用的太重了。有这个必要吗?」 — **one table, report-only**. No gate is removed, disabled or edited by this PR; the retirement batch is its own card(s) after the maintainer's one-word 「认可」 on the table.\n\n`docs/audits/gate-census-2026-09.md`:\n\n- **Inventories**: ① 182 check files (`scripts/**/check-*.mjs` 178 + `packages/*/scripts/check-*.mjs` 4) · ② 26 root `check:*` scripts that are not a thin alias (of 164; 138 collapse onto their file row) · ③ 10 hooks (5 PreToolUse guards + 5 self-tests; the base tree had 12 — #18478 removed the enqueue guard on `main` after the base) · ④ 7 required contexts (read from `GET /repos/objectstack-ai/objectstack/rules/branches/main`) → **union = 225 rows**, the table has 225 rows.\n- **Verdicts**: **retire 59** (58 rule-derived + `retire (ruled)` for `check-reference-carrier-shape.mjs`, objectstack#18095 E) · **report-only 16** · **keep 150** (133 plain, 2 ruled — the governed queue guard and its context —, 5 too new to judge, 5 session hooks + 5 hook self-tests).\n- **Classes**: process 115 · contract 60 · correctness 50.\n- **Column 5 (real catches)**: sampled over the last 30 days of failed PR CI (2026-08-17..09-16): 1,230 failed runs in the eight PR-triggered gate workflows, 1,287 failed jobs read step-by-step, 1,287 annotation reads, 9 sampled job logs, attribution by step name, split by annotation tag where a step hosts several gates, counted as distinct PRs, PRs that edited the gate's own file excluded. Every zero is a measured zero; every `unmeasured` names why; no count is guessed.\n- **Three sections**: retirement list (per row: files to delete, root scripts to drop, workflow `file:line`, count of other references to fix; a nine-row CI-integrity sub-group presented as one decision), report-only list, method + limits (incl. what is outside the four inventories: 70 per-package `check:*`, 31 workflow-direct non-`check-*` steps, two inline workflow gates — the inline `Require a changeset` step alone reddened 107 PRs).\n- Zod validation inside `packages/spec` / the runtime is the product, out of scope, said in one line.\n\nStanding verdicts recorded as given: `check-governed-queue-guard.mjs` = `keep (ruled)`; `check-reference-carrier-shape.mjs` = `retire (ruled)`.\n\n## Acceptance notes\n\n- Dispatch-derived gates (`node scripts/pm/dispatch-gates.mjs --commands docs/audits/gate-census-2026-09.md`, 17 families) all exit 0 on the merged tree except `pnpm check:cross-package-test-inputs` (exit 1, at the base and again on the merged tree): its finding names `packages/cli/test/init-created-files-summary.e2e.test.ts` walking `packages/spec/dist/` with no declared glob — not a path this diff touches (one docs file). Reported to the seat in the dev report for filing; not fixed here (scope rule).\n- `pnpm --filter @objectstack/lint run check:doc-formula-expressions` first answered exit 3 (PREREQUISITE NOT MET: `@objectstack/formula` and `@objectstack/lint` not built) — built both through the verify lock and re-ran: exit 0.\n- noted, not filed: the four inventories the card defines leave 31 workflow-direct gate steps and two inline workflow gates without a row; the census names them in Method so the union stays honest. 承接者: the director's retirement batch (it decides whether a ⑤ is worth a follow-up census).\n- noted, not filed: two of the 25 `Docs anchors resolve to real headings` step failures could not be attributed between `check-doc-anchors.mjs` and `check-system-context-census.mjs` (no tag in the annotation); recorded as `unmeasured` on the doc-anchors row. 承接者: none.\n- Drift: `origin/main` moved seven commits before this PR opened; the branch merged `bf61f0a1` and the census was re-derived on the merged tree (Drift paragraph in the file). #18481 (the protocol flip: a census-marked retirement becomes class-1) landed in that range and is the other half of ruling F.\n- Local verification scope: no package is touched, so no build/test closure is owed; `packages/spec`, `@objectstack/formula` and `@objectstack/lint` were built only as prerequisites of the derived gates. Repo-wide scans (`pnpm lint`) are CI's.\n\n## 维护者速读(草稿)\n\n**改了什么**:新增一份审计文档 `docs/audits/gate-census-2026-09.md`,把仓库里全部门禁放到一张表上:182 个 `check-*.mjs`、26 个非别名的根 `check:*` 脚本、10 个 `.claude/hooks` 文件、7 个 main 分支必过的 CI 上下文,合计 225 行。每行六列:名字、类别(contract / correctness / process)、守的是什么契约、是否必过与波及面、落地以来真实抓到过几次(近 30 天 1,230 次失败的 PR 运行逐步归因,去掉门禁自己的 PR)、结论。⛔ 本 PR 不删、不停、不改任何门禁。\n\n**为什么改**:您在直连通道的裁决 **F**(「门禁是不是用的太重了」→ 先普查、再按表退役)。这张表就是普查结果:**59 行建议退役**(其中 1 行 `check-reference-carrier-shape` 是 #18095 已裁 E),**16 行只是报告不拦合并**,**150 行保留**(含您已裁定保留的治理队列守卫)。波及面最大的三处:`check-changeset-no-major`(Clause-② 等级规则,30 天红了 **74 个 PR**)、`check-partof-closing-keyword`(**31 个 PR**,但它只在非必过的工作流里跑)、`check-system-context-census`(必过、全仓,**21 个 PR**)。表外还有一个最大的红源:`pr-automation.yml` 里的内联「Require a changeset」步骤,30 天红了 107 个 PR。\n\n**风险与代价(含回滚)**:本 PR 只加一份文档,零运行时改动,回滚即删除该文件。真正的代价在下一步:退役清单里有 9 行是「CI 自身接线」的守卫(必过上下文名字钉、聚合器 needs 花名册、Node/pnpm 获取、self-test 接线等),按规则它们 30 天零抓获所以列为退役,但它们的价值是威慑而非抓获——表里把这 9 行单独成组,供您一次决定。抽样只有 30 天:一季度才响一次的门禁会读成零。\n\n**席位意见**:(留空,席位定稿)\n\n**你要做的**:读表,认可则回一个字「认可」;若对某行有异议(尤其 CI 接线 9 行组、以及 5 个会话 hook 的保留),点名该行即可,director 会把退役批次按您的意见立卡。\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01Wj1HUjzyeiBQ8atRf1ZhaL)_"
+}

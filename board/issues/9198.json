@@ -1,0 +1,35 @@
+{
+  "number": 9198,
+  "kind": "issue",
+  "title": "ADR-0049 enforce-or-remove: `targetVariable` on `element:text_input` / `element:record_picker` — a declarative hint with zero readers in any repo and no liveness-ledger entry",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-17T01:26:48Z",
+  "updated_at": "2026-08-17T04:08:52Z",
+  "closed_at": "2026-08-17T04:08:52Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9198",
+  "body": "Filed by the triage seat (scheduled round 2026-08-17) as the enforce-or-remove channel for objectstack-ai/objectui#3834, whose grading history reached this route after its sibling card resolved by retirement.\n\n## The declared-but-unenforced shape\n\n`packages/spec` declares `targetVariable` on two elements (`packages/spec/src/ui/component.zod.ts:1635/:1743/:1810` at 2026-08-17 origin/main; also listed in `authorable-surface.base.json` and `authorable-surface/ui.json`). Its own describe text says it is a *declarative hint*: \"Page variable this input writes to. Declarative hint; the live binding resolves via the variable whose `source` equals this component id (see PageVariableSchema).\"\n\nMeasured (objectui#3834, re-verified 2026-08-17 against objectui origin/main):\n- **Zero production readers in objectui** — the only hits are the reverse-parity gate's exemption block (`apps/console/src/__tests__/registry-inputs-spec-parity.test.ts:545-556`, citing objectui#3834) and CHANGELOG lines. The live binding runs the other direction (`usePageVariableBinding(schema?.id)` reverse-looks-up `PageVariableSchema.source`), which works and matches the spec's own description.\n- **No entry for it in any liveness ledger / ADR-0087 registry** (grep across `packages/spec`, `docs/adr`, `docs/audits` — zero hits outside the schema and generated surface files).\n\n## Why this card, and why now\n\nThe hazard was written on objectui#3834: an author (human or AI) who reads the manifest will write `targetVariable`, skip the variable's `source`, and get an input that writes nothing, with zero diagnostics. The card sat as a hold pending a publish-vs-retire pick; the deciding precedent has since landed — objectui#3829, the paired inert-hint card, resolved via the **retirement route** (objectui PR #4794, commit `183d09b`).\n\n## The work\n\nRun the ADR-0049 enforce-or-remove flow for these two keys (both shapes identical — one disposition covers both):\n1. Establish the liveness verdict properly (the `spec-property-retirement` playbook's ledger discipline — the measurement above is a lead, not a ledger row).\n2. If the verdict is dead: retire via the standard route (ADR-0087 conversion, tombstone, generated baselines/forms/docs, pin tests) — the removal decision inside that flow follows its own maintainer gates as usual.\n3. If instead the disposition is \"publish as intent metadata\": the describe text must state explicitly that authoring it alone binds nothing (objectui#3834 records why the silent-no-op risk makes this the weaker option).\n4. objectui follow-through rides the outcome: drop the parity-gate exemption block either way (objectui#3834 is `pm:blocked` on this card).\n\nBacklinks: objectui#3834 (origin, full analysis and grading history) · objectui#3829 → objectui PR #4794 (the sibling settled by retirement) · ADR-0049 · ADR-0087."
+}

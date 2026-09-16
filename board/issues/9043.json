@@ -1,0 +1,34 @@
+{
+  "number": 9043,
+  "kind": "issue",
+  "title": "pm-dispatch: `pm:on-hold` carries no machine-readable restart condition — 16 holds have no exit at all, and #8449's actively-held vs stable-ruled split was never implemented",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-16T07:25:38Z",
+  "updated_at": "2026-08-16T09:34:44Z",
+  "closed_at": "2026-08-16T09:34:21Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9043",
+  "body": "Filed on the maintainer's direct instruction (2026-08-16, live PM session). Maintainer's words, verbatim: 「开 skills 卡」 — accepting the two changes below after an on-hold census run this session. **Unassigned — recording, not claiming.** SKILL text is ADR-class and human-merged, so this is the skills lane's input, not a dispatchable code card.\n\n## Measured state (2026-08-16 05:18Z, all three repos)\n\n`pm:on-hold` = **107 cards**, and it is now the largest single state in the fleet:\n\n| repo | on-hold | share of that repo's open backlog |\n|---|---|---|\n| objectstack | **83** | **41%** |\n| cloud | 15 | 27% |\n| objectui | 9 | 5% |\n\nIt is not an aged backlog — **85 of 107 were created this month**, and **38 of 106 comment-threads state outright that the card was migrated from `finding` as a graded hold**. Tracking one repo across this session's own readings:\n\n| objectstack | 08-11 | 08-14 | 08-16 |\n|---|---|---|---|\n| `finding` | 51 | 3 | **2** |\n| `pm:on-hold` | 29 | 66 | **83** |\n\nThe finding pool was not drained, it was **relocated**.\n\n## Gap 1 — #8449 named the split, then put both populations in one bucket\n\n#8449 (closed completed) diagnosed the finding pool precisely:\n\n> the raw count conflates three very different populations: **ungraded** (never had a first verdict; premise accuracy decays in days), **actively-held** (graded, restart conditions live, needs periodic re-verification), and **stable-ruled holds** (maintainer-ruled or verdict-stable; ... explicitly exempted from per-round re-verification on 08-12 because four consecutive passes returned identical results against an unchanged file).\n\nFirst-touch grading separated population 1 correctly — that is why `finding` fell to 2. But populations **2 and 3 were migrated into the same `pm:on-hold` label**, so the distinction #8449 identified — and whose operational consequence it named (*\"re-verification of stable holds eats the budget that ungraded cards need\"*) — is today unrepresentable. A sweep cannot tell a hold whose condition is live from one ruled stable four passes ago.\n\n## Gap 2 — 16 holds have no recorded restart condition, and the rate is rising\n\nCards carrying `pm:on-hold` with no restart condition anywhere in the thread:\n\n```\nobjectstack  #8641 #8672 #8714 #8725 #8760 #8802 #8852 #8276 #8285\n             #5958 #7443 #7497 #7611\ncloud        #797 #987\nobjectui     #2443\n```\n\n**Nine of the sixteen are 8xxx — filed this week.** The rule already exists and seats quote it back verbatim (#8662's grading comment):\n\n> *a hold without a droppable exit is a card nobody can legally revive*\n\nThere is no gate. A hold with no exit is indistinguishable from an abandoned card, and the population is growing.\n\n## What is asked\n\n### 1. Require a machine-readable `Restart-when:` line on every `pm:on-hold` card\n\nClosed vocabulary, one line, same discipline as `Blocked-by:`:\n\n```\nRestart-when: closed #8368\nRestart-when: npm create-objectstack >= 17.0.0\nRestart-when: manual — first real EE customer asking for arm64\n```\n\nThe first two forms let a sweep fire the hold without a human. The third **declares that nothing will fire automatically**, which routes the card to human re-review instead of leaving it to look like the other two. Both halves matter: this session's sweep recovered cloud#1292 and #7644 purely because their conditions happened to be written mechanically (`objectstack#8368 关闭 ⇒ 可派`, `npm view create-objectstack dist-tags`), while cards with equally-fired conditions stayed parked because the condition was prose.\n\n⛔ **Do not decide where the line lives or how the scan reads it here.** That is #8941's question for `Blocked-by:` (body-grep vs seats parking the line in comments to dodge the MCP HTML-entity hazard). **`Restart-when:` adopts whatever channel #8941 lands — do not decide it twice.** #8941 is in flight; this card sequences behind it.\n\n### 2. Add `pm:hold-stable` for the re-verification exemption\n\nOne label carrying population 3, so per-round re-verification budget is spent only on actively-held cards. The precedent is already set and recorded (#8449's 08-12 exemption); this makes it a state rather than a per-card note.\n\n### 3. Gate: refuse `pm:on-hold` without `Restart-when:`\n\nThe only change here that is preventive rather than descriptive, and the only one that closes Gap 2 permanently.\n\n## Explicitly NOT in scope\n\n- ⛔ **No reason-axis labels** (`hold-train` / `hold-demand` / `hold-appetite` / `hold-evidence`). Measured this session: a regex classifier over all 107 threads put 34 cards in a \"release-train\" bucket; manual review found the great majority were false positives — the words `v17` / `GA` appearing incidentally in surrounding prose. **If a regex cannot sort them, a human running a weekly sweep cannot either**, and a label would freeze the misclassification. Reasons also change: #5536's restart-condition ② was retired outright after four measured misses, while its label would have stayed put. The axis that pays is *what can fire this*, not *why is it held*.\n- ⛔ **The objectstack/objectui divergence is a separate question.** objectstack ran #8449's migration (`finding` 2, on-hold 83); objectui did not (`finding` **76**, on-hold 9). `pm:on-hold` therefore means different things in the two repos, and any cross-repo statistic currently adds two unlike things. That needs a maintainer ruling (migrate objectui, or record the divergence deliberately) and is **not** settled by this card.\n\n## Related\n\n#8449 (the three-population diagnosis this completes) · #8941 (in flight; owns the channel decision this defers to) · #8662 (quotes the droppable-exit rule) · #7548 (skills updates are ADR-class, human-merged) · #5536 (a restart condition retired after measurement — why reason-labels rot)\n\nAuthorization: maintainer directive (this session) —「先做 23 张 blocked 解锁 10 张 on-hold 按各自自述处理」· PM session `01JaVVMrSxt7Tgi1uwEuDtH7`\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

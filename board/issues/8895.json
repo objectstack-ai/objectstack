@@ -1,0 +1,35 @@
+{
+  "number": 8895,
+  "kind": "issue",
+  "title": "ObjectQL.cascadeDeleteRelations fails OPEN: a failed dependents probe skips the `restrict` guard entirely, so a delete that should be refused succeeds silently",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-15T15:45:27Z",
+  "updated_at": "2026-08-16T06:15:19Z",
+  "closed_at": "2026-08-16T06:15:19Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8895",
+  "body": "Found while measuring the read-seam census for #8845 (measurement card; no fix attempted there). Filed unassigned. Not a claim.\n\nMeasured on `origin/main` @ `8664a2c`.\n\n## The seam\n\n`packages/objectql/src/engine.ts`, in `cascadeDeleteRelations()` (catch at `:9896`):\n\n```ts\nlet dependents: any[];\ntry {\n  dependents = await this.find(childName, { where: { [fieldName]: id }, context } as any);\n} catch {\n  continue;\n}\nif (!dependents || dependents.length === 0) continue;\n\nif (behavior === 'restrict') {\n  // ... refuse the delete with DELETE_RESTRICTED\n}\n```\n\nThe `continue` is reached whenever the dependents probe fails for any reason. Control then moves to the next child relation, and the effect is exactly as if the probe had returned zero rows:\n\n- `behavior === 'restrict'` never fires, so a delete that the integrity rules say must be refused is **allowed through**;\n- `behavior === 'set_null'` / `'cascade'` never runs, so child rows that should have been nulled or removed are **left orphaned**;\n- nothing is logged and nothing is returned to the caller, so the delete reports success.\n\nThis is fail-OPEN on a referential-integrity guard. The comparable seams in the same family fail closed or report.\n\n## Why it is not caught today\n\n`check:durability-log-level`'s read-seam invention rule classifies a `catch` by the expression it returns. This one returns nothing — it jumps — so there is no expression to classify and the seam is counted in the census and cleared as `no invented answer`. That blind spot is #8845's subject; #8845 measured it and deliberately did **not** extend the rule (the reasons are recorded in the checker's header). So this seam needs fixing on its own terms, not by waiting for a gate.\n\n## Suggested shape\n\nThe repo already has the vocabulary for this: discriminate the error's type and only treat the benign case as \"no dependents\".\n\n```ts\n} catch (error) {\n  if (isMissingTableError(error)) continue;\n  throw error;\n}\n```\n\nA child table that has not been provisioned genuinely has no dependents, so `continue` is truthful there. Any other failure means the guard could not be evaluated, and a referential-integrity guard that could not be evaluated must not silently pass.\n\n## Notes\n\n- Severity judgement is the triage round's, not mine — but of the seams the #8845 census turned up, this is the only one where the invented answer disables an authorization/integrity refusal rather than shortening a report.\n- Related: #8845 (the measurement), #5186 (the rule), #7413 and #7307 (prior cascade-delete work on this function, both closed and neither touching this path).\n"
+}

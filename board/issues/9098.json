@@ -1,0 +1,33 @@
+{
+  "number": 9098,
+  "kind": "issue",
+  "title": "The REST door's own `sendError` overload does not narrow, so an unregistered `error.code` reaches the wire there too",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:queue"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-16T09:42:24Z",
+  "updated_at": "2026-08-17T03:34:35Z",
+  "closed_at": "2026-08-17T03:34:35Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9098",
+  "body": "Found while implementing #8087 (the dispatcher-door vocabulary gate). Filed unassigned; nobody is on it. Not fixed in that PR — it lands in `packages/rest`, outside that card's `domain:cli` file surface.\n\n## The gap\n\n#8087's premise rested on an asymmetry between the two doors, stated in `resolveThrownHttpError`'s module note and in `packages/runtime/src/package-door-error-parity.test.ts`:\n\n> The direct-mount REST door needs exactly this: `sendError`'s closed `ErrorCode` parameter [...] so an unregistered code there is a failing test, not a wire answer.\n\nThat holds for `sendError` in `@objectstack/types` (`packages/types/src/response-envelope.ts`), whose `code` parameter is the closed `ErrorCode`:\n\n```ts\nexport function sendError(\n  res: EnvelopeResponse,\n  status: number,\n  code: ErrorCode,\n  message: string,\n  extra?: Pick&lt;ApiError, 'category' | 'httpStatus' | 'details' | 'requestId'&gt;,\n): void\n```\n\nBut `packages/rest` has a **second, same-named** responder, and it is the one REST route modules reach for:\n\n```ts\n// packages/rest/src/error-response.ts\nexport function sendError(res: any, error: any, object?: string): void {\n    const resolved = resolveErrorResponse(error, object);\n    logWithheldServerFault(error, resolved);\n    res.status(resolved.status).json(resolved.body);\n}\n```\n\n`error: any`. No narrowing, no closed vocabulary, no type error.\n\n## The measured instance\n\n`sendFieldVisibilityFault` in that same file (ADR-0106 D6 tier 3) hands it a code the ledger does not register:\n\n```ts\nsendError(res, {\n    code: 'FIELD_VISIBILITY_UNRESOLVED',\n    message: `Field visibility for object '${objectName}' could not be evaluated; the object schema is not being served.`,\n    status: 503,\n});\n```\n\n`FIELD_VISIBILITY_UNRESOLVED` is in neither `StandardErrorCode` nor `ERROR_CODE_LEDGER`, so that 503 body cannot parse against `ApiErrorSchema` — and, because `BaseResponseSchema` embeds it, **the whole response body fails to parse**, not just the nested error object. (That last point is measured in #8087's suite, per code.)\n\nDerived mechanically, not by eye:\n\n```\n$ node scripts/check-dispatcher-error-vocabulary.mjs --report\n  FIELD_VISIBILITY_UNRESOLVED   objlit   pending-registration   packages/rest/src/error-response.ts\n```\n\n## Why it is worth its own card\n\nTwo separable things, and only the first is #8846's business:\n\n1. **The code needs a ledger row.** It is already on #8846's registration list (reported by #8087's gate, which is door-agnostic), so registering it closes the immediate wire defect.\n\n2. **The door has the same class of hole #8087 just closed for the dispatcher, and registering one code does not close it.** The reason `packages/rest` was believed safe is a type that the module in question does not actually use. Any route reaching for the local `sendError` can put a fresh unregistered string on the wire tomorrow, silently — which is exactly the \"an unswept producer just re-opens the hole\" shape the maintainer ruled against on #8087 (2026-08-12, option B delivered as a gate).\n\nNote the REST door's conformance suite did not catch this: like the dispatcher's did before #8087, it parses the cases it drives, and this branch is not among them.\n\n## Possible shapes, not a recommendation\n\n- Route `sendFieldVisibilityFault` (and any sibling) through the closed-`ErrorCode` responder, leaving the local overload for the `mapDataError` classification path it was written for.\n- Or narrow inside `resolveErrorResponse` the way `toRowApiError` does — but that is a contract decision about the REST door's `error.code`, and the dispatcher's equivalent needed a maintainer ruling.\n- Or extend #8087's gate to assert the door-typing itself, rather than only the code vocabulary.\n\nThe naming collision is worth a look on its own: two exported functions called `sendError` with different arities, different types and different strictness, one of which is documented elsewhere as the reason a whole door is safe.\n\nRelated: #8087 (the dispatcher half, ruled and gated), #8846 (the ledger registrations, which include this code).\n"
+}

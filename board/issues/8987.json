@@ -1,0 +1,36 @@
+{
+  "number": 8987,
+  "kind": "pull_request",
+  "title": "test(engine-double-contract): pin the 29 baseline entries #8639 first-measured",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "dependencies",
+    "size/m",
+    "skip-changeset",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-16T04:12:06Z",
+  "updated_at": "2026-08-16T04:57:16Z",
+  "closed_at": "2026-08-16T04:57:15Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": "2026-08-16T04:57:15Z",
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/8987",
+  "body": "Fixes #8651\n\n#8639 widened this gate's discovery — `implOf` learned to unwrap a call-expression initializer, so every double spelling its write verb `vi.fn(async …)` became visible (379 → 435 doubles, +56, 0 lost). 21 of the newly visible engine-shaped doubles were pinned in #8639's own PR: every one whose pin was a single call. The other 29 (file, verb) pairs each needed more than a one-line insert and were carried as `MEASURED (#8639)` baseline entries naming their specific obstacle. This closes all 29 and deletes their entries in the same PR, which is what the shrink-only rule requires of a pin.\n\nA first measurement is not a raised ratchet, and removing these entries is the ratchet tightening: 270 → 301 pinned, 162 → 133 in the DEBT ledger, 2 exempt unchanged. The checker reconciles in BOTH directions, so the pins and the deletions had to land together.\n\n> **Note on the counts below.** The commit message on this branch reports the first two classes as *16 entries / 12 files* and *4 entries / 2 files*. Those two figures are wrong and are corrected here to **17 / 15** and **3 / 2**. `seed-loader-driver-text.test.ts`'s two `delete` doubles return `{ deleted: 1 }` — they are ordinary signature widening, not tripwires; only its two `update` doubles throw. The class descriptions and the code itself were always right, and the total is 29 either way. The branch was not amended, because force-push is unconditionally forbidden by the multi-agent discipline in AGENTS.md.\n\n## The four classes, and what each needed\n\n**Signature widening (17 entries, 15 files).** The impl declared fewer than two parameters, so it had no binding to hand the predicate (`delete: vi.fn(async () => ({ deleted: 1 }))`). Widened to `(_objectName: string, options?: any)` and opened with `assertEngineDeleteDispatch(options)`: the ten uniform `packages/metadata-protocol/src/seed-loader-*.test.ts` deletes, `seed-loader-driver-text.test.ts`'s two `delete` doubles, `packages/runtime/src/seed-loader.test.ts`, `packages/objectql/src/protocol-meta-type-canonicalization.test.ts`, `packages/metadata-protocol/src/protocol.lock-gate-fail-closed.test.ts` (both verbs), and `packages/plugins/plugin-auth/src/auth-manager.test.ts` (both verbs — the `sys_member` reader stand-in).\n\n**Concise arrow bodies (3 entries, 2 files).** Expression-bodied arrows with no statement list: `protocol.dropped-fields.test.ts` and `seed-loader-env-scope.test.ts` were converted to block bodies first, then pinned.\n\n**Deliberate tripwire doubles (3 entries, 2 files).** `protocol.validate-data.test.ts` (both verbs) and the two `update` doubles in `seed-loader-driver-text.test.ts` open by throwing, because the test asserts the path performs no write at all. The predicate is inserted AHEAD of the throw, which preserves the assertion's meaning in both directions: on a passing suite the body still never runs, and a call that did arrive still fails the test — only WHICH of the two errors it raises could differ, and nothing in either file asserts on that text. Measured rather than assumed: both suites are green, so the seed loader's real pass-2 back-fill `update` satisfies `ObjectQL.update`'s dispatch contract rather than merely being tolerated by a looser double.\n\n**`@objectstack/mcp` (6 entries, 3 files).** The package depended on neither home of the predicate, so `@objectstack/metadata-core` is added as a devDependency (no cycle — metadata-core does not depend on mcp), and the three doubles needed widening on top.\n\n## Two follow-on edits the gates asked for\n\n`packages/mcp/vitest.config.ts` is NEW. The devDependency above is a value import, and `@objectstack/metadata-core` resolves through its `exports` to `dist/`, so `pnpm check:test-source-alias` correctly failed: without an alias these pins would judge metadata-core's build artifact rather than the source in the checkout — a dist merely BEHIND rather than missing the predicate would let every new pin run green against its old behaviour. One anchored array-form entry, matching `plugin-sharing`'s shape.\n\nThe baseline's `$comment` closing paragraph asserted that 29 `MEASURED (#8639)` entries exist \"below\". All 29 are gone, so it is rewritten to record the batch as closed while keeping the discovery history that makes 379 → 435 readable to the next author.\n\n## Verification\n\nEvery affected package's own suite, on this branch after a full `pnpm build` (exit status, not just output):\n\n| package | files | tests | exit |\n|---|---|---|---|\n| @objectstack/metadata-protocol | 106 | 1512 | 0 |\n| @objectstack/mcp | 19 | 200 | 0 |\n| @objectstack/objectql | 211 | 3721 | 0 |\n| @objectstack/plugin-auth | 54 | 1250 | 0 |\n| @objectstack/runtime | 165 | 2456 | 0 |\n\nNo pin turned a suite red. mcp was re-run after the alias landed, so its 200 tests are a verdict about metadata-core's source.\n\nGates, derived from the changed paths with `scripts/pm/dispatch-gates.mjs`: `check:engine-double-contract` 0, `check:nul-bytes` 0, `check:cross-package-test-inputs` 0, `check:durability-log-level` 0, `check:test-source-alias` 0 (1 before the vitest config, 0 after), `check:type-source-resolution` 0, `check:query-options-erasure` 0, `check:type-check-coverage` 0, `check:type-check-debt --re-measure` 0, `check-engine-split-ratio` 0.\n\n## PM verification before opening\n\nThis PR was opened by the `domain:devx` PM seat because the implementing session had a blanket GitHub API 403 (`git push` worked; issue reads, labels and PR creation did not). Re-verified from the pushed branch before opening, by content:\n\n- baseline **164 → 135** entries; entries still carrying `MEASURED (#8639)`: **0** on this branch vs **29** on `main` as the positive control (the 2 remaining textual occurrences are in the rewritten `$comment` prose, which is deliberate)\n- diffstat 25 files, +191/−277\n- `seed-loader-driver-text.test.ts` classification re-derived from the source on both sides, which is what produced the count correction above\n- the class totals reconcile against triage's independent package split on #8651 (metadata-protocol 19 · mcp 6 · plugins 2 · objectql 1 · runtime 1 = 29)\n\n`skip-changeset`: test files, a shrink-only ledger, a vitest config and a workspace-internal devDependency — nothing user-visible is released.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_011RB4waLuNbdruCo6X9oobm)_"
+}

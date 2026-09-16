@@ -1,0 +1,34 @@
+{
+  "number": 9136,
+  "kind": "pull_request",
+  "title": "docs(spec): the unresolvable-column entry states MySQL's reach after #8926 — envelope and recoveries both (#9060)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-16T13:27:51Z",
+  "updated_at": "2026-08-16T14:13:43Z",
+  "closed_at": "2026-08-16T14:13:42Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-16T14:13:42Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/9136",
+  "body": "Fixes #9060\n\nText amendment to an already-registered ADR-0087 entry. The entry id, `surface`\nand `replacement` prescription are unchanged and no accept/reject behaviour\nmoves — what changes is the `reason`, which is upgrader-facing documentation\n(the data source for `objectstack migrate meta`, `spec-changes.json` and the\ngenerated upgrade guide).\n\n## Premise verified on the merged tree first\n\nThe card claims the entry's \"Reach, stated rather than assumed\" paragraph became\nfalse when #8926 merged. Verified against `origin/main` at `24206416a` rather\nthan taken from the card:\n\n- `packages/drivers/driver-sql/src/sql-driver.ts` — `isUnresolvableColumnError`\n  now carries a third arm, `message.includes(\"Unknown column '\")`, alongside the\n  SQLite and Postgres arms. Its docblock states the reach as all three dialects\n  \"since #8926\".\n- `sql-driver-unresolvable-where-column-refusal.test.ts` — the message-shape\n  sweep flips the MySQL WHERE case from `recognised: false` to `true`, adds the\n  `'field list'` and `'order clause'` spellings, and carries an explicit\n  direction pin: *\"mysql: all three clause positions ride ONE arm — envelope and\n  recoveries arrive together (#8926)\"*.\n\nSo the triage re-pricing holds as written: #9061 delivered **full parity**, not\nthe envelope alone. Both halves are stated in the addendum.\n\n## What this PR does\n\nAppends a dated addendum to the entry's `reason`. The historical paragraph is\nkept **verbatim** as the state at registration — it is not rewritten — and the\naddendum amends it, stating both halves of what one shared predicate did on\nMySQL:\n\n1. **The envelope** — an unresolvable WHERE column refuses with the same\n   `INVALID_FILTER` / 400 naming the column, instead of travelling out as the\n   raw `ER_BAD_FIELD_ERROR` with the statement's bound literals inlined.\n2. **The recoveries** — MySQL also gained the #3821 projection and ORDER-BY\n   recoveries it never had, so those clause positions now return recovered rows\n   where they used to throw.\n\nBoth arrive together because `ER_BAD_FIELD_ERROR` spells every clause position\nwith one sentence, so all three ride one arm of the predicate — cited to the\nwidened sweep above. The addendum also records what the ruling did **not**\nchange: a dotted filter key is still classified per dialect (Postgres raises\nundefined_table, which neither arm matches), the axis #8371 owns.\n\n`registry.ts` regenerated with `gen:migration-registry` — never hand-edited.\n\n## Measured: two of the four assumed artifacts do not move, and that is correct\n\nThe dispatch assumed the chain entry edit ⇒ `gen:migration-registry` ⇒\n`gen:spec-changes` ⇒ `gen:upgrade-guide`. Only the first link produces a diff\nhere. Both generators were run anyway and rewrote their files **byte-identically**:\n\n- `PROTOCOL_VERSION` is `17.0.0`, so `spec-changes.json` folds the floor-10 to\n  major-17 range (measured: the majors present in the committed manifest are\n  11-17).\n- This entry is registered under major **18**, so it is not projected into\n  `spec-changes.json` or `docs/protocol-upgrade-guide.md` yet.\n\n`check:spec-changes` and `check:upgrade-guide` both pass (\"up to date\"), which\nis synchrony holding rather than a skipped step. Nothing to hand-fix; recorded\nso the empty diff is not read as a missed regeneration.\n\n## Verification — union run at `ad1f96e88` (the final commit)\n\nBuild closure first: `pnpm --filter '@objectstack/spec^...' build` matches no\nprojects (spec has no workspace deps), so `pnpm --filter @objectstack/spec build`\nwas run instead; the working tree stayed clean afterwards, so `gen:schema` moved\nno anchor.\n\n| gate | result |\n| --- | --- |\n| `spec test` | 406 files / 10785 tests passed |\n| `spec typecheck` | pass (`tsc --noEmit`, scripts project, test-typecheck) |\n| `check:migration-registry` | `registry.ts is current (100 semantic, 30 retired-key, 54 retired-def)` |\n| `check:spec-changes` | `spec-changes.json is up to date.` |\n| `check:upgrade-guide` | `protocol-upgrade-guide.md is up to date.` |\n| `check:generated` | `All 13 generated artifacts are up to date.` |\n| `check:nul-bytes` | OK, 5990 files, no raw control bytes |\n| `check-adr-0087-registration` | self-test 206 assertions; `this PR adds no declared-breaking changeset` |\n| `check:changeset-gate-self-tests` | pass |\n| `check:merge-driver` | pass |\n| `check:spec-parsed-alias` | pass |\n| `check:type-source-resolution` | pass |\n| `check:cross-package-test-inputs` | pass |\n| `check:doc-formula-expressions` | pass |\n\nGates beyond the dispatch list were re-derived from the actual changed paths with\n`node scripts/pm/dispatch-gates.mjs`, which added the last eight rows above.\n\nTwo of them failed first on an **unbuilt worktree**, not on this diff:\n`check:doc-formula-expressions` could not resolve\n`@objectstack/formula/dist/index.mjs`, and `check-dev-prereqs` reports 66 of 67\npackages have no `dist/`. Building `@objectstack/formula` turned the first green\n(24 self-test cases, 22 formula examples, 9 spec TSDoc examples). `check-dev-prereqs`\nstill reports the unbuilt workspace — it is a whole-workspace precondition\n(\"run `pnpm build`\"), unrelated to this change and not something a text amendment\ncan satisfy locally.\n\nChangeset: `patch` on `@objectstack/spec`, non-breaking, so no ADR-0087\ndisposition marker is required (the gate confirms).\n\n_Generated by [Claude Code](https://claude.ai/code/session_01225pUjnCKWqxcc1PeqKFUq)_\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01225pUjnCKWqxcc1PeqKFUq)_"
+}

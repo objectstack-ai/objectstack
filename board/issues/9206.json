@@ -1,0 +1,35 @@
+{
+  "number": 9206,
+  "kind": "pull_request",
+  "title": "feat(spec): builder forces required: true on a master_detail reference under controlled_by_parent (#9138)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-17T01:55:54Z",
+  "updated_at": "2026-08-17T02:39:01Z",
+  "closed_at": "2026-08-17T02:39:00Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": "2026-08-17T02:39:00Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/9206",
+  "body": "Fixes #9138\n\nImplements **Direction 2 of the #8772 maintainer ruling** (2026-08-16, comment 5306089973). This is a maintainer-ruled implementation — no re-adjudication here. Siblings: the guard freeze note is #9137 (identity — the ruling says it lands **before or with** this slice; merge ordering is the PM's call), and the lint promotion is #9139 (on hold until the v18 window; #9139 is not addressed here).\n\n## What changed\n\n`ObjectSchema.create()` — the authoring builder in `packages/spec` — now enforces, for every field of `type: 'master_detail'` on an object declaring `sharingModel: 'controlled_by_parent'`:\n\n- **omitted `required` → forced to `true`** in the emitted object (the lint rule `relationship/master-detail-required` already computed exactly this fix);\n- **explicit `required: false` → loud refusal**: a located error naming the object, the field, the consequence (null master FK ⇒ row unreadable by everyone, ADR-0055) and the fix. An explicitly authored contradiction is refused, not silently rewritten (ADR-0032).\n\nPremise re-checked before building (the card asked): on `origin/main` @ `7a537ce90`, both unsafe shapes parsed green through the builder and emitted `required: false` — the card's premise held. The 2026-08-15 survey also re-verified: exactly 3 shipped `controlled_by_parent` objects (`opportunity-line-item`, `expense-report`, `invoice`), all already `required: true`; `packages/platform-objects` has none. First-party migration cost is zero, as measured.\n\n## What deliberately did NOT change\n\n- **Runtime untouched**: `resolveCbpRelation`'s fallbacks stay; no file under `packages/plugins/plugin-security` is touched (the serial-constraint boundary with #9137 was honored — zero overlap).\n- **Lint untouched**: `relationship/master-detail-required` stays `warning` until #9139 lands at v18.\n- **Raw `ObjectSchema.parse()` / `.safeParse()` stay tolerant** — metadata at rest keeps loading, `required` unrewritten. A new test pins this tolerance explicitly, so this slice cannot silently grow into the runtime-narrowing the ruling rejected. Alias spellings (`isRequired` / `mandatory` / `notNull`) need no special handling: `FieldSchema` is a `strictObject`, those keys are refused at parse and can never land a `required: false` the check would miss.\n- Scope pin: `externalSharingModel: 'controlled_by_parent'` is untouched — the ruling, the measurement, and the card all speak of the internal `sharingModel`; widening would be re-adjudicating.\n\n## Changeset + ADR-0087\n\nReal changeset (`@objectstack/spec`: **minor**, `**BREAKING**` accept-face narrowing per the post-17.0.0 lockstep convention — same shape as the #9186 precedent), carrying the FROM → TO block. Because the body carries a prescription, the only honest ADR-0087 disposition is **registered**: semantic entry `cbp-master-detail-required-forced` under protocol major 18 (`packages/spec/src/migrations/entries/semantic/18.cbp-master-detail-required-forced.ts`), registry regenerated the scripted way. `spec-changes.json` and the upgrade guide are byte-identical by design — they project released majors only; protocol-18 entries surface at the v18 cut (verified: the #9186 entry is absent from them too). `check:adr-0087-registration` green.\n\n## Verification (all runs at `17f5340`, the final commit; tree clean)\n\n- `packages/spec`: full suite **407 files / 10834 tests passed**; `typecheck` green; ESLint green on changed files.\n- **Reverse verification** (from the committed state, direction decided in advance: red): with `object.zod.ts` restored to `origin/main`, exactly the 4 enforcement tests went red and the 3 unchanged-behavior pins (explicit `required: true`, non-cbp scope, parse tolerance) stayed green — 4 failed / 164 passed; fix restored byte-identically (clean porcelain), 168/168 green again.\n- **Consumer sweep (downstream of spec, scoped to the rule's consumption radius)**: `@objectstack/lint` (2065), `@objectstack/plugin-security` (1279), `@objectstack/objectql` (3755), `@objectstack/metadata-protocol` (1588), `@objectstack/example-crm` (42), `@objectstack/example-showcase` (221) — all passed. The card-named pin `packages/lint/src/validate-security-posture.test.ts` (+ its runtime-surface sibling) re-run explicitly: 106/106 green — runtime resolution posture undisturbed.\n- **Built-dist receipt**: `@objectstack/dogfood` cbp proofs (2 files / 8 tests) green against the rebuilt `dist/`, plus a direct probe importing `packages/spec/dist/data/index.mjs` showing forced `true` and the refusal — the artifact consumers resolve carries the change (`check-dev-prereqs` confirms dist is built from the sources on disk, content-hash).\n- **Gates**: derived with `node scripts/pm/dispatch-gates.mjs` against the actual changed paths; ran the matched + convention-triggered set — `check:generated` (all 13 artifacts current), `check:migration-registry`, `check:adr-0087-registration`, `check-changeset-no-major`, `check-empty-changeset`, `check:cross-package-test-inputs`, `check:merge-driver`, `check:objectui-changeset`, `check:spec-parsed-alias`, `check:type-source-resolution`, `check:query-options-erasure`, `check:engine-double-contract`, `check:where-matcher`, `check:type-check-coverage`, `check:type-check-debt` (33 entries re-measured, none above), `check:nul-bytes`, spec liveness family (`check:liveness`, `check:empty-state`, `check:strictness-ledger`, `check:variant-docs`), `check:doc-formula-expressions`, `check-dev-prereqs` — all green locally.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01Y26DJEHSBhhAQ6wwfsHNza)_"
+}

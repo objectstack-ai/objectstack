@@ -1,0 +1,35 @@
+{
+  "number": 8943,
+  "kind": "issue",
+  "title": "finding: 4 of the 6 `checkFieldRefs` threading sites in `validate-react-page-props` can drop the `unprovisionedAnchors` index with the whole lint suite staying green",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-16T01:59:14Z",
+  "updated_at": "2026-08-16T04:57:16Z",
+  "closed_at": "2026-08-16T04:57:16Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8943",
+  "body": "Measured while implementing #8664 (which corrects the `unprovisionedAnchors` parameter comment on `checkFieldRefs`). Filed as an observation; **not fixed** — #8664's scope is the prose claim, and adding these pins is the other half its grading told the implementer not to mix in.\n\n## What was measured\n\n`checkFieldRefs` (`packages/lint/src/validate-page-field-bindings.ts`) takes the anchor index as an OPTIONAL trailing parameter, so a call site that stops passing it keeps compiling and silently downgrades to the pre-#8340 behaviour (existence answered, provenance never asked).\n\nI dropped the argument at each in-repo threading site in turn and ran `packages/lint`'s suite. Result:\n\n| # | Site | Drop the index ⇒ |\n|---|---|---|\n| P1 | `validate-page-field-bindings.ts:433` — `validatePageFieldBindings` | **RED** — \"warns on a highlights binding over an unprovisioned anchor…\" |\n| R0 | `validate-react-page-props.ts:1100` — `validateReactPageProps` into `checkBlockFieldProps` | **RED** — \"reaches the FILTER position through the shared core…\" |\n| R2 | `validate-react-page-props.ts:849` — `queried` refs | **RED** — same test |\n| R1 | `validate-react-page-props.ts:846` — `own` refs (`skipped`) | **GREEN** |\n| R3 | `validate-react-page-props.ts:858` — `ObjectForm` subform child refs | **GREEN** |\n| R4 | `validate-react-page-props.ts:863` — `subs.parent` (`totalField` rollup) | **GREEN** |\n| R5 | `validate-react-page-props.ts:873-880` — the `COMPONENT_FIELD_SPECS` / Block path | **GREEN** |\n\n\"GREEN\" means the full `@objectstack/lint` suite (73 files, 2045 tests) passes with the index dropped, and typecheck is unaffected — the parameter is optional and the local `unprovisionedAnchors` binding stays read by the sibling call sites, so there is no TS6133 either.\n\n## Why it is worth recording\n\nThe two **module seams** are pinned (P1, R0), which is what #8664's corrected comment now states and what #8404 established as the pattern. But four of the react surface's own calls are threaded by convention only. Each is a real author-facing surface: the `skipped` display refs, `ObjectForm` subforms, the `totalField` rollup, and every `COMPONENT_FIELD_SPECS`-driven block. A refactor that reorders or rewrites `checkBlockFieldProps` can quietly drop provenance on any of them, and #8340's warning simply stops appearing for those surfaces — the silent-zero / blank-column failure it exists to announce comes back with every gate green.\n\nThis is the same shape as the #8404 pin in `validate-react-page-props.test.ts`, whose comment records exactly this reasoning for the `searchableFields` call (\"with the argument dropped here… the whole lint suite stays green. This test is the only thing that goes red\"). That claim re-verifies today; these four sites are the calls that have no such pin.\n\n## Suggested disposition\n\nOne behaviour test per uncovered site, through `validateReactPageProps`, asserting `page-field-unprovisioned` on an ADR-0015 `external` object — mirroring the existing FILTER-position test. Each should be written ablation-first: drop the argument, watch the new test go red, restore.\n\nRelated: #8664, #8340, #8404, #8116.\n"
+}

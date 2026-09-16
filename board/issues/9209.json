@@ -1,0 +1,34 @@
+{
+  "number": 9209,
+  "kind": "pull_request",
+  "title": "chore(ci)(deps): Bump google/osv-scanner-action/osv-scanner-action from 9fd1bcce27f67e3bd819a0a7620e332803dc43bc to f4cfcc01edc9c8b756a9b873b7a623ca674da51e",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "dependabot[bot]",
+    "id": 49699333,
+    "type": "Bot"
+  },
+  "labels": [
+    "ci/cd",
+    "dependencies",
+    "size/xs"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-17T02:09:09Z",
+  "updated_at": "2026-08-17T03:37:07Z",
+  "closed_at": "2026-08-17T03:37:06Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": "2026-08-17T03:37:06Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/9209",
+  "body": "Bumps [google/osv-scanner-action/osv-scanner-action](https://github.com/google/osv-scanner-action) from 9fd1bcce27f67e3bd819a0a7620e332803dc43bc to f4cfcc01edc9c8b756a9b873b7a623ca674da51e.\n<details>\n<summary>Commits</summary>\n<ul>\n<li><a href=\"https://github.com/google/osv-scanner-action/commit/f4cfcc01edc9c8b756a9b873b7a623ca674da51e\"><code>f4cfcc0</code></a> Merge pull request <a href=\"https://redirect.github.com/google/osv-scanner-action/issues/117\">#117</a> from renovate-bot/renovate/workflows</li>\n<li><a href=\"https://github.com/google/osv-scanner-action/commit/dfd4cd1d0114e5fc71a6862faf1114ed69d9dca7\"><code>dfd4cd1</code></a> Update workflows</li>\n<li><a href=\"https://github.com/google/osv-scanner-action/commit/e13f842f8f0b5845b610f16e8a2eb7f22a7f8677\"><code>e13f842</code></a> Merge pull request <a href=\"https://redirect.github.com/google/osv-scanner-action/issues/133\">#133</a> from renovate-bot/renovate/major-workflows</li>\n<li><a href=\"https://github.com/google/osv-scanner-action/commit/8deb546fdb875b9996d27d4950be7312dac076a1\"><code>8deb546</code></a> Merge pull request <a href=\"https://redirect.github.com/google/osv-scanner-action/issues/140\">#140</a> from google/update-to-v2.5.0</li>\n<li><a href=\"https://github.com/google/osv-scanner-action/commit/8fb3f8c89519ea2c868d3277441ee7fd3c7f15af\"><code>8fb3f8c</code></a> Update unified workflow example to point to v2.5.0 reusable workflows</li>\n<li><a href=\"https://github.com/google/osv-scanner-action/commit/0c58c542420dfd23fcac08dd9c8ca3cca9c36f1a\"><code>0c58c54</code></a> Update reusable workflows to point to v2.5.0 actions</li>\n<li><a href=\"https://github.com/google/osv-scanner-action/commit/06b2ab4348248b456ee06c9e953637f55e03504f\"><code>06b2ab4</code></a> &quot;Update actions to use v2.5.0 osv-scanner image&quot;</li>\n<li><a href=\"https://github.com/google/osv-scanner-action/commit/3f2e7fe5a8528de51a596a4c89dd68e977012c5d\"><code>3f2e7fe</code></a> Update actions/checkout action to v7</li>\n<li>See full diff in <a href=\"https://github.com/google/osv-scanner-action/compare/9fd1bcce27f67e3bd819a0a7620e332803dc43bc...f4cfcc01edc9c8b756a9b873b7a623ca674da51e\">compare view</a></li>\n</ul>\n</details>\n<br />\n\n\nDependabot will resolve any conflicts with this PR as long as you don't alter it yourself. You can also trigger a rebase manually by commenting `@dependabot rebase`.\n\n[//]: # (dependabot-automerge-start)\n[//]: # (dependabot-automerge-end)\n\n---\n\n<details>\n<summary>Dependabot commands and options</summary>\n<br />\n\nYou can trigger Dependabot actions by commenting on this PR:\n- `@dependabot rebase` will rebase this PR\n- `@dependabot recreate` will recreate this PR, overwriting any edits that have been made to it\n- `@dependabot show <dependency name> ignore conditions` will show all of the ignore conditions of the specified dependency\n- `@dependabot ignore this major version` will close this PR and stop Dependabot creating any more for this major version (unless you reopen the PR or upgrade to it yourself)\n- `@dependabot ignore this minor version` will close this PR and stop Dependabot creating any more for this minor version (unless you reopen the PR or upgrade to it yourself)\n- `@dependabot ignore this dependency` will close this PR and stop Dependabot creating any more for this dependency (unless you reopen the PR or upgrade to it yourself)\n\n\n</details>"
+}

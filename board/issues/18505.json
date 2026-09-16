@@ -1,0 +1,36 @@
+{
+  "number": 18505,
+  "kind": "pull_request",
+  "title": "fix(spec): title every authorable row property on dashboard.widgets and dashboard.globalFilters",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "protocol:ui",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-16T16:45:22Z",
+  "updated_at": "2026-09-16T19:15:06Z",
+  "closed_at": "2026-09-16T19:15:05Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": "2026-09-16T19:15:05Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/18505",
+  "body": "Fixes #17505\n\nClause-②: yes — no authorable key moves, but every titled row property gains a `title` node in the emitted JSON Schema, a published artifact. Changeset is `minor` accordingly (`AGENTS.md` Post-Task Checklist step 3: `yes` takes at least `minor`). The `needs:contract-review` carrier is the seat's and is already on the card; this PR neither hangs nor strips it.\n\n## What this does\n\nStudio renders a `type: 'repeater'` field as a table whose column headers read `items.properties[k].title ?? k` off the schema from `z.toJSONSchema(...)`. With no `title` the fallback arm runs in **every** locale, English included, so the maker saw `requiresService`, `filterBindings` and `optionsFrom` inside an otherwise translated panel. `resolveMetadataFormSchemaTitles` only ever REPLACES a title already present, so the English default has to live on the schema.\n\nThis applies the mechanism ruled in #16458 and already landed on `dashboard.header.actions` (PR #17227) and on the `ai/skill`, `ui/report` and `ui/page` carriers (PR #17500). No new contract decision.\n\n## The row-property set, re-derived on today's tree\n\nThe card's `17 + 10 = 27` is a 2026-09-10 reading, so it was re-derived through the platform's own predicate (`z.toJSONSchema` over `getMetadataTypeSchema`, `io: 'input'`) rather than by regexing source — using the derivation helpers copied byte-identical out of `repeater-item-titles.test.ts` itself.\n\n| carrier | authorable row properties | untitled before | untitled after |\n|---|---|---|---|\n| `dashboard:widgets` | 17 | 17 | 0 |\n| `dashboard:globalFilters` | 10 | 10 | 0 |\n\n**It is still 27, and the card is NOT stale.** `#17616` removed `stageOrder` from widget types that do not read it, but `stageOrder` lives inside `options` — one level BELOW the repeater's row properties, where `options` itself is the single row property. A refusal at that depth cannot move this count.\n\n## The emitted schema, before and after\n\nRead as Studio reads it — the property node first, never the `$ref` target, because a `.meta({ title })` on a schema zod hoists into `$defs` is emitted as a sibling of the `$ref`.\n\n- before: `widgets.items.properties.id.title` = `undefined`\n- after: `widgets.items.properties.id.title` = `\"Widget ID\"`, in **both** `io: 'input'` and `io: 'output'`\n- after: `globalFilters.items.properties.targetWidgets.title` = `\"Target Widgets\"`\n\n## What must NOT get a title, and what was checked\n\n- **The five `retiredKey()` tombstones on this row** — `actionUrl`, `actionType`, `actionIcon`, `responsive`, `aria` — are untouched and still emit `title: undefined` in both io modes. A tombstone declares a key unwritable; an authoring label would advertise it as writable. They are #17502's subject and are not addressed here.\n- **Every other repeater carrier is unchanged in the same run.** The other twenty carriers hold their exact counts — `field:options` 6, `object:fields.options` 6, `view:columns` 14, `view:sort` 2, `view:tabs` 9 still untitled — so no shared item schema leaked a title sideways.\n- **Non-repeater and composite siblings are unchanged**: dashboard top-level `columns` and `header.showTitle` still emit no `title`, which is what keeps the two absence controls in `packages/rest/src/meta-types-schema-titles.test.ts` valid (3/3 green).\n\n## One control had to be re-pointed, not deleted\n\n`dashboard.test.ts` used `widgets[].id` as its \"a sibling with no authored title has none\" control — proving the emitter invents no titles. This change titles that property, so the control was re-pointed onto a **tombstone** (`widgets[].actionUrl`) and given a lit leg (`widgets[].id` is now `'Widget ID'`). It now pins the tombstone rule instead of borrowing a coincidence, which is strictly stronger than what it replaced.\n\n## The ledger is paid, not weakened\n\n`repeater-item-titles.test.ts` is exact in both directions, so a paid debt left in the set is as red as an unpaid one. Both `dashboard:*` entries are **deleted**; five remain. Verified by name in the verbose run: `dashboard:widgets` and `dashboard:globalFilters` now execute without the `(ledger: still owed titles)` arm, while the five survivors keep it.\n\n## Verification\n\n| check | result |\n|---|---|\n| `pnpm --filter @objectstack/spec build` | exit 0 (lock verdict `command-exit 0`) |\n| `pnpm --filter @objectstack/spec test` | **483 files / 13773 tests passed** |\n| `pnpm --filter @objectstack/spec typecheck` | exit 0 |\n| `pnpm --filter @objectstack/spec check:generated` | all **15** artifacts up to date, `check:authorable-surface` included |\n| `packages/rest` `meta-types-schema-titles.test.ts` | 3/3 passed |\n| `packages/platform-objects` translations | 8 files / 100 tests passed |\n\n`check:authorable-surface` green is the load-bearing one for the declared fence: **`packages/spec/authorable-surface.base.json` did not move and was not touched**, so the in-flight anchor-only PR that owns it is unaffected.\n\n## Acceptance notes\n\n- `dashboard.form.ts` deliberately does **not** enumerate the `widgets` / `globalFilters` children. That enumeration is the i18n-catalog half (`os i18n extract` emits `REPEATER.PROPERTY` keys from the form's declared `label`s) and belongs to #17508, a decision card. The spec-side pin that holds a form `label` equal to a schema `title` is scoped to `header.actions` only, so nothing here reds without it.\n- noted, not filed: the card and its triage both say \"six `retiredKey()` tombstones ... (5 on `dashboard.widgets`)\". On today's tree the two carriers in this card hold exactly **5**, all on `widgets`, and `globalFilters` holds **0** — so the sixth is not on either carrier of this card. 承接者: #17502, whose subject is the tombstone set.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01KB5PFtxuy1x3dcR5gxudx6)_"
+}

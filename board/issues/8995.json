@@ -1,0 +1,36 @@
+{
+  "number": 8995,
+  "kind": "issue",
+  "title": "Three packages/cli tests read content/docs/deployment/*.mdx with a seed spelling check:cross-package-test-inputs does not recognise, so the reads are undeclared and the gate stays green",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:devx",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-16T04:48:17Z",
+  "updated_at": "2026-08-16T06:20:53Z",
+  "closed_at": "2026-08-16T06:20:53Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8995",
+  "body": "Blocked-by: #8946\n\nSame package and the same declaration block as #8946, a different glob, and a different mechanism — filed separately because closing #8946 (`examples/**` radius for cli and lint) leaves this one open. It should land **after** PR #8991, which is editing the exact `@objectstack/cli#test` inputs array and the `CROSS_PACKAGE_TEST_INPUTS` entry this needs.\n\n## What was measured\n\nMeasured on `origin/main` @ `8b9eba51b`, in a fresh worktree with `pnpm install` run.\n\nThree `packages/cli` tests read hand-written docs outside their package:\n\n```\npackages/cli/test/cloud-login-json-ndjson.e2e.test.ts:79   content/docs/deployment/cli.mdx\npackages/cli/test/cloud-login-json-ndjson.e2e.test.ts:80   content/docs/deployment/index.mdx\npackages/cli/test/login-json-ndjson.e2e.test.ts:75         content/docs/deployment/cli.mdx\npackages/cli/test/login-json-noninteractive.e2e.test.ts:64 content/docs/deployment/cli.mdx\n```\n\nThey are real assertions, not incidental reads — they enforce the #6730 ruling that the NDJSON exception \"stays declared, not just implemented\", by requiring the declaration to be present in the prose a script author actually meets.\n\nThree facts that only make sense together:\n\n1. `turbo.json` → `@objectstack/cli#test` declares three cross-package globs (`packages/verify/src/**`, `packages/plugins/plugin-security/src/**`, `packages/services/service-cluster/src/**`). **No `content/docs` glob.**\n2. `pnpm check:cross-package-test-inputs` exits **OK** — \"12 package(s) read outside themselves, all declared, and turbo.json hashes every declared glob.\"\n3. (1) and (2) can only both be true if the gate never saw the reads. Its `--verify` layer fails on a package that has a scan and no declaration, so a seen read with no glob would be red.\n\n## Why the gate misses them\n\nA lead, not a conclusion — the conclusion above holds regardless of which spelling is the blind spot.\n\nAGENTS.md publishes the recognised seed list, and the first entry is `dirname(fileURLToPath(import.meta.url))`. All three files seed differently — with `resolve(..., '..')` in place of `dirname`:\n\n```ts\nconst HERE = resolve(fileURLToPath(import.meta.url), '..');\nconst REPO_ROOT = resolve(HERE, '../../..');\nconst CLI_DOCS = resolve(REPO_ROOT, 'content/docs/deployment/cli.mdx');   // two hops\n```\n\nand `login-json-noninteractive.e2e.test.ts:64` adds a third shape, a three-argument resolve:\n\n```ts\nconst CLI_DOCS = resolve(HERE, '../../..', 'content/docs/deployment/cli.mdx');\n```\n\nThis is the class #8698 already paid for once with a different spelling (`new URL(…, import.meta.url)`), and it is the hazard the gate's own header names: an unrecognised spelling produces no flag, which means no declaration, silently.\n\n## The consequence, observed today rather than reasoned about\n\nPR #8983 (docs-only, issue #8913) rewrote `content/docs/deployment/index.mdx`. Every fact the pin protects survived the rewrite — NDJSON named, the CLI anchor kept, \"parse line by line\" kept — but one assertion is `/one\\s+per\\s+line/i`, which needs those three tokens contiguous, and the new prose read \"one compact JSON document per line\".\n\nBecause the read is undeclared, `@objectstack/cli#test` was not in the affected set: PR CI was green, and the failure surfaced only in the merge queue's full suite (build `31926481115`, `Test Core (3/3)`), which **dequeued the PR**. That is the same cost shape #8946 describes — the first signal is a red in the shared queue, which stalls every lane rather than the one that made the edit.\n\n## Suggested fix (not prescribed)\n\n1. Extend the detector to recognise the `resolve(fileURLToPath(import.meta.url), '..')` seed and the three-argument `resolve(HERE, '../../..', 'rel')` shape, **with a `--self-test` case per shape in the same edit** — the discipline AGENTS.md already states for this script.\n2. Declare the radius that then becomes visible. It can be narrow — the three files read exactly two pages:\n   ```\n   $TURBO_ROOT$/content/docs/deployment/cli.mdx\n   $TURBO_ROOT$/content/docs/deployment/index.mdx\n   ```\n   in `CROSS_PACKAGE_TEST_INPUTS['@objectstack/cli']` and mirrored onto `@objectstack/cli#test` in `turbo.json`.\n3. Worth a second look while in there: a re-scan after (1) may surface other packages whose reads use the same unrecognised seeds. The count in the gate's OK line (\"12 packages\") is the before-number to compare against.\n\nSeparately and **not** part of this card: whether a regex requiring literal token adjacency is the right shape for a prose pin at all. It is defensible — the ruling is about the declaration being findable — but `/one\\s+per\\s+line/i` fails on a rewording that preserves every fact. Recording it here so the decision is visible; the PR that hit it repaired the phrasing rather than weakening the pin.\n\n## Backlinks\n\n- #8946 — same declaration block, `examples/**` glob; PR #8991 open against it\n- #8698 — the same detector, a different unrecognised seed, closed\n- #8913 / PR #8983 — where this surfaced\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_011RB4waLuNbdruCo6X9oobm)_"
+}

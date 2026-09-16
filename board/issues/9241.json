@@ -1,0 +1,34 @@
+{
+  "number": 9241,
+  "kind": "issue",
+  "title": "docs：主 README 与文档首页统一换用新定稿 tagline（150k 整体 + 100k 业务逻辑拆分）",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-17T05:40:27Z",
+  "updated_at": "2026-08-17T06:21:40Z",
+  "closed_at": "2026-08-17T06:20:52Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9241",
+  "body": "## 交付（维护者 2026-08-17 定稿，逐字使用，⛔ 不改写）\n\n**主 tagline（README 首屏 + 文档首页 hero 等所有出现旧版语的位置）：**\n\n> Apps small enough for AI to hold whole. ObjectStack turns the whole app — data model, UI, workflows, permissions — into typed metadata: a complete CRM in under 150k tokens, one context window. Agents read it whole, reason it whole, refactor it whole.\n\n**README 首段紧随其后的拆分行（100k 业务逻辑强调，维护者要点）：**\n\n> The business logic alone — every object, workflow and permission — is under 100k tokens; the UI adds just 50k more.\n\n## 范围与清扫\n\n1. 根 `README.md`：首屏 tagline 替换 + 拆分行加入首段。\n2. 全仓 grep 旧口径并对齐：旧句式（\"A complex business system in 170k tokens\" / \"compresses an entire app\" / 单独出现的 100k 整体性主张等）在 `README*`、`content/docs/**` 首页/概览页中的出现处，换新定稿或改写至与两条新句数字一致——**数字纪律：150k 恒指整 app（含 UI），100k 恒指业务逻辑，⛔ 两个数字不得互换宿主名词**。\n3. ⛔ `content/docs/releases/**` 不碰（仓规）。\n4. GitHub 仓库 description 字段不在 git 内——不属本卡，另行提醒维护者在 UI 粘贴主 tagline 首两句。\n\n## 约束\n\n- 客户面文档恒英文；docs-only 按仓内 changeset 惯例。\n- 契约面零接触（Clause-②: no）；档位无路径强制，PM 判档默认。\n- 非 ADR 面：复核通过后按正常队列落地。"
+}

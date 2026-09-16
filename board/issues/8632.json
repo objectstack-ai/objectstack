@@ -1,0 +1,34 @@
+{
+  "number": 8632,
+  "kind": "issue",
+  "title": "[finding] `check:engine-double-contract` is a PM judgement call in dispatch-gates.mjs, not a convention entry — and a mechanical trigger for it exists",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-14T04:17:06Z",
+  "updated_at": "2026-08-16T04:04:38Z",
+  "closed_at": "2026-08-16T04:04:07Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8632",
+  "body": "Filed unassigned, no `pm:queue`, for triage to route. Found while driving PR #8626 (#8577) to green; **not a defect in that PR**, which fixed the underlying problem at the doubles and is green.\n\n## What happened\n\nPR #8626 went red on CI under the job named **ESLint**, on the step `check:engine-double-contract`:\n\n```\nx PINNED [delete]: …/suggested-audience-bindings-install-path.test.ts declares 2 engine\n  double(s) whose delete() does not route through assertEngineDeleteDispatch (lines 143, 337)\nx PINNED [update]: … same two, assertEngineUpdateDispatch\n```\n\nThe dev seat had derived its gate union with `scripts/pm/dispatch-gates.mjs` against the actual changed paths — twice, including a re-derivation after adding a vitest config — and `check:engine-double-contract` was in neither derivation.\n\n## Why it was not in the derivation — measured, not inferred\n\n`CHANGE_KIND_GATES` declares exactly **two** change kinds:\n\n- *adds or edits a test file* → `check:query-options-erasure` + `check:type-check-coverage` + `check:type-check-debt`\n- *edits a file in a package that owns an `i18n-extract.config.ts`* → `check:i18n`\n\n`check:engine-double-contract` appears in the script **only in its closing prose**, which explicitly hands it to human judgement:\n\n> the rest stay the PM judgment call — new fake engine => `check:engine-double-contract`, new error code => `check:error-code-casing`, any edit => `check:nul-bytes`\n\nSo the derivation did not lose an entry it has — **it has none, by design**. This is worth stating plainly because the first reading (including mine) was \"the tool missed it\", which would have pointed at the wrong fix.\n\nThe other half of the miss was judgement: two *delegating pass-through seams wrapping a real engine* were not classified as \"fake engines\", which is exactly the call the prose delegates. That reading is defensible — they delegate to a real `ObjectQL` — and it is still the reading the gate disagrees with.\n\n## The question this raises\n\nA mechanical trigger for this gate does appear to exist: **a test file declaring an object literal with `delete`/`update` members** is the shape `check-engine-double-contract.mjs` itself scans for. If that is a reliable enough signal, the gate could move from the prose (judgement) into `CHANGE_KIND_GATES` (derived), and this class of miss stops depending on whether the author recognises their own seam as a double.\n\nArguments the other way, which is why this is filed rather than fixed:\n\n- the gate's own detector is more precise than a path-level convention could be, so a coarse trigger would emit the gate on test files that have no doubles at all — noise that trains seats to skip it;\n- the prose is currently honest about the boundary. Moving one of the three judgement-call gates into the derived set without the other two (`check:error-code-casing`, `check:nul-bytes`) leaves the prose describing a set it no longer matches;\n- #8553 already records that the detector counts *declaration sites*, so an `Object.assign`-built double is invisible to it — a convention entry keyed on the same shape inherits that blind spot.\n\nWhoever takes this should decide whether the gate belongs in the derived set at all, and if so, whether the prose's other two go with it.\n\n## Related\n\n- #8626 / #8577 — where it surfaced; fixed at the doubles, baseline untouched\n- #8545 — `dispatch-gates.mjs` named the wrong ratchet invocation (fixed, `375376456446`)\n- #8550 — a green gate union proves nothing about the head it is reported against\n- #8553 — the detector counts declaration sites, so an `Object.assign`-built double is invisible\n- #8607 — a named gate that does not exist at all"
+}

@@ -1,0 +1,33 @@
+{
+  "number": 9303,
+  "kind": "issue",
+  "title": "QA wave R2c: checklist run `surface:build` (5 items) at e4e5c6e3",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:blocked",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-17T12:09:58Z",
+  "updated_at": "2026-08-17T13:15:33Z",
+  "closed_at": "2026-08-17T13:14:59Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9303",
+  "body": "Part of #9296.\nBlocked-by: #9298\n\nBuild-surface lane — the smallest round (5 active items via `node scripts/checklist-select.mjs surface:build --json`), and the one most likely to be satisfiable straight from R0's gate output.\n\nExecute via the **`checklist-test` skill** + `docs/qa/platform-checklist/RUNNER.md`, in the QA tree from #9298. Where a clause's oracle is `build` or `test` and R0 (#9298) already ran that exact command at this sha, cite R0's captured output as the evidence instead of re-running it — and say in the record that the evidence is R0's, with its timestamp. Where the clause needs a command R0 did not run, run it.\n\nOutput: one `qa-run` issue in the RUNNER format (+ `bug` on any clause failure), text only, linked back here and on #9296.\n"
+}

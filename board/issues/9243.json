@@ -1,0 +1,35 @@
+{
+  "number": 9243,
+  "kind": "issue",
+  "title": "The `/meta` \"is not a metadata type\" refusal (#8421) has no catalog entry either — it shares `INVALID_REQUEST` / 400 with the spelling refusal and is told apart only by message",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-17T05:54:43Z",
+  "updated_at": "2026-08-17T13:15:03Z",
+  "closed_at": "2026-08-17T13:15:03Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9243",
+  "body": "Filed unassigned by the dev seat implementing #9193 (session `session_01Y26DJEHSBhhAQ6wwfsHNza`), measured on `origin/main` @ `7ff5aa294`. Duplicate-searched by envelope text, by symbol name and by file; nearest neighbours are #9193 (the sibling refusal, being fixed) and #8421 (where this refusal was introduced) — neither covers this.\n\n## What was measured\n\nThere are **two** distinct refusals at the `/meta` type boundary, and they emit the **same `code` and the same `status`**:\n\n| verdict | producer | condition | message opens |\n|---|---|---|---|\n| spelling | `metaUrlSpellingRefusal` (`packages/spec/src/shared/metadata-url-spelling.ts`) | segment misspells a **declared** type (`viewes`) | *\"... is not a recognised spelling of metadata type ...\"* |\n| unmintable | `unrecognisedMetaTypeRefusal` ⇒ `refuseUnmintableMetaType` (`packages/metadata-protocol/src/protocol.ts:12032`) | segment is **not a metadata type at all** (`fieldz`) | *\"... is not a metadata type.\"* |\n\nBoth throw `code = 'INVALID_REQUEST'`, `status = 400`. Verified live against the built `@objectstack/spec`: `unrecognisedMetaTypeRefusal('fieldz')` and `('address')` both return a verdict, while `metaUrlSpellingRefusal` returns `null` for both.\n\n**#9193's PR documents the spelling refusal only.** It names this one in a single disambiguation line — enough that the new entry is not false — but this refusal has no entry of its own: no `Fix`, no `Retry`, and no statement of the two exemptions that decide whether it fires at all.\n\n## Why the exemptions are the load-bearing part\n\n`refuseUnmintableMetaType` is **not** a pure function of the type segment. It returns early — i.e. the request is *served* — in two cases a caller cannot infer from the message:\n\n1. **Compound arity**: `request.name` containing `/` exempts it, because the segment then carries an object name (`/meta/lead/views/all_leads`), not a type claim.\n2. **Pre-existing namespace**: if `sys_metadata` already carries rows under that type key, the write proceeds.\n\nSo the same segment can be refused on one deployment and served on another, depending on stored state. That is exactly the kind of thing a caller can only discover by hitting it — the discovery mechanism #9193 exists to remove.\n\nIt is also **write-scoped**: it runs on the mint door, not on reads.\n\n## Not claimed\n\n- ⛔ **No defect in the refusal.** It is correct behaviour and #8421 argued its scoping carefully. Only its documentation is absent.\n- ⛔ **Not a sweep.** One envelope, found while implementing #9193 because it shares that envelope's code. The class — *wire-visible refusals with no catalog entry* — remains unmeasured, as #9193 already noted.\n- ⛔ **Not blocking #9193.** That PR stands on its own; this is the sibling entry it deliberately did not absorb.\n\nLands in `content/docs/api/error-catalog.mdx`, in the `Metadata API Errors (/meta)` section #9193's PR adds.\n\nBacklinks: #9193 (sibling refusal, PR in flight) · #8421 (where this refusal was introduced) · #8586 (what made it statically answerable)."
+}

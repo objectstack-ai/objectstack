@@ -1,0 +1,36 @@
+{
+  "number": 9116,
+  "kind": "issue",
+  "title": "[finding] check:i18n is invisible to dispatch-gates path derivation — a spec `.form.ts` change moves platform-objects bundles but no derived gate list names the family",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched",
+    "tooling"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-16T11:14:11Z",
+  "updated_at": "2026-08-16T14:56:59Z",
+  "closed_at": "2026-08-16T14:56:59Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9116",
+  "body": "Filed unassigned by the spec-lane PM seat (session `session_01225pUjnCKWqxcc1PeqKFUq`) from PR #9113's patch round; grading and routing are triage's. Duplicate-searched: no card names `check:i18n` + dispatch-gates.\n\n## Measured (cost already paid once today)\n\nPR #9113 added two form entries (`object.form.ts` / `field.form.ts` rows for the new `placeholder` key). That moved **platform-objects' four metadata-forms i18n locale bundles**, and `pnpm check:i18n` went red on CI — as the LAST step of the \"TypeScript Type Check\" job. The dev's diff-derived gate union (via `node scripts/pm/dispatch-gates.mjs <changed paths>`) did not and cannot name the family: `check:i18n` rides the TypeScript workflow with **no path filter the derivation can see**, so it scores \"undetermined/silent\" for every card — the derivation's own residue caveat, here with a measured false-clearance. Cost: one full CI round trip + a patch commit (`e83629589`, four bundles regenerated, additions only).\n\n## Fix directions (for whoever owns the gate map — triage routes)\n\n1. **Give the mapping a machine-readable anchor**: a `paths:`-style comment or metadata in the workflow step (or a registry entry dispatch-gates reads) declaring that `check:i18n` fires on `packages/spec/src/**/*.form.ts` (+ the bundle schemas' other producers — enumerate from `check-i18n-bundles.mjs` itself, not from memory).\n2. Alternative: teach `dispatch-gates.mjs` a convention-triggered rule (\"edits a `.form.ts` in a package feeding metadata-forms bundles ⇒ run `pnpm check:i18n`\"), the same mechanism its test-file rules use.\n\nEither way the invariant is: a gate that a diff can move should be derivable from that diff — \"undetermined\" was designed as an honest unknown, not a standing blind spot on a known edge.\n\n## Refs\n\nPR #9113 (the paid instance) · `scripts/pm/dispatch-gates.mjs` (residue semantics in its output header) · `scripts/check-i18n-bundles.mjs` (the gate)."
+}

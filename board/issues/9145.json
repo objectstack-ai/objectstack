@@ -1,0 +1,34 @@
+{
+  "number": 9145,
+  "kind": "pull_request",
+  "title": "docs(qa): reword the #2567 Phase 2 authz-conformance comment off a fixed route list",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-16T13:44:21Z",
+  "updated_at": "2026-08-16T23:20:53Z",
+  "closed_at": "2026-08-16T23:20:51Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": "2026-08-16T23:20:51Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/9145",
+  "body": "Fixes #9027\n\n## What\n\n`packages/qa/dogfood/test/authz-conformance.test.ts` carried a \"#2567 Phase 2\" comment describing `discover()`'s static enumeration as covering `data/meta/graphql` HTTP entry points only. That was accurate when written but the `PROBES` table has grown well past it. Reworded the description generically instead of naming a fixed route-segment list, per the issue's own reasoning: an enumerated list is what drifted in the first place, so swapping one fixed list for another (even an up-to-date one) re-creates the exact mechanism that produced this finding.\n\n`discover()` itself is unchanged and correct — this is a prose-only fix to three comments in one file.\n\n## Re-derived numbers (per triage instruction — not copied from the card)\n\nRe-derived on current `origin/main` (after confirming #9026 landed as `2ce1eb41b`) with a small extraction script that parses every `file:` key out of the `PROBES` array literal — verified the extraction actually reads real quoted paths (not a guessed regex silently returning zero matches):\n\n- **15 probes** over **11 named source files**, spanning **7 route families**: `meta`, `actions`, `automation`, `packages`, `data`, `realtime`, `mcp`.\n- No `graphql` probe exists in the table today — the old \"data/meta/graphql\" wording was already stale on that front too (searched: `graphql` appears only in the comments being fixed here, never in a `PROBES` entry).\n\nThis matches the card's own re-derivation (15/11), independently confirmed rather than copied.\n\n## Bounded in-place sweep\n\nThe issue names one specific comment block (quoted verbatim, unique \"Phase 2\" text at the top of the file). While fixing it I found the identical stale claim (\"data/meta/graphql\") repeated twice more in the same file — immediately above the `PROBES` table declaration, and inline inside the `checkLedger` call — both describing the same table using the same now-inaccurate vocabulary. Extended the fix to all three per the bounded in-place exemption: same defect class, mechanical (same generic-wording treatment already decided for the named comment, applied consistently), file held only by this claim, no new verification surface (comments only). Leaving two of three near-identical descriptions stale while fixing the third would have left contradictory claims meters apart in the same file.\n\n## Tests\n\nUnion run at final commit `60fc93198`:\n\n```\npnpm --filter \"@objectstack/dogfood^...\" build                         → 0 (dependency closure built)\npnpm --filter \"@objectstack/dogfood\" exec vitest run test/authz-conformance.test.ts --maxWorkers=2\n  → Test Files  1 passed (1) / Tests  15 passed (15)\npnpm --filter \"@objectstack/dogfood\" typecheck                          → clean (tsc --noEmit)\npnpm check:test-source-alias                                            → OK\npnpm check:type-source-resolution                                       → OK\npnpm check:engine-double-contract                                       → OK — 311 pinned, 133 in DEBT ledger, 2 exempt (unchanged)\npnpm check:where-matcher                                                → holds, 247/247, none new\npnpm check:query-options-erasure                                        → holds, 67 unswept non-test sites, none new\nnode scripts/check-nul-bytes.mjs <changed file>                         → OK\n```\n\nGate selection: `check:test-source-alias` / `check:type-source-resolution` are the path-derived gates for `packages/qa`; `check:engine-double-contract`, `check:where-matcher`, `check:query-options-erasure` are convention-triggered by editing a test file (`node scripts/pm/dispatch-gates.mjs`). Did not run the repo-wide `check:type-check-coverage` / `check:type-check-debt` re-measure — the diff is comments only in an already-typechecked, already-tracked file (no new file, no new export, no code-path change), so the package's own clean `tsc --noEmit` stands in for it; flagging this choice rather than silently skipping it.\n\n## Changeset\n\nTest-file comment change, nothing published — no changeset. Applying the `skip-changeset` label (this repo's real mechanism, per the maintainer note on #9133) as part of this PR, reading back the label set after the changeset-gate bot's first pass rather than declaring it done on the write alone.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01Y26DJEHSBhhAQ6wwfsHNza)_"
+}

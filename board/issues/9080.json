@@ -1,0 +1,36 @@
+{
+  "number": 9080,
+  "kind": "issue",
+  "title": "docs(releases): v16.mdx documents framework#3354 but never objectui#2743, the Console half of the same mark-as-read fix",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:devx",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-16T08:39:35Z",
+  "updated_at": "2026-08-16T15:40:13Z",
+  "closed_at": "2026-08-16T15:40:13Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9080",
+  "body": "Measured while implementing #9035 (the rc.1 Console pin correction) and deliberately **not** fixed there: #9035 is the releases-page **factual-correction** lane (something is documented and is wrong). This is the **completeness** lane (something should be documented and is not), which is release-owned surface needing the maintainer's per-card approval — the same separation #8917 insisted on. Filed unassigned.\n\n## Measurement\n\n`packages/console/CHANGELOG.md`'s `## 16.0.0-rc.1` section closes with changeset `a791200`, objectui range `af1b0db96e44...69fa5d163a97`, carrying exactly one frontend change:\n\n- `fix(app-shell): mark notifications read via the REST surface, not direct receipt writes` (objectui#2743)\n\nThat window is inside `16.0.0-rc.1`, and rc.1 was the train's last RC, so objectui#2743 shipped in **16.0.0**.\n\nGrepping `content/docs/releases/v16.mdx`:\n\n| grep | result |\n| :-- | :-- |\n| `2743` | no match |\n| `3354` | one match, line 793 |\n\nLine 793 documents the **framework** half under *Landed since 16.0.0-rc.0 → New capabilities (backend)*, and its prose describes the user-visible outcome directly:\n\n> the functional fix — `GET /api/v1/notifications` + the two `read` routes are now explicitly mounted in the standalone dispatcher (they only reached cloud's hono catch-all before), so mark-as-read works on `os dev` / standalone instead of leaving unread state that could never clear.\n\nSo the page tells a reader the server side of mark-as-read was fixed, and never mentions that the Console stopped writing receipts directly and started calling that REST surface. Related closed card for the same defect: #3362.\n\n## Why #9035's PR did not fold it in\n\n#9035 corrected the four pin statements to `94d4876 → 69fa5d163a97`, which widens the window the *New in Console (objectui …)* heading names — so the question of whether the correction obliges adding objectui#2743 was live. It does not, and the reason is measurable rather than a judgment call:\n\n**that bullet list is already a curated highlights list, not an enumeration.** The `1965549` window (`3b2e4d98d904...af1b0db96e44`) holds 16 frontend changes; the list itemizes 13. The three it omits — objectui#2726 (type the exportDownload test fetch mock), objectui#2718 / #2695 (docs build resilient to remote badge fetch failures), objectui#2721 (coerce i18n tab-label helpers to string) — are internal, and their omission predates and is independent of the pin error.\n\n⇒ The heading's parenthetical is a **pin** claim (a fact about what the release bundles), and correcting it does not induce a false claim about the list's contents, because the list never claimed to be exhaustive. Adding objectui#2743 is therefore adding content, not correcting a fact.\n\nBut objectui#2743 is unlike those three omissions: it is user-visible, and its counterpart half **is** documented in the same release's page, which is what makes the asymmetry worth a card rather than a shrug.\n\n## Suggested fix (needs the completeness-lane approval first)\n\nOne bullet under *New in Console (objectui, now bundled `94d4876 → 69fa5d163a97`)*, pairing it to framework#3354 the way the neighbouring bullets pair to their framework halves — e.g. the existing *\"the client half of framework#3347\"* phrasing for objectui#2736.\n\n## Provenance\n\nDerived from `packages/console/CHANGELOG.md` and `content/docs/releases/v16.mdx` on `origin/main` at `c308a4fd8`. Dedupe search run before filing (keyword + path, open issues): no open card covers it.\n\nBlocked-by: none. Scope note: v16 and later only, per the standing release-page boundary."
+}

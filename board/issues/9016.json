@@ -1,0 +1,33 @@
+{
+  "number": 9016,
+  "kind": "pull_request",
+  "title": "docs(docker): bump README example image tag from 14.8.0 to 17.0.0",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-16T06:16:10Z",
+  "updated_at": "2026-08-16T06:44:53Z",
+  "closed_at": "2026-08-16T06:44:52Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": "2026-08-16T06:44:52Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/9016",
+  "body": "Fixes #8961\n\n## The fix\n\n`docker/README.md` pinned its three example image references at `14.8.0`\nwhile `packages/cli/package.json` is at `17.0.0` — three majors stale:\n\n- `:32` — `FROM ghcr.io/objectstack-ai/objectstack:14.8.0`\n- `:43` — the `docker run` example\n- `:65` — `docker build --build-arg OS_CLI_VERSION=14.8.0`\n\nAll three now read `17.0.0`. This is the same defect class PR #8960 fixed in\n`content/docs/deployment/self-hosting.mdx` for #8911; `docker/README.md` was\noutside that card's file surface, hence a separate card and PR.\n\nWhy it's a bug and not cosmetic: a reader who copies the `FROM` line gets a\nv14 runtime, then builds with a current v17 CLI. The runtime's\n`engines.protocol` gate refuses that pairing by design (\"the safety belt of\nthe two-axis split\"), so the copy-paste path from this README ended in a\nboot failure caused by one stale digit.\n\n## The convention question (recommendation, not implemented here)\n\nThe issue asks for a recommendation on whether these examples should carry a\nconcrete version at all, versus `packages/create-objectstack/src/templates/blank/Dockerfile:26`'s\n`:latest` approach — **not implemented in this PR**, per scope instruction.\n\n**Recommendation: keep the concrete-version convention** (`17.0.0`, as this\nPR and `self-hosting.mdx` both do), and instead treat `create-objectstack`'s\n`:latest` as the outlier to fix in a follow-up — not the other way around.\n\n- `docker/README.md`'s own tag table (line 20) says it explicitly: `X.Y.Z` —\n  \"**pin this in production**\"; `latest` is scoped there to \"quick starts\n  only.\" A concrete-version example is the README teaching its own stated\n  best practice by demonstration. Docs that recommend pinning and then show\n  `:latest` in the primary example undercut the advice they just gave.\n- The `create-objectstack` template Dockerfile already half-agrees: its\n  comment right above the `FROM` line reads \"Pin the tag to the\n  `@objectstack/cli` version in your package.json so the runtime matches the\n  CLI that built the artifact\" — but the `FROM` line itself uses `:latest`,\n  contradicting its own comment. That's a second, independent defect in that\n  file, not a reason to move the other two surfaces toward `:latest`.\n  Filed separately below rather than fixed here (different file surface,\n  different readers, and the issue says not to touch it in this PR).\n  `create-objectstack` is scaffolded once per app at `npx create-objectstack`\n  time, so `:latest` there also means every scaffolded app silently drifts\n  to whatever image is newest at each rebuild, unrelated to the CLI version\n  actually pinned in the generated `package.json` — the opposite of what its\n  own comment promises.\n- A concrete version's cost (goes stale on every major) is exactly what a\n  mechanical guard should absorb, rather than trading it for a convention\n  (`:latest`) that silently breaks the \"pin in production\" guidance for\n  every reader who copies the example as-is.\n\n## Mechanical guard (recommendation, not implemented here)\n\nA durable fix, now that this has happened twice: a gate that asserts the\nconcrete-version docs image tags in `docker/README.md` and\n`content/docs/deployment/self-hosting.mdx` share `packages/cli/package.json`'s\nmajor (or full version, since both currently pin exact versions) —\n`scripts/check-docs-image-tag.mjs` in the spirit of the existing\n`scripts/check-*.mjs` gate family, run in the same lint/docs workflow.\n\nWhat it would assert: extract every `ghcr.io/objectstack-ai/objectstack:X.Y.Z`\nand `OS_CLI_VERSION=X.Y.Z` literal from the two known doc surfaces via\nregex, compare against `packages/cli/package.json`'s `version`, fail listing\nfile:line + found vs. expected on any mismatch.\n\nHow it would be proven capable of failing: revert one occurrence to a stale\nversion locally, confirm the gate goes red naming that file:line, then\nrestore and confirm green — the same reverse-verification discipline used\nfor code gates.\n\nFiled as a separate, unassigned issue (`out_of_scope_findings` below) rather\nthan built in this PR, since it's new gate infrastructure beyond the\nthree-line mechanical fix the card asks for and needs its own review of\nfalse-positive risk (the tag table's own doc text on line 20 contains\n`X.Y.Z` as a pattern, not a literal version, and a naive regex would need to\nexclude it).\n\n## Verification\n\n- `pnpm check:nul-bytes` — green (5947 tracked text files scanned, no raw\n  control bytes).\n- `node scripts/pm/dispatch-gates.mjs docker/README.md` — 0 of 98 discovered\n  check families name this path; no gate family fires on this file.\n- Confirmed no remaining `14.8.0` occurrences in `docker/README.md`.\n- HEAD at time of verification: `5f7a99a92`.\n\n`skip-changeset` applied — `docker/README.md` is documentation outside\npublished package source, not user-visible package behavior.\n\n## Out of scope, filed separately\n\n- `packages/create-objectstack/src/templates/blank/Dockerfile:26` uses\n  `:latest` while its own adjacent comment instructs pinning to the CLI\n  version — a second, independent defect, different file surface, different\n  readers. Not touched here per the issue's explicit instruction.\n- A mechanical guard asserting docs image tags track `packages/cli`'s\n  version (see above) — new gate infrastructure, filed for PM triage rather\n  than built unreviewed in this PR.\n\n_Generated by [Claude Code](https://claude.ai/code/session_011RB4waLuNbdruCo6X9oobm)_\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_011RB4waLuNbdruCo6X9oobm)_"
+}

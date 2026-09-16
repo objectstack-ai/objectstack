@@ -1,0 +1,35 @@
+{
+  "number": 9170,
+  "kind": "pull_request",
+  "title": "feat(spec): register the dispatcher conformance gate's reported error codes in ERROR_CODE_LEDGER",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-16T17:09:40Z",
+  "updated_at": "2026-08-16T23:45:41Z",
+  "closed_at": "2026-08-16T19:08:49Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-16T19:08:49Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/9170",
+  "body": "Fixes #8846\n\n## What this does\n\nRegisters, in `ERROR_CODE_LEDGER` (`packages/spec/src/api/error-code-ledger.zod.ts`), the seven error codes the #8087 conformance gate reports as \"merely unregistered\" — regenerated in this worktree with `node scripts/check-dispatcher-error-vocabulary.mjs --report` rather than taken from any snapshot; the derivation returned exactly 7, matching the cli seat's table, so no surplus to report:\n\n| code | owning package (per #7504 provenance) | door |\n|---|---|---|\n| `FLOW_FAILED` | `@objectstack/runtime` | dispatcher |\n| `QUERY_OBJECT_MISMATCH` | `@objectstack/metadata-protocol` | dispatcher |\n| `ERR_AUTONUMBER_COLLISION` | `@objectstack/objectql` | dispatcher |\n| `ERR_TRANSACTION_UNSUPPORTED` | `@objectstack/objectql` | dispatcher |\n| `ERR_CROSS_DATASOURCE_TRANSACTION_WRITE` | `@objectstack/objectql` | dispatcher |\n| `ERR_HOOK_TARGET_REBIND` | `@objectstack/objectql` | dispatcher |\n| `FIELD_VISIBILITY_UNRESOLVED` | `@objectstack/rest` | rest |\n\nEvery row carries a `[#8846]` provenance comment naming the producer site, following the ledger's existing conventions (PR #8212's `CONFLICT` registration and the existing objectql `ERR_*` family). None of the seven trips either prong of the #8211 `standardSynonymOf` detector, so no waiver is needed — verified mechanically by the admission gate and pinned per-code in the new test.\n\n## The both-direction ratchet (cross-lane file, carried per the cli seat's in-PR option)\n\n`packages/runtime/src/dispatcher-error-vocabulary.ts` is `domain:cli` surface, declared in the PM claim and carried here because the gate reconciles in both directions: a `pending-registration` row whose code is now registered fails it. The seven discharged rows are deleted (the mechanical edit the gate directs) and the section comment records the discharge. The gate is green at this head — `check-dispatcher-error-vocabulary: OK — 7 unregistered code-stamping site(s), all classified; 0 awaiting a ledger entry`.\n\n`packages/runtime/src/error-envelope.conformance.test.ts` needed the mechanical follow-up the ratchet forces: its `PENDING_AT_DISPATCHER_DOOR.length` greater-than-zero wiring guard asserted the pre-discharge state, so it is replaced by a positive drive — each of the seven codes through the real `errorFromThrown` builder, asserting verbatim carriage plus full `ApiErrorSchema`/`BaseResponseSchema` conformance (the exact pair that failed before registration). The standing ratchet test (\"every pending code is still unregistered\") stays for future rows.\n\n## Deliberate exclusions — absences, not omissions\n\n- `STORAGE_FAILURE` is NOT registered: measured producer-less (only non-test occurrences are comment lines); a row would be unemittable from birth. Its absence is pinned in the new spec test.\n- `DUPLICATE` is NOT registered: it is the pinned witness of the tenant-authored `error.code` limb; its re-homing was ruled to #9106's lane. #9106 stays open; its absence is pinned too.\n- No loosening of `ApiErrorSchema` or ADR-0112 — option C stays rejected; this PR only widens the registered union by measured, produced codes.\n\n## #8211 — settled state, recorded\n\n#8211 is already closed (completed 2026-08-13 via PR #8450): the maintainer-adjudicated outcome (2026-08-12, option C) made the synonym rule mechanical — `standardSynonymOf` + the admission gate — with the five pre-gate synonyms (`CONFLICT` shadowing `RESOURCE_CONFLICT`, plus `FORBIDDEN`, `INTERNAL`, `NOT_FOUND`, `UNAUTHORIZED`) grandfathered as recorded `STANDARD_SYNONYM_WAIVERS`, wire values unchanged, and consolidation onto standard members explicitly DEFERRED (option B) until a specific code has a measured victim. So the synonyms coexist with the catalog, on the record, and no wire behavior moves here. This PR adds nothing to that family (none of the seven is a synonym) and changes nothing in it; #8211 remains settled as adjudicated. `CONFLICT` was already registered by PR #8212 and is not re-registered.\n\n## Tests and verification (union run at head `0b5ae56fc`, clean tree)\n\n- `pnpm --filter @objectstack/spec test` — 406 files, 10817 tests, all passed (includes the new per-code registration test: parseable by `ErrorCode`, registered under its measured owner, no synonym, exclusions pinned).\n- `pnpm --filter @objectstack/runtime test` — 165 files, 2463 tests, all passed.\n- `pnpm --filter @objectstack/spec typecheck` and `pnpm --filter @objectstack/runtime typecheck` — green.\n- `node scripts/check-dispatcher-error-vocabulary.mjs` + `--self-test` — green, 0 pending.\n- Gate union re-derived from actual changed paths (`scripts/pm/dispatch-gates.mjs`) and run at `0b5ae56fc`: nul-bytes, error-code-casing, merge-driver, spec-parsed-alias, engine-double-contract, where-matcher, changeset-gate-self-tests, objectui-changeset, cross-package-test-inputs, query-options-erasure, docs-audit-scope, docs-redirects, quick-reference-counts, role-word, type-source-resolution, type-check-coverage, doc-formula-expressions, adr-0087-registration, changeset-no-major, empty-changeset, dev-prereqs — all green.\n\n## Generated artifacts\n\n`gen:docs` (after the spec build's `gen:schema` + `gen:openapi`) regenerated the 11 API reference pages the wider `ErrorCode` enum moves — the same set PR #8212's precedent moved — committed as a separate generated-output-only commit.\n\nChangeset: `@objectstack/spec` patch, matching the #8212 sibling precedent.\n\n_Generated by [Claude Code](https://claude.ai/code/session_01225pUjnCKWqxcc1PeqKFUq)_\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01225pUjnCKWqxcc1PeqKFUq)_"
+}

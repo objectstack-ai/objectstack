@@ -1,0 +1,35 @@
+{
+  "number": 8911,
+  "kind": "issue",
+  "title": "docs(deployment): promote Docker to the lead path in `self-hosting` — it is how the platform actually ships",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-15T16:26:21Z",
+  "updated_at": "2026-08-16T03:25:33Z",
+  "closed_at": "2026-08-16T03:25:33Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8911",
+  "body": "Blocked-by: #8904\n\nCard 04 of the deployment restructure. Maintainer ruling, 2026-08-15: 「平台通常用 docker 发布」.\n\n## ⛔ Serial constraint — read before claiming\n\n**#8904 edits this same file** (`content/docs/deployment/self-hosting.mdx`) to remove two prose links into the retiring Vercel page, at line 11 and line 424. Do not start until #8904 has **merged**, then re-read the file on the merged ref — line numbers in this card are from `origin/main` at filing time and #8904 will move them.\n\n## The defect\n\n`self-hosting.mdx` (425 lines) presents three peer options:\n\n- `## Option 1 — Bare Node.js (systemd)` (line 50)\n- `## Option 2 — Docker (official image)` (line 88)\n- `## Option 3 — Docker Compose with Postgres` (line 220)\n\nBut Docker is not one option among three — it is **how the platform ships**. `docker/Dockerfile` and `.github/workflows/docker-publish.yml` build and publish the official image; bare Node is the minority path for people who have a reason to avoid containers. The page's ordering tells a new reader the opposite, and ordering is the strongest signal a docs page has.\n\nThe content itself is good — official image, Compose, Kubernetes (line 297), artifact-pinned boot (line 117), health checks, reverse proxy, scaling. **This is a re-framing card, not a rewrite.** Resist the urge to rewrite prose that is already correct; the win is that the right thing is first.\n\n## Scope\n\n- Lead with the official Docker image. Compose and Kubernetes follow as deployment shapes of the same path, not as alternatives to it.\n- Demote bare Node.js to the minority path with a sentence on when it is the right choice — do **not** delete it.\n- Keep this page **Axis A (platform runtime)**. The `OS_ARTIFACT_URL` section stays here as operational detail; card #8910 references it from the app side and will not move it.\n- Verify the image name, tags and registry against `docker/Dockerfile` and `.github/workflows/docker-publish.yml` **from the tree** — do not copy any image reference out of the current prose without checking it. A stale image tag in the lead position is worse than the current ordering.\n\nDo not touch other deployment pages; the index rewrite is card 05.\n\nDocs-only, `skip-changeset`. `Check Documentation Links` (`lint.yml`) must stay green — this page's Related section is edited by #8904 first."
+}

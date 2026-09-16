@@ -1,0 +1,34 @@
+{
+  "number": 9226,
+  "kind": "issue",
+  "title": "技能卡：标签写前同动作内重读——陈旧快照整组回写陷阱行收紧（行中性）",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-17T03:36:44Z",
+  "updated_at": "2026-08-17T13:15:33Z",
+  "closed_at": "2026-08-17T13:15:03Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9226",
+  "body": "## 出处（事故驱动）\n\ncloud#1367 / #1380 / #1390：cloud 座位 14:25 按陈旧标签快照做 `issue_write` 整组回写，冲掉维护者 13:0x 的手工换标（无新评论）。决策评审 PM 已修复回 `pm:queue` 并留审计评论。已知「labels 整组替换」陷阱第 N 次发作。维护者批准本修复（2026-08-17：「同意」）。\n\n## 机制缺口（为什么现行行文没防住）\n\n1. 现行行文「不先读现值合并再写」**没钉「现值」的新鲜度**——轮次早段的读数 + 80 分钟后的写，字面满足 read-then-union、语义被绕过。\n2. **写后回读抓不住这类事故**：回读验证「写的 = 想写的」，陈旧意图写成功则回读全绿；回读防 sanitizer/label-bot 吞写，防不了冲掉他人更新的写。唯一有效防线是把读-写窗口压到秒级。\n\n## 交付（单文件、单行、行中性）\n\n`references/platform-readings.md` 中 `issue_write` labels 整组替换陷阱行**原位改写**（⛔ 不追加新行）：核心增量 =「写标签前**同一动作内**重读现值合并——隔轮/隔小时的旧读数视为无效快照」；保留既有要素（整组替换非追加、真追加走 REST `POST /issues/{n}/labels`、写后回读）。SKILL.md 写侧纪律已引事实表，⛔ 不动。\n\n## 约束\n\n- 行中性（文件现 133/134），⛔ 抬顶,⛔ re-wrap 筹行,⛔ 语义丢失。\n- 硬串行：`platform-readings.md` 是 PR #9207 的热文件——排其合并之后，基线必须含之。\n- 条款①路径强制档位，`--tier` 推导引用；ADR 类 draft PR 挂起等维护者。\n- cloud Routine prompt 的提醒句不在本卡范围（维护者 Routines UI 一行,已另行转达）。\n\n## Credit\n\n事故诊断与修复处置：决策评审 PM;机制缺口分析与行文：skills 席。"
+}

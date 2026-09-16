@@ -1,0 +1,35 @@
+{
+  "number": 8967,
+  "kind": "issue",
+  "title": "gate: nothing reconciles the documented HTTP status of an error code against the status the runtime actually emits — measured on MISSING_REQUIRED_FIELD (400 documented, 422 served)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-16T03:13:23Z",
+  "updated_at": "2026-08-16T07:03:11Z",
+  "closed_at": "2026-08-16T07:03:11Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8967",
+  "body": "Filed by the `domain:devx` PM seat (#6023) as the deliberately-split third direction of #8880. #8880 was scoped to direction 1 (correct the docs, landed as PR #8963); direction 2 (move the refusals onto 400) is foreclosed on measured fail-open grounds. **This card is direction 3 and nothing else.**\n\n⛔ **No `domain:*` / `target:*` label set** — both are triage's single-producer fields.\n\n## The gap\n\n`content/docs/api/error-catalog.mdx` and `content/docs/protocol/kernel/error-handling.mdx` both publish an HTTP status for every error code. **Nothing checks those numbers against the runtime.** The catalog's status table is hand-maintained prose; the statuses are decided at the doors in `packages/types` / `packages/rest`. The two sides are free to disagree indefinitely, and did.\n\n## The live instance that motivated this\n\n`MISSING_REQUIRED_FIELD` is documented as **400** in two places (`error-handling.mdx:246`, and the status table at `error-catalog.mdx:630`). Five `controlled_by_parent` paths answer **422** with no `fields[]`, on a public error contract, on a surface a client branches on. CI was fully green the whole time. It was found by a human reading a PR, which is exactly the failure mode a ratchet removes.\n\nWorse, the honest complication #8880 recorded: **the status is not asserted in-package on either side of the branch.** `ValidationError` declares no status. So today nothing pins the doc's claim *or* contradicts it — there is no test to update when the doc drifts, and no doc to update when the door changes.\n\n## Measured facts to build against (read from source under #8880, PR #8963 — do not re-derive from prose)\n\n- `MasterReferenceMissingError` declares `code` / `status` / `statusCode` = 422 in `errors.ts`\n- `declaredHttpStatus` in `packages/rest/src/error-response.ts` reads `status` then `statusCode`; its 4xx passthrough arm emits `{ error, code, object }` only\n- `fields` is emitted **solely** for the `VALIDATION_FAILED` duck-type — so \"the catalog says read `fields`\" is false for any code that does not travel that path\n- `resolveCbpRelation` sets `omissionRefusedByValidation` to `type === 'master_detail' && required && !readonly && !system`; only that shape reaches validation and answers the documented 400\n\n## What to build — and the two places this will go wrong\n\nA gate that reconciles **declared status** (docs) against **emitted status** (runtime) per error code.\n\n**(a) The runtime side must be derived, not listed.** A hand-written table of code→status is a second copy of the thing that drifted; it would need its own drift tripwire, and #8122 is the standing example of a hand-written list reconciled against nothing. Derive from the error classes' declared `status`/`statusCode` and the door's mapping. Where a code has **no** in-package declaration, that is a finding the gate should be able to state, not silently pass.\n\n**(b) One code can legitimately have more than one status.** `MISSING_REQUIRED_FIELD` is now documented as 400-with-one-documented-exception. A gate asserting a single status per code would demand the docs lie. The assertion is *\"every status the runtime can emit for this code is documented, and every status documented is reachable\"* — a set comparison in both directions, which is also what makes it catch the next one.\n\n## Prove it catches the real defect\n\n⚠️ The instance is being fixed as this is filed. **Verify against the pre-#8963 ref** (`git show <pre-merge-sha>:content/docs/api/error-catalog.mdx`), not against a clean tree. A gate whose only evidence is \"green on current main\" has not been tested — that is the #8892 lesson, and it applies unchanged here.\n\nPositive control for the zero-hit case: confirm the instrument can see a status it *should* accept before trusting it to report none.\n\n## House conventions\n\n- `--self-test` before the real check, like `check:role-word` and `check:docs-audit-scope`\n- Wire into `.github/workflows/lint.yml`\n- Derive the gate set for your own PR with `node scripts/pm/dispatch-gates.mjs <paths>` rather than recalling it\n\n## Out of scope\n\n⛔ Changing any runtime status. ⛔ Re-opening direction 2 of #8880 — those four refusals are correct and stay 422; two independent runs measured unconditional hand-over as fail-open, minting detail rows with a null master FK that the `controlled_by_parent` read filter can never match.\n\nRelated: #8880 (the instance) · PR #8963 (the docs correction) · #8959 (a separate false present-tense claim in the same family, including one in a release-note-bound changeset) · #8122 (hand-written list with no reconciliation — the anti-pattern to avoid here)"
+}

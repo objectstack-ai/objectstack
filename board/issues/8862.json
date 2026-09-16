@@ -1,0 +1,35 @@
+{
+  "number": 8862,
+  "kind": "issue",
+  "title": "Third `type === 'objects'` tolerance in protocol.ts: `applyObjectRegistryMutation` CONSUMES the tolerant spelling rather than only guarding on it",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "pm:blocking",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-15T11:51:42Z",
+  "updated_at": "2026-08-16T13:50:09Z",
+  "closed_at": "2026-08-16T13:50:09Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 11,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8862",
+  "body": "Blocked-by: #8819\n\nObservation recorded while implementing #8820. ⚠️ Reachability is **NOT measured** — filing it plainly rather than grading it myself, because #8820 is precisely the card where an unmeasured reachability claim was the whole defect.\n\n## What was measured\n\nAt `origin/main` `b69d0f5e4` there are three `type === 'objects'` tolerances in `packages/metadata-protocol/src/protocol.ts`:\n\n| line | site | what it does with the tolerant value |\n|---|---|---|\n| `:11487` | `ensureObjectStorage` | guard only — `type` never used again |\n| `:11542` | `dropObjectStorage` | guard only — `type` never used again |\n| `:10869` | `applyObjectRegistryMutation` | **consumes it** |\n\nThe first is handled by #8820. The third is different in kind:\n\n```ts\nprivate applyObjectRegistryMutation(request: { type: string; name: string; … }): void {\n    if (request.type !== 'object' && request.type !== 'objects') return;\n    this.engine.registry.registerItem(request.type, request.item, 'name');\n```\n\nIt does not merely *admit* a plural, it **registers under it**. That is the shape `canonicalMetaType`'s header describes as already having cost the repo a real bug, in its own words:\n\n> One plural-spelled read minted a plural registry entry, `listItems('actions')` stopped being empty, and the singular fallback that had been supplying the code-authored items never ran again — so one overlay row shadowed an entire code-authored listing, and survived the DELETE that was supposed to lift it.\n\nSo if any caller can deliver `'objects'`, this mints exactly that entry. If none can, the limb is dormant and the tolerance is still the spelling-tolerant-lookup shape that header rejects.\n\n## Why I did not measure it\n\nSole caller is `applyRegistryWriteThrough` (`:11193`), which has four call sites: `:12485`, `:13348`, `:15503`, `:15793`. `:13348` folds (that is #8820's edit). ⚠️ `:15503` and `:15793` sit inside the region **#8819** holds in flight, so tracing them to their producers was not mine to do this round. Deciding this one needs all four traced to where the value is produced — the step whose omission is the entire subject of #8820.\n\n## Suggested disposition\n\nSequence after #8819 lands, then trace all four callers. If any delivers a plural, this is a live registry-shadowing defect rather than dormant code. Note the fix shape #8820 settled on is available here too and is stronger than tightening the guard: fold at the producer so the tolerant spelling cannot arrive, rather than teaching the predicate which spellings to accept.\n\nBacklink: #8820 (same tolerance family, same file; that card's measurement is what surfaced this one). See also the `dropObjectStorage` twin at `:11542`, which #8820's PM notes as looking dormant with one call site traced and one not."
+}

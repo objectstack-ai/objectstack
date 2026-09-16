@@ -1,0 +1,35 @@
+{
+  "number": 9171,
+  "kind": "issue",
+  "title": "`scripts/pm/dispatch-gates.mjs` does not derive `check:liveness` for a `packages/objectql/**` path, but CI's `Spec property liveness` job runs on one — every dispatch tells devs to trust that derivation",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-16T17:26:14Z",
+  "updated_at": "2026-08-17T10:22:56Z",
+  "closed_at": "2026-08-17T00:44:19Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9171",
+  "body": "Filed unassigned by the `domain:metadata` execution seat (#6367), PM session `session_01NTKPDRoynY8i3HmdSFUxFj`. Surfaced by the dev on PR #9166 (#8990) and reported to me rather than filed there, correctly — `scripts/pm/**` is the dispatch tooling, so the disposition is the PM's, not the card's. Duplicate-searched by script name and gate name first.\n\n## The gap, measured\n\nOn PR #9166 the second commit touched `packages/objectql/src/.../declared-fields.ts` (a doc comment on the canonical sparse-face guard rule).\n\n| | result |\n|---|---|\n| `node scripts/pm/dispatch-gates.mjs <the two-commit path set>` | does **not** name `check:liveness` |\n| CI at the same head `f5e13cc1f` | runs **`Spec property liveness`** — and it appears in the check-run list |\n\nRun directly at `f5e13cc1f`: **passes.** So nothing shipped broken here — but that is luck, not the process working.\n\n## Why this matters more than one missing entry\n\n**Every dispatch brief this seat writes tells the dev to derive the gate union with this script and run it.** That instruction is the mechanism by which a dev is supposed to know what CI will check *before* pushing. Where the derivation is silent and CI is not, a dev who follows the instruction **exactly** ships without having run a gate that will run on them — and the only signals are a red CI job they did not predict, or (worse) a green one that makes the omission invisible forever.\n\n⭐ **This instance was caught only because I happened to name `Spec property liveness` to the dev from a CI check-run list I was reading for an unrelated reason** (the head had moved and I was re-reading conclusions). The dev then ran it directly. Remove that coincidence and the gap stays open indefinitely — nothing in the loop compares the derivation's output against the jobs CI actually schedules.\n\nThis is the concrete, reproducible instance of the caveat #8889 states in the abstract and that this seat repeats in every brief — *\"the derivation's silence is not evidence of absence.\"* Repeating a warning in prose has not been enough; here is a case where following the tooling correctly still under-runs.\n\n## What a disposition has to decide\n\n1. **Fix the mapping** — add whatever path rule makes `packages/objectql/**` (or whatever the real trigger is: it may be broader than objectql, and the trigger condition should be read off the workflow rather than inferred from this one hit) derive `check:liveness`. Cheapest, and closes exactly this hole.\n2. **Close the class instead** — make the derivation checkable against CI rather than hand-maintained: derive from, or diff against, the workflow's own job triggers, so a job CI schedules and the script omits is itself a failure. More expensive; it is the only option that stops the next divergence rather than this one.\n3. **Both**, with 1 now and 2 as the standing fix.\n\n⛔ **No recommendation from this seat beyond one observation**: a hand-maintained mirror of a gate list has the same failure mode as every other declared-vs-enforced pair this repo has been closing all week (#8739's dialect claim, #8862's tolerance limbs, #9009's promised-but-never-filed card). The mirror drifts, the drift is silent, and it is discovered by accident. Option 1 fixes an instance of exactly the shape option 2 exists to retire.\n\n## Not claimed\n\n- ⛔ **Nothing shipped broken.** `Spec property liveness` passes at `f5e13cc1f`; this is a process gap, not a defect in any landed change.\n- ⛔ **No sweep performed.** One path pattern, one gate, found by accident. I did **not** diff the script's full output against CI's scheduled job set for any other path class — that comparison is the actual measurement this card asks for and it has not been taken.\n- ⛔ **The trigger condition is not established.** That CI ran the job on an `objectql` path does not establish that `packages/objectql/**` is the rule; read the workflow.\n\nBacklinks: PR #9166 / #8990 (where it surfaced) · #8889 (the standing \"derivation's silence is not evidence of absence\" caveat)."
+}

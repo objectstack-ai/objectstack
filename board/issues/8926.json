@@ -1,0 +1,34 @@
+{
+  "number": 8926,
+  "kind": "issue",
+  "title": "driver-sql: MySQL's unresolvable-column wording is matched by neither arm of the recovery/refusal predicate, so MySQL gets no ADR-0112 envelope and no #3821 recovery",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-15T17:21:12Z",
+  "updated_at": "2026-08-16T09:21:15Z",
+  "closed_at": "2026-08-16T08:24:03Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8926",
+  "body": "Found while implementing #8790 (unresolvable WHERE column refuses on both halves). Filed separately because closing it is an accept-set change in the **opposite direction** from that card's ruling, so it should not ride along on it.\n\n## The gap\n\n`SqlDriver` decides \"is this an unresolvable column?\" with one predicate (`isUnresolvableColumnError`, extracted from the inline test the #3821 ladder carried):\n\n```\nmessage.includes('no such column')                                  // SQLite\n|| (message.includes('column') && message.includes('does not exist'))  // Postgres\n```\n\nMySQL spells the same condition `Unknown column 'x' in 'where clause'` / `'field list'` (`ER_BAD_FIELD_ERROR`). It contains `column` but not `does not exist`, so **neither arm matches**. Two consequences, both live on MySQL only:\n\n1. **No ADR-0112 envelope.** After #8790, SQLite and Postgres answer an unresolvable WHERE column with `INVALID_FILTER` / 400 naming the column, on both `find()` and `count()`. MySQL still throws the raw dialect error — the dialect's own `code`, no `status` (an unclassified 5xx at the REST boundary rather than a caller mistake), and **the statement's bound literals inlined in the message**, which is the predicate-text disclosure shape #7929 redacted elsewhere.\n2. **No #3821 recovery.** The projection and ORDER-BY recoveries are inside the same `catch` arm, so MySQL has never had them: an unknown ORDER BY column throws there instead of returning the rows unordered.\n\nThe repo already recognises this wording elsewhere — `packages/metadata/src/utils/schema-sync-errors.ts` handles `ER_BAD_FIELD_ERROR` explicitly, and `packages/rest` maps MySQL's \"Unknown column\" to `400 INVALID_FIELD` (`rest.test.ts`). Only the driver's ladder predicate does not.\n\n## Measured\n\nNot measured against a live MySQL — no `OS_TEST_MYSQL_URL` in the container this was found in. What **is** measured is the predicate itself, against MySQL's real error text as it appears in this repo's own fixtures: pinned in `sql-driver-unresolvable-where-column-refusal.test.ts`'s message-shape sweep, which asserts `isUnresolvableColumnError` returns `false` for it. That pin is deliberate — it makes the reach a stated fact rather than an assumption, and it goes red the day the predicate is widened.\n\n## Why it is a decision, not an obvious fix\n\nAdding MySQL's spelling to the predicate is one line, and it does **two** things at once, because the recovery ladder and the refusal terminal share the arm:\n\n- it gives MySQL the `INVALID_FILTER` envelope — an accept-set **narrowing**, the direction #8790 was ruled on;\n- it also gives MySQL the projection and ORDER-BY recoveries — an accept-set **widening** on a GA read path, turning a throw into returned rows for callers who today receive an error.\n\nThe second half is the one nobody has ruled on. Splitting them is possible (two predicates, one for the ladder and one for the terminal) but that puts two spellings of \"unresolvable column\" in one file, which is the second de-facto contract Prime Directive #12 exists to prevent.\n\nWorth ruling alongside whatever posture #8371 lands on the same axis.\n"
+}

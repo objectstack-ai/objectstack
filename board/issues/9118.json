@@ -1,0 +1,35 @@
+{
+  "number": 9118,
+  "kind": "issue",
+  "title": "QA checklist studio-authoring still describes `/meta` write attribution as \"X-Actor / the session identity\" after #7941",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-16T11:17:29Z",
+  "updated_at": "2026-08-17T00:44:19Z",
+  "closed_at": "2026-08-17T00:44:19Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9118",
+  "body": "Observation-class finding, filed unassigned from the census run for #7941. Documentation drift, not a defect in shipped behaviour.\n\n## What\n\n#7941 ruled that the authenticated identity is the recorded actor on all five `/meta` write sites, and the `X-Actor` limb was removed from `resolveMetaWriteActor` — the header is now ignored outright. Three clauses in `docs/qa/platform-checklist/areas/studio-authoring.json` still describe the old two-source rule:\n\n- **line 327** — a rollback step instructing the runner to \"send `X-Actor` or drive it under an authenticated session so the actor is attributable\". The first branch no longer attributes anything; only the second does. A runner who takes the `X-Actor` branch will now see the *authenticated* caller in the rows, which is correct behaviour but not what the step led them to expect.\n- **line 393** — the audit clause: \"each stamped with the acting user, resolved from `X-Actor` / the session identity, never anonymous\".\n- **line 412** — the source-file pointer: \"actor from `X-Actor` / session\".\n\n## Why this is a finding and not a fix in the #7941 PR\n\nThe #7941 dispatch scoped that PR to `packages/rest/src/`, and these are checklist fixtures under `docs/qa/`, with their own gate family and review surface. They are re-spelled rather than deleted — the *capability* being checked (audit rows name the acting user, never anonymous) is still real and still worth checking; only the sentence about where the actor comes from is stale.\n\nNote the checklist item does not currently fail because of this: line 327's step still works via its second branch, and the line 393 clause still holds — the rows are stamped with the acting user. What is wrong is the stated mechanism, which will mislead the next runner and would let a genuine regression be mis-diagnosed.\n\n## Suggested repair\n\nRe-spell the three clauses to name the single source — the authenticated identity — and drop the `X-Actor` branch from the step, so the checklist stops advertising a header that the server ignores. Worth pairing with a clause that the header is ignored, since \"send `X-Actor` and confirm it does NOT change the recorded actor\" is now a meaningful check that nothing else covers at the QA layer.\n\nRelated: #7941 (the ruling), #7749 (the producer fix), `packages/rest/src/meta-write-actor-identity.test.ts` (where the behaviour is pinned at the unit layer).\n"
+}

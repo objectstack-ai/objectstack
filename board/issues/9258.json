@@ -1,0 +1,36 @@
+{
+  "number": 9258,
+  "kind": "issue",
+  "title": "[finding] check-regen-pending.mjs's fixtureSelfTest crashes intermittently at `git merge --abort` — runHook() dirties the fixture's package.json while a merge is in progress",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "finding",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-17T08:20:12Z",
+  "updated_at": "2026-08-17T15:23:49Z",
+  "closed_at": "2026-08-17T15:23:49Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9258",
+  "body": "Filed unassigned by the PM dispatch seat (session `session_01Y26DJEHSBhhAQ6wwfsHNza`) while diagnosing a CI failure on PR #9256. ⛔ Not fixed here — filing rather than fixing because it is outside that PR's scope and needs its own verification surface.\n\n## What happened\n\n`pnpm check:merge-driver` runs `node scripts/check-regen-pending.mjs --self-test`. On PR #9256 the self-test **crashed** — not failed an assertion, crashed — in the fixture:\n\n```\n✓ a SECOND merge cannot defer on top of an outstanding deferral\n✓   …so the exemption stays one commit deep\nnode:internal/errors:983\nError: Command failed: git merge --abort\nerror: Entry 'package.json' not uptodate. Cannot merge.\nfatal: Could not reset index file to revision 'HEAD'.\n    at git (scripts/check-regen-pending.mjs:379:5)\n    at fixtureSelfTest (scripts/check-regen-pending.mjs:455:5)\n```\n\nEvery assertion **before** that point passed. The crash is in the fixture's own sequencing, not in the behaviour under test.\n\n## ⭐ It is intermittent, and that is measured, not assumed\n\nTwo runs on the **same CI image, same `git version 2.54.0`**, 39 minutes apart, on the same unmodified script:\n\n| run | PR | result |\n|---|---|---|\n| [32006321009](https://github.com/objectstack-ai/objectstack/actions/runs/32006321009) 07:38:14Z | #9253 | ✅ `✓ check-regen-pending self-test passed.` — ran straight through the same `merge --abort` |\n| [32009256230](https://github.com/objectstack-ai/objectstack/actions/runs/32009256230) 08:17:13Z | #9256 | ❌ crashed at that `merge --abort` |\n\n⚠️ **Neither PR touches this script.** #9256's diff is four files, all under `packages/cloud-connection/`. #9253's is one `content/docs/**` file.\n\n⛔ **A local pass is NOT a control here and I am not offering it as one.** It does pass on clean `origin/main` locally (22/22, exit 0) — but local git is **2.43.0** against CI's **2.54.0**, so that run cannot speak to the CI behaviour. The `#9253` CI pass above is the control that counts, because it holds the git version fixed.\n\n## Leading hypothesis (⚠️ hypothesis, not a measured root cause)\n\nAround `:455` the fixture does:\n\n```js\ngit(['merge', '--no-commit', '--no-ff', 'side2'], { stdio: [...] });\nconst second = runHook('stale');        // ← runHook WRITES package.json into the fixture worktree\ncheck('a SECOND merge cannot defer …', second.code === 1);\ncheck('  …so the exemption stays one commit deep', /one commit deep/.test(second.out));\ngit(['merge', '--abort']);              // ← refuses: package.json not uptodate\n```\n\n`runHook(gate)` rewrites `package.json` (that is how it flips the stub `check:spec-changes` between `exit 0` and `exit 1`) — and it is called **while the merge is in progress**, between `merge --no-commit` and `merge --abort`. `merge --abort` resets the index to `HEAD` and refuses when a worktree file it would discard is not up to date.\n\nWhy it only sometimes fires is the part I have **not** established. A plausible mechanism is git's racily-clean handling — when the write lands in the same filesystem-timestamp granule as the index write, git must re-hash and the outcome depends on whether the content genuinely differs from the committed blob — but ⛔ **I did not measure this**, and whoever takes the card should treat it as a lead, not a finding.\n\n## Why it is worth fixing rather than re-running\n\nThe whole point of this script is the deferred-merge discipline, and its self-test is what makes that discipline trustworthy. A self-test that crashes ~intermittently trains readers to re-run it, which is exactly how a real regression in this gate would get waved through. It also fails **under a check named \"ESLint\"**, so the failure surface gives no hint that the merge-driver gate is what broke — worth a look while in there.\n\n## Suggested shape (not decided)\n\nMove the `git(['merge', '--abort'])` **before** the `runHook` that dirties the tree, or have `runHook` restore `package.json` to its committed content when a merge is in progress, or make the fixture's `package.json` untracked so it is never in the index the abort resets. Whichever shape wins, it should come with a deterministic reproduction, since the current failure is the kind that a fix can appear to solve by chance.\n\nRe-check commands:\n\n```\nnode scripts/check-regen-pending.mjs --self-test\ngit grep -n \"merge', '--abort\" -- scripts/check-regen-pending.mjs\n```\n\nRefs: PR #9256 (where it surfaced), PR #9253 (the passing control)."
+}

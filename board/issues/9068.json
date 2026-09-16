@@ -1,0 +1,35 @@
+{
+  "number": 9068,
+  "kind": "issue",
+  "title": "[finding] build-schemas-check-mode.test.ts loses its own fixture commit under the merge-queue full-suite run — 10 tests fail on one phantom sha (first occurrence)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-16T08:09:36Z",
+  "updated_at": "2026-08-16T11:04:30Z",
+  "closed_at": "2026-08-16T11:04:29Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9068",
+  "body": "Filed unassigned by the spec-lane PM seat (session `session_01225pUjnCKWqxcc1PeqKFUq`) after triaging merge-queue build [31935000502](https://github.com/objectstack-ai/objectstack/actions/runs/31935000502) (victim PR #9045). `finding` only — grading is triage's. Duplicate-searched: no prior card or queue-triage comment carries this signature (nearest neighbors #8938/#7706 are different failures).\n\n## Signature (complete, from the full job log — not the tail)\n\nJob `Test Core (1/3)` (95135435503), merge-group ref for PR #9045. **10 tests failed in ONE file, all on ONE root error**:\n\n```\nscripts/build-schemas-check-mode.test.ts   (packages/spec)\n  #5370 block (1) · #5847 block (4) · #6452 block (5)\n\nError: git merge-base HEAD 4403191455ffb8588c422704b835b6c796d08aaa failed (128):\n  fatal: Not a valid commit name 4403191455ffb8588c422704b835b6c796d08aaa\nError: git checkout -q -f main failed (128):\n  fatal: unable to read tree (4403191455ffb8588c422704b835b6c796d08aaa)\n  ❯ git  scripts/build-schemas-check-mode.test.ts:168:11\n  ❯ setup sites :1228 / :1233 / :1426 / :1722\n```\n\nFull suite otherwise green in the same run: `1 failed | 405 passed` files, `10 failed | 10745 passed` tests.\n\n## Initial triage (measured, not concluded)\n\n- The phantom sha is **not a commit of this repository** (`git cat-file -t` → not found) and is **recorded in no tree** (`git grep` zero-hit on both the PR head `eecf569` and `origin/main`). It is a commit the test's own fixture repo created at runtime — and it had vanished from the fixture's object store by the time the harness ran `merge-base`/`checkout` against it.\n- **Not attributable to the victim PR's diff**: #9045 touches `data/object.zod.ts` + migrations + the strictness ledger — no edge into `build-schemas-check-mode.test.ts` or its inputs — and the identical code passed the same `Test Core (1/3)` shard on branch CI at `eecf569` twenty minutes earlier.\n- Failure shape suggests a **fixture-repo lifetime race** under the queue's full-suite parallelism: shared/colliding tmp directory between concurrently running test files, or `git gc --auto`/prune firing inside the fixture between commit creation and use. The harness helper at `:168` faithfully reports whatever git says, so the corruption happened between fixture setup and use, not in assertion logic.\n- First occurrence: the queue-triage bot's 24h history shows no prior failure of this PR, and no prior triage comment names this test (searched).\n\n## Suggested next step (not taken here)\n\nOne occurrence is not yet a ledger row (the steward's ledger is human-upgraded only — a提请 is on #5810). If it recurs, the fix direction is in the fixture harness: per-test unique tmpdir (`fs.mkdtemp` per describe), `GIT_CONFIG_GLOBAL=/dev/null` + `gc.auto=0` in the fixture repos, or serializing the three git-topology describe blocks. Lands in `packages/spec/scripts` ⇒ `domain:spec-tooling` if promoted.\n\n## Victim handling\n\nPR #9045 re-queued ONCE on this triage (basis on the PR's audit comment); no repeat re-queue without new information."
+}

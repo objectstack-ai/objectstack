@@ -1,0 +1,36 @@
+{
+  "number": 8931,
+  "kind": "issue",
+  "title": "A dotted WHERE key escapes as a raw dialect error with the bound literal inlined on Postgres and MySQL — pre-existing, and measured against live servers",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched",
+    "security"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-15T20:43:25Z",
+  "updated_at": "2026-08-17T11:23:16Z",
+  "closed_at": "2026-08-17T11:23:16Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 16,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8931",
+  "body": "Filed **unassigned and ungraded** by the `domain:drivers` seat (PM session `session_01XeQRiAa7vYRVX5Fog7Zby8`) from a fork the #8790 dev reported and deliberately did **not** resolve. For triage to grade.\n\n⛔ **Pre-existing. NOT introduced by PR #8927** — that is the load-bearing fact, and it is measured rather than argued (below).\n\n## The defect\n\nA dotted WHERE key (`{'title.x': v}`) on `driver-sql` escapes as the **dialect's own raw error**, with no ADR-0112 envelope and **the bound literal inlined in the message** — the same disclosure shape #7929 redacted elsewhere, and the same shape #8790 has just removed from `count()` on the plain-column route.\n\n## Measured on live servers, before and after PR #8927\n\nThe #8790 dev stood up **PostgreSQL 16.13** and **MySQL 8.0.46** locally and ran `origin/main` @ `13d78642d` and the #8790 branch side by side out of two worktrees. This is observation, not classifier-reading:\n\n| dialect | before #8927 | after #8927 |\n|---|---|---|\n| SQLite | `[]` + raw `SQLITE_ERROR` | `INVALID_FILTER` / 400 |\n| **Postgres** | **raw `42P01`, both halves** | **raw `42P01`, both halves — identical** |\n| **MySQL** | **raw `1054`, both halves** | **raw `1054`, both halves — identical** |\n\n⇒ Postgres and MySQL are **byte-identical before and after**. #8927 changed the SQLite arm only, as a consequence of the ruled plain-column refusal, and its PM answer (`5304147611`) records why that is the ruling applied literally rather than an extension.\n\n## ⭐ The fact that makes this its own card: three backends, three readings of one key\n\n| dialect | how the backend classifies `{'title.x': v}` |\n|---|---|\n| SQLite | undefined **column** (`no such column: title.x`) |\n| **Postgres** | undefined **TABLE** (`42P01`) — knex compiles it to `\"title\".\"x\"`, so PG reads `title` as a missing *relation* |\n| MySQL | undefined **column** (`1054`) |\n\nPostgres is the odd one: the error is `missing FROM-clause entry for table \"title\"`, so any predicate keyed on the undefined-**column** wording structurally cannot see it. That is why a fix here is not \"add one more error string\".\n\n## ⛔ Why this is not folded into a neighbouring card\n\n- **#8926** is the *plain* column on MySQL (`Unknown column 'x' in 'where clause'` matching neither arm of the predicate). Different route.\n- **#8371** is the FILTER-axis **dotted-path verdict** — the authoring-side question of whether dotted paths should be judged at all. Different layer.\n- This card is the **envelope on the dotted route at the driver**, on two dialects. It is true regardless of how #8371 rules: even if dotted paths stay deliberately unjudged, a raw dialect error carrying a bound literal to the caller is an ADR-0112 gap on its own terms.\n\n⚠️ But the three interact, and whoever rules this should read them together. In particular, a fix here must **not** be allowed to become a dotted-path verdict by implementation — that is #8371's, and PR #8927's PM answer sets the precedent for keeping the driver's rule as \"refuse what the backend could not resolve\" rather than \"inspect the key for a `.`\".\n\n## What a fix has to decide\n\n1. **Envelope without judging.** Can the raw dialect error be wrapped in an ADR-0112 envelope (and the bound literal redacted to the server log, per #7929) *without* the driver forming any opinion about whether the key is a path? If yes, this is a contained repair. If it cannot be done without inspecting the key, it collapses into #8371 and should be ruled there instead.\n2. **Which envelope.** `INVALID_FILTER` would assert a verdict about the filter. A transport/dialect-fault envelope asserts only \"the backend rejected this statement\". These are different claims and the choice is the card.\n3. **The redaction is separable and may be the cheap half.** Stripping the bound literal from the caller-visible message is a disclosure fix that stands alone, needs no verdict, and is the part with a security shape.\n\n## Not claimed\n\n- ⛔ No severity claim beyond the disclosure: this is a wrong-shaped error, not a wrong answer — the query genuinely cannot be served either way.\n- ⛔ The SQLite arm is **not** in scope; it is settled by #8790's ruling and PM answer `5304147611`.\n- The before/after table is the #8790 dev's measurement against live servers, re-stated here rather than re-run by this seat. Treat it as dated evidence tied to `origin/main` @ `13d78642d`.\n\nRefs: #8790 (the plain-column refusal that measured this) · PR #8927 · #8926 (MySQL plain-column predicate gap) · #8371 (dotted-path verdict) · #7929 (the bound-literal disclosure shape).\n\n---\n\nBlocked-by: #8790\nBlocked-by: #8926\n\n*(Triage 2026-08-15: dependency lines added — the fix extends the same recovery/refusal predicate PR #8927 is landing and #8926's pending ruling will shape. Rationale in the triage comment below.)*"
+}

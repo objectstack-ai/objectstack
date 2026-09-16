@@ -1,0 +1,35 @@
+{
+  "number": 9013,
+  "kind": "issue",
+  "title": "validate-dashboard-action-refs 的 resolveActionTarget 仍接受 modal 裸对象名与 verb_object —— 其镜像依据(objectui DashboardView 运行时)已被 PR objectui#4782 删除,规则方向反转",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-16T06:08:49Z",
+  "updated_at": "2026-08-16T09:06:10Z",
+  "closed_at": "2026-08-16T09:06:10Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9013",
+  "body": "跨仓跟进卡(objectui 座位按 linkage-chore 规则代立,不认领,不打 domain 标签 —— 交分诊席路由)。发现于 objectui#4766 的实施(PR objectui#4782)。\n\n## 事实\n\n`packages/lint/src/validate-dashboard-action-refs.ts` 的 `resolveActionTarget` 对 `actionType:'modal'` 仍接受裸对象名与 `verb_object`(`MODAL_VERB_RE`),其 docblock 自述理由:「mirrors the objectui runtime dispatch(DashboardRenderer + DashboardView)so the lint flags exactly what would fail to resolve at runtime」—— 该镜像依据正是 PR objectui#4782 按维护者裁定(#6739-A)删除的代码。\n\n**objectui#4782 合并后方向反转**:`os validate` 会放行一个运行时点下去只得到点名拒绝的按钮 —— 即该规则自己 docblock 写着要消灭的 false affordance。\n\n## 待做(sequencing:objectui#4782 合并之后,与 #6739 裁定第 2 项的先语料后删除纪律同向)\n\n1. 按裁定 A 收窄 `resolveActionTarget`:`actionType:'modal'` 的字符串 target 只认 page;\n2. 同步三条钉子测试(`validate-dashboard-action-refs.test.ts:67/213/224`);\n3. 改 `content/docs/deployment/validating-metadata.mdx:83` 标为 ✓ 的 `create_opportunity` 示例(它演示的正是被退役的形态)。\n\n## 参考\n\n- objectui#4766 / PR objectui#4782(运行时侧退役,含两仓生产者枚举:零 verb_object 生产者)\n- objectstack#6739(维护者裁定 A)、objectui PR #4764(useActionModal 侧同裁定先例)\n\n已检索 open issues 无重复卡。"
+}

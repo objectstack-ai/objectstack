@@ -1,0 +1,35 @@
+{
+  "number": 9078,
+  "kind": "issue",
+  "title": "packages/spec schema comments still spell the console form routes `/console/…` (no underscore) — a path that does not resolve",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-16T08:31:40Z",
+  "updated_at": "2026-08-16T16:15:09Z",
+  "closed_at": "2026-08-16T16:15:09Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9078",
+  "body": "Measured while sweeping the docs surface for #9050. Filed unassigned, not fixed there: #9050 is scoped documentation-only and its dispatch explicitly excludes route/code/config changes, so this is recorded rather than ridden along.\n\n## What\n\nThree source sites in `packages/spec` document the console form routes with a bare `/console/…` prefix. That prefix resolves nowhere.\n\n```\npackages/spec/src/ui/view.zod.ts:2446:   * kind (ruled 2026-08-10 on #7245): the public `/console/f/:slug` path\npackages/spec/src/ui/view.zod.ts:2449:   * The internal `/console/forms/:name` path — where `type: 'form'` actions\npackages/spec/src/ui/action.zod.ts:500: * - `type: 'form'`   — `target` is **required** (the FormView name to open, routed to `/console/forms/:name`).\n```\n\n## Why they are wrong\n\nThe Console SPA is mounted by one hardcoded constant — `packages/cli/src/utils/console.ts:43`, `export const CONSOLE_PATH = '/_console'` — which registers exactly three routes (`:534-541`): `/` redirecting to `/_console/`, bare `/_console` redirecting to `/_console/`, and `/_console/*` serving the SPA. Nothing registers a bare `/console`, and there is no catch-all that would reach one. The SPA's own routes (objectui `apps/console/src/App.tsx:180` `path=\"/f/:slug\"` and `:225` `path=\"/forms/:name\"`) hang off that mount's injected base-href, so the live URLs are `/_console/f/:slug` and `/_console/forms/:name`.\n\nThe one configurable knob, `uiBasePath` (default `/_console`, `auth-config.zod.ts:302`), is consumed only by `plugin-auth` for building auth-email links (`auth-manager.ts:3622-3632`). It does not mount the server route, so it cannot make the bare spelling resolve.\n\n## Not currently published\n\nThese three sites are JSDoc comments, not `.describe()` strings, and no generated reference page under `content/docs/references/` carries the text today — so this is developer-facing source drift, not a live docs defect. Recording severity honestly rather than inflating it.\n\n## Prior art\n\n`docs/audits/2026-06-handwritten-docs-accuracy-followups.md:371` already flagged exactly this and declined to act, on the grounds that the handwritten doc \"faithfully mirrors code\" and that \"the schema text itself may be inconsistent with the '/_console' convention. Flagging for human follow-up\". Once #9050 lands, that reasoning inverts: the docs will be correct and the schema comments will be the only remaining carriers of the non-resolving spelling.\n\nNote the `2026-08-10 on #7245` ruling quoted at `view.zod.ts:2446` pins the **mode-aware submitBehavior default**, not the path spelling — the paths in that comment are incidental prose, so correcting them does not touch the ruling.\n\n## Suggested fix\n\nMechanical: `/console/forms/` → `/_console/forms/` and `/console/f/` → `/_console/f/` at the three sites above. No behavior change; comments only.\n\nNo `domain:*` label applied — left for triage.\n\nRefs: #9050 (docs half, where this was measured), #7245 (where the live URL was first measured in a browser)."
+}

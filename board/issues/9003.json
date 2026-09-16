@@ -1,0 +1,34 @@
+{
+  "number": 9003,
+  "kind": "pull_request",
+  "title": "docs(pm-dispatch): complete the spec-lane merge — fold domain:spec-surface / domain:spec-tooling into a single domain:spec lane",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-16T05:32:32Z",
+  "updated_at": "2026-08-16T06:27:23Z",
+  "closed_at": "2026-08-16T06:27:22Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-16T06:27:22Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/9003",
+  "body": "Fixes #9001\n\nCompletes the spec-lane merge ruled by the maintainer on 2026-08-16. Presented with A (full merge into one `domain:spec`, bijection restored) vs B (keep three labels, note single-seat stewardship), the maintainer ruled, verbatim:\n\n> A\n\nContext quote from the same session, verbatim and untranslated: 「domain:spec-tooling domain:spec-surface 不是说要合并车道吗？合并完成了吗？为什么还有新任务」\n\nThe seat layer already merged 2026-08-14; this PR lands the remaining table and label layers. Two files changed, per the card's declared surface.\n\n## Changes\n\n**`.claude/skills/pm-dispatch/SKILL.md`** (687 → 685 lines; ratchet ceiling 686, net shrink)\n\n1. **Domain table**: the three spec rows (`domain:spec` / `domain:spec-surface` / `domain:spec-tooling`) are merged into one `domain:spec` row covering the whole `packages/spec` surface — semantic, text and machine faces. The row keeps the essential routing facts: `packages/spec` as the sole contract, and the tooling-vs-devx boundary per the 2026-08-09 ruling (围着 spec 契约转的工具链归 spec, 一般开发工具面留 devx), now anchored in the merged row. The `domain:devx` row's cross-reference is re-anchored from `spec-tooling` to `domain:spec`.\n2. **一包三席 section → in-seat dispatch reference** (renamed \"spec 席内分派参考\"): the operative judgments survive as the single seat's internal dispatch criteria, no longer lane-routing law — the surface/semantic boundary test (合法元数据集合变没变), surface-changeset-always-patch, tooling's no-go zones (`packages/spec/src/**/*.zod.ts` and the strictness ledger), and artifacts-follow-source. The section states explicitly that the labels are retired and that the anchoring rule's one-package-one-domain bijection is restored (the old section was its explicit exception).\n3. **Model tiering**: the per-sub-lane tier lines are folded into single-lane guidance (text-face cards sonnet/opus; machine-face default opus, gate-semantics design fable). The fable-mandatory clause for cards that change contract accept/reject behavior keeps its exact strength — only its parenthetical criteria pointer was re-anchored from the retired 一包三席 name to the renamed in-seat reference; the binding sentence and the quoted 2026-08-12 ruling are byte-identical.\n\n**`scripts/pm/ensure-pm-labels.sh`**\n\n4. Both labels removed from the domain vocabulary loop, and the retirement recorded in the script header per its own convention (the header is the authority): reason (merged into `domain:spec`, maintainer ruling 「A」) and date (2026-08-16), extending the existing retired-lanes parenthetical exactly in its established form.\n\n## Not in this PR (declared follow-up, assigned to the seat post-merge)\n\nRelabeling the 8 open stock cards to `domain:spec` and confirming triage output is the seat's job after this merges — per the card's \"Declared follow-up\" section. #9001 remains the audit anchor for those label writes.\n\n## Verification\n\nGate union run at `7a3338b37` (the final commit), all green:\n\n- `pnpm check:pm-skill-ratchet` — SKILL.md 685 lines, ceiling 686, headroom 1 (net −2)\n- `pnpm check:pm-skill-id-lint` — 9 files clean\n- `pnpm check:skill-frame-sync` / `pnpm check:skill-frame-freshness` — 4 copies isomorphic; current with origin/main\n- `pnpm check:nul-bytes` — 5945 files clean\n- `pnpm check:doc-authoring` — 376 files clean\n- `pnpm --filter @objectstack/lint run check:doc-formula-expressions` — clean (derivation-added family; ran after building the lint package's dependency closure)\n\nTier derivation (first live claim/report use of the new tool): `node scripts/pm/dispatch-gates.mjs --tier` over the changed paths mandates `claude-fable-5` via clause ① (`.claude/skills/pm-dispatch/**`) — the tier this card ran at.\n\nResidual grep for `spec-surface` / `spec-tooling` / 一包三席 across `.claude/` and `scripts/` finds only the two retirement records themselves (the new SKILL.md section's opening line and the labels-script header).\n\n## Landing\n\nADR-class (skills root touched): draft PR, **human merge only** — per the 2026-08-11 ruling 「所有 skills 的更新和adr 类似,需要人工审核」, no AI seat merges, queues, or arms auto-merge on this PR. `skip-changeset`: the diff is `.claude/` + `scripts/pm/` only and releases nothing.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_017TNzEetykdh7ceZGwuAPLq)_"
+}

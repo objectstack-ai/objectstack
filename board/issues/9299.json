@@ -1,0 +1,36 @@
+{
+  "number": 9299,
+  "kind": "issue",
+  "title": "QA wave R4: coverage sweep (checklist-author) — re-audit the ledger against the 727 commits since the 2026-08-08 sweep",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched",
+    "tests"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-17T12:09:18Z",
+  "updated_at": "2026-08-17T13:51:40Z",
+  "closed_at": "2026-08-17T13:51:40Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9299",
+  "body": "Part of #9296. Round 4 — runs **in parallel with R0**, no dependency on it.\n\n## Why\n\n`pnpm check:platform-checklist` is green, but its two ratchets only catch a **new metadata kind** (liveness-derived coverage) and a **new member of a pinned enum** (`enumSource` freshness). Neither can see *new behavior inside an existing kind* — which is where 727 commits / 3992 changed files since 2026-08-11 most likely hid something. That class is exactly what the five-angle sweep exists to find (`docs/qa/platform-checklist/SWEEP.md`).\n\nLedger today: 182 active items, 15 areas, coverage 28 kinds mapped / 2 waived. By `since`: v15 41 · v15.1 19 · v16 108 · **v17 only 14** — for a tree whose spec package is already at 17.0.0, that ratio is itself a signal worth testing.\n\n## Scope\n\nRun the **`checklist-author` skill** and follow `SWEEP.md` as written — it is the method, this card is not a second copy of it. Two scoping notes specific to this round:\n\n- **Bias the five hunters toward the delta**: the ledger was built by the 2026-08-08 sweep, so the highest-yield surface is what landed after it. Ground every hunter in real file paths (`git log`/`git diff` against that window is available — the clone is full-depth).\n- **Re-audit every waiver.** In the 2026-08 sweep four of six waivers turned out factually stale. A waiver is a claim that ages; the two current ones (`book`, `doc`) each get re-checked against the runtime, not against their own prose.\n\n## Constraints\n\n- ⛔ **Do not run `pnpm install`.** `scripts/check-platform-checklist.mjs` and `scripts/checklist-select.mjs` are zero-dependency (`node:fs` / `node:path` only) and run straight from a fresh worktree. R0 owns the one install in this container and the disk allowance is shared.\n- Worktree-first, per CLAUDE.md — your own tree, branch `claude/issue-<n>-<slug>`.\n- Deliverable: `areas/*.json` additions/revisions + a reconciled `coverage.json`, validator green (`node scripts/check-platform-checklist.mjs`), plus `FOLLOW-UPS.md` entries for product defects and docs drift found while grounding. Every new item obeys the deep-test contract in `README.md`: a fixture that does not exist is `blocked`/`knownGaps`, **never faked coverage**.\n- Security-sensitive findings are NOT filed publicly — they go to the maintainer through the PM.\n- Draft PR, do not merge, do not enable auto-merge. If the Check Changeset gate demands a changeset for a docs-only diff, use the repo's real `skip-changeset` mechanism rather than inventing one.\n\n## Fold in while you are in this file (two known defects in the ledger's own prose)\n\n1. **`SWEEP.md` L9–10 states `check-platform-checklist.mjs` runs in \"CI, every PR\".** It does not, by maintainer decision — see this dir's `README.md` \"Operating cadence\" and the recorded note at `.github/workflows/lint.yml:426`. Measured cost, for the record while you correct the text: the validator is ~80 ms, and the full `pnpm check:platform-checklist` (selector self-test + validator) is 0.165 s — so the sentence is wrong about the *fact*, not about the cost. Fix the fact; ⛔ do not change the CI posture, that is a maintainer decision.\n2. Anything else in `README.md`/`SWEEP.md`/`RUNNER.md` your grounding proves stale gets corrected in the same PR, each with a one-line rationale.\n"
+}

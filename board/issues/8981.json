@@ -1,0 +1,34 @@
+{
+  "number": 8981,
+  "kind": "pull_request",
+  "title": "docs(plugin-security): state the controlled_by_parent residue bound in the mood that is true",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "skip-changeset",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-16T03:49:15Z",
+  "updated_at": "2026-08-16T04:38:34Z",
+  "closed_at": "2026-08-16T04:38:33Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": "2026-08-16T04:38:32Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/8981",
+  "body": "Fixes #8959\n\nThree landed artifacts asserted, in the **present tense**, that a publish-time lint refuses the declarable shapes on which `assertControlledByParentWrite` still answers `422 MISSING_REQUIRED_FIELD`. No such lint exists. The issue that *proposes* one is open and unruled, so the documented blast-radius bound was false on the day it landed — and one of the three artifacts is a changeset still sitting unconsumed in `.changeset/`, i.e. a **pending release note** scheduled to ship that claim to users.\n\nThis PR is **direction 1 only**: correct the mood of the three artifacts. No runtime behaviour changes. `packages/lint/src/data-model-rules.ts` is untouched.\n\n## What changed\n\n| artifact | was | now |\n|---|---|---|\n| `packages/plugins/plugin-security/src/security-plugin.ts` (stand-down site) | \"confined to exactly those shapes, which #8772's lint **now refuses** at publish time\" | states that \"confined\" is not a publish-time bound, with the measured lint verdicts |\n| `packages/plugins/plugin-security/src/errors.ts` (`MasterReferenceMissingError`) | \"#8772's lint **refuses** those shapes at publish time; until an app is republished…\" | \"#8772 *proposes* a publish-time lint that **would** refuse those shapes, but it is open and unruled\" |\n| `.changeset/cbp-missing-master-insert-validation-envelope.md` | \"precisely the shapes #8772's lint **now refuses** at publish time. An app that publishes cleanly sees one envelope\" | confinement kept, reachability corrected: an app can newly declare any of the three, publish cleanly, and still see the old envelope |\n\n## The measurement the new text rests on\n\nRe-derived against `origin/main` in this worktree rather than taken from the card — all four rows hold:\n\n| surviving 422 shape | publish-time lint verdict, measured |\n|---|---|\n| `master_detail`, no `required` | `severity: 'warning'` — `relationship/master-detail-required`, `packages/lint/src/data-model-rules.ts` R2. Only `error` findings fail a build (`packages/cli/src/commands/lint.ts` exits non-zero on errors only; `compile.ts` splits by severity and blocks on errors) |\n| `master_detail` + `required` + `readonly` | **nothing** — no rule in `data-model-rules.ts` reads `readonly` |\n| `master_detail` + `required` + `system` | **nothing** — no rule in `data-model-rules.ts` reads `system` |\n| required-`lookup` fallback relation | **nothing** — `validate-security-posture.ts` refuses only a `controlled_by_parent` object with *no* resolvable relation at all |\n\nSo a freshly authored object declaring `master_detail` + `required` + `readonly` publishes with no warning and no error, and its inserts answer `422 MISSING_REQUIRED_FIELD` with no `fields[]`. The residue is a **live surface any new app can reach**, not a shrinking legacy tail — and the corrected text says so, because the landed rationale read as acceptable only under the false bound.\n\n## What the text deliberately does not say\n\nIt asserts **no outcome** for the proposed lint, in either direction. Writing \"will refuse\" would be the same error in a different tense — trading a false present for a false future. All of that issue's directions are live and the maintainer has not ruled; #8772 remains open, and this PR neither predicts nor presumes its ruling.\n\n## Why `skip-changeset` rather than a new changeset\n\nDeliberate, not a default. This diff is comment prose plus a correction to an **existing, unconsumed** changeset's body. It ships no behaviour of its own, so a new changeset would mint a second release entry and another version bump for zero behaviour change. The correction reaches users through the changeset that is already pending. Note the gate counts changesets a PR **adds** (`--diff-filter=A`), so editing one in place scores zero by design — the label is the correct mechanism here, not a workaround.\n\n## Verification\n\nGate union re-run **after** the final commit, at `370a67e35`:\n\n```\npnpm check:changeset-gate-self-tests       EXIT=0\npnpm check:objectui-changeset              EXIT=0\npnpm check:test-source-alias               EXIT=0\npnpm check:type-source-resolution          EXIT=0\npnpm check:nul-bytes                       EXIT=0\npnpm check:cross-package-test-inputs       EXIT=0\nnode scripts/check-adr-0087-registration.mjs  EXIT=0\nnode scripts/check-changeset-no-major.mjs     EXIT=0\nnode scripts/check-empty-changeset.mjs        EXIT=0\npnpm check:i18n                            EXIT=0  (9 packages, all bundles in sync)\npnpm --filter @objectstack/plugin-security typecheck   EXIT=0\npnpm --filter @objectstack/plugin-security test        65 files, 1240 tests passed\n```\n\nGates derived with `node scripts/pm/dispatch-gates.mjs` against the actual changed paths, not recalled. `check:i18n` came from the script's convention-triggered set (the package owns an `i18n-extract.config.ts`); it first refused to run at all until `@objectstack/cli` was built — reported as a hard failure rather than a skip, which is the intended \"absence must be loud\" behaviour — and passed once built.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_011RB4waLuNbdruCo6X9oobm)_"
+}

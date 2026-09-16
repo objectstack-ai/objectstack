@@ -1,0 +1,33 @@
+{
+  "number": 8979,
+  "kind": "pull_request",
+  "title": "Record the declined verdict for the mirror null-guard gate on the sparse action face",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-16T03:42:36Z",
+  "updated_at": "2026-08-16T04:13:36Z",
+  "closed_at": "2026-08-16T04:13:35Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": "2026-08-16T04:13:35Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/8979",
+  "body": "Fixes #8881\n\nThe maintainer's 2026-08-06 ruling on #4953 asked, as item 2, for an **evaluation** of the mirror of `checkNullGuards` — flag `!= null` on a sparse binding — for the action `visible`/`disabled` face. The ledger in `packages/lint/src/validate-null-guards.ts` recorded that evaluation as *owed*, with no answer.\n\n**The answer is: declined. Do not build it.** This PR is comment-only and records the verdict with its measurements in the ledger that poses the question, so the next reader does not re-derive it and so a closed card does not leave a stale \"owed\" behind.\n\n## The premise shift is real — re-measured, not inherited\n\nThe card flagged its own renderer evidence as dated. Re-read on objectui `2e82ab2`: `usePredicateRecordContext` binds the row as `{ ...row, record: row, data: row }`, and `evalRowPredicate` binds the same three ways. So a `record.x` predicate does now resolve the namespace on all four action renderers and **does** reach the sparse-binding fault for real. Confirmed, not carried forward.\n\n## Four measurements against `origin/main` @ `585edf738` + objectui `2e82ab2`\n\n**1. `!= null` is not a distinctive fault — it is one spelling of nine.** On a sparse binding the abort happens at *key resolution*, before any operator is reached:\n\n```\nrecord.a == 'pending'   | SPARSE: FAULT [runtime] No such key: a\nrecord.a != null        | SPARSE: FAULT [runtime] No such key: a\nrecord.a != 'owner'     | SPARSE: FAULT [runtime] No such key: a\n!record.a               | SPARSE: FAULT [runtime] No such key: a\nrecord.a > 1            | SPARSE: FAULT [runtime] No such key: a\n```\n\nThe ledger's mirror table reads as though `!= null` were the special case. It is not special at all.\n\n**2. Yield: 2 of 34 authored action predicates (5.9%).** Census over production + examples in both repos — 34 record-scoped action predicates, all members of the fault class, exactly 2 matching `record.x [!=]= null`, **both in one file** (`examples/app-showcase/.../predicate-matrix.action.ts`). Zero of the 34 use `has()`. The 32 missed include every platform object's actions (`sys-user`, `sys-invitation`, `sys-member`, `sys-approval-request`).\n\n**3. Sparseness is not decidable from the metadata this linter sees.** It is a property of the view's `$select` projection — and the two hits from (2) prove it inside one file: identical `!= null` guards on identical `locations`, where `f_lookup`/`f_lookups` are *not* default-list columns (so it faults on `list_item`) while `f_textarea` *is* one (so it does not). Nothing in the action metadata distinguishes them. `&&` short-circuiting makes it worse — `record.id == ctx.user.id && record.two_factor_enabled != true` never reaches the absent key when the first conjunct is false, so faulting depends on row **data**. A sound static rule would flag 34 of 34, which is a platform-contract finding rather than a lint rule.\n\n**4. The prescription would be wrong.** `has()` guards absence, not nullness:\n\n| predicate | `{}` absent | `{a: null}` projected-null | `{a: 5}` |\n|---|---|---|---|\n| `record.a != null && record.a > 1` | **FAULT** | `false` | `true` |\n| `has(record.a) && record.a > 1` | `false` | **FAULT** no such overload | `true` |\n| `has(record.a) && record.a != null && record.a > 1` | `false` | `false` | `true` |\n\nA list row is both sparse-capable and null-capable, so both failure modes are live on this one face. Swapping `!= null` for `has()` would trade one silent fail-closed vanish for another — the exact error this row already refuses in the opposite direction, mirrored.\n\n## Routing\n\nThe card's `domain:devx` read was anchored on the gate landing in `packages/lint`. Since the recommendation is to build no gate, the residual work is not devx: it is the authoring-contract contradiction filed as #8975, which belongs to the metadata/docs lane. Flagging for re-routing as the triage comment invited.\n\n## Not done here\n\n`has(record.x) && record.x != null` is the measured-correct idiom, and neither `declared-fields.ts` nor the showcase says it. Correcting that changes what authors are told to write, so it is filed separately (#8975) rather than ridden in on this PR. #4953 clause 2 is untouched — the binding stays sparse permanently, and nothing here re-opens it.\n\n## Verification\n\nComment-only change; no behavior change. Gate union re-run at final head `a2ceecb38`:\n\n- `pnpm check:nul-bytes` — OK (5935 files, self-test 75 assertions)\n- `pnpm check:cross-package-test-inputs` — OK (26 self-test cases, 12 packages)\n- `pnpm --filter @objectstack/lint typecheck` — clean\n- `pnpm --filter @objectstack/lint test` — 73 files, 2041 passed / 4 skipped\n\nGates re-derived with `node scripts/pm/dispatch-gates.mjs` against the actual changed paths; it returned the same two families the dispatch named, plus the any-edit `check:nul-bytes`.\n\n`skip-changeset`: comments only in `packages/lint`, nothing user-visible is released.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_011RB4waLuNbdruCo6X9oobm)_"
+}

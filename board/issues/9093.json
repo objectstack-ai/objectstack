@@ -1,0 +1,34 @@
+{
+  "number": 9093,
+  "kind": "pull_request",
+  "title": "docs: the `os validate` sample transcript reproduces the run it claims to",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/xs",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-16T09:23:45Z",
+  "updated_at": "2026-08-16T09:55:33Z",
+  "closed_at": "2026-08-16T09:55:32Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": "2026-08-16T09:55:32Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/9093",
+  "body": "Fixes #9034\n\n## The fork, and which branch this took\n\nThe card recommended **eliding** the count, citing PR #9005 (and #9056 did the same for `authorization.mdx`'s unexplained `~18`). This PR **does not elide it** — it refreshes it to the real value, because the two precedents are about **prose** and this site is a **transcript**.\n\n- A count in prose is the author's assertion. If you cannot account for it, eliding it is honest.\n- A count in a transcript is a reproduction of what the program prints. Deleting it manufactures output the CLI will never emit — trading a stale number for a fabricated transcript.\n\n**What decided it: the CLI does print a count on that line, today.** `packages/cli/src/commands/validate.ts:117`:\n\n```js\nconst registered = authoringRulesFor('validate');\nif (!flags.json) printStep(`Running author-time rules (${registered.length})...`);\n```\n\nSo the sample block is a reproduction, not an illustration, and the faithful fix is the real number.\n\n## Re-derived, not copied from the card\n\nThe card's \"38 vs 41\" was another dev's earlier measurement; both the page and `AUTHORING_RULES` moved since (#9033 and #9077 landed on this page today, and #9077 narrowed a rule). Re-measured on this branch's merge base, `8640fb268`, from the built registry:\n\n```\nAUTHORING_RULES.length = 41\nauthoringRulesFor('validate').length = 41\nauthoringRulesFor('build').length = 41\nauthoringRulesFor('lint').length = 38\n```\n\nNote **38 is today's `os lint` count**, not validate's — so the old number was not merely stale by a few rules, it named a different door.\n\nAnd the real command, run end to end (`node packages/cli/bin/run.js validate` in `examples/app-todo`), prints verbatim:\n\n```\n◆ Validate\n────────────────────────────────────────\n  → Loading configuration...\n  Config: /home/user/objectstack-9034/examples/app-todo/objectstack.config.ts\n  Load time: 170ms\n  → Validating against ObjectStack Protocol...\n  → Running author-time rules (41)...\n  → Checking capability providers (#3366)...\n  → Checking package docs (ADR-0046)...\n\n  ✓ Validation passed (240ms)\n\n  Todo Manager v2.0.0\n  ...\n\n  Data: 1 Objects  18 Fields\n```\n\n## The diff\n\nTwo lines, both making the block match that run:\n\n1. `38` → `41` on the author-time rules step.\n2. **A restored blank line** between the manifest line (`Support Desk v0.1.0`) and `Data: …`. `validate.ts` prints it unconditionally whenever a manifest exists — the `console.log('')` that closes the `if (config.manifest)` block, after the optional description. Called out explicitly because it is a second, smaller instance of the same defect the card is about, in the same fenced block; without it this PR's own claim that the transcript is now faithful would not be true. Same file, same defect class, mechanically pinned by the source and the run above, no new verification surface.\n\nEverything else in the block already matched the real run line for line — the header, the divider, the step order and glyphs, and the blank lines around `✓ Validation passed`. That correspondence is itself part of the evidence that the block is a reproduction.\n\n## No new hard count in prose\n\n#9033 deliberately removed this page's hard counts in favour of each rule's own `runtimeTypes`; nothing here re-introduces one. The only other number on the page is the historical `23 of 26` statement about the #4409 audit, which is a fact about a past audit and stays as it is.\n\n## Verification\n\nDocs-only diff. Gate families derived after the diff was final, in this worktree, with `node scripts/pm/dispatch-gates.mjs content/docs/deployment/validating-metadata.mdx` — it named `check:docs-audit-scope`, `check:docs-redirects`, `check:role-word`. Union run at **`0af6858d0`**, the final commit, plus `check:nul-bytes` (any edit) and `check:doc-anchors`:\n\n```\ncheck-nul-bytes: OK (scanned 5969 text file(s); no raw ASCII control bytes)\n✓ docs-accuracy-audit scope is in sync with content/docs/: 178 hand-written doc(s).\ncheck-docs-redirects: OK (92 entries -- 89 page destination(s) resolved, 3 wildcard, 0 outside /docs)\ncheck-role-word: OK (43 baselined file(s), no new occurrences)\n✅ check-doc-anchors: 240 internal #fragment link(s) across 396 source file(s) all resolve to a real heading\n```\n\nThe diff adds no links and no anchors, so `Check Documentation Links` has no new page-path target to resolve.\n\nNo changeset — docs-only, nothing user-visible ships from it; `skip-changeset` applied.\n\n## Out-of-scope finding, filed not fixed\n\n**#9092** — `content/docs/deployment/cli.mdx` (the `os compile` output example) and `content/docs/getting-started/build-with-claude-code.mdx` (the failing `os validate` example) both still print the **pre-#4409 per-concern step list** that the registry collapsed into the single line this PR corrects, and `cli.mdx` also omits `→ Checking capability providers (#3366)...` entirely. Filed unassigned with both real runs. Not touched here: different pages, out of this card's scope.\n\nUnqueued and draft, per dispatch — the PM arms the merge queue.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_011RB4waLuNbdruCo6X9oobm)_"
+}

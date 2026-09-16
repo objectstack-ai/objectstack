@@ -1,0 +1,35 @@
+{
+  "number": 8896,
+  "kind": "issue",
+  "title": "Measured set: five read seams answer a failed read from an empty accumulator with no log and no field saying the answer is incomplete",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-15T15:45:53Z",
+  "updated_at": "2026-08-16T09:33:22Z",
+  "closed_at": "2026-08-16T09:33:22Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8896",
+  "body": "Filed from #8845's measurement (the gate card measured this class and deliberately did not extend the rule; these seams therefore need their own disposition). Unassigned. Not a claim.\n\nMeasured on `origin/main` @ `8664a2c`, across the read-seam rule's three scan roots.\n\n## The shape\n\nA `catch` that returns nothing — it falls through, or jumps — above a value that was supposed to be filled by the read. The caller receives an answer indistinguishable from a legitimate one, and no surface says otherwise. Per ADR-0110 D3 those are different facts.\n\n`check:durability-log-level` cannot see any of these: its read-seam rule classifies a catch by the expression it returns, and these return none. All five are counted in its census and reported as `no invented answer`.\n\n## The set\n\nExcluding `diffMetaItem` (that seam's disposition is #8833, with the maintainer) and `cascadeDeleteRelations` (filed separately as #8895 — it is an integrity bypass, not a reporting gap).\n\n| seam | what the caller gets |\n|:--|:--|\n| `metadata-protocol/src/seed-loader.ts:2058` `loadExistingRecords()` | `catch { /* Object may not have records yet */ }` returns an empty `Map`. The upsert-key match then finds nothing, so \"cannot read the object\" is treated as \"no existing rows\" — the replay-skip decision this map exists to make is inverted, and the loader writes rows it should have skipped. |\n| `metadata-protocol/src/protocol.ts:8961` `searchAll()` | Per-object `catch { continue; }`. Objects whose read failed contribute no hits, but the response still reports `totalHits: hits.length` and `truncated` as though the scan were complete. |\n| `metadata-protocol/src/protocol.ts:16982` `findReferencesToMeta()` | Per-matcher `catch { return; }` inside a `Promise.all`. The returned `out[]` is silently missing every reference from the source types whose read failed — and this answer drives \"what would break if I delete this\". |\n| `metadata-protocol/src/protocol.ts:4733` `getMetaDiagnostics()` | `catch { continue; }` drops the whole type from the diagnostics report. The comment reads \"Type not listable in this kernel scope\", which is one real reason among several; a store outage produces the same silent omission. |\n| `objectql/src/lifecycle/lifecycle-service.ts:805` `checkGovernance()` | `catch { continue; }` on the row `count`. The object is skipped for quota and growth alerting, and is also dropped from `nextCounts`, so the growth baseline for the next sweep is lost too. |\n\nLowest-severity first read: the last two are reduced functionality; the first three hand a caller an answer it will act on.\n\n## A sixth, different in kind\n\n`metadata-protocol/src/protocol.ts:13830` `publishPackageDrafts()` does not fall through — it pushes a **fabricated** entry:\n\n```ts\n} catch {\n  commitItems.push({ type: d.type, name: d.name, existedBefore: false, prevVersion: null });\n}\n```\n\nTwo things to check there. `existedBefore: false` means \"revert = soft-remove\"; if the item did exist, a later revert deletes it instead of restoring the previous version. And the comment five lines above says a capture failure \"just omits that item from the revert plan\", which is not what the code does. Either the comment or the code is wrong; worth a look from whoever owns the revert plan.\n\n## Suggested disposition\n\nThese share one question — what should a read seam do when the read fails and the answer is an accumulator? — and the repo already has both answers in its vocabulary: discriminate with `isMissingTableError` and treat only that as truthful emptiness, or carry an explicit \"incomplete\" fact in the response. Several of the correct seams nearby already do the second (`build-probes`' `issues[]`, the dangling-reference audit's `report.unreadableObjects`, `history-cleanup`'s `errors` counter).\n\n## Related\n\n- #8845 — the measurement card; its PR records why the gate was not extended to catch this shape.\n- #8833 — `diffMetaItem`, the same shape, `needs-user-decision` with the maintainer.\n- #8895 — `cascadeDeleteRelations`, same shape, split out for severity.\n- #5186 / #6451 — the rule and its prior extension.\n"
+}

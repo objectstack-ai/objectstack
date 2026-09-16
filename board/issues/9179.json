@@ -1,0 +1,33 @@
+{
+  "number": 9179,
+  "kind": "pull_request",
+  "title": "docs(getting-started): fix swapped master_detail delete-behavior default",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "size/xs",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-16T23:28:22Z",
+  "updated_at": "2026-08-16T23:53:17Z",
+  "closed_at": "2026-08-16T23:53:15Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": "2026-08-16T23:53:15Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/9179",
+  "body": "Fixes #9164\n\n## What was wrong\n\n`content/docs/getting-started/common-patterns.mdx:95` told authors `master_detail`\ndefaults to `deleteBehavior: 'set_null'`, and that they must set `deleteBehavior: 'cascade'`\nexplicitly to get children deleted with the parent. Both clauses are false, and the two\ndefaults are swapped onto the wrong field type.\n\n## Verification against the engine (re-derived, not copied from the issue)\n\n`packages/objectql/src/engine.ts`, `cascadeDeleteRelations` (around line 10065, current\n`origin/main`):\n\n```ts\nfdef.type === 'master_detail'\n    ? (fdef.deleteBehavior === 'restrict' ? 'restrict' : 'cascade')\n    : (fdef.deleteBehavior || 'set_null');\n```\n\nRead with my own eyes on this branch's `origin/main`, anchored on the symbol\n(`cascadeDeleteRelations`) rather than the line number since anchors have been drifting:\n\n- `master_detail` with no `deleteBehavior` (or any value other than `'restrict'`, including\n  an explicit `'set_null'`) resolves to `cascade` — `set_null` is not reachable for this\n  field type at all.\n- `set_null` is the default for the *other* branch: a plain reference (`lookup`) with no\n  `deleteBehavior`.\n\nThe doubly-commented block right above that ternary (lines 10026-10028) states the same\nthing in prose: \"`master_detail` defaults to `cascade` ... `lookup` defaults to\n`set_null`\". `content/docs/protocol/objectql/types.mdx:691` agrees (`Deletion | Always\ncascade` for master-detail) and I re-checked it is still current — no drift there, so the\nnew docs wording is consistent with it rather than inventing a third phrasing.\n\n## The harmful reading this fixes\n\nThe passive one: an author who followed the old sentence's instruction (set `cascade`\nexplicitly) was opting in to a no-op. The one who got hurt is the one who read \"defaults\nto `set_null`\", concluded their child rows were safe, and changed nothing — then deleted a\nparent and silently lost the children.\n\n## The fix\n\n```diff\n-Create a parent-child relationship between a master and its detail records. Note that `master_detail` defaults to `deleteBehavior: 'set_null'`; set `deleteBehavior: 'cascade'` explicitly if you want child records deleted with the parent.\n+Create a parent-child relationship between a master and its detail records. A `master_detail` child has no independent existence, so `master_detail` fields **cascade deletes by default** — deleting the parent deletes its children too. Set `deleteBehavior: 'restrict'` explicitly if you want the parent delete blocked while children still exist.\n```\n\nCorrected both false clauses, and (per the filer's suggestion) said *why* cascade is the\nright default: a master-detail child has no independent existence — the fact the old\nsentence was presumably reaching for. The override guidance now points at `restrict`\n(the only other value the engine's ternary above ever resolves a `master_detail` field\nto) rather than at `cascade`, which was never a real override.\n\nThe example code block a few lines down (`deleteBehavior: 'cascade'`, now redundant with\nthe corrected default) is left as-is — it was never false, being explicit there is\nharmless, and touching it is outside what this card asked for.\n\n## The one judgement that was mine to make\n\nTriage left \"should `getting-started/` state per-type defaults at all\" for this PR to\ndecide. I kept it stating the `master_detail` default, scoped to just that one type:\nthis section's whole point is the master-detail pattern, so the default delete behavior\nfor *that* field type is directly on-topic and worth a reader knowing without a trip to\n`types.mdx`. What I did not do is turn this into a defaults matrix covering `lookup`/\n`set_null` as well — that comparison already lives in `types.mdx` (the \"Difference from\n`lookup`\" table), stating it a second time here is exactly the kind of duplication that\ndrifted out of sync once already, and getting-started's job is one clear worked pattern,\nnot a second copy of the reference page.\n\n## Scope\n\nDocs-only, no engine change (the engine is correct). No sweep — this is the one page\nnamed in the issue; other `getting-started/` pages were explicitly not audited for the\nsame shape and none were touched here.\n\n## Tests / gates\n\nNamed by `node scripts/pm/dispatch-gates.mjs content/docs/getting-started/common-patterns.mdx`\n(re-run against the actual changed path at the final commit, same 3 gates both times):\n\n```\npnpm check:docs-audit-scope   # PASS\npnpm check:docs-redirects     # PASS\npnpm check:role-word          # PASS\n```\n\nAlso ran, since the file has a fenced `os:check` TS block and this is a `content/docs`\nedit:\n\n```\npnpm check:doc-authoring   # PASS - 376 files clean, no bare metadata literals\npnpm check:doc-anchors     # PASS - 240 fragment links resolve\npnpm check:nul-bytes       # PASS\n```\n\nAll six green at `ef3998635` (the final commit on this branch, quoted from\n`git rev-parse --short HEAD` run after the last push).\n\n## Changeset\n\nNone — docs-only, releases nothing. Applying `skip-changeset` on this PR (existing labels\npreserved).\n\n_Generated by [Claude Code](https://claude.ai/code/session_01Y26DJEHSBhhAQ6wwfsHNza)_\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01Y26DJEHSBhhAQ6wwfsHNza)_"
+}

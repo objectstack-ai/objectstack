@@ -1,0 +1,33 @@
+{
+  "number": 9144,
+  "kind": "issue",
+  "title": "[finding] the metadata TYPE registry moves the same metadataForms bundles and is still invisible to dispatch-gates path derivation",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:queue"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-16T13:43:55Z",
+  "updated_at": "2026-08-17T02:57:00Z",
+  "closed_at": "2026-08-17T02:57:00Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9144",
+  "body": "Filed unassigned from the #9116 implementation (PR #9143, session `session_011RB4waLuNbdruCo6X9oobm`). Duplicate-searched: no card names the type registry plus dispatch-gates. Grading and routing are triage's.\n\n## Measured\n\nPR #9143 closes the `.form.ts` edge of #9116: a metadata form module edit now derives `check:i18n` through a convention entry whose population is walked at runtime and whose applicability is read from the extract configs' own documented flags.\n\nWhile enumerating that trigger surface, a **second producer of the same four bundles** turned up that the new entry does not cover. `walkMetadataForms` (`packages/cli/src/utils/i18n-extract.ts`, ~line 920) emits the `metadataForms` surface from **two** sources, not one:\n\n1. `METADATA_FORM_REGISTRY` (`packages/spec/src/system/metadata-form-registry.ts`) — section, field, helpText and placeholder strings. Its members are the 17 `*.form.ts` modules, which is the population PR #9143 now derives.\n2. `DEFAULT_METADATA_TYPE_REGISTRY` (`packages/spec/src/kernel/metadata-plugin.zod.ts`, ~line 653) — the type-level `metadataForms.TYPE.label` / `.description` entries, emitted for **every** registry entry including form-less types.\n\nEditing a label in (2), or adding/removing an entry in the registry module of (1), moves exactly the same `platform-objects` metadata-form bundles that PR #9113 had to regenerate — and derives nothing. Neither file carries a filename that distinguishes it from its ~925 neighbours under `packages/spec/src`, so the `*.form.ts` convention cannot reach them, and the ordinary path derivation cannot either (the gate's own path literals are its CLI and stale-dist prerequisites; `packages/spec` owns no extract config).\n\nThis is the same invariant #9116 states, on the adjacent edge:\n\n> a gate that a diff can move should be derivable from that diff — \"undetermined\" was designed as an honest unknown, not a standing blind spot on a known edge.\n\n## Why it was not fixed in PR #9143\n\nNot scope creep avoidance for its own sake: the correct FORM is not pinned by existing evidence, so fixing it there would have been a guess.\n\nThe `*.form.ts` convention works because the producer states it about itself (`metadata-form-registry.ts`: \"the FormView produced by `defineForm({ schemaId })` in the corresponding `*.form.ts`\") and because the convention and the population coincide exactly — 17 files, 17 registry entries, nothing left over. Neither registry module has an equivalent self-describing anchor. The candidate anchors each cost something and want a decision rather than an implementer's preference:\n\n- **identifier discovery** — walk the form modules' owning package for the `export const` declaration of the two names the extractor imports. Self-reporting when it rots (not found ⇒ warn/STALE), but writes down two identifier names and reads ~925 files per run unless bounded.\n- **a declared coupling constant** — the `check-type-check-coverage.mjs` shape PR #9143 already uses for the shared module: a bare module-body path literal in `check-i18n-bundles.mjs` naming each registry module. Cheap and already precedented, but manual per-coupling upkeep and it puts `packages/spec` paths in a root gate's source.\n- **widen to the package** — treat `packages/spec/src` as the trigger surface. Derivable with nothing written down, but over-triggers `check:i18n` for every spec card, which is the failure mode #9116 explicitly asked not to trade for.\n\n## Refs\n\n#9116 (the `.form.ts` half) · PR #9143 (states this gap in `scripts/i18n-bundle-surface.mjs`'s header, so the omission is visible at the source rather than only here) · `scripts/pm/dispatch-gates.mjs` (`CHANGE_KIND_GATES`) · PR #9113 (the paid instance on the sibling edge)"
+}

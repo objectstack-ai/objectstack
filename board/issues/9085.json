@@ -1,0 +1,30 @@
+{
+  "number": 9085,
+  "kind": "issue",
+  "title": "[finding] The share-link eligibility pin passes with the declared-field binder fully ablated — the surface it claims to cover has no real coverage",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-16T08:48:29Z",
+  "updated_at": "2026-08-17T11:24:38Z",
+  "closed_at": "2026-08-17T11:24:21Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9085",
+  "body": "Found while measuring #8489 (the `plugin-sharing` declared-field binder swap). Out of that card's scope — filed separately, unassigned, for triage. **Measured, not inferred.**\n\n## The gap\n\n`packages/plugins/plugin-sharing/src/share-link-eligibility.test.ts` carries a case named for the exact behaviour the binder exists to produce:\n\n> *\"a DECLARED field the row left empty is judged, not faulted\"*\n\n**That case passes identically with `bindDeclaredFields` fully ablated.** Measured: `record.owner_id == null` on row `a_ok` reaches `RECORD_NOT_ELIGIBLE` both **with** the binder and with the binder **removed**.\n\nThe reason is in the fixtures, not the assertion: every seeded row carries `owner_id`, so the row never exercises the declared-and-absent path. The binder is never the thing under test, and the case name asserts a property the test cannot observe.\n\n## Why it matters\n\n`assertEligible` **fails closed** — an unevaluable predicate raises `ELIGIBILITY_UNEVALUABLE` and refuses to mint the link. So this is not a live hole today; the cost is that the one pin standing over a security-relevant gate's materialisation behaviour **cannot fail**, and would not notice the binder being deleted, changed, or diverging further.\n\n⭐ This is the same failure shape as the card that surfaced it: something written down as covering a contract, reconciled against nothing that would notice if it stopped.\n\n## Interaction with #8489 — read before scheduling\n\n#8489 is now `needs-user-decision` (adopting the canonical helper changes eligibility verdicts on one measured input class, in both directions). Whichever option is ruled there, **its implementation has to rewrite this pin anyway** — the dev's own note is that a discriminating pin needs a row where the declared field is *genuinely absent*, plus the `!has(record.x)` case.\n\nSo the cheapest sequencing is probably **to fold this into #8489's eventual fix** rather than land it standalone: both touch `packages/plugins/plugin-sharing`, and a standalone fix here would collide with that card and would have to guess which semantics to pin. Recording it as its own card so it is not lost if #8489 stays parked in the decision box — ⛔ not because it wants a separate dispatch.\n\n## Reproduction\n\nAblate `bindDeclaredFields` at `share-link-service.ts:274` (pass `record` straight through) and run the suite. The named case stays green.\n\nVerified against `origin/main` @ `c308a4fd8`."
+}

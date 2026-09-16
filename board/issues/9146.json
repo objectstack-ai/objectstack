@@ -1,0 +1,35 @@
+{
+  "number": 9146,
+  "kind": "pull_request",
+  "title": "feat(spec): refuse bound external.credentialsRef with a user-less mongo config.url at publish (#9041)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-16T13:45:22Z",
+  "updated_at": "2026-08-16T15:09:28Z",
+  "closed_at": "2026-08-16T15:09:27Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-16T15:09:27Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/9146",
+  "body": "Fixes #9041\n\n## What\n\nRefuses, at the authoring/publish door, the contradictory pair \"`external.credentialsRef` bound + a mongo `config.url` whose userinfo names NO user\" — a configuration that cannot work as written. Premise re-verified on the post-#9123 tree: `buildMongoAuth` in the driver factory injects the bound secret only when `urlUserinfoUsername(url)` names a user (MongoClient `auth` needs a username the URL must supply), so on a user-less URL the binding is a silent no-op — the datasource connects anonymously and the operator is told nothing. The factory's own #8696 comment defers the loud half to this door by name.\n\n## Where — the seam that sees both halves\n\n`DatasourceSchema`'s existing `superRefine` in `packages/spec/src/data/datasource.zod.ts` — the card measured this cannot be a `MongoConfigSchema.superRefine` (`credentialsRef` sits on the datasource, `url` inside `config`), and the datasource-level refinement is the one place in `packages/spec` both halves are visible at once (no fork: the PM's assumed seam exists on today's tree).\n\n## Fences (triage, adopted verbatim)\n\n- **mongo arm ONLY** — judged through `resolveDriverId`, so a legacy `driver: 'mongo'` row is judged identically to `'mongodb'` (the same alias mechanism the #9040 read-path redaction uses). The postgres arm is not assumed: #8873 measured `pg` injecting on a user-less DSN by its own mechanism, and a fence-② pin asserts a user-less pg DSN + binding stays accepted.\n- **\"names no user\" = `urlUserinfoUsername` answers `undefined` only** — the present-but-empty forms (`mongodb://@h/db`, `mongodb://:p@h/db`) already throw in MongoClient itself (`MongoParseError: URI contained empty userinfo section`); pinned as NOT this refusal.\n- **The message names BOTH valid fixes, prescribing neither**: add the username to the URL's userinfo, or remove the binding.\n- Additional edges mirrored from the measured mechanisms: an empty-string `credentialsRef` is not a binding (the connect path resolves under a truthy check); the composed branch (no `url`) is untouched — its discrete `username` field is live; a non-string `url` is left to the driver-config gate.\n\n## Composition (PM-mechanism pins)\n\n- One artefact violating this refusal AND #9123's `credentialFreeMongoOptions` reports both, each at its own path (`config.url` + `config.options.auth.password`) — pinned.\n- The #8082 direction composes by construction: a `user:password@` URL HAS a user, so the author gets exactly the #8082 prescription and never a contradictory second message — pinned.\n\n## Envelope\n\nPer the sibling refusals' documented pattern (#8082/#9040 pins in the same test file): the zod issue's `code: 'custom'` + pathed location are the whole envelope at this layer; the publish door wraps every schema refusal uniformly as `422 INVALID_METADATA` with these issues carried verbatim.\n\n## Breaking + ADR-0087\n\nAccept-set narrowing shipped as `@objectstack/spec` minor with BREAKING annotation, matching the #8337/#9123 sibling convention (a stored row carrying a vestigial binding over a working anonymous connection now refuses — a real accept-set flip, not only dead configs). Semantic migration entry `datasource-credentialsref-mongo-url-no-user-refused` registered under major 18 (registry regenerated via `gen:migration-registry`); no mechanical rewrite is possible because the two fixes are contradictory intents (authenticate vs anonymous).\n\n## Consumer fixture sweep\n\nSwept every file binding `credentialsRef` across packages/examples/content/skills: no fixture pairs it with a user-less mongo URL (service-datasource's `bound-secret-dsn-branches.test.ts` builds connection specs directly, below this schema; the #8155 migration keeps the username in the URL by prescription; the showcase example's `credentialsRef` is commented out and postgres). Zero flips expected, and the full spec suite confirms.\n\n## Verification (all at `d4fbe7352`, the head commit)\n\n- Full `@objectstack/spec` suite: **406 files / 10797 tests passed** (includes the new describe block, 13 new cases).\n- Reverse verification, direction decided up front as red-on-ablation: with the refinement removed (fix committed first, ablation via script, restore via `git checkout` from the branch), the refusal test file went **4 failed / 129 passed** — exactly the four refusal-asserting cases; accept pins stayed green. Restored and re-ran: 181/181 green. Vitest runs from `src`, so no dist rebuild was involved in the ablation loop (not a dogfood `dist/` ablation).\n- `pnpm --filter @objectstack/spec check:generated`: all 13 artifacts up to date after rebuild (an earlier api-surface \"stale\" was the stale-dist phantom; rebuilt, clean, zero artifact diffs beyond the regenerated migration registry).\n- `pnpm --filter @objectstack/spec typecheck` green; `check:type-check-coverage` + `check:type-check-debt --re-measure` green (no surplus).\n- Diff-derived gates (`node scripts/pm/dispatch-gates.mjs` over the 5 changed paths), all green: `check:changeset-gate-self-tests`, `check:cross-package-test-inputs` (both spellings), `check:doc-formula-expressions` (after building the lint closure), `check:merge-driver`, `check:objectui-changeset`, `check:spec-parsed-alias`, `check:type-source-resolution`, `check-adr-0087-registration` (BREAKING changeset carries `registered datasource-credentialsref-mongo-url-no-user-refused`), `check-changeset-no-major`, `check-empty-changeset`, `check-dev-prereqs` (after full package build), plus the test-file convention gates `check:query-options-erasure`, `check:engine-double-contract`, `check:where-matcher` and `check:nul-bytes`.\n- Example apps `validate` (crm / showcase / todo): green (pre-existing warnings only).\n\n_Generated by [Claude Code](https://claude.ai/code/session_01225pUjnCKWqxcc1PeqKFUq)_\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01225pUjnCKWqxcc1PeqKFUq)_"
+}

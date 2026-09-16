@@ -1,0 +1,35 @@
+{
+  "number": 8934,
+  "kind": "issue",
+  "title": "`$icontains` has no counterpart in `VIEW_FILTER_OPERATORS` or `VALID_AST_OPERATORS`, so it is authorable only in the MongoDB-style dialect",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-08-15T21:40:53Z",
+  "updated_at": "2026-08-16T07:50:31Z",
+  "closed_at": "2026-08-16T07:50:31Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8934",
+  "body": "Filed while implementing objectstack-ai/objectui#4023 (the FilterConditionField builder operator for `$icontains`). Measured against `@objectstack/spec@17.0.0-rc.6` as pinned by objectui.\n\n## What is missing\n\n`FieldOperatorsSchema` (`data/filter.zod.ts`) declares `$icontains`, and per its own docblock every driver and evaluation face the platform ships now executes it (#5702 + #6520). The spec's **other two** filter vocabularies do not have it:\n\n```\nnode -e \"console.log(require('@objectstack/spec/ui').VIEW_FILTER_OPERATORS)\"\n// equals, not_equals, contains, not_contains, starts_with, ends_with,\n// greater_than, less_than, greater_than_or_equal, less_than_or_equal,\n// in, not_in, is_empty, is_not_empty, is_null, is_not_null, before, after, between\n\nnode -e \"console.log([...require('@objectstack/spec/data').VALID_AST_OPERATORS])\"\n// =, ==, equals, eq, !=, ..., contains, notcontains, not_contains, like,\n// startswith, starts_with, endswith, ends_with, between, is_null, ...\n```\n\nNeither set has a case-insensitive contains, and neither has an alias that folds onto one.\n\n## Why that is a defect and not just an omission\n\nThe three vocabularies are three doors onto the same capability, and a filter authored at one door cannot always be expressed at another. Measured consequences in `objectui`, all on `origin/main` today:\n\n- `packages/core/src/utils/filter-converter.ts` — `convertOperatorToAST('$icontains')` returns `null`, so `convertFiltersToAST` throws `FilterOperatorError` (`INVALID_FILTER`, 400). Any MongoDB-style filter carrying the operator is refused before it reaches the wire.\n- `packages/plugin-list/src/ListView.tsx` — `mapOperator` has no row, so the operator is emitted verbatim into the array AST. Per that repo's own `filter-operator-ast-parity.test.ts`, an operator outside `VALID_AST_OPERATORS` costs either an unfiltered read or a 400 (see #3948) — either way not the filter the user asked for.\n- `packages/app-shell/src/views/viewFilterFold.ts` — a saved view rule is refused by `ViewFilterRuleSchema`'s enum.\n\nSo a capability that the engine executes on every face is reachable from exactly one of three authoring dialects. objectui#4023 shipped the operator as **opt-in per consumer** for this reason: only the widget that persists MongoDB-style criteria offers it, and the other FilterBuilder consumers deliberately do not, because there is nothing correct for them to store.\n\nMapping `$icontains` onto plain `contains` in the bridges is not the workaround: case sensitivity is part of the contract as of the 2026-08-06 ruling on #5701, so that is a different question silently answered.\n\n## Suggested shape (not a decision)\n\nAdd a canonical case-insensitive contains to `VIEW_FILTER_OPERATORS` (e.g. `icontains` / `contains_ignore_case`) with the alias folds, and the matching AST spelling in `VALID_AST_OPERATORS`, so the three dialects declare one capability rather than one-and-a-bit. The naming and whether the view layer should carry it at all are product decisions this issue does not take.\n\n## Provenance\n\nMeasured during objectstack-ai/objectui#4023. Not a regression — a gap that card exposed while wiring the operator into the filter UI.\n"
+}

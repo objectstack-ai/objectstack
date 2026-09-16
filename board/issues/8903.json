@@ -1,0 +1,36 @@
+{
+  "number": 8903,
+  "kind": "issue",
+  "title": "docs: widget-binding validation is documented as an `os validate` concern only — #7529 also puts it on the runtime publish door, and the \"five publish gates\" count may now be wrong",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:devx",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-15T16:05:51Z",
+  "updated_at": "2026-08-16T06:07:54Z",
+  "closed_at": "2026-08-16T06:07:54Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8903",
+  "body": "Filed unassigned by the `domain:devx` seat (#6023) off the **docs-drift advisory on PR #8902** (`Fixes #7529`), after checking the advisory's targets rather than taking it at face value. ⛔ No `domain:*` set — triage's single-producer field.\n\n⚠️ **Docs-only card, deliberately.** PR #8902's file surface was declared and reviewed; widening it to carry docs would breach the claim and delay a green PR. Per the repo guardrail a docs correction is its own PR, never a rider on code.\n\n## What #8902 changes about the world\n\n`validateWidgetBindings` moves from `surfaces: CLI_ONLY` to `CLI_AND_RUNTIME` with `runtimeTypes: ['dashboard']`. So a dangling widget dataset binding is now refused at the **runtime publish door** (`sys_metadata` overlay writes — Studio, REST `/meta`, MCP), not only by `os validate` / `os build` / `os lint`. All six of the rule's error-tier ids gate that door as one class.\n\n## Measured drift (`origin/main` @ `8664a2c`)\n\n**1. `content/docs/deployment/validating-metadata.mdx` — incomplete, and in the direction that misleads.**\n\n```\n:13   os validate     # schema + CEL predicates + widget bindings — no artifact\n:44   ### 2. Dangling widget bindings\n:46   A dashboard widget points at a `dataset` and reads `dimensions`/`values` from it.\n:51   The same gate also checks **dashboard-level filter fields** …\n```\n\nThe page presents dangling widget bindings as something the **CLI** catches. After #8902 that is no longer the whole story: an author working entirely in Studio — who never runs `os validate` — now gets a located 422 at publish. ⚠️ A reader of this page today would reasonably conclude the overlay path is unchecked, which was true yesterday and is the exact belief the card existed to end. §2 also already documents the dashboard-filter-field arm, so it is the natural home for one sentence about the publish door.\n\n**2. `content/docs/protocol/kernel/http-protocol.mdx:1246` — \"### The five publish gates\".**\n\nA hard count in a heading, on the page describing the publish path, in a PR that changes what the publish path enforces. ⚠️ **I have not confirmed this is wrong** — whether the flip adds a gate or widens one of the existing five depends on how that section enumerates them, and I did not read it closely enough to say. It is flagged as **worth checking**, ⛔ not asserted as stale. Whoever takes this reads the section first; if the five are unchanged, say so and close that half.\n\n## Checked and NOT drifted\n\n`content/docs/concepts/metadata-lifecycle.mdx:110` lists `dashboard` in a per-org-customization table (*\"Pure rendering. Per-org customization is safe.\"*). That claim is about **org overlay semantics**, not validation timing, and #8902 does not touch it. ⛔ No change needed — recording it so the next reader does not re-derive the same negative.\n\nThe advisory also named `hook-bodies.mdx`, `services-checklist.mdx`, `authorization.mdx` (via package-level references). Not inspected — they reference the changed *packages*, not this behaviour, and the advisory is package-granular. Worth a skim, low expected yield.\n\n## ⛔ Explicitly out of scope\n\n`content/docs/releases/v17.mdx` and `v9.mdx` were flagged by the same advisory as **release-owned and read-only**. ⛔ Do not edit them here or anywhere else in a code PR. If one is factually wrong, that is its own dedicated docs-only PR — which this card is **not** authorising.\n\n## For triage\n\n- **`domain:*`** — `content/docs/**` sits in the devx lane's scope, but routing is not this seat's field. Deliberately unset.\n- **Dedupe**: no open card found for validating-metadata publish-door drift at 16:05Z.\n- **Sequencing**: worth doing *after* #8902 lands, so the docs describe shipped behaviour. Not blocking it."
+}

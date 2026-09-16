@@ -1,0 +1,33 @@
+{
+  "number": 9192,
+  "kind": "issue",
+  "title": "The docs-drift advisory lists pages by package dependency, so it is wrong in BOTH directions — measured: 2 of 3 listed pages irrelevant, and the 2 pages that actually document the changed surface were not listed",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:queue"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-17T00:21:41Z",
+  "updated_at": "2026-08-17T04:43:23Z",
+  "closed_at": "2026-08-17T04:43:23Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9192",
+  "body": "Filed unassigned by the `domain:metadata` execution seat (#6367), PM session `session_01NTKPDRoynY8i3HmdSFUxFj`. Measured on PR #9191 (#9157) by sweeping the whole `content/docs/**` corpus instead of trusting the advisory list. Duplicate-searched by tool name and by keyword.\n\n## The measurement\n\nPR #9191 changed `auditMetaItem`, `historyMetaItem` and `findReferencesToMeta` in `@objectstack/metadata-protocol`. The bot listed three pages.\n\n**Both directions are wrong:**\n\n| listed page | measured |\n|---|---|\n| `content/docs/concepts/metadata-lifecycle.mdx` | **zero hits** on both probe sets |\n| `content/docs/kernel/services-checklist.mdx` | its only `singular` is `:391`, a service **slot name** (`notification`) — unrelated |\n| `content/docs/protocol/kernel/http-protocol.mdx` | relevant, but the three changed verbs are **absent from the page entirely** |\n\n| NOT listed, but actually documents the changed surface | |\n|---|---|\n| `content/docs/api/client-sdk.mdx:187-188` | `getReferences('object', …)` / `getAudit('object', …)` |\n| `content/docs/kernel/contracts/metadata-service.mdx:85` | `getHistory?(type: string, …)` |\n\n⇒ **3 listed, 1 relevant; 2 relevant pages unlisted.**\n\n## Why, mechanically\n\nThe advisory resolves pages **by package dependency** — \"which hand-written docs reference `@objectstack/metadata-protocol`\". That is a coarse over-approximation in one direction (a page depending on the package need not document the changed symbol) and an under-approximation in the other (a page documenting the symbol through the **SDK** surface does not depend on the implementing package at all).\n\nIt is honest about being advisory. The failure is not the tool lying; it is the tool being **read as a work list** when its precision does not support that.\n\n## ⭐ Third instance of one shape in a single shift\n\n| # | derived list | wrong how |\n|---|---|---|\n| **#9171** | `dispatch-gates.mjs` gate derivation | **omits** gates CI actually runs (`Spec property liveness`; and on PR #9191, **five** more including `check:meta-type-normalized`, squarely that change's subject) |\n| **#9182** | the os-regen driver over 11 generated pages | **drops a side silently**, exit 0, no conflict markers |\n| **this** | docs-drift page list | **both** false entries and missing entries |\n\nThe common shape: **a derived list is consumed as authoritative, and its silence is read as absence.** Every one of the three was caught only because a dev widened the probe past what the tool offered — never because the tool signalled its own limits at the point of use.\n\n⇒ The cheapest durable fix in each case is the same one the dev applied here by instinct: **grep the whole corpus; it is cheaper than trusting a list.** Whether that belongs in the tool's output, in `AGENTS.md`, or in the dispatch brief template is the disposition question.\n\n## Not claimed\n\n- ⛔ **No defect in the bot's implementation.** It does what it says. The gap is between its precision and how it is used.\n- ⛔ **One PR is not a rate.** Measured on #9191 only; I did not check whether earlier advisories on this shift were similarly off. Three sibling PRs this round had their lists checked by devs and all three cleared — but \"cleared\" meant *no page was falsified*, which does not establish the list was *right*.\n- ⛔ **Not measured: cost.** A whole-corpus grep is cheap for one dev on one PR; whether it is the right default for every PR is a judgement I did not make.\n\nBacklinks: PR #9191 / #9157 · #9171 · #9182 · #8986 (where the silent-drop class was first paid for)."
+}

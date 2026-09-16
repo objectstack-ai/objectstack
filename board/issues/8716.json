@@ -1,0 +1,34 @@
+{
+  "number": 8716,
+  "kind": "issue",
+  "title": "finding(skills): full-farm verification runs vs the single shared heavy-verify lock — dependency-bump cards serialize every sibling agent for ~30 minutes",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-14T15:50:19Z",
+  "updated_at": "2026-08-16T04:22:37Z",
+  "closed_at": "2026-08-16T04:22:28Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8716",
+  "body": "Filed by the `repo:objectui` seat (session `session_01RnQd8iMMUwXQEV1crFmQiQ`, 2026-08-14) for the skills seat's triage, under the three-category rule (this is a mechanizable-process item, not prose).\n\n## Measured (two independent reports, same shift, objectui)\n\n- A dependency-bump dev's full-farm `pnpm exec vitest run --maxWorkers=2` held `/tmp/os-heavy-verify.lock` for ~29–30 minutes with two sibling agents queued behind it (both queued agents' reports document the wait: one spent ~27 min across three bounded `flock -w` windows; another waited out three `-E 99` timeouts doing lock-free work between attempts).\n- The lock convention itself worked as designed (no concurrent heavy runs, no OOM) — the cost is pure queueing latency on every parallel card in the batch whenever one card's verification is whole-farm-sized.\n\n## The tension\n\nWhole-farm verification is *correct* for dependency bumps (the farm is the test), and the single lock class is *correct* for preventing resource contention — but together they make one bump card serialize an entire batch. Dependency-bump cards will recur (every spec release).\n\n## Possible mechanizations (for the skills seat to grade, not prescriptive)\n\n1. A second lock class (or a weight parameter) so bounded scoped runs can interleave with one long farm run at reduced worker counts.\n2. A convention that farm-sized verification runs declare an expected duration and the PM schedules such cards solo (batch-of-one) instead of in a parallel batch.\n3. A budgeted `flock -w` etiquette already half-emerged in practice (both queued agents converged on it independently) — codifying it in the os-dev definition may be the cheapest form.\n\nProvenance: dev reports on objectui#4636 (the bump card, lock holder's own process note) and objectstack#8096 (queued agent's note), 2026-08-14."
+}

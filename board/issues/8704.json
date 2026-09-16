@@ -1,0 +1,36 @@
+{
+  "number": 8704,
+  "kind": "issue",
+  "title": "feat(spec): no declarative filter for auto-derived related lists — add field-level `relatedListFilter` so soft-deleted child rows can be excluded without abandoning the auto record page",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "enhancement",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-08-14T15:09:25Z",
+  "updated_at": "2026-08-16T03:43:10Z",
+  "closed_at": "2026-08-16T03:43:10Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8704",
+  "body": "Reported from a downstream re-test batch of platform-capability gaps in Titanwind EHR (private repo: steedos-labs/os-project-titanwind-ehr#1071, gap ③). All facts below are from `@objectstack/*` **17.0.0** and are self-contained — the downstream links are for provenance only.\n\n## Current state (17.0.0)\n\nThe field-level related-list surface in `@objectstack/spec` consists of exactly three keys — `relatedList`, `relatedListTitle`, `relatedListColumns` (`spec/src/data/field.zod.ts:788-792`). There is **no filter dimension** at all.\n\nConsequently, the related-list descriptors that RecordDetailView auto-derives for a record page carry only `childObject` / `childLabel` / `referenceField` / `isOwned` / `isPrimary` (plus the title/columns overrides above), and the list query is issued directly as `{ [referenceField]: parentId }` — every child row pointing at the parent is shown, unconditionally.\n\n## Scenario that breaks\n\nA child object implements soft deletion (e.g. `status = 'deleted'`). After a user \"deletes\" a child record:\n\n- the parent's record page still shows the deleted row in the related list, unchanged;\n- the related-list tab badge count does not decrease;\n- the child object's own list-view filters do **not** apply to related lists, so there is no declarative way to hide the row anywhere on the auto-derived record page.\n\n## Current workaround and its cost\n\nThe only way to filter a related list today is to replace the **entire page** with a hand-written page using the `record:related_list` component, which does accept a `filter` input (wired up in objectstack-ai/objectui#3981, from #7118). That works, but the cost is giving up the auto-derived record page for that object — every other related list, layout, and future platform improvement on that page now has to be maintained by hand, to express one filter condition.\n\nNote #7118 is the *component-level* read point; this issue is the missing *declaration-level* counterpart, so the auto-derived page can express the same thing.\n\n## Request\n\nAdd a field-level `relatedListFilter` key (or an equivalent related-list default-filter declaration) to the spec, and have the auto-derived related lists consume it:\n\n- semantics: AND-composed with the parent-relationship condition `{ [referenceField]: parentId }` — an authored constraint, not a user-editable suggestion;\n- the tab badge count should honor the same filter, so counts match the visible rows.\n\nNaming/placement is the platform's call — the capability gap is \"a declared filter that auto-derived related lists respect\"."
+}

@@ -1,0 +1,34 @@
+{
+  "number": 9137,
+  "kind": "issue",
+  "title": "Freeze note on `assertControlledByParentWrite` — the guard is the sole enforcement for three authorable master-reference shapes until the #8772 ramp completes",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-16T13:28:25Z",
+  "updated_at": "2026-08-17T01:53:15Z",
+  "closed_at": "2026-08-17T01:53:15Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9137",
+  "body": "## Provenance\n\nSlice A (Direction 4) of the **#8772 maintainer ruling** (2026-08-16, comment [5306089973](https://github.com/objectstack-ai/objectstack/issues/8772#issuecomment-5306089973)): Direction 2 now + Direction 1 at v18 + **Direction 4's sentence immediately**. Carved into its own card on the maintainer's instruction of 2026-08-16 (PM chat, verbatim: 「接受你的建议，开新卡，现有的可以关闭？」 confirming the three-way split), recorded by PM session `session_01NYgmGheCzM6NrHZN436Cxf`. Intended lane: **`domain:identity`** (lands in `plugin-security`) — `domain:*` left for the triage seat per the single-producer rule.\n\n**This is the first slice to land** — the ruling says the note should land before or with the first code slice, because it is what protects #8688's proposed route during the ramp.\n\n## The work (S-grade, mechanical)\n\nAdd a load-bearing comment at `assertControlledByParentWrite` (`packages/plugins/plugin-security/src/security-plugin.ts`) stating:\n\n- This guard is the **sole enforcement point** for three authorable `controlled_by_parent` master-reference shapes (`master_detail` without `required`; `required: true` + `readonly`; `required: true` + `system` — the latter two skipped by `record-validator.ts`'s provenance-flag `continue`).\n- ⛔ **Do not move, weaken, or stand the guard down** — in particular not for the absent-master insert route #8688 proposes — until the #8772 ramp completes: (a) the authoring builder forces `required: true` (sibling card), and (b) lint refuses the shape at the v18 boundary (sibling card). Standing it down earlier mints a detail row with a null master FK that the `controlled_by_parent` read filter (`fk IN (readable masters)`) can never match — unreadable by anyone, `422 MISSING_REQUIRED_FIELD` on every later by-id write.\n- Reference #8772's five-shape measurement table.\n\nNo behaviour change; comment + (optionally) one pinned test asserting the guard refuses the absent-master insert for the three shapes, if not already pinned.\n\n## Re-check before acting\n\n- `git grep -n \"assertControlledByParentWrite\" origin/main -- packages/plugins/plugin-security`\n- Guard still unconditional on absent master FK; #8688 still open/unruled.\n\nRefs: #8772 (ruling + measurement) · #8688 (the route this note protects) · sibling cards: builder-force (spec), lint-at-v18 (devx)."
+}

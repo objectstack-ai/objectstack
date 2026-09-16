@@ -1,0 +1,34 @@
+{
+  "number": 7748,
+  "kind": "issue",
+  "title": "draft-publish-lifecycle: the metadata audit trail records only `save` — publish, rollback and the 409 conflict denial never write a row",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "bug"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T12:26:20Z",
+  "updated_at": "2026-08-16T11:19:49Z",
+  "closed_at": "2026-08-13T11:48:44Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7748",
+  "body": "## Symptom\n\nStaging, publishing and rolling back a metadata item all answer 200, and the audit trail records only one of the three.\n\n- After **3 publishes and 2 rollbacks** (all 200, all sent with `X-Actor`), `GET /api/v1/meta/&lt;type&gt;/&lt;name&gt;/audit` returns `Counter({'save': 5})` — no `publish` rows, no `rollback` rows.\n- The **409 `METADATA_CONFLICT`** denial is likewise absent.\n\nReproduced twice, on two actors. Everything else in the lifecycle passes: draft staging, the publish flip, OCC (409 with a passing control), package-wide `publish-drafts` atomicity, the #4463 draft→active gate, the Studio unpublished badge and Changes counter, `/history` carrying both publish events, and rollback flipping the served body. So the operations happen — they are simply not written down.\n\n## Root cause (source-confirmed)\n\n`packages/metadata-protocol/src/protocol.ts` writes an **allowed-outcome** audit row at exactly two sites:\n\n- line 10220 — `operation: 'save', outcome: 'allowed'` (in the save path, commented \"ADR-0010 — success audit (best-effort)\")\n- line 12848 — `operation: 'delete', outcome: 'allowed'`\n\n`publishMetaItem` and `rollbackMetaItem` reach `recordMetadataAudit` **only** through `assertLockAllowsWrite()` (called at lines 10783 and 12414). That helper records on the **deny** path and returns early on allow:\n\n```\nconst refusal = evaluateLockForWrite(state.lock);\nif (!refusal) return null;          // ← allowed: returns before any audit write\n…\nawait this.recordMetadataAudit({ …, outcome: 'denied', … });\n```\n\nSo a *refused* publish is audited and a *successful* one is not — the inverse of what an audit trail is for. The same asymmetry explains the missing 409: the conflict is refused outside the lock helper, and nothing on that route writes a row either.\n\n**Stale-premise check:** re-verified on `objectstack` `origin/main` (`00e9196`). Both allowed-outcome sites and both `assertLockAllowsWrite` call sites are unchanged in substance; only line numbers moved from the run's build (save 9833 → 10220, delete 12429 → 12848).\n\n## Reproduction\n\n1. Boot the showcase with writable runtime packages.\n2. Stage a draft (`PUT …?mode=draft`), publish it, roll it back — repeat to 3 publishes and 2 rollbacks, sending `X-Actor` on every call. All answer 200.\n3. `GET /api/v1/meta/&lt;type&gt;/&lt;name&gt;/audit` → only `save` rows (`Counter({'save': 5})`).\n4. Force a 409 `METADATA_CONFLICT` (stale `If-Match`), then re-read the audit — the denial is absent too.\n\n## Scope\n\nThe actor stamped on the rows that *are* written is a second, independent defect with a different located file — filed separately as #7749 so it survives this fix.\n\n## Source\n\nExtracted from the QA run objectstack-ai/objectstack#7695 (framework 92f26f75, console 09987b680)."
+}

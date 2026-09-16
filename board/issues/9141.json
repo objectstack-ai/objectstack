@@ -1,0 +1,33 @@
+{
+  "number": 9141,
+  "kind": "pull_request",
+  "title": "fix(ci): check-required-contexts' `carries` names the gate family instead of a step count that nothing asserts",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-16T13:31:20Z",
+  "updated_at": "2026-08-16T14:55:01Z",
+  "closed_at": "2026-08-16T14:55:00Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": "2026-08-16T14:55:00Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/9141",
+  "body": "Fixes #9103\n\n`check-required-contexts`' `carries` prose claimed the ESLint job carries 25 `check:*` steps. It does not — and the fix is not to write a bigger number.\n\n## What I measured (not the card's 52, and not the dispatch's)\n\nCounted at HEAD `1af1f9ba4`, by YAML-parsing `lint.yml` rather than slicing it textually:\n\n| job | total steps | `pnpm check:*` steps | any `check:*` script (incl. `--filter` spellings) | registry said |\n| --- | --- | --- | --- | --- |\n| `lint` (ESLint) | 61 | **54** | 54 | 25 |\n| `typecheck` (TypeScript Type Check) | 43 | 11 | 26 (28 counting direct `node scripts/check-*.mjs`) | 33 |\n\n**Caliber**, stated because it is where this defect breeds: a step counts when its `run:` invokes a `check:*` npm script. Neither job declares a `strategy.matrix` (assertion 4 pins exactly that), so there is no expansion to count. For the ESLint job all three calibers agree at 54 — every check step uses the bare `pnpm check:*` spelling. For `typecheck` they do not agree, spanning 11 to 43, which is the point below.\n\nThe card measured 52 at `4e3a4c3c8`. I measure 54 at HEAD. Both are honest: **the job gained two steps while the card sat open.**\n\n## Two findings the card did not have\n\n**1. The counts were wrong on the day they were written, not merely outgrown.** At the pin's authoring commit `d3e53f2d8` (2026-08-09) the ESLint job ran 35 `pnpm check:*` steps while the entry said 25; the typecheck job ran 10 while its entry said 33. No caliber I tried reproduces 33 at that commit — 10 bare, 23 including `--filter` spellings, 29 non-setup, 38 total. So the number never measured anything recoverable. 25 was approximately the ESLint count at the #5617 **incident** (24 on 2026-08-06), i.e. a historical figure that drifted out of the header narrative into a present-tense field.\n\n**2. There is a second stale count.** The `typecheck` entry's `(33 steps)` is the identical defect one line below the one the card names. Fixed here under the same change: leaving it would have closed the instance and kept the class.\n\n## The drift curve, measured from git\n\n`lint` job, `check:*` steps: 24 (08-06) → 29 (08-07) → 32 (08-08) → 36 (08-09) → 38 (08-11) → 47 (08-13) → 54 (08-16). About three a day, every gate green throughout.\n\n## Why option 1 (re-stamp to 54) was rejected\n\nThe dispatch's hard criterion was to explain why a refreshed number would not rot again. I cannot, and the evidence runs the other way: the number gains ~3/day, and it moved by 2 during the few hours between the card being filed and being picked up. A re-stamp schedules the same card for next week.\n\n## What this does instead — option 2, plus the guard that closes the class\n\n- Both parenthetical counts are removed. `carries` now names the gate **family**; the authoritative count is the job's own step list in the workflow, one grep away and never stale.\n- Line 21's header narrative drops its `25` too. That sentence describes the #5617 blast radius, for which \"the whole `check:*` gate family\" is both the durable fact and the point.\n- **New assertion 10** in the pin's enforcement path: a `carries` string may not embed a step count. This is what the card observed was missing — the number was asserted by nothing. Re-adding one now turns `check:required-contexts` red on the PR that does it.\n\nAssertion 10 costs no recurring maintenance, which is why it is preferable to option 3 (assert the count itself): asserting a step count would make every PR that adds a `check:` step also edit this registry — a mandatory cross-file edit on a repo doing ~18 merges/day, i.e. a merge-conflict magnet, in exchange for a number nothing consumes. `carries` has no programmatic consumers; I grepped.\n\n## Verification\n\nAll at `1af1f9ba4`, the final commit:\n\n```\n✓ check-required-contexts --self-test: 55 assertions (rename ablations across both workflows +\n  matrix/continue-on-error/trigger shapes + the shard-name collision + the `carries` step-count\n  ban + the #4690 pins).\n✓ check-required-contexts: 9 required context name(s) pinned across 3 workflow(s).\n✓ check-nul-bytes: OK (scanned 5989 text files; no raw ASCII control bytes)\n✓ eslint scripts/check-required-contexts.mjs — clean\n```\n\nGate derivation over the actual changed path (`node scripts/pm/dispatch-gates.mjs scripts/check-required-contexts.mjs`) places exactly one family on this card, `check:required-contexts` — the one run above.\n\n**Reverse verification** (direction decided in advance: red). With the original `(25 steps)` restored into the live registry, the pin exits 1 with assertion 10's finding, and the self-test's real-registry assertion fires:\n\n```\n✗ check-required-contexts — 1 problem(s)\n  • the registry's `carries` for 'ESLint' embeds a step count (\"25 steps\"). That number is\n    asserted by nothing and rots silently as the gate family grows …\n```\n\nThe self-test also carries two permanent ablations covering both spellings a future author would reach for — `(25 steps)` and the unparenthesised `, 33 steps`.\n\nNo changeset: this is repo-internal CI tooling with no user-visible surface, so the PR carries `skip-changeset`.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_011RB4waLuNbdruCo6X9oobm)_"
+}

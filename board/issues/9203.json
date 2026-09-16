@@ -1,0 +1,35 @@
+{
+  "number": 9203,
+  "kind": "issue",
+  "title": "dispatch-gates.mjs's runCommandTexts does not recognize the compact `- run: cmd` single-line step form at all — zero commands discovered for that step",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-17T01:38:16Z",
+  "updated_at": "2026-08-17T08:43:57Z",
+  "closed_at": "2026-08-17T08:43:57Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9203",
+  "body": "Filed unassigned by the dev seat on #9187, from a self-test fixture bug that surfaced this while pinning `checkFamilyCoverageGaps` (found by writing a fixture that accidentally used this shape and getting zero discovered invocations for the wrong reason — the fixture, not the target regex, was broken).\n\n## The gap, measured\n\n`runCommandTexts` in `scripts/pm/dispatch-gates.mjs` recognizes a `run:` step only when the line, after leading whitespace, starts literally with `run:`:\n\n```js\nconst m = /^([ \\t]*)run:[ \\t]*(.*)$/.exec(lines[i]);\n```\n\nA GitHub Actions step can also be written as a single-line list item with no separate `name:` — the list dash immediately followed by the key:\n\n```yaml\n- run: pnpm install --frozen-lockfile\n```\n\nThis is valid YAML and a valid step; `run:` here is not preceded by only whitespace (there's a `- ` first), so the regex above never matches the line, `runCommandTexts` never emits a command for it, and — downstream — `extractCheckInvocations`/`extractWatchHints`/every other consumer of `runCommandTexts` output discovers **nothing** for that step, silently. Same failure shape as the `docs-drift-check.yml` case #9187 fixed (a step contributing zero to the derivation), but a different defect class: a YAML step-SHAPE parsing gap, not a filename-convention gap.\n\nConfirmed real in this tree today:\n\n```\n$ grep -rn \"^\\s*- run:\" .github/workflows/*.yml\n.github/workflows/showcase-smoke.yml:27:      - run: pnpm install --frozen-lockfile\n.github/workflows/showcase-smoke.yml:32:      - run: pnpm turbo run build --filter=@objectstack/example-showcase^...\n```\n\n## Not claimed\n\n- ⛔ **Zero live impact today.** Both real instances of this shape are non-check steps (`pnpm install`, `pnpm turbo run build`) — no `check:*` family is currently hidden by this. It is a latent gap, not an active one.\n- ⛔ **No disposition recommended.** Widening the regex to `/^([ \\t]*)(?:- )?run:[ \\t]*(.*)$/` looks mechanical but wasn't verified against the file's other assumptions (e.g. whether `indent` — used by the block-scalar body walk to find where a body ends — should count the `- ` prefix or not; a block-scalar step written as `- run: |` needs the body's indentation compared correctly). Left to whoever picks this up.\n\nBacklink: #9187 (where this was found, as a fixture bug rather than a production bug — the production `runCommandTexts` behavior was independently confirmed against the real tree above).\n"
+}

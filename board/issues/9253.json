@@ -1,0 +1,34 @@
+{
+  "number": 9253,
+  "kind": "pull_request",
+  "title": "docs(data): accept-and-document mongo/turso passthrough secrets with no binder slot",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-17T07:33:12Z",
+  "updated_at": "2026-08-17T08:30:39Z",
+  "closed_at": "2026-08-17T08:30:37Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": "2026-08-17T08:30:37Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/9253",
+  "body": "Fixes #9124\n\n## What\n\nMaintainer ruling 2026-08-17 03:19Z (issue comment 5311378700): **Option B — accept-and-document.** This PR is the docs deliverable only; Option A (named binder slots) and Option C (publish-door refusal) stay out of scope by that ruling.\n\nAdds a new subsection to `content/docs/data-modeling/drivers.mdx` — **\"Secret-shaped keys with no binder slot: accepted at-rest risk\"**, placed directly under the existing \"`config` is validated per driver\" section (the section a reader configuring any datasource driver already lands on). It:\n\n- Names the five keys: mongo's `options.proxyPassword`, `options.tlsCertificateKeyFilePassword`, `options.key`, `options.passphrase`, and turso's `encryptionKey`.\n- States plainly that they are **writable** (the parse accepts them) and stored **at rest in `sys_metadata` as plain text**.\n- States the protection that exists today is read-side only: they are stripped before ever being served back over the admin API / Setup UI (#9040, shipped).\n- Records the **named restart condition** from the ruling: the first real deployment needing an authenticated SOCKS5 proxy or a passphrase-protected key converts this into the binder-slot programme (Option A) — one mechanism covering all five keys.\n\n## Verification of the card's premises (done before writing, per the dispatch instructions)\n\n- `PASSTHROUGH_SECRET_PATHS` in `packages/spec/src/data/datasource-credential-redaction.ts` covers exactly the four mongo keys (`options.auth.password`, `options.proxyPassword`, `options.tlsCertificateKeyFilePassword`, `options.key`, `options.passphrase`, plus `options.authMechanismProperties.AWS_SESSION_TOKEN`) — the four named in the card are all present and confirmed still-writable (only `auth.password` is also refused at write, mirrored in `refusedPassthroughSecretPaths`).\n- The restore mirror lives in `packages/services/service-datasource/src/datasource-config-redaction.ts` (`restoreRedactedConfig`), imports `passthroughSecretPaths` from spec, and is wired into `datasource-admin-service.ts` (`merged.config = restoreRedactedConfig(...)`) — confirmed.\n- turso's `encryptionKey` (`packages/spec/src/data/driver/turso.zod.ts`) is `z.string().optional()` with `format: 'password'` metadata — a **top-level** writable config key (`STILL_WRITABLE_CREDENTIAL_KEYS.turso`), a different code path from mongo's **nested passthrough** keys (`PASSTHROUGH_SECRET_PATHS`). The outcome shape the card claims — writable, stored cleartext at rest, redacted only on read — is genuinely the same for both; the underlying mechanism is not identical, and the doc text says \"same … posture,\" not \"same mechanism.\"\n- Confirmed `sys_metadata` is the real, durable storage table for datasource records (`packages/services/service-datasource/src/datasource-admin-plugin.ts`, `packages/metadata-core/src/objects/sys-metadata.object.ts`).\n\n## Scope discipline\n\nNo runtime code changed — this PR touches only `content/docs/data-modeling/drivers.mdx`. Per the dispatch scope fence: no publish-door refusal added (Option C), no binder slot growth (Option A).\n\n**Out-of-scope finding, not fixed here — filed as #9254:** the auto-generated `options` field description in `packages/spec/src/data/driver/mongo.zod.ts` (rendered into `content/docs/references/data/driver-mongo.mdx` and the Studio connection-form help text) currently reads *\"credential material is refused\"* — true only for `auth.password`, not for the four keys this card is about. Not fixed in-place here: it is a `packages/spec` source edit that pulls in the spec build/docs-regen gate surface, a different verification surface than this docs-only PR.\n\n## Tests\n\nDocumentation-only change; no test suite applies. Local gates, all green at `5dd33ddd0`:\n\n- `pnpm check:nul-bytes`\n- `pnpm check:docs-audit-scope`\n- `pnpm check:docs-redirects`\n- `pnpm check:role-word`\n- `pnpm --filter @objectstack/spec run check:empty-state`\n- `pnpm --filter @objectstack/spec run check:liveness`\n- `pnpm --filter @objectstack/spec run check:strictness-ledger`\n- `pnpm --filter @objectstack/spec run check:variant-docs`\n\n(the four spec gates run because `content/docs/**` is a CI trigger path in `spec-liveness-check.yml`, per `node scripts/pm/dispatch-gates.mjs content/docs/data-modeling/drivers.mdx`; `packages/spec` was built first per the toolchain-trap note.)\n\n## Changeset\n\nNone — docs-only, nothing published moves. `skip-changeset` label applied.\n\n_Generated by [Claude Code](https://claude.ai/code/session_01Y26DJEHSBhhAQ6wwfsHNza)_\n"
+}

@@ -1,0 +1,34 @@
+{
+  "number": 9002,
+  "kind": "issue",
+  "title": "finding(objectql): the delete-cascade path's two registry-read swallows are the #8895 shape one layer up — `catch → return` disables every referential guard at once, silently",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-16T05:32:25Z",
+  "updated_at": "2026-08-16T17:27:32Z",
+  "closed_at": "2026-08-16T17:26:21Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9002",
+  "body": "Found while implementing #8895 (the dependents-probe fail-open). Filed unassigned, not a claim. The #8895 PR deliberately does **not** touch these — its declared file surface was the dependents-probe `catch` only.\n\nMeasured on `origin/main` @ `fdf0fbb`, located by symbol (the neighbouring line numbers move constantly).\n\n## The two seams\n\nBoth live in `packages/objectql/src/engine.ts`, both read the registry, both exit silently and valuelessly:\n\n1. `cascadeDeleteRelations()`, first statement — the one that decides whether the cascade runs **at all**:\n\n```ts\nlet objects: ServiceObject[];\ntry {\n  objects = this._registry.getAllObjects();\n} catch {\n  return;\n}\n```\n\n   A `return` here skips every child relation: no `restrict` refusal, no `set_null`, no `cascade` — the same fail-open consequence #8895 fixed for one relation, applied to all of them at once, and reached before the per-relation probe ever runs.\n\n2. `planCascadeAtomicity()` — same call, verdict `'none'`, and its comment says so explicitly: *\"Same swallow as `cascadeDeleteRelations` — an unreadable registry cascades nothing, so there is nothing to make atomic.\"* Consequence: the cascade is not wrapped in a transaction (#7413's atomicity), which matters only if seam 1 does **not** fire on the same call — i.e. a read that fails once and succeeds the next time.\n\n## Why this is filed as an observation, not as a defect card\n\nThe class matches #8895 — a failed read answered with an invented \"nothing to do\", disabling an integrity guard, with no log — but the **read** does not:\n\n- `SchemaRegistry.getAllObjects()` is a walk over in-memory `Map`s calling `resolveObject()`, which returns `undefined` on every failure branch it models (missing contributors, orphan overlay — the latter `console.warn`s and returns). No I/O, no driver, and no `throw` statement on the path measured.\n- So unlike the dependents probe — which crosses a driver and fails on any connection drop, timeout, permission denial or query error — there is no measured way to make these two catches fire today. The looseness is dormant.\n\nDormant is not harmless, on the #8895 reasoning: seam 1's blast radius is strictly larger than the one just fixed, and the day `getAllObjects()` grows a throwing path (a lazily-resolved contributor, a validating merge) it fails open across every relation with nothing in the log.\n\n## Suggested disposition (triage's call, not mine)\n\nCheapest correct shape is the one #8895 landed — discriminate or propagate. Here there is no benign class to discriminate at all: an unreadable registry is never truthfully \"no relations\", so seam 1's `catch` can simply be removed (let it propagate) or made loud. Seam 2's `'none'` is a genuine judgement call and its docblock already argues a fail-toward direction, so it should be decided with seam 1 rather than separately.\n\nRelated: #8895 (the dependents-probe fix), #7413 (cascade atomicity — the card that introduced `planCascadeAtomicity`), #8845 (the gate blind spot that keeps this shape invisible to `check:durability-log-level`).\n"
+}

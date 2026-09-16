@@ -1,0 +1,33 @@
+{
+  "number": 9306,
+  "kind": "issue",
+  "title": "[Decision] Should `check:platform-checklist` move from manual cadence to a path-filtered CI gate?",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-17T12:13:16Z",
+  "updated_at": "2026-08-17T13:01:46Z",
+  "closed_at": "2026-08-17T13:01:46Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9306",
+  "body": "Filed at the maintainer's request while scoping the QA wave #9296. This revises a **recorded maintainer decision**, so it is not auto-adjudicable: the confidence gate bars a triage ruling that narrows or overturns an existing one, even when the change would *strengthen* a gate rather than weaken it.\n\n## What triggered it\n\nMaintainer, 2026-08-17, verbatim:\n\n> check-platform-checklist.mjs 如果 是 CI，会导致每一个pr都增加大量时间吧？有必要吗\n\nThe cost half of that premise is measurably false, so the question deserves a straight answer rather than an inherited assumption.\n\n## Measured facts (re-check commands included — a premise with no re-check command ages into folklore)\n\n| fact | reading | re-check |\n|---|---|---|\n| validator runtime | ~80 ms | `time node scripts/check-platform-checklist.mjs` |\n| full pnpm script (selector self-test + validator) | 0.165 s | `time pnpm check:platform-checklist` |\n| dependencies | none — `node:fs`, `node:path` only, so no `pnpm install` and no build needed | `grep -n '^import' scripts/check-platform-checklist.mjs` |\n| current posture | not in CI, by maintainer decision | `grep -n 'platform-checklist' .github/workflows/lint.yml` (see the note at L426) |\n| drift has reached `main` at least once | #7347 — \"`check:platform-checklist` is red on `main`: the new `qa` liveness ledger is neither mapped nor waived\" | `gh issue view 7347` |\n\n*(Cost-row correction, 2026-08-17: these figures were measured on an idle container; under load the `pnpm` wrapper dominates (~2.9 s wall). What survives any machine state: zero-dependency, direct-node sub-second. See the correction comment — cost was never the deciding axis.)*\n\nSo the real trade is **not seconds**. Appended to the existing lint job (which already has a checkout) the marginal cost is ~0.2 s; only giving it a dedicated job would cost anything, and that cost is runner spin-up, not the script.\n\n## Options\n\n- **A — status quo.** Manual/periodic cadence (before a release, after a large surface lands, alongside a `checklist-author`/`checklist-test`). Drift is caught at the next manual run, by whoever remembers.\n- **B — path-filtered CI (recommended).** Append the one line to the existing lint job, guarded to PRs touching `packages/spec/liveness/**`, `packages/spec/src/**`, or `docs/qa/platform-checklist/**`. Unrelated PRs are untouched; the PRs that can actually turn it red pay 0.2 s.\n- **C — every-PR CI.** Cheap in seconds, but couples every PR in the repo to QA-ledger bookkeeping.\n- **D — scheduled run** (e.g. nightly) that opens/refreshes one issue when red. Catches drift without touching PR flow at all; detection lands hours after the merge, on nobody's desk in particular.\n\nB and D are not exclusive.\n\n## Four-corner card face\n\n- **① platform long-term coherence** — the coverage ratchet encodes a *declared* invariant (\"凡是有的能力, 都要测试\"). Under A it is enforced by memory, which is the declared≠enforced shape ADR-0049 exists to eliminate. B closes that gap without adding a special case: the check already exists, only its trigger changes. C closes it by making every author pay for a ledger they did not touch — coherence bought with coupling.\n- **② measured business pull** — one measured instance of drift reaching `main` (#7347, the `qa` liveness ledger neither mapped nor waived), found by a sweep rather than a gate. Low frequency, not zero. A second data point is inbound: #9299 will report whether the ledger drifted again across the 727 commits since the 2026-08-08 sweep — **that reading is worth waiting for before deciding**, and is the honest answer to \"有必要吗\".\n- **③ AI-agent error-resistance** — the gate would fire on the PR whose author still holds the context to map the new kind (usually an AI agent). Detected days later, a *different* agent has to reconstruct why the kind exists and what should cover it — the expensive direction. Loud refusal at authoring time over silent drift.\n- **④ startup scope discipline** — B is one line plus a path guard on an existing job: no new workflow, no new ledger, no new declared surface to maintain. D would add a schedule and an issue-updating step — a second mechanism, and a heavier obligation than the problem currently justifies.\n\n## Recommendation\n\n**B**, and only after #9299 reports. If the sweep finds the ledger did *not* drift across 727 commits, the measured pull for any gate is weak and **A** is the honest answer — the manual cadence would have been proven sufficient. If it did drift, B is the smallest change that makes the invariant real, and it costs 0.2 s on exactly the PRs that can break it.\n\n⛔ No agent implements any of this until the maintainer rules. Related: #9296 (QA wave), #9299 (which corrects `SWEEP.md`'s factual claim that this check already runs in CI — a text fix only, explicitly not a posture change).\n\n---\n\n**Ruled 2026-08-17 (final): A — status quo; card closed.** The premised ruling (B if #9299 found drift, A if zero drift) resolved through the third branch: #9299 found the ledger **did** drift (8 gaps), but with **zero new kinds and zero new enum members** — every gap was new behavior inside already-mapped kinds, invisible to both ratchets by construction. The gate would have caught none of it; the sweep is the mechanism that works. `check:platform-checklist` stays out of CI; the `.github/workflows/lint.yml` L426 posture note remains authoritative. Re-open condition: gate-visible drift (a new kind or new pinned-enum member reaching `main` unmapped) — file a fresh card citing this one. See the resolution comment for the full record."
+}

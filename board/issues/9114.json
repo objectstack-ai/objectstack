@@ -1,0 +1,32 @@
+{
+  "number": 9114,
+  "kind": "pull_request",
+  "title": "docs(plugin-sharing): record the write-scope provenance omission as ruled, not oversight",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-16T10:48:50Z",
+  "updated_at": "2026-08-16T11:58:56Z",
+  "closed_at": "2026-08-16T11:58:55Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": "2026-08-16T11:58:55Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/9114",
+  "body": "Fixes #8792\n\nComments only. No behaviour change, no runtime code touched — `git diff` is 39 added lines, every one of them a `//` comment.\n\n## What this lands\n\nThe maintainer ruling of 2026-08-15 took the **\"no\"** branch on #8792: `markFilterSubtreeProvenance`'s declared meaning stays **read-scope**, and write-scope refusal semantics stay unspecified rather than inherited from #8220. The remaining deliverable was the deliberate-omission comments at the two write-side merge sites in `buildSharingMiddleware`, so the next reader does not \"complete\" the pattern by reflex.\n\nTwo comments in `packages/plugins/plugin-sharing/src/sharing-plugin.ts`:\n\n- the **bulk-write merge** (before `buildWriteFilter`) carries the full explanation;\n- the **delegator's second `buildWriteFilter`** carries a three-line back-reference rather than a duplicate, matching what the read-side comments already do.\n\n⛔ Explicitly *not* done: no `markFilterSubtreeProvenance` call was added to the write path. That is the rejected branch.\n\n## Why the comment says what it says\n\nThe reader it is written for has just noticed three marked read merges and two unmarked write ones in one file and concluded it is drift. The ruling's existence will not stop that person; the reason has to. The four points the comment makes:\n\n- unmarked ⇒ **withheld**, so a cross-field refusal in this composed tree already keeps the #7929 redaction — the omission is the safe fail direction and costs nothing in disclosure terms today;\n- the only thing a mark would add here is the author's own diagnostic on the author's own predicate — an author-experience gain, not a disclosure fix;\n- \"completing\" the pattern would **widen what a bulk-write refusal is permitted to name**, on a boundary whose current behaviour is exactly that redaction;\n- and there is no inherited answer to widen it by: write refusals sit behind the per-verb gate (ADR-0111 D3) and the `probeAuthoredRowWrite` deferral, so *\"what may a refusal name here\"* is a question read scope never had to answer.\n\nThe ruling's named **re-open trigger** is included, so this reads as a decision with a falsifier rather than a permanent \"no\": a real report of an author unable to diagnose a bulk-write refusal on their own predicate.\n\nOne precision the comment adds beyond the card's framing, because it is what makes the ruling legible: the write branch omits **both** halves of the pattern, and they are not equally consequential. Marking the injected filter `'policy'` would change no behaviour at all (unmarked already withholds); the user-visible half is `vouchCallerWhereBeforeRewrite`, and that is the one that would widen the refusal surface. The comment names which half carries the risk.\n\n## Consistency with what landed since the card was written\n\n- **#8791 (the read-side marking) has landed** — the card and its triage comment both record *zero* `markFilterSubtreeProvenance` call sites in this package, which is now false. The comment is written against the asymmetry as it actually exists in the file today, per the ruling's own instruction to keep the wording consistent with what #8791 shipped.\n- **#9073 / #8836** rewrote the mark's docblock in `packages/spec` and added the request-scoped invariant. The comment does not contradict it and carries it forward as an obligation the re-open would inherit.\n- Line numbers are deliberately **not** cited in the comment text. The ruling named `:984`/`:987`; the sites were at `:1012`/`:1015` at claim time. The comment anchors on code identifiers only, so it cannot drift the same way.\n\n## Verification\n\nAll gates run at the final commit `65a85d11a`, working tree clean.\n\n| gate | result |\n| --- | --- |\n| `pnpm check:test-source-alias` | OK — 72 packages with tests scanned |\n| `pnpm check:type-source-resolution` | OK — 76 packages with a tsconfig.json scanned |\n| `pnpm check:i18n` | OK — 9 packages, `plugins/plugin-sharing in sync (4 bundle(s))` |\n| `pnpm check:nul-bytes` | OK — 5975 text files, no raw ASCII control bytes |\n| `pnpm --filter @objectstack/plugin-sharing typecheck` | exit 0 |\n| `pnpm --filter @objectstack/plugin-sharing test` | **24 files, 617 tests passed** |\n\n`check:i18n` first exited 1 with `PREREQUISITE NOT MET — the workspace CLI is not built`, which says nothing about bundle sync. Resolved with `turbo run build --filter=@objectstack/cli`; the table row is the second, real run.\n\n`node scripts/pm/dispatch-gates.mjs packages/plugins/plugin-sharing/src/sharing-plugin.ts` re-derived at the final head names exactly the two lint gates above plus the convention-triggered `check:i18n` — nothing the dispatch missed.\n\nComments-only, nothing published ⇒ `skip-changeset`.\n\n_Generated by [Claude Code](https://claude.ai/code/session_01Y26DJEHSBhhAQ6wwfsHNza)_\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01Y26DJEHSBhhAQ6wwfsHNza)_"
+}

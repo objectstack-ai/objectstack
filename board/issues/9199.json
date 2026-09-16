@@ -1,0 +1,33 @@
+{
+  "number": 9199,
+  "kind": "pull_request",
+  "title": "docs(plugin-security): freeze note on assertControlledByParentWrite (#9137)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-17T01:30:54Z",
+  "updated_at": "2026-08-17T01:53:15Z",
+  "closed_at": "2026-08-17T01:53:13Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": "2026-08-17T01:53:13Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/9199",
+  "body": "Fixes #9137\n\n## What\n\nAdds the load-bearing freeze note the #8772 ruling's Direction 4 calls for\n(\"immediately\", ahead of or alongside the first ramp slice) at\n`assertControlledByParentWrite`'s absent-master-FK branch in\n`packages/plugins/plugin-security/src/security-plugin.ts`. **No behaviour\nchange** — comment-only.\n\nThe note states, in place:\n\n- This `if` (and the `omissionRefusedByValidation` predicate it reads) is the\n  **sole enforcement point** for three authorable `controlled_by_parent`\n  master-reference shapes: `master_detail` with no `required`; `required:\n  true` + `readonly`; `required: true` + `system` — the last three rows of\n  #8772's five-shape measurement table, and exactly the three shapes\n  `record-validator.ts` skips before its required check ever runs\n  (`if (def.system || def.readonly) continue;`, insert-mode `:993` /\n  update-mode `:1003`).\n- ⛔ Do not move, weaken, or stand this gate down further for those three\n  shapes — concretely, do not widen `omissionRefusedByValidation` to admit\n  them — until **both** ramp legs land: (a) the authoring builder forces\n  `required: true` under `controlled_by_parent` (#9138), and (b) lint refuses\n  the shape at the **v18** boundary (#9139, held for the v18 window).\n- Why, concretely: standing the gate down for any of the three would mint a\n  detail row whose master FK is null, which the `controlled_by_parent` read\n  filter (`fk IN (readable masters)`) can never match — unreadable by anyone,\n  and `422 MISSING_REQUIRED_FIELD` on every later by-id write, permanently\n  (no payload the caller could send would restore a field the request never\n  carried).\n- A matching one-line pointer was added at the `omissionRefusedByValidation`\n  field declaration itself, since that predicate is the actual knob a future\n  change would widen.\n\n**Also corrects an adjacent, now-stale `[#8959]` paragraph in the same\nbranch.** It still read \"#8772 *proposes* a lint … it is open and unruled\" —\ntrue when #8959 landed it, false today: #8772 was ruled and closed on\n2026-08-16 ([comment 5306089973](https://github.com/objectstack-ai/objectstack/issues/8772#issuecomment-5306089973)).\nLeft uncorrected, it would have sat one paragraph above this PR's own freeze\nnote and contradicted it. The corrected paragraph keeps #8959's actual\nfinding intact and current: no publish-time gate refuses these three shapes\n*yet* — that remains true until #9138 **and** #9139 both land — but it no\nlonger misdescribes #8772 itself as unruled.\n\n## Premise re-check (the card asked for this before writing)\n\n- `assertControlledByParentWrite` is confirmed live at\n  `security-plugin.ts:5121` on `origin/main` (`git grep`).\n- **The guard is not flatly unconditional any more.** PR #8879 (merged\n  2026-08-15, closing #8688) already landed a *conditional* stand-down keyed\n  on `CbpRelation.omissionRefusedByValidation`. For the three shapes this\n  note is about, that predicate is always `false` by construction\n  (`def?.type === 'master_detail' && !!def?.required && !def?.readonly &&\n  !def?.system`), so the guard remains the sole, *unconditional* enforcement\n  point for exactly those three — which is what the note now says, rather\n  than the flat \"still unconditional\" framing the card anticipated as the\n  default outcome of the re-check.\n- **#8688 is not \"still open and unruled.\"** It was ruled and merged (PR\n  #8879, 2026-08-15). Its proposed route — stand the guard down for an\n  absent master FK on insert — already landed, correctly narrowed to the one\n  shape `validateRecord` actually covers. The freeze note is written\n  accordingly: it protects against *widening* an already-landed, conditional\n  stand-down, not against a still-hypothetical change. (Reported per the\n  card's own instruction to adjust the framing rather than write a stale\n  warning.)\n- The three unsafe shapes were independently re-counted against\n  `record-validator.ts`'s `if (def.system || def.readonly) continue;`\n  (`:993` insert-mode, `:1003` update-mode) plus `validateOne`'s\n  `def.required && isMissing(value)` check: exactly 3, matching the card and\n  #8772's five-row measurement table.\n- **A pinned test asserting the guard refuses the absent-master insert for\n  all three shapes already exists** —\n  `controlled-by-parent-sharing.test.ts`'s `it.each` block (`'[#8688] 422\n  MISSING_REQUIRED_FIELD survives on insert: %s'`), added by PR #8879. Per\n  the card's \"check first\" instruction, no duplicate test was added.\n\n## Changeset\n\nComment-only, no behaviour change ⇒ no changeset. `skip-changeset` label\napplied.\n\n## Tests\n\nAll commands below were re-run at this PR's final commit,\n`1a67152fc` (`git rev-parse --short HEAD`).\n\n- `pnpm --filter '@objectstack/plugin-security^...' build` — dependency\n  closure, green.\n- `pnpm --filter @objectstack/plugin-security typecheck` — green (`tsc\n  --noEmit`, exit 0).\n- `pnpm --filter @objectstack/plugin-security test` — 66 test files, 1279\n  tests, all passing (includes the already-pinned three-shape `it.each`\n  above).\n- `node scripts/check-cross-package-test-inputs.mjs`,\n  `node scripts/check-test-source-alias.mjs`,\n  `node scripts/check-type-source-resolution.mjs` — the three path-derived\n  gates from `node scripts/pm/dispatch-gates.mjs` — all green.\n- `node scripts/check-adr-anchors.mjs` — green (this file is ADR-0055\n  content-anchored; the anchor is citation-based, not line-based, so the\n  comment edit does not disturb it).\n- `node scripts/check-nul-bytes.mjs` — clean.\n- `node scripts/check-i18n-bundles.mjs` (after `pnpm exec turbo run build\n  --filter=@objectstack/cli`) — \"9 package(s) — all bundles in sync, no\n  undeclared authoring keys\" (comment-only edit produces no drift).\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01Y26DJEHSBhhAQ6wwfsHNza)_"
+}

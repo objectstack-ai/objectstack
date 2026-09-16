@@ -1,0 +1,35 @@
+{
+  "number": 8807,
+  "kind": "issue",
+  "title": "drivers(sql): on MySQL an upsert with no conflictKeys — or one naming the primary key — still merges on a unique key the caller never named",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-15T03:37:18Z",
+  "updated_at": "2026-08-16T04:09:36Z",
+  "closed_at": "2026-08-16T04:09:36Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8807",
+  "body": "Found while implementing #8755 (PR #8806). Filed unassigned rather than folded in: #8755's ruling scopes its refusal to a caller-named **non-primary** conflict target, and this is the residue that scoping leaves behind. It is documented in that PR (driver docs + `refuseAmbiguousConflictTarget`'s docblock) rather than hidden, but documented is not fixed.\n\n## The condition\n\n`ON DUPLICATE KEY UPDATE` carries no conflict target, so on MySQL the merge lands on whichever UNIQUE key the row collides with first. #8755 refuses that when the caller names a non-primary target. Two shapes remain, and they are the same statement:\n\n- `upsert(object, row)` — no `conflictKeys`. The pre-flight deliberately never probes this path (the driver's own `['id']`).\n- `upsert(object, row, ['id'])` — the primary key named explicitly. #8755 leaves this merging on purpose: it compiles byte-identically to the line above, so refusing one and merging the other would make the accept set a property of how the caller typed the same statement, and the refusal's stated remedy (\"drop or rename the extra key\") is not available for a primary key.\n\nIn both, the driver mints or is handed an `id` that usually does not collide — while a business UNIQUE key on the same table can, and MySQL merges there instead.\n\n## Measured — live MySQL 8.0.46\n\nUbuntu noble `mysql-server`, `mysqld --daemonize`, `time_zone='+08:00'`, through the same knex + `mysql2` path `SqlDriver.upsert` takes. Table carries `PRIMARY KEY (id)`, `UNIQUE KEY (email)`, `UNIQUE KEY (tax_id)`:\n\n```\nseed  upsert({email:'d@b.com', tax_id:'T-9', title:'first'})     -- no conflictKeys\n      -> RESOLVED, id='6HBQhzgSTbtxNdLc'\n\nB     upsert({email:'e@b.com', tax_id:'T-9', title:'second'})    -- no conflictKeys\n      -> RESOLVED. rows=1, id='6HBQhzgSTbtxNdLc', email='e@b.com', title='second'\n         The fresh `id` did not collide; `tax_id` did, and MySQL merged on it —\n         rewriting a row whose `email` the caller never asked to touch.\n```\n\nThe identical pair on SQLite raises `UNIQUE constraint failed: ….tax_id` and leaves the seeded row untouched (also measured, same session).\n\nNote the row identity IS preserved (`id` is insert-only since #8622) — this is not that defect. What is wrong is *which row* was updated.\n\n## Why it is not obviously the same call as #8755\n\nThe ruled refusal rests on a caller who **named** a target: the platform promised to honour it and cannot. Here nobody named anything, so the argument has to be different — something like \"an upsert should never merge into a row whose identity the caller did not supply and whose conflict key it did not name\". That is a wider statement about what `upsert` means, not a MySQL detail, and it wants its own adjudication.\n\nOptions, none of them free:\n\n- **A — extend the pre-flight to the default path**: refuse a `conflictKeys`-less upsert on a MySQL table carrying any non-primary UNIQUE key. Widest accept-set change of the three; it would refuse the platform's own lifecycle archiver (`lifecycle-service.ts`, `cold.upsert(object, row, ['id'])`) for every object with a declared unique business column.\n- **B — narrow it to the payload**: refuse only when the row actually supplies a value for a rival UNIQUE column (a NULL there cannot collide). Much smaller accept-set change, but it is a per-call decision rather than a per-table one, so it costs a payload inspection on the hot path and the refusal becomes data-dependent — two identical calls, one refused.\n- **C — leave it documented** (the state after #8755) and treat \"one UNIQUE key per table on MySQL\" as the platform's advice.\n\n## One unverified thread worth a look while adjudicating\n\n`SqlDriver.upsert`'s #6943 re-seed logic states that \"the tenanted autonumber lives under a DIFFERENT unique index, so its violation is still raised and still reaches here\", and re-seeds the counter when it can prove the collision was its own. On MySQL a collision on that index would be **merged**, not raised — so the re-seed path may be unreachable there, and a burned/stale autonumber may merge into the row that owns the number instead. **Not measured**; it needs an object with an `auto_number` field on live MySQL to confirm or kill.\n\nRelated: #8755 (the ruled half, PR #8806), #8621 (the unbacked-target pre-flight), #8592 (the original live-MySQL measurement), #8622 (`id` insert-only, which is why identity survives above), #6943 (the autonumber re-seed thread).\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01XeQRiAa7vYRVX5Fog7Zby8)_"
+}

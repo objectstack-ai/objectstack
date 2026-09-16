@@ -1,0 +1,34 @@
+{
+  "number": 8574,
+  "kind": "issue",
+  "title": "[finding] GitHub MCP `list_issue_types` returns 403 for this integration while `issue_write` sets native types fine — a seat that probes the list first will wrongly conclude typing is unavailable",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-13T22:22:07Z",
+  "updated_at": "2026-08-16T10:33:47Z",
+  "closed_at": "2026-08-16T10:33:39Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8574",
+  "body": "Platform-fact observation for the platform-readings trap table (`.claude/skills/pm-dispatch/references/platform-readings.md`). Filed unassigned as `finding`, skills lane to grade; the deliverable is a one-line row in the fact table, not code.\n\n## Measured (2026-08-13, triage seat Routine round ~22:16Z)\n\n- `list_issue_types` (org-level, `owner: objectstack-ai`): **403 \"Resource not accessible by integration\"**.\n- `issue_write` with `type: \"Bug\"` / `\"Task\"` on repo issues, same session, same integration: **succeeds** — verified by the write returning clean and the native-type discipline (triage as sole type producer, maintainer ruling 2026-08-12) staying operable.\n\n## Why it matters\n\nThe MCP server's own guidance says \"Use `list_issue_types` first … to get valid type values\", and the `issue_write` schema says to only pass `type` if types are enabled. A seat following that guidance hits the 403 and has two wrong exits available: conclude native typing is unavailable and silently drop the type discipline, or report the typing mandate as blocked. Both are the \"查不了 ≠ 查过了干净\" trap in a new costume — the *read* permission is missing from the integration, the *write* path works.\n\n## Proposed fact-table row\n\n> `list_issue_types` 403s for this integration (read scope gap); `issue_write` `type:` works regardless. Do not probe the list first — write the type directly (known-good values: `Bug`, `Feature`, `Task`) and treat a write-side error, not the list 403, as the real signal.\n\nCaveat a grader should keep: whether an *invalid* type value errors loudly or is silently dropped by `issue_write` was not measured this round — the proposed row asserts only the measured pair (list 403 / write success on known-good values).\n\nTriage seat Routine, session `session_01KKqo1q7JddqjVbabF1ujMj`."
+}

@@ -1,0 +1,33 @@
+{
+  "number": 9301,
+  "kind": "issue",
+  "title": "QA wave R2a: checklist run `surface:api` (49 items) at e4e5c6e3",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:blocked",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-17T12:09:44Z",
+  "updated_at": "2026-08-17T13:15:29Z",
+  "closed_at": "2026-08-17T13:14:55Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9301",
+  "body": "Part of #9296.\nBlocked-by: #9298\n\nThe cheap, high-fan-out lane: **no console build is needed** for these — boot the framework and drive REST. 26 of the 49 carry an `automated.ref`; run the pin and cite its output rather than re-proving by hand (RUNNER rule 6).\n\n## Contract\n\n- `node scripts/checklist-select.mjs surface:api --json` selects the set. Blocked items stay excluded.\n- Execute via the **`checklist-test` skill** + `RUNNER.md` + `dogfood-verification`. Run in the QA tree from #9298.\n- API items are cheap enough to fan out widely — **but every concurrent item still gets its own free non-default port and its own `file:/tmp/qa-wave/<item>.db`**. Shared port or shared DB is the `shared-browser-tab` trap wearing a different hat.\n- Both sides of every gate: for permission/visibility clauses, prove the entitled persona sees it **and** that the unentitled one is refused **by the server** — a forged direct request where feasible, since UI absence is only a client courtesy (ADR-0057 D10).\n- Watch the `dispatcher-vs-hono-route` trap: the oracle is a live server trace, never a simulated dispatch.\n\n## Output\n\nOne `qa-run` issue in the RUNNER format (+ `bug` if any clause fails). Text only. Link back here and on #9296.\n"
+}

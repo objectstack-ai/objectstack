@@ -1,0 +1,35 @@
+{
+  "number": 9225,
+  "kind": "issue",
+  "title": "[finding] Template-path notify's inbox channel degrades to topic-as-title: IEmailService has no render-only seam, so localized templates cannot reach sys_inbox_message",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-08-17T03:09:38Z",
+  "updated_at": "2026-08-17T07:08:28Z",
+  "closed_at": "2026-08-17T07:08:28Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9225",
+  "body": "Measured while landing #9205 (PR #9224 — notify nodes reference email templates, resolved `(name, recipient locale)` at delivery). Filed unassigned — recording, not claiming.\n\n## The gap\n\nA template-path notify node with `channels: ['inbox', 'email']` now delivers a **localized email** and an **inbox row whose title is the topic and whose body is empty** (honest degraded rendering, deliberately not an empty string — see PR #9224's \"Inbox channel: gap documented\" section).\n\nRoot cause, measured on the #9224 head:\n- The inbox channel writes `sys_inbox_message` rows straight from the notification title/body; it is not wired to any template subsystem (`NotificationTemplateStore` is keyed by `(topic, channel, locale)` — a different subsystem from `sys_email_template` anyway).\n- `IEmailService` exposes only `send`/`sendTemplate` — there is NO render-only method. The locale ladder + `{{var}}` renderer (with ADR-0053 format filters) live inside plugin-email, unreachable without sending mail.\n- Wiring the inbox today would mean either a new `IEmailService` contract method or a duplicated resolver/renderer in service-messaging (a second de-facto contract that drifts) — the \"forced new subsystem\" shape #9205's dispatch ruled out for that card.\n\n## Natural shape (from the landing analysis, for triage to price)\n\nA small **render-only method on `IEmailService`** (e.g. `renderTemplate({ template, locale, data }) → { subject, html/text }`), implemented once in plugin-email next to the existing resolver, consumed by the inbox channel the same way the email channel consumes `sendTemplate`. Contract change on a service interface ⇒ if promoted, the implementing card is `domain:spec`-adjacent (contract face) and per standing tiering carries the fable floor.\n\n## Consumers waiting\n\nhotcrm's 16 notify nodes (4 locales) unlock at #9205's landing for the email channel; their inbox half stays degraded until this seam exists.\n\nRefs: #9205 / PR #9224 (measurement site) · #7646 (flows translation surface exclusion) · ADR-0053 (format filters)."
+}

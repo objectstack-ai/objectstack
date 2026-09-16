@@ -1,0 +1,35 @@
+{
+  "number": 9113,
+  "kind": "pull_request",
+  "title": "feat(spec): declare `placeholder` on FieldSchema — Option C ruling on objectui#4676 (#9019)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-16T10:46:15Z",
+  "updated_at": "2026-08-16T11:56:52Z",
+  "closed_at": "2026-08-16T11:56:51Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-16T11:56:51Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/9113",
+  "body": "Fixes #9019\n\nImplements the maintainer ruling of 2026-08-16 (Option C on objectui#4676, 「主线1 3 4：同意」): `placeholder` becomes a declared optional string key on `FieldSchema`, with the semantics the four shipped objectui render surfaces already implement (measured in objectui#4676 report comment 5301288148: plugin-form, plugin-detail, app-shell `resolveActionParams`, apps/console FormPage — feeding the `@object-ui/fields` widgets).\n\n## What changed\n\n- **`packages/spec/src/data/field.zod.ts`** — `placeholder` declared next to `inlineHelpText`, `.describe()` prose carries the three-way distinction (in-input placeholder that disappears on typing, vs `inlineHelpText` always-visible help beside/under the input, vs `description` tooltip/developer docs), with a doc comment recording the ruling and the measured consumers.\n- **`packages/spec/src/data/authoring-key-lint.ts`** — the `FIELD_KEY_GUIDANCE` retirement entry (\"never a FieldSchema key. Author hint text through `inlineHelpText` or `description`.\") is REMOVED, replaced by a NOTE comment recording the flip. Note: the prescription prose lived here (folded into `FieldSchema`'s `strictObject` guidance options via `fieldKeyGuidanceAsStrictOptions()`), not literally in `field.zod.ts` as the card assumed — same table region the dispatch warned about, one file over. The `authoring-key-lint.test.ts` no-rot pin (\"no guidance entry names a key the schema now declares\") makes leaving the entry a red build, so the flip is gate-enforced, not convention.\n- **`packages/spec/src/data/object.form.ts` + `field.form.ts`** — the \"`placeholder` removed: never a FieldSchema key\" tombstone comment in object.form.ts is replaced with the actual form field entry, and the full per-field editor (field.form.ts) offers the key too. Bounded same-class completion, named here per the in-place exemption: the object.form.ts comment was mandated prose-flip surface; the field.form.ts row makes the declared key authorable in the editor the reconciliation test names as \"where the long tail of FieldSchema is authored\". Both entries are validated by `metadata-form-zod-reconciliation.test.ts` (form-only direction).\n- **`packages/spec/liveness/field.json`** — `live` row with `evidenceScope: \"cross-repo\"` citing the measured objectui read points @9ce096fb0 (the ledger gate demands a row for every newly authorable property; evidence format follows the existing `precision` cross-repo row). `state-counts.md` regenerated.\n- **Generated**: `authorable-surface/data.json` gains `data/Field:placeholder` (base anchor lag is the allowed informational state); `content/docs/references/data/field.mdx` regenerated wholesale via `gen:docs` — the new row renders the distinction.\n- **Tests**: `field.test.ts` gains an accept-side describe block — parse + round-trip, coexistence of all three hint keys, optional-stays-absent, non-string rejection, no type-restriction (flat like scale/min), unknown-key strictness undisturbed, `.describe()` prose pin via JSON Schema, and the object-document shape that used to 422 on `PUT /api/v1/meta/object/:name`.\n- **Changeset**: minor on `@objectstack/spec` (accept-set expansion on a published surface), with the ADR-0087 not-required annotation (purely additive).\n\n## Reverse verification (direction: rejection flips to acceptance)\n\nPre-change probe on unmodified `origin/main` @9bf110fb6, built dist: `{name,label,type:'text'}` control SUCCESS; `+placeholder` FAIL `unrecognized_keys` with the exact \"never a FieldSchema key\" prescription; `+inlineHelpText` / `+description` SUCCESS. Post-change probe on the rebuilt dist: `+placeholder` SUCCESS and round-trips; non-string `placeholder` still rejects. This is the expected direction for an accept-set expansion — the old reject-with-prose pin is gone (guidance entry removed, enforced by the no-rot gate) and the accept side is pinned in `field.test.ts`.\n\n## #9088 same-file churn\n\n#9088 (currency guidance in the same `field.zod.ts` guidance region) landed mid-task as predicted; `origin/main` re-merged after it (merge commit `7cb089f37`), clean merge, both semantics verified present: the `currency` guidance entry survives in the `guidance:` block and the `placeholder` declaration stands. Full spec suite re-run green after the merge.\n\n## Verification (all at final HEAD `7cb089f37`, after the merge commit)\n\n- `@objectstack/spec` full suite: 406 files, 10771 tests, all passed. Typecheck green.\n- Consumer sweep (direction: **downstream consumers** of `@objectstack/spec`, named explicitly): rest 2001 ✓, objectql 3730 ✓, lint 2065 ✓, metadata 603 ✓, metadata-core 162 ✓, metadata-fs 51 ✓, metadata-protocol 1565 ✓ — zero fixture flips needed (no consumer fixture pinned the field-level `placeholder` rejection; searched).\n- Gate union re-derived via `node scripts/pm/dispatch-gates.mjs` against the actual diff and run in full: changeset-gate-self-tests, cross-package-test-inputs (both forms), docs-audit-scope, docs-redirects, merge-driver, objectui-changeset, quick-reference-counts, role-word, spec-parsed-alias, type-source-resolution, nul-bytes, adr-0087-registration, changeset-no-major, empty-changeset, dev-prereqs, doc-formula-expressions, query-options-erasure, engine-double-contract, where-matcher, type-check-coverage, type-check-debt (workspace closure built via turbo first, 70/70), spec check:api-surface / check:authorable-surface / check:docs / check:generated / check:liveness / check:export-origins — all EXIT=0. Beyond the prompt's list, the derivation added the changeset/docs families (changeset-gate-self-tests, objectui-changeset, adr-0087, no-major, empty-changeset, docs-audit-scope, docs-redirects, quick-reference-counts, role-word) — all run, all green.\n- Example apps `validate`: app-crm, app-showcase, app-todo — all EXIT=0 (pre-existing draft-flow warnings only).\n\nobjectui side per the ruling: zero code change expected there; objectui#4676 unblocks on the release + pin bump.\n\n_Generated by [Claude Code](https://claude.ai/code/session_01225pUjnCKWqxcc1PeqKFUq)_\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01225pUjnCKWqxcc1PeqKFUq)_"
+}

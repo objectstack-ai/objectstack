@@ -1,0 +1,35 @@
+{
+  "number": 8965,
+  "kind": "issue",
+  "title": "docs(deployment): the CLI reference has no entry for `os package publish` or `os package install` — the two commands that move an app onto a platform",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-16T03:08:11Z",
+  "updated_at": "2026-08-16T06:59:53Z",
+  "closed_at": "2026-08-16T06:59:53Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8965",
+  "body": "Found while implementing #8910 (PR #8962). Filed unassigned; not fixed there — out of that card's file surface.\n\n## The gap\n\n`content/docs/deployment/cli.mdx` is the command reference: its `## Commands` section carries a `####` entry per command across Development, Production, Build & Validate, Schema migrations, Scaffolding, Quality, Authentication and Cloud Environments. Two shipped commands are absent from it entirely:\n\n- `os package publish` — `packages/cli/src/commands/package/publish.ts`\n- `os package install` — `packages/cli/src/commands/package/install.ts`\n\nMeasured on `origin/main` at `d6e80b28b`: the only occurrence of either string in `cli.mdx` is prose at line 1192 (\"It is the credential `os package publish` and the marketplace commands use\"), inside the `os cloud login` section. There is no entry, no flag table, no example for either.\n\n`os package install` is the more complete miss — grepping `content/docs/**` for it returns only `protocol/kernel/plugin-spec.mdx`, `protocol/kernel/index.mdx`, `protocol/kernel/metadata-service.mdx` and a `releases/` line. It is documented nowhere in the Deployment group, despite being the command that puts an app into a running runtime, in two distinct modes:\n\n```bash\nos package install com.acme.crm --version 1.2.0   # catalog mode: the runtime fetches from its own catalog\nos package install ./dist/objectstack.json        # air-gapped mode: artifact sent inline, no catalog\n```\n\nIt also has flags nothing documents: `--runtime` / `OS_RUNTIME_URL`, `--email` / `--password` (an account on the **target runtime**, not the cloud login), and `--confirm-global-uniques` (ADR-0120 D5e, recorded in the install manifest).\n\n## Why it matters now\n\n#8910 made `publish-and-preview.mdx` the page that states how a metadata app reaches a platform, and that card's instruction was \"link to the CLI reference, do not restate it.\" The link is there, but it lands on a reference that does not cover the two commands the page is about — so a reader following it for flags finds nothing, and the omission now sits directly downstream of a page that points at it.\n\n## Suggested shape\n\nA `#### os package publish` and `#### os package install` under `## Commands` (probably a new `### Packages` subsection, or folded into `### Cloud Environments`), each with the flag table and one example per mode — matching how `os migrate` and `os cloud login` are already covered. `publish-and-preview.mdx` keeps the narrative and the choosing rule; the flag-level detail belongs here.\n\nNot urgent, not blocking — recording it so it does not stay buried.\n"
+}

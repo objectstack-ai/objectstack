@@ -1,0 +1,35 @@
+{
+  "number": 9037,
+  "kind": "issue",
+  "title": "docs-drift-check: cap the PR comment above a threshold — a hub-package PR posts an invariant ~106-row list into every subscribed agent session on every push",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-16T07:20:27Z",
+  "updated_at": "2026-08-16T07:56:36Z",
+  "closed_at": "2026-08-16T07:56:36Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9037",
+  "body": "Filed by the spec-lane PM seat (session `session_01225pUjnCKWqxcc1PeqKFUq`) on maintainer instruction — routing via the standing direct-command channel; ruling quotes below. Unassigned; `domain:devx` per the anchoring rule (landing files are `.github/workflows/docs-drift-check.yml` + possibly `scripts/docs-audit/affected-docs.mjs`'s JSON output, general gate tooling).\n\n(Body re-edited once after write-back read: the first save's sanitizer ate three angle-bracket tokens — the details-tag name, the HTML-comment marker, and the base-ref placeholder. Re-spelled without angle brackets; no content change.)\n\n## Problem, measured today (PR #9020)\n\nThe Docs Drift Check advisory comment on a `packages/spec`-touching PR lists **106 editable + 7 release-owned rows (~8 KB)**. Because the mapper is package-granular and nearly every hand-written doc references `@objectstack/spec`, that list is **invariant across all spec PRs** — zero per-PR information on the repo's hottest lane. The comment is updated in place on every `synchronize`, and each update is relayed as an event into **every agent session subscribed to the PR** (PM seats, queue steward, dev sessions). Today's cost was 8 KB × 4 events × N subscribers on one PR, before its first review round.\n\nThis is the presentation-cap direction (#7009's \"direction 2: Cap and summarise\"), which #7007 deliberately left un-done (\"choosing N and the ranking belongs with whoever owns the granularity question\"). It changes **nothing about what is computed** — so it does not contradict `affected-docs.mjs`'s stated over-inclusion principle, which was the ground for closing the edge-granularity question (#7009, not planned, 2026-08-12). #7009's restart condition (\"the first measured review burden — a seat reports acting on (or skipping) a wrong advisory list\") fired today in the maintainer's own words, but the edge-granularity subject stays closed; this card is presentation only.\n\n## Change\n\nIn `docs-drift-check.yml`'s comment step (all numbers current as of today — re-derive at claim time):\n\n- **If `editable.length` exceeds N (suggested default N=15; dev may tune with a measurement)**: post NO list. One summary line — count, the changed package names, and the runnable re-derivation (`node scripts/docs-audit/affected-docs.mjs --json origin/BASE_REF`) — plus ONE line for the release-owned subset (\"K release-owned pages also affected — read-only, see AGENTS.md Documentation Guardrails\").\n- **If `editable.length` is at or under N**: current full-list rendering, unchanged (small-package PRs keep the actionable short list — measured: an `@objectstack/client` JSDoc edit lists 11).\n- ⛔ No details-tag folding as the mechanism — collapsing rows behind an HTML disclosure element does not reduce what the event relay delivers to agent sessions; the tokens are spent regardless. The cap must actually omit the rows.\n- Keep unchanged: the `docs-drift-check` HTML-comment marker (in-place update dedup), the benign \"0 changed package(s) ✅\" comment, the mapper self-test step, and the release-owned partition **semantics** (#6893/#4920 — the subset stays computed and stays flagged read-only; only its rendering compresses above the threshold). The `docs-accuracy-audit` workflow is unaffected — it recomputes from `affected-docs.mjs`, never from this comment.\n\n## Provenance (maintainer, 2026-08-16, in-session with the spec-seat PM, verbatim, untranslated)\n\n- 「这个是不是浪费 token， 应该关了。 每张 spec PR 的例行 advisory(106 页「可能需要复核」的提示 + releases 页只读警示)」\n- PM analysis offered: threshold truncation / full off / hub-package silence. Maintainer chose threshold truncation and ordered the card: 「立」.\n- Context: the maintainer separately disabled the Vercel PR comments (dashboard toggle) in the same conversation — this card is the remaining half of the PR-comment token-burn cleanup.\n\n## Size/model suggestion\n\nS, sonnet — mechanical workflow-script edit; the judgment (cap vs off vs granularity) is already ruled above.\n\n## Lineage\n\n#6893 (headline noise, fixed by #7007) → #7009 (edge granularity, closed not planned — stays closed) → #8771 (recall blind spot, documented limitation) → this card (presentation cap, maintainer-ruled)."
+}

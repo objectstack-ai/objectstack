@@ -1,0 +1,33 @@
+{
+  "number": 8195,
+  "kind": "issue",
+  "title": "Auth emails are always en-US: no send names a locale and sys_user has no locale column, so localized template rows can never be selected",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "pm:queue"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-08-12T19:49:50Z",
+  "updated_at": "2026-08-16T23:20:52Z",
+  "closed_at": "2026-08-16T23:20:52Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 9,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8195",
+  "body": "Found while implementing #8019 (old-address change-email notice). Filed unassigned; triage grades it. Not a defect in that PR — it is the surface that PR landed on.\n\n## Measured\n\n`EmailService.sendTemplate` resolves templates by `(name, locale)` and honours an explicit `input.locale`; with none named it resolves `DEFAULT_TEMPLATE_LOCALE` (`en-US`) — deliberately, per #7731. Two facts make every other locale row unreachable through the platform's own send path:\n\n1. **No auth send names a locale.** Every `sendTemplate` call in `packages/plugins/plugin-auth/src/auth-manager.ts` (password reset, verification, MCP, and the new change-email notice) omits `locale`.\n2. **There is no per-recipient locale to name.** `packages/platform-objects/src/identity/sys-user.object.ts` declares no `locale` / `language` field, so nothing on the user row expresses a preference.\n\nConsequence: a `zh-CN` deployment receives English password-reset, verification and invitation mail. Before #8019 this was invisible because every built-in auth template was `en-US`-only — `packages/plugins/plugin-email/src/templates/auth-templates.ts` had exactly one row per template, and in fact no template anywhere in the repo shipped a non-`en-US` row.\n\n## Why it surfaces now\n\nThe #8019 ruling scoped its new template to all four supported locales, so `auth.email_change_notice` ships as four rows (`en-US`, `zh-CN`, `ja-JP`, `es-ES`). Three of them are correct, seeded, and currently unselectable by the platform itself — they become live the moment a caller or a tenant overlay names a locale. That PR deliberately did **not** wire a locale resolution, because making one template locale-aware while the other five stay `en-US`-only manufactures exactly the mixed-language artefact `II18nService.setSupportedLocales`' docstring describes: a user would get a Chinese \"your email is being changed\" notice and an English \"verify your email\" in the same flow.\n\n## Two halves, gradeable separately\n\n- **Dormant surface** (observation-class): three locale rows the platform cannot select today.\n- **User-visible gap** (concrete): outbound auth mail is English-only on a platform that supports four locales and whose UI already switches.\n\n## What a fix would need to decide\n\n- Where recipient locale comes from — a `sys_user` column, the deployment default (`II18nService.getDefaultLocale()`, reachable from the plugin layer), or the request's `Accept-Language`. This is a product decision, not a lookup.\n- Whether the other five auth templates get localized in the same change. Localizing the resolution without localizing the templates just moves the mixed-language problem.\n\n## Related\n\n#8019 / the change-email notice PR (the four-locale template that exposed this) · #7731 (why a no-locale send resolves `en-US` rather than an arbitrary row) · #7801 (row locale vs. render-filter locale) · #5419 (the console's mirror of this on the UI side)\n"
+}

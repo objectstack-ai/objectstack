@@ -1,0 +1,33 @@
+{
+  "number": 9121,
+  "kind": "pull_request",
+  "title": "docs(adr): record ADR-0076 OQ#9 worklist item (4)'s outcome — env resolution is seam-first across the audited pair, with one consumer measured off it",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "size/xs",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-16T11:59:07Z",
+  "updated_at": "2026-08-16T14:54:14Z",
+  "closed_at": "2026-08-16T14:54:13Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": "2026-08-16T14:54:13Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/9121",
+  "body": "Fixes #9058\n\n⚠️ **`docs/adr/**` — maintainer merges this by hand** (Prime Directive #14). Left as **draft**, not queued, no auto-merge.\n\n## What this changes\n\nOne new bullet under ADR-0076 Open Question 9, recording the outcome of D11 worklist item **(4) — unify env-resolution on the injected `KernelResolver` seam**. Items (1)(2)(3) each had their outcome recorded under that entry; (4) was never mentioned again, so the ADR kept reading as an open obligation while the seam had been serving requests for months.\n\n**No code changes.** The one defect the audit turned up is filed separately (see below) rather than ridden along — mixing a behaviour change into a maintainer-merged ADR PR is exactly what Prime Directive #14 makes expensive.\n\n## The measurement came first, and it did not come out where the card guessed\n\nThe card (#9058) was explicit that it had measured only \"the seam exists, and the dispatcher's env resolution goes through it\", and ⛔ did **not** assert full discharge. So the first step was auditing every env-resolution call site — every site that answers *\"which environment does this request belong to\"* from request-borne signals — against `main` @ `ba2e3c172`. Result: **partial**, and the entry says partial.\n\n| surface | on the seam? | measured |\n| --- | --- | --- |\n| `runtime/http-dispatcher.ts` | yes | one decision per request; `packages/runtime/src` holds **zero** `env-registry` / `resolveByHostname` reads |\n| `runtime/domain-handler-registry.ts` | yes | direct-caller kernel swap reads the same seam |\n| `rest/rest-server.ts` | seam-first | one shared entry point, **8** consumers; host resolver consulted first, normal return final |\n| `plugin-hono-server` current-user trio | yes | `kernel-resolver` per request, structural interface declared locally |\n| `rest-server.ts` legacy chain | no (deliberate) | hostname → `X-Environment-Id` → default, retained beneath the seam for resolver-less hosts |\n| `rest-server.ts` `probeMcpServeable` | **no (gap)** | the 9th consumer; re-derives its own environment — filed as #9120 |\n| `cloud-connection-plugin.ts` | no | own closure, **8** handlers |\n| `runtime-config-plugin.ts` | no | own hostname chain, two registry spellings |\n| `cli/.../serve.ts` hostname guard | no | hostname *existence* only |\n\nTwo findings that differ from the card and are reported as measured, not smoothed over:\n\n1. **Item (4) landed in two tranches under two different ADR attributions.** The card attributed the seam to ADR-0006 Phase 5 — true of the dispatcher tranche. But `rest-server.ts` and `rest-api-plugin.ts` cite **ADR-0076 D11 step ④** by name. A reader auditing only the dispatcher's citation would credit the whole item to ADR-0006 and never find the half naming this decision. The entry records both.\n2. **\"Unify\" was delivered as seam-first with a documented fallback**, not as deletion of the parallel chain. The entry says so explicitly and marks ⛔ *do not read \"unified\" as \"the hostname/header chain is gone\"*.\n\n## Shape follows the merged D11 revision (#9057)\n\nSame three habits, applied where they have a subject: figures **re-derived** at `ba2e3c172` rather than copied from source comments; limits **named** rather than rounded away; the reading a later reader must not inherit marked ⛔. Where a habit has no subject it is not manufactured — no prior ADR wording is falsified by this audit, so nothing is marked `superseded`.\n\nOne thing the entry refuses on the record: **the tranches are not dated.** This clone is shallow (155 reachable commits), so `git log -S` bottoms out at the graft boundary and returns the same unrelated commit for every probe. Attribution is read from source citations; a landing date quoted here would be fabrication. Same measurement hazard the D11 revision already records for the retired line-count series.\n\n## Out-of-scope finding\n\n**#9120** — `RestServer.probeMcpServeable` re-derives the request's environment instead of using the shared entry point, so `/discovery`'s `mcp` advertisement can follow the host kernel rather than the request's environment on a hostname-routed multi-tenant host. Filed unassigned, unlabeled for triage; #9120 remains open and is not addressed by this PR. Its sibling `resolveRegisteredServices` — which the probe's own doc-comment claims parity with — *does* reach the entry point, which is what makes it a gap rather than a design choice.\n\n## Verification\n\nGate union re-run **after** the final commit, at `git rev-parse --short HEAD` = **`3b3bf65fa`** (working tree clean at that sha). Families derived from the changed path with `node scripts/pm/dispatch-gates.mjs docs/adr/0076-objectql-core-tiering.md`, which named three; `check:nul-bytes` added because any edit implicates it.\n\n```\nnode scripts/check-adr-links.mjs\n  ✅ check-adr-links: 543 relative link destination(s) under docs/adr/ resolve\nnode scripts/check-adr-anchors.mjs\n  check-adr-anchors: OK (49 anchored file(s), every governing ADR still referenced;\n  121 decision number(s) ...; 25840 citation(s) across 3224 file(s) resolve).\nnode scripts/check-nul-bytes.mjs\n  check-nul-bytes: OK (scanned 5978 text file(s) ... no raw ASCII control bytes).\nnode scripts/check-adr-merge-approval.mjs --self-test\n  ✓ 66 assertions over the real decide() / review-state / PR-resolution paths.\n```\n\nNo build or test run: the diff is one markdown file in `docs/adr/`, ships no code and releases nothing — hence `skip-changeset` and no `.changeset/*.md`.\n\n`check-adr-merge-approval` will stay red on this PR until the maintainer's own approving review lands. That is the gate working, not a failure to fix.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_011RB4waLuNbdruCo6X9oobm)_"
+}

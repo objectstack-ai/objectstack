@@ -2,8 +2,8 @@
   "number": 17864,
   "kind": "issue",
   "title": "check-adr-0087-registration reads a governed MENTION as a label whenever a framing word sits between the governor and the placeholder",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "os-bill",
@@ -13,7 +13,6 @@
   "labels": [
     "bug",
     "domain:spec",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-09-12T15:17:32Z",
-  "updated_at": "2026-09-16T14:16:05Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-16T16:21:37Z",
+  "closed_at": "2026-09-16T16:16:35Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/17864",
   "body": "Filed by the `os-dev` round on PR #17862 (card #17357), `session_01MkQhmuuJAVDjmeWNixwDDH`,\n2026-09-12. ⛔ Unclaimed. No `domain:*` label and no `pm:*` state — both are the triage seat's to\nproduce.\n\n## The shape\n\n`findMigrationPrescription`'s branch 1 distinguishes a placeholder that is **used** as the\nconvention's label from one that is merely **mentioned** by asking whether an ordinary word\ndirectly governs it. When the word immediately left of the placeholder is a *framing* word\n(`Migration`, `迁移`, `rename`, `upgrade`, …), that word frames rather than governs, so the\npredicate strips it and asks the question of what stands behind it.\n\nIt never asks. Stripping the framing tail leaves the **space** the framing word sat behind, and\nthe governance test is end-anchored, so it can no longer match anything — and the occurrence is\nread as a label.\n\n⇒ **inserting a framing word between the governor and the placeholder flips a mention into a\nlabel**, which is the #6967 false-positive direction the script's own header calls out as worth a\nrule of its own: a false positive here does not merely misreport, it hard-blocks a PR.\n\n## Reproduction, with both controls lit\n\nRun against `findMigrationPrescription` exported from\n`scripts/check-adr-0087-registration.mjs`, on `objectstack-ai/objectstack` at `d87a6936ef`:\n\n| input | result |\n|:---|:---|\n| **probe** — `the Migration FROM → TO is documented elsewhere` | `{ branch: 'from-to-label' }` |\n| **control A**, the same sentence with the framing word removed — `the FROM → TO is documented elsewhere` | `null` (correctly a mention: `the` governs) |\n| **control B**, the framing word with no governor in front — `Migration FROM → TO: delete the block` | `{ branch: 'from-to-label' }` (correctly a label) |\n\nControl A is what makes the probe a reading rather than an assertion: the only difference between\nit and the probe is one framing word, and the verdict flips. Control B shows the label arm has not\nsimply stopped working.\n\n## Where the mechanism is — re-derive by symbol, ⛔ not by line\n\n- `labelPositioned`, its in-line arm — the expression that strips `FRAMING_TAIL_RE` from the\n  prefix and hands the result to `GOVERNING_WORD_RE`.\n- `FRAMING_TAIL_RE`'s own docblock states the intent explicitly: a framing word *frames* the\n  placeholder and *does not govern it*. The strip exists to expose the word behind it; nothing\n  re-trims, so that word is never reached.\n- `GOVERNING_WORD_RE` is end-anchored on a letter or the attributive particle, neither of which a\n  trailing space can be.\n\n## Why this is filed rather than folded into #17357\n\n#17357 repairs the **heading** arm's missing polarity, and PR #17862 does exactly that and no\nmore. This is the same false-positive *direction* in a **different arm**, and that arm carries its\nown measured history — its first draft used the wider rule \"no letters anywhere in the prefix\" and\ntook five real prescriptions with it, `app-dead-authoring-keys.md` among them. Repairing it\ntherefore needs its own measurement over the changeset stock before it is believed, which is not\nsomething to ride along on another card's diff.\n\n⚠️ Note the direction before choosing a repair: today's behaviour is the **conservative** one\n(more hits ⇒ more refusals), so the cost is a blocked author rather than a missed retirement. A\nrepair that simply re-trims must be measured for what it *stops* flagging.\n\n## Dedup\n\nTargeted enumeration read 2026-09-12 over `labels=domain:spec&state=all`, 100 rows, grepped for\n`adr-0087|prescription|FROM|mention|from-to|framing`: 10 title hits, none of them this mechanism.\nLit control: 100 of 100 rows match a lowercase letter. Dark control: a fabricated token matches 0.\n\n**Not duplicates, and each worth reading first:** #17357 (the heading arm, repaired in PR #17862),\n#16787 (`type-surface-only` unclaimable by its own class — same gate, same *shape* of defect),\n#6967 (the narrowing that introduced the mention/label distinction this card extends).\n\n## Source\n\ncard #17357 · PR #17862 · `scripts/check-adr-0087-registration.mjs` at `d87a6936ef`\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"

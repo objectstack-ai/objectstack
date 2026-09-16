@@ -1,0 +1,32 @@
+{
+  "number": 5958,
+  "kind": "issue",
+  "title": "The `default-project` slot has 3 production readers, 0 production registrants — and 6 comments name a registrant function that exists in neither repo",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T12:56:11Z",
+  "updated_at": "2026-08-16T08:45:48Z",
+  "closed_at": "2026-08-16T08:39:17Z",
+  "closed_by": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5958",
+  "body": "Found while sweeping the REST composition root for #4251 (B4, PR #5953). Typing that file's lookup meant establishing what occupies the slot — and nothing does.\n\n## Evidence\n\n**Three production readers**, all resolving the literal `'default-project'`:\n\n```\npackages/rest/src/rest-api-plugin.ts        defaultEnvironmentIdProvider() → dp?.environmentId\npackages/runtime/src/http-dispatcher.ts:618 resolveDefaultProject() → memoized for the process\n../cloud objectos-runtime/src/kernel-resolver.ts:193  resolution level 6\n```\n\n**Zero production registrants.** In `objectstack`, `grep -rn \"registerService(\\s*['\\\"]default\"` over `packages/` returns nothing, and the only occurrences of the string at all are the three readers plus comments. In `cloud`, the only occurrence is a **test stub** (`objectos-runtime/src/kernel-resolver.test.ts:143`, `getService: (n) => n === 'default-project' ? { environmentId: 'proj_local' } : undefined`).\n\n**Six comments name the registrant, and it does not exist.** `createSingleEnvironmentPlugin` is referenced as the thing that registers this slot in:\n\n```\npackages/rest/src/rest-server.ts:1796\npackages/rest/src/rest-server.ts:1877\npackages/rest/src/rest-api-plugin.ts:146\npackages/runtime/src/http-dispatcher.ts:252\npackages/runtime/src/http-dispatcher.ts:614   ([#5155])\npackages/runtime/src/domain-handler-registry.ts:213\n```\n\n`grep -rn \"createSingleEnvironmentPlugin\"` over both repos returns **only those comments** — no declaration, no export, no call. Same for the `cloud` checkout.\n\n## Why this is observation-class and not a live outage\n\nEvery reader has a working fallback and degrades by design:\n\n- `rest-api-plugin`'s provider is wrapped in `try/catch` returning `undefined`; `RestServer` then falls through its hostname/header chain.\n- `http-dispatcher.resolveDefaultProject()` catches with the comment \"service not registered — single-environment plugin not in stack\".\n- `kernel-resolver`'s level 6 is the last of six, and its own comment already hedges (\"may register a `default-project` service for the lone env\").\n\nSo nothing a user hits today — single-environment local dev works, because other resolution levels cover it. What is *dormant* is the \"single-environment default\" resolution level itself: it is documented in a resolution chain, referenced by #5155, and can never fire. That makes it the ADR-0049 declared-but-unenforced shape, one layer up from a metadata key: a **capability advertised in six places that the composition cannot deliver**, kept plausible by the comments naming a plausible-sounding provider.\n\nIt is also the exact input that makes an agent reason confidently from dead code — the hazard \"One route, one owner\" in AGENTS.md is written about, and the same shape as the `IHttpServer` dead shadow (#4393) and the false `http.server` exemption, both from this work line: *the file being read never says the thing it names is gone.*\n\n## Two ways to close it, opposite directions\n\n1. **The plugin should exist** — `createSingleEnvironmentPlugin` was planned or removed, and single-environment hosts genuinely want bare `/api/v1/data/...` to route into the lone environment's kernel without a hostname. Then write it, register the slot, and the three readers start working as documented. Worth checking #5155's history first: it may have been dropped deliberately when the per-request kernel landed.\n2. **The slot should go** — the other five resolution levels are sufficient and this level is speculative surface. Then delete the three reads and the six comments, per enforce-or-remove. Note the readers are cheap but not free: `http-dispatcher` memoizes the answer for the process lifetime.\n\nI did not guess between them: PR #5953 only names the field its own file reads (`{ environmentId: string }`, a narrow slice of the fuller `{ environmentId, orgId? }` that `runtime` declares) and changes no behaviour. Filed unassigned.\n"
+}

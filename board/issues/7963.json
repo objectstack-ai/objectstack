@@ -1,0 +1,35 @@
+{
+  "number": 7963,
+  "kind": "issue",
+  "title": "[finding] ADR-0002's \"already discarded in v3.4's ADR-0001\" points at a document this repo never contained — the number it cites held an unrelated decision",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-12T08:59:36Z",
+  "updated_at": "2026-08-17T00:43:00Z",
+  "closed_at": "2026-08-17T00:43:00Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7963",
+  "body": "Filing unassigned; observation-class. Found while writing the ADR-0001 tombstone (#7866 / PR #7960), which documents the discrepancy for a reader arriving at the number. This card is about the **citing record's own wording**, which that PR deliberately did not touch.\n\n## The observation\n\n`docs/adr/0002-environment-database-isolation.md:122`, under *Alternatives Considered*:\n\n> 4. **One global DB + tenant column.** Was never on the table — already discarded in v3.4's ADR-0001.\n\nThat reference does not resolve to the record which actually held the number. Measured against full history (clone unshallowed — a shallow clone silently answers \"never existed\"):\n\n- `docs/adr/0001-metadata-service-architecture.md` — added 2026-02-10 (`908d95c82`), deleted 2026-02-11 (`9da8e3e72`). It decided how the `metadata` **service** is registered (ObjectQL vs MetadataPlugin precedence) and says nothing about tenancy or database topology.\n- `git log --all --diff-filter=AD -- '*0001-*'` returns **exactly those two commits**, on any path, on any branch. No other file ever claimed the number.\n\nSo \"v3.4's ADR-0001\" is a reference to a pre-registry document that has never existed in this repository. Today's ADR-0002 is itself dated 2026-04-19 and supersedes the v3.4/v4.0 per-organization database model, which is consistent with the reference being to a v3.4-era artifact that predates `docs/adr/`.\n\nWorth noting the same mistaken attribution had propagated into tooling: the `UNRESOLVED_ADR_CITATIONS` entry in `scripts/check-adr-anchors.mjs` justified itself as *\"cited as history by ADR-0002\"*. That half is corrected in PR #7960 (the entry is removed and the tombstone dissects the discrepancy).\n\n## Why this is not urgent\n\nAfter PR #7960 the citation **resolves** — `docs/adr/0001-withdrawn-metadata-service-architecture.md` exists and has a *\"What ADR-0002 actually cites\"* section written for exactly this reader. No gate is red and no navigation dead-ends. The residual cost is that ADR-0002's sentence still asserts, in its own voice, a provenance that is not this repository's.\n\n## Why it was not fixed in PR #7960\n\nADR-0002 is an **accepted record**. Editing its prose is a decision about the decision log, not a rider on a tooling change, and `docs/adr/` is maintainer-merge territory with no size exemption. Left for a maintainer call.\n\n## Possible dispositions\n\n1. **Leave it.** The tombstone already carries the explanation. Zero cost, mild residual inaccuracy in an accepted record.\n2. **Qualify the sentence** — e.g. name it as a pre-registry v3.4 document rather than a bare `ADR-0001`, so it stops reading as a pointer into `docs/adr/`. Smallest edit that makes the record self-consistent.\n3. **Drop the citation**, keeping the rejection (\"was never on the table\") without the provenance claim.\n\nNo recommendation offered — this is the maintainer's record to word.\n"
+}

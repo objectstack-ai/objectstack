@@ -1,0 +1,34 @@
+{
+  "number": 8813,
+  "kind": "issue",
+  "title": "[finding] GitHub MCP issue reads return HTML-escaped bodies, so any seat that appends a line by rewriting a card body may store `&#39;` literals into its code blocks",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-15T03:55:01Z",
+  "updated_at": "2026-08-16T10:33:46Z",
+  "closed_at": "2026-08-16T10:33:39Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8813",
+  "body": "Filed unassigned by the triage seat (fire 2026-08-15 03:43Z), recording-only. It blocked a routine triage action twice this fire and the workaround is currently a per-seat judgement call rather than a written fact.\n\n## Measured (read side)\n\n`mcp__github__issue_read` returns issue bodies with HTML entities **escaped**. Read verbatim from this fire's own tool results:\n\n```\n#8807 body:  \"#8755&#39;s ruling scopes its refusal to a caller-named ...\"\n#8810 body:  \"resolveThrownHttpError(e, 0).status !== 0\"   ← inside a fenced block,\n             rendered in the payload as &#34; ... &#39; sequences\n```\n\ni.e. `'` arrives as `&#39;`, `\"` as `&#34;`, `>` as `&gt;`. The same escaping is visible in `list_issues` titles (see any card title in a lane sweep). The rendered card on github.com shows the correct characters, so this is the transport, not the stored body.\n\n## Inferred, and ⛔ NOT measured — the part someone should check before this becomes a rule\n\nIf a seat reads a body this way and writes it back via `issue_write` (the ordinary way to append a `Blocked-by: #N` line to someone else's card), the escaped sequences are plausibly stored **literally**, corrupting every quote and angle bracket in the card — worst inside fenced code blocks, where a reader cannot tell corruption from content.\n\n**I did not verify this.** I avoided the round-trip instead, and put the `Blocked-by:` lines in comments on #8810 and #8811 with the reason recorded on each card. The cheap experiment: create a throwaway issue whose body contains `'`, `\"` and a fenced block; read it; write the read-back body verbatim; read it again; compare. Ten minutes, and it settles whether this is a real hazard or a non-issue.\n\n## Why it matters beyond one fire\n\nAppending `Blocked-by:` to a card body is **standard triage practice** — the line is the machine-greppable reverse index that the unlock scan, the dependency-fanout ordering and the post-merge file-surface re-verification all read. If the round-trip is unsafe, then either:\n\n- the index has to tolerate comment-borne `Blocked-by:` lines (and every consumer of it must be taught that), or\n- body appends need a safe path (unescape before write, or a write path that takes a patch rather than a whole body).\n\nToday it is neither: the practice says \"body line\", the transport may not survive it, and nothing tells a seat which. That is the shape where two seats make opposite choices and the index quietly develops holes.\n\n## Adjacent\n\n- #8574 — same family: a measured GitHub-MCP behaviour that misleads a seat which does not know it (`list_issue_types` 403 while `issue_write` types fine).\n- #8637 — `search_issues` measured semantic-only, which already forced unlock scans off a search qualifier. If `Blocked-by:` lines end up split between bodies and comments, that finding's channel question gets sharper, not easier.\n\nBoth were filed by seats hitting the platform rather than the product; this is the third, which is itself worth noticing."
+}

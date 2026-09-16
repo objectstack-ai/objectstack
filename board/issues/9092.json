@@ -1,0 +1,36 @@
+{
+  "number": 9092,
+  "kind": "issue",
+  "title": "docs: two sample transcripts still print the pre-#4409 per-concern step list that the author-time rule registry collapsed into one line",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:devx",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-16T09:22:41Z",
+  "updated_at": "2026-08-16T15:46:59Z",
+  "closed_at": "2026-08-16T15:46:59Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9092",
+  "body": "Filed unassigned while fixing #9034 (the stale author-time rule count in the `os validate` transcript on `validating-metadata.mdx`). Same defect class, two different pages, and out of that card's scope — it is scoped to one fenced block on one page. ⛔ No `domain:*` set — triage's single-producer field.\n\n## Measured\n\n`#4409` collapsed the per-concern authoring checks into one registry (`AUTHORING_RULES`), so the three authoring commands now print **one** step for the whole table. Two sample transcripts still reproduce the step list from before that change.\n\nMeasured against `origin/main` @ `8640fb268`, by building the CLI and running it on `examples/app-todo`.\n\n### 1. `content/docs/deployment/cli.mdx:398-420` — the `os compile` output example\n\nShown:\n\n```\n  → Validating protocol compliance...\n  → Validating expressions (ADR-0032)...\n  → Checking dashboard widget bindings (ADR-0021)...\n  → Checking dashboard action references (ADR-0049)...\n  → Checking SDUI styling (ADR-0065)...\n  → Checking security posture (ADR-0090 D7)...\n  → Collecting package docs (ADR-0046)...\n  → Writing artifact...\n```\n\nReal run (`node packages/cli/bin/run.js compile` in `examples/app-todo`):\n\n```\n  → Validating protocol compliance...\n  → Running author-time rules (41)...\n  → Checking capability providers (#3366)...\n  → Collecting package docs (ADR-0046)...\n  → Writing artifact...\n```\n\nSo five of the listed steps no longer exist as steps (they are entries in the registry the one line reports), and **`→ Checking capability providers (#3366)...` is missing from the sample entirely**. The authority is `packages/cli/src/commands/compile.ts` — its `printStep` calls are the complete list.\n\n### 2. `content/docs/getting-started/build-with-claude-code.mdx:229-243` — the failing `os validate` example\n\nShown:\n\n```\n  → Validating against ObjectStack Protocol...\n  → Validating expressions (ADR-0032)...\n\n  ✗ Expression validation failed (1 issue)\n  • stack · action 'resolve_ticket' visible: bare reference `status` — ...\n      source: `status != \"resolved\"`\n```\n\n`packages/cli/src/commands/validate.ts` has exactly five `printStep` calls and none of them is `Validating expressions (ADR-0032)`; an expression finding now arrives through the registry, and the failure header the code prints is\n\n```js\nprintError(`Author-time rules failed (${ruleErrors.length} issue${ruleErrors.length > 1 ? 's' : ''})`);\nfor (const f of ruleErrors.slice(0, 50)) {\n  console.log(`  • ${f.where}: ${f.message}`);\n  console.log(chalk.dim(`      ${f.hint}`));\n  console.log(chalk.dim(`      rule: ${f.rule}  at ${f.path}`));\n}\n```\n\n— i.e. `✗ Author-time rules failed (1 issue)`, and each finding carries a `hint` line and a trailer of the form `rule: RULE_ID  at PATH` rather than a `source:` line.\n\nNote this transcript is the one `validating-metadata.mdx` sends readers to **for the bare-reference example verbatim** (\"see [the gate in action](/docs/getting-started/build-with-claude-code#4-the-gate-os-validate-catches-ai-mistakes) for the bare-reference example verbatim\"). The word `verbatim` is load-bearing there, and it is currently not true.\n\n### Also, on both pages: a missing blank line\n\nBoth pages' clean-run snippets print the manifest line immediately followed by `Data: …`. `validate.ts` prints a blank line between them unconditionally whenever a manifest exists (the `console.log('')` after the optional description). Fixed in the `validating-metadata.mdx` block by the #9034 PR; still present on these two pages.\n\n## Why this is worth fixing rather than eliding\n\nSame reasoning the #9034 dispatch settled on: a count or a step list **in prose** is the author's assertion, so eliding an unaccountable one is honest — but **in a transcript it is a reproduction of program output**, and deleting it manufactures output the CLI will never emit. These blocks should be re-derived from a real run, not trimmed.\n\n## For triage\n\n- **Dedupe**: searched open issues at 09:2xZ for stale-sample-output / `cli.mdx` output-example drift — nothing open. #7465 is the closed precedent for exactly this class on `cli.mdx` (a stale rule count plus a retired rule still listed).\n- **Scope**: `content/docs/deployment/cli.mdx` and `content/docs/getting-started/build-with-claude-code.mdx`. Docs-only. Whoever takes it should re-run the commands rather than hand-editing, and should check the other `os *` output examples on `cli.mdx` in the same pass.\n- **Not a CLI bug** — the CLI's output is correct; the docs are behind it.\n- `content/docs/releases/**` stays out of scope as always.\n- Backlink: found while implementing #9034.\n\n_(Body edited once to repair two angle-bracket placeholders the GitHub sanitizer stripped as HTML tags.)_\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_011RB4waLuNbdruCo6X9oobm)_"
+}

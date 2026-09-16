@@ -1,0 +1,34 @@
+{
+  "number": 8739,
+  "kind": "issue",
+  "title": "[finding] `error-leak.ts` asserts \"nobody here runs\" MySQL — but CI stands up a live mysql:8.0 for a required check, and the claim is load-bearing for security reasoning",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli"
+  ],
+  "assignees": [
+    "qq9340100"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-14T17:05:38Z",
+  "updated_at": "2026-08-16T07:40:32Z",
+  "closed_at": "2026-08-16T07:40:32Z",
+  "closed_by": {
+    "login": "qq9340100",
+    "id": 313832657,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8739",
+  "body": "Filed unassigned, `finding` only — grading and routing are triage's field. Surfaced while reviewing PR #8737 (#8682), where a dev leaned on this claim in good faith to size a value-leak residual. Duplicate-searched first: no existing card.\n\n## The contradiction\n\n`packages/types/src/error-leak.ts` scopes its keyword list with an explicit dialect claim (lines ~57-60):\n\n> …it is right that the list is unbounded *across dialects* — **MySQL/MSSQL/Oracle each phrase all of this differently and nobody here runs** [them] … `driver-turso` and `driver-sqlite-wasm` actually reach.\n\nMeasured against the same tree:\n\n| | evidence |\n|---|---|\n| MySQL is a supported dialect | `packages/drivers/driver-sql/src/sql-driver.ts:1989`, `:2063`, and `:3257` — `c === 'mysql' \\|\\| c === 'mysql2'` |\n| CI runs a **live MySQL server** | `.github/workflows/ci.yml:577-583` starts an `image: mysql:8.0` service |\n| …for a **required** check | `ci.yml:551-556` — job name `Temporal Conformance (live PG + MySQL)`, with a comment noting *the name IS the required check* |\n| and it is actively measured | #8621 / #8622 measured live **MySQL 8.0.46** this week and filed real driver defects against it |\n\nSo \"nobody here runs MySQL\" is false as written.\n\n## Why it is worth a card rather than a comment fix\n\nThis is not a stale comment about tidiness. **It is a security-reasoning input, and it has already been used as one.** The `error-leak` keyword list decides which driver error phrasings get recognised (and therefore suppressed or handled) before an error reaches a caller. A future author asking \"do I need to defend against MySQL's phrasing here?\" reads this file, finds an explicit *no*, and stops.\n\nThat is exactly what happened on PR #8737: the dev kept a database diagnostic tail verbatim and justified it as *\"not a live exposure, since `error-leak.ts` records that this repo runs only SQLite/libsql and Postgres.\"* The quote was accurate; the source was wrong. In that instance the conclusion survived on other grounds — the kept tail is the **unknown-column** diagnostic, which names an identifier on MySQL too, while the value-bearing `Duplicate entry 'x' for key …` phrasing belongs to the **unique-violation** path — but the reasoning got there by luck rather than by the file being right.\n\nSame shape as #8586 and the two `additionalTypes` comments: a source assertion that describes a world the repo has since left, sitting exactly where someone will consult it.\n\n## Not claimed\n\n- **No leak is demonstrated.** I did not measure a MySQL deployment leaking a value through any path; this is about the assertion's truth, not a proven exposure.\n- **No opinion on the remedy.** Correcting the comment, extending the keyword list to MySQL phrasings, and deciding whether MySQL is a *supported deployment target* versus merely a *tested dialect* are three different dispositions with different costs. The last of those is a product question, not a code fix — and it is the one that decides the other two.\n- **Scope not bounded.** I did not sweep for other places asserting the same dialect boundary. Treat this as a sample.\n\n## Related\n\n- #8682 / PR #8737 — where the claim was consumed.\n- #8621 / #8622 — the live MySQL 8.0.46 measurements.\n- #8586 — the same defect shape (a source comment asserting a path that does not exist)."
+}

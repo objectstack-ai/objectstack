@@ -1,0 +1,34 @@
+{
+  "number": 9033,
+  "kind": "pull_request",
+  "title": "docs(deployment): reconcile the four-doors table with AUTHORING_RULES",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-16T07:16:37Z",
+  "updated_at": "2026-08-16T07:40:18Z",
+  "closed_at": "2026-08-16T07:40:17Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": "2026-08-16T07:40:17Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/9033",
+  "body": "Fixes #9007\n\nOne pass over the `## The one gate, four doors` table in\n`content/docs/deployment/validating-metadata.mdx`, audited row by row against\n`AUTHORING_RULES` in `packages/lint/src/authoring-rules.ts` — the authority the\ntable's own footnote already names. No rule's `surfaces` or `runtimeTypes`\nchanged; this documents what is.\n\nDocs-only, so `skip-changeset`.\n\n## The two cells the card names\n\n| | declared | table said | table says now |\n|---|---|---|---|\n| `validateSecurityPosture` | `runtimeTypes: ['seed', 'permission', 'book', 'object']` | `—` | `✓ˢᵖᵉᵇᵒ` |\n| `validatePresetComparands` | `runtimeTypes: ['dashboard', 'view', 'object', 'page', 'flow']` | *no row at all* | new row, `✓ᵈᵛᵒᵖᶠ` |\n\n## Four more drifts the audit found\n\n1. **The security-posture row silently covered two entries with opposite runtime\n   answers.** `validateSecurityRoleWord` was split out of\n   `validateSecurityPosture` at #8310 precisely so it could stay CLI-only while\n   the rest of the ADR-0090 D7 block crossed. One row could not be true for both,\n   so the vocabulary freeze is now its own row, and the prose says why it stayed\n   behind whole.\n2. **The ADR-0120 D5 declared-unique rules were shown as `os lint`-only.** All\n   three register `commands: ['validate', 'build']` and are reported by `os lint`\n   through its own data-model sweep — \"coverage recorded, not coverage missing\",\n   in their own `scopeReason`'s words. They get a row of their own with `✓ ✓ ✓`,\n   and the rubric row is narrowed to what really is lint-only.\n3. **The footnote's reasons for a `—` cell were incomplete and one was stale.**\n   It named two reasons; the registry carries more (a rule that is snapshot-safe\n   and merely not rolled out to a type yet; the capability-reference rule, which\n   would *graduate* from advisory to gating at that door). It also cited\n   permission sets as a collection the per-write snapshot does not carry — untrue\n   since #8309, which added `permissions` and `books`; `datasets` followed at\n   #7529.\n4. **Eight registry entries had no row.** Added, grouped by concern so the table\n   does not become one row per rule: inert-by-construction declarations\n   (`validateFunctionalCompleteness`, `validateManagedApiMethods`), declared\n   enforcement that cannot run (`validateSharingRuleEnforceability`,\n   `validateRlsPredicateEnforceability`, `validateRuleCompilability`,\n   `validateRuleSchemaFormats`), plus form layout, action placement and SDUI\n   component props into the existing advisory row. Every one of the eight is\n   `✓ ✓ ✓ | —`, so none of them changes the runtime picture — they were simply\n   invisible.\n\n## Marker convention\n\nKept as #9005 left it, extended rather than replaced: one superscript per\ndeclared type, in the order the rule declares them, with the footnote naming each\nletter. One marker is invented, and only because the convention could not express\nit — `page` and `permission` both start with `p`, so `permission` takes the\ntwo-letter `ᵖᵉ` and the footnote says why.\n\nNo hard count is introduced anywhere. Each cell points at that rule's own\n`runtimeTypes`, per the shape PR #9005 established when it removed the false\ncount instead of replacing it.\n\n## Rows verified correct and left alone\n\nEvery other row matches its entry: the `flow`-gated set (CEL/predicate, empty\ncombinators, flow reference integrity, approval approvers, flow trigger\nreadiness, flow anti-patterns), the `view` pair, widget-binding integrity on\n`dashboard`, the runtime-only platform-schedule row (its judge returns early for\nany type that is not `flow`, so `✓ᶠ` is exact), the Zod parse and undeclared-key\nrows, package docs and the build artifact. The five reference-integrity rows that\nshow `—` are members of an entry that *is* on the runtime surface for `flow`; on\na flow snapshot they read collections the snapshot does not carry and contribute\nno verdict, which is the footnote's first `—` reason exactly.\n\n## Verification\n\nGate union re-run after the final commit, at `54b0b3520`:\n\n- `pnpm check:nul-bytes` — OK, 5950 text files, no raw control bytes\n- `pnpm check:role-word` — OK, 43 baselined files, no new occurrences (this page\n  is not in the baseline and stays at zero, which is why the new row is called a\n  *vocabulary freeze*)\n- `pnpm check:docs-audit-scope` — scope in sync, 178 hand-written docs\n- `pnpm check:doc-anchors` — 231 fragment links resolve; the\n  `#the-one-gate-four-doors` heading that `content/docs/deployment/cli.mdx` deep\n  links is untouched\n\nGate set derived with `node scripts/pm/dispatch-gates.mjs content/docs/deployment/validating-metadata.mdx`\n(`check:docs-audit-scope`, `check:role-word`); `check:nul-bytes` is any-edit and\n`check:doc-anchors` was added because the page carries fragment links. No\npage-path links were added or changed.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_011RB4waLuNbdruCo6X9oobm)_"
+}

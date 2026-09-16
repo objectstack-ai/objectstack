@@ -1,0 +1,36 @@
+{
+  "number": 9035,
+  "kind": "issue",
+  "title": "docs(releases): v16.mdx names `af1b0db` as the 16.0.0-rc.1 Console pin, but rc.1 ended at `69fa5d163a97` — two further pin moves, and objectui#2743 is documented nowhere",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:devx",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-16T07:19:36Z",
+  "updated_at": "2026-08-16T09:17:51Z",
+  "closed_at": "2026-08-16T09:17:51Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9035",
+  "body": "Measured while implementing #8917 (v16 content gaps) and deliberately **not** fixed there: #8917 is completeness-only and its maintainer ruling pins the surface to 16.1.0 plus the two GA-cut changesets. This is a factual correction on a release-owned page, which is the other lane. Filed unassigned.\n\n## What the page says\n\n`content/docs/releases/v16.mdx` names `af1b0db` as the Console pin the `16.0.0-rc.1` cut landed on, in four places:\n\n| line | text |\n| :-- | :-- |\n| 572 | \"The `rc.0` bundle pins `94d4876`; the pin advanced to `af1b0db` before the `16.0.0-rc.1` cut\" |\n| 704 | \"the console pin advanced `94d4876 → af1b0db`, released as `@objectstack/console` 16.0.0-rc.1\" |\n| 713 | \"Console from the objectui pin advancing `94d4876 → af1b0db` (objectui #2706–#2736), bundled as `@objectstack/console` 16.0.0-rc.1\" |\n| 802 | heading: \"New in Console (objectui, now bundled `94d4876 → af1b0db`)\" |\n\n(Line numbers as of `422f086c2` on the #8917 branch; on `main` before that commit they are 535, 666, 676, 765.)\n\n## What the changelog says\n\n`packages/console/CHANGELOG.md`'s `## 16.0.0-rc.1` section contains **four** pin bumps, and each entry states its own `objectui range`, so they chain deterministically:\n\n| changeset | refreshed to | stated range |\n| :-- | :-- | :-- |\n| `a276969` | `0318118e02fd` | `94d4876df090...0318118e02fd` |\n| `bfa3c3f` | `3b2e4d98d904` | `0318118e02fd...3b2e4d98d904` |\n| `1965549` | `af1b0db96e44` | `3b2e4d98d904...af1b0db96e44` |\n| `a791200` | `69fa5d163a97` | `af1b0db96e44...69fa5d163a97` |\n\nSo `af1b0db` is an **intermediate** pin inside rc.1, not the cut's endpoint. The rc.1 endpoint is `69fa5d163a97`.\n\nIndependent corroboration from the other side of the boundary: the GA-cut changeset `db34d54` states its range as `69fa5d163a97...9a5f016f7d5c` — it starts where rc.1 actually ended.\n\n## Consequence: one Console change is documented nowhere\n\nThe window `af1b0db96e44...69fa5d163a97` (`a791200`) carries one frontend change:\n\n- `fix(app-shell): mark notifications read via the REST surface, not direct receipt writes` (objectui#2743)\n\nThat is the **Console half** of the mark-as-read fix whose framework half (#3354) the page does document, under *Landed since 16.0.0-rc.0 → New capabilities (backend)*. Grepping `v16.mdx` for `2743` returns nothing. Related closed card for the same defect: #3362.\n\nThe other two windows are fine content-wise — `a276969` (objectui#2707) and `bfa3c3f` (objectui#2706 / #2701 / #2708) are all described on the page; only the pin arithmetic in the four lines above is wrong for them.\n\n## Suggested fix\n\nDedicated docs-only PR (release pages are never a rider on code — repo `CLAUDE.md`): correct the four pin statements to `94d4876 → 69fa5d163a97`, and add objectui#2743 to the *New in Console (objectui …)* bullet list. The objectui issue-number range in line 713 (\"objectui #2706–#2736\") would want re-deriving too, since #2743 falls outside it.\n\n⛔ Not to be conflated with #8916 (v9/v12/v14 status lines) or #8917 (v16 completeness) — both are separate surfaces, deliberately.\n\n## Provenance\n\nDerived from `packages/console/CHANGELOG.md` on `origin/main` at `6468df115`, by chaining each rc.1 entry's own `objectui range` line. Dedupe search run before filing (keyword + path, open issues): no open card covers it; #6115 is the closed **v17.mdx** analogue of exactly this defect class, which doubles as a positive control that the search instrument was live."
+}

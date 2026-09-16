@@ -1,0 +1,33 @@
+{
+  "number": 8969,
+  "kind": "pull_request",
+  "title": "docs(agents): repo-conditional skip-changeset, vacuous-pass guard, publish-route preflight in the os-dev contract",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-16T03:20:45Z",
+  "updated_at": "2026-08-16T04:22:27Z",
+  "closed_at": "2026-08-16T04:22:25Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-16T04:22:25Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/8969",
+  "body": "Fixes #8915\nFixes #8727\nFixes #8891\nFixes #8716\n\nOne PR, one file: `.claude/agents/os-dev.md` — the four-card os-dev contract-fix bundle dispatched by the skills-lane seat. Provenance: maintainer batch acceptance of the seat's enumerated bundle proposal, 2026-08-16, verbatim: 「其他问题我接受你的建议。」 Language ruling, same day, verbatim: 「.claude/skills/** 用中文，给客户的 skills 不要改。」 — os-dev.md is in the internal surface per the accepted recommendation, so new/reworded clauses are written in Chinese; machine literals (labels, commands, script names) stay English. Scope notes: the vacuous-pass card lands only its os-dev half (candidates 1+2; candidate 3, the repo-side script-existence guard, goes to the devx lane as its own card at ACCEPT time), and the lock-etiquette card lands direction 3 only (directions 1–2 graded not taken by the seat).\n\n⛔ ADR-class landing: human merge only — do not queue it, do not arm auto-merge. This PR edits the agent-contract instruction surface (human-review class per the standing skills guardrail).\n\n## Deliverables\n\n1. **skip-changeset made repo-conditional** (the anchor card): this repo applies the label and reads it back (the whole-set-PUT hazard and the first-run race are preserved verbatim in the rewrite); objectui declares tests/docs-only via an empty-frontmatter changeset, and the label must never be created there — a label add silently mints a repo label that the next agent reads as a real mechanism. Verified against objectui origin/main: zero skip-changeset hits anywhere in its workflows; its changeset-presence workflow states \"An empty frontmatter counts\".\n2. **Vacuous-pass guard** (new toolchain trap): a `pnpm --filter` run matching zero scripts exits 0. Measured in this tree at this head: `pnpm --filter @objectstack/spec run type-check` prints ERR_PNPM_RECURSIVE_RUN_NO_SCRIPT and exits 0, and the same run piped through `tail` also reads 0. The trap names objectui's hyphenated `type-check` spelling (verified: zero unhyphenated spellings in objectui package.json files) and prescribes verifying the script name echoed in output or reading the exit via `PIPESTATUS`, never through a piped `tail`. The section header's parenthetical was reworded — the old \"false-red lap\" wording no longer covered this false-green member.\n3. **Publish-route preflight** (ground rule 1): the first action after creating the branch is pushing it empty, before any edit — it doubles as the claim's branch marker and a minute-one write-route probe; a 403 there is a stop-and-report-blocked, never a retry loop (network errors keep the backoff retry). Self-applied on this very branch: the empty branch was pushed as this task's first action and the write route confirmed at minute one.\n4. **Heavy-verify lock etiquette — premise finding, zero diff.** The direction-3 etiquette (bounded `flock -w` windows sized to fit one foreground call, re-acquire in a loop, lock-free work between attempts, blocked-report past ~20 minutes naming the holder) is already codified in resource-discipline rules 1 and 7, and predates the member card: present at commit bea44431a (2026-08-13 23:54 UTC), before that card was filed on 2026-08-14. Merging therefore closes that card as already-satisfied; if the PM prefers to re-triage it instead, drop its line from the Fixes block before merge.\n\n## Ratchet accounting (ceiling 399, untouched; file 399 → 398)\n\nAdditions: ground rule 1 preflight +2 net; toolchain trap +4; skip-changeset conditionalization +1. Funded by compression with no semantic loss, English → Chinese per the language ruling: ground rule 2 (8 → 5), resource rule 6 (6 → 4), standard-clauses intro (6 → 4), stash clause (6 → 5), and the scratchpad clause folded inside ground rule 1. Net −1 line; headroom 1. No ceiling raise needed, so the raise authorization quote is not invoked.\n\n## Verification\n\nGate union run AFTER the final commit, at HEAD `82991ad0a` (exit read via PIPESTATUS-safe direct `$?`, not through a pipe): check:pm-skill-ratchet ✓ (os-dev.md 398 lines, ceiling 399, headroom 1) · check:pm-skill-id-lint ✓ (9 files clean) · check:skill-frame-sync ✓ (4 copies isomorphic — the escalation-frame anchors were not touched) · check:skill-frame-freshness ✓ (current with origin/main) · check:agent-model-declared ✓ · check:nul-bytes ✓ (5935 files, no raw control bytes) · check:doc-authoring ✓ · check:doc-formula-expressions ✓ (22 + 9 examples clean). The gate set was re-derived with scripts/pm/dispatch-gates.mjs against the actual changed path; it added check:doc-authoring and check:doc-formula-expressions over the prompt's named families — both run, both green. The doc-formula gate needed the lint package's dependency closure built first (fresh-worktree trap; built, then green).\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_017TNzEetykdh7ceZGwuAPLq)_"
+}

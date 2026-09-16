@@ -1,0 +1,36 @@
+{
+  "number": 8846,
+  "kind": "issue",
+  "title": "spec: register the dispatcher conformance gate's reported error codes in ERROR_CODE_LEDGER (spec half of the #8087 ruling)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:blocking",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-15T09:17:39Z",
+  "updated_at": "2026-08-16T19:08:50Z",
+  "closed_at": "2026-08-16T19:08:50Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8846",
+  "body": "Blocked-by: #8087\n\nCreated by the triage seat (whole-repo Routine, fire 08:47Z) to execute the **contract-first split** of the maintainer's #8087 ruling. Unassigned. Not a claim.\n\n## Why this card exists\n\n#8087 was ruled by the maintainer on **2026-08-12 18:23Z** (verbatim: 「接受你的全部建议。」) — **option B, delivered as a gate rather than a sweep**, with option C (declaring the dispatcher's `error.code` deliberately open, amending ADR-0112 / `ApiErrorSchema`) explicitly **rejected**.\n\nThe ruled deliverable has two halves in two lanes, which is why it stalled rather than dispatching:\n\n| half | lands in | lane |\n|:--|:--|:--|\n| the conformance gate + in-lane collapses | `packages/runtime` (+ `packages/types`) | `domain:cli` — stays on **#8087** |\n| **registering the reported codes** | `packages/spec/src/api/error-code-ledger.zod.ts` | `domain:spec` — **this card** |\n\nThe `domain:cli` seat correctly refused to cross into `packages/spec` and reported the boundary rather than breaching it or sending a dev into a mid-implementation hard stop. Splitting a ruled card is a routing decision and therefore triage's production, so the split is made here rather than by that seat.\n\n⛔ **The ruling is not re-opened by this split.** Option B stands, option C stays rejected, and neither half may re-litigate them.\n\n## Verified on `origin/main` @ `6b6b606` before creating this card\n\n- `packages/spec/src/api/error-code-ledger.zod.ts` **exists** and is the ledger's home — the lane boundary is real, not assumed.\n- ⭐ **The in-flight collision the `domain:cli` seat flagged is GONE.** Its note said PR #8239 was \"open against that exact ledger file\"; **#8239 merged 2026-08-13 02:53Z**. That was the stated scheduling obstacle and it no longer exists. ⚠️ Re-check for new open PRs against the ledger file at claim time — this reading is from this fire, not a standing guarantee.\n- ⭐ **`CONFLICT` is already registered** (`error-code-ledger.zod.ts:144`, `:602`), landed by PR #8212. So the 20:35Z evidence comment on #8087 is now historical: that specific code is done. **Do not re-register it**, and do not treat the #8087 thread's mention of it as outstanding work.\n\n## Scope\n\n**Register, in `ERROR_CODE_LEDGER`, the set that #8087's gate reports as \"merely unregistered\"**, under owning packages per #7504 provenance.\n\nExplicitly in scope, per the ruling and the #8087 thread:\n- ⭐ **Settle #8211** — `CONFLICT` vs the catalog's `RESOURCE_CONFLICT`, plus the three sibling synonyms already in that block. Both the 20:35Z evidence comment and the escalation argued this is the same family and should be answered together. Now that `CONFLICT` is registered, #8211 is the consolidation question left over, and this is its natural home.\n\n⛔ **Out of scope:**\n- Building the gate, or any change in `packages/runtime` / `packages/types` — that is #8087.\n- Codes the gate reports as **genuinely wrong** rather than merely unregistered. Those collapse to the status-derived standard code and get their pin rewritten **in #8087's lane**, not here.\n- Amending `ApiErrorSchema` or ADR-0112 in any way that loosens closure — that is the rejected option C.\n\n## ⚠️ Two standing constraints this card inherits\n\n1. **`packages/spec` has exactly one owner.** This card is the `domain:spec` seat's regardless of who needs it.\n2. **Registering a code WIDENS the accepted set.** `ErrorCode` is `StandardErrorCode ∪ ERROR_CODE_LEDGER` and `ApiErrorSchema.code` parses against exactly that union, so this is the **semantic face** of `packages/spec` by the standing accept-surface test — ⚠️ **not** `spec-surface`, and it carries the `claude-fable-5` model floor for contract-accept-surface changes. The `domain:cli` seat identified both points correctly and they are ratified here.\n\n## Sequencing\n\nHard `Blocked-by: #8087` — **the set does not exist until the gate runs**. ⛔ Do not attempt to pre-empt it by hand-registering the three historically-known codes (`STORAGE_FAILURE`, `FLOW_FAILED`, `DUPLICATE`); hand-registration in place of the gate's report is precisely the snapshot-instead-of-invariant shape the ruling rejected.\n\n⚠️ Expect the gate's first run to name **more than three**. If the tail comes back large, the ruling's instruction is to **report the number before registering it unexamined** — that reporting obligation lands on this card, since this is where registration happens.\n\n## ⏱️ Time-sensitivity, carried forward verbatim from the ruling\n\nPR #8088's two-spelling workaround (`code` narrowed / `declaredCode` verbatim) plus its `package-door-error-parity.test.ts` pin **is main's de-facto answer and accrues callers**. Deferral converts the outcome into option C by default — the one option ruled inadmissible. The split exists to unblock this faster than a lane-boundary stall, ⛔ not to park it.\n\n## Related\n\n#8087 (the ruled parent, `domain:cli` half) · #8211 (the consolidation question, in scope) · #8212 / PR #8088 · #4805 (ledger federation) · #7504 (ledger provenance) · #8239 (merged; the former collision)"
+}

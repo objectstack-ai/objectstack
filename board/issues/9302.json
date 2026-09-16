@@ -1,0 +1,33 @@
+{
+  "number": 9302,
+  "kind": "issue",
+  "title": "QA wave R2b: checklist run `surface:cli` (8 items) at e4e5c6e3",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:blocked",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-17T12:09:55Z",
+  "updated_at": "2026-08-17T13:15:32Z",
+  "closed_at": "2026-08-17T13:14:57Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9302",
+  "body": "Part of #9296.\nBlocked-by: #9298\n\nCLI lane — no console build needed. `node scripts/checklist-select.mjs surface:cli --json` selects the set (8 active; 5 carry an `automated.ref`).\n\nExecute via the **`checklist-test` skill** + `docs/qa/platform-checklist/RUNNER.md` + `dogfood-verification`, in the QA tree from #9298. Own port + own `file:/tmp/qa-wave/<item>.db` per concurrent item. `packages/cli` and `packages/cli/test` both moved substantially in the 727-commit window this wave covers, so treat \"the command still exists\" as the beginning of a clause, never the end of one — the acceptance clause names the oracle, consult that.\n\nOutput: one `qa-run` issue in the RUNNER format (+ `bug` on any clause failure), text only, linked back here and on #9296.\n"
+}

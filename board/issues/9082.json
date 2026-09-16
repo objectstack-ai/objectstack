@@ -1,0 +1,34 @@
+{
+  "number": 9082,
+  "kind": "pull_request",
+  "title": "docs(protocol): narrow realtime-protocol.mdx's \"enforces this in CI\" claim to what the tripwires check",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/xs",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-16T08:43:15Z",
+  "updated_at": "2026-08-16T09:17:52Z",
+  "closed_at": "2026-08-16T09:17:50Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": "2026-08-16T09:17:50Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/9082",
+  "body": "Fixes #9055\n\n## The claim\n\n`content/docs/protocol/kernel/realtime-protocol.mdx:15`, inside the v1 implementation-status callout, ended the identity-admission paragraph with:\n\n> The authz conformance matrix (`realtime-delivery-authz` row + transport tripwires) enforces this in CI.\n\n\"this\" is the antecedent sentence — the per-recipient RLS/FLS/tenant re-check on delivery. CI does not check that, and cannot. The sentence sits inside a callout whose whole job is to tell the reader \"do not trust the sections below as shipped\", so it borrows that callout's credibility for the one statement in it measurement does not support.\n\n## Measured against `origin/main` (`2cb69c31c`)\n\nRe-derived here rather than taken from the card:\n\n1. **Row state** — `packages/qa/dogfood/test/authz-conformance.matrix.ts:166` is `state: 'experimental'`, one of exactly two experimental rows in the file. Its summary records the *absence* of the property.\n2. **Tripwire population** — 5 probes over 5 distinct source files: `in-memory-realtime-adapter.ts` (`handleUpgrade`), `realtime-service-plugin.ts` (`handleUpgrade` / `WebSocketServer` / `text/event-stream`), `http-dispatcher.ts` (`handleRealtime|Upgrade|Subscribe`), `client/realtime-api.ts` (`new WebSocket` / `new EventSource`), `rest-server.ts` (a `/realtime` route literal). A transport wired anywhere else produces no key and no failure.\n3. **The one non-tripwire `covers` key** is pinned by `/async\\s+publish\\s*\\(/` — it pins that the method exists, not that any authorization runs inside it.\n4. **`:15` still holds** at this revision (the card warned the line number was unreliable after today's merges; it was not).\n\n## Reverse verification — run, not assumed, in both directions\n\n**The genuine property, which the new prose keeps.** I wired a real `new EventSource('/api/v1/stream')` into `packages/client/src/realtime-api.ts` and ran the conformance test:\n\n```\nAssertionError: UNCLASSIFIED surface — add a ledger row (ADR-0060): realtime:client/realtime-api.ts:transport(TRANSPORT-WIRED)\nTests  2 failed | 13 passed (15)\n```\n\nSo CI really does catch a wired transport nobody classified. That property is real and must survive the rewrite.\n\n**The limit, which the old prose hid.** Leaving that transport wired and writing **zero** authorization, I added only the tripwire key to the row's `covers`:\n\n```\nTests  15 passed (15)\n```\n\nThe build goes green on the hand edit alone. That is precisely the gap: CI forces the classification decision, it cannot verify the re-check was implemented. Both mutations were reverted (`git checkout HEAD --`, tree confirmed clean); the diff is the single prose line.\n\n## The rewrite\n\nThe new sentence keeps the anti-regression property in the foreground, then states its limit and its coverage caveat: the row is `experimental`; the tripwires watch a curated list of realtime source files; wiring a transport in one of them turns it into an unclassified surface and reddens the build until the row is upgraded with its enforcement site; that puts the requirement in front of a reviewer but does not check the re-check was written; a transport wired outside the watched files produces no key and no failure.\n\nWording mirrors PR #9056, which landed the same defect class on `authorization.mdx` today (`ratchet`, `curated`, `unclassified surface`, hand-maintained-vs-checked), so the two callouts describe one mechanism the same way.\n\n**No number was swapped for a freshly-measured one.** The new sentence carries no count at all — it names the mechanism and the watched-file caveat instead, and leaves the matrix file the authority on its own populations.\n\n## Scope\n\nProse only, as the card fences: no matrix row, row state, gate, tripwire or test behaviour changed. Whether the row *should* be upgraded is a different card with a different owner (`domain:identity` territory), not decided here.\n\nTwo out-of-scope defects measured on the way and filed unassigned rather than fixed in this PR — both change gate behaviour, so both belong to the matrix owner:\n\n- #9083 — the ledger accepts a `TRANSPORT-WIRED` key classified by the **experimental** row, so the enforcement site the tripwire note promises to hold out for is never required. This is the second leg of the reverse verification above.\n- #9084 — the `rest-server.ts` tripwire matches only a `/realtime` route literal, so it cannot fire for `/ws` or `/api/v1/stream`, the two transports this very page documents.\n\nNeither is addressed by this PR; both remain open.\n\n## Verification\n\n`node scripts/pm/dispatch-gates.mjs content/docs/protocol/kernel/realtime-protocol.mdx` derived three families. Run **after** the final commit, at head `5ee6068c9`, plus the universal NUL scan:\n\n| Gate | Result |\n|---|---|\n| `pnpm check:docs-audit-scope` | OK — scope in sync, 178 hand-written docs |\n| `pnpm check:docs-redirects` | OK — 92 entries, 98 chain probes |\n| `pnpm check:role-word` | OK — 43 baselined files, no new occurrences |\n| `pnpm check:nul-bytes` | OK — 5960 text files, no raw control bytes |\n\n`pnpm --filter @objectstack/dogfood test` green beforehand at the same tree (780 passed, 3 skipped, 110 files) — the matrix and its ratchet are untouched by this PR. The page re-parses under `fumadocs-mdx`.\n\nDocs-only, releases nothing ⇒ `skip-changeset` (applied and read back).\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_011RB4waLuNbdruCo6X9oobm)_"
+}

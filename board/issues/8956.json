@@ -1,0 +1,35 @@
+{
+  "number": 8956,
+  "kind": "pull_request",
+  "title": "feat(spec): export `urlUserinfoUsername` — the username half of the shared URL userinfo grammar (#8876)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-16T02:48:40Z",
+  "updated_at": "2026-08-16T03:31:42Z",
+  "closed_at": "2026-08-16T03:31:41Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": "2026-08-16T03:31:41Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/8956",
+  "body": "Fixes #8876\n\nAdds the username half of the URL userinfo grammar `@objectstack/spec/data` already owns: one additive pure helper, `urlUserinfoUsername`, beside `urlUserinfoPassword` in `packages/spec/src/data/driver/common.zod.ts` — **Option A as adjudicated on the card** (B refused by the #8082 single-parse ruling; C contradicts `MongoConfigSchema.url`'s declared text).\n\n## What changed\n\n- **One boundary parse, two accessors.** The RFC-3986 authority/userinfo boundary logic was extracted into an internal (unexported) `urlUserinfo` that both halves now call, so the two halves share the documented boundaries *by construction*, not by comment. `urlUserinfoPassword`'s behavior is byte-identical — the split/non-empty-password rules stayed in the accessor; every pre-existing test passes unchanged.\n- **`urlUserinfoUsername` semantics** (pinned in tests):\n  - judges the multi-host DSN form `new URL()` throws on (`mongodb://app@h1:27017,h2:27017/app` → `app`);\n  - parses the publish-refused `user:password@` shape correctly (stored legacy rows carry it; #8155's migration path must judge exactly those rows) — the refusal/parse distinction is pinned in one test;\n  - answers `''` for an empty username inside present userinfo vs `undefined` for no userinfo at all (`:pass@host` and `host` are different facts; the caller decides usability);\n  - returns the RAW component, percent-encoding preserved — same convention as the password half and the byte-level alignment pin; decoding is value interpretation and stays with the caller (noted in TSDoc: `mongodb`'s `auth.username` expects a decoded value).\n- **Alignment pin extended** (`datasource-credential-redaction.test.ts`): a new property case asserts `redactUrlPassword` preserves the username byte-for-byte across all carrying + credential-free fixtures — the read door and the new accessor cannot drift.\n- **Zero acceptance change**: no Zod schema touched; the full pre-existing publish-door suite (refusals and accepted shapes) passes unchanged, which is the acceptance-diff control.\n- Regenerated `api-surface/data.json` + `export-origins/data.json` (exactly +1 entry each for the new export); changeset `@objectstack/spec` minor per the additive-public-export precedent.\n- Post-merge regen commit discharges the os-regen deferral after `origin/main` (#8936, which also touched these shards) was merged in; both sides' entries verified present in both shards.\n\n⛔ Deliberately NOT here: the consuming mongo arm (`service-datasource` / `buildMongoUrl` / `options.auth`) — that is #8696's scope (services lane), which unblocks on this merge. #8873 remains open. #8155 remains open.\n\n## Verification\n\nFull union re-run at head `16ea5d3` (after the final commit; `origin/main` incl. #8936 merged in, closure rebuilt):\n\n- `pnpm --filter @objectstack/spec test`: **406 files / 10 729 tests passed** at head (includes the 10 new `urlUserinfoUsername` cases + the extended alignment pin). One unrelated flake in an earlier pre-merge partial run did not reproduce on either complete run (pre-merge complete run: 405/10 721 passed).\n- `pnpm --filter @objectstack/spec typecheck`: green at head (incl. test-layer tsconfig).\n- Consumer sweep, downstream direction: `@objectstack/service-datasource` (the future #8696 consumer) — **19 files / 432 tests passed** and `tsc --noEmit` green at head, on the rebuilt closure; package untouched by this PR.\n- Built-artifact proof: the new function was exercised from `packages/spec/dist/data/index.js` (multi-host / legacy `user:pass@` / empty-username / no-userinfo / percent-encoded all answer as pinned) and appears in `dist/data/index.d.ts` — not a stale-dist read.\n- `check:generated`: all artifacts current at head (only `api-surface` + `export-origins` were stale, regenerated narrowly via `--fix`; post-merge deferral discharged the same way).\n- Gate union at head (derived from actual changed paths via `scripts/pm/dispatch-gates.mjs`): `check:nul-bytes`, `check:merge-driver`, `check:spec-parsed-alias`, `check:type-source-resolution`, `check:cross-package-test-inputs`, `check:changeset-gate-self-tests`, `check:objectui-changeset`, `check:query-options-erasure`, `check-adr-0087-registration`, `check-changeset-no-major`, `check-empty-changeset`, `check:type-check-coverage`, `check:type-check-debt --re-measure` (33 entries, none above recorded) — all green.\n\nNo ADR-0087 obligation (acceptance set unchanged — additive export only, per the triage's mechanical test).\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01Fgvh1iEJfxetei7aNVdtJt)_"
+}

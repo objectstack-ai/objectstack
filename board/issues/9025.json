@@ -1,0 +1,34 @@
+{
+  "number": 9025,
+  "kind": "pull_request",
+  "title": "docs(devx): re-tally three type-check ledger notes onto their present state",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "size/m",
+    "skip-changeset",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-16T06:53:32Z",
+  "updated_at": "2026-08-16T07:15:59Z",
+  "closed_at": "2026-08-16T07:15:58Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": "2026-08-16T07:15:58Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/9025",
+  "body": "Fixes #8982\n\nThree per-entry notes in `scripts/check-type-check-coverage.mjs` still narrated a bootstrap margin that is gone. Each is re-tallied from a **fresh measurement**, not rescaled from the older composition.\n\n## Measurement\n\nMeasured at **`62b2655d8`** (this branch merged with `main`), with the workspace closure built exactly as `lint.yml` builds it before the gate:\n\n```\npnpm exec turbo run build --filter='./packages/*' --filter='./packages/*/*'\n```\n\nThe numbers reproduce: the same three tallies came out **identical, class for class and file for file, at `b849d9e33` and at `62b2655d8`** — three `--re-measure` runs in total, each reporting `1926 raw tsc error(s) total` and `surplus: none`. That satisfies the header's own determinism check, and it is the direct answer to the file's record that three readings of one entry were in circulation in a single day.\n\n**No `errors` field is lowered or raised**, and none can be: every entry in both ledgers already sits exactly at its measurement, so there is no tightening worklist to fold in. The `@objectstack/lint` entry is untouched.\n\n## The three, and why one is not like the others\n\n| entry | ledger | field | the defect |\n|---|---|---|---|\n| `@objectstack/mcp` | TEST_DEBT | 53 | note stated `RECORDED 63 is a bootstrap margin` |\n| `@objectstack/service-storage` | **DEBT** | 51 | note stated `RECORDED 52 is a bootstrap margin`, and its composition still summed to 42 |\n| `@objectstack/objectql` | TEST_DEBT | 355 | true as history, misleading as present tense |\n\nNote the middle row: `@objectstack/service-storage` is a **DEBT** entry, not TEST_DEBT as the card's title has it. The stale narration is exactly as described; only the ledger label differs.\n\n### `@objectstack/mcp` — 53\n\nRe-tallied and **unchanged class for class**, so the existing composition is kept rather than rewritten: TS18046 x51, TS6133 x1, TS2352 x1, with the 51 in exactly the four files and counts already named. What the old tally never said is *where* the two singletons are, and both are now located: `src/skill-prompts.test.ts(185,23)` for the TS2352, `src/__tests__/mcp-server-runtime.test.ts(7,1)` for the TS6133. The margin sentence becomes history — lowered 63 to 53 by #7888 / PR #8225.\n\n### `@objectstack/service-storage` — 51\n\nThe note's composition described the **42-era** pile and was never restated when the entry was lowered onto 51. Re-tallied at 51:\n\n- code-tier **8** — TS2339 x4, TS2347 x4\n- config-tier **26** — TS2835 x23, TS2550 x3\n- noise **17** — TS7006 x15, TS6196, TS6133\n\nThe useful finding is that **the code tier is the half that did not move** — the same 8, all of them in two files. The entire 42 to 51 delta is config-tier and noise (TS2835 21 to 23, TS7006 11 to 15, plus TS2550 x3, a class the old tally did not list at all). Which PRs contributed the +9 is **not attributed**: the pre-#8225 per-file counts were not retained, and an invented attribution is worse than an admitted gap. Both concentrations the old note gave for the 42 re-verify at 51 (11 and 7). One now-false reference is corrected: `storage-adapter-list-retirement.test.ts` no longer exists under that name.\n\n### `@objectstack/objectql` — 355 (the tense fix)\n\nKept deliberately distinct from the other two. Its margin was **never tightened away — it was spent**: real growth carried the measurement 345 to 355 while the slack absorbed it, so the recorded number stood still and the measurement rose to meet it. The note now says that the margin sentence is history, that this entry measures its recorded 355 exactly, and states the distinction plainly — the other four were *tightened onto* their measurement, this one was *overtaken by* its own. Both routes end in the same place, and only one shows up as a lowering in the history.\n\nRe-tallied at 355 (the previous tally was taken at 333 and summed to 297, so it never described this entry at its recorded size):\n\n- code-tier **300** — TS2339 x115, TS2554 x113, TS2345 x24, TS2749 x14, TS2322 x14, TS18048 x8, TS2353 x4, plus 8 singletons\n- config-tier **9** — TS2550 x8, TS6059 x1\n- noise **46** — TS7006 x36, TS6133 x9, TS6196 x1\n\nGrowth is not uniform: TS2554 rose 93 to 113 and TS2345 19 to 24 while **TS7006 fell** 47 to 36. Per file, `src/engine.test.ts` x102 leads.\n\nOne older claim is **discharged rather than carried**: the note flagged two TS2304 unresolved names in `src/save-meta-response-conformance.test.ts` as lines that cannot run. That call was taken — the file reports zero errors today and the package has no TS2304 left anywhere.\n\n## Top-of-ledger paragraph\n\nThe `BOOTSTRAP MARGINS` block carried a paragraph stating that mcp's and service-storage's notes were *still* stale and were being left to their own cards. That is this card, so the paragraph is replaced by the settled statement, keeping the arithmetic-vs-tense distinction that makes the objectql case readable.\n\n## Verification\n\nGate union run **after** the final commit, at `59fca46af`:\n\n```\npnpm check:nul-bytes           OK (5950 text files scanned, no raw ASCII control bytes)\npnpm check:type-check-coverage OK (64/77 packages type-checked, 13 DEBT, 1 exempt)\npnpm check:type-check-debt     OK (33 entries re-measured in 213.0s, 1926 raw tsc errors,\n                                  none above its recorded number; surplus: none)\n```\n\nGate families re-derived against the actual changed path with `node scripts/pm/dispatch-gates.mjs scripts/check-type-check-coverage.mjs`, which names these two families and no others.\n\n`skip-changeset`: `scripts/` is not published package source, so this PR releases nothing.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_011RB4waLuNbdruCo6X9oobm)_"
+}

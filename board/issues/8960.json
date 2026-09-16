@@ -1,0 +1,34 @@
+{
+  "number": 8960,
+  "kind": "pull_request",
+  "title": "docs(deployment): promote Docker to the lead path in self-hosting",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-16T03:05:00Z",
+  "updated_at": "2026-08-16T03:25:34Z",
+  "closed_at": "2026-08-16T03:25:32Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": "2026-08-16T03:25:32Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/8960",
+  "body": "Fixes #8911\n\nDocker is not one option among three — it is how the platform ships. `docker/Dockerfile` and `.github/workflows/docker-publish.yml` build and publish `ghcr.io/objectstack-ai/objectstack` on every framework release; the page's ordering told a new reader the opposite, and ordering is the strongest signal a docs page has.\n\nThis is the re-framing the card asked for, not a rewrite. Prose that was already correct is left alone.\n\n## What changed — one file, `content/docs/deployment/self-hosting.mdx`\n\n- **Docker leads.** `## Option 2 — Docker (official image)` becomes `## Docker (official image) — the standard path` and moves to the front of the deployment paths. The `Option 1/2/3` peer numbering is gone from all three headings — that numbering was the thing asserting they were equals.\n- **Compose and Kubernetes are shapes of the same path.** Compose gains one lead-in sentence tying `build: .` back to the Dockerfile in the section above; the Kubernetes subsection already opened with \"The same image works unchanged\" and is untouched.\n- **Bare Node.js is demoted, not deleted.** It moves after the Docker family and opens with a new sentence on when it is genuinely the right choice (no container runtime available or permitted, an existing systemd / configuration-management estate, debugging directly on the box). **Its body is byte-identical across the move** — `git hash-object` reads `e48b3aed70947447d4d21e3373b4f6cffcef8129` on both sides.\n- **Intro paragraph and frontmatter description** re-ordered to match. The `It assumes you have read…` sentence that #8947 rewrote is preserved exactly as it landed.\n- **`OS_ARTIFACT_URL` stays on this page**, unchanged, as Axis A operational detail. Its heading text is deliberately untouched: `environment-variables.mdx`, `cli.mdx` and `docker/Dockerfile` all point at the `#artifact-pinned-boot-os_artifact_url` anchor.\n\n## Image facts, verified from the tree\n\nPer the card, no image reference was copied out of the existing prose.\n\n| Claim in the prose | Checked against | Verdict |\n|---|---|---|\n| Registry and name `ghcr.io/objectstack-ai/objectstack` | `docker-publish.yml` `IMAGE:`, `docker/Dockerfile` header | correct |\n| Tag ladder: exact / major.minor / major / `latest` | `docker-publish.yml` `metadata-action` `tags:` | correct |\n| `latest` only on stable publishes | `enable=${{ !contains(version, '-') }}` | correct — now stated in the prose |\n| Published multi-arch | `platforms: linux/amd64,linux/arm64` | correct |\n| non-root user, health check, `OS_ARTIFACT_PATH` / `OS_PORT=8080` preset | `docker/Dockerfile` | correct |\n| **Example version `14.8.0`** | `packages/cli/package.json` is **17.0.0** | **stale — fixed** |\n\n`14.8.0` appeared five times while the CLI is at 17.0.0 (GA'd 2026-08-14, per `content/docs/releases/v17.mdx`) — three majors stale, in what this PR makes the lead position, which is the failure the card called out as worse than the ordering itself. All five now read `17.0.0`.\n\n### One bounded in-place fix, named with its evidence\n\nThe `Dockerfile (self-built runtime, equivalent)` block claimed equivalence with the official image while omitting two things `docker/Dockerfile` actually does: it ran as root (missing `RUN chown node:node /srv/app` and `USER node`, source lines 52-53) and hard-coded `8080` in the health check where the real one reads `process.env.OS_PORT||8080` (source line 63). Same defect class as the card (Docker prose drifted from the tree), mechanical, correct form pinned verbatim by the source file, no other claim on this file, same gate families. Fixed here rather than filed, because the prose two paragraphs above advertises non-root as a property of the image being described.\n\n## Verification\n\nGates run at `e9a250f`, the final commit:\n\n- `pnpm check:docs-audit-scope` — scope in sync with `content/docs/`, 177 hand-written docs; release-owned pages review-only\n- `pnpm check:role-word` — 43 baselined files, no new occurrences (this page has zero and is not baselined)\n- `pnpm check:nul-bytes` — 5935 text files scanned, no raw ASCII control bytes\n\nThe set was re-derived against the actual changed path with `node scripts/pm/dispatch-gates.mjs content/docs/deployment/self-hosting.mdx`, which returns exactly `check:docs-audit-scope` and `check:role-word`; `check:nul-bytes` is the any-edit convention. No links were added or removed, and the only inbound-linked anchor on this page is preserved.\n\nDocs-only, no user-visible package change — `skip-changeset`.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_011RB4waLuNbdruCo6X9oobm)_"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 9184,
+  "kind": "issue",
+  "title": "`os meta resync` reports a nonzero skip count with no explanation — the outcome every pre-#8692 install now sees permanently",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-16T23:42:43Z",
+  "updated_at": "2026-08-17T02:07:05Z",
+  "closed_at": "2026-08-17T02:07:05Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9184",
+  "body": "Split out of #9130, which covered the **docblock** half (delivered by PR #9183). This is the **runtime-output** half, promoted after a triage reconciliation on that card — see [the reconciliation comment](https://github.com/objectstack-ai/objectstack/issues/9130#issuecomment-5310276209) for why it was initially deferred and why that deferral was withdrawn.\n\n## The gap\n\nAfter #8692's forward-only ruling (PR #9129), `bootstrapPlatformAdmin` stamps `managed_by: 'platform'` on new rows, and pre-existing `'admin'`-stamped rows are deliberately **never** migrated — a stored `'admin'` cannot be told apart from a genuine Setup takeover, so restamping could silently overwrite real admin edits.\n\nThe consequence is correct and permanent: on **every install created before that ruling**, `os meta resync` reports something like `resynced 0 / skipped 8`, forever, by design.\n\nWhat an operator sees is a command that appears to do nothing, with no indication that this is the intended outcome rather than a failure. The docblock (PR #9183) now explains it — but that is documentation someone has to go looking for, and the reason they would go looking is that the output already confused them.\n\n## Why this is not the deferrable kind of polish\n\nThe usual startup-scope test — \"has anyone asked for it?\" — is the wrong instrument here. This is not a feature request with speculative demand; it is a **guaranteed** recurring confusion with a known population (every pre-ruling install) and a known trigger (running a documented command). The pull is structural rather than reported.\n\nContrast the genuinely deferrable case, #9022: surfacing `attestedAt` / `attestedBy` in `os doctor`. Those fields have no reader and no forced encounter — nobody hits them unless they go looking. Here the operator is handed the confusing output whether or not they were curious.\n\n## Suggested shape\n\nOne line alongside the skip summary when `skipped > 0`, naming the provenance value responsible and that it is intentional — enough that the reader stops wondering whether the command failed. Something in the shape of:\n\n> `resynced 0 / skipped 8` — 8 row(s) are `admin`-owned and are left alone by design (see `--help`).\n\n⛔ Deliberately **not** specifying the wording, the exact trigger condition, or whether it belongs on every run vs only when `skipped > 0` and `resynced == 0` — those are the implementing PR's call, and the surrounding output conventions in `packages/cli/src/commands/meta/resync.ts` should decide them rather than this card.\n\n⚠️ Read the vocabulary on current `origin/main` before writing the string: `'user'` is the **legacy** spelling, normalized to `'admin'` by `normalizeManagedByVocab` (`sys-permission-set.object.ts`), so a message naming only one of them may be wrong for stored legacy rows. PR #9183's docblock handles this distinction — match it rather than inventing a second phrasing.\n\n## Reference\n\n- `packages/cli/src/commands/meta/resync.ts` — the skip summary\n- `packages/plugins/plugin-security/src/bootstrap-platform-admin.ts` — the seeder docblock carrying the #8692 reasoning, and the neutral-framing log message the docblock now matches\n- #9130 / PR #9183 (the docblock half) · #8692 / PR #9129 (the forward-only ruling that makes this permanent) · #9022 (the contrasting, genuinely deferred case)"
+}

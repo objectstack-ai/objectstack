@@ -1,0 +1,35 @@
+{
+  "number": 9077,
+  "kind": "pull_request",
+  "title": "fix(lint): a dashboard header modal action's target resolves against declared pages, only (#9013)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-16T08:29:57Z",
+  "updated_at": "2026-08-16T09:06:10Z",
+  "closed_at": "2026-08-16T09:06:09Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": "2026-08-16T09:06:09Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/9077",
+  "body": "Fixes #9013\n\n## What broke, and which way\n\n`validateDashboardActionRefs`'s `resolveActionTarget` accepted, for `actionType: 'modal'`, a defined action name, a bare object name, and the `verb_object` prefix form (`create_`/`new_`/`add_`/`edit_`/`update_` + a defined object) — on its docblock's claim that it mirrored the objectui runtime dispatch. That mirror was deleted: maintainer ruling objectstack#6739-A (2026-08-09) decided a `type: 'modal'` string target names a PAGE, only; objectui#4764 retired the object fallback in the shared `useActionModal`, and objectui#4782 (merged 2026-08-16T06:28:14Z) deleted `DashboardView`'s own second copy of the prefix convention after enumerating both repos' corpora and finding zero producers.\n\nThe inversion ran **both ways**: `os validate` blessed buttons that now dispatch to a named refusal at runtime, and it ERRORED on a page-named modal target — the one shape the runtime serves (the old resolver consulted actions and objects, never `stack.pages`).\n\n## The changes (the card's three items, plus two named additions)\n\n1. **`packages/lint/src/validate-dashboard-action-refs.ts`** — for `actionType: 'modal'`, a string target resolves only against declared pages (`stack.pages`). `MODAL_VERB_RE` is deleted; the docblock's mirror claim is rewritten to cite the post-#4782 dispatch; the modal refusal message/hint now name the page contract and point at `actionType: 'form'` with an `object.view` form-view target (mirroring objectui's shared `modalTargetRefusalMessage` wording). `script` resolution is unchanged.\n2. **`packages/lint/src/validate-dashboard-action-refs.test.ts`** — the pinning tests flip: the three retired shapes (defined action name, `verb_object` against a real object, bare object name) are now pinned as refusals, and a new test pins that a declared-page target resolves. The #3367 repro keeps its 2-errors-1-warning shape with its comment corrected.\n3. **`content/docs/deployment/validating-metadata.mdx`** — the example no longer marks `create_opportunity` (verb-prefix form) as valid; it now shows it as an error with the prescription, plus a valid declared-page target.\n4. **`packages/lint/src/authoring-rules.ts`** (same file surface, same defect class) — the rule's registration comment still described \"a header or widget action ... resolves to no defined action\"; corrected to the script/action, modal/page split.\n5. **ADR-0087 semantic entry `dashboard-header-modal-target-page-only`** (`packages/spec/src/migrations/entries/semantic/18.…` + regenerated `registry.ts`). This is the changeset machinery's own requirement, not scope creep: the changeset below is declared **BREAKING** and carries a FROM → TO prescription, so the only honest `check:adr-0087-registration` disposition is `registered`. `spec-changes.json` and the upgrade guide are byte-unchanged by design — step-18 entries project into those artifacts at the major cut (same as `analytics-authorable-unknown-keys-refused`).\n\n## Changeset — real, `minor`, declared BREAKING\n\n`@objectstack/lint` is published and this narrows the accept set of a gating `os validate` rule, so no `skip-changeset`. Bump is `minor` per the post-v17-cut lockstep convention (`check-changeset-no-major.mjs` pushes breaking changes to `minor` outside the launch window; precedent: `analytics-authorable-unknown-keys-refused`), with a `**BREAKING**` declaration, the FROM → TO, and `adr-0087: registered dashboard-header-modal-target-page-only`. `@objectstack/spec` is bumped too because the ledger entry lands in its shipped registry.\n\n## Proof the narrowing refuses (reverse verification, direction decided in advance)\n\nPredicted: against the origin/main resolver, exactly 4 tests red — 3 because the old code **accepts** the retired shapes, 1 because the old code **refuses** a page-named target; the #3367 repro green in both regimes (its stack declares neither page nor object, dead either way). Measured exactly that (fix committed first; old source stood up via `git restore --source=origin/main`, then restored from HEAD):\n\n```\n× passes a modal action that names a declared page\n× ERRORS on a modal action that names a defined action — an action is not a page\n× ERRORS on the retired verb_object convention, even against a real object\n× ERRORS on a bare object name — the create-form fallback is retired\nTest Files  1 failed | 72 passed (73) · Tests  4 failed | 2057 passed\n```\n\nRestored at HEAD: `73 passed (73) · 2061 passed | 4 skipped`.\n\n## Verification at `25bd737b5` (the union ran after the final commit, clean tree)\n\n- `pnpm --filter @objectstack/lint test` — 73 files / 2061 passed; `typecheck` clean.\n- `pnpm --filter @objectstack/spec test` — 406 files / 10743 passed; `typecheck` clean; `check:generated` — all 13 artifacts current (`check:migration-registry`, `check:spec-changes`, `check:upgrade-guide` included).\n- Gate union derived via `node scripts/pm/dispatch-gates.mjs` over the real changed paths, all green at `25bd737b5`: `check:changeset-gate-self-tests`, `check:cross-package-test-inputs`, `check:doc-formula-expressions` (lint), `check:docs-audit-scope`, `check:merge-driver`, `check:objectui-changeset`, `check:role-word`, `check:spec-parsed-alias`, `check:type-source-resolution`, `check-adr-0087-registration`, `check-changeset-no-major`, `check-dev-prereqs` (after the full packages-closure build, as lint.yml runs it), `check-empty-changeset`, `check:nul-bytes`, plus the test-file convention gates `check:query-options-erasure`, `check:type-check-coverage`, `check:type-check-debt` (re-measure, no drift), `check:engine-double-contract`, `check:where-matcher`.\n- Consumption-radius sweep: no other fixture or rule spells the retired shapes — the only remaining `verb_object` mentions are immutable CHANGELOG history; other `create_opportunity` hits are unrelated (a flow name, a convert param, a translation fixture).\n\nCorpus note: no dashboard in this repo's examples/apps authors `header.actions[]` at all (matching objectui#4782's enumeration), so no fixture re-spelling was needed outside the rule's own tests.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_011RB4waLuNbdruCo6X9oobm)_"
+}

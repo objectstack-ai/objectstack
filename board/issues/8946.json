@@ -1,0 +1,35 @@
+{
+  "number": 8946,
+  "kind": "issue",
+  "title": "packages/cli and packages/lint have no declared input radius for examples/**, so their four live-importing tests still never run on an examples-only PR",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-16T02:05:21Z",
+  "updated_at": "2026-08-16T05:19:51Z",
+  "closed_at": "2026-08-16T05:02:04Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8946",
+  "body": "## What was measured\n\nWhile building the live-import inventory (#8754, PR #8945), the coupling population split cleanly into three tiers by what CI can actually see. Measured on `origin/main` @ `7b3c0335dac0f9c01d2c536f12208cde53692305`:\n\n| tier | count | mechanism |\n|:--|--:|:--|\n| `invisible` | 4 | no declared dependency, no declared input glob |\n| `inputs-declared` | 2 | `$TURBO_ROOT$/examples/app-showcase/**` on the package's `#test` task |\n| `graph-visible` | 63 | imported by workspace package name, dependency declared |\n\n`packages/qa/dogfood` sits in the covered tiers because it does both: its `package.json` declares `@objectstack/example-showcase` and `@objectstack/example-crm` as `workspace:*`, **and** `CROSS_PACKAGE_TEST_INPUTS['@objectstack/dogfood']` carries an `examples/app-showcase/**` glob that `turbo.json` mirrors onto `@objectstack/dogfood#test`.\n\n`packages/cli` and `packages/lint` do neither. Their four test files reach the showcase app by test-only **relative import** across a workspace boundary no package dependency declares:\n\n```\npackages/cli/test/i18n-section-coverage.test.ts\npackages/cli/test/i18n-tab-coverage.test.ts\npackages/lint/src/validate-translatable-sections.test.ts\npackages/lint/src/validate-translation-references.test.ts\n```\n\n## Why this is worth a separate card\n\nThe inventory now makes the coupling **discoverable** — a dev editing the app can run `pnpm examples:live-imports` and see exactly which assertions read the file they are touching. That was the whole of #8754's scope, deliberately.\n\nWhat the inventory does not do is make CI **run** those tests. Both scoping layers still judge them by where they live, so an examples-only PR still cannot fail on them, and the first signal is still a red `Test Core` in the shared merge queue — which stalls every lane, not just the one that made the edit (queue build [31825946401](https://github.com/objectstack-ai/objectstack/actions/runs/31825946401) is the signature; it caught #8231's remainder twice in one round).\n\nThe mechanism to close it already exists and is already used by a sibling package. `CROSS_PACKAGE_TEST_INPUTS` in `scripts/check-cross-package-test-inputs.mjs` drives both layers from one declaration: `--union-into` adds the package to the affected shard when the diff touches a declared glob, and `--verify` requires `turbo.json` to hash the same globs so the task cache moves with them.\n\n## Suggested next step (not prescribed here)\n\nAdd an input radius for `@objectstack/cli` and `@objectstack/lint` naming the example-app paths their tests actually read, and mirror it onto the matching `#test` tasks in `turbo.json`. The inventory's reverse index already reports the exact paths, so the radius can be kept narrow rather than `examples/**`:\n\n```\nexamples/app-showcase/src/data/objects/contact.object.ts\nexamples/app-showcase/src/data/objects/semantic-zoo.object.ts\nexamples/app-showcase/src/system/translations/index.ts\nexamples/app-showcase/src/ui/pages/task-triage.page.ts\nexamples/app-showcase/src/ui/views/contact.view.ts\n```\n\nTwo things worth deciding rather than assuming, which is why this is filed rather than done:\n\n- **Radius vs. cost.** A declaration puts `packages/cli` and `packages/lint` tests on every PR touching those app files. That is the trade the affected-subset optimisation exists to avoid paying blindly, and the narrow-glob option above is the mitigation.\n- **Overlap with the decoupling fork.** Whether these four should keep asserting over the live app at all is a separate, still-open call (the fork #8515 already had to make once, package-by-package: synthetic fixtures vs. frozen snapshots vs. a lint-time guard). A declared input radius is orthogonal — it makes the current coupling honest to CI without deciding that question — but if the fork is resolved toward decoupling, part of this work becomes unnecessary. Sequencing is a triage call.\n\n## Backlinks\n\n- #8754 — the inventory card (scope was recording and surfacing the coupling only)\n- PR #8945 — where the three-tier measurement above comes from\n"
+}

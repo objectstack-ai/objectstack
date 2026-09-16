@@ -1,0 +1,34 @@
+{
+  "number": 9196,
+  "kind": "issue",
+  "title": "protocol.ts's `migrateStoredMetadata` JSDoc (\"What it declines to touch, and says so\") still lists three declines — #8957 added a fourth there too",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-17T01:03:07Z",
+  "updated_at": "2026-08-17T10:10:45Z",
+  "closed_at": "2026-08-17T10:10:45Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9196",
+  "body": "Filed while implementing #9175 (unassigned — a finding, not the fix).\n\n## What I found\n\n#9175 is about `content/docs/deployment/cli.mdx`'s \"Three things it\ndeliberately declines\" table being stale — #8957 (PR #9059, `b740440bd`)\nadded a fourth decline path to `migrateStoredMetadata` (a row stored under a\nnon-canonical metadata type, reported `outcome: 'skipped'`) and the docs\ntable was never updated to match.\n\nWhile verifying the count directly against the code\n(`packages/metadata-protocol/src/protocol.ts`), I read the function's own\nJSDoc header, immediately above `migrateStoredMetadata`'s signature:\n\n```\n/**\n * ...\n * ## What it declines to touch, and says so\n *\n * - **`flow` rows with no reachable automation engine.** ...\n * - **Types with no repository write path** (neither `allowOrgOverride` nor\n *   `allowRuntimeCreate`). ...\n * - **Rows that still fail the current schema after conversion.** ...\n */\n```\n\nThis is a **separate** enumeration from the one on the docs page, and it is\n**also** stale — it lists exactly the same three items it always has and\nnever picked up the #8957 addition either. Same root cause as #9175 (PR\n#9059's dispatch brief named the code surface and the gates, said nothing\nabout either docs face — one hand-written mdx table, one hand-written JSDoc\nlist, both count-carrying, both un-enforced), just a second victim.\n\n## A second, pre-existing thing worth a maintainer's eyes (not asserted as a bug)\n\nThe JSDoc's three items and the (pre-fix) cli.mdx table's three items are\n**not the same three**:\n\n- The JSDoc's first bullet, \"`flow` rows with no reachable automation\n  engine\" (`outcome: 'skipped'`, when no `canonicalizeFlow` is reachable),\n  has **no row** in the cli.mdx table.\n- The cli.mdx table's third row, \"A flow whose rename the conflict guard\n  refused\" (`outcome: 'failed'`, on a real `conflicts.length > 0`), has **no\n  bullet** in the JSDoc.\n\nThis predates #8957 and is plausibly intentional — the JSDoc documents the\nfunction's full internal surface (including a path only a non-CLI caller can\nhit, since `os migrate meta --stored` always supplies a live automation\nengine per the \"Flows are covered, and cost one extra plugin\" prose already\non the docs page), while the docs page documents only what an operator\nrunning the actual command can observe. Flagging so a maintainer can confirm\nthat's the intended scope split rather than two lists that just drifted from\neach other independently.\n\n## Suggested disposition\n\nAdd a fourth bullet to the JSDoc for the non-canonical-stored-type decline,\nmirroring the cli.mdx fix in #9175's PR — the exact reasoning is already\nwritten at the `isNonCanonicalStoredType` call site's own inline comment\n(`packages/metadata-protocol/src/protocol.ts`, inside `migrateStoredMetadata`,\nthe `if (isNonCanonicalStoredType(rawType))` branch), so this is mechanical.\nOptionally also resolve or explicitly document the flow-bullet /\nflow-conflict-row scope difference above.\n\nBacklinks: #9175 (the cli.mdx fix this was found while doing) · #8957 / PR\n#9059 `b740440bd` (the fourth decline, in both places).\n"
+}

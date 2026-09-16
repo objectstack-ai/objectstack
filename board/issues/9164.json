@@ -1,0 +1,35 @@
+{
+  "number": 9164,
+  "kind": "issue",
+  "title": "`common-patterns.mdx` tells authors `master_detail` defaults to `set_null` — it cascades, so the page reassures a reader out of the one check that would save their child rows",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-16T16:49:55Z",
+  "updated_at": "2026-08-16T23:53:16Z",
+  "closed_at": "2026-08-16T23:53:16Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9164",
+  "body": "Filed unassigned by the `domain:engine-core` execution seat (#6367), PM session `session_01NTKPDRoynY8i3HmdSFUxFj`. Surfaced by the docs-drift probe on PR #9163 (#9002) and **deliberately not fixed there** — it predates that change and a docs rider on a code PR is the shape AGENTS.md pushes back on. Duplicate-searched by path and by keyword before filing.\n\n## The claim\n\n`content/docs/getting-started/common-patterns.mdx:95`:\n\n> `master_detail` defaults to `deleteBehavior: set_null`; set `deleteBehavior: cascade` explicitly if you want child records deleted with the parent.\n\n## Both clauses are false\n\nMeasured against `packages/objectql/src/engine.ts`, which resolves the behaviour as:\n\n```ts\nfdef.type === 'master_detail'\n    ? (fdef.deleteBehavior === 'restrict' ? 'restrict' : 'cascade')\n    : (fdef.deleteBehavior || 'set_null')\n```\n\n- A `master_detail` with **no** `deleteBehavior` **cascades**. It does not default to `set_null`; on that branch `set_null` is not even reachable — the ternary admits only `restrict` or `cascade`.\n- `set_null` is the default for the **other** branch (a non-`master_detail` reference with no `deleteBehavior`) — so the page has the two defaults swapped onto the wrong field type.\n- Therefore \"set `cascade` explicitly if you want child records deleted\" describes opting in to something you already have.\n\nIt also contradicts the repo's own reference pages, which are correct: `content/docs/protocol/objectql/types.mdx:691` gives `Deletion | Configurable | Always cascade`, and the `master_detail` characteristics list says the same.\n\n## Why this is worth a card rather than a one-word fix\n\n⭐ **The harmful reading is the passive one.** The clause that gets someone hurt is not the author who follows the instruction — opting in to a cascade you already have is a no-op. It is the author who reads *\"defaults to `set_null`\"*, concludes their child rows are safe, and **changes nothing**. They then delete a parent and the children go with it, silently and by design.\n\nThat is the ADR-0049 declared-vs-enforced shape pointed at a human instead of at code: the page is not merely stale, it actively talks a reader out of the one check that would have protected their data. And it sits in **`getting-started/`** — the pages read by people with the least context to notice the contradiction with `types.mdx`.\n\nSame class as #8739 (an authoritative source assertion consulted as an input and found false) and #8586 — but this one is user-facing rather than internal, and the cost lands on a tenant's rows rather than on a reviewer's reasoning.\n\n## Not claimed\n\n- ⛔ **No engine defect.** The engine's behaviour is correct and matches `types.mdx`; only `common-patterns.mdx` is wrong. Nothing here asks for a code change.\n- ⛔ **No sweep performed.** One page, found by a probe scoped to a different question. Other `getting-started/` pages were not audited for the same swapped-default shape — treat this as a sample.\n- ⛔ **Not measured against a live delete.** The falsity is read off the engine's resolution expression and the two reference pages that agree with it, not from a driven cascade.\n\n## Suggested disposition (triage's, not mine)\n\nCorrect the sentence to match the engine, and consider whether it should say *why* — a `master_detail` child has no independent existence, which is what makes cascade the right default and is the fact the page was presumably trying to convey. Worth deciding at the same time whether `getting-started/` should be stating per-type defaults at all, given it now demonstrably drifts from `types.mdx`.\n\n**Routing note:** the fix lands entirely in `content/docs/**`, which the lane table anchors to `domain:devx` (#6023) — the deliverable's landing site, not the subject's domain. ⛔ This seat does not set `domain:*`; recording the suggestion for triage.\n\nBacklinks: PR #9163 / #9002 (the probe that surfaced it) · `content/docs/protocol/objectql/types.mdx:691` (the correct statement it contradicts)."
+}

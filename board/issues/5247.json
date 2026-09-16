@@ -1,0 +1,35 @@
+{
+  "number": 5247,
+  "kind": "issue",
+  "title": "console 的内嵌索引编辑器与 IndexSchema 漂移:`where` vs `partial`、枚举里的 `brin` —— 阻塞 #4001 对 IndexSchema 的收紧",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched",
+    "repo:objectui"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T12:17:05Z",
+  "updated_at": "2026-08-16T04:57:21Z",
+  "closed_at": "2026-08-16T04:57:21Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5247",
+  "body": "Blocked-by: #5248\n\n发现于 #4001 批 20(`data/object.zod.ts` 内层块收紧)的逐站点测量。**本 issue 只记录,不在批 20 里修**——批 20 因此**有意保留** `IndexSchema` 未收紧,是该批 14 个站点里唯一没关的一个。\n\n## 症状\n\nobjectui 的 console 为 `object.indexes[]` 里的条目自带了一份**手抄的 JSON-Schema**:\n\n- `packages/app-shell/src/views/metadata-admin/EmbeddedItemEditor.tsx` → `FALLBACK_SCHEMAS.index`\n\n它存在的原因是合理的:`index` 是**内嵌专用子类型**,没有自己的元数据类型,框架没有槽位发布它的 schema(文件里的注释也这么写:*\"Once / if the framework grows an embedded-sub-type registry, this can move server-side too.\"*)。注释同时声称这些 fallback *\"mirror the framework's Zod definitions\"* —— 而它已经不再 mirror 了:\n\n| console 表单提供 | `IndexSchema` 声明 | 后果 |\n|---|---|---|\n| **`where`**(标题 \"Partial-index predicate\") | **`partial`** | 键名不同,当前被静默丢弃 |\n| 枚举含 **`brin`** | `['btree','hash','gin','gist','fulltext']` | 值非法,今天就会被拒 |\n\n## 为什么它现在是静默失败\n\n编辑器的保存路径(同文件,`spliceEmbedded` → `client.save(parentType, …)`)把表单结果拼回**父对象**再 PUT 整个对象。服务端 `saveMetaItem`(`packages/metadata-protocol/src/protocol.ts`)对 body 做 `safeParse` 并在失败时 422,但**逐字保留原 body**。\n\n`IndexSchema` 目前是 zod 默认的 `.strip`,所以管理员在 \"Partial-index predicate\" 里填的内容:\n\n1. 保存成功,没有任何提示;\n2. `where` 作为未声明键被 spec 在每次后续 parse 时丢掉;\n3. 即使它没被丢掉也没用 —— 见下。\n\n## 两个方向都是死的\n\n`partial` 和 `type` **都没有任何 DDL 消费者**。`driver-sql` 的 `syncDeclaredIndexes` 只读 `name` / `fields` / `unique`(以及 ADR-0120 D3/D4 之后的 `nullSafeColumns`);`DeclaredIndexInput`(`packages/plugins/driver-sql/src/schema-drift.ts`)的字段列表就是这四个。\n\n> 注意区分:`sql-driver.ts` 里确实有读 `partial` 的地方(`introspectIndexes` / `parseIndexDdl`),但那是从**数据库自身的 DDL** 解析出来做漂移检测的,和声明式元数据里的 `IndexSchema.partial` 无关。\n\n## 为什么这会阻塞 #4001\n\n关掉 `IndexSchema` 会把上面第 1 步变成 **422**,而 422 打在 console 自己渲染的控件上 —— 这正是 #5114 那一类(区别是这次在发布**之前**抓到)。\n\n但\"先修生产者再关\"还不够。因为 `partial` 本身也是死的,收紧后把作者指向 `partial`,是一条**声称超出平台实际交付**的 guidance —— 台账 finding 18 记录的正是本战役已经发过的四条假 guidance。\n\n所以关掉 `IndexSchema` 至少需要两件事先落地:\n\n1. **生产者侧(contract-first)**:objectui 把 `where` 改成 `partial`,并把枚举对齐 spec(去掉 `brin`,或在 spec 里声明它——后者需要有驱动读它)。\n2. **ADR-0049 enforce-or-remove**:给 `IndexSchema.type` 和 `IndexSchema.partial` 一个结论——要么接上驱动,要么退役。\n\n顺带值得考虑的第三条:这类 fallback schema 本身就是漂移源。框架长一个**内嵌子类型注册表**(把 `index` 的 schema/form 发布出去,像 `validation` 已经通过 `HAND_CRAFTED_SCHEMAS.validation` 做的那样)能一次性消灭这个复制品。\n\n## 现状记录在三个地方\n\n- `packages/spec/src/data/object.zod.ts` 的 `IndexSchema` JSDoc(明确写了\"不要顺手补完\");\n- `packages/spec/src/data/object-strictness-batch20.test.ts` §4 —— 把当前的 strip 行为钉住,使它改变的那天是**有意**改变;\n- `docs/audits/2026-07-unknown-key-strictness-ledger.md` 的 `data/` 行。\n\n复现(当前 `main` + 批 20 分支上行为一致):\n\n```ts\nObjectSchema.parse({\n  name: 'x', label: 'X', fields: { name: { type: 'text', label: 'N' } },\n  indexes: [{ fields: ['name'], where: \"status = 'open'\" }],\n}).indexes[0].where  // => undefined,静默丢弃\n```"
+}

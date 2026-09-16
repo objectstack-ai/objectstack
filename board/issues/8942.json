@@ -1,0 +1,34 @@
+{
+  "number": 8942,
+  "kind": "issue",
+  "title": "[finding] The GitHub MCP `list_issues` multi-label filter is OR (union), not AND — a two-label query returns every issue carrying either label",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-16T01:54:52Z",
+  "updated_at": "2026-08-16T10:33:44Z",
+  "closed_at": "2026-08-16T10:33:38Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8942",
+  "body": "Platform-fact finding for the skills lane (references/platform-readings.md candidate — one-line fact-table change). Filed unassigned by the `domain:spec` seat, session `session_01Fgvh1iEJfxetei7aNVdtJt`. Measured 2026-08-15, during a live PM shift.\n\n## Measured\n\n`mcp__github__list_issues` with `labels: [\"pm:dispatched\", \"domain:spec\"]` against `objectstack-ai/objectstack` returned **36 issues** — the UNION of both labels' holders (cards carrying only `pm:queue`+`domain:spec`, only `pm:blocked`, and a `domain:*`-less `pm:dispatched` card from another lane were all present). The GitHub REST `GET /issues?labels=a,b` contract is AND (intersection); this MCP tool (GraphQL-backed, cursor pagination) evidently compiles the list to ANY-of.\n\n## Why it matters (the trap)\n\nA seat that queries `[<state-label>, <domain-label>]` expecting \"my lane's cards in state X\" gets a superset that includes **other lanes' cards in that state** and **its own cards in every state**. Read as an in-flight inventory, that's a false fleet-wide dispatch reading; read as a candidate list, it invites claiming another lane's card. The failure is silent — the result is well-formed and plausibly sized for big lanes.\n\n## The safe pattern (already the standing rule, now with a mechanical reason)\n\nWhole-lane single-label read (`labels: [<domain>]`) + local intersection on the returned label arrays — exactly what the pm-dispatch skill's 「整车道一次读全,本地求交」 prescribes. This finding turns that from a query-visibility argument into a correctness requirement.\n\n## Suggested disposition\n\nOne line in `references/platform-readings.md`'s API-reading traps table. Not graded by me — `finding` awaits first-touch grading per the standing protocol."
+}

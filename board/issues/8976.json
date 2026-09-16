@@ -1,0 +1,36 @@
+{
+  "number": 8976,
+  "kind": "issue",
+  "title": "install-local routes accept any authenticated session (plus an x-user-id header fallback) — a schema-mutating channel with no capability check, cross-tenant on walled multi-org deployments",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "security",
+    "target:v17"
+  ],
+  "assignees": [
+    "qq9340100"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-16T03:37:32Z",
+  "updated_at": "2026-08-16T07:11:51Z",
+  "closed_at": "2026-08-16T07:11:31Z",
+  "closed_by": {
+    "login": "qq9340100",
+    "id": 313832657,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8976",
+  "body": "Cross-repo filing from the `repo:cloud` whole-repo seat (objectstack#6026, session `session_0137TnZzVmkSjXxoSVgPFS6S`, 2026-08-16), surfaced by a deployment survey for the walled-posture EE SaaS shape (cloud#1331). Fix lands in this repo (`packages/cloud-connection`), hence filed here per the issues-live-where-the-fix-lands rule. Unassigned — `domain:*` routing belongs to the triage seat (the lane table maps `packages/cloud-connection` to `domain:cli`; taking that as a suggestion, not a label).\n\n## Measured (framework `origin/main`; consumer context at cloud `origin/main`)\n\n`packages/cloud-connection/src/marketplace-install-local-plugin.ts:1320-1341` — `requireAuthenticatedUser` accepts **any** better-auth session, and falls back to trusting a bare **`x-user-id` request header** (`:1338`). It is the only check on:\n\n- `POST /api/v1/marketplace/install-local` (`:454`) — accepts an **inline manifest**, hot-registers its objects into the shared registry (`:646-651`), runs `ql.syncSchemas()` against the shared database (`:694-702`), writes the install ledger (`:681-688`), runs seed data (`:709`);\n- `DELETE …/install-local/:id` (`:780`), `…/reseed-sample-data`, `…/purge-sample-data`.\n\n**No capability is consulted on any of them.** For comparison, the platform's other metadata-write doors are gated: `PUT /api/v1/meta/:type/:name` requires `manage_metadata` (#6603; `packages/rest/src/meta-item-save-capability-gate.test.ts`), and `POST /api/v1/ai/tools/:toolName/execute` requires `manage_metadata` or `studio.access`. This route is the odd one out — declared as an operator-grade action, enforced as \"anyone with a login\".\n\nTwo test files look like they cover this and do not: `marketplace-install-local-posture-gate.test.ts` is the ADR-0120 D5e confirmation ceremony for installation-wide unique indexes — and the **caller satisfies it themselves** by passing `confirmGlobalUniques` in their own request body (`:634-637`); `marketplace-install-local-tenancy-posture.test.ts` selects the seeding path, not authorization.\n\n## Why it matters, by deployment shape\n\n- **Walled multi-org EE deployment (one shared DB, orgs = customers — the cloud#1331 SaaS shape):** any signed-up user of any customer org can install/uninstall packages, i.e. **mutate the schema every tenant runs on**. Metadata is environment-scoped, not org-scoped, so the Layer 0 tenant wall does not reach these writes — this is a cross-tenant write channel. It also defeats the cloud-side maintainer ruling that AI `build` must be structurally closed on that shape (closing the build agent while this route stays open closes the front door and leaves the loading dock unlocked).\n- **Single-org self-host:** severity is lower (all users are one tenant's), but \"any employee with a login can alter the schema and run seed data\" still contradicts the operator-action framing, and the `x-user-id` fallback means an **unauthenticated** caller who can reach the port can pass the check where no session store is consulted first.\n\n## Suggested direction (dev/triage judgement, not a ruling)\n\nRequire a real capability (`manage_metadata`, matching the `/meta` precedent) on all four routes, service/operator tokens exempt as elsewhere; scrutinize the `x-user-id` fallback separately — if it exists for a dev-mode reason, gate it to that mode explicitly. A two-principal test (capability holder 2xx, plain member 403, header-only caller 401/403) pins the class. Note the mount itself is deliberately unconditional on the EE image (cloud#1287 moved it out of the `marketplaceUrl` ternary so air-gapped boxes stop 404ing) — the fix here is authorization on the routes, **not** un-mounting the plugin; whether walled deployments should additionally be able to disable it is cloud-side and tracked under cloud#1331.\n\nRe-check commands:\n\n```\ngit grep -n \"requireAuthenticatedUser\" -- packages/cloud-connection/src/marketplace-install-local-plugin.ts\ngit grep -n \"x-user-id\" -- packages/cloud-connection/src\ngit grep -rn \"manage_metadata\" -- packages/rest/src | head -5   # the precedent gate\n```\n\nRefs: cloud#1331 (deployment context + survey record), cloud#1344 (the AI-agents half of the same \"close every metadata-write channel\" ruling), cloud#1338 (the harness that will assert this refusal)."
+}

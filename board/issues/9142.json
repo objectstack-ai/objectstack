@@ -1,0 +1,34 @@
+{
+  "number": 9142,
+  "kind": "pull_request",
+  "title": "test(scaffold-e2e): cover the pinned Dockerfile shape a real scaffold ships",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "ci/cd",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-16T13:31:57Z",
+  "updated_at": "2026-08-16T14:57:00Z",
+  "closed_at": "2026-08-16T14:56:58Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": "2026-08-16T14:56:58Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/9142",
+  "body": "Fixes #9117\n\nThe docker leg of `scaffold-e2e` scaffolds with `--skip-install` and installs the generated project in a separate step, so the scaffolder's **own** post-install work never runs — and the Dockerfile runtime-image pin landed by PR #9115 (for #9017) lives exactly there. The shape the job built and booted was therefore the unpinned one (`FROM ghcr.io/objectstack-ai/objectstack:latest`), while every real `npx create-objectstack` user ships the pinned one. The pin silently ceasing to happen was invisible to this job.\n\nThis lands the card's **first shape**: a second, throwaway project scaffolded the way a real user does — no `--skip-install` — asserting only that the emitted Dockerfile names the `@objectstack/cli` version the project actually resolved. No docker build: the two shapes differ by exactly one `FROM` tag, and the existing leg already proves the image builds and boots. Option 2 (relocating the install into the scaffolder) was **not** taken and no impracticality is claimed — see the residual at the bottom.\n\n## What only this leg can catch\n\n`runtime-image.test.ts` covers the *rewrite* on fabricated input. What needs an end-to-end run is the pin never **running**: a scaffolder that stops calling it, or an install path that no longer leaves a resolvable CLI behind. Both are proven discriminating below.\n\n## The three branches, all measured\n\nThe step distinguishes two failure classes rather than skipping on any install trouble. When the scaffolder's install leaves no CLI behind, the registry is asked whether the emitted range was satisfiable at all:\n\n| Situation | Verdict |\n|:---|:---|\n| pin ran | green — `FROM` tag == resolved CLI |\n| pin did not run, CLI resolvable | **red**, naming the pin |\n| install left no CLI, range unsatisfiable | warn + skip (the unpublished-version window) |\n| install left no CLI, range satisfiable | **red** — the scaffolder's install path is broken |\n\n## Verification — union run at `d1ae6ce7e`, the final commit\n\nCI cannot be run locally, so every run below executes the **literal `run:` block** extracted out of `scaffold-e2e.yml` by a small YAML harness, with `RUNNER_TEMP` / `GITHUB_WORKSPACE` set — the bytes CI will run, not a re-typed copy. The workflow invokes `bin/create-objectstack.js`, which resolves `dist/`, so **every ablation was rebuilt** and its arrival in the artifact proven with `scripts/ablation-dist-preflight.mjs` before the run's colour was allowed to mean anything.\n\nGreen, unmodified scaffolder:\n\n```\nresolved @objectstack/cli   : 17.0.0\nemitted Dockerfile FROM tag : 17.0.0\npinned as expected: FROM tag == resolved CLI (17.0.0)\nSTEP EXIT=0\n```\n\n**Reverse verification** (direction predicted before running: red in the first two, exit 0 in the third, red in the fourth):\n\n| Ablation | dist preflight | Result |\n|:---|:---|:---|\n| `pinRuntimeImage` returns success without writing | marker present | **red** — see message below |\n| the pin call removed from `index.ts` wiring | call-site marker **absent** | **red**, identical message |\n| scaffolder version bumped to an unpublished `99.0.0` | n/a (runtime read) | **exit 0 + `::warning::`** — the window branch |\n| `detectPackageManager` returns a broken pm | marker present | **red** — install-path branch |\n\nThe red message names the pin, which is what the card asked for:\n\n```\n::error::the scaffolder did NOT pin the Dockerfile runtime image: the emitted\nFROM tag is 'latest' but this project resolved @objectstack/cli@17.0.0. This is\nthe file every real npx create-objectstack user ships (#9017); the\n--skip-install legs in this job cannot see it.\n```\n\nWorth recording: under ablation 1 the scaffolder still printed its own `✓ Dockerfile runtime image pinned to 17.0.0` while the file was untouched — the exact \"silently not happening\" mode, and the reason a leg that reads the emitted file is the only thing that catches it.\n\nRestore legs: `index.ts`'s call-site marker was proven **present** again after ablation 2, no `ABLATION_9117` string survives in `src/` or `dist/`, the working tree is clean at `d1ae6ce7e`, and `pnpm --filter create-objectstack test` is **58 passed (4 files)** from the restored tree — this PR changes no package source.\n\nGates re-derived against the actual changed path (`.github/workflows/scaffold-e2e.yml`), which added nothing beyond the dispatched list — all green at `d1ae6ce7e`: `check:node-version`, `check:required-contexts`, `check:shard-attestation`, `check:workflow-status-functions`, `check:nul-bytes`, `node scripts/check-shard-attestation.mjs`. Control-byte self-scan of the edited file: clean.\n\n## The comment that had gone stale\n\nThe docker leg claimed to exercise \"the exact Docker path a real `npm create objectstack` user ships\" — true only of the `--skip-install` variant since PR #9115. It now states its scope precisely and points at the new step for the pinned half. The file header gained the same split.\n\n## Residual, stated rather than hidden\n\nIn the unpublished-version window the new leg warns and skips instead of asserting. That is not a design preference: the fallback which rewrites unresolvable `@objectstack/*` ranges to `latest` lives in the workflow's install step, and relocating it into the scaffolder is the separate design the card records. The degradation is evidenced (the registry is asked) rather than blanket, so a broken install path still fails loudly. That fork needs a card of its own; out of scope here, and no other card is addressed by this PR.\n\n## Changeset\n\nNone — `.github/workflows/**` only, releasing nothing user-visible. `skip-changeset` applies.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_011RB4waLuNbdruCo6X9oobm)_"
+}

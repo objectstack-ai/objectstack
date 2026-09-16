@@ -1,0 +1,34 @@
+{
+  "number": 9185,
+  "kind": "issue",
+  "title": "技能卡：条款②入队闸门——契约面 diff 复核与 needs:contract-review 复审链",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-16T23:44:40Z",
+  "updated_at": "2026-08-17T01:37:45Z",
+  "closed_at": "2026-08-17T01:37:29Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9185",
+  "body": "## 背景（事故驱动）\n\n- objectstack#9173 往 `packages/spec/src/api/error-code-ledger.zod.ts` 新增错误码并令 `hydrateOverlayIntoRegistry` 由接受转拒绝——按条款②（维护者 2026-08-12：凡改变契约接受/拒绝行为或扩大公开面的卡一律 `claude-fable-5`）须按该档派发，实际按低档派发。派发席自报，维护者转达至 skills 席。\n- 同日 #9170（+7 码）/#9177（+9 码）在同一契约面（同一 ledger 文件）的加宽改动已合并——同一漏洞一日三穿。\n- 结构成因：`dispatch-gates.mjs --tier` 只推导条款①（路径可推导）；条款②依赖派发席在派发时刻做内容判断，无机器兜底。工具输出已诚实声明此限制。本卡不试图机器化内容判断，而是把强制关卡挪到**入队前按 diff 判定**——diff 是事实，卡片语义是预测。\n\n## 规则包（维护者已批，2026-08-16 会话）\n\n1. **入队闸门（SKILL.md）**：PR 实际 diff 触及契约面（`packages/spec/src/**`，含 error-code-ledger、`*.zod.ts` 契约 schema）且派发档位低于契约复审档位 ⇒ ⛔ 禁止入队。派发席职责止于：卡上记一行认定、挂 `needs:contract-review`、停手；⛔ 禁止自查放行。\n2. **资格双条件**：复审席必须同时满足 ① 跑在契约复审档位；② 非该卡派发席。犯规席在结构上无资格补救自己的犯规。\n3. **复审归属**：常设 = 统一分诊席（Routine 模型由维护者在 Routines UI 钉在契约复审档位）；分诊轮新增子轮清 `needs:contract-review`——只审契约增量 diff，结论一行写在卡上，清标签后卡方可入队。每小时一轮即天然攒批。过渡期（分诊 Routine 未建成前）由 skills 席代行。\n4. **降档保险丝**：分诊轮开场自检当前模型，非契约复审档位 ⇒ 该子轮整体跳过、标签原样留置。卡在队列外等待是安全态；契约复审⛔不适用配额豁免降档——它的存在意义就是补偿一次低于地板的派发。\n5. **档位单一来源**：标签语义命名 `needs:contract-review`（命名审的对象，不含模型名——维护者指出：标签硬编码模型名，模型升级即全量标签迁移）；档位仅在 `dispatch-gates.mjs` 定义常量 `CONTRACT_REVIEW_TIER`（现值 `claude-fable-5`），SKILL.md 行文写「契约复审档位以 dispatch-gates 常量为准」。模型升级 = 改一行一个文件。\n6. **派发时提示（dispatch-gates.mjs）**：新增 `SUSPECT_TIER_GLOBS`（`packages/spec/src/**`），`--tier` 命中时输出「条款②嫌疑面：尽力从卡片内容判档；无论派什么档，入队前按 diff 过闸门」。措辞明确是提示不是裁定。\n\n## 实施面\n\n- `.claude/skills/pm-dispatch/SKILL.md`：入队闸门 + 复审链（上 1–5 条）。行数在现天花板内（当前 682），不提顶。\n- `scripts/pm/dispatch-gates.mjs`：`SUSPECT_TIER_GLOBS` + `CONTRACT_REVIEW_TIER` 常量 + `--tier` 输出行 + 自测（嫌疑命中 / 不命中 / 输出措辞三向覆盖）。\n- `references/dispatch-runbook.md`：视需要补一行闸门操作序（可选）。\n\n## 排序与档位\n\n- 同文件硬串行：排 objectstack#9148、#9178 之后执行。\n- 本卡开发档位：条款①路径强制（`.claude/skills/pm-dispatch/**`）。\n- ADR 类终局三步：PR 挂起等维护者手工合并。\n\n## 授权链（维护者原话）\n\n- 「分诊 Routine 钉 fable 是没问题的」\n- 「目前是 Fable，除非你有更好的方案」\n- 「needs:fable-review 这个标签不好，下次模型升级怎么办」（→ 第 5 条：标签改名 + 常量单源）"
+}

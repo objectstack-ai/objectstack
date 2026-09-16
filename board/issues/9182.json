@@ -1,0 +1,33 @@
+{
+  "number": 9182,
+  "kind": "issue",
+  "title": "Every PR that registers an error code regenerates the same 11 reference pages — the ledger is a serialization point, and a PR carrying a new code is in a race it keeps losing",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:queue"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-16T23:35:44Z",
+  "updated_at": "2026-08-17T06:15:08Z",
+  "closed_at": "2026-08-17T06:15:08Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9182",
+  "body": "Filed unassigned by the `domain:metadata` execution seat (#6367), PM session `session_01NTKPDRoynY8i3HmdSFUxFj`. Measured while diagnosing why **PR #9173** (#9111) would not land. Duplicate-searched by file path and by keyword.\n\n## What was measured\n\n**PR #9173 changes 16 files. Twelve of them are shared:**\n\n```\npackages/spec/src/api/error-code-ledger.zod.ts          ← one line added\ncontent/docs/references/api/analytics.mdx               ← regenerated\ncontent/docs/references/api/auth.mdx                       …\ncontent/docs/references/api/automation-api.mdx\ncontent/docs/references/api/batch.mdx\ncontent/docs/references/api/contract.mdx\ncontent/docs/references/api/error-code-ledger.mdx\ncontent/docs/references/api/export.mdx\ncontent/docs/references/api/metadata.mdx\ncontent/docs/references/api/package-api.mdx\ncontent/docs/references/api/protocol.mdx\ncontent/docs/references/api/storage.mdx\n```\n\nAdding **one** error code regenerates **eleven** pages, because each carries a roll-up count (`+269 more` → `+270 more`).\n\n**Three of `main`'s last six commits touched that same set:**\n\n| commit | PR | what |\n|---|---|---|\n| `30b1c636a` | #9177 | registers 9 REST wire codes |\n| `09a9a8ae0` | #9170 | registers the dispatcher conformance codes |\n| `c80e7ae6a` | #8994 | reference tables stop marking `.default()` members required |\n\n`main` moved four times in the window this was observed (`30b1c636a` → `157570dfa` → `445ae4deb` → `fbb247cbd`).\n\n⇒ **Any two PRs that register an error code are mutually exclusive by construction.** Whichever lands second must merge, take main's side, re-run the os-regen sequence, and re-verify — and is then exposed again until it lands.\n\n## Measured consequence on PR #9173\n\nIt has been through this once already. The conflict was in the **hand-written** file: #9170 added `QUERY_OBJECT_MISMATCH` at the same ledger position as #9173's `REGISTRY_TYPE_NOT_CANONICAL`. Both intents were kept, alphabetically, via `scripts/pm/os-regen-merge.sh`.\n\n⚠️ **The eleven generated pages produced NO conflict at all** — which is the #8986 hazard signature, not a relief: the regen driver exits 0 while dropping a side, with zero conflict markers. It was only caught because the dev re-ran a **neighbour control** (does any page enumerate a sibling code while missing the new one?) rather than trusting the roll-up total. **A count cannot detect a code dropped from *some* pages; a neighbour comparison can.**\n\n## Why this is a card and not a fact of life\n\n⭐ **This repo has already diagnosed this exact pathology once, one layer down.** `CLAUDE.md` names `content/docs/releases/` *\"the single hottest merge-conflict magnet in the repo\"* — because every PR appended its own row — and the ruling was: **don't accrete; the release process compiles it centrally from per-PR changesets, which never conflict.**\n\nThe generated reference pages are the same shape with the same cause: **N PRs writing into one shared artifact**. The difference is that here the shared artifact is *generated*, so the conflict is silent (the driver exits 0) rather than loud.\n\nThe per-PR input that never conflicts already exists — the **ledger entry itself**. What does not exist is a compile step that keeps the generated pages out of the PR.\n\n## What a disposition has to decide\n\n1. **Take the generated pages out of PRs entirely** — generate at release/build time, the changeset model applied to `references/`. Highest cost, retires the class.\n2. **Make the roll-up counts not per-page** — the `+N more` total is what makes eleven pages change for one code. If the count were computed at render time, adding a code would touch **one** page.\n3. **Serialize deliberately** — a lane rule that at most one error-code PR is in flight, the way hot-file region rules already work. Cheapest, and it does not scale with merge volume.\n4. **Do nothing, and mandate the neighbour control** — accept the churn but make the silent-drop detection mandatory rather than something a good dev happened to invent.\n\n⛔ No recommendation between them. (2) looks disproportionately cheap for what it removes and is worth measuring first, but I did not measure whether the counts can be computed at render time, and a guess about a generator's structure is not an input.\n\n## Not claimed\n\n- ⛔ **No defect in any landed PR.** #9170, #9177 and #9173 each did the right thing; the cost is structural, not anyone's error.\n- ⛔ **Not measured: how often this actually bites.** Three of six recent commits is a snapshot, not a rate. A real answer needs the merge history over a working day.\n- ⛔ **Not the reason PR #9173 is not entering the merge queue.** That is a separate, still-unexplained blocker recorded at #9111 `5309751134` — the PR was measured CLEAN against `fbb247cbd` and still was not admitted. This card explains why it *keeps re-conflicting*, not why the queue refuses it.\n\nBacklinks: #9111 / PR #9173 · #9170 · #9177 · #8986 (where the silent-drop hazard was first paid for) · `CLAUDE.md`'s `content/docs/releases/` ruling (the same pathology, already ruled one layer down)."
+}

@@ -1,0 +1,34 @@
+{
+  "number": 9112,
+  "kind": "pull_request",
+  "title": "Translate pm-dispatch SKILL.md residual English fragments to Chinese (wave 2, final)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-16T10:44:42Z",
+  "updated_at": "2026-08-16T13:33:40Z",
+  "closed_at": "2026-08-16T13:33:39Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-16T13:33:39Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/9112",
+  "body": "Fixes #8958\n\nWave 2 (final) of the Chinese-stock translation card. Scope: exactly one file, `.claude/skills/pm-dispatch/SKILL.md` — the residual English narrative fragments in the already-Chinese-dominant PM dispatch skill, translated semantics-preserving. Waves 1a (PR #8972) and 1b (PR #9049) landed earlier; merging this PR closes the card.\n\n**ADR-class: human merge only.** This PR touches `.claude/skills/**`, so per the skills-update ruling it hangs for the maintainer's manual merge — no AI ready/queue/auto-merge.\n\nProvenance (2026-08-16, live PM session, verbatim, untranslated):\n\n> 我建议存量你一次性处理为中文。\n\n> .claude/skills/** 用中文,给客户的 skills 不要改。\n\n## What changed\n\n685 lines, was 686 (ceiling 686 — net decrease, no padding). Diff is +31/−32 on one file. Frontmatter byte-identical; structural counts identical to origin/main (16 H2, 7 H3, 97 stop-markers, 2 fence lines); the one blockquote reflow (3 lines to 2) is the translated anchoring rule.\n\nTranslated: the H1; the loop-stage line (select/claim/dispatch/collect/review/report/next batch, now 选卡 → 认领 → 派发 → 收集 → 复核 → 报告 → 下一批); section headers \"State model\" / \"Domain lanes\" / \"Guardrails (binding)\" / \"Report contract\"; the anchoring-rule blockquote; the one-board slogan; \"You are the reviewer of record\"; \"PM writes no files\"; \"AGENTS.md wins\"; \"Every dev agent works in its own worktree per repo\" and \"file-disjoint by construction\"; the four health-metric names; bolded lead-in handles (Model tiering, Stale-claim reclaim, Premise-first, Repair first, stale-premise check, \"claim before code\"); \"mark ready\" and \"held bug\" fragments.\n\n## Judgment calls (keep vs translate)\n\n- **Decision-frame region untouched.** The frame-sync checker's COPIES export declares this file's copy `lang: 'zh'` with Chinese anchors (`每个方案必须沿%N%固定评估轴` / `推荐意见必须基于这%N%轴给出理由`) — the region was already Chinese and stays byte-stable; the wave-1a review's warning about the published English copy is moot because no frame wording moved. `check:skill-frame-sync` self-test (12 cases) and gate both green.\n- **Cross-file-referenced handles keep an English gloss in parentheses**, verified by grep before deciding: \"State model\" and \"Domain lanes\" (referenced in `scripts/pm/ensure-pm-labels.sh` header comments), \"Guardrails\" (referenced in `scripts/pm/check-skill-line-ratchet.mjs` header and same-file 见 Guardrails), \"anchoring rule\" (same-file reference at the spec-seat paragraph, renamed at both ends), \"reviewer of record\" (matches wave-1a's identical rendering in `references/review-checklist.md`), \"one board, no second tracker\" (slogan mirrored in the published skill — kept as parenthetical slogan-handle, not a sync anchor), \"Report contract\", \"stale-claim reclaim\" (renamed at both in-file ends), \"model tiering\", \"premise-first\", \"repair first\", \"stale-premise check\", health-metric names (dispatchable inventory / decision inbox / release blockers).\n- **Deliberate keeps, untranslated**: frontmatter (machine anchor, byte-identical); the `Claim:` template and all its field names; the four-prong card-face items (platform long-term coherence / measured business pull / AI-agent error-resistance / startup scope discipline) — they serialize onto GitHub cards, where content is English by ruling; GitHub/platform literals (`stopped by the user`, `no active task; resumed from transcript`, `already claimed — yielding`, `Triage: lands in …; rationale: …`, `not planned`, MERGED, ACCEPT/REWORK/ESCALATE verdict names, \"awaiting a human merge\" report-section name — already used verbatim in prior seat reports); label/command/gate/path literals and the Report-contract JSON block; established loan terms (Backlog sweep, contract-first, file-at-destination, Epic, sweep, same-day churn, fixture triage, pin bump, org Project).\n- Verbatim maintainer quotes stay verbatim; no ambiguity silently resolved; no rule content changed.\n\n## Verification\n\nGate union run AFTER the final commit at head `28c400f75`, derived via `node scripts/pm/dispatch-gates.mjs` on the actual changed path (derivation added `check:doc-authoring` and `check:doc-formula-expressions` beyond the prompt-named families; both run):\n\n- `pnpm check:doc-authoring` PASS (376 files clean)\n- `pnpm check:pm-skill-id-lint` PASS (9 files clean)\n- `pnpm check:pm-skill-ratchet` PASS — SKILL.md is 685 lines (ceiling 686; headroom 1)\n- `pnpm check:skill-frame-sync` PASS (self-test 12 cases; 4 copies isomorphic across 3 files, 3 axes, 4 count mentions agree)\n- `pnpm check:skill-frame-freshness` PASS (frame current with origin/main)\n- `pnpm check:nul-bytes` PASS + control-byte self-scan of the changed file: clean\n- `pnpm --filter @objectstack/lint run check:doc-formula-expressions` PASS (22 examples across 395 files clean) after building the lint closure\n\n`skip-changeset`: `.claude/`-only, releases nothing — label applied with read-back.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_017TNzEetykdh7ceZGwuAPLq)_"
+}

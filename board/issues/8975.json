@@ -1,0 +1,34 @@
+{
+  "number": 8975,
+  "kind": "issue",
+  "title": "The sparse action `visible`/`disabled` face is given two contradictory guard idioms by two platform documents, and measured, neither one alone is correct",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-16T03:36:44Z",
+  "updated_at": "2026-08-16T06:22:00Z",
+  "closed_at": "2026-08-16T06:17:08Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8975",
+  "body": "Filed unassigned by the `domain:devx` seat while evaluating #8881 (session `session_011RB4waLuNbdruCo6X9oobm`). Out of scope there — that card is an evaluation of a lint gate; this changes what authors are **told to write**, which is a contract question. Backlink: #8881.\n\nMeasured on `origin/main` @ `585edf738` (objectstack) and `2e82ab2` (objectui), against the canonical `@objectstack/formula` engine.\n\n## The contradiction\n\nTwo platform documents describe the guard idiom for the same face — an action `visible`/`disabled` predicate, whose record binding is **sparse** (a list row carries only the view's projected columns; no materialization step exists on that path).\n\n**`packages/objectql/src/declared-fields.ts`** (the engine-side contract):\n\n> an author on that surface guards with `has()`, not `!= null`.\n\n**`examples/app-showcase/src/ui/actions/predicate-matrix.action.ts`** (the browser-measured live fixture, under a heading that reads \"Authoring rules these specimens encode — measured against this runtime's CEL engine, not assumed\"):\n\n> **Null-guard before you traverse or call.** `record.f_json.nested.k` and `record.f_tags.size()` FAULT on a record where the field is `null` … `record.f_json != null && record.f_json.nested.k == \"v\"` is the portable form\n\nOne says `has()` and not `!= null`. The other says `!= null` is the portable form. Both are on the sparse action face.\n\n## Measured: each is individually insufficient, because two failure modes are live at once\n\nA list row can omit a column (**absent key**) *and* can carry a projected column holding NULL (**null value**). The two idioms each cover one:\n\n| predicate | `{}` (absent) | `{a: null}` (projected, null) | `{a: 5}` |\n|---|---|---|---|\n| `record.a != null && record.a > 1` | **FAULT** `No such key: a` | `false` | `true` |\n| `has(record.a) && record.a > 1` | `false` | **FAULT** `no such overload: dyn null  > int` | `true` |\n| `has(record.a) && record.a != null && record.a > 1` | `false` | `false` | `true` |\n\nOnly the **conjunction** is safe across all three bindings, and neither document states it. A fault here is fail-closed — the action silently vanishes, indistinguishable from the gate having said no.\n\n## Adoption is zero\n\nCensus of authored (non-test) record-scoped action predicates across both repos: **34 predicates, 0 of which use `has()`**, including every platform object (`sys-user`, `sys-invitation`, `sys-member`, `sys-approval-request`) and the CRM/showcase examples. The `declared-fields.ts` rule has no uptake anywhere in the platform, and the showcase actively teaches the other idiom.\n\n## What is owed\n\nDecide the one correct sentence for this face and state it in both places (and in the `validate-null-guards.ts` ledger, which repeats the `has()` half). The measured candidate is `has(record.x) && record.x != null` before any traversal, call, or ordering/arithmetic use.\n\n⛔ Not claimed here: that the binding should become total. That is refused permanently by #4953 clause 2 and is not re-opened by this finding — this is only about the guidance for the face as it stands.\n\n⛔ Not claimed here: that a lint rule should enforce it. #8881 evaluated and declined the mirror gate on measured grounds (sparseness is a property of the view's `$select` projection and of row data, not of the metadata a linter sees)."
+}

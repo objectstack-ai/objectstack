@@ -1,0 +1,35 @@
+{
+  "number": 9086,
+  "kind": "issue",
+  "title": "`pnpm docs:start` is broken — the root delegate names `start`, but apps/docs declares `site:start`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-16T08:56:09Z",
+  "updated_at": "2026-08-16T11:16:48Z",
+  "closed_at": "2026-08-16T11:16:48Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9086",
+  "body": "Measured at `origin/main` 6a99ead9b while working #8973 (out-of-scope finding, filed unassigned per the dispatch's finding rule; not fixed there because that card produced no PR).\n\n## The defect\n\nRoot `package.json` line 24:\n\n```json\n\"docs:start\": \"pnpm --filter @objectstack/docs start\",\n```\n\n`apps/docs/package.json` declares no `start` script. Its scripts are: `dev`, `build`, `site:start`, `site:lint`, `types:check`, `postinstall`, `typecheck`. The runnable one is **`site:start`** (`next start`).\n\n```\n$ pnpm docs:start\n\n> @objectstack/spec-monorepo@4.0.1 docs:start /home/user/objectstack-8973\n> pnpm --filter @objectstack/docs start\n\n ERR_PNPM_RECURSIVE_RUN_NO_SCRIPT  None of the selected packages has a \"start\" script\n ELIFECYCLE  Command failed with exit code 1.\nEXIT=1\n```\n\nIts two siblings are fine — `docs:dev` resolves to `dev` and `docs:build` to `build`. Only the `start` delegate is misspelled.\n\n## Provenance\n\nBoth lines were introduced in the same commit, **159e29944** (2026-08-15): `apps/docs/package.json` got `site:start`, and the root got `docs:start` pointing at `start`. So the delegate has never worked; this is not a later drift.\n\n## Suggested fix\n\nOne character-level edit, `\"pnpm --filter @objectstack/docs site:start\"` — worth a quick check of whether anything else (docs prose, deploy notes) tells a reader to run `pnpm docs:start`.\n\n## Note on severity\n\nIt fails **loudly** with exit 1, so nothing green is hiding behind it — a reader hits an immediate error rather than a silent no-op. Graded low; filing rather than sitting on it, per the file-plainly rule.\n"
+}

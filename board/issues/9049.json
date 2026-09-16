@@ -1,0 +1,34 @@
+{
+  "number": 9049,
+  "kind": "pull_request",
+  "title": "Translate .claude/agents/os-dev.md narrative to Chinese (wave 1b of Chinese-stock translation)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-16T07:30:54Z",
+  "updated_at": "2026-08-16T08:41:24Z",
+  "closed_at": "2026-08-16T08:41:23Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-16T08:41:23Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/9049",
+  "body": "Part of #8958 (wave 1b — the card stays open for wave 2).\n\n**ADR-class / skills-equivalent surface: human merge only.** This PR must not be marked ready, queued, or auto-merged by any AI seat; the maintainer's merge is the veto window.\n\n## Provenance (2026-08-16, live PM session, verbatim, untranslated)\n\n> 我建议存量你一次性处理为中文。\n\n> .claude/skills/** 用中文，给客户的 skills 不要改。\n\n## What this PR does\n\nFull semantics-preserving translation of the remaining English narrative in `.claude/agents/os-dev.md` to Chinese, converging terminology with `pm-dispatch/SKILL.md` and the wave-1a files (认领/派发/复核/门禁/棘轮/停摆/派发词/裁决…). No rule changes; ambiguity preserved; every judgment call listed below. One file, one commit.\n\n**Machine anchors stay English byte-stable** (verified by md5 where block-shaped): frontmatter block (md5-identical), the JSON report contract block (md5-identical: keys, enum values, example strings), the attribution-footer example block (md5-identical), label names, commands, script/gate names, paths/globs, the os-dev-report comment marker, the Fixes / Part of forms, and all inline code spans.\n\n**Structural integrity vs origin/main**: line count 398 → 330 (ratchet ceiling 399 — net decrease, no padding); H2 heading count 10 → 10; ⛔-marker count 13 → 13; code-fence count 4 → 4; numbered-item count 17 → 17; top-level bullet count 28 → 28.\n\n## Gate evidence\n\nFull derived union run AFTER the final commit at head `6dd60e001` (pnpm forms, self-tests included): `check:agent-model-declared` PASS, `check:doc-authoring` PASS, `check:nul-bytes` PASS, `check:pm-skill-id-lint` PASS (0 issue-ID citations), `check:pm-skill-ratchet` PASS (330/399), `check:skill-frame-sync` PASS (\"4 copies … structurally isomorphic … 4 count mention(s) agree\"), `check:skill-frame-freshness` PASS (\"the decision frame in this tree is current with origin/main\"), and `pnpm --filter @objectstack/lint run check:doc-formula-expressions` PASS after building the lint dependency closure. Control-byte self-scan beyond the gate (the change touches the byte-discipline section): clean.\n\nDerivation delta: `node scripts/pm/dispatch-gates.mjs` on the changed path added `check:doc-authoring` and `check:doc-formula-expressions` beyond the dispatch prompt's named families — both run, both green. The derivation does not itself list `check:skill-frame-freshness` (its trigger is not path-shaped); the prompt named it and it was run green anyway.\n\nModel-tier probe (PM mechanism assumption, quoted verbatim from `--tier` output): \"Model tier — no path-derived mandate: the surface hits none of the 1 declared glob(s), derived here, not recalled.\" Run at fable by the PM's per-card decision (instruction-surface translation).\n\n## Translation judgment calls (complete list)\n\n1. **Decision-frame region kept partially English — deliberate, checker-driven.** `scripts/check-skill-frame-sync.mjs` declares this file's copy with `lang: 'en'`, English `start`/`binding` anchors, and English AXIS_MAP patterns, and its self-test pins byte literals from this exact file as mutation targets (the declaring sentence, the axis-2 bullet opening, the \"on three fixed axes\" / \"on all three axes\" fragments). Translating those would require editing the checker and its self-test in the same PR — outside this card's one-file scope. Kept English byte-stable: the declaring sentence, the three axis names (bold spans), and the binding clause \"Your recommendation must be justified on all three axes\". Translated: the section intro, the three axis bodies (converged with the internal-PM frame copy's established vocabulary), and the sentence tails around the anchors. Chinese glosses added in parentheses after each English axis name. Frame-sync and frame-freshness both green post-change.\n2. **Startup-focus ruling parenthetical**: the English source carries a paraphrase, not a quoted verbatim — \"(maintainer, 2026-08-04: this is a startup project and core capability comes first)\". Rendered as a Chinese paraphrase with the date preserved (维护者 2026-08-04:这是创业项目,核心能力优先), not as a fabricated 「」-quoted verbatim; the sibling frame copy in `pm-dispatch/SKILL.md` carries the dated verbatim quote for that ruling.\n3. **Headings translated except load-bearing handles**: \"Definition of done\" kept in its heading — `references/dispatch-runbook.md` cross-references it by name as an os-dev section anchor (\"住在 os-dev 定义的 Definition of done\"); \"Toolchain traps\" heading kept in its existing bilingual form; \"Worktree-first\" / \"Contract-first\" kept as protocol handles. Internal cross-references (本地验证范围, 字节与 sanitizer 纪律) renamed consistently at both ends inside the file.\n4. **The two footer example lines inside the text code fence kept byte-stable including their arrow annotations** — comments inside code blocks may translate, but these lines are pinned examples of exact stored-body shapes.\n5. **The bare-literal fallback sentence keeps \"os-dev-report\" unquoted**, exactly as the source does (backticks would not protect it from the sanitizer, which is the sentence's own point).\n6. **Already-Chinese regions left byte-identical** (the contract-fix bundle's clauses: ground rule 2 and the push-early/scratchpad half of rule 1, resource rule 6, the zero-match pnpm trap, the standard-clauses intro, the git-stash clause, the skip-changeset bullet) — no re-touch, per the ratchet's no-padding clause and minimal-diff review.\n7. **English protocol vocabulary retained inline** where it is converged terminology rather than narrative (draft PR, worktree, changeset, monitor, watcher, ablation, fixture, sanitizer, ratchet, Fixture triage, dogfood ablation), matching wave-1a and SKILL.md usage.\n8. **The model-pin HTML comment (below the frontmatter) translated**: it is narrative that `pm-dispatch/SKILL.md` designates as the authority on pin semantics; the frontmatter block itself is untouched.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_017TNzEetykdh7ceZGwuAPLq)_"
+}

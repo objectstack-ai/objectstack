@@ -1,0 +1,33 @@
+{
+  "number": 9138,
+  "kind": "issue",
+  "title": "spec builder: force `required: true` on a `master_detail` reference under `controlled_by_parent` (ruled Direction 2 of #8772)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:queue"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-16T13:28:41Z",
+  "updated_at": "2026-08-17T02:39:01Z",
+  "closed_at": "2026-08-17T02:39:01Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9138",
+  "body": "## Provenance\n\nSlice B (Direction 2) of the **#8772 maintainer ruling** (2026-08-16, comment [5306089973](https://github.com/objectstack-ai/objectstack/issues/8772#issuecomment-5306089973)): the authoring builder forces `required: true` on a `master_detail` reference under a `controlled_by_parent` object, so the unsafe shape cannot be **newly** declared. Carved into its own card on the maintainer's 2026-08-16 instruction (PM chat, verbatim: 「接受你的建议，开新卡，现有的可以关闭？」), recorded by PM session `session_01NYgmGheCzM6NrHZN436Cxf`. Intended lane: **`domain:spec`** (lands in `packages/spec`'s authoring builder) — `domain:*` left for triage per the single-producer rule.\n\n**Dispatch note: `model: claude-fable-5` mandatory** — authorable-shape narrowing (standing tiering rule).\n\n## The work\n\n- The builder path that emits a `controlled_by_parent` object's master `master_detail` reference sets/forces `required: true` (and refuses/corrects an explicit `required: false` there, loudly).\n- ⛔ Runtime untouched: `resolveCbpRelation`'s fallbacks stay (tolerance for existing installs); lint stays `warning` until the v18 sibling card lands. This slice is the bridge that makes new metadata safe while old metadata stays tolerated.\n- The 2026-08-15 survey stands: the shipped surface (`examples/**`, `packages/platform-objects/**`) holds exactly 3 `controlled_by_parent` objects, **all already `required: true`** — migration cost measured at zero for first-party.\n- Consumer-package fixture triage per standing rule (spec-touching change ⇒ run consumer packages' tests).\n- Note for implementer: `validate-security-posture.test.ts` lives in **`packages/lint/`** (the #8772 body mis-homed it) and pins runtime resolution, not the builder — it should stay green under this slice.\n\n## Re-check before acting\n\n- `git grep -n \"controlled_by_parent\" origin/main -- packages/spec | head`\n- Confirm the builder currently permits omitting `required` on that shape (the #8772 table's row 3).\n\nRefs: #8772 (ruling + measurement) · siblings: guard freeze note (identity, lands first), lint warning→error at v18 (devx)."
+}

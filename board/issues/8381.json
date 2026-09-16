@@ -1,0 +1,30 @@
+{
+  "number": 8381,
+  "kind": "issue",
+  "title": "The `nameField` write-side strip drops an author's EXPLICIT pointer when it coincides with the derivation — make it stored-row-aware (option C), now that #8184 has landed and the fence is lifted",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-13T10:15:11Z",
+  "updated_at": "2026-08-16T08:45:47Z",
+  "closed_at": "2026-08-16T08:32:39Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8381",
+  "body": "**Filed by the #8268 dev agent**, at the PM's ruling on that card's open question. Unassigned. The refinement below changes **no resolved answer today** — it is a fidelity fix for what gets persisted, not a behaviour fix.\n\n## Context — what shipped, and why\n\n#8268 converged the ADR-0079 `nameField` designation at the `/meta` read exits. That read stamp created a write obligation (the landed #4326 round-trip pin caught it immediately), so #8268 also shipped the write-side inverse: `SchemaRegistry.stripProvisionedPrimaryFrom`, reached via `stripMaterializedStampsFrom`.\n\nThat strip is **exactness-bounded** — the pointer comes off only when it is identical to what `provisionPrimary(body-without-pointer, { synthesize: false })` would designate. A pointer naming any other field is the author overriding the derivation and is kept untouched (pinned as `KEEPS an author's own designation that overrides the derivation`).\n\nThe PM ruled option **A** (ship the exactness-bounded strip) and asked for this card. Option **B** (do not strip) was ruled out: it bakes a read-added pointer into the tenant's `sys_metadata` row, its checksum and every history diff — the phantom-customisation harm #6562 already ruled against — and leaves the two halves of one seam asymmetric.\n\n## The residual divergence this card closes\n\n`nameField` is a single string, so \"the author wrote `nameField: 'name'`\" and \"the read derived `nameField: 'name'`\" are **the same bytes** in the served document. The strip cannot tell them apart, so an author's explicit pointer that happens to coincide with the derivation is dropped on a round trip.\n\nThis is NOT the trade `stripProvisionedSearchCompanionFrom` makes. That one compares against a platform-canonical field DEFINITION, where coincidence with something an author typed is implausible. Here coincidence is the **common** case: an author who picks `name` as the title on an object with a `name` field writes exactly what the derivation would have produced.\n\nPinned as an expected divergence in `packages/objectql/src/meta-object-primary-designation-roundtrip.test.ts` (`MEASURES that an author pointer identical to the derivation does NOT survive`), so a fix here turns that pin red and it should be updated in the same PR.\n\n## Why it is currently harmless, and when it stops being\n\n`registerObject` runs `provisionPrimary` over every base layer at load, so the pointer is **re-derived on every boot**: the resolved answer is identical with or without the stored key, now and at any future boot. What is lost is *stability of intent* — if a later edit adds a field that outranks the current one in `deriveDisplayField`'s tiers (tier 1 name-ish exact, in `NAME_ISH_EXACT` priority order; tier 2 affix; tier 3 declaration order), the title moves, where a stored explicit pointer would have held it.\n\n## The fix — option C\n\nMake the strip **stored-row-aware**: remove the pointer only when it is redundant with the derivation **and** absent from the currently persisted row. Lossless in both directions — a read-added pointer never persists, an author-written pointer never disappears.\n\nThis needs the existing stored row at the strip site, which means `saveMetaItem` itself rather than only the helper it calls.\n\n## ⚠️ The fence that blocked this on #8268 is LIFTED — do not re-derive it\n\n#8268 could not take this route because `saveMetaItem`'s body was concurrently held by **#8184**, and that card's dispatch fenced it off. **#8184 has since landed (`003feae65`)**, so `saveMetaItem` is available. Whoever takes this card should not re-discover the old fence and assume it still holds.\n\nNote `saveMetaItem` already reads the existing row on this path (the destructive-change diff and the provenance gate both consult it), so the stored body is likely reachable without a second read — confirm rather than assume.\n\n## Where (anchored on function names, not line numbers)\n\n- `packages/objectql/src/registry.ts` — `stripProvisionedPrimaryFrom` (the exactness-bounded strip as shipped), `stripMaterializedStampsFrom` (the whole-seam inverse), `materializeServedObjectOnto` (the read half).\n- `packages/metadata-protocol/src/protocol.ts` — `stripMaterializedFromRegistry` and `stripServedObjectColumns` (the helpers), and `saveMetaItem`, which holds the stored row this card needs.\n- ⚠️ Whatever shape this takes must keep the landed #4326 pins green: `meta-object-primary-designation-roundtrip.test.ts` and `meta-object-search-companion-roundtrip.test.ts`.\n\n## Scope note\n\n⛔ This is about the `nameField` strip only. The sibling findings on the same seam are separately tracked: **#8375** (the multi-tenant `indexes` stamp has no converger at all) and **#8376** (`needs-user-decision` — the read exits materialize the folded object while the registry materializes the base).\n\n## Related\n\n#8268 (the class fix and its stamp inventory) · #8184 (`003feae65`, whose landing lifts the fence) · #4326 (the byte-identical round-trip invariant) · #6562 · #8038 · ADR-0005 §Validation · ADR-0079\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_012WMpuAfA2KSdDjGF6tm1bH)_"
+}

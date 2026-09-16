@@ -1,0 +1,34 @@
+{
+  "number": 9101,
+  "kind": "pull_request",
+  "title": "test(approvals): pin the deliberately-unfiltered position expansion of the #8710 carve-out",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-16T09:54:28Z",
+  "updated_at": "2026-08-16T10:55:37Z",
+  "closed_at": "2026-08-16T10:55:36Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": "2026-08-16T10:55:36Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/9101",
+  "body": "Fixes #8863\n\nThe 2026-08-15 ruling on #8710 — *\"Access-conferring paths filter deactivated positions; addressing paths do not\"* — has two sides, and only the sharing side was asserted by a test. `ApprovalService.expandPositionUsers` reads `sys_user_position` RAW on purpose, and until now that carve-out was held up on this side by a doc comment alone: `sharing-rule.test.ts`'s `the ADDRESSING primitive stays a RAW directory read` guards the sharing helper, not this one, so \"fixing\" the apparent oversight here left the whole suite green while shipping a step that routes to nobody (#3807 / #3424).\n\nTests only. No production behaviour changed — `approval-service.ts` is byte-identical to `origin/main` (blob `4f0a054e` in the working tree, at `HEAD`, and at `origin/main`).\n\n## What landed\n\nTwo negative pins in `packages/plugins/plugin-approvals/src/approval-service.test.ts`, next to the existing position-expansion cases:\n\n1. **`an EXPIRED sys_user_position row STILL routes`** — the card's deliverable. Seeds a holder whose ADR-0091 D2 window lapsed in 2025 alongside an in-window control, and asserts both stay in the slate.\n2. **`the routing read never consults the sys_position catalogue`** — limb 3 of the same ruling, named in `expandPositionUsers`' own doc block. Same file, same defect class, same gate families; called out here because it is beyond the shape triage sketched. It asserts the absent `sys_position` read and not only the slate, because the slate alone cannot fail: nothing queries the catalogue at all, so a deactivated row is never looked at rather than deliberately kept, and an outcome-only assertion would pass for the wrong reason.\n\n## Ablation evidence — both pins were made to fail\n\nA pin asserting \"the expired holder is still there\" degrades into a tautology the moment its fixture stops carrying a lapsed window, and it degrades silently (`isGrantActive` reads an absent bound as unbounded, so a window-less row survives any filter). That is not hypothetical here — #9085 records a sibling case that passes with its subject fully ablated. So both pins were run against a deliberately-broken tree, at the final assertions:\n\n| Ablation (local, never committed) | Result |\n| --- | --- |\n| Window filter: `isGrantActive` + the `valid_from`/`valid_until` projection copied from sharing's `position-graph.ts` | pin 1 **RED** — `expected [ 'u6' ] to deeply equal [ 'u5', 'u6' ]`; 287 others green |\n| Catalogue gate: a `sys_position` lookup dropping holders on `active === false` | pin 2 **RED** — `expected [ 'position:sales_manager' ] to deeply equal [ 'u5' ]`; 287 others green |\n\nEach ablation turns exactly **one** test red — which is itself the card's premise measured: no other case in the suite covers this behaviour. Pin 2's failure output is the predicted regression stated literally: the slate collapses to the `position:sales_manager` literal no user can act on.\n\nRestoration proved by blob identity, not by eye: `git hash-object` on the working tree, `git rev-parse HEAD:&lt;path&gt;` and `git rev-parse origin/main:&lt;path&gt;` all report `4f0a054ee2708ac86e5923063754adddd468a719`.\n\n## TEST_DEBT ratchet\n\nThe first draft added +2 `TS2339` to `@objectstack/plugin-approvals`' frozen `TEST_DEBT` entry (348 → 350) — the same error the neighbouring position cases contribute via a bare `req.pending_approvers` on the `ApprovalRequestRow | ApprovalNodeAutoOutcome` union. Fixed at the source rather than by raising the ledger: narrowed off the `autoApproved` discriminant, and the optional slate read with `?.slice().sort()`. Entry back to **348, unchanged** — `--re-measure` reports \"surplus: none\".\n\n## Verification — union run at `cab5c4b28` (the final commit)\n\n- `pnpm --filter @objectstack/plugin-approvals test` — 23 files, **486 passed**\n- `pnpm --filter @objectstack/plugin-approvals typecheck` — clean\n- `check:nul-bytes`, `check:test-source-alias`, `check:type-source-resolution`, `check:query-options-erasure`, `check:type-check-coverage`, `check:engine-double-contract`, `check:where-matcher`, `check:i18n` — all exit 0\n- `check:type-check-debt --re-measure` — exit 0, 33 entries re-measured on the built closure, none above its recorded number\n\n`scripts/pm/dispatch-gates.mjs` re-derived against the actual changed path names exactly the families the dispatch listed — nothing missed. `check:i18n` needed `@objectstack/cli` built before it measured anything (it exits 1 with \"PREREQUISITE NOT MET\" otherwise, which is not drift); it is green on the built closure.\n\nTests-only, so no changeset — `skip-changeset` is already on the card.\n\n_Generated by [Claude Code](https://claude.ai/code/session_01Y26DJEHSBhhAQ6wwfsHNza)_\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01Y26DJEHSBhhAQ6wwfsHNza)_"
+}

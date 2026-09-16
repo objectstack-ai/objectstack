@@ -1,0 +1,34 @@
+{
+  "number": 8964,
+  "kind": "pull_request",
+  "title": "docs: add upgrading.mdx stating both upgrade halves and linking the per-major checklists",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-16T03:07:49Z",
+  "updated_at": "2026-08-16T03:24:42Z",
+  "closed_at": "2026-08-16T03:24:40Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": "2026-08-16T03:24:40Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/8964",
+  "body": "Fixes #8909\n\nAdds `content/docs/upgrading.mdx` and lists it in the **Build** group of the root `content/docs/meta.json`, after `api`.\n\n## The defect this closes\n\nThe two upgrade lifecycles — platform runtime and metadata app — run on separate clocks and were never distinguished anywhere in the docs. `content/docs/deployment/cli.mdx:821` already calls `os migrate meta --from 16` \"the metadata half of the upgrade\"; the other half was written down nowhere, and no page placed them side by side. The v17 upgrade checklist (66 actionable bullets, correctly written for app authors) sits at line 3270 of a 3691-line page with nothing linking to it.\n\n## Shape\n\nOne page, no directory, as the card ruled. `build-without-code.mdx` is the existing precedent for a bare `.mdx` listed directly in the root nav. The content measured out at roughly one page — fork, two halves, link table, disambiguation — so no structural escalation was needed.\n\n## Verified against source, not prose\n\nThe card's load-bearing good news is that `os migrate meta --from N` accumulates across skipped majors. I confirmed it in the source rather than the docs, and then measured it:\n\n`composeMigrationChain` (`packages/spec/src/migrations/chain.ts`) filters `MIGRATION_MAJORS` to `m > fromMajor && m <= toMajor` and `applyMetaMigrations` folds every resulting step in one pass. Probed against the real registry:\n\n```\n--from 16 -> hops [17]                       (1 step)\n--from 15 -> hops [16, 17]                   (2 steps)\n--from 14 -> hops [15, 16, 17]               (3 steps)\n--from 12 -> hops [13, 14, 15, 16, 17]       (5 steps)\nfrom=9  -> MigrationFloorError: the chain's support floor is 10\n```\n\nBoth premise clauses hold. Two further facts came out of the same read and are stated on the page:\n\n- **The support floor is 10** (`MIGRATION_SUPPORT_FLOOR`), a release-policy knob, and below it the command refuses rather than half-migrating.\n- **Semantic changes are never auto-applied.** `applyMetaMigrations` applies the mechanical transforms and reports the non-lossless residue as structured to-dos — measured at 73 to-dos for `--from 16` alone. The page says so explicitly, because \"run one command and you are done\" would be a false promise and it is precisely why the per-major checklists still matter.\n\nThe runtime half is likewise sourced: the one-major-wide load-time conversion window (ADR-0087 D2, retired at N+1) is what decides when a platform move forces an app move, and the artifact-pinned boot applies safe/needs-confirm drift while **refusing the boot** on destructive drift before the port binds.\n\n## Link, never copy\n\nEvery per-major checklist is linked at its `#upgrade-checklist` anchor for v9 and v12 through v17 — verified present on all seven pages. Nothing under `content/docs/releases/` is touched, and no bullet is duplicated: a second copy would silently rot, which is the failure class the v17 work just cleaned up. `content/docs/deployment/` is untouched as well (cards #8910 and #8911 hold those files concurrently).\n\n## Disambiguating link: yes\n\n`content/docs/references/kernel/package-upgrade.mdx` is a genuinely different concept — upgrading an *installed* package inside a deployment, with its own pre-check / snapshot / execute / rollback lifecycle. It is neither of the two halves, and a reader searching \"upgrade\" lands on it. The page therefore closes with a short \"Not this page\" section pointing at it. I did **not** add a reciprocal link from that file: it carries an `AUTO-GENERATED — DO NOT EDIT` banner and is regenerated from the spec source, so an edit there would be overwritten.\n\n## Third file, and why\n\n`.claude/workflows/docs-accuracy-audit.js` is regenerated. `check:docs-audit-scope` derives `ALL_HANDWRITTEN` from `content/docs/`, and a new hand-written page that is not registered makes a run that calls itself a FULL audit silently skip it — the gate goes red naming the omission. Produced with the gate's own `--write`, a one-line addition; not a hand edit.\n\n## Gates\n\nUnion re-run after the final commit, at `dfbf789cc`, clean tree:\n\n```\nPASS  check:nul-bytes\nPASS  check:role-word\nPASS  check:release-notes\nPASS  check:docs-audit-scope\nPASS  check:doc-authoring\nPASS  check:skill-frame-sync\nPASS  check:doc-formula-expressions\n```\n\nThe last three were **not** in my dispatch list — re-deriving with `scripts/pm/dispatch-gates.mjs` against my actual changed paths surfaced them via the `.claude/` edit. `check:role-word` is a ratchet and is green at head with no baseline change (the new page uses none of the reserved vocabulary).\n\nAlso compiled the page through `@mdx-js/mdx` directly to confirm it parses (OK, 14682 chars) — worth doing since MDX treats a bare angle bracket before a letter as JSX.\n\nDocs-only; `skip-changeset`.\n\n_Generated by [Claude Code](https://claude.ai/code/session_011RB4waLuNbdruCo6X9oobm)_\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_011RB4waLuNbdruCo6X9oobm)_"
+}

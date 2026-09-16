@@ -1,0 +1,35 @@
+{
+  "number": 9220,
+  "kind": "issue",
+  "title": "ADR-0049 candidate: `element:filter` declares `targetVariable` (and possibly the whole element) with no renderer or reader in any repo",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-17T02:54:36Z",
+  "updated_at": "2026-08-17T07:44:29Z",
+  "closed_at": "2026-08-17T07:44:29Z",
+  "closed_by": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9220",
+  "body": "Found while retiring `targetVariable` on `element:text_input` / `element:record_picker` (#9198). Out of that card's scope — its disposition explicitly covered the two input elements only — so recorded here unassigned for triage.\n\n## Measured (2026-08-17)\n\n- `ElementFilterPropsSchema.targetVariable` (`packages/spec/src/ui/component.zod.ts`, \"Page variable to store filter state\") has **zero readers** in objectstack, objectui (origin/main `372d9f9b4`) and cloud — the same declarative-hint shape #9198 just retired on the two input elements. It is not even in the objectui reverse-parity gate's exemption block (which names only the two input-element keys).\n- The finding may be wider than one key: grep for `element:filter` in objectui finds **no renderer registration at all** — the only hits are a comment in `packages/components/src/renderers/basic/elements.tsx:18` claiming \"heavier interactive elements (element:filter, element:form) live in their own files\", a metadata-admin preview block-types listing, and CHANGELOG lines. If nothing renders the element, every `ElementFilterProps` key is a capability claim nothing keeps, and a per-key retirement would be the wrong grain.\n- `packages/spec/src/ui/component.test.ts` carries an accept test authoring `targetVariable` on filter props (\"should accept filter with targetVariable\") — deliberately left untouched by #9198.\n\n## Suggested route\n\nEstablish the element-level verdict first (does any renderer/consumer exist for `element:filter` anywhere?), then either implement or run ADR-0049 enforce-or-remove at the right grain — the #9198 / objectui#3829 → objectui PR #4794 retirement precedent applies if the verdict is dead, and #9198's conversion (`element-input-target-variable-removed`) uses the filter element's `targetVariable` as its untouched negative-control fixture, which would need updating alongside.\n\nBacklink: #9198."
+}

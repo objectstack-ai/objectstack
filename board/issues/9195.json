@@ -1,0 +1,33 @@
+{
+  "number": 9195,
+  "kind": "pull_request",
+  "title": "docs(cli): migrateStoredMetadata declines four things, not three",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-17T01:01:33Z",
+  "updated_at": "2026-08-17T01:29:13Z",
+  "closed_at": "2026-08-17T01:29:12Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": "2026-08-17T01:29:11Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/9195",
+  "body": "Fixes #9175\n\n## What was wrong\n\n`content/docs/deployment/cli.mdx` said `migrateStoredMetadata` deliberately\ndeclines \"Three things\" and tabled three. #8957 (PR #9059, `b740440bd`) added\na fourth decline path this shift and the docs face was never carried.\n\n## How I enumerated the declines (verified against code, not the card)\n\nRead `migrateStoredMetadata` end to end on `origin/main`\n(`packages/metadata-protocol/src/protocol.ts`, anchored on the symbol — not a\nline number, which drifts) and listed every `record({ outcome: 'skipped' |\n'failed', ... })` call site rather than trusting the issue's count. There are\nseven such sites in the function body. Three of them are call-site-specific\nvariants of \"no reachable automation engine for a flow\" and \"invalid JSON /\nflow schema hard-fail at conversion time\" that the page's own surrounding\nprose already excludes or folds elsewhere (the \"Flows are covered, and cost\none extra plugin\" paragraph explains why the CLI never actually surfaces the\nmissing-engine skip — the CLI always supplies one). The remaining four are\nexactly the ones the table is about — real, CLI-observable, distinct refusal\nclasses:\n\n1. **(new)** a row stored under a non-canonical metadata type — `outcome:\n   'skipped'`, added by #8957/PR #9059. This is the one the card names.\n2. types with no repository write path (`agent`) — `outcome: 'skipped'`\n3. rows that still fail the current schema after conversion — `outcome:\n   'failed'` on the post-conversion `saveMetaItem` rejection\n4. a flow whose rename the conflict guard refused — `outcome: 'failed'`\n\nThis also matches the function's own `## What it declines to touch, and says\nso` JSDoc header (which independently documents 3 of these — though that\ncomment enumerates a slightly different triple, since it talks about the\n\"no reachable engine\" flow skip rather than the \"conflict guard refused\" one;\nthat pre-existing JSDoc/docs-page framing difference is unrelated to this\ncard and out of scope here).\n\n## The fix\n\n- Table gets its fourth row for the non-canonical-stored-type decline, with\n  the same \"identity move, not an edit\" reasoning the code's own comment at\n  the `isNonCanonicalStoredType` guard gives.\n- The lead-in sentence drops the hard-coded count: `\"Three things it\n  deliberately declines\"` → `\"What it deliberately declines\"`. This costs\n  nothing (single-word-scope edit, no prose contortion) and removes exactly\n  the kind of declared-vs-enforced pair-with-no-enforcement the issue is\n  about — the table itself is now the only place a count lives, so a future\n  fifth decline can't leave stale prose beside it. I looked for an existing\n  `os:check`-style anchor idiom already in use on this page family (e.g.\n  `scripts/check-doc-anchors.mjs`, which is a fragment-link ↔ heading-id\n  checker, not a code ↔ prose-count checker) and found none that fits this\n  shape, so this is the mirror fix, not a new mechanism — per the triage's\n  explicit instruction not to build generation on this card.\n\n## Scope\n\nDocs-only (`content/docs/deployment/cli.mdx`), no `content/docs/releases/`\ntouched, no other pages swept (per the card: this page only; other counted\nprose elsewhere is reported, not fixed, if noticed — none was).\n\n## Tests\n\n- `pnpm check:cross-package-test-inputs` — pass (33/33 self-test cases, 12\n  packages declared)\n- `pnpm check:docs-audit-scope` — pass (178 hand-written docs in scope, 9\n  release-owned pages correctly read-only)\n- `pnpm check:docs-redirects` — pass (92 entries, 98 chain probes matched)\n- `pnpm check:role-word` — pass (43 baselined files, no new occurrences)\n- `node scripts/check-doc-anchors.mjs` — pass (240 internal fragment links,\n  396 source files, all resolve)\n- `node scripts/check-nul-bytes.mjs` — pass\n- `packages/spec`: `check:liveness`, `check:empty-state`,\n  `check:variant-docs`, `check:strictness-ledger` — all pass (matched via\n  `spec-liveness-check.yml`'s `content/docs/**` CI trigger; unaffected by\n  this change, run under the shared verify lock)\n\nGates derived with `node scripts/pm/dispatch-gates.mjs content/docs/deployment/cli.mdx`\n(9 of 103 discovered families placed against this path; the rest are either\nundetermined-by-path or silent-for-this-path per that script's own\ndisclaimer).\n\nAll at `ab09610db` (`git rev-parse --short HEAD`, quoted after the final\ncommit).\n\n## skip-changeset\n\nDocs-only change, publishes nothing. `skip-changeset` label applied (this\nrepo's mechanism — read back after the bot settles, per AGENTS.md).\n\n_Generated by [Claude Code](https://claude.ai/code/session_01Y26DJEHSBhhAQ6wwfsHNza)_\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01Y26DJEHSBhhAQ6wwfsHNza)_"
+}

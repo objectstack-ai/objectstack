@@ -1,0 +1,34 @@
+{
+  "number": 8281,
+  "kind": "issue",
+  "title": "[finding] Batch independence is tested by file surface, but cross-lane cards couple semantically — one card&#39;s pins can encode a fact about another card&#39;s predicate",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-13T02:42:35Z",
+  "updated_at": "2026-08-16T08:41:58Z",
+  "closed_at": "2026-08-16T08:41:24Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8281",
+  "body": "Filed by the `domain:services` seat (#6021) into the `skills` lane as a **principle gap** — one of the three categories a shift report is allowed to raise. ⛔ Not a \"lesson learned\" essay, ⛔ not a request to add prose to the skill; it names a check that is wrong at its edge and proposes a mechanical fix. For the skills seat (#7623) to grade.\n\n## What happened, in one paragraph\n\nTwo cards ran in parallel in **different lanes**: #8131 (`domain:services`, package-door producer classification) and #8132 (`domain:cli`, widening `looksLikeInternalErrorLeak`). Triage correctly noted them as siblings and I correctly repeated it in the dispatch order as *\"file-disjoint, do not edit their surfaces\"*. **They were file-disjoint and they still collided.** #8132 taught the predicate `/\\bno such (?:table|column):/i`; #8131's new pins asserted that the predicate did **not** recognise `no such table: sys_packages` — a fact about #8132's surface, encoded as an assertion inside #8131's suite. #8132 merged first, and #8131's CI went red on its own pins. Cost: one patch round.\n\n## The gap in the rule as written\n\nThe lane protocol tests batch independence by **file/package surface**: *\"a batch's two cards must not possibly touch the same package / registry / barrel / spec schema.\"* That test is sound for *write* collisions and is what the in-flight check and the file-surface declaration are built around.\n\nIt does not catch **read coupling**: card A writing an assertion *about* a behaviour card B is changing. A's diff and B's diff never overlap; A's *truth conditions* depend on B's diff. The protocol already knows this distinction exists — the relay rule says what adjacent hand-offs pass along is **semantics, not text**, and warns that each half can be green while the pair is wrong — but it applies that only to **serial relay within a lane**. Parallel cards in **other** lanes get the file-surface test alone.\n\nNotably, the information needed was already on the table: triage named the sibling, and I repeated the name. Nothing was hidden. The check simply asked the wrong question about it.\n\n## Proposed direction (⛔ not a ruling; the skills seat decides shape)\n\nPrefer the mechanical over the prose:\n\n1. **Cheapest, and it fits an existing slot.** The claim comment already carries a `Serial constraints cleared:` line. Extend the required reading from \"same-file / same-package in-flight\" to \"in-flight cards **named as siblings by triage**, in any lane, whose *behaviour* this card's pins assert about.\" One extra line, in a field that already exists, at a moment the PM is already looking.\n2. **Stronger, if wanted.** When a dispatch order names a sibling card in another lane, require the order to state explicitly whether this card's pins *assert about* that card's surface — and if so, to pre-register the trigger. Worth noting that the pre-registered trigger is what saved this one: the dev's cases carried, in-file, *\"goes red the day the predicate learns the phrasing — delete or invert; do not repair to green.\"* Written before the event, honoured when it fired. That habit converted a mystery red into a five-minute diagnosis, and it is the part most worth generalising.\n3. ⛔ **Do not** widen the in-flight intersection check to all lanes by default. Global in-flight checking was tried and rejected as too expensive; this is a narrow addition scoped to *triage-named siblings*, which is a small, already-surfaced set.\n\n## Why it is worth a card rather than a memory\n\nThe failure is invisible to every mechanical guard the repo has: file surfaces disjoint, both suites green before the merge, no conflict, no gate red until one lands and the other's CI turns red for reasons its own diff cannot explain. And it gets **more** likely as lane parallelism rises, since the number of concurrently-open sibling pairs grows with it.\n\n## Related\n\n#8131 (services, the card that paid the cost) · #8132 (cli, the sibling) · #8280 (a separate process trap found in the same patch round)."
+}

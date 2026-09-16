@@ -1,0 +1,38 @@
+{
+  "number": 4001,
+  "kind": "issue",
+  "title": "未知键静默剥离仍是全仓默认:把 #3405 的 strict 收紧从一个 schema 推广到整个可授权面(ADR-0078 完整性闸门)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:blocking",
+    "pm:dispatched",
+    "protocol:breaking",
+    "repo:objectstack"
+  ],
+  "assignees": [
+    "qq9340100"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-30T02:25:21Z",
+  "updated_at": "2026-08-16T10:15:41Z",
+  "closed_at": "2026-08-16T10:15:25Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 70,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4001",
+  "body": "从 #3405 拆出。那个 issue 的方案第 3 条当时标注「影响面比前两条大得多,建议单独评估、必要时拆出去做」,#3746 只把 **`ActionParamSchema` 一个** 收紧了。**导致 #3405 的机制在全仓其余地方原样保留。**\n\n## 问题\n\nzod 的默认是 `.strip`:schema 没声明的键被**静默丢弃**,解析照样成功。作者写了一个语义正确的键,得到的唯一反馈是一个行为不对的控件 —— 没有报错、没有告警、`tsc` 全绿。\n\n这不是假想的失效模式,它已经真实发生过至少两次:\n\n- **#3405** —— 作者写 `{ type: 'lookup', reference: 'sys_user' }`,`reference` 被吃掉,动作参数弹窗降级成「粘贴记录 ID(UUID)」文本框。真人基本没法用(PLAT-DEF-005,天顺 EHR 质检派工)。\n- **#1535** —— 对象级 `workflows: [...]` 被吃掉,作者以为接好了自动化,实际发布了一份死元数据。\n\n对 **AI 作者**尤其致命:人看到控件不对会去翻;AI 拿到一个成功响应,然后报告「已完成」。这正是 ADR-0049 为安全属性、ADR-0054 为集成、ADR-0078 为实例完整性各自命名过的同一种不对称 —— **静默失效比硬报错更坏,因为它制造虚假的完成。**\n\n## 现状测量(`origin/main`,`packages/spec/src/**/*.zod.ts`)\n\n```\nz.object 站点:  .strict()=31   .passthrough()=20   默认 strip=1885\n```\n\n按目录:\n\n| 站点数 | 目录 | 性质 |\n|---|---|---|\n| 422 | `api/` | 多为**线上/响应**形状 |\n| 383 | `system/` | 运行时 |\n| 340 | `kernel/` | 插件契约 |\n| **177** | **`ui/`** | **可授权** |\n| **149** | **`data/`** | **可授权** |\n| 83 | `cloud/` | 运行时 |\n| **80** | **`automation/`** | **可授权** |\n| 72 | `ai/` | 混合 |\n| 64 | `integration/` | 连接器载荷 |\n| 34 | `identity/` | 混合 |\n| **27** | **`studio/`** | **可授权** |\n| 23 | `shared/` | 混合 |\n| **20** | **`security/`** | **可授权** |\n| 6 | `qa/` | — |\n\n## 建议:先分类,不要一次性全改\n\n**1885 不是目标数。** 有相当一部分本就该保持宽松 —— 外部 API 响应、连接器载荷、故意开放的用户数据形状,对它们 strict 会把上游加一个字段变成己方的解析崩溃。\n\n真正的高价值目标是**可授权面**:作者手写进 `*.object.ts` / 配置里的那些 —— `ui` + `data` + `automation` + `security` + `studio` ≈ **453 个站点**。那里的静默剥离直接损害作者,而 strict 的下游风险最低(输入是本仓与租户的源码,不是第三方响应)。\n\n建议做法:\n\n1. **先分类**,产出一份「可授权 / 线上 / 开放」三分账,判据是「这个 schema 的输入由谁写」。分类结果本身就该落盘(类似 liveness ledger),而不是一次性判断。\n2. **按 ADR-0054 的棘轮方式推进**:先做审计确认过的高价值形状,长尾挂在验证通过上、不挂日期。\n3. **每一步都要能实证零破坏**,而不是靠推断(见下)。\n\n## 已有机制,不要另造\n\n这件事需要的零件**已经全在仓库里**,#3746 只是把它们接了起来:\n\n- `shared/suggestions.zod.ts` —— `findClosestMatches` / `levenshteinDistance` / `formatSuggestion`,以及 `FIELD_TYPE_ALIASES` 这个「别名表 + 编辑距离」的成熟范式\n- `data/object.zod.ts` —— `UNKNOWN_KEY_GUIDANCE`(退役键的墓碑 + 升级处方)与 `suggestKey` 的**长度相对**距离上界\n- `shared/visibility.ts` —— `strictVisibilityError`,ADR-0089 D3a 给 view/page schema 做 strict 的先例\n- `shared/error-map.zod.ts` —— 已有通用的 `unrecognized_keys` 文案\n- `ui/action.zod.ts`(#3746)—— 本次的模板:语义别名表 + 长度相对的 `findClosestMatches` 兜底\n\n**关键要求:strict 必须配可修的错误信息,不能只是「大声」。** 光报 \"unrecognized key\" 只是把静默失效换成了困惑;要点名那个键,并在能识别时给出正确拼法。#3746 里最有价值的一条别名不是错别字,而是 `visibleWhen → visible` —— ADR-0089 让 `visibleWhen` 成为 view/page 的正统拼法,在动作参数上借用它过去会**把参数的能力开关整个剥掉、让它无条件渲染**,一个静默失效的权限门。\n\n## #3746 的成本实证(这条支持推进)\n\n单个 schema 收紧的实测代价接近零:\n\n- `@objectstack/spec` 258 文件 / 6716 用例通过,`tsc --noEmit` 干净\n- **app-showcase / app-crm / app-todo 三个示例应用 `validate` 全过** —— 仓库里没有任何既有元数据带未声明的动作参数键\n- 下游消费包回归全过(lint 467 / metadata 276 / platform-objects 223 / metadata-core 100 / metadata-protocol 70 / sdui-parser 6)\n- 全部 `content/docs/**/*.mdx` 扫过:**0 份文档**在教用户写会被新校验拒绝的键\n\n## 踩过的坑(照做能省一轮 CI)\n\n#3746 用了三次 CI 才绿,失败点都不在收紧逻辑本身:\n\n1. **`.strict()` 会让生成的参考文档漂移。** `scripts/build-docs.ts` 的 `getFileDescription()` 取模块里**第一个** `/** */` 块原样作为参考页描述 —— 在 schema 的文件级 JSDoc **之前**插入辅助代码块,会把公开文档页的内容换成你的内部注释。`check:docs` 会抓到,但别顺手提交重新生成的 mdx(那等于把回归发出去),要把代码块挪到那段 JSDoc **之后**。\n2. **`packages/spec` 有十个 `check:*` 闸门,`check:docs` 只是第一个。** 一次跑完再推:`docs / skill-refs / skill-docs / api-surface / spec-changes / upgrade-guide / liveness / react-blocks / react-conformance / skill-examples`。`check:api-surface` 读的是**构建产物**,改完要先 `build` 才反映。\n3. **别导出 error map。** 只在本模块用就设为模块私有,否则进公共 API 面、`check:api-surface` 判罚。\n4. **`lazySchema` 的注释里记着一个隐患**:ADR-0089 D3a 把 `FormFieldSchema` / `PageComponentSchema` 改成 `.strict().transform(…)` 管道时,触发过 zod `toJSONSchema` 遍历在 Proxy 上的 `seen` 查找失效(`Cannot set properties of undefined (setting 'ref')`)。批量收紧时这条要盯。\n\n## 参考\n\n- ADR-0078(no-silently-inert-metadata;**状态仍是 Proposed,核心机制未建** —— 共享的 completeness predicate 与 `validate-functional-completeness` lint 都不存在,目前全靠逐案例引用)\n- ADR-0049(enforce-or-remove)、ADR-0054(棘轮范式)、ADR-0089 D3a(view/page strict 先例)\n- #3405 / #3746(动作参数)、#1535(对象级 `workflows`)\n- `docs/audits/2026-06-metadata-functional-completeness.md`"
+}

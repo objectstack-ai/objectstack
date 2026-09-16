@@ -1,0 +1,34 @@
+{
+  "number": 9295,
+  "kind": "pull_request",
+  "title": "test(lint): give the runtime lazy-deps guard an object-write leg",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/m",
+    "skip-changeset",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-17T12:05:24Z",
+  "updated_at": "2026-08-17T13:56:11Z",
+  "closed_at": "2026-08-17T13:56:09Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-17T13:56:09Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/9295",
+  "body": "Part of #4716 — the one ruled **prerequisite**, not the card. #4716's own acceptance criterion (the false-positive budget against a stored `sys_metadata` replay corpus) is untouched and stays the maintainer's; nothing here approaches the gate's behaviour.\n\n## The defect\n\n`packages/lint/src/runtime-lazy-deps.test.ts` guards the kernel boot path. Its docblock promised:\n\n> widen `runtimeTypes` to a type whose snapshot carries a hook body or a react page and this goes red\n\nbut **every gate-running probe in it wrote a `type: 'flow'` body and nothing else**. The guard was narrower than its own prose, and the gap is not cosmetic: a `json_schema` validation is authored on an **object** (`objects[].validations[]`), so a flow write can never make `validateRuleCompilability` compile anything, while an object write hands it a schema on a plate. **The written TYPE reaches the heavy dep, not the rule set.**\n\nWiden that CLI-only rule onto `object` — precisely what #4716's first bullet proposes — and the guard stays green while the kernel boot path starts paying for a JSON-Schema compiler on every Studio field edit.\n\nLanding **before** any widening is the ruling, not a preference: a guard authored after the event it was meant to catch cannot be shown to work.\n\n## Measured on this branch (built worktree, spawned-process `require.cache` walk)\n\n| probe | ajv | ajv-formats |\n|---|---|---|\n| import `dist/runtime.cjs` | – | – |\n| import full `dist/index.cjs` barrel | – | – |\n| RUN today's gate, **flow** write | – | – |\n| RUN today's gate, **object** write carrying a `json_schema` validation | – | – |\n| RUN `validateRuleCompilability` over that same object body | **63 modules** | **3 modules** |\n\nNon-vacuity of the probe itself: that last row returns exactly **1 finding**, `validation-rule-json-schema-uncompilable`; cold **56.4 ms** vs warm **11.5 ms**. Re-derived registry facts: `runtimeGatedTypes()` returns 8 types (`book, dashboard, flow, object, page, permission, seed, view`), **11 of 41** rules declare `runtime-publish`, and the two gating `object` today are `validatePresetComparands` + `validateSecurityPosture`.\n\n## The change\n\nOne test file. Adds:\n\n1. an **object-write leg** — in-process and in both spawned dist entries (CJS + ESM) — over a body carrying an uncompilable `json_schema` validation. Non-vacuous twice over: it asserts a rule actually gates `object` (`rulesRun.length > 0`) and that the gate produced the finding the fixture is authored to produce (`filter-preset-comparand`, from the `relatedListFilter` comparing a datetime against the bare preset `last_30_days`). `sharingModel` is authored so the other object-gating rule contributes nothing and the expected finding set stays exactly the intended one;\n2. a spawned **positive control** — the same object body handed to `validateRuleCompilability` must load ajv + ajv-formats. A require-cache walk reporting \"clean\" proves nothing until it has been shown to report \"dirty\" for the load it exists to catch. It also fails loudly if the fixture's schema ever stops being one ajv rejects, rather than letting the negative leg degrade into \"a body with nothing in it loads nothing\";\n3. the docblock corrected to match what the assertions now say.\n\n`loaded` / `fail` are lifted out of `check` so the positive control uses the *same* cache walk rather than a second opinion about what \"loaded\" means.\n\n## Reverse verification — the guard was falsified, then shown to fire\n\nAblation: `validateRuleCompilability` temporarily flipped to `surfaces: CLI_AND_RUNTIME, runtimeTypes: ['object']` and the package rebuilt — i.e. exactly the widening #4716's first bullet proposes.\n\n- **Old guard (`origin/main`'s file) on that tree: 4/4 GREEN**, while ajv was demonstrably loading onto the kernel boot path. That is the blind spot, measured rather than argued.\n- **New guard on the same tree: 3 of 6 legs RED** — spawned CJS, spawned ESM, and the in-process object leg, each naming ajv. The flow leg stayed **green**, which is precisely why flow-only was blind.\n\nAblation restored and the artifact re-proved clean: after rebuild, `runtimeAuthoringRulesFor('object')` reports `[\"validatePresetComparands\",\"validateSecurityPosture\"]` — the mutation is out of `dist/`, not merely out of `src/`. Working tree byte-identical to the commit (`git diff HEAD` empty).\n\n## Scope\n\nTest-only. **No rule, no `AUTHORING_RULES` entry, no `runtimeTypes`, no gate dispatch, and nothing that changes what the gate accepts or refuses.** No `TEST_DEBT` entry raised. No changeset: the PR releases nothing, so it takes `skip-changeset` by the workflow's own prescription.\n\n## Verification — all at `0f405abc1` (the head commit)\n\n```\npnpm --filter @objectstack/lint test          73 files, 2067 tests passed\npnpm --filter @objectstack/lint typecheck     tsc --noEmit, clean\nvitest run src/runtime-lazy-deps.test.ts      6 passed (was 4)\n```\n\nGate union re-derived at the final path set via `node scripts/pm/dispatch-gates.mjs`, all green: `check:nul-bytes`, `check:cross-package-test-inputs`, `check:engine-double-contract` (315 pinned / 133 debt / 2 exempt, unchanged), `check:where-matcher` (251 matchers, none new), `check:query-options-erasure` (baseline unchanged, no files added), `check:type-check-coverage`, `scripts/docs-audit/check-affected-docs.mjs`. The `check:type-check-debt` ratchet's subject was checked directly by reproducing its test-inclusive project for `@objectstack/lint`: the edited file contributes **0** tsc diagnostics, so the ledgered count cannot drift up from this change.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01NTKPDRoynY8i3HmdSFUxFj)_"
+}

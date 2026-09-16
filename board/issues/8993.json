@@ -1,0 +1,36 @@
+{
+  "number": 8993,
+  "kind": "issue",
+  "title": "spec/security: field masking is all-or-nothing — no partial masking (phone last-4, ID middle-8), and `maskingRule` was pruned as dead in 2026-06",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:blocking",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-08-16T04:32:13Z",
+  "updated_at": "2026-08-16T14:33:17Z",
+  "closed_at": "2026-08-16T14:33:17Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8993",
+  "body": "## Summary\n\nField-level masking today has exactly two states: fully readable, or fully masked.\n\n- `requiredPermissions` (ADR-0066 D3) — \"mask on read, deny on write\", an all-or-nothing gate.\n- `type: 'secret'` — encrypted at rest, opaque ref on the row, masked on read. Correct for credentials, wrong shape for business PII.\n\nThere is no way to declare **partial** masking: show the last 4 digits of a phone number, mask the middle 8 of a national ID, keep the surname and mask the given name, show the last 4 of a bank account.\n\n## History — this is a re-introduction, not a new idea\n\n`maskingRule` existed as a declarable key and was deliberately removed in the 2026-06 dead-surface prune (`packages/spec/src/data/field.zod.ts`):\n\n```\n// Pruned 2026-06 (dead in both layers — aspirational governance with no runtime\n// consumer; encryption/masking implied at-rest protection that never happened —\n// the real channel is type:'secret'). See\n// docs/audits/2026-06-dead-surface-disposition-plan.md (P0/P2 field prune):\n// encryptionConfig, maskingRule, auditTrail, cached, dataQuality.\n```\n\nThat prune was right under ADR-0049 enforce-or-remove — the key promised protection the runtime never delivered. **This issue is therefore explicitly a request for the runtime capability first**, with the metadata key re-introduced only as its authoring surface. Re-adding a declarable `maskingRule` without enforcement would just recreate the dead surface that was removed.\n\n## Why it matters\n\nFound while scoping a bank CRM RFI (VTB Shanghai SME), where \"敏感字段脱敏\" (sensitive-field masking) is a stated security requirement and had to be quoted as custom work.\n\nPartial masking is the *normal* form of the control in Chinese PIPL practice — regulators and internal audit expect masked-but-recognisable values so staff can still verify identity over the phone without seeing the full number. All-or-nothing masking fails both ways: fully visible leaks, fully hidden breaks the workflow.\n\n## What's already right\n\nThe enforcement channel is sound and should be reused as-is: masking is applied by the runtime `FieldMasker`, not by the UI, so an API caller is masked identically to a browser user — there is no bypass path. Partial masking should ride that same channel rather than introduce a second one. (It also already applies before AI tool output reaches model context, per the enterprise AI-governance interceptor, so a partial rule would inherit that for free.)\n\n## Suggested shape\n\n- A declarable rule on the field — named presets (`phone`, `id_card`, `bank_account`, `email`, `name`) plus a keep-head/keep-tail form for the long tail.\n- Applied in `FieldMasker` alongside the existing all-or-nothing path, gated by the same permission evaluation.\n- Masked value must be stable (same input → same output) so it doesn't break list rendering or grouping.\n- Export path must honour it — masking that applies on screen but not in CSV is the failure mode auditors look for.\n\n## Verified against\n\n`0f539bd` — `packages/spec/src/data/field.zod.ts` (lines ~765–780 prune note, ~838–854 `requiredPermissions` / `ackPlaintextMasking`, ~988 `secret`).\n"
+}

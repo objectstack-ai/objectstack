@@ -1,0 +1,35 @@
+{
+  "number": 9159,
+  "kind": "pull_request",
+  "title": "fix(metadata-protocol): report a failed sys_metadata_commit write instead of swallowing it (#9066)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-16T16:17:42Z",
+  "updated_at": "2026-08-16T16:54:25Z",
+  "closed_at": "2026-08-16T16:54:24Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-16T16:54:23Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/9159",
+  "body": "Fixes #9066\n\n## What was wrong\n\n`recordPackageCommit` in `packages/metadata-protocol/src/protocol.ts` — the ADR-0067 commit writer `publishPackageDrafts` calls with the revert plan it captured a few lines earlier — sat behind a bare `catch` that answered `null` for every reason, with nothing logged. Its comment's premise was true (the publish already succeeded and cannot be unwound) but its conclusion, \"grouping is a best-effort overlay\", understated the row: `sys_metadata_commit` is the ONLY record of a turn's revert plan (`existedBefore` / `prevVersion` per artifact) that `revertCommit` and `rollbackToPackageCommit` can act on.\n\nSo when the insert failed: the artifacts went live, the response read `success: true` with `commitId` merely absent, the turn could never be reverted, and no line anywhere said so. A commit store that was failing kept failing, and every later publish lost its plan the same silent way — the AGENTS.md durability-degradation shape exactly.\n\n## What changed\n\nThe failure is discriminated by error TYPE, through the shared `isMissingTableError` predicate the read seams in this same file already ask (#5532 / #5980 / #8896 — it was **already imported** in `protocol.ts`, unlike the sibling card #8906 where a new import was needed):\n\n- **unprovisioned** `sys_metadata_commit` (a first boot, or an env kernel composed without the commit log) is a configuration fact, identical on every publish and fixed in one place: `console.info`, said **once per protocol instance**, naming the consequence and how to provision the store;\n- **everything else** (connection drop, timeout, permission denial, schema drift on that table): `console.error`, **once per turn**, carrying the package, the operation, the item count, the driver's own reason, that the publish itself succeeded and still reports success, and the fix.\n\n`error` per turn and `info` once are deliberately different dedupe policies: each `error` line is a *different* turn whose revert plan was lost, so collapsing them would hide how many turns are unrevertible; the `info` sentence is the same configuration fact every time.\n\n**Publish semantics are untouched**, and the tests assert it rather than assume it: the `catch` still returns `null`, the publish still answers `success: true` with the artifacts live, and `commitId` is still merely ABSENT. **Option 3 — telling the caller the turn is unrevertible — is NOT done here**; that is a response-field question the #8896 ruling forbids for this family and it stays undecided.\n\n## The bounding sweep — the gate that stops this regressing\n\nAGENTS.md's degradation-log-level rule says a newly found seam is added to `DURABILITY_CRITICAL_CALLEES` in the same PR that fixes it. That vocabulary matches callee NAMES and `insert` is far too generic to declare repo-wide, so the insert now goes through a named `persistPackageCommitRow` — the same shape `persistAuditTrailRow` / `dropPromotedDraftRow` already take in that vocabulary — and the seam is declared in `scripts/check-durability-degradation-log-level.mjs`. Nothing else in the repo is named that, so the entry's blast radius is this one seam.\n\nProved in both directions, not assumed:\n\n```\n# with the fix\npackages/metadata-protocol/src/protocol.ts:15721  guards persistPackageCommitRow()@15705  -> loud (error@15762)\ncheck-durability: 26 durability-critical catch seam(s), all loud, rethrowing or propagating (exit 0)\n\n# with the pre-fix bare catch restored (ablation)\nX 1 durability-critical catch(es) degrade quietly ... found: catch swallows the failure with no log at all (exit 1)\n```\n\n## Verification\n\nUnion re-derived against the actual changed paths with `node scripts/pm/dispatch-gates.mjs`, run at **`bf19fe51e`** (`git rev-parse --short HEAD` from that run — the final commit):\n\n| gate | result |\n| --- | --- |\n| `pnpm --filter '@objectstack/metadata-protocol^...' build` (dependency closure, prefix = upstream deps) | exit 0 |\n| `@objectstack/metadata-protocol` full suite | 113 files, 1574 tests passed |\n| new file alone | 7 passed |\n| `check:durability-log-level` | 26 seams, all loud; read-seam rule 66 seams, clean |\n| `check:engine-double-contract` | OK, 313 pinned (new double routes through `assertEngineDeleteDispatch` / `assertEngineUpdateDispatch`) |\n| `check:where-matcher` | 248 matchers, none silently wrong, none new |\n| `check:query-options-erasure` | ratchet holds, none new |\n| `check:cross-package-test-inputs` | OK |\n| `check:changeset-gate-self-tests`, `check-empty-changeset`, `check-changeset-no-major`, `check-adr-0087-registration`, `check:objectui-changeset` | all OK |\n| `check:filter-alias-parity` | OK |\n| `check:type-check-coverage` | OK (structural half) |\n| `check:nul-bytes` | OK, 5997 files |\n\n**Reverse verification** (fix committed first, then ablated to the pre-fix bare `catch`, then restored byte-identically via `git checkout` of the branch path): 6 of the 7 new tests went red — `expected \"error\" to be called 1 times, but got 0 times`, `expected \"info\" to be called 1 times, but got 0 times` — and the positive control (a healthy publish records the row and logs nothing) stayed green, which is what makes the six failures attributable to the seam and not to a broken fixture. Green again after restore: 7 passed.\n\n`check:type-check-debt --re-measure` needs the whole workspace `dist/` closure built; that build was still queued behind other agents on the shared verification lock when this PR went up, so it is left to CI. `@objectstack/metadata-protocol` carries a TEST_DEBT entry (63 frozen errors), and the new test file is written against the same fixture shape as its neighbours.\n\n## Changed line ranges (hot file)\n\n`packages/metadata-protocol/src/protocol.ts` is shared with #9009 this round. This PR's actual changed ranges, post-change: **15632-15687** (the new dedupe flag, `persistPackageCommitRow`, and the rewritten JSDoc), **15705** (one line: the insert call now goes through the wrapper), **15721-15770** (the discriminated `catch`). All inside `recordPackageCommit`'s own neighbourhood in the ADR-0067 section; `getEffectiveLock` is untouched.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01NTKPDRoynY8i3HmdSFUxFj)_"
+}

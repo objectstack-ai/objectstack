@@ -1,0 +1,35 @@
+{
+  "number": 8881,
+  "kind": "issue",
+  "title": "Evaluate the mirror null-guard gate for the sparse action `visible`/`disabled` binding — #4953's clause-2 remainder, whose premise moved when objectui#4079 landed",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-15T14:03:20Z",
+  "updated_at": "2026-08-16T04:13:36Z",
+  "closed_at": "2026-08-16T04:13:36Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8881",
+  "body": "Filed **unassigned and ungraded** by the `domain:metadata`/`engine-core` seat (PM session `session_01XeQRiAa7vYRVX5Fog7Zby8`) while closing out #4953 on the maintainer's direct instruction. For triage to grade.\n\n⛔ This is **not** a new proposal. It is the last un-carded deliverable of the maintainer's **2026-08-06 ruling on #4953**, which asked for three items; the other two are settled (see \"Provenance\"). It has sat un-carded since 2026-08-08, when the contract-first sub-issue split the ruling asked triage for did not happen.\n\n## What is already DECIDED — ⛔ do not re-open\n\nThe action `visible` / `disabled` face **stays sparse, permanently**. That is recorded in the ledger at `packages/lint/src/validate-null-guards.ts`, measured on `origin/main` @ `b3f9831cb`:\n\n```\n| action `visible` / `disabled` | sparse | evaluated client-side; no materialization\n  exists in `objectui` | excluded (decided — #4953 clause 2) |\n```\n\n> #4953 clause 2 defers making this binding total — it would mean every REST read padding out all declared columns — so the face stays sparse, is documented as sparse, and an author there guards with `has()`. **The exclusion is permanent under the current decision, not pending one.**\n\nSo this card is ⛔ **not** \"make the action binding total\", and ⛔ not a widening of `checkNullGuards`. Both are refused by the decision above.\n\n## What is actually owed\n\nThe ledger names the replacement action in the same breath, and that is this card:\n\n> The ruling's replacement action for this face is the **MIRROR** of this gate — **flag `!= null` on a sparse binding** — and it is an evaluation **owed by the devx / objectui lanes**.\n\nNote the word the ruling uses: **evaluation**. The deliverable is a measured recommendation on whether that mirror gate is worth building (and where it would run), not an unconditional instruction to ship one. A well-evidenced \"not worth it\" closes this card legitimately.\n\nThe inversion that makes it a mirror rather than an extension, from the same ledger:\n\n| predicate | TOTAL binding (`{a: null}`) | SPARSE binding (`{}`) |\n|---|---|---|\n| `has(record.a)` | `true` | `false` |\n| `record.a != null` | `false` | **FAULT — `No such key: a`** |\n\nOn a total binding `!= null` is the cure and `checkNullGuards` flags its absence. On a sparse binding `!= null` is **itself the fault** and `has()` is the correct guard — so the existing gate cannot catch this face, and a rule pointed the other way is required.\n\n## ⚠️ The premise moved on 2026-08-10, and nothing recorded it\n\nThis is the part worth a fresh measurement rather than inheriting the 2026-08-06 framing.\n\n**objectui#4075 closed 2026-08-10 via merged PR objectui#4079** — *\"bind the row three ways on the four action renderers\"*. Before it:\n\n- `action-menu.tsx` / `action-group.tsx` passed **no record context at all**;\n- `action-button.tsx` / `action-icon.tsx` bound the row at the **bare root only**, so `record.status == 'pending'` threw `record is not defined` and failed closed.\n\n⇒ On those renderers a `record.*` predicate faulted at the **namespace** level, which made the *sparseness* question moot there — you could not reach it. After #4079 the row binds three ways (`record.x`, bare `x`, `data.x`), so authored `record.x != null` predicates now resolve the namespace and **reach the sparse-binding fault for real**.\n\n**The mirror gate's value went up when #4079 landed, and the ledger was written before that.** Whoever takes this card should price it against today's renderers, not the 2026-08-06 ones. ⛔ Do not carry the ledger's cost estimate forward without re-reading `useCondition` / `evalRowPredicate` on current `main` of both repos — a cross-reference is a claim about the world, and this one is known to have decayed once already.\n\nAlso relevant and unchanged: a fault here is **fail-closed** — the action silently vanishes, which is indistinguishable from \"the gate said no\". The trap is real; only the prescription inverts.\n\n## Landing site — measured, and it is not where the ruling's wording suggests\n\nThe ruling's item 2 is phrased as \"the objectui action surface\", which reads like an `objectui` card. Measured, the *work* lands in this repo:\n\n- The gate and its ledger are `packages/lint/src/validate-null-guards.ts` — **objectstack**.\n- `declared-fields.ts` states the same contract from the engine side — **objectstack**.\n- `objectui` is where the *surface* is, but it contains no materialization step and, under the permanent-sparse decision, is not being changed.\n\nBy the anchoring rule (`domain:*` = the domain of the package the fix lands in), my read is **`domain:devx`**. ⛔ Recorded as a read, not applied — this seat is not the producer of `domain:*` labels, and if the evaluation concludes the rule belongs in an objectui-side lint pass instead, the routing changes with it.\n\n## Provenance — the other two ruling items, so nobody re-derives them\n\n| Ruling item | Status |\n|---|---|\n| **1** — materialize the two server-side seams | ✅ **Complete.** `readonlyWhen` via PR #6454 (2026-08-07); flow-trigger record seeding via PR #8483 (2026-08-13). |\n| **2** — this card | ⬜ Open, un-carded until now. |\n| **3** — #4811's null-guard gate widening | ⛔ **Void.** #4811 closed `completed` 2026-08-03, **ten days before** either seam landed; the prior seat's own correction `5285969957` records this. There is no open #4811 to unblock. A gate widening, if still wanted, is a new card that must first read PR #4951 — its title says it *decided* the remaining surfaces (「其余各面按绑定全量性定案」) rather than deferring them, and the binding totality it decided against has since changed underneath that decision. |\n\nAnchor card #4953 is closed alongside this filing; its remaining work is this card and nothing else.\n\n## Not claimed\n\n- ⛔ No measurement of the mirror rule's false-positive rate. That is the evaluation this card asks for.\n- ⛔ No claim that the rule should ship. \"Evaluate\" is the ruling's own word.\n- ⛔ The renderer re-measurement above is read from objectui#4075's body and PR #4079's merge state, **not** re-verified against current `objectui` `main` by this seat. Treat it as dated evidence.\n"
+}

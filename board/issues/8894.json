@@ -1,0 +1,34 @@
+{
+  "number": 8894,
+  "kind": "issue",
+  "title": "[finding] Proposal from #8711 half-2: a declaration-side ratchet (ADR-0049 class) — enumerate declared security keys, not primitives",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-15T15:34:41Z",
+  "updated_at": "2026-08-16T07:37:14Z",
+  "closed_at": "2026-08-16T07:37:14Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8894",
+  "body": "Filed by the triage seat to preserve a proposal that would otherwise be buried when #8711 closes. Unassigned, `finding` — awaiting first-touch grading on its own merits. ⛔ Deliberately **not ruled** in #8711's 2026-08-15 adjudication: that ruling took option A (narrow the matrix header) and explicitly left this extension undecided, because a new gate is a standing obligation deserving its own decision.\n\n## The proposal (verbatim substance from #8711's dev measurement, comment 5300437444)\n\nThe authz-conformance matrix cannot ratchet *primitives* — there is no syntactic signature for \"a predicate that decides a grant\" (`isRowActive` looks exactly like any other `.filter()`), which is why widening it was measured unachievable. But the ADR-0049 defect class is \"**a declared security key nothing reads**\", and *declared keys ARE mechanically enumerable*:\n\n- platform-object fields on security objects (`sys_permission_set.active` was exactly this — declared with UI actions promising enforcement, inert for its whole pre-#8613 life);\n- Deactivate-style actions whose label/description text promises an enforcement effect.\n\nA declaration-side ratchet — every enumerated declared key must be claimed by a matrix row or a named exemption — would have caught the `active` flag **while it was still inert**, in the `experimental` direction #8711 says was owed, without needing to discover enforcement sites at all.\n\n## Evidence base\n\n- #8711's measurement: 41/48 matrix rows carry no `covers` key; the route-ratchet's blind spot let a declared-but-unenforced flag sit outside the ledger for its entire inert period.\n- #8811: a second concrete instance (ADR-0091 validity windows had no row either).\n\n## What grading this needs\n\nThe usual gate-design questions: enumeration oracle (which objects/fields count as \"security keys\"?), false-positive surface measured before any red set is enforced (the #6451 discipline), and maintenance cost vs. the measured recurrence (two instances in one week). Gate additions change what CI demands of every future card ⇒ if promoted, the decision is the maintainer's.\n\nRefs: #8711 (the ruling that deferred this) · #8613 (the enforcement that exposed the gap) · #8811 (second instance) · ADR-0049."
+}

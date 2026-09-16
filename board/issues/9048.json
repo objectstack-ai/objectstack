@@ -1,0 +1,34 @@
+{
+  "number": 9048,
+  "kind": "pull_request",
+  "title": "fix(devx): cap the docs-drift-check PR comment above 15 editable rows",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "ci/cd",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-16T07:30:08Z",
+  "updated_at": "2026-08-16T07:56:36Z",
+  "closed_at": "2026-08-16T07:56:35Z",
+  "closed_by": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "merged_at": "2026-08-16T07:56:35Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/9048",
+  "body": "Fixes #9037\n\n## What changed\n\n`docs-drift-check.yml`'s \"Comment on PR\" step now caps the editable-doc row list at\n`EDITABLE_ROW_CAP = 15`. Above the cap, the comment posts **no row list** — one summary\nline (count + a runnable `--json` re-derivation command) plus one line for the\nrelease-owned subset. At or under the cap, rendering is unchanged (byte-identical).\n\nThis is presentation only: `affected-docs.mjs` computes exactly what it computed before\n(nothing about \"what is computed\" changed, per #7009's closed-not-planned ruling).\nNo details-tag folding — the rows are actually omitted from the posted text, since a\ncollapsed disclosure element still ships every row's bytes to the event relay that\ndelivers this comment into every subscribed agent session.\n\nKept unchanged, per the card's keep-list: the docs-drift-check HTML-comment marker\n(in-place update dedup), the benign \"0 changed package(s)\" comment, the mapper self-test\nstep, and the release-owned partition semantics (`releaseOwnedDocs` stays computed and\nflagged read-only — only its rendering compresses above the threshold). The\n`docs-accuracy-audit` workflow is untouched — it recomputes from `affected-docs.mjs`,\nnever from this comment.\n\n## Numbers — re-derived today against `origin/main` (not copied from the card)\n\nRan `node scripts/docs-audit/affected-docs.mjs --json origin/main` against two real\nchanged-package sets:\n\n- **Hub package** (PR #9020's actual head commit, `@objectstack/spec`): **106 editable +\n  7 release-owned = 113 total** rows — matches the card's reading exactly on today's\n  `origin/main`.\n- **Small package** (a trivial one-line JSDoc-comment edit to `packages/client/src/index.ts`,\n  committed on a throwaway branch, then discarded): **11 editable + 3 release-owned = 14\n  total** — matches the card's \"`@objectstack/client` JSDoc edit lists 11\" reading exactly.\n\n## N=15 — tuned, not just copied\n\nMeasured the full distribution: for every one of the 72 packages under `packages/**`,\nhow many of the repo's 178 hand-written docs would be flagged if that package alone\nchanged (mention of its npm name or its repo path). Sorted descending, the top of the\ntable:\n\n```\neditable  release  total  package\n     106        7    113  @objectstack/spec\n      19        3     22  @objectstack/cli\n      18        4     22  @objectstack/core\n      18        2     20  @objectstack/runtime\n      13        1     14  @objectstack/objectql\n      12        1     13  @objectstack/plugin-security\n      11        3     14  @objectstack/client\n      11        1     12  @objectstack/mcp\n       9        3     12  @objectstack/rest\n       8        1      9  @objectstack/driver-sql\n```\n\n`@objectstack/spec` is a singular, extreme outlier (59.6% of all hand-written docs\nmention it) — the next tier (cli/core/runtime) sits at 18-19, then a smooth taper down\nthrough 11 (`@objectstack/client`, which the card requires to keep its full list) and\nbelow. There's no comparably sharp break anywhere in the 11-19 range to justify moving\noff the suggested default, and 15 sits cleanly in the one real gap (above the\n\"actionable short list\" cluster, below the 18+ tier). Kept **N=15**.\n\n## Rendered comment — before/after, both limbs\n\nAbove threshold (`@objectstack/spec`, PR #9020's data): **8923 bytes / 113 list-row\nlines to 558 bytes / 0 list-row lines** (93.7% reduction). New body reads:\n\n> ### Docs Drift Check\n> This PR changes **1** package(s): `@objectstack/spec`.\n>\n> **106** hand-written doc(s) reference the affected code — list omitted above 15 rows. Re-derive: `node scripts/docs-audit/affected-docs.mjs --json origin/main`.\n>\n> **7** release-owned page(s) also affected — read-only, see AGENTS.md Documentation Guardrails.\n>\n> Advisory only. To re-verify, run the `docs-accuracy-audit` workflow scoped to these files:\n> `node scripts/docs-audit/affected-docs.mjs origin/main` (pass the list as `args.docs`).\n\n(plus the leading dedup marker comment and the emoji before \"Docs Drift Check\", omitted\nabove only to keep this quote block from tripping the body sanitizer on raw angle\nbrackets — unchanged in the actual workflow code, see the diff.)\n\nAt/under threshold (`@objectstack/client`, 11 editable): **1887 bytes / 14 list-row\nlines to 1887 bytes / 14 list-row lines** — 0 bytes changed, byte-identical to the old\nrendering, confirming the small-package short list is untouched.\n\n## Verification\n\n- `node scripts/docs-audit/affected-docs.mjs --self-test` → 56 cases pass (file\n  untouched by this diff; sanity-checked anyway).\n- Gate families derived via `node scripts/pm/dispatch-gates.mjs .github/workflows/docs-drift-check.yml`\n  after the diff was final: `check:node-version`, `check:required-contexts`,\n  `check:shard-attestation`, `check:workflow-status-functions` — all green. Plus\n  `check:nul-bytes` (any-edit convention) — green.\n- All gates re-run at the final commit `be5bb3392` (`git rev-parse --short HEAD`), all\n  green.\n- No `packages/**` touched, so no package build/test/typecheck applies.\n\n## Out of scope\n\nNothing filed — no defects found outside this card's scope during this pass. The\nmeasurement above (per-package distribution) was produced solely to validate `N`, not as\na new finding.\n\n`.github/**`-only change — no published package source touched, so no changeset;\n`skip-changeset` will be applied once labels settle and read back.\n\n_Generated by [Claude Code](https://claude.ai/code/session_011RB4waLuNbdruCo6X9oobm)_"
+}
