@@ -321,12 +321,28 @@ Once it **is** on, the posture decides what a time-triggered flow owes:
 | posture | what an armed time-triggered flow needs |
 |---|---|
 | `single` | nothing. The deployment holds exactly one organization, the run carries **no** organization, and every tenant-scoped insert beneath it resolves that one organization the way a single-organization install always did. |
-| `group` · `isolated` | `config.organization` on the start node, naming the organization the run executes as. A flow that declares none is **not armed** and is named in the boot summary. There is no fan-out: a sweep wanted in N organizations is declared N times, and nothing ever chooses an organization for a flow. |
+| `group` | **optionally** `config.organization`. Declared, it behaves exactly as `isolated` below — bounding the sweep's query as well as its identity. Undeclared, the flow still arms: a `timeRelative` sweep reads group-wide and each run it launches acts as **its own swept record's organization**. |
+| `isolated` | `config.organization` on the start node, naming the organization the run executes as. A flow that declares none is **not armed** and is named in the boot summary. There is no fan-out: a sweep wanted in N organizations is declared N times, and nothing ever chooses an organization for a flow. |
 
-`group` is walled here like `isolated`, and not by analogy: an organization-less
-system insert is refused under any wall, and which organization a group-wide
-sweep's own inserts belong to is not yet decided. Until it is, `group` behaves
-as walled.
+`group` is walled like `isolated` — an organization-less system insert is refused
+under any wall — but that is not the whole picture, and it is why the two rows
+differ. `group` is one legal group over one shared database, where group-wide
+visibility and cross-organization workflow are *inherent to the shape*, so a
+group-level batch job is a capability of the posture rather than a boundary
+violation. What was open until 2026-09-16 was which organization such a run's
+inserts belong to; the answer is the swept record's own, which is the
+subject-first order `sys_automation_run` already used.
+
+<Callout type="warn">
+A **record-less** flow under `group` — a plain `schedule` cron with no sweep —
+has nothing to derive an organization from. It binds and runs, but any
+tenant-scoped row it writes (a notification, an inbox message) is **refused** at
+the write, by name, with the remedy. Declare `organization` on such a flow if it
+writes per-organization data; its bind line says so at boot. ⛔ Nothing falls
+back to a "default" organization — a wrong `organization_id` is silently
+authoritative to every report and export that filters by organization, which is
+worse than a refusal.
+</Callout>
 
 While the switch is off, such a flow is listed in the startup summary and in
 `getTriggerBindingAudit()` as **disabled by deployment policy** — not as a
