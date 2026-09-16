@@ -432,23 +432,53 @@
  * guarantee this tree has never yet had occasion to exercise, not a new
  * refusal aimed at work already done.
  *
- * ⚠️ The quiet direction this buys, stated rather than left to be discovered: a
- * key whose value opens `retiredKey(` is now unreportable on T1, so a diff that
- * re-declared a LIVE key with a tombstone-shaped value would go unreported
- * here. What bounds it is the helper's own contract — `z.never(…).optional()`
- * accepts nothing, so there is no value such a line can add to an accept set —
- * together with the instruments a real key must move anyway:
- * `check:authorable-surface` on any authorable key, `check:api-surface` on any
- * exported name, and the ADR-0087 registries.
+ * ⚠️ The quiet direction this buys, stated rather than left to be discovered —
+ * and stated as MEASURED, because the first wording of this paragraph bounded
+ * it with an argument that does not hold. The bound is NOT "the helper's
+ * contract accepts nothing, so no such line can add a spelling": a value may
+ * OPEN `retiredKey(` and then CHAIN a live arm onto its result —
+ * `legacy: retiredKey('gone').or(z.string()),` and the same line with
+ * `.catch(undefined)` — and each of those leaves a key an author may still
+ * write. Both fired on the reading this file shipped before them, both went
+ * silent on the first version of `declaresRetiredKeyTombstone`, and both fire
+ * again now: the predicate requires the value to BE the call and nothing after
+ * it, and the battery carries them as controls.
+ *
+ * ⚠️ What stays quiet is exactly ONE shape, named here so the next reader meets
+ * it instead of rediscovering it: a MULTI-LINE tombstone whose CLOSING line
+ * chains that arm — `legacy: retiredKey(` on the key line, `).or(z.string()),`
+ * two lines down. The key line is a tombstone by every byte it shows, and the
+ * closing line declares no key, so no line-shaped reading reports it. Measured
+ * population on this tree: 0. ⭐ Control: the same scanner locates all 254
+ * tombstone key lines across 66 files, of which 178 are multi-line, and the
+ * SINGLE-line chained form it is the twin of reads T1. The gate owner ruled it
+ * open rather than reading forward to the balancing paren — a forward read
+ * crosses lines to decide a population of zero, while the single-line escape
+ * closes on the key line at no cost, and the identical question was answered
+ * the same way on #18095 the same day. ⭐ The OVERTURN CONDITION is written
+ * down so it needs no second discussion: the FIRST real multi-line chained
+ * carrier — landed, never a synthetic sample — closes it by reading forward.
+ * This paragraph and the self-test case pinned beside the #17955 battery's
+ * vocabulary assertion are that carrier's discovery device.
  *
  * ⚠️ One boundary this deliberately does NOT touch, recorded rather than left
  * to be found: the PRESCRIPTION a tombstone carries is bare-string lines, so a
- * prescription written on ONE line still reads as a T2 member. Measured on this
- * tree: all 6 such single-line call sites are in `*.test.ts` files, which are
- * off the contract source surface, and every one of the 254 judged tombstones
- * spells its prescription as the multi-line concatenation #16822's continuation
- * rule already declines. The judged population is zero, so it is a different
- * reading's card on the day it is not.
+ * prescription written on ONE line still reads as a T2 member. The spelling
+ * census, corrected — an earlier wording of it claimed every one of the 254
+ * judged tombstones spells its prescription as the multi-line concatenation
+ * #16822's continuation rule already declines, and that is false. Measured by
+ * the branch the predicate itself takes: 178 do not close the call on the key
+ * line (148 ending at `retiredKey(`, 30 continuing into a prescription helper's
+ * own arguments) and 76 DO close on it — 61 naming a constant, 15 calling a
+ * helper, 0 carrying a string literal. The operative conclusion survives the
+ * correction and is reached by DIRECT SIMULATION rather than by that claim:
+ * feed all 254 blocks back through this reader as added hunks and 0 rows of any
+ * kind are raised, where the pre-#17955 reading raises 254 T1 — so the residual
+ * T2 population is 0. ⭐ Control: the live-key twin of each of those 254 lines
+ * fires, 254 of 254. The 4 key-shaped single-line STRING prescriptions in this
+ * tree are all in `packages/spec/src/system/metadata-form-zod-reconciliation.test.ts`,
+ * which `surfaceFlags` puts off the contract source surface. It is a different
+ * reading's card on the day that population is not zero.
  *
  * ## Where the surfaces come from — imported, never hand-copied
  *
@@ -663,7 +693,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '#16943 — the net member/key delta: a replaced line is not a net addition': 23,
   '#17618 — a PARAMETER is not a key, and a closed set RE-SPELLED around fewer values is not a new one': 24,
   '#17300 — the retirement ledger is a record of REMOVALS, not a set that gained a value': 27,
-  '#17955 — a `retiredKey()` tombstone declares a key UNWRITABLE, and never adds a spelling': 19,
+  '#17955 — a `retiredKey()` tombstone declares a key UNWRITABLE, and never adds a spelling': 29,
   'T3 — a new row in a published entry point': 8,
   'T4 — a new registration in a registry': 10,
   '#16448 acceptance: the four positive controls, each with its file:line': 8,
@@ -1441,20 +1471,41 @@ export function respellsExistingClosedSetKey(text, removedTexts) {
  * `z.never(…).optional()`, and its entire contract is to REFUSE: the key's
  * `z.input` becomes `never` so `tsc` rejects it at the authoring site, and a
  * value that reaches the parse is refused carrying the migration prescription.
- * A line whose value opens it therefore makes the accept set strictly narrower
- * — the one direction T1's sentence ("the accept set gains a spelling an author
- * may now write") cannot be true of.
+ * A line whose value IS that call therefore makes the accept set strictly
+ * narrower — the one direction T1's sentence ("the accept set gains a spelling
+ * an author may now write") cannot be true of.
  *
  * The evidence is positive, hunk-local and absent by default, the way every
  * decline in this file is: it is the added line's OWN value, read on the one
  * line, and a line that does not open the helper is not a tombstone.
  *
- * ⛔ The value must OPEN the call — `legacy: z.string().or(retiredKey('x'))`
- * mentions the helper inside a live schema and is NOT a tombstone. And the key
- * half is spelled from `SCHEMA_PROPERTY`'s own four spellings rather than a
- * second pattern, so "the row that fires" and "the row that declines" can never
- * become two different questions — the drift `memberTellKind` and
- * `bareElementValue` each exist to prevent one reading over.
+ * ⛔ OPENING the call is not enough — the value must BE the call and nothing
+ * after it. `legacy: z.string().or(retiredKey('x'))` merely MENTIONS the helper
+ * inside a live schema, and `legacy: retiredKey('x').or(z.string())` CHAINS a
+ * live arm onto its result; each leaves a key an author may still write, so
+ * neither is a tombstone and both must fire. "Nothing after it" is read per the
+ * branch the line takes, and the branches are the two spellings this tree
+ * actually uses (measured over the 254 judged tombstones at 1cb6a06195):
+ *
+ * ① the call CLOSES on the key line (76) — only a comma, a comment or the end
+ *   of the line may follow the balancing paren. `matchingCloser` finds that
+ *   paren string-aware, so a paren inside the prescription cannot close the
+ *   call early, and `legacy: retiredKey('x'), extra: z.string(),` is refused
+ *   the decline its second key would otherwise inherit.
+ * ② it does NOT close there (178 — 148 ending at `retiredKey(`, 30 continuing
+ *   into a prescription helper's own arguments) — every byte left on the line
+ *   is INSIDE the argument list, and an argument cannot chain onto a result
+ *   that does not exist yet: `retiredKey(…)` is `z.never(…).optional()`
+ *   whatever it is passed. The line is a tombstone, and a chain can only appear
+ *   on the line that CLOSES the call — a line that declares no key, which is
+ *   the residual quiet direction the header names with its overturn condition.
+ *
+ * ⚠️ ⛔ Do not "tighten" ② to "only whitespace or a comment may follow
+ * `retiredKey(`". Measured: that re-fires 30 of the 254 landed tombstones
+ * (`packages/spec/src/data/driver.zod.ts:239` is one of eight in that file),
+ * which is the exact false positive this reading exists to remove — and it
+ * closes nothing, because a key line that has not closed the call shows no
+ * chain to catch.
  *
  * ⚠️ It is deliberately NOT a lookup of the helper's import, and not a check
  * that the key existed before. #17300 measured that class of reading wrong for
@@ -1465,6 +1516,32 @@ export function respellsExistingClosedSetKey(text, removedTexts) {
 const RETIRED_KEY_TOMBSTONE =
   /^[ \t]*(?:'[^']+'|"[^"]+"|\[[^\]]+\]|[A-Za-z_$][\w$]*)[ \t]*\??[ \t]*:[ \t]*retiredKey\(/;
 
+/** What may follow the balancing paren when the call closes on the key line. */
+const TOMBSTONE_TAIL = /^[ \t]*,?[ \t]*$/;
+
+/**
+ * `text` with its comments removed — a line comment takes the rest of the line,
+ * and a delimited comment takes up to its closer, or to the end of the line
+ * when it has none. Same conventions as `matchingCloser` above, so "what may
+ * follow the call" and "where the call closes" cannot drift apart.
+ */
+function withoutComments(text) {
+  let out = '';
+  for (let k = 0; k < text.length; k += 1) {
+    const ch = text[k];
+    const next = text[k + 1];
+    if (ch === '/' && next === '/') return out;
+    if (ch === '/' && next === '*') {
+      const end = text.indexOf('*/', k + 2);
+      if (end === -1) return out;
+      k = end + 1;
+      continue;
+    }
+    out += ch;
+  }
+  return out;
+}
+
 /**
  * @param {string} text — one patch line's text, with its `+` / `-` already stripped
  * @returns {boolean} true when the line declares a `retiredKey()` tombstone
@@ -1472,7 +1549,15 @@ const RETIRED_KEY_TOMBSTONE =
 export function declaresRetiredKeyTombstone(text) {
   const s = String(text ?? '');
   if (COMMENT_LINE.test(s)) return false;
-  return RETIRED_KEY_TOMBSTONE.test(s);
+  const opening = RETIRED_KEY_TOMBSTONE.exec(s);
+  if (opening === null) return false;
+  const open = opening[0].length - 1;
+  const close = matchingCloser(s, open);
+  // ② The call is still OPEN at the end of the line, so every byte after
+  // `retiredKey(` is one of its arguments — and an argument chains onto nothing.
+  if (close === -1) return true;
+  // ① It closed here, so the value ends here too, give or take a comma.
+  return TOMBSTONE_TAIL.test(withoutComments(s.slice(close + 1)));
 }
 
 /**
@@ -2683,6 +2768,13 @@ export function selfTest() {
   t('…and the row it reports is the genuine key, never the tombstone', tombstoneTells("+  legacy: retiredKey('gone'),", '+  extra: z.string(),')[0]?.text === 'extra: z.string(),');
   t('⛔ a value that merely MENTIONS the helper is not a tombstone — it must OPEN it', tombstoneTells("+  legacy: z.string().or(retiredKey('gone')),").length === 1);
   t('⛔ nor is a key whose value opens a DIFFERENT helper that ends in the same word', tombstoneTells("+  legacy: buildRetiredKey('gone'),").length === 0 && memberTellKind("  legacy: buildRetiredKey('gone'),", { onContractSource: true }) === null);
+  // ⭐ OPENING the call is not enough — the value must BE the call. A chained
+  // arm puts a writable spelling back on the key (`retiredKey(…)` is
+  // `z.never(…).optional()`, but `.or(z.string())` is not), which is T1's
+  // sentence exactly, so these three fire with the tombstone's own file:line.
+  t('⛔ a live arm CHAINED onto the helper is not a tombstone — `.or()` leaves the key writable, so it fires', tombstoneTells("+  legacy: retiredKey('gone').or(z.string()),")[0]?.tell === 'T1');
+  t('⛔ …and `.catch()` reads the same way — a default is a spelling an author may now write', tombstoneTells("+  legacy: retiredKey('gone').catch(undefined),")[0]?.tell === 'T1');
+  t('⛔ …nor does a tombstone cover a SECOND key spelled after it on the same line', tombstoneTells("+  legacy: retiredKey('gone'), extra: z.string(),")[0]?.tell === 'T1');
   t('⛔ a tombstone-shaped line on a declared REGISTRY is read as a registration first, and still fires', tells({ filename: 'packages/spec/src/api/error-code-ledger.zod.ts', status: 'modified', patch: patchOf(140, "+    legacy: retiredKey('gone'),") })[0]?.tell === 'T4');
   t('⭐ CONTROL — un-retiring FIRES: a removed tombstone buys nothing, so the key becoming writable again is reported', tells({ filename: TOMBSTONE_FILE, status: 'modified', patch: "@@ -30,1 +30,1 @@\n-  legacy: retiredKey('gone'),\n+  legacy: z.string()," }).length === 1);
   t('⛔ CONTROL — a genuinely new key still fires with its own file:line', at(FILE_SCHEMA_KEY)[0] === 'packages/spec/src/kernel/manifest.zod.ts:44');
@@ -2701,7 +2793,35 @@ export function selfTest() {
   t('⛔ …and declines a value that is not the helper', declaresRetiredKeyTombstone('  legacy: z.string(),') === false);
   t('⛔ …a bare call that names no key — a tombstone is a PROPERTY, not an expression', declaresRetiredKeyTombstone("  retiredKey('gone'),") === false);
   t('⛔ …and the same text in a COMMENT', declaresRetiredKeyTombstone("  // legacy: retiredKey('gone'),") === false);
+  t('⛔ …and a value that OPENS the call but chains onto its result — the value must BE the call and nothing after it', declaresRetiredKeyTombstone("  legacy: retiredKey('gone').or(z.string()),") === false && declaresRetiredKeyTombstone("  legacy: retiredKey('gone').catch(undefined),") === false);
+  t('⭐ …while BOTH spellings this tree actually uses still read as tombstones — 76 close the call on the key line, 178 do not', declaresRetiredKeyTombstone("  legacy: retiredKey('gone'),") === true && declaresRetiredKeyTombstone('  legacy: retiredKey(') === true);
+  t('…a trailing comment is not a chained arm, on either spelling', declaresRetiredKeyTombstone("  legacy: retiredKey('gone'), // ADR-0087") === true && declaresRetiredKeyTombstone('  legacy: retiredKey( // the prescription is below') === true);
+  t('…and a prescription that closes its OWN parens on the key line is still the call and nothing after it', declaresRetiredKeyTombstone("  legacy: retiredKey(useInstead('x')),") === true && declaresRetiredKeyTombstone('  legacy: retiredKey(LEGACY_PRESCRIPTION),') === true);
+  t('⛔ …but a paren inside the prescription STRING cannot close the call early and let a chain through', declaresRetiredKeyTombstone("  legacy: retiredKey('call foo(bar) instead'),") === true && declaresRetiredKeyTombstone("  legacy: retiredKey('call foo(bar) instead').or(z.string()),") === false);
+  // ⭐ The landed shape a literal reading of "nothing may follow `retiredKey(`"
+  // re-breaks: the prescription helper's own ARGUMENTS continue on the next
+  // line, so the key line ends INSIDE the argument list rather than at the open
+  // paren. 30 of this tree's 254 judged tombstones are spelled this way, all in
+  // `packages/spec/src/data/driver.zod.ts`, and each one fires T1 again — the
+  // very false positive this reading exists to remove — if this case weakens.
+  t('⭐ a prescription helper whose ARGUMENTS continue on the next line is still a tombstone — 30 landed lines take this shape', declaresRetiredKeyTombstone("  create: retiredKey(capRemoved('create',") === true);
   t('⭐ the vocabulary is INTACT — `memberTellKind` still classifies a tombstone as a key of kind T1, so both sides of the budget read one question', memberTellKind("  legacy: retiredKey('gone'),", { onContractSource: true }) === 'T1');
+
+  // ⚠️ The residual QUIET direction, asserted rather than described so the next
+  // reader meets it HERE instead of rediscovering it: a MULTI-LINE tombstone
+  // whose CLOSING line chains a live arm. The key line is a tombstone by every
+  // byte it shows, and the line carrying `.or(…)` declares no key, so nothing a
+  // line-shaped reader sees on either line reports it. Measured population on
+  // this tree: 0 — control, the same scanner locates all 254 tombstone key lines
+  // across 66 files, 178 of them multi-line, and the SINGLE-line chained form
+  // three cases up fires. The gate owner ruled it open rather than reading
+  // forward to the balancing paren: a forward read crosses lines to decide a
+  // population of zero, while the single-line escape closes on the key line at
+  // no cost. ⭐ The OVERTURN CONDITION, written down so it needs no second
+  // discussion: the FIRST real multi-line chained carrier — landed, never a
+  // synthetic sample — closes it by reading forward, and this case is the one
+  // that reds when it does.
+  t('⚠️ QUIET — a multi-line tombstone whose CLOSING line chains a live arm is not reported; population 0, and the header carries the overturn condition', tells({ filename: TOMBSTONE_FILE, status: 'modified', patch: '@@ -30,0 +30,3 @@\n+  legacy: retiredKey(\n+    LEGACY_PRESCRIPTION,\n+  ).or(z.string()),' }).length === 0);
 
   // -- T3 --------------------------------------------------------------------
   battery('T3 — a new row in a published entry point');
@@ -2972,7 +3092,7 @@ export function selfTest() {
       '#17618\'s two declines — a parameter list and a closed set re-spelled around fewer values — ' +
       'each bracketed by the control that still fires, ' +
       '#17300\'s retirement-ledger licence with the firing controls that bracket it on every side, ' +
-      '#17955\'s tombstone decline — read before the budget so a rename is still paid for — with the un-retiring control that fires, ' +
+      '#17955\'s tombstone decline — read before the budget so a rename is still paid for, and requiring the value to BE the call — with the un-retiring control, the two chained-arm controls that fire, and the multi-line chained close pinned as the residual quiet direction, ' +
       "#16448's four positive controls each with its file:line, its negative controls — " +
       'the same diffs with `yes`, and a removal-only diff with `no` — the local path composed end ' +
       'to end so a binary change to a tell surface cannot read as clean, #17112\'s split count with ' +
