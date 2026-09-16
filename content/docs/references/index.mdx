@@ -1,6 +1,6 @@
 ---
 title: Protocol Reference
-description: Every schema published by @objectstack/spec — 1525 schemas across 14 protocol modules
+description: Every schema published by @objectstack/spec — 1527 schemas across 14 protocol modules
 ---
 
 {/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
@@ -19,7 +19,7 @@ counts are sums of the rows they head. Regenerate with
 
 | Module | Pages | Schemas | Description |
 | :--- | ---: | ---: | :--- |
-| [AI Protocol](/docs/references/ai) | 11 | 66 | Agents, tools, skills, RAG and knowledge sources, model registry, conversations. |
+| [AI Protocol](/docs/references/ai) | 12 | 68 | Agents, tools, skills, RAG and knowledge sources, model registry, conversations. |
 | [API Protocol](/docs/references/api) | 31 | 440 | REST contracts, endpoints, routing, realtime, batch, discovery. |
 | [Automation Protocol](/docs/references/automation) | 14 | 74 | Flows and their nodes, approvals, ETL pipelines, webhooks, state machines, execution records. |
 | [Data Protocol](/docs/references/data) | 29 | 173 | Objects, fields, queries, filters, datasources and drivers — the ObjectQL layer. |
@@ -33,19 +33,20 @@ counts are sums of the rows they head. Regenerate with
 | [Studio Protocol](/docs/references/studio) | 3 | 35 | Studio designer metadata — the authoring surfaces for the protocols above. |
 | [System Protocol](/docs/references/system) | 33 | 272 | The runtime environment — logging, jobs, cache, metrics, notifications, i18n and compliance. |
 | [UI Protocol](/docs/references/ui) | 16 | 156 | Apps, pages, views, dashboards, reports, actions and themes — the ObjectUI layer. |
-| **Total** | **193** | **1525** | 14 protocol modules |
+| **Total** | **194** | **1527** | 14 protocol modules |
 
 ---
 
 ## AI Protocol
 
-**Source:** `packages/spec/src/ai/` · **Import:** `@objectstack/spec/ai` · **11 pages, 66 schemas**
+**Source:** `packages/spec/src/ai/` · **Import:** `@objectstack/spec/ai` · **12 pages, 68 schemas**
 
 Agents, tools, skills, RAG and knowledge sources, model registry, conversations.
 
 | File | Schemas |
 | :--- | :--- |
 | [`agent.zod.ts`](/docs/references/ai/agent) | `AIModelConfig`, `Agent`, `StructuredOutputConfig`, `StructuredOutputFormat`, `TransformPipelineStep` |
+| [`build-progress.zod.ts`](/docs/references/ai/build-progress) | `BuildProgressFrame`, `BuildProgressPhase` |
 | [`conversation.zod.ts`](/docs/references/ai/conversation) | `CodeContent`, `ConversationAnalytics`, `ConversationContext`, `ConversationMessage`, `ConversationSession`, `ConversationSummary`, `FileContent`, `FunctionCall`, `ImageContent`, `MessageContent`, `MessageContentType`, `MessagePruningEvent`, `MessageRole`, `TextContent`, `TokenBudgetConfig`, `TokenBudgetStrategy`, `TokenUsageStats`, `ToolCall` |
 | [`embedding.zod.ts`](/docs/references/ai/embedding) | `EmbeddingModel`, `VectorStore`, `VectorStoreProvider` |
 | [`knowledge-document.zod.ts`](/docs/references/ai/knowledge-document) | `KnowledgeChunk`, `KnowledgeDocument`, `KnowledgeHit` |

@@ -1,0 +1,83 @@
+---
+title: Build Progress
+description: Build Progress protocol schemas
+---
+
+{/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
+
+Build-progress PHASE vocabulary for the `data-build-progress` stream frame
+(cloud#2172 ruling A).
+
+## Producer
+
+The cloud AI-studio **agent loop** — deliberately not the tool it just ran.
+A build turn applies its change through `apply_blueprint` / `apply_edit` and
+then keeps working: the loop spends a further POST-APPLY VERIFICATION window
+re-reading and re-seeding what it wrote (measured on cloud#1838: 111 seconds
+and 9 tool calls *after* `apply_blueprint` returned, one of them the
+registered `verify_build` tool — see `PLATFORM_TOOLS_BY_PACKAGE` in
+`../system/constants/platform-tool-names`). A tool's own `ctx.onProgress`
+handle dies when the tool returns, so a frame emitted in that window can only
+come from the loop. WHERE in the loop it is emitted is cloud#2172's decision,
+not this module's; what such a frame may SAY is declared here.
+
+## Consumer
+
+The objectui chat panel — `extractBuildProgress` in
+`packages/plugin-chatbot/src/mapMessages.ts`, which lifts the reconciled part
+onto `ChatBuildProgress` for the build panel in `ChatbotEnhanced.tsx`. That
+reader recognises a fixed set and coerces everything else to `'structure'`,
+which renders a "still building" spinner. So an UNDECLARED phase is not
+merely unlabelled — it reads as the wrong phase, and the user watches a
+build that finished two minutes ago still claim to be building
+(objectui#7388). The panel's per-phase COPY is objectui's to choose; this
+module fixes only the set of values it must be able to tell apart.
+
+## Channel
+
+Unchanged: the `data-`-prefixed custom part described on
+`AIToolContext.onProgress` in `../contracts/ai-service`, reconciled in place
+under a stable part id. This module adds the vocabulary that prose has always
+assumed and never declared; it moves no transport and renames nothing.
+
+<Callout type="info">
+**Source:** `packages/spec/src/ai/build-progress.zod.ts`
+</Callout>
+
+## TypeScript Usage
+
+```typescript
+import { BuildProgressFrameSchema, BuildProgressPhaseSchema } from '@objectstack/spec/ai';
+import type { BuildProgressFrame, BuildProgressPhase } from '@objectstack/spec/ai';
+
+// Validate data
+const result = BuildProgressFrameSchema.parse(data);
+```
+
+---
+
+## BuildProgressFrame
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **phase** | `Enum<'structure' \| 'data' \| 'verify' \| 'done'>` | ✅ | Build-turn phase this frame reports |
+| **hop** | `integer` | optional | Post-apply verification hop this frame reports |
+| **tool** | `string` | optional | Name of the tool the current hop is running |
+
+
+---
+
+## BuildProgressPhase
+
+### Allowed Values
+
+* `structure`
+* `data`
+* `verify`
+* `done`
+
+
+---
+
