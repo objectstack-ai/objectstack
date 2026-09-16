@@ -103,7 +103,7 @@ describe('#15006 — the auto-registration gates answer the same on BOTH shapes'
   });
 
   it('says no when nothing anywhere declares an object', () => {
-    expect(shouldAutoRegisterObjectQL({ manifest: { id: 'x', name: 'x' } }, [])).toBe(false);
+    expect(shouldAutoRegisterObjectQL({ manifest: { id: 'com.example.x', name: 'x' } }, [])).toBe(false);
     expect(shouldAutoRegisterStorageDriver({}, [])).toBe(false);
     expect(shouldAutoRegisterObjectQL(undefined, [])).toBe(false);
   });
