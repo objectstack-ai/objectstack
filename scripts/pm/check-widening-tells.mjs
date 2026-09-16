@@ -364,6 +364,92 @@
  *      re-spellings are `.meta` / `.describe` rewrites and none adds
  *      `.optional()`.
  *
+ * ## The sixth accidental variable #17955 removed — a key DECLARED UNWRITABLE
+ *
+ * T1's sentence is "the accept set gains a spelling an author may now write",
+ * and the gate raised it on the line that DECLARES A TOMBSTONE. Measured on PR
+ * #17954 — the first of the #15939 ruling-A duration-key renames — where
+ * `+    schemaCacheTTL: retiredKey(` was the ONLY tell in the whole diff and
+ * `check-clause2-carriers --pair 17954` returned exit 4 / C5.
+ *
+ * `retiredKey()` (`packages/spec/src/shared/retired-key.ts`) returns
+ * `z.never(…).optional()` and its entire contract is to REFUSE. The line it is
+ * written on makes the accept set strictly NARROWER: the key's `z.input`
+ * becomes `never` so `tsc` rejects it at the authoring site, and a value that
+ * reaches the parse is refused carrying the migration prescription. There is no
+ * spelling an author "may now write" — there is one they may no longer write.
+ * The instrument read the change class whose direction is least ambiguous as
+ * the widening one, which is the inverse of what clause ② exists to catch, and
+ * is the same failure #17300 and #17618 each record one surface over.
+ *
+ * ⚠️ The population is not one card. A tombstone is the AGENTS.md-mandated kit
+ * for removing an authorable spec key ("Removing an authorable spec key also
+ * requires a tombstone so the rejection itself carries the prescription"), so
+ * it is EVERY ADR-0087 key retirement and every rename that tombstones its old
+ * spelling. Measured on this tree: 254 tombstone key lines across 66 files on
+ * the judged surface.
+ *
+ * ⛔ The fix is NOT a weakening of T1, not a threshold, and not an exclusion of
+ * `packages/spec/src/**` — #17300 ruled that shape out by name. ⛔ Nor is it a
+ * lookup in the local tree, which #17300 measured WRONG for this whole
+ * population, because a retirement registers in the SAME PR. What the hunk
+ * carries instead is positive, hunk-local and absent by default: the added
+ * line's own VALUE opens the helper. ⭐ `retiredKey(` stays in
+ * `SCHEMA_PROPERTY`'s measured vocabulary, so the row is still RECOGNISED as a
+ * key line — `memberTellKind` still answers T1 for it and both sides of the
+ * budget keep reading one question. It is the TELL that declines, on evidence
+ * the line itself carries, never the vocabulary that shrinks.
+ *
+ * ⭐ It is read BEFORE the #16943 budget, and that ordering is the repair
+ * rather than a detail of it. An ADR-0087 rename puts THREE key lines in one
+ * change block — the old spelling removed, the new one added, the tombstone
+ * added — so the REPLACEMENT budget the removal earns is owed to the RENAME.
+ * Let the tombstone spend it and the budget is exhausted by the one line that
+ * never needed it, leaving the rename to report as the surplus; which of the
+ * two fires then depends on nothing but the order the author wrote them in.
+ * ⛔ This is the OPPOSITE ordering from #17300's licence, and the difference is
+ * the evidence rather than a preference: a licence is minted ELSEWHERE in the
+ * diff, so reading it before the budget would let it pay for a genuine member.
+ * A tombstone carries its evidence on its own line and takes nothing out of the
+ * block, so a genuine key beside it still has the whole budget to pay with —
+ * and still fires, with its own file:line, when it cannot.
+ *
+ * The REMOVED side declines symmetrically, the way #17618's parameter does.
+ * Un-retiring a key — dropping `legacy: retiredKey(…)` and putting a live
+ * schema back on that spelling — is a real WIDENING, and a removed tombstone
+ * that bought the replacement would trade this file's loud failure for a silent
+ * one on the only diff shape that RE-OPENS an accept set the tree had already
+ * closed. That leg gains diagnostics rather than losing them: it fires where
+ * the previous reading was silent.
+ *
+ * The price, measured over the 1,674 commits touching these surfaces in this
+ * tree's available history: of the 24,725 tell rows the previous reading
+ * raises, 125 now decline and 24,600 stand. All 125 are T1, and all 125 are
+ * `retiredKey()` tombstones by the very predicate that declines them — checked
+ * row by row, 0 exceptions — spread over 23 commits and 45 files. No T2, T3 or
+ * T4 row moves. ⭐ And NO row anywhere in that history begins firing: the
+ * un-retiring leg has zero historical population, so it is a sensitivity
+ * guarantee this tree has never yet had occasion to exercise, not a new
+ * refusal aimed at work already done.
+ *
+ * ⚠️ The quiet direction this buys, stated rather than left to be discovered: a
+ * key whose value opens `retiredKey(` is now unreportable on T1, so a diff that
+ * re-declared a LIVE key with a tombstone-shaped value would go unreported
+ * here. What bounds it is the helper's own contract — `z.never(…).optional()`
+ * accepts nothing, so there is no value such a line can add to an accept set —
+ * together with the instruments a real key must move anyway:
+ * `check:authorable-surface` on any authorable key, `check:api-surface` on any
+ * exported name, and the ADR-0087 registries.
+ *
+ * ⚠️ One boundary this deliberately does NOT touch, recorded rather than left
+ * to be found: the PRESCRIPTION a tombstone carries is bare-string lines, so a
+ * prescription written on ONE line still reads as a T2 member. Measured on this
+ * tree: all 6 such single-line call sites are in `*.test.ts` files, which are
+ * off the contract source surface, and every one of the 254 judged tombstones
+ * spells its prescription as the multi-line concatenation #16822's continuation
+ * rule already declines. The judged population is zero, so it is a different
+ * reading's card on the day it is not.
+ *
  * ## Where the surfaces come from — imported, never hand-copied
  *
  * The contract SOURCE surface is `SUSPECT_TIER_GLOBS`, imported from
@@ -2886,6 +2972,7 @@ export function selfTest() {
       '#17618\'s two declines — a parameter list and a closed set re-spelled around fewer values — ' +
       'each bracketed by the control that still fires, ' +
       '#17300\'s retirement-ledger licence with the firing controls that bracket it on every side, ' +
+      '#17955\'s tombstone decline — read before the budget so a rename is still paid for — with the un-retiring control that fires, ' +
       "#16448's four positive controls each with its file:line, its negative controls — " +
       'the same diffs with `yes`, and a removal-only diff with `no` — the local path composed end ' +
       'to end so a binary change to a tell surface cannot read as clean, #17112\'s split count with ' +
