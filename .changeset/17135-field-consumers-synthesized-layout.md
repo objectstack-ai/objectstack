@@ -1,5 +1,5 @@
 ---
-"@objectstack/lint": patch
+"@objectstack/lint": minor
 ---
 
 `field-no-consumers` now reads two consumers that name the field nowhere in metadata — a declared field group placing it on the synthesized layout, and the column a seed or import mapping matches on (#17135).
