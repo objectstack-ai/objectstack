@@ -1108,15 +1108,18 @@ if (surfaceDoc) {
 //      file did before #4650. The manifest deletion gate below now anchors that
 //      comparison on the merge base and demands a declared removal, and it runs
 //      BEFORE this check so the deferral resolves to a real verdict;
-//   4. the guidance route (#18301) — the def's shape is CLOSED and NAMES the key
-//      in its `strictObject` `guidance` table (or an enumerated `guidanceSets`
-//      entry), so an author who keeps writing it is answered with the upgrade
-//      prescription instead of a silent parse. This is the retirement route that
-//      deletes the key from the shape rather than tombstoning it in place, so it
-//      never earns the `[RETIRED]` mark proof 1 starts from — proof 1 cannot
-//      apply to it at all, which is why it needed a proof of its own rather than
-//      a relaxation of that clock. `computeGuidanceRoutes()` below is the
-//      authority on what is proved and on the two deliberate narrowings.
+//   4. the guidance route (#18301) — the base entry was NOT `[RETIRED]`, and the
+//      def's shape is CLOSED and NAMES the key in its `strictObject` `guidance`
+//      table (or an enumerated `guidanceSets` entry), so an author who keeps
+//      writing it is answered with the upgrade prescription instead of a silent
+//      parse. This is the retirement route that deletes the key from the shape
+//      rather than tombstoning it in place, so it never earns the `[RETIRED]`
+//      mark proof 1 starts from — proof 1 cannot apply to it at all, which is
+//      why it needed a proof of its own rather than a relaxation of that clock.
+//      The un-marked half is load-bearing: it keeps the two DISJOINT, so a key
+//      that IS tombstoned stays on proof 1's aging clock and a `guidance` line
+//      written beside it cannot shorten that. `computeGuidanceRoutes()` below is
+//      the authority on what is proved and on the two deliberate narrowings.
 //
 // Proofs 2 and 4 are asymmetric on purpose and must stay so: proof 2 waives
 // because nobody could be authoring the key, proof 4 because everybody who does
@@ -1409,12 +1412,15 @@ function computeGuidanceRoutes(): GuidanceRoutes {
     if (matched.length !== 1) return null;
     const { options } = matched[0]!;
     const prescribed = new Set<string>();
-    // `name in shape` is what keeps proof 4 disjoint from proof 1 rather than a
-    // way around it: a key the shape still DECLARES is a tombstone, it reaches
-    // the aging clock and never the unrecognized-key path, so its prescription
-    // here would be a claim about a door the author never arrives at. The
-    // `alias-integrity` audit says the same thing from the other side; this gate
-    // computes it instead of importing the guarantee.
+    // `name in shape` drops an entry filed under a key the shape DECLARES. Such an
+    // entry is a false claim about its own schema — `guidance` is consulted only
+    // from the `unrecognized_keys` path, which a declared key never reaches — so
+    // it prescribes about a door no author arrives at and must prove nothing
+    // here. The `alias-integrity` audit says the same from the other side; this
+    // gate computes it rather than importing the guarantee. (What keeps proof 4
+    // disjoint from proof 1 is the un-marked gate at the CALL SITE, not this
+    // line: a tombstone is in the shape at HEAD but its baseline entry is what
+    // check (c) reads, and the two can disagree.)
     for (const name of Object.keys(options.guidance ?? {})) {
       if (!(name in shape)) prescribed.add(name);
     }
@@ -2429,29 +2435,33 @@ let gitResolvedAnchor: { rev: string; keys: string[] } | null = null;
           );
           continue;
         }
-        // Proof 4 (#18301) runs BEFORE the tombstone chain because a
-        // guidance-route retirement never carried the `[RETIRED]` mark the chain
-        // starts from — the key left the shape rather than staying in it as a
-        // `retiredKey()`. Reaching the chain would print "the entry was LIVE
-        // (never tombstoned)", which is true and is not the question.
-        const prescribed = guidanceRoutes.prescribedKeys(defKey);
-        if (prescribed?.has(leaf)) {
-          allowed.push(
-            `${key} — def ${describeReach(via)}, and its shape is CLOSED and prescribes for
-` +
-              `       '${leaf}' by name (\`strictObject\` \`guidance\`/\`guidanceSets\`, this build's own
-` +
-              `       declaration registry): an author who keeps writing the key gets the upgrade
-` +
-              `       prescription, not a silent parse, so the retirement is audible without a
-` +
-              `       \`retiredKey()\` tombstone to age out (#18301).`,
-          );
-          continue;
-        }
         const wasRetired = baseSnapshot.get(key) === true;
         const how = describeReach(via);
         if (!wasRetired) {
+          // Proof 4 (#18301) lives on THIS branch and only on it. A guidance-route
+          // retirement deletes the key from the shape instead of leaving a
+          // `retiredKey()` in it, so it never earned the `[RETIRED]` mark — "the
+          // entry at baseRev was LIVE" is the true description of every member of
+          // the class, and it is the verdict they were all getting.
+          //
+          // The un-marked gate is what makes the two proofs DISJOINT rather than
+          // merely different, and it is not a formality: `data/Object:compactLayout`
+          // is both #5898's aged-tombstone fixture and a real `guidance` key, so a
+          // proof 4 placed AHEAD of this branch took that deletion off proof 1's
+          // aging clock — measured, in the two #5898 cases that reddened. A key that
+          // WAS marked is a tombstone; it stays on the clock, and a `guidance` line
+          // written beside it may not shorten that.
+          const prescribed = guidanceRoutes.prescribedKeys(defKey);
+          if (prescribed?.has(leaf)) {
+            allowed.push(
+              `${key} — def ${how}, and its shape is CLOSED and prescribes for\n` +
+                `       '${leaf}' by name (\`strictObject\` \`guidance\`/\`guidanceSets\`, this build's\n` +
+                `       own declaration registry): an author who keeps writing the key gets the\n` +
+                `       upgrade prescription, not a silent parse, so the retirement is audible\n` +
+                `       without a \`retiredKey()\` tombstone to age out (#18301).`,
+            );
+            continue;
+          }
           violations.push(`${key} — def ${how}; the entry at ${baseRev} was LIVE (never tombstoned).`);
           continue;
         }
@@ -2514,13 +2524,15 @@ let gitResolvedAnchor: { rev: string; keys: string[] } | null = null;
             `     3. its whole def stopped being emitted — adjudicated by the manifest deletion\n` +
             `        gate above (#4725), which demands the removal be declared in\n` +
             `        RETIRED_DEFS_BY_MAJOR (src/migrations/registry.ts); or\n` +
-            `     4. its def's shape is CLOSED and NAMES the key in its \`strictObject\`\n` +
-            `        \`guidance\` table — an enumerated \`guidanceSets\` entry counts, a RegExp\n` +
-            `        one does not — so writing the key raises the upgrade prescription\n` +
-            `        instead of parsing clean. That is the retirement route that removes the\n` +
-            `        key from the shape rather than leaving a \`retiredKey()\` tombstone in it,\n` +
-            `        and it is the only one of the four with no \`[RETIRED]\` mark to age\n` +
-            `        (#18301). This gate computes it too (it would have said so above).\n\n` +
+            `     4. its baseline entry was NOT \`[RETIRED]\`, and its def's shape is CLOSED and\n` +
+            `        NAMES the key in its \`strictObject\` \`guidance\` table — an enumerated\n` +
+            `        \`guidanceSets\` entry counts, a RegExp one does not — so writing the key\n` +
+            `        raises the upgrade prescription instead of parsing clean. That is the\n` +
+            `        retirement route that removes the key from the shape rather than leaving\n` +
+            `        a \`retiredKey()\` tombstone in it, and it is the only one of the four with\n` +
+            `        no \`[RETIRED]\` mark to age (#18301). A key that IS marked is a tombstone\n` +
+            `        and stays on route 1's clock. This gate computes all of that too (it\n` +
+            `        would have said so above).\n\n` +
             `   Restore the line(s) — \`pnpm --filter @objectstack/spec gen:schema\` regenerates\n` +
             `   the file — or complete the retirement route (#4650, ADR-0104, and the\n` +
             `   spec-property-retirement skill in .claude/skills/).`,

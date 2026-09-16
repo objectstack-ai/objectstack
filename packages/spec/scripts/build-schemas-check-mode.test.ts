@@ -1353,13 +1353,20 @@ describe('build-schemas.ts — deleted baseline lines must prove themselves (#46
       //     a proof beside and must not reverse;
       //   - `DELETED_UNREACHABLE`     proof 2's own territory, unchanged — it
       //     would move if proof 4 had been written as a widening of proof 2
-      //     instead of a fourth proof beside it.
+      //     instead of a fourth proof beside it;
+      //   - `DELETED_AGED`            the DISJOINTNESS, measured rather than
+      //     argued: `data/Object:compactLayout` is a `[RETIRED]` baseline entry
+      //     AND a real `guidance` key on the same def, so a proof 4 that did not
+      //     require the entry to be un-marked takes this deletion off proof 1's
+      //     aging clock. It did, on the way in — the two #5898 cases at the
+      //     bottom of this file are what caught it.
       seedBase((s) => [
         ...s,
         DELETED_GUIDANCE_ROUTE,
         DELETED_GUIDANCE_UNNAMED,
         WITHHELD_TOMBSTONE,
         DELETED_UNREACHABLE,
+        DELETED_AGED,
       ].sort());
       const canonical = seedSurface((s) => s);
 
@@ -1407,7 +1414,17 @@ describe('build-schemas.ts — deleted baseline lines must prove themselves (#46
       expect(eager.output).toMatch(rx(DELETED_UNREACHABLE, 'def not reachable from the \\d+ metadata-type roots'));
       expect(eager.output).not.toMatch(rx(DELETED_UNREACHABLE, 'shape is CLOSED'));
 
-      // The same four verdicts under the lazy-Proxy graph, where every def
+      // Direction 5 — the two proofs are DISJOINT, not merely different. This key
+      // satisfies every OTHER condition proof 4 tests: reachable def, closed
+      // shape, and `compactLayout` really is in `data/Object`'s `guidance` table.
+      // What disqualifies it is that its baseline entry carried `[RETIRED]`, so it
+      // is a tombstone and stays on proof 1's clock — here refused for want of a
+      // RETIRED_KEYS_BY_MAJOR declaration, exactly as before this card.
+      const agedKey = DELETED_AGED.replace(RETIRED_MARK, '');
+      expect(eager.output).toMatch(rx(agedKey, 'def .*tombstoned, but no entry in RETIRED_KEYS_BY_MAJOR'));
+      expect(eager.output).not.toMatch(rx(agedKey, 'shape is CLOSED'));
+
+      // The same five verdicts under the lazy-Proxy graph, where every def
       // resolves through `zodShapeOf`'s lazy getter rather than by identity. The
       // VERDICT is what this gate acts on, so it is the verdict pinned in both
       // regimes.
@@ -1417,6 +1434,7 @@ describe('build-schemas.ts — deleted baseline lines must prove themselves (#46
       expect(lazy.output).toMatch(rx(DELETED_GUIDANCE_UNNAMED, 'def .*was LIVE \\(never tombstoned\\)'));
       expect(lazy.output).toMatch(rx(WITHHELD_TOMBSTONE, 'def .*was LIVE \\(never tombstoned\\)'));
       expect(lazy.output).toMatch(rx(DELETED_UNREACHABLE, 'def not reachable from the \\d+ metadata-type roots'));
+      expect(lazy.output).not.toMatch(rx(agedKey, 'shape is CLOSED'));
 
       expect(readSurface()).toBe(canonical);
     },
@@ -1440,10 +1458,16 @@ describe('build-schemas.ts — deleted baseline lines must prove themselves (#46
       for (const route of ['     1.', '     2.', '     3.', '     4.']) {
         expect(output, `the remedy stopped naming route ${route.trim()}`).toContain(route);
       }
-      // Route 4 states both halves of its own evidence, and the narrowing that
-      // keeps it from being a blanket waiver.
-      expect(output).toContain('its def\'s shape is CLOSED and NAMES the key');
-      expect(output).toContain('an enumerated `guidanceSets` entry counts, a RegExp');
+      // Route 4 states all three halves of its own evidence — the un-marked
+      // baseline entry, the closed door, the named key — and the narrowing that
+      // keeps it from being a blanket waiver. The un-marked half is the one a
+      // reader most needs: without it route 4 reads as a way around route 1.
+      expect(output).toContain('its baseline entry was NOT `[RETIRED]`');
+      expect(output).toContain('its def\'s shape is CLOSED and');
+      expect(output).toContain('NAMES the key in its `strictObject` `guidance` table');
+      expect(output).toContain('an enumerated');
+      expect(output).toContain('entry counts, a RegExp one does not');
+      expect(output).toContain("A key that IS marked is a tombstone");
     },
   );
 
