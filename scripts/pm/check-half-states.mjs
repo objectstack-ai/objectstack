@@ -14455,16 +14455,18 @@ export function h63StaleFindingBesideGrade(issue) {
 // Every agent on this board shares one protocol identity, so an artefact's
 // GitHub author cannot say WHO wrote it. The protocol answers that with the
 // TEXT: 「`user.login` 记令牌不记席位,归属 = 文本里的 session ID」
-// (`.claude/skills/pm-dispatch/SKILL.md`), and the write identity follows the
-// CHANNEL rather than the account — 「REST 按会话为 `claude[bot]` 或用户,MCP
-// 恒用户」 (`.claude/skills/pm-dispatch/references/rest-channel.md`).
+// (`.claude/skills/pm-dispatch/SKILL.md`), and the login it does record is a
+// TOKEN CLASS bound to the Claude Code ACCOUNT rather than to the session — it
+// is read back from each write and can flip between two writes of ONE session
+// with no seat act behind it
+// (`.claude/skills/pm-dispatch/references/platform-readings.md` 配额段).
 //
 // So the half-state is an artefact whose text asserts seat/dev provenance —
 // a claim, a report, a contract review, a filing header — while carrying no
 // `session_…` id anywhere. The text says a seat or a dev wrote it; nothing in
-// it says WHICH, and the author field records only the token that session was
-// handed. Two carriers disagree about one live artefact and the repair is on
-// the board: that is `state`'s definition exactly, and the repair is one an
+// it says WHICH, and the author field records only the token class behind that
+// write. Two carriers disagree about one live artefact and the repair is on the
+// board: that is `state`'s definition exactly, and the repair is one an
 // owner can actually perform — it gives the artefact its id.
 //
 // ## The premise this row was BUILT on, and the measurement that retired it
@@ -14483,8 +14485,8 @@ export function h63StaleFindingBesideGrade(issue) {
 //   slug (#18045, objectui#9404, PR #18051, comment 5652138683).
 //
 // The first two are both REST-proxy writes and differ only in the TOKEN CLASS
-// the session was handed. The field names the APP whose credential signed the
-// write; it never names the TOOL. ⛔ So no channel is inferred from it here,
+// behind them. The field names the APP whose credential signed the write; it
+// never names the TOOL. ⛔ So no channel is inferred from it here,
 // and an MCP-tool write is indistinguishable from a REST-proxy write in this
 // payload. What the field still separates is an App credential from none: an
 // absent slug is a user PAT, outside the App entirely.
@@ -14507,10 +14509,12 @@ export function h63StaleFindingBesideGrade(issue) {
 //
 // ⛔ Nothing here relaxes it. It is reported as an INFORMATIONAL count plus a
 // login roster in the summary clause, on every run, and files NO row — because
-// the token class is handed to a session at start rather than chosen at write
-// time, so no act available to a user-token session moves its content to the
-// App. A row naming no remedy that a reader could perform is the unclearable
-// shape above; the clause states the exposure without spending the cap on it.
+// the token class follows the Claude Code ACCOUNT and flips between writes
+// with no seat act behind it: nothing available to a user-token session
+// chooses the class of its own write, and nothing moves content it already
+// authored to the App. A row naming no remedy that a reader could perform is
+// the unclearable shape above; the clause states the exposure without spending
+// the cap on it.
 //
 // ## The artefact is recognised STRUCTURALLY — ⛔ and never from a roster
 //
@@ -14878,7 +14882,7 @@ export function h64UnattributedSeatContent(text, more = 0, since = UNATTRIBUTED_
       : `this open ${kind}`;
   const authorClause = author
     ? `GitHub records its author as \`${author.login}\` (\`user.type\` = \`${author.type}\`), which is the ` +
-      'TOKEN that session was handed and not the seat that wrote'
+      'TOKEN CLASS that write was made with and not the seat that wrote'
     : 'GitHub serves no readable `user` for it, so not even the token is known — the artefact is unattributed ' +
       'on both carriers at once';
   const moreClause =
@@ -14892,9 +14896,10 @@ export function h64UnattributedSeatContent(text, more = 0, since = UNATTRIBUTED_
       : '';
   return (
     `${subject} carries ${signature.what} — a seat/dev artefact — and NO session id appears anywhere in its ` +
-    `text. ${authorClause}: attribution on this board is the \`session_\` id the text carries, because the ` +
-    'write identity follows the CHANNEL and one protocol identity is shared by every agent here ' +
-    '(`.claude/skills/pm-dispatch/SKILL.md`, `.claude/skills/pm-dispatch/references/rest-channel.md`). The two ' +
+    `text. ${authorClause}: attribution on this board is the \`session_\` id the text carries, because one ` +
+    'protocol identity is shared by every agent here and the token class behind that login follows the Claude ' +
+    'Code ACCOUNT rather than the session (`.claude/skills/pm-dispatch/SKILL.md`, ' +
+    '`.claude/skills/pm-dispatch/references/platform-readings.md` 配额段). The two ' +
     'carriers disagree about one live artefact: the text says a seat or a dev wrote it, and nothing says which ' +
     'session, so a reader who needs the author of this act has nobody to ask and no branch to read.' +
     `${moreClause}${dated} Remedy — WHO and HOW: the seat or dev that owns the artefact gives it its session ` +
@@ -15021,9 +15026,10 @@ export function h64ExposureClause(counts = {}, cap = H64_LOGIN_ROSTER_CAP) {
   return (
     `INFORMATIONAL, no remedy and no row: ${counts.seatSignedUser ?? 0} signed text(s) are authored by a USER ` +
     `account rather than \`claude[bot]\`${list}. A suspended user account hides everything it authored — ` +
-    'measured on this board, not hypothetical — so those artefacts carry that exposure; but the token class is ' +
-    'handed to a session at start rather than chosen at write time, and no act available to a user-token session ' +
-    'moves its content to the App, so this half names NO remedy and files NO row rather than re-filing an ' +
+    'measured on this board, not hypothetical — so those artefacts carry that exposure; but the token class ' +
+    'follows the Claude Code ACCOUNT and flips between writes with no seat act behind it, and nothing ' +
+    'available to a user-token session chooses the class of its own write or moves content it already ' +
+    'authored to the App, so this half names NO remedy and files NO row rather than re-filing an ' +
     `unclearable one every sweep. ${counts.seatSignedUserPat ?? 0} of them carry no App credential at all (a ` +
     `user PAT) and ${counts.seatSignedUserUnreadChannel ?? 0} ride the \`/pulls\` shape that does not serve ` +
     '`performed_via_github_app`; ⛔ that field names the APP whose credential signed a write and never the TOOL, ' +
@@ -25164,7 +25170,7 @@ async function selfTest() {
   t('⛔ H64 author: …and comment 5654046782 — the App-authored claim that DOES name its session — is clean', h64UnattributedSeatContent(text64('comment', comment5654046782(), carrier64)), null);
   t('H64 author: …as is the byte-identical comment under a USER login, because the ID decides and the login does not', h64UnattributedSeatContent(text64('comment', comment5654046782({ user: user64('os-tesla') }), carrier64)), null);
   t('H64 author: the row names the login it read', row64(claim64()).includes('`os-tesla`'), true);
-  t('H64 author: …and says that login is the TOKEN the session was handed, not the seat', row64(claim64()).includes('TOKEN that session was handed and not the seat that wrote'), true);
+  t('H64 author: …and says that login is the TOKEN CLASS the write was made with, not the seat', row64(claim64()).includes('TOKEN CLASS that write was made with and not the seat that wrote'), true);
   t('H64 author: an unreadable `user` no longer silences the row — the finding is about the TEXT', typeof h64UnattributedSeatContent(text64('comment', comment5652138683({ user: undefined }), carrier64)), 'string');
   t('H64 author: …and the row says so rather than guessing one', row64(text64('comment', comment5652138683({ user: undefined }), carrier64)).includes('serves no readable `user`'), true);
   t('H64 author: a `Bot` type is an App, whatever its login', isApp64({ user: { login: 'some-app[bot]', type: 'Bot' } }), true);
@@ -25197,7 +25203,7 @@ async function selfTest() {
   t('H64 exposure: the suspension hazard is stated, ⛔ not relaxed', h64ExposureClause({}).includes('A suspended user account hides everything it authored'), true);
   t('H64 exposure: …as measured on this board rather than hypothetical', h64ExposureClause({}).includes('measured on this board, not hypothetical'), true);
   t('⛔ H64 exposure: …and it names NO remedy, which is the whole reason it files no row', h64ExposureClause({}).includes('names NO remedy and files NO row'), true);
-  t('H64 exposure: …and says why no remedy exists — the token class is handed to a session, not chosen', h64ExposureClause({}).includes('handed to a session at start rather than chosen at write time'), true);
+  t('H64 exposure: …and says why no remedy exists — the class follows the ACCOUNT, and no act of the session chooses it', h64ExposureClause({}).includes('follows the Claude Code ACCOUNT and flips between writes with no seat act behind it'), true);
   t('H64 exposure: the PAT reading and the unread-channel reading are separate numbers', h64ExposureClause({ seatSignedUserPat: 2, seatSignedUserUnreadChannel: 5 }).includes('2 of them carry no App credential at all (a user PAT) and 5 ride'), true);
   t('H64 exposure: a bare clause renders numbers, never `undefined`', h64ExposureClause({}).includes('undefined'), false);
   t('H64 exposure: ⛔ no less-than fragment — it is rendered into a GitHub issue body', /[<>]/.test(h64ExposureClause({ seatSignedLogins: ['os-warren'] })), false);
@@ -25219,7 +25225,7 @@ async function selfTest() {
   t('H64 row: …a PR as a pull request', row64(text64('pull request', pr18051({ body: BODY18051_NOID }))).includes('this open pull request'), true);
   t('H64 row: …and a card as a card', row64(text64('card', card9404({ body: BODY9404_NOID }))).includes('this open card'), true);
   t('H64 row: it cites the rule by FILE rather than by issue number', row64(claim64()).includes('`.claude/skills/pm-dispatch/SKILL.md`'), true);
-  t('H64 row: …both halves of it', row64(claim64()).includes('`.claude/skills/pm-dispatch/references/rest-channel.md`'), true);
+  t('H64 row: …both halves of it', row64(claim64()).includes('`.claude/skills/pm-dispatch/references/platform-readings.md`'), true);
   t('H64 row: the remedy is the artefact\'s own session id', row64(claim64()).includes('gives it its session id'), true);
   t('H64 row: …an edit in place is enough where the owner can edit', row64(claim64()).includes('an edit in place is enough'), true);
   t('H64 row: …and the original STAYS as history', row64(claim64()).includes('the original STAYS as history'), true);
