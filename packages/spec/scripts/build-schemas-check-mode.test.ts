@@ -68,6 +68,10 @@ import {
   listMetadataTypeSchemaTypes,
   listUnregisteredKindSchemaTypes,
 } from '../src/kernel/metadata-type-schemas';
+// Read ONLY to keep the #18301 fixture honest about the TREE FACT it models — a
+// key that left the shape whose door still answers an author with a prescription
+// — never to assert gate behaviour, which is read off the spawned run's output.
+import { MetricSchema } from '../src/data/analytics.zod';
 import {
   AUTHORABLE_SURFACE_DIR_NAME,
   SCHEMA_MANIFEST_DIR_NAME,
@@ -1027,6 +1031,35 @@ const DELETED_BY_RENAME = `${DELETED_BY_RENAME_SOURCE_DEF}:source`;
  *  upstream anchor from before the rename is the mirror image, and holding both
  *  at once is the #17383 collision. */
 const CARRIED_BY_RENAME = `${RENAMED_DEFS[DELETED_BY_RENAME_SOURCE_DEF]}:source`;
+/** #18301's pin — the GUIDANCE ROUTE, and the only fixture here that is a REAL
+ *  completed retirement rather than a synthetic key.
+ *
+ *  `data/Metric:filters` was removed from `MetricSchema`'s shape outright (#10414,
+ *  ADR-0049) with its prescription left in the closed shape's `guidance` table. A
+ *  retirement done that way never carries the `[RETIRED]` mark, because there is
+ *  nothing left in the shape to mark — so proof 1 could not apply to it at any
+ *  major, and while proof 2 was broken (#17356) proof 2 was answering instead. The
+ *  key is usable verbatim here for the same reason the synthetic ones are not:
+ *  check (c) only ever sees a key the build STOPPED emitting, and this one really
+ *  has stopped. */
+const GUIDANCE_ROUTE_DEF = 'data/Metric';
+const GUIDANCE_ROUTE_LEAF = 'filters';
+const DELETED_GUIDANCE_ROUTE = `${GUIDANCE_ROUTE_DEF}:${GUIDANCE_ROUTE_LEAF}`;
+/** The dark control, and the reason proof 4 is not a blanket waiver: the SAME def
+ *  — same reachability, same closed door — with a key nothing prescribes for. */
+const DELETED_GUIDANCE_UNNAMED = `${GUIDANCE_ROUTE_DEF}:zzNotPrescribed18301`;
+/** The key a maintainer ruling (2026-09-10, #16320) retired while DELIBERATELY
+ *  withholding the tombstone. `DataSyncConfigSchema` is a plain `z.object`, not a
+ *  `strictObject`, so nothing declares a prescription for it and proof 4 has no
+ *  route to it — which is what keeps this card an ADDED proof rather than a
+ *  reversal of that ruling. If someone later writes a `guidance` entry for
+ *  `schedule`, this assertion flips, and it SHOULD: the retirement would have
+ *  become audible, which is a real change and not a test to relax. */
+const WITHHELD_TOMBSTONE = 'integration/DataSyncConfig:schedule';
+/** How `strictUnknownKeyError` renders a prescription: one bullet line. The
+ *  guard below reads it as a lit/dark PAIR, never alone — a shape that rejects
+ *  everything and prescribes for nothing passes a one-legged rejection test. */
+const PRESCRIPTION_BULLET = '\n  • ';
 
 describe('build-schemas.ts — deleted baseline lines must prove themselves (#4650)', () => {
   beforeAll(() => {
@@ -1041,6 +1074,9 @@ describe('build-schemas.ts — deleted baseline lines must prove themselves (#46
       ...DELETED_GONE_DEF,
       DELETED_AGED,
       DELETED_BY_RENAME,
+      DELETED_GUIDANCE_ROUTE,
+      DELETED_GUIDANCE_UNNAMED,
+      WITHHELD_TOMBSTONE,
     ]) {
       expect(
         keys.includes(injected) || keys.includes(injected.replace(' [RETIRED]', '')),
@@ -1091,6 +1127,36 @@ describe('build-schemas.ts — deleted baseline lines must prove themselves (#46
       `${DELETED_VIA_UNREGISTERED_KIND_DEF} is no longer emitted with authorable keys — check (c) ` +
         `would route this fixture to the vanished-def proof instead; re-pick the def`,
     ).toBe(true);
+    // #18301's fixture is only a pin while `data/Metric:filters` is still a
+    // completed guidance-route retirement in the tree. Three halves, all loud,
+    // because each can rot on its own and each rots the pin into a green that
+    // asserts nothing about proof 4.
+    expect(
+      keys.some((k) => k.startsWith(`${GUIDANCE_ROUTE_DEF}:`)),
+      `${GUIDANCE_ROUTE_DEF} is no longer emitted with authorable keys — check (c) would route ` +
+        `this fixture to the vanished-def proof instead; re-pick the def`,
+    ).toBe(true);
+    expect(
+      Object.keys(MetricSchema.shape),
+      `'${GUIDANCE_ROUTE_LEAF}' is DECLARED on the shape again — it would reach the aging clock, ` +
+        `not the unrecognized-key path, so this fixture no longer models the guidance route`,
+    ).not.toContain(GUIDANCE_ROUTE_LEAF);
+    // The lit leg and the dark leg of the same read: the retired key's rejection
+    // carries a prescription bullet, an undeclared neighbour's does not.
+    const metric = { name: 'revenue', label: 'Revenue', type: 'sum', sql: 'amount' };
+    const lit = MetricSchema.safeParse({ ...metric, [GUIDANCE_ROUTE_LEAF]: [{ sql: '1 = 1' }] });
+    const dark = MetricSchema.safeParse({ ...metric, zzNotPrescribed18301: 1 });
+    expect(lit.success, `writing '${GUIDANCE_ROUTE_LEAF}' is accepted again — re-pick the fixture`).toBe(false);
+    expect(
+      lit.success ? '' : lit.error.issues.map((i) => i.message).join('\n'),
+      `'${GUIDANCE_ROUTE_LEAF}' is rejected with no prescription — the \`guidance\` entry that IS ` +
+        `proof 4's evidence has gone; this fixture models nothing`,
+    ).toContain(PRESCRIPTION_BULLET);
+    expect(
+      dark.success ? '' : dark.error.issues.map((i) => i.message).join('\n'),
+      'an UNdeclared metric key now renders a prescription bullet too — the lit leg above has ' +
+        'stopped discriminating, so it no longer reads the guidance table',
+    ).not.toContain(PRESCRIPTION_BULLET);
     // The manifest ratchet runs first; keep it current so every run reaches (c).
     seedManifest((s) => s);
   });
@@ -1269,6 +1335,115 @@ describe('build-schemas.ts — deleted baseline lines must prove themselves (#46
       expect(lazy.output).toMatch(rx(DELETED_UNREACHABLE, 'def not reachable from the \\d+ metadata-type roots'));
 
       expect(readSurface()).toBe(canonical);
+    },
+  );
+
+  it(
+    '#18301 — a guidance-route retirement on a reachable def proves itself; the same deletion, unnamed, does not',
+    { timeout: SPAWN_TIMEOUT_MS },
+    () => {
+      // FOUR keys, ONE run, because every one of them is satisfiable by a gate
+      // that is simply wrong somewhere else — and a proof that admits everything
+      // and a proof that admits nothing both pass a one-legged test:
+      //
+      //   - `DELETED_GUIDANCE_ROUTE`  a blanket waiver passes this alone;
+      //   - `DELETED_GUIDANCE_UNNAMED` the SAME def, so a gate that keyed proof 4
+      //     off the def rather than the KEY passes the first and fails here;
+      //   - `WITHHELD_TOMBSTONE`      the 2026-09-10 ruling, which this card adds
+      //     a proof beside and must not reverse;
+      //   - `DELETED_UNREACHABLE`     proof 2's own territory, unchanged — it
+      //     would move if proof 4 had been written as a widening of proof 2
+      //     instead of a fourth proof beside it.
+      seedBase((s) => [
+        ...s,
+        DELETED_GUIDANCE_ROUTE,
+        DELETED_GUIDANCE_UNNAMED,
+        WITHHELD_TOMBSTONE,
+        DELETED_UNREACHABLE,
+      ].sort());
+      const canonical = seedSurface((s) => s);
+
+      const rx = (key: string, tail: string): RegExp =>
+        new RegExp(`${key.replace(/[/$]/g, '\\$&')} — ${tail}`);
+
+      // Read the gate as CI runs it first: `check:authorable-surface` exports
+      // OS_EAGER_SCHEMAS=1, so `zodByDefKey` holds the real instances and the
+      // declaration registry proof 4 reads is populated by construction.
+      const eager = run(['--check'], EAGER_SCHEMAS_ENV);
+
+      // Direction 1 — proof 4 fires, and the verdict carries its own evidence:
+      // which def, that the door is closed, and the key it prescribes for BY
+      // NAME. A reader judging this waiver is not taking the deleter's word.
+      expect(eager.output).toContain('carry their own proof (#4650)');
+      expect(eager.output).toMatch(
+        rx(DELETED_GUIDANCE_ROUTE, 'def reachable from the metadata-type roots, and its shape is CLOSED'),
+      );
+      expect(eager.output).toContain(`'${GUIDANCE_ROUTE_LEAF}' by name`);
+      // Specifically NOT proof 2. `data/Metric` hangs off the `analytics_cube`
+      // root, one of the four unregistered kinds #18131 put into the root union,
+      // so before that repair this key read unreachable and was waived for the
+      // WRONG reason — which is exactly how the class stayed invisible.
+      expect(eager.output).not.toMatch(rx(DELETED_GUIDANCE_ROUTE, 'def not reachable from the'));
+
+      // Direction 2 — the same deletion, on the same def, with nothing naming
+      // the key: still a violation. This is what makes proof 4 a proof and not a
+      // waiver for the def.
+      expect(eager.status).toBe(1);
+      expect(eager.output).toContain('authorable baseline line(s) were deleted without proof (#4650)');
+      expect(eager.output).toMatch(
+        rx(DELETED_GUIDANCE_UNNAMED, 'def reachable from the metadata-type roots; .*was LIVE'),
+      );
+      expect(eager.output).not.toMatch(rx(DELETED_GUIDANCE_UNNAMED, 'shape is CLOSED'));
+
+      // Direction 3 — the withheld tombstone stays withheld. Nothing prescribes
+      // for `schedule`, so proof 4 has no route to it and the deletion is still
+      // refused, on the same verdict it was refused on before this card.
+      expect(eager.output).toMatch(rx(WITHHELD_TOMBSTONE, 'def .*was LIVE \\(never tombstoned\\)'));
+      expect(eager.output).not.toMatch(rx(WITHHELD_TOMBSTONE, 'shape is CLOSED'));
+
+      // Direction 4 — proof 2's repaired conservatism is untouched: a def no
+      // metadata document is ever parsed against still reads `null` and is still
+      // waived by proof 2, with proof 2's words and not proof 4's.
+      expect(eager.output).toMatch(rx(DELETED_UNREACHABLE, 'def not reachable from the \\d+ metadata-type roots'));
+      expect(eager.output).not.toMatch(rx(DELETED_UNREACHABLE, 'shape is CLOSED'));
+
+      // The same four verdicts under the lazy-Proxy graph, where every def
+      // resolves through `zodShapeOf`'s lazy getter rather than by identity. The
+      // VERDICT is what this gate acts on, so it is the verdict pinned in both
+      // regimes.
+      const lazy = run(['--check']);
+      expect(lazy.status).toBe(1);
+      expect(lazy.output).toMatch(rx(DELETED_GUIDANCE_ROUTE, 'def .*shape is CLOSED'));
+      expect(lazy.output).toMatch(rx(DELETED_GUIDANCE_UNNAMED, 'def .*was LIVE \\(never tombstoned\\)'));
+      expect(lazy.output).toMatch(rx(WITHHELD_TOMBSTONE, 'def .*was LIVE \\(never tombstoned\\)'));
+      expect(lazy.output).toMatch(rx(DELETED_UNREACHABLE, 'def not reachable from the \\d+ metadata-type roots'));
+
+      expect(readSurface()).toBe(canonical);
+    },
+  );
+
+  it(
+    "#18301 — the remedy names four proofs, and names what the fourth one needs",
+    { timeout: SPAWN_TIMEOUT_MS },
+    () => {
+      // The remedy is the only thing an author who hits this gate reads. Until
+      // this card it listed three routes and a guidance-route retirement matched
+      // none of them, so the honest next step was invisible — the #12574 shape,
+      // one proof further on.
+      seedBase((s) => [...s, DELETED_GUIDANCE_UNNAMED].sort());
+      seedSurface((s) => s);
+
+      const { status, output } = run(['--check'], EAGER_SCHEMAS_ENV);
+
+      expect(status).toBe(1);
+      expect(output).toContain('A line may only leave this file when:');
+      for (const route of ['     1.', '     2.', '     3.', '     4.']) {
+        expect(output, `the remedy stopped naming route ${route.trim()}`).toContain(route);
+      }
+      // Route 4 states both halves of its own evidence, and the narrowing that
+      // keeps it from being a blanket waiver.
+      expect(output).toContain('its def\'s shape is CLOSED and NAMES the key');
+      expect(output).toContain('an enumerated `guidanceSets` entry counts, a RegExp');
     },
   );
 
