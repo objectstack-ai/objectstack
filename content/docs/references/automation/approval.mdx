@@ -72,12 +72,23 @@ const result = ApprovalDecision.parse(data);
 | **minApprovals** | `integer` | optional | Approvals required — total (quorum) or per group (per_group). Omitted ⇒ all resolvable approvers for quorum, 1 per group for per_group |
 | **lockRecord** | `boolean` | optional (default: `true`) | Lock the record from editing while pending |
 | **approvalStatusField** | `string` | optional | Business-object field to mirror request status onto |
-| **onEmptyApprovers** | `Enum<'admin_rescue' \| 'fail' \| 'auto_approve'>` | optional (default: `"admin_rescue"`) | Behavior when no concrete approver resolves at node entry |
+| **onEmptyApprovers** | `Enum<'admin_rescue' \| 'fail' \| 'auto_approve' \| 'fallback'>` | optional (default: `"admin_rescue"`) | Behavior when no concrete approver resolves at node entry — 'fallback' opens the request on fallbackApprovers instead |
+| **fallbackApprovers** | `{ type: Enum<'manager' \| 'position' \| 'department' \| 'team' \| 'field' \| 'expression' \| …>; value?: string; resolveAs?: Enum<'user' \| 'department' \| 'position' \| 'team'>; group?: string; … }[]` | optional | Approvers the request opens on when onEmptyApprovers is 'fallback' |
 | **decisionOutputs** | `(string \| { key: string; label?: string; type?: Enum<'text' \| 'user' \| 'department' \| 'position' \| 'team'>; multiple?: boolean; … })[]` | optional | Author-declared decision outputs — bare keys or typed `{ key, type, multiple }` declarations |
 | **escalation** | `{ enabled: boolean; timeoutHours: number; action: Enum<'reassign' \| 'auto_approve' \| 'auto_reject' \| 'notify'>; escalateTo?: string; … }` | optional | Per-node SLA escalation |
 | **maxRevisions** | `integer` | optional (default: `3`) | Max send-backs for revision before auto-reject (0 = send-back disabled) |
 
 ### Nested Shape: `ApprovalNodeConfig.approvers[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `Enum<'manager' \| 'position' \| 'department' \| 'team' \| 'field' \| 'expression' \| …>` | ✅ | Approval step approver type. `manager` is a directory-sync dependency rather than something an author configures here: it resolves the submitter's `sys_user.manager_id` at runtime, and that column has no product write surface, so until an operator populates it from outside the product a manager step resolves to nobody and the request waits. `os lint` reports that at authoring time as `approval-approvers-may-resolve-empty` and carries the graded population routes and the full remedy; the Approvals guide states the same remedy in prose. |
+| **value** | `string` | optional | User id / membership tier / position / team / department / field — per `type`; for `expression`, a CEL expression over `current.*` / `trigger.*` / `vars.*` |
+| **resolveAs** | `Enum<'user' \| 'department' \| 'position' \| 'team'>` | optional | How an `expression` result is expanded into approvers (default 'user') |
+| **group** | `string` | optional | Group label for per_group sign-off (e.g. "legal", "finance") |
+| **organization** | `string` | optional | ADR-0105 D9 — organization whose directory resolves this approver: `$root` (group org), `$parent` (one level up), or an organization slug. Omitted = the request's own organization. |
+
+### Nested Shape: `ApprovalNodeConfig.fallbackApprovers[number]`
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |

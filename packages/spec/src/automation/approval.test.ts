@@ -83,6 +83,33 @@ describe('ApproverType', () => {
 // `delegated_admin` tier (ADR-0105 D8) could not be authored as an approver.
 // The list is now DERIVED from `BUILTIN_MEMBERSHIP_ROLES`; these pins keep the
 // derivation from ever being silently replaced by a copy again.
+// The enum's `.describe()` reaches authors twice over: `os lint` is not its only
+// reader, the generated reference renders it verbatim ONCE PER SHAPE that reuses
+// the approver entry — so a stale sentence there multiplies rather than sits
+// still. It is a POINTER at the remedy by design; what it must never do is make
+// a claim of its own that the platform contradicts.
+describe('ApproverType.describe() points at the remedy without asserting a stale fact', () => {
+  const doc = () => ApproverType.description ?? '';
+
+  it('⛔ does not deny a write surface that exists', () => {
+    // `sys_user.manager_id` gained a dedicated admin operation. An author who
+    // reads "no product write surface" stops looking for it.
+    expect(doc()).not.toContain('no product write surface');
+    expect(doc()).not.toContain('from outside the product');
+  });
+
+  it('still routes the reader to the one authoritative remedy', () => {
+    expect(doc()).toContain('approval-approvers-may-resolve-empty');
+    expect(doc()).toContain('os lint');
+    // ⛔ And still does not restate it — one copy, in the lint rule.
+    expect(doc()).not.toContain('/api/v1/auth/admin/set-user-manager');
+  });
+
+  it('names the node-level escape this widening added', () => {
+    expect(doc()).toContain('onEmptyApprovers');
+  });
+});
+
 describe('ORG_MEMBERSHIP_LEVELS derives from BUILTIN_MEMBERSHIP_ROLES', () => {
   it('is the same list, in the same display order, as the sys_member.role vocabulary', () => {
     expect([...ORG_MEMBERSHIP_LEVELS]).toEqual([...BUILTIN_MEMBERSHIP_ROLES]);

@@ -165,16 +165,14 @@ const GROUP_ROUTED_TYPES = new Set(['position', 'team', 'department']);
  * SHAPE, and a declared `fallbackApprovers` list can itself resolve to nobody
  * at runtime, which a static check cannot see either.
  *
- * ⛔ DEPENDENCY — one carrier of the old assertion is still stale and is ⛔ NOT
- * fixed here: `ApproverType`'s `.describe()` in
+ * ⛔ DEPENDENCY — the other two carriers of this assertion are now correct and
+ * must stay that way: `ApproverType`'s `.describe()` in
  * `packages/spec/src/automation/approval.zod.ts` (rendered verbatim into the
- * generated `content/docs/references/automation/approval.mdx`) still says the
- * column "has no product write surface". That edit is `packages/spec`, which
- * this change is fenced out of; it is reported to the PM for the `domain:spec`
- * seat. The third carrier, the `manager` callout in
- * `content/docs/automation/approvals.mdx`, IS updated in this same change.
- * Neither RESTATES the remedy — both point back here, which is why there is
- * still exactly one copy to edit.
+ * generated `content/docs/references/automation/approval.mdx`, once per shape
+ * that reuses the approver entry — so a stale copy there multiplies) and the
+ * `manager` callout in `content/docs/automation/approvals.mdx`. Neither
+ * RESTATES the remedy — both point back here, which is why there is still
+ * exactly one copy to edit.
  */
 // ⛔ The tracker ids stay in the comments above and never in this string:
 // `check:doc-authoring` Rule 3 — a runtime string reaches authors, operators and

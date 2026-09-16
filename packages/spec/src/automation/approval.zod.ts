@@ -83,19 +83,26 @@ export const ApproverType = z.enum([
   // `packages/lint/src/validate-approval-approvers.ts`, mirrored for readers by
   // the Approvals guide; a third copy here would be one more line to keep in
   // step, and a pointer cannot drift into disagreement with what it points at.
-  // That file's `⛔ DEPENDENCY` docblock now names this string among the lines
-  // that go stale if `manager_id` ever gains a product write surface.
+  // ⛔ It said "that column has no product write surface" until the write
+  // surface landed — the exact staleness the pointer discipline above exists to
+  // make cheap to repair, and the reason the sentence now describes the COLUMN
+  // (not a profile field an author edits) rather than the platform's inventory
+  // of writers. An author who reads "no write surface" stops looking for the
+  // admin operation that does exist, which is worse than no sentence at all.
+  // The generated reference renders this string once per carrier, so a stale
+  // copy multiplies silently every time a new shape reuses the approver entry.
   //
   // ⛔ Tracker ids stay out of the string itself — it reaches authors and
   // generated surfaces, neither of whom can resolve one (`check:doc-authoring`
   // Rule 3).
   .describe(
-    'Approval step approver type. `manager` is a directory-sync dependency rather than something ' +
-    "an author configures here: it resolves the submitter's `sys_user.manager_id` at runtime, and " +
-    'that column has no product write surface, so until an operator populates it from outside the ' +
-    'product a manager step resolves to nobody and the request waits. `os lint` reports that at ' +
-    'authoring time as `approval-approvers-may-resolve-empty` and carries the graded population ' +
-    'routes and the full remedy; the Approvals guide states the same remedy in prose.',
+    'Approval step approver type. `manager` is resolved from the directory rather than configured ' +
+    "here: it reads the submitter's `sys_user.manager_id` at runtime, and that column is not a " +
+    'profile field an author edits, so until an operator populates it through one of the routes ' +
+    '`os lint` names, a manager step resolves to nobody and the request waits. `os lint` reports ' +
+    'that at authoring time as `approval-approvers-may-resolve-empty` and carries the graded ' +
+    'population routes and the full remedy, the node-level `onEmptyApprovers` fallback included; ' +
+    'the Approvals guide states the same remedy in prose.',
   );
 export type ApproverType = z.input<typeof ApproverType>;
 
