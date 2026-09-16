@@ -40,7 +40,12 @@ best match and no folding, only the ladder above.
 `defineStack`'s `warnEmailTemplateLocaleFloor` gains a declaration of the two
 shapes it deliberately does NOT examine (a stack whose `i18n.supportedLocales`
 is absent or empty; a bundle whose tags all fall outside `supportedLocales`) —
-both can still ship a floorless bundle. Its logic is unchanged and its warning
-stays advisory; whether either shape should warn is the ADR-0049
-enforce-or-remove question and is not answered here. Both shapes are now pinned
-against a warning discriminator so neither can change without a test saying so.
+both can still ship a floorless bundle. Its control flow is unchanged — the same
+bundles warn, once each, and the warning stays advisory — but the emitted warning
+TEXT did change, and now names BOTH call shapes: it says the bundle has no
+fallback floor *for a send that names a locale*, and adds that a send naming NO
+locale does not fail but drops to that bundle's lowest tag and renders it
+silently. A test asserting on the old wording needs updating. Whether either
+undeclared shape should warn is the ADR-0049 enforce-or-remove question and is
+not answered here. Both shapes are now pinned against a warning discriminator so
+neither can change without a test saying so.

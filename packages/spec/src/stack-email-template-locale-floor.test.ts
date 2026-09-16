@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 //
 // #17614 — an `emailTemplates` bundle tagged with the stack's OWN
-// `i18n.defaultLocale` has no fallback floor.
+// `i18n.defaultLocale` has no fallback floor for a send that names a locale.
 //
 // Measured before this landed, on an unmodified tree: a stack declaring
 // `defaultLocale: 'en'`, `supportedLocales: ['en','zh-CN','ja-JP','es-ES']`
@@ -10,10 +10,13 @@
 // PERMANENT, so the delivery dead-letters with no retry — for `de-DE` and for
 // the literal `en-US`. The identical bundle with its English row tagged
 // `en-US` delivered for `de-DE`. `sendTemplate` matches `(name, locale)`
-// exactly and retries exactly one rung, the literal `en-US`; there is no
-// language-subtag folding, and that ladder's shape is a settled ruling this
-// change deliberately does not touch. The remedy is the bundle, so the
-// diagnostic is where the author is standing.
+// exactly and, for a call that NAMES a locale, retries exactly one rung — the
+// literal `en-US` — and stops; there is no language-subtag folding. A call that
+// names NO locale is the other case and does NOT dead-letter: it starts at
+// `en-US` by name and, when the bundle carries no `en-US` row, drops to that
+// bundle's lowest locale tag and renders it silently. That ladder's shape is a
+// settled ruling this change deliberately does not touch. The remedy is the
+// bundle, so the diagnostic is where the author is standing.
 //
 // These pin the diagnostic ADVISORY: every case asserts the parse still
 // succeeds and the stack comes back unchanged. The diagnostic narrows what
