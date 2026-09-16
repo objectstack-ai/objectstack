@@ -2652,6 +2652,11 @@ export class ApprovalService implements IApprovalService {
    * #3447 P2: may instead return an {@link ApprovalNodeAutoOutcome} — no
    * request opened — when the slate resolves empty and the node's
    * `onEmptyApprovers` policy is `auto_approve`.
+   *
+   * An empty slate under `onEmptyApprovers: 'fallback'` opens a NORMAL request
+   * on the node's declared `fallbackApprovers` instead, resolved through the
+   * same expansion as `approvers`. The return type is unchanged for that
+   * policy: from the flow node's side it is an ordinary pending request.
    */
   async openNodeRequest(
     input: {
@@ -2732,10 +2737,13 @@ export class ApprovalService implements IApprovalService {
     const subjectOrg = this.recordOrgResolver.organizationOf(input.object, liveRecord, input.record);
     const requestOrg = subjectOrg ?? ctxOrg;
     const resolvedFrom: Record<string, unknown> = {};
-    const approvers = await this.expandApprovers(
+    const exprCtx = { trigger: input.record ?? null, vars: input.variables ?? null };
+    // `let`, not `const`: the `fallback` empty-slate policy below REPLACES this
+    // slate with the node's declared fallback approvers.
+    let approvers = await this.expandApprovers(
       { approvers: input.config.approvers }, liveRecord, requestOrg, {
         now: nowDate.getTime(), substitutions, groups,
-        exprCtx: { trigger: input.record ?? null, vars: input.variables ?? null },
+        exprCtx,
         resolvedFrom,
       },
     );
@@ -2760,16 +2768,89 @@ export class ApprovalService implements IApprovalService {
         );
         return { autoApproved: true, reason: 'empty_approvers' };
       }
+      // `fallback`: the one policy that NAMES people. The declared
+      // `fallbackApprovers` go through the SAME resolver as `approvers` — not
+      // a parallel path — so every approver type, OOO delegation (#1322) and
+      // per_group tagging (#3266) behaves on the fallback exactly as it does on
+      // the primary slate. The request then opens on THOSE ids.
+      //
+      // ⛔ What must never happen here is opening on the abandoned slate: an
+      // empty `{ type: 'manager' }` rung leaves the literal `manager:undefined`
+      // (the type is in GRAPH_APPROVER_TYPES and `value` is omitted for
+      // `manager`, so the literal interpolates the missing value), and that
+      // slot is decidable by nobody. Replacing the slate is the whole point.
+      if (emptyPolicy === 'fallback') {
+        const declared = (input.config as any).fallbackApprovers;
+        // The spec refuses `fallback` without a non-empty list, so an empty one
+        // here means a stored node written before the policy existed, or a
+        // caller that bypassed the schema. Degrade to admin_rescue rather than
+        // throw: this is a rescue path, and killing the run is the one outcome
+        // the policy was chosen to avoid.
+        if (Array.isArray(declared) && declared.length) {
+          const fallbackResolvedFrom: Record<string, unknown> = {};
+          const fallbackApprovers = await this.expandApprovers(
+            { approvers: declared }, liveRecord, requestOrg, {
+              now: nowDate.getTime(), substitutions, groups,
+              exprCtx,
+              resolvedFrom: fallbackResolvedFrom,
+            },
+          );
+          // Keep the primary slate's resolution inputs (they explain WHY the
+          // fallback fired) and namespace the fallback's own, so neither
+          // clobbers the other in the `__resolvedFrom` audit snapshot.
+          for (const [k, v] of Object.entries(fallbackResolvedFrom)) {
+            resolvedFrom[`fallback:${k}`] = v;
+          }
+          if (fallbackApprovers.some(a => a && !a.includes(':'))) {
+            this.logger?.warn?.(
+              `[approvals] approval node '${input.nodeId}' on ${input.object}/${input.recordId} resolved to no `
+              + `concrete approver — opening on the declared fallbackApprovers per onEmptyApprovers: 'fallback'.`,
+              {
+                object: input.object, recordId: input.recordId, node: input.nodeId,
+                resolved: approvers, fallback: fallbackApprovers,
+              },
+            );
+            // The abandoned slate's per_group tags describe ids that are no
+            // longer on this request; drop them so the snapshot the tally reads
+            // describes the slate the approvers actually see.
+            for (const slot of approvers) delete groups[slot];
+            approvers = fallbackApprovers;
+          } else {
+            this.logger?.warn?.(
+              `[approvals] approval node '${input.nodeId}' on ${input.object}/${input.recordId} resolved to no `
+              + `concrete approver AND its declared fallbackApprovers resolved to nobody either — falling back `
+              + `to admin_rescue. Check that the fallback target(s) are staffed.`,
+              {
+                object: input.object, recordId: input.recordId, node: input.nodeId,
+                resolved: approvers, fallback: fallbackApprovers,
+              },
+            );
+          }
+        } else {
+          this.logger?.warn?.(
+            `[approvals] approval node '${input.nodeId}' on ${input.object}/${input.recordId} declares `
+            + `onEmptyApprovers: 'fallback' with no fallbackApprovers — falling back to admin_rescue.`,
+            { object: input.object, recordId: input.recordId, node: input.nodeId, resolved: approvers },
+          );
+        }
+      }
+
       // #3424 admin_rescue (default): the request is still opened (a privileged
       // admin can override it, and legacy 15.x literal slots stay queryable) —
       // the only option that neither waves the record through nor kills the
       // run — but warn loudly so the misconfiguration surfaces instead of
       // silently locking the record with no obvious cause.
-      this.logger?.warn?.(
-        `[approvals] approval node '${input.nodeId}' on ${input.object}/${input.recordId} resolved to no concrete approver`
-        + ' — the request is decidable only by a privileged admin. Check that the approver target(s) are staffed.',
-        { object: input.object, recordId: input.recordId, node: input.nodeId, resolved: approvers },
-      );
+      //
+      // Re-tested rather than assumed: a `fallback` that landed people above
+      // has already turned this into a normal request, and warning "decidable
+      // only by a privileged admin" about it would be false.
+      if (!approvers.some(a => a && !a.includes(':'))) {
+        this.logger?.warn?.(
+          `[approvals] approval node '${input.nodeId}' on ${input.object}/${input.recordId} resolved to no concrete approver`
+          + ' — the request is decidable only by a privileged admin. Check that the approver target(s) are staffed.',
+          { object: input.object, recordId: input.recordId, node: input.nodeId, resolved: approvers },
+        );
+      }
     }
 
     const now = nowDate.toISOString();
