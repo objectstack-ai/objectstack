@@ -18,8 +18,12 @@ make. The entry's `surface`, `replacement`, `reason` and `acceptanceCriteria`
 each gained their `group` row here, the rejected bootstrap-organization arm
 included — recorded because it is the one a later reader will re-propose.
 
-**Nothing that worked stops working, and nothing that was admitted becomes
-refused.** The accept set widens in one cell.
+**Marked breaking (`!`) for the behaviour change, not for a narrowing.** Nothing
+that worked stops working and nothing that was admitted becomes refused — the
+accept set WIDENS in one cell. What earns the banner is the other direction: on a
+`group` deployment with the switch already on, flows that were refused at bind
+now arm and run, so clock-driven work appears where an operator had none. That is
+worth reading before upgrading even though no consumer has to change anything.
 
 ## What changes
 
