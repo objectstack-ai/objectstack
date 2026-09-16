@@ -395,14 +395,14 @@ Sort field and direction pair
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **objectName** | `string` | optional | Object this chart binds to — the THIRD record source `getDataConfig` resolves, after `data` and `staticData`. Optional because the component-level `dataSource` binding can supply the object instead |
+| **objectName** | `string` | optional | Object this gantt binds to — the THIRD record source `getDataConfig` resolves, after `data` and `staticData`. Optional because the component-level `dataSource` binding can supply the object instead |
 | **data** | `{ provider: 'object'; object: string } \| { provider: 'api'; read?: object; write?: object } \| { provider: 'value'; items: any[] } \| { provider: 'schema'; schemaId: string; schema?: Record<string, any> }` | optional | Data source binding (ViewDataSchema — discriminated on `provider`: object \| api \| value \| schema), read FIRST by `getDataConfig`. Static inline rows live at `{ provider: 'value', items: [...] }` or at `staticData`; the bare-array shortcut is refused |
 | **staticData** | `any[]` | optional | Inline records — read SECOND by `getDataConfig`, wrapped into a `{ provider: 'value' }` config |
 | **filter** | `{ field: string; operator: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>; value?: string \| number \| boolean \| null \| (string \| number)[] }[]` | optional | Base query filter — the ViewFilterRule array form `[{ field, operator, value }, ...]`, the one filter orthography every `filter` door in this map shares; lowered to the wire `$filter`. The MongoDB-style record form is refused — see migration `element-data-source-and-object-block-filter-rule-array` |
 | **sort** | `{ field: string; order: Enum<'asc' \| 'desc'> }[]` | optional | Task order for the fetched bars — the SortItem array form `[{ field, order }, ...]`, the one sort orthography every declared `sort` door on this platform shares; lowered to the wire `$orderby`. The legacy string clause (`name desc`) is refused — see migration `object-block-sort-item-array` |
 | **gantt** | `{ startDateField: string; endDateField: string; titleField: string; progressField?: string; … }` | optional | Gantt-timeline configuration, the author face — the same block `ListViewSchema.gantt` declares, and the one the renderer validates this node against. Taken WHOLE when present: the flat top-level spelling beside it is ignored |
 | **navigation** | `any` | optional | Task-click navigation config (`{ mode: page \| drawer \| modal \| split \| popover \| none }`); renderer default `drawer` |
-| **label** | `string \| Record<string, string>` | optional | Chart label — the second link of the exported PNG/PDF file-name chain, after `gantt.exportFileName` and before the bound object's own label |
+| **label** | `string \| Record<string, string>` | optional | Gantt label — the second link of the exported PNG/PDF file-name chain, after `gantt.exportFileName` and before the bound object's own label |
 | **skipWeekends** | `boolean` | optional | Measure duration and auto-schedule math in WORKING days, skipping Saturdays and Sundays |
 | **holidays** | `string[]` | optional | Additional non-working dates for the working calendar, ISO `yyyy-mm-dd` strings; folded into a Set for the duration math |
 | **persistLayout** | `boolean` | optional | Opt OUT of layout and filter-chip persistence — only an explicit `false` disables it; the storage key is `objectName:viewName` |
@@ -410,7 +410,7 @@ Sort field and direction pair
 | **markers** | `any[]` | optional | Extra vertical reference lines drawn like the Today marker (`{ date, label?, color? }`) |
 | **criticalPath** | `boolean` | optional | Seed the critical-path highlight ON; the toolbar toggle stays available either way |
 | **showBaselines** | `boolean` | optional | Render the planned-vs-actual baseline bars — ON unless an explicit `false` disables it |
-| **readOnly** | `boolean` | optional | Disable every write path on the chart and lock the record drawer |
+| **readOnly** | `boolean` | optional | Disable every write path on this gantt and lock the record drawer |
 | **mobileReadOnly** | `boolean` | optional | Auto read-only on narrow viewports — ON unless an explicit `false` disables it |
 
 ### Nested Shape: `ObjectGanttProps.data[provider='object']`
@@ -765,7 +765,7 @@ View filter rule
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **objectName** | `string` | optional | Object this tree binds to — the THIRD record source `getDataConfig` resolves, after `data` and `staticData`. Optional because the component-level `dataSource` binding can supply the object instead |
+| **objectName** | `string` | optional | Object this tree binds to — the THIRD record source `getDataConfig` resolves, after `data` and `staticData`. Optional because either of the first two rungs resolves the source without it: `data` can name the object itself (`{ provider: 'object', object }`) and `staticData` needs none. ⚠️ NOT supplied by the component-level `dataSource` binding the sibling blocks name — this renderer registers no such gate |
 | **data** | `{ provider: 'object'; object: string } \| { provider: 'api'; read?: object; write?: object } \| { provider: 'value'; items: any[] } \| { provider: 'schema'; schemaId: string; schema?: Record<string, any> }` | optional | Data source binding (ViewDataSchema — discriminated on `provider`: object \| api \| value \| schema), read FIRST by `getDataConfig`. Static inline rows live at `{ provider: 'value', items: [...] }` or at `staticData`; the bare-array shortcut is refused |
 | **staticData** | `any[]` | optional | Inline records — read SECOND by `getDataConfig`, wrapped into a `{ provider: 'value' }` config |
 | **filter** | `{ field: string; operator: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>; value?: string \| number \| boolean \| null \| (string \| number)[] }[]` | optional | Base query filter — the ViewFilterRule array form `[{ field, operator, value }, ...]`, the one filter orthography every `filter` door in this map shares; lowered to the wire `$filter`. The MongoDB-style record form is refused — see migration `element-data-source-and-object-block-filter-rule-array` |
