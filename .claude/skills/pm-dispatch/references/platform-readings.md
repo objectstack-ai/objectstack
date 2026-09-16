@@ -139,8 +139,8 @@
 - porcelain 家族(`gh issue view` / `gh pr list`)与 `gh pr create` 走 GraphQL,当场回限流。
 - 同批事实改走 `gh api` 的 REST 路径照常返回,含开 draft PR;容器无 `gh`,本条只对本机席适用。
 - 红窗调度:守候只给上面那几件 GraphQL-only 的,⛔ 其余一切不为配额空等。
-- 走队列的仓落地必经 auto-merge ⇒ 红窗里无退路;直合仓有,合并本身有 REST 端点。
-- 红窗里 draft 翻转与 auto-merge 挂载照常走 ccr REST,⛔ 不为它们守候 ⇒ 上条无退路不成立。
+- 走队列的仓落地仍必经 auto-merge,红窗里照样走 ccr REST 挂载;直合仓合并本身有 REST 端点。
+- 红窗里 draft 翻转与 auto-merge 挂载照常走 ccr REST,⛔ 不为它们守候。
 - 被挡住的翻转是在等窗口,不是关于该 PR 的信号 ⇒ ⛔ 不据它重挂、不据它改判状态。
 - 其余动作(评论、标签、请审、读、timeline)照常走 REST。
 - 报文里的 user ID 只是报文:据它推 MCP 池跨席共享与本节首条冲突,⛔ 未裁不写成事实。
