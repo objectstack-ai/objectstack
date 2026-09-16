@@ -3435,12 +3435,16 @@ describe('the three #18305 object blocks — key sets derived from the renderers
 
   it('object-tree declares exactly its measured read set — and `data` IS in it', () => {
     // The card's open question, answered by measurement rather than by family
-    // symmetry: ObjectTree.tsx @ 53ded82b reads `schema.data` on TWO sites —
-    // `resolveRecordSourceConfig(schema)` at :359 (rung 1 of the shared ladder,
-    // returned verbatim as a `ViewData`) and `(rest as any).data ?? (schema as
-    // any).data` at :496. objectui#9234 left that read marked `undeclared`
-    // because neither published face carried the key; the protocol row follows
-    // the READ POINTS, which is what 「以协议为准」 resolving for this block means.
+    // symmetry: ObjectTree.tsx @ 53ded82b reaches `schema.data` through
+    // `resolveRecordSourceConfig(schema)` at :359 — rung 1 of the shared
+    // ladder, which returns the authored value VERBATIM as a `ViewData`. That
+    // ONE site is the whole support for the object arm, and it is sufficient.
+    // ⛔ :496 is NOT a second one: `(rest as any).data ?? (schema as any).data`
+    // is gated by `Array.isArray(passed)` on the next line, so it honours only
+    // the bare-ARRAY shorthand this row REFUSES (pinned below). objectui#9234
+    // left the :359 read marked `undeclared` because neither published face
+    // carried the key; the protocol row follows the READ POINTS, which is what
+    // 「以协议为准」 resolving for this block means.
     expect(keysOf('object-tree')).toEqual([
       'data', 'filter', 'navigation', 'objectName', 'staticData', 'tree',
     ]);

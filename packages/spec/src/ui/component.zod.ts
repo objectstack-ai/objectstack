@@ -3345,7 +3345,8 @@ const OBJECT_GANTT_FLAT_CONFIG_GUIDANCE: readonly KeySetGuidance[] = [
  * `getGanttConfig` branch 1, the author face and the registration's declared
  * `{ name: 'gantt', type: 'object' }` input, validated there against this
  * repo's own {@link GanttConfigSchema}), `navigation` (`:1487`), `label`
- * (`:1849`, resolved through `resolveI18nLabel` for the export file name),
+ * (`:1871`, resolved through `resolveI18nLabel` for the export file name —
+ * `:1849` is the comment ABOVE that chain, not a read),
  * `skipWeekends` (`:1205`), `holidays` (`:1206`), `persistLayout` (`:1357`),
  * `viewName` (`:1359`), `markers` (`:1826`), `criticalPath` (`:1829`),
  * `showBaselines` (`:1832`), `readOnly` (`:1833` and `:1916`) and
@@ -3354,7 +3355,7 @@ const OBJECT_GANTT_FLAT_CONFIG_GUIDANCE: readonly KeySetGuidance[] = [
  * Measured and deliberately NOT declared: the flat `GanttConfig` spellings (the
  * flatten product — {@link OBJECT_GANTT_FLAT_CONFIG_GUIDANCE}); `title`, which
  * this renderer never reads (the export-name chain is `gantt.exportFileName` →
- * `label` → the OBJECT's label → `objectName`, `:1846-1874`); a row cap — the
+ * `label` → the OBJECT's label → `objectName`, `:1869-1874`); a row cap — the
  * reload's `$top` is the platform ceiling `NON_GRID_ROW_CEILING_TOP` and the
  * renderer's own comment marks it "⛔ Not authorable"; and the `onTaskClick` /
  * `onRowClick` / `onBeforeTaskUpdate` callbacks, which are host props.
@@ -3375,7 +3376,7 @@ export const ObjectGanttPropsSchema = lazySchema(() => strictObject({
   aliases: FILTERS_TO_FILTER,
 }, {
   objectName: z.string().optional()
-    .describe('Object this chart binds to — the THIRD record source `getDataConfig` resolves, after `data` and `staticData`. Optional because the component-level `dataSource` binding can supply the object instead'),
+    .describe('Object this gantt binds to — the THIRD record source `getDataConfig` resolves, after `data` and `staticData`. Optional because the component-level `dataSource` binding can supply the object instead'),
   /**
    * Data source binding — `ViewDataSchema`, spelled exactly as `object-map`'s
    * and `object-grid`'s. Derived from the read point: rung 1 of
@@ -3402,7 +3403,7 @@ export const ObjectGanttPropsSchema = lazySchema(() => strictObject({
   navigation: z.unknown().optional()
     .describe('Task-click navigation config ({ mode: page | drawer | modal | split | popover | none }); renderer default `drawer`'),
   label: I18nLabelSchema.optional()
-    .describe('Chart label — the second link of the exported PNG/PDF file-name chain, after `gantt.exportFileName` and before the bound object\'s own label'),
+    .describe('Gantt label — the second link of the exported PNG/PDF file-name chain, after `gantt.exportFileName` and before the bound object\'s own label'),
   skipWeekends: z.boolean().optional()
     .describe('Measure duration and auto-schedule math in WORKING days, skipping Saturdays and Sundays'),
   holidays: z.array(z.string()).optional()
@@ -3418,7 +3419,7 @@ export const ObjectGanttPropsSchema = lazySchema(() => strictObject({
   showBaselines: z.boolean().optional()
     .describe('Render the planned-vs-actual baseline bars — ON unless an explicit `false` disables it'),
   readOnly: z.boolean().optional()
-    .describe('Disable every write path on the chart and lock the record drawer'),
+    .describe('Disable every write path on this gantt and lock the record drawer'),
   mobileReadOnly: z.boolean().optional()
     .describe('Auto read-only on narrow viewports — ON unless an explicit `false` disables it'),
 }));
@@ -3466,8 +3467,9 @@ const OBJECT_TREE_FLAT_CONFIG_GUIDANCE: readonly KeySetGuidance[] = [
  * `object-tree` (objectui `plugin-tree/src/ObjectTree.tsx` plus the registry
  * shell `plugin-tree/src/index.tsx`, measured at the `.objectui-sha` pin
  * `53ded82b`). Read points per key: `data` (`resolveRecordSourceConfig` at
- * `:359` — rung 1, `core/src/utils/record-source.ts:151` — and again at `:496`,
- * `(rest as any).data ?? (schema as any).data`), `staticData` (rung 2,
+ * `:359` — rung 1, `core/src/utils/record-source.ts:151`, which returns the
+ * authored value VERBATIM as a `ViewData`; that ONE site is the whole support
+ * for the arm this row declares), `staticData` (rung 2,
  * `record-source.ts:155`), `objectName` (rung 3; also `:534`, `:570` and
  * `:605` here), `filter` (`:474`, verbatim to `$filter`), `tree` (`:108`, the
  * nested config block `getTreeConfig` reads and the registration's declared
@@ -3477,13 +3479,23 @@ const OBJECT_TREE_FLAT_CONFIG_GUIDANCE: readonly KeySetGuidance[] = [
  * symmetry. objectui#9234 left this block's rung-1 read marked `undeclared`
  * because neither published face carried the key: `ObjectTreeSchema` on
  * `@object-ui/types` declares no `data`, no `staticData`, no `filter` and no
- * `navigation` at all, and requires `objectName`. The renderer reads all four,
- * on two sites for `data` — so the protocol row follows the READ POINTS, which
- * is what 「以协议为准」 resolving for this block means, and the mirror is the
- * face that has to follow.
+ * `navigation` at all, and requires `objectName`. The renderer reads all four
+ * — so the protocol row follows the READ POINTS, which is what 「以协议为准」
+ * resolving for this block means, and the mirror is the face that has to
+ * follow.
+ *
+ * ⛔ `:496` is NOT a second site for the object arm, and citing it as one would
+ * be citing a read of the opposite SHAPE: `(rest as any).data ?? (schema as
+ * any).data` is gated by `Array.isArray(passed)` on the very next line, so it
+ * honours only the bare-ARRAY shorthand this row REFUSES — the same shorthand
+ * `object-map` measures and declines one section up. One ladder site is
+ * sufficient, and `:359` is it.
  *
  * Measured and deliberately NOT declared: the flat `TreeConfig` spellings
- * ({@link OBJECT_TREE_FLAT_CONFIG_GUIDANCE}); `sort` — this renderer's fetch
+ * ({@link OBJECT_TREE_FLAT_CONFIG_GUIDANCE}); the bare-array `data` shorthand
+ * `:496-497` accepts, which `ViewData` cannot publish (a discriminated union
+ * over OBJECT variants) and for which `staticData` is this block's declared
+ * door; `sort` — this renderer's fetch
  * (`:473-484`) carries `$filter`, `$top` and `$expand` and NO `$orderby`, and
  * nothing else reads an order, so declaring one would publish a key with no read
  * site; a row cap, for the same reason `object-gantt` declares none (the `$top`
@@ -3508,8 +3520,26 @@ export const ObjectTreePropsSchema = lazySchema(() => strictObject({
   guidanceSets: OBJECT_TREE_FLAT_CONFIG_GUIDANCE,
   aliases: FILTERS_TO_FILTER,
 }, {
+  /**
+   * ⚠️ Optional for a DIFFERENT reason than its siblings, and the reason is
+   * measured rather than inherited. `object-grid` / `object-kanban` /
+   * `object-calendar` / `object-map` / `object-gantt` all say "the
+   * component-level `dataSource` binding can supply the object instead"; that
+   * holds for them because each registers through `ElementDataSourceGate`,
+   * which lowers the spec binding onto `objectName` before the renderer sees
+   * the node. `plugin-tree/src/index.tsx` does NOT: at the `.objectui-sha` pin
+   * `53ded82b` its registry shell has ZERO hits for that wiring, against 7
+   * each in `plugin-map`, `plugin-gantt`, `plugin-grid` and `plugin-calendar`
+   * — four controls, so the zero discriminates. Its shell pulls a `dataSource`
+   * off the schema context and hands it down as the data ADAPTER; nothing on
+   * that path writes an object name.
+   *
+   * What really makes it optional is the record-source ladder's first two
+   * rungs (objectui#6939): `data` can name the object itself, and `staticData`
+   * needs no object at all, so a tree authored on either never reads this key.
+   */
   objectName: z.string().optional()
-    .describe('Object this tree binds to — the THIRD record source `getDataConfig` resolves, after `data` and `staticData`. Optional because the component-level `dataSource` binding can supply the object instead'),
+    .describe("Object this tree binds to — the THIRD record source `getDataConfig` resolves, after `data` and `staticData`. Optional because either of the first two rungs resolves the source without it: `data` can name the object itself (`{ provider: 'object', object }`) and `staticData` needs none. ⚠️ NOT supplied by the component-level `dataSource` binding the sibling blocks name — this renderer registers no such gate"),
   /**
    * Data source binding — `ViewDataSchema`, the object arm rung 1 returns
    * verbatim. Declared from the READ POINTS (`:359` and `:496`), not from
