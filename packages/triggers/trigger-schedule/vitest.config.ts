@@ -5,6 +5,7 @@
 // for every test file in the package (packages/cli/vitest.config.ts's header
 // records the incident that taught that).
 import { defineConfig } from 'vitest/config';
+import path from 'node:path';
 
 export default defineConfig({
   test: {
@@ -15,5 +16,26 @@ export default defineConfig({
     // Mechanism + measured costs: examples/app-showcase/vitest.config.ts.
     // Enforced repo-wide by scripts/check-console-intercept-disarm.mjs.
     disableConsoleIntercept: true,
+  },
+  resolve: {
+    alias: [
+      {
+        // [#17396] Both triggers read the deployment's scheduled-work switch
+        // through `@objectstack/types`, and the suites assert on the exact
+        // reason string that package exports. Unaliased, the workspace link
+        // resolves to `dist/` and the verdict becomes a function of build state
+        // rather than of the source in this checkout — a `dist` merely BEHIND
+        // would run the switch pins green against a sentence no longer
+        // shipping. `pnpm check:test-source-alias` is the gate.
+        //
+        // ANCHORED regex, array form, deliberately: a bare string `find`
+        // matches by PREFIX, so with a FILE replacement it would also swallow
+        // any subpath and resolve it to `…/types/src/index.ts/<sub>` —
+        // `ENOTDIR` at run time, from a config that reads as correct. Same rule
+        // as `packages/services/service-automation/vitest.config.ts`.
+        find: /^@objectstack\/types$/,
+        replacement: path.resolve(__dirname, '../../types/src/index.ts'),
+      },
+    ],
   },
 });

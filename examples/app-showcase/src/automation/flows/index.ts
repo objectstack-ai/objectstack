@@ -355,28 +355,31 @@ export const TaskCompletedSlackFlow = defineFlow({
  * service) registers a job that fires this flow every interval, and each tick
  * runs the `notify` node.
  *
- * ⛔ AS SHIPPED, THIS FLOW DOES NOT FIRE. Since #16659 a time-triggered flow
- * must declare the organization it runs as (`config.organization`, a
- * `sys_organization.id`), and a flow that declares none is REFUSED at bind:
- * the trigger logs the reason at `error` and throws, the engine records the
- * flow as not bound, and it is listed in the startup summary's
- * trigger-binding audit. A package-shipped flow has no legal value to write
- * there — organization ids are minted at runtime, per install — so this
- * example cannot declare one and ⛔ a placeholder id must NOT be invented: a
- * value matching no row is silently authoritative, which is strictly worse
- * than the refusal.
+ * ⚠️ WHETHER THIS FLOW FIRES IS A DEPLOYMENT DECISION, not something this file
+ * can settle — and it declares no organization on purpose. #17396 ruled how a
+ * package-shipped time-triggered flow works; the two facts that decide it are
+ * both read from the environment at boot, and neither is metadata:
  *
- * ⇒ What a package-shipped time-triggered flow should do INSTEAD is an open
- * maintainer decision. Its tracking card was destroyed along with a suspended
- * account and is being re-filed; until that card carries a number, this
- * paragraph is the record. Until it is settled this flow is a worked example of
- * the SHAPE, and running it end-to-end means registering it at runtime with an
- * `organization` your install actually holds.
+ *  1. `OS_AUTOMATION_SCHEDULED_WORK_ENABLED` — package-authored scheduled work
+ *     is OFF by default in every tenancy posture. Unset, this flow is not
+ *     armed, and the startup summary lists it as *disabled by deployment
+ *     policy* — ⛔ not as a binding failure, and nothing here needs fixing.
+ *  2. The tenancy posture, once the switch is ON. Under `single` this flow
+ *     binds and runs exactly as written: the run carries NO organization, and
+ *     every tenant-scoped write beneath it resolves the deployment's one
+ *     organization. Under a wall (`group` / `isolated`) it declares
+ *     `config.organization` or it is not armed (#16659, unchanged).
  *
- * `os lint` / `os validate` / `objectstack build` say so too, as a `warning`
- * (`flow-schedule-organization-missing`) — deliberately not an `error`, because
- * an `error` would refuse this package's own build for a defect it has no
- * authorable way to repair.
+ * ⛔ So this example deliberately declares none, and a placeholder id must NOT
+ * be invented for the walled case: organization ids are minted at runtime, per
+ * install, and a value matching no row is silently authoritative — strictly
+ * worse than the refusal. To run this flow on a walled deployment, register it
+ * at runtime with an `organization` that install actually holds.
+ *
+ * `os lint` / `os validate` / `objectstack build` say NOTHING about the missing
+ * key, and that is the ruling rather than an omission: lint cannot see the
+ * switch or the posture, so a finding here would be false for the default
+ * deployment.
  *
  * Install `requires: ['automation', 'triggers', 'job', 'messaging']` for the
  * binding machinery this example demonstrates.
@@ -1793,20 +1796,23 @@ export const CommitteeQuorumFlow = defineFlow({
  * `offsetDays` for `withinDays: 7` to nudge everything due within a week
  * (negative = overdue lookback).
  *
- * ⛔ AS SHIPPED, THIS SWEEP DOES NOT FIRE — same reason as
- * {@link ScheduledDigestFlow}, and it is worth stating separately because a
- * sweep is the case where the consequence is largest. Since #16659 a
- * `time_relative` flow must declare `config.organization`, and a flow that
- * declares none is REFUSED at bind. The declaration is not only the run's
- * identity: it is the SWEEP QUERY's scope, so a sweep without one would select
- * rows across every organization on the install. That is why there is no
- * "fall back to something" path for it to take instead, and why a placeholder
- * id ⛔ must not be invented here — a value matching no row is silently
- * authoritative.
+ * ⚠️ WHETHER THIS SWEEP FIRES IS THE SAME DEPLOYMENT DECISION described on
+ * {@link ScheduledDigestFlow} — the switch first, then the posture — and it is
+ * worth stating separately because a sweep is the case where the consequence is
+ * largest. For a `time_relative` flow the declaration is not only the run's
+ * identity: it is the SWEEP QUERY's scope.
  *
- * ⇒ Package-shipped time-triggered flows are the open decision described on
- * {@link ScheduledDigestFlow}. Register this sweep at runtime with an
- * `organization` your install holds to see it work.
+ *  - Switch OFF (the default): no sweep, no query, nothing armed. Listed as
+ *    *disabled by deployment policy*.
+ *  - Switch ON under `single`: the sweep runs UNSCOPED and its runs carry no
+ *    organization. That is the shape a one-organization install always had —
+ *    there is no second organization for an unscoped read to reach.
+ *  - Switch ON under a wall: `config.organization` or not armed (#16659). The
+ *    declaration bounds the query and the run together.
+ *
+ * ⛔ A placeholder id must not be invented for the walled case — a value
+ * matching no row is silently authoritative. Register this sweep at runtime
+ * with an `organization` your install holds to see the walled shape work.
  */
 export const TaskDueReminderFlow = defineFlow({
   name: 'showcase_task_due_reminder',

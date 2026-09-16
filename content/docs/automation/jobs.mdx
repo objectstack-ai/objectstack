@@ -77,6 +77,34 @@ key, the `sys_job` row key, and the `jobId` stamped on each execution. There is
 no separate `id` key: it was removed in `@objectstack/spec` 17.0.0 because
 nothing read it, and two jobs differing only in `id` were one job declared twice.
 
+## Does this deployment run packaged jobs at all?
+
+A job declared by a **package** — every `defineJob` reaching the runtime through
+`defineStack({ jobs })` or a package bundle — is scheduled only on a deployment
+that has switched package-authored scheduled work on:
+
+```bash
+OS_AUTOMATION_SCHEDULED_WORK_ENABLED=true
+```
+
+It is **off by default in every tenancy posture and every kernel**, and it is
+the same switch that gates time-triggered flows — one deployment decision for
+all package-authored scheduled work, because the resource risk is the same and a
+second switch would be a special case. Whether a clock-driven workload is
+affordable is a fact about the deployment, not about the job, so it is a
+deployment variable rather than metadata.
+
+While it is off, the boot says so once per app, at `info`, with the count of
+jobs it did not schedule; `os doctor` prints the effective value.
+
+<Callout>
+⛔ **Platform-internal scheduled work is not gated by this switch** and runs
+either way: approvals escalation, the lifecycle Reaper, the messaging dispatch
+loop, membership backfill. The boundary is *authored by a package*, not *runs on
+the job service* — the platform's own maintenance is part of the runtime a
+deployment asked for.
+</Callout>
+
 ## Schedule forms
 
 `schedule` is a discriminated union on `type`. Three forms, and the schema
