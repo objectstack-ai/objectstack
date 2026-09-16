@@ -602,6 +602,100 @@ function readOptions(field: AnyRec): { values: Set<string>; byLabel: Map<string,
 }
 
 /**
+ * Target app name → every `navigationContributions[].items` array aimed at it
+ * (ADR-0029 D7, #18203).
+ *
+ * ## Why the universe has to include these at all
+ *
+ * A package injects nav items into an app it does not own by declaring
+ * `manifest.navigationContributions`. Those items never enter the target app's
+ * authored `navigation` array — the runtime merges them on every read
+ * (`SchemaRegistry.applyNavContributions`, which `GET /api/v1/meta/app` reaches
+ * through the protocol). So a universe built from the authored array alone
+ * calls every locale key for a contributed item an orphan, and this rule's
+ * remedy for an orphan is `or drop it` — which deletes a translation the
+ * runtime honours. Measured on `objectstack-ai/hotcrm` `be11c07`: five
+ * contributed items, 15 findings across three non-default locales, while the
+ * app endpoint returned all five with those very labels resolved.
+ *
+ * ## Why this reads the declaration and does not re-run the runtime's fold
+ *
+ * ⛔ `applyNavContributions` is NOT imported, and not because it is awkward to
+ * reach: `@objectstack/lint` depends on `@objectstack/spec` and never on a
+ * runtime (this package's own `description`), and that fold is a method on
+ * `@objectstack/objectql`'s `SchemaRegistry`. `os build` reaches the engine
+ * lazily for the *group* question (`cli/src/utils/nav-contribution-groups.ts`),
+ * whose own header records why that check could not be a lint rule.
+ *
+ * The reason a union is nevertheless FAITHFUL here, rather than a second
+ * implementation free to drift, is a property of the fold: it pushes the items
+ * in EVERY branch. A `group` that resolves receives them; a `group` that names
+ * nothing gets a `nav_contribution_group_missing` diagnostic and the items are
+ * appended at the app top level; an omitted `group` appends at the top level
+ * too (`NavigationContributionSchema`'s header states the same). The fold
+ * chooses WHERE an item lands and never WHETHER — so the set of addressable
+ * ids is invariant under it, and the only question this rule asks is whether an
+ * id is in that set. Reproducing the placement would pull a runtime in to
+ * compute a set the placement cannot change. The three placements are pinned
+ * side by side in this rule's test file so the invariant cannot quietly stop
+ * being true.
+ *
+ * ## Which two carriers are read, and why both
+ *
+ * Contributions reach a stack in hand in exactly two shapes, and `os build`
+ * runs the rule table over both of them (`compile.ts` step 3b / 3b-ii):
+ *
+ *   1. `packages[].manifest.…` — the ADR-0130 D4 artifact entry, whose body
+ *      half is the assembled package body. Read with the same reach
+ *      `validateObjectReferences`' `artifactProvidedObjectNames` uses (#16611),
+ *      because it answers the same question: what does THIS ARTIFACT provide,
+ *      beyond the collections the stack in hand carries at its top level. It is
+ *      the shape the per-package leg needs — the app's owner declares no
+ *      contribution of its own, so without this its stack sees none.
+ *   2. `manifest.…` — the stack's own `StackSchema.manifest`, which is where a
+ *      single-`defineStack` project's contributions live. `os validate` judges
+ *      only the union stack, so reading the artifact form alone would leave the
+ *      fast inner-loop command reporting the false positive the build no longer
+ *      does.
+ *
+ * ⚠️ Both are read unconditionally, which is a deliberate difference from
+ * `collectNavGroupInputs`, whose top-level manifest is read ONLY when there is
+ * no `packages[]`. That either/or exists to stop a DIAGNOSTIC being emitted
+ * twice for one mis-aim, since composition also picks a singular top-level
+ * `manifest` that is a copy of one package's. The output here is set
+ * membership, where a duplicate is free and a miss is the defect being fixed.
+ *
+ * ⛔ What this cannot see, stated rather than implied: contributions registered
+ * IMPERATIVELY by plugin code (`engine.registerAppNavContribution` from a
+ * plugin's `init`) are not metadata and no static rule can read them. That is
+ * the population `packages/cli/scripts/check-app-nav-i18n.mjs` has to BOOT a
+ * composition to judge — see its header. A key for one of those is still
+ * reported here.
+ */
+function contributedNavItemsByApp(stack: AnyRec): Map<string, unknown[]> {
+  const byApp = new Map<string, unknown[]>();
+  const add = (contributions: unknown) => {
+    for (const contribution of recordsOf(contributions)) {
+      const targetApp = strName(contribution.app);
+      // A contribution names ONE target app. Items aimed elsewhere must not
+      // become addressable here, or one widening would silence every app in
+      // the artifact at once.
+      if (!targetApp) continue;
+      const items = byApp.get(targetApp) ?? [];
+      items.push(contribution.items);
+      byApp.set(targetApp, items);
+    }
+  };
+  add(isRec(stack.manifest) ? stack.manifest.navigationContributions : undefined);
+  for (const entry of recordsOf(stack.packages)) {
+    const body = entry.manifest;
+    if (!isRec(body)) continue;
+    add(body.navigationContributions);
+  }
+  return byApp;
+}
+
+/**
  * Collect every name a translation bundle may resolve against. Built once per
  * run: the same universe answers all bundles and all locales.
  */
@@ -707,6 +801,7 @@ function buildUniverse(stack: AnyRec): Universe {
   }
 
   // ── Apps: navigation item ids (`apps.<app>.navigation.<id>.label`) ──
+  const contributedNav = contributedNavItemsByApp(stack);
   const apps = new Map<string, Set<string>>();
   for (const app of recordsOf(stack.apps)) {
     const appName = strName(app.name);
@@ -725,6 +820,10 @@ function buildUniverse(stack: AnyRec): Universe {
       if (areaId) navIds.add(areaId);
       walkNav(area.navigation);
     }
+    // [#18203] …and everything CONTRIBUTED into this app, walked by the same
+    // `walkNav` so a contributed subtree resolves exactly as a declared one
+    // does. This is the population the runtime serves, not the authored array.
+    for (const items of contributedNav.get(appName) ?? []) walkNav(items);
     apps.set(appName, navIds);
   }
 
