@@ -691,6 +691,74 @@ export type ApprovalEscalationParsed = z.infer<typeof ApprovalEscalationSchema>;
  * first-class engine-adjacent state owned by `plugin-approvals`; this config
  * only describes how the node behaves.
  */
+/**
+ * `onEmptyApprovers: 'fallback'` ↔ `fallbackApprovers` must be declared as one
+ * unit, in both directions.
+ *
+ * ## Why a refinement and not a discriminated union
+ *
+ * `automation/ApprovalNodeConfig` is a published JSON-Schema def — the Studio
+ * property form and `registerFlow()`'s per-node config validation both read it
+ * (see {@link getApprovalNodeConfigJsonSchema}). A union would fan that one def
+ * into four branches re-declaring the same eleven keys, and the designer would
+ * render whichever branch it happened to pick. A refinement adds no structure,
+ * keeps the `ZodObject` class and `.shape` intact under Zod 4, and emits ONE
+ * issue on the key the author has to edit.
+ *
+ * ## Why BOTH arms
+ *
+ * The forward arm is obvious: a policy that names people and names nobody
+ * cannot run. The reverse arm is the one that earns its place — a
+ * `fallbackApprovers` list under `admin_rescue` (the DEFAULT, so the arm fires
+ * on the likeliest authoring slip: adding the list and forgetting the policy)
+ * is read by nothing at all. Accepting it would ship a node that declares a
+ * rescue slate and silently ignores it, which is exactly the failure this
+ * module's `.strict()` shapes exist to make audible.
+ *
+ * Both messages name BOTH keys, because either one of them is a valid edit and
+ * only the author knows which they meant.
+ */
+function checkFallbackApproversPairing(
+  cfg: { onEmptyApprovers?: unknown; fallbackApprovers?: unknown },
+  ctx: z.RefinementCtx,
+): void {
+  // `.default('admin_rescue')` has already been applied by the time a
+  // refinement runs, so an omitted key and an explicit `admin_rescue` are
+  // INDISTINGUISHABLE here. The message says so rather than guessing: on the
+  // default value it names both readings, because "added the list, forgot the
+  // key" is the slip this arm exists for and an author told flatly that their
+  // policy is `admin_rescue` would go looking for a key they never wrote.
+  const policy = typeof cfg.onEmptyApprovers === 'string' ? cfg.onEmptyApprovers : 'admin_rescue';
+  const declared = Array.isArray(cfg.fallbackApprovers) && cfg.fallbackApprovers.length > 0;
+
+  if (policy === 'fallback') {
+    if (declared) return;
+    ctx.addIssue({
+      code: 'custom',
+      path: ['fallbackApprovers'],
+      message:
+        "onEmptyApprovers: 'fallback' needs a sibling fallbackApprovers naming who takes the "
+        + 'request when the primary slate resolves to nobody — it is the one empty-slate policy '
+        + 'that names people. Either add fallbackApprovers (same shape as approvers, e.g. '
+        + "[{ type: 'org_membership_level', value: 'owner' }]), or choose a policy that names "
+        + "nobody: 'admin_rescue', 'fail' or 'auto_approve'.",
+    });
+    return;
+  }
+
+  if (!declared) return;
+  ctx.addIssue({
+    code: 'custom',
+    path: ['onEmptyApprovers'],
+    message:
+      `fallbackApprovers is only read when onEmptyApprovers is 'fallback', and this node's `
+      + `policy is '${policy}'`
+      + (policy === 'admin_rescue' ? ' (either declared, or the default that applies when the key is omitted)' : '')
+      + ', so the list would be silently ignored. Either set '
+      + "onEmptyApprovers: 'fallback' to make it live, or remove fallbackApprovers.",
+  });
+}
+
 export const ApprovalNodeConfigSchema = lazySchema(() => strictObject(
   {
     surface: "this approval node's config",
@@ -790,9 +858,46 @@ export const ApprovalNodeConfigSchema = lazySchema(() => strictObject(
    *  - `auto_approve` — skip the request and continue down the `approve` edge
    *    with `output.autoApproved = true`. The DingTalk/Feishu default; opt-in
    *    here because it silently waves the record through.
+   *  - `fallback` — open the request on {@link ApprovalNodeConfig.fallbackApprovers}
+   *    instead. The only policy that NAMES people, so it is the only one that
+   *    turns an empty slate into a request someone can actually decide rather
+   *    than a state an operator has to recover from. Measured elsewhere as
+   *    Entra's "Add fallback" and Odoo's "If empty, the approval is done by an
+   *    Administrator or Approver" — taken here at the NODE, not on the
+   *    `manager` rung: all five graph approver types share the same dead end
+   *    (a lookup that finds nobody leaves a `type:value` literal no user can
+   *    act on), and the node is already where emptiness is decided.
+   *
+   * The fallback slate is resolved by the SAME resolver as `approvers`, so
+   * every approver type, OOO delegation and `per_group` tagging behaves
+   * identically on it. A fallback that itself resolves to nobody degrades to
+   * `admin_rescue` — the run is never killed and the record is never waved
+   * through by a policy that only asked for different people.
    */
-  onEmptyApprovers: z.enum(['admin_rescue', 'fail', 'auto_approve']).default('admin_rescue')
-    .describe('Behavior when no concrete approver resolves at node entry'),
+  onEmptyApprovers: z.enum(['admin_rescue', 'fail', 'auto_approve', 'fallback']).default('admin_rescue')
+    .describe(
+      'Behavior when no concrete approver resolves at node entry — '
+      + "'fallback' opens the request on fallbackApprovers instead",
+    ),
+
+  /**
+   * Who takes the request when `onEmptyApprovers` is `'fallback'` and the
+   * primary slate resolved to nobody. Same shape as `approvers` —
+   * {@link ApprovalNodeApproverSchema}, deliberately NOT a second approver
+   * shape: a fallback that could not express `{ type: 'position' }` or a
+   * `group` would be a dialect of the key it backs up.
+   *
+   * Required iff the policy is `'fallback'`, and refused otherwise — both
+   * arms are enforced by {@link checkFallbackApproversPairing}. The second arm
+   * is the load-bearing one: a `fallbackApprovers` list under any other policy
+   * is read by nothing, and a node that quietly ignores half its config is the
+   * exact ADR-0078 trap this shape was closed against.
+   *
+   * Prefer a target that cannot itself resolve empty — a literal `user`, or
+   * `{ type: 'org_membership_level', value: 'owner' }`.
+   */
+  fallbackApprovers: z.array(ApprovalNodeApproverSchema).min(1).optional()
+    .describe("Approvers the request opens on when onEmptyApprovers is 'fallback'"),
 
   /**
    * #3447 P2: keys a decision may carry as structured outputs
@@ -832,7 +937,7 @@ export const ApprovalNodeConfigSchema = lazySchema(() => strictObject(
    */
   maxRevisions: z.number().int().min(0).default(3)
     .describe('Max send-backs for revision before auto-reject (0 = send-back disabled)'),
-}));
+}).superRefine(checkFallbackApproversPairing));
 export type ApprovalNodeConfig = z.input<typeof ApprovalNodeConfigSchema>;
 /** Post-parse shape of {@link ApprovalNodeConfig} — defaults applied, transforms run (ADR-0122). */
 export type ApprovalNodeConfigParsed = z.infer<typeof ApprovalNodeConfigSchema>;
