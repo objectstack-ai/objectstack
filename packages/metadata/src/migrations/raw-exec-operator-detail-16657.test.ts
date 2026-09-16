@@ -23,11 +23,15 @@
  * ⚠️ That channel is a RULE, not byte-identity with what these `catch` blocks
  * used to compute, and the negative pins below do not claim otherwise: each
  * throws a NON-EMPTY `new Error(…)`, the shape for which the rule and the old
- * expression agree. They differ elsewhere — at the three `err?.message ??
+ * expression agree. They differ elsewhere — at the two `err?.message ??
  * String(err)` sites `new Error('')` recorded `''` and now records `'Error'`,
  * and `{message:42}` recorded the number where it now records
  * `'[object Object]'`; at the `error instanceof Error ? … : String(error)` site
  * `{message:'x'}` recorded `'[object Object]'` and now records `'x'`.
+ *
+ * ⚠️ Two, not the three this said when it was written. The third was
+ * `migrateSysNotificationToEvent`, and it went with that runner when the
+ * adr-0030-notification-event migration was retired.
  *
  * ⚠️ The composed sentence is the producer's, copied; `driver-sql`'s
  * `sql-driver-16657-operator-facing-cause-text.test.ts` pins the copy against a
