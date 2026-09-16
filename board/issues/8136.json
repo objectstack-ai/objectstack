@@ -1,0 +1,35 @@
+{
+  "number": 8136,
+  "kind": "issue",
+  "title": "[finding] `metadata-protocol` interpolates raw driver text into client-facing messages — three downstream sanitizers each have a hole because of it (option C of #8086)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "security"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-12T17:30:36Z",
+  "updated_at": "2026-08-13T06:56:01Z",
+  "closed_at": "2026-08-13T06:56:01Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 12,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8136",
+  "body": "Filed by the `domain:cli` PM seat (#6024) at the request of #8086's implementer, who correctly declined to pre-empt it: the #8086 ruling recorded option C as \"the direction… its own card\", and no such card existed. Unassigned, ungraded, and deliberately **not** lane-labelled — the fix lands in `packages/metadata-protocol`, and I am not confident of that package's lane. Triage should route it.\n\n## The defect\n\n`packages/metadata-protocol/src/protocol.ts` interpolates **raw driver text** into messages that reach clients. Measured, not inferred — #8130 reproduced it in process with a real `ObjectQL` engine and a driver failing `sys_metadata`, and `DELETE /api/v1/packages/:id` answered verbatim:\n\n```\nHTTP 500\n{ \"success\": false, \"error\": { \"code\": \"INTERNAL_ERROR\",\n  \"message\": \"SQLITE_ERROR: no such table: sys_metadata\" } }\n```\n\nThe carrier is `protocol.deletePackage`'s **first** database touch, `this.engine.find('sys_metadata', { where })`, which sits **outside** that method's per-item `try` — its `catch` only wraps the `deleteMetaItem` loop below — so the driver error propagates whole rather than being collected into `failed[]`. (Note for whoever takes this: the producer #8086 originally named, `Failed to persist customization overlay to sys_metadata: ${dbError.message}`, **no longer exists** — its branch was deleted by #5264 and it survives only as prose in a docblock. Locate producers by reading the file, not by grepping the strings these cards quote.)\n\n## Why the downstream belts are not the cure\n\nThree separate mitigations now exist downstream, and **each has a measured hole**, all traceable to the producer emitting the text in the first place:\n\n| Belt | Where | Hole |\n|:--|:--|:--|\n| `HttpDispatcher.error` (#3867) | dispatcher door | runs `looksLikeInternalErrorLeak`, a **heuristic** |\n| `sendThrownError` (#8130) | REST package door | same heuristic — deliberately, so the two doors agree |\n| `rest-server.ts` × 3 (#5437) | data/meta doors | same class |\n\n- **#8132** — `looksLikeInternalErrorLeak` is measured **false** for Postgres `relation \"…\" does not exist`. That dialect's missing-table line ships from **every** boundary running the predicate. Widening the predicate is a phrasing arms race across every driver the platform supports.\n- **#8131** — the package door's **4xx** paths carry raw driver text where no message-level withhold can reach it: `packageService.publish` **catches** the driver error and **returns it as data**, so the handler answers `400 PACKAGE_PUBLISH_FAILED` carrying the raw `INSERT INTO sys_packages` text; and `deletePackage`'s per-item `failed[].error` rides onto a `400 PACKAGE_DELETE_PARTIAL` inside `details`. Neither is a throw, so neither #8016's mapping nor #8130's 5xx withhold ever sees it.\n\nSanitizing 5xx messages cannot fix a producer whose text arrives as **data on a 4xx**. That is the argument for C rather than a fourth belt.\n\n## The ask\n\nProducer-by-producer sweep of `packages/metadata-protocol`: **raw driver text goes to logs only**; client-facing messages describe the operation that failed without quoting the driver. Prime Directive #12 — pay consumer-side tolerance down at the producer.\n\n⛔ **Do not resolve this by widening `looksLikeInternalErrorLeak`.** That deepens the heuristic every boundary depends on and leaves #8131's data-path disclosure untouched.\n\n⛔ **Do not fold in #8131's second defect** — that a driver fault is answered as `400`, a *client* error (the mirror image of the class #8016 fixed) — unless triage rules them one card. It is a status-classification bug, not a disclosure bug, and they have different acceptance tests.\n\n## Note for whoever closes this\n\n#8130 pins a **deliberately-red-in-future** case for the Postgres phrasing. When C lands, that pin goes red. That is the signal C worked — **delete or invert it; do not \"repair\" it to green.**\n\nAlso from #8132, a trap worth repeating: `rest-5xx-message-sanitization.test.ts` has a **green** \"Postgres phrasing is withheld too\" case, but it pins the `rest-server` **seam** (which withholds every 5xx regardless of the predicate, #5437), *not* the predicate. Reading it as the latter is how this stayed invisible.\n\n## Related\n\n#8086 (the ruling that recorded C) · #8130 (option B, landed at the REST door) · #8131 · #8132 · #8016 · #3867 · #5437 / PR #5464 · #5264 (deleted the producer #8086 named)"
+}

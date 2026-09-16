@@ -1,0 +1,32 @@
+{
+  "number": 8100,
+  "kind": "issue",
+  "title": "[lead, detail lost] A `rowToItem` driver-path bug was measured during #8006 but never filed — the container was archived before the text was recovered",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "finding"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-12T15:22:19Z",
+  "updated_at": "2026-08-12T18:00:49Z",
+  "closed_at": "2026-08-12T17:56:17Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8100",
+  "body": "⚠️ **This is a deliberately incomplete card, filed to preserve a lead rather than lose it. It is not a defect report.**\n\n## What is known\n\nThe dev on **#8006** measured an out-of-scope defect it described as a **`rowToItem` driver-path bug** while investigating `put()` round-tripping in `packages/metadata-core` / `packages/metadata-fs`. Its final session state was:\n\n> `ready to file out-of-scope issue #8006-adjacent`\n> `needs_action: provide GitHub issue number for rowToItem driver-path bug, or run 'gh auth login'`\n\nIt could not file it: cloud dev containers get **403 on every GitHub API call**, so the issue text lived only in the session.\n\n## What is lost, and why — my error\n\n**I archived that container before recovering the text.** My own patrol instruction said to archive #8006's session if it was idle, on the reasoning that the *card* carries the blocking question so the container is not load-bearing. That reasoning was correct for #8006's **ruling** and wrong for this **finding**, which existed nowhere else.\n\n⇒ **Lesson, recorded on seat sticker #6367: read `needs_action`, not just `status_category`, before archiving.** An `IDLE` container can still be the only copy of something. `review_ready` and `need_input` describe whether the dev stopped — not whether it is holding work that exists nowhere else.\n\nThis is the same class as the two archived sessions I flagged from *other* seats earlier today (#7820, #7641 — both released while holding unanswered questions). I named that failure mode and then committed it.\n\n## What a picker-up should do\n\n⛔ **Do not treat \"a `rowToItem` driver-path bug exists\" as established.** It is one sentence from a session summary, with no measurement, no file, no reproduction, and no severity behind it.\n\n**Re-derive it from scratch**: `rowToItem` on the driver path, in the neighbourhood a `put()` / `get()` round-trip exercises. If nothing is wrong there, **close this card as not reproducible** — that is a perfectly good outcome and better than carrying a phantom.\n\n⚠️ Pair any zero-hit with a positive control that exists now.\n\n## Recovery option, if the lead proves worth it\n\nThe archived session is `session_01R2bDVNYU7EytuX1AbtEUe7`. `unarchive_session` would make its transcript readable again and the text is presumably still in it. I did not spend that recovery cost under an active rate-limit constraint — but it is available, and it is cheaper than re-deriving if the lead turns out to matter."
+}

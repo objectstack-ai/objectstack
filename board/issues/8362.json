@@ -1,0 +1,36 @@
+{
+  "number": 8362,
+  "kind": "issue",
+  "title": "time-relative/schedule cron flows permanently fail to re-bind after kernel rebuild — croner name leaked because DbJobAdapter.destroy() never destroys the cron adapter",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:services",
+    "target:v17"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-13T08:43:44Z",
+  "updated_at": "2026-08-13T16:02:55Z",
+  "closed_at": "2026-08-13T16:02:07Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8362",
+  "body": "## 现象\n\n本地 magic-flow rig（cloud main `3f2884c4` × framework main `cb43296ef`，2026-08-13）实测：一个 `timeRelative` flow 首次绑定成功后，**每一次 kernel 重建都无法重绑**，且永不自愈（连续 4 次重建复现）：\n\n```\nINFO [time-relative] bound flow 'xqao_contract_expiry_reminder_flow' → sweep 'xqao_contract.expiry_date' offsets [3]d on cron '0 8 * * *'\n（kernel 被 freshness probe 驱逐、重建后）\nWARN [time-relative] failed to schedule flow 'xqao_contract_expiry_reminder_flow': Cron: Tried to initialize new named job 'flow-time-relative:xqao_contract_expiry_reminder_flow', but name already taken.\n```\n\n之后 sweep 绑在空处，自动化**静默死亡**——`verify_build`、UI、DB 全部显示健康，唯一信号是这条 WARN。同一批重建里 `record-change` trigger 每次都正常重绑，对照明显。\n\n两个对照实验钉住根因是**残留的进程级 job 名**：\n- 把 start 节点 schedule 换成 `{type:'interval'}` → 重绑成功（interval 走 `setInterval`，不经过 croner 命名注册表）；换回 cron 型立刻 `name already taken`。\n- 在 `sys_metadata` 里改 flow 名（= 换 job 名）→ 下一次重建绑定成功。\n\n## 根因链（四层）\n\n1. **绑定层** `packages/triggers/trigger-schedule/src/time-relative-trigger.ts:214`：job 名 `flow-time-relative:<flowName>`，**不带 env/kernel 标识**；绑定前的 `this.stop(flowName)` 读实例级 `this.bound` Map——新 kernel 的新实例 Map 为空，清理 no-op。`schedule-trigger.ts`（`flow-schedule:<flowName>`）结构完全相同，同样中招。\n2. **适配层** `cron-job-adapter.ts`：`schedule()` 先 `await this.cancel(name)`，但也只查**自己实例**的 `this.jobs` Map。\n3. **croner 层**：`new Cron(expression, { name })` 登记进 croner **进程级全局**命名注册表——旧 kernel 的 Cron 对象还在，新建同名直接 throw。\n4. **销毁层（单点根因）** `db-job-adapter.ts`：kernel 驱逐链路本身是完整的（`KernelManager.evict()` → `kernel.shutdown()` → `plugin.destroy()` → `JobServicePlugin.destroy()` → `dbAdapter.destroy()`），但 `DbJobAdapter.destroy()` 只有 `await this.inner.destroy()`——**漏掉 `this.cron`（CronJobAdapter）**。旧 kernel 的 croner 任务永不 stop，永久占名。\n\n另外 trigger 的 `schedule()` 是 fire-and-forget（`void Promise.resolve(...)`），失败被降为一条 WARN。\n\n## 为什么严重\n\n- 多租户云运行时里 **kernel 驱逐是常规操作**：freshness probe ~10s 一次，AI 每次 auto-publish 都会 bump freshness → 驱逐。所以「AI 建好定时自动化 → 用户改一次元数据 → 自动化死了」是常态路径。\n- job 名不带 env id：**同一容器里两个环境同名 flow 不用等驱逐就冲突**（AI 生成的 flow 名极易撞，如 `contract_expiry_reminder_flow`）。\n- 失败静默：唯一信号是没人看的 WARN，属于 valid-but-inert（ADR-0078）一类。\n- 旧 kernel 的 cron 任务不只占名字，它还活着——闭包握着已 shutdown 的旧 kernel 引擎（目前正因新绑定失败才没有双写；单修命名不修销毁会把静默死亡变成 zombie 双写）。\n\n## 期望修复\n\n1. `DbJobAdapter.destroy()` 补上 `this.cron` 的销毁（`CronJobAdapter.destroy()` 已存在，只是没人调）。\n2. job 名加 environment/kernel 命名空间，杜绝跨 kernel/跨环境冲突。\n3. 重绑改为 **replace 语义**（bind 撞名时替换旧 job），而非 warn-and-give-up。\n4. 绑定失败升级为可观测状态（不只 WARN）。\n5. 回归测试：bind → 新插件实例模拟 kernel 重建 → 再 bind → job 恰好调度一次且能触发；覆盖 `time-relative-trigger` 与 `schedule-trigger` 两处。\n\n注意：即使全部修完，「kernel 不驻留时定时任务不跑」仍是架构层问题（时钟应上移到常驻层），cloud 侧另行跟踪。\n"
+}

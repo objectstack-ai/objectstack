@@ -1,0 +1,33 @@
+{
+  "number": 8398,
+  "kind": "pull_request",
+  "title": "docs(pm-dispatch): pre-wall conservation posture for the seven_day warning",
+  "state": "closed",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-13T11:03:43Z",
+  "updated_at": "2026-08-13T12:47:24Z",
+  "closed_at": "2026-08-13T12:47:24Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/8398",
+  "body": "Fixes #8181\n\nImplements the maintainer's Option B ruling (2026-08-13 10:04Z, recorded verbatim on the issue) — exactly the ruled scope, nothing more.\n\n## What changed\n\n**`.claude/skills/pm-dispatch/references/platform-readings.md`** — the starvation section is retitled (no longer scoped to the 5-hour wall) and extended in place, in the file's existing language, register and structure:\n\n- **Two-tier signal split, written down**: the authoritative pre-wall signal is `rate_limit_info` (`status: \"allowed_warning\"` — requests still allowed); the authoritative wall signal remains the failure itself. Boundary stated in both directions: a warning is not a wall (rounds continue, only the dispatch posture changes; treating it as a wall forfeits the week's remaining quota), and an absent warning is no evidence of distance from the wall.\n- **Conservation posture on `allowed_warning` + `seven_day`**: batch cap 1; mechanical S/M cards at the `sonnet` floor; L/XL and non-urgent work frozen; only `priority:p0`, release-board items and in-flight closeout stay; fable-mandatory cards are deferred, never downgraded; every round report carries a weekly-window line (the cheapest fleet-level aggregation point that exists).\n- **Measured platform facts landed in the facts table regardless of posture**: the payload shape (`rateLimitType: \"seven_day\"`, camelCase, reset about 5 days out; single-source relayed reading so far — the next occurrence captures the raw payload verbatim, including whether it carries a threshold or remaining figure), the seven_day / 5-hour coexistence **working assumption** (marked to be confirmed from the next hard-wall payload, not guessed), `ccusage weekly` and its single-container blind spot (worse under an account-level weekly cap), and one-shot `run_once_at` for multi-day resets — never an hourly cron across a multi-day window (about 120 dead fires plus an orphan cron to remember).\n- The recovery-playbook bullet is unchanged — the pre-wall posture is a peer of the existing wall playbook, not a rewrite of it.\n\n**`.claude/skills/pm-dispatch/SKILL.md`** — touched, at **zero net lines** (686 before, 686 after; the ratchet ceiling holds and no offset was needed because no line was added):\n\n- Section title `断粮与跨墙恢复(5 小时用量墙)` → `断粮:预警节流与跨墙恢复(用量墙)` — the old title scoped the section to the 5-hour wall, which is the findability gap the card measured.\n- The 检测 bullet is rewritten in place (3 lines → 3 lines) into the two-tier signal principle, pointing to references for the posture details; the ccusage single-container / cost-not-quota caveat is retained.\n- The 跨墙定时器 bullet is updated in place (4 lines → 4 lines) to carry the multi-day prohibition: one-shot `run_once_at` for multi-day windows, hourly cron only at the 5-hour scale; the send_later prohibition and the delete-the-cron discipline are retained.\n\n## Verification\n\nAll six derived gates green locally; re-deriving from the actual changed paths (`node scripts/pm/dispatch-gates.mjs …`) returned exactly these six families, no additions:\n\n- `check:doc-authoring` — 376 files clean\n- `check:doc-formula-expressions` — clean (lint dependency closure built first)\n- `check:nul-bytes` — 7589 text files, no raw control bytes\n- `check:pm-skill-id-lint` — 9 files clean\n- `check:pm-skill-ratchet` — SKILL.md 686 lines, ceiling 686\n- `check:skill-frame-sync` — 4 copies structurally isomorphic\n\n## Notes for review\n\n- One mechanical completion beyond the ruling's literal text, flagged deliberately: the posture's **exit criterion** (\"the posture follows the signal — `allowed_warning` no longer appearing, or the window reset, means back to normal dispatch\"). The ruling defines entry but not exit; the exit is written signal-bound, adding no tracking surface. Strike that sentence if unwanted.\n- **No changeset — `skip-changeset` applies**: the diff touches only `.claude/` internal agent tooling; nothing ships to consumers.\n- ADR-class terminal three-piece per the ruling: this PR stays **draft**; no auto-merge, no merge queue, no ready-flip — the maintainer merges by hand.\n- pm-dispatch edits are fable-mandatory per the card's binding constraints; this session ran on `claude-fable-5`.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01139NJ9Wg5pFeZi1Zh8WLg6)_"
+}

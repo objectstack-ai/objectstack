@@ -1,0 +1,34 @@
+{
+  "number": 7168,
+  "kind": "issue",
+  "title": "[finding] two §1c-adjacent silent wrong answers that are NOT on the retry path — cross-type `in` membership, and `==` against a Date-valued binding",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-10T01:39:08Z",
+  "updated_at": "2026-08-12T19:41:02Z",
+  "closed_at": "2026-08-12T19:41:02Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 10,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7168",
+  "body": "Out-of-scope findings measured while implementing #7098 (PR #7166). Recorded per Prime Directive #10, unassigned.\n\n#7098 was scoped to what the ADR-0032 §1c **retry rewrites** once armed. Both facts below are the same *shape* — a silently wrong boolean, `{ ok: true }`, no fault, no log line — but neither is on the retry path at all, so neither could be folded into that fix. Closing either one means changing the **clean** path, which changes answers for expressions that never faulted; that is a different and larger decision, which is why these are filed rather than fixed.\n\n## Fact 1 — a string-serialized numeric field never matches a numeric list\n\n```text\nrecord.n in [1, 7]        with { n: \"7\" }   ->  { ok: true, value: false }\n```\n\nCEL membership is total across types, so this **answers** rather than faulting. Because it never faults, the §1c retry never arms, and the value is `false` both before and after PR #7166 — measured on `origin/main` and on the fix branch.\n\nThis matters because it is drawn from exactly the pool §1c exists for: `Field.rating` → `\"5.0\"`, `Field.currency` → `\"250000.00\"`. An author writing `record.status_code in [1, 2, 3]` against a string-serialized numeric field gets a silent `false` for every row.\n\nNote the interaction with #7098, which is why it surfaced now: before PR #7166 this expression's answer **depended on whether an unrelated conjunct faulted** — `record.n >= 4 && record.n in [1, 7]` returned `true` (the scope-wide hydration retyped `n`) while `record.n in [1, 7]` alone returned `false`. PR #7166 makes the answer consistently `false` in both positions. That is the correct outcome for that card — the `in` result was never a fault to rescue — but it leaves this fact standing on its own.\n\n## Fact 2 — `==` against a Date-VALUED binding is not covered by #3183's rewrite\n\n```text\nrecord.d == record.dt     with { d: \"2026-06-20\", dt: <Date 2026-06-20T00:00:00Z> }\n  ->  { ok: true, value: false }\n```\n\n`rewriteTemporalEquality` (#3183) wraps a field operand in `date(...)` only when its counterpart is a temporal **call** — `today()`, `now()`, `daysFromNow()`, `daysAgo()`. A counterpart that is a Date-valued *binding* is not wrapped, so the comparison stays `string == Timestamp` and answers a silent `false`.\n\nThe reachable shape is a mixed-provenance comparison, e.g. `record.due == previous.due` in a hook or validation scope where `previous` arrives from the driver as a `Date` and `record` from a JSON payload as a `\"YYYY-MM-DD\"` string. Both sides are the same logical field and the same calendar day, and the predicate answers `false`.\n\n## Class\n\nObservation-class, each with a demonstrated wrong value. **Frequency is unmeasured and none is claimed** — the trigger is measured, the incidence is not. No production report is attached to either.\n\nA grading seat may reasonably split these: fact 1 is a data-shape mismatch with a broad blast radius and no obvious fix that does not change clean-path answers; fact 2 is a bounded gap in an existing rewrite whose per-occurrence machinery already exists and could plausibly be extended to a Date-valued counterpart the same way it handles a temporal call.\n\n## Related\n\n#7098 / PR #7166 (what the retry rewrites — this is the clean path instead) · #3183 (`rewriteTemporalEquality`) · #1530 / #1534 (why §1c exists) · #6679 / PR #7097 (what arms the retry) · ADR-0032 §1c.\n"
+}

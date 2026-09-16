@@ -1,0 +1,35 @@
+{
+  "number": 8019,
+  "kind": "issue",
+  "title": "[finding] change-email verifies only the NEW address, so a hijacked session can move the account identity without the old mailbox ever being told",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched",
+    "security"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-12T11:43:38Z",
+  "updated_at": "2026-08-12T20:31:30Z",
+  "closed_at": "2026-08-12T20:31:30Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8019",
+  "body": "Filed by the `domain:identity` seat (#6022) out of PR #8017's review, on that dev's reported option B. **Observation-class — this is the shipped better-auth default and the maintainer ruling selected it**, so nothing here is a defect against the ruling. Recording the exposure so it does not evaporate into a closed thread. Unassigned; triage grades it.\n\n## What ships now\n\nPR #8017 enabled `user.changeEmail` per the 2026-08-12 ruling, which said 「策略按 better-auth 常规」. The dev established what 常规 means **in the installed version** (`1.7.0-rc.2`) rather than in general — a correction worth keeping, since the option name I had suggested does not exist there.\n\nThe resulting flow is **single-step**: the verification token rides `emailVerification.sendVerificationEmail` to the **new** address, and `/verify-email` applies the change. `sendChangeEmailConfirmation` and `updateEmailWithoutVerification` stay at their defaults, each documented at the config site as the policy it is.\n\n## The exposure\n\n**The old mailbox is never contacted.** So an attacker holding a live session — stolen cookie, unattended device, session not yet revoked — can:\n\n1. `POST /change-email` to an address they control;\n2. verify it from that address;\n3. own the account's identity, with the original owner's mailbox receiving **nothing**.\n\nThe account-recovery path then belongs to the attacker. Password knowledge is not required at any step, because the session already authenticates the request.\n\n**Why this is a `finding` and not a queue card:**\n\n- it is better-auth's default and the ruling explicitly selected 常规;\n- no measured incident, no user report;\n- the fix is not free — `sendChangeEmailConfirmation` means a **new email template plus its i18n bundle keys in all four locales**, i.e. a new authoring surface, not a config flip;\n- and it interacts with work already in flight: session revocation now tombstones rather than deletes (#7732), so \"was the session still valid\" became an answerable question that it was not before.\n\n## The mitigation, if it is ever graded up\n\n`sendChangeEmailConfirmation` gives the two-step shape: the **old** address approves first, then the new one verifies. better-auth treats the confirmation callback as a pure addition, so adopting it later undoes nothing that shipped here — the option stays reachable at any time.\n\n## ⚠️ Do not read this as a defect in #8017\n\nThe PR implemented the ruling correctly and documented both withheld options at the config site with their reasons, rather than leaving them as unexplained defaults. That documentation is what makes this finding cheap to act on later. If triage grades this up, the work is a follow-up card against the *policy*, not rework against that PR.\n\n## Related\n\n#7735 / PR #8017 (the enablement and the documented withheld options) · #7732 (session tombstoning — makes session validity auditable) · #7724 / PR #7879 (the admin deletion path, whose brokenness was the other half of #7735's ruling)"
+}

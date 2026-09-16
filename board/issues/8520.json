@@ -1,0 +1,30 @@
+{
+  "number": 8520,
+  "kind": "issue",
+  "title": "[throwaway probe A — fenced] closing-keyword reading for #8476 step 1",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-13T17:03:28Z",
+  "updated_at": "2026-08-13T17:29:25Z",
+  "closed_at": "2026-08-13T17:29:25Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8520",
+  "body": "Throwaway target for the #8476 step-1 live reading. This issue is the **FENCED-BLOCK** arm: a throwaway PR will carry a closing keyword bound to this number inside a fenced code block. If a closing link appears here, `stripMarkdownCode`'s fence rule in `scripts/pm/check-half-states.mjs` is a false negative and must be revised.\n\nClosed immediately after the reading. No work is requested here."
+}

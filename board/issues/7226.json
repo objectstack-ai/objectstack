@@ -1,0 +1,35 @@
+{
+  "number": 7226,
+  "kind": "issue",
+  "title": "examples/app-todo: `is_completed` and `is_overdue` are `readonly` flags that nothing ever maintains — permanently false, and one of them is read by a hook",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-10T03:07:40Z",
+  "updated_at": "2026-08-13T04:41:53Z",
+  "closed_at": "2026-08-13T04:41:53Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7226",
+  "body": "Found while implementing #7036. Observation-class, filed unassigned: nothing a user hits today reports a wrong answer, but the fields are inert in a way that reads as working.\n\n## What is there\n\n`examples/app-todo/src/objects/task.object.ts`:\n\n```ts\nis_completed: Field.boolean({ label: 'Is Completed', defaultValue: false, readonly: true }),\nis_overdue:   Field.boolean({ label: 'Is Overdue',   defaultValue: false, readonly: true }),\n```\n\nBoth are `readonly`, so a non-system caller's write to either is stripped on both write paths. Nothing else in the app writes them: no hook leg, no flow node, no action handler, and the seed data sets neither. They are therefore `false` on every row for the life of the app.\n\n`is_overdue` additionally has a *reader*: the `afterUpdate` leg of `src/objects/task.hook.ts` logs when a task \"became overdue\", gated on `data.is_overdue && previous && !previous.is_overdue`. That condition can never be true, so the branch is unreachable. (#7036 repairs how that leg reads its record but does not change this.)\n\n`is_completed` is the one with a visible partner: after #7036 the app maintains `completed_date` on the completion transition, so a reader comparing the two now sees a task with a completion date and `is_completed: false`.\n\n## Why it is a finding rather than a defect\n\nNo user-facing surface currently branches on either flag — no view filter, dashboard, report or dataset in the app reads them (`is_overdue`'s only reader is the log line above). So nothing produces a wrong answer today; the cost is that a shipped reference app declares two derived flags and derives neither, which is the pattern an AI author copies.\n\n## Shape of the fix, if it is wanted\n\nThree readings, and the choice is an app-semantics call rather than an obvious repair:\n\n- **Maintain them** — `is_completed` in the same `beforeUpdate` leg that stamps `completed_date` (they are the same transition); `is_overdue` needs a clock, so it belongs to a scheduled flow rather than a record hook.\n- **Derive them** — make both formula fields, so they cannot drift from `status`/`due_date` and are visible to list views without anything writing them.\n- **Remove them** — if the example does not mean to demonstrate derived flags, `status` and `due_date` already carry the information.\n"
+}

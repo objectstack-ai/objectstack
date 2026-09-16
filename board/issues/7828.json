@@ -1,0 +1,35 @@
+{
+  "number": 7828,
+  "kind": "issue",
+  "title": "`actionLooksDestructive` keys destructiveness off `confirmText` — the exact signal #7278/#7309 are migrating away, and 6 of 14 actions flip",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-11T17:30:07Z",
+  "updated_at": "2026-08-12T19:00:59Z",
+  "closed_at": "2026-08-12T19:00:59Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7828",
+  "body": "Reported as an `out_of_scope_findings` item by the #7309 dev ([report](https://github.com/objectstack-ai/objectstack/issues/7309#issuecomment-5256410797)), deliberately not fixed there. Filed unassigned; assign at the moment you start.\n\nNo `domain:*` label applied — routing is the triage seat's call. For the record the site is `packages/runtime`.\n\n## The mechanism\n\n`actionLooksDestructive` (`packages/runtime/src/action-execution.ts:620`) treats the presence of **`confirmText`** as a destructiveness signal.\n\n#7278 and #7309 are deliberately removing `confirmText` from actions that also declare `params`, moving the question onto `description` — so the heuristic's input is being withdrawn by design, one card at a time. Measured on #7309's branch: **6 of its 14 migrated actions flip from destructive to not-destructive** — `generate_backup_codes`, `regenerate_backup_codes`, `change_slug`, `enable_oauth_application`, `disable_oauth_application`, `rotate_client_secret` — and **none** of them carries `mode: 'delete'` or `variant: 'danger'` to fall back on.\n\n## Latent today — and the reason it is latent is not a property of the heuristic\n\nThe #7309 dev established this and it should not be re-derived: the only caller is `summarizeAction`, reachable only from MCP `listActions`, which is gated **twice** — fail-closed on `sys_*` objects (all 14 qualify) **and** requiring `ai.exposed === true` (false on all 14). **Nothing changes today.**\n\nBut both gates are facts about *today's platform objects*, not about the heuristic. An `ai.exposed` object — third-party or future first-party — declaring the same shape reaches the live path with a destructiveness signal that the platform's own authoring guidance is actively telling authors to stop writing. The erosion is also cumulative across cards: #7278 moved 2 actions, #7309 moves 14, and #7428 intends to make the pair a *rule*, at which point `confirmText`-beside-`params` stops existing in new metadata altogether.\n\n## ⛔ What NOT to do\n\nDo **not** fix this by declaring `ai: { requiresConfirmation: true }` on the affected system actions. That was considered and rejected on #7309 for the right reason: it adds **dead metadata to a doubly-unreachable path**, which is speculative widening. That reasoning is endorsed here — the fix belongs in the heuristic, not in per-action annotations papering over it.\n\n## Step one — measure before designing\n\n1. Does **any** `ai.exposed === true` object today rely on the `confirmText` signal to be classified destructive? If none does, this is confirmed latent and can be fixed calmly on its merits.\n2. What *should* the signal be, now that the platform's own convention moves confirm questions to `description`? Candidates worth measuring rather than presuming: `mode: 'delete'`, `variant: 'danger'`, an explicit `ai.requiresConfirmation`, or `description` presence — noting that the last one would classify **every** migrated action as destructive, which is the opposite over-correction.\n3. Whether the heuristic should exist at all, versus requiring an explicit declaration. A heuristic keyed off **UI dialog copy** to decide an **AI-facing safety property** is a category confusion worth naming, and it is the reason this is filed rather than patched.\n\n**\"Latent, no change needed yet\" is a valid outcome** if step 1 comes back empty and the design question is recorded — but it should be an outcome someone measured, not one inherited from this card.\n\n## Related\n\n- #7278 (ruling: carry the confirm question on `description`; moved 2 actions)\n- #7309 / PR #7827 (moved 14; where this was measured)\n- #7428 (the authoring-time guard that would make the pair a rule — note its guard must be scoped to `ActionSchema`, per the correction filed on that card)"
+}

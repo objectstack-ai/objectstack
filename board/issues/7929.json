@@ -1,0 +1,35 @@
+{
+  "number": 7929,
+  "kind": "issue",
+  "title": "finding: after the #7598 Q1=B ruling, a read scope with a driver-refused field reference answers 400 from the driver — which cuts across #5367's attribution argument on that one path",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched",
+    "security"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-12T04:48:01Z",
+  "updated_at": "2026-08-12T21:12:26Z",
+  "closed_at": "2026-08-12T21:10:48Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 15,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7929",
+  "body": "Observation-class finding, filed **unassigned with no `pm:queue`** — for triage to grade and route. Raised by the dev on #7598 / PR #7916 as *\"one place the ruling is slightly awkward, stated rather than papered over\"*, and graded by the services PM as **not a blocker for that PR** (reasoning below). Carries a second, smaller observation from the same report.\n\n## Observation 1 — the attribution seam\n\nThe **2026-08-12 maintainer ruling on #7598** (Q1 = B) has `NativeSQLStrategy.canHandle` decline a query whose `where` or read scope carries `{ $field: … }`, so it routes to the ObjectQL/engine path and the **driver** enforces the four #5222 rulings with metadata it owns. That is working as ruled.\n\nThe consequence: a read scope carrying a reference the **driver** refuses — an undeclared column, or the tenant-isolation column — now surfaces as **`INVALID_FILTER` / 400 from the driver**, where before the ruling the analytics path answered `READ_SCOPE_COMPILE_FAILED` / **500 with a withheld message**. The refusal moved to the driver along with the compilation.\n\n**Why this is not a violation of Q2 = A.** Q2 = A governs `read-scope-sql`'s **own** envelope, and PR #7916 leaves it untouched: same code, same status, same withheld message, and the `\"Deliberately NOT a 4xx of any flavour, including a 422\"` module-header paragraph is not rewritten. Verified on the diff. The 400 comes from a *different* component that the ruling deliberately routed to.\n\n**Why it is still worth recording.** #5367's adjudication rests on an attribution argument — a caller must not be billed a 4xx for a document they cannot author, and policy field names must not be echoed to the tenant. On this one path, the ruling's routing produces exactly the 4xx that argument was written to prevent. Two independent decisions, each correct on its own terms, meeting at a seam neither anticipated.\n\n**Open question for whoever grades this:** does the driver's `INVALID_FILTER` on a *read-scope-originated* filter need the same withhold treatment #5367 gave the analytics path — and if so, does that belong at the driver, or at the boundary that hands a read scope to it? Note the driver cannot currently distinguish \"this filter came from an author's query\" from \"this filter came from a read scope the caller never saw\", which is likely the crux.\n\n⚠️ This may deserve **`needs-user-decision`** rather than a dispatch: it is a consequence of a ruling the maintainer made hours ago, and re-deciding it is not a dev-seat or PM-seat call. Filed as `finding` so triage grades it; the services seat is not pre-empting that.\n\n## Observation 2 — an unreachable-today configuration, named rather than hidden\n\nThe decline creates one configuration that could not previously occur: a host advertising `nativeSql` **without** an aggregate bridge now reaches `resolveStrategy`'s dead end for a `$field` filter (native declines, and there is nothing to fall back to).\n\nMeasured on PR #7916: **not reachable from `AnalyticsServicePlugin`**, whose defaults derive both capability flags from the bridges it actually wired. Only a hand-overridden `queryCapabilities` can construct it. The PR adds a diagnostic for it anyway, with a narrowness control. Recorded here so the reasoning survives the session; **no action is claimed to be needed today.**\n\n## Explicitly NOT claimed\n\n- **No regression is asserted.** PR #7916's 26 CI checks are green, including the `#5367` end-to-end pin `analytics-query-read-scope-withhold.test.ts` in `runtime` (2096/2096). The withhold behaviour on the path #5367 actually adjudicated is intact.\n- **The ruling is not being re-litigated here.** Q1 = B and Q2 = A stand. This card records a downstream consequence, not an objection.\n\n## Evidence\n\nMeasured 2026-08-12 by the dev on PR #7916 (`packages/services/service-analytics`, head `94c5580`). Full measurement in the `<!-- os-dev-report -->` comment on #7598 (comment 5262307982); the PM's acceptance reasoning is in comment 5262400038.\n\n## Source\n\nSplit out of objectstack-ai/objectstack#7598 (PR objectstack-ai/objectstack#7916) — the dev's named residuals, deliberately not decided inside that card.\n\nRefs: #5367 (the withhold adjudication), #5222 (the four cross-field rulings), #7596, #7597."
+}

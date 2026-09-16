@@ -1,0 +1,35 @@
+{
+  "number": 8026,
+  "kind": "issue",
+  "title": "`SettingsService` falls back to a NoopCryptoAdapter whose `encrypt()` is base64 — fail-open where the engine's `Field.secret()` path fails closed",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-12T11:59:39Z",
+  "updated_at": "2026-08-13T02:35:40Z",
+  "closed_at": "2026-08-13T02:35:40Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8026",
+  "body": "Filed by the `domain:services` PM seat from the #7902 credential-persistence survey (report: comment 5264546868). Unassigned, no `pm:queue`. For triage to grade.\n\n⚠️ **This is NOT a live leak, and the card should not be read as one.** On the shipped plugin path a real `LocalCryptoProvider` is always wired (`settings-service-plugin.ts:204`). Filed on **direction**, not on impact.\n\n## The observation\n\n`SettingsService` constructed without a `cryptoProvider` + `secretStore` falls back to `NoopCryptoAdapter` (`settings-service.ts:537`), whose `encrypt()` is:\n\n```\n'b64:' + base64(plaintext)\n```\n\n— `crypto-adapter.ts:30-33`. That is **encoding, not encryption**: trivially reversible, and it produces a value that *looks* protected (prefixed, opaque at a glance) while being plaintext with extra steps.\n\n## Why it is worth recording despite not being live\n\n**The direction is the opposite of the engine's.** The `Field.secret()` path **refuses the write** when no CryptoProvider is present — measured on #7799/PR #7901, where the fail-closed behaviour is what makes the webhook secret migration safe on a provider-less deployment (the row stays cleartext and is *reported*, rather than being silently \"encrypted\" into something reversible).\n\nSo the platform currently has two credential-encryption paths with **opposite failure modes**:\n\n| path | no CryptoProvider ⇒ |\n|---|---|\n| engine `Field.secret()` | **refuses the write** (fail-closed) |\n| `SettingsService` | **writes base64** (fail-open) |\n\nThe survey's whole subject is credentials at rest. A fallback that yields a reversible value under a name that reads as encryption is the shape most likely to be mistaken for protection by the next author — and by the next audit, since `value_enc` being populated looks like success from the storage side.\n\n## What a fix would be, if wanted (⛔ not decided here)\n\nMake the settings path fail closed like the engine's: refuse to persist an `encryptedKeys` value when no real provider is wired, and say so loudly at boot. The measured fact that the shipped path always wires one is what makes this **cheap** — if nothing legitimate depends on the Noop fallback, removing it costs nothing and closes the divergence.\n\nThe card should first establish that: **who actually constructs `SettingsService` without a provider?** If the answer is \"only tests\", the fix is small and the tests move to an explicit fake. If some real host relies on it, that is a different and more interesting conversation.\n\n## Explicitly NOT claimed\n\n- **No live leak.** Shipped plugin path wires `LocalCryptoProvider` unconditionally. This is a hazard-by-construction card.\n- **No accusation that settings credentials are unprotected today** — the survey verified the opposite: **every** `service-settings` credential specifier is shape ③ (manifest `type: 'password'` ⇒ `encryptedKeys` ⇒ `sys_secret` handle in `value_enc`, `value` nulled). That is the mechanism that makes settings the *cleanest* family in the whole 26-surface sweep.\n- ⚠️ Note for whoever picks this up: the manifest's `type: 'password'` is **not** the objectql `Field` type and has nothing to do with ADR-0100 — it means *\"encrypt this\"*. Easy to misread as a password-field hit; it is the opposite.\n\n## Routing note\n\nLanding site is `packages/services/service-settings` ⇒ plausibly `domain:services`, but the divergence it is measured against lives in `packages/objectql`, so a triage that routes it to `domain:engine-core` as \"make the two paths agree\" would also be defensible. Not guessed here.\n\n## Evidence\n\nMeasured 2026-08-12 by the dev on #7902 (read-only survey, `pr: null`). Full 26-surface verdict table in comment 5264546868.\n\n## Source\n\nSplit out of objectstack-ai/objectstack#7902 (survey residual (c)). Siblings: #7986, #7987, #7990, #8009, #8011, #8025."
+}

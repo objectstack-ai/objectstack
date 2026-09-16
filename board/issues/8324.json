@@ -1,0 +1,35 @@
+{
+  "number": 8324,
+  "kind": "pull_request",
+  "title": "refactor(spec)!: view.exportOptions adopts the object form the renderer reads; 'pdf' leaves the format enum (#8010)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-13T05:32:20Z",
+  "updated_at": "2026-08-13T06:09:29Z",
+  "closed_at": "2026-08-13T06:09:28Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-08-13T06:09:28Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/8324",
+  "body": "Fixes #8010\n\n## What\n\n`view.exportOptions` adopts the **object form** the renderer actually reads (maintainer ruling 2026-08-12, on-card comment 5270998514, option A), and **`'pdf'` leaves the format enum** (PDF export was declined as #1301, NOT_PLANNED; that decision is unchanged here).\n\n- **Object form is the contract**: `{ formats?, maxRecords?, includeHeaders?, fileNamePrefix?, streaming? }` — a strict object declaring **exactly** the five keys the only renderer reads, re-measured on objectui `origin/main@878140b` (`ObjectGrid.tsx:1596–1642`): `formats` (:1596, :1605), the previously **undeclared** `streaming` opt-out (:1600, :1642), `maxRecords` (:1621), `includeHeaders` (:1622), `fileNamePrefix` (:1631). The measurement matches the ruling's five-key claim exactly; no undeclared-but-read key survives.\n- **Back-compat normalization**: the legacy bare format array stays accepted and **lifts to `{ formats: [...] }` at parse** (`z.input` keeps both spellings; `z.output` is the object form only — `ListView` is `z.input`, `ListViewParsed` is `z.infer`, both stay coherent by construction).\n- **`'pdf'` removal is an enum-VALUE narrowing** (the `crypto.hash` precedent): the format enum's error map carries the prescription keyed on `issue.input`, so only the spelling that used to be legal is told it \"was removed\"; a union-level error dispatch makes the refusal the **top-level** parse message in either authored form, naming #1301 and the surviving formats. Not a runtime `console.warn`.\n- **ADR-0087 kit**: conversion `view-export-options-pdf-removed` (D2) + step-17 wiring (D3); `retiredFromLoadPath` — stored pre-removal rows replay clean, `os migrate meta --from 16` rewrites author sources. The conversion strips only `'pdf'` and deliberately does **not** rewrite the array spelling (back-compat, not retired). No `RETIRED_KEYS_BY_MAJOR` entry — an enum value is not a key, so there is no tombstone line for gate (b) to read (same as `hook-body-crypto-hash-removed`); the four existence ratchets are byte-identical by design for a value narrowing (#4391 precedent).\n- Liveness `view.json` row re-cited to the five measured reads and re-dated; docs table + generated references updated; both example apps moved to the canonical object form (which the current renderer actually reads — the examples' XLSX menu entry was dead under the array spelling).\n\n## Scope\n\n**Spec half only**, per the ruling's contract-first split: the objectui renderer/type reconciliation (the false \"Aligned with @objectstack/spec\" comment at `types/src/objectql.ts:783–785`, the `as any` streaming read, `'pdf'` in its local type) is the PM-filed follow-up card on that repo. objectui was touched **read-only** for measurement.\n\nFile surface kept to the `ListViewSchema` `exportOptions` block in `view.zod.ts` (plus the new module-level consts it needs), the conversion/migration registries, liveness note, changeset, tests, docs, examples. The `FormSectionSchema` / `PageComponentSchema` blocks and the shared strict-options plumbing are untouched.\n\n**Landing serialization**: current `origin/main` (2a18012f2) is merged in; if #8201/#8202 (branch `claude/issue-8202-per-shape-guidance-completion`, same file, disjoint region) lands first, this branch re-merges before landing.\n\n## Verification\n\n- New pins (7): object form byte-preserved with all five keys; array lift asserted on output; `'pdf'` refused in **both** spellings with the prescription (message substance asserted: the removal sentence, #1301, the survivors, the migrate sentence); a never-legal format keeps the plain enum message (no false \"was removed\"); unknown key on the object form gets the strict-surface suggestion; `ObjectListViewSchema` copy behaves identically.\n- **Reverse verification** (direction predicted before running): restoring the old bare-array declaration turned exactly 6 of the 7 pins red (the never-legal-format pin is green in both worlds by design); restored byte-identical from the committed fix and re-ran green.\n- Spec suite 388 files / 10258 tests green; spec typecheck green; conversions/migrations suites green (fixture disjointness + chain replay); consumer suites (downstream direction) and both example apps' typecheck: see report comment on #8010 for per-package readings.\n- `check:generated` green after regenerating exactly the four proved-stale artifacts (spec-changes, upgrade-guide, references, strictness-ledger counts); full derived gate list green except two pre-existing non-PR gates (objectui pin freshness — blocks the Version Packages PR only; dev-prereqs — local stale-dist advisory).\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01Euoy6wyfzgiWtgCg4s6JK2)_"
+}

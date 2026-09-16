@@ -1,0 +1,32 @@
+{
+  "number": 7132,
+  "kind": "issue",
+  "title": "finding: view.json cites \"ObjectGrid.tsx (audit L15)\" for 15 `list.*` keys, but 6 of them have zero occurrences in ObjectGrid.tsx — verdicts hold via other readers, the recorded evidence doesn't",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "pm:blocked"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T19:14:28Z",
+  "updated_at": "2026-08-13T04:00:56Z",
+  "closed_at": "2026-08-10T02:26:30Z",
+  "closed_by": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7132",
+  "body": "Direction-A (stale evidence / prose-rot) finding from the axis-③ liveness audit. Filed unassigned for triage. The `live` verdicts themselves appear **correct** for at least 4 of the 6 keys — this is about the citations, plus one unresolved question on `striped`/`bordered`.\n\n## Audited revisions (E24)\n\n- objectstack `origin/main` @ `4ac12ef4cfe4a1925fb7e950c56d7aff0bbc5381`\n- objectui `origin/main` @ `5bfaabde05c3876c9604a2aa47f4822f9e6de8b5`\n\nBoth read via `git fetch` + `git archive` of `origin/main`, not working trees.\n\n## The claim\n\n`packages/spec/liveness/view.json` → `props.list.children.*`: fifteen keys carry the identical note `\"objectui: ObjectGrid.tsx (audit L15).\"` — `resizable, striped, bordered, selection, pagination, rowHeight, grouping, rowColor, hiddenFields, fieldOrder, rowActions, virtualScroll, conditionalFormatting, inlineEdit, exportOptions`.\n\n## Measured at objectui @5bfaabd\n\n`packages/plugin-grid/src/ObjectGrid.tsx` is the only file of that name in the repo. Plain substring count (not even word-bounded):\n\n| cited key | occurrences in ObjectGrid.tsx | actual measured reader(s) |\n|---|---|---|\n| resizable | 2 | citation OK |\n| selection | 31 | citation OK |\n| pagination | 17 | citation OK |\n| rowHeight | 22 | citation OK |\n| grouping | 12 | citation OK |\n| rowColor | 2 | citation OK |\n| conditionalFormatting | 4 | citation OK |\n| exportOptions | 10 | citation OK |\n| rowActions | 7 | citation OK |\n| **striped** | **0** | spec-bridge `bridges/list-view.ts:92`; `plugin-view/ObjectView.tsx:851`; `app-shell/views/ObjectView.tsx:1426` — all forwarding |\n| **bordered** | **0** | `bridges/list-view.ts:93`; same forwarding pattern (`components` `containers.tsx:674` `bordered` is the card container, a different surface) |\n| **hiddenFields** | **0** | `bridges/list-view.ts:123`; `plugin-list/ListView.tsx:1509` (effective-fields filter); `plugin-view/ObjectView.tsx:1043` |\n| **fieldOrder** | **0** | `bridges/list-view.ts:124`; `plugin-list/ListView.tsx:1499-1509` (column ordering) |\n| **virtualScroll** | **0** | `bridges/list-view.ts:105`; `plugin-list/ListView.tsx:1561`; `plugin-view/ObjectView.tsx:1053` |\n| **inlineEdit** | **0** | `bridges/list-view.ts:107`; `plugin-list/ListView.tsx:791-794`, forwarded to the grid as **`editable:`** at `:1559` — a one-hop rename, which is exactly why ObjectGrid greps clean |\n\nThe 9 hits double as the honest-positive control: the same instrument that returns 0 for six keys returns strong counts for nine, in the same file.\n\n## The unresolved half (recorded, not asserted)\n\nFor `hiddenFields`/`fieldOrder`/`virtualScroll`/`inlineEdit` a real applying reader was found (ListView). For **`striped`/`bordered`** every measured read is a pass-through copy onto the grid schema, and no renderer applying them was found (`ObjectGrid.tsx` 0 hits; `components/metadata/ObjectGrid.component.yml:45` declares a `striped` prop the implementation never reads). If nothing downstream applies them, those two rows are over-graded — that needs a deeper trace than this audit performed (dynamic/config-driven reads are the instrument's blind spot), so it is recorded as an open question, not a verdict.\n\n## Dedup\n\nOrg-wide open-issue search for `ObjectGrid ledger` and `liveness ledger` returns no card on this citation batch. objectstack#5175 (`chartConfig` row over-grades evidence) is the nearest relative, different rows.\n\n## Suggested lane\n\nspec-surface / ledger hygiene, single-repo (evidence refresh in `view.json`); the `striped`/`bordered` question may spawn an objectui-side card if the deeper trace confirms no applier.\n\nProvenance: cross-repo read-only audit, session https://claude.ai/code/session_018ffcE95NaMJcL9XJ9VDYgk"
+}

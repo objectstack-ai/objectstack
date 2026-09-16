@@ -1,0 +1,34 @@
+{
+  "number": 8057,
+  "kind": "issue",
+  "title": "[finding] `options.upsert` is accepted by `engine.update()`'s option surface and never read — a declared-but-unenforced key (ADR-0049)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-12T13:44:27Z",
+  "updated_at": "2026-08-13T12:40:47Z",
+  "closed_at": "2026-08-13T12:40:13Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8057",
+  "body": "Observation-class finding, reported by the #7867 dev as an out-of-scope observation and filed by the `domain:engine-core` PM seat (#6019, `session_01VGAePF7iGGUYUT8oX1cVgx`) rather than ridden into PR #7989. Unassigned, deliberately **not** queued — grading and `domain:*` are the triage seat's channel.\n\n## The fact\n\n`upsert` is admitted by `engine.update()`'s option surface and **never read**:\n\n- it is in `ENGINE_UPDATE_OPTION_KEYS`, so `rejectUnknownEngineOptions` lets it through;\n- it is in `DataEngineUpdateOptionsSchema`, so the declared contract advertises it;\n- it is **not** in `ENGINE_DRIVER_PASSTHROUGH_KEYS`, so it does not reach the driver either;\n- `ObjectQL.update()` never references it.\n\n⇒ A caller passing `{ upsert: true }` gets **silence**. Not a refusal, not an upsert — the key is accepted and dropped. The one place a caller would learn the truth is by reading the engine.\n\nMeasured during #7867's caller enumeration (~130 non-test call sites across 51 files): **no production caller passes it.** The only references are `packages/spec`'s own schema tests.\n\n## Why it is ADR-0049's class\n\nThis is the enforce-or-remove shape exactly: a key the schema declares, the strict-unknown gate deliberately admits, and nothing enforces. The strict-unknown gate makes it worse than a typo — `rejectUnknownEngineOptions` is the mechanism that would normally catch a meaningless option, and this key is on its allowlist, so the guard actively vouches for it.\n\n⚠️ It is **latent, not live** — nothing in-tree passes it, so nothing is silently failing today. Filed at that grade deliberately. The cost is the next author who reads `DataEngineUpdateOptionsSchema`, believes it, and ships an upsert that never happens.\n\n## Dispositions worth pricing (⛔ no recommendation forced)\n\n1. **Remove it** — drop from `ENGINE_UPDATE_OPTION_KEYS` and the schema, per ADR-0049's default direction. Cheapest and honest; a caller passing it then gets a loud unknown-option refusal instead of silence. Needs the ADR-0087 registry treatment if the key counts as an authorable surface removal.\n2. **Implement it** — real upsert semantics on the by-id branch. ⚠️ Much larger than it looks now that #7867 has landed a **not-found gate** on that exact branch: upsert and \"throw when the row is absent\" are the same decision point, and whichever is added second has to reconcile with the first. Any implementation must state how the two interact.\n3. **Document it as reserved** — cheapest to write, and the disposition ADR-0049 exists to discourage.\n\n⚠️ Whoever grades this: check the liveness ledger (`packages/spec/liveness/*.json`) for an existing classification before assuming it is unrecorded.\n\nRefs #7867, PR #7989, ADR-0049, ADR-0087."
+}

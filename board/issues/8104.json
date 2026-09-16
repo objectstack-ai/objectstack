@@ -1,0 +1,36 @@
+{
+  "number": 8104,
+  "kind": "issue",
+  "title": "service-settings: alias the remaining three workspace deps to source in vitest.config.ts, shrinking its check-test-source-alias registry entry to empty",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "pm:dispatched",
+    "tooling"
+  ],
+  "assignees": [
+    "huangyiirene"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-12T15:33:52Z",
+  "updated_at": "2026-08-13T00:45:48Z",
+  "closed_at": "2026-08-13T00:45:47Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8104",
+  "body": "Residual from #8030 → PR #8063, filed by the `domain:services` PM seat on the dev's recommendation. ⛔ Not graded by me — for triage. Small and mechanical, but with one non-obvious trap that has already cost this repo a debugging round, so it is written down rather than left as folklore.\n\n## State after #8063\n\nPR #8063 introduced this package's first real-engine test and, with it, `packages/services/service-settings/vitest.config.ts`. It aliases **two** workspace deps to source — `@objectstack/objectql` and `@objectstack/core` — because those two were what `check-test-source-alias` newly named. The gate's registry entry for `service-settings` was left **byte-identical**: `@objectstack/platform-objects`, `@objectstack/spec`, `@objectstack/types` are still listed as known-unaliased.\n\nThose three still resolve through `exports` to **`dist`** in this package's tests. That is the condition the gate exists to shrink: a test that reads a build artifact reports on build state rather than on the source in the checkout, and its failure mode is a **green test that proves nothing**.\n\n## The ask\n\nAlias the remaining three to source in the same config, and delete `service-settings`' entry from `KNOWN_UNALIASED_TEST_IMPORTS` in `scripts/check-test-source-alias.mjs`.\n\n⚠️ The registry is audited for **set equality in both directions** — a stale entry for a package that no longer has unaliased imports is itself a failure. So the removal is not optional cleanup; it is half of the change.\n\n## Two traps, both measured, both cheap to walk into\n\n1. **Array form with anchored regexes, never the object form.** `resolve.alias`'s object form matches by **prefix**, so a bare key whose replacement is a **file** also swallows every subpath and resolves it to `…/index.ts/<sub>` — `ENOTDIR`, at run time, in a config that reads as correct. See #7778, and the shape already in `vitest.config.ts` from #8063: `{ find: /^@objectstack\\/spec$/, replacement: … }`. `@objectstack/spec` and `@objectstack/platform-objects` are the ones that matter here — this package imports **subpaths** of both (`@objectstack/platform-objects/system`, `@objectstack/spec/system`), so a prefix-matching alias will break them and an anchored one will **not cover them**. Whether the subpath entry points need their own alias entries is the actual work in this card.\n2. **Blast radius is the whole package.** This changes module resolution for **all 20 test files** in `service-settings`, not just the one that motivated it. That is exactly why it was kept off a P0 security hotfix. Expect to run the full package suite (413 passing / 20 files as of #8063) and read the result, not just the new file's.\n\n## Acceptance\n\n- `check-test-source-alias`: OK, and `service-settings` **absent** from the registry.\n- `service-settings` suite still green at its full count.\n- ⛔ No source change in `packages/services/service-settings/src/**` — if aliasing to source turns a test red, that is a **finding to report**, not a thing to patch away. A test that only passed against `dist` was measuring the wrong artifact, and what it was hiding is the interesting half of this card.\n\nProvenance: #8030 dev report (comment 5267935069, \"Deliberately not done\"), and my ACCEPT receipt on #8030 (comment 5268937227)."
+}

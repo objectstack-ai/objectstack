@@ -1,0 +1,35 @@
+{
+  "number": 8278,
+  "kind": "issue",
+  "title": "`packages/rest` serves `/meta/:type/:name/published` from the code snapshot too — #8031's fix does not reach the REST transport",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-13T02:15:28Z",
+  "updated_at": "2026-08-13T04:24:20Z",
+  "closed_at": "2026-08-13T04:23:29Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8278",
+  "body": "**Filed by the PM on behalf of the #8031 dev agent**, which measured this but could not file it — its container 403s on every GitHub API call, reads and writes alike. Recovered over git transport as `.os-handover/8031-handover.md` on branch `claude/issue-8031-handover`. ⚠️ **No `domain:*` label applied — routing is triage's call.** The dev's own suggestion: **`domain:cli`** (`packages/rest`), explicitly *\"reported, not performed\"* because a fix landing there was outside its scope fence.\n\nUnassigned.\n\n## The defect\n\n`packages/rest/src/rest-server.ts` mounts **both** arities of this route —\n\n- `GET /api/v1/meta/:type/:name/published`\n- `GET /api/v1/meta/:type/:section/:name/published`\n\n— and resolves them through `resolveMetadataService(...)` → `svc.getPublished(type, name)`. **It never consults the overlay.**\n\nThat is **the same wrong store** the runtime dispatcher had, on **the transport that actually serves the cloud runtime**. So the defect #8031 fixed (an item published at runtime via `POST /packages/:id/publish-drafts` answers `404` on this route, while the ordinary read serves it) **remains reachable through REST after PR #8254 merges.**\n\n## Why the overlay is authoritative\n\nUnchanged from #8031, and established from the spec rather than from the fact that the write went there:\n\n- **ADR-0027 (E)(5)** defines sealing a publish as flipping the draft's `sys_metadata` rows `state:'draft' → 'active'`. **The flip *is* the publish.**\n- `packages/metadata-protocol/src/sys-metadata-repository.ts`, the `OverlayState` contract: *\"`'active'` → the published, live overlay.\"*\n- **ADR-0033 §2** — the ADR this route cites in its own comment — routes **every** authoring write into the ADR-0027 draft, making promotion of that draft the definition of \"published\" for anything authored at runtime.\n\n## Suggested shape (mirrors the landed dispatcher fix)\n\nConsult the `state:'active'` overlay row **first**; fall through to `getPublished` on a **null** overlay, so a code-published item keeps resolving to byte-identical bytes. The dispatcher-side implementation is in `packages/runtime/src/domains/meta.ts` (PR #8254) and can be read as the reference.\n\n⚠️ **Two facts the REST side has that the dispatcher does not:**\n\n1. **A latent second failure mode, independent of this one.** REST answers **`501 NOT_IMPLEMENTED`** (*\"metadata.getPublished() is not available in this kernel\"*) when the resolved service lacks the member. `getPublished` is an **optional** member of `IMetadataService` with **exactly one implementation in the repo** (`MetadataManager`). So on any topology whose `metadata` slot is filled by something else, **this route is simply a 501.**\n2. ⛔ **Do not widen the 404 into \"unpublished\".** `rest-server.ts` already carries a comment explaining precisely what its 404 means, written to preserve that distinction. Keep that semantics intact.\n\n## ⛔ A trap for whoever picks this up\n\nThe #8031 card's own verification arm — *\"an item that is genuinely unpublished still 404s\"* — is **false for a code-defined item by design**: `getPublished`'s documented fallback answers **200 with the current definition**. Anyone who \"fixes\" that to a 404 will be **breaking the contract on purpose while believing they are tightening it.** The version of the arm that *is* correct — a **draft-only** item must not be served — is implemented and load-bearing in #8254's suite (arm D).\n\n## Related fragility, recorded (not a bug)\n\n`IMetadataService.getPublished?` is optional, has exactly one implementation, and its store (`publishedDefinition`) is written by exactly one caller — `MetadataManager.publishPackage`, reachable only via `POST /packages/:id/publish`. Worth someone's attention alongside the 501 above.\n\n## Related\n\n#8031 / PR #8254 (the dispatcher-side fix this does not reach) · ADR-0027 (E)(5) · ADR-0033 §2"
+}

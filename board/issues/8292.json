@@ -1,0 +1,33 @@
+{
+  "number": 8292,
+  "kind": "issue",
+  "title": "Published docs tell customers that admin-door edits of a packaged permission set are \"no longer refused\" — they 403; ADR-0094's 2026-07-14 direction was retired 2026-08-09",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:devx"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-13T03:40:43Z",
+  "updated_at": "2026-08-13T12:53:27Z",
+  "closed_at": "2026-08-13T12:06:55Z",
+  "closed_by": {
+    "login": "qq9340100",
+    "id": 313832657,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8292",
+  "body": "Found while implementing #7351 (PRs #8290 / #8291), by re-running that card's own six-phrase sweep on a current ref. **Outside #7351's three-file surface, so deliberately not fixed there.** Filed unassigned, **no `domain:*` label — routing and grading are the triage seat's call.** `content/docs/**` is not the `domain:cli` lane, which is why this seat is filing rather than dispatching it.\n\n## The measurement\n\nADR-0094's 2026-07-14 direction — an env-scope overlay is the standard ADR-0005 customization of a packaged permission set, and deleting the overlay resets the row to the shipped declaration — was **retired on 2026-08-09** by D5-R (#6858 / PR #6962), after #6483 / PR #6608 rolled `permission` back to `allowOrgOverride: false`. The admin-door edit now answers **403 `not_overridable`**.\n\n**`content/docs/permissions/authorization.mdx:231-234` still states the retired direction as current, in the present tense, to customers:**\n\n> admin-door **edits of a packaged set are no longer refused**: the ADR-0094 write-through translates them into the standard ADR-0005 env-scope **overlay** — the record projects the effective body while the package keeps owning the row, and \"delete\" resets to the shipped declaration.\n\nThat is not merely stale — it is **inverted**. It tells a reader the edit succeeds; the platform refuses it.\n\nVerified on `origin/main` at filing time, not taken from the finder's report:\n\n```\n$ git grep -n -A3 \"no longer refused\" origin/main -- content/docs/permissions/authorization.mdx\n231:  admin-door **edits of a packaged set are no longer refused**: the ADR-0094\n232-  write-through translates them into the standard ADR-0005 env-scope\n233-  **overlay** — the record projects the effective body while the package keeps\n...\n$ git grep -c \"RETIRED 2026-08-09\" origin/main -- docs/adr/0094-sys-permission-set-pure-projection.md\n1\n```\n\nThe second command is the control: the direction really is retired, so the docs claim is genuinely wrong rather than a misreading of an unsettled question.\n\nThe finder also reports a looser sibling bullet in the same file (~`:222`), *\"Deleting an artifact-backed set through this door **resets** it to its declared body\"*. ⚠️ I could **not** confirm that one with my own grep — my pattern did not match, and I am recording the gap rather than passing it on as verified. Whoever picks this up should re-locate it by text.\n\n## Second site, same defect class\n\n`docs/adr/0086-authz-metadata-config-boundary-and-cross-package-composition.md:400-403` carries a live-voiced, present-tense pointer at the retired D5:\n\n> ADR-0094 D5 (revised 2026-07-14) makes an environment overlay of a package-owned set a **first-class ADR-0005 customization** (overlay-wins … a data-door \"delete\" is an overlay reset to the shipped declaration)\n\nConfirmed present on `origin/main` (`git grep -n \"revised 2026-07-14\" -- docs/adr/0086-*`). This is the same defect #7351 fixed *inside* ADR-0094's D2, one ADR over.\n\n⚠️ **That second site is under `docs/adr/**`, so fixing it is a maintainer-merged PR.** If both sites are taken as one card, it must ship as **two PRs** — a mixed diff routes the whole thing to maintainer-only landing and would hold the customer-facing fix hostage to a human merge it does not need. #7351 has just been through exactly this split (#8290 normal path, #8291 maintainer-merged); reuse that shape.\n\n## Why this is graded higher than the card that found it\n\n#7351's three sites were internal prose whose harm was bounded — two test headers contradicted by their own passing bodies, and an ADR parenthetical pointing at a section whose title already said RETIRED. This one is **published, customer-facing, and inverted**: a reader following it expects an edit to work and gets a 403, with the docs offering no hint that the supported channel is \"edit the package and re-publish\" (ADR-0086 two-doors). Severity is triage's to set, but the inputs differ in kind from #7351's, not just in degree.\n\n## Dedup\n\nThe finder searched open issues by keyword and by path; nothing covers `authorization.mdx` (#8165 is a different docs-currency card). Related and already handled, listed so the sweep is reproducible: PR #7346 swept `packages/plugins/plugin-security`; #7351 / PRs #8290, #8291 cover the two dogfood headers and ADR-0094 D2. Checked and **clean**: `packages/spec/src/kernel/metadata-plugin.zod.ts:921` mentions the direction but is correctly retired-voiced; CHANGELOG hits are historical and correctly past-tense.\n\n## Note on provenance\n\nThis exists because a dispatch assumption was written down and then tested. The dispatch for #7351 asserted that no fourth site survived outside `plugin-security` and instructed the dev to re-run the sweep anyway and report rather than widen. The assumption was wrong; the instruction is what caught it. The dev correctly did not touch these files and reserved the widen-or-file decision — this card is that decision.\n\nRefs: #7351 / PRs #8290, #8291 · #6858 / PR #6962 (D5-R) · #6483 / PR #6608 (the rollback) · #7082 / PR #7346 · ADR-0005, ADR-0086, ADR-0094"
+}

@@ -1,0 +1,34 @@
+{
+  "number": 8382,
+  "kind": "issue",
+  "title": "Two `visibleWhen` shapes were outside #7832's sweep: `page:tabs` items and `ScreenFieldConfig` still reject `visible` / `showWhen` without naming the key",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-13T10:24:28Z",
+  "updated_at": "2026-08-13T12:58:48Z",
+  "closed_at": "2026-08-13T12:58:48Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8382",
+  "body": "Found while verifying #7816's ask 1 (which #7832 / PR #7884 delivered). #7832 curated six shapes; its inventory test `packages/spec/src/shared/visible-when-alias-guidance.test.ts` pins those six. **Two other shapes in `packages/spec` declare `visibleWhen` and were never in that inventory** — on both, an author who writes the action-side spelling still gets a rejection that names the surface but never names the key to write instead. That is exactly the defect #7832 existed to remove, just on surfaces nobody enumerated.\n\n## Measured on `origin/main` @ `84c07c3c1`, freshly built spec `dist`\n\n**1. `page:tabs` item — `packages/spec/src/ui/component.zod.ts` (`PageTabsProps`, items array, `visibleWhen` declared ~L601)**\n\n```\nACCEPTED  items[0].visibleWhen                  (canonical — landing key confirmed)\nBARE      items[0].visible\n          Unrecognized key(s) on this `page:tabs` item: `visible`. Until #4001 batch A an\n          undeclared prop was dropped in silence: …\nBARE      items[0].showWhen                     (same message shape)\n```\n\n**2. `ScreenFieldConfigSchema` — `packages/spec/src/automation/builtin-node-config.zod.ts` (`visibleWhen` declared ~L404)**\n\n```\nACCEPTED  { name: 'f', visibleWhen: 'record.x' }   (canonical — landing key confirmed)\nBARE      { name: 'f', visible: true }\n          Unrecognized key(s) on this screen field: `visible`. Until #4001 an undeclared key\n          here was dropped at the execute-time parse — …\nBARE      { name: 'f', showWhen: 'record.x' }      (same message shape)\n```\n\nNeither message mentions `visibleWhen`. Compare the six shapes #7832 did cover, all of which now name a target key (`RowCrudActionOverrideSchema`, `FieldSchema`, `SelectOptionSchema`, `FormFieldSchema`, `FormSectionSchema`, `PageComponentSchema`).\n\n## Suggested fix\n\nBoth shapes have exactly ONE landing key for the visibility intent and no boolean sibling, so by the rule `visible-when-alias-guidance.test.ts` states in its header (*one landing key ⇒ alias; two ⇒ guidance prose; none ⇒ nothing*) both are the simple **alias** case: `visible → visibleWhen`, `showWhen → visibleWhen`. Acceptance stays byte-identical — an alias row is a message channel, not a parse-time rename.\n\nTwo constraints inherited from #8199, both worth re-checking at implementation time:\n\n- A `guidanceSet` match consumes a key **before** the alias channel, so a set and an alias row matching the same key are not additive. Neither shape here spreads `VISIBILITY_STRICT_OPTIONS` (they are hand-rolled `strictObject` calls with their own options), so no set currently shadows these keys — but verify, or `alias-integrity.test.ts`'s #7889 reachability check will go red on a dead row.\n- Do not hoist either row onto `VISIBILITY_STRICT_OPTIONS`: that table may carry only what is true of all three of its consumers.\n\nThe natural home for the pins is a fourth section in `visible-when-alias-guidance.test.ts`, so the inventory stays the single place that says which surfaces are answered and which are deliberately not.\n\n## Scope note\n\nFiled unassigned, out of scope for #7816 — that card's declared file surface is `data/object.zod.ts` / `data/field.zod.ts` / the shared strict-options plumbing, and neither file above is on it.\n\nRefs #7816 (parent question), #7832 / #7884 (the sweep this completes), #7889, #8199.\n"
+}

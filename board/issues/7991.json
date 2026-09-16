@@ -1,0 +1,35 @@
+{
+  "number": 7991,
+  "kind": "issue",
+  "title": "`packages/qa/downstream-contract` — the repo's backward-compatibility gate for `@objectstack/spec` reports 14/14 green against a spec change that breaks its own fixture, because it reads `spec/dist`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-12T09:48:30Z",
+  "updated_at": "2026-08-12T17:52:08Z",
+  "closed_at": "2026-08-12T17:52:08Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7991",
+  "body": "Filing unassigned; `domain:*` routing and grading are the triage seat's. `packages/qa/**` is not the devx lane — filing at the destination per the file-at-destination rule, from the devx seat (#6023) as the committed first follow-up of PR #7966.\n\n## The defect, demonstrated rather than argued\n\n`packages/qa/downstream-contract` is the repository's **frozen third-party consumer fixture**. Its own README states that a failure there means a spec change has narrowed something a published-spec consumer already relies on — i.e. that the change is **breaking**. It is the backward-compatibility gate for `@objectstack/spec`.\n\nIt ships no `vitest.config.*`, so `@objectstack/spec` resolves through `exports` to `packages/spec/dist` — a build artifact. Measured during PR #7966, direction predicted before running:\n\n| step | tree | result |\n|---|---|---|\n| baseline | spec built, source == dist | 14/14 pass |\n| a required field injected into `ConnectorSchema` **in source only**, no rebuild | the frozen fixture can no longer parse | **14/14 pass** |\n| identical tree, spec aliased to source | — | **1 failed / 13 passed**, naming the injected field |\n\nSo the gate whose entire job is to notice breaking spec changes **did not notice one**, and said nothing about why. This is the silent half of #7668: a dist merely *behind* the source runs green against old behaviour, with nothing in the output indicating the verdict is about build state rather than the checkout.\n\n## Why this one first, ahead of the other 62\n\nPR #7966 (merged into the gate + registry for #7849) measured **63 packages with at least one unaliased artifact import, across 312 package↔dependency pairs**. This card is one of those 63 registry entries and is deliberately *not* a duplicate of the sweep — it is pulled out first because its blast radius is categorically different from the rest:\n\n- Every other entry produces a wrong verdict about **its own package**.\n- This entry produces a wrong verdict about **whether the repo is shipping a breaking change to `spec`**, which is the highest-churn package in the tree, and does so on the one test suite specifically built to answer that question.\n\nA green here is currently consumed as evidence of backward compatibility. It is not evidence of that today.\n\n## The fix, and the one thing that could make it non-trivial\n\nAdd `packages/qa/downstream-contract/vitest.config.ts` aliasing `@objectstack/spec` (and any other workspace dep its tests reach) to source. **Use the anchored regex / array form, never the object form** — the object form matches by prefix, so a bare `@objectstack/spec` entry also swallows `@objectstack/spec/ui` and resolves it to `spec/src/index.ts/ui` (`ENOTDIR`). Constraint from PR #7778, mechanically enforced by `pnpm check:test-source-alias` as of PR #7966.\n\nThen **remove this package's entry from `KNOWN_UNALIASED_TEST_IMPORTS`** in `scripts/check-test-source-alias.mjs`. The registry is audited in both directions: leaving a stale entry behind fails the gate and names itself for deletion, so this is not optional cleanup — it is part of the change.\n\n⚠️ **Do not assume it is a one-liner, and do not widen the registry if it is not.** Aliasing a dep to source can surface dual-instance or circular-import problems that the `dist` boundary is currently hiding. If that happens here, it is a **finding in its own right** and should be reported — not a reason to leave the artifact on the resolution path. This caveat is the PR #7966 dev's, carried verbatim because it is the failure mode most likely to turn this card into a silent no-op.\n\nExpect the suite to go **red** once aliased if any real narrowing has landed in `spec` since the last `dist` build. That is the gate starting to work, not a regression introduced by this card.\n\n## Prior art (searched before filing)\n\n- **#7849** / PR #7966 — the gate and registry that make this measurable, and the source of the demonstration above.\n- **#7668** / PR #7778 — the loud version of this hazard (17 cases erroring on a symbol its prebuilt core predated) and the anchored-regex constraint.\n- **#7181** (closed, `domain:spec-tooling`) — *\"Three more dist-reading spec gates carry the same unenforced freshness precondition as `gen:api-surface`\"*. Same family, different surface; closed.\n- **#5864** (closed, `domain:devx`) — `check:dev-prereqs` checks dist existence only, leaving the stale-dist half ungated. Closed, and this is that half showing up somewhere costly.\n\nNothing open covers this package."
+}

@@ -1,0 +1,34 @@
+{
+  "number": 8488,
+  "kind": "pull_request",
+  "title": "docs(driver-sql): state the autonumber contract — unique and monotonic, not gapless",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-13T15:38:30Z",
+  "updated_at": "2026-08-13T16:25:03Z",
+  "closed_at": "2026-08-13T16:25:02Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-13T16:25:02Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/8488",
+  "body": "Fixes #8283\n\nExecutes the maintainer ruling of 2026-08-13 (option 1): **document the contract, change nothing.**\n\n## What this is\n\nA TSDoc addition and a changeset. Nothing else.\n\n```\n .changeset/autonumber-not-gapless-contract.md | 40 ++++++++++++++++++++++++\n packages/drivers/driver-sql/src/sql-driver.ts | 45 +++++++++++++++++++++++++++\n 2 files changed, 85 insertions(+)\n```\n\nAll 45 added lines in `sql-driver.ts` are comment lines; there are **zero deletions** and zero non-comment additions in the whole diff. Verified mechanically rather than by eye:\n\n```\n$ git diff -U0 origin/main -- packages/drivers/driver-sql/src/sql-driver.ts \\\n    | grep '^+' | grep -v '^+++' | sed 's/^+//' | grep -vE '^\\s*\\*'\n(no output)\n```\n\n## The contract, as stated\n\nPlaced **next to the existing sentence** `an autonumber is an immutable business identifier` (anchored by phrase — the neighbour is at `sql-driver.ts:4827` on this base, and line numbers there have drifted repeatedly). The new section says:\n\n- **Unique and monotonic per counter** — the `(table, tenant, field, scope)` key `getNextSequenceValue` issues from — and **NOT gapless**.\n- **A rejected write consumes the number it reserved**: a unique violation on another field, a validation rule, a throwing `beforeInsert`. The number is issued to no row and never re-issued; the next write gets the one after it. `TK-0001`, a failed insert, then `TK-0003` is the contract behaving correctly.\n- **Why it cannot be taken back** — the mechanism, since this is the driver that owns it: `getNextSequenceValue` commits the reservation in its own transaction (`runner.transaction` over `parentTrx ?? this.knex`), deliberately independent of the caller's insert.\n- **This is ordinary sequence semantics, not a defect** — with an explicit instruction not to add reclamation or reservation-reordering, and the reason that shape was rejected.\n- **A decided property**, citing the ruling, so the next reader can tell it was chosen rather than defaulted.\n\n## Accuracy note on the mechanism\n\nI verified the mechanism against the code it sits beside rather than restating the card. `runner.transaction` nests when a `parentTrx` is supplied, so the **inside-a-caller-transaction** path rolls back with the refused insert and burns nothing — which the `upsert` retry comment right below already records as measured. The TSDoc states the independent-commit case as the contract-relevant one and notes the nested case parenthetically, so the paragraph does not overstate what the code does.\n\n## Explicitly not done\n\n- No behaviour change of any kind.\n- No reservation-ordering work (rejected as option 2).\n- The savepoint structure in `getNextSequenceValue` is untouched; I did not edit that function at all, and reference it outward via `{@link getNextSequenceValue}` instead.\n- No opt-in gapless mode (option 3 — recorded as a restart condition, not work).\n- No `content/docs/**`. The author-facing half of the ruling belongs to the devx lane and is tracked in #8479, which stays open and is not addressed here.\n\n## Changeset: `patch` on `@objectstack/driver-sql`, deliberately\n\nReasoned rather than copied, on repo evidence:\n\n- The **empty-frontmatter** route is not available: `check-empty-changeset.mjs` rejects a PR that newly adds one (the 182 in the tree are grandfathered by a diff-computed exemption).\n- That leaves `patch` or the `skip-changeset` label. The label is for a PR that \"declares no release of its own\" — the workflow's own textbook case is editing a CI-internal script.\n- This PR's entire product is a **consumer-facing contract statement**, and it ships two ways: the package builds with `declaration: true` and no `removeComments`, and `insertOnlyUpsertColumns` is `protected`, so the text is emitted into the published `.d.ts`; and AGENTS.md frames the changeset body as the channel that reaches consumers as `CHANGELOG.md` — \"what an upgrading agent greps\".\n- Routing a statement whose whole purpose is preventing a mis-promise into driver source only would reproduce, at the release-notes layer, exactly the gap that made this card necessary.\n\nThe honest counter-argument: AGENTS.md scopes changesets to feature work and functional improvement, and this is neither — that is the case for `skip-changeset`. I judged the delivery channel to be the deciding factor. Flipping to the label costs one deleted file if the reviewer disagrees.\n\n## Verification\n\n| Check | Result |\n| --- | --- |\n| `pnpm --filter @objectstack/driver-sql typecheck` | pass |\n| `pnpm --filter @objectstack/driver-sql test` | **1431 passed**, 52 skipped, 93 files, 0 failed |\n| autonumber + upsert-immutable specs, re-run by name | 3 files, 18 tests, pass |\n| `check:nul-bytes` | pass (7643 files, no raw control bytes) |\n| `check:driver-conformance` | pass (45 cells, 0 debt) |\n| `check:changeset-gate-self-tests` | pass |\n| `check-empty-changeset` / `check-changeset-no-major` / `check-adr-0087-registration` | pass, diff-scoped against the merge base |\n| `check:objectui-changeset`, `check:test-source-alias`, `check:type-source-resolution` | pass |\n\nReverse verification does not apply here: there is no behaviour to revert and no diagnostic that could change colour. What I did instead was read the mechanism I describe — `getNextSequenceValue`'s `runner` assignment and its `runner.transaction` body — and check the claim against the two independent places in the file that already record it as measured.\n\n`check:objectui-pin-fresh` and `check-dev-prereqs` are red on inputs this diff does not touch (a stale `.objectui-sha`; a workspace needing `pnpm build`) — known-ambient, reported not chased.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01VoxQqG5FiUHZKCST7KDoZC)_"
+}

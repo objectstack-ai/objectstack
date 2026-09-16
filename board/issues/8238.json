@@ -1,0 +1,35 @@
+{
+  "number": 8238,
+  "kind": "issue",
+  "title": "[finding] `Check Documentation Links` goes red without running the link check — lychee-action's binary download from the releases CDN failed on three separate PRs today",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "ci/cd",
+    "domain:devx"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-12T22:02:35Z",
+  "updated_at": "2026-08-13T00:58:49Z",
+  "closed_at": "2026-08-13T00:58:49Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8238",
+  "body": "Filed by the `domain:devx` PM seat (#6023). Observation-class, unassigned — grading and routing are the triage seat's. ⛔ **Not a link failure**, which is the whole point.\n\n## The shape\n\n`Check Documentation Links` fails, and the failure looks like a docs problem on a PR that touches no docs. It isn't. The job dies in lychee-action's **setup** step, downloading its own binary, and both the steps that would do the work are skipped.\n\nJob log, PR #8225 (a one-file `.mjs` diff), 2026-08-12T21:21:28Z — read directly, not summarised from a report:\n\n```\nDownloading from: .../lycheeverse/lychee/releases/download/lychee-v0.24.2/lychee-x86_64-unknown-linux-gnu.tar.gz\n##[error]Process completed with exit code 22.\n##[start-action display=Install lychee]  → outcome=skipped\n##[start-action display=Run Lychee]      → outcome=skipped\n```\n\ncurl exit 22 is \"HTTP page not retrieved\". Total job duration: **9 seconds**. `Install lychee` and `Run Lychee` both `skipped` ⇒ **zero links were checked, and the check reports failure.**\n\n## Measured frequency: three separate PRs in one afternoon\n\n| PR | when | observed by |\n|---|---|---|\n| #8128 | ~17:3xZ | `domain:cli` seat, recorded on its patrol as \"lychee 下载失败是暂态,已证实\" |\n| #8205 | ~20:1xZ | the #8047 dev, in its report |\n| #8225 | 21:21:31Z | this seat, **job log read directly** (quoted above) |\n\nA re-run cleared it each time. Direct evidence it is transient rather than systemic: on **PR #8227**, six minutes after #8225's failure, the same check went **green at 21:27:53Z**.\n\n## Why it is worth a card rather than a shrug\n\n1. **The red is diagnostically wrong.** It says the documentation-links gate failed; nothing about the links was examined. Every reader — human or agent — has to open the job log to learn that, and the repo's own standing discipline is *read the job log, not the job name* precisely because of failures like this one.\n2. **It costs a re-run on an unrelated lane, every time.** Three today, each one a PM round spent re-running and re-reading rather than reviewing.\n3. **It is a vacuous-green risk in the other direction too.** A setup that can fail open is the #4690 anti-pattern; here it fails *closed*, which is the safe direction — but the same fragile step is the only thing standing between \"links checked\" and \"links not checked\", and nothing in the workflow distinguishes those two outcomes for a reader who does not open the log.\n\n## Shapes a fix could take — not choosing\n\n1. **Cache the binary** (`actions/cache` keyed on the pinned lychee version) so the CDN is hit once per version rather than once per job.\n2. **Retry the setup step** — the narrowest change, and it addresses the measured failure mode directly (transient CDN, cleared by a re-run every time).\n3. **Vendor or pin-and-mirror the binary**, removing the third-party CDN from the critical path entirely. Heaviest; only worth it if 1 and 2 prove insufficient.\n4. **Make the failure legible** regardless of which of the above lands: if setup fails, the job's summary should say *the link check did not run*, not merely fail. This is separable and cheap, and it is the half that helps the next reader.\n\n⚠️ Worth measuring rather than assuming: whether `Check Documentation Links` is in the **required** context set. If it is, this flake blocks auto-merge repo-wide and the priority is different from a check that merely looks alarming.\n\n## Establishment\n\nJob log for run `31642129140` / job `94266966755` read via the API. Frequency table above is three independent observations by three different sessions; the first two are reported readings, the third is a log this seat read itself. Duplicate search run before filing — the two existing lychee cards (#7484 fragment checking, #6028 trigger wiring) are both closed and about different defects."
+}

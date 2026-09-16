@@ -1,0 +1,33 @@
+{
+  "number": 8330,
+  "kind": "pull_request",
+  "title": "fix(devx): refresh the ledgered packages' dep closure before --re-measure, so a stale dist stops reporting phantom drift",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/m",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-13T05:45:33Z",
+  "updated_at": "2026-08-13T06:24:48Z",
+  "closed_at": "2026-08-13T06:24:46Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-13T06:24:46Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/8330",
+  "body": "Fixes #8271\n\n`check:type-check-debt --re-measure` asserted that every workspace dependency of a ledgered package has a built type entry point on disk, and stopped there. **Presence is not currency.** A `dist/*.d.ts` that predates its own source sails through that precondition, and tsc then resolves the ledgered package's imports through an artifact describing a package that no longer exists — so the drift the gate reports is not in the source at all.\n\nCI never sees this because `lint.yml` builds the closure immediately before invoking the gate. Only the local path lacked that step, which is how #8235 came to be filed in good faith as a `priority:p0` main-red stanch off four errors that were never in any source.\n\n## What changed\n\n`--re-measure` now **refreshes** the closure instead of merely asserting it — `refreshBuiltClosure()` runs the same turbo command with the same filters `lint.yml` runs immediately before this gate, then measures. Two things are deliberately kept:\n\n- **The nothing-is-built case keeps its existing refusal.** A cold closure is minutes, and a gate that silently disappears for minutes is a gate nobody runs before pushing.\n- **An mtime freshness read stays on as a backstop**, run *after* the build and never before it, naming any package those filters do not reach.\n\n## Why refresh rather than detect-and-refuse\n\nThe card offered both directions. Three measurements chose this one:\n\n| measurement | value |\n|---|---|\n| closure build, everything already current | **9.5 s** (70/70 turbo cache hits) vs. a ~250 s re-measure — under 4% to remove the variable |\n| ONE ledgered package's 7-task closure built **cold** | **3 m 2 s** — why the cold case stays a refusal |\n| packages an mtime read flagged as stale in the first worktree it saw | **3 of 3 were false alarms** — 2 dated by a `*.test.ts` that no `dist/` is generated from, 1 by a `git checkout` that rewrote a file to byte-identical content |\n\nThat last row is what settled it: an error rate fine for a backstop is disqualifying for a refusal, because refusing costs a 4-minute lap while the rebuild it would demand costs 9.5 seconds. turbo decides what is genuinely out of date by hashing inputs, which is strictly better than an mtime guess, and its cache replay rewrites the outputs it restores — so a refreshed closure reads as current afterwards.\n\n## Verification\n\n**The defect, reproduced.** Staged deterministically: drop one export from `driver-sql/src/index.ts`, build that package alone, restore the source from HEAD (`git hash-object` confirms byte-identical, `git status` clean). `dist/` now carries the pre-change shape while the source is current — the #8235 world.\n\n- **Unfixed gate against that fixture:** red — `@objectstack/service-analytics: DEBT records 10 raw tsc error(s), now reports 11 (+1)`, with the source tree byte-identical to HEAD.\n- **Fixed gate against the same fixture:** green — 33 entries re-measured, **1969** raw errors, `surplus: none`.\n- **Control** (clean built tree, before any change): green — 33 entries, **1969** raw errors, `surplus: none`.\n\nPer #8218's lesson that changing *where* you measure changes *what* you measure, the readings are equal item by item, not merely in total: `surplus: none` means every one of the 33 entries sat exactly at its recorded number, and it holds in both runs. The gate is also observed to have repaired the staged artifact itself.\n\n**Self-test:** 28 built-closure cases (up from 15), paired the way the file's existing table is — the same graph asserted quiet, then with one flag flipped.\n\n**Mutation-tested, and it found a real hole.** Seven mutations; the first pass caught six. The survivor was my own case labelled \"a package that declares no type entry point is never stale\" — it described the node as `built: false`, so the `built` guard alone carried it and the type-entry guard it named was never exercised. Fixed, re-run, 7 of 7 caught. A separate weakness found the same way: the source-file cases re-spelled the predicate inline instead of calling it, so they would have stayed green through a walk that had stopped excluding test files; the predicate is now named and called.\n\n## Not changed, deliberately\n\n`lint.yml` step 31 is now redundant (roughly 9.5 s of cache hits before a gate that does the same thing). Removing it is a `lint.yml` edit pulling in seven more gate families for no measured benefit, and leaving it costs cache hits. Out of scope here.\n\n## Gates\n\n`pnpm check:type-check-debt` (the wired npm script, end to end), `check:type-check-coverage`, `check:type-source-resolution`, `check:nul-bytes` — all green. `scripts/pm/dispatch-gates.mjs` re-derived against the actual changed path returns exactly the three named families; no delta.\n\nReleases nothing — a repo gate script, no published package touched. Takes `skip-changeset`.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01KNfj35pXRxnF1D3gZN5zjc)_"
+}

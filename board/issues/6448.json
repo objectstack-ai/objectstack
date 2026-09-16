@@ -1,0 +1,33 @@
+{
+  "number": 6448,
+  "kind": "issue",
+  "title": "notification: 没有 `notification_id` 的 `sys_inbox_message` 行永远无法被标记已读 —— 读态的键在事件 id 上",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "finding"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T21:04:45Z",
+  "updated_at": "2026-08-12T18:00:45Z",
+  "closed_at": "2026-08-12T17:56:15Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 9,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6448",
+  "body": "发现于 #6436 的实施（PR 见下方关联）。**观察类（`finding`），不是今天用户会碰到的缺陷** —— 见下面的「可达性」一节：出厂管线不产生这种行。记在这里是因为它是 ADR-0030 读态键的一个真实结构性缺口，而不是某段代码的笔误。\n\n## 事实\n\n读态存在 `sys_notification_receipt` 上，键是 `(notification_id, user_id, channel)`（ADR-0030）。一条 `sys_inbox_message` 行如果 `notification_id` 为 null：\n\n1. `createInboxChannel` 的 `writeDeliveredReceipt` 直接 `if (!r.notificationId) return;` —— 不写任何收据（`packages/services/service-messaging/src/inbox-channel.ts`）。\n2. `listInbox` 的连接读 `m.notification_id`，为 null 则 `state` 为 undefined ⇒ `read: false`。\n3. #6363 的 `countUnreadTotal` 明确把它数成未读（注释原话：never receipted, therefore always unread）。\n\n三条合起来：**这种行恒为未读，没有任何写入能改变它**。\n\n`markAllRead` 之前会把它的**收件箱行 id**（`listInbox` 视图里的 `id: nid ?? String(m.id)`）喂给 `markRead`，于是插入一条 `notification_id` = 收件箱行 id 的收据 —— 连接永远读不回来，既没让行变成已读，又把自己计进了 `readCount`。#6436 的 PR 已把它从清扫集合中剔除（收据无键可写，跳过），所以 `readCount` 现在是诚实的；但**「这种行该不该可读」本身没有被解决**，也不该由那个 PR 顺手定。\n\n## 可达性：今天不可达（这是它被标 `finding` 的理由）\n\n单一 ingress `MessagingService.emit()` → `writeEvent()` 在任何分支都返回非空 id（无 data engine 时也合成 `evt_...`，`messaging-service.ts:737`），fan-out 再把它带进 `Delivery.notification.notificationId`。收件箱行只由该管线写。所以 null 只可能来自**绕过 ingress 的直接写入或迁移/遗留数据**。已在 `packages/services/**` 与 `packages/runtime/**` 搜过，没有第二个写 `sys_inbox_message` 的站点。\n\n## 可选路线（不猜，留给分诊）\n\n- **A. 收口声明** —— `sys_inbox_message.notification_id` 改成 `required: true`（今天是可选字段），让「无事件 id 的收件箱行」在写入时就被拒。声明即强制，与管线的实际行为一致；代价是遗留行需要一次迁移判断。\n- **B. 让读态可退回行 id** —— 收据键允许以收件箱行 id 兜底。会给读态引入第二种键，跨渠道语义（ADR-0030 把读态放在收据上的**理由**）随之变模糊；不推荐，列出以求完整。\n- **C. 明确记为不支持** —— 在对象定义与 ADR-0030 上写明：无事件 id 的收件箱行不参与读态。最省事，但把一条恒为未读、用户永远清不掉的行留在系统里。\n\n倾向 A（声明即强制，且与 ingress 已有的行为一致），但涉及 spec 侧字段必填性，交由分诊/维护者定。\n\n## 关联\n\n- 母单：#6436（`markAllRead` 全量清扫）\n- 相邻：#6363（`unreadCount` 数总未读）\n- 读态模型：ADR-0030\n"
+}

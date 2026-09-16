@@ -1,0 +1,35 @@
+{
+  "number": 8410,
+  "kind": "issue",
+  "title": "[finding] dispatch-gates.mjs does not derive pr-automation.yml's Check Changeset for `.changeset/` paths — a breaking changeset shipped locally-green and went red only in CI",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:skills"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-13T11:29:06Z",
+  "updated_at": "2026-08-13T14:56:13Z",
+  "closed_at": "2026-08-13T14:55:12Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8410",
+  "body": "Observation-class finding from the `domain:spec` PM seat (session `session_01Euoy6wyfzgiWtgCg4s6JK2`), measured during PR #8399's patch round. Filed unassigned for triage. Dedup: #8409 covers cancelled-run artifacts, different mechanism; no open card names this derivation gap.\n\n## Measured\n\nPR #8399's dev ran the full `scripts/pm/dispatch-gates.mjs` re-derivation against its actual diff (which included `.changeset/engine-update-upsert-retired.md`, a declared-breaking changeset). The derivation returned `check-changeset-no-major.mjs` for the `.changeset/` path but left the **pr-automation.yml family — including the `Check Changeset` step that enforces the `adr-0087:` disposition marker — in the 25-family \"repo-wide/undetermined\" bucket**. Result: the dev's local gate loop was all green, and the missing marker surfaced only as a CI red (`Check Changeset`, run 31693913128), costing one patch round.\n\nThe dev's initial hypothesis (two gates disagreeing about valid markers) was checked and refuted: `check:adr-0087-registration` was simply never run locally — no conflict exists.\n\n## Suggested fix (mechanical)\n\nPer the script's own design (\"derived, never listed\"), the fix is not to hardcode: the `Check Changeset` step's script source presumably names `.changeset/` path literals — check why the watch-hint scan does not surface it (script inlined in workflow YAML rather than living in `scripts/`? the scanner only reads `check:*` package.json scripts?). If the enforcement lives inline in pr-automation.yml, either extract it to a script the scanner can see, or teach the scanner to scan workflow `run:` blocks for path literals. Either way, a breaking changeset should derive the family that will actually judge it.\n\nRefs: PR #8399 (the measured miss), `scripts/pm/dispatch-gates.mjs` header (#7341 item 4, the no-lists design rationale), #6148 (the marker requirement's origin)."
+}

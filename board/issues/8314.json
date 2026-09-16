@@ -1,0 +1,36 @@
+{
+  "number": 8314,
+  "kind": "pull_request",
+  "title": "test(platform-objects): sweep code-shipped managed objects through the apiMethods affordance rule (#7934)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "dependencies",
+    "size/m",
+    "skip-changeset",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-13T04:33:14Z",
+  "updated_at": "2026-08-13T05:55:27Z",
+  "closed_at": "2026-08-13T05:55:26Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-13T05:55:26Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/8314",
+  "body": "Fixes #7934\n\n`os lint` walks an **authored stack**. This repo's own object definitions ship as **code** (`packages/**/*.object.ts`), so they were never walked by `object/managed-api-method-unaffordable` — the rule #7521 wrote. This adds the sweep that closes that gap, by importing the exported predicate rather than re-deriving it.\n\n## The measurement came first, and it is green\n\nThe card was explicit that it is unknown whether this repo has any live divergence, and that the fix must not be scoped before the measurement says there is one. Measured on `origin/main`:\n\n| | |\n|---|---|\n| object files swept | **76** |\n| objects loaded | **76** |\n| in scope (managed + non-empty `apiMethods`) | **51** |\n| findings | **0** |\n\nSo there is nothing to fix. This lands as **regression insurance**: the divergence class does not exist here today, and this is what stops it arriving unannounced. No object definition is modified by this PR.\n\n## The rule is reused, never copied\n\n`validateManagedApiMethods` is imported from `@objectstack/lint` (a new devDependency of `platform-objects`), which delegates to `checkManagedApiMethodAffordances` in `@objectstack/spec/data` — the same predicate objectql's registry calls when it strips the verb. This PR adds **no affordance table and no verb list**; `packages/lint` is not touched.\n\n## Why the sweep is repo-wide\n\n#7934 names `platform-objects` and `metadata-core`. Measured, those hold **30 of the 51** in-scope objects; the other 21 live in `plugin-security`, `plugin-approvals`, `plugin-audit`, `plugin-sharing`, `service-messaging`, `service-realtime` and `service-automation` — same class of object, same registry, equally unwalked by `os lint`.\n\nScoping the sweep to the package it lives in would repeat a failure this repo has already paid for twice: the #3391 bulk audit was scoped to `platform-objects` and missed eight objects elsewhere (#3745), and #7802 records it as \"an audit whose SCOPE was a package name while the gap lived in packages nobody thought to open\".\n\nThe objects are **imported** rather than regex-matched, unlike the two existing repo-wide object walkers, because this verdict resolves affordances through `resolveCrudAffordances` — a regex would have to re-derive that layering, and a second copy of the table is exactly the drift the rule detects. That is affordable because every one of these files imports from `@objectstack/spec` and nothing else.\n\n## Anti-vacuity\n\nA sweep over an empty or wrongly-filtered set passes triumphantly and proves nothing, so:\n\n- **three population floors** that fail differently on purpose — file count (the walk broke), in-scope count (the import or filter is wrong), and package spread (the walk quietly became package-local again, the #7802 shape a single total would hide);\n- **an in-repo red arm**: cloud#1225's exact shape is injected into the real loaded set and must produce exactly one finding naming it, while an adjacent coherent object stays silent;\n- **template exemptions pinned in both directions** — the one scaffolding template is skipped by exact path and asserted to still exist, and every other file is imported with no try/catch, so a file the sweep cannot load fails the run instead of being silently dropped.\n\n**Reverse verification** (direction predicted before running): adding `update` to `sys_audit_log`'s `apiMethods` — in `plugin-audit`, deliberately outside the card's named surface — turned the verdict red naming that exact file, export and rule, and took the red arm from 1 finding to 2; the two population cases stayed green. Restored from the commit, `git status` clean.\n\n## The two non-test changes, and why they are here\n\n- **`scripts/check-cross-package-test-inputs.mjs` + `turbo.json`** — a test whose real inputs are wider than its package is invisible to both turbo's affected-set and its task cache, so it goes red on `main` while every PR reports green (#7802). The declaration is what `check:cross-package-test-inputs` requires; without it the gate fails.\n- **`platform-objects/tsconfig.json` gains `types: [\"node\"]`** — so the new file contributes **0** errors to the package's TEST_DEBT (which stays at its recorded 3) instead of raising a shrink-only ledger. The sweep also seeds its root from `__dirname` rather than `import.meta.url`: the latter is a TS1470 under this package's config, and those are the only two seeds the cross-package gate recognises as escaping — deriving the root any other way makes the radius invisible to the gate, which then asks for the declaration to be deleted. Measured both ways.\n\nNo object definition, no runtime code and no published behaviour changes, so this carries the `skip-changeset` label rather than a changeset.\n\n## Verification\n\n```\npnpm --filter @objectstack/platform-objects test         17 files, 351 tests passed\npnpm --filter @objectstack/platform-objects typecheck    clean\npnpm --filter '...@objectstack/platform-objects' typecheck   51 projects in scope, 43 ran, all Done (downstream)\npnpm check:nul-bytes                    OK (7524 files)\npnpm check:cross-package-test-inputs    OK (9 packages, all declared, turbo.json hashes every glob)\npnpm check:type-check-coverage          OK\npnpm check:type-check-debt              OK (33 entries re-measured, none above its recorded number)\npnpm check:query-options-erasure        OK\n```\n\n`check:query-options-erasure` was not in the dispatch list; re-deriving the gates against the actual diff surfaced it, and it passes.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_012WMpuAfA2KSdDjGF6tm1bH)_"
+}

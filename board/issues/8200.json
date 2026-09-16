@@ -1,0 +1,35 @@
+{
+  "number": 8200,
+  "kind": "pull_request",
+  "title": "refactor(plugin-audit)!: retire `export` / `permission_change` from the sys_audit_log action enum (#8147)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-12T20:00:45Z",
+  "updated_at": "2026-08-12T20:49:51Z",
+  "closed_at": "2026-08-12T20:49:50Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-12T20:49:50Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/8200",
+  "body": "Part of #8147\n\n⚠️ **`Part of`, not `Fixes` — deliberately.** This lands 2 of the 3 values the\n2026-08-12 ruling named. The third (`import`) is referred back to the maintainer\nbecause its stated premise is measurably false; see \"The escalation\" below.\nMerging this must not close #8147.\n\n## What landed\n\n`export` and `permission_change` are retired from the `sys_audit_log.action`\nenum. Neither has ever been written. The repo has exactly **two**\n`sys_audit_log` writers:\n\n| writer | vocabulary |\n|:--|:--|\n| `packages/plugins/plugin-audit/src/audit-writers.ts` (generic hook writer) | `actionFor()` maps afterInsert/afterUpdate/afterDelete to `create`/`update`/`delete` and nothing else |\n| `packages/plugins/plugin-auth/src/admin-import-users.ts` | `action: 'import'`, run-level, `record_id: null` |\n\nNeither emits `export` or `permission_change`, so the shipped list views\nfiltering on them and the dashboard tiles counting them were permanently empty —\nthe visible product defect the ruling names (空 widget + 永远查不到东西的过滤器).\n\n- action enum: `export` + `permission_change` removed\n- `auth_events` list view filter: narrowed to `['login', 'logout']`\n- `config_changes` list view filter: `export` dropped, `config_change` and `import` kept\n- `plugin-audit` translation bundles regenerated (4 locales, via `check-i18n-bundles --write` — not hand-edited)\n- ADR-0087 registration: semantic migration `audit-log-action-enum-retired` on D3 step 17, with `spec-changes.json` and the upgrade guide regenerated\n- new pin test `sys-audit-log-retired-actions.test.ts`\n- `service-analytics` routing fixture reseeded off `permission_change`\n\n### Why a semantic entry and not a D2 conversion\n\n`sys_audit_log` is a platform-owned append-only object whose every field is\n`readonly: true`. Nobody authors an audit row and nobody authors this enum, so\nthere is no source for the chain to rewrite — the same disposition\n`BatchOptions.validateOnly` and the notification cursor already take in this\nmajor. As an enum-VALUE retirement nothing lands in `RETIRED_KEYS_BY_MAJOR` and\nthe four surface ratchets are byte-identical by construction (no def and no\nauthorable key changed) — verified, they did not move.\n\n## The escalation: `import` is NOT retired\n\nThe ruling named `import` on the premise 无此 feature. That premise is false:\n\n- `plugin-auth/src/admin-import-users.ts` writes a real run-level audit row on\n  every admin user-import run, and its docblock records the design decision\n  (corrected rationale, superseding an earlier stale claim) that this row is a\n  deliberate **complement** to the per-row rows, not a duplicate.\n- Case W4 of `packages/qa/dogfood/test/admin-identity-audit-trail.dogfood.test.ts`\n  asserts that row exists, with `record_id: null` and `metadata.event ===\n  'user.import_run'`.\n\nRetiring it would make the enum deny a value the platform writes — and do it\n**silently**: `validateRecord` skips `readonly` fields on insert, every field\nhere is readonly, so nothing rejects the write and nothing goes red. The result\nwould be written-but-not-declared, which for an audit surface is strictly worse\nthan the declared-but-never-written defect this card exists to fix, because the\nrow exists and the contract denies it. `config_changes` is also the only shipped\nview that lists those rows.\n\n## Ablation (predicted before measured)\n\nRestoring both values to the enum, everything else held:\n\n| surface | predicted | measured |\n|:--|:--|:--|\n| new pin test | RED, exactly 2 failures (the \"not declared by the enum\" cases); filter/dangling/`import` cases stay green | RED, exactly 2, exactly those. 205 others passed |\n| `check:i18n` (plugin-audit) | RED, bundle drift | RED — `DRIFTED (4)` |\n| `check:spec-changes` / `check:upgrade-guide` / `check:authorable-surface` | GREEN — nothing cross-checks the ADR-0087 entry against the enum | PASS / PASS / PASS |\n| `service-analytics` routing test | GREEN — fixture uses `delete`, never validates against the object schema | 1655 passed |\n\nZero divergence. The negative arms matter as much as the red one: **the ADR-0087\nregistration is not verified against reality by any gate**, and the\nservice-analytics fixture is not a detector of this retirement. The only\nmechanical detectors are the new pin test and the i18n bundle ratchet — which is\nprecisely why the pin test is in this PR, with its expectations written as\nliterals so that expectation and reality do not derive from the same source.\n\n## Gates\n\n`check:nul-bytes`, `check-adr-0087-registration`, `check-changeset-no-major`,\n`check-empty-changeset`, `check:migration-registry`, `check:spec-changes`,\n`check:upgrade-guide`, `check:authorable-surface`, `check:api-surface`,\n`check:liveness`, `check:i18n`, `check:adr-anchors`, `check:merge-driver`,\n`check:cross-package-test-inputs`, `check:test-source-alias`,\n`check:docs-audit-scope`, `check:engine-double-contract`,\n`check:query-options-erasure` — all PASS. `check:type-check-debt` PASS from the\nrepo root after a full build closure (no entry above its ceiling; the surplus\nnotes are pre-existing and in packages this PR does not touch — ledger not\nlowered). `plugin-audit` 207 tests pass, `service-analytics` 1655 pass,\n`plugin-audit` + `spec` typecheck pass.\n\n## Downstream, deliberately untouched\n\n- `packages/platform-objects` widget + translations + tile test → #8148\n- objectui `ACTION_OPTIONS` / `HistoryTimeline` → objectui#4476\n\n⚠️ Both are scoped as \"the three retired values\". If the maintainer upholds this\nPR's finding, both need correcting to **two** — dropping `import` from the\nconsole badge map would leave real, existing rows rendering without a label.\n\n_Generated by [Claude Code](https://claude.ai/code/session_01PEVB6w7D7uCszR9Mw1BL73)_\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01PEVB6w7D7uCszR9Mw1BL73)_"
+}

@@ -1,0 +1,34 @@
+{
+  "number": 7893,
+  "kind": "issue",
+  "title": "meta-field-write-inert: an accepted `field` PUT never reaches the object — a runtime-created field is stored `valid=true` and is absent from `fields` forever",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "bug"
+  ],
+  "assignees": [
+    "huangyiirene"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-12T02:34:29Z",
+  "updated_at": "2026-08-13T16:45:25Z",
+  "closed_at": "2026-08-13T16:43:25Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7893",
+  "body": "## Summary\n\nSplit out of #7743, which recorded **two** entangled defects. #7743's PR closes the first (an artifact-backed `field` override is now refused 403 `NOT_OVERRIDABLE`). This is the second, and it is **independent**: a `field` write that is entirely *legitimate* under the registry declaration is accepted, persisted, reported valid — and read by nothing.\n\nThe registry declares `field` with `allowRuntimeCreate: true`, so authoring a brand-new field through `PUT /api/v1/meta/field/<object>.<name>` is a **supported** capability. It just does not work. `declared ≠ enforced`, Prime Directive #10.\n\n## Why this is its own card, not part of #7743\n\n#7743's dispatch predicted that refusing the override would destroy the evidence for the inertness. **Measured: it does not.** The inertness has two halves and only one of them is behind the new refusal:\n\n- *override* half (`showcase_task.title`) — now 403, no longer observable. ✔ expected\n- *create* half (`showcase_task.zz_new_probe`) — **still 200, still inert, still reproducible on `main` after #7743's PR lands.**\n\nSo this card has a live repro, not archived evidence.\n\n## Measured (booted showcase, admin bearer)\n\nBefore #7743's fix — both halves:\n\n```\nPUT /api/v1/meta/field/showcase_task.title  {name:'title', label:'Tampered', type:'text'}\n  → 200 {\"success\":true,\"state\":\"active\",\"message\":\"Saved field 'showcase_task.title' (env-wide…)\"}\nGET /api/v1/meta/field/showcase_task.title\n  → {\"item\":{\"name\":\"title\",\"label\":\"Tampered\",\"type\":\"text\",\"_diagnostics\":{\"valid\":true}}}\nGET /api/v1/meta/object/showcase_task\n  → title.label === 'Title'      ← unchanged. 24 fields.\n```\n\nAfter #7743's fix — the create half, unchanged:\n\n```\nPUT /api/v1/meta/field/showcase_task.zz_new_probe  {name:'zz_new_probe', label:'Probe', type:'text'}\n  → 200 {\"success\":true,\"state\":\"active\",\"message\":\"Saved field 'showcase_task.zz_new_probe' (env-wide…)\"}\nGET /api/v1/meta/field/showcase_task.zz_new_probe\n  → {\"item\":{…,\"_diagnostics\":{\"valid\":true}}}\nGET /api/v1/meta/object/showcase_task\n  → fields count === 24, 'zz_new_probe' in fields === false     ← the field does not exist\n```\n\nThe row answers success twice over — accepted, and stored valid — for a document no consumer reads.\n\n## Where to look\n\nA `field` write lands in `sys_metadata` as a standalone row `type='field'`, `name='<object>.<field>'`. Nothing merges standalone `field` rows into an object's effective schema: the object's `fields` come from the object artifact plus its own overlay row, and `applyRegistryWriteThrough` routes only `type === 'object'` into `applyObjectRegistryMutation`. A `field` row takes the generic `hydrateOverlayIntoRegistry` branch, and `field` is `supportsOverlay: false`, so there is no overlay merge for it either.\n\nConsistent with `field` having no standalone artifact loader at all (`filePatterns: ['**/*.field.ts']` matches nothing in any app — fields are authored inside `ObjectSchema.fields`), which is the same structural fact #7743's root cause turned on.\n\n## The decision this needs\n\nThree coherent outcomes; this is a maintainer call, not a mechanical fix:\n\n1. **Implement it** — a `field` write composes into the parent object (registry write-through + read-path merge + column sync), making `allowRuntimeCreate: true` true.\n2. **Retire the write channel** — ADR-0049 enforce-or-remove: if a field is only ever authored as part of its object, `field` should not carry `allowRuntimeCreate: true`, and the route should refuse with a sentence pointing at `PUT /meta/object/<name>`.\n3. **Keep the row, document it as inert** — the weakest, and it is the shape ADR-0049 forbids.\n\n⚠️ If (1) is ever chosen, note that #7743's overlay refusal must stay: making field *overrides* legal is a separate decision from making field *creates* work, and #7743 pins the override as refused in both topologies.\n\n## Source\n\nExtracted from #7743 (itself from the QA run #7695). Measured on `origin/main` at `bcea363` plus #7743's fix, on the showcase with writable runtime packages."
+}

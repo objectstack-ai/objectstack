@@ -1,0 +1,34 @@
+{
+  "number": 8246,
+  "kind": "issue",
+  "title": "[finding] dogfood 消融跑在构建产物 dist 上:不先重建的消融会「绿着通过」,从而认证一个空洞的测试(三次独立实测)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-12T22:24:57Z",
+  "updated_at": "2026-08-13T13:06:19Z",
+  "closed_at": "2026-08-13T13:05:54Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8246",
+  "body": "观察类,**无标签定级、未认领**,交分诊。由 `domain:identity` 执行席位 #6022 汇总(session `session_01PEVB6w7D7uCszR9Mw1BL73`)——⛔ 本席位不定级。\n\n## 形状\n\n`packages/qa/dogfood` 的套件通过各包的**构建产物 `dist/`** 解析被测代码,不是 `src/`。于是任何\"改源码 → 直接跑 dogfood\"的流程,测到的都是**改动之前的代码**,除非中间重建过。\n\n单独看这只是常识。⚠️ **危险在于它与「消融」(predict-then-mutate)相遇时的方向:**\n\n| 场景 | 后果 | 严重性 |\n|:--|:--|:--|\n| 修复后不重建就跑 | 测出**假故障** | 会浪费一轮,但会被发现 |\n| **消融后不重建就跑** | 消融**绿着通过** | ⚠️ **静默认证一个空洞的测试为「已验证有判别力」** |\n\n第二种是本卡的重点。消融的**全部意义**在于证明\"这个测试在缺陷存在时会红\";如果消融跑在没有被消融的构建上,它会绿 —— 而这个绿会被读成\"测试通过了消融检验\",于是一个**永远不可能失败的断言**被当成已验证的守卫留在仓库里。\n\n## 三次独立实测(不同 agent、不同卡、不同包)\n\n1. **#8095**(`plugin-security`):第一次测管理员放宽时,策略在种子行里\"不见了\" —— 是**陈旧 dist**,不是缺陷。重建后重测正常。原文:「the dogfood suite consumes plugin-security's BUILT dist, not src」。\n2. **#8233**(`packages/rest`):复现队列失败时,必须**先应用 #8212 的 `rest-server.ts` 并重建 `@objectstack/rest`**,才拿到与 CI 逐字节相同的失败。原文:「because dogfood consumes built dist」。\n3. **#8144**(`plugin-auth`):**第一次 dogfood 消融跑出绿色** —— dist 里还是消融前的构建。dev 靠 **grep dist 里的消融标记**才发现,此后每次消融都先重建。原文:「a false green that would have certified a vacuous test」。\n\n三次都是 agent 在做别的事时撞见并主动记录的,不是有人去找它。\n\n## 为什么值得系统性处理,而不是靠每个人记住\n\n本班已经反复出现\"需要靠人重复记住、否则静默出错\"的形状,而这一条的失败模式**没有任何门会报警**:\n\n- 消融绿了 ⇒ 报告里写\"消融已做,方向如预测\" ⇒ 评审看到的是一次**合格的**验证;\n- 真实情况是那个测试可能根本不会红,而这一点**在此后任何一次 CI 里都不会暴露** —— 因为 CI 跑的是构建过的、正确的代码,测试当然绿。\n\n也就是说:**这个错误一旦发生就永久隐形**,直到某天真正的回归发生而那个\"守卫\"沉默为止。\n\n## 可能的处置方向(⛔ 未选定,留给分诊/裁定)\n\n1. **文档/流程**:在 os-dev 的消融步骤里写死\"消融后必须重建被消融的包\";最便宜,但仍靠人。\n2. **让 dogfood 从 src 解析**(如其它包的 test-source-alias 约定);根治,但会改变 dogfood 的语义 —— 它**故意**测构建产物,以覆盖打包/导出面的问题。⚠️ 这是个真实的权衡,不是纯改进。\n3. **消融自检**:提供一个小工具,在跑消融前校验 dist 里确实含有消融标记(#8144 的 dev 手工做的正是这件事)。折中,保留 dogfood 测 dist 的语义。\n\n⚠️ 方向 2 的代价请勿低估:`check:test-source-alias` 这条既有门的存在说明本仓已经在别处刻意区分\"测源码\"与\"测产物\"。dogfood 测产物很可能是**有意为之**。\n\nRefs: #8095 / PR #8242、#8233(已关闭)、#8144 / PR #8244。相邻但不同:#8218(门的临时文件未被 gitignore)。"
+}

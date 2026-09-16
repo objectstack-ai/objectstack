@@ -1,0 +1,34 @@
+{
+  "number": 8201,
+  "kind": "issue",
+  "title": "[finding] `SelectOptionSchema` was left out of the #7887 editability ruling — and it is the one shape where \"boundary\" is not the obvious answer",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-12T20:01:02Z",
+  "updated_at": "2026-08-13T07:03:54Z",
+  "closed_at": "2026-08-13T07:03:54Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8201",
+  "body": "Filed unassigned by the `domain:spec-surface` seat (#6298) from PR #8199's dev report. Recording only — routing suggestion at the bottom, no label claimed beyond `finding`.\n\n## What\n\n`visible-when-alias-guidance.test.ts` §3 (added by #7884) pins **three** shapes as declaring no disabled-ish key: `SelectOptionSchema` (`data/field.zod.ts`), `FormSectionSchema` (`ui/view.zod.ts`), `PageComponentSchema` (`ui/page.zod.ts`).\n\nThe maintainer ruling of 2026-08-12 on #7887 covered **two** of them — sections and page components gate visibility only; editability lives on fields. PR #8199 implemented that and deliberately left `SelectOptionSchema` bare, since the ruling does not name it.\n\nSo the third shape is now the odd one out: two of the three answer `disabled` with a boundary prescription, and it still answers with a bare unknown-key error.\n\n## Why it is not simply \"apply the same ruling\"\n\nThe ruling's reasoning does not obviously transfer, which is why this is filed as a question rather than a follow-up chore:\n\n- **A disabled select option is a real UI concept.** An option that is *shown but unselectable* is a thing pickers do — unlike a read-only form section, which has no rendering meaning of its own. So \"no editability semantics to enforce\" — the load-bearing premise of the #7887 ruling — is not clearly true here.\n- **This surface already carries per-option state.** Per-option `visibleWhen` binds `current_user` (ADR-0068), i.e. options already have their own predicate machinery. The section/component argument (\"editability belongs to the field inside\") has no equivalent: an option has nothing inside it.\n- Conversely the ADR-0049 argument still applies with full force: if nothing in the renderer honours a per-option disabled flag today, declaring one ships a declared-but-unenforced key.\n\nSo it is a genuine **boundary-vs-gap** question of the same kind #7887 was, and it wants the same treatment: a decision, then whichever prose or slot follows from it.\n\n## What would settle it\n\nWhether any consumer (the console's picker, the metadata-form renderer, or any objectui select widget) has a notion of a non-selectable option today. If one does, this is a gap; if none does, it is a boundary and the fix is the same one-paragraph prose + prescription that #8199 just landed for the two siblings — pointing authors at whatever the real answer is (filtering the option out via `visibleWhen`, most likely).\n\n## Routing suggestion\n\n`domain:spec` for the decision (adding a key would widen the accepted set); the follow-on prose is `domain:spec-surface` and small — the #8199 pattern is directly reusable, including the guidance-set placement reasoning. Low urgency: zero measured author pull, and the existing §3 pins already fail loudly the moment any disabled-ish key is added to this shape.\n\nBacklinks: #7887 (the ruling), PR #8199 (the two-shape implementation), #7884 (the §3 pins), ADR-0068 (per-option `current_user` binding)."
+}

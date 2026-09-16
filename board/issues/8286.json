@@ -1,0 +1,37 @@
+{
+  "number": 8286,
+  "kind": "issue",
+  "title": "analytics: /analytics/query echoes the executed SQL in production (NODE_ENV=production, no debug requested) — schema documents it as debug-only",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:services",
+    "pm:dispatched",
+    "security"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-13T03:04:57Z",
+  "updated_at": "2026-08-13T04:50:22Z",
+  "closed_at": "2026-08-13T04:50:22Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8286",
+  "body": "`POST /api/v1/analytics/query` returns the executed SQL to the caller on a deployment running `NODE_ENV=production`, with no debug flag requested.\n\n## Repro\n\nRequest (no debug field of any kind):\n\n```json\n{ \"cube\": \"sys_user\", \"measures\": [\"count\"], \"dimensions\": [] }\n```\n\nResponse:\n\n```json\n{ \"success\": true, \"data\": {\n    \"rows\": [{ \"count\": \"2\" }],\n    \"fields\": [{ \"name\": \"count\", \"type\": \"number\" }],\n    \"sql\": \"SELECT COUNT(*) AS \\\"count\\\" FROM \\\"sys_user\\\" WHERE ((\\\"sys_user\\\".\\\"id\\\" = $1 OR \\\"sys_user\\\".\\\"id\\\" IN ($2, $3) OR \\\"sys_user\\\".\\\"id\\\" = $4 …\"\n} }\n```\n\nContainer environment of the serving app (`objectos-ee-deploy-app-1`):\n\n```\nNODE_ENV=production\nOS_TENANCY_POSTURE=isolated\nOS_MODE=standalone\n```\n\n## Expected\n\nThe contract already says this is debug-gated — `packages/spec/src/api/analytics.zod.ts:75`:\n\n```ts\nsql: z.string().optional().describe('Executed SQL (if debug enabled)'),\n```\n\nNothing in the request enabled debug, and the deployment is production, so `sql` should be absent.\n\n## Why it matters here specifically\n\nThe echoed statement discloses the physical table name, the column naming, and — most sensitive on a multi-tenant deployment — **the shape of the isolation predicate itself**. In this case it reveals that `sys_user` is walled by an enumerated `id IN (…)` member list rather than an `organization_id` comparison, i.e. it tells a tenant exactly how (and on which column) the wall is built, plus the bound-parameter arity, which leaks the rough member count of their own org and the query surface to probe against.\n\nThis is an information-disclosure issue, not a broken wall: every isolation probe I ran on this deployment held (cross-tenant read → 404, cross-tenant update/delete → 403 row-level security, `filter`/`where` naming another org → empty, batch update/delete by foreign id → per-row `PERMISSION_DENIED`, audit log and activity stream partitioned cleanly). The wall is fine; it just should not describe itself to callers.\n\n## Suggested fix\n\nGate the `sql` field on the same debug switch the schema documents, and default it off outside development — or drop it from the response entirely and keep SQL echo on the dedicated `/api/v1/analytics/sql` dry-run route (`analytics.zod.ts:23`), which is the surface that exists for it.\n\n## Environment\n\n`objectos-ee-deploy` stack (Caddy → app → postgres:16) on `http://localhost:8080`, observed 2026-08-13, org owner session. Image commit not verified; spec references are the current `framework` main checkout.\n"
+}

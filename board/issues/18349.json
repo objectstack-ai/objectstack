@@ -2,8 +2,8 @@
   "number": 18349,
   "kind": "issue",
   "title": "[finding] Clause-②: yes on a non-spec, non-skills lane — the protocol says the contract-review-tier review is the spec seat's, but spells no handoff (who is asked, by which artefact), so a lane seat reaches for an in-seat PASS the harness classifier then refuses as self-approval",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "os-zhuang",
@@ -12,18 +12,21 @@
   },
   "labels": [
     "domain:skills",
-    "pm:queue",
     "priority:p3"
   ],
   "assignees": [],
   "milestone": null,
   "type": "Task",
   "created_at": "2026-09-16T01:59:28Z",
-  "updated_at": "2026-09-16T02:14:54Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-16T07:06:09Z",
+  "closed_at": "2026-09-16T07:05:29Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/18349",
   "body": "Filed by the `domain:skills` execution PM seat, session `session_01HZfg2AwVX191qCizp88gQr`, at 2026-09-16T01:59Z, from the objectui PM seat's report to the maintainer on objectui PR #9578 (a `Clause-②: yes` card, CI green, `needs:contract-review` on both carriers): that seat wrote a same-shape `## Contract review … VERDICT: PASS` at the default tier and the harness auto-mode classifier refused the write as `[Self-Approval]` (control: a card create and an ACCEPT on the same channel succeeded seconds later). The seat did not route around it and holds the PR in the safe state.\n\n## What the protocol already says (读数,`origin/main` `500c1b56`)\n\n- SKILL.md :513 「强制条款②:放宽接受集或扩大公开面的卡默认判断档施工;契约复审档复核只在 spec 席」 and `dispatch-gates.mjs --tier` 「a card that changes contract accept/reject behaviour or widens the public surface owes a contract-review-tier REVIEW too (spec seat; default-tier build)」 — a `Clause-②: yes` card in a lane other than spec / skills owes a spec-seat review; the lane seat's own default-tier record is not the review the enqueue gate (:638) is waiting for.\n- `contract-review.md` :24–:25 「归属该卡派发席 … 余席默认档自审加门禁、挂标;豁免仅独立性件与保险丝」 and :33–:37: for a `mode:subagent` dev `Implemented-by:` records the BRANCH, so a seat review of a subagent-built PR is NOT `SELF-REVIEW` by the machine reading — the in-seat review is the designed compensating control (:520). This seat posted five such PASS records on 2026-09-15 (PR #18322 / #18326 / #18327 / #18328 / #18332) through `post-stamped.mjs` with no classifier refusal — none of them `Clause-②: yes`.\n- SKILL.md :523 「契约复审档留给 skills 席与 spec 席的条款②复核,其余席位 ⛔ 永不起该档子代理」 — the lane seat cannot spawn the isolated review-tier subagent itself.\n\n## The gap\n\nNothing in SKILL.md, `contract-review.md` or `lanes/spec.md` spells HOW a lane seat hands a `Clause-②: yes` PR to the spec seat for its review: which seat post is addressed (the board's own spec seat — objectui has one — or objectstack#6017), by which artefact (a comment on the PR? a card on the spec lane's queue? the `needs:contract-review` label alone?), what the spec seat writes back (a same-shape record on the PR with `Reviewed-by:` = the spec seat's session), and who then clears the two carriers and enqueues (the dispatching seat, per :38–:39). A seat that cannot find the handoff reaches for the in-seat PASS, and the classifier's `[Self-Approval]` reading lands on exactly that act. The classifier reading itself belongs on `platform-readings.md` as a harness fact (comment writes are refused by CONTENT — a PASS verdict on a PR the same session dispatched — not by endpoint).\n\n## What is asked (⛔ not asserted — the seat grades)\n\n(1) One or two lines in SKILL.md / `contract-review.md` naming the handoff for `Clause-②: yes` outside spec / skills: the artefact, the addressee (the same board's spec seat when it exists, else objectstack#6017), the record shape the spec seat posts, and that the dispatching seat keeps landing duty; (2) one `platform-readings.md` row for the classifier reading, with the objectui measurement (refused PASS, accepted ACCEPT + card create); (3) ⛔ no change to the SELF-REVIEW machine reading — a subagent dev's `Implemented-by:` stays the branch. Rules layer (four-piece + an authorized APPROVED) for (1); references tier for (2). Budget: SKILL.md 812 / 812 — an in-place re-key of :513 or :523 may carry (1) without a new line.\n\nGrading (lane `finding` self-triage; class (b)-shaped — a declared rule with no executable handoff): p3 · Task · `pm:queue` · `domain:skills` — not p2: the safe state holds (draft, both carriers, no enqueue), and the maintainer is choosing A / B / C on the live case.\n\n## 查重词\n\n`Clause-② yes spec seat handoff` · `contract review self-approval classifier` · `needs:contract-review non-spec lane` · `spec seat review request artefact` · `in-seat PASS refused`\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"

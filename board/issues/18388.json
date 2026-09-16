@@ -1,0 +1,30 @@
+{
+  "number": 18388,
+  "kind": "pull_request",
+  "title": "Wire check-harness-current.mjs and check:pm-expected-skips self-tests into lint.yml",
+  "state": "open",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-elon-musk",
+    "id": 328766734,
+    "type": "User"
+  },
+  "labels": [
+    "ci/cd",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-16T07:59:32Z",
+  "updated_at": "2026-09-16T08:22:14Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/18388",
+  "body": "Fixes #18356\nFixes #18358\n\n## What changed\n\nTwo independent one-line wirings into `.github/workflows/lint.yml`, one per linked card, each landed as its own commit so `check-self-test-wired.mjs` starts counting a `--self-test` that already ships on `main` but that no workflow names.\n\n### #18356 — `check-harness-current.mjs --self-test` into the \"Shallow-history guard self-tests\" collector\n\n- Location: the `Shallow-history guard self-tests` step's `run:` block (the collector `check-step-collectors.mjs --self-test` extracts and drives).\n- Before: three `run_self_test` lines (`git-history.mjs`, `check-engine-split-ratio.mjs`, `collect-release-notes.sh`), closing prose read \"all three ran and passed\".\n- After: a fourth line — `run_self_test node scripts/pm/check-harness-current.mjs --self-test` — and the closing prose updated to \"all four ran and passed\" (the FAILED-branch prose is unchanged; it already names failures generically).\n- Independent verification: `node scripts/check-step-collectors.mjs --self-test` (182 assertions, 5 live blocks) and `node scripts/check-step-collectors.mjs` (the live gate) both pass; `node scripts/pm/check-harness-current.mjs --self-test` passes standalone (14 of 14 cases) both before and after the wiring.\n\n### #18358 — `pnpm check:pm-expected-skips` beside the other `check:pm-*` steps\n\n- Location: the `check:pm-*` step block, immediately after `Settings deny-roster pin (#18281)` (`pnpm check:pm-settings-deny-roster`) and before the release-rehearsal step — the same \"self-test only, live check stays a seat tool\" shape as the widening-tell and prior-ruling-reader steps beside it.\n- Before: no step in any workflow named `check:pm-expected-skips` or `check-expected-skips.mjs`.\n- After: a new step named \"Expected-skips roster self-test\" running `pnpm check:pm-expected-skips`.\n- Independent verification: `pnpm check:pm-expected-skips` passes locally (99 of 99 cases).\n\n## `check-self-test-wired` — before / after\n\nBEFORE, on origin/main at 8b81ab60d7:\n\n```\ncheck-self-test-wired: every one of the 212 script(s) CI runs that ship a --self-test has that self-test run by CI.\nscope: 292 file(s) under scripts/, 229 carrying --self-test in code (comments masked, 1 of them package-local gate(s) CI names by path); 212 of those are run by 37 workflow(s); 209 have their self-test run through the flag, 3 through a recorded route.\n```\n\nAFTER, on this branch:\n\n```\ncheck-self-test-wired: every one of the 214 script(s) CI runs that ship a --self-test has that self-test run by CI.\nscope: 292 file(s) under scripts/, 229 carrying --self-test in code (comments masked, 1 of them package-local gate(s) CI names by path); 214 of those are run by 37 workflow(s); 211 have their self-test run through the flag, 3 through a recorded route.\n```\n\n212 to 214 run by CI (both new scripts counted \"through the flag\": 209 to 211). `check-harness-current.mjs` and `check-expected-skips.mjs` are the two scripts that moved.\n\n## Gates\n\nDerived via `node scripts/pm/dispatch-gates.mjs --commands` against merge-base `8b81ab60d` (41 commands: 21 `pnpm`, 20 direct `node`). All 40 non-lock commands ran locally and passed, except `pnpm check:type-check-debt`, which reported PREREQUISITE NOT MET (exit 3, not a finding — the ledgered packages' workspace dependencies have no built dist type entry point in this worktree; the script's own text says a re-measure without the closure built would silently measure a different world). `pnpm check:pm-dispatch-gates` (single-machine roughly 430 to 450 seconds) ran through the shared verify lock.\n\n`node scripts/pm/check-governed-merges.mjs --test .github/workflows/lint.yml` reports NOT governed at exit 0, as expected for a workflow-only diff. `node scripts/pm/check-clause2-carriers.mjs --pair 18388` reports both cards' clause-2 declaration readable in the fixed spelling, both carriers agreeing, and no widening tell on either diff (exit 0).\n\n## skip-changeset\n\nNo published package's shipped content moves — the diff is entirely inside `.github/workflows/lint.yml`, which is not published. `skip-changeset` applied.\n\n## Acceptance notes\n\nNone — both cards' file surfaces were exactly as scoped (one collector line plus its closing prose, one new step), and no reproducible defect, contract violation or metadata-authoring trap was found while touching this file.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01Bz6hxDBqK62NP2W1LATvnt)_\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

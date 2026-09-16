@@ -1,0 +1,34 @@
+{
+  "number": 8240,
+  "kind": "issue",
+  "title": "`delegated_admin` can issue invitations but can no longer read them via the data API — the #8095 narrowing lands on owner/admin only",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-08-12T22:04:33Z",
+  "updated_at": "2026-08-13T13:40:42Z",
+  "closed_at": "2026-08-13T13:40:42Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8240",
+  "body": "Recording a consequence of #8095's narrowing that the ruling did not decide either way. Measured, not inferred.\n\n## What changed and what it left behind\n\n#8095 ruled that `sys_invitation` read goes to `owner`/`admin`, plus a row-scope carve-out for the addressee. The implementation states the admin admission as an RLS policy in `organization_admin` domained by `positions` to the two built-in org-administration identities:\n\n```\npositions: [BUILTIN_IDENTITY_ORG_OWNER, BUILTIN_IDENTITY_ORG_ADMIN]   // 'org_owner', 'org_admin'\n```\n\n`delegated_admin` normalizes to **neither**. `mapMembershipRole` (`packages/spec/src/identity/eval-user.zod.ts`) maps only `owner` / `admin` / `member`, and unknown values pass through unchanged — so the role reaches `current_user.positions` as the literal `delegated_admin`, matching no listed identity. It also does not receive `organization_admin` from the auto-grant: `auto-org-admin-grant.ts` tests `roles.includes('owner') || roles.includes('admin')` against the comma-split list, and `['delegated_admin']` contains neither as an element.\n\nNet effect: a `delegated_admin` reads only invitations addressed to their own email.\n\n## Measured\n\nStock `showcase` boot, `single` posture, four personas against `GET /api/v1/data/sys_invitation` with two invitations in the org:\n\n```\nowner            200  total: 2   (both rows, with role + inviter_id)\nmember           200  total: 0\ninvitee          200  total: 1   (their own row)\ndelegated_admin  200  total: 0\n```\n\n## Why it may matter\n\n`delegated_admin` exists precisely as the invitation-issuing principal that is not an org admin (ADR-0105 D8 / #3697: better-auth grants `invitation: [\"create\"]` to owner/admin only, and under a wall-enforcing posture those two are auto-elevated to tenant admins, so the delegated grade is the one caller the scope-bounded issuance path has). It can create invitations it then cannot list. better-auth's own `list-invitations` route is owner/admin-gated too, so there is no second path back.\n\nAlso note `docs/qa/platform-checklist/areas/identity-auth.json` (the ADR-0105 D8 item) has steps phrased as \"as the delegated_admin ... capture the created sys_invitation row via the data API\" and \"immediately read sys_invitation via the API and verify NO row was left behind\". Those reads now return nothing for that persona. The item's preferred lane — the pinned `packages/qa/dogfood/test/delegated-admin-invite.dogfood.test.ts` — is unaffected, because it reads through `ql.find` under a system context. Left alone rather than edited: whether the checklist wording or the permission changes depends on the decision below.\n\n## The decision\n\nEither:\n\n- **A. Intended.** `delegated_admin` issues invitations without reviewing the ledger; the checklist steps get re-phrased to read as owner/admin. Cheapest, and consistent with a literal reading of the #8095 ruling.\n- **B. Add `delegated_admin` to the admin-side admission** (one entry in the `positions` domain of `sys_invitation_org_admin`). Gives the issuing grade visibility of what it can issue. Widens the ledger's audience by one role beyond what #8095 ruled, which is why it is not being done unilaterally.\n- **C. Narrower than B** — let a `delegated_admin` see the invitations **they themselves issued** (`inviter_id == current_user.id`), not the whole ledger. Matches the \"scope-bounded issuance\" shape of ADR-0105 D8 more closely than B, at the cost of a third policy.\n\nNo option is being taken here; #8095's PR ships A by default (the status quo of the ruling as written).\n\nFiled from the #8095 implementation. Not assigned.\n"
+}

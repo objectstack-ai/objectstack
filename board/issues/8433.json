@@ -1,0 +1,34 @@
+{
+  "number": 8433,
+  "kind": "issue",
+  "title": "pm-dispatch: 调度策略四项(维护者 2026-08-13)—— 被依赖卡提权标签、bug 提权、紧急卡 fable 直接分诊、跨车道简单依赖直接接手",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-13T12:59:17Z",
+  "updated_at": "2026-08-13T15:38:12Z",
+  "closed_at": "2026-08-13T15:33:19Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8433",
+  "body": "维护者在 skills 席聊中提出四项调度策略意见并指示与 #8428 一起处理(2026-08-13,原话逐字,未翻译):\n\n> 被依赖的卡片是不是应该通过label标注提高优先级。项目经理处理任务清单时,bug 是不是应该提高优先级。\n\n> 对于比较紧急的卡片,是否应该使用 fable 5 子agent直接分诊;如果当前任务依赖其他赛道的任务,如果判断简单,是否可以直接接手而不必持续等待。\n\n> 和我刚才几个意见一起。\n\n## 四项的 PM 解释(skills 席落地口径;维护者可在 PR 评审时逐条否决)\n\n**① 被依赖卡提权标签。** 新标签 `pm:blocking` = 「本 open 卡有 open 的下游依赖者」。⛔ 不手工维护 —— 从卡身 `Blocked-by:` 引用的**反向索引机械推导**(分诊简报已为决策箱指标现算这个索引,写标签只是把算出的结果缓存到列表页可见的地方);分诊轮 sweep 时写入/摘除,依赖者全关即摘。消费查询:排序规则(下条)+ 列表页扫描。种子入 `scripts/pm/ensure-pm-labels.sh`(该文件的既有不变量:每个种子标签必须有具名消费查询)。\n\n**② bug 提权 + 队列全序。** 车道队列取卡顺序成文(现状是 FIFO/自由裁量):`priority:p0` > `pm:blocking` > type `Bug` > 其余按卡龄。理由:p0 是维护者显式裁定;blocking 卡住别的车道的吞吐,一张挡多张;bug 是已坏的不变量,先于增强。\n\n**③ 紧急卡 fable 直接分诊。** 紧急卡(维护者点名、或 p0 嫌疑)⇒ 座位可**立即**起一个 `claude-fable-5` 分诊子代理,不等分诊 Routine 的班次节奏。授权面 = 分诊(定级/路由/标签/分诊评论既有格式),⛔ 不写码不认领。产出落卡上,与 Routine 分诊同格式同效力。\n\n**④ 跨车道简单依赖直接接手。** 本车道卡被他车道卡挡住、且该阻塞项**判断简单**(机械、规格清楚、S 级)⇒ 被挡座位可直接接手做掉,⛔ 不持续等待。纪律不减:在他车道卡上走完整认领(assign + 会话 ID + 分支评论)、尊重该车道热文件串行队、完工后卡上留收单注记。边界:凡带设计判断/语义权衡的,仍归属地车道 —— 本条只覆盖「等一周 vs 做十分钟」的形状。\n\n## 落地位置与约束\n\n- 排序全序与三条新规入 `.claude/skills/pm-dispatch/` 文本:SKILL.md 仅骨架行(⚠️ 686/686 顶格,增行须同 PR 等量抵扣),细则入 `references/`(dispatch-runbook.md 或就近既有节)。\n- `pm:blocking` 种子 + 消费查询具名,改 `scripts/pm/ensure-pm-labels.sh`(先例:该文件 target: 家族的 rider 纪律)。\n- ⛔ 技能文本不引 issue 号(`check:pm-skill-id-lint`);决策帧多副本改动跑 `check:skill-frame-sync`。\n- **热文件区域申报(与 #8428 并行的依据)**:本卡区域 = SKILL.md 队列/分诊/派发节 + references 对应节 + `scripts/pm/ensure-pm-labels.sh`;#8428 区域 = SKILL.md 波次收工点块 + `references/seat-post-protocol.md`。两区不相交。\n- `model: claude-fable-5` 强制(pm-dispatch-edit 卡);ADR-class 三件套:draft PR、⛔ 不自动合并/入队/ready,维护者人工处理。"
+}

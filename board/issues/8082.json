@@ -1,0 +1,35 @@
+{
+  "number": 8082,
+  "kind": "issue",
+  "title": "[Decision] URL-embedded credentials (`user:password@host` in driver `config.url`) remain a live cleartext door after #7990 — refuse at publish, or accept as residual risk?",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "security"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-12T14:48:57Z",
+  "updated_at": "2026-08-13T09:11:03Z",
+  "closed_at": "2026-08-13T09:09:41Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8082",
+  "body": "Escalated from PR #8078's dev report (#7990 comment 5268367568, open question 1) by the `domain:spec` PM seat (session `session_0123k4cam2jEAkPmbJeoaY3r`). On the manual floor: refusing URL userinfo is an accept-set change to a published authoring surface, and the legitimate-DSN-workflow carve-out is a product call.\n\n## Background\n\n#7990's ruled Option A (PR #8078) refuses inline `config.password` / `config.authToken` on all four SQL/NoSQL driver config schemas, diverting authors to the secret binder / `external.credentialsRef`. **Measured during that implementation and pinned as a FACT** (in `driver-credential-refusal.test.ts`, deliberately asserting today's acceptance): `config.url` admits `postgresql://user:password@host/db` on all four drivers, and that URL lands in `sys_metadata` cleartext exactly as `config.password` did. The refused key has a one-syntax-over workaround, and the schema prose even documents the URL's password segment.\n\n## Premise re-check commands\n\n- `git grep -n \"user\\[:password\\]\" origin/main -- packages/spec/src/data/driver/postgres.zod.ts` (the documented URL format)\n- The pinned acceptance test: `git grep -n \"url\" origin/main -- packages/spec/src/data/driver/driver-credential-refusal.test.ts` (post-#8078 merge)\n\n## Question\n\nShould publish-time validation refuse a driver `config.url` carrying userinfo credentials?\n\n## Options\n\n- **A — refuse URL userinfo at publish** (value-level parse on `config.url`; guidance: move the password to the binder / `credentialsRef`, keep the URL credential-free). Closes the workaround loudly. ⚠️ Cost: DSN-style workflows (`OS_DATABASE_URL`-shaped single-string configs) are a common ops pattern; authored-metadata refusal must not break URLs that arrive via **runtime environment** rather than authored metadata — the carve-out line needs your word. Note (measured, #8078): `${…}` placeholders in authored metadata resolve to **nothing** — they reach the client verbatim — so \"put a placeholder in the URL\" is not a working escape today.\n- **B — accept as documented residual risk**: keep the pin, document the door in the security posture docs, revisit if measured in the wild.\n- **C — fold into the services half (#8080-scope)**: scrub userinfo at the write door instead of the contract (value rewriting or refusal at `datasource-admin`), leaving the spec accept-set unchanged.\n\n## Four-lens\n\n1. **实际业务需求** — the door is live and measured on all four drivers; it is the exact sink the maintainer just ruled worth closing, one syntax over. But no in-repo or reported author writes credentials in authored URLs today (census found none), so the pull is preventive, not remedial.\n2. **项目长远合理性** — leaving the workaround open makes the #7990 closure structurally incomplete: the next refused author (or AI) gets steered to the URL form by the refusal itself. A publish-time value check is one rule at the same contract; a write-door scrub (C) is a second, drifting copy of the policy.\n3. **防 AI 写错** — strongest is A: an AI author refused on `config.password` will otherwise \"fix\" the error by moving the secret into the URL — silently succeeding, which is the masked-failure shape this programme exists to kill. The refusal message can teach the correct split (URL without userinfo + ref for the secret).\n4. **创业阶段收缩** — A is bounded (one value-level check shared by four schemas, guidance text reused). Its only real cost is the DSN carve-out decision, which is precisely the part that cannot be a dev default.\n\n## Recommendation\n\n**A**, premised on your ruling of the carve-out: authored metadata refuses URL userinfo; runtime-environment-provided URLs (not authored, never stored in `sys_metadata`) stay out of the contract's reach. If you would rather not spend the carve-out decision now, **B with the pin kept** is honest and cheap — ⛔ not C (a second policy copy at a different layer).\n\nRefs: #7990 (ruling + report), PR #8078 (the pinned fact), #8075 (further census)."
+}

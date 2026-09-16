@@ -1,0 +1,35 @@
+{
+  "number": 8141,
+  "kind": "issue",
+  "title": "The read-only strip still logs a WARN calling the addressed row's own `id` a forged caller write, on every single-record update of a platform object",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-12T17:51:49Z",
+  "updated_at": "2026-08-12T21:51:01Z",
+  "closed_at": "2026-08-12T21:51:01Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8141",
+  "body": "Split out of #8093 rather than fixed there, because the fix is a judgement call about a shared strip helper and #8093's scope fence is the *report* channel.\n\n## What #8093 fixed, and what it left\n\n#8093 stopped `droppedFields` / `onFieldsDropped` naming the row's own primary key on a by-id update: the payload `id` that equals the bound row is the write's **address**, not payload, so it is not a drop. That closed the user-facing amber toast.\n\nThe **log** channel still says the untrue thing. `stripReadonlyFields` (`packages/objectql/src/validation/rule-validator.ts`) is unchanged by that PR — deliberately, since the strip itself must keep removing `id` from the SET clause — and it emits its `readonlyStripWarning` whenever it deletes a key.\n\n## Measured, after #8093's fix\n\nA real `ObjectQL` + a real `ObjectStackProtocolImplementation`, `updateData({ object: 'sys_user_preference', id: 'rec_1', data: { value: ['x'] } })` — a body with no `id` key:\n\n```\ndroppedFields : null            ← #8093's fix, correct\nwarn count    : 1\n  WARN: Field 'id' on 'sys_user_preference' is read-only: the caller-supplied\n        value was DROPPED and the update is being COMMITTED WITHOUT IT — ...\n```\n\nEvery one of those three claims is false for this write. The value was not caller-supplied (`metadata-protocol`'s `updateData` folded the path id in, #6479); nothing the caller wanted was dropped; and the update was not \"committed without\" anything it asked for.\n\n## Why it is worth a card and not a shrug\n\n1. **Volume.** It fires on every single-record `PATCH` of every object declaring `id` as `readonly: true` — which is every platform object. The console's recents trace alone emits one per org switch. This is the log-side version of the exact \"drown the real signal\" cost #8093, #3431 and #3794 were about; `readonlyStripWarning`'s own doc argues it stays at `warn` precisely so real forgery attempts are visible, and this buries them.\n2. **The remedy prose is wrong here.** The message tells the reader to pass `{ context: { isSystem: true } }`. Following that advice for this write would exempt the caller from the static read-only strip entirely — a strictly worse posture, adopted to silence a line that should never have printed.\n\n## What the fix is NOT\n\n⛔ Not \"stop stripping `id`\". The strip must stay: a same-value primary-key write is a harmless no-op on SQL but an outright rejection on stores with immutable primary keys, and #6435's block already ruled that widening the strip to the truthy-scalar `data.id` case \"is a separate decision, not a rider here\".\n\n## Options for whoever takes it\n\n- **A.** Teach `stripReadonlyFields` which key is the write's address (an option alongside `preserveAudit`) and skip only the log line for it. Contained, but adds a parameter to a helper shared by the by-id branch, the multi branch and the insert-side sibling.\n- **B.** Have the by-id branch remove the addressing `id` before the read-only pass, as addressing rather than as a read-only strip — no strip, no warn, no report, one concept in one place. Bigger blast radius: it changes what the driver receives for objects whose `id` is *not* readonly, which is #6435's explicitly separate decision.\n- **C.** Leave it and accept the log noise.\n\nRecommendation from the #8093 lane: **A**, with B filed as the follow-up if the \"addressing is not payload\" idea is worth unifying across both channels.\n\n## Pointers\n\n- `packages/objectql/src/validation/rule-validator.ts` — `stripReadonlyFields`, `readonlyStripWarning`\n- `packages/objectql/src/engine.ts` — `idAddressesThisRow`, the #8093 predicate that already computes \"this `id` is the address\"\n- `packages/spec/src/contracts/data-engine.ts` — `WriteObservabilityOptions`, where #8093 wrote the invariant down\n\nFiled unassigned by the #8093 dev lane (seat #6019, `domain:engine-core`).\n"
+}

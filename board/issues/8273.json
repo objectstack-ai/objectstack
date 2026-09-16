@@ -1,0 +1,35 @@
+{
+  "number": 8273,
+  "kind": "issue",
+  "title": "`SETTINGS_CRYPTO_UNAVAILABLE` has no wire spelling — the fail-closed settings refusal answers a generic 500 a client cannot branch on",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:spec"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-13T02:05:46Z",
+  "updated_at": "2026-08-13T11:53:07Z",
+  "closed_at": "2026-08-13T11:52:43Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8273",
+  "body": "Filed by the dev on #8026 as an out-of-scope finding of that card. Unassigned, no `pm:queue` — for triage to grade.\n\nBlocked-by: #8026 (the error class this is about is introduced there).\n\n## The gap\n\n#8026 makes the settings write path fail closed: a declared-encrypted value (`encrypted: true` / manifest `type: 'password'`) is refused with `SettingsCryptoUnavailableError` when nothing able to encrypt it is wired. The class carries `code = 'SETTINGS_CRYPTO_UNAVAILABLE'`, and that code is **in-process only**.\n\n`settings-routes.ts` does not map it, so over REST the refusal takes the same `500` / `INTERNAL_ERROR` arm every unmapped service error takes. The full actionable message is carried, so an operator reading logs is fine — but a client (the Setup UI is the consumer) cannot distinguish \"the deployment cannot encrypt secrets, reconfigure it\" from \"the server crashed\", and so cannot render the one thing an admin needs to see.\n\nEvery other settings error class has a registered wire code and a dedicated status: `SETTINGS_LOCKED` 409, `SETTINGS_UNKNOWN_KEY` 400, `SETTINGS_VALIDATION` 400, `SETTINGS_FORBIDDEN` 403, `UNKNOWN_NAMESPACE` 404. This one is the odd one out.\n\n## Why it was left out of #8026\n\nNot an oversight — a scope boundary. A dedicated wire code must first be registered in `ERROR_CODE_LEDGER` (`packages/spec/src/api/error-code-ledger.zod.ts`), because `ApiErrorSchema.code` validates against the closed `StandardErrorCode` union the ledger, and emitting an unregistered code is precisely the silent fourth state ADR-0112 forbids. #8026's dispatch excluded `packages/spec/src/**`, so the honest in-scope choice was to leave the refusal on the generic arm rather than put an unregistered code on the wire.\n\n## What the fix looks like\n\n1. Register `SETTINGS_CRYPTO_UNAVAILABLE` in `ERROR_CODE_LEDGER` under `@objectstack/service-settings`, next to the other `SETTINGS_*` rows.\n2. Map it in `settings-routes.ts`'s PUT handler.\n3. Decide the status. Worth an actual decision rather than a default: 500 says \"server fault\", which is true and matches today's behaviour; 503 says \"temporarily unavailable\", which invites a client retry that will fail forever until an operator wires a provider. My weak preference is 500 with the specific code (the code carries the meaning, the status stays honest), but this is exactly the kind of call that should be made once, in the open.\n4. Pin it: a refusal test asserting both `code` and `status` on the envelope already exists in `settings-crypto-fail-closed.test.ts` and would be re-pointed.\n\n## Severity\n\nLow. Nothing is unsafe; the refusal already holds and its message already carries the fix. This is about whether a client can act on it programmatically.\n"
+}

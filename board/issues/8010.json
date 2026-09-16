@@ -1,0 +1,36 @@
+{
+  "number": 8010,
+  "kind": "issue",
+  "title": "spec: `ListView.exportOptions` is typed as a bare array, but the only renderer reads `exportOptions.formats`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:spec",
+    "priority:p2"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-12T11:16:06Z",
+  "updated_at": "2026-08-13T06:09:56Z",
+  "closed_at": "2026-08-13T06:09:29Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8010",
+  "body": "Reported from an app project (`steedos-labs/os-project-titanwind-ehr#1161`) on `@objectstack/*@17.0.0-rc.6`.\n\n## The divergence\n\n`@objectstack/spec` types a list view's `exportOptions` as a **bare array**:\n\n```ts\n// packages/spec/src/ui/view.zod.ts:1438\nexportOptions: z.array(z.enum(['csv', 'xlsx', 'pdf', 'json'])).optional()\n  .describe('Available export format options'),\n```\n\nThe only renderer of that property reads an **object** and looks for `.formats`:\n\n```ts\n// objectui/packages/plugin-grid/src/ObjectGrid.tsx:1394\nconst declared = schema.exportOptions?.formats || ['csv', 'json'];\n```\n\n`objectui/packages/types/src/objectql.ts:785` declares the object shape\n(`{ formats?, maxRecords?, includeHeaders?, fileNamePrefix? }`) under the comment\n*\"Aligned with `@objectstack/spec` ListViewSchema.exportOptions\"* — that comment is\nfalse today; the two shapes have never matched.\n\n## Consequence for app projects\n\nA project that follows the **published spec type** writes `exportOptions: ['xlsx']`.\nAt render time `['xlsx'].formats` is `undefined`, so ObjectGrid falls back to\n`['csv', 'json']` and XLSX never appears in the export menu. Writing the object form\nthat Console actually reads makes the metadata fail its own `@objectstack/spec` type\ncheck. **There is no declaration that is both type-legal and functional**, which is\nwhat the reporting project hit.\n\n## Second defect on the same property: the dead `'pdf'` member\n\nThe spec enum still admits `'pdf'`, but PDF export was closed **NOT_PLANNED** as\n`objectstack-ai/objectstack#1301`, and ObjectGrid drops unsupported formats with only a\nruntime `console.warn` (`ObjectGrid.tsx:1403-1409`). So `exportOptions: ['xlsx','pdf']`\ntype-checks, passes `validate`, passes `tsc`, and silently renders a menu without PDF —\nthe app author's only signal is a browser console line they may never see.\n\n## Repro\n\n1. Declare `exportOptions: ['xlsx', 'pdf']` on any object list view (spec-legal form).\n2. Grant `allowExport`.\n3. Open the list's export menu → only CSV and JSON, no XLSX, no PDF, no build/validate diagnostic.\n\n## What we're asking for\n\n1. **Pick one shape and make it the contract.** Either spec adopts the object form\n   Console implements (with array-form normalization for back-compat), or Console is\n   fixed to read the array the spec publishes. Whichever side moves, the false\n   \"Aligned with @objectstack/spec\" comment at `objectui/packages/types/src/objectql.ts:785`\n   must be corrected in the same change.\n2. **Resolve `'pdf'`.** Given `objectstack#1301` is NOT_PLANNED, the spec enum should\n   drop `'pdf'` (a breaking-but-honest narrowing), or a declared-but-unrenderable format\n   should surface as a validate-time diagnostic rather than a runtime `console.warn`.\n\n## Business impact at the reporting project\n\nThe customer spec (§7.7) promises \"download/print supports PDF/Excel export\". Both halves\nare currently blocked platform-side: XLSX by the contract mismatch above, PDF by\n`objectstack#1301`.\n\n## Related\n\n- Console-side twin: the list toolbar Print button — objectstack-ai/objectui#4462\n- `objectstack-ai/objectstack#1301` — print / PDF export, closed NOT_PLANNED\n- Project-side evidence: https://github.com/steedos-labs/os-project-titanwind-ehr/issues/1161#issuecomment-5265108797\n"
+}

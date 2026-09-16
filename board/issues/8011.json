@@ -1,0 +1,34 @@
+{
+  "number": 8011,
+  "kind": "issue",
+  "title": "[security] verify the unverified \"hashed / encrypted at rest\" claims on `sys_scim_provider.scim_token` and `sys_oauth_application.client_secret` — both are plain `Field.text` and API-readable",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "security"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-12T11:16:07Z",
+  "updated_at": "2026-08-13T12:06:44Z",
+  "closed_at": "2026-08-13T12:06:44Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8011",
+  "body": "Filed by the `domain:services` PM seat from the #7902 credential-persistence survey (report: comment 5264546868). Unassigned, no `pm:queue`, **no `domain:*`**. For triage to grade and route.\n\n**This is a verification card, not a defect card.** It may correctly close as **no-change**. It exists because two shipped surfaces *assert* a protection that the survey could not confirm from the storage side, and an unverified security claim is worth exactly one measurement.\n\n## The two claims\n\n| # | Object · column | What it declares | What the storage side shows | Evidence |\n|---|---|---|---|---|\n| ②-c | `sys_scim_provider.scim_token` | field label says **\"(hash)\"** | plain `Field.text`, in field group `Secret`, `apiMethods: ['list']` | `sys-scim-provider.object.ts:107-114` |\n| ②-d | `sys_oauth_application.client_secret` | description *claims* **\"hashed/encrypted at rest\"** | plain `Field.text` | `sys-oauth-application.object.ts:300-306` |\n\nIn both cases **better-auth owns the write**, so the protection — if it exists — happens upstream of the column and is invisible to a survey that reads declarations. The survey deliberately recorded these as **unverified rather than clean**, which is the correct call and the reason this card exists.\n\n## The measurement this card is asking for\n\nFor each of the two, answer one question with evidence:\n\n> **Does the value that actually lands in the column come out of a one-way hash / an encryption step — or is the declaration describing an intention that the write path does not perform?**\n\nConcretely: follow better-auth's write path for each column and read what it stores; or write one through the real stack and read the row back. **A round-trip that reproduces the stored value from the plaintext proves it is not hashed.**\n\nThen one of two outcomes:\n\n- **Claims hold** ⇒ close as no-change, and (cheaply) make the declaration cite *where* the hashing happens so the next survey does not re-open this. A claim that is true but unciteable will be re-measured by every future audit.\n- **Claims are false** ⇒ this **re-grades to P1** and joins the ①/② family: a token/secret sitting in cleartext behind a description that says otherwise is strictly worse than one that is honestly plain, because it silences exactly the review that would have caught it.\n\n## Why the \"(hash)\" label is not itself evidence\n\nThe survey's structural finding is that **declarations near a credential are not load-bearing** unless something enforces them. Two data points from the same sweep:\n\n- `datasource-admin-service.ts:179` carries a **\"credential-stripped\" comment** — reverse-checked, and no scrub of `config` exists anywhere in that package (this became #7990's ①-c).\n- `sys_api_key.key` took a real mechanism instead of a claim: `internal: true`, so `omitInternalFields` **omits** it (#7728). Neither of the two columns here carries that flag.\n\nSo the question is not whether the label is *plausible* — it is whether anything makes it *true*.\n\n## Explicitly NOT claimed\n\n- **No leak is asserted.** If the claims hold, both surfaces are fine, and that is a likely outcome.\n- **No accusation about better-auth.** It may well hash both; the point is that this repo currently cannot show it, and both columns are API-reachable if it doesn't.\n- **Not an ADR-0100 case** — `Field.password()` has zero occurrences repo-wide.\n\n## Routing note — why no `domain:*`\n\nBoth columns are declared in `packages/platform-objects` (**`domain:metadata`**), the write paths are better-auth under `plugin-auth` (**`domain:identity`**), and any remediation could land in either. The measurement itself is lane-neutral. Flagged rather than guessed.\n\n## Evidence\n\nMeasured 2026-08-12 by the dev on #7902 (read-only survey, `pr: null`), which recorded both as **unverified** rather than clean. Full verdict table in comment 5264546868 on #7902.\n\n## Source\n\nSplit out of objectstack-ai/objectstack#7902 (survey items ②-c and ②-d, packed as one card because they are one question asked twice). Siblings: #7986, #7987, #7990, #8009."
+}

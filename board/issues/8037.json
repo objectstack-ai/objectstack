@@ -1,0 +1,33 @@
+{
+  "number": 8037,
+  "kind": "issue",
+  "title": "Object-extension fold leaks the extension's `label` onto `?layers=true` only — the two reads #7556 reconciled on FIELDS now disagree on LABEL",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "needs-user-decision"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-12T12:59:08Z",
+  "updated_at": "2026-08-13T03:01:34Z",
+  "closed_at": "2026-08-13T01:05:55Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8037",
+  "body": "Found while re-testing #7556 on a baseline that contains its fix. **#7556 / PR #8015 is genuinely fixed — do not revert it.** `GET /meta/object/:name` now serves all three `account.extension.ts` overlay fields, `?layers=true` carries them on both `code` and `effective`, the edit form renders real controls for them, and a `PATCH` round-trip persists. Every acceptance clause of `platform-core.metadata-registry-serving` passes. This is a smaller, adjacent inconsistency the same fold introduces.\n\n## Symptom\n\nOne object, three metadata reads, two different labels:\n\n| read | `label` |\n|---|---|\n| `GET /api/v1/meta/object` (list) | `Account` |\n| `GET /api/v1/meta/object/showcase_account` | `Account` |\n| `GET /api/v1/meta/object/showcase_account?layers=true` → `code.label` / `effective.label` | **`Account (Success Overlay)`** |\n\nReproduced 3/3 on baseline `279ee48a` (`git merge-base --is-ancestor e3c8ed0f8675 HEAD` → in build).\n\n## Mechanism\n\n`examples/app-showcase/src/data/extensions/account.extension.ts:15` declares a label alongside its additive fields:\n\n```ts\nexport const AccountExtension = defineObjectExtension({\n  label: 'Account (Success Overlay)',\n  ...\n  priority: 210,\n});\n```\n\n`mergeObjectDefinitions` (`packages/objectql/src/registry.ts:137-140`) merges fields/validations/indexes **additively** but overrides the scalars **last-writer-wins**:\n\n```ts\n// Override scalar props (last writer wins)\nif (extension.label !== undefined) merged.label = extension.label;\nif (extension.pluralLabel !== undefined) merged.pluralLabel = extension.pluralLabel;\nif (extension.description !== undefined) merged.description = extension.description;\n```\n\nBefore #8015 the `code` layer served the raw `MetadataService` body straight from the artifact (`objects.showcase_account.label = 'Account'`, 12 fields) and never went through the fold, so the overlay label had nowhere to surface. Now the fold runs on that layer — which is exactly what fixed the fields — and it carries the scalar override with it, while the list and by-name reads still report the base label.\n\n## Why the existing pins can't see it\n\nBoth agreement pins added with the fix compare **field names only** — `packages/rest/src/meta-object-extension-agreement.test.ts` and `packages/qa/dogfood/test/showcase-object-extension-meta-read.dogfood.test.ts` reconcile via `fieldNamesOf`. Both are green (6/6 and 5/5 on this baseline). A scalar divergence is structurally outside what they assert.\n\n## Reproduction\n\n1. Boot the showcase: `node packages/cli/bin/run.js dev -a dist/objectstack.json --seed-admin -d file:/tmp/x.db -p <port>`\n2. Sign in as `admin@objectos.ai` (`Origin: http://localhost:<port>`), take the bearer from `set-auth-token`.\n3. `GET /api/v1/meta/object/showcase_account` → `item.label` is `Account`.\n4. `GET /api/v1/meta/object/showcase_account?layers=true` → `code.label` and `effective.label` are `Account (Success Overlay)`.\n\n**Expected** one object, one label, on every read. **Actual** the layered read disagrees with the other two.\n\n## Which side is right is a decision, not a given\n\nBoth readings are defensible and the fix should pick one deliberately:\n\n- **The overlay label should win everywhere** — `defineObjectExtension` accepts `label`, `mergeObjectDefinitions` documents last-writer-wins, and priority 210 says the extension outranks the base. Then the list and by-name reads are the ones under-reporting.\n- **The base label should win everywhere** — an *additive* overlay arguably has no business renaming the object it extends, and the showcase's `(Success Overlay)` suffix is a fixture affordance, not a product intent. Then the fold should not carry scalars, or `defineObjectExtension` should refuse a `label`.\n\nWhichever way it goes, the gate that keeps it from drifting again is extending the two agreement pins past `fieldNamesOf` to the scalar triple (`label`, `pluralLabel`, `description`) across all three reads.\n\n## Scope\n\nExtension-independent objects are unaffected: across all 96 registered objects, no object other than `showcase_account` gains an extension field, and `showcase_task` (unextended) serves 24 fields with none of the overlay fields. The fold is also not double-applying — `validations` stayed at 5 with zero duplicates across three consecutive reads, so the non-idempotency PR #8015 warns about is not firing here.\n\n## Source\n\nExtracted from the checklist retest of `platform-core.metadata-registry-serving` (framework `279ee48a`, console `6314e87f2d49`).\n"
+}

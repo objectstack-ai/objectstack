@@ -1,0 +1,35 @@
+{
+  "number": 8233,
+  "kind": "issue",
+  "title": "[queue-blocker] federated-phantom-share-grant.dogfood.test.ts:311 fails in the merge queue (expected SHARING_NOT_ENABLED, received undefined) — #8209's new pin, green on PR CI",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-12T21:32:23Z",
+  "updated_at": "2026-08-12T22:17:08Z",
+  "closed_at": "2026-08-12T22:17:08Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8233",
+  "body": "**队列阻塞。本 lane 落进 `main` 的测试正在红掉其他 PR 的队列构建。** 由 `domain:identity` 执行席位 #6022 开出并自领(session `session_01PEVB6w7D7uCszR9Mw1BL73`)——不是 finding,是本 lane 自己造成的活体故障,不走定级通道。\n\n## 症状\n\n队列构建 [31641477795](https://github.com/objectstack-ai/objectstack/actions/runs/31641477795)(承载 PR #8217)红在:\n\n```\nFAIL  test/federated-phantom-share-grant.dogfood.test.ts\n  > [#8119] federated phantom anchor: single-record gates + share posture\n\nExpected: \"SHARING_NOT_ENABLED\"\nReceived: undefined\n  ❯ test/federated-phantom-share-grant.dogfood.test.ts:311:25\n```\n\n`Dogfood Regression Gate (3/3)`,步骤 `Boot example apps and exercise real user flows`。\n\n## 为什么这不是 #8217 的问题\n\n#8217 是 **docs-only**:一个文件、一行,`content/docs/kernel/runtime-services/sharing-service.mdx`。它在结构上不可能改变 `plugin-sharing` 的守卫行为。\n\n⚠️ **它在 PR 侧 CI 上没被抓到,是因为队列跑全量而 PR 侧只跑 affected 子集** —— 一个只改 `.mdx` 的 PR 不会触发 dogfood 套件。所以这个测试在 #8217 的 24 个 job 里**一次都没运行过**。\n\n## 为什么这比\"某个 PR 排队失败\"严重\n\n该测试由 **PR #8209(`Part of #8119`)** 于 20:4x 合并进 `main`,当时其 PR 侧 CI 全绿(26 job)。它现在在 `main` 上,**每一个进入队列的 PR 都会跑到它**。在弄清楚之前重排只会再烧一轮全队列 —— 队列分诊评论自己也这么写。\n\n## 关键线索:`undefined`,不是\"错的码\"\n\n断言拿到的是 **`undefined`**,不是另一个错误码。这指向**守卫根本没有触发、请求成功了**,而不是\"拒绝了但错误信封变了\"。这两者是不同的病:\n\n- 若是**守卫未触发** ⇒ `main` 上存在一个 #8209 的 PR 构建里不存在的行为差异 ⇒ 这是**真回归**,而且是安全向的(该守卫的作用是拒绝一个任何裁决都查不到的 `sys_record_share` 行,#8209 实测过修复前它会返回 **201 Created**)。\n- 若是**测试不稳定**(顺序依赖、共享状态、boot 时序)⇒ 需要隔离或修测试。\n\n⛔ **不要先假设是 flaky。** #8209 的 dev 实测过:修复前 `grant()` 会成功铸出一行真的 `sys_record_share`,HTTP 201。如果队列里真的又变回 201,那不是测试的问题。\n\n## 调查次序(先证,再修)\n\n1. **在当前 `main` 上直接跑这个测试文件**,不带任何 PR。绿 ⇒ 与队列环境/顺序有关;红 ⇒ `main` 上就是坏的,与队列无关。\n2. **若 `main` 上绿而队列红**:查它在全量套件里的顺序依赖 —— 该文件是 `isolated` 标记的(日志里有 `isolated` 标签),确认隔离是否真的生效,以及同分片里是否有别的测试留下了状态。\n3. **若 `main` 上就红**:比对 #8209 的 PR 构建 base(`6b702480f`)与当前 `main` 之间落地的提交,找出改变了该守卫可达性的那一个。⚠️ 候选之一是 **#8198**(`a5dcb74eb`,cross-field `$field` 拒绝不再报出列名)—— 它改了拒绝信封的形状,而本测试断言的正是一个错误码。**这只是候选,不是结论,必须实测确认。**\n4. 读 `:311` 那一处断言本身,确认它读的是哪个字段(`error.code` / `code` / 别的),以及 #8209 之后是否有东西改了那个字段的位置。\n\n## 判据\n\n- 修复后,该测试必须在**全量套件**里绿,而不只是单文件跑绿 —— 这正是它逃过 PR 侧 CI 的那条缝。\n- ⛔ 不许通过放宽断言(改成\"抛了就行\"、或接受 `undefined`)让它变绿。#8209 的整个价值在于**区分\"拒绝了\"与\"从未求值\"**,而 `undefined` 恰恰是后者的样子。放宽它等于把这张卡撤销。\n- 若结论是 flaky,隔离/修复要说明**是什么状态泄漏**,不接受\"加了重试就好了\"。\n\nRefs: #8119(母卡)、#8209(引入该测试的 PR)、#8217(被它挡住的 docs-only PR)、#8198(信封改动候选)。"
+}

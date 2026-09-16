@@ -1,0 +1,35 @@
+{
+  "number": 8289,
+  "kind": "issue",
+  "title": "organization/remove-member answers a permission denial with 400 \"cannot leave as the only owner\" — wrong status, wrong reason, false even with two owners",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-13T03:31:08Z",
+  "updated_at": "2026-08-13T05:24:17Z",
+  "closed_at": "2026-08-13T05:24:17Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8289",
+  "body": "When a caller without permission calls `POST /api/v1/auth/organization/remove-member`, the request is correctly refused — but the response is:\n\n```\n400 {\"message\":\"You cannot leave the organization as the only owner\",\n     \"code\":\"YOU_CANNOT_LEAVE_THE_ORGANIZATION_AS_THE_ONLY_OWNER\"}\n```\n\nThe caller is not leaving, is not an owner, and — as shown below — the organization does not have only one owner. Every clause of that message is false. The actual reason is \"you are a `member`, you may not remove people\".\n\n**No security hole:** the removal genuinely does not happen (member list unchanged after the attempt). This is about the response being wrong and actively misleading.\n\n## Measured\n\nFixture: workspace with owner `lisi`, plain member `zhangsan` (the caller).\n\n**1. Member tries to remove the owner**\n\n```\nactor: { email: lisi→zhangsan, role: \"member\" }\nPOST organization/remove-member { memberIdOrEmail: \"lisi@…\" }\n→ 400 YOU_CANNOT_LEAVE_THE_ORGANIZATION_AS_THE_ONLY_OWNER\n```\n\n**2. Add a second owner, so \"only owner\" is now factually false, and retry**\n\n```\nmembers: [owner:lisi@…, owner:outsider@…, member:zhangsan@…]\nactor role: \"member\"\nPOST organization/remove-member { memberIdOrEmail: \"outsider@…\" }\n→ 400 YOU_CANNOT_LEAVE_THE_ORGANIZATION_AS_THE_ONLY_OWNER\nmembers after: unchanged (all three) ✅ refusal is real\n```\n\nTwo owners exist and the target is not the caller, yet the same \"only owner\" refusal comes back.\n\n**3. The sibling endpoint gets it right**\n\n```\nPOST organization/update-member-role { memberId: <owner>, role: \"member\" }   as the same member\n→ 403 YOU_ARE_NOT_ALLOWED_TO_UPDATE_THIS_MEMBER      ← correct code, correct reason\n```\n\n`organization/update`, `organization/delete` and `organization/invite-member` likewise return proper `403 YOU_ARE_NOT_ALLOWED_TO_*` for the same actor. `remove-member` is the odd one out.\n\n**4. The legitimate paths work fine, so this is not a functional defect**\n\n```\nas OWNER: remove the other owner  → 200, members: [owner:lisi, member:zhangsan]\nas OWNER: remove the member       → 200, members: [owner:lisi]\n```\n\n## Expected\n\n`403` with a `YOU_ARE_NOT_ALLOWED_TO_REMOVE_THIS_MEMBER`-style code, matching the rest of the organization API. The only-owner guard should fire only when it is actually true — i.e. on the self-removal / leave path of a sole owner.\n\nLikely shape of the bug: the permission branch falls through into the leave/last-owner guard instead of returning its own denial, so the last-owner check answers for a question it was never asked.\n\n## Why it matters beyond tidiness\n\n- A client cannot distinguish \"you lack permission\" from \"business rule blocks this\", so it cannot decide whether to hide the action or to surface a retry.\n- It is a `400` where every sibling denial is a `403`, so generic auth-error handling misses it.\n- Combined with #8092 (the console shows **Remove member** to plain members, including on the owner's row), the end-user experience is: click a button you should not have, and be told you cannot leave an organization you were not leaving.\n\n## Environment\n\n`objectos-ee-deploy` (Caddy → app → postgres:16, `NODE_ENV=production`, `OS_TENANCY_POSTURE=isolated`) on `http://localhost:8080`, observed 2026-08-13. Probed via the REST API with real sessions; a throwaway workspace was used so the owner-removal paths could be exercised safely.\n\nRelated: #8092 (the UI affordance that leads a member here).\n"
+}

@@ -1,0 +1,34 @@
+{
+  "number": 8389,
+  "kind": "issue",
+  "title": "serve.ts's cloud-less branch still mounts no RuntimeConfigPlugin — the air-gapped runtime's working install-local route stays undiscoverable by the Console",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-13T10:51:22Z",
+  "updated_at": "2026-08-13T13:29:52Z",
+  "closed_at": "2026-08-13T13:28:49Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8389",
+  "body": "Found while fixing #8356. Filed rather than fixed: that card's file surface is `packages/cloud-connection`, and this is a change to the CLI wiring block in `packages/cli/src/commands/serve.ts`.\n\n`Serve`'s marketplace wiring has two arms. The cloud arm mounts the proxy, install-local, cloud-connection and `RuntimeConfigPlugin`. The `offlineInstallLocal` arm (added by #8343, `OS_CLOUD_URL=off`) mounts install-local **alone**:\n\n```ts\n} else if (wiring.offlineInstallLocal) {\n  // Cloud explicitly disabled -> mount the OFFLINE half only.\n  await kernel.use(new MarketplaceInstallLocalPlugin({ controlPlaneUrl: Serve.OFFLINE_CONTROL_PLANE }));\n  trackPlugin('MarketplaceInstallLocal');\n}\n```\n\nSo an air-gapped runtime now has a **working** `/api/v1/marketplace/install-local` route and serves **no** `/api/v1/runtime/config` at all — the Console has no way to learn the route is there, and renders no install affordance for a capability that works. #8343 calls this out directly: \"a cloud-less framework runtime currently has a working install-local route that the Console cannot discover.\"\n\n## Why it was left that way, and why that reason is now gone\n\n#8343 could not mount `RuntimeConfigPlugin` in this arm because the plugin hardcoded `features.marketplace: true`: reporting install-local truthfully would have cost a false browse claim, \"trading the reported bug for its mirror image\" (#8356's words).\n\n#8356 removes that constraint. `features.marketplace` is now derived from the route table of the app serving the response, so mounting `RuntimeConfigPlugin` on a runtime with no proxy reports `marketplace: false` on its own — no knob, nothing for the wiring to remember. Mounting it in this arm is now safe and is what completes #8343's user-visible outcome.\n\n## Suggested change\n\nMount `RuntimeConfigPlugin` in the `offlineInstallLocal` arm with the same shape the cloud arm uses (`controlPlaneUrl: ''`, `singleEnvironment: true`, `installLocal: true`), and pin it: an `OS_CLOUD_URL=off` boot serves `/api/v1/runtime/config` reporting `installLocal: true` **and** `marketplace: false`.\n\nWorth checking while there: the cloud arm's `RuntimeConfigPlugin` and this one would be two `kernel.use` calls keyed by the same plugin name, so the same \"a host that wires its own keeps it\" presence reasoning the install-local mount already documents in this block should apply here too.\n\nBlocked-by: #8356 (the derivation must land first, or this arm re-introduces the false browse claim on exactly the deployment #8343 was filed against).\n\nBacklink: #8343, #8356.\n"
+}

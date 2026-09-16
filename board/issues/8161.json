@@ -1,0 +1,36 @@
+{
+  "number": 8161,
+  "kind": "issue",
+  "title": "[governance] `ADR maintainer approval` is unsatisfiable on any PR the maintainer authored — GitHub forbids self-approval, so the gate is permanently red exactly when the human IS driving",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:devx",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-12T18:21:01Z",
+  "updated_at": "2026-08-13T03:11:45Z",
+  "closed_at": "2026-08-13T03:11:45Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8161",
+  "body": "Filed by the `domain:devx` PM seat (#6023) after the maintainer stated in session on 2026-08-12 ~18:2xZ that they judge the #7960 blockage to be a **CI-rule** defect rather than a PR defect. Measured on `origin/main`; #8012 anticipated this (\"probably wants its own card once graded\") and this is that card. Unassigned — recording only.\n\n## The deadlock, mechanically\n\n`scripts/check-adr-merge-approval.mjs` has exactly one pass condition. From `decide()`:\n\n- `latestMaintainerReviewState(reviews)` walks the PR's reviews, keeps only those whose author matches `MAINTAINER_APPROVERS` **by numeric account id**, keeps only the state-setting kinds (`APPROVED` / `CHANGES_REQUESTED` / `DISMISSED`), and returns the last one;\n- the gate returns `ok: true` **only** when that value is `APPROVED`. There is no other exit that passes.\n\n`scripts/check-adr-merge-approval.mjs:101`:\n\n```js\nexport const MAINTAINER_APPROVERS = [{ login: 'hotlong', id: 50353452 }];\n```\n\nOne entry. And `scripts/check-required-contexts.mjs:194` records that `ADR maintainer approval` is a **required** context, put there deliberately after #6942/#6962 landed while it sat outside the required set.\n\nNow compose that with a GitHub platform rule: **an account cannot submit a review on a pull request it authored.** So for any PR whose `user.login` is `hotlong`:\n\n- the only account whose approval the gate accepts is the one account GitHub will not let approve;\n- therefore `latestMaintainerReviewState` can never return `APPROVED`;\n- therefore a **required** context is **permanently red**;\n- therefore the PR cannot be merged through the normal path, or enter the merge queue, no matter what anyone does on it.\n\nLive instance: **PR #7960** (ADR-0001 tombstone, #7866). `user.login` is `hotlong`. The maintainer has marked it ready, has armed auto-merge, and reports that nothing they try lands it. That is not a misuse — it is the only possible outcome of the rule as written.\n\n## Why this is a rule defect and not \"the gate doing its job\"\n\nThe ruling the gate implements (#6741) is *「adr 只能由维护者自己确认，人工合并，ai 不得擅自合并。」* The gate does not measure that. It measures a **proxy**: \"an APPROVED review exists from account 50353452\". The proxy was sound only while maintainer-account ≠ author-account — historically true, because ADR PRs were authored by `os-zhuang` / `os-help` / `os-project-manager`. Cloud dev sessions in this environment now author under `hotlong`, so the proxy's premise is gone.\n\n⚠️ **The proxy is not merely broken — it is inverted.** Under the current single shared identity:\n\n| case | what the gate should do | what it does |\n|---|---|---|\n| PR authored by `hotlong` (the human is the one driving it) | pass once the human confirms | **can never pass** — self-approval is impossible |\n| PR authored by some other account, with an AI seat holding the `hotlong` credential | refuse — an AI must not confirm on the maintainer's behalf | **passes** — the seat can submit the approving review itself |\n\nSo the gate is closed on the case it was meant to admit and open on the case it was meant to stop. #8012 recorded the second row already; this card is the first. Both rows have one root cause: **the human maintainer and the agent fleet are the same GitHub account**, and an account-identity gate is not implementable under that condition.\n\n## Shapes a fix could take — not choosing, this is a governance surface\n\n**1. Fix the identity (closes both rows, and #8012 with them).** Give the agent fleet its own GitHub account; reserve `hotlong` for the human. Then ADR PRs are authored by the bot, the human's approval is both possible and meaningful, and the existing gate becomes correct as written with no code change. Highest cost (org/token work, outside CI), and the only shape that restores the gate's guarantee rather than re-routing around it.\n\n**2. Admit a second maintainer signal that self-approval does not block.** Keep the approval path; additionally pass when the PR author is a maintainer **and** a maintainer comment carries an explicit confirmation token **pinned to the head SHA** (e.g. a literal marker plus `ac278e6`). The SHA pin is load-bearing: an unpinned token survives a force-push and would confirm code nobody looked at. Under shared credentials this adds no real assurance — but it takes none away either, since row 2 shows the approval path is already reachable by a seat. Cheapest unblock; ⚠️ it also makes the gate satisfiable by an AI seat *by design* rather than by accident, which should be stated out loud rather than discovered later.\n\n**3. Ruleset-side bypass for this one PR.** Not a fix — the next ADR PR authored by a session lands in the identical hole. Listed only so it is not mistaken for one.\n\n⛔ **What must not be done, and why it is the tempting one:** \"the PR author is a maintainer ⇒ pass\". Every session-authored ADR PR is authored by `hotlong`, so that predicate is true on precisely the population the gate exists to catch. It would weld the gate permanently open while still reporting green. Naming it because it is the one-line change an implementer will reach for first.\n\n## Establishment\n\n- Gate logic read at `origin/main`, not from memory: `MAINTAINER_APPROVERS` at `:101`, `isMaintainer` at `:123` (id-first comparison), `latestMaintainerReviewState` at `:140`, the single `ok: true` return at `:190`.\n- Required-context status read from `scripts/check-required-contexts.mjs:194`.\n- `.github/workflows/adr-merge-approval.yml` triggers on `pull_request`, `pull_request_review: [submitted, edited, dismissed]` and `merge_group` — so the gate does re-run on an approval; the re-run is not the missing piece.\n- PR #7960 state read by fresh fetch: open, not draft, not merged, not enqueued, head `ac278e6`, author `hotlong`, `ADR maintainer approval` red.\n- ⛔ No action taken on #7960 by this seat, and none will be: ADR-class PRs are not AI-merged, AI-enqueued or AI-auto-merged (#6741). Auto-merge is currently armed there by `hotlong` and was left alone as the maintainer's own disposition — it is inert regardless, since the required context cannot go green."
+}

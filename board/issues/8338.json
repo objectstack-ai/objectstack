@@ -1,0 +1,35 @@
+{
+  "number": 8338,
+  "kind": "pull_request",
+  "title": "METADATA_CREATE_SEEDS.object authors its OWD explicitly (sharingModel: 'private') — #7891 blocker A",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-13T06:16:17Z",
+  "updated_at": "2026-08-13T06:51:16Z",
+  "closed_at": "2026-08-13T06:51:15Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-08-13T06:51:15Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/8338",
+  "body": "Fixes #8308\n\nBlocker A of the #7891 programme (`validateSecurityPosture` onto the runtime publish surface, #4001 pattern): the platform's own minimal create body for `object` carried no org-wide default, so declaring `object` in `runtimeTypes` would make `security-owd-unset` refuse the platform's own create path. This PR repairs the authoritative create body and its test fallout. It does NOT flip the registration — that is #8310, blocked on this and #8309.\n\n## The judgment call — resolved as the mechanical repair, with the measured default\n\nThe dispatch's escalation clause asked whether authoring a `sharingModel` in the seed is a product fork (changing what a tenant's default sharing IS) or a mechanical repair (making an existing default explicit). Measured, not inferred: `effectiveSharingModel` (`packages/plugins/plugin-sharing/src/sharing-service.ts`) resolves a custom object (not `sys_*`, not `isSystem`) with `sharingModel == null` to **`private`** — the ADR-0090 D1 fail-closed default; `ObjectSchema`'s own `.describe()` documents the same (\"A CUSTOM object that omits this resolves to private at runtime\"). Seeding `sharingModel: 'private'` therefore changes no tenant's effective sharing — it makes the operative default an authored decision, which is exactly what `security-owd-unset` exists to demand (the leave_request incident class). No product fork; no `needs_decision`.\n\n## Changes\n\n- **`packages/spec/src/kernel/metadata-create-seeds.ts`** — `METADATA_CREATE_SEEDS.object` gains `sharingModel: 'private'` with the rationale in place.\n- **10 `@objectstack/metadata-protocol` test files** — every active-state `object` fixture write now authors its OWD, so the suite passes both before and after #8310's flip. Re-measured today at the gate's call site (issue inherited \"26 refusals / 48 tests / 8 files\" from PR #7886): **56 active object writes across 10 files, every one refusable by `security-owd-unset` alone, no other rule id** — the suite grew since #7886's measurement. Each fixture was judged individually; two are refusal pins where an OWD-less body would have swapped the pinned refusal (`NOT_OVERRIDABLE`, package-writability 403s) for the gate's 422 post-flip, and the gate's own \"does not gate an undeclared type\" case now carries a clean body plus a comment handing its re-pin to #8310.\n- **`packages/lint/src/validate-security-posture.runtime-surface.test.ts`** — new pin: the REAL seed (consumed from the registry, not re-spelled) is clean at the gate's mirror; the pre-#8308 OWD-less body stays as the refusal's positive control. The registry entry (`runtimeTypes`) is untouched.\n- **Changeset** (`@objectstack/spec` patch).\n\n## Measurement method (deviation, disclosed)\n\nPR #7886 measured the fallout by flipping `runtimeTypes` and rebuilding. In this session the sandbox's action classifier repeatedly denied rebuilding `packages/lint` with a temporary flip in the tree, so the re-measurement used the gate's exact mirror instead: a temporary (never-committed) recording tap at `saveMetaItem`'s gate call site captured every active-state `object` write (body + live object context + owning test file) across the full metadata-protocol suite, and each record was judged with `validateSecurityPosture` using the identical baseline/candidate set-difference the runtime gate performs (the `wouldGateAdd` construction the runtime-surface test pins against the real `runRuntimeAuthoringRules`). Before the fixture repair: 56 refusable writes / 10 files, all `security-owd-unset`. After: 0. #8310's real flip will re-verify this end to end at registration time.\n\n## Verification\n\n- `@objectstack/spec` full suite: 388 files / 10249 tests green with the repaired seed (includes `metadata-create-seeds.test.ts` schema validation of every seed).\n- `@objectstack/metadata-protocol` full suite green before and after the fixture repair (77 files / 1117 tests).\n- Gate-mirror measurement: 56 → 0 refusable writes (method above).\n- Lint runtime-surface + posture tests: 2 files / 97 tests green. `@objectstack/metadata-core`: 10 files / 162 tests green. Typecheck: spec + lint green (metadata-protocol is DEBT-ledgered, no typecheck script). `check:generated`: all 13 artifacts current. `check:nul-bytes`, `check:cross-package-test-inputs`, `check:spec-parsed-alias`: green.\n\nPart of #7891. #8309 and #8310 remain open; #8310 is not addressed here.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01Euoy6wyfzgiWtgCg4s6JK2)_"
+}

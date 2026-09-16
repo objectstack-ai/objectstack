@@ -1,0 +1,35 @@
+{
+  "number": 8427,
+  "kind": "pull_request",
+  "title": "fix(metadata-protocol): attribute a revert commit to the scope of the commit it reverts",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-13T12:42:23Z",
+  "updated_at": "2026-08-13T13:19:23Z",
+  "closed_at": "2026-08-13T13:19:21Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-13T13:19:21Z",
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/8427",
+  "body": "Fixes #7860\n\n`revertCommit` recorded its compensating commit under the **requesting session's** organization. `packageId` on that same `recordPackageCommit` call is already read off the reverted `row`; the org was the one field still taken from whoever asked. It now reads `row.organization_id ?? null` — the rule #7559 gave this function's **items** (`resolveMetaItemOrgScope`) and #7819 tier 2 gave `duplicatePackage`'s copies, applied to the commit **record** that documents them.\n\nOne functional line. The rest of the `protocol.ts` diff is the comment stating the invariant and the measured numbers.\n\n## The card was NOT filed as a defect — the measurement settled it\n\n#7860 was explicit that the behaviour is self-consistent for the caller who performed the revert, and asked for a measurement before choosing between \"attribute to the request\" and \"attribute to the reverted row\". Run on a real ObjectQL + `SqlDriver` (`better-sqlite3`) through the real publish path, after an org-scoped revert of an env-wide commit:\n\n| reader | before | after |\n|:--|:--|:--|\n| the actor (`org_active`) | `[revert, apply]` | `[revert, apply]` |\n| **a different organization** | **`[apply]`** | `[revert, apply]` |\n| no-org (direct-mount REST) | `[revert, apply]` | `[revert, apply]` |\n\nThe middle row is the fork the card named: a different org could still see the original env-wide publish **with no visible compensation**, which makes this a concrete reporting defect rather than a design question — so the intent question was never mine to pick.\n\nWhat makes it more than cosmetic is the artifact state measured alongside it: `sys_metadata` held **no** row for the reverted view afterwards. Items revert in the **row's** scope (#7559), so the artifact really was withdrawn env-wide — the effect was global while the record was private, and another organization saw an `apply` that was never compensated for an artifact already gone. Since #7814, `rollbackToPackageCommit` **plans** from `listCommits`, so this list is not merely an observability surface.\n\n## The mirror direction, same line\n\nA no-org caller reverting an **org-scoped** commit stamped the revert env-wide, so every other organization read a dangling `Revert: ...` whose `parentCommitId` names a commit that door cannot see. Measured before: `[revert]` for an unrelated org; after: `[]`.\n\nBoth collapse to one invariant: **a revert commit is visible to exactly the readers who can see the commit it reverts.**\n\n## Verification\n\n`packages/runtime/src/package-revert-commit-attribution-org-scope.integration.test.ts` — real engine, real driver (a stubbed `engine.find` cannot see NULL semantics; that is this family's repeated lesson).\n\nAblation, with a rebuild between measurements because these suites resolve `metadata-protocol` through its **`dist`** while stack traces map back to `src`. Direction predicted before running: restoring the request-derived `orgId` should turn the two defect-direction cases plus the raw-row case red and leave the actor/no-org case green. Measured: exactly that — 3 failed, 1 passed, the survivor being the predicted one.\n\n```\nAssertionError: expected [ 'apply' ] to deeply equal [ 'revert', 'apply' ]\n```\n\nRestored byte-identical (empty `git diff HEAD`), rebuilt, re-run green. Sibling #7819 and #7814 suites stay green: 18/18 across the three files. `@objectstack/metadata-protocol` full suite: 1170 passed (80 files).\n\nGates derived from the actual changed paths via `scripts/pm/dispatch-gates.mjs` and run locally — `check:nul-bytes`, `check:changeset-gate-self-tests`, `check:cross-package-test-inputs`, `check:durability-log-level`, `check:filter-alias-parity`, `check:objectui-changeset`, `check:query-options-erasure`, `check:type-check-coverage`, `check-changeset-no-major`: all pass. `check:objectui-pin-fresh` is red, and is red identically on an unmodified checkout — a pre-existing release-time pin chore, not this diff.\n\n## Coordination\n\n#8333 is still open and in flight against this same function. Its `revertCommit` hunk ends at the `catch` block's closing brace; this change is the `orgId` argument roughly three lines below, so the two do not touch the same lines — but they are adjacent enough that whichever lands second may want a look. `origin/main` was merged in at `4827e915d1`: clean, and no merged commit touched `protocol.ts`.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_012WMpuAfA2KSdDjGF6tm1bH)_"
+}

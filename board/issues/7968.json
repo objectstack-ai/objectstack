@@ -1,0 +1,37 @@
+{
+  "number": 7968,
+  "kind": "issue",
+  "title": "finding: `GET /automation/:name/runs/:runId/screen` still discloses record-derived values to any authenticated caller who knows a run id",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "pm:dispatched",
+    "security"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-12T09:05:57Z",
+  "updated_at": "2026-08-12T21:57:48Z",
+  "closed_at": "2026-08-12T21:57:48Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7968",
+  "body": "Observation-class finding, filed **unassigned with no `pm:queue`** — for triage to grade and route. Named residual of #7900 (PR pending), deliberately not decided inside that card because closing it needs a *different* mechanism from the one #7900's maintainer ruling names.\n\n## What #7900 closed, and what it left\n\nThe 2026-08-12 ruling on #7900 converged the `/automation` run-state reads on the `sys_automation_run` object-read grant. `GET /:name/runs/:runId` and `GET /:name/runs` now require it. The ruling also asked for the rest of the domain to be audited against the same rule, with a stated reason for anything that stays authenticated-only.\n\n`GET /:name/runs/:runId/screen` is the one route the audit left authenticated-only, and the reason is on the route in `packages/runtime/src/domains/automation.ts`:\n\n- It is the **end user's** surface, not the operator's. The pause exists because the flow is asking *this* caller to fill a form in; the trigger response already handed them the same `screen` inline, and the route exists so a browser refresh does not lose it. Requiring an operator grant here would refuse the screen to the very person the flow paused for — a breakage, not the narrowing the ruling prices in (\"operator tooling … now needs the grant\").\n- Its **write sibling already answers on a different axis**: `resume` is gated in the engine by the suspension's declared `resumeAuthority` (#3801 / #5561) — a per-run authority model, not an object grant. Read and write on the same pause answering to two unrelated permissions would be the incoherence #7900 exists to remove.\n\n## The residual, measured\n\nThe route is not inert with respect to record data. `AutomationEngine.getSuspendedScreen(runId)` returns `(await this.loadSuspendedRun(runId))?.screen` — the `ScreenSpec` persisted with the suspended run — and that spec is built with values **interpolated against the live flow variables** at suspend time (`packages/services/service-automation/src/builtin/screen-nodes.ts`: `interpolate(cfg.defaults, variables, context)` and, per field, `interpolate(f.defaultValue, variables, context)`).\n\nSo a flow whose screen prefills from the triggering record (`defaultValue: '{record.email}'`, a `defaults` map over `{record.*}`) writes those values into the spec, and the route answers them to **any authenticated caller who knows the run id** — there is no check anywhere on this path that the run belongs to, or was paused for, the caller. Same shape as the #7900 exposure, one route over and a narrower payload: interpolated screen defaults rather than the whole variable map.\n\nNot claimed: that this is a regression (it is true of `origin/main` before #7900 as well), or that it exposes any credential class (the #7900 analysis of connector credentials applies here unchanged).\n\n## What closing it would take\n\nNot the `sys_automation_run` grant — that is the mechanism this route was audited *out* of, for the reasons above. The shape that fits is the one the resume path already has: a **per-run authority read gate**, i.e. \"may this caller see the screen this run is paused on?\", answered from the suspension's own `resumeAuthority` / assignee state rather than from an object permission. That is a design call about the screen-flow runtime (ADR-0019 territory), not an application of the #7900 ruling, which is why it is a separate card.\n\nPossible cheaper interim, if triage wants one before that design lands: scope the route to the run's own trigger identity (`ExecutionLogEntry.trigger.userId`) with the `sys_automation_run` grant as the operator override — narrow, decidable, and it does not refuse the end user. Recorded as an option, not a recommendation; the authority model is the real answer.\n\n## Evidence\n\nMeasured 2026-08-12 while implementing #7900, on `origin/main` base `4b5702a`, reading `packages/runtime/src/domains/automation.ts`, `packages/services/service-automation/src/engine.ts` (`getSuspendedScreen`) and `packages/services/service-automation/src/builtin/screen-nodes.ts`.\n\n## Source\n\nSplit out of objectstack-ai/objectstack#7900 — the implementing dev's named residual, recorded in the route's own comment and in that card's PR audit table."
+}

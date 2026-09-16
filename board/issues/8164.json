@@ -1,0 +1,35 @@
+{
+  "number": 8164,
+  "kind": "issue",
+  "title": "`crm_opportunity_line_item` has no object-level CRUD grant in any app-crm permission set — the platform's own build lint already flags it",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-12T18:26:58Z",
+  "updated_at": "2026-08-12T21:56:49Z",
+  "closed_at": "2026-08-12T21:56:49Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8164",
+  "body": "## What was measured\n\nBuilding `examples/app-crm` (`pnpm --filter '@objectstack/example-crm...' build`)\nemits an author-time warning nothing has acted on:\n\n```\n⚠ object \"crm_opportunity_line_item\": detail object \"crm_opportunity_line_item\"\n  (master_detail \"opportunity\" → \"crm_opportunity\") has no object-level CRUD\n  grant in any permission set. A master-detail child derives its RECORD-level\n  access from the master (ADR-0055 controlled_by_parent), but object-level CRUD\n  is a SEPARATE gate that is never derived — role-bound non-admin users are\n  denied (403) before the parent-derived access is ever consulted (the silent\n  \"can't submit the subtable\" trap).\n  Grant \"crm_opportunity_line_item\" in at least one permission set that already\n  grants its master \"crm_opportunity\" — e.g. permissions[i].objects.crm_opportunity_line_item\n  = { allowRead: true, allowCreate: true, allowEdit: true }.\n  rule: security-master-detail-ungranted  at objects[5].fields.opportunity\n```\n\n`examples/app-crm/src/security/sales-positions.ts` declares the app's only\nnon-guest permission set (`crm_sales_user`) with grants on 5 objects\n(`crm_account`, `crm_contact`, `crm_opportunity`, `crm_lead`, `crm_activity`)\n— `crm_opportunity_line_item` is not among them, even though the object exists\nspecifically to be edited inline on the Opportunity form\n(`inlineEdit: 'grid'`, `crm_opportunity_line_item.object.ts`).\n\nConfirmed live: `objectstack verify --app examples/app-crm/objectstack.config.ts\n--rls` (run against `main` after #8060 bound the app's three positions to\n`crm_sales_user`) shows every position persona `probe-blocked` on exactly this\none object — LIST 403, object gate refuses before record scope is ever\nconsulted — while the other 5 granted objects resolve normally.\n\n## Why this is a real gap, not decoration\n\nThe build's own lint rule (`security-master-detail-ungranted`) names the\nconsequence precisely: any role-bound (non-admin) user — including one holding\n`sales_rep`/`sales_manager`, the positions this app ships to demonstrate\nselling — gets a silent 403 the moment they try to add/edit a product line on\nan Opportunity, despite fully owning the parent record. The example ships\n`inlineEdit: 'grid'` specifically to make line-item editing look like a normal\npart of the Opportunity form; nothing in the UI would explain the resulting\n403 to whoever hits it.\n\n## Suggested fix\n\nAdd `crm_opportunity_line_item` to `crm_sales_user`'s `objects` map in\n`examples/app-crm/src/security/sales-positions.ts`, e.g.\n`{ allowRead: true, allowCreate: true, allowEdit: true, allowDelete: false }`\n— matching the grant shape already used for its parent `crm_opportunity`.\n\n## Not fixed here\n\nFound while implementing #8060 (bind positions → `crm_sales_user`), which was\nscoped to the missing `sys_position_permission_set` join only, per the\ntriage ruling — deliberately not the permission set's own grant contents.\nFiled unassigned, unlabeled for triage.\n"
+}

@@ -1,0 +1,34 @@
+{
+  "number": 7351,
+  "kind": "issue",
+  "title": "[finding] Two more copies of the retired ADR-0094 2026-07-14 overlay direction survive outside `plugin-security` — a dogfood test header and ADR-0094's own D2 cross-reference",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-10T07:45:15Z",
+  "updated_at": "2026-08-13T10:07:17Z",
+  "closed_at": "2026-08-13T10:06:48Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 9,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7351",
+  "body": "Observation-class finding, recorded while implementing #7082 (PR #7346). **Filed unassigned, no `domain:*` label** — routing is the triage seat's call. Prose only; no behaviour is wrong and no assertion is affected.\n\n## Context\n\nADR-0094 **D5-R** (2026-08-09, #6858 / PR #6962) retired the 2026-07-14 direction that \"an env-scope overlay is the platform's standard ADR-0005 customization of a packaged permission set, and deleting the overlay resets the row to the shipped declaration\". #6483 / PR #6608 rolled `permission` back to `allowOrgOverride: false`, so the write 403s; #6960 measures the delete refusing too.\n\n#7082 caught the copy in `permission-set-projection.ts`'s function JSDoc. PR #7346 fixes that one plus four more inside `packages/plugins/plugin-security`. Sweeping the direction's phrasings across the repo (`2026-07-14`, `standard customization`, `standard ADR-0005`, `delete = reset`, `resets the row`, `refuse-the-env-door`) turned up two more **outside** that package, which #7346 deliberately did not widen into.\n\nMeasured on `origin/main` @ `f3f855ac154f202fa9f1497abd3e0dff60436e1a`.\n\n## 1. `packages/qa/dogfood/test/two-doors-permission.dogfood.test.ts:12-17` — the strong one\n\nThe file header states both retired halves verbatim, as current:\n\n```\n//  块2 — the ADMIN door (evolved by ADR-0094, direction 2026-07-14): a\n//        data-plane edit of a package-managed row is TRANSLATED into an\n//        env-scope metadata OVERLAY (the standard ADR-0005 customization) —\n//        the record projects the effective body while the package keeps\n//        owning the row, and \"delete\" resets to the shipped declaration.\n```\n\nIts own test body, ~60 lines down, already asserts the opposite and is correctly annotated:\n\n```\n:74  // ── 块2 — admin door: artifact-backed rows now REFUSE the overlay (#6483) ─\n:75  it('块2: an admin edit of a package-managed set is refused — no env overlay is minted (#6483)', …\n:76    // Pre-#6483 this edit became an env-scope overlay (ADR-0094's 2026-07-14\n:77    // direction). `permission` has since rolled back to `allowOrgOverride: false` …\n```\n\nThis is exactly #7082's shape — a corrected body under an uncorrected header — one file over, and it is the same silent-by-construction class as #6696 / #6842 / #6947.\n\n## 2. `docs/adr/0094-sys-permission-set-pure-projection.md:109` — the weak one\n\nInside the **D2** section, describing the projector:\n\n```\n- upserts the record …; a PACKAGE-OWNED record's facets follow the effective\n  body too, with its `managed_by:'package'` + `package_id` provenance preserved\n  (see D5 — an env overlay is the standard customization of a packaged set);\n```\n\nD5's own heading is marked `RETIRED 2026-08-09 — see D5-R`, and the D5 body is history preserved on purpose. This line, however, restates the direction as a live parenthetical in a section a reader reaches first, with no retirement marker. Low harm (the pointer lands on a section that says RETIRED in its title), but it is the ADR contradicting itself in one document.\n\n**Lesser instance, listed for completeness, probably fine as-is:** `packages/qa/dogfood/test/showcase-permission-projection.dogfood.test.ts:21-23` header item 3 says \"deleting an artifact-backed set RESETS it to the declared body\". Its corresponding case at `:122-125` already carries the `#6483` annotation (\"with the edit above refused, there is no overlay to lift — the delete is a no-op reset\"), so the body is honest; only the header summary is loose.\n\n## What is NOT wrong\n\nNo behaviour, no assertion, no gate. Both dogfood suites pin the post-#6483 refusal correctly and would go red if it regressed. `check:adr-anchors` is green and stays green — measured under a deliberate mutation in PR #7346: it is a **presence** check (the file exists, each registered ADR id resolves to a record, each id still appears in the file) and by construction has no opinion about whether what a file *says* about an ADR is current. That gap is #7082's disposition **B** (a #6628-idiom currency pin), which was not dispatched and is not proposed here.\n\nRefs: #7082 / PR #7346, #6858 / PR #6962 (D5-R), #6483 / PR #6608 (the rollback), #6609 (ruling A), #6960 (the delete measurement), ADR-0005, ADR-0094, #6628 (pin idiom), #6696 / #6842 / #6947 (same drift class)."
+}

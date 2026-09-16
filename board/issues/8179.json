@@ -1,0 +1,35 @@
+{
+  "number": 8179,
+  "kind": "pull_request",
+  "title": "fix(metadata-protocol): draft preview no longer reports itself invalid over its own `_draft` badge",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-12T18:45:52Z",
+  "updated_at": "2026-08-12T20:56:28Z",
+  "closed_at": "2026-08-12T20:56:27Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": "2026-08-12T20:56:27Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/8179",
+  "body": "Fixes #7656\n\n## The defect, reproduced\n\n`GET /api/v1/meta/{type}/{name}?preview=draft` answered `_diagnostics.valid:false`\nfor a **valid** draft, complaining about a key the read itself had just added:\n\n```\nUnrecognized key(s) on this object: `_draft`. Until #4001 closed this shape these\nwere dropped silently on the PARSE path — ...\n```\n\nConfirmed on `origin/main` before any edit, on **both** injection sites, with\ntests that were red first (see \"Reverse verification\" below).\n\n## Root cause\n\nThe preview read stamps `_draft:true` onto the item so the console can badge it —\n`protocol.ts:4462` (list overlay) and `protocol.ts:4672` (single-item read) — and\nthen hands the item to `decorateMetadataItem` → `computeMetadataDiagnostics`,\nwhich **re-parses it against the closed item schema**.\n\nThat re-parse stripped only `_diagnostics`, via a private one-key helper\n(`stripDiagnostics`) that predated `_draft` joining the shared\n`METADATA_READ_DECORATIONS` list. So the reader validated its own badge and\nreported the document invalid for it. The verdict described the reader, not the\ndocument — and it reached every draft of every type, on both exits.\n\n## The fix\n\n`computeMetadataDiagnostics` now calls the shared `stripReadDecorations` instead\nof its private copy. One line of behaviour; the rest of the diff is the comment\nexplaining why the list is the right authority here.\n\nThis is the shape the codebase already owns. The module header of\n`spec/kernel/metadata-read-decorations.ts` names two classes of consumer that\nmust strip: the write path's verbatim persist (#4326) and **any re-parse of a\nserved document** (cloud#971's cold-boot flow bind). Read-time diagnostics are a\nre-parse of a served document in exactly that sense — the third consumer — so it\nreads the list rather than keeping a private subset of it.\n\nSame class as the closed #6810 (`indexed`, rejected by name on a served object),\n**different remedy**, deliberately: `indexed` did not belong on the served body\nat all and was removed at its injection site, whereas `_draft` is the preview\nbadge the UI reads and is already a declared read decoration. Removing the stamp\nwould break the badge; the list is where it is consumed.\n\n⛔ **The item schema is not loosened.** `_draft` stays rejected by name in a\nstored body — pinned by a test — which is what keeps the #4326 write-path strip\nload-bearing rather than cosmetic.\n\n## Scope note\n\nThe declared file surface was `protocol.ts` — \"the draft-preview read decoration\nand the `_diagnostics` computation it feeds\". The fix landed in the module that\n*is* that computation (`metadata-diagnostics.ts`, same package), not in\n`protocol.ts`. Closing it there fixes both injection sites with one edit, covers\nany future decoration key for free, and touches none of `protocol.ts` — which is\ncarrying two other claimed regions this round (#8136, #8003).\n\n## Tests\n\n`packages/metadata-protocol/src/protocol.read-decorations.test.ts`, +6 cases in\nthe file that already owns this discipline:\n\n- **the reproduction, both exits** — a valid draft read back through\n  `getMetaItem({ previewDrafts: true })` and through the `getMetaItems` draft\n  overlay: `_diagnostics.valid` is `true` and no error mentions `_draft`.\n- **anti-vacuity, both exits** — a genuinely broken draft (a field whose `type`\n  is not a field type, seeded directly since the save path refuses it with 422)\n  still reads back `valid:false`, with errors naming `amount` and **not**\n  `_draft`. Without these, a fix that simply stopped computing diagnostics on\n  the draft path would pass.\n- **drift guard** — every member of `METADATA_READ_DECORATIONS` must be\n  invisible to the verdict, so a fourth decoration fails on a unit here instead\n  of as `valid:false` on somebody's badge.\n- **anti-loosening pin** — the `object` schema still rejects `_draft` with\n  `unrecognized_keys`.\n\n### Reverse verification\n\nReverting only `metadata-diagnostics.ts` to `origin/main` turns **5 of the 6**\nnew cases red, each on the card's verbatim message. The sixth — the\nanti-loosening pin — is **green in both directions by design**: it pins a\nconstraint the fix must not relax (the schema stays closed), not the fix itself,\nso a direction change there would mean the schema had been loosened.\n\n### Evidence\n\n```\n@objectstack/metadata-protocol   Test Files  75 passed (75)   Tests 1100 passed (1100)\n@objectstack/objectql            Test Files 191 passed (191)  Tests 3390 passed (3390)\n@objectstack/rest                Test Files 102 passed (102)  Tests 1728 passed (1728)\n@objectstack/runtime             Test Files 145 passed (145)  Tests 2195 passed (2195)\n@objectstack/metadata            Test Files  31 passed (31)   Tests  603 passed (603)\n@objectstack/service-automation  Test Files  79 passed (79)   Tests  940 passed (940)\n```\n\nConsumer direction: the five non-authoring packages above are **downstream**\nconsumers of `@objectstack/metadata-protocol` (prefix filter `...` + the package\nname), picked as the ones whose suites exercise `/meta` reads, draft preview or\n`_diagnostics`. Type surface is unchanged, so this sweep is about behaviour pins,\nnot types.\n\nGates named by `scripts/pm/dispatch-gates.mjs` for these files, all green\nlocally: `check:error-code-casing`, `check:cross-package-test-inputs`,\n`check:durability-log-level`, `check:changeset-gate-self-tests`,\n`check:objectui-changeset`, `check-changeset-no-major`, plus `check:nul-bytes`\nand `eslint` on the changed files.\n\nChangeset: `.changeset/draft-preview-diagnostics-draft-badge.md` (patch).\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01AmES43BMDg4bPrxTdi5q7t)_"
+}

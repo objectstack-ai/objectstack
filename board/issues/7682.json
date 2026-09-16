@@ -1,0 +1,34 @@
+{
+  "number": 7682,
+  "kind": "issue",
+  "title": "readonly-package-locks-studio: the read-only metadata refusal keys on the metadata type's overlay policy, not package writability (ITEM_LOCKED / WRITABLE_PACKAGE_REQUIRED never emitted)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "bug"
+  ],
+  "assignees": [
+    "huangyiirene"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T10:14:15Z",
+  "updated_at": "2026-08-13T03:08:43Z",
+  "closed_at": "2026-08-13T03:08:43Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7682",
+  "body": "## Symptom\nStudio's read-only lock is real, not cosmetic (207/207 checkboxes disabled, 92/92 bulk buttons disabled, no Save rendered, Publish disabled; a forced click left `data-state` unchanged; the direct write is refused and the artifact is byte-identical afterwards, sha256 match). But the server-side refusal does not key on package writability:\n\n`PUT /api/v1/meta/object/showcase_task` → 403 `NOT_OVERRIDABLE` (\"'object' is not allowOrgOverride in the registry\"), the **same** with `?package=` pointing at either a read-only *or* a writable package. `ITEM_LOCKED` and `WRITABLE_PACKAGE_REQUIRED` are both in the error-code ledger and **neither was ever emitted on this path**.\n\n## Root cause\nLocated by the run. `SysMetadataRepository.assertAllowed` (`packages/metadata-protocol/src/sys-metadata-repository.ts` ~L1055; code selected at ~L1086: `intent === 'runtime-only' ? 'NOT_CREATABLE' : 'NOT_OVERRIDABLE'`) discriminates on the metadata **type's** overlay policy (`allowOrgOverride` in the registry), not on a package-writability check. Confirmed present on `origin/main`.\n\n## Caveat needing a maintainer decision\nWith the documented operator hatch `OS_METADATA_WRITABLE=permission`, `PUT /api/v1/meta/permission/showcase_contributor?package=com.example.showcase` — a set belonging to the **read-only** package — **succeeds** (200, env-wide overlay), while Studio still renders that matrix fully disabled with a \"Read-only\" badge. The hatch is documented as unlocking the write, so this may be intended — but the Studio badge then **asserts a lock the server is not applying**. Please rule: intended hatch (fix the badge) vs badge is correct (the server should refuse). (The overlay was reverted afterwards.)\n\n## Reproduction\n1. Stock showcase (read-only package). `PUT /api/v1/meta/object/showcase_task` → 403 `NOT_OVERRIDABLE`; repeat with `?package=&lt;read-only pkg&gt;` and `?package=&lt;writable pkg&gt;` — same code, never `ITEM_LOCKED`/`WRITABLE_PACKAGE_REQUIRED`.\n2. Set `OS_METADATA_WRITABLE=permission`; `PUT /api/v1/meta/permission/showcase_contributor?package=com.example.showcase` → 200 while Studio still shows the matrix disabled with a \"Read-only\" badge.\n\n## Suggested fix\nMake the refusal on the package door discriminate on package writability (emitting the ledgered `ITEM_LOCKED` / `WRITABLE_PACKAGE_REQUIRED` where appropriate), and resolve the badge-vs-hatch inconsistency per the decision above.\n\n## Source\nExtracted from the QA run objectstack-ai/objectstack#7637 (framework 92f26f75, console 09987b680)."
+}

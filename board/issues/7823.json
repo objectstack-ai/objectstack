@@ -1,0 +1,35 @@
+{
+  "number": 7823,
+  "kind": "issue",
+  "title": "Check whether `sys_session.token` — a live session credential — serializes over the data API (ADR-0100 channel 3 has no read protection)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched",
+    "security"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-11T16:35:01Z",
+  "updated_at": "2026-08-13T17:19:04Z",
+  "closed_at": "2026-08-13T16:25:39Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 21,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7823",
+  "body": "## Status: UNMEASURED. Step one is a measurement, not a fix.\n\nRaised as an `out_of_scope_findings` item by the #7728 dev (objectstack-ai/objectstack#7728 [report](https://github.com/objectstack-ai/objectstack/issues/7728#issuecomment-5254965631)), who flagged it as *\"worth checking first\"* — i.e. potentially more serious than the card it fell out of. Filed unassigned; assign at the moment you start.\n\n**Nothing here has been observed on a running system.** The #7728 dev inferred it structurally from the same code paths it measured for `sys_api_key.key`, and said so plainly. Treat every claim below as a hypothesis with a named place to check it.\n\n## The hypothesis\n\n`packages/platform-objects/src/identity/sys-session.object.ts:176` declares:\n\n```\ntoken: ... description: 'Opaque session token — never exposed in UI'\n```\n\nThe mechanism that leaked `sys_api_key.key` — established on code in #7728 — is not field-specific:\n\n- the engine read path **never consults `hidden`** (no `.hidden` reference in `engine.ts`), so `hidden: true` does not strip a value from serialization; and\n- `collectMaskedReadFields` (`packages/objectql/src/secret-fields.ts:88-96`) masks `password`-typed fields **only when the object is not** `managedBy: 'better-auth'`.\n\n`sys_session` is an auth-subsystem object, so if it carries `managedBy: 'better-auth'` the masking collector is inert on it too — ADR-0100's **channel 3** (auth-subsystem one-way hashes and opaque tokens on plain `text` columns), which #7728 established has **no read protection at all**.\n\n## ⚠️ Do NOT import #7728's framing — this is a different defect if it is one\n\n#7728 is a **false-declaration** defect: its field claims *\"never exposed to clients\"*, which is a serialization claim, and it was false.\n\nThis field claims *\"never exposed in **UI**\"*. That is the narrower claim, and `hidden: true` **does** satisfy it. So:\n\n- If `token` serializes over the data API, the declaration is **not** thereby false — the defect would be a **credential disclosure**, argued on its own merits, not on a contradicted description.\n- Conversely a \"fix the description\" option does **not** exist here, because the description is not the thing that would be wrong.\n\nThe reason to rate this potentially **above** #7728 despite the weaker declaration: `sys_api_key.key` is a **SHA-256 hash** — not a usable credential, which is why #7728 was correctly kept public, unembargoed and off `target:v17`. A session token is the **live credential itself**. If it serializes to any persona that should not hold it, that is a real disclosure and the severity conversation is a different one.\n\n## Step one — measure before anything else\n\n1. Confirm whether `sys_session` is `managedBy: 'better-auth'` and whether `token` is a plain `text` column.\n2. On a real engine: create a session, then `GET /api/v1/data/sys_session/{id}` and the list endpoint. **Does the `token` value come back, and to which personas?** #7728's leak was admin-readable only, because ordinary personas are 403 on the object — establish the equivalent here rather than assuming it matches.\n3. Check whether anything legitimately reads `token` off a data-API **response** (the verifier using it as a `where` filter is not a read — that was the distinction that made #7728's strip safe).\n\n**\"Latent, not live\" is a complete and valid outcome.** If the value never serializes, say so with the measurement and close the card — do not manufacture a fix for a path nothing exercises.\n\n## If it IS live\n\nThe fix vehicle is very likely **the same one #7728 is parked on** — there is currently no field-level mechanism that strips a value from the generic read path (`secret` encrypts at rest and would break the lookup; `password` is inert on better-auth objects; FLS is bypassed by system contexts and by admin). #7728's report contains the full elimination and a proposed design awaiting a maintainer ruling.\n\n⛔ **Do not build a parallel mechanism.** If the measurement says live, report the dependency and stop — the PM will sequence this against #7728's ruling. Two competing masks would be a worse defect than either leak.\n\n⛔ Do not relabel this a security card or embargo it pre-measurement; and do not assume the #7728 severity call transfers, in either direction.\n\n## Source\n\n`out_of_scope_findings` #1 from the #7728 dev report. Sibling finding #2 (`sys_account.password`, `sys-account.object.ts:208`, hashed `text`, same unprotected class, makes no non-exposure claim) is recorded on #7728's escalation rather than filed separately — it has no independent symptom."
+}

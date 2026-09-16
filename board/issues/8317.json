@@ -1,0 +1,36 @@
+{
+  "number": 8317,
+  "kind": "issue",
+  "title": "better-auth's org-role matching is case- and whitespace-sensitive, so `role='Owner'` is an owner to our grade ladder and a plain member to the vendor",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched",
+    "security"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-13T04:54:50Z",
+  "updated_at": "2026-08-13T14:01:31Z",
+  "closed_at": "2026-08-13T14:01:31Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8317",
+  "body": "Found while implementing #8289 (not fixed there — that card is the remove-member response envelope only, and correcting this would change *who* is refused).\n\n## The disagreement\n\n#5942 unified the two ObjectStack spellings of \"is this membership an administrator\" onto one grade ladder (`orgRoleGrade` / `isOrgAdminGrade` in `packages/plugins/plugin-auth/src/invitation-role-cap.ts`), which trims and lower-cases:\n\n```ts\nflat.split(',').map((r) => r.trim().toLowerCase())\n```\n\nThere is a **third** spelling nobody reconciled, and it is the one that actually guards better-auth's organization routes. In `better-auth@1.7.0-rc.2`, `dist/plugins/organization/routes/crud-members.mjs`, `removeMember`:\n\n```js\nconst roles = toBeRemovedMember.role.split(\",\");            // no trim, no lowercase\nconst creatorRole = ctx.context.orgOptions?.creatorRole || \"owner\";\nif (roles.includes(creatorRole)) { /* only an owner may remove an owner */ }\n```\n\nThe caller's half one line down does `.map(r =%3E r.trim())` — trim but still no lower-casing — so the vendor is inconsistent even with itself across the two operands.\n\n## Consequence\n\nFor a `sys_member.role` stored as `Owner` (or `\" owner\"` with a leading space):\n\n| Question | Our ladder (#5942) | better-auth |\n|---|---|---|\n| is this row an owner? | yes | no |\n\nSo the vendor's \"only an owner may remove an owner\" rule does not recognise the row as an owner at all, skips that branch, and falls through to `hasPermission({ member: ['delete'] })` — which an `admin` passes. **An org admin can remove an owner whose role is stored with non-canonical casing**, while every ObjectStack-side check (`isOrgOrPlatformAdmin`, the break-glass ban guard, the invitation role cap) treats that same row as an owner.\n\nThe same mismatch applies to `updateMemberRole`'s creator-protection branch and to `organization/leave`'s last-owner count, which use the same raw `split(',')`.\n\n## Reachability\n\nbetter-auth's own writes are canonical lower-case, so this is not reachable through the ordinary invite/accept path. It is reachable through anything that writes `sys_member.role` without normalising: an operator/SQL fix-up, a data import, SCIM group mapping, or a script. That is the same population #5942 was filed about — it was filed because such rows were considered realistic, and the fix at the time only covered our own readers.\n\n## Not fixed in #8289\n\n#8289's guard deliberately reproduces the vendor's exact predicate (including the trim asymmetry) so that its refusal set is byte-for-byte the vendor's and only the HTTP envelope changes. Normalising there would have silently changed authorization behaviour under cover of a response-shape fix. Whoever takes this should decide the question on its own terms.\n\n## Options, roughly\n\n- **A. Normalise at the write.** Force `sys_member.role` to canonical lower-case on every write path (an ObjectQL `beforeInsert`/`beforeUpdate` on `sys_member`). Makes the disagreement unrepresentable rather than adjudicated, and needs a one-off migration for existing rows.\n- **B. Normalise at the read seam.** Have the org plugin see normalised roles. Fragile — it means intercepting every vendor read.\n- **C. Accept and document.** Declare canonical lower-case a data-entry invariant and add a check to the SCIM/import paths only.\n\nA looks like the contract-first answer (declared = enforced, and it removes the second spelling rather than teaching consumers to tolerate it), but it is a data migration, so it wants a maintainer's call rather than mine."
+}

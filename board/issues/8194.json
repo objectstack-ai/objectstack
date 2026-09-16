@@ -1,0 +1,35 @@
+{
+  "number": 8194,
+  "kind": "issue",
+  "title": "[finding] Existence coherence of engine/driver doubles is enforced only at the two consumer seams — `check:engine-double-contract` still cannot see it",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "qq9340100"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-12T19:30:24Z",
+  "updated_at": "2026-08-13T13:14:46Z",
+  "closed_at": "2026-08-13T13:14:46Z",
+  "closed_by": {
+    "login": "qq9340100",
+    "id": 313832657,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8194",
+  "body": "Follow-on filed from the #8058 audited sweep, exactly as that card's dispatch ruling planned: option 1 (widen `check:engine-double-contract` to existence coherence) lands in `scripts/check-engine-double-contract.mjs`, so it is `domain:devx` and not #8058's lane. Filed unassigned. **Read #8058's sweep report first — it changes the cost/benefit of this card, and not in the direction the parent card assumed.**\n\n## What the sweep measured (so this card starts from data, not from the hypothesis)\n\nAudited every data-access double in `packages/objectql/src` at `2473cd2d3` — 154 doubles, enumerated by AST, then instrumented at runtime (24,385 recorded calls) to see what each one's write side was *actually handed*:\n\n- **0** doubles took a by-id `update`/`delete` their own read side denied.\n- **0** doubles had an id-blind read side (answering a constant row for any id).\n- **63** doubles took at least one by-id write, and every one was answered by that double's own read side — the positive control proving the instrument can tell answered from denied.\n- **89** were called but never handed a by-id write; **37** of those statically carry a read side that denies every row (`findOne` unconditionally empty). Their incoherence is real but **dormant**.\n\n## Why zero, and why that is the interesting part\n\nThe parent card's framing was that the five doubles fixed in PR #7989 were found by coincidence and \"the next incoherent double waits for the next unrelated change.\" The sweep falsifies the second half. #7989 did not merely fix five doubles — it installed the **unconditional** by-id prior-row read, and that turned the whole class self-detecting at the engine seam: a driver-shaped double whose `findOne` denies the row now fails its own test loudly with `RECORD_NOT_FOUND` the moment anyone points a by-id write at it. The green suite is therefore *evidence* that no driver-shaped incoherence is load-bearing, not merely an absence of evidence.\n\nBoth consumer seams are already gated and already pinned:\n\n| seam | gate | pin |\n|---|---|---|\n| `ObjectQL.update`/`delete` by id (driver-shaped doubles) | unconditional prior read, #7989 | `engine-write-not-found-gate.test.ts`, plus the read-count pins in `engine-update-prior-read-scope.test.ts` / `engine-delete-prior-read-scope.test.ts` |\n| `protocol.updateData`/`deleteData` (engine-shaped doubles) | existence probe, #4435 | `protocol-data.test.ts` (\"updateData refuses an id that names no row\"), `metadata-protocol/src/protocol.record-not-found.test.ts` |\n\n## What a gate would therefore have to be worth\n\nThis is the decision this card exists to make, and the sweep argues both sides honestly:\n\n- **Against.** The property is already enforced *behaviourally* at every seam that consumes a double, on the real producer, with pins. A static gate would re-assert from source what the runtime already refuses. And the obvious static predicate over-approximates badly: \"read side unconditionally empty\" flags **37** doubles in objectql alone, **none** of which is a defect — every one is a double that legitimately never takes a by-id write. A gate shipping a 37-entry accepted-exceptions ledger on day one, in one package, runs straight into the warning in `check-engine-double-contract.mjs`'s own header: a gate that reddens correct code and can only be digested through its ledger grows the ledger into noise, and that ledger's readability is the gate's whole value.\n- **For.** Seam enforcement only covers doubles consumed *through a seam that probes existence*. An engine-shaped double handed to a consumer that reads then writes without probing would still be silently incoherent, and nothing structural prevents that consumer from being written tomorrow. Coverage today is a fact about today's consumers, not an invariant.\n\n## What a gate would need to be non-noisy (the design constraint, measured)\n\nThe distinguishing predicate is not \"does the read side answer\" — it is **\"does the write side get addressed by id at all\"**, and that is a *runtime* property. Statically, the two populations are indistinguishable: the 37 dormant doubles and the 63 live ones declare the same members. So a mechanically honest gate needs one of:\n\n1. a way to decide reachability of a by-id write per double (hard — it is whole-suite dataflow), or\n2. to invert the subject and pin the **seams** rather than the doubles (assert every consumer that performs a by-id write probes existence first) — which is a much smaller, decidable set and is what actually enforces the property today, or\n3. to accept being a *lint on newly-added doubles only*, where the author is present to answer.\n\nOption 2 is the one the sweep's data supports, and it is a different gate from the one this card's title proposes. Deciding between them is the point of the card.\n\nRefs #8058, #7867, PR #7989, #7620, `scripts/check-engine-double-contract.mjs`.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_014C8pAprWdmtecFsEprZax4)_"
+}

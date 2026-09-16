@@ -1,0 +1,33 @@
+{
+  "number": 6232,
+  "kind": "issue",
+  "title": "`zodShapeOf` 补完 union + `prefault` 后仍剩两格不对齐:不下探 `array` element / `record` valueType,且 depth 上限 12 是四个 walker 里最窄的",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "finding",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T11:23:55Z",
+  "updated_at": "2026-08-12T18:02:07Z",
+  "closed_at": "2026-08-12T17:58:25Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 9,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6232",
+  "body": "观察类发现,来自 #6098 收尾时对四个同族 walker 的逐格对照。**今天两格都被 fail-closed 兜住**(解不出 shape 时 `reachableVia` 返回 `'root-graph'`,宁可多要一个 tombstone),没有已知错误产物。记录在案,免得下一轮把「补齐了吗」当成已答之问。\n\n#6098 补掉的是 union 分支与 `prefault`,这两格补完之后 `zodShapeOf` 与三个同族 walker 的**包装器集合、lazy、pipe 方向、union 键面**已经一致。剩下的不一致有两处,都不是 #6098 的范围。\n\n## 格 1 —— 不下探 `array` element / `record` valueType\n\n| walker | `array` → `element` | `record` → `valueType` |\n|---|---|---|\n| `scripts/lib/zod-graph.ts` `zodShapeOf` | ❌ | ❌ |\n| `scripts/liveness/check-liveness.mts` `unwrap` | ❌ | ❌ |\n| `src/kernel/metadata-authoring-lint.ts` `unwrap` | ❌ | ❌ |\n| `src/system/metadata-form-zod-reconciliation.test.ts` `unwrap` | ✅ `d.element` | ✅ `d.valueType` |\n\n所以这一格**三比一**,而且是**唯一一个**下探的那位跟另外三个不同——不能直接说「zodShapeOf 窄」。真正要先答的是语义问题:对 `z.array(SomeObject)` 这样的节点,「作者在这个节点上写的 shape」到底是不是元素的 shape?\n\n- 对 `keysOf` 的问题(「这条路径下声明了哪些键」)答案显然是「是」;\n- 对**可达性**的问题(「这个 def 的属性实例有没有出现在根闭包的桥里」)则等于把 array-of-X 的 def 视为携带 X 的 (name, instance) 对——这会**新增桥项**,是 #5056 明确要求单独测量的那类改动。\n\n现存标本:`data/FilterArray`(一个 `lazy` → `array` 的 emitted def,`visited=false`)今天 `zodShapeOf` 解不出 shape,落在 fail-closed 兜底上答 `root-graph`。#6098 实测的 1610 个 def 里只有它一个属于这一类。\n\n## 格 2 —— depth 上限 12,是四个里最窄的\n\n```\nscripts/lib/zod-graph.ts                                12   (zodShapeOf 与 pipeInIsTransform 各一处)\nscripts/liveness/check-liveness.mts                     16\nsrc/kernel/metadata-authoring-lint.ts                   25\nsrc/system/metadata-form-zod-reconciliation.test.ts     25\n```\n\n#6098 之后这一格的重要性上升了一点:union 分支是**逐成员递归**的(`mergedUnionShape` 对每个成员 `depth + 1`),嵌套 union 会比以前更快吃掉预算。今天没有截断——`view` 这条最深的链在 depth ≤ 3 就解完了——但「最窄的那个上限」正好落在喂删除门禁的这个 walker 上,方向不理想。\n\n超限的后果同样是 `return null` → fail-closed,所以是保守而非错答。\n\n## 与 #6098 的关系\n\n#6098 的正文只点名了两格(union、`prefault`),这两格已随 PR #6222 合入并完成 #5056 测量轮。本条是那一轮**收尾对照**时发现的剩余项,单独记录而不是塞进那个 PR——因为格 1 会动桥表,必须有自己的测量轮。\n\n## 建议\n\n- 格 2(depth)可以独立成一个极小改动,但仍应带一次 `gen:schema` 前后 diff 才算数(理论上零移动,实测才能这么说)。\n- 格 1 需要先回答语义问题,再决定是否对齐;如果对齐,必须走 #5056 的完整测量协议(逐条解释新增桥项 + 逐条解释判定移动,两个方向都要看——#6222 实测到的主要移动方向是 `root-graph → null` 这个**放宽**方向,不是 `root-graph → derived-clone`)。\n\n参考:#6098 · PR #6222 · #5317 · #5056 · #6221\n"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 8190,
+  "kind": "pull_request",
+  "title": "test(service-settings): alias the remaining three workspace deps to source, emptying its check-test-source-alias entry (#8104)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-12T19:23:28Z",
+  "updated_at": "2026-08-13T00:45:48Z",
+  "closed_at": "2026-08-13T00:45:46Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": "2026-08-13T00:45:46Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/8190",
+  "body": "Closes #8104.\n\n#8063 gave `service-settings` its first `vitest.config.ts` and aliased two workspace deps to source. The other three — `@objectstack/spec`, `@objectstack/platform-objects`, `@objectstack/types` — stayed on the package's `KNOWN_UNALIASED_TEST_IMPORTS` entry and kept resolving through `exports` to **`dist/`**. They are now aliased to source, and the registry entry is deleted.\n\n## How much was actually reading the artifact: 17 of 20 files\n\nMeasured, not inferred. With the three `dist/` trees physically removed from the checkout:\n\n| config | result |\n|---|---|\n| pre-#8104 (two aliases) | **17 of 20 files fail to load**, 58 of 413 cases run — `Cannot find package '@objectstack/spec/system'` |\n| this PR | **413 passed / 20 files** |\n\nSo the artifact is off the resolution path, not merely shadowed by a fresh copy of it.\n\n## The subpath entry points were the job, and the obvious shape does not do it\n\nThis package imports **no bare** `@objectstack/spec` and **no bare** `@objectstack/platform-objects` at run time. Every specifier its tests can reach for those two is a **subpath**:\n\n```\n@objectstack/spec/api          @objectstack/spec/data      @objectstack/platform-objects/system\n@objectstack/spec/contracts    @objectstack/spec/system\n```\n\nplus `@objectstack/spec/security`, reached transitively through `@objectstack/types` ([ADR-0105 D1] tenancy posture) once types itself resolves to source.\n\nBoth shapes that suggest themselves fail, in opposite directions:\n\n- the **object** form matches by **prefix** → swallows the subpaths into `…/index.ts/system`, `ENOTDIR` at run time in a config that reads as correct (#7778);\n- the **anchored bare** form (`/^@objectstack\\/spec$/`, what #8063 left behind) does not swallow them, but does not **cover** them either → all six stay on `dist` and the registry entry cannot come off.\n\nWhat covers them is a subpath rule, and the right rule differs per package because their export maps differ:\n\n- **`spec`** is uniform (`src/<ns>/index.ts` throughout) → the one-rule-for-all-namespaces capture form `/^@objectstack\\/spec\\/([a-z-]+)$/`, which cannot go stale when a new namespace import arrives.\n- **`platform-objects`** is **not** uniform — `./plugin` is `src/plugin.ts`, a *file* → an explicit `/system` entry. A `([a-z-]+)` rule would send `platform-objects/plugin` to `src/plugin/index.ts`, a path nobody wrote, failing on whoever next adds that import. `plugin-audit` writes its `platform-objects/audit` entry the same way for the same reason.\n\n## The two halves constrain each other\n\n`KNOWN_UNALIASED_TEST_IMPORTS` is audited for set equality in **both directions**, so neither half is green alone:\n\n| state | `check-test-source-alias` |\n|---|---|\n| before (entry present, aliases missing) | **OK** — 72 scanned, **62** registered |\n| aliases complete, entry still present | **FAILED** — *\"registry entry is no longer needed … Delete the entry\"* |\n| entry deleted, one alias rule removed | **FAILED** — *\"tests import 1 workspace package(s) that resolve to `dist/` with no source alias\"* |\n| after (both halves) | **OK** — 72 scanned, **61** registered |\n\n`--self-test` OK.\n\n## Scope\n\n- 413 passed / 20 files, unchanged from the #8063 baseline. Nothing turned red — expected for a checkout whose `dist` was built from the same commit, which is exactly the condition under which the old setup looked fine.\n- **Zero changes under `packages/services/service-settings/src/**`.**\n- Three files touched: the package's `vitest.config.ts`, the registry entry in `scripts/check-test-source-alias.mjs`, and a changeset. `content/docs/releases/**`, `docs/adr/**`, `.claude/skills/**`, `skills/**` untouched.\n\n## One finding, not fixed here\n\nWhen the gate names an unaliased dep it prints a remediation hint that is the **anchored bare** form:\n\n```\nalias: [{ find: /^@objectstack\\/spec$/, replacement: path.resolve(__dirname, '<relative>/src/index.ts') }]\n```\n\nFor a package whose only reachable specifiers are subpaths — this one — following that hint verbatim leaves the gate red with no further guidance, since the suggested alias covers nothing it just named. The hint is correct for bare importers and misleading for subpath-only ones. Fixing it means teaching the diagnostic to print the specifiers it measured rather than a generic template; that is a change to the gate's own surface and belongs in its own card, not riding on this one.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01SMN7p2W62YzA3bY7BaFv3r)_"
+}

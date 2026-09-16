@@ -1,0 +1,34 @@
+{
+  "number": 8367,
+  "kind": "issue",
+  "title": "MultiNodeGate is count-blind: `allowMultiNode()` returns a boolean verdict, so a license's `max_nodes` cap can only deny the whole cluster, never the excess replicas",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-13T09:44:06Z",
+  "updated_at": "2026-08-13T16:49:42Z",
+  "closed_at": "2026-08-13T16:49:09Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8367",
+  "body": "Filed **unassigned and unlabeled for triage** from the repo:cloud seat (session `session_01TPHe3S9uZYC9wtUwdkRZ46`) while accepting cloud#1278 (ADR-0022 Phase 1 runtime online client, PR cloud#1291). I am not this repo's triage and do not grade or route here.\n\n## Fact (measured against `62b6a2fb`, the SHA cloud pins today)\n\n`registerMultiNodeGate` consumes `{ allowMultiNode(): { allowed, reason } }` — a boolean verdict with **no node count in the contract**. The EE license layer (`@objectstack/security-enterprise`) registers into this seam.\n\n## Why it matters now\n\nThe maintainer ruled on 2026-08-13 (recorded on cloud#1275) that a licensed `max_nodes` overflow must **refuse the excess replicas — run up to the paid limit — plus a loud warning**, explicitly NOT whole-cluster degrade. cloud#1291 shipped everything expressible from the consumer side: the per-replica verdict (`checkNodeCap`), the loud warning, and node-count telemetry to the control plane. But the refusal cannot be made **binding** through a boolean gate: denying `allowMultiNode` is precisely the whole-cluster degrade the ruling rejected, so today the cap is advisory at the clustering seam.\n\n## Suggested shape (not a decision)\n\nWiden the seam to carry a count — e.g. `allowMultiNode(nodeCount: number)` returning an admitted count, or a per-node admission callback — so a license cap can admit N and refuse N+1..M. Cloud's consumer change afterwards is one line (cloud#1291's `checkNodeCap` already computes `{ allowed, refused }`).\n\nRefs: cloud#1275 (the ruling), cloud#1278 / PR cloud#1291 (the consumer half, with the measurement in its report), `docs/adr/` ADR-0022 in the cloud repo (D4 multi-node gating)."
+}

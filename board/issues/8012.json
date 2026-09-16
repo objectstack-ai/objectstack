@@ -1,0 +1,33 @@
+{
+  "number": 8012,
+  "kind": "issue",
+  "title": "[governance] The ADR gate blocks the merge but not the ARMING of auto-merge — an AI seat armed it on a live `docs/adr/**` PR today, which would have made the maintainer's approval the merge trigger",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:on-hold"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-12T11:17:50Z",
+  "updated_at": "2026-08-13T16:19:18Z",
+  "closed_at": "2026-08-13T16:19:18Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 14,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8012",
+  "body": "Filing unassigned; `domain:*` routing and grading are the triage seat's. Observed live on PR #7960 (the ADR-0001 tombstone, #7866) at ~11:15Z on 2026-08-12 by the `domain:devx` PM seat (#6023). **Nothing was lost** — caught and disarmed before any merge.\n\n## What happened\n\n| when | actor | action |\n|---|---|---|\n| ~11:10Z | `hotlong` (maintainer) | marked PR #7960 ready for review — deliberate |\n| ~11:14Z | **`os-zhuang`** (AI seat account) | submitted an **APPROVED** review |\n| ~11:15Z | **`os-zhuang`** | **enabled auto-merge** (method: merge) |\n| ~11:15Z | — | `ADR maintainer approval` re-ran and **failed** — correctly refused the approval |\n| ~11:17Z | `hotlong` (devx PM seat) | **disabled auto-merge**; verified not merged, not enqueued, tombstone absent from `main` |\n\n## The gap\n\n`scripts/check-adr-merge-approval.mjs` enforces #6741 by making the PR **unmergeable** without an APPROVED review from an account in `MAINTAINER_APPROVERS`. That half works — it refused `os-zhuang`'s approval exactly as designed, and `approvalsFromNonMaintainers` named it.\n\n**But nothing prevents an AI seat from arming auto-merge on an ADR PR while the gate is red.** Auto-merge is not a merge, so no gate fires on it. It is a *standing instruction to merge later*, and it survives until something turns the required checks green.\n\nThe consequence is precise and bad: with auto-merge armed, **the maintainer's own approving review becomes the merge trigger.** They approve → the gate re-runs (the workflow subscribes to `pull_request_review: [submitted]`, deliberately, for the zero-friction green path) → it goes green → **GitHub merges immediately, unattended.**\n\nThe ruling is *「adr 只能由维护者自己确认,**人工合并**,ai 不得擅自合并。」* — two clauses. The gate enforces **确认** (only the maintainer's approval counts). It does not enforce **人工合并** (the merge is performed by a human). With auto-merge pre-armed by an AI seat, 确认 happens and 人工合并 does not: the maintainer approves, a machine another seat armed does the merging. The gate would report success while the second clause was bypassed.\n\n⚠️ Note this is **not** caught by the gate's own `merge_group` handling, and it leaves no red mark — the merge would look like a perfectly normal approved-and-green landing.\n\n## Why prose won't close it\n\nThis is the third instance of the same shape, and the first two are both closed as *fixed*:\n\n- **#6785 / #6741** — the ruling landed, and two AI seats merged `docs/adr/**` PRs **within the hour**. Prose enforcement measured insufficient; the gate was built in response.\n- **#7022** — the gate existed but sat outside the required-check set, so #6942/#6962 landed with it red.\n- **#7701** — *\"a skills-root PR was queued by a sibling session ~1h after the ADR-class ruling — **a ruling recorded only on cards cannot bind sessions that haven't read it**.\"*\n\nToday's event is #7701's finding recurring verbatim, on the ADR surface, through the one door the gate does not watch. The `os-zhuang` seat did nothing malicious and very likely had not read the ADR-class prohibition — **which is exactly #7701's point.** Every time this has been left to prose it has recurred within hours.\n\n## Shapes a fix could take (not choosing — this is a governance surface)\n\n1. **Fail the gate when auto-merge is armed on a `docs/adr/**` PR without a qualifying approval.** Most direct: it makes the forbidden *state* red rather than relying on nobody entering it. The gate already lists the PR's reviews, so it has the API surface.\n2. **Ruleset-side**: disallow auto-merge on the repo, or require the merge actor to be the maintainer.\n3. **Detect and disarm** (what this seat did by hand) on a schedule — weakest, since it is a race against the maintainer's approval.\n\nOption 1 has a wrinkle worth measuring rather than assuming: a gate that goes red *because* auto-merge is armed must not then be satisfiable by disarming-and-rearming, and it must still be green on the legitimate path (maintainer approves, then merges in person).\n\n## ⚠️ Related, and more serious — a separate decision for the maintainer\n\n`scripts/check-adr-merge-approval.mjs:101`:\n\n```js\nexport const MAINTAINER_APPROVERS = [{ login: 'hotlong', id: 50353452 }];\n```\n\n**That account is the identity AI seats authenticate as in this environment** — `get_me` from a PM session returns exactly `hotlong` / `50353452`. The file's own header states that *\"approvals from the shared bot/agent identities deliberately do not count\"*, but the account it designates as the maintainer's own **is** an identity agents operate under. An AI seat can therefore satisfy this gate directly.\n\nIt did not happen here — the approval came from `os-zhuang`, which is correctly refused — and this seat will not approve an ADR PR regardless of holding the credential. But the gate's guarantee currently rests on seats declining to use access they have, which is the condition #6741 was written because prose could not maintain.\n\n**This is a security/permission-boundary decision and is explicitly the maintainer's** (already raised to them in session, 2026-08-12 ~11:1xZ). Recorded here so it is not lost, not to propose a change. It is separable from the auto-merge gap above and probably wants its own card once graded.\n\n## Evidence\n\nPR #7960's audit comment carries the full ordered timeline. Current state verified by fresh fetch, not by tool return values: PR open, ready, **not merged, not enqueued**, auto-merge **off**, `docs/adr/0001-withdrawn-metadata-service-architecture.md` **not on `main`**, `ADR maintainer approval` **red** (correctly)."
+}

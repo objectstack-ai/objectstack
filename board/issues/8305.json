@@ -1,0 +1,35 @@
+{
+  "number": 8305,
+  "kind": "pull_request",
+  "title": "test(plugin-auth): pin credential-at-rest posture for scim_token / client_secret",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-13T04:08:53Z",
+  "updated_at": "2026-08-13T04:34:03Z",
+  "closed_at": "2026-08-13T04:34:01Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-13T04:34:01Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/8305",
+  "body": "Fixes #8192\n\nNot a defect fix. #8011 measured that both credential columns already store a one-way SHA-256 digest; this PR is the tripwire that holds that posture in place. Before it, `grep -rn 'storeSCIMToken|storeClientSecret' --include=*.test.ts packages/` returned zero hits.\n\n## The exposure being pinned\n\n`@better-auth/scim`'s own default is `storeSCIMToken: \"plain\"` — cleartext. A single option literal in `auth-manager.ts` is the only thing between a live IdP bearer and a cleartext value in a column that is readable over the generic data API (`sys_scim_provider` declares `apiMethods: ['list']`). The planned SCIM rc.2 migration (#3653) changes that exact call site's construction signature.\n\n## What makes the pin non-vacuous\n\n1. **It drives `AuthManager`, not `scim()`.** The load-bearing choice. A test that calls `scim({ storeSCIMToken: 'hashed' })` itself pins its own literal and would stay green forever after the repo's literal was deleted — certifying exactly the regression it was written to catch. Every assertion runs against a plugin list built by `AuthManager.buildPluginList()`.\n2. **It reads the row at driver level**, below the ObjectQL read mask and below the plugin's own accessor.\n3. **It asserts the hash relationship, recomputed independently** with `node:crypto`. \"Differs from the plaintext\" would be satisfied by base64 of the plaintext.\n4. **The inner-token trap is an explicit negative.** The SCIM bearer is `base64url(\"BASE:providerId:organizationId\")` while the stored digest covers the inner `BASE` alone, so hashing the full bearer must NOT match. Without that case a future rewrite could \"simplify\" the positive into the naive shape that fails on correct code.\n5. **A control arm measures upstream's default** rather than citing it: `scim()` with no option stores the bearer in cleartext. That is what makes the literal demonstrably load-bearing, and it is the permanent form of this card's ablation.\n\nEach positive case also asserts the credential still authenticates, so \"hash it\" cannot be satisfied by storing garbage.\n\n## Asymmetry found while building this\n\nThe two upstream helpers end differently on an unrecognised storage method: `storeSCIMToken()` falls through to `return scimToken` (cleartext, silently), while `storeClientSecret()` ends in `throw new BetterAuthError`. So `client_secret` cannot reach cleartext via a dropped literal at all — the only non-hashed value the plugin accepts is `\"encrypted\"`, and only with `disableJwtPlugin`, which its own validation cross-checks. That is recorded in the test header; it is why the SCIM row is the sharp one.\n\n## Ablation — predicted first, then measured\n\n| mutation | predicted | measured |\n|:--|:--|:--|\n| `storeSCIMToken: 'hashed'` becomes `'plain'` | 1 red (the at-rest case), stored = raw inner base token | exactly that: `'mkDp7IWxEjL7ugQQn_kmpgup'` vs the expected digest. 1 failed, 3 passed |\n| `storeClientSecret` set to a pass-through custom hasher (a `{ hash }` object returning its input unchanged) | 1 red, stored = the 32-char plaintext | exactly that: `'xRHyKIHKCyRKAuJlOFkcZJfMBZUsdYSx'`. 1 failed, 3 passed |\n\nNote the second mutation's shape: `'plain'` is not usable as an ablation for the OAuth column, because `storeClientSecret()` throws on it rather than storing cleartext.\n\nThe table includes the deliberate prediction that the AUTHENTICATES case stays **green** under the SCIM ablation — `verifySCIMToken` mirrors the configured storage method, so with `'plain'` it compares plaintext to plaintext and still succeeds. That case is a liveness arm, not a posture detector, and the ablation is what establishes the difference.\n\nNo rebuild was needed for the ablations: the test imports `./auth-manager.js` relatively, so vitest transforms the package's own source rather than a consumed `dist/`. Both mutations took effect immediately, which is itself the evidence.\n\nRestores were done with `git checkout BRANCH -- PATH` from the commit; no `git stash` at any point.\n\n## Verification\n\n- `pnpm --filter @objectstack/plugin-auth test` — 47 files, 1093 tests, all pass (4 new).\n- `pnpm --filter @objectstack/plugin-auth typecheck` — clean.\n- Type-check ledger: the new file initially drifted plugin-auth's TEST_DEBT +1 (`registerObject` requires `packageId`, which several older harnesses omit). Fixed the type rather than raising the ledger; re-measure is back at the recorded 111 and reports \"surplus: none\".\n- Gates re-derived with `scripts/pm/dispatch-gates.mjs`, run after a full `pnpm build`. All green except `check:objectui-pin-fresh`, which is a stale `.objectui-sha` in the repo state and untouched by this PR.\n\n_Generated by [Claude Code](https://claude.ai/code/session_01PEVB6w7D7uCszR9Mw1BL73)_\n"
+}

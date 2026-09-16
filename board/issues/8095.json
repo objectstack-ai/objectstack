@@ -1,0 +1,36 @@
+{
+  "number": 8095,
+  "kind": "issue",
+  "title": "[finding] `org_member` can read every sys_invitation row in the org — other people's emails, granted roles, inviter — intended?",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched",
+    "security"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-12T15:15:29Z",
+  "updated_at": "2026-08-12T22:39:39Z",
+  "closed_at": "2026-08-12T22:39:39Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8095",
+  "body": "Recording an observation for the platform to rule on — I could not tell from the outside whether this is intended.\n\nA user whose org role is `member` can read **every** invitation row of the organization through the data API, including invitations addressed to other people: their email address, the role they are being granted, and the inviter.\n\n## Repro (measured)\n\nOrg *甲* has two invitations: `lisi@` (member, accepted) and `wangwu@` (admin, pending). `lisi@` is a plain `member` of that org.\n\nAs `lisi@`, with the active organization set to *甲*:\n\n```js\nawait fetch('/api/v1/auth/organization/get-active-member')  // → { role: \"member\" }\nawait fetch('/api/v1/data/sys_invitation')\n// → 200, total: 2\n// [ { email: \"lisi@acme-test.com\",   role: \"member\", status: \"accepted\" },\n//   { email: \"wangwu@acme-test.com\", role: \"admin\",  status: \"pending\"  } ]\n```\n\nIdentical to what the org **owner** sees. Full rows also carry `inviter_id` and `expires_at`.\n\nFor contrast, the same member is correctly denied elsewhere:\n\n```\nGET /api/v1/data/sys_permission_set\n→ 403 [Security] Access denied: operation 'find' on object 'sys_permission_set'\n      is not permitted for positions [org_member, everyone]\n```\n\nso object-level gating is in force generally — `sys_invitation` is simply readable by `org_member`.\n\n## Why it might matter\n\nA pending invitation is administrative intent, not a colleague directory: it exposes the addresses of people who are not yet (and may never become) members, and discloses *who is about to be made an admin*. Membership (`sys_member` / the members page) is a different question — that one reads like a legitimate staff directory.\n\n## The decision\n\nEither confirm `org_member` read on `sys_invitation` is intended (in which case this issue is just documentation), or narrow it — e.g. restrict to `owner`/`admin`, or row-scope it to `email = current_user.email` so a member can still see their own invitation.\n\nRelated UI-side finding: #8092 (the members page shows invite/remove affordances to `member`; the server does gate those writes).\n\n## Environment\n\nLocal dev server `http://localhost:8080`, multi-org enabled, observed 2026-08-12. The server was started by the maintainer and its exact commit is not verified.\n"
+}

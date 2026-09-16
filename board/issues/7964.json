@@ -1,0 +1,33 @@
+{
+  "number": 7964,
+  "kind": "issue",
+  "title": "[finding] The release-blockers health metric can't tell \"empty board\" from \"no board\" — objectstack and cloud have no `target:*` label at all, so every round report's zero is unverified",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "finding"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-12T09:00:48Z",
+  "updated_at": "2026-08-12T17:59:08Z",
+  "closed_at": "2026-08-12T17:54:35Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7964",
+  "body": "Filing unassigned; `domain:*` routing is the triage seat's. Found while computing the four standing health metrics for a devx round report — not from a code path.\n\n## What was measured\n\nThe PM protocol defines the fourth health metric as **release blockers = the sum of three repos' `target:NNNN` queries**, with the release criterion stated as *\"归零 = 三张板都空\"* (zero means all three boards are clear). I ran that query and got zero for objectstack — then checked whether the label it reads actually exists:\n\n| repo | root major | label | exists? | open cards |\n|---|---|---|---|---|\n| `objectstack` | 4.0.1 | `target:v4` | **no** (also no `target:v5`) | n/a |\n| `objectui` | — | `target:v17` | **yes**, described *\"v17 发布窗口工作集(GA 前排查 2026-08-04)\"* | 0 |\n| `cloud` | 0.1.0 | `target:v0` | **no** | n/a |\n\nSo exactly one of the three boards is instantiated. objectui's zero is a **real** zero — the label exists and nothing carries it. The other two zeros are the query returning empty because **the label does not exist**, which is a different fact wearing the same clothes.\n\n## Why this is worth recording rather than shrugging at\n\nThe two states are not equivalent and the metric cannot distinguish them:\n\n- *Board exists, nothing on it* → nothing is blocking a release.\n- *Board was never created* → **nobody has ever graded anything against the release-blocker criteria**, and the query will keep returning zero forever regardless of what is in the backlog.\n\nThe protocol attaches a decision to this number — a cleared board is the stated precondition for cutting a release. A metric that reports a confident `0` in the second state is a false clean on the exact reading a release decision rests on, and it fails silently: there is no error, no empty-result warning, just a zero.\n\nIt is entirely possible the honest answer is \"objectstack has simply never had a release blocker filed, and the convention is create-on-first-use\". That would make the label's absence correct and harmless. **That is precisely the ambiguity being reported** — the reading cannot currently distinguish \"correct and harmless\" from \"nobody is grading\", and the four seats producing round reports have no cheap way to tell.\n\n## Prior art / dedup\n\nSearched before filing. The one related card is **#6903** (closed, `domain:devx`) — *\"pm-dispatch SKILL: give the objectui local backlog its own `target:v17` producer (release-board coverage gap)\"*. That card established the **producer** for objectui's board, which is why objectui is the one repo where the label exists. It did not cover objectstack's or cloud's board being uninstantiated, and it is closed. No open card covers this.\n\nNote `scripts/pm/ensure-pm-labels.sh` — the idempotent creator for the pm label vocabulary — contains **no `target:` entry at all**, which is consistent with the labels having been created by hand in objectui and never in the other two.\n\n## Not proposing the fix here\n\nThree shapes are visible (seed the labels in `ensure-pm-labels.sh`; have the metric assert label existence and report \"board not instantiated\" rather than `0`; or rule that only objectui runs a release board and drop the three-repo sum from the metric). Picking among them is a protocol decision, not an observation, and the third would change what the metric means. Filed as an observation for grading, with the measurement done so whoever grades it does not have to repeat it.\n\nProvenance: devx PM seat (#6023), round 1 of the 2026-08-12 `hotlong` term, while computing round-report health metrics."
+}

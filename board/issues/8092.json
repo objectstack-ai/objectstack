@@ -1,0 +1,34 @@
+{
+  "number": 8092,
+  "kind": "issue",
+  "title": "console: workspace members page offers Invite / Remove member to the `member` role; only the server 403 stops it",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "priority:p2",
+    "repo:objectui"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-12T15:08:33Z",
+  "updated_at": "2026-08-13T03:31:10Z",
+  "closed_at": "2026-08-12T15:55:36Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8092",
+  "body": "On `/_console/organizations/<slug>/members`, a user whose org role is `member` is shown the **Invite member** button and a per-row **Member actions** menu containing **Remove member** — including on the row of the workspace **Owner**. Nothing is disabled or hidden; the action only fails after the user commits to it.\n\n## Repro\n\n1. User A owns workspace *甲*; user B joins it as `member`.\n2. As B, open `/_console/organizations/acme-jia/members`.\n\n## Actual\n\n- **Invite member** (top right) is enabled. Opening it, filling an email and pressing **Send invitation** fails inline with the raw English server message `You are not allowed to invite users to this organization` (also see the i18n issue).\n- The `…` menu on **every** row, the Owner's included, offers **Remove member**.\n\nThe server does gate the write — `POST /api/v1/auth/organization/invite-member` as the member returns:\n\n```\n403 {\"message\":\"You are not allowed to invite users to this organization\",\n     \"code\":\"YOU_ARE_NOT_ALLOWED_TO_INVITE_USERS_TO_THIS_ORGANIZATION\"}\n```\n\nso this is a UI-gating gap, not a privilege escalation. (`remove-member` was not exercised destructively; a probe with a non-existent member returned `400 MEMBER_NOT_FOUND`, i.e. the lookup runs before the permission check, so that path's gating is unverified from the client side and worth a look while fixing.)\n\n## Expected\n\nA `member` sees no invite or remove affordances — matching the **Settings** tab of the very same page, which already gets this right: it replaces the form with \"只有所有者可以修改设置。\" and disables **Delete organization** while leaving **Leave organization** enabled. The members/invitations tabs simply never got the same treatment.\n\n## Where\n\n`packages/app-shell/src/console/organizations/manage/` — `MembersPage` (invite button + row actions) and `InviteMemberDialog`. The active member's role is already available via the org context used elsewhere on the page.\n\n## Environment\n\nLocal dev server `http://localhost:8080`, multi-org enabled, zh locale, observed 2026-08-12. The server was started by the maintainer and its exact commit is not verified.\n"
+}

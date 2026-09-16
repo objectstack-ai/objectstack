@@ -1,0 +1,35 @@
+{
+  "number": 8183,
+  "kind": "pull_request",
+  "title": "fix(lint): name the metadata-editing surface, not a `*.form.ts` filename",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-12T18:54:33Z",
+  "updated_at": "2026-08-12T19:30:13Z",
+  "closed_at": "2026-08-12T19:30:11Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-12T19:30:11Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/8183",
+  "body": "Fixes #8042\n\nThe metadata-layer arm of the visibility diagnostics explained the layer by naming `*.form.ts` — a file a Studio / REST `/meta` / MCP author of a schema-bound view does not have and cannot open. This names the **surface** instead: a metadata-editing form, the row under edit.\n\nProse only. No rule id, severity, prescribed root or firing condition moves; the actionable half of every message and hint is byte-stable.\n\n## The premise, measured rather than assumed\n\nBefore touching anything, the publish-gate path was probed with the gate's own call shape — `validateVisibilityPredicates(stack)`, no options, which is exactly how `authoring-rules.ts` calls it. A form view declaring `data: { provider: 'schema', schemaId }` emitted both graded strings, each naming a file:\n\n```\nvisibility-root-mislayered (warning)\n  \"...not a metadata-editing form. A `*.form.ts` predicate that binds `record.` never matches...\"\nvisibility-bare-identifier (error)\n  hint: \"Write `data.status` instead of `status` (a `*.form.ts` metadata-editing form binds the row under edit as `data`).\"\n```\n\nBoth reachable, both file-naming, prescriptions already correct. Premise holds.\n\n## What changed, and the discrimination behind each site\n\nThe rule file carried **8** `*.form.ts` occurrences (counted, not eyeballed). The question applied per site was: is this string read by an **author of the metadata**, who may hold no source file — or is it explaining the **caller contract** to someone reading or maintaining the linter, where the filename is accurate and is the point?\n\n**Rewritten — emitted prose an author reads (3):**\n\n| site | why |\n|---|---|\n| `MISLAYER_BY_LAYER.metadata.message` | graded target; read at the publish door by an author with no file |\n| `visibility-bare-identifier` hint, metadata arm | graded target; same audience, and this one **gates** |\n| `MISLAYER_BY_LAYER.runtime.message` | the mirror sentence, same defect — see below |\n\n**Broadened — module and type docs that DEFINE the layer (3):** the module note, the `VisibilityLayer` doc, and the `CANONICAL_ROOT_BY_LAYER` doc each defined the metadata layer as `*.form.ts` files. Since #7815 that definition is incomplete rather than merely surface-specific: a schema-bound form view is on this layer with no file at all. Each now names both routes.\n\n**Retained deliberately (2):** the `opts.layer` option doc (\"...which is what a file-aware caller linting a `*.form.ts` does\") and the `validateVisibilityPredicates` doc (\"pass `opts.layer = 'metadata'` when linting a `*.form.ts` metadata-editing form\"). Both address a **caller** that is genuinely linting a file — the option exists precisely for that caller — so the filename is both correct and the useful word. A blanket find-and-replace would have deleted these, which is why one pin asserts they are still present.\n\nNet: 8 occurrences to 6, and **zero** remaining inside any emitted string. All 6 survivors are comments.\n\n## One judgment call beyond the graded scope, flagged for review\n\nThe graded targets are the two metadata-arm strings. I also rewrote the **runtime** arm, which explained its forbidden `data.` root as \"a `*.form.ts` row under edit\" and named the runtime surface as \"a `*.view.ts` / `*.page.ts` live record\".\n\nThe reasoning: a view or page published through Studio has no `*.view.ts` either, so the same finding applies, and the graded metadata message names `*.view.ts` / `*.page.ts` **in the same sentence** it names `*.form.ts`. Fixing only the graded half would have left one sentence half-pointing at files. Happy to narrow this back if review reads it as out of scope — it is isolated to one message string.\n\n## Tests\n\nSix pins in a new `#8042` block, all on the no-options call (the gate's shape):\n\n- the mis-layered advisory and the bare-identifier hint name no source file, still fire, and keep their exact prescription\n- the runtime arm is file-free too\n- a mechanical sweep: one case per rule id per layer (8 rows), asserting no emitted `message` or `hint` matches a `*.form.ts` / `*.view.ts` / `*.page.ts` spelling, with a non-vacuity guard per row so a case that goes blind fails instead of passing\n- the file-aware caller path emits the **same** prose (the strings are keyed by layer, not by how the layer was decided — pinned so a later \"fork the wording by caller\" is visible; one condition, one wording)\n- the retained caller-contract mentions are still in the source\n\n**Reverse verification** — direction predicted before running: revert the source, keep the tests, and the prose pins go red while the caller-contract pin stays **green** (origin/main still carries that wording). Measured exactly that: 4 failed, 113 passed, and the 4 are precisely the prose pins. That asymmetry is what separates \"changed the right thing\" from \"changed everything\".\n\nNote on the suggested negative control: the emitted strings cannot be forked by caller path, because `MISLAYER_BY_LAYER` is keyed by **layer**, not by how the layer was derived. So \"the file-aware path still produces its retained wording\" is not an available assertion — the file-aware caller reads the same prose. That is pinned as an equality instead, and the retained-wording control moved to the source-level pin.\n\n## Verification\n\n- `pnpm --filter @objectstack/lint test` — 72 files, 1954 passed, 4 skipped. `runtime-gate.test.ts` untouched and green.\n- `validate-visibility-predicates.test.ts` — 117 passed (was 113 pass + 4 red under reverse verification).\n- `pnpm --filter @objectstack/lint typecheck` — clean. `eslint` on both changed files — clean.\n- `check:nul-bytes` OK (7428 files). `check:spec-parsed-alias` OK.\n- Gate set re-derived against the real diff: `check:changeset-gate-self-tests`, `check:cross-package-test-inputs`, `check:objectui-changeset` all green. `check:objectui-pin-fresh` is **red and pre-existing** — it matched only because this PR adds a changeset, my diff touches no `.objectui-sha`, and it fails identically on a pristine tree (the pin has drifted behind upstream objectui since `a0151e9`).\n\nChangeset added: `@objectstack/lint` is published, so prose that changes what an author reads still ships as a `patch`.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01WocN37om5bw81JDoEEMA2e)_"
+}

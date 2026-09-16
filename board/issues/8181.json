@@ -1,0 +1,34 @@
+{
+  "number": 8181,
+  "kind": "issue",
+  "title": "pm-dispatch starvation playbook is written for the 5-hour wall — a `seven_day` `allowed_warning` was measured live, and the playbook has no pre-wall posture",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-12T18:50:48Z",
+  "updated_at": "2026-08-13T12:47:44Z",
+  "closed_at": "2026-08-13T12:47:44Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8181",
+  "body": "Filed by the `domain:skills` seat (#7623, session `session_01139NJ9Wg5pFeZi1Zh8WLg6`), 2026-08-12, at the maintainer's direct request in the seat chat (\"帮我全面调研并提出方案\"). Decision card — ⛔ not dispatchable while this label is on.\n\n## Measured facts (2026-08-12)\n\n1. **A dev session at 18:18Z read** `rate_limit_info: {rateLimitType: \"seven_day\", status: \"allowed_warning\"}`, reset ≈ 2026-08-17. Requests were still allowed — this is a **pre-wall warning**, several days before the window resets. Single-source so far: this is a dev's relayed reading; the next occurrence should capture the raw payload verbatim into the platform facts table (does it carry a threshold? a remaining figure?).\n2. The payload's `rateLimitType` is an enum naming `seven_day` — i.e. the platform distinguishes wall types. Working assumption (to be confirmed from the next hard-wall payload, not guessed): the 5-hour rolling window and the 7-day window **coexist**, and whichever is nearer binds. `ccusage blocks` still reports 5-hour billing blocks (measured in this container: active block 47m in, 18.0M tokens / ~$33, projected ~$207 per block at current burn).\n3. `ccusage` has a `weekly` command (not currently in the facts table). It shows **this container only** — measured 18.3M tokens for the week from here, which is essentially this session alone. The single-container blind spot is *worse* under a weekly cap: the cap is account-level, every seat and cloud card burns it, and no container can see the sum. There is still no agent-facing interface for account-level remaining quota.\n4. No existing card covers this (semantic search for seven_day/weekly/quota/断粮 returned zero; corpus verified with known-present queries).\n\n## What this falsifies in the current skill text\n\nBoth starvation sections are written against the 5-hour wall — premise re-check: `grep -n \"5 小时\" .claude/skills/pm-dispatch/SKILL.md .claude/skills/pm-dispatch/references/platform-readings.md` (today: SKILL.md:559 section title; platform-readings.md:100-117).\n\n- **Timer selection**: \"no reset time ⇒ hourly cron\" is sane for an hours-scale window and absurd across a ~5-day one (~120 dead fires, plus an orphan cron to remember). With a known reset the existing \"one-shot at reset + buffer\" stays correct (`create_trigger` with `run_once_at` handles multi-day).\n- **The bigger gap**: the playbook only covers **after** the wall (\"撞墙后恢复\"). For a 5-hour wall that is fine — the worst case is a coffee break. A 7-day hard wall mid-week kills the whole fleet for **days**, and the only effective response happens **before** the wall — which is exactly what `allowed_warning` exists to enable. The current text's \"权威的墙信号是失败本身\" needs splitting: the authoritative *pre-wall* signal is now `rate_limit_info` (`allowed_warning`); the authoritative *wall* signal remains the failure itself.\n\n## Options (spend/fleet posture = the maintainer's decision; this card decides nothing)\n\n- **A — full speed until the hard wall.** Keep dispatching normally; on the hard wall run the recovery playbook with a one-shot timer at reset+buffer. Max throughput; accepts that a mid-week hard stop freezes p0/release-board work for days.\n- **B — two-tier response (recommended).** On `allowed_warning` (seven_day): **conservation posture** — batch cap to 1; mechanical S/M cards at the `sonnet` floor; freeze L/XL and non-urgent work; keep only `priority:p0`, release-board items, and in-flight closeout; fable-mandatory cards (maintainer-ruled) are **deferred, never downgraded**; every round report carries a weekly-window line (the cheapest fleet-level aggregation point that exists). On the hard wall: existing recovery playbook; timer = one-shot at reset+buffer; ⛔ never an hourly cron across a multi-day window.\n- **C — full dispatch stop on warning.** Warning treated as wall; review/landing/triage reads only. Most conservative; forfeits legitimate remaining quota for the rest of the week.\n\n## Four-facet block\n\n- **Platform long-term coherence**: B turns signal→posture into a closed two-state machine inside the *existing* starvation section — no new tracking surface, no second board. A leaves a written playbook that is wrong for the wall that actually fired today. C collapses warning into wall, misstating the platform.\n- **Measured business pull**: not speculative — the warning fired today at 18:18Z with reset ~5 days out. A mid-week hard wall stops p0 and release-board work for days; the 5-hour wall never could.\n- **AI-agent error-resistance**: B's throttle rules are a closed enumeration (batch cap, tier floor, freeze list, defer-not-downgrade) any seat executes mechanically. A relies on each seat's discretion under quota pressure — exactly where an AI seat optimizes its own lane and burns the shared budget.\n- **Startup scope discipline**: B is ~10 lines into an existing references section plus a title fix; no new tooling, no new labels, no coordination machinery.\n\n## Facts to land in the platform facts table regardless of the option chosen\n\n`rate_limit_info` shape + its reading discipline; seven_day/5h coexistence (confirm from next hard-wall payload); `ccusage weekly` and the account-level blind spot; one-shot `run_once_at` for multi-day resets.\n\n## Binding constraints for the implementing card (once the maintainer picks)\n\n- Touches `.claude/skills/pm-dispatch/**` ⇒ `model: claude-fable-5` mandatory; ADR-class: draft PR, human review, human merge. ⛔ No auto-merge, no merge queue.\n- SKILL.md sits at its ratchet ceiling (686/686): the section-title fix must be funded by a content-free offset in the same PR, or the substantive text lands in `references/platform-readings.md` only.\n- Gates: `check:pm-skill-ratchet`, `check:pm-skill-id-lint`, `check:skill-frame-sync`, `check:doc-authoring`."
+}

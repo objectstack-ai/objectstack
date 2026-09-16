@@ -1,0 +1,35 @@
+{
+  "number": 8308,
+  "kind": "issue",
+  "title": "[1 of #7891] `METADATA_CREATE_SEEDS.object` gains an authored `sharingModel` — or an explicit default-OWD ruling (blocker A)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-13T04:22:45Z",
+  "updated_at": "2026-08-13T06:51:16Z",
+  "closed_at": "2026-08-13T06:51:16Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8308",
+  "body": "Programme slice of #7891 (split by the `domain:spec` seat, session `session_01Euoy6wyfzgiWtgCg4s6JK2`). Contract-first head of the chain — no `Blocked-by:`; slices 2 and 3 wait on it.\n\n## Scope\n\nBlocker A of the parent card: declaring `object` in `runtimeTypes` makes `security-owd-unset` refuse the platform's own minimal create body, because `METADATA_CREATE_SEEDS.object` (`packages/spec/src/kernel/metadata-create-seeds.ts`) carries no `sharingModel`. This slice repairs the authoritative create body: the seed gains an authored OWD **or** an explicit, documented decision not to — plus the fallout repair in the 8 affected `@objectstack/metadata-protocol` test files (measured: 26 refusals → 48 failing tests, all from the single rule id `security-owd-unset`).\n\n## Escalation clause (from triage, binding)\n\nWhether the seed gains an authored `sharingModel` vs an explicit default-OWD ruling is the one embedded judgment call. If implementation shows it is a genuine product fork (semantics of a tenant's default sharing) rather than the mechanical repair the measurements suggest, flip THIS slice to `needs-user-decision` — ⛔ never silently pick.\n\n## Measured facts inherited from PR #7886 (re-run, do not trust)\n\n- Fallout measurement re-runnable via `packages/lint/src/validate-security-posture.runtime-surface.test.ts` and the metadata-protocol suite.\n- Corrected premise: the gate's plumbing reaches non-object collections; the gap for three cross-collection rules is sibling collections (that is slice 2's territory, not this one's).\n\n## Notes\n\n- `packages/spec/src/kernel` semantic-face change ⇒ `claude-fable-5` clause applies at dispatch.\n- ⛔ This slice does NOT flip `runtimeTypes` for `object` — that is slice 3, after this and slice 2 land.\n\nPart of #7891."
+}

@@ -1,0 +1,35 @@
+{
+  "number": 8265,
+  "kind": "pull_request",
+  "title": "fix(mcp): the stdio transport honours the ADR-0049 apiEnabled / apiMethods exposure declaration (#8083)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-13T01:25:13Z",
+  "updated_at": "2026-08-13T02:44:42Z",
+  "closed_at": "2026-08-13T02:44:40Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-13T02:44:40Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/8265",
+  "body": "Fixes #8083\n\n## What was wrong\n\nBoth MCP transports register the same tools from the same `McpDataBridge`, but the two\nhosts implement that bridge over different seams. HTTP runs every data verb through\n`callData`, which gates on the object's declared `apiEnabled` / `apiMethods` before\ndispatch. The stdio bridge went straight to the engine and applied no gate. One\ndeclaration, two transports, two answers.\n\n**This is a surface-area declaration leak, not an authorization bypass** — the framing the\ncard argues and triage adopted. `packages/runtime/src/api-exposure.ts` documents the gate\nas a surface-area control rather than the authorization boundary, and every stdio call\npassed the engine's CRUD / FLS / RLS middleware before this change and after it. What was\nleaking is the author's *exposure declaration*.\n\n## What this does\n\nApplies the gate on the stdio bridge (option C on the card). The decision is **not\nre-implemented**: it comes from the spec's single source of truth\n(`resolveEffectiveApiMethods` / `isApiOperationAllowed`) — the same helpers the repo's two\nexisting enforcement points already delegate to:\n\n| surface | wrapper | delegates to |\n|---|---|---|\n| HTTP / MCP-over-HTTP | `checkApiExposure` (runtime) | the spec helpers |\n| REST | `apiAccessDenialFromEnable` (rest) | the spec helpers |\n| MCP-over-stdio | `enforceApiExposure` (this PR) | the spec helpers |\n\nEach surface owns only its own envelope, so the three-state whitelist, the\naction-to-operation mapping and the derived verbs resolve identically on all three. No new\npackage dependency: `packages/mcp` already depends on `@objectstack/spec`, and this file\nalready imported `@objectstack/spec/data`. Nothing in `packages/spec` changed.\n\n**Which verbs are gated** is the parity claim, so it is data (`GATED_ACTIONS`) rather than\nsix literals: exactly the six methods `buildMcpBridge` routes through `callData`, with\n`remove` reaching it as the `delete` action word. `list_objects` / `describe_object` stay\n**ungated** because the HTTP bridge answers both straight off the metadata service —\ngating them here would be a fresh divergence pointing the other way.\n\nThree behaviours are matched to the HTTP path deliberately: a system context bypasses,\nunresolvable metadata **fails open** to the schema defaults, and the flat legacy definition\nshape is still read when there is no nested `enable` block. Refusals carry the same two\nmachine codes REST answers with (`OBJECT_API_DISABLED` 404,\n`OBJECT_API_METHOD_NOT_ALLOWED` 405, with the effective operation set attached).\n\nThe gate runs **before** the existence probe in `update` / `remove`: gating after it would\nanswer \"that id names no row\" for one id and succeed for another, an existence oracle on an\nobject the author declared unexposed.\n\n## Tests\n\n`packages/mcp/src/stdio-data-bridge.exposure.test.ts` — 24 cases, in the shape of #8034's\n`transport parity: one bridge, one tool surface`.\n\nThe parity is pinned the way it is actually reviewable from inside `packages/mcp`: the\nHTTP verdict function lives in `packages/runtime`, which this package neither depends on\nnor may read (that is exactly the cross-package test input `check:cross-package-test-inputs`\nexists to catch). So the declaration-to-verdict table mirrors the one\n`packages/runtime/src/api-exposure.test.ts` pins the HTTP side against, case for case. The\nhalf that is *not* a hand-copied table is `GATED_ACTIONS`, asserted structurally against\nthe spec's own action map — a typo in an action word would otherwise fall through\n`DATA_ACTION_TO_API_OPERATION[action] ?? action` and silently stop gating that verb.\n\nReverse-verified: with only the six gate call sites removed (exports kept), the file goes\n**14 failed / 10 passed** — every refusal case red, the structural, fail-open, bypass and\nallow-path cases still green, which is the direction predicted before running. Worth noting\nthat the existence-probe case failed with `code: undefined`, because the ungated path\nthrows a bare `recordNotFound`: a plain `.toThrow()` assertion would have stayed green\nthere, which is why the refusals assert the `code` **and** `status` envelope.\n\nLocal: `pnpm --filter @objectstack/mcp test` 162 passed (14 files), `typecheck` clean.\nGates run: `check:cross-package-test-inputs`, `check:nul-bytes`,\n`check:engine-double-contract`, `check:error-code-casing`, `check:query-options-erasure`,\n`check:type-check-coverage` — all green.\n\n## Scope\n\nOptions A and B on the card (unifying the two transports behind one transport-neutral data\nseam) are out of scope by the triage ruling and are untouched. The rest of the divergence\ntable in the module docblock — the protocol layer's ingress `readonly` strip, existence\nprobes, spec-shaped receipts, `expand` / `select` — is left intact and still points at that\nfollow-up work; only the ADR-0049 line was retired.\n\nNot addressed here, filed separately: the ADR-0101 record resource\n(`objectstack://objects/{objectName}/records/{recordId}`) reads rows through its own\n`getRecord` seam in `plugin.ts` and is still ungated. Out of scope: #7279 also touches that\narea and is deliberately not in flight, so this PR does not go near it.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_016pY4Xb2iDecfDtT3CWoiTW)_"
+}

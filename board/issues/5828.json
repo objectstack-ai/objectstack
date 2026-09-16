@@ -1,0 +1,33 @@
+{
+  "number": 5828,
+  "kind": "issue",
+  "title": "门测量的重合度 bridge 有残余假可达面:整形状由共享叶子组成的「小形状」恒为 1.0,任何阈值都排不掉",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "finding",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T07:06:04Z",
+  "updated_at": "2026-08-12T18:02:13Z",
+  "closed_at": "2026-08-12T17:58:29Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 10,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5828",
+  "body": "观察类发现,来自 #5056 的实测。**今天没有任何真实 spec 形状命中**,不影响用户;记录在案,免得后面某个批次把它当成新 bug 重新发现一次。\n\n## 事实\n\n#5056 把 derived-clone bridge 从「任意单属性命中」换成**整形状重合度 ≥ 0.5**,`WidgetManifestSchema` 的假可达因此被正确排除(2/19 = 0.105)。\n\n但重合度的分母是**候选形状自己的键数**。于是一个键数很少、且每个键都是仓内**共享叶子**的形状,重合度恒为 **1.0**:\n\n```\nz.object({\n  name:  SnakeCaseIdentifierSchema.describe('Machine name'),\n  label: I18nLabelSchema.describe('Display label'),\n})\n```\n\n实测 `cloneOverlap` = 1.0000,判定 `derived-clone` → **可达**。而它跟任何活 schema 都没有派生关系,只是两个键碰巧都是被 `.describe()` 过的共享叶子(`.describe()` 复用接收者实例的 `_zod.def`,见 #5056)。\n\n对照:同样两个共享叶子 + 3 个普通键 → 0.4000 → 正确判为不可达。所以命中条件是**形状小**,不是共享的绝对数量。\n\n## 为什么阈值调不掉\n\n`(0, 1]` 里没有哪个阈值能排除它:真·派生也会打到 1.0 —— 实测 `ObjectListViewSchema.strip()` 重合度就是 1.0000,且必须保持可达。两者在「重合度」这一个维度上不可分。要分开需要另一个判据(例如要求共享的属性里至少有一个是**结构性**节点而非叶子,或要求候选与基形状的键集**双向**覆盖),那是对仪器契约的改动,不该顺手塞进 #5056 的测试层 PR。\n\n## 影响面(今天为零)\n\n误差方向仍然只朝**假可达**一侧 —— 也就是仍然只可能让某个批次**对死形状做收紧**(#4583 的「precisely validated dead slot」)。触发需要:被测形状键数很少(约 ≤ 4),且几乎每个键都是共享叶子。\n\n- `WidgetManifestSchema` 19 键 → 0.105,不命中\n- 批 16 / 批 15 / 批 14 已测的形状均不命中\n\n## 现状\n\n已在 #5056 的 PR 里作为**具名 pin** 钉住(`packages/spec/src/ui/door-reachability.testkit.test.ts`,用例名以 `KNOWN BOUND` 开头),所以这条边界是被测量、被断言的,不是潜伏的。本 issue 只负责让后续批次在遇到小形状时知道该去读那条 pin。\n\n## 建议给后续批次(17-22)的操作\n\n测到一个 `derived-clone` 判定时,如果目标形状键数很少,**先看 `cloneOverlap` 和键数**,再决定信不信这扇门。\n\n参考:#5056 · #4001 · #4583\n"
+}

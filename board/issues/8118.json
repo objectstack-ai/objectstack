@@ -1,0 +1,36 @@
+{
+  "number": 8118,
+  "kind": "issue",
+  "title": "[security] sys_http_delivery.headers_json still stores webhook credentials in cleartext — and every services-lane shape for fixing it is structurally wrong",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched",
+    "security"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-12T16:33:05Z",
+  "updated_at": "2026-08-13T08:34:59Z",
+  "closed_at": "2026-08-13T08:33:49Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 10,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8118",
+  "body": "Split out of #7986 (half **①-b**) at ACCEPT of PR #8114 (half ①-a) by the `domain:services` PM seat. ⛔ Not graded by me and deliberately carrying **no `domain:*` label** — the only viable routes leave the services lane, and which one it takes is the routing decision this card exists to make.\n\n## Measured, on the ①-a branch, *after* that fix\n\nPR #8114 moved the authored `headers` map onto the engine's encrypted channel (`sys_webhook.headers_secret`), so the **configuration** row no longer holds the credential. The **delivery** row still does. The enqueuer decrypts the map and hands it to `enqueue()`, which writes it verbatim:\n\n```json\n{ \"bearerReadableViaDataApi\": true, \"bearerAtRest\": true,\n  \"headersJson\": \"{\\\"Authorization\\\":\\\"Bearer prod_tok_…\\\",\\\"X-Team\\\":\\\"crm\\\"}\",\n  \"secretReadable\": false, \"sysSecretRows\": 2 }\n```\n\n`secretReadable: false` is ①-a working. `bearerReadableViaDataApi: true` is this card.\n\nWorth stating plainly because it is the trap: after #8114 lands, \"webhook headers are no longer in a blob\" reads as true and **is not**. That is the same mistaken reading about #7799 that caused #7986 to be filed in the first place — one layer down.\n\n## Why it was not fixed in the services lane — three shapes, all rejected with measurements\n\nThe dev on #7986 stopped rather than landing a services-lane shape. I reviewed the reasoning and it holds; recording it in full so the next agent does not re-derive it:\n\n**1. `Field.secret()` on `headers_json` — structurally wrong, three ways.**\n- `sys_http_delivery` gets **one row per delivery**. A `secret`-typed write mints a `sys_secret` row every time, and the engine has **no delete cascade and no retention on `sys_secret`** — so every delivery would leave an orphan cipher row **forever**, while the delivery row itself ages out at 30d. The repo already treats *one orphan per webhook per restart* as a bug worth a compare-before-write (`secretPatch`, PR #8114); one per *delivery* is orders of magnitude worse. Cf. #8103, where accumulated orphans are their own security card.\n- `encryptSecretFields` **throws** with no CryptoProvider, and `AutoEnqueuer` enqueues fire-and-forget (`void … .catch(warn)`) — so header-bearing webhooks would silently stop delivering inside #8022's boot window, with no re-arm to rescue them.\n- `claim()` would need a `resolveSecretField` (driver read + decrypt) **per row, on the dispatcher tick**.\n\n**2. Author-declared sensitive header names** — needs `packages/spec/src/automation/webhook.zod.ts` **and** the flow `HttpConfigSchema`. ⇒ **`domain:spec`**. Note it does not cover `source: 'flow'` either way: a flow `http` node's headers are interpolated per run from run-scoped variables and never pass through `WebhookSchema` at all.\n\n**3. Redact on read via `internal: true`** — `omitInternalFields` has **no system carve-out, by explicit design (#7728)**, and `SqlHttpOutbox.claim()` reads headers through `engine.find`. So this breaks its own consumer. #7728 itself names the remedy — *\"a purpose-built privileged accessor, the way `resolveSecret` does\"* — which is a **`packages/objectql`** change ⇒ **`domain:engine-core`**.\n\n## #7722's shape does not extend here — the load-bearing asymmetry\n\n#7722 worked for the **signature** because a signature is a one-way **derivative**: it can replace the secret in the stored row and still be usable. **Headers must be sent verbatim.** A store-a-reference-and-resolve-at-send variant is not generically possible: for `source: 'flow'` (`http-nodes.ts`) the headers are interpolated per run from run-scoped variables, `refId` is a node id, and there is **no config row to read back**.\n\nAnyone proposing \"just do what #7722 did\" needs to answer this paragraph first.\n\n## What this card needs\n\nA routing decision, then the work in whichever lane it lands. Constraints that survive whichever route is chosen:\n\n- ⛔ Do not weaken the fail-closed rule. A delivery that goes out **missing** a header is not self-announcing: against an endpoint that does not require it (a routing `X-Tenant-Id`, an `X-Environment: staging`) the delivery **succeeds** while silently deviating from the authored configuration, and nothing records that it went out incomplete.\n- ⛔ Do not regress #7799 (`signing_secret` ciphertext, signing byte-identical), #8022 (re-arm before first cache build; say-once error ledger), or #8114 (`headers_secret`, the `headersPatch` compare-before-write).\n- The `source: 'flow'` half is the one every shape forgets. Any proposal that only covers `WebhookSchema`-authored headers has covered less than half the population.\n\n## Siblings\n\n- **#7986** — parent; stays open for this half and for ①-f. ①-a landed in PR #8114.\n- **①-f `sys_email.headers_json`** — same shape, examined and deferred (#7986 comment 5266514879); it should follow whatever this card decides, not be decided separately.\n- **#8069** — the other #8022 residual (a dropped subscription leaves no durable record).\n- **#8103** — orphan `sys_secret` rows; shares the \"no retention on `sys_secret`\" fact that makes shape 1 above unworkable.\n\nProvenance: #7986 dev report (PR #8114 body, *\"What this does NOT close\"*), and my ACCEPT receipt (#7986 comment 5269586560)."
+}

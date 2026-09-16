@@ -1,0 +1,36 @@
+{
+  "number": 8050,
+  "kind": "issue",
+  "title": "A durable PAUSED run is invisible to `GET /automation/:name/runs` and to run-detail after a cold restart — while remaining fully resumable",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:services",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "huangyiirene"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-12T13:38:20Z",
+  "updated_at": "2026-08-12T18:38:52Z",
+  "closed_at": "2026-08-12T18:38:52Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8050",
+  "body": "## Symptom\n\nAfter a process restart, an in-flight paused automation run cannot be enumerated or read through the automation API, even though the run survived, is listed correctly over the data API, and resumes perfectly.\n\nMeasured on one paused run (`showcase_budget_approval`, parked at its `approval_revise` node):\n\n| read | result |\n|---|---|\n| `GET /api/v1/data/sys_automation_run/run_1a7f3a5b…` | **200**, `status:'paused'`, `node_id:'wait_revision'`, `node_type:'approval_revise'` |\n| `GET /api/v1/automation/showcase_budget_approval/runs` | 200 with **zero rows** |\n| `GET /api/v1/automation/showcase_budget_approval/runs?status=paused` | 200 with **zero rows** |\n| `GET /api/v1/automation/showcase_budget_approval/runs/run_1a7f3a5b…` | **404 RESOURCE_NOT_FOUND** \"Execution not found\" |\n\nReproduced 2×, across 3 durable paused rows on 2 flows (`showcase_reassign_wizard` showed durable = 2, listedPaused = 0).\n\n## Reproduction\n\n1. Boot the showcase on a **file** DB: `os dev -a dist/objectstack.json --seed-admin -d file:/tmp/x/data.db -p <port>`\n2. Park a run — e.g. `PATCH` a `showcase_project`'s budget above the approval threshold, then `POST /api/v1/approvals/requests/:id/revise`, which parks `showcase_budget_approval` at its `approval_revise` node.\n3. Kill the process and cold-boot a second server over the **same** DB file.\n4. Read the row over the data API and over the automation API.\n\n**Expected** both surfaces show the paused run.\n**Actual** the data API shows it; the automation API lists zero and 404s the detail.\n\n## Root cause (suspected, located)\n\n`AutomationEngine.listRuns` merges the **in-memory ring buffer** with the durable **history** rows (the `run_run_<id>`-prefixed terminal rows written by `recordLog`) — but not the durable **paused** rows (the `run_<id>` rows written by the suspended-run store, `packages/services/service-automation/src/suspended-run-store.ts` `serialize()`).\n\nBefore a restart, paused runs appear only because they are still in the ring. After a restart the ring is empty and the paused rows have no reader.\n\n## Scope — deliberately narrow\n\n**Durability itself is intact, and this is not data loss.** A post-restart paused *screen* run still served `GET /runs/:runId/screen` (200, full contract) and `POST /runs/:runId/resume` (200 → run completed, `acted:1`, paused row consumed, history row written). Eight paused rows across five suspending node types round-tripped a cold restart byte-identical.\n\nThis is an **observability** defect: after any process cycle an operator cannot enumerate in-flight runs through the automation API. It also silently defeats a filter that just landed — **#7359**'s newly-enforced `?status=paused` can never return a row after a restart, which is the one query an operator would reach for here.\n\n## Suggested shape (not prescriptive)\n\nHave `listRuns` (and the by-id read) also consult the suspended-run store's durable rows, deduping against the ring by run id. The gate: a test that parks a run, cold-restarts against the same file DB, and asserts the run appears in `?status=paused` and answers on run-detail — the existing durability tests assert resumability, which is exactly the half that already works.\n\n## Source\n\nFound during the platform checklist retest of `automation.durable-suspend-restart` (framework `279ee48a`). Did not hold any clause of that item — the item's own steps read the paused rows over the data API, which works.\n"
+}

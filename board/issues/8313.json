@@ -1,0 +1,32 @@
+{
+  "number": 8313,
+  "kind": "issue",
+  "title": "`sys_oauth_application.client_secret`'s \"hashed/encrypted at rest\" description asserts a protection without citing what enforces it — the measurement has now been paid for twice",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-13T04:31:21Z",
+  "updated_at": "2026-08-13T09:06:37Z",
+  "closed_at": "2026-08-13T09:06:06Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8313",
+  "body": "Filed by the `domain:identity` execution seat as the cross-lane remainder of **#8011**. It lands in `packages/platform-objects` (`domain:metadata`'s package), so it is filed separately and **unassigned/unlabeled for triage** rather than absorbed. Comment-only change, zero behavioural surface.\n\n## Background — the claim is TRUE, and that is exactly why this is worth doing\n\n#8011 verified by real round-trip that both credential columns are genuinely hashed at rest. Measured, not inferred:\n\n| column | declares | what actually lands | verdict |\n|:--|:--|:--|:--|\n| `sys_scim_provider.scim_token` | label `\"(hash)\"` | SHA-256/base64url of the inner base token | **claim holds** |\n| `sys_oauth_application.client_secret` | \"hashed/encrypted at rest\" | SHA-256/base64url of the plaintext | **claim holds** |\n\nNeither column ever receives cleartext.\n\n## The problem this card fixes\n\nThe declarations **assert** the protection without citing what enforces it. A declaration-reading survey therefore cannot confirm them from the storage side — both are plain `Field.text`, neither carries `internal: true`, and both are API-reachable (`sys_oauth_application`: `['get','list']`). So the survey correctly records them as *unverified rather than clean*, and someone re-measures.\n\n**That has now happened twice** — the #7902 survey, then #8011 — on a claim that was true both times. The citation is what stops a third.\n\n`sys_scim_provider` (②-c) **needs nothing**: `sys-scim-provider.object.ts:16-20` already cites `storeSCIMToken: 'hashed'` in the object docstring and the field description already says \"Hashed bearer credential\". That is precisely why the survey scored it near-closed while ②-d stayed open. Only `client_secret` lacks the pointer.\n\n## Suggested shape (not decided here)\n\nOne-line description change on `packages/platform-objects/src/identity/sys-oauth-application.object.ts:304`, wording proposed by the dev that measured it:\n\n> OAuth client secret — stored as a SHA-256 digest, never plaintext (`@better-auth/oauth-provider` `storeClientSecret`, which defaults to hashed whenever the jwt plugin is enabled; wired in `plugin-auth` `auth-manager.ts:2473`). Shown once at registration.\n\nSupporting evidence, read off `@better-auth/oauth-provider@1.7.0-rc.2` dist rather than docs: `storeClientSecret` (`dist/resource-challenge-2qgK1B-a.mjs:455`) has **no cleartext branch at all** — every path hashes, encrypts, or throws. The repo sets neither `storeClientSecret` nor `disableJwtPlugin` anywhere in `packages/`, and `auth-manager.ts:2473` registers the jwt plugin, so the default resolves to `\"hashed\"`. The plaintext is spliced into the *response* only (`dist/index.mjs:3560` persists the digest, `:3595` returns the plaintext).\n\n## ⚠️ Carry this forward — #8011's acceptance bar misfires as literally worded\n\n#8011 stated the bar as \"a round-trip that reproduces the stored value from the plaintext proves it is **not** hashed\". Read literally that is backwards: unsalted SHA-256 **is** reproducible from the plaintext by construction — that is how every hash verifier works, better-auth's own included — so the literal sentence would score every correctly-hashed credential in the repo as unhashed, `sys_api_key.key` (#7728) included, and manufacture a false P1 on a clean surface.\n\nThe discriminator that was actually applied: whether the stored value **equals** the plaintext or is **reversible** to it. Neither holds — the only inverse better-auth has is recompute-and-compare (`verifyStoredClientSecret` / `verifySCIMToken` use `constantTimeEqual` on a re-derived digest, never a decrypt).\n\nRecorded here because a later audit mechanically applying that sentence would fabricate a finding on a surface that is correct.\n\nAlso worth carrying: these are 32-char machine-generated secrets, not user passwords, so an unsalted fast digest is the standard construction — the absence of bcrypt/argon2 is **not** a finding.\n\n## ⚠️ The trap a naive pin falls into\n\nFor `scim_token` the bearer returned to the IdP admin is `base64url(\"BASE:providerId:organizationId\")`, but the stored digest covers **`BASE` alone**. Hashing the returned bearer yields a value that does **not** match the stored digest. An audit that skipped the decode step would report a **false negative on a correct implementation**.\n\nParent: #8011. Related: #8192 (the regression pin for this posture, PR #8305), #7728, #7990, #7902."
+}

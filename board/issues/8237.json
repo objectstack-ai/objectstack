@@ -1,0 +1,35 @@
+{
+  "number": 8237,
+  "kind": "pull_request",
+  "title": "fix(plugin-sharing): a manage_sharing holder with no active organization no longer reads every tenant's sharing rules (#8158)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-12T22:00:42Z",
+  "updated_at": "2026-08-12T22:35:15Z",
+  "closed_at": "2026-08-12T22:35:14Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-12T22:35:13Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/8237",
+  "body": "Fixes #8158\n\n`SharingRuleService` decided its admin read scope on the **absence of an organization id**, not on system-ness:\n\n```ts\nif (!orgId) return where;   // unscoped — every tenant's rows\n```\n\nThat unfiltered branch exists for the system context (boot seeding, the reconcile hooks, the backfills), but it was reached on capability rather than system-ness, and the ADR-0111 D6 gate admits any caller holding the **org-scoped** `manage_sharing` capability. Three sites shared the shape — `adminOrgScope`, `getRule` and `findRuleRowByName` — so an authenticated, non-system caller with neither `organizationId` nor `tenantId` read every organization's rules, resolved any of them by id **or by name**, and could `evaluate` them, which reconciles `sys_record_share` grants: a cross-tenant write.\n\n## Step 1 — reachability, measured through the real login path\n\nThe card filed its own gap (\"whether a real deployment can hand an authenticated `manage_sharing` holder a session with no `activeOrganizationId` is **not** measured here\"). It is measured now, over HTTP, in `packages/qa/dogfood/test/sharing-rule-org-less-caller.dogfood.test.ts`:\n\n- better-auth `sign-up` + `sign-in` mint the session; ADR-0081 D1's `session.create.before` hook is the thing that would stamp an active organization and declines, because the user holds no `sys_member` row (the test asserts the stored `sys_session` row carries none);\n- the user holds an org-scoped `manage_sharing` grant anyway — a `sys_user_permission_set` row is independent of membership, and `resolveUserAuthzGrants` keeps an org-scoped grant when there is no active org to compare it against;\n- `GET /api/v1/sharing/rules` as that session, on a fixture with **two** organizations, answered **HTTP 200** on the pre-fix build with:\n\n  ```json\n  [\"rule_8158_tenant_a@org_8158_a\", \"rule_8158_tenant_b@org_8158_b\",\n   \"share_high_value_red_projects_with_managers@null\",\n   \"share_new_inquiries_with_field_ops@null\",\n   \"share_open_tasks_with_manager@null\",\n   \"share_red_projects_with_execs@null\"]\n  ```\n\n  Both tenants' rules, to a caller whose only grant was scoped to tenant A. **Reachability: yes.**\n\nThe shape is ordinary, not contrived: a multi-organization deployment (whose membership reconciler binds nobody — ADR-0093 D1 `no-target-org`), an `invite-only` deployment, a user removed from their organization, or an SSO JIT user pending placement all produce it.\n\n## The fix\n\nThe three sites now take the **execution context** instead of a bare org id, so \"system\" and \"no organization\" can no longer be the same input, and `assertCanManageRules` refuses an authenticated caller with no resolvable organization: `PERMISSION_DENIED`, mapped to HTTP 403 by the route's existing error mapping.\n\n**Refuse rather than answer empty.** Both are fail-closed; the difference is what the caller is told. An empty list is the #7676 shape — `{data: []}` over rules that exist and are actively granting access — which reads as \"this deployment has no sharing rules\". `manage_sharing` is declared `scope: 'org'`: with no organization there is no scope in which it grants anything, so the honest answer is a refusal naming the missing organization.\n\n**Two classes keep the unfiltered read, deliberately** — system contexts (`isSystem`), and platform operators (`manage_platform_settings` or the `platform_admin` position), whose cross-tenant read is what the platform-only Setup sharing pages are and who are exactly the caller a single-tenant deployment has before its default organization is bootstrapped. The card's own reading: \"a platform operator hitting this path is harmless\".\n\n## Tests\n\n- `packages/plugins/plugin-sharing/src/sharing-rule.test.ts` — a new `[#8158]` block: **two organizations with a rule each** plus the platform-global seed, so it cannot pass on a single-tenant fixture; refusals for list / get-by-id / get-by-name / evaluate / delete / define, each paired with the row it used to leak; the grant table asserted unchanged after the refused evaluate; and the permitted side pinned — system context still reads and still SEEDS, both platform-authority spellings still read unfiltered, each org-bound admin sees exactly its own organization plus the platform-global row, and the `tenantId` spelling (what `resolveAuthzContext` actually stamps) resolves.\n- `packages/qa/dogfood/test/sharing-rule-org-less-caller.dogfood.test.ts` — the HTTP-level proof above.\n\nAblation (prediction written first, then measured): restoring the three `if (!orgId)` branches turned exactly the 8 predicted unit refusals and the 7 predicted dogfood refusals red, and left every system / platform / org-bound pin green.\n\n## Docs — the new refusal is enumerated where refusals are enumerated\n\nA second commit documents it on both pages a reader would reach, following #8217's precedent (the runtime refusing more than the page says is the enforced-but-undocumented inverse of a declared-but-unenforced gap):\n\n- `content/docs/permissions/sharing-rules.mdx` — the ADR-0111 D6 \"Rule administration\" section, which is where the rule surface's `403 PERMISSION_DENIED` already lives: the capability alone is not enough, an active organization is required, and system contexts + platform operators are deliberately unaffected.\n- `content/docs/kernel/runtime-services/sharing-service.mdx` — the \"Typical Errors\" list #8217 corrected twenty minutes before this PR. The new condition rides on the existing `PERMISSION_DENIED` bullet, explicitly scoped to `ISharingRuleService` (declared in the same canonical source) and cross-linked to the page above. That page's version was taken from current `main` so #8217's line is preserved.\n\nRelated: #7795 (this card's origin), #7761, #7676, #5852. Adjacent, deliberately not unified here: #8208 is the same \"authenticated session with no active organization\" state falling **closed** in a different subsystem.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01PEVB6w7D7uCszR9Mw1BL73)_\n"
+}

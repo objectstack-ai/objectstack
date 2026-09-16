@@ -1,0 +1,34 @@
+{
+  "number": 8296,
+  "kind": "issue",
+  "title": "The FILTER axis has no unmaterializable verdict: a `where` on a virtual formula field returns 0 rows silently, while sort and search refuse the same field with a 400",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-13T03:47:48Z",
+  "updated_at": "2026-08-13T11:35:47Z",
+  "closed_at": "2026-08-13T11:14:12Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8296",
+  "body": "Found while implementing #7226 (PR #8295), where this gap is what made that card's defect invisible. Filed unassigned; the fix is a platform change in `packages/metadata-protocol`, out of scope for an examples-only PR.\n\n## The asymmetry\n\n`formula` is the one field type no driver materialises a column for. Three query axes can name a field; two of them refuse a formula loudly, one accepts it and answers nothing:\n\n| axis | gate | verdict for a `formula` field |\n|---|---|---|\n| SORT | `assertSortFieldsExist` + `assertOrderByIsMaterializable` | `400 INVALID_SORT`, with a denormalize-onto-a-stored-field remedy (#6994, #7095) |\n| SEARCH | `assertSearchFieldsAreSearchable` | refused by name, with a mirror-onto-a-stored-text-field remedy (#6674) |\n| **FILTER** | `assertFilterFieldsExist` | **accepted — 200, 0 rows, no error** |\n\n`assertFilterFieldsExist` (`packages/metadata-protocol/src/protocol.ts`) computes exactly one verdict:\n\n```\nconst unknown = names.filter((f) =&gt; !gate.known.has(f.split('.')[0]));\nif (unknown.length === 0) return;\n```\n\nA `formula` field IS known, so it passes the door and reaches the driver, which has no column for it.\n\n## Measured\n\nReal `ObjectQL` over `@objectstack/driver-sqlite-wasm`, one object, two rows — `is_completed` a `formula` whose source is `record.status == \"completed\"`, `status` a stored text column:\n\n```\nwhere { is_completed: true  }            ->  0 rows, no error\nwhere { is_completed: false }            ->  0 rows, no error\nCONTROL where { status: 'completed' }        ->  1 row\nCONTROL where { status: { $ne: 'completed' } } ->  1 row\n```\n\nThe formula READS correctly on the same rows in the same call (`applyFormulaPlan` hydrates it), which is what makes this hard to spot: the field is visibly populated in the response and simultaneously unfilterable.\n\n`packages/spec/src/data/search-fields.ts` already records the same measurement for the `$contains` case (\"0 rows on driver-memory ... 0 rows with NO error on driver-sql/better-sqlite3\"), so the storage fact is established repo-side; only the filter axis never grew a door for it.\n\n## Why it matters\n\nBoth directions are wrong, and the `false` direction is the dangerous one:\n\n- `{ formula_field: true }` returns nothing — a surface that looks merely empty.\n- `{ formula_field: false }` **also** returns nothing, where the same predicate against a stored boolean returns every row. A filter meaning \"not yet done\" silently becomes \"no records at all\".\n\nThis is the fail-open shape #4254 / #6674 / #6994 each closed one axis over, on the last axis that still has it. It is also a live authoring trap: #7226's `app-todo` had eight filters on that exact predicate, and the natural repair for that card — deriving the flags as formula fields — would have silently emptied a list view, a scheduled reminder flow and two reports, with no error anywhere. The fix there had to route around the platform rather than use it.\n\n## Shape of the fix, if wanted\n\nGive `assertFilterFieldsExist` the third verdict its two neighbours already have, splitting `unknown` from `virtual`, judged by the same `@objectstack/spec/data` predicate the search axis uses (`isVirtualSearchField` / `SEARCH_VIRTUAL_TYPES`) so gate and drivers cannot disagree about which types have a column. The remedy sentence should match the wording the sort and search refusals already share (\"denormalise onto a stored field ... and filter that\"), per the one-vocabulary-across-doors discipline recorded on `assertSortFieldsExist`.\n\nTwo things worth deciding rather than assuming:\n\n1. **Ingress-only, or the engine door too?** #7095 had to add `assertOrderByIsMaterializable` inside `objectql` because saved reports forward `query.orderBy` straight into `engine.find`, bypassing the REST ingress. Filters are forwarded the same way from reports, flows and dashboards, so an ingress-only fix would leave the author-reachable half open — the same lesson, one axis over.\n2. **Blast radius.** Unlike sort, a filter changes the row SET, so a refusal turns today's silent-zero surfaces into loud 4xx. That is the correct direction (ADR-0032, no silent failure), but it will surface every existing app that has one of these, which is a migration question rather than a pure bug fix.\n\n`summary` and `autonumber` must NOT be caught by this — both get real stored columns and filter correctly; the set is exactly `formula`, as `UNMATERIALIZED_SORT_TYPES` and `SEARCH_VIRTUAL_TYPES` both already pin.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01ARidKDYSCD56LaygrvDPnk)_\n"
+}

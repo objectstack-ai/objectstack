@@ -1,0 +1,35 @@
+{
+  "number": 8333,
+  "kind": "issue",
+  "title": "[finding] `metadata-protocol`'s batch verbs still put caught error text on client-facing payloads — the 8 producers option C did not reach",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "security"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-13T05:56:00Z",
+  "updated_at": "2026-08-13T14:06:33Z",
+  "closed_at": "2026-08-13T14:05:51Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8333",
+  "body": "Filed by the dev on #8136 while landing option C of #8086. **Unassigned; nobody is on it.** This is the recorded remainder of that card's producer sweep, not a new discovery — the full inventory was enumerated there and only the measured cluster was fixed, deliberately and with the remainder named rather than silently narrowed.\n\nBlocked-by: #8136 (its PR introduces the helper these sites would use).\n\n## What #8136 fixed, and what it did not\n\n#8136 fixed the uninstall / overlay-delete cluster, which is the cluster #8130 reproduced end to end: `deletePackage`'s first `sys_metadata` read, `deleteMetaItem`'s two re-wrap exits, and the `failed[]` / `cleanups[]` arrays that ride onto a `PACKAGE_DELETE_PARTIAL` 400 inside `details`.\n\nThe rule it installed at the producer, stated once: a caught error's sentence is quoted back to a caller **only when that error declared itself a client-facing refusal** — a 4xx `status` in the ADR-0112 envelope. Everything else gets a stable sentence naming the operation, with the original error on `cause` for the log.\n\nEight sites in the same file were enumerated and **not** converted:\n\n| # | Site | Sink |\n|:--|:--|:--|\n| P6 | `publishPackageDrafts` `failed[].error` | batch-publish response data |\n| P7 | publish side effects `materialize.failures[].error` | same |\n| P8 | `materializeApplied.error` (feeds P7) | same |\n| P9 | seed-apply `error` | seed response data |\n| P10 | `duplicatePackage` `failed[].error` | copy response data |\n| P11 | `revertCommit` `failed[].error` | revert response data |\n| P12 | `revertToCommit` `failed[].error` | derivative of P11 |\n| P13 | `migrateStoredMetadata` `rows[].reason` | migration report |\n\nEach reaches a client the same way the fixed ones do — as **data on a response**, not as a message — so no HTTP boundary's 5xx message withhold can reach any of them, which is the whole argument for option C over a fourth belt.\n\n## ⚠️ Why this was NOT swept blind, and what the taker must measure first\n\nThis is the substantive part of the card, and it is a real design question rather than remaining typing.\n\nSeveral of these sites carry **authored refusals as well as driver text**, and the two are not distinguishable by the sink. `publishPackageDrafts`' `failed[].error` is the clearest case: it ships alongside `code` and structured spec-validation `issues`, and its whole job is to tell an author which field of which draft is wrong. Applying the 4xx rule there **without first measuring which publish-path refusals actually declare a `status`** would blank exactly the authoring feedback #4277 exists for — a usability regression traded for a disclosure gain, on the surface AI-authored metadata apps depend on most.\n\nSo the first step is a measurement, not an edit:\n\n1. For each of P6–P13, drive the real path and record whether the errors arriving in that catch declare a 4xx `status`. Spec/Zod validation failures raised through `saveMetaItem` are the ones to check hardest — they are the population most likely to be authored-and-undeclared.\n2. Where refusals are undeclared but *should* be declared, the contract-first fix is to **declare them at their own producer**, not to loosen the rule at the collector. That is the same direction #8136 took and it keeps the positive list intact.\n3. Only then convert the site.\n\nA site whose refusals turn out to be uniformly undeclared-and-authored is a legitimate `needs_decision`, not a thing to force.\n\n## Two sites that look like members and are not\n\nThe copy path's `the flow does not canonicalize: ...` and `conversion refused — ...` strings interpolate **authored schema-validation** text, not driver text. They were examined and deliberately left alone. Whoever takes this should not \"tidy\" them in.\n\n## Evidence\n\nRead from the file directly, structurally (`${e.message}`-shaped interpolation and direct assignment of a caught message into a payload field), never by grepping the strings the older cards quote — the producer #8086 originally named no longer exists and survives only as docblock prose. The sinks were confirmed by reading each method's return shape.\n\n**Not** reproduced end to end per site. #8136 earned its premise with a live reproduction for the cluster it fixed; these eight are read from source, and whoever takes this should force a real driver failure through at least one of the batch verbs and record the actual response body before fixing, the same way #8086 and #8136 were each made to earn theirs.\n\n## Related\n\n#8136 (option C, the measured cluster) · #8086 (the ruling recording option C) · #8130 · #8131 · #8132\n"
+}

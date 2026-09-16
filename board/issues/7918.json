@@ -1,0 +1,35 @@
+{
+  "number": 7918,
+  "kind": "issue",
+  "title": "Contract question: should publish-time validation reject a declared currency `precision` that contradicts the currency's ISO 4217 digits?",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "huangyiirene"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-12T04:21:15Z",
+  "updated_at": "2026-08-12T22:35:15Z",
+  "closed_at": "2026-08-12T22:35:15Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7918",
+  "body": "## The question\n\nA currency field can declare a `precision`. A currency also has a fraction-digit count of its own, fixed by ISO 4217 and carried in CLDR. Nothing today stops an author from declaring a `precision` that contradicts it:\n\n```yaml\ntype: currency\ncurrency: JPY\nprecision: 2      # the yen has no minor unit at all\n```\n\n**Is that combination something publish-time validation should reject, or is it a legitimate authored display choice that overrides the currency's own convention?**\n\nThis is a spec question, not a renderer question, which is why it is filed here rather than answered downstream. It came out of objectui#4361 (currency formatting overrode each currency's own fraction-digit convention); the PM ruling on that card is quoted at the bottom.\n\n## Measured — the two `precision` keys are not the same key\n\nMeasured against `@objectstack/spec@17.0.0-rc.6` as consumed by objectui:\n\n| key | schema | default |\n| --- | --- | --- |\n| a currency FIELD's own `precision` | `z.ZodOptional(z.ZodNumber)` | none — absent stays absent |\n| `CurrencyConfigSchema.precision` (`packages/spec/src/data/field.zod.ts`, around lines 112-114) | `z.number().int().min(0).max(10).default(2)` | materialized `2` |\n\nWorth stating plainly because it decides whether a consumer can even tell the two cases apart: a parsed FIELD carries no materialized `2`, so a renderer can distinguish \"the author declared 2\" from \"the author declared nothing\". The `currencyConfig` block cannot be distinguished that way — its default is baked in at parse time, so by the time anyone reads it, an unset `precision` and an authored `precision: 2` are the same value.\n\nNote also that `CurrencyConfigSchema` aliases both `decimals` and `scale` onto `precision`, so three spellings reach one key.\n\n## The digit counts in question\n\nICU, node 22, full ICU (icu 78.2), identical across every display locale tested (en-US, de-DE, ja-JP, ar-KW, zh-CN, fr-FR, pl-PL, es-ES) — the count comes from CLDR `currencyData`, keyed by the currency and not by the reader:\n\n| digits | currencies |\n| --- | --- |\n| 0 | JPY, KRW, CLP, ISK, VND |\n| 2 | USD, EUR, CNY, GBP |\n| 3 | KWD, BHD, OMR, TND |\n\nSo `precision: 2` on a JPY field asks for two digits of a minor unit that does not exist, and `precision: 2` on a KWD field silently drops the third fils digit that does.\n\n## Options\n\n**A. Reject at publish time** — a declared `precision` that disagrees with the currency's ISO 4217 digits is a validation error, when the currency is statically known (a field-level `currency`, or `currencyConfig` in `fixed` mode).\n\n- Real business need: the pull is authoring correctness rather than a new capability. The contradiction is not expressible as a deliberate intent anyone has asked for — nobody has a business reason to display two decimal places of yen.\n- Long-term soundness: declared = enforced, and the contradiction cannot reach a renderer at all. Costs a rule that only fires when the currency is statically known; a `dynamic` currencyMode field has no single currency to check against, so the rule is necessarily partial.\n- Hard to get wrong: strongest of the three. An AI-authored metadata app that writes `precision: 2` next to `currency: JPY` is told at publish time, once, instead of shipping money rendered with digits it does not have.\n\n**B. Treat an authored `precision` as an intentional display override** — document it as winning over the currency convention, and leave validation alone.\n\n- Real business need: no measured case. I could not find a scenario where showing sub-unit precision on a 0-digit currency is what someone wants; if one exists (accounting displays that carry fractional yen internally?), that is the argument for B and it should be written down, because right now it is only implied by the absence of a rule.\n- Long-term soundness: cheapest today, and it fossilizes \"the author may contradict ISO 4217\" as contract by silence rather than by decision.\n- Hard to get wrong: weakest. The failure is invisible — the metadata publishes, the app renders, and the money is wrong.\n\n**C. Warn, do not reject.** Splits the difference and, in an AI-authoring pipeline, mostly means the warning is not read.\n\n## Recommendation\n\n**A**, scoped to the case where the currency is statically known, with the message naming both numbers (\"currency JPY has 0 fraction digits; `precision: 2` contradicts it\"). B is defensible only if someone can name the business case that A would block — and that case should be captured in the spec's own docs either way, since today the behavior is undefined rather than chosen.\n\nDeciding this does not block anything: objectui already ships the renderer half.\n\n## What objectui does meanwhile (no coupling)\n\nobjectui#4361 fixes the rendering defect independently. Its PM ruling, quoted verbatim:\n\n> **`CurrencyField.formatAmount`**: **explicitly authored `precision` wins** — it is authored metadata, and the repo's convention is authored-metadata-keeps-priority (same shape as #4397's `param.placeholder`). **Absent** precision derives from the currency instead of defaulting to 2.\n\n> **The contract question goes upstream, contract-first**: whether publish-time validation should reject a declared `precision` that contradicts the currency's ISO 4217 digits is a spec question. The dev files the objectstack card (contract-first shape, citing this ruling and the measured table), links it here, and the renderer ruling above stands as objectui's behavior pending the upstream answer — no waiting, no coupling.\n\nSo an authored `precision` currently wins in the renderer, and an absent one derives from the currency. If this card is answered **A**, the contradicting combination stops reaching the renderer at all and the objectui behavior is unaffected. If it is answered **B**, objectui's behavior is already the documented one.\n\nAdjacent but different: objectstack#7501 asks whether a number field's declared `scale` is enforced on write. This card is about a declared display width contradicting a fixed property of the currency, at publish time.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_017Qqyix2QcnpUC9XeYVDzx3)_\n"
+}

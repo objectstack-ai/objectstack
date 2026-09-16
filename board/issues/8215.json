@@ -1,0 +1,35 @@
+{
+  "number": 8215,
+  "kind": "issue",
+  "title": "A `preserveAudit` by-id update hands the primary key to the driver: `isPreservableUnderAudit` reinstates a platform object's own `id`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-12T20:49:59Z",
+  "updated_at": "2026-08-13T05:41:42Z",
+  "closed_at": "2026-08-13T05:41:06Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8215",
+  "body": "Measured while implementing #8141, out of its ruled scope, and not the same fact as #6435's \"truthy-scalar `data.id`\" block — this one lands on objects whose `id` **is** `readonly: true`, i.e. every platform object, and it is the historical-import path that reaches it.\n\n## What happens\n\n`isPreservableUnderAudit` (`packages/objectql/src/validation/rule-validator.ts`) is:\n\n```ts\nfunction isPreservableUnderAudit(name: string, def: ConditionalFieldDef): boolean {\n  if (AUDIT_TIMELINE_FIELDS.has(name)) return true;\n  return def.system !== true;                 // author-declared business readonly field\n}\n```\n\nA platform object's primary key qualifies under the second limb. `sys_user_preference` declares it as `Field.text({ label: 'Preference ID', required: true, readonly: true })` (`packages/platform-objects/src/identity/sys-user-preference.object.ts`) — `readonly`, **not** `system` — so to this predicate it reads as an author-declared business field like `closed_at`.\n\nSo on a by-id update carrying `{ context: { preserveAudit: true } }`, `stripReadonlyFields` **keeps** `id` instead of stripping it, and the payload reaching the driver is `SET id = 'rec_1' WHERE id = 'rec_1'`. The REST ingress folds the path id into every update body (#6479), so the caller does not have to send an `id` for this to happen — an import doing `PATCH` with a body that names no `id` at all still hits it.\n\nPinned as observed behaviour, deliberately, in `rule-validator.test.ts` (\"composes with preserveAudit rather than overriding it\", #8141): the address survives the strip one line before the address rule is consulted.\n\n## Why it is worth a card\n\nThe strip exists because a primary-key write is not uniformly harmless — #8141 and #6435 both restate the reason: **a same-value primary-key write is a no-op on SQL but an outright rejection on stores with immutable primary keys.** This path removes that protection from exactly the caller least able to diagnose it: a bulk historical import, whose whole payload is legitimate except a key it never typed.\n\nThe exemption is also not the one the flag was designed for. #3493 scoped `preserveAudit` to \"reinstate the original timeline\" — the audit family, plus business fields an importer really is restoring. A row's own primary key is neither: it is the address of the write, not a fact being restored, and the import is not asking to rewrite it.\n\n## Shape of a fix (for triage, not a ruling)\n\nNarrow the second limb so a `primaryKey: true` field is never preservable, i.e. the whitelist stops covering the one column the strip protects for a store-portability reason rather than an authorship one. That is a one-predicate change with a real blast radius (`preserveAudit` upserts that today carry `id` through), so it wants measuring against the import runner's own tests (`packages/rest/src/import-runner-historical-readonly-insert.test.ts` and the #3493 suite) before it lands.\n\n⛔ Not to be folded into #8141, which is ruled to the log channel and whose payload-to-driver invariant is \"byte-identical\".\n\nFiled unassigned by the #8141 dev lane (seat #6019, `domain:engine-core`).\n"
+}

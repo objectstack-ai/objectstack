@@ -1,0 +1,35 @@
+{
+  "number": 7894,
+  "kind": "issue",
+  "title": "meta-plural-url-bypass: `PUT /meta/fields/<name>` walks around the whole two-tier registry gate — 4 registry types have no entry in `PLURAL_TO_SINGULAR`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "security"
+  ],
+  "assignees": [
+    "huangyiirene"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-12T02:34:59Z",
+  "updated_at": "2026-08-13T13:01:53Z",
+  "closed_at": "2026-08-13T13:01:07Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7894",
+  "body": "## Summary\n\n`canonicalMetaType` — the ONE canonical spelling of a metadata type at the `/meta` read/write/delete boundary (#4432) — folds plural→singular through `PLURAL_TO_SINGULAR`. That map is a **manifest collection map** (`objects: [...]`, `apps: [...]`), and it is missing entries for four registry types. For those, the plural URL spelling is not folded: it is treated as an **unregistered plugin type**, which every authorization gate treats as permissive by construction.\n\nResult: the plural URL is a door around the singular URL's lock.\n\n## Measured, live (booted showcase, admin bearer, on top of #7743's fix)\n\n```\nPUT /api/v1/meta/field/showcase_task.title   → 403 NOT_OVERRIDABLE     ← #7743's fix, correct\nPUT /api/v1/meta/fields/showcase_task.title  → 200 {\"success\":true,\"state\":\"active\",\n                                                    \"message\":\"Saved fields 'showcase_task.title' …\"}\n```\n\nNote the receipt: **`Saved fields`**. The row is persisted with `type='fields'` — a second namespace for the same item, which is precisely the defect class #4432 was filed about (\"one plural-spelled read minted a plural registry entry … one overlay row shadowed an entire code-authored listing, and survived the DELETE that was supposed to lift it\").\n\n## Why the gates let it through\n\nFor an unmapped spelling `'fields'`:\n\n- `isOverlayAllowed('fields')` → `false`\n- `isRuntimeCreateAllowed('fields')` → `true` — no static registry entry, so `getMetaTypes()` synthesises `allowRuntimeCreate: true`\n- the #5086 code-only refusal needs BOTH false → does not fire\n- `orgScopedWriteRefusal` → returns `null`, explicitly: *\"Statically-declared types only… a type with no entry in `DEFAULT_METADATA_TYPE_REGISTRY` is plugin-registered at runtime\"*\n- `SysMetadataRepository.assertAllowed('fields', 'runtime-only')` → `!STATIC_REGISTRY_TYPES.has('fields')` → **returns, allowed**\n\nEvery one of those is correct behaviour *for a genuinely plugin-registered type*. The bug is that `'fields'` is not one — it is a registry type wearing a spelling the boundary map does not know.\n\n## Blast radius (measured against `DEFAULT_METADATA_TYPE_REGISTRY` at `bcea363`)\n\nRegistry types with **no** singular target anywhere in `PLURAL_TO_SINGULAR`:\n\n| type | `allowOrgOverride` | `allowRuntimeCreate` | exploitable today |\n|:--|:--|:--|:--|\n| `field` | false | true | **yes** — proven above; artifacts exist (inside objects) |\n| `seed` | false | true | structurally, if a package ships one |\n| `external_catalog` | false | true | structurally, if a package ships one |\n| `translation` | true | true | no — the singular route allows it anyway |\n\nPlus `email_template`, reachable only as camelCase `emailTemplates`; the REST-shaped `/meta/email_templates` is unmapped. (`allowOrgOverride: true`, so no lock to bypass.)\n\nSo the one type where this is a live authorization hole today is **`field`**, which is why it surfaced under #7743.\n\n## Why #7743 did not fix it\n\nIt is a different defect with a wider remedy, and the narrow patch is the wrong shape. Two candidate fixes, both needing a decision:\n\n1. **Add the missing keys to `PLURAL_TO_SINGULAR`.** ⚠️ Careful: that map is also iterated by `metadata-authoring-lint.ts` to emit \"did you mean\" hints for **stack-level manifest collections**. Adding `fields:` there would advertise a top-level `fields: [...]` collection that does not exist and collides conceptually with `ObjectSchema.fields`.\n2. **Split the two roles** — a manifest-collection map and a URL-spelling map are two different contracts that happen to overlap. `canonicalMetaType` would read the URL one, derived from `DEFAULT_METADATA_TYPE_REGISTRY` so a new type cannot arrive unmapped (Prime Directive #8: registry-derived, never a hand-written list).\n\nA third option worth pricing: **refuse an unknown plural at the boundary** rather than silently treating it as a plugin type — an unmapped spelling of a *declared* type is a caller error, and answering 200 to it is how the second namespace gets minted.\n\n⛔ Do **not** fix this by teaching `isNestedArtifactField` (or any other predicate) to accept `'fields'` — that is a spelling-tolerant lookup one layer below the boundary, which is the exact pattern #4432's doc comment rejects, and it would still persist the row under `type='fields'`.\n\n## Repro\n\n1. Boot the showcase with writable runtime packages; obtain an admin bearer.\n2. `PUT /api/v1/meta/field/showcase_task.title {name:'title', label:'X', type:'text'}` → 403 (with #7743's fix).\n3. `PUT /api/v1/meta/fields/showcase_task.title` with the same body → **200**.\n4. `SELECT type, name FROM sys_metadata` → a row with `type='fields'`.\n\n## Source\n\nFound while writing #7743's route-level pin: the plural case was written expecting a 403 and measured 200, then confirmed against the live showcase. Not present in #7743's original report."
+}

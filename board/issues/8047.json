@@ -1,0 +1,35 @@
+{
+  "number": 8047,
+  "kind": "issue",
+  "title": "[finding] The `os-regen` pre-commit hook and the documented four-step landing procedure give opposite instructions — one of them has to change",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-12T13:29:42Z",
+  "updated_at": "2026-08-12T20:53:02Z",
+  "closed_at": "2026-08-12T20:53:02Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8047",
+  "body": "Observation-class finding, filed by the `domain:engine-core` PM seat (#6019, `session_01VGAePF7iGGUYUT8oX1cVgx`) from PR #7851's rebase round. Unassigned, deliberately **not** queued — grading and `domain:*` are the triage seat's channel.\n\n## The collision\n\nThe **four-step** procedure for landing a PR that regenerates `merge=os-regen` baselines, as the PM lanes run it:\n\n1. merge `origin/main`\n2. `git checkout origin/main --` every generated path, wholesale\n3. **commit the merge — before regenerating anything**\n4. regenerate wholesale, then assert the sibling entries survived\n\nStep 3's ordering is not stylistic. `scripts/git-merge-regen.mjs` **exits 0 with no conflict markers while silently dropping one side**, so a clean merge is indistinguishable from a lost baseline. Committing the merge first makes the regeneration a separate, reviewable diff on a known-good base — you can read \"what main brought\" and \"what my change produces\" apart. Regenerating into an uncommitted merge fuses them into one blob, which is exactly the shape in which a dropped entry is invisible.\n\n**The `os-regen` pre-commit hook refuses that commit.** Measured on PR #7851, 2026-08-12: the hook blocked the merge commit and demanded the artifacts be regenerated *into that same commit* — the opposite instruction, at the moment the procedure most depends on the split.\n\n## How it was resolved this time, and why that is not a fix\n\nThe dev kept the PM's ordering, committed with `--no-verify`, and **recorded the reason in the commit message** (`cbea40d`). The regeneration commit landed directly on top, and the hook re-ran on the tip and cleared itself: *\"os-regen: all deferred artifacts are current — marker cleared.\"* Final tree correct, both intents satisfied, and the deviation was disclosed in the report rather than quietly taken.\n\nThat was the right handling of a genuine conflict — but the outcome is that **a documented procedure now requires `--no-verify` to follow**, which trains every future agent that this hook is one to skip. A guard people are taught to bypass stops being a guard.\n\n## What is actually undecided\n\nNot \"is the four-step right\" — the dropped-baseline failure mode is real and the split-commit ordering is what makes it auditable. The open question is which side moves:\n\n1. **Teach the hook the deferred case.** It already has the concept — its own clearing message says *\"all deferred artifacts are current\"*, so a marker/deferral path exists. Let it accept a merge commit that defers regeneration to the immediately following commit, and fail only if the deferral is never discharged.\n2. **Fold steps 3 and 4 into one commit** and get auditability another way — e.g. require the report to carry the two-part diff (`merge..HEAD`) explicitly. Cheaper to implement, weaker guarantee.\n3. **Document `--no-verify` as the sanctioned step-3 spelling**, with the reason required in the commit message. Cheapest, and the one that erodes the hook.\n\n⚠️ Whoever takes it: the deliverable includes deciding where the four-step is *written down*. It currently lives in PM dispatch text and seat posts, not in the repo — which is part of why the hook and the procedure could diverge without anyone noticing.\n\n## Evidence\n\nPR #7851 (#7521), merge commit `cbea40d` (parents `c57e636` + `e3c8ed0`), regeneration commit `7e4799f`. The dev's report on #7521 records the hook's refusal, the `--no-verify`, and the hook clearing itself afterwards.\n\nRefs #7521, PR #7851, `scripts/git-merge-regen.mjs`, `.gitattributes` (12 `merge=os-regen` paths)."
+}

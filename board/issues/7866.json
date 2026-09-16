@@ -1,0 +1,35 @@
+{
+  "number": 7866,
+  "kind": "issue",
+  "title": "ADR-0001 is still on the weaker remedy: upgrade it from an `UNRESOLVED_ADR_CITATIONS` allowlist entry to a tombstone record, now that 0107 is the template",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T22:08:25Z",
+  "updated_at": "2026-08-13T03:32:27Z",
+  "closed_at": "2026-08-13T03:32:27Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7866",
+  "body": "Filing unassigned; `domain:*` routing is the triage seat's. This is the one live remainder of #7329 — named by that card's 2026-08-11T03:10Z triage comment as the real restart condition, and explicitly left **open and unclaimed** by PR #7838 (merged 21:35Z) with its reason stated. Filing it so it does not die with the card that carried it.\n\n## The gap\n\n`docs/adr/0001-*.md` was **deleted** on 2026-02-11 in the permission-protocol rewrite (`9da8e3e72`), while ADR-0002 still cites it as history. Today it is covered by an entry on `UNRESOLVED_ADR_CITATIONS` in `scripts/check-adr-anchors.mjs` — an allowlist that says \"this citation resolves to nothing, and that is knowingly tolerated\".\n\nThe gate's own prose says a **tombstone record is the preferred remedy**, and since #6676 / PR #7316 there is a working template for one: `docs/adr/0107-withdrawn-hook-body-write-set-static-gap.md`. So ADR-0001 sits on the weaker of two remedies, purely because the better one did not exist when it was written.\n\nA tombstone buys two things the allowlist cannot:\n1. **The citations genuinely resolve** — ADR-0002's historical reference points at a file that exists and explains what happened, instead of at an allowlist entry a reader has to go find.\n2. **The number can never be re-handed out.** An allowlist entry is inert against re-use; a record collides loudly in `auditAdrDirectory` (that path was hardened by #7316, and PR #7838 just added the rule that a tombstone number is refused as an *anchor* while still resolving as a *citation*).\n\n## Why #7838 did not take it\n\nNot an oversight — the PR says so directly: it *\"needs a **new** `docs/adr/0001-*.md`, which is a #6741 human-merge PR and does not belong on a script-only branch.\"* PR #7838 confirmed the mechanism while it was in flight: its `ADR maintainer approval` check was green *precisely because nothing under `docs/adr/` was touched*.\n\n## ⚠️ The merge-channel constraint, and why this card cannot be split\n\nThe obvious split — \"new tombstone file (human) + drop the allowlist entry (AI)\" — **does not work**, and whoever takes this should know before planning:\n\n- `check-adr-merge-approval.mjs` matches on the `docs/adr/` **path prefix with no size exemption**, so the tombstone half is maintainer-merge no matter how small.\n- The two halves are **coupled**: removing `0001` from `UNRESOLVED_ADR_CITATIONS` before the tombstone exists turns the gate red, and landing the tombstone while the allowlist entry remains leaves a redundant grandfather clause behind. They have to land together.\n\nSo this is a **single PR that goes entirely through the maintainer's manual channel** — unlike #7783→#7837 and #7863, where the halves were genuinely separable. An AI seat may draft and PR it; it must not merge, enqueue, or arm auto-merge on it.\n\n## What the change is\n\n1. Write `docs/adr/0001-withdrawn-<slug>.md` following the 0107 tombstone's shape — content is \"this number's record was deleted on 2026-02-11 in the permission-protocol rewrite; nothing in it is in force; do not reuse\", with the commit reference and a pointer to ADR-0002 which cites it as history. Note the slug must start with `withdrawn-` — PR #7838 made that prefix the machine-readable marker for \"not a decision\", so a tombstone that misses it is silently anchorable.\n2. Drop the `0001` entry from `UNRESOLVED_ADR_CITATIONS` in `scripts/check-adr-anchors.mjs`, with its comment.\n3. `pnpm check:adr-anchors` must stay green, and `--self-test` should gain a live-tree assertion that `0001` is now in both `records` and `nonDecisions` — the same both-directions pin #7838 added for `0107`.\n\n**Worth confirming rather than assuming**: whether ADR-0001's deleted content is recoverable from history and worth summarising in the tombstone, or whether the honest record is just \"deleted, see `9da8e3e72`\". The 0107 tombstone is the style precedent either way.\n\n## Provenance\n\n#7329's 03:10Z triage comment (the re-scope), and PR #7838's \"Out of scope, with the reasoning recorded\" section. Filed by the devx PM seat (#6023)."
+}

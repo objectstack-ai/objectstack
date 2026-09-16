@@ -1,0 +1,32 @@
+{
+  "number": 6896,
+  "kind": "issue",
+  "title": "[finding] `isSystem` 写入的 owner_id 缺口有两处彼此独立的补偿、没有共享机制 —— 第三条系统写入路径两者都拿不到",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "finding"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T03:10:58Z",
+  "updated_at": "2026-08-12T17:59:35Z",
+  "closed_at": "2026-08-12T17:54:44Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6896",
+  "body": "观察类记录，来自 #6782 的 `isSystem` 全仓普查（PR #6891）。**今天没有用户能撞到**：已知的两条系统写入路径各自都补上了。记录它是因为补偿方式是两套、互不知情，而缺口本身在中间件里。\n\n## 事实\n\n平台的 `owner_id` 写时 stamp 在安全中间件的 3.5 步（`packages/plugins/plugin-security/src/security-plugin.ts:1466`—`1560`：INSERT 时把空 `owner_id` 补成 acting user）。该中间件在 `security-plugin.ts:825` 因 `context.isSystem` **整体短路**，所以任何 `isSystem` 写入都拿不到这个 stamp，行落库时 `owner_id = NULL` —— 默认的 `owner_only_writes` 策略会让它**对自己的创建者不可见**。\n\n对此平台做了两处**彼此独立**的补偿：\n\n1. **自动化流程的数据节点，内联补。** `packages/services/service-automation/src/runtime-identity.ts:279`（`stampSystemInsertOwner`），由 `packages/services/service-automation/src/builtin/crud-nodes.ts:309` 调用。该调用点的注释自陈了原因：\n\n   > the ownership anchor has no such engine-side channel for system writes — the security middleware that stamps it short-circuits on `isSystem` — so the writer fills it here.\n\n2. **种子数据，启动期扫描补。** `packages/plugins/plugin-security/src/claim-seed-ownership.ts`：`kernel:ready` 之后扫出 `owner_id` 为 NULL 或 `usr_system` 的行，以 `isSystem` 更新认领。\n\n两者解决同一个缺口，但没有共享的机制或契约：一个是写入时填充，一个是启动后修复，彼此不知道对方存在。\n\n## 为什么记录\n\n**新增第四条系统写入路径时，两条补偿都不会自动覆盖它**，而失败模式与 #4707 记录的完全同形 —— 元数据完整正确，行也写进去了，只有查库才能发现它没有 owner，因而对创建者不可见。普查确认目前只有上面两处补偿点。\n\n## 可能的处置（不预设结论，留给分诊）\n\n- A：维持现状，只靠文档（PR #6891 的权威表已点名这条，新增路径的作者若读到表就会知道要自己补）。\n- B：把 stamp 从安全中间件里提出来，做成不随 `isSystem` 短路的独立步骤（`owner_id` 本来就不是授权判定，是平台锚点）。\n- C：给系统写入提供一个共享的 helper / 契约，让第三条路径「不写就报错」而不是静默拿不到。\n\n倾向 B 或 C，但这是**已发布语义的改动**，且 #4707 的裁决刚刚明确「不拆分 `isSystem` 概念」，所以不自作主张 —— 按 observation 记录，不挂 `pm:queue`。\n\n参考：#4707（锚点单）、#6782 / PR #6891（权威表，含本条为「已知粗糙处」第 1 条）、hotcrm#622（诉求 1 的原始 app 侧 bug）。"
+}

@@ -1,0 +1,32 @@
+{
+  "number": 6522,
+  "kind": "issue",
+  "title": "flaky: `sql-driver-overlay-index-drift.test.ts` 「stays silent on the SECOND boot, when the runtime ledger starts empty again」偶发判红",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "finding"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T03:08:28Z",
+  "updated_at": "2026-08-13T10:21:52Z",
+  "closed_at": "2026-08-13T10:21:52Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 12,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6522",
+  "body": "观察类记录(`finding`,不入队),来自 #5702 实施期的一次全包跑。\n\n## 实测\n\n同一个 worktree、同一份改动,`pnpm --filter @objectstack/driver-sql test` 连跑两次:\n\n```\n第 1 次: FAIL src/sql-driver-overlay-index-drift.test.ts\n         > overlay index drift on a fresh database (#4884)\n         > stays silent on the SECOND boot, when the runtime ledger starts empty again\n         Test Files 1 failed | 69 passed | 4 skipped (74)\n\n第 2 次: Test Files 70 passed | 4 skipped (74)   ← 同一份代码,全绿\n```\n\n归因手法按 §9 走过一遍:把改动 `git stash -u` 掉,在 **pristine `origin/main`** 上跑同一个包 —— `69 passed | 4 skipped`,全绿。所以既不是本轮改动造成的,也不能靠「再跑一次」当作证伪 —— 它两边都可能绿。\n\n## 为什么值得记\n\n用例名字里的 \"SECOND boot\" 与 \"runtime ledger starts empty again\" 提示它依赖跨 boot 的状态复位;这类用例在并行 worker 下共享同一个库/账本时最容易互串。本仓 CI 的合并队列对偶发红很敏感(#5499 冻结 mongo 二进制下载,起因就是一次偶发红把无关 PR 踢出队列)。\n\n未做定位,只记录读数 —— 复现频率未测,是否与 `--maxWorkers=2` 相关未测。"
+}

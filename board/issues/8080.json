@@ -1,0 +1,34 @@
+{
+  "number": 8080,
+  "kind": "issue",
+  "title": "The 400 that four comments cite as the `$searchFields` half of the `__search` contract is asserted by no test",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-12T14:45:51Z",
+  "updated_at": "2026-08-12T19:54:31Z",
+  "closed_at": "2026-08-12T19:54:31Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8080",
+  "body": "Observation-class finding, noticed while implementing #7876 (PR #8079). Nothing is broken today — filing it so the triage round can grade it rather than sitting on it.\n\n## What is unasserted\n\n\"A `$searchFields` override naming `__search` is refused with a 400 (\\\"is hidden\\\")\" is now stated in four places in the tree:\n\n- `packages/objectql/src/engine.ts` — `stripSearchCompanionFromRead`'s docblock (twice after #8079: the pre-existing sentence and the new #7876 ruling block)\n- `packages/objectql/src/search-companion.ts:224` — `stripSearchCompanion`'s docblock\n- `packages/objectql/src/search-companion-read-projection-conformance.test.ts:12` — the suite's own docblock\n\nNo test asserts it. Re-check:\n\n```\ngit grep -rln \"searchFields\" -- packages | grep test | xargs grep -l \"__search\"\n```\n\nreturns three files, and in all three the two names never meet in an assertion — `search-companion.test.ts:173` pins the engine-side half (`resolveSearchFields` will not admit the column even when `requestedFields` names it), which is a different fact from the ingress gate's refusal.\n\n## Why it is only observation-class\n\nThe 400 does follow from two facts that ARE pinned, composed:\n\n1. `resolveSearchFields` excludes hidden fields (`packages/spec/src/data/search-fields.ts:112`), pinned by `search-companion.test.ts:173`;\n2. `assertSearchFieldsAreSearchable` refuses a known-but-unsearchable name with `400 INVALID_FIELD` (`packages/metadata-protocol/src/protocol.ts`), pinned by `query-expression-conformance.test.ts:1390` — on `estimate`, not on `__search`.\n\nSo the behaviour is real and reachable; what is missing is a test that names this column and asserts the ADR-0112 envelope (`code` AND `status`) on it.\n\n## Why it may still be worth closing\n\n#7876's ruling makes the 400 load-bearing *as a contrast*: the projection door's silence is now documented as correct precisely because the authoring door refuses. A future change that let hidden columns clear the searchability gate would leave all four comments false with every suite green, and the one suite whose stated job is \"on ANY door\" is the one whose docblock asserts it in prose only.\n\nSuggested shape if taken: one case in `search-companion-read-projection-conformance.test.ts`'s matrix asserting `code: 'INVALID_FIELD'` and `status: 400` for a `searchFields` override naming the companion.\n\nRelated: #7876 (the ruling) · PR #8079 (the comments) · #7642 (the projection strip) · #4254 (the gate)\n"
+}

@@ -1,0 +1,36 @@
+{
+  "number": 8323,
+  "kind": "issue",
+  "title": "tenant-scoped objects get GLOBAL unique indexes: 409-vs-201 enumerates other tenants' values, and a user's preferences silently stop persisting in their second org",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "security",
+    "target:v17"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-13T05:30:53Z",
+  "updated_at": "2026-08-13T15:52:35Z",
+  "closed_at": "2026-08-13T15:51:36Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 10,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8323",
+  "body": "On a deployment running `OS_TENANCY_POSTURE=isolated`, reads are tenant-scoped but field-level `unique: true` materializes a **global** unique index. The two disagree, and that gap is both an information leak and a live data-plane failure.\n\n## 1. The oracle: `409` vs `201` enumerates values you cannot see\n\nSame user, two organizations they belong to (甲 / 乙), `sys_capability`:\n\n```\nas 甲: POST /data/sys_capability {name:\"probe_cap_xtenant\"} → 201   (stamped organization_id = 甲)\nas 乙: GET  /data/sys_capability?filter=[\"name\",\"=\",\"probe_cap_xtenant\"] → total 0     ← invisible\nas 乙: POST /data/sys_capability {name:\"probe_cap_xtenant\"} → 409 UNIQUE_VIOLATION      ← but it collides\nas 乙: POST /data/sys_capability {name:\"probe_cap_only_in_b\"} → 201                     ← control\n```\n\nA tenant can therefore decide, for any value, whether some other tenant already holds it — while being unable to read the row. It also leaks platform-reserved rows: `POST {name:\"manage_metadata\"}` returns `409` in an org whose visible capability count is `0`.\n\n## 2. Not one object — the same on ordinary tenant data\n\n`sys_user_preference`, unique on `(user_id, key)`, same user in both orgs:\n\n```\nas 乙: POST {user_id:<self>, key:\"probe.uniq.xtenant\"} → 201\nas 甲: GET  ?filter=[\"key\",\"=\",\"probe.uniq.xtenant\"]   → total 0\nas 甲: POST {user_id:<self>, key:\"probe.uniq.xtenant\"} → 409 UNIQUE_VIOLATION\n```\n\nAny tenant-scoped object with a `unique` field inherits this. For customer-authored objects the enumerable values are the ones people actually mark unique — national ID, phone, email, customer code. Under `isolated`, the posture sold as *\"legal-entity / sovereignty isolation — the hard wall\"* (`packages/spec/src/security/tenancy-posture.ts:15`), that is exactly the wall this crosses.\n\n## 3. It is already breaking the platform's own feature\n\nThe console's own preference rows collide across organizations:\n\n```\nzhangsan in 甲: keys = [\"ui.recent\"]\nzhangsan in 乙: keys = [\"probe.uniq.xtenant\"]        ← no ui.recent\nzhangsan in 乙: POST {key:\"ui.recent\"} → 409 UNIQUE_VIOLATION\n```\n\nSo a user who belongs to two organizations can never persist `ui.recent` (or any preference key they already used elsewhere) in the second one. It fails silently, because the client swallows it by design — `packages/data-objectstack/src/userState.ts`:\n\n> `save()` resolves without throwing, so UI mutations never surface a toast.\n> […] Swallow — provider falls back to localStorage as source of truth.\n\nNet effect: \"recent items\" and similar preferences quietly never persist server-side in a user's second workspace, with no error anywhere.\n\n## Cause\n\n`uniqueIndexesFromFields` (`packages/drivers/driver-sql/src/schema-drift.ts:921`) only puts the tenant column in the index when the field opted in:\n\n```ts\nconst scoped =\n  isOrganizationScopedUnique(field.unique) && tenantField != null && tenantField !== name;\nconst columns = scoped ? [tenantField, name] : [name];\n```\n\n`unique: true` (and `'global'`) → single-column global index. Only `unique: 'organization'` (ADR-0120 D1) → `(organization_id, field)`. The machinery for the correct shape exists and is used for tenanted autonumber — `sql-driver.ts:4318` documents that index as `(COALESCE(organization_id,'__global__'), field)` — but ordinary unique fields do not get it, and the platform's own objects (`sys_capability`, `sys_user_preference`) are declared with the plain form.\n\n## The decision\n\n1. **Default should follow the posture.** Under `group`/`isolated`, a bare `unique: true` on a tenant-scoped object arguably *means* \"unique within the tenant\". Making the default posture-aware fixes every existing object at once, at the cost of an index migration.\n2. **At minimum, fix the platform's own objects** — `sys_user_preference` (`user_id, key`) and `sys_capability` (`name`) should be `unique: 'organization'`. This alone clears §3 and most of §2's blast radius on system tables.\n3. **Whatever is decided, the `409` must stop being an oracle** for values in other tenants — a collision against an invisible row should read as an ordinary refusal, not a distinguishable \"taken\" signal.\n\nI did not assume which of these you want, hence one issue rather than a patch.\n\n## Environment\n\n`objectos-ee-deploy` (Caddy → app → postgres:16, `NODE_ENV=production`, `OS_TENANCY_POSTURE=isolated`) on `http://localhost:8080`, observed 2026-08-13, via the REST API with real sessions of a user who is a member of both organizations. Probe rows created during this test were deleted afterwards.\n\nRelated: #8093 (the same `sys_user_preference` write path, surfacing a spurious warning toast).\n"
+}

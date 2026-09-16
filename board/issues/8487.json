@@ -1,0 +1,35 @@
+{
+  "number": 8487,
+  "kind": "pull_request",
+  "title": "fix(rest): render exported datetime cells in the business timezone, not UTC",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-13T15:35:21Z",
+  "updated_at": "2026-08-13T16:14:35Z",
+  "closed_at": "2026-08-13T16:14:34Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-13T16:14:34Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/8487",
+  "body": "Fixes #8373\n\nExport files must show the same clock as the screen. They did not: `formatDate` in `packages/rest/src/export-format.ts` read `getUTC*` unconditionally, and `formatCellValue` called it for every `date` / `datetime` cell, so a Console export streamed UTC while the UI rendered the business timezone. The reported harm is not \"a few hours out\" — a row the screen showed at `2026/8/1 06:00` (+08) landed in the file as `2026-07-31 22:00:00`, i.e. it left August, and a downstream deployment's monthly reconciliation stopped balancing on exactly that. Because `getUTC*` ignores the process `TZ`, no deployment-side setting could work around it.\n\n## The premise held: the timezone was already there\n\nThe card's load-bearing claim re-verified on the merged tree:\n\n- `resolveExecCtx` at the top of the export handler returns an `ExecutionContext` whose `timezone` is set by `assembleExecutionContext` (`packages/core/src/security/assemble-execution-context.ts`) from `resolveLocalizationContext`'s platform-default to global to tenant cascade.\n- The formatting layer simply never asked for it: `formatCellValue` and `formatRowCells` took no timezone parameter.\n\nSo this is plumbing, not a new resolution mechanism. The consistency anchor held too: autonumber date tokens already render in the ADR-0053 business timezone with UTC as the fallback (`calendarParts` in `packages/spec/src/data/autonumber-format.ts`), so this brings the export formatter onto an existing platform semantic rather than minting one.\n\n## What changed\n\n- `formatDate` takes its calendar components through `Intl.DateTimeFormat(..., { timeZone })` so DST comes from the platform tz database rather than hand-rolled offset arithmetic — the same primitive `@objectstack/core`'s `calendarPartsInTz` uses. Formatters are memoized per zone; a 50k-row export formats one cell per datetime column per row.\n- `timezone` is threaded through `formatRowCells` / `formatRowForJson` / `formatCellValue`, and the export route reads it off the context it already resolved.\n- All three writers of the one route get it: CSV, XLSX **and** JSON. CSV and XLSX both reproduce the defect and both are pinned; JSON shares `formatCellValue` through `formatRowForJson`, and leaving it behind would have recreated inside the route the very \"one export, two clocks\" contradiction this card cites as evidence. That JSON call site is one line inside the same handler loop as the XLSX writer — called out here because the dispatch named the CSV/XLSX writers specifically.\n\n## The two things that deliberately did **not** change\n\n**No timezone means UTC, byte for byte.** That is the backward-compatibility promise for every deployment that never configured one, and it covers a zone the platform does not recognise as well (degrade, never fail the export). Pinned in both directions.\n\n**`date` columns are untouched.** Under ADR-0053 a `date` is a **timezone-naive calendar day** and `datetime` is an instant rendered in a reference timezone — two different meanings, so two different clocks. `@objectstack/driver-sql`'s `toDateOnly` is the single source of truth for what a `date` is (`YYYY-MM-DD`; a `Date` collapsed on its UTC calendar day) and the filter, write and read paths all agree with it. Projecting a date-only value through a zone would move `2026-08-01` to `2026-07-31` for every deployment west of UTC — inventing the off-by-one-day defect that ADR decision exists to remove. This narrows the card's stated fix direction (\"date/datetime\"), and the narrowing is pinned by tests in Asia/Shanghai, America/New_York and Pacific/Honolulu.\n\n## Tests\n\nNew `packages/rest/src/export-business-timezone.test.ts` (18 tests): unit-level formatter cases plus the real export route over a real ObjectQL engine and a real sqlite `:memory:` driver, mirroring the existing `export-integration.test.ts` harness — the only stub is `resolveExecCtx`, standing in for the localization cascade.\n\nEvery datetime fixture straddles a **month** boundary rather than sitting comfortably mid-day: a test written at 12:00 would have passed both before and after the fix while the reported symptom survived untouched.\n\nReverse verification, direction predicted before running it — reverting only the threading (`wallClock(d, undefined)`) should redden every business-timezone assertion and leave the UTC-fallback and date-naive pins green, because those assert pre-fix behaviour:\n\n```\nTests  9 failed | 9 passed (18)\nAssertionError: expected '2026-07-31 22:00:00' to be '2026-08-01 06:00:00'\nAssertionError: expected [ '1', '2026-07-31 22:00:00', ... ] to deeply equal [ '1', '2026-08-01 06:00:00', ... ]   (CSV, route level)\nAssertionError: expected [ '1', '2026-07-31 22:00:00', ... ] to deeply equal [ '1', '2026-08-01 06:00:00', ... ]   (XLSX, route level)\n```\n\nRestored, the whole package is green: `pnpm --filter @objectstack/rest test` — 113 files, 1861 tests passed; `pnpm --filter @objectstack/rest typecheck` clean.\n\nGates run locally on a full built closure: `check:type-check-debt` (OK, 33 entries re-measured, none above its recorded number — the first attempt was +1 on this package's frozen test layer, from `registry.registerObject`'s missing packageId in the new test; fixed at the source rather than raising the ledger), `check:type-check-coverage`, `check:nul-bytes`, `check:route-envelope`, `check:authz-resolver`, `check:query-options-erasure`, `check:cross-package-test-inputs`, `check:filter-alias-parity`, `check:meta-type-normalized`, the changeset family (`check:changeset-gate-self-tests`, `check-empty-changeset`, `check-changeset-no-major`, `check-adr-0087-registration`, `check:objectui-changeset`), and eslint over the changed files.\n\n## Out of scope, filed\n\n- #8484 — the export's *filename* timestamp is still stamped in the process-local timezone. It is the other half of the \"one export, two clocks\" evidence on the card, but it changes a different user-visible surface and was not in the fix direction.\n- #8485 — bulk import reads a naive datetime cell in the process-local timezone, so the export/edit/re-import round trip depends on the host `TZ` rather than the tenant's.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01P7vaLs7bhBPi9m3JyzkhDj)_"
+}

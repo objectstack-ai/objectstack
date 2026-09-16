@@ -1,0 +1,34 @@
+{
+  "number": 8146,
+  "kind": "issue",
+  "title": "[Decision] `OS_METADATA_WRITABLE` unlocks a write on a read-only package while Studio renders a \"Read-only\" badge — which one is telling the truth?",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "bug"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-12T17:57:42Z",
+  "updated_at": "2026-08-13T05:54:24Z",
+  "closed_at": "2026-08-13T05:53:38Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8146",
+  "body": "Split out of #7682 at dispatch time so the invariant-restoring half of that card could ship without pre-empting this ruling. #7682 is dispatched with a binding instruction to **preserve the measured hatch behaviour exactly and pin it**, so whichever way this is ruled, the move is deliberate rather than a side effect.\n\n## Background\n\n`OS_METADATA_WRITABLE` is a documented operator hatch. With `OS_METADATA_WRITABLE=permission`:\n\n```\nPUT /api/v1/meta/permission/showcase_contributor?package=com.example.showcase\n→ 200 (env-wide overlay)\n```\n\n`com.example.showcase` is a **read-only** package. Meanwhile Studio renders that same permission matrix fully disabled with a \"Read-only\" badge. (The overlay was reverted after the run.)\n\nSo two surfaces answer the same question differently: the server says this is writable, the UI says it is locked. One of them is lying to the operator.\n\n## Premises (each with a re-check command)\n\n- The hatch is live and documented — re-check: `git grep -n \"OS_METADATA_WRITABLE\" origin/main -- packages/ content/docs/`\n- The refusal path it bypasses is the one #7682 is repairing — re-check: `git grep -n \"NOT_OVERRIDABLE\" origin/main -- packages/metadata-protocol/src/sys-metadata-repository.ts`\n- The badge is rendered by `objectui`; this issue carries `repo:objectui` because the fix for option A lands there — re-check by locating the \"Read-only\" badge in the console source before acting.\n\n⚠️ The reproduction is from QA run #7637 (framework `92f26f75`, console `09987b680`). Both repos have moved substantially since. **Re-run the reproduction before implementing whichever option is chosen** — if the hatch no longer bypasses the refusal, this card is moot and should be closed rather than implemented.\n\n## The question\n\nWhich surface is correct?\n\n**Option A — the hatch is intended; fix the badge.** The operator deliberately set an env var to unlock metadata writes; the server honouring it is the point. Studio's badge is then simply not reading the hatch, and should reflect it (badge off, or badge annotated \"unlocked by operator hatch\").\n\n**Option B — the badge is correct; the server should refuse.** Package read-only-ness is a property of the artifact, not of the session, and an env var should not make a read-only package writable. The hatch should widen *which metadata types* are overridable without also overriding *package* writability.\n\n**Option C — hatch keeps working, but loudly.** Server still allows it, but the response and the audit trail mark the write as hatch-authorised, and Studio surfaces \"unlocked by `OS_METADATA_WRITABLE`\" instead of a flat \"Read-only\".\n\n## Recommendation\n\n**Option B**, with A as the fallback if the hatch's documented purpose is genuinely package-level.\n\nReasoning along the three axes:\n\n- **Real business need** — the measured pull is operator escape-hatch usage, which is real but rare. Neither A nor B removes the hatch; they differ only in whether it reaches *package* writability. No user is asking for read-only packages to be editable by env var; they are asking for the lock to mean something.\n- **Platform long-term coherence** — B keeps one answer to \"is this package writable?\". A creates a permanent obligation for every future surface to also ask \"…unless the hatch is set\", which is exactly the special-case proliferation that makes locks unreliable. C is coherent but costs a new response/audit concept and two-surface plumbing for a rare path.\n- **AI-agent error-resistance** — this is the decisive axis. A read-only badge that an env var silently invalidates is precisely the shape that teaches an agent the lock is advisory. B makes the refusal loud and the declaration honest. A leaves a documented lock that is not enforced — declared ≠ enforced, the class this lane keeps filing.\n\n## Four-cornered card face\n\n1. **Platform long-term coherence** — B *shrinks* the special-case surface (one writability answer); A *grows* it (every writability check gains an \"unless hatch\" clause).\n2. **Measured business pull** — no measured demand for editing read-only packages via env var; the measured event is a QA run noticing the contradiction. Zero pull for A's capability as such.\n3. **AI-agent error-resistance** — B is loud refusal over silent tolerance; A preserves a lock that lies. B is strictly stronger here.\n4. **Startup scope discipline** — B is the smaller permanent obligation. C is the largest (a new \"hatch-authorised\" concept to maintain on two surfaces in two repos) and should only win if operators genuinely need the hatch at package level *and* need to see it.\n\n## Related\n\n#7682 (the invariant-restoring half, dispatched with the hatch behaviour pinned as-is) · QA run #7637"
+}

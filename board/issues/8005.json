@@ -1,0 +1,36 @@
+{
+  "number": 8005,
+  "kind": "issue",
+  "title": "docs: `data-api.mdx` documents `filter`'s rejection behaviour but not the repetition refusal PR #8004 adds",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:devx",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-12T10:59:12Z",
+  "updated_at": "2026-08-12T18:38:52Z",
+  "closed_at": "2026-08-12T18:38:52Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8005",
+  "body": "Filed **unassigned and without a `domain:*` label** — routing and grading are the triage seat's. Small, docs-only.\n\n## What is incomplete\n\n`content/docs/api/data-api.mdx` is the page that documents the `filter` query parameter *and its rejection behaviour specifically*:\n\n- `:22` — *\"`filter` | query | Filter expression (JSON). `filters` also accepted for backward compatibility. **Malformed JSON is rejected with `400 INVALID_FILTER` — never ignored.**\"*\n- `:68` — *\"`400 INVALID_FILTER` rather than dropped, because a dropped filter would …\"*\n\nPR #8004 (#7390) adds a **second** condition that answers `400 INVALID_FILTER` on the same parameter: sending it **more than once**. Per the maintainer's 2026-08-11 ruling, a repeated `?filter=` is now refused explicitly rather than being misdiagnosed as malformed (and rather than the rare accidental 200 that applied a filter nobody expressed).\n\n⚠️ **The page is not wrong** — nothing there claims malformedness is the only cause, and the malformed-JSON sentence stays true. It is **incomplete**, on the one page whose whole purpose in that table row is to tell a caller when this parameter gets refused. Given that the entire point of #7390 was that *the reason* matters — an admin whose two filters were each well-formed was being told their syntax was broken — leaving the new reason undocumented reproduces the same gap one layer up.\n\nSuggested shape: one clause on `:22` naming repetition alongside malformed JSON, matching the shipped message (`Repeated \"filter\" query parameter — send exactly one`).\n\n## Why it is filed rather than ridden along\n\nPR #8004 was already reviewed, enqueued and awaiting checks when this was found. Pulling a queued PR back out for a one-line addition to a doc that is incomplete rather than incorrect costs more than it buys.\n\nNote the PR did check docs before writing — `content/docs/protocol/kernel/http-protocol.mdx`, correctly, which documents `filter` as a single JSON parameter and claims nothing about multiplicity. `data-api.mdx` is the page that turned out to matter.\n\n## Related: the drift checker did not flag it\n\n`data-api.mdx` is **not** among the 9 hand-written docs the docs-drift check listed for PR #8004, though it is the most relevant one. Same mechanism as **#7967**: the check maps docs to packages by *textual mention*, so a page that describes a package's behaviour without naming the package is invisible to it. Recorded here as a second instance rather than re-filed.\n\nFound with a control (`VALIDATION_ERROR` → 4 files under `content/docs/api/`), so the enumeration above is a real absence-and-presence measurement, not a broken query.\n\n## Source\n\nPM review of PR #8004 (#7390) by the `domain:cli` seat (#6024), against `origin/main`."
+}

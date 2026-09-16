@@ -1,0 +1,33 @@
+{
+  "number": 8407,
+  "kind": "pull_request",
+  "title": "test(qa): assertArmed — a fixture proves the control under test is engaged before it measures anything (#8074)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/l",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-13T11:25:30Z",
+  "updated_at": "2026-08-13T12:03:25Z",
+  "closed_at": "2026-08-13T12:03:23Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-13T12:03:23Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/8407",
+  "body": "Fixes #8074\n\n## What this is\n\n`packages/qa/dogfood/test/armed.ts` — `assertArmed`: a fixture names the control it is about to measure and the default that would silence it, and the harness reads that declaration off the **live booted stack** before the fixture is allowed to measure anything.\n\nThe card's common factor is not a missing fixture helper — it is **a platform default that disarms the thing under test**, while the harness keeps reporting success. So the guard is built around the precondition, not around any one of the three defaults.\n\n## Scope — stated plainly, because two of three is the honest answer\n\n| instance | disarming mechanism | covered here |\n|---|---|---|\n| #8023 | org-less boot ⇒ no `org_member` ⇒ the write floor never applies | yes — `principalArmed` |\n| #8049 | `passwordHistoryCount: 0` ⇒ nothing to reject against | yes — `authSettingArmed` |\n| #7809 | tsconfig excludes the test layer ⇒ a type-level pin is never evaluated | **no, deliberately** |\n\nInstance 3 is out of reach of a runtime probe by construction: its assertion was evaluated by `tsc`, not by vitest, and what disarmed it lived in `tsconfig.json`. Three measured reasons not to build a package-local imitation of it:\n\n- `scripts/check-type-check-coverage.mjs` already owns the coverage half repo-wide (its `TEST_DEBT` ledger lifts a package's test-layer exclusion, compiles it, ratchets the count);\n- the remaining **signal** hole — `PINS_CHECKED` recognising only `@ts-expect-error` — is #8113 and is explicitly not this card's;\n- measured rather than assumed: `@objectstack/dogfood` is in neither ledger, its tsconfig `include` is `[\"src/**/*\", \"test/**/*\"]`, and a deliberate type error in a dogfood **test** file makes `pnpm --filter @objectstack/dogfood typecheck` go red (`TS2322`, ablation G below). Instance 3's mechanism is absent from this surface.\n\nThe module's header carries this reasoning, so the mechanism cannot read as though it covers all three.\n\n## Three design decisions, each load-bearing\n\n1. **Called from `beforeAll`, not from an `it()`.** A disarmed fixture must produce **zero** green cells. The hand-rolled `[integrity]` idiom this generalises is an ordinary case, so a disarm reddens one cell and every sibling still prints green — and #8023's harm was exactly a green cell in a 124-cell matrix re-drive. Measured, on #8023's own fixture: ablating `orgContext: true` used to leave 9 green cells; it now yields **10 skipped, 0 green**.\n2. **An unreadable probe counts as disarmed.** A guard that passes when it cannot see is a guard that passes.\n3. **The vacuous spellings are unavailable, not discouraged.** `assertArmed([])` throws; `principalArmed` with nothing required and `seededArmed` with an empty `where` throw at construction.\n\n## Consumers — five fixtures that patch-and-trust today\n\n`owd-public-read-write-write-floor` (#8023), `bearer-lane-password-change` (#8049), `two-factor-lockout`, `oidc-authorize-env-gate`. All four state their vacuity risk in prose and then trust the arming; none reads it back. They now do.\n\n## Every guard is shown to fire\n\nThis card is about assertions that cannot fail, so the guard is held to its own standard. Direction predicted before each run:\n\n| ablation | predicted | observed |\n|---|---|---|\n| A — `assertArmed` neutered | 5 red (the rejection cases) | 5 red, 15 green |\n| B — `armedWhen` accepts a truthy non-boolean | exactly 1 red | 1 red, 19 green |\n| C — `principalArmed` always armed | 4 red | 4 red, 16 green |\n| D — the guard's own org-bound stack loses `orgContext` | 4 red | 4 red, both positive controls fell |\n| E — #8023's fixture loses `orgContext: true` | whole file dies, 0 green | **10 skipped, 0 green** |\n| F(i) — #8049's fixture loses its arming line | whole file dies, 0 green | **12 skipped, 0 green** |\n| F(ii) — same disarm, gate also removed (pre-#8074 shape) | some red, green cells alongside | **3 red + 9 GREEN** |\n| G — type error in a dogfood test file | red | red, `TS2322` |\n\nF(ii) is the one worth reading twice: the pre-#8074 fixture records **nine passing cells** for a control that was never armed. That is the harm, reproduced.\n\nTwo positive controls in the guard's own suite assert that a fully armed declaration **resolves** — without them, an `assertArmed` that simply always threw would satisfy every rejection case above.\n\nNo dependency package was mutated in any ablation: all six files live in `packages/qa/dogfood/test/` and vitest transforms them from source, so no `dist/` rebuild sits between mutate and run.\n\n## Verification\n\n- `vitest run` over the five affected fixtures: **55 passed**.\n- `pnpm --filter @objectstack/dogfood typecheck`: clean.\n- Gate families re-derived from the actual changed paths via `scripts/pm/dispatch-gates.mjs`: `check:nul-bytes`, `check:test-source-alias`, `check:type-source-resolution`, `check:query-options-erasure`, `check:type-check-coverage` — all green.\n- `eslint --no-inline-config` on all six files: clean.\n\nTests-only (`packages/qa/dogfood/test/**`; `@objectstack/dogfood` is `private: true`), so no changeset — `skip-changeset` applied.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01P7vaLs7bhBPi9m3JyzkhDj)_"
+}

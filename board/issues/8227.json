@@ -1,0 +1,34 @@
+{
+  "number": 8227,
+  "kind": "pull_request",
+  "title": "ci(devx): run the dev-prereqs gate's self-test half in lint.yml",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "ci/cd",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-12T21:27:34Z",
+  "updated_at": "2026-08-12T22:17:15Z",
+  "closed_at": "2026-08-12T22:17:14Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-08-12T22:17:14Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/8227",
+  "body": "Fixes #8170\n\nThe second and only other member of the split-gate family whose first member landed as #8171. One step in `.github/workflows/lint.yml` running `node scripts/check-dev-prereqs.mjs --self-test`, and deliberately nothing else.\n\n## What lands\n\n- **`.github/workflows/lint.yml`** — one step in the `typecheck` job, in the pre-build group, invoked as `node` (never through the `check:dev-prereqs` npm script, which is `--self-test && the scan`), with the same \"self-test half only, never the scan\" naming as the #8171 and #6509 precedents.\n- **`scripts/check-dev-prereqs.mjs`** — header precision only, no behaviour change. Its header said *\"CI IS UNAFFECTED. This is wired into the root `dev` / `dev:*` scripts only — never into a workflow\"*. That is true of the scan and this change makes it false of the file, so the paragraph is split into WHERE THE SCAN RUNS / WHERE THE SELF-TEST RUNS. Leaving a header that flatly contradicts the step being added seemed worse than the extra file; the dispatch's file surface was `lint.yml` (+ `package.json` if argued), so this is a stated deviation rather than a silent one.\n- **No `package.json` change**, matching #8110's decision against a dedicated script name — a second hand-kept spelling of one command buys nothing here.\n\n## Measurements, re-taken on this tree (not inherited)\n\nEvery reading below was taken fresh in a worktree at merge base `a5dcb74`, with no `node_modules` and nothing built.\n\n| # | claim | reading |\n| --- | --- | --- |\n| A | `--self-test` is green and hermetic | exit 0, 16 cases, **0.105–0.222s**; no `node_modules` present |\n| A' | it survives CI's shallow clone | green in a `git clone --depth 1 --single-branch` carrying **zero `refs/remotes/origin/main`** (verified by `show-ref`), 0.105s |\n| B | the scan half is CI-hostile | exit 1 — *\"The workspace is not built … 67 of 67 workspace packages declare an entry point under dist/ that is not on disk\"*, byte-for-byte the reading the issue recorded |\n| D | wall clock as its own step | **~0.11s** steady-state (0.222s cold) |\n\n## C — what reddens it, and where this differs from #8171\n\n#8110's gate turned out to be unable to redden **alone**; its sibling `check:skill-frame-sync` reds first with a clearer diagnosis. Asking the same question here gives the opposite answer, measured both directions:\n\n- **It CAN go red alone.** Rewording the stale-dist red message (`LIES` → `MISLEADS`) in `scripts/check-dev-prereqs.mjs` reds the self-test on its own: `stale/says-it-lies: expected true, got false`. Nothing else in CI reads this script — the other repo references are prose, plus `packages/spec`'s build script calling `--stamp` — so no sibling gate reddens first.\n- **That is fine here, and it is why the placement did not need to change.** The self-test's only input is this one script's own code, so the only PR that can reach the step red is a PR editing that script, and the failure names the assertion label sitting a few lines below the edit. The #8110 hazard was a red whose *diagnosis lived elsewhere*; this red is same-file and self-explaining.\n- **The other direction.** A legitimate change elsewhere cannot redden it: dropping `--stamp` from `packages/spec`'s build script — which does red the scan half with a `CoverageError` — leaves the self-test green, because its fixtures are synthetic. Stated in the step comment as the step's honest boundary: it vouches for the gate's verdict paths, never for this workspace.\n\n## Placement\n\nNext to the existing **Stall-guard self-test** rather than beside #8171's step. Both neighbours are self-tests of a guard whose real path CI does not exercise, which is this step's actual subject; the region around #8171's step is a tight run of skill-frame / `.claude` gates, and wedging a dev-preflight gate into it would break that narrative. The family reads as a family through the shared step-name convention, not through adjacency. Happy to move it if the reviewer prefers adjacency.\n\nThe naive-grep meta-hazard is honoured: with comment lines stripped, `check:dev-prereqs` appears **nowhere** in `.github/workflows/`, so no comment here can be misread as evidence the whole gate is wired.\n\n## Verification\n\nGates re-derived against the actual changed paths with `node scripts/pm/dispatch-gates.mjs .github/workflows/lint.yml scripts/check-dev-prereqs.mjs`, then run:\n\n```\ncheck:nul-bytes                  OK  (7454 files, self-test 75 assertions)\ncheck:filter-alias-parity        OK\ncheck:node-version               OK  (27 setup-node steps across 24 workflows)\ncheck:required-contexts          OK\ncheck:shard-attestation          OK  (self-test 92 assertions)\ncheck:workflow-status-functions  OK  (24 workflows, 43 jobs)\ncheck:type-check-coverage        OK  (64/77 packages)\ncheck:changeset-gate-self-tests  OK  (118 + 153 + 117 assertions)\nnode scripts/check-dev-prereqs.mjs --self-test   exit 0, 16 cases\n```\n\n`check:type-check-debt` was **not** run locally: it refuses without the full workspace build closure (*\"55 workspace dependencies … have no built type entry point on disk\"*) and CI runs it after the build step. This diff contains no TypeScript.\n\nThe workflow was also parsed with a YAML loader to confirm the new step lands in `jobs.typecheck.steps` as exactly one `run` line, with none of the comment prose leaking into it.\n\n## Release impact\n\nNone — a workflow step and a comment block. Route 2: `skip-changeset`, no changeset file.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_019xoGBNGx23DVgbTP2Ym1bw)_"
+}

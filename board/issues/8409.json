@@ -1,0 +1,33 @@
+{
+  "number": 8409,
+  "kind": "issue",
+  "title": "[finding] Gate workflows (`Lint & Type Check`, `CI`) conclude `cancelled` on PR heads with no newer push — twice in one shift, both needed manual reruns",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:devx"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-13T11:27:31Z",
+  "updated_at": "2026-08-13T13:06:03Z",
+  "closed_at": "2026-08-13T13:06:03Z",
+  "closed_by": {
+    "login": "qq9340100",
+    "id": 313832657,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8409",
+  "body": "Observation-class finding from the `domain:spec` PM seat (session `session_01Euoy6wyfzgiWtgCg4s6JK2`), filed unassigned for triage. Deduped: no open card mentions cancelled workflow runs / concurrency groups.\n\n## Measured (2026-08-13, twice within ~5 hours)\n\nBoth `Lint & Type Check` and `CI` concluded **`cancelled`** (not failure) on a PR head that had NO newer push — the usual concurrency-group preemption explanation does not obviously apply, since nothing newer existed on the branch to preempt them:\n\n1. PR #8335, head `e5d3457` (branch `claude/issue-8124-fielderror-mapper-to-spec`) — runs 31672859420 / 31672859375, created 06:10:14Z, cancelled; manual rerun (attempt 2) both green.\n2. PR #8396, head `9800bae` (branch `claude/issue-8273-settings-crypto-wire-code`) — runs 31693746175 / 31693746148, cancelled; rerun queued 11:2xZ.\n\nIn both cases all sibling workflows on the same head (Docs Drift, Duplicate Fix Guard, ADR Merge Approval, etc.) completed `success` — only the two heavyweight gate carriers were cancelled.\n\n## Why it costs\n\nA `cancelled` conclusion is neither green nor a red signature: the landing discipline (gate jobs must be `completed: success`) correctly refuses to flip such a PR to ready, so each occurrence silently adds a PM patrol round + a manual rerun (~15–30 min landing latency per PR). Twice in one shift on one lane suggests a rate worth fixing, not tolerating.\n\n## Suggested investigation (for whoever takes it)\n\n- Read the two workflows' `concurrency:` blocks: if the group key includes something shared beyond the branch (e.g. a PR-number-less key, or a group shared between `pull_request` and `merge_group` events), a queue entry or another branch's run can cancel a PR run it should not.\n- The second incident's runs were created while the merge queue was active on sibling PRs — check whether `merge_group` events share a concurrency group with `pull_request` runs.\n- Timeline evidence is preserved in the run records (both attempts) for all four runs named above.\n\nRefs: PR #8335, PR #8396 (audit comments on both note the reruns)."
+}

@@ -1,0 +1,35 @@
+{
+  "number": 8399,
+  "kind": "pull_request",
+  "title": "refactor(spec)!: remove never-implemented engine.update() upsert option (#8057, ADR-0049)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-13T11:04:34Z",
+  "updated_at": "2026-08-13T12:40:13Z",
+  "closed_at": "2026-08-13T12:40:12Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-08-13T12:40:12Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/8399",
+  "body": "Fixes #8057\n\n`options.upsert` was declared on both update-options schemas (`EngineUpdateOptionsSchema` and the deprecated `DataEngineUpdateOptionsSchema`), sat on the engine's update allowlist, and was never read by any engine or driver path — a caller passing `{ upsert: true }` got silence, with the strict-unknown gate actively vouching for the key. Removal route only, per the finding-grading ruling of 2026-08-12 recorded on the card.\n\n## The retirement kit\n\n- **Tombstones, not deletion** (the schemas are not strict — a plain delete would re-create the silent strip): `retiredKey(ENGINE_UPDATE_UPSERT_REMOVED)` on BOTH schemas in `packages/spec/src/data/data-engine.zod.ts`, one exported prescription serving three rejection sites. The prescription names the key, states it was removed as never-implemented (#8057, ADR-0049), and points at the not-found-gate semantics per #7867 for create-if-absent intent: read first (`findOne`), then `insert` or `update` explicitly. #7867's gate itself is untouched by this PR.\n- **Engine gate**: `upsert` dropped from `ENGINE_UPDATE_OPTION_KEYS` and added to `ENGINE_RETIRED_OPTION_MESSAGES`, so the untyped runtime path refuses loudly, quoting the same prescription (the cursor/distinct shape).\n- **ADR-0087 registration** — required, priced on the tree: both keys are in `authorable-surface/data.json`, so the kit applies. Two `RETIRED_KEYS_BY_MAJOR[17]` entry files (`data/EngineUpdateOptions:upsert`, `data/DataEngineUpdateOptions:upsert`) plus the D3 semantic entry `engine-update-upsert-retired`. **No D2 conversion, deliberately**: an engine option bag is call-time only — nobody authors one and nothing persists one (the `BatchOptions.validateOnly` / `ListNotificationsRequest:cursor` disposition, recorded in the entry comments). Consequently no `os migrate meta` sentence in the prescription.\n- **Liveness ledger: N/A, verified** — the gate walks registered metadata types plus `SPEC_ONLY_SCHEMAS` (webhook/query/validation/qa); neither update-options schema is walked, so no ledger row exists or is needed (the on-card grading's reading confirmed on the tree).\n- **Baselines regenerated** (`check:generated --fix`, only the proved-stale set): `authorable-surface/data.json` gains two `[RETIRED]` marks, `authorable-defaults` drops the two `= false` rows, `api-surface/data.json` gains the exported prescription const, `spec-changes.json` / upgrade guide / reference docs / `export-origins` regenerated. `json-schema.manifest/` unchanged — key-level narrowing is invisible to the def-existence ratchets, the expected reading for this route.\n- **Pins**: engine refusal pin asserting the prescription substance (#8057, ADR-0049, \"Delete the key\", not-found gate pointer) plus a null-withdrawal pin; drift-pin `TOMBSTONES` set extended; spec tests re-pointed — negative pins on both schemas asserting the refusal message, positive pins asserting a clean parse never produces the key.\n- **Changeset**: major for `@objectstack/spec`, patch for `@objectstack/objectql`, with the FROM → TO mapping and one-line fix.\n\n## Verification\n\n- Full suites green: `@objectstack/spec` 10328 tests / 389 files; `@objectstack/objectql` 3498 tests / 196 files. Typechecks green (spec, objectql). No other package is implicated: tree-wide grep finds zero option-bag `upsert` references outside these two packages (driver `upsert()` methods are a different, live surface and are untouched).\n- Reverse verification from the committed state, direction predicted first, both channels: type channel — a temp consumer assigning `{ upsert: true }` to `EngineUpdateOptions` / `DataEngineUpdateOptions` goes red against the rebuilt `.d.ts` (TS2322, both schemas); runtime channel — restoring the allowlist limb turns exactly the refusal pin and the drift pin red (the call resolves, i.e. the original silent drop returns). Both restored; file re-run green (23/23).\n- Gate families re-derived from actual changed paths (`scripts/pm/dispatch-gates.mjs`): all derived families pass, including `check:i18n` (after building the CLI), `check:nul-bytes`, `check:engine-double-contract`, and the seven source audits `check:generated` does not run. Two environmental reds, not from this change: `check-dev-prereqs` (fresh worktree, 12 unrelated packages unbuilt — CI builds the workspace) and `check-objectui-pin-fresh` (red on pristine `origin/main` too, `EXIT=1`; repo-wide pin staleness).\n\nZero production callers passed the flag (re-verified by grep, matching the #7867-era measurement), so no runtime behaviour changes for any in-tree caller. The premise held; #7867 remains open work for no one — its gate is referenced, not modified. #8057 is the only card this PR closes.\n\n_Generated by [Claude Code](https://claude.ai/code/session_01Euoy6wyfzgiWtgCg4s6JK2)_\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01Euoy6wyfzgiWtgCg4s6JK2)_"
+}

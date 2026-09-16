@@ -1,0 +1,33 @@
+{
+  "number": 7570,
+  "kind": "issue",
+  "title": "Unconfirmed observation: the dashboard `dateRange` \"Custom…\" option did not open a picker under automation — needs a re-drive on a current console build before it is treated as a defect",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "finding",
+    "repo:objectui"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-11T05:28:03Z",
+  "updated_at": "2026-08-12T18:00:59Z",
+  "closed_at": "2026-08-12T17:56:21Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7570",
+  "body": "## Symptom\n\n> **Read this first: this is an unconfirmed observation, not a reproduced defect.** The dashboards run deliberately did **not** file it as a bug — it was recorded as something to re-check, and this card exists only so the re-check is not lost. Nothing here asserts broken behaviour.\n\nWhile driving the dashboards area, selecting **\"Custom…\"** in a `dateRange` global filter did not appear to open a date-range picker under browser automation. Expected: the custom-range picker opens and accepts an explicit start/end window.\n\nWhat makes it weak evidence, stated plainly:\n\n- observed under automation only, with no manual confirmation;\n- not reproduced, and no repeat-count recorded;\n- the console under test was the **vendored** build (`09987b68`), which is many commits behind objectui `origin/main` — in the same run the vendored pin was found to trail `origin/main` by 138 commits;\n- a picker that fails to open under automation is a classic driver/timing artifact (portal-rendered popovers, animation settling), which is exactly why the run declined to call it.\n\nThe rest of the `dateRange` surface behaved (the dashboards run's global-filter and drill-through items passed, including half-open month bounds on drill).\n\n## Root cause\n\n**Not located by the run.** No source was inspected for this observation, and no failing selector or console error was captured.\n\n## Reproduction\n\nNot established — establishing it *is* the work. Required next step:\n\n1. Re-drive the \"Custom…\" option of a `dateRange` global filter against a **current console build** (objectui `origin/main`, not the vendored `09987b68` pin), in a fresh browser session.\n2. Drive it manually as well as under automation, so a driver artifact can be told apart from a real failure.\n3. **If it reproduces on a current build**, it becomes a real defect and the card belongs in **objectui** (console date-range filter control) with the captured evidence — this card is not that card.\n4. **If it does not reproduce**, close this as an automation artifact and note it, so the next run does not re-litigate it.\n\nNo `domain:*` lane is applied: there is nothing to fix in this repo unless step 3 lands, and if it does, the fix is cross-repo in objectui.\n\n## Source\n\nExtracted from the QA run objectstack-ai/objectstack#7515 (framework a86db175)."
+}

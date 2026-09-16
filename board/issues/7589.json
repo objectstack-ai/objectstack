@@ -1,0 +1,34 @@
+{
+  "number": 7589,
+  "kind": "issue",
+  "title": "finding: SqlDriver's #3821 recovery ladder widens an unresolvable projection to every field",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-11T06:34:37Z",
+  "updated_at": "2026-08-13T06:32:36Z",
+  "closed_at": "2026-08-13T06:31:38Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 13,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7589",
+  "body": "## What this is\n\nA **finding**, filed as defence-in-depth rather than a live user-facing defect. Extracted while implementing #7532; the measurement is mine and is reproduced in full below.\n\nOnce #7532 lands (PR: #7588), the ingress gate refuses a dotted projection before it reaches a driver, so no request from the REST/protocol doors arrives carrying the projection that triggers this. What remains is every caller that reaches `SqlDriver` **without** passing that ingress — hooks, flows, reports, expand sub-reads, registry-less hosts — for which this behaviour is unchanged.\n\n## Observed\n\n`SqlDriver`'s unknown-column recovery ladder (`packages/drivers/driver-sql/src/sql-driver.ts`, ~L3395-3425) catches `no such column` and retries the query with `select('*')`. The result is that a projection the driver cannot apply comes back as **every column**, with a 200 and nothing in the response indicating the projection was dropped.\n\nDriven against a REAL `SqlDriver` over better-sqlite3 (`:memory:`), calling `driver.find` **directly** — no engine, no protocol, so this is the driver's own behaviour and not the ingress gate's:\n\n```\nA  no projection (baseline)      -> [account, amount, created_at, id, name, status, updated_at]\nB  fields ['name']               -> [name]                                    <- narrows correctly\nC  fields ['name','account.name'] -> [account, amount, created_at, id, name, status, updated_at]\nD  fields ['account.name']        -> [account, amount, created_at, id, name, status, updated_at]\n```\n\nRows C and D are **byte-identical to row A** — to asking for no projection at all. Knex renders `\"account\".\"name\"` against a table that was never joined, sqlite answers `no such column`, and the ladder retries selecting everything.\n\nReproduction harness (drop into `packages/drivers/driver-sql/src/`):\n\n```ts\nimport { describe, it, expect, beforeEach, afterEach } from 'vitest';\nimport { SqlDriver } from '../src/index.js';\n\ndescribe('SqlDriver projection widening', () => {\n  let driver: SqlDriver;\n  beforeEach(async () => {\n    driver = new SqlDriver({\n      client: 'better-sqlite3',\n      connection: { filename: ':memory:' },\n      useNullAsDefault: true,\n    });\n    await driver.initObjects([\n      { name: 'showcase_project', fields: { name: { type: 'string' } } },\n      { name: 'showcase_invoice', fields: {\n          name: { type: 'string' }, amount: { type: 'number' },\n          status: { type: 'string' },\n          account: { type: 'lookup', reference: 'showcase_project' },\n      } },\n    ]);\n    await driver.create('showcase_project', { id: 'p1', name: 'Apollo' } as any);\n    await driver.create('showcase_invoice', {\n      id: 'i1', name: 'INV-1', amount: 100, status: 'open', account: 'p1',\n    } as any);\n  });\n  afterEach(async () => { await driver.disconnect(); });\n\n  it('widens instead of narrowing', async () => {\n    const rows: any[] = await driver.find('showcase_invoice', { fields: ['name', 'account.name'] } as any);\n    // Observed: every column. A projection that cannot be applied returns MORE.\n    expect(Object.keys(rows[0]).sort()).toEqual(['name']);\n  });\n});\n```\n\n## Why it is deliberate today, and why it is still worth a card\n\nThe ladder is documented and intentional — its own comment explains the trade: a `$select` naming a column the table lacks used to make the WHOLE query fail, which read to the UI as \"no records exist\" while rows were there. Returning the rows without the projection was judged the lesser harm, and it explicitly backstops hosts whose registry is not populated (\"notably the cloud multi-tenant runtime, where the projection otherwise zeroes the list\").\n\nThat reasoning is sound for the case it was written for — an unknown **plain** column, which is simply absent from each row. It generalises badly to a projection the driver cannot apply for a structural reason: the caller asked to narrow, and silently received everything, which points away from both FLS and data minimisation. Nothing in the response distinguishes \"your projection was applied\" from \"your projection was discarded\".\n\n## Not fixed here, deliberately\n\nNarrowing a documented tolerance is a contract change with its own blast radius and needs its own reverse verification — it is not a rider on #7532, and #7532's ruling was explicit that the ingress gate is where that card lands. Filed unassigned and without a `domain:*` label so routing stays the triage seat's call.\n\nRelated: #7532 (ingress refusal), #3821 (the ladder's origin), #4226 (the projection axis' unknown-name gate).\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 7872,
+  "kind": "issue",
+  "title": "driver-memory has no policy for an unsupported comparand TYPE: a `BigInt` crashes with a raw mingo `TypeError`, and four other types silently answer zero rows",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "huangyiirene"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-12T01:19:43Z",
+  "updated_at": "2026-08-13T00:53:59Z",
+  "closed_at": "2026-08-13T00:53:59Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7872",
+  "body": "Found while implementing #7853 (the analytics pipeline dump's lost `RegExp` operand). **Deliberately outside that card's scope and not fixed in #7869** — this is an **execution** defect, not a dump one. #7853's surface is `AnalyticsResult.sql`, a debug string; the crash below happens inside mingo during `$match`, *before* that string is ever built, so no change to the dump reaches it. Filing rather than folding in, and filing rather than dropping: the card decides nothing, it preserves a measurement.\n\n## Measured on `origin/main` @ `55635fc`, executed (mingo@7.2.2)\n\nA `BigInt` comparand escapes as an unhandled third-party `TypeError` with no rows and no refusal envelope:\n\n```\nTypeError: Do not know how to serialize a BigInt\n    at JSON.stringify (<anonymous>)\n    at Query.compile (node_modules/.pnpm/mingo@7.2.2/node_modules/mingo/cjs/query.js:49:49)\n    at new Query (node_modules/.pnpm/mingo@7.2.2/node_modules/mingo/cjs/query.js:44:10)\n    at $match (node_modules/.pnpm/mingo@7.2.2/node_modules/mingo/cjs/operators/pipeline/match.js:25:13)\n    at node_modules/.pnpm/mingo@7.2.2/node_modules/mingo/cjs/aggregator.js:73:36\n    at Array.reduce (<anonymous>)\n```\n\nReproducing filter, on a `number` field over a one-row table:\n\n```ts\nwhere: { qty: { $eq: BigInt(100) } }\n```\n\n**Both faces, identically** — this is not a face divergence. `MemoryAnalyticsService.query()` and `InMemoryDriver.find()` each throw the same `TypeError`; mingo serializes the query object to build its cache key, and `JSON.stringify` refuses a `BigInt` outright.\n\n## The wider shape: it is comparand TYPES that have no policy, not just `BigInt`\n\nThe single-type reading would be too narrow. Every comparand type below, `{qty: {$eq: <value>}}`, measured on both faces:\n\n| comparand | `query()` | `find()` |\n|:--|:--|:--|\n| `BigInt(100)` | **`TypeError`, unhandled** | **`TypeError`, unhandled** |\n| `() => 1` | OK — **0 rows** | OK — **0 rows** |\n| `Symbol('x')` | OK — **0 rows** | OK — **0 rows** |\n| `new Map()` | OK — **0 rows** | OK — **0 rows** |\n| class instance | OK — **0 rows** | OK — **0 rows** |\n| `undefined` | OK — **0 rows** | OK — **0 rows** |\n\nSo one unsupported type crashes and five are answered with a silent empty result — a row count the author never asked for, which is the shape #5240 ruled on for `{field: {}}` (\"both silent readings answer it with a row count the author never asked for\").\n\n## Why it reads as a defect: the face refuses filter SHAPE cleanly and comparand TYPE not at all\n\nThe contrast is what makes this more than a curiosity. Measured on the same face, filter *vocabulary and shape* problems already get clean, descriptive refusals:\n\n```\n{ qty: {}     }  ->  Error: Field constraint at where.qty carries zero operators ({ \"qty\": {} }). A field constraint must name at least on…\n{ qty: {$wat} }  ->  Error: Unsupported filter operator \"$wat\" on field \"qty\". Supported operators: $eq, $ne, $gt, $gte, $lt, $lte, $in, $…\n```\n\n`filter-refusal.ts` is built for exactly this and its own docblocks already reason about these types — the `isFilterNode` header names \"a `Date`, a `RegExp`, a `Map` or a class instance\" as values that enumerate to nothing, and `isEmptyFieldConstraint` distinguishes them as COMPARANDS \"left to the paths that already handle it\". The measurement above is that no path in fact handles them: the refusal vocabulary covers the operator and the constraint shape, and stops at the comparand's type.\n\n## The routing question, stated rather than answered\n\nWhether the fix belongs in this package's `filter-refusal.ts` vocabulary, or is a `packages/spec` door question — a comparand type policy enforced once at `parseFilterAST()` for every driver rather than re-derived per driver — is a **cross-seat call that needs the PM's declaration**, not a dev's. Both readings are defensible from the measurement:\n\n- **`filter-refusal.ts`**: the crash is driver-local (mingo's cache-key serialization), the refusal envelope already lives here, and `driver-sql`'s twin makes the same prototype check for its own reasons.\n- **spec door**: the six types above are not JSON, so no driver can receive them through a REST/JSON write path — they only arrive from direct JS callers, and a policy that every driver copies is the kind of hand-copy the repo has been consolidating (`like-pattern.ts`'s header refuses a third copy of its escape on exactly that ground). Whether the sibling drivers answer these six the same way is **not measured here** and would decide the routing.\n\n## Not measured / open for triage\n\n- Whether the other four drivers (`driver-sql`, `driver-mongodb`, `driver-sqlite-wasm`, `driver-turso`) crash, refuse, or silently empty on the same six comparands. This is the measurement that most cheaply settles the routing question above.\n- Whether ADR-0112 already rules on comparand types anywhere, which would make this enforcement of an existing decision rather than a new one.\n- Grade. It is a raw unhandled third-party `TypeError` reaching the caller, but only from direct JS callers on an input no JSON path can express — plausibly S rather than higher, and left to triage.\n\nUnassigned and unclaimed — a finding for triage to grade, not a claimed card."
+}

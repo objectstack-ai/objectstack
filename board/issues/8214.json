@@ -1,0 +1,35 @@
+{
+  "number": 8214,
+  "kind": "issue",
+  "title": "`readonlyStripWarning` promises a commit that strict mode refuses, and omits the `preserveAudit` remedy its own strip implements",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-12T20:48:54Z",
+  "updated_at": "2026-08-13T00:20:29Z",
+  "closed_at": "2026-08-13T00:20:29Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8214",
+  "body": "Found while implementing #8141 (the addressing-`id` half of this message's falsity) and deliberately left out of it: #8141's acceptance bar pins the line as **unchanged in wording** for the cases that still print, so both defects below are separate decisions about the same string and would collide with that pin. Filed here so the wording is decided once, on evidence, rather than drifting.\n\n`readonlyStripWarning` — `packages/objectql/src/validation/rule-validator.ts`.\n\n## 1. \"COMMITTED WITHOUT IT\" is false under `strictReadonlyWrites`\n\nThe strip logs from inside `stripReadonlyFields`; `assertNoStrictDrops()` throws afterwards, **before any driver call**. So a strict caller is told in prose that the update was committed without the field, while the update was refused outright and nothing was written.\n\nMeasured on a real `ObjectQL` + a recording driver, by-id update of an object with a `readonly` `locked_note`, `{ strictReadonlyWrites: true }`:\n\n```\nrefusedCode    : ERR_READONLY_FIELD_REJECTED\ndriverWrites   : 0\nwarnLines      : 1\nclaimsCommitted: true      ← the line says \"COMMITTED WITHOUT IT\"\n```\n\nThis is the #4632 shape inverted: the log promises a silent partial success where the engine actually delivered a loud refusal. A reader debugging from the log alone looks for a row that was never touched.\n\nSame class on the insert side, unverified here: `runtimeOwnedStripWarning` says \"the write is being COMMITTED WITHOUT IT\" and `insert` discharges `strictReadonlyWrites` too (#5126 / #5503).\n\n## 2. The message names `isSystem` as the remedy but never `preserveAudit`\n\n`stripReadonlyFields` honours `context.preserveAudit` (#3493) — a **whitelist**, narrower than `isSystem` by construction, and the documented route for a historical import reinstating the original timeline. The message names only `{ context: { isSystem: true } }`, the **blanket** exemption from the whole strip.\n\nIts own runtime-owned twin names both, and there is a test pinning that it does (`rule-validator.test.ts`, \"logs the runtime-owned message…\": asserts the line contains `isSystem` *and* `preserveAudit`). So the two sibling messages disagree about the remedy set for the same pair of exemptions.\n\nConsequence: an import that forgot the flag reads this line and is steered to the strictly-worse posture — exactly the failure #8141 fixed for the addressing `id`, one remedy over. Whoever fixes it should decide whether the audit-family case deserves a *targeted* remedy sentence rather than a blanket one.\n\n## Scope note\n\nBoth are one edit to one string plus its pin tests, which is why this is one card and not two. ⛔ It must not silently re-open #8141: the address key no longer reaches this message at all, and the case that still prints must keep naming the field, the consequence and a remedy that is true for it — the line stays at `warn` so real forgery attempts stay visible (its docblock argues the level).\n\nFiled unassigned by the #8141 dev lane (seat #6019, `domain:engine-core`).\n"
+}

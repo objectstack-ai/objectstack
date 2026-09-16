@@ -1,0 +1,36 @@
+{
+  "number": 8271,
+  "kind": "issue",
+  "title": "`check:type-check-debt --re-measure` trusts stale `dist/`: phantom upward drift for ledgered packages whose deps resolve to build artifacts, unless the caller builds the closure first",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched",
+    "tooling"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-13T01:52:45Z",
+  "updated_at": "2026-08-13T06:24:47Z",
+  "closed_at": "2026-08-13T06:24:47Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8271",
+  "body": "Split out of #8235 (closed: its \"red on `main`\" premise measured false) per the services seat's referral (comment 5274624869 on #6015). The measurement establishing the mechanism is the services seat's stale-premise check, comment 5274598357 on #8235 — read it before re-deriving anything here.\n\n## The defect\n\n`KNOWN_UNALIASED_TEST_IMPORTS` packages (e.g. `@objectstack/service-analytics`, listed at `scripts/check-test-source-alias.mjs:279`) resolve workspace deps through `exports` → **`dist/`** — no `vitest.config.ts`, no `paths` in `tsconfig.json`.\n\n- **In CI** (`lint.yml`), step 31 \"Build the ledgered packages' dependencies\" runs immediately before step 32's re-measure, so tsc always sees a `dist/` matching current source.\n- **Locally**, `pnpm check:type-check-debt --re-measure` performs no closure build. Against a `dist/` predating a sibling package's change, it reports **upward ledger drift that does not exist in source**.\n\nMeasured consequence: #8235 was filed in good faith as a `priority:p0` \"main-red stanch\" off exactly this — four phantom errors (`TS2614`/`TS2339`/`TS7006` against pre-#8198 `@objectstack/driver-sql` artifacts) while `main` CI's step 32 was green on two consecutive runs.\n\n## Why it matters\n\nThe gate lies in the direction that manufactures false alarms: a careful reporter following the gate's own output escalates a queue-jumping p0 against a green gate. The mirror direction also holds — a stale `dist/` can *hide* real drift locally until CI catches it, which defeats the point of running the gate before pushing.\n\n## Suggested directions (not prescriptive)\n\n1. Make `--re-measure` build the ledgered packages' dep closure first (what CI step 31 does), or\n2. Staleness detection: warn/refuse loudly when a resolved dep's `dist/` is older than its `src/`, naming the un-built packages, or\n3. Resolve through source — heavier; that is the #8249 worklist's axis, not this card's.\n\n## Acceptance shape\n\nA local `--re-measure` against a deliberately stale `dist/` must either build the closure or name the staleness — it must not report phantom ledger drift. A regression fixture can stage this deterministically (touch a `src/` file in a dep of any ledgered package, skip the build, run the gate).\n\n## Related (checked for duplicates before filing)\n\n- #8249 — tracking worklist, dist-resolution on the *resolution* side (51 packages); this card is the *measurement* side only.\n- #8256 — `check-test-source-alias` remediation-hint defect; different gate.\n- #6376 — ledger-slack blindness; different failure mode of the same gate."
+}

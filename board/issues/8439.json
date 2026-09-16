@@ -1,0 +1,35 @@
+{
+  "number": 8439,
+  "kind": "pull_request",
+  "title": "fix(mcp): the stdio record resource honours the ADR-0049 apiEnabled / apiMethods exposure declaration (#8266)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-13T13:09:56Z",
+  "updated_at": "2026-08-13T14:44:34Z",
+  "closed_at": "2026-08-13T14:44:33Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-13T14:44:33Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/8439",
+  "body": "Fixes #8266\n\nAn object that declares `enable.apiEnabled: false` — or narrows `enable.apiMethods` so a single-record read falls outside the whitelist — was refused by the `get_record` **tool** and **still readable** through the ADR-0101 record **resource** (`objectstack://objects/{objectName}/records/{recordId}`). Same transport, same key, same declaration, two answers.\n\n## Grading: this is a surface-area declaration leak, NOT an authorization bypass\n\n`packages/runtime/src/api-exposure.ts` records this gate as a **surface-area** control rather than the authorization boundary. The resource read passed the ObjectQL security middleware (CRUD / FLS / RLS) under the API key's `ExecutionContext` before this change and after it — that is unchanged and was never at issue. What was leaking is the author's *exposure declaration*. Please do not read this as a security fix in the release notes.\n\n## Why the resource was missed when the tool was gated\n\nThe six object-CRUD verbs all flow through `createStdioDataBridge`, gated since #8083 (PR #8265). The record resource does not use that bridge at all: its reader is a separate closure built inline in `packages/mcp/src/plugin.ts` that calls `ql.find` directly and is handed to `bridgeResources`. Gating the bridge therefore never reached it — a seam that skipped the decision, not a seam that got the decision wrong.\n\n## The change (route A, as scoped on the card)\n\n- `stdio-data-bridge.ts` — `enforceApiExposure` becomes exported. It was **not** already exported; the card's suggested shape assumed it was, which is the one correction worth recording here. `index.ts` publishes neither it nor `createStdioDataBridge`, so this is intra-package only and not a public API change.\n- `plugin.ts` — the `getRecord` closure calls that helper before its `find`, under the action word `GATED_ACTIONS.get`, matching what the HTTP path sends for a single-record read. The decision is **not** re-implemented: it comes from the spec's single source of truth (`resolveEffectiveApiMethods` / `isApiOperationAllowed`), exactly as #8083 did.\n\nRoute B (rebuilding the resource reader from the bridge) was explicitly out of scope and was **not** needed — route A lands cleanly, so there is no fork to report.\n\n## Tests: the parity claim, and its ablation\n\n`plugin.record-resource-exposure.test.ts` boots the **real** plugin once per case against **one** fake metadata service holding **one** declaration, and drives **both** reads down a real `StdioServerTransport`: `resources/read` on the record URI and `tools/call get_record`. The verdicts are asserted against each other rather than against two hand-written literals — asserting the resource alone would stay green on a build where the tool had silently stopped gating too.\n\nThe failure mode the card names — a parity that passes because *both* paths refuse for some unrelated reason — is closed by an ablation that changes only the declaration and requires both paths to **serve** the row, reach the engine, and still carry the key's identity.\n\nMeasured before the fix, with the gate absent and the identical fixture:\n\n```\nAssertionError: the record resource SERVED a row for an object declaring apiEnabled: false\n  Expected: undefined\n  Received: { \"id\": \"t1\", \"title\": \"the row behind the declaration\" }\n```\n\nThe tool half refused in that same run, which is the divergence itself, reproduced. After the fix both paths refuse with the identical sentence and the engine is never asked for the row.\n\nThe ADR-0112 envelope (`code` + `status`) is asserted at the seam that carries it, because **both** surfaces forward only `.message` to the wire (the resource's `catch` in `bridgeResources`, and the tool's `errorResult(messageOf(err))`). That is pre-existing on both and is not this card's to change.\n\n## Verification\n\n- `pnpm --filter @objectstack/mcp test` — 170 passed (15 files), whole package suite\n- `pnpm --filter @objectstack/mcp typecheck` — clean\n- Gate families derived against the actual changed paths via `scripts/pm/dispatch-gates.mjs`: `check:nul-bytes`, `check:cross-package-test-inputs`, `check:changeset-gate-self-tests`, `check:objectui-changeset`, `check:query-options-erasure`, `check:type-check-coverage`, `check-changeset-no-major` — all pass.\n- `check-objectui-pin-fresh` fails, and does so **identically with this PR's changeset removed** — a stale `.objectui-sha` in the repo, independent of this diff.\n\n## Note for #7279, which is not in flight and is untouched here\n\nWhile gating the reader I measured that the two read paths hand the engine their `ExecutionContext` in **different argument positions**: the bridge sends `find(obj, query, { context })`, while this inline reader sends `find(obj, { where, limit, context })`. Nothing here depends on that and I changed neither, but it is the kind of hand-assembled divergence that card is about, so it is recorded rather than left for it to rediscover.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01P7vaLs7bhBPi9m3JyzkhDj)_"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 8388,
+  "kind": "issue",
+  "title": "RuntimeConfigPlugin's features.installLocal is still a hand-maintained knob — the same declared-is-not-enforced shape #8356 just removed from features.marketplace",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-13T10:51:05Z",
+  "updated_at": "2026-08-13T15:55:05Z",
+  "closed_at": "2026-08-13T15:53:24Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8388",
+  "body": "Found while fixing #8356 (deriving `features.marketplace` from what is mounted). Filed rather than fixed: that card's acceptance list is scoped to `marketplace`, and this is a second behaviour change on the same published surface with its own blast radius.\n\nAfter #8356, `packages/cloud-connection/src/runtime-config-plugin.ts` builds its response like this:\n\n```ts\nfeatures: {\n    installLocal: this.installLocal,          // still a constructor flag\n    marketplace: hasMarketplaceBrowseMount(rawApp),   // observed\n    ...features,\n},\n```\n\n`installLocal` is whatever the host passed to the constructor. Nothing checks that `MarketplaceInstallLocalPlugin` is actually mounted on the kernel serving the response — so `new RuntimeConfigPlugin({ installLocal: true })` on a runtime that never mounted the install-local plugin reports a capability whose route 404s.\n\nThat is not hypothetical. It is **#8343's literally measured second symptom**, on a real customer deployment:\n\n```json\n{\"cloudUrl\":\"\",\"singleEnvironment\":true,\n \"features\":{\"installLocal\":true,\"marketplace\":true,\"aiStudio\":true,\"autoPublishAiBuilds\":true}}\n```\n\nwith\n\n```\nGET  /api/v1/marketplace/install-local -> 404 {\"error\":\"Not found\"}\nPOST /api/v1/marketplace/install-local -> 404 {\"error\":\"Not found\"}\n```\n\n#8343 says so in as many words: \"whichever component reports `features.installLocal` should report what is actually mounted.\" #8356 did that for `marketplace` and stopped there, so the two keys in one object are now derived by different rules — one observed, one declared.\n\n## Why this is the same bug, not a smaller one\n\nThe argument the #8343 ACCEPT ruling of 2026-08-13 adopted against a `marketplace?: boolean` knob applies unchanged: a hand-maintained flag makes every host responsible for keeping it in step with its own mounting, and the objectos-ee config and this package's README both already failed at exactly that. `installLocal` is that knob, still in place — it is simply the one the ruling was not asked about.\n\n## The seam already exists\n\n#8356 built `hasMarketplaceBrowseMount(rawApp)` for this: it reads the raw app's route ledger, which is the union of adapter-registered and framework-native `getRawApp()` mounts. `MarketplaceInstallLocalPlugin` mounts `/api/v1/marketplace/install-local` (and `/:manifestId` sub-paths) through that same raw app, so the same ledger already answers this question — and #8356 deliberately excludes those paths from the browse predicate, so the two derivations would not collide. The work is a sibling predicate plus tests, not a new mechanism.\n\n## Suggested acceptance\n\n- `features.installLocal` reflects whether an install-local surface is mounted on the kernel serving the response.\n- Coverage pinning both directions (mounted install-local plugin reports `true`; nothing mounted reports `false`), with the mounted case driving the real plugin rather than a hand-spelled route.\n- The `resolveFeatures` escape hatch keeps merging over the derived base, as it does for `marketplace`.\n\nOne thing to decide when triaging: whether the `installLocal` constructor option is then retired, kept as a documented override, or kept as a *ceiling* (a host that passes `false` gets `false` even if the plugin is mounted). #8356 left the analogous question moot by never adding a knob; here one already exists and hosts pass it, so removing it is a breaking change for them.\n\nBacklink: #8343, #8356.\n\nBlocked-by: #8356"
+}

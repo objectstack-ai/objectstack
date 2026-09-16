@@ -1,0 +1,36 @@
+{
+  "number": 8093,
+  "kind": "issue",
+  "title": "sys_user_preference update reports droppedFields:[id] for a key the caller never sent — every org switch pops a user-facing warning toast",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-12T15:08:55Z",
+  "updated_at": "2026-08-13T05:30:55Z",
+  "closed_at": "2026-08-12T18:31:52Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8093",
+  "body": "Switching the active organization (and, more generally, visiting any object page) pops a user-facing amber warning toast:\n\n> 已保存，但部分字段未生效\n> 以下字段为只读，未生效: 偏好设置 ID\n\nNothing the user edited was dropped. The write is the console's internal \"recent items\" trace.\n\n## Actual\n\nThe trigger is the `ui.recent` preference write. Response body of the PATCH behind the toast:\n\n```\nPATCH /api/v1/data/sys_user_preference/4mekbFDEhx0QgC85 → 200\n{\n  \"object\": \"sys_user_preference\",\n  \"id\": \"4mekbFDEhx0QgC85\",\n  \"record\": { \"id\": \"4mekbFDEhx0QgC85\", ..., \"key\": \"ui.recent\", \"value\": [ ... ] },\n  \"droppedFields\": [ { \"object\": \"sys_user_preference\", \"fields\": [\"id\"], \"reason\": \"readonly\" } ]\n}\n```\n\nThe dropped field is `id` — the record's own primary key, carried in the **URL path**, and the client's update body does not contain it. `ObjectStackDataSource.update()` forwards exactly the `data` argument (`packages/data-objectstack/src/index.ts:1573`), and the caller passes only `{ value: items }` (`packages/data-objectstack/src/userState.ts:169` — `dataSource.update(resource, cachedRowId, { value: items })`). So the server appears to fold the path id into the candidate write set, judge it read-only, and then report it as a dropped field.\n\n*(The request body was not captured on the wire; the above is read off the client source in the current main checkout. If the running build does send `id`, this is a client bug instead — either way the toast is wrong.)*\n\n## Expected\n\n`droppedFields` reports fields the **caller supplied** and the engine refused. The primary key addressing the row is not a supplied field, and an internal preference write must never surface a warning to the user.\n\nBoth invariants are already written down:\n\n- `packages/data-objectstack/src/userState.ts:41` — \"`save()` resolves without throwing, so UI mutations never surface a toast.\"\n- the same file, on why `updated_at` is no longer sent (#3431/#3794) — \"Sending it made every recents/favorites write pop a scary warning about a field the user never touched, drowning the real signal the toast exists for.\"\n\nThis is that same drowning, one field over, and it is the loudest thing a user sees after switching workspaces.\n\n## Suggested fix\n\nServer side: exclude the path/primary key from the read-only drop accounting on single-record update (it is addressing, not payload). Optionally also let a write opt out of drop reporting for internal preference traces.\n\n## Environment\n\nLocal dev server `http://localhost:8080`, multi-org enabled, zh locale, observed 2026-08-12 (reproduced on every org switch). The server was started by the maintainer and its exact commit is not verified.\n"
+}

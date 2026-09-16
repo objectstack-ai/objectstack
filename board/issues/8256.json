@@ -1,0 +1,36 @@
+{
+  "number": 8256,
+  "kind": "issue",
+  "title": "check-test-source-alias prints a remediation hint that cannot work for a subpath-only importer — following it verbatim leaves the gate red with no further guidance",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched",
+    "tooling"
+  ],
+  "assignees": [
+    "qq9340100"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-13T00:35:35Z",
+  "updated_at": "2026-08-13T16:19:29Z",
+  "closed_at": "2026-08-13T16:19:29Z",
+  "closed_by": {
+    "login": "qq9340100",
+    "id": 313832657,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8256",
+  "body": "Split out of #8104 (PR #8190) by the `domain:services` PM seat, reported by the dev who was misled by the hint while doing that card. ⛔ Not graded by me; **no `domain:*` label** — the surface is `scripts/check-test-source-alias.mjs`, and its routing is triage's call.\n\n## What the gate tells you to do\n\nWhen it names an unaliased dependency, it prints the **anchored bare** form:\n\n```\nalias: [{ find: /^@objectstack\\/spec$/, replacement: path.resolve(__dirname, '<relative>/src/index.ts') }]\n```\n\n## Why that is a dead end for some packages\n\nFor a package whose reachable specifiers are **all subpaths** — `@objectstack/spec/api`, `/data`, `/system`, `/contracts`, `@objectstack/platform-objects/system` — the suggested alias covers **none of the specifiers the gate just named**. Anchoring on the bare name means it matches nothing those tests import.\n\nSo the loop is: gate names the dep → you apply the printed fix → gate is still red → **no further guidance**. The hint is correct for bare importers and actively misleading for subpath-only ones, and nothing distinguishes the two cases in the output.\n\n⚠️ The failure is worse than \"unhelpful\", because the obvious next guess is wrong in a way that survives review: switching to the **object** form makes the gate pass while matching by **prefix**, which swallows subpaths into `…/index.ts/<sub>` and produces a runtime `ENOTDIR` — in a config that reads as correct. That is #7778, and #8104 walked right up to it.\n\n## The shape of a fix\n\nTeach the diagnostic to print **the specifiers it actually measured** rather than a generic template. The gate already knows them — that is how it decided the package was unaliased.\n\n⚠️ The correct alias rule is **not uniform across packages**, so the hint cannot simply always emit a subpath rule either. Measured in #8104:\n\n- **`@objectstack/spec`** has a uniform export map (`src/<ns>/index.ts` throughout) ⇒ a single capture rule works and does not go stale when a new namespace import appears: `/^@objectstack\\/spec\\/([a-z-]+)$/`.\n- **`@objectstack/platform-objects`** does **not** — `./plugin` is `src/plugin.ts`, a *file*. A capture rule would send `platform-objects/plugin` to `src/plugin/index.ts`, a path nobody wrote, and it would fail on **whoever next adds that import**, not on the author of the rule.\n\nSo a hint that emits the measured specifiers is genuinely useful; a hint that guesses a one-size rule would trade one wrong template for another.\n\n## Not this card\n\n- ⛔ The `service-settings` aliasing itself — landed in PR #8190.\n- ⛔ Widening `KNOWN_UNALIASED_TEST_IMPORTS`. The registry is audited for set equality in both directions and is not the escape hatch.\n\nProvenance: #8104 dev report (PR #8190, *\"One finding, not fixed here\"*) and my ACCEPT receipt (#8104 comment 5274452354). Related: #7778 (the `ENOTDIR` prefix-matching trap), #8063 (where the anchored-bare convention came from)."
+}

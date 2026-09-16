@@ -1,0 +1,34 @@
+{
+  "number": 7887,
+  "kind": "issue",
+  "title": "[finding] `disabled` has no vocabulary at all on FormSectionSchema / PageComponentSchema — no readonly/disabled/disabledWhen key to point an author at",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-12T02:17:36Z",
+  "updated_at": "2026-08-12T21:34:12Z",
+  "closed_at": "2026-08-12T21:34:12Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7887",
+  "body": "Recorded from PR #7884's report (out_of_scope_finding 2 of card #7832; filed by the PM seat because the cloud dev session cannot write issues). Filed unassigned — a recording, not a claim.\n\n## Observation, measured on the #7884 branch against `origin/main`\n\nWhile curating alias/guidance rows for `visible`/`showWhen`/`disabled` on the `visibleWhen`-family shapes (#7832), the dev found that `FormSectionSchema` and `PageComponentSchema` (and `SelectOptionSchema`) declare **no disabled-ish key whatsoever** — no `disabled`, no `disabledWhen`, no `readonly`. There is no way to express \"this section / page component is disabled/read-only\" in view/page metadata.\n\nConsequence for #7832's scope: `disabled` written on those shapes is rejected loudly (strict shapes) but with **no pointer**, because there is nothing on the shape to point at — an alias row would name a key the shape rejects next (`alias-integrity.test.ts` fails such a row outright). PR #7884 pinned these as **deliberate gaps**: `visible-when-alias-guidance.test.ts` section 3 fails if any of the three shapes ever gains a disabled-ish key, so the owed alias row becomes visible the moment it becomes writable.\n\n## The question\n\nWhether this is a **deliberate design boundary** (sections/components gate visibility only; disabling is a field-level concern via `readonly`/`readonlyWhen`) or a **vocabulary gap** is an acceptance-surface question for `domain:spec`, not for the surface seat — adding any such key would widen the accepted metadata set.\n\nIf it is ruled a boundary: worth one sentence of prose on the shapes saying so (that half would return to `domain:spec-surface`). If it is ruled a gap: the #7884 tripwire pins already mark where the alias rows become owed.\n\n## Refs\n\n#7832 / PR #7884 (provenance, tripwire pins), #7816 (canonical-spelling question, related vocabulary), #7751 (page-component props passthrough — adjacent but distinct: that is about the `properties` bag, this is about the shape's own keys).\n\nDedup: searched open issues for FormSectionSchema/PageComponentSchema + disabled/readonly vocabulary — nothing beyond the refs above."
+}

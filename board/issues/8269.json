@@ -1,0 +1,36 @@
+{
+  "number": 8269,
+  "kind": "issue",
+  "title": "driver-sql: first concurrent autonumber insert from two tenants fails on Postgres (25P02) — the sequence-row race handler runs inside an already-aborted transaction",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:queue",
+    "target:v17"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-13T01:35:09Z",
+  "updated_at": "2026-08-13T02:57:13Z",
+  "closed_at": "2026-08-13T02:53:07Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8269",
+  "body": "On Postgres, when two tenants insert into the same autonumber-bearing object **for the first time concurrently**, the whole batch fails with `25P02 current transaction is aborted`. The counters are advanced anyway, so the numbers the failed attempt reserved are lost — a permanent gap at the start of both tenants' sequences.\n\nSingle-tenant concurrency is fine at every level I tried. The tenant boundary is what breaks it, which makes this specific to multi-org deployments — and the EE stack runs Postgres.\n\n## Measured\n\nDriver-level probe, `SqlDriver` on `postgres:16`, object `{ organization_id, code: autonumber 'TK-{0000}', name }`, one `Promise.all` burst per case, each case on a fresh driver and a fresh table:\n\n| case | total inserts | result |\n|---|---|---|\n| 1 tenant × 2 / 4 / 6 / 8 / 12 | up to 12 | **OK** — `TK-0001…TK-0012`, contiguous, no duplicates |\n| 2 tenants × 2 | 4 | **FAILED** `25P02` |\n| 2 tenants × 4 | 8 | **FAILED** `25P02` |\n| 2 tenants × 6 | 12 | **FAILED** `25P02` |\n| 2 tenants × 6, pool `max: 20` | 12 | **FAILED** `25P02` — not pool exhaustion |\n| 2 tenants, strictly serial | 8 | OK — `A:TK-0001 B:TK-0001 A:TK-0002 B:TK-0002 …` |\n\nThe failing statement is the sequence reservation itself:\n\n```\nselect * from \"_objectstack_sequences\" where \"key_hash\" = $1 limit $2 for update\n  - current transaction is aborted, commands ignored until end of transaction block\n```\n\n**Cold vs warm is the discriminator.** Seed one serial row per tenant first (so both counter rows exist), then run the exact burst that failed cold:\n\n```\n[W] warm-up => orgA:TK-0001 orgB:TK-0001\n[W] counter rows now => [{\"tenant_id\":\"orgA\",\"last_value\":\"1\"},{\"tenant_id\":\"orgB\",\"last_value\":\"1\"}]\n[W] warm concurrent => OK orgA=TK-0002..TK-0005 orgB=TK-0002..TK-0005\n[W] cold concurrent  => FAILED code=25P02\n```\n\n**Retry \"recovers\" but loses numbers.** Three successive bursts on a cold object:\n\n```\n[R] attempt 1 => FAILED code=25P02\n[R]   counters after 1 => [{\"tenant_id\":\"orgA\",\"last_value\":\"3\"},{\"tenant_id\":\"orgB\",\"last_value\":\"1\"}]\n[R] attempt 2 => OK orgA:TK-0004 TK-0005 TK-0006   orgB:TK-0002 TK-0003 TK-0004\n[R] attempt 3 => OK orgA:TK-0007 TK-0008 TK-0009   orgB:TK-0005 TK-0006 TK-0007\n```\n\n`TK-0001…TK-0003` (orgA) and `TK-0001` (orgB) exist in no row — the counters were advanced by the attempt whose transaction then aborted. So the user-visible story is: *\"creating the first records failed; I retried, it worked, and my numbering starts at 0004.\"*\n\n**SQLite is unaffected** — the identical cold cross-tenant burst succeeds:\n\n```\n[R] sqlite cold burst => OK orgA:TK-0001 TK-0002 TK-0003 orgB:TK-0001 TK-0002 TK-0003\n```\n\nwhich is why the existing autonumber suite (sqlite-backed) does not catch it.\n\n## Cause\n\n`reserveSequenceValue` handles the first-insert race by catching the unique violation and continuing **inside the same transaction** (`packages/drivers/driver-sql/src/sql-driver.ts`, ~line 4209):\n\n```ts\ntry {\n  await trx(SEQUENCES_TABLE).insert({ ...insertRow, last_value: initial });\n  return initial;\n} catch (err) {\n  // Another writer raced us to the first INSERT. Fall through to\n  // the UPDATE path with the now-present row.\n  existing = await trx(SEQUENCES_TABLE).where(key).forUpdate().first();   // ← 25P02 here\n  if (!existing) throw err;\n}\n```\n\nIn Postgres any statement error poisons the whole transaction: every subsequent statement returns `25P02` until rollback. So this recovery path can never run on Postgres — the `SELECT … FOR UPDATE` in the `catch` is itself the statement that raises the error we observe. The pattern is only valid on SQLite/MySQL, where a statement error does not abort the transaction. The comment a few lines above (`Postgres/MySQL behave normally here`) is the assumption that does not hold.\n\n## Suggested fix\n\nMake the first-insert race dialect-safe, e.g.\n\n- wrap the speculative INSERT in a `SAVEPOINT` and roll back to it before falling through, or\n- do the insert as `INSERT … ON CONFLICT DO NOTHING` (the driver already uses `onConflict` at `sql-driver.ts:4596`) and then re-select, so no statement ever errors.\n\nA regression test needs to be Postgres-backed and cross-tenant + cold + concurrent — the three conditions together. Single-tenant or warm variants pass regardless.\n\n## Environment\n\nReproduced against `postgres:16` in Docker, via `SqlDriver` directly (branch `claude/multi-org-service-testing-a75937`, deps built from the current worktree). Same shape as the `objectos-ee-deploy` stack serving `http://localhost:8080`, which is single-database with `organization_id` partitioning. The probe files were temporary and are not part of this report; the tables above are the full output.\n"
+}

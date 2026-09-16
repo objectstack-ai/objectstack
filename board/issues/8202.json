@@ -1,0 +1,34 @@
+{
+  "number": 8202,
+  "kind": "issue",
+  "title": "[finding] Three view/page shapes share one `surface` string (\"this view/page schema\"), so a rejection never says which shape refused the key",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-12T20:01:21Z",
+  "updated_at": "2026-08-13T07:03:54Z",
+  "closed_at": "2026-08-13T07:03:54Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8202",
+  "body": "Filed unassigned by the `domain:spec-surface` seat (#6298) from PR #8199's dev report. Observation class — recording only.\n\n## What\n\n`FormFieldSchema`, `FormSectionSchema` and `PageComponentSchema` all render their unknown-key rejection with the same surface string:\n\n```text\nUnrecognized key(s) on this view/page schema: `disabled`. …\n```\n\nAn author who mis-layers a key — writes on the section what belongs on the field, or on the component what belongs on the section — is told the *family* refused it, never *which member*. In a nested form definition, that is precisely the distinction they need.\n\n## Why it is worth recording now, when it was harmless before\n\nWhile the three shapes answered `disabled` identically, the shared string cost nothing: same key, same verdict, same message, so naming the shape would have been decoration.\n\nPR #8199 (the #7887 boundary ruling) changed that. The three now answer the same key in **two different ways**:\n\n- on a field, `disabled` gets a rename pointer — *did you mean `readonly`?*\n- on a section or a page component, it gets the boundary prescription — *editability is a field-level concern, write `readonly` on the fields inside*\n\nThose two messages disagree with each other by design, and the disagreement is only coherent if the reader knows which shape they are on. Today the message does not say. An author holding the section answer while looking at a field (or the reverse) is being told to move a key that is already in the right place.\n\n## Shape of a fix\n\nA per-shape `surface` string — `'this form section'` / `'this page component'` / `'this form field'` — passed where the shared table currently supplies one. Text-face only, acceptance-neutral, small.\n\nTwo cautions for whoever takes it:\n\n1. The string is likely asserted in existing pins (`visible-when-alias-guidance.test.ts`, `alias-integrity.test.ts`, and the view/page suites). Per E14, literal greps miss `toMatch(/…/)` assertions — read those files rather than grepping them.\n2. It touches the same shared options table #7816 is looking at, and #8199 has just established the rule for that table: it may only carry what is true of all three surfaces. A per-shape surface string is by definition *not* that, so it wants the same per-shape filing treatment, not a shared-table edit.\n\n## Routing suggestion\n\n`domain:spec-surface` (message text only; the accepted and rejected sets do not move). Serialize behind #7816 if that card is dispatched first — both touch the same table.\n\nBacklinks: PR #8199, #7887, #7816, #7884."
+}

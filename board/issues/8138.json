@@ -1,0 +1,32 @@
+{
+  "number": 8138,
+  "kind": "issue",
+  "title": "measure: try to reproduce #6522's overlay-index-drift flake under contention — the arm the 0/67 run never exercised",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "huangyiirene"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-12T17:38:23Z",
+  "updated_at": "2026-08-13T02:30:33Z",
+  "closed_at": "2026-08-13T02:30:33Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8138",
+  "body": "## What this card is\n\nA **measurement**, not a stabilization. Deliverable is a reproduction attempt with a number attached, and — if it reproduces — the two artefacts triage asked for. No test is changed, quarantined, retried or deleted.\n\nIt exists because #6522's hold rests on a gap its own triage identified. From `5248527171`:\n\n> Reproduction is measured, not unmeasured: **0/67 across four worker arms on an idle box** (≤4.5%/run at 95% confidence) — **weak evidence against a flake first seen under load, which is exactly why this stays held rather than closed.**\n\nand from the 08-11 maintainer-directed round (`5254591185`): *「frequency unmeasured, both-sides-green, cause unlocated; a stabilization card without a repro is a guess.」*\n\nSo the blocking gap is not \"has anyone tried\" — it is that **the load/contention arm was never exercised**, and the original sighting happened during a full-package run. This card exercises that arm. It does not stabilize anything: if it reproduces, triage gets a repro and the cause becomes locatable; if it does not, the confidence bound tightens and the restart condition can be narrowed honestly.\n\n## Target\n\n`packages/drivers/driver-sql/src/sql-driver-overlay-index-drift.test.ts`, the case **\"stays silent on the SECOND boot, when the runtime ledger starts empty again\"** (live at `:154` as of the last triage verify; re-locate it, the file may have moved).\n\n## What to vary — the arm that was missed\n\nThe prior run was four worker arms **on an idle box**. Vary contention, not just worker count:\n\n- The suite run **as part of a full-package / full-repo run** rather than alone — the shape of the original sighting.\n- **Worker counts at and above the machine's core count**, so workers genuinely compete rather than each getting a core.\n- **Background CPU load** while the suite runs, if the box is otherwise idle — the point is to make scheduling non-deterministic, which is the condition the 0/67 run lacked by construction.\n- Any shared state the case depends on across boots. Triage already refuted one hypothesis by construction — *「the cross-boot ledger-reset hypothesis is refuted: `runtimeCreatedIndexes` is per-instance, `sql-driver.ts:4625`」* — so ⛔ do not re-derive that one; if you find the shared state is something else, that is the finding.\n\nRun enough iterations that the number means something, and **report the denominator**. A \"0/N\" is only useful with N and a confidence bound; a \"1/N\" is worth more than a hundred green runs.\n\n## If it reproduces — capture these, they are the point\n\nTriage named exactly what a recurrence must yield (`5248527171`):\n\n> on any recurrence, capture **which assertion failed and what `drift` contained**\n\nSo: the failing assertion verbatim, the full contents of `drift` at failure, and whatever distinguishes the failing run from its green neighbours (worker id, ordering, timing, what else was running). Without those a recurrence is just another sighting.\n\n## Deliverable\n\nA report on this card **and** a copy of the outcome on #6522, since that is the card whose restart condition this informs. State plainly which of these you got:\n\n- **reproduced** — with the assertion, `drift`, and the conditions; this converts the hold's \"cause unlocated\" into something locatable.\n- **not reproduced** — with the denominator, the arms actually exercised, and the resulting bound; say what that does and does not rule out. Include this honestly even if it is the boring answer: a measured negative under contention is worth more than the untested assumption that contention is the cause.\n\nEither way, propose (do not apply) what the restart condition should become given what you now know.\n\n## Explicitly out of scope\n\n- ⛔ **Do not stabilize, quarantine, retry, `skip`, or otherwise touch the test.** #6522 is held; this card feeds that hold, it does not lift it. A \"fix\" without a located cause is the guess triage refused.\n- ⛔ **No production changes** in `driver-sql` or anywhere else.\n- ⛔ **No new conformance cells, no DEBT/EXEMPT entries.** `check:driver-conformance` reads **40 covered / 0 DEBT / 0 exempt** and must still read that.\n- The diff should be empty or a throwaway harness you delete. If you believe something is worth landing, say why in the report rather than landing it.\n\n## Refs\n\n#6522 (the finding, and both hold comments `5248527171` / `5254591185`) · #7335 (the metadata-fs watcher flake's mechanism, a worked example of locating this class) · #5499 (freeze scope — `driver-sql` is **not** covered; this card is unaffected by it) · #7956 (the precedent for a measurement card dispatched against a held finding)"
+}

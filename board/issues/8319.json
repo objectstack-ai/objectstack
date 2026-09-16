@@ -1,0 +1,35 @@
+{
+  "number": 8319,
+  "kind": "pull_request",
+  "title": "fix(objectql): a preserveAudit by-id update no longer hands the primary key to the driver",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-13T05:07:57Z",
+  "updated_at": "2026-08-13T05:41:06Z",
+  "closed_at": "2026-08-13T05:41:05Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-13T05:41:05Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/8319",
+  "body": "Fixes #8215\n\n## What\n\n`isPreservableUnderAudit` (`packages/objectql/src/validation/rule-validator.ts`) now excludes the row's own primary key before consulting the `preserveAudit` whitelist:\n\n- **Before**: a platform object's `id` is `readonly: true` with no `system` flag (`sys_user_preference`: `Field.text({ label: 'Preference ID', required: true, readonly: true })`), so the second limb (`def.system !== true`) read it as an author-declared business field like `closed_at`. On a `preserveAudit` by-id update the strip KEPT `id`, and the driver received `SET id = 'rec_1' WHERE id = 'rec_1'` — a no-op on SQL, an outright rejection on stores with immutable primary keys. The REST ingress folds the path id into every update body (#6479), so a bulk historical import hit this without ever sending an `id` itself.\n- **After**: the predicate returns `false` for `SystemFieldName.ID` before either limb. The primary key is the ADDRESS of the write, not a fact a historical import restores (#3493 scoped the flag to \"reinstate the original timeline\"), and the strip protects that one column for a store-portability reason, not an authorship one.\n\nKeyed on `SystemFieldName.ID` (`@objectstack/spec/system`) — the registry's sanctioned \"canonical spelling of the column that plays role X\" use — because there is no per-field `primaryKey` marker in the spec for a def-based test to read: the driver provisions `id` as the primary key on every physical table, unconditionally (`resolveInjectedSystemColumns` reports it even under `systemFields: false`), and the engine's whole by-id addressing (`idAddressesThisRow`, `addressKey: 'id'`) reads that name. The `primaryKey: true` spellings in test fixtures are inert runtime decoration (`register-object-authored-shape.pin.ts` pins that the key is not a spec Field key).\n\n## Both directions pinned\n\n- `stripReadonlyFields`: a readonly `id` is stripped even under `preserveAudit`, with and without `addressKey` (and with `addressKey: 'id'` the address stays out of the LOG as well as the payload — #8141 composes).\n- The flag keeps doing its actual job: the audit/timestamp family (`created_*` / `updated_*`) and author-declared business `readonly` fields (`closed_at`) still ride through beside the stripped `id`, and `organization_id` stays stripped and loud (no tenancy backdoor).\n- `stripRuntimeOwnedFields` (shared predicate, insert side): an `autonumber` primary key seeded under a `preserveAudit` insert is now stripped; the business `autonumber` identifier (`account_number`) remains preservable — #5503's actual case.\n- The warn line no longer offers `{ context: { preserveAudit: true } }` for a stripped `id` — post-fix the flag would not keep it, so offering it would be the #8214 false-remedy shape. `preserveAuditApplies` derives from the same predicate, so the remedy text moved with the verdict, by construction.\n\n## The pin this card exists to turn red\n\nThe #8216 pin (\"composes with preserveAudit rather than overriding it\") captured pre-fix behaviour as observed, deliberately. Rewritten as \"composes with preserveAudit — and the primary key is stripped even under the flag (#8215)\", pointed at #8215 rather than #6435, and its load-bearing facts are asserted as literals (`toHaveLength`, `toContain` on field-name substrings, a literal `out` object) rather than derived from the composer, so a reworded message cannot keep both sides green.\n\n## Doc clause (cross-seat: `content/docs/**`, `domain:devx` #6023 — declared on the card by the PM)\n\n`content/docs/protocol/objectql/state-machine.mdx:113` already described the narrower whitelist (\"author-declared **business** `readonly` fields\"); one clause is added so the prose stays the correct half instead of inverting into the loose half: \"— but never the record's own primary key (`id`), which is the address of the write rather than a fact being restored (#8215).\"\n\n## Blast radius, measured\n\n- `@objectstack/objectql`: full suite 196 files / 3454 tests green; `tsc --noEmit` green.\n- `@objectstack/rest` (read and run, **not edited** — `domain:cli` #6024's package): full suite 109 files / 1809 tests green; the three named surfaces re-run verbose: `import-runner-historical.test.ts` (#3479/#3493), `import-runner-historical-readonly-insert.test.ts` (#6640), `import-job-integration.test.ts` — 20/20 green. Their fixtures either declare `id` without `readonly` (the strip never examines it) or exercise `closed_at`.\n- `@objectstack/metadata-protocol` (owns the #6479 fold and the #6640 insert-ingress warn): full suite 77 files / 1117 tests green.\n- `@objectstack/runtime`: `preserve-audit-real-driver.integration.test.ts` (real SQLite end-to-end) 3/3 green, re-run against the restored fix.\n- Insert-side ingress (`stripReadonlyForInsert`, #3043) is untouched: `preserveAudit` static-readonly relaxation is update-only (#6640), and the ingress warn lists stripped fields without re-deriving this predicate — no drift copy exists.\n- Reverse verification (direction decided in advance: red, exactly the 5 new/updated cases): fix committed first, `rule-validator.ts` restored to `origin/main` under the new tests — measured **5 failed / 163 passed**, the five being exactly the #8215 cases; the fix was then restored from the commit and proven byte-identical (`git hash-object` equals the HEAD blob).\n\n## Out of ruled scope, unchanged\n\n- #8141's byte-identical payload-to-driver invariant holds for every non-`preserveAudit` path; the address-silence rule is unchanged.\n- An object whose `id` is NOT readonly still carries `id` into the SET clause — removing it there is #6435's explicitly separate decision.\n- #6435's truthy-scalar `data.id` dispatch rules are untouched.\n\nChangeset: patch for `@objectstack/objectql` (behaviour fix on a documented flag; nothing authorable removed, so no ADR-0087 entry — the changeset is not declared-breaking).\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01RDTnVvsgA6cUZ4xFVtPZRy)_"
+}

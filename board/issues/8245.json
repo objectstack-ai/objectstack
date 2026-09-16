@@ -1,0 +1,32 @@
+{
+  "number": 8245,
+  "kind": "issue",
+  "title": "audit: a user's FIRST session predates their membership, so every audit row written in that window carries a NULL tenant and is invisible to RLS readers",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:on-hold"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-12T22:21:44Z",
+  "updated_at": "2026-08-13T15:45:13Z",
+  "closed_at": "2026-08-13T15:45:13Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8245",
+  "body": "Observation-class finding, measured while implementing #8144 (PR #8244). **Not caused by that change** — it is a pre-existing ordering property that #8144 made visible because it put a row on the ledger at exactly that moment.\n\n## What was measured\n\n`databaseHooks.session.create.before` derives a session's `activeOrganizationId` from the caller's `sys_member` row (ADR-0081 D1, `AuthManager.composeDatabaseHooks` → `defaultActiveOrg`). The membership itself is written by the ADR-0093 reconciler composed into `user.create.after`, and better-auth **defers that past the signup transaction** — `membership-actor-attribution.dogfood.test.ts` already polls up to 10s for it, and calls the delay out in a comment.\n\nSo the session minted by sign-up is created **before** the user has any membership. It carries `activeOrganizationId: null`, legitimately: at that instant there is no organization to name.\n\nReproduced while writing #8144's dogfood test: signing up a member and immediately reading the `login` audit row for that first session yields `tenant_id: null` (and `organization_id: null`). Waiting for the `sys_member` row before signing in produces a correctly tenanted row on every subsequent session. The test now measures the tenant half on an ordinary sign-in and documents the first-session case rather than asserting on it.\n\n## Why it is worth a card\n\nThe SecurityPlugin's RLS predicate gates on `organization_id`. `audit-writers.ts` already names the consequence in its own comment, for the sibling cause:\n\n> Without this fallback, audit rows are written with `organization_id=NULL` and the SecurityPlugin's RLS predicate (`organization_id = current_user.organization_id`) hides them forever — making the audit log UI appear permanently empty even though writes succeed.\n\nIts fallback reads the audited record's own `organization_id`, which cannot help here: a session row has no organization column either, and the account/user rows being written in that same window are in the same state.\n\nThe window is narrow (a user's first session) but the loss is permanent — nothing back-fills a written ledger row — and the affected rows are exactly the ones describing account creation.\n\n## Related, not duplicate\n\n- #8208 — a record created with no active organization is invisible to its own creator (same RLS consequence, different producer: an HTTP write rather than the signup ordering).\n- #8158 — `adminOrgScope` falls open when a session has no active organization (same \"no active org\" precondition, opposite failure direction).\n\nThis card is about the **ordering** that produces the no-active-org state for every new user, and about ledger rows specifically.\n\n## Not proposed here\n\nWhether the fix is to settle the membership before minting the first session, to back-fill the tenant on the audit row when the session later gains one, or to accept it and document it, is a design call with a real cost on the sign-up hot path. No fix is implied by this filing.\n\nSource: #8144 / PR #8244, `packages/qa/dogfood/test/auth-session-audit-trail.dogfood.test.ts` (see the `beforeAll` note).\n"
+}

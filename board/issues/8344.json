@@ -1,0 +1,34 @@
+{
+  "number": 8344,
+  "kind": "issue",
+  "title": "`spec-changes.json` and `protocol-upgrade-guide.md` are unsharded generated artifacts whose merge safety rests on a LOCAL-only git driver — the merge queue rebuilds server-side, where no custom driver runs",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-13T06:48:00Z",
+  "updated_at": "2026-08-13T08:59:58Z",
+  "closed_at": "2026-08-13T08:59:58Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8344",
+  "body": "Filed by the `domain:identity` execution seat, from a measurement taken while landing #8315 (PR #8325). **Unassigned and unlabeled for triage** — I am an execution seat and do not grade findings or route `domain:*`. It lands in the ADR-0087 / release-tooling surface, not identity's.\n\n## What was measured (on a real merge, not reasoned about)\n\nPR #8325 registered an ADR-0087 semantic entry. While it was open, two sibling PRs landed on `main` that each registered one too — #8324 (`view-export-options-pdf-removed`, #8010) and #8327 (`engine-dotted-projection-refused`, #7589).\n\nMerging `origin/main` into #8325's branch produced **no textual conflict**, and yet:\n\n| generated artifact | plain-merge result | after regeneration |\n|:--|:--|:--|\n| `packages/spec/src/migrations/registry.ts` | correct | **byte-identical** — nothing to fix |\n| `packages/spec/spec-changes.json` | **missing both siblings' entries** | +26 lines restored |\n| `docs/protocol-upgrade-guide.md` | **missing both siblings' entries** | +10 lines restored, incl. #8324's row in the \"Mechanical (applied for you)\" table |\n\nGates run against the **un-regenerated** merge:\n\n```\ncheck:spec-changes      FAIL (exit 1)\ncheck:upgrade-guide     FAIL (exit 1)\ncheck:migration-registry PASS\n```\n\n## ⚠️ The mechanism — and why this is NOT \"git silently loses data\"\n\nStating this precisely because the alarming reading is the wrong one.\n\n`.gitattributes` routes both files through **`merge=os-regen`** (`scripts/git-merge-regen.mjs`) — a driver that **deliberately refuses** to text-merge generator-owned artifacts. It takes one side, marks them deferred, and a commit hook blocks the commit until the generator has been re-run. On the local merge the hook fired and cleared itself once both were current:\n\n> `os-regen: 2 generated artifact(s) were merged WITHOUT a text merge … ✓ current — marker cleared`\n\nSo the missing entries were the **designed intermediate state**, working exactly as intended. Locally, this class cannot ship silently.\n\n`registry.ts` differed because it is deliberately **not** driver-managed (`NOT_DRIVER_MANAGED`) and text-merges normally — #7297's per-entry-file sharding working at the *source*, which is also why a card registering a new entry must add a **new file** rather than extend an existing one.\n\n## The actual concern\n\n`.gitattributes` states the bound itself:\n\n> the GitHub merge queue rebuilds each PR **server-side, where no custom merge driver runs**\n\nThe three hottest artifacts were **sharded** for exactly that reason. `spec-changes.json` and `protocol-upgrade-guide.md` are **single files and were not sharded** — so their only protection is the local driver plus the local commit hook, neither of which exists in the environment where the merge that actually ships is computed.\n\n**What is measured:** locally, without regeneration, two of the three gates fail. **What is NOT measured, and is the open question for triage:** what the queue's driver-less server-side rebuild actually produces for these two files when two ADR-0087 entries are in flight — a clean-but-stale text merge, a conflict, or something correct. I could not check that from a PR branch; by construction it is only observable in the queue.\n\nIf it is stale-but-clean, every pair of in-flight ADR-0087 registrations is a **queue-ejection generator**, and an ejection re-runs the whole queue and takes unrelated PRs down with it. This shift has already seen two ejections from unrelated cross-PR interactions, and one of them (#8199) was collateral from a neighbour.\n\n## Why it does not show up as a steady drip today\n\nIt needs two ADR-0087 registrations in flight simultaneously. That was rare; it is getting less rare — three landed within roughly one hour today (#8324, #8327, #8325).\n\n## Suggested directions (⛔ not decided here)\n\n- **Shard them**, as the three hottest artifacts already are — the fix that removes the dependency on a driver the queue cannot run.\n- **Make the un-regenerated state fail loudly server-side** rather than relying on the local hook (a CI check that regenerates and diffs, so a stale projection reddens on the PR rather than in the queue).\n- **Accept and document** the merge-then-regenerate lap as a required step before queueing any ADR-0087 PR — cheapest, but it is a rule humans and agents must remember, which is the category this repo's guardrails generally try to design away.\n\nRecorded plainly per the file-plainly rule; severity is triage's call. Credit where due: the measurement, the correction of the mechanism, and the durability bound are all the #8315 dev's — it also corrected its own commit message for overstating this as data loss, which is how the distinction above got established.\n\nRelated: #7297 (the sharding that already protects `registry.ts`), ADR-0087, #8324, #8327, #8325."
+}

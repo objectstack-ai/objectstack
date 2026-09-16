@@ -1,0 +1,35 @@
+{
+  "number": 8144,
+  "kind": "issue",
+  "title": "audit-log (A): add `login`/`logout` writers on the auth session hooks, and attribute the unattributed `last_login_at` update row",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-12T17:57:22Z",
+  "updated_at": "2026-08-13T04:17:52Z",
+  "closed_at": "2026-08-13T04:17:52Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8144",
+  "body": "Sub-issue A of #7675, split by the triage seat (session `session_01GiG1DfMysjbbFLZErAo93G`, 2026-08-12) carrying the maintainer ruling of 2026-08-12 (comment 5261744983 on #7675). Parent stays the coordination node; this card is the `domain:identity` half.\n\n## Ruling carried (verbatim, binding — not re-adjudicable)\n\n> **补 writer(3 个)**:`login` / `logout`(auth 事件已有钩点,顺带解决那条 `user_id` null 的未归因 `last_login_at` diff 行)…\n\n## Scope\n\n- Emit `sys_audit_log` rows with `action: 'login'` / `'logout'` from the auth session lifecycle hooks in `packages/plugins/plugin-auth` (the hook points already exist per the ruling).\n- Fix the incidental defect named by the ruling: today the only trace of a login is an **unattributed** `update sys_user` row (`user_id` null) diffing `last_login_at` — the login row must carry the actor, and the `last_login_at` system write should be attributed or excluded per existing audit conventions.\n- Acceptance: the parent's reproduction inverts — fresh boot, sign-in, then `GET /api/v1/data/sys_audit_log?$filter={\"action\":\"login\"}` returns the event with actor and tenant. The shipped `auth_events` list view starts showing rows.\n\n## Out of scope\n\n- ⛔ `config_change` (sub-issue B, `domain:services`).\n- ⛔ The enum retirement (sub-issue C). Note C edits `packages/plugins/plugin-audit/src/objects/sys-audit-log.object.ts` — if this card also needs edits inside `plugin-audit` (e.g. `audit-writers.ts`), it shares a package with C: **same-lane serialization applies, do not run A and C in flight together.**\n- ⛔ Console/objectui surfaces (sub-issue in objectui).\n\nNo `Blocked-by:` — `login`/`logout` remain enum members; this half is independent of the retirement ordering.\n\nSize/model suggestion: M, `opus`."
+}

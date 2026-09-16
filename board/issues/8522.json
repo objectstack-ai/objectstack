@@ -1,0 +1,30 @@
+{
+  "number": 8522,
+  "kind": "issue",
+  "title": "[throwaway probe C — plain prose] closing-keyword reading for #8476 step 1",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-13T17:03:33Z",
+  "updated_at": "2026-08-13T17:29:30Z",
+  "closed_at": "2026-08-13T17:29:30Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8522",
+  "body": "Throwaway target for the #8476 step-1 live reading. This issue is the **PLAIN-PROSE POSITIVE CONTROL**: the same throwaway PR will carry an unformatted closing keyword bound to this number. Its whole job is to prove the link mechanism was live and readable during the reading — without it, \"no link on the fenced arm\" cannot be told apart from \"links only materialize on merge\".\n\nClosed immediately after the reading. No work is requested here."
+}

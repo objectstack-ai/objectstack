@@ -1,0 +1,34 @@
+{
+  "number": 8419,
+  "kind": "pull_request",
+  "title": "fix(cloud-connection): move install-local outside the cloud ternary in README example",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-13T12:24:55Z",
+  "updated_at": "2026-08-13T13:04:12Z",
+  "closed_at": "2026-08-13T13:04:10Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-13T13:04:10Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/8419",
+  "body": "Fixes #8355\n\n`packages/cloud-connection/README.md` stated the air-gapped contract correctly in prose\n— \"`OS_CLOUD_URL=off` disables every remote call; air-gapped installs keep working via\ninline manifests handed to `install-local`\" — while the code example a few lines above\ndid the opposite: `MarketplaceInstallLocalPlugin` sat *inside* the `cloudUrl ?` ternary,\nso `OS_CLOUD_URL=off` unmounted the very surface the prose promised keeps working.\n`cloud`'s `apps/objectos-ee/objectstack.config.ts` was a faithful copy of this recipe —\nthe measured propagation vector for the #8343 P1 (a self-hosted deployment that could\nnot install a package by any route).\n\n## What changed\n\n- `MarketplaceInstallLocalPlugin` moves **outside** the `cloudUrl ?` ternary and is\n  constructed with `cloudUrl || 'off'` instead of the bare `cloudUrl`/`''`. The plugin\n  re-resolves whatever it is handed through `resolveCloudUrl()`, which treats `''` as\n  *unset* and substitutes the public `DEFAULT_CLOUD_URL` — so passing the empty string\n  through would have pointed an air-gapped runtime's catalog branch at the public cloud\n  instead of disabling it. `'off'` is one of the documented disable sentinels\n  (`packages/cloud-connection/src/cloud-url.ts`) and is the value that actually resolves\n  to no cloud. This trap is a property of config resolution, untouched by #8387.\n- `RuntimeConfigPlugin` now mounts **unconditionally** too (it already sat outside the\n  ternary). This was previously a second trap on its own — the plugin used to hardcode\n  `features.marketplace: true`, so mounting it on a cloud-less runtime would have\n  advertised catalog browse it could not serve. #8387 (merged) derives\n  `features.marketplace` from what is actually mounted on the kernel serving the\n  response, so a cloud-less runtime now reports `marketplace: false` on its own with\n  nothing for a host config to keep in sync. That trap is retired; the corrected example\n  reflects it.\n- The ternary now keeps only the genuinely cloud-gated halves —\n  `MarketplaceProxyPlugin` and `CloudConnectionPlugin`, which *are* the control-plane\n  client and need a resolved URL as their precondition.\n\nEach line carries an inline comment explaining why it is (or isn't) inside the ternary,\nso the recipe doesn't get silently miscopied again.\n\n## Verification\n\nRead (not modified) to confirm the corrected shape:\n\n- `packages/cli/src/commands/serve.ts` (`Serve.planMarketplaceWiring`,\n  `Serve.OFFLINE_CONTROL_PLANE`) — the #8343 reference implementation. It confirmed the\n  `'off'`-sentinel trap and the disable-sentinel spelling; note serve.ts's own\n  `offlineInstallLocal` arm does **not** yet mount `RuntimeConfigPlugin` (a separate,\n  already-filed and already-dispatched gap — a worktree for it exists alongside this\n  one), so this PR's example is the *documented recipe* the Suggested Shape asked for,\n  not a byte-for-byte mirror of serve.ts's current CLI wiring branches.\n- `packages/cloud-connection/src/cloud-url.ts` — `resolveCloudUrl()`'s disable sentinels\n  (`off`/`none`/`local`/`disabled`) and the `''`-means-unset behavior.\n- `packages/cloud-connection/src/runtime-config-plugin.ts` — confirmed\n  `features.marketplace` is derived via `hasMarketplaceBrowseMount(rawApp)` (#8387,\n  merged `631ddbf36`), and that `RuntimeConfigPluginConfig.controlPlaneUrl: ''` is\n  handled as an intentional \"stay on this origin\" case in this plugin specifically\n  (different from the two Marketplace plugins' `resolveCloudUrl` re-resolution) — so the\n  existing `controlPlaneUrl: ''` on `RuntimeConfigPlugin` was already correct and is\n  unchanged.\n- The four plugins' config interfaces (`MarketplaceProxyPluginConfig`,\n  `MarketplaceInstallLocalPluginConfig`, `CloudConnectionPluginConfig`,\n  `RuntimeConfigPluginConfig`) — confirmed `controlPlaneUrl`/`singleEnvironment`/\n  `installLocal` are the real prop names the example uses.\n- Typechecked the corrected snippet against the package's real source (copied into\n  `packages/cloud-connection/src/` as an untracked scratch file importing from\n  `./index.js`, deleted before this diff was committed) with\n  `npx tsc --noEmit -p tsconfig.json` — 0 errors. So the example is verified runnable\n  against the real constructors, not merely illustrative.\n\nDocs-only. `skip-changeset` applied (docs change, nothing to release).\n\n## Out of scope (named in the dispatch brief, not touched here)\n\n- #8388 — `features.installLocal` is still a hand-maintained constructor flag (not\n  derived like `features.marketplace` now is). With install-local mounted\n  unconditionally, this example's `installLocal: true` is truthful for the first time —\n  but only because the example mounts the plugin unconditionally, not because anything\n  enforces the two stay in sync. Not fixed or hedged in prose here.\n\n_Generated by [Claude Code](https://claude.ai/code/session_01P7vaLs7bhBPi9m3JyzkhDj)_\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01P7vaLs7bhBPi9m3JyzkhDj)_"
+}

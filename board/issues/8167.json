@@ -1,0 +1,34 @@
+{
+  "number": 8167,
+  "kind": "pull_request",
+  "title": "fix(example-crm): bind sales positions to crm_sales_user permission set",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-12T18:31:05Z",
+  "updated_at": "2026-08-12T19:44:52Z",
+  "closed_at": "2026-08-12T19:44:51Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-12T19:44:51Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/8167",
+  "body": "Fixes #8060\n\n## What\n\n`examples/app-crm` declared three positions (`sales_rep`, `sales_manager`,\n`finance_approver`) and a `crm_sales_user` permission set granting CRUD on 5\nCRM objects, but nothing ever bound them together — no\n`sys_position_permission_set` seeding, and `crm_sales_user` was not\n`isDefault`. Any user assigned one of the three positions therefore resolved\nonly the platform `everyone` baseline and was 403'd on every CRM object.\n\nThis mirrors `examples/app-showcase/src/security/bind-position-sets.ts`\nexactly, per the triage ruling: a new\n`examples/app-crm/src/security/bind-position-sets.ts` binds the three\npositions to `crm_sales_user` imperatively on `kernel:bootstrapped` (a\ndeclarative seed can't do this — the seed loader runs before the security\nbootstrap creates the `sys_position`/`sys_permission_set` rows), wired via a\nnew `onEnable` export in `objectstack.config.ts`. `crm_sales_user` is\ndeliberately **not** marked `isDefault` — that would auto-bind it to the\n`everyone` anchor and grant every user the CRM permissions, changing the\nexample's security story rather than completing it (explicitly ruled out).\n\n## Measured (predict-then-mutate + reverse verification)\n\nReproduced the issue's own acceptance test with\n`objectstack verify --app examples/app-crm/objectstack.config.ts --rls`:\n\n**Before** (confirmed matches the issue exactly):\n```\ndeclared=3 [sales_rep,sales_manager,finance_approver]  ran=3  notRun=[]\n  sales_rep         proven=0  unproven=6 (probeBlocked=6)\n  sales_manager     proven=0  unproven=6 (probeBlocked=6)\n  finance_approver  proven=0  unproven=6 (probeBlocked=6)\ntotals: probeBlocked=18, proven=6 (base persona only)\n```\n\n**After**, per persona: `objects:6, probeBlocked:1, memberVisible:5`.\n`probeBlocked` (no object grant at all — the by-id-write class never\nexercised) drops from 18/18 → 3/18. The one remaining `probe-blocked` object\nper persona is `crm_opportunity_line_item`, which `crm_sales_user` does not\ngrant at all — a separate, pre-existing gap (filed as #8164, out of this\ncard's scope). Zero RLS holes introduced or found, in either state.\n\n**Reverse verification**: disabled the `onEnable` wiring, re-ran — readout\nreturned to exactly the pre-fix 18/18 `probeBlocked` baseline, confirming the\nhook (not something else) is the lever. Re-enabled and re-confirmed the fixed\nreadout before pushing.\n\n**A caveat on \"proven\"**: the report's strict `proven` field (⇒\n`rls-consistent`) stayed at 0 for the position personas even after the fix —\nnot a defect of this change. All 5 now-granted CRM objects declare\n`sharingModel: 'public_read_write'` (\"everyone reads+writes\"), so once the\nobject gate opens, the record is visible to any authenticated holder by\ndesign — the report classifies that as `member-visible` (inconclusive), which\nis correct and expected for this app, not `rls-consistent`. Zero holes is the\nsignal that matters: no security regression.\n\n## Sharing rules (PM mechanism assumption #2)\n\nThe three `sharedWith: { type: 'position', value: … }` sharing rules do\n**not** start mattering after this fix — measured, not assumed. They widen\nrecord visibility on top of the object's OWD baseline, but every CRM object\nthey target is already `public_read_write` (org-wide read+write for anyone\nholding the object grant), so there is nothing left to widen. The sharing\nrules remain inert on top of an already-maximal baseline; this is a property\nof the objects' declared `sharingModel`, unrelated to the binding fix.\n\n## Out of scope\n\n- `packages/plugins/plugin-security/**` untouched, per the ruling.\n- #8164 filed (unassigned, unlabeled) for `crm_opportunity_line_item` having\n  no object-level CRUD grant in any app-crm permission set — the platform's\n  own build-time lint (`security-master-detail-ungranted`) already flags this\n  independently of the binding gap this card fixes.\n\n## Tests\n\n- `objectstack verify --app examples/app-crm/objectstack.config.ts --rls`\n  (see above) — the issue's own acceptance test, run before/after/reverted.\n- `cd examples/app-crm && npx vitest run` — 27/27 passing (unchanged; no test\n  file added, following the showcase's own precedent of proving the binding\n  via the live `verify --rls` probe rather than a unit test).\n- `cd examples/app-crm && npx tsc --noEmit` — clean.\n- `pnpm --filter '@objectstack/example-crm...' build` — clean, only the\n  pre-existing (now separately filed) `security-master-detail-ungranted`\n  warning on `crm_opportunity_line_item`.\n- `pnpm check:changeset-gate-self-tests`, `check:i18n-coverage` (after\n  rebuilding the showcase closure to clear a stale-dist false positive\n  unrelated to this diff), `check:objectui-changeset`,\n  `check-changeset-no-major.mjs`, `check:nul-bytes` — all green. Note\n  `check:objectui-pin-fresh` / `check-objectui-pin-fresh.mjs` are red, but\n  pre-existing and unrelated (ambient objectui pin staleness, independent of\n  this diff's content).\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01PEVB6w7D7uCszR9Mw1BL73)_"
+}

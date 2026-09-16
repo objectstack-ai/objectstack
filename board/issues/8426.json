@@ -1,0 +1,35 @@
+{
+  "number": 8426,
+  "kind": "pull_request",
+  "title": "fix(rest,lint,spec): prune nav entries whose destination object cannot serve, and refuse them at authoring time (#7912)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-13T12:36:35Z",
+  "updated_at": "2026-08-13T14:44:34Z",
+  "closed_at": "2026-08-13T14:44:33Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-13T14:44:33Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/8426",
+  "body": "Fixes #7912\n\nA `type: 'object'` navigation entry pointing at an object that **cannot answer a list** was served in the `/meta` payload anyway. The user saw a menu item that could not work, and the console rendered the failure as a generic empty state — so it read as *\"you have no records\"* rather than *\"this page cannot work\"*.\n\nImplements the maintainer ruling of 2026-08-12 (「接受你的全部建议。」) — **option (c): derive it, mint no new key**, plus its mandatory publish-time companion.\n\n## The gap, re-measured on the merged tree\n\nThe card's line numbers were stale (`rest-server.ts` is 11k lines and moves daily). Anchored on symbols instead:\n\n| Symbol | Card said | Actually |\n|:--|:--|:--|\n| `filterAppForUser` | `:2976-3056` | `:2946`, delegating to `filterAppForUserWithReason` at `:2994` — the real implementation |\n| `apiAccessDenialFromEnable` | `:1665` / `:1658` | `:1439` |\n| `requiresObject` in nav filtering | docblock only | confirmed — one mention, the \"NOT gated here\" line |\n\nThe mechanism the card guessed at held: `apiExposureDenialReason`'s two steps are a pure function of `enable` — no user, no permissions, no context — so the prune decision really is persona-independent and sits outside the permission logic entirely.\n\n## What landed\n\n**1. The prune (`packages/rest`).** `filterAppForUser` gates `type: 'object'` entries on whether the destination can serve a `list`, on both `/meta` app routes, inside `children` and inside `areas[]` — through the same `filterNav` the other gates use, so there is no second implementation to drift. The gate is resolved **once per request** from object metadata, mirroring the ADR-0057 D10 `serviceGate` pattern rather than re-reading metadata per entry.\n\nFail-open in three distinct cases, each deliberate: unreadable metadata resolves **no gate at all** (a cold start must not empty a healthy sidebar — the #3545 trade); an object absent from metadata is **served** (no declared policy to enforce, #3770); an object with no `enable` block is **served**.\n\n**2. The mandatory companion (`packages/lint`).** A new reference-integrity rule `nav-object-unservable` **fails** `os validate` / `os build` / `os lint`, naming the entry, the object, which of the two conditions fired and the offending `enable` key path. It gates (`error`) where its sibling `validate-nav-access` only warns, and the asymmetry is principled: `enable` is declared on the object **in the same stack**, so a finding is a certainty, not a suspicion. Objects the stack does not declare are skipped — their `enable` is not visible from there. The serving side logs the same facts, throttled per `app|entry|object|reason`.\n\n**3. One gate order, three consumers (`packages/spec`).** The two-step order — `apiEnabled` first and independently, the whitelist second — is now `apiExposureDenialReason` / `canServeApiOperation` in `@objectstack/spec/data`, beside the `resolveEffectiveApiMethods` / `isApiOperationAllowed` primitives it composes. There were already **three** spellings of it; the REST data gate, the nav prune and #7909's invariant test now all read the one export. Per the card's ⛔, #7909's test was **reused, not copied** — its local `canList` became a call to the shared function.\n\n## Verification\n\n**Ablation (the assertion is not vacuous).** Fix committed first, then the derivation removed, then restored from the commit — never against an uncommitted edit:\n\n| State | Result |\n|:--|:--|\n| Derivation in place | `16 passed (16)` |\n| Derivation removed | `8 failed / 8 passed` |\n\nThe 8 reds are exactly the pruning and diagnostic assertions; the 8 that stay green are exactly the fail-open *\"must NOT prune\"* cases, which **should** survive an ablation. Predicted before running, and that is the direction observed.\n\n**⭐ The control holds.** `nav_api_keys` → `sys_api_key` survives, asserted as the whole surviving set so an over-pruning derivation cannot pass by keeping one row alive. `sys_jwks` stays `apiEnabled: false` and is untouched.\n\n**Full suites on the merged tree** (`origin/main` advanced twice mid-flight; merged, then artifacts regenerated via `scripts/pm/os-regen-merge.sh`):\n\n| Suite | Result |\n|:--|:--|\n| `@objectstack/dogfood` (full, as dispatched) | 728 passed, 2 expected fail, 3 skipped |\n| `@objectstack/rest` | 1843 passed (112 files) |\n| `@objectstack/spec` | 10331 passed (390 files) |\n| `@objectstack/lint` | 1975 passed (72 files) |\n| `@objectstack/cli` | 1265 passed (116 files) |\n| `@objectstack/platform-objects` | 351 passed |\n| `@objectstack/runtime` | 2306 passed |\n| `spec check:generated` | 13/13 up to date |\n| typecheck (4 packages) + eslint (changed files) | clean |\n| 16 derived gate families | all pass |\n\n`examples/app-showcase` builds green, which is `os build` running the new gating rule against a real stack.\n\n## Deliberately unchanged\n\n- **`requiresObject` keeps its client-only pin.** It asks whether an object is *registered*; this gate asks whether a registered object's `enable` lets it answer. Option (a) was rejected and nothing here re-means the key — an entry whose object this layer cannot find is served, not pruned. Pinned by test.\n- **`visible` (CEL)** stays client-side only.\n- **`sys_jwks`** is out of scope and untouched.\n\n## The Account-app sibling closes — as already-closed\n\nThe ruling said it \"closes with this card or not at all\". Measured: the sibling is **#7555** (same QA run #7514), and it was already closed by merged PR **#7605**. Its cause was permission *composition* — an app-declared baseline replacing the platform `member_default` — which option (c) neither can nor should touch, since servability is persona-independent by construction. What this card owed it is proof of no regression, and that is asserted: all six Account-app object destinations grant `list`, so the derived gate leaves the app exactly as it found it. No edit to `account.app.ts` was required.\n\n## Serial-file note\n\n`#8039`'s region (the docblock above `DATA_RECORD_READ_PARAMS`) was **not touched**. My nearest hunk ends where `apiAccessDenialFromEnable` closes, two declarations earlier.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01P7vaLs7bhBPi9m3JyzkhDj)_"
+}

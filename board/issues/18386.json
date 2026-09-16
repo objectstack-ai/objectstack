@@ -1,0 +1,28 @@
+{
+  "number": 18386,
+  "kind": "issue",
+  "title": "feat(rest): 导出接口新增 ?template=true —— 输出只含「可填列」的 xlsx 导入模板",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-16T07:45:44Z",
+  "updated_at": "2026-09-16T07:46:23Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/18386",
+  "body": "## 问题\n\n导入模板目前没有统一实现,两个仓库各做了一套,且都把**用户填了也写不进去的列**放进了模板。\n\nobjectui 的「下载模板」按钮前端自行拼 CSV,列取自 `importTargetFields` 的全量结果;framework 这边 `GET /data/:object/export` 的默认列是 `buildFieldMetaMap(schema)` 的全部 key,只按 FLS 收窄,不看 `system` / `hidden` / `readonly`。注释里 `rest-server.ts` 明确写了「an empty export doubles as an import template」——但空导出只保证「没有数据行」,没回答「表头该有哪些列」。\n\n实测一个业务对象(项目),模板前 7 列是 registry 注入的系统字段:\n\n| 列 | 字段 | readonly | hidden | system |\n|---|---|---|---|---|\n| 组织标识 | `organization_id` | ✅ | ✅ | ✅ |\n| 创建时间 | `created_at` | ✅ | — | ✅ |\n| 创建人 | `created_by` | ✅ | — | ✅ |\n| 更新时间 | `updated_at` | ✅ | — | ✅ |\n| 更新人 | `updated_by` | ✅ | — | ✅ |\n| 所有者 | `owner_id` | ❌ | — | ✅ |\n| 所属业务单元 | `owning_business_unit_id` | ✅ | ✅ | ✅ |\n\n因为是 registry 注入,**每个对象都这样**,不是个别对象配错。\n\n比「列太多」更严重的是:这些 `readonly` 列会被 `stripReadonlyFields` 在写入时静默剥掉(engine.ts)。用户照模板填了「创建人」,导入成功、无报错、数据没进去。**模板在教用户填注定被丢弃的列。**\n\n## 为什么不能直接改导出的默认列\n\n导出和模板的诉求相反:\n\n| | 所有者 / 修改时间 |\n|---|---|\n| 导出(我要**看**数据) | 要 —— 列表上显示了,导出就该有 |\n| 模板(我要**填**数据) | 不要 —— 填了会被平台盖掉或 strip |\n\n同一套列规则无法同时满足。所以导出的列规则**保持不变**,模板作为新模式引入 —— 这样对现网调用方零影响。\n\n## 方案:一个接口,两个模式\n\n```\nGET /data/:object/export                 → 现状,不改\nGET /data/:object/export?template=true   → 新增\n```\n\n### 目标列规则\n\n| | 导出模式(不改) | 模板模式(新增) |\n|---|---|---|\n| 起点 | schema 全字段 | schema 全字段 |\n| `system` | 保留 | **排除** |\n| `hidden` | 保留 | **排除** |\n| `readonly` | 保留 | **排除** |\n| `formula` / `summary` | 保留 | **排除** |\n| `autonumber` | 保留 | **排除** |\n| FLS | ∩ 可**读** | ∩ 可**写** |\n| `?fields=` 显式指定 | 照办,不收窄 | 照办,不收窄 |\n| 数据行 | 有 | **0 行** |\n| 列顺序 | 作者声明顺序 | 作者声明顺序(不重排,必填靠 `*` 标记) |\n\n判据一句话:**「这列我填了,导入后真的会落库吗?」答\"会\"才进模板。** 每条排除都对应引擎里一个真实的丢弃或拒绝行为,不是审美判断。\n\n### 输出格式:xlsx(不是 CSV)\n\n模板必须表达**值域**,CSV 做不到:\n\n| | CSV | xlsx |\n|---|---|---|\n| 封闭值域下拉 | 做不到 | Excel 数据验证,点选不会错 |\n| multiselect 用逗号分隔 | 与 CSV 分隔符打架 | 无冲突 |\n| 值域说明 | 只能污染表头 | 独立 sheet |\n| 前导零(`00123`) | 被 Excel 吃成 `123` | 可声明文本单元格 |\n\n具体结构:\n\n- **Sheet1「模板」**:表头(必填带 `*`)+ 一行示例值;`select` / `radio` / `boolean` 列挂数据验证下拉\n- **Sheet2「填写说明」**:每字段一行 —— 合法值、格式、分隔符;`lookup` 写「填 <目标对象> 的名称」。同时兼作下拉数据源(Excel 内联下拉有 255 字符上限,选项多时必须引用区域)\n\n### 值域怎么写\n\n导入端(`import-coerce.ts`)实际接受的范围比模板告诉用户的宽得多,模板应如实传达:\n\n| 类型 | 导入端接受 | 模板该给 |\n|---|---|---|\n| select / radio | ① `value` 精确 ② `label` 大小写不敏感 ③ 翻译后 label | **label**(用户看得懂,导入端认) |\n| multiselect | 按 `,` `;` `、` 换行 拆分 | 示例用 `、` 连两个真实选项;说明列出四种分隔符 |\n| boolean | `true/t/yes/y/1/on/是/对/✓/√` + 反面 | 示例给「**是**」,不是 `true` |\n| lookup / reference | 显示名 → `resolveRef` 解析 | 说明写「填名称」,提示重名会 `reference_ambiguous` |\n| number | 容忍 `1,234` / `$¥€£￥` / `25%` / `(100)` | 说明里写明 |\n\n## 实现要点\n\n- 模板路径**不复用** `createXlsxStream`。0 行数据不需要流式,而 streaming writer 对 `dataValidation` 的支持未经验证(exceljs 类型里 `WorksheetModel.dataValidations` 是注释掉的)。用普通 `new ExcelJS.Workbook()` + `workbook.xlsx.write(res)`。\n- **零新依赖**:`exceljs@^4.4.0` 已是 `packages/rest` 的既有依赖,`loadExcelJs()` 懒加载封装已存在。\n- 列规则过滤抽成独立函数,单测覆盖上表每一行。\n- `?template=true` 需要进 `DATA_EXPORT_PARAMS` 允许集,否则被 `refuseUnknownQueryParams` 挡掉。\n- 权限沿用现有两道闸(`enforceApiAccess('export')` + `enforceExportPermission`)。\n\n## 已定的边界\n\n- **upsert 匹配列**:模板不预置 `autonumber`。要 upsert 的人自己加列,映射步骤里照样选得到 —— 功能不丢。理由:为少数场景在模板里塞一列「填了新建时无效」的东西,又回到\"教人填没用的列\"的老问题。\n- **示例值行**:保留。它传达格式,Sheet2 说明里提示用户删除。\n\n## 验收\n\n1. 任一业务对象 `?template=true`,下载的 xlsx 中**不含**任何 `system` / `hidden` / `readonly` / `formula` / `summary` / `autonumber` 列\n2. 保留列的顺序与作者 `fields` 声明顺序一致,必填列表头带 `*`\n3. `select` / `boolean` 列在 Excel 中可下拉选择\n4. 不带 `?template=true` 的导出,列与本 issue 之前**逐字节一致**(现网零行为变更)\n5. 下载的模板填入数据后原样导回,不产生 `invalid_option` / `invalid_boolean`\n6. 跨表格软件实测:Excel / **WPS** / Numbers / Google Sheets 下拉均正常 —— 单测证明不了,需真下载真打开\n\n## 关联\n\nobjectui 侧改动(「下载模板」改调本接口、删除前端 CSV 生成)见 objectstack-ai/objectui 的对应 issue。本 issue 落地后 objectui 那侧才能动。\n"
+}

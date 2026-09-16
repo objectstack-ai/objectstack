@@ -1,0 +1,35 @@
+{
+  "number": 8401,
+  "kind": "pull_request",
+  "title": "fix(metadata-protocol): audit the allowed publish/rollback and the 409 conflict denial (#7748)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-13T11:05:10Z",
+  "updated_at": "2026-08-13T11:48:44Z",
+  "closed_at": "2026-08-13T11:48:43Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-13T11:48:43Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/8401",
+  "body": "Fixes #7748\n\n## The defect is an inversion\n\n`protocol.ts` wrote an allowed-outcome audit row at exactly two sites — the `save` path and the `delete` path. `publishMetaItem` and `rollbackMetaItem` reached `recordMetadataAudit` through **one** route only, `assertLockAllowsWrite`, which records on the **deny** path and returns before any write on allow:\n\n```\nconst refusal = evaluateLockForWrite(state.lock);\nif (!refusal) return null;          // allowed: returns before any audit write\n…\nawait this.recordMetadataAudit({ …, outcome: 'denied', … });\n```\n\nSo a **refused** publish was audited and a **successful** one was not — the inverse of what an audit trail is for. The 409 `METADATA_CONFLICT` refusal is raised *outside* that helper (it comes back from the repository's parent-version check), so it wrote nothing either: a caller repeatedly losing an optimistic-concurrency race was indistinguishable, in the trail, from a caller who never tried.\n\nThe QA run this came from: 3 publishes + 2 rollbacks, all 200, all with `X-Actor`, produced `Counter({'save': 5})`.\n\n## What changed\n\nAll three gaps the card names, in `packages/metadata-protocol/src/protocol.ts`:\n\n| route | row now written |\n| --- | --- |\n| `publishMetaItem` | `operation: 'publish'`, `outcome: 'allowed'`, `code: 'ok'` |\n| `rollbackMetaItem` | `operation: 'rollback'`, `outcome: 'allowed'`, note names the restored version |\n| 409 `METADATA_CONFLICT` — all four sites (save / publish / rollback / delete) | `outcome: 'denied'`, `code: 'metadata_conflict'` |\n\nThe two allowed rows are placed exactly where the two pre-existing ones sit: after persistence has committed, before the projector. The four conflict sites route through **one** new private helper, `recordOptimisticConflictAudit`, rather than four hand-written copies — those sites already carry four near-identical hand-written conflict `Error`s, and this is the lane that has paid twice this shift for one idea acquiring several spellings.\n\n`sys_metadata_audit` has always declared `publish` and `rollback` as `operation` options, so no schema work was needed — the table was designed for these rows and the writes were simply never made.\n\n## Anti-vacuity\n\nEvery other multi-table fake engine in this repo opens `insert` with `if (table === 'sys_metadata_audit') return { id: 'audit_skip' };`. That is correct for a suite about something else and makes every assertion here vacuous — it reports \"no audit rows\" identically before and after the fix. The new harness persists audit rows like any other table, and a `save`-row control proves it can see them at all.\n\nIt also separates **attempted** from **landed**. `recordMetadataAudit` is best-effort by contract (ADR-0010 §3.6): it swallows its own insert failure. That makes a missing row ambiguous between \"nothing ever tried to write it\" (this defect) and \"the write was attempted and failed\" (a provisioning problem). The last case drives the second explicitly — audit table rejecting, publish still succeeds, attempt observed, row absent.\n\n## Reverse verification\n\nDirection predicted before running; the prediction was **wrong** and the correction is recorded in the test header rather than smoothed over. Predicted 5 red / 2 green; **measured 6 red / 1 green**. The best-effort-swallow case also goes red, correctly: under the defect no publish audit write is *attempted*, so there is nothing for the failing table to reject. Only the `save` control stayed green — the asymmetry that matters, proving the fix did not disturb the site that already worked.\n\nTaken by reverting `protocol.ts` to `origin/main` from the commit, then restoring with `git checkout` from the branch; `git status` clean afterwards, so the numbers were taken against the bytes that ship.\n\n## Verification\n\n- `metadata-protocol` — 80 files / 1170 tests green (re-run after merging `main`)\n- Downstream consumer sweep (prefix filter `...@objectstack/metadata-protocol`, i.e. **consumers**): `objectql` 196/3496, `rest` 110/1817, plus the two other suites whose fake engines drive publish/rollback without an audit branch (`spec` `api/protocol.test.ts` 51, `plugin-email` template-runtime-write 14). These were checked deliberately: their stubs lack a `sys_metadata_audit` branch, so a new insert could have collided in their row maps.\n- All 45 `check:*` gates parsed out of the `ESLint` job, plus `check:i18n`, `check:type-check-coverage`, `check:agent-model-declared` — 48/48 green. `check:i18n` first reported a prerequisite miss (workspace CLI not built) and was re-run green after building it.\n- Re-derived against the actual changed paths: this surfaced `check:changeset-gate-self-tests`, `check:objectui-changeset`, `check:query-options-erasure` and `scripts/check-changeset-no-major.mjs`, which the dispatch list did not name — all green.\n\n## Scope\n\nBatch `publishPackageDrafts` is deliberately untouched and filed separately as #8400 — it promotes drafts inside one `engine.transaction()`, where an audit row would roll back with the batch rather than record the refusal that caused it. That needs a Phase 2 placement and its own test, not a rider here. The actor stamped on the rows that *are* written stays out — that is #7749, which remains open.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_012WMpuAfA2KSdDjGF6tm1bH)_"
+}

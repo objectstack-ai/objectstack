@@ -1,0 +1,33 @@
+{
+  "number": 7651,
+  "kind": "issue",
+  "title": "[finding] UNCONFIRMED: runtime bundle filename hash differs across byte-identical rebuilds — needs a deterministic-rebuild repro",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "finding"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T09:50:44Z",
+  "updated_at": "2026-08-12T17:56:37Z",
+  "closed_at": "2026-08-12T17:54:20Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7651",
+  "body": "## Symptom\n**UNCONFIRMED.** During the `build-own-contract` run, the runtime bundle's filename hash differed across runs whose inputs were restored byte-for-byte, suggesting the emitted bundle name may not be content-deterministic. The QA run explicitly declined to file this as a defect: it is a side-observation with no dedicated reproduction yet and means nothing until reproduced. Do not treat as a confirmed defect.\n\n## Root cause\nNot located by the run. Possible non-deterministic build output — e.g. a timestamp, iteration ordering, or salt feeding the bundle-name hash — in the `objectstack build` / compile pipeline (`packages/cli`). Unverified.\n\n## Reproduction\nNot yet established. Next step is a dedicated deterministic-rebuild repro: build twice from byte-identical restored inputs (same source tree, same lockfile, cleared caches), capture the emitted runtime bundle filenames both times, and diff them. If the hash differs with identical content, capture the differing input feeding the hash. Until this repro is in hand the observation is not actionable as a defect.\n\nRouting note: labeled `domain:cli` because the runtime bundle is produced by the `objectstack build` / compile command in `packages/cli`; re-route to `domain:devx` if the repro localizes it to build tooling under `scripts/` instead.\n\n## Source\nExtracted from the QA run objectstack-ai/objectstack#7628 (framework 92f26f75, console 6314e87f)."
+}

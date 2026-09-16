@@ -1,0 +1,34 @@
+{
+  "number": 8469,
+  "kind": "pull_request",
+  "title": "feat(pm-dispatch): four 2026-08-13 scheduling rulings — pm:blocking cache, computed pull order, urgent fable triage, simple cross-lane takeover",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-13T14:27:43Z",
+  "updated_at": "2026-08-13T15:33:28Z",
+  "closed_at": "2026-08-13T15:33:18Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-08-13T15:33:18Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/8469",
+  "body": "Fixes #8433\n\nImplements the maintainer's four 2026-08-13 scheduling-policy opinions (quoted verbatim, untranslated, in `references/dispatch-runbook.md`; date-tagged skeleton lines in SKILL.md). ADR-class merge path: this stays a **draft** for the maintainer's hand-merge — no auto-merge, no queue, no ready-flip by any AI seat.\n\n## What each item became\n\n1. **`pm:blocking` stored label** (State model row + 标签纪律 bullet + seed in `scripts/pm/ensure-pm-labels.sh`): a **sweep-maintained cache** of the `Blocked-by:` reverse index — written/removed only by the triage sweep, off when every dependent closes, never hand-set. The 2026-08-11 sentence 「被依赖」是随上游关单衰变的推导属性…⛔ 不落存储标签 is superseded and was reconciled **in both places it lived** (标签纪律 bullet, line ~96; the old ordering sentence, line ~340): the text now records the 2026-08-11 → 2026-08-13 supersession with dates, and keeps the invariant *a label exists iff it has a named reader* (readers: the pull order, list-page scans). The seed follows the script's convention: a comment naming the consumers + a description under GitHub's 100-char limit.\n2. **Computed total pull order** (选择优先级 rewrite): `priority:p0` insert-ahead, then `pm:blocking` (within-tier by unlock fanout, still computed live — the fanout *count* stays label-free), then `target:` board items, then type `Bug`, then the rest; card age breaks ties at every tier. Reconciled with the recorded P1–P5 rejection: what was rejected is hand-maintained gradation values; every tier here reads an existing signal (label, native type field, created_at) with zero per-card maintenance.\n3. **Urgent direct triage** (Backlog sweep skeleton + runbook section): maintainer-named or p0-suspect card ⇒ the seat immediately spins up a `claude-fable-5` triage subagent instead of waiting for the triage Routine's shift cadence; authority surface is triage only (no code, no claim, no dispatch); output lands on the card, same format and force as Routine triage.\n4. **Simple cross-lane blocker takeover** (批次独立性 skeleton + runbook section): a mechanical, clear-spec, S-class blocker in another lane may be taken over directly by the blocked seat — full claim discipline on the other lane's card, hot-file serial queue respected, completion note left; design-judgment work stays with the owning lane.\n\n## Interpretation points flagged for review (veto per item as ruled on the card)\n\n- **`pm:blocking` ahead of type `Bug`** is the PM's reading, not the maintainer's words — the single ordering choice most likely to be flipped at review.\n- **`target:` board items kept as a tier** (between `pm:blocking` and `Bug`): the card's four-tier order did not name the release board; silently deleting its queue effect had no ruling behind it, so it was retained. Flip or drop at review if the four-tier order was meant to be exhaustive.\n- Item 3's single-producer sentence (yield when the triage seat is on shift and already on that card — same boundary as 代扫) is an operationalization from the existing 代扫 rule, not the ruling's words.\n- Item 4 keeps two standing absolutes explicit in the runbook: `packages/spec` remains the spec seat's regardless, and the takeover is dependency-shaped, not a return of 借调 (load-shaped secondment stays deleted).\n\n## Region note\n\nDeclared surface was SKILL.md queue/triage/dispatch + 标签纪律 sections, the runbook, and `ensure-pm-labels.sh`. Item 4 falsifies three standing \"only/never\" phrases outside those sections; leaving them would ship a self-contradicting skill, so three surgical, same-line-count reconciliations were made and are called out here rather than done silently: 跨座位转移 (多仓协调) gains the takeover as its named sole exemption; 跨域例外路径 (Domain lanes) heading now names two boundary channels; Guardrails' lane-claim clause now reads 例外两条. None of the reserved regions (Model tiering, 发现分诊轮, 落卡/升级流程, `references/seat-post-protocol.md`, `platform-readings.md`, `review-checklist.md`) was touched.\n\n## SKILL.md line accounting (686/686 shrink-only ratchet → now 685, ceiling untouched)\n\nAdditions (+6):\n- +1 State model row for `pm:blocking`\n- +1 标签纪律 `Blocked-by:` bullet (4→5) — supersession record + cache semantics\n- +2 Backlog sweep paragraph — item 3 skeleton\n- +2 批次独立性 paragraph — item 4 skeleton\n\nRemovals (−7), each deferring detail to where it already lives verbatim:\n- −1 状态变更不过夜 bullet (5→4) — checker command deferred to the 机械守卫索引 table\n- −2 一次性建标签 (3→1) — retired-lane rationale deferred to the script header (its stated authority)\n- −1 三分区 bullet (3→2) — full partition semantics live in the runbook\n- −2 云卡四课/接手中断 (7→5) — the four takeover increments live in the runbook\n- −1 直接验收兜底 bullet (4→3) — per-file checklist lives in the runbook\n\nConstant-line rewrites: 选择优先级 7→7, 跨座位转移 3→3, 跨域例外路径 4→4, Guardrails bullet 5→5. Net −1; the 1-line headroom is left for the serialized cards behind this one (the fable-exemption card must add Model-tiering text).\n\n## Verification\n\nGate list re-derived from the actual changed paths with `node scripts/pm/dispatch-gates.mjs` — it returned exactly the six families named in the dispatch, no additions. All six pass locally (true exit codes captured):\n\n- `check:doc-authoring` ✓ (376 files clean)\n- `@objectstack/lint check:doc-formula-expressions` ✓ (after building the lint package's dependency closure — first run was the known fresh-worktree false red on missing formula `dist/`)\n- `check:nul-bytes` ✓ (7630 files, no raw control bytes)\n- `check:pm-skill-id-lint` ✓ (9 files clean — no issue-ID citations added to skill text)\n- `check:pm-skill-ratchet` ✓ (685 lines, ceiling 686, headroom 1)\n- `check:skill-frame-sync` ✓ (4 decision-frame copies isomorphic; none of my edits touch its anchors)\n\nNo changeset: nothing published releases from `.claude/**` or `scripts/pm/**` — `skip-changeset` applies.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_018WuTtyckQa1VcXwgd52JpN)_"
+}

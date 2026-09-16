@@ -1,0 +1,33 @@
+{
+  "number": 6221,
+  "kind": "issue",
+  "title": "非记忆化 `z.lazy` getter 让 `zodShapeOf` 每次解出**新实例**：桥项进得去、永远匹配不上(#6098 测量轮的副产品)",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "finding",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T11:08:12Z",
+  "updated_at": "2026-08-12T18:02:10Z",
+  "closed_at": "2026-08-12T17:58:27Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 9,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6221",
+  "body": "观察类发现,来自 #6098 的 #5056 测量轮实测。**今天不产生任何错误答案**,记录在案,免得下一轮把它当成新 bug 重新发现一次。\n\n与 #5828 不是同一件事:那条说的是「门测量 testkit」里 `cloneOverlap` 比值的假可达面(`src/ui/door-reachability.testkit.test.ts`);这条说的是 `scripts/build-schemas.ts` 里 `computeSurfaceReachability` 的 `bridged` 表,机制是**实例身份**而不是重合度。同属 #5056 家族,不同仪器。\n\n## 事实\n\n`zodChildSchemas` 与 `zodShapeOf` 都会调用 `z.lazy` 节点的 `def.getter()`,而 **Zod 的 lazy getter 不做记忆化**——实测 `getter() !== getter()`。如果 getter 的函数体里现构造 schema(`.extend(...)`、`.strict()` 等),那么两次调用拿到的是**两套不同实例的子图**。\n\n仓内的现成标本是 `NavigationItemSchema`(`packages/spec/src/ui/app.zod.ts:570`):\n\n```ts\nexport const NavigationItemSchema = z.lazy(() =>\n  z.discriminatedUnion('type', [\n    ObjectNavItemSchema.extend({ children: z.array(NavigationItemSchema).optional()... }).strict()...,\n    ...\n  ])\n);\n```\n\n后果,#6098 实测:\n\n- BFS 用 `zodChildSchemas` 走进去,入队的是**第一次** getter 调用产出的实例;\n- 建 `bridged` 表时 `zodShapeOf` 又调一次 getter,拿到的 `children` 是**全新实例**——于是桥表里多出一个 `(children, 从未被 BFS 访问过的实例)` 对;\n- 该桥项**谁也匹配不上**:任何后续 `zodShapeOf` 调用都会再 mint 一个新实例,身份永远对不上。实测 1610 个 def 中 **0 个**命中它。\n\n## 为什么今天不产生错误答案\n\n误差方向朝**假不可达**(fail-open)一侧,而两个可能踩中的位置今天都被别的机制挡住了:\n\n- `ui/NavigationItem` 自己在 `visited` 里,`reachableVia` 先于 shape 判定返回 `root-graph`;\n- `data/FilterArray`(另一个 emitted 的 lazy def,`visited=false`)根本解不出 shape,落在 `!shape` 的 fail-closed 兜底上。\n\n触发真实错误需要:一个 emitted def 是**非记忆化 lazy**、**不在 BFS 闭包里**、且**解得出 shape**——三条同时成立。今天没有这样的 def。\n\n## 如果哪天要修\n\n修法在**生产侧或仪器侧**,不是在消费端加容忍:\n\n- **A. 记忆化 getter**(`lazySchema()` 层面缓存一次),让「同一个 lazy 解出同一套实例」成为契约。最干净,但要确认 `OS_EAGER_SCHEMAS` 两种模式下都成立,且不改变 Zod 自身的解析语义。\n- **B. `zodChildSchemas` / `zodShapeOf` 共享一次 getter 结果**(walk 期间的 WeakMap 缓存),把不稳定性关在仪器内部。范围小,但只治这两个 walker。\n\n两条都需要自己的测量轮(会动 `bridged` 表),所以不该顺手塞进任何别的 PR。\n\n参考:#6098 · #5056 · #5828\n"
+}

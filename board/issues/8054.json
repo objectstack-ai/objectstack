@@ -1,0 +1,36 @@
+{
+  "number": 8054,
+  "kind": "issue",
+  "title": "`ListRunsRequestSchema.limit` declares `.min(1).max(100)` but the boundary enforces only integer-ness — `?limit=0` answers \"no runs\", `?limit=101` ignores the cap",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-12T13:39:50Z",
+  "updated_at": "2026-08-12T20:32:10Z",
+  "closed_at": "2026-08-12T20:32:10Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8054",
+  "body": "The same declared-vs-enforced family as #7359, on the **sibling parameter of the same route**, left behind when `status` was fixed.\n\n## Symptom\n\n`GET /api/v1/automation/:name/runs` against a flow with 10 runs:\n\n| query | result |\n|---|---|\n| `?limit=0` | **200 with zero rows** |\n| `?limit=-5` | **200 with zero rows** |\n| `?limit=101` | **200 with all 10 rows** (cap not applied) |\n| `?limit=abc` | 400 `VALIDATION_FAILED` — \"Invalid \\`limit\\` query parameter — expected a whole number, received \\\"abc\\\"\" |\n| `?limit=1.5` | the same 400 |\n\nSo the boundary refuses the wrong *type* but accepts anything outside the declared *range*. Reproduced 2×, identical both passes.\n\nThe `?limit=0` arm is the one that bites: a caller paging with a computed limit that reaches 0 is told the flow has **no runs** — a confidently wrong answer of exactly the shape #7359 was filed for.\n\n## Root cause\n\n`packages/runtime/src/query-param.ts:121` `parseIntegerParam` checks `Number.isInteger` and returns the value; it has no min/max arm — unlike its sibling `parseEnumParam`, which does read the closed set. `packages/runtime/src/domains/automation.ts:737` calls it bare, so `ListRunsRequestSchema`'s declared `(1, 100)` never reaches the boundary.\n\n## Suggested shape\n\nGive `parseIntegerParam` optional bounds and pass `ListRunsRequestSchema`'s own at the call site, so the declared and enforced ranges cannot drift — the discipline #7359's fix applied to `status` by reading `ExecutionStatus.options` rather than re-listing them.\n\n## Severity\n\nP3 — no corruption, no leak. A wrong-but-confident answer and an unenforced result-set cap.\n\n## Source\n\nFound by the platform checklist retest of `automation.flow-runs-page-test-trigger` (framework `279ee48a`), while verifying #7359's fix. Held no clause of that item.\n"
+}

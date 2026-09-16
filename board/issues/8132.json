@@ -1,0 +1,36 @@
+{
+  "number": 8132,
+  "kind": "issue",
+  "title": "`looksLikeInternalErrorLeak` does not recognise Postgres `relation \"…\" does not exist` — measured false, so that dialect's line ships from every boundary that runs the predicate",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "security"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-12T17:26:27Z",
+  "updated_at": "2026-08-13T01:59:30Z",
+  "closed_at": "2026-08-13T01:58:21Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8132",
+  "body": "Found while implementing #8086 (PR #8130), which applies this predicate at the direct-mount package door. Measured, not inferred. Filed unassigned; nobody is on it.\n\n## The gap\n\n`looksLikeInternalErrorLeak` (`packages/types/src/error-leak.ts`) is the shared \"does this message leak server internals?\" heuristic. Its keyword set is:\n\n```\nsqlite_ · sqlstate · startsWith(\"insert into \") · startsWith(\"update \")\nstartsWith(\"select \") · startsWith(\"delete from \") · constraint failed\nunique constraint · foreign key\n```\n\nNone of those matches Postgres's canonical missing-relation phrasing. Measured against the shipping predicate:\n\n```\ntrue   \"SQLITE_ERROR: no such table: sys_metadata\"\nfalse  \"relation \\\"sys_metadata\\\" does not exist\"\ntrue   \"UNIQUE constraint failed: sys_metadata.name\"\nfalse  \"Failed to delete customization overlay: relation \\\"sys_metadata\\\" does not exist\"\ntrue   \"SQLSTATE 08006: connection failure\"\n```\n\nSo the SQLite phrasing of a missing table is withheld and the **Postgres phrasing of the same condition is disclosed**, naming a physical table, from every boundary that applies the predicate — `HttpDispatcher.error` (#3867) and the direct-mount package door (#8086) among them. The one seam that is NOT affected is `rest-server.ts`'s `resolveErrorResponse` band, which withholds **every** 5xx regardless of the predicate (#5437) — which is why `rest-5xx-message-sanitization.test.ts` has a green \"Postgres phrasing is withheld too\" case while the predicate itself returns false for that string. That case pins the *seam's* behaviour, not the predicate's, and reading it as the latter is the trap this issue exists to name.\n\nPinned as a live case in `packages/rest/src/package-door-5xx-message-sanitization.test.ts` (the residual case, added by PR #8130), which goes red the day this is fixed.\n\n## Why not \"just add the keyword\"\n\nThat is one option, and it is the cheapest, but it is worth deciding rather than reflexing — the predicate's own module note already argues against growing it:\n\n> Deliberately a *heuristic over the message*, not a driver taxonomy … Teaching the heuristic to recognise `[read-scope-sql]` would have been *more* message sniffing, which is the mechanism #5352/#5367 exist to remove.\n\nThat was written when #5811 added `declaresServerFault` alongside it, keying on the producer's **declaration** rather than its phrasing. Each new dialect string is one more entry in a list that is unbounded by construction — Postgres alone has `relation … does not exist`, `column … does not exist`, `permission denied for table …`, and MySQL/MSSQL/Oracle each phrase all of it differently. Every one of them is a leak the current set misses, and the list can only ever be as complete as the dialects someone has met.\n\nOptions, briefly:\n\n- **A — add the phrasings.** Cheap, immediate, and strictly better than today. Unbounded by construction, and each addition is a guess about dialects nobody in this repo has run.\n- **B — reach for `declaresServerFault` where the producer declares.** Already exists (#5811) for exactly the messages a phrasing test cannot see. Does not help a **bare** `Error` from a driver, which declares nothing — and that is precisely the case here.\n- **C — fix at the producer.** The direction #8086's ruling recorded and did not fold in: a producer that does not interpolate driver text into a client-facing message needs no predicate to recognise its dialect. The only option whose correctness does not depend on having enumerated the world's SQL engines.\n\nA and C are not exclusive; A is a reasonable interim while C is scoped, the same shape #8086 settled on for its own door.\n\n## Note for triage\n\nI could not find an existing card for #8086's **option C** (\"`metadata-protocol` stops interpolating driver text into client-facing messages; the raw text goes to logs only\"). #8086's PM ruling records it as the direction and says it \"needs a producer-by-producer sweep, which is its own card\", but no such issue appears in a search. If it was never filed, this issue and #8131 are both arguments for it, and all three probably want to be read together.\n"
+}

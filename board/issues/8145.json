@@ -1,0 +1,36 @@
+{
+  "number": 8145,
+  "kind": "issue",
+  "title": "audit-log (B): `config_change` reaches `sys_audit_log` — settings service dual-writes or reroutes (implementation decides), and `settings-service.types.ts:16` becomes true",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:services",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-12T17:57:37Z",
+  "updated_at": "2026-08-13T03:41:30Z",
+  "closed_at": "2026-08-13T03:41:30Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8145",
+  "body": "Sub-issue B of #7675, split by the triage seat (session `session_01GiG1DfMysjbbFLZErAo93G`, 2026-08-12) carrying the maintainer ruling of 2026-08-12 (comment 5261744983 on #7675). This card is the `domain:services` half.\n\n## Ruling carried (verbatim, binding — not re-adjudicable)\n\n> `config_change`(settings 服务已在审计、只是写进了 `sys_setting_audit` —— 双写或改道 `sys_audit_log`,实现时一并解决 `settings-service.types.ts:16` 文档契约与实际去向的矛盾,以实现定契约)。\n\n## The real decision inside the ruled direction (put here deliberately, not discovered mid-flight)\n\nThe ruling allows **dual-write or reroute** and says 以实现定契约 — the implementation decides. So this card must **decide whether `sys_setting_audit` keeps its rows**, then make `settings-service.types.ts:16` state exactly what the implementation does. The identity seat's analysis on #7675 (comment 5264328866) flagged this as the load-bearing choice; weigh: existing consumers/views of `sys_setting_audit` (measure who reads it before dropping it), duplicate-row cost of dual-write, and the parent's defect that `config_change` filters and the `config_changes` list view are empty today.\n\n## Scope\n\n- Settings writes produce `sys_audit_log` rows with `action: 'config_change'` (emission point already located: `settings-service-plugin.ts:315`, which today inserts into `sys_setting_audit` with action `set`).\n- `settings-service.types.ts:16` (\"Emit sys_audit_log rows for every successful write.\") becomes true as written, or is rewritten to match the decided behaviour.\n- Acceptance: the parent's reproduction inverts — `PUT /api/settings/branding` then filter `{\"action\":\"config_change\"}` returns the event. The `config_changes` list view starts showing rows.\n\n## Out of scope\n\n- ⛔ `login`/`logout` writers (sub-issue A, identity). ⛔ Enum retirement (sub-issue C). ⛔ objectui surfaces.\n\nNo `Blocked-by:` — `config_change` remains an enum member; independent of the retirement ordering.\n\nSize/model suggestion: M, `opus` (carries a real design decision within the ruled direction)."
+}

@@ -1,0 +1,35 @@
+{
+  "number": 8332,
+  "kind": "pull_request",
+  "title": "fix(metadata-protocol): the /meta list serves one row per name after a runtime PUT",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-13T05:52:12Z",
+  "updated_at": "2026-08-13T06:36:40Z",
+  "closed_at": "2026-08-13T06:36:39Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-13T06:36:39Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/8332",
+  "body": "Part of #7654\n\nCloses the **metadata half** of that card — symptom 1, the duplicate row. Symptom 2 (the MCP prompt bridge) is `domain:cli`'s lane, is deliberately not touched here, and is filed as #8328 with a `Blocked-by` line pointing at this work. `packages/mcp` is untouched by this PR.\n\n## The card's premise, verified\n\nSymptom 1 reproduces on current `main`. Reverting just this PR's hunk and re-running the new suite serves the card's exact shape — one skill, two rows, disagreeing about `active`:\n\n```\nformula-helper|(none)|true              ← the store override row\nformula-helper|com.acme.showcase|false  ← the package row\n```\n\n## Root cause — neither \"un-deduped\" nor \"registered wrongly\"\n\nThe card was dispatched with two candidate shapes: add a dedup, or register `skill` the way types that already merge correctly are registered. **It is neither**, and the difference decides the fix.\n\n`getMetaItems` merges three layers, and two of them answered the identity question differently:\n\n- `mergePackageAwareOverlay` — the `sys_metadata` overlay merge — resolves per `(slot, package)` and treats a **package-less** row as *standing in for* each package's row of that name. That is exactly how `getMetaItem(name, packageId=P)` resolves.\n- The MetadataService merge one layer below hand-rolled a `Map` keyed on `(package, name)` with **strict** equality, so a package-less row occupied a slot of its own rather than standing in for anything.\n\nWhich merge decides a type is a function of where its baseline comes from. `email_template` is resolved by the first, because its rows come from the SchemaRegistry. `skill`, `agent` and `tool` reach the list through the **MetadataService**'s own loaders, so the registry listing is empty and they are resolved by the second.\n\nA runtime `PUT /api/v1/meta/{type}/{name}` carries no `?package=`, so `sys_metadata` takes a `package_id IS NULL` row. With an empty registry listing the overlay merge has no base row to take provenance from and leaves the override body with no `_packageId`. Its key then missed the package-bearing baseline row in the merge below, the \"already present, do not overwrite\" guard never fired, and both rows were served.\n\n## The fix\n\nDelete the second implementation and call the first. The MetadataService merge now runs that same package-aware resolution, with the runtime listing as the base layer and the registry-plus-overlay result as the higher one — so the documented precedence (a `sys_metadata` customization wins over the artifact baseline) is preserved, while the two steps can no longer disagree about what a package-less row means.\n\nOne hunk, in the `getMetaItems` read merge only.\n\n## Not a `skill` special case\n\nTwo pins in the new suite make this a class fix rather than a patch:\n\n- **`agent` duplicates identically** and is closed by the same resolution. Any fix that special-cased `skill`, or that merely \"registered `skill` like every other type\", would leave it broken.\n- **The mirrored attribution duplicates too** — a package-less MetadataService baseline under a package-bearing higher row — and is closed by the same call.\n\nADR-0048 resolution is unchanged: two packages shipping one name still stay two rows, and a package-less override now reaches both of their slots.\n\n## Verification\n\nReverse verification, **direction predicted before running**: restoring the hand-rolled `itemMap` must turn the duplication cases red naming two rows where one is expected, and must leave `protocol.i18n-bundle-list-merge.test.ts` green. Both observed — 5 failed / 17 passed in the new suite, i18n suite green.\n\n**Green for the right reason, proved rather than asserted.** A control suite that passes in both states proves nothing on its own, so its reachability was measured directly: with `items = []` injected immediately after the new merge call, **3 of the i18n suite's tests go red**. It genuinely executes the branch this PR replaces, and its green result under the real fix is therefore meaningful.\n\n| Suite | Result |\n|---|---|\n| `@objectstack/metadata-protocol` | 78 files, 1126 tests passed |\n| `@objectstack/rest` | 109 files, 1809 tests passed |\n| `@objectstack/objectql` | 196 files, 3451 tests passed |\n| `@objectstack/runtime` | 150 files, 2306 tests passed |\n\nGates, re-derived against the actual changed paths rather than taken from the dispatch list: `check:nul-bytes`, `check:cross-package-test-inputs`, `check:durability-log-level`, `check:filter-alias-parity`, `check:changeset-gate-self-tests`, `check:objectui-changeset`, `check:type-check-coverage`, `check:type-check-debt`, `check:query-options-erasure`, `check-changeset-no-major` — all pass. The re-derivation surfaced the four changeset-triggered families the dispatch list did not name.\n\n## Concurrency\n\n`protocol.ts` is under the region exemption. This PR's region is the `getMetaItems` read merge; #8136's is error and catch message construction. The regions are disjoint, `main` is merged as of this push, and the merge queue arbitrates — no manual ordering was applied to either side.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_012WMpuAfA2KSdDjGF6tm1bH)_"
+}

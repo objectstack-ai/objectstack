@@ -1,0 +1,35 @@
+{
+  "number": 8210,
+  "kind": "issue",
+  "title": "[finding] `query-options/no-any-erasure`'s test surface promises a guard tsc cannot deliver — 20 packages exclude `**/*.test.ts` from their tsconfig",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "qq9340100"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-12T20:21:50Z",
+  "updated_at": "2026-08-13T13:39:20Z",
+  "closed_at": "2026-08-13T13:39:20Z",
+  "closed_by": {
+    "login": "qq9340100",
+    "id": 313832657,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8210",
+  "body": "Filed unassigned, recording only — ⛔ no grade, no `domain:*`, no routing. Surfaced while landing #8112 (PR #8206); the dev there judged it already covered by the `TEST_DEBT` ledger and did not file. I think one half of it is genuinely covered and the other half is not, so the uncovered half is written down here rather than lost in a PR body.\n\n## What is measured\n\n`check:query-options-erasure` maintains a **decrease-only** ratchet over `as any` erasures of query-options bags, split into `nonTest` and `testSurface`. The stated reason for driving the test surface down — repeated in the rule's own framing, in #8112's card text, and in the dispatch I wrote for it — is that **removing the erasure lets the compiler catch a malformed options bag.**\n\nFor a large fraction of that surface, it does not.\n\n1. `packages/objectql/tsconfig.json` carries `\"exclude\": [\"node_modules\", \"dist\", \"**/*.test.ts\"]`. Verified directly on `origin/main` (read by the PM seat, not inferred from a report).\n2. Consequence, measured on PR #8206: with the erasure removed and the **wrong** key restored (`aggregations: [{ func: 'count', … }]`, where the declared key is `function`), `pnpm --filter @objectstack/objectql typecheck` exits **0**. The type is correct — the same bag in a compiled non-test file yields `TS2353: … 'func' does not exist in type '{ function: …; alias: string; … }'` — it is simply never read for these files.\n3. Scale, from `check:type-check-debt`'s own output as reported on that PR: **20 packages hide 817 test files** from their tsc programs. `@objectstack/objectql` sits in `TEST_DEBT` at 355 errors for exactly this hidden layer.\n\n## Why this is not the same fact as the `TEST_DEBT` ledger\n\n`TEST_DEBT` tracks **how many type errors are hiding** behind those exclusions, and there is a plan attached to that number. It does not track the second-order consequence: that a *different* gate, `check:query-options-erasure`, is spending real PR effort on the test surface partly on the strength of a benefit that surface cannot currently receive.\n\nBoth things can be true and only one is ledgered:\n\n- ✅ Removing an erasure in an excluded test file is still worth something — it removes an `any` that would otherwise blind whatever *is* type-aware there, and it is a precondition for the day the exclusion lifts.\n- ❌ It does **not** make a wrong key visible today, in those packages. The guard that catches a re-introduced `func:` in #8206 is the **assertion** the dev added, not the type.\n\nThe cost of the confusion is concrete: #8112 was filed and dispatched with \"dropping the erasure is what makes the mistake visible\" as its stated rationale, and that rationale was false for both files it named. The work was still worth doing — for a different reason than the one everybody wrote down.\n\n## ⚠️ What is NOT established here, deliberately\n\n- **Whether ESLint is type-aware over these files.** The measurement above is specifically `tsc --noEmit` via each package's `typecheck` script. If the ESLint config drives a type-aware program that *does* include test files, some type checking survives the tsconfig exclusion and the finding narrows accordingly. ⛔ I did not measure that and am not asserting either way — it is the first thing whoever picks this up should check.\n- **Whether the ratchet's framing should change, or the exclusions should.** Those are different fixes with different owners, and picking between them is not this card's job.\n- **How much of the 240-site test surface sits in excluded packages.** The 20-packages/817-files number is repo-wide, not scoped to the ratchet's file list. The useful version of this finding would intersect the two.\n\n## If it is graded worth doing\n\nThe cheapest honest outcome is probably **not** a code change: it is making the gate say what it actually delivers, so the next card's rationale is true when it is written. A ratchet whose stated purpose is unattainable for part of its own surface will keep generating dispatches that argue for the wrong reason — and an AI author reading the rule has no way to discover the exclusion except by predicting a red, observing a green, and going to look.\n\nRefs: #8112 / PR #8206 (where this was measured) · #7888 (type-check DEBT ledger entries sitting below their ceilings — adjacent, different claim) · #4674 (the shape the erasure rule exists to prevent)."
+}

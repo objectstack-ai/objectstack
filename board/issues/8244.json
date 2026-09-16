@@ -1,0 +1,35 @@
+{
+  "number": 8244,
+  "kind": "pull_request",
+  "title": "feat(audit): write login/logout rows to sys_audit_log and attribute the last_login_at update",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/xl",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-12T22:20:29Z",
+  "updated_at": "2026-08-13T04:17:52Z",
+  "closed_at": "2026-08-13T04:17:51Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-13T04:17:51Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/8244",
+  "body": "Fixes #8144\n\nSub-issue A of #7675, carrying the maintainer ruling of 2026-08-12 (comment 5261744983 on #7675), quoted verbatim and untranslated:\n\n> **补 writer(3 个)**:`login` / `logout`(auth 事件已有钩点,顺带解决那条 `user_id` null 的未归因 `last_login_at` diff 行)…\n\n## The defect\n\n`sys_audit_log.action` declares `login` and `logout`, the shipped `auth_events` list view filters on them, and two System Overview widgets chart them — but nothing in the platform ever wrote either row. The audit writers subscribe to the ObjectQL CRUD lifecycle, so `create`/`update`/`delete`/`restore` were the only actions that could materialize. The whole trace a sign-in left behind was one **unattributed** `update sys_user` row (`user_id` null) diffing `last_login_at`: a compliance ledger recording that somebody, unknown, had signed in.\n\n## What changed\n\n**plugin-audit registers the `audit` service** — the ledger's write ingress for events that are not CRUD (`src/auth-event-audit.ts`). The row shape stays owned by plugin-audit, which is where `packages/spec/src/system/index.ts` records that it belongs (\"the LIVE audit path (plugin-audit) … defines its own sys_audit_log row shape\"). The caller hands over an **event**, not a row, and `action` is a closed `login | logout` union — the only structural protection available on an object where every field is `readonly` and `validateRecord` skips readonly/system fields on both branches (#8203), so the declared enum validates nothing in either direction.\n\n**plugin-auth emits from better-auth's session lifecycle hooks** (`src/auth-session-audit.ts`), resolving the sink lazily through a locally-declared structural surface — the mirror of the `MessagingEmitSurface` pattern plugin-audit already uses. Neither package depends on the other; a stack without the audit plugin writes no auth rows, exactly as before.\n\n- `session.create.after` ⇒ `login`. Wired to the session hook rather than the `/sign-in/email` middleware, so it covers every way a session is minted: email sign-in, sign-up auto-sign-in, SSO, OAuth callback, magic link, email OTP, passkey. On a real deployment most sign-ins are federated, and an endpoint-scoped writer would have audited the minority.\n- `session.delete.after` under `/sign-out` ⇒ `logout`. Scoped deliberately: revokes, bans, user erasure and better-auth's own collection of expired rows all reach the same hook, and recording those as `logout` would name an action the subject never took. Those revocations already carry their cause on the ADR-0069 D4 tombstone — `session-tombstone.ts` left this exact question to #7675.\n- The endpoint path comes from the hook's captured `ctx` argument, not from `currentAuthEndpointPath()`: `delete.after` runs inside `queueAfterTransactionHook`, so the ambient AsyncLocalStorage may no longer answer by then.\n- An impersonation session keeps the subject on `user_id` and names the admin on `actor`, so it cannot be misread as a self-service login.\n\n**`stampLastLogin` now carries `attributedUserId`** (#4586), so the `last_login_at` diff row names the person who signed in. Attribution only — the write still authorizes as the system. **Attributed rather than excluded** (the ruling allowed either): suppressing it would mean adding `last_login_at`/`last_login_ip` to the CRUD writer's repo-wide `NOISE_FIELDS`, deleting the `last_login_ip` trail for every object and deployment, and a login from a new address is exactly what a compliance ledger is read for.\n\n## Verification\n\nEvery assertion **reads the row back**. On this object \"no error was thrown\" is evidence of nothing — a misspelled action is accepted silently and a writer that never ran throws nothing either.\n\n- `packages/qa/dogfood/test/auth-session-audit-trail.dogfood.test.ts` — #7675's own reproduction, inverted: real sign-up + sign-in through better-auth, then `GET /api/v1/data/sys_audit_log?$filter={\"action\":\"login\"}` as admin returns the event with actor and tenant (the tenant checked against the `sys_member` row the platform wrote, not against anything the writer passed in). Plus: the `auth_events` view stops being empty (its filter read from the running registry, so #8200's narrowing cannot silently strand it), sign-out writes `logout`, a revoke does **not**, and the `last_login_at` row is attributed. 5/5.\n- Unit: 6 sink cases in plugin-audit (read back through a real ObjectQL engine), 20 composition cases in plugin-auth.\n- **Ablation** (predict-then-mutate): removing the login writer turned exactly the 6 predicted plugin-auth cases and the 2 predicted dogfood cases red — the login query reporting `total 0`, literally #7675's symptom — with logout, revoke-is-not-logout and the `last_login_at` attribution staying green. Plain red, no inversion.\n\n`scripts/check-durability-degradation-log-level.mjs` gains `persistAuthEventAuditRow`, so the new seam's failure report cannot be walked back down to `warn`.\n\n_Generated by [Claude Code](https://claude.ai/code/session_01PEVB6w7D7uCszR9Mw1BL73)_\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01PEVB6w7D7uCszR9Mw1BL73)_"
+}

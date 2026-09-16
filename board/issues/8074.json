@@ -1,0 +1,34 @@
+{
+  "number": 8074,
+  "kind": "issue",
+  "title": "[finding] An org-less test fixture cannot observe the `org_member`-gated write floor, so a real 403 defect records as a PASSING cell",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-12T14:31:32Z",
+  "updated_at": "2026-08-13T12:04:00Z",
+  "closed_at": "2026-08-13T12:03:24Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8074",
+  "body": "Filed by the `domain:identity` execution seat (#6022) out of the review of #8023 / PR #8072. **Observation class — not a request to change behaviour.** Unassigned; grading and routing are the triage seat's call.\n\n## The observation\n\nThe platform's wildcard row-level write floor — `owner_only_writes` (object `'*'`, operation `update`, `created_by == current_user.id`) seeded by `member_default` — is **positions-gated to `org_member`**. A principal holds `org_member` only through a `sys_member` row.\n\nSo in a harness that boots **without an organization**, a fresh sign-up gets `positions: ['everyone']`, the floor never applies at all, and a write that a real deployment refuses with 403 answers **200**.\n\n**The defect becomes invisible, and the fixture reports success.**\n\n## How it was found — by ablation, not by reading\n\nThis is not hypothetical. While implementing #8023 the dev's *first* fixture was org-less. It **passed against the known-broken build** — the build whose defect the card had already reproduced end-to-end over HTTP. Quoting the report:\n\n> *\"my first fixture was org-less and passed on the broken build, which is why the final fixture boots with `orgContext: true` and says so in its header.\"*\n\nThe final fixture in PR #8072 stands up the default organization that the membership reconciler binds new users to (ADR-0093 D1), which is what a real deployment boots into. The header records the trap for the next author.\n\n## Why this is worth a card rather than a PR comment\n\nA fixture that cannot fail is worse than no fixture: it converts an untested surface into a *reported-as-tested* one. The specific risk here is a **false negative in QA re-drives**:\n\n- #8023 was found by a 124-cell matrix re-drive, and was its only failing cell.\n- The same matrix, run org-less, would have recorded that cell **green** — a live `target:v17` over-permission defect scored as passing.\n- The precondition is not stated on the card, in the checklist item, or anywhere a re-runner would look. It has to be known.\n\nAnything asserting on row-level **write** permission is exposed to this — the read axis is not, which is part of why it hides: the same fixture gives correct-looking read results.\n\n## Possible directions (⛔ not a recommendation — grading is triage's)\n\n1. State the precondition where a re-runner meets it: the checklist items that drive write-permission cells, and the dogfood fixture helpers.\n2. Make it mechanical rather than documentary — a fixture helper that refuses, or loudly warns, when an org-less context is used to assert on a positions-gated policy.\n3. Do nothing and rely on authors ablating their fixtures. Cheap, and it did work here — but it worked because one dev ran a mutation they had predicted in writing first, not because anything caught it.\n\nDirection 2 is the only one that removes the failure mode rather than documenting it, and it is also the most expensive; the trade is a real one and belongs to whoever owns the harness.\n\n## Related\n\n- #8023 — the defect this surfaced from (`target:v17`), fixed in PR #8072.\n- The fixture and its header comment live in `packages/qa/dogfood/test/owd-public-read-write-write-floor.dogfood.test.ts` as of that PR."
+}

@@ -1,0 +1,34 @@
+{
+  "number": 8205,
+  "kind": "pull_request",
+  "title": "fix(devx): teach the os-regen pre-commit hook the deferred merge",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-12T20:08:32Z",
+  "updated_at": "2026-08-12T20:53:02Z",
+  "closed_at": "2026-08-12T20:53:01Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-08-12T20:53:01Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/8205",
+  "body": "Fixes #8047. Implements the maintainer ruling of 2026-08-12 (option 1): the `os-regen` pre-commit hook learns the deferred case.\n\n## The contradiction this removes\n\nTwo in-repo authorities disagreed on `main`. `scripts/pm/os-regen-merge.sh` — the sanctioned landing sequence for a branch touching `merge=os-regen` paths — commits the merge **before** regenerating, deliberately: the driver exits 0 while silently dropping one side, so only a separate regeneration commit on a known-good base lets a reviewer read \"what main brought\" apart from \"what the change produces\". The pre-commit hook refused exactly that commit. Measured on PR #7851, the way out people learned was to skip the *entire* pre-commit hook — one false positive traded for a blanket bypass.\n\n## Both halves\n\n**Accept.** A merge commit whose artifacts are stale is now **deferred, not passed**: `pre-commit` appends `deferred-at &lt;head&gt; &lt;merge-head&gt;` to the existing marker and lets the commit through, printing what it recorded.\n\n**Collect.** A change that only stopped refusing would convert a false positive into no coverage. Two properties prevent that:\n\n- **One commit deep, by construction.** A deferral is entered only while `MERGE_HEAD` exists; a second merge attempted while one is outstanding is refused; every non-merge commit after it is refused by the ordinary staleness check. Nothing can land between the merge and its discharge, so \"the immediately following commit\" is enforced by there being no other commit it could be.\n- **Collected where collection becomes possible.** At the instant the merge commit is created, the commit that discharges it does not exist — pre-commit can only *record*. The two events that can follow are the next commit (this same check) and the push, so `.githooks/pre-push` is new: registered by the existing `core.hooksPath=.githooks` with no registrar change, and 77 ms plus a marker stat on every push that did not defer. An undischarged deferral cannot leave the machine.\n\n## Prose reconciled\n\nAll three authorities that disagreed now say the same thing: `scripts/pm/os-regen-merge.sh`'s header (the authority — its four-step is unchanged), `AGENTS.md` §11, and what the hook prints. The refusal points at `os-regen-merge.sh` instead of advertising a bypass.\n\n## Measurements behind the design\n\n- **The marker machinery is real, but \"it already has the concept\" was half right.** `$GIT_DIR/os-regen-pending` exists and self-clears; there was no deferral path — the clearing message refers to artifacts the *driver* deferred, not to a deferred merge commit. The deferral record is new state, deliberately inside the existing marker so there is one state machine, not a marker plus a flag.\n- **`git merge` does not run `pre-commit`** for a merge it completes itself (verified, git 2.43). A clean auto-committed merge lands with the marker untouched and the refusal falls on the next commit — the same collection point. Only a merge finished with `git commit` reaches the new accept path, which is the PR #7851 shape.\n- **The governed set cannot drift.** The hook reads `scripts/regen-artifacts.mjs`, and `check:merge-driver` reconciles that table against `.gitattributes` in both directions already. Nothing to fix.\n- **Mixed-version clones fail safe.** An older checkout reading a marker written by this one reports the `deferred-at` line as an unknown pending path and refuses — no silent pass.\n\nOut of scope, unchanged as directed: `.gitattributes`'s merge-driver registration, and `scripts/git-merge-regen.mjs`'s behaviour.\n\n## Tests\n\n`node scripts/check-regen-pending.mjs --self-test` (the second half of `pnpm check:merge-driver`) grows three sections: the pre-push hook's index mode, a decision table over all five states including the two a fixture cannot reach, and a fixture that builds throwaway git repos and replays the two-commit sequence. The behaviour is a property of a *pair* of commits, which no single-tree assertion can express. Gates are redirected at the fixture's own `package.json` via `OS_REGEN_GATE_CWD`, so the replay costs no spec build and a mistake fails safe — a directory without those scripts reads as stale.\n\nReverse verification, direction predicted before running: on one fixture state (MERGE_HEAD present, marker set, artifacts stale) `origin/main`'s hook exits **1** — the false positive, and its trailer is the `--no-verify` advice — while this one exits **0** with the deferral recorded. One commit later, still stale, **both** exit 1.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01Q983j8EGKjUs8r14n76TeH)_"
+}

@@ -1,0 +1,32 @@
+{
+  "number": 7654,
+  "kind": "issue",
+  "title": "finding: GET /api/v1/meta/skill lists a skill twice after a runtime PUT, and the meta PUT never reaches the prompt bridge (two divergent skill-read paths)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T09:51:21Z",
+  "updated_at": "2026-08-13T06:37:42Z",
+  "closed_at": "2026-08-13T06:37:42Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7654",
+  "body": "Unconfirmed observation from the QA run — recorded for triage; the two mechanisms below were located but not independently root-caused, and the natural next step is to decide the single source of truth for skill rows (merge/dedup by name) that both the meta HTTP list and the MCP prompt bridge read from.\n\n## Symptom\n\nTwo related divergences in how `skill` metadata is read after a runtime store override:\n\n1. **`GET /api/v1/meta/skill` returns the same skill twice** after a runtime `PUT` — the store-override row and the package row are both listed, not merged/deduped by name.\n2. **`PUT /meta/skill/&lt;name&gt; {active:true}` → 200 does not reach the prompt bridge.** Flipping a skill active via the runtime metadata API does not make it appear over MCP prompts.\n\n- **Expected:** one row per skill name (override merged over package), and a runtime `{active:true}` PUT reflected in the prompt bridge.\n\n## Root cause (as located, unconfirmed)\n\nThe two surfaces read from **different** sources:\n\n- The MCP prompt bridge's `listSkills` calls `metadataService.list('skill')` — registry/package rows (`packages/mcp/src/mcp-server-runtime.ts:753`, `listSkills: async () => (await metadataService.list('skill')) ?? []`).\n- The HTTP meta list goes through `protocol.getMetaItems` — which merges store overrides.\n\nSo the store override (the `{active:true}` PUT) lands on the `getMetaItems` path but never on the `metadataService.list` path the bridge consumes; and on the HTTP list path the override and package rows are not deduped by name, producing the double listing. Both mechanisms are present on `origin/main` (`mcp-server-runtime.ts:753`; the dedup gap is in the `getMetaItems` merge in `packages/metadata-protocol`).\n\nNote: the fix straddles `packages/metadata-protocol` (dedup/merge of skill rows) and `packages/mcp` (which source `listSkills` reads). Routed `domain:metadata` because the defining symptom — duplicate rows and un-merged overrides — lives in the metadata read/list layer; flag if the maintainer prefers the bridge-side lane.\n\n## Reproduction\n\n1. Boot a showcase with a packaged `skill`.\n2. `PUT /api/v1/meta/skill/&lt;name&gt;` with `{active:true}` → 200.\n3. `GET /api/v1/meta/skill` → the skill appears **twice** (override row + package row).\n4. Query the skill over MCP prompts → the `{active:true}` flip is **not** reflected.\n\n## Source\n\nExtracted from the QA run objectstack-ai/objectstack#7627 (framework 92f26f75, console 6314e87f)."
+}

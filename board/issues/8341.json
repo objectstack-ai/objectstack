@@ -1,0 +1,35 @@
+{
+  "number": 8341,
+  "kind": "pull_request",
+  "title": "feat(spec)!: refuse URL-embedded credentials (user:password@host) in driver config.url at publish (#8082)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-13T06:27:49Z",
+  "updated_at": "2026-08-13T09:09:41Z",
+  "closed_at": "2026-08-13T09:09:40Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-08-13T09:09:40Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/8341",
+  "body": "Fixes #8082\n\nImplements the maintainer-ruled Option A (on-card comment, 2026-08-12): driver `config.url` carrying userinfo credentials (`user:password@host`) is refused at publish, via one value-level parse shared by the URL-bearing driver schemas.\n\n## What changed\n\n- **Shared value-level parse** (`packages/spec/src/data/driver/common.zod.ts`): `urlUserinfoPassword()` extracts the userinfo password segment using RFC 3986 boundaries (authority after `//` up to `/?#`; userinfo ends at the LAST `@`; password after the FIRST `:`), deliberately not `new URL()` — real DSN forms (multi-host `h1:5432,h2:5432`, `:memory:`, `file:` paths) are judged instead of failing open. `credentialFreeUrl()` attaches the refusal to a URL key; `URL_EMBEDDED_CREDENTIAL_REFUSED` is the message.\n- **Wired into the measured URL surface**: postgres / mysql / mongo `config.url`, turso `config.url` **and `config.syncUrl`** (same authored-URL cleartext sink, same shared parse — one small extension beyond the four `url` keys, flagged for review).\n- **Posture on bare-user userinfo** (PM mechanism assumption 3): `user@host` and `user:@host` stay accepted — follows #7990's posture (`username` is a writable inline key; only the secret is refused). Only a NON-EMPTY password segment is credential material. This also keeps the #8126 legacy-row round-trip working: the read path serves `user@host` for a stored `user:pass@host` row, and that shape must keep parsing green or every untouched \"Save\" would 400 (the regression shape reported on #7990).\n- **Refusal message discipline** (binding details from the ruling): names the working mechanisms by name (connection form's secret field → secret binder → `sys_secret` + `external.credentialsRef`); states the runtime-DSN carve-out explicitly (`OS_DATABASE_URL` and friends never pass through the publish door — unaffected by construction); warns that `${…}` placeholders are resolved by nothing and reach the client verbatim (#8078, measured) instead of steering authors into that broken escape.\n- **The acceptance pin is INVERTED, not deleted** (`driver-credential-refusal.test.ts`, formerly lines 166-174, located by content): same input, opposite verdict, asserting the zod issue's `code` (`custom`) + re-pathed location (`config.url`) + the message contract. Note on `code` + `status`: an HTTP `status` does not exist at the schema layer — every schema refusal is wrapped uniformly by the publish door (metadata-protocol's `422 INVALID_METADATA` envelope, whose `issues[]` carry these zod codes verbatim); the pin asserts the full envelope the schema layer carries.\n- **#8126's write-door acceptance pin flips too** (`packages/services/service-datasource/src/__tests__/datasource-config-redaction.test.ts`): its own comment said \"this pin fails the moment that boundary moves without a ruling\" — the ruling arrived, so it now asserts the refusal plus the continued acceptance of the redacted shape. The redaction module's header no longer claims the refusal is unruled. These two files are outside the dispatched file surface (`packages/spec/src/data/driver/**`); they are in the narrowed rule's consumption radius and would have gone red on merge — flagged here per the fixture-sweep clause rather than silently left red.\n- **ADR-0087**: D3 semantic entry `datasource-config-url-userinfo-refused` (no D2 conversion — a credential cannot be mechanically encrypted into `sys_secret`; auto-stripping userinfo would silently drop a live credential). Registry, spec-changes, upgrade guide, api-surface, export-origins, and reference docs regenerated via `check:generated --fix` (exactly the five proved stale).\n- **Changeset**: `@objectstack/spec` major (rc pre-mode absorbs it, same as #8078), with FROM → TO and the registered marker.\n\n## Test coverage\n\nPer URL key (5 surfaces × the family suite): refusal of `user:password@`, `${…}`-placeholder password, percent-encoded password, malformed double-`@` password (caught WHOLE at the RFC 3986 boundary, mirroring the read-path redactor), userinfo before an IPv6 host; acceptance of bare-user, credential-free, and IPv6-without-userinfo forms byte-identically. Detector unit tests cover multi-host DSNs, scheme-relative URLs, path/query/fragment colons, `file:`/`:memory:`/bare strings, and the empty-password boundary.\n\nReverse verification (fix committed first): restoring the pre-ruling `url` lines flips the new rejection pins red while the acceptance pins stay green — direction as predicted; readings in the dev report on #8082.\n\n## Carve-out, verified on the tree\n\n`OS_DATABASE_URL` / CLI / standalone-stack DSNs are translated into driver configs and handed to the driver factory directly (`packages/runtime/src/standalone-stack.ts`, `packages/cli/src/utils/storage-driver.ts`); they never meet the authoring schema — the same construction #8078 already relies on for the turso `authToken` env path. The refusal docs state this rather than implying it, per the ruling.\n\nOut of scope, tracked separately (both remain open, neither is addressed here): the `${…}` placeholder escape, tracked as #8336; the turso `?authToken=` query-parameter door, tracked as #8337. #8081's stored-cleartext remediation is likewise untouched (#8126 already narrowed read exposure; the ruling calls for no sweep here).\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01Euoy6wyfzgiWtgCg4s6JK2)_"
+}

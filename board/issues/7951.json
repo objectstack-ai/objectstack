@@ -1,0 +1,32 @@
+{
+  "number": 7951,
+  "kind": "issue",
+  "title": "Uninstalling a package orphans its tenants' bare-key ADR-0005 overlays — warned about, but nothing resolves them",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "finding"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-12T08:43:20Z",
+  "updated_at": "2026-08-12T17:59:27Z",
+  "closed_at": "2026-08-12T17:54:42Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7951",
+  "body": "Observation-class finding, filed from #7221 as the consequence that card's bare-key ruling deliberately left open. Unassigned, deliberately **not** queued.\n\n## Where it comes from\n\n#7221 added `SchemaRegistry.unregisterItemsByPackage(packageId)` — the package-addressed removal verb for the generic `metadata` map — and wired it into `MetadataFacade.unregisterPackage` and `SchemaRegistry.uninstallPackage`.\n\nThe ruling applied there was the **non-destructive** branch, made by the engine-core seat and carried into dispatch: scope the removal to composite `${packageId}:${name}` keys **only**, and leave ADR-0005 bare-key runtime/DB overlays untouched. The reasoning stands and this card does not re-open it — a bare key carries no package provenance and is the runtime face of a tenant-authored `sys_metadata` row, so an uninstall deleting it would take a tenant's own customization along with the package it merely overlaid. Nobody authorised that delete.\n\n## The consequence that ruling leaves\n\nAn overlay whose base has just been uninstalled now layers over **nothing**.\n\n`unregisterItemsByPackage` makes this LOUD rather than silent — the house pattern from ADR-0029 D9.5's orphan-overlay violation (*\"re-install the package that owns it, or delete the `sys_metadata` row\"*) and from `unregisterObjectsByPackage`'s refusal. It `console.warn`s naming every orphaned overlay and returns them as `orphanedOverlays` so a caller can act.\n\nBut **nothing acts on them today**:\n\n- Neither caller reads the returned `orphanedOverlays`. `uninstallPackage` returns `boolean`; `MetadataFacade.unregisterPackage` returns `void` (its `IMetadataService` signature).\n- The warning goes to `console`, so in a server process it lands in logs an operator may never correlate with the uninstall.\n- The orphaned bare-key item stays fully resolvable through `getItem` / `listItems` — which is *correct* (it is the tenant's data), but it now presents as a first-class item of a type whose package is gone, with no marker saying so.\n\nNote the asymmetry with the object side, which is deliberate and is **not** the thing to copy: ADR-0029 D9.7 has an object overlay *layer* leave with the base it layers over, and that is safe precisely because the layer is a runtime projection of a `sys_metadata` row the removal does not touch — a re-install re-hydrates it. A bare-key generic entry is the other way round: it **is** the runtime face of that row, with no separate contributor list holding a durable copy, so the same rule applied here would lose the edit.\n\n## What is actually undecided\n\nNot \"delete or keep\" — that is settled. The open question is what the platform owes the operator afterwards:\n\n1. **Surface it in the uninstall envelope.** #7557 landed an honest uninstall envelope; orphaned overlays are exactly the kind of thing it exists to report. Needs a path from the registry return value up to whatever composes that envelope.\n2. **Mark the orphan on the item.** A `_diagnostics`-style badge (the read path already carries one for spec-invalid rows) so Studio can show \"the package that owned this is no longer installed\".\n3. **A bootstrap assertion**, mirroring `assertSingleOwnerPerObject`, that names generic-map orphans at boot rather than only at uninstall time.\n4. **Nothing beyond the warning** — accept it as an operator-log concern. Cheapest, and defensible if orphaned generic overlays turn out to be rare in practice; that is a measurement nobody has made.\n\nOption 1 is the one that touches the persisted/data-plane faces of uninstall, so it wants sequencing against that family rather than being folded into a registry-only change.\n\n## Adjacency\n\nThe three faces of uninstall, all landed or in flight: #7557 (registry/data-plane enforcement + the honest envelope), #7705 (persisted `sys_metadata` rows), #7221 (this one's parent — the in-memory registry). ⛔ Distinct mechanisms; this card should not reach into them without a ruling on which face owns the orphan report.\n\nRefs #7221, #7557, #7705, ADR-0005, ADR-0029 D9.5/D9.7."
+}

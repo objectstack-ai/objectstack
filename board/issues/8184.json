@@ -1,0 +1,34 @@
+{
+  "number": 8184,
+  "kind": "issue",
+  "title": "The metadata write refusal answers a different code per TOPOLOGY: `saveMetaItem`'s scoped-kernel branch refuses before the repository's package door ever runs",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "bug"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-12T18:57:41Z",
+  "updated_at": "2026-08-13T08:34:44Z",
+  "closed_at": "2026-08-13T08:33:49Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8184",
+  "body": "## What this is\n\nFallout found while implementing #7682 (package-writability discrimination in `SysMetadataRepository.assertAllowed`). Filed rather than fixed: #7682's dispatch declared `sys-metadata-repository.ts` as its file surface and explicitly forbade editing `protocol.ts`, which two other cards (#8136, #8003) are editing concurrently.\n\n## The two refusal points\n\nAn artifact-backed write of a type without `allowOrgOverride` is refused **twice over**, and which one answers depends on the kernel's `environmentId` — a row-scoping key, not a topology declaration:\n\n1. `packages/metadata-protocol/src/protocol.ts`, inside `saveMetaItem`, guarded by `if (this.environmentId !== undefined)` (search for the `not_overridable` message beginning \"is provided by a code package and the type has not opted into per-org overlay writes\"). Emits `403 NOT_OVERRIDABLE`, reads no package.\n2. `packages/metadata-protocol/src/sys-metadata-repository.ts` — `assertAllowed`, the topology-INDEPENDENT gate. After #7682 this one reads the base the caller named and answers `403 ITEM_LOCKED` (read-only base) / `422 WRITABLE_PACKAGE_REQUIRED` (runtime-only into a read-only base) / `403 NOT_OVERRIDABLE` (writable or unnamed base).\n\nPoint 1 shadows point 2 whenever it runs. So after #7682, the SAME request answers differently per deployment shape:\n\n| kernel | `PUT /api/v1/meta/object/showcase_task?package=READONLY_PKG` |\n| --- | --- |\n| host-config / CLI lightweight assembler (`environmentId` undefined — the flagship showcase, self-hosted servers) | `403 ITEM_LOCKED`, `lockSource: package` |\n| project/cloud per-env kernel (`environmentId` set) | `403 NOT_OVERRIDABLE` — package never read |\n\nThe QA run behind #7682 (#7637) measured the first row, which is why #7682's fix lands there.\n\n## Why it is worth closing\n\nThis is the same class of finding #5086 and #6710 already closed twice in this method: \"keying authorization off a row-scoping key is what made a type-level declaration depend on deployment topology\" (`protocol.ts`, the `#5086` block comment). The refusal VOCABULARY now depends on it too — a cloud tenant and a self-hosted tenant get different machine-readable codes for the same refused write, and a client that learns to handle `ITEM_LOCKED` on one will not see it on the other.\n\nNote it is not a regression: point 1 answered `NOT_OVERRIDABLE` before #7682 as well. #7682 makes the divergence visible rather than creating it.\n\n## Suggested shape (not a ruling)\n\nHave point 1 consult the same shared `isWritablePackage` predicate (`packages/metadata-protocol/src/package-writability.ts`) that the ADR-0070 D1 gate a few hundred lines below it and the repository door both use, so one condition keeps one vocabulary on every kernel. The alternative — deleting point 1 and letting the repository answer on all topologies — is the larger change and would need its own reading of why the scoped branch exists.\n\n`packages/metadata-protocol/src/sys-metadata-repository.package-writability.test.ts` (added by #7682) states this boundary in its final `describe` block, so whoever picks this up has the reachability argument and a harness already written.\n\n## Related\n\n- #7682 — the repository half, fixed.\n- #8146 — the separate `OS_METADATA_WRITABLE` hatch vs Studio \"Read-only\" badge decision.\n"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 8175,
+  "kind": "pull_request",
+  "title": "fix(plugin-auth): run the D5.1 /oauth2/authorize env-access gate for a signed bearer (#8102)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-12T18:45:04Z",
+  "updated_at": "2026-08-12T19:28:01Z",
+  "closed_at": "2026-08-12T19:27:59Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-12T19:27:59Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/8175",
+  "body": "Fixes #8102\n\nADR-0069 D5.1's cloud-as-IdP gate (`oidcAuthorizeGate`) is what enforces org-membership / app-assignment before the OIDC OP issues an authorization code. Its branch resolved the acting subject with an **inline copy** of the shared `resolveActor` — line for line the same logic, in a second place — and the two diverged the moment one of them was fixed.\n\n#8101 taught `resolveActor` that a bearer credential must have its signature stripped before lookup: `bearer()` hands clients the signed form in the `set-auth-token` response header (the documented API-lane credential) and accepts it back, while `session.token` stores the **unsigned** value. The copy guarding `/oauth2/authorize` kept looking the signed credential up verbatim, and so resolved nothing.\n\n## Why this is `security` and not a lookup miss\n\nThe unresolved case at this endpoint is deliberately **fail-open** — a genuinely anonymous caller must fall through so the OP can redirect them to log in. So an *authenticated* caller holding the signed bearer was read as unauthenticated, and the env-access check was not denied but **never evaluated at all**.\n\nMeasured on the unfixed build, with the gate armed to DENY and a `skip_consent` client:\n\n```\ngateCalls=0  status=302\nlocation=https://env.example.com/api/v1/auth/callback/objectstack-cloud?code=wCZn6Nsj4vY9pNucPs5ARYa8BTrjc2aS&state=envgate-8102\n```\n\nThe gate was never invoked and an authorization code was **actually issued** to a subject it would have refused. The issue was written from a code reading and explicitly flagged that no live bearer-driven `/oauth2/authorize` had been measured; this closes that gap with a real request.\n\n**Impact stays bounded, as the issue itself said**: `oidcAuthorizeGate` is set only on the cloud control plane (unset in open editions / self-host, where there is no gate at all), and the OP's authorize endpoint is normally browser/cookie-driven — the cookie branch always normalized and was never affected.\n\n## The fix\n\nDelete the inline copy; call the shared `this.resolveActor(ctx)`. Two resolution sites are what let them diverge, so correcting the copy in place would have left the same class open.\n\nThe fail-open default for genuinely unauthenticated callers is **unchanged and deliberately preserved** — that was never the defect, and the pin has a case asserting it still holds. `resolveActor` also returns `activeOrgId`; this gate deliberately does not consume it (the D5.1 host contract is `(userId, clientId)`, and the control plane derives org membership from the user itself), and the site now says so rather than dropping it silently.\n\n## The pin\n\n`oidcAuthorizeGate` previously appeared in no test file at all. The new dogfood gate drives `/oauth2/authorize` across three credential lanes against an armed, **denying** gate:\n\n| lane | on this build | on the unfixed build |\n|---|---|---|\n| cookie | refused | refused — **control**, cannot detect the defect |\n| bearer, signed `set-auth-token` | refused | **code issued** — the pin |\n| bearer, raw sign-in token | refused | refused — **control** |\n\nIt closes the three ways this surface can be green while proving nothing:\n\n- A cookie-driven pin passes before *and* after the fix, so the cookie and raw-token lanes are carried explicitly as *armed-fixture controls*. Exactly one lane flips.\n- A gate that ALLOWS makes refusal and fall-through the same observation, so this one denies — \"refused\" and \"issued a code\" are then opposite outcomes.\n- With no gate configured at all the file would be vacuously green, so it installs one through `applyConfigPatch` and asserts it was **actually called, with the right userId**. A status code alone cannot separate \"denied\" from \"never evaluated\".\n\n## Verification\n\n- New pin: 7/7 green. Reverse-verified by restoring the inline copy from `origin/main` and rebuilding — exactly one lane went red, with the predicted diagnosis.\n- `@objectstack/dogfood` full suite: 101 files, 680 passed / 3 skipped (re-run after merging `main`).\n- `@objectstack/plugin-auth`: 45 files, 1069 passed.\n- `typecheck` clean on both packages; ESLint clean.\n- Gates: `check:nul-bytes`, `check:changeset-gate-self-tests`, `check:docs-audit-scope`, `check:objectui-changeset`, `check:test-source-alias`, `check-changeset-no-major`, plus the three off-list ratchets — `check:query-options-erasure`, `check:type-check-debt` (ledger **not** raised) and `check:engine-double-contract`.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01PEVB6w7D7uCszR9Mw1BL73)_"
+}

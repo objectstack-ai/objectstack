@@ -1,0 +1,34 @@
+{
+  "number": 8283,
+  "kind": "issue",
+  "title": "[finding] a failed insert permanently burns its autonumber (TK-0001 → fail → TK-0003) — is a gapless series in scope at all?",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-13T02:57:11Z",
+  "updated_at": "2026-08-13T16:25:03Z",
+  "closed_at": "2026-08-13T16:25:03Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8283",
+  "body": "Recording an observation for the platform to rule on — this may well be an accepted trade-off, but it is currently neither documented nor decided anywhere I could find.\n\nAn insert that fails for a reason **unrelated to the autonumber** still consumes the number that row had reserved. Measured on both dialects, same shape:\n\n```\nsqlite:   first=TK-0001  → insert fails (duplicate `slug`)  → next=TK-0003\npostgres: first=TK-0001  → insert fails (duplicate `slug`)  → next=TK-0003\n```\n\n`TK-0002` exists in no row and will never be issued. Any rejected write — a unique violation on another field, a validation rule, a `beforeInsert` hook throwing — leaves a permanent hole in the business identifier.\n\nThis is *not* multi-tenant-specific (a failed insert in tenant A does not disturb tenant B — verified), and it is the ordinary behaviour of database-native sequences. But ObjectStack's autonumber is not a native sequence: it is a counter this driver owns and updates itself, and the driver's own docs frame the value as a business identifier —\n\n> `packages/drivers/driver-sql/src/sql-driver.ts:4523` — \"an autonumber is an immutable business identifier\"\n\nFor a surrogate key, gaps are free. For a business identifier — a contract number, an invoice number, an order number — gaps are sometimes a compliance problem, and are frequently the first thing a customer's finance team asks about.\n\n## The decision\n\nThree coherent answers, and the platform should pick one rather than leave it implicit:\n\n1. **Gaps are fine and guaranteed-unique-only is the contract** — then say so in the autonumber docs, so nobody promises a customer a gapless series.\n2. **Gaps are worth avoiding on the cheap path** — reserve the number only after the row is known to be insertable, or return it on a clean rejection.\n3. **Gapless is a supported option** — an opt-in mode that pays the concurrency cost (serialized issuance) for objects that need it.\n\nRelated: #8269 is the pathological version of the same mechanism — there the counter advances and the *whole batch* fails, so a fresh tenant's numbering can start at `TK-0004`.\n\n## Environment\n\nProbed via `SqlDriver` directly against `postgres:16` and file-backed sqlite, branch `claude/multi-org-service-testing-a75937`, 2026-08-12. Probe files were temporary and have been removed; the two lines above are the complete result.\n"
+}

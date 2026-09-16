@@ -1,0 +1,33 @@
+{
+  "number": 8139,
+  "kind": "pull_request",
+  "title": "test(spec): restore the compile-time half of the ISecurityService contract test (#7831)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "size/m",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-12T17:38:53Z",
+  "updated_at": "2026-08-12T18:22:49Z",
+  "closed_at": "2026-08-12T18:22:48Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": "2026-08-12T18:22:48Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/8139",
+  "body": "Fixes #7831\n\n`packages/spec/src/contracts/security-service.test.ts` advertised itself as the **exhaustive** gate on `ISecurityService` while omitting three **required** members — `hasWriteBypass`, `resolveWriteScope` and `describeDelegableScope` — from both `makeService()`'s literal and the assertion list. It did not go red because the file held one entry in `test-typecheck-debt.json` (**TS2322 at line 21**), so the gate's compile-time half was asserted *past* a suppressed error. A gate that is itself type-suppressed does not gate.\n\n## What changed (two files, exactly the card's scope)\n\n**1. `security-service.test.ts` — completed, and made exhaustive by the compiler**\n\nEach stub returns the method's **own documented fail-closed answer**, so the file stays a contract-honest minimal implementation rather than a cast. All three match what `plugin-security` (the reference implementation) returns for the corresponding state:\n\n| member | stub | why that value |\n|:--|:--|:--|\n| `hasWriteBypass` | `false` | ADR-0111 D2 fails CLOSED. It is the **explicit** `modifyAllRecords` bit only; a stub resolving no permission set holds no such bit — the same `false` the implementation returns for a principal-less context, an on-behalf-of context, and any resolution failure. |\n| `resolveWriteScope` | `'own'` | ADR-0111 D1 DEPTH fails CLOSED to the narrowest scope. Deliberately **not** `'org'`: there `'org'` means *either* a genuine Modify-All holder *or* the fail-OPEN \"no permission set mentions this object\" default, so it is the one value the contract says a caller may not trust on its own. |\n| `describeDelegableScope` | `isTenantAdmin: false` + three empty lists | ADR-0090 D12 / ADR-0105 D8 fails CLOSED, and \"no delegated authority\" is a **real** answer, not a missing one — byte-for-byte the literal `security-plugin.ts` returns when no delegated-admin gate is wired. |\n\nThe member list is now exhaustive **in both directions, by the compiler**, using the idiom the sibling `sharing-service.test.ts` already carries (its `RequiredKeys` mapped type) rather than a new framework:\n\n- `as const satisfies readonly RequiredMember[]` rejects an **optional** member listed as required — the cheap way to make a red go away without implementing anything.\n- `UnlistedRequiredMember` (an `Exclude` of the list from the required-key union) rejects a **required** member left out — the drift that produced this card.\n\n**2. `test-typecheck-debt.json` — ratchet 1 to 0**\n\nThe file's entry is **deleted**, not lowered. Measured: `56 file(s) / 264 error(s)` before, `55 file(s) / 263 error(s)` after; the gate reports OK on both sides of the change.\n\n## Verification, including the reverse direction\n\nPredicted **before** running, then observed: injecting a new **required** member into `ISecurityService` must red **two** places, and a new **optional** member must red none.\n\n```\nPROBE A — required member added to the interface:\n  security-service.test.ts(66,3):   error TS2322: ... is not assignable to type 'ISecurityService'.   [the literal]\n  security-service.test.ts(118,11): error TS2322: Type 'true' is not assignable to type 'never'.      [the list]\n\n  check:test-typecheck then FAILS:\n    • src/contracts/security-service.test.ts: 2 type error(s) in a file the ledger does not cover.\n\nPROBE B — optional member added to the interface:\n  (no errors — an optional member is correctly not demanded)\n```\n\nThat is the card's claim proven end to end: a future required member goes red, **and no suppression is available**, because the ledger no longer covers the file. The interface file was restored by `git checkout` from the committed branch and confirmed byte-identical (`git hash-object` equals the committed blob) — it is **not** part of this diff.\n\nGates run locally on the merged tree:\n\n- `pnpm --filter @objectstack/spec typecheck` — green (`tsc`, `check:scripts-typecheck`, `check:test-typecheck` at 55/263).\n- `pnpm --filter @objectstack/spec test` — **385 files / 10195 tests passed** (the whole spec suite).\n- `node scripts/check-nul-bytes.mjs` — OK, 7406 files, no raw control bytes; plus a direct control-byte scan of both changed files.\n- `node scripts/check-empty-changeset.mjs --self-test` — 118 assertions hold.\n\n`main` was merged before pushing (`3670cf9f2` to `37b82ed5b`); the merge touched `packages/spec` **not at all**, so the two sides are disjoint and no generated artifact can have moved.\n\n## Changeset: none, `skip-changeset` instead\n\nThis PR releases nothing. `packages/spec`'s build config excludes `**/*.test.ts` and its published `files` list carries neither the test nor `test-typecheck-debt.json`, which is a repo-internal CI ratchet — so there is no package version to bump and nothing to attach a CHANGELOG entry to. The changeset gate has **no path-based exemption** (it demands a changeset on every PR unless the label is present), and `scripts/check-empty-changeset.mjs` is explicit that the label, not an empty changeset, is the route for exactly this case: an empty changeset is a real input to `changesets/action` and an all-empty set stalls a release silently and greenly. Hence the `skip-changeset` label.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_0123k4cam2jEAkPmbJeoaY3r)_"
+}

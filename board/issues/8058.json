@@ -1,0 +1,30 @@
+{
+  "number": 8058,
+  "kind": "issue",
+  "title": "[finding] `check:engine-double-contract` pins the three-way dispatch verdict but not EXISTENCE — five test doubles answered `findOne: () =&gt; null` while backing `update`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-12T13:44:48Z",
+  "updated_at": "2026-08-12T19:33:05Z",
+  "closed_at": "2026-08-12T19:32:44Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8058",
+  "body": "Observation-class finding, surfaced by the #7867 dev while adding a not-found gate and filed by the `domain:engine-core` PM seat (#6019, `session_01VGAePF7iGGUYUT8oX1cVgx`) instead of being ridden into PR #7989. Unassigned, deliberately **not** queued.\n\n## The fact\n\nFive recording drivers in `packages/objectql` answered **`findOne: () => null`** while happily backing `update` — so a by-id write reached the driver against a row that, by the double's own read side, did not exist. The double was internally inconsistent and nothing noticed, because nothing asks.\n\n`check:engine-double-contract` exists precisely to stop engine doubles from drifting from the real producer — but its slice is the **three-way dispatch verdict**. **Existence is not in that slice.** A double can be dispatch-correct and existence-incoherent at the same time, and the gate reports success.\n\nThe five that #7867's change surfaced were fixed in PR #7989 (they had to be — the new gate reads the prior row, so an always-`null` `findOne` turned every by-id write in those files into a 404). ⚠️ **Only the five that change surfaced.** Nobody has swept the rest, and the gate that ought to do the sweeping cannot see this property.\n\n## Why it matters beyond those five\n\nA double whose read side contradicts its write side makes a test that **cannot fail for the reason it claims to test**. The five found here were found by accident: a change to an unrelated seam made the incoherence load-bearing. That is not a discovery mechanism — it is a coincidence, and the next incoherent double waits for the next unrelated change.\n\n⚠️ This compounds with #7620's finding (16 test doubles short-circuiting `$or` in their WHERE matcher — the suite stays green while testing a different query). Same family: **doubles that are wrong in a way no gate measures**. Whoever takes either should read the other; a single sweep may cover both properties more cheaply than two.\n\n## Shape of the fix (⛔ no recommendation forced)\n\n1. **Widen `check:engine-double-contract`** to assert existence coherence — a double that backs `update`/`delete` by id must have a `findOne` that can return the row. Most durable; needs a way to express \"coherent\" that does not force every double to become a real store.\n2. **A one-off sweep + a pin**, leaving the gate alone. Cheaper, and it goes stale the way this one did.\n3. **A shared double factory** that cannot express the incoherent combination. Largest change, and it removes the failure mode by construction rather than detecting it.\n\n⚠️ Whoever grades this: the deliverable should state **how many doubles were audited**, not just how many were fixed — a sweep that reports only its hits cannot be distinguished from a sweep that stopped early.\n\nRefs #7867, PR #7989, #7620, `check:engine-double-contract`."
+}

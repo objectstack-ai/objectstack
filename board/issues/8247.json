@@ -1,0 +1,32 @@
+{
+  "number": 8247,
+  "kind": "issue",
+  "title": "[Decision] What is an authenticated session with NO active organization? Three subsystems answered it three contradictory ways in one shift (fail-open / fail-closed / permanently-invisible ledger rows)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-08-12T22:51:17Z",
+  "updated_at": "2026-08-13T16:12:23Z",
+  "closed_at": "2026-08-13T16:12:23Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8247",
+  "body": "Filed by the triage seat (scheduled fire, session `session_01BJ9jjXsUuc4Mkiyzvv1xUW`, 2026-08-12 ~22:47Z round). This decision has no single natural anchor — it sits upstream of three measured cards in three subsystems — so it gets a standalone card per the escalation protocol.\n\n## Background\n\nOne and the same state — **an authenticated session whose `activeOrganizationId` is null** — produced three different, mutually contradictory behaviors, all measured live on 2026-08-12:\n\n| Card | Subsystem | Behavior under the state | Consequence |\n|:--|:--|:--|:--|\n| #8158 | plugin-sharing `adminOrgScope` | **fell OPEN** | org-scoped `manage_sharing` read/wrote ALL tenants' sharing rules (fixed to reject, PR #8237) |\n| #8208 | Layer 0 tenant wall + write stamping | **falls CLOSED, silently** | HTTP-created record stamped `organization_id: NULL`, immediately invisible to its own creator |\n| #8245 | audit ledger | **writes rows no reader can ever see** | every audit row from a user's FIRST session carries a NULL tenant, permanently invisible to RLS readers |\n\nNone of the three implementations is individually wrong; the platform has never declared what the state means, so each layer improvised. The state is structurally guaranteed to occur: better-auth defers the ADR-0093 membership reconciler past the signup transaction, so **every new user's first session predates their membership** (ADR-0081 D1 `defaultActiveOrg` finds no `sys_member` row). It can also arise later (member removed from their org, etc.), so it cannot be defined away by fixing signup alone.\n\n## Premises (re-check before ruling)\n\n- The signup ordering is still live: `git log --oneline -5 -- packages/plugin-auth/src` and re-read `AuthManager.composeDatabaseHooks` / the ADR-0093 reconciler for a synchronous-settle change.\n- #8158's reject-direction fix is merged: check PR #8237 state.\n- #8208 / #8245 are still open findings with no disposition: re-read both cards.\n\n## The question\n\nIs \"authenticated, but no active organization\" a **legal session state** with defined semantics, or an **illegal intermediate** to be eliminated at the mint point?\n\n## Options\n\n- **A. Illegal — eliminate at source.** Settle membership (or an explicit org selection) before the first session mints; reject or refresh sessions that lose their org. Closes the whole class, but touches the signup hot path and better-auth's deferred-hook ordering; and \"member removed mid-session\" still needs an answer.\n- **B. Legal, with declared fail-closed semantics.** Write the rule down (ADR-class): under this state, tenant-scoped **reads resolve to nothing, tenant-scoped writes are refused loudly** (no silent NULL stamping). #8158's landed fix already conforms; #8208's silent NULL stamp becomes a 4xx refusal; audit writes need a carve-out (see C) because refusing to write a ledger row loses history.\n- **C. B + a targeted signup-ordering fix.** The general rule is B, and specifically for signup the membership settles synchronously before the first session (or the ledger row's tenant is back-filled once the session gains its org), because account-creation audit rows are exactly the ones a fail-closed refusal would permanently lose.\n\n## Recommendation: **C**\n\n- **Platform long-term coherence:** one declared rule replaces three improvisations, and the next subsystem that meets this state inherits an answer instead of inventing a fourth. A alone cannot cover the non-signup producers of the state.\n- **Measured business pull:** three independent hits in one working day, one of them (#8158) a cross-tenant security leak — this is not speculative surface.\n- **AI-agent error-resistance:** a declared fail-closed contract with loud refusals is exactly the shape agents cannot silently get wrong; today's silent NULL stamp (#8208) is the archetype of the quiet corruption this axis exists to prevent.\n- **Startup scope discipline:** C adds no new capability — it is one ruling plus one ordering fix; the per-user \"pick your org\" UX and multi-org session semantics stay out of scope.\n\nSecurity/permission-boundary semantics ⇒ human floor; not auto-adjudicable.\n\n## Downstream\n\nDisposition of findings #8208 and #8245 is gated on this ruling; #8158's fix stands either way. Related: #8241 (RLS policy-composition trap, same family but a different mechanism — not gated on this)."
+}

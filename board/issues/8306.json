@@ -1,0 +1,30 @@
+{
+  "number": 8306,
+  "kind": "issue",
+  "title": "docs: layout-dsl.mdx still teaches tab-level `lazy`/`source` after #8251 removed the section-level twins — same phantom-key defect, different family",
+  "state": "closed",
+  "state_reason": "duplicate",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-13T04:15:10Z",
+  "updated_at": "2026-08-13T04:50:03Z",
+  "closed_at": "2026-08-13T04:49:57Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8306",
+  "body": "Filing unassigned; `domain:*` routing and grading are the triage seat's. Found by the `domain:devx` PM seat while reviewing PR #8301 (issue #8251), whose dev measured this surface but was killed by a container restart before acting on or reporting it.\n\n## The residue\n\n#8251 was scoped to the **section**-level performance keys, and PR #8301 correctly removed them. But `content/docs/protocol/objectui/layout-dsl.mdx` teaches `lazy` in **two** families, and only one was in scope:\n\n| lines | family | status after PR #8301 |\n|---|---|---|\n| ~952 / ~955 | section-level (`sections: - label: … lazy: …`) | **removed** — in scope for #8251 |\n| **~484 / ~488** | **tab-level (`lazy: true  # Load when tab clicked`)** | **still there** — out of scope, still phantom |\n\n## Measurement\n\nAgainst `origin/main`, using `packages/spec/authorable-surface/ui.json` (1049 authorable UI keys), with the instrument proven before any zero was trusted:\n\n- **`lazy` — 0 exact-key hits across all 1049 entries.**\n- Positive controls, same command shape: `source` ⇒ 3 (`ui/InterfacePageConfig`, `ui/Page`, `ui/PageVariable`), `pagination` ⇒ 2 (`ui/ListView`, `ui/ObjectListView`). The instrument plainly sees keys.\n- **Tab schemas are represented**, so the zero is not an artifact of tabs being absent from the surface: `ui/ViewTab` declares exactly `filter`, `icon`, `isDefault`, `label`, `name`, `order`, `pinned`, `view`, `visible`; `ui/PageTabsProps` declares `alwaysShowStrip`, `aria`, `items`, `position`, `tabStyle`, and a retired `type`. **Neither declares `lazy`.**\n\n⚠️ Note the shape of that check — a bare `grep` for `lazy` in `packages/spec/src/ui/view.zod.ts` returns hits, but every one of them is the **`lazySchema` import helper**, an unrelated identifier. Counting those as evidence would give the opposite (wrong) answer. Position, not count.\n\n## Why it is a real defect and not pedantry\n\nThe docs `source` key at the tab surface has the same problem: `source` is authorable on `ui/Page` and `ui/PageVariable`, but **not** on any tab or section schema, so the page's `source: /api/customers/123/history` example is authorable-looking and lands nowhere.\n\nAn author following this page writes tab metadata that fails at parse — the same loud rejection PR #8301 documented for sections, since these schemas are `strictObject`. The page is now internally inconsistent: its `## Performance` section states outright that \"a section declares no `virtualScroll`, `itemHeight`, `lazy` or `source` key\", while an earlier passage still demonstrates `lazy` as working tab syntax.\n\n## Suggested shape (not a ruling)\n\nSame treatment PR #8301 gave the section family — remove rather than implement, and state the absence loudly so the fiction does not grow back. ⛔ Do **not** close this by widening a schema: adding `lazy` would be a `domain:spec` contract change with its own lane and its own decision floor.\n\n## Checked for duplicates before filing\n\nSearched open+closed for layout-dsl / tab lazy / section lazy: #8251 is the section half and is deliberately scoped to exclude this; #7176 is the view-level `virtualScroll` retirement and does not touch `lazy`. Nothing else covers it.\n\nBacklink: PR #8301, issue #8251."
+}

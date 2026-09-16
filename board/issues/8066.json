@@ -1,0 +1,33 @@
+{
+  "number": 8066,
+  "kind": "issue",
+  "title": "`os dev` still prints its supervisor output to stdout, so the diagnostics-on-stderr policy stops at two of three server commands",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "finding"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-12T14:15:12Z",
+  "updated_at": "2026-08-12T17:55:17Z",
+  "closed_at": "2026-08-12T17:54:17Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8066",
+  "body": "Observation found while fixing #7915 (PR #8065). Filed rather than folded in — nothing a user\nhits today, recorded so the boundary is deliberate rather than accidental.\n\n## What is true after #7915\n\n`os serve` and `os start` install `redirectStdoutToStderr()` at the top of `run()`: every human\nline those two commands print — and everything the kernel or any package writes to\n`process.stdout` — goes to stderr, unconditionally, because their stdout may be the MCP stdio\ntransport's JSON-RPC channel.\n\n`os dev` does not. Its own supervisor lines (`packages/cli/src/commands/dev.ts` — the rebuild\nnotices, `↪ server bound to port …`, `✓ server restarted — the new build is live`, the MCP\nconnect hint) still go to stdout, and it spawns the serve child with `stdio: ['inherit',\n'inherit', 'inherit', 'ipc']` — so the parent's stdout IS the fd the child's transport would\nwrite frames to.\n\n## Why it was left out of #7915\n\n`os dev` is not a viable stdio MCP host with or without this: its restart supervisor tears the\nchild down on every successful rebuild, which drops any live stdio session. So there is no\nconfiguration in which the parent's lines corrupt a session that would otherwise have worked —\nthe inconsistency is real, the user-visible defect is not.\n\nWhat remains is a smaller thing worth a decision rather than a silent divergence:\n\n- three server-shaped commands, two of which treat their output as diagnostics and one of which\n  does not — the next person to read `dev.ts` has no way to tell whether that is a decision;\n- `os dev | grep` and `os serve | grep` behave differently for the same-looking lines.\n\n## Options\n\n1. Install the same one-line redirect in `dev.run()` — consistent, and cheap. Costs: `os dev`'s\n   output moves to stderr for everyone who pipes it today.\n2. Leave it, and say so in `dev.ts` with a comment naming this issue.\n\nNo recommendation attached; both are defensible, and option 1 is a behaviour change for a\ncommand people watch interactively all day."
+}

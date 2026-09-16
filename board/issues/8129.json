@@ -1,0 +1,36 @@
+{
+  "number": 8129,
+  "kind": "pull_request",
+  "title": "test(qa): make the spec backward-compatibility gate read spec source, not spec dist",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "skip-changeset",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-12T17:24:49Z",
+  "updated_at": "2026-08-12T17:52:08Z",
+  "closed_at": "2026-08-12T17:52:07Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-08-12T17:52:07Z",
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/8129",
+  "body": "Fixes #7991\n\n`packages/qa/downstream-contract` is the repo's backward-compatibility gate for\n`@objectstack/spec` — its own package description says that if a spec change breaks it,\nthat change is breaking (#2035). It shipped no `vitest.config.*`, so every\n`@objectstack/spec` import resolved through `exports` to `packages/spec/dist`, a build\nartifact. The one suite built to answer \"are we shipping a breaking change to spec?\" was\nrendering a verdict about build state.\n\n## The pin: the card's demonstration, made executable\n\nMeasured on the tree in this PR, direction predicted before running. A required field\ninjected into `ConnectorSchema` in **source only**, no rebuild — a break the frozen\n`DcConnector` fixture cannot parse. Counts are `test/contract.test.ts`, the 14\nfrozen-fixture cases, so both columns describe the same 14 assertions.\n\n**BEFORE — no `vitest.config.ts`, injected source, stale dist:**\n\n```\n Test Files  1 passed (1)\n      Tests  14 passed (14)\n```\n\n**AFTER — same checkout, same stale dist, only the alias added:**\n\n```\n FAIL  test/contract.test.ts > downstream consumer contract (#2035) > Connector bare-literal parses against the current spec\nAssertionError: expected [Function] to not throw an error but '[\\n  {\\n    \"expected\": \"string\",\\n  ...' was thrown\n\n+ Received:\n\"[\n  {\n    \\\"expected\\\": \\\"string\\\",\n    \\\"code\\\": \\\"invalid_type\\\",\n    \\\"path\\\": [\n      \\\"osProbeRequiredField\\\"\n    ],\n    \\\"message\\\": \\\"Invalid input: expected string, received undefined\\\"\n  }\n]\"\n\n Test Files  1 failed (1)\n      Tests  1 failed | 13 passed (14)\n```\n\nThe gate now notices the break, and names the field. The probe was reverted and the\nsource file verified byte-identical afterwards.\n\n## No genuine narrowing is outstanding\n\nOn an unmodified tree at this branch's merge base the aliased suite is green —\n`Tests  16 passed (16)` — so the card's \"expect it to go red if a real narrowing has\nlanded\" branch does not apply. Nothing is being suppressed to get that green: the two\nruns above prove the suite can fail.\n\n## What changed\n\n- **`packages/qa/downstream-contract/vitest.config.ts`** (new) — aliases\n  `@objectstack/spec` and its namespace subpaths to source. **Anchored regex / array\n  form**, per the PR #7778 constraint: the object form matches by prefix, so a bare\n  `@objectstack/spec` entry would also swallow `@objectstack/spec/ui` and resolve it to\n  `spec/src/index.ts/ui` (ENOTDIR). One subpath rule covers every namespace, so it\n  cannot go stale as fixtures reach new ones.\n- **`scripts/check-test-source-alias.mjs`** — deletes this package's\n  `KNOWN_UNALIASED_TEST_IMPORTS` entry. Mechanically coupled, not cleanup: the registry\n  is audited in both directions, so a stale entry fails the gate naming itself. The gate\n  now reports 62 registered packages, down from 63.\n- **`test/source-resolution.pin.test.ts`** (new, 2 cases) — keeps the demonstration\n  executable rather than historical. Reverse-verified: with the config removed both\n  cases fail (`Tests  2 failed (2)`).\n\n## A dual instance the dist boundary was hiding\n\nThe second pin case asserts `defineConnector` imported from `@objectstack/spec` and from\n`@objectstack/spec/integration` is one object. Resolved through `dist` it is **not** —\nthe two entry points serve different function objects, so identity comparisons across\nthem were quietly false. The source alias collapses them to one tree. Reported rather\nthan worked around, per the card's ruling.\n\n## Verification\n\n- `pnpm check:test-source-alias` — OK, including the `--self-test` leg.\n- `node scripts/check-nul-bytes.mjs` — OK; targeted control-character self-scan clean.\n- `pnpm --filter @objectstack/downstream-contract test` — `Tests  16 passed (16)`.\n- `pnpm --filter @objectstack/downstream-contract typecheck` — clean (this package's\n  tsconfig includes `test/**/*`, so the new pin file is type-checked).\n- `pnpm check:type-check-debt` — self-test and coverage audit pass with ledgers\n  unmoved: 64/77 type-checked, 13 in DEBT (442 frozen raw errors), 20 hiding tests\n  (1795 in TEST_DEBT). Byte-identical numbers on a pristine tree. The `--re-measure`\n  leg refuses on this container for want of a full build closure; verified\n  change-independent by reverting to a pristine tree and reproducing the identical\n  refusal naming the same 54 packages. No ledgered package's tsc program is touched by\n  this PR.\n\n## Changeset\n\nA release-nothing changeset (empty frontmatter) is included rather than a\n`skip-changeset` label. `@objectstack/downstream-contract` is `private: true` and never\npublished, and nothing here changes any published package's code, so there is no version\nto bump — but the empty-frontmatter form is this repo's established convention for\nharness- and docs-only work, it satisfies the changeset check (which counts added\n`.changeset/*.md` without parsing frontmatter), and it puts the reasoning in the repo's\nrecord instead of in a label.\n\n## Follow-ups found under this card\n\n- **#8020** — `check:test-source-alias` could not read a template-literal alias\n  replacement. Filed separately and **already fixed and merged** by PR #8107 while this\n  card was in flight; the note this branch carried about that limitation is corrected to\n  the past tense in the final commit.\n- **#8021** (open) — this package's *other* half, `typecheck`, still resolves spec types\n  through `dist/*.d.ts`, so a narrowed export type reads green the same way. Same defect,\n  sibling command; deliberately not fixed here.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01B3Kurx8qufrDzNjk4rag7V)_"
+}

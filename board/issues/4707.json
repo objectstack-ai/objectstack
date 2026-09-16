@@ -1,0 +1,30 @@
+{
+  "number": 4707,
+  "kind": "issue",
+  "title": "`isSystem: true` has at least three distinct, undocumented side effects across three packages — each one has cost an app-side bug",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-02T20:02:52Z",
+  "updated_at": "2026-08-12T19:43:38Z",
+  "closed_at": "2026-08-12T19:43:38Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4707",
+  "body": "Filed from the HotCRM reference app after the third one bit us in a single day. Each was found separately, by a different task, and none is written down anywhere that connects it to the others.\n\n## The three behaviours\n\n`isSystem: true` on a write is used by the seed loader and by internal writers. Across three different packages it changes three unrelated things:\n\n| # | package | effect | how we found it |\n|---|---|---|---|\n| 1 | ObjectQL (`applySystemFields`) | **`owner_id` is not injected** — the row is written with no platform owner | hotcrm#622: `demo_bootstrap` had to sweep and stamp ownership after the fact |\n| 2 | write pipeline | **`readonly` stripping is bypassed** — a `readonly` field CAN be written | hotcrm#613: relied on deliberately, so a `seed_key` column exists that only the seed loader can write |\n| 3 | `plugin-sharing` | **grant materialisation is skipped** — the record-write hook returns early, so no `sys_record_share` rows are created | hotcrm#640: every seeded row is `isSystem`, so a fully-configured sharing rule granted **nothing** until a rule was re-evaluated |\n\nNumber 3 is the one that motivated this issue. On a fresh install we had: 9 sharing rules installed, 9 accounts matching their criteria, users holding the right positions — and `sys_record_share` **empty**. Every visible layer said the feature was configured. Nothing anywhere said that the seed path had skipped materialisation, and no amount of reading the sharing metadata could have revealed it.\n\n## Why this is worth a single issue rather than three\n\nIndividually each is defensible. Together they mean **`isSystem` is not one concept** — it is at least three policies (ownership, field protection, sharing) sharing one boolean, implemented in three packages, discoverable only by reading each package's source.\n\nThat has two concrete consequences:\n\n- **An author cannot predict what a seeded row will look like.** We reasoned correctly about #1 and #2 and were still wrong about #3, because knowing two of the three gives no hint that a third exists.\n- **The failure mode is always \"configured but inert\".** In all three cases the metadata is complete and correct; the gap is invisible from the metadata and only observable by querying the resulting rows. For AI-authored metadata this is close to worst-case: the author has no signal, and validation has nothing to complain about.\n\n## What we would like\n\n1. **Document the full set.** The minimum useful artifact is one table listing every behaviour keyed off `isSystem`, in one place, maintained as the authority. If there is a fourth we have not hit yet, that table is how we would find out.\n2. **Consider splitting the concept.** Ownership injection, readonly bypass, and sharing materialisation are independent decisions; a seed loader plausibly wants #1 and #2 but usually **not** #3. If they stay one flag, say so and say why.\n3. **Make #3 observable.** A seed run that writes N rows to an object covered by an active sharing rule and materialises 0 grants is worth one INFO line (\"sharing materialisation skipped for isSystem writes; re-evaluate rules or restart to backfill\"). Today the only way to learn this is to query `sys_record_share`, find it empty, and go read `plugin-sharing`'s source.\n\nPoint 3 alone would have saved most of a task: the boot backfill *does* eventually fix it, so the behaviour is not wrong — it is just completely silent, and silence here is indistinguishable from a broken sharing configuration.\n\nRelated: hotcrm#622, hotcrm#613, hotcrm#640 (PR hotcrm#652), #4698."
+}

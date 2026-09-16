@@ -1,0 +1,35 @@
+{
+  "number": 8180,
+  "kind": "issue",
+  "title": "No gate asserts the TYPE axis of the source-resolution invariant: check:test-source-alias reads vitest.config.* only, so every package's tsconfig can resolve workspace deps through dist with nothing saying so",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-12T18:46:07Z",
+  "updated_at": "2026-08-12T23:32:28Z",
+  "closed_at": "2026-08-12T23:32:28Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8180",
+  "body": "Filing unassigned; found while implementing #8021 (PR #8176), and deliberately not fixed there — that card's scope is one package's tsconfig, and a repo-wide gate is its own blast radius.\n\n## The asymmetry\n\n#7849 / PR #7966 landed `check:test-source-alias`, which makes the source-resolution invariant mechanical rather than per-package goodwill: for every workspace package with tests, walk the imports reachable from those tests, keep the deps that resolve under `dist/`, simulate Vite's resolution over `vitest.config.*`, and demand that anything left is registered. Its own header states why a sweep is the wrong terminal state — \"it leaves the NEXT package unguarded, and the symptom of the omission is a green test, so nothing would report the gap\".\n\nThat reasoning is axis-independent, but the gate is not. It reads `vitest.config.*` and nothing else. **No gate reads `tsconfig.json`**, so the identical exposure on the type axis is unguarded repo-wide, and its symptom is likewise a green `typecheck`.\n\n## Measured, on the one package that has now been fixed\n\n#8021 measured it end to end on `packages/qa/downstream-contract`. Identical checkout, identical stale `dist`, a narrowing injected into `packages/spec/src/integration/connector.zod.ts` in source only with no rebuild:\n\n- without a `paths` block: `tsc --noEmit` exit 0, clean\n- with a `paths` block: `src/additional-domains.fixtures.ts(35,3): error TS2322: Type 'string' is not assignable to type 'number'.`\n\nThat package is the repo's backward-compatibility gate, whose README promises \"a removed or NARROWED export fails here\" — so it was the loudest instance, which is why it got a card. It is not the only instance. The mechanism is generic and is in fact documented as the expected state in `.github/workflows/lint.yml`, beside the type-check-debt re-measure step:\n\n> tsc resolves workspace imports through each dependency's built `dist/*.d.ts` — so it needs the build steps above\n\nOrdering does not reach it, same as both prior cards: `turbo.json` orders `typecheck` after `^build`, so `turbo run typecheck` and CI are not the failing paths. What breaks is every path turbo does not mediate — `pnpm --filter PKG typecheck` inside a package, an editor's TS server, an agent in a tree built at an older commit. Those are exactly the paths a type contract is re-read on **while** someone is changing the dependency.\n\n## What a gate would have to get right (from #8021's measurements)\n\nNot a copy of the vitest one — the resolution algorithm and the trap are both different:\n\n1. **tsc's `paths` algorithm, not Vite's.** An exact (star-free) key wins outright; otherwise the pattern key with the **longest matching prefix** wins and the captured text substitutes into the target's star. Vite's is first-match-wins with prefix matching for string finds.\n2. **The trap has a different spelling and is worse.** A tsconfig key without a `*` is an exact match, so the bare `@objectstack/spec` entry cannot swallow `@objectstack/spec/ui` the way a Vite object-form alias does (`ENOTDIR`). The tsconfig-shaped mistake is `@objectstack/spec*` — star not preceded by a slash — which matches every namespace and folds it onto whatever the target names. It does **not** crash: `spec/src/index.ts` re-exports most of the namespace surface, so it type-checks against the wrong module and stays green.\n3. **Rules fail independently and silently.** Measured on #8021: with the subpath rule kept and only the bare-entry rule deleted, tsc stayed clean while `src/stack.ts`'s `defineStack` types came from `dist`.\n4. **`tsconfig.json` is JSONC.** Whole-line comment stripping before `JSON.parse`, as `scripts/check-type-check-coverage.mjs` already does.\n5. **`extends` chains.** Unlike `vitest.config.*`, tsconfigs inherit; a gate must resolve `extends` before reading `paths`.\n6. **The switch is not free, and the cost is not the gate's to hide.** Putting a dependency's source into a consumer's program makes tsc check that source under the consumer's `compilerOptions`. On #8021 that surfaced 2 `TS2591` (spec source needs `types: [\"node\"]`) and 247 `TS6059` from a `rootDir` that emits nothing under `noEmit` but is still enforced. So remediation is per-package and lands as its own card — the gate's job is to make the list of cards finite and unable to grow behind anyone's back, exactly as the vitest gate's header argues. A registry of the measured state, shrink-only and audited for set equality in both directions, is the shape that worked there.\n\n## Prior art (searched before filing)\n\n- #7849 / PR #7966 — the runtime-axis gate and registry. Type resolution is explicitly outside their scope.\n- #7991 / PR #8129 — the runtime half of `downstream-contract`.\n- #8021 / PR #8176 — the type half of that one package; this finding is the repo-wide generalization it deliberately did not attempt.\n- #8020, #8108 — defects in how the vitest gate reads alias replacements (template literal, `+` concatenation). Same family, and a warning about how easily a resolution-simulating gate reads a correct config as wrong.\n- #7181 (closed) — dist-reading spec gates with unenforced freshness preconditions.\n- #5475 (closed), #4311 — type-check **coverage** holes, a different question: those ask whether tsc reads a file at all, this asks what a file's imports resolve to once it does.\n\nNothing open covers the type axis.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01B3Kurx8qufrDzNjk4rag7V)_\n"
+}

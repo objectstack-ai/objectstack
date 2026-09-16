@@ -1,0 +1,36 @@
+{
+  "number": 8102,
+  "kind": "issue",
+  "title": "The D5.1 `/oauth2/authorize` env-access gate silently does not run for a signed bearer credential — its inline token lookup is a stale copy of `resolveActor`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched",
+    "security"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-12T15:25:19Z",
+  "updated_at": "2026-08-12T19:28:01Z",
+  "closed_at": "2026-08-12T19:28:01Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8102",
+  "body": "Blocked-by: #8049\n\nFound while fixing #8049 (PR #8101). Not fixed there — different endpoint, kept out of scope deliberately.\n\n## What\n\n`packages/plugins/plugin-auth/src/auth-manager.ts` resolves a session token from the request in **two** places:\n\n- `resolveActor` (~`:3806`) — the shared, documented, hook-order-independent resolver, used by the `/sso/register` admin gate and (as of #8101) `/change-password`;\n- an **inline copy** inside the `/oauth2/authorize` branch of the same global before-hook (~`:1341-1362`), guarding ADR-0069 D5.1's cloud-as-IdP `oidcAuthorizeGate`.\n\nThe two are line-for-line the same logic. #8101 fixed one bug in the shared one and left the copy untouched, so they have now diverged.\n\n## The defect\n\nBoth copies look the session up by `sys_session.token`, which stores the **unsigned** value. The cookie branch strips the signature (`decodeURIComponent(cm[1]).split('.')[0]`); the **bearer branch does not**. But better-auth's `bearer()` plugin hands clients the **signed** `token.signature` form in the `set-auth-token` response header — the documented API-lane credential — and accepts it back. So a caller presenting that credential resolves to nothing.\n\nOn `/oauth2/authorize` the unresolved case is deliberately **fail-open** — the comment reads *\"Unauthenticated → fall through so the OP redirects to login\"*, and the branch is skipped entirely when `gateUserId` is undefined:\n\n```\nif (gateUserId) {\n  const allowed = await this.config.oidcAuthorizeGate({ userId: gateUserId, clientId: String(clientId) });\n  if (!allowed) { ... ENV_ACCESS_DENIED ... }\n}\n```\n\nSo an **authenticated** caller holding a signed bearer is treated as unauthenticated and the env-access (org-membership / app-assignment) check never evaluates. That is the same shape as #8049 one endpoint over: a declared security control that is enforced for one credential spelling and silently absent for the other.\n\nThe author clearly intended bearer to work here — the comment on the branch says *\"or immediately for a bearer/cookie session\"* and the fallback exists precisely because `getSessionFromCtx` misses bearer requests at this hook.\n\n## Severity note\n\n`oidcAuthorizeGate` is only set on the cloud control plane (unset in open editions / self-host ⇒ no gate at all), and the OP's authorize endpoint is normally browser/cookie-driven, so the cookie path — which does normalize — is the common one. I have **not** measured a live bearer-driven `/oauth2/authorize` request; the claim above is read off the code plus the token-shape measurement from #8049 (`set-auth-token` = `token.signature`, `sys_session.token` = unsigned; measured on better-auth 1.7.0-rc.2). Grading is the triage round's call, not mine.\n\nThere is also no test coverage: `oidcAuthorizeGate` appears in `auth-manager.ts` only (declaration + the two use sites), with no occurrences in any `*.test.ts`.\n\n## Suggested fix\n\nDelete the inline copy and call `this.resolveActor(ctx)` — after #8101 it is correct for both bearer spellings and returns the `activeOrgId` too. That removes the second resolution site rather than fixing it twice, which is what let these diverge in the first place. Hence `Blocked-by: #8049`: the shared resolver only became correct in that PR.\n\nA regression pin should drive `/oauth2/authorize` with a **signed** bearer against a gate configured to deny, and assert the request is refused rather than falling through.\n"
+}

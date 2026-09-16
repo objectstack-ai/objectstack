@@ -1,0 +1,35 @@
+{
+  "number": 8261,
+  "kind": "pull_request",
+  "title": "feat(service-settings): report-only sys_secret orphan classifier, and the reachability fact it falsifies (#8103)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/xl",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-13T01:19:27Z",
+  "updated_at": "2026-08-13T02:24:57Z",
+  "closed_at": "2026-08-13T02:24:55Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-13T02:24:55Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/8261",
+  "body": "Part of #8103 — the **non-destructive half** only. The deletion half stays open and is being decided on #8259, which this PR does not address.\n\n⛔ **No deletion ships here.** No delete path, no boot-time migration, nothing behind a flag. The classifier is a pure function that cannot write and cannot decrypt.\n\n## Headline: re-measuring falsified one of the three reachability facts\n\nThe card asked for #8063's three reachability facts to be **re-measured rather than cited**. Measured on this checkout:\n\n| Fact | Reading |\n| --- | --- |\n| Handle ids minted per `encrypt()` call | ✅ **GREEN** — `LocalCryptoProvider.encrypt` mints `sec_` + 16 random bytes per call; `rotateKey` keeps `id` stable |\n| `sys_setting.value_enc` is the only column holding a handle | ❌ **RED — FALSIFIED** |\n| Audit trail records digests, not handles | ✅ **GREEN** — `old_hash`/`new_hash` are content digests; no handle appears anywhere in an audit entry |\n\n**`sys_secret` has three producers, not one** — stated by its own schema (`platform-objects/src/system/sys-secret.object.ts`, \"three privileged producer paths\"):\n\n1. `SettingsService` → handle in `sys_setting.value_enc`\n2. the engine's `secret`-field channel (`encryptSecretFields`) → `secret: id` stored on **an arbitrary business row**, including tenant-authored objects\n3. the datasource credential binder → `sys_secret: id` at `external.credentialsRef`\n\nTwo of the three are invisible from this package, and (2) is **not statically enumerable** — it is every `secret`-typed field on every registered object. A sweep that treated \"unreferenced by `sys_setting`\" as \"unreferenced\" would delete live datasource credentials and live business-row secrets.\n\nThat is why the verdict vocabulary has a third value: a row that cannot be **attributed** to the settings producer is reported `unattributable`, never `orphaned`. That guard is the safety property of this PR and is pinned by test.\n\n## What landed\n\n`classifySysSecretRows()` — pure, read-only, over caller-supplied snapshots:\n\n- `in_force` — a live `sys_setting.value_enc` names this handle\n- `orphaned` — unreferenced **and** attributable to a declared encrypted specifier\n- `unattributable` — unreferenced and not provably settings' — ⛔ not an orphan\n\n`SecretRowSnapshot` deliberately has **no `ciphertext` member**, so carrying cipher material into the report is a type error rather than a review question (maintainer ruling of 2026-08-12: report mode names counts and row ids without decrypting).\n\nBoth directional guards the card names are pinned:\n\n- **`rotateKey()` is not a retirement** — it re-wraps in place and keeps the handle, so a re-wrapped row is the row *in force*. Verdicts are decided by **reference only**; `version` / `rotated_at` are reported and never consulted. Stripping that metadata changes no verdict, which the test asserts.\n- **Legacy inline crypto, in the other direction from #8063's `sec_` guard** — an inline `value_enc` contributes no handle to the referenced set, and any `sys_secret` row sharing its `(namespace, key)` is flagged `legacyInlineSibling`.\n\nThe report also carries explicit `caveats` naming its own blind spots, so counts are never read bare.\n\n## Mechanism reproduced, not cited\n\nThe filer's 7 → 8 → 9 anecdote is reproduced from a clean table against a **real** `ObjectQL` over the real `SysSetting`/`SysSecret` schemas, driving the real `SettingsService` — writes through an adapter that drops `context`, which is the whole pre-fix defect (`value_enc` is `readonly: true` and the engine strips it from a non-system UPDATE). Three writes give exactly 1 → 2 → 3, with `value_enc` pinned at the first handle.\n\nA faithful pre-fix instance needs the store's `delete` absent too, since the context fix and the reaper landed together in #8063. Wiring a live reaper to a context-dropping adapter instead yields 1 → 1 → 2 and a **dangling** `value_enc` — filed separately as a finding (#8262), not touched here.\n\nThat double is loose in exactly one dimension (`context`) and stays conformant in the rest: its `update()` routes through `assertEngineUpdateDispatch` per `check:engine-double-contract`. The predicate reads only `where` / `multi` / `data.id` and never looks at `context`, so the pin is orthogonal to the defect being reproduced.\n\n### The card's security framing is inverted for this population\n\nMeasured (and asserted in the test): after three pre-fix writes the value **still in force is the oldest one** — the credential the admin believed replaced — while the **orphans hold the values the admin intended to set** and which never took effect.\n\nSo deleting the orphans does **not** retire the exposed credential; the exposed one is referenced and no sweep would touch it. The orphans are still real exposure — if the admin also rotated at the provider, the newest orphan may be a **currently-valid** credential.\n\n## Tests\n\nAll four classes (orphaned, in-force, legacy-inline, re-wrapped) are present in one fixture, so the pins are not vacuous. 14 new cases; the package's 427 tests pass; typecheck clean.\n\nReverse verification, direction predicted before running, all RED as predicted:\n\n- collapsing the attribution guard (`unattributable` → `orphaned`) → 3 failures including the safety pin\n- letting re-wrap metadata decide a verdict → 3 failures including the re-wrap guard\n- flipping the engine double's `multi` to `false` → the real engine's own \"Update requires an ID or options.multi=true\", proving the dispatch pin sits on the harness's live write path rather than being dead code\n\n## Scope\n\nRead/report path only. `settings-service.ts` and `crypto-adapter.ts` are **untouched**, so there is no overlap with #8026's write/persist path this round.\n\n_Generated by [Claude Code](https://claude.ai/code/session_01ARidKDYSCD56LaygrvDPnk)_"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 8435,
+  "kind": "issue",
+  "title": "`check:engine-double-contract` fires at CI time, not authoring time — four independent PRs tripped it on brand-new test files in one shift, and a pre-warning in the brief did not prevent it",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "qq9340100"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-13T13:03:28Z",
+  "updated_at": "2026-08-13T17:26:24Z",
+  "closed_at": "2026-08-13T17:26:24Z",
+  "closed_by": {
+    "login": "qq9340100",
+    "id": 313832657,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8435",
+  "body": "Filed by the `domain:identity` execution seat from an operational measurement across one shift. **Unassigned and unlabeled for triage** — ⛔ execution seats do not grade findings or route `domain:*`. Lands in the gate-farm / developer-ergonomics surface, not identity's.\n\n⚠️ **The gate is correct and is doing its job.** This card is not asking to weaken it. It is about *where in the workflow it fires*.\n\n## Measured, same shift (2026-08-13)\n\nFour independent PRs, four different authors, four brand-new test files, same failure:\n\n| PR | issue | file | line |\n|:--|:--|:--|:--|\n| #8311 | #8207 | `plugin-sharing/src/system-caller-inert-grant.test.ts` | 88 |\n| #8316 | #8289 | `plugin-auth/src/remove-member-permission-guard.test.ts` | 89 |\n| #8325 | #8315 | (avoided — declared no engine double) | — |\n| #8432 | #8243 | `plugin-auth/src/impersonation-bearer-rotation.test.ts` | 72 |\n\nAll were `update()` on a hand-rolled in-memory engine double. All were fixed the correct way (route through `assertEngineUpdateDispatch`); **none** took the baseline entry. Each cost one full CI round plus a PM relay.\n\n## The part that makes this more than \"devs should read the docs\"\n\nFor #8432 the requirement was **written into the dispatch brief up front**, naming the gate, the correct import, the cycle caveat, and the trap — and the gate fired anyway.\n\nThat is the useful signal: a pre-warning **does not prevent the failure**, because the author writes the double first and only meets the requirement when CI rejects it. What the warning demonstrably *does* prevent is the **wrong remedy** — every dev took the correct fix rather than the baseline escape hatch the gate's own message offers.\n\nSo documentation-shaped fixes (briefs, CLAUDE.md, AGENTS.md) address the wrong half. The failure is one of **discovery point**, not of knowledge.\n\n## ⚠️ The gate's message advertises a ratchet-weakening remedy as a co-equal option\n\nVerbatim:\n\n> Open the fake's update with `assertEngineUpdateDispatch(data, options)` … **Or** add a MEASURED entry to `scripts/engine-double-contract.baseline.json` saying why not — with `\"verb\": \"update\"`.\n\nThat baseline is **shrink-only**. Adding to it is weakening a ratchet, which is a maintainer action, not a dev's. The message presents the two remedies symmetrically, with no marker that the second is privileged. Four devs got this right today because they were told separately; a dev reading only the gate output has no way to know.\n\n**This half is cheap to fix regardless of what happens to the rest of the card** — one sentence in the gate's own output.\n\n## Suggested directions (⛔ not decided here)\n\n- **Move discovery to authoring time**: an ESLint rule, or a shared test helper / factory for in-memory engine doubles that routes the dispatch predicates by construction. The helper shape is attractive because it also removes the per-file re-derivation of an engine double, which is what produces the drift.\n- **Mark the baseline remedy as privileged** in the gate's message (e.g. \"⛔ maintainer-only — the baseline is shrink-only\").\n- **Accept and do nothing**: defensible if the CI round is considered cheap. Recorded so the choice is explicit rather than default.\n\n## Why the underlying gate matters, stated so this is not misread\n\nThe gate's own rationale: *\"A fake looser than `ObjectQL.update` is how #4434 shipped a dead REST route with its suite green.\"* A double that accepts calls the real engine would reject is a test that structurally cannot fail — the same vacuity class the ablation discipline exists to catch. ⛔ Nothing here argues for relaxing it.\n\nRelated: #4434 (the incident the gate exists for), #5619 (where the predicate lives), #4550."
+}

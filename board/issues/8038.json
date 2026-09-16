@@ -1,0 +1,35 @@
+{
+  "number": 8038,
+  "kind": "issue",
+  "title": "`/meta/object/:name` answers the `__search` question two different ways — drops it for all 22 package objects, keeps it for all 71 platform objects (and the list route keeps it for both)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "huangyiirene"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-12T13:01:24Z",
+  "updated_at": "2026-08-13T01:07:00Z",
+  "closed_at": "2026-08-13T01:07:00Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8038",
+  "body": "Surfaced while building a list-vs-by-name field-set reconciliation for `platform-core.metadata-registry-serving`. `__search` is the **only** residual field-set difference between the two `/meta/object` reads anywhere in the registry — which makes it the one thing standing between the platform and a clean cross-read agreement gate. It is also, on its own, a self-inconsistency.\n\nDistinct from #7561 (which was about `fields.__search` carrying an `index` key that `FieldSchema` rejects, invalidating `/meta/diagnostics`) and from #7642 (which was about `__search` echoing in **record** bodies). This is the **metadata** read, and the defect is that one route gives two answers.\n\n## Measurement\n\nShowcase, admin bearer, baseline `279ee48a`. All 96 registered objects walked, by-name read fetched for each:\n\n| | list `GET /meta/object` | by-name `GET /meta/object/:name` |\n|---|---|---|\n| 22 package objects (`showcase_*`) | `__search` **present** | `__search` **absent** |\n| 71 platform objects (`sys_*`) | `__search` **present** | `__search` **present** |\n| 3 objects (`sys_session`, `sys_audit_log`, `showcase_project_membership`) | absent (no companion provisioned) | absent |\n\nThe split is exact — **22/22 and 71/71, zero exceptions in either direction**. It keys on provenance (package-declared vs platform), not on whether the object is extended, searchable, or large: 21 of the 22 carry no object extension at all.\n\nSo `GET /meta/object/showcase_account` reports 22 fields while `GET /meta/object/sys_metadata` reports its companion column as a normal field, from the same route, in the same response shape.\n\n## Why it matters\n\n1. **`__search` is declared client-invisible.** #7642 fixed exactly that contract on the record-body door and its clause is green on this baseline. The metadata door was never brought along — so the internal search-normalization companion (`packages/objectql/src/search-companion.ts`, `SEARCH_COMPANION_FIELD`, #2486) is still published to every metadata reader for the list route and for 71 of 93 by-name reads.\n2. **A consumer cannot write one correct rule.** Studio, form derivation, and any agreement gate must currently special-case `sys_*` vs package objects to get the same field set from the same route.\n3. **It silently weakens the new cross-read pins.** `packages/rest/src/meta-object-extension-agreement.test.ts` and `packages/qa/dogfood/test/showcase-object-extension-meta-read.dogfood.test.ts` (added with #7556's fix) reconcile list against by-name — they are green only because they scope to `showcase_account`, which happens to sit on the stripping side. Widen either pin to a `sys_*` object and it goes red on this column alone.\n\n## Reproduction\n\n1. Boot the showcase: `node packages/cli/bin/run.js dev -a dist/objectstack.json --seed-admin -d file:/tmp/x.db -p <port>`\n2. Sign in as `admin@objectos.ai` with `Origin: http://localhost:<port>`; take the bearer from the `set-auth-token` response header.\n3. `GET /api/v1/meta/object/showcase_account` → `item.fields` has **no** `__search`.\n4. `GET /api/v1/meta/object/sys_metadata` → `item.fields` **has** `__search`.\n5. `GET /api/v1/meta/object` → the entries for **both** carry `__search`.\n\n**Expected** one answer for one internal column, on every object and every read. **Actual** three combinations across two routes.\n\n## Which answer is right\n\nThe by-name package-object behaviour (**strip it**) looks like the correct side — it matches `__search`'s own \"never exposed to clients\" declaration and the direction #7642 settled. That would mean the list route and the 71 `sys_*` by-name reads all need the same strip, applied at one place rather than per route.\n\nThe gate that makes it stick is extending the two agreement pins beyond `showcase_account` to at least one `sys_*` object, so a per-provenance divergence in either route cannot pass.\n\n## Source\n\nMeasured during the checklist retest of `platform-core.metadata-registry-serving` (framework `279ee48a`, console `6314e87f2d49`).\n"
+}

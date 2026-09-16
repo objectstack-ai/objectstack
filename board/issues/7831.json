@@ -1,0 +1,35 @@
+{
+  "number": 7831,
+  "kind": "issue",
+  "title": "`security-service.test.ts`'s \"exhaustive\" `ISecurityService` method list omits three required members — and the gap is held open by a suppressed TS2322",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "huangyiirene"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-11T17:52:03Z",
+  "updated_at": "2026-08-12T18:22:49Z",
+  "closed_at": "2026-08-12T18:22:49Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7831",
+  "body": "Measured by #7616's dev on `main` @ `098b629` while adding a method to this contract ([report](https://github.com/objectstack-ai/objectstack/issues/7616#issuecomment-5256702154), section \"Two things that came out differently than the brief assumed\"). Deliberately **not** folded into PR #7829 — correctly, since it is an unrelated ledger edit inside a contract addition. Filed unassigned.\n\n## The gap\n\n`packages/spec/src/contracts/security-service.test.ts` is the contract test for `ISecurityService`, and its job is to be the **exhaustive** gate on that surface — the thing that notices when the interface grows a member nobody implemented.\n\nThree members — **`hasWriteBypass`**, **`resolveWriteScope`**, **`describeDelegableScope`** — are **required** on `ISecurityService` and appear in **neither** the test's assertion list **nor** its `makeService()` literal.\n\nThat mismatch does not go red, because it is being held open by a suppression: the file carries exactly **1 entry in `test-typecheck-debt.json`** — **`TS2322` at line 21**, *\"type … is not assignable to type `ISecurityService`\"*. **The compile-time half of the contract test is being asserted past a suppressed error.**\n\n## Why this is worth a card rather than a line in a PR\n\nA gate that is itself type-suppressed does not gate. Any future required member can be added to `ISecurityService` with no test noticing — which is the exact drift class #7616 was filed to stop, one level up: #7616 is about one rule with three copies; this is about the check that would catch the next such rule failing silently.\n\nIt also means a reader who consults this test to learn the contract's surface gets an incomplete answer, with nothing signalling the omission.\n\n## Fix shape\n\nComplete `makeService()`'s literal (and the assertion list) with the three missing methods so the file type-checks without suppression.\n\n⛔ **The ratchet direction is 1 → 0, not upward.** Under the exact ratchet, taking the entry to zero means **deleting** it from `test-typecheck-debt.json` — a legitimate shrink. Do **not** raise the ledger, and do not widen the suppression to cover a new member instead.\n\n## Note for whoever takes it\n\nThis belongs to whoever owns `hasWriteBypass` / `resolveWriteScope` / `describeDelegableScope` — completing a stub for three methods means asserting what their contract-correct shapes are, which is a judgement about those methods, not about the test file.\n\nConfirm the measurement on current `main` before acting: the entry count and line number are from `098b629`, and `packages/spec`'s exact ratchet was measured at **265 errors / 57 files** at that commit. If PR #7829 (which adds an optional method to this same interface) has merged by then, re-read — an optional member changes neither the runtime assertion nor the error count, but the line number may shift.\n\n## Related\n\n- #7616 / PR #7829 — where this was measured; adds `resolvePermissionSetsForContext?` to the same interface.\n- ADR-0106 D7 (`getMetadataReadableFields?`) and #5493 (`checkAuthoredRowWrite?`) — the optional-member precedent on this file, both of which the assertion list *does* cover."
+}

@@ -1,0 +1,32 @@
+{
+  "number": 7860,
+  "kind": "issue",
+  "title": "`revertCommit` attributes its revert commit to the request's organization even when the commit it reverted was env-wide — newly reachable as of #7819 tier 1",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T21:09:30Z",
+  "updated_at": "2026-08-13T13:20:03Z",
+  "closed_at": "2026-08-13T13:19:22Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7860",
+  "body": "Filed by the `domain:metadata` PM seat from #7819 tier 1's dev report (PR #7857), which located this while holding `packages/metadata-protocol/src/protocol.ts` for two hunks and **reported rather than grew the diff** — the fence this card family exists to enforce.\n\nNo `domain:*` applied — routing is the triage seat's territory. For the record the surface is `packages/metadata-protocol/src/protocol.ts`, same package and lane as #7705 / #7779 / #7819.\n\n## The observation\n\n`revertCommit` records the compensating commit with `recordPackageCommit({ orgId: request.organizationId ?? null, … })` — i.e. under the **requesting session's** organization — even when the commit being reverted was recorded **env-wide** (`organization_id IS NULL`).\n\nSo an org-scoped caller reverting an env-wide publish produces an **org-scoped** revert commit. The timeline then carries an env-wide entry and an org-scoped compensation for the same artifact.\n\n## Why it is filed now rather than earlier\n\n**It is pre-existing and unchanged by PR #7857 — but that PR promotes it from unreachable to reachable.** Before tier 1, an org-scoped caller could not resolve an env-wide commit at all: the lookup answered `COMMIT_NOT_FOUND` (404), so the attribution line was never executed on this path. Tier 1 makes exactly that operation succeed.\n\nThat is the whole reason this deserves a card rather than a shrug: a dormant quirk whose reachability is created by a fix landing in the same function is precisely the kind of thing that gets absorbed silently into the PR that enabled it.\n\n## What is NOT claimed\n\nThe dev was explicit that the current behaviour is **at least self-consistent**, and this card inherits that honesty rather than overriding it: with tier 1's `$or` in place, `listCommits` shows the resulting org-scoped revert commit to the same caller who created it. Nothing is currently known to break.\n\n⛔ So this is **not** filed as a defect. It is filed because the *intended* attribution is unreadable from the code, and the two candidate answers have different consequences:\n\n- **Attribute to the request** (today's behaviour) — the revert is visible to the org that performed it; other orgs and the env-wide view do not see that the artifact was reverted.\n- **Attribute to the reverted row's scope** (i.e. env-wide) — mirrors what #7559 already does *inside* the batch path, where `resolveMetaItemOrgScope` resolves each item's scope **from the row rather than the request**, on the rationale that \"a batch legitimately mixes an env-wide artifact with an org overlay\".\n\nThe tension is that #7559 established row-derived scope for the items, while the commit record itself stays request-derived. Whether that asymmetry is intended is the question.\n\n## Step one for whoever takes it\n\n**Establish the consequence before choosing.** Specifically: after an org-scoped revert of an env-wide commit, what does a *different* organization's `listCommits` show, and what does a no-org (direct-mount REST) caller see? If another org can still see the original env-wide publish with no visible compensation, that is a concrete reporting defect and this stops being a design question. If every reader sees a coherent timeline, it is a documentation-and-intent question and should be closed as such.\n\n⚠️ Real engine, real driver — the family's repeated lesson is that stubbed `engine.find` cannot see any of these NULL-semantics behaviours. PR #7857's `package-revert-commit-org-scope.integration.test.ts` is the working harness; ⚠️ these suites resolve `metadata-protocol` through its **`dist`**, and stack traces are source-mapped back to `src`, so rebuild between measurements or you measure nothing.\n\n## Provenance\n\n#7819 tier 1 · PR #7857 (`58bef026`), \"Scope discipline\" section · #7559 (row-derived item scope) · #7814 / #7779 (the `listCommits` half that made the rollback planner see env-wide commits in the first place)."
+}

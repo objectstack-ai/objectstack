@@ -1,0 +1,35 @@
+{
+  "number": 7870,
+  "kind": "issue",
+  "title": "finding: `storage.resumeUpload` ignores `progress.status`, so resuming an expired session surfaces as a 410 on the first chunk instead of a clean early exit",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-12T00:56:54Z",
+  "updated_at": "2026-08-13T01:59:31Z",
+  "closed_at": "2026-08-13T01:58:20Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7870",
+  "body": "## Observation\n\nSince #7667 (PR #7844) a chunked upload session past its own `expires_at` is durably stamped `expired`, `GET .../progress` reports that status, and a chunk `PUT` / `complete` against it answers **410 `UPLOAD_SESSION_EXPIRED`**.\n\n`packages/client`'s `storage.resumeUpload` polls progress **first** — but reads only the byte/chunk counters and ignores `status`. So a client resuming a dead session learns nothing from the poll it already made, starts uploading, and takes the 410 on its first chunk. Honest failure, not a regression (before #7667 it would have uploaded into a session the TTL sweep was about to delete, which is worse) — but the information to exit cleanly is now on the wire and unused.\n\n## Where\n\n`packages/client` — the `resumeUpload` path that calls `GET /api/v1/storage/upload/chunked/:uploadId/progress`. Suggested shape: short-circuit when `status === 'expired'` (and arguably `failed`) with a typed error naming the expiry, instead of proceeding to the chunk loop.\n\n## Why a finding, not a queue card\n\nNo user report; the behaviour is correct-but-clumsy rather than wrong, and the fix is a client-side UX judgment (which statuses short-circuit, what the caller sees) rather than a mechanical gap. Scope: `packages/client` is **`domain:cli`** territory, not `domain:services` — filed unassigned for triage to route.\n\n## Refs\n\n- #7667 / PR #7844 (where the producers landed; the dev's report flagged this as an out-of-scope open question)\n- `UploadProgressSchema.status` (packages/spec) — `expired` is a declared member, so no contract change is needed to consume it\n- Filed unassigned by the services seat (recording, not claiming)."
+}

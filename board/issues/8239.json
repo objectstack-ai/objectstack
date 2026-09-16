@@ -1,0 +1,35 @@
+{
+  "number": 8239,
+  "kind": "pull_request",
+  "title": "fix(spec): MONGODB_MULTI_TENANT_UNSUPPORTED leaves the error-code ledger — a boot refusal never reaches a wire envelope (#8035)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-12T22:04:21Z",
+  "updated_at": "2026-08-13T02:53:07Z",
+  "closed_at": "2026-08-13T02:53:05Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": "2026-08-13T02:53:05Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/8239",
+  "body": "Fixes #8035\n\n`ERROR_CODE_LEDGER` (ADR-0112 D3) registered `MONGODB_MULTI_TENANT_UNSUPPORTED` under `@objectstack/driver-mongodb` (#3724). The finding-grading round on #8035 measured the code as **registered-but-unemittable**; this PR re-verified both readings on the merged tree before deleting, then unregisters the ledger row only.\n\n## Premise re-verification (both readings, on this branch's tree)\n\n1. **Boot path rethrows pre-HTTP.** `packages/cli/src/commands/serve.ts:1279` rethrows a driver-construction failure on `e?.code === 'MONGODB_MULTI_TENANT_UNSUPPORTED'` into `run()`'s fatal handler — the process prints and exits 1 before any HTTP server exists. No envelope.\n2. **The one request-reachable trigger is swallowed.** `assertObjectsNotTenantScoped` (thrown from the driver's `syncSchema`/`syncSchemasBatch`) reaches request scope only via `engine.syncObjectSchema` inside `ensureObjectStorage` (`packages/metadata-protocol/src/protocol.ts:9915-9922`), whose catch is a documented \"best-effort + non-fatal\" `console.warn`. No envelope.\n3. **Sweep of every other caller of the sync path** (beyond the two readings the grading round measured): `ObjectQLEngine.syncSchemas` catches per-object into `logger.error` (#4632); the objectql plugin's boot sync catches into `reportSyncFailure`; `service-datasource`'s connect path catches into `logger.warn`; the lifecycle sweep's `archiveObject` cold-store sync is caught by the per-object handler into `report.errors` + `warn` (a message string, never a wire `error.code`); `packages/verify` is CLI tooling. No wire path exists.\n\n## Consumer check (per the ledger's \"Retiring a code\" section)\n\n- Repo-wide exact-name search: the ledger row itself, two generated reference pages (`contract.mdx`, `error-code-ledger.mdx`), the driver's guard constant + README + `drivers.mdx` (all describe the thrown error object, which is unchanged — every sentence stays true), the CLI's duck-typed boot match (a consumer of the thrown object, not of the wire vocabulary — stays), and historical changesets/CHANGELOGs. **No wire producer, no wire consumer.**\n- `objectui` at `origin/main`: 0 hits (positive control on `VALIDATION_FAILED` confirms the grep saw the tree).\n- `cloud` (GitHub org-wide code search): 0 hits outside this repo.\n- Nothing gates an emission on ledger membership, so the removal changes no accept/reject verdict at runtime; the narrowing is type-level (`ErrorCode` / `ApiErrorSchema.code`).\n\n## What changed\n\n- `packages/spec/src/api/error-code-ledger.zod.ts`: the `@objectstack/driver-mongodb` entry (whose only row was this code) is removed. The header's \"Retiring a code\" section now names the second shape of the class: a row that never had a wire path, as opposed to one that lost its producer (`OVERLAY_PERSISTENCE_FAILED` / #5783, the precedent this PR mirrors).\n- `packages/spec/src/api/error-code-ledger.test.ts`: the wire vocabulary's refusal is asserted — `ErrorCode.parse('MONGODB_MULTI_TENANT_UNSUPPORTED')` throws, the union does not contain the string, and the owner key is gone (a future driver-mongodb wire code re-registers deliberately, with an emit path, not by reverting this PR).\n- `packages/drivers/driver-mongodb/src/mongodb-tenancy-guard.test.ts`: new pin — `MULTI_TENANT_UNSUPPORTED_CODE === 'MONGODB_MULTI_TENANT_UNSUPPORTED'`. With the ledger row gone this is the only cross-package guard on the literal the CLI matches duck-typed; a silent rename would un-arm the CLI's loud-fail path and boot the server with no driver (the exact failure #3724 removed). The boot refusal itself — constant, error class, message, CLI match — is untouched, and its existing tests (message names the knobs, the escape route, and every offending object) all still pass.\n- `content/docs/references/api/*.mdx`: regenerated — the code leaves the two reference pages, and the `ErrorCode` enum count drops 264 → 263 across the API pages.\n- Changeset: `@objectstack/spec` **patch** — wire impact none (no response ever carried the code; the narrowing is type-level, and there is no emit site to reject), mirroring the #5783 precedent's bump. Not a declared-breaking changeset, so no ADR-0087 disposition marker is owed (`check-adr-0087-registration --base origin/main`: \"adds no declared-breaking changeset\"); the ADR-0087 conversion registry governs authorable metadata shapes, not the response vocabulary.\n\n## Verification (all post-merge of `main` @ `fa4897335`)\n\n- `@objectstack/spec` test: **385 files / 10196 tests passed**; typecheck green.\n- `@objectstack/driver-mongodb` test: **16 files passed, 5 skipped / 365 tests passed, 143 skipped** (skips are the suites needing a live MongoDB binary — pre-existing).\n- `@objectstack/rest` test: **104 files / 1744 tests passed**.\n- `check:generated`: all 13 artifacts up to date from the merged tree (`api-surface` unchanged — the export set is unchanged, only the union narrows).\n- Gate farm: `adr-anchors`, `changeset-gate-self-tests`, `cross-package-test-inputs`, `doc-formula-expressions`, `docs-audit-scope`, `i18n` (9 bundles in sync), `merge-driver`, `release-body`, `spec-parsed-alias`, `nul-bytes`, `error-code-casing` — all pass.\n\n## Reverse verification (direction predicted before running)\n\n- **Declarations**: a probe compiled against the rebuilt `dist` `.d.ts` — `const retired: ErrorCode = 'MONGODB_MULTI_TENANT_UNSUPPORTED'` fails with **TS2322** while the `'VALIDATION_FAILED'` control compiles; a `@ts-expect-error` variant compiles clean (exactly one absorbed error). Proves the narrowing is in the built declarations, not a cached tree.\n- **Runtime**: temporarily restoring the deleted ledger row turned exactly the new rejection test red (**1 failed | 8 passed** in `error-code-ledger.test.ts` — the retired string parses again) and nothing else; restoring the committed state returned the file to **9 passed**.\n\n_Generated by [Claude Code](https://claude.ai/code/session_0123k4cam2jEAkPmbJeoaY3r)_\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_0123k4cam2jEAkPmbJeoaY3r)_"
+}

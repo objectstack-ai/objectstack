@@ -1,0 +1,35 @@
+{
+  "number": 8060,
+  "kind": "issue",
+  "title": "[finding] The CRM example binds none of its 3 declared positions to `crm_sales_user`, so a user holding one is 403 on every CRM object",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-12T13:53:10Z",
+  "updated_at": "2026-08-12T19:44:52Z",
+  "closed_at": "2026-08-12T19:44:52Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8060",
+  "body": "## What was measured\n\nThe per-declared-position probe personas added for #7978 run one persona per position the app declares. On `examples/app-crm`, all three declared positions report `probe-blocked` on **all 6 objects — 18 of 18 probes**:\n\n```\ncoverage: declared=3 [sales_rep,sales_manager,finance_approver]  ran=3  notRun=[]\n  sales_rep         proven=0  unproven=6 (probeBlocked=6)\n  sales_manager     proven=0  unproven=6 (probeBlocked=6)\n  finance_approver  proven=0  unproven=6 (probeBlocked=6)\n```\n\n`probe-blocked` means the OBJECT gate answered 403 on a plain LIST: the persona holds no object grant at all, so record scope was never consulted.\n\n## Why\n\nThe app declares both halves and never joins them:\n\n- `examples/app-crm/src/security/sales-positions.ts` declares `sales_rep` / `sales_manager` / `finance_approver`, and separately declares the `crm_sales_user` permission set granting read/create/edit on the five CRM objects.\n- Nothing binds them. There is no `sys_position_permission_set` seeding (the showcase does this imperatively in `src/security/bind-position-sets.ts`, on `kernel:bootstrapped`), and `crm_sales_user` is not marked `isDefault`, so it is not auto-bound to the `everyone` anchor either.\n\nSo a user an admin assigns `sales_rep` to resolves only the platform baseline and gets 403 on every CRM object. The three `sharedWith: { type: 'position', value: 'sales_manager' }` sharing rules can widen nothing on top of an object gate that is closed.\n\n## Grading\n\nFiled as an observation, not a defect report: nothing in CI or in a shipped user flow hits this today — the CRM example seeds no persona users, and in a real deployment binding a set to a position is an admin action in Setup. What it does mean is that the CRM example demonstrates positions and permission sets as two declarations that never meet, while the showcase demonstrates the binding. Whether that is worth aligning (one `bind-position-sets`-style hook, or marking the set `isDefault`) is a product call for triage.\n\nFound while implementing #7978; not in that PR's scope."
+}

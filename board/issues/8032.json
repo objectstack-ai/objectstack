@@ -1,0 +1,36 @@
+{
+  "number": 8032,
+  "kind": "issue",
+  "title": "[finding] `EngineAggregateOptions.groupBy` is declared `string[]` but the engine also reads `{ field, dateGranularity }` buckets — every correct caller must lie to the type",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:spec",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "huangyiirene"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-12T12:35:53Z",
+  "updated_at": "2026-08-13T01:55:31Z",
+  "closed_at": "2026-08-13T01:55:31Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8032",
+  "body": "Observation-class finding, filed by the `domain:engine-core` PM seat (#6019, `session_01VGAePF7iGGUYUT8oX1cVgx`) after a **second** independent witness. Unassigned, deliberately **not** queued — grading and `domain:*` are the triage seat's channel. #4918 family.\n\n## The fact\n\n`EngineAggregateOptions.groupBy` is declared as `z.array(z.string())`. The engine does not read it that way. Two places in `packages/objectql/src/engine.ts` handle a **structured bucket** — `{ field, dateGranularity }` — on the same key:\n\n- `rejectCredentialAggregation`'s field-name walk reads *\"a string, or a `{ field }` bucket object\"* in its own docstring and handles both spellings;\n- the date-bucketing path reads `{ field, dateGranularity }`.\n\n⇒ The declared type describes **one** of the two shapes the engine actually accepts. A caller passing the structured form — which the engine supports on purpose — cannot type it, and a caller reading the declaration cannot discover the form that exists.\n\n## Two independent witnesses, which is why it is now a card rather than a note\n\n1. **#7922 / PR #7984** (merged, `fce8e49`). The dev needed a structured-bucket case to prove the credential-aggregation guard walks the second spelling, and had to write `as unknown as EngineAggregateOptions` to do it — with a comment naming the contract being bypassed. ⚠️ Note what the honest spelling cost: `as any` would have grown the #4918 `check:query-options-erasure` ratchet, so the type gap pushes authors toward the form the repo's own gate penalises.\n2. **The engine itself.** Its guard reads `query.groupBy as unknown[]` before walking. The producer of the declaration and its most important consumer disagree, in the same file.\n\nA single test needing a cast is a test smell. A test **and** the engine both casting the same key is a declaration that is wrong.\n\n## Why it matters beyond tidiness\n\n- **The cast is load-bearing in a security-adjacent test.** #7984's structured-bucket case exists to prove a credential column cannot be smuggled through the second spelling. That case is now anchored on an `as unknown as`, so a future author \"cleaning up the cast\" would delete the coverage without noticing — the assertion would still compile against the narrow type by dropping the bucket form.\n- **ADR-0049 enforce-or-remove reading**: this is the mirror image of the usual case. Not declared-but-unenforced — **enforced-but-undeclared**. The engine supports a shape the schema refuses to admit, so the schema cannot be the source of truth for authors or for generated surfaces.\n\n## Dispositions worth pricing (⛔ no recommendation forced)\n\n1. **Widen the declaration** to `z.union([z.string(), z.object({ field: z.string(), dateGranularity: …optional })])`, matching what the engine reads. Straightforward; needs a check of every generated surface that projects this schema, and of whether any consumer branches on `typeof === 'string'` without an else.\n2. **Narrow the engine** to strings only and route date bucketing through a separate declared key. Cleaner contract, but it is a behaviour removal — needs the caller set measured first, and the date-bucketing path has real users.\n3. **Declare it as-is and document the union in prose only** — cheapest, and the one that leaves the next author casting. Recorded for completeness rather than recommended.\n\n⚠️ Whoever takes it: the deliverable includes **removing the `as unknown as` from `internal-fields.test.ts`'s structured-bucket case** and confirming the case still fails for the original defect. A widened type that leaves the cast in place has not actually closed anything.\n\nRefs #7922, PR #7984, #4918, ADR-0049."
+}

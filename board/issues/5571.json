@@ -1,0 +1,32 @@
+{
+  "number": 5571,
+  "kind": "issue",
+  "title": "[观察,机制未确认] 对不存在的记录 id 走 action body 更新时,afterUpdate hook 的 condition 读 previous 报 400 HookConditionError,而非干净的 not-found",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T18:49:38Z",
+  "updated_at": "2026-08-13T14:52:00Z",
+  "closed_at": "2026-08-13T14:52:00Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 18,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5571",
+  "body": "来源:#5519(PR #5569)复现过程中的偶发观察,dev 按「不 sit on finding / 不 mis-attribute」原则完整记录原始证据但未立单;PM 以观察类立单保存证据,**机制未确认,标题只陈述症状**。\n\n## 原始证据(#5519 的真机等价 harness,`bootStack(showcaseStack, {automation:true})`)\n\n对**不存在的** `showcase_task` id 走 action body 更新时,偶见一次:\n\n```\n400 HookConditionError\nshowcase_audit_task_completion (afterUpdate, condition 读 previous):\n\"previous is not bound for this operation — operation aborted\"\n```\n\n## dev 已排除的候选机制\n\n`HookConditionError` 刻意绕过 `onError`/async 是 **#4775 的既定裁决**,并非缺陷——这条路径不是问题所在。\n\n## 未确认的候选机制(立单原因)\n\n「目标行不存在 → `previous` 未绑定 → 整个写被 400 中止,而非干净的 not-found」。dev 未能在隔离环境复现确认,且该机制紧邻 #5037 / #5038 与 ADR-0058 bulk-write 附录的既有裁决面——**若按此归因立修复单,须先复现证实**。\n\n## 处置建议\n\n派发时应作为「复现单」而非「修复单」:第一步在隔离 harness 里稳定复现并确认机制,第二步才谈修法(且修法可能落在既有裁决面内,需先读 #5037/#5038 与 ADR-0058 附录)。#5519 的 dev 表示可提供 harness 配方(见 PR #5569 报告的 out_of_scope_findings 段)。\n\n关联:#5519、#4775、#5037、#5038、ADR-0058。\n\nFiled unassigned,无标签,待分诊席判级分域。"
+}

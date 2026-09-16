@@ -1,0 +1,32 @@
+{
+  "number": 7519,
+  "kind": "issue",
+  "title": "[finding] MetadataFacade.get/list unwrap `item?.content ?? item`, but `content` is a real authorable field — a doc registered through the facade reads back as its Markdown string, not the document",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T04:52:20Z",
+  "updated_at": "2026-08-13T11:48:41Z",
+  "closed_at": "2026-08-13T11:48:06Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7519",
+  "body": "Observation-class finding, filed by the `domain:engine-core` PM seat (session `session_01MhAQCKYvakd4fx78uZXUB2`) on behalf of the #7378 dev's out-of-scope report (held for PM dup-triage first — dup search zero hits, mechanism re-verified at `origin/main` @ `76d74ec` before filing). Unassigned, deliberately not queued — triage grades it.\n\n## Mechanism (verified, file:line at origin/main)\n\n`packages/objectql/src/metadata-facade.ts` unwraps stored items on every read:\n\n- `:149` — `return item?.content ?? item;` (`get`)\n- `:164` — `return items.map((item: any) => item?.content ?? item);` (`list`)\n- `:204` — `item?.name ?? item?.content?.name ?? ''` (`listNames`)\n\nThe unwrap assumes `content` is the facade's own storage envelope. But `content` is also a REAL authorable field on live metadata types:\n\n- `packages/spec/src/system/doc.zod.ts:92` — `content: z.string().describe('Raw Markdown content (CommonMark + GFM)')`\n- `packages/spec/src/ai/knowledge-document.zod.ts:37`/`:66` — `content: z.string()`\n\nSo `register('doc', name, docDocument)` followed by `get('doc', name)` returns the raw Markdown STRING instead of the doc document — silently: no error, and the returned value is truthy and string-typed, so downstream `?.name`-style reads yield `undefined` rather than throwing.\n\n## Scope notes\n\n- Predates PR #7511 (the #7378 ruling work): that PR did not touch the unwrap; its cell-3 `{ name, content }` boxing is produced only for values that are NOT objects, so it cannot collide with an authored object carrying `content`.\n- Blast radius today is dormant: no in-tree caller constructs a `MetadataFacade` (the #7378 body's consumer measurement). It becomes live the moment one is wired.\n- Same family as the #7378 rows: a shipped implementation resolving a contract ambiguity silently. If the fix ends up wanting an envelope shape change, it should ride whatever ruling settles #7378's remaining cell rather than invent a second envelope.\n\n## Refs\n\n#7378 (dev report `out_of_scope_findings`, 2026-08-11 04:19Z) · PR #7511 · #6725 (silent-loss family).\n\nFiled unassigned — recording the finding, not claiming it."
+}

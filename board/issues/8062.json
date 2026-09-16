@@ -1,0 +1,35 @@
+{
+  "number": 8062,
+  "kind": "issue",
+  "title": "[finding] examples/app-showcase/e2e/global-setup.ts is read by no tsc program — 6 errors, 3 of them holes in test/node-shim.d.ts",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-12T14:03:25Z",
+  "updated_at": "2026-08-12T19:34:33Z",
+  "closed_at": "2026-08-12T19:34:33Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8062",
+  "body": "Filed unassigned by the #7923 dev (PR #8061) as an out-of-scope observation. Nothing is red; this is a \"should be covered\" note.\n\n## What is dark\n\n#7923 graduated `@objectstack/example-showcase` out of `TEST_DEBT` by widening its `include` to reach the `e2e/` Playwright specs. The glob it added is spec-scoped — `e2e` + `/**/*.spec.ts` — deliberately, and NOT the wholesale `e2e` + `/**/*`, because the deleted `TEST_DEBT` note warned that the wholesale form would pull in `e2e/global-setup.ts` and bill the *test layer* 6 errors from a file that is not a test. That warning was re-measured on `origin/main` @ `3373a29` during #7923 and is exactly right.\n\nSo the three specs are now type-checked and the fixture beside them still is not. `global-setup.ts` is read by no tsc program at all — it is not a `*.spec.ts`, so the coverage gate (which counts test files) has no opinion on it either. It is genuinely invisible rather than ledgered.\n\n## Measured, at `3373a29`\n\nAdding `e2e` + `/**/*` to the package `include` and running `tsc --noEmit`:\n\n```\ne2e/global-setup.ts(2,10): error TS2305: Module '\"node:fs\"' has no exported member 'mkdirSync'.\ne2e/global-setup.ts(2,21): error TS2724: '\"node:fs\"' has no exported member named 'writeFileSync'. Did you mean 'readFileSync'?\ne2e/global-setup.ts(3,25): error TS2591: Cannot find name 'node:path'. Do you need to install type definitions for node?\ne2e/global-setup.ts(11,21): error TS2339: Property 'env' does not exist on type '{ cwd(): string; }'.\ne2e/global-setup.ts(12,23): error TS2339: Property 'env' does not exist on type '{ cwd(): string; }'.\ne2e/global-setup.ts(13,26): error TS2339: Property 'env' does not exist on type '{ cwd(): string; }'.\n```\n\nTwo different causes, and the split is the interesting part:\n\n- **3 x TS2339** are the ordinary `process.env` shape. The package deliberately omits `@types/node` and each module that needs env reads declares a file-local `declare const process` — the idiom already in `objectstack.config.ts`, `src/system/self-url.ts` and `test/connector-self-url.test.ts`. #7923 applied the same one-liner to the three specs. This file just never got it, because nothing ever checked it.\n- **3 x TS2305 / TS2724 / TS2591** are holes in `test/node-shim.d.ts` itself: the `node:fs` shim declares `existsSync`/`readFileSync`/`readdirSync` but not `mkdirSync` or `writeFileSync`, and there is no `node:path` module declaration at all. This half is not a `global-setup.ts` defect — it is the shim being narrower than what the package actually imports, and any future file reaching for those members hits the same wall.\n\nThat second half is why #7923 did not fold this in: extending a shim that serves the vitest layer, for the benefit of a non-test file, is a different change from the graduation it was scoped to.\n\n## Why it is worth closing anyway\n\n`global-setup.ts` is what authenticates the e2e run (it reads `SMOKE_API_URL` / `SMOKE_EMAIL` / `SMOKE_PASSWORD` and writes a storage-state file). A type error in it fails the whole smoke suite at setup rather than in a spec, and `test:smoke` is non-blocking nightly — so a break here is quiet in exactly the way that costs an afternoon later.\n\nLikely shape of the repair: add the file-local `declare const process` (3 gone), add `mkdirSync`/`writeFileSync` to the `node:fs` shim and a minimal `node:path` module declaration (3 gone), then widen the include glob to `e2e` + `/**/*`. Worth deciding as part of that: whether `test/node-shim.d.ts` is still the right home for a declaration the `e2e/` tree also depends on.\n\nRelated: #7923 (PR #8061) · #7353 · #7312 · #5286\n"
+}

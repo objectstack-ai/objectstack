@@ -1,0 +1,35 @@
+{
+  "number": 8031,
+  "kind": "issue",
+  "title": "`GET /meta/:type/:name/published` 404s for a runtime-published item — the route is mounted but resolves from the code/registry snapshot, not the row `publish-drafts` wrote",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "huangyiirene"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-12T12:33:19Z",
+  "updated_at": "2026-08-13T02:27:25Z",
+  "closed_at": "2026-08-13T02:27:25Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8031",
+  "body": "Found by a **retest** of `platform-core.metadata-authoring-roundtrip` (QA run #7514) against `origin/main` @ `b602d536`, rebuilt. The fix under retest — #7526 / PR #7584, which **mounted** this route — is verified: the route is live and serves package-shipped items. This card is about what sits behind the mount.\n\n## Symptom\n\nAn item authored and published **at runtime** is served by the ordinary read and enumerated by the type listing, but `/published` **404s** for it.\n\n## Reproduction (3×)\n\n1. `POST /api/v1/packages {id:'os_qa_rt4_pkg', name:…, version:'1.0.0'}` → 201.\n2. `PUT /api/v1/meta/view/showcase_task.qa_rt4?package=os_qa_rt4_pkg&mode=draft` with a valid ListView body → 200 `state:'draft'`.\n3. `GET /api/v1/meta/_drafts` → the draft is listed.\n4. `POST /api/v1/packages/os_qa_rt4_pkg/publish-drafts` → 200 `{success:true, publishedCount:1, published:[{type:'view', name:'showcase_task.qa_rt4', version:'sha256:c9f8e037…'}]}`.\n5. `GET /api/v1/meta/view/showcase_task.qa_rt4/published` → **404 NOT_FOUND** — also with `?package=os_qa_rt4_pkg` and `?package=all`.\n\nMeanwhile, on the very same name:\n- `GET /api/v1/meta/view/showcase_task.qa_rt4` → **200** with the authored body;\n- the name appears in `GET /api/v1/meta/view` (41 items).\n\n**Control on the same route**: `GET /api/v1/meta/view/showcase_task/published` (a package-shipped view) → **200**.\n\nReproduced with two different view names, one of them compound-named and container-shaped, each published with `publishedCount:1`.\n\n## Suspected root cause\n\nThe route (`packages/runtime/src/domains/meta.ts:232-251`) delegates to `metadataService.getPublished(type, name)` and 404s on `undefined`. That resolver appears to answer from the **code/registry published snapshot** rather than the published `sys_metadata` row the `publish-drafts` commit wrote — so precisely the runtime-authored items this round-trip is about are the ones it cannot serve.\n\nThe mount is fixed; the resolution behind it is not.\n\n## Acceptance criteria\n\n- `/published` serves the body just written by `publish-drafts` for a runtime-authored item, matching what `GET /meta/:type/:name` returns immediately after publish.\n- The package-shipped path keeps working (`showcase_task/published` → 200).\n- The bogus-name 404 behaviour introduced by #7584 is preserved (a nonexistent name must still 404, so the route can still tell \"not published\" from \"does not exist\").\n\n## What is verified working (scoping this card)\n\n- **#7526/PR #7584 is confirmed live under this item's contract too**: `/meta/view/showcase_task/published` → 200, and `/meta/types` → 200 with the Studio-facing type registry (34 types, a payload shape distinct from `GET /meta`).\n- Mounting the routes **did not shadow neighbours**: on the same names, the active read still returns the authored body, `/meta/view` still enumerates (41), `/meta/_drafts` still lists pending drafts and stops after publish, and `/meta/view/showcase_task/history` still returns its event list.\n- The rest of the round-trip passes: draft save, `_drafts` listing, `publish-drafts` promotion with a commit id, both deny gates (**422** `writable_package_required` on a read-only package, **403** `NOT_OVERRIDABLE` for `object`), and schema-validated refusal (**422** `invalid_metadata`) with nothing stored.\n\n## Two authoring facts worth recording (not defects, each cost a first attempt)\n\n- **`?mode=draft` is required** to create a draft — a plain `PUT` lands as `state:'active'` and `_drafts` stays empty.\n- An **unknown `?package=` id is silently accepted** and the row lands env-wide as `state:'active'` — adjacent to the #2252 orphan shape this item's deny clause guards, but with an *unknown* rather than a *read-only* package.\n\n## Source\n\nRetest of `platform-core.metadata-authoring-roundtrip` clause 1 at `b602d536`."
+}

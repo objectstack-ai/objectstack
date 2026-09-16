@@ -1,0 +1,35 @@
+{
+  "number": 8177,
+  "kind": "pull_request",
+  "title": "fix(runtime): PUT /automation/:name answers 400 VALIDATION_FAILED, not 500, matching POST (#8123)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-12T18:45:17Z",
+  "updated_at": "2026-08-12T19:10:44Z",
+  "closed_at": "2026-08-12T19:10:42Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-08-12T19:10:42Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/8177",
+  "body": "Fixes #8123\n\n## What\n\n`PUT /api/v1/automation/:name` (`updateFlow`) makes the identical `automationService.registerFlow(name, definition)` call `POST /` makes, in the same file (`packages/runtime/src/domains/automation.ts`), with no classification around it. #8055 / PR #8125 reclassified `POST /`'s refusal from 500 `INTERNAL_ERROR` to 400 `VALIDATION_FAILED` through a module-local, route-agnostic `flowDefinitionRefusal` helper — but left `PUT` untouched, so the two doors disagreed about the class of an identical malformed-flow refusal.\n\n`PUT /:name`'s `registerFlow` call is now wrapped the same way, reusing the same `flowDefinitionRefusal` helper `POST /` uses:\n\n```ts\ntry {\n    automationService.registerFlow(name, definition);\n} catch (e) {\n    return {\n        handled: true,\n        response: deps.errorFromThrown(flowDefinitionRefusal(e), VALIDATION_FAILED_STATUS),\n    };\n}\nreturn { handled: true, response: deps.success(definition) };\n```\n\nThe helper itself is untouched — `POST /`'s behaviour is unchanged.\n\n## The pin — both doors compared directly\n\nAdded `packages/runtime/src/domains/automation-put-post-error-parity.test.ts`: a table-driven suite that drives **both** `POST /` and `PUT /:name` with the same four malformed bodies from #8055/#8123 (missing `label`, unknown node key, malformed `try_catch` region, undeclared #4277 config key) and asserts:\n\n- each door independently answers the full ADR-0112 envelope (`status`, `code`) plus ADR-0114 `details.fields[]` shape — not just \"not 500\"\n- **the two doors' responses are compared directly** — same `status`, same `code`, same `fields[]`, same `message` — so reverting either door's classification (not just `PUT`'s) reddens this file\n- the #4277 self-correcting message survives verbatim through `PUT` too (names the key, the node, the node type, and the declared keys)\n- the raw Zod issue array does not reach the wire via `PUT` either\n- `PUT`'s own `{ definition }` / bare-body dialect (`body.definition ?? body`) classifies identically either way\n- an engine error that declares its own `.status` still keeps it on `PUT` (the same escape hatch `POST` honours)\n\nContrast controls: a well-formed body still registers 200 on both doors, and no previously-refused body starts succeeding on `PUT` — only the class changed from 500 to 400.\n\n## Reverse verification\n\nReverted the source fix only (`git checkout origin/main -- packages/runtime/src/domains/automation.ts`, keeping the new test file) and re-ran the parity suite. 9 of 9 `PUT`-touching tests went red, all for the expected reason — the raw thrown error now escapes uncaught from the unguarded call at `automation.ts:880`, so the test's own `await` rejects instead of observing a classified response, e.g.:\n\n```\nFAIL  src/domains/automation-put-post-error-parity.test.ts > ... case \"missingNodeLabel\": POST and PUT answer the SAME envelope for the identical body\nZodError: [\n  { \"expected\": \"string\", \"code\": \"invalid_type\", \"path\": [\"nodes\", 0, \"label\"], \"message\": \"Invalid input: expected string, received undefined\" }\n]\n ❯ handleAutomationRequest src/domains/automation.ts:880:35\n```\n\n```\nFAIL  ... case \"undeclaredConfigKey\": POST and PUT answer the SAME envelope for the identical body\nError: Flow 'welcome_flow' rejected: 1 undeclared config key(s) (#4277).\n  - node 'n' (notify): unknown config key `totallyBogusKey` at config.totallyBogusKey ...\n ❯ handleAutomationRequest src/domains/automation.ts:880:35\n```\n\nThe other 145 test files (2196 tests, including the untouched POST-only `#8055` suite) stayed green throughout. Restored the fix via `git apply` of the saved patch; `git diff --stat HEAD` on `automation.ts` came back identical before and after the round trip (13 insertions, 1 deletion both times).\n\n## Verification\n\n- `pnpm --filter '@objectstack/runtime^...' build` — closure builds clean\n- `pnpm --filter @objectstack/runtime test -- --maxWorkers=2` — **146 test files, 2205 tests, all pass**\n- `pnpm --filter @objectstack/runtime typecheck` — clean\n- `pnpm check:type-check-debt` (full closure built first) — green, `@objectstack/runtime` un-drifted from its recorded 227\n- `node scripts/check-nul-bytes.mjs` — OK\n\n## Not in scope\n\nWidening the refusal, changing which bodies are rejected, or altering `flowDefinitionRefusal`'s behaviour for `POST` — none of that changed here. Did not touch `#8054`'s `ListRunsRequestSchema.limit` bounds or `#7968`'s `/runs/:runId/screen` gating, both queued behind this card on the same file.\n\n## Changeset\n\n`.changeset/put-automation-error-class-parity.md` — `@objectstack/runtime` patch, user-visible status-code change on `PUT`.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01B3Kurx8qufrDzNjk4rag7V)_"
+}

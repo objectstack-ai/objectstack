@@ -1,0 +1,34 @@
+{
+  "number": 8350,
+  "kind": "issue",
+  "title": "spec: the IMetadataService contract still states the SUPERSEDED 2026-08-11 register ruling — including a \"do not implement\" instruction for behaviour now shipped (#7378 spec half)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec"
+  ],
+  "assignees": [
+    "qq9340100"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-13T07:04:02Z",
+  "updated_at": "2026-08-13T16:37:16Z",
+  "closed_at": "2026-08-13T16:36:50Z",
+  "closed_by": {
+    "login": "qq9340100",
+    "id": 313832657,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8350",
+  "body": "**Cross-seat transfer from `domain:engine-core` (seat #6019) to `domain:spec` (seat #6017).** Provenance: this is the `packages/spec/src/**` half of **#7378**, split out by the dispatch fence that stops any engine-core card at the spec boundary. #7378 remains open and its implementation half is PR **#8349** (`Part of #7378`, deliberately not `Fixes`).\n\n⛔ **This card does not re-open the ruling.** The maintainer ruled all three cells on 2026-08-12 (#7378 comment 5261734580). This is the transfer the fence prescribes, nothing more.\n\n## Why this is urgent-ish, and it is not the case table\n\n⭐ **`packages/spec/src/contracts/metadata-service.ts` currently instructs readers NOT to implement the behaviour that is now ruled and shipped.** Its `register` / `get` TSDoc still presents the **superseded 2026-08-11 option-(a)** ruling as current, and includes a paragraph to the effect of *\"(c) PARKED for v18 — do not implement\"* — where **(c) is exactly what the 2026-08-12 ruling adopted** and what PR #8349 implements across three packages.\n\nA stale table is a lagging fact. **A \"do not implement\" instruction pointed at shipped behaviour is a live trap for the next agent that opens the contract** — it reads authoritative, it is recent, and following it would mean writing code that contradicts main. That is the half worth doing promptly.\n\n## The three pieces (all under `packages/spec/src/**`)\n\n1. **`contracts/metadata-service.ts`** — TSDoc for `register` / `get`: replace the superseded option-(a) text and delete the \"PARKED — do not implement\" paragraph. State the ruled contract: a `name` argument disagreeing with `data.name` is **refused loudly**; a non-object (or array) `data` is **refused**, not accepted-and-dropped; type stores key on the **canonical** type.\n2. **`contracts/metadata-service-roundtrip-conformance.ts`** — `METADATA_ROUNDTRIP_CASES`' `expected` for five rows still states pre-ruling reference semantics: `key-is-the-name-argument-object`, `key-is-the-name-argument-nonobject`, `primitive-data-roundtrips`, `array-data-roundtrips` (all → refused) and `plural-objects-type-is-its-own-store` (→ readable; ⚠️ the case **name is now a misnomer** and should be renamed with the fix).\n3. **`contracts/metadata-service-roundtrip-conformance.test.ts`** — the contract's own reference double must refuse rows 1/3 and fold row 2, like the three shipped implementations now do.\n\n## ⭐ There is a mechanical handoff signal — you do not have to coordinate by hand\n\nPR #8349 carries `RULED_CONTRACT_ANSWERS` in the objectql conformance driver, overriding the (still pre-ruling) shared table for exactly those five rows, plus a wiring test asserting **\"the table still lags the 2026-08-12 ruling\"**.\n\n**That test goes RED the moment you update the table** — which is the signal to delete the overrides. ⛔ It is not a defect when it fires on your PR; it is the handoff working. Delete `RULED_CONTRACT_ANSWERS` and its wiring test in the same PR that lands the table.\n\n## Model tier\n\n⚠️ This is the **`domain:spec` semantic lane**: it changes the reference implementation's accept/reject behaviour and the contract's declared acceptance text. By the mandatory clause that is **`claude-fable-5`**, with no downward discretion. Flagging it so the tier decision is not re-derived from the card's small diff size.\n\n## What the implementation half already settled, so you need not re-derive it\n\n- The shared guard lives at `packages/core/src/metadata-service-contract.ts` (exported from `@objectstack/core`, the lowest common dependency) — `assertMetadataRegisterContract` (rows 1/3) and `canonicalMetadataServiceType` (row 2). The reference double can converge with the same semantics; ⛔ whether it should *import* that guard or restate it is your seat's call, not mine.\n- Refusals use the standard catalog's `VALIDATION_ERROR` + status **400**, with a locating message naming the type, the argument, and — on mismatch rows — **both** disagreeing spellings. No `ERROR_CODE_LEDGER` entry was needed.\n- **Arrays are refused with primitives**, reasoned rather than assumed: an array carries no document identity and `{ ...[a, b] }` is `{ 0: a, 1: b }` corruption, so the ruling's ban on coercion-into-storability decides the array row with the primitive one.\n- Row 2 folds through `PLURAL_TO_SINGULAR` from `@objectstack/spec/shared`, converging with `check:meta-type-normalized`'s existing direction (the ruling requires the two to **cross-reference each other**, and #8349's guard header quotes the ruling at the gate).\n- **Boundary**: `registerInMemory` shares the row-2 fold but **not** the rows-1/3 refusals — the ruling names `register`, and `registerInMemory` is the boot-time seeding primitive.\n\nFiled unassigned by the `domain:engine-core` seat (#6019), session `session_01RDTnVvsgA6cUZ4xFVtPZRy`. ⛔ Not graded by me — `domain:spec` + `pm:queue` reflect the mechanical routing (it lands in `packages/spec`, whose sole owner is that seat), and the triage seat should correct the type/priority if it disagrees."
+}

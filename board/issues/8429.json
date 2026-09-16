@@ -1,0 +1,35 @@
+{
+  "number": 8429,
+  "kind": "pull_request",
+  "title": "feat(spec): read-scope filter-subtree provenance mark — restore the author-facing cross-field diagnostic without re-disclosing policy (#8220)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/xl",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-13T12:48:46Z",
+  "updated_at": "2026-08-13T14:10:20Z",
+  "closed_at": "2026-08-13T14:10:18Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-08-13T14:10:18Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/8429",
+  "body": "Fixes #8220\n\nImplements **A of the #7929 maintainer ruling** (\"B now, A next\" — B landed as #8198): a spec-declared provenance mark on filter subtrees, set at both read-scope merge boundaries, so the driver can give a vouched author back the full cross-field diagnostic while policy-injected predicates keep #8198's redaction.\n\n_(Opened by the dispatching PM on the dev's behalf — the dev's cloud session has no GitHub API egress; the branch and this description are the dev's work, relayed. Full report on #8220.)_\n\n## What landed\n\n- **DECLARED** (`packages/spec/src/data/filter-subtree-provenance.ts`): `FilterSubtreeProvenance` (`'author' | 'policy'`), `markFilterSubtreeProvenance` (non-enumerable `Symbol.for` key; first-mark-wins; silent no-op on frozen input), `filterSubtreeProvenanceOf`, and `resolveFilterSubtreeProvenance(root, node)` — positional, innermost-mark-wins, identity-located; unreachable/conflicting ⇒ `null`. The mark crosses the driver boundary ON the `where` tree itself; `DriverQuery` grows no slot, and its TSDoc declares the crossing and the fail direction.\n- **SET at both boundaries**: `plugin-security`'s RLS injection marks every injected scope (RLS / CBP / delegator / deny-sentinel) `'policy'`, and the caller's predicate `'author'` only under the identity vouch `opCtx.ast.where === opCtx.options.where` — a sibling-rewritten tree is vouched for nobody; `service-analytics`' `ObjectQLStrategy.withReadScope` marks scope `'policy'` and the strategy-built user filter `'author'` (`resolveFkAttr`'s scope arm `'policy'`, its internal idFilter deliberately unmarked).\n- **CONSUMED**: `driver-sql` resolves withheld refusals against the query's own `where` root at its two existing seams (the `applyFilters` catch for eager refusals; `withWithheldFilterLog`, now threaded with the root, for knex's lazy group callbacks) — `'author'` gets a fresh `INVALID_FILTER`/400 carrying the full diagnostic (both columns, the operator, the list index, the boundary reason); `'policy'` / unmarked / unreachable / ambiguous keep #8198's redaction + server-log relocation. `driver-turso`'s `RemoteTransport` applies the same resolution at `buildWhereSQL` entry under the same `Symbol.for` keys; `driver-sqlite-wasm` inherits (pinned via the runtime suite).\n\n## Fail-closed invariant\n\n**Unmarked or ambiguous ⇒ WITHHELD.** The mark is permission to reveal, never a requirement to prove secrecy. Pinned at every layer, including a byte-equality unmarked==policy pin and a JSON-round-trip-drops-the-author-mark pin.\n\n## Two B-era pins rewritten deliberately (not regressions — accounted in the changeset)\n\n1. `packages/runtime/src/cross-field-refusal-operand-withhold.test.ts` — the byte-equality pin (\"author and policy messages identical\") was the strongest statement of the fact this card was chartered to change; its successor is a three-way split: policy withholds; the vouched author names columns on BOTH real faces (CRUD and `POST /analytics/query`); unmarked withholds byte-identical to policy.\n2. `service-analytics` `cross-field-engine-fallback.test.ts` — pinned B's blanket redaction on the caller's OWN `where`; those callers are now the vouched author, so the routed cases assert the corpus `diagnosticIncludes` fragments back on the wire, with the policy-scope case gaining explicit non-disclosure assertions as the fail-closed pair.\n\n## Why this is not #8116's mechanism (prior art read first, per the card's scope note)\n\n`injected-system-column-provenance` (#8116/PR #8342) is **COLUMN provenance** — a derivation over metadata documents at rest (\"is storage behind an injected column\"). This is **FILTER-SUBTREE provenance** — an attestation about one query value in flight, knowable only at the merge moment. Folding them would give the column verdict a mutable runtime carrier it must not have, and the filter mark a document derivation it cannot have. Justified in both module headers.\n\n## Scope fences\n\n- REST boundary's 5xx-only withhold (#5367 / #5667) untouched.\n- #8197 (pm:blocked on this card) NOT silently absorbed — its unlock re-measure note is in the report on #8220: its refusal families now have a real, spec-declared mark available to consume.\n- Third merge boundary discovered (plugin-sharing's composeAnd, arrives unmarked ⇒ withholds, fail-closed-correct) — reported for its own card in the sharing lane, not ridden here.\n\n## Verification\n\nFull suites green: spec 10346 · plugin-security 1036 · driver-sql 1431 · objectql 3496 · driver-sqlite-wasm 393 · driver-turso 973 · service-analytics 1675 · runtime 2309. Typecheck 127/127. spec `check:generated` 13/13 (api-surface + export-origins regenerated for the new exports). Every family from `dispatch-gates.mjs` green; ESLint clean on changed files. New pin files: spec (15), driver-sql (11, incl. the lazy group-callback disclosure seam), driver-turso (7), plugin-security (4), service-analytics (5); rewritten: runtime (11), service-analytics engine-fallback (93).\n\nChangeset: `minor` for `@objectstack/spec` + `patch` ×4 consumers; non-breaking; adr-0087 gate green with no disposition needed.\n\n---\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01Euoy6wyfzgiWtgCg4s6JK2\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01Euoy6wyfzgiWtgCg4s6JK2)_"
+}

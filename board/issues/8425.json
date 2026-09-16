@@ -1,0 +1,35 @@
+{
+  "number": 8425,
+  "kind": "pull_request",
+  "title": "feat(security): let a `delegated_admin` read the invitations it issued (#8240)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-13T12:30:51Z",
+  "updated_at": "2026-08-13T13:40:43Z",
+  "closed_at": "2026-08-13T13:40:41Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-13T13:40:41Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/8425",
+  "body": "Fixes #8240\n\nImplements the maintainer's **option C** ruling of 2026-08-13: a `delegated_admin` sees the invitations **they themselves issued**, not the whole ledger.\n\n## The gap\n\n`delegated_admin` is the one grade that reaches `/organization/invite-member` without being an org admin (ADR-0105 D8 / #3697). #8095 narrowed the `sys_invitation` ledger to an admin admission domained to `org_owner` / `org_admin` plus an addressee carve-out — and `delegated_admin` normalizes to neither of those identities, nor does it receive `organization_admin` from the auto-grant. So the issuing principal could create invitations it then could not list, with no second path back (better-auth's own `list-invitations` route is owner/admin gated too).\n\n## The change — one row-scope policy\n\n`member_default` gains `sys_invitation_issuer`, a sibling of the addressee carve-out already sitting beside it:\n\n```\nname:      'sys_invitation_issuer'\nobject:    'sys_invitation'\noperation: 'select'\nusing:     'inviter_id == current_user.id'\npositions: [MEMBERSHIP_ROLE_DELEGATED_ADMIN]\n```\n\nSame set, same declarative mechanism, same `select` — differing only in which end of the invitation it keys on. **Owner/admin visibility is untouched**; their admission still comes from `sys_invitation_org_admin`, and a test asserts that set is byte-identical to before.\n\nThe `positions` domain is not decoration. The predicate looks self-domaining (only owner/admin/delegated_admin can ever be an `inviter_id`, and the first two already read everything), but without the domain a principal **demoted out of** an administrative grade keeps a permanent window onto what it issued while it held one — wider than what was ruled. The domain only ever widens: a principal it does not match keeps the addressee scope and fails closed.\n\n## Measured four-persona matrix\n\nReal `GET /api/v1/data/sys_invitation` responses, stock showcase boot, ledger of three invitations from **two distinct inviters** (two by the org-owner grade, one by the delegate).\n\n| persona | before | after | rows seen |\n|:--|:--|:--|:--|\n| owner | 200, 3 | 200, 3 | all three — unchanged |\n| member | 200, 0 | 200, 0 | none — unchanged |\n| invitee | 200, 1 | 200, 1 | their own addressed row — unchanged |\n| **delegated_admin** | **200, 0** | **200, 1** | **only the row it issued** |\n\nThe \"before\" column is measured, not recalled: ablation M1 below removes the policy and the delegate drops to zero, which reproduces the card's original probe exactly.\n\n## Anti-vacuity — predict-then-mutate ablation\n\nPredictions were written down before any edit. The trap this card names is that a pin asking only \"can the delegate see *a* row\" passes under the ruled option **and** under the rejected option B, so the fixture carries a second inviter and asserts the negative case.\n\n| mutation | predicted | observed | evidence |\n|:--|:--|:--|:--|\n| M1 — delete the policy | RED | **RED** | `expected [] to have a length of 1 but got +0` |\n| M2 — widen predicate to option B's `id != null` | RED | **RED** | `expected [ ... ] to have a length of 1 but got 3` |\n| M3 — drop the `positions` domain | GREEN (indistinguishable) | **GREEN** | all 7 HTTP assertions pass |\n| M4 — point the domain at a bogus name | RED | **RED** | delegate drops to zero rows |\n\nM2 is the one that matters: under option B's shape the delegate read **3** rows — the whole ledger — and the negative assertions fire. A single-inviter fixture could not have told the two apart.\n\nM3 came out green exactly as predicted, and that is why the `positions` domain also carries a **structural** pin in `default-permission-sets.test.ts` rather than relying on the HTTP matrix. Verified complementary: with M3 applied, the unit pin goes red (`expected undefined to deeply equal [ 'delegated_admin' ]`) while all seven HTTP assertions stay green. The two layers catch different things, measured rather than asserted.\n\n## ADR-0105 D8 checklist — no rewording needed, and the step stops being vacuous\n\nThe ruling predicted the D8 checklist steps become correct as written and asked for verification rather than assumption. **Confirmed by measurement; `docs/qa/platform-checklist/areas/identity-auth.json` is not edited by this PR.**\n\nOne finding beyond the prediction: the item's second step (\"read `sys_invitation` via the API and verify NO row was left behind\" by the refused admin-role attempt) was not merely broken before — it was **vacuously passing**. The delegate read zero rows unconditionally, so the step returned \"no row\" whether or not a row had actually been left behind. With the issuer scope in place, a leaked row would carry the delegate's own `inviter_id` and therefore land inside the granted scope, so the step is load-bearing for the first time. A test now drives that exact sequence.\n\n## Tests\n\n- `packages/qa/dogfood/test/invitation-ledger-row-scope.dogfood.test.ts` — 7 passed. Four personas over real HTTP, plus a by-id probe for the delegate in both directions (refused for a row it did not issue, 200 for the one it did — so the refusal is the row scope talking, not the object being closed).\n- `@objectstack/plugin-security` — 51 files, 1033 tests passed.\n- `@objectstack/dogfood` full suite — 107 files, 750 tests passed.\n- `typecheck` clean on both packages.\n- Gates run locally: `check:nul-bytes`, `check:engine-double-contract` (193 pinned / 2 exempt — this PR declares no engine double), `check:error-code-casing`, `check:agent-model-declared`. No ratchet, ledger or baseline touched.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01PEVB6w7D7uCszR9Mw1BL73)_"
+}

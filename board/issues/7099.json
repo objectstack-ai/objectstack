@@ -1,0 +1,34 @@
+{
+  "number": 7099,
+  "kind": "issue",
+  "title": "Turso remote:带 id/conflictKeys 但没匹配上的 upsert 仍会静默写入 NULL 自增号(#6944 拒绝闸门覆盖不到的那条腿)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-09T15:17:53Z",
+  "updated_at": "2026-08-13T12:40:13Z",
+  "closed_at": "2026-08-13T12:40:13Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 12,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7099",
+  "body": "## 一句话说明\n\n#6944(PR #7089)让 Turso remote 面上带 `auto_number` 的写入**明确拒绝**(`NOT_IMPLEMENTED` / 501),消除了\"静默写 NULL\"。但有**一条腿没被覆盖**:一个携带 `id` 或显式 `conflictKeys` 的 `upsert`,若实际**没有匹配到任何行**,就会走 insert,而自增号槽位**仍然被静默写成 NULL**。\n\n由 #6944 的 dev 在实现中测得并**主动申报**,已在该 PR 的测试里钉成 `[known residue, not fixed]` 断言。本卡只负责让它在 #6944 关闭后不被埋掉。\n\n## 为什么 #6944 没有一起修\n\n拒绝闸门**刻意在构建语句之前**触发 —— 这正是它的价值之一:被拒绝的写入不消耗一次往返(#6944 已断言零 `execute` 调用)。\n\n而\"这次 upsert 到底会 merge 还是 insert\",在**发出语句之前无法判定**:需要先去问一次数据库。要覆盖这条腿,就得引入拒绝闸门本身要避免的那次往返。这是一个真实的取舍,不是遗漏。\n\n## 影响范围(承接 #6944 的实测)\n\nremote 面上已被覆盖、会**明确拒绝**的路径:`create`、`bulkCreate`、以及无 `id` 的 `upsert`(其新鲜 nanoid 永远匹配不上,所以恒为 insert)、以及**匹配上并合并**的 `upsert`。\n\n**未覆盖的只有这一条**:带 `id` / `conflictKeys` 且**未匹配**的 upsert。它的结果与 #6944 修复前一致 —— 行落地,自增号列为 NULL,调用方无从得知。\n\n## 可能的处置(不预设结论)\n\n- **接受现状**:代价是 remote 面上仍存在一条静默 NULL 的窄路径,已由测试钉住,不会静默漂移。\n- **付一次往返**:在这条腿上先探测再决定拒绝与否 —— 与拒绝闸门\"零往返\"的设计取向冲突,需要权衡。\n- **随 A 一起消失**:若将来 appetite door 对\"在 remote 上真正实现自增号\"(#6944 的处置 A)打开,这条腿自然不再存在。\n\n## 关联\n\n- #6944 / PR #7089 —— 拒绝闸门本体;本残留已在其测试内钉为 `[known residue, not fixed]`\n- #5495 / #6943 / #7011 —— 自增号在 SQL 家族其余面上的序列与烧号修复\n- ADR-0112 / #5907 —— `NOT_IMPLEMENTED` / 501 的二类拒绝分类\n\n未认领,仅作记录,定级交分诊。"
+}

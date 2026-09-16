@@ -1,0 +1,35 @@
+{
+  "number": 8124,
+  "kind": "issue",
+  "title": "`fieldsFromZodIssues` leaks Zod's issue codes onto the wire's `fields[].code` — the exact pass-through ADR-0114 D3 closed, still live in `@objectstack/runtime`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:spec"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-12T16:56:55Z",
+  "updated_at": "2026-08-13T09:25:48Z",
+  "closed_at": "2026-08-13T09:25:27Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8124",
+  "body": "Found while implementing #8055 (which emits through this helper and therefore inherits the defect).\n\n## What is declared\n\nADR-0114 D2 makes `FieldErrorSchema.code` a **closed catalog** — `FieldErrorCode` in `packages/spec/src/api/errors.zod.ts`, 27 lowercase snake_case members. D3 is explicit that Zod is mapped at the boundary, **never** passed through:\n\n> **D3 — Zod is mapped at the boundary, never passed through.** `zodIssuesToFields` translates using `origin` / `format` per the table above, plus the parsed input for the `invalid_type` split. An unmapped Zod code becomes `invalid_value` (a catalog member) rather than leaking.\n\n`@objectstack/rest` complies: `zodIssuesToFields` in `rest-server.ts` runs `zodIssueToFieldCode`, which is typed to return `FieldErrorCode`.\n\n## What is emitted\n\n`packages/runtime/src/validation-failure.ts` has a second, non-compliant converter — `fieldsFromZodIssues` — which assigns the Zod issue's own code verbatim:\n\n```\ncode: issue.code,\n```\n\nMeasured against the real `FlowSchema` (a genuine `safeParse`, not a hand-written fixture), the codes that reach the wire include `unrecognized_keys` — **not** a `FieldErrorCode` member. ADR-0114 D3's own table says that row maps to `unknown_field`. Zod's `too_small` / `too_big` / `custom` / `invalid_union` are equally outside the catalog, and `too_small` is the ambiguity D3 names explicitly (a short string, a small number and a short array share one code).\n\nConsequence: a response whose `details.fields[]` carries one of those codes does **not** parse against the schema the protocol declares for it. A client validating the error envelope — the thing ADR-0114 D2 gave it a schema for — rejects a well-formed refusal from its own server. It is also the two-vocabularies-on-one-position problem the ADR was written to remove: the same wire slot answers `min_length` from a validator and `too_small` from a Zod-parsed route, and nothing in the body says which dialect the reader is holding.\n\n## Affected call sites\n\nThree, all in `@objectstack/runtime`, all through this one helper:\n\n- `src/domains/analytics.ts` — the `AnalyticsQueryRequestSchema` entry refusal\n- `src/domains/notifications.ts` — the same shape one domain over\n- `src/domains/automation.ts` — the flow-registration refusal added by #8055\n\nHandled as one card rather than three deliberately: the pass-through is the helper's, not any route's, and the fix belongs where they all read from. #8055 explicitly did **not** fork a local mapper for its own route, because a fourth spelling inside one package is worse than the shared gap.\n\n## Why the obvious fix is not a one-liner\n\n`zodIssuesToFields` — the compliant implementation — is **module-local to `packages/rest/src/rest-server.ts`** and not exported from that package's index. Three routes worth weighing:\n\n1. **Export it from `@objectstack/rest`.** Cheapest edit, but it makes a ~11k-line server module part of runtime's import graph for one pure function, and puts a spec-vocabulary mapper's public home in the REST transport.\n2. **Move the mapper to `@objectstack/spec`,** next to the `FieldErrorCode` catalog it is total over, and have both `rest` and `runtime` read it. Most contract-first: one catalog, one mapping, defined where the vocabulary is defined. Largest diff.\n3. **Reimplement in `runtime`.** Rejected on sight — a second implementation of D3's table is the drift the ADR exists to prevent, and the two would disagree the first time Zod adds an issue code.\n\nRecommendation is (2), but it is a real design call, so it wants a decision rather than a guess.\n\n## Note on measurement\n\nADR-0114 D3 says its mapping is \"tested by driving **real** `safeParse` calls, not by hand-written issue fixtures — which is how the `input` problem above surfaced at all\". Whatever fix lands should be measured the same way; #8055's tests already drive the real `FlowSchema`, so they are one available fixture source.\n\n## Severity\n\nNot judged here. It is a live wire-contract mismatch (declared schema vs. emitted value) on three routes, but no in-repo consumer branches on a field code today — objectui's `extractFieldErrors` reads `field` and `message` and touches `code` only as a last-resort fallback, which ADR-0114 measured before choosing the casing.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01B3Kurx8qufrDzNjk4rag7V)_\n"
+}

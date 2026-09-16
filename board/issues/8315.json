@@ -1,0 +1,32 @@
+{
+  "number": 8315,
+  "kind": "issue",
+  "title": "`sys_audit_log.action` declares `restore` with no writer anywhere — `actionFor()` structurally cannot return it, while a comment and a shipped list view both assert it is covered",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-13T04:35:15Z",
+  "updated_at": "2026-08-13T12:30:30Z",
+  "closed_at": "2026-08-13T12:23:15Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8315",
+  "body": "Found by the `domain:identity` execution seat while measuring whether **#7675** (\"4 of 10 declared `sys_audit_log` actions have no writer anywhere\") can close. Filed **unassigned and unlabeled for triage** — I am an execution seat and do not grade findings or route `domain:*`.\n\n**Same defect class as #7675, on a value #7675's own survey did not name.** Measured on `origin/main`, not inferred.\n\n## What\n\n`packages/plugins/plugin-audit/src/objects/sys-audit-log.object.ts:125` declares:\n\n```ts\naction: Field.select(\n  ['create', 'update', 'delete', 'restore', 'login', 'logout', 'config_change', 'import'],\n```\n\nNothing writes `restore`. The record-level audit writer **structurally cannot** produce it — `packages/plugins/plugin-audit/src/audit-writers.ts:245`:\n\n```ts\nfunction actionFor(event: string): 'create' | 'update' | 'delete' | null {\n```\n\n`restore` is not in the return type, and `audit-writers.ts:1105-1106` early-returns on `null`. A tree-wide grep for any form of `action: 'restore'` across `packages/**/*.ts` excluding tests returns **no producer** — the only `restore` hits are unrelated (`metadata-protocol` uses a different `'restored'` literal on its own revert report; `sys-attachment.object.ts:138` explicitly declares `false` rather than \"claim a restore capability the runtime does not provide\").\n\n## ⚠️ Two declarations assert the opposite, which is what makes this more than tidiness\n\n**1. A comment states the coverage that does not exist** — `packages/plugins/plugin-audit/src/auth-event-audit.ts:11`:\n\n> `create`/`update`/`delete`/`restore` and nothing else — four of the declared…\n\nIt names `restore` as one of the four covered actions. `actionFor()`'s own signature contradicts it. This is the pattern #8011 was about: *a declaration near a mechanism, with nothing enforcing it.* A declaration-reading audit stops at this comment and scores `restore` as covered.\n\n**2. A shipped list view offers it as a filter value** — `sys-audit-log.object.ts:55`:\n\n```ts\nfilter: [{ field: 'action', operator: 'in', value: ['create', 'update', 'delete', 'restore'] }],\n```\n\nThe `data_changes` view advertises a value that can never match. Harmless to the query, but it is the same \"empty widget / permanently-unmatchable filter\" shape the maintainer ruled on for #7675: *空 widget + 永远查不到东西的过滤器是可见产品缺陷;审计面宁窄勿谎.* Four generated translation files also carry the option label (`plugin-audit/src/translations/*.objects.generated.ts:27`).\n\n## Status of #7675's named values, for context\n\nEvery value #7675 actually named is now resolved, which is why this one surfaced:\n\n| action | state |\n|:--|:--|\n| `login` | ✅ writer at `auth-session-audit.ts:138` (#8144 → PR #8244) |\n| `logout` | ✅ writer at `auth-session-audit.ts:162` (#8144 → PR #8244) |\n| `config_change` | ✅ writer landed (#8145 → PR #8288) |\n| `export` | ✅ retired from the enum (#8147 → PR #8200) |\n| `permission_change` | ✅ retired from the enum (#8147 → PR #8200) |\n| `import` | ✅ **real writer** at `plugin-auth/src/admin-import-users.ts:515` |\n| **`restore`** | ❌ **no writer — this card** |\n\n## Not adjudicated here\n\n⛔ I have deliberately **not** decided between the two obvious shapes (give `restore` a writer, or retire it from the enum/view/translations per the 宁窄勿谎 principle). That turns on whether a restore/undelete capability is intended to exist — **#1883** (`pm:on-hold`, M2 permission lifecycle undelete/purge) suggests the capability itself is unbuilt, which would make retirement the consistent answer, but that is a product call and not an execution seat's to make. Recorded plainly per the file-plainly rule.\n\nWhichever way it goes, the false comment at `auth-event-audit.ts:11` needs correcting either way — it is wrong today regardless of the disposition.\n\nRelated: #7675 (parent survey), #8147 (the retirement that this measurement re-checks), #1883, #8011 (same \"unenforced declaration\" class), #8203 (a `select` option enum is unenforceable once the field is `readonly` — the mechanism that lets this persist undetected)."
+}

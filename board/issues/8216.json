@@ -1,0 +1,35 @@
+{
+  "number": 8216,
+  "kind": "pull_request",
+  "title": "fix(objectql): the read-only strip stops calling the addressed row's own `id` a forged caller write (#8141)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-12T20:51:30Z",
+  "updated_at": "2026-08-12T21:51:01Z",
+  "closed_at": "2026-08-12T21:51:00Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-12T21:51:00Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/8216",
+  "body": "Fixes #8141\n\nThe read-only strip logged, on **every single-record update of every platform object**, that the addressed row's own primary key was a caller forgery:\n\n```\nField 'id' on 'sys_user_preference' is read-only: the caller-supplied value was\nDROPPED and the update is being COMMITTED WITHOUT IT — ...\n```\n\nAll three claims are false for that write. The REST ingress folds the path id into the body (#6479) before the engine's caller snapshot, so the value was never caller-supplied; nothing the caller wanted was dropped; nothing it asked for was left out of the commit. #8093 fixed this in the **report** channel (`droppedFields` / `onFieldsDropped`) and deliberately left the strip and its log alone. This is the log half.\n\n## The change\n\n`stripReadonlyFields` gains `options.addressKey` — the key that carries the write's **address**. That key is still **stripped**; it just no longer logs. The by-id update branch passes it from the **same `idAddressesThisRow` predicate #8093 already wired to the report channel**, so the two channels cannot disagree about what an address is (one predicate, two consumers — no second derivation).\n\nRuled scope, honoured: option A only. Not \"stop stripping `id`\" (a same-value primary-key write is a no-op on SQL but an outright rejection on stores with immutable primary keys); not option B (removing the address before the read-only pass changes what the driver receives for objects whose `id` is not readonly — #6435's explicitly separate decision).\n\n## The acceptance pair, predicted then measured\n\nReverse verification: drop the `addressKey` argument at the `engine.ts` call site, leaving everything else — including #8093's report exclusion — in place.\n\n| | predicted | observed |\n|---|---|---|\n| card's repro (by-id, body carries no `id`) | RED, gains the `id` line | RED, gained exactly `readonlyStripWarning('id', 'pref')` |\n| canonical `update(obj, { id, ...fields })` | RED, same line | RED, same line |\n| address + a really-forged `readonly` field | RED, two warns instead of one | RED, two warns |\n| ruled-non-id `data.id` (`primary_key` strip) | GREEN | GREEN |\n| MULTI branch | GREEN | GREEN |\n| object whose `id` is not readonly | GREEN | GREEN |\n| `isSystem` caller | GREEN | GREEN |\n| #8093's whole report-channel suite | GREEN | GREEN |\n\n`3 failed / 6 passed` in the new file, `0 failed` everywhere else — the prediction held exactly. The direction did **not** invert the way #8093's strict rows did: this option feeds no counter and no derived refusal. `strictReadonlyWrites` is keyed on `reportDroppedFields`, which already excluded the address, so the loud half cannot move when only the log line does.\n\nWith the fix in place, the tripwire is asserted positively: a forged `readonly` field still warns, compared with `toBe` against the exported `readonlyStripWarning` (so a reworded line fails) and with the emitted level asserted (so a downgrade fails).\n\n## The message wording and its remedy\n\nChecked as asked, and **not changed** — the acceptance bar pins it unchanged for the cases that still print, and it holds up:\n\n- \"caller-supplied\" and \"DROPPED\" are true for every case that still reaches the line (the `supplied`-snapshot own-property plus `Object.is` guards make that exact);\n- the `{ context: { isSystem: true } }` remedy becomes correct **by construction** once the line prints only for callers that really did write a read-only column — the card's complaint was that following it for the address write would exempt that caller from the strip entirely, and the address write no longer prints.\n\nTwo remaining wording defects were found, measured, and filed rather than folded in, because fixing either changes the text this PR's acceptance bar pins as unchanged:\n\n- **#8214** — \"COMMITTED WITHOUT IT\" is false under `strictReadonlyWrites`: measured `ERR_READONLY_FIELD_REJECTED`, 0 driver writes, 1 warn line claiming the commit. Also: the message names `isSystem` but never `preserveAudit`, while its runtime-owned twin names both (and has a test pinning that it does).\n- **#8215** — `isPreservableUnderAudit` returns true for any non-`system` field, so a `preserveAudit` by-id update **keeps** a platform object's `id` and hands `SET id = ... WHERE id = ...` to the driver. Pinned as observed behaviour in the new unit case; it is pre-existing and untouched here.\n\n## Verification\n\n- `packages/objectql` full suite: **193 files / 3415 tests passed** (with the fix; the one earlier failure was this PR's own draft expectation, corrected to the measured `preserveAudit` behaviour).\n- `pnpm --filter @objectstack/objectql typecheck` — exit 0.\n- Gates derived with `node scripts/pm/dispatch-gates.mjs` over the changed paths, all exit 0: `check:adr-anchors`, `check:changeset-gate-self-tests`, `check:cross-package-test-inputs`, `check:durability-log-level`, `check:engine-double-contract`, `check:error-code-casing`, `check:objectui-changeset`, `check:stack-collection-maps`, `check:nul-bytes`, `check:query-options-erasure`, `check:type-check-coverage`, `check-changeset-no-major.mjs`, `check-engine-split-ratio.mjs`. **No baseline or ratchet was raised.**\n- `check-objectui-pin-fresh.mjs` exits 1 at this base and is **not** caused by this branch: it compares `.objectui-sha` against objectui `main`, a file this PR does not touch (last bumped by #8137).\n\nChangeset: `patch` for `@objectstack/objectql` — observable log behaviour changes, so this is not a `skip-changeset` PR.\n\nCross-seat: none. `packages/spec/src/contracts/data-engine.ts` was **not** touched; #8093's `WriteObservabilityOptions` invariant still reads true, because this change moves no report, no refusal and no payload.\n\n_Generated by [Claude Code](https://claude.ai/code/session_014C8pAprWdmtecFsEprZax4)_\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_014C8pAprWdmtecFsEprZax4)_"
+}

@@ -1,0 +1,34 @@
+{
+  "number": 8042,
+  "kind": "issue",
+  "title": "[finding] The metadata-layer arm of the visibility rules explains itself with `*.form.ts`, a file a Studio / MCP author of a schema-bound view does not have",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-12T13:06:17Z",
+  "updated_at": "2026-08-12T19:30:13Z",
+  "closed_at": "2026-08-12T19:30:13Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8042",
+  "body": "Found while implementing #7815 (PR #8041), disclosed in that PR's scope rather than absorbed into it. Filed unassigned, **observation class** — nothing a user hits as a defect today, and the prescription itself is correct. ⛔ Grading is the triage seat's single channel.\n\n## What was measured\n\n`packages/lint/src/validate-visibility-predicates.ts` carries two pieces of metadata-layer prose that explain the layer by naming a **source file kind**:\n\n- `MISLAYER_BY_LAYER.metadata.message` — \"...not a metadata-editing form. A `*.form.ts` predicate that binds `record.` never matches...\"\n- the `visibility-bare-identifier` hint's metadata arm — \"(a `*.form.ts` metadata-editing form binds the row under edit as `data`).\"\n\nBefore #7815 that wording was only reachable through `opts.layer = 'metadata'`, which **no production caller ever passed** (`layer: 'metadata'` hit test files only — measured on `origin/main` at #7815's triage). So in practice it was written for a caller that did not exist.\n\n#7815 makes it reachable: a form view declaring `data: { provider: 'schema', schemaId }` is now judged at the metadata layer, including at the **runtime publish gate**. That gate's audience is precisely the author who has no source file — Studio, REST `/meta`, MCP. The finding they now read is correct about the root (`data`, which is the fix) and explains it by pointing at a `*.form.ts` they never wrote and cannot open.\n\n## Why it is worth recording\n\nSame family as #7815 itself, one notch quieter: a diagnostic whose *prescription* is right and whose *explanation* points somewhere the reader cannot go. It costs nothing today — the actionable half (\"write `data.status`\") is unambiguous — which is exactly why it will not surface on its own.\n\nIt also has a shape worth grading rather than assuming: the honest fix is probably not \"delete the file reference\" but \"name the surface by what it is\" (a schema-bound metadata-editing form — the row under edit), which would cover both the file-authored and the published-through-Studio spellings with one sentence.\n\n## What is NOT being claimed\n\n- ⛔ Not a defect in #7815 / PR #8041 — that PR is bounded to layer plumbing and deliberately did not touch either message, since editing rule wording is the adjacent thing its own scope excluded.\n- ⛔ Not a wrong prescription. The root each message prescribes is correct; only the parenthetical justification is surface-specific.\n- No user-visible breakage, no acceptance implication, and both strings are advisory-or-hint text, never a rule id.\n\n## Pointers\n\n- `packages/lint/src/validate-visibility-predicates.ts` — `MISLAYER_BY_LAYER` and the `visibility-bare-identifier` hint's `layer === 'runtime' ? … : …` arm\n- #7815 / PR #8041 (made the wording reachable), #7696 / PR #7810 (the surface's other prescription pair)"
+}

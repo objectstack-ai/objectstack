@@ -1,0 +1,35 @@
+{
+  "number": 8221,
+  "kind": "pull_request",
+  "title": "fix(plugin-auth): OIDC SSO registration works again — drop the retired `oidcConfig.mapping.id`",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-12T21:18:12Z",
+  "updated_at": "2026-08-12T21:55:06Z",
+  "closed_at": "2026-08-12T21:55:05Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-12T21:55:05Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/8221",
+  "body": "Part of #8193\n\n`Part of`, not `Fixes`: this lands the whole `plugin-auth` half — OIDC SSO\nregistration works again — but the card also asks for the now-dead `mapId`\naction param to go or be re-pointed, and that param lives in\n`packages/platform-objects` (`domain:metadata`'s package), which this card's\ndispatch put out of scope. That half is filed separately and linked below.\n\n## Re-measured first\n\nReproduced on the real path before changing anything, against the **installed**\n`@better-auth/sso@1.7.0-rc.2` (resolved from\n`packages/plugins/plugin-auth/node_modules`), by driving the real\n`/sso/register` endpoint of a real `betterAuth()` instance carrying the real\n`sso()` plugin:\n\n| body | result |\n| --- | --- |\n| exactly what the bridge emits today | `400` `[body.oidcConfig.mapping] Unrecognized key: \"id\"` |\n| same body, `id` dropped | `401 Unauthorized` — cleared the schema, stopped at the session gate |\n| same body, `id` re-homed to `extraFields` | `401 Unauthorized` — parses, but see below |\n\nThe 400 matches the reported symptom verbatim. The second row is the load-bearing\none: `@better-auth/sso` validates the body **before** the endpoint's session\ngate, so reaching `401` is positive evidence the emitted body parsed.\n\n## `id` was retired upstream, not moved\n\nRead out of the two package versions rather than from docs or memory:\n\n- **1.6.20** declared `oidcMappingSchema` as a plain, non-strict `z.object`\n  that **did** carry `id`, and honoured it when resolving the federated user:\n  `id: rawUserInfo[mapping.id || \"sub\"]` / `id: idToken[mapping.id || \"sub\"]`.\n  So the bridge did not invent the key — it was correct against the version the\n  stale attestation names.\n- **1.7.0-rc.2** deletes the member, closes the object with `z.strictObject`,\n  and hard-wires the federated subject to the OIDC `sub` claim\n  (`id: readStringClaim(rawUserInfo, \"sub\")` / `id: idToken.sub`), then\n  cross-checks it (`id_token_subject_missing`,\n  `id_token_userinfo_subject_mismatch`).\n\nSo there is **no new home** for the key, and dropping it is not merely what\nmakes the 400 go away. `extraFields` is the one open member and it does parse —\nbut it is spread **before** `id` in the profile literal, so an `extraFields.id`\nis overwritten by `sub` before it is ever read. Re-homing there would have read\nas configured while doing nothing, which is worse than dropping it.\n\n## What changed\n\n- `register-sso-provider.ts` emits `mapping: { email, name }` — the two members\n  the strict schema requires. The email/name claim mappings the form collects\n  still work exactly as before.\n- Because the subject claim is not configurable anywhere any more, a\n  registration asking for a **non-`sub`** user-ID claim is now refused with a\n  clear `INVALID_REQUEST` instead of being accepted and silently discarded.\n  Empty, or `sub` (the value the form suggests), registers as normal. This is the\n  in-scope half of the card's \"the `mapId` param should go or be re-pointed\":\n  the param itself is not mine to touch, but honouring it silently is.\n- `auth-manager.ts` — the stale attestation. It claimed the plugin \"accepts NO\n  `schema` option (verified against 1.6.20 ... runtime never reads\n  options.schema)\". Re-checked against the pinned 1.7.0-rc.2: **that claim is now\n  false** — `SSOOptions.schema.ssoProvider` exists and the runtime honours\n  `modelName` plus a per-field `fieldName` map. The comment now records what was\n  actually measured, and says plainly that only the mapping surface was\n  re-verified in depth. The adapter-level bridge itself is left alone (separate\n  change, filed below) rather than rewired silently.\n\n## The coverage hole\n\nThe OIDC bridge had **zero** tests — the reason a total breakage shipped. Five\ncases added; the two load-bearing ones drive the **real** `/sso/register` of a\nreal better-auth instance, so the emitted body is judged by the installed\npackage's own Zod schema rather than by a hand-copied restatement that would\ndrift silently on the next bump.\n\n**Predict-then-mutate ablation.** Predicted, before running, that restoring only\nthe `id` member (keeping the new guard) turns 4 of 8 red: both real-path cases,\nthe emitted-shape case, and the explicit-`sub` case — with the `mapId` guard case\nand all three SAML cases staying green. Measured: exactly that, `4 failed | 4\npassed`, all plain `AssertionError`s, and the failure text is verbatim the 400\nthis card reports.\n\n## Verification\n\n- `pnpm --filter @objectstack/plugin-auth test` — **45 files, 1080 tests passed**\n  (post-merge with `origin/main`).\n- `pnpm --filter @objectstack/plugin-auth typecheck` — clean.\n- Gates: `check:nul-bytes`, `check:test-source-alias`,\n  `check:changeset-gate-self-tests`, `check:objectui-changeset`,\n  `check:docs-audit-scope`, `check:error-code-casing`,\n  `check:query-options-erasure`, `check:engine-double-contract`,\n  `check-changeset-no-major` — all green.\n  `check-objectui-pin-fresh` is red, and is red on an untouched `main` too\n  (pre-existing, unrelated to this diff).\n\n`origin/main` was merged before opening; it touched `auth-manager.ts` too and\nmerged cleanly with no conflict.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01PEVB6w7D7uCszR9Mw1BL73)_"
+}

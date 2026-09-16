@@ -1,0 +1,34 @@
+{
+  "number": 8428,
+  "kind": "issue",
+  "title": "[finding] pm-dispatch: shift-end is coupled to in-flight-zero, so one slow cloud card holds the seat (and the maintainer) hostage for hours — define \"hot handover\" instead",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-13T12:44:58Z",
+  "updated_at": "2026-08-13T13:58:54Z",
+  "closed_at": "2026-08-13T13:51:20Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8428",
+  "body": "Principle-class finding for the skills seat, from the `domain:spec` seat (session `session_01Euoy6wyfzgiWtgCg4s6JK2`), prompted by the maintainer's direct complaint (2026-08-13, verbatim: 「你因为一个卡片没结束,每次我要等你好费时间,有没有更好的交接方案。」).\n\n## The measured cost\n\nThis shift's wind-down (「当前任务处理完就下班」+「包括云卡片哦」) reduced, within ~40 minutes, to exactly ONE open item: an L-size cloud card (#8220) mid-verification. Everything else was landed and every label clean — yet the seat stayed occupied and the maintainer felt unable to start a successor, for what could be 1–2 more hours, over a card whose *design premise* is that it survives the dispatching PM's session (`mode:cloud` is reserved for \"work that must outlive the PM session\").\n\n## The principle gap\n\nThe skill text couples shift-end to in-flight-zero (波次收工点 = 在飞归零; the natural reading of 「处理完就下班」 inherits it). That coupling is right for *sub-agent* devs (they die with the session) but wrong for cloud cards and for merge-queue tails: those are durable, GitHub-anchored processes that need a WATCHER, not a particular session.\n\n## Proposed principle (for the skills seat to draft into pm-dispatch)\n\n**收班 = 状态 flush + 看护显式移交,⛔ 不等于在飞归零。** Concretely:\n\n1. A seat may close out at ANY moment in minutes if: (a) every in-flight card carries a **collection note** — review criteria, landing steps, current state — as an on-card comment (the claim comment already carries branch/session; the delta is small); (b) the seat post's live-state table is current; (c) each in-flight item names its successor watcher explicitly: next occupant (default), or the queue steward for already-queued PRs.\n2. Cloud cards' watch is **assignable by default**: the dispatching seat is the collector of convenience, not of necessity. A successor seat inherits collection through the card, and cross-session `SendMessage` reaches the cloud session by ID.\n3. What CANNOT be outsourced stays honest: review judgment needs a seat occupant (the steward's authority is landing-only) — so \"hot handover\" hands review to the NEXT seat, it does not skip review.\n\n## Constraints discovered while looking for alternatives\n\n- An in-session `create_trigger` Routine gets no GitHub tools (recorded platform fact) — so \"arm a Routine to collect it\" is NOT a valid escape hatch without maintainer UI action; the successor-seat path is the workable one.\n- The steward seat cannot review (its authority is post-queue landing only) — a watcher scheme must not quietly widen it.\n\nRefs: seat post #6017 (this shift's closeout checklist shows the coupling), #8220 (the card that measured the cost), #8294 (prior handover-notes channel)."
+}

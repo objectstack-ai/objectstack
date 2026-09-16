@@ -1,0 +1,35 @@
+{
+  "number": 8431,
+  "kind": "pull_request",
+  "title": "fix(cli): mount RuntimeConfigPlugin on the offline marketplace arm so an air-gapped runtime's install-local route is discoverable (#8389)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-13T12:52:16Z",
+  "updated_at": "2026-08-13T13:28:49Z",
+  "closed_at": "2026-08-13T13:28:47Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-13T13:28:47Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/8431",
+  "body": "Fixes #8389\n\nAn `OS_CLOUD_URL=off` runtime had a **working** `/api/v1/marketplace/install-local`\nroute and served **no** `/api/v1/runtime/config` at all. From the Console's side\nthat is indistinguishable from \"the feature does not exist\": it cannot learn the\nroute is there, and renders no install affordance for a capability that works.\n\n#8343 mounted install-local alone on purpose, not carelessly. `RuntimeConfigPlugin`\nhardcoded `features.marketplace: true`, so reporting install-local truthfully would\nhave asserted a browse capability definitively absent on a proxy-less runtime —\ntrading the reported bug for its mirror image. #8356 (PR #8387) removed that\nconstraint by deriving `features.marketplace` from the route table of the app\nserving the response. That is what unblocks this mount, and it is why this is\ncompletion of #8343's ruled outcome rather than a new decision.\n\n## What changed\n\n`packages/cli/src/commands/serve.ts` only.\n\n- `planMarketplaceWiring` gains a third flag, `offlineRuntimeConfig`, and the\n  offline arm mounts `RuntimeConfigPlugin` under it. The decision stays in the pure\n  static for the reason that function's own doc gives: the call site sits deep\n  inside `run()` behind a dynamic import, where observing a mounting rule means\n  booting a kernel.\n- The two offline flags are computed **independently** rather than sharing one\n  gate. A host that wires its own install-local (so the existing rule leaves it\n  alone) may still have no runtime-config at all — that box has this defect in\n  full, and one shared gate would silently exclude it.\n- The mount is guarded like its neighbour. `Kernel.use()` does\n  `this.plugins.set(name, meta)`, so an unguarded mount does not double-mount, it\n  **replaces** — and `RuntimeConfigPlugin` carries the host's branding and the\n  open-core `resolveFeatures` seam, so the replacement would answer with framework\n  defaults and no distribution policy. New `RUNTIME_CONFIG_IDENTITIES` + a drift\n  check, mirroring `INSTALL_LOCAL_IDENTITIES`.\n- Both arms now construct the plugin from one shared frozen\n  `RUNTIME_CONFIG_OPTIONS`. The difference between the arms must come from what is\n  **mounted** (the derived `marketplace` flag), never from a second copy of the\n  options drifting away from the first.\n\nNote the two neighbouring mounts in this arm deliberately spell \"no cloud\"\ndifferently: `RuntimeConfigPlugin` special-cases `controlPlaneUrl: ''` as \"stay on\nthis origin\", while `MarketplaceInstallLocalPlugin` re-resolves what it is handed\nand would substitute the public default cloud, hence `OFFLINE_CONTROL_PLANE`.\nHarmonising them in either direction breaks one of them; both are commented and one\nis pinned.\n\n## The pin is written against the served payload\n\n`packages/cli/test/serve-marketplace-offline-runtime-config.test.ts` reads the body\nout of the really-mounted handler and asserts `installLocal: true` **and**\n`marketplace: false`. It deliberately does not assert \"the constructor was handed\n`installLocal: true`\": #8388 makes `features.installLocal` derived the same way\n`marketplace` now is, keeping the constructor option only as an explicit override,\nso a pin on the mechanism would break when it lands and a pin on the payload will\nnot. #8388 is not addressed here.\n\n`marketplace: false` is the assertion most at risk of being vacuous — a runtime\nserving nothing would also \"report\" false. Three guards:\n\n- the read helper **throws** when `/api/v1/runtime/config` was never registered, so\n  \"nothing served\" can never read as a passing `false`;\n- the same body must simultaneously report `installLocal: true`, which an unserved\n  payload cannot do;\n- a positive control mounts the **real** `MarketplaceProxyPlugin` on the same app\n  and requires `marketplace: true`, proving the flag is observed and not pinned\n  false by the fixture.\n\nAblation, run from the committed state: reverting `serve.ts` to `origin/main` turns\n11 of 11 cases red, and the acceptance case dies on\n`THE #8389 DEFECT: nothing mounted GET /api/v1/runtime/config`, not on a\nfalse-looking `false`. Restored from the commit, all 20 cases across both offline\nfiles pass again.\n\n## Verification\n\n- `packages/cli` full suite: 117 files, 1276 tests, all passed.\n- Targeted: 20/20 across the new file and #8343's existing pins.\n- `pnpm --filter @objectstack/cli typecheck` clean.\n- Gate families derived from the changed paths via `scripts/pm/dispatch-gates.mjs`\n  (the dispatch prompt named none): `check:changeset-gate-self-tests`,\n  `check:cross-package-test-inputs`, `check:objectui-changeset`,\n  `check:startup-registry-verdict`, `check:query-options-erasure`,\n  `check:type-check-coverage`, `check:type-check-debt`,\n  `check-changeset-no-major.mjs`, `check:nul-bytes` — all green.\n- `check:objectui-pin-fresh` reports a stale `.objectui-sha`. Pre-existing repo\n  state, not from this branch: `.objectui-sha` is not in this diff, so the gate's\n  inputs are identical to `origin/main`.\n\n## Scope\n\n`packages/cloud-connection` is untouched — that is #8388's file surface. The cloud\narm's own unguarded mounts are out of scope: already filed as #8357, which names\n`RuntimeConfigPlugin` explicitly, and making the host win there is a real behaviour\nchange for connected runtimes.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01P7vaLs7bhBPi9m3JyzkhDj)_"
+}

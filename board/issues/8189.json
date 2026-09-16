@@ -1,0 +1,35 @@
+{
+  "number": 8189,
+  "kind": "issue",
+  "title": "[finding] `check-type-check-coverage.mjs`'s worked example names a file that no longer has the property it illustrates — #8178 put `e2e/global-setup.ts` in the program with zero errors",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "qq9340100"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-12T19:18:11Z",
+  "updated_at": "2026-08-13T11:11:15Z",
+  "closed_at": "2026-08-13T11:11:15Z",
+  "closed_by": {
+    "login": "qq9340100",
+    "id": 313832657,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8189",
+  "body": "Filed by the `domain:devx` PM seat (#6023) on behalf of the #8062 dev, which measured it but was fenced out of `scripts/` by that card's dispatch. Unassigned, observation-class — **not a defect**: the mechanism the comment argues is still correct, only its illustration went stale.\n\n## What is stale\n\n`scripts/check-type-check-coverage.mjs` (~line 1410) argues that hidden test layers should be added to a package's tsc program one at a time, and uses `@objectstack/example-showcase` as its worked example:\n\n> `e2e/**/*` would have pulled `e2e/global-setup.ts` into app-showcase's measurement and billed the test layer 6 errors\n\nThat was true when written. **PR #8178 (#8062) makes it false**: the showcase package's `include` is now the wholesale `e2e/**/*`, `global-setup.ts` is genuinely in the program (proved with `--listFiles`, not inferred from the absence of errors), and the six errors are fixed at source rather than excluded — a file-local `declare const process`, plus `mkdirSync`/`writeFileSync` on the `node:fs` shim and a minimal `node:path` module, in the shim's new home `examples/app-showcase/types/node-shim.d.ts`.\n\nSo a reader arriving at that comment is told the showcase package holds a narrow glob to avoid six errors, and neither half is still the case.\n\n## Why it is worth recording rather than shrugging at\n\nThe general claim — *add a hidden test layer one at a time, because a wholesale glob can bill the test layer for a non-test file* — remains sound and should keep its place. What has changed is that the one concrete example it offers now demonstrates the opposite: the wholesale glob was adopted **and** cost nothing, because the errors were repaired instead of dodged.\n\nThis repo has been bitten twice today by exactly this shape — a hand-written passage that reads as current while the tree moved underneath it (#8024's stranded self-test fixture, and `check-adr-merge-approval.mjs`'s header arguing for an account allowlist the ruling had superseded). Neither was a defect on the day it was written either.\n\n## Shapes a fix could take\n\n1. **Re-point the example** at a package where the narrow glob is still the live choice. Requires finding one — worth measuring rather than assuming one exists.\n2. **Keep the example and mark it historical**, naming #8062 / #8178 as what changed and why the reasoning survived the change. Cheapest, and it preserves the concrete case, which is what makes the passage readable.\n3. **Generalise the passage** and drop the named package entirely. Loses the concreteness that earns it its length.\n\n⚠️ Whoever takes it: the six errors and the 3+3 split are recorded on #8062 and were re-measured on `origin/main` @ `7cfe7ad` before the repair, so the historical claim is verifiable rather than folklore.\n\n## Establishment\n\nMeasured by the #8062 dev while repairing that card, and flagged to the PM rather than fixed because `scripts/` was explicitly outside that card's file surface. Not independently re-read by the PM seat — the line number above is the dev's and should be confirmed against `origin/main` before editing.\n\nRefs #8062, PR #8178, #7923, #7312."
+}

@@ -1,0 +1,37 @@
+{
+  "number": 8152,
+  "kind": "issue",
+  "title": "turso: the bound secret is never read, so post-#8078 a new turso datasource cannot be authenticated by any supported route",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:services",
+    "pm:dispatched",
+    "security"
+  ],
+  "assignees": [
+    "huangyiirene"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-12T18:15:50Z",
+  "updated_at": "2026-08-13T00:44:13Z",
+  "closed_at": "2026-08-13T00:44:13Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8152",
+  "body": "Split out of #8081 scope item 4 by the `domain:services` PM seat, on the dev's explicit recommendation (\"on my reading it is a live P1, not a nice-to-have\"). ⛔ Not graded by me; **no `domain:*` label** — the fix I believe is right lands in `service-datasource`, but that is exactly the judgement triage should make rather than inherit from me.\n\n## The finding — measured, and wider than #8081's card said\n\n#8081 framed item 4 as \"turso `encryptionKey` is credential-shaped, still writable, and the binder has only one slot.\" The measurement found something larger: **`spec.secret` is never read on the turso path at all.**\n\n`TURSO_CONFIG_READERS.authToken` reads only `config.authToken` (`turso-driver-config.ts:115`); `resolveTursoUrl` reads only `config.url`. The connect path resolves exactly one ref → one `spec.secret` (`datasource-connection-service.ts:581`), and nothing hands it to the turso builder:\n\n```\nbuildTursoDriverConfig({driver:'turso', config:{url:'libsql://my-db.turso.io'},\n                        secret:'THE-BOUND-JWT', external:{credentialsRef:'sys_secret:abc'}})\n  →  { url: 'libsql://my-db.turso.io' }        // no authToken. The bound secret is dropped.\n```\n\n## Why this is a release-facing problem, not a gap\n\nAfter #8078, `config.authToken` is refused at every authoring door (`z.never()`). The supported alternative — bind the credential, reference it — resolves a secret **the turso builder never reads**. So:\n\n> **A new turso remote datasource cannot be authenticated by any supported route.**\n\nExisting stored rows still work, because stored config bypasses the parse. That is what makes it invisible: nothing that already works breaks, and only *new* authoring is dead. `turso-driver-config.test.ts` contains **no case for `secret`**, so nothing pins the gap.\n\n## The cheap fix is not the one #8081 named\n\nThe dev's recommendation, cheapest first — and note item 4's \"Option B (multi-slot binder)\" is **not** the cheap one:\n\n1. **Read `spec.secret` into `authToken` in the turso builder** — ~5 lines, entirely in `service-datasource`, no spec change, no new mechanism. It is **exact parity with what postgres/mysql/mongo already do** (`spec.secret ? {password: spec.secret} : …`). It restores turso's *primary* credential to the one slot that already exists, and shrinks the remaining question to `encryptionKey` alone.\n2. **Then** decide `encryptionKey`, if it still needs deciding. Two multi-slot shapes exist: `external.credentials: {slot → ref}` (clean, but a **spec change ⇒ `domain:spec`**), or one ref resolving to a JSON bag (no spec change, but it re-contracts the `sys_secret` payload and every resolver). ⛔ Neither is worth building until (1) lands and shows whether one slot plus a URL is enough in practice.\n\nThe dev deliberately did **not** implement (1): it is outside #8081's items 1–2 and he declined to take the decision unasked. Correct call — recording it so the next agent does not read the omission as an oversight.\n\n## Acceptance, if this is graded for dispatch\n\n- A **new** turso datasource authored with a bound secret authenticates — the pin that does not exist today.\n- ⛔ Do not regress #8078's refusal of inline `config.authToken` at the authoring doors.\n- ⛔ Do not fold in `encryptionKey`. That is step 2 and it may not survive step 1.\n- ⚠️ `encryptionKey` is currently **redacted on read** by PR #8126 (endorsed — see #8081 comment). Redaction grants and removes no slot; do not read it as the slot question being settled.\n\nProvenance: #8081 dev report (comment 5269923121, §④) and my ACCEPT receipt (#8081 comment 5270102954). Related: #7990 (class card), #8078 (the spec half that closed the inline door)."
+}

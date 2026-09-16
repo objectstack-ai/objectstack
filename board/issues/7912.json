@@ -1,0 +1,34 @@
+{
+  "number": 7912,
+  "kind": "issue",
+  "title": "Nav gating cannot express \"prune when the destination cannot serve\" — `enable.apiEnabled` is never consulted by `filterAppForUser`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-12T03:54:36Z",
+  "updated_at": "2026-08-13T14:58:27Z",
+  "closed_at": "2026-08-13T14:44:34Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 9,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7912",
+  "body": "Split out of #7544 (fixed in #7909) by the `domain:metadata` seat. #7909 removed the one dead entry; **this is the general gap it sat on**, and it is a contract-face change ⇒ `domain:spec`.\n\n## Symptom\n\nA Setup/app nav entry whose destination object cannot serve the request is shipped to the client in the `/meta` payload anyway. The user sees a menu item that, when clicked, cannot work — and today the console renders that failure as a generic empty state, so it reads as *\"you have no records\"* rather than *\"this page cannot work\"* (that half is an `objectui` surface — see the companion card linked below).\n\n## Root cause — measured on `origin/main`, twice, independently\n\n`filterAppForUser` (`packages/rest/src/rest-server.ts:2976-3056`) is the server-side nav filter. It gates:\n\n- `_unpublished` (the machine-managed key, ⛔ not `hidden`)\n- app-level and item-level `requiredPermissions`\n- `requiresService` (ADR-0057 D10)\n- empty-group collapse (#7380)\n\nIts own docblock names what it does **not** gate:\n\n> NOT gated here: `visible` (CEL) at any level, and `requiresObject` — both are still evaluated client-side only. That asymmetry is deliberate and pinned in `rest.test.ts`.\n\n**Nothing in nav filtering consults `enable.apiEnabled` at all.** Two measurements, run separately by the #7544 dev and by the dispatching PM:\n\n| Probe | Result |\n|:--|:--|\n| `apiEnabled` in `rest-server.ts` | **9** occurrences — `apiAccessDenialFromEnable` (`:1665`), the `enforceApiAccess` docblock (`:2468-2505`), the bulk path (`:10128`, `:10177`, `:10423`) |\n| …of those, inside `filterAppForUser` (`:2976-3056`) | **0** |\n| `requiresObject` in `rest-server.ts` | **1** — the docblock line at `:3011` saying it is *not* gated there |\n\nSo `requiresObject`, the key that *looks* like the right tool, never reaches the server-side filter.\n\n## ⭐ Why this is not \"just add a gate\"\n\nTwo independent conditions decide whether a destination can serve, and **neither is expressible on a nav entry today**:\n\n1. **`enable.apiEnabled: false`** → `OBJECT_API_DISABLED` (404). `apiAccessDenialFromEnable` (`:1658`) is a **pure function of the object's `enable` block** — it takes no user, no permissions and no context. The denial is identical for every persona, platform admin included.\n2. **an `apiMethods` whitelist without the needed operation** → `OBJECT_API_METHOD_NOT_ALLOWED` (405), same pure-function property.\n\n⚠️ **A `requiredPermissions` gate cannot prune either**, and this is the load-bearing point: they are independent conditions, so no combination of permissions on the *entry* prunes an entry whose *object* is API-disabled. #7544 shipped exactly that combination for a year and it read as correct to reviewers — the in-code comment on the removed entry claimed a non-admin \"403s server-side\", which implies an admin *could* list. None could.\n\n⇒ Re-pointing a dead entry at a `requiresObject` gate **would not have pruned it either**. Deletion was the only repair *available* to #7544, not merely the one chosen.\n\n## The sibling defect shares this root\n\nThe Account app served whole to a member denied every backing object (same QA sweep as #7544) uses `requiresObject` and **still** leaves the server with no pruning signal — because `requiresObject` *is* the client-only key. Both halves are one missing server-side declaration. Anyone closing this should check whether that sibling closes with it.\n\n## Scope — this is a fork, rule it before dispatching\n\n⛔ Do not leave a dev to pick; the readings produce different contract faces:\n\n- **(a) Make `requiresObject` server-side** — reuse the existing key, and have `filterAppForUser` resolve the named object and consult `enable`. Cheapest to declare, but it **changes the meaning of an existing spec key** and the docblock says the client-only asymmetry is *deliberate and pinned in `rest.test.ts`* — so that pin is a decision to overturn in the open, not a test to update quietly.\n- **(b) A new declaration** (e.g. `requiresServableObject` / an `enable`-aware variant) — leaves `requiresObject` alone, costs a new spec property (ADR-0087 registration required).\n- **(c) Derive it, declare nothing** — `type: 'object'` entries already name their `objectName`; the filter could consult `enable` for *every* such entry with no new key at all. Smallest contract face; ⚠️ but it is implicit behaviour, and it prunes entries whose authors never asked for pruning.\n\nWhoever dispatches this should rule with a falsifiable premise, or escalate with the menu.\n\n## Control — a fix must not over-prune\n\n`nav_api_keys` → `sys_api_key` rides the same machinery and has no `enable` restriction: it **must survive** any pruning change. `packages/platform-objects/src/platform-objects.test.ts` (landed in #7909, `describe('object entries can actually serve a list (#7544)')`) already asserts both directions through the same derivation source the REST gate uses (`resolveEffectiveApiMethods` / `isApiOperationAllowed`, #3391) — reuse it rather than writing a second, drifting copy of the gate order.\n\n⚠️ **`sys_jwks`'s `enable` block is ⛔ out of scope.** It is API-disabled because its rows are private JWT signing-key material; #7909 pinned that it stays `apiEnabled: false` / `apiMethods: []` / `access.default: 'private'`. Opening a read path onto it is a credential disclosure, not a fix.\n\n## Evidence trail\n\n- #7544 — the reported instance (QA run #7514), and the dev report with the full measurement table\n- #7909 — the removal, and the invariant test that now catches a re-added dead entry\n- #3391 — `apiMethods` fails CLOSED\n- ADR-0057 D10 — `requiresService`, the existing precedent for a server-side nav gate\n- #7380 — empty-group collapse"
+}

@@ -1,0 +1,33 @@
+{
+  "number": 7009,
+  "kind": "issue",
+  "title": "[devx] Docs Drift Check edges are still package-granular: a one-line JSDoc edit in @objectstack/client lists 11 docs, a spec src change 106",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "finding"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T08:40:16Z",
+  "updated_at": "2026-08-12T17:58:56Z",
+  "closed_at": "2026-08-12T17:54:33Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7009",
+  "body": "Filed unassigned for triage by the dev seat that implemented #6893 (PR #7007). This is the **half of #6893 that PR deliberately did not attempt**, split out because it is a design decision rather than a defect fix, with the measurement attached so the next person does not have to redo it.\n\nSearched open issues first (`drift symbol granularity docs affected-docs`, `\"docs drift\"`) — only #6893 itself and unrelated #7002.\n\n## What #7007 fixed, and what it left\n\nPR #7007 removed two things from the Docs Drift Check advisory:\n\n- **dev-only manifest false positives** — a `package.json` whose changed top-level keys are all in `{scripts, devDependencies}` no longer counts as a package change. This was the entire cause of #6893's headline \"112\": PR #6892's only `packages/` change was one `scripts.build` line. Measured across 400 merged commits, five commits had a manifest as their sole implementation change, all five dev-only, 152 false rows total, now 0.\n- **the forbidden-path hazard** — `content/docs/releases/**` rows are now partitioned into a read-only section that says \"file an issue, do not edit here\", per the #4920 ruling (they stay in the computed set; only the presentation forks).\n\nIt changed **nothing** about how a changed package maps to docs. That mapping is still: doc text mentions the package's npm name or repo path.\n\n## The residual, measured\n\n| PR | change | docs still listed after #7007 |\n|:--|:--|--:|\n| #7003 | **one sentence of JSDoc prose** in `packages/client/src/index.ts` — no behaviour, no export, no type | **11** editable (+3 read-only) |\n| #6885 | genuine `packages/spec/src/**` change (storage contract) | **106** editable (+7 read-only) |\n\n#7003 is the sharper specimen of the two: if package granularity cannot tell a prose-only JSDoc reword from a semantic change, the \"may need an implementation-accuracy re-verification\" claim carries essentially no information on that class of PR.\n\n## Why #7007 did not narrow the edges\n\nTwo reasons, both worth the maintainer's attention before anyone starts:\n\n1. **It contradicts a stated design principle in the tool itself.** `scripts/docs-audit/affected-docs.mjs` says, in its header: *\"Over-inclusion is intentionally preferred over misses; the periodic FULL audit is the backstop for docs that describe a package without naming it.\"* Narrowing to symbols or exports trades that the other way. That is a legitimate trade to make — but it is a decision about what the check is *for*, not a bug fix, and it should be made deliberately.\n2. **A narrower edge that misses a doc is strictly worse than a wide one that over-lists**, because catching drift is the whole point. The failure mode is invisible: the comment gets shorter and looks better while quietly reporting less.\n\n## Two edge kinds, both of which any narrowing must handle\n\nOn #7003, 12 rows came from the **npm name** (`via @objectstack/client`) and 2 from the **repo path** (`via packages/client`). These are separate arms of the matcher. Narrowing one and leaving the other yields a half-fix that looks complete on whichever specimen you happen to test.\n\n## Directions (unchanged from #6893, none chosen)\n\n1. **Symbol / export granular.** Map changed exported symbols rather than the package name. Highest fidelity; needs a story for changes with no exported-symbol delta — which is exactly #7003, a JSDoc edit that changes no symbol at all. Does that class report nothing, or everything?\n2. **Cap and summarise.** Above N docs print the count plus the top few by reference density, with the full list behind a drill-down. Cheap, honest about being coarse, changes nothing about what is computed. #7007 deliberately did not do half of this: choosing N and the ranking belongs with whoever owns the granularity question.\n3. **Filter to docs the diff can plausibly affect** — e.g. only those whose own frontmatter names a symbol in the diff. Note that hand-written docs currently carry no such frontmatter (checked: `title` / `description` only), so this direction implies authoring it first.\n\n## Reproducing the measurement\n\n```\nnode scripts/docs-audit/affected-docs.mjs --json origin/main\n```\n`docs` is the full set, `releaseOwnedDocs` its read-only subset, `detail[].via` names the edge kind that produced each row."
+}

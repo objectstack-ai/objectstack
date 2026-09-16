@@ -1,0 +1,35 @@
+{
+  "number": 8009,
+  "kind": "issue",
+  "title": "[security] `sys_sso_provider.oidc_config` carries the OIDC `clientSecret` in a cleartext JSON textarea, by its own field description",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched",
+    "security"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-12T11:15:40Z",
+  "updated_at": "2026-08-12T21:56:09Z",
+  "closed_at": "2026-08-12T21:56:09Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 10,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8009",
+  "body": "Filed by the `domain:services` PM seat from the #7902 credential-persistence survey (report: comment 5264546868). Unassigned, no `pm:queue`, **no `domain:*`** — see routing note. For triage to grade and route.\n\n## The finding\n\n`sys_sso_provider.oidc_config` is a `textarea` whose **own field description** states what it holds:\n\n> *\"JSON: clientId, **clientSecret**, endpoints, scopes, mapping, pkce\"*\n\n— `packages/platform-objects/src/identity/sys-sso-provider.object.ts:267-272`. Read back by the better-auth SSO plugin.\n\nThis is shape ① from the survey: a credential inside a serialized JSON blob, on an object reachable through the ordinary data API (`sys_sso_provider` declares `apiMethods: ['get','list']`).\n\nAn OIDC `clientSecret` is the credential that authenticates *this platform* to the identity provider. Anyone who can read the row can impersonate the platform's OIDC client against that IdP.\n\n## What makes this one distinctive\n\nUnlike the other ① hits, **nothing here is hidden or accidental**. The blob is doing exactly what its description says. There is no drift between declaration and behaviour to point at — which means:\n\n- the \"declared ≠ enforced\" framing does **not** apply; and\n- fixing it is not a repair, it is a **decision to change a shipped storage shape**, with migration for existing rows.\n\nThat is why it is filed as a finding for grading rather than a defect to dispatch. The card that takes it up has to choose a shape first, and that choice has an owner beyond this lane (below).\n\n## Shape of a fix, if wanted (⛔ not decided here)\n\nSame fork as #7986, and for the same reason — a blob with mixed sensitivity:\n\n- pull only `clientSecret` into a `Field.secret()`-backed column, leaving the rest of the config in the blob (needs a shape change to what authors write);\n- move the whole `oidc_config` behind `Field.secret()` (simple, but the non-secret half becomes unreadable to the admin UI that legitimately renders endpoints/scopes/mapping);\n- redact on read (leaves cleartext at rest, which is the property the survey is about).\n\n⚠️ **better-auth owns the writes to this object** — the same constraint that makes #7987 (`sys_account` OAuth tokens) hard. Any shape that routes the write through the engine's encrypt-on-write path has to sit between better-auth and its own adapter. That constraint is the first thing a card should measure, not the last.\n\n## Explicitly NOT claimed\n\n- **No leak is demonstrated.** Reachable-cleartext finding; permissions on `sys_sso_provider` in a shipped deployment were not evaluated.\n- **Not an ADR-0100 case.** `Field.password()` has zero occurrences repo-wide; this is a `textarea`, not a password-typed field.\n- **No regression.** This predates every credential change landed today and was not touched by PR #7901.\n\n## Routing note — why no `domain:*`\n\nThe column is declared in `packages/platform-objects` (**`domain:metadata`**); the consumer is the better-auth SSO plugin under `plugin-auth` (**`domain:identity`**); a `Field.secret()` route touches the `objectql` machinery (**`domain:engine-core`**). Which lane owns it depends on the shape chosen. Flagged rather than guessed, per the anchoring rule — the label is the domain of the package the fix lands in, never the domain of where it was found.\n\n## Evidence\n\nMeasured 2026-08-12 by the dev on #7902 (read-only survey, `pr: null`). Full 26-surface verdict table, including the reverse-checks that validate the clean verdicts, in comment 5264546868 on #7902.\n\n## Source\n\nSplit out of objectstack-ai/objectstack#7902 (survey item ①-e). Sibling cards from the same survey: #7986 (webhook headers), #7987 (`sys_account` OAuth tokens), #7990 (`sys_metadata` as a general cleartext sink)."
+}

@@ -1,0 +1,35 @@
+{
+  "number": 7736,
+  "kind": "issue",
+  "title": "view-authoring-live: the documented view-container authoring path is inert at runtime — the container is stored but never served",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "huangyiirene"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T12:24:52Z",
+  "updated_at": "2026-08-13T03:02:36Z",
+  "closed_at": "2026-08-13T01:05:55Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7736",
+  "body": "## Symptom\n\nAuthoring a view through the runtime metadata door with the documented ViewSchema **container** shape succeeds at every step and produces nothing a consumer can see.\n\n- `PUT /api/v1/meta/view/&lt;name&gt;?mode=draft&package=&lt;pkg&gt;` with `{object, list:{…}, form:{…}}` → **200** `state:'draft'`\n- `POST /api/v1/meta/view/&lt;name&gt;/publish` → **200**\n- `GET /api/v1/meta/view?object=&lt;obj&gt;` → **`{\"items\":[]}`**\n- `GET /api/v1/meta/view/&lt;name&gt;` → **200 with the full authored body**\n\nSo the item *is* stored — it is just never served. The end-user list keeps rendering synthesized default columns. **A deliberate full server restart does not help**: the path is inert, not restart-required. Reproduced on two objects, and with the container stored under both an arbitrary name and under the object name.\n\n**Control that isolates it.** Publishing the *same* list and form bodies as **pre-expanded ViewItems** (`{name, object, viewKind, config}`) makes the list columns **and** the authored form section render live, after a client reload only. Draft isolation is clean in both shapes (pre-publish, both consumer doors report absent; only `?preview=draft` exposes it), and the edit loop is repeatable with zero restarts on the shape that works.\n\n## Root cause\n\nContainer expansion exists, but it is wired to exactly one path — the artifact/package **boot load** — and the runtime write door is not on it.\n\n- `packages/metadata/src/plugin.ts` iterates `ARTIFACT_FIELD_TO_TYPE` over the **built** `objectstack.json` and, for a `view` item that `isAggregatedViewContainer()` accepts, registers the container under the bare object key **and** registers every `expandViewContainer(viewObject, item)` result as its own ViewItem (`origin/main` lines 634-668).\n- The runtime write door stores the container verbatim. `packages/metadata-protocol/src/protocol.ts` imports `isAggregatedViewContainer` (line 60) and uses it only to *skip* containers in a list response (line 4405) and to leave container bodies untouched during identity normalization (`normalizeViewMetadata`, ~line 774). It never calls `expandViewContainer` — that symbol has zero references anywhere in `packages/metadata-protocol`.\n- `MetadataManager.getViewsByObject()` (`packages/metadata/src/metadata-manager.ts:1432-1444`) filters `v.viewKind && v.object === object`. A container carries neither, so it is filtered out by design: its own docblock says it \"Returns only expanded ViewItems (those carrying a `viewKind`) — never the legacy aggregated container\".\n\nThe three facts compose into the measured behaviour: the write door accepts and persists the container, the expansion that would give it `viewKind` never runs off the boot path, and the by-object consumer drops anything without `viewKind`.\n\n**Stale-premise check:** re-verified on `objectstack` `origin/main` (`00e9196`). All three sites are present and unchanged in substance; only line numbers moved from what the run recorded.\n\n**Neighbour:** #7163 (closed) is the same missing-expansion class on a *different* seam — the nested-plugin loader. That one was fixed at its own seam; the runtime write door described here was not covered by it, so the shared question — where expansion belongs so every producer gets it — is worth answering once rather than a third time.\n\n## Reproduction\n\n1. Boot the showcase with writable runtime packages.\n2. `PUT /api/v1/meta/view/&lt;name&gt;?mode=draft&package=&lt;pkg&gt;` with a ViewSchema container: `{object: '&lt;obj&gt;', list: {…}, form: {…}}` → 200 `state:'draft'`.\n3. `POST /api/v1/meta/view/&lt;name&gt;/publish` → 200.\n4. `GET /api/v1/meta/view?object=&lt;obj&gt;` → `{\"items\":[]}`, while `GET /api/v1/meta/view/&lt;name&gt;` returns the full body.\n5. Restart the server and repeat step 4 — still `{\"items\":[]}`.\n6. Control: publish the same bodies as `{name, object, viewKind, config}` ViewItems; after a client reload the authored list columns and form section render.\n\n## Source\n\nExtracted from the QA run objectstack-ai/objectstack#7695 (framework 92f26f75, console 09987b680)."
+}

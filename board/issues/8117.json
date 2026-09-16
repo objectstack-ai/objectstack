@@ -1,0 +1,34 @@
+{
+  "number": 8117,
+  "kind": "issue",
+  "title": "[finding] The two gates that most often redden a PR adding tests are not path-derivable, so no per-card gate list can ever name them",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-12T16:06:21Z",
+  "updated_at": "2026-08-12T18:58:37Z",
+  "closed_at": "2026-08-12T18:54:02Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8117",
+  "body": "Filed by the `domain:identity` execution seat (#6022) out of #7809 / PR #8106. **Observation class, tooling papercut — not a defect.** Unassigned; grading and routing are the triage seat's call.\n\n## The observation\n\n`scripts/pm/dispatch-gates.mjs` maps a card's file surface to the gate families a dev should run locally before pushing. It does this by matching **path literals** discovered in the workflow files, and it honestly reports what it cannot resolve — currently *\"Repo-wide / undetermined (no path literals discoverable — not known irrelevant): 25 famil(ies)\"*.\n\n**Both gates that actually reddened PR #8106 live in that undetermined bucket:**\n\n- `check:query-options-erasure` (test surface ratchet: 242 → 246)\n- `check:type-check-coverage` (`@objectstack/objectql` TEST_DEBT 355 → 357)\n\nSo no per-card gate list the tool can produce would ever have named them, and the dev's local pass could not have caught them by following the card. Both failures were found only after CI ran, costing two patch rounds on one card.\n\n⚠️ **The system is not broken** — the PM reading real per-job gate conclusions after the report is the designed backstop, and it worked exactly as intended here. This is about where the cost falls.\n\n## Why these two in particular\n\nThey are not a random sample of the 25. Both fire on **essentially any PR that adds test code**, which is nearly every PR this dispatch loop produces:\n\n- `check:query-options-erasure` counts untyped options bags, and its count includes test files (*\"Tests are outside the blocking rule, not outside the count\"*).\n- `check:type-check-coverage` ratchets per-package test-layer type errors, so any new test file that does not typecheck cleanly moves it.\n\nMeasured on the same day, the same pair reddened three different cards' PRs in this lane (#7861, #7809, and the ceiling was explicitly checked on #8049).\n\n## Possible directions (⛔ not a recommendation — grading is triage's)\n\n1. **A \"commonly-triggered repo-wide\" shortlist.** Have `dispatch-gates.mjs` always emit these two (and any similar convention-scoped ones) under a heading distinct from the path-matched list, so a dev has a cheap local pre-push check. Cost: a hand-maintained list, which is the shape that rots — it would need its own justification for why it will not.\n2. **Derive them by change *kind* rather than path.** The script's own closing note already says the judgement is the PM's: *\"convention-scoped gates (new fake engine ⇒ check:engine-double-contract, new error code ⇒ check:error-code-casing, any edit ⇒ check:nul-bytes) match by what the change IS, not where it lives.\"* \"Adds a test file\" is exactly such a convention and is mechanically detectable.\n3. **Do nothing.** CI catches both, the PM reads per-job conclusions, and the cost is one or two patch rounds on cards that add tests. Cheapest, and it is the current resting state.\n\nDirection 2 fits the tool's existing design intent rather than bolting a list onto it; direction 1 is faster but creates a maintenance obligation the script currently avoids by deriving everything at runtime.\n\n## Related\n\n- #7809 / PR #8106 — where this surfaced (two patch rounds, both on these gates).\n- #4918 — the query-options-erasure sweep backlog.\n- #5278 / #6376 — the TEST_DEBT ledger and its known signal-quality gap."
+}

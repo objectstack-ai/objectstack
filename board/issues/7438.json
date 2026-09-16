@@ -1,0 +1,33 @@
+{
+  "number": 7438,
+  "kind": "issue",
+  "title": "[observation] ADR-0058 expression-surface ratchet discovers surfaces by schema-name text — any slot narrowed onto its own schema silently drops out of the scan",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "finding"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-10T11:28:52Z",
+  "updated_at": "2026-08-12T17:56:40Z",
+  "closed_at": "2026-08-12T17:54:27Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7438",
+  "body": "Observation-class record from #7327's implementation (PR #7387), filed by the dispatching PM so it is not lost to session memory. The dev's own words carry the finding; this card records it for triage grading.\n\n## The fragility\n\n`packages/qa/dogfood/test/expression-conformance.test.ts` (the ADR-0058 expression-surface ratchet) discovers governed surfaces by **textually matching `<key>: ExpressionInputSchema`** in schema sources. Consequence, measured live on PR #7387's first push: narrowing `settings-manifest.zod.ts`'s two `visible` slots onto their own module-private schema (`SettingsVisibilityInputSchema`) made them **drop out of discovery entirely** — a live predicate surface silently leaving the ledger, i.e. the #1887 class that ledger exists to catch. Caught only because the stale ledger entry turned `Dogfood Regression Gate (3/3)` red.\n\n## Mitigation already landed (PR #7387)\n\nDiscovery now reads a **registered schema-name list** instead of one hardcoded name, and the trap is written down in both the test and the ledger header. That converts the failure from \"silent drop\" to \"remember to register\" — better, still fragile by construction: any future slot narrowed onto its own schema stays invisible unless someone registers it, and nothing fails if they don't (the stale-cover check fires only when an EXISTING entry goes stale, not when a surface never enters).\n\n## The structural fix (not attempted — larger than #7327's card)\n\nDiscover by **resolved type** rather than by identifier text — e.g. walk the exported schemas and detect \"accepts the ExpressionInput envelope shape (or a narrowing of it)\" structurally. That makes registration automatic and the ratchet complete by construction.\n\n## Refs\n\n- PR #7387 (the mitigation + trap documentation; commit 60b3120 is the CI-forced fix)\n- #7327 / OS-DEV-REPORT comment 5238208223 (the dev's full account, \"open_questions\" section)\n- The `settings-visibility` ledger row + `ExprDialect` member added there\n\nFiled unlabeled and unassigned for triage per the filing discipline. Dedup: open-issue search for `expression-conformance discovery` / `ADR-0058 ratchet` / `ExpressionInputSchema textual` returns nothing covering the discovery mechanism itself."
+}

@@ -1,0 +1,35 @@
+{
+  "number": 8458,
+  "kind": "pull_request",
+  "title": "fix(objectql): converge the multi-tenant tenant-scope index at every /meta read exit (#8375)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-13T14:06:52Z",
+  "updated_at": "2026-08-13T15:51:36Z",
+  "closed_at": "2026-08-13T15:51:35Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-13T15:51:35Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/8458",
+  "body": "Fixes #8375\n\nOn a multi-tenant deployment `GET /meta/object/:name` served the object with **no `indexes` key at all** whenever the answer came from the `metadata` service or a `sys_metadata` overlay row, while the registry's own resolved schema — and the list read — carried `indexes: [{ fields: ['organization_id'] }]`. Same object, same moment, same host.\n\n## The root cause was a second implementation, not a missing line\n\nThe read exits converge the #6562 system-column stamp with `applyInjectedSystemColumns` (`@objectstack/metadata-core`). That function **cannot** import its producer: `applySystemFields` lives in `@objectstack/objectql`, and `objectql` → `metadata-protocol` → `metadata-core`, so the import runs UP the dependency graph. So it re-implemented the half it could reach — the fields map — and silently omitted the half it could not, the index.\n\n⚠️ **Two things the card states are wrong, and they change the fix.** `applySystemFields` is **not** in `packages/spec/src/data`; it is `packages/objectql/src/registry.ts`. And it is therefore **not** callable from `metadata-core` — routing the converger through it inverts the layering. Adding an `indexes` line to the copy was ruled out for the right reason; calling the producer from the copy is impossible for a second one.\n\nSo the decision moves into **one function**, `provisionTenantScopeIndex`, called by the producer and by `materializeBaseLayer` — the #8268 seam every read exit already replays. That seam's doc promises \"a fourth stamp added to this method is converged at the read exits the day it is added, with no fourth method and no fourth card\". This is that fourth stamp, and the promise held: **no edit to `packages/metadata-protocol/src/protocol.ts` was needed** (it is at its 3-editor cap), and no new method anywhere.\n\nThe decision also had to move out of the injection branch. It was nested under `!schema.fields?.organization_id`, and at a read exit the column is **already present** — `governServedItem` runs `applyInjectedSystemColumns` before the seam — so that condition is false exactly where the convergence is needed. The predicate is now \"the object carries a tenant column the PLATFORM provisioned\", via `isInjectedColumnDefinition`, which answers the same question at either site in either order.\n\n## The write path owes a counterpart, and `indexes` concatenates\n\n`stripProvisionedTenantIndexFrom` removes the **last** entry identical to the platform's own (the seam appends) and keeps the removal **only when re-stamping the remainder reproduces the arriving list byte-for-byte** — recomputed through the stamping function itself, so strip and stamp cannot drift. An emptied list drops the key rather than storing `indexes: []`.\n\nThat one comparison separates every case: an author's **named** entry is never a candidate; an author's own tenant index **ordered before** their others fails the comparison on order; the identical entry on a **single-tenant** deployment fails it because the seam would add nothing there. The residual it cannot separate — an author whose last index is byte-identical to the platform's on a multi-tenant host — is the trade `stripProvisionedPrimaryFrom` documents, bounded the same way: the entry is re-derived at every load, so no resolved answer changes.\n\n## Measured\n\n| # | measurement | predicted | actual |\n|---|---|---|---|\n| 1 | premise on merged `main` | one diverging key `indexes` | ✅ as predicted |\n| 2 | after the fix | by-name serves the index; pin flips | ✅ red at the exact line, then green |\n| 3 | GET → PUT → GET → PUT | list does not grow; row never carries it | ✅ |\n| 4 | reverse verification, 2 arms | read-side red / write-side red separately | ✅ both directions |\n| 5 | single-tenant control | no index on either route | ✅ |\n\n**One prediction was wrong, and it is recorded rather than retro-fitted.** The brief expected an unbounded strip to grow the array *every* cycle. Measured with the strip fully ablated across three cycles, the stored row goes `undefined → 1 → 1 → 1`: it gains one phantom entry and then **stabilizes**, because `declaresTenantIndex` already guards the append. The real defect of a missing strip is a phantom customisation baked into `sys_metadata.metadata`, its checksum and every history diff — not growth. This matters for the gate: a test asserting only \"length does not grow\" would pass with the strip **entirely absent**. The pin asserts the **stored row**, which is what ablation B reddens, at `cycle 1 stored`.\n\n## Two expected-divergence pins flip, as each was written to\n\nBoth were deliberate tripwires, so failing them is the design working:\n\n- `MEASURES the un-converged multi-tenant indexes stamp` (rest materialization-agreement) → now asserts agreement on every key, plus a single-tenant control.\n- The #6562/#6810 residual in `protocol-meta-effective-schema.test.ts`, whose own comment read *\"If a served-document consumer of `indexes[]` ever appears, this is the line that says so.\"* It appeared. **This file is not named in the issue** — it surfaced from the full suite run.\n\n## Verification\n\n- `objectql` 3546 ✅ · `rest` 1828 ✅ · `metadata-protocol` 1170 ✅ · `metadata-core` 162 ✅ (all post-merge, after rebuilding `dist`)\n- Landed #4326 round-trip pins and the #6810 tenant-index pins: green\n- Gates: the 7 path-derived + 2 convention-triggered families from `scripts/pm/dispatch-gates.mjs` against the actual changed paths, plus `check:nul-bytes` — all pass\n- Typecheck green on all four packages\n\n⚠️ Every measurement rebuilt `dist` first — these suites resolve `metadata-protocol`/`objectql` through it.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_012WMpuAfA2KSdDjGF6tm1bH)_"
+}

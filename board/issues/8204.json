@@ -1,0 +1,35 @@
+{
+  "number": 8204,
+  "kind": "pull_request",
+  "title": "fix(runtime): enforce ListRunsRequestSchema's declared limit range (#8054)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-12T20:02:36Z",
+  "updated_at": "2026-08-12T20:32:10Z",
+  "closed_at": "2026-08-12T20:32:09Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-08-12T20:32:09Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/8204",
+  "body": "Fixes #8054\n\n`ListRunsRequestSchema.limit` has always declared `.min(1).max(100)`, but the\nruntime boundary that reads it (`parseIntegerParam`) only checked that the\nvalue was a whole number, never that it fell inside the declared range.\nMeasured, twice, identical both passes:\n\n| query | before | after |\n|---|---|---|\n| `?limit=0` | `200`, zero rows (a confidently wrong \"this flow has never run\") | `400 VALIDATION_FAILED`, field `limit`, code `min_value` |\n| `?limit=-5` | `200`, zero rows | `400 VALIDATION_FAILED`, field `limit`, code `min_value` |\n| `?limit=101` | `200`, cap not applied | `400 VALIDATION_FAILED`, field `limit`, code `max_value` |\n| `?limit=1` / `?limit=100` | `200`, forwarded unchanged | unchanged |\n| ordinary in-range (`?limit=25`) | `200`, forwarded unchanged | unchanged |\n\n## The fix\n\n`parseIntegerParam` (`packages/runtime/src/query-param.ts`) gains an optional\nthird `bounds: { min?, max? }` argument. It is **opt-in per call site** — every\nexisting caller that omits it (`notifications.ts`'s `limit`) is byte-for-byte\nunaffected, pinned by the untouched `?limit=1000` semantics there.\n\nThe one call site with a declared range —\n`GET /automation/:name/runs` in `packages/runtime/src/domains/automation.ts`\n— now threads `ListRunsRequestSchema.shape.limit`'s own `.min()`/`.max()`\nthrough, rather than re-listing `(1, 100)` as literals:\n\n```ts\nconst limitBounds = ListRunsRequestSchema.shape.limit.unwrap();\n// …\nlimit: parseIntegerParam('limit', query.limit, {\n    min: limitBounds.minValue ?? undefined,\n    max: limitBounds.maxValue ?? undefined,\n}),\n```\n\nThis is the same discipline #7359 already applies to `status`\n(`ExecutionStatus.options`): the wire's declared range and the boundary's\nenforced range are the same read, so they cannot drift apart the next time\n`ListRunsRequestSchema`'s `.min()`/`.max()` changes. **The schema's bounds\nwere directly readable at the call site** — confirmed via a standalone probe\nagainst the real (lazy-proxied) `ListRunsRequestSchema`:\n`ListRunsRequestSchema.shape.limit.unwrap().minValue === 1`,\n`.maxValue === 100`, both official public Zod v4 `ZodNumber` accessors\n(`v4/classic/schemas.d.ts`), not internals.\n\nA value outside the range is refused in the module's house shape —\n`VALIDATION_FAILED` (ADR-0112) with a `details.fields[]` entry carrying the\nADR-0114 field code the property names already mirror: `min_value` /\n`max_value`. Those two codes were already used by\n`packages/objectql/src/validation/record-validator.ts` for the identical\nrefuse-not-clamp semantics, which is the precedent this PR follows rather\nthan clamping.\n\n## Not in scope\n\n- The declared bounds themselves (`.min(1)`, `.max(100)`) — unchanged.\n- `parseIntegerParam`'s behaviour for callers that pass no bounds — unchanged,\n  pinned by the `notifications.ts` call site's own untouched test coverage.\n- #7968's `/runs/:runId/screen` gating in the same file — untouched.\n\n## Tests\n\n`packages/runtime/src/domains/automation-runs-query-validation.test.ts` gains\na `#8054` block pinning the four refusal cases (`0`, `-5`, `101`, `1000`) with\nthe full ADR-0112 envelope (`status` **and** `code`) plus the ADR-0114 field\ncode, and asserts `listRuns` is never called. The existing preservation\n`it.each` table is updated: the three rows that used to pin `?limit=1000`,\n`?limit=-5` and `?limit=0` as forwarded-unchanged are removed (superseded,\nsame as #7359 superseded the `status`-ignored case) and a new\n`?limit=25 (ordinary, mid-range)` row is added as the over-block guard,\nalongside the untouched `?limit=1` / `?limit=100` boundary rows.\n\n**Reverse-verified.** Reverted `query-param.ts` + `automation.ts` to their\npre-fix content (`git checkout HEAD~1` for those two files, test file left at\nHEAD).\nAll four new `#8054` cases went red for the expected reason — the request was\nsilently **accepted** instead of refused:\n\n```\n× refuses ?limit=0 (the \"no runs\" trap) with 400 VALIDATION_FAILED (0)\n  → {\"limit\":\"0\"} was accepted (answered {\"status\":200,...}) instead of\n    refused: expected undefined to be defined\n× refuses ?limit=-5 (negative) ... → same shape\n× refuses ?limit=101 (one past the declared cap) ... → same shape\n× refuses ?limit=1000 (far past the declared cap) ... → same shape\n\n Test Files  1 failed (1)\n      Tests  4 failed | 43 passed (47)\n```\n\nAll 43 other cases in the file stayed green under the revert — nothing else\nmoved. Restored the fix (`git checkout HEAD` for those two files); `git diff\n--stat HEAD` came back empty (byte-identical), and the full 47-case suite is\ngreen again.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01B3Kurx8qufrDzNjk4rag7V)_"
+}

@@ -1,0 +1,36 @@
+{
+  "number": 8111,
+  "kind": "issue",
+  "title": "[finding] `registerSharingEndpoints` / `respondSharingError` still answers the bare-string error dialect (ADR-0112) — the sharing half split out of #8073",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-12T15:52:07Z",
+  "updated_at": "2026-08-12T22:26:09Z",
+  "closed_at": "2026-08-12T22:26:09Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8111",
+  "body": "Split out of #8073 at triage (2026-08-12), per the `domain:cli` seat's serial/split analysis on that card (comment 5269022297): the explain pair and the `/sharing/*` family are different blast radii, and this half carries a question the explain half does not.\n\n## Fact (inherited from #8073's measurement — re-verify at claim)\n\n`registerSharingEndpoints`'s single emitter `respondSharingError` in `packages/rest/src/rest-server.ts` answers `{ code, error: msg.replace(...) }` — a bare-string `error` — feeding 400 / 403 / 404 / 409 / 422 across the whole `/sharing/*` family. `body.error.code`, the one position ADR-0112 D5 declares, reads `undefined` on all of them.\n\n## Why this is held as a finding rather than queued\n\nThe envelope convergence itself is implementation of the settled ADR-0112 D5 ruling. But this emitter carries a second, unrelated protocol: `msg.startsWith(CODE)` — the error **code is recovered by parsing the message text**. Whether that string-prefix protocol survives (kept alongside the D5 envelope) or is retired with it must be ruled **before** dispatch, not during it — retiring it silently changes what programmatic consumers can read.\n\nAlso inherited scope notes from #8073:\n\n- Any converging PR must **migrate** existing flat-shape pins to the D5 position, never delete them.\n- The SDK-compatibility measurement on #7981 (`ObjectStackClient.fetch` reads both envelopes' spots) was taken for that card's consumers; it must be **re-run** for the `/sharing/*` consumers, not inherited.\n- Same-file serial: `packages/rest/src/rest-server.ts` is the repo's hottest file (#5949); check in-flight writers before any claim.\n\nPromotion path: at the findings round, either (a) the prefix-protocol question goes to the maintainer and this queues after the ruling, or (b) if a measured consumer census shows nothing reads the prefix, it collapses into a plain convergence card.\n\nProvenance: #8073 (measurement record), PR #8071 / #7981 (the pattern to follow), #7035 / PR #7293 (the dialect retirement)."
+}

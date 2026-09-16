@@ -1,0 +1,35 @@
+{
+  "number": 8322,
+  "kind": "pull_request",
+  "title": "feat(objectql): enforce number field `scale` by rejection, never rounding",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-13T05:24:28Z",
+  "updated_at": "2026-08-13T06:13:47Z",
+  "closed_at": "2026-08-13T06:13:46Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-13T06:13:46Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/8322",
+  "body": "Fixes #7501\n\n## What\n\nA `number` field's declared `scale` was documentation, not a constraint: the record validator's number branch tested only `def.min` / `def.max`, so `scale: 0` accepted `11.5` and stored it verbatim through both the REST create route and the CSV import route.\n\nPer the maintainer ruling of 2026-08-11 (issue comment 5250623270): an over-scale value is now **refused** — `400 VALIDATION_FAILED` with field code `max_scale` and `constraint: { scale, actual }` — symmetric with `min_value`/`max_value`. **Never rounded**: silent rounding is silently altering data. Validation applies to **new writes only**; already-stored legacy values are not migrated or re-judged.\n\n## Where it landed\n\n- `packages/objectql/src/validation/record-validator.ts` — the `scale` branch after `min`/`max` in the number branch, plus a `decimalPlacesOf` helper that measures decimal places from the number's canonical string form (exponent-safe: `1e-7` is 7 places, `1.2e+3` is 0; no multiply-overflow false rejections). A malformed declaration (negative or non-integer `scale`) stays unenforced rather than getting invented semantics — tightening the declaration itself at authoring time is filed as #8321 (that issue is not addressed here and remains open).\n- `packages/spec/src/api/errors.zod.ts` — `max_scale` joins the closed field-level catalog (ADR-0114 D2), in the bounded-range `max_*` family. **This is a declared widening of the card's file surface**: the catalog is closed and validated on the way out (`FieldErrorSchema.code`), so a first-class symmetric refusal cannot be expressed from inside `record-validator.ts` alone; the catalog's own doc says a new constraint kind \"adds a member here\".\n- `packages/spec/src/system/validation-message.ts` — `max_scale` message templates in all four platform locales (en / zh-CN / ja-JP / es-ES), so the refusal is born fully localized.\n- `content/docs/references/api/errors.mdx` — regenerated (`gen:docs`); `api-surface` verified current after rebuild.\n\nOne branch covers every leg the issue measured: REST create/update, CSV/JSON import real write, and the import **dry run** (it asks the engine for its verdict via `validateData`, so preview and write agree by construction).\n\n## Pins\n\n- **Positive, code AND status**: direct create route answers `400` + `VALIDATION_FAILED` + `fields[0].code === 'max_scale'` + `constraint { scale: 0, actual: 1 }` (import-integration test, real sqlite backend).\n- **CSV import leg**: an over-scale cell fails its row with `max_scale` and stores **nothing** — neither `11.5` nor a rounded `12` (the assertion that distinguishes the ruling from the rejected rounding option); a sibling in-range row still writes. Dry run reports the same verdict and message.\n- **Negative pins**: `scale: 0` still accepts integers (the repro's own declaration); values within a non-zero scale still write; `min`/`max` behaviour unchanged and checked first; a field with no declared `scale` accepts any precision; malformed declarations stay unenforced.\n- Unit pins for exponent forms, string-carried (CSV-shaped) numbers, update mode, and the zh-CN template rendering.\n\n## Verification\n\n- `pnpm --filter @objectstack/objectql test` — 196 files / 3461 tests green\n- `pnpm --filter @objectstack/spec test` — 388 files / 10249 tests green\n- `pnpm --filter @objectstack/rest test` — 109 files / 1812 tests green\n- typecheck green on spec, objectql, rest — `'max_scale'` in the validator type-checks only against the rebuilt spec `.d.ts` (stale-dist false green impossible); reverse-verified by substituting a non-member literal → `TS2345` red, restored from commit.\n- Behavioral reverse verification (validator reverted to `origin/main`, predicted red): exactly the 6 rejection-dependent pins failed; all negative pins stayed green. Restored from commit.\n- Gates: the 6 dispatch-named families green, plus the families `dispatch-gates.mjs` derived from the actual diff (adr-anchors, authz-resolver, changeset-gate-self-tests, docs-audit-scope, filter-alias-parity, i18n, merge-driver, meta-type-normalized, objectui-changeset, quick-reference-counts, release-body, role-word, spec-parsed-alias, type-source-resolution, query-options-erasure, type-check-coverage) — all green. `check:i18n` required building the CLI first (prerequisite, not a finding).\n- `check:generated`: 2 artifacts proved stale (api-surface via rebuild + docs), regenerated exactly those; all 13 now current.\n\n## Deliberately not in this PR\n\n- The half-translated `min`/`max` import message the issue's secondary observation records — ruled out of this card (「same file is not the same card」); it stays recorded on the #7501 thread per triage.\n- Authoring-time refusal of malformed `scale` declarations — #8321 remains open.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01RDTnVvsgA6cUZ4xFVtPZRy)_"
+}

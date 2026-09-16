@@ -1,0 +1,35 @@
+{
+  "number": 8412,
+  "kind": "pull_request",
+  "title": "fix(driver-turso): a remote upsert that lands a NULL record number now says so (#7099)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-13T11:56:40Z",
+  "updated_at": "2026-08-13T12:40:13Z",
+  "closed_at": "2026-08-13T12:40:12Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-13T12:40:12Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/8412",
+  "body": "Fixes #7099\n\n## What changes — and what deliberately does not\n\n#6944 made the Turso REMOTE face refuse an `auto_number` write it cannot fulfil instead of silently writing NULL. One leg was left uncovered and declared as known residue: an `upsert` carrying an `id` or explicit `conflictKeys` that **matches nothing** still inserts, and the record-number slot still lands NULL.\n\n**That outcome is unchanged here. What changes is that it is no longer silent.**\n\n```\nupsert({ id: 'never-seen', … })  ->  RESOLVED case_number=null    (before: nothing said)\n                                     RESOLVED case_number=null\n                                     + logger.warn naming the object,\n                                       the column and the row id   (now)\n```\n\nOut of scope, unchanged, per the triage promotion:\n\n- **No accept/reject change.** Same writes accepted, same refused, returned row byte-identical. Refusing *after* the write has landed is a different act from the pre-write gate, and that trade-off is untouched.\n- **Not a generator.** Issuing record numbers on the remote transport stays behind #6944's disposition-A appetite door.\n\n## The premise, re-measured\n\nThe residue was recorded under the claim that classifying this leg \"needs the round trip this refusal exists to avoid\". That round trip is **already paid, unconditionally**: `RemoteTransport.upsert` follows its `INSERT … ON CONFLICT` with a `SELECT` by id and returns the mapped row — the residue pin's own `expect(inserted.case_number).toBeNull()` was reading that very result. The NULL was in hand all along, one field read away. No probe query was added, and none is needed.\n\n## Where the detection lives — the one place this PR departs from the suggested shape\n\nThe promoted scope suggested handing the autonumber rule **down** to `RemoteTransport`, following the `setFilterColumnSql` / `setDiagnosticSink` plumbing precedent. Measured, the driver is the better layer and needs **no plumbing at all**:\n\n1. `TursoDriver.upsert` already receives the transport's returned row, and already holds `autoNumberFields[object]` — both halves of the detection are in hand at the same frame.\n2. Its `logger.warn` is literally the sink `setDiagnosticSink((message) => this.logger.warn(message))` forwards to, so routing through the transport would be a longer path to the same log line, with no added reach.\n3. An existing pin forbids the transport-side shape: `turso-remote-autonumber-refusal.test.ts` asserts no member of `RemoteTransport.prototype` matches `/autonumber|sequence/i`, encoding #6944's layering decision (\"RemoteTransport cannot see a field type, so it cannot be the one to refuse\"). Teaching the transport this rule would have gone red there — correctly.\n\nSo: detection and reporting both on `TursoDriver`, zero new mechanisms, and the schema-blind transport stays schema-blind.\n\n## False positives were designed against, not hoped away\n\nThe check reads the **result** row, not the request — a merging upsert leaves the slot empty in the request too, so a request-shaped rule would warn on the one leg #6944 measured as correct. Three silence controls pin that: the MERGE leg, an object with no `auto_number` field, and a caller-supplied number on this same leg (the seed-replay / import path). The empty-slot predicate is now stated **once** and read by both the pre-write refusal and the post-write report, so \"empty\" cannot acquire two spellings.\n\nReported at `warn`, not `error`: everything the caller submitted persisted, and the returned row carries the `null` in plain sight; what is missing is a derived value this face declares it does not issue. Per AGENTS.md §Degradation log levels that is a functional degradation, not a durability one. Not throttled, unlike the tenant-audit warning it sits beside — here the row `id` **is** the payload.\n\n## Reverse verification — both directions predicted before running\n\n| | prediction | measured |\n|---|---|---|\n| ① fix reverted, tests kept | exactly 1 red: the pin, on the **warning** half, never the NULL half | `1 failed / 19 passed` — `expected [] to have a length of 1` |\n| ② predicate dropped (over-firing) | exactly 2 red: MERGE-leg + caller-supplied controls; the pin itself **green** | `2 failed / 18 passed` — both `expected [ Array(1) ] to deeply equal []` |\n\n② is the half ① cannot prove: the pin alone cannot tell a correct warning from a wolf-crying one, and the controls are what do. Also green in ②: the no-`auto_number`-field control, because the registry lookup returns before the predicate is reached.\n\n## Verification\n\n`pnpm --filter @objectstack/driver-turso test` — 35 files, 969 passed. `typecheck` clean, `eslint` clean on both changed files. Gates derived from the actual changed paths via `scripts/pm/dispatch-gates.mjs` and run green: `check:driver-conformance`, `check:nul-bytes`, `check:changeset-gate-self-tests`, `check:objectui-changeset`, `check:test-source-alias`, `check:type-source-resolution`, `check:query-options-erasure`, `check:type-check-coverage`, `check:durability-log-level`, `check-changeset-no-major`. Two reds not caused by this diff: `check:objectui-pin-fresh` (known-ambient, fires for any PR carrying a changeset) and `check-dev-prereqs` (my worktree only built the driver's dependency closure, not all 67 packages).\n\nChangeset: `patch` — no public export moves, the new member is `private`, and no caller-visible behaviour changes; the only new output is an operator log line where there was silence.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01VoxQqG5FiUHZKCST7KDoZC)_"
+}

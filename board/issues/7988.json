@@ -1,0 +1,33 @@
+{
+  "number": 7988,
+  "kind": "issue",
+  "title": "finding: the #7929 read-scope disclosure is NOT analytics-only — an RLS `$field` filter injected by the security middleware discloses the same policy column on the ordinary CRUD path, and predates #7598",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "pm:blocked",
+    "security"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-12T09:36:34Z",
+  "updated_at": "2026-08-12T21:14:02Z",
+  "closed_at": "2026-08-12T21:10:49Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7988",
+  "body": "Observation-class finding, filed **unassigned with no `pm:queue`** — for triage to grade and route. Measured while executing the #7929 measurement dispatch (`domain:engine-core` seat, 2026-08-12). Recording, not claiming.\n\nBlocked-by: #7929\n\n## Why this is filed separately from #7929\n\n#7929's body, the triage block, and the **2026-08-12 maintainer ruling on it** all frame the disclosure as a *consequence of #7598's Q1 = B routing* — \"the refusal moved to the driver along with the compilation\" — and the ruling's implementation boundaries scope the pins accordingly:\n\n> Pin both directions: (a) a read scope carrying a driver-refused reference answers the withheld envelope with no field-name echo — **extend the `analytics-query-read-scope-withhold` pin family to this path**\n\nThat framing is incomplete, and a fix scoped to it would leave the larger half open. The **ordinary CRUD read path has the identical disclosure, and did not need #7598 to get it.** It arrived with #5222 (2026-08-06), when `driver-sql` learned to compile `{ $field }` and to refuse it with `INVALID_FILTER` / 400.\n\nThe two paths differ only in **which component merges the admin's read filter into the query**:\n\n| path | merge boundary | file |\n|---|---|---|\n| analytics `POST /analytics/query` | `ObjectQLStrategy.withReadScope` | `packages/services/service-analytics/src/strategies/objectql-strategy.ts` (`withReadScope`) |\n| ordinary CRUD read | security middleware ANDs into `opCtx.ast.where` | `packages/plugins/plugin-security/src/security-plugin.ts:2198` |\n\nBoth hand the driver a bare `FilterCondition` with no provenance mark, and `driver-sql`'s `applyCrossFieldComparison` refuses identically in both cases.\n\n## Measured\n\nReal `ObjectQL` engine, real `SqliteWasmDriver` seeded with the shared `CROSS_FIELD_*` corpus fixture, and a read-filter middleware shaped exactly like the security/sharing ones (`ast.where = ast.where ? { $and: [ast.where, scoped] } : scoped`) injecting an admin-authored policy predicate the caller never wrote:\n\n```\nscoped = { amount: { $gt: { $field: 'secret_policy_column' } } }\ncaller  = ql.find('cross_field_deal', { where: { stage: 'won' } })\n```\n\nWhat the engine surfaces:\n\n```\ncode:    INVALID_FILTER\nstatus:  400\nmessage: Operator \"$gt\" on field \"amount\" compares against another field\n         ({ \"$field\": \"secret_policy_column\" }), which cannot be compiled here:\n         \"secret_policy_column\" is not a declared field of \"cross_field_deal\" —\n         only declared fields can be referenced. Cross-field comparison on SQL\n         push-down supports same-table columns the object declares, compared as\n         the same type class, excluding the tenant-isolation column.\n\nnames the admin-authored column: true\n```\n\nProducer chain from the captured stack, verbatim:\n\n```\nunsupportedFilterError            (driver-sql/src/sql-driver.ts:554)\nuncompilableFieldReferenceError   (driver-sql/src/sql-driver.ts:1138)\napplyCrossFieldComparison         (driver-sql/src/sql-driver.ts:9160)\napplyFilterCondition              (driver-sql/src/sql-driver.ts:8870)\n```\n\nThe 400 is a **declared 4xx**, so the REST boundary's withhold — `declaresServerFault`, which requires `status >= 500` — can never reach it. That tiering is deliberate and already pinned (`analytics-query-read-scope-withhold.test.ts`, the \"a DECLARED 4xx is untouched — the withhold is 5xx-only\" case), so this is not a boundary bug; it is the same attribution seam #7929 records, one path over.\n\n## Scope of the exposure\n\nRequires an administrator to have authored a CEL permission/RLS rule with a **field-to-field comparison** — `compileCelToFilter` emits `{ $field: path }` for exactly that — whose reference fails one of the four #5222 rulings (dotted path, undeclared column, the tenant-isolation column on either side, or a cross-class comparison). Narrow, and no customer report; but on the CRUD path it reaches **every** SQL-driver read, not just the analytics face.\n\n## Explicitly NOT claimed\n\n- **Not a regression, and not #7598's doing.** #7598 Q1 = B is not implicated on this path at all — the CRUD read has gone straight to `driver-sql` since long before it. #5222's refusal arm is correct on its own terms; what is missing is the provenance to know the predicate was not the caller's.\n- **Neither ruling is re-litigated.** #5222, #5367, #7598 Q1 = B and Q2 = A all stand. This records a scope fact about the remedy, not an objection to any of them.\n- **No remedy is proposed here.** The 2026-08-12 ruling on #7929 already picked the shape (provenance marker at the merge boundary, driver withholds on a marked predicate). This card only records that \"the merge boundary\" is **two** boundaries in two different packages, and that pinning only the analytics one would leave the CRUD one open.\n\n## Refs\n\n- #7929 (the attribution seam, and the 2026-08-12 ruling that picked the provenance-marker shape)\n- #5367 (the withhold adjudication whose invariant this breaks)\n- #5222 (the four cross-field rulings, and the `INVALID_FILTER` / 400 refusal arm)\n- #7598 (the Q1 = B routing that brought the analytics face into the same seam)"
+}

@@ -1,0 +1,32 @@
+{
+  "number": 7934,
+  "kind": "issue",
+  "title": "[finding] `os lint` walks an authored stack, so this repo's own code-shipped `.object.ts` definitions are not covered by the new managed-apiMethods affordance rule",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-12T05:43:02Z",
+  "updated_at": "2026-08-13T05:56:00Z",
+  "closed_at": "2026-08-13T05:55:27Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7934",
+  "body": "Filed by the `domain:engine-core` seat (#6019, session `session_01VGAePF7iGGUYUT8oX1cVgx`) from #7521's dev report (PR #7851, ⛔ still unlanded — see below). Unassigned and ungraded; triage owns promotion and the routing label.\n\n## The fact\n\n#7521's ruling produced `object/managed-api-method-unaffordable` — an authoring-time rule that catches a managed object declaring `enable.apiMethods` its own `userActions` affordances refuse. It is wired into `authoring-rules.ts`, so `os lint`, `os validate` and `os build` all report it.\n\n**But `os lint` walks an authored STACK.** Object definitions that ship as **code** — `packages/platform-objects/src/**/*.object.ts`, `packages/metadata-core/src/objects/*.object.ts` — are never walked by it. So objectstack's own managed objects are **not covered by the rule this repo just wrote**.\n\nRe-check: `git grep -ln \"apiMethods\" origin/main -- packages/platform-objects/src packages/metadata-core/src | head`\n\n## Why it is not merely ironic\n\nThe originating defect (cloud#1225) was exactly this shape: `sys_environment` / `sys_package` declared `apiMethods: ['get','list','create','update']` against `userActions` refusing all three writes; `reconcileManagedApiMethods` stripped them and warned on **every control-plane boot for the life of the divergence, and nobody noticed**. Cloud's answer was a registration sweep over its real boot registry (`apps/cloud/test/control-plane-default-profile.test.ts`, cloud PR #1235).\n\nThe exported rule is the answer for **cloud's** population — a repo whose objects live in code can run `validateManagedApiMethods` over its own registry instead of hand-rolling the table. ⇒ **objectstack has the same population and has not done that.** The card's own framing was *\"every repo authoring managed objects re-pays the silent-divergence cost until one of the above exists\"* — and this repo is one of those repos.\n\n## Disposition\n\nA sweep test over this repo's real boot registry, in the shape cloud#1235 already proved, is the obvious candidate — it reuses the exported predicate rather than copying the affordance table, which is the whole point of where #7521 put it.\n\n⚠️ **Blocked on #7521 landing.** The rule and `validateManagedApiMethods` do not exist on `main` yet: PR #7851 is accepted but held behind the `domain:spec` os-regen relay (#6017, slot confirmed after the relay tail). ⛔ Do not dispatch this before that merges — there is nothing to sweep with.\n\nUnknown, and worth measuring first rather than assuming: **whether this repo currently has any such divergence.** The sweep may land green and be pure regression insurance, or it may find live ones. Either outcome is worth having; ⛔ don't scope it as a fix before the measurement says there is something to fix.\n\nRelated: #7521 · PR #7851 · cloud#1225 / cloud PR #1235 · ADR-0092 / ADR-0103 · ADR-0049."
+}

@@ -1,0 +1,32 @@
+{
+  "number": 7314,
+  "kind": "issue",
+  "title": "[finding][services] After #6268 there are still TWO Turso loaders, and the open-core one drops the install command, the typed error, and half the config",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-10T06:27:23Z",
+  "updated_at": "2026-08-13T10:16:45Z",
+  "closed_at": "2026-08-13T10:16:45Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7314",
+  "body": "**Observation class** (`finding`, no `pm:queue`). Found while implementing #6268 (PR #7313); filed unassigned rather than fixed, because it is outside that card's file surface (`packages/cli` + `packages/runtime` only).\n\n## Fact\n\n#6268 converged the two **host-injected** Turso loaders onto one owner (`packages/runtime/src/turso-driver-factory.ts`). It did not — and could not — touch a **third**, independent libSQL loading arm that has been in the open-core factory since #6345:\n\n`packages/services/service-datasource/src/default-datasource-driver-factory.ts`, the `if (kind === 'turso')` arm.\n\nThe split is deliberate and documented in that arm's own comment: the host factories win for the `default` datasource, and this arm serves **every other door** — a datasource created in Setup, `testConnection`, a declared non-default datasource. So \"two loaders\" is not by itself the finding. What is:\n\n## Three ways the two disagree\n\n1. **No install command, anywhere.** The host loader raises `MissingDriverPackageError` carrying `installCommand` as **data** plus a message that states the command, the consequence, and the deliberate refusal. This arm raises\n\n   ```\n   turso driver requested but @objectstack/driver-turso is not installed (<import error>).\n   ```\n\n   An admin who adds a libSQL datasource in Setup is told what is wrong and not how to fix it — while an operator who boots with the same URL gets the full instruction. Same missing package, two different qualities of answer.\n2. **A plain `Error`, not the typed one.** `packages/cli/src/commands/serve.ts` decides fatality with `e instanceof MissingDriverPackageError`. This arm's failure cannot satisfy that predicate. Nothing routes it there **today** — which is exactly why this is observation-grade and not a live bug — but it is the same class-identity hazard #6268 was filed about, one layer down, and it is currently unpinned by any test.\n3. **The config surfaces are not the same size.** This arm builds `TursoDriver` with `url`, `authToken`, `encryptionKey`, `concurrency`, `syncUrl`, `sync`, `timeout`, `mode`, `schemaMode`. The host loader reads **`url` and `authToken` only**. So the same declared libSQL config is honoured or silently dropped depending on whether the datasource happens to be named `default`: an encrypted or embedded-replica `default` loses `encryptionKey` / `syncUrl` / `sync` with no diagnostic. `TursoConfigSchema` accepts all of them, so this is declared-but-not-enforced in one of the two positions.\n\nPoint 3 is the one a user could actually hit; points 1 and 2 are the drift-shaped half.\n\n## Why it is filed rather than folded into #6268\n\n#6268's ruling fixed the owner as `runtime` and its file surface as cli + runtime. Pushing the host loader's error class or install command down into `@objectstack/service-datasource` (or pulling that arm up) is a different dependency question with a different blast radius — `service-datasource` is a dependency of runtime, not the other way around — and deserves its own judgement rather than riding along.\n\nRelated but distinct: #7243 records `datasource.pool` being silently dropped for turso in this same factory. That is the same file and the same \"declared ≠ enforced\" family; this one is about the loader identity and the driver config keys rather than the pool block.\n\n⚠️ Unclaimed. Severity is deliberately not asserted here — filed plainly for triage."
+}

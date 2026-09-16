@@ -1,0 +1,35 @@
+{
+  "number": 8209,
+  "kind": "pull_request",
+  "title": "fix(plugin-sharing): refuse a share row on a federated phantom owner anchor, with the single-record gate behaviour measured (#8119)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-12T20:20:23Z",
+  "updated_at": "2026-08-12T20:50:25Z",
+  "closed_at": "2026-08-12T20:50:24Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-12T20:50:24Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/8209",
+  "body": "Part of #8119\n\n`Part of`, not `Fixes`, on purpose: the card covers **three** `hasOwnerField`\nconsumers and this PR moves **one**. `checkEdit` / `checkDelete` are ruled out of\nscope on the card itself — they currently refuse, which is fail-closed, and\nwidening them to `abstain` can turn a refusal into an allow. That is a decision,\nand this PR is its measured input, not its execution. Merging must not close the\ncard.\n\n## Phase 1 — the measurement, which is the deliverable\n\nThe card was filed as a **code-path reading** and flagged its own premise as\nunverified: nobody had run a federated single-record write, and the SELECT-list\nbehaviour for a nonexistent column (as opposed to #7858's measured\ncomparison-position degradation) was expected to be dialect-dependent.\n\nMeasured on a booted showcase stack — SQLite external datasource, an **unstamped**\nfederated object bound to the remote `customers` table (the shipped federated\nobjects carry the ADR-0090 D1 `public_read_write` stamp and return at a gate\n*above* the phantom line, so they cannot exercise it at all):\n\n```\nfind(obj, { where:{id:'c1'}, fields:['id','name'] })\n  -> keys [id, name]                                        projection HONOURED\n\nfind(obj, { where:{id:'c1'}, fields:['id','owner_id'] })\n  -> keys [id, created_at, updated_at, name, email, region, lifetime_value]\n     hasOwnProperty('owner_id') === false                    projection DISCARDED\n\nNO throw, in any position tested.\n```\n\n**Neither branch the card predicted.** The driver does not raise, and it does not\nreturn a 2-column row with an absent value — it *discards the whole projection*\nand returns the full row, which simply has no `owner_id` key. Three consequences\nthe card could not have known:\n\n1. `writeGateFailClosed` is **never reached** on SQLite, so nothing is logged.\n   The refusal is produced silently by `matchesOwnerScope` reading `owner == null`.\n2. The refusal is **not depth-dependent**. The null-owner branch short-circuits\n   *before* `__writeScope` is consulted, so even an `org`-scope caller is denied.\n3. `modifyAllRecords` is the **only** route to `allow` — and it never reads a\n   share row to get there.\n\nSo the card's premise holds: `checkEdit` and `checkDelete` both answer `deny`.\nVerified non-vacuously — the same gates answer `allow` on a local record the\ncaller owns, and on a federated object whose author **declared** a real remote\n`owner_id`.\n\n## Phase 2 — the one refusal this authorises\n\nPhase 1 also turned up something the card described only as a hypothetical. Pre-fix,\nan admin's `grant()` on such an object **succeeded**, minting a real\n`sys_record_share` row:\n\n```\n{ id: 'shr_...', object_name: 'measure_ext_nostamp', record_id: 'c1',\n  recipient_id: '...', access_level: 'edit', source: 'manual' }\n```\n\nOver HTTP that is **201 Created** for a share no verdict can ever consult — the\nADR-0078 silently-inert trap ADR-0111 D7's guard exists to close. It now answers\n**422 `SHARING_NOT_ENABLED`**, with a message naming the federated anchor rather\nthan claiming a missing field (which would be false, and would send an operator to\nadd a column the platform already injected).\n\nRefusing costs no live access: the row it declines to write could never have\ngranted any.\n\n## The #7865 marker: convergence available, deliberately declined\n\n#8115 landed `resolveInjectedColumnProvenance` / `unprovisionedInjectedColumns` /\n`platformProvisionsStorage` 38 minutes after #7858 shipped this plugin's\nhand-rolled `hasPhantomOwnerAnchor`. Direction B has consumers converge on the\nmarker **as they are touched**, so convergence was available here.\n\nNot taken, for one reason: `hasPhantomOwnerAnchor` lives in\n`federated-phantom-anchors.ts`, whose other two consumers are `buildReadFilter`\nand `buildWriteFilter` — the two this card may not change. Rewriting the shared\nhelper changes their behaviour transitively, which is the refactor the scope\nruling excludes.\n\nThe decision is measured rather than assumed: on the real registry the two agree\non every case — the federated anchor reads `injected-unprovisioned` / `true`, the\nstamped object likewise, and the local control reads `author` / `false` (it\ndeclares its own `owner_id`). That agreement is pinned in the dogfood test, so\nwhoever does converge the helper starts from evidence rather than a fresh\nmeasurement.\n\n## Verification\n\n- **Reverse verification, direction predicted before running** (plain red on the\n  new cases only; nothing counts diagnostics and no rule is narrowed, so removing\n  an added refusal branch can only remove refusals). Observed exactly that:\n  unit **3 failed / 24 passed** — the three new grant cases, with every `deny`\n  verdict and both \"must not change\" grant cases unmoved; dogfood **2 failed / 16\n  passed** — `grant()` resolved and HTTP returned **201** instead of 422.\n- `@objectstack/plugin-sharing`: **517 passed** (20 files); `typecheck` clean.\n- `@objectstack/dogfood`: the new file **18 passed**; `typecheck` clean; full\n  suite green earlier on this branch (674 passed / 3 skipped).\n- Gates: `check:engine-double-contract`, `check:query-options-erasure`,\n  `check:test-source-alias`, `check:docs-audit-scope`, `check:objectui-changeset`,\n  `check:changeset-gate-self-tests`, `check-changeset-no-major`, `check:nul-bytes`\n  — all pass. `check-objectui-pin-fresh` fails **pre-existing and unrelated**: it\n  matched only because this PR adds a changeset, and the diff does not touch\n  `.objectui-sha` (moving the pin is release-adjacent work, not this card's).\n\n## Not in this PR\n\n`grant()` skips the posture guard entirely for **system** callers, which is the\npath the sharing-rule evaluator materialises through — so a *rule* can still\nmaterialise an inert row on a phantom-anchor federated object. Left alone\ndeliberately: the scope ruling names `assertSharingEnforced` only, and changing\nthe system path would change rule-evaluator behaviour. Filed as #8207.\n\nAlso filed while measuring: #8208 (a record an admin creates over HTTP is\ninvisible to its own creator when the caller has no active organization).\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01PEVB6w7D7uCszR9Mw1BL73)_"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 8170,
+  "kind": "issue",
+  "title": "`check:dev-prereqs --self-test` runs nowhere in CI — the second and only other member of #8110's split-gate family",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-12T18:35:37Z",
+  "updated_at": "2026-08-12T23:51:06Z",
+  "closed_at": "2026-08-12T22:17:15Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8170",
+  "body": "Filed by the `domain:devx` dev working #8110 (PR pending). Out of scope there: that card's file surface is the one `lint.yml` step for `check:skill-frame-freshness`, and its dispatch ruled explicitly that other family members are **reported, not fixed, in that PR**.\n\n## The finding\n\n#8110 asked whether other gates share its split shape. The criterion it fixed is narrow and deliberately **not** \"any `check:*` script containing `&&`\":\n\n> a gate whose **scan** half cannot run in CI, and whose CI-safe `--self-test` half is therefore also absent from CI.\n\nSurveyed mechanically (method below). Exactly **one** other gate qualifies: **`check:dev-prereqs`**.\n\n```\n\"check:dev-prereqs\": \"node scripts/check-dev-prereqs.mjs --self-test && node scripts/check-dev-prereqs.mjs\"\n```\n\nBoth halves measured on a clean worktree at `7cfe7ad`, before any build:\n\n| half | reading |\n| --- | --- |\n| `--self-test` | **exit 0 in 0.12s**, 16 cases, on a checkout with *no* `node_modules` and *nothing built* — \"every verdict reachable, exclusions and freshness coverage pinned\" |\n| the scan | **exit 1** — \"The workspace is not built ... 67 of 67 workspace packages declare an entry point under dist/ that is not on disk\" |\n\nThat is the same asymmetry as #8110, for the same reason. The scan asks \"is this workspace BUILT and is the one staleness-lying artifact CURRENT\", which is a precondition for `pnpm dev` on a human's long-lived tree. In a CI job that has not built, it is a hard false red about a precondition CI does not have; in a job that just built, it is a tautological green. So it correctly stays out — and takes the self-test half with it.\n\nThe self-test half has neither property. It is hermetic (temp fixtures, no network, no workspace state — proven by the 0.12s green above on an unbuilt tree with no dependencies installed) and it is the thing that would notice `check-dev-prereqs.mjs` losing a verdict path.\n\n## Why it is worth a card rather than a note\n\nIdentical failure mode to the one #8110 measured: the gate keeps sitting in the gate list reading as coverage. `check:dev-prereqs`'s exposure is arguably worse than the skill-frame one, because its scan half **does** run on every `pnpm dev` (the `dev` chain invokes `scripts/check-dev-prereqs.mjs` directly with `node`, without the self-test — that is documented in the script header as a deliberate hot-path saving). So the scan is exercised constantly by humans while the self-test that keeps it honest is exercised by nobody unless someone types `pnpm check:dev-prereqs` by hand.\n\n## Suggested shape\n\nOne `lint.yml` step, `node scripts/check-dev-prereqs.mjs --self-test`, in the same job and with the same \"self-test half only, never the scan\" naming as the #8110 step, so the deliberate omission reads as a decision. Precedent for the shape already exists twice in that file: the changeset-family self-tests (#6509, \"the SELF-TEST halves only — the real scans stay in pr-automation.yml\") and #8110's step.\n\n## How the survey was run (so the negative half is reviewable)\n\n- All 62 root `check:*` scripts enumerated from `package.json`, cross-referenced against every file in `.github/workflows/` **with YAML comment lines stripped first** — that step matters: matching raw text puts `check:platform-checklist` in the \"wired\" column because `lint.yml` mentions it only in a comment explaining why it is *not* wired.\n- Result: 3 of 62 are referenced by no workflow — `check:skill-frame-freshness` (#8110), `check:dev-prereqs` (this card), `check:platform-checklist`.\n- Widened once beyond `check:*`: every `scripts/**/*.mjs` mentioning `--self-test` (63 files), same cross-reference. It surfaced no further candidates — the extras it named are a shared library (`scripts/adr-anchors.mjs`, imported by gates that do run), PM-loop tooling with no gate role (`scripts/pm/check-half-states.mjs`, `scripts/pm/dispatch-gates.mjs`), and `scripts/setup-git-hooks.mjs`, which runs in CI via the `prepare` lifecycle.\n\n### Considered and rejected: `check:platform-checklist`\n\nIt fails the criterion's first clause. Its scan is a static JSON-structure check over `docs/qa/platform-checklist/` that would run in CI perfectly well; it is out by an explicit **maintainer policy decision** recorded in `lint.yml` (\"the checklist is a QA ledger, not a code gate; keeping it out of the per-PR path means an unrelated PR is never blocked by checklist drift\"). Its self-test half is therefore excluded on purpose, not as collateral damage — a different fact, and not this family's.\n\n### Also rejected: `check:skill-frame-sync`\n\nRuns in CI whole, at `lint.yml:1082`, and is `--self-test && scan` — the counter-example that shows `&&` is not the family marker.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01P6QzoCR4U6RKxdbCHMJp3V)_\n\nRelated: #8110"
+}

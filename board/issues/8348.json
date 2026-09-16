@@ -1,0 +1,35 @@
+{
+  "number": 8348,
+  "kind": "pull_request",
+  "title": "fix(service-messaging,objectql): stop serving sys_http_delivery.headers_json on the generic read path — internal: true + a batch privileged accessor (#8118)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-13T06:58:26Z",
+  "updated_at": "2026-08-13T08:33:50Z",
+  "closed_at": "2026-08-13T08:33:48Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-13T08:33:48Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/8348",
+  "body": "Fixes #8118\n\nRoute 3, as ruled by triage (issue comment 5269775253, not reopenable): redact-on-read via `internal: true` on `sys_http_delivery.headers_json`, plus a purpose-built privileged accessor in `packages/objectql` — the `resolveSecret` pattern that #7728 itself names as the remedy.\n\n## What this does\n\n- **`packages/objectql`** — `ObjectQL.resolveInternalField(object, recordIds, field)`: a batch, driver-level dereference of ONE `internal: true` field, returning a Map keyed by record id (`null` = row exists with nothing stored; absent = no such row). Refuses any field not declared `internal: true` with the ADR-0112 envelope (`INVALID_FIELD`, status 400) — without that guard it would be a generic read-protection bypass (over ADR-0100's deliberately-masked `password` in particular). Batch-shaped because its consumer claims a batch per dispatcher tick: one driver read per claim batch, never per row (the per-row cost was one of route 1's rejection reasons).\n- **`packages/services/service-messaging`** — `sys_http_delivery.headers_json` is declared `internal: true`, so the engine omits it from every generic read (list, get, explicit `?select=headers_json`) with no system carve-out (#7728's explicit design). The redaction sits at the ROW layer, so it covers the whole delivery population: `source: 'webhook'` rows (WebhookSchema-authored headers) AND `source: 'flow'` rows (per-run interpolated headers that never pass through WebhookSchema — the half every author-declared shape forgets). `SqlHttpOutbox.claim()` — the one reader that must put the map on the wire verbatim — recovers it through the accessor; `list()` / `redeliver()` return the redacted view.\n- **Fail-closed, unweakened**: an engine that redacts the column but cannot dereference it makes `claim()` throw — nothing goes out missing an authored header (missing headers are not self-announcing; the delivery would succeed while silently deviating from the authored config). The claimed rows revert to `pending` via the claim TTL, and a healthy claimer recovers them headers-intact (pinned in test).\n- **`content/docs/automation/webhooks.mdx`** — the `sys_http_delivery` field table stops advertising `headers_json` as a plain readable column, and the page's own rule (\"reading a delivery row tells you what was sent, not how to forge it\") now states explicitly that it covers the authored headers — this PR is what makes that sentence true. One page; no release-owned docs touched.\n\n## Constraint evidence (all four binding constraints)\n\n- **`source: 'flow'` shown covered**: a dedicated integration case drives the exact input shape `http-nodes.ts` produces (`source: 'flow'`, `refId` = node id, per-run interpolated headers) end-to-end through the production enqueue → claim → send path: redacted on the data API, run-scoped bearer verbatim on the wire.\n- **No #7799 regression**: the signing pin verifies the way a receiver verifies — recomputed HMAC over the actual wire body equals the `X-Objectstack-Signature` header, byte-identical across redelivery.\n- **No #8114 regression**: this PR touches neither `sys_webhook.headers_secret` nor the `headersPatch` compare-before-write; the enqueuer path is unchanged.\n- **No #8022 regression**: no change to enqueue/re-arm or the error ledger; the redaction is read-side only.\n- **At rest is deliberately untouched** and pinned as such: the delivery row still holds the map until 30d retention ages it out — `Field.secret()` was measured and rejected on the card (orphan `sys_secret` row per delivery, boot-window fail-open, per-tick decrypt). A future card that changes the at-rest story flips that pin deliberately.\n\n## Provenance — resumed work\n\nFour commits (`c17e8677`…`d232665`) were implemented by the previous dev on this card before an account-quota kill in the gate tail; this session inherited the branch, merged `origin/main` (89 commits, including #8327's rewrite of the projection filter in `engine.ts` — merged clean; the refusal is dotted-leg only, so the accessor's driver-level read and the `?select=` served-without-it behavior are unaffected), and re-ran all verification from scratch. Full inherited-vs-added accounting is in the dev report on #8118.\n\n## Out of scope, deliberately\n\n- `sys_email.headers_json` (#7986 ①-f, card #8149) is not addressed here — it is sequenced behind this card and adopts what lands here. #7986 remains open.\n- Orphan `sys_secret` retention (#8103) is untouched.\n\n## Verification\n\n- `pnpm --filter @objectstack/objectql test` — 196 files / 3484 tests green (includes the new accessor pins).\n- `pnpm --filter @objectstack/service-messaging test` — 19 files / 211 tests green (includes the 5-case at-rest integration suite).\n- `pnpm --filter` typecheck green on both packages; ESLint clean on all six changed source files.\n- Reverse verification (direction decided in advance): removing `internal: true` turns exactly the 4 redaction/fail-closed cases red and the header-less-delivery case stays green; restored byte-identical from the commit.\n- Gates green: adr-anchors, docs-audit-scope, durability-log-level, engine-double-contract, stack-collection-maps, test-source-alias, type-source-resolution, changeset-fixed, engine-split-ratio, query-options-erasure, type-check-coverage, nul-bytes, changeset-gate-self-tests, objectui-changeset, changeset-no-major (the last three derived from the changed paths, beyond the dispatch list). `check-objectui-pin-fresh` reports the repo-wide pin staleness equally on `main` — pre-existing release-lane state, zero lines of this diff.\n- Docs gates green after the webhooks.mdx amendment: docs-audit-scope, quick-reference-counts, role-word, doc-authoring, nul-bytes, and `pnpm --filter @objectstack/lint run check:doc-formula-expressions` (first run hit the documented unbuilt-dist prerequisite `ERR_MODULE_NOT_FOUND` on `@objectstack/formula`; green after building that closure — a prerequisite, not a finding).\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01RDTnVvsgA6cUZ4xFVtPZRy)_"
+}

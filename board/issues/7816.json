@@ -1,0 +1,32 @@
+{
+  "number": 7816,
+  "kind": "issue",
+  "title": "One intent, two spellings: `visible` (actions) vs `visibleWhen` (fields / sections / userActions) — and the alias guard only covers one direction",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T15:58:23Z",
+  "updated_at": "2026-08-13T10:28:02Z",
+  "closed_at": "2026-08-13T10:28:02Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 10,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7816",
+  "body": "## Summary\n\nOne intent — \"show this thing only when the predicate holds\" — is spelled **two different ways** depending on which schema you are authoring, and the guard that catches the wrong spelling only runs in **one direction**.\n\n* Actions (and action params) declare it as **`visible`** / **`disabled`** — `ActionSchema` ([`ui/action.zod.ts:1131`](https://github.com/objectstack-ai/objectstack/blob/main/packages/spec/src/ui/action.zod.ts#L1131)), `ActionParamSchema` (L383).\n* Everything else declares it as **`visibleWhen`** / **`disabledWhen`** — fields ([`data/field.zod.ts:814`](https://github.com/objectstack-ai/objectstack/blob/main/packages/spec/src/data/field.zod.ts#L814)), form sections ([`ui/view.zod.ts:1757`](https://github.com/objectstack-ai/objectstack/blob/main/packages/spec/src/ui/view.zod.ts#L1757), L1858), page components ([`ui/page.zod.ts:150`](https://github.com/objectstack-ai/objectstack/blob/main/packages/spec/src/ui/page.zod.ts#L150)), per-option predicates (`field.zod.ts:176`), and the built-in row CRUD overrides `userActions.edit/delete` ([`data/object.zod.ts:1079`](https://github.com/objectstack-ai/objectstack/blob/main/packages/spec/src/data/object.zod.ts#L1079)).\n\nThe action schemas already recognise the *other* spelling and rename it: `actionObject()` registers `visibleWhen → visible`, `showWhen → visible`, `disabledWhen → disabled` (`action.zod.ts:776`), and `ACTION_PARAM_KEY_ALIASES` maps `visiblewhen/visibleon/visibility → visible` (L74). The comment there states the motive exactly:\n\n> ADR-0089 made `visibleWhen` the canonical predicate on view/page schemas. An author who learned it there would silently lose a param's capability gate here.\n\n**The reverse alias does not exist.** An author who learns `visible` on an action and writes it on a field or on `userActions.delete` gets a bare unknown-key error that never names the key they should have used.\n\n## Measured (spec `dist` on `main`, `ObjectSchema.create`)\n\n```\nACCEPTED  field.visibleWhen                          (canonical)\nREJECTED  field.visible\n          Unrecognized key(s) on this field: `visible`. Until #4001 closed this shape\n          these were dropped silently — …\nREJECTED  userActions.delete.visible\n          Unrecognized key: \"visible\"\nREJECTED  userActions.delete.disabled\n          Unrecognized key: \"disabled\"\n```\n\nNeither message mentions `visibleWhen` / `disabledWhen`. `RowCrudActionOverrideSchema` is a plain `z.object({…}).strict()` — it has no `aliases` / `guidance` map at all, so it cannot say anything beyond zod's default.\n\nThe arms accepted also differ, which matters for any unification:\n\n| surface | key | `false` literal | CEL string | `{dialect, source}` |\n| --- | --- | --- | --- | --- |\n| action / action param | `visible` | ✅ (#5970) | ✅ | ✅ |\n| field / section / component / `userActions.*` | `visibleWhen` | ❌ | ✅ | ✅ |\n\nOn `userActions.edit/delete` the boolean lives on a *sibling* key (`enabled: false`), so the same \"settled at authoring time\" case is spelled differently again.\n\n## Why raise it\n\nThe asymmetry argument the repo already accepts, applied to itself. From `action.zod.ts` (#5970, on `visible` vs `disabled` before they were unified):\n\n> An asymmetry between two keys that mean the same *kind* of thing is a dialect nursery: it teaches each consumer to keep its own widening … and every one of those is a second de-facto contract (Prime Directive #12).\n\nTwo spellings for one intent across neighbouring schemas is the same nursery one level up. Today it costs authors a failed parse and a search; the aliases already carry the admission that authors DO move between these surfaces.\n\n## Asks (in order of cost)\n\n1. **Symmetry, no behaviour change** — give `RowCrudActionOverrideSchema` (and the field / section / component shapes) the same `aliases` treatment the action shapes have: `visible → visibleWhen`, `showWhen → visibleWhen`, `disabled → disabledWhen`. Purely a better error; nothing that parses today changes. Note the boolean case on `userActions.*` should point at `enabled`, not at `visibleWhen`, or the hint will just move the confusion.\n2. **A platform decision on ONE canonical**, recorded rather than left implicit. `visibleWhen` is the majority surface and already ADR-0089's canonical, so converging there (with `visible` demoted to a registered alias on the action shapes) is the smaller move — but it needs a call on:\n   * the **boolean arm**: `ExpressionInputSchema` has none, and `visible: false` is common enough that #5970 added it deliberately. Converging means either widening the target schema or telling authors to switch key;\n   * **already-published metadata** written with `visible`, and whatever the retirement process (ADR-0087) requires;\n   * whether ADR-0089's scope was ever meant to reach the action shapes at all.\n\nItem 1 stands on its own even if item 2 lands as \"keep both\" — right now the guard protects one direction of a two-way street.\n"
+}

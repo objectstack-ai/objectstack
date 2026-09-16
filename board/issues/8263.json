@@ -1,0 +1,35 @@
+{
+  "number": 8263,
+  "kind": "pull_request",
+  "title": "fix(types): withhold the Postgres and bare-SQLite phrasings of a driver failure (#8132)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-13T01:23:33Z",
+  "updated_at": "2026-08-13T01:58:21Z",
+  "closed_at": "2026-08-13T01:58:19Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-13T01:58:19Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/8263",
+  "body": "Fixes #8132\n\n`looksLikeInternalErrorLeak` recognised SQLite's `SQLITE_ERROR: no such table: sys_metadata`\nbut not the Postgres phrasing of the same condition, `relation \"sys_metadata\" does not exist`.\nOne failure therefore disclosed a physical table name, or not, depending purely on which engine\nwas underneath — from every boundary that applies the predicate.\n\nImplements **option A** as ruled in triage. Option C (the producer-side fix, so no driver text is\ninterpolated into client-facing messages) is tracked separately as #8136 and is deliberately out\nof scope here.\n\n## What changed\n\n`packages/types/src/error-leak.ts` gains a `DIALECT_LEAK_PHRASINGS` list covering the two engines\nthis repo actually runs (`driver-sql`, `driver-turso`, `driver-sqlite-wasm`):\n\n| phrasing | dialect |\n|:---|:---|\n| `relation \"…\" does not exist` / `column \"…\" does not exist` | Postgres 42P01 / 42703 |\n| `permission denied for table\\|relation\\|sequence\\|database …` | Postgres 42501 |\n| bare `no such table:` / `no such column:` | SQLite / libsql, message-only form |\n\nThe bare SQLite forms are not speculative: `packages/metadata/src/utils/schema-sync-errors.ts`\nalready documents both as shapes libsql and better-sqlite3 raise without a `SQLITE_` prefix, which\nis exactly what the existing `sqlite_` limb needs in order to fire.\n\nNo dialect this repo does not run gets an entry. The unbounded-list trap the module note warns\nabout is real, and `declaresServerFault` remains the answer that does not depend on phrasing.\n\n## The judgment: anchoring, not keywords\n\nA bare `includes('does not exist')` would have matched \"user does not exist\" and started replacing\nlegitimate business answers with `Internal server error`. Every phrasing is anchored on what the\n**driver** always emits and prose usually does not — a quoted identifier, or the trailing colon.\n\nThe negative half is pinned as tests, including two near-misses that prove the anchor is real\nrather than incidental: `This relation does not exist in the diagram` and `The column layout does\nnot exist` both stay `false`. The looser `includes('relation') && includes('does not exist')`\nreading used elsewhere would match the first of those.\n\n`permission denied for` is restricted to physical object kinds. `schema`, `view`, `function` and\n`column` are all ObjectStack **authoring** vocabulary, so a product message could legitimately use\nthem; a miss is the cheap direction, since the outcome is already a 5xx.\n\n## The residual pin, inverted\n\n`package-door-5xx-message-sanitization.test.ts` carried a deliberately-red-in-future case from\nPR #8130 asserting the predicate returned `false` for the Postgres line. It is inverted into the\npositive assertion rather than deleted, and now asserts the full withheld envelope — so the pair\nof cases proves that door answers the same envelope for **both** dialects of one failure. The\noption-C pointer survives in the comment, since a phrasing test can only know the dialects\nsomeone has met.\n\nThat is the only `packages/rest` touch, keeping clear of #8039's landing in `rest-server.ts`.\n\n## Verification\n\n- `packages/types` — 246/246 pass. New cases measured **red first** against the unfixed predicate\n  (10 positives failing, negatives already green), then green after the change.\n- `packages/runtime` — 2301/2301 pass, no flips.\n- `packages/rest` — 1756/1756 pass. Before the pin flip: exactly **one** failure, the named\n  residual pin and nothing else.\n- `typecheck` green on all three packages.\n- Gates: `check:authz-resolver`, `check:cross-package-test-inputs`, `check:filter-alias-parity`,\n  `check:meta-type-normalized`, `check:query-options-erasure`, `check:type-check-coverage`,\n  `check:nul-bytes`, plus five changeset-triggered families surfaced by re-deriving against the\n  actual diff — all green.\n\nVerified at every call site that the predicate still only ever runs where the outcome is already a\n5xx. Seven call sites: four guard on `httpStatus >= 500`, two build a hard-coded 500, and\n`rest-server.ts`'s classifier chooses between `DATA_STORE_FAULT` and `UNCLASSIFIED_FAULT`, both of\nwhich are status 500. One nuance worth recording: at that classifier the predicate selects *which*\nsanitised 500 envelope is returned, so a false positive there shifts `INTERNAL_ERROR` to\n`DATABASE_ERROR` — a code change, never a disclosure.\n\n_Generated by [Claude Code](https://claude.ai/code/session_016pY4Xb2iDecfDtT3CWoiTW)_\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_016pY4Xb2iDecfDtT3CWoiTW)_"
+}

@@ -1,0 +1,34 @@
+{
+  "number": 8147,
+  "kind": "issue",
+  "title": "audit-log (C): retire `export` / `import` / `permission_change` from the `sys_audit_log` action enum and its in-repo consumer surfaces (ADR-0087 registration)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-12T17:57:56Z",
+  "updated_at": "2026-08-12T20:49:51Z",
+  "closed_at": "2026-08-12T20:49:51Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8147",
+  "body": "Sub-issue C of #7675, split by the triage seat (session `session_01GiG1DfMysjbbFLZErAo93G`, 2026-08-12) carrying the maintainer ruling of 2026-08-12 (comment 5261744983 on #7675). This is the retirement half, and it is the **upstream** of the ordering chain — the two consumer-shrink cards are `Blocked-by:` this one.\n\n## Ruling carried (verbatim, binding — not re-adjudicable)\n\n> **退役(3 个)**:`export` / `import`(无此 feature)与 `permission_change`(权限对象的写入已以 create/update 行入账,语义重复行不再造)从 enum、两个 list view、两个 dashboard widget、console `ACTION_OPTIONS` 中一并摘除;按 ADR-0087 登记退役。\n> 原则记录:空 widget + 永远查不到东西的过滤器是可见产品缺陷;审计面宁窄勿谎。\n\n## Routing correction, verified against `origin/main` (this supersedes the seat table on #7675)\n\nThe identity seat's split-request table placed the enum in `packages/spec`. **Measured false**: the action enum lives at `packages/plugins/plugin-audit/src/objects/sys-audit-log.object.ts:101`, and spec's own CHANGELOG records \"the `sys_audit_log` object definition in `plugin-audit` is the row-shape source of truth\". `git grep` over `packages/spec` finds no audit action enum. **There is no `domain:spec` member in this split**; this card routes `domain:identity` because `plugin-audit` is an identity-lane package.\n\n## Scope (this repo, this card)\n\n- Remove `export`, `import`, `permission_change` from the action enum (`sys-audit-log.object.ts:101`).\n- Narrow the `auth_events` list view filter (`sys-audit-log.object.ts:65`) from `['login','logout','permission_change']` to `['login','logout']`. The `config_changes` view stays (it becomes truthful via sub-issue B).\n- Regenerate `plugin-audit`'s generated translation artifacts (os-regen discipline — do not hand-edit).\n- ADR-0087 retirement registration for the three values.\n\n## Consumer-fixture flag (named, per the fixture-triage rule)\n\n`packages/services/service-analytics/src/__tests__/raw-sql-object-routing.test.ts:149,210` seeds rows with `action: 'permission_change'`. Run the service-analytics tests and update those fixtures in this PR — a seeded value the enum no longer accepts must not linger as a green-looking lie.\n\n## Downstream (⛔ not this card)\n\n- Widgets in `packages/platform-objects` → sub-issue D (`domain:metadata`), Blocked-by this card.\n- Console `ACTION_OPTIONS` + `HistoryTimeline` badge maps → objectui sub-issue, Blocked-by this card.\n- Note: sub-issue A may also touch `plugin-audit` — same-lane serialization; do not run A and C in flight together.\n\nSize/model suggestion: M, `opus`."
+}

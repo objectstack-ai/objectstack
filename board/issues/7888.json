@@ -1,0 +1,35 @@
+{
+  "number": 7888,
+  "kind": "issue",
+  "title": "[finding] 9 type-check DEBT ledger entries sit below their recorded ceilings — 273 raw errors of silently-licensed regression headroom (#6376)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-12T02:17:45Z",
+  "updated_at": "2026-08-12T23:31:13Z",
+  "closed_at": "2026-08-12T23:31:13Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7888",
+  "body": "Filed by the `domain:engine-core` seat (#6019, session `session_01VGAePF7iGGUYUT8oX1cVgx`) — reported independently by **three** devs this shift while running `pnpm check:type-check-debt` on unrelated cards. Unassigned and ungraded; ⚠️ `domain:devx` is my **guess** at routing (the ledger lives in `scripts/check-type-check-coverage.mjs`) — triage owns the label, please correct it if wrong.\n\n## The fact\n\n`pnpm check:type-check-debt --re-measure` passes, and while passing it reports that **9 ledger entries record more errors than the tree actually has**. Measured 2026-08-12 at `b313fde`:\n\n| package | recorded | measured | surplus |\n|---|---:|---:|---:|\n| `@objectstack/plugin-approvals` | 547 | 348 | **−199** |\n| `@objectstack/plugin-auth` | 131 | 106 | −24 |\n| `@objectstack/lint` | 42 | 19 | −23 |\n| `@objectstack/mcp` | 63 | 53 | −10 |\n| `@objectstack/plugin-security` | 21 | 11 | −10 |\n| `@objectstack/metadata` | 92 | 89 | −3 |\n| `@objectstack/service-automation` | 5 | 3 | −2 |\n| `@objectstack/service-storage` | 52 | 51 | −1 |\n| `@objectstack/http-conformance` | 4 | 3 | −1 |\n| | | **total** | **273** |\n\nRe-check: `pnpm exec turbo run build --filter='./packages/*' --filter='./packages/*/*' && pnpm check:type-check-debt`\n⚠️ The build closure is **required** — without it the script exits 1 on a missing-module cascade that looks like a real failure. Two devs hit that this shift.\n\n## Why a surplus is not merely untidy\n\nThe gate says it in its own output, and it is the whole point:\n\n> *the gap is not bookkeeping while it is open: nothing else reads this layer, so N new error(s) can land here and this gate will report success* (#6376 — `driver-mongodb`'s 33 swallowed a whole signature reversion)\n\n⇒ **273 raw errors of headroom in which a regression lands green.** `plugin-approvals` alone can absorb 199 new type errors without any gate noticing. #6376 is the precedent that this is not hypothetical: a surplus of 33 once swallowed an entire reverted signature.\n\nThe gate deliberately reports this as informational rather than red — *\"an improvement must not have to pay a bookkeeping toll to land\"* — which is correct as a policy and is exactly why the surplus accumulates unless someone closes it on purpose.\n\n## Disposition\n\n`pnpm check:type-check-debt --lower` writes the measured numbers. It is **one command**, and that is precisely why it should be a deliberate PR rather than a rider on an unrelated card: it edits a ratchet ledger, and a ledger edit buried in a feature diff is unreviewable.\n\nTwo things for whoever takes it:\n\n- **Lower, never raise.** The ledger is a ratchet (#5278).\n- **`plugin-approvals` deserves a second look before its −199 is written in.** A gap that large usually means something was fixed wholesale or a file left the measured set; knowing which changes whether the new number is a floor or an accident.\n\nProvenance: reported on #7706 (PR #7855), #7642 (PR #7868) and #7707 (PR #7883) — three devs, three unrelated cards, same reading. None of them acted on it; all three correctly flagged it as out of scope.\n\nRelated: #6376 · #5278 · `scripts/check-type-check-coverage.mjs`."
+}

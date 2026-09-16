@@ -1,0 +1,28 @@
+{
+  "number": 18379,
+  "kind": "issue",
+  "title": "[finding] H19 resolves `Blocked-by:` targets over the body∪comment UNION while judging only the body — a superseded AND unreadable target yields an UNJUDGED row the card's owner can never clear",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "finding"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-16T06:33:11Z",
+  "updated_at": "2026-09-16T06:33:11Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/18379",
+  "body": "A `Blocked-by:` target that a seat has **superseded in the body** keeps being discovered from the **comment archive**, and when that archived number is also **unreadable**, H19 emits an `UNJUDGED` row that **no correct action by the card's owner can ever clear**.\n\nFound by the `domain:services` seat (#6021) while discharging the patrol anchor's UNJUDGED rows at seating. ⛔ Report-only from this lane: the fix lands in `scripts/pm/check-half-states.mjs`, which is not this lane's. Grading and routing left to triage.\n\n## The measurement\n\nAnchor #9857, sweep `2026-09-16T01:55:47Z`, row:\n\n> **H19** #11975 — `pm:blocked` and 1 of 2 `Blocked-by:` target(s) could NOT be resolved this sweep (`#13515` (HTTP 404)) — the set judged against the BODY's `Blocked-by:` set …\n\nBut #11975's **body** no longer names `#13515` at all. Its machine-readable line reads `Blocked-by: #18336`, refreshed by the triage seat at `2026-09-15T23:14Z` — i.e. **~2.7 h BEFORE that sweep**. The body's only `Blocked-by:` spellings are `#18336` (live) and a struck `` `Blocked-by: #11974` `` quoted inside prose.\n\nWhere `#13515` actually comes from — enumerated over the comment channel:\n\n| carrier | created | `Blocked-by:` target(s) |\n|---|---|---|\n| comment 5639940830 | 2026-09-11T19:59Z | `13515` |\n| comment 5640543168 | 2026-09-11T20:56Z | `13515` |\n| comment 5682194651 | 2026-09-15T14:40Z | `13515` |\n| comment 5689373281 | 2026-09-15T23:13Z | `13515`, `18336` |\n\n⇒ **four archived comments**, one of them triage's own re-pointing note, which necessarily names the old number in order to explain that it is dead.\n\nReadability, re-probed in this act (2026-09-16T06:33Z) with positive controls (⛔ not taken from the sweep's word): `#13515` → **404**, `#13514` → **404**, `#13689` → **404**; controls `#18336` → **200**, `#11973` → **200**.\n\n## Why this is a defect and not the documented design\n\nThe file states the split deliberately, and it is the right split:\n\n> ⚠️ DISCOVERING from both channels and JUDGING from both are two different claims, and only the first one survived measurement. … The union is therefore still what is discovered and resolved, and the BODY's set is what the row judges whenever the body states one (#17564).\n\nThe `UNJUDGED` branch does not sit on the **judging** step — it sits on the **resolution** step, which still runs over the **union**. So #17564's fix corrects which targets decide the verdict, and leaves a superseded-and-unreadable target able to veto the verdict from the archive. The two conditions have to coincide for it to bite, which is why it survived #17564:\n\n1. the target was superseded in the body (so judging correctly ignores it), **and**\n2. the superseded number is unreadable (so resolution cannot dismiss it either).\n\n## Why it cannot be worked around from the card's side\n\n⭐ **This is the part that makes it worth a card rather than a note.** The card's owner did the prescribed thing — refreshed the body line to the live blocker — and the row persists. The only remaining lever would be **editing or deleting the four archived comments**, which is precisely what the protocol forbids: #11975's own body says of its dead pointers 「they record what an earlier seat measured and why the line was migrated, and editing them would erase that」. ⇒ the row re-fires every 6 h, permanently, and `UNJUDGED` rows are the ones the anchor says 「nothing in a later sweep will resolve on its own … the rows to judge BY HAND」. A permanently-unclearable row in that class is noise in exactly the channel that is supposed to have none.\n\n## Scope note — ⛔ not a one-card artefact\n\n`#13514`, `#13515` and `#13689` are all unreadable and all belong to the #11663 platform-admin re-anchor epic. `#13689` is named by **#11973**'s body today, so that card is the same H19 `UNJUDGED` shape through the *body* channel rather than the archive. ⇒ whenever #11973's body is likewise re-pointed, this defect captures it too.\n\n⛔ This card does **not** propose the remedy — whether resolution should narrow to the judged set, whether an unresolvable target outside the judged set should downgrade below `UNJUDGED`, or whether the anchor should render it as a distinct class, is the owning seat's call.\n\nDedup words: `H19 UNJUDGED superseded comment target` · `check-half-states union resolution body judging` · `#17564 body-authoritative Blocked-by` · `unreadable Blocked-by 404 archive` · `unclearable half-state row`\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 8279,
+  "kind": "pull_request",
+  "title": "fix(driver-sql): the first concurrent autonumber insert from two tenants no longer fails on Postgres with 25P02",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-13T02:18:50Z",
+  "updated_at": "2026-08-13T02:53:07Z",
+  "closed_at": "2026-08-13T02:53:05Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-13T02:53:05Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/8279",
+  "body": "Fixes #8269\n\nOn Postgres, two tenants inserting into the same autonumber-bearing object **for the first time concurrently** failed the whole batch with `25P02 current transaction is aborted, commands ignored until end of transaction block`. The counters advanced anyway, so the numbers that attempt reserved were lost — a permanent gap at the start of both tenants' sequences.\n\n## Cause\n\n`getNextSequenceValue` handled the first-insert race by catching the unique violation and recovering **on the same transaction**. On Postgres any statement error aborts the entire transaction, so the recovery `SELECT … FOR UPDATE` **is** the statement that raises the error the report observed — the recovery path could never run there. SQLite and MySQL do not abort a transaction on a statement error, which is why the idiom looked correct and why the SQLite-backed autonumber suite could not catch it.\n\n## Fix\n\nBoth speculative statements now run under a `SAVEPOINT` (`attemptWithoutPoisoning`, a knex nested transaction), released on success and rolled back to on failure, so a failed attempt leaves the surrounding transaction usable on every dialect. The race handler that was written for this case now actually runs: the loser blocks on the winner's row, reads the committed counter, and takes its number from the UPDATE path.\n\n**Both catch-inside-transaction sites are fixed.** The `SELECT … FOR UPDATE` fallback above the measured site had the same shape and the same consequence. Its comment attributed it to dialects that \"reject `.forUpdate()` on a missing row\" — measured on `postgres:16`, that does not happen (a missing row returns zero rows), so the catch was unreachable *for the documented reason*. It is reachable for lock-level failures (deadlock `40P01`, lock/statement timeout `55P03`/`57014`), and each of those was being masked as an uninformative `25P02` by the fallback read. Same savepoint, so the fallback runs on a clean transaction.\n\n## Why savepoint over `INSERT … ON CONFLICT DO NOTHING`\n\nBoth candidates were measured; `ON CONFLICT` lost on evidence:\n\n1. It cannot cover the second site — that one is a `SELECT … FOR UPDATE`, and there is no `ON CONFLICT` for a read.\n2. It does not compose with both key shapes. `ON CONFLICT (object, tenant_id, field)` — the columns the legacy key uses when `sequencesHasKeyHash` is false — raises `42P10 there is no unique or exclusion constraint matching the ON CONFLICT specification` against an **interim** table whose primary key is the four columns `(object, tenant_id, field, scope)`. That pairing is reachable: it is exactly what a failed `ensureSequencesKeyHashShape` migration leaves behind. It would have replaced this bug with a harder one on the deployments least able to absorb it.\n\nThe helper also returns a discriminated result rather than rethrowing, so the caller keeps the original error — an `ON CONFLICT DO NOTHING` affecting zero rows cannot tell \"another writer raced me\" apart from \"the row was rejected for another reason\".\n\n## Refinement to the report: this is not multi-org-only\n\nThe report measured single-tenant bursts as safe. They are only *flakier*. Measured on `postgres:16` before the fix, 5 rounds each of one tenant x N cold concurrent inserts:\n\n| case | rounds failed | code |\n|---|---|---|\n| 1 tenant x2 cold | 0/5 | — |\n| 1 tenant x4 cold | 1/5 | `25P02` |\n| 1 tenant x6 cold | 3/5 | `25P02` |\n| 1 tenant x12 cold | 2/5 | `25P02` |\n\nTwo tenants means two cold counter rows, which makes the window near-certain to be hit rather than occasional — an **amplifier, not a precondition**. Single-organization deployments were exposed too. The regression guard is still written cross-tenant because that is the shape that fails deterministically.\n\n## Tests\n\n`sql-driver-autonumber-cold-race.test.ts`, reusing the existing live-dialect harness (`live-dialect-matrix.testkit.ts` + `OS_TEST_POSTGRES_URL`, the `Temporal Conformance (live PG + MySQL)` job's mechanism) — no second Postgres mechanism invented. The guard is Postgres-backed AND cross-tenant AND cold AND concurrent, all four; an unprovisioned pg cell is a reported skip that becomes a hard failure under `OS_EXPECT_LIVE_DIALECT_MATRIX=1`, so CI cannot silently degrade it. A SQLite cell runs the same burst as an explicitly-labelled **control** (it passed before the fix and must still pass), not as coverage.\n\nReverse verification, prediction stated before running — revert `sql-driver.ts` only, keep the tests:\n\n```\n× issues a contiguous band per tenant on a cold concurrent cross-tenant burst (regression guard)\n× advances each tenant's counter exactly once per issued number (regression guard)\n× leaves the surrounding transaction usable after a statement error\n  -> TypeError: driver.attemptWithoutPoisoning is not a function\n  -> error: select * from \"_objectstack_sequences\" where \"key_hash\" = $1 limit $2 for update\n     - current transaction is aborted, commands ignored until end of transaction block\n✓ ...(sqlite) issues a contiguous band per tenant... (unaffected control)\n✓ ...(sqlite) advances each tenant's counter exactly once... (unaffected control)\n\nTests  3 failed | 2 passed (5)\n```\n\nThe two SQLite rows staying green is the load-bearing half: it confirms the control is genuinely a control rather than a second copy of the guard.\n\nFull `@objectstack/driver-sql` suite against live Postgres 16: **91 files passed, 1629 tests passed, 0 failed**; `typecheck` clean.\n\n## Deliberately unchanged\n\nWhat happens to numbers on a failed attempt. The reservation still commits in its own transaction (`runner.transaction`, `parentTrx ?? this.knex`) and is not rolled back with the caller's insert — ordinary sequence semantics, out of scope here. No behaviour change for SQLite or MySQL: the savepoint makes Postgres behave the way those two already did.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01VoxQqG5FiUHZKCST7KDoZC)_"
+}

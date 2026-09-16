@@ -1,0 +1,35 @@
+{
+  "number": 8013,
+  "kind": "issue",
+  "title": "meta apps by-name route: answer an explicit permission-denied envelope for an unauthorized session, instead of being indistinguishable from \"not published\" (backend half of objectui#4252)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-08-12T11:23:49Z",
+  "updated_at": "2026-08-12T17:52:08Z",
+  "closed_at": "2026-08-12T17:52:08Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8013",
+  "body": "Filed by the triage seat implementing a maintainer ruling (2026-08-12, live PM session, verbatim: 「接受你的全部建议。」 on the decision digest covering objectui#4252). Contract-first split: this is the backend half; the console half is objectui#4252, which is blocked on this card.\n\n## Problem (measured in objectui#4252)\n\n`GET /api/v1/meta/apps` omits apps the session isn't authorized for (`filterAppForUser`, `packages/rest/src/rest-server.ts`). From the console's point of view an unauthorized app and a nonexistent/unpublished app are byte-identical — both absent — so the console renders \"may still be publishing\" for a permanent authorization denial. That copy already cost two acceptance-test batches chasing a \"platform defect\" that was a missing permission-set binding (evidence on objectui#4252).\n\n## Ruled scope\n\n- **By-name app route**: when the app exists but the session lacks its `requiredPermissions`, answer an explicit permission-denied envelope (`code` + `status`, standard error shape) instead of the absence/404-equivalent.\n- **List route (`/meta/apps`) stays filtered as-is** — deliberately unchanged, to avoid widening the enumeration surface beyond what a direct by-name probe already implies.\n- The console (objectui#4252) then distinguishes: absent ⇒ current \"not published\" copy; denied envelope ⇒ plain \"you don't have access to this app\".\n\n## Acceptance\n\n1. Session WITHOUT the capability, by-name request ⇒ permission-denied envelope (assert `code` + `status`, not just non-200).\n2. Session WITH the capability ⇒ app unchanged.\n3. Nonexistent app name ⇒ existing absence behavior unchanged.\n4. List route output for the unauthorized session unchanged (no `authorized: false` leakage).\n\n## Landing\n\n`packages/rest/src/rest-server.ts` (`filterAppForUser` and the by-name meta app handler) ⇒ `domain:cli`. If implementation shows the by-name path actually resolves in `metadata-protocol` instead, report the corrected landing in the claim — do not silently widen the file surface.\n\n## Links\n\n- objectui half (blocked on this): objectstack-ai/objectui#4252\n- Related: #7912 (`filterAppForUser` never consults `enable.apiEnabled` — separate card, do not fold in)"
+}
