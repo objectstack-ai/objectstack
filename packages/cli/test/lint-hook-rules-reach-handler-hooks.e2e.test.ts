@@ -86,7 +86,7 @@ const OBJECT = `{
 /** INTAKE: the reference app's shape — an inline handler, no `body`. */
 const CONFIG_HANDLER = `
 export default {
-  manifest: { id: 'com.example.reach_handler', name: 'reach_handler', version: '1.0.0', type: 'app' },
+  manifest: { id: 'com.example.reach-handler', name: 'reach_handler', version: '1.0.0', type: 'app' },
   objects: [${OBJECT}],
   hooks: [{
     name: 'escalate',
@@ -102,7 +102,7 @@ export default {
 /** CONTROL: the identical statement authored as an explicit `body`. */
 const CONFIG_BODY = `
 export default {
-  manifest: { id: 'com.example.reach_body', name: 'reach_body', version: '1.0.0', type: 'app' },
+  manifest: { id: 'com.example.reach-body', name: 'reach_body', version: '1.0.0', type: 'app' },
   objects: [${OBJECT}],
   hooks: [{
     name: 'escalate',
@@ -124,7 +124,7 @@ export default {
  */
 const CONFIG_HANDLER_OK = `
 export default {
-  manifest: { id: 'com.example.reach_handler_ok', name: 'reach_handler_ok', version: '1.0.0', type: 'app' },
+  manifest: { id: 'com.example.reach-handler-ok', name: 'reach_handler_ok', version: '1.0.0', type: 'app' },
   objects: [${OBJECT}],
   hooks: [{
     name: 'retitle',
@@ -151,7 +151,7 @@ export default {
  */
 const CONFIG_ACTION_TARGET = `
 export default {
-  manifest: { id: 'com.example.reach_action_target', name: 'reach_action_target', version: '1.0.0', type: 'app' },
+  manifest: { id: 'com.example.reach-action-target', name: 'reach_action_target', version: '1.0.0', type: 'app' },
   objects: [{
     name: 'crm_case',
     label: 'Case',
@@ -189,7 +189,7 @@ export default {
  */
 const CONFIG_FUNCTIONS_NAMELESS = `
 export default {
-  manifest: { id: 'com.example.reach_functions_nameless', name: 'reach_functions_nameless', version: '1.0.0', type: 'app' },
+  manifest: { id: 'com.example.reach-functions-nameless', name: 'reach_functions_nameless', version: '1.0.0', type: 'app' },
   objects: [${OBJECT}],
   functions: [{
     handler: async (ctx: any) => {

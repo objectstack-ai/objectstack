@@ -72,7 +72,7 @@ describe('readTemplateNamespace', () => {
     );
     fs.writeFileSync(
       path.join(dir, 'objectstack.config.ts'),
-      'export default defineStack({ manifest: { id: "x" } });\n',
+      'export default defineStack({ manifest: { id: "com.example.x" } });\n',
     );
     expect(readTemplateNamespace(dir)).toBe('fallback');
   });

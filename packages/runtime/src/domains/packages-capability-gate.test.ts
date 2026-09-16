@@ -145,7 +145,7 @@ const WRITE_ROUTES: WriteCase[] = [
     // `overwrite` so the allow-path clears the 409 duplicate guard (the shared
     // registry double answers `getPackage` truthy for any id); the write gate
     // runs FIRST, so the deny cases still 403/401 before this is consulted.
-    { name: 'POST /packages (install)', path: '/', method: 'POST', body: { manifest: { id: 'pkg-new', name: 'n', version: '1.0.0' } }, query: { overwrite: 'true' }, target: (_p, r) => r.installPackage },
+    { name: 'POST /packages (install)', path: '/', method: 'POST', body: { manifest: { id: 'com.example.pkg-new', name: 'n', version: '1.0.0' } }, query: { overwrite: 'true' }, target: (_p, r) => r.installPackage },
     { name: 'PATCH /:id/enable', path: '/pkg-a/enable', method: 'PATCH', target: (_p, r) => r.enablePackage },
     { name: 'PATCH /:id/disable', path: '/pkg-a/disable', method: 'PATCH', target: (_p, r) => r.disablePackage },
     { name: 'POST /:id/publish-drafts', path: '/pkg-a/publish-drafts', method: 'POST', target: (p) => p.publishPackageDrafts },

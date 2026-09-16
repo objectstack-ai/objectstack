@@ -28,8 +28,8 @@ describe('lint protocol/missing-engines-range', () => {
   });
 
   it('accepts the engines.platform and legacy engine.objectstack fallbacks', () => {
-    expect(protocolIssues({ manifest: { id: 'a', engines: { platform: '>=15' } } })).toEqual([]);
-    expect(protocolIssues({ manifest: { id: 'b', engine: { objectstack: '^15.0.0' } } })).toEqual([]);
+    expect(protocolIssues({ manifest: { id: 'com.example.a', engines: { platform: '>=15' } } })).toEqual([]);
+    expect(protocolIssues({ manifest: { id: 'com.example.b', engine: { objectstack: '^15.0.0' } } })).toEqual([]);
   });
 
   it('stays silent for a bare metadata fragment with no manifest', () => {

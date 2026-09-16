@@ -156,7 +156,7 @@ describe('#15006 — the wrap gate and the i18n gate', () => {
   it('auto-registers i18n on both shapes — this one DID lose', () => {
     expect(bundleDeclaresTranslations(additive())).toBe(true);
     expect(bundleDeclaresTranslations(optionB())).toBe(true);
-    expect(bundleDeclaresTranslations({ manifest: { id: 'a' } })).toBe(false);
+    expect(bundleDeclaresTranslations({ manifest: { id: 'com.example.a' } })).toBe(false);
     // The nested-bundle shape a host/aggregator config composes.
     expect(bundleDeclaresTranslations({ manifest: { translations: [{ en: {} }] } })).toBe(true);
     expect(bundleDeclaresTranslations({ i18n: { defaultLocale: 'en' } })).toBe(true);
