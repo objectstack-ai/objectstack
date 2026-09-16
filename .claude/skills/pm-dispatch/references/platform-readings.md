@@ -7,9 +7,9 @@
 - 本仓是否强制队列是仓库 ruleset 事实;`grep merge_group` 答的是队列内是否重跑 CI,两者独立。
 - 缺席不构成反证:有仓 ruleset 强制而无 trigger,队列照收 PR;新仓靠实测,⛔ 不由缺席推断。
 - 权威读数 = 合并尝试本身(回 405 `Changes must be made through the merge queue`)或 rulesets API。
-- 判在不在合并队列的决断读数是 timeline 事件 `added_to_merge_queue` / `removed_from_merge_queue`。
-- 拼写 `GET /repos/{o}/{r}/issues/{pr}/timeline`:可按需重查、一次调用双向答。
-- 它分得开从未入队与入队后被踢;`pull_request.enqueued` webhook 推送式不可重读,只作旁证。
+- 判在不在队列的决断读数是 timeline 事件 `added_to_merge_queue` / `removed_from_merge_queue`,可重查。
+- 拼写 `GET /repos/{o}/{r}/issues/{pr}/timeline`:一次双向答,分得开未入队与被踢;webhook 不可重读。
+- 入队行通常即时可读,曾实测 +75 s 缺席 ⇒ 短窗缺席非读数,复读;`pull_request.enqueued` 旁证。
 - `auto_merge` 字段不只是空,是不稳定:同一 PR 一分钟内先 set 后 None,入队后又回落 off。
 - ⛔ 永不据它判没挂上而重挂 —— 重挂踢队重排。
 - 推送重折已挂 auto-merge 的 PR 可静默掉挂,无字段说明 ⇒ 重折后重发,再按队列 ref 探。

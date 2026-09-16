@@ -970,7 +970,7 @@
 
 import process from 'node:process';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { isEntrypoint } from '../invoked-as.mjs';
 
@@ -6872,6 +6872,15 @@ export function seatDeclaresWait(markerBody) {
  *   `domain:devx @ objectui`      — a lane on a SIBLING board
  *   `repo:cloud` / `skills` / `triage (objectstack-wide)`
  *
+ * plus the free-claim multi-seat shape the protocol added afterwards:
+ *
+ *   `domain:spec · seat 2`        — seat NUMBER 2 of a lane several PMs sit on
+ *
+ * The `· seat N` suffix is a roster axis, not a lane: it is stripped BEFORE the
+ * lane test, so a numbered seat reads as its `domain:*` lane exactly as the
+ * bare post does, and seat 1 keeps the bare title (an absent suffix reads as
+ * seat 1 — every seat post written before the suffix existed is seat 1).
+ *
  * The `foreign` flag is the load-bearing half and it exists for the same reason
  * H19 refuses to guess at a cross-repo 404: this sweep reads ONE repo. A seat
  * whose lane lives in a sibling repo has an inventory this patrol cannot see at
@@ -6881,19 +6890,27 @@ export function seatDeclaresWait(markerBody) {
  * changes. `repo:*`-scoped and lane-less seats (`triage`) are foreign for the
  * same reason: there is no `domain:*` label to count a lane inventory against.
  *
- * @returns {{ lane: string|null, foreign: boolean }}
+ * @returns {{ lane: string|null, foreign: boolean, seat: number|null }} —
+ *   `seat` is the seat number (1 when the title carries no `· seat N`), or
+ *   null when the title does not parse as a seat post at all.
  */
 export function seatLane(issue) {
   const m = /^\[PM seat\]\s*(.*?)\s*—\s*(.*)$/u.exec(issue?.title ?? '');
-  if (!m) return { lane: null, foreign: true };
-  const raw = m[1].trim();
+  if (!m) return { lane: null, foreign: true, seat: null };
+  let raw = m[1].trim();
+  // The `· seat N` suffix (free-claim multi-seat) is a seat NUMBER, wherever
+  // it sits in the lane half; taken out first so the lane test below sees the
+  // same text a bare post would. Absent ⇒ seat 1.
+  const seatM = /\s*·\s*seat\s+(\d+)\b/iu.exec(raw);
+  const seat = seatM ? Number(seatM[1]) : 1;
+  if (seatM) raw = (raw.slice(0, seatM.index) + raw.slice(seatM.index + seatM[0].length)).trim();
   // An `@ <repo>` suffix names the board the lane lives on. Present ⇒ the lane
   // is only READABLE there, whatever its `domain:*` spelling says here.
   const at = /^(.*?)\s*@\s*(\S+)\s*$/u.exec(raw);
   const lane = (at ? at[1] : raw).trim();
   const elsewhere = at ? at[2] !== SWEEP_REPO.repo.split('/')[1] : false;
-  if (!/^domain:[a-z0-9][a-z0-9._-]*$/i.test(lane)) return { lane: null, foreign: true };
-  return { lane, foreign: elsewhere };
+  if (!/^domain:[a-z0-9][a-z0-9._-]*$/i.test(lane)) return { lane: null, foreign: true, seat };
+  return { lane, foreign: elsewhere, seat };
 }
 
 /**
@@ -8479,7 +8496,38 @@ export function seatPostLastEventMs(seat, commentRows) {
 }
 
 /**
- * The newest `Claim:` on a lane, over the dispatched cards this sweep holds.
+ * The `Seat:` line of a claim body — the seat NUMBER the claiming PM sits on
+ * (`Seat: domain:<x>#<n>`, free-claim multi-seat), read with the same key-line
+ * tolerance as `threadReadField` (leading bullet or blockquote, bold or code
+ * decoration around the key).
+ *
+ * Absent ⇒ 1. Every claim written before the line existed belongs to seat 1,
+ * which is the only seat those lanes had, so the default is backward
+ * compatible with every existing claim rather than a guess. A line that is
+ * PRESENT but names no `#<n>` is unreadable and returns null: it matches no
+ * seat, so its claim is invisible to the seat filter below — the file's
+ * under-reporting direction on every unrecognised spelling — and ⛔ never
+ * silently read as seat 1.
+ */
+const CLAIM_SEAT_KEY_LINE = /^[ \t]*(?:[-*+][ \t]+)?>?[ \t]*(?:\*\*)?`?Seat`?(?:\*\*)?[ \t]*:[ \t]*(.*)$/im;
+
+/** @returns {number|null} the seat number, 1 when the line is absent, null when it is present but unreadable. */
+export function claimSeatNumber(body) {
+  const m = CLAIM_SEAT_KEY_LINE.exec(String(body ?? ''));
+  if (!m) return 1;
+  const n = /#(\d+)\b/.exec(String(m[1] ?? ''));
+  return n ? Number(n[1]) : null;
+}
+
+/**
+ * The newest `Claim:` on a lane, over the dispatched cards this sweep holds,
+ * restricted to the claims of ONE seat number.
+ *
+ * Free-claim multi-seat puts several PMs on one lane, one post each. A post is
+ * behind only when a claim of ITS OWN seat outran it — another seat's claim is
+ * that seat's business and would otherwise read every second seat as stale on
+ * every fire. The seat filter narrows the ROWS handed to the shared claim
+ * predicate, so what a claim IS stays `latestClaimComment`'s call (below).
  *
  * ⚠️ The claim predicate is `latestClaimComment` — REUSED, deliberately not
  * re-spelled. The filing card is explicit that the literal `Claim:` marker is
@@ -8499,9 +8547,10 @@ export function seatPostLastEventMs(seat, commentRows) {
  * @param {string} lane — a `domain:*` label.
  * @param {Iterable<any>} issues — open cards this sweep already listed.
  * @param {Map<number, any[]>} commentsByNumber — threads already in the cache.
+ * @param {number} [seat=1] — the seat number whose claims count (`seatLane(post).seat`).
  * @returns {{ number: number, at: number }|null} the newest claim, or null.
  */
-export function newestLaneClaim(lane, issues, commentsByNumber) {
+export function newestLaneClaim(lane, issues, commentsByNumber, seat = 1) {
   let best = null;
   for (const issue of issues ?? []) {
     const labels = labelNames(issue ?? {});
@@ -8509,7 +8558,9 @@ export function newestLaneClaim(lane, issues, commentsByNumber) {
     if (!labels.includes('pm:dispatched') || !labels.includes(lane)) continue;
     const rows = commentsByNumber?.get?.(issue.number);
     if (!rows) continue;
-    const claim = latestClaimComment(rows);
+    // Only this seat's claims: the filter runs on the rows, the predicate is reused.
+    const own = (Array.isArray(rows) ? rows : []).filter((row) => claimSeatNumber(row?.body) === seat);
+    const claim = latestClaimComment(own);
     if (!claim) continue;
     const at = Date.parse(claim.createdAt ?? '');
     if (!Number.isFinite(at)) continue;
@@ -8523,11 +8574,12 @@ export function newestLaneClaim(lane, issues, commentsByNumber) {
  *
  * @param {object} seat — the `pm:seat` post.
  * @param {number|null} seatAt — `T_seat` (`seatPostLastEventMs`).
- * @param {{ number: number, at: number }|null} claim — the newest lane claim.
+ * @param {{ number: number, at: number }|null} claim — the newest lane claim
+ *   OF THIS POST'S SEAT NUMBER (`newestLaneClaim(lane, …, seatLane(seat).seat)`).
  */
 export function h38SeatPostStale(seat, seatAt, claim) {
   if (!labelNames(seat ?? {}).includes('pm:seat')) return null;
-  const { lane, foreign } = seatLane(seat ?? {});
+  const { lane, foreign, seat: seatNo } = seatLane(seat ?? {});
   // A lane this board cannot count has no readable claim population here, so
   // an absent claim would mean "unreadable", not "none" — H32's `foreign`
   // reasoning, and the reason this row declines rather than reporting silence.
@@ -8542,7 +8594,7 @@ export function h38SeatPostStale(seat, seatAt, claim) {
 
   const behindHours = (claim.at - seatAt) / 3_600_000;
   return (
-    `\`pm:seat\` post is STALE — its lane \`${lane}\` carries a \`Claim:\` on #${claim.number} written ` +
+    `\`pm:seat\` post is STALE — its lane \`${lane}\` (seat ${seatNo}) carries a \`Claim:\` on #${claim.number} written ` +
     `${behindHours.toFixed(1)}h AFTER this post's last event (claim ${new Date(claim.at).toISOString()}, ` +
     `post ${new Date(seatAt).toISOString()}). A shift dispatched work and did not record it, so every ` +
     'number the post states — 在飞 / 队列 / 决策箱 / the round number — describes a round that has since ' +
@@ -9577,7 +9629,7 @@ export function h43GovernedReviewRequestGap(pr, governed, approvers, reviewed = 
 //               of these five artefacts a table of bare numbers is a board
 //               reading essentially always.
 //
-// ## Three narrowings, each of which can only make the row QUIETER
+// ## Four narrowings, each of which can only make the row QUIETER
 //
 // 1. A paragraph carrying a timestamp is clean, and the timestamp shape is
 //    `HH:MM[:SS]Z`. ⚠️ The optional SECONDS field is a deliberate widening of
@@ -9592,6 +9644,35 @@ export function h43GovernedReviewRequestGap(pr, governed, approvers, reviewed = 
 // 3. ⛔ No comment-length floor. The fragment requirement is a stronger filter
 //    than a character count, and a length constant with no measurement behind it
 //    is a number nobody can defend later.
+// 4. ⚠️ A `tree` candidate that is lexically part of an IDENTIFIER is not a tip
+//    (#18385). A SESSION ID satisfies the tree shape — measured on a live board,
+//    6 of 9 H44 rows in one sweep were this and nothing else: 「PM session
+//    c5c0ce54」 / 「PM 会话 c5c0ce54」 fired on the shorthand itself, and a
+//    canonical `Session:` line carrying `session_71836b57-…-c6d9d7dd2cc6` fired
+//    on the UUID's LAST SEGMENT, because `-` is a word boundary. ⛔ The cost is
+//    not a noisy row: this row's remedy sentence says 「add the time the reading
+//    was taken」, and there is no board state behind an id — applied to one it
+//    asks a seat to STAMP A READING NOBODY TOOK, and a later reader cannot tell
+//    that stamp from a real one. So the row would teach the wrong discipline,
+//    which is worse than saying nothing. ⛔ The `tree` SHAPE is not loosened —
+//    a real tip is matched exactly as before (`h44TreeCandidateIsIdentifier` is
+//    the whole of the change, and it excludes a CANDIDATE, never a spelling):
+//      • the UUID leg — the candidate sits immediately behind a `-` or `_` that
+//        itself follows a word character, i.e. it is the tail of a longer token.
+//      • the introduction leg — the candidate's SENTENCE says `session` /
+//        `会话` (`session_` is that word with its separator).
+//    ⚠️ SENTENCE, not paragraph, and that boundary is a DECISION pinned in the
+//    self-test rather than a detail: every claim comment carries a `Session:`
+//    line, so a paragraph-scoped test would silence H44 on the whole claim
+//    population — a false negative exactly where CONTROL A lives. A dateless
+//    real tip in its OWN sentence still fires with a session id one line above
+//    it; the declared false negative is the two in ONE sentence, which is the
+//    narrowest shape that covers the measured spellings.
+//    ⚠️ The paragraph is RESCANNED past an excluded candidate — only for a shape
+//    that declares an `exclude`, which is this one alone — so a comment that
+//    fired before can change WHICH fragment it names but a quiet one cannot
+//    start firing. Like narrowings 1–3 it admits strictly more paragraphs as
+//    clean and cannot manufacture a finding.
 //
 // ## Cost, and the residual this row DECLARES rather than hides
 //
@@ -9712,10 +9793,84 @@ export function h43GovernedReviewRequestGap(pr, governed, approvers, reviewed = 
 export const H44_READING_TIMESTAMP = /(?:\b|(?<=T))\d{2}:\d{2}(?::\d{2})?Z\b/;
 
 /**
+ * The word that INTRODUCES an identifier rather than a reading — narrowing 4's
+ * second leg, anchored at the END of the text that precedes the candidate, so
+ * it reads 「the thing right after this word」 and not 「this word occurs
+ * somewhere near」. `session_` is `session` with its separator, so one
+ * alternative reaches both spellings, and 「会话」 is the same word on a
+ * Chinese-language board.
+ *
+ * ⚠️ ADJACENCY is the whole of its precision, and it was measured rather than
+ * chosen: with the leg written as 「the sentence mentions a session」, live
+ * comment `5695539587` on this board — 「every harness-loaded path on
+ * `origin/main` is in this session's checkout HEAD `588475c3`」 — went QUIET,
+ * and that is a real dateless tip reading this row exists to file. A possessive
+ * three words away introduces nothing. Only separators may stand between:
+ * whitespace, a colon in either width, quotes, backticks, emphasis and bracket
+ * characters — the decorations the claim template actually writes.
+ *
+ * ⛔ An intervening WORD (「session id c5c0ce54」) is therefore not excluded
+ * here: it is one measurement away, not a guess to make now.
+ *
+ * ⛔ Case-insensitive on purpose and safe to be: unlike `H44_VERDICT_MARKER`
+ * this word is not a protocol verb whose lower-case twin is ordinary prose —
+ * `Session:`, `session` and `SESSION` all name the same thing.
+ */
+export const H44_IDENTIFIER_INTRO = /(?:session|会话)[\s:：=·*'"`([\]_-]*$/i;
+
+/**
+ * The characters that END a sentence for narrowing 4 — the ASCII set and the
+ * full-width forms a Chinese-language board writes, plus the newline, which is
+ * what keeps a claim's `Session:` LINE from reaching the tip on the line below
+ * it (see the banner: that is the whole of the sentence-vs-paragraph decision).
+ */
+export const H44_SENTENCE_BREAKS = '\n。.!?;！？；';
+
+/**
+ * The part of the candidate's own sentence that PRECEDES it: from the nearest
+ * sentence break before `index` up to `index`. ⛔ Never widened to the
+ * paragraph, and never read past the candidate — what follows a fragment
+ * introduces nothing.
+ */
+export function h44SentenceLead(paragraph, index) {
+  const text = String(paragraph ?? '');
+  const at = Math.max(0, Math.min(Number(index) || 0, text.length));
+  let start = at;
+  while (start > 0 && !H44_SENTENCE_BREAKS.includes(text[start - 1])) start--;
+  return text.slice(start, at);
+}
+
+/**
+ * Narrowing 4's predicate: is this `tree` CANDIDATE lexically part of an
+ * identifier rather than a tip? Two legs, both measured on live claim comments
+ * (#18385), and the banner carries the argument.
+ *
+ * ⛔ It reads the TEXT AROUND the candidate and never the candidate itself: a
+ * session id and a tip are the same 7–40 hex characters, so anything that
+ * judged the token alone would have to loosen the shape for real tips, which is
+ * the one thing this change must not do.
+ */
+export function h44TreeCandidateIsIdentifier(paragraph, index, _matched = '') {
+  const text = String(paragraph ?? '');
+  // The UUID leg: `…-c6d9d7dd2cc6` / `…_c6d9d7dd2cc6` — a separator that itself
+  // follows a word character, so the candidate is the TAIL of a longer token
+  // and not a token a reader could quote as a tip. (A bullet's `- ` or a lone
+  // dash is not this: the separator must be flush against both sides.)
+  if (/[0-9A-Za-z_][-_]$/.test(text.slice(0, index))) return true;
+  // The introduction leg: the candidate's own sentence introduces it as a
+  // session, immediately and with only decoration in between.
+  return H44_IDENTIFIER_INTRO.test(h44SentenceLead(text, index));
+}
+
+/**
  * The reading grammar, as data so the self-test can drive every shape by name
  * and a reader can check the banner against the regexes. ⛔ No `g` flag on any
  * of them: `exec` on a sticky regex carries `lastIndex` between calls, and this
  * row runs the same regex over thousands of paragraphs.
+ *
+ * An entry may carry an `exclude(paragraph, index, matched)` — narrowing 4's
+ * seam, and the `tree` shape is the only holder. A shape without one is read
+ * exactly as before: first match wins, no rescan.
  */
 export const H44_READING_FRAGMENTS = Object.freeze([
   Object.freeze({
@@ -9737,6 +9892,7 @@ export const H44_READING_FRAGMENTS = Object.freeze([
     kind: 'tree',
     what: 'a tree tip',
     re: /\b(?=[0-9a-f]*[a-f])(?=[0-9a-f]*\d)[0-9a-f]{7,40}\b/,
+    exclude: h44TreeCandidateIsIdentifier,
   }),
   Object.freeze({
     kind: 'tableCount',
@@ -9848,6 +10004,33 @@ export function h44ArtefactShape(body, onSeatPost = false) {
 }
 
 /**
+ * The first match of one shape in one paragraph that the shape ADMITS, or null.
+ *
+ * ⛔ The rescan walks the paragraph by SLICING rather than by setting a `g`
+ * flag's `lastIndex`: the declared regexes are frozen and shared across every
+ * comment in a run, and a sticky one would make this row's answer depend on how
+ * many comments preceded it (the grammar pin). A shape with no `exclude` never
+ * reaches the loop's second turn, which is what keeps the anchored `tableCount`
+ * shape — whose `^`/`$` a slice would misread — on its original reading.
+ *
+ * @returns {{ matched: string, index: number }|null}
+ */
+export function h44AdmittedMatch(fragment, paragraph) {
+  const text = String(paragraph ?? '');
+  let offset = 0;
+  while (offset <= text.length) {
+    const m = fragment.re.exec(text.slice(offset));
+    if (!m) return null;
+    const index = offset + m.index;
+    if (typeof fragment.exclude !== 'function' || !fragment.exclude(text, index, m[0])) {
+      return { matched: m[0], index };
+    }
+    offset = index + Math.max(1, m[0].length);
+  }
+  return null;
+}
+
+/**
  * H44's predicate — null when the comment is clean or out of scope, else the
  * first reading-shaped fragment that carries no time.
  *
@@ -9862,9 +10045,9 @@ export function h44UntimestampedReading(body, onSeatPost = false) {
     if (!paragraph.trim()) continue;
     if (H44_READING_TIMESTAMP.test(paragraph)) continue;
     for (const fragment of H44_READING_FRAGMENTS) {
-      const m = fragment.re.exec(paragraph);
+      const m = h44AdmittedMatch(fragment, paragraph);
       if (m) {
-        return { shape, kind: fragment.kind, what: fragment.what, fragment: m[0].trim().slice(0, H44_FRAGMENT_ECHO_CAP) };
+        return { shape, kind: fragment.kind, what: fragment.what, fragment: m.matched.trim().slice(0, H44_FRAGMENT_ECHO_CAP) };
       }
     }
   }
@@ -14455,16 +14638,18 @@ export function h63StaleFindingBesideGrade(issue) {
 // Every agent on this board shares one protocol identity, so an artefact's
 // GitHub author cannot say WHO wrote it. The protocol answers that with the
 // TEXT: 「`user.login` 记令牌不记席位,归属 = 文本里的 session ID」
-// (`.claude/skills/pm-dispatch/SKILL.md`), and the write identity follows the
-// CHANNEL rather than the account — 「REST 按会话为 `claude[bot]` 或用户,MCP
-// 恒用户」 (`.claude/skills/pm-dispatch/references/rest-channel.md`).
+// (`.claude/skills/pm-dispatch/SKILL.md`), and the login it does record is a
+// TOKEN CLASS bound to the Claude Code ACCOUNT rather than to the session — it
+// is read back from each write and can flip between two writes of ONE session
+// with no seat act behind it
+// (`.claude/skills/pm-dispatch/references/platform-readings.md` 配额段).
 //
 // So the half-state is an artefact whose text asserts seat/dev provenance —
 // a claim, a report, a contract review, a filing header — while carrying no
 // `session_…` id anywhere. The text says a seat or a dev wrote it; nothing in
-// it says WHICH, and the author field records only the token that session was
-// handed. Two carriers disagree about one live artefact and the repair is on
-// the board: that is `state`'s definition exactly, and the repair is one an
+// it says WHICH, and the author field records only the token class behind that
+// write. Two carriers disagree about one live artefact and the repair is on the
+// board: that is `state`'s definition exactly, and the repair is one an
 // owner can actually perform — it gives the artefact its id.
 //
 // ## The premise this row was BUILT on, and the measurement that retired it
@@ -14483,8 +14668,8 @@ export function h63StaleFindingBesideGrade(issue) {
 //   slug (#18045, objectui#9404, PR #18051, comment 5652138683).
 //
 // The first two are both REST-proxy writes and differ only in the TOKEN CLASS
-// the session was handed. The field names the APP whose credential signed the
-// write; it never names the TOOL. ⛔ So no channel is inferred from it here,
+// behind them. The field names the APP whose credential signed the write; it
+// never names the TOOL. ⛔ So no channel is inferred from it here,
 // and an MCP-tool write is indistinguishable from a REST-proxy write in this
 // payload. What the field still separates is an App credential from none: an
 // absent slug is a user PAT, outside the App entirely.
@@ -14507,10 +14692,12 @@ export function h63StaleFindingBesideGrade(issue) {
 //
 // ⛔ Nothing here relaxes it. It is reported as an INFORMATIONAL count plus a
 // login roster in the summary clause, on every run, and files NO row — because
-// the token class is handed to a session at start rather than chosen at write
-// time, so no act available to a user-token session moves its content to the
-// App. A row naming no remedy that a reader could perform is the unclearable
-// shape above; the clause states the exposure without spending the cap on it.
+// the token class follows the Claude Code ACCOUNT and flips between writes
+// with no seat act behind it: nothing available to a user-token session
+// chooses the class of its own write, and nothing moves content it already
+// authored to the App. A row naming no remedy that a reader could perform is
+// the unclearable shape above; the clause states the exposure without spending
+// the cap on it.
 //
 // ## The artefact is recognised STRUCTURALLY — ⛔ and never from a roster
 //
@@ -14878,7 +15065,7 @@ export function h64UnattributedSeatContent(text, more = 0, since = UNATTRIBUTED_
       : `this open ${kind}`;
   const authorClause = author
     ? `GitHub records its author as \`${author.login}\` (\`user.type\` = \`${author.type}\`), which is the ` +
-      'TOKEN that session was handed and not the seat that wrote'
+      'TOKEN CLASS that write was made with and not the seat that wrote'
     : 'GitHub serves no readable `user` for it, so not even the token is known — the artefact is unattributed ' +
       'on both carriers at once';
   const moreClause =
@@ -14892,9 +15079,10 @@ export function h64UnattributedSeatContent(text, more = 0, since = UNATTRIBUTED_
       : '';
   return (
     `${subject} carries ${signature.what} — a seat/dev artefact — and NO session id appears anywhere in its ` +
-    `text. ${authorClause}: attribution on this board is the \`session_\` id the text carries, because the ` +
-    'write identity follows the CHANNEL and one protocol identity is shared by every agent here ' +
-    '(`.claude/skills/pm-dispatch/SKILL.md`, `.claude/skills/pm-dispatch/references/rest-channel.md`). The two ' +
+    `text. ${authorClause}: attribution on this board is the \`session_\` id the text carries, because one ` +
+    'protocol identity is shared by every agent here and the token class behind that login follows the Claude ' +
+    'Code ACCOUNT rather than the session (`.claude/skills/pm-dispatch/SKILL.md`, ' +
+    '`.claude/skills/pm-dispatch/references/platform-readings.md` 配额段). The two ' +
     'carriers disagree about one live artefact: the text says a seat or a dev wrote it, and nothing says which ' +
     'session, so a reader who needs the author of this act has nobody to ask and no branch to read.' +
     `${moreClause}${dated} Remedy — WHO and HOW: the seat or dev that owns the artefact gives it its session ` +
@@ -15021,9 +15209,10 @@ export function h64ExposureClause(counts = {}, cap = H64_LOGIN_ROSTER_CAP) {
   return (
     `INFORMATIONAL, no remedy and no row: ${counts.seatSignedUser ?? 0} signed text(s) are authored by a USER ` +
     `account rather than \`claude[bot]\`${list}. A suspended user account hides everything it authored — ` +
-    'measured on this board, not hypothetical — so those artefacts carry that exposure; but the token class is ' +
-    'handed to a session at start rather than chosen at write time, and no act available to a user-token session ' +
-    'moves its content to the App, so this half names NO remedy and files NO row rather than re-filing an ' +
+    'measured on this board, not hypothetical — so those artefacts carry that exposure; but the token class ' +
+    'follows the Claude Code ACCOUNT and flips between writes with no seat act behind it, and nothing ' +
+    'available to a user-token session chooses the class of its own write or moves content it already ' +
+    'authored to the App, so this half names NO remedy and files NO row rather than re-filing an ' +
     `unclearable one every sweep. ${counts.seatSignedUserPat ?? 0} of them carry no App credential at all (a ` +
     `user PAT) and ${counts.seatSignedUserUnreadChannel ?? 0} ride the \`/pulls\` shape that does not serve ` +
     '`performed_via_github_app`; ⛔ that field names the APP whose credential signed a write and never the TOOL, ' +
@@ -21256,12 +21445,13 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
   // would put an accusation of staleness on a post that correctly says it is
   // not running a shift.
   for (const { issue, rows } of seatMarkers.values()) {
-    const { lane } = seatLane(issue);
+    const { lane, seat } = seatLane(issue);
     if (!lane) continue;
+    // Free-claim multi-seat: the post is compared against ITS seat's claims only.
     const stale = h38SeatPostStale(
       issue,
       seatPostLastEventMs(issue, rows),
-      newestLaneClaim(lane, seen.values(), commentCache),
+      newestLaneClaim(lane, seen.values(), commentCache, seat),
     );
     if (stale) findings.push([issue, 'H38', stale]);
   }
@@ -25164,7 +25354,7 @@ async function selfTest() {
   t('⛔ H64 author: …and comment 5654046782 — the App-authored claim that DOES name its session — is clean', h64UnattributedSeatContent(text64('comment', comment5654046782(), carrier64)), null);
   t('H64 author: …as is the byte-identical comment under a USER login, because the ID decides and the login does not', h64UnattributedSeatContent(text64('comment', comment5654046782({ user: user64('os-tesla') }), carrier64)), null);
   t('H64 author: the row names the login it read', row64(claim64()).includes('`os-tesla`'), true);
-  t('H64 author: …and says that login is the TOKEN the session was handed, not the seat', row64(claim64()).includes('TOKEN that session was handed and not the seat that wrote'), true);
+  t('H64 author: …and says that login is the TOKEN CLASS the write was made with, not the seat', row64(claim64()).includes('TOKEN CLASS that write was made with and not the seat that wrote'), true);
   t('H64 author: an unreadable `user` no longer silences the row — the finding is about the TEXT', typeof h64UnattributedSeatContent(text64('comment', comment5652138683({ user: undefined }), carrier64)), 'string');
   t('H64 author: …and the row says so rather than guessing one', row64(text64('comment', comment5652138683({ user: undefined }), carrier64)).includes('serves no readable `user`'), true);
   t('H64 author: a `Bot` type is an App, whatever its login', isApp64({ user: { login: 'some-app[bot]', type: 'Bot' } }), true);
@@ -25197,7 +25387,7 @@ async function selfTest() {
   t('H64 exposure: the suspension hazard is stated, ⛔ not relaxed', h64ExposureClause({}).includes('A suspended user account hides everything it authored'), true);
   t('H64 exposure: …as measured on this board rather than hypothetical', h64ExposureClause({}).includes('measured on this board, not hypothetical'), true);
   t('⛔ H64 exposure: …and it names NO remedy, which is the whole reason it files no row', h64ExposureClause({}).includes('names NO remedy and files NO row'), true);
-  t('H64 exposure: …and says why no remedy exists — the token class is handed to a session, not chosen', h64ExposureClause({}).includes('handed to a session at start rather than chosen at write time'), true);
+  t('H64 exposure: …and says why no remedy exists — the class follows the ACCOUNT, and no act of the session chooses it', h64ExposureClause({}).includes('follows the Claude Code ACCOUNT and flips between writes with no seat act behind it'), true);
   t('H64 exposure: the PAT reading and the unread-channel reading are separate numbers', h64ExposureClause({ seatSignedUserPat: 2, seatSignedUserUnreadChannel: 5 }).includes('2 of them carry no App credential at all (a user PAT) and 5 ride'), true);
   t('H64 exposure: a bare clause renders numbers, never `undefined`', h64ExposureClause({}).includes('undefined'), false);
   t('H64 exposure: ⛔ no less-than fragment — it is rendered into a GitHub issue body', /[<>]/.test(h64ExposureClause({ seatSignedLogins: ['os-warren'] })), false);
@@ -25219,7 +25409,7 @@ async function selfTest() {
   t('H64 row: …a PR as a pull request', row64(text64('pull request', pr18051({ body: BODY18051_NOID }))).includes('this open pull request'), true);
   t('H64 row: …and a card as a card', row64(text64('card', card9404({ body: BODY9404_NOID }))).includes('this open card'), true);
   t('H64 row: it cites the rule by FILE rather than by issue number', row64(claim64()).includes('`.claude/skills/pm-dispatch/SKILL.md`'), true);
-  t('H64 row: …both halves of it', row64(claim64()).includes('`.claude/skills/pm-dispatch/references/rest-channel.md`'), true);
+  t('H64 row: …both halves of it', row64(claim64()).includes('`.claude/skills/pm-dispatch/references/platform-readings.md`'), true);
   t('H64 row: the remedy is the artefact\'s own session id', row64(claim64()).includes('gives it its session id'), true);
   t('H64 row: …an edit in place is enough where the owner can edit', row64(claim64()).includes('an edit in place is enough'), true);
   t('H64 row: …and the original STAYS as history', row64(claim64()).includes('the original STAYS as history'), true);
@@ -28245,6 +28435,43 @@ async function selfTest() {
   t('H38 lane: an em-dash claim stays invisible (malformed by ruling)', newestLaneClaim('domain:services', [laneCard(1, ['pm:dispatched', 'domain:services'])], new Map([[1, [{ body: 'Claim — the skills seat', created_at: '2026-08-30T00:00:00Z' }]]])), null);
   t('H38 lane: an unreadable claim stamp is not an ordering', newestLaneClaim('domain:services', [laneCard(1, ['pm:dispatched', 'domain:services'])], new Map([[1, [{ body: 'Claim: x', created_at: 'nope' }]]])), null);
 
+  // Free-claim multi-seat: several PMs on one lane, one post per seat, and a
+  // post is compared only against claims of ITS seat number. The title suffix
+  // and the claim's `Seat:` line are the two readings; both default to seat 1.
+  const seat2Title = '[PM seat] domain:services · seat 2 — 🟢 os-b (session_y)';
+  t('H38 seat: a `· seat N` title suffix parses as the LANE, not foreign', seatLane(seat38(seat2Title)).lane, 'domain:services');
+  t('H38 seat: …and is not foreign', seatLane(seat38(seat2Title)).foreign, false);
+  t('H38 seat: …and carries the seat number', seatLane(seat38(seat2Title)).seat, 2);
+  t('H38 seat: a bare title is seat 1', seatLane(seat38()).seat, 1);
+  t('H38 seat: a numbered seat on a SIBLING board is still foreign', seatLane(seat38('[PM seat] domain:devx · seat 3 @ objectui — 🟢 os-b')).foreign, true);
+  t('H38 seat: …and still carries its number', seatLane(seat38('[PM seat] domain:devx · seat 3 @ objectui — 🟢 os-b')).seat, 3);
+  t('H38 seat: a numbered seat still buys the H32 comment fetch', h32NeedsSeatComments(seat38(seat2Title)), true);
+  t('H38 seat: an unparseable title has no seat', seatLane(seat38('not a seat title')).seat, null);
+  t('H38 seat: a claim with no `Seat:` line is seat 1', claimSeatNumber('Claim: x\nBranch: `claude/issue-1-a`'), 1);
+  t('H38 seat: `Seat: domain:services#2` reads 2', claimSeatNumber('Claim: x\nSeat: domain:services#2'), 2);
+  t('H38 seat: …backticked too', claimSeatNumber('Claim: x\nSeat: `domain:services#2`'), 2);
+  t('H38 seat: …and behind a bullet then a blockquote, bold key', claimSeatNumber('- > **Seat**: domain:services#4'), 4);
+  // ⛔ Blockquote-then-bullet is out, exactly as `claimedBranches` pins for `Branch:` — invisible, so absent, so seat 1.
+  t('H38 seat: a `> - Seat:` line is not read (measured shape, same as `Branch:`)', claimSeatNumber('> - Seat: domain:services#4'), 1);
+  t('H38 seat: a `Seat:` line naming no number is unreadable, not seat 1', claimSeatNumber('Claim: x\nSeat: domain:services'), null);
+  t('H38 seat: prose mentioning a seat is not a `Seat:` line', claimSeatNumber('the seat: domain:services#2 is busy'), 1);
+  const seatRow = (seatLine, iso) => [{ body: `Claim: PM loop round 1\nSession: \`session_x\`\n${seatLine}`, created_at: iso }];
+  const oneCard = [laneCard(1, ['pm:dispatched', 'domain:services'])];
+  const seat2Claim = new Map([[1, seatRow('Seat: `domain:services#2`', '2026-08-30T00:00:00Z')]]);
+  const seat1Claim = new Map([[1, seatRow('Branch: `claude/issue-1-a`', '2026-08-30T00:00:00Z')]]);
+  t('H38 seat: a SAME-seat newer claim is found (seat 2 post, seat 2 claim)', newestLaneClaim('domain:services', oneCard, seat2Claim, 2).number, 1);
+  t('H38 seat: ANOTHER seat\'s claim is not counted (seat 1 post, seat 2 claim)', newestLaneClaim('domain:services', oneCard, seat2Claim, 1), null);
+  t('H38 seat: an absent `Seat:` line is seat 1 — the seat 1 post sees it', newestLaneClaim('domain:services', oneCard, seat1Claim, 1).number, 1);
+  t('H38 seat: …and the seat 2 post does not', newestLaneClaim('domain:services', oneCard, seat1Claim, 2), null);
+  t('H38 seat: the default seat argument is 1, so every pre-existing call reads as before', newestLaneClaim('domain:services', laneIssues, laneComments).number, 13398);
+  t('H38 seat: an unreadable `Seat:` line matches no seat', newestLaneClaim('domain:services', oneCard, new Map([[1, seatRow('Seat: domain:services', '2026-08-30T00:00:00Z')]]), 1), null);
+  t('H38 seat: the newest SAME-seat claim wins over a newer other-seat one', newestLaneClaim('domain:services', oneCard, new Map([[1, [...seatRow('Seat: domain:services#1', '2026-08-29T00:00:00Z'), ...seatRow('Seat: domain:services#2', '2026-08-30T00:00:00Z')]]]), 1).at, at38('2026-08-29T00:00:00Z'));
+  // End to end on the post: a seat-2 post is judged against the claim handed to it, and names its seat.
+  t('H38 seat: a seat-2 post behind a same-seat claim -> finding', typeof h38SeatPostStale(seat38(seat2Title), SEAT_AT_38, claim38(13398, '2026-08-30T07:30:00Z')), 'string');
+  t('H38 seat: …and the finding names the seat', h38row(seat38(seat2Title), SEAT_AT_38, claim38(13398, '2026-08-30T07:30:00Z')).includes('seat 2'), true);
+  t('H38 seat: …while the bare post names seat 1', h38row(seat38(), SEAT_AT_38, claim38(13398, '2026-08-30T07:30:00Z')).includes('seat 1'), true);
+  t('H38 seat: a seat-2 post with no same-seat claim -> clean', h38SeatPostStale(seat38(seat2Title), SEAT_AT_38, newestLaneClaim('domain:services', oneCard, seat1Claim, 2)), null);
+
   // -- H39 — the closed `pm:*` residue census (#13526, report-only) ---------
   //
   // The card's central fence, restated as an assertion rather than as prose:
@@ -29237,6 +29464,72 @@ Doubles as the fire's **write self-check** (step 0). \`201\` is not the reading.
   t('H44 summary: …with the located count beside the read count', saidBy('h44Readings', summaryLine({ readingSeatRead: 6, readingSeatCandidates: 6, readingSeatNewest: 5 }, 0)).includes('5 of those post(s) had that page LOCATED'), true);
   t('H44 summary: …and that the page is shared rather than bought per row', saidBy('h44Readings', summaryLine({}, 0)).includes('shared with H56, H64 and H65'), true);
   t('H44: the window count key rides the enumerated forwarding contract too', SWEEP_COUNT_KEYS.includes('readingSeatNewest'), true);
+
+  // -- H44's tree shape: an IDENTIFIER is not a tip (#18385) -----------------
+  //
+  // ⭐ The three firing inputs are the live spellings measured on the cloud
+  // board, where 6 of 9 H44 rows in one sweep were this and nothing else. What
+  // makes them worse than noise is the row's own remedy: 「add the time the
+  // reading was taken」 applied to a session id asks a seat to stamp a reading
+  // nobody took. CONTROL A and CONTROL B are the regression pins that say the
+  // row still does its job, and CONTROL C is the canonical spelling that was
+  // already quiet — the three of them are what make the change a NARROWING
+  // rather than a silencing.
+  const TIP_18385 = '480080c7a0';
+  const CLAIM_SHORTHAND = 'Claim: PM session c5c0ce54 — dispatching this card';
+  const CLAIM_SHORTHAND_ZH = 'Claim: PM 会话 c5c0ce54 派发本卡(席位 F)。';
+  const CLAIM_UUID = 'Claim: PM loop round 1 (skills seat)\nSession: `session_71836b57-5db6-459d-ae4d-c6d9d7dd2cc6`';
+  const CLAIM_TIP_A = `Claim: PM loop round 1\nreviewed head \`${TIP_18385}\` of the PR`;
+  const CLAIM_TIP_B = `${CLAIM_TIP_A} at 2026-09-16T06:48Z`;
+  const CLAIM_CANONICAL = 'Claim: PM loop round 1\nSession: `session_01TAUTP6Yky8QWoHUAPDKNJQ`';
+  t('H44 identifier: ⭐ 「PM session c5c0ce54」 is an id, not a tip — quiet', h44hit(CLAIM_SHORTHAND), null);
+  t('H44 identifier: ⭐ …and the 「PM 会话」 spelling of the same claim', h44hit(CLAIM_SHORTHAND_ZH), null);
+  t('H44 identifier: ⭐ …and a canonical `Session:` line, which fired on the UUID\'s LAST SEGMENT', h44hit(CLAIM_UUID), null);
+  t('H44 identifier: ⭐ CONTROL A — a dateless REAL tip still fires, which is the whole point', h44kind(CLAIM_TIP_A), 'tree');
+  t('H44 identifier: ⭐ …echoed as the tip itself, so the remedy still names what to date', h44frag(CLAIM_TIP_A), TIP_18385);
+  t('H44 identifier: ⭐ CONTROL B — the same tip WITH its stamp stays quiet', h44hit(CLAIM_TIP_B), null);
+  t('H44 identifier: ⭐ CONTROL C — the canonical session spelling was already quiet and still is', h44hit(CLAIM_CANONICAL), null);
+  // ⭐ CONTROL D, and it is the reason the introduction leg reads ADJACENCY
+  // rather than 「the sentence mentions a session」: this is comment 5695539587
+  // on this board, a REAL dateless tip reading, and the loose spelling of the
+  // leg silenced it. A possessive three words away introduces nothing.
+  const POSSESSIVE_18385 = 'Claim: x\n\n**Harness reading** — every harness-loaded path on `origin/main` is in this session\'s checkout HEAD `588475c3` (the STALE reading that closed the previous shift)';
+  t('H44 identifier: ⭐ CONTROL D — 「this session\'s checkout HEAD` + a tip」 is a READING and still fires', h44frag(POSSESSIVE_18385), '588475c3');
+  // The sentence-vs-paragraph DECISION, both directions. A claim carries a
+  // `Session:` line by template, so a paragraph-scoped test would silence the
+  // whole claim population — CONTROL A's own habitat.
+  t('H44 identifier: a session line ABOVE a dateless tip does not silence it — the break is the newline', h44frag(`${CLAIM_CANONICAL}\n\`5bc2f2727ae\` is the tip`), '5bc2f2727ae');
+  t('H44 identifier: …and the rescan reaches a real tip past an excluded id in ONE sentence', h44frag(`Claim: x\n\nPM session c5c0ce54 reviewed head ${TIP_18385} of the PR`), TIP_18385);
+  // ⛔ The two declared residuals: a word between the introduction and the
+  // candidate is NOT excluded (one measurement away, not a guess), and no other
+  // shape is touched at all.
+  t('H44 identifier: ⛔ an intervening word is not an introduction — 「session id …」 still fires', h44kind('Claim: x\n\nPM session id c5c0ce54 dispatching'), 'tree');
+  t('H44 identifier: ⛔ a count beside a session id is still a count', h44kind('Claim: PM session c5c0ce54 — 12 open cards on this lane.'), 'count');
+  // ⛔ The SHAPE is not loosened for real tips — pinned as the regex source, so
+  // a future widening of the token itself cannot ride in under this row.
+  const tree18385 = H44_READING_FRAGMENTS.find((f) => f.kind === 'tree');
+  t('H44 identifier: ⛔ the `tree` shape itself is byte-for-byte what it was', tree18385.re.source, '\\b(?=[0-9a-f]*[a-f])(?=[0-9a-f]*\\d)[0-9a-f]{7,40}\\b');
+  t('H44 identifier: …and the exclusion is declared on exactly one shape', H44_READING_FRAGMENTS.filter((f) => typeof f.exclude === 'function').length, 1);
+  t('H44 identifier: …that one being the tree shape', typeof tree18385.exclude, 'function');
+  // The two legs, driven directly.
+  t('H44 identifier leg: the UUID tail — a separator flush against a word character', h44TreeCandidateIsIdentifier('session_71836b57-5db6-459d-ae4d-c6d9d7dd2cc6', 32), true);
+  t('H44 identifier leg: ⛔ …but a bullet dash is not that — the separator must be flush on BOTH sides', h44TreeCandidateIsIdentifier('- 5bc2f2727ae is the tip', 2), false);
+  t('H44 identifier leg: the introduction — `session` with only decoration between', h44TreeCandidateIsIdentifier('PM session `c5c0ce54`', 12), true);
+  t('H44 identifier leg: …and 「会话」 is the same word', h44TreeCandidateIsIdentifier('PM 会话 c5c0ce54', 6), true);
+  t('H44 identifier leg: ⛔ a possessive three words away is not an introduction', h44TreeCandidateIsIdentifier('this session\'s checkout HEAD 588475c3', 29), false);
+  t('H44 identifier leg: the lead stops at the sentence break, so a `Session:` LINE cannot reach the line below', h44SentenceLead('Session: `session_01x`\n`5bc2f2727ae` is the tip', 24), '`');
+  t('H44 identifier leg: …and a full-width stop breaks it too', h44SentenceLead('会话 c5c0ce54。tip 5bc2f2727ae', 16), 'tip ');
+  // The rescan seam. ⛔ A shape with no `exclude` is read exactly as before —
+  // first match wins, no slicing, which is what keeps the ANCHORED `tableCount`
+  // shape on its original reading.
+  // ⛔ Read through `?.` — a case that THROWS on a null takes the whole
+  // self-test down before its verdict, hiding every sibling reading with it.
+  const admitted18385 = (kind, paragraph) => h44AdmittedMatch(H44_READING_FRAGMENTS.find((f) => f.kind === kind), paragraph);
+  t('H44 rescan: the first admissible match is returned with its index', String(admitted18385('tree', `session c5c0ce54 then ${TIP_18385}`)?.matched ?? ''), TIP_18385);
+  t('H44 rescan: …and its index is the position in the WHOLE paragraph, not the slice', Number(admitted18385('tree', `session c5c0ce54 then ${TIP_18385}`)?.index ?? -1), 22);
+  t('H44 rescan: a paragraph of nothing but excluded candidates has no match', admitted18385('tree', 'session c5c0ce54 and 会话 5bc2f2727ae'), null);
+  t('H44 rescan: a shape with no exclusion returns its first match untouched', String(admitted18385('count', 'we hold 12 open cards and 4 PRs')?.matched ?? ''), '12 open cards');
+  t('H44 rescan: …and the anchored tableCount shape still reads its row', String(admitted18385('tableCount', '| objectstack | **2** |')?.matched ?? '').includes('**2**'), true);
 
   // -- H45 — reserved and handed over at once (#15667, report-only) ----------
   // Both directions of a pure label intersection. The neighbour cases pin that
@@ -31642,6 +31935,90 @@ Doubles as the fire's **write self-check** (step 0). \`201\` is not the reading.
   t('#13544 control: a genuinely unreachable host still refuses', classifyTransportProbe({ token: 'proxy-injected', authed: { networkError: 'ECONNREFUSED' }, transport: describeTransportRoute({ env: { HTTPS_PROXY: 'http://127.0.0.1:1' } }) }).kind, 'host-unreachable');
   t('#13544 control: …and the refusal exit code is still 3', EXIT_PREREQUISITE_NOT_MET, 3);
 
+  // -- CLI surface (#18369) --------------------------------------------------
+  //
+  // Two layers, because they fail separately: the PURE cases judge
+  // `refuseUnknownArgs` and `USAGE`; the SPAWNED ones below judge the ENTRY —
+  // which branch runs first, and whether anything reached the network before
+  // it. No in-process call can observe "no request was made", and the filed
+  // defect was exactly an ordering one.
+  t('#18369 the standing caller\'s own argv is honoured', refuseUnknownArgs(['--format=markdown', '--provenance=run 1 · commit abc']), null);
+  t('#18369 no argument at all is honoured (the default sweep)', refuseUnknownArgs([]), null);
+  t('#18369 --self-test is honoured', refuseUnknownArgs(['--self-test']), null);
+  t('#18369 --probe is honoured', refuseUnknownArgs(['--probe']), null);
+  t('#18369 --help/-h are honoured', refuseUnknownArgs(['--help']) === null && refuseUnknownArgs(['-h']) === null, true);
+  t('#18369 --provenance with an empty value is honoured', refuseUnknownArgs(['--provenance=']), null);
+  // ⚖️ The NAME is this layer's judgement; the VALUE stays `parseOutputOptions`'.
+  // A second format vocabulary here would be a second list to drift.
+  t('#18369 a bad --format VALUE is not this layer\'s refusal', refuseUnknownArgs(['--format=bogus']), null);
+  t('#18369 …and is still refused, by the layer that owns it', typeof parseOutputOptions(['--format=bogus']).error, 'string');
+  // The filer's positive control, and the card's headline case.
+  t('#18369 a flag that certainly does not exist is refused BY NAME', refuseUnknownArgs(['--totally-bogus-flag-xyz']), 'unknown option --totally-bogus-flag-xyz');
+  // The wrong-TARGET token: `--repo=` never existed here, was silently dropped,
+  // and the sweep then ran against the DEFAULT board.
+  t('#18369 a --repo= this tool never had is refused by name', refuseUnknownArgs(['--repo=objectstack-ai/objectui']), 'unknown option --repo');
+  t('#18369 a near-miss of a real option is refused by name', refuseUnknownArgs(['--formats=markdown']), 'unknown option --formats');
+  t('#18369 a value option spelled with a SPACE is refused, not silently defaulted', String(refuseUnknownArgs(['--format', 'markdown'])).startsWith('--format carries its value in the same token'), true);
+  t('#18369 a bare positional is refused and told where the board comes from', String(refuseUnknownArgs(['objectstack-ai/objectui'])).startsWith('unexpected argument "objectstack-ai/objectui"'), true);
+  // ⛔ Deliberate: the proxy flag is node's, read at process START, so after the
+  // script path it never did anything. Refusing it is how a caller finds out.
+  t('#18369 the proxy flag AFTER the script path is refused (it is node\'s, not ours)', refuseUnknownArgs([PROXY_FLAG]), `unknown option ${PROXY_FLAG}`);
+  t('#18369 the refusal names the FIRST offending token, not the last', refuseUnknownArgs(['--bogus-one', '--bogus-two']), 'unknown option --bogus-one');
+  // One roster, both halves: a flag documented and not honoured — or honoured
+  // and not documented — is a case here, never a code review.
+  t('#18369 USAGE documents every flag on the roster', CLI_FLAGS.filter((f) => !USAGE.includes(f)).join(','), '');
+  t('#18369 USAGE documents every value option on the roster', CLI_VALUE_OPTIONS.filter((o) => !USAGE.includes(`${o}=`)).join(','), '');
+  t('#18369 every format this tool renders is named in USAGE', OUTPUT_FORMATS.filter((f) => !USAGE.includes(f)).join(','), '');
+  t('#18369 USAGE names the env the board comes from, since no flag does', USAGE.includes('PM_SWEEP_REPO'), true);
+  t('#18369 USAGE opens with the word a caller greps for', USAGE.startsWith('usage:'), true);
+
+  // -- The entry, spawned — "zero requests" is not observable in-process ------
+  //
+  // `globalThis.fetch` is replaced in the child by one that exits 97, so a fetch
+  // ATTEMPT is a distinct exit code rather than a network result: offline and
+  // deterministic. ⛔ The proxy env is cleared for the child because
+  // `rearmThroughProxy` would else re-exec a GRANDCHILD without `--import`,
+  // where the trap is not installed — the case would then be answering about a
+  // process it never armed.
+  const FETCH_TRAP_EXIT = 97;
+  const FETCH_TRAP =
+    'data:text/javascript,globalThis.fetch=()=>{process.stderr.write("FETCH-ATTEMPTED\\n");' +
+    `process.exit(${FETCH_TRAP_EXIT})};`;
+  const runEntry = (args, env = {}) =>
+    spawnSync(process.execPath, ['--import', FETCH_TRAP, SELF_PATH, ...args], {
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        HTTPS_PROXY: '', https_proxy: '', NODE_OPTIONS: '', NODE_USE_ENV_PROXY: '',
+        GITHUB_TOKEN: '', GH_TOKEN: '', ...env,
+      },
+    });
+  // ⭐ THE CONTROL, and it is what gives every case below it meaning: a trap
+  // never installed would let `--help` "pass" with the sweep deleted, or with
+  // this whole battery deleted. The default invocation must still reach the
+  // network, in an exit code nothing else in this file uses.
+  const trapped = runEntry([]);
+  t('#18369 control: the default sweep still reaches fetch, so the trap is armed', trapped.status, FETCH_TRAP_EXIT);
+  t('#18369 control: …and the trap, not the sweep, is what said so', String(trapped.stderr).includes('FETCH-ATTEMPTED'), true);
+  const helped = runEntry(['--help']);
+  t('#18369 --help exits 0', helped.status, 0);
+  t('#18369 --help issues ZERO requests', String(helped.stderr).includes('FETCH-ATTEMPTED'), false);
+  t('#18369 --help prints the usage block on STDOUT, whole and untruncated', helped.stdout, `${USAGE}\n`);
+  const shortHelp = runEntry(['-h']);
+  t('#18369 -h answers identically', `${shortHelp.status}:${shortHelp.stdout}`, `0:${helped.stdout}`);
+  // ⭐ Answered BEFORE the `SWEEP_REPO` guard on purpose: a caller asking what
+  // the flags are must get them on the box whose environment is broken, which
+  // is exactly the box where they ask.
+  const helpedBroken = runEntry(['--help'], { PM_SWEEP_REPO: 'not a repository' });
+  t('#18369 --help answers even when the sweep target is malformed', helpedBroken.status, 0);
+  t('#18369 …and still issues zero requests', String(helpedBroken.stderr).includes('FETCH-ATTEMPTED'), false);
+  const refused = runEntry(['--totally-bogus-flag-xyz']);
+  t('#18369 an unknown option exits 2 — this file\'s bad-usage code, not a fourth one', refused.status, 2);
+  t('#18369 an unknown option issues ZERO requests', String(refused.stderr).includes('FETCH-ATTEMPTED'), false);
+  t('#18369 an unknown option is refused by name, in git-history.mjs\'s spelling', String(refused.stderr).startsWith('check-half-states: unknown option --totally-bogus-flag-xyz'), true);
+  t('#18369 …and the refusal carries the usage block with it', String(refused.stderr).includes('usage:'), true);
+  t('#18369 the refusal goes to STDERR, leaving stdout empty', refused.stdout, '');
+
   let failed = 0;
   for (const [name, actual, expected] of cases) {
     const ok = actual === expected;
@@ -31657,8 +32034,118 @@ Doubles as the fire's **write self-check** (step 0). \`201\` is not the reading.
   return SELF_TEST_VERDICT;
 }
 
+// ---------------------------------------------------------------------------
+// CLI surface — the roster, the usage text and the refusal (#18369)
+// ---------------------------------------------------------------------------
+//
+// argv was READ here but never VALIDATED: the only membership tests were
+// `includes('--self-test')` / `includes('--probe')`, and `parseOutputOptions`
+// matched two prefixes and dropped every other token silently. So `--help` and
+// a flag that certainly does not exist behaved IDENTICALLY — both fell through
+// into the full sweep, a multi-page, rate-limit-spending read of a live board,
+// and no usage string existed in this file to print instead.
+//
+// The unanswered `--help` is the cheap half. The expensive half is the mistyped
+// REAL flag: `--format markdown` with a space, or a `--repo=…` this tool has
+// never had, was IGNORED, and the sweep then ran with the DEFAULT format
+// against the DEFAULT board — a wrong-target reading indistinguishable from the
+// run the caller believes they asked for. Same failure direction the
+// `SWEEP_REPO` guard below already refuses to take, so argv gets the same
+// answer: refused by name, exit 2, before any request.
+//
+// Three things to know before editing this block:
+//
+//   · ONE roster feeds both the refusal and `USAGE`. A tool that refuses what
+//     its own usage documents is worse than one that documents nothing, and a
+//     second hand-typed list is how that drift arrives — `post-stamped.mjs`'s
+//     `KNOWN_FLAGS`/`KNOWN_OPTIONS` shape, reused rather than reinvented.
+//   · EXIT 2, not `git-history.mjs`'s 1. The refusal WORDING mirrors that file
+//     (`check-half-states: unknown option --foo`), but this file's exit
+//     vocabulary is pinned by its own header at 0/2/3 and all three of its
+//     pre-existing bad-usage exits are 2. A fourth code would make "bad usage"
+//     two numbers inside one tool.
+//   · `--use-env-proxy` is deliberately NOT on the roster (node's flag, read at
+//     process START) and neither is any positional — the board comes from
+//     `resolveSweepRepo`, so a bare `owner/name` here is precisely the
+//     wrong-target token this refusal exists to catch.
+
+/** The bare flags honoured in this file's OWN argv. ⛔ The refusal and `USAGE` read no other list. */
+export const CLI_FLAGS = Object.freeze(['--self-test', '--probe', '--help', '-h']);
+
+/** The `--name=value` options. This owns the NAME; `parseOutputOptions` owns what a VALUE may be. */
+export const CLI_VALUE_OPTIONS = Object.freeze(['--format', '--provenance']);
+
+/** The usage block — stdout under `--help`, and beneath every refusal on stderr. */
+export const USAGE = [
+  'usage:',
+  '  node scripts/pm/check-half-states.mjs                      sweep the live board (report-only)',
+  '  node scripts/pm/check-half-states.mjs --probe              can a live sweep run HERE? (no sweep)',
+  '  node scripts/pm/check-half-states.mjs --self-test          verify the predicates offline (no network)',
+  '  node scripts/pm/check-half-states.mjs --help               this text, before any board read',
+  '',
+  `  --format=FMT        render the sweep as one of: ${OUTPUT_FORMATS.join(', ')} (default ${OUTPUT_FORMATS[0]})`,
+  '  --provenance=TEXT   stamp the caller\'s run identity into a --format=markdown body',
+  '',
+  'the board is named by the ENVIRONMENT — there is no --repo and no positional argument:',
+  '  PM_SWEEP_REPO         `owner/name` to sweep; else GITHUB_REPOSITORY, else the built-in default',
+  '  PM_SWEEP_CLOSED_FLOOR YYYY-MM-DD floor for the closed-card pass',
+  '  GITHUB_TOKEN/GH_TOKEN the credential the sweep reads with',
+  '  NODE_OPTIONS=--use-env-proxy   node reads its proxy flag at process START, so it goes there or',
+  '                        before the script path — never in this argv',
+  '',
+  'exit 0 swept or answered (report-only: 0 findings and 40 findings both exit 0)',
+  '     2 bad usage, or a sweep that could not run for an unclassified reason',
+  '     3 transport prerequisite not met — NOTHING was swept, which is not a clean board',
+].join('\n');
+
+/**
+ * Refuse an argv this tool does not honour, by name. Pure, so the self-test
+ * pins every refusal offline — and so the entry can answer before it has spent
+ * a request, a child process, or a page of somebody's rate limit.
+ *
+ * @param {string[]} argv
+ * @returns {string|null} the refusal sentence, or `null` when every token is honoured
+ */
+export function refuseUnknownArgs(argv) {
+  for (const arg of argv ?? []) {
+    if (CLI_FLAGS.includes(arg)) continue;
+    const named = /^(--[A-Za-z0-9][A-Za-z0-9-]*)=/.exec(arg);
+    if (named && CLI_VALUE_OPTIONS.includes(named[1])) continue;
+    // Spelled with a SPACE is the silent one: the old parser matched neither
+    // token, kept the default format, and swept anyway.
+    if (CLI_VALUE_OPTIONS.includes(arg)) {
+      return `${arg} carries its value in the same token — spell it \`${arg}=…\`, not \`${arg} …\``;
+    }
+    if (arg.startsWith('-')) return `unknown option ${named ? named[1] : arg}`;
+    return `unexpected argument ${JSON.stringify(arg)} — this tool takes options only; the board it sweeps comes from PM_SWEEP_REPO/GITHUB_REPOSITORY, never from a positional`;
+  }
+  return null;
+}
+
 const isMain = isEntrypoint(import.meta.url);
 if (isMain) {
+  // ⚠️ argv is read INSIDE the guard, never at module scope: this file is
+  // imported by a dozen `scripts/pm/*` and `scripts/check-*` tools, several of
+  // which take a `--help` of their own, and an unguarded read would answer
+  // THEIR flag out of a module they imported for one predicate.
+  const argv = process.argv.slice(2);
+  // Answered FIRST — before the `SWEEP_REPO` / `CLOSED_FLOOR` guards below,
+  // before the proxy re-exec, before any request. Not merely "before the
+  // network": a caller asking what the flags ARE must get them on the box whose
+  // environment is broken, which is exactly the box where they ask.
+  // ⛔ `writeSync`, not `console.log`, because the next statement is
+  // `process.exit` and stdout to a PIPE is asynchronous on some platforms — the
+  // self-test reads this through one, and a truncated usage block would be a
+  // flaky case blaming the parser.
+  if (argv.includes('--help') || argv.includes('-h')) {
+    writeSync(1, `${USAGE}\n`);
+    process.exit(0);
+  }
+  const refusal = refuseUnknownArgs(argv);
+  if (refusal !== null) {
+    writeSync(2, `check-half-states: ${refusal}\n\n${USAGE}\n`);
+    process.exit(2);
+  }
   // A malformed sweep target is bad usage (exit 2), refused BEFORE any request
   // — including the probe's, whose second stage is a repo-scoped read of this
   // very string. Silently falling back to the default would sweep a board

@@ -863,13 +863,17 @@ export function approvalVerdict(reviews) {
  * `pinnedApprovalVerdict`. Renaming a predicate is cheap; leaving a retired
  * rule's vocabulary lying around next to a live one is not.
  *
- * ⭐ BOTH RENAMES LANDED WITH THEIR IMPORTER, in one commit.
- * `.claude/hooks/guard-governed-enqueue.sh` imports this function and reads that
- * bucket off its result — the "⛔ no second mechanism" design paying off, since
- * the seat-side hook's verdict flipped with this ruling for free and it needs no
- * predicate of its own. ⛔ Never rename either name without that hook in the
- * same diff: it catches the resulting failure and ALLOWS, with one warning line
- * on stderr, so every governed enqueue would sail through it silently.
+ * ⭐ BOTH RENAMES LANDED WITH THEIR IMPORTER, in one commit. At the time a
+ * seat-side PreToolUse enqueue hook imported this function and read that bucket
+ * off its result — the "⛔ no second mechanism" design paying off, since its
+ * verdict flipped with this ruling for free and it needed no predicate of its
+ * own. That client-side hook has since been REMOVED by ruling (it only ever
+ * saved a queue cycle; this file's `merge_group` refusal is the line), so the
+ * queue leg in this file is now this function's only consumer. The two names
+ * are still this module's exported contract: ⛔ never rename either without
+ * grepping for importers in the same diff — an importer that catches the
+ * resulting failure and ALLOWS is a silent hole, which is exactly what the old
+ * hook would have become.
  *
  * Pure; the array is expected in GitHub's chronological order, so last wins.
  */

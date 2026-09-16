@@ -591,7 +591,7 @@ os compile --json                    # JSON output for CI pipelines
   → Validating protocol compliance...
   → Running author-time rules (45)...
   → Checking capability providers (#3366)...
-  → Collecting package docs (ADR-0046)...
+  → Collecting package docs (ADR-0046)... 0 collected
   → Writing artifact...
 
   ✓ Build complete (74ms)
@@ -604,7 +604,13 @@ os compile --json                    # JSON output for CI pipelines
 ```
 
 Those counts are from a sample project, named in full under [`os info`](#os-info)
-below — the same fixture backs both output examples.
+below — the same fixture backs both output examples. It ships no `src/docs/`
+directory, which is why the docs step reads `0 collected`.
+
+The docs step reports what it collected, not what it attempted — a project whose
+`src/docs/` is empty, or whose docs directory moved into a package under an
+ADR-0130 layout, prints `0 collected` here instead of the same sentence a
+successful collection prints.
 
 The resulting `dist/objectstack.json` is a **portable, self-describing deployment unit** —
 you can hand it to `os start` (locally or on a server), publish it to a CDN, or fetch it

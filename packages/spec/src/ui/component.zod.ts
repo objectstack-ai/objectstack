@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { z } from 'zod';
-import { ViewFilterRuleSchema, ViewDataSchema } from './view.zod';
+import { ViewFilterRuleSchema, ViewDataSchema, GanttConfigSchema, TreeConfigSchema } from './view.zod';
 import { InlineActionSchema, ActionLocationSchema } from './action.zod';
 import { I18nLabelSchema, AriaPropsSchema } from './i18n.zod';
 import { FeedItemType, FeedFilterMode } from '../data/feed.zod';
@@ -3149,6 +3149,430 @@ export const ObjectMasterDetailFormPropsSchema = lazySchema(() => strictObject({
 export type ObjectMasterDetailFormProps = z.input<typeof ObjectMasterDetailFormPropsSchema>;
 
 /**
+ * The flat per-field spellings `ObjectMap` reads as the ObjectView / ListView
+ * flatten product (`getMapConfig` branch 2, `ObjectMap.tsx:382-396`) and that
+ * both view layers EMIT (`plugin-view/src/ObjectView.tsx` and
+ * `plugin-list/src/ListView.tsx`, `case 'map'`, which spread `options.map`'s
+ * CONTENTS at the top level and carry no `map` key at all). Read, but NOT
+ * authorable: the maintainer ruled that shape an internal transport form rather
+ * than a second authoring surface (objectui#5018, 2026-08-17), and the renderer
+ * says so itself — when a `map` block is present it wins outright and every flat
+ * key beside it is named as IGNORED in a dev warning
+ * (`warnOnShadowedFlatMapKeys`). One composition key per concept (Prime
+ * Directive #12), the same channel {@link ObjectCalendarPropsSchema} uses above.
+ *
+ * The member list is objectui's own `FLAT_MAP_CONFIG_KEYS` — `ObjectMapConfig`'s
+ * keys minus `style` — and `component.test.ts` holds it equal to the spec's own
+ * {@link ListMapConfigSchema} shape, so a key added to the config block on
+ * either face cannot leave this prescription behind.
+ */
+const OBJECT_MAP_FLAT_CONFIG_GUIDANCE: readonly KeySetGuidance[] = [
+  ...COMPONENT_LEVEL_GUIDANCE,
+  {
+    name: 'OBJECT_MAP_FLAT_CONFIG_KEYS',
+    keys: ['latitudeField', 'longitudeField', 'locationField', 'titleField', 'descriptionField', 'zoom', 'center'],
+    examples: ['latitudeField', 'titleField'],
+    prescription:
+      'Write this as a key of the `map` config object instead — `map: { latitudeField, longitudeField, '
+      + 'locationField, titleField, descriptionField, zoom, center }`. The flat spelling is the internal '
+      + 'form `ObjectView`/`ListView` produce when they flatten `options.map`, not a second authoring '
+      + 'spelling: whenever a `map` block is present the renderer takes it whole and names every flat key '
+      + 'beside it as ignored. The map STYLE is the top-level `mapStyle` (or `map.style`) — never `style`, '
+      + "which is the component node's inline CSS record.",
+  },
+];
+
+/**
+ * `object-map` (objectui `plugin-map/src/ObjectMap.tsx` plus the registry shell
+ * `plugin-map/src/index.tsx`, measured at the `.objectui-sha` pin `53ded82b`).
+ * Read points per key: `data` (`:169`, the array-shorthand head, then
+ * `resolveRecordSourceConfig` at `:174` — rung 1 of the ruled record-source
+ * ladder, `core/src/utils/record-source.ts:151`), `staticData` (rung 2,
+ * `record-source.ts:155`), `objectName` (rung 3, `record-source.ts:162`; also
+ * `:793` and `:890` here), `filter` (`:742`, handed verbatim to `$filter`),
+ * `sort` (`:743`, through the shared `convertSortToQueryParams` sink to
+ * `$orderby`), `map` (`:370` — `getMapConfig` branch 1, the author face and the
+ * registration's declared `{ name: 'map', type: 'object' }` input), `mapStyle`
+ * (`:365`, `schema.mapStyle || schema.map?.style`), `navigation` (`:889`) and
+ * `enableClustering` (`:905`).
+ *
+ * Measured and deliberately NOT declared:
+ *
+ *  - the flat `map`-config spellings — the ObjectView/ListView flatten product,
+ *    ruled an internal transport form (objectui#5018). They get
+ *    {@link OBJECT_MAP_FLAT_CONFIG_GUIDANCE}'s wrong-layer prescription.
+ *  - `style`. `ObjectMap.tsx:283` reads it only to say it is NOT consumed as a
+ *    map style (objectui#5017): it is `BaseSchema.style`, the node's inline CSS
+ *    record, and `COMPONENT_NODE_KEYS` above already sends it back to the node.
+ *  - `clusterRadius`, `data` as an ARRAY, `onMarkerClick` / `onRowClick` /
+ *    `onEdit` / `onDelete`, `className` and `dataSource` — React props of
+ *    `ObjectMapProps`, host-injected, never authored metadata.
+ *
+ * VALUE posture for `map`: `z.unknown()`, the section's "the value contract
+ * still lives in objectui" arm, and measured rather than assumed. The spec's own
+ * {@link ListMapConfigSchema} is strict and declares the same seven field keys,
+ * but NOT the `style` key `getMapConfig` reads at `:365` (`schema.map?.style`),
+ * so pointing this door at it would refuse a value the renderer honours today.
+ * Tightening it is the later value ratchet this section describes, once that
+ * one-key gap is closed on the list-view face it belongs to.
+ */
+export const ObjectMapPropsSchema = lazySchema(() => strictObject({
+  surface: 'this `object-map`',
+  history: objectBlockHistory('object-map'),
+  guidanceSets: OBJECT_MAP_FLAT_CONFIG_GUIDANCE,
+  aliases: FILTERS_TO_FILTER,
+}, {
+  objectName: z.string().optional()
+    .describe('Object this map binds to — the THIRD record source `getDataConfig` resolves, after `data` and `staticData`. Optional because the component-level `dataSource` binding can supply the object instead'),
+  /**
+   * Data source binding — `ViewDataSchema`, the same object arm `object-grid`
+   * declares above. Derived from the read point, not from objectui's mirror:
+   * rung 1 of `resolveRecordSourceConfig` returns `schema.data` VERBATIM as the
+   * record-source config, and `ViewData` is what every consumer of that return
+   * value is typed against. (`ObjectMapSchema.data` on `@object-ui/types`
+   * happens to spell it the same way — read after the derivation, as a check on
+   * it, never as the source of it.)
+   *
+   * The bare-array shorthand `ObjectMap.tsx:169-172` normalizes is NOT declared:
+   * `ViewData` is a discriminated union over OBJECT variants, so an array under
+   * `data` cannot be published, and `staticData` below is this block's declared
+   * door for inline rows — the renderer's own comment says so.
+   */
+  data: ViewDataSchema.optional()
+    .describe("Data source binding (ViewDataSchema — discriminated on `provider`: object | api | value | schema), read FIRST by `getDataConfig`. Static inline rows live at `{ provider: 'value', items: [...] }` or at `staticData`; the bare-array shortcut is refused"),
+  staticData: z.array(z.unknown()).optional()
+    .describe("Inline records — read SECOND by `getDataConfig`, wrapped into a `{ provider: 'value' }` config"),
+  /**
+   * Base query filter — the `ViewFilterRule` ARRAY form, the one filter
+   * orthography every `filter` door in this map shares (ui#6206-B reaching the
+   * `object-*` family: #15449, decision batch #55, option A). Measured at the
+   * objectui pin `53ded82b`: `ObjectMap.tsx:742` hands `schema.filter` verbatim
+   * to `$filter`, where the adapter lowers a rule array exactly as it does for
+   * the kanban and the calendar. The record form is refused at `filter`.
+   */
+  filter: z.array(ViewFilterRuleSchema, {
+    error: ruleArrayFilterError({
+      surface: 'this `object-map`',
+      migration: 'element-data-source-and-object-block-filter-rule-array',
+    }),
+  }).optional()
+    .describe('Base query filter — the ViewFilterRule array form `[{ field, operator, value }, ...]`, the one filter orthography every `filter` door in this map shares; lowered to the wire `$filter`. The MongoDB-style record form is refused — see migration `element-data-source-and-object-block-filter-rule-array`'),
+  /**
+   * Marker order — the `SortItem` ARRAY form, the one sort orthography every
+   * DECLARED `sort` door on this platform carries (objectui#8221, decision batch
+   * #77, option B). Measured at the objectui pin `53ded82b`: `ObjectMap.tsx:743`
+   * hands `schema.sort` to the shared `convertSortToQueryParams` sink as the
+   * fetch's `$orderby` — the same sink `object-grid` and `object-calendar`
+   * declare against, so the legacy string clause is refused here for the same
+   * ruling. `plugin-map/src/index.tsx` declares no `sort` input at all, so
+   * nothing on the registry side moves.
+   */
+  sort: z.array(SortItemSchema).optional()
+    .describe('Marker order for the fetched records — the SortItem array form `[{ field, order }, ...]`, the one sort orthography every declared `sort` door on this platform shares; lowered to the wire `$orderby`. The legacy string clause (`name desc`) is refused — see migration `object-block-sort-item-array`'),
+  map: z.unknown().optional()
+    .describe('Map field config, the author face: { latitudeField, longitudeField, locationField?, titleField?, descriptionField?, zoom?, center?, style? }. Taken WHOLE when present — the flat top-level spelling beside it is ignored'),
+  mapStyle: z.string().optional()
+    .describe('MapLibre style URL or spec, overriding the public demo tiles. Read before `map.style`; NOT the base node `style`, which is an inline CSS record'),
+  navigation: z.unknown().optional()
+    .describe('Marker-click navigation config ({ mode: page | drawer | modal | split | popover | none })'),
+  enableClustering: z.boolean().optional()
+    .describe('Group nearby markers into clusters. Absent, the renderer clusters only above 100 markers'),
+}));
+/** Author state (ADR-0122: the bare name is the author state). */
+export type ObjectMapProps = z.input<typeof ObjectMapPropsSchema>;
+/**
+ * ADR-0122: the parsed state differs from the authored state — `filter` carries
+ * `z.array(ViewFilterRuleSchema)` (`operator` normalizes on parse) and `data`
+ * carries `ViewDataSchema`, so this block leaves the type-alias convention pin's
+ * default-free family the way `object-grid` did.
+ */
+export type ObjectMapPropsParsed = z.infer<typeof ObjectMapPropsSchema>;
+
+/**
+ * The flat `GanttConfig` spellings `getGanttConfig`'s branch 2 reads
+ * (`ObjectGantt.tsx:513-543`) and that `ObjectView` / `ListView` EMIT when they
+ * flatten `options.gantt` — objectui's own `FLAT_GANTT_CONFIG_KEYS`. Read, but
+ * NOT authorable, for the reason the map's twin set above records: objectui#6469
+ * inherited the objectui#5018 ruling for this block, so the `gantt` block is the
+ * authoring shape, it is taken WHOLE when present, and every flat key beside it
+ * is named as ignored in a dev warning.
+ *
+ * The flat branch is the HOT path for this block — a hand-authored `gantt` block
+ * reaching the renderer through either view layer has already been flattened —
+ * which is exactly why the prescription matters here: an author who learned the
+ * flat spelling from a view config (or from `@object-ui/types`'
+ * `ObjectGanttSchema`, which declares the whole flat face) writes it on an SDUI
+ * node next, where nothing flattens anything.
+ *
+ * Membership is `GanttConfigSchema`'s own shape plus the legacy singular
+ * `dependencyField` alias the flat branch still reads beside `dependenciesField`
+ * — the same two halves objectui derives its list from. Spelled out rather than
+ * read off `GanttConfigSchema.shape` here because that schema is a
+ * {@link lazySchema} proxy and forcing it at module load would build `view.zod`
+ * mid-initialisation (the import-cycle footgun `ruleArrayFilterError` defers
+ * around); `component.test.ts` holds the list equal to the shape instead.
+ */
+const OBJECT_GANTT_FLAT_CONFIG_GUIDANCE: readonly KeySetGuidance[] = [
+  ...COMPONENT_LEVEL_GUIDANCE,
+  {
+    name: 'OBJECT_GANTT_FLAT_CONFIG_KEYS',
+    keys: [
+      'assigneeField', 'autoZoomToFilter', 'baselineEndField', 'baselineStartField', 'borderColorField',
+      'capacity', 'colorField', 'defaultCollapsedDepth', 'dependenciesField', 'dependencyField',
+      'dependencyTypes', 'effortField', 'endDateField', 'exportFileName', 'groupByField', 'interactions',
+      'lockField', 'objectField', 'parentField', 'progressField', 'quickFilters', 'resourceView',
+      'startDateField', 'summaryExtent', 'timeSegments', 'timeZone', 'titleField', 'tooltipFields',
+      'typeField', 'viewMode',
+    ],
+    examples: ['startDateField', 'endDateField', 'viewMode'],
+    prescription:
+      'Write this as a key of the `gantt` config object instead — `gantt: { startDateField, endDateField, '
+      + 'titleField, ... }`. The flat top-level spelling is the internal form `ObjectView`/`ListView` '
+      + 'produce when they flatten `options.gantt`, not a second authoring spelling: whenever a `gantt` '
+      + 'block is present the renderer takes it WHOLE and names every flat key beside it as ignored. The '
+      + 'legacy singular `dependencyField` is `dependenciesField` inside that block.',
+  },
+];
+
+/**
+ * `object-gantt` (objectui `plugin-gantt/src/ObjectGantt.tsx` plus the registry
+ * shell `plugin-gantt/src/index.tsx`, measured at the `.objectui-sha` pin
+ * `53ded82b`). Read points per key: `data` (`resolveRecordSourceConfig` at
+ * `:593` — rung 1, `core/src/utils/record-source.ts:151`), `staticData` (rung 2,
+ * `record-source.ts:155`), `objectName` (rung 3; also `:1359` and `:1491` here),
+ * `filter` (`:738`, verbatim to `$filter`), `sort` (`:739`, through
+ * `convertSortToQueryParams` to `$orderby`), `gantt` (`:499-501` —
+ * `getGanttConfig` branch 1, the author face and the registration's declared
+ * `{ name: 'gantt', type: 'object' }` input, validated there against this
+ * repo's own {@link GanttConfigSchema}), `navigation` (`:1487`), `label`
+ * (`:1871`, resolved through `resolveI18nLabel` for the export file name —
+ * `:1849` is the comment ABOVE that chain, not a read),
+ * `skipWeekends` (`:1205`), `holidays` (`:1206`), `persistLayout` (`:1357`),
+ * `viewName` (`:1359`), `markers` (`:1826`), `criticalPath` (`:1829`),
+ * `showBaselines` (`:1832`), `readOnly` (`:1833` and `:1916`) and
+ * `mobileReadOnly` (`:1834`).
+ *
+ * Measured and deliberately NOT declared: the flat `GanttConfig` spellings (the
+ * flatten product — {@link OBJECT_GANTT_FLAT_CONFIG_GUIDANCE}); `title`, which
+ * this renderer never reads (the export-name chain is `gantt.exportFileName` →
+ * `label` → the OBJECT's label → `objectName`, `:1869-1874`); a row cap — the
+ * reload's `$top` is the platform ceiling `NON_GRID_ROW_CEILING_TOP` and the
+ * renderer's own comment marks it "⛔ Not authorable"; and the `onTaskClick` /
+ * `onRowClick` / `onBeforeTaskUpdate` callbacks, which are host props.
+ *
+ * VALUE posture: `gantt` is the one config block in this family whose value
+ * contract is already the SPEC's — `ObjectGantt.tsx:500` validates it against
+ * `GanttConfigSchema` imported from `@objectstack/spec/ui` — so the read point
+ * names the schema and this door takes it rather than `z.unknown()`. The
+ * scalars below are read as their coercions say: `!!schema.readOnly`,
+ * `schema.showBaselines !== false`, `schema.persistLayout === false`,
+ * `new Set(schema.holidays)`. `markers` stays `z.array(z.unknown())` — its
+ * element contract is `GanttView`'s `GanttMarker`, still objectui's.
+ */
+export const ObjectGanttPropsSchema = lazySchema(() => strictObject({
+  surface: 'this `object-gantt`',
+  history: objectBlockHistory('object-gantt'),
+  guidanceSets: OBJECT_GANTT_FLAT_CONFIG_GUIDANCE,
+  aliases: FILTERS_TO_FILTER,
+}, {
+  objectName: z.string().optional()
+    .describe('Object this gantt binds to — the THIRD record source `resolveRecordSourceConfig` resolves, after `data` and `staticData`. Optional because the component-level `dataSource` binding can supply the object instead'),
+  /**
+   * Data source binding — `ViewDataSchema`, spelled exactly as `object-map`'s
+   * and `object-grid`'s. Derived from the read point: rung 1 of
+   * `resolveRecordSourceConfig` returns `schema.data` VERBATIM as the
+   * record-source config the fetch resolves through `resolveDataSource`.
+   */
+  data: ViewDataSchema.optional()
+    .describe("Data source binding (ViewDataSchema — discriminated on `provider`: object | api | value | schema), read FIRST by `resolveRecordSourceConfig`. Static inline rows live at `{ provider: 'value', items: [...] }` or at `staticData`; the bare-array shortcut is refused"),
+  staticData: z.array(z.unknown()).optional()
+    .describe("Inline records — read SECOND by `resolveRecordSourceConfig`, wrapped into a `{ provider: 'value' }` config"),
+  /** Base query filter — the family's one `ViewFilterRule` array orthography (#15449). */
+  filter: z.array(ViewFilterRuleSchema, {
+    error: ruleArrayFilterError({
+      surface: 'this `object-gantt`',
+      migration: 'element-data-source-and-object-block-filter-rule-array',
+    }),
+  }).optional()
+    .describe('Base query filter — the ViewFilterRule array form `[{ field, operator, value }, ...]`, the one filter orthography every `filter` door in this map shares; lowered to the wire `$filter`. The MongoDB-style record form is refused — see migration `element-data-source-and-object-block-filter-rule-array`'),
+  /** Task order — the platform's one `SortItem` array orthography (objectui#8221 option B). */
+  sort: z.array(SortItemSchema).optional()
+    .describe('Task order for the fetched bars — the SortItem array form `[{ field, order }, ...]`, the one sort orthography every declared `sort` door on this platform shares; lowered to the wire `$orderby`. The legacy string clause (`name desc`) is refused — see migration `object-block-sort-item-array`'),
+  gantt: GanttConfigSchema.optional()
+    .describe('Gantt-timeline configuration, the author face — the same block `ListViewSchema.gantt` declares, and the one the renderer validates this node against. Taken WHOLE when present: the flat top-level spelling beside it is ignored'),
+  navigation: z.unknown().optional()
+    .describe('Task-click navigation config ({ mode: page | drawer | modal | split | popover | none }); renderer default `drawer`'),
+  label: I18nLabelSchema.optional()
+    .describe('Gantt label — the second link of the exported PNG/PDF file-name chain, after `gantt.exportFileName` and before the bound object\'s own label'),
+  skipWeekends: z.boolean().optional()
+    .describe('Measure duration and auto-schedule math in WORKING days, skipping Saturdays and Sundays'),
+  holidays: z.array(z.string()).optional()
+    .describe("Additional non-working dates for the working calendar, ISO `yyyy-mm-dd` strings; folded into a Set for the duration math"),
+  persistLayout: z.boolean().optional()
+    .describe('Opt OUT of layout and filter-chip persistence — only an explicit `false` disables it; the storage key is `objectName:viewName`'),
+  viewName: z.string().optional()
+    .describe("Layout-persistence scope, the second half of the `objectName:viewName` storage key (renderer default `'default'`)"),
+  markers: z.array(z.unknown()).optional()
+    .describe('Extra vertical reference lines drawn like the Today marker ({ date, label?, color? })'),
+  criticalPath: z.boolean().optional()
+    .describe('Seed the critical-path highlight ON; the toolbar toggle stays available either way'),
+  showBaselines: z.boolean().optional()
+    .describe('Render the planned-vs-actual baseline bars — ON unless an explicit `false` disables it'),
+  readOnly: z.boolean().optional()
+    .describe('Disable every write path on this gantt and lock the record drawer'),
+  mobileReadOnly: z.boolean().optional()
+    .describe('Auto read-only on narrow viewports — ON unless an explicit `false` disables it'),
+}));
+/** Author state (ADR-0122: the bare name is the author state). */
+export type ObjectGanttProps = z.input<typeof ObjectGanttPropsSchema>;
+/**
+ * ADR-0122: the parsed state differs from the authored state — `filter` carries
+ * `z.array(ViewFilterRuleSchema)` (`operator` normalizes on parse) and `data`
+ * carries `ViewDataSchema`, so this block leaves the type-alias convention pin's
+ * default-free family the way `object-grid` did.
+ */
+export type ObjectGanttPropsParsed = z.infer<typeof ObjectGanttPropsSchema>;
+
+/**
+ * The flat `TreeConfig` spellings `getTreeConfig` reads ahead of the `tree`
+ * block (`ObjectTree.tsx:108-119`) and that `ObjectView` / `ListView` EMIT when
+ * they flatten `options.tree` (`ListView.tsx:2597-2606`, `case 'tree'`: the
+ * product carries these keys and NO `tree` key). Read, but NOT authorable —
+ * one composition key per concept (Prime Directive #12), the ruling the map and
+ * the gantt carry from objectui#5018 / #6469 and the channel `object-calendar`
+ * uses above. The registration agrees: `plugin-tree/src/index.tsx` declares
+ * `{ name: 'tree', type: 'object' }` and no flat input.
+ *
+ * `titleField` is in the set although no `tree` block key is spelled that way:
+ * `getTreeConfig` reads it as the last fallback for `labelField`
+ * (`:117`), and `ListView`'s flatten resolves `treeCfg.titleField` into
+ * `labelField` before emitting, so the author's intent is always the block's
+ * `labelField`.
+ */
+const OBJECT_TREE_FLAT_CONFIG_GUIDANCE: readonly KeySetGuidance[] = [
+  ...COMPONENT_LEVEL_GUIDANCE,
+  {
+    name: 'OBJECT_TREE_FLAT_CONFIG_KEYS',
+    keys: ['parentField', 'labelField', 'titleField', 'fields', 'defaultExpandedDepth'],
+    examples: ['parentField', 'labelField'],
+    prescription:
+      'Write this as a key of the `tree` config object instead — `tree: { parentField, labelField, fields, '
+      + 'defaultExpandedDepth }`. The flat top-level spelling is the internal form `ObjectView`/`ListView` '
+      + 'produce when they flatten `options.tree`, not a second authoring spelling. A `titleField` is the '
+      + "block's `labelField`: it is only ever read as that key's last fallback.",
+  },
+];
+
+/**
+ * `object-tree` (objectui `plugin-tree/src/ObjectTree.tsx` plus the registry
+ * shell `plugin-tree/src/index.tsx`, measured at the `.objectui-sha` pin
+ * `53ded82b`). Read points per key: `data` (`resolveRecordSourceConfig` at
+ * `:359` — rung 1, `core/src/utils/record-source.ts:151`, which returns the
+ * authored value VERBATIM as a `ViewData`; that ONE site is the whole support
+ * for the arm this row declares), `staticData` (rung 2,
+ * `record-source.ts:155`), `objectName` (rung 3; also `:534`, `:570` and
+ * `:605` here), `filter` (`:474`, verbatim to `$filter`), `tree` (`:108`, the
+ * nested config block `getTreeConfig` reads and the registration's declared
+ * `{ name: 'tree', type: 'object' }` input) and `navigation` (`:591`).
+ *
+ * ⚠️ `data` IS declared here, and that is the measurement, not a family
+ * symmetry. objectui#9234 left this block's rung-1 read marked `undeclared`
+ * because neither published face carried the key: `ObjectTreeSchema` on
+ * `@object-ui/types` declares no `data`, no `staticData`, no `filter` and no
+ * `navigation` at all, and requires `objectName`. The renderer reads all four
+ * — so the protocol row follows the READ POINTS, which is what 「以协议为准」
+ * resolving for this block means, and the mirror is the face that has to
+ * follow.
+ *
+ * ⛔ `:496` is NOT a second site for the object arm, and citing it as one would
+ * be citing a read of the opposite SHAPE: `(rest as any).data ?? (schema as
+ * any).data` is gated by `Array.isArray(passed)` on the very next line, so it
+ * honours only the bare-ARRAY shorthand this row REFUSES — the same shorthand
+ * `object-map` measures and declines one section up. One ladder site is
+ * sufficient, and `:359` is it.
+ *
+ * Measured and deliberately NOT declared: the flat `TreeConfig` spellings
+ * ({@link OBJECT_TREE_FLAT_CONFIG_GUIDANCE}); the bare-array `data` shorthand
+ * `:496-497` accepts, which `ViewData` cannot publish (a discriminated union
+ * over OBJECT variants) and for which `staticData` is this block's declared
+ * door; `sort` — this renderer's fetch
+ * (`:473-484`) carries `$filter`, `$top` and `$expand` and NO `$orderby`, and
+ * nothing else reads an order, so declaring one would publish a key with no read
+ * site; a row cap, for the same reason `object-gantt` declares none (the `$top`
+ * is the platform ceiling, marked "⛔ Not authorable" at `:482`); and
+ * `filter.tree`, the legacy stash `:108` still reads, which is a shape to stop
+ * writing rather than a key to declare.
+ *
+ * This is also the one block of the three whose type is absent from the tracked
+ * `sdui.manifest.json`, so `check:react-declaration-parity` reports it as
+ * missing from the registry rather than comparing it — the derivation above is
+ * from the renderer's sources at the pin either way, which is what #7751's
+ * method asks for.
+ *
+ * VALUE posture for `tree`: {@link TreeConfigSchema}, this repo's own block —
+ * #15469 closed it against unknown keys on exactly this measurement
+ * (`getTreeConfig` reads precisely those four keys from the block; the
+ * undeclared read set was EMPTY), re-measured here at `53ded82b` and unchanged.
+ */
+export const ObjectTreePropsSchema = lazySchema(() => strictObject({
+  surface: 'this `object-tree`',
+  history: objectBlockHistory('object-tree'),
+  guidanceSets: OBJECT_TREE_FLAT_CONFIG_GUIDANCE,
+  aliases: FILTERS_TO_FILTER,
+}, {
+  /**
+   * ⚠️ Optional for a DIFFERENT reason than its siblings, and the reason is
+   * measured rather than inherited. `object-grid` / `object-kanban` /
+   * `object-calendar` / `object-map` / `object-gantt` all say "the
+   * component-level `dataSource` binding can supply the object instead"; that
+   * holds for them because each registers through `ElementDataSourceGate`,
+   * which lowers the spec binding onto `objectName` before the renderer sees
+   * the node. `plugin-tree/src/index.tsx` does NOT: at the `.objectui-sha` pin
+   * `53ded82b` its registry shell has ZERO hits for that wiring, against 7
+   * each in `plugin-map`, `plugin-gantt`, `plugin-grid` and `plugin-calendar`
+   * — four controls, so the zero discriminates. Its shell pulls a `dataSource`
+   * off the schema context and hands it down as the data ADAPTER; nothing on
+   * that path writes an object name.
+   *
+   * What really makes it optional is the record-source ladder's first two
+   * rungs (objectui#6939): `data` can name the object itself, and `staticData`
+   * needs no object at all, so a tree authored on either never reads this key.
+   */
+  objectName: z.string().optional()
+    .describe("Object this tree binds to — the THIRD record source `resolveRecordSourceConfig` resolves, after `data` and `staticData`. Optional because either of the first two rungs resolves the source without it: `data` can name the object itself (`{ provider: 'object', object }`) and `staticData` needs none. ⚠️ NOT supplied by the component-level `dataSource` binding the sibling blocks name — this renderer registers no such gate"),
+  /**
+   * Data source binding — `ViewDataSchema`, the object arm rung 1 returns
+   * verbatim. Declared from the READ POINT (`:359`), not from objectui's
+   * mirror, which carries no `data` on either face at this pin.
+   */
+  data: ViewDataSchema.optional()
+    .describe("Data source binding (ViewDataSchema — discriminated on `provider`: object | api | value | schema), read FIRST by `resolveRecordSourceConfig`. Static inline rows live at `{ provider: 'value', items: [...] }` or at `staticData`; the bare-array shortcut is refused"),
+  staticData: z.array(z.unknown()).optional()
+    .describe("Inline records — read SECOND by `resolveRecordSourceConfig`, wrapped into a `{ provider: 'value' }` config"),
+  /** Base query filter — the family's one `ViewFilterRule` array orthography (#15449). */
+  filter: z.array(ViewFilterRuleSchema, {
+    error: ruleArrayFilterError({
+      surface: 'this `object-tree`',
+      migration: 'element-data-source-and-object-block-filter-rule-array',
+    }),
+  }).optional()
+    .describe('Base query filter — the ViewFilterRule array form `[{ field, operator, value }, ...]`, the one filter orthography every `filter` door in this map shares; lowered to the wire `$filter`. The MongoDB-style record form is refused — see migration `element-data-source-and-object-block-filter-rule-array`'),
+  tree: TreeConfigSchema.optional()
+    .describe('Tree/hierarchy configuration, the author face — the same block `ListViewSchema.tree` declares: { parentField?, labelField?, fields?, defaultExpandedDepth? }. `parentField` auto-detects from the object schema when omitted'),
+  navigation: z.unknown().optional()
+    .describe('Row-click navigation config ({ mode: page | drawer | modal | split | popover | none })'),
+}));
+/** Author state (ADR-0122: the bare name is the author state). */
+export type ObjectTreeProps = z.input<typeof ObjectTreePropsSchema>;
+/**
+ * ADR-0122: the parsed state differs from the authored state — `filter` carries
+ * `z.array(ViewFilterRuleSchema)` (`operator` normalizes on parse) and `data`
+ * carries `ViewDataSchema`, so this block leaves the type-alias convention pin's
+ * default-free family the way `object-grid` did.
+ */
+export type ObjectTreePropsParsed = z.infer<typeof ObjectTreePropsSchema>;
+
+/**
  * ----------------------------------------------------------------------
  * Component Props Map
  * Maps Component Type to its Property Schema
@@ -3299,6 +3723,18 @@ export const ComponentPropsMap = {
   'object-calendar': ObjectCalendarPropsSchema,
   'object-form': ObjectFormPropsSchema,
   'object-master-detail-form': ObjectMasterDetailFormPropsSchema,
+  // #18305, executing the objectui#8348 ruling 「8348 以协议为准」 (batch #83)
+  // and batch #136 item 3 (Q1-C). The three blocks this section enumerated
+  // past: they were not ruled out, they were simply never measured, so the
+  // #5068 gate skipped them and objectui's OWN mirror stood in as the
+  // authority for map and gantt while tree's rung-1 `data` read stayed
+  // undeclared on every face. Key sets measured from the renderers' read
+  // points at the `.objectui-sha` pin `53ded82b` — per-block citations in each
+  // schema's header, including what each block reads and deliberately does NOT
+  // declare.
+  'object-map': ObjectMapPropsSchema,
+  'object-gantt': ObjectGanttPropsSchema,
+  'object-tree': ObjectTreePropsSchema,
 } as const;
 
 /**

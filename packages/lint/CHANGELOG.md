@@ -2173,8 +2173,20 @@
   `severity: 'error'`, so this changes which message an author reads and nothing
   about what lints clean.
   
-  `FIELD_RULE_AMBIENT_ROOTS` and `FIELD_RULE_JUDGED_ROOTS` are exported beside
-  the existing `FIELD_RULE_BOUND_ROOTS`.
+  **Correction (2026-09-16, docs-only, #18169).** As published, this entry
+  claimed that `FIELD_RULE_AMBIENT_ROOTS` and `FIELD_RULE_JUDGED_ROOTS` "are
+  exported beside the existing `FIELD_RULE_BOUND_ROOTS`". That was false the
+  day it shipped, and it fails when acted on. `packages/lint/src/index.ts`
+  re-exports exactly `validateStackExpressions`, `fieldRuleRootIssue` and
+  `FIELD_RULE_BOUND_ROOTS` from `./validate-expressions.js`, and carries no
+  star-export, so `FIELD_RULE_BOUND_ROOTS` is the only member of this family a
+  consumer can import from `@objectstack/lint`. Importing
+  `FIELD_RULE_AMBIENT_ROOTS` or `FIELD_RULE_JUDGED_ROOTS` from this package
+  does not resolve: both constants are internal to `validate-expressions.ts`,
+  and the widened vocabulary reaches a consumer only through the exported
+  `fieldRuleRootIssue`. (In the source, `FIELD_RULE_AMBIENT_ROOTS` has since
+  been renamed `FIELD_RULE_NOWHERE_BOUND_ROOTS` — internal as well, and still
+  not exported.)
 - 365e334: **Fix:** `lintLivenessProperties` walks `stack.translations` as the locale-keyed bundle it is, so the `translation` liveness ledger finally reaches the author (#11288).
   
   `stack.translations` is `z.array(TranslationBundleSchema)` — each item is a `TranslationBundle`, i.e. `z.record(LocaleSchema, TranslationDataSchema)`, whose top-level keys are locale codes. The lint registered `{ type: 'translation', key: 'translations' }` in `TYPE_COLLECTIONS` and then walked those items flat, the way every other collection there is walked: `checkItem` read `bundle['flows']` for the ledger's one `authorWarn` row. A bundle has no `flows` key at any depth reachable that way — the groups live one level down, under each locale — so every warned lookup missed and the whole `translation` ledger was silent for file-authored bundles, the only way apps author translations today.

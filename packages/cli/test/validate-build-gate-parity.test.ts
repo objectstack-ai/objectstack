@@ -37,12 +37,19 @@ import { join } from 'node:path';
 const COMMANDS_DIR = join(__dirname, '..', 'src', 'commands');
 
 /**
- * Gates that are NOT registry rules (they need the filesystem or the emitted
- * artifact) and that both commands must therefore wire by hand.
+ * Gates that are NOT registry rules — they need the filesystem, the emitted
+ * artifact, or the whole ARTIFACT across its packages, and none of those is a
+ * pure function of the ONE stack `runAuthoringRules` hands a rule — and that
+ * both commands must therefore wire by hand.
  *
  * Adding a gate to `compile.ts` means adding it here and to `validate.ts`, or
  * to `BUILD_ONLY_GATES` below with a reason. There is no third option — that is
  * the whole point of the file.
+ *
+ * ⚠️ The roster is the ONLY thing holding an artifact-level gate to both doors.
+ * The scan below extracts `lintFoo(`/`validateFoo(` call sites, so a gate named
+ * anything else — `findFoo(`, say — is invisible to it and drifts silently the
+ * day it is wired into one command only.
  */
 const SHARED_NON_REGISTRY_GATES: readonly string[] = [
   // [#3366] Resolves each `requires` token's provider in the active edition.
@@ -62,6 +69,13 @@ const SHARED_NON_REGISTRY_GATES: readonly string[] = [
   // build` refuses. Both doors run the same call, between the two key lints
   // above and the parse.
   'lowerCallables',
+  // [#18024] Permission sets declared under a name another package in the SAME
+  // artifact owns — the compile-time half of #17516's runtime refusal. Neither
+  // the filesystem nor the emitted artifact, but cross-package by construction:
+  // the name is declared by package A and declared again by package B, so the
+  // per-package walk a registry rule gets sees one half at a time. Listed by
+  // name because the extractor below cannot see a `find*` gate.
+  'findPermissionSetNameCollisions',
 ];
 
 /**

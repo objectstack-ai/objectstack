@@ -599,6 +599,222 @@ describe('validateTranslationReferences — apps, dashboards, global actions', (
   });
 });
 
+/**
+ * Navigation CONTRIBUTED into an app by another package (#18203).
+ *
+ * `manifest.navigationContributions` (ADR-0029 D7) injects nav items into an
+ * app the contributing package does not own. Those items are NOT in the target
+ * app's `navigation` array, so a universe built from that array alone reports
+ * every locale key for them as naming an item "which app X does not declare" —
+ * with the advice *"Match the key to the navigation item's `id`, or drop it"*.
+ *
+ * ⚠️ That advice DELETES a translation the runtime honours. Measured downstream
+ * on `objectstack-ai/hotcrm` `be11c07`: five contributed items, 15 findings
+ * (5 × 3 non-default locales), while `GET /api/v1/meta/app?id=crm_enterprise`
+ * returns all five WITH their `zh-CN` labels resolved from the app's own pack.
+ *
+ * The three `group` cases below are the load-bearing ones, and they are why the
+ * universe can be a union rather than a re-implementation of the runtime fold:
+ * `SchemaRegistry.applyNavContributions` PUSHES the items in every branch — into
+ * the resolved group, or at the app top level when the group id names nothing
+ * (which is a diagnostic, never a refusal; see `NavigationContributionSchema`'s
+ * header). The fold chooses WHERE an item lands, never WHETHER. So a rule that
+ * only asks "is this id addressable?" cannot diverge from the fold, and pinning
+ * all three placements here is what keeps that true.
+ */
+describe('validateTranslationReferences — contributed navigation (#18203)', () => {
+  /** Package `crm_core` owns the app; package `crm_service` contributes into it. */
+  const contributedArtifact = (contributions: unknown[]) => ({
+    packages: [
+      {
+        manifest: {
+          id: 'crm_core',
+          apps: [
+            {
+              name: 'crm_enterprise',
+              navigation: [
+                { id: 'group_sales', type: 'group', children: [{ id: 'nav_leads', type: 'object', objectName: 'crm_lead' }] },
+                { id: 'group_service', type: 'group', children: [] },
+              ],
+            },
+          ],
+        },
+      },
+      { manifest: { id: 'crm_service', navigationContributions: contributions } },
+    ],
+    objects: [{ name: 'crm_lead', fields: { name: { type: 'text' } } }],
+    apps: [
+      {
+        name: 'crm_enterprise',
+        navigation: [
+          { id: 'group_sales', type: 'group', children: [{ id: 'nav_leads', type: 'object', objectName: 'crm_lead' }] },
+          { id: 'group_service', type: 'group', children: [] },
+        ],
+      },
+    ],
+  });
+
+  const localeKeys = (...navIds: string[]) => [
+    {
+      'zh-CN': {
+        apps: {
+          crm_enterprise: {
+            label: '企业版 CRM',
+            navigation: Object.fromEntries(navIds.map((id) => [id, { label: id }])),
+          },
+        },
+      },
+    },
+  ];
+
+  it('accepts a locale key for an item contributed into a group the app DOES declare', () => {
+    const findings = validateTranslationReferences({
+      ...contributedArtifact([
+        { app: 'crm_enterprise', group: 'group_service', priority: 100, items: [{ id: 'nav_case', type: 'object', objectName: 'crm_case' }] },
+      ]),
+      translations: localeKeys('nav_case'),
+    });
+    expect(findings).toEqual([]);
+  });
+
+  it('accepts one contributed into a group the app does NOT declare — the fold relocates, it does not drop', () => {
+    const findings = validateTranslationReferences({
+      ...contributedArtifact([
+        { app: 'crm_enterprise', group: 'group_nonexistent', items: [{ id: 'nav_knowledge', type: 'object', objectName: 'crm_kb' }] },
+      ]),
+      translations: localeKeys('nav_knowledge'),
+    });
+    expect(findings).toEqual([]);
+  });
+
+  it('accepts one contributed with no `group` at all — appended at the app top level', () => {
+    const findings = validateTranslationReferences({
+      ...contributedArtifact([
+        { app: 'crm_enterprise', items: [{ id: 'nav_service_dashboard', type: 'dashboard' }] },
+      ]),
+      translations: localeKeys('nav_service_dashboard'),
+    });
+    expect(findings).toEqual([]);
+  });
+
+  it('accepts a CHILD of a contributed group — contributed items carry subtrees', () => {
+    const findings = validateTranslationReferences({
+      ...contributedArtifact([
+        {
+          app: 'crm_enterprise',
+          group: 'group_service',
+          items: [{ id: 'nav_reports', type: 'group', children: [{ id: 'nav_report_sla', type: 'report' }] }],
+        },
+      ]),
+      translations: localeKeys('nav_reports', 'nav_report_sla'),
+    });
+    expect(findings).toEqual([]);
+  });
+
+  it('accepts the whole HotCRM set — the five items #18203 measured as 15 findings', () => {
+    const items = ['nav_case', 'nav_knowledge', 'nav_service_dashboard', 'nav_my_cases', 'nav_report_sla'];
+    const findings = validateTranslationReferences({
+      ...contributedArtifact([
+        { app: 'crm_enterprise', group: 'group_service', priority: 100, items: items.map((id) => ({ id, type: 'object' })) },
+      ]),
+      translations: localeKeys(...items),
+    });
+    expect(findings).toEqual([]);
+  });
+
+  /**
+   * ⭐ The control. Widening a universe trades a false positive for a blind spot
+   * unless the genuine orphan still reports — so the same stack, one key that
+   * NOTHING contributes, has to stay an error with its id and severity intact.
+   */
+  it('still reports a genuinely unknown navigation id, at `error`, with the rule id', () => {
+    const findings = validateTranslationReferences({
+      ...contributedArtifact([
+        { app: 'crm_enterprise', group: 'group_service', items: [{ id: 'nav_case', type: 'object' }] },
+      ]),
+      translations: localeKeys('nav_case', 'nav_deleted_surface'),
+    });
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toMatchObject({
+      rule: TRANSLATION_TARGET_UNKNOWN,
+      severity: 'error',
+      path: 'translations[0]["zh-CN"].apps.crm_enterprise.navigation.nav_deleted_surface',
+    });
+    expect(findings[0].message).toContain('which app "crm_enterprise" does not declare');
+    // The contributed id joins the population the hint enumerates, so the
+    // remedy an author is handed lists what they may actually key to.
+    expect(findings[0].hint).toContain('nav_case');
+  });
+
+  /**
+   * A contribution is aimed at ONE app (`NavigationContributionSchema.app`), so
+   * it may not make its ids addressable under a different one — otherwise the
+   * widening would silence every app in an artifact at once.
+   */
+  it('does NOT accept a key under app A for an item contributed into app B', () => {
+    const findings = validateTranslationReferences({
+      ...contributedArtifact([
+        { app: 'other_app', group: 'group_service', items: [{ id: 'nav_case', type: 'object' }] },
+      ]),
+      translations: localeKeys('nav_case'),
+    });
+    expect(findings).toHaveLength(1);
+    expect(findings[0].path).toBe('translations[0]["zh-CN"].apps.crm_enterprise.navigation.nav_case');
+  });
+
+  /**
+   * The single-package shape. A project that is one `defineStack` carries no
+   * `packages[]`; its contributions sit on the stack's own top-level
+   * `manifest` (`StackSchema.manifest`). `os validate` judges exactly this
+   * shape, so reading only the artifact form would leave the fast inner-loop
+   * command reporting the false positive the build no longer does.
+   */
+  it('reads contributions off the stack\'s own top-level `manifest` when there is no `packages[]`', () => {
+    const findings = validateTranslationReferences({
+      manifest: {
+        id: 'crm_service',
+        navigationContributions: [
+          { app: 'crm_enterprise', group: 'group_service', items: [{ id: 'nav_case', type: 'object' }] },
+        ],
+      },
+      apps: [{ name: 'crm_enterprise', navigation: [{ id: 'group_service', type: 'group', children: [] }] }],
+      translations: localeKeys('nav_case'),
+    });
+    expect(findings).toEqual([]);
+  });
+
+  /**
+   * The per-PACKAGE leg of `os build` (`compile.ts` step 3b-ii) hands each
+   * package its OWN body as the stack and the artifact's `packages[]` as
+   * resolution context (`packageBodyAsStack`, #16611). The app-owning package
+   * carries the translations and none of the contributions, so this is the
+   * shape in which the false positive actually reached the HotCRM author —
+   * the union run above it de-duplicates, so a fix that only worked on the
+   * union would leave this leg reporting it alone.
+   */
+  it('accepts the key in the per-package leg, where the app owner declares no contribution itself', () => {
+    const artifactPackages = [
+      { manifest: { id: 'crm_core', apps: [{ name: 'crm_enterprise', navigation: [{ id: 'group_service', type: 'group', children: [] }] }] } },
+      {
+        manifest: {
+          id: 'crm_service',
+          navigationContributions: [
+            { app: 'crm_enterprise', group: 'group_service', items: [{ id: 'nav_case', type: 'object' }] },
+          ],
+        },
+      },
+    ];
+    const ownerBody = {
+      id: 'crm_core',
+      apps: [{ name: 'crm_enterprise', navigation: [{ id: 'group_service', type: 'group', children: [] }] }],
+      translations: localeKeys('nav_case'),
+    };
+    // `packageBodyAsStack(body, entries)` — the body IS its own manifest.
+    const findings = validateTranslationReferences({ ...ownerBody, manifest: ownerBody, packages: artifactPackages });
+    expect(findings).toEqual([]);
+  });
+});
+
 describe('validateTranslationReferences — flows (#7646 / #11287)', () => {
   /**
    * One stack, shared by every case below — the clean run and the three

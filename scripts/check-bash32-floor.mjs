@@ -40,6 +40,47 @@
  * depth over the class, at the price of a regex — and the blind spot named
  * under "Known limit" below is exactly the half the simulation harness holds.
  *
+ * ## The BOUNDARY: the axis is the bash INTERPRETER, not the userland binaries
+ *
+ * A gate that states its class but not its boundary can be widened by a
+ * well-meaning row, so the boundary is written here rather than left to be
+ * re-derived. This gate's axis is the VERSION OF BASH THAT RUNS A SCRIPT, and
+ * the row schema says so by construction, not by convention: every
+ * `CONSTRUCTS` row carries a `since:` that is a bash version, and every `kind`
+ * is a bash category — a builtin, a piece of syntax, a variable. There is no
+ * value for "an external binary", and a row about one has nowhere to put it.
+ *
+ * So a difference between the GNU and BSD USERLAND BINARIES a script calls —
+ * `mktemp` and where it will accept the `XXXXXX`, `sed -i` and whether it
+ * demands a suffix argument, `readlink -f`, `date` and its flags — is a
+ * DIFFERENT AXIS, and ⛔ it is not a row here. Such a row could not be written
+ * honestly: `mktemp` has no bash version, so its `since:` would have to be a
+ * lie or a special case, and the verdict line this gate prints ends
+ * "constructs checked, floor bash 3.2" — which becomes false advertising the
+ * moment a coreutils-vs-BSD rule joins the table it counts. Widening here
+ * would silently convert a gate that means "this script needs bash 4" into one
+ * that means "this script behaves differently on a Mac": a strictly larger
+ * claim, made by adding a row.
+ *
+ * ⇒ That class wants a SIBLING gate, not a row here — and ⛔ not yet. The
+ * measured population of real userland defects in this repo is ONE: an
+ * `mktemp` template whose `XXXXXX` was not last. It is already fixed and
+ * guarded by a per-script pin, which ⛔ stays — nothing here replaces it. A
+ * shared gate for a population of one is not warranted, and the evidence that
+ * would change that is a SECOND real instance; the place to land it is the
+ * boundary card this paragraph came from (#17141).
+ *
+ * ⚠️ The basis is written out and not just the verdict, on purpose: a boundary
+ * stated without its basis gets re-litigated by the next person who
+ * provisionally leans yes. That is not hypothetical. This exact question —
+ * should this gate grow a BSD/portability rule, so the `mktemp` class is
+ * caught by a shared gate instead of a per-script pin — was asked, was
+ * answered NO, and the seat that answered it had leaned the other way first
+ * and put that on the record: *"measuring is what produced it — I had
+ * provisionally leaned yes."* ⇒ Measuring is the part that is reproducible.
+ * Read any row's `since:` and `kind:` before re-opening this; ⛔ do not
+ * re-litigate it from intuition.
+ *
  * ## The exemption rule: telling a HUNTER from a USER
  *
  * The hard part of a repo-wide scan is that the files which document this floor
@@ -624,6 +665,131 @@ export function isShell(relPath, text) {
 }
 
 /**
+ * ## What the `bash` on PATH can actually do — MEASURED, never inferred
+ *
+ * Two `--self-test` harnesses in this repo drive a real shell, and both
+ * assumed the interpreter they spawn is bash 4+. On macOS `/bin/bash` is
+ * 3.2.57 — the very floor this gate defends — so both went red on the one
+ * platform whose support is the whole point of the floor, while CI's bash 5
+ * stayed green. This is the ONE detection both harnesses now share. The
+ * DISPOSITIONS they take from it are deliberately NOT shared, and each is
+ * argued where it is taken: a harness that replays a bash-4 workflow block
+ * verbatim cannot run at all under the floor and says so out loud, while the
+ * simulated-3.2 leg below wants the opposite and reads a native absence as a
+ * BETTER instrument than the one it manufactures.
+ *
+ * Two readings, and the split between them is not cosmetic:
+ *
+ *   `major`/`minor`   from `BASH_VERSINFO`, set by every bash since 2.0. It is
+ *                     the only instrument that can speak about SYNTAX and about
+ *                     new FLAGS on old builtins — `declare -A`, `shopt -s
+ *                     globstar`, `${x^^}` — because on 3.2 the command itself
+ *                     still exists and only the flag or the expansion is new,
+ *                     so there is nothing for `type` to be asked about.
+ *
+ *   `builtins`        `type -t <name>`, per name, for the rows whose construct
+ *                     IS the command. Exactly two names are probed and the
+ *                     narrowness is the whole point: `type -t declare` answers
+ *                     `builtin` on 3.2 as loudly as on 5.2, so probing there
+ *                     would report a capability the host does not have. It is
+ *                     also the only reading that survives `enable -n mapfile
+ *                     readarray` — the manufactured floor this file's own
+ *                     instrument leg builds, where the version still reads 5.x
+ *                     while the builtin is gone.
+ *
+ * ⚠️ `CONSTRUCTS[].since` is NOT consulted here and must not be. The header
+ * above states it is documentation and not a predicate; a capability inferred
+ * from a table is not a measurement, and the table would then be certifying
+ * itself.
+ *
+ * ⛔ `answered: false` is a REFUSAL, not a default. A caller that cannot read
+ * the host's capabilities knows nothing, and "knows nothing" must fail loudly
+ * rather than fall through to the permissive branch (#4690).
+ */
+export const PROBED_BUILTINS = Object.freeze(['mapfile', 'readarray']);
+
+/**
+ * The pure half: turn one probe transcript into a capability reading.
+ *
+ * Split out from the spawning half on purpose — it is what lets BOTH branches
+ * of every disposition below be pinned from fixtures on any host, including the
+ * bash-4+ hosts where a native 3.2 reading cannot be produced at all.
+ *
+ * @param {string} stdout the probe's output
+ * @param {number|null} status the probe's exit status
+ */
+export function readBashCapabilities(stdout, status) {
+  const lines = String(stdout ?? '')
+    .split('\n')
+    .map((l) => l.trimEnd())
+    .filter((l) => l.length > 0);
+  const version = lines[0] ?? '';
+  const m = /^(\d+)\.(\d+)$/.exec(version);
+  /** @type {Record<string, boolean|null>} */
+  const builtins = {};
+  for (const name of PROBED_BUILTINS) builtins[name] = null;
+  for (const line of lines.slice(1)) {
+    const [name, kind] = line.split(' ');
+    if (!PROBED_BUILTINS.includes(name)) continue;
+    // `type -t` prints `builtin` for a live builtin and NOTHING once
+    // `enable -n` has removed it — which is also what a host that never had it
+    // prints. Those two are the same fact about this shell, and this reading
+    // deliberately does not try to tell them apart: the callers that care do it
+    // by argument, not by probe.
+    builtins[name] = kind === 'builtin' || kind === 'function' || kind === 'file';
+  }
+  const answered = status === 0 && m !== null && PROBED_BUILTINS.every((b) => builtins[b] !== null);
+  return {
+    answered,
+    version: m ? version : null,
+    major: m ? Number(m[1]) : null,
+    minor: m ? Number(m[2]) : null,
+    builtins,
+  };
+}
+
+/** The probe script, kept beside its reader so the two cannot drift. */
+const CAPABILITY_PROBE =
+  'printf \'%s.%s\\n\' "${BASH_VERSINFO[0]:-0}" "${BASH_VERSINFO[1]:-0}"\n' +
+  PROBED_BUILTINS.map((b) => `printf '%s %s\\n' '${b}' "$(type -t ${b} 2> /dev/null || true)"`).join('\n') +
+  '\n';
+
+/** Measure the `bash` this process would spawn. Resolved through `PATH`, like every other spawn here. */
+export function probeBashCapabilities() {
+  const out = spawnSync('bash', ['-c', CAPABILITY_PROBE], { encoding: 'utf8' });
+  return readBashCapabilities(out.stdout ?? '', out.status);
+}
+
+/**
+ * The rows whose construct is a COMMAND, so `type -t` can answer for them.
+ * Every other row is a flag, an option, an expansion or an operator on
+ * something 3.2 already has, and only the version reading speaks to those.
+ */
+const ROW_PROBED_BUILTINS = Object.freeze({ mapfile: PROBED_BUILTINS });
+
+/**
+ * Which constructs in one block of shell this host's `bash` cannot run.
+ *
+ * Returns `scanText` findings, so a caller reporting a skip can name the line,
+ * the spelling and what it BREAKS — the same sentence this gate prints when it
+ * flags the same construct in a tracked file. A skip carrying that is a skip
+ * with a reason; one carrying a count is the quiet pass #4690 refuses.
+ *
+ * @param {string} label a name for the block, used only in the findings
+ * @param {string} text the block, verbatim
+ * @param {ReturnType<typeof readBashCapabilities>} caps
+ */
+export function unsupportedConstructs(label, text, caps) {
+  if (!caps.answered) throw new Error('unsupportedConstructs: capabilities were never read — refuse, do not guess');
+  return scanText(label, text).filter((finding) => {
+    const probed = ROW_PROBED_BUILTINS[finding.id];
+    const named = probed ? probed.filter((name) => finding.text.includes(name)) : [];
+    if (named.length > 0) return named.some((name) => caps.builtins[name] === false);
+    return typeof caps.major === 'number' && caps.major < 4;
+  });
+}
+
+/**
  * The population, read from the git index under the derived walk roots.
  *
  * @param {string} root
@@ -736,13 +902,14 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'population membership': 5,
   '⭐ the declaration, and the two obligations it makes unreachable': 5,
   '⭐ end to end, through the real discovery path': 5,
-  '⭐ the instrument is real: the flagged construct really does break': 4,
+  '⭐ the bash-4 capability reading, pinned in BOTH directions': 12,
+  '⭐ the instrument is real: the flagged construct really does break': 5,
   'the real tree': 2,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 17;
+const SELF_TEST_BATTERY_FLOOR = 18;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -1109,24 +1276,151 @@ function selfTest() {
     `${emptyRun.stdout}${emptyRun.stderr}`.slice(0, 300),
   );
 
+  // --- ⭐ the capability reading, pinned in BOTH directions (#17458) ---------
+  //
+  // The disposition every harness takes from `probeBashCapabilities()` branches
+  // on a reading that a bash-4+ host can only ever produce ONE value of. Pin the
+  // pure reader against transcripts instead, so the 3.2 branch — the branch that
+  // only ever executes on the platform this gate defends — is verified on every
+  // run, on every host, including the CI runner that can never take it.
+  //
+  // ⛔ These are fixtures of a REAL transcript shape: the probe's own output,
+  // `BASH_VERSINFO` major.minor then one `<name> <type -t>` line per probed
+  // builtin, with `type -t` printing nothing for a builtin that is not there.
+  battery('⭐ the bash-4 capability reading, pinned in BOTH directions');
+  const capsOf = (text, status = 0) => readBashCapabilities(text, status);
+  const BASH52 = '5.2\nmapfile builtin\nreadarray builtin\n';
+  const BASH32 = '3.2\nmapfile \nreadarray \n';
+  const MANUFACTURED = '5.2\nmapfile \nreadarray \n';
+  t('a bash 5.2 transcript reads as answered, 5.2, builtins present', (() => {
+    const c = capsOf(BASH52);
+    return c.answered && c.major === 5 && c.minor === 2 && c.builtins.mapfile === true;
+  })());
+  t("a bash 3.2 transcript — macOS's `/bin/bash`, unreachable from CI — reads as 3.2 with the builtin ABSENT", (() => {
+    const c = capsOf(BASH32);
+    return c.answered && c.major === 3 && c.builtins.mapfile === false && c.builtins.readarray === false;
+  })());
+  t('the two readings are INDEPENDENT: a manufactured floor is 5.2 with the builtin gone', (() => {
+    const c = capsOf(MANUFACTURED);
+    return c.answered && c.major === 5 && c.builtins.mapfile === false;
+  })());
+  t('a truncated transcript is a REFUSAL, never a permissive default (#4690)', capsOf('5.2\n').answered === false);
+  t('an unreadable version line is a refusal too', capsOf('GNU bash, version 3.2.57\nmapfile \n').answered === false);
+  t('a non-zero probe status is a refusal even when the output parses', capsOf(BASH52, 1).answered === false);
+  const MAPFILE_BLOCK = "mapfile -t selftests < <(find .claude/hooks -type f -name '*.selftest.sh' | sort)\n";
+  const ASSOC_BLOCK = 'declare -A seen\n';
+  t(
+    'a `mapfile` block is UNRUNNABLE against the 3.2 reading, and the finding names the line',
+    (() => {
+      const u = unsupportedConstructs('block.sh', MAPFILE_BLOCK, capsOf(BASH32));
+      return u.length === 1 && u[0].id === 'mapfile' && u[0].line === 1;
+    })(),
+  );
+  t(
+    'the SAME block is runnable against the 5.2 reading — so nothing is skipped on CI',
+    unsupportedConstructs('block.sh', MAPFILE_BLOCK, capsOf(BASH52)).length === 0,
+  );
+  t(
+    'and it is unrunnable against the MANUFACTURED reading too, which is how this is provable off 3.2',
+    unsupportedConstructs('block.sh', MAPFILE_BLOCK, capsOf(MANUFACTURED)).length === 1,
+  );
+  t(
+    '`declare -A` is decided by the VERSION leg — `type -t declare` answers `builtin` on 3.2, so it cannot be probed',
+    unsupportedConstructs('block.sh', ASSOC_BLOCK, capsOf(BASH32)).length === 1 &&
+      unsupportedConstructs('block.sh', ASSOC_BLOCK, capsOf(BASH52)).length === 0 &&
+      unsupportedConstructs('block.sh', ASSOC_BLOCK, capsOf(MANUFACTURED)).length === 0,
+  );
+  t(
+    'E1 carries through: a full-line comment NAMING the builtin is not a reason to skip anything',
+    unsupportedConstructs('block.sh', '# no mapfile in this block\n', capsOf(BASH32)).length === 0,
+  );
+  t('and an unread capability THROWS rather than guessing a disposition', (() => {
+    try {
+      unsupportedConstructs('block.sh', MAPFILE_BLOCK, capsOf('', 1));
+      return false;
+    } catch {
+      return true;
+    }
+  })());
+
   // --- ⭐ the instrument is real: the flagged construct really does break ---
   //
   // R7a's shape, and for R7a's reason: without this the leg below could pass by
   // proving nothing. `BASH_ENV` is sourced by every non-interactive bash, so the
   // child inherits the disabling — measured BOTH ways on a probe first.
+  //
+  // ⭐ ON A HOST THAT IS ALREADY THE FLOOR, THE MANUFACTURE IS THE WRONG
+  // INSTRUMENT, AND THE READING IS STRONGER WITHOUT IT (#17458).
+  //
+  // The claim this section owes the leg after it is ONE sentence: *the shell
+  // the next leg measures really has no `mapfile`, and really does run shell
+  // otherwise*. On bash 4+ the only way to establish that is to manufacture the
+  // absence and read it BOTH ways — present before, gone after. On a host where
+  // `mapfile` was never there, that before-probe is empty because the host is
+  // bash 3.2, and the assertion written for the manufacture reports the floor
+  // itself as a broken harness. That is the shape the gate defending the 3.2
+  // floor failed on 3.2.
+  //
+  // ⛔ The repair is NOT to relax the assertion — an `||` admitting an empty
+  // before-probe would also admit a harness that never ran, which is the #4690
+  // reading this whole file refuses. The repair is that a native absence is a
+  // DIFFERENT and better instrument, and is asserted as one: the shell is asked
+  // for `mapfile` and refuses it BY NAME at status 127, and a positive control
+  // written in 3.2-only shell runs to completion in the same interpreter — so
+  // "the builtin is gone" is told apart from "nothing here runs", which is
+  // exactly the discrimination the before-probe buys on bash 4+. The floor is
+  // then not simulated at all; it is the host, which is the strongest reading
+  // of the two and the one no CI runner can produce.
   battery('⭐ the instrument is real: the flagged construct really does break');
+  const caps = probeBashCapabilities();
+  t(
+    'the host\'s bash capabilities were MEASURED, not assumed (a reading that failed is a refusal)',
+    caps.answered === true,
+    `caps=${JSON.stringify(caps)}`,
+  );
   const simDir = mkdtempSync(join(tmpdir(), 'bash32-sim-'));
   const noBash4 = join(simDir, 'no-bash4-builtins.sh');
   writeFileSync(noBash4, 'enable -n mapfile readarray 2> /dev/null\n');
   const probe = join(simDir, 'probe.sh');
   writeFileSync(probe, 'mapfile -t x < /dev/null && echo MAPFILE-WORKS\n');
+  // 3.2-only shell, and the control that separates "the builtin is gone" from
+  // "this interpreter runs nothing". `while IFS= read -r` is the very
+  // replacement the `mapfile` row points at, so a host that cannot run THIS is
+  // a host on which the gate's own advice is wrong.
+  const control = join(simDir, 'control.sh');
+  writeFileSync(control, 'while IFS= read -r l; do :; done < /dev/null\necho CONTROL-SHELL-OK\n');
   const plain = spawnSync('bash', [probe], { encoding: 'utf8' });
   const sim = spawnSync('bash', [probe], { encoding: 'utf8', env: { ...process.env, BASH_ENV: noBash4 } });
-  t(
-    'the simulated-3.2 harness really removes the builtin (else the next leg proves nothing)',
-    plain.stdout.includes('MAPFILE-WORKS') && !sim.stdout.includes('MAPFILE-WORKS') && /mapfile/.test(sim.stderr),
-    `plain=${plain.stdout.trim()} sim.out=${sim.stdout.trim()} sim.err=${sim.stderr.trim()}`,
+  const nativelyAbsent = caps.answered && caps.builtins.mapfile === false;
+  console.log(
+    `    · instrument: ${nativelyAbsent ? 'NATIVE' : 'MANUFACTURED'} — bash ${caps.version ?? '(unreadable)'}, ` +
+      `mapfile ${caps.builtins.mapfile === false ? 'absent' : 'present'} before `
+      + `${nativelyAbsent ? 'anything is disabled' : '`enable -n`'}`,
   );
+  if (nativelyAbsent) {
+    const plainControl = spawnSync('bash', [control], { encoding: 'utf8' });
+    t(
+      'the host IS the floor: its own bash refuses `mapfile` BY NAME, so nothing has to be simulated',
+      plain.status === 127 && /mapfile/.test(plain.stderr) && !plain.stdout.includes('MAPFILE-WORKS'),
+      `status=${plain.status} out=${plain.stdout.trim()} err=${plain.stderr.trim()}`,
+    );
+    t(
+      'and the positive control proves that is about the BUILTIN, not about a shell that runs nothing',
+      plainControl.status === 0 && plainControl.stdout.includes('CONTROL-SHELL-OK'),
+      `status=${plainControl.status} out=${plainControl.stdout.trim()} err=${plainControl.stderr.trim()}`,
+    );
+    t(
+      'and `enable -n` over a builtin that is already gone changes nothing, so the next leg reads the same shell',
+      !sim.stdout.includes('MAPFILE-WORKS') && /mapfile/.test(sim.stderr),
+      `sim.out=${sim.stdout.trim()} sim.err=${sim.stderr.trim()}`,
+    );
+  } else {
+    t(
+      'the simulated-3.2 harness really removes the builtin (else the next leg proves nothing)',
+      plain.stdout.includes('MAPFILE-WORKS') && !sim.stdout.includes('MAPFILE-WORKS') && /mapfile/.test(sim.stderr),
+      `plain=${plain.stdout.trim()} sim.out=${sim.stdout.trim()} sim.err=${sim.stderr.trim()}`,
+    );
+  }
   t(
     'and a script this gate flags really does die at 127 under it',
     sim.status === 127,

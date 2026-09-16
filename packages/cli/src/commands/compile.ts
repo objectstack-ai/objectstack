@@ -50,6 +50,14 @@ import { checkProtocolVersionGap } from '../utils/protocol-version-gap.js';
 // Reports; never refuses — the runtime still relocates, deliberately.
 import { findNavGroupDiagnostics } from '../utils/nav-contribution-groups.js';
 import type { NavContributionGroupDiagnostic } from '@objectstack/objectql';
+// [#18024] The compile-time half of the #17516 permission-set name-collision
+// ruling. Reports; never refuses — the runtime still drops the set, deliberately
+// (ADR-0086 D4), and what was missing was the author hearing about it.
+import {
+  findPermissionSetNameCollisions,
+  formatPermissionSetNameCollisions,
+} from '../utils/permission-set-name-collisions.js';
+import type { PermissionSetNameCollisionDiagnostic } from '@objectstack/plugin-security';
 
 /** Identity of one finding, for the per-package de-duplication below. */
 const findingKey = (f: { rule: string; where: string; path: string; message: string }): string =>
@@ -153,12 +161,20 @@ export default class Compile extends Command {
     // third pin in that file asserts ("nothing rides in build that validate
     // does not also report") holds rather than being weakened to fit.
     let navGroupWarnings: NavContributionGroupDiagnostic[] = [];
+    // [#18024] The permission-set name-collision half, a member of
+    // `warningsSoFar()` for the same three reasons the list above it records:
+    // the two undeclared-key pins refuse a new top-level payload key by name,
+    // `os validate` computes the identical list so the residue pin holds, and
+    // `severity: 'warning'` is declared at the producer — this reports, it
+    // never refuses.
+    let permissionSetCollisionWarnings: PermissionSetNameCollisionDiagnostic[] = [];
     const warningsSoFar = () => [
       ...ruleAdvisories,
       ...docWarnings,
       ...unknownKeyWarnings,
       ...capProviderWarnings,
       ...navGroupWarnings,
+      ...permissionSetCollisionWarnings,
     ];
     // [#12125] The ADR-0087 D2 conversion notices, hoisted for the SAME reason
     // and under the SAME ruling as the four lists above — one field over. The
@@ -490,6 +506,37 @@ export default class Compile extends Command {
         );
       }
 
+      // 3b-ter. [#18024] Permission sets declared under a name another package
+      //     in this same artifact already owns. The RUNTIME door (#17516)
+      //     refuses the write and says so at boot; this is the compile-time
+      //     half of that ruling, behind the SAME predicate and the SAME
+      //     sentence so the two cannot drift.
+      //
+      //     ⛔ REPORTS, NEVER REFUSES, and ⛔ does not change what is skipped.
+      //     Refusing a foreign set is correct under ADR-0086 D4 and stays; the
+      //     producer declares `severity: 'warning'` and the failure direction
+      //     is CLOSED (the set is not installed, so nothing is over-granted).
+      //     Exiting non-zero here would narrow what `os build` accepts, which
+      //     is a different decision from the one this card carries.
+      //
+      //     Only the COMPOSED case can be judged: a name a package installed
+      //     from some OTHER artifact owns is invisible without a database, and
+      //     the same bound the nav check keeps one step above.
+      permissionSetCollisionWarnings =
+        await findPermissionSetNameCollisions(result.data as Record<string, unknown>);
+      if (permissionSetCollisionWarnings.length > 0 && !flags.json) {
+        console.log('');
+        printWarning(
+          `Permission sets declared under a name another package in this artifact owns ` +
+            `(${permissionSetCollisionWarnings.length}) — at runtime the ENTIRE declared set is ` +
+            `dropped, not merged (ADR-0086 D4)`,
+        );
+        printBulletList(
+          await formatPermissionSetNameCollisions(permissionSetCollisionWarnings),
+          { noun: 'permission-set collision diagnostic' },
+        );
+      }
+
       // 3c. [#3366] Installable-provider preflight. Every capability the app
       //     DECLARES in `requires: [...]` must have a provider resolvable in the
       //     active edition. A `requires` entry whose provider has NO installable
@@ -649,8 +696,17 @@ export default class Compile extends Command {
       //
       //     Not a registry rule: it reads `src/docs/` off disk, and the docs it
       //     collects there are an INPUT to the artifact, not just a check.
-      if (!flags.json) printStep('Collecting package docs (ADR-0046)...');
+      //
+      // [#18432] The step line is printed AFTER the call and carries the count.
+      //     Printed before it, the line announced a collection the build had
+      //     not performed yet, so a run that collected NOTHING — an empty or
+      //     absent `src/docs/`, or a docs directory that moved into a package
+      //     under an ADR-0130 layout — emitted the same reassuring sentence as
+      //     a run that collected four documents. Reporting the count is what
+      //     makes the two runs distinguishable; the ordering is what makes the
+      //     count available to report.
       const docsResult = collectAndLintDocs(absolutePath, result.data as Record<string, unknown>);
+      if (!flags.json) printStep(`Collecting package docs (ADR-0046)... ${docsResult.docs.length} collected`);
       const docErrors = docsResult.issues.filter((i) => i.severity === 'error');
       // [#11727] Consumed by BOTH faces — the text block below and the `--json`
       //     payload. Only the text block read it before, so the advisories were

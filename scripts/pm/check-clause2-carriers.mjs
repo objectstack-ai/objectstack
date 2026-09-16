@@ -714,6 +714,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '#17959: POSITION is the LINE, not the body — the merged #17819 specimen in both its shapes': 10,
   '#18042: the copyable record TEMPLATE — the one machine-read artefact with nothing to copy': 24,
   '#18141: the head sha sits in a span of ITS OWN — the key-in-span spelling, refused and NAMED': 19,
+  '#17919: the correction remedy names THIS card\'s claim comment, never another card\'s': 24,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -723,8 +724,8 @@ const SELF_TEST_BATTERIES = Object.freeze({
 // existing slack is preserved rather than tightened or loosened as a side
 // effect, and once more by the one #17149 adds, by the one #17098 adds, by the
 // one #17915 adds, by the one #17959 adds, by the one #18042 adds, and by the
-// one #18174 adds, and by the one #18141 adds.
-const SELF_TEST_BATTERY_FLOOR = 24;
+// one #18174 adds, and by the one #18141 adds, and by the one #17919 adds.
+const SELF_TEST_BATTERY_FLOOR = 25;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -1246,6 +1247,82 @@ export function readClause2Correction(row) {
   };
 }
 
+/**
+ * The issue a comment row SAYS it belongs to, or null when it says nothing.
+ *
+ * REST comment rows carry `issue_url`, and its tail is the parent issue's
+ * number — the same resolution #17919's control performed by hand: comment
+ * 5642248126 resolves to `/issues/17366` while the card under test was #17425,
+ * and the card's own governing claim resolves to `/issues/17425`. So the
+ * endpoint answers this correctly and a row's parent is readable without a
+ * second request.
+ *
+ * ⛔ Absence of the field is NOT evidence of a foreign parent. An offline
+ * `--pair-json` document and this file's own fixtures both carry rows without
+ * it, and a row that states nothing about its parent contradicts nothing. Only
+ * a POSITIVE disagreement is a mismatch — a guard that read absence as a
+ * mismatch would drop ids it has no reason to doubt.
+ *
+ * @param {{ issue_url?: string }} row
+ * @returns {number|null}
+ */
+export function commentCardNumber(row) {
+  const m = /\/issues\/(\d{1,9})(?:$|[/?#])/.exec(String(row?.issue_url ?? ''));
+  return m ? Number(m[1]) : null;
+}
+
+/**
+ * WHICH comment id the correction remedy may name — #17919's ⭐.
+ *
+ * The remedy's part (3) tells a seat to post `Clause-②-correction: N`, and N
+ * has to be THIS card's governing claim comment: a correction naming any other
+ * comment is IGNORED by `applicableCorrection`, so a wrong N sends the seat to
+ * perform an act that cannot land. It used to be a LITERAL baked into the
+ * remedy string — 5642248126, the #17366 specimen — so every C2 row on every
+ * card printed a real comment id belonging to a different card, inside a
+ * verdict about this one. That is the class #17919 was filed on, and it is not
+ * a selection at all: nothing selected that comment, and no `issue_url` guard
+ * over a selection could have caught a constant.
+ *
+ * ⭐ The cut is therefore one level up: the only ids this file may print in a
+ * remedy are ids it READ from the pool `cardDeclaration` is judging, and each
+ * one is checked against the card under test before it is printed. A row whose
+ * declared parent is another card is dropped and SAID, ⛔ never silently; when
+ * nothing survives, the remedy names no id at all rather than a plausible one.
+ * ⛔ Fail-closed on a missing card number too: an id that cannot be checked is
+ * an id that cannot be shown to be this card's.
+ *
+ * ⛔ This resolves NO verdict and NO exit. It decides which digits a sentence
+ * carries; the state, the row and the exit code are whatever they already were.
+ *
+ * @param {{ id?: number|string, issue_url?: string }[]|null} pool — the claim
+ *   rows `cardDeclaration` built its readings from, and nothing else.
+ * @param {number|string|null} card — the card under test.
+ * @returns {{ id: string|null, candidates: string[],
+ *   foreign: { id: string, card: number }[], card: number|null }}
+ */
+export function correctionTarget(pool, card) {
+  const under = Number(card);
+  const known = Number.isFinite(under) && under > 0 ? under : null;
+  const candidates = [];
+  const foreign = [];
+  for (const row of Array.isArray(pool) ? pool : []) {
+    if (row?.id === undefined || row?.id === null) continue;
+    const parent = commentCardNumber(row);
+    if (known !== null && parent !== null && parent !== known) {
+      foreign.push({ id: String(row.id), card: parent });
+      continue;
+    }
+    candidates.push(String(row.id));
+  }
+  return {
+    id: known !== null && candidates.length === 1 ? candidates[0] : null,
+    candidates,
+    foreign,
+    card: known,
+  };
+}
+
 /** Newest first — by timestamp, falling back to thread order when it is unreadable. */
 function newestFirst(a, b) {
   const ap = Date.parse(a.createdAt ?? '');
@@ -1425,7 +1502,7 @@ const CLAUSE2_CORRECTION_KEY_TEXT = 'Clause-②-correction';
  *   `governingClaim` ride the same way, on the `claim-branch-unparsed` state only,
  *   so its sentence can name the comment and say what governance did instead.
  */
-export function cardDeclaration(commentRows) {
+export function cardDeclaration(commentRows, { card = null } = {}) {
   if (!Array.isArray(commentRows)) return { state: 'unreadable' };
   const governance = claimGovernance(commentRows);
   // ⛔ FIRST, and ahead of the correction read (#17366) as well as of every
@@ -1453,6 +1530,11 @@ export function cardDeclaration(commentRows) {
     ? claimRows.filter((row) => (row?.created_at ?? null) === claim.createdAt)
     : claimRows;
   const pool = governing.length > 0 ? governing : claimRows;
+  // WHICH comment id a remedy printed below may name, resolved from the SAME
+  // pool the readings are built from and from nowhere else (#17919). It rides
+  // alongside exactly as `correctionNote` does: the rows below print it, and
+  // ⛔ no state, verdict, count or exit reads it.
+  const target = correctionTarget(pool, card);
 
   // The CORRECTION reading comes first (#17366), and it supersedes in BOTH
   // directions: an unreadable claim declaration and a claim declaration whose
@@ -1470,7 +1552,11 @@ export function cardDeclaration(commentRows) {
   // so the row below can say why the repair did not land. ⛔ It never changes
   // the state: a correction that was not read is not a declaration.
   const correctionNote = correction.state === 'ignored' ? correction.note : undefined;
-  const withNote = (o) => (correctionNote === undefined ? o : { ...o, correctionNote });
+  const withNote = (o) => ({
+    ...o,
+    ...(correctionNote === undefined ? {} : { correctionNote }),
+    correctionTarget: target,
+  });
 
   let malformed = null;
   let nearMiss = null;
@@ -1641,28 +1727,93 @@ const TEMPLATE_POINTER =
   'seat needs to know this regex to satisfy it.';
 
 /**
+ * Why part (3) could not name an id, or which id it refused — always printed,
+ * ⛔ never silent.
+ *
+ * A remedy that quietly drops the id reads as a remedy that never had one, and
+ * #17919's whole cost was a number nobody could account for standing inside a
+ * verdict. So each branch says which reading produced the gap, and the foreign
+ * branch names the comment and the card it declared, so a reader can open both.
+ */
+function correctionTargetNote(target) {
+  const parts = [];
+  for (const f of target?.foreign ?? []) {
+    parts.push(
+      `⚠️ Comment ${f.id} was read on this card's claim pool but declares issue #${f.card} as its ` +
+      'own parent, so it is NOT named above: an id from another card\'s thread names a comment ' +
+      'this card\'s correction can never match, and a reader would take it for this card\'s claim. ' +
+      '⛔ Dropped loudly rather than printed — #17919.',
+    );
+  }
+  if ((target?.id ?? null) !== null) return parts.length === 0 ? '' : ` ${parts.join(' ')}`;
+  if ((target?.card ?? null) === null) {
+    parts.push(
+      '⚠️ No id is named above because this reading carries no card number to check one against, ' +
+      'and an id that cannot be checked cannot be shown to be this card\'s. Read the claim ' +
+      'comment\'s id off the card\'s own thread.',
+    );
+  } else if ((target?.candidates?.length ?? 0) === 0) {
+    parts.push(
+      '⚠️ No id is named above because this reading found no claim comment id on card ' +
+      `#${target.card}'s own thread. ⛔ A specimen id from another card is not a stand-in: read ` +
+      'the id off the claim comment on this card.',
+    );
+  } else {
+    parts.push(
+      `⚠️ No single id is named above because card #${target.card}'s claim pool carries more than ` +
+      `one readable id (${target.candidates.join(' or ')}); name the ONE this correction repairs.`,
+    );
+  }
+  return ` ${parts.join(' ')}`;
+}
+
+/**
  * The remedy that names WHO can act and HOW — the sentence #17366 was filed to
  * get, in three parts, because the old one («add the line to that claim
  * comment») named an act the claiming seat may have no tool for.
  *
  * ⛔ Nothing here prescribes a VALUE, and part (3) is a shape, never a fill-in:
  * the declaration is still the seat's judgement, written by the seat.
+ *
+ * ⭐ It is a FUNCTION of the card under test since #17919, and that is the fix
+ * rather than a refactor. As a constant it carried a literal comment id — the
+ * #17366 specimen, 5642248126, which lives on card #17366 — so every C2 row on
+ * every card printed a real id belonging to a different card inside a verdict
+ * about this one, and a reader had nothing in the output to tell it apart from
+ * a comment the checker had selected. A constant cannot be right about a card
+ * it does not know; the only ids printable here are ids read from this card's
+ * own claim pool, and `correctionTarget` is where that is decided.
+ *
+ * ⛔ Nothing here changes a state, a row's existence or an exit code. A row
+ * that printed before prints now, with the same verdict; what moves is which
+ * digits part (3) carries, and whether it carries any.
  */
-const CORRECTION_REMEDY =
-  'Remedy — WHO can act, and HOW: the CLAIMING SEAT itself, and it needs no comment edit. ' +
-  `(1) ${TEMPLATE_POINTER} ` +
-  '(2) ⚠️ A claim comment that is ALREADY POSTED cannot be repaired by editing it from every ' +
-  'seat: the MCP GitHub tool set has no edit-an-issue-comment call, and ⛔ a second `Claim:` is ' +
-  'forbidden by the claim protocol. ⛔ Do not wait for somebody outside the repository. ' +
-  '(3) Post ONE new comment on this card whose FIRST line is `Clause-②-correction: 5642248126` — ' +
-  'the numeric id of the claim comment it corrects, digits only — followed by the declaration in ' +
-  'the fixed spelling on a line of its own, and a `Session:` line carrying the claiming session. ' +
-  'The newest correction naming the governing claim SUPERSEDES that claim\'s declaration, in ' +
-  'both directions; one naming any other comment, or declaring a different session, is ignored ' +
-  'with a printed reason. ⛔ Never a second `Claim:`.';
+function correctionRemedy(target) {
+  const id = target?.id ?? null;
+  const shape = id === null
+    ? 'whose FIRST line is the key `Clause-②-correction:` followed by the numeric id of the ' +
+      'claim comment it corrects, digits only'
+    : `whose FIRST line is \`Clause-②-correction: ${id}\` — the numeric id of the claim comment ` +
+      `it corrects, digits only, read from card #${target.card}'s own thread`;
+  return (
+    'Remedy — WHO can act, and HOW: the CLAIMING SEAT itself, and it needs no comment edit. ' +
+    `(1) ${TEMPLATE_POINTER} ` +
+    '(2) ⚠️ A claim comment that is ALREADY POSTED cannot be repaired by editing it from every ' +
+    'seat: the MCP GitHub tool set has no edit-an-issue-comment call, and ⛔ a second `Claim:` is ' +
+    'forbidden by the claim protocol. ⛔ Do not wait for somebody outside the repository. ' +
+    `(3) Post ONE new comment on this card ${shape} — followed by the declaration in ` +
+    'the fixed spelling on a line of its own, and a `Session:` line carrying the claiming session. ' +
+    'The newest correction naming the governing claim SUPERSEDES that claim\'s declaration, in ' +
+    'both directions; one naming any other comment, or declaring a different session, is ignored ' +
+    `with a printed reason. ⛔ Never a second \`Claim:\`.${correctionTargetNote(target)}`
+  );
+}
 
 export function c2DeclarationUnreadable(pair) {
-  const d = cardDeclaration(pair?.cardComments ?? null);
+  // ⭐ The card number travels WITH the thread (#17919): the remedy this row
+  // prints may name a comment id, and an id is only printable once it has been
+  // checked against the card being judged.
+  const d = cardDeclaration(pair?.cardComments ?? null, { card: pair?.card ?? null });
   const head = `card #${pair.card} (delivering open PR #${pair.pr}${pair.draft ? ' (draft)' : ''})`;
   // An IGNORED correction is appended to whichever row the thread earns, so a
   // seat that DID try the self-solvable exit is told why it did not land — ⛔
@@ -1687,6 +1838,8 @@ export function c2DeclarationUnreadable(pair) {
  * appended in exactly one place rather than on each branch.
  */
 function c2Sentence(d, head, fixed, notADecision) {
+  // Built once, from the ids this reading actually read off this card's thread.
+  const CORRECTION_REMEDY = correctionRemedy(d.correctionTarget);
   switch (d.state) {
     case 'declared':
       return null;
@@ -4449,7 +4602,16 @@ export function selfTest() {
   // MCP tool set has no call for, which is the one-way door the card measured.
   t('⭐ …and the remedy names WHO can act', says(missingLine, 'WHO can act, and HOW: the CLAIMING SEAT'));
   t('⭐ …and states that an already-posted claim comment is not editable from every seat', says(missingLine, 'no edit-an-issue-comment call'));
-  t('⭐ …and names the one comment that repairs it, first line and all', says(missingLine, 'Clause-②-correction: 5642248126'));
+  // ⚠️ This case used to read `says(missingLine, 'Clause-②-correction: 5642248126')`
+  // — it PINNED a literal comment id belonging to card #17366 as the remedy's
+  // content, on a row rendered for card #13476. The assertion was green for as
+  // long as the defect held, which is how #17919's class survived a self-test
+  // of 689 cases: a pin written from the thing it pins asserts nothing about
+  // whether the thing is right. What is pinned now is the PROPERTY — the
+  // remedy names the correction comment's key, and any id it names is one read
+  // off THIS card's thread.
+  t('⭐ …and names the one comment that repairs it, first line and all', says(missingLine, 'Clause-②-correction:'));
+  t('⛔ …carrying no id HERE, because this fixture\'s claim rows carry none — and ⛔ never a specimen id from another card (#17919)', says(missingLine, '5642248126') === false && says(missingLine, 'found no claim comment id on card #13476'));
   t('⛔ …while still forbidding a second `Claim:`', says(missingLine, 'Never a second `Claim:`'));
   const noClaim = c2DeclarationUnreadable(pair({ cardComments: [{ body: 'a triage note, and nothing that begins a line with the claim key', created_at: '2026-08-31T10:00:00Z' }] }));
   t('a thread with no claim comment produces a C2 row of its own', typeof noClaim === 'string');
@@ -5965,6 +6127,83 @@ export function selfTest() {
   // nobody. ⛔ Not derived from the constant: a pin written from the thing it
   // pins asserts nothing.
   t('⭐ the printed placeholder is EXACTLY the branch form, assembled or not', says(TPL_RECORD, 'Implemented-by: `claude/issue-NNNN-slug`') && RECORD_TEMPLATE_PLACEHOLDERS.implementedBy === 'claude/issue-NNNN-slug');
+
+  // -- #17919: the remedy's id is THIS card's, or there is none -------------
+  //
+  // The class in one line: part (3) of the C2 remedy carried a LITERAL comment
+  // id — 5642248126, the #17366 specimen — so a verdict about card #17425
+  // printed a real `Claim:` comment id belonging to card #17366, and nothing in
+  // the output told a reader that. ⛔ Nothing SELECTED that comment: a constant
+  // makes no selection, so an `issue_url` guard over a selection would have
+  // been a guard that can never fire. The cut is therefore at the ids this file
+  // may PRINT: they come from the pool the reading was built from, and each is
+  // checked against the card under test first.
+  //
+  // ⚠️ Every case below is about the digits in a sentence. The states, the rows
+  // and the exits are pinned UNMOVED by the controls at the end, because a
+  // guard that turned a loud wrong answer into a quiet wrong one would be worse
+  // than the defect it closes.
+  battery('#17919: the correction remedy names THIS card\'s claim comment, never another card\'s');
+  const C19_URL = (n) => 'https://api.github.com/repos/objectstack-ai/objectstack/issues/' + n;
+  const C19_CLAIM = (o) => ({
+    id: (o && o.id !== undefined) ? o.id : 5650083758,
+    issue_url: (o && o.issue_url !== undefined) ? o.issue_url : C19_URL(13476),
+    created_at: '2026-09-12T02:00:00Z',
+    body: 'Claim: PM loop round R1\nBranch: `claude/issue-13476-unresolvable-engine-403`\n'
+      + ((o && o.extra) || 'Domain: `domain:engine`'),
+  });
+  const C19_ROW = (rows) => c2DeclarationUnreadable(pair({ cardComments: rows }));
+  const C19_OWN = C19_ROW([C19_CLAIM()]);
+  t('⭐ the remedy names the id of THIS card\'s own claim comment', says(C19_OWN, 'Clause-②-correction: 5650083758'));
+  t('…and says which card\'s thread that id was read from, so a reader can check it', says(C19_OWN, 'read from card #13476\'s own thread'));
+  t('⛔ …and the #17366 specimen id appears nowhere in it', says(C19_OWN, '5642248126') === false);
+
+  // Every state that prints the remedy, in one sweep. ⚠️ Each row is asserted
+  // to EXIST first: `says(null, x) === false` would pass for a row that stopped
+  // being printed, which is the vacuous form this battery exists to refuse.
+  const C19_STATES = [
+    ['misplaced', [C19_CLAIM(), { id: 5650083759, issue_url: C19_URL(13476), body: 'Clause-②: yes', created_at: '2026-09-12T03:00:00Z' }]],
+    ['malformed', [C19_CLAIM({ extra: 'Clause-②: Yes' })]],
+    ['missing', [C19_CLAIM()]],
+    ['missing/describing', [C19_CLAIM({ extra: '- **`Clause-②: yes` / `Clause-②: no`** — the value alone on its line, machine-read.' })]],
+    ['missing/inline-key', [C19_CLAIM({ extra: 'Domain: `domain:cli` · Clause-②: no' })]],
+  ];
+  const C19_RENDERED = C19_STATES.map(([name, rows]) => [name, C19_ROW(rows)]);
+  t('⭐ every C2 state that prints the remedy prints a row at all — the controls are not vacuous', C19_RENDERED.every(([, row]) => typeof row === 'string' && row.length > 0), JSON.stringify(C19_RENDERED.map(([n, r]) => [n, typeof r])));
+  t('⭐ …and NOT ONE of them carries a comment id from another card', C19_RENDERED.every(([, row]) => !says(row, '5642248126')), JSON.stringify(C19_RENDERED.filter(([, r]) => says(r, '5642248126')).map(([n]) => n)));
+  t('…each naming this card\'s own claim comment instead', C19_RENDERED.every(([, row]) => says(row, 'Clause-②-correction: 5650083758')));
+
+  // ⭐ Direction 1 — a guard that SUPPRESSES a correct message is worse than
+  // the defect. Nothing is suppressed: the row, its state and its sentence are
+  // what they were, and only the id is withheld — loudly.
+  const C19_FOREIGN_ROWS = [C19_CLAIM({ id: 5642248126, issue_url: C19_URL(17366) })];
+  const C19_FOREIGN = C19_ROW(C19_FOREIGN_ROWS);
+  t('⛔ a claim row declaring ANOTHER card as its parent still produces its C2 row — nothing is suppressed', typeof C19_FOREIGN === 'string' && says(C19_FOREIGN, 'NO READING'));
+  t('…with the same STATE the same thread earns on its own card — the guard moves no verdict', cardDeclaration(C19_FOREIGN_ROWS, { card: 13476 }).state === cardDeclaration([C19_CLAIM()], { card: 13476 }).state);
+  t('⛔ …and that comment\'s id is NOT named in the remedy', says(C19_FOREIGN, 'Clause-②-correction: 5642248126') === false);
+  t('⭐ …the drop is LOUD: the row names the comment and the issue it declared', says(C19_FOREIGN, 'Comment 5642248126') && says(C19_FOREIGN, 'declares issue #17366'));
+  t('…and still names the key, so the remedy stays performable', says(C19_FOREIGN, 'Clause-②-correction:'));
+
+  // The parent reader, and its same-subject control.
+  t('a comment row resolves to the issue its `issue_url` names', commentCardNumber({ issue_url: C19_URL(17366) }) === 17366);
+  t('⛔ CONTROL — the SAME reader on the governing claim resolves to the card under test', commentCardNumber({ issue_url: C19_URL(17425) }) === 17425);
+  t('a row carrying no `issue_url` states NOTHING about its parent', commentCardNumber({}) === null);
+  t('…so absence is not read as a mismatch — only a positive disagreement is', correctionTarget([{ id: 7 }], 13476).id === '7');
+  t('…and a positive disagreement withholds the id', correctionTarget([{ id: 7, issue_url: C19_URL(17366) }], 13476).id === null);
+  t('…naming the card it declared, so the reason is checkable', correctionTarget([{ id: 7, issue_url: C19_URL(17366) }], 13476).foreign[0].card === 17366);
+  t('⛔ FAIL-CLOSED without a card number: an id that cannot be checked is not printed', correctionTarget([{ id: 7 }], null).id === null);
+  t('⛔ …and more than one readable id names none of them alone', correctionTarget([{ id: 7 }, { id: 8 }], 13476).id === null);
+  t('⛔ …nor does a pool with no ids at all invent one', correctionTarget([{ body: 'Claim: x' }], 13476).id === null);
+
+  // ⛔ Never silent: each no-id branch says which reading produced the gap.
+  const C19_TWO = C19_ROW([C19_CLAIM({ id: 11 }), C19_CLAIM({ id: 12 })]);
+  t('⭐ two readable ids name NEITHER, and name both as candidates', says(C19_TWO, '11 or 12') && says(C19_TWO, 'Clause-②-correction: 11') === false);
+  t('a thread whose claim rows carry no id says so, rather than printing nothing', says(C19_ROW([CLAIM('Domain: x')]), 'found no claim comment id on card #13476'));
+
+  // ⭐ Direction 2 — a pair judged correctly today is judged identically.
+  t('⛔ a DECLARED card still reads declared, and still earns NO C2 row', cardDeclaration([CLAIM('Clause-②: no')], { card: 13476 }).state === 'declared' && C19_ROW([CLAIM('Clause-②: no')]) === null);
+  t('…and the reading is the same with and without the card number — the guard reads no verdict', cardDeclaration([CLAIM('Clause-②: no')]).value === cardDeclaration([CLAIM('Clause-②: no')], { card: 13476 }).value);
+  t('⛔ …an ABSENT thread\'s row is untouched: it names no claim comment to correct in the first place', C19_ROW([{ body: 'a triage note, and nothing that begins a line with the claim key', created_at: '2026-08-31T10:00:00Z' }]) === noClaim);
 
   // -- The floor: every declared battery RAN, and ran its cases (#13489) -----
   //
