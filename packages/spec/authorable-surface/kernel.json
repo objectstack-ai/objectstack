@@ -180,6 +180,7 @@
     "kernel/ExecutionContext:oauthScopes",
     "kernel/ExecutionContext:onBehalfOf",
     "kernel/ExecutionContext:org_user_ids",
+    "kernel/ExecutionContext:performedBy",
     "kernel/ExecutionContext:permissions",
     "kernel/ExecutionContext:positions",
     "kernel/ExecutionContext:posture",
