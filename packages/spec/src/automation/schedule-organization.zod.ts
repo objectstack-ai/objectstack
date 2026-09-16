@@ -28,16 +28,37 @@ import { z } from 'zod';
  *
  * > 多组织定时任务本来只能在组织内运行，应该带组织ID，不允许跨组织的定时任务。
  *
- * A time-triggered flow is **organization-scoped by construction**: it names
- * one organization and the run executes as that organization. There is
- * deliberately no fan-out — a tenant that wants the same sweep in N
- * organizations declares it N times — and there is deliberately no fallback: a
- * flow that names none is a DECLARATION ERROR, not a run that quietly picks
- * one. Guessing is the failure this key exists to prevent, and the platform
- * organization is not a safe guess: a wrong `organization_id` is worse than a
- * null, because a null is visibly missing while a wrong value is silently
- * authoritative to every report, export and cleanup script that filters by
- * organization.
+ * Under a WALLED tenancy posture (`group` / `isolated`) a time-triggered flow
+ * is **organization-scoped by construction**: it names one organization and the
+ * run executes as that organization. There is deliberately no fan-out — a
+ * tenant that wants the same sweep in N organizations declares it N times — and
+ * under a wall there is deliberately no fallback: a flow that names none is a
+ * DECLARATION ERROR, not a run that quietly picks one. Guessing is the failure
+ * this key exists to prevent, and the platform organization is not a safe
+ * guess: a wrong `organization_id` is worse than a null, because a null is
+ * visibly missing while a wrong value is silently authoritative to every
+ * report, export and cleanup script that filters by organization.
+ *
+ * ## Where that requirement bites, and where it does not (#17396)
+ *
+ * ⚠️ The sentence above is scoped to walled postures, and the scoping is the
+ * whole of the 2026-09-12 amendment. Two deployment facts decide whether this
+ * key is required, and ⛔ neither of them is metadata — both are read from the
+ * environment at boot, beside `resolveTenancyPosture`:
+ *
+ * | deployment | is this key required? |
+ * |:--|:--|
+ * | package-authored scheduled work switched OFF (the global default) | ⛔ nothing arms, so nothing is required — the flow is listed as *disabled by deployment policy*, never as a binding failure |
+ * | switched ON, posture `single` | **no** — the deployment holds exactly one organization, the run carries none, and every tenant-scoped insert beneath it resolves that one through the #8844 guard |
+ * | switched ON, posture `group` / `isolated` | **yes** — declare or the flow is not armed, exactly as above |
+ *
+ * ⇒ The key is never *deprecated* and its meaning never changes: it is the only
+ * way a run under a wall gets an organization, and nothing on this path ever
+ * chooses one. What changed is that a missing key is no longer a defect on
+ * every deployment — so ⛔ do not read the refusal sentence below as a universal
+ * authoring rule, and ⛔ do not re-add an authoring-time lint for it: at
+ * authoring time neither the switch nor the posture is knowable, which is why
+ * the diagnostic lives at BIND and only fires where the answer is settled.
  *
  * ## Where it lives, and why there
  *
@@ -98,7 +119,7 @@ export const ScheduleOrganizationSchema = z
   .string()
   .min(1)
   .describe(
-    'Organization id (sys_organization.id) this scheduled/time-relative flow runs as. Required: a time-triggered run has no session to inherit a tenant from.',
+    'Organization id (sys_organization.id) this scheduled/time-relative flow runs as. A time-triggered run has no session to inherit a tenant from, so under a walled tenancy posture (group/isolated) a flow that declares none is not armed; under the single posture it is not required and the run carries no organization.',
   );
 
 /**
@@ -210,6 +231,16 @@ function findScheduleOrganizationNearMissInConfig(
  * Enforcement is at BIND — the two triggers below — which is where the
  * consequence lives: there is no path by which an organization-less
  * time-triggered run reaches the data layer once bind refuses.
+ *
+ * ⚠️ [#17396] BIND is also the only door that knows whether the key is required
+ * at all. This sentence is emitted by exactly one gate — a walled tenancy
+ * posture (`group` / `isolated`) with package-authored scheduled work switched
+ * on — because those are the two deployment facts that decide it, and a trigger
+ * binding inside a booted kernel is the first place both are readable. Under
+ * `single` the sentence is never emitted and must not be: nothing is missing
+ * there. It is written unconditionally as a requirement because every reader
+ * that receives it IS under that gate; ⛔ do not reuse it to describe a flow on
+ * a deployment where the key is optional.
  *
  * It names the flow (the ruling requires that), the key, where the key goes,
  * and — when the author wrote a near-miss — which spelling of theirs was

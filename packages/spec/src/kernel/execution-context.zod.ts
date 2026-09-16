@@ -192,6 +192,55 @@ export const ExecutionContextSchema = lazySchema(() => z.object({
     userId: z.string(),
     principalKind: z.enum(['human', 'agent', 'service', 'guest', 'system']).optional(),
   }).optional(),
+
+  /**
+   * [ADR-0090 D10 rule 4 — dual attribution] WHO performed this operation,
+   * when the performer is not the principal the write is authorized as.
+   *
+   * Set at the ONE door that resolves an agent — the `/mcp` OAuth dispatch
+   * door, whose access token names an authorized client (`azp`) — on exactly
+   * the branch that already decides `principalKind: 'agent'` and
+   * {@link onBehalfOf}. Absent on every other provenance, and the ABSENCE is
+   * the record: a write carrying no `performedBy` was performed by the
+   * principal itself, so the delegated and the personal write are told apart
+   * by a key being there rather than by guesswork.
+   *
+   * The pair rule 4 names is deliberately asymmetric on this envelope, because
+   * the envelope already carries one half: {@link userId} stays the human, so
+   * owner-stamping and `current_user.*` RLS keep resolving to them (ADR-0073
+   * D3 — attribution is not ownership), and this names the client that acted
+   * for them. {@link onBehalfOf} states the same delegation from the
+   * AUTHORIZATION side (it is what the confused-deputy intersection reads);
+   * this states it from the ATTRIBUTION side, which is the side the audit
+   * writer reads.
+   *
+   * **ATTRIBUTION ONLY**, exactly like {@link actor} and
+   * {@link attributedUserId}: nothing in the authorization path reads it, it
+   * neither widens nor narrows what the write may touch, and it never becomes
+   * the subject the write is authorized as. The agent's own ceiling travels on
+   * `permissions` / `systemPermissions`, which the door already replaces.
+   *
+   * Server-constructed only, never client-supplied — exactly like
+   * {@link isSystem}.
+   *
+   * Surfaced to hooks as `HookContext.provenance.performedByClientId` and
+   * recorded by the audit writer in `sys_audit_log.metadata` as
+   * `performed_by` beside `on_behalf_of`. ⛔ It does NOT move `actor`:
+   * ADR-0118 D1/D5 keeps that column two-valued (a user id, or `null` for the
+   * system) and answers "which non-user acted" with an ADDED attribution
+   * field — this one — never with a second actor vocabulary.
+   *
+   * A one-key object rather than a bare string so the API-key door (#18335,
+   * blocked on this carrier) can name its own identifier as a sibling key if
+   * it is ruled an agent, without re-shaping a field that already shipped.
+   */
+  performedBy: z.object({
+    /**
+     * The OAuth client (`azp`) that performed the operation — the id of the
+     * registered `sys_oauth_application` the access token was issued to.
+     */
+    clientId: z.string(),
+  }).optional().describe('ADR-0090 D10 rule 4 dual attribution: the agent that PERFORMED this operation, when the performer is not the principal the write is authorized as. Set only at the /mcp OAuth door, on the same branch that decides principalKind: agent and onBehalfOf; absent everywhere else, and the absence is the record that the principal acted for itself. ATTRIBUTION ONLY — no security middleware reads it, it never becomes the authorization subject, and userId stays the human so owner-stamping and current_user.* RLS still resolve to them. Server-constructed only, never client-supplied. Surfaced to hooks as HookContext.provenance.performedByClientId and recorded by the audit writer as sys_audit_log.metadata.performed_by beside on_behalf_of; it does not move `actor`, which ADR-0118 D1/D5 keeps two-valued.'),
   
   /** Aggregated permission names (resolved from PermissionSet) */
   permissions: z.array(z.string()).default([]),

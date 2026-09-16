@@ -1,104 +1,75 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#17343] A `multiple: true` BOOLEAN column keeps its `$contains` MEMBERSHIP
+ * [#17343 · retargeted by #17469] The declared-type gate never fires on a JSON
+ * column — and the population of JSON columns is now the one the protocol
+ * declares.
+ *
+ * ## What this file was filed for, and what happened to it
+ *
+ * #17343: a `multiple: true` BOOLEAN column lost its `$contains` MEMBERSHIP
  * filter — the carve-out #14079's declared-type gate never received on its
  * boolean limb, while its numeric limb carried one from the first line it
- * shipped and its temporal limb gained one in #15683.
+ * shipped and its temporal limb gained one in #15683. `{ FIELD: { $contains:
+ * 'true' } }` compiled `where 1 = 0` over a multi-valued boolean: the
+ * fail-CLOSED direction #7398's own table calls out, byte-identical to a filter
+ * that legitimately matched nothing.
  *
- * ## What was measured, and which of triage's two worlds this is
+ * The card's fourth reading of WHY the exclusion existed was, verbatim:
  *
- * Triage fenced this card: establish WHY the type-gate excludes boolean before
- * widening it — a deliberate exclusion (a stored array of booleans being
- * genuinely meaningless) makes the honest fix a loud refusal at authoring
- * time, not a silent `1 = 0`. The exclusion is an OMISSION, on four readings:
+ * > `boolean` + `multiple: true` is authorable — `FieldSchema.multiple` refuses
+ * > exactly one type (`radio`) — and this driver already gives it a JSON
+ * > column, a faithful array write and a working `$contains` on every OTHER
+ * > multi-valued class.
  *
- * 1. **The predicate declared itself scalar-only.** As `isNonTextColumn`
- *    landed (`a646120d`, #14079) its own first line read "a declared numeric
- *    or boolean SCALAR?", and it annotated the numeric registry it reads as
- *    "`numericFields` (`NUMERIC_SCALAR_TYPES`, non-`multiple`)" — the author
- *    was tracking the `multiple` axis and recorded it on the limb where the
- *    registry happened to carry it. `booleanFields` carries no such condition
- *    and none was added, so the predicate's stated scope and its behaviour
- *    disagreed from the first commit.
- * 2. **`booleanFields` is not a filter registry.** Its fill is commented for
- *    READ COERCION — "`toggle` shares boolean storage/affinity, so it needs
- *    the same read coercion (stored 1/0 → JS true/false)" — a question with no
- *    `multiple` axis in it. Nothing in either fill states a filter-side intent
- *    to include multi-valued columns.
- * 3. **Nothing could have caught it.** #7398's live rows caught exactly this
- *    omission on the temporal limb when #15683 first landed without the
- *    condition; its fixture declares a `multiple: true` LOOKUP and a
- *    `multiple: true` DATETIME and no multi-valued boolean at all, so the
- *    boolean limb was never aimed at.
- * 4. **The spec set says nothing about `multiple`.** `NON_TEXT_STORED_VALUE_TYPES`
- *    is keyed on the DECLARED TYPE; the carve-out for JSON storage is a driver
- *    concern each limb spells for itself. `boolean` + `multiple: true` is
- *    authorable — `FieldSchema.multiple` refuses exactly one type (`radio`) —
- *    and this driver already gives it a JSON column, a faithful array write and
- *    a working `$contains` on every OTHER multi-valued class.
+ * ⭐ **That premise is retired.** The maintainer ruling of 2026-09-13 (decision
+ * batch #128 item 5, option 1′, on #17469) gives "multi-valued" exactly ONE
+ * definition — `isMultiValueField` — refuses `multiple: true` at the authoring
+ * entrance on every type outside `MULTI_CAPABLE_TYPES` ∪ `MULTI_OPTION_TYPES`,
+ * and makes this driver's storage decision derive from that same predicate. So
+ * a multi-valued BOOLEAN, TOGGLE, NUMBER or DATETIME column is no longer
+ * authorable and is no longer a JSON column here: the declared-type gate fires
+ * on it exactly as it fires on the scalar beside it, which is correct, because
+ * the column now really does store one scalar.
  *
- * So there is no refusal to make loud: the shape is declared, stored and
- * filtered everywhere except here. The repair restores the membership filter.
+ * ## What survives, and why this file is not vacuous
  *
- * ## The measurement, before (`origin/main` @ `f721ef0`)
+ * The invariant is unchanged and still has a population: **the declared-type
+ * gate never fires on a JSON column.** What moved is which declarations produce
+ * one. Every row below is asserted on a shape that exists after the ruling —
+ * a multi-valued `select` / `lookup`, and the inherently-multi `tags` — plus
+ * two pins of the ruling itself, so a revert on EITHER side reddens this file:
  *
- * `{ FIELD: { $contains: 'true' } }`, `better-sqlite3`, both registry fills:
+ *   1. `FieldSchema` refuses the retired declarations (the entrance half);
+ *   2. the driver stops giving them a JSON column (the storage half).
  *
- * | declared field                    | compiled WHERE                | verdict |
- * |:--|:--|:--|
- * | `{ type: 'boolean', multiple: true }` | `where 1 = 0`             | ⚠️ dead |
- * | `{ type: 'toggle',  multiple: true }` | `where 1 = 0`             | ⚠️ dead |
- * | `{ type: 'number',  multiple: true }` | `` `nums` GLOB '*true*' `` | correct |
- * | `{ type: 'tags' }`                    | `` `tags_` GLOB '*true*' ``| correct |
+ * ⛔ Do not restore a `{ type: 'boolean', multiple: true }` fixture to "keep the
+ * original cell". It would pin a branch the writer no longer has, and it would
+ * pass for the wrong reason: the gate fires, the answer is empty, and an empty
+ * answer is what the original defect looked like.
  *
- * `1 = 0` is the fail-CLOSED direction #7398's own table calls out: the query
- * returns nothing and is byte-identical to a filter that legitimately matched
- * nothing, so an author reads "no matching records" and doubts their data.
+ * ## Which cells executed
  *
- * ## The invariant this file pins, one guard for the whole class
+ *   - **sqlite** — always, embedded.
+ *   - **live mysql / live postgres** — run when provisioned. #17590's ruling
+ *     (2026-09-12) replaced the text lowering with a real MEMBERSHIP construct
+ *     compiled per dialect, so all three answer the same rows and this file
+ *     carries no per-dialect branch.
  *
- * **The declared-type gate never fires on a JSON column.** Swept over every
- * member of `NON_TEXT_STORED_VALUE_TYPES` rather than over the two types this
- * card names, so a class added to that set — or a registry that grows a fill
- * without the carve-out — turns this file red instead of silently retiring
- * another membership filter.
- *
- * ## Which cells executed, and the one that cannot
- *
- *   - **sqlite** — always, embedded. The cell that carried the defect, so its
- *     rows are the reverse-verification witness.
- *   - **live mysql** — runs when provisioned; its `json` column is coerced for
- *     `LIKE`, so the membership rows answer there exactly as they do on SQLite.
- *   - **live postgres** — runs when provisioned and pins a NAMED DIVERGENCE
- *     instead of the answer. Its `json` column has no `LIKE` operator
- *     (SQLSTATE 42883), so the membership spelling is a `DATABASE_ERROR` 500
- *     on that backend for EVERY multi-valued class, this card's included.
- *     ⚠️ Pre-existing and class-wide, not introduced here: measured on live
- *     PostgreSQL 16.13 with `sql-driver.ts` checked out at this branch's merge
- *     base, where the `multiple: true` NUMBER and `tags` columns answer the
- *     identical 42883 while the boolean column still answers the silent
- *     `1 = 0`. #17590 owns that ruling. What this card's repair changes on
- *     Postgres is only WHICH wrong answer the boolean cell gets — the silent
- *     one becomes the loud one every sibling class already gave.
- *   - Nothing in this repo had executed a text operator against a JSON column
- *     on a live server before this file: #7398's suite, which owns the
- *     membership spelling, constructs `better-sqlite3` in both of its
- *     fixtures.
- *
- * @see SqlDriver.isNonTextColumn — the predicate; the boolean limb is the repair.
- * @see SqlDriver.isJsonColumn — the carve-out's authority on "is this JSON".
- * @see https://github.com/objectstack-ai/objectstack/issues/17590 (the live-Postgres membership gap)
+ * @see SqlDriver.isNonTextColumn — the predicate; its JSON carve-out is the invariant.
+ * @see SqlDriver.isJsonField — the storage half of the #17469 ruling.
+ * @see https://github.com/objectstack-ai/objectstack/issues/17469 (the ruling that retargeted this file)
  * @see https://github.com/objectstack-ai/objectstack/issues/17343
  * @see https://github.com/objectstack-ai/objectstack/issues/14079 (the gate)
- * @see https://github.com/objectstack-ai/objectstack/issues/15683 (the temporal carve-out this copies)
+ * @see https://github.com/objectstack-ai/objectstack/issues/15683 (the temporal carve-out)
  * @see https://github.com/objectstack-ai/objectstack/issues/7398 (the membership spelling it protects)
+ * @see https://github.com/objectstack-ai/objectstack/issues/17590 (the membership construct)
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import type { Knex } from 'knex';
 import type { DriverOptions, FilterCondition } from '@objectstack/spec/data';
-import { NON_TEXT_STORED_VALUE_TYPES } from '@objectstack/spec/data';
+import { FieldSchema, NON_TEXT_STORED_VALUE_TYPES } from '@objectstack/spec/data';
 import { SqlDriver, type SqlDriverConfig } from './sql-driver.js';
 import {
   DIALECT_CELLS,
@@ -113,66 +84,64 @@ const MULTI_OBJECT = 'os17343_multi_boolean';
 const BYPASS: DriverOptions = { bypassTenantAudit: true };
 
 /**
- * [#17590, CLOSED] The membership spelling now EXECUTES on every dialect, so
- * this file no longer carries a per-dialect branch.
+ * The fixture shape, after #17469.
  *
- * What stood here was a predicate excusing the PostgreSQL cell: `multiple:
- * true` is a JSON column on every dialect, but only some of them let a TEXT
- * operator reach it — SQLite stored the serialized array as TEXT so `GLOB
- * '*x*'` was a membership test by accident, MySQL coerced its `json` column for
- * `LIKE`, and PostgreSQL's `json` has no `LIKE` operator at all (SQLSTATE
- * 42883 → `DATABASE_ERROR` 500). This card could only pin that divergence and
- * name the issue that owned it.
- *
- * #17590's ruling (2026-09-12) replaced the text lowering with a real
- * MEMBERSHIP construct compiled PER DIALECT, so all three now answer the same
- * rows — including the boolean cell this card owns, which is what "the boolean
- * cell stays loud until the construct covers it" was waiting for. The rows
- * below are therefore asserted on every cell, with no branch to be honest
- * about.
- *
- * ⚠️ Consequence for THIS file's construct assertions: `$contains` on a
- * multi-valued column no longer compiles a pattern match on any dialect. What
- * this card is about survives unchanged — the declared-type gate must not fire
- * on a JSON column — so those assertions now read "a real predicate, not the
- * declared constant", with the shape of that predicate owned by
- * `sql-driver-17590-json-column-membership.test.ts`.
- */
-
-/**
- * The fixture shape. `flags`/`toggles` are the cell this card owns; `nums` and
- * `tags_` are the POSITIVE CONTROLS the card names (they compile a real pattern
- * match today and must not move); `scalar_flag`/`scalar_toggle` are the
- * NEGATIVE controls — the gate must still fire on them, or the repair is a hole
- * in the gate rather than a carve-out for the JSON storage shape.
+ * `picks` / `refs` are multi-valued by `isMultiValueField` and therefore JSON
+ * columns — the cell the invariant now owns. `tags_` is the inherently-multi
+ * option type beside them. `scalar_flag` / `scalar_toggle` are the NEGATIVE
+ * controls: the gate must still fire on them, or the carve-out is a hole in the
+ * gate rather than a reading of the storage shape. `retired_flags` is the
+ * RULING's own pin — the declaration the entrance refuses, which reaches this
+ * driver only through a hand-built fixture like this one and is a plain boolean
+ * column when it does.
  */
 const MULTI_FIELDS: Record<string, Record<string, unknown>> = {
   label: { type: 'string' },
-  flags: { type: 'boolean', multiple: true },
-  toggles: { type: 'toggle', multiple: true },
-  nums: { type: 'number', multiple: true },
+  picks: { type: 'select', multiple: true },
+  refs: { type: 'lookup', multiple: true },
   tags_: { type: 'tags' },
   scalar_flag: { type: 'boolean' },
   scalar_toggle: { type: 'toggle' },
+  retired_flags: { type: 'boolean', multiple: true },
 };
 
 /**
- * Rows chosen so the membership filter has a real job: `true` is a member of
- * row 1's and row 3's `flags` and NOT of row 2's, so a gate that silently
- * fails to fire returns a WRONG set rather than the same empty list a fired
- * gate returns.
+ * Rows chosen so the membership filter has a real job: `red` is a member of row
+ * 1's and row 3's `tags_` and NOT of row 2's, so a gate that silently fails to
+ * fire returns a WRONG set rather than the same empty list a fired gate returns.
  */
 const MULTI_ROWS = [
-  { id: '1', label: 'alpha', flags: [true, false], toggles: [true], nums: [1, 2], tags_: ['red'] },
-  { id: '2', label: 'beta', flags: [false], toggles: [false], nums: [3], tags_: ['blue'] },
-  { id: '3', label: 'gamma', flags: [true], toggles: [true, false], nums: [1], tags_: ['red', 'blue'] },
+  { id: '1', label: 'alpha', picks: ['a', 'b'], refs: ['r1', 'r2'], tags_: ['red'], scalar_flag: true, scalar_toggle: true, retired_flags: true },
+  { id: '2', label: 'beta', picks: ['c'], refs: ['r3'], tags_: ['blue'], scalar_flag: false, scalar_toggle: false, retired_flags: false },
+  { id: '3', label: 'gamma', picks: ['a'], refs: ['r1'], tags_: ['red', 'blue'], scalar_flag: true, scalar_toggle: false, retired_flags: true },
 ] as const;
 
 const POSITIVE_OPERATORS = ['$contains', '$startsWith', '$endsWith', '$icontains', '$like', '$ilike'] as const;
 
+/** The declarations #17469 retired, read from the spec sets rather than listed. */
+const RETIRED_MULTI_TYPES = [...NON_TEXT_STORED_VALUE_TYPES].sort();
+
+describe('[#17469] the entrance half — the declarations this file used to pin are REFUSED', () => {
+  it('`FieldSchema` refuses `multiple: true` on every declared non-text class', () => {
+    expect(RETIRED_MULTI_TYPES.length, 'the swept population').toBeGreaterThan(8);
+    for (const type of RETIRED_MULTI_TYPES) {
+      const r = FieldSchema.safeParse({ name: 'several', type, multiple: true });
+      expect(r.success, `\`${type}\` + multiple: true must be refused at the entrance`).toBe(false);
+    }
+  });
+
+  it('…and still accepts the multi-capable declarations this file now uses — the negative control', () => {
+    expect(FieldSchema.safeParse({ name: 'refs', type: 'lookup', reference: 'account', multiple: true }).success).toBe(true);
+    expect(FieldSchema.safeParse({
+      name: 'picks', type: 'select', multiple: true,
+      options: [{ label: 'Alpha', value: 'alpha' }, { label: 'Beta', value: 'beta' }],
+    }).success).toBe(true);
+  });
+});
+
 for (const cell of DIALECT_CELLS) {
   if (!cell.available) {
-    declareUnprovisionedCell(cell, '[#17343] the multi-valued boolean membership filter');
+    declareUnprovisionedCell(cell, '[#17343] the JSON-column membership filter');
     continue;
   }
   declareMembershipSweep(cell);
@@ -185,7 +154,7 @@ for (const cell of DIALECT_CELLS) {
  * ANSWERS, rather than merely compiling to something other than a constant.
  */
 function declareMembershipSweep(cell: DialectCell): void {
-  describe(`[#17343] SqlDriver — $contains over a multi-valued boolean column (${cell.label})`, () => {
+  describe(`[#17343] SqlDriver — $contains over a JSON column (${cell.label})`, () => {
     let driver: SqlDriver;
     let knexInstance: Knex;
 
@@ -217,71 +186,34 @@ function declareMembershipSweep(cell: DialectCell): void {
       expect(rows.map((r) => String(r.id)).sort()).toEqual(['1', '2', '3']);
     });
 
-    /**
-     * The stored form, read raw, on the dialect whose storage makes the
-     * pattern match a MEMBERSHIP test: the cell holds the serialized array as
-     * TEXT, so the match is over `[true,false]` and selects the rows whose
-     * array really carries `true`. Without this, a green membership row could
-     * be a pattern accidentally matching something else entirely.
-     *
-     * ⚠️ SQLite-only deliberately, and the reason outlived #17590: on
-     * PostgreSQL and MySQL the same declaration produces a real `json` column,
-     * so `typeof()` has nothing to say there. What the membership filter is
-     * asking on each backend is now the same question either way — see
-     * `jsonMembershipPredicate`.
-     */
-    if (cell.id === 'sqlite') {
-      it('the column really holds the JSON array text — so the matched rows below are MEMBERSHIP', async () => {
-        const probe = (await knexInstance.raw(
-          `select typeof(flags) as t_flags, flags as raw_flags from ${MULTI_OBJECT} where id = '1'`,
-        )) as Array<Record<string, unknown>>;
-        const row = (Array.isArray(probe) ? probe[0] : (probe as { rows?: Array<Record<string, unknown>> }).rows?.[0])!;
-        expect(row.t_flags).toBe('text');
-        expect(String(row.raw_flags)).toContain('true');
-        expect(String(row.raw_flags)).toContain('false');
-      });
-    }
-
-    it('$contains over a multiple:true BOOLEAN answers the rows whose array holds that member', async () => {
-      expect(await ids({ flags: { $contains: 'true' } })).toEqual(['1', '3']);
-      expect(await ids({ flags: { $contains: 'false' } })).toEqual(['1', '2']);
+    it('$contains over a multi-valued SELECT answers the rows whose array holds that member', async () => {
+      expect(await ids({ picks: { $contains: 'a' } })).toEqual(['1', '3']);
+      expect(await ids({ picks: { $contains: 'c' } })).toEqual(['2']);
     });
 
-    it('$contains over a multiple:true TOGGLE answers identically — same registry arm', async () => {
-      expect(await ids({ toggles: { $contains: 'true' } })).toEqual(['1', '3']);
-      expect(await ids({ toggles: { $contains: 'false' } })).toEqual(['2', '3']);
+    it('$contains over a multi-valued LOOKUP answers identically — same storage shape', async () => {
+      expect(await ids({ refs: { $contains: 'r1' } })).toEqual(['1', '3']);
+      expect(await ids({ refs: { $contains: 'r3' } })).toEqual(['2']);
     });
 
-    /**
-     * The card's positive controls: these two already worked and the repair
-     * must not move them.
-     */
-    it('the multiple:true NUMBER and the tags column beside them are unmoved', async () => {
-      expect(await ids({ nums: { $contains: '1' } })).toEqual(['1', '3']);
+    it('the inherently-multi `tags` column beside them is unmoved', async () => {
       expect(await ids({ tags_: { $contains: 'red' } })).toEqual(['1', '3']);
+      expect(await ids({ tags_: { $contains: 'blue' } })).toEqual(['2', '3']);
     });
-
-    /**
-     * [#17590] Where the NAMED DIVERGENCE used to be pinned. It said: on
-     * PostgreSQL the column is a real `json` column and `LIKE` has no operator
-     * over `json`, so the membership spelling raised SQLSTATE 42883 — a
-     * `DATABASE_ERROR` 500 — for EVERY multi-valued class, this card's boolean
-     * cell included. It was pinned rather than skipped precisely so that "the
-     * day #17590 is ruled and the membership filter starts answering here, this
-     * block goes red and whoever fixes it must come and delete it". It went
-     * red, and this is that deletion: the rows above now run on the PostgreSQL
-     * cell like any other, and the construct that makes them run is pinned in
-     * `sql-driver-17590-json-column-membership.test.ts`.
-     */
 
     /**
      * The negative control, and the reason this is a carve-out rather than a
      * hole. A SCALAR boolean is still a declared non-text column, so every
      * positive text operator still answers the declared no-match and
      * `$notContains` its exact complement.
+     *
+     * ⭐ [#17469] `retired_flags` is in the same loop on purpose: a `boolean`
+     * carrying `multiple: true` is NOT multi-valued any more, so it is a plain
+     * boolean column and the gate fires on it identically. That is the storage
+     * half of the ruling, asserted where it is observable.
      */
-    it('the SCALAR boolean and toggle beside them are STILL gated — the carve-out is per storage shape', async () => {
-      for (const field of ['scalar_flag', 'scalar_toggle']) {
+    it('the SCALAR boolean/toggle — and the RETIRED multi-valued boolean — are gated alike', async () => {
+      for (const field of ['scalar_flag', 'scalar_toggle', 'retired_flags']) {
         for (const op of POSITIVE_OPERATORS) {
           expect(await ids({ [field]: { [op]: 'true' } } as FilterCondition), `${op} over ${field}`).toEqual([]);
         }
@@ -332,11 +264,11 @@ describe('[#17343] the per-dialect construct, compiled — the registerExternalO
   };
 
   for (const [label, config] of DIALECTS) {
-    it(`${label}: a multi-valued boolean/toggle compiles a real predicate, never the constant`, () => {
+    it(`${label}: a multi-valued select/lookup compiles a real predicate, never the constant`, () => {
       const d = typed(config);
-      for (const field of ['flags', 'toggles']) {
+      for (const field of ['picks', 'refs']) {
         for (const op of POSITIVE_OPERATORS) {
-          const sql = d.compileWhere({ [field]: { [op]: 'true' } } as FilterCondition);
+          const sql = d.compileWhere({ [field]: { [op]: 'x' } } as FilterCondition);
           expect(sql, `${op} over ${field}`).not.toMatch(/1 = 0|1 = 1/);
           // [#17590] `$contains` compiles the MEMBERSHIP construct now and the
           // rest of the family still compiles a pattern match. What this card
@@ -348,9 +280,9 @@ describe('[#17343] the per-dialect construct, compiled — the registerExternalO
       }
     });
 
-    it(`${label}: the scalar boolean/toggle still compile to the declared constants`, () => {
+    it(`${label}: the scalar boolean/toggle — and the retired multi-valued one — compile the declared constants`, () => {
       const d = typed(config);
-      for (const field of ['scalar_flag', 'scalar_toggle']) {
+      for (const field of ['scalar_flag', 'scalar_toggle', 'retired_flags']) {
         for (const op of POSITIVE_OPERATORS) {
           const sql = d.compileWhere({ [field]: { [op]: 'true' } } as FilterCondition);
           expect(sql, `${op} over ${field}`).toMatch(/where 1 = 0/);
@@ -361,15 +293,15 @@ describe('[#17343] the per-dialect construct, compiled — the registerExternalO
       }
     });
 
-    it(`${label}: the card's positive controls still compile a real predicate`, () => {
+    it(`${label}: the positive controls still compile a real predicate`, () => {
       const d = typed(config);
-      for (const field of ['nums', 'tags_', 'label']) {
-        expect(d.compileWhere({ [field]: { $contains: 'true' } } as FilterCondition), field)
+      for (const field of ['tags_', 'label']) {
+        expect(d.compileWhere({ [field]: { $contains: 'red' } } as FilterCondition), field)
           .toMatch(REAL_PREDICATE[label]!);
       }
-      // …and the SCALAR column among them is the one still on the pattern
+      // …and the SCALAR string column among them is the one still on the pattern
       // emitter, which is what keeps the row above from passing vacuously.
-      expect(d.compileWhere({ label: { $contains: 'true' } } as FilterCondition)).toMatch(/LIKE|GLOB/);
+      expect(d.compileWhere({ label: { $contains: 'red' } } as FilterCondition)).toMatch(/LIKE|GLOB/);
     });
   }
 
@@ -385,12 +317,12 @@ describe('[#17343] the per-dialect construct, compiled — the registerExternalO
     await managed.getKnex().schema.dropTableIfExists(MULTI_OBJECT);
     await managed.initObjects([{ name: MULTI_OBJECT, fields: MULTI_FIELDS } as never]);
     try {
-      for (const field of ['flags', 'toggles', 'nums', 'scalar_flag']) {
-        const filter = { [field]: { $contains: 'true' } } as FilterCondition;
+      for (const field of ['picks', 'refs', 'tags_', 'scalar_flag', 'retired_flags']) {
+        const filter = { [field]: { $contains: 'a' } } as FilterCondition;
         expect(managed.compileWhere(filter), field).toBe(external.compileWhere(filter));
       }
       // …and the agreed construct is the working one, not an agreed `1 = 0`.
-      expect(managed.compileWhere({ flags: { $contains: 'true' } })).toMatch(REAL_PREDICATE.sqlite!);
+      expect(managed.compileWhere({ picks: { $contains: 'a' } })).toMatch(REAL_PREDICATE.sqlite!);
     } finally {
       await managed.getKnex().schema.dropTableIfExists(MULTI_OBJECT).catch(() => {});
       await managed.disconnect?.();
@@ -399,32 +331,43 @@ describe('[#17343] the per-dialect construct, compiled — the registerExternalO
 
   /**
    * ONE GUARD FOR THE WHOLE CLASS — the invariant behind all three limbs of the
-   * predicate rather than the two types this card names.
+   * predicate rather than the two types this card named.
    *
-   * `multiple: true` makes any column a JSON TEXT array ({@link
-   * SqlDriver.isJsonField}), and on a JSON array `$contains` is the MEMBERSHIP
-   * spelling #7398 deliberately preserved — never a substring test over a
-   * stored scalar, which is the only thing the declared-type gate is about. So
-   * the gate must not fire on ANY multi-valued column, whatever its declared
-   * class. The numeric limb spells that at its registry, the temporal and
-   * boolean limbs at the predicate; this sweep is what makes a fourth class
-   * joining the set without a carve-out red on arrival instead of silent.
+   * A JSON column's `$contains` is the MEMBERSHIP spelling #7398 deliberately
+   * preserved, never a substring test over a stored scalar, which is the only
+   * thing the declared-type gate is about. So the gate must not fire on ANY
+   * JSON column.
+   *
+   * ⭐ [#17469] The sweep runs in BOTH directions now, and the second direction
+   * is the ruling: a declared non-text class carrying `multiple: true` is NOT
+   * multi-valued, so it is an ordinary scalar column and the gate DOES fire on
+   * it. Before the ruling this row asserted the opposite, over a declaration
+   * `FieldSchema` now refuses.
    */
-  it('NO declared non-text class fires the gate once the column is MULTI-VALUED', () => {
-    const classes = [...NON_TEXT_STORED_VALUE_TYPES].sort();
+  it('the gate never fires on a JSON column — and DOES fire on a retired `multiple` non-text class', () => {
+    const classes = RETIRED_MULTI_TYPES;
     expect(classes.length, 'the swept population — a class added upstream must reach this sweep').toBeGreaterThan(8);
     for (const declared of classes) {
       const d = new CompilerProbeDriver(DIALECTS[0][1]).declareMulti({
         many: { type: declared, multiple: true },
         one: { type: declared },
       });
-      const membership = d.compileWhere({ many: { $contains: 'x' } });
-      expect(membership, `multiple:true ${declared}`).not.toMatch(/1 = 0/);
-      // [#17590] the membership construct on the SQLite cell this sweep runs on.
-      expect(membership, `multiple:true ${declared}`).toMatch(REAL_PREDICATE.sqlite!);
-      // …while the SCALAR column of the same class is gated, which is what
-      // makes the row above a carve-out reading rather than a dead gate.
+      // The ruled storage change: `multiple` on this class declares nothing, so
+      // both columns are scalars of the same declared class and both are gated.
+      expect(d.compileWhere({ many: { $contains: 'x' } }), `multiple:true ${declared}`).toMatch(/1 = 0/);
       expect(d.compileWhere({ one: { $contains: 'x' } }), `scalar ${declared}`).toMatch(/1 = 0/);
+    }
+    // …while a JSON column of every shape that still produces one is NOT gated,
+    // which is what keeps the rows above from reading as a dead gate.
+    const json = new CompilerProbeDriver(DIALECTS[0][1]).declareMulti({
+      sel: { type: 'select', multiple: true },
+      look: { type: 'lookup', multiple: true },
+      usr: { type: 'user', multiple: true },
+      checks: { type: 'checkboxes' },
+      blob: { type: 'json' },
+    });
+    for (const field of ['sel', 'look', 'usr', 'checks', 'blob']) {
+      expect(json.compileWhere({ [field]: { $contains: 'x' } } as FilterCondition), field).not.toMatch(/1 = 0/);
     }
   });
 });

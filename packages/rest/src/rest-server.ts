@@ -1507,6 +1507,57 @@ function notImplementedRefusalAnswer(
     return { status: 501, body: { error: { code: 'NOT_IMPLEMENTED', message } } };
 }
 
+/**
+ * [#18066] THE one absence answer `GET /meta/:type/:name` gives — a single
+ * emitter, so the several conditions that mean "you get nothing" cannot answer
+ * several different bodies.
+ *
+ * ⭐ Byte-identity is the POINT here, not tidiness. #8013 partitioned this
+ * route's refusals deliberately: an app that EXISTS and whose
+ * `requiredPermissions` the caller lacks reports `403 PERMISSION_DENIED`,
+ * while an unpublished app (ADR-0045 §3, "externally unobservable"), an app
+ * gated by an absent optional service (ADR-0057 D10) and a name with nothing
+ * behind it must be INDISTINGUISHABLE — extending the denial to them "would
+ * make every app name on the platform enumerable", which is the unruled change
+ * that card fenced off. Two hand-built bodies for two of those three arms is
+ * that fence held by coincidence; one emitter makes it structural.
+ *
+ * The condition this closes was the LOUDEST of the three and the one that got
+ * away. The uncached arm reached its 404 only from INSIDE `if (isAppType &&
+ * visible)`, where `visible` is the document — so for a name that resolves to
+ * nothing the gate was skipped whole and the envelope fell through to
+ * `res.json`, answering `200` with the declared envelope MINUS its `item`
+ * member. Two in-repo declarations already said otherwise, and this restores
+ * what they declare rather than deciding anything new:
+ *
+ *  - `GetMetaItemResponseSchema` (the route's own `responseSchema`, see
+ *    `rest-route-ledger.ts`) makes `item` a required member. Measured on this
+ *    tree with the body a real server sent: `safeParse({ type: 'app', name:
+ *    'no_such_app_xyz', lock: 'none', editable: true, deletable: true,
+ *    resettable: false })` fails `invalid_type` / `expected: 'nonoptional'` at
+ *    `item`. ⚠️ The producer's in-process return passes that same parse —
+ *    `item` is PRESENT holding `undefined`, and `z.unknown()` admits that — so
+ *    the contract broke at `JSON.stringify`, which drops the member. A probe
+ *    written against the object rather than the wire bytes sees nothing wrong.
+ *  - The CACHED arm of this same route already answers this condition `404
+ *    RESOURCE_NOT_FOUND`: `getMetaItemCached` throws
+ *    `metadataItemNotFoundError` on a falsy `item`. `app`, `dashboard`, `doc`,
+ *    `book`, `?state=draft`, `?preview=draft`, `?package=` and every
+ *    `enableCache: false` deployment are diverted around it, so which arm a
+ *    request took decided whether absence was an error — the #5563 defect
+ *    class, one member over.
+ *
+ * ⛔ Not `sendEnvelopeError`, which the 403 beside it uses: that builder adds
+ * `success: false`, and an absence answer that carries a key the unpublished
+ * app's answer does not is the enumeration signal all over again. The nested
+ * `error.code` accessor is the same one objectui#4252 reads on both.
+ */
+function sendMetaItemAbsent(res: any): void {
+    res.status(404).json({
+        error: { code: 'RESOURCE_NOT_FOUND', message: 'Metadata item not found or access denied.' },
+    });
+}
+
 export class RestServer {
     private protocol: RestProtocol;
     private config: NormalizedRestServerConfig;
@@ -6926,6 +6977,38 @@ export class RestServer {
                             // envelope is rebuilt around the result at `res.json`.
                             // Nothing downstream asks which shape it holds.
                             let visible: any = envelope?.item;
+
+                            // [#18066] ABSENCE IS AN ERROR ON THIS ARM TOO.
+                            //
+                            // Ordered BEFORE every gate below, and that ordering
+                            // is the security half of this change rather than a
+                            // style choice. The three gates under it all read
+                            // `&& visible`, so they are reached only by a
+                            // document that EXISTS; a name that resolves to
+                            // nothing can never enter the app gate and can
+                            // therefore never be converted into the `403
+                            // PERMISSION_DENIED` #8013 reserves for an app the
+                            // caller may not open. The withheld-but-existing
+                            // app keeps answering exactly what it answered
+                            // before — 403 for a permission denial, absence for
+                            // the other two arms — because nothing on its path
+                            // changed.
+                            //
+                            // `== null` rather than falsiness: the miss this
+                            // catches is `undefined` (no overlay row, no
+                            // MetadataService copy, no registry entry — see
+                            // `metadata-protocol`'s `getMetaItem`, whose three
+                            // lookups all leave `item` undefined) or a protocol
+                            // implementation that resolved nothing at all. A
+                            // document that is legitimately falsy-but-present is
+                            // not a miss, and a metadata store that could not be
+                            // READ never arrives here as a value at all — it
+                            // throws 503 (#5532), which is the distinction this
+                            // condition must not flatten.
+                            if (visible == null) {
+                                sendMetaItemAbsent(res);
+                                return;
+                            }
                             // Same per-user RBAC filtering as the list endpoint:
                             // for `app` items, drop entirely (404) when the user
                             // lacks the app's `requiredPermissions`, and strip
@@ -6982,9 +7065,14 @@ export class RestServer {
                                             );
                                             return;
                                         }
-                                        res.status(404).json({
-                                            error: { code: 'RESOURCE_NOT_FOUND', message: 'Metadata item not found or access denied.' },
-                                        });
+                                        // [#18066] Through the shared emitter, so
+                                        // this arm and the nothing-behind-the-name
+                                        // arm above it are byte-identical by
+                                        // construction — see
+                                        // {@link sendMetaItemAbsent} for why that
+                                        // is the ADR-0045 §3 property and not
+                                        // housekeeping.
+                                        sendMetaItemAbsent(res);
                                         return;
                                     }
                                 }

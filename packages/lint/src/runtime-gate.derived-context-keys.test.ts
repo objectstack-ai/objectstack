@@ -11,11 +11,20 @@
  * `{ [K in keyof RuntimeStackContext]-?: true }`, so a collection added to the
  * interface without a row is a type error naming that collection, in
  * `runtime-gate.ts`, at `tsc --noEmit` and at the DTS build. ⛔ It is
- * deliberately NOT restated here as a runtime assertion: this package's
- * `tsconfig.json` excludes `**\/*.test.ts`, so no tsc program compiles this
- * file and a type-level witness written here would evaluate never — a phantom
- * check that deletes clean. The guard's own failure was measured instead, on
- * the card, by adding a collection and reading the build.
+ * deliberately NOT restated here as a runtime assertion — ⛔ but NOT because
+ * nothing compiles this file. This package's `typecheck` is
+ * `tsc --noEmit && pnpm check:test-typecheck`, and that second half runs
+ * `--project tsconfig.test.json`, a config whose `include` is `src/**\/*` with
+ * no test exclusion. So this file IS in a tsc program the `typecheck` script
+ * runs, and a type-level witness written here would be LIVE. Measured with
+ * `tsc --listFiles`: 103 of this package's `src` test files are in that
+ * program and 0 are in the build program, which is where the old sentence came
+ * from — `tsconfig.json` does still exclude `**\/*.test.ts`, and that stopped
+ * being the whole story when the test layer got its own program. The witness
+ * is left out on its own merit: the compiler already holds completeness at the
+ * declaration site named above, so restating it here would be a second COPY of
+ * one invariant rather than a second CHECK of it. The guard's own failure was
+ * measured instead, on the card, by adding a collection and reading the build.
  *
  * ORDER is what a test can hold, and the derivation had to be chosen so as not
  * to break it — a mapped type does not guarantee declaration order. The order

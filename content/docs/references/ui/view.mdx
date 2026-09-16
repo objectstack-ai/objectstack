@@ -773,7 +773,7 @@ Map view configuration
 | **titleField** | `string` | optional | Field displayed as the marker title (popup heading, mobile record card, and what the map search box matches on) |
 | **descriptionField** | `string` | optional | Field displayed as the marker description |
 | **zoom** | `number` | optional | Initial zoom level (1-20). Omit to let the renderer fit the camera to the queried records |
-| **center** | `any[]` | optional | Initial camera center as [latitude, longitude]. Omit to let the renderer fit the camera to the queried records |
+| **center** | `[number, number]` | optional | Initial camera center as [latitude, longitude]. Omit to let the renderer fit the camera to the queried records |
 
 
 ---
@@ -1020,7 +1020,7 @@ View filter rule
 | **titleField** | `string` | optional | Field displayed as the marker title (popup heading, mobile record card, and what the map search box matches on) |
 | **descriptionField** | `string` | optional | Field displayed as the marker description |
 | **zoom** | `number` | optional | Initial zoom level (1-20). Omit to let the renderer fit the camera to the queried records |
-| **center** | `any[]` | optional | Initial camera center as [latitude, longitude]. Omit to let the renderer fit the camera to the queried records |
+| **center** | `[number, number]` | optional | Initial camera center as [latitude, longitude]. Omit to let the renderer fit the camera to the queried records |
 
 ### Nested Shape: `ListView.tree`
 
@@ -1417,7 +1417,7 @@ View filter rule
 | **titleField** | `string` | optional | Field displayed as the marker title (popup heading, mobile record card, and what the map search box matches on) |
 | **descriptionField** | `string` | optional | Field displayed as the marker description |
 | **zoom** | `number` | optional | Initial zoom level (1-20). Omit to let the renderer fit the camera to the queried records |
-| **center** | `any[]` | optional | Initial camera center as [latitude, longitude]. Omit to let the renderer fit the camera to the queried records |
+| **center** | `[number, number]` | optional | Initial camera center as [latitude, longitude]. Omit to let the renderer fit the camera to the queried records |
 
 ### Nested Shape: `ObjectListView.tree`
 

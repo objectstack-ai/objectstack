@@ -129,29 +129,63 @@ export function registerSubflowNode(engine: AutomationEngine, ctx: PluginContext
       // delegates its writes to a subflow reports `acted: 0` and reads as a
       // broken sweep. The child keeps its own run row with its own summary;
       // the parent's answers "what did this run cause", subflows included.
+      //
+      // These three ride up from a child that completed AND one that failed
+      // alike — a child that wrote rows before it died really did write them.
+      // `failures` (#15617) does NOT, which is why it is added past the failure
+      // exit below and not here; the two rules are deliberately different and
+      // `ExecutionStepMetrics.failures` names `acted` as the contrast.
       const rolled = child.summary
         ? {
-            metrics: {
-              selected: child.summary.selected,
-              acted: child.summary.acted,
-              // An uncountable effect inside the child is uncountable for the
-              // parent too — the parent's `acted` cannot be read as complete.
-              ...(child.summary.unmeasured ? { unmeasuredEffect: true } : {}),
-            },
+            selected: child.summary.selected,
+            acted: child.summary.acted,
+            // An uncountable effect inside the child is uncountable for the
+            // parent too — the parent's `acted` cannot be read as complete.
+            ...(child.summary.unmeasured ? { unmeasuredEffect: true } : {}),
           }
-        : {};
+        : undefined;
 
       if (!child.success) {
         // A failed child may still have written rows before it died — carry its
         // counts so the parent's summary does not understate what happened.
-        return { success: false, error: `subflow '${flowName}' failed: ${child.error ?? 'unknown error'}`, ...rolled };
+        //
+        // ⛔ And no `failures`: a child that FAILED — whether or not it also
+        // contained failures before it failed — is THIS step's own failure,
+        // counted once through `nodes[].failures` as it always was. Its own
+        // `failed`, contained and fatal alike, stays on the child's run row;
+        // rolling it up here would count one loss twice.
+        return {
+          success: false,
+          error: `subflow '${flowName}' failed: ${child.error ?? 'unknown error'}`,
+          ...(rolled ? { metrics: rolled } : {}),
+        };
       }
+
+      // #15617 — the child went on and CONTAINED its failures. Those steps
+      // live in the child's log, so until this slot existed the parent's fold
+      // could not see them and a parent whose child lost a row read
+      // `failed: 0` — the misreading the run-level `failed` was added to
+      // prevent (#13681), one level up. Rolled up here, it folds into this
+      // node's `failures` and so into the run-level `failed`.
+      //
+      // Deliberately the SAME exit the three totals above already leave by, so
+      // this adds one total to an existing rollup and decides nothing new
+      // about which child outcomes reach it. (A `refused` child — the run
+      // OUTCOME sense, an `end` node saying no — reaches this exit today and
+      // has since refusals existed; whether a parent should go on from one at
+      // all is a separate open question about this node, not this slot's.)
+      //
+      // Absent, never zero: a child summary with no `failed` is a row recorded
+      // before the count existed, and `0` would claim it was measured.
+      const metrics = rolled && child.summary?.failed !== undefined
+        ? { ...rolled, failures: child.summary.failed }
+        : rolled;
 
       // Bare output variable (like the assignment node, the executor may write
       // directly to the parent variable map).
       if (outVar) variables.set(outVar, child.output ?? null);
 
-      return { success: true, output: { output: child.output ?? null }, ...rolled };
+      return { success: true, output: { output: child.output ?? null }, ...(metrics ? { metrics } : {}) };
     },
   });
 

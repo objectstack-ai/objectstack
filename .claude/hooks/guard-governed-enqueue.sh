@@ -148,6 +148,34 @@
 # change where DATA comes from and nothing else; the open escape hatch above is
 # the way to actually skip the guard.
 #
+# OS_GOVERNED_ENQUEUE_SIBLING_ROOT=<dir> is the third, and it moves WHERE a
+# sibling checkout is looked for — never WHAT is accepted as one. The admission
+# rule stays the origin-slug comparison further down: a directory becomes the
+# tree this guard audits only when its own `origin` declares the target
+# `owner/repo`, so a value pointed anywhere wrong resolves NOTHING. It cannot
+# widen the audit, and it cannot soften one either — a sibling that does resolve
+# is judged exactly as it is today.
+#
+#   unset   → `$(dirname "$repo_root")`, the parent of this checkout. Today's
+#             behaviour, to the byte.
+#   empty   → the same as unset. An empty value is an accident (`export VAR=`,
+#             or `VAR="$SOMETHING_UNSET"`), and the safe reading of an accident
+#             is "no override" — never "look nowhere", which would silently
+#             drop a real audit.
+#   a directory carrying no matching checkout, one that does not exist included
+#           → nothing resolves, and the run takes the existing "no checkout of
+#             the target repo is available" fail-open below, with its existing
+#             warning. That is the branch a box WITHOUT the sibling has always
+#             taken; this variable opens no new way out.
+#
+# Why it exists: the self-test's cross-repo case asserts that fail-open, and its
+# premise used to be a fact about the BOX ("objectstack-ai/cloud has no sibling
+# checkout here") rather than about the hook. On a container that does carry a
+# sibling `cloud` checkout the guard resolved it, recomputed the predicate on it
+# and blocked — 54 passed / 1 failed, green in CI only because CI carries no
+# sibling. The matrix now sets this variable and owns its own premise, and the
+# resolved-sibling BLOCK is pinned beside it as the deliberate behaviour it is.
+#
 # Self-test (no network, no build): .claude/hooks/guard-governed-enqueue.selftest.sh
 
 set -uo pipefail
@@ -256,6 +284,31 @@ url_target() { # url_target <word> -> "owner repo pull" or empty
   printf '%s %s %s' "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}" "${BASH_REMATCH[3]}"
 }
 
+# The `owner/repo` a checkout's `origin` names, or nothing. ONE reader with two
+# call sites — the bare `gh pr merge <n>` target derivation just below, and the
+# sibling admission rule further down — because the two inlined copies it
+# replaces agreed on a defect: the path character class owns `.` and is greedy,
+# so the optional `\(\.git\)` group matched EMPTY and
+# `https://github.com/objectstack-ai/cloud.git` read as the slug
+# `objectstack-ai/cloud.git`, which equals no `owner/repo` this guard is ever
+# asked about. A sibling cloned with the conventional URL therefore never
+# resolved, and a bare `gh pr merge <n>` in such a clone derived a slug the API
+# answers 404 for — this guard's fail-open, on the clone URL `git clone` hands
+# out by default.
+#
+# The suffix is stripped AFTER the match rather than carved out of the class:
+# the class still has to own `.` (a repository may legitimately be called
+# `objectstack.ai`), and which of the two the class-vs-group race gives it up to
+# is exactly the kind of thing GNU and BSD sed are free to disagree about. A
+# trailing `.git` is removed by the shell either way, and nothing legitimate is
+# lost with it — GitHub refuses a repository name that ends in `.git`.
+slug_of() { # slug_of <checkout dir> -> owner/repo, or empty
+  local slug
+  slug="$(git -C "$1" remote get-url origin 2>/dev/null \
+    | sed -n 's#.*github\.com[:/]\([A-Za-z0-9._-]*/[A-Za-z0-9._-]*\)/*$#\1#p')"
+  printf '%s' "${slug%.git}"
+}
+
 # The enqueue-class target one shell segment names, or nothing.
 segment_target() { # segment_target <segment> -> "owner repo pull" or empty
   local seg="$1"
@@ -326,8 +379,7 @@ segment_target() { # segment_target <segment> -> "owner repo pull" or empty
     return 1
   fi
   if [ -z "$slug" ]; then
-    slug="$(git -C "$repo_root" remote get-url origin 2>/dev/null || true)"
-    slug="$(printf '%s' "$slug" | sed -n 's#.*github\.com[:/]\([A-Za-z0-9._-]*/[A-Za-z0-9._-]*\)\(\.git\)\{0,1\}/*$#\1#p')"
+    slug="$(slug_of "$repo_root")"
   fi
   [ -n "$slug" ] || return 1
   printf '%s %s %s' "${slug%%/*}" "${slug#*/}" "$num"
@@ -445,13 +497,22 @@ done < "$work/files.txt"
 # has to be the target repo's own tree. Resolve a checkout whose origin actually
 # declares owner/repo — never audit one repo's paths against another's files.
 
-slug_of() { git -C "$1" remote get-url origin 2>/dev/null | sed -n 's#.*github\.com[:/]\([A-Za-z0-9._-]*/[A-Za-z0-9._-]*\)\(\.git\)\{0,1\}/*$#\1#p'; }
+# `slug_of` is defined once, up beside the Bash pass that shares it.
+#
+# WHERE a sibling is looked for is injectable (OS_GOVERNED_ENQUEUE_SIBLING_ROOT,
+# header); WHAT is accepted as one is not. The slug comparison below is the whole
+# admission rule and is untouched by it, so the variable can only move the
+# search — a sibling that resolves is audited exactly as before, and a root
+# holding no matching checkout resolves nothing and falls through to the
+# "no checkout available" fail-open, the branch a box without the sibling
+# already takes. Unset or empty ⇒ the parent of this checkout, as always.
+sibling_root="${OS_GOVERNED_ENQUEUE_SIBLING_ROOT:-$(dirname "$repo_root")}"
 
 target_root=""
 if [ "$(slug_of "$repo_root")" = "$owner/$repo" ]; then
   target_root="$repo_root"
-elif [ "$(slug_of "$(dirname "$repo_root")/$repo")" = "$owner/$repo" ]; then
-  target_root="$(dirname "$repo_root")/$repo"
+elif [ "$(slug_of "$sibling_root/$repo")" = "$owner/$repo" ]; then
+  target_root="$sibling_root/$repo"
 fi
 
 test_args=(--test --json)

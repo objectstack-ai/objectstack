@@ -57,7 +57,7 @@ export default definePlugin({
   
   // DEPENDENCIES
   dependencies: {
-    '@objectstack/core': '^2.0.0',
+    '@objectstack/core': '^17.0.0',
     '@mycompany/base': '1.0.0 - 2.0.0',
   },
   
@@ -433,7 +433,7 @@ Plugin **cannot function** without these.
 
 ```typescript
 dependencies: {
-  '@objectstack/core': '^2.0.0',
+  '@objectstack/core': '^17.0.0',
   '@mycompany/base': '1.0.0 - 2.0.0',
 }
 ```
@@ -466,6 +466,20 @@ peerDependencies: {
 Use for large dependencies (React, Vue) that should be shared across plugins.
 
 ### Version Constraints
+
+<Callout type="warn">
+**The kernel does not check these range strings at plugin load.** `manifest.dependencies`
+has exactly two consumers today and both read `Object.keys(...)` only — the ids, never the
+ranges: `resolveArtifactPackageOrder` (`packages/core/src/artifact-packages.ts`) hands the
+ids to `resolvePluginOrder` as `optionalDependencies`, so an id naming a sibling package in
+the same artifact orders ahead of it and an id naming anything else is skipped; and
+`resolveWritePackageScope` (`packages/metadata-protocol/src/protocol.ts`) walks the ids
+transitively for the write-scope gate. `SemanticVersionManager` and `DependencyResolver`
+below are exported from `@objectstack/core` but have no call site outside their own unit
+test. So a range here is a **declaration for the installer and for human readers** — a
+stale or malformed one fails nothing at load. The forms below are the ones the parser in
+`dependency-resolver.ts` accepts, not a set the kernel enforces on you.
+</Callout>
 
 ObjectStack uses **semantic versioning (semver)**. `SemanticVersionManager.satisfies()`
 (`packages/core/src/dependency-resolver.ts`) accepts exactly these forms:
@@ -700,11 +714,11 @@ Plugins are distributed as **NPM packages** for easy versioning and distribution
   ],
   
   "dependencies": {
-    "@objectstack/core": "^2.0.0"
+    "@objectstack/core": "^17.0.0"
   },
   
   "devDependencies": {
-    "@objectstack/cli": "^2.0.0",
+    "@objectstack/cli": "^17.0.0",
     "typescript": "^5.3.0"
   },
   
@@ -723,7 +737,12 @@ Plugins are distributed as **NPM packages** for easy versioning and distribution
 
 The `typescript` floor above mirrors `SCAFFOLD_TYPESCRIPT_RANGE` in
 `packages/cli/src/commands/init.ts` — that constant, not this snippet, is the
-authority the scaffolders emit from.
+authority the scaffolders emit from. The two `@objectstack/*` ranges have an
+authority in the same file: every `@objectstack/*` package in this monorepo is
+published on one shared release version, and the scaffolders caret-pin each
+dependency to the version of the CLI that generated the project
+(`getCliVersion()`). A hand-written example cannot carry that live value, so it
+carries the **current major's floor** — track it when the major moves.
 
 ### Publishing to NPM
 
@@ -930,13 +949,18 @@ declares one (`PluginLifecycleSchema`) but nothing in the kernel calls it.
 ```
 
 ### 3. Pin Core Dependencies
-Use exact version for `@objectstack/core` to avoid surprises:
+Use an exact version for `@objectstack/core` rather than a caret range, so moving to a new
+release is a deliberate edit and not whatever the installer happens to resolve:
 
 ```typescript
 dependencies: {
-  '@objectstack/core': '2.0.0',  // Not '^2.0.0'
+  '@objectstack/core': '17.4.0',  // Not '^17.0.0'
 }
 ```
+
+Per the *Version Constraints* callout above, the kernel does not check this range at load,
+so the advice is for whoever installs the plugin — and it applies with more force to the
+same dependency in `package.json`, which npm really does resolve.
 
 ### 4. Validate Configuration Early
 Parse config with your Zod schema in `init()` — the first phase that runs — so a bad

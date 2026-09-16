@@ -17,9 +17,9 @@
 - 语义与文本按合法元数据集合变没变分:改动前过校验的输入改动后同判 ⇒ 文本面。
 - 文本面的 changeset 恒 patch,默认 sweep-first;否则语义面。
 - 放宽接受集或扩大公开面的卡,不论多小,即条款②;收窄仍是语义面,不触条款②。
+- 收窄不触发条款②,但按 `yes` 申报恒不是错误;⛔ 个案裁决不改本行。
 - 机器面改围契约的机器,与文本面不交,⛔ 不碰 `packages/spec/src/**/*.zod.ts` 与 strictness 台账。
 - 产物随源走:describe 与 JSDoc 改动重生成的 references 产物归触发它的源 PR。
-- 生成物门禁重生成提交,⛔ 手改。
 - 改元数据格式或接受面的照旧归 `domain:spec`;`/meta` 路由本体在 `packages/rest` 归 `domain:cli`。
 - 拿不准 FLAG 回分诊,⛔ 不自设第二套判据。
 - 档位随面走的现行表在 SKILL.md 模型分档,单源,⛔ 不另抄。

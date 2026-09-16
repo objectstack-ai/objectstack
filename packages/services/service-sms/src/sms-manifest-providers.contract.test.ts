@@ -139,11 +139,24 @@ describe('sms settings dropdown ↔ sms transports', () => {
 
   it('exercises every provider in the vocabulary — no fixture, no coverage', () => {
     // Deliberately a RUNTIME assertion rather than typing the table as
-    // `Record<SmsProviderTag, …>`: this package's tsconfig excludes its own
-    // test files (its TEST_DEBT entry in scripts/check-type-check-coverage.mjs),
-    // so a type-level exhaustiveness check written here would be evaluated by
-    // no tsc program at all — green forever, deletable without a trace. That is
-    // the phantom-check shape #5286 is about; an assertion vitest runs is not.
+    // `Record<SmsProviderTag, …>`, and on its own merit: what the vocabulary
+    // OFFERS is observable at runtime, and a fixture that exists but is never
+    // built is what this case exists to catch.
+    //
+    // ⚠ NOT because a type-level exhaustiveness check here would go
+    // unevaluated. That reason used to be given — "this package's tsconfig
+    // excludes its own test files (its TEST_DEBT entry in
+    // scripts/check-type-check-coverage.mjs), so a type-level check would be
+    // evaluated by no tsc program at all" — and both halves are FALSE on this
+    // tree. `typecheck` is `tsc --noEmit && pnpm check:test-typecheck`, whose
+    // second leg runs `--project tsconfig.test.json`; that config's `include`
+    // is `src/**/*` with no test exclusion and THIS file is in its program
+    // (measured with `tsc --listFiles`; the build config, which does exclude
+    // `**/*.test.ts`, is the firing control at 0). And
+    // `scripts/check-type-check-coverage.mjs` holds no `@objectstack/service-sms`
+    // key in its `DEBT` or `TEST_DEBT` literal — counted inside each literal,
+    // not over the file; the package's residue lives in the per-file
+    // `test-typecheck-debt.json` beside this one.
     expect(new Set(Object.keys(PROVIDER_FIXTURES))).toEqual(new Set(SMS_TRANSPORT_PROVIDERS));
   });
 

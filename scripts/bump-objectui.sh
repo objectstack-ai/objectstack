@@ -7,12 +7,24 @@
 #   scripts/bump-objectui.sh --no-commit    # update files only, don't commit
 #   scripts/bump-objectui.sh --no-changeset # skip the @objectstack/console changeset
 #
-# After the bump — the second half of the pin-update procedure (#5960):
-#   pnpm sdui:manifest        # dump objectui's sdui.manifest.json and run the
-#                             # spec↔registry declaration-parity ratchet (ADR-0082 D4).
-#                             # The pin bump is that ratchet's ONLY trigger; it is an
-#                             # on-demand gate by decision, never a CI job. Needs
-#                             # Playwright chromium. This script prints the reminder.
+# After the bump — the second half of the pin-update procedure (#5960, #12924):
+#   node scripts/gen-sdui-manifest-node.mjs \
+#     --objectui-version {the @object-ui version the new pin ships}
+#
+# That call rewrites the two TRACKED files, and nothing else writes them: the
+# repo-root `sdui.manifest.json` and its provenance record
+# `scripts/sdui-manifest.record.json`. The required lint job reds the bump PR until
+# it has run — `scripts/check-sdui-manifest.mjs` asserts the record's pin equals
+# `.objectui-sha` — and ADR-0082 D4's spec↔registry declaration-parity ratchet reads
+# that same tracked artefact on every PR. No browser and no objectui build; it
+# installs the published @object-ui packages into a temp dir. This script prints the
+# reminder on its way out.
+#
+# ⛔ `pnpm sdui:manifest` is a DIFFERENT command and does not clear that gate: it
+# dumps objectui's registry from a real browser to the gitignored
+# `packages/console/dist/sdui.manifest.json` and ratchets against that untracked
+# copy. An independent read of the registry, worth running when you hold an objectui
+# checkout and a Playwright chromium — but it writes neither tracked file.
 #
 # The pin must name a commit that is on objectui MAIN. This script WARNS — it
 # does not refuse — when the revision being pinned is not reachable from the
@@ -686,40 +698,52 @@ if [[ -n "$CS_FILE" ]]; then
   echo "→ wrote changeset $(basename "$CS_FILE") (@objectstack/console: ${BUMP})"
 fi
 
-# --- The other half of the pin-update procedure (#5960) ----------------------
-# ADR-0082 D4's spec↔registry declaration-parity ratchet reads objectui's
-# `sdui.manifest.json`, and that file changes when — and only when — this pin
-# moves. So the pin bump is the ratchet's trigger, and the ratchet has no
-# AUTOMATIC one at all: `packages/console/dist/` is gitignored and the published
-# @objectstack/console tarball ships no manifest, so the file exists only where
-# somebody dumped it. Producing it in this repo's CI was considered and REJECTED
-# (#5960) — it would put a full objectui build plus a chromium download on every
-# matching PR.
+# --- The other half of the pin-update procedure (#5960, #12924) --------------
+# The pin bump is what makes the committed manifest stale, and regenerating it is
+# what this prints. Which command writes what is the whole of it:
+#
+#   node scripts/gen-sdui-manifest-node.mjs  ->  sdui.manifest.json (repo root) and
+#                                                scripts/sdui-manifest.record.json
+#                                                — both TRACKED, and gated per PR
+#   pnpm sdui:manifest (gen-sdui-manifest.sh) ->  packages/console/dist/sdui.manifest.json
+#                                                — GITIGNORED, and gated nowhere
+#
+# So only the first one can turn the bump PR green. `scripts/check-sdui-manifest.mjs`
+# in the required lint job reds while the record's pin trails `.objectui-sha`, and
+# ADR-0082 D4's declaration-parity ratchet runs `--strict` against the tracked
+# manifest on every PR (#12924 checked it in; before that the ratchet had no
+# automatic run at all, which is the world the reminder here used to describe).
+#
+# Producing the BROWSER dump in this repo's per-PR CI was considered and REJECTED
+# (#5960) — a full objectui build plus a chromium download on every matching PR —
+# and that ruling stands; what changed is the ratchet's input, not the ruling.
 #
 # ⚠️ Corrected 2026-08-30 (#13091): this comment used to read "measured on
 # origin/main, no workflow runs `pnpm sdui:manifest`, no workflow installs
 # Playwright for it". Both halves stopped being true on 2026-08-10, when
 # `.github/workflows/cut-rc.yml` landed doing both, one step apart, as the last
-# check before publish. The trigger claim above is unaffected — cut-rc is a
-# `workflow_dispatch`-only lane a human starts by typing the version — but "no
-# workflow" was an absolute about the whole workflow set, and that is the shape
-# that rotted. Read a workflow's `on:` block rather than a file count. ADR-0082
-# addendum 2 carries the full correction.
+# check before publish — a `workflow_dispatch`-only lane a human starts by typing
+# the version. "No workflow" was an absolute about the whole workflow set, and that
+# is the shape that rotted. Read a workflow's `on:` block rather than a file count.
+# ADR-0082 addendum 2 carries the full correction.
 #
-# Deliberately a REMINDER, not a hard gate: a machine without Playwright must
-# still be able to move the pin, and hard-failing here would be the rejected
-# CI cost wearing a local disguise. The gate itself cannot go falsely green —
-# since #4690 a missing or unusable manifest exits 1 instead of skipping — so
-# the only failure mode left is "nobody ran it", which is what this prints to
-# prevent. Printed on BOTH exits below: --no-commit still moved the pin.
+# Deliberately a REMINDER, not a hard gate: a machine that cannot reach npm must
+# still be able to move the pin, and hard-failing here would be CI cost wearing a
+# local disguise. Nothing is lost by that, because the gate cannot go falsely green
+# — since #4690 a missing or unusable manifest exits 1 instead of skipping, and
+# since #12924 the bump PR itself reds until the regeneration lands. Printed on
+# BOTH exits below: --no-commit still moved the pin.
 print_sdui_next_step() {
   echo
-  echo "→ NEXT STEP — run the declaration-parity ratchet (ADR-0082 D4):"
-  echo "      pnpm sdui:manifest"
-  echo "  It rebuilds objectui at the new pin, dumps packages/console/dist/sdui.manifest.json"
-  echo "  and ratchets spec↔registry declaration parity. A pin bump is its only trigger:"
-  echo "  it is an on-demand gate by decision (#5960), never a CI job."
-  echo "  Needs a Playwright browser — 'pnpm exec playwright install chromium-headless-shell'."
+  echo "→ NEXT STEP — regenerate the committed SDUI manifest (required lint gate):"
+  echo "      node scripts/gen-sdui-manifest-node.mjs \\"
+  echo "        --objectui-version {the @object-ui version the new pin ships}"
+  echo "  Read that version from the objectui checkout's packages/core/package.json."
+  echo "  It rewrites the tracked sdui.manifest.json and scripts/sdui-manifest.record.json;"
+  echo "  scripts/check-sdui-manifest.mjs reds this bump PR until it does, and ADR-0082 D4's"
+  echo "  declaration-parity ratchet reads the same tracked artefact. No browser needed."
+  echo "  ⛔ 'pnpm sdui:manifest' does NOT write those files — it is the separate browser"
+  echo "  dump to the gitignored packages/console/dist/ (needs Playwright chromium)."
   echo "  Procedure: docs/releases-maintenance.md → 'After the pin moves'."
 }
 

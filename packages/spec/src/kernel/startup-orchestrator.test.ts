@@ -1,204 +1,81 @@
 import { describe, it, expect } from 'vitest';
-import {
-  StartupOptionsSchema,
-  HealthStatusSchema,
-  PluginStartupResultSchema,
-  StartupOrchestrationResultSchema,
-} from './startup-orchestrator.zod';
+import { PluginStartupResultSchema } from './startup-orchestrator.zod';
 
-describe('Startup Orchestrator Protocol', () => {
-  describe('StartupOptionsSchema', () => {
-    it('should apply default values', () => {
-      const options = {};
-
-      const result = StartupOptionsSchema.parse(options);
-      expect(result.timeoutMs).toBe(30000);
-      expect(result.rollbackOnFailure).toBe(true);
-      expect(result.healthCheck).toBe(false);
-      expect(result.parallel).toBe(false);
+// [#16059] The orchestration vocabulary this file used to cover
+// (`StartupOptionsSchema`, `HealthStatusSchema`,
+// `StartupOrchestrationResultSchema`) is retired — see
+// `startup-orchestrator-retirement.test.ts` for the absence pins and the zod
+// module's retirement block for the record. What is left is the one shape the
+// kernel really produces, so the cases below are written against
+// `ObjectKernel.startPluginWithTimeout()`'s three real return paths.
+describe('PluginStartupResultSchema — the shape the kernel produces', () => {
+  it('accepts the no-start() path: success with no elapsed time', () => {
+    const result = PluginStartupResultSchema.safeParse({
+      pluginName: 'crm-plugin',
+      success: true,
     });
-
-    it('should validate custom options', () => {
-      const options = {
-        timeoutMs: 60000,
-        rollbackOnFailure: false,
-        healthCheck: true,
-        parallel: true,
-        context: { custom: 'data' },
-      };
-
-      const result = StartupOptionsSchema.safeParse(options);
-      expect(result.success).toBe(true);
-      if (result.success) {
-        expect(result.data.timeoutMs).toBe(60000);
-        expect(result.data.context).toEqual({ custom: 'data' });
-      }
-    });
-
-    it('should reject negative timeout', () => {
-      const options = {
-        timeoutMs: -1000,
-      };
-
-      const result = StartupOptionsSchema.safeParse(options);
-      expect(result.success).toBe(false);
-    });
+    expect(result.success).toBe(true);
   });
 
-  describe('HealthStatusSchema', () => {
-    it('should validate healthy status', () => {
-      const healthyStatus = {
-        healthy: true,
-        checkedAt: Date.now(),
-        details: {
-          databaseConnected: true,
-          memoryUsage: 45.2,
-        },
-      };
-
-      const result = HealthStatusSchema.safeParse(healthyStatus);
-      expect(result.success).toBe(true);
+  it('accepts the success path: durationMs alone', () => {
+    const result = PluginStartupResultSchema.safeParse({
+      pluginName: 'crm-plugin',
+      success: true,
+      durationMs: 1250,
     });
-
-    it('should validate unhealthy status with message', () => {
-      const unhealthyStatus = {
-        healthy: false,
-        checkedAt: Date.now(),
-        message: 'Database connection failed',
-      };
-
-      const result = HealthStatusSchema.safeParse(unhealthyStatus);
-      expect(result.success).toBe(true);
-    });
+    expect(result.success).toBe(true);
+    if (result.success) expect(result.data.durationMs).toBe(1250);
   });
 
-  describe('PluginStartupResultSchema', () => {
-    it('should validate successful startup result', () => {
-      const successResult = {
-        plugin: {
-          name: 'crm-plugin',
-          version: '1.0.0',
-        },
-        success: true,
-        durationMs: 1250,
-      };
-
-      const result = PluginStartupResultSchema.safeParse(successResult);
-      expect(result.success).toBe(true);
+  it('accepts the failure path: the serializable error projection', () => {
+    const result = PluginStartupResultSchema.safeParse({
+      pluginName: 'failing-plugin',
+      success: false,
+      durationMs: 500,
+      error: { name: 'Error', message: 'Connection failed' },
     });
-
-    it('should validate failed startup result with error', () => {
-      const failedResult = {
-        plugin: {
-          name: 'failing-plugin',
-          version: '1.0.0',
-        },
-        success: false,
-        durationMs: 500,
-        error: { name: 'Error', message: 'Connection failed' },
-      };
-
-      const result = PluginStartupResultSchema.safeParse(failedResult);
-      expect(result.success).toBe(true);
-    });
-
-    it('should validate result with health status', () => {
-      const resultWithHealth = {
-        plugin: {
-          name: 'crm-plugin',
-        },
-        success: true,
-        durationMs: 1250,
-        health: {
-          healthy: true,
-          checkedAt: Date.now(),
-        },
-      };
-
-      const result = PluginStartupResultSchema.safeParse(resultWithHealth);
-      expect(result.success).toBe(true);
-    });
-
-    it('should reject negative duration', () => {
-      const invalidResult = {
-        plugin: { name: 'test' },
-        success: true,
-        durationMs: -100,
-      };
-
-      const result = PluginStartupResultSchema.safeParse(invalidResult);
-      expect(result.success).toBe(false);
-    });
+    expect(result.success).toBe(true);
   });
 
-  describe('StartupOrchestrationResultSchema', () => {
-    it('should validate complete orchestration result', () => {
-      const orchestrationResult = {
-        results: [
-          {
-            plugin: { name: 'plugin1', version: '1.0.0' },
-            success: true,
-            durationMs: 1200,
-          },
-          {
-            plugin: { name: 'plugin2', version: '2.0.0' },
-            success: true,
-            durationMs: 850,
-          },
-        ],
-        totalDurationMs: 2050,
-        allSuccessful: true,
-      };
-
-      const result = StartupOrchestrationResultSchema.safeParse(orchestrationResult);
-      expect(result.success).toBe(true);
+  it('accepts the TIMEOUT failure path, where timedOut is set', () => {
+    const result = PluginStartupResultSchema.safeParse({
+      pluginName: 'slow-plugin',
+      success: false,
+      durationMs: 30000,
+      error: { name: 'Error', message: 'Plugin slow-plugin start timeout after 30000ms' },
+      timedOut: true,
     });
+    expect(result.success).toBe(true);
+    if (result.success) expect(result.data.timedOut).toBe(true);
+  });
 
-    it('should validate orchestration with rollback', () => {
-      const orchestrationWithRollback = {
-        results: [
-          {
-            plugin: { name: 'plugin1' },
-            success: true,
-            durationMs: 1200,
-          },
-          {
-            plugin: { name: 'plugin2' },
-            success: false,
-            durationMs: 850,
-            error: { name: 'Error', message: 'Startup failed' },
-          },
-        ],
-        totalDurationMs: 2050,
-        allSuccessful: false,
-        rolledBack: ['plugin1'],
-      };
+  it('requires pluginName — the result carries the NAME, never a plugin object', () => {
+    const result = PluginStartupResultSchema.safeParse({ success: true });
+    expect(result.success).toBe(false);
+  });
 
-      const result = StartupOrchestrationResultSchema.safeParse(orchestrationWithRollback);
-      expect(result.success).toBe(true);
+  it('rejects a negative duration', () => {
+    const result = PluginStartupResultSchema.safeParse({
+      pluginName: 'test',
+      success: true,
+      durationMs: -100,
     });
+    expect(result.success).toBe(false);
   });
 });
 
 // #15678 (stack card 3/6 of #14478) — ruling B: the unit of a duration-shaped
-// number lives in the key NAME. All three old spellings are `retiredKey()`
-// tombstones, so the refusal carries the RENAME (the prescription IS the
-// payload) rather than a bare unrecognized-key error. This contract already
-// contained its own counter-example: `startWithTimeout(plugin, ctx, timeoutMs)`
-// named its parameter correctly while the options object beside it did not.
-describe('Startup orchestration durations carry their unit (#15678)', () => {
-  it('StartupOptions REFUSES the retired `timeout` with the rename in the message', () => {
-    const result = StartupOptionsSchema.safeParse({ timeout: 60000 });
-    expect(result.success).toBe(false);
-    const issue = result.error!.issues.find((i) => i.path.join('.') === 'timeout');
-    expect(issue).toBeDefined();
-    expect(issue!.code).not.toBe('unrecognized_keys');
-    expect(issue!.message).toContain('`StartupOptions.timeout` was renamed to `timeoutMs`');
-  });
-
-  it('PluginStartupResult REFUSES the retired `duration` with the rename in the message', () => {
+// number lives in the key NAME. The old spelling is a `retiredKey()` tombstone,
+// so the refusal carries the RENAME (the prescription IS the payload) rather
+// than a bare unrecognized-key error. The two sibling tombstones this file used
+// to cover (`StartupOptions.timeout`, `StartupOrchestrationResult.totalDuration`)
+// left with their defs on #16059 — a whole-def removal is strictly stronger
+// than "this one key is gone", and the retired-key registrations that dated
+// them stay in RETIRED_KEYS_BY_MAJOR[18] as the record of the narrower step.
+describe('Startup result durations carry their unit (#15678)', () => {
+  it('REFUSES the retired `duration` with the rename in the message', () => {
     const result = PluginStartupResultSchema.safeParse({
-      plugin: { name: 'crm-plugin' },
+      pluginName: 'crm-plugin',
       success: true,
       duration: 1250,
     });
@@ -208,37 +85,52 @@ describe('Startup orchestration durations carry their unit (#15678)', () => {
     expect(issue!.code).not.toBe('unrecognized_keys');
     expect(issue!.message).toContain('`PluginStartupResult.duration` was renamed to `durationMs`');
   });
+});
 
-  it('StartupOrchestrationResult REFUSES the retired `totalDuration` with the rename', () => {
-    const result = StartupOrchestrationResultSchema.safeParse({
-      results: [],
-      totalDuration: 2050,
-      allSuccessful: true,
+// [#16059] The two members that left the SURVIVING def. Both are tombstones,
+// not deletions, because this def keeps emitting and `@objectstack/core`
+// imports its type: a construction site still writing them meets the
+// prescription at the parse as well as at `tsc`.
+describe('[#16059] the re-declared result refuses the members it dropped', () => {
+  it('REFUSES `plugin` and prescribes `pluginName`', () => {
+    const result = PluginStartupResultSchema.safeParse({
+      pluginName: 'crm-plugin',
+      success: true,
+      plugin: { name: 'crm-plugin', version: '1.0.0' },
     });
     expect(result.success).toBe(false);
-    const issue = result.error!.issues.find((i) => i.path.join('.') === 'totalDuration');
+    const issue = result.error!.issues.find((i) => i.path.join('.') === 'plugin');
     expect(issue).toBeDefined();
     expect(issue!.code).not.toBe('unrecognized_keys');
-    expect(issue!.message).toContain(
-      '`StartupOrchestrationResult.totalDuration` was renamed to `totalDurationMs`',
-    );
+    expect(issue!.message).toContain('Replace the key with `pluginName`');
   });
 
-  it('the aggregate and its parts now agree: totalDurationMs sums durationMs', () => {
-    const parsed = StartupOrchestrationResultSchema.parse({
-      results: [
-        { plugin: { name: 'plugin1' }, success: true, durationMs: 1200 },
-        { plugin: { name: 'plugin2' }, success: true, durationMs: 850 },
-      ],
-      totalDurationMs: 2050,
-      allSuccessful: true,
+  it('REFUSES the deprecated `startTime` alias and prescribes `durationMs`', () => {
+    const result = PluginStartupResultSchema.safeParse({
+      pluginName: 'crm-plugin',
+      success: true,
+      durationMs: 1250,
+      startTime: 1250,
     });
-    expect(parsed.totalDurationMs).toBe(2050);
-    expect(parsed.results.reduce((sum, r) => sum + r.durationMs, 0)).toBe(2050);
+    expect(result.success).toBe(false);
+    const issue = result.error!.issues.find((i) => i.path.join('.') === 'startTime');
+    expect(issue).toBeDefined();
+    expect(issue!.code).not.toBe('unrecognized_keys');
+    // The prescription is the payload: the name promised an instant and the
+    // value was always an elapsed duration.
+    expect(issue!.message).toMatch(/startTime.*removed.*read `durationMs`/s);
   });
 
-  it('keeps the 30000 default under the renamed key', () => {
-    expect(StartupOptionsSchema.parse({}).timeoutMs).toBe(30000);
-    expect(StartupOptionsSchema.parse({ timeoutMs: 5000 }).timeoutMs).toBe(5000);
+  it('REFUSES `health` and says no startup probe system exists', () => {
+    const result = PluginStartupResultSchema.safeParse({
+      pluginName: 'crm-plugin',
+      success: true,
+      health: { healthy: true, checkedAt: Date.now() },
+    });
+    expect(result.success).toBe(false);
+    const issue = result.error!.issues.find((i) => i.path.join('.') === 'health');
+    expect(issue).toBeDefined();
+    expect(issue!.code).not.toBe('unrecognized_keys');
+    expect(issue!.message).toMatch(/health.*removed.*Delete the key/s);
   });
 });

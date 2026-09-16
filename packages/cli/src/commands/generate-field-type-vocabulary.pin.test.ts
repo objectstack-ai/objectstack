@@ -86,9 +86,15 @@
  *     listed here), asserted against what the generators actually EMIT;
  *   - the DRIVER'S OWN SOURCE, read where it lives, for the questions the spec
  *     does not answer — which types are virtual, and what a reference column's
- *     physical shape is. ⛔ The driver is the authority for which column
- *     exists; the spec's `isMultiValueField` is the ADR-0104 D1 VALUE contract
- *     and answers a different question (#14829's pin argues this in full);
+ *     physical shape is. The driver is the authority for which column exists.
+ *     ⭐ [#18199] That clause used to continue "; the spec's `isMultiValueField`
+ *     is the ADR-0104 D1 VALUE contract and answers a different question
+ *     (#14829's pin argues this in full)", and the second half stopped being
+ *     true: the maintainer ruling of 2026-09-13 (decision batch #128 item 5,
+ *     option 1′) gave "multi-valued" ONE definition, #17469 derived all three
+ *     driver sites from it, and #18199 derived `generate.ts` from it too. The
+ *     authority is unchanged — asking `isMultiValueField` about multi-value IS
+ *     asking the driver's own rule now;
  *   - or the file's INTERNAL agreement — an array-typed answer in
  *     `FIELD_TYPE_MAP` and a scalar column in `FIELD_TYPE_SQL_MAP` is a
  *     contradiction whoever is right, and `autonumber` was exactly that.
@@ -443,7 +449,12 @@ describe('#14828 — the SQL answers are the platform’s, not this file’s inv
     // The second statement of the same rule, in the differ.
     const at = SCHEMA_DRIFT_SOURCE.indexOf('export function fieldHasColumn(');
     expect(at, 'fieldHasColumn moved or was renamed in driver-sql').toBeGreaterThan(0);
-    expect(SCHEMA_DRIFT_SOURCE.slice(at, at + 200)).toContain("!== 'formula'");
+    // [#17469] 600, not 200: `fieldHasColumn`'s first line is a call to
+    // `isMultiValueField(...)` with its argument object spelled out now, three
+    // times the width of the `field?.multiple` read it replaced. A window sized
+    // to the old spelling stops reaching the `formula` arm, and this assertion
+    // would then fail for a reason that has nothing to do with `formula`.
+    expect(SCHEMA_DRIFT_SOURCE.slice(at, at + 600)).toContain("!== 'formula'");
   });
 
   it('neither migration generator emits a column for a virtual field', () => {

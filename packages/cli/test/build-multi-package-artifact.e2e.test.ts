@@ -143,15 +143,31 @@ export default {
  * between the ruled fix and "skip the site per package".
  *
  * One fixture measures both, because the discriminating fact is WHICH of the
- * two lookups on `probe_order` is reported: `account` (a sibling provides it)
- * must not be, `ghost` (nothing provides it) must be. Dropping the `packages[]`
+ * lookups on `probe_order` is reported: `account` (a sibling provides it) must
+ * not be, `ghost` (nothing provides it) must be. Dropping the `packages[]`
  * pass-through reports both; dropping the judging reports neither.
+ *
+ * ## Two LEVELS, one artifact, one verdict (#18204)
+ *
+ * `probe_order` carries the same pair of names twice: once as a field
+ * `reference` (`Field.lookup()`'s target) and once as an action param's
+ * record-picker `reference`. Both are resolved by the same ladder in
+ * `validate-object-references.ts` against the same set, and ADR-0130 §1.5
+ * accepts a cross-package lookup — so a build in which one level resolves a
+ * sibling's object and the other refuses it is the platform contradicting
+ * itself inside a single command. That contradiction SHIPPED: `@objectstack/
+ * cli@17.4.0` lowers a package body with `packageBodyAsStack(body)` and no
+ * context argument at all, which refuses the action-param reference while the
+ * field level — a site that release's rule did not yet walk — goes unjudged
+ * and therefore looks accepted. The equality below is what keeps the two
+ * levels from drifting apart again: it names the paths of BOTH refusals and,
+ * by their absence, BOTH resolutions.
  *
  * ⚠️ The top level carries `probe_account`, so `objects` is PRESENT and
  * `authoringRuleUnionStack` folds nothing into it — it only ever fills ABSENT
  * keys, which `src/utils/stack-collections.test.ts` pins BY IDENTITY on exactly
  * this shape (a stack carrying both its collections and `packages[]`). So the
- * union run never sees `probe_order`'s fields, and this is a pin on
+ * union run never sees `probe_order`'s fields or actions, and this is a pin on
  * `compile.ts`'s half rather than a second copy of `packages/lint`'s rule test,
  * whose input is a local three-key REPLICA of `packageBodyAsStack`
  * (`perPackageStack`) and stays green if this command stops building that
@@ -160,8 +176,9 @@ export default {
  * ⭐ That last claim is MEASURED rather than argued. Three ablations, each
  * reddening THIS case alone and leaving the other six in this file green:
  *
- *   1. drop `packages[]` from `packageBodyAsStack` (the pre-#16611 shape) — the
- *      equality below receives BOTH paths, `account` first;
+ *   1. drop `packages[]` from `packageBodyAsStack` (the pre-#16611 shape, and
+ *      the one `@objectstack/cli@17.4.0` ships) — the equality below receives
+ *      all FOUR paths, `account` first;
  *   2. hand the per-package leg no `objects` at all, i.e. the "skip the site per
  *      package" option the ruling rejected — `os build` exits **0** with
  *      `success: true`, so the union run is NOT a second reporter for these
@@ -185,6 +202,16 @@ const probeOrder = {
     account: { type: 'lookup', label: 'Account', reference: 'probe_account' },
     ghost: { type: 'lookup', label: 'Ghost', reference: 'probe_nothing' },
   },
+  actions: [
+    {
+      name: 'probe_link', label: 'Link', type: 'script', locations: [],
+      params: [
+        { name: 'account', label: 'Account', type: 'lookup', reference: 'probe_account' },
+        { name: 'phantom', label: 'Phantom', type: 'lookup', reference: 'probe_nothing_param' },
+      ],
+      body: { language: 'js', source: 'return { ok: true };', capabilities: [] },
+    },
+  ],
 };
 
 export default {
@@ -289,7 +316,7 @@ describe('ADR-0130 D4 — `os build` emits one artifact carrying `packages[]`', 
     expect(paths).toContain('packages.0.manifest.objects.0');
   }, 180_000);
 
-  it('resolves a SIBLING package\'s object on the per-package leg, and still errors on an artifact-wide dangling one', async () => {
+  it('resolves a SIBLING package\'s object on the per-package leg at BOTH reference levels, and still errors on an artifact-wide dangling one', async () => {
     const run = await runCli(['build', '--json'], dirs.refs);
     expect(run.code, `${run.stdout}\n${run.stderr}`).toBe(1);
     const payload = JSON.parse(run.stdout) as {
@@ -301,11 +328,29 @@ describe('ADR-0130 D4 — `os build` emits one artifact carrying `packages[]`', 
     // is the only thing that distinguishes the two exits from outside.
     expect(payload.error).toBe('author-time rules failed for one or more packages');
     const refs = (payload.issues ?? []).filter((i) => i.rule === 'object-reference-unknown');
-    // Both directions in one equality: `ghost` is present (the leg still
-    // JUDGES) and `account` is absent (the leg RESOLVED it through the
-    // artifact's `packages[]`). A pass-through that went missing reports both.
-    expect(refs.map((i) => i.path)).toEqual(['objects[0].fields.ghost.reference']);
-    expect(refs[0].package).toBe('com.example.probe.orders');
+    // Every direction in ONE equality, over BOTH levels (#18204):
+    //
+    //   present — `fields.ghost` and `params[1]` (`probe_nothing_param`): the
+    //             leg still JUDGES both levels, so the refusal MOVED rather
+    //             than disappearing when the context was added;
+    //   absent  — `fields.account` and `params[0]`, both naming
+    //             `probe_account`: the leg RESOLVED that name through the
+    //             artifact's `packages[]` at the field level AND at the
+    //             action-param level, which is the agreement the two levels
+    //             owe each other.
+    //
+    // The order is the rule's own walk order (`validate-object-references.ts`:
+    // object fields, then global actions, then object-embedded actions), so an
+    // equality — not a `toContain` pair — is what keeps a silently dropped
+    // finding visible.
+    expect(refs.map((i) => i.path)).toEqual([
+      'objects[0].fields.ghost.reference',
+      'objects[0].actions[0].params[1].reference',
+    ]);
+    expect(refs.map((i) => i.package)).toEqual([
+      'com.example.probe.orders',
+      'com.example.probe.orders',
+    ]);
   }, 180_000);
 });
 

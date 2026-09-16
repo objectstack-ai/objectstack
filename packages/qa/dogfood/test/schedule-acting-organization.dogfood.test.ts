@@ -43,6 +43,7 @@ import { bootStack, type VerifyStack } from '@objectstack/verify';
 import { MessagingServicePlugin, INBOX_OBJECT, NOTIFICATION_EVENT_OBJECT } from '@objectstack/service-messaging';
 import { ScheduleTrigger, type JobServiceSurface, type TriggerLogger } from '@objectstack/trigger-schedule';
 import type { JobHandler, JobSchedule } from '@objectstack/spec/contracts';
+import { SCHEDULED_WORK_ENV } from '@objectstack/types';
 import {
   scheduleOrganizationStack,
   declaringScheduleFlow,
@@ -127,6 +128,8 @@ for (const databaseDriver of ['sqlite-wasm', 'memory'] as const) {
     let orgB: string;
     let recipientId: string;
     let memberToken: string;
+    let priorSwitch: string | undefined;
+    let priorPosture: string | undefined;
 
     beforeAll(async () => {
       stack = await bootStack(scheduleOrganizationStack as never, {
@@ -186,6 +189,36 @@ for (const databaseDriver of ['sqlite-wasm', 'memory'] as const) {
       automation.registerFlow(DECLARED_FLOW, declaringScheduleFlow(orgA, recipientId));
       automation.registerFlow(UNDECLARED_FLOW, organizationLessScheduleFlow(recipientId));
 
+      // ── [#17396] The DEPLOYMENT the pins below are about ───────────────
+      //
+      // Ruling G put two deployment facts in front of every bind, and both are
+      // set HERE, for the bind only, rather than at boot:
+      //
+      //  1. `OS_AUTOMATION_SCHEDULED_WORK_ENABLED` — OFF by default in every
+      //     posture, so without it NOTHING in this suite arms and every pin
+      //     below would go red for a reason that has nothing to do with the
+      //     acting organization.
+      //  2. `OS_TENANCY_POSTURE=isolated` — the declaration requirement these
+      //     pins exist for now lives behind a WALL. Under `single` the very
+      //     same organization-less flow is ARMED (pinned below, as the other
+      //     half of the same fact), so leaving the posture at its default would
+      //     turn pin (3) into an assertion about a state that no longer exists.
+      //
+      // ⚠️ Set around the BIND, not around `bootStack`. Both triggers read
+      // these live, at `start()`, so the bind sees what is set here — while
+      // booting the STACK under a wall would demand the enterprise
+      // organizations plugin this suite deliberately does not install
+      // (ADR-0093 D5 refuses to boot a walled posture it cannot enforce), and
+      // that is a different topology from the one the card measured. What the
+      // pins are about is unchanged by the flip: which organization a run's
+      // writes carry is decided by the two `sys_organization` rows above and by
+      // the declaration, and the posture only decides whether the declaration
+      // is required.
+      priorSwitch = process.env[SCHEDULED_WORK_ENV];
+      priorPosture = process.env.OS_TENANCY_POSTURE;
+      process.env[SCHEDULED_WORK_ENV] = 'true';
+      process.env.OS_TENANCY_POSTURE = 'isolated';
+
       job = fakeJobService();
       log = recordingLogger();
       automation.registerTrigger(new ScheduleTrigger(() => job.service, log.logger));
@@ -193,6 +226,12 @@ for (const databaseDriver of ['sqlite-wasm', 'memory'] as const) {
     }, 120_000);
 
     afterAll(async () => {
+      // [#17396] Restore the PREVIOUS values rather than deleting the keys — a
+      // CI box that exported either one must be left exactly as it was found.
+      if (priorSwitch === undefined) delete process.env[SCHEDULED_WORK_ENV];
+      else process.env[SCHEDULED_WORK_ENV] = priorSwitch;
+      if (priorPosture === undefined) delete process.env.OS_TENANCY_POSTURE;
+      else process.env.OS_TENANCY_POSTURE = priorPosture;
       await stack?.stop();
     });
 
@@ -304,7 +343,7 @@ for (const databaseDriver of ['sqlite-wasm', 'memory'] as const) {
     // ⛔ The assertion is deliberately NOT "it logged something". It is: no job
     // exists for it, so there is no path by which an organization-less
     // time-triggered run reaches the data layer at all.
-    it('(3) an organization-less scheduled flow is REFUSED at bind, naming the flow', () => {
+    it('(3) an organization-less scheduled flow is REFUSED at bind UNDER A WALL, naming the flow', () => {
       expect(
         job.has(`flow-schedule:${UNDECLARED_FLOW}`),
         'the organization-less flow BOUND — it will tick, run, and deliver nothing, which is the defect',
@@ -320,6 +359,48 @@ for (const databaseDriver of ['sqlite-wasm', 'memory'] as const) {
       // this install may appear in the refusal as a chosen value.
       expect(refusal).not.toContain(orgA);
       expect(refusal).not.toContain(orgB);
+    });
+
+    // ⭐ [#17396] The other half of pin (3), and the reason (3) had to gain the
+    // words "under a wall". Ruling G leaves the 2026-09-08 refusal exactly as
+    // it is where a wall exists, and removes it where one does not: under
+    // `single` the deployment holds exactly one organization by contract
+    // (plugin-auth's org-create posture gate refuses a second), so there is
+    // no cross-organization task to
+    // forbid and nothing an author could usefully declare.
+    //
+    // ⛔ Not a relaxation pinned by its absence. The SAME flow object and the
+    // SAME trigger class are bound a second time, with the posture as the only
+    // thing that differs, so the contrast is attributable to the posture and to
+    // nothing else — and the tick is deliberately NOT fired: what is pinned is
+    // that the flow ARMS, and this suite's two-organization data is out of
+    // contract for `single`, so running it would assert about a deployment the
+    // platform refuses to create.
+    it('(3, the other half) under `single` the very same flow ARMS instead', async () => {
+      const posture = process.env.OS_TENANCY_POSTURE;
+      const singleJob = fakeJobService();
+      const singleLog = recordingLogger();
+      try {
+        process.env.OS_TENANCY_POSTURE = 'single';
+        const trigger = new ScheduleTrigger(() => singleJob.service, singleLog.logger);
+        trigger.start(
+          { flowName: UNDECLARED_FLOW, config: { schedule: { type: 'cron', expression: '0 8 * * *' } } },
+          async () => {},
+        );
+        await new Promise<void>((r) => setTimeout(r, 0));
+      } finally {
+        if (posture === undefined) delete process.env.OS_TENANCY_POSTURE;
+        else process.env.OS_TENANCY_POSTURE = posture;
+      }
+
+      expect(
+        singleJob.has(`flow-schedule:${UNDECLARED_FLOW}`),
+        'under `single` an undeclared time-triggered flow is armed — that widening is the whole of ruling G item 4',
+      ).toBe(true);
+      expect(
+        singleLog.errors.filter((l) => l.includes('declares no acting organization')),
+        'and it must not be refused, nor warned about, for a key it does not owe',
+      ).toHaveLength(0);
     });
 
     it('(3, control) refusing the organization-less flow did not disarm the declaring one', () => {

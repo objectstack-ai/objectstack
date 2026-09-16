@@ -469,12 +469,19 @@ describe('[#12405] `declaredCode` is ABSENT unless the demote actually happened'
         // every transport, and "presence means demotion" is a statement about
         // the KEY.
         //
-        // `in` rather than `Object.hasOwn`, and not by taste: this package's
-        // test layer compiles against a `lib` older than es2022 (the same
-        // ceiling its TEST_DEBT entry records as TS2550 x16 for
-        // `Array.prototype.at`), so `Object.hasOwn` is three fresh raw errors
-        // in a shrink-only ratchet. Measured, not guessed — it drifted the
-        // ledger 155 to 158 before this line was written this way.
+        // `in` rather than `Object.hasOwn`. ⚠ The reason recorded here has
+        // EXPIRED and the line is kept as written; the note is corrected rather
+        // than deleted because the stale version reads as a live constraint on
+        // whoever edits this file next. It used to say this package's test
+        // layer compiled against a `lib` older than es2022 — "the same ceiling
+        // its TEST_DEBT entry records as TS2550 x16 for `Array.prototype.at`"
+        // — so that `Object.hasOwn` would be three fresh raw errors in a
+        // shrink-only ratchet. All three halves are false on this tree:
+        // `packages/rest/tsconfig.test.json` declares `lib: ["ES2022"]`,
+        // `packages/rest/test-typecheck-debt.json` has `entries: {}`, and
+        // `scripts/check-type-check-coverage.mjs` holds no `@objectstack/rest`
+        // key in `DEBT` or `TEST_DEBT`. The 155-to-158 drift is history, and
+        // stays readable as history.
         expect('declaredCode' in error).toBe(false);
       });
     }

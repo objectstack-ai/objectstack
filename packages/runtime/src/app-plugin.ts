@@ -13,7 +13,11 @@ import {
     type ArtifactGrantBinding,
 } from './security/artifact-granted-permissions.js';
 import { applyArtifactForwardConversions, assertProtocolCompat } from '@objectstack/metadata-core';
-import { resolveTenancyPosture } from '@objectstack/types';
+import {
+    resolveTenancyPosture,
+    resolveScheduledWorkEnabled,
+    SCHEDULED_WORK_DISABLED_REASON,
+} from '@objectstack/types';
 import { postureEnforcesWall, type TenancyPosture } from '@objectstack/spec/security';
 import { SeedLoaderService } from './seed-loader.js';
 import { recordSeedOutcome } from './seed-summary.js';
@@ -1166,6 +1170,31 @@ export class AppPlugin implements Plugin {
                     : [];
             if (jobs.length > 0) {
                 ctx.hook('kernel:ready', async () => {
+                    // [#17396] The DEPLOYMENT gate, ahead of the job service
+                    // probe. Every `defineJob` reaching this loop is
+                    // PACKAGE-AUTHORED — it arrived through `defineStack({ jobs })`
+                    // or a package bundle — which is exactly the boundary the
+                    // switch draws. ⛔ Platform-internal scheduled work is NOT
+                    // gated and does not pass through here: approvals
+                    // escalation, the lifecycle Reaper, the messaging dispatch
+                    // loop and membership backfill each schedule themselves
+                    // from their own service plugin, because they are part of
+                    // the runtime a deployment asked for rather than arbitrary
+                    // load a package put on its clock.
+                    //
+                    // `info`, not `warn`: this is the default state of every
+                    // deployment and the deployment declared it, so nothing is
+                    // wrong and nothing looks normal-but-broken. Said once per
+                    // app with the job count, rather than once per job — the
+                    // remedy is one variable, and repeating it N times is how a
+                    // line stops being read.
+                    if (!resolveScheduledWorkEnabled()) {
+                        ctx.logger.info(
+                            `[AppPlugin] declarative jobs NOT scheduled — ${SCHEDULED_WORK_DISABLED_REASON}`,
+                            { appId, jobCount: jobs.length },
+                        );
+                        return;
+                    }
                     let svc: IJobService | undefined;
                     try { svc = ctx.getService<IJobService>('job'); } catch { /* not installed */ }
                     if (!svc || typeof svc.schedule !== 'function') {

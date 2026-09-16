@@ -38,15 +38,32 @@
  * against it. A re-narrowing is then red twice over, and neither check depends
  * on the retired export coming back.
  *
- * WHY A `.pin.ts` AND NOT A `*.test.ts`: `packages/plugins/plugin-sharing/
- * tsconfig.json` excludes `**\/*.test.ts` (a measured TEST_DEBT of 3 in
- * `scripts/check-type-check-coverage.mjs`), so no tsc program the `typecheck`
- * script runs would ever read a pin written in a test file here — it would be
- * a phantom check that stays green however this file is broken (AGENTS.md,
- * #5286's `PINS_CHECKED`; #6212 measured the same hole on driver-mongodb).
- * This file IS in that program. It is imported by nothing, so tsup (entry
- * `src/index.ts`) never bundles it into `dist`, exactly like the sibling
- * `.testkit.ts`.
+ * WHY A `.pin.ts` AND NOT A `*.test.ts`, stated to today's tree. This file is
+ * in the BUILD program: `packages/plugins/plugin-sharing/tsconfig.json`
+ * includes `src/**\/*` and excludes `**\/*.test.ts`, and a `.pin.ts` is not a
+ * test file, so `typecheck`'s unconditional first leg (`tsc --noEmit`) reads
+ * it. That is the whole reason for the extension, and it does not depend on
+ * anything being uncompiled.
+ *
+ * ⚠ This docblock used to ground itself the other way round — that the
+ * exclusion left "no tsc program the `typecheck` script runs" able to read a
+ * pin written in a test file here, and that the package carried "a measured
+ * TEST_DEBT of 3 in `scripts/check-type-check-coverage.mjs`". Both halves are
+ * FALSE on this tree, and the correction is kept rather than the sentence
+ * deleted, because the wrong version is the one a sibling package copies:
+ *   - `typecheck` is `tsc --noEmit && tsc --noEmit -p tsconfig.scripts.json &&
+ *     pnpm check:test-typecheck`, and the last leg runs
+ *     `--project tsconfig.test.json`, whose `include` is `src/**\/*` with no
+ *     test exclusion — 33 of this package's `src` test files are in that
+ *     program, measured with `tsc --listFiles`. A pin in a test file here
+ *     would be evaluated.
+ *   - `scripts/check-type-check-coverage.mjs` holds no `@objectstack/plugin-sharing`
+ *     key in either the `DEBT` or the `TEST_DEBT` literal (counted inside each
+ *     literal, not over the file). The 3 is real but lives elsewhere: it is the
+ *     per-file, shrink-only `test-typecheck-debt.json` beside this file.
+ *
+ * It is imported by nothing, so tsup (entry `src/index.ts`) never bundles it
+ * into `dist`, exactly like the sibling `.testkit.ts`.
  */
 
 import type { SharingService } from './sharing-service.js';

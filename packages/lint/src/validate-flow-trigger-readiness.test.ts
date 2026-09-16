@@ -10,7 +10,6 @@ import {
   FLOW_TIME_RELATIVE_DESCRIPTOR_INVALID,
   FLOW_TIME_RELATIVE_DESCRIPTOR_UNROUTABLE,
   FLOW_TRIGGER_UNROUTABLE,
-  FLOW_SCHEDULE_ORGANIZATION_MISSING,
 } from './validate-flow-trigger-readiness.js';
 
 function recordFlow(overrides: Record<string, unknown> = {}) {
@@ -38,15 +37,15 @@ const candidateObject = { name: 'app_candidate', label: 'Candidate', fields: {} 
 
 /**
  * [#16659] Every time-triggered fixture in this file that is ABOUT some other
- * rule now declares an acting organization.
+ * rule declares an acting organization.
  *
- * `flow-schedule-organization-missing` fires on any `schedule` /
- * `time_relative` flow without one, so a fixture that omits it would carry a
- * second finding and stop isolating the rule it exists to pin — the tests below
- * assert exact finding LISTS, which is what makes them worth having. ⛔ This is
- * not a relaxation: the fixtures that are about the missing key omit it
- * deliberately, in the `acting organization (#16659)` block and in the severity
- * table.
+ * [#17396] ⚠️ The reason it had to is GONE — `flow-schedule-organization-missing`
+ * is retired, so an undeclared fixture no longer carries a second finding. The
+ * declarations are KEPT rather than stripped, deliberately: the key is still
+ * real and still required under a walled posture, these fixtures still read as
+ * well-formed time-triggered flows, and a sweep that deleted them would be a
+ * large diff whose only effect is to make the fixtures less representative. The
+ * absence pin below is what proves the rule is gone; these fixtures are not it.
  */
 const FIXTURE_ORG = 'org_2mtx1w9d0k4bqf7v';
 
@@ -1018,11 +1017,12 @@ describe('validateFlowTriggerReadiness', () => {
   // added to this file has to decide which side it is on, and a later edit that
   // quietly demotes one of the gating ones has to come past this test.
   //
-  // [#16659] `flow-schedule-organization-missing` is the one entry whose side is
-  // NOT decided by that question: it answers YES and still advises, because an
-  // `error` gates `objectstack build` and the repo's own shipped example apps
-  // carry time-triggered flows with no authorable repair. Its docblock records
-  // that, and this table is where a later promotion has to come past.
+  // [#16659 / #17396] `flow-schedule-organization-missing` was the one entry
+  // whose side that question did not decide, and it is RETIRED rather than
+  // promoted: under a deployment-level switch the key is not required in the
+  // default posture at all, and a stack cannot see which deployment it is. So
+  // the table is back to "the question decides every row", and the absence pin
+  // further down is what keeps the id from creeping back.
   //
   // Every entry is provoked through a real stack, so an id whose criterion stops
   // firing fails here instead of passing vacuously (the empty-verdict trap: an
@@ -1140,25 +1140,6 @@ describe('validateFlowTriggerReadiness', () => {
           flows: [recordFlow()],
         },
       ],
-      [
-        // [#16659] `warning`, and its own docblock records why the corpus, not
-        // the verdict, is what holds it there.
-        FLOW_SCHEDULE_ORGANIZATION_MISSING,
-        'warning',
-        {
-          objects: [{ name: 'task', label: 'Task', fields: {} }],
-          flows: [
-            {
-              name: 'orgless_digest',
-              type: 'schedule',
-              status: 'active',
-              nodes: [
-                { id: 'start', type: 'start', config: { schedule: { type: 'cron', expression: '0 1 * * *' } } },
-              ],
-            },
-          ],
-        },
-      ],
     ];
 
     for (const [rule, severity, stack] of provoke) {
@@ -1205,11 +1186,12 @@ describe('validateFlowTriggerReadiness', () => {
                 {
                   id: 'start',
                   type: 'start',
-                  // [#16659] The clean fixture gained `organization`: after this
-                  // card a CORRECT time-triggered flow declares the organization
-                  // it runs as, so a fixture without one is no longer clean —
-                  // the trigger would refuse to bind it. ⛔ Not a relaxation of
-                  // the floor this case guards; the floor moved.
+                  // [#16659 / #17396] The clean fixture carries `organization`.
+                  // It no longer HAS to — lint stopped asking — but a correct
+                  // time-triggered flow under a walled posture still declares
+                  // the organization it runs as, so this is what a clean one
+                  // looks like. ⛔ Not a relaxation of the floor this case
+                  // guards either way.
                   config: {
                     timeRelative: { object: 'task', dateField: 'due_at', withinDays: 30 },
                     organization: 'org_2mtx1w9d0k4bqf7v',
@@ -1223,14 +1205,24 @@ describe('validateFlowTriggerReadiness', () => {
     });
   });
 
-  // ─── the acting organization (#16659) ───────────────────────────────────
+  // ─── the acting organization: RETIRED as an authoring rule (#17396) ──────
   //
-  // `engine.ts`'s trigger-kind resolver states the invariant: it is shared with
-  // `defineStack`'s trigger-capability refusal and with this file, "so the
-  // runtime cannot drift from what authoring accepted". A key the two triggers
-  // REFUSE to bind without, and that authoring never mentions, is that drift —
-  // an author's first signal was a production stderr line at boot.
-  describe('acting organization (#16659)', () => {
+  // #16659 put `flow-schedule-organization-missing` here, on the argument that
+  // a key the two triggers REFUSE to bind without, and that authoring never
+  // mentions, is authoring/runtime drift. Ruling G removed the premise: a
+  // deployment-level switch now gates time-triggered flows, and under the
+  // `single` posture with that switch on a flow that declares NOTHING binds and
+  // runs correctly. Neither the switch nor the posture is metadata — both are
+  // read from the environment at boot — so this rule could not tell the two
+  // deployments apart and fired on the default one.
+  //
+  // ⇒ What is pinned now is the ABSENCE, and it is pinned positively: the
+  // fixtures below are the exact ones the deleted rule fired on, and the
+  // assertion is that `validateFlowTriggerReadiness` reports nothing for them.
+  // ⛔ Not `findings.filter(rule === id).toEqual([])` — that spelling passes
+  // just as well when the whole function has stopped working, which is the
+  // empty-verdict trap this file's severity table already names.
+  describe('acting organization is NOT an authoring rule (#17396)', () => {
     const taskObject = { name: 'task', label: 'Task', fields: {} };
 
     function timeTriggered(config: Record<string, unknown>, overrides: Record<string, unknown> = {}) {
@@ -1248,90 +1240,67 @@ describe('validateFlowTriggerReadiness', () => {
       };
     }
 
-    const orgFindings = (stack: Record<string, unknown>) =>
-      validateFlowTriggerReadiness(stack).filter((f) => f.rule === FLOW_SCHEDULE_ORGANIZATION_MISSING);
-
-    it('fires on a `schedule` flow that declares none', () => {
-      const findings = orgFindings(timeTriggered({ schedule: { type: 'cron', expression: '0 1 * * *' } }));
-      expect(findings).toHaveLength(1);
-      expect(findings[0].path).toBe('flows[0].nodes[0].config.organization');
-      expect(findings[0].message, 'the sentence is the trigger\'s own, so the two cannot drift').toContain(
-        'declares no acting organization',
-      );
-      expect(findings[0].message, 'the refusal names the flow — the ruling requires that').toContain('digest');
-    });
-
-    it('fires on a `time_relative` sweep that declares none, and says WHICH kind', () => {
-      const findings = orgFindings(
-        timeTriggered({ timeRelative: { object: 'task', dateField: 'due_at', withinDays: 7 } }),
-      );
-      expect(findings).toHaveLength(1);
+    it('reports NOTHING for a `schedule` flow that declares no organization', () => {
       expect(
-        findings[0].message,
-        'a sweep must be named as one — the two kinds take the same refusal for different reasons',
-      ).toContain('time-relative flow');
+        validateFlowTriggerReadiness(timeTriggered({ schedule: { type: 'cron', expression: '0 1 * * *' } })),
+        'the deleted rule fired here; under the single posture with the switch on this flow is correct',
+      ).toEqual([]);
     });
 
-    it('names the near-miss spelling the open `config` record accepted and ignored', () => {
-      const findings = orgFindings(
-        timeTriggered({ schedule: { type: 'cron', expression: '0 1 * * *' }, organizationId: 'org_x' }),
-      );
-      expect(findings).toHaveLength(1);
+    it('reports NOTHING for a `time_relative` sweep that declares no organization', () => {
       expect(
-        findings[0].message,
-        'an author who wrote `organizationId` is told about THEIR spelling, not about "nothing"',
-      ).toContain('organizationId');
+        validateFlowTriggerReadiness(
+          timeTriggered({ timeRelative: { object: 'task', dateField: 'due_at', withinDays: 7 } }),
+        ),
+      ).toEqual([]);
     });
 
-    it('judges a present-but-unusable value exactly as the trigger does', () => {
-      // ⛔ Not a separate opinion: both read `resolveScheduleOrganization`, so a
-      // flow admitted by one and refused by the other is the silent hole again.
+    it('reports NOTHING for a near-miss spelling the open `config` record accepted', () => {
+      // The near-miss vocabulary did NOT die with the rule — it still names the
+      // author's own spelling in the BIND-time refusal, at the one door that
+      // knows the posture and the switch. What is gone is reporting it from a
+      // layer that knows neither.
+      expect(
+        validateFlowTriggerReadiness(
+          timeTriggered({ schedule: { type: 'cron', expression: '0 1 * * *' }, organizationId: 'org_x' }),
+        ),
+      ).toEqual([]);
+    });
+
+    it('reports NOTHING for a present-but-unusable organization value', () => {
       for (const bad of ['', 123, { id: 'org_x' }, null]) {
         expect(
-          orgFindings(timeTriggered({ schedule: '0 1 * * *', organization: bad })),
-          `organization: ${JSON.stringify(bad)} must be judged undeclared`,
-        ).toHaveLength(1);
+          validateFlowTriggerReadiness(timeTriggered({ schedule: '0 1 * * *', organization: bad })),
+          `organization: ${JSON.stringify(bad)} is the trigger's judgement to make, not lint's`,
+        ).toEqual([]);
       }
     });
 
-    it('is silent once the flow declares one', () => {
-      expect(
-        orgFindings(timeTriggered({ schedule: { type: 'cron', expression: '0 1 * * *' }, organization: 'org_a' })),
-      ).toEqual([]);
+    it('still reports the OTHER rules on a time-triggered flow — the absence is scoped', () => {
+      // The control for every assertion above: this file did not simply stop
+      // seeing `schedule` flows. A `timeRelative` descriptor the spec refuses
+      // is still an `error` on the same fixture shape.
+      const findings = validateFlowTriggerReadiness(
+        timeTriggered({ timeRelative: { object: 'task', dateField: 'due_at' } }),
+      );
+      expect(findings.map((f) => f.rule)).toContain(FLOW_TIME_RELATIVE_DESCRIPTOR_INVALID);
     });
 
-    it('never fires on a record_change, api, or manual flow', () => {
-      // Those bindings carry no organization BY CONSTRUCTION — they are fired by
-      // a caller who already holds one, and lifting a declared one onto them
-      // would let a flow overrule the tenant of the write that triggered it. A
-      // rule that asked them for the key would be asking for a defect.
-      expect(orgFindings({ objects: [candidateObject], flows: [recordFlow({ status: 'active' })] })).toEqual([]);
-      expect(
-        orgFindings({
-          objects: [taskObject],
-          flows: [
-            {
-              name: 'by_api',
-              type: 'api',
-              status: 'active',
-              nodes: [{ id: 'start', type: 'start', config: {} }],
-            },
-          ],
-        }),
-      ).toEqual([]);
-      expect(
-        orgFindings({
-          objects: [taskObject],
-          flows: [
-            {
-              name: 'by_hand',
-              type: 'autolaunched',
-              status: 'active',
-              nodes: [{ id: 'start', type: 'start', config: {} }],
-            },
-          ],
-        }),
-      ).toEqual([]);
+    it('the retired id is not exported from the rule module', async () => {
+      // A published id is answerable forever; this one was never released (its
+      // changeset is still unconsumed), so removing it is the whole point.
+      const mod = await import('./validate-flow-trigger-readiness.js');
+      expect(Object.keys(mod)).not.toContain('FLOW_SCHEDULE_ORGANIZATION_MISSING');
+      // Widened to `readonly string[]` on purpose. Left at its inferred type
+      // the comparison is a TS2367 "no overlap" error — which is the module's
+      // own type system agreeing with this assertion, and therefore useless as
+      // a RUNTIME pin: it would stop compiling long before it could ever fail.
+      // The pin has to survive a future edit that re-adds the slug under some
+      // other name, and only an untyped read can catch that.
+      const exportedValues: readonly unknown[] = Object.values(mod);
+      expect(exportedValues, 'the slug itself must be gone, not merely renamed').not.toContain(
+        'flow-schedule-organization-missing',
+      );
     });
   });
 

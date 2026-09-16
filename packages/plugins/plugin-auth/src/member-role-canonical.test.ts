@@ -321,7 +321,7 @@ describe('#8317 — write-path canonicalisation hooks', () => {
     for (const event of ['beforeInsert', 'beforeUpdate']) {
       const { options } = hookOn(engine, event);
       expect(options.object).toBe('sys_member');
-      // ADR-0092 identity write guard is 10; ADR-0024 D5.2 break-glass is 20.
+      // ADR-0092 identity write guard is 10; ADR-0135 D5.2 break-glass is 20.
       expect(options.priority).toBe(5);
       expect(options.priority).toBeLessThan(10);
     }
@@ -527,7 +527,7 @@ describe('#8317 — the one-off convergent pass', () => {
   });
 
   it('a canonicalisation never changes a row GRADE, so it can never revoke standing', async () => {
-    // Why the pass may safely write through the ADR-0024 D5.2 break-glass guard
+    // Why the pass may safely write through the ADR-0135 D5.2 break-glass guard
     // under a system context: the guard counts administrators with
     // `isOrgAdminGrade`, which already trims and lower-cases.
     for (const stored of [...NON_CANONICAL, 'ADMIN', ' Delegated_Admin ', 'MEMBER']) {

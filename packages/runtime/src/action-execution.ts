@@ -1264,6 +1264,22 @@ function collectScreenFieldSpecs(flow: any): Map<string, any> {
  * carries them directly (inline overrides win). `obj` is the action's
  * parent object schema (holds `.fields`); pass `undefined` for a global
  * action with only inline params.
+ *
+ * ⛔ [#18199] THE `multiple` READ BELOW IS NOT THE MULTI-VALUE QUESTION — do not
+ * "align" it on `isMultiValueField` because it matched a grep for
+ * `field.multiple`. #18199 is the ruling card for the maintainer decision of
+ * 2026-09-13 (decision batch #128 item 5, option 1′) that "multi-valued" has ONE
+ * definition, and this site was measured against it and EXCLUDED, for the reason
+ * the ADR-0104 D2 sentence above already gives: this function INHERITS an
+ * author's declaration onto a descriptor, it does not decide anything from it.
+ * The one definition is asked of the descriptor one frame down, where the
+ * decision actually happens — `validateActionParams` builds the param's schema
+ * with `valueSchemaFor({ type, multiple, options })`, whose last line is
+ * `isMultiValueField(def) ? z.array(element) : element`. So the runtime already
+ * follows the one definition here, through the spec's own consumer. Pre-computing
+ * the verdict into this field would ALSO break the inheritance contract: the key
+ * would stop carrying what the author wrote, and the predicate would then be
+ * applied to its own output.
  */
 export function resolveDeclaredActionParams(_deps: ActionExecutionDeps, action: any, obj: any): ResolvedActionParam[] {
     const fields: Record<string, any> = obj?.fields ?? {};

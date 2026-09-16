@@ -1049,7 +1049,11 @@ tags:
 <Callout>
 There is no generic `array` field type. To store multiple values, use `tags`
 (free-form strings), `multiselect` (multiple choices from `options`), or set
-`multiple: true` on a scalar/`lookup` field to store an array of that type.
+`multiple: true` on one of the **multi-capable** types — `select`, `lookup`,
+`user`, `file`, `image` — to store an array of that type. `multiple: true` on
+any other type (`text`, `number`, a date type, `radio`) is **refused when the
+field is parsed**, naming the alternative to use instead: a cell holding several
+values at once is declared only on the types whose storage has an array form.
 </Callout>
 
 **Storage:**
@@ -1258,10 +1262,17 @@ affinity there and SQLite still accepts a fractional value as a REAL. The
 refusal `rating` gains is a PostgreSQL/MySQL effect: PostgreSQL refuses a
 fractional star count outright, and MySQL **rounds** it (4.5 arrives as 5).
 
-Any field flagged `multiple: true` becomes a `JSON` column regardless of its
-type. Relationship columns are plain id strings with no database `FOREIGN KEY`
-constraint (see `lookup` above). The MongoDB driver is schemaless — it issues no
-DDL and stores the value it is given.
+A **multi-valued** field becomes a `JSON` column whatever its element type would
+have been — the flag is answered before the type is looked up at all. "Multi-valued"
+has one definition, `isMultiValueField` in `packages/spec`, and every producer of a
+column reads it: `SqlDriver.createColumn`, the read-side deserializer, the drift
+detector and both `os generate migration` formats. It is true for an inherently-multi
+option type (`multiselect` / `checkboxes` / `tags`) with or without the flag, and for
+one of the multi-capable types (`select`, `lookup`, `user`, `file`, `image`) carrying
+`multiple: true`; `multiple: true` on any other type is refused when the field is
+parsed, so no other declaration reaches this rule. Relationship columns are plain id
+strings with no database `FOREIGN KEY` constraint (see `lookup` above). The MongoDB
+driver is schemaless — it issues no DDL and stores the value it is given.
 
 <Callout type="warn">
 There is no Redis persistence backend. ObjectQL's data drivers are SQL

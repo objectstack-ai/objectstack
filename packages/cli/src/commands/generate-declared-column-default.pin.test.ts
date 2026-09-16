@@ -192,8 +192,16 @@ const FIELDS: Record<string, any> = {
   c_token_user: { type: 'lookup', referenceTo: 'sys_user', defaultValue: 'current_user' },
   c_expression: { type: 'text', defaultValue: { dialect: 'cel', source: 'today()' } },
   c_option_default: { type: 'select', options: [{ label: 'A', value: 'a', default: true }] },
-  // ...and the flag that returns before `createColumn` reaches either question.
-  c_multiple: { type: 'text', multiple: true, defaultValue: 'x' },
+  // ...and the MULTI-VALUE short-circuit that returns before `createColumn`
+  // reaches either question.
+  //
+  // [#17469] On `lookup`, not `text`. The maintainer ruling of 2026-09-13 gives
+  // "multi-valued" one definition (`isMultiValueField`) and derives the driver's
+  // storage from it, so `text` + `multiple: true` is refused at the authoring
+  // entrance and is an ORDINARY VARCHAR COLUMN here — it reaches the default
+  // question and carries `DEFAULT 'x'`, which is the opposite of what this row
+  // is for. `lookup` is multi-capable, so it still short-circuits.
+  c_multiple: { type: 'lookup', multiple: true, defaultValue: 'x' },
 };
 
 /** The columns whose DEFAULT the driver is expected to emit — the non-vacuity set. */

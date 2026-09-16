@@ -4,7 +4,7 @@ import type { MessagingChannel, MessagingChannelContext, Notification, SendResul
 import type { AckResult, ClaimedDeliveryRecord, INotificationOutbox, NotificationDeliveryRecord } from './outbox.js';
 import { classifyDeliveryAttempt } from './backoff.js';
 import { renderDigest } from './digest-render.js';
-import { DispatchLoop } from './dispatch-loop.js';
+import { DispatchLoop } from '@objectstack/core';
 
 /** Minimal channel-registry surface the dispatcher needs (MessagingService satisfies it). */
 export interface ChannelRegistry {
@@ -49,7 +49,7 @@ export interface NotificationDispatcherLogger {
  * {@link NotificationDispatcherOptions.maxIdleIntervalMs}. It lives with the
  * loop both dispatchers run (#17623) and stays exported from here.
  */
-export { DEFAULT_MAX_IDLE_INTERVAL_MS } from './dispatch-loop.js';
+export { DEFAULT_MAX_IDLE_INTERVAL_MS } from '@objectstack/core';
 
 export interface NotificationDispatcherOptions {
     nodeId: string;

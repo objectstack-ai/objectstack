@@ -5,13 +5,78 @@ description: Startup Orchestrator protocol schemas
 
 {/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
 
-Startup Orchestrator Protocol
+Plugin Startup Result Protocol
 
-Zod schemas for plugin startup orchestration data structures.
-These schemas align with the IStartupOrchestrator contract interface.
+One schema, describing the one startup datum the kernel actually produces.
 
-Following ObjectStack "Zod First" principle - all data structures
-must have Zod schemas for runtime validation and JSON Schema generation.
+`ObjectKernel.startPluginWithTimeout()` (`packages/core/src/kernel.ts`)
+races a plugin's `start()` against its `startupTimeout` and returns exactly
+this record for every plugin it starts — on the success path, on the failure
+path, and for a plugin that declares no `start()` at all. The kernel's boot
+loop is its only caller and its only reader: a `success: false` result is
+logged, and with `rollbackOnFailure` set the already-started plugins are
+destroyed and the original `error` is rethrown as the new error's `cause`.
+
+What each member means, and when it is present:
+
+- `pluginName` — always. The plugin's registered name; the result carries the
+  NAME, never a plugin object.
+- `success` — always. `false` means `start()` threw or the timeout fired.
+- `durationMs` — `Date.now()` elapsed across the `start()` race, on BOTH the
+  success and the failure path. Absent for a plugin with no `start()`, which
+  returns `{ success: true, pluginName }` without racing anything.
+- `error` — the failure path only: the value `start()` threw. Declared here
+  as the serializable projection every consumer of this record can carry
+  (`name` / `message` / `stack` / `code`), which a thrown `Error` satisfies —
+  the kernel hands the live instance through, so `instanceof Error` still
+  narrows at the read site and the original cause survives the rethrow.
+- `timedOut` — the failure path only, and only when the failure was the
+  TIMEOUT rather than a throw from inside `start()`: the kernel sets it from
+  the raced rejection's message. Absent on the success path; absent, not
+  `false`, when a plugin's own `start()` threw.
+
+The deprecated `startTime` alias the kernel used to set beside `durationMs`
+ends here: it never held an instant, and a member whose name promises one
+while carrying an elapsed duration is the confusion the duration-unit rule
+exists to stop. It is a tombstone on this schema and the kernel no longer
+populates it.
+
+── [#16059] What this module used to declare, and why it no longer does ────
+
+Until this major it also declared a whole startup-ORCHESTRATION vocabulary —
+`StartupOptionsSchema` (with `timeoutMs`, `rollbackOnFailure`, `healthCheck`,
+`parallel`, `context`), `HealthStatusSchema`, `StartupOrchestrationResultSchema`
+— beside the `IStartupOrchestrator` contract interface in
+`contracts/startup-orchestrator.ts` that tied them together
+(`orchestrateStartup` / `rollback` / `checkHealth` / `startWithTimeout`).
+
+Maintainer ruling on #16059 (director seat, decision batch #60, 2026-09-06):
+the spec KEEPS a startup-result contract and it describes what the kernel
+actually produces. Neither enforcing the never-landed design nor dropping the
+contract was adopted. So the orchestrator vocabulary is retired under ADR-0049
+enforce-or-remove and this result schema is re-declared against the shipped
+shape, with `@objectstack/core` importing the type from here rather than
+declaring a twin — the drift that made the two disagree cannot recur.
+
+Nothing implemented `IStartupOrchestrator` and nothing parsed the three
+schemas: measured across this repository and the pinned `objectui` checkout
+with lit same-corpus controls, every reference outside this module's own
+tests was a generated artifact or a released `CHANGELOG.md`. `healthCheck`
+and `HealthStatus` in particular named a probe system that does not exist —
+the kernel never checks a plugin's health at startup — which is the #3950
+shape: a published vocabulary an author (ADR-0033) reads as proof of a
+capability, that parses clean and is received by nobody.
+
+Route 3 of the retirement playbook: with no authored document carrying the
+defs there is no seam for a D2 conversion and nobody to hand a tombstone to,
+so `RETIRED_DEFS_BY_MAJOR[18]` plus the D3 semantic entry
+`startup-orchestrator-retired` ARE the declaration. Two keys of THIS
+surviving schema are tombstoned rather than dropped, because this def keeps
+emitting and its type is imported by `@objectstack/core`: a construction site
+still writing them gets the prescription through `tsc`.
+
+Following ObjectStack "Zod First" principle — all data structures have Zod
+schemas for runtime validation and JSON Schema generation.
 
 <Callout type="info">
 **Source:** `packages/spec/src/kernel/startup-orchestrator.zod.ts`
@@ -20,27 +85,12 @@ must have Zod schemas for runtime validation and JSON Schema generation.
 ## TypeScript Usage
 
 ```typescript
-import { HealthStatusSchema, PluginStartupResultSchema, StartupOptionsSchema, StartupOrchestrationResultSchema } from '@objectstack/spec/kernel';
-import type { HealthStatus, PluginStartupResult, StartupOptions, StartupOrchestrationResult } from '@objectstack/spec/kernel';
+import { PluginStartupResultSchema } from '@objectstack/spec/kernel';
+import type { PluginStartupResult } from '@objectstack/spec/kernel';
 
 // Validate data
-const result = HealthStatusSchema.parse(data);
+const result = PluginStartupResultSchema.parse(data);
 ```
-
----
-
-## HealthStatus
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **healthy** | `boolean` | ✅ | Whether the plugin is healthy |
-| **checkedAt** | `integer` | ✅ | Unix timestamp in milliseconds when health check was performed |
-| **timestamp** | `never` | optional | [REMOVED] `HealthStatus.timestamp` was renamed to `checkedAt` in @objectstack/spec 17 — the instant the check RAN now carries the shared `EpochMs` schema, which declares the epoch-millisecond unit the bare key name left to the describe prose. Rename the key to `checkedAt`; the value is unchanged (`Date.now()`). |
-| **details** | `Record<string, any>` | optional | Optional plugin-specific health details |
-| **message** | `string` | optional | Error message if plugin is unhealthy |
-
 
 ---
 
@@ -50,12 +100,15 @@ const result = HealthStatusSchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **plugin** | `{ name: string; version?: string } & Record<string, any>` | ✅ | Plugin metadata |
+| **pluginName** | `string` | ✅ | Name of the plugin that was started |
 | **success** | `boolean` | ✅ | Whether the plugin started successfully |
-| **durationMs** | `number` | ✅ | Time taken to start the plugin in milliseconds |
-| **duration** | `never` | optional | [REMOVED] `PluginStartupResult.duration` was renamed to `durationMs` in @objectstack/spec 17 — the unit of a duration-shaped number lives in the key name, not only in the describe prose. Rename the key to `durationMs`; the value (milliseconds) is unchanged. |
+| **durationMs** | `number` | optional | Time taken to start the plugin in milliseconds; absent when the plugin declares no start() |
 | **error** | `{ name: string; message: string; stack?: string; code?: string }` | optional | Serializable error representation if startup failed |
-| **health** | `{ healthy: boolean; checkedAt: integer; details?: Record<string, any>; message?: string }` | optional | Health status after startup if health check was enabled |
+| **timedOut** | `boolean` | optional | Whether startup failed because the startup timeout fired, rather than start() throwing |
+| **startTime** | `never` | optional | [REMOVED] `PluginStartupResult.startTime` was removed in @objectstack/spec 18 (ADR-0049) — it never held an instant: the kernel filled it with the SAME elapsed milliseconds as `durationMs`, so a reader who took the name at its word and computed `Date.now() - startTime` got an age near the epoch instead of a wait. Delete the key and read `durationMs`, which has always carried the same value. |
+| **duration** | `never` | optional | [REMOVED] `PluginStartupResult.duration` was renamed to `durationMs` in @objectstack/spec 17 — the unit of a duration-shaped number lives in the key name, not only in the describe prose. Rename the key to `durationMs`; the value (milliseconds) is unchanged. |
+| **plugin** | `never` | optional | [REMOVED] `PluginStartupResult.plugin` was removed in @objectstack/spec 18 (ADR-0049) — the kernel has never put a plugin OBJECT in this result, so the nested `{ name, version }` shape described a value nothing ever built. Replace the key with `pluginName` and carry the plugin name string. |
+| **health** | `never` | optional | [REMOVED] `PluginStartupResult.health` was removed in @objectstack/spec 18 (ADR-0049) — it carried a `HealthStatus`, and that vocabulary is retired with the startup orchestrator that declared it: no probe system ever ran a health check at startup, so nothing ever filled the key. Delete the key; a plugin that reports health does it through a service it registers, not through this result. |
 
 ### Nested Shape: `PluginStartupResult.error`
 
@@ -65,58 +118,6 @@ const result = HealthStatusSchema.parse(data);
 | **message** | `string` | ✅ | Error message |
 | **stack** | `string` | optional | Stack trace |
 | **code** | `string` | optional | Error code |
-
-### Nested Shape: `PluginStartupResult.health`
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **healthy** | `boolean` | ✅ | Whether the plugin is healthy |
-| **checkedAt** | `integer` | ✅ | Unix timestamp in milliseconds when health check was performed |
-| **timestamp** | `never` | optional | [REMOVED] `HealthStatus.timestamp` was renamed to `checkedAt` in @objectstack/spec 17 — the instant the check RAN now carries the shared `EpochMs` schema, which declares the epoch-millisecond unit the bare key name left to the describe prose. Rename the key to `checkedAt`; the value is unchanged (`Date.now()`). |
-| **details** | `Record<string, any>` | optional | Optional plugin-specific health details |
-| **message** | `string` | optional | Error message if plugin is unhealthy |
-
-
----
-
-## StartupOptions
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **timeoutMs** | `integer` | optional (default: `30000`) | Maximum time in milliseconds to wait for each plugin to start |
-| **timeout** | `never` | optional | [REMOVED] `StartupOptions.timeout` was renamed to `timeoutMs` in @objectstack/spec 17 — the unit of a duration-shaped number lives in the key name, not only in the describe prose. Rename the key to `timeoutMs`; the value (milliseconds) is unchanged. |
-| **rollbackOnFailure** | `boolean` | optional (default: `true`) | Whether to rollback already-started plugins if any plugin fails |
-| **healthCheck** | `boolean` | optional (default: `false`) | Whether to run health checks after plugin startup |
-| **parallel** | `boolean` | optional (default: `false`) | Whether to start plugins in parallel when dependencies allow |
-| **context** | `any` | optional | Custom context object to pass to plugin lifecycle methods |
-
-
----
-
-## StartupOrchestrationResult
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **results** | `{ plugin: object; success: boolean; durationMs: number; error?: object; … }[]` | ✅ | Startup results for each plugin |
-| **totalDurationMs** | `number` | ✅ | Total time taken for all plugins in milliseconds |
-| **totalDuration** | `never` | optional | [REMOVED] `StartupOrchestrationResult.totalDuration` was renamed to `totalDurationMs` in @objectstack/spec 17 — the unit of a duration-shaped number lives in the key name, not only in the describe prose. Rename the key to `totalDurationMs`; the value (milliseconds) is unchanged. |
-| **allSuccessful** | `boolean` | ✅ | Whether all plugins started successfully |
-| **rolledBack** | `string[]` | optional | Names of plugins that were rolled back |
-
-### Nested Shape: `StartupOrchestrationResult.results[number]`
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **plugin** | `{ name: string; version?: string } & Record<string, any>` | ✅ | Plugin metadata |
-| **success** | `boolean` | ✅ | Whether the plugin started successfully |
-| **durationMs** | `number` | ✅ | Time taken to start the plugin in milliseconds |
-| **duration** | `never` | optional | [REMOVED] `PluginStartupResult.duration` was renamed to `durationMs` in @objectstack/spec 17 — the unit of a duration-shaped number lives in the key name, not only in the describe prose. Rename the key to `durationMs`; the value (milliseconds) is unchanged. |
-| **error** | `{ name: string; message: string; stack?: string; code?: string }` | optional | Serializable error representation if startup failed |
-| **health** | `{ healthy: boolean; checkedAt: integer; details?: Record<string, any>; message?: string }` | optional | Health status after startup if health check was enabled |
 
 
 ---

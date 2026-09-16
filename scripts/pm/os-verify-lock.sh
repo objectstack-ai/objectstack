@@ -4,7 +4,8 @@
 #
 #   scripts/pm/os-verify-lock.sh -c 'pnpm --filter @objectstack/core test'
 #   scripts/pm/os-verify-lock.sh -- pnpm --filter @objectstack/core test
-#   scripts/pm/os-verify-lock.sh --status        # holder, how long it has held, the queue
+#   scripts/pm/os-verify-lock.sh --status        # holder, how long it has held, the queue,
+#                                                # and whether each recorded process still exists
 #   scripts/pm/os-verify-lock.sh --show-budget   # the acquisition budget this call would use
 #   scripts/pm/os-verify-lock.sh --self-test     # verify this script
 #
@@ -14,6 +15,11 @@
 # exit code — including a command that itself exits 99, which is why every run
 # ends with a VERDICT line naming which of the two happened. Read the verdict
 # line, never a bare `$?`.
+#
+# `--status` is the one mode with an exit code of its own: 3 means the liveness
+# control at the foot of its output failed, so it printed no reading at all
+# rather than one it cannot stand behind. It takes no lock, so 99 is not
+# something it can ever mean.
 #
 # A host with no usable `flock` runs in DECLARED UNLOCKED MODE (see the block
 # below): the command runs and its own exit code passes through, so 99 keeps
@@ -372,6 +378,10 @@ LOCK_FILE="${OS_VERIFY_LOCK_FILE:-/tmp/os-heavy-verify.lock}"
 # one removes the exclusion the lock exists for; don't.
 FLOCK_BIN="${OS_VERIFY_LOCK_FLOCK:-flock}"
 
+# See `pid_alive` for what this is, why it exists and why it is announced on
+# every invocation. Empty in every real run.
+SIM_LIVENESS="${OS_VERIFY_LOCK_SIM_LIVENESS:-}"
+
 QUEUE_DIR="${LOCK_FILE}.q"
 HOLDER_FILE="${LOCK_FILE}.holder"
 # `OS_VERIFY_LOCK_LEDGER` exists for the same reason `OS_VERIFY_LOCK_FILE` does:
@@ -479,6 +489,19 @@ now_stamp() {
 # have no `/proc` at all). Same-user only, which is the case here: every agent
 # in a container runs as the same user.
 pid_alive() {
+  # ⛔ TEST-ONLY, AND A LIE ON PURPOSE. `OS_VERIFY_LOCK_SIM_LIVENESS=alive`
+  # makes every pid read alive, `=dead` makes every pid read dead. It exists
+  # because the ONE failure the liveness control further down is built to catch
+  # — a prober broken in the reassuring direction — cannot be produced by
+  # arranging real processes, and a control nothing has ever been seen to fail
+  # is not a control. Setting it anywhere else makes the ordering layer read
+  # dead tickets as waiters (or live ones as corpses); exclusion and the cap are
+  # untouched, and every invocation announces it at second zero so that it
+  # cannot be set quietly.
+  case "$SIM_LIVENESS" in
+    alive) return 0 ;;
+    dead) return 1 ;;
+  esac
   if [[ -d /proc/self ]]; then
     [[ -d "/proc/${1}" ]]
   else
@@ -909,6 +932,214 @@ utc_stamp() {
       ;;
   esac
   return 1
+}
+
+# --- the liveness reading ---------------------------------------------------
+#
+# ⭐ WHY THIS IS A READING AND NOT A FOURTH OPINION. Measured 2026-09-13
+# (#17966), one dispatch seat, one round: a dev whose turn had ENDED WHILE
+# WAITING was still listed `running` by the harness, `--status` said the lock
+# was free and the queue empty, and a queued message never woke it. Three
+# instruments, three definitions, and the truth took a fourth reading typed by
+# hand — `ps -e` showing zero node/vitest/pnpm processes NEXT TO two pids known
+# to be alive. Thirty-three minutes of a batch slot were spent waiting on a
+# corpse, and it was caught only because somebody thought to take that reading.
+#
+# What is added here is ONE COMMAND answering, for a reader who already runs
+# `--status`: is the process behind each of this lock's records still there?
+#
+# ⚠ WHAT IT JUDGES, NARROWLY, SO IT CANNOT BE OVER-READ: the HOLDER RECORD and
+# the TICKETS. Nothing else. A process that never reached this lock leaves
+# nothing here, so `no records to judge` is NOT an all-clear — it is the same
+# boundary the `covers:` block declares, and the measured instance was exactly
+# that shape. The block prints that sentence rather than leaving an absence to
+# be read as good news, which is how the 33 minutes were spent.
+#
+# ⭐ THE ADDITION IS THE DEAD ONES, AND THE ORDER IS THE MECHANISM.
+# `holder_line` and `queue_live` already decide this very question for the grant
+# logic — and both then DELETE the record and say nothing about it. That is
+# right for ordering (a dead ticket must not wedge the queue) and it is exactly
+# why the reading a seat needs was never on the page: by the time `--status`
+# prints, the evidence that a run died holding this lock has been reaped
+# silently. So the snapshot is taken BEFORE those two run, and every verdict is
+# printed from it.
+#
+# ⛔ NOTHING HERE PRUNES, GRANTS OR DECIDES. It reads and it reports; pruning
+# stays with the paths that own it. A reading that reaped what it reported would
+# be a second definition of liveness competing with the grant logic's — this
+# card's own defect, rebuilt one layer up.
+
+# Every record this lock keeps, captured verbatim BEFORE anything prunes one.
+# One snapshot line per record: "<kind> <name> <pid> <start> <stamp> <label...>".
+# The label is last because it is the only field that can contain a space; the
+# four before it are digits or a single `-` standing in for a field the record
+# did not carry, so the field COUNT is stable whatever is on disk and a
+# malformed record is REPORTED rather than dropped.
+LIVENESS_SNAPSHOT=""
+
+liveness_snapshot() {
+  local file pid start stamp label
+  LIVENESS_SNAPSHOT=""
+  if [[ -f "$HOLDER_FILE" ]]; then
+    pid=''
+    start=''
+    stamp=''
+    label=''
+    read -r pid start stamp label < "$HOLDER_FILE" 2> /dev/null || true
+    LIVENESS_SNAPSHOT="holder - ${pid:--} ${start:--} ${stamp:--} ${label:-?}"$'\n'
+  fi
+  if [[ -d "$QUEUE_DIR" ]]; then
+    shopt -s nullglob
+    for file in "$QUEUE_DIR"/*; do
+      [[ -f "$file" ]] || continue
+      pid=''
+      start=''
+      stamp=''
+      label=''
+      read -r pid start stamp label < "$file" 2> /dev/null || true
+      LIVENESS_SNAPSHOT="${LIVENESS_SNAPSHOT}ticket ${file##*/} ${pid:--} ${start:--} ${stamp:--} ${label:-?}"$'\n'
+    done
+    shopt -u nullglob
+  fi
+  return 0
+}
+
+# ⭐ THE READING CARRIES ITS OWN CONTROL, OR IT IS NOT A READING. A prober broken
+# in the ALIVE direction reports every corpse as running — an instrument
+# answering confidently, wrongly, and in the reassuring direction, which is the
+# shape this whole card is about. So both directions are proved in the same
+# output, against pids whose answer is known before the test is run:
+#
+#   ALIVE leg — this very process. Anything that reads it as dead cannot be
+#   trusted to read anything else.
+#
+#   DEAD leg — a child this call started and REAPED. It existed and it is gone,
+#   and `wait` guarantees the kernel released it before the check. A
+#   never-allocated pid would be cheaper and weaker: it never exercises the
+#   transition every verdict here is about.
+#
+# A pid can be REUSED between the reap and the check — an alive reading through
+# no fault of the instrument — so the dead leg retries before concluding.
+#
+# ⛔ A FAILED CONTROL PRINTS NO READING AT ALL — not a reading with a caveat, and
+# not merely no verdicts. Every holder, waiter and parked line `--status` prints
+# is decided by this same `pid_alive`, so an unlit prober invalidates the whole
+# listing and `--status` refuses it entire, naming which leg failed.
+readonly LIVENESS_REFUSAL_EXIT=3
+LIVENESS_CONTROL_LINE=""
+LIVENESS_IDENTITY_READABLE=0
+
+liveness_control() {
+  local dead='' attempt
+  LIVENESS_CONTROL_LINE=''
+  LIVENESS_IDENTITY_READABLE=0
+  liveness_usable && LIVENESS_IDENTITY_READABLE=1
+  if ! pid_alive "$$"; then
+    LIVENESS_CONTROL_LINE="instrument: NOT LIT — this prober reads its OWN pid ($$) as DEAD, so nothing it could say about any other pid is worth reading."
+    return 1
+  fi
+  for attempt in 1 2 3; do
+    (exit 0) &
+    dead=$!
+    wait "$dead" > /dev/null 2>&1 || true
+    if ! pid_alive "$dead"; then
+      if ((LIVENESS_IDENTITY_READABLE == 1)); then
+        LIVENESS_CONTROL_LINE="instrument: lit — own pid $$ reads ALIVE, a child this call started and reaped (pid ${dead}) reads DEAD, and start times are readable here, so a reused pid is told apart from the original."
+      else
+        LIVENESS_CONTROL_LINE="instrument: lit for PRESENCE ONLY — own pid $$ reads ALIVE and a child this call reaped (pid ${dead}) reads DEAD, but this host will not give a pid's start time, so a REUSED pid cannot be told from the original and every verdict below is presence-only."
+      fi
+      return 0
+    fi
+  done
+  LIVENESS_CONTROL_LINE="instrument: NOT LIT — a child this call started and reaped (pid ${dead}) still reads ALIVE after 3 attempts. That is precisely the failure this control exists for: a prober broken this way reports every corpse as running."
+  return 1
+}
+
+# One verdict line per record, each naming the pid so a reader can carry it
+# straight to the process table.
+liveness_verdict() {
+  local kind="$1" name="$2" pid="$3" start="$4" stamp="$5" label="$6" now="$7"
+  local subject verb gone reap ident age='' at='' since_live='' since_rec='' agetxt nowstart
+  case "$kind" in
+    holder)
+      subject='liveness holder'
+      verb='holding'
+      gone='the run recorded as holding this lock is gone'
+      reap='the grant path prunes this record, so this is the one reading you get'
+      ;;
+    *)
+      subject="liveness waiter ticket ${name}"
+      verb='waiting'
+      gone='nothing is waiting behind this ticket'
+      reap='the next queue scan prunes it, so this is the one reading you get'
+      ;;
+  esac
+  case "$stamp" in
+    '' | *[!0-9]*) ;;
+    *)
+      case "$now" in
+        '' | *[!0-9]*) ;;
+        *) age="$(human_s $((now - stamp)))" ;;
+      esac
+      at="$(utc_stamp "$stamp" 2> /dev/null || true)"
+      ;;
+  esac
+  agetxt="${age:-an unknown time}"
+  if [[ -n "$at" ]]; then
+    since_live=", since ${at}"
+    since_rec=", at ${at}"
+  fi
+  if ((LIVENESS_IDENTITY_READABLE == 1)); then
+    ident=' and still the same process (start time matches the record)'
+  else
+    ident=" (presence only — this host will not give a pid's start time, so a reused pid would read the same)"
+  fi
+  case "$pid" in
+    '' | *[!0-9]*)
+      printf '%s: UNREADABLE RECORD — the pid field reads %s, so nothing here can be judged — %s\n' \
+        "$subject" "$pid" "$label"
+      return 0
+      ;;
+  esac
+  if [[ "$pid" == 0 ]]; then
+    printf 'liveness parked %s: pid 0 — BY DESIGN no process to judge; a place kept, not a waiter, taken %s ago%s — %s\n' \
+      "$name" "$agetxt" "$since_rec" "$label"
+    return 0
+  fi
+  if ! pid_alive "$pid"; then
+    printf '%s: pid %s DOES NOT EXIST — %s; the record was written %s ago%s, and %s — %s\n' \
+      "$subject" "$pid" "$gone" "$agetxt" "$since_rec" "$reap" "$label"
+    return 0
+  fi
+  nowstart="$(proc_starttime "$pid" 2> /dev/null || true)"
+  if ((LIVENESS_IDENTITY_READABLE == 1)) && [[ "$start" != '-' && -n "$nowstart" && "$nowstart" != "$start" ]]; then
+    printf '%s: pid %s EXISTS BUT IS NOT THE RECORDED PROCESS (start time %s recorded, %s now) — %s and its pid has been reused; %s — %s\n' \
+      "$subject" "$pid" "$start" "$nowstart" "$gone" "$reap" "$label"
+    return 0
+  fi
+  printf '%s: pid %s ALIVE%s — %s %s%s — %s\n' \
+    "$subject" "$pid" "$ident" "$verb" "$agetxt" "$since_live" "$label"
+  return 0
+}
+
+liveness_verdicts() {
+  local kind name pid start stamp label now n=0
+  now="$(now_s 2> /dev/null)" || now=''
+  while IFS=' ' read -r kind name pid start stamp label; do
+    [[ -n "${kind:-}" ]] || continue
+    n=$((n + 1))
+    liveness_verdict "$kind" "$name" "$pid" "$start" "$stamp" "${label:-?}" "$now"
+  done <<< "$LIVENESS_SNAPSHOT"
+  if ((n == 0)); then
+    printf 'liveness: no records to judge — this lock has no holder and no tickets.\n'
+    printf '          ⚠ That is NOT evidence that whatever you are waiting on is alive. A\n'
+    printf '          process that never reached this lock leaves nothing here to judge,\n'
+    printf '          which is the exact shape #17966 measured: the harness said running,\n'
+    printf '          this command said free and empty, and the process was already dead.\n'
+    printf '          Read the process table next to a pid you KNOW is alive before you\n'
+    printf '          conclude anything about a run that left no record here.\n'
+  fi
+  return 0
 }
 
 # --- the ledger -------------------------------------------------------------
@@ -2037,6 +2268,14 @@ under this lock are SHARED-BOX seconds. Say so beside any absolute you publish,
 or quote ratios, which survive contention. Every acquiring run prints this
 boundary, and the VERDICT line repeats it beside the numbers it carries.
 
+`--status` ENDS WITH A LIVENESS READING: one line per holder and per queued
+ticket saying whether the process behind it still exists, and whether it is
+still the same process (by its start time), preceded by a line proving the
+prober itself works -- its own pid must read alive and a child it reaped must
+read dead. If that control fails, `--status` prints NO reading at all and exits
+3. ⚠ It judges only what took a ticket here: `no records to judge` is not an
+all-clear for a run that never reached this lock.
+
 There is deliberately no -w / --timeout: the acquisition budget is capped at the
 call site. OS_VERIFY_LOCK_WAIT may LOWER it; a value above the cap is clamped.
 ⛔ The cap is not a tuning knob and raising it is not the remedy for a long
@@ -2173,6 +2412,24 @@ run_unlocked() {
 
 mode_status() {
   local n=0 file pid start stamp label problem
+  # ⭐ TAKEN FIRST, AND THAT ORDER IS THE MECHANISM. `holder_line` and
+  # `queue_live` below DELETE every record they judge dead, so a snapshot taken
+  # after them can only ever report the survivors — which is exactly how a run
+  # that died holding this lock leaves no trace on the one surface a seat reads.
+  liveness_snapshot
+  # ⛔ AND THE CONTROL IS SETTLED BEFORE A SINGLE LINE IS PRINTED. Every holder,
+  # waiter and parked line below is decided by the same `pid_alive` the verdicts
+  # use, so an unlit prober does not produce a partly-trustworthy listing — it
+  # produces none, and names the leg that failed.
+  if ! liveness_control; then
+    printf 'lock: %s\n' "$LOCK_FILE"
+    printf '%s\n' "$LIVENESS_CONTROL_LINE"
+    printf 'refusing: every holder, waiter and parked line this command prints is decided by\n'
+    printf '          that same probe, so it prints NO reading at all rather than one with a\n'
+    printf '          caveat. Take the reading by hand — the process table next to a pid you\n'
+    printf '          know is alive — and record the liveness of this box as NOT MEASURED.\n'
+    return "$LIVENESS_REFUSAL_EXIT"
+  fi
   printf 'lock: %s\n' "$LOCK_FILE"
   # ⚠ Everything printed below is about LOCKED work only. Said here because
   # `--status` is what an agent reads to answer "is this box busy?", and the
@@ -2243,6 +2500,11 @@ mode_status() {
   else
     printf 'boots: %s (nothing recorded yet)\n' "$BOOTS_FILE"
   fi
+  # The liveness reading, from the snapshot taken before anything above pruned
+  # it. Last because a reader scanning for the queue depth must not have to
+  # scroll past it, and because it is the line to act on once the rest is read.
+  printf '%s\n' "$LIVENESS_CONTROL_LINE"
+  liveness_verdicts
   return 0
 }
 
@@ -2974,7 +3236,8 @@ mode_self_test() {
   # silence a case instead (OS_VERIFY_LOCK_NO_FILTER_CHECK=1 skips the very
   # check two cases below assert). The cases that want one of these set it
   # themselves, per command, which still works.
-  unset OS_VERIFY_LOCK_SLOT OS_VERIFY_LOCK_WAIT OS_VERIFY_LOCK_NO_FILTER_CHECK OS_VERIFY_LOCK_BOOTS
+  unset OS_VERIFY_LOCK_SLOT OS_VERIFY_LOCK_WAIT OS_VERIFY_LOCK_NO_FILTER_CHECK OS_VERIFY_LOCK_BOOTS \
+    OS_VERIFY_LOCK_SIM_LIVENESS
 
   # Both halves matter: the export reaches the child invocations, and the three
   # globals redirect the helpers called IN THIS PROCESS. Without the second, a
@@ -3881,6 +4144,74 @@ FAKEDATE
   QUEUE_DIR="${L}.q"
   HOLDER_FILE="${L}.holder"
 
+  # ⭐ THE LIVENESS READING (#17966) — the reading a seat could not take in one
+  # command on the day a dev that had ended its turn while waiting was still
+  # being waited on. Driven as a CHILD `--status` against a private lock of its
+  # own, because what is owed is the SURFACE a seat runs: cases that called the
+  # helpers in-process would pin the predicates and leave the output unpinned,
+  # which is the state this whole card is about.
+  local lvl lvq lvout lvrc lvstart
+  lvl="${tmp}/liveness-lock"
+  lvq="${lvl}.q"
+  mkdir -p "$lvq"
+  lvstart="$(proc_starttime "$$")"
+  # A waiter that really is there: this very process, with the start time it
+  # really has.
+  printf '%s %s %s live-waiter\n' "$$" "$lvstart" "$(now_s)" > "${lvq}/00000000000000000001-$$"
+  # A holder that is not there at all — the verdict the card asks for by name.
+  printf '%s %s %s dead-holder\n' 999999 12345 "$(now_s)" > "${lvl}.holder"
+  # And a pid that IS alive without being the recorded process, so the reading
+  # is pinned to the identity the grant logic already keys on and not to
+  # presence alone.
+  printf '%s %s %s reused-waiter\n' "$$" $((lvstart + 7)) "$(now_s)" > "${lvq}/00000000000000000002-r$$"
+  lvout="$(OS_VERIFY_LOCK_FILE="$lvl" bash "$SELF" --status 2>&1)"
+  lvrc=$?
+  st_case 'a lit liveness reading exits 0' "$lvrc" 0
+  st_case 'and says it is lit, on its own line, before any verdict' \
+    "$(printf '%s\n' "$lvout" | grep -c '^instrument: lit')" 1
+  st_case 'a waiter whose process is really there reads ALIVE' \
+    "$(printf '%s\n' "$lvout" | grep -c '^liveness waiter ticket .* ALIVE')" 1
+  st_case 'a holder whose process is gone reads DOES NOT EXIST — the one-line reading that was owed' \
+    "$(printf '%s\n' "$lvout" | grep -c '^liveness holder: pid 999999 DOES NOT EXIST')" 1
+  st_case 'and a live pid that is NOT the recorded process is neither alive nor gone' \
+    "$(printf '%s\n' "$lvout" | grep -c 'EXISTS BUT IS NOT THE RECORDED PROCESS')" 1
+  # ⚠ The readers of this output count `queue N:` lines and read `state:`
+  # (pm-dispatch SKILL.md, arrival depth). Lines may be ADDED here; those two
+  # may not be reshaped, and this case is what says so mechanically.
+  st_case 'and the lines existing readers count are untouched' \
+    "$(printf '%s\n' "$lvout" | grep -cE '^(queue 1: pid |state: )')" 2
+
+  # THE CONTROL FAILING. Simulated, because the failure it exists for — a prober
+  # that reports every corpse as running — cannot be produced by arranging real
+  # processes. Both directions, because a control that only works one way round
+  # is half an instrument.
+  lvout="$(OS_VERIFY_LOCK_FILE="$lvl" OS_VERIFY_LOCK_SIM_LIVENESS=alive bash "$SELF" --status 2>&1)"
+  lvrc=$?
+  st_case 'a prober that reads every pid ALIVE refuses instead of reporting' "$lvrc" 3
+  st_case 'and names its instrument as not lit' \
+    "$(printf '%s\n' "$lvout" | grep -c '^instrument: NOT LIT')" 1
+  st_case 'and prints no verdict at all — not one carrying a caveat' \
+    "$(printf '%s\n' "$lvout" | grep -c '^liveness ')" 0
+  st_case 'and withholds the holder, queue and parked lines that same probe decides' \
+    "$(printf '%s\n' "$lvout" | grep -cE '^(queue |state: |parked )')" 0
+  lvrc=0
+  OS_VERIFY_LOCK_FILE="$lvl" OS_VERIFY_LOCK_SIM_LIVENESS=dead bash "$SELF" --status > /dev/null 2>&1 || lvrc=$?
+  st_case 'and the other direction — every pid reading DEAD — refuses too' "$lvrc" 3
+
+  # THE ABSENCE, which is the reading most easily over-read: it is what the
+  # measured instance looked like, and it is not an all-clear.
+  rm -f "${lvl}.holder"
+  rm -rf "$lvq"
+  mkdir -p "$lvq"
+  lvout="$(OS_VERIFY_LOCK_FILE="$lvl" bash "$SELF" --status 2>&1)"
+  st_case 'with nothing recorded it says there is nothing to judge' \
+    "$(printf '%s\n' "$lvout" | grep -c 'no records to judge')" 1
+  st_case 'and refuses to let that absence read as an all-clear' \
+    "$(printf '%s\n' "$lvout" | grep -c 'NOT evidence that whatever you are waiting on is alive')" 1
+  st_case 'and prints no verdict line, because there is nothing to judge' \
+    "$(printf '%s\n' "$lvout" | grep -cE '^liveness (holder|waiter|parked)')" 0
+  rm -rf "$lvq" "${lvl}"*
+
   # arrival stamps sort lexically in arrival order — the FIFO claim rests on it.
   # A host with only whole-second stamps (no EPOCHREALTIME, no GNU `date +%N`,
   # no perl) cannot promise STRICTLY increasing, and says so via --status rather
@@ -4170,6 +4501,10 @@ true' 2>&1 | grep -c 'VERDICT batch-last-exit 0')" 1
 # --- dispatch ---------------------------------------------------------------
 
 main() {
+  # ⛔ The test-only liveness simulation (see `pid_alive`) announces itself on
+  # every invocation: a knob that makes this script lie about whether processes
+  # exist must never be settable quietly.
+  [[ -n "$SIM_LIVENESS" ]] && log "⚠ OS_VERIFY_LOCK_SIM_LIVENESS=${SIM_LIVENESS} is set — every pid reads ${SIM_LIVENESS}. TEST-ONLY: the ordering layer is wrong while it is set."
   # ⭐ THE PASSIVE MEASUREMENT, AND WHY IT IS HERE RATHER THAN IN A MODE. It
   # runs on EVERY invocation -- a run, a refusal, a `--status`, even a usage
   # error -- because the measurement has to happen as a side effect of what the
@@ -4194,7 +4529,7 @@ main() {
       ;;
     --status)
       mode_status
-      exit 0
+      exit $?
       ;;
     --show-budget)
       mode_show_budget

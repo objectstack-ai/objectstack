@@ -29,8 +29,18 @@
  *    throwing a bare `Error` would satisfy, and which `[null, null]`'s
  *    `TypeError` did satisfy;
  *  - ONE envelope across the four, because one condition gets one envelope;
- *  - the message discipline: what arrived, the two-element contract, the
- *    single-day spelling to write instead;
+ *  - ⭐ the WORDING, byte-for-byte equal to the spec's own
+ *    `analyticsDateRangeRefusalMessage(input, 'runtime')` on every face and
+ *    every shape — one condition keeps one wording (#5240), and #18232 removed
+ *    the second wording this package used to overwrite it with once #18230 had
+ *    removed both grounds that wording gave for existing. ⛔ Pinned by
+ *    IDENTITY, not by substrings of a sentence this package owns: a substring
+ *    pin is satisfied by any private wording that quotes the contract, which is
+ *    exactly what stood here before;
+ *  - the discipline that identity alone does NOT buy — identity tracks the
+ *    shared builder wherever it goes, so what arrived, the two-bound contract,
+ *    the single-day spelling and the RUNTIME origin are asserted as well, with
+ *    the schema-origin sentence as the negative control;
  *  - ⭐ the CONTROL that the refusal did not widen — the two-element window
  *    answers byte-for-byte as it did before on each face, including the #3777
  *    half-open bare-day widening on the SQL side and the inclusive upper
@@ -48,6 +58,7 @@ import { DatasetSchema } from '@objectstack/spec/ui';
 import type { Cube } from '@objectstack/spec/data';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import type { AnalyticsQuery, AnalyticsResult, IAnalyticsService } from '@objectstack/spec/contracts';
+import { analyticsDateRangeRefusalMessage } from '@objectstack/spec/data';
 import { AnalyticsService } from '../analytics-service.js';
 import { evaluateAnalyticsQueryOverRows } from '../preview-evaluator.js';
 import { compileDataset } from '../dataset-compiler.js';
@@ -220,15 +231,42 @@ describe('#17124 — an array arm that is not a two-bound window is REFUSED on e
     expect(envelopes.size, `raised ${envelopes.size} envelopes: ${[...envelopes].join(' | ')}`).toBe(1);
   });
 
-  it('says what arrived, the two-element contract, and the single-day spelling to write', async () => {
-    const msg = String((await refusalFrom(() => objectqlBounds(['2026-01-01'])))?.message);
-    // ① what arrived — so the author can find it in the document they wrote.
-    expect(msg).toContain('["2026-01-01"]');
+  it('every face raises the SHARED wording, byte-for-byte — one condition, one wording', async () => {
+    // ⭐ #18232. The `.code`/`.status` pin above is satisfied by a face that
+    // keeps the envelope and writes its own sentence — which is precisely what
+    // this package did until #18230 gave `analyticsDateRangeRefusalMessage` its
+    // `origin` parameter and removed the two grounds the second wording named.
+    for (const [faceName, drive] of FACES) {
+      for (const [shapeName, range] of NOT_A_WINDOW) {
+        const msg = String((await refusalFrom(() => drive(range)))?.message);
+        expect(msg, `${faceName} answered ${shapeName} with a wording of its own`)
+          .toBe(analyticsDateRangeRefusalMessage(range, 'runtime'));
+      }
+    }
+  });
+
+  it('that shared wording says what is wrong, the contract, the spelling and the ORIGIN', async () => {
+    // ⚠️ Identity above tracks the shared builder wherever it goes, so it
+    // would stay green if the builder itself dropped a clause. These four are
+    // the clauses an author needs, asserted against the sentence they receive.
+    const range: readonly string[] = ['2026-01-01'];
+    const msg = String((await refusalFrom(() => objectqlBounds(range)))?.message);
+    // ① what is WRONG with what arrived — the spec describes the shape rather
+    //   than echoing the value (`describeRefusedDateRange`).
     expect(msg).toContain('1-element array');
     // ② the contract, in the spec's own words.
-    expect(msg).toContain('TWO-element array [start, end]');
-    // ③ what to do instead — the spelling every face already agrees on.
-    expect(msg).toContain('["2026-01-01", "2026-01-01"]');
+    expect(msg).toContain('two-element array [start, end]');
+    // ③ what to do instead — the single day written as both bounds.
+    expect(msg).toContain('BOTH bounds');
+    // ④ ⭐ the ORIGIN clause #18230 made a parameter: this refusal happened
+    //   PAST the schema door, so the schema-origin sentence is the one it must
+    //   NOT be — the negative control for the identity pin above.
+    expect(msg).toContain('Refused past the schema door');
+    expect(msg).not.toContain('Refused at the schema');
+    expect(msg).not.toBe(analyticsDateRangeRefusalMessage(range, 'schema'));
+    // ⑤ ⛔ and no package-private prefix: the second wording announced itself
+    //   with one, so its absence is checkable.
+    expect(msg).not.toContain('[service-analytics]');
   });
 });
 

@@ -20,7 +20,7 @@ import {
 import {
   validateStackExpressions,
   FIELD_RULE_BOUND_ROOTS,
-  FIELD_RULE_AMBIENT_ROOTS,
+  FIELD_RULE_NOWHERE_BOUND_ROOTS,
   FIELD_RULE_JUDGED_ROOTS,
 } from './validate-expressions.js';
 import type { ExprIssue } from './validate-expressions.js';
@@ -1368,9 +1368,9 @@ describe('validateStackExpressions (ADR-0032 build-time)', () => {
      * the allowlist and a hand-copied list in the test would assert the opposite
      * of what it claims — it would go green on a root the rule never saw. Since
      * #13935 the imported thing is `FIELD_RULE_JUDGED_ROOTS` rather than
-     * `SCOPE_ROOTS`: the judged vocabulary is now the WIDER "bound at some
-     * evaluation site" set, and generating from the baseline would have left
-     * exactly the ambient roots #13935 added out of the table.
+     * `SCOPE_ROOTS`: the judged vocabulary is the WIDER "this rule has a
+     * measured verdict for it" set, and generating from the baseline would have
+     * left exactly the nowhere-bound roots #13935 added out of the table.
      */
     describe('field-level `*When` roots are an ALLOWLIST over the judged vocabulary (#6713/#13935)', () => {
       /** The three the surface really binds. Everything else must be rejected. */
@@ -1431,19 +1431,27 @@ describe('validateStackExpressions (ADR-0032 build-time)', () => {
       });
 
       /**
-       * ── The AMBIENT roots (#13935) ────────────────────────────────────────
+       * ── The NOWHERE-BOUND roots (#13935, re-founded on batch #67) ─────────
        *
        * `SCOPE_ROOTS` answers "is this declared platform-wide"; this rule needs
-       * "is this bound at SOME evaluation site". They agreed for 27 roots and
-       * disagreed for `app`, which objectui's `ExpressionProvider` binds on the
-       * very surface an author migrates a rule DOWN from. Falling outside the
-       * membership test sent `app` to the bare-reference check, which
-       * prescribed `record.app` — and following THAT earns `unknown field
-       * \`app\``. The defect is WHICH diagnostic fires, so every assertion here
-       * names the specific diagnostic rather than counting that "something
-       * fired".
+       * "does this rule have a measured verdict for this root". They agreed for
+       * 27 roots and disagreed for `app`. Falling outside the membership test
+       * sent `app` to the bare-reference check, which prescribed `record.app` —
+       * and following THAT earns `unknown field \`app\``. The defect is WHICH
+       * diagnostic fires, so every assertion here names the specific diagnostic
+       * rather than counting that "something fired".
+       *
+       * ⭐ Decision batch #67 (2026-09-07) moved the GROUNDS and left the
+       * verdict standing. #13935 justified the membership by saying objectui's
+       * app-shell bound `app` at the renderer; the batch ruled the engine's
+       * declared scope to be the contract, ObjectUI aligned to it, and `app` is
+       * now bound at NO site. So the word "ambient" is false and the membership
+       * is not: emptying the constant hands the author `Write \`record.app\``
+       * again — the exact two-step wrong correction #13935 exists to remove, on
+       * the exact root. The constant keeps the root under a name that says what
+       * is now true, and the tier's message was re-founded to match.
        */
-      describe('ambient roots — bound somewhere, absent from SCOPE_ROOTS (#13935)', () => {
+      describe('nowhere-bound roots — judged here, bound at no site (#13935, batch #67)', () => {
         /**
          * The ruling, pinned as a boundary test rather than restated in prose:
          * the fix widens the vocabulary THIS package assembles and leaves
@@ -1451,13 +1459,18 @@ describe('validateStackExpressions (ADR-0032 build-time)', () => {
          * edit that "simplifies" this by adding `app` to `SCOPE_ROOTS` widens a
          * published accept set — every surface judging bare identifiers stops
          * faulting it — and goes red right here.
+         *
+         * The membership itself is pinned NON-empty for the second half of the
+         * ruling: an edit that empties the constant "because nothing is ambient
+         * any more" reads as obvious and is the regression, so it goes red here
+         * rather than only in the message assertions below.
          */
         it('does NOT widen `SCOPE_ROOTS` — the judged set is a strict superset assembled locally', () => {
-          expect([...FIELD_RULE_AMBIENT_ROOTS]).toEqual(['app']);
+          expect([...FIELD_RULE_NOWHERE_BOUND_ROOTS]).toEqual(['app']);
           // The baseline is untouched: `app` is still not declared platform-wide.
           expect(SCOPE_ROOTS).not.toContain('app');
-          // …and the judged vocabulary contains all of it, plus the ambient set.
-          expect(FIELD_RULE_JUDGED_ROOTS).toEqual([...SCOPE_ROOTS, ...FIELD_RULE_AMBIENT_ROOTS]);
+          // …and the judged vocabulary contains all of it, plus the local set.
+          expect(FIELD_RULE_JUDGED_ROOTS).toEqual([...SCOPE_ROOTS, ...FIELD_RULE_NOWHERE_BOUND_ROOTS]);
           expect(FIELD_RULE_JUDGED_ROOTS.length).toBe(SCOPE_ROOTS.length + 1);
         });
 
@@ -1476,13 +1489,55 @@ describe('validateStackExpressions (ADR-0032 build-time)', () => {
           expect(hit[0]!.message).not.toContain('Write `record.app`');
         });
 
-        it('tells `app` the truth about where it binds — ambient, renderer-only', () => {
+        it('tells `app` the truth about where it binds — nowhere, on any surface', () => {
           const hit = fieldIssues("app.locale == 'en'");
-          expect(hit[0]!.message).toContain('AMBIENT root');
+          expect(hit[0]!.message).toContain('no evaluation site binds it');
+          expect(hit[0]!.message).toContain('there is no surface to move it to');
           expect(hit[0]!.message).toContain('⛔ Do NOT write `record.app`');
-          // ⛔ NOT the general tier's claim, which is false for an ambient root
-          // in both of its clauses.
+          // ⛔ NOT the general tier's claim, which is false for this root in
+          // both of its clauses.
           expect(hit[0]!.message).not.toContain('is declared platform-wide');
+          // ⛔ And NOT the pre-batch-#67 claim. The renderer was aligned to the
+          // engine's declared scope and no longer binds this root, so pointing
+          // an author at it is the same class of error the tier exists to stop:
+          // a destination that does not bind what they wrote.
+          //
+          // These three name text nothing in this file produces any more, and
+          // that is deliberate — unlike the `current_user` discriminator below,
+          // their job is not to tell two live tiers apart but to keep a ruled-
+          // away claim from being restored, so "cannot fire today" is the
+          // success condition rather than a phantom check.
+          expect(hit[0]!.message).not.toContain('AMBIENT root');
+          expect(hit[0]!.message).not.toContain('mounted only by the renderer');
+          expect(hit[0]!.message).not.toContain('IS bound');
+        });
+
+        /**
+         * ⛔ THE ACCEPTANCE BAR, pinned on BOTH spellings an author can write.
+         *
+         * The whole point of keeping the root in the vocabulary is that no path
+         * ends at the record-qualified rewrite. `app` alone and `app.theme`
+         * take different routes through `collectCelRootIdentifiers` (a bare
+         * identifier vs a member access) and both must land on this tier, so
+         * both are asserted rather than one standing in for the other.
+         *
+         * The forbidden string is assembled with `+` for #5017's receiver scan,
+         * exactly as the rule assembles it: written whole, it reads as a member
+         * access off a `record` receiver.
+         */
+        it.each([
+          ['bare', 'app'],
+          ['bare, compared', "app == 'x'"],
+          ['dotted', "app.theme == 'dark'"],
+          ['dotted, another member', "app.locale == 'en'"],
+        ])('never prescribes the record rewrite for a %s `app` predicate', (_shape, predicate) => {
+          const hit = fieldIssues(predicate);
+          expect(hit).toHaveLength(1);
+          expect(hit[0]!.severity).toBe('error');
+          expect(hit[0]!.message).not.toContain('Write `' + 'record.app`');
+          expect(hit[0]!.message).not.toContain('bare reference');
+          // …and it is the good tier that fired, not silence.
+          expect(hit[0]!.message).toContain('no evaluation site binds it');
         });
 
         /**
@@ -1498,31 +1553,35 @@ describe('validateStackExpressions (ADR-0032 build-time)', () => {
 
         /**
          * The discriminator. `current_user` is the positive control that passed
-         * before this card and must keep passing UNCHANGED — same tier, same
-         * prescription. A repair that gave every rejected root the new ambient
+         * before #13935 and must keep passing UNCHANGED — same tier, same
+         * prescription. A repair that gave every rejected root the nowhere-bound
          * wording would satisfy the `app` assertions above and be wrong.
+         *
+         * ⚠️ The negative assertion tracks the CURRENT tier marker, not the one
+         * the tier used to carry: asserting the absence of a string this file no
+         * longer produces anywhere is a phantom check that passes forever.
          */
-        it('leaves the `current_user` control on the USER tier, not the ambient one', () => {
+        it('leaves the `current_user` control on the USER tier, not the nowhere-bound one', () => {
           const hit = fieldIssues("current_user.id == 'U1'");
           expect(hit).toHaveLength(1);
           expect(hit[0]!.message).toContain('`visibleWhen` reads `current_user`');
           expect(hit[0]!.message).toContain('move the predicate to the option\'s own');
-          expect(hit[0]!.message).not.toContain('AMBIENT root');
+          expect(hit[0]!.message).not.toContain('no evaluation site binds it');
         });
 
         /**
          * Tie-break no-regression. `SCOPE_ROOTS` is spliced in FIRST, so a
-         * predicate reading both a baseline root and an ambient one reports the
-         * baseline root — the same root, and the same message, it reported
+         * predicate reading both a baseline root and a nowhere-bound one reports
+         * the baseline root — the same root, and the same message, it reported
          * before #13935 widened the vocabulary.
          *
          * The LENGTH is the second half of this pin and it is the half that
          * moved: before #13935 this predicate earned two issues — the `ctx`
          * verdict plus a bare reference to `app` prescribing `record.app`, the
-         * exact false advice this card removes. The rule emits one verdict per
+         * exact false advice #13935 removes. The rule emits one verdict per
          * slot, so `app` waits its turn rather than being told something untrue.
          */
-        it('keeps the pre-#13935 tie-break — a baseline root still wins over an ambient one', () => {
+        it('keeps the pre-#13935 tie-break — a baseline root still wins over a nowhere-bound one', () => {
           const hit = fieldIssues("ctx.locale == 'en' && app.locale == 'en'");
           expect(hit).toHaveLength(1);
           expect(hit[0]!.message).toContain('`visibleWhen` reads `ctx`');
@@ -1534,17 +1593,17 @@ describe('validateStackExpressions (ADR-0032 build-time)', () => {
          * `app` its own correct verdict on the next run. Without this the pin
          * above would be satisfied by a repair that simply dropped the root.
          */
-        it('reports the ambient root on the next pass, once the baseline root is fixed', () => {
+        it('reports the nowhere-bound root on the next pass, once the baseline root is fixed', () => {
           const hit = fieldIssues("record.amount > 0 && app.locale == 'en'");
           expect(hit).toHaveLength(1);
           expect(hit[0]!.message).toContain('`visibleWhen` reads `app`');
         });
 
         /**
-         * Root-vs-MEMBER, at ambient width: `record.app_id` is an ordinary
-         * field name that merely starts like the new root.
+         * Root-vs-MEMBER, at judged-vocabulary width: `record.app_id` is an
+         * ordinary field name that merely starts like the judged root.
          */
-        it('does NOT trip on a `record` member merely spelled like an ambient root', () => {
+        it('does NOT trip on a `record` member merely spelled like a judged root', () => {
           const issues = validateStackExpressions({
             objects: [{
               name: 'showcase_deal',
@@ -1584,7 +1643,7 @@ describe('validateStackExpressions (ADR-0032 build-time)', () => {
 
         /**
          * …and a bare FIELD reference on a field-rule slot is untouched: no
-         * ambient root is read, so no verdict fires and nothing is suppressed.
+         * judged root is read, so no verdict fires and nothing is suppressed.
          * Guards the gate itself — a suppression keyed on the wrong condition
          * would swallow this and leave the author with silence.
          */

@@ -807,6 +807,21 @@
       "pinned": 1
     },
     {
+      "file": "packages/metadata-protocol/src/protocol.meta-types-unauthorable-columns.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.meta-types-unauthorable-columns.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.meta-types-unauthorable-columns.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/metadata-protocol/src/protocol.metadata-redaction.test.ts",
       "verb": "delete",
       "pinned": 1
@@ -2223,6 +2238,16 @@
     },
     {
       "file": "packages/plugins/plugin-approvals/src/approval-positions-name-authority.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-approvals/src/approval-tenant-positions-name-authority.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-approvals/src/approval-tenant-positions-name-authority.test.ts",
       "verb": "update",
       "pinned": 1
     },
@@ -3839,6 +3864,16 @@
     {
       "file": "packages/services/service-queue/src/db-queue-adapter.test.ts",
       "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/services/service-queue/src/db-queue-idle-backoff.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/services/service-queue/src/db-queue-idle-backoff.test.ts",
+      "verb": "update",
       "pinned": 1
     },
     {

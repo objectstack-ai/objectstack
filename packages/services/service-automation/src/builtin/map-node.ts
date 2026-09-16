@@ -148,6 +148,16 @@ export function registerMapNode(engine: AutomationEngine, ctx: PluginContext): v
       let selected = 0;
       let acted = 0;
       let unmeasured = false;
+      // #15617 — the contained failures of the items that COMPLETED during this
+      // entry, on their own rule (see the three exits below). `tracked` is the
+      // presence bit the other totals do not need: `ExecutionStepMetrics`
+      // declares an absent `failures` as "delegated nothing, or the child
+      // tracked no count", never zero, so an entry that ran no item — or only
+      // items recorded before the count existed — reports nothing here rather
+      // than a `0` that would claim a measurement nobody took.
+      let failures = 0;
+      let failuresTracked = false;
+      const rolledFailures = (): { failures?: number } => (failuresTracked ? { failures } : {});
 
       // Drive items in order. Synchronous items advance inline; a pausing item
       // suspends the run and is resumed via re-entry.
@@ -187,7 +197,11 @@ export function registerMapNode(engine: AutomationEngine, ctx: PluginContext): v
           variables.set(stateKey, state);
           return {
             success: true, suspend: true, correlation: `map:${child.runId}`,
-            metrics: { selected, acted, ...(unmeasured ? { unmeasuredEffect: true } : {}) },
+            // The pausing item has done nothing yet; what rides out here is what
+            // the items BEFORE it contained. The engine credits the pausing
+            // item's own totals to this same step when its child run bubbles
+            // back (AutomationEngine.creditChildRun).
+            metrics: { selected, acted, ...(unmeasured ? { unmeasuredEffect: true } : {}), ...rolledFailures() },
           };
         }
         if (!child.success) {
@@ -195,11 +209,20 @@ export function registerMapNode(engine: AutomationEngine, ctx: PluginContext): v
             success: false,
             error: `map '${node.id}': item ${idx} (subflow '${flowName}') failed: ${child.error ?? 'unknown error'}`,
             // Items that already succeeded wrote real rows; a later item's
-            // failure must not erase them from the run's totals.
+            // failure must not erase them from the run's totals — and the
+            // failing item's own writes count too, for the same reason.
+            //
+            // ⛔ `failures` is the one total that does NOT take the failing
+            // item's contribution (#15617): a child that FAILED is THIS step's
+            // own failure, counted once through `nodes[].failures`, and its own
+            // `failed` — contained and fatal alike — stays on its run row.
+            // Rolling it up would count one loss twice. The items that already
+            // completed keep theirs, which is what the accumulator holds.
             metrics: {
               selected: selected + (child.summary?.selected ?? 0),
               acted: acted + (child.summary?.acted ?? 0),
               ...(unmeasured || child.summary?.unmeasured ? { unmeasuredEffect: true } : {}),
+              ...rolledFailures(),
             },
           };
         }
@@ -211,6 +234,13 @@ export function registerMapNode(engine: AutomationEngine, ctx: PluginContext): v
         // One uncountable effect anywhere in the batch makes the batch's
         // `acted` incomplete — the flag rides out with this entry's metrics.
         if (child.summary?.unmeasured) unmeasured = true;
+        // #15617 — this item went on and contained its failures, so they are
+        // this run's to answer for. `undefined` is "the child tracked no
+        // count", so it neither adds nor flips the presence bit.
+        if (child.summary?.failed !== undefined) {
+          failures += child.summary.failed;
+          failuresTracked = true;
+        }
       }
 
       // All items done — the collection is exhausted, so this is the node's
@@ -240,7 +270,7 @@ export function registerMapNode(engine: AutomationEngine, ctx: PluginContext): v
       return {
         success: true,
         output: { results: state.results, count: state.results.length },
-        metrics: { selected, acted, ...(unmeasured ? { unmeasuredEffect: true } : {}) },
+        metrics: { selected, acted, ...(unmeasured ? { unmeasuredEffect: true } : {}), ...rolledFailures() },
       };
     },
   });

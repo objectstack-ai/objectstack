@@ -4,6 +4,7 @@ import type { PluginContext } from '@objectstack/core';
 import { defineActionDescriptor } from '@objectstack/spec/automation';
 import type { IJobService, JobRunOutcome } from '@objectstack/spec/contracts';
 import type { AutomationEngine, SuspendedRunStore } from '../engine.js';
+import { refuseNode } from '../guard-refusal.js';
 import { describeThrownForLog, type ThrownCauseMeta } from '../thrown-cause-diagnostics.js';
 
 /**
@@ -230,10 +231,57 @@ export function registerWaitNode(engine: AutomationEngine, ctx: PluginContext): 
       // including the `registerFlow` rehydration seam, so there is nothing left
       // to fall back to here (PD #12: no consumer-side fallbacks).
       //
-      // The `?? 'timer'` below is NOT such a fallback: `waitEventConfig` is
-      // itself optional, and a wait node without one is a valid timer wait.
-      const wec = (node.waitEventConfig ?? {}) as Record<string, unknown>;
-      const eventType = String(wec.eventType ?? 'timer');
+      // ── REVERSAL (#17928) ────────────────────────────────────────────────
+      // Until this change the two lines below read `(node.waitEventConfig ?? {})`
+      // and `String(wec.eventType ?? 'timer')`, under a comment that declared
+      // the second one intentional: "`waitEventConfig` is itself optional, and
+      // a wait node without one is a VALID TIMER WAIT". It was not valid. A
+      // block-less node took that default into the timer branch, where the
+      // absent `timerDuration` computed no deadline — so no wake-up job was
+      // armed (measured with a job service ANSWERING), no `waitUntil` was
+      // persisted for a later boot's re-arm pass, not one log line was emitted
+      // at any level, and the node returned `{ success: true, suspend: true }`.
+      // A run parked forever, reporting success, from the state a freshly
+      // created node is in (PR #17937's `absent-config-node-characterization.test.ts`
+      // is that measurement; this file's own reversal is pinned there now).
+      //
+      // The contract now refuses the shape at parse (`FlowNodeSchema` requires
+      // the block on a `wait` node, and `timerDuration` under
+      // `eventType: 'timer'`), so this guard is the second door, for a document
+      // that reaches `execute` without passing the first: a stored
+      // pre-migration row rehydrated by a path that skipped the parse, or an
+      // executor invoked directly. Per the maintainer's ruling on defaults
+      // (decision batch #127 item 5) a required key has no "unset behaves as",
+      // so there is nothing left for this seam to assume — and PD #12 forbids
+      // re-inventing the tolerance in the consumer once the producer refuses
+      // it. Refuse LOUDLY instead: a `guard` failure, because the metadata is
+      // wrong and re-running changes nothing, so a `fault` edge must not be
+      // able to route this into a handler that reports success.
+      const wec = node.waitEventConfig as Record<string, unknown> | undefined;
+      const declaredEventType = typeof wec?.eventType === 'string' ? wec.eventType.trim() : '';
+      if (!wec || declaredEventType === '') {
+        // Logged as well as returned, because the defect this closes was
+        // SILENCE: the run's own `status=failed` summary line names no node and
+        // no cause, and the step log is not where an operator looks first. At
+        // `warn`, not `error`, by AGENTS.md's degradation rule — the failure is
+        // handed to the caller (the run fails and says so), so nothing looks
+        // normal from the outside and this is not a durability degradation.
+        ctx.logger.warn(
+          `[wait] node '${node.id}': no \`waitEventConfig\` block${wec ? ' `eventType`' : ''} — refusing to run. ` +
+            `A wait node must say what resumes it; this one would have parked the run forever while reporting ` +
+            `success, which is why the contract now refuses the shape at parse. This document predates that ` +
+            `refusal: edit the node to declare its resume condition (\`waitEventConfig: { eventType: 'timer', ` +
+            `timerDuration: 'PT1H' }\`, or an \`eventType\` of 'signal' / 'webhook' / 'manual' / 'condition' with ` +
+            `a \`signalName\`), then re-publish the flow. \`os migrate meta --from 17\` lists the nodes to edit.`,
+        );
+        return refuseNode(
+          `wait '${node.id}': no waitEventConfig${wec ? '.eventType' : ''} — a wait node must declare what resumes it ` +
+            `(eventType: 'timer' with a timerDuration, or 'signal'/'webhook'/'manual'/'condition' with a signalName). ` +
+            `This is metadata, so re-running changes nothing: edit the node and re-publish the flow. A node in this ` +
+            `state used to suspend the run forever and report success.`,
+        );
+      }
+      const eventType = declaredEventType;
       const runId = variables.get('$runId');
 
       if (eventType === 'timer') {
@@ -243,15 +291,81 @@ export function registerWaitNode(engine: AutomationEngine, ctx: PluginContext): 
         // rewrites it to `timerDuration`, so there is one spelling left.
         const durationMs = parseIsoDuration(wec.timerDuration);
 
+        // ── REVERSAL (#18179) ──────────────────────────────────────
+        // The #17928 hole, reached through a different door. That card closed the
+        // ABSENT block, and the contract now requires `waitEventConfig` and, under
+        // `eventType: 'timer'`, a non-blank `timerDuration` (`flow.zod.ts`). What a
+        // contract cannot do is evaluate the string: `timerDuration` is
+        // `z.string()`, so `'not-a-duration'`, `'P'`, `'PT0S'` and `'0'` are all
+        // saveable documents — and every one of them makes `parseIsoDuration`
+        // answer `undefined`, exactly as the absent key did.
+        //
+        // Until this change that answer fell through the branch below with `at`
+        // undefined, and the result was measurably WORSE than the absent-block
+        // case it mirrors: no deadline computed, no `waitUntil` persisted (so the
+        // cold-boot re-arm pass, which reads exactly that key, could never see the
+        // run), no job armed — and, with a job service ANSWERING, not one log line
+        // at any level, because the `!job` fallback below fires only when the job
+        // service is MISSING. The node then returned `{ success: true, suspend:
+        // true }`: un-refused, un-armed, un-persisted and un-logged, while
+        // reporting success.
+        //
+        // Same remedy as #17928 and for the same reason: the metadata is wrong and
+        // re-running changes nothing, so this is a `guard` refusal — a `fault` edge
+        // must not be able to route a metadata defect into a handler that then
+        // reports success — and it LOGS, because the defect being closed is
+        // silence. ⛔ A warning alone does not discharge it: warning and still
+        // suspending leaves the run parked forever, which is the whole defect.
+        //
+        // Zero and negative are the same verdict, deliberately not a separate one:
+        // `parseIsoDuration` already answers `undefined` for them, and `'PT0S'` is
+        // not a short wait — it is a deadline already past, which parks exactly as
+        // permanently as an unparseable string.
+        if (durationMs === undefined || !(durationMs > 0)) {
+          // The authored value is quoted through `JSON.stringify`, never spliced
+          // raw: it is FOREIGN text arriving on a log record, and a value carrying
+          // a newline would split this alarm into physical lines of which only the
+          // first carries its level — the #5737 hazard, from the authoring side.
+          const declared = JSON.stringify(wec.timerDuration) ?? String(wec.timerDuration);
+          // `warn`, not `error`, by AGENTS.md's degradation rule and for the same
+          // reason the block-less refusal above is `warn`: the failure is handed to
+          // the CALLER (the run fails and says so), so nothing looks normal from
+          // the outside and this is not a durability degradation.
+          ctx.logger.warn(
+            `[wait] node '${node.id}': \`timerDuration\` ${declared} is not a usable wait — refusing to run. ` +
+              `The key is a string, so this document saves, but it yields no duration: the node would have armed no ` +
+              `timer, persisted no deadline for a later boot's re-arm pass, and parked the run forever while ` +
+              `reporting success. Write an ISO-8601 duration (\`timerDuration: 'PT1H'\`, \`'P3D'\`, \`'PT90M'\`) or a ` +
+              `QUOTED positive millisecond count (\`'60000'\`), then re-publish the flow. For a pause with no ` +
+              `deadline, declare an \`eventType\` that names its resumer instead ('signal' / 'webhook' / 'manual' / ` +
+              `'condition').`,
+          );
+          return refuseNode(
+            `wait '${node.id}': timerDuration ${declared} is not a usable wait — it yields no duration, so no timer ` +
+              `can be armed and no deadline persisted. This is metadata, so re-running changes nothing: write an ` +
+              `ISO-8601 duration ('PT1H', 'P3D') or a quoted positive millisecond count ('60000'), then re-publish ` +
+              `the flow. A node in this state used to suspend the run forever and report success.`,
+          );
+        }
+
         // Persist the wake deadline as node output: the engine writes output
         // to variables (`<nodeId>.waitUntil`) *before* snapshotting the
         // suspended run, so a cold-booted kernel can re-arm the timer from the
         // durable store ({@link rearmSuspendedWaitTimers}).
-        const at = durationMs && durationMs > 0 ? new Date(Date.now() + durationMs).toISOString() : undefined;
-        const output = at ? { waitUntil: at } : undefined;
+        //
+        // Unconditional since #18179, and that is the guard above paying off: past
+        // it a deadline ALWAYS exists. The old spread (`at ? { output: … } : {}`)
+        // was there so `output` would be ABSENT rather than a present key holding
+        // `undefined` when no deadline was computed — `toStrictEqual` and
+        // `Object.keys` tell those apart, a JSON dump does not. That distinction
+        // still matters and is still pinned; what is gone is the arm that reached
+        // it. The two degraded returns below keep carrying the deadline: they lose
+        // the auto-resume, never the `waitUntil` a later boot re-arms from.
+        const at = new Date(Date.now() + durationMs).toISOString();
+        const output = { output: { waitUntil: at } };
 
         const job = getJobService();
-        if (job && runId != null && at) {
+        if (job && runId != null) {
           const jobName = waitTimerJobName(String(runId), node.id);
           try {
             await job.schedule(
@@ -259,7 +373,7 @@ export function registerWaitNode(engine: AutomationEngine, ctx: PluginContext): 
               { type: 'once', at },
               makeWaitTimerJobHandler(engine, job, String(runId), jobName, ctx.logger),
             );
-            return { success: true, suspend: true, correlation: jobName, output };
+            return { success: true, suspend: true, correlation: jobName, ...output };
           } catch (err) {
             // #5737 — `warn(message, meta?)`: the `Logger` contract has no
             // `Error` slot below `error`, so the job service's own failure goes
@@ -281,7 +395,7 @@ export function registerWaitNode(engine: AutomationEngine, ctx: PluginContext): 
         }
         // Degrade: still suspend; resumption comes from an external resume()
         // (or a later boot's re-arm pass, when the deadline was persisted).
-        return { success: true, suspend: true, correlation: `timer:${node.id}`, output };
+        return { success: true, suspend: true, correlation: `timer:${node.id}`, ...output };
       }
 
       // signal / webhook / manual / condition — suspend; an external producer

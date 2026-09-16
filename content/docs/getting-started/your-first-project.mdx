@@ -130,6 +130,37 @@ export default defineStack({
 });
 ```
 
+<Callout type="warn">
+**The config file is a module, and the whole module is the stack.** What
+`defineStack()` returns is the *base*; every **named export** of
+`objectstack.config.ts` is then merged onto it as a **top-level stack key**,
+under the export's own name. That is how the `onEnable` and `functions` hooks
+are authored — and it is why a helper exported beside the stack is not read as a
+helper:
+
+```typescript title="objectstack.config.ts"
+export default defineStack({ /* … */ });
+
+// ⛔ Read as a top-level stack key called `collectPackageDirs`.
+//    `os build` refuses it: Unrecognized key(s) on this stack definition.
+export const collectPackageDirs = () => [ /* … */ ];
+```
+
+A named export is legal **only when its name is a key the stack schema
+declares**. Keep helpers in a sibling module — `objectstack.composition.ts`,
+say — and import them here. Two further shapes worth recognising, neither of
+them a pattern to rely on:
+
+- a named export whose name **is** a declared stack key that the default export
+  does not carry is merged in and accepted — that is the `onEnable` /
+  `functions` path;
+- a named export whose name the default export **already carries** is dropped
+  **silently**, and the build still succeeds. A second
+  `export const objects = [...]` beside `defineStack({ objects })` is therefore
+  a value nothing reads. Write every stack key inside `defineStack()`.
+
+</Callout>
+
 The REST API needs no configuration — it is on by default for every object
 with `apiEnabled`. The `plugins:` array ships the three **generic connector
 executors**, so you can integrate an external REST / OpenAPI / MCP service as

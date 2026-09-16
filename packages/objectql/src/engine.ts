@@ -4100,14 +4100,27 @@ export class ObjectQL implements IObjectQLEngine {
    * triggered it must reach the audit writer WITHOUT appearing in `session` —
    * where every caller-gating hook would read them as the caller. Attribution
    * here, authorization in `session`/`isSystem`, never the two mixed.
+   *
+   * `performedByClientId` rides it for the THIRD time on the same reasoning
+   * (#17022, ADR-0090 D10 rule 4): an MCP OAuth agent's write authorizes as
+   * the human it acts for, so the acting client can only reach the audit
+   * writer through a channel that is not `session` — putting it there would
+   * make every caller-gating hook read the client as the caller, which is the
+   * opposite of what the delegation means. This copy list is the whole reason
+   * the field is not inert: `HookContext` is built from a CLOSED literal whose
+   * `provenance` value is exactly what this function returns, so a key
+   * declared on `hook.zod.ts` and missing here is declared and never
+   * populated (ADR-0049).
    */
   private buildProvenance(execCtx?: ExecutionContext): HookContext['provenance'] {
     const flowRunId = (execCtx as any)?.flowRunId;
     const attributedUserId = (execCtx as any)?.attributedUserId;
-    if (!flowRunId && !attributedUserId) return undefined;
+    const performedByClientId = (execCtx as any)?.performedBy?.clientId;
+    if (!flowRunId && !attributedUserId && !performedByClientId) return undefined;
     return {
       ...(flowRunId ? { flowRunId: String(flowRunId) } : {}),
       ...(attributedUserId ? { attributedUserId: String(attributedUserId) } : {}),
+      ...(performedByClientId ? { performedByClientId: String(performedByClientId) } : {}),
     };
   }
 

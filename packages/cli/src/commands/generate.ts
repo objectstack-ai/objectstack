@@ -26,10 +26,20 @@ import {
   // four helpers beside it — never transcribed — so a type added to the spec is
   // admitted by these generators on the same commit.
   FieldType,
+  // [#18199] THE one definition of "is this field multi-valued" (maintainer
+  // ruling 2026-09-13, decision batch #128 item 5, option 1′). Imported for
+  // exactly the reason the block above gives — never transcribed — and read
+  // through {@link declaredMultiValued}, the single local seam every site in
+  // this file asks.
+  isMultiValueField,
   isNowDefaultToken,
   isRuntimeDefaultToken,
   isTenancyDisabled,
   isUniqueDeclared,
+  // [#18199] Not a second answer to "is this multi-valued": the roster states
+  // which types {@link FIELD_TYPE_MAP} has ALREADY spelled as an array, so the
+  // one predicate's verdict is not applied to that table twice.
+  MULTI_OPTION_TYPES,
   numericColumnFor,
   // #16726 — the name gate below. IMPORTED for the same reason as the five
   // above: it asks the schema whether a name is legal instead of restating
@@ -636,9 +646,55 @@ const FIELD_TYPE_MAP: Record<string, string> = {
   address: 'Data.AddressValue',
 } satisfies Record<FieldType, string>;
 
-function fieldTypeToTs(fieldType: string, multiple?: boolean): string {
+/**
+ * [#18199] Is this field MULTI-VALUED — the one question, asked of the one
+ * predicate `@objectstack/spec` publishes.
+ *
+ * Maintainer ruling 2026-09-13 (decision batch #128 item 5, option 1′): there
+ * is ONE definition of "multi-valued", `isMultiValueField`, and storage follows
+ * it. #17469 moved `driver-sql` onto it — `createColumn` short-circuits on
+ * `isMultiValuedColumn(...)` above its own `switch (type)`, `isJsonField` is
+ * `JSON_COLUMN_TYPES.has(type) || isMultiValuedColumn(type, field)`, and
+ * `schema-drift`'s `fieldHasColumn` opens with `isMultiValueField(...)` — and
+ * left this file behind on a raw `field.multiple` read. That gap was measurable:
+ * a `text` field flagged `multiple: true` got JSONB from `os generate migration`
+ * and a varchar from the driver that actually creates the table, which is #14829
+ * ("the platform and the GENERATED DDL as two lists") in reverse.
+ *
+ * Takes the RESOLVED type rather than reading `field.type`, for the same reason
+ * `isMultiValuedColumn` does: every caller here has already resolved it through
+ * {@link declaredFieldType}, and two spellings of that resolution is how the
+ * drift this closes started.
+ *
+ * ⛔ The predicate is called, never re-spelled. `MULTI_CAPABLE_TYPES` /
+ * `MULTI_OPTION_TYPES` membership tests written out here would be a second
+ * answer to a question the ruling gave exactly one.
+ */
+function declaredMultiValued(fieldType: string, field: unknown): boolean {
+  const declaring = field as { multiple?: unknown } | null | undefined;
+  return isMultiValueField({ type: fieldType, multiple: declaring?.multiple === true });
+}
+
+/**
+ * The generated TypeScript property type for one field.
+ *
+ * [#18199] The second argument is {@link declaredMultiValued}'s verdict, not a
+ * raw `field.multiple`. It is spelled `multiValued` rather than `multiple` so a
+ * future caller cannot hand it the flag again without noticing.
+ *
+ * ⚠️ {@link FIELD_TYPE_MAP}'s entry is the WHOLE value type, not an element
+ * type — the inherently-multi option types already read `string[]` there, and
+ * `isMultiValueField` answers true for them with or without the flag. Wrapping
+ * again would emit `string[][]` for a `multiselect`, which `FieldSchema`
+ * accepts flagged (the flag is REDUNDANT on those types, never refused). So the
+ * roster is consulted for what the table has already said, ⛔ not as a second
+ * multi-value predicate. `vector` / `repeater` are array entries too and need
+ * no such guard: the one predicate answers false for both.
+ */
+function fieldTypeToTs(fieldType: string, multiValued: boolean): string {
   const base = FIELD_TYPE_MAP[fieldType] || 'unknown';
-  return multiple ? `${base}[]` : base;
+  if (!multiValued) return base;
+  return MULTI_OPTION_TYPES.has(fieldType) ? base : `${base}[]`;
 }
 
 /** [#16319] The closed `FieldType` vocabulary as a Set — built once, off the spec enum. */
@@ -754,7 +810,8 @@ export function generateTypesFromConfig(config: Record<string, unknown>): string
     for (const [fieldName, fieldDef] of Object.entries(fields)) {
       // [#16319] Was `String(fieldDef.type || 'text')`. See {@link declaredFieldType}.
       const fType = declaredFieldType(name, fieldName, fieldDef);
-      const tsType = fieldTypeToTs(fType, !!fieldDef.multiple);
+      // [#18199] Was `!!fieldDef.multiple`. See {@link declaredMultiValued}.
+      const tsType = fieldTypeToTs(fType, declaredMultiValued(fType, fieldDef));
       const required = fieldDef.required ? '' : '?';
       if (fieldDef.label) {
         lines.push(`  /** ${fieldDef.label} */`);
@@ -1200,7 +1257,8 @@ function generateClientFromConfig(config: Record<string, unknown>): string {
     for (const [fieldName, fieldDef] of Object.entries(fields)) {
       // [#16319] Was `String(fieldDef.type || 'text')`. See {@link declaredFieldType}.
       const fType = declaredFieldType(name, fieldName, fieldDef);
-      const tsType = fieldTypeToTs(fType, !!fieldDef.multiple);
+      // [#18199] Was `!!fieldDef.multiple`. See {@link declaredMultiValued}.
+      const tsType = fieldTypeToTs(fType, declaredMultiValued(fType, fieldDef));
       const required = fieldDef.required ? '' : '?';
       lines.push(`  ${fieldName}${required}: ${tsType};`);
     }
@@ -1328,9 +1386,10 @@ async function runClientGeneration(configPath: string | undefined, flags: { outp
  * PRE-EXISTING entry byte-for-byte alone. This is the third direction: entries
  * that existed, keyed on a real member, and described something the platform
  * does not do. Each is now the platform's own answer, read from
- * `packages/drivers/driver-sql/src/sql-driver.ts` — ⛔ the DRIVER is the
- * authority for which column exists, never the spec's `isMultiValueField`
- * VALUE predicate (see {@link fieldTypeToSql}):
+ * `packages/drivers/driver-sql/src/sql-driver.ts` — the DRIVER is the authority
+ * for which column exists, and since #17469 the driver derives its multi-value
+ * half from the spec's `isMultiValueField`, so asking that predicate here IS
+ * asking the driver's own rule (see {@link declaredMultiValued}):
  *
  *   `autonumber`  SERIAL      → VARCHAR(255). The runtime issues a RENDERED
  *                 string (prefix + counter + suffix); `createColumn`'s
@@ -1682,9 +1741,14 @@ function declaredNotNull(field: unknown): boolean {
  *
  * ## What this deliberately does NOT emit, each because the driver does not
  *
- * - **A `multiple: true` field.** `createColumn` short-circuits on the flag and
- *   returns before both the nullability line and this one, so a multi-value
- *   column carries no DEFAULT on the platform either.
+ * - **A MULTI-VALUE field.** `createColumn` short-circuits on the multi-value
+ *   question and returns before both the nullability line and this one, so a
+ *   multi-value column carries no DEFAULT on the platform either. [#18199] The
+ *   question is {@link declaredMultiValued}, not a raw `field.multiple`: the
+ *   driver's own short-circuit became `isMultiValuedColumn(...)` in #17469, so
+ *   a `text` field flagged `multiple: true` is an ordinary column there and
+ *   reaches the default question — reading the flag raw here withheld a DEFAULT
+ *   the platform emits.
  * - **An option-level `default: true`** on a `select`. `applyDeclaredColumnDefault`
  *   states at length why that stays out of DDL (one resolver owns the precedence;
  *   the `multiple` shape has no scalar DDL form; a retrofit would divide
@@ -1703,7 +1767,8 @@ type DeclaredColumnDefault =
 
 function declaredColumnDefault(field: unknown, type: string): DeclaredColumnDefault {
   const declaring = field as { defaultValue?: unknown; multiple?: unknown } | undefined;
-  if (declaring?.multiple) return { kind: 'none' };
+  // [#18199] Was `if (declaring?.multiple)`. See {@link declaredMultiValued}.
+  if (declaredMultiValued(type, declaring)) return { kind: 'none' };
   const dv = declaring?.defaultValue;
   if (dv === undefined || dv === null) return { kind: 'none' };
   if (isNowDefaultToken(dv)) {
@@ -2271,32 +2336,39 @@ function partitionUniqueIndexes(
 /**
  * The column one field takes.
  *
- * `multiple` is answered FIRST, before the type is looked up at all, because
+ * MULTI-VALUE is answered FIRST, before the type is looked up at all, because
  * that is what the platform does. `SqlDriver.createColumn` short-circuits on
- * `field.multiple` ABOVE its own `switch (type)`; `isJsonField` is
- * `JSON_COLUMN_TYPES.has(type) || !!field.multiple`; and `fieldHasColumn`
- * opens with `if (field?.multiple) return true` under the comment "Mirrors
- * `SqlDriver.createColumn` exactly ... including `multiple` (a JSON column)".
- * Three statements of one rule: a flagged field is a JSON column whatever its
- * element type would have been, so the element type gets no vote here either
- * (#14829). Before this, one authored `Field.lookup({ multiple: true })`
- * produced `account?: string[]` from `os generate types` and a scalar
- * `VARCHAR(36)` column from this generator, in the same run.
+ * `isMultiValuedColumn(...)` ABOVE its own `switch (type)`; `isJsonField` is
+ * `JSON_COLUMN_TYPES.has(type) || isMultiValuedColumn(type, field)`; and
+ * `fieldHasColumn` opens with `if (isMultiValueField(...)) return true` under
+ * the comment "Mirrors `SqlDriver.createColumn` exactly ... including
+ * `multiple` (a JSON column)". Three statements of one rule: a multi-value
+ * field is a JSON column whatever its element type would have been, so the
+ * element type gets no vote here either (#14829). Before this, one authored
+ * `Field.lookup({ multiple: true })` produced `account?: string[]` from
+ * `os generate types` and a scalar `VARCHAR(36)` column from this generator, in
+ * the same run.
  *
- * WARNING: this is deliberately NOT the spec's `isMultiValueField`. That is the
- * ADR-0104 D1 VALUE contract ("is the persisted value an array"), gated on
- * `MULTI_CAPABLE_TYPES`; asking it here would answer VARCHAR for a `text`
- * field the driver gives a JSON column - the same drift one notch narrower.
- * The column question belongs to the driver, and the driver's answer is the
- * flag alone. `generate-multiple-json-column.pin.test.ts` pins both halves.
+ * ⭐ [#18199] THE QUESTION IS THE SPEC'S `isMultiValueField`, and this paragraph
+ * is the record of the reversal. It used to open "WARNING: this is deliberately
+ * NOT the spec's `isMultiValueField`", on the ground that the column question
+ * belongs to the driver and the driver's answer was the flag alone. The second
+ * half of that stopped being true: the maintainer ruling of 2026-09-13
+ * (decision batch #128 item 5, option 1′) gives "multi-valued" ONE definition
+ * and #17469 derived all three driver sites above from it. So the premise held
+ * and the conclusion inverted — the column question still belongs to the
+ * driver, and the driver now answers it with the spec predicate. Asking the
+ * flag raw here is what made `os generate migration` emit JSONB for a `text`
+ * field the driver gives a varchar. Asked through {@link declaredMultiValued}.
+ * `generate-multiple-json-column.pin.test.ts` pins both halves.
  *
  * The JSON spelling is READ from this table's own `json` entry rather than
  * restated, so the two cannot drift about what a JSON column is spelled here.
  *
  * `null` means NO COLUMN — the answer for a virtual field type (#14828). It is
  * the table's own entry, not a second decision here, and it composes in the
- * driver's order: `multiple` still wins first, so a flagged field of any type
- * is a JSON column and never reaches the lookup at all.
+ * driver's order: multi-value still wins first, so a multi-value field of any
+ * type is a JSON column and never reaches the lookup at all.
  *
  * ⚠️ The lookup is by OWN-PROPERTY PRESENCE, not by the value being falsy or
  * nullish, because `null` is a meaningful ANSWER and every other spelling
@@ -2327,12 +2399,15 @@ function partitionUniqueIndexes(
  * declaration produce two different columns, and refusing is the ruled answer.
  */
 function fieldTypeToSql(
+  // [#18199] `multiValued` is {@link declaredMultiValued}'s verdict, not a raw
+  // `field.multiple`; the rename is so a future caller cannot hand it the flag
+  // again without noticing.
   fieldType: string,
-  multiple?: boolean,
+  multiValued: boolean,
   maxLength?: unknown,
   keyed?: boolean,
 ): string | null {
-  if (multiple) return FIELD_TYPE_SQL_MAP.json;
+  if (multiValued) return FIELD_TYPE_SQL_MAP.json;
   const base = Object.prototype.hasOwnProperty.call(FIELD_TYPE_SQL_MAP, fieldType)
     ? FIELD_TYPE_SQL_MAP[fieldType]
     : 'TEXT';
@@ -2440,7 +2515,8 @@ export function generateMigrationSql(config: Record<string, unknown>): string {
       const fType = declaredFieldType(tableName, fieldName, fieldDef);
       const sqlType = fieldTypeToSql(
         fType,
-        !!fieldDef.multiple,
+        // [#18199] Was `!!fieldDef.multiple`. See {@link declaredMultiValued}.
+        declaredMultiValued(fType, fieldDef),
         fieldDef.maxLength,
         keyColumns.has(fieldName),
       );
@@ -2606,15 +2682,16 @@ export function generateMigrationTs(config: Record<string, unknown>): string {
       // name is kept so the emitter below reads unchanged.
       const required = declaredNotNull(fieldDef) ? '.notNullable()' : '.nullable()';
 
-      // #14829 - `multiple` before the type, exactly as `SqlDriver.createColumn`
-      // does it: the driver short-circuits on the flag above its own per-type
-      // switch, so a flagged field is a JSON column whatever its element type
-      // would have been. Emitted here rather than as a switch arm because the
-      // switch cases on the TYPE and the type has no vote in this decision;
-      // the spelling is this generator's own JSON arm, stated once more.
-      // See `fieldTypeToSql` for why the authority is the driver's flag rule
-      // and not the spec's `isMultiValueField` value predicate.
-      if (fieldDef.multiple) {
+      // #14829 - MULTI-VALUE before the type, exactly as `SqlDriver.createColumn`
+      // does it: the driver short-circuits above its own per-type switch, so a
+      // multi-value field is a JSON column whatever its element type would have
+      // been. Emitted here rather than as a switch arm because the switch cases
+      // on the TYPE and the type has no vote in this decision; the spelling is
+      // this generator's own JSON arm, stated once more.
+      // [#18199] The question is {@link declaredMultiValued} — the spec's
+      // `isMultiValueField`, which is what the driver's own short-circuit
+      // became in #17469. See `fieldTypeToSql` for the reversal in full.
+      if (declaredMultiValued(fType, fieldDef)) {
         lines.push(`    table.jsonb('${fieldName}')${required};`);
         emittedColumns.add(fieldName);
         continue;

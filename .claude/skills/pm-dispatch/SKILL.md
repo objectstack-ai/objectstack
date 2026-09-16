@@ -57,7 +57,7 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 | `director` | 以项目总监席身份运行(人工召唤;四职见 升级与决策 节与 `references/lanes/director.md`) | — |
 | `label:<name>` | backlog 过滤标签;`label:all` = 全部 open 未认领 | `pm:queue` |
 | `repo:<owner/name>` | 扫哪个仓的 backlog(单 issue 的落地仓看它自己的 `repo:*` 标签) | `objectstack-ai/objectstack` |
-| `batch:<n>` | 同时在飞的 dev 上限 | 默认 `2`;`n` 的维护者天花板 `5` |
+| `batch:<n>` | 同时在飞的 dev 上限 | 默认 `3`;`n` 的维护者天花板 `5` |
 | `rounds:<n>` | 跑 N 轮后停 | 队列清空为止 |
 | `mode:subagent` \| `mode:cloud` | 派发后端 | 按卡分流:S+M ⇒ `subagent`,`cloud` 只留 L/XL 等保留面 |
 | `#12 #34 …` | 显式 issue 清单,整体覆盖标签查询 | — |
@@ -86,14 +86,16 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 - 收班简报是前任不再写的显式声明,是释放标记不是锁:简报即最新事件 ⇒ 立即坐席。
 - 滞后标题是进场顺手修的半状态,⛔ 不是阻塞;简报点名的留守尾巴作围栏。
 - 维护者明示召唤是仲裁:有简报径直坐席;无简报才走保守确认,确认终止即坐席。
-- 互斥清 ⇒ fetch 后读三章程文件(本文、core-rules、本席章程)在 `origin/main` 的最新触碰 sha。
+- 互斥清 ⇒ fetch 后三章程(本文、core-rules、本席章程)最新触碰 sha 走 `git-history.mjs touch`。
 - 异于上一开轮标记即先重读;留开轮标记(session ID + fire 时刻 + 该触碰,注明重读)再跑轮。
+- 同读 harness 载入面 `.claude/{settings.json,agents/*.md,hooks/*}` 的最新触碰是否已在共享检出 HEAD。
+- 否 ⇒ 收班、换新会话再派,⛔ 不推进共享检出;读数走 `scripts/pm/check-harness-current.mjs`。
 
 ## 全体座位的不变量
 
 - 状态只经 GitHub 标签、assignee、正文行与 `pm:seat` 座位贴读写;循环须能从全新会话恢复。
-- 用户账号仅三用:assignee、授权批准、维护者亲手;⛔ 席位与 dev 永不以用户账号写内容。
-- 内容恒经 REST 代理(`claude[bot]`);批准账号永不跑席位、不作席位 claude.ai 的关联用户。
+- 用户账号仅三用:assignee、授权批准、维护者亲手;批准账号永不跑席位或作其关联用户。
+- 内容写只走 REST 代理,⛔ 无 MCP 写;`user.login` 记令牌不记席位,归属 = 文本里的 session ID。
 - GitHub 上一切新内容用英文;中文只留四通道(维护者速读、轮报、裁决引文、四维分析)。
 - 裁决引文照抄不译;四维中文只管新记录,存量英文块 ⛔ 不迁移;存量中文 ⛔ 不追溯改写。
 - 一座位一车道双射:域 X 谁管、PM Y 管什么,各恰好一个答案。
@@ -158,8 +160,8 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 - GitHub API 与工具行为的实测事实表在 `references/platform-readings.md`,做对应操作的那一刻查阅。
 - 核验 main 用 `origin/main`:先 fetch,再 `git grep PAT origin/main -- PATHS` 或 `git show origin/main:PATH`。
 - ⛔ 不用共享检出的工作树核验 main,它的 HEAD 由别的 agent 摆布。
-- 零命中须用确定存在的邻近词反查;控制词须与主张同主体,否则该零作废,不是阴性。
-- 同主体 = 同语料、同路径形、同包界、同引法、同失效形态:跨行短语配跨行控制词。
+- 零命中须配同主体必中词,否则该零作废;同主体 = 同语料/路径形/包界/引法/失效形态。
+- 同仪器的控制词双零是仪器坏,⛔ 不读作缺席:换法重画再报;哑火仪器与干净结果同值。
 - 仓不可达 ⛔ 不当查过了干净:在 issue 上贴出给对应座位的现成命令,等读数回贴再派。
 - 板面/树/队列读数恒带 UTC 取数时刻;认领、派发令、复核、轮报与座位贴皆同。
 - 时间戳形如 `YYYY-MM-DDThh:mmZ`,树读数另带 ref 或 tip;无时间戳的读数按未取处理。
@@ -170,8 +172,7 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 - advisory 门禁红着进 main 是共享损伤,任何车道发现都立即止血并立单。
 - main-red 的跳队例外与事故锚卡约定见 `references/landing-operations.md` B 节。
 - dev 自己死了不等于维护者中止:子代理消失是正常死法,走死认领回收。
-- 维护者中止只在有显式信号时成立:原话,或宿主回报 stopped by the user。
-- ⛔ 不据推断立一道没有重启条件的门;判据是信号不是症状。
+- 维护者中止只认原话或宿主回报 stopped by the user,⛔ 不据推断立无重启条件的门。
 - 立卡者不查重,只附 3–5 个查重词;分诊按词查自有列表,零命中须控制词背书。
 - 共享基础设施修复入队前按症状复查 main,不按 issue 号。
 - 真撞上重复,先比数值与作用域再决定关哪个。
@@ -181,6 +182,7 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 - 冲突立成 `needs-user-decision` 卡,该 PR 不挂 auto-merge 留异议窗口。
 - 读序 git、payload、REST、MCP;REST 可达性逐会话探一次;通道对照见 `references/rest-channel.md`。
 - 派发前读一次 `rate_limit`,余量装不下整批就减批,⛔ 不靠撞墙发现。
+- 写少而大:同卡同轮结论合成一条评论,⛔ 不放慢单笔、不攒着一次性发;写量按身份计。
 
 ## 多仓协调
 
@@ -190,7 +192,7 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 - 单车道仓 `cloud`、`objectos`、`hotcrm`、`www.objectos.ai`;未来新仓默认此类。
 - 单车道仓 `repo:*` 席自理机械三务,⛔ 不产 `domain:*`;决策卡入本仓收件箱,不落 objectstack。
 - 机械三务 = 自扫 sweep、自打 `type`、自做 `finding` 首触定级。
-- 新仓登记是一张清单:座位贴、标签、类别归属、门禁盘点。
+- 新仓登记是一张清单:座位贴、标签、类别归属、门禁盘点、写身份锁移植(deny + hooks)。
 - 新仓准入判据一句:这个仓真的需要常设席位吗。
 - hotcrm 收卡判据与宪章见 `references/lanes/hotcrm.md`。
 - objectui 卡按修复落点分流三流,`domain:ui` 是唯一新增标签。
@@ -306,8 +308,7 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 - sweep 与首触定级只对多车道仓,单车道仓机械三务自理。
 - 发版板(无板仓跳过)、查重/shadow 检查与代裁通道全仓照跑。
 - 代裁只由维护者召唤的总监席产出,⛔ 永不凭自述、⛔ 无子代理裁决。
-- fire 开局只按名加载互斥检查所需工具,`ToolSearch` 用 `select:` 形式。
-- 判定本轮有活之后才加载其余工具。
+- fire 开局只按名加载互斥检查所需工具,`ToolSearch` 用 `select:`;判定本轮有活才加载其余。
 - ⛔ 分诊 fresh session 开局不做泛关键词 ToolSearch;可验判据:空转轮 ~4 万 token 以内。
 - 工具加载纪律只约束分诊 fresh session 的开局;执行座位与 dev 不受约束。
 - 两级盘点:小时轮以 `since` 窗口读增量,锚 = 座位贴上一份收班简报的时间戳。
@@ -335,6 +336,7 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 - bump 单单张封顶:先查同题 open 单,已有就追评刷新;工具链新形态只提请不扩面。
 - 分类动作每张三选一,外加一个修复通道。
 - ⛔ 不挂 `needs:contract-review`:随 draft PR 或 `Clause-②: yes` 认领;裁定写方向、给六态之一。
+- 方向落在 ADR/已裁卡/不可重裁规则:贴 `check-prior-rulings.mjs` 的 `Prior rulings read:` 行,或不点。
 - `pm:queue` = 有具名落点或复现的具体缺陷,或范围明确的工具/门禁修复,无可问之事。
 - `pm:queue` 也收恢复不变量的 finding、test-only pin,与实现未被裁错的说明书脱节(修文档)。
 - `needs-user-decision` = 设计卡、feature/契约形状提案、需要 appetite 的多周程序。
@@ -375,7 +377,7 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 - 三类内再过时前提检查,三选一:晋级 / 关闭 not planned / hold;判级只在此轮,不在立单时。
 - ⛔ 写入前对每张卡现读当前状态;任何列表快照读数一律作废。
 - ⛔ 带 `pm:dispatched` / assignee / 任何 open 或 merged PR 引用的卡,一律不动。
-- ⛔ `issue_write` 会替换标签集并清空未传字段:写入时必须回传 `assignees`。
+- 标签/assignee 写恒经 `scripts/pm/label-write.mjs`(四步、回读);⛔ 永不 MCP `issue_write`(锁 1 已拒)。
 - 车道席可附证据/前提重验,⛔ 不定级不改标;skills 车道 finding 由该席自分诊,全仓轮跳过。
 - 域分批与 sweep 打包晋级五条照用;每批约定与积压告警见 `references/dispatch-runbook.md`。
 - `pm:retriage` 每 fire 先答异议评论所求,答后同笔摘标;须维护者答的进收件箱,标照摘。
@@ -469,9 +471,9 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 - 同笔 `Release:` 行点名已落项与余项去向;余项需换道/拆分加 `pm:retriage`,自队列重新认领。
 - 派发前按序执行原子对:① Assign @me,并把 `pm:dispatched` 与摘 `pm:queue` 放进同一次标签写入。
 - step ① 之后获得 assignee 的直接弃出本批。
-- ② 认领评论(英文),固定形状见 模板与表 节;首行以字面 `Claim:` 开头是机器判据。
-- 巡查谓词只认 `Claim:` 这一个拼写且保持严格,修法是全舰队向它收敛,⛔ 不放宽谓词。
-- session ID 不可省;`mode:subagent` 的 dev 与 PM 同会话同 ID,甄别身份是分支。
+- ② 认领评论(英文)照抄 模板与表 节:`Claim:` 首行,`Branch:`、`Clause-②:` 各占一行且行首。
+- 条款②入队闸门只读认领评论且只读行首键:句中提及与另发评论皆读不到,卡即不可读。
+- 谓词保持严格、⛔ 不放宽;session ID 不可省,`mode:subagent` 下 dev 与 PM 同 ID,身份看分支。
 - `Clause-②: yes | no` 恰这两种拼写,恒英文机器判据;判据:本卡放宽接受集或扩大公开面吗。
 - Container & model 行的档位引当次 `node scripts/pm/dispatch-gates.mjs --tier <paths>` 输出,⛔ 不凭记忆。
 - 末行 Serial constraints cleared 是落在评论里的读数,同包在飞单不点名等于没查。
@@ -508,7 +510,7 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 - 发布的 `skills/**` 整根随 `npx skills add` 发运,⛔ 无一行级豁免,逐行判机械不作数。
 - 纯机械一行 PM 酌定可至下限档;降档施工的补偿控制 = 复核席跑契约复审档。
 - 降档施工只经契约复审档复核到达维护者,⛔ 不新增标签不新增链。
-- 强制条款②:放宽接受集或扩大公开面的卡默认判断档施工;契约复审档复核只在 spec 席。
+- 强制条款②:放宽接受集或扩大公开面的卡默认判断档施工;达档复核归派发席席内。
 - 条款②判据即代裁的机械边界测试与 `references/lanes/spec.md` 席内分派判据,⛔ 不另抄。
 - 负边界:运行时权限/安全行为变更不是条款②,归人工地板安全/权限边界类。
 - 条款②只指已发布契约面,拉回已声明契约不触它;卡面复述仍是条款②。
@@ -518,7 +520,7 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 - 机械放宽判别门禁落地前,入队前的席内契约复核是方向自述的补偿控制。
 - 豁免够不到的地板只有维护者裁决能设。
 - 席位档策略:skills 车道外的执行席与分诊席默认判断档会话。
-- 契约复审档留给 skills 席与 spec 席的条款②复核,其余席位 ⛔ 永不起该档子代理。
+- 条款②复核只在实测达档的席内做,记录写读数;未达档席 ⛔ 不审、不起该档子代理。
 - 降档出口两条:额度耗尽豁免,与主动预降(余量吃紧可预先降档)。
 - 额度耗尽豁免仅当契约复审档实测不可用才落默认判断档,⛔ 不再往下。
 - 降档的档位与理由记入认领评论 Container & model 行;档位逐次派发显式传参,永不省略。
@@ -532,8 +534,8 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 - 标准非协商条款 ⛔ 不抄进派发词:hook 已机械强制段与 os-dev.md 已载通用段砍掉。
 - ⛔ 不砍卡类特有约束:ADR 类 draft-only、tier 推导引用、棘轮实况、释义纪律。
 - 无条件条款只住角色文件,冲突时它胜、错了修那里,⛔ 不靠派发词临时覆盖。
-- 终报要求随派发词带一句:只收机器可核字段,⛔ 复述 PR body 叙事。
-- 机器可核字段 = gates / line_budget / deviations / files_changed。
+- 终报要求随派发词带一句:只收机器可核字段(gates / line_budget / deviations / files_changed)。
+- 派发令恒带 `Writes:` 行:只走 REST 代理、写预算(端点清单)、`mcp_calls` 计数,dev 两数都报。
 - 清单、路径、行号在派发那一刻从树上取,⛔ 不从卡片/上次派发/记忆抄。
 - 门禁清单取 `dispatch-gates.mjs --commands` 逐条跑,退出码先落盘,`--ran` 对账;⛔ 不抓人读输出。
 - 点名单是线索不是规格,dev 对实际改动重取补跑;行级断言转述前必须自己重验。
@@ -551,8 +553,7 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 - 翻转公开语义的裁决随卡带全仓 pin 清扫,两句缺一不可,原文见 runbook。
 - 拒收用例 ⇒ `code`+`status` 最低断言;过滤/谓词语义 ⇒ 编译面清单逐面申报,⛔ 静默略过。
 - 资源与后端:S 级机械 + M ⇒ `mode:subagent`;S 级但不机械(判断面在设计不在门禁)按 M 待遇。
-- `mode:cloud` 只保留给 L/XL、必须活过 PM 会话的工作、浏览器/dogfood 验证。
-- build 重的 M 卡逐卡判断是否上云。
+- `mode:cloud` 只保留给 L/XL、活过 PM 会话的工作、浏览器/dogfood 验证;build 重的 M 卡逐卡判。
 - 归档义务只落在云卡;OOM 死的单独重派;判定连同档位写进认领评论。
 - 一次性云卡用 `create_session`,⛔ 不用 create_trigger+fire;trigger 流只留给定时/重复型。
 - 云会话 `SendMessage` not-reachable 是设计非故障,⛔ 不复测。
@@ -563,8 +564,7 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 
 - 报告通道统一:GitHub 是两种模式共用的真相源;dev 终报先落 issue 评论、再作返回消息。
 - 收集先扫 GitHub,标记评论在 = 报告完整;两处皆无才进探活/判死。
-- 标记两种拼写等效:HTML 注释形与首行纯文本 `os-dev-report`。
-- ⛔ 仅凭 HTML 注释形式缺失永不读作报告未达;⛔ 永不把没收到失败通知读作还在跑。
+- 标记两种拼写等效(HTML 注释形、首行 `os-dev-report`);⛔ 永不把没收到失败通知读作还在跑。
 - 探活是每轮巡检的固定动作;完成通知不可靠,缺席什么都不证明。
 - ① 巡检首动作 `list_triggers` 确认 Routine 启用,在飞重挂加速器;唤醒归 Routine,漏挂不断链。
 - ② 在飞期间主巡检间隔 ≤45 分钟,待命期 60–70;节奏维护者明示可改。
@@ -599,6 +599,7 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 - 触 `skills/**` 的 PR 加问整包价值密度:从整包加载的客户 agent 座位读,⛔ 不从作者座位读。
 - 超派发预算或小功能大扩写 ⇒ REWORK,⛔ 不因已经写好了放行。
 - 判决 ACCEPT:issue 英文短评论,核对清单结论 + 抽查读数 + 偏差,链接 PR,⛔ 不复述其叙事。
+- `mcp_calls` 点名写工具(`settings.json` deny 清单 + `update_pull_request`)⇒ 拒收,⛔ 不带注放行。
 - 判决 REWORK:逐项反馈,同认领重派;补丁轮优先 SendMessage 续派原 dev;最多 2 轮,第三次升级。
 - 判决 ESCALATE:见 升级与决策 节。
 - **ACCEPT 之后的路径分叉**:翻 ready / 挂 auto-merge / 入队前先取一次 PR 的路径面。
@@ -612,20 +613,20 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 - 速读五段固定:改了什么/为什么改/风险与代价(含回滚)/席位意见/你要做的(一个动作)。
 - 草稿归 dev:受管面 PR 正文带 `## 维护者速读(草稿)`,中文、业务角度,席位意见留空。
 - 终稿 = 席位对照自己读的 diff 校正草稿、填席位意见后贴评论;维护者只读评论。
-- PR 上的标签 = 待维护者审阅,不入六态;与请审同为等人合清单,随合并或撤回判决离开。
+- PR 上的标签 = 待维护者审阅,不入六态;与请审同为等人批清单,随获批或撤回判决离开。
 - 批准判定单源 = 队列守卫常量 `GOVERNED_APPROVERS`:授权账户 APPROVED 即算,⛔ 不卡 `commit_id`。
 - 批准后再推亦不过期;席位落地 = 过落地前检、清标、ready、auto-merge,踢出/变基同法。
 - ③ 在 draft PR 上向两个授权批准账户 `os-zhuang` 与 `hotlong` 都 request review,主动推。
 - PR 作者身份即两账户之一的席位时,对该账户请审必失败(author-identity 422)。
 - 该账户改为把 PR assign 给它替代通知,另一账户照常请审;轮次报告点名说明走了兜底。
-- 请审走免碰 draft 位的专用 REST 端点,MCP 兜底显式带 `draft: true`;端点事实住 platform-readings。
+- 请审走免碰 draft 位的 REST 专用路,ready/draft 走 ccr 路;MCP 兜底已拒;端点见 platform-readings。
 - ④ 轮次报告单列 awaiting a human merge。
 - 已入队才读到本条 ⇒ 转 draft 与 disable 都做;出队以阳性探针答,ref 缺席只旁证。
 - skills 车道自有 PR:纯代码面如 `scripts/pm/` 由本席按达档自审(清单不减)后落地。
 - 受管面两层:事实层仅本技能 `references/`,其余为规则层(含发布 `skills/**` 与 SKILL.md)。
-- 规则层四件套等人合;事实层 PR(受管路径全在该目录)经席内达档复核后 ready → 入队。
+- 规则层四件套等人批;事实层 PR(受管路径全在该目录)经席内达档复核后 ready → 入队。
 - 路径面干净的才转 ready → 入队;队列是唯一被认可的落地路径,⛔ 永不队列外合并。
-- 入队资格 = PR 上每一个 check 全绿,⛔ 不是 required 子集;required 集是队列强制的地板。
+- 入队资格 = 每个 check 为 success 或预期 skip(名单:check-expected-skips.mjs),⛔ 不是 required 子集。
 - 非必查红是真缺陷或坏门,归 PM 入队前处置;第三种按设计而红,三条全立才可带红入队:
 - 源码自述 pushed 分支上按设计而红、不跑 `merge_group`、PR 评论记明门与因,缺一即否。
 - 本段只适用本循环派发的 dev PR;PM 自己的工具 PR 留维护者。
@@ -637,12 +638,12 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 - `--tier` 嫌疑行是提示非裁定;双肢命中任一 ⇒ 无席内条款②复核 PASS 在案 ⛔ 禁止入队。
 - 路径肢 = diff 触及契约面 `packages/spec/src/**`,含 error-code-ledger 与 `*.zod.ts` 契约 schema。
 - 声明肢 = 认领评论声明 `Clause-②: yes`,与路径无关;错误的 `no` 是可审计的假申报。
-- 交付后复核由派发席席内完成:spec 席达档,余席默认档加门禁;记录 = 同形评论落 PR 或卡。
+- 交付后复核由派发席席内完成:达档审,未达档默认档加门禁;记录 = 同形评论落 PR 或卡。
 - PASS ⇒ 同席剥标并引记录、ready、auto-merge;FAIL ⇒ 补丁轮;⛔ 免复核不放行。
 - 真正设计分叉照旧进决策箱,席内复核 ⛔ 不替代维护者裁定。
 - 外部评审链降为可选事后审计,非放行前提。
-- `needs:contract-review`(恒英文)由 PR 创建者随可复审契约增量同笔挂:draft PR,或先到的报告。
-- `Clause-②: yes` 认领同笔在卡上挂标;PR 开出即读 `check-clause2-carriers --pair N` 为 0 再请审。
+- `needs:contract-review`(恒英文)由席位同笔挂:PR 一现即挂 PR;报告先到则先挂卡。
+- `Clause-②: yes` 认领同笔卡上挂标;PR 开出读 `check-clause2-carriers --pair PR-NUMBER` 为 0 再请审。
 - 挂标后复核完成前短暂停靠;⛔ 不前瞻预挂。
 - 席内复核的适用面、载体纪律、资格与归属、降档保险丝见 `references/contract-review.md`。
 - 碰生成物的 PR 入队前先同步 + 整体重生成:四步序 `bash scripts/pm/os-regen-merge.sh`。
@@ -771,8 +772,7 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 
 ## 报告契约
 
-- 终报 JSON 的权威形状住 `.claude/agents/os-dev.md` 终报消息节,字段与拼写以那里为准。
-- ⛔ 本文不抄终报形状的第二份。
+- 终报 JSON 的权威形状住 `.claude/agents/os-dev.md` 终报消息节,⛔ 本文不抄第二份。
 - `premise_still_valid: false` + `pr: null` 是合法终报,当再分诊输入复核,永不当失败派发。
 - `status: needs_decision` 时 `open_questions` 必须非空。
 - `out_of_scope_findings` 只列三类立卡与 `noted, not filed`;立卡附查重词、归挂、立在修复仓。

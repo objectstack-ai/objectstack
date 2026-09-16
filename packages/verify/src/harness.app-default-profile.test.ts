@@ -38,9 +38,15 @@ import {
 } from '@objectstack/plugin-security';
 // `.js` extension deliberate: under `moduleResolution: NodeNext` the
 // extensionless form does not resolve, so every symbol it names silently
-// becomes `any` (AGENTS.md §Build & Test). This package's older test files
-// still carry that shape as measured TEST_DEBT — a shrink-only ratchet — so a
-// new file must not add to it.
+// becomes `any` (AGENTS.md §Build & Test). ⚠ The second half of this note is
+// corrected rather than deleted, because a reader copies the reason: this
+// package's older test files do NOT still carry that shape, and there is no
+// ratchet to add to. Measured on this tree — 0 extension-less relative
+// imports across all 14 of its `src` test files; no
+// `packages/verify/test-typecheck-debt.json` exists at all; and
+// `scripts/check-type-check-coverage.mjs` holds no `@objectstack/verify` key
+// in `DEBT`, `TEST_DEBT` or `EXEMPT`. The layer is at zero with no ledger, so
+// an error a new file introduces is red on arrival.
 import { bootStack, type VerifyStack } from './harness.js';
 
 // Booting the full in-process stack runs well past vitest's 5s default.

@@ -238,13 +238,16 @@ export function registerTryCatchNode(engine: AutomationEngine, ctx: PluginContex
         // WHICH thing, and `message` names one only when it happens to echo
         // the template.
         //
-        // `code` (#14419) is bound alongside but is NOT declared on
-        // `TryCatchErrorValueSchema`, so it is spelled as an explicit widening
-        // of the declared type rather than dropped — dropping it would regress
-        // a catch region's ability to branch on `{$error.code}`. The
-        // divergence is filed as #14954 against the spec lane; this file is
-        // not the place to change the contract.
-        const errorValue: TryCatchErrorValue & { code?: string } = {
+        // `code` (#14419) is bound alongside and IS declared on
+        // `TryCatchErrorValueSchema` — an open, optional `string` whose
+        // docblock in `packages/spec/src/automation/control-flow.zod.ts`
+        // states why the type stays open rather than closing over
+        // `StandardErrorCode`. The declared type therefore already covers
+        // this binding and it is annotated as that type alone. Dropping the
+        // key would still regress a catch region's ability to branch on
+        // `{$error.code}`; its absence means "no classified code", never
+        // "nothing failed".
+        const errorValue: TryCatchErrorValue = {
           nodeId: node.id,
           message: lastError,
           ...(lastErrorCode ? { code: lastErrorCode } : {}),

@@ -268,6 +268,9 @@ import type * as M183 from './api/sortability.zod.js';
 import type * as M184 from './shared/value-domain.zod.js';
 // [#15676] The shared epoch-millisecond instant — new module, next free index.
 import type * as M185 from './shared/epoch.zod.js';
+// [#18122] The closed duration vocabulary beside that instant — new module,
+// next free index (M186 is `automation/schedule-organization.zod.ts`).
+import type * as M187 from './shared/duration.zod.js';
 
 // ---------------------------------------------------------------------------
 // 783 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
@@ -947,9 +950,7 @@ export type Iso465 = Assert<Eq< z.input< typeof M103.ScopeConfigSchema >, z.infe
 export type Iso466 = Assert<Eq< z.input< typeof M103.ScopeInfoSchema >, z.infer< typeof M103.ScopeInfoSchema > >>;
 
 // kernel/startup-orchestrator.zod.ts
-export type Iso467 = Assert<Eq< z.input< typeof M104.HealthStatusSchema >, z.infer< typeof M104.HealthStatusSchema > >>;
 export type Iso468 = Assert<Eq< z.input< typeof M104.PluginStartupResultSchema >, z.infer< typeof M104.PluginStartupResultSchema > >>;
-export type Iso469 = Assert<Eq< z.input< typeof M104.StartupOrchestrationResultSchema >, z.infer< typeof M104.StartupOrchestrationResultSchema > >>;
 
 // qa/testing.zod.ts
 export type Iso470 = Assert<Eq< z.input< typeof M105.TestSuiteSchema >, z.infer< typeof M105.TestSuiteSchema > >>;
@@ -1015,6 +1016,15 @@ export type Iso502 = Assert<Eq< z.input< typeof M115.ProtectionSchema >, z.infer
 // first of the two exemptions ruling B on #14478 declares on the schema.
 // `z.number().int()`: no default, no transform, the (RISE) case.
 export type Iso868 = Assert<Eq< z.input< typeof M185.EpochMs >, z.infer< typeof M185.EpochMs > >>;
+
+// shared/duration.zod.ts — the closed DURATION vocabulary (#18122), step ① of
+// ruling A on #18115 and the counterpart of the instant above. Both are
+// `z.number().int().nonnegative()`: no default, no transform, the (RISE) case.
+// The refinement is deliberate rather than incidental, so these two pins are
+// what goes red the day someone gives a duration type a `.default()` — which
+// would put the author state and the parsed state on different sides of it.
+export type Iso873 = Assert<Eq< z.input< typeof M187.DurationMs >, z.infer< typeof M187.DurationMs > >>;
+export type Iso874 = Assert<Eq< z.input< typeof M187.DurationSeconds >, z.infer< typeof M187.DurationSeconds > >>;
 
 // shared/value-domain.zod.ts — the ONE standard-domain vocabulary (#14168);
 // `SpecifierValueDomainSchema` (Iso758) is an alias of it, so both pins hold
@@ -2184,6 +2194,39 @@ describe('ADR-0122 type-alias convention', () => {
     // `Iso872`, the next free id after the merged file's maximum; ids are
     // claims about pins, not positions, so the collision costs nothing but a
     // number. The merged count is 811 - 30 + 1 + 1.
+    //
+    // 783 -> 785 is #18122's closed DURATION vocabulary (shared/duration.zod.ts,
+    // new module slot M187): `DurationMs` and `DurationSeconds`, the declared
+    // half of ruling A on #18115 and the counterpart of `EpochMs` (`Iso868`)
+    // one block above. Both are `z.number().int().nonnegative()` with no
+    // default and no transform — the (RISE) case twice, two new pins. +2 added.
+    //
+    // Note what these two pins are FOR, because the schemas are trivial and the
+    // reason is not: the whole point of the vocabulary is that the unit rides on
+    // the VALUE, so a site composes `DurationSeconds.default(60 * 60 * 24)`
+    // rather than the type carrying a default of its own. The day someone moves
+    // that default onto the shared type instead, author state and parsed state
+    // part company for every key in the family at once, and these are the lines
+    // that say so by name.
+    // 785 -> 783 is #16059's ADR-0049 retirement of the startup ORCHESTRATION
+    // surface (kernel/startup-orchestrator.zod.ts, module slot M104):
+    // `HealthStatusSchema` (`Iso467`) and `StartupOrchestrationResultSchema`
+    // (`Iso469`) left with their defs (whole-def removal,
+    // `RETIRED_DEFS_BY_MAJOR[18]` `kernel/HealthStatus` +
+    // `kernel/StartupOrchestrationResult`), so the pins that named them leave
+    // with the schemas — there is nothing left to be isomorphic. The module
+    // slot stays occupied and `Iso468` stays with it: the maintainer ruling
+    // KEEPS `PluginStartupResultSchema`, re-declared against the shape
+    // `@objectstack/core` ships, and it is still the (RISE) case — every new
+    // member is `.optional()` with no default and no transform, so author
+    // state and parsed state still coincide. -2 removed; the Iso numbers stay
+    // vacant (ids are claims about pins, not positions).
+    //
+    // Worth one line on the member that could have moved it: the deprecated
+    // `startTime` alias is mirrored, not defaulted. The day someone writes
+    // `startTime: durationMs`-style `.default()` or a `.transform()` that
+    // fills one member from another, this pin is the line that says the alias
+    // has gained a second shape.
     expect(pins).toHaveLength(783);
 
     // The count is stated in PROSE twice as well — this case's title and the

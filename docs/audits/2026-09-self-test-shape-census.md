@@ -127,6 +127,25 @@ instrument's header that is **not** a hold: a comparison against a missing retur
 to be false, and nothing detected anything. It belongs on the repair list beside the
 4 DEFEATED, not among the 165 that held.
 
+#### The two non-handshake shapes — the worked examples, held here
+
+`AGENTS.md`'s `--self-test` section points here for these two rather than carrying them itself.
+They are the two shapes an author reaches for when the dispatch is supposed to notice an early
+`return` above the verdict. Neither notices anything; the difference is only in the exit code:
+
+```js
+// the DEFEATED shape — 4 rows above carry it
+process.exit(selfTest());                 // early return → process.exit(undefined) → exit 0
+// the ACCIDENT shape — this row carries it
+process.exit(selfTest() === 0 ? 0 : 1);   // early return → undefined === 0 → false → exit 1,
+                                          // ZERO BYTES printed; the arithmetic did it, not a check
+```
+
+⛔ Neither is a handshake. **A handshake is the dispatch reading a module-level flag the VERDICT
+set, and SAYING so when it is unset** — which is why a non-zero exit alone cannot be scored as a
+hold, and why the ACCIDENT row is classified apart from the 165. The 159 HELD rows that answer the
+mutation do it in one sentence: `selfTest() returned without reaching its verdict`.
+
 ### What the 9 NOT MEASURED are, and what they are not
 
 They are limits of the probe, published per row rather than folded into a verdict — 9

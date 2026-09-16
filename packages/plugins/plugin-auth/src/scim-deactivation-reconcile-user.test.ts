@@ -30,7 +30,7 @@
  *
  * A real `ObjectQL` over `@objectstack/driver-sql` + better-sqlite3
  * `:memory:` — the backend `credential-at-rest-posture.test.ts` already boots
- * SCIM on. The break-glass last-administrator guard (ADR-0024 D5.2) and the
+ * SCIM on. The break-glass last-administrator guard (ADR-0135 D5.2) and the
  * ADR-0092 identity write guard are registered on the engine the way
  * `auth-plugin.ts` registers them at `kernel:ready`, so the refusal in (c) is
  * the production hook, not a stand-in.
@@ -440,7 +440,7 @@ describe('[#14360] deactivating the last administrator is refused through SCIM, 
     expect(body.schemas ?? []).toContain(SCIM_ERROR_SCHEMA);
     expect(String(body.status)).toBe('403');
     expect(body.detail).toMatch(/last administrator/i);
-    expect(body.detail).toMatch(/ADR-0024 D5\.2/);
+    expect(body.detail).toMatch(/ADR-0135 D5\.2/);
     expect(body.detail).toMatch(/SCIM deprovision is too broad/);
 
     // The ban did not land and the administrator still signs in — the
@@ -505,7 +505,7 @@ describe('[#14360] deactivating the last administrator is refused through SCIM, 
     expect(body.schemas ?? []).toContain(SCIM_ERROR_SCHEMA);
     expect(String(body.status)).toBe('403');
     expect(body.detail).toMatch(/last administrator/i);
-    expect(body.detail).toMatch(/ADR-0024 D5\.2/);
+    expect(body.detail).toMatch(/ADR-0135 D5\.2/);
 
     // Nothing landed: the row is still there, still unbanned, and the last
     // administrator still signs in — the lockout the guard exists to stop.

@@ -15,12 +15,22 @@
  * pin is the refusal itself: each `@ts-expect-error` below is red exactly
  * when the refusal stops happening.
  *
- * WHY A `.pin.ts` AND NOT A `*.test.ts`: this package's `tsconfig.json`
- * excludes `**\/*.test.ts` (measured TEST_DEBT), so a pin written in a test
- * file is read by NO tsc program the `typecheck` script runs — a phantom
- * check that stays green however the contract is broken. This file IS in the
- * program, is imported by nothing, and is never bundled (tsup entry is
- * `src/index.ts`), exactly like `exec-context-annotation.pin.ts`.
+ * WHY A `.pin.ts` AND NOT A `*.test.ts`, stated to today's tree: a `.pin.ts`
+ * is not a test file, so this package's `tsconfig.json` exclusion of
+ * `**\/*.test.ts` does not reach it and `typecheck`'s unconditional first leg
+ * (`tsc --noEmit`) compiles it. It is imported by nothing and is never bundled
+ * (tsup entry is `src/index.ts`), exactly like
+ * `exec-context-annotation.pin.ts`.
+ *
+ * ⚠ It is NOT that a pin in a test file here would go unread — this
+ * docblock used to say so, and that is FALSE on this tree. `typecheck`'s third
+ * leg (`pnpm check:test-typecheck`) runs `--project tsconfig.test.json`, whose
+ * `include` is `src/**\/*` with no test exclusion: 33 of this package's `src`
+ * test files are in that program, measured with `tsc --listFiles`. The
+ * "measured TEST_DEBT" the old sentence leaned on is likewise not a key in
+ * `scripts/check-type-check-coverage.mjs` — it is the per-file, shrink-only
+ * `test-typecheck-debt.json` in this package. See
+ * `exec-context-annotation.pin.ts` for the same correction in full.
  *
  * ⚠️ SHAPE DISCIPLINE for this file: it deliberately declares NO interface,
  * no type-literal alias and no inline type literal carrying channel-named

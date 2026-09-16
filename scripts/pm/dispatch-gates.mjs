@@ -17,15 +17,26 @@
  *   node scripts/pm/dispatch-gates.mjs --repo <owner>/<name> ...  # refuse unless this checkout IS that repo
  *   node scripts/pm/dispatch-gates.mjs --self-test
  *
+ * A path NAMED on argv that is not in this tree has two readings — a surface of
+ * THIS repo that is not written yet, and a path belonging to ANOTHER repo — and
+ * a repo-relative path cannot tell them apart. Unasserted, that is NOT MEASURED
+ * and the run ends at exit 3 rather than picking the harmless reading: add
+ * `--repo <owner>/<name>` naming THIS checkout to derive as a not-yet-written
+ * path, or name the other repo and be refused with both repos named (exit 2).
+ *
  * ## Run --self-test DETACHED on an agent container (#14281)
  *
  * The battery re-spawns this tool's own CLI as a child process many times —
  * deliberate (see `check-dispatch-gates.mjs`'s header for why a self-test this
- * size is not fixture-only) — and on an agent container that makes the full
- * run longer than the container's foreground command cap, which SIGTERMs a
- * run past it. Do not run `--self-test` (or `pnpm check:pm-dispatch-gates`,
- * which is exactly that flag) in the foreground there. Detach it and poll the
- * log instead:
+ * size is not fixture-only) — and on an agent container it now runs
+ * cap-SIZED, not cap-exceeding: since #18201 made discovery run once per tree
+ * per process instead of many times over, it fits inside a quiet container's
+ * foreground command cap with room to spare — but the cap is a property of
+ * the CALLER's container and the margin a property of how contended it is,
+ * neither of which this file can see, and an agent box runs several agents at
+ * once. Do not run `--self-test` (or `pnpm check:pm-dispatch-gates`, which is
+ * exactly that flag) in the foreground there. Detach it and poll the log
+ * instead:
  *
  *   nohup pnpm check:pm-dispatch-gates > /tmp/pm-dispatch-gates.log 2>&1 &
  *
@@ -3517,6 +3528,23 @@ export function workflowEnvValues(entry) {
  * followable by construction, whose author knows which of its literals a caller
  * would be reading and which it would not.
  *
+ * ## What this marker cannot reach, and what does (#17991)
+ *
+ * It is keyed on the MODULE, while whether a contribution is fabricated is a
+ * property of the CALLER — and a module can be both at once. This file's own
+ * globs are a real population for the gate that reads them and a fabrication
+ * for a gate that binds one string constant out of the same file; a declaration
+ * narrow enough for the second blinds the first, and one wide enough for the
+ * first fabricates for the second. ⛔ One declaration cannot be both.
+ *
+ * The half that reaches the caller is `importBindsNoPopulation`, keyed on what
+ * the importer BINDS: a value constant carries no behaviour and no table, so it
+ * reaches none of the module's reads however the module is written. ⛔ It is
+ * deliberately NOT a second marker on the importer — a per-caller opt-out is
+ * the hand-written path map this contract refuses, rewritten one caller at a
+ * time — and it narrows nothing for a table importer, so this marker's ruling
+ * for them stands unchanged.
+ *
  * ## Why a marker IN the module, never a roster in this script
  *
  * Same reason as the two markers above: a roster here is a second copy of a
@@ -5288,21 +5316,87 @@ function anchorAtPackageRoot(hints, scriptPath, moduleBody, tree) {
  * A hint from a followed module is a different CLAIM from one the gate spells
  * itself, so it does not travel unlabelled: entry.hintOrigin records which
  * module contributed it and coveringKey prints that in the via column.
+ *
+ * ## What the follow does NOT decide (#17991)
+ *
+ * Which modules a gate REACHES and what it INHERITS from one are two questions,
+ * and the refusals above answer only the first. The second is answered per
+ * CALLER, by `importBindsNoPopulation`, off the binding that
+ * `firstPartyImportBindings` carries beside each target: an importer that binds
+ * only a value constant reaches none of the module's reads and inherits
+ * nothing, and every other shape inherits exactly what it did. One resolver,
+ * two readings of it — the edge set below is unchanged to the byte.
  */
-const IMPORT_FROM_SPECIFIER = /(?:^|[;\n])[ \t]*(?:import|export)\b[^;]*?\bfrom[ \t]*(['"])([^'"\n]+)\1/g;
+const IMPORT_FROM_SPECIFIER = /(?:^|[;\n])[ \t]*(import|export)\b([^;]*?)\bfrom[ \t]*(['"])([^'"\n]+)\3/g;
 const SIDE_EFFECT_IMPORT = /(?:^|[;\n])[ \t]*import[ \t]*(['"])([^'"\n]+)\1/g;
+const NAMED_BINDING_LIST = /\{([^}]*)\}/;
+const BINDING_IDENTIFIER = /^[A-Za-z_$][\w$]*$/;
 
-export function firstPartyImportTargets(scriptPath, source, { root = ROOT } = {}) {
+/**
+ * What ONE import clause BINDS — the exported names it names, or `whole` when
+ * the clause reaches the module's every export and there is no name list to
+ * read. Every shape this reading cannot resolve to a name list answers `whole`,
+ * which is the inheriting direction and therefore today's behaviour: a rule
+ * that narrowed on a clause it could not parse would drop leads by accident
+ * rather than by measurement.
+ *
+ * `whole` for: the namespace form (the module object reaches every export), a
+ * default binding (a name this module never declares under), the side-effect
+ * form (nothing is bound), a re-export (it republishes names rather than
+ * reading them, and nothing here can tell whether the re-exporter's own callers
+ * open the population), and any braced list carrying something that is not an
+ * identifier.
+ */
+function clauseBinding(keyword, clause) {
+  if (keyword !== 'import') return { names: [], whole: true };
+  const text = String(clause ?? '');
+  if (text.includes('*')) return { names: [], whole: true };
+  const braced = NAMED_BINDING_LIST.exec(text);
+  const outside = (braced ? text.slice(0, text.indexOf('{')) : text).replace(/,/g, '').trim();
+  if (outside.length > 0) return { names: [], whole: true };
+  if (!braced) return { names: [], whole: true };
+  const names = [];
+  for (const part of braced[1].split(',')) {
+    const name = part.trim().split(/[ \t\n]+as[ \t\n]+/)[0].trim();
+    if (name === '') continue;
+    if (!BINDING_IDENTIFIER.test(name)) return { names: [], whole: true };
+    if (!names.includes(name)) names.push(name);
+  }
+  return names.length > 0 ? { names, whole: false } : { names: [], whole: true };
+}
+
+/**
+ * The same resolution as `firstPartyImportTargets` below, carrying the one
+ * thing that function drops: WHAT the importer binds from each module it
+ * reaches. Returned as a Map in the same sorted order the targets list has, so
+ * a caller iterating this Map builds its follow set in the byte-identical order
+ * it built before this seam existed.
+ *
+ * Two different specifiers can resolve to one module (`./x.mjs` from here and
+ * `../pm/x.mjs` from a sibling directory), and one file can import a module
+ * twice; the bindings are UNIONED, so a module bound by name in one clause and
+ * wholly in another answers `whole`.
+ */
+export function firstPartyImportBindings(scriptPath, source, { root = ROOT } = {}) {
   // The same masking hint extraction uses, for the same reason: an import
   // written out in a docblock, or one inside a self-test fixture, is a
   // specifier this script NAMES rather than one it loads.
   const body = maskedModuleBody(String(source));
-  const specifiers = new Set();
-  for (const m of body.matchAll(IMPORT_FROM_SPECIFIER)) specifiers.add(m[2]);
-  for (const m of body.matchAll(SIDE_EFFECT_IMPORT)) specifiers.add(m[2]);
+  const specifiers = new Map();
+  const bind = (specifier, binding) => {
+    const prior = specifiers.get(specifier);
+    if (!prior) {
+      specifiers.set(specifier, { names: [...binding.names], whole: binding.whole });
+      return;
+    }
+    prior.whole = prior.whole || binding.whole;
+    for (const name of binding.names) if (!prior.names.includes(name)) prior.names.push(name);
+  };
+  for (const m of body.matchAll(IMPORT_FROM_SPECIFIER)) bind(m[4], clauseBinding(m[1], m[2]));
+  for (const m of body.matchAll(SIDE_EFFECT_IMPORT)) bind(m[2], { names: [], whole: true });
   const here = nodePath.dirname(nodePath.join(root, scriptPath));
-  const targets = new Set();
-  for (const specifier of specifiers) {
+  const targets = new Map();
+  for (const [specifier, binding] of specifiers) {
     if (!specifier.startsWith('./') && !specifier.startsWith('../')) continue;
     const rel = nodePath.relative(root, nodePath.resolve(here, specifier));
     // One test, three refusals: a path that escapes the repo, one that lands
@@ -5314,9 +5408,105 @@ export function firstPartyImportTargets(scriptPath, source, { root = ROOT } = {}
     // extension-less spellings ESM does not resolve, and the ../<rel> shapes a
     // module body carries as illustration, both land here.
     if (!existsSync(abs) || !statSync(abs).isFile()) continue;
-    targets.add(rel);
+    const prior = targets.get(rel);
+    if (!prior) {
+      targets.set(rel, { names: [...binding.names], whole: binding.whole });
+      continue;
+    }
+    prior.whole = prior.whole || binding.whole;
+    for (const name of binding.names) if (!prior.names.includes(name)) prior.names.push(name);
   }
-  return [...targets].sort();
+  // Sorted with the default string comparison the targets list has always used,
+  // never a locale-aware one: the follow order decides which module a shared
+  // hint is attributed to, and a re-ordering would move rows in output.
+  return new Map([...targets].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)));
+}
+
+export function firstPartyImportTargets(scriptPath, source, { root = ROOT } = {}) {
+  return [...firstPartyImportBindings(scriptPath, source, { root }).keys()];
+}
+
+/**
+ * The exporter half of the binding rule: is NAME declared in this module as a
+ * VALUE — a `const` initialised to one primitive literal?
+ *
+ * Returns `{ literal }` — the string's own text when the value is a quoted
+ * string, and `null` for a number, a boolean or `null` — or `null` for every
+ * other declaration, which is the answer that inherits.
+ *
+ * ## Why this recogniser is deliberately this narrow
+ *
+ * It is read in ONE direction only: a positive answer REMOVES leads, so every
+ * shape it cannot read has to answer negative. It therefore requires the whole
+ * initialiser on the declaration's own line and refuses escapes and template
+ * literals rather than parsing them — an array, an object, a function, a class,
+ * a computed initialiser, a multi-line one, a re-exported binding and a name
+ * this module does not declare at all are all "not a value", and a module whose
+ * export surface this reading cannot see contributes exactly what it
+ * contributed before.
+ *
+ * The module body is masked first, for the reason every reader in this file
+ * masks: a declaration written out in a docblock, or built inside a self-test
+ * fixture, is a declaration this module NAMES rather than one it exports.
+ */
+export function exportedValueConstant(moduleSource, name) {
+  if (typeof name !== 'string' || !BINDING_IDENTIFIER.test(name)) return null;
+  const body = maskedModuleBody(String(moduleSource));
+  const declaration = new RegExp(`(?:^|\\n)[ \\t]*export[ \\t]+const[ \\t]+${name}[ \\t]*=[ \\t]*([^\\n]*)$`, 'm');
+  const m = declaration.exec(body);
+  if (!m) return null;
+  const initialiser = m[1].trim();
+  const quoted = /^('[^'\\\n]*'|"[^"\\\n]*")[ \t]*;[ \t]*$/.exec(initialiser);
+  if (quoted) return { literal: quoted[1].slice(1, -1) };
+  if (/^(?:-?\d[\d_]*(?:\.\d[\d_]*)?(?:[eE][+-]?\d+)?|true|false|null)[ \t]*;[ \t]*$/.test(initialiser)) {
+    return { literal: null };
+  }
+  return null;
+}
+
+/**
+ * Does this import bind NOTHING that can carry the followed module's
+ * population? (#17991)
+ *
+ * `declaredInheritedPopulation` is keyed on the MODULE, and whether a
+ * contribution is fabricated is a property of the CALLER — so one module cannot
+ * serve two importers when one of them reads its population table and the other
+ * takes a single constant out of it. This is the per-caller half, and it asks
+ * the one question the derivation can SEE without a path map: what did the
+ * importer BIND?
+ *
+ * A value carries no behaviour and no table. A caller that binds only value
+ * constants reaches none of the module's reads however the module is written,
+ * so every pair the module would contribute to it is a fabricated lead in the
+ * column a dispatch prompt pastes. Everything else — a function, a class, a
+ * declaration table, a namespace, a default, a re-export — keeps today's
+ * inheritance: the follow exists because a population MOVED into a shared
+ * module must not stop being declared, and a population moves into exactly
+ * those shapes.
+ *
+ * ⭐ One value is NOT inert: a string constant whose own text is one of the
+ * paths the module contributes IS a one-path population, and binding it is
+ * reading it. Measured on this tree, the shape is live — `scripts/adr-anchors.mjs`
+ * exports its anchor directory as a bare string constant — so the exception is
+ * a specimen, not a hypothetical.
+ *
+ * Live cost of the whole rule, measured over the 52 import edges this tree
+ * follows: ONE edge answers true, and it is the card's —
+ * `scripts/pm/check-clause2-carriers.mjs` binding `CONTRACT_REVIEW_TIER` out of
+ * this file and inheriting the workflow directory it never opens. Every other
+ * edge binds a function or a table and is untouched, which is the measurement
+ * that says this rule narrows the fabrication and not the follow.
+ */
+export function importBindsNoPopulation(binding, moduleSource, population = []) {
+  if (!binding || binding.whole) return false;
+  const names = binding.names ?? [];
+  if (names.length === 0) return false;
+  const paths = new Set(population ?? []);
+  return names.every((name) => {
+    const value = exportedValueConstant(moduleSource, name);
+    if (!value) return false;
+    return value.literal === null || !paths.has(value.literal);
+  });
 }
 
 /**
@@ -8285,6 +8475,36 @@ export function watchHintTree(files = trackedFiles()) {
 }
 
 /**
+ * ── The repository's OWN corpus, listed once per process (#18201) ───────────
+ *
+ * The listing and the tree built from it, for the one tree this process is
+ * about: the checkout `ROOT` names. Every caller that wants "this repo" takes
+ * the SAME two objects from here, which is the "one read, N answers"
+ * discipline `watchHintTree`'s own docblock states, promoted from an
+ * invariant each caller had to keep by hand to one the module keeps for them.
+ *
+ * ⛔ It is NOT a general tree cache. A caller that means a DIFFERENT tree — a
+ * temporary repository, a hand-built fixture listing, `null` — still builds
+ * and passes its own, and nothing here answers for it; the memo below is keyed
+ * on the tree object, so a fixture tree can never be served this one's answer.
+ *
+ * What makes the reuse observationally identical rather than merely cheaper:
+ * within one process nothing writes to `ROOT`. The CLI is one-shot, and the
+ * self-test's every write goes to a `mkdtemp` directory under the system temp
+ * root — the in-tree-fixture class its own cases refuse. A process that did
+ * mutate the checkout under itself would need a fresh listing, and would ask
+ * `trackedFiles()` for one, which is untouched.
+ */
+let repoCorpusMemo = null;
+export function repoCorpus() {
+  if (repoCorpusMemo === null) {
+    const files = trackedFiles();
+    repoCorpusMemo = { files, tree: watchHintTree(files) };
+  }
+  return repoCorpusMemo;
+}
+
+/**
  * The longest leading run of a hint's segments that the tree still has, or ''
  * when even its first segment names nothing.
  *
@@ -10815,7 +11035,58 @@ export function tierLines(result) {
  * is the drift this file's header refuses everywhere else. The self-test is
  * the only other caller, and it calls THIS.
  */
-export function discoverFamilies({ tree = watchHintTree() } = {}) {
+/**
+ * ── ONE discovery pass per tree, per process (#18201) ──────────────────────
+ *
+ * PROFILED, not guessed, on the same principle as the source maskers far
+ * above and with the same promise: ⛔ this changes nothing about WHAT is
+ * discovered — it is the same derivation run once instead of N times, which
+ * is the only kind of speed-up this tool may take.
+ *
+ * The reading that motivated it belongs to a named commit rather than to this
+ * comment, so it lives on the card: a V8 CPU profile of one plain derivation
+ * found this function running TWICE over the identical tree — once from
+ * `derive`, once from `gateFamilyFiles` under `changeKindGates` — and the
+ * self-test driving it a further twenty-odd times in one process, every pass
+ * re-reading every workflow and re-masking every gate source for bytes that
+ * cannot have changed in between.
+ *
+ * Keyed on the TREE OBJECT, which is what makes the memo observationally
+ * identical rather than merely cheaper: the answer is a pure function of the
+ * tree it is handed plus the checkout on disk, a caller that means a
+ * different tree hands a different object and gets its own pass, and nothing
+ * in this process writes to the checkout (see `repoCorpus`). A `null` tree —
+ * the deliberate no-tree probe — is not an object and is never memoised.
+ *
+ * ⛔ The entries this hands back are SHARED. A caller that mutates one for an
+ * ablation must restore it before it returns, exactly as the one self-test
+ * case that does so already restores `entry.reads`.
+ */
+const discoveryMemo = new WeakMap();
+
+/**
+ * How many discovery passes this process has really computed — the reading a
+ * case needs to tell "memoised" from "cheap enough that nobody noticed", and
+ * the only way to pin a collapse whose whole symptom is the absence of work.
+ */
+let discoveryPasses = 0;
+export function discoveryPassCount() {
+  return discoveryPasses;
+}
+
+export function discoverFamilies({ tree = repoCorpus().tree } = {}) {
+  if (tree !== null && typeof tree === 'object') {
+    const hit = discoveryMemo.get(tree);
+    if (hit !== undefined) return hit;
+    const value = discoverFamiliesPass(tree);
+    discoveryMemo.set(tree, value);
+    return value;
+  }
+  return discoverFamiliesPass(tree);
+}
+
+function discoverFamiliesPass(tree) {
+  discoveryPasses += 1;
   const wfDir = nodePath.join(ROOT, '.github/workflows');
   const workflows = readdirSync(wfDir).filter((f) => /\.ya?ml$/.test(f));
   if (workflows.length === 0) throw new Error('no workflow files found under .github/workflows');
@@ -10937,15 +11208,22 @@ export function discoverFamilies({ tree = watchHintTree() } = {}) {
   const manifestPrefixes = tree?.prefixes ?? trackedPrefixes([...trackedSet]);
   // A followed module is scanned once however many families import it —
   // invoked-as.mjs is imported by 79 of them.
+  const moduleSources = new Map();
+  const sourceOfModule = (rel) => {
+    if (!moduleSources.has(rel)) moduleSources.set(rel, readFileSync(nodePath.join(ROOT, rel), 'utf8'));
+    return moduleSources.get(rel);
+  };
   const moduleHints = new Map();
   const hintsOfModule = (rel) => {
     if (!moduleHints.has(rel)) {
-      // ONE read, two answers — the module's literals and its own declaration of
-      // which of them a caller INHERITS — so the pair cannot describe different
-      // revisions of a file, the same discipline the trigger paths take above.
-      // A module that declares nothing contributes everything it spells, which
-      // is the behaviour every followed module had before the marker existed.
-      const source = readFileSync(nodePath.join(ROOT, rel), 'utf8');
+      // ONE read, THREE answers — the module's literals, its own declaration of
+      // which of them a caller INHERITS, and (through `sourceOfModule`, which
+      // holds the same bytes) what each of its exported names is declared as —
+      // so no two of them can describe different revisions of a file, the same
+      // discipline the trigger paths take above. A module that declares nothing
+      // contributes everything it spells, which is the behaviour every followed
+      // module had before the marker existed.
+      const source = sourceOfModule(rel);
       const spelled = extractWatchHints(source, rel, { tree });
       const declared = declaredInheritedPopulation(source, spelled);
       moduleHints.set(rel, declared ? declared.population : spelled);
@@ -10997,6 +11275,13 @@ export function discoverFamilies({ tree = watchHintTree() } = {}) {
   };
   for (const entry of byCheck.values()) {
     entry.imports = [];
+    // The subset of `entry.imports` that CONTRIBUTES a population (#17991).
+    // The edge list stays whole — the gate really does import every module in
+    // it — and what an importer inherits is decided separately, per caller, by
+    // what the caller BINDS. Unioned across the family's files: one file taking
+    // a constant out of a module another file reads the table of is a family
+    // that reads the table.
+    entry.populationImports = new Set();
     entry.runs = [];
     entry.manifests = [];
     entry.reads = [];
@@ -11075,9 +11360,18 @@ export function discoverFamilies({ tree = watchHintTree() } = {}) {
       // population declared elsewhere can spell it here, which is the direction
       // this file errs in everywhere: a missing lead, never a fabricated one.
       if (entry.selfTest) continue;
-      for (const mod of firstPartyImportTargets(f, source)) {
-        if (gateFiles.has(mod) || entry.imports.includes(mod)) continue;
-        entry.imports.push(mod);
+      //
+      // What the follow INHERITS is decided one line down, and separately
+      // (#17991): the edge is a fact about this file, the population is a fact
+      // about the BINDING. `declaredInheritedPopulation` is keyed per module and
+      // so cannot express it — the same module's globs ARE a real population for
+      // an importer that reads them, and a declaration narrow enough for the
+      // constant-importer would blind that reader.
+      for (const [mod, binding] of firstPartyImportBindings(f, source)) {
+        if (gateFiles.has(mod)) continue;
+        if (!entry.imports.includes(mod)) entry.imports.push(mod);
+        if (importBindsNoPopulation(binding, sourceOfModule(mod), hintsOfModule(mod))) continue;
+        entry.populationImports.add(mod);
       }
       // The SECOND POPULATION FOLLOW, under the same two refusals as the first
       // and for the same reasons (#13511). ⚠️ "Second" counts FOLLOWS, not
@@ -11113,6 +11407,10 @@ export function discoverFamilies({ tree = watchHintTree() } = {}) {
     // (measured at 0 re-attributions over the live tree).
     const own = new Set(entry.hints);
     for (const mod of entry.imports) {
+      // A value-only importer inherits nothing (#17991) — see
+      // `importBindsNoPopulation`. The edge stays in `entry.imports`, because it
+      // is real; what it does not do is contribute a lead.
+      if (!entry.populationImports.has(mod)) continue;
       for (const hint of hintsOfModule(mod)) {
         if (own.has(hint) || entry.hintOrigin.has(hint)) continue;
         entry.hintOrigin.set(hint, mod);
@@ -12735,12 +13033,16 @@ function derive(paths, { showResidue = false, mode = 'human', runRecord = [] } =
   // It is read here, above the discovery, because the extractor needs the same
   // corpus to judge a single-segment directory literal — one listing, so the
   // hints and the sweep that grades them cannot be taken from different trees.
-  const swept = trackedFiles();
-  // Held in a name rather than built inline: the artifact-roster split needs
-  // the SAME bundle the discovery was handed. Built twice it would be two
-  // readings of one listing, which is the drift `watchHintTree`'s own docblock
-  // refuses ("the pair is meaningless apart").
-  const tree = watchHintTree(swept);
+  // Both halves come from `repoCorpus`, which lists the checkout once per
+  // process. Held in names rather than built inline: the artifact-roster split
+  // needs the SAME bundle the discovery was handed. Built twice they would be
+  // two readings of one listing, which is the drift `watchHintTree`'s own
+  // docblock refuses ("the pair is meaningless apart") — and taking them from
+  // the shared corpus makes the pair the same two OBJECTS rather than two
+  // equal copies, which is also what lets the discovery below be the same pass
+  // `gateFamilyFiles` gets under `changeKindGates` instead of a second one
+  // over an identical tree (#18201).
+  const { files: swept, tree } = repoCorpus();
   const { byCheck, workflows, workflowEntries } = discoverFamilies({ tree });
   // ONE per-hint sweep feeds both readers of dead literals: the unreachable
   // listing (whole-family grain) and the residue annotations (per-hint grain,
@@ -13883,6 +14185,71 @@ export function repoAssertionVerdict({ asserted, identity }) {
 }
 
 /**
+ * The declared paths that are not in this tree.
+ *
+ * ONE reading, shared by the banner line that counts them and the refusal that
+ * ends the run over them, so the two can never name different sets — a refusal
+ * listing paths the banner did not count (or the reverse) would put the reader
+ * back where the defect started, guessing which line was about their argv.
+ *
+ * A glob is skipped rather than resolved: it names a PATTERN, not a file, so
+ * `existsSync` on one is false for every glob ever passed and counting them as
+ * absent would refuse every wildcard dispatch on a tree that holds the matches.
+ */
+export function absentDeclaredPaths({ identity, paths = [] }) {
+  return paths.filter((p) => !p.includes('*') && !existsSync(nodePath.join(identity?.root ?? ROOT, p)));
+}
+
+/**
+ * The absent-path refusal: an absent path with no `--repo` is NOT MEASURED.
+ *
+ * The banner alone reported the ambiguity and let the run continue at exit 0.
+ * Measured: `--commands skills/objectui/SKILL.md AGENTS.md` (one sister-repo
+ * path, one local one, no assertion) exited 0, derived THIS repo's families for
+ * the local path and filed the sister-repo path under "apply once this card's
+ * changeset exists" — the reading a dispatcher of a not-yet-written path wants,
+ * and exactly the wrong one for a path that belongs to another repository. A
+ * seat then wrote "it refuses objectui paths by design" into five dispatch
+ * texts on the strength of that exit code.
+ *
+ * So the ambiguity refuses instead of resolving itself toward the harmless
+ * reading. The exit is `EXIT_PREREQUISITE_NOT_MET` — this tool's existing NOT
+ * MEASURED code — and ⛔ never the `2` a usage error and the wrong-repo refusal
+ * carry: a caller that distinguishes them can tell "you asked me something I
+ * cannot answer from here" from "that argv is wrong".
+ *
+ * Both resolving spellings are printed verbatim because the remedy is a copy,
+ * not a deduction: assert THIS repo to get today's derivation back, or name the
+ * repo the paths really belong to and be refused with both repos named.
+ *
+ * ⛔ Not reached when `asserted` is non-null: the wrong-repo refusal above runs
+ * first and keeps its own exit 2 and its own text, so `--repo <other>` with an
+ * absent path answers exactly as it did before this branch existed.
+ */
+export function absentPathVerdict({ asserted = null, identity, paths = [] }) {
+  const missing = absentDeclaredPaths({ identity, paths });
+  if (missing.length === 0 || asserted !== null) return { ok: true, missing: [], lines: [] };
+  const here = identity?.slug ?? null;
+  return {
+    ok: false,
+    missing,
+    lines: [
+      'dispatch-gates: NOT MEASURED — an absent path may be another repo\'s'
+        + ` — assert ${REPO_FLAG} to derive as a not-yet-written path of THIS repo, or name the other repo to be refused.`,
+      `  ${missing.length} of ${paths.length} named path(s) are absent, and no ${REPO_FLAG} says whose tree they are from: ${missing.join(' ')}`,
+      '  Two readings, and nothing in a repo-relative path tells them apart. Pick one — copy a line:',
+      here
+        ? `    ${REPO_FLAG} ${here}   — they are paths of THIS repo that are not written yet; derive as before.`
+        : `    ${REPO_FLAG} owner/this-repo   — UNVERIFIABLE from here: this checkout's '${DEFAULT_BASE_REMOTE}' remote could not be read, so an assertion cannot be checked either.`,
+      `    ${REPO_FLAG} owner/the-other-repo   — they are another repo's; be refused with both repos named, from a checkout of that repo.`,
+      `  (Exit ${EXIT_PREREQUISITE_NOT_MET} = NOT MEASURED, distinct from the 2 a usage error and the wrong-repo refusal carry.`
+        + ' Capture it BEFORE any pipe.)',
+      `  Tree: ${identity?.root ?? 'unknown'}`,
+    ],
+  };
+}
+
+/**
  * The provenance banner — the first thing every derivation prints.
  *
  * The unplaceable-path count is reported in ONE direction only. Paths missing
@@ -13891,6 +14258,10 @@ export function repoAssertionVerdict({ asserted, identity }) {
  * claims neither. There is deliberately no "all paths present" line: that would
  * read as a clearance, and it is precisely the reading the measured failure
  * would have passed — its two paths exist in every repo in the family.
+ *
+ * The banner still only COUNTS. Ending the run over that count is
+ * `absentPathVerdict`'s job, one caller down, so the banner stays printable in
+ * every mode and the refusal stays one decision in one place.
  */
 export function bannerLines({ identity, paths = [], drift = null }) {
   const at = identity?.head ? ` at commit ${identity.head}` : '';
@@ -13902,7 +14273,7 @@ export function bannerLines({ identity, paths = [], drift = null }) {
     `  Families are a property of THAT repo. A card landing in another repo derives nothing here — assert with ${REPO_FLAG} to make this checkable.`,
   ];
   lines.push(...driftLines(drift));
-  const missing = paths.filter((p) => !p.includes('*') && !existsSync(nodePath.join(identity?.root ?? ROOT, p)));
+  const missing = absentDeclaredPaths({ identity, paths });
   if (missing.length > 0) {
     lines.push(
       `  ${missing.length} of ${paths.length} path(s) are absent from this tree: ${missing.slice(0, 6).join(' ')}${missing.length > 6 ? ' …' : ''}`,
@@ -20132,6 +20503,159 @@ function selfTest() {
     firstPartyImportTargets('scripts/fixture.mjs', importFixture).join(' · '),
   );
 
+  // ── The per-CALLER half of an inherited population (#17991) ───────────────
+  //
+  // `declaredInheritedPopulation` is keyed on the MODULE, and whether a
+  // contribution is fabricated is a property of the CALLER: the same module's
+  // globs ARE a population for an importer that reads them and a fabrication
+  // for one that takes a single constant out of the file. One declaration
+  // cannot be both, so the caller's own BINDING decides. Fixtures first, in
+  // both directions, then the live shape the card was filed for.
+  const bindingOf = (clause) =>
+    firstPartyImportBindings('scripts/fixture.mjs', `${clause} from './invoked-as.mjs';\n`)
+      .get('scripts/invoked-as.mjs') ?? null;
+  t(
+    'a named import binds its names, read at the EXPORTER\'s spelling rather than the local alias',
+    bindingOf('import { ALPHA, BETA as LOCAL }')?.names.join(' · ') === 'ALPHA · BETA'
+      && bindingOf('import { ALPHA, BETA as LOCAL }')?.whole === false,
+    JSON.stringify(bindingOf('import { ALPHA, BETA as LOCAL }')),
+  );
+  t(
+    'and every clause with no name list to read binds the WHOLE module — namespace, default, mixed, re-export,'
+      + ' side-effect — which is the inheriting direction and therefore the direction an unreadable clause takes',
+    [
+      bindingOf('import * as everything'),
+      bindingOf('import theDefault'),
+      bindingOf('import theDefault, { ALPHA }'),
+      bindingOf('export { ALPHA }'),
+      firstPartyImportBindings('scripts/fixture.mjs', "import './invoked-as.mjs';\n").get('scripts/invoked-as.mjs'),
+    ].every((b) => b?.whole === true && b.names.length === 0),
+  );
+
+  // The exporter half. The fixture carries one declaration of every shape the
+  // recogniser must answer, so a widening or a narrowing of it fails HERE with
+  // the shape named rather than as a lead count nobody can attribute after.
+  const valueExporterFixture = [
+    "export const TIER_NAME = 'a-model-id';",
+    'export const LIMIT = 12;',
+    'export const OPEN = true;',
+    'export const NOTHING = null;',
+    "export const ANCHOR_DIR = 'scripts/adr-anchors';",
+    'export const GLOBS = [',
+    "  'packages/spec/src/**',",
+    '];',
+    'export const TABLE = { where: \'packages/plugins\' };',
+    'export function covers(glob, candidate) {',
+    '  return glob === candidate;',
+    '}',
+    'export class Walker {}',
+    'export const JOINED = ANCHOR_DIR + \'/shards\';',
+    'export const WRAPPED =',
+    "  'scripts/adr-anchors';",
+    'const NOT_EXPORTED = \'x\';',
+    'export { NOT_EXPORTED };',
+  ].join('\n');
+  const valueOf = (name) => exportedValueConstant(valueExporterFixture, name);
+  t(
+    'exportedValueConstant reads a string, a number, a boolean and null as VALUES, and the string carries its own text',
+    valueOf('TIER_NAME')?.literal === 'a-model-id'
+      && valueOf('ANCHOR_DIR')?.literal === 'scripts/adr-anchors'
+      && valueOf('LIMIT')?.literal === null
+      && valueOf('OPEN')?.literal === null
+      && valueOf('NOTHING')?.literal === null,
+    JSON.stringify(['TIER_NAME', 'ANCHOR_DIR', 'LIMIT', 'OPEN', 'NOTHING'].map((n) => [n, valueOf(n)])),
+  );
+  t(
+    'and refuses every other declaration — an array, an object, a function, a class, a computed initialiser,'
+      + ' one wrapped onto a second line, a name re-exported rather than declared, and a name the module never declares',
+    ['GLOBS', 'TABLE', 'covers', 'Walker', 'JOINED', 'WRAPPED', 'NOT_EXPORTED', 'ABSENT'].every((n) => valueOf(n) === null),
+    JSON.stringify(['GLOBS', 'TABLE', 'covers', 'Walker', 'JOINED', 'WRAPPED', 'NOT_EXPORTED', 'ABSENT'].map((n) => [n, valueOf(n)])),
+  );
+
+  // The rule itself, over that one fixture module and one fixture population.
+  const fixturePopulation = ['packages/spec/src/**', 'scripts/adr-anchors'];
+  const binds = (...names) => ({ names, whole: false });
+  t(
+    'a caller that binds ONLY value constants inherits nothing — a value carries no behaviour and no table,'
+      + ' so every pair the module would contribute to it is a fabricated lead',
+    importBindsNoPopulation(binds('TIER_NAME'), valueExporterFixture, fixturePopulation) === true
+      && importBindsNoPopulation(binds('TIER_NAME', 'LIMIT', 'OPEN'), valueExporterFixture, fixturePopulation) === true,
+  );
+  t(
+    'and a table, a function, a class, an unreadable name, a WHOLE-module clause and a mixed list all keep inheriting'
+      + ' — the follow exists because a population MOVED into a shared module, and it moves into exactly those shapes',
+    [
+      binds('GLOBS'),
+      binds('covers'),
+      binds('Walker'),
+      binds('ABSENT'),
+      binds('TIER_NAME', 'GLOBS'),
+      { names: [], whole: true },
+      { names: [], whole: false },
+    ].every((b) => importBindsNoPopulation(b, valueExporterFixture, fixturePopulation) === false),
+  );
+  t(
+    'but a string constant whose own text is one of the module\'s paths is NOT inert: a one-path population is a'
+      + ' population, and binding it is reading it',
+    importBindsNoPopulation(binds('ANCHOR_DIR'), valueExporterFixture, fixturePopulation) === false
+      && importBindsNoPopulation(binds('ANCHOR_DIR'), valueExporterFixture, []) === true,
+  );
+
+  // The live halves. Counts in the names, for the reason the follow's own live
+  // cases carry them: a case that can only be read as "something was found" is
+  // the shape the old pin failed in.
+  const inertEdges = [];
+  const bearingEdges = [];
+  for (const [check, entry] of liveDiscovery.byCheck) {
+    if (entry.selfTest) continue;
+    for (const f of entry.files ?? []) {
+      if (!existsSync(nodePath.join(ROOT, f))) continue;
+      for (const [mod, binding] of firstPartyImportBindings(f, liveSource(f))) {
+        if (liveGateFiles.has(mod)) continue;
+        const edge = [check, mod, binding.whole ? '*' : binding.names.join('+')];
+        if (importBindsNoPopulation(binding, liveSource(mod), liveModuleHints(mod))) inertEdges.push(edge);
+        else bearingEdges.push(edge);
+      }
+    }
+  }
+  t(
+    `the narrowing is NOT vacuous on this tree — ${inertEdges.length} of ${inertEdges.length + bearingEdges.length}`
+      + ` followed import edge(s) bind only value constants`
+      + ` (${inertEdges.map(([c, m, n]) => `${c} -> ${m} {${n}}`).join(' · ') || 'none'})`,
+    inertEdges.length > 0,
+  );
+  const stillFabricating = inertEdges.filter(([check, mod]) => {
+    const entry = liveDiscovery.byCheck.get(check);
+    // A family whose OTHER file reads the same module's population inherits it
+    // on that file's account — the union is the rule, so only an edge no file
+    // of the family bound population-bearingly is owed an empty origin here.
+    if ((entry?.populationImports ?? new Set()).has(mod)) return false;
+    return [...(entry?.hintOrigin ?? new Map())].some(([, origin]) => origin === mod);
+  });
+  t(
+    'and not one of those edges contributes a hint to the family that binds it'
+      + `${stillFabricating.length ? ` — STILL FABRICATING: ${stillFabricating.map(([c, m]) => `${c} <- ${m}`).join(' · ')}` : ''}`,
+    stillFabricating.length === 0,
+  );
+  const bothWays = [...new Set(inertEdges.map(([, m]) => m))].filter((m) => bearingEdges.some(([, bm]) => bm === m));
+  t(
+    'the answer is a property of the CALLER and not of the module — the live tree has'
+      + ` ${bothWays.length} module(s) answering BOTH ways (${bothWays.join(' · ') || 'none'}),`
+      + ' which is the shape no per-module declaration can express',
+    bothWays.length > 0,
+  );
+  const populationLost = bothWays.filter((mod) =>
+    liveModuleHints(mod).length > 0
+    && bearingEdges
+      .filter(([, bm]) => bm === mod)
+      .some(([check]) => !liveModuleHints(mod).every((h) => (liveDiscovery.byCheck.get(check)?.hints ?? []).includes(h))),
+  );
+  t(
+    'and the caller that BINDS the population still inherits every path of it'
+      + `${populationLost.length ? ` — LOST: ${populationLost.join(' · ')}` : ''}`,
+    populationLost.length === 0,
+  );
+
   // The live halves. Counts in the names: a case that can only be read as
   // "something was found" is the shape the old pin failed in.
   const inheriting = [...liveDiscovery.byCheck].filter(([, e]) => (e.hintOrigin?.size ?? 0) > 0);
@@ -20152,8 +20676,13 @@ function selfTest() {
       if (!existsSync(nodePath.join(ROOT, f))) continue;
       const source = liveSource(f);
       own.push(...extractWatchHints(source, f, { tree: liveTree }));
-      for (const mod of firstPartyImportTargets(f, source)) {
+      // Modelled through the BINDING (#17991), never through the bare edge: a
+      // reconstruction that summed every followed module would redden for the
+      // one family whose import binds a value, while the case it feeds asserts
+      // in its own name that a caller decides what it inherits.
+      for (const [mod, binding] of firstPartyImportBindings(f, source)) {
         if (liveGateFiles.has(mod) || direct.includes(mod)) continue;
+        if (importBindsNoPopulation(binding, liveSource(mod), liveModuleHints(mod))) continue;
         direct.push(mod);
       }
       // The second followed edge (#13511), reconstructed here for the same
@@ -20185,7 +20714,13 @@ function selfTest() {
     // The depth bound, family by family: a module reached only through another
     // module is not in the followed set. Non-vacuous wherever a followed
     // module imports something the family does not import itself.
-    const twoHop = direct.flatMap((m) => liveTargets(m)).filter((m) => !direct.includes(m));
+    // "Reached ONLY through another module" is the claim, so a module the
+    // family imports ITSELF is out of the two-hop set however it was bound: an
+    // inert edge (#17991) is absent from `direct` and present in `entry.imports`,
+    // and without this second filter it would read as a depth-2 follow.
+    const twoHop = direct
+      .flatMap((m) => liveTargets(m))
+      .filter((m) => !direct.includes(m) && !(entry.imports ?? []).includes(m));
     if (twoHop.length > 0 && (entry.imports ?? []).some((m) => twoHop.includes(m))) deeperOnly.push(check);
   }
   t(
@@ -20923,6 +21458,76 @@ function selfTest() {
   t('the live tree has at least one paths-filtered workflow (the guard is not vacuous)', liveWorkflowEntries.some((e) => extractTriggerPaths(e.text).length > 0));
   const liveGaps = checkFamilyCoverageGaps(liveWorkflowEntries);
   t(`every real paths-filtered workflow discovers a check family or declares why not (gaps: ${liveGaps.join(', ') || 'none'})`, liveGaps.length === 0);
+
+  // ── ONE discovery pass per tree, and the collapse is OBSERVED (#18201) ────
+  //
+  // The memo's whole symptom is work that does NOT happen, and absent work is
+  // invisible to every other case here: each of them asks what discovery
+  // ANSWERS, and the answer is identical either way — which is the point of
+  // the memo and also the reason nothing already in this file can tell a
+  // collapsed pass from a repeated one. So the pass counter is read directly,
+  // and both directions are pinned: the default tree is discovered once, and a
+  // tree that is NOT that object is never served its answer.
+  //
+  // ⛔ The second half is not decoration. The cheap wrong memo is one module
+  // slot ignoring the argument, and under it every fixture-tree case in this
+  // file — the directory-landing tree, the class tree, the no-tree probe —
+  // would be answered about the REAL tree while still reading as a pass on the
+  // day their expectations happen to coincide. The pin that costs a pass is
+  // what makes that unbuildable.
+  const warmDiscovery = discoverFamilies();
+  const passesWarm = discoveryPassCount();
+  const defaultAgain = discoverFamilies();
+  const defaultOnceMore = discoverFamilies();
+  t(
+    'the default tree is discovered ONCE per process — two further calls compute no pass',
+    discoveryPassCount() === passesWarm,
+    `passes before ${passesWarm}, after ${discoveryPassCount()}`,
+  );
+  t(
+    'and those calls hand back the SAME object, so an entry ablated and restored is one entry',
+    defaultAgain === warmDiscovery && defaultOnceMore === warmDiscovery,
+  );
+  t(
+    'the corpus behind it is listed once too — one bundle, so the sweep and the discovery cannot describe different revisions',
+    repoCorpus() === repoCorpus() && repoCorpus().tree === repoCorpus().tree,
+  );
+  t(
+    "and that listing is the tracked corpus itself, not a trimmed copy of it",
+    repoCorpus().files.length === trackedFiles().length && repoCorpus().tree.files.size === repoCorpus().files.length,
+  );
+  // The derivation's own collapse, pinned at the seam that used to pay twice:
+  // `derive` takes this exact tree object and `gateFamilyFiles` — reached from
+  // `changeKindGates`, a whole call chain away — asks for the default one. The
+  // two are the same object, so the second ask is the first pass.
+  const passesBeforeSeam = discoveryPassCount();
+  const seamDiscovery = discoverFamilies({ tree: repoCorpus().tree });
+  const seamFiles = gateFamilyFiles();
+  t(
+    'the tree `derive` hands down and the default `gateFamilyFiles` asks for are ONE pass, not two',
+    discoveryPassCount() === passesBeforeSeam && seamDiscovery === warmDiscovery && seamFiles.size > 0,
+    `passes before ${passesBeforeSeam}, after ${discoveryPassCount()}, gate files ${seamFiles.size}`,
+  );
+  // A DIFFERENT tree object, built from the very same listing: identical
+  // content, and still its own pass. Content is not the key — the object is —
+  // because a caller that built its own bundle is asking about ITS tree.
+  const twinTree = watchHintTree(repoCorpus().files);
+  const passesBeforeTwin = discoveryPassCount();
+  const twinDiscovery = discoverFamilies({ tree: twinTree });
+  t(
+    'a tree object that is not the corpus’s is never served its answer — same content, its own pass',
+    discoveryPassCount() === passesBeforeTwin + 1 && twinDiscovery !== warmDiscovery,
+    `passes before ${passesBeforeTwin}, after ${discoveryPassCount()}`,
+  );
+  // The no-tree probe is not an object, so it cannot be a key at all — and a
+  // memo that tried would throw rather than answer. It computes every time.
+  const passesBeforeNull = discoveryPassCount();
+  const nullDiscovery = discoverFamilies({ tree: null });
+  t(
+    'the no-tree probe is never memoised — it is not an object, and it still answers',
+    discoveryPassCount() === passesBeforeNull + 1 && nullDiscovery !== warmDiscovery && nullDiscovery.byCheck.size > 0,
+    `passes before ${passesBeforeNull}, after ${discoveryPassCount()}`,
+  );
 
   // ── The reachability sweep — the third verdict (#9883) ────────────────────
   //
@@ -22128,6 +22733,49 @@ function selfTest() {
   const bannerPresent = bannerLines({ identity: { ...hereIdentity, root: ROOT }, paths: ['packages/spec/src/index.ts'] });
   t('all paths present prints NO clearance line — absence and clearance must not share a spelling', !bannerPresent.join('\n').includes('absent from this tree') && bannerPresent.length === 2);
 
+  // ── An absent path with no assertion is NOT MEASURED ──────────────────────
+  //
+  // The banner above COUNTS absent paths and claims nothing; these pin that the
+  // count now ends the run when nothing says whose tree the paths are from. The
+  // pure half here, the three shapes end-to-end on the real CLI further down —
+  // the defect was an EXIT CODE that read as an answer, and only a child
+  // process measures one.
+  const localIdentity = { ...hereIdentity, root: ROOT };
+  const ABSENT = 'packages/this-repo-has-no-such-package/src/index.ts';
+  const PRESENT = 'packages/spec/src/index.ts';
+  t(
+    'the absent set and the banner\'s count are ONE reading, so a refusal can never name a path the banner did not',
+    absentDeclaredPaths({ identity: localIdentity, paths: [PRESENT, ABSENT] }).join() === ABSENT
+      && bannerLines({ identity: localIdentity, paths: [PRESENT, ABSENT] }).join('\n').includes(ABSENT),
+  );
+  t(
+    'a glob is a PATTERN, not an absent file — counting one would refuse every wildcard dispatch',
+    absentDeclaredPaths({ identity: localIdentity, paths: ['packages/*/src/index.ts'] }).length === 0,
+  );
+  const unassertedAbsent = absentPathVerdict({ asserted: null, identity: localIdentity, paths: [PRESENT, ABSENT] });
+  t('⭐ an absent path with no assertion REFUSES — the measured defect answered 0 here', !unassertedAbsent.ok);
+  const unassertedText = unassertedAbsent.lines.join('\n');
+  t('and it names the absent path, never just a count', unassertedText.includes(ABSENT) && unassertedAbsent.missing.join() === ABSENT);
+  t('and it says NOT MEASURED in those words, so the exit code is not the only tell', unassertedText.includes('NOT MEASURED'));
+  t(
+    'and it carries BOTH resolving spellings, so the remedy is a copy rather than a deduction',
+    unassertedText.includes(`${REPO_FLAG} ${hereIdentity.slug}`) && unassertedText.includes(`${REPO_FLAG} owner/the-other-repo`),
+  );
+  t(
+    'CONTROL: all paths present is not a refusal — this guard must not tax an ordinary dispatch',
+    absentPathVerdict({ asserted: null, identity: localIdentity, paths: [PRESENT] }).ok,
+  );
+  t(
+    'CONTROL: an assertion present hands the run to the wrong-repo refusal instead — this branch is unreached',
+    absentPathVerdict({ asserted: 'an-owner/a-repo', identity: localIdentity, paths: [ABSENT] }).ok
+      && absentPathVerdict({ asserted: 'other-owner/other-repo', identity: localIdentity, paths: [ABSENT] }).ok,
+  );
+  t(
+    'with the remote unreadable the refusal says the assertion cannot be CHECKED either, rather than printing a slug it does not have',
+    absentPathVerdict({ asserted: null, identity: { root: ROOT, head: null, remote: null, slug: null }, paths: [ABSENT] })
+      .lines.join('\n').includes('UNVERIFIABLE'),
+  );
+
   // ── Base drift (#11540) ───────────────────────────────────────────────────
   // The banner names the commit an answer came from; on a stale checkout that
   // reads as ordinary provenance. These pin the loudness, and pin that the
@@ -22436,6 +23084,18 @@ function selfTest() {
   );
   t('the banner stays OFF stdout, which is pasted verbatim into claim comments', !(plainRun.stdout ?? '').includes('gate list derived from the tree of'));
   const liveSlug = repoIdentity().slug;
+  /**
+   * A CLI run whose card names a path that is HYPOTHETICAL by design — the
+   * pending-changeset probe's path, a surface not written yet. Those runs are
+   * exactly what the absent-path refusal ends: unasserted, a path not in this
+   * tree is NOT MEASURED and the run exits 3 before deriving anything. So the
+   * assertion is spelled ONCE, here, and every probe of a hypothetical path
+   * carries it — ⛔ never by weakening the refusal for the mode a probe happens
+   * to use. With no readable remote there is no assertion to make and these
+   * probes refuse; the cases that use this helper say so in their own branch
+   * rather than passing over the empty output that comes back.
+   */
+  const runCliHypothetical = (args) => runCli(liveSlug ? [...args, REPO_FLAG, liveSlug] : args);
   const assertedRun = runCli(['--tier', 'packages/spec/src/index.ts', REPO_FLAG, liveSlug ?? 'an-owner/a-repo']);
   t(
     liveSlug
@@ -22452,6 +23112,47 @@ function selfTest() {
   t('and pointing the flag at a checkout refuses instead of retargeting', wrongShapeRun.status === 2 && (wrongShapeRun.stdout ?? '').trim() === '');
   const valuelessRun = runCli(['--tier', 'packages/spec/src/index.ts', REPO_FLAG]);
   t('a valueless assertion refuses rather than deriving as though it were absent', valuelessRun.status === 2);
+
+  // ── The three shapes an absent path can arrive in, end to end ─────────────
+  //
+  // Measured on the real CLI and not on the verdict function, because what was
+  // wrong was the process EXIT CODE: a seat read 0 and wrote "it refuses
+  // objectui paths by design" into five dispatch texts. A pure function cannot
+  // hold that, and the derivation the middle case restores is a full tree walk
+  // no fixture stands in for.
+  const ABSENT_CLI = 'packages/this-repo-has-no-such-package/src/index.ts';
+  const absentUnasserted = runCli(['--commands', ABSENT_CLI]);
+  t(
+    `⭐ (a) an absent path with no ${REPO_FLAG} exits ${EXIT_PREREQUISITE_NOT_MET} = NOT MEASURED — it answered 0 before this guard`,
+    absentUnasserted.status === EXIT_PREREQUISITE_NOT_MET,
+  );
+  t('and it names the absent path on stderr, where the dispatcher reads it', (absentUnasserted.stderr ?? '').includes(ABSENT_CLI));
+  t(
+    'and prints NOTHING on stdout — a refusal must not also be pasteable into a dispatch text',
+    (absentUnasserted.stdout ?? '').trim() === '',
+  );
+  const absentAssertedHere = runCli(['--commands', ABSENT_CLI, REPO_FLAG, liveSlug ?? 'an-owner/a-repo']);
+  t(
+    liveSlug
+      ? `⭐ (b) asserting THIS repo restores the derivation — the not-yet-written reading is still reachable, by one flag`
+      : 'with no readable remote even the asserted form refuses, rather than passing unverified',
+    liveSlug
+      ? absentAssertedHere.status === 0 && (absentAssertedHere.stdout ?? '').trim().length > 0
+      : absentAssertedHere.status === 2,
+  );
+  t(
+    'and the restored derivation still files the absent path as a pending changeset, not as a clearance',
+    !liveSlug || (absentAssertedHere.stderr ?? '').includes('apply once this card'),
+  );
+  const absentAssertedOther = runCli(['--commands', ABSENT_CLI, REPO_FLAG, 'not-an-owner/not-a-repo']);
+  t(
+    '⭐ (c) naming ANOTHER repo keeps its own exit 2 and its own text — this guard did not swallow the older refusal',
+    absentAssertedOther.status === 2 && (absentAssertedOther.stderr ?? '').includes('REFUSING — asked for'),
+  );
+  t(
+    `CONTROL: a path that EXISTS still derives at 0 with no ${REPO_FLAG} — the guard fires on absence, not on every unasserted run`,
+    runCli(['--commands', 'packages/spec/src/index.ts']).status === 0,
+  );
   // The published catalog on the real CLI (2026-09-10 ruling): the mandate
   // prints for a catalog file and stays absent for an internal references
   // file — the two acceptance paths, measured end to end rather than on the
@@ -22536,13 +23237,33 @@ function selfTest() {
     // changeset. Those families must move into the matched list and the section
     // must stop printing — the double-print is the shape this section would be
     // worst as, since the two headings make different claims about time.
+    // ⚠️ This probe's changeset path is HYPOTHETICAL — that is the whole point
+    // of it — so it is the first caller in this tree to owe the assertion the
+    // absent-path refusal now requires: unasserted, a path not in the tree is
+    // NOT MEASURED and the run ends at exit 3 before any derivation. Measured
+    // on this battery: adding the branch turned this case and the one below it
+    // red, and asserting the repo is the whole repair. That is the migration
+    // every dispatcher of a not-yet-written path owes, done here on the only
+    // in-tree caller that has one.
+    const assertHere = liveSlug ? [REPO_FLAG, liveSlug] : [];
     const withChangeset = spawnSync(
       process.execPath,
-      [SELF, 'packages/spec/src/data/filter.zod.ts', `.${'changeset'}/pinned-by-the-self-test.md`],
+      [SELF, 'packages/spec/src/data/filter.zod.ts', `.${'changeset'}/pinned-by-the-self-test.md`, ...assertHere],
       { encoding: 'utf8', cwd: ROOT },
     );
     const withOut = withChangeset.stdout ?? '';
-    t('a run whose surface ALREADY carries a changeset answers at all', withChangeset.status === 0 && withOut.trim().length > 0);
+    // Both branches assert a SHAPE. With no readable remote the assertion above
+    // cannot be built, so the hypothetical path stays ambiguous and the run
+    // refuses — pinned as a refusal rather than skipped, so the no-remote case
+    // can never pass by asserting nothing over empty output.
+    t(
+      liveSlug
+        ? 'a run whose surface ALREADY carries a changeset answers at all'
+        : 'with no readable remote its repo cannot be asserted, so the hypothetical path stays NOT MEASURED',
+      liveSlug
+        ? withChangeset.status === 0 && withOut.trim().length > 0
+        : withChangeset.status === EXIT_PREREQUISITE_NOT_MET && withOut.trim() === '',
+    );
     t('and prints no pending section — there is no temporal gap left to disclose', !/^Once a changeset exists,/m.test(withOut));
     // ⚠️ Counted per COMMAND, not per substring (#14880). `check-empty-changeset`
     // is invoked two ways by CI — `--self-test` beside a `--base` run — and
@@ -22557,8 +23278,12 @@ function selfTest() {
       .map((l) => l.slice(4).split('   ')[0].trim())
       .filter((c) => c.includes('check-empty-changeset'));
     t(
-      'because those families are in the MATCHED list instead, each one exactly once',
-      changesetCommands.length > 0
+      liveSlug
+        ? 'because those families are in the MATCHED list instead, each one exactly once'
+        : 'and with the run refused there is no matched list to check — it printed no command at all',
+      !liveSlug
+        ? changesetCommands.length === 0 && withOut.trim() === ''
+        : changesetCommands.length > 0
         && new Set(changesetCommands).size === changesetCommands.length
         // The `--base` run is the one this section is ABOUT — it is the family
         // a changeset brings into scope. ⚠️ The SPELLING this looks for moved
@@ -24536,7 +25261,7 @@ function selfTest() {
       // assertion rather than lost along with the probe. The second path is the
       // gate's own script, which is how a card honestly reaches this family.
       const vbCard = [CHANGESET_PROBE_PATH, VALUE_BEARING_PROBE_SCRIPT];
-      const jsonRun = runCli(['--json', ...vbCard]);
+      const jsonRun = runCliHypothetical(['--json', ...vbCard]);
       const doc = jsonRun.status === 0 ? JSON.parse(jsonRun.stdout ?? '{}') : null;
       const vbRows = [...(doc?.matched ?? []), ...(doc?.alwaysRunsPopulation ?? [])].filter((row) => row.notRunnable);
       t('CONTROL: this tree still derives at least one VALUE-BEARING family for a changeset path', Boolean(doc) && vbRows.length >= 1);
@@ -24545,7 +25270,7 @@ function selfTest() {
         t('CONTROL: and the runnable union WITHHOLDS it — which is the whole reason the bucket exists', !doc.commands.includes(vbCommand));
         const vbRecord = nodePath.join(vbTmp, 'ran-value-bearing.list');
         writeFileSync(vbRecord, `${[...doc.commands, vbCommand].join('\n')}\n`);
-        const vbRun = runCli([RAN_FLAG, vbRecord, ...vbCard]);
+        const vbRun = runCliHypothetical([RAN_FLAG, vbRecord, ...vbCard]);
         const vbOut = vbRun.stdout ?? '';
         t(
           '⭐ a real run that RECORDS it lands it in the VALUE-BEARING bucket, with the remainder heading gone entirely',
@@ -24581,12 +25306,12 @@ function selfTest() {
     // a changeset path alone only through the gate's own exclusion constant,
     // which #15753 stopped reading as a watch surface. The first case below is
     // that removal, pinned; the second is the card as it must now be spelled.
-    const changesetOnlyRun = runCli([CHANGESET_PROBE_PATH]);
+    const changesetOnlyRun = runCliHypothetical([CHANGESET_PROBE_PATH]);
     t(
       '⭐ a changeset path alone reaches NO value-bearing family any more — the noise floor it used to be derived through is an exclusion, not a surface (#15753)',
       changesetOnlyRun.status === 0 && !(changesetOnlyRun.stdout ?? '').includes('Value-bearing argv'),
     );
-    const notMeasuredRun = runCli([CHANGESET_PROBE_PATH, VALUE_BEARING_PROBE_SCRIPT]);
+    const notMeasuredRun = runCliHypothetical([CHANGESET_PROBE_PATH, VALUE_BEARING_PROBE_SCRIPT]);
     const notMeasuredOut = notMeasuredRun.stdout ?? '';
     t(
       'CONTROL: this card still reaches a family this tool cannot run, so the wording below is judged on a live row',
@@ -24601,7 +25326,7 @@ function selfTest() {
       notMeasuredOut.includes('node scripts/check-adr-0087-registration.mjs --base origin/main')
         && notMeasuredOut.includes("is this script's own documented default; CI pins it to $MERGE_BASE"),
     );
-    const notMeasuredCommands = runCli(['--commands', CHANGESET_PROBE_PATH, VALUE_BEARING_PROBE_SCRIPT]);
+    const notMeasuredCommands = runCliHypothetical(['--commands', CHANGESET_PROBE_PATH, VALUE_BEARING_PROBE_SCRIPT]);
     t(
       '⭐ --commands says it on stderr too, one line per family, where it cannot corrupt the harvest',
       (notMeasuredCommands.stderr ?? '').includes('⊘ NOT MEASURED — scripts/pm/check-half-states.mjs')
@@ -24904,6 +25629,30 @@ if (invokedDirectly) {
         process.exit(2);
       }
       console.error(`  ${REPO_FLAG} '${argv.assertion}' checked against this checkout's '${DEFAULT_BASE_REMOTE}' remote — it holds.`);
+    }
+    // The third branch, at the point where the two facts above meet: paths the
+    // banner just counted as absent, and no assertion to say whose tree they
+    // are from. Reached only when `argv.assertion` is null — a wrong-repo
+    // assertion already ended the run two lines up with its own exit 2, and a
+    // satisfied one has just said so — so this refuses exactly the ambiguous
+    // run and no other.
+    //
+    // Placed BEFORE every mode branch, not inside the derivation: `--tier`
+    // reads no workflow and derives no family, but the assertion refusal above
+    // it already ends a `--tier` run over another repo's slug, so the repo an
+    // answer is about is ALREADY load-bearing there. Exempting `--tier` from
+    // this half would resolve the same ambiguity silently toward the harmless
+    // reading in the one mode a claim comment pastes from.
+    //
+    // ⛔ Only the paths NAMED on argv reach here. A `--changed` derivation
+    // names paths read out of this tree's own diff, which is the one input that
+    // cannot be another repo's, and the banner has never counted them either.
+    if (argvPaths.length > 0) {
+      const absent = absentPathVerdict({ asserted: argv.assertion, identity, paths: declaredPaths });
+      if (!absent.ok) {
+        for (const line of absent.lines) console.error(line);
+        process.exit(EXIT_PREREQUISITE_NOT_MET);
+      }
     }
     console.error('');
     // Read BEFORE the derivation, not inside it. A record that cannot be read

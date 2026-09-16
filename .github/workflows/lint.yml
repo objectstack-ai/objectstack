@@ -1352,6 +1352,31 @@ jobs:
       - name: Governed-surface prose pin
         run: pnpm check:pm-governed-prose
 
+      # Settings deny-roster pin (#18281) — the same shape as the two steps
+      # above, one lock over. The charter's ACCEPT refusal names the MCP write
+      # tools by POINTING at `permissions.deny` in `.claude/settings.json`
+      # rather than enumerating them, and nothing under `scripts/` read that
+      # list's membership: a tool declared closed could be absent from the file
+      # with every gate green (#18218 was exactly that, for an entire day, and
+      # a human found it). This step holds the two lists equal in both
+      # directions. Like the prose pin it runs the self-test AND the gate, and
+      # it carries no `if:` and no paths filter: the run is one file read, and
+      # a filter here would be a third copy of "which paths are the two sides"
+      # to keep in step — whose failure mode is a silent skip of the very
+      # reconciliation this step is.
+      - name: 'Settings deny-roster pin (#18281)'
+        run: pnpm check:pm-settings-deny-roster
+
+      # Expected-skips roster self-test (#18308) — same family and the same
+      # split as the widening-tell and prior-ruling steps above: the LIVE read
+      # takes a PR head and judges its check-runs over REST, so it is a tool a
+      # seat runs against the PR in front of it, not a verdict about the PR
+      # that happens to run CI next. Only the offline self-test runs here — it
+      # is the only instrument this roster's matching rules have, which is
+      # exactly the family `check:self-test-wired` requires this step for.
+      - name: Expected-skips roster self-test
+        run: pnpm check:pm-expected-skips
+
       # Release-rehearsal clone preflight self-test (#9555). A local
       # `pnpm run version` rehearsal — the prescribed verification route for
       # every release-machinery change — HANGS FOREVER in an agent container:
@@ -1475,13 +1500,14 @@ jobs:
           run_self_test node scripts/pm/git-history.mjs --self-test
           run_self_test node scripts/check-engine-split-ratio.mjs --self-test
           run_self_test bash scripts/collect-release-notes.sh --self-test
+          run_self_test node scripts/pm/check-harness-current.mjs --self-test
           if [ -n "$failed" ]; then
             echo ""
             echo "Shallow-history guard self-tests — the following FAILED:"
             printf "%s" "$failed"
             exit 1
           fi
-          echo "Shallow-history guard self-tests — all three ran and passed"
+          echo "Shallow-history guard self-tests — all four ran and passed"
 
       # Step-collector gate (#10814) — the guard over the two steps above, and
       # over any step that grows their shape later. It has a static half and a
@@ -3981,6 +4007,31 @@ jobs:
       # IDIOM note at the top of this file. Pure functions, no IO, milliseconds.
       - name: Shard partitioner self-test
         run: node scripts/partition-test-shards.mjs --self-test
+
+      # A self-test that RUNS but cannot fail anything (#17097) — the sibling of
+      # the defect above, one turn further out. `scripts/report-test-timings.mjs`
+      # ships a real self-test: 61 cases across 4 batteries, a naive prefix-only
+      # reference parser plus three controls that assert it gets the answer WRONG
+      # exactly where the real parser gets it right. ci.yml names it, so
+      # `check:self-test-wired` was green. But every `Test Core` step that runs
+      # that script carries `continue-on-error: true`, and MUST: #16454 rules the
+      # timing feature report-only, and #14469 is the measured cost of an
+      # unguarded diagnostics step there (a FinalizeArtifact 403 on a 313-byte
+      # upload evicted a fully green shard from the merge queue). So the guard
+      # that makes the feature safe was the same guard that disarmed its
+      # self-test — the verdict was produced and then discarded, and the wiring
+      # gate was satisfied by an invocation that could not fail.
+      #
+      # ⇒ the self-test runs HERE, where it has teeth, and ⛔ is no longer
+      # invoked from ci.yml: ONE enforcing run, not one enforcing and one
+      # decorative. ci.yml's own `continue-on-error` on the capture and merge
+      # steps is untouched by this — the report-only property belongs to that
+      # workflow, not to this script.
+      # Invoked as `node` rather than through a `pnpm check:*` alias for the same
+      # reason as the steps above: see the GATE INVOCATION IDIOM note at the top
+      # of this file. In-process fixtures, no IO, milliseconds.
+      - name: Test-timing parser self-test
+        run: node scripts/report-test-timings.mjs --self-test
 
       # Hand-written `.d.mts` mirrors (#10549). `scripts/js-comment-mask.mjs`
       # and `scripts/check-regen-pending.mjs` are untyped `.mjs` that each ship

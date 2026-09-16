@@ -9,7 +9,13 @@ import type {
 } from '@objectstack/spec/contracts';
 import { emptyGroupValueFor, type FilterCondition } from '@objectstack/spec/data';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
-import { bucketKeyToCalendarRange, filterTokenContextFrom, resolveFilterTokens } from '@objectstack/core';
+import {
+  bucketKeyToCalendarRange,
+  filterTokenContextFrom,
+  resolveAnalyticsDateRangeString,
+  resolveFilterTokens,
+  type LoweredDateRangeWindow,
+} from '@objectstack/core';
 import type { CompiledDataset, DerivedMeasureSpec } from './dataset-compiler.js';
 import { explicitDateRangeWindow } from './date-range-array-arm.js';
 import { datasetInvalidError } from './dataset-refusal.js';
@@ -498,6 +504,79 @@ function shiftYear(date: string, years: number): string {
   const d = new Date(parseUTC(date));
   d.setUTCFullYear(d.getUTCFullYear() + years);
   return toISODate(d.getTime());
+}
+
+/**
+ * [#17973] Lower one `dateRange` the way `compareTo` reads it — this executor's
+ * face in the shared `dateRange` conformance kit
+ * (`analyticsDateRangeConformanceFindings`), and the ONE call site
+ * {@link DatasetExecutor.runCompare} uses for either arm.
+ *
+ * ## What was wrong
+ *
+ * The STRING arm was spelled `[td.dateRange, td.dateRange]` — the degenerate
+ * `[range, range]` fallback #17015 removed from every OTHER analytics face.
+ * `parseUTC` was handed the preset NAME, so a DECLARED, honoured member of the
+ * closed vocabulary was refused. MEASURED on `b3b43b6ea`, `last_30_days` plus
+ * `compareTo`:
+ *
+ * ```
+ * DATASET_INVALID  400  [dataset-executor] invalid date in dateRange: "last_30_days"
+ * ```
+ *
+ * ⇒ the diagnostic is not merely unhelpful, it is FALSE, and it sends the
+ * author to check a date that is exactly what the schema and the docs tell them
+ * to write. This face was not in #17015's kit, so nothing measured it.
+ *
+ * ## Why it reports INSTANTS while `runCompare` shifts DAYS
+ *
+ * What is reported here is the window the VOCABULARY resolved, which is what
+ * the kit holds every face to. Projecting it onto this module's UTC calendar is
+ * a per-face calendar translation and stays downstream, in
+ * {@link inclusiveUtcDayWindow} — the same split `lowerPreviewDateRange` makes
+ * when it leaves the #3777 bare-day widening in its own predicate.
+ *
+ * ⛔ The ARRAY arm is the CALLER's explicit window and is handed back bound for
+ * bound, with the inclusive upper reading it has always had (#16179) — the
+ * refusal for anything that is not a two-bound window is
+ * `explicitDateRangeWindow`'s, unchanged (#17124).
+ *
+ * @throws the ADR-0112 `400 ANALYTICS_DATE_RANGE_UNRECOGNIZED` envelope for a
+ *   string outside `DATE_RANGE_PRESETS` — the same envelope the sibling faces
+ *   raise, replacing the `DATASET_INVALID` this arm used to answer with.
+ */
+export function lowerDatasetCompareDateRange(
+  dateRange: string | readonly unknown[],
+  timezone?: string,
+): LoweredDateRangeWindow {
+  if (!Array.isArray(dateRange)) {
+    const window = resolveAnalyticsDateRangeString(dateRange as string, { timezone });
+    return { start: window.start, end: window.end, endExclusive: window.endExclusive };
+  }
+  const [start, end] = explicitDateRangeWindow(dateRange as readonly unknown[]);
+  return { start, end, endExclusive: false };
+}
+
+/**
+ * [#17973] The UTC calendar days a lowered window covers, as the INCLUSIVE
+ * `[first, last]` pair every piece of `compareTo` math in this module takes.
+ *
+ * {@link shiftRange} measures `previousPeriod`'s length as a count of whole
+ * days between two day-starts, and {@link alignedCompareBucketKey} reads
+ * `currentRange[1]` as the LAST bucket the window contains — so both bounds
+ * must name days the window really covers.
+ *
+ * ⚠️ `endExclusive` is therefore load-bearing, not decoration: the ten calendar
+ * presets report the first instant AFTER the window (`this_month` ends at the
+ * next month's start), so the last day they cover is the one holding the
+ * instant before that bound. Reading their bound as inclusive would make every
+ * calendar preset one day too long and shift `previousPeriod` by a day. The
+ * three rolling presets end at NOW, a moment they REACH, so their bound is
+ * already the last day.
+ */
+function inclusiveUtcDayWindow(window: LoweredDateRangeWindow): [string, string] {
+  const endMs = parseUTC(window.end);
+  return [toISODate(parseUTC(window.start)), toISODate(window.endExclusive ? endMs - 1 : endMs)];
 }
 
 /**
@@ -1313,9 +1392,29 @@ export class DatasetExecutor {
     // bound in from the lower one, so a one-element array silently became a
     // point window HERE while the primary pass it is compared against may have
     // read the same document as all of history.
+    //
+    // [#17973] The STRING arm is the CLOSED preset vocabulary, lowered by the one
+    // shared `resolveAnalyticsDateRangeString` every other face calls and then
+    // projected onto this module's UTC calendar. ⛔ What this replaced was the
+    // degenerate `[range, range]` fallback #17015 removed everywhere else: it
+    // handed `parseUTC` the preset NAME, so `last_30_days` — declared, honoured,
+    // and exactly what the schema tells an author to write — came back as
+    // `DATASET_INVALID "invalid date in dateRange"`. A false diagnostic on a
+    // valid input has no repair to send the author to.
+    //
+    // The timezone precedence is `buildQuery`'s, verbatim, so the comparison
+    // window is resolved in the SAME calendar as the primary pass it is
+    // compared against — a preset resolved here in UTC while the primary pass
+    // read it in the org's zone would misalign the two grids by a day.
+    const lowered = lowerDatasetCompareDateRange(
+      td.dateRange as string | readonly unknown[],
+      selection.timezone ?? context?.timezone ?? 'UTC',
+    );
     const range: [string, string] = Array.isArray(td.dateRange)
-      ? explicitDateRangeWindow(td.dateRange as readonly unknown[])
-      : [td.dateRange as string, td.dateRange as string];
+      ? // The caller's own bounds, untouched — `explicitDateRangeWindow` already
+        // refused anything that is not a two-bound window (#17124).
+        [lowered.start, lowered.end]
+      : inclusiveUtcDayWindow(lowered);
     const shifted = shiftRange(range, cmp.kind);
     const shiftedTd = (selection.timeDimensions ?? []).map((t) =>
       t.dimension === dimension ? { ...t, dateRange: shifted } : t,

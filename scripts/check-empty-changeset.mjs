@@ -1,7 +1,23 @@
 #!/usr/bin/env node
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 //
-// check-empty-changeset -- a PR may not ADD an empty-frontmatter changeset.
+// check-empty-changeset -- two rules about what a PR may do to a
+// `.changeset/*.md`, both read off the diff's STATUS LETTERS against the merge
+// base, answered in one run:
+//
+//   1. EMPTY FRONTMATTER (#5471) -- a PR may not ADD an empty-frontmatter
+//      changeset. Everything from "The rule (#5471)" down to "The foreign
+//      changeset rule" below is this one.
+//   2. THE FOREIGN CHANGESET RULE (#17712) -- a PR may not MODIFY or DELETE a
+//      `.changeset/*.md` that exists on the merge base and was not added by
+//      this PR. Read "The foreign changeset rule (#17712)" below.
+//
+// The run exits with the WORSE of the two verdicts and prints BOTH, because
+// they are independent facts about one changeset set and an author who fixes
+// the first should not have to push again to discover the second. The FILE NAME
+// names rule 1 only: renaming the file would mean editing the workflow steps
+// that spawn it, and the wiring is the expensive half here -- see "The second
+// consumer" battery for what a step's shape is already pinned to.
 //
 //   node scripts/check-empty-changeset.mjs --base <ref-or-sha> [--head <ref>]
 //   node scripts/check-empty-changeset.mjs              # base defaults to origin/main
@@ -99,6 +115,78 @@
 // made the identical one-letter correction first, off the same measurement
 // (#7005 / PR #7048); this file and `check-adr-0087-registration.mjs` followed in
 // #7045 because each of the three owns its own fixtures and its own messages.
+//
+// ## The foreign changeset rule (#17712)
+//
+// A PR may not MODIFY or DELETE a `.changeset/*.md` that exists on the merge
+// base and was not added by this PR. Refused by name, and the refusal names TWO
+// classes because the diff shape cannot tell them apart and their remedies are
+// opposite (#18160, ruling D on #17712, 2026-09-14):
+//
+//     COLLISION            -> rename yours; restore theirs from base
+//     DELIBERATE CORRECTION -> do NOT restore it; get it confirmed on the PR
+//
+// The second class is a PR that changed behaviour a PENDING release note
+// describes and corrected that note in the same stroke. It is refused exactly as
+// before -- ruling D moved no verdict, `--diff-filter=MD`, `--no-renames`, the
+// merge-base derivation and both exemptions are untouched -- but the single
+// remedy sent that author to restore a sentence their own PR had just falsified.
+// The measured instance is `ed7243d52` (boolean support for `sum` / `avg` /
+// `min` / `max`, rewriting `.changeset/aggregate-field-type-compatibility.md`,
+// which had said booleans were refused). Where the two classes are rendered and
+// how they are held equal is at `FOREIGN_TWO_CLASS_LINES`.
+//
+// Ruled 2026-09-13 (director seat, decision batch #130 item 3) on #17712, as
+// option A'. The census the ruling rests on, taken on `origin/main` at
+// `9bd4344e4b`: 209 changesets, 39 card-scoped (`<card>-<slug>.md`), 170 with no
+// card scope at all. So the collision surface is 81% of the directory, not an
+// occasional generated name.
+//
+// Why a gate and not a naming convention. A changeset filename is content-free
+// -- changesets' random word-pair default was designed for ONE human running the
+// CLI at a time, and this repository runs many agents in parallel drawing from
+// the same small name space. Overwriting somebody else's changeset produces a
+// perfectly VALID changeset file, so the parse-shaped gates stay green: the
+// sibling PR's release note is silently replaced by this PR's, the sibling's own
+// CI never re-runs, and the loss surfaces at release time in the generated
+// CHANGELOG, by which point the authoring PR is merged. A naming rule alone is
+// the class of protection that just failed -- the round that collided was
+// following its dispatch faithfully; the dispatch simply had not told it to
+// scope the name -- so the durable protection has to be mechanical and
+// CONTENT-BLIND: "you may not change someone else's release note". Legacy names
+// are untouched by this rule; it reads diff shape only, never the filename.
+//
+// "Added by this PR" is the file's ABSENCE ON THE MERGE BASE -- which is exactly
+// what git's status letters already say, so the rule needs no second reading:
+//
+//   A  absent at the merge base                -> this PR's own file, always ok
+//   M  present at the merge base, changed here -> foreign, REFUSED
+//   D  present at the merge base, gone here    -> foreign, REFUSED
+//
+// Three consequences worth stating, because each is a case somebody will ask
+// about:
+//
+//   - A PR editing ITS OWN changeset across commits is unaffected. Added in
+//     commit 1 and edited in commit 2, the file is an `M` row against the
+//     previous commit but an `A` row against the merge base, and only the
+//     second reading is the rule.
+//   - Rename detection is turned OFF here (`--no-renames`), the opposite of the
+//     `AMR` choice rule 1 makes. Renaming somebody else's changeset DELETES
+//     their release note at its path, and that is the harm; with detection on,
+//     the deletion is folded into an `R` row and disappears. With it off the
+//     same edit reports `D <theirs>` + `A <yours>` and the `D` is refused. It
+//     costs nothing in the other direction: a PR renaming its OWN changeset
+//     across commits still shows `A <new path>` alone, because the old path was
+//     never on the merge base either.
+//   - `.changeset/README.md` is documentation, not a release note, and is
+//     exempt by the same `isChangesetFile` predicate rule 1 uses.
+//
+// Where the diff starts matters MORE for this rule than for rule 1, and in a
+// direction rule 1 cannot show: run two-dot against a MOVING base tip instead of
+// the merge base and every changeset main gained while the PR sat open is
+// reported as a `D` on this branch -- an author refused by name for deleting
+// files they never touched. See "Where the diff starts (#6129)" directly below;
+// the self-test pins that false red as a firing control beside the real reading.
 //
 // ## Where the diff starts (#6129)
 //
@@ -324,6 +412,66 @@ export function scan({ cwd, base, head = 'HEAD' }) {
   return { violations, exempt, ok, base: from };
 }
 
+// ── The foreign-changeset scan (#17712) ──────────────────────────────────────
+
+/**
+ * The changesets this diff MODIFIES or DELETES that it did not add.
+ *
+ * A separate pass over the same fork, deliberately, rather than another branch
+ * inside `scan()`: the two rules want DIFFERENT diff options. Rule 1 wants
+ * rename detection ON (`AMR`), because a rename is where its bypass reappears;
+ * this rule wants it OFF, because a rename is how a deletion HIDES. One `git
+ * diff` invocation cannot hold both settings, and a scan that quietly answered
+ * one rule's question with the other's options would be the more expensive
+ * mistake -- see "The foreign changeset rule (#17712)" in the header.
+ *
+ * There is no content reading here at all. The verdict is the status letter and
+ * nothing else, which is the ruling's content-blind half: the filename, the
+ * frontmatter and the prose are all irrelevant to whether this PR is entitled
+ * to change the file.
+ *
+ * `base` is the branch point to judge against; the diff starts at
+ * `merge-base(base, head)` for the #6129 reason, which bites HARDER here (a
+ * two-dot diff against a moved base tip turns main's own new changesets into
+ * `D` rows on this branch). Resolving it HERE rather than in the caller is the
+ * same decision `scan()` documents: this is the function the self-test drives.
+ *
+ * @param {{ cwd: string, base: string, head?: string }} opts
+ * @returns {{ foreign: { file: string, status: 'M'|'D' }[], base: string }}
+ * @throws when `base` and `head` have no merge base (#4690: not a pass)
+ */
+export function scanForeign({ cwd, base, head = 'HEAD' }) {
+  const from = mergeBase(base, head, cwd);
+  if (!from) {
+    throw new Error(
+      `no merge base between '${base}' and '${head}' -- the diff has no trustworthy starting point. ` +
+        'Refusing to fall back to the raw base, which is the #6129 defect.',
+    );
+  }
+  // `--no-renames` is load-bearing, not tidiness: see the header. `MD` is the
+  // whole rule -- an `A` row is by definition a path absent at `from`, which is
+  // the definition of "added by this PR", so it is never even listed.
+  const out = git(
+    ['diff', '--name-status', '--no-renames', '--diff-filter=MD', from, head, '--', '.changeset/*.md'],
+    cwd,
+  );
+
+  const foreign = [];
+  for (const line of out.split('\n')) {
+    if (!line.trim()) continue;
+    const fields = line.split('\t');
+    // Read one character wide for the same reason `scan()` does. `M` and `D`
+    // carry no similarity score today, but the narrow read costs nothing and
+    // does not become wrong if a future option adds one.
+    const status = fields[0][0];
+    const file = fields[1];
+    if (!file || !isChangesetFile(file)) continue;
+    foreign.push({ file, status });
+  }
+
+  return { foreign, base: from };
+}
+
 // ── Reporting ────────────────────────────────────────────────────────────────
 
 const KIND_NOTE = {
@@ -371,6 +519,96 @@ function report(violations) {
   for (const { file } of violations) {
     console.error(
       `::error file=${file}::${file} is an empty-frontmatter changeset. If this PR releases nothing, delete it and apply the 'skip-changeset' label instead; an empty changeset is a real input to changesets/action and an all-empty set stalls the release silently and greenly (#4898).`,
+    );
+  }
+}
+
+/**
+ * The remedy for the COLLISION class, verbatim as the #17712 ruling names it.
+ * A constant because the self-test asserts the rendered report carries it: a
+ * refusal that names the offending file but not the way out sends an author to
+ * read this script.
+ */
+export const FOREIGN_REMEDY = 'rename yours; restore theirs from base';
+
+/**
+ * The remedy for the DELIBERATE-CORRECTION class (#18160, ruling D on #17712).
+ * It is the OPPOSITE act, and that is the whole point of naming two classes: a
+ * PR that changed behaviour a PENDING release note describes and corrected that
+ * note in the same stroke is refused CORRECTLY -- this text changes no verdict
+ * -- but following `FOREIGN_REMEDY` there restores a sentence the same PR has
+ * just made false. Measured instance: `ed7243d52` lands boolean support for
+ * `sum` / `avg` / `min` / `max` and rewrites
+ * `.changeset/aggregate-field-type-compatibility.md`, whose base text stated
+ * booleans were refused for exactly those four aggregates.
+ */
+export const FOREIGN_CORRECTION_REMEDY = 'do NOT restore it -- say so on the PR and get it confirmed';
+
+// ONE source for the two-class remedy, rendered TWICE: as indented lines in the
+// human body, and joined into the single line a `::error` annotation has to be.
+// A reviewer who reads only the annotation on the diff and an author who reads
+// only the job log must be told the same thing, so the two renderings are held
+// equal by construction (one source) AND by assertion -- the self-test reads the
+// block back OUT of the rendered body, normalises it to one line, and requires
+// it to equal `FOREIGN_TWO_CLASS_TEXT` byte for byte (#18160 acceptance 2).
+const FOREIGN_TWO_CLASS_LINES = Object.freeze([
+  'Two things produce this refusal and their remedies are OPPOSITE, so read which one you are before you act.',
+  `COLLISION -- you and another PR drew the same changeset filename, and yours overwrote theirs. Remedy: ${FOREIGN_REMEDY}.`,
+  `DELIBERATE CORRECTION -- your change may have made this PENDING release note false, and you rewrote it in the same stroke. Remedy: ${FOREIGN_CORRECTION_REMEDY}; restoring it from the base would put the false sentence back.`,
+]);
+
+/** The one-line rendering of {@link FOREIGN_TWO_CLASS_LINES}, for annotations. */
+export const FOREIGN_TWO_CLASS_TEXT = FOREIGN_TWO_CLASS_LINES.join(' ');
+
+const FOREIGN_NOTE = {
+  M: 'present on the merge base and CHANGED by this PR -- this is somebody else\'s release note',
+  D: 'present on the merge base and DELETED by this PR -- this is somebody else\'s release note',
+};
+
+function reportForeign(rows) {
+  console.error('This PR changes a changeset it did not add:\n');
+  for (const { file, status } of rows) {
+    console.error(`   ${file}\n     ${FOREIGN_NOTE[status] ?? `status ${status} against the merge base`}`);
+  }
+  console.error(
+    [
+      '',
+      ...FOREIGN_TWO_CLASS_LINES.map((line, i) => (i === 0 ? line : `  ${line}`)),
+      '',
+      'A changeset filename carries no meaning, so a collision looks like nothing: the',
+      'default word-pair names were designed for one human running the CLI at a time, and',
+      'this repository runs many agents in parallel drawing from the same small name space.',
+      'Overwriting an existing changeset produces a perfectly VALID changeset file, so every',
+      'parse-shaped gate stays green on BOTH sides -- the other PR\'s release note is simply',
+      'replaced by yours, its own CI never re-runs, and the loss surfaces at release time in',
+      'the generated CHANGELOG, with the authoring PR long merged (#17712).',
+      '',
+      'Concretely, for the COLLISION class:',
+      '',
+      '  1. Restore their file exactly as it stands on the merge base:',
+      '       git checkout <merge-base> -- <the file named above>',
+      '     (that command STAGES what it retrieves -- read `git status --porcelain`',
+      '      before committing, and diff the restored path against the merge base.)',
+      '  2. Give YOUR changeset an issue-scoped name that cannot collide:',
+      '       .changeset/<issue>-<slug>.md',
+      '',
+      'Deleting a changeset is the same act one step further: `changeset version` is the',
+      'only thing that consumes them, and it runs on the release PR, which this gate never',
+      'judges.',
+      '',
+      'For the DELIBERATE CORRECTION class there is no second command to run, and step 1',
+      'above is the one thing not to do: the note you rewrote describes behaviour THIS PR',
+      'changed, so restoring it from the base republishes a sentence that is now false, and',
+      'no label and no diff shape makes that safe. Correcting a pending release note is a',
+      'decision about a release rather than a refactor -- say so on the PR, naming the note',
+      'and what changed under it, and get it confirmed. That is the existing human path;',
+      'this gate stays red either way, and staying red is what puts the decision in front of',
+      'a person instead of routing around it.',
+    ].join('\n'),
+  );
+  for (const { file } of rows) {
+    console.error(
+      `::error file=${file}::${file} exists on the merge base and was not added by this PR, so changing or deleting it silently replaces somebody else's release note (#17712). ${FOREIGN_TWO_CLASS_TEXT}`,
     );
   }
 }
@@ -443,6 +681,8 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'RED 5: an `R` row whose BASE side is README.md is not "inherited"': 3,
   '#6129: main drift must not move the verdict, in EITHER direction': 6,
   '#6129, the other half: a base branch that DELETES': 2,
+  "A' (#17712): a changeset the PR did not add is neither modified nor deleted": 29,
+  'D (#18160): the refusal names BOTH classes, body and annotation pinned equal': 12,
   '#4690, one step later: no merge base at all is a failure': 1,
   'The consumer: this gate\'s own CI step (#6129)': 23,
   'The second consumer: where THIS SELF-TEST runs (#6509)': 12,
@@ -454,7 +694,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 21;
+const SELF_TEST_BATTERY_FLOOR = 23;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -516,6 +756,48 @@ function selfTest() {
     }
     git(['add', '-A'], dir);
     git(['commit', '-q', '-m', 'head', '--no-gpg-sign'], dir);
+    return { dir, base };
+  };
+
+  /**
+   * A base commit plus N further commits on one branch (#17712).
+   *
+   * `makeRepo` is this with a single head step, and is left exactly as it is
+   * rather than rewritten in terms of this: every fixture above is pinned to its
+   * behaviour, and a shared builder that drifted would move verdicts in batteries
+   * that never changed. What needs more than one head commit is the case where
+   * "what this PR did" is only visible ACROSS commits -- a changeset added in
+   * one commit and edited in the next.
+   *
+   * @param {Record<string,string>} baseFiles files committed as the base
+   * @param {...Record<string,string|null>} steps one commit each (null = delete)
+   * @returns {{ dir: string, base: string }}
+   */
+  const makeRepoSteps = (baseFiles, ...steps) => {
+    const dir = mkdtempSync(join(tmpdir(), 'check-empty-changeset-steps-'));
+    repos.push(dir);
+    const apply = (files) => {
+      for (const [rel, contents] of Object.entries(files)) {
+        const full = join(dir, rel);
+        if (contents === null) rmSync(full);
+        else {
+          mkdirSync(dirname(full), { recursive: true });
+          writeFileSync(full, contents);
+        }
+      }
+      git(['add', '-A'], dir);
+    };
+    git(['init', '-q', '-b', 'main'], dir);
+    git(['config', 'user.email', 'selftest@example.invalid'], dir);
+    git(['config', 'user.name', 'self test'], dir);
+    git(['config', 'commit.gpgsign', 'false'], dir);
+    apply(baseFiles);
+    git(['commit', '-q', '-m', 'base', '--allow-empty', '--no-gpg-sign'], dir);
+    const base = git(['rev-parse', 'HEAD'], dir).trim();
+    steps.forEach((files, i) => {
+      apply(files);
+      git(['commit', '-q', '-m', `pr commit ${i + 1}`, '--allow-empty', '--no-gpg-sign'], dir);
+    });
     return { dir, base };
   };
 
@@ -901,6 +1183,319 @@ function selfTest() {
         r.base === fork,
         '#6129 DELETED-ON-MAIN: the scan must start at the fork point, not at the moved branch tip',
       );
+    }
+
+    // ── A' (#17712): a changeset the PR did not add ──────────────────────────
+    // The four cases the ruling names (foreign `M` red, foreign `D` red, own `M`
+    // green, new `A` green), each with the control that proves the fixture did
+    // what it claims -- a `0` from a diff that was empty for some unrelated
+    // reason is not a green, it is a reading taken against nothing.
+    battery("A' (#17712): a changeset the PR did not add is neither modified nor deleted");
+    {
+      const THEIRS = '.changeset/plain-donkeys-repeat.md';
+      const MINE = '.changeset/17712-foreign-changeset-guard.md';
+      const OTHER_DECLARING = '---\n"@objectstack/cli": minor\n---\n\nfeat(cli): somebody else\n';
+      /** The raw diff rows, so a fixture that did nothing cannot read as a pass. */
+      const rows = (dir, base, head = 'HEAD', extra = []) =>
+        git(['diff', '--name-status', ...extra, base, head, '--', '.changeset/*.md'], dir);
+
+      // RULED CASE 1 -- foreign `M` is RED. The #17712 incident verbatim: a
+      // round writes its changeset under the changesets default word-pair name
+      // and that file is already a sibling PR's `minor` changeset on main.
+      {
+        const { dir, base } = makeRepo(
+          { '.changeset/README.md': '# Changesets\n', [THEIRS]: OTHER_DECLARING },
+          { [THEIRS]: DECLARING, 'src/app.ts': 'export const v = 2;\n' },
+        );
+        const r = scanForeign({ cwd: dir, base });
+        assert(r.foreign.length === 1, "A' foreign M: overwriting a changeset that exists on the base must produce exactly one refusal");
+        assert(r.foreign[0]?.file === THEIRS, "A' foreign M: the refusal must NAME the foreign file");
+        assert(r.foreign[0]?.status === 'M', "A' foreign M: the status letter carried into the report must be M");
+      }
+
+      // RULED CASE 2 -- foreign `D` is RED. `scan()` cannot see this one at all:
+      // its `--diff-filter=AMR` has no `D`, so deleting somebody's release note
+      // is invisible to every other member of this family.
+      {
+        const { dir, base } = makeRepo(
+          { '.changeset/README.md': '# Changesets\n', [THEIRS]: OTHER_DECLARING },
+          { [THEIRS]: null, [MINE]: DECLARING },
+        );
+        const r = scanForeign({ cwd: dir, base });
+        assert(r.foreign.length === 1, "A' foreign D: deleting a changeset that exists on the base must produce exactly one refusal");
+        assert(r.foreign[0]?.file === THEIRS, "A' foreign D: the refusal must NAME the deleted file");
+        assert(r.foreign[0]?.status === 'D', "A' foreign D: the status letter carried into the report must be D");
+        assert(
+          scan({ cwd: dir, base }).violations.length === 0,
+          "A' foreign D: rule 1 sees nothing here (`--diff-filter=AMR` has no D) -- the control that this rule is not redundant",
+        );
+      }
+
+      // RULED CASE 3 -- the PR's OWN changeset, edited across commits, is GREEN.
+      // Added in commit 1 and rewritten in commit 2: an `M` row against the
+      // previous commit, an `A` row against the merge base, and only the second
+      // reading is the rule.
+      {
+        const { dir, base } = makeRepoSteps(
+          { '.changeset/README.md': '# Changesets\n', [THEIRS]: OTHER_DECLARING },
+          { [MINE]: '---\n"@objectstack/spec": patch\n---\n\nfix(spec): first go\n' },
+          { [MINE]: DECLARING },
+        );
+        assert(
+          /^M\t\.changeset\/17712-foreign-changeset-guard\.md$/m.test(rows(dir, 'HEAD~1')),
+          "A' own M: CONTROL -- against the PREVIOUS COMMIT the file really is an M row, so the green below is about the merge base and not about an empty diff",
+        );
+        assert(
+          /^A\t\.changeset\/17712-foreign-changeset-guard\.md$/m.test(rows(dir, base)),
+          "A' own M: CONTROL -- against the MERGE BASE the same file is an A row",
+        );
+        assert(scanForeign({ cwd: dir, base }).foreign.length === 0, "A' own M: a PR editing its own changeset across commits must stay green");
+      }
+
+      // RULED CASE 4 -- a brand-new changeset is GREEN, with the stock present
+      // and untouched beside it.
+      {
+        const { dir, base } = makeRepo(
+          { '.changeset/README.md': '# Changesets\n', [THEIRS]: OTHER_DECLARING },
+          { [MINE]: DECLARING },
+        );
+        assert(
+          /^A\t\.changeset\/17712-foreign-changeset-guard\.md$/m.test(rows(dir, base)),
+          "A' new A: CONTROL -- the fixture really added a changeset",
+        );
+        assert(scanForeign({ cwd: dir, base }).foreign.length === 0, "A' new A: adding a changeset of your own must stay green");
+      }
+
+      // RENAMING somebody else's changeset. This is the case `--no-renames`
+      // exists for: with git's default detection ON the deletion is folded into
+      // an `R` row and vanishes, which is how row 2 of rule 1's table reopened
+      // under another letter in #7045.
+      {
+        const { dir, base } = makeRepo(
+          { '.changeset/README.md': '# Changesets\n', [THEIRS]: OTHER_DECLARING },
+          { [THEIRS]: null, [MINE]: OTHER_DECLARING },
+        );
+        const detected = rows(dir, base, 'HEAD', ['--find-renames']);
+        assert(/^R\d*\t/m.test(detected), "A' rename: CONTROL -- with rename detection ON this diff really does collapse to an R row");
+        assert(!/^D\t/m.test(detected), "A' rename: CONTROL -- and that R row leaves NO D row for a `D`-only filter to find");
+        const r = scanForeign({ cwd: dir, base });
+        assert(r.foreign.length === 1 && r.foreign[0]?.status === 'D', "A' rename: with --no-renames the deletion reappears and is refused");
+        assert(r.foreign[0]?.file === THEIRS, "A' rename: the refusal names the path their release note stood at");
+      }
+
+      // ...and the other direction of the same flag: renaming YOUR OWN
+      // changeset across commits stays green, because the old path was never on
+      // the merge base either.
+      {
+        const { dir, base } = makeRepoSteps(
+          { '.changeset/README.md': '# Changesets\n', [THEIRS]: OTHER_DECLARING },
+          { '.changeset/wobbly-pandas-shout.md': DECLARING },
+          { '.changeset/wobbly-pandas-shout.md': null, [MINE]: DECLARING },
+        );
+        assert(
+          /^A\t\.changeset\/17712-foreign-changeset-guard\.md$/m.test(rows(dir, base)) &&
+            !/^D\t/m.test(rows(dir, base)),
+          "A' own rename: CONTROL -- against the merge base this is one A row and no D row",
+        );
+        assert(scanForeign({ cwd: dir, base }).foreign.length === 0, "A' own rename: renaming your own changeset across commits must stay green");
+      }
+
+      // `.changeset/README.md` is documentation, by the same predicate rule 1
+      // uses. Editing it is ordinary work.
+      {
+        const { dir, base } = makeRepo(
+          { '.changeset/README.md': '# Changesets\n', [THEIRS]: OTHER_DECLARING },
+          { '.changeset/README.md': '# Changesets\n\nHow to write one.\n' },
+        );
+        assert(/^M\t\.changeset\/README\.md$/m.test(rows(dir, base)), "A' README: CONTROL -- the fixture really modified README.md");
+        assert(scanForeign({ cwd: dir, base }).foreign.length === 0, "A' README: .changeset/README.md is documentation, never a release note");
+      }
+
+      // The nonsense control: a PR that modifies files with nothing to do with
+      // `.changeset/*.md` reads zero, and the unrestricted diff proves the
+      // fixture was not simply empty.
+      {
+        const { dir, base } = makeRepo(
+          { '.changeset/README.md': '# Changesets\n', [THEIRS]: OTHER_DECLARING, 'docs/guide.md': 'v1\n' },
+          { 'docs/guide.md': 'v2\n' },
+        );
+        assert(
+          git(['diff', '--name-status', base, 'HEAD'], dir).includes('docs/guide.md'),
+          "A' nonsense control: CONTROL -- this PR really did change a file",
+        );
+        assert(scanForeign({ cwd: dir, base }).foreign.length === 0, "A' nonsense control: a diff that touches no changeset reads zero");
+      }
+
+      // #6129 in THIS rule's direction, and it is sharper here than for rule 1:
+      // run two-dot against the moved base TIP and every changeset main gained
+      // while the PR sat open is reported as a deletion on this branch. The
+      // firing control is the false red itself.
+      {
+        const { dir, mainTip } = makeMergeRefRepo({
+          baseFiles: { '.changeset/README.md': '# Changesets\n' },
+          prFiles: { [MINE]: DECLARING },
+          driftFiles: { [THEIRS]: OTHER_DECLARING },
+        });
+        const twoDot = git(
+          ['diff', '--name-status', '--no-renames', '--diff-filter=MD', mainTip, 'pr', '--', '.changeset/*.md'],
+          dir,
+        );
+        assert(
+          /^D\t\.changeset\/plain-donkeys-repeat\.md$/m.test(twoDot),
+          "A' #6129: FIRING CONTROL -- a two-dot diff against the MOVED base tip really does report main's new changeset as a deletion on this branch",
+        );
+        const r = scanForeign({ cwd: dir, base: mainTip, head: 'pr' });
+        assert(r.foreign.length === 0, "A' #6129: from the MERGE BASE the same branch is clean -- main's drift is not this PR's deletion");
+        assert(
+          /^A\t\.changeset\/17712-foreign-changeset-guard\.md$/m.test(rows(dir, r.base, 'pr')),
+          "A' #6129: CONTROL -- and the PR's own changeset is still visible from that merge base, so the zero above is not a zero from a wrong range",
+        );
+      }
+
+      // Missing input is a failure, never a pass (#4690) -- the same rule
+      // `scan()` follows, restated for this scan because it has its own throw.
+      {
+        const { dir } = makeRepo({}, { 'a.txt': 'x\n' });
+        const other = mkdtempSync(join(tmpdir(), 'check-empty-changeset-foreign-unrelated-'));
+        repos.push(other);
+        git(['init', '-q', '-b', 'main'], other);
+        git(['config', 'user.email', 'selftest@example.invalid'], other);
+        git(['config', 'user.name', 'self test'], other);
+        git(['config', 'commit.gpgsign', 'false'], other);
+        writeFileSync(join(other, 'b.txt'), 'y\n');
+        git(['add', '-A'], other);
+        git(['commit', '-q', '-m', 'unrelated', '--no-gpg-sign'], other);
+        git(['fetch', '-q', other, 'main:unrelated'], dir);
+        let threw = false;
+        try {
+          scanForeign({ cwd: dir, base: 'unrelated' });
+        } catch {
+          threw = true;
+        }
+        assert(threw, "A' #4690: no merge base at all must THROW, not fall back to the raw base");
+      }
+
+      // The refusal has to be actionable: the report names the file and carries
+      // the ruling's remedy verbatim, in the human body AND in the annotation a
+      // reviewer sees on the diff.
+      {
+        const captured = [];
+        const realError = console.error;
+        console.error = (...args) => captured.push(args.join(' '));
+        try {
+          reportForeign([{ file: THEIRS, status: 'M' }]);
+        } finally {
+          console.error = realError;
+        }
+        const text = captured.join('\n');
+        assert(text.includes(THEIRS), "A' report: the refusal must name the offending file");
+        assert(text.includes(FOREIGN_REMEDY), "A' report: the refusal must carry the ruling's remedy verbatim");
+        assert(
+          captured.some((line) => line.startsWith('::error file=') && line.includes(FOREIGN_REMEDY)),
+          "A' report: the GitHub annotation must carry the remedy too -- an annotation that only accuses sends the author to read this script",
+        );
+      }
+    }
+
+    // ── D (#18160): the refusal names BOTH classes, and cannot drift ─────────
+    //
+    // Ruling D on #17712 changed the refusal TEXT and nothing else: the same
+    // diffs are refused before and after, so every case here asserts about what
+    // is PRINTED, plus one fixture that pins the strength it does not move.
+    //
+    // The equality case is the load-bearing one. Body and annotation are two
+    // renderings of one source, and a later author editing only the one they
+    // happened to be reading is exactly the drift acceptance 2 forbids -- so the
+    // two-class block is read back OUT of the rendered body, normalised to a
+    // single line, and required to equal the annotation's text byte for byte. A
+    // case that asserted each rendering against its own constant would pass
+    // through that drift without a word.
+    battery('D (#18160): the refusal names BOTH classes, body and annotation pinned equal');
+    {
+      const THEIRS = '.changeset/plain-donkeys-repeat.md';
+      const MINE = '.changeset/18160-foreign-changeset-remedy.md';
+      const OTHER_DECLARING = '---\n"@objectstack/cli": minor\n---\n\nfeat(cli): somebody else\n';
+      const render = (rows) => {
+        const captured = [];
+        const realError = console.error;
+        console.error = (...args) => captured.push(args.join(' '));
+        try {
+          reportForeign(rows);
+        } finally {
+          console.error = realError;
+        }
+        return captured;
+      };
+
+      const captured = render([{ file: THEIRS, status: 'M' }]);
+      const text = captured.join('\n');
+
+      assert(
+        text.includes(FOREIGN_REMEDY),
+        'D two-class: the body still carries the COLLISION remedy verbatim -- ruling D removed nothing',
+      );
+      assert(
+        text.includes(FOREIGN_CORRECTION_REMEDY),
+        'D two-class: the body carries the DELIBERATE CORRECTION remedy -- the class the single remedy misrouted',
+      );
+      assert(
+        /your change may have made this PENDING release note false/.test(text),
+        'D two-class: the body names the second class in the ruling\'s own terms, not as a generic caveat',
+      );
+      assert(
+        text.includes('there is no second command to run') && text.includes('get it confirmed'),
+        'D two-class: the second class is ROUTED to the confirmation path rather than to the restore',
+      );
+
+      // The equality pin, taken against the REAL rendered body.
+      {
+        const lines = text.split('\n');
+        const start = lines.findIndex((line) => line.trim() === FOREIGN_TWO_CLASS_LINES[0]);
+        assert(start !== -1, 'D two-class: the body really contains the two-class block (the pin below is not vacuous)');
+        const normalised = lines
+          .slice(start, start + FOREIGN_TWO_CLASS_LINES.length)
+          .map((line) => line.trim())
+          .join(' ');
+        assert(
+          normalised === FOREIGN_TWO_CLASS_TEXT,
+          'D two-class: the body block and the annotation text are EQUAL once normalised -- neither rendering may drift from the other',
+        );
+      }
+
+      const annotations = captured.filter((line) => line.startsWith('::error file='));
+      assert(annotations.length === 1, 'D two-class: one annotation per refused file, unchanged');
+      assert(
+        annotations[0].includes(FOREIGN_TWO_CLASS_TEXT),
+        'D two-class: the annotation a reviewer reads on the diff carries the WHOLE two-class text, not the collision half',
+      );
+      assert(
+        annotations[0].includes(THEIRS),
+        'D two-class: the annotation still names the file -- CONTROL that the line above is the real annotation',
+      );
+
+      // Strength, unchanged. The `ed7243d52` shape in miniature: the PR adds its
+      // OWN changeset (so `skip-changeset` is not available to it) and rewrites a
+      // foreign one in the same commit. Ruling D does NOT make this pass.
+      {
+        const { dir, base } = makeRepo(
+          { '.changeset/README.md': '# Changesets\n', [THEIRS]: OTHER_DECLARING },
+          { [THEIRS]: DECLARING, [MINE]: DECLARING, 'packages/spec/src/data/table.ts': 'export const v = 2;\n' },
+        );
+        const shape = git(['diff', '--name-status', '--no-renames', base, 'HEAD', '--', '.changeset/*.md'], dir);
+        assert(
+          /^A\t\.changeset\/18160-foreign-changeset-remedy\.md$/m.test(shape),
+          'D strength: CONTROL -- the fixture really adds a changeset of its own, so this PR could not take the skip-changeset exemption',
+        );
+        assert(
+          /^M\t\.changeset\/plain-donkeys-repeat\.md$/m.test(shape),
+          'D strength: CONTROL -- and it really rewrites a foreign one in the same commit',
+        );
+        const r = scanForeign({ cwd: dir, base });
+        assert(
+          r.foreign.length === 1 && r.foreign[0]?.file === THEIRS && r.foreign[0]?.status === 'M',
+          'D strength: the deliberate-correction shape is STILL refused, and refused by name -- ruling D moved the text, never the verdict',
+        );
+      }
     }
 
     // ── #4690, one step later: no merge base at all is a failure ─────────────
@@ -1639,24 +2234,42 @@ if (!invokedDirectly) {
   }
 
   let result;
+  let foreignResult;
   try {
     result = scan({ cwd: REPO_ROOT, base, head });
+    foreignResult = scanForeign({ cwd: REPO_ROOT, base, head });
   } catch (error) {
     console.error(`⛔ check-empty-changeset: ${error instanceof Error ? error.message : String(error)}`);
     console.error('   Missing input is a failure, never a pass (#4690).');
     process.exit(1);
   }
   const { violations, exempt, ok, base: from } = result;
+  const { foreign } = foreignResult;
   // The starting commit is printed on both verdicts, and it is not decoration:
   // #6129 hid for as long as it did because nothing in any log said where the
   // diff began, so a gate reading the wrong side of a fork looked exactly like a
   // gate reading the right one.
   console.log(`Diffing ${head} from ${from.slice(0, 9)} (merge base with ${baseLabel}).`);
+
+  // Both rules are reported before either exits. An author who has done two
+  // things wrong should learn both from one run: exiting on the first would
+  // spend a push per rule, and this gate's whole subject is a diff that is
+  // expensive to re-push.
+  let refused = false;
   if (violations.length) {
     report(violations);
-    process.exit(1);
+    refused = true;
+  } else {
+    const parts = [`${ok.length} declaring changeset(s) added`];
+    if (exempt.length) parts.push(`${exempt.length} pre-existing empty changeset(s) touched but exempt`);
+    console.log(`✓ No empty-frontmatter changeset introduced by this diff (${parts.join(', ')}).`);
   }
-  const parts = [`${ok.length} declaring changeset(s) added`];
-  if (exempt.length) parts.push(`${exempt.length} pre-existing empty changeset(s) touched but exempt`);
-  console.log(`✓ No empty-frontmatter changeset introduced by this diff (${parts.join(', ')}).`);
+  if (foreign.length) {
+    if (refused) console.error('');
+    reportForeign(foreign);
+    refused = true;
+  } else {
+    console.log('✓ No changeset from the merge base modified or deleted by this diff (#17712).');
+  }
+  if (refused) process.exit(1);
 }

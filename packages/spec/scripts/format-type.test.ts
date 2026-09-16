@@ -82,6 +82,31 @@ describe('formatType — open objects keep their declared shape (#4912)', () => 
       .toBe('Record<string, any>[]');
   });
 
+  it('[#17598] prints a TUPLE by its positions, never as `any[]`', () => {
+    // Draft-2020-12 spells a `z.tuple([…])` as `prefixItems` and leaves `items`
+    // ABSENT, so the array branch used to render the element type of nothing —
+    // `any[]`, a cell strictly weaker than the schema beside it. Measured on
+    // `origin/main` before the fix: `ListView.map.center`
+    // (`z.tuple([z.number(), z.number()])`) printed `any[]` on
+    // `references/ui/view.mdx`, and #17598's two-bound `dateRange` window would
+    // have regressed `string[]` -> `any[]` on `references/data/analytics.mdx`.
+    expect(formatType({ type: 'array', prefixItems: [{ type: 'string' }, { type: 'string' }] }, ctx()))
+      .toBe('[string, string]');
+    expect(formatType({ type: 'array', prefixItems: [{ type: 'number' }, { type: 'number' }] }, ctx()))
+      .toBe('[number, number]');
+    // A REST element is spelled rather than dropped, so the cell never claims a
+    // fixed length the schema does not have.
+    expect(formatType(
+      { type: 'array', prefixItems: [{ type: 'string' }], items: { type: 'number' } },
+      ctx(),
+    )).toBe('[string, ...number[]]');
+    // Draft-7 spells the same tuple as an ARRAY in `items`; both are read.
+    expect(formatType({ type: 'array', items: [{ type: 'string' }, { enum: ['a', 'b'] }] }, ctx()))
+      .toBe("[string, Enum<'a' | 'b'>]");
+    // Control: a plain array is untouched by the tuple branch.
+    expect(formatType({ type: 'array', items: { type: 'string' } }, ctx())).toBe('string[]');
+  });
+
   it('ignores `&`-free nesting when deciding to parenthesize (no stray brackets)', () => {
     // `Enum<'a' | 'b'>` and markdown links carry `<>`/`[]`/`()` that must not
     // confuse the depth scan into either adding or skipping parens.

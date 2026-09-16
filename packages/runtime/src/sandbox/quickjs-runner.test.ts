@@ -208,11 +208,16 @@ describe('QuickJSScriptRunner — L2 hook script', () => {
   });
 
   it('ScriptContext.crypto declares randomUUID and nothing else (#4391)', () => {
-    // Compile-time companion to the pin above. It is DORMANT today (runtime is
-    // not typechecked — see the note above) and arms itself the moment runtime
-    // onboards `typecheck`; it is kept because re-declaring the type without an
-    // implementation is the exact defect #4391 removed, and this is where the
-    // next reader will look for that rule.
+    // Compile-time companion to the pin above, and it is LIVE — not dormant.
+    // This sentence used to read "DORMANT today (runtime is not typechecked)",
+    // which contradicts the correction 50 lines above it and is FALSE on this
+    // tree: `@objectstack/runtime` declares
+    // `typecheck` = `tsc --noEmit && pnpm check:test-typecheck`, holds no DEBT
+    // entry, and #14504's `tsconfig.test.json` — which that script NAMES via
+    // `check:test-typecheck --project` — puts THIS file in its program
+    // (measured with `tsc --listFiles`). It is kept because re-declaring the
+    // type without an implementation is the exact defect #4391 removed, and
+    // this is where the next reader will look for that rule.
     type CryptoSeam = NonNullable< ScriptContext['crypto'] >;
     type ExtraMembers = Exclude< keyof CryptoSeam, 'randomUUID' >;
     const extraMembers: ExtraMembers[] = [];

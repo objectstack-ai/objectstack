@@ -32,33 +32,46 @@
  * places:
  *
  *   packages/drivers/driver-sql/src/sql-driver.ts  `createColumn`
- *     `if (field.multiple) { this.jsonColumn(table, name); return; }` — stated
- *     above the `switch (type)`, so the element type never gets a vote.
+ *     the multi-value short-circuit — stated above the `switch (type)`, so the
+ *     element type never gets a vote.
  *   packages/drivers/driver-sql/src/sql-driver.ts  `isJsonField`
- *     `JSON_COLUMN_TYPES.has(type) || !!field.multiple`
  *   packages/drivers/driver-sql/src/schema-drift.ts  `fieldHasColumn`
- *     `if (field?.multiple) return true;` — under the comment "Mirrors
- *     `SqlDriver.createColumn` exactly … everything else — including `multiple`
- *     (a JSON column) — gets one."
+ *     — under the comment "Mirrors `SqlDriver.createColumn` exactly …
+ *     everything else — including a MULTI-VALUED field (a JSON column) — gets
+ *     one."
  *
- * The spec's `isMultiValueField` is a DIFFERENT question with a different
- * answer: it is the ADR-0104 D1 VALUE contract ("is the persisted value an
- * array"), and it gates on `MULTI_CAPABLE_TYPES` —
- * `MULTI_OPTION_TYPES.has(type) || (MULTI_CAPABLE_TYPES.has(type) && multiple)`.
- * A generator that asked it instead would answer VARCHAR for a `text` field
- * flagged `multiple: true` while the driver gives that same field a JSON
- * column — reintroducing this very drift one notch narrower. `FieldSchema`
- * does not refuse the combination either (`multiple` is a plain
- * `z.boolean().default(false)` on every field; only `radio` + `multiple` is
- * refused, by name, in `field.zod.ts`'s superRefine), and the CLI generators
- * sit DOWNSTREAM of validation and explicitly serve the unvalidated authoring
- * door. So the column authority is the driver's flag-first rule, and this pin
- * asserts against that.
+ * ⭐ [#17469] WHAT "MULTI-VALUE" MEANS IN THOSE THREE PLACES CHANGED, and this
+ * header is the record of it. Until the maintainer ruling of 2026-09-13
+ * (decision batch #128 item 5, option 1′) they all read `field.multiple` RAW,
+ * and this file argued at length that the spec's `isMultiValueField` was "a
+ * DIFFERENT question" that a generator must not ask. The ruling made it the
+ * SAME question: `FieldSchema` refuses `multiple: true` on every type outside
+ * `MULTI_CAPABLE_TYPES` ∪ `MULTI_OPTION_TYPES`, and all three driver sites now
+ * derive from `isMultiValueField`.
+ *
+ * ⭐ [#18199] THE SPLIT THAT PARAGRAPH OPENED IS CLOSED, and this one is the
+ * record of it. #17469 moved the driver and left `generate.ts` reading
+ * `field.multiple` raw, so for one release this file carried a paragraph saying
+ * the two halves it exists to hold together had SPLIT: `os generate migration`
+ * emitted JSONB for a `text` field flagged `multiple: true` while the driver
+ * emitted a varchar for it — #14829 in reverse, one notch narrower. All five
+ * reads in `generate.ts` now go through its own `declaredMultiValued` seam onto
+ * the same `isMultiValueField`, so the assertions below state ONE answer again
+ * and the arms that used to record the divergence are inverted rather than
+ * deleted — a `text` field flagged `multiple: true` is a SCALAR in all three
+ * CLI surfaces, which is what the driver stores.
+ *
+ * ⛔ The bound has NOT moved and is not what was fixed: `FieldSchema` refuses
+ * that declaration at the authoring entrance, so these readers reach it only
+ * through the unvalidated door they explicitly serve (`registerExternalObject`
+ * / `initObjects`, and a hand-written config). What changed is that the two
+ * answers behind that door are now one.
  *
  * `MULTI_CAPABLE_TYPES` is still imported here rather than transcribed — it is
  * the roster this pin SWEEPS, so a type added to that spec class is measured on
- * the day it lands. It is not the implementation's gate, and the type-blindness
- * control below is what states the difference as an assertion.
+ * the day it lands. It is not the implementation's gate; `isMultiValueField`
+ * is, and the type-blindness control below states the difference between the
+ * roster and the predicate as an assertion.
  *
  * ## Anti-vacuity
  *
@@ -74,7 +87,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { MULTI_CAPABLE_TYPES } from '@objectstack/spec/data';
+import { isMultiValueField, MULTI_CAPABLE_TYPES, MULTI_OPTION_TYPES } from '@objectstack/spec/data';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -91,8 +104,30 @@ const DRIVER_SQL_SRC = path.resolve(HERE, '../../../drivers/driver-sql/src');
  * restated) plus `text` — a type that is NOT in that roster and whose scalar
  * answer is a varchar, which is what makes the type-blindness of the rule
  * assertable rather than merely described.
+ *
+ * [#18199] `text` is still swept and is still the probe; what it probes has
+ * inverted. It used to demonstrate that the generators read the FLAG and not
+ * the type, by taking a JSON column the spec predicate would have refused; it
+ * now demonstrates that they read the PREDICATE, by taking the scalar column
+ * the driver gives it. The membership assertion in the first control is what
+ * keeps the probe meaningful either way.
  */
 const FLAGGED_TYPES: readonly string[] = [...MULTI_CAPABLE_TYPES, 'text'];
+
+/**
+ * [#18199] The swept types the ONE definition calls multi-valued when flagged —
+ * derived from the predicate itself, ⛔ never a second list. `text` drops out
+ * here and only here, which is the whole delta this card landed.
+ */
+const MULTI_VALUED_WHEN_FLAGGED: readonly string[] =
+  FLAGGED_TYPES.filter((type) => isMultiValueField({ type, multiple: true }));
+
+/**
+ * [#18199] The swept types it calls SINGLE-valued even flagged — the same
+ * derivation, complemented, so the two arms below cannot both go empty and pass.
+ */
+const SINGLE_VALUED_WHEN_FLAGGED: readonly string[] =
+  FLAGGED_TYPES.filter((type) => !isMultiValueField({ type, multiple: true }));
 
 /** One object carrying, for each swept type, a flagged field and its scalar twin. */
 function probeConfig(): Record<string, unknown> {
@@ -138,6 +173,11 @@ describe('#14829 — `multiple: true` is one answer across all three surfaces', 
     // `text` is the type-blindness probe: it must NOT be in the roster, or the
     // control below stops distinguishing the flag rule from the value rule.
     expect(MULTI_CAPABLE_TYPES.has('text')).toBe(false);
+    // [#18199] …and the two derived arms must BOTH be populated, or one of the
+    // sweeps below is an empty loop that passes while measuring nothing. This
+    // is the non-vacuity the derivation buys instead of a second hand-list.
+    expect(MULTI_VALUED_WHEN_FLAGGED.length).toBeGreaterThanOrEqual(6);
+    expect(SINGLE_VALUED_WHEN_FLAGGED).toEqual(['text']);
   });
 
   it('control — all three generators really emitted a table for the probe', () => {
@@ -172,12 +212,19 @@ describe('#14829 — `multiple: true` is one answer across all three surfaces', 
     expect(sqlColumn('single_text')).toBe('TEXT');
     expect(tsColumn('single_text')).toBe("table.text('single_text')");
     // …and it still discriminates: the scalar answer is not the JSON one.
-    expect(sqlColumn('single_text')).not.toBe(sqlColumn('multi_text'));
+    //
+    // [#18199] On `lookup`, not `text`. The pair has to straddle the ONE
+    // definition to discriminate anything, and `text` no longer does — flagged
+    // or not it is the same scalar column now, which is the fix. `lookup` is
+    // multi-capable, so `single_` vs `multi_` there is still exactly the
+    // scalar-vs-JSON contrast this control exists to prove is being measured.
+    expect(sqlColumn('single_lookup')).not.toBe(sqlColumn('multi_lookup'));
+    expect(tsColumn('single_lookup')).not.toBe(tsColumn('multi_lookup'));
     expect(sqlColumn('single_file')).toBe('VARCHAR(2048)');
     expect(tsInterfaceType('single_lookup')).toBe('string');
   });
 
-  for (const type of FLAGGED_TYPES) {
+  for (const type of MULTI_VALUED_WHEN_FLAGGED) {
     it(`${type} + multiple:true — array TS type AND a JSON column in both migrations`, () => {
       const declared = tsInterfaceType(`multi_${type}`);
       expect(declared, `os generate types must give a flagged ${type} an array type`)
@@ -198,13 +245,102 @@ describe('#14829 — `multiple: true` is one answer across all three surfaces', 
     });
   }
 
-  it('the flag decides before the type — a type outside MULTI_CAPABLE_TYPES too', () => {
-    // Stated as its own assertion because it is the one place this pin departs
-    // from the spec's value predicate on purpose. `text` is not multi-capable
-    // under `isMultiValueField`, and the driver gives it a JSON column anyway.
+  it('[#18199] the PREDICATE decides in the generators — a flagged type outside the roster stays scalar', () => {
+    // ⭐ THE INVERTED ARM, and the reason it is inverted rather than deleted:
+    // this is the one row where the flag and the ONE definition disagree, so it
+    // is the only row that can tell which of the two `generate.ts` is reading.
+    //
+    // It used to read "the flag decides before the type in the GENERATORS — a
+    // type outside MULTI_CAPABLE_TYPES too" and assert JSONB here, because that
+    // is what the flag rule produced. #17469 made that a DIVERGENCE from the
+    // driver (which emits a varchar for this declaration) and this file
+    // recorded it as such; #18199 closed it from the CLI side.
+    //
+    // ⛔ A future edit that turns these back into JSONB is reinstating the
+    // second definition of "multi-valued", not fixing a stale expectation.
     expect(MULTI_CAPABLE_TYPES.has('text')).toBe(false);
-    expect(sqlColumn('multi_text')).toBe('JSONB');
-    expect(tsColumn('multi_text')).toBe("table.jsonb('multi_text')");
+    expect(isMultiValueField({ type: 'text', multiple: true })).toBe(false);
+    expect(
+      sqlColumn('multi_text'),
+      'os generate migration --format sql gave a flagged `text` field a JSON column. The ONE ' +
+      'definition of multi-valued (`isMultiValueField`, maintainer ruling 2026-09-13) answers ' +
+      'false for it and driver-sql emits a varchar — a JSONB here is #14829 in reverse.',
+    ).toBe('TEXT');
+    expect(tsColumn('multi_text')).toBe("table.text('multi_text')");
+    expect(
+      tsInterfaceType('multi_text'),
+      'os generate types called a flagged `text` field an array while both migration formats ' +
+      'give it a scalar column — the three CLI surfaces have split again.',
+    ).toBe('string');
+  });
+
+  it('[#18199] the flag is REDUNDANT on an inherently-multi option type — one level of array, not two', () => {
+    // The other half of routing the one predicate through `fieldTypeToTs`.
+    // `isMultiValueField` answers true for `multiselect` / `checkboxes` / `tags`
+    // with or WITHOUT the flag, while `FIELD_TYPE_MAP`'s entry for those is
+    // already the array (`string[]`). Wrapping the predicate's verdict around
+    // that table a second time emits `string[][]`, and `FieldSchema` accepts
+    // the flag on these types (it is redundant there, never refused), so the
+    // declaration is fully authorable — measured `multiselect?: string[][]`
+    // before this card.
+    //
+    // Swept off `MULTI_OPTION_TYPES` rather than listed, for the same reason
+    // every other roster here is imported.
+    expect(MULTI_OPTION_TYPES.size).toBeGreaterThanOrEqual(3);
+    const fields: Record<string, Record<string, unknown>> = {};
+    for (const type of MULTI_OPTION_TYPES) {
+      fields[`flagged_${type}`] = { type, multiple: true };
+      fields[`bare_${type}`] = { type };
+    }
+    const out = generateTypesFromConfig({ objects: { probe: { name: 'probe', fields } } });
+    // Non-vacuity: the interface really emitted, and the bare twin is the
+    // control — if BOTH read `string[][]` this assertion would be blind to the
+    // double wrap it exists to catch.
+    expect(out).toContain('export interface ProbeRecord {');
+    for (const type of MULTI_OPTION_TYPES) {
+      const flagged = out.match(new RegExp(`^ {2}flagged_${type}\\??: (.+);$`, 'm'));
+      const bare = out.match(new RegExp(`^ {2}bare_${type}\\??: (.+);$`, 'm'));
+      expect(flagged, `no interface member emitted for flagged_${type}`).not.toBeNull();
+      expect(bare, `no interface member emitted for bare_${type}`).not.toBeNull();
+      expect(flagged?.[1], `a redundantly-flagged ${type} was emitted as a nested array`)
+        .toBe(bare?.[1]);
+      expect(flagged?.[1]).not.toMatch(/\[\]\[\]$/);
+      expect(flagged?.[1]).toMatch(/\[\]$/);
+    }
+  });
+
+  it('[#18199] every swept declaration agrees with `isMultiValueField` on all three CLI surfaces', () => {
+    // The invariant this card exists to restore, stated once as an assertion
+    // instead of being spread across the arms above: for each swept type, the
+    // TS property type is an array exactly when the ONE definition says the
+    // value is one, and both migration formats give it a JSON column on exactly
+    // the same rows.
+    //
+    // Non-vacuity: the sweep is the union of the two derived arms, and the
+    // first control has already pinned that neither is empty; the counts are
+    // re-asserted here so this loop cannot silently become one.
+    const swept = [...MULTI_VALUED_WHEN_FLAGGED, ...SINGLE_VALUED_WHEN_FLAGGED];
+    expect(swept.length).toBe(FLAGGED_TYPES.length);
+    let arrays = 0;
+    let scalars = 0;
+    for (const type of swept) {
+      const multiValued = isMultiValueField({ type, multiple: true });
+      const isJsonSql = sqlColumn(`multi_${type}`) === 'JSONB';
+      const isJsonTs = tsColumn(`multi_${type}`) === `table.jsonb('multi_${type}')`;
+      const isArrayTs = /\[\]$/.test(tsInterfaceType(`multi_${type}`));
+      expect(isJsonSql, `--format sql disagreed with isMultiValueField for a flagged ${type}`)
+        .toBe(multiValued);
+      expect(isJsonTs, `--format typescript disagreed with isMultiValueField for a flagged ${type}`)
+        .toBe(multiValued);
+      expect(isArrayTs, `os generate types disagreed with isMultiValueField for a flagged ${type}`)
+        .toBe(multiValued);
+      if (multiValued) arrays += 1;
+      else scalars += 1;
+    }
+    // Both outcomes really occurred, so "they all agree" is not "they are all
+    // the same answer".
+    expect(arrays).toBeGreaterThan(0);
+    expect(scalars).toBeGreaterThan(0);
   });
 
   /**
@@ -252,19 +388,28 @@ describe('#14829 — `multiple: true` is one answer across all three surfaces', 
     const preSwitch = source.slice(start, switchAt);
     expect(
       preSwitch,
-      'driver-sql no longer short-circuits on `field.multiple` before its per-type switch. ' +
+      'driver-sql no longer short-circuits on MULTI-VALUE before its per-type switch. ' +
       'That short-circuit is the authority this pin and the CLI migration generators mirror ' +
       '(#14829) — re-derive both sides before changing it.',
-    ).toMatch(/if \(field\.multiple\)/);
+    ).toMatch(/if \(isMultiValuedColumn\(/);
     expect(preSwitch).toMatch(/this\.jsonColumn\(/);
   });
 
-  it('driver-sql `fieldHasColumn` still answers the flag before the type', () => {
+  it('driver-sql `fieldHasColumn` still answers multi-value before the type', () => {
     const source = fs.readFileSync(path.join(DRIVER_SQL_SRC, 'schema-drift.ts'), 'utf8');
     expect(source.length).toBeGreaterThan(10_000);
     const start = source.indexOf('export function fieldHasColumn(');
     expect(start, 'fieldHasColumn moved or was renamed in driver-sql').toBeGreaterThan(0);
-    expect(source.slice(start, start + 300)).toMatch(/if \(field\?\.multiple\) return true;/);
+    // [#17469] The window is 600 rather than 300: the predicate is a call to
+    // `isMultiValueField(...)` with its argument object spelled out, which is
+    // three times the width of the `field?.multiple` read it replaced. A
+    // window sized to the old spelling silently stops reaching the `formula`
+    // arm below it, which is the other half of what this pin is for.
+    const body = source.slice(start, start + 600);
+    expect(body, 'fieldHasColumn no longer answers the multi-value question first')
+      .toMatch(/if \(isMultiValueField\(/);
+    expect(body, 'the `formula` arm is no longer inside the read window')
+      .toMatch(/!== 'formula'/);
   });
 
   // ── The former SCOPE FENCE for #14828 — DISCHARGED, and kept as the seam ──

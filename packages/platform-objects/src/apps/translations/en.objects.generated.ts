@@ -1774,7 +1774,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       domain_verified: {
         label: "Domain Verified",
-        help: "Whether DNS ownership of the email domain has been proven (ADR-0024 ②). Set by “Verify Domain” after the DNS TXT record resolves. Managed by better-auth — not directly editable. Only enforced when domain verification is enabled for the environment."
+        help: "Whether DNS ownership of the email domain has been proven (ADR-0135 D6). Set by “Verify Domain” after the DNS TXT record resolves. Managed by better-auth — not directly editable. Only enforced when domain verification is enabled for the environment."
       },
       oidc_config: {
         label: "OIDC Config",

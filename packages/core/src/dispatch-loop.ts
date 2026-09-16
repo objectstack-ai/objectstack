@@ -1,13 +1,22 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * The timer loop both outbox dispatchers run — `NotificationDispatcher` over
- * `sys_notification_delivery` and `HttpDispatcher` over `sys_http_delivery`.
+ * The timer loop every polling worker in the platform runs —
+ * `NotificationDispatcher` over `sys_notification_delivery`, `HttpDispatcher`
+ * over `sys_http_delivery`, and `DbQueueAdapter` over `sys_job_queue`.
  *
  * #17610 wrote this loop inside `NotificationDispatcher`. #17623 found
  * `HttpDispatcher` still on the fixed 500 ms `setInterval` the notification side
- * had just left, and moved the loop here, so the two dispatchers run one
- * implementation of these rules instead of two copies that can drift:
+ * had just left, and pulled the loop out into one implementation of these rules
+ * instead of two copies that can drift. #17612 found the third copy —
+ * `DbQueueAdapter` on a flat 1 s `setInterval` — and that is why the loop
+ * lives HERE, in `@objectstack/core`, rather than in either service: it is a
+ * timing primitive, owned by neither the messaging domain nor the queue
+ * domain, and a service-to-service dependency between them to share it would
+ * invert the direction (a queue service depending on a messaging service).
+ * `@objectstack/core` is the package all three already depend on.
+ *
+ * The rules, one implementation:
  *
  *  - **Never two ticks at once.** A tick asked for while one is running (a
  *    {@link DispatchLoop.wake}, typically) becomes ONE follow-up tick, run the

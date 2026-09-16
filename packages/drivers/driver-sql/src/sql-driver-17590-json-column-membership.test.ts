@@ -32,9 +32,15 @@
  * `nums: [10, 21]` must NOT answer `$contains: '1'`.
  *
  * The three declared classes are the ruling's own fixture — `tags`,
- * `multiselect`, and a `multiple: true` `number` — one from
+ * `multiselect`, and a `multiple: true` `select` — one from
  * `STRUCTURED_JSON_TYPES`' array neighbours, one from `MULTI_OPTION_TYPES`, and
- * one that is a JSON column only because `multiple: true` says so. The scalar
+ * one that is a JSON column only because it is MULTI-VALUED. ⚠️ [#17469] That
+ * third row was a `multiple: true` `number` until the 2026-09-13 ruling gave
+ * "multi-valued" one definition (`isMultiValueField`) and made the driver's
+ * storage derive from it: `number` + `multiple: true` is refused at the
+ * authoring entrance and is a plain numeric column here. `select` carries the
+ * row unchanged — it is multi-capable, it is NOT a JSON-class type, and its
+ * option values are numbers, so the members are still JSON NUMBERS. The scalar
  * `label` column beside them is the NEGATIVE control and the other half of the
  * contract sentence: on a scalar string column `$contains` STAYS the substring
  * test, so a change that made membership universal would redden this file
@@ -86,7 +92,7 @@ const FIELDS: Record<string, Record<string, unknown>> = {
   label: { type: 'string' },
   tags_: { type: 'tags' },
   picks: { type: 'multiselect' },
-  nums: { type: 'number', multiple: true },
+  nums: { type: 'select', multiple: true },
 };
 
 /**
@@ -157,12 +163,12 @@ function declareMembershipCell(cell: DialectCell): void {
     }, LIVE_CELL_TIMEOUT_MS);
 
     /**
-     * The `multiple: true` NUMBER — the column whose members are JSON NUMBERS
+     * The multi-valued NUMERIC-OPTION column — whose members are JSON NUMBERS
      * while the contract declares the comparand a STRING. A type-strict
      * construct would answer nothing here, which is why the comparand denotes
      * two candidates.
      */
-    it('$contains over a multiple:true NUMBER answers by MEMBER, not by digit substring', async () => {
+    it('$contains over a multi-valued numeric-option column answers by MEMBER, not by digit substring', async () => {
       expect(await ids({ nums: { $contains: '1' } })).toEqual(['1']);
       expect(await ids({ nums: { $contains: '2' } })).toEqual(['1', '3']);
       expect(await ids({ nums: { $contains: '10' } })).toEqual(['2']);
@@ -311,21 +317,26 @@ describe('[#17590] the per-dialect membership construct, compiled', () => {
 
   /**
    * The POPULATION, pinned as a whole rather than as the three declared classes
-   * above: `isJsonColumn` is `JSON_COLUMN_TYPES.has(type) || !!field.multiple`
-   * (#17469's reading of the predicate the driver uses TODAY), so a class added
-   * to that set — or a `multiple: true` of any declared class — arrives with
-   * the membership construct instead of quietly keeping the substring one.
+   * above: `isJsonColumn` is `JSON_COLUMN_TYPES.has(type) || isMultiValueField(field)`
+   * (#17469's ruling of 2026-09-13 — one definition of multi-valued, and storage
+   * derives from it), so a class added to that set — or a MULTI-CAPABLE type
+   * flagged `multiple: true` — arrives with the membership construct instead of
+   * quietly keeping the substring one.
    * ⛔ The population is NOT widened here; this asserts the one that exists.
+   * ⚠️ The three multi-valued rows were `string` / `boolean` / `datetime` before
+   * that ruling. Those declarations are refused at the authoring entrance now
+   * and are plain scalar columns here, so pinning them would pin a branch the
+   * driver no longer has.
    */
-  it('the population is every JSON column — declared class or multiple:true alike', () => {
+  it('the population is every JSON column — declared class or multi-valued alike', () => {
     const d = new CompilerProbeDriver(DIALECTS[0]![1]).declare({
-      many_str: { type: 'string', multiple: true },
-      many_bool: { type: 'boolean', multiple: true },
-      many_date: { type: 'datetime', multiple: true },
+      many_sel: { type: 'select', multiple: true },
+      many_look: { type: 'lookup', multiple: true },
+      many_user: { type: 'user', multiple: true },
       checks: { type: 'checkboxes' },
       one_str: { type: 'string' },
     });
-    for (const field of ['many_str', 'many_bool', 'many_date', 'checks']) {
+    for (const field of ['many_sel', 'many_look', 'many_user', 'checks']) {
       expect(d.compileWhere({ [field]: { $contains: 'x' } } as FilterCondition), field)
         .toMatch(CONSTRUCT.sqlite!);
     }

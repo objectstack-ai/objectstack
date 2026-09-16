@@ -350,3 +350,203 @@ describe('[#8144] createAuthEventAuditSink writes a login row that names its act
     expect(meta).toMatchObject({ action: 'login' });
   });
 });
+
+/**
+ * [#17452] The dedupe key is the failure's CAUSE, not the process.
+ *
+ * The block above pins that a lost auth-event row is reported at `error`, and
+ * that it is reported ONCE rather than once per failed sign-in. Both still
+ * hold. What this block pins is the COUNTING UNIT of that "once", and the two
+ * defects the process-wide version had — the SECOND, independent copy of the
+ * pair `audit-writers.ts` carried before #15166:
+ *
+ *  1. after the first failure of ANY cause, every later failure of every OTHER
+ *     cause degraded to `debug` for the life of the process — a server could
+ *     keep losing sign-in rows for hours to a second fault with one `error`
+ *     line at the top of the log describing the first;
+ *  2. that one line named the ADR-0057 §3.6 telemetry-datasource remedy
+ *     unconditionally, so a refusal that had nothing to do with datasource
+ *     routing sent its operator to check something that was not broken.
+ *
+ * ⚠️ The anti-noise choice these must not undo is AGENTS.md's, and #4420 is
+ * what it was invented against: an unbounded per-event line nobody could read.
+ * `keys on the error CODE, never its message` below is the pin that keeps
+ * "once per cause" from decaying into it — ⛔ do not relax it to a message.
+ *
+ * The helpers are `audit-writers.ts`'s, imported rather than re-spelled: a
+ * second copy of this key is how the defect got here in the first place.
+ */
+describe('auth-event audit — reported once per CAUSE, not once per process (#17452)', () => {
+  interface LogLine {
+    level: string;
+    message: string;
+    meta?: Record<string, any>;
+  }
+
+  /** A sink whose ledger insert fails with a caller-chosen error each time. */
+  function makeCauseSink(nextError: (n: number) => unknown) {
+    const logs: LogLine[] = [];
+    let n = 0;
+    const broken: any = {
+      getSchema: () => null,
+      insert: async () => {
+        throw nextError(n++);
+      },
+    };
+    const logger = {
+      error(message: string, _err?: Error, meta?: Record<string, any>) {
+        logs.push({ level: 'error', message, meta });
+      },
+      warn(message: string, meta?: Record<string, any>) {
+        logs.push({ level: 'warn', message, meta });
+      },
+      debug(message: string, meta?: Record<string, any>) {
+        logs.push({ level: 'debug', message, meta });
+      },
+    };
+    const sink = createAuthEventAuditSink({ getEngine: () => broken, logger });
+    const signIn = (id: string) => sink.recordAuthEvent({ action: 'login', userId: id, sessionId: id });
+    const at = (level: string) => logs.filter((l) => l.level === level);
+    return { sink, signIn, at, logs };
+  }
+
+  const driverError = (message: string, code?: string): Error => {
+    const e = new Error(message) as Error & { code?: string };
+    if (code !== undefined) e.code = code;
+    return e;
+  };
+
+  const NO_SUCH_TABLE = () => driverError('no such table: sys_audit_log', 'SQLITE_ERROR');
+  const ORG_REQUIRED = () =>
+    driverError('system write requires an organization', 'ERR_SYSTEM_WRITE_ORGANIZATION_REQUIRED');
+
+  it('reports a SECOND, DIFFERENT cause at error — a new cause is a new degradation', async () => {
+    // THE DEFECT. On the process-wide boolean this was one `error` (the first
+    // cause) and one `debug`; the organization refusal — a completely
+    // different fault, with a different remedy — was never reported at all.
+    let phase = 0;
+    const { signIn, at } = makeCauseSink(() => (phase === 0 ? NO_SUCH_TABLE() : ORG_REQUIRED()));
+
+    await signIn('usr_1');
+    phase = 1;
+    await signIn('usr_2');
+
+    const errors = at('error');
+    expect(errors).toHaveLength(2);
+    expect(errors[0].message).toMatch(/no such table: sys_audit_log/);
+    expect(errors[1].message).toMatch(/ERR_SYSTEM_WRITE_ORGANIZATION_REQUIRED/);
+    expect(at('debug')).toHaveLength(0);
+    expect(at('warn')).toEqual([]);
+  });
+
+  it('still degrades a REPEAT of an already-reported cause to debug', async () => {
+    // ⚠️ THE DISCRIMINATING CONTROL. Deleting the boolean outright would also
+    // make the test above pass, and would be the falsifier AGENTS.md names
+    // ("log every failure at `error`"). This is the half that must NOT change:
+    // the same cause on the same object still says it once.
+    const { signIn, at } = makeCauseSink(() => NO_SUCH_TABLE());
+
+    for (const id of ['usr_1', 'usr_2', 'usr_3', 'usr_4', 'usr_5']) await signIn(id);
+
+    expect(at('error')).toHaveLength(1);
+    expect(at('debug')).toHaveLength(4);
+    // The repeats name the cause they were folded into, so a `debug` sweep can
+    // tell "the same fault, 4 more times" from "four different faults".
+    expect(at('debug')[0].meta?.cause).toBe(at('debug')[3].meta?.cause);
+  });
+
+  it('keys on the error CODE, never its message, so a per-row fault cannot flood `error`', async () => {
+    // ⚠️ THE ANTI-NOISE PIN (AGENTS.md; #4420). A driver names the offending
+    // ROW in its message, so a message-keyed dedupe would grow one `error`
+    // line per lost sign-in row — #4420 again, wearing the word "cause". 200
+    // sign-ins, 200 distinct messages, ONE code ⇒ one line.
+    const EVENTS = 200;
+    const { signIn, at } = makeCauseSink((i) =>
+      driverError(`UNIQUE constraint failed: sys_audit_log.id (row aud_${i})`, 'SQLITE_CONSTRAINT_UNIQUE'),
+    );
+
+    for (let i = 0; i < EVENTS; i += 1) await signIn(`usr_${i}`);
+
+    expect(at('error')).toHaveLength(1);
+    expect(at('debug')).toHaveLength(EVENTS - 1);
+  });
+
+  it('folds a fault carrying NO code into ONE bucket rather than growing one', async () => {
+    // The other half of the bound: "the code, or its ABSENCE" is a single key
+    // value, so an uncoded driver — the shape with nothing bounded to key on —
+    // still says it once instead of once per sign-in.
+    const EVENTS = 200;
+    const { signIn, at } = makeCauseSink((i) => driverError(`insert failed for record aud_${i}`));
+
+    for (let i = 0; i < EVENTS; i += 1) await signIn(`usr_${i}`);
+
+    expect(at('error')).toHaveLength(1);
+    expect(at('debug')).toHaveLength(EVENTS - 1);
+  });
+
+  it('carries the underlying code and message in the first line it prints', async () => {
+    // The information was computed one line above the branch and dropped on the
+    // floor: the `error` path built a fixed string and never read `err`.
+    const { signIn, at } = makeCauseSink(() => ORG_REQUIRED());
+
+    await signIn('usr_1');
+
+    const msg = at('error')[0].message;
+    expect(msg).toMatch(/ERR_SYSTEM_WRITE_ORGANIZATION_REQUIRED/);
+    expect(msg).toMatch(/system write requires an organization/);
+    // The consequence half is unchanged — it is still owed, and still first.
+    expect(msg).toMatch(/compliance trail is now INCOMPLETE/);
+  });
+
+  it('prints the datasource remedy for the cause it is the remedy FOR, and not for others', async () => {
+    // ⛔ Not a deletion: the ADR-0057 §3.6 routing text is genuinely correct for
+    // the "no such table" cause it was written for, so it must still print
+    // there. What is fixed is that it used to print for EVERY cause.
+    const missing = makeCauseSink(() => NO_SUCH_TABLE());
+    await missing.signIn('usr_1');
+    const forMissingTable = missing.at('error')[0].message;
+    expect(forMissingTable).toMatch(/telemetry/);
+    expect(forMissingTable).toMatch(/OS_TELEMETRY_DB=0/);
+
+    // The misdirection: the cause is an organization refusal and the text said
+    // "datasource".
+    const refused = makeCauseSink(() => ORG_REQUIRED());
+    await refused.signIn('usr_1');
+    const forRefusal = refused.at('error')[0].message;
+    expect(forRefusal).not.toMatch(/OS_TELEMETRY_DB/);
+    expect(forRefusal).not.toMatch(/telemetry/i);
+    // It still owes a fix — it just owes the RIGHT one.
+    expect(forRefusal).toMatch(/Fix:/);
+  });
+
+  it('[#9657] the `warn` fallback is per-cause too — a sink with no `error` hears the second fault', async () => {
+    // `AuthEventAuditLogger.error` is OPTIONAL, so the degrade path is the only
+    // channel a host without one ever gets. Fixing the dedupe on the `error`
+    // branch alone would leave that host exactly where it started.
+    const logs: Array<{ level: string; message: string }> = [];
+    let phase = 0;
+    const broken: any = {
+      getSchema: () => null,
+      insert: async () => {
+        throw phase === 0 ? NO_SUCH_TABLE() : ORG_REQUIRED();
+      },
+    };
+    const logger = {
+      warn(message: string) {
+        logs.push({ level: 'warn', message });
+      },
+      debug(message: string) {
+        logs.push({ level: 'debug', message });
+      },
+    };
+    const sink = createAuthEventAuditSink({ getEngine: () => broken, logger });
+
+    await sink.recordAuthEvent({ action: 'login', userId: 'usr_1' });
+    phase = 1;
+    await sink.recordAuthEvent({ action: 'logout', userId: 'usr_1' });
+
+    const warns = logs.filter((l) => l.level === 'warn');
+    expect(warns).toHaveLength(2);
+    expect(warns[1].message).toMatch(/ERR_SYSTEM_WRITE_ORGANIZATION_REQUIRED/);
+  });
+});

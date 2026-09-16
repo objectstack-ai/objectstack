@@ -504,6 +504,16 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
       // declaration, and declaring one rarely-touched file is cheaper than
       // rewording prose to dodge a scanner.
       'scripts/cross-package-test-inputs.mjs',
+      // `check-cli-examples-parity.mjs` is the mention shape again, from
+      // test/docs-cli-enumeration-parity.test.ts (#17723): that pin's header
+      // states WHY it does not extend this sibling gate --- `os lint` declares no
+      // `examples`, and an example set and a flag set are different populations,
+      // so an examples-parity check is structurally blind to a missing flag. The
+      // sentence is the gate's own stated reason, and it has to name what it is
+      // about. Settled the way `check-nul-bytes.mjs` above is: declaring one
+      // rarely touched file is cheaper than rewording prose to dodge a scanner,
+      // and over-collection can only widen a radius, never narrow one.
+      'scripts/check-cli-examples-parity.mjs',
       // `nightly-tiers.mjs` is the mention shape a FIFTH time, and the one entry
       // that was already HALF declared: turbo.json has carried it (and its
       // `.d.mts`) in this task's `inputs` all along, because `vitest-tiers.ts`
@@ -1044,6 +1054,50 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
       // change that reopens the #9084 blind spot, so it must re-run this test.
       'content/docs/protocol/kernel/realtime-protocol.mdx',
     ],
+  },
+  '@objectstack/vitest-filter-preflight': {
+    // test/config-wiring-sweep.test.ts is the anti-phantom sweep for the ONE
+    // shared vitest filter preflight (#17978). Its population is DERIVED, not
+    // listed: it walks `packages/` for package-root vitest configs, masks their
+    // comments, and requires every config that declares `projects` to invoke the
+    // preflight. So each package's own config, its manifest name and the exact
+    // `include` ledger it hands the preflight are real inputs to this suite's
+    // verdict — a ninth package declaring `projects` must re-run it, which is the
+    // whole reason the population is derived.
+    //
+    // Scoped to `packages/` by the test itself (its `packageRoots` docblock
+    // carries the trade): three globs under one already-declared root, rather
+    // than opening `examples/` and `apps/` roots in ci.yml's `crosspkg` filter
+    // for a config shape that exists in neither today. The residual is an
+    // UNDER-report, which is the direction this card resolves uncertainty in.
+    globs: [
+      'packages/**/vitest.config.ts',
+      'packages/**/vitest.repo-tests.json',
+      'packages/**/package.json',
+      // `maskComments` — the sweep reads config SOURCE, so a change to what
+      // counts as a comment changes what it sees in code position.
+      'scripts/js-comment-mask.mjs',
+      // Named in the suite's prose rather than read: the config spellings it
+      // accepts come from the console-intercept gate, and this very table is
+      // cited for the radius trade. The literal collector takes quoted paths out
+      // of comments without parsing them, so a mention forces a declaration —
+      // and declaring a file under a root ci.yml's `crosspkg` filter already
+      // carries is cheaper than rewording prose to dodge the scanner.
+      'scripts/check-console-intercept-disarm.mjs',
+      'scripts/cross-package-test-inputs.mjs',
+    ],
+    heldBy: {
+      // Both are built by joining a LOOP VARIABLE (each swept package's own
+      // directory) to a bare filename, so the escape verdict resolves and the
+      // NAME does not — the trade `pathExpression` documents. The sweep reads
+      // one of each per package in its population.
+      'packages/**/vitest.repo-tests.json': [
+        'packages/qa/vitest-filter-preflight/test/config-wiring-sweep.test.ts',
+      ],
+      'packages/**/package.json': [
+        'packages/qa/vitest-filter-preflight/test/config-wiring-sweep.test.ts',
+      ],
+    },
   },
   '@objectstack/formula': {
     // src/rls-predicate.test.ts pins spec's RLS zod source against the

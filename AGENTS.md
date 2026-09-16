@@ -270,8 +270,8 @@ localStorage / auth gotchas.
     spent once per PR: the OWNING seat then lands it, later pushes included, re-queuing after an ejection or a rebase on
     its own pre-landing check; this gate does not re-review it. Hand-authored governed content needs that approval; a PR
     whose only governed paths are register rows the queue leg regenerates byte-exact clears with zero approvals — an
-    uncertified recompute, drift or a hand-authored sibling keeps it governed. Unapproved, the bypass direct merge
-    (人工直合) is the only landing. **Landing is tiered**: a PR whose governed paths all lie under
+    uncertified recompute, drift or a hand-authored sibling keeps it governed. Unapproved, no seat lands it: the
+    ending is that approval, then the owning seat. **Landing is tiered**: a PR whose governed paths all lie under
     `.claude/skills/pm-dispatch/references/` lands through the queue after the skills seat's contract-tier review; every
     other governed path is the rules layer and waits for the maintainer's word, which the director seat requests as ONE
     batch of at most five rows — the approval stays the maintainer's click. ⛔ **No agent seat submits an approving
@@ -281,7 +281,7 @@ localStorage / auth gotchas.
     **Already armed or queued when you read this?** Convert it back to **draft** AND disable auto-merge — draft is
     what removes queue membership, disabling alone drops only the arming — then confirm from the remote that it is in
     neither the queue nor `origin/main`. **Draft is no barrier by itself — the barrier is this directive**, and a
-    human merge IS the review record, ⛔ not a relaxation. Behind it: the queue guard refuses an unpinned governed
+    spent approval IS the review record, ⛔ not a relaxation. Behind it: the queue guard refuses an unpinned governed
     diff; CODEOWNERS routes review requests for `docs/adr/` only, so nothing summons the maintainer on the other four;
     the post-merge audit (`scripts/pm/check-governed-merges.mjs`) lists every governed-surface merge with its approver
     and merger — a merger the maintainer does not recognise, or any agent approval, is a seat violation, filed and
@@ -438,10 +438,10 @@ recognised and the whole block lands under it, leaving two; the session-URL form
 verbatim and a bare one lands under it, leaving two. ⛔ A tail bare footer on a comment is the
 platform's, not your form downgraded. Which layer does this is unknown; don't go establishing
 it. **Commit message:** an agent commit ends with the model-free trailer pair
-`Claude-Session: https://claude.ai/code/session_<id>` and `Co-authored-by: Claude <noreply@anthropic.com>`,
-and the pre-push hook refuses a model identifier in that pair; no model identifier lands in a PR title or body,
-a comment, a changeset, a doc or a code comment. The one exemption is a REPORTING one: a harness-written
-`Co-Authored-By` trailer is not declared a deviation; the pair stays model-free; landed history is not rewritten.
+`Claude-Session: https://claude.ai/code/session_<id>` and `Co-authored-by: Claude <noreply@anthropic.com>`, and the
+pre-push hook refuses a model identifier in that pair; no model identifier lands in a PR title or body, a comment, a
+changeset, a doc or a code comment. Two exemptions: a harness-written `Co-Authored-By` trailer (REPORTING: not declared
+a deviation; landed history is not rewritten) and a verbatim maintainer ruling preserved as a quotation block.
 
 **GitHub mutates body BYTES — spell poison-shaped tokens out in words, never literally.**
 Regex literals and script-tag-shaped tokens go in fenced code with the dangerous character
@@ -470,8 +470,8 @@ Even inside your own worktree, operate defensively:
 3. **Never force-push a *shared* branch, and never push `main`.** A force-push can
    clobber a parallel agent's work; `main` is shared — land all via PR. A branch is
    unshared, and `--force-with-lease` allowed, only while ALL FIVE hold: ① it is named
-   `claude/issue-*`; ② this worktree created it; ③ nobody else has ever pushed it (the
-   author and committer sets of `git log origin/<branch>` are you alone); ④ no open PR
+   `claude/issue-*`; ② this worktree created it; ③ nobody else has ever pushed it (the author and
+   committer sets of its own commits, `git log origin/main..origin/<branch>`, are you alone); ④ no open PR
    on it carries a reviewer or an approval (one does ⇒ a new branch and a fresh PR
    instead); ⑤ the push spells `--force-with-lease=<branch>:<sha you last pushed>` —
    ⛔ never bare `--force`. One criterion failing ⇒ the branch is shared.
@@ -502,12 +502,12 @@ Even inside your own worktree, operate defensively:
    yet"; `in_progress` is not a pass. Arming a red PR does not queue it, it hides it:
    every poll then misreads "not on `main` yet" as "queued". Always read *two* things:
    the queue branch **and** `origin/main`. And **the queue enforces only the required
-   set** — six contexts block: `Lint & Repo Gates` (all `check:*` gates),
-   `TypeScript Type Check`, `Test Core`, `Dogfood Regression Gate`, `Build Core` and
-   `Temporal Conformance (live PG + MySQL)`. A check outside those six is advisory and
-   rides through, and an advisory red that lands rides `main`'s merge ref into every later
-   PR until stanched. A required context is matched by check-run name, so a rename
-   detaches its gate silently — treat those six names as contract.
+   set** — seven contexts block: `Lint & Repo Gates` (all `check:*` gates),
+   `TypeScript Type Check`, `Test Core`, `Dogfood Regression Gate`, `Build Core`,
+   `Temporal Conformance (live PG + MySQL)` and `Governed Surface Queue Guard`. A check outside
+   those seven is advisory and rides through, and an advisory red that lands rides `main`'s
+   merge ref into every later PR until stanched. A required context is matched by check-run
+   name, so a rename detaches its gate silently — treat those seven names as contract.
 
    **Re-arm awareness** — none of these is a reason to avoid the queue; all are reasons to
    confirm a PR is still *in* it: a red queue build **ejects** your entry and drops
@@ -1026,6 +1026,30 @@ registry? Add it to `OPEN_CAPABILITY_REGISTRIES` in the same PR that fixes it.
 
 ---
 
+## Writing a `--self-test` — it must be capable of failing when it runs nothing
+
+**Floor — pin battery NAMES, never one total.** Declare a frozen roster of battery name → minimum
+case count, register every case against a battery, and fail when a declared battery registers fewer
+cases than its pin, when a registered case names no declared battery, or when the roster itself
+falls below its pinned battery count. ⛔ A printed case count is EVIDENCE, NOT PROOF — a battery
+falling 40 → 3 still prints a non-zero count — and one pinned TOTAL rots the moment a sibling grows.
+
+**Handshake — the verdict sets a module-level flag, and the dispatch refuses when it is unset.**
+Set the flag as the self-test's last statement, after its success line prints; the dispatch must
+SAY the self-test never reached its verdict. ⛔ An exit code is not a handshake. Without this a
+`return` above the verdict prints nothing and exits 0, and a perfect floor never runs either —
+the two holes are ORTHOGONAL, so close both.
+
+**Copy a landed one — ⛔ never import one.** `scripts/check-agent-model-declared.mjs` carries all
+three parts (`SELF_TEST_BATTERIES`, `SELF_TEST_BATTERY_FLOOR`, `selfTestReachedVerdict`); every
+self-test must keep running standalone as `node scripts/<x>.mjs --self-test`, so a shared assertion
+module is one point of failure for every instrument at once.
+
+Both non-handshake shapes, and how to classify and probe your own:
+`docs/audits/2026-09-self-test-shape-census.md` and the `scripts/measure-self-test-floor.mjs` docblock.
+
+---
+
 ## Post-Task Checklist
 
 1. `pnpm test` — verify nothing broke. Touched a type-check-covered package? `pnpm typecheck` too.
@@ -1040,8 +1064,8 @@ registry? Add it to `OPEN_CAPABILITY_REGISTRIES` in the same PR that fixes it.
 3. **Add a changeset for anything that publishes.** Feature, functional improvement or fix — run `pnpm changeset`
    (or add a `.changeset/*.md` entry) describing it before committing. A bug fix in a released package takes a
    **`patch`** changeset — never none, and ⛔ never `skip-changeset`: that label is for a diff that publishes
-   nothing from any released package. A PR that declares `Clause-②: yes` takes at least **`minor`** instead —
-   the widening it declares is what makes it more than a patch, whatever else the diff fixes.
+   nothing from any released package. The declaration is `Clause-②: yes|no` plus at most one arm from the closed pair
+   `(widening)`/`(narrowing)`: `yes` takes at least **`minor`**, `(narrowing)` is BREAKING, `no (widening)` malformed.
    **Breaking changesets must carry their migration.** If the change removes or renames anything an author can write (a
    spec key, an export, a config field), the changeset body must state the FROM → TO mapping and the one-line fix —
    this text ships to consumers as `CHANGELOG.md` inside the npm package and is what an upgrading agent greps after the
@@ -1051,9 +1075,9 @@ registry? Add it to `OPEN_CAPABILITY_REGISTRIES` in the same PR that fixes it.
    schema is `.strict()`. The changeset is one of fourteen surfaces a retirement touches — follow the
    `spec-property-retirement` skill (`.claude/skills/`) rather than reconstructing the kit, and note the two routes
    imply **opposite** liveness-ledger dispositions.
-   **A breaking changeset must also state its ADR-0087 disposition, in writing** — exactly one marker in the
-   changeset body, enforced by `pnpm check:adr-0087-registration` (CI step *Require an ADR-0087 disposition on a
-   declared-breaking changeset*). ⛔ The categories are NOT copied here — the gate prints the full set when it fails.
+   **A breaking changeset must also state its ADR-0087 disposition, in writing** — exactly one marker in the changeset
+   body, which also carries the PR's `Clause-②` line: `pnpm check:adr-0087-registration` reads the arm there. ⛔ The
+   categories are NOT copied here — the gate prints the full set when it fails.
 4. **A removal that breaks the pinned sibling checkout ships together with the sibling fix and the pin bump — or it
    does not ship.** The `Console Pin Gate` job builds objectui at the pinned `.objectui-sha` against **current** `main`,
    so a removal or rename the pinned sibling still imports turns `main` red for every PR in the repo the moment it

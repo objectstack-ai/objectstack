@@ -10,7 +10,9 @@
  *      active organization (user mode) or supplied via --org (service mode).
  *   2. POST /cloud/packages/:id/versions     — snapshot dist/objectstack.json
  *      into sys_package_version.manifest_json (status=published).
- *   3. (optional) auto-install into a target environment via --env.
+ *   3. (optional) auto-install into a target environment via --env, or the
+ *      environment `os environments switch` recorded in cloud.json for the
+ *      control plane being published to.
  *
  * This is the "upload my local code to my org" path — the single supported
  * way to publish. (The legacy direct-to-environment `os publish` / `os
@@ -32,6 +34,7 @@ import { Args, Command, Flags } from '@oclif/core';
 import { PackageSchema } from '@objectstack/spec/marketplace';
 import { printHeader, printKV, printSuccess, printError, printStep } from '../../utils/format.js';
 import { DEFAULT_CLOUD_URL, tryReadCloudConfig } from '../../utils/cloud-config.js';
+import { resolveCloudActiveEnvironmentId } from '../../utils/active-environment.js';
 import { readErrorMessage } from '../../utils/response-envelope.js';
 
 /**
@@ -279,6 +282,7 @@ export default class PackagePublish extends Command {
     '$ os package publish',
     '$ os package publish --manifest-id com.acme.crm --version 1.2.0',
     '$ os package publish --env env_abc123 --install',
+    '$ os package publish --install    # into the active environment (os environments switch)',
     '$ os package publish dist/objectstack.json --visibility org --note "first cut"',
     '$ OS_CLOUD_URL=http://localhost:4000 os package publish    # local dev',
   ];
@@ -333,7 +337,9 @@ export default class PackagePublish extends Command {
       env: 'OS_ORG_ID',
     }),
     env: Flags.string({
-      description: 'Environment id to install the new version into after publish',
+      description:
+        'Environment id to install the new version into after publish. Defaults to the '
+        + 'environment `os environments switch` recorded for this control plane in cloud.json',
       env: 'OS_ENVIRONMENT_ID',
     }),
     install: Flags.boolean({
@@ -658,12 +664,38 @@ export default class PackagePublish extends Command {
       if (flags.submit) verBody.submit_for_review = true;
       if (flags['auto-approve']) verBody.auto_approve = true;
 
-      const shouldInstall = flags.install && flags.env;
+      // Install target precedence: `--env` (which oclif also fills from
+      // $OS_ENVIRONMENT_ID), then the environment `os environments switch`
+      // recorded in `cloud.json` FOR THIS CONTROL PLANE.
+      //
+      // ⛔ Never `credentials.json`. That file's `activeEnvironmentId` belongs
+      // to whatever server the runtime identity points at — `localhost:3000`
+      // by default — so it can name an environment on a different control
+      // plane than the one this publish is POSTing to. The url gate lives in
+      // `utils/active-environment.ts`; this line must not grow a second one.
+      let installEnvId = flags.env;
+      let installEnvFromActive = false;
+      if (flags.install && !installEnvId) {
+        installEnvId = await resolveCloudActiveEnvironmentId(baseUrl);
+        installEnvFromActive = Boolean(installEnvId);
+      }
+
+      const shouldInstall = flags.install && installEnvId;
       if (shouldInstall) {
-        verBody.install_env_id = flags.env;
+        verBody.install_env_id = installEnvId;
         verBody.seed_sample_data = flags['seed-sample-data'];
-      } else if (flags.install && !flags.env) {
-        printError('`--install` requires `--env <id>`. Skipping auto-install.');
+        if (installEnvFromActive) {
+          printStep(
+            `Installing into the active environment ${installEnvId} `
+            + '(os environments switch / os environments create --activate)',
+          );
+        }
+      } else if (flags.install && !installEnvId) {
+        printError(
+          '`--install` requires `--env <id>`, $OS_ENVIRONMENT_ID, or an active environment '
+          + '(`os environments switch <id>` or `os environments create --activate` against this '
+          + 'control plane). Skipping auto-install.',
+        );
       }
 
       const verRes = await this.postJson(

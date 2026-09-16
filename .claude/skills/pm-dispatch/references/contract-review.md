@@ -23,10 +23,10 @@
 ## 复核归属与资格(席内)
 
 - 归属该卡派发席,交付后收集复核当轮席内完成;借复核不移卡,新 spec 工作恒归 spec 席。
-- 逐车道:spec 席达档审契约增量;余席默认档自审加门禁、挂标;豁免仅独立性件与保险丝。
+- 按档位:达档席内审契约增量;未达档默认档自审加门禁、挂标;豁免仅独立性件与保险丝。
 - 复核记录 = 一条评论落 PR 或卡,达档与默认档同形;散文、dev 自评、`os-dev-report` 恒不算。
-- 同形 = `## Contract review` 题头、所审 head sha 码段、①②③ 逐项、独立性对、PASS/FAIL 判词。
-- 同形含首行 `Served-tier:`:值写常量名 `CONTRACT_REVIEW_TIER`,可前置 N/N;无此行不成裁决。
+- 同形 = `## Contract review` 题头、所审 head sha 独占码段、①②③ 逐项、独立性对、PASS/FAIL。
+- 同形含首行 `Served-tier:`:值写常量名 `CONTRACT_REVIEW_TIER`;无此行不成裁决,模板见 `--template`。
 - ① derived judgments 逐项:diff 引出的接受集与公开面变化逐条点名判对错。
 - ② semver 定级与 changeset 声明一致;③ 边界旗:dev 挂旗与 `open_questions` 逐旗答复或升级。
 - 独立性件:契约真分叉、dev 挂旗或派发后的跨车道面(含 spec)⇒ 起隔离的达档复核子代理。
@@ -34,11 +34,11 @@
 - 隔离复核子代理暂存全写按所审 PR 命名的 `<scratchpad>/pr-<n>/`,⛔ 不读非本轮自写的暂存。
 - 独立性对(机读):`Implemented-by:` 写产 diff 者身份;`mode:subagent` 记分支,`mode:remote` 记 session id。
 - `Reviewed-by:` 写渲染或采纳裁决的席位 session;隔离复核子代理无 session,记采纳它的席位。
-- 两者同 session ⇒ 报 SELF-REVIEW;值紧跟冒号,前置词即不可读;两行皆无的历史裁决恒静默。
+- 两者同 session ⇒ 报 SELF-REVIEW;只 `mode:remote` 可达,`mode:subagent` 席内审是设计;值紧跟冒号。
 - 清标即落地:PASS ⇒ 同席同笔剥双载体;清标同笔落 PR provenance 评论,引记录 id 与所判 head。
 - 随后按 `landing-operations.md` 走落地前检 → 转 ready → 挂 auto-merge 或入队。
 - 轮次报告设复审清单专节,形状与代裁清单同为强制审计。
-- 落地前检三条:① 席内条款②复核 PASS 在案,即 PR 或卡上同形的复核记录(档位按逐车道)。
+- 落地前检三条:① 席内条款②复核 PASS 在案,即 PR 或卡上同形的复核记录(档位按实测)。
 - ② 双载体已清,逐对机读 `node scripts/pm/check-clause2-carriers.mjs --pair PR-NUMBER`。
 - 0 = 双肢一致、无放宽 tell、head 上有记录;4 = 任一不成立;3 = 环境答不了,⛔ 不作干净。
 - 放宽 tell 由 `scripts/pm/check-widening-tells.mjs` 判,`no` 撞新键/成员/导出/登记即拒,附 file:line。
@@ -48,8 +48,8 @@
 
 ## 降档保险丝(机读)
 
-- 保险丝只管 spec 席条款②复核与 skills 席,每场前必读服役档,读法见 `platform-readings.md`。
-- 余席条款②复核与总监席裁决非达档裁决,⛔ 不受本丝;总监席档位由维护者逐场定。
+- 保险丝管每个出条款②裁决的席,每场前必读服役档,读法见 `platform-readings.md`。
+- 总监席裁决非达档裁决,⛔ 不受本丝;总监席档位由维护者逐场定。
 - ⛔ 自述档位与传参皆非读数;条款②的 `mode:subagent` 派发恒保留标至席内复核完成。
 - 读数不达档 ⇒ 改走转录核验的复核子代理;标签原样留置,队列外等待是安全态。
 - 保险丝只测座位自会话:`mode:subagent` 里 `get_session` 量的是派发会话,⛔ 不作互证。

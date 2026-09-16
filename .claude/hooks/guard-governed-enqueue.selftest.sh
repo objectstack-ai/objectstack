@@ -30,6 +30,11 @@ set -uo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 hook="$here/guard-governed-enqueue.sh"
+# The hook `run`/`stderr_of` actually invoke. It is `$hook` for every case but
+# one: the bare `gh pr merge <n>` case asks the hook about a DIFFERENT checkout's
+# origin, and the hook derives its repo root from its own path, so that case runs
+# a copy sitting in a checkout it built — and restores this on the next line.
+hook_under_test="$hook"
 repo_root="$(cd "$here/../.." && pwd)"
 pass=0
 fail=0
@@ -112,7 +117,7 @@ MERGE=mcp__github__merge_pull_request
 run() { # run <payload> [env assignments…] -> allow | block | exitN
   local payload="$1"; shift
   local rc
-  printf '%s' "$payload" | env "$@" "$hook" >/dev/null 2>&1
+  printf '%s' "$payload" | env "$@" "$hook_under_test" >/dev/null 2>&1
   rc=$?
   case "$rc" in
     0) printf 'allow' ;;
@@ -123,7 +128,7 @@ run() { # run <payload> [env assignments…] -> allow | block | exitN
 
 stderr_of() { # stderr_of <payload> [env…]
   local payload="$1"; shift
-  printf '%s' "$payload" | env "$@" "$hook" 2>&1 >/dev/null
+  printf '%s' "$payload" | env "$@" "$hook_under_test" 2>&1 >/dev/null
 }
 
 expect() { # expect <block|allow> <label> <payload> [env…]
@@ -290,6 +295,38 @@ expect allow 'the same Bash spelling on an approved PR' \
   "$(bash_call 'gh pr merge 13794 -R objectstack-ai/objectstack')" \
   "OS_GOVERNED_ENQUEUE_FIXTURE=$F_PINNED"
 
+echo "== a bare \`gh pr merge <n>\` derives the slug from the checkout's OWN origin =="
+# The second half of this card's defect, and the expensive half: with no `-R` the
+# target repo comes from the checkout's `origin`, so a `.git` suffix left on the
+# slug rides into the API URL — `GET /repos/objectstack-ai/objectstack.git/pulls/N`
+# answers 404 and this guard's read-failure branch ALLOWS. On any clone made with
+# the URL `git clone` hands out by default, that spelling was unguarded.
+#
+# The checkout is BUILT here: the hook derives its repo root from its own path
+# (`BASH_SOURCE`), so the only way to ask it about another origin is to run a copy
+# that sits in one. `.claude/hooks/` and `scripts/` are symlinked back at this
+# tree, so both predicates are the same files, running the same way.
+#
+# ⛔ The allow/block verdict is deliberately NOT asserted here, and that is
+# measured rather than cautious: `OS_GOVERNED_ENQUEUE_FIXTURE` answers EVERY path,
+# so the 404 that makes the real guard fail open cannot be reproduced without the
+# network — under the fixture the wrong slug blocks exactly like the right one,
+# and a verdict row here would pass in both worlds. What discriminates is the slug
+# itself, which the refusal prints as `<owner>/<repo>#<n>`: it read
+# `objectstack-ai/objectstack.git#13794` until `slug_of` stripped the suffix.
+DOTGIT_CLONE="$root/dotgit-url-clone"     # under $root: the existing trap removes it
+mkdir -p "$DOTGIT_CLONE/.claude/hooks"
+ln -s "$hook" "$DOTGIT_CLONE/.claude/hooks/guard-governed-enqueue.sh"
+ln -s "$repo_root/scripts" "$DOTGIT_CLONE/scripts"
+git -C "$DOTGIT_CLONE" init -q >/dev/null 2>&1
+git -C "$DOTGIT_CLONE" remote add origin https://github.com/objectstack-ai/objectstack.git >/dev/null 2>&1
+hook_under_test="$DOTGIT_CLONE/.claude/hooks/guard-governed-enqueue.sh"
+expect_says 'objectstack-ai/objectstack#13794' 'the slug the guard reads is the one the API answers for' \
+  "$(bash_call 'gh pr merge 13794 --squash')" "OS_GOVERNED_ENQUEUE_FIXTURE=$F_UNAPPROVED"
+expect_lacks 'objectstack.git' 'no .git suffix rides into the repo path the guard reads' \
+  "$(bash_call 'gh pr merge 13794 --squash')" "OS_GOVERNED_ENQUEUE_FIXTURE=$F_UNAPPROVED"
+hook_under_test="$hook"                   # every case below is back on the real hook
+
 echo "== an UNQUOTED \\\" opens no quote, so the merge behind it is still seen =="
 # The #11738 class, carried by all three Bash-reading guards in this directory:
 # segmentation used to read the escaped `\"` as OPENING a region that never
@@ -342,12 +379,200 @@ expect allow 'a PR reporting no changed files is not a governed answer' \
   "$(mcp $AUTO 13794)" "OS_GOVERNED_ENQUEUE_FIXTURE=$F_EMPTY"
 
 echo "== a generated-exception row on a repo with no checkout to recompute against =="
-# objectstack-ai/cloud has no sibling checkout here, so the register cannot
-# recompute the row's provenance on the RIGHT tree. Judging one repo's paths
-# against another's files would be worse than not answering: fail open, say so.
+# With no checkout of the target repo the register cannot recompute the row's
+# provenance on the RIGHT tree, and judging one repo's paths against another's
+# files would be worse than not answering: fail open, say so.
+#
+# ⚠️ THIS CASE'S PREMISE IS INJECTED, AND THE INJECTION IS THE REPAIR. It used to
+# rest on a fact about the BOX — "objectstack-ai/cloud has no sibling checkout
+# here" — which is a property of the container, not of the hook, and not true
+# everywhere: on a box that does carry a sibling `cloud` checkout the guard
+# resolved it, recomputed the predicate on it and BLOCKED, so this matrix read
+# `54 passed, 1 failed` there and was green in CI only because the runner
+# mounts no sibling. A case whose verdict depends on what else happens to sit
+# next to the checkout is not hermetic, whatever the step comment says. It now
+# points the lookup at a directory it created itself and therefore knows is
+# empty, so the "cannot resolve" premise is one this file OWNS on every box.
+# ONE spelling of the path, read by the fixture the hook is handed AND by the
+# register leg below. Two spellings drift: change the fixture alone and the
+# agreement leg goes on asking about the old path, which is agreement with a
+# question nobody asked.
+CROSS_REPO_PATH=skills/objectstack-data/references/_index.md
+F_CROSS_REGEN="$(fixture cross-repo-regen "$(files_of "$CROSS_REPO_PATH")" "$NO_REVIEWS")"
+NO_SIBLING_ROOT="$root/no-sibling-here"   # under $root: the existing trap removes it
+mkdir -p "$NO_SIBLING_ROOT"
+#
+# ⚠️ AND IT DOES NOT REACH THE "no checkout … is available" FAIL-OPEN — measured,
+# because the comment that used to sit here said it did. With nothing resolved
+# the register is asked WITHOUT `--root`, so it answers about THIS tree, where
+# this path is byte-exact against its own generator and therefore LIFTED: the
+# hook leaves at the cleared-predicate `exit 0` with EMPTY stderr, several
+# branches above that fail-open. Pinning a warning here would pin a sentence
+# nothing prints. What this case does hold is the property the card is about —
+# the verdict must not depend on what else is mounted beside the checkout — and
+# the resolved-sibling case below is its other half: same fixture, same payload,
+# only the injected root differs.
 expect allow 'an exception-row path in a repo this container cannot resolve' \
   "$(mcp $AUTO 999 objectstack-ai cloud)" \
-  "OS_GOVERNED_ENQUEUE_FIXTURE=$(fixture cross-repo-regen "$(files_of skills/objectstack-data/references/_index.md)" "$NO_REVIEWS")"
+  "OS_GOVERNED_ENQUEUE_FIXTURE=$F_CROSS_REGEN" "OS_GOVERNED_ENQUEUE_SIBLING_ROOT=$NO_SIBLING_ROOT"
+
+echo "== ...and a sibling checkout that DOES resolve is audited on its own tree =="
+# The other half of that same branch, and the reason the case above needs an
+# injection rather than a rename: when a checkout of the target repo IS
+# reachable, resolving it and recomputing the predicate there is the DESIGNED
+# behaviour — the answer then reflects the DIFF instead of the environment,
+# which is the whole point of passing `--root`. Pin only the fail-open and the
+# guard stays green after it stops looking for siblings at all.
+#
+# The sibling is BUILT here rather than borrowed from the box: `git init` plus an
+# `origin` naming objectstack-ai/cloud is the entire admission requirement, since
+# the hook compares origin slugs and reads nothing else. Measured on a container
+# carrying the real read-only /home/user/cloud checkout: this throwaway and that
+# checkout hand the register the SAME verdict with the SAME reason — governed,
+# `pureRegeneration: false`, "the generator declared no output set … fail closed"
+# — because the `gen:skill-refs` toolchain cannot run on either tree. The
+# throwaway reproduces the real sibling, so no further tree is needed.
+#
+# ⛔ The origin URL is the BARE form on purpose — do not "tidy" a `.git` suffix
+# onto it. The hook's slug reader keeps that suffix (its path character class
+# owns the dot and swallows it, leaving `cloud.git`), so the `.git` spelling
+# resolves NOTHING and this case would silently become a second copy of the one
+# above. Measured here; filed separately as its own defect, since the same
+# reader also derives the slug for a bare `gh pr merge <n>`.
+#
+# ⭐ Asserted as AGREEMENT with the register, for the reason the pure-regeneration
+# case above learned the hard way: `skills/**` leaving the governed fence, or this
+# exception row being retired, would flip the verdict for a reason the hook had
+# nothing to do with, and a verdict copied from the register makes this matrix a
+# second register. Here and in CI today that branch is `block`.
+SIBLING_ROOT="$root/sibling-parent"       # under $root: the existing trap removes it
+mkdir -p "$SIBLING_ROOT/cloud"
+git -C "$SIBLING_ROOT/cloud" init -q >/dev/null 2>&1
+git -C "$SIBLING_ROOT/cloud" remote add origin https://github.com/objectstack-ai/cloud >/dev/null 2>&1
+node "$repo_root/scripts/pm/check-governed-merges.mjs" --test --root "$SIBLING_ROOT/cloud" \
+  "$CROSS_REPO_PATH" >/dev/null 2>&1
+sibling_rc=$?
+if [ "$sibling_rc" -eq 0 ]; then
+  sibling_want=allow
+  sibling_branch='LIFTED on the sibling tree — the hook must answer the same way'
+else
+  sibling_want=block
+  sibling_branch="GOVERNED on the sibling tree (exit $sibling_rc, fail-closed: the generator cannot run there) — the refusal must stand"
+fi
+printf '  ..   register verdict on the RESOLVED sibling: %s\n' "$sibling_branch"
+expect "$sibling_want" 'a sibling checkout that resolves is audited, never waved through' \
+  "$(mcp $AUTO 999 objectstack-ai cloud)" \
+  "OS_GOVERNED_ENQUEUE_FIXTURE=$F_CROSS_REGEN" "OS_GOVERNED_ENQUEUE_SIBLING_ROOT=$SIBLING_ROOT"
+# ⛔ No companion assertion that the fail-open text is ABSENT here — it was
+# written, and measured to be a phantom: when the sibling does NOT resolve the
+# hook does not print that warning either (it leaves at the cleared-predicate
+# exit with empty stderr, per the case above), so the assertion passed in both
+# worlds and discriminated nothing. The verdict row above is the discriminator,
+# and it is the one that goes red when the sibling stops being resolved.
+
+echo "== an exception row with NO tree to recompute it on takes the fail-open =="
+# The branch neither case above reaches, and the reason it needs a third fixture
+# rather than a third root: with nothing resolved the register is asked WITHOUT
+# `--root`, so it answers about THIS tree, and a path this tree's generator owns
+# is LIFTED there — the cleared-predicate `exit 0`, several branches ABOVE the
+# fail-open. To reach it the payload must carry a path that stays GOVERNED with
+# an exception row wherever the register is asked: a `skills/**` path that no
+# generator declares. The hook then holds an exception row and no right tree to
+# recompute its provenance on, which is the whole of this branch's premise.
+#
+# The injected root is the EMPTY one the case above already built — same
+# injection, and the path shape is the only thing separating the cleared exit
+# from this warning. Reused rather than re-created so the two cases cannot drift
+# into asking about different emptiness.
+#
+# ⛔ Do not "fix" the path to a real skill. A declared path is byte-exact
+# against its own output here and is lifted, which would turn this case into a
+# silent second copy of the one above — green forever over a branch nothing
+# reaches, the exact failure this file was repaired for once already.
+#
+# Hermetic in both directions and both were measured: with `node_modules`
+# present the register answers "does not write … not among the 9 file(s) that
+# generator declared on this tree"; without it, "the generator declared no
+# output set (the generator's own --check exited 254)". Two reasons, one
+# precondition — exit 3 carrying an exception row — and that precondition is all
+# this branch reads, so the case holds on an installed worktree and on the bare
+# one this file documents itself as running under.
+UNGENERATED_PATH=skills/zz-no-such-skill/references/_index.md
+F_UNGENERATED="$(fixture ungenerated-exception-row "$(files_of "$UNGENERATED_PATH")" "$NO_REVIEWS")"
+# Printed, never asserted: the rows below pin the HOOK's branch, not a register
+# verdict, so copying one in would make this matrix a second register again.
+# It is here so a dead premise — the register no longer answering governed with
+# an exception row for this shape — reads as one line instead of as two
+# mysteriously red text assertions.
+node "$repo_root/scripts/pm/check-governed-merges.mjs" --test --json "$UNGENERATED_PATH" \
+  > "$root/ungenerated-verdict.json" 2>/dev/null
+ungenerated_rc=$?
+printf '  ..   register verdict on THIS tree for the ungenerated path: exit %s with %s exception row(s)\n' \
+  "$ungenerated_rc" "$(jq '.exceptions | length' < "$root/ungenerated-verdict.json" 2>/dev/null || printf '?')"
+expect allow 'an exception row with no checkout to recompute it on is waved through, not refused' \
+  "$(mcp $AUTO 999 objectstack-ai cloud)" \
+  "OS_GOVERNED_ENQUEUE_FIXTURE=$F_UNGENERATED" "OS_GOVERNED_ENQUEUE_SIBLING_ROOT=$NO_SIBLING_ROOT"
+expect_says 'no checkout of objectstack-ai/cloud' 'the fail-open names the repo it could not resolve' \
+  "$(mcp $AUTO 999 objectstack-ai cloud)" \
+  "OS_GOVERNED_ENQUEUE_FIXTURE=$F_UNGENERATED" "OS_GOVERNED_ENQUEUE_SIBLING_ROOT=$NO_SIBLING_ROOT"
+expect_says 'recompute its provenance' 'the fail-open names the reading that was missing' \
+  "$(mcp $AUTO 999 objectstack-ai cloud)" \
+  "OS_GOVERNED_ENQUEUE_FIXTURE=$F_UNGENERATED" "OS_GOVERNED_ENQUEUE_SIBLING_ROOT=$NO_SIBLING_ROOT"
+# THE FIRING CONTROL, and it is what keeps the two rows above from being the
+# phantom this file has already paid for once: the same payload with the sibling
+# RESOLVED (the throwaway built above — one, not two) recomputes on that tree
+# and never reaches the branch, so the sentence must be ABSENT there. Measured
+# in both directions before it was written: unresolved prints it and allows,
+# resolved prints the ordinary governed refusal and blocks. Point either `says`
+# row at this root and it goes red — which is the proof a text assertion owes,
+# and the reading the companion assertion on the resolved-sibling case could not
+# give, since nothing prints that sentence in EITHER of the two worlds it saw.
+expect_lacks 'no checkout of' 'the same payload with the sibling RESOLVED never claims a missing checkout' \
+  "$(mcp $AUTO 999 objectstack-ai cloud)" \
+  "OS_GOVERNED_ENQUEUE_FIXTURE=$F_UNGENERATED" "OS_GOVERNED_ENQUEUE_SIBLING_ROOT=$SIBLING_ROOT"
+
+echo "== every spelling of that same origin URL resolves to that same sibling =="
+# The other half of this card's defect. `git clone` hands out
+# `https://github.com/objectstack-ai/cloud.git`, and until `slug_of` stripped that
+# suffix the slug read back as `objectstack-ai/cloud.git` — equal to no
+# `owner/repo` this guard is ever asked about, so a sibling cloned the
+# conventional way resolved NOTHING and the case above silently degraded into a
+# second copy of the "cannot resolve" one. That is why its origin is pinned to the
+# bare form in place; these are the four spellings it does not cover.
+#
+# Same `$sibling_want`, and deliberately the same variable rather than four more
+# register calls: every tree here is built exactly as that one is (an empty
+# `git init` plus an `origin`), so the register would be answering the identical
+# question about identical content — and the verdict still comes FROM the register
+# rather than from a word copied into this file.
+#
+# ⚠️ `-u GIT_CONFIG_COUNT -u GIT_CONFIG_PARAMETERS` is what makes the two
+# `git@github.com:` rows MEAN what they say, and it was measured here rather than
+# assumed: this container injects `url.https://github.com/.insteadOf
+# git@github.com:` through the environment, and the hook reads the origin with
+# `git remote get-url`, which HONOURS that rewrite — so without the unset git
+# hands the hook `https://…` and both ssh rows silently become second copies of
+# the https ones, green forever over a reader they never reach. A row whose
+# premise is a property of the box is the defect the cross-repo case above was
+# repaired for; these rows own theirs. On a machine that injects nothing, `env -u`
+# on an unset name is a no-op.
+spelling_n=0
+for spelling_url in \
+  'https://github.com/objectstack-ai/cloud.git' \
+  'git@github.com:objectstack-ai/cloud' \
+  'git@github.com:objectstack-ai/cloud.git' \
+  'https://github.com/objectstack-ai/cloud.git/' \
+  ; do
+  spelling_n=$((spelling_n + 1))
+  spelling_root="$root/sibling-spelling-$spelling_n"    # under $root: the trap removes it
+  mkdir -p "$spelling_root/cloud"
+  git -C "$spelling_root/cloud" init -q >/dev/null 2>&1
+  git -C "$spelling_root/cloud" remote add origin "$spelling_url" >/dev/null 2>&1
+  expect "$sibling_want" "origin $spelling_url resolves and is audited" \
+    "$(mcp $AUTO 999 objectstack-ai cloud)" \
+    -u GIT_CONFIG_COUNT -u GIT_CONFIG_PARAMETERS \
+    "OS_GOVERNED_ENQUEUE_FIXTURE=$F_CROSS_REGEN" "OS_GOVERNED_ENQUEUE_SIBLING_ROOT=$spelling_root"
+done
 
 echo "== the deliberate exception switch =="
 expect allow 'OS_ALLOW_GOVERNED_ENQUEUE=1 on the blocking case' \

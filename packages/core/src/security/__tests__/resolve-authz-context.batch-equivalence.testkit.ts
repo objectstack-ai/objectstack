@@ -269,7 +269,7 @@ export const FIXTURES: Fixture[] = [
   },
   {
     // The `ai_seat` read: no seedEmail, so BOTH the `current_user.email`
-    // fallback and the ADR-0024 seat synthesis need `sys_user` — and it must
+    // fallback and the cloud ADR-0024 §7 seat synthesis need `sys_user` — and it must
     // still be read exactly ONCE (the #2409 memo).
     name: 'ai-seat-and-email-from-sys-user',
     userId: 'u_ai',

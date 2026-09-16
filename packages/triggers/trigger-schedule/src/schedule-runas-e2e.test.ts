@@ -19,6 +19,7 @@ import { describe, it, expect } from 'vitest';
 import { AutomationEngine } from '@objectstack/service-automation';
 import type { AutomationContext, JobSchedule, JobHandler } from '@objectstack/spec/contracts';
 import { ScheduleTrigger } from './schedule-trigger.js';
+import { withScheduledWorkOn } from './deployment-switch.test-support.js';
 
 function recordingLogger(): { logger: any; warns: string[] } {
   const warns: string[] = [];
@@ -84,6 +85,12 @@ function captureDataContext(engine: AutomationEngine): AutomationContext[] {
   } as never);
   return seen;
 }
+
+// [#17396] Every assertion in this file is about a deployment that RUNS
+// package-authored scheduled work. The switch is OFF by default in every
+// posture, so without this line nothing here binds and every case below
+// would fail for a reason that has nothing to do with what it pins.
+withScheduledWorkOn('single');
 
 describe('schedule trigger -> engine: user-less runAs fail-open via the REAL cron path (#1888)', () => {
   it('a fired scheduled job runs the flow UNSCOPED (user-less) and the engine warns', async () => {

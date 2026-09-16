@@ -331,6 +331,122 @@ describe('validateFieldConsumers (#15922)', () => {
     });
   });
 
+  describe('the synthesized layout is a display consumer (#17135)', () => {
+    /** An object whose only consumer root is an empty view — nothing NAMES a field. */
+    const grouped = (fields: AnyRec, fieldGroups: unknown): AnyRec => ({
+      objects: [{ name: 'o', fieldGroups, fields }],
+      views: [{ list: { data: { object: 'o' }, columns: [] } }],
+    });
+    const reported = (stack: AnyRec): string[] => validateFieldConsumers(stack).map((f) => f.field);
+
+    it('a field a declared group places on the layout is drawn, so it is not reported', () => {
+      expect(
+        validateFieldConsumers(
+          grouped(
+            { name: { type: 'text' }, street: { type: 'text', group: 'address' } },
+            [{ key: 'address', label: 'Address' }],
+          ),
+        ),
+      ).toEqual([]);
+    });
+
+    it('only a DECLARED group places anything — an undeclared key is not a placement', () => {
+      expect(
+        reported(
+          grouped(
+            { name: { type: 'text' }, street: { type: 'text', group: 'no_such_group' } },
+            [{ key: 'address', label: 'Address' }],
+          ),
+        ),
+      ).toEqual(['street']);
+    });
+
+    it('never the trailing flat bucket: an ungrouped field beside a grouped one is still judged', () => {
+      expect(
+        reported(
+          grouped(
+            { name: { type: 'text' }, street: { type: 'text', group: 'address' }, loose: { type: 'text' } },
+            [{ key: 'address', label: 'Address' }],
+          ),
+        ),
+      ).toEqual(['loose']);
+    });
+
+    it('an object declaring no field groups keeps every verdict it had', () => {
+      expect(reported(grouped({ name: { type: 'text' }, loose: { type: 'text' } }, undefined))).toEqual(['loose']);
+      expect(reported(grouped({ name: { type: 'text' }, loose: { type: 'text' } }, []))).toEqual(['loose']);
+    });
+
+    it('a hidden field earns nothing here — the derivation never draws one', () => {
+      expect(
+        reported(
+          grouped(
+            {
+              name: { type: 'text' },
+              street: { type: 'text', group: 'address' },
+              secret: { type: 'text', group: 'address', hidden: true },
+            },
+            [{ key: 'address', label: 'Address' }],
+          ),
+        ),
+      ).toEqual(['secret']);
+    });
+
+    it('reaches the array-shaped field map too', () => {
+      expect(
+        validateFieldConsumers({
+          objects: [
+            {
+              name: 'o',
+              fieldGroups: [{ key: 'address', label: 'Address' }],
+              fields: [{ name: 'name', type: 'text' }, { name: 'street', type: 'text', group: 'address' }],
+            },
+          ],
+          views: [{ list: { data: { object: 'o' }, columns: [] } }],
+        }),
+      ).toEqual([]);
+    });
+  });
+
+  describe('an upsert identity inside a carrier root is a read (#17135)', () => {
+    /** `x` is declared, `hidden` and `readonly` — the seeder-only identity shape. */
+    const seeded = (extra: AnyRec): AnyRec => ({
+      objects: [{ name: 'o', fields: { name: { type: 'text' }, x: { type: 'text', hidden: true, readonly: true } } }],
+      views: [{ list: { data: { object: 'o' }, columns: [] } }],
+      ...extra,
+    });
+    const reported = (stack: AnyRec): string[] => validateFieldConsumers(stack).map((f) => f.field);
+
+    it("a seed's externalId names the column the loader matches on", () => {
+      expect(reported(seeded({ data: [{ object: 'o', mode: 'upsert', externalId: 'x', records: [{ x: 'k1' }] }] }))).toEqual([]);
+    });
+
+    it('a composite externalId credits every member', () => {
+      expect(
+        validateFieldConsumers({
+          objects: [{ name: 'o', fields: { name: { type: 'text' }, a: { type: 'text' }, b: { type: 'text' } } }],
+          views: [{ list: { data: { object: 'o' }, columns: [] } }],
+          data: [{ object: 'o', mode: 'upsert', externalId: ['a', 'b'], records: [{ a: '1', b: '2' }] }],
+        }),
+      ).toEqual([]);
+    });
+
+    it("an import mapping's upsertKey is the same read", () => {
+      expect(
+        reported(seeded({ mappings: [{ name: 'm', targetObject: 'o', mode: 'upsert', upsertKey: ['x'] }] })),
+      ).toEqual([]);
+    });
+
+    it('⛔ hidden is not exempt — the matched pair differs only in the identity role', () => {
+      // Same declaration, same object, no upsert matching on it.
+      expect(reported(seeded({ data: [{ object: 'o', records: [{ x: 'k1' }] }] }))).toEqual(['x']);
+      // A seeded VALUE stays a carrier even when an upsert matches on ANOTHER column.
+      expect(
+        reported(seeded({ data: [{ object: 'o', mode: 'upsert', externalId: 'name', records: [{ x: 'k1' }] }] })),
+      ).toEqual(['x']);
+    });
+  });
+
   describe('registry wiring', () => {
     const entry = AUTHORING_RULES.find((r) => r.name === 'validateFieldConsumers');
 

@@ -303,7 +303,7 @@ describe('[#5892] break-glass: the last unbanned administrator cannot be banned'
 
     await expect(ban(engine, 'usr_owner')).rejects.toThrow(/usr_owner/);
     await expect(ban(engine, 'usr_owner')).rejects.toThrow(/last administrator/i);
-    await expect(ban(engine, 'usr_owner')).rejects.toThrow(/ADR-0024 D5\.2/);
+    await expect(ban(engine, 'usr_owner')).rejects.toThrow(/ADR-0135 D5\.2/);
     // Information as operating instructions: how to make the ban legal, and
     // where to look when an IdP drove it.
     await expect(ban(engine, 'usr_owner')).rejects.toThrow(new RegExp(ADMIN_FULL_ACCESS));
@@ -622,7 +622,7 @@ describe('[#5941] break-glass: the last unbanned administrator cannot be DELETED
     await expect(removeUser(engine, 'usr_owner')).rejects.toThrow(/Refusing to delete 'usr_owner'/);
     await expect(removeUser(engine, 'usr_owner')).rejects.toThrow(/last administrator/i);
     await expect(removeUser(engine, 'usr_owner')).rejects.toThrow(/deleting that account/);
-    await expect(removeUser(engine, 'usr_owner')).rejects.toThrow(/ADR-0024 D5\.2/);
+    await expect(removeUser(engine, 'usr_owner')).rejects.toThrow(/ADR-0135 D5\.2/);
     await expect(removeUser(engine, 'usr_owner')).rejects.toThrow(new RegExp(ADMIN_FULL_ACCESS));
     await expect(removeUser(engine, 'usr_owner')).rejects.toThrow(/SCIM deprovision is too broad/);
   });
@@ -636,7 +636,7 @@ describe('[#5941] break-glass: the last unbanned administrator cannot be DELETED
       // which fires only when the TARGET holds a local `credential` account —
       // skips this delete entirely. `usr_escape` is the password-holding
       // non-admin the issue describes: able to sign in, unable to administer
-      // anything, which is the state ADR-0024 D5.2 exists to prevent.
+      // anything, which is the state ADR-0135 D5.2 exists to prevent.
       await seedUser(engine, 'usr_idp_owner', { role: 'owner', accountProvider: 'oidc' });
       await seedUser(engine, 'usr_escape', { role: 'member', accountProvider: 'credential' });
 
@@ -1017,7 +1017,7 @@ describe('[#5978] path 1 — downgrading the last administrator\'s sys_member ro
     // No `banned` write, no `sys_user` delete — the two guarded chokepoints are
     // not on this path at all. The write lands on `sys_member`, and it is still
     // refused.
-    await expect(setRole('mem_usr_owner', 'member')).rejects.toThrow(/ADR-0024 D5\.2/);
+    await expect(setRole('mem_usr_owner', 'member')).rejects.toThrow(/ADR-0135 D5\.2/);
     await expectUserRowUntouched(engine, 'usr_owner');
     expect(await memberRole(engine, 'mem_usr_owner')).toBe('owner');
   });
@@ -1033,7 +1033,7 @@ describe('[#5978] path 1 — downgrading the last administrator\'s sys_member ro
     await expect(setRole('mem_usr_owner', 'member')).rejects.toThrow(/'usr_owner'/);
     await expect(setRole('mem_usr_owner', 'member')).rejects.toThrow(/last administrator/i);
     await expect(setRole('mem_usr_owner', 'member')).rejects.toThrow(/sys_member/);
-    await expect(setRole('mem_usr_owner', 'member')).rejects.toThrow(/ADR-0024 D5\.2/);
+    await expect(setRole('mem_usr_owner', 'member')).rejects.toThrow(/ADR-0135 D5\.2/);
     await expect(setRole('mem_usr_owner', 'member')).rejects.toThrow(new RegExp(ADMIN_FULL_ACCESS));
     // An IdP drove most of these, so the message points at the group mapping.
     await expect(setRole('mem_usr_owner', 'member')).rejects.toThrow(/SCIM group mapping/);
@@ -1162,7 +1162,7 @@ describe('[#5978] path 2 — deleting the last administrator\'s sys_member row',
       /Refusing this membership removal/,
     );
     await expect(removeMembership('mem_usr_owner')).rejects.toThrow(/removing it/);
-    await expect(removeMembership('mem_usr_owner')).rejects.toThrow(/ADR-0024 D5\.2/);
+    await expect(removeMembership('mem_usr_owner')).rejects.toThrow(/ADR-0135 D5\.2/);
   });
 
   it('removing a non-administrative membership is allowed even with exactly one admin', async () => {
@@ -1671,7 +1671,7 @@ describe('[#6084] path 4 — deleting or renaming the admin_full_access permissi
   it('THE PATH ITSELF: no identity table is touched, which is why the first three halves miss it', async () => {
     await seedUser(engine, 'usr_platform', { platformAdmin: true, accountProvider: 'oidc' });
 
-    await expect(deleteSet(PS_ADMIN)).rejects.toThrow(/ADR-0024 D5\.2/);
+    await expect(deleteSet(PS_ADMIN)).rejects.toThrow(/ADR-0135 D5\.2/);
     // The user row is present and unbanned (#5892 / #5941 see nothing), and the
     // grant row is untouched as well (#5978 sees nothing) — the write lands on
     // a fourth table entirely, and is still refused.
@@ -1687,7 +1687,7 @@ describe('[#6084] path 4 — deleting or renaming the admin_full_access permissi
     await expect(deleteSet(PS_ADMIN)).rejects.toThrow(/'usr_platform'/);
     await expect(deleteSet(PS_ADMIN)).rejects.toThrow(/last administrator/i);
     await expect(deleteSet(PS_ADMIN)).rejects.toThrow(/sys_permission_set/);
-    await expect(deleteSet(PS_ADMIN)).rejects.toThrow(/ADR-0024 D5\.2/);
+    await expect(deleteSet(PS_ADMIN)).rejects.toThrow(/ADR-0135 D5\.2/);
     await expect(deleteSet(PS_ADMIN)).rejects.toThrow(new RegExp(ADMIN_FULL_ACCESS));
     // …and the closing advice names the doors that actually write this table.
     await expect(deleteSet(PS_ADMIN)).rejects.toThrow(/package uninstall/);
@@ -1894,7 +1894,7 @@ describe('[#6084] a zero-administrator reading is no longer automatically the bo
     await expect(ban(engine, 'usr_platform')).rejects.toThrow(/'usr_platform'/);
     await expect(ban(engine, 'usr_platform')).rejects.toThrow(new RegExp(PS_ADMIN));
     await expect(ban(engine, 'usr_platform')).rejects.toThrow(new RegExp(ADMIN_FULL_ACCESS));
-    await expect(ban(engine, 'usr_platform')).rejects.toThrow(/ADR-0024 D5\.2/);
+    await expect(ban(engine, 'usr_platform')).rejects.toThrow(/ADR-0135 D5\.2/);
   });
 
   it('after the fourth path is REFUSED, the other three guards still answer in that environment', async () => {
@@ -2073,7 +2073,7 @@ describe('[#8613] path 4, third spelling — deactivating the admin_full_access 
   it('no identity table is touched, exactly as in the delete and rename spellings', async () => {
     await seedUser(engine, 'usr_platform', { platformAdmin: true, accountProvider: 'oidc' });
 
-    await expect(deactivate(PS_ADMIN)).rejects.toThrow(/ADR-0024 D5\.2/);
+    await expect(deactivate(PS_ADMIN)).rejects.toThrow(/ADR-0135 D5\.2/);
     await expectUserRowUntouched(engine, 'usr_platform');
     expect(await rowExists(engine, 'sys_user_permission_set', 'ups_usr_platform')).toBe(true);
   });
@@ -2195,7 +2195,7 @@ describe('[#8613] a DEACTIVATED break-glass set is an emptied environment, not a
     // "restore the deleted row" sentence the #6084 wipe prescribes.
     await expect(ban(engine, 'usr_platform')).rejects.toThrow(/Re-activate/);
     await expect(ban(engine, 'usr_platform')).rejects.toThrow(new RegExp(ADMIN_FULL_ACCESS));
-    await expect(ban(engine, 'usr_platform')).rejects.toThrow(/ADR-0024 D5\.2/);
+    await expect(ban(engine, 'usr_platform')).rejects.toThrow(/ADR-0135 D5\.2/);
   });
 
   it('THE WAY BACK IS OPEN: re-activating the set is permitted from inside that environment', async () => {

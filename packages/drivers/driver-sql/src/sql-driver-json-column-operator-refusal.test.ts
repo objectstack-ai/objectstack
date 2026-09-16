@@ -502,35 +502,51 @@ describe('[#7398] the second lowering family — normalised columns', () => {
     // If this ever returns `null`, the cell has silently become a copy of the
     // block above and stops controlling anything.
     expect((driver as any).filterColumnExpr('ext_sprint', 'milestones', 'milestones')).not.toBeNull();
-    expect((driver as any).isJsonColumn('ext_sprint', 'milestones')).toBe(true);
   });
 
-  for (const [op, comparand] of [
-    ['$in', [WHEN]],
-    ['$nin', [WHEN]],
-    ['$eq', WHEN],
-    ['$ne', WHEN],
-    ['$gt', WHEN],
-    ['$between', [WHEN, WHEN]],
-  ] as ReadonlyArray<readonly [string, unknown]>) {
-    it(`refuses "${op}" on the normalised JSON column`, async () => {
-      const err = await refusalOf(() =>
+  /**
+   * ⭐ [#17469] THE INTERSECTION IS NOW EMPTY, and this row is what says so.
+   *
+   * The maintainer ruling of 2026-09-13 (decision batch #128 item 5, option
+   * 1′) gives "multi-valued" one definition — `isMultiValueField` — and
+   * derives this driver's storage decision from it. `datetime` is not a
+   * multi-capable type, so `{ type: 'datetime', multiple: true }` is refused at
+   * the authoring entrance AND is no longer a JSON column here.
+   *
+   * The normalised lowering family is reached through exactly two doors —
+   * `needsLegacyDatetimeRepair` and `needsLegacyTimeRepair`
+   * ({@link SqlDriver.filterColumnExpr}) — both of which require a DECLARED
+   * temporal field, and no declared temporal field can be multi-valued any
+   * more. So the population "a JSON column served by the normalised family" is
+   * empty, and #7398's gate covers that family as DEFENCE only.
+   *
+   * ⛔ Do not "repair" this block by re-declaring `milestones` as a
+   * multi-capable type. That makes it a JSON column again, but it also leaves
+   * the normalised family — `filterColumnExpr` answers `null` for it — so the
+   * block becomes a silent copy of the one above, which is the exact failure
+   * its own header names. The honest reading is the one below: the family is
+   * still reached, the column is no longer JSON, and the gate does not fire.
+   */
+  it('[#17469] the normalised column is NO LONGER a JSON column — the gate has no population here', async () => {
+    expect((driver as any).isJsonColumn('ext_sprint', 'milestones')).toBe(false);
+    // …and the consequence, executed rather than inferred: the operators the
+    // gate refuses on a JSON column are compiled normally here.
+    for (const [op, comparand] of [
+      ['$in', [WHEN]],
+      ['$eq', WHEN],
+      ['$gt', WHEN],
+      ['$between', [WHEN, WHEN]],
+    ] as ReadonlyArray<readonly [string, unknown]>) {
+      await expect(
         driver.find('ext_sprint', {
           where: authored({ milestones: { [op]: comparand } }) as FilterCondition,
         }),
-      );
-      expectJsonColumnRefusal(err, op, 'milestones');
-    });
-  }
-
-  it('refuses bare equality on the normalised JSON column', async () => {
-    const err = await refusalOf(() =>
-      driver.find('ext_sprint', { where: authored({ milestones: WHEN }) as FilterCondition }));
-    expectJsonColumnRefusal(err, '=', 'milestones');
-  });
-
-  it('$contains still works there too', async () => {
-    const rows = await driver.find('ext_sprint', { where: { milestones: { $contains: WHEN } } as FilterCondition });
-    expect(rows.map((r: any) => r.id)).toEqual(['s1']);
+        `${op} must no longer be refused on this column`,
+      ).resolves.toBeDefined();
+    }
+    await expect(
+      driver.find('ext_sprint', { where: authored({ milestones: WHEN }) as FilterCondition }),
+      'bare equality must no longer be refused on this column',
+    ).resolves.toBeDefined();
   });
 });

@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import type { DispatchCluster, DispatchLockHandle } from './dispatcher.js';
-import { DispatchLoop } from './dispatch-loop.js';
+import { DispatchLoop } from '@objectstack/core';
 import { classifyAttempt, sendOnce, type FetchImpl } from './http-sender.js';
 import type { HttpAckResult, HttpClaimCredential, HttpDelivery, IHttpOutbox } from './http-outbox.js';
 

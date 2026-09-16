@@ -8,6 +8,7 @@ import type {
   QueueHandler,
 } from '@objectstack/spec/contracts';
 import { SysJobQueue } from '@objectstack/platform-objects/audit';
+import { DispatchLoop, DEFAULT_MAX_IDLE_INTERVAL_MS } from '@objectstack/core';
 import {
   SYSTEM_CTX,
   uid,
@@ -135,6 +136,21 @@ export interface LifecycleFloorRegistrar {
 export interface DbQueueAdapterOptions {
   /** Polling interval for the worker loop (ms, default 1000) */
   pollIntervalMs?: number;
+  /**
+   * [#17612] Ceiling of the IDLE backoff, in ms (default
+   * {@link DEFAULT_MAX_IDLE_INTERVAL_MS}, 30 s). Each tick that claims nothing
+   * doubles the delay to the next from `pollIntervalMs` up to this value; any
+   * tick that claims work, and every {@link DbQueueAdapter.wake}, snaps it
+   * straight back to `pollIntervalMs`.
+   *
+   * A value at or below `pollIntervalMs` disables the backoff and restores the
+   * flat poll. What the backoff costs is latency on work this process was not
+   * told about — a row another node wrote, a deferred row coming due, a
+   * crashed worker's lease expiring: never noticed more than this long after it
+   * became claimable. Work published through THIS adapter wakes the loop, so it
+   * is unaffected.
+   */
+  maxIdleIntervalMs?: number;
   /** Max messages claimed per poll tick (default 10) */
   batchSize?: number;
   /** Lease duration before another worker may reclaim (ms, default 30000) */
@@ -192,8 +208,7 @@ export class DbQueueAdapter implements IQueueService {
   private readonly opts: Required<Omit<DbQueueAdapterOptions, 'workerId'>> & { workerId: string };
 
   private readonly handlers = new Map<string, RegisteredHandler[]>();
-  private timer?: ReturnType<typeof setInterval>;
-  private running = false;
+  private loop?: DispatchLoop;
 
   constructor(args: {
     engine: JobEngine;
@@ -207,6 +222,7 @@ export class DbQueueAdapter implements IQueueService {
     const o = args.options ?? {};
     this.opts = {
       pollIntervalMs: o.pollIntervalMs ?? 1000,
+      maxIdleIntervalMs: o.maxIdleIntervalMs ?? DEFAULT_MAX_IDLE_INTERVAL_MS,
       batchSize: o.batchSize ?? 10,
       leaseMs: o.leaseMs ?? 30_000,
       idempotencyWindowMs: o.idempotencyWindowMs ?? 24 * 60 * 60 * 1000,
@@ -353,6 +369,13 @@ export class DbQueueAdapter implements IQueueService {
       updated_at: now.toISOString(),
     }, { context: SYSTEM_CTX });
 
+    // [#17612] Tick now rather than wait out the idle backoff — but only for a
+    // row that is claimable THIS instant. A deferred row is exactly the case
+    // the loop's contract already covers (noticed within one backed-off
+    // interval of coming due), and waking for it would reset the backoff to
+    // `pollIntervalMs` for a tick guaranteed to claim nothing.
+    if (Date.parse(scheduledFor) <= now.getTime()) this.wake();
+
     return id;
   }
 
@@ -426,6 +449,9 @@ export class DbQueueAdapter implements IQueueService {
       scheduled_for: now.toISOString(),
       updated_at: now.toISOString(),
     }, { context: SYSTEM_CTX });
+    // [#17612] `replay` re-arms the row for RIGHT NOW, so it wakes the loop
+    // unconditionally — there is no deferred case here to discriminate.
+    this.wake();
   }
 
   async purgeFailed(messageId: string): Promise<void> {
@@ -440,19 +466,38 @@ export class DbQueueAdapter implements IQueueService {
   // ── Worker lifecycle ─────────────────────────────────────────────
 
   start(): void {
-    if (this.timer) return;
-    this.timer = setInterval(() => {
-      if (this.running) return;
-      this.running = true;
-      this.pollOnce()
-        .catch((err) => { this.logger?.warn?.('DbQueueAdapter: poll tick failed', err); })
-        .finally(() => { this.running = false; });
-    }, this.opts.pollIntervalMs);
-    (this.timer as any)?.unref?.();
+    if (this.loop) return;
+    // [#17612] The shared polling loop (`@objectstack/core`), not a bare
+    // `setInterval`: it coalesces overlapping ticks — the job the `running`
+    // flag here used to do — AND backs off while the queue is idle. A flat 1 s
+    // poll cost 3600 candidate SELECTs an hour per registered queue whatever
+    // was in the table; on a remote driver every one of those is an HTTP round
+    // trip. The same shape #17610 removed from `NotificationDispatcher` and
+    // #17623 from `HttpDispatcher`; this was the third copy.
+    this.loop = new DispatchLoop({
+      intervalMs: this.opts.pollIntervalMs,
+      maxIdleIntervalMs: this.opts.maxIdleIntervalMs,
+      runTick: () => this.pollOnce(),
+      onTickError: (err) => { this.logger?.warn?.('DbQueueAdapter: poll tick failed', err); },
+    });
+    this.loop.start();
   }
 
   async stop(): Promise<void> {
-    if (this.timer) { clearInterval(this.timer); this.timer = undefined; }
+    if (!this.loop) return;
+    const loop = this.loop;
+    this.loop = undefined;
+    await loop.stop();
+  }
+
+  /**
+   * [#17612] Work is claimable now: run a tick at once and reset the idle
+   * backoff. A no-op while the worker is stopped — `start()` ticks immediately
+   * anyway. This is what keeps {@link DbQueueAdapterOptions.maxIdleIntervalMs}
+   * off the latency path for anything published through this process.
+   */
+  wake(): void {
+    this.loop?.wake();
   }
 
   /** Test-friendly synchronous poll. */
