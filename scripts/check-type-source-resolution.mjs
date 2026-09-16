@@ -735,10 +735,48 @@ const KNOWN_DIST_RESOLVED_TYPE_IMPORTS = {
   // more workspace deps. The #5286 route this entry backs makes this
   // package's OWN test files compile clean; `paths` would immediately re-bury
   // that result under other packages' diagnostics.
+  //
+  // #17396 / PR #18198 -- `@objectstack/types` is ADMITTED here by maintainer
+  // ruling 「18198 确认 + A」 (relayed by the director seat at PR comment
+  // 5692650519, 2026-09-16), which places the deployment-switch resolver in
+  // `packages/types` (ruling G item 1) and the gate plus its reason in this
+  // package and `trigger-schedule` (items 2-3).
+  //
+  // ⚠️ This is NOT the re-baseline limb and a later reader must not take it
+  // for one. Condition 1 above requires every admitted dep be reached ONLY
+  // through a program the change ONBOARDED; this change onboarded NOTHING.
+  // `tsconfig.test.json` and this package's `typecheck` script are both
+  // byte-identical to the merge-base (d4554d4f5), so the dep arrives through a
+  // program that was ALREADY counted -- which is precisely the exposure this
+  // ratchet exists to catch. It is admitted under the OTHER limb, the one this
+  // gate's own failure text names in its last two lines: widening this ledger
+  // is MAINTAINER-ONLY, and the maintainer ruled. No author may reach for this
+  // entry as precedent; ⛔ it is not a door, it is a signature.
+  //
+  // Provenance read off the instrument rather than asserted: the failure
+  // annotated this dep `via tsconfig.test.json`, i.e. the build program does
+  // not reach it -- only the test program does.
+  //
+  // `paths` (option B) was ruled out on this package's OWN measurement, stated
+  // directly above: 647 TS6059, not one of them naming a file under this
+  // package's `src/`. ⛔ Not C (no source-reachable shared home; spec may not
+  // read env) and ⛔ not D (a second and third implementation of one
+  // deployment policy).
+  //
+  // Numbers, per this registry's rule that a widening states them or is
+  // indistinguishable from a ratchet quietly reset. ⚠️ `--list` reports the
+  // MEASURED repo, not this object, so on this widening it does NOT move:
+  // 135 programs / 80 packages / 321 pairs / 19 clean, before AND after. That
+  // is the honest reading and not a missing measurement -- this change admits
+  // no program, and the exposure was already inside that 321 (it is what went
+  // red). What moves is the REGISTRY: 61 entries / 319 pairs -> 61 entries /
+  // 321 pairs, so +0 entries and +2 pairs, this one and `trigger-schedule`.
+  // Shrink-only from the new number.
   '@objectstack/service-automation': [
     '@objectstack/core', '@objectstack/driver-sql', '@objectstack/formula',
     '@objectstack/metadata-core', '@objectstack/objectql', '@objectstack/plugin-security',
     '@objectstack/service-job', '@objectstack/service-messaging', '@objectstack/spec',
+    '@objectstack/types',
   ],
   // #14181 re-baseline (the onboarding limb above): a NEW entry, reached ONLY
   // through `tsconfig.test.json` -- a program this card ADDED. This is the
@@ -921,8 +959,23 @@ const KNOWN_DIST_RESOLVED_TYPE_IMPORTS = {
     '@objectstack/core', '@objectstack/driver-sql', '@objectstack/formula', '@objectstack/objectql',
     '@objectstack/service-automation', '@objectstack/spec',
   ],
+  // #17396 / PR #18198 -- `@objectstack/types` admitted by the same maintainer
+  // ruling 「18198 确认 + A」 that moves the `service-automation` entry above;
+  // the full argument, the limb it is admitted under and the before/after
+  // numbers are stated there once rather than twice here.
+  //
+  // ⚠️ This half is the WEAKER provenance of the two and says so in place.
+  // The failure text annotated the `service-automation` admission
+  // `via tsconfig.test.json`; this one carries NO `(via ...)` at all, which by
+  // `withProvenance`'s rule means the dep is reached through this package's
+  // MAIN `tsconfig.json` -- the build program, counted since long before this
+  // card. This package runs exactly one program (`typecheck` is `tsc --noEmit`,
+  // byte-identical to the merge-base) and has no sibling config to onboard, so
+  // the re-baseline limb is not merely unmet here, it is unreachable. Admitted
+  // by maintainer ruling alone.
   '@objectstack/trigger-schedule': [
     '@objectstack/core', '@objectstack/service-automation', '@objectstack/spec',
+    '@objectstack/types',
   ],
   '@objectstack/types': ['@objectstack/spec'],
   '@objectstack/verify': [
