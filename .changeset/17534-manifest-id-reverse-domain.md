@@ -53,3 +53,42 @@ conforming one: the bundled `create-objectstack` template ships
 `com.example.blank` and interpolates `com.example.<project-name>` in kebab form,
 and `os init` derives its id from the project name instead of interpolating the
 snake_case namespace (`os init my-app` produced `com.example.my_app`).
+
+## ⚠️ One consent path reverses direction: fail-OPEN → fail-CLOSED
+
+Narrowing `manifest.id` also narrows the **accept set of the artifact load
+path**, and on one route that is a **fail-OPEN → fail-CLOSED reversal on a
+consent/permission path**. Stating it explicitly because a reversal in that
+direction is owed a named direction and a named population, however small the
+population turns out to be.
+
+**What changed.** `AssembledPackageBodySchema` extends `ManifestSchema`, so the
+artifact package entry schema now carries this rule too. An assembled package
+whose `manifest.id` is `''` used to parse: `artifactPackageId` is
+`manifest.id || manifest.name`, so such a package was carried under its `name`,
+while an install-time `grantedPermissions` record keyed by `''` matched no
+carried package and was registered nowhere. The package loaded **with no
+consent record at all** — reported as unbound, warned about, and otherwise
+allowed to run. That is the fail-OPEN half. Such an entry is now refused
+outright (`INVALID_ARTIFACT_PACKAGE_ENTRY`, 422) and the artifact does not
+materialize at all — fail-CLOSED.
+
+**Who is affected: artifacts carrying `manifest.id: ''`, and they were already
+half-broken in both directions.**
+
+- They could never be **published**: the registry face
+  (`PackageSchema.manifestId`) has carried this exact pattern all along — the
+  same regex literal, now the shared `MANIFEST_ID_PATTERN` — so the publish path
+  has always refused them.
+- Their granted-permissions **consent already did not apply**: a record keyed by
+  `''` bound to nothing, silently, on every load.
+
+⇒ For that population this converts a silent, already-ineffective consent
+binding into an explicit refusal that names `manifest.id`. Nobody who could
+publish an artifact loses the ability to load it; what they lose is a shape that
+only ever half-worked.
+
+⛔ This is the **artifact package door** refusing a malformed id, **not** the
+permission enforcer acquiring teeth. The install-time granted permission set is
+still registered and not enforced (#17147) — nothing on the tree queries that
+registry, and the repo-wide pin asserting so is unchanged and still green.
