@@ -156,6 +156,15 @@ const GROUP_ROUTED_TYPES = new Set(['position', 'team', 'department']);
  * "an operator can". So the finding stays, `stackWiresManagerChain` stays the
  * silencer, and the remedy is what was rewritten (#16678).
  *
+ * ⛔ THE SAME READING APPLIES to the node-level `onEmptyApprovers: 'fallback'`
+ * policy this remedy now names. A fallback does not make `manager` resolve; it
+ * makes the failure SURVIVABLE, and the two are independent. So it is added to
+ * the remedy as one more route the author can take — ⛔ never as a second
+ * silencer beside `stackWiresManagerChain`. Silencing on it would be a
+ * different claim from the one this rule is allowed to make: the rule reads
+ * SHAPE, and a declared `fallbackApprovers` list can itself resolve to nobody
+ * at runtime, which a static check cannot see either.
+ *
  * ⛔ DEPENDENCY — one carrier of the old assertion is still stale and is ⛔ NOT
  * fixed here: `ApproverType`'s `.describe()` in
  * `packages/spec/src/automation/approval.zod.ts` (rendered verbatim into the
@@ -191,7 +200,9 @@ const MANAGER_ONLY_ROUTES =
   `platform declares the SCIM 'manager' attribute without projecting it onto the column, and its ` +
   `admin bulk import does not write it either — and where an identity carries ` +
   `source 'idp_provisioned' the admin operation refuses, leaving that directory the one surface ` +
-  `that authors its manager.`;
+  `that authors its manager. Or declare onEmptyApprovers: 'fallback' on the node, with a ` +
+  `fallbackApprovers list: an empty manager rung then opens the request on those people instead ` +
+  `of on a slot nobody can act on, which needs no write to the column at all.`;
 
 export type ApprovalApproverSeverity = 'error' | 'warning' | 'info';
 
@@ -512,8 +523,10 @@ export function validateApprovalApprovers(stack: AnyRec): ApprovalApproverFindin
             (locks ? `, and (lockRecord) the record stays locked with no in-product recovery.` : `.`),
           hint:
             `Make sure at least one target is always staffed, or add a guaranteed-staffed ` +
-            `fallback approver, e.g. { type: 'org_membership_level', value: 'owner' }. A request ` +
-            `that still lands empty is recoverable only by a platform/tenant admin override (#3424).`,
+            `approver entry, e.g. { type: 'org_membership_level', value: 'owner' }, or declare ` +
+            `onEmptyApprovers: 'fallback' with a fallbackApprovers list for the node to open on ` +
+            `when the groups come back empty. A request that still lands empty is recoverable ` +
+            `only by a platform/tenant admin override (#3424).`,
         });
       }
 
@@ -561,9 +574,9 @@ export function validateApprovalApprovers(stack: AnyRec): ApprovalApproverFindin
             (locks ? `, and (lockRecord) the record stays locked with no in-product recovery.` : `.`),
           hint:
             `${MANAGER_ONLY_REMEDY} ${MANAGER_ONLY_ROUTES} Populate it for everyone who submits ` +
-            `this request, or take the escape that needs none of that: add a fallback approver ` +
-            `which cannot resolve empty, e.g. { type: 'org_membership_level', value: 'owner' }. A ` +
-            `request that still lands empty is recoverable only by a platform/tenant admin override.`,
+            `this request, or take the other escape that needs none of that: add a second approver ` +
+            `entry which cannot resolve empty, e.g. { type: 'org_membership_level', value: 'owner' }. ` +
+            `A request that still lands empty is recoverable only by a platform/tenant admin override.`,
         });
       }
 
@@ -587,8 +600,9 @@ export function validateApprovalApprovers(stack: AnyRec): ApprovalApproverFindin
             `privileged admin can act).`,
           hint:
             `Declare the empty-slate policy explicitly: onEmptyApprovers: 'admin_rescue' (hold for ` +
-            `admin takeover), 'fail' (fail the node — config bug), or 'auto_approve' (wave through, ` +
-            `output.autoApproved = true).`,
+            `admin takeover), 'fail' (fail the node — config bug), 'auto_approve' (wave through, ` +
+            `output.autoApproved = true), or 'fallback' with a sibling fallbackApprovers list (open ` +
+            `the request on those people instead).`,
         });
       }
 
