@@ -2,16 +2,23 @@
 
 **Status**: Proposed (2026-09-16) — awaiting the maintainer's hand-merge, which is the acceptance act for a
 governed surface (Prime Directive #14). 本记录是维护者的**优先级法**:旅程表是维护者的胃口,评审时**按删除与替换编辑**;
-席位只能带着 runner 提新行,⛔ 不能自行加行。
+席位只能带着 runner 提新行,⛔ 不能自行加行。Rework 2026-09-16:首稿的表是云服务的旅程,维护者驳回后重写为
+**开发者平台**的旅程(裁决见下)。
 **Deciders**: ObjectStack maintainer, 2026-09-16, on the direct channel, verbatim and untranslated:
 「我觉得一个创业项目核心应该放在怎么解决实际业务需求上,你再帮我综合评估我们最近的开发还有哪些跑偏了」·
 「我们是一个开发平台,也是创业项目,用的人少,你也不会知道『谁今天撞上』」·「路的清单 是否建议重新讨论,专门立文档」—
 reply to the ADR proposal: 「立」. Filed as [#18477](https://github.com/objectstack-ai/objectstack/issues/18477).
+Rework ruling, review 5224841038 on [#18480](https://github.com/objectstack-ai/objectstack/pull/18480), verbatim
+and untranslated: 「这是云服务的旅程，不是本应用开发平台的旅程。本平台的目的是不能让第三方开发者能进入我们的元数据协议快速地开发迭代企业管理应用。」
+(the director seat reads 「不能让」 as 「能让」 from context; the direction is the same either way: **锚是第三方开发者进入元数据
+协议、快速开发并迭代企业管理应用**。)
 **Supersedes**: [PRIORITIZATION.md](./PRIORITIZATION.md) as the priority anchor — 那是一份 2026-06 的 ADR 状态复核,
 2026-07-16 自标 STALE;它保留自己的方法与 status-hygiene 规则,不再回答「先做什么」。
-**Sources**: 全部取自 `origin/main` 上已有文件与已有卡片,⛔ 无一行发明 — cloud ADR-0111 验收行、cloud
-`scripts/dev-local/MAGIC-FLOW-TEST-RUNBOOK.md` §7、cloud#1521、cloud#1653、hotcrm `docs/requirements/`、
-objectstack `docs/qa/platform-checklist/`。各源行数与归并见 Consequences。
+**Sources**: 全部取自 `origin/main` 上已有文件与已有卡片,⛔ 无一行发明 — objectstack `docs/qa/platform-checklist/`
+(`areas/*.json`、`coverage.json`)、`content/docs/getting-started/`、`skills/objectstack-*`、`packages/create-objectstack`、
+`packages/cli`、`packages/verify`、`packages/mcp` 的 README;hotcrm `docs/requirements/` 与 `.github/tasks/new-feature.md`
+(参考第三方应用);cloud `scripts/dev-local/MAGIC-FLOW-TEST-RUNBOOK.md` §7 只作「AI 从提示词建应用」这一步的 runner。
+各源行数与归并见 Consequences。
 **Enforcement**: 三条裁决落进 PM 协议(`SKILL.md` 分诊行)是接受后另立的 skills-lane 卡;⛔ 本记录不改任何 `SKILL.md`。
 
 ---
@@ -25,40 +32,54 @@ objectstack `docs/qa/platform-checklist/`。各源行数与归并见 Consequence
 - 同期 cloud 六个 P0(三处凭据泄露、生产注册 22 天不通、控制面 26 天不可发布、一次 15 h 故障)停在等待态;
   hotcrm 唯一一条客户需求线(REQ-0006)被代码体量 ratchet 挡住。队列:spec 88 · devx 57 对 engine 9 ·
   services 1 · cli 3。
-- 没有用户拉力时,**维护者自己声明的端到端路径**就是锚。本记录把这些路写成一张表,每行带一个能变红的 runner,
-  然后规定:卡片先问「在哪条路上」,再问「违背哪条契约」。
+- 本仓是**应用开发平台**:它的用户是第三方开发者,路是「进入元数据协议 → 快速开发 → 迭代一个企业管理应用」;
+  云服务(注册、控制面、托管租户)是另一条产品线,有自己的路。没有用户拉力时,**维护者替开发者声明的端到端路径**
+  就是锚。本记录把这条路切成 ≤10 段,每段带一个能变红的 runner,然后规定:卡片先问「在哪一段上」,再问「违背哪条契约」。
 
 ## Decision
 
 ### D1 — 旅程表(≤10 行;维护者按删除与替换编辑)
 
 列:谁走 · 入口 → 完成时用户看到什么 · runner(能机械变红的证明;`none yet` = 缺口)· 最近读数(🟢/🔴 + 日期 +
-红时的卡号;`unknown` = 无读数)· 来源。读数是 2026-09-16 写下时的快照,不是活数据。
+红时的卡号;`unknown` = 无读数)· 来源。读数是 2026-09-16 写下时的快照,不是活数据。主角是**第三方开发者**;
+应用的终端用户只在最后一行出现,作为「做出来的应用能用」的证明,不是锚。
 
 | # | 谁走 | 入口 → 完成时用户看到什么 | runner | 最近读数 | 来源 |
 |---|---|---|---|---|---|
-| J1 | 租户管理员(新用户) | 在 cloud.objectos.ai 注册 → 建组织 → 自带 production 环境 → 以 admin 进入环境控制台 | cloud `scripts/dev-local/LOCAL-E2E-CHECKLIST.md` A2–A3 · B2(手动);`golden-journey.mjs` 每晚在 rig 上以新用户注册(只覆盖注册腿,不覆盖 prod 姿态) | 🔴 2026-09-16 [cloud#1653](https://github.com/objectstack-ai/cloud/issues/1653)(P0 open,`pm:awaiting-maintainer`;prod `tenancyPosture` 读数待人工取) | cloud#1653;cloud ADR-0111 R5.2 |
-| J2 | 平台运营者 / 所有用户 | 已登录打开 cloud.objectos.ai → 首页 ≤2.5 s、单个 DB 请求 ≤200 ms、20 并发不过拐点 | none yet(六项发布门槛只能在 prod 人工重测,树上无脚本) | 🔴 2026-08-21 读数 ~1.5 s/请求、home load 3,669 ms;2026-09-16 子卡全关、待 prod 重测 [cloud#1521](https://github.com/objectstack-ai/cloud/issues/1521) | cloud#1521 |
-| J3 | AI 应用构建者 | 发一句中文提示 → Proposed plan → Build it → Publish → 我的应用里出现应用,列表有行、仪表盘按状态出数;再说「加张表」直接进导航 | cloud `scripts/dev-local/golden-journey.mjs`(nightly `golden-journey.yml`)+ `verify-magic-flow.mjs --v1`;runbook §7 行 Build / Publish / Dashboard / Iterate add-table | 🟢 2026-09-15 nightly [run #17](https://github.com/objectstack-ai/cloud/actions/runs/35008107007) success(#14 于 09-12 失败) | cloud `MAGIC-FLOW-TEST-RUNBOOK.md` §7;cloud#1955 / cloud#1957 |
-| J4 | AI 应用构建者 | 再说「加个自动化」→ 流程绑定 → 改一条记录 / 到期前 3 天 → 目标表真的多出一行 | runbook §7 行 Iterate add-automation / add-time-relative / Time-relative EXECUTION / Flow execution(手动;v1 面之外,cloud ADR-0112);LOCAL-E2E B8 | 🟢 2026-08-01(time-relative 腿,runbook 自述);record-change 腿无带日期的读数 | cloud `MAGIC-FLOW-TEST-RUNBOOK.md` §7 |
-| J5 | 租户管理员(HotCRM 托管) | 打开托管实例 → cloud 登录直通 → 落在本组织的 CRM,带示例数据;组织 B 看不见、探不到 | cloud `scripts/dev-local/verify-hotcrm-saas.mjs`(DB 真值,R3 隔离半边)+ `apps/objectos-ee/test/hotcrm-multitenant.acceptance.ts`(HTTP 半边);R1/R2 登录与首登建空间:`HOTCRM-SAAS-TEST-RUNBOOK.md` §3 手动 | 🟢 2026-08-16 rig 硬检查全绿(hotcrm@`d4ddee09`),3 项 ⚑ pinned 发现(平台表 `organization_id = NULL`、hierarchy 惰性、contact hook 租户盲) | cloud ADR-0111 R1.1–1.3 · R2.1–2.4 · R3.1–3.4 |
-| J6 | 应用作者(标准产品) | 客户原话进 `docs/requirements/NNNN` → 分诊 A/B/C/D → 元数据落 `src/` 或 overlay → `pnpm verify` + changeset → 发版 → CRM 用户看到字段 / 审批 | none yet(hotcrm `pnpm verify` 与 `e2e/*.spec.ts` 证明产品能启动、hook 会触发,不证明某条 REQ 已落地) | 🔴 2026-09-16:六条记录零条过 `Triaged`,REQ-0002–0006 的 Traceability 仍是「to be filled in when built」(hotcrm@`087b7c5`);无卡号 | hotcrm `docs/requirements/README.md` + REQ-0001–0006 |
-| J7 | 应用作者(零代码) | 脚手架 / 启动 → 建 package → object → 记录 → app → publish → 终端用户看到;零代码、零重启 | `studio-authoring.first-run-loop`(P0,手动)· `cli.scaffold-first-run`(`.github/workflows/scaffold-e2e.yml`,每日) | 🟢 2026-09-16 scaffold-e2e [run #3082](https://github.com/objectstack-ai/objectstack/actions/runs/35052312706) success(脚手架腿);first-run-loop:unknown(run record 只落 `qa-run` issue,不在树上) | objectstack `docs/qa/platform-checklist/areas/studio-authoring.json` · `cli.json` |
-| J8 | 租户管理员 | 市场浏览 → 安装包(本地 / 离线 inline)→ 导航出现应用 → 记录可读写 | `platform-core.marketplace-install-local-lifecycle`(P1,手动)· `platform-core.marketplace-console-honesty`(P2,手动) | unknown | objectstack `areas/platform-core.json` |
-| J9 | 租户管理员 / 终端用户 | 种子 admin 从控制台登录 → 在 UI 里增删改查一条记录 → 数据落库;受限成员只看到自己的行 | `records-forms.crud-roundtrip`(P0,手动)· `platform-core.console-login`(P0,手动)· `packages/qa/dogfood/test/showcase-crud-persona-matrix.dogfood.test.ts`(CI `Dogfood Regression Gate`) | 🟢 2026-09-16 Dogfood Regression Gate success on `main@85c6d76e`(API 半边);浏览器半边 unknown | objectstack `areas/records-forms.json` · `platform-core.json` · `access-security.json` |
+| J1 | 第三方开发者(首次进入) | 读 getting-started(`how-ai-development-works` → `build-with-claude-code` → `your-first-project`)→ `npm create objectstack@latest my-app` → 10 个 `skills/objectstack-*` 随脚手架装入 → `os validate` / `os build` / 启动 → `/api/v1/health` 200 | `cli.scaffold-first-run`(`.github/workflows/scaffold-e2e.yml`,每日)· 文档链接可达:`.github/workflows/check-links.yml`(每 PR) | 🟢 2026-09-16 scaffold-e2e [run #3082](https://github.com/objectstack-ai/objectstack/actions/runs/35052312706) success;check-links run #9879 success 同日 | `content/docs/getting-started/meta.json`(8 页)· `skills/README.md`(10 技能)· `packages/create-objectstack/README.md`(1 模板 `blank`)· checklist `cli.json` |
+| J2 | 第三方开发者(手写元数据) | 在 `src/` 里以类型化元数据写 objects / fields / views / flows / permissions(`*.object.ts`、`*.view.ts`、`*.flow.ts`、access-matrix)→ 每一种元数据在运行时兑现,而不是声明了却不生效 | `platform-core.metadata-authoring-roundtrip`(`packages/qa/dogfood/test/package-first-authoring.dogfood.test.ts`)· `records-forms.field-type-matrix`(`packages/qa/dogfood/test/field-zoo-roundtrip.dogfood.test.ts`)· 每种元数据 kind 的覆盖棘轮 `docs/qa/platform-checklist/coverage.json`(`pnpm check:platform-checklist`,手动节奏) | 🟢 2026-09-16 `Dogfood Regression Gate` success on `main@85c6d76e`;覆盖棘轮 unknown(手动节奏,run record 只落 `qa-run` issue) | checklist `platform-core.json` · `records-forms.json` · `coverage.json`;`skills/objectstack-{data,ui,automation,platform}` |
+| J3 | 第三方开发者(AI 辅助) | 用 Claude Code + 已装技能,或对 build agent 说一句中文提示 → AI 写出元数据 → Build → Publish → 应用出现、列表有行、仪表盘出数;再说「加张表」「加个自动化」→ 直接进导航、流程绑定并真的触发 | cloud `scripts/dev-local/golden-journey.mjs`(nightly `golden-journey.yml`)+ `verify-magic-flow.mjs --v1`(runbook §7 行 Build / Publish / Dashboard / Iterate add-table);自动化四行手动(runbook §7,v1 面之外,cloud ADR-0112);平台侧 `ai.skill-instructions-mcp-prompts`(`packages/mcp/src/skill-prompts.test.ts`)· `ai.mcp-http-surface`(`packages/qa/dogfood/test/showcase-mcp-http-identity.dogfood.test.ts`) | 🟢 2026-09-15 nightly [run #17](https://github.com/objectstack-ai/cloud/actions/runs/35008107007) success(#14 于 09-12 失败);自动化腿 🟢 2026-08-01(runbook 自述,time-relative) | `content/docs/getting-started/build-with-claude-code.mdx` · `skills/README.md` · `packages/mcp/README.md` · checklist `ai.json`;runner 取自 cloud `MAGIC-FLOW-TEST-RUNBOOK.md` §7 |
+| J4 | 第三方开发者 / 其管理员(Studio 零代码) | 在运行中的应用里零代码:建 package → object → 记录 → app → publish → 终端用户看到;零重启;草稿不外泄、publish 原子翻转 | `studio-authoring.first-run-loop`(P0,手动)· `studio-authoring.draft-publish-lifecycle`(`packages/qa/dogfood/test/dashboard-designer-roundtrip.dogfood.test.ts`) | first-run-loop unknown;draft-publish 腿 🟢 2026-09-16(Dogfood gate 同上) | checklist `studio-authoring.json`(15 项) |
+| J5 | 第三方开发者(本地跑) | `os dev` → 健康、种子 admin 可登录、端口与陈旧提示诚实 → 控制台(objectui 渲染半边,`.objectui-sha` pin)里看到自己的导航、列表、表单 | `cli.dev-boot-contract`(P0,手动)· `platform-core.boot-health`(P0,手动)· `platform-core.nav-surfaces-render`(`examples/app-showcase/e2e/showcase-smoke.spec.ts`)· `cli.scaffold-console-first-paint`(P1,手动) | unknown(手动项的 run record 只落 `qa-run` issue;showcase-smoke 无独立读数) | checklist `cli.json` · `platform-core.json`;`packages/cli/README.md`(`os dev`) |
+| J6 | 第三方开发者(验证) | `os validate` / `os lint` / `objectstack verify`(`pnpm verify`)→ 错拼与已退役键被**响亮拒收**并附处方,不会静默落库;字段回环与跨 owner RLS 在真实 HTTP 栈上证明 | `cli.verify-verdict-exit-mapping`(`packages/cli/src/commands/verify-tenancy-posture.test.ts`)· `access-security.crud-permission-matrix`(`objectstack verify --rls`:`packages/verify/src/verify.ts` + `rls.ts`;dogfood `showcase-crud-persona-matrix`)· `studio-authoring.authoring-validation-not-persisted`(P1,手动)· `cli.build-own-contract`(P1,手动);参考应用:hotcrm `pnpm verify` 在 `ci.yml` | 🟢 2026-09-16 hotcrm ci run #3054 success(`087b7c5`);Dogfood gate 🟢 同日 | `packages/verify/README.md` · `packages/cli/README.md`(Quality)· `content/docs/deployment/validating-metadata.mdx` · checklist `cli.json` · `access-security.json` |
+| J7 | 第三方开发者(发布) | `os compile` → `dist/objectstack.json` → `os package publish`(或 hotcrm `scripts/publish-marketplace.mjs`)→ 版本出现在市场 | hotcrm `.github/workflows/publish-staging.yml` / `publish-production.yml`(workflow_dispatch)· `cli.plugin-manifest-build-contract`(P2,手动) | 🟢 2026-09-14 hotcrm publish-staging [run #11](https://github.com/objectstack-ai/hotcrm/actions/runs/34822081894) · publish-production run #5 success | `packages/cli/README.md`(Cloud — publish & install)· hotcrm `scripts/publish-marketplace.mjs` |
+| J8 | 第三方开发者 / 其客户的管理员(安装) | 把发布的包装进一个环境(在线市场或离线 inline)→ 导航出现应用 → 记录可读写;`engines` 不兼容在安装边界被拒 | `platform-core.marketplace-install-local-lifecycle`(P1,手动)· `platform-core.manifest-install-contract`(P1,手动)· `platform-core.package-lifecycle-enable-disable`(P1,手动) | unknown | checklist `platform-core.json` |
+| J9 | 第三方开发者(迭代) | 客户原话进 `docs/requirements/NNNN` → 分诊 A/B/C/D → 按 `.github/tasks/new-feature.md` 写元数据到 `src/` 或 overlay → `pnpm verify` + changeset → 发版 → 客户在 CRM 里看到字段 / 审批 | none yet(hotcrm `ci.yml` + `e2e.yml` 证明迭代后应用仍能启动、hook 仍触发,不证明某条 REQ 已落地) | 🔴 2026-09-16:六条 REQ 零条过 `Triaged`,0002–0006 的 Traceability 仍是「to be filled in when built」(hotcrm@`087b7c5`);应用本身 🟢 同日 ci #3054 / e2e #1272 | hotcrm `docs/requirements/README.md` + REQ-0001–0006 · `.github/tasks/new-feature.md` |
+| J10 | 终端用户(作为证明) | 开发者做出的应用里:登录 → 增删改查一条记录 → 数据落库;受限成员只看到自己的行、字段级掩码生效 | `records-forms.crud-roundtrip`(P0,手动)· `platform-core.console-login`(P0,手动)· `access-security.rls-both-sides`(`packages/verify/src/rls.ts` + `packages/qa/dogfood/test/showcase-private-owd.dogfood.test.ts`)· `access-security.crud-permission-matrix`(dogfood `showcase-crud-persona-matrix`) | 🟢 2026-09-16 Dogfood Regression Gate success on `main@85c6d76e`(API 半边);浏览器半边 unknown | checklist `records-forms.json` · `platform-core.json` · `access-security.json` |
 
-**未入选**(源里有、本表未收;维护者可换入):
+objectui 是开发者应用的**渲染半边**(`.objectui-sha` pin),住在 J4 / J5 / J10 里,不单独成行。
 
-- 发布者飞轮:`os plugin build` → `sign` → `publish` → 云端审核副签 → 装进第二个环境 — runner cloud
-  `LOCAL-E2E-CHECKLIST.md` D1–D6(手动);读数 unknown;源不在本卡点名的四份文件里。
-- 运营者按组织启停一个 Service(cloud ADR-0111 R4.1–4.2)— 后台操作,无 UI,无 runner。
-- 托管实例宕机而控制面与客户环境照常(cloud ADR-0111 R6.1)— 无 runner。
-- 非管理员从账户应用进入审批收件箱(`approvals.account-app-entry`,P0,手动)— 读数 unknown。
-- `os dev` 启动到健康、种子 admin 可登录(`cli.dev-boot-contract` · `platform-core.boot-health`,P0)— 已并入 J7 / J9 的入口。
+**未入选 — cloud 服务自己的清单**(首稿收过、本轮移出;cloud 仓可按同一形状自立一张清单,本表不锚定它们):
+
+- 新用户注册 → 建组织 → 自带环境:[cloud#1653](https://github.com/objectstack-ai/cloud/issues/1653)(🔴 P0 open,
+  2026-09-16);runner cloud `scripts/dev-local/LOCAL-E2E-CHECKLIST.md` A2–A3。
+- 控制面发布速度(首页 ≤2.5 s、DB 请求 ≤200 ms):[cloud#1521](https://github.com/objectstack-ai/cloud/issues/1521)
+  (🔴,待 prod 人工重测);无脚本。
+- 托管 HotCRM:cloud 登录直通、按组织建空间、租户隔离:cloud ADR-0111 R1.1–3.4;runner cloud
+  `scripts/dev-local/verify-hotcrm-saas.mjs`(🟢 2026-08-16 rig,3 项 pinned 发现)。
+- 运营者按组织启停 Service、托管实例的爆炸半径:cloud ADR-0111 R4、R6.1;无 runner。
+- 计费姿态:cloud ADR-0111 D1 留的挂点,MVP 免费、未建;无 runner。
+- 云端审核并副签一个发布的包(发布飞轮的云端半边):cloud `LOCAL-E2E-CHECKLIST.md` D5–D6;开发者半边住 J7。
+
+**未入选 — 平台侧**:
+
+- 非管理员从账户应用进入审批收件箱(`approvals.account-app-entry`,P0,手动)— 终端用户面,J10 之外。
+- 声明式自定义页的块组合与页源分层(`studio-authoring.custom-page-render-and-blocks` · `custom-page-source-tiers`)—
+  并入 J2 / J4 的元数据种类,不单独成行。
 
 ### D2 — 三条裁决(PM 协议引用的规则)
 
-1. **旅程锚定优先级。** 每张分诊过的卡带一行 `Journey:`,值是本表行号(J1–J9)或 `none`。
+1. **旅程锚定优先级。** 每张分诊过的卡带一行 `Journey:`,值是本表行号(J1–J10)或 `none`。
    顶带恒定:**安全与数据完整性从不等旅程,永远最高一带。** 其下:旅程断了或被挡 ⇒ P0/P1;
    旅程能跑但在它经过的路径上产出错误结果(含 AI 写的应用被平台静默吞掉)⇒ P2;
    不在任何已声明旅程上 ⇒ 默认 p3 或 `not_planned` — declared-but-unenforced 的键按发布批量退役,⛔ 不一键一卡。
@@ -74,15 +95,19 @@ objectstack `docs/qa/platform-checklist/`。各源行数与归并见 Consequence
 
 ## Consequences
 
-- **清单即胃口。** 维护者删行、换行;席位提新行必须附 runner;十行是上限。表中 9 行,7 行有 runner,
-  2 行 `none yet`(J2、J6)。`none yet` 的行变不了红,就喂不了队列(D2.3):要么补 runner,要么删行。
-- **源与归并。** cloud ADR-0111 共 17 条验收行(R1–R6;本卡点名 1.1–5.x 计 15)→ J5 收 R1–R3 共 11 条,
-  R5.2 进 J1,R4、R6.1、R6.2 进未入选,R5.1 归顶带;runbook §7 共 8 个检查点 → J3 收 4、J4 收 4;
-  cloud#1521 六项门槛 → J2 一行;cloud#1653 → J1 一行;hotcrm 六条 REQ 记录(0001 为示例,0002–0006 是同一客户
-  的 Track A)→ J6 一行;platform-checklist 264 项 / 15 区 / 19 项 P0 → J7、J8、J9 引 7 项,未入选再引 3 项。
+- **清单即胃口。** 维护者删行、换行;席位提新行必须附 runner;十行是上限。表中 10 行(已到上限),9 行有 runner,
+  1 行 `none yet`(J9)。`none yet` 的行变不了红,就喂不了队列(D2.3):要么补 runner,要么删行。
+- **源与归并。** objectstack `docs/qa/platform-checklist/` 264 项 / 15 区 / 19 项 P0 → 十行引 22 项,未入选再引 3 项;
+  `content/docs/getting-started/` 8 页 → J1、J3;`skills/objectstack-*` 10 个技能 → J1、J2、J3;
+  `packages/create-objectstack/README.md`(1 个模板)→ J1;`packages/cli/README.md` 命令表 → J5、J6、J7;
+  `packages/verify/README.md` → J6、J10;`packages/mcp/README.md` → J3;hotcrm `docs/requirements/` 6 条记录
+  (0001 为示例,0002–0006 是同一客户的 Track A)+ `.github/tasks/new-feature.md` + 4 个 workflow → J6、J7、J9;
+  cloud runbook §7 的 8 个检查点只作 J3 的 runner。**移出**:首稿的 cloud ADR-0111 17 条验收行、cloud#1521、
+  cloud#1653、cloud `LOCAL-E2E-CHECKLIST.md` 的 A / D 段 → 「未入选 — cloud 服务自己的清单」6 行。
 - **读数会腐烂。** 「最近读数」列是写下当天的快照;活数据住 runner 自己的记录(nightly run、`qa-run` issue、
   CI check)。引用本表某行的读数时带日期,过期即重取。
 - **执行是另一张卡。** D2 三条落进 `SKILL.md` 分诊行与取卡全序,由接受后立的 skills-lane 卡承担;本记录是法,
   技能编辑是执法。
-- **代价。** 锚是维护者的声明,不是用户的拉力;真实用户到来后,本表按他们走的路重排。跨 lane 规则(D2.2)会让
-  契约卫生卡在产品仓有 P0/P1 时整批停摆 — 这是有意的。
+- **代价。** 锚是维护者替第三方开发者做的声明,不是开发者的拉力;真实开发者到来后,本表按他们走的路重排。
+  跨 lane 规则(D2.2)会让契约卫生卡在产品仓有 P0/P1 时整批停摆 — 这是有意的。云服务的路不在表里,不等于不重要:
+  它们在 cloud 仓自己的清单里排,本表只管开发者平台。
