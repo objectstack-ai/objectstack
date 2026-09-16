@@ -32456,7 +32456,17 @@ Doubles as the fire's **write self-check** (step 0). \`201\` is not the reading.
   b(BATTERY66, 'H66 controls: …and the lowercase one really says the word', QUOTES66[6][1].includes('released rather than closed'), true);
 
   // The heading scanner, read on its own — depth, indent, decoration, order.
-  b(BATTERY66, 'H66 scan: an `h3` heading matches and comes back AS WRITTEN', releaseAnnouncementHeadings('### Card RELEASED, ⛔ not closed')[0].heading, '### Card RELEASED, ⛔ not closed');
+  //
+  // ⚠️ Through `heading66`, never `…[0].heading`: the scanner returns an EMPTY
+  // array when it matches nothing, so the direct index throws while evaluating
+  // `b()`'s ARGUMENTS — before `b()` runs — and the whole suite ABORTS at that
+  // line with a TypeError instead of reporting a case. That cost is paid
+  // exactly during ABLATION, which is the one run this battery exists to be
+  // read in; it was measured here (mutate the anchor, watch the suite abort at
+  // this line and every later case never run). The describing string is `says()`'s
+  // shape, one block over, for `says()`'s reason.
+  const heading66 = (text) => releaseAnnouncementHeadings(text)[0]?.heading ?? 'NO HEADING MATCHED';
+  b(BATTERY66, 'H66 scan: an `h3` heading matches and comes back AS WRITTEN', heading66('### Card RELEASED, ⛔ not closed'), '### Card RELEASED, ⛔ not closed');
   b(BATTERY66, 'H66 scan: `h6` matches too', releaseAnnouncementHeadings('###### Card RELEASED, ⛔ not closed').length, 1);
   b(BATTERY66, 'H66 scan: ⛔ seven hashes is not a heading', releaseAnnouncementHeadings('####### Card RELEASED, ⛔ not closed').length, 0);
   b(BATTERY66, 'H66 scan: ⛔ nor a hash with no space after it', releaseAnnouncementHeadings('##Card RELEASED, ⛔ not closed').length, 0);
