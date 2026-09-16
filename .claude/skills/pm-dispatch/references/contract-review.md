@@ -34,7 +34,7 @@
 - 隔离复核子代理暂存全写按所审 PR 命名的 `<scratchpad>/pr-<n>/`,⛔ 不读非本轮自写的暂存。
 - 独立性对(机读):`Implemented-by:` 写产 diff 者身份;`mode:subagent` 记分支,`mode:remote` 记 session id。
 - `Reviewed-by:` 写渲染或采纳裁决的席位 session;隔离复核子代理无 session,记采纳它的席位。
-- 两者同 session ⇒ 报 SELF-REVIEW;值紧跟冒号,前置词即不可读;两行皆无的历史裁决恒静默。
+- 两者同 session ⇒ 报 SELF-REVIEW;只 `mode:remote` 可达,`mode:subagent` 席内审是设计;值紧跟冒号。
 - 清标即落地:PASS ⇒ 同席同笔剥双载体;清标同笔落 PR provenance 评论,引记录 id 与所判 head。
 - 随后按 `landing-operations.md` 走落地前检 → 转 ready → 挂 auto-merge 或入队。
 - 轮次报告设复审清单专节,形状与代裁清单同为强制审计。
