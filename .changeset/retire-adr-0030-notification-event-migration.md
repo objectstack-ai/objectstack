@@ -1,6 +1,5 @@
 ---
 '@objectstack/metadata': minor
-'@objectstack/platform-objects': minor
 '@objectstack/spec': minor
 ---
 
