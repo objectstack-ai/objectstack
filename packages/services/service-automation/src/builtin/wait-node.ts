@@ -291,20 +291,81 @@ export function registerWaitNode(engine: AutomationEngine, ctx: PluginContext): 
         // rewrites it to `timerDuration`, so there is one spelling left.
         const durationMs = parseIsoDuration(wec.timerDuration);
 
+        // ── REVERSAL (#18179) ──────────────────────────────────────
+        // The #17928 hole, reached through a different door. That card closed the
+        // ABSENT block, and the contract now requires `waitEventConfig` and, under
+        // `eventType: 'timer'`, a non-blank `timerDuration` (`flow.zod.ts`). What a
+        // contract cannot do is evaluate the string: `timerDuration` is
+        // `z.string()`, so `'not-a-duration'`, `'P'`, `'PT0S'` and `'0'` are all
+        // saveable documents — and every one of them makes `parseIsoDuration`
+        // answer `undefined`, exactly as the absent key did.
+        //
+        // Until this change that answer fell through the branch below with `at`
+        // undefined, and the result was measurably WORSE than the absent-block
+        // case it mirrors: no deadline computed, no `waitUntil` persisted (so the
+        // cold-boot re-arm pass, which reads exactly that key, could never see the
+        // run), no job armed — and, with a job service ANSWERING, not one log line
+        // at any level, because the `!job` fallback below fires only when the job
+        // service is MISSING. The node then returned `{ success: true, suspend:
+        // true }`: un-refused, un-armed, un-persisted and un-logged, while
+        // reporting success.
+        //
+        // Same remedy as #17928 and for the same reason: the metadata is wrong and
+        // re-running changes nothing, so this is a `guard` refusal — a `fault` edge
+        // must not be able to route a metadata defect into a handler that then
+        // reports success — and it LOGS, because the defect being closed is
+        // silence. ⛔ A warning alone does not discharge it: warning and still
+        // suspending leaves the run parked forever, which is the whole defect.
+        //
+        // Zero and negative are the same verdict, deliberately not a separate one:
+        // `parseIsoDuration` already answers `undefined` for them, and `'PT0S'` is
+        // not a short wait — it is a deadline already past, which parks exactly as
+        // permanently as an unparseable string.
+        if (durationMs === undefined || !(durationMs > 0)) {
+          // The authored value is quoted through `JSON.stringify`, never spliced
+          // raw: it is FOREIGN text arriving on a log record, and a value carrying
+          // a newline would split this alarm into physical lines of which only the
+          // first carries its level — the #5737 hazard, from the authoring side.
+          const declared = JSON.stringify(wec.timerDuration) ?? String(wec.timerDuration);
+          // `warn`, not `error`, by AGENTS.md's degradation rule and for the same
+          // reason the block-less refusal above is `warn`: the failure is handed to
+          // the CALLER (the run fails and says so), so nothing looks normal from
+          // the outside and this is not a durability degradation.
+          ctx.logger.warn(
+            `[wait] node '${node.id}': \`timerDuration\` ${declared} is not a usable wait — refusing to run. ` +
+              `The key is a string, so this document saves, but it yields no duration: the node would have armed no ` +
+              `timer, persisted no deadline for a later boot's re-arm pass, and parked the run forever while ` +
+              `reporting success. Write an ISO-8601 duration (\`timerDuration: 'PT1H'\`, \`'P3D'\`, \`'PT90M'\`) or a ` +
+              `QUOTED positive millisecond count (\`'60000'\`), then re-publish the flow. For a pause with no ` +
+              `deadline, declare an \`eventType\` that names its resumer instead ('signal' / 'webhook' / 'manual' / ` +
+              `'condition').`,
+          );
+          return refuseNode(
+            `wait '${node.id}': timerDuration ${declared} is not a usable wait — it yields no duration, so no timer ` +
+              `can be armed and no deadline persisted. This is metadata, so re-running changes nothing: write an ` +
+              `ISO-8601 duration ('PT1H', 'P3D') or a quoted positive millisecond count ('60000'), then re-publish ` +
+              `the flow. A node in this state used to suspend the run forever and report success.`,
+          );
+        }
+
         // Persist the wake deadline as node output: the engine writes output
         // to variables (`<nodeId>.waitUntil`) *before* snapshotting the
         // suspended run, so a cold-booted kernel can re-arm the timer from the
         // durable store ({@link rearmSuspendedWaitTimers}).
-        const at = durationMs && durationMs > 0 ? new Date(Date.now() + durationMs).toISOString() : undefined;
-        // Spread, never `output: undefined`. The two are the same value and
-        // different objects: `toStrictEqual` and `Object.keys` tell them apart,
-        // a JSON dump does not, and a present key holding `undefined` reads to
-        // the next author as "the node answered a deadline" when it computed
-        // none. Absent says the one true thing.
-        const output = at ? { output: { waitUntil: at } } : {};
+        //
+        // Unconditional since #18179, and that is the guard above paying off: past
+        // it a deadline ALWAYS exists. The old spread (`at ? { output: … } : {}`)
+        // was there so `output` would be ABSENT rather than a present key holding
+        // `undefined` when no deadline was computed — `toStrictEqual` and
+        // `Object.keys` tell those apart, a JSON dump does not. That distinction
+        // still matters and is still pinned; what is gone is the arm that reached
+        // it. The two degraded returns below keep carrying the deadline: they lose
+        // the auto-resume, never the `waitUntil` a later boot re-arms from.
+        const at = new Date(Date.now() + durationMs).toISOString();
+        const output = { output: { waitUntil: at } };
 
         const job = getJobService();
-        if (job && runId != null && at) {
+        if (job && runId != null) {
           const jobName = waitTimerJobName(String(runId), node.id);
           try {
             await job.schedule(

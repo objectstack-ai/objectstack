@@ -2,10 +2,10 @@
 
 import { describe, it, expect, beforeEach } from 'vitest';
 import { AutomationEngine } from '../engine.js';
-import type { NodeExecutor } from '../engine.js';
+import type { NodeExecutionResult, NodeExecutor } from '../engine.js';
 import { InMemorySuspendedRunStore } from '../suspended-run-store.js';
 import { registerWaitNode, parseIsoDuration, rearmSuspendedWaitTimers } from './wait-node.js';
-import type { IJobService, JobHandler, JobSchedule } from '@objectstack/spec/contracts';
+import type { AutomationResult, IJobService, JobHandler, JobSchedule } from '@objectstack/spec/contracts';
 // #6758 — the wait tombstone's prescription is checked against BOTH gates an
 // author's value must clear: the spec schema and `parseIsoDuration` above.
 import { FlowNodeSchema } from '@objectstack/spec/automation';
@@ -19,12 +19,24 @@ function ctxNoJob() {
   return { logger: silentLogger(), getService() { throw new Error('no service'); } } as any;
 }
 
-/** A fake job service that records `schedule()` calls and exposes the handler. */
-function fakeJobCtx() {
+/**
+ * A fake job service that records `schedule()` calls and exposes the handler.
+ *
+ * `scheduleThrows` makes the arming call FAIL while the service itself stays
+ * present and answering — the one remaining route to a timer pause that carries
+ * the degraded `timer:<nodeId>` correlation on a host that HAS a job service, and
+ * therefore the only fixture from which `cancelled` is still observable for that
+ * shape. Since #18179 an unparseable duration no longer reaches it (the node is
+ * refused before any of this), so the teardown case below had to move here.
+ */
+function fakeJobCtx(opts: { scheduleThrows?: boolean } = {}) {
   const scheduled: Array<{ name: string; schedule: JobSchedule; handler: JobHandler }> = [];
   const cancelled: string[] = [];
   const job: IJobService = {
-    async schedule(name, schedule, handler) { scheduled.push({ name, schedule, handler }); },
+    async schedule(name, schedule, handler) {
+      if (opts.scheduleThrows) throw new Error('job queue unreachable');
+      scheduled.push({ name, schedule, handler });
+    },
     async cancel(name) { cancelled.push(name); },
     async trigger() {},
   };
@@ -329,25 +341,27 @@ describe('wait timer teardown when the pause ends another way (#5512)', () => {
     expect(cancelled).toEqual([]);
   });
 
-  it('cancels nothing for a timer wait that armed no job (no parseable duration)', async () => {
-    const { ctx, scheduled, cancelled } = fakeJobCtx();
+  it('cancels nothing for a timer wait that armed no job (the arming call failed)', async () => {
+    const { ctx, scheduled, cancelled } = fakeJobCtx({ scheduleThrows: true });
     registerWaitNode(engine, ctx);
-    // An UNPARSEABLE `timerDuration` ⇒ no deadline ⇒ nothing scheduled; the
-    // pause carries the degraded `timer:<nodeId>` correlation instead of a job
-    // name. This case used to be spelled `{ eventType: 'timer' }` with the key
-    // ABSENT, which the contract now refuses at parse — so the fixture moved to
-    // the shape that still reaches this branch. ⚠️ That it still reaches it is a
-    // residual: the contract can require the key but cannot evaluate the string,
-    // so a malformed (or zero-valued) duration reproduces the old silent park —
-    // `parseIsoDuration` returns `undefined` for it exactly as it did for the
-    // absent key. ⚠️ NO card exists for that yet: it is reported in this PR's
-    // acceptance notes for triage to file, and THIS fixture is its repro. ⛔ Do
-    // not read the line above as a filing. What this test is about is the
-    // TEARDOWN, and that is unchanged.
-    engine.registerFlow('wait_flow', waitFlow({ eventType: 'timer', timerDuration: 'not-a-duration' }));
+    // A job service that is PRESENT and answering, whose `schedule` throws: the
+    // run still suspends (degrade-don't-crash — only auto-resume is lost) and
+    // carries the degraded `timer:<nodeId>` correlation instead of a job name, so
+    // the teardown must not hand that string to `cancel()`.
+    //
+    // ⚠️ The fixture MOVED. This case used to be spelled
+    // `{ timerDuration: 'not-a-duration' }`, because an unparseable duration
+    // reached the same degraded return — and the comment here said that residual
+    // had no card and named this very fixture as its repro. #18179 is that card,
+    // and it closed the route: an unparseable, zero or negative duration is now
+    // REFUSED before the node suspends at all (pinned in the `#18179` block
+    // below). So the fixture moved to the shape that still reaches this branch.
+    // What this test is about is the TEARDOWN, and that is unchanged.
+    engine.registerFlow('wait_flow', waitFlow({ eventType: 'timer', timerDuration: 'P1D' }));
 
     const paused = await engine.execute('wait_flow');
-    expect(scheduled).toEqual([]);
+    expect(paused.status).toBe('paused');
+    expect(scheduled).toEqual([]); // the arming call threw, so no job was recorded
     expect(engine.listSuspendedRuns()[0]).toMatchObject({ correlation: 'timer:pause' });
 
     const resumed = await engine.resume(paused.runId!);
@@ -371,6 +385,218 @@ describe('wait timer teardown when the pause ends another way (#5512)', () => {
     // not pinned, since which of the two fires is not a behavioural promise.
     expect(cancelled.length).toBeGreaterThan(0);
     expect([...new Set(cancelled)]).toEqual([`flow-wait:${paused.runId}:pause`]);
+  });
+});
+
+/**
+ * #18179 — the #17928 hole reached through a DIFFERENT DOOR.
+ *
+ * #17928 closed the ABSENT `waitEventConfig` block: the contract now requires the
+ * block, and requires a non-blank `timerDuration` under `eventType: 'timer'`.
+ * Neither half can evaluate the string. `timerDuration` is `z.string()`, so
+ * `'not-a-duration'`, `'P'`, `'PT0S'`, `'0'` and `'-5'` all SAVE — and
+ * `parseIsoDuration` answers `undefined` for every one of them, exactly as it did
+ * for the absent key.
+ *
+ * ⭐ The premise leg below is what makes this card's evidence stronger than
+ * #17928's, not weaker. Those documents had to be STAGED (the block stripped after
+ * registration, because the parse refuses it). These need no staging at all:
+ * `registerFlow` parses them clean, so every reading here is of a document an
+ * author can save from the designer's own screen.
+ *
+ * What moved, on each channel — the same channels #17928's characterization
+ * measured, so the two rows can be read side by side:
+ *
+ * | channel                  | before #18179                      | pinned now                                   |
+ * | ------------------------ | ---------------------------------- | -------------------------------------------- |
+ * | `engine.execute()`       | `{ success: true, suspend: true }` | run FAILS, node status `failure`             |
+ * | suspended runs           | one, parked forever                | none — the run never suspends                 |
+ * | persisted `waitUntil`    | absent ⇒ cold-boot re-arm blind    | nothing persisted, because nothing parks      |
+ * | scheduled jobs           | none, with a job service ANSWERING | none, and the run is refused instead          |
+ * | log lines during the run | **0 at any level**                 | a `warn` naming the node, the value, the fix  |
+ * | `errorClass`             | n/a — it reported success          | `'guard'` — a `fault` edge cannot route it    |
+ *
+ * ⛔ A warning-only fix would have left every other row where it was. The run
+ * would still park forever; only the operator's chance of noticing would change.
+ */
+describe('an unparseable, zero or negative `timerDuration` is REFUSED, not parked (#18179)', () => {
+  type LogLine = { level: string; text: string };
+
+  /**
+   * Every level the `Logger` contract offers funnelled into ONE ordered sink, so
+   * "did anything at all get logged" is answerable rather than "did the level I
+   * happened to spy on get logged" — the reading that carried #17928 was a zero
+   * across all four.
+   */
+  function recordingLogger(sink: LogLine[]): any {
+    const at = (level: string) => (...args: unknown[]) => {
+      sink.push({ level, text: args.map((a) => (typeof a === 'string' ? a : JSON.stringify(a))).join(' ') });
+    };
+    const logger = { info: at('info'), warn: at('warn'), error: at('error'), debug: at('debug'), child: () => logger };
+    return logger;
+  }
+
+  /**
+   * One real, engine-driven run of a timer wait, reporting every channel above.
+   *
+   * The executor's own return value is captured by wrapping the executor
+   * `registerWaitNode` publishes, so the value recorded is the one the ENGINE
+   * received from a genuine run — never a second invocation staged by the test.
+   */
+  async function runTimerWait(timerDuration: unknown) {
+    const logs: LogLine[] = [];
+    const ran: string[] = [];
+    const engine = new AutomationEngine(recordingLogger(logs));
+    const store = new InMemorySuspendedRunStore();
+    engine.setSuspendedRunStore(store);
+    engine.registerNodeExecutor(markerExecutor(ran));
+
+    // A job service that is PRESENT and answering — the instrument for "was a
+    // wake-up armed", and the composition in which the old silence was total.
+    const scheduled: Array<{ name: string; schedule: JobSchedule }> = [];
+    const job: IJobService = {
+      async schedule(name, schedule) { scheduled.push({ name, schedule }); },
+      async cancel() {},
+      async trigger() {},
+    };
+    const ctx = { logger: recordingLogger(logs), getService: (id: string) => (id === 'job' ? job : undefined) } as any;
+
+    let returned: NodeExecutionResult | undefined;
+    const realRegister = engine.registerNodeExecutor.bind(engine);
+    const patchable = engine as unknown as { registerNodeExecutor: (e: NodeExecutor) => void };
+    patchable.registerNodeExecutor = (exec: NodeExecutor) => {
+      if (exec.type !== 'wait') return realRegister(exec);
+      const inner = exec.execute.bind(exec);
+      return realRegister({
+        ...exec,
+        async execute(n, v, c) { const r = await inner(n, v, c); returned = r; return r; },
+      });
+    };
+    registerWaitNode(engine, ctx);
+    delete (engine as unknown as Record<string, unknown>).registerNodeExecutor;
+
+    engine.registerFlow('wait_flow', waitFlow({ eventType: 'timer', timerDuration }));
+    // Production seals the vocabulary at `kernel:bootstrapped`
+    // (`AutomationServicePlugin`); sealing here keeps the engine's own "never
+    // sealed" warning out of the window, so a line seen during the run is one the
+    // NODE produced.
+    engine.sealNodeTypeVocabulary();
+    const from = logs.length;
+    const result = await engine.execute('wait_flow');
+    return {
+      result,
+      returned,
+      scheduled,
+      ran,
+      suspended: engine.listSuspendedRuns(),
+      stored: await store.list(),
+      logsDuringRun: logs.slice(from),
+    };
+  }
+
+  const nodeStatus = (result: AutomationResult, nodeId: string) =>
+    result.summary?.nodes?.find((n) => n.nodeId === nodeId)?.status;
+
+  /**
+   * Every spelling that SAVES and yields no wait. Unparseable, the empty ISO
+   * designator, two zero-valued spellings (one ISO, one bare millisecond count)
+   * and a negative one — the zero/negative half is not a separate verdict,
+   * because `'PT0S'` is not a short wait, it is a deadline already past.
+   */
+  const UNUSABLE = ['not-a-duration', '1 hour', 'P', 'PT0S', 'PT0H0M0S', '0', '-5'] as const;
+
+  it('⭐ premise — the contract ACCEPTS every one of these, so they reach the executor UNSTAGED', () => {
+    for (const timerDuration of UNUSABLE) {
+      const parsed = FlowNodeSchema.safeParse({
+        id: 'pause', type: 'wait', label: 'Wait',
+        waitEventConfig: { eventType: 'timer', timerDuration },
+      });
+      expect(parsed.success, `the contract still accepts \`timerDuration: '${timerDuration}'\``).toBe(true);
+      // Both halves, or the refusals below could be pinning a document that never
+      // existed: the contract lets it through AND the reader answers nothing.
+      expect(parseIsoDuration(timerDuration), `\`${timerDuration}\` must yield no duration`).toBeUndefined();
+    }
+    // CONTROL — #17928's half is still in place, so what this block measures is
+    // the gap that contract deliberately left, not the absence of a contract.
+    expect(FlowNodeSchema.safeParse({
+      id: 'pause', type: 'wait', label: 'Wait',
+      waitEventConfig: { eventType: 'timer', timerDuration: '   ' },
+    }).success, 'a BLANK duration is still refused at the parse').toBe(false);
+  });
+
+  it.each(UNUSABLE)(
+    'fails the run with a named, LOGGED guard refusal for %o — never a silent suspension reporting success',
+    async (timerDuration) => {
+      const m = await runTimerWait(timerDuration);
+
+      // ① ⭐ the whole reversal, on the run's own verdict
+      expect(m.result.success).toBe(false);
+      expect(m.result.status).toBe('failed');
+      expect(m.result.status).not.toBe('paused');
+      expect(nodeStatus(m.result, 'pause'), 'the run reached the wait node and failed AT it').toBe('failure');
+      expect(m.ran, 'nothing downstream of the wait ran').toEqual([]);
+
+      // ② the executor's return: a guard refusal, so a `fault` edge cannot route
+      //    a metadata defect into a handler that then reports success
+      expect(m.returned?.success).toBe(false);
+      expect(m.returned?.errorClass).toBe('guard');
+      expect(m.returned?.suspend).toBeUndefined();
+      expect(m.returned?.error).toContain('timerDuration');
+      expect(m.returned?.error).toContain('pause');
+
+      // ③ nothing parked, nothing armed, nothing persisted — where the old
+      //    behaviour left a run in the suspension ledger AND in the durable store
+      expect(m.suspended).toEqual([]);
+      expect(m.stored).toEqual([]);
+      expect(m.scheduled).toEqual([]);
+
+      // ④ ⭐ the silence is gone. With a job service ANSWERING, the old reading
+      //    here was [] at every level — that zero is what made the hang
+      //    unobservable, and neither existing branch could produce a line: the
+      //    arming guard failed on `at`, and the `!job` fallback needs no job.
+      const named = m.logsDuringRun.find((l) => l.level === 'warn' && l.text.includes("node 'pause'"));
+      expect(named, 'the refusal names the node in the log, not only in the step record').toBeDefined();
+      expect(named!.text).toContain('timerDuration');
+      // the offending value travels with the complaint…
+      expect(named!.text).toContain(JSON.stringify(timerDuration));
+      // …and so does the remedy, so an operator can fix the flow from this line
+      expect(named!.text).toContain("timerDuration: 'PT1H'");
+    },
+  );
+
+  it('quotes the authored value rather than splicing it — a newline cannot split the alarm (#5737)', async () => {
+    // `timerDuration` is author-controlled foreign text on a log record. Spliced
+    // raw, a value carrying a newline breaks the warning into physical lines of
+    // which only the first carries its level — the hazard #5737 measured from the
+    // driver side, arriving here from the authoring side.
+    const m = await runTimerWait('not\na duration');
+
+    const named = m.logsDuringRun.find((l) => l.level === 'warn' && l.text.includes("node 'pause'"));
+    expect(named, 'the value still saves and is still refused').toBeDefined();
+    expect(named!.text, 'one physical line').not.toContain('\n');
+    expect(named!.text, 'the newline is present, escaped').toContain('\\n');
+  });
+
+  it('CONTROL — a parseable duration still suspends, arms the one-shot and persists the deadline', async () => {
+    const control = await runTimerWait('PT1H');
+
+    // A wake-up job IS armed, one shot…
+    expect(control.scheduled).toHaveLength(1);
+    expect(control.scheduled[0].schedule.type).toBe('once');
+    // …the deadline IS persisted, under the key the cold-boot re-arm pass reads…
+    const vars = (control.stored[0]?.variables ?? {}) as Record<string, unknown>;
+    expect(typeof vars['pause.waitUntil']).toBe('string');
+    expect(control.returned?.output).toEqual({ waitUntil: vars['pause.waitUntil'] });
+    // …and the run parks, successfully, exactly as before this change.
+    expect(control.result.status).toBe('paused');
+    expect(control.result.success).toBe(true);
+    expect(control.suspended).toHaveLength(1);
+    // …saying nothing, because a legitimate pause owes no complaint.
+    expect(control.logsDuringRun.filter((l) => l.level === 'warn' || l.level === 'error')).toEqual([]);
+
+    // ⇒ the instrument discriminates: every channel that reads non-zero here
+    //    reads the opposite above, so the refusals are the DURATION and not a
+    //    harness that fails everything.
   });
 });
 
