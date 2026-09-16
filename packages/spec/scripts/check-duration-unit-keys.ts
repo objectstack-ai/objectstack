@@ -113,17 +113,36 @@
  *
  * ⚠️ WHAT THE NAME-LIST RETIREMENT COST THIS CLASS, stated plainly because a
  * silent repeal is the worse outcome. The divergence branch used to be guarded
- * by the name-shape list, so its whole live population was keys like `timeout`,
- * `window` and `interval` — names that declare nothing. Those keys are no
- * longer admitted, so the branch can no longer reach them: a bare `timeout`
- * whose unit is written only in a JSDoc is now neither listed nor refused. What
- * survives is the half that rests on a declaration — a key whose NAME carries a
- * unit, whose describe names none, and whose JSDoc names a DIFFERENT unit. The
- * two channels still disagree and the disagreement is still refused; the shape
- * where nothing was declared in the first place went out with the list. The
- * route back for such a key is step ③'s conversion to a `Duration*` type, at
- * which point the schema declares the unit and the contradiction branch reaches
- * it again.
+ * by the retired name-shape predicate — the `duration`-shaped-name flag,
+ * spelled out here rather than named because the retirement pin below asserts
+ * that identifier is gone from this file — and that guard's reach was WIDER
+ * than the bare list words: it admitted any key whose STEM was in the list,
+ * unit suffix or not. So TWO shapes this branch used to refuse are
+ * no longer refused here, and both are named rather than one:
+ *
+ *   (a) a bare list-shaped key that declares nothing (`timeout`, `window`,
+ *       `interval`) whose unit lives only in a JSDoc. It is no longer admitted,
+ *       so the branch can no longer reach it — the direct, intended cost of
+ *       retiring the list, and the route back is step ③'s conversion to a
+ *       `Duration*` type, at which point the schema declares the unit and the
+ *       contradiction branch reaches the key again.
+ *
+ *   (b) a key whose stem was in the retired list AND whose name carries a unit
+ *       token, whose JSDoc names the SAME unit and whose describe names none
+ *       (`timeoutMs` + JSDoc "in milliseconds" + describe 'Maximum execution
+ *       time'; `intervalSeconds` + JSDoc "in seconds" + no describe). This one
+ *       is still ADMITTED — its NAME declares a unit — and it goes unrefused
+ *       because of the agreement carve-out on the branch below, ⛔ not because
+ *       the retirement removed it from the population. It is DEFERRED to
+ *       #18075, ⛔ not decided correct here: refusing the agreement shape today
+ *       reds `latencyMs` / `frequencyHours` on `main` (that card's ordering
+ *       constraint — remediation before widening), and whether agreement is an
+ *       offence at all is that card's open question.
+ *
+ * What survives as a live refusal is the half resting on a declaration the
+ * JSDoc CONTRADICTS — a key whose NAME carries a unit, whose describe names
+ * none, and whose JSDoc names a DIFFERENT unit. Those two channels disagree and
+ * the disagreement is still refused.
  *
  * Why the divergence is worth a refusal and the blindness was not: the card
  * that filed it measured the cost. #15678 recorded in its changeset that
@@ -797,11 +816,14 @@ export function judge(site: DurationKey): Finding | undefined {
   //   header — not smuggled in as a guard that happens to be equivalent.
   //
   //   the unit must not already BE in the name — a JSDoc that says milliseconds
-  //   over a key called `latencyMs` diverges from nothing: the published
-  //   reference page prints that key name, so the reader who most needs the
-  //   unit can see it. Refusing there would manufacture offenders out of
-  //   agreement, and the two rows in this tree that sit in exactly that shape
-  //   (`latencyMs`, `frequencyHours`) are the measured proof of it.
+  //   over a key called `latencyMs` names no unit the key name does not already
+  //   carry, and the published reference page prints that key name. ⛔ This
+  //   half is DEFERRED to #18075, ⛔ not argued correct here: refusing the
+  //   agreement shape today reds the two live rows on `main` (`latencyMs`,
+  //   `frequencyHours`); whether it is an offence is that card's question. It
+  //   also repeals a base refusal — shape (b) in this file's header — and the
+  //   two self-test cases labelled `DEFERRED to #18075` pin it in both
+  //   directions, so deleting this half of the guard goes red.
   //
   // The JSDoc is still NEVER read as a way to SATISFY the rule — that was
   // option 1 and it was not adopted. It is read in one direction only: to
@@ -1091,9 +1113,17 @@ function selfTest(): number {
   // read exactly as the instant root is — as the identifier the value chain
   // bottoms out at — so the cases that keep the instant root honest are the
   // cases that keep this one honest.
+  // ⛔ Asserted through `durationType`, never through `rulesOf` alone: a key
+  // that is OUTSIDE the population also yields '', so a bare `rulesOf(...) ===
+  // ''` here passes just as well when the type channel is ablated away. The
+  // `DurationSeconds` case below already asserts the root; this one now does
+  // too, so both legs of the vocabulary are pinned to a reading that can fail.
   expect('admitted by TYPE: a `DurationMs` key needs no unit in its name',
-    rulesOf(`const S = z.object({ gracePeriod: DurationMs.default(30000).describe('How long to wait before forcing the operation') });`)
-      .join() === '');
+    (() => {
+      const sites = collectDurationKeys('fixture.ts', `const S = z.object({ gracePeriod: DurationMs.default(30000).describe('How long to wait before forcing the operation') });`);
+      return sites.length === 1 && sites[0].durationType === 'DurationMs'
+        && sites[0].typeUnits.join() === 'ms' && declaresUnit(sites[0]) && judge(sites[0]) === undefined;
+    })());
   expect('admitted by TYPE: a BARE `DurationSeconds` key (no chain at all)',
     (() => {
       const sites = collectDurationKeys('fixture.ts', `const S = z.object({ refreshInterval: DurationSeconds });`);
@@ -1156,6 +1186,29 @@ function selfTest(): number {
   expect('REFUSED (divergence): JSDoc says ms, the NAME says seconds, and there is NO describe at all',
     rulesOf(`const S = z.object({\n  /**\n   * Export interval in milliseconds\n   */\n  intervalSeconds: z.number().int().positive().optional().default(60) });`)
       .join() === 'unit-in-jsdoc-not-in-describe');
+
+  // ⚠️ THE AGREEMENT CARVE-OUT — DEFERRED to #18075, pinned here so it cannot
+  // move silently. These are the two fixtures directly above with ONE word
+  // changed: the JSDoc names the SAME unit the key name already carries. The
+  // base gate refused both as `unit-in-jsdoc-not-in-describe` — its guard was
+  // the retired name-shape predicate, whose reach was the STEM, so `timeoutMs`
+  // and `intervalSeconds` both satisfied it. They pass here, and they pass because
+  // of the `!jsdocUnits.some(...)` half of the guard below, ⛔ NOT because the
+  // retirement removed them from the population and ⛔ NOT because agreement
+  // has been ruled not to be an offence.
+  //
+  // #18075 holds the opposite and asked for exactly the first fixture as a
+  // POSITIVE control. Refusing it today reds `latencyMs` / `frequencyHours` on
+  // `main` — that card's ordering constraint, remediation before widening — so
+  // this is a sequencing accommodation with a card attached, not a decision.
+  // ⛔ Delete the carve-out and BOTH of these go red: that is what they are
+  // for, and it is what was missing when this repeal first landed unnoticed.
+  expect('DEFERRED to #18075: `timeoutMs` + JSDoc naming the SAME unit (ms) + describe naming none — base REFUSED this, head does not',
+    rulesOf(`const S = z.object({\n  /**\n   * Execution timeout in milliseconds\n   */\n  timeoutMs: z.number().int().min(0).optional().describe('Maximum execution time') });`)
+      .join() === '');
+  expect('DEFERRED to #18075: `intervalSeconds` + JSDoc naming the SAME unit (seconds) + NO describe — base REFUSED this, head does not',
+    rulesOf(`const S = z.object({\n  /**\n   * Export interval in seconds\n   */\n  intervalSeconds: z.number().int().positive().optional().default(60) });`)
+      .join() === '');
 
   // ⚠️ THE COST OF THE RETIREMENT, pinned rather than quietly dropped. These
   // three shapes were this class's original positive controls (#15939) and
