@@ -13,6 +13,18 @@ export interface LoadedConfig {
   config: any;
   absolutePath: string;
   duration: number;
+  /**
+   * The module's NAMED exports that {@link loadConfig} merged onto the
+   * default-exported stack, in module order — the provenance half of
+   * {@link namedExportRejectionHints}, and empty for the overwhelmingly common
+   * config whose only export is the default.
+   *
+   * It records what the merge DID, not what the schema thinks of it: a name the
+   * stack schema declares (`onEnable`, `functions`) and a name it does not
+   * (`collectPackageDirs`) are both listed here, because the loader cannot tell
+   * them apart and the parse that can runs several steps later.
+   */
+  namedExports: readonly string[];
 }
 
 /**
@@ -329,7 +341,43 @@ export interface LoadConfigOptions {
 
 /**
  * Load and bundle a config file using bundle-require.
- * Returns the resolved config object and load time.
+ * Returns the resolved config object, its load time, and the provenance of
+ * whatever named exports were merged into it.
+ *
+ * ## The rule this function establishes: the config file is a MODULE, and the
+ * whole module is the stack
+ *
+ * `objectstack.config.ts` is not read for its `default` export alone. The
+ * default is the base, and then **every named export the module has is merged
+ * onto it as a TOP-LEVEL STACK KEY**, under the export's own name. That is
+ * deliberate and load-bearing: `onEnable` and `functions` are declared stack
+ * keys that an app authors as named exports, and unwrapping `mod.default` alone
+ * dropped them — which is why `AppPlugin` never invoked the runtime hooks.
+ *
+ * The consequence is the half nothing said out loud, and #18171 is the card
+ * about it: **a named export is legal only when its name is a key
+ * `ObjectStackDefinitionSchema` declares.** An `export const collectPackageDirs
+ * = …` helper sitting beside the default is not a helper as far as this loader
+ * is concerned — it is a top-level stack key called `collectPackageDirs`, and
+ * the strict stack parse then refuses it as unrecognised. That refusal is
+ * correct and stays correct; what it could not say is WHY a key the author
+ * never wrote inside `defineStack()` is being judged as a stack key at all.
+ * {@link namedExportRejectionHints} is that missing half, and the
+ * `namedExports` returned here is the provenance it reads.
+ *
+ * ⚠️ Two further shapes, measured on this tree rather than reasoned about.
+ * They are documented on the config-authoring docs page so an author can
+ * recognise them; ⛔ neither is a pattern to rely on:
+ *
+ *  - a named export whose name IS a declared stack key the default does not
+ *    carry is merged in and ACCEPTED — that is the `onEnable` / `functions`
+ *    path, and nothing distinguishes a deliberate hook from a stray export
+ *    that happens to collide with a collection name;
+ *  - a named export whose name the default export ALREADY carries is dropped
+ *    **silently** (`if (key in merged) continue`) and the build exits 0. So a
+ *    second `export const objects = [...]` beside a `defineStack({ objects })`
+ *    is not a second declaration, it is a value nothing ever reads. Keep every
+ *    stack key inside `defineStack()`.
  */
 export async function loadConfig(source?: string, options?: LoadConfigOptions): Promise<LoadedConfig> {
   const absolutePath = resolveConfigPath(source);
@@ -352,6 +400,13 @@ export async function loadConfig(source?: string, options?: LoadConfigOptions): 
   // alongside the default-exported stack. Module-namespace named exports are
   // otherwise dropped when we unwrap `mod.default`, which prevents AppPlugin
   // from invoking runtime hooks.
+  //
+  // ⛔ This loop is what makes EVERY named export a top-level stack key — see
+  // this function's header for the rule and for the two shapes it has that an
+  // author cannot see from here. `namedExports` records the names it merged so
+  // the refusal several steps downstream can say where the key came from; it is
+  // a reading, and changes nothing about which configs load.
+  const namedExports: string[] = [];
   const config = (baseConfig === mod || mod.default == null)
     ? baseConfig
     : (() => {
@@ -359,6 +414,7 @@ export async function loadConfig(source?: string, options?: LoadConfigOptions): 
         for (const key of Object.keys(mod)) {
           if (key === 'default' || key in merged) continue;
           merged[key] = (mod as any)[key];
+          namedExports.push(key);
         }
         return merged;
       })();
@@ -367,7 +423,93 @@ export async function loadConfig(source?: string, options?: LoadConfigOptions): 
     config,
     absolutePath,
     duration: Date.now() - start,
+    namedExports,
   };
+}
+
+/**
+ * The lines that turn a strict-stack `unrecognized_keys` refusal into the RULE
+ * it enforces, for the keys that got there by being named exports of the config
+ * module (#18171).
+ *
+ * ## What the refusal already says, and what it cannot say
+ *
+ * `ObjectStackDefinitionSchema` is closed, so an undeclared top-level key is
+ * refused by name, with the surface named and the closest declared key
+ * suggested. Measured on this tree, an `export const ProbeNamedExport = [1, 2,
+ * 3]` appended to an otherwise valid config produces exactly that:
+ *
+ * ```console
+ *   ✗ Validation failed
+ *     unrecognized_keys: Unrecognized key(s) on this stack definition: `ProbeNamedExport`.
+ * ```
+ *
+ * That diagnostic is good and this does not touch it. What it cannot reach is
+ * the author's actual question — *I never wrote `ProbeNamedExport` inside
+ * `defineStack()`, so why is the stack schema judging it?* The schema is handed
+ * an object and has no idea one of its keys was a named export a step earlier;
+ * {@link loadConfig} is the only place that knows, which is why the explanation
+ * is assembled here rather than widened into the spec's error map.
+ *
+ * ## Why this is a hint and not a refusal
+ *
+ * ⛔ Nothing here changes what the build accepts. The key is still merged, still
+ * reaches the strict parse, and is still refused there — the same run, the same
+ * exit code, the same `--json` payload, which is deliberately left untouched so
+ * this adds no field to a published envelope. The loud named refusal is the
+ * property that makes this class of mistake cheap; the hint only tells the
+ * author which of their two files to edit.
+ *
+ * ## Scope of the match
+ *
+ * Root-path `unrecognized_keys` issues only, intersected with the names
+ * {@link loadConfig} actually merged. A key an author wrote inside
+ * `defineStack()` is refused with no hint attached, because for that key the
+ * existing message is already the whole truth. An offending key that is BOTH
+ * (spelled in the object and exported) cannot exist: the merge skips any name
+ * the default export already carries.
+ *
+ * @param issues the `ZodError.issues` of the failed stack parse
+ * @param namedExports {@link LoadedConfig.namedExports} from the same run
+ * @returns dim lines to print under the formatted errors, or `[]`
+ */
+export function namedExportRejectionHints(
+  issues: readonly unknown[],
+  namedExports: readonly string[],
+): string[] {
+  if (namedExports.length === 0) return [];
+  const merged = new Set(namedExports);
+
+  const offenders: string[] = [];
+  for (const issue of issues) {
+    const i = issue as { code?: unknown; path?: unknown; keys?: unknown };
+    if (i.code !== 'unrecognized_keys') continue;
+    // The stack definition is the ROOT of this parse, so its own unrecognised
+    // keys carry an empty path. A nested one (a key inside an object, a view, a
+    // package body) is a different surface with a different explanation, and
+    // reaching it from here would attribute an authoring mistake to a merge
+    // that never touched it.
+    if (!Array.isArray(i.path) || i.path.length > 0) continue;
+    if (!Array.isArray(i.keys)) continue;
+    for (const key of i.keys) {
+      if (typeof key === 'string' && merged.has(key) && !offenders.includes(key)) {
+        offenders.push(key);
+      }
+    }
+  }
+  if (offenders.length === 0) return [];
+
+  const one = offenders.length === 1;
+  const list = offenders.map((k) => `\`${k}\``).join(', ');
+  return [
+    `  ${list} ${one ? 'is a NAMED EXPORT' : 'are NAMED EXPORTS'} of your config file, `
+      + `${one ? 'it is not a key' : 'not keys'} written inside defineStack().`,
+    '  The config file is loaded as a MODULE: every named export is merged onto the default-exported',
+    '  stack as a top-level key, so a named export is legal only when its name is a key the stack',
+    '  schema declares. A helper exported beside the stack is read as a stack key, and refused above.',
+    `  Fix: move ${one ? 'it' : 'them'} into a sibling module (e.g. objectstack.composition.ts) and import `
+      + `${one ? 'it' : 'them'} here.`,
+  ];
 }
 
 /**

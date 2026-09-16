@@ -2018,6 +2018,38 @@ export default defineStack({
 });
 ```
 
+### What the config file may export
+
+The config file is loaded as a **module**, and the whole module is the stack:
+the default export is the base, and then **every named export is merged onto it
+as a top-level stack key**, under the export's own name. `onEnable` and
+`functions` are authored that way on purpose.
+
+So a named export is legal **only when its name is a key
+`ObjectStackDefinitionSchema` declares**. A helper exported beside the stack —
+`export const collectPackageDirs = …` — arrives at the strict parse as a
+top-level stack key of that name, and is refused:
+
+```console
+$ printf '\nexport const ProbeNamedExport = [1, 2, 3];\n' >> objectstack.config.ts
+$ os build
+  ✗ Validation failed
+    unrecognized_keys: Unrecognized key(s) on this stack definition: `ProbeNamedExport`.
+```
+
+Move helpers into a sibling module (`objectstack.composition.ts`, for instance)
+and import them from the config. Two further shapes, documented so they are
+recognisable rather than as patterns to use:
+
+| The named export's name | What happens |
+|:---|:---|
+| not a declared stack key | the build **fails**, naming the key (above) |
+| a declared stack key the default export does **not** carry | merged in and **accepted** — the `onEnable` / `functions` path |
+| a key the default export **already** carries | dropped **silently**; the build exits 0 and the exported value is never read |
+
+The last row is why every stack key belongs inside `defineStack()`: a second
+copy beside it is not a second declaration.
+
 ### Config File Auto-Detection
 
 The CLI searches for configuration files in this order:
