@@ -470,8 +470,8 @@ Even inside your own worktree, operate defensively:
 3. **Never force-push a *shared* branch, and never push `main`.** A force-push can
    clobber a parallel agent's work; `main` is shared — land all via PR. A branch is
    unshared, and `--force-with-lease` allowed, only while ALL FIVE hold: ① it is named
-   `claude/issue-*`; ② this worktree created it; ③ nobody else has ever pushed it (the
-   author and committer sets of `git log origin/<branch>` are you alone); ④ no open PR
+   `claude/issue-*`; ② this worktree created it; ③ nobody else has ever pushed it (the author and
+   committer sets of its own commits, `git log origin/main..origin/<branch>`, are you alone); ④ no open PR
    on it carries a reviewer or an approval (one does ⇒ a new branch and a fresh PR
    instead); ⑤ the push spells `--force-with-lease=<branch>:<sha you last pushed>` —
    ⛔ never bare `--force`. One criterion failing ⇒ the branch is shared.
