@@ -3361,7 +3361,7 @@ const OBJECT_GANTT_FLAT_CONFIG_GUIDANCE: readonly KeySetGuidance[] = [
  * `onRowClick` / `onBeforeTaskUpdate` callbacks, which are host props.
  *
  * VALUE posture: `gantt` is the one config block in this family whose value
- * contract is already the SPEC's — `ObjectGantt.tsx:501` validates it against
+ * contract is already the SPEC's — `ObjectGantt.tsx:500` validates it against
  * `GanttConfigSchema` imported from `@objectstack/spec/ui` — so the read point
  * names the schema and this door takes it rather than `z.unknown()`. The
  * scalars below are read as their coercions say: `!!schema.readOnly`,
@@ -3376,7 +3376,7 @@ export const ObjectGanttPropsSchema = lazySchema(() => strictObject({
   aliases: FILTERS_TO_FILTER,
 }, {
   objectName: z.string().optional()
-    .describe('Object this gantt binds to — the THIRD record source `getDataConfig` resolves, after `data` and `staticData`. Optional because the component-level `dataSource` binding can supply the object instead'),
+    .describe('Object this gantt binds to — the THIRD record source `resolveRecordSourceConfig` resolves, after `data` and `staticData`. Optional because the component-level `dataSource` binding can supply the object instead'),
   /**
    * Data source binding — `ViewDataSchema`, spelled exactly as `object-map`'s
    * and `object-grid`'s. Derived from the read point: rung 1 of
@@ -3384,9 +3384,9 @@ export const ObjectGanttPropsSchema = lazySchema(() => strictObject({
    * record-source config the fetch resolves through `resolveDataSource`.
    */
   data: ViewDataSchema.optional()
-    .describe("Data source binding (ViewDataSchema — discriminated on `provider`: object | api | value | schema), read FIRST by `getDataConfig`. Static inline rows live at `{ provider: 'value', items: [...] }` or at `staticData`; the bare-array shortcut is refused"),
+    .describe("Data source binding (ViewDataSchema — discriminated on `provider`: object | api | value | schema), read FIRST by `resolveRecordSourceConfig`. Static inline rows live at `{ provider: 'value', items: [...] }` or at `staticData`; the bare-array shortcut is refused"),
   staticData: z.array(z.unknown()).optional()
-    .describe("Inline records — read SECOND by `getDataConfig`, wrapped into a `{ provider: 'value' }` config"),
+    .describe("Inline records — read SECOND by `resolveRecordSourceConfig`, wrapped into a `{ provider: 'value' }` config"),
   /** Base query filter — the family's one `ViewFilterRule` array orthography (#15449). */
   filter: z.array(ViewFilterRuleSchema, {
     error: ruleArrayFilterError({
@@ -3499,7 +3499,7 @@ const OBJECT_TREE_FLAT_CONFIG_GUIDANCE: readonly KeySetGuidance[] = [
  * (`:473-484`) carries `$filter`, `$top` and `$expand` and NO `$orderby`, and
  * nothing else reads an order, so declaring one would publish a key with no read
  * site; a row cap, for the same reason `object-gantt` declares none (the `$top`
- * is the platform ceiling, marked "⛔ Not authorable" at `:477`); and
+ * is the platform ceiling, marked "⛔ Not authorable" at `:482`); and
  * `filter.tree`, the legacy stash `:108` still reads, which is a shape to stop
  * writing rather than a key to declare.
  *
@@ -3539,16 +3539,16 @@ export const ObjectTreePropsSchema = lazySchema(() => strictObject({
    * needs no object at all, so a tree authored on either never reads this key.
    */
   objectName: z.string().optional()
-    .describe("Object this tree binds to — the THIRD record source `getDataConfig` resolves, after `data` and `staticData`. Optional because either of the first two rungs resolves the source without it: `data` can name the object itself (`{ provider: 'object', object }`) and `staticData` needs none. ⚠️ NOT supplied by the component-level `dataSource` binding the sibling blocks name — this renderer registers no such gate"),
+    .describe("Object this tree binds to — the THIRD record source `resolveRecordSourceConfig` resolves, after `data` and `staticData`. Optional because either of the first two rungs resolves the source without it: `data` can name the object itself (`{ provider: 'object', object }`) and `staticData` needs none. ⚠️ NOT supplied by the component-level `dataSource` binding the sibling blocks name — this renderer registers no such gate"),
   /**
    * Data source binding — `ViewDataSchema`, the object arm rung 1 returns
-   * verbatim. Declared from the READ POINTS (`:359` and `:496`), not from
-   * objectui's mirror, which carries no `data` on either face at this pin.
+   * verbatim. Declared from the READ POINT (`:359`), not from objectui's
+   * mirror, which carries no `data` on either face at this pin.
    */
   data: ViewDataSchema.optional()
-    .describe("Data source binding (ViewDataSchema — discriminated on `provider`: object | api | value | schema), read FIRST by `getDataConfig`. Static inline rows live at `{ provider: 'value', items: [...] }` or at `staticData`; the bare-array shortcut is refused"),
+    .describe("Data source binding (ViewDataSchema — discriminated on `provider`: object | api | value | schema), read FIRST by `resolveRecordSourceConfig`. Static inline rows live at `{ provider: 'value', items: [...] }` or at `staticData`; the bare-array shortcut is refused"),
   staticData: z.array(z.unknown()).optional()
-    .describe("Inline records — read SECOND by `getDataConfig`, wrapped into a `{ provider: 'value' }` config"),
+    .describe("Inline records — read SECOND by `resolveRecordSourceConfig`, wrapped into a `{ provider: 'value' }` config"),
   /** Base query filter — the family's one `ViewFilterRule` array orthography (#15449). */
   filter: z.array(ViewFilterRuleSchema, {
     error: ruleArrayFilterError({
