@@ -1352,6 +1352,21 @@ jobs:
       - name: Governed-surface prose pin
         run: pnpm check:pm-governed-prose
 
+      # Settings deny-roster pin (#18281) — the same shape as the two steps
+      # above, one lock over. The charter's ACCEPT refusal names the MCP write
+      # tools by POINTING at `permissions.deny` in `.claude/settings.json`
+      # rather than enumerating them, and nothing under `scripts/` read that
+      # list's membership: a tool declared closed could be absent from the file
+      # with every gate green (#18218 was exactly that, for an entire day, and
+      # a human found it). This step holds the two lists equal in both
+      # directions. Like the prose pin it runs the self-test AND the gate, and
+      # it carries no `if:` and no paths filter: the run is one file read, and
+      # a filter here would be a third copy of "which paths are the two sides"
+      # to keep in step — whose failure mode is a silent skip of the very
+      # reconciliation this step is.
+      - name: 'Settings deny-roster pin (#18281)'
+        run: pnpm check:pm-settings-deny-roster
+
       # Release-rehearsal clone preflight self-test (#9555). A local
       # `pnpm run version` rehearsal — the prescribed verification route for
       # every release-machinery change — HANGS FOREVER in an agent container:

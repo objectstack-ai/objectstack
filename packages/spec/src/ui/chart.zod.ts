@@ -1,7 +1,8 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { z } from 'zod';
-import { I18nLabelSchema, AriaPropsSchema } from './i18n.zod';
+import { I18nLabelSchema } from './i18n.zod';
+import { retiredKey } from '../shared/retired-key';
 import { strictObject } from '../shared/strict-object';
 
 // ---------------------------------------------------------------------------
@@ -554,7 +555,14 @@ export const ChartConfigSchema = lazySchema(() => strictObject(
       annotation: 'annotations', referenceLines: 'annotations', markers: 'annotations',
       interactions: 'interaction', interactivity: 'interaction',
       caption: 'subtitle', subTitle: 'subtitle',
-      accessibility: 'aria', ariaProps: 'aria',
+      // `accessibility` / `ariaProps` were aliases FOR `aria` until that key was
+      // retired. They moved to `guidance` below rather than being deleted: an
+      // alias whose target is a tombstone is the one shape `alias-integrity`
+      // refuses by name ("it accepts nothing"), because it sends the author to
+      // the single key guaranteed to be rejected next; and deleting them
+      // outright would drop both spellings onto the edit-distance fallback,
+      // which excludes tombstones from its candidate list — leaving the two
+      // words the alias table existed for with no prescription at all.
       plotHeight: 'height',
       xAxes: 'xAxis', yAxes: 'yAxis',
     },
@@ -562,6 +570,14 @@ export const ChartConfigSchema = lazySchema(() => strictObject(
     // one the author typed (#4410's lesson), and none of them promises a slot
     // that does not exist — the check the `drillDown` correction above forced.
     guidance: {
+      // The two former aliases FOR `aria`, re-homed here when that key became a
+      // tombstone. They carry the retirement rather than a rename because a
+      // rename is exactly the wrong answer now: the key they named is the one
+      // key this shape is guaranteed to reject.
+      accessibility:
+        '`accessibility` is not a chart-level key — it was an alias for `aria`, and `aria` was removed in @objectstack/spec 17 (ADR-0049 D2): no chart renderer ever applied it, so ARIA attributes declared on a chart config parsed and then silently did not reach the DOM. Do not rename it to `aria`. The accessible name that IS applied is `description` on this same chart config, which the chart renderer lowers onto the chart graphic as `role="img"` plus `aria-label`. The shared `AriaProps` block (`ariaLabel` / `ariaDescribedBy` / `role`) stays live on `page.aria`, `page.components[].aria` and the list view `aria`.',
+      ariaProps:
+        '`ariaProps` is not a chart-level key — it was an alias for `aria`, and `aria` was removed in @objectstack/spec 17 (ADR-0049 D2): no chart renderer ever applied it. Do not rename it to `aria`. Use `description` on this same chart config for the chart graphic\'s accessible name; the shared `AriaProps` block (`ariaLabel` / `ariaDescribedBy` / `role`) stays live on `page.aria`, `page.components[].aria` and the list view `aria`.',
       width:
         '`width` is not a chart-level key: a chart fills its container, and the container\'s width is owned by the dashboard widget\'s `layout.w` (or the report block). Only `height` is chart-level.',
       aggregate:
@@ -626,8 +642,45 @@ export const ChartConfigSchema = lazySchema(() => strictObject(
   interaction: ChartInteractionSchema.optional()
     .describe('Interaction toggles: { tooltips?, brush? }'),
 
-  /** ARIA accessibility attributes */
-  aria: AriaPropsSchema.optional().describe('ARIA accessibility attributes'),
+  // `aria` REMOVED (ADR-0049 enforce-or-remove, maintainer decision batch #118
+  // item 2 — the protocol is wrong for this one key). The same false-compliance
+  // shape the `aria` family has already been retired for twice one level up:
+  // `dashboard.aria` at the #3896 close-out and `dashboard.widgets[].aria` at
+  // #5010. Measured at this checkout's own `.objectui-sha` pin `53ded82bf7a4` and
+  // recorded per key in `liveness/dashboard.json`: `AdvancedChartImpl` declares
+  // no `aria` prop, `chartConfigPresentation` names it nowhere (its docblock
+  // calls it "the one declared key with no reader at all"), `SchemaRenderer`'s
+  // ARIA injection reads flat node props and never a nested `aria` object, and
+  // `ui/react-blocks.ts` omits it from `<ObjectChart>`'s thirteen `dataProps` —
+  // it is the one `ChartConfigSchema` key missing from that list. Pinned as a
+  // negative from both spellings in objectui ("ignores chartConfig.aria",
+  // "ignores aria — nested and flattened").
+  //
+  // Giving it a reader was the alternative and was refused: this shape already
+  // carries a WORKING accessible-name channel in `description` (lowered to
+  // `role="img"` + `aria-label` on the chart graphic), so a second source of
+  // accessible name on one element would need a precedence rule nobody has
+  // written. One node, one accessibility vocabulary.
+  //
+  // The shape leaves nothing orphaned: `AriaPropsSchema` keeps its other
+  // carriers (page, page component, list view, action, and the component
+  // family) and is untouched — this is a key retirement, not a def retirement.
+  // `ReportChartSchema` extends this shape, so the tombstone copies into its
+  // walked shape too and registers as its own `ui/ReportChart:aria` retired
+  // key; nothing radiates from the base.
+  aria: retiredKey(
+    '`ChartConfig.aria` — authored as `dashboard.widgets[].chartConfig.aria`, ' +
+    '`report.chart.aria` and `report.blocks[].chart.aria` — was removed in ' +
+    '@objectstack/spec 17 (ADR-0049 D2). No chart renderer ever applied it: the chart ' +
+    'implementation declares no `aria` prop, the presentation lowering names it nowhere, and ' +
+    'the react `<ObjectChart>` block never published it, so ARIA attributes declared here ' +
+    'parsed and then silently did not reach the DOM. Delete the key. The accessible name ' +
+    'that IS applied on this same chart config is its sibling `description`, which the chart ' +
+    'renderer lowers onto the chart graphic as `role="img"` plus `aria-label`. The shared ' +
+    '`AriaProps` shape is NOT gone — `ariaLabel` / `ariaDescribedBy` / `role` stay live in ' +
+    'the `aria` block on `page.aria`, `page.components[].aria` and the list view `aria`. ' +
+    'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.',
+  ),
   },
 ));
 

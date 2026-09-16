@@ -585,10 +585,12 @@ describe('ObjectKernel', () => {
         });
 
         // These two pin the MEANING of the number, not merely that one is
-        // present. The result member carrying it was spelled `startTime` while
-        // holding `Date.now() - start`, so a reader who correctly took it for an
-        // instant and wrote `Date.now() - result.startTime` got an age near the
-        // epoch. `toBeGreaterThan(0)` cannot tell the two readings apart -- an
+        // present. The result member carrying it was once ALSO spelled
+        // `startTime` while holding `Date.now() - start`, so a reader who
+        // correctly took that name for an instant and wrote
+        // `Date.now() - result.startTime` got an age near the epoch. #16059
+        // removed that alias; `durationMs` is the only spelling left, and
+        // `toBeGreaterThan(0)` cannot tell the two readings apart -- an
         // epoch-millisecond instant passes it too. A ceiling can: any instant
         // today is ~1.7e12, orders of magnitude above any plugin's start().
         const INSTANT_FLOOR_MS = 1_000_000_000; // ~11.5 days as a duration; well below any real epoch-ms instant
@@ -636,8 +638,13 @@ describe('ObjectKernel', () => {
             expect(ok.success).toBe(true);
             expect(ok.durationMs).toBeGreaterThan(0);
             expect(ok.durationMs).toBeLessThan(INSTANT_FLOOR_MS);
-            // The deprecated alias carries the same elapsed value, not an instant.
-            expect(ok.startTime).toBe(ok.durationMs);
+            // [#16059] The `startTime` alias that used to carry the same value is
+            // GONE, not merely deprecated: a member whose name promises an
+            // instant while holding an elapsed duration is the confusion this
+            // case exists to pin, and the spec now tombstones it. Asserting its
+            // absence here is what keeps a later "restore the alias" from
+            // passing quietly.
+            expect(ok).not.toHaveProperty('startTime');
 
             const failingMeta: PluginMetadata = {
                 name: 'failing-plugin',
@@ -652,7 +659,7 @@ describe('ObjectKernel', () => {
             expect(failed.success).toBe(false);
             expect(failed.durationMs).toBeGreaterThanOrEqual(0);
             expect(failed.durationMs).toBeLessThan(INSTANT_FLOOR_MS);
-            expect(failed.startTime).toBe(failed.durationMs);
+            expect(failed).not.toHaveProperty('startTime');
         });
     });
 
