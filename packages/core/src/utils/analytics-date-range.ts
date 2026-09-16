@@ -203,23 +203,63 @@ export function resolveAnalyticsDateRangePreset(
  * `service-analytics` strategies, because "memory and SQL refuse identically"
  * is a property a shared conformance fixture can only hold if there is one
  * refusal to hold. The wording is the spec's
- * {@link analyticsDateRangeRefusalMessage} — the same sentence the schema door
- * answers with (the #5240 convention: one condition, one wording), quoted
- * rather than restated.
+ * {@link analyticsDateRangeRefusalMessage} (the #5240 convention: one
+ * condition, one wording), quoted rather than restated — asked for the
+ * `'runtime'` ORIGIN, which is the one this constructor has.
+ *
+ * ⚠️ That argument is not decoration (#17598 item ②). Every refusal whose
+ * MESSAGE leaves here is raised PAST the schema door, so the sentence the spec
+ * used to return unconditionally — "Refused at the schema" — was false for
+ * every one of them, and sent an author to inspect a parse call that never
+ * ran. The origin is a parameter precisely so this call site states the truth
+ * it alone knows; ⛔ it is never omitted and there is no default to omit it to.
+ * TWO of the four callers keep the `.code`/`.status` and supply their OWN
+ * message: the REST dataset door (`rest/src/analytics-selection-door.ts`),
+ * which serves the schema's own prescription because its refusal IS the
+ * schema's, and `driver-memory`'s face-side array arm
+ * (`driver-memory/src/memory-analytics.ts`), which names what its own face
+ * would otherwise have guessed. ⚠️ `service-analytics`' array arm
+ * (`service-analytics/src/date-range-array-arm.ts`) was a third until #18232:
+ * it overwrote the message on two grounds — a sentence that judged a bare
+ * STRING, and "Refused at the schema" — that this parameter and
+ * `describeRefusedDateRange` removed, so it now raises the sentence built here
+ * unchanged. That sentence therefore leaves through this package's own string
+ * resolver below AND through that arm, which are the callers the `'runtime'`
+ * origin describes.
  *
  * ⚠️ The code is registered under `@objectstack/runtime` (the door that names
  * the wire vocabulary) and this package carries a recorded provenance waiver
  * in `error-code-ledger.zod.ts` — the shared-constructor shape, the same one
  * `UPDATE_ID_MISMATCH` records.
  *
- * Reachability: on `POST /analytics/query` and `/analytics/sql` the schema door
- * refuses first and this never fires. It is the answer for the in-process
- * caller past that door — `AnalyticsService.query`, a driver's cube face
- * called directly, and `POST /analytics/dataset/query`, which types
- * `selection.timeDimensions` from `AnalyticsQuery` but does not Zod-parse it.
+ * Reachability: on EVERY REST analytics route a schema door parses
+ * `timeDimensions` ahead of the reader. `POST /analytics/query` and
+ * `/analytics/sql` parse the whole body; `POST /analytics/dataset/query` has
+ * parsed its selection's shared members — `timeDimensions` included — against
+ * `AnalyticsQuerySchema.pick(…)` since PR #17548, the PR that landed that door
+ * for card #17058 (`rest/src/analytics-selection-door.ts`, wired ahead of the
+ * executor). So every `dateRange` the union CAN refuse is refused there, with
+ * the schema's own sentence, and this constructor contributes only its
+ * `.code`/`.status` to that answer.
+ *
+ * ⛔ Which is narrower than "this never fires". The array arm is
+ * `z.tuple([z.string(), z.string()])` — it judges arity and bound TYPE, never a
+ * bound's VALUE — so the residue it cannot refuse, a two-string tuple with an
+ * empty bound such as `['', '']`, passes every door and reaches this
+ * constructor at each face (`date-range-array-arm.ts`, `memory-analytics.ts`) —
+ * `memory-analytics.ts` then replaces the message and, since #18232,
+ * `date-range-array-arm.ts` does not. What does hold on a REST route is about
+ * the SENTENCE: each of the three callers a route can reach answers with the
+ * sentence chosen for its own door — the schema's own prescription at the REST
+ * door, `driver-memory`'s at that face, and the one built here at
+ * `service-analytics`' — and a string that passed the preset enum cannot reach
+ * the resolver's throw below.
+ * This is also the answer for the IN-PROCESS caller past those doors —
+ * `AnalyticsService.query`, `queryDataset` and the dataset executor behind it,
+ * and a driver's cube face called directly.
  */
 export function analyticsDateRangeUnrecognizedError(input: unknown): Error {
-  const err = new Error(analyticsDateRangeRefusalMessage(input)) as Error & {
+  const err = new Error(analyticsDateRangeRefusalMessage(input, 'runtime')) as Error & {
     code?: string;
     status?: number;
   };

@@ -3,7 +3,9 @@
 import { describe, it, expect } from 'vitest';
 import { DashboardWidgetSchema } from './dashboard.zod';
 import { AppSchema } from './app.zod';
+import { ChartConfigSchema } from './chart.zod';
 import { PageSchema, PageComponentSchema } from './page.zod';
+import { ReportChartSchema } from './report.zod';
 import { ListViewSchema } from './view.zod';
 
 /**
@@ -57,6 +59,8 @@ describe('the `aria` tombstones name only live `AriaProps` carriers (#6756)', ()
   const appWithAria = {
     name: 'sales_app', label: 'Sales', navigation: [], aria: ARIA,
   };
+  const chartWithAria = { type: 'bar', aria: ARIA };
+  const reportChartWithAria = { type: 'bar', xAxis: 'region', yAxis: 'revenue', aria: ARIA };
 
   const messageOf = (result: { success: boolean; error?: { issues: { message: string }[] } }) => {
     expect(result.success, 'the tombstone must still REJECT — a passing parse means the key came back').toBe(false);
@@ -154,5 +158,108 @@ describe('the `aria` tombstones name only live `AriaProps` carriers (#6756)', ()
       DashboardWidgetSchema.safeParse(widgetWithAria).success,
       '`dashboard.widgets[].aria` is a tombstone',
     ).toBe(false);
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // The third member of the family (#17751): `ChartConfig.aria`, the
+  // block-local spelling that outlived the other two by DEPTH — it sits inside
+  // `dashboard.widgets[].chartConfig`, an undrilled container, so no sweep had
+  // ever classified a key inside it. Joined to this file rather than pinned
+  // apart, because the failure this file exists for is a tombstone naming a
+  // surface that stopped existing, and every new `aria` tombstone enlarges the
+  // set of prescriptions that can go stale at each other.
+  //
+  // ONE DIFFERENCE from its two siblings, stated so the assertion below is not
+  // read as a copy: this prescription legitimately contains the word `widgets`,
+  // because `dashboard.widgets[].chartConfig.aria` is one of the three
+  // coordinates the RETIRED key was authored at. The `App.aria` test above can
+  // therefore refuse `/widget/i` outright and this one cannot — it refuses the
+  // retired DESTINATION by its exact spelling instead.
+  // ─────────────────────────────────────────────────────────────────────────
+
+  it('the chart-config tombstone fires and prescribes only live carriers', () => {
+    const message = messageOf(ChartConfigSchema.safeParse(chartWithAria));
+
+    // Anti-vacuity, the widget test's shape: `ChartConfigSchema` is a
+    // `strictObject`, so deleting the tombstone still REFUSES the key — as a
+    // generic unrecognized-key rejection that cannot carry this opening clause.
+    // Wording drift fails the assertions below; DISAPPEARANCE fails this one.
+    expect(
+      message,
+      'the chart `aria` prescription must still be reachable through the parse',
+    ).toContain('`ChartConfig.aria`');
+    expect(message).toContain('was removed');
+
+    // The working accessible-name channel on this very shape. Naming it is the
+    // whole reason this key could be REMOVED rather than enforced, so a
+    // prescription that loses it has lost the ruling's reasoning.
+    expect(
+      message,
+      'the prescription must name the sibling channel that IS applied',
+    ).toContain('`description`');
+
+    // Every surface that still declares `aria: AriaPropsSchema` and is graded
+    // `live` in the ledger — the same three the widget twin names, asserted
+    // against the same ground truth below.
+    for (const live of ['`page.aria`', '`page.components[].aria`', 'list view `aria`']) {
+      expect(message, `the prescription must still name ${live}`).toContain(live);
+    }
+
+    // ...and nothing retired, matched by exact spelling (see the block note).
+    expect(
+      message,
+      'the prescription must not point at `app.aria`, retired in 17.0.0',
+    ).not.toMatch(/app\.aria/i);
+    expect(
+      message,
+      'the prescription must not point at `dashboard.widgets[].aria`, retired in 17.0.0',
+    ).not.toMatch(/dashboard\.widgets\[\]\.aria(?!\.)/i);
+
+    // None of the above bought by weakening the prescription itself.
+    expect(message).toContain('Delete the key.');
+    expect(message).toContain('os migrate meta --from 17');
+    expect(message).toMatch(/to list the mechanical edits for existing sources; apply them by hand\.$/);
+  });
+
+  it('the tombstone rides the `.extend()` onto ReportChart', () => {
+    // `ReportChartSchema` is `ChartConfigSchema.extend({ xAxis, yAxis })`, which
+    // copies the retired property into its own walked shape — which is why the
+    // retirement registers TWO keys, `ui/ChartConfig:aria` and
+    // `ui/ReportChart:aria`. If the extension ever stopped carrying it, a report
+    // author would meet a bare unrecognized-key error with no upgrade in it.
+    //
+    // ⚠️ Read the second key as ARITHMETIC, not as scope. Exactly ONE property
+    // on exactly ONE schema was retired; `ReportChart:aria` is not a second
+    // decision and is not separable from the first, because there is no second
+    // declaration to leave alone — the extension has no `aria` of its own to
+    // keep. The build gate says so before any author does: tombstoning the one
+    // property fails `build-schemas.ts` check (b) with *"2 key(s) were
+    // tombstoned with no registered retirement"* naming BOTH, and stays red
+    // until both are registered. Same shape as `shared/FieldMapping:transform`,
+    // where one tombstone produced three keys; `RETIRED_KEYS_BY_MAJOR`'s own
+    // docblock states the rule — registered per key, nothing radiating from the
+    // base.
+    const message = messageOf(ReportChartSchema.safeParse(reportChartWithAria));
+    expect(message).toContain('`ChartConfig.aria`');
+    expect(message).toContain('`report.blocks[].chart.aria`');
+  });
+
+  it('the two former alias spellings refuse instead of renaming onto the tombstone', () => {
+    // `accessibility` and `ariaProps` were `aliases` FOR `aria`. Left as
+    // aliases they would answer "did you mean `aria`?" — the one key this shape
+    // is now guaranteed to reject, which is the ledger's finding-7 shape and
+    // what `shared/alias-integrity.test.ts` refuses by name. Deleted outright
+    // they would fall to the edit-distance fallback, which excludes tombstones
+    // from its candidate list, so both spellings would carry no upgrade at all.
+    for (const written of ['accessibility', 'ariaProps']) {
+      const message = messageOf(ChartConfigSchema.safeParse({ type: 'bar', [written]: ARIA }));
+      expect(message, `\`${written}\` must still be answered`).toContain(`\`${written}\``);
+      expect(message, `\`${written}\` must carry the retirement`).toContain('was removed in @objectstack/spec 17');
+      expect(message, `\`${written}\` must name the live channel`).toContain('`description`');
+      expect(
+        message,
+        `\`${written}\` must not be renamed onto the tombstone`,
+      ).not.toMatch(/did you mean/i);
+    }
   });
 });

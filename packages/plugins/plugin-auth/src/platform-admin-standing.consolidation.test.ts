@@ -113,7 +113,7 @@ const jsonOf = async (res: Response) => {
 // ── the two gates ───────────────────────────────────────────────────────────
 
 /**
- * The ObjectStack refusal on `/sso/register` (ADR-0024 + ADR-0068 D4).
+ * The ObjectStack refusal on `/sso/register` (ADR-0135 D6 + ADR-0068 D4).
  *
  * ⭐ The pin is on OUR gate's answer, so "admitted" means exactly "this
  * refusal was not issued" — and that is deliberate rather than a compromise.

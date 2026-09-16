@@ -628,7 +628,7 @@ export class AuthPlugin implements Plugin {
       dashboards: [SystemOverviewDashboard],
       // ADR-0021 — datasets backing the System Overview dashboard's widgets.
       datasets: SystemOverviewDatasets,
-      // ADR-0024 / cloud#551 — surface "SSO Providers" (sys_sso_provider) in the
+      // ADR-0135 D6 / cloud#551 — surface "SSO Providers" (sys_sso_provider) in the
       // Setup app's Access Control group, but ONLY when the external-IdP RP is
       // wired (self-host `OS_SSO_ENABLED`, or the cloud per-env `planAllowsSso`
       // arriving via `plugins.sso`). Without the gate the entry would render an
@@ -1271,7 +1271,7 @@ export class AuthPlugin implements Plugin {
             + 'adapter-level `sys_account` insert stamps `source=idp_provisioned`, so every '
             + 'SCIM-provisioned user is left reading `env_native` and is offered the password / '
             + 'identity-edit actions that are supposed to hide for a managed identity (cloud '
-            + 'ADR-0024 D4). The OAuth path still stamps via better-auth databaseHooks, which is '
+            + 'ADR-0135 D4). The OAuth path still stamps via better-auth databaseHooks, which is '
             + 'why this is invisible on a deployment that also uses OAuth. This line is the only '
             + 'notice; it is registered once per boot and does NOT retry. Remedy: check that the '
             + '`objectql` service is registered by kernel:ready and that registerHook is '
@@ -2258,7 +2258,7 @@ export class AuthPlugin implements Plugin {
 
     // ────────────────────────────────────────────────────────────────────
     // SSO admin: register an external OIDC IdP from the flat metadata form
-    // (ADR-0024). `@better-auth/sso`'s POST /sso/register expects the protocol
+    // (ADR-0135 D6). `@better-auth/sso`'s POST /sso/register expects the protocol
     // fields NESTED under `oidcConfig` ({ clientId, clientSecret,
     // discoveryEndpoint, scopes, mapping }). The `sys_sso_provider`
     // `register_sso_provider` action collects FLAT form fields (the action
@@ -2793,7 +2793,7 @@ export class AuthPlugin implements Plugin {
     });
 
     // ────────────────────────────────────────────────────────────────────
-    // SSO domain verification (ADR-0024 ②, opt-in OS_SSO_DOMAIN_VERIFICATION).
+    // SSO domain verification (ADR-0135 D6, opt-in OS_SSO_DOMAIN_VERIFICATION).
     // Re-dispatch through @better-auth/sso's /sso/{request-domain-verification,
     // verify-domain} (so the per-provider admin gate runs) and reshape into the
     // `{ success, data }` envelope the action `resultDialog` / toast reads:

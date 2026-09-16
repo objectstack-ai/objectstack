@@ -422,7 +422,7 @@ resolver would permit exactly the write it exists to refuse.
 **Deactivating the break-glass set is refused.** Switching `admin_full_access`
 off un-makes every platform admin who holds it *through a grant row*, in one
 write — and re-activating it needs the permission just lost. That write is
-judged like deleting or renaming the row (ADR-0024 D5.2): it is refused while
+judged like deleting or renaming the row (ADR-0135 D5.2): it is refused while
 it would leave the environment with no administrator who can sign in. The
 enumeration behind that judgement counts **both** anchors, so an environment
 whose administrators are configured rather than granted is not empty, and the

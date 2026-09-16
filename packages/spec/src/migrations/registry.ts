@@ -5482,7 +5482,26 @@ const step18: MigrationStep = {
     + 'teach — and the two alias entries became refusals naming the permission-set route. The '
     + 'D2 conversion STRIPS the key — there is no lossless target, because which permission set '
     + 'a given profile name corresponds to is a judgement no walker can make, which is what the '
-    + 'paired D3 semantic entry is for.',
+    + 'paired D3 semantic entry is for. '
+    + 'Finally, it removes `aria` from the chart config (ADR-0049 enforce-or-remove; maintainer '
+    + 'decision batch #118 item 2, 2026-09-12 — recommendation C, judge the protocol wrong for '
+    + 'this one key). It is the last member of the `aria` family retired for the same measured '
+    + 'reason as `dashboard.aria` and `dashboard.widgets[].aria` before it: an ARIA block an '
+    + 'author can declare and nothing lowers to the DOM. It survived those two sweeps by depth — '
+    + 'it sits inside the widget’s `chartConfig` bag, which no drill had reached until the '
+    + 'per-key pass recorded in `liveness/dashboard.json`. That pass found `aria` to be the one '
+    + '`ChartConfigSchema` key with no reader on EITHER face: the chart implementation declares '
+    + 'no `aria` prop, the presentation lowering names it nowhere, and the react block omits it '
+    + 'from `<ObjectChart>`’s `dataProps`. Remove rather than enforce, because the same chart '
+    + 'config already carries a WORKING accessible-name channel in `description` (lowered as '
+    + '`role="img"` + `aria-label`), and giving `aria` a reader would put two accessible-name '
+    + 'sources on one element behind a precedence rule nobody has written — one node, one '
+    + 'accessibility vocabulary. The tombstone rides `ChartConfigSchema` and therefore copies '
+    + 'into `ReportChartSchema`, so the key is registered twice; the D2 conversion STRIPS it '
+    + 'from all three authored sites (`dashboards[].widgets[].chartConfig`, `reports[].chart`, '
+    + '`reports[].blocks[].chart`) as a pure lossless delete — it never had an effect to lose. '
+    + 'The two alias spellings that pointed at it, `accessibility` and `ariaProps`, became '
+    + 'refusals carrying the same prescription rather than renames onto a tombstone.',
   conversionIds: [
     'field-malformed-scale-precision-removed',
     'record-chatter-position-vocabulary',
@@ -5512,6 +5531,7 @@ const step18: MigrationStep = {
     'view-page-mount-removed',
     'list-view-sort-string-clause-to-array',
     'page-assigned-profiles-removed',
+    'chart-config-aria-removed',
   ],
   semantic: [
     // One file per entry under `entries/semantic/`, concatenated here sorted by
@@ -5777,6 +5797,63 @@ const step18: MigrationStep = {
         + 'keys at every level (cube, refreshKey, measures, dimensions, joins); '
         + 'every `/analytics/query` body\'s `timeDimensions[]` items carry only '
         + '`dimension`/`granularity`/`dateRange`. Declared keys parse byte-identically to before.',
+    },
+    {
+      id: 'analytics-date-range-array-two-bounds-required',
+      // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
+      // code span already, and a nested backtick would close it.
+      surface:
+        'the ARRAY arm of timeDimensions[].dateRange on an analytics query — '
+        + 'AnalyticsQuerySchema / the POST /analytics/query and /analytics/sql bodies, a dataset '
+        + 'selection\'s timeDimensions, and any AnalyticsQuery a host passes to '
+        + 'AnalyticsService.query in-process — authored with anything other than EXACTLY two '
+        + 'string bounds: a one-element window such as ["2026-01-01"], the empty array [], and '
+        + 'three or more bounds such as ["2026-01-01", "2026-01-31", "2026-02-28"]',
+      replacement:
+        'exactly two string bounds — `[start, end]`. A ONE-ELEMENT window is that day written as '
+        + 'BOTH bounds: `[\'2026-01-01\']` becomes `[\'2026-01-01\', \'2026-01-01\']`, the shape '
+        + 'the shipped #16322 migration table already prescribes for a single day, and the shape '
+        + 'all four analytics faces have selected that one day with since PR #17593. ⛔ The EMPTY '
+        + 'array and THREE-OR-MORE bounds have NO replacement that can be derived from what was '
+        + 'written: an empty array names no window at all, and a 3+ array names no pair — decide '
+        + 'the window the widget was meant to show and write its two bounds, or drop the '
+        + 'dateRange entirely (the field is optional, and absent means the query is not '
+        + 'time-bounded). A relative window is a preset name from the closed vocabulary '
+        + '(`\'last_7_days\'`) or a date-macro pair (`[\'{7_days_ago}\', \'{today}\']`).',
+      reason:
+        'Maintainer ruling A on #17598 (decision batch #117 item 3, 2026-09-12, re-affirmed '
+        + '2026-09-13): the array arm was a bare `z.array(z.string())` with NO length constraint, '
+        + 'while the refusal sentence in the same source file said verbatim that "an explicit '
+        + 'window is the two-element array [start, end]" and #16322\'s shipped migration table '
+        + 'told an author to write a single day as `[\'2026-01-20\', \'2026-01-20\']`. So only the '
+        + 'TYPE was weaker than the prose beside it, and #17124 measured what that bought: one '
+        + 'authored `[\'2026-01-01\']` meant a point window on ObjectQLStrategy, NO time clause at '
+        + 'all on NativeSQLStrategy (the whole of history), an unbounded-above window in the '
+        + 'draft-preview evaluator, and a shifted point window in DatasetExecutor.runCompare — the '
+        + 'same document, four backends, four different numbers, no error on any of them. PR '
+        + '#17593 made all four faces refuse it with the ADR-0112 envelope `400 '
+        + 'ANALYTICS_DATE_RANGE_UNRECOGNIZED`, which left the contract door LOOSER than every '
+        + 'reader behind it; this narrowing closes that gap at the door. ⚠️ No D2 conversion and '
+        + 'no stored-metadata rewrite, deliberately: rewriting `[\'2026-01-01\']` to the same day '
+        + 'twice at load would be the platform deciding, silently, that the author meant one day '
+        + 'rather than a window whose end they forgot — and for the empty array and 3+ bounds '
+        + 'there is nothing to decide FROM. The blast radius is the WIDGET, not the page: a stored '
+        + 'dashboard carrying a now-refused range loses that widget with the accurate refusal '
+        + 'shown, and the dashboard still loads. Since PR #17593 every such stored range already '
+        + 'failed at QUERY time with the same code and status, so this adds no new class of '
+        + 'breakage — it moves the refusal to authoring time and states it accurately. '
+        + 'ADR-0049 / ADR-0087 / ADR-0112.',
+      acceptanceCriteria:
+        'Grep every authored `timeDimensions[].dateRange` ARRAY — dashboard widget datasets, saved '
+        + 'analytics queries, SDK / MCP callers, in-process `AnalyticsService.query` calls — and '
+        + 'count its bounds. Two string bounds parse byte-identically to before, as do every preset '
+        + 'name and an absent `dateRange`; anything else now answers one prescriptive issue at '
+        + '`timeDimensions.N.dateRange` naming the arity it received, so `AnalyticsQuerySchema.'
+        + 'safeParse` and `POST /analytics/query` both make the sweep mechanical. ⚠️ Do not trust '
+        + 'the numbers a one-element window used to produce: the four analytics faces disagreed '
+        + 'about what it meant, so a widget that showed a plausible figure may have been reading '
+        + 'all of history on one backend and a single day on another. Re-check what each converted '
+        + 'widget was supposed to show against its two explicit bounds.',
     },
     {
       id: 'analytics-time-dimension-date-range-vocabulary-closed',
@@ -10555,6 +10632,84 @@ const step18: MigrationStep = {
         + 'fails `StandardErrorCode`/`ApiErrorSchema` parse rather than passing silently.',
     },
     {
+      id: 'startup-orchestrator-retired',
+      // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
+      // code span AND a table cell.
+      surface:
+        'the startup-ORCHESTRATION surface of kernel/startup-orchestrator.zod.ts and '
+        + 'contracts/startup-orchestrator.ts — 3 emitted defs and 8 exported names: '
+        + 'StartupOptionsSchema / StartupOptions / StartupOptionsParsed, '
+        + 'HealthStatusSchema / HealthStatus, StartupOrchestrationResultSchema / '
+        + 'StartupOrchestrationResult, and the IStartupOrchestrator interface '
+        + '(orchestrateStartup / rollback / checkHealth / startWithTimeout). The '
+        + 'startup RESULT survives, re-declared: PluginStartupResultSchema and '
+        + 'PluginStartupResult stay on both entries',
+      replacement:
+        '(removed — there is no declarative replacement, because nothing ever '
+        + 'implemented the interface or parsed the schemas. Plugin startup is the '
+        + 'kernel own boot loop: ObjectKernel.start() calls startPluginWithTimeout() '
+        + 'per plugin, which races that plugin start() against '
+        + 'PluginMetadata.startupTimeout and, when KernelConfig.rollbackOnFailure is '
+        + 'set, destroys the already-started plugins and rethrows the original error '
+        + 'as the new error cause. So: instead of StartupOptions.timeoutMs declare '
+        + 'startupTimeout on the plugin; instead of StartupOptions.rollbackOnFailure '
+        + 'set rollbackOnFailure on the kernel config; instead of '
+        + 'StartupOrchestrationResult.results read the per-plugin durations through '
+        + 'ObjectKernel.getPluginStartupDurations(). StartupOptions.healthCheck and '
+        + 'HealthStatus have NO replacement at all — no startup probe system exists, '
+        + 'and one returns only through the enforce route of ADR-0049 with a new ADR, '
+        + 'the probe first and the vocabulary second. StartupOptions.parallel and '
+        + 'StartupOptions.context likewise: the kernel starts plugins sequentially '
+        + 'and passes its own PluginContext)',
+      reason:
+        'ADR-0049 enforce-or-remove; maintainer ruling on #16059 (director seat, '
+        + 'decision batch #60, 2026-09-06). The module declared an orchestration '
+        + 'design that never landed, and the spec and the kernel had already drifted '
+        + 'into disagreement about the one shape that did: PluginStartupResultSchema '
+        + 'described a plugin object, a required durationMs and a health member, '
+        + 'while @objectstack/core shipped pluginName, an optional durationMs and '
+        + 'timedOut. The ruling keeps a startup-result contract that describes what '
+        + 'the kernel actually produces, and retires the rest. Re-measured on this '
+        + 'card: zero implementers and zero consumers of the four retired surfaces in '
+        + 'this repository and in the pinned objectui checkout, with lit same-corpus '
+        + 'controls (defineStack, ManifestSchema); every remaining reference was a '
+        + 'generated artifact or a released CHANGELOG.md. healthCheck and HealthStatus '
+        + 'are the sharpest of the four: they name a per-plugin health probe the '
+        + 'runtime has never had, which is the #3950 shape an AI author (ADR-0033) '
+        + 'reads as proof the capability exists. With no authored document carrying '
+        + 'any of the three defs there is no seam for a D2 conversion and no author to '
+        + 'tombstone for: route 3, the #4834 / #11825 shape — RETIRED_DEFS_BY_MAJOR '
+        + 'plus this entry ARE the declaration. The two keys of the SURVIVING result '
+        + 'schema that leave (plugin, health) are tombstoned instead, and registered '
+        + 'in RETIRED_KEYS_BY_MAJOR, because that def keeps emitting and its type is '
+        + 'imported by @objectstack/core. A third key arrives on the spec surface only '
+        + 'to leave it: core deprecated startTime alias, which held the same elapsed '
+        + 'milliseconds as durationMs under a name that promises an instant. The '
+        + 're-declaration had to either mirror it or tombstone it, and mirroring is '
+        + 'refused by check:duration-unit-keys (ruling B on #14478) since it is an '
+        + 'elapsed number whose key name carries no unit and matches neither of that '
+        + 'rule two schema-declared exemptions. So the L1 window closes here and the '
+        + 'kernel stops populating it in the same change.',
+      acceptanceCriteria:
+        'No code imports any of the 8 retired names from @objectstack/spec, '
+        + '@objectstack/spec/kernel or @objectstack/spec/contracts — every one is '
+        + 'TS2305 after upgrade, pinned by resolved symbol identity in '
+        + 'kernel/startup-orchestrator-retirement.test.ts. No metadata document needs '
+        + 'editing: none of the three defs was reachable from a metadata-type '
+        + 'binding, a stack collection or a manifest embed, so no authored document '
+        + 'could ever carry one. PluginStartupResult SURVIVES on both entries with '
+        + 'the shape the kernel ships — pluginName, success, optional durationMs, the '
+        + 'serializable error projection, timedOut — and @objectstack/core now imports '
+        + 'that type instead of declaring a twin, so the drift cannot recur. Writing '
+        + 'plugin, health or startTime on a PluginStartupResult is a tsc error and a '
+        + 'parse error carrying the rename or the deletion; a reader of the removed '
+        + 'startTime alias reads durationMs, which has always carried the same value. '
+        + 'Runtime behaviour is unchanged except for that one alias: nothing ever read '
+        + 'the retired ORCHESTRATION surfaces, the kernel boot loop is untouched, and '
+        + 'the only observable difference is that a startup result no longer carries '
+        + 'startTime beside durationMs.',
+    },
+    {
       id: 'strategy-context-aggregation-method-narrowed',
       surface: 'StrategyContext.executeAggregate aggregations[].method '
         + '(contracts/analytics-service.ts, exported from @objectstack/spec/contracts) '
@@ -13460,6 +13615,35 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // this rename, and the divergence between the two shapes is filed separately.
     // See `kernel-startup-orchestrator-durations-unit-in-key`.
     'kernel/PluginStartupResult:duration',
+    // #16059 — `PluginStartupResult.health` held the `HealthStatus` a startup
+    // health check would have produced. The health-check option, the orchestrator
+    // interface that declared the check and the `HealthStatus` vocabulary itself
+    // all leave in this major (`kernel/HealthStatus` in RETIRED_DEFS_BY_MAJOR[18]),
+    // and nothing ever filled the key. Tombstoned rather than dropped because the
+    // carrying def survives — see `18.kernel__PluginStartupResult__plugin.ts` for
+    // why that matters here.
+    'kernel/PluginStartupResult:health',
+    // #16059 — `PluginStartupResult.plugin` carried a nested
+    // `{ name, version } & Record<string, unknown>` plugin object. The kernel has
+    // never built one: `ObjectKernel.startPluginWithTimeout()` has always returned
+    // the plugin NAME, and the re-declaration of this schema against the shipped
+    // shape replaces the key with `pluginName`. Tombstoned rather than dropped
+    // because this def keeps emitting and its type is imported by
+    // `@objectstack/core`, so a construction site still writing `plugin` meets the
+    // prescription through tsc as well as through a parse.
+    'kernel/PluginStartupResult:plugin',
+    // #16059 — `PluginStartupResult.startTime` was `@objectstack/core`'s own
+    // ADR-0087 L1 alias: the kernel set it to the SAME elapsed milliseconds as
+    // `durationMs`, under a name that promises an instant. It arrives on the spec's
+    // surface only to leave it, because the re-declaration of this schema against
+    // the shipped shape had to choose between mirroring the member and tombstoning
+    // it, and mirroring is refused by `check:duration-unit-keys` (ruling B on
+    // #14478): an elapsed number whose key name carries no unit, matching neither
+    // of that rule's two schema-declared exemptions — not an `EpochMs` instant, not
+    // an external-standard mirror. Renaming it to `startTimeMs` would mint a
+    // spelling nothing ever produced for a member already slated for removal, so
+    // the alias ends here and the kernel stops populating it in the same change.
+    'kernel/PluginStartupResult:startTime',
     // #15939 ruling A (per-file remediation of #14478 ruling B). This is the fifth
     // duration on `kernel/plugin-security-advanced.zod.ts` and the one #15678
     // deliberately left alone: `resourceLimits.timeout` said "Execution timeout in
@@ -14310,6 +14494,45 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // parse) and the D3 semantic entry named below.
     // D3 semantic entry: `training-deadline-keys-retired`.
     'system/TrainingPlan:reminderDaysBefore',
+    // #17751 — ADR-0049 enforce-or-remove (maintainer decision batch #118 item 2,
+    // 2026-09-12: recommendation C, judge the protocol wrong for this one key).
+    // The third and last member of the `aria` family retired on the same measured
+    // evidence: `dashboard.aria` at the #3896 close-out, `dashboard.widgets[].aria`
+    // at #5010, and now the block-local spelling one level further in, inside the
+    // widget's `chartConfig`. It outlived the first two sweeps by DEPTH, not by
+    // evidence — `widgets.chartConfig` was an undrilled container, so no key inside
+    // it had ever been classified until the per-key pass recorded in
+    // `liveness/dashboard.json` at the `.objectui-sha` pin `53ded82bf7a4`. That pass
+    // found `aria` to be the one `ChartConfigSchema` key with no reader on EITHER
+    // face: `AdvancedChartImpl` declares no `aria` prop, `chartConfigPresentation`
+    // names it nowhere (its docblock calls it "the one declared key with no reader
+    // at all"), `SchemaRenderer`'s ARIA injection reads flat node props and never a
+    // nested `aria` object, and `ui/react-blocks.ts` omits it from `<ObjectChart>`'s
+    // thirteen `dataProps` — the one key of this shape missing from that list.
+    // Pinned as a negative from both spellings in objectui ("ignores
+    // chartConfig.aria", "ignores aria — nested and flattened").
+    //
+    // REMOVE rather than ENFORCE, which is the less usual ADR-0049 answer and is
+    // the whole of the ruling: this same chart config already carries a WORKING
+    // accessible-name channel in `description`, lowered onto the chart graphic as
+    // `role="img"` + `aria-label` and pinned in the DOM. Wiring `aria` too would
+    // put two accessible-name sources on one element and demand a precedence rule
+    // nobody has written. One node, one accessibility vocabulary — which on the
+    // surfaces that really render DOM is the shared `AriaProps` block, untouched
+    // and still live on `page.aria`, `page.components[].aria` and the list view
+    // `aria`.
+    //
+    // `retiredKey()` rather than a bare deletion even though `ChartConfigSchema` IS
+    // a `strictObject`: a bare delete would still be loud, but as a generic
+    // unrecognized-key rejection that cannot carry the prescription — the exact
+    // distinction `aria-carrier-tombstones.test.ts` asserts by name for the widget
+    // twin. Sources are rewritten by the D2 conversion `chart-config-aria-removed`.
+    //
+    // Registered under 18, not 17: v17 was cut before this landed, so the tombstone
+    // ships on the 17.x line (launch-window convention — accept-set narrowings ride
+    // minor releases) and the prescription lives at the major boundary where
+    // `migrate meta` users look.
+    'ui/ChartConfig:aria',
     // #15680 (stack card 5/6 of #14478) — ruling B. `dashboard.refreshInterval`
     // said "Auto-refresh interval in seconds" in prose and nothing else. The three
     // rename-hint aliases beside it — `refresh`, `autoRefresh`, `pollInterval` —
@@ -14797,6 +15020,18 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // entries of every `record:highlights` `fields[]` (pure lossless delete — the
     // chip renders label and value only, so the key never had an effect to lose).
     'ui/RecordHighlightsField:icon',
+    // #17751 — the SECOND key one tombstone produced. `ReportChartSchema` is a
+    // `ChartConfigSchema.extend(...)`, and an extension copies the retired property
+    // into its own walked shape, which `authorable-surface/` marks `[RETIRED]`
+    // separately. Registered per key, as the gate reads them — nothing radiates
+    // from the base (the `shared/FieldMapping:transform` precedent). See
+    // `18.ui__ChartConfig__aria.ts` for the evidence and the ruling.
+    //
+    // The report face is where this key was authorable at two depths —
+    // `reports[].chart.aria` and `reports[].blocks[].chart.aria`, a `joined` report
+    // carrying both — and the D2 conversion `chart-config-aria-removed` strips all
+    // of them together with the dashboard site.
+    'ui/ReportChart:aria',
     // </os-generated retired-key:18>
   ],
 };
@@ -15730,6 +15965,17 @@ export const RETIRED_DEFS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // ENFORCE route of ADR-0049 through a new ADR — the implementation first.
     // See `18.kernel__AdvancedPluginLifecycleConfig.ts` for the family record.
     'kernel/GracefulDegradation',
+    // #16059 — `HealthStatusSchema` (`healthy`, `checkedAt`, `details`, `message`)
+    // was the return vocabulary of `IStartupOrchestrator.checkHealth(plugin)` and
+    // the value of `PluginStartupResult.health`. Both carriers left in this same
+    // major, and no probe system was ever built behind either: the kernel does not
+    // check a plugin's health at startup, so nothing ever produced a HealthStatus.
+    // An exported health vocabulary with no producer reads as proof the platform
+    // health-checks plugins (#3950, ADR-0033). The `health` member of the surviving
+    // `PluginStartupResult` is tombstoned rather than dropped, because that def
+    // keeps emitting — see `18.kernel__PluginStartupResult__health.ts`. Route 3;
+    // the D3 semantic entry `startup-orchestrator-retired` carries the record.
+    'kernel/HealthStatus',
     // #13135 — ADR-0049 enforce-or-remove (maintainer ruling 2026-08-29 on
     // #12057: retirement adopted, re-scope rejected; re-charter #13135 executes
     // the widened surface). Part of the whole-module removal of
@@ -15915,6 +16161,25 @@ export const RETIRED_DEFS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // the production-posture hard-refusal as the first-landed half (#11846 ruling
     // record).
     'kernel/PreviewModeConfig',
+    // #16059 — `StartupOptionsSchema` (`timeoutMs`, `rollbackOnFailure`,
+    // `healthCheck`, `parallel`, `context`) left with the `IStartupOrchestrator`
+    // contract it was the argument of: it was only ever the `options` parameter of
+    // `orchestrateStartup(plugins, options)`, and nothing in any repository
+    // implemented or called that method. The kernel's own boot loop reads its
+    // timeout from `PluginMetadata.startupTimeout` and its rollback policy from
+    // `KernelConfig.rollbackOnFailure`, never from this object. `healthCheck` named
+    // a startup probe system that does not exist. Route 3 (no authored document
+    // carries the def, so no tombstone and no D2 conversion): this table plus the
+    // D3 semantic entry `startup-orchestrator-retired` ARE the declaration.
+    'kernel/StartupOptions',
+    // #16059 — `StartupOrchestrationResultSchema` (`results`, `totalDurationMs`,
+    // `allSuccessful`, `rolledBack`) was the aggregate `orchestrateStartup()`
+    // returned, and it left with that method: no implementation ever existed, so no
+    // aggregate was ever built. The kernel starts plugins one at a time and returns
+    // a `PluginStartupResult` per plugin; the per-plugin durations it does keep are
+    // reachable through `ObjectKernel.getPluginStartupDurations()`. Route 3; the D3
+    // semantic entry `startup-orchestrator-retired` carries the record.
+    'kernel/StartupOrchestrationResult',
     // #13612 — ADR-0049 enforce-or-remove (maintainer ruling 2026-09-01, director
     // batch C: retire; binding was weighed and not adopted). One of the six
     // branded identifier schemas of `shared/branded-types.zod.ts`, removed whole

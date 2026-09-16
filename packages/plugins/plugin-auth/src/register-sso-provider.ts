@@ -10,7 +10,7 @@
  * support), so posting them straight to `/sso/register` drops
  * clientId/clientSecret at the top level (Zod-stripped) and persists an
  * unusable `oidc_config = null` provider that can never complete a login
- * (ADR-0024).
+ * (ADR-0135 D6).
  *
  * This helper reshapes the flat form body into the nested shape and
  * RE-DISPATCHES it through the real `/sso/register` endpoint (via the
@@ -313,7 +313,7 @@ export async function runRegisterSamlProviderFromForm(
 }
 
 
-// ── Domain verification (ADR-0024 ②, opt-in OS_SSO_DOMAIN_VERIFICATION) ──────
+// ── Domain verification (ADR-0135 D6, opt-in OS_SSO_DOMAIN_VERIFICATION) ──────
 //
 // `@better-auth/sso` proves an external IdP's email DOMAIN is controlled by the
 // registrant via a DNS-TXT challenge, mounted ONLY when `domainVerification` is

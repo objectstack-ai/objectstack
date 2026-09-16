@@ -1915,7 +1915,7 @@ export class AuthManager {
             // fall through — the vendor still performs the revoke itself
           }
 
-          // ── ADR-0024 + ADR-0068 D4: registering an identity provider is ──
+          // ── ADR-0135 D6 + ADR-0068 D4: registering an identity provider is ──
           // a PLATFORM-OPERATOR action.
           //
           // `@better-auth/sso`'s POST /sso/register only checks org-admin when
@@ -2461,11 +2461,11 @@ export class AuthManager {
           origins.push('http://*.localhost:*');
           origins.push('https://*.localhost:*');
         }
-        // ── ADR-0024: runtime self-service external-IdP registration ───────
+        // ── ADR-0135 D6: runtime self-service external-IdP registration ───────
         // `@better-auth/sso`'s `validateDiscoveryUrl` requires the IdP's
         // *discovery* origin to be in `trustedOrigins` — even for a publicly-
         // routable IdP (stricter than its own sub-endpoint check, which allows
-        // any public host). Without help that breaks ADR-0024's "register your
+        // any public host). Without help that breaks ADR-0135 D6's "register your
         // IdP at runtime, no boot config" promise for every real IdP
         // (Okta/Entra/Google). When the SSO RP is enabled, expose
         // `trustedOrigins` as a per-request FUNCTION that, for a
@@ -2790,7 +2790,7 @@ export class AuthManager {
     // writer), while the operator per-environment override survives for every
     // deployment that leaves the keys unset.
     const ssoFromEnv = readBooleanEnv('OS_SSO_ENABLED');
-    // Opt-in DNS domain-verification for external SSO providers (ADR-0024 ②).
+    // Opt-in DNS domain-verification for external SSO providers (ADR-0135 D6).
     // OFF by default → today's behavior exactly (register → login immediately).
     // ON → @better-auth/sso mounts /sso/{request-domain-verification,verify-domain}
     // AND enforces a HARD login gate: a provider whose domain is not DNS-verified
@@ -3633,7 +3633,7 @@ export class AuthManager {
 
     // External SSO (OIDC / SAML) relying-party — lets this environment federate
     // login to a customer's own IdP (Okta / Entra / Google …). Per-env, runtime-
-    // registered providers live in `sys_sso_provider` (ADR-0024: the OPEN SSO
+    // registered providers live in `sys_sso_provider` (ADR-0135 D6: the OPEN SSO
     // mechanism — cloud-free for self-host). Endpoints mount under
     // /api/v1/auth/sso/{register,providers,delete-provider,callback,…}.
     //
@@ -3658,13 +3658,13 @@ export class AuthManager {
       // re-verified in depth — see register-sso-provider.ts for the
       // `oidcConfig.mapping` strict-object findings.
       //
-      // `organizationProvisioning.defaultRole` (ADR-0024 V1): a first-time
+      // `organizationProvisioning.defaultRole` (cloud ADR-0024 V1): a first-time
       // federated login is JIT-provisioned into the user's domain-matched org
       // with this role, so a member who arrives via an external IdP lands with
       // an explicit default role (belt-and-suspenders over SecurityPlugin's
       // `member_default` fallback, which already grants baseline access to any
       // authenticated user). Requires the `organization` plugin — on by default.
-      // `domainVerification.enabled` (ADR-0024 ②, opt-in via OS_SSO_DOMAIN_VERIFICATION):
+      // `domainVerification.enabled` (ADR-0135 D6, opt-in via OS_SSO_DOMAIN_VERIFICATION):
       // when on, @better-auth/sso mounts /sso/request-domain-verification +
       // /sso/verify-domain (DNS TXT proof-of-ownership) AND enforces that an
       // external IdP's email domain be DNS-verified before it may complete a
@@ -6019,7 +6019,7 @@ export class AuthManager {
    * the tombstone re-links the same user, the state turns active, and the
    * SCIM ban is lifted by the second bullet.
    *
-   * The break-glass last-administrator guard (ADR-0024 D5.2, #5892) is an
+   * The break-glass last-administrator guard (ADR-0135 D5.2, #5892) is an
    * ENGINE `beforeUpdate` hook on `sys_user`, so it judges this write exactly
    * as it judges the admin mount's: deactivating the last administrator
    * throws its 403 `PERMISSION_DENIED`, the adapter rethrows it as an
@@ -6651,7 +6651,7 @@ export class AuthManager {
   }
 
   /**
-   * Whether opt-in DNS domain-verification (ADR-0024 ②) is wired — i.e. the
+   * Whether opt-in DNS domain-verification (ADR-0135 D6) is wired — i.e. the
    * `/sso/request-domain-verification` + `/sso/verify-domain` endpoints are
    * mounted (and the hard "domain must be verified to log in" gate is active).
    * Resolved with the EXACT logic `buildPluginList` uses for the `sso()`
@@ -6693,7 +6693,7 @@ export class AuthManager {
    * request. For a `POST /sso/register` | `/sso/update-provider`, parse the
    * (cloned) body and return the PUBLIC-ROUTABLE origins of the declared
    * `issuer` / `oidcConfig` endpoints so `@better-auth/sso`'s discovery
-   * validation accepts a customer IdP registered at runtime (ADR-0024) without
+   * validation accepts a customer IdP registered at runtime (ADR-0135 D6) without
    * the operator pre-listing it in boot config. Only public-routable hosts are
    * returned — private / internal / loopback hosts are never auto-trusted
    * (better-auth's `isPublicRoutableHost`, the same predicate its own
@@ -6806,7 +6806,7 @@ export class AuthManager {
    * callback. Both copies are gone; both callers land here, and this method
    * performs no derivation of its own. Adding one back is the regression.
    *
-   * The three call sites are `/sso/register`'s ADR-0024 before-hook, the
+   * The three call sites are `/sso/register`'s ADR-0135 D6 before-hook, the
    * `/admin/impersonate-user` oracle (both the caller and the protected-target
    * question), and the `customSession` payload — which is why the payload can
    * no longer report a different answer from the gates.

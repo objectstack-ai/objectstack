@@ -172,7 +172,7 @@ export const AuthPluginConfigSchema = lazySchema(() => z.object({
   ),
   /**
    * Enable opt-in DNS domain-verification for external SSO providers
-   * (ADR-0024 ②): mounts `/sso/{request-domain-verification,verify-domain}`
+   * (ADR-0135 D6): mounts `/sso/{request-domain-verification,verify-domain}`
    * and enforces the hard "provider domain must be DNS-verified to log in"
    * gate. Only honored when the SSO plugin itself is enabled (see `sso`).
    *

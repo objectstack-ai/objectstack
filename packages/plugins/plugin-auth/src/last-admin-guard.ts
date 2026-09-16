@@ -121,7 +121,7 @@
  *
  * ## What counts as an administrator
  *
- * The two grades below are what the ADR-0024 `/sso/register` admin gate counted
+ * The two grades below are what the ADR-0135 D6 `/sso/register` admin gate counted
  * until #10009 narrowed that gate to platform-admin-only and removed its
  * `AuthManager.isOrgOrPlatformAdmin` predicate. That predicate is gone; this
  * guard is unchanged and still counts both, so the definition stands on its own
@@ -551,7 +551,7 @@ function isRefusal(err: unknown): boolean {
 }
 
 const BREAK_GLASS_CITATION =
-  'break-glass invariant, ADR-0024 D5.2 — an environment must always keep at least one ' +
+  'break-glass invariant, ADR-0135 D5.2 — an environment must always keep at least one ' +
   'administrator who can sign in';
 
 function toId(value: unknown): string | undefined {
@@ -828,7 +828,7 @@ export const STANDING_KEY_EXCLUSIONS: Readonly<Record<string, Readonly<Record<st
       + 'this engine `data.id` on an update ADDRESSES the row rather than proposing a new primary '
       + 'key, so a key rewrite is not expressible through this write path at all.',
     ai_access:
-      'ADR-0024 `ai_seat` synthesis (§7). It grants an AI seat, never administrator standing: the '
+      'cloud ADR-0024 `ai_seat` synthesis (§7). It grants an AI seat, never administrator standing: the '
       + 'posture rung is derived from the unscoped `admin_full_access` grant and, since #11663 L2, '
       + 'from the configured-and-verified email pair — never from this flag. Emptying it costs the '
       + 'holder their AI seat, which is an ADR-0086 capability question with an in-product remedy, '
@@ -1473,7 +1473,7 @@ export function registerLastAdminGuard(
     // The whole downgrade family lands here: better-auth's `updateMemberRole`,
     // a SCIM group-mapping change, an import, a script. It is NOT narrowed to
     // "the caller downgrading themselves" — an IdP writes these on everyone's
-    // behalf, which is exactly the case ADR-0024 D5.2 exists for.
+    // behalf, which is exactly the case ADR-0135 D5.2 exists for.
     //
     // A payload touching neither `role` nor `user_id` provably cannot move the
     // enumeration (see MEMBER_STANDING_KEYS), so it costs no reads at all.
@@ -1621,6 +1621,6 @@ export function registerLastAdminGuard(
     '[LastAdminGuard] last-administrator guard registered on sys_user (ban + delete, and the ' +
       'email/email_verified pair the deployment-config anchor derives from), sys_member and ' +
       'sys_user_permission_set (standing revocation), and sys_permission_set ' +
-      '(the admin_full_access row every platform admin is derived from) — ADR-0024 D5.2',
+      '(the admin_full_access row every platform admin is derived from) — ADR-0135 D5.2',
   );
 }

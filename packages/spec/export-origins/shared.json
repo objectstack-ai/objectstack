@@ -10,6 +10,8 @@
     "CorsConfigSchema": "src/shared/http.zod.ts#CorsConfigSchema (const)",
     "CronExpressionInput": "src/shared/expression.zod.ts#CronExpressionInput (type)",
     "CronExpressionInputSchema": "src/shared/expression.zod.ts#CronExpressionInputSchema (const)",
+    "DurationMs": "src/shared/duration.zod.ts#DurationMs (type)",
+    "DurationSeconds": "src/shared/duration.zod.ts#DurationSeconds (type)",
     "EVALUATED_EXPRESSION_SOURCE_REQUIRED": "src/shared/expression.zod.ts#EVALUATED_EXPRESSION_SOURCE_REQUIRED (const)",
     "EXTERNAL_ERROR_CODES": "src/shared/external-errors.ts#EXTERNAL_ERROR_CODES (const)",
     "EXTERNAL_ERROR_HTTP_STATUS": "src/shared/external-errors.ts#EXTERNAL_ERROR_HTTP_STATUS (const)",

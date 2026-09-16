@@ -25,7 +25,7 @@
 - 归属该卡派发席,交付后收集复核当轮席内完成;借复核不移卡,新 spec 工作恒归 spec 席。
 - 逐车道:spec 席达档审契约增量;余席默认档自审加门禁、挂标;豁免仅独立性件与保险丝。
 - 复核记录 = 一条评论落 PR 或卡,达档与默认档同形;散文、dev 自评、`os-dev-report` 恒不算。
-- 同形 = `## Contract review` 题头、所审 head sha 码段、①②③ 逐项、独立性对、PASS/FAIL 判词。
+- 同形 = `## Contract review` 题头、所审 head sha 独占码段、①②③ 逐项、独立性对、PASS/FAIL。
 - 同形含首行 `Served-tier:`:值写常量名 `CONTRACT_REVIEW_TIER`;无此行不成裁决,模板见 `--template`。
 - ① derived judgments 逐项:diff 引出的接受集与公开面变化逐条点名判对错。
 - ② semver 定级与 changeset 声明一致;③ 边界旗:dev 挂旗与 `open_questions` 逐旗答复或升级。

@@ -73,6 +73,25 @@ name: Board Snapshot
 # cursor and exits non-zero with the reset time. A loop against a spent budget
 # starves every other automated caller in the repository for the rest of the hour.
 #
+# ## A stale archive is not a green run
+#
+# A run that stops on its own budget is a planned pause and exits 0. A run whose
+# archive has not been CONFIRMED against the live board for longer than a day is
+# a different thing, and until #18137 it exited 0 as well: NINETEEN consecutive
+# runs of this workflow reported `count_check: pending` between 2026-09-10T20:23Z
+# and 2026-09-14T20:24Z and every one of them is `success` in this workflow's own
+# run history — including 2026-09-14T02:34Z, whose delta cursor was two days
+# behind the live board on the morning an account suspension destroyed cards the
+# archive did not hold. The script now carries a `freshness` row and exits 5 when
+# that streak passes a day; its header is the authority on the anchor and the
+# window, and ⛔ the row prescribes no remedy: the cadence above and the
+# 800-request cap are the maintainer's decisions, not this row's.
+#
+# The ORDER of the steps below is what makes that safe, and it is deliberate: the
+# commit and the R2 mirror run BEFORE the step that reads the exit code, so a red
+# freshness row never costs the records the same run archived. ⛔ Do not move the
+# failing step above them — a stale archive is better than none.
+#
 # ## The `pull_request` trigger, and what it is allowed to do
 #
 # Every patrol in this tree exercises itself on the pull requests that change
@@ -421,8 +440,10 @@ jobs:
             echo '</details>'
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Fail the run if the snapshot did not read the board
+      # LAST on purpose: every step that lands the records is above it, so this
+      # one only ever decides the colour of the run. See the header.
+      - name: Fail the run if the snapshot did not read the board, or the archive is behind it
         if: steps.snapshot.outputs.exit_code != '0'
         run: |
-          echo "::error::board-snapshot exited ${{ steps.snapshot.outputs.exit_code }} — 2 is a failed count check (the archive and the board disagree about how many open issues exist), 3 is a prerequisite the runner did not meet, 4 is a rate-limit stop with a resume cursor written. Whatever was read HAS been committed; see this run's summary."
+          echo "::error::board-snapshot exited ${{ steps.snapshot.outputs.exit_code }} — 2 is a failed count check (the archive and the board disagree about how many open issues exist), 3 is a prerequisite the runner did not meet, 4 is a rate-limit stop with a resume cursor written, 5 is a STALE archive (no run has confirmed it against the live board for longer than a day; the run summary names the streak and what clears it). Whatever was read HAS been committed; see this run's summary."
           exit 1

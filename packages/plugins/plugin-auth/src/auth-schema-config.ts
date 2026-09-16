@@ -909,7 +909,7 @@ export const buildOidcProviderPluginSchema = buildOauthProviderPluginSchema;
 // NOTE: there is intentionally no `ssoProvider` mapping constant here, and no
 // `buildSsoPluginSchema()`. Each `sys_sso_provider` row is an external
 // OIDC/SAML IdP this environment federates login to (the relying-party side —
-// ADR-0024's OPEN per-env SSO mechanism); protocol detail lives in JSON blobs
+// ADR-0135 D6's OPEN per-env SSO mechanism); protocol detail lives in JSON blobs
 // (`oidc_config` / `saml_config`), so the model itself is thin. Unlike scim
 // below, the absence of a mapping is a CHOICE, not a limitation of the
 // dependency: `@better-auth/sso@1.7.1` DOES accept a schema option —
@@ -924,7 +924,7 @@ export const buildOidcProviderPluginSchema = buildOauthProviderPluginSchema;
 // someone remembers to update it. That layer is pinned by the dedicated
 // sso/scim block in better-auth-schema-parity.test.ts.
 //
-// `domainVerified` (ADR-0024 ②): with `sso({ domainVerification: { enabled:
+// `domainVerified` (ADR-0135 D6): with `sso({ domainVerification: { enabled:
 // true } })` — the shape `OS_SSO_DOMAIN_VERIFICATION` turns on — the plugin
 // writes an eighth `ssoProvider` field, `domainVerified` (DNS
 // domain-ownership proof), which the adapter rule resolves to

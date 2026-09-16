@@ -55,7 +55,7 @@ export const AUTH_MODEL_TO_PROTOCOL: Record<string, string> = {
   // op via resolveProtocolName. For scim that is the only available route; for
   // sso it is now a CHOICE (see #8224 — moving it onto the plugin option is an
   // open architecture question, deliberately not decided here). Off by default
-  // (OS_SSO_ENABLED / OS_SCIM_ENABLED). See ADR-0024 / ADR-0134.
+  // (OS_SSO_ENABLED / OS_SCIM_ENABLED). See ADR-0135 D6 / ADR-0134.
   ssoProvider: 'sys_sso_provider',
   // (rc.1's one scim model, `scimProvider` → `sys_scim_provider`, retired
   // under #11757: stable 1.7.x no longer derives that model.)
@@ -535,7 +535,7 @@ function isObjectQLValidationError(
  * the guards live in this package but throw a plain engine-shaped error so that
  * BOTH transports can map it — `mapDataError` gives the REST data routes a 403,
  * this gives the auth pipeline one. The concrete case is the break-glass
- * last-administrator ban guard (ADR-0024 D5.2, `last-admin-guard.ts`):
+ * last-administrator ban guard (ADR-0135 D5.2, `last-admin-guard.ts`):
  * without this arm, an over-broad SCIM deprovision would be refused correctly
  * and then reported to the IdP as an opaque 500, which is the one thing a guard
  * whose whole product is an explanation must not do.

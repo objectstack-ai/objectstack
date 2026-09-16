@@ -2,183 +2,130 @@
 
 import { z } from 'zod';
 
-/**
- * Startup Orchestrator Protocol
- * 
- * Zod schemas for plugin startup orchestration data structures.
- * These schemas align with the IStartupOrchestrator contract interface.
- * 
- * Following ObjectStack "Zod First" principle - all data structures
- * must have Zod schemas for runtime validation and JSON Schema generation.
- */
-
-// ============================================================================
-// Startup Configuration Schemas
-// ============================================================================
-
-/**
- * Startup Options Schema
- * Configuration for plugin startup orchestration
- * 
- * @example
- * {
- *   "timeoutMs": 30000,
- *   "rollbackOnFailure": true,
- *   "healthCheck": false,
- *   "parallel": false
- * }
- */
 import { lazySchema } from '../shared/lazy-schema';
-import { EpochMs } from '../shared/epoch.zod';
 import { retiredKey } from '../shared/retired-key';
-export const StartupOptionsSchema = lazySchema(() => z.object({
-  /**
-   * Maximum time (ms) to wait for each plugin to start
-   * @default 30000 (30 seconds)
-   */
-  // Renamed from `timeout` (#15678, #14478 ruling B): the unit lived only in the
-  // describe prose. The contract's own `startWithTimeout(plugin, ctx, timeoutMs)`
-  // parameter already spelled it this way.
-  timeoutMs: z.number().int().min(0).optional().default(30000)
-    .describe('Maximum time in milliseconds to wait for each plugin to start'),
-
-  /** Tombstone for the rename above (#15678, ruling B on #14478). */
-  timeout: retiredKey(
-    '`StartupOptions.timeout` was renamed to `timeoutMs` in @objectstack/spec 17 — '
-    + 'the unit of a duration-shaped number lives in the key name, not only '
-    + 'in the describe prose. Rename the key to `timeoutMs`; the value (milliseconds) is unchanged.',
-  ),
-  
-  /**
-   * Whether to rollback (destroy) already-started plugins on failure
-   * @default true
-   */
-  rollbackOnFailure: z.boolean().optional().default(true)
-    .describe('Whether to rollback already-started plugins if any plugin fails'),
-  
-  /**
-   * Whether to run health checks after startup
-   * @default false
-   */
-  healthCheck: z.boolean().optional().default(false)
-    .describe('Whether to run health checks after plugin startup'),
-  
-  /**
-   * Whether to run plugins in parallel (if dependencies allow)
-   * @default false (sequential startup)
-   */
-  parallel: z.boolean().optional().default(false)
-    .describe('Whether to start plugins in parallel when dependencies allow'),
-  
-  /**
-   * Custom context to pass to plugin lifecycle methods
-   */
-  context: z.unknown().optional().describe('Custom context object to pass to plugin lifecycle methods'),
-}));
-
-export type StartupOptions = z.input<typeof StartupOptionsSchema>;
-/** Post-parse shape of {@link StartupOptions} — defaults applied, transforms run (ADR-0122). */
-export type StartupOptionsParsed = z.infer<typeof StartupOptionsSchema>;
-
-// ============================================================================
-// Health Status Schemas
-// ============================================================================
 
 /**
- * Health Status Schema
- * Health status for a plugin
- * 
- * @example
- * {
- *   "healthy": true,
- *   "checkedAt": 1706659200000,
- *   "details": {
- *     "databaseConnected": true,
- *     "memoryUsage": 45.2
- *   }
- * }
+ * Plugin Startup Result Protocol
+ *
+ * One schema, describing the one startup datum the kernel actually produces.
+ *
+ * `ObjectKernel.startPluginWithTimeout()` (`packages/core/src/kernel.ts`)
+ * races a plugin's `start()` against its `startupTimeout` and returns exactly
+ * this record for every plugin it starts — on the success path, on the failure
+ * path, and for a plugin that declares no `start()` at all. The kernel's boot
+ * loop is its only caller and its only reader: a `success: false` result is
+ * logged, and with `rollbackOnFailure` set the already-started plugins are
+ * destroyed and the original `error` is rethrown as the new error's `cause`.
+ *
+ * What each member means, and when it is present:
+ *
+ * - `pluginName` — always. The plugin's registered name; the result carries the
+ *   NAME, never a plugin object.
+ * - `success` — always. `false` means `start()` threw or the timeout fired.
+ * - `durationMs` — `Date.now()` elapsed across the `start()` race, on BOTH the
+ *   success and the failure path. Absent for a plugin with no `start()`, which
+ *   returns `{ success: true, pluginName }` without racing anything.
+ * - `error` — the failure path only: the value `start()` threw. Declared here
+ *   as the serializable projection every consumer of this record can carry
+ *   (`name` / `message` / `stack` / `code`), which a thrown `Error` satisfies —
+ *   the kernel hands the live instance through, so `instanceof Error` still
+ *   narrows at the read site and the original cause survives the rethrow.
+ * - `timedOut` — the failure path only, and only when the failure was the
+ *   TIMEOUT rather than a throw from inside `start()`: the kernel sets it from
+ *   the raced rejection's message. Absent on the success path; absent, not
+ *   `false`, when a plugin's own `start()` threw.
+ *
+ * The deprecated `startTime` alias the kernel used to set beside `durationMs`
+ * ends here: it never held an instant, and a member whose name promises one
+ * while carrying an elapsed duration is the confusion the duration-unit rule
+ * exists to stop. It is a tombstone on this schema and the kernel no longer
+ * populates it.
+ *
+ * ── [#16059] What this module used to declare, and why it no longer does ────
+ *
+ * Until this major it also declared a whole startup-ORCHESTRATION vocabulary —
+ * `StartupOptionsSchema` (with `timeoutMs`, `rollbackOnFailure`, `healthCheck`,
+ * `parallel`, `context`), `HealthStatusSchema`, `StartupOrchestrationResultSchema`
+ * — beside the `IStartupOrchestrator` contract interface in
+ * `contracts/startup-orchestrator.ts` that tied them together
+ * (`orchestrateStartup` / `rollback` / `checkHealth` / `startWithTimeout`).
+ *
+ * Maintainer ruling on #16059 (director seat, decision batch #60, 2026-09-06):
+ * the spec KEEPS a startup-result contract and it describes what the kernel
+ * actually produces. Neither enforcing the never-landed design nor dropping the
+ * contract was adopted. So the orchestrator vocabulary is retired under ADR-0049
+ * enforce-or-remove and this result schema is re-declared against the shipped
+ * shape, with `@objectstack/core` importing the type from here rather than
+ * declaring a twin — the drift that made the two disagree cannot recur.
+ *
+ * Nothing implemented `IStartupOrchestrator` and nothing parsed the three
+ * schemas: measured across this repository and the pinned `objectui` checkout
+ * with lit same-corpus controls, every reference outside this module's own
+ * tests was a generated artifact or a released `CHANGELOG.md`. `healthCheck`
+ * and `HealthStatus` in particular named a probe system that does not exist —
+ * the kernel never checks a plugin's health at startup — which is the #3950
+ * shape: a published vocabulary an author (ADR-0033) reads as proof of a
+ * capability, that parses clean and is received by nobody.
+ *
+ * Route 3 of the retirement playbook: with no authored document carrying the
+ * defs there is no seam for a D2 conversion and nobody to hand a tombstone to,
+ * so `RETIRED_DEFS_BY_MAJOR[18]` plus the D3 semantic entry
+ * `startup-orchestrator-retired` ARE the declaration. Two keys of THIS
+ * surviving schema are tombstoned rather than dropped, because this def keeps
+ * emitting and its type is imported by `@objectstack/core`: a construction site
+ * still writing them gets the prescription through `tsc`.
+ *
+ * Following ObjectStack "Zod First" principle — all data structures have Zod
+ * schemas for runtime validation and JSON Schema generation.
  */
-export const HealthStatusSchema = lazySchema(() => z.object({
-  /**
-   * Whether the plugin is healthy
-   */
-  healthy: z.boolean().describe('Whether the plugin is healthy'),
-  
-  /**
-   * Health check timestamp (Unix milliseconds)
-   */
-  // Renamed from `timestamp` and typed `EpochMs` (#15676, #14478 ruling B): the
-  // instant the health check ran, named for what it marks.
-  checkedAt: EpochMs.describe('Unix timestamp in milliseconds when health check was performed'),
-
-  /** Tombstone for the rename above (#15676, ruling B on #14478). */
-  timestamp: retiredKey(
-    '`HealthStatus.timestamp` was renamed to `checkedAt` in @objectstack/spec 17 — the '
-    + 'instant the check RAN now carries the shared `EpochMs` schema, which declares the '
-    + 'epoch-millisecond unit the bare key name left to the describe prose. Rename the key '
-    + 'to `checkedAt`; the value is unchanged (`Date.now()`).',
-  ),
-  
-  /**
-   * Optional health details (plugin-specific)
-   */
-  details: z.record(z.string(), z.unknown()).optional().describe('Optional plugin-specific health details'),
-  
-  /**
-   * Optional error message if unhealthy
-   */
-  message: z.string().optional().describe('Error message if plugin is unhealthy'),
-}));
-
-export type HealthStatus = z.input<typeof HealthStatusSchema>;
 
 // ============================================================================
-// Startup Result Schemas
+// Plugin Startup Result Schema
 // ============================================================================
 
 /**
  * Plugin Startup Result Schema
- * Result of a single plugin startup operation
- * 
+ * The per-plugin outcome the kernel returns for every plugin it starts
+ *
  * @example
  * {
- *   "plugin": { "name": "crm-plugin", "version": "1.0.0" },
+ *   "pluginName": "crm-plugin",
  *   "success": true,
- *   "durationMs": 1250,
- *   "health": {
- *     "healthy": true,
- *     "checkedAt": 1706659200000
- *   }
+ *   "durationMs": 1250
+ * }
+ *
+ * @example
+ * {
+ *   "pluginName": "slow-plugin",
+ *   "success": false,
+ *   "durationMs": 30000,
+ *   "error": { "name": "Error", "message": "Plugin slow-plugin start timeout after 30000ms" },
+ *   "timedOut": true
  * }
  */
 export const PluginStartupResultSchema = lazySchema(() => z.object({
   /**
-   * Plugin that was started
+   * Name of the plugin that was started
    */
-  plugin: z.object({
-    name: z.string(),
-    version: z.string().optional(),
-  }).passthrough().describe('Plugin metadata'),
-  
+  pluginName: z.string().describe('Name of the plugin that was started'),
+
   /**
    * Whether startup was successful
    */
   success: z.boolean().describe('Whether the plugin started successfully'),
-  
+
   /**
    * Time taken to start (milliseconds)
+   *
+   * Optional because a plugin that declares no `start()` is resolved without
+   * racing anything, and there is no elapsed time to report.
    */
   // Renamed from `duration` (#15678, #14478 ruling B): the unit lived only in the
   // describe prose.
-  durationMs: z.number().min(0).describe('Time taken to start the plugin in milliseconds'),
+  durationMs: z.number().min(0).optional()
+    .describe('Time taken to start the plugin in milliseconds; absent when the plugin declares no start()'),
 
-  /** Tombstone for the rename above (#15678, ruling B on #14478). */
-  duration: retiredKey(
-    '`PluginStartupResult.duration` was renamed to `durationMs` in @objectstack/spec 17 — '
-    + 'the unit of a duration-shaped number lives in the key name, not only '
-    + 'in the describe prose. Rename the key to `durationMs`; the value (milliseconds) is unchanged.',
-  ),
-  
   /**
    * Error if startup failed
    */
@@ -188,62 +135,56 @@ export const PluginStartupResultSchema = lazySchema(() => z.object({
     stack: z.string().optional().describe('Stack trace'),
     code: z.string().optional().describe('Error code'),
   }).optional().describe('Serializable error representation if startup failed'),
-  
+
   /**
-   * Health status after startup (if healthCheck enabled)
+   * Whether the failure was the startup TIMEOUT rather than a throw from
+   * inside the plugin's own `start()`
    */
-  health: HealthStatusSchema.optional().describe('Health status after startup if health check was enabled'),
+  timedOut: z.boolean().optional()
+    .describe('Whether startup failed because the startup timeout fired, rather than start() throwing'),
+
+  /**
+   * Tombstone for the deprecated `startTime` alias core carried (#16059).
+   *
+   * Mirroring it was the other candidate and the tree refuses it: the member
+   * holds elapsed milliseconds under a name that carries no unit, which is
+   * exactly what `check:duration-unit-keys` (ruling B on #14478) fails, and
+   * neither of that rule's two schema-declared exemptions applies — it is not
+   * an `EpochMs` instant and it mirrors no external standard. Renaming it to
+   * `startTimeMs` would mint a spelling nothing has ever produced, for a member
+   * already slated for removal. So the L1 alias ends here, audibly.
+   */
+  startTime: retiredKey(
+    '`PluginStartupResult.startTime` was removed in @objectstack/spec 18 (ADR-0049) — '
+    + 'it never held an instant: the kernel filled it with the SAME elapsed milliseconds as '
+    + '`durationMs`, so a reader who took the name at its word and computed '
+    + '`Date.now() - startTime` got an age near the epoch instead of a wait. Delete the key '
+    + 'and read `durationMs`, which has always carried the same value.',
+  ),
+
+  /** Tombstone for the `duration` → `durationMs` rename (#15678, ruling B on #14478). */
+  duration: retiredKey(
+    '`PluginStartupResult.duration` was renamed to `durationMs` in @objectstack/spec 17 — '
+    + 'the unit of a duration-shaped number lives in the key name, not only '
+    + 'in the describe prose. Rename the key to `durationMs`; the value (milliseconds) is unchanged.',
+  ),
+
+  /** Tombstone for the `plugin` → `pluginName` re-declaration (#16059). */
+  plugin: retiredKey(
+    '`PluginStartupResult.plugin` was removed in @objectstack/spec 18 (ADR-0049) — '
+    + 'the kernel has never put a plugin OBJECT in this result, so the nested '
+    + '`{ name, version }` shape described a value nothing ever built. Replace the key '
+    + 'with `pluginName` and carry the plugin name string.',
+  ),
+
+  /** Tombstone for the health member, retired with `HealthStatus` itself (#16059). */
+  health: retiredKey(
+    '`PluginStartupResult.health` was removed in @objectstack/spec 18 (ADR-0049) — '
+    + 'it carried a `HealthStatus`, and that vocabulary is retired with the startup '
+    + 'orchestrator that declared it: no probe system ever ran a health check at '
+    + 'startup, so nothing ever filled the key. Delete the key; a plugin that reports '
+    + 'health does it through a service it registers, not through this result.',
+  ),
 }));
 
 export type PluginStartupResult = z.input<typeof PluginStartupResultSchema>;
-
-// ============================================================================
-// Startup Orchestration Result Schema
-// ============================================================================
-
-/**
- * Startup Orchestration Result Schema
- * Overall result of orchestrating startup for multiple plugins
- * 
- * @example
- * {
- *   "results": [
- *     { "plugin": { "name": "plugin1" }, "success": true, "durationMs": 1200 },
- *     { "plugin": { "name": "plugin2" }, "success": true, "durationMs": 850 }
- *   ],
- *   "totalDurationMs": 2050,
- *   "allSuccessful": true
- * }
- */
-export const StartupOrchestrationResultSchema = lazySchema(() => z.object({
-  /**
-   * Individual plugin startup results
-   */
-  results: z.array(PluginStartupResultSchema).describe('Startup results for each plugin'),
-  
-  /**
-   * Total time taken for all plugins (milliseconds)
-   */
-  // Renamed from `totalDuration` (#15678, #14478 ruling B): the unit lived only
-  // in the describe prose.
-  totalDurationMs: z.number().min(0).describe('Total time taken for all plugins in milliseconds'),
-
-  /** Tombstone for the rename above (#15678, ruling B on #14478). */
-  totalDuration: retiredKey(
-    '`StartupOrchestrationResult.totalDuration` was renamed to `totalDurationMs` in @objectstack/spec 17 — '
-    + 'the unit of a duration-shaped number lives in the key name, not only '
-    + 'in the describe prose. Rename the key to `totalDurationMs`; the value (milliseconds) is unchanged.',
-  ),
-  
-  /**
-   * Whether all plugins started successfully
-   */
-  allSuccessful: z.boolean().describe('Whether all plugins started successfully'),
-  
-  /**
-   * Plugins that were rolled back (if rollbackOnFailure was enabled)
-   */
-  rolledBack: z.array(z.string()).optional().describe('Names of plugins that were rolled back'),
-}));
-
-export type StartupOrchestrationResult = z.input<typeof StartupOrchestrationResultSchema>;
