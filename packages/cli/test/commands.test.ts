@@ -566,10 +566,12 @@ describe('os explain — every catalog entry swept against its spec schema (#148
       expect(
         offenders,
         `os explain ${key}: table row(s) name key(s) ${bound.schema} does NOT declare `
-          + `(judged by the ${technique} technique). An author who copies such a row gets a `
-          + 'parse that succeeds and a value with that key gone — no error, no warning, and '
-          + 'a query that runs unfiltered. Correct the ROW to the schema\'s own spelling '
-          + '(⛔ do not relax the schema to accept it).',
+          + `(judged by the ${technique} technique). An author who copies such a row gets `
+          + 'one of two bad outcomes: a strict schema REFUSES the whole object by name, and '
+          + 'an OPEN one takes it, strips the key and reports success. The second is the trap '
+          + '`os explain query` shipped — a copied row, a silently stripped key, and a query '
+          + 'that ran unfiltered under an ordinary success. Correct the ROW to the schema\'s '
+          + 'own spelling (⛔ do not relax the schema to accept it).',
       ).toEqual([]);
     });
   }
