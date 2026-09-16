@@ -23,8 +23,8 @@
  *
  * Nothing under `scripts/` read the deny list's MEMBERSHIP before this file.
  * The key `permissions.deny` occurred there only inside comments and one
- * handoff string, and the hook self-tests grep `.claude/settings.json` for hook
- * registration and for two enqueue matchers -- never for a tool name. So a tool
+ * handoff string, and the hook self-tests grep `.claude/settings.json` for
+ * their own registration -- never for a tool name. So a tool
  * the charter declares closed could be absent from `deny` with every gate
  * green, and that is measured rather than hypothetical: #18218 was exactly that
  * state for `update_pull_request`, declared closed in the prose and open in the
@@ -60,10 +60,12 @@
  * (#18282, ruled A). The REST route `PUT .../pulls/{n}/ccr/auto_merge` in
  * `.claude/skills/pm-dispatch/references/rest-channel.md` already serves every
  * real enqueue, so denying the MCP pair costs a seat nothing, and a tool the
- * runtime refuses cannot be mis-called by a seat that mis-reads the scope of
- * the PreToolUse hook `.claude/hooks/guard-governed-enqueue.sh`. That hook
- * stays as defence in depth: it judges a governed PR's pinned approval, this
- * gate judges membership, and neither reads the other.
+ * runtime refuses cannot be mis-called at all. This roster is the ONLY
+ * seat-side refusal of the MCP enqueue class: the client-side PreToolUse
+ * enqueue guard was removed by ruling (it only ever saved a queue cycle), and
+ * the line that judges a governed PR's approval is
+ * `scripts/pm/check-governed-queue-guard.mjs` on the `merge_group` build. This
+ * gate judges membership; neither reads the other.
  *
  * ## What is deliberately NOT asserted
  *

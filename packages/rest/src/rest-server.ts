@@ -1837,8 +1837,8 @@ export class RestServer {
      *   4. Control-plane protocol captured at boot.
      *
      * Special case: `environmentId === 'platform'` is a reserved virtual id used
-     * by Studio to address the control plane through the regular project
-     * URL shape (`/projects/platform/...`). It is NOT a row in the projects
+     * by Studio to address the control plane through the regular environment
+     * URL shape (`/environments/platform/...`). It is NOT a row in the projects
      * table, so we must never call `KernelManager.getOrCreate('platform')`.
      * Instead, return the control-plane protocol directly. This lets Studio
      * (and any other client) speak a single, uniform URL family without
