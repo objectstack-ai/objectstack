@@ -28313,7 +28313,9 @@ async function selfTest() {
   t('H38 seat: a claim with no `Seat:` line is seat 1', claimSeatNumber('Claim: x\nBranch: `claude/issue-1-a`'), 1);
   t('H38 seat: `Seat: domain:services#2` reads 2', claimSeatNumber('Claim: x\nSeat: domain:services#2'), 2);
   t('H38 seat: …backticked too', claimSeatNumber('Claim: x\nSeat: `domain:services#2`'), 2);
-  t('H38 seat: …and behind a bullet or blockquote', claimSeatNumber('> - **Seat**: domain:services#4'), 4);
+  t('H38 seat: …and behind a bullet then a blockquote, bold key', claimSeatNumber('- > **Seat**: domain:services#4'), 4);
+  // ⛔ Blockquote-then-bullet is out, exactly as `claimedBranches` pins for `Branch:` — invisible, so absent, so seat 1.
+  t('H38 seat: a `> - Seat:` line is not read (measured shape, same as `Branch:`)', claimSeatNumber('> - Seat: domain:services#4'), 1);
   t('H38 seat: a `Seat:` line naming no number is unreadable, not seat 1', claimSeatNumber('Claim: x\nSeat: domain:services'), null);
   t('H38 seat: prose mentioning a seat is not a `Seat:` line', claimSeatNumber('the seat: domain:services#2 is busy'), 1);
   const seatRow = (seatLine, iso) => [{ body: `Claim: PM loop round 1\nSession: \`session_x\`\n${seatLine}`, created_at: iso }];
