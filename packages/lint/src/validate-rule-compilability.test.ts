@@ -34,7 +34,7 @@ import { AUTHORING_COMMANDS, AUTHORING_RULES, authoringRulesFor, runAuthoringRul
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 const RUNTIME_VALIDATOR = 'packages/objectql/src/validation/rule-validator.ts';
 
-const MANIFEST = { id: 'rule_compilability_probe', name: 'rule_compilability_probe', version: '1.0.0', type: 'app' } as const;
+const MANIFEST = { id: 'com.example.rule-compilability-probe', name: 'rule_compilability_probe', version: '1.0.0', type: 'app' } as const;
 
 /** Does the schema refuse any KEY in this stack (as opposed to any VALUE)? */
 function unrecognizedKeysIn(stack: unknown): string[] {
