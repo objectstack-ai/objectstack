@@ -1500,13 +1500,14 @@ jobs:
           run_self_test node scripts/pm/git-history.mjs --self-test
           run_self_test node scripts/check-engine-split-ratio.mjs --self-test
           run_self_test bash scripts/collect-release-notes.sh --self-test
+          run_self_test node scripts/pm/check-harness-current.mjs --self-test
           if [ -n "$failed" ]; then
             echo ""
             echo "Shallow-history guard self-tests — the following FAILED:"
             printf "%s" "$failed"
             exit 1
           fi
-          echo "Shallow-history guard self-tests — all three ran and passed"
+          echo "Shallow-history guard self-tests — all four ran and passed"
 
       # Step-collector gate (#10814) — the guard over the two steps above, and
       # over any step that grows their shape later. It has a static half and a
