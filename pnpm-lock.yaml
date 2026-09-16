@@ -1206,9 +1206,6 @@ importers:
       '@objectstack/metadata-fs':
         specifier: workspace:*
         version: link:../metadata-fs
-      '@objectstack/platform-objects':
-        specifier: workspace:*
-        version: link:../platform-objects
       '@objectstack/spec':
         specifier: workspace:*
         version: link:../spec
