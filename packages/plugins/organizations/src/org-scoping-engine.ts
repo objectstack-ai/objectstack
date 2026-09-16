@@ -22,7 +22,7 @@
 import type { ServiceObject } from '@objectstack/spec/data';
 
 export interface OrgScopingEngine {
-  find(object: string, query?: any, options?: any): Promise<any>;
+  find(object: string, query: any, options?: any): Promise<any>;
   update(object: string, data: any, options?: any): Promise<any>;
   /**
    * Optional on purpose. "registry unavailable" is a real, tested, logged no-op
