@@ -1092,7 +1092,7 @@ function selfTest() {
     const answeredTouch = runCliAllowFail(['touch', '--path=charter.md', '--deepen=34'], touch5);
     t('with fetching allowed it deepens and answers the TRUE touch, exit 0',
       answeredTouch.code === 0 && answeredTouch.stdout.trim() === trueTouch, JSON.stringify(answeredTouch));
-    t('while the clone is STILL shallow — the predicate is the parent\'s presence, never the shallow flag',
+    t('while the clone is STILL shallow — the predicate is the COMMIT\'s graft state, never the repo\'s shallow flag',
       isShallow(touch5) === true && /fetch --deepen=34/.test(answeredTouch.stderr) && /proof: 1 parent\(s\) present/.test(answeredTouch.stderr),
       answeredTouch.stderr);
 
