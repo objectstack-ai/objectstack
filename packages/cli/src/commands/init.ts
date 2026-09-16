@@ -594,7 +594,7 @@ import * as objects from './src/objects';
 // top-level stack key under its own name. A helper exported from here is
 // therefore read as a stack key and the build refuses it — keep helpers in a
 // sibling module and import them. Only names the stack schema declares
-// (`onEnable`, `functions`, the collections) belong here as named exports.
+// (onEnable, functions, the collections) belong here as named exports.
 export default defineStack({
   manifest: {
     id: 'com.example.${namespace}',
@@ -688,7 +688,7 @@ import * as objects from './src/objects';
 // top-level stack key under its own name. A helper exported from here is
 // therefore read as a stack key and the build refuses it — keep helpers in a
 // sibling module and import them. Only names the stack schema declares
-// (`onEnable`, `functions`, the collections) belong here as named exports.
+// (onEnable, functions, the collections) belong here as named exports.
 export default defineStack({
   manifest: {
     id: 'com.objectstack.plugin-${name}',
@@ -766,7 +766,7 @@ export default ${toCamelCase(namespace)}Item;
 // top-level stack key under its own name. A helper exported from here is
 // therefore read as a stack key and the build refuses it — keep helpers in a
 // sibling module and import them. Only names the stack schema declares
-// (`onEnable`, `functions`, the collections) belong here as named exports.
+// (onEnable, functions, the collections) belong here as named exports.
 export default defineStack({
   manifest: {
     id: 'com.example.${namespace}',
