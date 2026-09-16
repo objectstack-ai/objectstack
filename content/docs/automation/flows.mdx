@@ -2071,10 +2071,11 @@ export const renewalReminder: Flow = {
           offsetDays: [60, 30, 7], // — or — withinDays: 30 (negative = overdue lookback)
           filter: { status: 'active' }, // optional, ANDed with the date window
         },
-        // Required under a WALLED tenancy posture, and for a stronger reason
-        // than a plain schedule flow — it bounds the sweep's query as well as
-        // its runs. Not required under `single`. See "The acting organization"
-        // below.
+        // Required under `isolated`, and for a stronger reason than a plain
+        // schedule flow — it bounds the sweep's query as well as its runs.
+        // Optional under `group` (an undeclared sweep reads group-wide and each
+        // run acts as its own record's organization) and not read under
+        // `single`. See "The acting organization" below.
         organization: '<sys_organization.id>',
         // schedule: { type: 'cron', expression: '0 8 * * *' } // optional; defaults to daily 08:00 UTC
       },
@@ -2132,10 +2133,9 @@ it: the caller's session rides into the run and every tenant-scoped write below
 resolves the same organization a normal write would. A **time-triggered** flow
 has no such caller — a job tick carries no identity at all.
 
-Under a **walled** tenancy posture (`group` or `isolated`) that is a question
-only the author can answer, so a `schedule` or `timeRelative` flow there
-**declares the organization it runs as**, on the start node's `config`, beside
-the cadence it scopes:
+Under the **`isolated`** tenancy posture that is a question only the author can
+answer, so a `schedule` or `timeRelative` flow there **declares the organization
+it runs as**, on the start node's `config`, beside the cadence it scopes:
 
 ```typescript
 config: {
@@ -2183,7 +2183,33 @@ scheduled-work switch, and neither is visible from a stack. A lint rule that
 fired on the default posture would be wrong more often than right.
 </Callout>
 
-**Under a wall, a time-triggered flow that declares none is a declaration
+<Callout type="info">
+**Under `group` the declaration is optional, and an undeclared flow still
+runs.** `group` is one legal group over one shared database — group-wide
+visibility and cross-organization workflow are inherent to the shape, not
+violations of it — so a group-level batch job is a capability of the posture. An
+undeclared `timeRelative` sweep there **reads group-wide** and stamps each run it
+launches with **that record's own organization**: sweep a contracts table across
+four plants and each plant's contract produces a run acting as that plant, whose
+notifications land in that plant's inboxes.
+
+That is not a new rule so much as one being made consistent: the
+`sys_automation_run` history row was already stamped from the subject record,
+with the acting context only as a fallback. Before this, the history row and the
+inbox rows of the same run could disagree about who owned it.
+
+Declaring on a `group` flow still works and still **narrows**: the declaration
+bounds the sweep's query as well as its identity, exactly as under `isolated`.
+
+⚠️ A **record-less** flow — a plain `schedule` cron with no sweep — has nothing
+to derive an organization from. Under `group` it binds and runs, but its first
+tenant-scoped write is **refused**, by name, with the remedy. Declare
+`organization` on such a flow if it writes notifications, inbox messages or other
+per-organization rows. The bind line says so at boot rather than leaving it to
+surface at the first tick.
+</Callout>
+
+**Under `isolated`, a time-triggered flow that declares none is a declaration
 error**, refused at bind:
 
 - the trigger logs the reason at `error`, naming the flow;
@@ -2193,15 +2219,19 @@ error**, refused at bind:
   `bound: false`;
 - nothing fires it.
 
-There is deliberately **no fallback** — not the platform organization, not "the
-first row of `sys_organization`", and never the swept record's own
-`organization_id`. Behind a wall, a run that reached every tenant-scoped write
-with nothing to offer would have each of those writes refused one layer below
-anything that summarises the run: the tick reports itself healthy and delivers
-nothing. A wrong `organization_id` is worse still, because it is silently
-authoritative to every report, export and cleanup script that filters by
-organization. ⛔ This is unchanged by the posture split above: `single` **omits**
-the organization, it never invents one.
+There is deliberately **no invented fallback** — not the platform organization,
+not "the first row of `sys_organization`", not the group's bootstrap
+organization. Behind a wall, a run that reached every tenant-scoped write with
+nothing to offer would have each of those writes refused one layer below anything
+that summarises the run: the tick reports itself healthy and delivers nothing. A
+wrong `organization_id` is worse still, because it is silently authoritative to
+every report, export and cleanup script that filters by organization.
+
+⛔ The swept record's own `organization_id` is **not** such an invention, and it
+is used under `group` alone — there the row is the only honest owner available
+and the posture's reads already span the group. Under `single` the organization
+is **omitted**, never filled from the row; under `isolated` an undeclared flow
+never binds in the first place.
 
 **No fan-out.** A single flow belongs to one organization. A sweep wanted in
 several organizations is declared once per organization.
@@ -2210,8 +2240,16 @@ several organizations is declared once per organization.
 The start node's `config` is an open record, so a near-miss spelling —
 `organizationId`, `organization_id`, `orgId`, `org_id`, `tenantId` — parses
 happily and is then ignored. The bind-time refusal names the spelling you
-actually wrote — under a wall, which is the only place the key is required and
-therefore the only place a near-miss is a mistake.
+actually wrote — under `isolated`, which is the only posture where the key is
+required and therefore the only place a near-miss is unambiguously a mistake.
+</Callout>
+
+<Callout type="warn">
+Under `group` a near-miss is **not** reported, because an undeclared flow is a
+legal shape there and the trigger cannot tell "meant to declare, misspelled it"
+from "meant not to declare". The symptom to watch for instead is a sweep whose
+runs act per-record when you expected them all to act as one organization —
+check the bind line, which names which of the two shapes the flow bound as.
 </Callout>
 
 ### Update-triggered flow
