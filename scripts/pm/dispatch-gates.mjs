@@ -17,6 +17,13 @@
  *   node scripts/pm/dispatch-gates.mjs --repo <owner>/<name> ...  # refuse unless this checkout IS that repo
  *   node scripts/pm/dispatch-gates.mjs --self-test
  *
+ * A path NAMED on argv that is not in this tree has two readings — a surface of
+ * THIS repo that is not written yet, and a path belonging to ANOTHER repo — and
+ * a repo-relative path cannot tell them apart. Unasserted, that is NOT MEASURED
+ * and the run ends at exit 3 rather than picking the harmless reading: add
+ * `--repo <owner>/<name>` naming THIS checkout to derive as a not-yet-written
+ * path, or name the other repo and be refused with both repos named (exit 2).
+ *
  * ## Run --self-test DETACHED on an agent container (#14281)
  *
  * The battery re-spawns this tool's own CLI as a child process many times —
@@ -14178,6 +14185,71 @@ export function repoAssertionVerdict({ asserted, identity }) {
 }
 
 /**
+ * The declared paths that are not in this tree.
+ *
+ * ONE reading, shared by the banner line that counts them and the refusal that
+ * ends the run over them, so the two can never name different sets — a refusal
+ * listing paths the banner did not count (or the reverse) would put the reader
+ * back where the defect started, guessing which line was about their argv.
+ *
+ * A glob is skipped rather than resolved: it names a PATTERN, not a file, so
+ * `existsSync` on one is false for every glob ever passed and counting them as
+ * absent would refuse every wildcard dispatch on a tree that holds the matches.
+ */
+export function absentDeclaredPaths({ identity, paths = [] }) {
+  return paths.filter((p) => !p.includes('*') && !existsSync(nodePath.join(identity?.root ?? ROOT, p)));
+}
+
+/**
+ * The absent-path refusal: an absent path with no `--repo` is NOT MEASURED.
+ *
+ * The banner alone reported the ambiguity and let the run continue at exit 0.
+ * Measured: `--commands skills/objectui/SKILL.md AGENTS.md` (one sister-repo
+ * path, one local one, no assertion) exited 0, derived THIS repo's families for
+ * the local path and filed the sister-repo path under "apply once this card's
+ * changeset exists" — the reading a dispatcher of a not-yet-written path wants,
+ * and exactly the wrong one for a path that belongs to another repository. A
+ * seat then wrote "it refuses objectui paths by design" into five dispatch
+ * texts on the strength of that exit code.
+ *
+ * So the ambiguity refuses instead of resolving itself toward the harmless
+ * reading. The exit is `EXIT_PREREQUISITE_NOT_MET` — this tool's existing NOT
+ * MEASURED code — and ⛔ never the `2` a usage error and the wrong-repo refusal
+ * carry: a caller that distinguishes them can tell "you asked me something I
+ * cannot answer from here" from "that argv is wrong".
+ *
+ * Both resolving spellings are printed verbatim because the remedy is a copy,
+ * not a deduction: assert THIS repo to get today's derivation back, or name the
+ * repo the paths really belong to and be refused with both repos named.
+ *
+ * ⛔ Not reached when `asserted` is non-null: the wrong-repo refusal above runs
+ * first and keeps its own exit 2 and its own text, so `--repo <other>` with an
+ * absent path answers exactly as it did before this branch existed.
+ */
+export function absentPathVerdict({ asserted = null, identity, paths = [] }) {
+  const missing = absentDeclaredPaths({ identity, paths });
+  if (missing.length === 0 || asserted !== null) return { ok: true, missing: [], lines: [] };
+  const here = identity?.slug ?? null;
+  return {
+    ok: false,
+    missing,
+    lines: [
+      'dispatch-gates: NOT MEASURED — an absent path may be another repo\'s'
+        + ` — assert ${REPO_FLAG} to derive as a not-yet-written path of THIS repo, or name the other repo to be refused.`,
+      `  ${missing.length} of ${paths.length} named path(s) are absent, and no ${REPO_FLAG} says whose tree they are from: ${missing.join(' ')}`,
+      '  Two readings, and nothing in a repo-relative path tells them apart. Pick one — copy a line:',
+      here
+        ? `    ${REPO_FLAG} ${here}   — they are paths of THIS repo that are not written yet; derive as before.`
+        : `    ${REPO_FLAG} owner/this-repo   — UNVERIFIABLE from here: this checkout's '${DEFAULT_BASE_REMOTE}' remote could not be read, so an assertion cannot be checked either.`,
+      `    ${REPO_FLAG} owner/the-other-repo   — they are another repo's; be refused with both repos named, from a checkout of that repo.`,
+      `  (Exit ${EXIT_PREREQUISITE_NOT_MET} = NOT MEASURED, distinct from the 2 a usage error and the wrong-repo refusal carry.`
+        + ' Capture it BEFORE any pipe.)',
+      `  Tree: ${identity?.root ?? 'unknown'}`,
+    ],
+  };
+}
+
+/**
  * The provenance banner — the first thing every derivation prints.
  *
  * The unplaceable-path count is reported in ONE direction only. Paths missing
@@ -14186,6 +14258,10 @@ export function repoAssertionVerdict({ asserted, identity }) {
  * claims neither. There is deliberately no "all paths present" line: that would
  * read as a clearance, and it is precisely the reading the measured failure
  * would have passed — its two paths exist in every repo in the family.
+ *
+ * The banner still only COUNTS. Ending the run over that count is
+ * `absentPathVerdict`'s job, one caller down, so the banner stays printable in
+ * every mode and the refusal stays one decision in one place.
  */
 export function bannerLines({ identity, paths = [], drift = null }) {
   const at = identity?.head ? ` at commit ${identity.head}` : '';
@@ -14197,7 +14273,7 @@ export function bannerLines({ identity, paths = [], drift = null }) {
     `  Families are a property of THAT repo. A card landing in another repo derives nothing here — assert with ${REPO_FLAG} to make this checkable.`,
   ];
   lines.push(...driftLines(drift));
-  const missing = paths.filter((p) => !p.includes('*') && !existsSync(nodePath.join(identity?.root ?? ROOT, p)));
+  const missing = absentDeclaredPaths({ identity, paths });
   if (missing.length > 0) {
     lines.push(
       `  ${missing.length} of ${paths.length} path(s) are absent from this tree: ${missing.slice(0, 6).join(' ')}${missing.length > 6 ? ' …' : ''}`,
@@ -22657,6 +22733,49 @@ function selfTest() {
   const bannerPresent = bannerLines({ identity: { ...hereIdentity, root: ROOT }, paths: ['packages/spec/src/index.ts'] });
   t('all paths present prints NO clearance line — absence and clearance must not share a spelling', !bannerPresent.join('\n').includes('absent from this tree') && bannerPresent.length === 2);
 
+  // ── An absent path with no assertion is NOT MEASURED ──────────────────────
+  //
+  // The banner above COUNTS absent paths and claims nothing; these pin that the
+  // count now ends the run when nothing says whose tree the paths are from. The
+  // pure half here, the three shapes end-to-end on the real CLI further down —
+  // the defect was an EXIT CODE that read as an answer, and only a child
+  // process measures one.
+  const localIdentity = { ...hereIdentity, root: ROOT };
+  const ABSENT = 'packages/this-repo-has-no-such-package/src/index.ts';
+  const PRESENT = 'packages/spec/src/index.ts';
+  t(
+    'the absent set and the banner\'s count are ONE reading, so a refusal can never name a path the banner did not',
+    absentDeclaredPaths({ identity: localIdentity, paths: [PRESENT, ABSENT] }).join() === ABSENT
+      && bannerLines({ identity: localIdentity, paths: [PRESENT, ABSENT] }).join('\n').includes(ABSENT),
+  );
+  t(
+    'a glob is a PATTERN, not an absent file — counting one would refuse every wildcard dispatch',
+    absentDeclaredPaths({ identity: localIdentity, paths: ['packages/*/src/index.ts'] }).length === 0,
+  );
+  const unassertedAbsent = absentPathVerdict({ asserted: null, identity: localIdentity, paths: [PRESENT, ABSENT] });
+  t('⭐ an absent path with no assertion REFUSES — the measured defect answered 0 here', !unassertedAbsent.ok);
+  const unassertedText = unassertedAbsent.lines.join('\n');
+  t('and it names the absent path, never just a count', unassertedText.includes(ABSENT) && unassertedAbsent.missing.join() === ABSENT);
+  t('and it says NOT MEASURED in those words, so the exit code is not the only tell', unassertedText.includes('NOT MEASURED'));
+  t(
+    'and it carries BOTH resolving spellings, so the remedy is a copy rather than a deduction',
+    unassertedText.includes(`${REPO_FLAG} ${hereIdentity.slug}`) && unassertedText.includes(`${REPO_FLAG} owner/the-other-repo`),
+  );
+  t(
+    'CONTROL: all paths present is not a refusal — this guard must not tax an ordinary dispatch',
+    absentPathVerdict({ asserted: null, identity: localIdentity, paths: [PRESENT] }).ok,
+  );
+  t(
+    'CONTROL: an assertion present hands the run to the wrong-repo refusal instead — this branch is unreached',
+    absentPathVerdict({ asserted: 'an-owner/a-repo', identity: localIdentity, paths: [ABSENT] }).ok
+      && absentPathVerdict({ asserted: 'other-owner/other-repo', identity: localIdentity, paths: [ABSENT] }).ok,
+  );
+  t(
+    'with the remote unreadable the refusal says the assertion cannot be CHECKED either, rather than printing a slug it does not have',
+    absentPathVerdict({ asserted: null, identity: { root: ROOT, head: null, remote: null, slug: null }, paths: [ABSENT] })
+      .lines.join('\n').includes('UNVERIFIABLE'),
+  );
+
   // ── Base drift (#11540) ───────────────────────────────────────────────────
   // The banner names the commit an answer came from; on a stale checkout that
   // reads as ordinary provenance. These pin the loudness, and pin that the
@@ -22981,6 +23100,47 @@ function selfTest() {
   t('and pointing the flag at a checkout refuses instead of retargeting', wrongShapeRun.status === 2 && (wrongShapeRun.stdout ?? '').trim() === '');
   const valuelessRun = runCli(['--tier', 'packages/spec/src/index.ts', REPO_FLAG]);
   t('a valueless assertion refuses rather than deriving as though it were absent', valuelessRun.status === 2);
+
+  // ── The three shapes an absent path can arrive in, end to end ─────────────
+  //
+  // Measured on the real CLI and not on the verdict function, because what was
+  // wrong was the process EXIT CODE: a seat read 0 and wrote "it refuses
+  // objectui paths by design" into five dispatch texts. A pure function cannot
+  // hold that, and the derivation the middle case restores is a full tree walk
+  // no fixture stands in for.
+  const ABSENT_CLI = 'packages/this-repo-has-no-such-package/src/index.ts';
+  const absentUnasserted = runCli(['--commands', ABSENT_CLI]);
+  t(
+    `⭐ (a) an absent path with no ${REPO_FLAG} exits ${EXIT_PREREQUISITE_NOT_MET} = NOT MEASURED — it answered 0 before this guard`,
+    absentUnasserted.status === EXIT_PREREQUISITE_NOT_MET,
+  );
+  t('and it names the absent path on stderr, where the dispatcher reads it', (absentUnasserted.stderr ?? '').includes(ABSENT_CLI));
+  t(
+    'and prints NOTHING on stdout — a refusal must not also be pasteable into a dispatch text',
+    (absentUnasserted.stdout ?? '').trim() === '',
+  );
+  const absentAssertedHere = runCli(['--commands', ABSENT_CLI, REPO_FLAG, liveSlug ?? 'an-owner/a-repo']);
+  t(
+    liveSlug
+      ? `⭐ (b) asserting THIS repo restores the derivation — the not-yet-written reading is still reachable, by one flag`
+      : 'with no readable remote even the asserted form refuses, rather than passing unverified',
+    liveSlug
+      ? absentAssertedHere.status === 0 && (absentAssertedHere.stdout ?? '').trim().length > 0
+      : absentAssertedHere.status === 2,
+  );
+  t(
+    'and the restored derivation still files the absent path as a pending changeset, not as a clearance',
+    !liveSlug || (absentAssertedHere.stderr ?? '').includes('apply once this card'),
+  );
+  const absentAssertedOther = runCli(['--commands', ABSENT_CLI, REPO_FLAG, 'not-an-owner/not-a-repo']);
+  t(
+    '⭐ (c) naming ANOTHER repo keeps its own exit 2 and its own text — this guard did not swallow the older refusal',
+    absentAssertedOther.status === 2 && (absentAssertedOther.stderr ?? '').includes('REFUSING — asked for'),
+  );
+  t(
+    `CONTROL: a path that EXISTS still derives at 0 with no ${REPO_FLAG} — the guard fires on absence, not on every unasserted run`,
+    runCli(['--commands', 'packages/spec/src/index.ts']).status === 0,
+  );
   // The published catalog on the real CLI (2026-09-10 ruling): the mandate
   // prints for a catalog file and stays absent for an internal references
   // file — the two acceptance paths, measured end to end rather than on the
@@ -25433,6 +25593,30 @@ if (invokedDirectly) {
         process.exit(2);
       }
       console.error(`  ${REPO_FLAG} '${argv.assertion}' checked against this checkout's '${DEFAULT_BASE_REMOTE}' remote — it holds.`);
+    }
+    // The third branch, at the point where the two facts above meet: paths the
+    // banner just counted as absent, and no assertion to say whose tree they
+    // are from. Reached only when `argv.assertion` is null — a wrong-repo
+    // assertion already ended the run two lines up with its own exit 2, and a
+    // satisfied one has just said so — so this refuses exactly the ambiguous
+    // run and no other.
+    //
+    // Placed BEFORE every mode branch, not inside the derivation: `--tier`
+    // reads no workflow and derives no family, but the assertion refusal above
+    // it already ends a `--tier` run over another repo's slug, so the repo an
+    // answer is about is ALREADY load-bearing there. Exempting `--tier` from
+    // this half would resolve the same ambiguity silently toward the harmless
+    // reading in the one mode a claim comment pastes from.
+    //
+    // ⛔ Only the paths NAMED on argv reach here. A `--changed` derivation
+    // names paths read out of this tree's own diff, which is the one input that
+    // cannot be another repo's, and the banner has never counted them either.
+    if (argvPaths.length > 0) {
+      const absent = absentPathVerdict({ asserted: argv.assertion, identity, paths: declaredPaths });
+      if (!absent.ok) {
+        for (const line of absent.lines) console.error(line);
+        process.exit(EXIT_PREREQUISITE_NOT_MET);
+      }
     }
     console.error('');
     // Read BEFORE the derivation, not inside it. A record that cannot be read
