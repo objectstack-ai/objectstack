@@ -426,6 +426,7 @@
 - `check-half-states.mjs` 连 `--help` 都跑整仓 I/O ⇒ 早读到的输出文件是空的,不是干净的。
 - 后台工具调用里再 `nohup … &` 会让包装器报假 `exit 0`,而真活还在跑。
 - 分支删除被拒有第二形态:代理回 403,与既有 send-pack 断连同处置 ⇒ 不可删,⛔ 不重试。
+- harness 按内容拒写:同会话派发 PR 上 PASS 拒为 `[Self-Approval]`;同通道建卡、ACCEPT 照过。
 
 ## 闭合关键词解析(PR 正文写侧)
 
