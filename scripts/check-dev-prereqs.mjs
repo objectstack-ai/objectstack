@@ -298,11 +298,13 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '15. The hash reads the inputs it claims to. A global build input (from': 3,
   '16. Existence outranks freshness: a workspace that is not built reports': 4,
   '17. The DECLARATIONS stamp (#14985), whose only job is to be written by a': 9,
+  '18. --stamp vouches for an ARTIFACT, not for a directory (#16529). The': 8,
+  "19. The ORDER the stamp's soundness rests on is now mechanical (#16529).": 8,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 17;
+const SELF_TEST_BATTERY_FLOOR = 19;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -322,8 +324,51 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
  */
 const AMPLIFIERS = ['packages/spec'];
 
-/** What an amplifier's build script must contain for its stamp to be maintained. */
+/** What an amplifier's build script must END WITH for its stamp to be maintained. */
 const STAMP_INVOCATION = 'check-dev-prereqs.mjs --stamp';
+
+/**
+ * Is `--stamp` reachable ONLY from a build that got all the way to the end?
+ *
+ * This predicate mechanises a sentence the whole scheme rests on, written in
+ * `inspectBuildStamp`'s docblock in scripts/build-input-hash.mjs:
+ *
+ *   "What makes the vouching sound is the build script's ORDER, not the flag:
+ *    `packages/spec`'s `build` runs the unconditional `tsup` (the JS pass)
+ *    before `--stamp` in the same `&&` chain, so this file is never written by
+ *    a run that did not emit bundles."
+ *
+ * That sentence was true of the one amplifier's spelling and enforced by
+ * NOTHING: the coverage check below was `buildScript.includes(...)`, a substring
+ * test that three lying spellings satisfy —
+ *
+ *   `tsup ; node …--stamp`   stamps after a tsup that FAILED;
+ *   `tsup || node …--stamp`  stamps ONLY when tsup failed;
+ *   `node …--stamp && tsup`  stamps BEFORE anything is emitted.
+ *
+ * Its own failure text already claimed "no longer ends with", so this is the
+ * declared-equals-enforced repair of a message that promised more than the code
+ * checked. It is also what makes GROWING `AMPLIFIERS` safe: every new entry is
+ * another hand-written build script that has to be spelled in the one order that
+ * makes its stamp true, and a convention does not survive being copied 60 times.
+ *
+ * Returns `null` when the spelling is sound, else the reason it is not.
+ */
+function stampStepOrderProblem(buildScript) {
+  const script = buildScript.trimEnd().replace(/;+$/, '').trimEnd();
+  if (!script.endsWith(STAMP_INVOCATION)) {
+    return script.includes(STAMP_INVOCATION)
+      ? `'${STAMP_INVOCATION}' is not its LAST step — a stamp written mid-chain vouches for output the steps after it have not emitted yet`
+      : `'${STAMP_INVOCATION}' does not appear in it at all`;
+  }
+  // The separator that introduces the stamp step, read off the text before it.
+  const head = script.slice(0, script.length - STAMP_INVOCATION.length);
+  let separator = null;
+  for (const m of head.matchAll(/\|\||&&|;|\|/g)) separator = m[0];
+  if (separator === null) return `nothing runs before it — a build whose only step is the stamp has emitted nothing to vouch for`;
+  if (separator !== '&&') return `the step before it is joined by '${separator}', not '&&' — so the stamp is written even when that step failed`;
+  return null;
+}
 
 /**
  * Workspace member directories, from pnpm-workspace.yaml — the workspace's own
@@ -390,11 +435,15 @@ function inspectFreshness(root, amplifiers, memberDirs) {
       throw new CoverageError(`${relDir}/package.json is not readable as JSON (${err.message}) — cannot judge the freshness of its dist.`);
     }
     const buildScript = typeof pkg.scripts?.build === 'string' ? pkg.scripts.build : '';
-    if (!buildScript.includes(STAMP_INVOCATION)) {
+    const orderProblem = stampStepOrderProblem(buildScript);
+    if (orderProblem !== null) {
       throw new CoverageError(
-        `${relDir} is a declared amplifier but its build script no longer ends with '${STAMP_INVOCATION}'.\n` +
-          `  Nothing would write ${relDir}/dist/${STAMP_BASENAME}, so this check would pass on any dist,\n` +
-          `  however old. Restore the stamp step, or drop ${relDir} from AMPLIFIERS on purpose.`,
+        `${relDir} is a declared amplifier but its build script does not end with '${STAMP_INVOCATION}':\n` +
+          `  ${orderProblem}.\n` +
+          `  ${relDir}/dist/${STAMP_BASENAME} is only evidence because the steps that EMIT the dist run\n` +
+          `  before it in the same '&&' chain — a stamp reached any other way vouches for a dist this\n` +
+          `  build did not produce, and this check would then pass on any dist, however old.\n` +
+          `  Restore the stamp as the last '&&'-joined step, or drop ${relDir} from AMPLIFIERS on purpose.`,
       );
     }
 
@@ -538,6 +587,41 @@ function stamp(root, cwd, amplifiers = AMPLIFIERS) {
     console.error(`\n✗ ${relDir}/dist does not exist, so there is no build to stamp. --stamp runs as the LAST step of the build, not before it.\n`);
     return 1;
   }
+
+  // "There is no build to stamp" is what the refusal above SAYS. What it used
+  // to check is that a DIRECTORY exists — and an empty `dist/` satisfies that,
+  // measured: `--stamp` into an empty directory exited 0 and wrote both stamps,
+  // which then read FRESH to every consumer over a dist holding nothing at all.
+  // So the same criterion the EXISTENCE half applies to all 68 packages is
+  // applied here to the one package about to make a freshness claim: the entry
+  // point this package's OWN manifest promises has to be on disk. Same shape as
+  // scripts/check-dts-emitted.mjs one artifact over — a build does not get to
+  // report success, or to stamp, over output it did not emit.
+  //
+  // ⛔ NOT an mtime comparison, and deliberately not a "did the bytes change"
+  // one either: an idempotent rebuild legitimately emits byte-identical output,
+  // so refusing on unchanged bytes would red the build this gate exists to ask
+  // for. Presence of the declared artifact is the observation available here.
+  let pkg;
+  try {
+    pkg = JSON.parse(readFileSync(path.join(dir, 'package.json'), 'utf-8'));
+  } catch (err) {
+    console.error(`\n✗ ${relDir}/package.json is not readable (${err.message}), so nothing here can say which artifact a stamp would vouch for.\n`);
+    return 1;
+  }
+  const entry = declaredEntry(pkg);
+  const entryPath = entry.replace(/^\.\//, '');
+  if (isBuildArtifact(entry) && !existsSync(path.join(dir, entryPath))) {
+    console.error(
+      `\n✗ ${relDir}/${entryPath} is not on disk, so this run emitted nothing for a stamp to vouch for.\n\n` +
+        `  --stamp records "this dist was built from these sources". A dist without the entry point\n` +
+        `  ${relDir}'s own manifest declares is not a build, and ${STAMP_BASENAME} written over it\n` +
+        `  reads FRESH to every consumer of it.\n\n` +
+        `  Fix:\n\n      pnpm --filter ${pkg.name || relDir} build\n`,
+    );
+    return 1;
+  }
+
   const hash = buildInputHash(root, dir);
   writeFileSync(path.join(dist, STAMP_BASENAME), `${hash}\n`);
   console.log(`✓ ${relDir}/dist/${STAMP_BASENAME} ← ${hash.slice(0, 16)}…`);
@@ -637,6 +721,15 @@ function selfTest() {
       return 'nothing';
     } catch (err) {
       return err instanceof CoverageError ? 'CoverageError' : 'other';
+    }
+  };
+  /** The refusal's own TEXT, for cases that pin what a developer is told to fix. */
+  const threwCoverageMessage = (fn) => {
+    try {
+      fn();
+      return '(nothing was thrown)';
+    } catch (err) {
+      return err instanceof CoverageError ? err.message : `(not a CoverageError: ${err.message})`;
     }
   };
 
@@ -870,6 +963,57 @@ function selfTest() {
     expect('dts/absent-computes-nothing', inspectDeclarationStamp(noDts, noDtsSpec).actual, null);
     write(noDts, 'packages/spec/dist/' + DTS_STAMP_BASENAME, 'not-a-hash\n');
     expect('dts/garbled-is-unstamped', inspectDeclarationStamp(noDts, noDtsSpec).state, 'unstamped');
+
+    // 18. --stamp vouches for an ARTIFACT, not for a directory (#16529). The
+    //     refusal above it has always SAID "there is no build to stamp" while
+    //     checking that `dist/` exists — and an empty directory passes that,
+    //     measured on the real tree: exit 0, both stamps written, every consumer
+    //     reading FRESH over a dist holding nothing. Both legs, because a red
+    //     that is never seen green is a gate nobody can trust and vice versa.
+    battery('18. --stamp vouches for an ARTIFACT, not for a directory (#16529). The');
+    const emptyDist = amplifierFixture('empty-dist');
+    const emptyDistSpec = path.join(emptyDist, 'packages/spec');
+    rmSync(path.join(emptyDistSpec, 'dist/index.js'), { force: true });
+    const emptyRed = capture(() => stamp(emptyDist, emptyDistSpec, ['packages/spec']));
+    expect('emit/empty-dist-refuses', emptyRed.code, 1);
+    expect('emit/empty-dist-names-the-artifact', emptyRed.text.includes('packages/spec/dist/index.js'), true);
+    expect('emit/empty-dist-one-fix', (emptyRed.text.match(/ build\n/g) || []).length, 1);
+    // The load-bearing half of the red leg: it refused BEFORE writing anything.
+    // A refusal that still leaves the stamp behind is not a refusal at all.
+    expect('emit/empty-dist-wrote-no-stamp', existsSync(path.join(emptyDistSpec, 'dist', STAMP_BASENAME)), false);
+    expect('emit/empty-dist-wrote-no-dts-stamp', existsSync(path.join(emptyDistSpec, 'dist', DTS_STAMP_BASENAME)), false);
+    // …and it is a DIFFERENT refusal from "no dist at all", which keeps its own
+    // wording — one precondition, one fix, and the developer reads which.
+    expect('emit/distinct-from-absent-dist', emptyRed.text.includes('does not exist, so there is no build to stamp'), false);
+    // GREEN LEG: put the emitted artifact back and the same call stamps.
+    write(emptyDist, 'packages/spec/dist/index.js', 'module.exports = {};');
+    expect('emit/emitted-dist-stamps', capture(() => stamp(emptyDist, emptyDistSpec, ['packages/spec'])).code, 0);
+    expect('emit/emitted-dist-is-fresh', inspect(emptyDist, ['packages/spec']).freshness[0]?.state, 'fresh');
+
+    // 19. The ORDER the stamp's soundness rests on is now mechanical (#16529).
+    //     `inspectBuildStamp`'s docblock says the vouching is sound because the
+    //     emitting step runs before `--stamp` in the same `&&` chain. That was
+    //     a property of one hand-written string, checked by `includes()`. Every
+    //     spelling below satisfies a substring test and lies.
+    battery('19. The ORDER the stamp\'s soundness rests on is now mechanical (#16529).');
+    const ordered = (name, build) => threwCoverage(() => inspect(amplifierFixture(name, { build }), ['packages/spec']));
+    expect('order/semicolon-stamps-after-failure', ordered('ord-semi', `tsup ; node ../../scripts/${STAMP_INVOCATION}`), 'CoverageError');
+    expect('order/or-stamps-only-on-failure', ordered('ord-or', `tsup || node ../../scripts/${STAMP_INVOCATION}`), 'CoverageError');
+    expect('order/pipe-is-not-a-chain', ordered('ord-pipe', `tsup | node ../../scripts/${STAMP_INVOCATION}`), 'CoverageError');
+    expect('order/stamp-before-the-emit', ordered('ord-first', `node ../../scripts/${STAMP_INVOCATION} && tsup`), 'CoverageError');
+    expect('order/stamp-is-the-whole-build', ordered('ord-only', `node ../../scripts/${STAMP_INVOCATION}`), 'CoverageError');
+    // The green leg, and the reason none of the above is vacuous: the shape the
+    // one real amplifier uses — a multi-step `&&` chain ending in the stamp,
+    // with a shell `if … ; fi` step in the middle whose internal `;` must NOT
+    // be mistaken for the separator that introduces the stamp step.
+    expect(
+      'order/real-shape-passes',
+      stampStepOrderProblem(`pnpm gen:schema && tsup && if [ -z "$OS_SKIP_DTS" ]; then BUILD_DTS=true tsup; fi && node ../../scripts/${STAMP_INVOCATION}`),
+      null,
+    );
+    expect('order/trailing-semicolon-is-not-a-separator', stampStepOrderProblem(`tsup && node ../../scripts/${STAMP_INVOCATION};`), null);
+    // The refusal has to say which spelling it found, or the fix is a guess.
+    expect('order/names-the-separator', threwCoverageMessage(() => inspect(amplifierFixture('ord-msg', { build: `tsup ; node ../../scripts/${STAMP_INVOCATION}` }), ['packages/spec'])).includes("joined by ';'"), true);
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }
@@ -932,7 +1076,13 @@ function selfTest() {
     console.error('');
     return 1;
   }
-  console.log('✓ check:dev-prereqs --self-test — every verdict reachable, exclusions and freshness coverage pinned (17 cases), plus the shared workspace enumerator.');
+  // Derived, not typed: this line read "(17 cases)" as a literal while the
+  // roster it describes had grown past it, which is the same "the text promises
+  // what the code does not check" shape this change repairs one function over.
+  console.log(
+    `✓ check:dev-prereqs --self-test — every verdict reachable, exclusions and freshness coverage pinned ` +
+      `(${batterySeen.size} batteries, ${[...batterySeen.values()].reduce((a, b) => a + b, 0)} cases), plus the shared workspace enumerator.`,
+  );
   selfTestReachedVerdict = true;
   return 0;
 }
