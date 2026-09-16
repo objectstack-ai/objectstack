@@ -15524,6 +15524,375 @@ export function h65TierlessRoundArtefactRow(hit, comment, total = 1) {
 }
 
 // ---------------------------------------------------------------------------
+// H66 — an unassigned `pm:queue` card whose NEWEST comment is a RELEASE whose
+// remainder no dispatch can execute (#18299, report-only).
+//
+// ## The clause this row enforces
+//
+// `pm:queue` is DEFINED by the state model, not described by it —
+// 「`pm:queue` = 有具名落点或复现的具体缺陷,或范围明确的工具/门禁修复,无可问之事。」
+// (`.claude/skills/pm-dispatch/SKILL.md`, quoted whole in `QUEUE_STATE_RULE`).
+// The release act is defined in the same file, and `RELEASE_ACT_RULE` quotes it whole; a
+// seat may lawfully release a card it has only PARTLY landed, back into that
+// pool, for the next seat to pick up.
+//
+// The two clauses meet on one shape the label cannot express: a seat lands part
+// of a card and lets it go, but what REMAINS is not work — it is a maintainer
+// ruling, a reading only the reporter can take, a confirmation owed by another
+// seat. The card then wears `pm:queue` with no assignee, which the selection
+// order reads as 「ready to hand to a dev」, and the card is the opposite of
+// dispatchable. Measured by the filer over one lane's 全序: the FOUR OLDEST p2
+// cards in objectui's `domain:ui` queue were all in this state at once — i.e.
+// precisely the cards an execution seat reaches for first under 「最老优先」.
+//
+// ⚠️ The remedy is NOT a relabel, and this row does not propose one. Whether
+// these cards belong in `needs-user-decision`, in `pm:awaiting-maintainer` or in
+// a state that does not exist yet is a maintainer question the filing card
+// explicitly leaves open (「the state question … is a separate decision」). So
+// this row is a LISTING: it turns 「read every queued candidate's whole thread」
+// into 「read the candidates whose newest word is a release」, and the reading
+// itself stays a human's.
+//
+// ## A1 — the `Release:` line's 去向, MEASURED and FALSIFIED as the live leg
+//
+// The obvious discriminator is machine-readable and canonical: the release line
+// carries (会话/因/去向), so a 去向 naming anything but the queue, on a card still
+// wearing `pm:queue`, is the label and the record disagreeing with no prose
+// matching at all. It was measured before it was built, on 2026-09-16, over both
+// boards the filing card names — the filer's own four specimens and the 25 most
+// recently updated open unassigned `pm:queue` cards on this board:
+//
+//   corpus                                                  threads  `Release:` lines
+//   objectui#7696 #8167 #8826 #8938 (the filer's four)             4   0
+//   objectstack-ai/objectstack, 25 newest queued cards            25   0
+//
+// ZERO of 29. ⭐ The LIT CONTROL for that zero is the prose leg below, read by
+// the same fetch over the same 29 threads: it answers THREE on the same four
+// specimens. So the zero is a property of the board, not of a broken reader or
+// an unread corpus — the canonical line is simply not being written yet.
+//
+// ⛔ The leg stays anyway, FIRST, and the reason is not symmetry. H47 exists to
+// report exactly that absence, and as it is answered the canonical line starts
+// appearing; on the day it does, it is the only reading here that can tell a
+// return-to-queue from an exit, because 「back to `pm:queue`」 and 「to the
+// maintainer」 are written in the SAME announcement heading otherwise. It costs
+// one regex the file already owns (`RELEASE_COMMENT_MARKER`, H47's).
+//
+// ## A2 — what IS written, and it is a HEADING
+//
+// Three spellings, each frozen beside the live comment it was measured on
+// (`H66_RELEASE_ANNOUNCEMENT_ANCHORS`). All three were measured as ATX HEADINGS,
+// and the scan is heading-anchored for H58's reason, which this row inherits
+// whole rather than re-deriving: a marker quoted in prose, a table cell, a code
+// span, a blockquote or a fence is a card TALKING ABOUT the shape rather than
+// declaring it — and the filing card #18299, this row's own report comment, and
+// this very docblock all quote the spellings. None of them may fire.
+//
+// ⛔ No fuzzy matching and no regex over free prose: each anchor is two literal
+// tokens with a bounded gap, matched on the undecorated heading text.
+//
+// ## Where the 去向 is read, and why it is the whole line
+//
+// On the `Release:` LINE itself, whole — ⛔ not a positional third field. With
+// zero measured instances there is no field layout to pin, and a positional
+// parse would be pinned against imagination. A line that names `pm:queue`
+// anywhere is a return to the pool and stands the row down; a line that does not
+// is listed, naming whichever destination out of `H66_NON_QUEUE_DESTINATIONS` it
+// could read, or saying it could read none. ⚠️ The unreadable case LISTS rather
+// than clears, which is the #4690 direction for a listing: an exit record nobody
+// can parse, on a card the queue view calls ready, is exactly what a human
+// should look at.
+//
+// ⛔ `pm:queue` is NOT read over the whole comment body, and that is measured
+// rather than stylistic: the two release comments on objectui#8167 and #8938
+// BOTH say 「`pm:dispatched` stripped, `pm:queue` added」 in their state-write
+// paragraph, so a body-wide read would clear precisely the specimens this row
+// exists to list.
+//
+// ## Recency — the NEWEST comment, which is also clause (d)
+//
+// `latestSeatMarker`, H32's and H38's reader, reused rather than re-spelled: the
+// newest comment on the thread, by `created_at` with a THREAD-ORDER fallback so
+// an unparseable stamp cannot promote an older comment to 「latest」. That single
+// choice IS the filing card's 「without a later comment returning it to
+// dispatchable」 clause, structurally: any later comment — a `Claim:`, a ruling,
+// a state repair, a re-triage — is then the newest, and no release heading is
+// there to match. Measured: all four specimens carry such a later comment TODAY
+// (7696 a state repair to `pm:awaiting-maintainer`, 8167 and 8826 a fresh
+// `Claim:`, 8938 an ACCEPT before it closed), and all four are correctly silent.
+//
+// ## Disjointness (A3) — and the ONE overlap, stated rather than hidden
+//
+//   H8   requires `pm:dispatched`; this population is `pm:queue` WITHOUT it.
+//        Disjoint by label, in every input.
+//   H47  leg (a) requires an ASSIGNEE; this population has none. Leg (b) is the
+//        INVERSE of this row: it fires when a `Claim:` is the newest ownership
+//        record and NO `Release:` answers it, i.e. exactly when the release was
+//        never written. This row's release-line leg fires only when one WAS —
+//        `releaseAnswersClaim` is then true and H47 leg (b) returns null.
+//   H49  requires `pm:dispatched` and an assignee. Disjoint.
+//   H58  reads the CARD's own declaration of its deliverable, in a heading, in
+//        the body or anywhere on the thread. This row reads the RELEASE RECORD,
+//        on the newest comment only. A card may wear both carriers and fire
+//        both: two readings, never one restated (H54/H58's own posture).
+//
+// ⚠️ The overlap, and it is real: on the PROSE leg, a card whose release was
+// announced in a heading and never written as a `Release:` line fires H47 leg
+// (b) TOO — which is correct and is a different defect (the record is missing
+// its canonical line) from this one (the card is in the dispatch pool with a
+// remainder nobody can dispatch). Three of the four specimens are in exactly
+// that shape. When the canonical line is written, H47 goes quiet and this row
+// becomes the only reader of the pair.
+//
+// ## Population and cost
+//
+// The `pm:queue` label page the sweep's loop already consumes, minus every card
+// another row already contradicts: a second member of `PM_EXCLUSIVE_STATE_LABELS`
+// beside `pm:queue` is H3's, H25's or H29's pair and a card the board still reads
+// as somewhere else has not exited anything here (H47 leg (b)'s refusal, taken
+// for its reason and against the same vocabulary rather than a second list). An
+// ASSIGNED card is H24's row and is out.
+//
+// ⛔ It buys NOTHING: one `commentCache.get` per card, never a fetch, so a card
+// whose thread nobody else bought is UNJUDGED rather than clean — and on this
+// population that is the THIN half by construction, because H2 buys a thread
+// only for an ASSIGNED card. The coverage pair on the summary line is what makes
+// that legible; without it a corpus of two cards and a clean queue render the
+// same way.
+// ---------------------------------------------------------------------------
+
+/**
+ * The `pm:queue` state's own definition, quoted from
+ * `.claude/skills/pm-dispatch/SKILL.md` VERBATIM and kept UNBROKEN on one line
+ * so it stays greppable against its source — `RELEASE_ACT_RULE`'s discipline,
+ * applied to the clause this row enforces.
+ *
+ * ⛔ Do not paraphrase it and do not coin a shorthand: the brackets in a row's
+ * sentence promise these are the protocol's OWN words. `selfTest` keeps its own
+ * transcription (`QUEUE_RULE_LINE`) so the pin compares two copies rather than
+ * reading the value it pins.
+ */
+const QUEUE_STATE_RULE =
+  '`pm:queue` = 有具名落点或复现的具体缺陷,或范围明确的工具/门禁修复,无可问之事。';
+
+/**
+ * The release-announcement spellings, each frozen beside the LIVE comment it was
+ * measured on so a reader can check the anchor against the thread that wrote it.
+ *
+ * ⛔ Never extend this list from imagination — `H58_RULING_MARKER_ANCHORS`'s
+ * rule, for its reason. Extend it when a new spelling is measured AS A HEADING
+ * on a live comment, and record where. Each regex matches the distinctive PAIR
+ * of literal tokens rather than a whole line, so the three measured variants
+ * (「Card RELEASED, ⛔ not closed」, 「the card is RELEASED, ⛔ not closed」,
+ * 「Card RELEASED for (c), ⛔ not closed」) are one anchor and not three.
+ *
+ * ⚠️ `RELEASED` is matched CASE-SENSITIVELY, in the uppercase the three measured
+ * headings write. That is the anchor, not a style preference: the same card's
+ * later prose says 「released rather than closed」 in lowercase, about the same
+ * event, and it is not a declaration.
+ *
+ * ⚠️ The third anchor's provenance is DIFFERENT from the first two and is
+ * recorded as such: it is named by the filing card's own criterion and was NOT
+ * measured on a live comment by this row's author. It is carried because the
+ * card names it; it is labelled so nobody later reads it as a measurement.
+ */
+export const H66_RELEASE_ANNOUNCEMENT_ANCHORS = Object.freeze([
+  Object.freeze({
+    heading: /\bRELEASED\b[^\n]{0,40}⛔\s*not closed/u,
+    spelling: 'Card RELEASED, ⛔ not closed',
+    instance: 'objectui#7696 `5664140343` · #8167 `5663517223` · #8938 `5668851500` (3 live comments)',
+    measured: true,
+  }),
+  Object.freeze({
+    heading: /⛔\s*not a dispatchable step/iu,
+    spelling: '⛔ not a dispatchable step',
+    instance: 'objectui#7696 (the releasing seat\'s own heading)',
+    measured: true,
+  }),
+  Object.freeze({
+    heading: /\bremainder is a ruling\b/iu,
+    spelling: 'remainder is a ruling',
+    instance: 'objectstack#18299 (the filing card\'s criterion — ⛔ NOT measured on a live comment)',
+    measured: false,
+  }),
+]);
+
+/**
+ * The ceiling on that frozen set — `H58_MARKER_ANCHOR_CAP`'s mechanism, for its
+ * reason: a cap on the ANCHOR SET (this row buys no requests) is what keeps
+ * 「measured, then frozen」 from drifting into 「whatever seemed plausible」. A
+ * sixth entry is an argument about whether the set is still a set of readings,
+ * not a one-line edit.
+ */
+export const H66_RELEASE_ANCHOR_CAP = 5;
+
+/**
+ * The destinations a `Release:` line's 去向 may name that are NOT the dispatch
+ * pool — a CLOSED vocabulary, so the row's sentence can say WHO the card went
+ * to instead of merely saying it did not say `pm:queue`.
+ *
+ * ⛔ Not a judgement about which of them is right: the filing card leaves the
+ * state question open, and this list only reads what a line already says.
+ */
+export const H66_NON_QUEUE_DESTINATIONS = Object.freeze([
+  Object.freeze({ re: /\bneeds-user-decision\b/iu, name: '`needs-user-decision`' }),
+  Object.freeze({ re: /\bpm:awaiting-maintainer\b/iu, name: '`pm:awaiting-maintainer`' }),
+  Object.freeze({ re: /维护者|\bmaintainer\b/iu, name: 'the maintainer' }),
+  Object.freeze({ re: /总监|\bdirector\b/iu, name: 'the director seat' }),
+  Object.freeze({ re: /报告人|\breporter\b|\bfiler\b/iu, name: 'the reporter' }),
+]);
+
+/**
+ * Every release-announcement anchor this text carries AS A HEADING, in the order
+ * written, deduped by anchor so a comment repeating a spelling names it once.
+ *
+ * Fenced code is blanked first through `stripMarkdownCode`'s `{ inline: false }`
+ * reading — H17's and H58's fence parser, shared rather than re-derived — so a
+ * marker inside a fence contributes nothing, while an inline code span on the
+ * heading itself survives to be undecorated by `undecorateProseLine`.
+ *
+ * Exported for the self-test: the anchor set and the heading anchoring are the
+ * whole design of this leg, and a spelling that silently stopped matching would
+ * cost every row without costing a case.
+ *
+ * @param {string} text
+ * @returns {{ spelling: string, instance: string, heading: string }[]}
+ */
+export function releaseAnnouncementHeadings(text) {
+  const out = [];
+  const claimed = new Set();
+  for (const raw of stripMarkdownCode(text, { inline: false }).split(/\r?\n/)) {
+    const m = H58_HEADING_LINE.exec(raw);
+    if (!m) continue;
+    const written = undecorateProseLine(m[2]).trim();
+    for (const anchor of H66_RELEASE_ANNOUNCEMENT_ANCHORS) {
+      if (claimed.has(anchor.spelling)) continue;
+      if (!anchor.heading.test(written)) continue;
+      claimed.add(anchor.spelling);
+      out.push({
+        spelling: anchor.spelling,
+        instance: anchor.instance,
+        measured: anchor.measured,
+        heading: `${m[1]} ${written}`,
+      });
+    }
+  }
+  return out;
+}
+
+/**
+ * What ONE comment says about the card's release, three-valued.
+ *
+ * `null`      — this comment is not a release record at all.
+ * `dispatchable: true`  — the canonical line names `pm:queue`: a normal return
+ *               to the pool, which is the whole point of the release act and is
+ *               ⛔ never a finding.
+ * `dispatchable: false` — a release whose destination is not the pool, or a
+ *               release announced in prose with no canonical line to read.
+ *
+ * The canonical leg WINS over the announcement leg where both are present: a
+ * comment that says 「back to `pm:queue`」 in the protocol's own words has
+ * answered the question, whatever its heading is shaped like.
+ *
+ * @param {string} body — ONE comment body.
+ */
+export function h66ReleaseVerdict(body) {
+  const text = String(body ?? '');
+  const line = RELEASE_COMMENT_MARKER.test(text)
+    ? (text.split(/\r?\n/).find((l) => RELEASE_COMMENT_MARKER.test(l)) ?? null)
+    : null;
+  if (line !== null) {
+    const bare = undecorateProseLine(line).trim();
+    if (/\bpm:queue\b/u.test(bare)) {
+      return { leg: 'release-line', line: bare, destination: '`pm:queue`', dispatchable: true };
+    }
+    const named = H66_NON_QUEUE_DESTINATIONS.find((d) => d.re.test(bare)) ?? null;
+    return {
+      leg: 'release-line',
+      line: bare,
+      destination: named ? named.name : null,
+      dispatchable: false,
+    };
+  }
+  const headings = releaseAnnouncementHeadings(text);
+  if (headings.length === 0) return null;
+  return { leg: 'announcement', headings, destination: null, dispatchable: false };
+}
+
+/**
+ * Which cards this row can speak about AT ALL — exported for the reason every
+ * counting policy here is: the predicate that decides what is even counted is
+ * where a silent hole would live, and the summary's pair is `judged of these`.
+ *
+ * ⛔ ISSUES only (the dispatch pool is cards), ⛔ closed cards out (`pm:queue` on
+ * one is residue the closed census already counts), ⛔ an unreadable `labels` out
+ * rather than read as unlabelled (#4690 on the one field that decides
+ * membership), ⛔ an ASSIGNED card out (that is H24's row), and ⛔ a card carrying
+ * a SECOND member of `PM_EXCLUSIVE_STATE_LABELS` out — that pair is H3's, H25's
+ * or H29's contradiction, and a card the board still reads as somewhere else has
+ * not exited anything here.
+ */
+export function h66SpeaksAbout(issue) {
+  if (issue?.pull_request) return false;
+  if (issue?.state === 'closed') return false;
+  if (!Array.isArray(issue?.labels)) return false;
+  const labels = labelNames(issue);
+  if (!labels.includes('pm:queue')) return false;
+  if (PM_EXCLUSIVE_STATE_LABELS.some((l) => l !== 'pm:queue' && labels.includes(l))) return false;
+  return (
+    (issue?.assignees ?? []).map((a) => (typeof a === 'string' ? a : a?.login)).filter(Boolean)
+      .length === 0
+  );
+}
+
+/**
+ * H66 — null when clean OR unjudged, else the finding sentence.
+ *
+ * Three input states for the thread, never two (#4690), the H4 contract
+ * verbatim: `undefined` never consulted, `null` consulted and unreadable — both
+ * UNJUDGED, kept apart from clean by the coverage pair on the summary line — and
+ * rows, judged.
+ *
+ * @param {object} issue — a card from a listing this sweep already holds.
+ * @param {{ body?: string, created_at?: string }[]|null|undefined} commentRows —
+ *   REST rows rather than bodies: this row resolves the NEWEST comment and needs
+ *   its stamp.
+ */
+export function h66ReleasedNonDispatchableRemainder(issue, commentRows) {
+  if (commentRows === undefined || commentRows === null) return null;
+  if (!h66SpeaksAbout(issue)) return null;
+  const newest = latestSeatMarker(Array.isArray(commentRows) ? commentRows : []);
+  if (!newest) return null;
+  const verdict = h66ReleaseVerdict(newest.body);
+  if (!verdict || verdict.dispatchable) return null;
+  const what =
+    verdict.leg === 'release-line'
+      ? `its \`Release:\` line — 「${verdict.line}」 — names ` +
+        `${verdict.destination ? `${verdict.destination}, ⛔ not the dispatch pool` : 'NO destination this row can read, so it cannot say the card came back to the pool'}`
+      : `it is a release ANNOUNCED IN A HEADING with no canonical \`Release:\` line to read — ` +
+        `${verdict.headings.map((h) => `「${h.heading}」`).join('; ')} ` +
+        `(anchor(s): ${verdict.headings.map((h) => `「${h.spelling}」, ${h.measured === false ? 'from' : 'measured on'} ${h.instance}`).join('; ')})`;
+  return (
+    '`pm:queue` with NO assignee while the card\'s NEWEST comment is a RELEASE — ' +
+    `${what}. The label is a definition, not a habit — 「${QUEUE_STATE_RULE}」 — so the queue view ` +
+    'and 「最老优先」 both read this card as ready to hand to a dev, and a release can lawfully ' +
+    'leave behind a remainder that is NOT work: a maintainer ruling, a reading only the reporter ' +
+    'can take, a confirmation owed by another seat. The act itself is 「' + RELEASE_ACT_RULE + '」, ' +
+    'and its 去向 is the only field that can tell those apart. Measured at filing: the FOUR OLDEST ' +
+    'p2 cards in one lane\'s queue were all in this state at once — the cards a seat reaches for ' +
+    'FIRST. ⛔ This row does NOT say the remainder is undispatchable, and it does NOT propose a ' +
+    'state: whether these cards belong in `needs-user-decision`, `pm:awaiting-maintainer` or a ' +
+    'spelling that does not exist yet is an open maintainer question (#18299), and a sweeper ' +
+    'guessing at it would write the very half-state it reports. Remedy: judge by hand — this is a ' +
+    'listing. Read the newest comment; if the remainder IS dispatchable, nothing is owed and the ' +
+    'next comment on the card stands this row down by construction. ⚠️ LOWER BOUND: this row ' +
+    'fetches NOTHING, so a card whose thread no other row bought is UNJUDGED rather than clean, ' +
+    'and on an unassigned population that is most of it. Report-only patrol INPUT: nothing here ' +
+    'is blocked, ⛔ no label is written and ⛔ nothing is relabelled.'
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Report rendering — pure over (findings, counts), so `--self-test` pins both
 // media offline. The live sweep below picks a renderer and prints it; nothing
 // about WHAT is swept or WHICH predicates fire depends on the format.
@@ -15895,6 +16264,16 @@ export const SWEEP_COUNT_KEYS = [
   'roundTierComments',
   'roundTierArtefacts',
   'roundTierRows',
+  // H66's coverage triple (#18299). `queueReleaseCandidates` is how many open
+  // unassigned `pm:queue` cards the row could speak about at all
+  // (`h66SpeaksAbout`) and `queueReleaseThreadRead` how many of those had a
+  // comment thread ALREADY in hand — this row buys none, and on an UNASSIGNED
+  // population that gap is most of it, because H2 buys a thread only for an
+  // assigned card. `queueReleaseRows` is what was FILED, so a run that judged
+  // nothing and a queue with nothing to judge stay distinguishable.
+  'queueReleaseCandidates',
+  'queueReleaseThreadRead',
+  'queueReleaseRows',
   'refBeyond',
 ];
 
@@ -16406,6 +16785,21 @@ export function summaryLine(counts, findingCount) {
     'cache itself, so no other row\'s corpus moves here. An artefact OLDER than that page is outside ' +
     'this row by construction and a post whose page could not be read is UNJUDGED rather than clean, ' +
     'so the rows are a LOWER BOUND. ' +
+    // H66's coverage triple (#18299). UNCONDITIONAL like every other window's,
+    // and it is the only place three things are visible: how thin this row's
+    // corpus is (it buys nothing and its population is the one H2 never fetches
+    // for), that the canonical `Release:` line had ZERO instances when the row
+    // was measured, and that the rows are therefore a lower bound rather than a
+    // census of the queue.
+    `Released queue cards (H66): ${counts.queueReleaseCandidates ?? 0} open unassigned \`pm:queue\` ` +
+    `card(s) could be spoken about, ${counts.queueReleaseThreadRead ?? 0} with a comment thread ` +
+    `ALREADY in hand, ${counts.queueReleaseRows ?? 0} listed. It fetches NOTHING — the thread comes ` +
+    'out of the shared cache — and on an UNASSIGNED population that gap is most of it, because H2 ' +
+    'buys a thread only for an ASSIGNED card: a card nobody else bought a thread for is UNJUDGED ' +
+    'rather than clean. ⚠️ Measured 2026-09-16 over 29 threads on two boards, the canonical ' +
+    '`Release:` line appeared ZERO times, so the live leg is the release ANNOUNCEMENT heading and ' +
+    'the rows are a LOWER BOUND. ⛔ A LISTING, never a verdict: the remedy is a hand read, and no ' +
+    'state is proposed for what it lists. ' +
     `Report-only: findings are patrol input, not a gate verdict.`
   );
 }
@@ -16470,6 +16864,7 @@ export const SUMMARY_CLAUSE_ANCHORS = [
   ['h59Linkage', 'Merged-PR closing linkage (H59): '],
   ['h64SeatSigned', 'Unattributed seat content (H64): '],
   ['h65RoundTier', 'Triage round tiers (H65): '],
+  ['h66QueueRelease', 'Released queue cards (H66): '],
   ['reportOnly', 'Report-only: '],
 ];
 
@@ -17132,6 +17527,34 @@ export const HALF_STATE_FAMILY_BAND = Object.freeze({
   // one sits beside — one reads a seat artefact whose reading cannot be dated,
   // one whose date is wrong, and this one whose tier is unnamed.
   H65: 'state',
+
+  // H66 is a `state` (#18299), and the three refusals are each taken on the
+  // refused band's OWN criterion rather than on this subject's vocabulary.
+  //
+  // ⛔ NOT `gate`: that band exists for the row that can tell a STRIPPED gate
+  // from an ungated card — an ABSENCE reading as a green light on a check that
+  // decides whether something may LAND. Nothing here decides a landing, and
+  // nothing is absent in the required sense: a label is PRESENT and says
+  // 「dispatchable」 while the newest record on the thread says the card was let
+  // go. Reading `gate` off 「something protective is missing」 alone is H57's
+  // refusal, taken for H57's reason.
+  // ⛔ NOT `stall`: that band's criterion is forward motion STOPPED with nothing
+  // else to move it, and BOTH halves fail. The card sits in the dispatch pool
+  // and any seat may pick it up at any hour — which is the defect, not a halt —
+  // and something else DOES move it: a seat's hand read, which is what disposed
+  // all four measured specimens within two days of the filing. H4 is `stall`
+  // because a blocked card with no machine-readable line is one the unlock scan
+  // can NEVER free; nothing here is waiting on a scan.
+  // ⛔ NOT `inventory`: the row alarms about ONE card. The population reading —
+  // how many queued cards this row could speak about and how many had a thread
+  // in hand — is a summary clause and takes no band at all (H39's shape).
+  //
+  // What is left is `state`'s criterion exactly: two carriers contradicting each
+  // other on a LIVE card, readable from the board, the repair a disposition a
+  // human writes. And it is H58's band, the row this one sits beside — one reads
+  // the card's own declaration of what it IS, this one reads the release record
+  // of where it WENT.
+  H66: 'state',
 
   // H57 is a `stall` (#17132), and the three refusals are each taken on the
   // refused band's own criterion rather than on this subject's vocabulary —
@@ -20774,6 +21197,29 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
       );
       if (declaresRuling) findings.push([issue, 'H58', declaresRuling]);
     }
+    // H66 (#18299) — the queued card whose NEWEST comment is a release. Beside
+    // H58 at the FOOT of this iteration for H47's reason and no other: it reads
+    // the thread out of `commentCache`, which every gate above this line fills,
+    // so judged at the top the cache would be empty on every iteration and the
+    // row would report UNJUDGED forever while looking perfectly healthy —
+    // #4690, self-inflicted by placement.
+    //
+    // ⛔ It buys NOTHING: ONE `commentCache.get` per card, never a fetch and
+    // never a second request class. The coverage triple below is the whole cost
+    // story — on an UNASSIGNED population the cache is thin by construction, so
+    // a corpus of two cards and a clean queue would otherwise render the same.
+    if (h66SpeaksAbout(issue)) {
+      stats.queueReleaseCandidates = (stats.queueReleaseCandidates ?? 0) + 1;
+      const queueReleaseRows = commentCache.get(issue.number);
+      if (queueReleaseRows !== undefined) {
+        stats.queueReleaseThreadRead = (stats.queueReleaseThreadRead ?? 0) + 1;
+      }
+      const releasedRemainder = h66ReleasedNonDispatchableRemainder(issue, queueReleaseRows);
+      if (releasedRemainder) {
+        stats.queueReleaseRows = (stats.queueReleaseRows ?? 0) + 1;
+        findings.push([issue, 'H66', releasedRemainder]);
+      }
+    }
   }
 
   // H55's census (#17017) — the legacy half of the awaiting population, counted
@@ -22172,9 +22618,54 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
 // as one that passed (#13798).
 const SELF_TEST_VERDICT = 'check-half-states self-test reached its verdict';
 
+// ---------------------------------------------------------------------------
+// The battery FLOOR — battery NAMES with a minimum case count each (#18299)
+// ---------------------------------------------------------------------------
+//
+// AGENTS.md 「Writing a `--self-test`」 is explicit that a printed case count is
+// EVIDENCE, NOT PROOF — a battery falling 40 → 3 still prints a non-zero total —
+// and that ONE pinned total rots the moment a sibling grows. This file printed
+// exactly that one total: `N cases pass`, over a suite whose cases are declared
+// in one flat list. The handshake below it (`SELF_TEST_VERDICT`) closes the
+// orthogonal hole — a `return` above the verdict — and neither closes the other.
+//
+// ⚠️ This roster is NEW and it is PARTIAL, said plainly so nobody reads it as a
+// census of the suite: the several hundred `t(...)` cases above and below are
+// UNBATTERIED and stay that way here. Retrofitting them is a diff of its own and
+// not this card's; what this roster does is make a floor EXIST, so the next row
+// registers against it instead of adding to an unfloored list. Three failure
+// conditions, all of them producing a real exit 1:
+//
+//   · a declared battery registering FEWER cases than its pin;
+//   · a case registered against a battery the roster does not declare;
+//   · the roster itself falling below `SELF_TEST_BATTERY_FLOOR` batteries.
+//
+// ⛔ Copied from a landed shape (`scripts/check-agent-model-declared.mjs`),
+// never imported: a shared assertion module is one point of failure for every
+// instrument at once, and every self-test here must keep running standalone.
+
+/** Battery name → the minimum number of cases that battery must register. */
+export const SELF_TEST_BATTERIES = Object.freeze({
+  // 139 registered as this landed; the pin sits just under it so an ordinary
+  // refactor does not have to move a number, while a battery losing a THIRD of
+  // its cases — the 40 → 3 shape AGENTS.md names — fails loudly.
+  'H66 released queue card': 130,
+});
+
+/** The floor on the ROSTER itself — how many batteries must be declared at all. */
+export const SELF_TEST_BATTERY_FLOOR = 1;
+
 async function selfTest() {
   const cases = [];
   const t = (name, actual, expected) => cases.push([name, actual, expected]);
+  // Battery-registered cases go through THIS. `b('<battery>', name, …)` is `t`
+  // plus one tally, so a battery that stops registering cases fails the floor
+  // below instead of shrinking a total nobody reads.
+  const batteryCounts = new Map();
+  const b = (battery, name, actual, expected) => {
+    batteryCounts.set(battery, (batteryCounts.get(battery) ?? 0) + 1);
+    t(name, actual, expected);
+  };
   // -- Summary-disclosure cases go through THIS, never through the raw line ---
   //
   // `summaryLine` is one sentence carrying every window's disclosure, so a bare
@@ -31828,6 +32319,241 @@ Doubles as the fire's **write self-check** (step 0). \`201\` is not the reading.
   t('H65 summary: the clause is rendered on EVERY run, not just interesting ones', saidBy('h65RoundTier', summaryLine({}, 0)).includes('0 of 0'), true);
   t('H65 summary: a bare line renders numbers, never `undefined`', saidBy('h65RoundTier', summaryLine({}, 0)).includes('undefined'), false);
 
+  // -- H66 — a released `pm:queue` card whose remainder is not work (#18299) --
+  //
+  // ⛔ The self-test never touches GitHub. Every heading below is a spelling
+  // MEASURED on a live comment (the banner names the three), the anchor carried
+  // from the filing card included — it is exercised here precisely BECAUSE its
+  // provenance is different and must not be mistaken for a measurement.
+  //
+  // ⭐ This is the file's FIRST registered battery: every case goes through
+  // `b(BATTERY66, …)` rather than `t(…)`, so deleting the block fails the floor
+  // instead of shrinking a total nobody reads.
+  const BATTERY66 = 'H66 released queue card';
+  const H66_ANNOUNCE = '## Measurement landed — verified in `main` by CONTENT. Card RELEASED, ⛔ not closed.';
+  const H66_ANNOUNCE_B = '## Slice landed — verified in `main` by CONTENT, and the card is RELEASED, ⛔ not closed';
+  const H66_ANNOUNCE_C = '## (a), (b) and (d) landed — verified in `main` by CONTENT. Card RELEASED for **(c)**, ⛔ not closed.';
+  const H66_STEP = '## What this card still owes — and it is ⛔ not a dispatchable step';
+  const H66_RULING = '## The remainder is a ruling, not a mechanical fix';
+  // The protocol line this row enforces, transcribed INDEPENDENTLY of the
+  // constant it pins — `RELEASE_RULE_LINE`'s discipline: two copies compared
+  // against each other is a check, a pin reading the value it pins is not.
+  const QUEUE_RULE_LINE =
+    '`pm:queue` = 有具名落点或复现的具体缺陷,或范围明确的工具/门禁修复,无可问之事。';
+  const cm66 = (body, at) => ({ body, created_at: at });
+  const T66_CLAIM = '2026-09-14T10:40:21Z';
+  const T66_RELEASE = '2026-09-14T12:44:12Z';
+  const T66_LATER = '2026-09-16T07:21:14Z';
+  const card66 = (extra = {}) => ({
+    number: 7696,
+    state: 'open',
+    labels: [{ name: 'pm:queue' }, { name: 'priority:p2' }],
+    assignees: [],
+    title: 'bug(analytics): the local select dimension is untranslated',
+    body: '## Measured\n\nthe pie widget renders raw keys.\n',
+    ...extra,
+  });
+  const thread66 = (body, at = T66_RELEASE) => [
+    cm66('Claim: PM loop round R37\nSession: `session_x`', T66_CLAIM),
+    cm66(body, at),
+  ];
+  const RELEASED66 = thread66(`${H66_ANNOUNCE}\n\nPR objectui#9498 merged.\n`);
+  const h66 = (extra = {}, rows) => h66ReleasedNonDispatchableRemainder(card66(extra), rows);
+  const h66row = (extra = {}, rows) =>
+    String(h66ReleasedNonDispatchableRemainder(card66(extra), rows) ?? '');
+
+  // ⭐ (c) — the measured PROSE leg, in each of the three spellings and in the
+  // heading shape all three were measured in.
+  b(BATTERY66, 'H66 fires: the measured release announcement on the newest comment', typeof h66({}, RELEASED66), 'string');
+  b(BATTERY66, 'H66 fires: …the second measured variant (`the card is RELEASED`)', typeof h66({}, thread66(H66_ANNOUNCE_B)), 'string');
+  b(BATTERY66, 'H66 fires: …and the third, whose RELEASED carries an item between the tokens', typeof h66({}, thread66(H66_ANNOUNCE_C)), 'string');
+  b(BATTERY66, 'H66 fires: the 「⛔ not a dispatchable step」 heading', typeof h66({}, thread66(`${H66_STEP}\n\nthe reading is the reporter\'s.\n`)), 'string');
+  b(BATTERY66, 'H66 fires: the 「remainder is a ruling」 heading', typeof h66({}, thread66(`${H66_RULING}\n\nthree arms.\n`)), 'string');
+  // ⚠️ Quoted UNDECORATED, which is what the scanner matched on: the live
+  // heading writes `main` in a code span, and quoting the raw line back would
+  // assert on a byte the anchor never saw.
+  b(BATTERY66, 'H66 fires: …and the row quotes the heading, depth and all, as the scanner read it', h66row({}, RELEASED66).includes(`「${undecorateProseLine(H66_ANNOUNCE)}」`), true);
+  b(BATTERY66, 'H66 fires: …and that really is the live heading with its decoration removed', undecorateProseLine(H66_ANNOUNCE), '## Measurement landed — verified in main by CONTENT. Card RELEASED, ⛔ not closed.');
+  b(BATTERY66, 'H66 fires: the UNMEASURED anchor is quoted as `from` its card, never `measured on`', h66row({}, thread66(H66_RULING)).includes('from objectstack#18299'), true);
+  b(BATTERY66, 'H66 fires: …and says the canonical line was ABSENT, not merely unmatched', h66row({}, RELEASED66).includes('with no canonical `Release:` line to read'), true);
+  b(BATTERY66, 'H66 fires: …naming the anchor with the live comments it was measured on', h66row({}, RELEASED66).includes('measured on objectui#7696 `5664140343`'), true);
+  b(BATTERY66, 'H66 fires: the filing card\'s own anchor is labelled NOT measured where it fires', h66row({}, thread66(H66_RULING)).includes('⛔ NOT measured on a live comment'), true);
+
+  // ⭐ (a) — the canonical `Release:` leg, the discriminator the dispatch named.
+  const REL66 = (tail) => thread66(`Release: session \`session_x\` — 部分落地 — ${tail}\n`);
+  b(BATTERY66, 'H66 fires: a `Release:` line whose 去向 is the maintainer', typeof h66({}, REL66('去向 the maintainer')), 'string');
+  b(BATTERY66, 'H66 fires: …the director seat', typeof h66({}, REL66('去向 the director seat confirms on #7650')), 'string');
+  b(BATTERY66, 'H66 fires: …the reporter', typeof h66({}, REL66('去向 the reporter takes one devtools reading')), 'string');
+  b(BATTERY66, 'H66 fires: …`needs-user-decision`', typeof h66({}, REL66('去向 `needs-user-decision`')), 'string');
+  b(BATTERY66, 'H66 fires: …`pm:awaiting-maintainer`', typeof h66({}, REL66('去向 `pm:awaiting-maintainer`')), 'string');
+  b(BATTERY66, 'H66 fires: …the Chinese spelling of the maintainer reads too', typeof h66({}, REL66('去向 维护者')), 'string');
+  b(BATTERY66, 'H66 fires: the row NAMES the destination it read', h66row({}, REL66('去向 the maintainer')).includes('names the maintainer, ⛔ not the dispatch pool'), true);
+  b(BATTERY66, 'H66 fires: …and quotes the line it read it off', h66row({}, REL66('去向 the maintainer')).includes('Release: session session_x'), true);
+  b(BATTERY66, 'H66 fires: a blockquoted release line reads the same, as at the claim marker', typeof h66({}, thread66('> Release: session `session_x` — 去向 the maintainer')), 'string');
+  // ⚠️ The unreadable 去向 LISTS rather than clears — the #4690 direction for a
+  // listing, and the row says which of the two it is.
+  b(BATTERY66, 'H66 fires: a `Release:` line naming NO destination is listed, never cleared', typeof h66({}, REL66('done')), 'string');
+  b(BATTERY66, 'H66 fires: …and says so in as many words', h66row({}, REL66('done')).includes('NO destination this row can read'), true);
+
+  // ⛔ (b) — a normal return to the pool. The whole point of the release act.
+  b(BATTERY66, 'H66 silent: a `Release:` line whose 去向 IS `pm:queue`', h66({}, REL66('去向 `pm:queue`, next seat re-claims')), null);
+  b(BATTERY66, 'H66 silent: …undecorated, without the code span', h66({}, REL66('去向 pm:queue')), null);
+  b(BATTERY66, 'H66 silent: …and the canonical line WINS over an announcement heading beside it', h66({}, thread66(`${H66_ANNOUNCE}\n\nRelease: session \`session_x\` — 去向 \`pm:queue\`\n`)), null);
+  b(BATTERY66, 'H66 silent: …which is the case that makes the leg worth keeping at all', typeof h66({}, thread66(`${H66_ANNOUNCE}\n\nRelease: session \`session_x\` — 去向 the maintainer\n`)), 'string');
+
+  // ⛔ (d) — a later comment returns the card to dispatchable. Structural: the
+  // row reads the NEWEST comment, so any later word stands it down.
+  b(BATTERY66, 'H66 silent: a later comment after the release', h66({}, [...RELEASED66, cm66('## Re-scoped — the remainder is a named fix, back to the queue', T66_LATER)]), null);
+  b(BATTERY66, 'H66 silent: …a later `Claim:` likewise', h66({}, [...RELEASED66, cm66('Claim: PM loop round 1\nBranch: `claude/issue-7696-x`', T66_LATER)]), null);
+  b(BATTERY66, 'H66 silent: …a later state repair likewise', h66({}, [...RELEASED66, cm66('## State repair — `pm:queue` → `pm:awaiting-maintainer`', T66_LATER)]), null);
+  b(BATTERY66, 'H66 silent: an OLDER release under a newer ordinary comment', h66({}, [cm66(H66_ANNOUNCE, T66_CLAIM), cm66('graded p2', T66_RELEASE)]), null);
+  // …and the ordering rule itself, which is `latestSeatMarker`'s, not a second one.
+  b(BATTERY66, 'H66 order: an unreadable stamp falls back to THREAD ORDER, release last', typeof h66({}, [cm66('graded p2', 'not-a-date'), cm66(H66_ANNOUNCE, 'not-a-date')]), 'string');
+  b(BATTERY66, 'H66 order: …and the reverse thread order goes clean', h66({}, [cm66(H66_ANNOUNCE, 'not-a-date'), cm66('graded p2', 'not-a-date')]), null);
+
+  // ⛔ (f) — no seat comment at all, and the two UNJUDGED states beside it.
+  b(BATTERY66, 'H66 silent: an EMPTY thread is a real reading, not a finding', h66({}, []), null);
+  b(BATTERY66, 'H66 silent: a thread with no release on it at all', h66({}, [cm66('## 分诊 · `pm:queue` / `domain:ui`', T66_CLAIM)]), null);
+  b(BATTERY66, 'H66 unjudged: an UNCONSULTED thread is UNJUDGED, never clean', h66({}, undefined), null);
+  b(BATTERY66, 'H66 unjudged: an UNREADABLE thread too', h66({}, null), null);
+
+  // ⛔ (e) — and the rest of the population gate.
+  b(BATTERY66, 'H66 population: an ASSIGNED card is out — that is H24\'s row', h66SpeaksAbout(card66({ assignees: [{ login: 'os-justin' }] })), false);
+  b(BATTERY66, 'H66 population: …and the predicate is silent on it, thread or no thread', h66({ assignees: [{ login: 'os-justin' }] }, RELEASED66), null);
+  b(BATTERY66, 'H66 population: an assignee given as a plain login is read too', h66SpeaksAbout(card66({ assignees: ['os-justin'] })), false);
+  b(BATTERY66, 'H66 population: an open unassigned `pm:queue` card is in', h66SpeaksAbout(card66()), true);
+  b(BATTERY66, 'H66 population: a CLOSED card is out — the queue label on it is residue', h66SpeaksAbout(card66({ state: 'closed' })), false);
+  b(BATTERY66, 'H66 population: a PULL REQUEST is out — the dispatch pool is cards', h66SpeaksAbout(card66({ pull_request: { url: 'x' } })), false);
+  b(BATTERY66, 'H66 population: an unreadable `labels` is out, ⛔ never read as unlabelled', h66SpeaksAbout(card66({ labels: undefined })), false);
+  b(BATTERY66, 'H66 population: a card with no `pm:queue` is out', h66SpeaksAbout(card66({ labels: [{ name: 'bug' }] })), false);
+  b(BATTERY66, 'H66 population: `pm:queue` + `pm:dispatched` is out — H3\'s contradiction', h66SpeaksAbout(card66({ labels: [{ name: 'pm:queue' }, { name: 'pm:dispatched' }] })), false);
+  b(BATTERY66, 'H66 population: `pm:queue` + `needs-user-decision` is out — H29\'s pair', h66SpeaksAbout(card66({ labels: [{ name: 'pm:queue' }, { name: 'needs-user-decision' }] })), false);
+  b(BATTERY66, 'H66 population: `pm:queue` + `pm:awaiting-maintainer` is out — H25\'s pair', h66SpeaksAbout(card66({ labels: [{ name: 'pm:queue' }, { name: AWAITING_MAINTAINER_LABEL }] })), false);
+  b(BATTERY66, 'H66 population: …and the exclusion reads ONE vocabulary, ⛔ not a second list', PM_EXCLUSIVE_STATE_LABELS.includes('pm:queue'), true);
+  b(BATTERY66, 'H66 population: `pm:retriage` is an ANNOTATION and does NOT exclude', h66SpeaksAbout(card66({ labels: [{ name: 'pm:queue' }, { name: 'pm:retriage' }] })), true);
+  b(BATTERY66, 'H66 population: a missing card is out, never a crash', h66SpeaksAbout(undefined), false);
+  b(BATTERY66, 'H66 population: …and the predicate does not crash on one either', h66ReleasedNonDispatchableRemainder(undefined, RELEASED66), null);
+  b(BATTERY66, 'H66 population: it is the label page the sweep already lists', SEEN_LABEL_PAGES.includes('pm:queue'), true);
+
+  // ⛔ The four quoting shapes the heading anchoring refuses STRUCTURALLY — the
+  // filing card, this row's own report and this file's banner all quote the
+  // spellings, and none of them may fire.
+  const QUOTES66 = [
+    ['the spelling in PROSE — a card talking about the shape, not declaring it', 'The releasing seat wrote Card RELEASED, ⛔ not closed at the top.'],
+    ['…inside an inline CODE SPAN in prose', 'the `Card RELEASED, ⛔ not closed` heading is the marker.'],
+    ['…inside a BLOCKQUOTED heading — one card quoting another', `> ${H66_ANNOUNCE}`],
+    ['…inside a FENCED block', `\`\`\`\n${H66_ANNOUNCE}\n\`\`\``],
+    ['…inside a tilde-fenced block, the other fence spelling', `~~~\n${H66_STEP}\n~~~`],
+    ['…in a TABLE cell, which is how the filing card carries it', '| card | why |\n|:--|:--|\n| objectui#7696 | the seat wrote ⛔ not a dispatchable step |'],
+    ['…and the lowercase prose the same card writes about the same event', '## What happened\n\nthe card was released rather than closed.'],
+  ];
+  b(BATTERY66, 'H66 controls: the quoting table is exercised WHOLE — seven fixtures, none quietly dropped', QUOTES66.length, 7);
+  for (const [why, body] of QUOTES66) b(BATTERY66, `H66 silent: ${why}`, h66({}, thread66(body)), null);
+  // …and the fixtures really carry the words, or every negative above is vacuous.
+  b(BATTERY66, 'H66 controls: the PROSE fixture really contains the spelling', QUOTES66[0][1].includes('RELEASED, ⛔ not closed'), true);
+  b(BATTERY66, 'H66 controls: …the FENCED one too', QUOTES66[3][1].includes('RELEASED, ⛔ not closed'), true);
+  b(BATTERY66, 'H66 controls: …the TABLE one too', QUOTES66[5][1].includes('⛔ not a dispatchable step'), true);
+  b(BATTERY66, 'H66 controls: …and the lowercase one really says the word', QUOTES66[6][1].includes('released rather than closed'), true);
+
+  // The heading scanner, read on its own — depth, indent, decoration, order.
+  b(BATTERY66, 'H66 scan: an `h3` heading matches and comes back AS WRITTEN', releaseAnnouncementHeadings('### Card RELEASED, ⛔ not closed')[0].heading, '### Card RELEASED, ⛔ not closed');
+  b(BATTERY66, 'H66 scan: `h6` matches too', releaseAnnouncementHeadings('###### Card RELEASED, ⛔ not closed').length, 1);
+  b(BATTERY66, 'H66 scan: ⛔ seven hashes is not a heading', releaseAnnouncementHeadings('####### Card RELEASED, ⛔ not closed').length, 0);
+  b(BATTERY66, 'H66 scan: ⛔ nor a hash with no space after it', releaseAnnouncementHeadings('##Card RELEASED, ⛔ not closed').length, 0);
+  b(BATTERY66, 'H66 scan: three leading spaces still open a heading', releaseAnnouncementHeadings('   ## Card RELEASED, ⛔ not closed').length, 1);
+  b(BATTERY66, 'H66 scan: ⛔ four do not — that is an indented code block', releaseAnnouncementHeadings('    ## Card RELEASED, ⛔ not closed').length, 0);
+  b(BATTERY66, 'H66 scan: decoration on the heading is read through', releaseAnnouncementHeadings('## **Card RELEASED**, ⛔ not closed').length, 1);
+  b(BATTERY66, 'H66 scan: two distinct anchors come back in the order written', releaseAnnouncementHeadings(`${H66_STEP}\n\n${H66_ANNOUNCE}`).map((h) => h.spelling).join(' | '), '⛔ not a dispatchable step | Card RELEASED, ⛔ not closed');
+  b(BATTERY66, 'H66 scan: one spelling written twice is named once', releaseAnnouncementHeadings(`${H66_ANNOUNCE}\n\ntext\n\n${H66_ANNOUNCE_B}`).length, 1);
+  b(BATTERY66, 'H66 scan: CRLF bodies read the same', releaseAnnouncementHeadings('## Card RELEASED, ⛔ not closed\r\n').length, 1);
+  b(BATTERY66, 'H66 scan: an empty text is not a crash', releaseAnnouncementHeadings(undefined).length, 0);
+  // ⛔ The gap between the two literal tokens is BOUNDED, so the anchor stays an
+  // anchor rather than becoming a fuzzy match across a paragraph.
+  b(BATTERY66, 'H66 scan: ⛔ a 41-character gap between the tokens does NOT match', releaseAnnouncementHeadings(`## Card RELEASED ${'x'.repeat(41)} ⛔ not closed`).length, 0);
+  b(BATTERY66, 'H66 scan: ⛔ and the two tokens on DIFFERENT lines never match', releaseAnnouncementHeadings('## Card RELEASED\n## ⛔ not closed').length, 0);
+  b(BATTERY66, 'H66 scan: ⛔ lowercase `released` is not the declaration', releaseAnnouncementHeadings('## Card released, ⛔ not closed').length, 0);
+
+  // The anchor set — measured, frozen, capped, provenance-labelled.
+  b(BATTERY66, 'H66 anchors: the set is at or under its declared cap', H66_RELEASE_ANNOUNCEMENT_ANCHORS.length <= H66_RELEASE_ANCHOR_CAP, true);
+  b(BATTERY66, 'H66 anchors: …and the cap is 5, so a sixth is an argument rather than an edit', H66_RELEASE_ANCHOR_CAP, 5);
+  b(BATTERY66, 'H66 anchors: every declared spelling fires against its OWN regex', H66_RELEASE_ANNOUNCEMENT_ANCHORS.every((a) => a.heading.test(a.spelling)), true);
+  b(BATTERY66, 'H66 anchors: …and every one of them fires as a real heading', H66_RELEASE_ANNOUNCEMENT_ANCHORS.every((a) => releaseAnnouncementHeadings(`## ${a.spelling}`).length === 1), true);
+  b(BATTERY66, 'H66 anchors: every anchor records where it came from', H66_RELEASE_ANNOUNCEMENT_ANCHORS.every((a) => /#\d+/u.test(a.instance)), true);
+  b(BATTERY66, 'H66 anchors: exactly TWO are measured on live comments…', H66_RELEASE_ANNOUNCEMENT_ANCHORS.filter((a) => a.measured === true).length, 2);
+  b(BATTERY66, 'H66 anchors: …and the third is labelled as the filing card\'s, ⛔ not a measurement', H66_RELEASE_ANNOUNCEMENT_ANCHORS.filter((a) => a.measured === false).map((a) => a.spelling).join(','), 'remainder is a ruling');
+  b(BATTERY66, 'H66 anchors: the set is frozen', Object.isFrozen(H66_RELEASE_ANNOUNCEMENT_ANCHORS), true);
+  b(BATTERY66, 'H66 anchors: …and so is every member', H66_RELEASE_ANNOUNCEMENT_ANCHORS.every((a) => Object.isFrozen(a)), true);
+  b(BATTERY66, 'H66 anchors: the destination vocabulary is frozen and CLOSED', Object.isFrozen(H66_NON_QUEUE_DESTINATIONS) && H66_NON_QUEUE_DESTINATIONS.every((d) => Object.isFrozen(d)), true);
+  b(BATTERY66, 'H66 anchors: …and every destination names itself for the sentence', H66_NON_QUEUE_DESTINATIONS.every((d) => typeof d.name === 'string' && d.name.length > 0), true);
+
+  // The verdict helper, read three-valued on its own.
+  b(BATTERY66, 'H66 verdict: an ordinary comment is not a release record at all', h66ReleaseVerdict('looks good to me'), null);
+  b(BATTERY66, 'H66 verdict: a `Release:` line to the pool is DISPATCHABLE', h66ReleaseVerdict('Release: session `x` — 去向 `pm:queue`').dispatchable, true);
+  b(BATTERY66, 'H66 verdict: …to anywhere else it is not', h66ReleaseVerdict('Release: session `x` — 去向 the maintainer').dispatchable, false);
+  b(BATTERY66, 'H66 verdict: …and it says which leg answered', h66ReleaseVerdict('Release: session `x` — 去向 the maintainer').leg, 'release-line');
+  b(BATTERY66, 'H66 verdict: the announcement leg names itself too', h66ReleaseVerdict(H66_ANNOUNCE).leg, 'announcement');
+  b(BATTERY66, 'H66 verdict: ⛔ `Released:` is a MALFORMED release, ⛔ not a dialect — no line is read', h66ReleaseVerdict('Released: session `x` — 去向 the maintainer'), null);
+  b(BATTERY66, 'H66 verdict: ⛔ prose about releasing is not a record', h66ReleaseVerdict('We will release: the card tomorrow'), null);
+  b(BATTERY66, 'H66 verdict: an empty body is not a crash', h66ReleaseVerdict(undefined), null);
+  // ⛔ MEASURED, not stylistic: the two live release comments both write
+  // 「`pm:queue` added」 in their state-write paragraph, so a body-wide read for
+  // the label would clear precisely the specimens this row exists to list.
+  b(BATTERY66, 'H66 verdict: ⛔ `pm:queue` in the BODY does not clear an announcement', typeof h66({}, thread66(`${H66_ANNOUNCE}\n\nState written: \`pm:dispatched\` stripped, \`pm:queue\` added, assignee cleared.\n`)), 'string');
+  b(BATTERY66, 'H66 verdict: …the 去向 is read on the `Release:` LINE and nowhere else', h66ReleaseVerdict('Release: session `x` — 去向 the maintainer\n\nback to `pm:queue` eventually.').dispatchable, false);
+
+  // The row's own sentence — the halves the direction requires.
+  b(BATTERY66, 'H66 row: it quotes the clause it enforces, in the protocol\'s own words', h66row({}, RELEASED66).includes(`「${QUEUE_RULE_LINE}」`), true);
+  b(BATTERY66, 'H66 row: …and that transcription matches the constant the row reads', h66row({}, RELEASED66).includes('无可问之事'), true);
+  b(BATTERY66, 'H66 row: it quotes the release ACT as well, since the 去向 is its field', h66row({}, RELEASED66).includes('释放是显式动作'), true);
+  b(BATTERY66, 'H66 row: the remedy is the card\'s own — judge by hand', h66row({}, RELEASED66).includes('judge by hand — this is a listing'), true);
+  b(BATTERY66, 'H66 row: ⛔ it proposes NO state, which the filing card leaves open', h66row({}, RELEASED66).includes('does NOT propose a state'), true);
+  b(BATTERY66, 'H66 row: ⛔ nor does it claim the remainder is undispatchable', h66row({}, RELEASED66).includes('does NOT say the remainder is undispatchable'), true);
+  b(BATTERY66, 'H66 row: report-only — it writes nothing and relabels nothing', h66row({}, RELEASED66).includes('⛔ no label is written and ⛔ nothing is relabelled'), true);
+  b(BATTERY66, 'H66 row: it declares what it CANNOT see, so a reader does not over-trust it', h66row({}, RELEASED66).includes('LOWER BOUND'), true);
+  b(BATTERY66, 'H66 row: …and names the measurement that made it a p2', h66row({}, RELEASED66).includes('FOUR OLDEST'), true);
+
+  // Adjacency — ⛔ this row restates no neighbour's verdict on its own specimen.
+  b(BATTERY66, 'H66 adjacency: H8 is silent — no `pm:dispatched` anywhere in this population', h8MergedPrStillDispatched(card66(), [], []), null);
+  b(BATTERY66, 'H66 adjacency: H24 is silent — the card is UNASSIGNED, correct for `pm:queue`', h24QueuedWithAssignee(card66()), null);
+  b(BATTERY66, 'H66 adjacency: H3 is silent — one pm state label, not two', h3QueueAndDispatched(card66()), false);
+  b(BATTERY66, 'H66 adjacency: H58 is silent — the specimen declares no ruling heading', h58QueuedRulingRow(card66(), [RELEASED66[1].body]), null);
+  b(BATTERY66, 'H66 adjacency: H47 is silent on the CANONICAL leg — the release answers the claim', h47ReleaseRecordDesync(card66(), REL66('去向 the maintainer')), null);
+  // ⚠️ …and the ONE overlap, asserted rather than hidden: on the PROSE leg the
+  // release was never written as a line, so H47 leg (b) fires TOO. Two
+  // readings — a record missing its canonical line, and a card in the pool with
+  // a remainder — never one restated.
+  b(BATTERY66, 'H66 adjacency: on the PROSE leg H47 (b) fires as well, and that is two readings', [typeof h47ReleaseRecordDesync(card66(), RELEASED66), typeof h66({}, RELEASED66)].join(','), 'string,string');
+
+  // Band, registry and the forwarding contract.
+  b(BATTERY66, 'H66 band: registered as a STATE row — two carriers on one live card', familyBand('H66'), 'state');
+  b(BATTERY66, 'H66 band: ⛔ NOT `gate` — nothing here decides a landing', familyBand('H66') === 'gate', false);
+  b(BATTERY66, 'H66 band: ⛔ NOT `stall` — the card sits in the pool and any seat may take it', familyBand('H66') === 'stall', false);
+  b(BATTERY66, 'H66 band: ⛔ NOT `inventory` — it alarms about ONE card; the population is a clause', familyBand('H66') === 'inventory', false);
+  b(BATTERY66, 'H66 band: it is H58\'s band, the row it sits beside', familyBand('H66'), familyBand('H58'));
+  b(BATTERY66, 'H66 band: …and the sweep really pushes it, so the registry sees it', familyRegistryCoverage().emitted.includes('H66'), true);
+  b(BATTERY66, 'H66 band: no code is left unregistered by this change', familyRegistryCoverage().missing.length, 0);
+  b(BATTERY66, 'H66 band: …and no band names a family the sweep never emits', familyRegistryCoverage().extra.length, 0);
+  b(BATTERY66, 'H66 band: the registry still fits inside the ledger ROW CAP', Object.keys(HALF_STATE_FAMILY_BAND).length <= FAMILY_LEDGER_ROW_CAP, true);
+  b(BATTERY66, 'H66 band: a gate row still outranks it', familyRank('H31') < familyRank('H66'), true);
+  b(BATTERY66, 'H66 census: every count key rides the enumerated forwarding contract', ['queueReleaseCandidates', 'queueReleaseThreadRead', 'queueReleaseRows'].every((k) => SWEEP_COUNT_KEYS.includes(k)), true);
+  const SUM66 = saidBy('h66QueueRelease', summaryLine({ queueReleaseCandidates: 100, queueReleaseThreadRead: 7, queueReleaseRows: 2 }, 0));
+  b(BATTERY66, 'H66 summary: the coverage triple is reported', SUM66.includes('100 open unassigned `pm:queue` card(s) could be spoken about'), true);
+  b(BATTERY66, 'H66 summary: …how many had a thread in hand', SUM66.includes('7 with a comment thread ALREADY in hand'), true);
+  b(BATTERY66, 'H66 summary: …and how many were listed', SUM66.includes('2 listed'), true);
+  b(BATTERY66, 'H66 summary: it says the row buys nothing', SUM66.includes('It fetches NOTHING'), true);
+  b(BATTERY66, 'H66 summary: …and WHY the gap is most of the population', SUM66.includes('H2 buys a thread only for an ASSIGNED card'), true);
+  b(BATTERY66, 'H66 summary: it publishes the zero the canonical leg measured', saidBy('h66QueueRelease', summaryLine({}, 0)).includes('appeared ZERO times'), true);
+  b(BATTERY66, 'H66 summary: …and that it is a LISTING rather than a verdict', saidBy('h66QueueRelease', summaryLine({}, 0)).includes('A LISTING, never a verdict'), true);
+  b(BATTERY66, 'H66 summary: the clause is rendered on EVERY run, not just interesting ones', saidBy('h66QueueRelease', summaryLine({}, 0)).includes('0 open unassigned'), true);
+  b(BATTERY66, 'H66 summary: a bare line renders numbers, never `undefined`', saidBy('h66QueueRelease', summaryLine({}, 0)).includes('undefined'), false);
+  b(BATTERY66, 'H66 summary: the anchor is declared in RENDER order, before the report-only tail', SUMMARY_CLAUSE_ANCHORS.findIndex(([k]) => k === 'h66QueueRelease') < SUMMARY_CLAUSE_ANCHORS.findIndex(([k]) => k === 'reportOnly'), true);
+
+  // The roster itself — a floor that cannot be satisfied by a zero.
+  b(BATTERY66, 'H66 floor: this battery is DECLARED on the roster', Object.prototype.hasOwnProperty.call(SELF_TEST_BATTERIES, BATTERY66), true);
+  b(BATTERY66, 'H66 floor: …with a positive pin, so an empty battery cannot satisfy it', SELF_TEST_BATTERIES[BATTERY66] > 0, true);
+  b(BATTERY66, 'H66 floor: the roster is frozen', Object.isFrozen(SELF_TEST_BATTERIES), true);
+  b(BATTERY66, 'H66 floor: …and the roster floor is at least one battery', SELF_TEST_BATTERY_FLOOR >= 1, true);
+
   // -- The `[::]` collapse (#12090): behaviour-preserving, asserted as such ---
   // The class held U+003A TWICE, never the fullwidth U+FF1A its shape implied.
   // These cases pin that the collapse changed nothing a reader could observe.
@@ -32029,7 +32755,41 @@ Doubles as the fire's **write self-check** (step 0). \`201\` is not the reading.
     console.error(`✗ check-half-states self-test: ${failed} of ${cases.length} case(s) failed.`);
     process.exit(1);
   }
-  console.log(`✓ check-half-states self-test: ${cases.length} cases pass.`);
+  // The FLOOR, evaluated after the cases and before the success line: a suite
+  // that ran every case it still has but lost a whole battery must not print a
+  // pass. Three conditions, each producing a real exit rather than a warning.
+  const declaredBatteries = Object.keys(SELF_TEST_BATTERIES);
+  const floorFailures = [];
+  if (declaredBatteries.length < SELF_TEST_BATTERY_FLOOR) {
+    floorFailures.push(
+      `the roster declares ${declaredBatteries.length} batter(ies), below its floor of ` +
+        `${SELF_TEST_BATTERY_FLOOR}`,
+    );
+  }
+  for (const [battery, minimum] of Object.entries(SELF_TEST_BATTERIES)) {
+    const registered = batteryCounts.get(battery) ?? 0;
+    if (registered < minimum) {
+      floorFailures.push(
+        `battery 「${battery}」 registered ${registered} case(s), below its pin of ${minimum}`,
+      );
+    }
+  }
+  for (const battery of batteryCounts.keys()) {
+    if (!Object.prototype.hasOwnProperty.call(SELF_TEST_BATTERIES, battery)) {
+      floorFailures.push(`case(s) registered against 「${battery}」, which the roster does not declare`);
+    }
+  }
+  if (floorFailures.length > 0) {
+    console.error(
+      `✗ check-half-states self-test: the battery floor failed — ${floorFailures.join('; ')}. ` +
+        'Every case above may have passed; a battery that stops running is invisible in a total.',
+    );
+    process.exit(1);
+  }
+  const rosterLine = declaredBatteries
+    .map((name) => `${name} ${batteryCounts.get(name) ?? 0}/${SELF_TEST_BATTERIES[name]}`)
+    .join(', ');
+  console.log(`✓ check-half-states self-test: ${cases.length} cases pass. Batteries: ${rosterLine}.`);
 
   return SELF_TEST_VERDICT;
 }
