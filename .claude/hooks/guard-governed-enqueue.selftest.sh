@@ -484,6 +484,17 @@ echo "== every spelling of that same origin URL resolves to that same sibling ==
 # `git init` plus an `origin`), so the register would be answering the identical
 # question about identical content — and the verdict still comes FROM the register
 # rather than from a word copied into this file.
+#
+# ⚠️ `-u GIT_CONFIG_COUNT -u GIT_CONFIG_PARAMETERS` is what makes the two
+# `git@github.com:` rows MEAN what they say, and it was measured here rather than
+# assumed: this container injects `url.https://github.com/.insteadOf
+# git@github.com:` through the environment, and the hook reads the origin with
+# `git remote get-url`, which HONOURS that rewrite — so without the unset git
+# hands the hook `https://…` and both ssh rows silently become second copies of
+# the https ones, green forever over a reader they never reach. A row whose
+# premise is a property of the box is the defect the cross-repo case above was
+# repaired for; these rows own theirs. On a machine that injects nothing, `env -u`
+# on an unset name is a no-op.
 spelling_n=0
 for spelling_url in \
   'https://github.com/objectstack-ai/cloud.git' \
@@ -498,6 +509,7 @@ for spelling_url in \
   git -C "$spelling_root/cloud" remote add origin "$spelling_url" >/dev/null 2>&1
   expect "$sibling_want" "origin $spelling_url resolves and is audited" \
     "$(mcp $AUTO 999 objectstack-ai cloud)" \
+    -u GIT_CONFIG_COUNT -u GIT_CONFIG_PARAMETERS \
     "OS_GOVERNED_ENQUEUE_FIXTURE=$F_CROSS_REGEN" "OS_GOVERNED_ENQUEUE_SIBLING_ROOT=$spelling_root"
 done
 
