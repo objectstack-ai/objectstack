@@ -91,6 +91,7 @@
     "check:pm-governed-merges": "node scripts/pm/check-governed-merges.mjs --self-test",
     "check:pm-governed-prose": "node scripts/pm/check-governed-prose.mjs --self-test && node scripts/pm/check-governed-prose.mjs",
     "check:pm-settings-deny-roster": "node scripts/pm/check-settings-deny-roster.mjs --self-test && node scripts/pm/check-settings-deny-roster.mjs",
+    "check:pm-expected-skips": "node scripts/pm/check-expected-skips.mjs --self-test",
     "check:publish-smoke-pin": "node scripts/publish-smoke-pack.mjs --self-test",
     "check:partof-closing-keyword": "node scripts/check-partof-closing-keyword.mjs --self-test",
     "check:commit-card-trailers": "node scripts/check-commit-card-trailers.mjs --self-test",

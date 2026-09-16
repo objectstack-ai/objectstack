@@ -626,7 +626,7 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 - 受管面两层:事实层仅本技能 `references/`,其余为规则层(含发布 `skills/**` 与 SKILL.md)。
 - 规则层四件套等人批;事实层 PR(受管路径全在该目录)经席内达档复核后 ready → 入队。
 - 路径面干净的才转 ready → 入队;队列是唯一被认可的落地路径,⛔ 永不队列外合并。
-- 入队资格 = PR 上每一个 check 全绿,⛔ 不是 required 子集;required 集是队列强制的地板。
+- 入队资格 = 每个 check 为 success 或预期 skip(名单:check-expected-skips.mjs),⛔ 不是 required 子集。
 - 非必查红是真缺陷或坏门,归 PM 入队前处置;第三种按设计而红,三条全立才可带红入队:
 - 源码自述 pushed 分支上按设计而红、不跑 `merge_group`、PR 评论记明门与因,缺一即否。
 - 本段只适用本循环派发的 dev PR;PM 自己的工具 PR 留维护者。
