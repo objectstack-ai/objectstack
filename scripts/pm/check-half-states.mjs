@@ -7042,6 +7042,30 @@ export function h44NeedsSeatComments(issue) {
 }
 
 /**
+ * The opening line of the seat-post memo, so the audit below can slice its body.
+ *
+ * ⚠️ ASSEMBLED rather than spelled, and that is not style: this audit reads THIS
+ * FILE, so a literal needle would be found at its own declaration — hundreds of
+ * lines above the memo — and the slice would run from the constant to the next
+ * `};`, a region containing no purchase at all. Measured: the first draft
+ * answered `seatPurchaseSites: 0` on a file with the purchase plainly inside the
+ * memo. `RETIRED_ASSIGNEE_COINAGE`'s hazard, one instrument over.
+ */
+const SEAT_MEMO_OPEN = ['const seatPostRowsFor = async', '(issue) => {'].join(' ');
+
+/**
+ * The `seatPostRowsFor` body, sliced out of a source text — '' when the memo is
+ * not in it at all, which is the honest answer for a synthetic fixture and makes
+ * a slice that silently matched the WHOLE file impossible.
+ */
+function seatMemoBody(text) {
+  const at = String(text ?? '').indexOf(SEAT_MEMO_OPEN);
+  if (at < 0) return '';
+  const end = String(text).indexOf('\n  };', at);
+  return end < 0 ? String(text).slice(at) : String(text).slice(at, end);
+}
+
+/**
  * The seat-post WINDOW audit (#18312) — read off this file's own source, the
  * detector shape `h57RunsPathAudit` and `familyRegistryCoverage` use, and for
  * their reason: the window lives inside `sweepInto`, which takes no injectable
@@ -7056,15 +7080,27 @@ export function h44NeedsSeatComments(issue) {
  *                   `commentRowsFor` — and a second one is a new row quietly
  *                   reading a seat thread's archive.
  *   purchaseSites   call sites that actually REQUEST a located page
- *                   (`h65CommentPagePath` against the swept repo). ONE, inside
- *                   the memo, is what makes the fetch-per-post bound hold; two
- *                   is the same page bought twice per run.
+ *                   (`h65CommentPagePath` against the swept repo), FILE-WIDE and
+ *                   across both populations.
+ *   seatPurchaseSites
+ *                   those of them inside `seatPostRowsFor`. ⭐ This is the one
+ *                   that carries the original argument: ONE, inside the memo, is
+ *                   what makes the fetch-per-SEAT-POST bound hold; two is the
+ *                   same page bought twice per run.
  *   readers         call sites that take the window through the memo. More of
  *                   these is free by construction — that is the point of the
  *                   memo — so this count is reported rather than bounded.
  *
+ * ⚠️ `seatPurchaseSites` was SPLIT OUT rather than the file-wide pin weakened
+ * (#18299). H66's bounded buy pass is a second located-page purchase, and it is
+ * a purchase against a DISJOINT population — an unassigned `pm:queue` CARD, never
+ * a `pm:seat` post — so it cannot be the 「same page bought twice」 the original
+ * bound is about. Reading that as a licence to raise the seat bound would have
+ * retired the check; the slice keeps it at one and names the second site instead.
+ *
  * @param {string} [source] — defaults to this file; injectable for the self-test.
- * @returns {{ commentPaths: string[], pagelessPaths: string[], purchaseSites: number, readers: number }}
+ * @returns {{ commentPaths: string[], pagelessPaths: string[], purchaseSites: number,
+ *   seatPurchaseSites: number, readers: number }}
  */
 export function seatWindowAudit(source) {
   const text =
@@ -7073,12 +7109,14 @@ export function seatWindowAudit(source) {
   const re = /`\/repos\/[^`]*?\/issues\/[^`]*?\/comments\?[^`]*`/g;
   let m;
   while ((m = re.exec(text))) commentPaths.push(m[0]);
+  const purchase = /h65CommentPagePath\(OWNER_REPO/g;
   return {
     commentPaths,
     // ⚠️ `[?&]page=` rather than `page=`: `per_page=100` carries that substring
     // and a bare `includes` would read every path in the file as paged.
     pagelessPaths: commentPaths.filter((p) => !/[?&]page=/.test(p)),
-    purchaseSites: (text.match(/h65CommentPagePath\(OWNER_REPO/g) ?? []).length,
+    purchaseSites: (text.match(purchase) ?? []).length,
+    seatPurchaseSites: (seatMemoBody(text).match(purchase) ?? []).length,
     readers: (text.match(/await seatPostRowsFor\(/g) ?? []).length,
   };
 }
@@ -15846,6 +15884,133 @@ export function h66SpeaksAbout(issue) {
 }
 
 /**
+ * How many comment pages this row may BUY in one run.
+ *
+ * ## Why this row buys at all, when the first landing did not
+ *
+ * It shipped reading `commentCache` and nothing else — one map lookup per card,
+ * no request. The first live sweep measured what that costs: **194 candidates,
+ * a thread in hand for 1**. The corpus is thin BY CONSTRUCTION and not by luck,
+ * because the only row that buys a card thread for a pm-tracked card is H2's
+ * claim read, and H2 buys one only for an **ASSIGNED** card — which is this
+ * population's exact complement. A listing that cannot see 99.5% of its own
+ * population is a row whose silence means nothing, and the filing card's own
+ * criterion already asks for the fetch: 「fetch the newest comment authored by a
+ * seat」.
+ *
+ * ## Why ONE page, and why the NEWEST one
+ *
+ * The whole thread is not needed and is not bought: this row reads the NEWEST
+ * comment and nothing else. The page is located from the carrier's own
+ * `comments` count through H65's two exported helpers (`h65NewestPagePlan` /
+ * `h65CommentPagePath`) rather than a second copy of the arithmetic — ⛔ never
+ * page 1, because GitHub serves issue comments OLDEST-FIRST and a page-less
+ * request returns the archive rather than the current word (the #18312 reading:
+ * five weeks stale on a long thread).
+ *
+ * ## Why 100
+ *
+ * The standing caller is `.github/workflows/half-state-patrol.yml` on
+ * `PATROL_CRON` — `37 1,7,13,19 * * *`, FOUR runs a day — under the Actions
+ * token's **1000 requests per hour per repository**. Each run already spends
+ * the label pages, the unscoped listing, the PR windows, H50's walks, H43's
+ * review probes, H45's parent reads and the seat pages; 100 is a ceiling that
+ * adds at most a tenth of one hour's budget to a run that happens at most once
+ * every six hours, and it covers the whole measured population of unassigned
+ * `pm:queue` cards on this board with room to spare (194 candidates, of which
+ * the overwhelming majority are old and quiet — see the ordering below).
+ *
+ * ⚠️ A cap is not a coverage claim. The candidates beyond it are NOT ATTEMPTED,
+ * which is neither judged nor clean, and the summary clause prints that number
+ * separately — H40's `H40_RESOLUTION_BUDGET` posture, taken for its reason.
+ */
+export const H66_THREAD_BUY_CAP = 100;
+
+/**
+ * Which candidates this run buys a page for, and which it defers — NEWEST-TOUCHED
+ * FIRST.
+ *
+ * A release is a WRITE on the card, so `updated_at` descending puts the cards a
+ * release could plausibly have just landed on at the front of the queue; a card
+ * that has not moved in a month is the last place a fresh release lives. That
+ * is the opposite of the dispatch order 「最老优先」 on purpose: the dispatch
+ * order says which card to WORK, this says where the evidence IS.
+ *
+ * ⚠️ An unreadable `updated_at` sorts LAST rather than first. A stamp that does
+ * not parse must never be promoted ahead of one that does (#4690's direction on
+ * every timestamp in this file), and the `number` tiebreak keeps the order total
+ * so two runs over one board agree.
+ *
+ * Pure, and exported, for the reason every budget in this file is: the thing
+ * that decides what gets READ AT ALL is where a silent hole would live, and a
+ * plan the self-test can drive offline is the only kind that can be pinned.
+ *
+ * @param {{ number?: number, updated_at?: string }[]} issues
+ * @param {number} [cap]
+ * @returns {{ buy: object[], deferred: object[] }}
+ */
+export function h66BuyOrder(issues, cap = H66_THREAD_BUY_CAP) {
+  const rows = (Array.isArray(issues) ? issues : []).filter(Boolean);
+  const stamp = (issue) => {
+    const parsed = Date.parse(issue?.updated_at ?? '');
+    return Number.isFinite(parsed) ? parsed : -Infinity;
+  };
+  const ordered = [...rows].sort(
+    (a, b) => stamp(b) - stamp(a) || Number(b?.number ?? 0) - Number(a?.number ?? 0),
+  );
+  const limit = Number.isFinite(cap) && cap > 0 ? Math.floor(cap) : 0;
+  return { buy: ordered.slice(0, limit), deferred: ordered.slice(limit) };
+}
+
+/**
+ * The BUY pass audit (#18299) — read off this file's own source, the detector
+ * shape `seatWindowAudit` and `familyRegistryCoverage` use, and for their
+ * reason: the pass lives inside `sweepInto`, which takes no injectable
+ * transport, so the two properties a spy would prove have to be proved on the
+ * text.
+ *
+ *   pushSites / guardedPushSites
+ *       where a candidate is DEFERRED to the buy. Exactly one site, and it must
+ *       sit under an `=== undefined` cache test — which is the whole of 「a card
+ *       whose thread is already in hand is never re-bought」. An unguarded push
+ *       would buy a page the sweep already holds, once per run, silently.
+ *   cacheWriteSites / wholeThreadCacheWrites
+ *       where the pass writes back into `commentCache`. Every one of them must
+ *       sit under a `pagePlan.page === 1` test, because only there is the page
+ *       bought the WHOLE thread; an unguarded write hands a partial window to
+ *       every reader keyed on that card, which is precisely why
+ *       `seatPostRowsFor` keeps its own window out of that map.
+ *
+ * ⚠️ The needles are ASSEMBLED, for `SEAT_MEMO_OPEN`'s measured reason: a
+ * literal one would be found at its own declaration in this very file.
+ *
+ * @param {string} [source] — defaults to this file; injectable for the self-test.
+ * @returns {{ pushSites: number, guardedPushSites: number, cacheWriteSites: number,
+ *   wholeThreadCacheWrites: number }}
+ */
+export function h66BuyAudit(source) {
+  const text =
+    typeof source === 'string' ? source : readFileSync(fileURLToPath(import.meta.url), 'utf8');
+  const before = (needle) => {
+    const out = [];
+    let at = text.indexOf(needle);
+    while (at >= 0) {
+      out.push(text.slice(Math.max(0, at - 200), at));
+      at = text.indexOf(needle, at + needle.length);
+    }
+    return out;
+  };
+  const pushes = before(['queueReleaseDeferred', '.push('].join(''));
+  const writes = before(['commentCache', '.set(issue.number, rows)'].join(''));
+  return {
+    pushSites: pushes.length,
+    guardedPushSites: pushes.filter((text_) => text_.includes('=== undefined')).length,
+    cacheWriteSites: writes.length,
+    wholeThreadCacheWrites: writes.filter((text_) => text_.includes('pagePlan.page === 1')).length,
+  };
+}
+
+/**
  * H66 — null when clean OR unjudged, else the finding sentence.
  *
  * Three input states for the thread, never two (#4690), the H4 contract
@@ -16273,6 +16438,17 @@ export const SWEEP_COUNT_KEYS = [
   // nothing and a queue with nothing to judge stay distinguishable.
   'queueReleaseCandidates',
   'queueReleaseThreadRead',
+  // …and the BOUNDED buy leg's own counters (#18299 patch round).
+  // `queueReleaseBought` is how many pages this run actually paid for,
+  // `queueReleaseCap` the ceiling it was allowed (a CONSTANT on the contract
+  // rather than a count, so the clause can say `of cap K` without a second
+  // import), `queueReleaseDeferred` the candidates the cap did NOT attempt —
+  // not attempted is not clean, H40's posture — and `queueReleaseUnjudged` the
+  // cards whose page failed or whose newest page could not be LOCATED.
+  'queueReleaseBought',
+  'queueReleaseCap',
+  'queueReleaseDeferred',
+  'queueReleaseUnjudged',
   'queueReleaseRows',
   'refBeyond',
 ];
@@ -16793,13 +16969,21 @@ export function summaryLine(counts, findingCount) {
     // census of the queue.
     `Released queue cards (H66): ${counts.queueReleaseCandidates ?? 0} open unassigned \`pm:queue\` ` +
     `card(s) could be spoken about, ${counts.queueReleaseThreadRead ?? 0} with a comment thread ` +
-    `ALREADY in hand, ${counts.queueReleaseRows ?? 0} listed. It fetches NOTHING — the thread comes ` +
-    'out of the shared cache — and on an UNASSIGNED population that gap is most of it, because H2 ' +
-    'buys a thread only for an ASSIGNED card: a card nobody else bought a thread for is UNJUDGED ' +
-    'rather than clean. ⚠️ Measured 2026-09-16 over 29 threads on two boards, the canonical ' +
-    '`Release:` line appeared ZERO times, so the live leg is the release ANNOUNCEMENT heading and ' +
-    'the rows are a LOWER BOUND. ⛔ A LISTING, never a verdict: the remedy is a hand read, and no ' +
-    'state is proposed for what it lists. ' +
+    `ALREADY in hand, ${counts.queueReleaseBought ?? 0} NEWEST comment page(s) BOUGHT this run ` +
+    `(cap ${counts.queueReleaseCap ?? H66_THREAD_BUY_CAP}` +
+    `${(counts.queueReleaseDeferred ?? 0) > 0 ? `, ${counts.queueReleaseDeferred} candidate(s) NOT ATTEMPTED at that cap` : ''}), ` +
+    `${counts.queueReleaseRows ?? 0} listed. ${counts.queueReleaseUnjudged ?? 0} card(s) stayed ` +
+    'UNJUDGED — a page whose fetch failed, or a carrier whose `comments` count is unreadable and ' +
+    'whose first page came back FULL, so the newest comment could not be LOCATED; neither is clean ' +
+    '(#4690), and a candidate the cap did not attempt is not clean either. The buy is ONE page per ' +
+    'card, the NEWEST one, located from the carrier\'s own `comments` count through H65\'s helpers ' +
+    '— ⛔ never page 1 on a long thread, because GitHub serves issue comments OLDEST-FIRST — and ' +
+    'candidates are ordered NEWEST-TOUCHED first, because a release is a write on the card. The ' +
+    'free half is unchanged: a thread another row already paid for costs nothing here. ⚠️ Measured ' +
+    '2026-09-16 over 29 threads on two boards, the canonical `Release:` line appeared ZERO times, ' +
+    'so the live leg is the release ANNOUNCEMENT heading and the rows are a LOWER BOUND. ⛔ A ' +
+    'LISTING, never a verdict: the remedy is a hand read, and no state is proposed for what it ' +
+    'lists. ' +
     `Report-only: findings are patrol input, not a gate verdict.`
   );
 }
@@ -20956,6 +21140,13 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
   // loop boundary, the same way H8's merged-PR window is.
   const seatMarkers = new Map();
 
+  // H66's deferred candidates (#18299), gathered here and bought at the FOOT of
+  // the sweep for the same split reason: the buy is ORDERED across the whole
+  // population and CAPPED, and neither can be decided one card at a time from
+  // inside this loop. A card whose thread is already in hand never lands here —
+  // it is judged in place, free, exactly as it was.
+  const queueReleaseDeferred = [];
+
   for (const issue of seen.values()) {
     const labels = labelNames(issue);
     if (h1DispatchedNoAssignee(issue)) {
@@ -21204,20 +21395,23 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
     // row would report UNJUDGED forever while looking perfectly healthy —
     // #4690, self-inflicted by placement.
     //
-    // ⛔ It buys NOTHING: ONE `commentCache.get` per card, never a fetch and
-    // never a second request class. The coverage triple below is the whole cost
-    // story — on an UNASSIGNED population the cache is thin by construction, so
-    // a corpus of two cards and a clean queue would otherwise render the same.
+    // ⚠️ TWO halves since the first live sweep. A card whose thread is ALREADY
+    // in hand is judged HERE and costs nothing — the free half, unchanged. A
+    // card whose thread nobody bought is DEFERRED to the bounded buy pass at the
+    // foot of the sweep, because the buy is ordered and capped across the whole
+    // population and cannot be decided one card at a time from inside a loop.
     if (h66SpeaksAbout(issue)) {
       stats.queueReleaseCandidates = (stats.queueReleaseCandidates ?? 0) + 1;
       const queueReleaseRows = commentCache.get(issue.number);
-      if (queueReleaseRows !== undefined) {
+      if (queueReleaseRows === undefined) {
+        queueReleaseDeferred.push(issue);
+      } else {
         stats.queueReleaseThreadRead = (stats.queueReleaseThreadRead ?? 0) + 1;
-      }
-      const releasedRemainder = h66ReleasedNonDispatchableRemainder(issue, queueReleaseRows);
-      if (releasedRemainder) {
-        stats.queueReleaseRows = (stats.queueReleaseRows ?? 0) + 1;
-        findings.push([issue, 'H66', releasedRemainder]);
+        const releasedRemainder = h66ReleasedNonDispatchableRemainder(issue, queueReleaseRows);
+        if (releasedRemainder) {
+          stats.queueReleaseRows = (stats.queueReleaseRows ?? 0) + 1;
+          findings.push([issue, 'H66', releasedRemainder]);
+        }
       }
     }
   }
@@ -22576,6 +22770,60 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
     }
   }
 
+  // H66's BUY pass (#18299) — the bounded half of the row, placed HERE for two
+  // reasons that are both mechanical.
+  //
+  //   1. AFTER every row that reads `commentCache`. A page bought here is the
+  //      NEWEST page of a thread, which is not the same object as the FIRST page
+  //      `commentRowsFor` caches; handing a partial window to H2's claim read or
+  //      H4's `Blocked-by:` fallback would make an absence out of a page nobody
+  //      read. Running last means no other row can be handed one. ⛔ And the
+  //      cache is written ONLY where the bought page IS the whole thread
+  //      (`plan.page === 1`), which is `seatPostRowsFor`'s own rule — it keeps
+  //      its window out of `commentCache` for exactly this reason — applied to
+  //      the one case where the two objects coincide.
+  //   2. AFTER the label pages are complete, because the ORDER and the CAP are
+  //      properties of the whole candidate set, not of one card.
+  //
+  // The request shape is H65's, reused rather than re-derived: ONE page per
+  // card, located from the carrier's own `comments` count, ⛔ never page 1 on a
+  // long thread (GitHub serves issue comments OLDEST-FIRST, so a page-less read
+  // returns the archive — the #18312 measurement).
+  //
+  // Three outcomes per card, and the summary clause counts all three: a page
+  // read and judged; a page whose fetch FAILED, which is UNJUDGED and never
+  // clean (#4690); and a carrier whose `comments` count is unreadable AND whose
+  // page 1 came back FULL — the newest comment may sit on a page nobody read, so
+  // it cannot be located and the card is UNJUDGED too, which is
+  // `h65NewestPagePlan`'s own contract rather than a second rule.
+  if (queueReleaseDeferred.length > 0) {
+    const plan = h66BuyOrder(queueReleaseDeferred, H66_THREAD_BUY_CAP);
+    stats.queueReleaseCap = H66_THREAD_BUY_CAP;
+    stats.queueReleaseDeferred = plan.deferred.length;
+    for (const issue of plan.buy) {
+      const pagePlan = h65NewestPagePlan(issue);
+      let rows = null;
+      try {
+        const page = await rest(h65CommentPagePath(OWNER_REPO, issue.number, pagePlan.page));
+        rows = Array.isArray(page) ? page : [];
+        stats.queueReleaseBought = (stats.queueReleaseBought ?? 0) + 1;
+      } catch {
+        rows = null;
+      }
+      if (rows !== null && !pagePlan.counted && rows.length >= H65_COMMENTS_PAGE_SIZE) rows = null;
+      if (rows === null) {
+        stats.queueReleaseUnjudged = (stats.queueReleaseUnjudged ?? 0) + 1;
+      } else if (pagePlan.page === 1) {
+        commentCache.set(issue.number, rows);
+      }
+      const releasedRemainder = h66ReleasedNonDispatchableRemainder(issue, rows);
+      if (releasedRemainder) {
+        stats.queueReleaseRows = (stats.queueReleaseRows ?? 0) + 1;
+        findings.push([issue, 'H66', releasedRemainder]);
+      }
+    }
+  }
+
   // H45's second half — the `pm:epic` index, read as its own population.
   //
   // LAST in the sweep, and that placement is the mechanism rather than a
@@ -22646,10 +22894,11 @@ const SELF_TEST_VERDICT = 'check-half-states self-test reached its verdict';
 
 /** Battery name → the minimum number of cases that battery must register. */
 export const SELF_TEST_BATTERIES = Object.freeze({
-  // 139 registered as this landed; the pin sits just under it so an ordinary
-  // refactor does not have to move a number, while a battery losing a THIRD of
-  // its cases — the 40 → 3 shape AGENTS.md names — fails loudly.
-  'H66 released queue card': 130,
+  // 183 registered as the bounded buy leg landed (139 before it); the pin sits
+  // just under that so an ordinary refactor does not have to move a number,
+  // while a battery losing a THIRD of its cases — the 40 → 3 shape AGENTS.md
+  // names — fails loudly. Raise it with the battery, never ahead of it.
+  'H66 released queue card': 172,
 });
 
 /** The floor on the ROSTER itself — how many batteries must be declared at all. */
@@ -29841,7 +30090,15 @@ Mutual exclusion: \`get_comments\` page 747 → \`[]\`, page 746 = my own R+117 
   // shares. ⚠️ The needles are ASSEMBLED — a literal one in a fixture would be
   // counted by the file-wide audit it exists to check (`RETIRED_ASSIGNEE_COINAGE`'s
   // reason, one row over).
-  t('seat window: the located page is REQUESTED in exactly one place', audit18312.purchaseSites, 1);
+  // ⚠️ REWRITTEN (#18299), not weakened: this pin read `1` while the located-page
+  // purchase existed only inside the seat memo. H66's bounded buy pass is a
+  // second one, against a DISJOINT population (an unassigned `pm:queue` CARD,
+  // never a `pm:seat` post), so the original argument — 「two is the same page
+  // bought twice per run」 — moves to `seatPurchaseSites`, which still reads 1
+  // and is the leg that would go red if a second seat purchase appeared.
+  t('seat window: the located page is REQUESTED in exactly two places, file-wide', audit18312.purchaseSites, 2);
+  t('seat window: ⭐ …and exactly ONE of them is inside the seat memo, which is the bound that matters', audit18312.seatPurchaseSites, 1);
+  t('seat window: …so the second is OUTSIDE the memo, on the card population', audit18312.purchaseSites - audit18312.seatPurchaseSites, 1);
   // ⚠️ REWRITTEN (#18325), not deleted: this pin read `2` while the memo's
   // readers were H44's seat leg and H65. H32's gather is the third, and it is
   // the FIRST to ask on every post in both populations — which is what makes
@@ -29853,7 +30110,15 @@ Mutual exclusion: \`get_comments\` page 747 → \`[]\`, page 746 = my own R+117 
   t('seat window: the audit SEES a second page-less read when one exists', seatWindowAudit([commentsPath18312('per_page=100'), commentsPath18312('per_page=100')].join('\n')).pagelessPaths.length, 2);
   t('seat window: …and does not read `per_page=` as a page number', seatWindowAudit(commentsPath18312('per_page=100&page=9')).pagelessPaths.length, 0);
   t('seat window: the audit SEES a second purchase site when one exists', seatWindowAudit(['h65CommentPagePath(', 'OWNER_REPO, a)\n', 'h65CommentPagePath(', 'OWNER_REPO, b)'].join('')).purchaseSites, 2);
-  t('seat window: …and the assembled needles did not defeat the file-wide audit', seatWindowAudit().purchaseSites, 1);
+  t('seat window: …and the assembled needles did not defeat the file-wide audit', seatWindowAudit().purchaseSites, 2);
+  // ⭐ The slicer's own controls. Without these `seatPurchaseSites` could read 1
+  // for the wrong reason — or 0 forever — and nobody would know: a slice that
+  // finds nothing and a memo with no purchase print the same number.
+  const MEMO_OPEN18312 = ['const seatPostRowsFor = async', '(issue) => {'].join(' ');
+  t('seat window: a source with NO memo slices to nothing, so the count is 0 rather than the whole file', seatWindowAudit(['h65CommentPagePath(', 'OWNER_REPO, a)'].join('')).seatPurchaseSites, 0);
+  t('seat window: …and a source WITH the memo finds the purchase inside it', seatWindowAudit([MEMO_OPEN18312, '  h65CommentPagePath(' + 'OWNER_REPO, a)', '  };'].join('\n')).seatPurchaseSites, 1);
+  t('seat window: …while a purchase AFTER the memo body is not counted as the memo\'s', seatWindowAudit([MEMO_OPEN18312, '  };', 'h65CommentPagePath(' + 'OWNER_REPO, a)'].join('\n')).seatPurchaseSites, 0);
+  t('seat window: the memo needle is ASSEMBLED, so it does not match its own declaration', (seatWindowAudit().commentPaths.length > 0) && seatWindowAudit().seatPurchaseSites === 1, true);
 
   // -- H32's clock and H38's `T_seat` read the NEWEST page (#18325) ----------
   //
@@ -32556,18 +32821,99 @@ Doubles as the fire's **write self-check** (step 0). \`201\` is not the reading.
   b(BATTERY66, 'H66 band: …and no band names a family the sweep never emits', familyRegistryCoverage().extra.length, 0);
   b(BATTERY66, 'H66 band: the registry still fits inside the ledger ROW CAP', Object.keys(HALF_STATE_FAMILY_BAND).length <= FAMILY_LEDGER_ROW_CAP, true);
   b(BATTERY66, 'H66 band: a gate row still outranks it', familyRank('H31') < familyRank('H66'), true);
-  b(BATTERY66, 'H66 census: every count key rides the enumerated forwarding contract', ['queueReleaseCandidates', 'queueReleaseThreadRead', 'queueReleaseRows'].every((k) => SWEEP_COUNT_KEYS.includes(k)), true);
-  const SUM66 = saidBy('h66QueueRelease', summaryLine({ queueReleaseCandidates: 100, queueReleaseThreadRead: 7, queueReleaseRows: 2 }, 0));
-  b(BATTERY66, 'H66 summary: the coverage triple is reported', SUM66.includes('100 open unassigned `pm:queue` card(s) could be spoken about'), true);
-  b(BATTERY66, 'H66 summary: …how many had a thread in hand', SUM66.includes('7 with a comment thread ALREADY in hand'), true);
-  b(BATTERY66, 'H66 summary: …and how many were listed', SUM66.includes('2 listed'), true);
-  b(BATTERY66, 'H66 summary: it says the row buys nothing', SUM66.includes('It fetches NOTHING'), true);
-  b(BATTERY66, 'H66 summary: …and WHY the gap is most of the population', SUM66.includes('H2 buys a thread only for an ASSIGNED card'), true);
+  b(BATTERY66, 'H66 census: every count key rides the enumerated forwarding contract', ['queueReleaseCandidates', 'queueReleaseThreadRead', 'queueReleaseBought', 'queueReleaseCap', 'queueReleaseDeferred', 'queueReleaseUnjudged', 'queueReleaseRows'].every((k) => SWEEP_COUNT_KEYS.includes(k)), true);
+  const SUM66 = saidBy('h66QueueRelease', summaryLine({ queueReleaseCandidates: 194, queueReleaseThreadRead: 7, queueReleaseBought: 100, queueReleaseCap: 100, queueReleaseDeferred: 87, queueReleaseUnjudged: 3, queueReleaseRows: 2 }, 0));
+  b(BATTERY66, 'H66 summary: the QUADRUPLE — candidates…', SUM66.includes('194 open unassigned `pm:queue` card(s) could be spoken about'), true);
+  b(BATTERY66, 'H66 summary: …already in hand…', SUM66.includes('7 with a comment thread ALREADY in hand'), true);
+  b(BATTERY66, 'H66 summary: …bought this run, with the cap named…', SUM66.includes('100 NEWEST comment page(s) BOUGHT this run (cap 100'), true);
+  b(BATTERY66, 'H66 summary: …and listed', SUM66.includes('2 listed'), true);
+  b(BATTERY66, 'H66 summary: the candidates the cap did NOT attempt are named, and are not clean', SUM66.includes('87 candidate(s) NOT ATTEMPTED at that cap'), true);
+  b(BATTERY66, 'H66 summary: …and the UNJUDGED count rides beside them', SUM66.includes('3 card(s) stayed UNJUDGED'), true);
+  b(BATTERY66, 'H66 summary: it says which two ways a card stays unjudged', SUM66.includes('whose fetch failed') && SUM66.includes('could not be LOCATED'), true);
+  b(BATTERY66, 'H66 summary: it says the buy is ONE page, the NEWEST one', SUM66.includes('ONE page per card, the NEWEST one'), true);
+  b(BATTERY66, 'H66 summary: …⛔ never page 1, and WHY', SUM66.includes('never page 1 on a long thread') && SUM66.includes('OLDEST-FIRST'), true);
+  b(BATTERY66, 'H66 summary: …and the candidate ORDER, with its reason', SUM66.includes('NEWEST-TOUCHED first, because a release is a write on the card'), true);
+  b(BATTERY66, 'H66 summary: the free half is still named, so a cached thread is visibly free', SUM66.includes('a thread another row already paid for costs nothing here'), true);
+  b(BATTERY66, 'H66 summary: a run under the cap does NOT print a not-attempted clause', saidBy('h66QueueRelease', summaryLine({ queueReleaseCandidates: 5, queueReleaseBought: 5, queueReleaseDeferred: 0 }, 0)).includes('NOT ATTEMPTED'), false);
+  b(BATTERY66, 'H66 summary: …and the cap is still named on that run', saidBy('h66QueueRelease', summaryLine({ queueReleaseCandidates: 5, queueReleaseBought: 5, queueReleaseDeferred: 0 }, 0)).includes('(cap 100)'), true);
+  b(BATTERY66, 'H66 summary: a bare line falls back to the DECLARED cap rather than to `undefined`', saidBy('h66QueueRelease', summaryLine({}, 0)).includes(`(cap ${H66_THREAD_BUY_CAP})`), true);
   b(BATTERY66, 'H66 summary: it publishes the zero the canonical leg measured', saidBy('h66QueueRelease', summaryLine({}, 0)).includes('appeared ZERO times'), true);
   b(BATTERY66, 'H66 summary: …and that it is a LISTING rather than a verdict', saidBy('h66QueueRelease', summaryLine({}, 0)).includes('A LISTING, never a verdict'), true);
   b(BATTERY66, 'H66 summary: the clause is rendered on EVERY run, not just interesting ones', saidBy('h66QueueRelease', summaryLine({}, 0)).includes('0 open unassigned'), true);
   b(BATTERY66, 'H66 summary: a bare line renders numbers, never `undefined`', saidBy('h66QueueRelease', summaryLine({}, 0)).includes('undefined'), false);
   b(BATTERY66, 'H66 summary: the anchor is declared in RENDER order, before the report-only tail', SUMMARY_CLAUSE_ANCHORS.findIndex(([k]) => k === 'h66QueueRelease') < SUMMARY_CLAUSE_ANCHORS.findIndex(([k]) => k === 'reportOnly'), true);
+
+  // -- H66's BOUNDED BUY leg (#18299 patch round) ---------------------------
+  //
+  // The row shipped reading the shared cache and nothing else; the first live
+  // sweep measured 194 candidates with a thread in hand for ONE. These cases
+  // pin the leg that closes that gap: what it buys, in which order, how much,
+  // and what it does when a buy fails.
+  const q66 = (n, updated, extra = {}) => ({
+    number: n,
+    state: 'open',
+    labels: [{ name: 'pm:queue' }],
+    assignees: [],
+    updated_at: updated,
+    ...extra,
+  });
+  const CAND66 = [
+    q66(1, '2026-09-10T00:00:00Z'),
+    q66(2, '2026-09-16T00:00:00Z'),
+    q66(3, '2026-09-01T00:00:00Z'),
+    q66(4, '2026-09-16T00:00:00Z'),
+  ];
+  const order66 = (issues, cap) => h66BuyOrder(issues, cap).buy.map((i) => i.number).join(',');
+
+  b(BATTERY66, 'H66 buy: the cap is 100, and it is a named constant rather than a literal in the pass', H66_THREAD_BUY_CAP, 100);
+  b(BATTERY66, 'H66 buy: ORDER is newest-touched first', order66(CAND66, 10), '4,2,1,3');
+  b(BATTERY66, 'H66 buy: …and the tie between two equal stamps is broken by card number, so the order is TOTAL', order66([CAND66[1], CAND66[3]], 10), '4,2');
+  b(BATTERY66, 'H66 buy: …an UNREADABLE stamp sorts LAST, ⛔ never promoted ahead of a dated card', order66([q66(9, 'not-a-date'), CAND66[2]], 10), '3,9');
+  b(BATTERY66, 'H66 buy: …a MISSING stamp likewise', order66([q66(9), CAND66[2]], 10), '3,9');
+  b(BATTERY66, 'H66 buy: the CAP is respected when candidates exceed it', h66BuyOrder(CAND66, 2).buy.length, 2);
+  b(BATTERY66, 'H66 buy: …and it takes the NEWEST ones, not the first ones handed in', order66(CAND66, 2), '4,2');
+  b(BATTERY66, 'H66 buy: …the rest are DEFERRED, ⛔ not dropped silently', h66BuyOrder(CAND66, 2).deferred.map((i) => i.number).join(','), '1,3');
+  b(BATTERY66, 'H66 buy: candidates + deferred always account for the whole set', h66BuyOrder(CAND66, 2).buy.length + h66BuyOrder(CAND66, 2).deferred.length, CAND66.length);
+  b(BATTERY66, 'H66 buy: a cap ABOVE the population buys all of it and defers none', h66BuyOrder(CAND66, 100).deferred.length, 0);
+  b(BATTERY66, 'H66 buy: a zero cap buys nothing and defers everything', `${h66BuyOrder(CAND66, 0).buy.length}:${h66BuyOrder(CAND66, 0).deferred.length}`, '0:4');
+  b(BATTERY66, 'H66 buy: a nonsense cap is read as zero, ⛔ never as unbounded', h66BuyOrder(CAND66, Number.NaN).buy.length, 0);
+  b(BATTERY66, 'H66 buy: a negative cap likewise', h66BuyOrder(CAND66, -5).buy.length, 0);
+  b(BATTERY66, 'H66 buy: an empty candidate set is not a crash', `${h66BuyOrder([], 10).buy.length}:${h66BuyOrder([], 10).deferred.length}`, '0:0');
+  b(BATTERY66, 'H66 buy: a non-array is not a crash either', h66BuyOrder(undefined, 10).buy.length, 0);
+  b(BATTERY66, 'H66 buy: the plan is PURE — the caller\'s array is not reordered under it', (() => { const input = [...CAND66]; h66BuyOrder(input, 2); return input.map((i) => i.number).join(','); })(), '1,2,3,4');
+
+  // What the buy actually asks for — H65's helpers, reused, ⛔ never page 1 on a
+  // long thread.
+  b(BATTERY66, 'H66 buy: a long thread is located on its NEWEST page, from the card\'s own count', h65NewestPagePlan({ comments: 250 }).page, 3);
+  b(BATTERY66, 'H66 buy: …and the request is that page, at the shared page size', h65CommentPagePath('o/r', 7696, h65NewestPagePlan({ comments: 250 }).page), '/repos/o/r/issues/7696/comments?per_page=100&page=3');
+  b(BATTERY66, 'H66 buy: a short thread stays on page 1 — there is no second request to make', h65NewestPagePlan({ comments: 12 }).page, 1);
+  b(BATTERY66, 'H66 buy: ⛔ an unreadable `comments` count cannot LOCATE a newest page', h65NewestPagePlan({}).counted, false);
+  b(BATTERY66, 'H66 buy: …which is why a FULL page-1 on such a carrier is read as UNJUDGED, never clean', h66ReleasedNonDispatchableRemainder(card66(), null), null);
+
+  // The bought rows are judged exactly as a cached thread is — one predicate,
+  // ⛔ not a second reader for the bought half.
+  b(BATTERY66, 'H66 buy: a BOUGHT page carrying a release is listed', typeof h66({}, RELEASED66), 'string');
+  b(BATTERY66, 'H66 buy: …and a bought page whose release returns the card to the pool stays silent', h66({}, REL66('去向 `pm:queue`, next seat re-claims')), null);
+  b(BATTERY66, 'H66 buy: a FAILED buy is UNJUDGED, ⛔ never clean — the H4 three-state contract', h66({}, null), null);
+  b(BATTERY66, 'H66 buy: …and is distinct from an EMPTY page, which is a real reading', h66({}, []), null);
+
+  // The pass itself, read off this file's source — the two properties no
+  // in-process call can observe.
+  const buyAudit66 = h66BuyAudit();
+  b(BATTERY66, 'H66 buy: a candidate is deferred in exactly ONE place', buyAudit66.pushSites, 1);
+  b(BATTERY66, 'H66 buy: ⭐ …and that place is guarded by the cache test, so a thread ALREADY in hand is never re-bought', buyAudit66.guardedPushSites, 1);
+  b(BATTERY66, 'H66 buy: the pass writes back into the shared cache in exactly one place', buyAudit66.wholeThreadCacheWrites, 1);
+  b(BATTERY66, 'H66 buy: …and every cache write in this file is accounted for — the card window, H50\'s walk, and this one', buyAudit66.cacheWriteSites, 3);
+  const PUSH66 = ['queueReleaseDeferred', '.push('].join('');
+  const WRITE66 = ['commentCache', '.set(issue.number, rows)'].join('');
+  b(BATTERY66, 'H66 buy: the audit SEES an UNGUARDED defer when one exists', h66BuyAudit(`if (true) { ${PUSH66}issue); }`).guardedPushSites, 0);
+  b(BATTERY66, 'H66 buy: …and still counts it as a site, so the two readings cannot be confused', h66BuyAudit(`if (true) { ${PUSH66}issue); }`).pushSites, 1);
+  b(BATTERY66, 'H66 buy: the audit SEES an UNGUARDED cache write when one exists', h66BuyAudit(`if (true) { ${WRITE66}; }`).wholeThreadCacheWrites, 0);
+  b(BATTERY66, 'H66 buy: …and the assembled needles did not defeat the file-wide audit', h66BuyAudit().pushSites, 1);
+  // ⭐ The located-page purchase this leg adds is OUTSIDE the seat memo, which is
+  // what keeps `seatWindowAudit`'s fetch-per-seat-post bound at one.
+  b(BATTERY66, 'H66 buy: the purchase it adds is outside the seat memo', seatWindowAudit().purchaseSites - seatWindowAudit().seatPurchaseSites, 1);
+  b(BATTERY66, 'H66 buy: …and the seat bound is untouched by it', seatWindowAudit().seatPurchaseSites, 1);
 
   // The roster itself — a floor that cannot be satisfied by a zero.
   b(BATTERY66, 'H66 floor: this battery is DECLARED on the roster', Object.prototype.hasOwnProperty.call(SELF_TEST_BATTERIES, BATTERY66), true);
