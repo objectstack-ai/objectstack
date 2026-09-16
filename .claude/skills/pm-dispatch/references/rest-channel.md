@@ -40,7 +40,7 @@
 - ⛔ 永不 MCP `issue_write`(锁 1 已拒);会话分类器拒改动 ⇒ 无通道,交有通道席位立卡。
 - ✓ 建卡带标签 `POST .../issues` · 改正文 `PATCH .../issues/{n}` · 认领 `POST .../issues/{n}/assignees`。
 - 请求体走文件(`-d @file`)或引号定界 heredoc(`<<'EOF'`),⛔ 永不内联双引号串。
-- 双引号内 shell 先展开反引号、`$(...)`、`$VAR`,请求尚未成形;只标题坏而正文完好即此形。
+- 每个写请求必带 `Content-Type: application/json`;缺头的 415 与判别式见配额段。
 - ✓ 请求复审 `POST .../pulls/{n}/requested_reviewers` · 开 PR `POST .../pulls` 带 `draft=true`。
 - ✓ `origin/main` 合进 PR head:`PUT .../pulls/{n}/update-branch`,PM 席位、零文件写、真合并提交。
 - `expected_head_sha` 须完整 40 字符 SHA(短 SHA 回 422);base 未动回 422 = 无事可做,不是失败。
