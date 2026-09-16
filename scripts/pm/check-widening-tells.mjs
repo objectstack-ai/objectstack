@@ -1501,9 +1501,9 @@ export function respellsExistingClosedSetKey(text, removedTexts) {
  *   the residual quiet direction the header names with its overturn condition.
  *
  * ⚠️ ⛔ Do not "tighten" ② to "only whitespace or a comment may follow
- * `retiredKey(`". Measured: that re-fires 30 of the 254 landed tombstones
- * (`packages/spec/src/data/driver.zod.ts:239` is one of eight in that file),
- * which is the exact false positive this reading exists to remove — and it
+ * `retiredKey(`". Measured: that re-fires 30 of the 254 landed tombstones, all
+ * of them in `packages/spec/src/data/driver.zod.ts`, which is the exact false
+ * positive this reading exists to remove — and it
  * closes nothing, because a key line that has not closed the call shows no
  * chain to catch.
  *
