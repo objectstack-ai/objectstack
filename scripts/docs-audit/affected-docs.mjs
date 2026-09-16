@@ -257,7 +257,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '#11178: WHY a row is unreachable, and the two causes that printed as one': 28,
   '`causes` GETS THE SAME TREATMENT, AT BOTH ENDS (#11867)': 16,
   'the ROUTE SOURCE concept: two kinds, and the runtime-registration guard (#11857)': 24,
-  'ROUTE-ANCHOR PRECISION, IN BOTH DIRECTIONS (#16696)': 16,
+  'ROUTE-ANCHOR PRECISION, IN BOTH DIRECTIONS (#16696)': 20,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -1593,20 +1593,34 @@ function routeTailOf(literal) {
  *     that writes `/api/v1/cloud/environments/:id` is documenting the control-plane route
  *     it names, not the data-plane one this anchor came from. Either spelling of the
  *     right name still counts — `:environmentId` and `{environmentId}` are one parameter.
- *  2. A CONCRETE EXAMPLE VALUE is admitted only where a STATIC segment still follows in
- *     the tail. That is the precondition above, made mechanical: a static segment to the
- *     right is what bounds the match, and a parameter with none is unbounded — filling it
- *     with `[A-Za-z0-9_%-]+` degrades the whole pattern to a prefix test on everything
- *     under `/environments/`, which is how `env_42` inside `/pub/v1/…/artifact` got in.
- *     `/:type/:name/history` keeps both concrete values, because `history` bounds them.
+ *  2. A CONCRETE EXAMPLE VALUE filling the tail's LAST segment must END the documented
+ *     path. Every earlier parameter is bounded by the rest of the pattern — the segments
+ *     to its right still have to be there — but the last one has nothing behind it, so a
+ *     value there degrades the whole pattern to a prefix test: `/environments/<anything>`,
+ *     which is how `env_42` inside `/pub/v1/…/artifact` got in. A page writing
+ *     `GET /api/v1/data/accounts` still matches `/data/:object`, because the path ends
+ *     where the anchor does; a page writing `GET /api/v1/data/account/123` no longer
+ *     does, because it is documenting `/data/:object/:id` — a different route, and the
+ *     one that lists it when the diff touches it.
  *
- * ⛔ WHAT WAS MEASURED AND REJECTED, so nobody re-derives it: requiring the match to sit
- * at the END of the documented path (the way the same tail is matched against a ledger
- * row, `route.endsWith(tail)`). It kills both bad hits — and also kills
- * `api/environment-routing.mdx`, the single most on-target page in that run, whose every
- * occurrence is `/api/v1/environments/:environmentId/...` with a segment after it, plus
+ * MEASURED, on `c7182b80c`, over the 228 distinct route tails declared in this repo's 28
+ * route-ledger files against all 195 hand-written docs (the denominator is
+ * `handwritten-docs.json`, the same one the tool's recall figures use): tail×page rows
+ * 571 → 524, −8.2%, with ZERO tails going from matching some page to matching none. Arm 1
+ * accounts for 5 of the 47 dropped rows and arm 2 for 42, and the 42 are one shape —
+ * a page documenting a LONGER route than the anchor, or not a route at all:
+ * `/packages/:id` matched eleven pages on the monorepo source paths `packages/core`,
+ * `packages/spec`, `packages/plugins` …, and `/meta/:type` matched
+ * `api/environment-routing.mdx` on the prose "data/meta/AI/automation".
+ *
+ * ⛔ WHAT WAS MEASURED AND REJECTED, so nobody re-derives it: requiring EVERY match to sit
+ * at the end of the documented path (the way the same tail is matched against a ledger
+ * row, `route.endsWith(tail)`). That reads −36.3% and it kills `api/environment-routing.mdx`,
+ * the single most on-target page in the #16694 run, whose every occurrence is
+ * `/api/v1/environments/:environmentId/...` with a segment after it — plus
  * `publish-and-preview.mdx`, `single-project-mode.mdx` and `http-protocol.mdx`. A route
- * prefix written with its own parameter named IS a page documenting that route.
+ * PREFIX written with the route's own parameter named IS a page documenting that route;
+ * that is why arm 2 is scoped to a concrete VALUE in the LAST position and nothing else.
  */
 function routePatternFor(tail) {
   const isParam = (s) => s.startsWith(':') || (s.startsWith('{') && s.endsWith('}'));
@@ -1618,9 +1632,10 @@ function routePatternFor(tail) {
       if (!isParam(s)) return quote(s);
       const name = quote(paramNameOf(s));
       const named = `:${name}|\\{${name}\\}`;
-      // Arm 2: is anything static left to the RIGHT of this segment to bound a value?
-      const bounded = segs.slice(i + 1).some((rest) => !isParam(rest));
-      return bounded ? `(?:${named}|[A-Za-z0-9_%-]+)` : `(?:${named})`;
+      // Arm 2: only the LAST segment has nothing behind it in the pattern to bound a
+      // concrete value, so only there does the documented path have to end.
+      const value = i === segs.length - 1 ? '[A-Za-z0-9_%-]+(?![\\w/-])' : '[A-Za-z0-9_%-]+';
+      return `(?:${named}|${value})`;
     })
     .join('/');
   return new RegExp(`/${body}(?![\\w-])`);
@@ -5842,7 +5857,15 @@ function selfTest() {
     ['/environments/:environmentId', 'artifact route (`/pub/v1/environments/:id/artifact[?commit=<id>]`) serves', false,
       'a DIFFERENT parameter name is a different route — #16696 finding 1, hit A'],
     ['/environments/:environmentId', "path: 'https://cloud.example.com/pub/v1/environments/env_42/artifact?commit=cmt_1a2b',", false,
-      'a concrete value cannot fill an UNBOUNDED trailing parameter — #16696 finding 1, hit B'],
+      'a concrete value in the LAST segment must end the documented path — #16696 finding 1, hit B'],
+    ['/data/:object', 'Create a record with `POST /api/v1/data/accounts` and read it back.', true,
+      'POSITIVE CONTROL for arm 2: a concrete value that DOES end the path still matches'],
+    ['/data/:object', 'Incoming API request: GET /api/v1/data/account/123', false,
+      'the same page text one segment longer is documenting /data/:object/:id, not this route'],
+    ['/data/:object/:id', 'Incoming API request: GET /api/v1/data/account/123', true,
+      '…and THAT tail is the one that lists it — the row moves, the page is not lost'],
+    ['/packages/:id', 'see [`packages/core`](https://github.com/o/r/blob/main/packages/core/src/x.ts)', false,
+      'a monorepo source path is not the wire route /api/v1/packages/:id'],
     ['/environments/:environmentId', 'Route REST, metadata, automation, AI, and package calls through /api/v1/environments/:environmentId/....', true,
       'POSITIVE CONTROL: the page that DOES name it stays listed (api/environment-routing.mdx:3)'],
     ['/environments/:environmentId', '| `auto` | Registers both unscoped `/api/v1/...` and scoped `/api/v1/environments/:environmentId/...` routes. |', true,
