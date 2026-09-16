@@ -198,8 +198,8 @@ Column footer summary configuration
 | **immutable** | `boolean` | optional | Editable on create, locked once the record exists (e.g. machine names). |
 | **required** | `boolean` | optional | Required override |
 | **hidden** | `boolean` | optional | Hidden override |
-| **colSpan** | `integer` | optional | [legacy — prefer `span`] Absolute column span (1-4). Fragile when the column count is derived per surface (mobile 1 / modal 2 / page 3-4): a fixed span only lines up at the width the author imagined. The renderer clamps it to the current column count. Prefer `span`. |
-| **span** | `Enum<'auto' \| 'full'>` | optional (default: `"auto"`) | Relative field width. 'auto' (default — omit it): the renderer sizes the field from its widget type × the current column count (wide widgets like textarea/richtext/json/file/subform take the whole row). 'full': whole row at any column count. Prefer this over the absolute `colSpan`. |
+| **colSpan** | `integer` | optional | Absolute column span (1-4). The renderer clamps it to the current column count and emits it as one container-query-scoped span class, so the cell starts at a real column boundary at every surface width; that class is inert below the breakpoint at which that many columns exist, and `colSpan: 1` emits no class at all. |
+| **span** | `Enum<'auto' \| 'full'>` | optional (default: `"auto"`) | Relative field width. 'auto' (default — omit it): the renderer sizes the field from its widget type × the current column count (wide widgets like textarea/richtext/json/file/subform take the whole row). 'full': compiles to a span of the section's declared column count, gated at the top breakpoint only — the whole row at that breakpoint, and identical to omitting the key at every narrower width. |
 | **widget** | `string` | optional | Custom widget/component name (overrides type-based inference) |
 | **language** | `string` | optional | Code editor language (for type=code) |
 | **keyField** | `{ field?: string; label?: string \| Record<string, string>; placeholder?: string \| Record<string, string>; helpText?: string \| Record<string, string>; … }` | optional | Key column config for record-typed fields |
@@ -363,8 +363,8 @@ View filter rule
 | **immutable** | `boolean` | optional | Editable on create, locked once the record exists (e.g. machine names). |
 | **required** | `boolean` | optional | Required override |
 | **hidden** | `boolean` | optional | Hidden override |
-| **colSpan** | `integer` | optional | [legacy — prefer `span`] Absolute column span (1-4). Fragile when the column count is derived per surface (mobile 1 / modal 2 / page 3-4): a fixed span only lines up at the width the author imagined. The renderer clamps it to the current column count. Prefer `span`. |
-| **span** | `Enum<'auto' \| 'full'>` | optional (default: `"auto"`) | Relative field width. 'auto' (default — omit it): the renderer sizes the field from its widget type × the current column count (wide widgets like textarea/richtext/json/file/subform take the whole row). 'full': whole row at any column count. Prefer this over the absolute `colSpan`. |
+| **colSpan** | `integer` | optional | Absolute column span (1-4). The renderer clamps it to the current column count and emits it as one container-query-scoped span class, so the cell starts at a real column boundary at every surface width; that class is inert below the breakpoint at which that many columns exist, and `colSpan: 1` emits no class at all. |
+| **span** | `Enum<'auto' \| 'full'>` | optional (default: `"auto"`) | Relative field width. 'auto' (default — omit it): the renderer sizes the field from its widget type × the current column count (wide widgets like textarea/richtext/json/file/subform take the whole row). 'full': compiles to a span of the section's declared column count, gated at the top breakpoint only — the whole row at that breakpoint, and identical to omitting the key at every narrower width. |
 | **widget** | `string` | optional | Custom widget/component name (overrides type-based inference) |
 | **language** | `string` | optional | Code editor language (for type=code) |
 | **keyField** | `{ field?: string; label?: string \| Record<string, string>; placeholder?: string \| Record<string, string>; helpText?: string \| Record<string, string>; … }` | optional | Key column config for record-typed fields |
