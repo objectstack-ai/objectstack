@@ -2955,8 +2955,9 @@ export class ObjectStackClient {
      * - `visibility` — server-owned, `private` today. The control plane forces
      *   it at create time and refuses the column here; a write entry arrives
      *   with the public-listing feature, on its OWN endpoint rather than this
-     *   generic update (2026-09-12 maintainer ruling). See `updateVisibility`
-     *   below, which is subject to exactly this refusal.
+     *   generic update (2026-09-12 maintainer ruling). This SDK carries no
+     *   method for that write: `updateVisibility` was RETIRED with exactly this
+     *   refusal as its reason — see the retirement note below.
      *
      * ⚠️ That 400 is an INHERITED reading, not one measured from this repo:
      * `/api/v1/cloud/*` is served by `objectstack-ai/cloud`, which is not
@@ -3080,35 +3081,35 @@ export class ObjectStackClient {
       return this.unwrapResponse<{ environment: any }>(res);
     },
 
-    /**
-     * Update the visibility of this environment ('private' | 'public').
-     * `private` (default) hides the environment from /pub/v1 enumeration but
-     * still allows anonymous artifact downloads when the URL includes an
-     * exact `?commit=<id>` (share-by-link). `public` lists the environment and
-     * freely exposes all revisions.
-     *
-     * ⛔ CURRENT STATE — this call is refused today, so the paragraph above
-     * describes a capability that does not exist yet. It PATCHes the generic
-     * `/api/v1/cloud/environments/:id` route with `{ visibility }`, and
-     * `visibility` is one of the server-owned columns that route rejects with
-     * a 400 (see `update` above). The 2026-09-12 maintainer ruling keeps
-     * `visibility` server-owned and forced to `private` until the
-     * public-listing feature ships, at which point it gets its OWN endpoint
-     * rather than this generic update.
-     *
-     * ⚠️ Note only. The signature and body below are deliberately untouched:
-     * retiring this method, re-signing it, or making it throw is a breaking
-     * change to a published SDK method and is the maintainer's ruling to make.
-     * ⚠️ The refusal is an INHERITED reading — see the provenance note on
-     * `update` above. It was NOT measured from this repo.
-     */
-    updateVisibility: async (id: string, visibility: 'private' | 'public') => {
-      const res = await this.fetch(`${this.baseUrl}/api/v1/cloud/environments/${encodeURIComponent(id)}`, {
-        method: 'PATCH',
-        body: JSON.stringify({ visibility }),
-      });
-      return this.unwrapResponse<{ environment: any }>(res);
-    },
+    // ⛔ RETIRED — `updateVisibility(id, visibility)` was REMOVED from this
+    // namespace under ADR-0049 enforce-or-remove (#17964; director-seat decision
+    // batch #132 item 1, maintainer 「同意」 2026-09-13). It PATCHed the generic
+    // `/api/v1/cloud/environments/:id` route with `{ visibility }`, and
+    // `visibility` is one of the server-owned columns that route refuses (see
+    // `update` above): a published method whose only behaviour was a write the
+    // control plane rejects. Declared-but-unfulfillable, so it is removed rather
+    // than left throwing forever.
+    //
+    // ADR-0087 structured TODO. A CALL SITE HAS NO CONVERSION — `objectstack
+    // migrate meta` rewrites stored metadata and an SDK call site is not stored
+    // metadata — so the TODO, not a conversion entry, is the channel that exists:
+    //
+    //   surface      `ObjectStackClient.environments.updateVisibility(id, visibility)`
+    //   reason       the capability its docblock described does not exist. The
+    //                2026-09-12 maintainer ruling keeps `visibility` server-owned
+    //                and forced to `private` until the public-listing feature
+    //                ships, at which point it arrives on its OWN endpoint rather
+    //                than on this generic update — so this method was never going
+    //                to be the carrier, even once the capability lands.
+    //   acceptance   when that endpoint ships, a NEW method is written here
+    //                against it. ⛔ Do not restore this one: restoring it
+    //                re-declares the generic-update write the control plane
+    //                refuses.
+    //
+    // There is no rewrite for a caller to apply — delete the call; the compiler
+    // is the channel that reaches every TypeScript consumer. Nothing in this repo
+    // called it, measured at retirement with a positive control on the sibling
+    // `updateHostname`.
 
     /**
      * List published artifact revisions for an environment. Each revision has

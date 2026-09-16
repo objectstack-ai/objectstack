@@ -2180,46 +2180,6 @@ export class HttpDispatcher {
         return handlePackagesRequest(this.domainDeps, path, method, body, query, _context);
     }
 
-
-    /**
-     * Cloud / Environment Control-Plane routes.
-     *
-     *  - GET    /cloud/drivers                                 → list registered ObjectQL drivers (for env provisioning)
-     *  - GET    /cloud/environments                            → list
-     *  - POST   /cloud/environments                            → provision (driver: memory | turso | <any registered driver>)
-     *  - GET    /cloud/environments/:id                        → detail (+ db, credential, membership)
-     *  - PATCH  /cloud/environments/:id                        → update displayName / plan / status / isDefault / metadata
-     *  - DELETE /cloud/environments/:id[?force=1]              → cascade-delete the project (cred/member/package install rows + physical DB)
-     *  - DELETE /cloud/organizations/:id                   → cascade-delete every project (and its DB) for the org, then drop the org
-     *  - POST   /cloud/environments/:id/retry                  → re-run provisioning for a failed environment
-     *  - POST   /cloud/environments/:id/activate               → mark as active for session (stub)
-     *  - POST   /cloud/environments/:id/credentials/rotate     → rotate credential
-     *  - GET    /cloud/environments/:id/members                → list members
-     *  - GET    /cloud/environments/:id/packages               → list installed packages
-     *  - POST   /cloud/environments/:id/packages               → install package into env
-     *  - GET    /cloud/environments/:id/packages/:pkgId        → get installation detail
-     *  - PATCH  /cloud/environments/:id/packages/:pkgId/enable  → enable package
-     *  - PATCH  /cloud/environments/:id/packages/:pkgId/disable → disable package
-     *  - DELETE /cloud/environments/:id/packages/:pkgId        → uninstall (scope=platform forbidden)
-     *  - POST   /cloud/environments/:id/packages/:pkgId/upgrade → upgrade to newer version
-     *
-     * Driver binding
-     * --------------
-     * Environments are not tied to any specific driver. At provisioning time the
-     * caller passes `driver` (a short name such as `memory`, `turso`, or any
-     * future `sql` / `postgres` driver). The dispatcher validates the name
-     * against the kernel's registered driver services (`driver.<name>`) and
-     * derives an appropriate placeholder `database_url` for the chosen driver.
-     * If `driver` is omitted, the dispatcher auto-selects the first available
-     * in preference order: turso → memory → any other registered driver.
-     *
-     * Backed by ObjectQL sys_environment / sys_environment_credential /
-     * sys_environment_member tables (registered by
-     * `@objectstack/service-tenant`'s `createTenantPlugin`).
-     * Physical database addressing (database_url, database_driver, etc.)
-     * is stored directly on the sys_environment row.
-     */
-
     /**
      * Resolve the calling user id from the request session, if any.
      * Returns `undefined` for anonymous calls or when auth is not wired up.
