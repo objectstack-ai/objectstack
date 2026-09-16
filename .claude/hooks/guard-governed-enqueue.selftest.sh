@@ -295,6 +295,53 @@ expect allow 'the same Bash spelling on an approved PR' \
   "$(bash_call 'gh pr merge 13794 -R objectstack-ai/objectstack')" \
   "OS_GOVERNED_ENQUEUE_FIXTURE=$F_PINNED"
 
+echo "== the CCR auto-merge mount is an enqueue, and the ONLY route a seat can reach =="
+# Both MCP tool names sit in `permissions.deny` and there is no `gh` in this
+# container, so `PUT .../pulls/<n>/ccr/auto_merge` is the spelling a compliant
+# seat actually writes — and it carries no literal `/merge` segment, so the
+# merge-URL reader above never saw it. Three verdicts are pinned on ONE payload
+# shape, so the fixture is the only thing that moves between them and the rows
+# cannot all be passing for some reason other than the predicates.
+CCR_MOUNT='curl -sS -X PUT https://api.github.com/repos/objectstack-ai/objectstack/pulls/13794/ccr/auto_merge -H "Content-Type: application/json" -d "{}"'
+expect block 'a REST PUT .../pulls/<n>/ccr/auto_merge through curl' \
+  "$(bash_call "$CCR_MOUNT")" "OS_GOVERNED_ENQUEUE_FIXTURE=$F_UNAPPROVED"
+expect_says 'approve BEFORE enqueue' 'the ccr mount earns the SAME refusal, not a second one' \
+  "$(bash_call "$CCR_MOUNT")" "OS_GOVERNED_ENQUEUE_FIXTURE=$F_UNAPPROVED"
+expect_says 'AGENTS.md' 'the ccr refusal names the governed hit, so the register really ran' \
+  "$(bash_call "$CCR_MOUNT")" "OS_GOVERNED_ENQUEUE_FIXTURE=$F_UNAPPROVED"
+expect allow 'the same ccr mount on a diff that is not governed' \
+  "$(bash_call "$CCR_MOUNT")" "OS_GOVERNED_ENQUEUE_FIXTURE=$F_CLEAR"
+expect allow 'the same ccr mount with an AUTHORIZED APPROVED review' \
+  "$(bash_call "$CCR_MOUNT")" "OS_GOVERNED_ENQUEUE_FIXTURE=$F_PINNED"
+expect block 'gh api --method PUT .../pulls/<n>/ccr/auto_merge' \
+  "$(bash_call 'gh api --method PUT /repos/objectstack-ai/objectstack/pulls/13794/ccr/auto_merge')" \
+  "OS_GOVERNED_ENQUEUE_FIXTURE=$F_UNAPPROVED"
+
+# ⛔ THE DISARM IS NOT AN ENQUEUE. `DELETE` on that SAME path unmounts auto-merge
+# — the corrective call a seat makes on a PR that should not be queued — so
+# refusing it would block the repair this file's own refusal text asks for. The
+# method is therefore read on this route. The row is not vacuous: the block row
+# at the top of this section is the same URL, the same fixture and the same
+# segment shape with `PUT`, so only the method separates them.
+expect allow 'DELETE on the ccr auto-merge path is the DISARM, never the mount' \
+  "$(bash_call 'curl -sS -X DELETE https://api.github.com/repos/objectstack-ai/objectstack/pulls/13794/ccr/auto_merge')" \
+  "OS_GOVERNED_ENQUEUE_FIXTURE=$F_UNAPPROVED"
+# ...and the ready flip is not an enqueue either: it queues nothing, and it is
+# the step that PRODUCES the review this guard is waiting for.
+expect allow 'POST .../pulls/<n>/ccr/ready_for_review is not an arm' \
+  "$(bash_call 'curl -sS -X POST https://api.github.com/repos/objectstack-ai/objectstack/pulls/13794/ccr/ready_for_review')" \
+  "OS_GOVERNED_ENQUEUE_FIXTURE=$F_UNAPPROVED"
+# The CONTROL on the other side of that method reading: `/pulls/<n>/merge` has no
+# disarm twin, so its method is not read at all — with none named, and with a
+# verb that would be a disarm on the ccr route. Both still block, which is this
+# arm's behaviour unchanged to the byte.
+expect block 'the merge route with NO method named is still an enqueue' \
+  "$(bash_call 'curl -sS https://api.github.com/repos/objectstack-ai/objectstack/pulls/13794/merge -d "{}"')" \
+  "OS_GOVERNED_ENQUEUE_FIXTURE=$F_UNAPPROVED"
+expect block 'the merge route is not method-read: DELETE there still blocks' \
+  "$(bash_call 'curl -sS -X DELETE https://api.github.com/repos/objectstack-ai/objectstack/pulls/13794/merge')" \
+  "OS_GOVERNED_ENQUEUE_FIXTURE=$F_UNAPPROVED"
+
 echo "== a bare \`gh pr merge <n>\` derives the slug from the checkout's OWN origin =="
 # The second half of this card's defect, and the expensive half: with no `-R` the
 # target repo comes from the checkout's `origin`, so a `.git` suffix left on the
@@ -343,6 +390,9 @@ expect allow 'grep -n "gh pr merge" AGENTS.md' \
   "$(bash_call 'grep -n "gh pr merge" AGENTS.md')" "OS_GOVERNED_ENQUEUE_FIXTURE=$F_UNAPPROVED"
 expect allow 'echo "never gh pr merge a governed PR"' \
   "$(bash_call 'echo "never gh pr merge a governed PR"')" "OS_GOVERNED_ENQUEUE_FIXTURE=$F_UNAPPROVED"
+expect allow 'echo "the ccr auto_merge mount, described rather than made"' \
+  "$(bash_call 'echo "never PUT /repos/o/r/pulls/13794/ccr/auto_merge on a governed PR"')" \
+  "OS_GOVERNED_ENQUEUE_FIXTURE=$F_UNAPPROVED"
 
 echo "== unrelated tools and commands are untouched =="
 expect allow 'a Bash command that enqueues nothing' \
@@ -628,6 +678,24 @@ for m in mcp__github__enable_pr_auto_merge mcp__github__merge_pull_request; do
     fail=$((fail + 1)); printf '  FAIL no PreToolUse matcher covers %s\n' "$m"
   fi
 done
+
+# The REST routes reach this hook through the `Bash` matcher, not through a tool
+# name, so "is the arm registered?" is a different question there — and the one
+# that mattered: the MCP rows above were green the whole time the guard watched
+# no spelling a seat could write. Two halves, both asserted: the DOOR (the Bash
+# matcher runs this hook) and the ARM behind it (the URL reader names the ccr
+# route in CODE, comments excluded, so deleting the regex alternative is red
+# here even if every fixture row above were deleted with it).
+if [ -f "$settings" ] && jq -e '[.hooks.PreToolUse[] | select(.matcher == "Bash") | .hooks[].command] | any(test("guard-governed-enqueue.sh"))' "$settings" >/dev/null 2>&1; then
+  pass=$((pass + 1)); printf '  ok   wired  the Bash matcher runs this hook (the door every REST spelling comes through)\n'
+else
+  fail=$((fail + 1)); printf '  FAIL no PreToolUse Bash matcher runs this hook — every REST enqueue spelling is unguarded\n'
+fi
+if grep -vE '^[[:space:]]*#' "$hook" | grep -qF 'ccr/auto_merge'; then
+  pass=$((pass + 1)); printf '  ok   wired  the URL reader names the ccr auto-merge route in CODE\n'
+else
+  fail=$((fail + 1)); printf '  FAIL the URL reader no longer names the ccr auto-merge route: the route a seat can reach is unwatched again\n'
+fi
 
 printf '\n%s passed, %s failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]

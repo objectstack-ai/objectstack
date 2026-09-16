@@ -4,9 +4,20 @@
 #
 # Blocks the enqueue-class tool calls — `mcp__github__enable_pr_auto_merge`,
 # `mcp__github__merge_pull_request`, and the Bash spellings (`gh pr merge`, a
-# `PUT .../pulls/<n>/merge` REST call) — when the target PR's changed files are
-# governed and no account in `GOVERNED_APPROVERS` holds an APPROVED review whose
-# `commit_id` equals the PR's current head. Everything else is allowed.
+# `PUT .../pulls/<n>/merge` REST call, a `PUT .../pulls/<n>/ccr/auto_merge` REST
+# call) — when the target PR's changed files are governed and no account in
+# `GOVERNED_APPROVERS` holds an APPROVED review whose `commit_id` equals the PR's
+# current head. Everything else is allowed.
+#
+# ⚠️ THE REST ROUTES ARE THE ONLY ONES A COMPLIANT SEAT CAN REACH HERE, so they
+# are not a nicety beside the MCP arm — they are the arm that fires. Both MCP
+# tool names sit in `permissions.deny` in `.claude/settings.json`, and there is
+# no `gh` in this container class (measured, below). What is left is curl, and
+# the protocol routes auto-merge through `PUT .../pulls/<n>/ccr/auto_merge`
+# alone. A guard that watched `/pulls/<n>/merge` only would read as present and
+# be absent: a `/pulls/<n>/ccr/auto_merge` URL never carries the literal `/merge`
+# segment that spelling requires — after the number comes `ccr/`. The MCP arm stays exactly where it is — a deny
+# roster is a policy that can be edited, and defence in depth costs nothing.
 #
 # ## Why a CLIENT-SIDE guard, when the queue guard already refuses
 #
@@ -276,12 +287,64 @@ split_segments() {
   segments+=("$seg")
 }
 
-# A REST merge URL in any spelling: .../repos/<owner>/<repo>/pulls/<n>/merge
-url_target() { # url_target <word> -> "owner repo pull" or empty
+# A REST enqueue URL in any spelling. Two routes, and the fourth field names
+# WHICH, because they are not read the same way once the method is considered:
+#
+#   .../repos/<owner>/<repo>/pulls/<n>/merge           — merge this PR now
+#   .../repos/<owner>/<repo>/pulls/<n>/ccr/auto_merge  — mount auto-merge on it
+#
+# ⛔ `POST .../pulls/<n>/ccr/ready_for_review` is deliberately NOT a route here.
+# Flipping a draft ready offers a PR for review; it queues nothing, and a guard
+# that refused it would be refusing the step that PRODUCES the approval this
+# file is asking for.
+url_target() { # url_target <word> -> "owner repo pull route" or empty
   local w="${1//\"/}"
   w="${w//\'/}"
-  [[ "$w" =~ /repos/([A-Za-z0-9._-]+)/([A-Za-z0-9._-]+)/pulls/([0-9]+)/merge ]] || return 1
-  printf '%s %s %s' "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}" "${BASH_REMATCH[3]}"
+  [[ "$w" =~ /repos/([A-Za-z0-9._-]+)/([A-Za-z0-9._-]+)/pulls/([0-9]+)/(merge|ccr/auto_merge) ]] || return 1
+  printf '%s %s %s %s' "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}" "${BASH_REMATCH[3]}" "${BASH_REMATCH[4]}"
+}
+
+# The HTTP method a `curl` / `wget` / `gh api` segment NAMES, upper-cased, or
+# empty when it names none. `-X PUT`, `-XPUT`, `--request PUT`, `--request=PUT`
+# and gh's `--method PUT` are the spellings; a repeated flag resolves to the LAST
+# one, which is how curl itself resolves it.
+segment_method() { # segment_method <word>... -> METHOD or empty
+  local m="" j
+  local -a mw=("$@")
+  for ((j = 0; j < ${#mw[@]}; j++)); do
+    case "${mw[$j]}" in
+      -X | --request | --method) m="${mw[$((j + 1))]:-}" ;;
+      -X*) m="${mw[$j]#-X}" ;;
+      --request=*) m="${mw[$j]#--request=}" ;;
+      --method=*) m="${mw[$j]#--method=}" ;;
+    esac
+  done
+  m="${m//\"/}"
+  m="${m//\'/}"
+  # `tr`, not the bash-4 case-modification operator the repo-wide floor gate
+  # refuses (scripts/check-bash32-floor.mjs): macOS ships bash 3.2.
+  printf '%s' "$m" | tr 'a-z' 'A-Z'
+}
+
+# Is this route, called with this method, an ENQUEUE?
+#
+# `/pulls/<n>/merge` carries no verb that is not one — the method is not read at
+# all there, which is this guard's behaviour to the byte and stays it.
+#
+# `/pulls/<n>/ccr/auto_merge` does carry one: the SAME path with `DELETE` is the
+# DISARM, the call that takes a mounted PR back out of the queue. Refusing that
+# on an unapproved governed PR would block the one action this file's whole
+# argument is asking for, so the disarm and the read verbs are named and
+# allowed. Everything else on that path is the mount, a segment naming no method
+# included: the protocol spells the mount as a PUT, and an unnamed method there
+# is a call this guard would rather see than miss.
+route_is_enqueue() { # route_is_enqueue <route> <method>
+  if [ "$1" != "merge" ]; then
+    case "$2" in
+      DELETE | GET | HEAD) return 1 ;;
+    esac
+  fi
+  return 0
 }
 
 # The `owner/repo` a checkout's `origin` names, or nothing. ONE reader with two
@@ -331,7 +394,13 @@ segment_target() { # segment_target <segment> -> "owner repo pull" or empty
   # the identification; no method sniffing, because that URL has no read verb.
   if [ "$head" = "curl" ] || [ "$head" = "wget" ]; then
     for ((j = i + 1; j < n; j++)); do
-      if hit="$(url_target "${w[$j]}")"; then printf '%s' "$hit"; return 0; fi
+      if hit="$(url_target "${w[$j]}")"; then
+        # The route is the LAST field, the target the first three. The method is
+        # read from the whole segment, not from the URL word.
+        route_is_enqueue "${hit##* }" "$(segment_method "${w[@]}")" || return 1
+        printf '%s' "${hit% *}"
+        return 0
+      fi
     done
     return 1
   fi
@@ -339,10 +408,14 @@ segment_target() { # segment_target <segment> -> "owner repo pull" or empty
   [ "$head" = "gh" ] || return 1
   i=$((i + 1))
 
-  # `gh api … /repos/o/r/pulls/N/merge`
+  # `gh api … /repos/o/r/pulls/N/merge`, and the ccr route through the same door
   if [ "${w[$i]:-}" = "api" ]; then
     for ((j = i + 1; j < n; j++)); do
-      if hit="$(url_target "${w[$j]}")"; then printf '%s' "$hit"; return 0; fi
+      if hit="$(url_target "${w[$j]}")"; then
+        route_is_enqueue "${hit##* }" "$(segment_method "${w[@]}")" || return 1
+        printf '%s' "${hit% *}"
+        return 0
+      fi
     done
     return 1
   fi
