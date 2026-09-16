@@ -156,7 +156,7 @@ const result = AuthProvider.parse(data);
 | **email** | `string` | ✅ | Email address |
 | **emailVerified** | `boolean` | optional (default: `false`) | Is email verified? |
 | **name** | `string` | ✅ | Display name |
-| **image** | `string` | optional | Avatar URL |
+| **image** | `string \| null` | optional | Avatar URL |
 | **username** | `string` | optional | Username (optional) |
 | **roles** | `string[]` | optional (default: `[]`) | Assigned role IDs |
 | **tenantId** | `string` | optional | Current tenant ID |
@@ -201,7 +201,7 @@ const result = AuthProvider.parse(data);
 | **email** | `string` | ✅ | Email address |
 | **emailVerified** | `boolean` | optional (default: `false`) | Is email verified? |
 | **name** | `string` | ✅ | Display name |
-| **image** | `string` | optional | Avatar URL |
+| **image** | `string \| null` | optional | Avatar URL |
 | **username** | `string` | optional | Username (optional) |
 | **roles** | `string[]` | optional (default: `[]`) | Assigned role IDs |
 | **tenantId** | `string` | optional | Current tenant ID |
