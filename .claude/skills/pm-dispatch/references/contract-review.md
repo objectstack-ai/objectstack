@@ -38,7 +38,7 @@
 - 清标即落地:PASS ⇒ 同席同笔剥双载体;清标同笔落 PR provenance 评论,引记录 id 与所判 head。
 - 随后按 `landing-operations.md` 走落地前检 → 转 ready → 挂 auto-merge 或入队。
 - 轮次报告设复审清单专节,形状与代裁清单同为强制审计。
-- 落地前检三条:① 席内条款②复核 PASS 在案,即 PR 或卡上同形的复核记录(档位按逐车道)。
+- 落地前检三条:① 席内条款②复核 PASS 在案,即 PR 或卡上同形的复核记录(档位按实测)。
 - ② 双载体已清,逐对机读 `node scripts/pm/check-clause2-carriers.mjs --pair PR-NUMBER`。
 - 0 = 双肢一致、无放宽 tell、head 上有记录;4 = 任一不成立;3 = 环境答不了,⛔ 不作干净。
 - 放宽 tell 由 `scripts/pm/check-widening-tells.mjs` 判,`no` 撞新键/成员/导出/登记即拒,附 file:line。
@@ -48,8 +48,8 @@
 
 ## 降档保险丝(机读)
 
-- 保险丝只管 spec 席条款②复核与 skills 席,每场前必读服役档,读法见 `platform-readings.md`。
-- 余席条款②复核与总监席裁决非达档裁决,⛔ 不受本丝;总监席档位由维护者逐场定。
+- 保险丝管每个出条款②裁决的席,每场前必读服役档,读法见 `platform-readings.md`。
+- 总监席裁决非达档裁决,⛔ 不受本丝;总监席档位由维护者逐场定。
 - ⛔ 自述档位与传参皆非读数;条款②的 `mode:subagent` 派发恒保留标至席内复核完成。
 - 读数不达档 ⇒ 改走转录核验的复核子代理;标签原样留置,队列外等待是安全态。
 - 保险丝只测座位自会话:`mode:subagent` 里 `get_session` 量的是派发会话,⛔ 不作互证。
