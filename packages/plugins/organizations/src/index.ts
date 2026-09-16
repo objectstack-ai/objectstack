@@ -63,6 +63,10 @@ export { OrganizationsPlugin as OrgScopingPlugin } from './organizations-plugin.
 export type { OrganizationsPluginOptions as OrgScopingPluginOptions } from './organizations-plugin.js';
 export { claimOrphanOrgRows } from './claim-orphan-org-rows.js';
 export { claimOrgSeedOwnership } from './claim-org-seed-ownership.js';
+// The receiver type both back-fills declare. Exported so a caller can name the
+// engine it hands over -- and so the tenant-audit census can READ that receiver
+// instead of reporting it as a site nothing places.
+export type { OrgScopingEngine } from './org-scoping-engine.js';
 // ⛔ No donor-org clone is exported, and none may be re-added (cloud#1345).
 // A new organization's rows come from the APP's own seed definitions
 // (`seed-datasets` / `seed-replayer`, replayed per tenant) or the organization

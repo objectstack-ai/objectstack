@@ -23,6 +23,8 @@
 
 import type { ServiceObject } from '@objectstack/spec/data';
 
+import type { OrgScopingEngine } from './org-scoping-engine.js';
+
 interface ClaimOwnershipOptions {
   logger?: {
     info: (message: string, meta?: Record<string, any>) => void;
@@ -49,7 +51,7 @@ function hasField(schema: ServiceObject, field: string): boolean {
  * and updates the org's unowned rows as `isSystem`. Returns a per-object summary.
  */
 export async function claimOrgSeedOwnership(
-  ql: any,
+  ql: OrgScopingEngine,
   organizationId: string,
   ownerUserId: string,
   options: ClaimOwnershipOptions = {},
@@ -57,7 +59,7 @@ export async function claimOrgSeedOwnership(
   const logger = options.logger;
   if (!organizationId || !ownerUserId) return [];
   if (!ql || typeof ql.update !== 'function' || typeof ql.find !== 'function') return [];
-  const registry = (ql as any).registry;
+  const registry = ql.registry;
   if (!registry || typeof registry.getAllObjects !== 'function') {
     logger?.warn?.('[org-scoping] claimOrgSeedOwnership: registry unavailable');
     return [];
