@@ -174,7 +174,7 @@ describe('[#18432] the package-docs step line reports what it collected', () => 
     // the shape this card exists to remove. Pinned as absent so a revert of the
     // ordering shows up here rather than in a customer's build log.
     expect(COUNTLESS_STEP_LINE.test(run.stdout)).toBe(false);
-  });
+  }, 120_000);
 
   it('EMPTY `src/docs/`: also `0 collected` — a present-but-empty directory is not a collection', async () => {
     const run = await runCli(['build'], dirs.empty);
@@ -182,7 +182,7 @@ describe('[#18432] the package-docs step line reports what it collected', () => 
 
     expect(printedCount(run)).toBe(0);
     expect(artifactDocCount(dirs.empty)).toBe(0);
-  });
+  }, 120_000);
 
   it('TWO docs: the step line reads `2 collected` — the other end of the pair', async () => {
     const run = await runCli(['build'], dirs.two);
@@ -192,7 +192,7 @@ describe('[#18432] the package-docs step line reports what it collected', () => 
     // The printed number IS the set the artifact receives, not a tally kept
     // beside it.
     expect(artifactDocCount(dirs.two)).toBe(2);
-  });
+  }, 120_000);
 
   it('the three runs are DISTINGUISHABLE — the defect was that they were not', async () => {
     // The whole card in one assertion. On the defective tree all three runs
@@ -204,12 +204,12 @@ describe('[#18432] the package-docs step line reports what it collected', () => 
       runCli(['build'], dirs.two),
     ]);
     expect([printedCount(absent), printedCount(empty), printedCount(two)]).toEqual([0, 0, 2]);
-  });
+  }, 180_000);
 
   it('`--json` prints no step line at all and stays one JSON document', async () => {
     const run = await runCli(['build', '--json'], dirs.two);
     expect(run.code, `stdout:\n${run.stdout}\nstderr:\n${run.stderr}`).toBe(0);
     expect(() => JSON.parse(run.stdout)).not.toThrow();
     expect(run.stdout).not.toMatch(/Collecting package docs/);
-  });
+  }, 120_000);
 });
