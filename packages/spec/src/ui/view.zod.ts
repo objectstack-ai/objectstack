@@ -2607,12 +2607,14 @@ const FormFieldBaseSchema = lazySchema(() => {
   immutable: z.boolean().optional().describe('Editable on create, locked once the record exists (e.g. machine names).'),
   required: z.boolean().optional().describe('Required override'),
   hidden: z.boolean().optional().describe('Hidden override'),
-  colSpan: z.number().int().min(1).max(4).optional().describe('[legacy — prefer `span`] Absolute column span (1-4). Fragile when the column count is derived per surface (mobile 1 / modal 2 / page 3-4): a fixed span only lines up at the width the author imagined. The renderer clamps it to the current column count. Prefer `span`.'),
+  colSpan: z.number().int().min(1).max(4).optional().describe('Absolute column span (1-4). The renderer clamps it to the current column count and emits it as one container-query-scoped span class, so the cell starts at a real column boundary at every surface width; that class is inert below the breakpoint at which that many columns exist, and `colSpan: 1` emits no class at all.'),
   /**
-   * [#2578] Relative field width — decoupled from the (often auto-derived)
-   * column count, so it stays correct at 1/2/3/4 columns.
+   * [#2578] Relative field width, authored instead of an absolute column span.
+   * Browser measurement at three surface widths found that 'full' compiles to
+   * a span of the section's declared column count, gated at the top breakpoint
+   * only — it is not a whole row at every column count.
    */
-  span: z.enum(['auto', 'full']).default('auto').describe("Relative field width. 'auto' (default — omit it): the renderer sizes the field from its widget type × the current column count (wide widgets like textarea/richtext/json/file/subform take the whole row). 'full': whole row at any column count. Prefer this over the absolute `colSpan`."),
+  span: z.enum(['auto', 'full']).default('auto').describe("Relative field width. 'auto' (default — omit it): the renderer sizes the field from its widget type × the current column count (wide widgets like textarea/richtext/json/file/subform take the whole row). 'full': compiles to a span of the section's declared column count, gated at the top breakpoint only — the whole row at that breakpoint, and identical to omitting the key at every narrower width."),
 
   /** Custom widget override — only needed when auto-inference is insufficient */
   widget: z.string().optional().describe('Custom widget/component name (overrides type-based inference)'),

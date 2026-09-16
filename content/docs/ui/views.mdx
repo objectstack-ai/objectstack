@@ -431,7 +431,7 @@ fields: [
     placeholder: 'Enter title',
     helpText: 'A brief description of the task',
     required: true,              // Override required
-    span: 'full',                // Take the whole row at any column count
+    span: 'full',                // Whole row at the top breakpoint; below it, same as omitting
     visibleWhen: "record.status != 'cancelled'",
   },
 ]
@@ -446,8 +446,8 @@ fields: [
 | `readonly` | `boolean` | Read-only override |
 | `required` | `boolean` | Required override |
 | `hidden` | `boolean` | Hidden override |
-| `span` | `'auto' \| 'full'` | Relative width — `'full'` takes the whole row at any column count (preferred) |
-| `colSpan` | `1-4` | Legacy absolute column span — prefer `span` |
+| `span` | `'auto' \| 'full'` | Relative width — `'full'` compiles to a span of the section's declared column count, gated at the top breakpoint only: the whole row there, identical to omitting the key at narrower widths |
+| `colSpan` | `1-4` | Absolute column span, clamped by the renderer to the current column count — grid-aligned at every surface width |
 | `widget` | `string` | Custom widget/component name |
 | `dependsOn` | `string` | Parent field for cascading |
 | `visibleWhen` | `string` | Visibility predicate (CEL); runtime form fields bind `record` (+ `previous`, `parent`) and, since objectui#6010, `current_user` — the identity scope page components and per-option predicates already bound (ADR-0089 D1). Form **sections** bind the same scope since objectui#6110 + objectui#6111. One surface still evaluates it unbound, where the predicate faults open: the public `/f/:slug` route, mounted outside any provider on purpose because an anonymous visitor has no principal — the authed `/forms/:name` publishes the session principal and binds normally. ⚠️ Either way the binding is **client-side only**: nothing on the write path evaluates a form-view field or section `visibleWhen`, so a `current_user.positions` test here hides controls and protects no data — declare permission-set [field-level security](/docs/permissions/field-level-security) for that. No `features.*` on any form-view predicate — refused at parse, see the boundary note below. (was `visibleOn`, ADR-0089) |
