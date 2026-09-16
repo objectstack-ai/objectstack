@@ -32497,11 +32497,22 @@ Doubles as the fire's **write self-check** (step 0). \`201\` is not the reading.
   b(BATTERY66, 'H66 anchors: …and every destination names itself for the sentence', H66_NON_QUEUE_DESTINATIONS.every((d) => typeof d.name === 'string' && d.name.length > 0), true);
 
   // The verdict helper, read three-valued on its own.
+  //
+  // ⚠️ Through `verdict66`, never `h66ReleaseVerdict(…).<field>`: the helper is
+  // three-valued BY DESIGN — `null` when the comment is no release record — so a
+  // direct field read throws while evaluating `b()`'s ARGUMENTS and ABORTS the
+  // whole suite. Measured here during the anchor ablation, on the announcement
+  // case. The describing string keeps 「the verdict went null」 distinguishable
+  // from 「the field said something else」, which is `says()`'s reason one block over.
+  const verdict66 = (body, field) => {
+    const v = h66ReleaseVerdict(body);
+    return v === null ? 'NO VERDICT (null)' : v[field];
+  };
   b(BATTERY66, 'H66 verdict: an ordinary comment is not a release record at all', h66ReleaseVerdict('looks good to me'), null);
-  b(BATTERY66, 'H66 verdict: a `Release:` line to the pool is DISPATCHABLE', h66ReleaseVerdict('Release: session `x` — 去向 `pm:queue`').dispatchable, true);
-  b(BATTERY66, 'H66 verdict: …to anywhere else it is not', h66ReleaseVerdict('Release: session `x` — 去向 the maintainer').dispatchable, false);
-  b(BATTERY66, 'H66 verdict: …and it says which leg answered', h66ReleaseVerdict('Release: session `x` — 去向 the maintainer').leg, 'release-line');
-  b(BATTERY66, 'H66 verdict: the announcement leg names itself too', h66ReleaseVerdict(H66_ANNOUNCE).leg, 'announcement');
+  b(BATTERY66, 'H66 verdict: a `Release:` line to the pool is DISPATCHABLE', verdict66('Release: session `x` — 去向 `pm:queue`', 'dispatchable'), true);
+  b(BATTERY66, 'H66 verdict: …to anywhere else it is not', verdict66('Release: session `x` — 去向 the maintainer', 'dispatchable'), false);
+  b(BATTERY66, 'H66 verdict: …and it says which leg answered', verdict66('Release: session `x` — 去向 the maintainer', 'leg'), 'release-line');
+  b(BATTERY66, 'H66 verdict: the announcement leg names itself too', verdict66(H66_ANNOUNCE, 'leg'), 'announcement');
   b(BATTERY66, 'H66 verdict: ⛔ `Released:` is a MALFORMED release, ⛔ not a dialect — no line is read', h66ReleaseVerdict('Released: session `x` — 去向 the maintainer'), null);
   b(BATTERY66, 'H66 verdict: ⛔ prose about releasing is not a record', h66ReleaseVerdict('We will release: the card tomorrow'), null);
   b(BATTERY66, 'H66 verdict: an empty body is not a crash', h66ReleaseVerdict(undefined), null);
@@ -32509,7 +32520,7 @@ Doubles as the fire's **write self-check** (step 0). \`201\` is not the reading.
   // 「`pm:queue` added」 in their state-write paragraph, so a body-wide read for
   // the label would clear precisely the specimens this row exists to list.
   b(BATTERY66, 'H66 verdict: ⛔ `pm:queue` in the BODY does not clear an announcement', typeof h66({}, thread66(`${H66_ANNOUNCE}\n\nState written: \`pm:dispatched\` stripped, \`pm:queue\` added, assignee cleared.\n`)), 'string');
-  b(BATTERY66, 'H66 verdict: …the 去向 is read on the `Release:` LINE and nowhere else', h66ReleaseVerdict('Release: session `x` — 去向 the maintainer\n\nback to `pm:queue` eventually.').dispatchable, false);
+  b(BATTERY66, 'H66 verdict: …the 去向 is read on the `Release:` LINE and nowhere else', verdict66('Release: session `x` — 去向 the maintainer\n\nback to `pm:queue` eventually.', 'dispatchable'), false);
 
   // The row's own sentence — the halves the direction requires.
   b(BATTERY66, 'H66 row: it quotes the clause it enforces, in the protocol\'s own words', h66row({}, RELEASED66).includes(`「${QUEUE_RULE_LINE}」`), true);
