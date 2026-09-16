@@ -41,9 +41,11 @@
 // every time, because `git add -A` writes the gitlink and never the
 // declaration.
 //
-// This repo has zero submodules today (0 entries at mode 160000 over 8725
-// tracked paths, and no `.gitmodules` file), so the rule costs nothing now and
-// is what keeps the first accidental one out.
+// This repo has zero submodules: measured on `objectstack-ai/objectstack` at
+// `7358c1c5b`, the index mode histogram is 8691 x 100644 and 34 x 100755 over
+// 8725 tracked paths -- no other mode at all -- and no `.gitmodules` file
+// exists. So the rule costs nothing today and is what keeps the first
+// accidental pointer out.
 //
 // ## Why the INDEX, and why `.gitmodules` is read from the index too
 //
@@ -82,9 +84,9 @@
 // -- which prints every gitlink and how each is judged, whether or not any is a
 // finding -- and the default run refuses from the first commit.
 
-// dispatch-gates: whole-tree-population -- the population is `git ls-files --stage`, the whole index, and the verdict is
-// about an entry's MODE, so any card that adds a path can move it and none can narrow it; the two literals below are
-// this gate's own subject names (a mode and a config file), never a file surface it reads.
+// The reason is ONE line on purpose: the marker is matched line-by-line, so a reason wrapped across
+// comment lines is captured only as far as its first newline and prints to a seat cut off mid-sentence.
+// dispatch-gates: whole-tree-population -- the population is `git ls-files --stage`, the WHOLE index, and the verdict is about an entry's MODE, so any card that adds a path can move this gate and no card's file surface can narrow it; the two literals below are this gate's own subject names (a mode and a config file), never a file surface it reads.
 
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
@@ -137,7 +139,10 @@ function git(root, args, { allowFailure = false } = {}) {
 }
 
 /**
- * Every stage-0 index entry, as `{ mode, oid, path }`.
+ * Every index entry, as `{ mode, oid, stage, path }` -- every STAGE of it. A
+ * conflicted index repeats a path at stages 1, 2 and 3, and dropping those here
+ * would hide a conflicted gitlink from the gate entirely; `findOffenders` is
+ * where one path becomes one finding.
  *
  * `-z` rather than newline-delimited, so a path holding a newline is one record
  * and not two. Each record is `<mode> <oid> <stage>\t<path>`.
@@ -194,6 +199,25 @@ function declaredSubmodulePaths(root) {
 }
 
 /**
+ * The gitlinks no declaration covers, at most one row per PATH.
+ *
+ * Deduplicated because an index in a CONFLICTED state carries the same path at
+ * stages 1, 2 and 3, and a gate that printed one path three times would read as
+ * broken to the person it is trying to help -- who would then go looking for
+ * three pointers. One path is one finding whatever the merge is doing.
+ */
+export function findOffenders(gitlinks, declared) {
+  const offenders = [];
+  const seen = new Set();
+  for (const entry of gitlinks) {
+    if (declared.has(entry.path) || seen.has(entry.path)) continue;
+    seen.add(entry.path);
+    offenders.push(entry);
+  }
+  return offenders;
+}
+
+/**
  * The one scan. `main()`, `--list` and `--self-test` all go through here, so
  * the self-test exercises the real code path rather than a parallel imitation.
  */
@@ -206,7 +230,7 @@ export function scan(root) {
   // difference off an exit code would conflate it with "declares nothing".
   const declared = gitmodulesStaged ? declaredSubmodulePaths(root) : new Map();
 
-  const offenders = gitlinks.filter((e) => !declared.has(e.path));
+  const offenders = findOffenders(gitlinks, declared);
   return { entries: entries.length, gitlinks, declared, gitmodulesStaged, offenders };
 }
 
@@ -309,11 +333,12 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the declaration must be in the INDEX, not merely on disk': 4,
   'the green is not vacuous, and it states its own scope': 6,
   'the parsers, on the shapes git really emits': 8,
+  'one path is one finding, whatever the index is doing': 3,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 5;
+const SELF_TEST_BATTERY_FLOOR = 6;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -542,6 +567,27 @@ function selfTest() {
     assert(
       parseDeclaredPaths(`submodule.x.path\nvendor/x/${NUL}`).has('vendor/x'),
       'a trailing slash names the same entry',
+    );
+
+    // ── one path is one finding ───────────────────────────────────────────
+    //
+    // A conflicted index carries the same path at stages 1, 2 and 3. Asserted
+    // on the pure function rather than on a real conflict fixture: the shape
+    // under test is the ENTRY LIST, and building a submodule merge conflict to
+    // produce it would test git's conflict machinery instead.
+    battery('one path is one finding, whatever the index is doing');
+    const conflicted = [1, 2, 3].map((stage) => ({ mode: GITLINK_MODE, oid: 'a'.repeat(40), stage: String(stage), path: 'vendor/thing' }));
+    assert(findOffenders(conflicted, new Map()).length === 1, 'a path at three conflict stages is ONE finding');
+    assert(
+      findOffenders(conflicted, new Map([['vendor/thing', 'vendor/thing']])).length === 0,
+      'a declaration covers every stage of the path it names',
+    );
+    assert(
+      findOffenders(
+        [{ mode: GITLINK_MODE, oid: 'b'.repeat(40), stage: '0', path: 'a' }, { mode: GITLINK_MODE, oid: 'c'.repeat(40), stage: '0', path: 'b' }],
+        new Map(),
+      ).map((o) => o.path).join() === 'a,b',
+      'two distinct paths stay two findings, in index order',
     );
   } finally {
     rmSync(dir, { recursive: true, force: true });
