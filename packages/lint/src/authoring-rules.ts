@@ -933,12 +933,12 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
   // that one is ambiguity of intent, not a dead flow).
   //
   // #16659 added a sixth id, `flow-schedule-organization-missing`, at
-  // `warning`: a time-triggered flow declaring no `config.organization` is
-  // refused at bind, so on the criterion above it belongs with the four — and
-  // it is held at `warning` because an `error` gates `objectstack build`, and
-  // the repo's own shipped example apps carry such flows with no authorable
-  // repair (the only legal value is a `sys_organization.id` minted per install
-  // at runtime). Its own docblock in the rule file records that.
+  // `warning`; #17396 RETIRED it. The criterion above is what retired it: this
+  // stack is not enough to know the flow is dead, because a deployment-level
+  // switch and the tenancy posture decide whether the key is required, and
+  // neither is metadata this file can read. The bind-time near-miss diagnostic
+  // stays — it fires only under a walled posture with the switch on, where the
+  // key really is required.
   {
     name: 'validateFlowTriggerReadiness',
     tier: 'gating',

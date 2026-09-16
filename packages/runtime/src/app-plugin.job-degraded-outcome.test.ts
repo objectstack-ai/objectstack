@@ -58,6 +58,7 @@ import { DbJobAdapter } from '@objectstack/service-job';
 import { SysJob, SysJobRun } from '@objectstack/platform-objects/audit';
 import { AppPlugin } from './app-plugin.js';
 import type { JobHandlerContext } from './job-handler-context.js';
+import { withScheduledWorkOn } from './scheduled-work.test-support.js';
 
 /** The reason a #5529-shaped handler reports when its store is unreachable. */
 const REASON = 'STORE_UNAVAILABLE';
@@ -179,6 +180,13 @@ function stackWith(jobName: string, handlerKey: string, fn: unknown) {
         functions: { [handlerKey]: fn },
     };
 }
+
+// [#17396] `AppPlugin` schedules package-authored jobs only where the
+// deployment runs package-authored scheduled work, and that switch is OFF by
+// default in every posture. These suites measure the READER, not the
+// deployment, so without this line every assertion below fails for a reason
+// that has nothing to do with its subject.
+withScheduledWorkOn();
 
 describe('#14256 — a declarative job\'s degraded outcome reaches `sys_job_run`', () => {
     it('lands `sys_job_run.status` distinct from `success`, with the reason in `error`', async () => {

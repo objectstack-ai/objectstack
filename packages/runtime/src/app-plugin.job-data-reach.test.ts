@@ -72,6 +72,7 @@ import {
     captureExpectedReadRefusals,
     type ExpectedReadRefusalCapture,
 } from './expected-read-refusal-noise.js';
+import { withScheduledWorkOn } from './scheduled-work.test-support.js';
 
 /** The record a scheduled sweep is supposed to be able to write. */
 const NOTE = {
@@ -212,6 +213,13 @@ async function sweepHandler(jobCtx: JobHandlerContext): Promise<void> {
 
 const rowsOf = (result: unknown): Array<Record<string, unknown>> =>
     Array.isArray(result) ? result as Array<Record<string, unknown>> : [];
+
+// [#17396] `AppPlugin` schedules package-authored jobs only where the
+// deployment runs package-authored scheduled work, and that switch is OFF by
+// default in every posture. These suites measure the READER, not the
+// deployment, so without this line every assertion below fails for a reason
+// that has nothing to do with its subject.
+withScheduledWorkOn();
 
 describe('#14094 — a declarative job handler has data reach (TS-config path)', () => {
     it('reads and writes a record through the context it is invoked with', async () => {

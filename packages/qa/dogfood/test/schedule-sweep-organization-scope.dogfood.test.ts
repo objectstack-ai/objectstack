@@ -39,6 +39,7 @@ import { bootStack, type VerifyStack } from '@objectstack/verify';
 import { MessagingServicePlugin, INBOX_OBJECT, NOTIFICATION_EVENT_OBJECT } from '@objectstack/service-messaging';
 import { TimeRelativeTrigger, type JobServiceSurface, type TriggerLogger } from '@objectstack/trigger-schedule';
 import type { JobHandler, JobSchedule } from '@objectstack/spec/contracts';
+import { SCHEDULED_WORK_ENV, SCHEDULED_WORK_DISABLED_REASON } from '@objectstack/types';
 import {
   scheduleOrganizationStack,
   declaringTimeRelativeFlow,
@@ -119,6 +120,9 @@ for (const databaseDriver of ['sqlite-wasm', 'memory'] as const) {
     let orgB: string;
     let rowA: string;
     let rowsB: string[];
+    let recipientId: string;
+    let priorSwitch: string | undefined;
+    let priorPosture: string | undefined;
 
     beforeAll(async () => {
       stack = await bootStack(scheduleOrganizationStack as never, {
@@ -143,7 +147,7 @@ for (const databaseDriver of ['sqlite-wasm', 'memory'] as const) {
       expect(orgA).not.toBe(orgB);
 
       const admin = await ql.findOne('sys_user', { where: { email: 'admin@objectos.ai' }, ...SYS });
-      const recipientId = String(admin?.id ?? 'usr_system');
+      recipientId = String(admin?.id ?? 'usr_system');
 
       // ── the differential fixture ──────────────────────────────────────
       // One matching row in A, TWO in B. Every row is inside the window, so
@@ -165,6 +169,36 @@ for (const databaseDriver of ['sqlite-wasm', 'memory'] as const) {
         'precondition: the rows must actually carry the two organizations — a NULL-org row is visible under ANY scope (`org = :tenant OR org IS NULL`), so a fixture that failed to stamp them would make this suite pass unfixed',
       ).toEqual([orgA, orgB, orgB].sort());
 
+      // ── [#17396] The DEPLOYMENT this suite is about ───────────────────
+      //
+      // Ruling G put two environment facts in front of every bind, and both
+      // are set HERE, around the bind, rather than at boot:
+      //
+      //  1. `OS_AUTOMATION_SCHEDULED_WORK_ENABLED` — package-authored
+      //     scheduled work is OFF by default in every posture, so without it
+      //     NOTHING arms and the `precondition: the sweep BOUND` case below
+      //     fails, taking every assertion built on it with it. ⛔ It is a
+      //     PRECONDITION of this file's subject, not a convenience: what these
+      //     pins measure is which rows an ARMED sweep selects, and an unarmed
+      //     sweep selects nothing for a reason that has nothing to do with
+      //     tenancy.
+      //  2. `OS_TENANCY_POSTURE=isolated` — the acting-organization
+      //     declaration this sweep carries is REQUIRED only behind a wall.
+      //     Under `single` the same flow arms while declaring nothing and
+      //     sweeps unscoped, which is a different subject with a different
+      //     correct answer.
+      //
+      // ⚠️ Set around the BIND, not around `bootStack`: both triggers read
+      // these live at `start()`, while booting the STACK under a wall would
+      // demand the enterprise organizations plugin this suite deliberately
+      // does not install (ADR-0093 D5 refuses to boot a wall it cannot
+      // enforce). Nothing the pins measure moves: which rows the sweep selects
+      // is decided by the two `sys_organization` rows and the declaration.
+      priorSwitch = process.env[SCHEDULED_WORK_ENV];
+      priorPosture = process.env.OS_TENANCY_POSTURE;
+      process.env[SCHEDULED_WORK_ENV] = 'true';
+      process.env.OS_TENANCY_POSTURE = 'isolated';
+
       automation.registerFlow(SWEEP_FLOW, declaringTimeRelativeFlow(orgA, recipientId));
 
       job = fakeJobService();
@@ -174,6 +208,12 @@ for (const databaseDriver of ['sqlite-wasm', 'memory'] as const) {
     }, 120_000);
 
     afterAll(async () => {
+      // [#17396] Restore the PREVIOUS values rather than deleting the keys — a
+      // CI box that exported either one must be left exactly as it was found.
+      if (priorSwitch === undefined) delete process.env[SCHEDULED_WORK_ENV];
+      else process.env[SCHEDULED_WORK_ENV] = priorSwitch;
+      if (priorPosture === undefined) delete process.env.OS_TENANCY_POSTURE;
+      else process.env.OS_TENANCY_POSTURE = priorPosture;
       await stack?.stop();
     });
 
@@ -184,8 +224,94 @@ for (const databaseDriver of ['sqlite-wasm', 'memory'] as const) {
     it('precondition: the sweep BOUND', () => {
       expect(
         job.has(SWEEP_JOB),
-        `the sweep did not bind — registered jobs: ${job.names().join(', ') || '(none)'}`,
+        `the sweep did not bind — registered jobs: ${job.names().join(', ') || '(none)'}`
+          + ` (⚠️ #17396: this is also the case that fails when ${SCHEDULED_WORK_ENV} is not set —`
+          + ' package-authored scheduled work is off by default in every posture, and an unarmed'
+          + ' sweep selects nothing for a reason that has nothing to do with tenancy)',
       ).toBe(true);
+    });
+
+    // ── [#17396] The OTHER deployment state, which ruling G item 6 requires
+    //    and nothing measured before this card ────────────────────────────
+    //
+    // With the switch OFF neither trigger arms anything, and every such flow is
+    // listed in `getTriggerBindingAudit()` — the surface the automation
+    // plugin's `kernel:bootstrapped` warning and the CLI startup summary read,
+    // its only two callers — with a DISTINCT reason: *disabled by deployment
+    // policy*, ⛔ NEVER "binding failed".
+    //
+    // ⭐ That distinction is the whole of the ruled item, and it is not
+    // cosmetic: a binding failure is a defect with an engineering remedy, while
+    // this is a deployment policy with an operator remedy, and the two send
+    // whoever reads the boot summary to different places. It is pinned HERE,
+    // on the real engine with a real registered trigger, because the engine's
+    // own catch — the one that writes "binding failed" — is the thing that must
+    // NOT be reached.
+    it('[#17396] switch OFF: the sweep does not arm, and the audit says disabled by deployment policy', async () => {
+      const OFF_FLOW = `${SWEEP_FLOW}_policy_off`;
+      const OFF_JOB = `flow-time-relative:${OFF_FLOW}`;
+      const restore = process.env[SCHEDULED_WORK_ENV];
+      try {
+        delete process.env[SCHEDULED_WORK_ENV];
+        automation.registerFlow(OFF_FLOW, declaringTimeRelativeFlow(orgA, recipientId));
+        await new Promise<void>((r) => setTimeout(r, 0));
+      } finally {
+        if (restore === undefined) delete process.env[SCHEDULED_WORK_ENV];
+        else process.env[SCHEDULED_WORK_ENV] = restore;
+      }
+
+      // ⛔ The flow is well-formed and DECLARES its organization — the same
+      // fixture the armed sweep above uses. Nothing about it is wrong; the
+      // deployment simply has not asked for scheduled work.
+      expect(
+        job.has(OFF_JOB),
+        `a policy-disabled flow must have no job at all — registered: ${job.names().join(', ') || '(none)'}`,
+      ).toBe(false);
+
+      const states = automation.getFlowRuntimeStates() as Array<{ name: string; bound: boolean }>;
+      expect(
+        states.find((st: { name: string }) => st.name === OFF_FLOW)?.bound,
+        "Studio's status badge must not report this flow as armed",
+      ).toBe(false);
+      expect(
+        states.find((st: { name: string }) => st.name === SWEEP_FLOW)?.bound,
+        'control: the sweep armed while the switch was ON must still read as bound, or this pin would pass with everything broken',
+      ).toBe(true);
+
+      const audit = automation.getTriggerBindingAudit() as Array<{
+        flowName: string;
+        triggerType: string;
+        reason: string;
+      }>;
+      const entry = audit.find((a: { flowName: string }) => a.flowName === OFF_FLOW);
+      expect(
+        entry,
+        `ruled item 6: the flow must be LISTED, so the boot summary names it; audit: ${JSON.stringify(audit)}`,
+      ).toBeTruthy();
+      expect(entry!.triggerType).toBe('time_relative');
+      expect(
+        entry!.reason,
+        'the reason must be the one sentence every surface shares, so the audit and the CLI summary cannot drift',
+      ).toBe(SCHEDULED_WORK_DISABLED_REASON);
+      expect(entry!.reason, 'and it must name the switch the operator has to set').toContain(SCHEDULED_WORK_ENV);
+      // ⭐ The prohibition, pinned by absence because the branch it must not
+      // take produces exactly this phrase.
+      expect(
+        entry!.reason,
+        'ruled item 6: a policy-disabled flow is ⛔ NEVER reported as a binding failure',
+      ).not.toMatch(/binding failed/);
+      expect(
+        audit.map((a: { flowName: string }) => a.flowName),
+        'control: the armed sweep must not be listed as a silent miss',
+      ).not.toContain(SWEEP_FLOW);
+
+      // And the trigger was never asked: with the switch off the engine does
+      // not call `start()` at all, so nothing threw and nothing was logged as
+      // a failure.
+      expect(
+        log.errors.filter((l) => l.includes(OFF_FLOW)),
+        'a deployment running the configuration it asked for must not print an error',
+      ).toEqual([]);
     });
 
     if (databaseDriver === 'memory') {

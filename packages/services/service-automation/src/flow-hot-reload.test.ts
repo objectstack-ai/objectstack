@@ -23,6 +23,7 @@ import { AutomationEngine } from './engine.js';
 import { AutomationServicePlugin } from './plugin.js';
 import type { FlowTrigger, FlowTriggerBinding } from './engine.js';
 import type { AutomationContext } from '@objectstack/spec/contracts';
+import { withScheduledWorkOn } from './deployment-switch.test-support.js';
 
 const flush = () => new Promise<void>((r) => setTimeout(r, 0));
 
@@ -124,6 +125,12 @@ async function bootKernel(proto: { service: unknown }) {
 }
 
 const reload = (kernel: LiteKernel) => (kernel as any).context.trigger('metadata:reloaded', {});
+
+// [#17396] Time-triggered flows arm only where the deployment runs
+// package-authored scheduled work, and the switch is OFF by default in every
+// posture. Without this, every trigger-wiring assertion below fails for a
+// reason that has nothing to do with wiring.
+withScheduledWorkOn();
 
 describe("scheduled flow hot-reload re-bind (metadata:reloaded re-sync)", () => {
     it('re-binds an edited scheduled flow to its NEW definition without a restart', async () => {

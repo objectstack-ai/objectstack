@@ -46,6 +46,20 @@ export default defineConfig({
         find: /^@objectstack\/platform-objects$/,
         replacement: path.resolve(__dirname, '../../platform-objects/src/index.ts'),
       },
+      {
+        // [#17396] `engine.ts` reads the deployment's scheduled-work switch
+        // through `@objectstack/types`, and `engine.test.ts` asserts on the
+        // exact reason string that package exports. Unaliased, the workspace
+        // link resolves to `dist/` and the verdict becomes a function of build
+        // state: a `dist` merely BEHIND would pin the audit's reason against a
+        // sentence no longer shipping — which is the one thing those
+        // assertions exist to catch. Same anchored-regex rule as the entry
+        // above; a bare string `find` matches by PREFIX and would resolve any
+        // subpath to `…/types/src/index.ts/<sub>` (ENOTDIR at run time, from a
+        // config that reads as correct).
+        find: /^@objectstack\/types$/,
+        replacement: path.resolve(__dirname, '../../types/src/index.ts'),
+      },
     ],
   },
 });
