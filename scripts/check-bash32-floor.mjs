@@ -40,6 +40,47 @@
  * depth over the class, at the price of a regex — and the blind spot named
  * under "Known limit" below is exactly the half the simulation harness holds.
  *
+ * ## The BOUNDARY: the axis is the bash INTERPRETER, not the userland binaries
+ *
+ * A gate that states its class but not its boundary can be widened by a
+ * well-meaning row, so the boundary is written here rather than left to be
+ * re-derived. This gate's axis is the VERSION OF BASH THAT RUNS A SCRIPT, and
+ * the row schema says so by construction, not by convention: every
+ * `CONSTRUCTS` row carries a `since:` that is a bash version, and every `kind`
+ * is a bash category — a builtin, a piece of syntax, a variable. There is no
+ * value for "an external binary", and a row about one has nowhere to put it.
+ *
+ * So a difference between the GNU and BSD USERLAND BINARIES a script calls —
+ * `mktemp` and where it will accept the `XXXXXX`, `sed -i` and whether it
+ * demands a suffix argument, `readlink -f`, `date` and its flags — is a
+ * DIFFERENT AXIS, and ⛔ it is not a row here. Such a row could not be written
+ * honestly: `mktemp` has no bash version, so its `since:` would have to be a
+ * lie or a special case, and the verdict line this gate prints ends
+ * "constructs checked, floor bash 3.2" — which becomes false advertising the
+ * moment a coreutils-vs-BSD rule joins the table it counts. Widening here
+ * would silently convert a gate that means "this script needs bash 4" into one
+ * that means "this script behaves differently on a Mac": a strictly larger
+ * claim, made by adding a row.
+ *
+ * ⇒ That class wants a SIBLING gate, not a row here — and ⛔ not yet. The
+ * measured population of real userland defects in this repo is ONE: an
+ * `mktemp` template whose `XXXXXX` was not last. It is already fixed and
+ * guarded by a per-script pin, which ⛔ stays — nothing here replaces it. A
+ * shared gate for a population of one is not warranted, and the evidence that
+ * would change that is a SECOND real instance; the place to land it is the
+ * boundary card this paragraph came from (#17141).
+ *
+ * ⚠️ The basis is written out and not just the verdict, on purpose: a boundary
+ * stated without its basis gets re-litigated by the next person who
+ * provisionally leans yes. That is not hypothetical. This exact question —
+ * should this gate grow a BSD/portability rule, so the `mktemp` class is
+ * caught by a shared gate instead of a per-script pin — was asked, was
+ * answered NO, and the seat that answered it had leaned the other way first
+ * and put that on the record: *"measuring is what produced it — I had
+ * provisionally leaned yes."* ⇒ Measuring is the part that is reproducible.
+ * Read any row's `since:` and `kind:` before re-opening this; ⛔ do not
+ * re-litigate it from intuition.
+ *
  * ## The exemption rule: telling a HUNTER from a USER
  *
  * The hard part of a repo-wide scan is that the files which document this floor

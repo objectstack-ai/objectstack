@@ -95,8 +95,8 @@ Tier 1 批量清掉,剩下的预算才对得起 Tier 2。
 - **并行度**:API 面测试项放开并行扇出(各自端口,便宜)。浏览器项**少量并行**
   (2–3 个),各自端口 + 浏览器上下文 —— 超过这个数,单机 CPU 与共享显示开始互相争
   抢。派发 runner 子代理时,档位引当次
-  `node scripts/pm/dispatch-gates.mjs --tier <paths>` 的输出、⛔ 不凭记忆(floor
-  sonnet · default opus · ceiling fable);每个给:该项 JSON、RUNNER.md、dogfood 技
+  `node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack --tier <paths>` 的输出、
+  ⛔ 不凭记忆(floor sonnet · default opus · ceiling fable);每个给:该项 JSON、RUNNER.md、dogfood 技
   能、自己的端口/DB、结果不进仓规则(§4)。
 - **没有子代理工具时,顺序跑 —— 并在运行记录里声明这一轮是顺序执行的。** 规则与它
   的论证住在 `checklist-author` 技能(维护者所定,一处成文);⛔ 不留第二份拷贝。
