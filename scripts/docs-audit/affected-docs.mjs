@@ -257,11 +257,12 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '#11178: WHY a row is unreachable, and the two causes that printed as one': 28,
   '`causes` GETS THE SAME TREATMENT, AT BOTH ENDS (#11867)': 16,
   'the ROUTE SOURCE concept: two kinds, and the runtime-registration guard (#11857)': 24,
+  'ROUTE-ANCHOR PRECISION, IN BOTH DIRECTIONS (#16696)': 16,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 29;
+const SELF_TEST_BATTERY_FLOOR = 30;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -1571,13 +1572,56 @@ function routeTailOf(literal) {
  * spellings a page may use — `:type`, `{type}`, or a concrete example value — so
  * `GET /api/v1/meta/object/account/history` in a code block still counts as documenting
  * `/:type/:name/history`. The static segments are what keep that from over-matching.
+ *
+ * THAT LAST SENTENCE IS A PRECONDITION, AND IT USED TO GO UNCHECKED (#16696). Both
+ * leniencies were unconditional, and each one on its own is enough to list a page for a
+ * route it does not document. Measured on PR #16694, where the anchor
+ * `/environments/:environmentId` listed `content/docs/protocol/kernel/metadata-service.mdx`
+ * — a page in which that string does not occur at all. The two hits that did it:
+ *
+ *   :204  `/pub/v1/environments/:id/artifact[?commit=…]`   — a DIFFERENT parameter name
+ *   :213  `…/pub/v1/environments/env_42/artifact?commit=…` — a concrete value with the
+ *                                                            tail's own right edge open
+ *
+ * ⭐ This is MATCH WIDENING, not mis-attribution: the row named the anchor that really
+ * did select the page, and the anchor's own matcher is what accepted a path family the
+ * anchor never described. The fix is therefore on the matcher, and the two arms are
+ * narrowed separately because the two hits above fail for separate reasons:
+ *
+ *  1. A parameter WRITTEN AS A PARAMETER must name the SAME parameter. `:id` and
+ *     `:environmentId` are two declared parameters, not two spellings of one, and a page
+ *     that writes `/api/v1/cloud/environments/:id` is documenting the control-plane route
+ *     it names, not the data-plane one this anchor came from. Either spelling of the
+ *     right name still counts — `:environmentId` and `{environmentId}` are one parameter.
+ *  2. A CONCRETE EXAMPLE VALUE is admitted only where a STATIC segment still follows in
+ *     the tail. That is the precondition above, made mechanical: a static segment to the
+ *     right is what bounds the match, and a parameter with none is unbounded — filling it
+ *     with `[A-Za-z0-9_%-]+` degrades the whole pattern to a prefix test on everything
+ *     under `/environments/`, which is how `env_42` inside `/pub/v1/…/artifact` got in.
+ *     `/:type/:name/history` keeps both concrete values, because `history` bounds them.
+ *
+ * ⛔ WHAT WAS MEASURED AND REJECTED, so nobody re-derives it: requiring the match to sit
+ * at the END of the documented path (the way the same tail is matched against a ledger
+ * row, `route.endsWith(tail)`). It kills both bad hits — and also kills
+ * `api/environment-routing.mdx`, the single most on-target page in that run, whose every
+ * occurrence is `/api/v1/environments/:environmentId/...` with a segment after it, plus
+ * `publish-and-preview.mdx`, `single-project-mode.mdx` and `http-protocol.mdx`. A route
+ * prefix written with its own parameter named IS a page documenting that route.
  */
 function routePatternFor(tail) {
   const isParam = (s) => s.startsWith(':') || (s.startsWith('{') && s.endsWith('}'));
-  const body = tail
-    .split('/')
-    .filter(Boolean)
-    .map((s) => (isParam(s) ? '(?::[A-Za-z_$][\\w$]*|\\{[A-Za-z_$][\\w$]*\\}|[A-Za-z0-9_%-]+)' : s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
+  const paramNameOf = (s) => (s.startsWith(':') ? s.slice(1) : s.slice(1, -1));
+  const quote = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const segs = tail.split('/').filter(Boolean);
+  const body = segs
+    .map((s, i) => {
+      if (!isParam(s)) return quote(s);
+      const name = quote(paramNameOf(s));
+      const named = `:${name}|\\{${name}\\}`;
+      // Arm 2: is anything static left to the RIGHT of this segment to bound a value?
+      const bounded = segs.slice(i + 1).some((rest) => !isParam(rest));
+      return bounded ? `(?:${named}|[A-Za-z0-9_%-]+)` : `(?:${named})`;
+    })
     .join('/');
   return new RegExp(`/${body}(?![\\w-])`);
 }
@@ -1652,7 +1696,29 @@ function isLiteralAnchorShape(lit) {
     || /^[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+$/.test(lit);           // SCREAMING_SNAKE (#13471)
 }
 
-/** Route tails and identifier-shaped string literals appearing on the changed lines. */
+/**
+ * Route tails and identifier-shaped string literals appearing on the changed lines.
+ *
+ * A COMMENT LINE IS A CHANGED LINE, AND THE ROW NOW SAYS SO (#16696). This scan reads the
+ * raw line on purpose — a path written in a doc comment is still evidence that the page
+ * documenting that path may need re-reading, and ⛔ excluding comments outright is the one
+ * shape ruled out: a JSDoc that newly documents a real route is sometimes exactly the
+ * signal. What it was NOT doing is telling the reader which kind of line it found.
+ *
+ * Measured on PR #16694: seven of that run's nine hand-written rows rode the anchor
+ * `/environments/:environmentId`, and that anchor entered the diff on exactly ONE added
+ * line — English prose inside a JSDoc block in `packages/client/src/index.ts`. The rows
+ * read `a path literal in meta`, indistinguishable from a route registration. A reader
+ * who opens seven pages and finds seven non-answers stops opening them, and the tool's
+ * whole value proposition is precision over the coarse package-mention fallback.
+ *
+ * So the STRENGTH of the hit rides in the provenance clause beside its location: an
+ * occurrence the comment mask blanks is reported as coming from a comment. Reporting only
+ * — ⛔ nothing here is admitted, dropped or reordered by it, so recall is unchanged by
+ * construction and a genuinely falsified page is still listed with a strong-hit anchor.
+ * A token found in code on one line and in a comment on another keeps BOTH clauses, the
+ * same way `noteFrom` already keeps every declaration a token reached through.
+ */
 function literalAnchorsFromLines(lines, changed, surface = liveContainerSurface()) {
   const routes = new Set();
   const literals = new Set();
@@ -1661,29 +1727,48 @@ function literalAnchorsFromLines(lines, changed, surface = liveContainerSurface(
   // mints none pays nothing. Reporting only: no route and no literal is admitted,
   // dropped or reordered by anything below.
   const from = new Map();
+  // The code-only projection of the same lines, for the strength clause above. Blanking
+  // keeps every line and every offset (see `js-comment-mask`), so `masked[n - 1]` is the
+  // same line with its prose removed and nothing else moved.
+  const masked = maskComments(lines.join('\n')).split('\n');
+  const ROUTE_RE = /(?:\/[A-Za-z0-9_:.$*{}-]+){2,}/g;
+  const LITERAL_RE = /['"]([A-Za-z][\w.$-]{3,63})['"]/g;
   for (const n of changed) {
     const line = lines[n - 1];
     if (line === undefined) continue;
+    const code = masked[n - 1] ?? line;
     let enclosing;
     const enclosingName = () => {
       if (enclosing === undefined) enclosing = documentableDeclarationsAt(lines, n - 1, surface)[0] || null;
       return enclosing ? enclosing.name : null;
     };
-    for (const m of line.replace(/\$\{[^}]*\}/g, '').matchAll(/(?:\/[A-Za-z0-9_:.$*{}-]+){2,}/g)) {
+    // What the SAME two scans find once the prose is blanked. Set membership, not offsets:
+    // the question a row answers is "did this anchor have a code occurrence on this line",
+    // and a tail present in both projections is code wherever else it also appears.
+    const codeRoutes = new Set();
+    for (const m of code.replace(/\$\{[^}]*\}/g, '').matchAll(ROUTE_RE)) {
+      const t = routeTailOf(m[0]);
+      if (t) codeRoutes.add(t);
+    }
+    const codeLiterals = new Set();
+    for (const m of code.matchAll(LITERAL_RE)) codeLiterals.add(m[1]);
+    const site = (kind, where, inComment) => {
+      const lead = inComment ? `a ${kind} in a comment` : `a ${kind}`;
+      return where ? `${lead} in ${where}` : `${lead} on a changed line`;
+    };
+    for (const m of line.replace(/\$\{[^}]*\}/g, '').matchAll(ROUTE_RE)) {
       const tail = routeTailOf(m[0]);
       if (tail) {
         routes.add(tail);
-        const where = enclosingName();
-        noteFrom(from, tail, where ? `a path literal in ${where}` : 'a path literal on a changed line');
+        noteFrom(from, tail, site('path literal', enclosingName(), !codeRoutes.has(tail)));
       }
     }
-    for (const m of line.matchAll(/['"]([A-Za-z][\w.$-]{3,63})['"]/g)) {
+    for (const m of line.matchAll(LITERAL_RE)) {
       const lit = m[1];
       if (GENERIC_ANCHOR_NAMES.has(lit.toLowerCase())) continue;
       if (!isLiteralAnchorShape(lit)) continue;
       literals.add(lit);
-      const where = enclosingName();
-      noteFrom(from, lit, where ? `a string literal in ${where}` : 'a string literal on a changed line');
+      noteFrom(from, lit, site('string literal', enclosingName(), !codeLiterals.has(lit)));
     }
   }
   return { routes, literals, from };
@@ -5738,6 +5823,85 @@ function selfTest() {
     check('walkSourceFiles', 'no TRACKED .ts source under packages/** lives in a dot-directory — the premise the prune rests on',
       'git ls-files packages, filtered to .ts under dot-directories', 0, trackedDotDirFiles.length);
   }
+
+  battery('ROUTE-ANCHOR PRECISION, IN BOTH DIRECTIONS (#16696)');
+  // ⛔ THIS BATTERY IS TWO-DIRECTIONAL BY CONSTRUCTION, and the second direction is the
+  // load-bearing one. A change that made the bad row disappear by matching less, or by
+  // dropping comment-sourced anchors, would turn this card's findings green while
+  // deleting the thing the tool is for — a precision-first list whose rows a reader
+  // trusts enough to act on. So every narrowing case below is paired with a KEEP case
+  // taken from the same run, and the provenance cases assert that a clause was ADDED,
+  // never that an anchor was removed.
+
+  // ── Direction 1: the wrong row can no longer be produced ──────────────────
+  // Both strings are verbatim from `content/docs/protocol/kernel/metadata-service.mdx`
+  // (:204 and :213 on `8cf527f8e`), the page PR #16694 listed via an anchor it does not
+  // contain. The instrument's own positive control is the row below them: the same
+  // matcher, the same page's path family, spelled with the parameter the anchor names.
+  const routePrecisionCases = [
+    ['/environments/:environmentId', 'artifact route (`/pub/v1/environments/:id/artifact[?commit=<id>]`) serves', false,
+      'a DIFFERENT parameter name is a different route — #16696 finding 1, hit A'],
+    ['/environments/:environmentId', "path: 'https://cloud.example.com/pub/v1/environments/env_42/artifact?commit=cmt_1a2b',", false,
+      'a concrete value cannot fill an UNBOUNDED trailing parameter — #16696 finding 1, hit B'],
+    ['/environments/:environmentId', 'Route REST, metadata, automation, AI, and package calls through /api/v1/environments/:environmentId/....', true,
+      'POSITIVE CONTROL: the page that DOES name it stays listed (api/environment-routing.mdx:3)'],
+    ['/environments/:environmentId', '| `auto` | Registers both unscoped `/api/v1/...` and scoped `/api/v1/environments/:environmentId/...` routes. |', true,
+      'a route PREFIX with its own parameter named is still a page documenting that route'],
+    ['/environments/:environmentId', '`/api/v1/environments/{environmentId}`', true,
+      'the brace spelling of the SAME name is one parameter, not two'],
+    ['/environments/:environmentId', 'Cloud control-plane endpoints such as `/api/v1/cloud/environments/:id` manage', false,
+      'a complete path with a different parameter name is still a different route'],
+    // The designed leniency, untouched: `history` bounds both parameters on the right.
+    ['/:type/:name/history', 'GET /api/v1/meta/object/account/history', true,
+      'concrete values stay admitted where a STATIC segment bounds them'],
+    ['/:type/:name/history', 'GET /api/v1/meta/{type}/{name}/history', true,
+      'the brace spelling stays admitted'],
+    ['/:type/:name/history', 'GET /api/v1/meta/object/account/audit', false,
+      'a different static segment still does not match'],
+  ];
+  for (const [tail, text, want, label] of routePrecisionCases) {
+    check('routePatternFor', label, `${tail} vs ${JSON.stringify(text)}`, want, routePatternFor(tail).test(text));
+  }
+
+  // ── Direction 2: strength is REPORTED, and nothing is dropped for it ──────
+  // The fixture is the shape PR #16694 actually carried: a path that enters the diff
+  // only as English prose in a JSDoc block, and — on a separate line — a path that
+  // enters as a real registration. Both must anchor; only the first may say "comment".
+  const provenanceSource = [
+    'const routes = {',
+    '  /**',
+    '   * Reaches the same handler as the unscoped twin — one replay against',
+    '   * `/environments/:environmentId` — so the body is byte-identical.',
+    '   */',
+    "  register: (app) => app.get('/api/v1/meta/:type/:name/history', historyHandler),",
+    '};',
+  ];
+  const prov = literalAnchorsFromLines(provenanceSource, [1, 2, 3, 4, 5, 6, 7]);
+  const clausesFor = (tail) => [...(prov.from.get(tail) || [])].join(' | ');
+  check('literalAnchorsFromLines', 'the comment-only path is STILL an anchor — ⛔ not excluded (#16696 finding 2)',
+    '/environments/:environmentId', true, prov.routes.has('/environments/:environmentId'));
+  check('literalAnchorsFromLines', '…and its row says the anchor came from a comment',
+    'clause for /environments/:environmentId', true, /in a comment/.test(clausesFor('/environments/:environmentId')));
+  check('literalAnchorsFromLines', 'the registered path is an anchor too',
+    '/api/v1/meta/:type/:name/history', true, prov.routes.has('/api/v1/meta/:type/:name/history'));
+  check('literalAnchorsFromLines', '…and a STRONG hit says nothing about comments — the reader can tell them apart',
+    'clause for /api/v1/meta/:type/:name/history', false, /in a comment/.test(clausesFor('/api/v1/meta/:type/:name/history')));
+  // A token in code on one line and in prose on another keeps BOTH clauses: `noteFrom`
+  // accumulates, and a row that printed only one of them would read like the only answer.
+  const bothSource = [
+    "  // documented at `/api/v1/meta/:type/:name/history`",
+    "  app.get('/api/v1/meta/:type/:name/history', historyHandler);",
+  ];
+  const both = [...(literalAnchorsFromLines(bothSource, [1, 2]).from.get('/api/v1/meta/:type/:name/history') || [])];
+  check('literalAnchorsFromLines', 'code and comment on two lines keep BOTH clauses',
+    'clause count for a tail written in each', 2, both.length);
+  check('literalAnchorsFromLines', '…one of which is the comment clause',
+    'at least one clause names a comment', 1, both.filter((c) => /in a comment/.test(c)).length);
+  // A string literal inside a comment rides the same predicate — same loop, same mask.
+  const litComment = literalAnchorsFromLines(["  // the stored key is 'controlled_by_parent' on the overlay"], [1]);
+  check('literalAnchorsFromLines', 'a string literal in prose is kept AND marked',
+    'controlled_by_parent', true, litComment.literals.has('controlled_by_parent')
+      && /in a comment/.test([...(litComment.from.get('controlled_by_parent') || [])].join(' | ')));
 
   // ── The floor: every declared battery RAN, and ran its cases (#13489) ───
   //
