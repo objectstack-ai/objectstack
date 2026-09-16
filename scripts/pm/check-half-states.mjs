@@ -9577,7 +9577,7 @@ export function h43GovernedReviewRequestGap(pr, governed, approvers, reviewed = 
 //               of these five artefacts a table of bare numbers is a board
 //               reading essentially always.
 //
-// ## Three narrowings, each of which can only make the row QUIETER
+// ## Four narrowings, each of which can only make the row QUIETER
 //
 // 1. A paragraph carrying a timestamp is clean, and the timestamp shape is
 //    `HH:MM[:SS]Z`. ⚠️ The optional SECONDS field is a deliberate widening of
@@ -9592,6 +9592,35 @@ export function h43GovernedReviewRequestGap(pr, governed, approvers, reviewed = 
 // 3. ⛔ No comment-length floor. The fragment requirement is a stronger filter
 //    than a character count, and a length constant with no measurement behind it
 //    is a number nobody can defend later.
+// 4. ⚠️ A `tree` candidate that is lexically part of an IDENTIFIER is not a tip
+//    (#18385). A SESSION ID satisfies the tree shape — measured on a live board,
+//    6 of 9 H44 rows in one sweep were this and nothing else: 「PM session
+//    c5c0ce54」 / 「PM 会话 c5c0ce54」 fired on the shorthand itself, and a
+//    canonical `Session:` line carrying `session_71836b57-…-c6d9d7dd2cc6` fired
+//    on the UUID's LAST SEGMENT, because `-` is a word boundary. ⛔ The cost is
+//    not a noisy row: this row's remedy sentence says 「add the time the reading
+//    was taken」, and there is no board state behind an id — applied to one it
+//    asks a seat to STAMP A READING NOBODY TOOK, and a later reader cannot tell
+//    that stamp from a real one. So the row would teach the wrong discipline,
+//    which is worse than saying nothing. ⛔ The `tree` SHAPE is not loosened —
+//    a real tip is matched exactly as before (`h44TreeCandidateIsIdentifier` is
+//    the whole of the change, and it excludes a CANDIDATE, never a spelling):
+//      • the UUID leg — the candidate sits immediately behind a `-` or `_` that
+//        itself follows a word character, i.e. it is the tail of a longer token.
+//      • the introduction leg — the candidate's SENTENCE says `session` /
+//        `会话` (`session_` is that word with its separator).
+//    ⚠️ SENTENCE, not paragraph, and that boundary is a DECISION pinned in the
+//    self-test rather than a detail: every claim comment carries a `Session:`
+//    line, so a paragraph-scoped test would silence H44 on the whole claim
+//    population — a false negative exactly where CONTROL A lives. A dateless
+//    real tip in its OWN sentence still fires with a session id one line above
+//    it; the declared false negative is the two in ONE sentence, which is the
+//    narrowest shape that covers the measured spellings.
+//    ⚠️ The paragraph is RESCANNED past an excluded candidate — only for a shape
+//    that declares an `exclude`, which is this one alone — so a comment that
+//    fired before can change WHICH fragment it names but a quiet one cannot
+//    start firing. Like narrowings 1–3 it admits strictly more paragraphs as
+//    clean and cannot manufacture a finding.
 //
 // ## Cost, and the residual this row DECLARES rather than hides
 //
@@ -9712,10 +9741,84 @@ export function h43GovernedReviewRequestGap(pr, governed, approvers, reviewed = 
 export const H44_READING_TIMESTAMP = /(?:\b|(?<=T))\d{2}:\d{2}(?::\d{2})?Z\b/;
 
 /**
+ * The word that INTRODUCES an identifier rather than a reading — narrowing 4's
+ * second leg, anchored at the END of the text that precedes the candidate, so
+ * it reads 「the thing right after this word」 and not 「this word occurs
+ * somewhere near」. `session_` is `session` with its separator, so one
+ * alternative reaches both spellings, and 「会话」 is the same word on a
+ * Chinese-language board.
+ *
+ * ⚠️ ADJACENCY is the whole of its precision, and it was measured rather than
+ * chosen: with the leg written as 「the sentence mentions a session」, live
+ * comment `5695539587` on this board — 「every harness-loaded path on
+ * `origin/main` is in this session's checkout HEAD `588475c3`」 — went QUIET,
+ * and that is a real dateless tip reading this row exists to file. A possessive
+ * three words away introduces nothing. Only separators may stand between:
+ * whitespace, a colon in either width, quotes, backticks, emphasis and bracket
+ * characters — the decorations the claim template actually writes.
+ *
+ * ⛔ An intervening WORD (「session id c5c0ce54」) is therefore not excluded
+ * here: it is one measurement away, not a guess to make now.
+ *
+ * ⛔ Case-insensitive on purpose and safe to be: unlike `H44_VERDICT_MARKER`
+ * this word is not a protocol verb whose lower-case twin is ordinary prose —
+ * `Session:`, `session` and `SESSION` all name the same thing.
+ */
+export const H44_IDENTIFIER_INTRO = /(?:session|会话)[\s:：=·*'"`([\]_-]*$/i;
+
+/**
+ * The characters that END a sentence for narrowing 4 — the ASCII set and the
+ * full-width forms a Chinese-language board writes, plus the newline, which is
+ * what keeps a claim's `Session:` LINE from reaching the tip on the line below
+ * it (see the banner: that is the whole of the sentence-vs-paragraph decision).
+ */
+export const H44_SENTENCE_BREAKS = '\n。.!?;！？；';
+
+/**
+ * The part of the candidate's own sentence that PRECEDES it: from the nearest
+ * sentence break before `index` up to `index`. ⛔ Never widened to the
+ * paragraph, and never read past the candidate — what follows a fragment
+ * introduces nothing.
+ */
+export function h44SentenceLead(paragraph, index) {
+  const text = String(paragraph ?? '');
+  const at = Math.max(0, Math.min(Number(index) || 0, text.length));
+  let start = at;
+  while (start > 0 && !H44_SENTENCE_BREAKS.includes(text[start - 1])) start--;
+  return text.slice(start, at);
+}
+
+/**
+ * Narrowing 4's predicate: is this `tree` CANDIDATE lexically part of an
+ * identifier rather than a tip? Two legs, both measured on live claim comments
+ * (#18385), and the banner carries the argument.
+ *
+ * ⛔ It reads the TEXT AROUND the candidate and never the candidate itself: a
+ * session id and a tip are the same 7–40 hex characters, so anything that
+ * judged the token alone would have to loosen the shape for real tips, which is
+ * the one thing this change must not do.
+ */
+export function h44TreeCandidateIsIdentifier(paragraph, index, _matched = '') {
+  const text = String(paragraph ?? '');
+  // The UUID leg: `…-c6d9d7dd2cc6` / `…_c6d9d7dd2cc6` — a separator that itself
+  // follows a word character, so the candidate is the TAIL of a longer token
+  // and not a token a reader could quote as a tip. (A bullet's `- ` or a lone
+  // dash is not this: the separator must be flush against both sides.)
+  if (/[0-9A-Za-z_][-_]$/.test(text.slice(0, index))) return true;
+  // The introduction leg: the candidate's own sentence introduces it as a
+  // session, immediately and with only decoration in between.
+  return H44_IDENTIFIER_INTRO.test(h44SentenceLead(text, index));
+}
+
+/**
  * The reading grammar, as data so the self-test can drive every shape by name
  * and a reader can check the banner against the regexes. ⛔ No `g` flag on any
  * of them: `exec` on a sticky regex carries `lastIndex` between calls, and this
  * row runs the same regex over thousands of paragraphs.
+ *
+ * An entry may carry an `exclude(paragraph, index, matched)` — narrowing 4's
+ * seam, and the `tree` shape is the only holder. A shape without one is read
+ * exactly as before: first match wins, no rescan.
  */
 export const H44_READING_FRAGMENTS = Object.freeze([
   Object.freeze({
@@ -9737,6 +9840,7 @@ export const H44_READING_FRAGMENTS = Object.freeze([
     kind: 'tree',
     what: 'a tree tip',
     re: /\b(?=[0-9a-f]*[a-f])(?=[0-9a-f]*\d)[0-9a-f]{7,40}\b/,
+    exclude: h44TreeCandidateIsIdentifier,
   }),
   Object.freeze({
     kind: 'tableCount',
@@ -9848,6 +9952,33 @@ export function h44ArtefactShape(body, onSeatPost = false) {
 }
 
 /**
+ * The first match of one shape in one paragraph that the shape ADMITS, or null.
+ *
+ * ⛔ The rescan walks the paragraph by SLICING rather than by setting a `g`
+ * flag's `lastIndex`: the declared regexes are frozen and shared across every
+ * comment in a run, and a sticky one would make this row's answer depend on how
+ * many comments preceded it (the grammar pin). A shape with no `exclude` never
+ * reaches the loop's second turn, which is what keeps the anchored `tableCount`
+ * shape — whose `^`/`$` a slice would misread — on its original reading.
+ *
+ * @returns {{ matched: string, index: number }|null}
+ */
+export function h44AdmittedMatch(fragment, paragraph) {
+  const text = String(paragraph ?? '');
+  let offset = 0;
+  while (offset <= text.length) {
+    const m = fragment.re.exec(text.slice(offset));
+    if (!m) return null;
+    const index = offset + m.index;
+    if (typeof fragment.exclude !== 'function' || !fragment.exclude(text, index, m[0])) {
+      return { matched: m[0], index };
+    }
+    offset = index + Math.max(1, m[0].length);
+  }
+  return null;
+}
+
+/**
  * H44's predicate — null when the comment is clean or out of scope, else the
  * first reading-shaped fragment that carries no time.
  *
@@ -9862,9 +9993,9 @@ export function h44UntimestampedReading(body, onSeatPost = false) {
     if (!paragraph.trim()) continue;
     if (H44_READING_TIMESTAMP.test(paragraph)) continue;
     for (const fragment of H44_READING_FRAGMENTS) {
-      const m = fragment.re.exec(paragraph);
+      const m = h44AdmittedMatch(fragment, paragraph);
       if (m) {
-        return { shape, kind: fragment.kind, what: fragment.what, fragment: m[0].trim().slice(0, H44_FRAGMENT_ECHO_CAP) };
+        return { shape, kind: fragment.kind, what: fragment.what, fragment: m.matched.trim().slice(0, H44_FRAGMENT_ECHO_CAP) };
       }
     }
   }
@@ -29237,6 +29368,69 @@ Doubles as the fire's **write self-check** (step 0). \`201\` is not the reading.
   t('H44 summary: …with the located count beside the read count', saidBy('h44Readings', summaryLine({ readingSeatRead: 6, readingSeatCandidates: 6, readingSeatNewest: 5 }, 0)).includes('5 of those post(s) had that page LOCATED'), true);
   t('H44 summary: …and that the page is shared rather than bought per row', saidBy('h44Readings', summaryLine({}, 0)).includes('shared with H56, H64 and H65'), true);
   t('H44: the window count key rides the enumerated forwarding contract too', SWEEP_COUNT_KEYS.includes('readingSeatNewest'), true);
+
+  // -- H44's tree shape: an IDENTIFIER is not a tip (#18385) -----------------
+  //
+  // ⭐ The three firing inputs are the live spellings measured on the cloud
+  // board, where 6 of 9 H44 rows in one sweep were this and nothing else. What
+  // makes them worse than noise is the row's own remedy: 「add the time the
+  // reading was taken」 applied to a session id asks a seat to stamp a reading
+  // nobody took. CONTROL A and CONTROL B are the regression pins that say the
+  // row still does its job, and CONTROL C is the canonical spelling that was
+  // already quiet — the three of them are what make the change a NARROWING
+  // rather than a silencing.
+  const TIP_18385 = '480080c7a0';
+  const CLAIM_SHORTHAND = 'Claim: PM session c5c0ce54 — dispatching this card';
+  const CLAIM_SHORTHAND_ZH = 'Claim: PM 会话 c5c0ce54 派发本卡(席位 F)。';
+  const CLAIM_UUID = 'Claim: PM loop round 1 (skills seat)\nSession: `session_71836b57-5db6-459d-ae4d-c6d9d7dd2cc6`';
+  const CLAIM_TIP_A = `Claim: PM loop round 1\nreviewed head \`${TIP_18385}\` of the PR`;
+  const CLAIM_TIP_B = `${CLAIM_TIP_A} at 2026-09-16T06:48Z`;
+  const CLAIM_CANONICAL = 'Claim: PM loop round 1\nSession: `session_01TAUTP6Yky8QWoHUAPDKNJQ`';
+  t('H44 identifier: ⭐ 「PM session c5c0ce54」 is an id, not a tip — quiet', h44hit(CLAIM_SHORTHAND), null);
+  t('H44 identifier: ⭐ …and the 「PM 会话」 spelling of the same claim', h44hit(CLAIM_SHORTHAND_ZH), null);
+  t('H44 identifier: ⭐ …and a canonical `Session:` line, which fired on the UUID\'s LAST SEGMENT', h44hit(CLAIM_UUID), null);
+  t('H44 identifier: ⭐ CONTROL A — a dateless REAL tip still fires, which is the whole point', h44kind(CLAIM_TIP_A), 'tree');
+  t('H44 identifier: ⭐ …echoed as the tip itself, so the remedy still names what to date', h44frag(CLAIM_TIP_A), TIP_18385);
+  t('H44 identifier: ⭐ CONTROL B — the same tip WITH its stamp stays quiet', h44hit(CLAIM_TIP_B), null);
+  t('H44 identifier: ⭐ CONTROL C — the canonical session spelling was already quiet and still is', h44hit(CLAIM_CANONICAL), null);
+  // ⭐ CONTROL D, and it is the reason the introduction leg reads ADJACENCY
+  // rather than 「the sentence mentions a session」: this is comment 5695539587
+  // on this board, a REAL dateless tip reading, and the loose spelling of the
+  // leg silenced it. A possessive three words away introduces nothing.
+  const POSSESSIVE_18385 = 'Claim: x\n\n**Harness reading** — every harness-loaded path on `origin/main` is in this session\'s checkout HEAD `588475c3` (the STALE reading that closed the previous shift)';
+  t('H44 identifier: ⭐ CONTROL D — 「this session\'s checkout HEAD` + a tip」 is a READING and still fires', h44frag(POSSESSIVE_18385), '588475c3');
+  // The sentence-vs-paragraph DECISION, both directions. A claim carries a
+  // `Session:` line by template, so a paragraph-scoped test would silence the
+  // whole claim population — CONTROL A's own habitat.
+  t('H44 identifier: a session line ABOVE a dateless tip does not silence it — the break is the newline', h44frag(`${CLAIM_CANONICAL}\n\`5bc2f2727ae\` is the tip`), '5bc2f2727ae');
+  t('H44 identifier: …and the rescan reaches a real tip past an excluded id in ONE sentence', h44frag(`Claim: x\n\nPM session c5c0ce54 reviewed head ${TIP_18385} of the PR`), TIP_18385);
+  // ⛔ The two declared residuals: a word between the introduction and the
+  // candidate is NOT excluded (one measurement away, not a guess), and no other
+  // shape is touched at all.
+  t('H44 identifier: ⛔ an intervening word is not an introduction — 「session id …」 still fires', h44kind('Claim: x\n\nPM session id c5c0ce54 dispatching'), 'tree');
+  t('H44 identifier: ⛔ a count beside a session id is still a count', h44kind('Claim: PM session c5c0ce54 — 12 open cards on this lane.'), 'count');
+  // ⛔ The SHAPE is not loosened for real tips — pinned as the regex source, so
+  // a future widening of the token itself cannot ride in under this row.
+  const tree18385 = H44_READING_FRAGMENTS.find((f) => f.kind === 'tree');
+  t('H44 identifier: ⛔ the `tree` shape itself is byte-for-byte what it was', tree18385.re.source, '\\b(?=[0-9a-f]*[a-f])(?=[0-9a-f]*\\d)[0-9a-f]{7,40}\\b');
+  t('H44 identifier: …and the exclusion is declared on exactly one shape', H44_READING_FRAGMENTS.filter((f) => typeof f.exclude === 'function').length, 1);
+  t('H44 identifier: …that one being the tree shape', typeof tree18385.exclude, 'function');
+  // The two legs, driven directly.
+  t('H44 identifier leg: the UUID tail — a separator flush against a word character', h44TreeCandidateIsIdentifier('session_71836b57-5db6-459d-ae4d-c6d9d7dd2cc6', 32), true);
+  t('H44 identifier leg: ⛔ …but a bullet dash is not that — the separator must be flush on BOTH sides', h44TreeCandidateIsIdentifier('- 5bc2f2727ae is the tip', 2), false);
+  t('H44 identifier leg: the introduction — `session` with only decoration between', h44TreeCandidateIsIdentifier('PM session `c5c0ce54`', 12), true);
+  t('H44 identifier leg: …and 「会话」 is the same word', h44TreeCandidateIsIdentifier('PM 会话 c5c0ce54', 6), true);
+  t('H44 identifier leg: ⛔ a possessive three words away is not an introduction', h44TreeCandidateIsIdentifier('this session\'s checkout HEAD 588475c3', 29), false);
+  t('H44 identifier leg: the lead stops at the sentence break, so a `Session:` LINE cannot reach the line below', h44SentenceLead('Session: `session_01x`\n`5bc2f2727ae` is the tip', 24), '`');
+  t('H44 identifier leg: …and a full-width stop breaks it too', h44SentenceLead('会话 c5c0ce54。tip 5bc2f2727ae', 16), 'tip ');
+  // The rescan seam. ⛔ A shape with no `exclude` is read exactly as before —
+  // first match wins, no slicing, which is what keeps the ANCHORED `tableCount`
+  // shape on its original reading.
+  t('H44 rescan: the first admissible match is returned with its index', h44AdmittedMatch(tree18385, `session c5c0ce54 then ${TIP_18385}`).matched, TIP_18385);
+  t('H44 rescan: …and its index is the position in the WHOLE paragraph, not the slice', h44AdmittedMatch(tree18385, `session c5c0ce54 then ${TIP_18385}`).index, 22);
+  t('H44 rescan: a paragraph of nothing but excluded candidates has no match', h44AdmittedMatch(tree18385, 'session c5c0ce54 and 会话 5bc2f2727ae'), null);
+  t('H44 rescan: a shape with no exclusion returns its first match untouched', h44AdmittedMatch(H44_READING_FRAGMENTS.find((f) => f.kind === 'count'), 'we hold 12 open cards and 4 PRs').matched, '12 open cards');
+  t('H44 rescan: …and the anchored tableCount shape still reads its row', h44AdmittedMatch(H44_READING_FRAGMENTS.find((f) => f.kind === 'tableCount'), '| objectstack | **2** |').matched.includes('**2**'), true);
 
   // -- H45 — reserved and handed over at once (#15667, report-only) ----------
   // Both directions of a pure label intersection. The neighbour cases pin that
