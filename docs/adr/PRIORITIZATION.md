@@ -1,4 +1,5 @@
 # ADR Prioritization Review
+> **Superseded as the priority anchor (2026-09-16): [ADR-0136 — Declared journeys as the priority anchor](./0136-declared-journeys-as-priority-anchor.md). This file keeps its method and the status-hygiene rule below; it no longer answers 「先做什么」.**
 
 > ⚠️ **STALE (noted 2026-07-16):** this review predates ADR-0050 onward — the directory now
 > reaches ADR-0097, so everything from 0050 up is outside its scope, and several statuses it
