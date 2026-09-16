@@ -254,10 +254,12 @@ section:
 ### Custom Span Widths
 
 A field's width is set on the field itself, inside the section's own `fields`
-list — there is no section-level `layout:` block. `span: full` compiles to a
-span of the section's declared column count, gated at the top breakpoint only —
-the whole row at that breakpoint, and identical to omitting the key at every
-narrower width. Omitting `span` (`auto`) lets the renderer size the field from
+list — there is no section-level `layout:` block. `span: full` resolves to the
+form grid's full column count (the explicit form `columns`, else the widest
+section's `columns`, else inferred from field count). Which container-query
+tiers emit that span is the renderer's: widest tier only at objectui
+`53ded82bf7` (objectstack#17328), one clamped class per tier since
+objectui#9253. Omitting `span` (`auto`) lets the renderer size the field from
 its widget type and the current column count.
 
 {/* os:check-yaml FormSectionSchema key=section */}

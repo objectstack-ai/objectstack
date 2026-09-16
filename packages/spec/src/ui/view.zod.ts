@@ -2607,14 +2607,19 @@ const FormFieldBaseSchema = lazySchema(() => {
   immutable: z.boolean().optional().describe('Editable on create, locked once the record exists (e.g. machine names).'),
   required: z.boolean().optional().describe('Required override'),
   hidden: z.boolean().optional().describe('Hidden override'),
-  colSpan: z.number().int().min(1).max(4).optional().describe('Absolute column span (1-4). The renderer clamps it to the current column count and emits it as one container-query-scoped span class, so the cell starts at a real column boundary at every surface width; that class is inert below the breakpoint at which that many columns exist, and `colSpan: 1` emits no class at all.'),
+  colSpan: z.number().int().min(1).max(4).optional().describe("Absolute column span (1-4). The renderer clamps it to the form grid's current column count, so the cell starts at a real column boundary at every surface width and never overflows (`colSpan: 4` in a 3-column grid renders as 3); a `colSpan` within the column count renders as authored, and `colSpan: 1` emits no span class at all."),
   /**
-   * [#2578] Relative field width, authored instead of an absolute column span.
-   * Browser measurement at three surface widths found that 'full' compiles to
-   * a span of the section's declared column count, gated at the top breakpoint
-   * only — it is not a whole row at every column count.
+   * [#2578] Relative field width. 'full' resolves to the form grid's full
+   * column count (`plugin-form` `resolveColSpan`); which container-query tiers
+   * receive the span class is the form renderer's, not this key's.
+   * At the `.objectui-sha` pin `53ded82bf7` the renderer emits the widest
+   * tier's class only, so at intermediate widths the field renders identically
+   * to omitting the key (objectstack#17328). objectui#9253 (objectui
+   * `bd09957380`, 2026-09-12, ahead of that pin) emits one clamped class per
+   * multi-column tier, making 'full' the whole row at every multi-column tier
+   * — re-read this block at the pin bump that absorbs it.
    */
-  span: z.enum(['auto', 'full']).default('auto').describe("Relative field width. 'auto' (default — omit it): the renderer sizes the field from its widget type × the current column count (wide widgets like textarea/richtext/json/file/subform take the whole row). 'full': compiles to a span of the section's declared column count, gated at the top breakpoint only — the whole row at that breakpoint, and identical to omitting the key at every narrower width."),
+  span: z.enum(['auto', 'full']).default('auto').describe("Relative field width. 'auto' (default — omit it): the renderer sizes the field from its widget type × the current column count (wide widgets like textarea/richtext/json/file/subform take the whole row). 'full': resolves to the form grid's full column count. How far down the container-query tiers that span is emitted is the renderer's, not this key's: at the `.objectui-sha` pin `53ded82bf7` only the widest tier's class is emitted (`@2xl:col-span-3` for a 3-column grid), so at intermediate widths the field rendered identically to omitting the key (objectstack#17328, Chromium at 390/720/1700)."),
 
   /** Custom widget override — only needed when auto-inference is insufficient */
   widget: z.string().optional().describe('Custom widget/component name (overrides type-based inference)'),
