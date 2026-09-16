@@ -86,7 +86,7 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 - 收班简报是前任不再写的显式声明,是释放标记不是锁:简报即最新事件 ⇒ 立即坐席。
 - 滞后标题是进场顺手修的半状态,⛔ 不是阻塞;简报点名的留守尾巴作围栏。
 - 维护者明示召唤是仲裁:有简报径直坐席;无简报才走保守确认,确认终止即坐席。
-- 互斥清 ⇒ fetch 后读三章程文件(本文、core-rules、本席章程)在 `origin/main` 的最新触碰 sha。
+- 互斥清 ⇒ fetch 后三章程(本文、core-rules、本席章程)最新触碰 sha 走 `git-history.mjs touch`。
 - 异于上一开轮标记即先重读;留开轮标记(session ID + fire 时刻 + 该触碰,注明重读)再跑轮。
 - 同读 harness 载入面 `.claude/{settings.json,agents/*.md,hooks/*}` 的最新触碰是否已在共享检出 HEAD。
 - 否 ⇒ 收班、换新会话再派,⛔ 不推进共享检出;读数走 `scripts/pm/check-harness-current.mjs`。
