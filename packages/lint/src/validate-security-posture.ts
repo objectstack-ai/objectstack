@@ -286,7 +286,10 @@ function labelHasRoleWord(label: unknown): boolean {
  * single carrier accessor, so this rule and the runtime give one answer.
  */
 function refOf(def: AnyRec): string | undefined {
-  return referenceCarrierOf(def, 'validate-security-posture refOf');
+  // The read stays HERE, on `def.reference`, so the #5017 receiver meta-test
+  // below keeps its subject: this rule reads `reference` and never the alias.
+  // Only the SHAPE judgment moves out, to the spec's one carrier accessor.
+  return referenceCarrierOf({ reference: def.reference }, 'validate-security-posture refOf');
 }
 
 /**

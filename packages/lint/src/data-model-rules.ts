@@ -247,7 +247,7 @@ function fieldEntries(fields: any): FieldEntry[] {
  * cannot drift into three answers.
  */
 function refOf(def: any): string | undefined {
-  return referenceCarrierOf(def, 'data-model-rules refOf');
+  return referenceCarrierOf({ reference: def?.reference }, 'data-model-rules refOf');
 }
 
 // ─── Uniqueness declarations (ADR-0120) ─────────────────────────────
@@ -630,7 +630,7 @@ export function lintDataModel(objects: any[]): LintIssue[] {
       if (OPTION_FIELD_TYPES.has(type)) {
         const hasOptions =
           (Array.isArray(def.options) && def.options.length > 0) ||
-          !!def.optionsFrom || !!def.dataSource || !!def.reference;
+          !!def.optionsFrom || !!def.dataSource || !!refOf(def);
         if (!hasOptions) {
           issues.push({
             severity: 'warning',
@@ -781,7 +781,7 @@ export function lintDataModel(objects: any[]): LintIssue[] {
     const summaryChildObjects = new Set(
       fields
         .filter((f) => f.def?.type === 'summary')
-        .map((f) => f.def?.summaryOperations?.object || f.def?.reference)
+        .map((f) => f.def?.summaryOperations?.object || refOf(f.def))
         .filter(Boolean),
     );
     const seenSuggestedChild = new Set<string>();
