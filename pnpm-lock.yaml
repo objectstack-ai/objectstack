@@ -903,6 +903,9 @@ importers:
         specifier: ^15.0.0
         version: 15.0.0
     devDependencies:
+      '@objectstack/spec':
+        specifier: workspace:*
+        version: link:../spec
       '@types/node':
         specifier: ^26.2.0
         version: 26.2.0

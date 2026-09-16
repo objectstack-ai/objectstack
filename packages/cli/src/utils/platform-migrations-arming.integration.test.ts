@@ -234,7 +234,7 @@ beforeEach(async () => {
   writeFileSync(
     join(dir, 'dist', 'objectstack.json'),
     JSON.stringify({
-      manifest: { id: 'os_9380', name: 'Platform Migration Arming', version: '0.0.0', type: 'app' },
+      manifest: { id: 'com.example.os-9380', name: 'Platform Migration Arming', version: '0.0.0', type: 'app' },
       objects: [
         {
           name: 'crm_case',

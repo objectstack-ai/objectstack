@@ -57,7 +57,7 @@ export const AdmissionWalled = ObjectSchema.create({
 
 export const admissionFixtureStack = defineStack({
   manifest: {
-    id: 'com.dogfood.analytics_admission',
+    id: 'com.dogfood.analytics-admission',
     namespace: 'admission',
     version: '0.0.0',
     type: 'app',
