@@ -403,6 +403,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'R8: an empty justification is refused': 2,
   'G5: the catch-all, on a changeset carrying no prescription': 1,
   'D-E2E (#17357): the denial heading, END TO END through `scan()`': 6,
+  'F-E2E (#17864): the framed MENTION, END TO END through `scan()`': 2,
   'R9: two markers is ambiguous, not "the first one wins"': 2,
   'R10: THE #6419 SHAPE -- a REAL prescription, written in Chinese with -': 4,
   'R11: the same, framed by a HEADING instead of an inline label': 3,
@@ -432,6 +433,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the floors: what the new vocabulary must refuse': 9,
   'the floors: labels that are NOT mentions, and mentions that ARE evidenced': 9,
   'D1-D9 (#17357): a heading that DENIES a prescription is not evidence of one': 9,
+  'F1-F9 (#17864): a framing word between the governor and the placeholder is': 9,
   'P51-P60: the HARD-WRAPPED mention, and the floors that keep the cure from': 11,
   'P62-P68: the framed region closes at the same or a SHALLOWER heading, not': 7,
   'U1-U12 (#8299): unit pins on the runtime-interface-only primitives': 13,
@@ -1217,9 +1219,51 @@ const GOVERNING_WORD_RE = /(?:[A-Za-z]|的)$/;
  * A migration-framing word sitting immediately before the placeholder FRAMES it; it
  * does not govern it (`Migration FROM → TO`, `迁移 FROM → TO`). Anchored at the end
  * because that is the only position where the distinction can arise.
+ *
+ * ⛔ Never apply this pattern directly — go through `withoutFramingTail` below. On
+ * its own it removes the word and LEAVES THE SPACE the word sat behind, which is a
+ * prefix no end-anchored predicate can read.
  */
 const FRAMING_TAIL_RE =
   /(?:迁移|改写|改名|升级|migrat(?:e|es|ed|ing|ion|ions)|rename[sd]?|rewrit(?:e|es|ten|ing)|upgrade[sd]?)$/i;
+
+/**
+ * The prefix with its framing word taken off -- and the SPACE that word sat behind
+ * taken off with it, so that what is EXPOSED is the word the framing word was
+ * standing in front of.
+ *
+ * Both readers of `FRAMING_TAIL_RE` ask an END-ANCHORED question of the result
+ * (`GOVERNING_WORD_RE`, `HEADING_DENIAL_RE`), and stripping alone leaves a trailing
+ * space, which is neither a letter nor `的` nor a negator. The strip therefore does
+ * not expose the word behind the framing word; it exposes a space, every
+ * end-anchored question answers "no", and the occurrence is read as a LABEL. That
+ * is the false-positive direction (#17864 · #6967): inserting a framing word between
+ * a governor and the placeholder flipped `the Migration FROM → TO is documented
+ * elsewhere` -- a plain MENTION -- into evidence of a prescription, and a false
+ * positive on this gate hard-blocks a PR rather than merely misreporting.
+ *
+ * One definition rather than two that can drift, for the reason `HEADING_RE` is
+ * hoisted: the heading arm composed the two replacements correctly and the in-line
+ * arm did not, and nothing held them equal. The two arms now differ only in the
+ * question they ask of the result.
+ *
+ * ⚠️ ONE framing word is stripped, deliberately, and the composition is not
+ * iterated: `the upgrade migration FROM → TO` exposes `upgrade`, a letter, so it
+ * reads as governed -- the same answer the mention reading wants here, by a route
+ * that is an accident. No stock occurrence stacks two framing words; a repeated
+ * strip is a wider claim and would need its own measurement.
+ *
+ * ⚠️ The pattern is not word-anchored (`MIGRATION_FRAMING_RE` is; this one is not),
+ * so `sys_migration FROM → TO` strips to `sys_`. That reading is UNCHANGED by the
+ * right-trim, and cannot be changed by it: with no whitespace before the framing
+ * word there is no whitespace left behind to trim. The repair keys on the SPACE, so
+ * it reaches exactly the shape where the framing word is a word of its own.
+ *
+ * @param {string} prefix the text left of the placeholder, already right-trimmed
+ */
+function withoutFramingTail(prefix) {
+  return prefix.replace(FRAMING_TAIL_RE, '').replace(/\s+$/, '');
+}
 
 /**
  * Does a NEGATOR directly govern the placeholder in this HEADING -- is the heading
@@ -1368,6 +1412,19 @@ const VERTICAL_TO_RE = /^\s{0,3}(?:(?:\/\/|#|-|\*|>)\s*)*\**TO\**\s*(?::|—|-|$
  * the closed class, the adjacency rule and why a denying heading is demoted to a
  * mention rather than exempted.
  *
+ * ⚠️ A FRAMING word between the governor and the placeholder is transparent, and
+ * transparency is a claim in BOTH directions (#17864). It does not make an
+ * occurrence a label -- `the Migration FROM → TO is documented elsewhere` is the
+ * same mention as `the FROM → TO is documented elsewhere`, one framing word apart --
+ * and it does not take a label away, because what the strip exposes is asked the
+ * ordinary question: `Migration FROM → TO:` exposes nothing at all and stays a
+ * label, `it. Migration FROM → TO:` exposes the sentence boundary that already made
+ * it one (P43), and `**Migration FROM → TO:**` exposes the markup. Every occurrence
+ * this moves is one where an ordinary word governs a framed placeholder, and each of
+ * those is still granted back by `carriesConcreteRewrite` the moment the body SHOWS
+ * a rewrite (P47). `withoutFramingTail` above carries the mechanism and what the
+ * strip deliberately does not reach.
+ *
  * ⚠️ Prose in this repo is HARD-WRAPPED at ~80 columns, so "starts its line" is NOT
  * the test and never could be -- `carry their\nFROM → TO migration` puts a mention
  * at column 0 with nothing at all to its left. #7078 left that as a stated blind
@@ -1418,9 +1475,15 @@ function labelPositioned(line, col, prev) {
   // takes the `carriesConcreteRewrite` path below, so a body that shows the goods
   // anywhere is refused exactly as it was.
   if (/^\s{0,3}#{1,6}\s/.test(line)) {
-    return !HEADING_DENIAL_RE.test(prefix.replace(FRAMING_TAIL_RE, '').replace(/\s+$/, ''));
+    return !HEADING_DENIAL_RE.test(withoutFramingTail(prefix));
   }
-  if (prefix !== '') return !GOVERNING_WORD_RE.test(prefix.replace(FRAMING_TAIL_RE, ''));
+  // A framing word is transparent HERE exactly as it is in the heading arm above
+  // (#17864): it frames the placeholder, so the governance question is asked of
+  // whatever stands behind it -- which requires the space it sat behind to come off
+  // with it (`withoutFramingTail`). Asked of the bare strip, the question met a
+  // trailing space, answered "nothing governs this", and read every governed
+  // MENTION carrying a framing word as a label.
+  if (prefix !== '') return !GOVERNING_WORD_RE.test(withoutFramingTail(prefix));
   // The placeholder OPENS its line -- bare or merely indented, so a wrapped list
   // item counts. There is no character to its left, so the governing word, if there
   // is one, is the last word of the line above; and only a line that is prose the
@@ -4290,6 +4353,34 @@ function selfTest() {
     },
   })), [/no `adr-0087:` disposition marker/]);
 
+  // ---- F-E2E (#17864): the framed MENTION, END TO END through `scan()` -------
+  //
+  // What the unit pins above read as a verdict, an author reads as a refusal they
+  // cannot answer: the catch-all is contradicted by "evidence" that is a sentence
+  // saying where the prescriptions live, `registered` has no entry to name, and
+  // `@objectstack/spec` is published so `unpublished` is false. Both directions run
+  // here, because the narrowing is only worth having if the second one holds.
+  battery('F-E2E (#17864): the framed MENTION, END TO END through `scan()`');
+  const FRAMED_MENTION = 'The retirement is announced in the release notes; the Migration FROM → TO is documented elsewhere.';
+  const FRAMED_WHY = 'a bare deletion on a non-strict schema refuses nothing and converts nothing';
+  green('F-E2E-G the framed mention is admitted -- a sentence ABOUT prescriptions is not one', run(mk({
+    files: {
+      '.changeset/x.md': CS({
+        body: '**BREAKING** the `x` key is deleted outright.\n\n' + FRAMED_MENTION + '\n\n'
+          + '<!-- adr-0087: not-required (no-migration-prescription) ' + FRAMED_WHY + ' -->\n',
+      }),
+    },
+  })));
+  red('F-E2E-R the same sentence over a body that SHIPS the prescription still refuses', run(mk({
+    files: {
+      '.changeset/x.md': CS({
+        body: '**BREAKING** the `x` key is deleted outright.\n\n' + FRAMED_MENTION + '\n\n'
+          + '- `App.x` → `App.y`\n\n'
+          + '<!-- adr-0087: not-required (no-migration-prescription) ' + FRAMED_WHY + ' -->\n',
+      }),
+    },
+  })), [/contradicts the changeset's own body/, /Evidence \(from-to-label\)/]);
+
   // ---- R9: two markers is ambiguous, not "the first one wins" ---------------
   battery('R9: two markers is ambiguous, not "the first one wins"');
   red('R9 two disposition markers', run(mk({
@@ -5941,6 +6032,61 @@ function selfTest() {
   assert(
     findMigrationPrescription('## Nonstandard keys, FROM → TO is how they are listed\n')?.branch === 'from-to-label',
     'D9: POSITIVE CONTROL -- the closed class is WORD-anchored, so `Nonstandard` is not `no` and this heading keeps its label reading',
+  );
+
+  // --- F1-F9 (#17864): a framing word between the governor and the placeholder is
+  // --- transparent, IN LINE as well as in a heading.
+  //
+  // `FRAMING_TAIL_RE` strips the framing word so the governance question reaches the
+  // word BEHIND it. In-line, nothing re-trimmed the space that word sat behind, and
+  // `GOVERNING_WORD_RE` is end-anchored -- so the question was asked of a trailing
+  // space, answered "nothing governs this", and every governed MENTION carrying a
+  // framing word read as a LABEL. Inserting one word flipped the verdict, in the
+  // #6967 false-positive direction, where the cost is a hard-blocked PR.
+  //
+  // F1/F3 are the RED set under reverse verification (drop the right-trim in
+  // `withoutFramingTail` and both go red). F2 is the positive control the specimen
+  // assertions are worthless without -- if it reds with F1 green the label arm has
+  // stopped seeing rather than started discriminating. F4 is the control that makes
+  // F1 a READING: one framing word is the only difference between them. F5-F9 are
+  // the floors in the dangerous direction -- a narrowing that turned a loud wrong
+  // answer into a quiet one would show up here, not in F1.
+  battery('F1-F9 (#17864): a framing word between the governor and the placeholder is');
+  assert(
+    !hasMigrationPrescription('the Migration FROM → TO is documented elsewhere\n'),
+    'F1: THE #17864 SHAPE -- `the Migration FROM → TO` is the mention `the FROM → TO` is, one framing word apart',
+  );
+  assert(
+    findMigrationPrescription('Migration FROM → TO: delete the block\n')?.branch === 'from-to-label',
+    'F2: POSITIVE CONTROL -- a framing word with NO governor in front of it opens a label, with no concrete rewrite in the body to fall back on',
+  );
+  assert(
+    !hasMigrationPrescription('唯一的 迁移 FROM → TO 落在部署方自己的代理配置上。\n'),
+    'F3: the Chinese spelling -- `的` governs across the framing word `迁移` exactly as `the` does across `Migration` (P40 framed)',
+  );
+  assert(
+    !hasMigrationPrescription('the FROM → TO is documented elsewhere\n'),
+    'F4: THE CONTROL F1 IS A READING AGAINST -- the same sentence without the framing word, which was already a mention',
+  );
+  assert(
+    findMigrationPrescription('The RLS compiler never read it. Migration FROM → TO: a set a policy needs is now supplied\n')?.branch === 'from-to-label',
+    'F5: FLOOR -- the strip exposes a sentence boundary, not a word, so a label following a finished sentence stays a label (P43 framed)',
+  );
+  assert(
+    findMigrationPrescription('**Migration FROM → TO:** delete the block\n')?.branch === 'from-to-label',
+    'F6: FLOOR -- it exposes MARKUP, which governs nothing',
+  );
+  assert(
+    findMigrationPrescription('- Migration FROM → TO: delete the block\n')?.branch === 'from-to-label',
+    'F7: FLOOR -- and a bullet marker, which is structure rather than prose',
+  );
+  assert(
+    findMigrationPrescription('the Migration FROM → TO mappings include:\n\n- `objectPermissions` → `objectPermission`\n')?.branch === 'from-to-label',
+    'F8: FLOOR -- a governed framed placeholder is still taken at face value once the body SHOWS a concrete rewrite (P47 framed); the narrowing removes no hit whose body ships the goods',
+  );
+  assert(
+    findMigrationPrescription('sys_migration FROM → TO: delete the block\n')?.branch === 'from-to-label',
+    'F9: FLOOR -- the repair keys on the SPACE, so an identifier ending in a framing word strips to `sys_` and reads exactly as it did',
   );
 
   // --- P51-P60: the HARD-WRAPPED mention, and the floors that keep the cure from
