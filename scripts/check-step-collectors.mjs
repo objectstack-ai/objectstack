@@ -164,6 +164,36 @@
  * judged on arrival instead of arriving unjudged. Its positive control is the
  * fixture, never the population -- a rule with an empty population cannot be
  * shown to work by the population.
+ *
+ * ## The harness spawns a REAL bash, so the host's bash decides what it can drive
+ *
+ * `driveBlock` reproduces GitHub's `bash -e <file>` verbatim, and that fidelity
+ * is the whole point of the dynamic half -- it must not be traded away. But the
+ * blocks it replays are written for CI's bash 5 and two of them enumerate with
+ * `mapfile`, a bash-4 builtin. On macOS `/bin/bash` is 3.2.57, where that line
+ * exits 127 before the block does anything: every assertion about the
+ * collector's behaviour failed, INCLUDING the ablation legs, which reported
+ * that they "cannot reproduce the defect". The step under test was fine; the
+ * harness could not run it there.
+ *
+ * So the interpreter is measured once, through the SHARED reading in
+ * `check-bash32-floor.mjs` -- the file that owns this repo's bash-floor
+ * knowledge and already carries the construct table this scan reuses. A block
+ * whose text uses a construct the measured host cannot run is not driven, and
+ * the three things that makes true are all deliberate:
+ *
+ *   - the skip is LOUD and carries its REASON -- the block, the line, the
+ *     spelling and what that construct does on the floor, printed in the same
+ *     sentence this repo's floor gate prints when it flags the same token in a
+ *     tracked file. A skip reporting a count is the quiet pass #4690 refuses.
+ *   - the skip is PER BLOCK, not per harness. On a 3.2 host exactly one live
+ *     collector enumerates with `mapfile`; the other four drive in full, and
+ *     the static half is untouched. A harness-wide skip would throw away four
+ *     working blocks to accommodate one.
+ *   - driving NOTHING is a refusal, never a pass. If every block were skipped
+ *     the dynamic half verified nothing, and this self-test fails saying so.
+ *
+ * On CI and on any bash 4+ host nothing is skipped and the run is unchanged.
  */
 
 import { requireDependency } from './import-prerequisite.mjs';
@@ -173,6 +203,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isEntrypoint } from './invoked-as.mjs';
+import { probeBashCapabilities, unsupportedConstructs } from './check-bash32-floor.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(HERE, '..');
@@ -622,6 +653,39 @@ async function selfTest() {
     if (!condition) failures.push(description);
   };
 
+  // ---- What this host's `bash` can actually drive ---------------------------
+  const caps = probeBashCapabilities();
+  assert(
+    caps.answered === true,
+    `the host's \`bash\` capabilities could not be read (${JSON.stringify(caps)}) -- a harness that drives a ` +
+      `real shell and cannot say WHICH shell knows nothing about its own verdict, so this is a refusal and not ` +
+      `a skip (#4690)`,
+  );
+  /** @type {{ label: string, blocked: ReturnType<typeof unsupportedConstructs> }[]} */
+  const skipped = [];
+  let drivenBlocks = 0;
+  /**
+   * May this host drive these block texts? Records a reasoned skip if not.
+   * Every text a block family needs is passed, the ablation shapes included --
+   * skipping the fixed shape while still driving its pre-fix ablation would
+   * leave half a verdict behind.
+   */
+  const drivable = (label, ...texts) => {
+    if (!caps.answered) return false;
+    const blocked = new Map();
+    for (const text of texts) {
+      for (const finding of unsupportedConstructs(label, text, caps)) {
+        if (!blocked.has(finding.id)) blocked.set(finding.id, finding);
+      }
+    }
+    if (blocked.size === 0) {
+      drivenBlocks += 1;
+      return true;
+    }
+    skipped.push({ label, blocked: [...blocked.values()] });
+    return false;
+  };
+
   // ---- The static half: the predicate can go red, and reds are specific -----
   const bareFixture = [
     'jobs:',
@@ -806,6 +870,8 @@ async function selfTest() {
    * enumeration will find them, then read what ran from the stubs' side effect.
    */
   const checkDiscoveryCollector = (label, runText, discovery) => {
+    // The block AND its ablation shape are driven below, so both are weighed.
+    if (!drivable(label, runText, bareDiscoveryLoop(discovery))) return;
     const names = ['zz-os-a.selftest.sh', 'zz-os-b.selftest.sh', 'zz-os-c.selftest.sh'];
     const n = names.length;
 
@@ -890,6 +956,9 @@ async function selfTest() {
     const commands = collectedCommands(collector.run);
     assert(commands.length >= 2, `${label}: the collector drives 2+ commands (found ${commands.length})`);
     if (commands.length < 2) continue;
+    // `bareSequence` re-uses these same commands, so the block's own text
+    // decides for both the fixed shape and its ablation.
+    if (!drivable(label, collector.run)) continue;
 
     // Every self-test green: everything runs, nothing is reported failed, exit 0.
     const allPass = driveBlock(collector.run, commands, new Set());
@@ -961,8 +1030,47 @@ async function selfTest() {
     );
   }
 
+  // ---- The skip ledger: loud, reasoned, and never a pass on its own --------
+  if (skipped.length > 0) {
+    console.error('');
+    console.error(
+      `⚠ check-step-collectors --self-test: SKIPPED ${skipped.length} block(s) -- this host's \`bash\` cannot ` +
+        `run them.`,
+    );
+    console.error(
+      `  host: bash ${caps.version ?? '(unreadable)'}; ` +
+        Object.entries(caps.builtins)
+          .map(([name, present]) => `${name} ${present === true ? 'present' : 'ABSENT'}`)
+          .join(', '),
+    );
+    for (const entry of skipped) {
+      console.error(`  · ${entry.label}`);
+      for (const f of entry.blocked) {
+        console.error(`      line ${f.line}: ${f.spelling} (bash ${f.since}) -- ${f.breaks}`);
+        console.error(`        ${f.text}`);
+      }
+    }
+    console.error(
+      '  This is a SKIP WITH A REASON, not a pass: the blocks above were never driven, so nothing below ' +
+        'vouches for them. The static half ran in full, and every other block was driven. To get a verdict ' +
+        'on these, run this self-test under a bash that has the builtins named above.',
+    );
+    console.error('');
+  }
+  // #4690, one level up again: a dynamic half that drove nothing is a dynamic
+  // half that verified nothing, and it must not print a success line.
+  assert(
+    drivenBlocks > 0,
+    `every block was skipped, so the dynamic half drove nothing and verified nothing -- that is a refusal, ` +
+      `not a pass (#4690). Host: bash ${caps.version ?? '(unreadable)'}.`,
+  );
+
   if (failures.length === 0) {
-    console.log(`✓ check-step-collectors --self-test: ${checked} assertions, ${live.collectors.length} live block(s) driven under a real \`bash -e\`.`);
+    const tail = skipped.length > 0 ? `, ${skipped.length} block(s) SKIPPED -- see the ledger above` : '';
+    console.log(
+      `✓ check-step-collectors --self-test: ${checked} assertions, ${drivenBlocks} block(s) driven under a ` +
+        `real \`bash -e\`${tail}.`,
+    );
     return 0;
   }
   console.error(`✗ check-step-collectors --self-test -- ${failures.length} failure(s)\n`);
