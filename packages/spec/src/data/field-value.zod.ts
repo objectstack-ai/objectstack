@@ -192,10 +192,70 @@ const IMPLICIT_REFERENCE_TARGETS: ReadonlyMap<string, string> = new Map([
  */
 export function referenceTargetOf(def: unknown): string | undefined {
   if (!def || typeof def !== 'object') return undefined;
-  const { type, reference } = def as { type?: unknown; reference?: unknown };
+  const { type } = def as { type?: unknown };
+  const reference = referenceCarrierOf(def, 'referenceTargetOf');
   if (typeof type !== 'string' || !REFERENCE_VALUE_TYPES.has(type)) return undefined;
-  if (typeof reference === 'string' && reference) return reference;
+  if (reference) return reference;
   return IMPLICIT_REFERENCE_TARGETS.get(type);
+}
+
+/**
+ * The `reference` carrier read as the string the contract declares it to be —
+ * or a THROW, when the key is present in a shape no reader can read.
+ *
+ * `FieldSchema.reference` is `z.string().optional()`, so `ObjectSchema.safeParse`
+ * already refuses an object- or array-valued carrier at the contract door, with a
+ * located `invalid_type` issue. This accessor is the OTHER door: the one a value
+ * reaches only when it never went through parse at all — a hand-built test
+ * fixture, a driver's raw registry entry, a metadata row rehydrated past its
+ * schema.
+ *
+ * Returning `undefined` there is the defect this function exists to end. A reader
+ * that answers "no target" for `{ object: 'shop_invoice' }` is blind in BOTH
+ * directions at once: the carrier is refused where it was written and read as
+ * absent where it is consumed, so nothing anywhere reports it. A fixture in that
+ * shape passes, and goes on passing until an assertion comes to depend on the
+ * parent it silently could not see.
+ *
+ * ## `null` and `undefined` are ABSENCE, not a wrong shape — and do not throw
+ *
+ * They express that the field names no target, which is a legal thing for a field
+ * to say: `undefined` is what `.optional()` admits, and `null` is what the
+ * blueprint's `StrictField` admits. Deciding whether an ABSENT target is legal
+ * needs to know which schema a literal is an instance of, and that is the parse
+ * step's question, not this accessor's. An empty string is absence too — it names
+ * no object — and is likewise returned as `undefined` rather than thrown on, so
+ * this function's answer stays exactly what every caller already read.
+ *
+ * ## Why a throw rather than a finding
+ *
+ * A finding needs a reader that can still read the record to report it. This one
+ * cannot: the carrier is the very thing it was asked for. `TypeError` follows the
+ * class this package's other total accessors already throw —
+ * `getDriverConfigJsonSchemaById` in `data/driver/config-registry.zod.ts` is the
+ * reference text — so a caller that catches one catches this.
+ *
+ * @param def   The field definition (or field-def-adjacent literal) to read.
+ * @param reader A label naming the caller, so the message says who could not read it.
+ */
+export function referenceCarrierOf(def: unknown, reader = 'referenceCarrierOf'): string | undefined {
+  if (!def || typeof def !== 'object') return undefined;
+  const { reference } = def as { reference?: unknown };
+  if (reference === undefined || reference === null) return undefined;
+  if (typeof reference === 'string') return reference === '' ? undefined : reference;
+  throw new TypeError(
+    `${reader}: \`reference\` is ${describeCarrierValue(reference)}, and FieldSchema declares it as an `
+      + 'optional STRING (the target object\'s name). A non-string carrier is refused by '
+      + 'ObjectSchema.safeParse, so this value never went through parse — spell the target as the object '
+      + 'name (reference: \'shop_invoice\'), or omit the key when the field names no target.',
+  );
+}
+
+/** How a value that is not a readable `reference` is named in the refusal above. */
+function describeCarrierValue(value: unknown): string {
+  if (Array.isArray(value)) return `an array (length ${value.length})`;
+  if (typeof value === 'object') return 'an object';
+  return `a ${typeof value}`;
 }
 
 /**

@@ -16,7 +16,7 @@
  * schema-valid AND lint-clean here.
  */
 
-import { BOOLEAN_VALUE_TYPES, NUMERIC_VALUE_TYPES } from '@objectstack/spec/data';
+import { BOOLEAN_VALUE_TYPES, NUMERIC_VALUE_TYPES, referenceCarrierOf } from '@objectstack/spec/data';
 
 export type Severity = 'error' | 'warning' | 'suggestion';
 
@@ -238,10 +238,16 @@ function fieldEntries(fields: any): FieldEntry[] {
  * `relationship/missing-reference` report a valid target for a field that has
  * none: the one component whose job is to catch the misspelling was the one
  * accepting it.
+ *
+ * The narrowing is now a REFUSAL rather than a quiet `undefined` (#13053): a
+ * `reference` present in a shape no reader can read throws, because a rule whose
+ * job is to tell an author their metadata is wrong must not be the component
+ * that reads the wrong metadata as absent. The predicate is the spec's single
+ * carrier accessor, so this file, `validate-security-posture.ts` and the runtime
+ * cannot drift into three answers.
  */
 function refOf(def: any): string | undefined {
-  const r = def?.reference as unknown;
-  return typeof r === 'string' && r ? r : undefined;
+  return referenceCarrierOf(def, 'data-model-rules refOf');
 }
 
 // ─── Uniqueness declarations (ADR-0120) ─────────────────────────────

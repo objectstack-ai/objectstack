@@ -14451,8 +14451,10 @@ function selfTest() {
 
   // ── The package-local gate lane: a path is keyed WHOLE (#15342) ───────────
   //
-  // `lint.yml` invokes `packages/lint/scripts/check-reference-carrier-shape.mjs`
-  // by path, twice. Before the directory prefix documented beside the patterns,
+  // `lint.yml` invoked `packages/lint/scripts/check-reference-carrier-shape.mjs`
+  // by path, twice (that gate is retired; the lane has no live member today, so
+  // these cases are synthetic on purpose and are what holds the grammar).
+  // Before the directory prefix documented beside the patterns,
   // `node ` had to be followed IMMEDIATELY by `scripts/`, so neither matcher saw
   // that step at all: no family, no hints, and nothing for `--residue` to place.
   //
@@ -14981,13 +14983,25 @@ function selfTest() {
     const direct = liveInvs.filter((i) => i.direct);
     const valueBearing = direct.filter((i) => (i.argvVariables ?? []).length > 0);
     // The live half of the package-local lane (#15342). The fixtures above prove
-    // the pattern; these two read the tree CI actually runs, so the day the lane
-    // moves this reds here instead of going quiet — and the second one holds the
-    // phantom class over EVERY direct invocation, not only over the specimen.
+    // the pattern; these read the tree CI actually runs, so the phantom class is
+    // held over EVERY direct invocation, not only over a specimen.
+    //
+    // The specimen the first of these used to name —
+    // `packages/lint/scripts/check-reference-carrier-shape.mjs` — was the tree's
+    // ONLY package-local by-path invocation, and it was retired by maintainer
+    // ruling. So the lane did not move, it emptied, and a live pin on it could
+    // only ever be a pin on zero from here. The reading is recorded as a zero WITH
+    // ITS CONTROL: no `packages/…` direct invocation, while the same extraction
+    // over the same corpus yields 143 root ones — so the zero is an empty lane and
+    // not a reader that stopped matching. The grammar itself stays under the
+    // synthetic fixtures above. ⛔ Do not widen the matchers to manufacture a
+    // subject; the day CI invokes a package-local gate by path, the fixtures
+    // already key it and a specimen can be named here again.
     t(
-      '⭐ the live corpus really carries the package-local lane the directory prefix exists for, so the '
-        + 'fixtures above judge a live class. If this reds, the lane moved — re-point it, never widen further',
-      direct.some((i) => i.script === 'packages/lint/scripts/check-reference-carrier-shape.mjs'),
+      `⭐ the package-local lane reads as EMPTY against a corpus that yields ${direct.length} direct root `
+        + 'invocation(s) — the control that makes the zero a reading. If the control collapses to 0 the '
+        + 'extraction broke; if a `packages/…` direct invocation appears, name it as the specimen again',
+      direct.length > 0 && !direct.some((i) => i.script.startsWith('packages/')),
     );
     t(
       `every one of the ${direct.length} direct invocation(s) in the live tree resolves to a file that EXISTS `
@@ -23528,9 +23542,16 @@ function selfTest() {
   );
   const liveCommands = liveTail.rows.flatMap((r) => r.commands);
   t('the live tail is not empty — an empty one would mean the walk broke, not that CI runs nothing', liveTail.rows.length > 0);
-  // #13333's first live instance was a package-local gate invoked by path. It is
-  // no longer here, and that is #15342 landing rather than this pin rotting —
-  // both halves are asserted for the reason the fixture case above states.
+  // #13333's first live instance was a package-local gate invoked by path. It
+  // left the unmeasured tail when #15342 gave the derivation a family for it, and
+  // it has since left the TREE: the gate was retired by maintainer ruling, so
+  // there is no package-local by-path invocation left to be accounted for.
+  //
+  // The pin keeps the half that is still about this file's walk — the tail names
+  // no such step — and states the second half as a zero with a control, because
+  // "the derivation names a family for it" has no `it` any more. ⛔ The control is
+  // not decoration: `liveDirectScripts` empty would satisfy the zero for the wrong
+  // reason, which is this whole file's failure mode.
   const liveDirectScripts = new Set(
     readdirSync(nodePath.join(ROOT, '.github/workflows'))
       .filter((f) => /\.ya?ml$/.test(f))
@@ -23539,10 +23560,11 @@ function selfTest() {
       .map((i) => i.script),
   );
   t(
-    'the INSTANCE the card was filed about has LEFT the live tail (#15342), and the derivation now names a '
-      + 'family for it — the tail shrank because the step became accounted for, not because the walk broke',
+    'the INSTANCE the card was filed about has LEFT the live tail (#15342) and then the tree — the tail '
+      + 'names no package-local step, and the derivation still reaches the direct invocations that remain',
     !liveCommands.some((c) => /^node\s+packages\/\S+\/check-[\w.-]+\.mjs/.test(c))
-      && liveDirectScripts.has('packages/lint/scripts/check-reference-carrier-shape.mjs'),
+      && liveDirectScripts.size > 0
+      && ![...liveDirectScripts].some((s) => s.startsWith('packages/')),
   );
   // The class assertion. The instance above is invisible because its path is
   // not under `scripts/`; this one is invisible because its INTERPRETER is not

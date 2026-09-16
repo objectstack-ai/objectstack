@@ -50,20 +50,19 @@ import { judgeHeadlessScreen } from '../screen-input-contract.js';
  * object PICKER (that is what `xRef` marks) whose collected value is the target
  * object's NAME — the same string `FieldSchema.reference` carries.
  *
- * Named rather than written inline at its `reference:` key, and the naming is
- * load-bearing. `check:reference-carrier-shape` classifies the object HOLDING a
- * `reference` key; here that holder is a JSON-Schema `properties` map, keyed by
- * property NAME — the same class the gate excludes by shape for a `fields` map
- * (N1) and for a field-key class map (N3), but a shape its position rules have
- * no case for. Written inline, the holder resolved under neither reading and
- * the gate refused to guess (exit 3 — correctly). None of its three site
- * remedies is spellable here: the holder is not under `fields:`, its own `type`
- * key holds a sub-schema rather than a string literal, and all twelve of its
- * keys are `data/Field` authorable keys, so no key can prove it is not a field
- * definition. A value reached through a name is UNJUDGED by the gate's stated
- * predicate, which judges LITERALS only. That narrows the gate nowhere else in
- * the tree; the missing `properties`-map rule is reported to the maintainer
- * rather than patched from inside this PR.
+ * Named rather than written inline at its `reference:` key. The naming was
+ * originally forced by `check:reference-carrier-shape`, a source scan that
+ * classified the object HOLDING a `reference` key and had no position rule for a
+ * JSON-Schema `properties` map, so an inline holder made it refuse (exit 3) with
+ * none of its three site remedies spellable here. That gate has been RETIRED by
+ * maintainer ruling — the contract door refuses a non-string carrier on its own
+ * (`FieldSchema.reference` is `z.string().optional()`), and the defect class it
+ * guarded now lives in the reader, which throws rather than reading a non-string
+ * as "no target".
+ *
+ * The name stays. It is a designer-form column that two call sites below read,
+ * and this is product surface; the retirement removed the reason it was
+ * MANDATORY, not the reason it is right.
  */
 const LOOKUP_TARGET_COLUMN = {
   type: 'string',

@@ -346,17 +346,13 @@ describe('ScreenFieldConfigSchema — the bound pair, help text and lookup targe
   // A lookup target is the target object's NAME, so every non-string SHAPE has to
   // be refused, not just the array this once spelled inline. Tabled for two
   // reasons. It widens the pin — `{ object: 'x' }` is the exact carrier shape
-  // #13053 was filed for, and it was untested here. And it is the only spelling
-  // available: `check:reference-carrier-shape` judges a `reference` whose value
-  // is a LITERAL, and it could place THIS holder under neither of its readings
-  // (`{ ...BASE, reference: … }` is a spread plus one key that `data/Field`
-  // does declare), so it refused rather than guess. Its three site remedies all
-  // make the refusal WORSE here: giving the holder a FieldType `type` or a
-  // `fields:` parent turns a rejection fixture into a reported finding, and
-  // `ScreenFieldConfig`'s twelve keys are every one of them `data/Field` keys,
-  // so none can prove the holder is not a field definition. Reaching the value
-  // through a name puts it in the population the gate documents as unjudged —
-  // it judges literals — while the assertion below gets STRICTER, not weaker.
+  // #13053 was filed for, and it was untested here. And the table was, at the
+  // time, the only spelling available: `check:reference-carrier-shape` judged a
+  // `reference` whose value was a LITERAL and could place THIS holder under
+  // neither of its readings, so it refused rather than guess. That gate has since
+  // been RETIRED by maintainer ruling, so the table is no longer forced — it is
+  // kept because it is the stricter assertion, which is why it was written this
+  // way in the first place.
   const NON_STRING_LOOKUP_TARGETS: readonly unknown[] = [['a'], { object: 'crm_account' }, 42, true];
 
   it('refuses help text and a lookup target that are not strings', () => {
