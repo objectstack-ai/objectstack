@@ -8,6 +8,11 @@ import {
     ScheduleOrganizationSchema,
     describeMissingScheduleOrganization,
 } from '@objectstack/spec/automation';
+import {
+    resolveScheduledWorkPolicy,
+    SCHEDULED_WORK_DISABLED_REASON,
+    type ScheduledWorkPolicy,
+} from '@objectstack/types';
 
 /**
  * Structural mirror of the automation engine's `FlowTriggerBinding`
@@ -271,8 +276,88 @@ export function resolveBindingOrganization(binding: FlowTriggerBinding): string 
 }
 
 /**
+ * [#17396] The deployment's scheduled-work policy, read once per bind.
+ *
+ * ⛔ Not memoised at module scope on purpose. {@link resolveScheduledWorkPolicy}
+ * reads `process.env` live, and a host that rebinds its flows after changing
+ * the environment (the CLI's `--fresh` harness, a test that flips the switch
+ * between kernels in one process) must get the value that is current at the
+ * bind, not the one the first import happened to see.
+ */
+function readScheduledWorkPolicy(): ScheduledWorkPolicy {
+    return resolveScheduledWorkPolicy();
+}
+
+/**
+ * Refuse to bind ANY time-triggered flow because package-authored scheduled
+ * work is switched off on this deployment (#17396): say so once, then THROW so
+ * the flow is never recorded as bound.
+ *
+ * ## Why this is a distinct refusal and not a variant of the one below
+ *
+ * The two refusals answer to different people. An undeclared acting
+ * organization is an AUTHORING defect with an authoring remedy — write the key.
+ * A deployment that has not switched scheduled work on has no defect at all:
+ * it is running the configuration it asked for, and the flow it ships is
+ * perfectly well-formed. Reporting the second as "binding failed" sends an
+ * operator to look for a broken flow, and sends an author to look for a key
+ * they may already have written. So the sentence is
+ * {@link SCHEDULED_WORK_DISABLED_REASON}, it names the switch and its remedy,
+ * and the automation engine's binding audit reports it under its own branch —
+ * ⛔ never as "binding failed — see earlier warnings", which is ruled item 6.
+ *
+ * ## Why `info` and not `warn` or `error`
+ *
+ * The repo's degradation-log-level rule asks whether the system still looks
+ * normal from the outside while something it claims is in place has not
+ * landed. Nothing here is claimed: the deployment declared this state, the
+ * global default IS this state, and every structured surface reports it. It is
+ * the rule's own functional class — "a trigger is not armed" — and it is
+ * DELIBERATE, so it sits one step below even that: escalating the default
+ * configuration of every deployment to `warn` is how a `warn` stops being read.
+ *
+ * ## Why it still throws
+ *
+ * `FlowTrigger.start` returns `void`, so a trigger that logs and returns is
+ * indistinguishable to its host from one that armed. Throwing is the engine's
+ * designed path for "not bound" — see {@link refuseMissingOrganization}'s
+ * header for the full mechanism. In the engine's own composition this is
+ * belt-and-braces rather than the primary gate: `activateFlowTrigger` reads the
+ * same policy and does not call `start()` at all when it is off, which is what
+ * keeps the audit's reason precise. This gate is what makes the guarantee hold
+ * for a host that drives the trigger directly.
+ */
+export function refuseScheduledWorkDisabled(
+    logger: TriggerLogger,
+    tag: 'schedule' | 'time-relative',
+    flowName: string,
+): never {
+    const sentence = `${tag} flow '${flowName}' is not armed: ${SCHEDULED_WORK_DISABLED_REASON}`;
+    logger.info(`[${tag}] NOT ARMED — ${sentence}`);
+    throw new Error(sentence);
+}
+
+/**
  * Refuse to bind a time-triggered flow that declares no acting organization
  * (#16659): say why at `error`, then THROW so the engine records the refusal.
+ *
+ * ## When this fires, after #17396
+ *
+ * ⚠️ Under a WALLED posture (`group` / `isolated`) with scheduled work switched
+ * on, and nowhere else. The 2026-09-08 ruling this implements is unchanged
+ * where it applies — a flow declares its organization or it is not armed, no
+ * fan-out, no organization is ever chosen for it — but it applies to the
+ * postures that have a wall to be crossed. On a `single` deployment with the
+ * switch on there is exactly one organization — plugin-auth's ORG-CREATE
+ * POSTURE GATE refuses a second: `auth-manager.ts`'s `beforeCreateOrganization`
+ * answers 403 "Creating additional organizations is disabled on this
+ * deployment." whenever `multiOrgPostureEffective()` is false, pinned in
+ * `org-create-posture-gate.test.ts`. So the run carries none, every
+ * tenant-scoped insert beneath it resolves that one organization through the
+ * #8844 guard, there is no cross-organization task to forbid and nothing for
+ * an author to declare. With the switch OFF this refusal is not
+ * reached at all: {@link refuseScheduledWorkDisabled} answers first, because a
+ * deployment that runs no scheduled work owes no authoring remedy.
  *
  * ## Why it throws, and does not merely log and return
  *
@@ -514,6 +599,22 @@ export class ScheduleTrigger implements FlowTrigger {
     }
 
     start(binding: FlowTriggerBinding, callback: (ctx: AutomationContext) => Promise<void>): void {
+        // [#17396] The DEPLOYMENT gate comes first — before the descriptor, the
+        // declaration and the job service. All three of those describe the
+        // flow; this one describes the deployment, and on a deployment that
+        // runs no package-authored scheduled work the other three verdicts are
+        // not reached and must not be reported: an operator told that a flow
+        // has "no recognizable schedule descriptor" would go and fix a
+        // descriptor that was never going to be read.
+        const policy = readScheduledWorkPolicy();
+        if (!policy.enabled) {
+            // Same ordering reason as the declaration refusal below: drop any
+            // prior binding before throwing, so a rebind under a switch that
+            // has since been turned off cannot leave the previous job armed.
+            this.stop(binding.flowName);
+            refuseScheduledWorkDisabled(this.logger, 'schedule', binding.flowName);
+        }
+
         const raw = binding.schedule ?? (binding.config as Record<string, unknown> | undefined)?.schedule;
         const schedule = normalizeSchedule(raw);
         if (!schedule) {
@@ -528,8 +629,15 @@ export class ScheduleTrigger implements FlowTrigger {
         // legally run must not be reported as "not scheduled because the job
         // service is missing", which is a different defect with a different
         // remedy.
+        //
+        // [#17396] …and only where the wall makes it answerable. Under
+        // `single` the run carries NO organization and the #8844 guard resolves
+        // the deployment's one organization beneath it, so a missing key is not
+        // a defect there — `policy.requiresActingOrganization` is the whole of
+        // that distinction and it is resolved once, centrally, so this trigger,
+        // the sweep trigger and the engine's audit cannot disagree about it.
         const organization = resolveBindingOrganization(binding);
-        if (organization === null) {
+        if (policy.requiresActingOrganization && organization === null) {
             // Drop any prior binding for this flow FIRST. A hot re-publish that
             // REMOVES the organization must not leave the previous, still-armed
             // job firing org-less ticks behind an error that says it was
@@ -577,21 +685,35 @@ export class ScheduleTrigger implements FlowTrigger {
             try {
                 const ctx: AutomationContext = {
                     event: 'schedule',
-                    // [#16659] The run executes AS this organization. This is
-                    // the one line the whole card is about: `tenantId` is the
-                    // acting run's organization, and every consumer already
-                    // reads it — `notify-node.ts` threads it onto the
-                    // notification it emits (#11303), and the engine copies it
-                    // onto the `sys_automation_run` history row (#10101). The
-                    // producer was simply never supplying a value, so both
-                    // consumers resolved NULL and the tenancy guard refused the
-                    // rows beneath them.
+                    // [#16659] When the flow declares one, the run executes AS
+                    // that organization: `tenantId` is the acting run's
+                    // organization, and every consumer already reads it —
+                    // `notify-node.ts` threads it onto the notification it
+                    // emits (#11303), and the engine copies it onto the
+                    // `sys_automation_run` history row (#10101). The producer
+                    // was simply never supplying a value, so both consumers
+                    // resolved NULL and the tenancy guard refused the rows
+                    // beneath them.
                     //
-                    // ⛔ Never conditional. `organization` is non-null here by
-                    // construction — the bind above refused the flow otherwise
-                    // — and spelling this `...(organization ? {…} : {})` would
-                    // re-open the org-less run as a silent state.
-                    tenantId: organization,
+                    // [#17396] ⚠️ RETIRED PIN, with its reason. This spread
+                    // replaces an unconditional `tenantId: organization` whose
+                    // comment read "⛔ Never conditional", on the argument
+                    // that an org-less run is a silent state. That argument was
+                    // sound while EVERY time-triggered run owed a declaration:
+                    // conditional there meant "sometimes we forgot". Under
+                    // ruling G an absent `tenantId` is a DECLARED state rather
+                    // than a forgotten one — the `single` posture with the
+                    // switch on, where the deployment holds exactly one
+                    // organization (plugin-auth's org-create posture gate
+                    // refuses a second) and the #8844 guard resolves it for
+                    // every tenant-scoped insert beneath the run. It is reached only through that gate: under a
+                    // wall the bind above still refuses an undeclared flow, and
+                    // with the switch off nothing binds at all. ⛔ The key is
+                    // OMITTED rather than set to `undefined` — the ruling says
+                    // the run carries no organization, and a present-but-
+                    // undefined `tenantId` is a different thing to every
+                    // consumer that asks `in`.
+                    ...(organization !== null ? { tenantId: organization } : {}),
                     params: {
                         jobId,
                         flowName: binding.flowName,

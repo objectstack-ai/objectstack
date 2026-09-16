@@ -1,37 +1,39 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 //
-// ⛔ NEITHER FLOW IN THIS FILE FIRES AS SHIPPED (#16659).
+// ⚠️ WHETHER EITHER FLOW IN THIS FILE FIRES IS A DEPLOYMENT DECISION (#17396).
 //
-// Both are `type: 'schedule'`. Since #16659 a time-triggered flow must declare
-// the organization it runs as — `config.organization`, a `sys_organization.id`
-// — and a flow that declares none is REFUSED at bind: the trigger logs the
-// reason at `error` and throws, the engine records the flow as NOT bound, and
-// it appears in `getTriggerBindingAudit()` and the CLI's startup summary.
+// Both are `type: 'schedule'` and neither declares `config.organization`, on
+// purpose. Two environment facts decide what happens, and neither is metadata:
 //
-// A package-shipped flow has no legal value to write there: organization ids
-// are minted at runtime, per install. ⛔ A placeholder id must NOT be invented
-// — a value matching no row is silently authoritative to every report, export
-// and cleanup that filters by organization, which is strictly worse than the
-// refusal.
+//  1. `OS_AUTOMATION_SCHEDULED_WORK_ENABLED` — package-authored scheduled work
+//     is OFF by default in every tenancy posture. Unset, neither flow is armed,
+//     and both are listed in `getTriggerBindingAudit()` and the CLI startup
+//     summary as *disabled by deployment policy* — ⛔ NOT as a binding failure.
+//     Nothing in this file needs fixing for that state.
+//  2. The tenancy posture, once the switch is ON. Under `single` both bind and
+//     run as written, carrying NO organization; every tenant-scoped write
+//     beneath them resolves the deployment's one organization. Under a wall
+//     (`group` / `isolated`) a time-triggered flow declares the organization it
+//     runs as or it is not armed (#16659, unchanged behind the wall).
 //
-// ⇒ What a package-shipped time-triggered flow should do instead is an open
-// maintainer decision. Its tracking card was destroyed along with a suspended
-// account and is being re-filed; until that card carries a number, this note is
-// the record. Until then these two are worked examples of the SHAPE: to run
-// either end to end, register it at runtime with an `organization` the install
+// ⛔ A placeholder id must NOT be invented for the walled case: organization ids
+// are minted at runtime, per install, and a value matching no row is silently
+// authoritative to every report, export and cleanup that filters by
+// organization — strictly worse than the refusal. To run either flow on a
+// walled deployment, register it at runtime with an `organization` that install
 // actually holds.
 //
-// `os lint` / `os validate` / `objectstack build` report it as a `warning`
-// (`flow-schedule-organization-missing`) — deliberately not an `error`, which
-// would refuse this package's own build for a defect it cannot repair.
+// `os lint` / `os validate` / `objectstack build` say NOTHING about the missing
+// key: lint can see neither the switch nor the posture, so a finding here would
+// be false for the default deployment.
 
 import type { Flow } from '@objectstack/spec/automation';
 
 /**
  * Task Reminder Flow — scheduled flow to send reminders for upcoming tasks.
  *
- * ⛔ Does not fire as shipped: it declares no `config.organization`. See the
- * file header.
+ * ⚠️ Whether it fires is a deployment decision — it declares no
+ * `config.organization`. See the file header.
  */
 export const TaskReminderFlow: Flow = {
   name: 'task_reminder',
@@ -87,8 +89,8 @@ export const TaskReminderFlow: Flow = {
 /**
  * Overdue Task Escalation Flow.
  *
- * ⛔ Does not fire as shipped: it declares no `config.organization`. See the
- * file header.
+ * ⚠️ Whether it fires is a deployment decision — it declares no
+ * `config.organization`. See the file header.
  */
 export const OverdueEscalationFlow: Flow = {
   name: 'overdue_escalation',

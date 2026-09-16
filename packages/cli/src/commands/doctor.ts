@@ -19,6 +19,8 @@ import { TENANCY_POSTURE_FIX_HINTS } from '../utils/tenancy-posture-hints.js';
 import { validateWidgetBindings } from '@objectstack/lint';
 import {
   resolveTenancyPosture,
+  resolveScheduledWorkEnabled,
+  SCHEDULED_WORK_ENV,
   collectGlobalUniques,
   unconfirmedGlobalUniques,
   describeGlobalUniqueFinding,
@@ -115,7 +117,7 @@ function renderHealthCheckResult(result: HealthCheckResult, verbose: boolean): v
  * Reading `.env` into a check that reports no attribution is precisely the
  * defect #5387 closed, and it would otherwise creep back one variable at a time.
  */
-export const DOCTOR_ENV_INPUTS = ['OS_TENANCY_POSTURE', 'OS_MULTI_ORG_ENABLED'] as const;
+export const DOCTOR_ENV_INPUTS = ['OS_TENANCY_POSTURE', 'OS_MULTI_ORG_ENABLED', SCHEDULED_WORK_ENV] as const;
 
 /** Where one environment value actually came from. */
 export interface EnvValueProvenance {
@@ -221,6 +223,71 @@ export function nodeEnvCheck(env: NodeJS.ProcessEnv = process.env): HealthCheckR
       + '      and this row is the only place the difference is visible.\n'
       + '      NODE_ENV cannot be supplied by a `.env*` file: it SELECTS which of those files\n'
       + '      load, so it is read from the process before any of them.',
+  };
+}
+
+/**
+ * [#17396] The EFFECTIVE value of the package-authored scheduled-work switch,
+ * reported unconditionally.
+ *
+ * ## Why this row always appears, when `nodeEnvCheck` above appears only when
+ * unset
+ *
+ * The two rows answer different questions. `NODE_ENV` has a documented default
+ * everyone knows, so only the unset case carries information. This switch is
+ * OFF by default in every posture and every kernel, and OFF is the state in
+ * which a shipped capability silently does not run — a packaged flow that an
+ * operator expects to fire, a `defineJob` an app declared. The whole reason the
+ * ruling put a DISTINCT reason on the binding audit is that "not running" and
+ * "broken" must be tellable apart; a doctor that printed nothing in the default
+ * state would leave the operator to discover the switch from the audit line, or
+ * not at all.
+ *
+ * ⇒ Both states print, and each names the other as its remedy.
+ *
+ * ## `ok`, never `warning` or `error`
+ *
+ * Neither state is a defect. OFF is the declared default and ON is a deliberate
+ * operator decision; a `warning` on the default configuration of every
+ * deployment is how doctor's warnings stop being read, and `error` is what
+ * makes doctor exit non-zero. `ok` is this file's only informational status
+ * (`HealthCheckResult.status` is `'ok' | 'warning' | 'error'`) and widening the
+ * union for one row would re-render every other check. This row informs, and
+ * that is its whole job — its `fix` text carries the operator's next step in
+ * both directions, printed under `--verbose` like every other non-error fix.
+ *
+ * ⚠️ Read through the `.env*` overlay like every other `DOCTOR_ENV_INPUTS`
+ * entry: `os serve` resolves this variable from the same cascade, so a value
+ * set in `.env.production` must be reported as the effective one. Reading
+ * `process.env` directly here would report OFF for a deployment that has turned
+ * it on in a file — the exact "diagnostic disagrees with the runtime" defect
+ * the posture reader above exists to have fixed.
+ */
+export function scheduledWorkCheck(reading: DotenvReading): HealthCheckResult {
+  const enabled = withDotenvOverlay(reading, () => resolveScheduledWorkEnabled());
+  const provenance = provenanceOf(reading, SCHEDULED_WORK_ENV);
+  return {
+    name: 'Package-authored scheduled work',
+    status: 'ok',
+    message: enabled
+      ? `ON — packaged time-triggered flows and packaged \`defineJob\` cron jobs are armed (${SCHEDULED_WORK_ENV})`
+      : `OFF (the default) — no packaged time-triggered flow and no packaged \`defineJob\` runs on this deployment`,
+    fix: enabled
+      ? `Unset ${SCHEDULED_WORK_ENV} to turn it back off. While it is on, a time-triggered\n`
+        + '      flow under a WALLED tenancy posture (group/isolated) must declare\n'
+        + '      config.organization on its start node or it is not armed; under `single` it\n'
+        + '      needs no declaration and its runs carry no organization.\n'
+        + `      ${envSourceSentence(reading, provenance)}`
+      : `Set ${SCHEDULED_WORK_ENV}=true to run package-authored scheduled work here.\n`
+        + '      OFF is the global default in every posture and every kernel: a clock-driven\n'
+        + "      workload's cost is a fact about the deployment, not about the flow. Flows in\n"
+        + '      this state are listed by the startup summary and getTriggerBindingAudit() as\n'
+        + '      "disabled by deployment policy" — NOT as a binding failure, and nothing about\n'
+        + '      them needs fixing.\n'
+        + '      ⛔ Platform-internal scheduled work (approvals escalation, the lifecycle\n'
+        + '      Reaper, the messaging dispatch loop, membership backfill) is NOT gated by this\n'
+        + '      switch and runs either way.\n'
+        + `      ${envSourceSentence(reading, provenance)}`,
   };
 }
 
@@ -1983,6 +2050,10 @@ export default class Doctor extends Command {
     if (nodeEnvFinding) {
       results.push(nodeEnvFinding);
     }
+
+    // [#17396] The deployment's scheduled-work switch, unconditionally — see
+    // `scheduledWorkCheck` for why both states print where NODE_ENV prints one.
+    results.push(scheduledWorkCheck(dotenvReading));
 
     // #5382 — the posture verdict resolved at the top of `run()`, reported here
     // among the other environment facts. Only an unrecognized value produces a

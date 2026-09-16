@@ -52,6 +52,7 @@ import { join } from 'node:path';
 
 import { LiteKernel } from '@objectstack/core';
 import { ObjectQLPlugin } from '@objectstack/objectql';
+import { SCHEDULED_WORK_ENV } from '@objectstack/types';
 import {
   AppPlugin,
   collectBundleActions,
@@ -266,6 +267,25 @@ function makeRecorder(rec: Recording) {
  * registry at all, which happens either way.
  */
 async function bootAndRecord(bundle: unknown): Promise<Recording> {
+  // [#17396] `AppPlugin` schedules package-authored jobs only where the
+  // deployment runs package-authored scheduled work, and that switch is OFF by
+  // default in every posture. This probe is not about the deployment: the row
+  // it feeds asks whether the READER saw the `jobs` collection at all, so with
+  // the switch unset the loop returns before reading anything and the row goes
+  // to zero on BOTH shapes — a baseline break that says nothing about option B.
+  // Armed here, around the boot, and restored after: the resolver reads
+  // `process.env` live, so this is the whole of what it takes.
+  const priorScheduledWork = process.env[SCHEDULED_WORK_ENV];
+  process.env[SCHEDULED_WORK_ENV] = 'true';
+  try {
+    return await bootAndRecordUnderPolicy(bundle);
+  } finally {
+    if (priorScheduledWork === undefined) delete process.env[SCHEDULED_WORK_ENV];
+    else process.env[SCHEDULED_WORK_ENV] = priorScheduledWork;
+  }
+}
+
+async function bootAndRecordUnderPolicy(bundle: unknown): Promise<Recording> {
   const rec: Recording = {
     scheduledJobs: [],
     connectedDatasources: [],
