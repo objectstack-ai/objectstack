@@ -649,8 +649,17 @@ export default class Compile extends Command {
       //
       //     Not a registry rule: it reads `src/docs/` off disk, and the docs it
       //     collects there are an INPUT to the artifact, not just a check.
-      if (!flags.json) printStep('Collecting package docs (ADR-0046)...');
+      //
+      // [#18432] The step line is printed AFTER the call and carries the count.
+      //     Printed before it, the line announced a collection the build had
+      //     not performed yet, so a run that collected NOTHING — an empty or
+      //     absent `src/docs/`, or a docs directory that moved into a package
+      //     under an ADR-0130 layout — emitted the same reassuring sentence as
+      //     a run that collected four documents. Reporting the count is what
+      //     makes the two runs distinguishable; the ordering is what makes the
+      //     count available to report.
       const docsResult = collectAndLintDocs(absolutePath, result.data as Record<string, unknown>);
+      if (!flags.json) printStep(`Collecting package docs (ADR-0046)... ${docsResult.docs.length} collected`);
       const docErrors = docsResult.issues.filter((i) => i.severity === 'error');
       // [#11727] Consumed by BOTH faces — the text block below and the `--json`
       //     payload. Only the text block read it before, so the advisories were
