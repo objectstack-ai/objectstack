@@ -214,7 +214,7 @@ import { isEntrypoint } from './invoked-as.mjs';
 // #16421 — the `fw-gate` sandbox below copies `check-adr-0087-registration.mjs`
 // in and runs it. Its staging manifest is DERIVED from that gate's module graph,
 // by the same module the gate's own fixture uses, so the two cannot disagree.
-import { stageFirstPartyClosure } from './first-party-closure.mjs';
+import { firstPartyModuleClosure, stageFirstPartyClosure } from './first-party-closure.mjs';
 
 // ── The self-test's own battery roster and floor (#13489) ──────────────────
 //
@@ -2315,12 +2315,25 @@ function selfTest() {
     // the closure from the same edges Node resolves, through
     // `first-party-closure.mjs`; neither holds an opinion about the graph any
     // more, and adding an import over there costs nothing here by construction.
+    //
+    // ⚠️ THE ENTRY IS READ HERE, BY NAME, and that line is not redundant with the
+    // walk below — it is this family's REGISTRATION. `dispatch-gates` derives
+    // "which gate does this family run a copy of?" from an anchored
+    // `readFileSync` whose target resolves to a tracked path; a loop variable or
+    // a read that happens inside another module is deliberately NOT followed. So
+    // the first spelling of this fix staged the gate correctly and made the
+    // dependency invisible, and `check:pm-dispatch-gates` said so: "the staged
+    // gate reaches the family that runs a copy of it (no key)". ⛔ Do not fold
+    // this read into the walk to save a line — the walk stages the DEPENDENCIES,
+    // this read stages the GATE, and each is load-bearing for a different reader.
     const gateEntry = 'scripts/check-adr-0087-registration.mjs';
-    const gateStaged = stageFirstPartyClosure(gateEntry, { root: join(__dirname, '..'), write: gw });
+    gw(gateEntry, readFileSync(join(__dirname, 'check-adr-0087-registration.mjs'), 'utf8'));
+    const gateDeps = firstPartyModuleClosure(gateEntry, { root: join(__dirname, '..') }).filter((rel) => rel !== gateEntry);
+    for (const rel of gateDeps) gw(rel, readFileSync(join(__dirname, '..', rel), 'utf8'));
     check(
       '#6494 the staged gate carries its whole first-party closure — DERIVED, not a hand manifest',
-      gateStaged.includes(gateEntry) && gateStaged.includes('scripts/pm/check-clause2-carriers.mjs'),
-      `${gateStaged.length} file(s): ${gateStaged.join(', ')}`,
+      gateDeps.includes('scripts/pm/check-clause2-carriers.mjs') && gateDeps.length >= 2,
+      `${gateDeps.length} dependenc(ies): ${gateDeps.join(', ')}`,
     );
     gg('add', '-A');
     gg('commit', '-q', '-m', 'base');

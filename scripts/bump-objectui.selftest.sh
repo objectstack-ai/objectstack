@@ -84,13 +84,27 @@ case_begin() { CASE="$1"; echo "  • ${CASE}"; }
 # ⭐ The module list is DERIVED, not typed (#16421). It was two names here
 # (`objectui-changeset-digest.mjs`, `invoked-as.mjs`) and the same two names in
 # three other places; when the digest script gained one import, this file was the
-# THIRD staging site to go red, and the symptom it produced was not an
-# `ERR_MODULE_NOT_FOUND` a reader could act on — the digest died as a subprocess
-# and `bump-objectui.sh` reported the objectui RANGE as unwalkable, which is a
-# true sentence about the wrong thing. The derivation lives in
-# `first-party-closure.mjs` and is shared with the JS staging sites.
-DIGEST_ENTRY='scripts/objectui-changeset-digest.mjs'
+# THIRD staging site to go red, and what a reader saw was not an
+# `ERR_MODULE_NOT_FOUND` they could act on: the staged digest died as a
+# subprocess, so `range_walkable` never returned one of its two verdicts and
+# case 5 failed on the refusal's wording instead. (⚠️ `bump-objectui.sh` itself
+# is NOT at fault and is not to be touched for this: it swallows no stderr, and
+# its `WALK_RC` branch already separates a verdict from a no-answer and refuses
+# to offer `--unshallow` for a crash. See #18354 for what IS carded.) The
+# derivation lives in `first-party-closure.mjs`, shared with the JS sites.
+#
+# ⚠️ THE BASENAME IS SPELLED ALONE AND THE DIRECTORY IS INTERPOLATED ONTO IT —
+# the same discipline the declaration above states for CHANGESET_NAME, and for
+# the same machine reason: `dispatch-gates` reads a quoted literal carrying a
+# separator as a DECLARED WATCHED PATH, so writing the repo-relative path as one
+# bare token here gives this gate a path population and CONTRADICTS the
+# `no-path-population` marker above. Measured, not theorised —
+# `check:pm-dispatch-gates`: "no family both DECLARES no path population and
+# names paths anyway (contradicted: check:objectui-bump)". ⛔ Do not tidy this
+# back into a single literal.
+DIGEST_BASENAME='objectui-changeset-digest.mjs'
 REPO_ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+DIGEST_ENTRY="scripts/${DIGEST_BASENAME}"
 # The same script, absolute, for the two cases that run it from THIS checkout
 # rather than from a sandbox — those need no staging at all.
 DIGEST_SCRIPT="${REPO_ROOT_DIR}/${DIGEST_ENTRY}"
