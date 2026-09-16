@@ -62,6 +62,10 @@ Three facts make that disclosure load-bearing rather than decorative.
    deliberately not done in the change that added this file: on the commit that introduced it,
    `git grep -n -E "ADR-0024" -- packages/plugins/plugin-auth/src packages/platform-objects/src/identity`
    minus the `cloud ADR-0024` spellings still measured **64** citing lines.
+   **What that number is**: a count of **lines** on that one historical commit, and not a per-site
+   population filter — a single line can carry two citations and a single citation can wrap across
+   two lines, so sorting lines by the `cloud ADR-0024` spelling mis-sorts in both directions, and
+   reusing this shape as a census of citation sites is wrong before it starts.
 
 ---
 
@@ -263,10 +267,16 @@ spelling. The re-pointing is per-site and semantic.
 
 ## Consequences
 
-- A reader who follows an `ADR-0024` citation out of `plugin-auth` or `platform-objects/identity`
+- **Historical — the transition this bullet describes is over.**
+  A reader who follows an `ADR-0024` citation out of `plugin-auth` or `platform-objects/identity`
   now has somewhere in *this* registry to land — once #14361 re-points the citations that mean the
   open half. Until then the citation still resolves to `docs/adr/0024-mcp-connectors.md`, which is
   the defect this record is a precondition for fixing, not one it fixes by itself.
+  As of #14361 — whose re-pointing landed 2026-09-14 in
+  [#18228](https://github.com/objectstack-ai/objectstack/pull/18228) — that `Until then` state no
+  longer exists: measured on this repository at `8b81ab60`, all 14 `ADR-0024` occurrences left in
+  those two trees carry the `cloud ADR-0024` qualifier, so none of them resolves to the
+  MCP-connectors record.
 - The open half of the identity architecture becomes reviewable by anyone who can read this
   repository, including a self-hosting customer who has no access to `cloud`.
 - `cloud` ADR-0024 gains a one-line pointer naming this record's number — filed as a `cloud` chore
