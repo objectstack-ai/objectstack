@@ -23225,13 +23225,33 @@ function selfTest() {
     // changeset. Those families must move into the matched list and the section
     // must stop printing — the double-print is the shape this section would be
     // worst as, since the two headings make different claims about time.
+    // ⚠️ This probe's changeset path is HYPOTHETICAL — that is the whole point
+    // of it — so it is the first caller in this tree to owe the assertion the
+    // absent-path refusal now requires: unasserted, a path not in the tree is
+    // NOT MEASURED and the run ends at exit 3 before any derivation. Measured
+    // on this battery: adding the branch turned this case and the one below it
+    // red, and asserting the repo is the whole repair. That is the migration
+    // every dispatcher of a not-yet-written path owes, done here on the only
+    // in-tree caller that has one.
+    const assertHere = liveSlug ? [REPO_FLAG, liveSlug] : [];
     const withChangeset = spawnSync(
       process.execPath,
-      [SELF, 'packages/spec/src/data/filter.zod.ts', `.${'changeset'}/pinned-by-the-self-test.md`],
+      [SELF, 'packages/spec/src/data/filter.zod.ts', `.${'changeset'}/pinned-by-the-self-test.md`, ...assertHere],
       { encoding: 'utf8', cwd: ROOT },
     );
     const withOut = withChangeset.stdout ?? '';
-    t('a run whose surface ALREADY carries a changeset answers at all', withChangeset.status === 0 && withOut.trim().length > 0);
+    // Both branches assert a SHAPE. With no readable remote the assertion above
+    // cannot be built, so the hypothetical path stays ambiguous and the run
+    // refuses — pinned as a refusal rather than skipped, so the no-remote case
+    // can never pass by asserting nothing over empty output.
+    t(
+      liveSlug
+        ? 'a run whose surface ALREADY carries a changeset answers at all'
+        : 'with no readable remote its repo cannot be asserted, so the hypothetical path stays NOT MEASURED',
+      liveSlug
+        ? withChangeset.status === 0 && withOut.trim().length > 0
+        : withChangeset.status === EXIT_PREREQUISITE_NOT_MET && withOut.trim() === '',
+    );
     t('and prints no pending section — there is no temporal gap left to disclose', !/^Once a changeset exists,/m.test(withOut));
     // ⚠️ Counted per COMMAND, not per substring (#14880). `check-empty-changeset`
     // is invoked two ways by CI — `--self-test` beside a `--base` run — and
@@ -23246,8 +23266,12 @@ function selfTest() {
       .map((l) => l.slice(4).split('   ')[0].trim())
       .filter((c) => c.includes('check-empty-changeset'));
     t(
-      'because those families are in the MATCHED list instead, each one exactly once',
-      changesetCommands.length > 0
+      liveSlug
+        ? 'because those families are in the MATCHED list instead, each one exactly once'
+        : 'and with the run refused there is no matched list to check — it printed no command at all',
+      !liveSlug
+        ? changesetCommands.length === 0 && withOut.trim() === ''
+        : changesetCommands.length > 0
         && new Set(changesetCommands).size === changesetCommands.length
         // The `--base` run is the one this section is ABOUT — it is the family
         // a changeset brings into scope. ⚠️ The SPELLING this looks for moved
