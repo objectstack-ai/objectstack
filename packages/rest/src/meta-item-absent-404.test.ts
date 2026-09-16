@@ -252,6 +252,41 @@ describe('[#18066] §2 — the #8013 partition survives, in both directions', ()
         expect(held.body?.item?.name).toBe('finance');
     });
 
+    it('the same invariant on a NON-`app` type: a gated `book` that exists still answers 403', async () => {
+        // The ordering pin generalised, because the fix is not app-scoped and
+        // neither is the trap. ADR-0046 §6.7's audience gate is the other arm on
+        // this handler that converts a withheld-but-EXISTING document into a
+        // refusal — 401 anonymous, 403 for an authenticated non-holder — and it
+        // is guarded by `&& visible` exactly as the app gate is. A check placed
+        // after it, or one that fired on a document that exists, would turn a
+        // gated book into an absence and lose the distinction; a caller could
+        // then no longer tell "sign in / ask for the permission set" from "this
+        // book does not exist".
+        const GATED_BOOK = { name: 'admin_guide', label: 'Admin Guide', audience: { permissionSet: 'crm_admin' }, groups: [] };
+        const { rest } = setup({ 'book/admin_guide': GATED_BOOK });
+
+        const withheld = await getItem(rest, 'book', 'admin_guide');
+        expect(withheld.statusCode).toBe(403);
+        // ⚠️ MEASURED, not assumed: this arm emits through `sendDeclaredFault`
+        // -> `sendThrownError`, whose body is the FLAT `{ error: '<message>',
+        // code }`, while the app gate's 403 one screen up emits
+        // `sendEnvelopeError`'s nested `{ success: false, error: { code,
+        // message } }`. So ONE handler answers `PERMISSION_DENIED` in two
+        // dialects depending on which gate fired, and `body.error.code` — the
+        // accessor #8013 settled on — reads `undefined` here. Asserted in the
+        // shape the route really sends rather than the shape it ought to; the
+        // divergence is reported as a finding, deliberately not converged in
+        // this change (see §3 for the same split on the 404).
+        expect(withheld.body?.code).toBe('PERMISSION_DENIED');
+        expect(withheld.body?.item).toBeUndefined();
+
+        // …and the name with nothing behind it, on the same type and the same
+        // caller, is the absence instead.
+        const absent = await getItem(rest, 'book', 'no_such_book');
+        expect(absent.statusCode).toBe(404);
+        expect(absent.body?.error?.code).toBe('RESOURCE_NOT_FOUND');
+    });
+
     it('⭐ absent and UNPUBLISHED are byte-identical — the enumeration hole this closes', async () => {
         // The half the card did not name and the reason the fix is not merely a
         // status-code correction. ADR-0045 §3 makes an unpublished app
