@@ -23084,6 +23084,18 @@ function selfTest() {
   );
   t('the banner stays OFF stdout, which is pasted verbatim into claim comments', !(plainRun.stdout ?? '').includes('gate list derived from the tree of'));
   const liveSlug = repoIdentity().slug;
+  /**
+   * A CLI run whose card names a path that is HYPOTHETICAL by design — the
+   * pending-changeset probe's path, a surface not written yet. Those runs are
+   * exactly what the absent-path refusal ends: unasserted, a path not in this
+   * tree is NOT MEASURED and the run exits 3 before deriving anything. So the
+   * assertion is spelled ONCE, here, and every probe of a hypothetical path
+   * carries it — ⛔ never by weakening the refusal for the mode a probe happens
+   * to use. With no readable remote there is no assertion to make and these
+   * probes refuse; the cases that use this helper say so in their own branch
+   * rather than passing over the empty output that comes back.
+   */
+  const runCliHypothetical = (args) => runCli(liveSlug ? [...args, REPO_FLAG, liveSlug] : args);
   const assertedRun = runCli(['--tier', 'packages/spec/src/index.ts', REPO_FLAG, liveSlug ?? 'an-owner/a-repo']);
   t(
     liveSlug
@@ -25249,7 +25261,7 @@ function selfTest() {
       // assertion rather than lost along with the probe. The second path is the
       // gate's own script, which is how a card honestly reaches this family.
       const vbCard = [CHANGESET_PROBE_PATH, VALUE_BEARING_PROBE_SCRIPT];
-      const jsonRun = runCli(['--json', ...vbCard]);
+      const jsonRun = runCliHypothetical(['--json', ...vbCard]);
       const doc = jsonRun.status === 0 ? JSON.parse(jsonRun.stdout ?? '{}') : null;
       const vbRows = [...(doc?.matched ?? []), ...(doc?.alwaysRunsPopulation ?? [])].filter((row) => row.notRunnable);
       t('CONTROL: this tree still derives at least one VALUE-BEARING family for a changeset path', Boolean(doc) && vbRows.length >= 1);
@@ -25258,7 +25270,7 @@ function selfTest() {
         t('CONTROL: and the runnable union WITHHOLDS it — which is the whole reason the bucket exists', !doc.commands.includes(vbCommand));
         const vbRecord = nodePath.join(vbTmp, 'ran-value-bearing.list');
         writeFileSync(vbRecord, `${[...doc.commands, vbCommand].join('\n')}\n`);
-        const vbRun = runCli([RAN_FLAG, vbRecord, ...vbCard]);
+        const vbRun = runCliHypothetical([RAN_FLAG, vbRecord, ...vbCard]);
         const vbOut = vbRun.stdout ?? '';
         t(
           '⭐ a real run that RECORDS it lands it in the VALUE-BEARING bucket, with the remainder heading gone entirely',
@@ -25294,12 +25306,12 @@ function selfTest() {
     // a changeset path alone only through the gate's own exclusion constant,
     // which #15753 stopped reading as a watch surface. The first case below is
     // that removal, pinned; the second is the card as it must now be spelled.
-    const changesetOnlyRun = runCli([CHANGESET_PROBE_PATH]);
+    const changesetOnlyRun = runCliHypothetical([CHANGESET_PROBE_PATH]);
     t(
       '⭐ a changeset path alone reaches NO value-bearing family any more — the noise floor it used to be derived through is an exclusion, not a surface (#15753)',
       changesetOnlyRun.status === 0 && !(changesetOnlyRun.stdout ?? '').includes('Value-bearing argv'),
     );
-    const notMeasuredRun = runCli([CHANGESET_PROBE_PATH, VALUE_BEARING_PROBE_SCRIPT]);
+    const notMeasuredRun = runCliHypothetical([CHANGESET_PROBE_PATH, VALUE_BEARING_PROBE_SCRIPT]);
     const notMeasuredOut = notMeasuredRun.stdout ?? '';
     t(
       'CONTROL: this card still reaches a family this tool cannot run, so the wording below is judged on a live row',
@@ -25314,7 +25326,7 @@ function selfTest() {
       notMeasuredOut.includes('node scripts/check-adr-0087-registration.mjs --base origin/main')
         && notMeasuredOut.includes("is this script's own documented default; CI pins it to $MERGE_BASE"),
     );
-    const notMeasuredCommands = runCli(['--commands', CHANGESET_PROBE_PATH, VALUE_BEARING_PROBE_SCRIPT]);
+    const notMeasuredCommands = runCliHypothetical(['--commands', CHANGESET_PROBE_PATH, VALUE_BEARING_PROBE_SCRIPT]);
     t(
       '⭐ --commands says it on stderr too, one line per family, where it cannot corrupt the harvest',
       (notMeasuredCommands.stderr ?? '').includes('⊘ NOT MEASURED — scripts/pm/check-half-states.mjs')
