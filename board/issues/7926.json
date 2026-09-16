@@ -1,0 +1,36 @@
+{
+  "number": 7926,
+  "kind": "issue",
+  "title": "DevPlugin 的 bare catch 把任何 driver 构造失败都报成「not installed」(#6915 实测)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-12T04:34:19Z",
+  "updated_at": "2026-08-12T14:32:55Z",
+  "closed_at": "2026-08-12T14:32:55Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7926",
+  "body": "## 一句话说明\n\n`packages/plugins/plugin-dev/src/dev-plugin.ts:311-327` 用一个**无绑定的 `catch {}`** 包住整个 driver 装配段,于是 driver 构造期抛出的**任何**错误都被吞掉,并统一报成同一句话:\n\n```\n✘ @objectstack/runtime or @objectstack/driver-memory not installed — skipping driver\n```\n\n这句话在包确实缺失时是对的;在包**装好了、但构造函数按设计拒绝启动**时,它把操作者指向一个完全不存在的问题。\n\n## 实测(#6915 分支 `eb1ad94`,真跑 `DevPlugin.init()`)\n\n`driver-memory` 的 #6915 租户闸在构造函数里拒绝多租户姿态。在 `OS_TENANCY_POSTURE=isolated` 下真实运行:\n\n```\nCONSTRUCTOR throws, code = MEMORY_MULTI_TENANT_UNSUPPORTED\nWARN   ✘ @objectstack/runtime or @objectstack/driver-memory not installed — skipping driver\n```\n\n那条错误消息本身写得很完整 —— 它点名了检测到的姿态、产生该姿态的两个 env 旋钮、以及 `@objectstack/driver-sql`(含 `:memory:` 的就地替代)作为出路。**这些一个字都没到操作者眼前。**\n\n## 为什么这不是「只是日志措辞」\n\n本次 `isolated` 场景里,DevPlugin 的 init 最终仍然拒绝了 —— 但那是**后面**的 ADR-0093 D5 organizations fail-fast 干的,和 driver 无关。也就是说:\n\n- 企业版 `@objectstack/organizations` **缺席**时:D5 兜住了,栈没起来,只是死因被归错。\n- 企业版**装好且健康**时:D5 放行,于是栈**照常起来**,只是没有 data driver,而唯一的线索是一句说包没装的假话。第一个查询才会炸,炸点离真因十万八千里。\n\n这正是 Prime Directive #10 的形状:一个真实的、写得很好的拒绝理由,被一个 catch-all 降级成了一句不实的诊断。\n\n## 建议(未定,留给分诊)\n\n`catch` 绑定住错误,区分「模块解析失败」和「其它」:前者保留现在这句;后者把原始错误(至少 `code` + `message`)透出来。是否应当**重抛**——即一个明确拒绝启动的 driver 是否应该让 DevPlugin 也拒绝启动——是个产品形状问题,本卡不替谁作决定。\n\n`mongodb-tenancy-guard.ts`(#3724)有同样的暴露面,只是 DevPlugin 从不构造 MongoDB driver,所以从未被触发过。\n\n## 关联\n\n- #6915 / PR #7924 —— 发现处;`driver-memory` 启动期租户闸(处置 B)\n- #3724 —— `driver-mongodb` 的同类闸门,同样的 typed error + code 形状\n- ADR-0093 D5 —— 本次场景里实际兜住栈的那道闸\n\n未认领,仅作记录。按 #6915 派发单第 4 条(「卡的定级是 S/M 且保持不变,相邻的东西另开卡」)单独开卡,不并入。"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 7768,
+  "kind": "issue",
+  "title": "spec: `Field.number` needs an authorable presentation hint (`useGrouping` / `displayFormat`) — ordinal integers (years) have no way to opt out of digit grouping",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T14:03:54Z",
+  "updated_at": "2026-08-12T09:50:29Z",
+  "closed_at": "2026-08-12T09:50:29Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7768",
+  "body": "Contract-first sub-card filed by the objectui whole-repo PM seat (session `session_017Qqyix2QcnpUC9XeYVDzx3`), spun out of objectui#4033 per the triage route on #5067 (2026-08-05: fixes 2+3 close in objectui; fix 1 touches `packages/spec` and must be its own card — \"不得在本单顺手改 spec\"). Unassigned — recording for this lane's triage; the objectui seat does not land code here.\n\n## Problem (measured in objectui#4033 / source thread #5067)\n\n`Field.number`'s only presentation-adjacent property is `scale`. The console's number renderers construct `Intl.NumberFormat` with grouping defaulted ON, so a year stored as `Field.number({ scale: 0, min: 1900 })` renders `2,026` in every grid/list/header, in every locale. Downstream apps have now paid for this three times by converting year fields to `Field.text`, losing numeric comparison at the driver, re-typing dataset dimensions, and hand-normalizing every writer (hotcrm-heimao#35/#40/#59) — a permanent loss of numeric semantics traded for a display detail.\n\n## What objectui is landing meanwhile (interim, no spec change)\n\nobjectui#4033 (in flight, PM-ruled): (a) the hardcoded `'en-US'` becomes the active i18n locale; (b) a transitional heuristic — `scale === 0 && no currency` ⇒ `useGrouping: false` — documented at the definition as \"overridden by the spec presentation hint when it lands\". The heuristic is deliberately crude: it also un-groups large scale-0 counts, which is the accepted cost of years no longer being wrong everywhere. An authorable hint makes the author's intent explicit and retires the heuristic.\n\n## The contract question\n\nEither of:\n- **A** — `useGrouping?: boolean` on the number field schema (narrow, maps 1:1 to `Intl.NumberFormat`), or\n- **B** — a broader `displayFormat` presentation slot (grouping, notation, unit display…) if the spec prefers one extensible carrier over per-knob accretion.\n\nA is the smallest closure for the measured pain; B is the question of whether number presentation deserves a structured home before more knobs accrete. Either way the renderer contract is: explicit hint > interim heuristic > locale default.\n\nRefs objectui#4033, #5067 (source thread + triage route), hotcrm-heimao#35/#40/#59 (downstream cost evidence)."
+}

@@ -1,0 +1,35 @@
+{
+  "number": 7778,
+  "kind": "pull_request",
+  "title": "test(service-storage): resolve `@objectstack/core` from source so a stale dist can't decide a pin (#7668)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T14:31:56Z",
+  "updated_at": "2026-08-11T19:49:44Z",
+  "closed_at": "2026-08-11T19:49:43Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": "2026-08-11T19:49:43Z",
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/7778",
+  "body": "Fixes #7668\n\n## Root cause — declared, not inherited from the issue\n\nThe issue's LEAD pointed at \"build ordering / CI\"; the PM brief guessed `turbo.json`'s task dependencies. **I reproduced both paths and neither is the defect.** `turbo.json` already declares:\n\n```json\n\"test\": { \"dependsOn\": [\"^build\"], ... }\n```\n\nand `pnpm turbo run test --filter=@objectstack/service-storage` builds core first and passes **352/352 (24 files)** on `origin/main` @ `7a8476f` — measured, not assumed. `turbo.json` is untouched by this PR.\n\nThe actual root cause is one directory down:\n\n> **`packages/services/service-storage` has no `vitest.config.ts`, so `@objectstack/core` resolves through the workspace link to `packages/core/dist/index.js` — a build artifact.** The verdict of every unit pin in the package is therefore a function of *build state*, not of the source in the checkout.\n\nThat is what #7668 reports. `attachment-access-hooks.test.ts` is the only executable guard on the #4757 predicate-less unscoped-multi-delete refusal (it cannot be expressed over REST — `deleteMany` with no `ids`/`where` is rejected 400 before the hook is reached), and against a prebuilt tree whose core dist predated the export it errored `TypeError: withoutOperationPrivateKeys is not a function` — while `packages/core/src/security/operation-private-keys.ts:117` was correct the whole time.\n\n**The loud error is the mild half.** A core dist merely *behind* rather than *missing* the symbol lets a pin run **green** against core's old behaviour — a passing test that is not testing the code in the checkout, with nothing in the output saying so.\n\n**Why ordering cannot fix this.** Turbo already orders correctly, so `turbo run test` was never the failing path. The paths that broke are the ones turbo does not mediate: `pnpm test` inside the package, `vitest run <file>`, an editor runner, or a QA agent in a tree built at an older commit (which is how #7635 found it). Those are exactly the paths a pin is re-run on *while someone is changing core* — i.e. when it most needs to be telling the truth. No `dependsOn` edit reaches them. Taking the artifact out of the resolution path does.\n\n## The fix\n\nA new `packages/services/service-storage/vitest.config.ts` aliases `@objectstack/core` → `packages/core/src/index.ts`, matching what `service-knowledge`, `plugin-audit`, `runtime`, `metadata`, `driver-memory`, `driver-sql`, `knowledge-memory`, `knowledge-ragflow`, `plugin-dev` and `plugin-hono-server` already do.\n\n- Anchored **regex, array form** — the object form matches by *prefix* and would swallow `@objectstack/core/logger` into `core/src/index.ts/logger` (`ENOTDIR`). Same shape and reasoning as `service-knowledge`'s config.\n- Aliasing is **graph-wide**, so the deps still loaded from dist (`spec`, `observability`, `platform-objects`, `objectql`) resolve to this *same single* core instance rather than a second copy; the shared `tsup.config.ts` externalizes workspace deps, so none of them inline one.\n- Scoped to `@objectstack/core` deliberately — it is the package that owns the pin's subject symbol and the one named in the failure. Aliasing the other four as well would widen the dual-instance surface for no defect on the table.\n\n**No product code and no test assertions changed.** Diff is 2 new files (config + changeset).\n\n## Reproduction and verification\n\nAll run on this branch, worktree at `7a8476f`.\n\n**1. Baseline repro — the suite cannot load without a built core** (clean `pnpm install`, no dists):\n```\n$ cd packages/services/service-storage && npx vitest run src/attachment-access-hooks.test.ts\nError: Failed to resolve entry for package \"@objectstack/core\".\n ❯ src/attachment-access-hooks.ts:3:1  import { withoutOperationPrivateKeys } from '@objectstack/core';\n```\n\n**2. `turbo.json` exonerated** — `pnpm turbo run test --filter=@objectstack/service-storage` → **Test Files 24 passed, Tests 352 passed**, before any change.\n\n**3. The decisive A/B** — the exact #7668 condition simulated by stripping the export from the *built* `packages/core/dist/index.js` (source untouched), then running the same file twice:\n\n| core dist | `vitest.config.ts` | result |\n|---|---|---|\n| stale (export stripped) | **present (this PR)** | **30/30 pass** |\n| stale (export stripped) | absent (pre-PR state) | **17 failed** / 13 passed |\n\nThe 17 failures reproduce the issue's count exactly, with its verbatim message:\n```\nCaused by: TypeError: withoutOperationPrivateKeys is not a function\n```\nSo the config is demonstrably what closes the hole, and #4757 now has a pin that a build artifact cannot silence.\n\n**4. Regression sweep** (core dist restored):\n- `npx vitest run` in the package (the previously-broken un-mediated path) → **24 files / 352 tests passed**\n- `pnpm turbo run test --filter=@objectstack/service-storage` → **352 passed**\n- `npx eslint packages/services/service-storage/vitest.config.ts --no-inline-config` → clean\n- `pnpm check:published-files` → ✓ (the gate classifies `vitest.config.ts` as test-harness config that must not ship; this package's `files` whitelist already excludes it)\n- `pnpm check:empty-changeset` → ✓\n\n`turbo.json` was not modified, so the hot-file conflict risk the brief flagged does not apply; `git merge origin/main` on this branch was **already up to date** at push time.\n\n## Out-of-scope findings — reported, not fixed\n\n- The same hazard shape exists wherever a package with unit tests imports `@objectstack/core` and ships no vitest config. This PR fixes the one package the issue names; a repo-wide sweep (or a lint gate asserting the invariant) is a separate change and should be its own issue rather than a rider here.\n- `service-storage`'s remaining runtime imports (`@objectstack/spec/*`, `observability`, `platform-objects/*`, `objectql`, `types`) still resolve to dist, so the suite continues to require a build for those. That is correct today — turbo orders it — and no observed defect argues for widening the alias set now.\n\n## Known-unrelated CI red\n\n`check:platform-checklist` → `coverage.json · qa: UNCLASSIFIED` is the pre-existing #7347 failure on base, not from this change.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01UqnHVpBA1ij5Jb87JaMXyM)_"
+}

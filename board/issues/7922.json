@@ -1,0 +1,34 @@
+{
+  "number": 7922,
+  "kind": "issue",
+  "title": "`rejectCredentialAggregation` keys off the `secret`/`password` TYPES, so an `internal`-flagged column is not covered — the same type-vs-flag gap #7728 just fixed on the read path",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "huangyiirene"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-12T04:29:44Z",
+  "updated_at": "2026-08-12T11:06:25Z",
+  "closed_at": "2026-08-12T11:06:25Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7922",
+  "body": "Split out of #7728 (PR #7920) by the `domain:metadata` seat. The dev recorded it as an out-of-scope observation rather than riding it into a credential PR — correct call. Filing it so the observation is a card, not a sentence in a merged PR body.\n\n## The gap\n\n#7728 minted `internal: true` — *\"the declared value is never returned on the generic data path\"* — because ADR-0100's third credential channel (auth-subsystem one-way hashes living in ordinary `text` columns) had **no read protection at all**, and structurally so: `collectMaskedReadFields` collects by field **TYPE**, so a `text` column is collected by nothing regardless of `managedBy`.\n\n`rejectCredentialAggregation` (`packages/objectql/src/engine.ts`) has **the same shape of blind spot**: it keys off `collectCredentialFields`, i.e. the `secret` / `password` types. An `internal`-flagged `text` column is invisible to it.\n\n⇒ The read path now understands \"protected by flag\". The aggregation guard still only understands \"protected by type\".\n\n## Why it is filed as a card and not a bug\n\n**No reachable route exposes this today** — the dev checked: there is no `/data/:object/aggregate`, and analytics requires a declared dataset. So this is a latent inconsistency, not a live disclosure, and it is filed at that grade deliberately.\n\n⚠️ **It matters more for the next adopter than for the one that exists.** `sys_api_key.key` is a SHA-256 hash — aggregating it leaks little. `sys_session.token` (#7823) is a **live bearer credential**, replay-proven working. If a route ever opens, the two are not equivalent risks, and the flag's promise (\"never returned on the generic data path\") reads as though it already covers this.\n\n## Scope\n\nFold `internal` into the aggregation guard's notion of a protected column — most likely by having `rejectCredentialAggregation` consult `collectInternalReadFields` alongside `collectCredentialFields`, so both the type-keyed and flag-keyed sets are refused.\n\n⚠️ **Check the direction of the guard before assuming.** `collectCredentialFields` deliberately ignores `managedBy` (it is the unconditional collector), while `collectInternalReadFields` has no `managedBy` exemption by design. They should compose cleanly, but that is an assumption to measure, not to inherit from this card.\n\n## Controls a fix must not break\n\n- An **unflagged** column must still aggregate normally — a guard that refuses too much silently breaks analytics, and that failure is quiet.\n- The **read-path** behaviour from #7920 must be unchanged: `internal` still omits on `find` / `findOne` / the 201 create body / the by-id update body, `?select=` included, and `sys_api_key.key` still authenticates (`where: { key: <hash> }`) and still mints show-once. `packages/objectql/src/internal-fields.test.ts` and `packages/qa/dogfood/test/api-key-hash-not-serialized.dogfood.test.ts` already assert all of that — reuse them as the regression floor rather than writing a second, drifting copy.\n\n## Evidence trail\n\n- #7728 / PR #7920 — where `internal` was minted, and the measurement that channel 3 had no read protection\n- #7823 — `sys_session.token`, the live-credential adopter this would matter for\n- ADR-0100 — the three credential channels\n- ADR-0049 — enforce-or-remove; `internal` is registered `live` in `packages/spec/liveness/field.json`"
+}

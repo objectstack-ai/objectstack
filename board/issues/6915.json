@@ -1,0 +1,34 @@
+{
+  "number": 6915,
+  "kind": "issue",
+  "title": "driver-memory 完全没有行级租户隔离(#3724 的未修姊妹面):多租户下静默不隔离",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "huangyiirene"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T03:52:08Z",
+  "updated_at": "2026-08-12T05:52:54Z",
+  "closed_at": "2026-08-12T05:52:54Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6915",
+  "body": "## 一句话说明\n\n`@objectstack/driver-memory` **没有任何行级租户隔离** —— 读路径不加租户谓词,写路径不打租户戳,`distinct()` 甚至不接受 `options`。这与 **#3724**(driver-mongodb,同为\"整个能力根本不存在\")是同一类,而 #3724 已经 **closed as completed**。\n\n在 #6792(PR #6908,SQL 家族读侧收口点闸门)的范围审计中测得。发现者当时判断\"姊妹卡已关闭,新卡只会被以冻结为由关掉\",因而没有开卡;PM 复核时发现该前提反了 —— 见下。\n\n## 事实(#6908 分支基线 `6595262` 上实测)\n\n```\n$ grep -c \"tenantId\\|organization_id\" packages/drivers/driver-memory/src/memory-driver.ts\n0\n```\n\n零匹配。另外 `distinct(object, field, query?)` 的签名里**没有 `options` 参数**,所以调用方即便想传 `tenantId` 也无处可传。\n\n对照 #6908 刚刚在 SQL 家族上做的事:`applyTenantScope` 是读侧唯一收口点,`getBuilder` 构造的每个读 builder 都必须路由过去,并由 `scripts/check-tenant-chokepoint.mjs` 从 AST 逐次重新推导。`driver-memory` 不在该闸门的扫描集内,**而且这不是因为 #5499 冻结** —— 是因为它根本不使用这套机制(文件里 `getBuilder` / `applyTenantScope` 均为零匹配)。闸门因此对它不产生任何判定,也就没有 DEBT 行可记:是一个真实的缺席,而不是被静默豁免。\n\n## 为什么\"姊妹卡已关闭\"不是不开卡的理由\n\n#3724 的关闭状态是 `state_reason: completed`,它自己给的处置是二选一:\n\n- **A. 实现行级租户隔离** —— 对齐 SQL driver 的租户列解析 / 读谓词 / 写打戳;\n- **B. 显式声明不支持多租户** —— 检测到多租户模式就**启动时硬失败**,而不是静默地不隔离(原卡倾向 B)。\n\n`packages/drivers/driver-mongodb` 现有的 `mongodb-tenancy-guard.ts` 正是处置 B。也就是说 **#3724 是被\"修好\"关掉的,不是被\"不修\"关掉的**,先例指向与\"不必开卡\"相反的方向。\n\n## 与 #5499 冻结的关系\n\n冻结的理由独立成立(且 #5704 已把它从测试后端迁走),但 **#3724-B 恰好是能穿过冻结的那种形状**:启动期拒绝不是对该 driver 能力的投资,而是消除一个静默失败模式。#3724 原文的判断在这里同样适用:\n\n> 当前状态——**能在多租户下启动、且不隔离**——都不该保留。\n\n是否值得动、以及走 A 还是 B,是分诊/维护者的定级问题,不是本卡替谁作的决定。本卡只负责把这个面记录下来,并纠正那条会让它被静默丢弃的前提。\n\n## 关联\n\n- #3724 —— driver-mongodb 的同类面,closed as completed,处置 B 已落地为 `mongodb-tenancy-guard.ts`\n- #6792 / PR #6908 —— 发现处;SQL 家族读侧收口点 + AST 闸门\n- #5499 —— `driver-memory` / `driver-mongodb` 投资冻结\n- #5704 —— 已将 `driver-memory` 迁出测试后端\n\n未认领,仅作记录。"
+}

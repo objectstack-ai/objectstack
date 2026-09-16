@@ -1,0 +1,35 @@
+{
+  "number": 8101,
+  "kind": "pull_request",
+  "title": "fix(plugin-auth): /auth/change-password clears the force-change flag and enforces password-reuse on the bearer lane (#8049)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-12T15:24:18Z",
+  "updated_at": "2026-08-12T16:12:37Z",
+  "closed_at": "2026-08-12T16:12:35Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-12T16:12:35Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/8101",
+  "body": "Fixes #8049\n\nAn admin-provisioned user (`mustChangePassword` defaults to **true**) is gated out of every protected route with `403 PASSWORD_EXPIRED` until they rotate their password. On the **bearer lane** — the documented API/agent/CLI lane — that escape hatch did not work: `POST /auth/change-password` answered **200**, the password really rotated, and the caller stayed locked out forever.\n\n## Measured on `origin/main` before editing (both lanes, real HTTP)\n\n| | change-password | password rotated | `must_change_password` | `password_changed_at` | protected read | reuse of previous password |\n|---|---|---|---|---|---|---|\n| Cookie | 200 | yes | → `false` | stamped | **200** | **refused** `400 PASSWORD_REUSE` |\n| Bearer | 200 | yes | stays `true` | stays `null` | **403 PASSWORD_EXPIRED** | **accepted, 200** |\n\nThe filer's premise is confirmed in full, including the security half.\n\n## Why this carries `security`, not just \"a lockout\"\n\nOne stash — `ctx.context.__osPwChangeUserId`, set by the before-hook when it resolves the acting user — gates **three** behaviours: the `password_changed_at` / `must_change_password` stamp, ADR-0069 D1's password-reuse **rejection**, and the history append. No principal resolved ⇒ none of them run. So the bearer lane did not merely stay flagged: password history was **neither checked nor recorded** there, and a user could immediately set their password back to the one just rotated away and be told 200. A control enforced on one transport and silently absent on the other is worse than one absent on both, because the console and every pre-existing pin exercise the working lane.\n\n## Cause\n\nbetter-auth's `getHooks` (`api/dispatch.mjs`) pushes `options.hooks.before` — the auth manager's global before-hook — ahead of **every** plugin before-hook, and `bearer()`'s before-hook is what rewrites `Authorization: Bearer` into a session cookie. `resolvePasswordChangeUserId` used a bare `getSessionFromCtx(ctx)`, which reads that cookie. On the bearer lane the cookie does not exist yet, so it resolved null — while better-auth's own password write, running after the conversion, succeeded. That is the 200 with nothing stamped.\n\n## Fix — one resolution site, not a second stamp site\n\n1. `/change-password` now resolves through `resolveActor`, the pipeline's existing hook-order-independent resolver (cookie session first, explicit token lookup as fallback). All three behaviours hang off that one id, so both halves are fixed together.\n2. `resolveActor` now strips the signature from a **bearer** credential the way it always did for cookies. `bearer()` hands clients the signed `token.signature` form in `set-auth-token` (the credential the issue's reproduction used) and accepts it back, while `sys_session.token` stores the unsigned value — so the credential the documented lane actually issues resolved nothing.\n\nPoint 2 is **not** cosmetic. See ablation B below: routing through `resolveActor` alone leaves the signed-bearer lane completely unfixed.\n\nThis also repairs the same lookup for the `/sso/register` admin gate, which shares the resolver.\n\n## Regression gate — both transports, same post-conditions\n\n`packages/qa/dogfood/test/bearer-lane-password-change.dogfood.test.ts` drives `/auth/change-password` over **cookie** and over **both accepted bearer spellings**, asserting the same post-conditions on each: flag cleared, `password_changed_at` stamped, old password rejected, protected read 200, history appended, and a reused password refused. Rejection cases assert `code` **and** `status`, and the two refusals are asserted distinctly — the gate refusal is the ADR-0112 REST envelope (`403`, `error.code`), the reuse refusal is better-auth's own `APIError` (`400`, `code`).\n\n`passwordHistoryCount` defaults to 0 (off), which would make every reuse assertion vacuously green, so the suite arms it through `applyConfigPatch` — the same seam the settings service writes.\n\n## Predict-then-mutate ablation\n\nPredictions were written down before running. Both matched exactly.\n\n| ablation | predicted | measured |\n|---|---|---|\n| **A** — both edits removed | 6 green / 6 red; cookie lane whole, each bearer lane green only on the 403 gate test | **6 passed / 6 failed**, exactly those |\n| **B** — only the signature normalization removed | 9 green / 3 red; failures confined to the **signed** bearer lane | **9 passed / 3 failed**, exactly those |\n\nAblation A failure text: `must_change_password not cleared: expected true to be false`, `no password history recorded: expected [] to have a length of 1`, `expected 403 to be 200`. Ablation B proves edit 2 is load-bearing rather than tidying.\n\n## Verification\n\n- `@objectstack/dogfood` full suite: **96 passed | 1 skipped (97 files), 636 passed | 3 skipped**\n- `@objectstack/plugin-auth` full suite: **45 files, 1063 passed**\n- `typecheck` green for both packages\n- `check:nul-bytes`, `check:docs-audit-scope`, `check:test-source-alias`, `check:cross-package-test-inputs` green\n- `check:type-check-debt` green — `plugin-auth` TEST_DEBT measures **108** against the recorded ceiling of **131** (the −23 gap is pre-existing and repo-wide, tracked by #6376; not moved here)\n\nNo behaviour change on the cookie lane.\n\n_Generated by [Claude Code](https://claude.ai/code/session_01PEVB6w7D7uCszR9Mw1BL73)_\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01PEVB6w7D7uCszR9Mw1BL73)_"
+}

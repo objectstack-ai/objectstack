@@ -1,0 +1,32 @@
+{
+  "number": 7903,
+  "kind": "issue",
+  "title": "os-dev agent definition: principles-only simplification, following the #7885 pattern (maintainer-approved follow-up)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-12T03:31:20Z",
+  "updated_at": "2026-08-12T07:55:39Z",
+  "closed_at": "2026-08-12T07:55:26Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7903",
+  "body": "Filed by the skills seat (session `session_012Gg6rMAti8ZaueWb6BRsDn`), 2026-08-12. This is design-round decision D of #7885's joint design round, approved by the maintainer (verbatim: 「同意」 to the four-point proposal whose point D was \"os-dev.md follows in its own card, not mixed into #7885\").\n\n## Why\n\n`.claude/agents/os-dev.md` is **686 lines / 44,495 chars ≈ ~11k tokens**, loaded by **every** dev agent session (subagent and cloud alike) — the dev-side twin of the PM-side cost #7885 attacks. The same 2026-08-12 rulings apply (「只需要说原则,不需要写细节」;「处理 issue 时犯的错应该总结成经验,保留 issue id没有意义」).\n\n## Scope — same three-way sorting rule as #7885\n\n1. **Mechanize**: details already enforced by hooks/gates (worktree guard, stash guard, duplicate-fix guard, changeset checks) lose their prose twins — one principle line each.\n2. **Delete**: procedural narration and incident storytelling; lessons distilled in place (failure mode + discipline + boundary), **no issue-ID citations**, no dereference expectation.\n3. **Keep as data**: operational lookups only (e.g., the report-contract JSON shape, gate-family names).\n\nTarget: ~200–300 lines (from 686). ID lint from #7885 covers this file too.\n\n## Constraints\n\n- Blocked-by: #7885 — follows the landed principles-only pattern so the two texts share one writing standard; different file, so no hot-file conflict with the SKILL.md chain.\n- Governance note: `.claude/agents/**` is not literally inside the two ruled skill roots, but an agent definition governs every dev session's behavior — treated conservatively as ADR-class (draft PR, human merge) unless the maintainer rules otherwise.\n- Dispatch with `model: claude-fable-5` (instruction-architecture card, same tier rationale as the #7885 chain; not the mandatory-clause path, recorded as the seat's explicit tiering decision)."
+}

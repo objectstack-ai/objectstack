@@ -1,0 +1,36 @@
+{
+  "number": 7749,
+  "kind": "issue",
+  "title": "A bearer-authenticated admin metadata write is stamped `actor: 'system'` — `req.user` / `req.userId` are unset on the `/meta` PUT path",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T12:26:39Z",
+  "updated_at": "2026-08-12T07:43:37Z",
+  "closed_at": "2026-08-12T07:43:37Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7749",
+  "body": "## Symptom\n\nA metadata write made by an authenticated admin is attributed to nobody.\n\n- `PUT /api/v1/meta/&lt;type&gt;/&lt;name&gt;` with an admin **bearer** token → the audit row records `actor: 'system'` and the history row records `actor: null`.\n- The real identity appears only when the caller sends `X-Actor` **by hand**.\n\nThe practical consequence: every audit row written through the normal console/API path names `system`, so the trail cannot answer \"who changed this\" for any client that does not know to add a non-standard header.\n\n## Root cause\n\n`packages/rest/src/rest-server.ts` computes the actor as a three-way fallback, at five sites (lines 5846-5847, 5965-5966, 6110-6111, 6164-6165, 6516-6517 on `origin/main`):\n\n```\nconst actorHeader = req.headers?.['x-actor'] ?? req.headers?.['X-Actor']\n    ?? req.user?.id ?? req.userId;\n```\n\nThe header is the only limb that resolves on this route: `req.user` and `req.userId` are **unset on the `/meta` PUT path**, so with no `X-Actor` the expression yields `undefined` and the downstream default (`'system'` for audit, `null` for history) takes over. The bearer token is validated — it just never lands on `req.user` for these handlers.\n\n**Stale-premise check:** re-verified on `objectstack` `origin/main` (`00e9196`) — all five sites still carry the identical fallback chain.\n\n## Reproduction\n\n1. Boot the showcase with writable runtime packages; obtain an admin bearer token.\n2. `PUT /api/v1/meta/&lt;type&gt;/&lt;name&gt;` with `Authorization: Bearer …` and **no** `X-Actor`.\n3. `GET /api/v1/meta/&lt;type&gt;/&lt;name&gt;/audit` → the row reads `actor: 'system'`; `/history` reads `actor: null`.\n4. Repeat with `X-Actor: &lt;id&gt;` → the row carries that id, proving the write path itself records whatever the fallback resolves.\n\n## Scope\n\nSeparate from #7748 (publish/rollback write no audit row at all): different file, different failure, and this one survives that fix — once publish and rollback start writing rows, they will write them stamped `system` for the same reason.\n\n## Source\n\nExtracted from the QA run objectstack-ai/objectstack#7695 (framework 92f26f75, console 09987b680)."
+}

@@ -1,0 +1,32 @@
+{
+  "number": 7553,
+  "kind": "issue",
+  "title": "The H2 half-state predicate is blind to two MORE claim spellings in live use — measured, 9 of 22 pm-tracked cards are false positives after #7488's fix",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T05:11:59Z",
+  "updated_at": "2026-08-12T01:21:08Z",
+  "closed_at": "2026-08-11T11:45:51Z",
+  "closed_by": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7553",
+  "body": "Filed by the dev on #7488 / #7440 (PR #7551) from the fleet measurement that card required. **Unassigned — recording, not claiming.** No `domain:*` label: same two artifacts as #7488, routing is the triage seat's call.\n\n## What #7488 fixed, and what it deliberately did not\n\n#7488 ruled direction 1: `h2AssigneeNoClaimComment` now accepts an optional markdown blockquote marker, so the shape SKILL.md step 4 tells every seat to write (`> Claim: …`) reads as a claim. That card ⛔ explicitly barred widening the regex any further — *\"do not widen the regex so far that ordinary prose containing the word claim starts matching (its current strictness is a feature)\"* — so what follows was measured and left alone, on purpose.\n\n## The measurement\n\nSample: all 18 open `pm:dispatched` cards (the exact population the H2 sweep reads) plus the 4 recently-closed cards #7488's table names. 22 cards, every comment thread read through the API on 2026-08-11.\n\n| claim-comment spelling on the thread | cards | read by the predicate after #7488? |\n|---|---|---|\n| bare `Claim:` | 11 | ✅ yes (always did) |\n| blockquote `> Claim:` | 2 (#6752, #7378) | ✅ yes (this is what #7488 fixed) |\n| bold, em-dash, no colon — `**Claim** —`, `**CLAIM** —`, `**DEV CLAIM** —` | 5 (#7485, #7450, #7359, #7363, #7467) | ❌ **no** |\n| Chinese — `认领：` / `**认领 ·**` / `**认领 ——**` / `🔒 **认领**` | 4 (#6599, #6350, #4953, #4001) | ❌ **no** |\n| no claim comment at all, in any spelling | **0** | — |\n\nSo after #7488 lands, **9 of these 22 cards still report as H2 half-states while carrying a perfectly good claim comment**. That is a higher false-positive rate than the 1-in-8 #7488 was filed about.\n\n⚠️ **A correction to #7488's own body, for the record.** It says of the other seven H2 hits: *\"the other seven are true findings — they carry no claim comment in any form.\"* Its table is literally correct (it measured exactly two spellings, and neither is present), but the generalization is wrong: all seven carry claim comments, in the two spellings above. #7488's acceptance criterion is unaffected — none of the seven uses a blockquote, so all seven are still reported after its fix, which is what PR #7551 verifies.\n\n## Why this is a ruling, not a dev-level tooling call\n\nUnlike the blockquote form, neither of these spellings is what SKILL.md tells seats to write, so \"the predicate cannot read the documented shape\" — #7488's whole argument — does not apply. There are two coherent directions and they point opposite ways:\n\n1. **Converge the fleet on the documented shape.** The predicate stays strict; the seats writing `**Claim** —` and `认领` are the thing that is wrong, and the fix is protocol discipline (plus, perhaps, an H-invariant that reports a claim-shaped comment the predicate cannot parse, so the divergence is loud instead of silent). Costs: every already-posted claim in those spellings stays unreadable, and 5 of the 9 are from the two most active PM seats.\n2. **Teach the predicate all four spellings.** Costs exactly what #7488 warned about — each spelling added is regex width, and `认领` plus bold-without-colon is a long way from \"a line that begins with Claim:\". The strictness that makes a green H2 mean something starts eroding.\n\nNote the interaction with the maintainer's 2026-08-08 English-on-GitHub ruling: the four Chinese-spelling cards are from 2026-08-05..09, i.e. mostly older than or contemporaneous with that ruling, so direction 1 may already be happening on its own. Worth measuring the trend by date before choosing.\n\n⛔ Not fixed in PR #7551 — that PR is scope-barred to the blockquote marker by #7488's own instruction.\n\nRefs: #7488 (the blockquote half), PR #7551 (the fix), #7412 (neighbour — the same script's live sweep cannot run in a PM/dev session container; independently re-confirmed during this work: `api.github.com/repos/**` answers 403 with and without the container token)."
+}

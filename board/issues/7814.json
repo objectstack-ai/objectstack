@@ -1,0 +1,35 @@
+{
+  "number": 7814,
+  "kind": "pull_request",
+  "title": "fix(metadata-protocol): listCommits no longer hides env-wide commit history (#7779)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T15:46:05Z",
+  "updated_at": "2026-08-11T20:09:45Z",
+  "closed_at": "2026-08-11T20:09:43Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": "2026-08-11T20:09:43Z",
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/7814",
+  "body": "Fixes #7779\n\n`protocol.listCommits` selected the ADR-0067 timeline with the strict `organization_id` equality that #7705 (PR #7771) had just replaced **one function above it**:\n\n```ts\nconst where = { package_id: request.packageId };\nif (request.organizationId) where.organization_id = request.organizationId;\n```\n\n`organization_id = '<org>'` matches no row whose column is NULL, so a session with an active organization was shown **none** of the commits recorded env-wide. The commits were in `sys_metadata_commit` the whole time; the read could not see them.\n\n## Step one, as the card required: live, not latent — and measured before the fix was written\n\n`recordPackageCommit` stores `organization_id: request.organizationId ?? null`. The **only** door into a publish is the dispatcher's `POST /packages/:id/publish-drafts` (`packages/runtime/src/domains/packages.ts`), which forwards an organization only when `resolveActiveOrganizationId` yields one. That resolver (`packages/runtime/src/http-dispatcher.ts:1668`) answers `undefined` both for a session with no active organization **and for any throw on the auth seam**, because its whole body is `catch`-wrapped.\n\nSo a publish made before an organization is selected — or during a transient auth blip — records its commit env-wide **permanently**, since the timeline is append-only.\n\nDriven on a real engine over a real SQLite driver, a no-org publish wrote `organization_id: null`, and the org-scoped read of that same package then returned `[]`.\n\n## The blast radius is wider than the card projected — a finding, not a detail\n\nThe card framed this as observability/audit in contrast with #7705's data-lifecycle defect. Measurement widened it: **`rollbackToPackageCommit` derives the set of commits it must undo from this list** (`protocol.ts:12463`). A commit the list could not see was a commit the rollback silently skipped.\n\nMeasured pre-fix, an org-scoped rollback past an env-wide commit answered `{success: true, revertedCommits: []}` while that commit's changes stayed live. A rollback that reports success and rolls back nothing is a correctness defect, not a reporting one.\n\n## The fix\n\nAn org-scoped read now matches its own organization **or** env-wide — the `$or [{organization_id: oid}, {organization_id: null}]` shape this package already uses for the #3115 orphaned-draft fix (`packages/metadata-protocol/src/sys-metadata-repository.ts:896-899`), the shape #7705 applied to the sibling `deletePackage` read, and the shape the SQL driver's own implicit tenant wall uses (`field = :tenant OR field IS NULL`, #2734).\n\n**The whole shape, or none of it.** The no-org branch is deliberately *not* narrowed to `organization_id IS NULL`. Narrowing it would hide every org-scoped commit from that door instead — the same bug pointed the other way — which is exactly why #7705 left its own no-org branch alone. A dedicated case pins it.\n\n## The pin asserts the consequence\n\n`packages/runtime/src/package-list-commits-org-scope.integration.test.ts` — real `ObjectQL` + real `driver-sql` over on-disk SQLite, seeded through the **real publish path**, in `packages/runtime` because that is the only package with `metadata-protocol` + `objectql` + a real `driver-sql` (`metadata-protocol` cannot import `objectql` — dependency cycle).\n\nBoth existing `deletePackage` suites stubbed `engine.find`, which is why neither could see the sibling defect, and a stub cannot see this one either: the question is whether `organization_id = 'org'` matches a NULL column, which is a property of the driver's SQL and not of a stub's `filter()`.\n\nSix cases: the premise (a no-org publish really does write `organization_id: null`, read straight back out of SQLite); the positive (env-wide commits returned to an org-scoped caller, ordering preserved); **both negative directions** (another organization's commits and another package's commits stay out); the no-org door (still package-wide); and the rollback planner's view of the timeline.\n\n## Reverse verification — direction predicted before the revert was run\n\nRestoring the strict equality was predicted to turn **exactly two** cases red — the env-wide commit vanishing from the org-scoped list, and the rollback-planner case failing at its list assertion before reaching the rollback lines — and to leave the other four green, because strict equality is **narrower** than the `$or`: it cannot reach another organization's rows or another package's, and it does not touch the no-org branch at all.\n\nMeasured on revert: exactly that. `2 failed | 4 passed`, both failures `[1]` vs `[2]`. The prediction held.\n\n## ⚠️ Known remaining gap — reported, not fixed here\n\n`revertCommit` (`protocol.ts:12180`) and `rollbackToPackageCommit`'s own target lookup (`:12455`) still carry the **byte-identical** strict equality. This card holds `protocol.ts` — a serialized file — for `listCommits` alone, so per #7705's precedent this is reported rather than grown into the diff.\n\nThe consequence is now **loud instead of silent**: the rollback above reports `success: false` naming the commit it could not resolve, rather than claiming success over a no-op. That is strictly better and non-destructive, but it is not the whole repair — so the new suite asserts it, and the remainder cannot drift unnoticed before its own card lands.\n\n## Gates\n\n| Gate | Status |\n|---|---|\n| `metadata-protocol` tests | 1066 passed (72 files) |\n| `objectql` tests | 3237 passed (183 files) |\n| `runtime` tests | 2039 passed (131 files), incl. the 6 new |\n| `check:type-check-debt` | holds — none above recorded; `runtime` measured **exactly 227**, its ceiling, with **0** errors from the new file |\n| `check:query-options-erasure` | holds — 67 non-test sites, none new |\n| `eslint` on changed files | clean |\n| CI | not awaited — reported at push per #6644 L2 |\n\nNo `content/docs/releases/` edits. No `docs/adr/**` needed. A `.changeset/*.md` is included. `main` merged before opening (`098b62914`).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01Kp1rUCEFGp3eYRztsRx1B1\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01Kp1rUCEFGp3eYRztsRx1B1)_"
+}

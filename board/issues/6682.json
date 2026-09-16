@@ -1,0 +1,34 @@
+{
+  "number": 6682,
+  "kind": "issue",
+  "title": "drivers(memory, mongodb): the `$contains` family still folds case — the last two backends left on the wrong side of #4706 Q2 = A",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "huangyiirene"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T12:18:31Z",
+  "updated_at": "2026-08-11T19:49:45Z",
+  "closed_at": "2026-08-11T19:49:45Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6682",
+  "body": "Finding, filed unassigned from the #6518 implementation. **Not** a request to unfreeze anything — it exists so the two `FILTER_TEXT_CASES` DEBT rows that survive #6518 have a successor to point at, instead of pointing at a closed issue.\n\n## What #6518 left behind\n\n#4706 **Q2 = A** rules the `$contains` family (`$contains` / `$notContains` / `$startsWith` / `$endsWith`) **case-SENSITIVE on every backend**. After #6518 the scoreboard is:\n\n| face | `{ name: { $contains: 'acme' } }` against `ACME Corp` | verdict |\n|:--|:--|:--|\n| driver-sql / -sqlite-wasm / -turso (local + remote) | does NOT match | ✅ ruled behaviour (#6518) |\n| `@objectstack/formula` `matchesFilterCondition` | does NOT match | ✅ already compliant (`String.includes`) |\n| objectql `having` | does NOT match | ✅ already compliant |\n| service-analytics (both SQL compilers) | does NOT match | ✅ already compliant on the dialect they emit for |\n| **driver-memory** — query path + analytics face | **MATCHES** | ❌ `new RegExp(escapeRegex(v), 'i')` |\n| **driver-memory** — reference matcher | does NOT match | ⚠️ this package answers ONE operator two ways |\n| **driver-mongodb** | **MATCHES** | ❌ `$regex` with a hard-coded `$options: 'i'` |\n\nBoth defects are **over-matching** — rows the filter excludes are returned — and both fold the **whole Unicode range**, so they also overshoot the #4706 **Q1 = A** ASCII-only boundary that `$icontains` is held to. On an RLS read scope a wider predicate is over-reach, not a loose filter (#3948).\n\nThe driver-memory row is the sharper one: its two faces disagree *with each other*, which is the divergence class #5374 closed between the other two faces of that package.\n\n## Why #6518 did not do it\n\nThe **#5499 freeze** (maintainer, 2026-08-05) suspends implementation investment in `driver-memory` and `driver-mongodb`. #6518 was dispatched with that freeze restated as a ruling, so both packages were explicitly out of scope; their `FILTER_TEXT_CASES` cells stay DEBT rather than being cleared or quietly widened.\n\n## Why this is separate from #6520\n\n#6520 is the **`$icontains`** programme (requirement 1: implement a new operator, gated on taking `$icontains` into the spec `FILTER_OPERATORS` allowlist). This is **requirement 2**: an operator both packages already implement returns the wrong rows. Different requirement, different risk — #6520's cost is the vocabulary change rippling through allowlist consumers, while this one is a one-line flag on each side plus the row-set pins that flip with it.\n\nThey are, however, natural PR-mates: both touch the same two `translateFieldOperators` / `normalizeFieldOperators` sites, and clearing a `FILTER_TEXT_CASES` cell needs BOTH requirements answered before the case-set can be imported (`scripts/check-driver-conformance.mjs` judges a cell by that import, so a half-answered cell must not import it).\n\n## Suggested scope\n\n1. `driver-memory`: drop the `'i'` flag from the `$contains`-family lowering on the query path and the analytics face, and align the reference matcher — one answer per operator, per #5374.\n2. `driver-mongodb`: drop the hard-coded `$options: 'i'` in `mongodb-filter.ts`'s `translateFieldOperators`. `escapeRegex` already makes the comparand literal, so the literal-comparand cases keep holding.\n3. Flip the row-set pins that currently encode the folded answer, asserting the NEW substance rather than deleting the assertion.\n4. Re-grade the two `FILTER_TEXT_CASES` DEBT rows in `scripts/check-driver-conformance.mjs` — they can only be deleted once requirement 1 (#6520) is answered too, since coverage is judged by importing the whole case-set.\n\nAnchors verified on `origin/main` @ `d13f627`: `driver-memory/src/memory-driver.ts` (`normalizeFieldOperators`, the RegExp-`'i'` query path), `driver-memory/src/memory-matcher.ts` (`match()`, `String.includes`), `driver-mongodb/src/mongodb-filter.ts` (`translateFieldOperators`)."
+}

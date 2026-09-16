@@ -1,0 +1,36 @@
+{
+  "number": 7900,
+  "kind": "issue",
+  "title": "finding: the whole /automation read domain is gated only by \"authenticated\" — run-detail returns the triggering record's fields without that record's own FLS",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched",
+    "security"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-12T03:01:20Z",
+  "updated_at": "2026-08-12T10:07:53Z",
+  "closed_at": "2026-08-12T10:07:53Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7900",
+  "body": "Observation-class finding, filed **unassigned with no `pm:queue`** — for triage to grade and route. Handed up by the dev on #7639 / PR #7896 as an explicit *\"for you to grade, not for me to decide\"* residual, and graded by the services PM as **not a blocker for that PR** (reasoning below) but worth its own card.\n\n## What was measured\n\n`packages/runtime/src/domains/automation.ts:135-147` applies the #5519 **anonymous baseline** to the **whole `/automation` domain** — not per route, not per field. `automation.ts:489-496` then answers run-detail with `deps.success(run)`, handing back the `ExecutionLogEntry` **verbatim**: no projection, no redaction, no masking, on any field, anywhere on that path. A repo-wide grep for redact/mask/sanitize across `service-automation` and the domain returns zero non-comment hits.\n\nSo the only question this surface asks is *\"are you authenticated?\"*. Any authenticated caller who knows a run id reads whatever that run's log entry holds — including, via the variables snapshot and via `output`, **the triggering record's fields, without that record's own field-level security applying**.\n\n## Why it is worth a card\n\nThe exposure is not new and was **not introduced by #7639/PR #7896**, which is exactly why it needs its own card rather than a veto on that PR:\n\n- `output` has always carried record fields **whenever a flow author declared the record (or a projection of it) as an output variable** — so the FLS-bypass property predates the paused-variables work.\n- `steps`, flow definitions and the rest of the `/automation` read surface sit behind the same single gate.\n- What PR #7896 changed is the **conditionality**: the paused snapshot carries the triggering record and its flattened fields **unconditionally**, where before reaching the same data required an author opt-in. Same data class, same door — broader traffic through it.\n\nFraming this as \"a problem with the `variables` key\" would be the inaccurate version. The accurate question is a domain-level policy one:\n\n> **Should the `/automation` read surface apply the underlying record's FLS (or any per-object permission) rather than only an authentication check?**\n\nThat is a product/security design call with real cost on both sides — narrowing it changes what every existing operator tool can read, and per-field filtering of a free-form variable map is not obviously well-defined (keys are `<nodeId>.<key>`, `record`, `previous`, `$runId`, seeded inputs; only some of them correspond to a record field at all).\n\n## What the other door does today\n\nThe identical snapshot has a second, **differently gated** door: `sys_automation_run.variables_json` (`sys-automation-run.object.ts:164-169`) persists it verbatim for every paused run, and that read goes through the system object's permissions. So the platform currently answers the same question two ways depending on which door you knock on — which is itself the sharpest evidence that a deliberate policy has never been stated for this surface.\n\n## Explicitly NOT claimed here\n\n- **No credential class is exposed.** Measured on #7639: connector credentials live in the connector registry and are never handed to a flow; the `http` node's `signingSecret`/headers are config **inputs** interpolated *from* variables and never written back (`builtin/http-nodes.ts:115-170`, output is `{response, status}`). A secret reaches variables only if a flow author puts one there — and by that same route it reaches `output`. This card is about **record-field FLS**, not secret leakage.\n- **No regression is asserted.** Everything above is true of `origin/main` before PR #7896 as well, for any flow whose author declared record data as output.\n\n## Suggested routing\n\nLanding site is `packages/runtime/src/domains/automation.ts` (the gate) and possibly `plugin-security` (whatever would supply the record's FLS), so this likely is **not** `domain:services` even though it surfaced there — the `service-automation` engine is not where the gate lives. Triage's call.\n\nIf graded for work, this probably wants `needs-user-decision` before implementation rather than a dispatch: the narrowing decision has a real blast radius, and per #4829 the time to put it in the maintainer's inbox is when there is pull — which there now arguably is, since PR #7896 makes the exposure unconditional.\n\n## Evidence\n\nMeasured 2026-08-12 by the dev on PR #7896 (`origin/main` base `68a1edb`), reading `packages/runtime/src/domains/automation.ts`, `packages/services/service-automation/src/engine.ts`, `builtin/http-nodes.ts`, and `sys-automation-run.object.ts`. Full measurement recorded in the `<!-- os-dev-report -->` comment on #7639 and in PR #7896's body.\n\n## Source\n\nSplit out of objectstack-ai/objectstack#7639 (PR objectstack-ai/objectstack#7896) — the dev's named residual, deliberately not decided inside that card."
+}

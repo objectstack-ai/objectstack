@@ -1,0 +1,35 @@
+{
+  "number": 7753,
+  "kind": "issue",
+  "title": "studio-authoring run notes: one correction to #7637, two stale `automated.ref` specs, and three ledger/route observations",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "huangyiirene"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T12:30:33Z",
+  "updated_at": "2026-08-11T20:25:39Z",
+  "closed_at": "2026-08-11T20:25:39Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7753",
+  "body": "## Symptom\n\nThe consolidated \"Corrections and notes\" from the `studio-authoring` FULL-area run. These are not the run's FAILs (those are filed separately — #7736, #7741, #7743, #7748, #7749, #7750, #7751, #7752); they are the corrections, ledger notes and checklist-maintenance items the run produced, collected so none is lost and none is re-investigated.\n\n**One item was split out** as a real product defect rather than a note: item 5 below (metadata-admin declaring a writable-package object read-only) is now **objectstack-ai/objectui#4308**. Everything else stays here.\n\n---\n\n### 1. Correction to run #7637 — the Studio read-only badge is honest on this build\n\nWith `OS_METADATA_WRITABLE=permission` set, the Studio read-only badge **does clear** on this build/pin: `GET /meta` reports `permission {allowOrgOverride: true, overrideSource: 'env'}` and the editor becomes fully writable.\n\nThe earlier observation in #7637 — that the badge asserts a lock the server is not applying — **does not reproduce here**. Recorded as a correction so the earlier card is not acted on as written. (The badge tracking the real writable computation was proven both ways in this run.)\n\n### 2. Ledger note — `publish-drafts` aborts with HTTP 200\n\nThe `publish-drafts` namespace-gate abort answers **HTTP 200 with `data.success: false`** rather than a 4xx.\n\nFiled as a note, not a defect, because the envelope-level `success` flag may well be the intended contract for this door — but it is worth one deliberate ruling, since an HTTP-status-only client reads an aborted publish as a successful one. The atomicity itself is correct and was verified: the abort leaves **both** names 404.\n\n### 3. Route note — a flow authored over the metadata API is not editable in Studio\n\nSuch a flow opens behind the \"provided by an installed package\" banner. Located: `ResourceEditPage` treats an item as artifact-backed when `layered.code != null && _packageId !== 'sys_metadata'` (objectui `packages/app-shell/src/views/metadata-admin/ResourceEditPage.tsx:951-955` / `1311-1323`), and `flow` declares `allowOrgOverride: false`.\n\nThe editable path is the console's own create page. Kept as a route note rather than a defect because the server would refuse the overlay write anyway — the banner is arguably telling the truth for this type. It is the *same heuristic* as the split card objectui#4308, where it is **not** telling the truth; whoever works that card should confirm this case stays correct.\n\n### 4. Known spurious `_diagnostics` banner (not re-filed)\n\nA freshly saved **valid** draft shows \"Unrecognized key(s) on this object: `_diagnostics`\", because the designer re-validates the server's own annotation on read-back. Already known; recorded so this run's sighting is not filed as new.\n\n### 5. — split out —\n\nmetadata-admin declares an object \"provided by an installed package, so it is read-only at runtime\" even for objects published into a **writable** package, while Studio treats them as editable and the server accepts the PUT. Filed as **objectstack-ai/objectui#4308**, cross-linked to objectui#4036 (the same disagreement with the polarity reversed).\n\n### 6. Two `automated.ref` specs are stale rather than red\n\nBoth live in objectui `e2e/live/` and are referenced from this repo's checklist (`docs/qa/platform-checklist/areas/studio-authoring.json` and `.../platform-core.json`):\n\n- **`studio-record-page.spec.ts`** — fills the Object control as an input when it is now a `role=combobox` button.\n- **`studio-editor.spec.ts`** — targets a \"Layout\" heading that no longer exists, plus a **shipped** page the editor correctly locks.\n\nNeither is reporting a product defect; both need re-pointing at the current surface. Until then they cost a red run every time the area is exercised, which is how a stale ref turns into ignored signal.\n\nA third, already-repaired instance of the same class from this run: `object-designer-roundtrip`'s 4th automated ref fails only because package-create moved to `/_console/studio` — that contract passes on the current surface.\n\n---\n\n## Source\n\nExtracted from the QA run objectstack-ai/objectstack#7695 (framework 92f26f75, console 09987b680)."
+}

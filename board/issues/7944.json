@@ -1,0 +1,34 @@
+{
+  "number": 7944,
+  "kind": "issue",
+  "title": "pm-dispatch SKILL: M-grade cards default to the subagent backend with per-dispatch model tiering — cloud reserved for L/XL, long-lived, browser-verify (maintainer ruling 2026-08-12)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-12T07:56:27Z",
+  "updated_at": "2026-08-12T08:46:06Z",
+  "closed_at": "2026-08-12T08:45:50Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7944",
+  "body": "Filed by the skills seat (session `session_012Gg6rMAti8ZaueWb6BRsDn`), 2026-08-12, executing a maintainer ruling from the seat 专题 chat.\n\n## Provenance (maintainer, verbatim, untranslated)\n\n> 还有我发现 agent 派出的云卡片总是忘了归档,派的太多也确实麻烦,我想讨论中级的卡片是不是应该改成子 agent,但是我需要先确认一个事情,子agent 可以指定模型吗?比如 项目经理用 Fable / OPus,子agent可以让项目经理根据难度指定 sonnet opus 或 fable 吗\n\n> 同意你的建议,刚才几个卡片可以合并开发。\n\nThe factual precondition was confirmed before the ruling: the `Agent` tool takes a per-dispatch `model` parameter (`sonnet` / `opus` / `haiku` / `fable`) that overrides the agent definition's frontmatter pin; resolution order is env `CLAUDE_CODE_SUBAGENT_MODEL` → per-call param → frontmatter → inherit.\n\n## The revision (supersedes the 2026-08-10 「M 及以上默认云卡」 default)\n\n- **S mechanical + M ⇒ `mode:subagent`** (the PM's own container), with per-dispatch model tiering: S-mechanical `sonnet`, M `opus`, judgment-heavy `fable`; the mandatory `claude-fable-5` clause for cards editing `.claude/skills/pm-dispatch/**` is unchanged and unaffected by size.\n- **Cloud (`mode:cloud`) reserved for**: L/XL cards; work that must outlive the PM session; browser/dogfood verification; and build-heavy M cards by explicit judgment (the shared-container contention that motivated the old default — docs/instruction M cards never hit it).\n- Rationale on record: cloud's three fixed taxes (archival debt — measured up to 11 forgotten containers on one seat; the create_session/poke/subscribe/collect plumbing; per-card container+clone startup) vs the subagent's one real cost (dies with the PM session — mitigated by the measured branch-early + report-at-draft-PR contract, SendMessage transcript revival, and the worktree handoff protocol).\n- Consequence: the archive duty applies only to cloud cards, shrinking the forgotten-container surface to L-grade dispatches.\n\n## Landing notes\n\n- Edits the backend/sizing section of `.claude/skills/pm-dispatch/SKILL.md`; ⚠️ ratchet headroom 0 — additions offset in-PR.\n- Model tiering mandatory clause: dispatch with `model: claude-fable-5`.\n- ADR-class: draft PR, human merge."
+}

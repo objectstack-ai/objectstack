@@ -1,0 +1,36 @@
+{
+  "number": 8020,
+  "kind": "issue",
+  "title": "check:test-source-alias cannot read a template-literal alias replacement, so two packages that DO alias spec subpaths to source are still recorded as unaliased",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:devx",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-12T11:44:36Z",
+  "updated_at": "2026-08-12T16:35:43Z",
+  "closed_at": "2026-08-12T16:35:43Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8020",
+  "body": "Filing unassigned; found while implementing #7991 (the `packages/qa/downstream-contract` source alias). Not fixed there — the card's ruling is that a problem surfaced by aliasing is a finding in its own right, and this one changes a shared gate's semantics plus two other packages' registry entries.\n\n## The fact, measured\n\n`scripts/check-test-source-alias.mjs` reads an alias replacement with `asPath()`, which takes **the last string literal in the expression**:\n\n```js\nfunction asPath(raw) {\n  const strings = [...raw.matchAll(/(['\"`])((?:[^\\\\]|\\\\.)*?)\\1/g)].map((m) => m[2]);\n  ...\n  return strings[strings.length - 1];\n}\n```\n\nFor the `path.resolve(__dirname, '../../spec/src/index.ts')` form that is the whole answer. For the **template-literal** form — the one the gate's own two reference configs use for subpath rules —\n\n```js\n{ find: /^@objectstack\\/spec\\/([a-z-]+)$/,\n  replacement: `${path.resolve(__dirname, '../../spec/src')}/$1/index.ts` }\n```\n\nthe only string literal delimiter reached is the backtick, so `asPath` returns the entire template body, `${path.resolve(__dirname, '../../spec/src')}/$1/index.ts`. `pointsAtSource()` looks for a `src` path segment and there is none in that text (`spec/src'` is followed by a quote, not a separator), so a config that aliases **every** namespace correctly reads to the gate as aliasing **nothing**.\n\n## Evidence: changing only the SPELLING moves the verdict\n\n`packages/services/service-knowledge` and `packages/plugins/plugin-audit` both alias spec subpaths to source with the template form today. Rewriting only the spelling — same resolution, no behaviour change:\n\n```js\nreplacement: path.join(path.resolve(__dirname, '..', '..'), 'spec/src/$1/index.ts')\n```\n\nmakes the gate declare their registry entries stale:\n\n```\n  x @objectstack/plugin-audit: registry entry is STALE — no longer unaliased: @objectstack/spec.\n    Narrow the entry to exactly: [\"@objectstack/objectql\"]\n  x @objectstack/service-knowledge: registry entry is STALE — no longer unaliased: @objectstack/spec.\n    Narrow the entry to exactly: [\"@objectstack/objectql\"]\n```\n\nSo `@objectstack/spec` sits in both entries because of how the replacement is *written*, not because anything resolves through `dist`. (Both experiments were reverted; nothing in PR for #7991 touches those two configs.)\n\n## Direction, and why it still matters\n\n**Fail-closed.** The gate never reads an unaliased package as safe, so its core guarantee is intact and this is not a #7991-shaped false green. What it does cost:\n\n1. The shrink-only registry **over-states** the remaining work — at least two of the 62 entries name a dependency that is already aliased.\n2. A dev dispatched to remediate either package finds the aliases already correct and the gate still red, with the failure text prescribing the alias they already have. The only thing that moves it is a spelling change; nothing in the message says so.\n3. It quietly penalises the one-rule-for-all-namespaces form. That form exists because hand-listing namespaces goes stale, and both configs carry a paragraph explaining why they use it.\n\n## Fix options (not chosen here)\n\n- **A — teach `asPath` the template form**: concatenate the literal chunks and treat each `${...}` as an opaque prefix, so the tail `/$1/index.ts` joins the `spec/src` chunk. Keeps every existing config as written; the two entries then shrink to `['@objectstack/objectql']` in the same PR (the gate audits both directions, so it names them).\n- **B — prescribe the readable spelling** in the gate header and convert the two configs; same registry shrink, no gate change.\n\nA is the contract-first shape: the configs are correct, the reader is what cannot see them. Either way the change is one PR and its own card — it edits a shared gate plus two packages' entries, so it should not ride a per-package alias fix.\n\n## Prior art (searched before filing)\n\n- #7849 / PR #7966 — the gate and the registry.\n- #7991 — the card this was found under; its config uses the `path.join` spelling deliberately, with a comment pointing here.\n- #7668 / PR #7778 — the anchored-regex constraint the template form implements.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01B3Kurx8qufrDzNjk4rag7V)_"
+}

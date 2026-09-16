@@ -1,0 +1,32 @@
+{
+  "number": 7264,
+  "kind": "issue",
+  "title": "objectql test driver doubles are `any`-annotated at scale — the retired-capability tombstone has no tsc channel in 64 files",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "finding"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-10T04:03:59Z",
+  "updated_at": "2026-08-12T11:09:23Z",
+  "closed_at": "2026-08-12T11:05:53Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7264",
+  "body": "Found while fixing #6546 (PR #7261). **Recorded, not fixed there** — #6546's file surface is\n`packages/objectql/src/protocol-batch-atomic.test.ts` only, and folding this in would have turned an\nXS card into a 64-file sweep.\n\n## Observation\n\n#6546 was one driver double authoring a capability key retired by #4634. The deletion was trivial;\nthe interesting half was *why nobody noticed* — the literal was annotated `const driver: any`, so it\nwas never compared against `IDataDriver`, and nothing in that file parses it through\n`DriverInterfaceSchema`. With both channels off, the `retiredKey(...)` tombstone in\n`DriverCapabilitiesSchema` had nothing to fire through.\n\nThat annotation is not unusual in this package. Measured on `origin/main` @ `0caf122`:\n\n| | files |\n|---|---|\n| `packages/objectql/src/**/*.test.ts` with a driver-ish double annotated `: any =` | **64** |\n| …of which also spell `supports: {} as any` | 17 |\n| test files that reference `IDataDriver` at all | 14 |\n\n## What this is NOT\n\n**No retired bit is authored in any of them today, and no gate is red.** A repo-wide sweep for\n`supports:` literals spelling retired or invented keys (run as part of #6546) found nothing beyond\n#6546's own instance, #4782's, and the two deliberate rejection fixtures\n(`packages/spec/src/data/driver.test.ts:317`, `packages/spec/src/data/datasource.test.ts:60`), which\nare correct as written. Every other literal is either `{}` or a **live** bit\n(`autonumber`, `batchSchemaSync`, `queryDateGranularity`).\n\nSo this is observation-class, exactly like #6546: nothing a user hits, nothing broken.\n\n## Why it is still worth a line\n\nThe tombstone's stated design is that a retired key is *authored-unwritable* — \"tsc rejects it at\nthe authoring site\" is the first of the two channels `driver.zod.ts` names for it. Across these 64\nfiles that channel is switched off, so the tombstone's protection currently rests entirely on the\nsecond channel (a parse), which test doubles by definition rarely go through.\n\nThe concrete harm is the one #4782 and #6546 both name: **mocks get copied.** #6546's mock had\ncarried its retired bit since #4634 without anyone noticing, and it was found by reading, not by a\ngate. The cost of the class is that the next such copy is equally invisible.\n\n## Measurement from #6546, for sizing\n\nRetyping one double `any` → `IDataDriver` cost **three stubs** for interface members the tests never\nreach (`upsert`, `syncSchema`, `dropTable`), and moved `@objectstack/objectql`'s measured\n`TEST_DEBT` count by **zero** (340 → 340, ceiling 355). One data point, not a trend — that double\nwas already close to interface-shaped, and the `as any` in 17 of the files above suggests some are\nfurther away. Anyone picking this up should re-measure per file rather than extrapolate from one.\n\nNote also that a naive sweep will trip `TS2790` wherever a test does `delete driver.<requiredMember>`\nto prove a method-presence gate; `Reflect.deleteProperty(...)` is the cast-free equivalent (#6546\nused it).\n\n## Suggestion\n\nNot obviously a single sweep. Plausible shapes, in increasing cost:\n\n1. Leave it, and retype opportunistically whenever a file is touched for another reason.\n2. Retype only the doubles that author a **non-empty** `supports` — the ones where a capability key\n   could actually be spelled wrong — which is a much smaller set than 64.\n3. A gate that fails a driver double annotated `any`, ratcheted against a measured baseline in the\n   style of `check-engine-double-contract`.\n\nFiling without a recommendation; the sizing above is what I measured, not a plan."
+}

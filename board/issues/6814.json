@@ -1,0 +1,34 @@
+{
+  "number": 6814,
+  "kind": "issue",
+  "title": "[drivers] driver-memory / driver-mongodb disagree with the SQL family on `count_distinct` — the two AGGREGATION_CASES cells #6409 left open",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "huangyiirene"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T22:27:41Z",
+  "updated_at": "2026-08-11T19:49:45Z",
+  "closed_at": "2026-08-11T19:49:45Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6814",
+  "body": "Filed unassigned from the #6409 lane (the enforce half of #6188). Recording, not claiming — both packages are inside the **#5499 investment freeze** and #6409's ruling put them explicitly out of scope. This issue exists so the two open cells of the new `AGGREGATION_CASES` matrix column have a measured verdict behind them instead of an omission.\n\n## Context\n\n#6409 lowered `count_distinct` to `COUNT(DISTINCT x)` on the SQL family and introduced `AGGREGATION_CASES` / `AGGREGATION_ROWS` (`@objectstack/spec/data`) — the shared standard the aggregate lowerings are now held to. Three of the five drivers were enrolled by that PR (`driver-sql`, `driver-turso` REMOTE, `driver-sqlite-wasm`). The other two carry DEBT rows in `scripts/check-driver-conformance.mjs` pointing here.\n\nThe standard's answer for `count_distinct` is **distinct NON-NULL values of the target column** — what `COUNT(DISTINCT col)` computes on SQLite, PostgreSQL and MySQL alike, and what `objectql`'s in-memory fallback (`in-memory-aggregation.ts`, `new Set(values.filter(v => v != null)).size`) and `service-analytics`'s `AGGREGATE_SQL` already give.\n\n## What each package answers today\n\nRead from the source on `origin/main` @ `6de592c`; not executed against the fixture, since neither cell has a suite (that is the debt).\n\n### 1. `driver-memory` — the DATA face answers `null`, silently\n\n`MemoryDriver.computeAggregate` (`packages/drivers/driver-memory/src/memory-driver.ts`) has arms for `count`, `sum`, `avg`, `min`, `max` and then:\n\n```ts\ndefault:\n    return null;\n```\n\nThere is no `count_distinct` arm. So `aggregate()` with `{ function: 'count_distinct', field: 'stage', alias: 'n' }` resolves with `{ n: null }` — no error, no log, no refusal. Against `AGGREGATION_ROWS` the standard says `2`.\n\nThis is the worse half of the pair: a wrong ANSWER rather than a wrong number. It is also the `default:`-arm shape #4157 and the `aggregation-lockstep` guard in `service-analytics` exist to prevent one layer up, arriving here through a different door.\n\nNote the package is partial in the way #6409's ruling described: its ANALYTICS face (`memory-analytics.ts`) does implement `count_distinct` (`$addToSet`, then sized). It is only the data-driver `aggregate()` path that has no arm — so this package answers one declared function two ways depending on which face you enter, the divergence class #5374 fixed for `$contains` in the same package.\n\n### 2. `driver-mongodb` — counts NULL as a distinct value\n\n`mongodb-aggregation.ts` lowers `count_distinct` to `{ $addToSet: fieldRef ?? null }`, and `postProcessAggregation` takes the array's `.length`. `$addToSet` adds an explicit `null` to the set, so a column with rows `won, won, lost, null, won, null` sizes to **3** where the standard says **2**.\n\n`$addToSet` on a MISSING field adds nothing, so the divergence only shows for an explicitly-null value — which is exactly what `AGGREGATION_ROWS` seeds and exactly what a nullable column produces in practice.\n\nSame file still carries a `string_agg` arm and a `string_agg` branch in `postProcessAggregation`; `string_agg` was retired from `AggregationFunction` at #6188, so that code is no longer reachable through a spec-valid request. Not a defect — noted so it is not rediscovered as one — and untouched for the same freeze reason.\n\n## Disposition\n\nDeliberately none proposed. Both packages are #5499-frozen, so this is a decision about the freeze, not about the code: the fix on `driver-memory` is a `count_distinct` arm beside its neighbours, and on `driver-mongodb` a `$ne: null` filter before the `$addToSet` (or sizing a `$setDifference` against `[null]`). Neither is difficult; both are inside the boundary.\n\nClearing a cell means writing the suite that runs `AGGREGATION_CASES` and deleting the ledger row **in the same PR** — the gate fails either half alone. `driver-mongodb`'s real-mongod suites are opt-in since #5517, so whatever clears its cell needs a server-free half in the shape of `mongodb-filter-logic-translation.test.ts`.\n\nRefs: #6409 (the lane that measured this), #6188 (the split ruling), #5499 (the freeze), #6682 / #6520 (the same pair's other two open cells).\n"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 8015,
+  "kind": "pull_request",
+  "title": "fix(metadata-protocol): an object extension reaches the by-name `/meta` read, not just the list (#7556)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-12T11:30:10Z",
+  "updated_at": "2026-08-12T12:05:16Z",
+  "closed_at": "2026-08-12T12:05:14Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": "2026-08-12T12:05:14Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/8015",
+  "body": "Fixes #7556\n\n⚠️ **PR opened by the `domain:metadata` PM seat on the implementing dev's behalf** — the `objectstack-ai` org has no Claude GitHub App connection, so cloud dev containers can push but cannot reach the GitHub API (5 of 5 dispatches this shift). Body is the dev's own changeset; its full report is owed and will be appended.\n\n**This card was deferred three times** before dispatch, each time because `protocol.ts` was held by another editor. It landed under the maintainer's mutually-exclusive-region exemption.\n\n## ⭐ The open question is answered: the LIST route was right\n\nThe card was filed as \"the by-name route is missing fields\", but explicitly did **not** assume that — the dispatch demanded it be settled by measurement, because if the *list* route were the wrong one the fix would point the other way. Measured:\n\n`GET /meta/object` composes from `SchemaRegistry.listItems('object')`, whose object branch resolves through `resolveObject` — a base layer with its `extend` contributors folded on (ADR-0029 D9.2). The **by-name** read consults the `metadata` **service** first, because that copy is the HMR-fresh one, and served whatever it returned.\n\nFor every other metadata type the two agree. For `object` they did not:\n\n> a deployment booted from a compiled artifact (`artifactSource` — `objectstack serve`, sealed runtimes, the cloud) ingests `objects` and `objectExtensions` as **SEPARATE collections**, so the service's copy is the owner's declaration with no extender in it.\n\n⭐ **And why it survived so long:** an in-process dev boot was immune, because ObjectQL's `bridgeObjectsToMetadataService` seeds that service from `registry.getAllObjects()` — bodies that are *already folded*. The bug is invisible on the boot path most tests use.\n\n## Why it was not cosmetic\n\nMeasured on the showcase, whose account extension contributes three fields: they were served by the list read and persisted through the data API round-trip, and were absent from the by-name read **and from both layers of `?layers=true`**. The edit and new forms derive from the by-name response — so three fields a client could read and write through the API **could never be set in the UI**.\n\n## The change\n\nThe registry's `extend` contributors are folded onto the MetadataService body at the two places that adopt one: the by-name read, and the `code` layer of the layered view (`effective` is `overlay ?? code`, so an object with no tenant overlay is corrected on both layers by that single fold).\n\n⭐ **The fold is the registry's own.** `foldObjectExtendersOnto` reuses the same private fold that `resolveObject` and `resolveOwnerLayer` apply, rather than growing a second copy that could drift — which is the failure mode a \"just make the route return the fields\" patch would have created.\n\n**The `overlay` layer is deliberately left alone**: it reports what a tenant customised, and a code-declared extension is not that.\n\n**Deployments with no `objectExtensions` see a byte-identical payload** — the fold applies only to a name something actually extends. That was a hard review criterion, not an afterthought.\n\n## ⭐⭐ Pinned as AGREEMENT, not presence\n\nThe dispatch's central instruction, because \"the by-name route returns the extension fields\" passes again the day someone special-cases that route — the same defect one layer over. `packages/rest/src/meta-object-extension-agreement.test.ts`:\n\n> the by-name read and the list read are both measured off real handlers over a real protocol over a real registry, across **four hosts that genuinely differ** — artifact-ingested, bridged in-process, no metadata service, and an object nothing extends — **plus an anti-vacuity case pinning that those hosts ARE discriminated**.\n\nThe end-to-end proof is `packages/qa/dogfood/test/showcase-object-extension-meta-read.dogfood.test.ts`, which **boots the artifact path on purpose — the shared in-process harness cannot see this bug.** Identifying that the standard harness is structurally blind to the defect, and building one that isn't, is the load-bearing part of this verification.\n\n## Changeset levels, and a cross-seat note\n\n`@objectstack/metadata-protocol`: **patch** — it restores the contract the route was already specified to answer; the divergence was the defect.\n`@objectstack/objectql`: **minor** — it gains one additive public API, `SchemaRegistry.foldObjectExtendersOnto`.\n\n⚠️ **Cross-seat note for `domain:engine-core` (#6019):** the `objectql` change is `packages/objectql/src/registry.ts` (+52), purely additive — one exported method wrapping an existing private fold, no behaviour change to existing callers. Flagging it rather than assuming silence is consent.\n\n⚠️ The `packages/rest` file is a **test only**; no `rest` source changed, so this stays `domain:metadata` rather than re-routing to `domain:cli`.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01AmES43BMDg4bPrxTdi5q7t)_"
+}

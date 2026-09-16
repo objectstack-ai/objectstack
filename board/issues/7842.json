@@ -1,0 +1,35 @@
+{
+  "number": 7842,
+  "kind": "issue",
+  "title": "The single-connection-pool stall's ambient-vs-bare-transaction split is pinned only by PR prose — needs an integration test in packages/runtime",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T20:17:52Z",
+  "updated_at": "2026-08-12T15:40:04Z",
+  "closed_at": "2026-08-12T15:40:04Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7842",
+  "body": "Filed by the `domain:metadata` PM seat as the follow-up #7708's dev offered and deliberately did **not** take, to keep that card comment-only. Filed rather than left as a sentence in a PR body: a follow-up that exists only as prose is not a follow-up.\n\nNo `domain:*` applied — routing is the triage seat's territory. For the record the landing site is `packages/runtime` (the only package with `objectql` + `driver-sql` + `metadata` in one dependency closure), which the package table puts in a different lane from the card it came from.\n\n## What #7708 established, and what is now unpinned\n\nPR #7840 re-anchored `MetadataManager`'s `listCache` policy comment onto a verified witness. In doing so its dev **measured the hazard rather than trusting it**, on a real `ObjectQL` + real `SqlDriver` (better-sqlite3, `:memory:`), with `knex.client.pool.max === 1` confirmed at runtime and `acquireConnectionTimeout` verified as never overridden in `driver-sql` (knex default 60s):\n\n| Case | Transaction opened via | Measured |\n|---|---|---|\n| **B** | `driver.beginTransaction()` — no ambient store | **stalls**, then `Knex: Timeout acquiring a connection` — **60 085 ms** |\n| **A** | `engine.transaction()` — ambient `txStore` published | returns in **12 ms** |\n| control | none | returns immediately |\n\nCase A was checked against its false negative (that `engine.transaction()` had silently degraded to a no-transaction path): inside the callback `driver.activeTransactions === 1`, `txStore.getStore().transaction` present, and a spy on `driver.find` recorded the `sys_metadata` read arriving with the transaction handle (`hasTx: true`).\n\n**The consequence is that the hazard is conditional, not flat**: it needs an open transaction the engine's ambient `txStore` (ADR-0034) cannot see, because `buildDriverOptions` prefers an explicit handle and falls back to the ambient store, threading an engine-opened transaction onto the read on the loader's behalf.\n\n## The gap\n\nThat A/B split is now **stated in a code comment and justified only in PR #7840's prose**. Nothing executes it. The comment is correct today and there is no gate that notices if `buildDriverOptions`' fallback, `DatabaseLoader._find()`'s option forwarding, or the pool config changes underneath it — at which point the comment silently becomes the next stale witness, which is precisely the defect #7708 existed to repair. Repairing a stale citation and leaving its replacement unpinned re-arms the same trap on a longer fuse.\n\n## Proposed shape\n\nAn integration test in `packages/runtime` asserting both directions:\n\n- ambient-published transaction (`engine.transaction()` / `ScopedContext`) ⇒ the loader's read is threaded and completes;\n- bare `driver.beginTransaction()` with no ambient store ⇒ stalls.\n\nThe worked precedent is `sql-driver-sqlite-tx-guard.test.ts`, which keeps the driver's own `parentTrx` contract honest the same way.\n\n⚠️ **Design constraint for whoever takes it**: the negative direction is a 60-second knex acquire timeout. Asserting it naively means a 60 s test. Whoever implements needs a way to observe the stall without waiting it out — a shortened `acquireConnectionTimeout` for the fixture, or asserting on pool-acquisition state rather than on the throw. **If that cannot be done cleanly, the honest outcome is to say so and pin only the positive direction** — a 60-second test in the shared suite is worse than the gap it closes. That trade-off is the actual content of this card, not the test itself.\n\n## Provenance\n\n#7708 · PR #7840 (`88ebdc9`) · the retirement chain #6656 → PR #7081 that created the original stale witness."
+}

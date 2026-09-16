@@ -1,0 +1,35 @@
+{
+  "number": 7779,
+  "kind": "issue",
+  "title": "listCommits misses env-wide sys_metadata_commit rows — same strict organization_id equality #7705 fixed one function away",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T14:32:27Z",
+  "updated_at": "2026-08-11T20:09:44Z",
+  "closed_at": "2026-08-11T20:09:44Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7779",
+  "body": "Filed by the `domain:metadata` PM seat, as the fence promised on #7705: that card's dev **measured** a mechanism that implicates this second site, was instructed to report rather than grow the diff on the repo's hottest file, and did exactly that. This is the follow-up card, not a duplicate.\n\nNo `domain:*` label applied — routing labels are the triage seat's territory. For the record it is `packages/metadata-protocol`, the same package and lane as #7705.\n\n## The defect\n\n`packages/metadata-protocol/src/protocol.ts:12085` (in `listCommits`, against `sys_metadata_commit`) carries the byte-identical predicate #7705 just fixed one function away:\n\n```ts\nconst where: Record<string, unknown> = { package_id: request.packageId };\nif (request.organizationId) where.organization_id = request.organizationId;\n```\n\nAn org-scoped `listCommits` therefore misses every commit row stored env-wide (`organization_id IS NULL`) — the same NULL semantics, the same engine, the same strict equality.\n\n## Why this is not speculative\n\n#7705's dev did the diagnostic work that makes this a measured inference rather than a grep match, and both halves of its fork were settled there:\n\n- **The engine is not the variable.** `findData` — the `GET /api/v1/data/...` path — issues `this.engine.find(object, options)` at `protocol.ts:6803` on the *same engine instance*. A bare `new ObjectQL()` carries zero middlewares, and the driver was measured receiving the author-supplied `where` **verbatim**. So a differently-scoped engine was falsified as an explanation; strict equality is the mechanism.\n- **The equality demonstrably drops env-wide rows.** On a real engine over a real SQLite driver, `deletePackage` with `{packageId, organizationId}` selected 1 of 4 rows and left 3 env-wide rows behind.\n\nNothing about that reasoning is specific to `sys_metadata`. The only open question is whether env-wide commit rows are actually written in practice — worth confirming as step one, since it decides whether this is live or latent.\n\n## Different table, different symptom — do not treat it as #7705 part two\n\n#7705's symptom was **orphaned rows after uninstall** (a data-lifecycle defect). This one is **missing commit history in a read** — an observability/audit defect. Same fix family, different blast radius, and the fix here should be judged on its own: a read that silently under-reports history is not obviously repaired by the same `$or` if, say, commit rows are meant to be org-partitioned by design.\n\n## Fix sketch, to be verified not assumed\n\nThe #3115 shape, as applied in #7705 (PR #7771):\n\n```ts\nif (request.organizationId) {\n    where.$or = [\n        { organization_id: request.organizationId },\n        { organization_id: null },\n    ];\n}\n```\n\nNote what #7705 deliberately did **not** do, because it applies here too: it did not narrow the no-org branch to `organization_id IS NULL`. On `deletePackage` that would have orphaned every org-scoped row — the same bug on the other door. Check whether the equivalent hazard exists for this read before mirroring only half the shape.\n\nThe in-package precedent is `packages/metadata-protocol/src/sys-metadata-repository.ts:896-899` (#3115, the \"orphaned draft\" bug). ⚠️ The commonly-cited path `metadata-service/src/sys-metadata-repository.ts` does **not** exist on `main` — that citation has already misdirected two cards.\n\n## Pin\n\nAssert the **consequence**, not the call: seed commit rows in both scopes, call `listCommits` with an org id, and assert the env-wide rows are returned — plus the negative direction, that another org's commit rows are **not**. Both existing `deletePackage` suites stubbed `engine.find`, which is why neither could see the sibling defect; a stubbed engine cannot see this one either.\n\n## Sequencing\n\n⛔ Do not dispatch this while another card holds `packages/metadata-protocol/src/protocol.ts` — that file is serialized and took five merges in one day. #7705 / PR #7771 must land first."
+}

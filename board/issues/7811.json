@@ -1,0 +1,36 @@
+{
+  "number": 7811,
+  "kind": "issue",
+  "title": "[finding] `authorization.mdx`'s RLS layer row says \"if no applicable policy compiles → deny-all\", which reads as \"empty policy set → deny everything\"",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:devx",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-11T15:32:42Z",
+  "updated_at": "2026-08-12T13:47:45Z",
+  "closed_at": "2026-08-12T13:47:45Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7811",
+  "body": "Pre-existing docs imprecision, surfaced during PR #7792's review. Filed for a docs-only PR; **no code is wrong here.**\n\n`content/docs/permissions/authorization.mdx:55`, the layer-5 row of the evaluation-order table, currently reads:\n\n> **Row-level security** | CEL predicates (`using` read filter, `check` write post-image) compiled into the query. If **no** applicable policy compiles, the result is a deny-all sentinel (fail-closed); …\n\nThe implementation's own contract is narrower. `packages/plugins/plugin-security/src/security-plugin.ts:2591`:\n\n> the `RLS_DENY_FILTER` sentinel → **policies applied but none compiled**, or resolution failed — fail-closed to zero rows.\n\nSo the sentinel fires when the applicable set is **non-empty** and every member fails to compile. An **empty** applicable set does not reach it at all — it yields no filter, which is why an object with no RLS policies is readable rather than invisible.\n\n## Why it is worth a line rather than shrugging off\n\nIt misled a reader in practice: the PM, reviewing #7792, read that sentence as documenting the fixed behaviour and instructed the dev to cite it as evidence that #7665 restored documented intent. The dev disputed it with the code and was right — the citation would have shipped a false claim in a security PR body. A sentence that can make a careful reader believe the write path was already fail-closed is worth two extra words.\n\nSuggested wording, keeping the row's density:\n\n> If applicable policies exist but **none of them compiles**, the result is a deny-all sentinel (fail-closed); an object with no applicable policy is simply unfiltered at this layer.\n\nWorth checking the same phrasing in the neighbouring pages while someone is in there (`permissions-matrix.mdx`'s layer table, `rls.mdx`'s fail-closed paragraph) — the compile-failure fail-closed rule is stated in more than one place and only this instance was checked.\n\n## Provenance\n\nPR #7792 review (#7665). Deliberately **not** fixed in that PR: its dev was instructed not to doc-tidy beyond the one accuracy fix its own change required, and it correctly flagged this to the PM instead of either editing it or filing a duplicate. Filed unassigned and unqueued — recording, not claiming. ⛔ Not a rider on a code PR; if it is fixed, a dedicated docs-only PR is the route."
+}

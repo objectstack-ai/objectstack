@@ -1,0 +1,35 @@
+{
+  "number": 7978,
+  "kind": "issue",
+  "title": "[finding] `verify --rls` cannot reach RLS narrowing authored on a POSITION — one probe persona holds no positions, so position-gated policies never apply to it",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-12T09:18:35Z",
+  "updated_at": "2026-08-12T16:28:07Z",
+  "closed_at": "2026-08-12T16:28:07Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7978",
+  "body": "## Symptom\n\nAfter #7685 / PR #7975, `objectstack verify --rls` reaches the #1994 by-id-write class: its probe persona holds object read+edit plus a verifier-authored owner narrowing, so a refusal is attributable to the record gate and the run is falsifiable (ablating the #7665 write-scope derivation turns 16 of 20 probed showcase objects red).\n\nOne class is still out of reach, and it is stated in the module header rather than left to be discovered:\n\n> an object whose narrowing is authored on a POSITION the probe does not hold is unnarrowed for this persona\n\nThe probe holds **no positions** by design (it must own nothing, so the admin-created target is outside its scope by construction). An app-authored RLS policy carrying `positions: [...]` is filtered out by `getApplicablePolicies` for that persona, so the runner never exercises the app's *own* narrowing — only the platform gate underneath it.\n\n## Why it matters\n\nThis is the exact authoring shape of the defect the tooling was fixed for. #7665's persona was the ordinary `showcase_contributor` — a `contributor` **position** plus the matching set — and the showcase's narrowing is authored that way:\n\n```ts\n// examples/app-showcase/src/security/permission-sets.ts\n{ name: 'task_own_rows',    object: 'showcase_task',    operation: 'select', using: 'assignee == current_user.email', positions: ['contributor'] }\n{ name: 'invoice_own_rows', object: 'showcase_invoice', operation: 'select', using: 'owner == current_user.email',    positions: ['contributor'] }\n```\n\nMeasured during PR #7975, with an object-granted but **un-narrowed** probe (before the verifier-authored owner policy was added): every such object reported `member-visible` — the probe read every row, so no cross-owner scenario existed and nothing was proven. The current probe covers the *platform* half by authoring its own narrowing; the *app-authored, position-gated* half is still unexercised.\n\n## Suggested direction (not prescriptive)\n\nThe generalization is app-agnostic and derivable from metadata, which is this tool's whole premise: for each **position the app declares**, provision a persona holding that position (and its bound sets) and run the same invariant. That reproduces #7665's persona exactly, for every app, without the verifier inventing a policy.\n\nTwo things to size before doing it:\n\n- **Cost.** ~4 HTTP calls × objects × positions. The showcase declares 9 positions and 23 objects; today's whole `dogfood-verify` job is ~4½ minutes against a 20-minute timeout, so this needs measuring rather than assuming.\n- **Over-privilege.** Some declared positions are bound to VAMA-carrying sets (`showcase_auditor`, `showcase_ops`). Those personas see everything and would report `member-visible` — correct, but it means the fan-out must report per-position coverage honestly rather than claiming N× the reach.\n\nBoth are the reason this was not folded into PR #7975: it is a different-shaped change from the probe fix, and shipping it as a rider would have made that PR's before/after measurement unreadable.\n\n## Source\n\nRecorded while executing #7685 item (i) (PR #7975), which cross-links it in the runner's module header. Filed unassigned — recording a finding, not claiming it."
+}

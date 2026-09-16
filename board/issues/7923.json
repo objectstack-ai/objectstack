@@ -1,0 +1,35 @@
+{
+  "number": 7923,
+  "kind": "issue",
+  "title": "[finding] The 3 test layers #7353 made visible are repair candidates, not permanent debt — metadata-fs (6) and example-showcase (4) look like same-day graduations",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-12T04:29:58Z",
+  "updated_at": "2026-08-12T14:50:30Z",
+  "closed_at": "2026-08-12T14:50:30Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7923",
+  "body": "Filed unassigned by the #7353 dev (PR #7921) as an out-of-scope observation. Not fixed there: #7353's file surface is `scripts/check-type-check-coverage.mjs` only — that card changes what the gate can SEE, not what the repo declares — so every one of these was recorded as measured TEST_DEBT rather than repaired.\n\n## The shape\n\n#7353 taught TESTS_COVERED the include-shaped form (a tsconfig that never steered tsc *toward* the tests, as opposed to one that steered it *away*). Three packages became visible and were ledgered:\n\n| package | files hidden | raw errors | why hidden |\n|---|---:|---:|---|\n| `@objectstack/cli` | 56 | 188 | `include: [\"src\"]`, no `exclude` at all, 56 tests in a sibling `test/` tree |\n| `@objectstack/metadata-fs` | 6 | 6 | `include: [\"src/**/*\"]`, all 6 tests in `test/` |\n| `@objectstack/example-showcase` | 3 | 4 | `include` names `src`/`test`; the `e2e/` Playwright tree beside it is unread |\n\nA TEST_DEBT entry is the correct *holding* position — it freezes the number and makes the layer ratchet — but it is not the destination. The supported repair is the #5286 route: widen `include` to reach the test tree, or add a sibling `tsconfig.test.json` and name it in the `typecheck` script, then delete the ledger entry in the same PR (RECONCILED forces the pair).\n\n## Why two of these look cheap\n\n- **`@objectstack/metadata-fs` — 6 errors.** TS6133 x5 (declared-never-read, from the root config's `noUnusedLocals`) and one TS2349, across 2 files. Five of the six are lint-grade.\n- **`@objectstack/example-showcase` — 4 errors.** TS2339 x4 across three Playwright specs.\n\nBoth are plausibly one sitting each, and both would graduate a package out of the ledger rather than move a number inside it.\n\n⚠️ One thing a repairer will hit immediately, measured during #7353: both packages set `\"rootDir\": \"src\"`. Widening `include` past it makes tsc answer with **one TS6059 per added file and nothing else** — `packages/cli` measured 56 TS6059 that way versus 188 real errors with `rootDir` neutralised. So the repair is not a one-line `include` edit; it needs `rootDir` handled too, which is part of why the sibling-`tsconfig.test.json` route exists.\n\n## `@objectstack/cli` is a different size\n\n188 raw errors, and **not** a sitting. But it is also less bad than it reads: 159 of the 188 are TS2835 (NodeNext extension specifiers) plus the TS7006 implicit-any cascade it causes — the pair the top-of-ledger note describes as one repair, not 159. The remainder is concentrated: `test/i18n-coverage.test.ts` x35, `test/data-model-rules.test.ts` x26, `test/i18n-declared-surface-gate.test.ts` x19, `test/i18n-section-coverage.test.ts` x18, `test/commands.test.ts` x15 account for 113 of the 188.\n\nWorth knowing before anyone sizes it: this layer has never been read by any gate, ledger or CI job, so the 188 is a first measurement rather than a drift.\n\n## Not urgent\n\nNothing is red and nothing regressed — after #7353 all three are frozen at their exact measured counts with no bootstrap margin, so the next new error in any of them goes red immediately. This is a \"these should graduate\" note, not a defect.\n\nRelated: #7353 (PR #7921) · #5286 · #7312 (the same repair, done for app-crm / app-todo) · #4311."
+}

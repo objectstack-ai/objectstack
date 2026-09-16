@@ -1,0 +1,35 @@
+{
+  "number": 7724,
+  "kind": "issue",
+  "title": "admin-lifecycle: `remove-user` is non-atomic and can never succeed — 409 leaks as a bodyless HTTP 500, credential rows deleted without rollback",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "huangyiirene"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T12:21:31Z",
+  "updated_at": "2026-08-12T08:45:50Z",
+  "closed_at": "2026-08-12T08:45:50Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7724",
+  "body": "## Symptom\n\nAs a genuine better-auth admin, `POST /api/v1/auth/admin/remove-user {userId}` on a user that owns a record fails, and the failure is **non-atomic**:\n\n- **Observed:** HTTP **500 with an empty body**. `sys_user` is still readable; the owned record still carries its `owner_id`; and the user's credential `sys_account` rows have **already been deleted** — so that email can no longer sign in (401) while still occupying the org roster. Reproduced twice; verified across three victims (`accounts=0` for all three vs `accounts=1` for untouched users).\n- **Expected:** 2xx, `sys_user` gone, the owned record surviving with `owner_id` cleared to null (engine FK clear).\n\nThe server log gives the real cause — a **409 leaking to the client as a bodyless 500**:\n\n```\nCannot delete sys_user (): 1 dependent sys_member record(s) reference it via user_id\n(user_id is required, so it cannot be cleared)… set deleteBehavior:cascade on sys_member.user_id\n{ code: DELETE_RESTRICTED, status: 409 }\n```\n\n## Root cause\n\nThree compounding problems, located on `origin/main`:\n\n1. **Every user is auto-bound to the default org at sign-up/create** (the membership reconciler in `packages/plugins/plugin-auth/src/reconcile-membership.ts` runs as a `user.create.after` hook), and `sys_member.user_id` is a **required** FK with no cascade — `packages/platform-objects/src/identity/sys-member.object.ts` declares `user_id: Field.lookup('sys_user', { required: true })` and sets **no** `deleteBehavior:'cascade'`. So the engine's referential restrict vetoes the `sys_user` delete every time — `remove-user` can **never** succeed on this deployment.\n2. **The operator cannot clear the blocker either.** `DELETE /api/v1/data/sys_member/{id}` → **405** — `sys-member.object.ts` sets `enable.apiMethods = ['get', 'list']` (writes owned by better-auth / refused by the identity write guard).\n3. **No rollback.** The account/session deletions performed by better-auth's admin `remove-user` handler are **not** rolled back when the engine refuses the `sys_user` delete, leaving an orphaned, un-authenticatable identity on the roster.\n\nOn top of that, the engine's `DELETE_RESTRICTED` (409) surfaces through the better-auth admin route as a **bodyless HTTP 500** rather than a structured 409 envelope (the generic REST data route maps this correctly in `packages/rest/src/rest-server.ts`, but the better-auth admin path does not).\n\nThis is **not** the #3023 owner-anchor regression — the veto comes from the engine's referential restrict on `sys_member.user_id`, not from the owner-anchor transfer guard.\n\nThe break-glass guard at `packages/plugins/plugin-auth/src/auth-manager.ts` (`ctx.path === '/admin/remove-user'`) refuses removing the last local-credential holder, but does **not** cascade `sys_member`, roll back the credential deletes, or map the 409 — so none of the three problems above are addressed by it.\n\n## Reproduction\n\n1. As a genuine better-auth admin: `POST /api/v1/auth/admin/create-user {email:…}` → 200.\n2. Create a record owned by that user.\n3. `POST /api/v1/auth/admin/remove-user {userId}`.\n4. Observe HTTP 500 with an empty body; re-read shows `sys_user` still present, the record still owned, but the user's `sys_account` rows gone (subsequent sign-in 401).\n\n## Related\n\nShares the **bodyless-500 statusCode-leak class** with the invitation-acceptance failure from the same run — #7725 (`accept-invitation` → bodyless 500 on a UNIQUE-constraint collision).\n\n## Source\n\nExtracted from the QA run objectstack-ai/objectstack#7663 (framework 92f26f75, console 09987b680)."
+}

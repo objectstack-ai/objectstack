@@ -1,0 +1,34 @@
+{
+  "number": 7728,
+  "kind": "issue",
+  "title": "api-key-ui-lifecycle (secondary): the `key` column (SHA-256 hash) serializes over the data API, contradicting its own \"never exposed to clients\" description",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "huangyiirene"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T12:23:24Z",
+  "updated_at": "2026-08-12T05:58:22Z",
+  "closed_at": "2026-08-12T05:58:22Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7728",
+  "body": "## Symptom\n\nThe `key` field on `sys_api_key` — the stored **SHA-256 hash** of the API key — **serializes over the data API** on both get-by-id and list, despite being declared with a description that says it is never exposed.\n\n- **Observed:** get-by-id and list responses for `sys_api_key` include the `key` (hash) value. Admin-readable only on this app (ordinary personas are 403 on the object), but it does serialize where readable.\n- **Field declaration** (`packages/platform-objects/src/identity/sys-api-key.object.ts`, ~line 174):\n  ```\n  key: Field.text({ label: 'Hashed Key', required: true, hidden: true, readonly: true,\n    description: 'Hashed API key value — never exposed to clients', group: 'Secret' })\n  ```\n\n## Not a `hidden`-contract violation\n\nThe spec defines `hidden` as **\"Hidden from default UI\"**, not \"stripped from API serialization\" — so serializing a `hidden` field is **not** a violation of the `hidden` contract. What is wrong is narrower: **the field's own `description` (\"never exposed to clients\") is false on this build.** The show-once secret handling is otherwise clean (the raw plaintext secret never re-serializes on get-by-id, list, or a reloaded DOM); this concerns only the stored hash column.\n\n## Root cause\n\nNot located precisely by the run. The fix lands in one of two places — a maintainer call:\n\n- **Strip on serialization:** genuinely omit `key` from data-API output (a `hidden`-and-secret field should not serialize its value), making the description true; or\n- **Correct the description:** if the hash is intentionally admin-readable, drop the \"never exposed to clients\" claim from the field description so the declaration stops lying.\n\nRoute `domain:metadata` (the field declaration and any serialization-strip both sit in `platform-objects` / metadata). Lower severity — labelled `finding`.\n\n## Reproduction\n\n1. As admin, create an API key (`POST /api/v1/keys {name}`).\n2. `GET /api/v1/data/sys_api_key/{id}` (and the list endpoint).\n3. Observe the `key` (SHA-256 hash) present in the serialized payload, despite the field description \"never exposed to clients\".\n\n## Source\n\nExtracted from the QA run objectstack-ai/objectstack#7663 (framework 92f26f75, console 09987b680)."
+}

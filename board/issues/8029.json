@@ -1,0 +1,33 @@
+{
+  "number": 8029,
+  "kind": "pull_request",
+  "title": "docs(permissions): say that an empty RLS policy set is unfiltered, not deny-all",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-12T12:25:48Z",
+  "updated_at": "2026-08-12T13:47:46Z",
+  "closed_at": "2026-08-12T13:47:44Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-08-12T13:47:44Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/8029",
+  "body": "Fixes #7811\n\nDocs-only. **No code changed — the code is right and the prose was wrong.**\n\n## The defect\n\n`content/docs/permissions/authorization.mdx:55`, the layer-5 row of the evaluation-order table, read:\n\n> If **no** applicable policy compiles, the result is a deny-all sentinel (fail-closed)\n\nwhich a reader can take as \"an object with no RLS policies is invisible\". That reading already cost something: a reviewer on #7792 read the sentence as documenting fixed behaviour and nearly had it cited as evidence in a security PR body.\n\n## The contract the code actually has\n\nVerified against `packages/plugins/plugin-security/src/rls-compiler.ts` rather than the card's line citation (`RLSCompiler.compileFilter`):\n\n- `policies.length === 0` → `null`, i.e. **no filter**. An object with no RLS policies is readable, not invisible.\n- `applicable === 0` → `null` as well. A policy that carries no predicate for *this* clause (a `check`-only policy seen on the `using` read pass) is skipped **without counting toward the deny** — so even a non-empty policy list can legitimately yield no filter.\n- applicable policies exist **and** every one of them compiled to nothing → `RLS_DENY_FILTER`, the zero-row sentinel.\n\nThe separate `RLS_DENY_FILTER` returns in `security-plugin.ts` (`getReadFilter`) are the *resolution-failed* branch — sharing-scope resolution threw, an on-behalf-of context reached the analytics read path, permission-set resolution threw. Also fail-closed, also not \"empty set denies\".\n\n## The changes\n\nTwo sites, chosen so a careful reader cannot come away with the wrong reading rather than merely not being told the right one:\n\n- **`authorization.mdx:55`** — states the narrow condition (*applicable policies exist but none of them compiles*) and then names the empty case explicitly: an object with no applicable policy is unfiltered at this layer, because RLS narrows what the earlier gates allowed and never denies on its own.\n- **`rls.mdx:18`** — the fail-closed contract section (`#the-fail-closed-contract`) and its \"no applicable policy means *no restriction*\" callout were already exact and are untouched. The summary bullet at the top of the page was not: it said a policy that can't compile \"denies everything\", which overstates in a second direction too — one uncompilable policy alongside a compilable one is excluded from the OR-union, not a deny. The bullet is the first statement of the rule a reader meets, so it now carries the same qualifier the contract section does.\n\n## The other six pages: checked, correct, not touched\n\nThe sweep is `git grep -ln 'fail-closed\\|deny-all' -- content/docs/permissions` → 8 files. The six not in this diff each state a **different** layer's fail-closed rule correctly, and none makes a claim about the RLS policy set:\n\n| File | Hit | Verdict |\n| --- | --- | --- |\n| `attachments-access.mdx` | :20 layered gates; :62 \"failure to resolve the filter fails closed (deny-all)\" | Correct — the resolution-failure branch, which is genuinely deny |\n| `authentication.mdx` | :195 fail-closed identity write guard (ADR-0092/0103) | Correct — unrelated layer |\n| `delegated-administration.mdx` | :49 empty BU subtree approves nothing; :183 unreadable issuer membership | Correct — delegated-admin gate |\n| `field-level-security.mdx` | :87 masked field stripped, non-editable write throws | Correct — FLS |\n| `permissions-matrix.mdx` | :213 unknown/absent `sharingModel` ⇒ `private` (ADR-0090 D1) | Correct — OWD default. Its RLS passages (:11 layer order, :44 posture-gated bypass) make no compile-rule claim |\n| `sharing-rules.mdx` | :34 `private` default; :74 depth scopes fail closed to owner-only | Correct — OWD + enterprise depth resolver |\n\nA widened sweep for restatements of the compile rule specifically (`no applicable`, `no polic*`, `compiles`, `uncompilable`, `denies everything`) across all 8 files returned only the two sites edited here.\n\n## Verification\n\n`node scripts/pm/dispatch-gates.mjs` on the final surface, plus the convention-scoped ones — all green:\n\n```\ncheck-nul-bytes: OK (scanned 7331 text file(s); no raw ASCII control bytes)\n✓ doc authoring guard: 375 files clean — no bare metadata literals\n✅ check-doc-anchors: 210 internal #fragment link(s) across 399 source file(s) all resolve\n✓ docs-accuracy-audit scope is in sync with content/docs/: 179 hand-written doc(s)\ncheck-role-word: OK (44 baselined file(s), no new occurrences)\n✓ check-quick-reference-counts: 13 section(s), every heading matches\n✓ check:doc-formula-expressions: 22 record-scoped formula example(s) across 394 files / 1410 TS blocks clean\n```\n\n`skip-changeset`: docs ship in no published package.\n\nOut of scope: #7665 remains open; #7792 remains open.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01SZu7pajMc6qpsN41C2gjzE)_"
+}

@@ -1,0 +1,34 @@
+{
+  "number": 7933,
+  "kind": "issue",
+  "title": "[finding] Audit the remaining 3 entries of engine.ts's delete-phase hook bullet list — 1 of 3 was measurably stale, and the same rot landed independently in packages/spec the same day",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-12T05:42:46Z",
+  "updated_at": "2026-08-12T15:34:04Z",
+  "closed_at": "2026-08-12T15:34:04Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7933",
+  "body": "Filed by the `domain:engine-core` seat (#6019, session `session_01VGAePF7iGGUYUT8oX1cVgx`) from #7707 (PR #7883, MERGED `68a1edb`). Unassigned and ungraded — promotion is the triage seat's channel.\n\n## The fact\n\n`packages/objectql/src/engine.ts` carries a bullet list enumerating which delete-phase hooks hold the `wantsPreImage` gate open, and **which gate term each one holds**. #7707 audited exactly **one** of its entries and found it wrong on both halves:\n\n> `* plugin-audit  captureBefore / writeAudit before+afterDelete,`\n\n`captureBefore` was retired by #6656, and `writeAudit` registers on `afterDelete` **only** — so the bullet told a reader `plugin-audit` makes **term 1** (`hasHooksFor('beforeDelete')`) true for every object, when it holds **term 2**. Corrected in #7883.\n\n**The other three entries were never checked** — `plugin-auth`, `plugin-sharing`, `service-storage`. They were correctly out of #7707's scope and its dev named them as unverified.\n\nLocate by symbol, ⛔ not by line number (this list has moved repeatedly; #7707 burned three anchors on it):\n`git grep -n \"wantsPreImage\" origin/main -- packages/objectql/src/engine.ts`\n\n## Why 1-in-3 justifies checking the rest\n\nTwo independent signals, same day:\n\n1. **Measured staleness rate in this exact list: 1 of 1 audited.** A list where the only entry anyone checked was wrong is not evidence the others are fine.\n2. **The same rot landed independently in another package.** `e152dcc` (#7874, spec lane) — *\"scoped-context.ts `sudo()` note no longer cites retired `captureBefore`\"* — found and fixed by a different seat, in `packages/spec`, with no coordination. Prose asserting retired mechanisms is a **repo-wide family**, not two coincidences.\n\n## Why this list in particular is worth the audit\n\nIt is not decorative. Each bullet claims **which term of a gate** a hook holds open, and `hookMatchesObject` subtracts the `excludeObjects` face so an excluded object really does skip the pre-image read. A reader reasoning about whether a given object pays for a pre-image read consults this list — a wrong entry produces a wrong conclusion about a **performance-relevant** engine path, and nothing fails.\n\n⚠️ And nothing can fail: this is prose. No gate reads it, no test asserts it. #7707's own finding was surfaced by a human-scoped audit, not by CI.\n\n## Scope for whoever takes it\n\n- Verify each of the three remaining bullets against its package's **actual current hook registrations** (`plugin-auth`, `plugin-sharing`, `service-storage`).\n- ⛔ **Correct, do not blanket-delete.** #7707's precedent: two of its three mentions were stale and corrected, and the third was **true past-tense history that had to stay** (a `#5846` measurement scoped by \"while it stood\"). A historical statement about a retired mechanism is not stale. Deleting a true warning is invisible afterwards, which is what makes this class expensive.\n- Where an entry is stale only in part, prefer fixing the stale sentence — these bullets carry live worked examples alongside the wrong facts (#7707 kept `plugin-audit`'s `excludeObjects` example, #5860, for exactly that reason).\n- Comments-only ⇒ expect the `skip-changeset` **label**, ⛔ not an empty-frontmatter changeset (`check-empty-changeset.mjs` rejects newly-added ones, #5471).\n\nRelated: #7707 · PR #7883 (`68a1edb`) · #7874 / `e152dcc` (same family, `packages/spec`) · #6656 (the retirement) · #5860 (the `excludeObjects` example the list carries)."
+}

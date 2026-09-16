@@ -1,0 +1,36 @@
+{
+  "number": 7598,
+  "kind": "issue",
+  "title": "[spec] `service-analytics`' read-scope / Cube filter compilers still refuse `$field`, so a CEL field-to-field RLS rule 400s on those faces",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "huangyiirene",
+    "os-help"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T06:51:20Z",
+  "updated_at": "2026-08-12T04:58:52Z",
+  "closed_at": "2026-08-12T04:58:52Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 13,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7598",
+  "body": "Measured while implementing #5222 (cross-field push-down). Filing unassigned — recording, not claiming.\n\n## The fact\n\n#5222 made `driver-sql` and `driver-sqlite-wasm` compile `{ $field: 'col' }` into a same-table column-to-column comparison for the six scalar operators. It did **not** reach `service-analytics`, whose two filter compilers are independent emitters:\n\n- `read-scope-sql.ts` — the RLS **read-scope** lowering\n- `strategies/filter-normalizer.ts` — the Cube face\n\nBoth gate comparands through `comparand-shape.ts`'s `isBindableComparand`, a deliberate hand-mirror of `driver-sql`'s module-private predicate (the file says so, and `__tests__/comparand-shape-refusal.test.ts` pins `{$field: …}` as refused \"converging with `driver-sql`\"). A `{ $field }` object is not bindable, so it is still refused there.\n\n## Why it matters\n\nThis is the same defect #5041 named, at a different face. `compileCelToFilter` emits `{ $field: path }` for a field-to-field comparison in a CEL permission/RLS rule. After #5222 that rule executes on the SQL drivers and in memory — but a read scope lowered through `read-scope-sql` still answers `INVALID_FILTER` / 400.\n\nSo the capability is now **asymmetric across SQL-lowering faces**: one rule, two outcomes, chosen by which compiler the request went through. That asymmetry is narrower than the one #5222 closed, but it is the same shape.\n\nNote the convergence comment those tests carry is now stale in one direction: it says refusing `$field` converges with `driver-sql`, and as of #5222 it diverges from it for the six scalar operators.\n\n## What the work looks like\n\nThe #5222 rulings port directly — same-table columns only, declared-only enumeration, tenant-isolation column forbidden on both sides, same comparison class, and the same total-across-NULLs predicate shape. What each face needs its own answer for is where the declared-field set comes from: the driver reads its own `initObjects` capture, and these compilers do not have one.\n\nThe conformance corpus is reusable as-is — it is exported from `@objectstack/driver-sql` as `CROSS_FIELD_CASES` / `CROSS_FIELD_ROWS` / `CROSS_FIELD_REFUSALS` precisely so a second face can be held to the same table.\n\nScope note: `driver-mongodb` and `driver-turso` REMOTE are also unconverted; they were out of #5222's ruling scope too, and are the reason its corpus was deliberately not promoted into `packages/spec/src/data` (doing so would enrol them as DEBT rows in the driver-conformance matrix).\n\n## Refs\n\n- #5222 (the driver-side implementation and its rulings)\n- #5041 (the original enforce-or-remove adjudication)"
+}

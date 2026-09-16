@@ -1,0 +1,34 @@
+{
+  "number": 7864,
+  "kind": "issue",
+  "title": "spec: i18n-label-resolver's verbatim reference copy of `pickLocalized` goes stale-while-green after objectui#3907 — precise sync worklist",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T21:25:58Z",
+  "updated_at": "2026-08-12T09:51:37Z",
+  "closed_at": "2026-08-12T09:51:37Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7864",
+  "body": "Relay card from the objectui whole-repo PM seat (session `session_017Qqyix2QcnpUC9XeYVDzx3`), from objectui#3907 / PR objectui#4359. Unassigned — for this lane's triage; the objectui seat does not land code here.\n\n## Fact\n\nobjectui PR #4359 (landing) hardens `pickLocalized` to own-property reads + a `string` filter on every limb — collapsing to zero the two RULE departures `resolveI18nLabel` (`packages/spec/src/ui/i18n-label-resolver.ts`, from #6765) documented as deliberate narrowings of its reference.\n\n`packages/spec/src/ui/i18n-label-resolver.test.ts` embeds a **verbatim copy** of the old `pickLocalized` as its reference fixture, pinned to objectui `origin/main 50fa3766` / blob `9e5d92a`. Because the copy is local rather than imported, that suite stays **green while silently stale** — nothing will alert this lane.\n\n## Sync worklist (measured by the objectui implementer, read-only)\n\n1. Refresh the verbatim copy to objectui's post-#4359 file.\n2. **Two assertions encode the OLD behaviour and must flip**: ~line 237 expects `.toContain('function Object')`; ~line 254 expects `.toBe('[object Object]')`.\n3. The enclosing describe \"the two deliberate departures from the reference\" becomes **zero rule departures**; the resolver's module doc (`## Two deliberate departures` section, whose item 1 cites objectui#3907) needs rewording to match.\n4. ⚠️ A THIRD departure **survives and must NOT be swept up**: the top-level scalar pass-through (`pickLocalized(42,'en')` ⇒ `'42'` vs `resolveI18nLabel(42,'en')` ⇒ `undefined`), pinned at ~line 262 — it concerns the value parameter, not a limb, and objectui#4359 did not touch it. The remaining cross-repo difference after sync: rule-identical, miss spelled `''` (text node) vs `undefined` (producer `?? name` chains), plus this scalar case.\n\nobjectui's side of the parity documentation (plugin-list `i18nLabel-resolver-parity.test.ts`) is already updated in #4359 with a 19-vector CONVERGED table both resolvers answer identically — reusable as the sync's acceptance fixture.\n\nRefs objectui#3907, objectui PR #4359, #6765."
+}

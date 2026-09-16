@@ -1,0 +1,35 @@
+{
+  "number": 7456,
+  "kind": "issue",
+  "title": "[finding] `objectName` on an object-embedded action is inert AND unvalidated — the third arm PR for #7397 deliberately left open",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-10T13:13:07Z",
+  "updated_at": "2026-08-12T03:16:18Z",
+  "closed_at": "2026-08-12T03:16:18Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7456",
+  "body": "Observation-class finding, surfaced and **measured** while implementing #7397 (the object-embedded modal/flow cross-reference arm). Filed unassigned per #4949 discipline — deliberately NOT fixed in that PR, because the fix requires a contract decision this seat should not take as a side effect.\n\n## What was measured\n\nThe registered action walk in `packages/spec/src/stack.zod.ts` applies **three** checks, not two: flow target, modal target, and `objectName` → declared object. #7397's PR mirrors the first two onto `config.objects[].actions[]`. The third is left as-is, and it splits the same way the target arms did:\n\n```\nembedded   { name: 'probe_on', type: 'script', target: 'doThing', objectName: 'probe_missing' }  ->  ACCEPTED\nREGISTERED { name: 'probe_on', type: 'script', target: 'doThing', objectName: 'probe_missing' }  ->  REJECTED\n   \"Action 'probe_on' references object 'probe_missing' which is not defined in objects.\"\n```\n\nSame action object, two authoring positions, opposite verdicts — the b/f, c/g, d/i pattern from #7397's probe table, one key over. Measured on `origin/main` @ `d13ce33` with both stacks built from the same helper and the same arguments.\n\n## Why it is observation-class rather than a live defect\n\nNothing consumes the key at that position today, so no user hits it at runtime:\n\n- `mergeActionsIntoObjects` (`stack.zod.ts`) builds its `objectName -> actions[]` map **only** from `config.actions` — the top-level list. It never reads `obj.actions[].objectName`. The merge direction is top-level to object, never the reverse.\n- The embedded position carries the full `ActionSchema` (`data/object.zod.ts`, `actions: z.array(ActionSchema)`), so the key is *declared* there purely because the shape is shared with the registered collection — not because anything reads it.\n\nSo it is a declared-but-unconsumed key at this position (Prime Directive #12, \"declared = enforced\") plus an unvalidated dangling reference — inert drift, not a live break. That is why it carries the `finding` label and no `pm:queue`.\n\n## The contract question that blocks a mechanical fix\n\nMirroring the registered check verbatim is **not** obviously right, which is exactly why #7397's PR did not do it. Two readings, different acceptance surfaces:\n\n- **A — existence check (verbatim mirror).** `objectName` on an embedded action must name a declared object, same as registered. Cheapest, consistent with the other two arms. But it accepts `objectName: 'other_object'` on an action embedded under `task` — a contradiction the schema would then bless.\n- **B — consistency check.** On an embedded action, `objectName` must equal the owning object's name (or be absent), because the action's owner is already unambiguous from its position. Stricter, and the only reading under which the key carries meaning at this position at all.\n- **C — retire the key at this position.** If nothing reads it and B says it can only ever restate the position, the ADR-0049 enforce-or-remove route may be the honest answer rather than either check.\n\nA/B/C differ in what they refuse, so this is an acceptance-surface decision (`domain:spec` by the standing red line), and under the startup-focus principle option C deserves real weight: there is no measured business pull for authoring `objectName` at a position that already names the object.\n\n## Anchors\n\n- `packages/spec/src/stack.zod.ts` — registered `objectName` check (`Validate action -> object references`); the #7397 embedded walk immediately above the inline one, whose comment records this exclusion in code.\n- `packages/spec/src/data/object.zod.ts` — `actions: z.array(ActionSchema)`, the shared shape.\n- #7397 / its PR — the modal/flow arms; #6889 / PR #7392 — the inline half. Neither covers this key: `InlineActionSchema` does not pick `objectName` at all, so the inline arm had nothing to decide.\n\n## Dedup\n\nOpen-issue search for `objectName action cross-reference` and `embedded action objectName defineStack` returns only #7397 itself. No open card covers this key."
+}

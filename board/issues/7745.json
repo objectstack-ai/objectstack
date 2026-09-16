@@ -1,0 +1,35 @@
+{
+  "number": 7745,
+  "kind": "issue",
+  "title": "finding: platform-checklist notes from the integration-system run (sys_account 405, Studio flow read-only, email wire-keys, predicate multi over REST)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "huangyiirene"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T12:25:58Z",
+  "updated_at": "2026-08-11T20:25:38Z",
+  "closed_at": "2026-08-11T20:25:38Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7745",
+  "body": "## Symptom\n\nConsolidated \"Notes worth keeping\" from the run that are checklist / recording notes rather than standalone product defects. (The seed-data non-user assignment and the push-success-while-nothing-delivered gap are judged real defects and split into their own cards.)\n\n- **`POST /api/v1/data/sys_account` now answers 405** (create not allowed), so the previously-used recipe for turning a seeded demo persona into a real login is closed on this build.\n- **A flow authored over the metadata API is not editable in Studio** — with or without `?package=`, it opens behind \"This flow is provided by an installed package, so it is read-only at runtime\". `ResourceEditPage` treats an item as artifact-backed when `layered.code != null && _packageId !== 'sys_metadata'`, and `flow` declares `allowOrgOverride:false`; the editable path is the console's own create page.\n- **Checklist slip** — `email-template-render` clause 7 names a `{to, subject, bodyHtml}` message body, but the wire keys are `html` / `text` (`bodyHtml` is the **template** field). The literal shape the clause names is refused 400 \"at least one of text or html is required\". The checklist clause should be corrected.\n- **Predicate (`multi:true`) writes are unreachable over REST by design** (#3897 strips `options.multi` from the batch routes), so the bulk-webhook clause needs a flow `update_record` / `delete_record` node with `multi:true` fired through the api trigger. Recorded so the next sweep does not re-derive it.\n\n## Root cause\n\nRecording notes for the platform-checklist / docs; each is attributed inline above. There is no single code root cause — the actionable items are a checklist clause correction (email wire-keys) and two behaviours worth documenting (sys_account 405, Studio read-only for metadata-API flows).\n\n## Reproduction\n\nNot applicable — these are recorded observations from the run for the platform-checklist maintainers; each note names the surface it was observed on.\n\n## Source\n\nExtracted from the QA run objectstack-ai/objectstack#7690 (framework 92f26f75, console 09987b680)."
+}

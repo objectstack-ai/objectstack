@@ -1,0 +1,36 @@
+{
+  "number": 7924,
+  "kind": "pull_request",
+  "title": "feat(driver-memory)!: refuse to boot into a multi-tenant deployment (#6915)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-12T04:33:49Z",
+  "updated_at": "2026-08-12T05:52:55Z",
+  "closed_at": "2026-08-12T05:52:53Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": "2026-08-12T05:52:53Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/7924",
+  "body": "Fixes #6915\n\nRoute **B** per the maintainer ruling (`5261729371`): a startup hard-fail when the deployment is multi-tenant, mirroring `driver-mongodb`'s `mongodb-tenancy-guard.ts`. ⛔ No row-level isolation (route A) — that stays behind the #5499 investment freeze. `driver-memory` stays **out** of `scripts/check-tenant-chokepoint.mjs`'s scan set.\n\n## What landed\n\nNew `packages/drivers/driver-memory/src/memory-tenancy-guard.ts`, same shape and layering as the sibling:\n\n| | Precedent (`driver-mongodb`) | This PR (`driver-memory`) |\n|---|---|---|\n| Typed error + code constant | `MongoDBMultiTenantUnsupportedError` / `MONGODB_MULTI_TENANT_UNSUPPORTED` | `MemoryMultiTenantUnsupportedError` / `MEMORY_MULTI_TENANT_UNSUPPORTED` |\n| Posture layer | `assertSingleTenantPosture()` ← `resolveTenancyPosture()` (ADR-0105 D1) | same |\n| — call sites | constructor + `connect()` | constructor + `connect()` |\n| Object layer | `assertObjectsNotTenantScoped()` | same |\n| — call sites | `syncSchema` + `syncSchemasBatch` | `syncSchema` only (no batch path here — see below) |\n| Re-exported from index | yes | yes |\n\nBoth walled postures (`group`, `isolated`) are refused; only `single` passes. There is deliberately **no override env var** — an escape hatch would restore exactly the silent non-isolation this removes.\n\n## Two things the precedent reading needed correcting on\n\n**`@objectstack/types` was not already reachable.** `driver-mongodb` declares it; `driver-memory` did not. Added as a `workspace:*` dependency (+ a vitest alias, + the mechanical `pnpm-lock.yaml` line). `resolveTenancyPosture()` is still the only knob read — no env var is touched directly.\n\n**Both call sites of the posture layer are load-bearing, for a reason the sibling's docstring only half-states.** `connect()` alone is not enough: `ObjectQLEngine.init()` downgrades a driver connect rejection to a warning under `OS_ALLOW_DRIVER_CONNECT_FAILURE=1` (`engine.ts:5303-5306`), which would boot the deployment unisolated again. The constructor is behind no such hatch. `connect()` is kept because it is the seam that aborts kernel bootstrap with this message (framework#3741) and it catches a host that flips the posture between construction and connect.\n\n**No `syncSchemasBatch`.** This driver does not advertise `supports.batchSchemaSync`, so the engine syncs one object per call. `assertObjectsNotTenantScoped()` keeps the array-taking signature anyway — it is the precedent's shape and it keeps the all-offenders-in-one-message property directly testable — but adding a batch path would be capability investment in a frozen driver.\n\n## Gates\n\n| Gate | Result |\n|---|---|\n| `pnpm lint` | clean |\n| `turbo run typecheck` (whole repo) | 126/126 |\n| `@objectstack/driver-memory` | 24 files / **732** tests (20 new) |\n| `@objectstack/verify` | 5 / 23 |\n| `@objectstack/dogfood` | 92 passed + 1 skipped / 588 passed + 3 skipped |\n| `objectql` · `runtime` · `spec` · `cli` · `metadata-protocol` · `plugin-auth` · `plugin-dev` · `service-datasource` · `service-analytics` | all green (19 794 tests total) |\n| `check:driver-conformance` | **40 covered / 0 DEBT / 0 exempt** — unchanged |\n| `check:query-options-erasure` | 67 non-test sites in 17 files, **no files added** — baseline untouched |\n| `check:tenant-chokepoint` | 19 bindings / 3 files — unchanged (`driver-memory` correctly absent) |\n| `check-driver-memory-census` | OK — 2 ruled consumers |\n| `check:error-code-casing`, `check:empty-changeset`, `check-changeset-no-major` | clean |\n\n## Not breaking the single-tenant path\n\nThis is where the card could do damage, so it was measured rather than assumed. Intersecting *\"names `InMemoryDriver`\"* with *\"sets `OS_TENANCY_POSTURE` / `OS_MULTI_ORG_ENABLED`\"* across `packages`/`apps`/`examples`/`scripts` yields six files: three `plugin-dev` tests that `vi.mock` the driver into `ERR_MODULE_NOT_FOUND` (never constructed), two that only mention it in prose, and `dev-plugin.ts` itself. Nothing in the repo runs the real driver under a walled posture. Three tests pin the clean path explicitly: construct → connect → sync → round-trip with no posture set, the same under an explicit `single`, and objects that omit or disable the `tenancy` block.\n\n## Changeset\n\n`minor`, not `patch` — a deployment that boots today can stop booting. Same grade the sibling guard took.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01Q7aqcZXdqX6yPMtbQWfASy)_"
+}

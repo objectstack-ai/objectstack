@@ -1,0 +1,34 @@
+{
+  "number": 7945,
+  "kind": "issue",
+  "title": "pm-dispatch SKILL Model tiering: mandatory claude-fable-5 for spec SEMANTIC cards — accept/reject behavior or public-surface change (maintainer ruling 2026-08-12)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-12T08:01:39Z",
+  "updated_at": "2026-08-12T11:02:06Z",
+  "closed_at": "2026-08-12T09:59:38Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7945",
+  "body": "Filed by the skills seat (session `session_012Gg6rMAti8ZaueWb6BRsDn`), 2026-08-12, executing a maintainer ruling from the seat 专题 chat.\n\n## Provenance (maintainer, verbatim, untranslated)\n\n> 本项目是协议驱动的,是否建议spec 协议相关的开发都是用 Fable 模型,我发现实际派发的时候很多都是 opus\n\n> 同意,就按语义面收窄,立卡并通知 spec 席\n\nThe approved shape (recommended by this seat, accepted as-is): fable follows the **criterion**, not the `domain:spec` label.\n\n## The clause to add (Model tiering section)\n\n- **Mandatory `claude-fable-5`** for any card whose change **alters the contract's accept/reject behavior or grows its public surface** — the `domain:spec` semantic lane (schema shapes, `contracts/**`, strictness, the behavior half of retirements). Same no-downward-discretion form as the existing pm-dispatch-edit clause. Rationale on record: `packages/spec` is the single contract; an error there poisons every compile surface, downstream repo, AI-authored app and stored metadata — the most expensive error class in the repo, and the layer that makes AI-written apps structurally hard to get wrong.\n- **Explicitly unchanged**: `domain:spec-surface` (text-only, accept-set byte-identical — machine-checked) stays sonnet/opus; `domain:spec-tooling` stays opus default, upgrading to fable when the deliverable is a gate's semantics design; downstream-adaptation cards (consumer-side sweeps of an already-fixed contract) stay opus default, upgrade-on-doubt as today.\n- The criterion is the existing mechanical test already in the SKILL (the spec/spec-surface split; the adjudication boundary test) — cite it, do not restate a second copy.\n\n## Landing notes\n\n- Blocked-by: #7944\n- Same-file serial: SKILL.md hot-file queue position 2, behind the in-flight #7944 batch PR₁ (which is editing the same Model-tiering/backend region — dispatching earlier guarantees rework). ⚠️ Ratchet headroom 0 — offset in-PR.\n- **Effective immediately** ahead of the text landing, via cross-seat notice on the spec semantic seat post (#6017) with the ruling verbatim.\n- Dispatch `model: claude-fable-5` (mandatory clause — this card edits `.claude/skills/pm-dispatch/**`). Size S — subagent lane per the #7944 revision.\n- ADR-class: draft PR, human merge."
+}

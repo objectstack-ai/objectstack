@@ -1,0 +1,35 @@
+{
+  "number": 7742,
+  "kind": "issue",
+  "title": "finding: dev metadata reload does not re-ingest connector items — reconcileDeclaredConnectors reads a registry the artifact reload never refreshes for connectors",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "huangyiirene"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T12:25:27Z",
+  "updated_at": "2026-08-11T21:43:52Z",
+  "closed_at": "2026-08-11T21:43:52Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7742",
+  "body": "## Symptom\n\nShared unproven half behind three PARTIALs (`connector-declarative-boot`, `connector-degraded-recovery`, `connector-spec-path-no-escape`): a connector edit on disk fires a metadata reload that does **not** reconcile the change — no reconcile, no teardown, no re-materialize. Not scored a fail, because the default `os dev` restarts the serve child on recompile so the user-visible loop still applies the change; the production trigger (a Studio package publish) was not drivable in the run. Flagged for triage.\n\n## Root cause\n\n`reconcileDeclaredConnectors` (`packages/services/service-automation/src/plugin.ts`, ~line 1059) reads `ql.registry.listItems('connector')`, but the artifact reload re-ingests object definitions and **not** connector items — so on a connector-only edit the registry the reconcile reads is stale and the reconcile is a no-op. The connector materialize/teardown never re-runs off the reload event.\n\nStale-premise check: present on `origin/main` (`reconcileDeclaredConnectors` still reads `listItems('connector')`, and the reload path does not re-ingest connectors).\n\n## Reproduction\n\n1. `os dev` a stack with a declared connector, but drive a metadata reload without a serve-child restart (or reload via a Studio package publish).\n2. Edit the connector definition on disk and trigger the reload.\n\nExpected: the connector is torn down and re-materialized from the new definition. Actual: the reload re-ingests objects only; the connector reconcile is a no-op and the old connector stays live.\n\n## Source\n\nExtracted from the QA run objectstack-ai/objectstack#7690 (framework 92f26f75, console 09987b680)."
+}

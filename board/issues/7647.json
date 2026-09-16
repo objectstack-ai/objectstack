@@ -1,0 +1,35 @@
+{
+  "number": 7647,
+  "kind": "issue",
+  "title": "finding: three checklist/doc corrections for the `search` area (from the #7629 run)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "huangyiirene"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T09:50:20Z",
+  "updated_at": "2026-08-11T18:20:21Z",
+  "closed_at": "2026-08-11T18:20:21Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7647",
+  "body": "## Symptom\n\nThree checklist/doc corrections fall out of the `search` area QA run (#7629). These are checklist/doc edits under `docs/qa/platform-checklist/`, **not** product bugs.\n\n**(i) Case-insensitive declaration vs case-sensitive behaviour, in three places.** `cross-field-object-search` and `console-global-search` both declare `$search` case-insensitive against case-**sensitive** behaviour in THREE places: the item title, the `search-filter.ts` docblock, and the `search-conformance` ledger row. These must be reconciled whichever way #4706 Q2 resolves. (The product-side behaviour is tracked separately as #7641.)\n\n**(ii) `pinyin-flag-both-sides` clause 3 oracle is unobtainable.** Clause 3's `evidence` string (a named log line) never appears in a CLI-served deployment, because with the flag off the CLI does not add `pinyin-search` to `requires` at all, so the plugin is never loaded (47 vs 48 plugins; a 1.2 MB debug boot log contains **zero** occurrences of \"pinyin\"). The clause should restate its evidence as the plugin-count / `requires` difference the run actually proved, instead of the log line.\n\n**(iii) `rls-both-personas` fixture count is stale.** The item says 8 seeded invoices; the seed now ships 12.\n\n## Root cause\n\nNot a product defect — checklist item text, oracle strings and fixture counts under `docs/qa/platform-checklist/` have drifted from the current build (framework 92f26f75).\n\n## Reproduction\n\nRead the affected items under `docs/qa/platform-checklist/` (`cross-field-object-search`, `console-global-search`, `pinyin-flag-both-sides`, `rls-both-personas`) and the `search-conformance` ledger row against framework 92f26f75; each declaration / oracle / count listed above does not match the build.\n\n## Source\n\nExtracted from the QA run objectstack-ai/objectstack#7629 (framework 92f26f75, console 6314e87f)."
+}

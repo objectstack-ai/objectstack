@@ -1,0 +1,35 @@
+{
+  "number": 7856,
+  "kind": "issue",
+  "title": "A spec that does not round-trip through JSON silently corrupts the metadata-fs head index — `put().version` already disagrees with `get().hash`, no watcher involved",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "huangyiirene"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T20:50:13Z",
+  "updated_at": "2026-08-12T10:39:33Z",
+  "closed_at": "2026-08-12T10:39:33Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7856",
+  "body": "Filed by the `domain:metadata` PM seat from #7335's dev report (PR #7845), which measured this while proving that removing the time-keyed self-write suppression **could not regress it**. Deliberately kept out of that PR: fixing it there would have masked a coherence bug behind a suppression change and made that PR's reverse verification attributable to two things at once.\n\nNo `domain:*` applied — routing is the triage seat's territory. For the record the surfaces are `packages/metadata-core` (`hashSpec`) and `packages/metadata-fs` (`put()` / the head index).\n\n## Measured, not inferred\n\n`hashSpec` canonicalises a `Date` to `{}` **in memory**, but `JSON.stringify` writes it as an ISO string, so the hash of the in-memory spec and the hash of the bytes actually on disk differ. Measured on `origin/main` @ `69fde55`:\n\n```\nin-memory hash : 2978612c\non-disk hash   : e5abe659\n```\n\nTwo consequences, both present today with the watcher **disabled entirely** — so this is not a watcher bug and does not depend on any timing:\n\n1. **`put(spec).version !== get().hash`** for any spec carrying a `Date` (or any object with a `toJSON` that changes its serialised shape). The version a caller is handed does not identify the bytes that were stored.\n2. **A second `put()` of such a spec publishes a spurious `{op: 'update', actor: 'fs'}` and corrupts the head index** — the stored head never matches what the watcher subsequently reads, so the repository believes an external actor edited a file that nothing outside the process touched.\n\n## Why it surfaced now, and why it is not #7335\n\n#7335's dispatch fenced \"specs whose in-memory form does not round-trip through JSON identically\" as the most likely way a content-identity comparison silently regresses. The dev checked, and the honest answer was that the hazard is **entirely pre-existing and was never covered by the mechanism being removed**: on the pre-fix tree the event arrives ~560 ms after the write, roughly 360 ms *after* the 200 ms suppression window had already expired. The old time-keyed pre-check therefore never held this class, and deleting it cannot make it worse.\n\nThat reasoning is what makes this a separate card rather than a regression of #7845 — and it is why the defect is worth its own measurement rather than being folded into a passing PR.\n\n## The actual question, which is a design one\n\nThere are at least three shapes and this card does **not** pick one:\n\n1. **Reject at the door** — `put()` refuses a spec that does not round-trip, loudly, naming the offending key. Consistent with \"declared = enforced\"; hardest for an AI author to get silently wrong; most likely to break existing callers.\n2. **Normalise before hashing** — hash the serialised form rather than the in-memory one, so `version` always identifies the stored bytes. Smallest blast radius; leaves authors free to pass values whose in-memory and stored forms differ, which may be its own trap.\n3. **Accept and document** — declare that `version` identifies the in-memory spec and not the bytes, and fix the head-index write instead.\n\nOption 2 looks cheapest and option 1 fits the repo's contract-first posture; whoever takes it should measure how many real specs carry non-round-tripping values before assuming option 1's blast radius is tolerable. If the choice turns on product intent unreadable from the code, that is a `needs-user-decision`, not a coin flip.\n\n⚠️ Whatever shape wins, the pin belongs where a future divergence is caught: assert `put().version === get().hash` over a table of spec shapes including at least one `Date` and one custom `toJSON`, not a single hand-picked case.\n\n## Provenance\n\n#7335 · PR #7845 (`1277a580`) — see its \"Card clauses / 2. Specs that do not round-trip through JSON\" section, and `handleFsChange`, where the dev documented the behaviour rather than silently changing it."
+}

@@ -1,0 +1,35 @@
+{
+  "number": 7985,
+  "kind": "pull_request",
+  "title": "spec: close memory driver's persistence sub-shapes against unknown keys (#4001 batch B)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-12T09:29:15Z",
+  "updated_at": "2026-08-12T12:56:42Z",
+  "closed_at": "2026-08-12T12:56:41Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-12T12:56:40Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/7985",
+  "body": "Part of #4001\n\n## What\n\nConverts the 5 remaining non-strict `z.object` sites in\n`packages/spec/src/data/driver/memory.zod.ts` to the campaign's `strictObject`\nposture — `PersistenceAdapterSchema`, `FilePersistenceConfigSchema`,\n`LocalStoragePersistenceConfigSchema`, `CustomPersistenceConfigSchema`,\n`AutoPersistenceConfigSchema`. These are the persistence-adapter union nested\nunder `datasource.config.persistence`.\n\n`.strict()` does not recurse: `MemoryConfigSchema` (the top-level `config`\nslot) was already closed as of #4410, but the five variant shapes nested\ninside its `persistence` field stayed open, so a typo written *inside*\n`persistence` (e.g. `{ type: 'file', filepath: '/data.json' }`) parsed clean\nand the driver silently came up on its defaults.\n\n## Premise check\n\nVerified against `origin/main` @ `8d80e12e74` before starting: `git show\norigin/main:packages/spec/src/data/driver/memory.zod.ts` still has exactly 5\nbare `z.object(` sites (the other 2 `z.object(` matches were in an unrelated\nJSDoc-adjacent context and don't count), and the ledger\n(`docs/audits/2026-07-unknown-key-strictness-ledger.md:1185`) still classed\nthe file `authorable`, \"persistence-adapter union under `datasource.config`\".\nPremise held — proceeded.\n\n## Changes\n\n- 5 sites converted to `strictObject`, each with its own `surface` name\n  (`.strict()` doesn't recurse, so each nested variant needed its own gate).\n  No aliases added — I don't have real-payload evidence for any specific\n  typo, and the helper's own docblock says curation is an upgrade, not a\n  precondition.\n- New unrecognised-key rejection tests for all 5 sites in `memory.test.ts`.\n  **Reverse-verified**: reverting `memory.zod.ts` to the `origin/main`\n  version turns exactly these 5 new cases red (`expected true to be false` —\n  the unknown key was silently accepted), restoring the fix turns them green\n  again. Done via `git checkout origin/main -- <path>` + a saved patch, not\n  `git stash`.\n- Caught and avoided a docs-drift trap before it shipped: my first draft put\n  the new shared `PERSISTENCE_HISTORY` doc comment *before* the file's real\n  module header. `findModuleDocBlock` (#5059) takes the first top-level doc\n  comment as the page description and returns `null` for the **whole file**\n  if it's immediately followed by a declaration — no fallback search — so\n  that ordering would have silently dropped `memory.zod.ts`'s published docs\n  description. Moved the new comment after the real header; confirmed with\n  `findModuleDocBlock` directly that the correct block is now selected.\n- Regenerated `docs/audits/2026-07-unknown-key-strictness-ledger.counts.md`\n  (`gen:strictness-ledger` — never hand-edited) and updated the ledger's\n  prose/table to drop `driver/memory.zod.ts`'s now-empty remaining-strip row\n  (`check:strictness-ledger` was red until this was fixed).\n- Removed `memory.test.ts`'s graduated entry from\n  `packages/spec/test-typecheck-debt.json` via\n  `gen:test-typecheck-debt` (not hand-edited) — the file now compiles clean\n  under `tsconfig.test.json`.\n- Changeset: `@objectstack/spec` minor.\n\n## Tests\n\n- `pnpm --filter @objectstack/spec test -- --maxWorkers=2` — **381 files /\n  10037 tests, all passing** (full package suite; ran clean both before and\n  after the ledger-doc fix).\n- `pnpm --filter @objectstack/spec typecheck` — clean (`tsc --noEmit`,\n  `check:scripts-typecheck`, `check:test-typecheck` all green).\n- `pnpm --filter @objectstack/spec check:generated` — all 13 generated\n  artifacts up to date (api-surface, strictness-ledger counts,\n  authorable-surface, docs, etc.).\n- `pnpm --filter @objectstack/spec check:authorable-surface` — green;\n  `authorable-surface.base.json` anchor untouched (the \"trails the baseline\"\n  note is the expected informational line, not an error).\n- Root-level named gates: `check:merge-driver`, `check:nul-bytes`,\n  `check:spec-parsed-alias`, `check:adr-anchors` — all green.\n- Consumer sweep (downstream, `...@objectstack/driver-memory` — wait, this\n  package has no in-repo consumers upstream of it other than\n  `@objectstack/driver-memory` itself, which is the one that parses these\n  configs): built its dependency closure first\n  (`pnpm --workspace-concurrency=2 --filter '@objectstack/driver-memory^...' build`),\n  then `pnpm --filter @objectstack/driver-memory typecheck` (clean) and\n  `pnpm --filter @objectstack/driver-memory test -- --maxWorkers=2` — **24\n  files / 732 tests, all passing**.\n\n## Out of scope\n\nNothing found outside this card's 5 sites while working the file.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01ECjShwqVRAhLy15mgatGjV)_"
+}

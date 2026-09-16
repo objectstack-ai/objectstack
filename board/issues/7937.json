@@ -1,0 +1,35 @@
+{
+  "number": 7937,
+  "kind": "pull_request",
+  "title": "fix(runtime): dispatcher `capabilities.search` answers a stated `false`, not bare slot presence (#7602)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-12T06:37:22Z",
+  "updated_at": "2026-08-12T06:58:58Z",
+  "closed_at": "2026-08-12T06:58:57Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-08-12T06:58:57Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/7937",
+  "body": "Fixes #7602\n\n## What was wrong\n\n`getDiscoveryInfo()` — the runtime dispatcher's discovery face — derived `capabilities.search.enabled` from `hasSearch = !!searchSvc`, i.e. bare service-slot presence.\n\n**The defect is not that today's answer is wrong — it is that today's answer is right by accident.** `false` is produced only because nothing fills the slot (`CORE_SERVICE_PROVIDER` records `'search': null` on every host in either repo). Register any `ISearchService` — which is exactly what the slot exists for, per `CoreServiceName`'s *\"Search Engine (Elastic/Meili)\"* — and the discovery document flips `search.enabled` to `true` while the host still 404s the endpoint. That is the `declared ≠ enforced` failure #7541 closed on the `getDiscovery()` producer, merely waiting on a precondition nobody has met yet.\n\n## Premise, verified on `origin/main` @ `7372d46` before coding\n\nLine numbers had drifted from the card's `~L1111` / `~L1372`; located by text.\n\n| claim | measured |\n|---|---|\n| the dispatcher mounts no `/search` route | no `search` entry in `route-ledger.ts`, no handler in `http-dispatcher.ts`, no `routes.search` key in the emitted `routes` literal |\n| `capabilities.search` still slot-derived | `http-dispatcher.ts:1111` `const hasSearch = !!searchSvc;` → `:1372` `search: { enabled: hasSearch }` |\n\nThe card's option 2 (mount a `/search` dispatcher domain) is **deliberately deferred**, not overlooked: no route exists and no host registers the slot, so mounting one would be building an unrequested capability.\n\n## The change\n\n`capabilities.search` is now a hardcoded `false` carrying its reasoning inline, exactly the way `websockets` immediately below it already is (ADR-0076 D12 / #2462).\n\nThe dispatcher's own doctrine at that site says every service whose HTTP surface is a **dispatcher domain** mirrors that domain's guard — *\"same predicate ⇒ same answer\"* (#4000 / #4058). `search` is not a dispatcher domain, which is precisely why slot presence was never the right predicate for it and why it has no guard to mirror. Should a `/search` domain ever be mounted, the guard applies and the key is re-derived from it — the comment says so.\n\nAlso folds in #5672's Ruling A where it applies: every key from every producer, answered from that producer's own facts. Two producers answering one key by two unrelated predicates was legal only while both answers happened to be honest — this ends that state for `search`.\n\n### `services.search` is untouched in behaviour, on purpose\n\nThe third read the triage comment flagged (`search: hasSearch ? svcAvailable(…) : svcUnavailable('search')`) stays **presence-gated, and correctly so**: that map reports what is *registered*, not what is served — the documented `*Registered` contract at the same site — and it already passes `route: undefined`, advertising nothing on the occupant's behalf. `hasSearch` is renamed `searchRegistered` and moved into the `*Registered` group so the two different facts stop sharing one name.\n\n## Testing\n\n`packages/runtime/src/discovery-schema-conformance.test.ts`'s existing pin (`info.capabilities.search.enabled === false`) is **not deleted, skipped or weakened** — it was correct before this PR and is still green. But it passes for the *accidental* reason, so this PR adds the case that gives it meaning:\n\n- **new**: `[#7602] answers 'search' false WITH a search service registered — the slot is not the predicate`. It resolves a real-shaped `ISearchService` occupant, asserts `capabilities.search.enabled === false`, asserts `routes.search` stays unadvertised, and re-parses the whole body against `DiscoverySchema`.\n- **anti-vacuity**: it first asserts `services.search.enabled === true`, so the `false` above is provably a decision about the HTTP surface rather than a fixture that failed to register anything.\n\n**Reverse verification** (direction predicted before running): with the producer change reverted to `search: { enabled: searchRegistered }`, the run is **1 failed / 22 passed** — the new case red, the pre-existing pin green. That asymmetry is the whole point of the case, and without it this change is untestable.\n\n## Gates run\n\n- `node scripts/pm/dispatch-gates.mjs …` → `pnpm check:changeset-gate-self-tests` ✅\n- full `packages/runtime` suite: **139 files / 2128 tests passed** ✅\n- full package build closure (`turbo run build`, 70 tasks) ✅\n- `pnpm check:type-check-debt` against the built closure ✅ — *\"none above its recorded number\"*; `@objectstack/runtime` measures exactly its recorded `227`, i.e. the new test file added **zero** type errors and no ledger entry was raised.\n\n## Wire impact\n\nNone on any existing host: the emitted value is `false` before and after. What changes is that it *stays* `false` when the slot is filled.\n\n## Out of scope, filed separately\n\n`services.search` reports `handlerReady: true` for a filled slot with no mounted handler — the same contradiction #4318 fixed for `cache`/`queue`/`job` via `svcInProcess` (`handlerReady: false`), left latent on the one slot nobody fills. Not touched here; filed as a finding.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01XeW3KzpmdURCJ32CNTJdM7)_"
+}

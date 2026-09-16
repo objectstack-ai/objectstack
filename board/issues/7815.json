@@ -1,0 +1,34 @@
+{
+  "number": 7815,
+  "kind": "issue",
+  "title": "[finding] The runtime gate runs `validateVisibilityPredicates` at its `runtime` layer default for schema-bound metadata forms, so a correctly `data.`-rooted form is told to use `record.`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-11T15:50:19Z",
+  "updated_at": "2026-08-12T14:10:21Z",
+  "closed_at": "2026-08-12T14:10:21Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7815",
+  "body": "Found while implementing #7696 (PR #7810), disclosed in that PR's body and deliberately **not** fixed there — it is a layer-plumbing question in the gate, not the bare-word prescription pair that card reopened. Filed so it does not scroll away with a PR body.\n\nFiled unassigned, observation class. ⛔ Grading is the triage seat's single channel.\n\n## What was measured\n\nAt the runtime publish gate, `validateVisibilityPredicates` runs with `opts.layer` at its **`'runtime'` default for every view** — including **schema-bound metadata forms**, whose predicates are correctly rooted at `data.`.\n\nTwo consequences, both visible in PR #7810's 14-row controls table:\n\n1. **Every `FORM` row draws a `warning visibility-root-mislayered`** telling the author to use `record.` — on metadata that is correctly written. It appears on *all* form rows in that table (marked `¹`), including the ones that are otherwise silent.\n2. **Before #7810, `visibility-bare-identifier` prescribed `record.active`** on those sites — not the `data.active` that #7696's issue body quotes. The prescription an author actually saw was rooted for the wrong layer.\n\n⚠️ Point 2 means the card that produced this finding was itself working from a slightly wrong quotation of the message, and nobody noticed until someone measured the gate instead of reading the rule. The reconciliation in #7810 is unaffected (it removes that prescription for this position entirely), but the layer default is still there for every other rule that consults it.\n\n## Why it is worth a card\n\nThis is an **advisory that is wrong on correct metadata**, at the publish door, for a whole surface class. It is the same harm shape as #7696 — an author is told to change something that is already right — differing only in that it warns rather than blocks.\n\nIt also has the property that makes this class expensive: **nothing goes red.** The gate is green, the advisory is emitted, and the only symptom is authors (or AI authors) being steered toward `record.` in a place where `data.` is the correct root.\n\n## What is NOT being claimed\n\n- ⛔ Not a defect in `visibility-root-mislayered` itself — the rule is correct for the layer it is told it is on.\n- ⛔ Not a defect in #7810 — that PR removes the affected prescription for the bare-RHS position specifically, and states this remainder rather than absorbing it.\n- The fix is plausibly a one-line plumbing change (pass the real layer for schema-bound form sites), but \"plausibly one line\" is exactly the shape that turns out to have a reason, so it is filed as a finding rather than asserted as a trivial fix.\n\n## Pointers\n\n- `packages/lint/src/validate-visibility-predicates.ts` — the rule and its `opts.layer` default\n- `packages/lint/src/runtime-gate.test.ts` — where the gate's invocation is pinned\n- `packages/lint/src/predicate-rhs-position.ts` (new in #7810) — `schemaIdOf`, the shared \"the metadata-admin evaluator renders this surface\" test, which is the same discrimination a layer fix would need\n- #7696 / PR #7810 (surfaced it), #7659 / PR #7691, #7010 / PR #7214"
+}

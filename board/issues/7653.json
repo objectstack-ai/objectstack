@@ -1,0 +1,36 @@
+{
+  "number": 7653,
+  "kind": "issue",
+  "title": "open-edition-honest-degradation c3: anonymous-deny ordering inverted on /ai/** (unauth /ai/models → 501, /ai/agents → 200 instead of 401)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T09:50:59Z",
+  "updated_at": "2026-08-12T04:27:46Z",
+  "closed_at": "2026-08-12T04:27:46Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7653",
+  "body": "The degradation itself is **honest and PASSES** — please do not \"fix\" that half: `/ai/models`, `/conversations`, `/usage`, `/chat` all 501 with the Cloud/EE remedy sentence (mounted-but-unimplemented, never 404/503); `/ai/agents` returns the declared envelope with the relocated payload; and `/discovery`'s `services.ai` message is string-identical to the 501 body. The defect below is only the ordering of the anonymous-deny gate.\n\n## Symptom\n\nUnauthenticated callers reach the `/ai/**` family instead of being denied.\n\n- **Observed:** unauth `GET /api/v1/ai/models` → **501** (leaking the Cloud/EE remedy sentence); unauth `GET /api/v1/ai/agents` → **200**. Reproduced twice.\n- **Expected:** both → **401**.\n- **Control (proves anonymous-deny is otherwise live on the same boot):** anonymous `GET /api/v1/data/showcase_task` → **401**, correctly.\n\nDisclosure impact is limited to two static strings, but the ordering contract this item exists to pin is inverted.\n\n## Root cause\n\n`runtime/src/domains/ai.ts` `handleAIRequest` returns the `/ai/agents` empty-list courtesy (`{ agents: [] }`) and `capabilityUnavailable(deps, 'ai')` at the **top** of the handler (around `ai.ts:68-79`), while the `shouldDenyAnonymous` gate lives **inside** the per-route loop further down (`ai.ts:128`) — reachable only when the AI service *is* serveable. So on every open-edition deployment the whole `/ai/**` family answers unauthenticated callers before the anonymous gate is ever consulted. Still present on `origin/main` (the courtesy + `capabilityUnavailable` return precedes the `shouldDenyAnonymous` check).\n\n## Reproduction\n\nOn a stock boot, with no `Authorization` header:\n\n```\ncurl http://&lt;host&gt;/api/v1/ai/models    # expected 401, actual 501\ncurl http://&lt;host&gt;/api/v1/ai/agents    # expected 401, actual 200\ncurl http://&lt;host&gt;/api/v1/data/showcase_task   # control: 401 (correct)\n```\n\n## Source\n\nExtracted from the QA run objectstack-ai/objectstack#7627 (framework 92f26f75, console 6314e87f)."
+}

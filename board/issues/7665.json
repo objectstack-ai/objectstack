@@ -1,0 +1,37 @@
+{
+  "number": 7665,
+  "kind": "issue",
+  "title": "[security] A by-id write is not gated by record visibility — a contributor mutates records they cannot read, when only select-scope RLS is authored",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched",
+    "security",
+    "target:v17"
+  ],
+  "assignees": [
+    "os-help"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T10:09:20Z",
+  "updated_at": "2026-08-11T20:11:23Z",
+  "closed_at": "2026-08-11T20:11:23Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7665",
+  "body": "## Impact\n\nAn authenticated **low-privilege** user modifies records they **cannot read**. Not admin-only, not owner-only — the probing persona held the ordinary `showcase_contributor` set. Reproduced on **three objects** (`showcase_invoice`, `showcase_invoice_line`, `showcase_task`), twice each on fresh rows. The run calls this **the strongest finding of the sweep**. `DELETE` is correctly refused (no delete bit) — only the **write** half is open.\n\nRuled `target:v17` class ① (a user-hitting defect on a shipped surface). \"You can't mutate what you can't see\" is not enforced.\n\n## Reproduction (2/2 per object)\n\nProvision two contributor personas C1 and C2 (sign-up + `sys_user_permission_set` showcase_contributor + `sys_user_position` `contributor`, then re-sign-in so the session carries the position).\n\n1. As **C1**: create an invoice (`owner` = C1) and a line under it.\n2. As **C2** — the READ side is correct:\n   - `GET /api/v1/data/showcase_invoice_line/&lt;lineId&gt;` → **404 RECORD_NOT_FOUND**\n   - `GET /api/v1/data/showcase_invoice_line?$top=300` → the line is **absent**\n3. As **C2** — the WRITE side is NOT:\n   - `PATCH /api/v1/data/showcase_invoice_line/&lt;lineId&gt;` `{\"description\":\"C2-FORGED\",\"quantity\":999,\"unit_price\":12345}` → **200**, admin re-read shows the forged values persisted.\n   - Same on the master invoice (C2 GET → 404, C2 PATCH → 200 persisted) and on `showcase_task`.\n\nThe platform's own explain engine states the split — the cleanest confirmation:\n- `POST /security/explain {object:'showcase_invoice', operation:'read', userId:&lt;C2&gt;}` → rls layer **\"narrows\"**\n- the same call with `operation:'update'` → rls layer **\"not_applicable — No RLS policy applies\"**\n\n## Root cause (located, re-verified on `origin/main`)\n\n`packages/plugins/plugin-security/src/security-plugin.ts`:\n\n- **2.7 the by-id write pre-image gate** (`:1378`) composes the RLS filter for the **UPDATE** operation and is documented as skipped when that returns null. The comment at `:1553` states it outright: for an object whose narrowing is authored as select-only, *\"the #1994 pre-image check above is a no-op for it\"*.\n- The showcase authors its contributor narrowing as **`operation: 'select'` rules only** (`task_own_rows`, `invoice_own_rows`), so there is **no update-scope predicate** and no read-visibility requirement is imposed on the by-id UPDATE path.\n- OWD is `public_read_write`, so `resolveSharingCanEdit` (`:2739`) also returns true.\n- For `showcase_invoice_line` (`controlled_by_parent`), `assertControlledByParentWrite` (`:4139`/`:4210`) then derives the detail's write access from that same permissive master verdict.\n\nSo an object narrowed with select-only RLS has **an open by-id write path** as shipped, and any app authoring select-only narrowing has this shape today.\n\n## Why nothing caught it\n\n- `verify --rls` (`runRlsProofs`) reports **0 HOLES**, but its member probe holds **no object grants**, so every probe is masked by the object-level gate (403) before record scope is reached. A `showcase_account` auto-record 400 also cascades into 5 downstream skips (8 of 23 objects skipped on a stock run) — and a skip is exactly where this hid. (The tooling gap is tracked publicly from the same run; this card is the enforcement fix.)\n- `authz-conformance.matrix.ts` marks both `rls-by-id-write` (#1994) and `controlled-by-parent` as `state:'enforced'` — neither holds as shipped.\n- `examples/app-showcase/src/security/permission-sets.ts` comments that a contributor \"can by-id read/write a line only when they can read/write its master\" — also false as shipped.\n\n## Acceptance criteria\n\n- A contributor holding only `operation:'select'` narrowing must **not** be able to `PATCH` a by-id target outside that select scope — on the master **and** on a `controlled_by_parent` detail.\n- The regression guard uses a **second probe persona that holds the object read+edit grants but is OUTSIDE the record scope** — the current `verify --rls` proof structurally cannot fail because its probe holds no object grants, so a re-tagged version of it is not acceptable.\n- Read-side behaviour is unchanged (C2 still 404s on GET), and a legitimately in-scope write still succeeds — assert both as guards so the fix does not over-correct into the widener-dead direction the sibling issues below already track.\n\n## Suggested shape (not prescriptive)\n\nTwo options, and the platform-side one is the one that generalises:\n- **(A, recommended)** the platform requires a by-id write target to be inside the caller's **readable** set — deriving a write scope from select-only rules when no `update` rule is authored.\n- **(B)** the showcase authors `operation:'update'` RLS on `showcase_invoice` / `showcase_task`. This fixes the demo but leaves every other select-only app exposed, so it is a workaround, not the fix.\n\n## Relationship to the adjacent open issues — this is the OPPOSITE direction, not a duplicate\n\nThe open cards on this gate all concern write-**widening** mechanisms being **ineffective** (too restrictive — a legitimate widener is dead): #7401 (pre-image resolves under the caller's own read scope, killing an app widener on `private`), #6736 (authored update-wideners ANDed away on the bulk path). This defect is the **reverse**: the by-id write is too **permissive** — no read-visibility requirement at all under select-only RLS. Related closed history: #5386 (`controlled_by_parent` derivation ignored master access), #7281, #5492. None of these covers the select-only-write-bypass, and a fix must not resurrect the widener-dead behaviour those track.\n\n## Provenance &amp; disclosure\n\nHeld back from the public #7637 run report pending the maintainer's disclosure decision (D1 precedent); the private write-up was delivered 2026-08-11 in `docs/qa/platform-checklist/FOLLOW-UPS.md` §1a entry **D11** (branch `claude/platform-test-checklist-ocwugl` @ `f268b2b2`). The maintainer then instructed the PM directly to file this fix card (verbatim, 2026-08-11): 「立一张私有修复卡」 — so the disclosure here is authorized, not a leak.\n\n## Source\n\nQA run objectstack-ai/objectstack#7637 (`rls-both-sides` clause 5 + `owd-sharing-matrix` clause 4, the same defect; framework `92f26f75`), private write-up FOLLOW-UPS.md §1a D11. Root cause re-verified against `origin/main` before filing."
+}

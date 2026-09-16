@@ -1,0 +1,33 @@
+{
+  "number": 8107,
+  "kind": "pull_request",
+  "title": "fix(scripts): read a template-literal alias replacement, and shrink the two entries it mis-measured",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "size/m",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-12T15:39:22Z",
+  "updated_at": "2026-08-12T16:35:43Z",
+  "closed_at": "2026-08-12T16:35:42Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-08-12T16:35:42Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/8107",
+  "body": "Fixes #8020\n\n## The defect\n\n`asPath` in `scripts/check-test-source-alias.mjs` took **the last string literal** in a replacement expression. For `path.resolve(__dirname, '../../spec/src/index.ts')` that is the whole answer. For the template form — the one the subpath rule needs, because the `$1` back-reference has to sit *inside* the path —\n\n```js\n{ find: /^@objectstack\\/spec\\/([a-z-]+)$/,\n  replacement: `${path.resolve(__dirname, '../../spec/src')}/$1/index.ts` }\n```\n\nthe only delimiter reached is the backtick, so the entire template **body** came back as the path. That text has no `src` *segment* in it — `spec/src'` is followed by a quote, not a separator — so `pointsAtSource()` said no, and a config aliasing every namespace correctly read as aliasing nothing.\n\nFail-closed, so never a false green. What it cost: `@objectstack/plugin-audit` and `@objectstack/service-knowledge` sat in the shrink-only registry as still resolving `@objectstack/spec` through `dist/` on the strength of how their replacement was **spelled**, and a dev dispatched to remediate either would have found the alias already correct, the gate still red, and the failure text prescribing the alias they already had.\n\n## The fix\n\n`asPath` now splits a template into its literal chunks and `${…}` holes, resolves each hole by the same last-literal rule, and concatenates — so `$1` survives into `String.replace` and joins the `src` chunk:\n\n```\n`${path.resolve(__dirname, '../x/src')}/$1/index.ts`  ->  ../x/src/$1/index.ts\n```\n\nNeither `vitest.config.ts` is touched. The configs are correct; the reader was what could not see them.\n\n## Registry delta — the complete before/after\n\nMeasured with `--list` on both sides. The blast radius is exactly the two dependencies predicted, with **no package reclassified that nobody suspected**:\n\n| | before | after |\n|---|---|---|\n| `@objectstack/plugin-audit` | `['@objectstack/objectql', '@objectstack/spec']` | `['@objectstack/objectql']` |\n| `@objectstack/service-knowledge` | `['@objectstack/objectql', '@objectstack/spec']` | `['@objectstack/objectql']` |\n| registry entries | 63 | 63 (unchanged — both keep `objectql`) |\n| package-dependency pairs | 312 | 310 |\n\nEvery other line of `--list` output is byte-identical; `diff` reports exactly those two rows.\n\n## The canary, pinned\n\n`plugin-audit` and `service-knowledge` have now defeated **three** readers of vitest aliases, by two different parsing assumptions:\n\n- an `objectstack/core` grep census missed them because the anchored regex form writes the bytes `@objectstack\\/core` — with an **escaped slash**, so the plain specifier never appears in the file;\n- this gate missed them because the subpath alias writes its replacement as a **template literal**.\n\nNeither spelling is exotic and neither is going away — the escaped slash is forced by the regex literal, the template by the capture group. Both are now pinned **together in one self-test fixture** (`packages/canary`), shaped like the real configs, so the fourth reader inherits the two assumptions instead of rediscovering them. Three more fixtures keep the new branch honest rather than permissive: a template landing on `dist/` is still unaliased; a template resolving through a file is still the ENOTDIR trap; a `${…}` hole with no literal in it is **unreadable**, never \"aliases nothing\".\n\n## Why not evaluate the config\n\nMeasured, not assumed. This gate runs dependency-free on a bare checkout in ~3s — there is no `node_modules` in this repo as CI reaches it, and the self-test builds its fixture tree in `tmpdir` with none either — while every real config here opens with `import { defineConfig } from 'vitest/config'`. Evaluation would trade that for a gate that cannot run before `pnpm install`, and would make an alias list the gate merely *reads* today into one it *executes*. Rejected; the reasoning is recorded in the `asPath` header so it is not re-litigated.\n\nThe legal-but-still-unreadable spellings that remain — `+` concatenation, a non-literal path argument, a nested template — are enumerated there too, each noted as fail-closed. The `+` form is the same defect one spelling over and is filed separately rather than fixed here.\n\n## Verification\n\n- `pnpm check:test-source-alias` — self-test OK, gate OK (72 packages scanned, 63 registered).\n- `check:nul-bytes` — OK, 7365 files; plus a direct control-byte scan of the changed file.\n- `scripts/pm/dispatch-gates.mjs` re-derived against the actual changed path: no check family names it; `check:nul-bytes` applies by convention and was run.\n\n**Reverse verification, direction predicted first.** Prediction: remove the reader's new template branch while the registry stays shrunk, and the failure flips to the *added* direction rather than `STALE` — the subpath aliases go invisible again, so `@objectstack/spec` re-enters the measurement while the registry no longer lists it. Observed, matching: two failures, both `NEW unaliased artifact import(s) since this entry was measured: @objectstack/spec`. The self-test went red on exactly the three predicted assertions (canary reported, the unreadable hole not failing as unreadable, the canary's both-directions audit), while the `dist/` and ENOTDIR template fixtures stayed green — those two the old reader happens to answer correctly. Fix restored from the commit; tree clean.\n\n## Scope\n\n- out of scope: #7849 — the tracking anchor for the remaining remediation cards. #7849 remains open.\n- No `packages/**/vitest.config.ts` is modified. No registry entry is added or widened; the change is shrink-only.\n- Tooling-only, releases nothing — `skip-changeset`.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01SJTPcfYPSRJVChXAjNzNQA)_"
+}

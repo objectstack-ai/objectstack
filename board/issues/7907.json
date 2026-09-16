@@ -1,0 +1,35 @@
+{
+  "number": 7907,
+  "kind": "pull_request",
+  "title": "fix(meta): gate `_drafts` outlets as authoring surfaces (ADR-0106 D5(4), #6599)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-12T03:43:34Z",
+  "updated_at": "2026-08-12T04:49:09Z",
+  "closed_at": "2026-08-12T04:49:07Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-08-12T04:49:07Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/7907",
+  "body": "Fixes #6599\n\n## What this closes\n\n`GET /api/v1/meta/_drafts` (`packages/rest/src/rest-server.ts`) and\n`GET /metadata/_drafts` (`packages/runtime/src/domains/meta.ts`) both called\n`protocol.listDrafts()` and returned the result verbatim — the one ADR-0106\nschema-serving outlet the #3682 D5(4) sweep left uncovered. A pending **object**\ndraft carries its full `fields` map, so an authenticated caller with no read\naccess to a field still learned it existed, along with its label, type,\npicklist options, formula and `requiredPermissions` — the exact disclosure\nADR-0106 closes on every other `/meta` exit.\n\n## Route (a), per the #6599 ruling — an authoring gate, not a field projection\n\nBoth faces now gate per caller on the **same D4 exemption predicate the mask\nuses** — `isObjectSchemaMaskExempt` from `@objectstack/metadata-core`\n(`studio.access` / `setup.access` / `manage_metadata`, or `isSystem`) — and\nanswer **403** to everyone else, rather than masking the draft field-by-field.\n\n- The gate runs **before** the protocol is resolved, so the 501-vs-200 answer\n  cannot be used to probe kernel support (the same posture as the neighbouring\n  `_migrate-stored` route).\n- It is **independent of the D8 per-field-mask escape hatch**: opting out of\n  per-field masking is not consent to expose pending drafts to non-authors.\n- Refusal envelopes follow each transport's own precedent: REST answers\n  `FORBIDDEN`; the runtime dispatcher answers `PERMISSION_DENIED` (derived from\n  the 403 status by `standardErrorCodeForHttpStatus`, matching `_migrate-stored`\n  next door).\n\n## Premise verification (the deciding check)\n\nRoute (a) 403s non-authors, which is correct only if no legitimate non-author\ncaller reads these routes. Consumer census of `.listDrafts(` / `_drafts` across\n`objectstack`, `objectui` and `cloud`:\n\n- **objectui console** — HomePage pending-drafts banner, Studio design surfaces,\n  metadata-admin (PackagesPage, inspectors), the preview/publish panels\n  (DraftChangesPanel, DraftPreviewBar, draftStatus): every one is a\n  builder/admin authoring affordance, and each tolerates a 403 gracefully\n  (`.catch(() => [])` / `client.listDrafts?.({})`). The HomePage banner is\n  explicitly the \"publish your AI-drafted metadata\" affordance — for a\n  non-author it degrades to \"not shown\", the correct behaviour.\n- **cloud AI-studio** — `readDraftFirst` uses `ctx.protocol.getMetaItem(...)`\n  server-side; it is **not** an HTTP `_drafts` consumer.\n- **cloud golden-prompts eval** — a dev cookie-jar harness that already checks\n  `res.ok`; not a production non-author.\n- **CLI** — no consumer.\n\nNo legitimate non-author production caller exists; authors' access is unchanged.\nDisclosure confirmed still reproducing on origin/main before the fix (both\noutlets unmasked, no gate).\n\n## Coverage — both faces, one shared case table\n\nBoth outlets are two faces of one contract, so a new describe block in **each**\npackage's shared ADR-0106 case table drives the SAME `OBJECT_SCHEMA_MASK_CASES`\nlist through the drafts face:\n\n- `packages/rest/src/meta-object-fls.test.ts`\n- `packages/runtime/src/domains/meta-object-fls.test.ts`\n\nThe verdict is derived, not hand-tabulated —\n`isObjectSchemaMaskExempt(context)` decides allow-vs-refuse for every case — so\nthe two transports cannot diverge on \"who is an author\" without a red test, and\na new exemption principal added to the shared table flows into the gate\nautomatically. Two consequences are pinned: `unrestricted-caller/byte-identical`\n(readable everywhere, no authoring capability) is a 403 here — the gate is\nstricter than the mask, which is the point of route (a) — and\n`masking-disabled/D8` is still a 403. Refusal cases assert the ADR-0112 envelope\n**code AND status**, and that the sensitive field never appears in the refusal\nbody. Three pre-existing `http-dispatcher.test.ts` drafts plumbing cases were\ngiven an author context (their intent is plumbing, not authz) and a gate-first\n403 case added beside them.\n\n## Verification\n\n- `pnpm --filter @objectstack/rest test` — 92 files, 1489 passed\n- `pnpm --filter @objectstack/runtime test` (FLS + http-dispatcher) — 138 files, 2109 passed\n- `pnpm --filter @objectstack/rest --filter @objectstack/runtime typecheck` — clean\n- Gates: `check:authz-resolver`, `check:meta-type-normalized`, `check:route-envelope`\n  (rest-server stays at the pinned `siblingCode 77` — the new 403 is the conformant\n  nested `error: { code, message }` shape, not the `siblingCode` dialect),\n  `check:nul-bytes` — all green\n- Merged latest `origin/main` (sits on landed #7836; region-disjoint, no conflicts)\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01B3Kurx8qufrDzNjk4rag7V)_"
+}

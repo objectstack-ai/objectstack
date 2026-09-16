@@ -1,0 +1,34 @@
+{
+  "number": 8028,
+  "kind": "pull_request",
+  "title": "skills(pm-dispatch): wave-2 consolidated hardening — Part-of closure, changeset test, gate lists as leads, stale rulings, negation trap, commit-first reverse verification [ADR-class, human merge]",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-12T12:08:52Z",
+  "updated_at": "2026-08-12T14:14:42Z",
+  "closed_at": "2026-08-12T14:14:40Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-12T14:14:40Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/8028",
+  "body": "Fixes #8000\nFixes #7949\nFixes #7863\n\n**ADR-class (skills root + agent definition): draft PR, human review, human merge. No auto-merge, no merge queue.**\n\nWave-2 consolidated skills batch. All deltas applied against the current post-rewrite texts; the cards' pre-rewrite locations were relocated semantically. SKILL.md ratchet: **686 before, 686 after** (headroom 0 preserved) — the 4 added principle lines are funded by 4 content-free rewraps that join an orphan trailing punctuation line into its previous line (复核 x1, 轮次报告 x1, 标签纪律 x1, 平台读数纪律 x1; the last two sit outside the sections this PR touches content-wise, but the joins delete zero content — stated here rather than hidden).\n\n## Per-member checklist\n\n### #8000 — four measured gaps\n\n1. **Part-of label leak** — ADOPTED. Principle line in SKILL.md 复核 PR-形态 bullet (fit the ratchet). Fuller rule near-verbatim from the card in `references/review-checklist.md` (new bullet), MERGED-same-action step in `references/landing-operations.md` section B.\n2. **Changeset `private: false` test** — ADOPTED. Card-specific dispatch clause in `references/dispatch-runbook.md` 条件性标准条款; ACCEPT-checklist bullet in `references/review-checklist.md`.\n3. **PM gate lists are leads** — ADOPTED with one ADAPTATION. Kept 「取数的是 PM 不是 dev」 in SKILL.md and the runbook copy; added the dev-side O(1) re-derive-and-report duty to `.claude/agents/os-dev.md` (Local verification scope, new item ④) with the PM-side pointers updated to match. Adaptation: the card proposed a raw grep over workflow ymls; the landed rule instead re-runs `node scripts/pm/dispatch-gates.mjs` over the dev's actual changed paths — the same mechanized source of truth the PM derives from (checks live in several workflow files beyond the lint one, so the script is the more accurate O(1) probe, and it also catches scope drift between predicted and actual paths).\n4. **Stale-premise check covers rulings** — ADOPTED (compressed). SKILL.md 候选 premise sentence extended: a ruling is a judgment against a repo state; before dispatching a ruling-implementation card, verify on origin/main that the ruled action has not already shipped.\n\nLower-confidence extras — **both included** as one-bullet additions that fit naturally, zero SKILL.md lines: measurement-first cards → `references/dispatch-runbook.md`; positive-control line → `references/review-checklist.md` (appended to the test-evidence bullet).\n\n### #7949 — negated closing keywords\n\n- Fact table (keyword list, negation ignored, body-vs-commit parsed separately, safe phrasings, why no mechanical guard covers it) → `references/platform-readings.md`, new section 闭合关键词解析. ADOPTED, adapted to placeholder numbers per id-lint.\n- Dev-side PR-body writing rule → `.claude/agents/os-dev.md` Definition-of-done draft-PR bullet (where devs write PR bodies).\n- PM-side post-merge `closed_by_pull_requests` sweep → `references/review-checklist.md` bullet + one line in landing-operations B.\n- The optional mechanical gate is **not in scope** — prose rule only, per the card's own restraint and the triage endorsement.\n\n### #7863 — WIP-destroying restore recipe\n\n- SKILL.md copy (old line 2120): **absorbed by the 2026-08-12 principles-only rewrite** — verified zero occurrences of the recipe in the current SKILL.md; no edit.\n- `.claude/agents/os-dev.md` (found at 167-174, was 172 pre-batch): context-verified as the WIP-restore half, replaced. The stash-alternatives list now leads with temp-commit and patch-file; a new clause carries the commit-then-revert rule **copied from this repo's AGENTS.md landed wording** (not re-derived), plus the byte-identity point (matching `--stat` insertion counts are not identity; prove with a saved patch or `git hash-object`) — placed in the agent definition where a recovering agent looks.\n- `.claude/hooks/guard-shared-stash.sh` (header comment + block-message heredoc): \"clean re-read\" alternative replaced with the commit-first form and an explicit uncommitted-edit warning. Heredoc kept free of backtick/command substitution. Self-test re-run: **32 passed, 0 failed** (it asserts verdicts, not comment text).\n- **Repo-wide sweep** (quoted exact string, per the card's instruction that its list is a lower bound): 9 files contain the string. 2 fixed (above); AGENTS.md already carries the correct warning-form usage; `references/landing-operations.md` and `scripts/pm/os-regen-merge.sh` are the fenced-off legitimate merge-state generated-artifacts uses — untouched; 4 test files (rest x1, runtime x2, spec-scripts x1) contain it only inside historical reverse-verification measurement records / trap documentation, not as operating instructions — untouched, out of card scope.\n\n## Verification\n\nAll named gates green locally on the final tree: `check:pm-skill-ratchet` (686/686), `check:pm-skill-id-lint` (9 files clean), `check:skill-frame-sync` (4 copies isomorphic), `check:doc-authoring` (375 files clean), `check:nul-bytes` (7326 files OK), `check:agent-model-declared` (os-dev → opus), `guard-shared-stash.selftest.sh` (32/32). Docs/hook-comment-only change: no changeset, `skip-changeset` label applied.\n\nNote on this very body: card numbers other than the three closing lines above are written without closing keywords — the trap this PR documents applies to its own PR body.\n\n_Generated by [Claude Code](https://claude.ai/code/session_012Gg6rMAti8ZaueWb6BRsDn)_\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_012Gg6rMAti8ZaueWb6BRsDn)_"
+}

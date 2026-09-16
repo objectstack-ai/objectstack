@@ -1,0 +1,35 @@
+{
+  "number": 7685,
+  "kind": "issue",
+  "title": "Cross-cutting (verify/qa coverage): verify --rls cannot reach by-id-write, authz-conformance overclaims 'enforced', and the console permission-matrix editor is read-only by default",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T10:14:32Z",
+  "updated_at": "2026-08-12T10:23:11Z",
+  "closed_at": "2026-08-12T10:23:11Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7685",
+  "body": "## Symptom\nThree coverage/tooling findings from the run, consolidated per the maintainer instruction. Itemised:\n\n**(i) `verify --rls` reports 0 HOLES but structurally cannot reach the by-id-write class.** Its member probe holds **no object grants**, so every such probe is masked by the object-level gate (403) before record scope is ever tested. A second probe persona holding object read+edit but **outside** the record scope would catch it. Compounding this, a `showcase_account` auto-record 400 cascades into 5 downstream skips, so **8 of 23 objects are skipped on a stock run** — and a skip is exactly where the privately-reported D11 defect hid. The run calls this the single highest-value fix: the tool's green is currently not evidence. (Tool: `packages/verify/src/rls.ts`.)\n\n**(ii) `authz-conformance.matrix.ts` overclaims.** It marks both `rls-by-id-write` (#1994) and `controlled-by-parent` as `state:'enforced'`, while neither holds as shipped. The showcase's own `permission-sets.ts` comment repeats the same false claim. (File: `packages/qa/dogfood/test/authz-conformance.matrix.ts` — both entries carry `state: 'enforced'` on `origin/main`.)\n\n**(iii) The console permission-matrix editor is read-only by default even for a writable package.** On a stock boot it renders \"Read-only (OS_METADATA_WRITABLE not enabled)\" with every checkbox disabled, at both the metadata-admin route **and** inside Studio's Access pillar for a **writable** package — because the editor computes `writable = !!resolved.allowOrgOverride && !readOnly` and the server returns `allowOrgOverride:false` for type `permission`. Yet the server **accepts** the package-door write in that same default env (`PUT …?package=&lt;writable pkg&gt;` → 200 via `allowRuntimeCreate`). The type gate locks a surface the server would allow.\n\n## Root cause\nAs located, per item above: (i) the probe persona holds no object grants + an auto-record 400 skip cascade in `packages/verify/src/rls.ts`; (ii) hard-coded `state:'enforced'` rows in `authz-conformance.matrix.ts` (and the mirroring `permission-sets.ts` comment); (iii) the objectui editor's `writable = !!resolved.allowOrgOverride && !readOnly` computation against a server that returns `allowOrgOverride:false` for type `permission`.\n\n## Reproduction\n- (i) Run `verify --rls` on a stock showcase → 0 HOLES; note 8/23 objects skipped and that the member probe holds no object grants.\n- (ii) Read `authz-conformance.matrix.ts` → `rls-by-id-write` and `controlled-by-parent` are `state:'enforced'`, contradicting the shipped behaviour proven elsewhere in this run.\n- (iii) Stock boot; open the permission-matrix editor at the metadata-admin route and inside Studio for a writable package → all checkboxes disabled, \"Read-only\" banner; yet `PUT /api/v1/meta/permission/&lt;set&gt;?package=&lt;writable pkg&gt;` → 200.\n\n## Routing note\nFiled as one `finding` in objectstack-ai/objectstack with `domain:cli`, because the dominant fix site is the verify/qa tooling (items i–ii). Item (iii)'s fix is **objectui** (the `writable` computation in the console permission-matrix editor); it is kept here as one consolidated finding per the maintainer instruction rather than split, but whoever picks it up should route (iii) to objectui.\n\n## Suggested fix\n(i) Add a probe persona with object read+edit but outside the record scope so the by-id-write class is reachable, and stop the auto-record 400 from cascading into skips (a skip must not read as a pass). (ii) Downgrade the two `state:'enforced'` claims to match shipped behaviour and correct the `permission-sets.ts` comment. (iii) In the objectui editor, allow editing when the server would accept the package-door write (`allowRuntimeCreate`) rather than gating solely on `allowOrgOverride`.\n\n## Source\nExtracted from the QA run objectstack-ai/objectstack#7637 (framework 92f26f75, console 09987b680)."
+}

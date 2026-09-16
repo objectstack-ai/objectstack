@@ -1,0 +1,34 @@
+{
+  "number": 7335,
+  "kind": "issue",
+  "title": "metadata-fs: `selfWrites` suppression is time-keyed, so a poll tick landing inside the 200 ms window can swallow an external edit",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "huangyiirene"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-10T07:22:33Z",
+  "updated_at": "2026-08-11T21:12:12Z",
+  "closed_at": "2026-08-11T21:12:12Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 9,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7335",
+  "body": "Found while working #7282. **Unassigned — recording, not claiming.** This is a\n*different* mechanism from #7282 and was deliberately not folded into PR for\n#7282, so that PR's reverse verification stays attributable to one change.\n\n## What it is\n\n`FileSystemRepository.put()` / `.delete()` suppress the chokidar event for a\npath they just wrote by adding the path to a `Set` and clearing it on a fixed\nwall-clock timer (`packages/metadata-fs/src/repository.ts`, `selfWrites` and the\ntwo `setTimeout(..., 200)` calls). `handleFsChange` then drops **any** event for\na path in that set, without looking at what the watcher actually observed.\n\nWith `usePolling: true, interval: 1000`, chokidar compares state once per tick,\nso a `put()` and an external edit that both land between two ticks are visible\nas **one** change carrying the *external* content. If that single event is\ndelivered while the path is still in `selfWrites`, it is discarded as our own\nwrite — and because it was the only event the external edit would ever produce,\nnothing later recovers it.\n\nThe window is roughly: an external edit landing within ~60 ms of a `put()`\n(50 ms `awaitWriteFinish.stabilityThreshold` plus the poll callback hop), with a\npoll tick falling between the two writes. Realistic trigger: a `git checkout` or\nan editor save arriving while the process is writing the same item.\n\n## Status of the evidence — please grade accordingly\n\nHonest about what is and is not measured:\n\n- **Derived, not observed.** In 360+ instrumented iterations under deliberate\n  event-loop starvation the suppression fired **zero** times\n  (`handleFsChange entries hitting the selfWrites suppression: 0`), and the\n  path was never in `selfWrites` at external-edit time (0/360). Those runs used\n  a 300–400 ms pre-edit sleep, which cannot reach this window.\n- The reason it is unreachable in the current tests is structural, not luck:\n  the suppression timer is scheduled before the tests' own pre-edit `sleep()`\n  and with a shorter delay, and Node runs expired timers in due-time order in a\n  single timers-phase pass — so by the time the sleep resolves, the entry is\n  provably gone. A sub-60 ms external edit is what escapes that argument, and\n  nothing exercises one today.\n- So this may well be observation-class rather than a live defect. I am filing\n  it plainly rather than sitting on it; the severity call is the triage seat's.\n\n## Note on the obvious fix\n\nMaking the suppression content-keyed (record the hash of what we wrote, clear\nthe entry when the content the watcher observes matches) removes the race\noutright. Worth knowing before anyone implements it: `handleFsChange` **already**\nhas a content-keyed suppression one step further down —\n`if (currentHead === hash) return;` compares the content the watcher actually\nread against the head index, which `put()` updates in the same microtask\ncontinuation as the write. That downstream check is what suppresses self-writes\nin practice today. So the change may be closer to \"delete the time-keyed\npre-check\" than to \"add a hash to it\" — but that needs measuring, particularly\nfor the `unlink` path and for specs whose in-memory form does not round-trip\nthrough JSON identically.\n\n## Not related to\n\n- **#7282** — that one is a chokidar registration race (the watcher never\n  emits at all); fixed by registering written paths explicitly. The suppression\n  is not involved in it, which is exactly what the 0/360 measurement above\n  established.\n- **#7150** — the chokidar `ignored` matcher, a third distinct mechanism in the\n  same file."
+}

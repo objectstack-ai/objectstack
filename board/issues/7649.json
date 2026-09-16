@@ -1,0 +1,36 @@
+{
+  "number": 7649,
+  "kind": "issue",
+  "title": "mcp-http-surface (a): POST /api/v1/mcp/skill returns a hand-rolled 405 envelope, not the standard API error shape",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "pm:queue"
+  ],
+  "assignees": [
+    "huangyiirene"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T09:50:31Z",
+  "updated_at": "2026-08-11T18:34:24Z",
+  "closed_at": "2026-08-11T18:34:24Z",
+  "closed_by": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7649",
+  "body": "## Symptom\n\n`POST /api/v1/mcp/skill` (a method mismatch — the route is GET-only) answers 405 with the **wrong envelope**.\n\n- **Observed:** a hand-rolled body `{error, code, message, method, path, allowed}`.\n- **Expected:** the standard `{success:false, error:{code, message, httpStatus}}` shape with the documented message *\"Method not allowed — use GET\"* (the 405 branch routed through `buildApiError` by #3842).\n\n## Root cause\n\n`dispatcher-plugin.ts` (`packages/runtime/src/dispatcher-plugin.ts:919`) registers the skill route with `server.get(`${prefix}/mcp/skill`, …)` **only** — unlike `/mcp`, which is mounted for POST+GET+DELETE (the method-keyed `register` at line ~902). Because no POST handler is registered for `/mcp/skill`, a method mismatch never reaches the dispatcher: Hono routes it to `notFound` and the hono adapter's `unmatchedResponse()` answers with its own envelope. The domain's 405 branch (via `buildApiError`, #3842) is **dead code** on this adapter.\n\nStill present on `origin/main` (`dispatcher-plugin.ts:919` is `server.get(...)` only).\n\n## Reproduction\n\nBoot a showcase with the MCP server available, then:\n\n```\ncurl -X POST http://&lt;host&gt;/api/v1/mcp/skill\n```\n\n**Expected** `{success:false, error:{code, message, httpStatus:405}}` / *\"Method not allowed — use GET\"*. **Actual** `{error, code, message, method, path, allowed}` from `unmatchedResponse()`.\n\n## Source\n\nExtracted from the QA run objectstack-ai/objectstack#7627 (framework 92f26f75, console 6314e87f)."
+}

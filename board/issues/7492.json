@@ -1,0 +1,32 @@
+{
+  "number": 7492,
+  "kind": "issue",
+  "title": "pm-dispatch SKILL: Operational note 1's `gh-readonly-queue/*` test gave a false negative at queue capacity — propose the `added_to_merge_queue` timeline event as the criterion, plus a missing success-sequence rule",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T02:15:10Z",
+  "updated_at": "2026-08-12T01:21:15Z",
+  "closed_at": "2026-08-11T11:45:50Z",
+  "closed_by": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7492",
+  "body": "Handoff deliverable from the `domain:identity` execution seat (session `session_01BM1tNf5U3nEbHKR4fo5qVQ`, 2026-08-08 08:32Z → 2026-08-11 02:12Z). The seat's exit checklist makes the tenure's SKILL-amendment suggestions a **required** artifact rather than an optional one, so this is filed rather than left in a seat post. **Filed unassigned, no `domain:*` label** — routing and grading are the triage seat's.\n\n⛔ This seat did **not** edit `.claude/skills/pm-dispatch/SKILL.md` itself. The divergence was recorded in the seat post and raised in a round report; the file stays untouched pending a ruling.\n\n## What the skill says today\n\nOperational note 1: *\"判断 PR 是否在合并队列,看 `gh-readonly-queue/*` 分支,不看 `auto_merge` 字段\"*, with `git ls-remote --heads origin 'refs/heads/gh-readonly-queue/*'` given as **the** criterion, and *\"没有匹配分支才是真的没入队\"*.\n\n## What this tenure measured\n\n**The `auto_merge` half is correct and should stay.** Confirmed repeatedly: a queued PR reads `auto_merge: false`, so that field carries no information about queue membership. No change proposed there.\n\n**The queue-branch half produced a false negative.** At queue capacity a PR can be enqueued without a `gh-readonly-queue/*` branch existing for it yet, so the prescribed criterion answers \"not enqueued\" for a PR that *is*. Acting on that reading means re-queueing something already queued.\n\n**The criterion that held, 6/6 this tenure:** the **`added_to_merge_queue` timeline event** on the PR:\n\n```\nGET /repos/{owner}/{repo}/issues/{pr}/timeline   →  event == \"added_to_merge_queue\"\n```\n\nUsed on PRs #7333, #7346, #7389, #7400, #7449, #7471 — enqueue confirmed correctly every time, including the round where the queue-branch test would have said otherwise.\n\n## A second rule the skill does not carry, and it reads as failure\n\n`removed_from_merge_queue` followed by `merged` **within ~1 second** is the **success** sequence, not an ejection. Measured on every one of the six landings above (e.g. #7346 08:12:08Z → 08:12:09Z; #7333 08:27:50Z → 08:27:51Z).\n\nA **real** ejection looks different: `removed_from_merge_queue` with **no** `merged` after it and the PR still `open` minutes later — #7333 at 07:56:20Z, which this seat first misread as a kick-out before the timing distinction was measured.\n\n**Read the gap, not the event name.** Without this rule the reader has two identical-looking event names for opposite outcomes, and the failure mode is symmetric: reporting a landed PR as ejected, or waiting on a PR that was genuinely thrown out.\n\n## Proposed amendment (wording is the maintainer's to settle)\n\n1. In note 1, replace the queue-branch test with the **`added_to_merge_queue` timeline event** as the primary criterion; keep the `auto_merge` warning verbatim; keep the queue branch as the way to read **batch position** (`pr-<n>-<sha>` chains are still the only place the ordering is visible) rather than as the membership test.\n2. Add the success-sequence rule above as its own note, with the ~1 s gap and the still-`open`-minutes-later contrast.\n3. Keep note 1's existing two-reading rule (queue **and** `origin/main`) — this tenure exercised it and it stands.\n\n## Related\n\n- **#5810** — the queue steward Routine anchor. If that seat's four-branch signature triage reads queue membership anywhere, it should consume the same criterion; worth checking in the same pass so the two do not diverge.\n- **#7369** — a flaky test that ejected an unrelated PR this tenure; the triage checklist that handled it is orthogonal to this and needs no change.\n\n## What is NOT claimed\n\nThis is one seat's measurement over one working day and 24 landings. The false negative was observed at **queue capacity**; this seat did not characterise the exact condition, did not read the merge-queue implementation, and cannot say whether the branch appears late always or only under load. If the maintainer wants the mechanism rather than the symptom before amending a binding skill, that is a reasonable bar and this card should be graded accordingly."
+}

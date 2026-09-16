@@ -1,0 +1,35 @@
+{
+  "number": 7953,
+  "kind": "pull_request",
+  "title": "docs(spec): sync i18n-label-resolver's pickLocalized reference to objectui#3907",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-12T08:46:36Z",
+  "updated_at": "2026-08-12T09:51:37Z",
+  "closed_at": "2026-08-12T09:51:36Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-12T09:51:36Z",
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/7953",
+  "body": "Fixes #7864\n\n## What was wrong\n\nobjectui PR #4359 (objectui#3907) hardened `pickLocalized` to own-property\nreads plus a `typeof === 'string'` filter on every limb, collapsing to zero\nthe two RULE departures `resolveI18nLabel`\n(`packages/spec/src/ui/i18n-label-resolver.ts`, from #6765) documented as\ndeliberate narrowings of its reference. `i18n-label-resolver.test.ts` embeds a\n**verbatim copy** of the old `pickLocalized` as its reference fixture, pinned\nto objectui `origin/main 50fa3766` / blob `9e5d92a`. Because the copy is local\nrather than imported, that suite stayed **green while silently stale**.\n\n## What changed\n\n- **Refreshed the verbatim reference copy** to objectui `origin/main\n  d8d0d665dceba53dada4994f1eeef9f83bf1cf91` / blob\n  `30fcb0a86343b9b937432a1b2ea89e0a78321f46` (last touched by objectui PR\n  #4359 / objectui#3907), and updated the pin comment.\n- **Flipped the two stale assertions**: the prototype-chain case now expects\n  `pickLocalizedReference({ en: 'Owner' }, 'constructor')` to be `'Owner'`\n  (was `.toContain('function Object')`), and the off-spec-value case now\n  expects `pickLocalizedReference(offSpec, 'zh-CN')` to be `'Owner'` (was\n  `.toBe('[object Object]')`) — per objectui PR #4359's own miss-vs-abort\n  correction: *\"A guard makes its limb miss; it does not abort the\n  resolution... `pickLocalized({ en: 'Pricing' }, 'constructor')` is\n  `'Pricing'`, not `''`.\"*\n- **Mirrored the 18-vector `CONVERGED` table** from objectui's\n  `plugin-list/src/__tests__/i18nLabel-resolver-parity.test.ts` into\n  `PARITY_VECTORS` as the sync's acceptance fixture — every row is now\n  asserted against the refreshed reference AND against `resolveI18nLabel`,\n  plus the single-pass \"every vector agrees\" check.\n  (Note: the issue and its triage comment describe this as a \"19-vector\"\n  table; measured count on objectui `origin/main` is **18** — noted for the\n  record, not blocking.)\n- **Reworded** the `describe('...the two deliberate departures...')` title and\n  body to `'the rule departures converged with objectui#3907; one departure\n  survives'`, and the resolver's module doc `## Two deliberate departures`\n  section to `## Rule departures — converged as of objectui#3907, zero\n  remain` + a new `## What still differs` section.\n\n## What did NOT change (guard honored)\n\nThe top-level scalar pass-through departure (`pickLocalized(42, 'en')` ⇒\n`'42'` vs `resolveI18nLabel(42, 'en')` ⇒ `undefined`, pinned in `'refuses an\noff-contract scalar rather than stringifying it'`) **survives untouched** —\nit concerns the value parameter, not a limb, and objectui#3907 did not touch\nit. Zero runtime-code lines changed in `i18n-label-resolver.ts`; only the\nmodule-doc prose moved.\n\n## Changeset measurement\n\nThe reworded module-doc prose is a non-`.zod.ts` file, so no reference-page\nregeneration is expected. Measured directly: after `pnpm --filter\n@objectstack/spec build`, the rewritten `## Rule departures` /\n`## What still differs` sections appear verbatim in\n`packages/spec/dist/ui/index.d.ts:713-767`, immediately preceding the\nexported `resolveI18nLabel` declaration. Since it reaches `dist/**/*.d.ts`, a\n**patch changeset** was added\n(`.changeset/i18n-label-resolver-parity-doc-sync.md`) rather than\n`skip-changeset`.\n\n## Verification\n\n- `pnpm --filter @objectstack/spec build` — green (dist regenerated, doc\n  reaches `.d.ts` as noted above).\n- `pnpm --filter @objectstack/spec test` (full package suite, flock-serialized,\n  `--max-old-space-size=4096`): **381 test files / 10067 tests passed**.\n- Targeted `vitest run src/ui/i18n-label-resolver.test.ts`: **1 file / 99\n  tests passed** (up from the pre-change file's assertion count — the 18\n  mirrored CONVERGED vectors plus the flipped/reworded departure tests).\n- `pnpm --filter @objectstack/spec typecheck` (`tsc --noEmit` +\n  scripts-typecheck + test-typecheck): green, 0 new errors; the `@ts-expect-error`\n  directives on the scalar-refusal test still hold (test-typecheck debt count\n  unchanged at 57 files / 265 errors, per the shrink-only ledger #5286).\n- `node scripts/check-nul-bytes.mjs`: OK.\n- `pnpm check:adr-anchors`: OK (self-test + full audit green).\n- `npx changeset status`: the new patch changeset parses and propagates\n  correctly.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_016YBUGvukaeVu9DjKdsHJa9)_"
+}

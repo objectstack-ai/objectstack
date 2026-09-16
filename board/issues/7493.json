@@ -1,0 +1,32 @@
+{
+  "number": 7493,
+  "kind": "issue",
+  "title": "pm-dispatch SKILL: the file-at-destination ruling (#7165) puts `target:v17` cards into cloud, which the 发版板 section says can never happen — a live v17 card was invisible to both prescribed queries for ~10h",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T02:16:04Z",
+  "updated_at": "2026-08-12T01:21:14Z",
+  "closed_at": "2026-08-11T11:45:50Z",
+  "closed_by": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7493",
+  "body": "Filed by the `repo:cloud` seat (objectstack#6026) at shift handoff, from a measured miss during the v17 chain. No labels applied — routing is the triage seat's single-producer territory.\n\n## The contradiction, both halves quoted\n\nThe 发版板 section says cloud is structurally off the board, and makes a hit there a **mislabel signal**:\n\n> 姊妹仓同标签:objectui **在自己仓里上板** … **cloud 独立部署不入板,advisory 单列**\n\n> org 级还会顺带扫到 cloud,而 cloud **按本节规则永不带这个标签**,所以那里出现命中本身就是误标信号,不是多出来的板上项\n\nMulti-repo **rule 1** (file-at-destination, maintainer 2026-08-10, #7165) says an execution card lives in the repo whose code the fix changes, and its Exception A prescribes **transferring** — or, when the credential cannot transfer, **recreating** — the card at the destination:\n\n> When transfer is unavailable to the session's credential (fine-grained / app tokens cannot call it — #7167 实测 404), recreate at the destination with a provenance header …\n\nRecreation copies the labels. So a v17-blocking card whose fix lands in cloud **necessarily arrives in cloud carrying `target:v17`** — the exact state the 发版板 section declares impossible and instructs the reader to treat as a mislabel.\n\n## The measured consequence (this is not hypothetical)\n\n- **objectstack#5852** (`target:v17`, the ADR-0057 DEPTH cross-organization escalation) was migrated to **cloud#1222** at 2026-08-10 02:12Z under #7167, closed at the source as `not_planned` with a \"moved, not rejected\" note. cloud#1222 was created carrying `pm:queue` + **`target:v17`**.\n- For the next ~10 hours that card was invisible to **both** prescribed readings of the board: the objectstack query no longer returned it (source closed), the objectui query never covered it, and the cloud reading does not exist by rule — the section says a hit there is a mislabel.\n- I found it only by chance at a standby tick, by following the migration note on the closed source thread. Had I read the board the way the skill prescribes, the answer would have been \"v17 clear\" while a v17 blocker sat open.\n- **The failure mode is silent and it points the wrong way.** A reader who *does* look at cloud is told by the skill that what they are seeing is a labelling error — so the documented reaction to finding the card is to remove its label, which destroys the only remaining evidence that it was a blocker.\n\n## Why this is new, and not covered by the existing cards\n\n- **#6903** (closed) gave the *objectui* backlog its own `target:v17` producer.\n- **#6906** (closed) updated the board consumers to the *two-query* form (objectstack + objectui).\n\nBoth predate #7165 (2026-08-10) and both reason about objectui. Neither considers migrated cards arriving in **cloud**, which is the repo the section singles out as never board-listed. The two-query prescription and Exception A were correct in isolation and became inconsistent when the second landed.\n\n## Options\n\n**A. Make it three queries — cloud goes on the board.** Add `repo:objectstack-ai/cloud label:target:<major> is:open` to the 消费者三处 list and to step 9's metric sum; give the cloud whole-repo seat the same single-producer duty objectui got in #6903. *Cost:* it contradicts the standing rationale that cloud is independently deployed, so a cloud card would gate a release it cannot actually block. Needs the maintainer to say whether a cloud v17 card is release-blocking or advisory.\n\n**B. Migration strips the board label and re-anchors it.** Exception A gains a step: when a card carrying `target:<major>` is recreated in a repo that is not board-listed, the label is dropped at the destination and the obligation stays visible some other way (a `Blocked-by:`-style pointer from a board-listed card, or the advisory list the section already mentions). *Cost:* the destination card loses the marker that says \"this one is release-critical\", exactly where the work now lives.\n\n**C. Keep cloud off the board but make the absence loud.** Leave the two queries; add to the 鲜度 pass a check that no closed board card was closed as `not_planned` with a migration note pointing at a still-open card elsewhere. *Cost:* narrowest fix, but it only catches this one shape (migration), not any other route by which a v17 obligation lands in cloud.\n\n**Recommendation: A**, with the maintainer deciding the blocking question — because the underlying fact that produced this miss is that the fix **did** live in cloud, and a board that structurally cannot name where the work is will keep generating this class of miss. B preserves the current model at the cost of deleting information at the moment it becomes most load-bearing; C is a good backstop under either A or B and is cheap enough to do regardless.\n\n## Also worth fixing while someone is in there\n\nThe section's line *\"那里出现命中本身就是误标信号\"* should not survive in its current absolute form under any option — as written it instructs a reader to treat a correctly-labelled migrated card as an error to be cleaned up.\n\nDedup: searched `pm-dispatch skill release board target label producer cloud advisory contradiction` and `release board target:v17 label migrated to cloud repo invisible file-at-destination` across this repo before filing — nine skill cards returned, none covering this (#6903 and #6906 are the near neighbours and are analysed above).\n\nRefs: #7165, #7167, #6903, #6906, objectstack-ai/cloud#1222, objectstack-ai/cloud#1219."
+}

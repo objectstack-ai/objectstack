@@ -1,0 +1,32 @@
+{
+  "number": 7557,
+  "kind": "issue",
+  "title": "Package disable and uninstall never reach the metadata/data layer: a disabled package's objects still serve rows, and uninstall leaves 7 orphaned `sys_metadata` rows",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "bug"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T05:25:15Z",
+  "updated_at": "2026-08-12T08:00:00Z",
+  "closed_at": "2026-08-12T08:00:00Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7557",
+  "body": "Blocked-by: #7705\n\n&gt; **Status 2026-08-11 (engine-core seat):** half (A) and the envelope part of half (B) LANDED via PR #7700 (`8f1851ea7`). What remains open on this card is the **persistence half of (B)** only, transferred to the metadata lane as **#7705**. This card closes when #7705 lands. See the ACCEPT comment below for the full verification record.\n\nTwo halves of one gap: a package lifecycle operation moves the registry/UI surfaces but never propagates to the metadata store or the data plane. Filed as one card because both are the same missing propagation, on the two operations that need it.\n\n## Symptom\n\n**(A) Disable is not an enforcement for objects.** ✅ **FIXED by PR #7700.** With the owning package at `status:'disabled'`:\n\n- `GET /api/v1/data/&lt;object&gt;` still answers **200 with all rows**. → now `404 OBJECT_PACKAGE_DISABLED`\n- `/meta/objects` still lists the object. → now dropped from the listing\n- Nav and views **are** correctly dropped — so disable is honoured on some surfaces and not others.\n- The console renders the live list too, so this is not an API-only artefact.\n\nReproduced over **two** disable/enable cycles.\n\nExpected: a disabled package's objects are dropped from the metadata registry and refuse on the data plane, consistently with the nav/view surfaces that already honour the status.\n\n**(B) Uninstall leaves orphaned metadata.** ⚠️ **HALF fixed.** `DELETE /packages/:id` answers **200**, with:\n\n```\npersisted: { success: false, deletedCount: 0 }\n```\n\nThe package disappears from `/packages`, but **7 `sys_metadata` rows survive** and `/meta/*` keeps serving them. Reproduced with a second, single-view package.\n\nExpected: either the persisted delete succeeds and the metadata rows go with the package, or the failed persistence is reported as a failure instead of being wrapped in a 200.\n\n- ✅ **The dishonest envelope is fixed** (PR #7700): the producer was the *dispatcher* twin `packages/runtime/src/domains/packages.ts`, not `packages/rest/src/package-routes.ts` as this card guessed — that REST door was already correct. The dispatcher now answers `400 PACKAGE_DELETE_PARTIAL` on per-item failures, matching the other door including its zero-rows carve-out.\n- ⛔ **The rows still orphan** — `protocol.deletePackage` finds 0 rows the data plane finds 3 of. Located with evidence, transferred to `domain:metadata` as **#7705**, deliberately not patched from the consumer side. Note this half is invisible to the envelope fix by construction (`failedCount: 0`).\n\n**Honest negative, recorded so nobody re-derives it:** disable destroys **no data** — 3 rows before, during and after the disabled window. Now pinned by `packages/objectql/src/package-disable-enforcement.test.ts`.\n\n## Root cause\n\nNot located by the report beyond the symptoms above. Two facts it does pin down:\n\n- The `persisted:{success:false,deletedCount:0}` envelope means the delete's own persistence step reported failure and the route answered 200 anyway — the status code and the payload disagree.\n- Disable is enforced at the nav/view layer but not at the registry or data layer, so the status is consulted in some readers and not others rather than being missing entirely.\n\nFiled `domain:engine-core` because the surviving surfaces are registry-backed reads; re-route if the fix lands in the `/packages` route layer (`packages/rest`) or in the metadata repository instead.\n\n&gt; Measured answer to that last sentence: the disable asymmetry was `listItems`' early return for `object`/`objects` (`registry.ts`) plus the same exemption in `getMetaItems` (`protocol.ts`) — engine-core, as filed. The envelope was `packages/runtime` (cli lane, declared on #6024). The persistence is `packages/metadata-protocol` (#7705).\n\n## Related\n\n- objectstack-ai/objectstack#7221 (open): `MetadataFacade.unregisterPackage` removes only object contributors — every non-object item the package shipped stays registered. Same family as (B) at the in-memory registry layer; (B) here is the persisted layer (`sys_metadata` rows surviving a 200 delete). PR #7700's measured fix path did **not** run through it, so it stays untouched and distinct.\n- objectstack-ai/objectstack#6808 (closed): a deleted runtime object still served by `SchemaRegistry.getObject` — the registry heal reached the `metadata` map but never `objectContributors`. Closed before this build was cut, and the symptom here arrives through a package status rather than a delete, so this is a distinct path rather than a regression of it — worth reading for the shape of the heal. (Its lesson was applied in #7700: the new gate resolves names through the same `resolveObjectKey` the read path uses, so gate and read cannot disagree.)\n\n## Reproduction\n\n**(A)**\n1. Install a package that ships an object with rows.\n2. `PATCH` the package to `status:'disabled'`.\n3. `GET /api/v1/data/&lt;object&gt;` → 200, all rows. `GET /meta/objects` → object still listed. Nav and views → correctly gone.\n4. Re-enable and repeat — reproduced over two cycles. Row count is 3 before, during and after.\n\n**(B)**\n1. Install a package (repeated with a second, single-view package).\n2. `DELETE /packages/:id` → 200 with `persisted:{success:false,deletedCount:0}`.\n3. `GET /packages` → gone. Query `sys_metadata` → 7 rows survive. `GET /meta/*` → still serving them.\n\n## Source\n\nExtracted from the QA run objectstack-ai/objectstack#7514 (framework a86db175, console 09987b68)."
+}

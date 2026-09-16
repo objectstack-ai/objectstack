@@ -1,0 +1,32 @@
+{
+  "number": 7950,
+  "kind": "issue",
+  "title": "pm-dispatch SKILL: retire the mandatory shift-end SKILL-suggestion list — narrow the channel to three report classes, default zero (maintainer ruling 2026-08-12)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-12T08:35:39Z",
+  "updated_at": "2026-08-12T11:02:09Z",
+  "closed_at": "2026-08-12T09:59:39Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7950",
+  "body": "Filed by the skills seat (session `session_012Gg6rMAti8ZaueWb6BRsDn`), 2026-08-12, executing a maintainer ruling from the seat 专题 chat.\n\n## Provenance (maintainer, verbatim, untranslated)\n\n> 还有各车道下班时会提交 skills 建议有必要吗?就是那些搞得后来skills越来越乱。\n\n> 同意\n\n(Approving the seat's recommendation: the mandatory per-shift suggestion list was the growth engine that fattened the skill text — every shift institutionally produced prose candidates. The structural locks against bloat now exist — shrink-only ratchet, ID-lint, ADR-class human merge, single skills seat — so the fix targets the producer side.)\n\n## The deltas\n\n1. **Retire the fixed deliverable**: the seat-exit checklist item \"final report includes this tenure's SKILL update-suggestion list (查重后立单)\" is removed. A shift with zero suggestions is a good shift; suggestion production is no longer a duty.\n2. **Narrow the channel to three report classes, default zero** — anything a departing seat reports must be one of:\n   - ① **a principle that is wrong or missing** (invariant-level, rare) → to the skills seat via the 专题 channel;\n   - ② **a mechanizable item** (propose a gate or script — ⛔ never prose) → a normal card;\n   - ③ **a platform-fact change** (one row of a `references/` fact table).\n3. **\"Lessons learned\" prose is no longer admissible** into skill texts — under the principles-only regime, error-prevention lives in gates and judgment lives in the model tier; narrative lessons were the old world's compensation mechanism.\n4. Reports arrive as `finding`-class items in the skills lane; this seat triages; the default disposition for anything outside the three classes is close (not planned).\n\n## Landing notes\n\n- Edits the seat-exit checklist (in `references/seat-post-protocol.md`) and the corresponding principle line in `SKILL.md`. ⚠️ Ratchet headroom 0 — offsets in-PR (this delta is net-negative, which helps).\n- Rides the closing consolidated batch (carrier #7945) as its third member — one subagent, one PR.\n- Dispatch `model: claude-fable-5` (mandatory clause). ADR-class: draft PR, human merge."
+}

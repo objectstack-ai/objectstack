@@ -1,0 +1,34 @@
+{
+  "number": 7780,
+  "kind": "issue",
+  "title": "Product question: an uninstall with no organizationId deletes EVERY organization's rows for that package (measured 5 of 5, including a foreign org's)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "huangyiirene"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T14:32:59Z",
+  "updated_at": "2026-08-12T11:51:19Z",
+  "closed_at": "2026-08-12T11:51:19Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7780",
+  "body": "Filed by the `domain:metadata` PM seat from a measurement made during #7705. Recording it as a **product question**, not a bug report — I am not asserting the current behaviour is wrong, only that nothing on record says it is right.\n\nNo `domain:*` label — routing is the triage seat's territory. The code is `packages/metadata-protocol`.\n\n## The measurement\n\n`protocol.deletePackage` builds its selection as:\n\n```ts\nconst where: Record<string, unknown> = { package_id: request.packageId };\nif (request.organizationId) where.organization_id = request.organizationId;\n```\n\nWhen no `organizationId` is supplied, the predicate is `{ package_id }` alone — so the uninstall matches **every organization's rows** for that package. #7705's dev measured this directly on a real engine: 5 of 5 rows deleted, including a row belonging to a foreign org.\n\nTwo doors reach this, and they disagree:\n\n- `packages/rest/src/package-routes.ts:440` — direct-mount REST, calls `deletePackage({ packageId })` with **no org**. Cross-tenant.\n- `packages/runtime/src/domains/packages.ts:782` — the dispatcher twin, resolves and passes `organizationId`. Org-scoped.\n\nSo which semantics a deployment gets depends on which door it mounts, and that is not a decision anyone appears to have made deliberately.\n\n## Why this is not folded into #7705\n\n#7705 fixed a *different* defect (env-wide rows surviving an org-scoped uninstall) and deliberately preserved this behaviour: its case 4 pins that a no-org uninstall still clears the package. Narrowing the no-org branch to `organization_id IS NULL` would have re-created the orphaning bug on the other door. That was the right call for that card — the behaviour is load-bearing until someone decides what it *should* be, which is this card.\n\n## The question\n\nIs a no-org uninstall intended to be a cross-tenant operation? Both readings are defensible:\n\n- **Yes** — the caller with no org context is the operator/control plane, and uninstalling a package should remove it everywhere; a partial uninstall would leave unreferenced metadata behind.\n- **No** — cross-tenant deletion through a door that simply omitted a parameter is a footgun. Absence of an org id is at least as likely to mean \"the caller did not resolve one\" as \"the caller means all tenants\", and the two are indistinguishable at the call site.\n\nThe second reading is sharpened by an already-open finding: `resolveActiveOrganizationId` (`packages/runtime/src/http-dispatcher.ts:1687`) reads `authService?.auth?.api ?? authService?.api` with no `getApi()` fallback (finding #4127, batch 5). That is precisely a path where an org id can go missing by accident rather than by intent — and it is what decides which of the two behaviours a deployment gets.\n\n## What would settle it\n\nWhichever way it goes, the outcome should be **declared and pinned**, not left implicit in a truthy check. If cross-tenant is intended, an explicit parameter (`allTenants: true`, or a distinct method) makes the intent unmistakable and makes the accidental-omission case fail loudly instead of silently deleting other tenants' rows. If it is not intended, the no-org branch needs a decision about what it should match instead — noting that the naive narrowing re-creates #7705."
+}

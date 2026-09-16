@@ -1,0 +1,35 @@
+{
+  "number": 7680,
+  "kind": "issue",
+  "title": "capability-declaration-lifecycle: no shipped resource enforces a package capability server-side (no REST action-invoke route on this build)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T10:14:04Z",
+  "updated_at": "2026-08-12T04:39:05Z",
+  "closed_at": "2026-08-12T04:39:05Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7680",
+  "body": "## Symptom\nNo shipped resource enforces a **package** capability server-side. The three showcase actions carrying `requiredPermissions` have **no REST execution route on this build**: `/api/v1/actions/&lt;n&gt;`, `/api/v1/action/&lt;n&gt;`, `/api/v1/objects/&lt;o&gt;/actions/&lt;n&gt;`, and `/api/v1/data/&lt;o&gt;/actions/&lt;n&gt;` all 404, and `rest-route-ledger.ts` registers no action-invoke route. So the `requiredPermissions` gate for these actions is **client-side only**; there is no server surface on which to exercise the grant/deny contrast.\n\nThe three-way grant/deny/regrant resolves by name, but only demonstrable with a **platform** capability (`manage_metadata`). The remainder of the item passes: declaration → `sys_capability` seeding is exact (both documented fallbacks — `humanize(name)` label, generated description); platform-capability hijack is refused (a package declaring `manage_users` gets a WARN, `skippedPlatform:1`, the platform row unchanged — though the refusal is a WARN and boot proceeds); malformed declarations abort boot at Zod parse before any `sys_capability` write, so #5961 does not hold.\n\n## Root cause\nLocated by the run at `packages/rest/src/rest-route-ledger.ts`: the ledger's `data-actions` family registers clone/import/export routes but **no action-invoke route** for declared object/record actions. Confirmed on `origin/main` — the `data-actions` block lists only clone / import / import-jobs / export, no `…/actions/&lt;name&gt;` invoke route.\n\nRelated prior art (closed, different framing): objectstack-ai/objectstack#3923 reported `Action.requiredPermissions` as client-side fail-open in Console for `type:'api'` actions on `17.0.0-rc.0`, and noted the server-side `actionPermissionError` covers only the platform `ql.executeAction` / MCP paths. This card records the coverage gap as observed on build 92f26f75: for the shipped showcase actions there is no REST invoke route at all, so `capability-declaration-lifecycle` clause 1 can only be exercised against a platform capability.\n\n## Reproduction\n1. Stock showcase boot; enumerate the REST route ledger and probe the four action-invoke shapes above for a showcase action declaring `requiredPermissions` → all 404.\n2. Confirm the grant/deny/regrant contrast is only demonstrable via a platform capability (`manage_metadata`).\n\n## Suggested fix\nEither ship a server-side action-invoke route that enforces `requiredPermissions` for package-declared actions (so the gate is not client-side only), or record explicitly that package capability enforcement is not yet a server surface and adjust the checklist item's expectation. Route owner: `packages/rest` route ledger unless the action-invoke owner is located elsewhere.\n\n## Source\nExtracted from the QA run objectstack-ai/objectstack#7637 (framework 92f26f75, console 09987b680)."
+}

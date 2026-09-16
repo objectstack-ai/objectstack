@@ -1,0 +1,36 @@
+{
+  "number": 7974,
+  "kind": "pull_request",
+  "title": "fix(sharing): enforce the declared `publicSharing.eligibility` predicate at link creation",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-12T09:17:21Z",
+  "updated_at": "2026-08-12T13:59:06Z",
+  "closed_at": "2026-08-12T13:59:04Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": "2026-08-12T13:59:04Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/7974",
+  "body": "Fixes #7861\n\nRoute A per the triage ruling: implement the declared predicate. `packages/spec/src/data/object.zod.ts` is untouched — this restores what the key already declares.\n\n## The defect\n\n`publicSharing.eligibility` was declared with a TSDoc promising the predicate is *\"evaluated against the candidate record when a link is created … the create call fails with 422\"*, and nothing read it. `getPolicy()` built its policy from the five sibling keys and skipped this one, so `createLink` ran no predicate at all. Re-verified by symbol on `origin/main` at 8d80e12 before implementing — the premise still stood.\n\nThe harm is not at `createLink`. `resolveToken` has no auth check and reads the record under `SYSTEM_CTX`, so a link that gets minted is served to a caller with no principal. Any staff user who could read a record could publish it to the open internet past a policy written specifically to prevent that, with no error raised.\n\n## The fix\n\n`createLink` now evaluates the predicate against the candidate record before the insert:\n\n- ineligible record ⇒ `422 RECORD_NOT_ELIGIBLE`\n- predicate that will not compile, or faults on the record ⇒ `422 ELIGIBILITY_UNEVALUABLE`\n\nBoth fail **closed**. A restrictive policy that cannot answer must not mint a capability token — the same direction `recordStillExists` already takes, and the same call the declarative hook-condition evaluator makes. The two codes stay distinct because the fixes differ: a false verdict is about this record, an unevaluable predicate is broken for every record until its author fixes it.\n\nWhen an eligibility predicate is declared, the existing visibility read widens its projection to fetch the record it judges instead of a second query being issued — and it widens **only** then, so an object without the key keeps the exact `id`-only read it always had.\n\n## The evaluator choice, measured\n\nThe TSDoc promises \"the same evaluator sharing rules use\". A sharing rule's CEL `condition` is lowered by `compileCelToFilter`, which is the *pushdown* path. Measured on this branch:\n\n```\ncompileCelToFilter(\"has(record.owner_id)\")  -> REJECTED (unsupported)\ncelEngine.evaluate  (\"has(record.owner_id)\") -> true\n```\n\nThe two answer different questions. A sharing rule asks *which records does this rule share* and must become a WHERE clause the driver can run, so its vocabulary is bounded by what backends push down. Eligibility asks *may THIS record, already fetched, be published* — a verdict on one record in hand.\n\n**This is not the fork the triage note reserved.** Both are the same evaluator in the sense the contract means: `@objectstack/formula`'s CEL through the one canonical front end (`parseCelToAstWithReason`) that `cel-to-filter.ts` was moved onto in #6132, with `cel-to-filter-parse-convergence.test.ts` pinning that both parse alike. Same dialect, same parse, different lowering — so the declared contract text needed no change, and the key's own `.describe()` (\"must evaluate to true on the target record\") is honoured exactly. No spec contract text was edited.\n\nDeclared fields absent from the returned row bind to `null` before evaluation, mirroring `materializeDeclaredFields` behind the two server-side CEL gates in `@objectstack/objectql`. Without it, drivers that omit NULL columns would fault — and since this gate fails closed, that would refuse links for exactly the rows whose field is empty rather than judging them. An *undeclared* key still faults, because that one really is an author typo.\n\n## Tests\n\nNew `share-link-eligibility.test.ts`, 14 cases, driving the real `ShareLinkService` over a live `SqlDriver` on better-sqlite3 `:memory:` with DDL through the driver's own `initObjects` from the real `SysShareLink` definition.\n\nEvidence is end-to-end and about the **row**, not the throw: every rejection case asserts `code` **and** `status` (the ADR-0112 envelope) and that `sys_share_link` took no row; the headline case walks mint → resolve on both an eligible and an ineligible record. A bare `toThrow()` would have passed against the pre-existing 403/404 visibility refusal.\n\nThe card's sibling table is pinned beside it as the control group — `allowedAudiences` and `maxExpiryDays` had no pin in this package before.\n\n### Predict-then-mutate ablation\n\nPredictions were written down before the mutation ran, then the `assertEligible` call was deleted from `createLink` (enforcement only; the projection widening left in place, isolating enforcement as the variable).\n\nPredicted 7 red / 7 green. **Observed exactly that, on exactly the predicted cases**: all seven eligibility cases flipped red; all five sibling-key pins stayed green, as did \"no eligibility key behaves exactly as before\" and the deliberate non-flipper (`has(record.owner_id)` still mints). Restored from the commit and re-verified green.\n\n## Gates run locally\n\n`@objectstack/plugin-sharing` test (468 passed / 18 files) and typecheck; `@objectstack/spec` test (10031 passed / 381 files); `check:nul-bytes`; `check:error-code-casing`; `check:engine-double-contract` (caught this PR's harness and it was pinned to `assertEngineUpdateDispatch`); `pnpm --filter @objectstack/spec check:generated` — all 13 artifacts up to date after regenerating `content/docs/references/` for the two new ledger codes; eslint `--no-inline-config` on the changed files; full workspace build (71/71); and the **downstream consumer** sweep, `--filter '...@objectstack/plugin-sharing'` (packages that depend on it), typecheck with zero errors.\n\n## Note on the spec edit\n\n`packages/spec/src/api/error-code-ledger.zod.ts` gains the two codes under `@objectstack/plugin-sharing`. `ApiErrorSchema.code` validates against `StandardErrorCode` union the ledger, so an unregistered code would itself be a declared-but-invalid surface — the same class this card is about. This is the error-code registration surface, not the `object.zod.ts` contract text the ruling placed out of scope.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01Bn4vq74D8dt3WHhJ2qBp2n)_"
+}

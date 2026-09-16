@@ -1,0 +1,35 @@
+{
+  "number": 7714,
+  "kind": "issue",
+  "title": "showcase: no view authors an `emptyState`, so the `objects._views.<view>.emptyState` translation surface has no fixture to test",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-11T11:51:48Z",
+  "updated_at": "2026-08-12T13:54:05Z",
+  "closed_at": "2026-08-12T13:54:05Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7714",
+  "body": "Observation-class finding, filed unassigned per Prime Directive #10. Found while reconciling the i18n checklist for #7686 (item 3); recorded there as a waiver, not fixed, because showcase code is outside that card's declared file surface.\n\n## What\n\n`packages/spec/src/system/translation.zod.ts` declares a per-view empty-state translation surface:\n\n```\nobjects.<object>._views.<view_name>.emptyState.title\nobjects.<object>._views.<view_name>.emptyState.message\n```\n\nNo view in `examples/app-showcase` authors an `emptyState` at all — a grep for `emptyState` across `examples/app-showcase/src` returns nothing, in the view definitions and in `src/system/translations/index.ts` alike. The declared group therefore has no reachable instance on the stock fixture: a zero-row view renders the console's own built-in placeholder, which is console chrome and not a resolution of this key.\n\n## Why it is worth writing down\n\nThe QA run #7640 tried to drive this variant of `i18n.surface-matrix` and could not — there is no translated key to render, so the clause lands `blocked(fixture)` on every run rather than testing the resolver. The checklist now waives it explicitly (`i18n.surface-matrix` → `fixtures.knownGaps`, revision 3), which stops each sweep from rediscovering it, but the waiver is a debt marker: paying it down means authoring one `emptyState` onto a showcase view plus its zh-CN bundle entry, after which the waiver flips back to a live clause.\n\nNote `examples/app-showcase/src/coverage.ts` does not track `emptyState` either, so the showcase's demonstrated-or-waived ratchet does not currently see this gap from its side.\n\n## Not a defect today\n\nNothing a user hits: the spec declares the surface, and an app that authors an `emptyState` presumably gets it translated — that is exactly what no fixture proves either way. The cost is a permanently unprovable clause in the i18n matrix. Recording it so triage grades it rather than leaving it inside a checklist waiver.\n\n## Options, not a decision\n\n- **Author the fixture** — add `emptyState: { title, message }` to one showcase view (a filtered slice that is genuinely empty on seed data reads best) and the matching `objects.<object>._views.<view>.emptyState` entry to the zh-CN bundle. Un-waives the clause and demonstrates the surface.\n- **Leave it waived** — accept that this one group is asserted by the spec's own tests rather than by an end-to-end run, and keep the knownGap as the record.\n\nSource: QA run #7640 · checklist card #7686."
+}

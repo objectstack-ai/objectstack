@@ -1,0 +1,32 @@
+{
+  "number": 7947,
+  "kind": "issue",
+  "title": "pm-dispatch SKILL: native issue-typing at triage (Bug/Feature/Task) + Bug-first tiebreaker in ordinary-queue selection (maintainer ruling 2026-08-12)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-12T08:07:13Z",
+  "updated_at": "2026-08-12T11:02:07Z",
+  "closed_at": "2026-08-12T09:59:38Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7947",
+  "body": "Filed by the skills seat (session `session_012Gg6rMAti8ZaueWb6BRsDn`), 2026-08-12, executing a maintainer ruling from the seat 专题 chat.\n\n## Provenance (maintainer, verbatim, untranslated)\n\n> 还有一个问题,每个issue创建时是否都应该标注 bug,项目经理安排任务时是否应该优先bug,还有哪些其他相关的建议\n\n> 同意\n\n(Approving the seat's recommendation as presented: native types, single producer, tiebreaker not ladder, the three consumer synergies, no mass backfill.)\n\nFact base: the repo already carries org-level native issue types **Bug / Feature / Task** (`issue_write` supports `type`); no new label axis is created.\n\n## Deltas to `.claude/skills/pm-dispatch/SKILL.md`\n\n**1. Triage duty (step-0 section): type every card.**\n- The triage seat is the single authoritative producer of the `type` field (filers may pre-set; triage corrects at classification time — same discipline as `domain:*`).\n- Mechanical criterion, citing the existing boundary test (no second copy): wrong behavior against the declared contract ⇒ `Bug`; grows the accept-set / public surface ⇒ `Feature`; everything else (docs, tooling, refactor, chores) ⇒ `Task`.\n- **Bug repro discipline**: a `Bug` with no named location or repro path does not enter `pm:queue` — triage flags it for repro instead (premise-first, moved to filing time).\n- ⛔ No mass backfill of the existing backlog (whole-backlog rescans are the known rot pattern): new cards at filing/triage; existing cards when next touched.\n\n**2. Executor selection: Bug-first tiebreaker.**\nWithin ordinary queue items (i.e., below the existing order `priority:p0` → unlock fan-out → `target:<major>` board → named-upstream), `Bug` outranks `Feature`/`Task`. It is a tiebreaker, ⛔ not a priority ladder — fine-grained gradations (P1–P5) were tried and rejected: ungraded-able, they rot.\n\n**Named consumers** (a classification exists iff something reads it): ① the adjudication lane's routing gate — `Feature` is mechanically on the human floor, `Bug`/`Task` are the auto-adjudicable candidates; ② the release-board producer's defect scan becomes a `type:Bug is:open` query; ③ the selection tiebreaker above.\n\n## Landing notes\n\n- Blocked-by: #7944\n- Blocked-by: #7945\n- Same-file serial: SKILL.md hot-file queue position 3. ⚠️ Ratchet headroom 0 — offset in-PR.\n- **Effective immediately** for the producer half via cross-seat notice on the triage seat post (#6015); the executor-side tiebreaker binds when the SKILL text lands (executor sessions load it unconditionally).\n- Dispatch `model: claude-fable-5` (mandatory clause). Size S — subagent lane.\n- ADR-class: draft PR, human merge."
+}

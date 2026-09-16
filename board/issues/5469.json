@@ -1,0 +1,34 @@
+{
+  "number": 5469,
+  "kind": "issue",
+  "title": "域标签词表有两个未入表条目:`domain:spec-tooling`(在用,文件面与 devx 完全重叠)与 `domain:ui`(一例,与 `repo:objectui` 重复)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "tooling",
+    "tracking"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T13:13:12Z",
+  "updated_at": "2026-08-12T05:21:26Z",
+  "closed_at": "2026-08-12T05:21:26Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5469",
+  "body": "分诊 #5095(补全 pm-dispatch 域分类表)时发现,随 PR #5468 一并核出。#5468 只补了**包**的归属,这两条是**标签词表**层面的问题,需要 PM/维护者拍板,故单独立单,不在那个 PR 里替两条活跃车道定边界。\n\nFollows-up: #5095 / PR #5468(该 PR 的「刻意未做的一件事」一节记了同样的理由)\n\n## 1. `domain:spec-tooling` 在运行,但不在域分类表内 —— 且其登记文件面与 `domain:devx` 行完全重叠\n\n- 该标签是登记在册的车道(program card #5163,登记表 #4604 有完整登记/注销记录),当前有一批 issue 挂着它;\n- 但 `.claude/skills/pm-dispatch/SKILL.md` 的域分类表**没有这一行**,读表的 PM 看不到它的存在;\n- 更要紧的是,#5163 卡上声明的文件面是 `scripts/**`、`packages/spec/scripts/**`、`packages/lint/**`、`content/docs/**`(⛔ 除 `releases/`),而表内 `domain:devx` 行现在写的是 `packages/lint`、`skills/**`、`content/docs/**`、`scripts/`(门禁类)—— **`packages/lint`、`content/docs/**`、`scripts/` 三处被两条车道同时声明**,与本节的锚定规则「每个包恰好属于一个 domain」直接矛盾。devx 车道当前有在册 PM,spec-tooling 的 14 单也在队列里,所以这不是纸面问题:落在这三处的 issue 今天就可能被两条车道各自认领。\n\n**需要的裁定**(任选其一,然后由一个 PR 更新表):\n\n- A. spec-tooling 收窄为「生成物门禁族」:`packages/spec/scripts/**` + `scripts/` 中与生成物/基线相关的那部分 + `content/docs/references/**` 生成面;`packages/lint`、`skills/**`、`content/docs/**` 其余部分留给 devx。(评论区在 #5095 提这条时的原始建议)\n- B. 按 #5163 卡面照收,devx 行相应让出 `packages/lint`、`content/docs/**`、`scripts/`,devx 只剩 `skills/**` 等。\n- C. 判定 spec-tooling 是**临时 program 车道**而非常设域,不进包家族表,改在表下用一句说明它是 #5163 存续期间的临时切分。\n\n三条的取舍取决于「spec-tooling 是长期车道还是 C 包存续期的临时切分」,这一点 #5163 与 #4604 的记录里没有明说 —— 属维护者/两条车道 PM 的口径,不由 dev 猜。\n\n## 2. `domain:ui` 出现一例(#5236),与 `repo:objectui` 语义重复\n\nobjectui / cloud 是**仓库级分片**,routing 一直用 `repo:*` 表达;域车道按协议是「同仓多 PM 并发」的切法。#5236 上的 `domain:ui` 是目前唯一一例,再放任下去就会长出第三种写法。\n\nPR #5468 已把**文本半边**写进表的说明段(「本表只覆盖本仓的包;objectui/cloud 用 `repo:*` 分片表达,不另打 `domain:*`」),剩下的是**标签动作**:#5236 上的 `domain:ui` 是摘掉换 `repo:objectui`,还是正式宣布为 `repo:objectui` 的别名并写进表。二选一,别让第三种写法自然生长。"
+}

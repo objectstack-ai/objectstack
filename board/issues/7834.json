@@ -1,0 +1,35 @@
+{
+  "number": 7834,
+  "kind": "issue",
+  "title": "Federated read × org-walled deployment has no reachable end-to-end coverage — the required dogfood test that names the path boots single-tenant and cannot emit the predicate",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T18:45:31Z",
+  "updated_at": "2026-08-12T04:49:08Z",
+  "closed_at": "2026-08-12T04:49:08Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7834",
+  "body": "Measured by #7738's dev, who then **re-measured their own first explanation and found it wrong** ([report](https://github.com/objectstack-ai/objectstack/issues/7738#issuecomment-5257162554), [correction](https://github.com/objectstack-ai/objectstack/issues/7738#issuecomment-5257216300)). Filed unassigned.\n\n## The gate that should have caught #7738, and could not\n\n`packages/qa/dogfood/test/showcase-external-autoconnect.dogfood.test.ts:37` asserts `rows.length >= 3` for an **authenticated** admin read of `showcase_ext_customer`. It is part of a **required** CI job (3 shards, `ci.yml:709`).\n\nPer #7738's QA capture, that authenticated read returned **0 rows** — a declared, correctly-bound external object silently answering empty. So this assertion is exactly the shape that should have failed, and CI was green.\n\n## The first explanation was plausible and wrong — the second is measured\n\nThe initial hypothesis was that the `@objectstack/verify` harness's signed-in admin carries no active org, leaving the wall dormant. Rather than leave that standing, the dev **checked `engine.ts` back out at `main`, rebuilt `@objectstack/objectql`, and re-ran the same file: 3 passed / 3 — with the fix and without it.**\n\nThat is the decisive measurement. The test does not merely fail to *assert* the wall; **it never emits the predicate at all, in either direction.** It could not have caught this defect and cannot catch a regression of it.\n\nMechanism, one line of harness:\n\n- `bootStack` sets `OS_TENANCY_POSTURE=isolated` **only** when `opts.multiTenant` is truthy — `packages/verify/src/harness.ts:268`. This test calls `bootStack(showcaseStack)` with **no options**.\n- Boot log confirms: `[security] tenancy posture 'single' — Layer 0 is inert; the platform's own tenant-scoped RLS policies are stripped`.\n- With no organization plugin and no active org, `execCtx.tenantId` is undefined, `hasTenant` is false at `engine.ts:2528`, the driver never receives a `tenantId`, and `applyTenantScope` early-returns.\n\n## The structural part — this is not a missing assertion\n\nPer `BootOptions.multiTenant`'s own docstring, the **only** honest way to boot the organization wall is `multiTenant: true` with the cloud-private `@objectstack/organizations`. `'posture-only'` is explicitly documented as performing *no* isolation — *\"nothing stamps `organization_id`, nothing scopes a query\"* — and the gates that need the real wall **SKIP** without that package.\n\n⇒ **The intersection this bug lived in — a federated read × an org-walled deployment — has no reachable end-to-end coverage in this repo's dogfood tier.** The one federated-read fixture boots single-tenant; the one honest walled harness is unavailable here.\n\n## Same class as #7802, different mechanism\n\n#7802: a cross-package conformance scan is never run because affected-subset CI is keyed on the package the scan lives in.\nThis: a required test runs, passes, and names the path — while booting a posture in which the thing under test is inert.\n\nBoth are **a green gate over a path it does not exercise**, which is worse than an absent gate because it reads as coverage. Worth deciding together whether there is a general answer.\n\n## ⛔ What not to do\n\n- Do **not** \"fix\" this by adding assertions to the single-tenant boot — that pins the inert path and deepens the illusion.\n- Do **not** mark the test skipped; it is doing useful work on the autoconnect path, just not on the wall.\n- Do **not** treat #7833's unit pin as closing this. That pin sits at the `DriverOptions` seam and is reachable without the enterprise package — it closes the regression risk, and it is genuinely not an end-to-end proof.\n\n## Step one — a decision, not code\n\nPick honestly between:\n\n1. a posture-aware fixture that can emit the org wall without the cloud-private package (if that is even possible — measure before promising it);\n2. accepting that this intersection is covered at the unit/seam tier only, and **saying so in a comment on the dogfood test** so the next reader does not mistake its assertion for coverage;\n3. something else — but not silence, because the current state is the failure mode.\n\n## Related\n\n- #7738 / PR #7833 — where this was measured; fixes the engine-side injection.\n- #7802 — the sibling green-gate-over-unrun-path card (CI affected-subset scoping).\n- #7737 — the boot-ordering card whose reported symptom #7738 turned out to produce."
+}

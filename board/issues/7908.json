@@ -1,0 +1,35 @@
+{
+  "number": 7908,
+  "kind": "pull_request",
+  "title": "fix(runtime): install `ctx.log.debug` in the sandbox — the fourth level the CLI and docs already promise",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-12T03:47:49Z",
+  "updated_at": "2026-08-12T04:27:46Z",
+  "closed_at": "2026-08-12T04:27:45Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-08-12T04:27:45Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/7908",
+  "body": "Fixes #7661\n\n`ctx.log.debug` was declared on three surfaces and implemented on none. An author who followed the documentation wrote a body whose declared capability was satisfied and whose call then threw **`TypeError: not a function`** inside the VM — under `onError: 'abort'`, an aborted write rather than a missing log line.\n\nDirection is the **enforce** arm of ADR-0049, per the ruling on the card: all four surfaces now agree on four methods.\n\n## The premise, measured before any code was written\n\nThe ruling hangs on two halves, both verified on `origin/main` @ `d91fad5`:\n\n| Half | Verdict | Evidence |\n|:---|:---|:---|\n| `Logger.debug(message, meta)` exists on the contract | ✅ holds | `packages/spec/src/contracts/logger.ts:15` — declared, two-arg, alongside `info`/`warn`/`error`/`fatal` |\n| the logger the `log` capability is served from carries a callable `debug` | ✅ holds | the surface is built from `opts.logger` (`body-runner.ts` `buildBodyLogSurface`, #7448), which all four `app-plugin.ts` construction sites populate with the kernel's `ctx.logger` = `createLogger()` → `ObjectLogger`, whose `debug` (`packages/core/src/logger.ts:401`) writes at level `debug` through the real sink. Not absent, not a throwing stub, not a no-op. `body-runner.ts:164` already calls `opts.logger?.debug?.(…)` on that same object — the `[BodyRunner] hook fired` line QA run #7439 observed at `--log-level debug`. |\n\nAnd the gap itself is still live on current `main` — this is not an already-fixed card:\n\n- `packages/cli/src/utils/extract-hook-body.ts:56` — `/ctx\\.log\\.(?:info|warn|error|debug)\\b/` → `log`, `debug` still in the alternation\n- `content/docs/automation/hook-bodies.mdx:317` — still teaches `ctx.log.info / warn / error / debug`\n- `quickjs-runner.ts:639` — still `['info', 'warn', 'error']`\n\n## What changed\n\n- **`quickjs-runner.ts`** — the `ctx.log` install loop covers four levels.\n- **`script-runner.ts`** — `ScriptContext['log']` declares `debug`.\n- **`body-runner.ts`** — the host-side surface forwards `debug` to the factory's logger, and warns for it in the no-logger branch. **This file is load-bearing for the fix, not incidental:** `installCtx` forwards through the *optional* call `ctx.log?.[level]?.(…)`, so a VM-side `debug` with no host-side member is not a throw but a silent drop — the #7448 defect verbatim. (Noted for the file-surface declaration: the card named `quickjs-runner.ts` + `script-runner.ts`; `body-runner.ts` is the third file in the same `runtime/src/sandbox/**` directory the claim reserved, and the consequence cannot be delivered without it. Nothing outside that directory is touched.)\n\nTwo pre-existing test doubles built a three-member `ctx.log`; they now build four. `packages/cli/src/utils/extract-hook-body.ts` and the docs table are **deliberately untouched** — under the enforce arm both were already correct.\n\n## Reverse-verification — measured in both directions\n\nThe pin must fail for a *missing* `debug` and for a *no-op* `debug`. Both arms were run.\n\n**1. Install reverted (i.e. the pin against unmodified `main`) — red, with the card's own error:**\n\n```\nFAIL  src/sandbox/body-log-capability.test.ts > [#7661] … > delivers the card's own reproduction\n  Caused by: SandboxError: hook 'h' threw: TypeError: not a function\n   ❯ QuickJSScriptRunner.execute src/sandbox/quickjs-runner.ts:400:17\nFAIL  … > gates debug behind the log capability like the other three levels\n  AssertionError: expected [Function] to throw error matching /capability 'log' not granted/\n  + Received: \"hook 'ungranted_hook' threw: TypeError: not a function\"\n\n Tests  4 failed | 5 passed (9)\n```\n\n**2. VM install kept, host-side forward removed (the no-op arm) — still red, and nothing throws:**\n\n```\nFAIL  … > delivers the card's own reproduction — ctx.log.debug('hi') — as a debug record\n  AssertionError: expected +0 to be 1\nFAIL  … > carries structured data across the VM boundary as a value\n  AssertionError: expected undefined to be 'debug'\n\n Tests  2 failed | 7 passed (9)\n```\n\nThat is the point the card insisted on: a `debug` installed as a no-op passes a throw-only test, so every assertion is on **what the host logger received**, not on the absence of an exception.\n\n**3. After the fix — green:**\n\n```\n Test Files  1 passed (1)\n      Tests  9 passed (9)\n```\n\n## Verification record\n\n| Command | Result |\n|:---|:---|\n| `npx vitest run src/sandbox/body-log-capability.test.ts` | 9 passed (4 new) |\n| `npx vitest run src/sandbox/` | 12 files, **138 passed** |\n| `npx vitest run` (whole `@objectstack/runtime`) | 137 files, **2090 passed** |\n| `pnpm --filter @objectstack/runtime... build` | success (DTS included) |\n| `pnpm exec turbo run build --filter='./packages/*' --filter='./packages/*/*'` | 70/70 successful |\n| `pnpm check:changeset-gate-self-tests` | ✓ 118 + 153 + 117 assertions |\n| `node scripts/check-empty-changeset.mjs` | ✓ 1 declaring changeset added |\n| `node scripts/check-changeset-no-major.mjs` | ✓ no `major` bump |\n| `node scripts/check-nul-bytes.mjs` | ✓ 7231 files scanned |\n| `pnpm check:type-check-debt` | ✓ OK — 33 entries re-measured, **none above its recorded number** |\n\nGate families derived with `node scripts/pm/dispatch-gates.mjs <changed paths>` (→ `check:changeset-gate-self-tests`), plus the convention-scoped gates and the affected package's suites.\n\n**On the type-check ratchet.** The first run reported `@objectstack/runtime` TEST_DEBT `227 → 229 (+2)`. The two new errors were real and mine: making `debug` required on `ScriptContext['log']` broke the two three-member test doubles (`capability-denial-is-a-fault.test.ts:95`, `quickjs-runner.test.ts:114`, both `TS2741: Property 'debug' is missing`). They were **fixed**, not ledgered — the entry is back to exactly its frozen 227 and the ceiling was not raised.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01CUymLqPDq3d7PgiwpZsbA2)_"
+}

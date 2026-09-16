@@ -1,0 +1,36 @@
+{
+  "number": 8063,
+  "kind": "pull_request",
+  "title": "fix(service-settings): repoint sys_setting.value_enc on a secret rotation, and reap the retired ciphertext (#8030)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-12T14:07:35Z",
+  "updated_at": "2026-08-12T16:01:37Z",
+  "closed_at": "2026-08-12T16:01:35Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": "2026-08-12T16:01:35Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/8063",
+  "body": "Fixes #8030\n\n## The defect\n\nA **second** `PUT` of a new value for an encrypted setting key answered **200** with a correctly redacted body, advanced `updated_at`, wrote an audit row and inserted a genuinely new `sys_secret` row holding the new plaintext — and left `sys_setting.value_enc` pointing at the **first** handle. The effective secret never changed.\n\nEvery signal an administrator can see said the rotation landed. Rotating a leaked SMTP password or provider API key looked exactly like a rotation that worked, while the leaked credential stayed the one in force. The **first** write of any secret was correct, so it was invisible until the second.\n\n## Root cause — the filer's analysis held, verified end-to-end\n\n`sys_setting.value_enc` (and `updated_by`) are declared `readonly: true` in `packages/platform-objects/src/system/sys-setting.object.ts`, and the engine strips author-declared read-only columns from a **non-system** caller's UPDATE payload (`stripReadonlyFields`, gated on `if (!opCtx.context?.isSystem)` in `packages/objectql/src/engine.ts`). `SettingsService.upsertRow` persisted through a plain, un-elevated `engine.update`, so the handle could never be repointed. The INSERT path is deliberately exempt from that strip (#3413) — exactly why the first write landed and every later one did not.\n\nThe engine's own warning names the fix:\n\n> Field 'value_enc' on 'sys_setting' is read-only: the caller-supplied value was DROPPED and the update is being COMMITTED WITHOUT IT — the call returns success while this column keeps its stored value (#2948). Server-side code that legitimately writes read-only columns … must declare itself trusted by passing `{ context: { isSystem: true } }` on the write.\n\n## The fix — service side only, no cross-lane change\n\n- **`upsertRow` performs its UPDATE as a system write.** `SettingsService` is a privileged writer: the manifest capability gate (`assertPermitted`), the env-lock / upper-scope-lock pre-flight and `validatePatch` have all run by then, and these are columns it owns rather than ones a caller forged. Same posture and same measured reason as `ObjectQL.recomputeSummaries`' elevation (#7673).\n- **`SettingsEngine.update` gains a `context` member**, and the `IDataEngine` adapter forwards it on **both** branches. The settings row write takes the `multi` one (its `where` is the composite `(namespace, key, scope, user_id)`, never an `id`), so the by-id branch is the half that would rot unnoticed — it is pinned.\n- ⚠️ **`value_enc` stays `readonly: true`.** The elevation is scoped to this one write, so an external caller reaching `sys_setting` through the data layer still cannot repoint a secret handle. That flag is a security control; removing it would have been the wrong direction on this defect. There is a test that fails if someone removes it.\n\nNothing in `packages/platform-objects` or `packages/objectql` is touched — the STOP fork on the card did not fire.\n\n## Orphan `sys_secret` rows — reaped, not accepted\n\nThe row a rotated-away handle named is deleted once the repoint has committed. An orphan is a decryptable copy of exactly the credential the admin just retired, accumulating one per rotation (the filer measured 7 → 8 → 9 across three writes) — so the exposure grows with the hygiene we ask operators to practise. Nothing else can reference the handle: ids are minted per `encrypt()` call, `value_enc` is the only column that holds one, and the audit trail records digests rather than handles, so it stays readable after the ciphertext is gone.\n\nThe store's `delete` is **optional** (pre-existing fakes and the legacy inline-crypto path simply have none) and the call is **best-effort**: the new secret is already in force by then, so a failed cleanup is reported loudly, never raised.\n\n## Verification\n\nTests boot a **real `ObjectQL`** over the **real `SysSetting` / `SysSecret`** schemas and drive the **real `SettingsService`** through the **real adapter** — the four pieces the running server bolts together — so the verdict is about the engine's actual strip rule rather than about a fake written to match the fix.\n\nReverse-verification, with only the fix's two behavioural lines removed and everything else identical:\n\n| | rotation test |\n|---|---|\n| fix removed | **6 failed / 6 passed** — `expected 'sec_d261eae…' not to be 'sec_d261eae…'` at the *second* write, `sys_secret` 1 → 2 |\n| fix applied | **12 passed** |\n\nThe 6 that stayed green with the fix removed are the ones that should: the first-write path, the readonly-for-external-callers pin, and the mask-echo no-op.\n\n- `service-settings` suite: **413 passed / 20 files** (was 401 / 19)\n- `tsc --noEmit` in `service-settings`: clean (0 errors — the package graduated out of the DEBT ledger in #7925 and stays out)\n- `check-test-source-alias`: **OK**, registry unchanged — `@objectstack/objectql` and `@objectstack/core` are aliased to source in a new `vitest.config.ts` rather than added to `KNOWN_UNALIASED_TEST_IMPORTS`\n- `check:engine-double-contract`: **OK** — 166 pinned, 133 ledgered, 2 exempt (unchanged)\n- eslint on the touched files: clean\n\n## Not regressed\n\n- **Mask-echo no-op (#7522 / PR #7554)** — a `PUT` carrying `••••••••` still leaves the stored ciphertext byte-identical; the key is dropped from the patch before the service sees it, so no write happens at all. Pinned.\n- **First-write path** — byte-for-byte unchanged (the INSERT branch is not elevated).\n- **`409 SETTINGS_LOCKED`** for env-locked secrets — untouched; the write path's pre-flight runs before any of this.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01AFizXytCQYaGCNvewL7TaE)_"
+}

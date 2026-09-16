@@ -1,0 +1,36 @@
+{
+  "number": 7729,
+  "kind": "issue",
+  "title": "teams-bu-membership: sharing-rule revocation is lazy — a BU moved OUT of a shared subtree keeps read access until the shared record is next written",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched",
+    "security"
+  ],
+  "assignees": [
+    "os-help"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T12:23:45Z",
+  "updated_at": "2026-08-11T20:20:34Z",
+  "closed_at": "2026-08-11T20:20:34Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7729",
+  "body": "## Symptom\n\n⚠️ **Security-relevant.** Business-unit subtree expansion for `unit_and_subordinates` sharing rules resolves correctly through three levels and is symmetric on placement (0→1 inside the shared subtree, 1→0 on re-parenting out) — so the tree is genuinely load-bearing. The defect is **timing**: the placement or re-parent alone does **not** move the read. The share only materializes (or de-materializes) when the shared **record** is next written.\n\nMeasured matrix: `inSubtree=1`, `reparentedOut(no touch)=1`, `reparentedOut(touched)=0`, `restored(no touch)=0`, `restored(touched)=1`.\n\n**The risky direction:** after a business unit is moved **out** of a shared subtree, its members **keep read access** until the shared record is next written — a lazy, unbounded-in-time revocation.\n\n## Root cause (located)\n\nThe sharing-rule recompute (rebind) triggers are bound **only to the rule's own object**. `bindRuleHooks` in `packages/plugins/plugin-sharing/src/rule-hooks.ts` iterates the rules and registers its `afterInsert` / `beforeUpdate` / `beforeDelete` / `afterUpdate` / `afterDelete` recompute hooks scoped to each rule's `object_name` (e.g. `showcase_project`, `showcase_inquiry`, `showcase_task` — what the boot log shows). It registers **no** hook on `sys_business_unit` or `sys_business_unit_member` changes.\n\nSo a BU tree edit (re-parent) or a membership edit never enqueues a recompute for rules with `unit_and_subordinates` recipients — the materialized `sys_record_share` grants are only recomputed when the rule's own object row is written. The `sys_business_unit_member` hooks that **do** exist (`packages/plugins/plugin-sharing/src/primary-bu-projection.ts`) only maintain the primary-BU projection, not the rule recompute.\n\n**Related but distinct** (not duplicates): #4433 (deactivating a rule never withdraws its grants) and #4779 (predicate/`multi` writes not recomputed) — both a different trigger axis from BU tree/membership edits, both closed.\n\n## Notes for the checklist\n\n- The item's `knownGap` can be **retired**: it anticipated no showcase geometry consuming BU membership, but `share_new_inquiries_with_field_ops` does, so the clause ran. (Tracked in the consolidated checklist-maintenance card for this run.)\n- **Seed-data-thin trap:** a fresh boot seeds the BU tree but **zero** `sys_business_unit_member` rows, so the rule materializes nothing until a tester places someone.\n\n## Reproduction\n\n1. Author/enable a `unit_and_subordinates` sharing rule on a record object (e.g. `share_new_inquiries_with_field_ops`).\n2. Place a user in a BU inside the shared subtree, confirm they can read the shared record (=1).\n3. Re-parent that BU **out** of the shared subtree — **do not** touch the shared record.\n4. The user still reads the record (`reparentedOut(no touch)=1`).\n5. Write the shared record; only then does the read drop to 0.\n\n## Source\n\nExtracted from the QA run objectstack-ai/objectstack#7663 (framework 92f26f75, console 09987b680)."
+}

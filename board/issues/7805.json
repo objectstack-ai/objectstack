@@ -1,0 +1,34 @@
+{
+  "number": 7805,
+  "kind": "pull_request",
+  "title": "fix(spec-tooling): a hard-wrapped mention is not a migration label (#7094)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T15:21:48Z",
+  "updated_at": "2026-08-11T19:09:44Z",
+  "closed_at": "2026-08-11T19:09:42Z",
+  "closed_by": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "merged_at": "2026-08-11T19:09:42Z",
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/7805",
+  "body": "Fixes #7094\n\n## The over-match\n\nBranch 1 of the ADR-0087 completeness gate tells a **used** placeholder (a `FROM → TO` label) from a **mentioned** one by reading the single character to its left. Prose in this repo is hard-wrapped at ~80 columns, so a mention that happens to wrap onto a fresh line has *nothing* to its left — its governing word sits on the line above — and was read as a declaration.\n\nThat is the hazardous direction: an over-match closes all four dispositions at once and leaves the author only the option of rewording a sentence that was true.\n\nSpecimen (`.changeset/changelog-ships-in-tarball.md:73-74`):\n\n```\nThe AGENTS.md post-task checklist requires breaking changesets to carry their\nFROM → TO migration because \"this text ships to consumers as `CHANGELOG.md`\n```\n\n## The fix\n\nWhen the placeholder **opens** its line (bare or merely indented, so a wrapped list item counts), the question is asked of the line **above** instead — and it is a deliberately **narrower** question there:\n\n- **within** a line, adjacency is the evidence, so any attached word governs (`GOVERNING_WORD_RE`, unchanged);\n- **across** a line break, adjacency proves nothing — a label may perfectly well open the line under a finished thought — so only a closed class of determiners, possessives and complement-taking prepositions counts (`WRAPPED_GOVERNOR_RE`). `carry their` continues into the next line; `ends the line here` does not.\n\nA **structural** line above (heading, table row, fence marker) does not wrap at all, and a **blank** line above opens a paragraph — both keep exactly their previous reading, as does every in-line position.\n\n⚠️ The wider version — reusing the in-line \"any line-final letter governs\" test across the wrap — was written first and **rejected by its own positive control**: it turned every label wrapped under an ordinary sentence into a mention, which is the precise failure #7078 predicted when it declined to attempt this. That control is pinned as **P52** rather than merely described.\n\n## Measurement — both halves of the bar\n\nWhole v17 stock, unshallowed clone, before → after:\n\n| | before | after |\n|---|---|---|\n| changesets scanned | 1792 | 1792 |\n| branch-1 + all-branch hits | 176 | **174** |\n| of them declared-breaking | 132 | **132** |\n| `--audit-stock` residue | 97 | **97** |\n| `--audit-stock` `!` candidates | 52 | **52** |\n\n`--audit-stock` output is **byte-identical** before and after (`diff` clean), so no declared-breaking changeset changed state and no worklist row moved — including `tidy-donkeys-yawn`, the measured false positive of a *different* mechanism, which is untouched.\n\n**Every state change, named** — exactly two rows, both `patch`, both mentions on inspection:\n\n1. `changelog-ships-in-tarball.md` — the reported specimen (`carry their` ↩ `FROM → TO migration`).\n2. `notification-retirement-evidence-corrected.md` — a docs-only correction narrating which commits touched a *published* `FROM → TO` (`the evidence and the` ↩ `FROM → TO), and one on the #4651 app-area entry`). Same mechanism, found by the same measurement.\n\n**Positive controls** (a scanner must prove it can see):\n\n- `apimethod-enum-shrink.md` — declared-breaking, carries the third wrapped mention *and* a genuine label; keeps its hit on the earlier label `**Migration (FROM → TO).**` (pinned as P61).\n- `app-dead-authoring-keys.md` — the declared-breaking prescription the previously-rejected wider predicate cost; still matches.\n- P52 in the self-test — a wrapped **label** with no concrete rewrite in the body to fall back on, which still matches.\n\nOf the stock's 49 line-opening occurrences, 46 sit under a blank line and are untouched; all 3 with prose above are mentions.\n\n## Gates\n\n- `pnpm check:adr-0087-registration` — green; self-test **142 → 153** assertions (11 added, P51–P61, pinning both directions).\n- `node scripts/check-empty-changeset.mjs`, `node scripts/check-changeset-no-major.mjs` — green.\n- `npx eslint scripts/check-adr-0087-registration.mjs --no-inline-config` — clean.\n\n## Scope\n\n`scripts/check-adr-0087-registration.mjs` + its self-test fixtures + one changeset. The gate's **diff-only** posture is untouched, no registry contents change, nothing is registered (#7630's grouping question is neither answered nor presupposed), and no `packages/spec` or `content/docs/releases/**` file is touched.\n\n**Not verified**: prose wrapped *inside* a fenced block — the fence's opening line is structural and excluded, but a line inside a fence reads as prose and this predicate gets one line of context, not block structure. No stock occurrence has that shape; it is stated in the code rather than hidden.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01PJS4XSauE4SRNAvRUMyw2Z)_"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 7602,
+  "kind": "issue",
+  "title": "finding: the runtime dispatcher's `capabilities.search` is still presence-gated, so it over-promises the moment the slot is filled",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T07:05:24Z",
+  "updated_at": "2026-08-12T06:58:58Z",
+  "closed_at": "2026-08-12T06:58:58Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7602",
+  "body": "## What this is\n\nA **finding**, filed as a latent declared-≠-enforced gap rather than a live user-facing defect. Surfaced while reviewing #7541 / PR #7577; the third-producer half was named in that PR's \"deliberately left alone\" section, and this card exists so it does not evaporate when that PR merges.\n\n## Observed\n\nThere are **two** producers of `capabilities.search`, and #7541 only moved one of them.\n\n| producer | predicate | file |\n|---|---|---|\n| `getDiscovery()` — the REST/protocol face | `typeof this.searchAll === 'function'`, ANDed with `api.enableSearch` | `packages/metadata-protocol/src/protocol.ts`, `packages/rest/src/rest-server.ts` (both **fixed** by #7541) |\n| `getDiscoveryInfo()` — the runtime dispatcher face | `hasSearch = !!searchSvc`, i.e. bare service-slot presence | `packages/runtime/src/http-dispatcher.ts` (~L1111, emitted ~L1372) |\n\n**Today this is not a live defect, and that is the only reason it is a finding rather than a bug.** Nothing in either repository registers the `search` slot (`CORE_SERVICE_PROVIDER` records `'search': null`, verified across both repos, ADR-0115 Evidence 5), so `hasSearch` is `false` on every host that exists. And the dispatcher mounts **no `/search` route at all** — there is no `search` entry in `route-ledger.ts` and no handler in `http-dispatcher.ts` — so `false` is the honest answer for that host. Declared and served agree, by coincidence of an empty slot.\n\n**The gap is what happens when the slot is filled.** Register any `ISearchService` on a dispatcher-served host — precisely what the slot exists for, per `CoreServiceName`'s \"Search Engine (Elastic/Meili)\" — and that producer flips `capabilities.search.enabled` to `true` while the host still serves no `/search` route. A conforming client reads the document, calls the endpoint, and gets the router's 404. That is Prime Directive #10 in its ordinary direction — an advertised endpoint that 404s — and it is the same defect class #7541 just closed on the other producer, merely waiting on a precondition nobody has met yet.\n\n## Why it was correctly left out of #7541\n\nTwo reasons, both worth keeping:\n\n- **The card's seam was the REST/protocol pair.** #7541 was measured against a live `GET /api/v1/search` answering 200 while the document said `false` — a symptom this producer cannot exhibit, since it serves no such route.\n- **Touching it would have broken a green pin for no measured gain.** `packages/runtime/src/discovery-schema-conformance.test.ts:245` asserts `info.capabilities.search.enabled === false`, and that assertion is *correct* for that producer today. Changing the predicate without deciding what the dispatcher's honest answer is would have turned a true pin red.\n\n## What a fix would have to decide\n\nNot obvious enough to prescribe here — the point of the card is that someone decides deliberately rather than discovering it from a 404:\n\n1. **Serveability, like its sibling.** The dispatcher's own doctrine already says this: the comment at `http-dispatcher.ts` ~L1111 states that every service whose HTTP surface is a *dispatcher domain* mirrors that domain's own guard (`isServiceServeable`), \"same predicate ⇒ same answer\" (#4000 / #4058). `search` is not currently a dispatcher domain, which is exactly why it was never brought onto that rule — so the honest answer may simply be a hardcoded `false` with a comment, until the dispatcher serves search.\n2. **Or mount the domain**, at which point the guard applies and the question answers itself.\n\nOption 1 is the smaller change and is consistent with `websockets` immediately below it, which is pinned `false` with the reasoning stated inline (ADR-0076 D12, #2462).\n\nAlso worth folding into whatever lands: #5672's Ruling A closed the capability vocabulary and requires **every key from every producer, answered from that producer's own facts**. Two producers answering one key by two unrelated predicates is legal under that ruling only while both answers happen to be honest — which is the situation this card is about.\n\nFiled unassigned and without a `domain:*` label so routing stays the triage seat's call.\n\nRelated: #7541 (the same defect on the REST/protocol producer, fixed), #5672 (the vocabulary ruling and the serveability rule), #4000 / #4058 (the dispatcher's own same-predicate doctrine), #2462 / ADR-0076 D12 (`websockets` pinned false with reasoning)."
+}

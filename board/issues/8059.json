@@ -1,0 +1,37 @@
+{
+  "number": 8059,
+  "kind": "issue",
+  "title": "[security] A check-only `update` policy suppresses the #7665 write-scope derivation — a contributor by-id-writes showcase_invoice rows it cannot read",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "pm:dispatched",
+    "security"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-12T13:52:25Z",
+  "updated_at": "2026-08-12T16:00:32Z",
+  "closed_at": "2026-08-12T16:00:32Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8059",
+  "body": "## Symptom\n\nOn the **stock showcase**, on current `origin/main`, a persona holding the plain `contributor` position:\n\n- `GET /data/showcase_invoice/:id` → **404** (the app's `invoice_own_rows` select narrowing correctly hides an invoice it does not own), and\n- `PATCH /data/showcase_invoice/:id` → **200, and the row actually changes** (ground truth: re-read as admin).\n\nSame on `showcase_invoice_line`, which is `controlled_by_parent` on the invoice.\n\nThat is the #1994 class — \"you can't mutate what you can't see\" — still open for this authoring shape, one issue after #7665 closed it for the select-only shape.\n\nFound by the per-declared-position probe personas added for #7978 (PR to follow); it is not reachable by the base probe persona, which holds no positions.\n\n## Evidence\n\n`objectstack verify --rls --app examples/app-showcase/objectstack.config.ts`, position persona `contributor`:\n\n```\nHOLE showcase_invoice: the probe cannot read it (GET 404) yet MUTATED it by id (PATCH 200) — by-id write bypassed RLS (#1994 class)\nHOLE showcase_invoice_line: the probe cannot read it (GET 404) yet MUTATED it by id (PATCH 200) — by-id write bypassed RLS (#1994 class)\n```\n\nThe **contrast is the diagnosis**. On the very same row, in the same run:\n\n| persona | authored on the update class | verdict on `showcase_invoice` |\n|:--|:--|:--|\n| base probe persona (verifier-authored owner narrowing, `select` only) | nothing | `rls-consistent` — refused |\n| `contributor` (the app's own set) | `invoice_owner_immutable`, `operation: 'update'`, **`check` only, no `using`** | `rls-hole` — written |\n\nAnd `showcase_task` — the same `positions: ['contributor']` select-only narrowing but **no** update-class policy — is `rls-consistent`, and flips to `rls-hole` when the #7665 derivation is ablated. So the derivation works; something switches it off for the invoice.\n\n## Mechanism — two sites, and BOTH have to move\n\n**1. The derivation is suppressed by a policy that gates nothing.**\n`packages/plugins/plugin-security/src/security-plugin.ts` (write-visibility floor, ~L4030):\n\n```ts\nif (\n  collected.length === 0 &&\n  (operation === 'update' || operation === 'delete') && ...\n) {\n  collected = this.collectRLSPolicies(permissionSets, object, 'select', (context?.positions ?? []) as string[]);\n}\n```\n\n`collected` here is the update-class collection, and `getApplicablePolicies` matches on object + `positions` + operation only — it never asks whether the policy carries a `using` predicate. The showcase's `invoice_owner_immutable` is `operation: 'update'` with **`check` only**, so for a caller holding `contributor` the collection is non-empty, `collected.length === 0` is false, and the select narrowing is never derived. The collected policy then compiles to no row filter (it has no `using`), so Layer 1 is null and every write-side row gate composed from it — the by-id pre-image gate at step 2.7 included — is a no-op again.\n\n#7665 criterion 5 says derive only when no update-scope **predicate** exists. A `check` clause is not a scope predicate; it is post-image validation (ADR-0058 D4). Counting it as one is what re-opens the hole.\n\n**2. The second belt is not there either — the `check` is dropped for position-scoped callers.**\nSame file, `computeWriteCheckFilter` (~L4141):\n\n```ts\nconst withCheck = this.collectRLSPolicies(permissionSets, object, operation).filter(...)\n```\n\n`heldPositions` is **not passed**. `getApplicablePolicies` then evaluates the applicability domain against `[]`, so **any policy declaring `positions` is filtered out of the post-image check for every caller** — including `invoice_owner_immutable`, whose whole point is that a contributor cannot write an invoice into a state they do not own. That is `positions` on a `check` policy being inert (ADR-0090 P2 / ADR-0049 enforce-or-remove, the same class #3539 closed for org-scoped policies), and it is why the write was not stopped on the way out either.\n\nFixing only 1 leaves position-scoped `check` clauses dead; fixing only 2 leaves the by-id write ungated for any row the check happens to accept. They belong in one change.\n\n## Reproduce\n\n```bash\npnpm turbo run build --filter=@objectstack/cli... --filter=@objectstack/example-showcase...\nOS_LOG_LEVEL=error node packages/cli/bin/run.js verify --app examples/app-showcase/objectstack.config.ts --rls\n```\n\nwith the #7978 position personas in place (they are what mints a `contributor`-holding probe). Without them the run is green, which is exactly why this sat unseen.\n\n## Impact\n\nReal, and not showcase-specific: any app that authors a `using` narrowing for a position plus **any** update-class policy — even one that only validates the post-image — loses by-id write scoping on that object. The showcase is the shipped example of the recommended authoring style, so this is the shape apps are being taught to write.\n\n## Scope\n\n⛔ Not fixed in the #7978 PR — that PR is the verifier that found it, and tuning either the probe or this policy to keep the run green is the one thing it must not do. Filed unassigned for triage."
+}

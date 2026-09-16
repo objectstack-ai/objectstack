@@ -1,0 +1,35 @@
+{
+  "number": 8045,
+  "kind": "pull_request",
+  "title": "fix(metadata-protocol): an object's overlay row is a base layer, not its resolved schema (#8027)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-12T13:28:18Z",
+  "updated_at": "2026-08-12T14:13:49Z",
+  "closed_at": "2026-08-12T14:13:47Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": "2026-08-12T14:13:47Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/8045",
+  "body": "Fixes #8027\n\n⚠️ **PR opened by the `domain:metadata` PM seat on the dev's behalf** — it pushed `claude/issue-8027-overlay-extension-fold` but no PR appeared, so the GitHub API is still unreachable from that container despite the App being connected. Body is the dev's own changeset; its report follows.\n\n## ⚠️⚠️ This also repairs a LIVE REGRESSION shipped by #7556 (PR #8015) one hour ago\n\n**Read this first** — it is the more urgent half of the PR.\n\nOn an in-process (`bridged`) boot, the by-name read and the `code` layer were serving **every extender-contributed `validation` and `index` TWICE**. Introduced by #8015, live on `main` now.\n\n`mergeObjectDefinitions` **concatenates** `validations` and `indexes` (`fields` is a key-keyed spread and scalars are last-writer-wins, so those were always safe). #8015 documented a precondition — *\"callers must apply this only to a base that has not been through the fold\"* — and:\n\n> that precondition turned out to be one **no caller can honour**, and **two shipped call sites already violated it**:\n>\n> 1. **The MetadataService body on an in-process boot.** `bridgeObjectsToMetadataService` seeds that service from `registry.getAllObjects()` — bodies that are *already resolved* — so #7556's fold ran on a folded base.\n> 2. **A stored overlay row.** The write path persists the request body verbatim (ADR-0005 §Validation), so the ordinary Studio GET → edit → PUT round-trip stores whatever the read served — and since #7556 that read is folded. Seeded / imported / migrated rows are unconstrained besides.\n\n⭐ **And why #8015's own pin could not see it:** *\"it compares FIELD NAMES, and the field spread is idempotent.\"* The duplication lives in `validations` and `indexes`, a dimension that pin never touched.\n\n⚠️ **That is a gap in my review, not just in the pin.** I accepted #8015 and called its four-host agreement pin excellent — it was, for the dimension it tested. I did not ask whether the pin covered the *other* fields of a merged object. A duplicated index does not fail a test; it fails a deployment.\n\n⇒ The fix makes `SchemaRegistry.foldObjectExtendersOnto` **idempotent** rather than documenting the precondition harder: an entry the `extend` contributors are about to add, already present in the base, is removed first and re-added exactly once. Extenders are still concatenated **against each other** — two contributors declaring an identical rule still yield two, matching `resolveObject` — so nothing the fold did on an unfolded base is narrowed, and such a base is returned **by reference**, byte-identical.\n\n## The defect this card was filed for\n\nAn overlay row for an object — an admin renaming its label in Studio — was adopted **as the resolved schema**. `getMetaItem` returned the stored row; `getMetaItems` did the same through `mergePackageAwareOverlay`, which picks a per-slot winner **wholesale rather than merging fields**; and `getMetaItemLayered`'s `effective` is `overlay ?? code`, so it inherited the same body.\n\nADR-0029 **D9.2** defines the resolution as `overlay ?? own` **with the `extend` contributors folded on** — exactly what `SchemaRegistry.resolveObject` does for an overlay it knows about, and what #7556 made the by-name read do for the MetadataService copy. **The `sys_metadata` path was the one adopter that never folded.**\n\nMeasured with one `extend` contributor (three fields) and one env-wide overlay row: `byName` and `listed` both served the object with **no** extension fields, while `layers.code` served them and `layers.effective` did not — so **one `?layers=true` response reported a `code` layer that has the fields and an `effective` layer that does not**, with an `overlay` layer showing a customisation that explained none of the difference.\n\nPractical cost, the #7556 shape again: an admin who customises a label **silently removes three extension-contributed fields from every writable form**, while the data API keeps accepting and persisting them.\n\n## Pinned against the registry's resolved schema — ⛔ deliberately NOT as route agreement\n\n`packages/rest/src/meta-object-overlay-extension-fold.test.ts`, eight cases over real handlers / real protocol / real registry:\n\n> #7556's `byName === listed` pin is **green throughout this defect**, because here both routes agree — on a body that has already lost the fields.\n\nCases: the overlay case on both routes and on `layers.effective`; `code` and `effective` agreeing when the row customises nothing; `layers.overlay` still reporting only what the tenant stored (an extension is not a tenant customisation — the boundary #7556 drew); **an already-folded row and a bridged host holding the idempotency**; the no-overlay and no-extension controls; and an **anti-vacuity** case pinning that the fixtures are discriminated.\n\n## Byte-identity, measured rather than argued\n\nAll three surfaces dumped for **nine hosts**, under this branch and under the pre-fix behaviour: **8 of 9 identical.** The one that differs is the extended object on a `bridged` host, where the pre-fix payload carries `['owner_rule','ext_rule','ext_rule']` / `['owner_idx','ext_idx','ext_idx']` and this branch carries each once — **the #7556 regression, repaired.**\n\n## Levels\n\n`metadata-protocol` **patch** — restores the contract these routes were already specified to answer, same reasoning #7556 used for the same routes. `objectql` **patch** — no new public API (`foldObjectExtendersOnto` exists since #7556); its documented contract moves from *\"not idempotent, callers must guarantee an unfolded base\"* to *\"idempotent\"*, a defect fix rather than a capability, and no caller can be relying on duplicated validations.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01AmES43BMDg4bPrxTdi5q7t)_"
+}

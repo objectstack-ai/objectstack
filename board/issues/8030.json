@@ -1,0 +1,39 @@
+{
+  "number": 8030,
+  "kind": "issue",
+  "title": "[security] Rotating an encrypted setting silently does nothing — the new ciphertext is written but `sys_setting.value_enc` still points at the old handle, so a leaked credential stays live after a 200",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:services",
+    "pm:dispatched",
+    "priority:p0",
+    "security",
+    "target:v17"
+  ],
+  "assignees": [
+    "huangyiirene"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-12T12:32:57Z",
+  "updated_at": "2026-08-12T16:01:37Z",
+  "closed_at": "2026-08-12T16:01:37Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8030",
+  "body": "Found by a **retest** of `platform-core.settings-hub-roundtrip` (QA run #7514) against `origin/main` @ `b602d536`, rebuilt — specifically while checking the #7522/PR #7554 secret-redaction fix for **over-correction**. That fix is verified correct and is not the cause; see the attribution section.\n\n## Impact\n\n**A secret rotation appears to succeed and does not happen.** `PUT /api/settings/<ns>` with a new value for an encrypted key returns **200** with a correctly redacted body, `sys_setting.updated_at` advances, and a **new `sys_secret` row containing the new plaintext is inserted** — but `sys_setting.value_enc` **still points at the first handle**, so the effective stored secret is still the original value.\n\nThe operationally dangerous shape: **rotating a leaked SMTP password or provider API key looks like it worked — 200, masked read-back, audit row — while the old credential remains the one in force.** Every signal an admin can see says the rotation landed.\n\nThe first write of any secret is correct, so this is invisible until the second one.\n\n## Reproduction (4×)\n\n1. Sign in as admin.\n2. `PUT /api/settings/sms {provider:'twilio', twilio_account_sid:'AC1', twilio_from:'+15550000000', twilio_auth_token:'alpha'}` → 200.\n3. Read `sys_setting` (namespace=`sms`, key=`twilio_auth_token`): `value_enc = sec_A`. Decrypt `sys_secret[sec_A]` (AES-256-GCM, dev data key, AAD `sms|twilio_auth_token`) → **`alpha`**. ✅ correct.\n4. `PUT /api/settings/sms {twilio_auth_token:'beta'}` → **200**, correctly redacted body.\n5. Re-read: `sys_setting.updated_at` **has advanced**; a **new** `sys_secret` row exists whose ciphertext decrypts to `beta`; but `sys_setting.value_enc` is **still `sec_A`**, so the effective secret is still `alpha`.\n\n**Expected**: `value_enc` repointed to the new handle; effective secret `beta`.\n**Actual**: rotation lost; orphan ciphertext rows accumulate (observed **7 → 8 → 9** across three writes).\n\nReproduced on `mail.smtp_password` (×2), `storage.s3_secret_access_key`, and `sms.twilio_auth_token` (×2, including after a server restart).\n\n## Root cause (located)\n\n`packages/platform-objects/src/system/sys-setting.object.ts:174` declares:\n\n```ts\nvalue_enc: Field.text({ readonly: true })\n```\n\nThe engine **strips readonly fields from a non-system caller's UPDATE payload** (`stripReadonlyFields`, `packages/objectql/src/engine.ts:8504` and `:8651`), so `SettingsService.upsertRow`'s\n`engine.update(objectName, { where, data: { ...row } })` (`packages/services/service-settings/src/settings-service.ts:1857`)\n**can never repoint the handle**.\n\nThe **INSERT path is unaffected** — which is exactly why the first write of a secret is correct and every later one is not.\n\n## Not a regression of PR #7554\n\n- The `readonly: true` flag dates to **2026-08-07** (`b3c1f3cd`); the redaction landed **2026-08-11** (`23bc6e16`).\n- The redaction only drops keys whose **submitted value equals the mask**. In this reproduction the PUT carries a genuinely new value, and the response **echoes the key** rather than dropping it — so the mask-drop path is visibly not involved.\n\n## Acceptance criteria\n\n- A second (and third) `PUT` of a *new* value for an encrypted key repoints `sys_setting.value_enc` so the effective secret is the new one; a read-after-write through the service resolves the new plaintext.\n- The mask-echo no-op is preserved: `PUT` with `••••••••` still leaves the stored ciphertext byte-identical (this currently works and must not regress).\n- No orphan `sys_secret` rows are left behind by a rotation — or, if orphans are acceptable, they are reaped.\n- The first-write path is unchanged.\n\n## What is verified working (scoping this card)\n\nThe #7522 redaction fix itself is sound and should not be touched:\n\n- Both flavours read back as `••••••••` — `type:'password'` (`mail.smtp_password`) and `encrypted:true` (`mail.api_key`) — with every `cascadeChain` entry masked rather than stripped.\n- **Whole-body literal scan** across all 10 namespace bodies *and* `GET /api/settings` → **zero** plaintext hits.\n- Unset secrets still serve as a present key with `value: null` (not omitted — #7573 shape holds).\n- Non-secret keys in the same body still carry real values; a non-encrypted key whose value genuinely *is* `••••••••` is stored and served verbatim.\n- Env-locked secrets still report `source:'env'`, `locked:true`, `lockedReason`, and still refuse `PUT` with **409 SETTINGS_LOCKED**.\n- Route pins green: `settings-routes.test.ts` + `settings-secret-redaction.test.ts` → 29/29.\n\n## Source\n\nRetest of `platform-core.settings-hub-roundtrip` clause 10 at `b602d536`. Storage-layer facts were read by decrypting `sys_secret` out-of-band with the dev data key, not inferred from the API."
+}

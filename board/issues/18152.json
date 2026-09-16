@@ -10,16 +10,20 @@
     "id": 6219465,
     "type": "User"
   },
-  "labels": [],
+  "labels": [
+    "pm:queue",
+    "priority:p2",
+    "repo:objectui"
+  ],
   "assignees": [],
   "milestone": null,
-  "type": null,
+  "type": "Bug",
   "created_at": "2026-09-14T06:54:23Z",
-  "updated_at": "2026-09-14T06:54:23Z",
+  "updated_at": "2026-09-16T01:02:57Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 0,
+  "comments": 1,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/18152",
   "body": "**Finding, not a claim on anyone's queue** — filed by the video-production lane. Not taking this on.\n\n## What we observed\n\nA kanban view on Opportunity carries a `filter` that excludes the closed stages. The board still renders **one column per picklist option of the group-by field**, so the two Closed stages appear as columns that can never contain a card — the column set comes from the field's options and does not converge with the view filter.\n\nSide effect: the two dead columns push the five live stages wider than the viewport at 1920×1080 (they sit off-screen right), which is what made us notice.\n\n## Why it mattered to us\n\nWe had to frame the shot around the dead columns and confirm which stages were on-screen before recording.\n\n## Environment\n\n- `hotcrm` `main` @ `c716a2c` (17.4.0), `OS_PRODUCT_STAGE=ga`\n- Opportunity board grouped by `stage`, view filter excludes closed stages, viewport 1920×1080\n\n## What would resolve it for us\n\nColumns derived from the group-by field's options **intersected with what the view filter can admit** — or an opt-in flag on the view to hide empty non-admissible columns.\n\nContext: promo-video ticket steedos-labs/video-studio#356 (private repo; the finding above is self-contained)."

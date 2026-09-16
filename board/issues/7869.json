@@ -1,0 +1,35 @@
+{
+  "number": 7869,
+  "kind": "pull_request",
+  "title": "fix(driver-memory): render the pipeline dump's RegExp operand instead of dropping it to `{}` (#7853)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-12T00:43:50Z",
+  "updated_at": "2026-08-12T01:33:19Z",
+  "closed_at": "2026-08-12T01:33:18Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": "2026-08-12T01:33:18Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/7869",
+  "body": "Fixes #7853\n\n`MemoryAnalyticsService.query()` returns `AnalyticsResult.sql` from `generateSqlFromPipeline()` — a stage-by-stage dump of the mingo pipeline it actually executed, and the only thing an author debugging an in-memory chart is given. It dumped each stage with a bare `JSON.stringify`, and a `RegExp` has **no own enumerable properties**, so every pattern operand rendered as `{}`. The `$match` stage was reported as constraining `name` by an empty object: the one field the reader came for is the one the dump dropped.\n\n## Measured on `origin/main` @ `55635fc`, executed\n\nAll twelve operators this face declares, before → after. Nine are **byte-identical**; the three that carry a pattern are the whole change:\n\n| operator | before | after |\n|:--|:--|:--|\n| `$contains` | `{\"name\":{\"$regex\":{}}}` | `{\"name\":{\"$regex\":\"/et/\"}}` |\n| `$icontains` | `{\"name\":{\"$regex\":{}}}` | `{\"name\":{\"$regex\":\"/[Bb][Ee][Tt]/\"}}` |\n| `$notContains` | `{\"name\":{\"$not\":{\"$regex\":{}}}}` | `{\"name\":{\"$not\":{\"$regex\":\"/et/\"}}}` |\n| `$eq` `$ne` `$gt` `$gte` `$lt` `$lte` `$in` `$nin` `$exists` | — | unchanged, character for character |\n\nA metacharacter comparand now shows its **escape** too: `{$contains: 'a.p'}` dumps `{\"name\":{\"$regex\":\"/a\\\\.p/\"}}`, so an author can see that `a.p` ran as a literal and not as \"any character between a and p\" (#5567's direction). The dump is the only place that distinction is visible.\n\n**Nothing executed changes.** This surface is explicitly not SQL — its own header says `-- MongoDB Aggregation Pipeline on table: …` — so it cannot render a predicate execution did not run. `query()`'s rows and `generateSql()`'s SQL are untouched; the diff is one replacer argument plus the function it names.\n\n## The rendering-form decision, and why it went against the lean\n\nThe two candidates were the pattern's own literal syntax (`/et/`) and the mongo-shaped `{\"$regex\":\"et\",\"$options\":\"\"}` that the rest of the dump speaks. The mongo form was the first choice for internal consistency, and **measurement ruled it out** on a structural ground rather than a cosmetic one: the `RegExp` sits **at** the `$regex` key, so a value replacer substituting the pair renders the doubled\n\n```\n{\"name\":{\"$regex\":{\"$regex\":\"et\",\"$options\":\"\"}}}\n```\n\n— a shape no mongo query has. Flattening it into the real mongo spelling means rewriting the **parent** object, which would make the dump disagree with the pipeline it claims to be dumping: what mingo executes at that key is a JS `RegExp` object, not a source/options pair. That trades a *visibly degenerate* rendering for a *plausible-but-wrong* one, which is the #5333 direction this card is explicitly graded away from.\n\nThe literal form is also the only one-token rendering that keeps the **flags**, and flags are not decoration on this axis: `$icontains`' fold lives in the pattern source (#6520) while `$contains` is case-exact (#7723 / #4706 Q2 = A), so a form that dropped them would recreate a smaller copy of this same information loss. No declared operator carries a flag today — measured, every builder folds into the source — so the segment renders empty; it is in the form because a fold that ever moved into a flag would otherwise vanish exactly the way the source did.\n\n## The check is strengthened, not duplicated\n\nThere **was** already a check on this dump — `memory-driver-filter-logic-conformance.test.ts`, \"the emitted `$match` wraps the negation around a pattern instead of a bare scalar\" — and it passed for the whole life of the defect. It asserted `$not` and `$regex` are present and even carried a comment conceding the loss (\"`JSON.stringify` renders a RegExp as `{}`, so assert on the STRUCTURE\"). That is precisely the blind spot the card names: `{\"$regex\":{}}` is non-empty and satisfies every presence-only assertion.\n\nSo it is strengthened in place rather than shadowed by a parallel file: four cases now assert the pattern **text** for each affected operator plus the metacharacter escape, and the structural assertion stays as the guard it was built to be.\n\n**Reverse-verified**: with the replacer argument removed, all four new cases fail (`expected '{\"name\":{\"$regex\":{}}}' not to contain '{}'`) and the pre-existing structural case stays **green** — measured confirmation that it was blind to this defect.\n\n## Assumptions the dispatch carried, measured\n\n| # | assumption | verdict |\n|:--|:--|:--|\n| A | `contains` / `icontains` / `notContains` reach the defect | **holds exactly** — enumerated all twelve declared operators; those three and no others |\n| B | no other value type on this path is degenerate under `JSON.stringify` | **holds** — a `Date` comparand is canonicalized to an ISO string by `comparandsFor` before it arrives (and `toJSON` runs before a replacer anyway). A `BigInt` comparand does throw, but out of **mingo's own `Query.compile`** during execution, before this dump is ever built, so no replacer here reaches it — stack captured |\n| C | the dump has no existing test asserting content | **falsified** — the test above exists and passes today. Strengthened rather than duplicated, exactly as the falsification implies |\n\n## Gates\n\n| gate | result |\n|:--|:--|\n| `@objectstack/driver-memory` tests | **712 passed / 23 files** (was 708 / 23 — the four new cases) |\n| `@objectstack/service-analytics` tests (the only consumer of this service outside the package) | 1558 passed / 72 files |\n| `tsc --noEmit` | clean |\n| `pnpm lint` | clean |\n| `check:driver-conformance` | **40 covered / 0 DEBT / 0 exempt** — unchanged |\n| `check:query-options-erasure` | holds — 67 unswept sites / 17 files, none new; baseline verified against `55635fc` |\n\nChangeset: `@objectstack/driver-memory` **patch** — a user-visible debug string. `content/docs/releases/` untouched. No adjacent card was folded in; nothing outside `packages/drivers/driver-memory` plus the changeset is touched.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01UzMdsWW2aZwGCEhfDLo1sT)_"
+}

@@ -1,0 +1,36 @@
+{
+  "number": 6599,
+  "kind": "issue",
+  "title": "finding: `/meta/_drafts` serves DRAFT object schemas unmasked — the one ADR-0106 outlet left uncovered",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched",
+    "target:v17"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-08T06:38:10Z",
+  "updated_at": "2026-08-12T04:49:08Z",
+  "closed_at": "2026-08-12T04:49:08Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6599",
+  "body": "Filed from the ADR-0106 D5(4) implementation-time outlet audit (#3682). Not fixed there: it is a distinct surface with its own authorization question, and guessing at that question inside a masking PR is the wrong place to answer it.\n\n## What was measured\n\nADR-0106 (#3682) now projects object schemas onto the caller's readable field set at every outlet it enumerated — the REST single read (cached and uncached), the layered `?layers=true` view, the compound-name read, the list read, and the runtime `/metadata` catch-all's five resolvers. The D5(4) sweep for \"any other schema-bearing endpoint\" found one that is **not** covered:\n\n- `GET /api/v1/meta/_drafts` — `packages/rest/src/rest-server.ts`, the route registered before `/meta/:type` so `_drafts` is not captured as a type parameter.\n- `GET /metadata/_drafts` — `packages/runtime/src/domains/meta.ts`, the same surface on the dispatcher.\n\nBoth call `protocol.listDrafts({ packageId, type })` and `res.json(result)` / `deps.success(data)` with no per-caller filtering at all beyond `requireAuth`. A pending **object** draft carries its full `fields` map, so an authenticated caller with no read access to `salary_grade` still learns the field exists, along with its label, type, picklist options, formula and `requiredPermissions` — exactly the disclosure ADR-0106 closes one route over.\n\n## Why it was left out of #3682\n\nTwo reasons, and both are questions rather than omissions:\n\n1. **`_drafts` is a mixed-type list.** Unlike `/meta/object`, its items are drafts of *any* metadata type, so applying the projection means inspecting each row's type before deciding. Mechanically easy; the shared masker in `@objectstack/metadata-core` already takes a per-object-name posture. But —\n2. **The route may not belong to non-authors at all.** ADR-0106 D4 assumes draft/preview reads are \"admin-gated upstream already\", and this route reads as an authoring surface (the console's \"pending changes\" view, draft-aware package contents). If that assumption is true, the correct fix is a capability gate on the route — not a field projection — and adding a projection instead would quietly bless non-author access to the pending-changes view.\n\nThose two answers lead to different code, and the decision is not ADR-0106's to make.\n\n## Suggested disposition\n\nDecide which of these `_drafts` is:\n\n- **(a) An authoring surface.** Gate the route on the same `systemPermissions` judgement ADR-0106 D4 uses for its exemption (`studio.access` / `setup.access`) and 403 everyone else. Cheapest, and matches how the route is actually used.\n- **(b) A general read surface.** Route each object-typed draft through `applyObjectSchemaMask` from `@objectstack/metadata-core` (the same function every other exit uses — see `packages/rest/src/meta-object-fls.test.ts` for the case table it is driven by, which a new exit joins by adding one row).\n\nEither way, add the exit to the shared ADR-0106 case table so it cannot regress silently.\n\n## Repro sketch\n\n```\n# as a caller whose permission set marks account.salary_grade readable:false,\n# with a pending draft of `account`\ncurl -H \"Cookie: <session>\" /api/v1/meta/_drafts?type=object | jq '.[].item.fields.salary_grade'\n# → the full field definition, where GET /api/v1/meta/object/account correctly omits it\n```\n\nRelated: #3682 (ADR-0106 implementation), #3661 ③, ADR-0033 (drafts), ADR-0106 D4/D5(4).\n"
+}

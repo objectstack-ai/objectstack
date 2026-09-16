@@ -1,0 +1,32 @@
+{
+  "number": 7696,
+  "kind": "issue",
+  "title": "[finding] Two publish-time rules give an author contradictory fixes for the same bare unquoted word — `visibility-bare-identifier` (error) says `data.active`, `predicate-rhs-path-shaped` (warning) says `'active'`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-help"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T10:49:12Z",
+  "updated_at": "2026-08-12T01:12:02Z",
+  "closed_at": "2026-08-11T19:09:44Z",
+  "closed_by": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7696",
+  "body": "Surfaced by the dev implementing #7659 (PR #7691), disclosed in that PR's body rather than papered over, and **pinned in `runtime-gate.test.ts`** so the interaction is recorded in the suite rather than only in prose. Filed separately because reconciling two rules' messages is not a rider on the PR that introduced one of them.\n\nFiled unassigned, observation class. ⛔ Grading is the triage seat's single channel.\n\n## The fact\n\nFor one token — a bare unquoted word on the right of `==`, e.g. `status == active` — two publish-time rules both fire, and they **prescribe different fixes**:\n\n| rule | severity | reads the token as | prescribes |\n|---|---|---|---|\n| `visibility-bare-identifier` | **`error`** | a dropped binding root | `data.active` |\n| `predicate-rhs-path-shaped` (#7659, PR #7691) | **`warning`** | a literal missing its quotes | `'active'` |\n\nBoth statements are true *about the token*. They are not true about the same **intent**, and nothing in either message tells the author which intent the linter thinks they had — because neither rule can know.\n\n## Why this is worth a card rather than a shrug\n\nThe two fixes are not merely different, they are **semantically opposite**: one turns the token into a path lookup, the other into a string literal. An author following the `error` (which is louder, and blocks) when they meant a literal gets a predicate that compares against `data.active` — a path that probably does not resolve, so #7214's `predicate-path-unresolved` then fires and the author is walked around a triangle.\n\n⚠️ Note also that the bare-word spelling **works today by accident** — that is exactly why #7659 landed it as `warning` rather than `error`, per objectui#4049's ruling (*\"it would flip `data.type == text`, the unquoted-string spelling that works today by accident, into a fail-open `true`\"*). So the author is being told, at `error` severity, to change something that currently works, in a direction that may break it.\n\n## What is NOT being claimed\n\n- ⛔ Neither rule is wrong on its own terms. This is not a bug report against either.\n- ⛔ This does not ask for #7659's severity split to be revisited — that was argued from the family's own bar (`error` where *\"there is no reading of the metadata under which it was going to work\"*, `warning` where the predicate is merely advisory-wrong) and the bare-word case is genuinely the second.\n- The interaction is already **pinned**, so it cannot drift silently. Nothing is currently breaking.\n\n## Shapes a fix could take (none obviously right — hence a finding)\n\n1. **Suppress one when the other fires.** Cheapest. Requires deciding which reading wins for a bare word on an RHS, which is the actual open question.\n2. **Merge the two messages for this one position** — a single finding naming both spellings and letting the author choose. Keeps both diagnoses, costs a special case in two rules.\n3. **Accept it and make the messages cross-reference each other**, so an author seeing both is told they are two readings of one ambiguity rather than two independent errors.\n4. **Accept as-is.** Defensible: both fire, the author reads both, and the pin stops it drifting. Weakest, because the `error` is the one that blocks and it is the one asserting the less likely intent for an RHS position.\n\n## Pointers\n\n- `packages/lint/src/validate-predicate-path-refs.ts` — both rules after PR #7691\n- `packages/lint/src/runtime-gate.test.ts` — where the pair is pinned\n- #7659 / PR #7691 (introduced the second rule, disclosed this), #7010 / PR #7214 (`predicate-path-unresolved`, the third corner of the triangle), objectui#4049 (the ruling that the bare-word spelling works today), #6253 (`visibility-predicate-syntax`)"
+}

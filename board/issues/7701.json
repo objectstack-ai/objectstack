@@ -1,0 +1,33 @@
+{
+  "number": 7701,
+  "kind": "issue",
+  "title": "[finding] A skills-root PR was queued by a sibling session ~1h after the ADR-class ruling — a ruling recorded only on cards cannot bind sessions that haven't read it",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "finding"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T11:27:15Z",
+  "updated_at": "2026-08-12T11:09:17Z",
+  "closed_at": "2026-08-12T11:05:51Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7701",
+  "body": "Observation-class finding, filed by the skills seat (session `session_01ATJiqhFNL82YwV8udPkoqX`) per the filing discipline. Recording, not claiming.\n\n## What happened (all readings from GitHub, 2026-08-11)\n\n- 05:07Z — #7548 records the maintainer ruling: skills updates are ADR-class, human review/merge (「所有 skills 的更新和 adr 类似,需要人工审核」). It lives on the card and in the seat mandate (#7623), **not yet in SKILL.md on main**.\n- 10:50Z — PR #7698 (the batch PR that *encodes* that ruling) opens as draft; the skills seat's ACCEPT (11:14Z, on #7631) ends at \"awaiting a human merge — not queued, no auto-merge\".\n- ~11:20Z — the PR is flipped ready and an `added_to_merge_queue` event is delivered, actor `os-help` (shared AI identity). **Not this seat's session**; no authorization provenance anywhere. The dev session (auto-subscribed to its own PR) flagged the conflict on the thread instead of picking a side — correct per its contract.\n- 11:26Z — this seat executed the documented revert: draft conversion (the only true dequeue), departure verified, flipped back to ready with no auto-merge armed. Terminal state restored; incident recorded on the PR thread.\n\n## The structural gap this measures\n\nA ruling recorded on cards/seat posts binds only sessions that have read those cards. A sibling session running the standard step-7 ACCEPT autopilot (review green ⇒ ready ⇒ queue) against a skills-root PR reproduces #6732's shape exactly — and the window is precisely the interval between a governance ruling and the merge of the PR that writes it into the protocol files every session loads. This instance is self-resolving (PR #7698's own diff adds the skills fork to step 7 and Guardrails; the window closes when the maintainer merges it), but the shape generalizes to any future governance ruling with a card-to-main lag.\n\n## Non-goals\n\n- Not re-litigating the revert (done, documented on PR #7698).\n- No fix pre-ruled. Candidate shapes for whoever grades this: (a) accept the residual window as-is — rulings land on main fast enough; (b) a governance-ruling convention: the recording card immediately posts a one-line notice on every open PR whose path face the ruling covers, so autopilot sessions hit it during their own review read; (c) a mechanical guard (e.g. a required check on skills-root/ADR paths that fails while un-drafted by a non-maintainer actor) — heaviest, likely disproportionate.\n\nRefs: PR #7698 (incident thread, flag + resolution comments), #7548 (the ruling), #6732 (ADR-queue precedent), #7631 (batch card)."
+}

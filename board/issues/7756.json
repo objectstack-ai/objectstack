@@ -1,0 +1,35 @@
+{
+  "number": 7756,
+  "kind": "pull_request",
+  "title": "fix(spec): PageHeaderProps.title is optional — matches the platform's own synthesized header",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T13:04:25Z",
+  "updated_at": "2026-08-11T18:20:21Z",
+  "closed_at": "2026-08-11T18:20:19Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-11T18:20:19Z",
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/7756",
+  "body": "Fixes #7702\n\n## Problem\n\n`PageHeaderProps.title` (`packages/spec/src/ui/component.zod.ts`) was declared **required**, but the platform's own synthesizer — objectui's `buildDefaultHeader` — emits every seeded `page:header` with **no `title` at all**: `{ type: 'page:header', recordChrome, ...(actions?) }`. `PageHeaderRenderer` (`containers.tsx:1013`) reads `schema?.title ?? schema?.properties?.title` and, finding neither, falls through to the record chip's own record-derived heading — a static authored title would be wrong on every record but one.\n\nConsequence: `PageHeaderProps.safeParse(node.properties)` rejected the platform's own canonical output with `title: Invalid input`. Invisible on the write path today (`PageComponent.properties` is an opaque `z.record`, so the strict D3a validator accepts the node regardless), but a standing contradiction that surfaces the moment any props-level validation runs against a header node — `validateComponentProps` (#5068) is exactly that consumer, and it flagged the synthesized header before this fix.\n\n## Ruling\n\nMaintainer ruling recorded 2026-08-11 (「接受你的建议,开始加速处理」, accepting the spec lane's A/B recommendation on #7702; option C — a sentinel value — rejected):\n\n> **Ruling: A/B merged.** `PageHeaderProps.title` becomes OPTIONAL, and its describe states the sanctioned spelling: title omitted ⇒ the renderer derives the heading from the record (matching the shipped renderer and `buildDefaultPageSchema`'s emission). Option C (synthesizer emits a sentinel) is rejected — it would push a placeholder into every seeded page against the renderer's record-derived heading.\n\n## Change\n\n- `PageHeaderProps.title`: `I18nLabelSchema.describe(...)` → `I18nLabelSchema.optional().describe(...)`, with a docstring recording the ruling and a describe stating the sanctioned spelling (title omitted ⇒ renderer derives the heading from the record).\n- `packages/spec/src/ui/component.test.ts`: replaced the old \"should reject header without title\" pin (which asserted the now-overturned behavior) with three pins — (a) parses without `title` using the synthesizer's **real emission shape** (`{ recordChrome: true }`, not a minimal stub), (b) parses with a fully empty object, (c) a present `title` still validates as `I18nLabelSchema` (rejects non-string/non-map, accepts a string).\n- `packages/lint/src/validate-component-props.test.ts`: added a positive pin against the actual named consumer — `validateComponentProps` no longer reports `component-props-invalid` for the synthesized title-less header.\n- `content/docs/references/ui/component.mdx`: regenerated (`gen:docs`) — the reference table now shows `title` as optional with the sanctioned-spelling description.\n- `.changeset/pageheader-title-optional.md`: `@objectstack/spec` **minor** — this widens the accepted-input surface (every payload that validated before still validates identically; the only newly-accepted shape is `title` omitted).\n\n## Reverse verification\n\nIsolated the fix (`git checkout origin/main -- packages/spec/src/ui/component.zod.ts`, keeping the new tests) and re-ran both suites:\n\n- `packages/spec/src/ui/component.test.ts` → **2 failed** on the new pins, with exactly the issue's error: `title: Invalid input ... expected string, received undefined`.\n- `packages/lint/src/validate-component-props.test.ts` → **1 failed**: `component-props-invalid` on `properties.title` for the synthesized header, confirming `validateComponentProps` was the consumer surfacing the contradiction, as the issue described.\n\nRestored the fix from a patch file (`git apply --include=... `) — never a second hand-revert — and re-ran; both suites green again (162/162 and 27/27 respectively).\n\n## Tests\n\n- `pnpm --filter '@objectstack/spec' exec vitest run src/ui/component.test.ts src/ui/page.test.ts --maxWorkers=2` → 237 passed\n- `pnpm --filter '@objectstack/spec' test -- --maxWorkers=2` (full package suite) → 377 files / 9885 tests passed\n- `pnpm --filter '@objectstack/lint' test -- --maxWorkers=2` → 70 files / 1905 passed, 4 skipped (pre-existing)\n- `pnpm --filter '@objectstack/spec' typecheck` → clean\n- `pnpm --filter '@objectstack/lint' typecheck` → clean\n- `pnpm --filter '@objectstack/spec' check:authorable-surface` → green (base-anchor lag is informational, per AGENTS.md guidance — not an error)\n- `pnpm --filter '@objectstack/spec' check:generated` → 1 stale artifact found (`content/docs/references/**`), regenerated with `gen:docs`, re-ran → all 13 green\n- `node scripts/check-adr-anchors.mjs --self-test && node scripts/check-adr-anchors.mjs` → OK\n- `node scripts/check-spec-parsed-alias.mjs --self-test && node scripts/check-spec-parsed-alias.mjs` → OK\n- `node scripts/git-merge-regen.mjs --self-test && node scripts/check-regen-pending.mjs --self-test` → OK\n- `node scripts/check-nul-bytes.mjs` → OK\n\n## Scope note\n\nNo downstream in-repo consumer imports `PageHeaderProps` directly outside `packages/spec` and `packages/lint` (checked via repo-wide grep) — this is a pure widening (required → optional) so nothing that validated before this change can start failing after it.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01JY2Q5Xto1u8YHADgrZDTnk)_"
+}

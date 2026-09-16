@@ -1,0 +1,34 @@
+{
+  "number": 7794,
+  "kind": "pull_request",
+  "title": "docs(pm-dispatch): cloud-card comms is event-driven by ruling — notes-21 verify-before-toggle, PR subscription as hard step",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T15:06:46Z",
+  "updated_at": "2026-08-12T03:54:07Z",
+  "closed_at": "2026-08-12T03:54:06Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-08-12T03:54:06Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/7794",
+  "body": "Fixes #7755\n\nThree validated deltas to `.claude/skills/pm-dispatch/SKILL.md` from the 2026-08-11 spec-lane shift, executing the maintainer's same-day rulings (「当前事件驱动架构即长期方案」/「云卡通信课题就此收档 … 不再追」/「没有计划 把 PM 席迁到常驻本地机」), plus the `bbe056b` rider folded in. All three targets were re-located **semantically on post-#7766 compressed text** (the card body predates the compression); everything verified against `origin/main` at `2701e95`.\n\n## The three deltas\n\n1. **`mode:cloud` backend — roster limitation on record.** New paragraph after 监控与转向: CCR cloud sessions do not register in the cross-session messaging roster (`ListAgents` doesn't list them, `SendMessage` by session ID returns not-reachable; the doc's visibility precondition — sender holds a claude.ai login on the first-party API — is not met by CCR container credentials). Ruling: the event-driven architecture IS the standing solution; ⛔ no roster re-tests, no local-machine migration. Measurement detail in references §「跨会话消息 roster 限制实测」.\n2. **Operational note 21 — amended in place (no competing entry).** The old prescription (toggle when membership reads absent) had a timing defect: the \"added to merge queue\" webhook can arrive out of order, so a disable fired into the arming window cancels a real enqueue (#7655; corrected sequence landed #7657 same day, zero friction). New sequence: ① empty-field return ⇒ verify queue branch first (`git ls-remote`, ~20–30s allowance); ② branch present ⇒ done, no toggle; ③ absent after wait AND queue visibly churned ⇒ ONE toggle, re-verify by notes 1 criteria; ④ (retained) disable on a settled member doesn't remove membership but clears the auto-merge flag. Hard rule: ⛔ never a disable between an enable and its queue verification. Narrative in references §「#7655 armed 窗口 disable 撤单实测」.\n3. **Cloud-card PR subscription — elevated to a hard step.** Now numbered lesson 4 of the `mode:cloud` delivery contract (实测三课 → 实测四课): the moment the cloud card's draft PR exists, `subscribe_pr_activity` it — an unsubscribed cloud-card PR is a polling liability. A/B evidence: #7672 (unsubscribed, merge found minutes late by polling) vs #7655/#7657 (subscribed, second-level delivery, zero polling). The 随行纪律 bullet stays as a pointer; the B-section boundary bullet is rewired to note the non-conflict with the report-time boundary post-#6644 L2.\n\n## Rider (`claude/pm-dispatch-spec-5ls2tr` @ `bbe056b`) — adopted, adapted\n\nStill applicable: its batch-sweep, never-archive-before-merge (#7265/#7325) and unarchive-caveat content was absent from post-#7766 main. Folded into the **existing** B-section archival bullet rather than as a standalone `mode:cloud` paragraph — post-#7766, the archival rule's single home is 入队与落地 B (the 随行纪律 bullet already points there), and a second paragraph would have created the competing-entry shape the card forbids. The rider's 6-line original text is preserved verbatim in references §「云卡归档欠账与 dirty 自救实测」 with provenance.\n\n## Ratchet discipline (headroom was 0)\n\n`MAX_LINES = 2568` and SKILL.md was exactly 2568 lines at `origin/main`. All additions (~+30 gross) are fully offset **within touched paragraphs** by the #7766 convention: residual narrative moved verbatim to `references/incidents.md` (append-only tail, five new sections, each with a 出处 line: #7655 sequence evidence, roster measurement, subscription A/B, #6072 perception-gap tale, archival-debt + rider text) and by reflowing the narrow-wrapped paragraphs already being edited. **SKILL.md lands at exactly 2568 lines; MAX_LINES untouched.**\n\n## Verification\n\n- `pnpm check:pm-skill-ratchet` ✅ (2568/2568, headroom 0)\n- `pnpm check:skill-frame-sync` ✅ (4 copies isomorphic)\n- `pnpm check:doc-authoring` ✅ (375 files clean)\n- `pnpm check:nul-bytes` ✅\n- `pnpm --filter @objectstack/lint run check:doc-formula-expressions` ✅ (after building the lint dependency closure)\n- Every `§「…」` pointer in SKILL.md verified to resolve to a real section header in `references/*.md` (script check, zero missing)\n\nNo changeset: `.claude/`-only change (internal agent tooling), per repo convention — `skip-changeset` at acceptance.\n\n**Landing**: skills updates are ADR-class (#7548) — this PR stays **draft**; ⛔ no auto-merge, no queue entry; the maintainer reviews and merges by hand.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01MJrrkG5usF1W3mX6RLyxNA\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01MJrrkG5usF1W3mX6RLyxNA)_"
+}

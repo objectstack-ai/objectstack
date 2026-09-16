@@ -1,0 +1,36 @@
+{
+  "number": 8061,
+  "kind": "pull_request",
+  "title": "fix(devx): graduate metadata-fs and example-showcase out of TEST_DEBT",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "dependencies",
+    "size/m",
+    "skip-changeset",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-12T14:02:29Z",
+  "updated_at": "2026-08-12T14:50:31Z",
+  "closed_at": "2026-08-12T14:50:29Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-08-12T14:50:29Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/8061",
+  "body": "Fixes #7923\n\nGraduates the two same-day candidates out of `TEST_DEBT` via the #5286 route, deleting each ledger entry in the same PR (RECONCILED forces the pair).\n\n`@objectstack/cli` (188 raw / 56 files) is **out of scope** per triage's binding scope comment — it is a programme, not a graduation. No other entry's recorded number is touched (that is #7888's `--lower` job; #7888 remains open).\n\n## Re-measured before repair\n\nThe recorded counts were taken at older commits, so both layers were re-measured on the merged ref (`3373a29`) the same way the gate's `measureTestDebt` does — hidden test files added to `include` one at a time, `rootDir` neutralised:\n\n| package | recorded | re-measured | classes |\n|---|---:|---:|---|\n| `@objectstack/metadata-fs` | 6 | **6** | TS6133 ×5, TS2349 ×1 |\n| `@objectstack/example-showcase` | 4 | **4** | TS2339 ×4 |\n\nBoth matched exactly, so the entries are deleted against measurements rather than against hope.\n\n## Route taken, per package\n\n**`@objectstack/metadata-fs` — sibling `tsconfig.test.json`, named by the `typecheck` script.**\nIts `rootDir` is `src` and `dev` emits (`tsc --watch`, `outDir: dist`), so widening `rootDir` in the *build* config would relocate `dist/index.js` to `dist/src/index.js` and start emitting compiled test files, which ci.yml gates against. The sibling carries the widened `rootDir` under `noEmit` instead. This package is a structural twin of `packages/metadata-core`, whose sibling config (#5476) is the model followed here. Strictness is inherited untouched — nothing is loosened.\n\nThe 6 errors were real and were fixed in the tests:\n- 5 × TS6133 in `test/contract.test.ts` — genuinely dead imports (`describe`, `it`, `beforeEach`, `expect`, `MetaRef`); the file registers the shared contract suite, which declares its own cases, so `afterEach` is the only hook it uses.\n- 1 × TS2349 in `test/watch-write-registration.test.ts` — the drain loop was written as an immediately-invoked async arrow. For an IIFE, tsc narrows a captured `let` to its type at the point of the call, so `resolveNext` (initialised `null`) narrowed to `null` and the optional call resolved to `never`. Binding the loop to a name and then calling it restores the declared type. Runtime behaviour is identical — the loop still starts there, unawaited.\n\n**`@objectstack/example-showcase` — widened `include`.**\nIts `rootDir` is already `.`, so nothing needed neutralising; this is the shape #7312 applied to app-crm / app-todo. The 4 × TS2339 were `process.env` reads against the package's minimal ambient shim (`test/node-shim.d.ts` declares only `cwd()`), fixed with the file-local `declare const process` idiom the package already uses in `objectstack.config.ts` and `src/system/self-url.ts` — no new dependency, no widened type surface.\n\nThe glob is spec-scoped (`e2e` + `/**/*.spec.ts`) rather than the wholesale `e2e` + `/**/*`, which holds the line the deleted entry's note drew. Confirmed by measurement: the wholesale glob pulls in `e2e/global-setup.ts` and bills the test layer 6 errors from a file that is not a test — 3 `process.env` reads plus 3 gaps in the shim (no `mkdirSync`/`writeFileSync` on the `node:fs` shim, no `node:path` module at all). That file stays outside the program and is filed separately rather than folded in here.\n\n## Reverse verification\n\nDirection predicted **before** running: deleting a ledger entry without repairing its layer should fail **TESTS_COVERED** (not RECONCILED) — the entry is what was holding the hidden layer, so removing both the entry and the repair leaves the layer visible-but-unheld.\n\nMeasured by un-wiring metadata-fs's `typecheck` script with the entry already deleted. It went red in exactly that direction:\n\n```\n• @objectstack/metadata-fs (packages/metadata-fs): 6 of its test file(s) sit outside\n  every tsc program that accounts for this package -- named by an `exclude`, or never\n  reached by any `include` -- so the check reports green over source it never read\n```\n\nRestored afterwards; the gates below are from the restored tree.\n\n## Verification\n\nDependency closure built first (`pnpm build`, 71/71 tasks) — a bare debt-gate run exits 1 on a missing-module cascade.\n\n- `pnpm check:type-check-coverage` — **OK**, 64/77 packages type-checked; test layer down to 20 packages hiding tests. Both entries gone.\n- `pnpm check:type-check-debt` — **OK**, 33 entries re-measured, 1965 raw errors, none above its recorded number. Neither graduated package appears in the surplus list.\n- `pnpm --filter @objectstack/metadata-fs typecheck` — passes both programs; `test` — 6 files, 51 tests passed.\n- `pnpm --filter @objectstack/example-showcase typecheck` — passes; `test` — 20 files, 193 tests passed.\n- `pnpm --filter @objectstack/metadata-fs build` — dist layout unchanged (`index.js`/`index.cjs`/`index.d.ts`), no compiled tests in dist.\n- `check:nul-bytes` — OK; control-char self-scan over all changed files clean.\n- `scripts/pm/dispatch-gates.mjs` on the changed paths named exactly the two gates above.\n\nPlaywright specs are type-checked but not executed here — `test:smoke` needs a live server and is non-blocking nightly.\n\nNo changeset: tests, tsconfig and gate-script only, nothing user-visible is released. `skip-changeset` applied.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01BpkcSBWf4aBtACND7SWPtT)_"
+}

@@ -1,0 +1,36 @@
+{
+  "number": 7802,
+  "kind": "issue",
+  "title": "`main` is red for every PR that touches `packages/spec`: #7769 gave `sys_api_key` `update` without `bulk`, and the conformance scan that catches it lives in a package #7769 never touched",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:devx",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T15:15:49Z",
+  "updated_at": "2026-08-12T06:21:14Z",
+  "closed_at": "2026-08-12T06:21:14Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 10,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7802",
+  "body": "Filing unassigned — this blocks any lane, not just mine. Grading is triage's call.\n\n## Symptom\n\n`@objectstack/spec` test suite is red on `main`:\n\n```\n FAIL  src/data/api-methods-batch-conformance.test.ts:139\n AssertionError: expected [ Array(1) ] to deeply equal []\n\n + [\n +   \"sys_api_key: [get, list, update] grants single-record writes but not 'bulk'\n +    — /batch and the *Many routes will 405\n +    (packages/platform-objects/src/identity/sys-api-key.object.ts)\",\n + ]\n\n Test Files  1 failed | 377 passed (378)\n      Tests  1 failed | 9952 passed (9953)\n```\n\n## Cause\n\nCommit 52200b43d1f26f91097dfc68cd9d0a3e3679d46a — *\"fix(platform-objects,plugin-auth): give API-key revoke/restore a working product route (#7727)\"*, PR #7769, merged today **14:30:34Z** — added `update` to `sys_api_key`'s `enable.apiMethods` so the Revoke button's PATCH would stop dying at the ADR-0049 method gate. That fix is correct on its own terms; it just crosses a conformance rule it had no way to see.\n\n## Why nobody saw it, and why this is the interesting part\n\nThe rule lives in **`packages/spec`**. The object it judges lives in **`packages/platform-objects`**. PR #7769 touched `platform-objects` and `plugin-auth` and **not** `spec` — so the affected-subset CI that gates PRs never ran the scan that would have failed. The queue's full suite is the first place it could go red, and it evidently did not gate there either.\n\nThe result: the regression is now on `main`, invisible to every PR that does not touch `spec`, and **charged in full to the next PR that does**. That was PR #7791 (#7739, an unrelated external-datasource error-envelope change) whose developer ran the complete spec suite locally — 378 files / 9953 tests green — on a worktree branched from `main` *before* 14:30, and then watched CI fail on a file it never opened.\n\nThis is the second instance today of the same structural gap; the first is recorded as the secondary point in #7706. **A cross-package conformance scan cannot be gated by an affected-subset CI keyed on the package the scan lives in.** The scan's real input set is every package it walks, and the CI filter does not know that.\n\n## What the fix is NOT\n\nDo not just add `bulk` to `sys_api_key` to make the scan quiet. #7769 deliberately kept `create`/`delete` off — keys are minted by `POST /api/v1/keys` and retired by revoking, not deleting — and bulk-updating API keys is very plausibly something this object should *not* offer. If that is right, then the conformance rule as written (\"single-record write implies `bulk`\") is too strong and needs an opt-out for objects whose write surface is intentionally narrow, rather than the object being widened to satisfy it.\n\nSo the decision is: **is `sys_api_key` wrong, or is the rule wrong?** That belongs to whoever owns ADR-0049's method-gate surface, not to whichever unlucky PR trips over it next. Both branches also want the CI-scope half fixed, or the next cross-package rule lands the same way.\n\n## Impact right now\n\nEvery open PR touching `packages/spec` is blocked on a failure it did not cause and cannot fix within its own scope. PR #7791 is one; it is otherwise green and is being held rather than re-queued, since re-queueing cannot fix a red that lives on the base branch.\n\n## Provenance\n\nDiagnosed by the `domain:cli` PM seat (seat post #6024) from PR #7791's `Test Core (1/3)` failure — job 93824832734, run 31505159559. The offending commit was identified by history on the named file, not inferred from the timing."
+}

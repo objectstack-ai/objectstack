@@ -1,0 +1,33 @@
+{
+  "number": 8109,
+  "kind": "pull_request",
+  "title": "fix(scripts): derive the skill-frame-freshness self-test fixture from the live documents",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "size/m",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-12T15:46:25Z",
+  "updated_at": "2026-08-12T16:34:55Z",
+  "closed_at": "2026-08-12T16:34:53Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-08-12T16:34:53Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/8109",
+  "body": "Fixes #8024\n\n## The defect, and the sharper shape it turned out to have\n\n`pnpm check:skill-frame-freshness` was red on a clean `main`, and red in the worst place. `package.json` runs it as `--self-test && (the real scan)`, so the fixture failure short-circuited the scan entirely:\n\n```\nnode scripts/check-skill-frame-freshness.mjs --self-test   EXIT=1  (fixture drifted)\nnode scripts/check-skill-frame-freshness.mjs               EXIT=0  frame is current\n                                                             4 copies / 3 files / 3 axes\n```\n\n**The gate was healthy; it was never reached.** There was no frame divergence to chase — consistent with `check:skill-frame-sync` staying green. The skill files are correct post-rewrite; the fixture was stale. Nothing under `.claude/skills/`, `skills/` or `.claude/agents/` is touched by this PR.\n\nWorth recording for the risk model: this gate is deliberately **not** wired into `lint.yml` (its header explains why — on a fresh CI merge ref it is a tautological green, and on any PR legitimately editing the frame it would be a false red). So nothing in CI could have reported it, and `main` stayed red until a PM ran it by hand at dispatch time.\n\n## Why the fixture, not the wording, is the fix\n\nThe fixture was a table of literal find/replace rules that manufactured the historical two-axis specimen by re-spelling the real documents' prose. The 2026-08-12 principles-only rewrite reworded one axis line, the rule matched nothing, and the fixture threw. The sibling `check:skill-frame-sync` — which *parses* rather than re-spells — survived the same rewrite untouched. That is the argument for deriving.\n\nThe specimen is now located the way the gates already read these documents:\n\n- the two count sentences — through each copy's own `start` / `binding` anchor;\n- the axis entry to drop — through the shared entry parser plus `AXIS_MAP`;\n- the in-file count mentions — through a shared mention scan.\n\nNothing in the fixture spells a sentence of the frame, so any rewording, re-indentation or reflow carries it along. A change of *structure* still fails, loudly, naming the file and line to edit.\n\n`check-skill-frame-sync.mjs` gains three exports for this (`ENTRY_START`, `axisEntryStarts`, `frameCountMentions`) and its own mention check now runs through the last of them, so the two scripts cannot drift apart about what a mention is. Cases 8 and 9, which broke a declaring sentence by spelling it out, are derived from the same anchors for the same reason.\n\n## The tautology question, measured rather than assumed\n\n\"Derive the fixture from the live files\" is vacuous when it makes a check compare files to themselves. It does not here, and the distinction is which half is derived: **what is derived is how the SPECIMEN is manufactured, never what the gate compares.** The gate's own comparison — this tree's structure against `origin/main` — never touches any of it. The self-test still commits the demoted specimen and the real documents as two commits in a temp repo and demands the gate call the older one behind.\n\nVerified by neutering the demotion in two layers, both predicted red before running:\n\n| tampering | result |\n| --- | --- |\n| `unmarkEntryLine` returns the line unchanged | red: `un-marking the axis entry left it still matching ENTRY_START` at `SKILL.md:604` |\n| the above, plus the `ENTRY_START` assertion bypassed | red: `the demoted copy reads unparseable`, expected 2 axes |\n\nA demotion that silently did nothing cannot produce a green run.\n\n## Reverse verification\n\nDirection predicted first in each case.\n\n**Reintroduce the stale fixture** (restore `origin/main`'s script). Predicted red on the fixture with the scan never reached — observed exactly that: `EXIT=1`, `Error: self-test fixture drifted`, and no scan summary line in the output.\n\n**Across the rewrite boundary.** The same three documents at `ab19075^` (before the principles rewrite) and at `HEAD`, each run through the old fixture and the new one:\n\n| documents | hand-copied table | derived (this PR) |\n| --- | --- | --- |\n| pre-rewrite (`ab19075^`) | RED — case 3, mention `三条评估轴` | GREEN, 12/12 |\n| today (`HEAD`) | RED — fixture throw | GREEN, 12/12 |\n\nThe top-left cell was **not** the direction I predicted (I expected green — the wording the table was written against), and it is the most useful result here: the hand-copied table had **already** stranded before the rewrite, in a second and independent way. Its mention rule spelled `沿三条固定评估轴`, which does not cover the bare `三条评估轴` mention in the same file, so its specimen was incoherent and the *sync* gate reported it — failing the independence case rather than throwing. The gate was red at `ab19075^` too, for a different reason than the card diagnoses. Two stranding events in one hand-maintained copy is the evidence for the derived route, not just the aesthetics of it.\n\nI could not date that second stranding: this clone's history is grafted at `f7dceed`, so `git log -S` attributes the mention to the graft boundary rather than to a real introducing commit.\n\n## Gates\n\nGreen locally: `pnpm check:skill-frame-freshness` (self-test 12/12 **and** the scan, which now runs at all), `pnpm check:skill-frame-sync` (12/12 plus its scan), `pnpm check:nul-bytes`. `node scripts/pm/dispatch-gates.mjs` on the two changed paths surfaces no additional named family.\n\n`eslint` was not run locally: no `node_modules` exists in this container and a full workspace install for two dependency-free root scripts is not a good trade. The applicable rule block for `**/*.mjs` is `no-restricted-imports` on `@objectstack/spec` subpaths, which neither file imports.\n\nNo changeset: root gate scripts, nothing released. `skip-changeset` applied.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01UWXewAQ8NK4gxrbonSAwvW)_"
+}

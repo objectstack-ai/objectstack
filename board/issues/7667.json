@@ -1,0 +1,35 @@
+{
+  "number": 7667,
+  "kind": "issue",
+  "title": "`upload-session-abort` c4: `failed`/`expired` sys_upload_session.status have no producer (enforce-or-remove)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "huangyiirene"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T10:09:45Z",
+  "updated_at": "2026-08-12T00:56:01Z",
+  "closed_at": "2026-08-12T00:56:01Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7667",
+  "body": "## Symptom\n\nA scan of all `sys_upload_session` rows after driving both the chunked-complete flow and the abandon/reap flow returns exactly `['in_progress', 'completed']`. `completing` is written transiently and immediately overwritten. The `failed` and `expired` statuses are never written by the service, yet the retention rule references them — so retention references two states the system can never enter.\n\n## Root cause\n\nLocated. In `packages/services/service-storage/src/objects/system-upload-session.object.ts` the `status` enum declares `failed` and `expired` (lines 104-105) and the retention `onlyWhen` is `{ status: { $in: ['completed', 'failed', 'expired'] } }` (line 134). A grep across `service-storage` finds `failed`/`expired` only in that enum, the retention clause, the `metadata-store.ts` type union, and tests — **no writer sets either status**. An expired session's row is TTL-reaped, never re-statused. This is an ADR-0049 enforce-or-remove candidate.\n\nFix shape: either give `failed`/`expired` a writer (status the row on abort-failure / TTL expiry before it is reaped) or drop them from the enum and the retention `onlyWhen`.\n\nRelated contract note (also captured in the checklist-maintenance card): the chunked-init route takes **`totalSize`**, not `size` (`packages/services/service-storage/src/storage-routes.ts:274`), and forces `chunkSize &gt;= 5 MiB`; the checklist step text says `size`.\n\n## Reproduction\n\nDrive a chunked upload to completion and abandon a second session so it is reaped; then scan `sys_upload_session.status` across all rows &rarr; only `['in_progress', 'completed']` ever appear. Grep `service-storage/src` for `'failed'`/`'expired'` &rarr; matches only in the enum, the retention clause, the type union, and tests — no producer.\n\n## Source\n\nExtracted from the QA run objectstack-ai/objectstack#7635 (framework 92f26f75, console 6314e87f)."
+}

@@ -1,0 +1,35 @@
+{
+  "number": 7800,
+  "kind": "issue",
+  "title": "finding: CLAUDE.md's first `git stash` alternative destroys uncommitted work in exactly the situation it is recommended for — `git checkout <your-branch> -- <path>` is not an undo",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "huangyiirene"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T15:09:47Z",
+  "updated_at": "2026-08-11T20:56:08Z",
+  "closed_at": "2026-08-11T20:56:08Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7800",
+  "body": "Filing unassigned. Grading is triage's call. This is a documentation hazard, not a code bug, but it belongs in the same class as the stash rule it sits inside: it silently destroys an agent's in-flight work.\n\n## The recipe\n\n`CLAUDE.md`'s \"Never `git stash`\" section offers four replacements. The **first** one is:\n\n```\ngit checkout origin/main -- <path>     # then: git checkout <your-branch> -- <path>\n```\n\nThe stated use case for that round-trip is comparing your tree against another ref and then putting your own version back — which in practice means **reverse verification**: revert the fix, watch the new test go red, restore the fix.\n\n## Why it does not work\n\n`git checkout <branch> -- <path>` copies the file **as committed on that branch** into the working tree, overwriting whatever is there. It has no knowledge of uncommitted edits. So the round-trip only returns your work if your work was already committed.\n\nDuring reverse verification it usually is **not** committed — that is the whole point of the exercise, and the recipe reads as though it were designed for it. Run the pair on an uncommitted edit and the second command does not restore your change, it restores `<branch>`'s older version and your edit is gone. There is no warning, no conflict, no \"would be overwritten\" refusal: `git checkout -- <path>` discarding local modifications is a normal, silent, exit-0 operation.\n\nThe other three replacements in the same block do not have this failure mode, because each captures the uncommitted state *first*:\n\n```\ngit diff > /tmp/wip.patch && git checkout -- <paths>   # then: git apply /tmp/wip.patch\ngit commit -am wip                                     # then: git reset --soft HEAD~1\ngit worktree add ../objectstack-<task>-cmp <ref>       # a second tree to compare against\n```\n\nThe hazardous line is the only one of the four that assumes a commit exists and does not say so.\n\n## It already cost an agent its work today\n\nThe developer agent on #7739 (PR #7791) ran exactly this during reverse verification, on an uncommitted edit, and lost the change. Its own report:\n\n> mid-task I ran `git checkout <branch> -- <path>` to restore the fix after reverse verification while the work was still UNCOMMITTED, which silently restored origin/main's version instead and destroyed the edit. Re-applied from context, verified byte-identical (same 69-insertion diffstat), and committed immediately.\n\nThat recovery worked because the agent still had the change in context and the package then passed its full suite (spec 378 files / 9953 tests, plus a re-run reverse verification, plus regenerated `api-surface` and `export-origins` baselines). An agent that hit this after a context compaction, or on a change too large to retype, would not have recovered.\n\n## A second, smaller point worth fixing alongside\n\nThe recovery above was checked with *\"verified byte-identical (same 69-insertion diffstat)\"*. A matching insertion count is **not** byte-identity — the same number of lines with different content produces the same diffstat. Nothing appears to have gone wrong here (the suites and the re-run reverse verification are the real evidence, and they are strong), but the reach for a diffstat is telling: this failure mode is silent, so the natural verification reach is a weak one. `git diff --stat` cannot answer \"did I retype it correctly\"; `git diff` against a saved patch, or `git hash-object`, can.\n\n## Suggested fix, if promoted\n\nEither annotate the first recipe with its precondition — *\"only after your work is committed; during reverse verification it is not\"* — or drop it entirely in favour of the patch/`wip`-commit forms, which are strictly safer and cover the same use case. Dropping it is probably better: the block exists to give agents a reflex that is safe **without thinking about it**, and a recipe whose safety depends on remembering an unstated precondition does not serve that purpose.\n\nNote the scope: `objectui`'s `CLAUDE.md` carries the same \"Never `git stash`\" section but lists **only** the three safe forms — the `git checkout origin/main -- <path>` line is unique to this repo's copy. So this is a one-file fix, and the two copies should probably be reconciled either way.\n\n## Provenance\n\nSurfaced by the `domain:cli` PM seat (seat post #6024) while reviewing the round-7 developer reports. Credit to the #7739 agent for reporting the incident in its own `scope_deviations` instead of quietly fixing it and moving on — the recipe's defect would otherwise be invisible."
+}

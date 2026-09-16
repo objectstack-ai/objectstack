@@ -1,0 +1,35 @@
+{
+  "number": 7661,
+  "kind": "issue",
+  "title": "[finding] `ctx.log.debug` is inferred, granted and documented, but the sandbox never installs it — a body calling it throws `TypeError: not a function`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T10:01:19Z",
+  "updated_at": "2026-08-12T04:27:46Z",
+  "closed_at": "2026-08-12T04:27:46Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7661",
+  "body": "Found while fixing #7448 (PR #7660). **Out of scope there** — that card is the observability of `ctx.log.{info,warn,error}`; this is a fourth method that does not exist. Filed rather than folded in, per Prime Directive #10. Unassigned — recording only.\n\n## The gap\n\n`ctx.log.debug` is declared on three surfaces and implemented on none.\n\n| Surface | Says | Anchor (`main` @ `245d1dc`) |\n|:---|:---|:---|\n| CLI capability extractor | matches `debug`, grants the `log` capability | `packages/cli/src/utils/extract-hook-body.ts:56` — `/ctx\\.log\\.(?:info\\|warn\\|error\\|debug)\\b/` |\n| Docs | lists `ctx.log.info / warn / error / debug` → `log` | `content/docs/automation/hook-bodies.mdx:317` |\n| Sandbox `ScriptContext` | declares `info` / `warn` / `error` only | `packages/runtime/src/sandbox/script-runner.ts:243` |\n| QuickJS VM install | installs `info` / `warn` / `error` only | `packages/runtime/src/sandbox/quickjs-runner.ts:639` — `for (const level of ['info', 'warn', 'error'] as const)` |\n\nSo an author writes `ctx.log.debug(…)`, the CLI reads it, infers `['log']` and emits a body whose declared capability is satisfied — and the call then throws inside the VM.\n\n## Measured\n\nHook body `ctx.log.debug('hi')` with `capabilities: ['log']`, run through `hookBodyRunnerFactory` + `QuickJSScriptRunner` with a logger that has a real `debug` method:\n\n```\nhook 'h' threw: TypeError: not a function\n```\n\nNot a silent drop — the hook fails. Under `onError: 'abort'` that aborts the write.\n\n## Why this is the `crypto.hash` shape again\n\n`script-runner.ts:249-258` documents the precedent in its own comment: `crypto.hash` carried a signature, a capability token **and** CLI build-time inference for a function the sandbox never installed, so the one call it typed threw inside the VM. It was **removed** rather than implemented (#4391, ADR-0049 enforce-or-remove). `ctx.log.debug` is the same shape one member over — and unlike hashing it has no security-surface argument against implementing it.\n\n## Decision needed (enforce-or-remove)\n\n- **Enforce** — add `debug` to the VM install loop and to `ScriptContext['log']`. Cheap; `Logger.debug(message, meta)` already exists on the contract (`packages/spec/src/contracts/logger.ts:15`), and after #7448 the capability is served from a real `Logger` that has it.\n- **Remove** — drop `debug` from the extractor regex and the docs table, so the three surfaces agree on three methods.\n\nEnforcing looks right here (a body emitting debug-level diagnostics is exactly what `--log-level debug` is for), but it is a capability-surface call, not a bug fix, so it should be decided rather than assumed.\n\n## Dedup\n\nSearched open issues for `ctx.log`, `log.debug`, `capability log`, `extract-hook-body`: no existing card. #7448 is the adjacent one and covers only the three installed methods."
+}

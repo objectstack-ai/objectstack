@@ -1,0 +1,35 @@
+{
+  "number": 7747,
+  "kind": "issue",
+  "title": "finding: a notify flow-run summary reports success/acted:1 while the delivery dead-lettered — the dead-letter is absent from the run summary",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "huangyiirene"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T12:26:15Z",
+  "updated_at": "2026-08-12T02:09:42Z",
+  "closed_at": "2026-08-12T02:09:42Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7747",
+  "body": "## Symptom\n\nA `['push']` notification probe's flow-run summary reports `status:'success', acted:1` while **nothing was delivered**. The dead-letter is visible in `sys_notification_delivery` (the `push` channel is unregistered — `status:'dead'`, `error: \"channel 'push' not registered\"`) but not in the flow-run summary — so an operator reading the run summary sees a successful action that in fact delivered nothing.\n\n## Root cause\n\nNot located by the run. The flow-run summary's `acted` count (the selected/acted/skipped surfacing added by #4354) treats the notify node as acted on enqueue and does not reconcile against the delivery outcome recorded in `sys_notification_delivery`, so a dead-lettered delivery is still counted as a successful act. Split from the run's \"Notes worth keeping\" #6 as a real observability defect (the summary an operator reads disagrees with the durable delivery record). Fix spans the notify-node acted accounting and the delivery-outcome reconciliation (`packages/services` automation/messaging).\n\nStale-premise check: present on `origin/main` (the run summary does not reflect delivery dead-letters).\n\n## Reproduction\n\n1. Boot without the `push` channel registered.\n2. Fire a flow whose notify node targets `['push']`.\n3. Read the flow-run summary, then `sys_notification_delivery`.\n\nExpected: the run summary reflects the failed/dead-lettered delivery (not `acted:1` success). Actual: run summary `status:'success', acted:1`; `sys_notification_delivery` shows the delivery dead-lettered.\n\n## Source\n\nExtracted from the QA run objectstack-ai/objectstack#7690 (framework 92f26f75, console 09987b680)."
+}

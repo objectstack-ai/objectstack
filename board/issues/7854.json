@@ -1,0 +1,34 @@
+{
+  "number": 7854,
+  "kind": "issue",
+  "title": "`packages/spec` prose still calls driver-memory's `$contains` fold open after #7723 closed it",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T20:44:50Z",
+  "updated_at": "2026-08-12T03:14:17Z",
+  "closed_at": "2026-08-12T03:14:17Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7854",
+  "body": "Found while implementing #7117 on `packages/drivers/driver-memory`. The driver-memory copies of this prose are corrected in that PR; these two live in `packages/spec` and dragging them into a `driver-memory` patch would pull a second package (and a second changeset) into an unrelated diff, so they are filed instead.\n\n## Measured on `origin/main` @ `69fde55`\n\n#7723 took the `i` flag off `MemoryDriver.filterSubstringPattern`, putting the `$contains` family on #4706 Q2 = A across every face of that package, and `pnpm check:driver-conformance` now reports **40 covered / 0 DEBT / 0 exempt** with driver-memory's `FILTER_TEXT` cell `ok`. Two spec docblocks still describe the pre-#7723 world:\n\n- **`packages/spec/src/data/filter.zod.ts:521`** — the per-backend table row:\n\n  > \\| `driver-memory` — query path and analytics face \\| INSENSITIVE, full Unicode \\| `new RegExp(escapeRegex(v), 'i')` — the last one standing, until #6682 \\|\n\n  Both cells are now wrong. The rule is `new RegExp(escapeRegex(v))`, case-exact, and it is not \"the last one standing\" — nothing is.\n\n- **`packages/spec/src/data/filter-text-conformance.ts:95`** — the `@see` line:\n\n  > `@see https://github.com/objectstack-ai/objectstack/issues/6682 (the $contains family — mongodb landed, memory open)`\n\n  The parenthetical contradicts that file's OWN header 37 lines earlier, which #7723 updated correctly (`:58` — \"`driver-memory` answers it too since #6682's second half: the `i` flag came off …\"). So this one is internally inconsistent, not merely stale.\n\n## Why it is worth an issue rather than absorbing\n\n`filter.zod.ts`'s table is the spec's single statement of what each backend means by the `$contains` family — the thing a driver author reads before writing an arm. A row that says driver-memory folds Unicode is an instruction to match a behaviour that no longer exists, and it is the same document the #4706 rulings are anchored in. Prime Directive #10's corollary applies in reverse: declared ≠ enforced is a defect in either direction.\n\n## Scope\n\nTwo docblock edits. No code, no schema, no generated baseline — a `skip-changeset` docs PR. Worth grepping `#6682` across `packages/spec` in the same pass; `filter-text-conformance.ts:259-271` reads correct today but is written around the same distinction and should be re-read rather than assumed."
+}

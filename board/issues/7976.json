@@ -1,0 +1,35 @@
+{
+  "number": 7976,
+  "kind": "issue",
+  "title": "[finding] The authz conformance ledger checks only that a cited proof FILE EXISTS, never that it proves the row",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-12T09:18:03Z",
+  "updated_at": "2026-08-12T13:49:58Z",
+  "closed_at": "2026-08-12T13:49:58Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7976",
+  "body": "## Symptom\n\n`AUTHZ_CONFORMANCE` (`packages/qa/dogfood/test/authz-conformance.matrix.ts`) is the durable encoding of the ADR-0056 D10 audit: one row per authorization primitive, `enforced` rows naming their runtime site, high-risk rows additionally citing an end-to-end dogfood proof. Its own file header states the contract:\n\n> The companion test (`authz-conformance.test.ts`) asserts the matrix is complete **and that every referenced proof file exists**\n\nThat is exactly what it does, and no more. `checkLedger` (`packages/verify/src/conformance.ts:77`):\n\n```ts\nif (r.proof && !existsSync(join(opts.proofRoot, r.proof))) problems.push(`${r.id}: proof missing on disk: ${r.proof}`);\n```\n\n**Existence — not that the proof proves the row.** So a row may cite a file that exercises a *neighbouring* primitive and stay green forever. The shape is not hypothetical bookkeeping: `rls-read` (`:37`) and `rls-by-id-write` (`:39`) cite the **same** file, `rls-fixture.dogfood.test.ts`, and nothing in CI distinguishes \"this file proves both\" from \"this row is borrowing the other's credibility\".\n\n## Why it matters\n\nThis is the ADR-0049 `declared ≠ enforced` shape one layer up: the *record* of enforcement is gated, but the gate cannot see whether the record is true. A false `enforced` survives a green CI indefinitely, and the matrix is the artifact ADR-0056 D10 exists so that reviewers do **not** have to re-derive the audit by hand.\n\n## Evidence it is the live mechanism, not a theoretical one\n\nInvestigated under #7685 / PR #7975. Both rows the card accused (`rls-by-id-write`, `controlled-by-parent`) turned out to be **correctly** `enforced` — each cited proof was checked line by line and both genuinely exercise their primitive with a persona holding full object CRUD, so refusals are the record gate. The point is that establishing that took a manual read of two proof files and a live ablation; **no gate could have told the reviewer either way**, which is precisely the gap.\n\nThat review did surface one thing the gate would also not have caught: `rls-by-id-write`'s `enforcement` field named only the #1994 pre-image re-read, which the ablation proved is a **no-op on its own** under select-only authoring (16 of 20 probed showcase objects became `rls-hole` with that re-read fully present). Corrected in PR #7975 — by hand, by eye.\n\n## Repro\n\n1. `packages/qa/dogfood/test/authz-conformance.matrix.ts:37,39` — two rows, one proof file.\n2. `packages/verify/src/conformance.ts:77` — the only assertion made about `proof`.\n3. Point any `enforced` row's `proof` at an unrelated but existing dogfood test file → `authz-conformance.test.ts` stays green.\n\n## Suggested direction (not prescriptive)\n\nBind row → proof by **name**, not just by path. Several dogfood proofs already carry a `@proof: <id>` tag in their header for the spec liveness registry (`packages/spec/scripts/liveness/proof-registry.mts`), e.g. `rls-fixture.dogfood.test.ts` carries `@proof: rls-by-id-write`. Reusing that channel would make a row's citation checkable.\n\n⚠️ It is not a drop-in: the liveness ids and the matrix row ids are **different vocabularies** today (`controlled-by-parent.dogfood.test.ts` is tagged `@proof: cbp-controlled-by-parent` while its matrix row id is `controlled-by-parent`), and most cited proofs carry no tag at all. So this needs a deliberate reconciliation across ~30 rows — a ratchet with a measured starting ledger, not a flag flip. Sizing that is the first task, not the fix.\n\n## Source\n\nFound while executing #7685 items (i)/(ii) (PR #7975). Filed unassigned — recording a finding, not claiming it."
+}

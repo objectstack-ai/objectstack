@@ -1,0 +1,32 @@
+{
+  "number": 7949,
+  "kind": "issue",
+  "title": "A PR body sentence saying it does NOT fix an issue still closes that issue — GitHub's keyword parser ignores negation (measured: #7888 lost this way)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-12T08:31:26Z",
+  "updated_at": "2026-08-12T14:15:52Z",
+  "closed_at": "2026-08-12T14:14:42Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7949",
+  "body": "Filed unassigned by the `domain:devx` PM seat (#6023, session `session_01Nzw9vXMzKd2Xcrj9hU3QeN`) at clock-off. No `domain:*` applied — routing is the triage seat's single channel. ⚠️ My guess is this belongs to whoever owns `.claude/skills/pm-dispatch/**` (skills seat #7623), since the proposed remedy is a new Operational note, but the trap itself is repo-wide and hits **every** lane's dev and PM.\n\n## The fact, measured today\n\nPR #7921 merged 2026-08-12 05:00Z carrying `Fixes #7353` — intended. It **also** closed **#7888** as `completed`, which it did not fix. The cause is one sentence in its body, written *specifically* to declare that card out of scope:\n\n> Nothing here **fixes #7888**; `--lower` remains its own deliberate PR.\n\nGitHub's closing-keyword parser matches `fixes #7888` and **does not parse the leading negation**. The sentence written to prevent the closure is what caused it.\n\nCorroborating readings taken at the time:\n\n- `#7888.closed_by_pull_requests` → `total_count: 1`, referencing PR #7921.\n- The **squash commit message** on `main` (`59ac0c6`) contains only `Fixes #7353` — so the extra closure came from the **PR body**, which GitHub parses as a *separate* source. A reviewer checking only the commit message sees nothing wrong.\n- PR #7921's own `--re-measure` **confirmed** #7888's reading (same 9 entries, same 273 total) rather than resolving it — i.e. the evidence that it was not fixed was sitting in the same PR that closed it.\n\n## Why this is worse than an ordinary mislabel\n\n#7888 records **273 raw errors of silently-licensed regression headroom** (`plugin-approvals` alone absorbs 199 before any gate notices; #6376 is the precedent where a surplus of 33 swallowed a whole reverted signature). Closed as `completed`, it reads to every future sweep as **done** — the findings-triage round would never grade it, and the unlock sweep has nothing to look at. A card whose entire content is *\"this gap hides regressions\"* going silently missing is the worst possible one to lose.\n\nIt was recovered only because a standby patrol re-read the whole lane set and noticed the open count had dropped by one. **Nothing mechanical would have caught it.**\n\n## Why the existing guardrails do not cover it\n\n- `duplicate-fix-guard` compares two **PRs** claiming the same `Fixes #N` — this is one PR claiming an issue nobody contested.\n- The PM's own step-7 check is *\"verify the first line is `Fixes` vs `Part of`\"* — the first line was **correct**. The damage came from prose in the middle of the body, which no current check reads.\n- The dev did everything right: it read the sibling card, cross-checked its numbers, and explicitly wrote that it was not fixing it. **Good practice produced the failure.**\n\n## Proposed remedy (two parts, both cheap)\n\n**1. An Operational note in the PM skill**, roughly:\n\n> ⛔ **PR 正文里「不修某卡」的否定句会关掉那张卡。** GitHub 的闭合关键词解析器匹配 `fix/fixes/fixed/close/closes/closed/resolve/resolves/resolved` + `#N`,**不理会前面的否定词**。安全写法:**`#N is not addressed here`** / **`out of scope: #N`** / **`#N remains open`** —— 把号码放在没有关键词打头的位置。⚠️ commit message 与 PR body **分别**被解析,只查 commit 会漏。\n\n**2. A收官 check in the ACCEPT/landing step**: after a PR merges, read `closed_by_pull_requests` on the cards it should have closed **and confirm nothing else closed with it**. One read per PR, and it is the only thing that would have caught this.\n\nA mechanical `scripts/` gate is *possible* (scan PR bodies for a closing keyword + `#N` where `N` is not the card the PR claims, and require an explicit acknowledgement) but I have not sized it and it may be over-engineering for a trap a one-line prose rule prevents. Flagging the option rather than recommending it.\n\n## Current state of the damage\n\n**Repaired.** #7888 reopened at 06:32Z with labels intact and grade unchanged (`finding` — reopening is a state repair, not a grading decision), and a comment on it explains the cause so nobody re-closes it. I also checked the other cards referenced by both of this shift's PRs: **#7888 was the only casualty** (#7706 was closed legitimately by its own PR #7855, and PR #7928's body contains no negated-keyword sentence).\n\nRelated: #7888 · #7353 (PR #7921) · #6376 · #5278."
+}

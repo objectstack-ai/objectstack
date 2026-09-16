@@ -1,0 +1,35 @@
+{
+  "number": 8043,
+  "kind": "pull_request",
+  "title": "fix(plugin-webhooks): re-arm an encrypted-secret webhook when the CryptoProvider registers (#8022)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-12T13:18:58Z",
+  "updated_at": "2026-08-12T14:37:16Z",
+  "closed_at": "2026-08-12T14:37:15Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": "2026-08-12T14:37:15Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/8043",
+  "body": "Fixes #8022\n\n## What was wrong\n\nFor ~60s after every restart, a webhook whose `signing_secret` is encrypted — the population #7799 created — was **not subscribed**. A record change in that window produced no delivery **and no `sys_http_delivery` row at all**: no dead letter, no retry, no durable trace, while `GET /api/v1/data/sys_webhook/` kept reading `active: true`. It self-healed at the next periodic refresh, so it was invisible to anyone not watching the window.\n\n## The fail-closed behaviour is unchanged\n\nDropping a subscription whose stored key cannot be recovered — rather than delivering it unsigned — is #7799's whole point and still holds. No unsigned delivery, no cleartext fallback, no weakened refusal. What was wrong is that a fail-closed drop **outlived its own cause**.\n\n## Root cause: an ordering, not a race\n\nThe filer read it off two log lines ~1.3s apart. It is stronger than that — it is deterministic. Plugins run inside `kernel:ready`, which `runtime.start()` completes (`packages/core/src/kernel.ts` Phase 3); the composition root calls `engine.setCryptoProvider(...)` only *after* `runtime.start()` returns, unconditionally and on every host (`packages/cli/src/commands/serve.ts`, `packages/verify/src/harness.ts`). So `AutoEnqueuer`'s first cache build **always** precedes the capability it needs, drops every secret-bearing row on what it could see, and nothing re-reads until the periodic refresh up to 60s later.\n\n## The shape landed\n\n`ObjectQL.onCryptoProviderChange(listener)` reports the registration, fired after the provider is in place. `AutoEnqueuer` subscribes **before** its first build — the registration can land at any moment from `start()` onward, including mid-refresh — and rebuilds the cache when it fires.\n\nEvent-driven, not a shorter poll. Chosen over the alternatives because it fixes **every** host rather than one: moving the wiring earlier in `serve.ts` leaves `apps/cloud`, `packages/verify`, and every embedder with the same window, and a retry ladder only shrinks the hole. The engine is the sole party that knows the moment the provider arrives.\n\nThe re-arm deliberately does not join an in-flight `refresh()`: the build most likely running at that instant is the pre-registration one, so joining it would report success having re-armed nothing.\n\nThe channel is feature-detected, exactly as `resolveSecretField` already was — this plugin takes no dependency on `@objectstack/objectql`. An engine without it keeps today's behaviour with the periodic refresh as backstop.\n\n## The drop is no longer quiet\n\nA subscription dropped for an unresolvable key now reports at `error` with the consequence and the fix in the message, carrying an ADR-0112 `code`/`status` pair (`INTERNAL_ERROR`/500) in its metadata — the same pair the seeder's refusal for the same cause already carried. Per AGENTS.md \"Degradation log levels\" it is said **once** per outage per webhook rather than every refresh cycle; a webhook that recovers and breaks again is loud again.\n\n## Half (b) — durability — is NOT closed here\n\nA drop that leaves a `sys_http_delivery` row would need `IHttpOutbox` to admit a row that is durable but **never sendable**, and today it cannot: `enqueue()` only mints `pending`, and `redeliver()` resets any terminal row back to `pending` for a byte-for-byte replay. A row parked for a missing key has no signature, so the existing admin redeliver endpoint would send it **unsigned** — re-opening #7799 through a new door. That wants a design decision (a new column on the `sys_http_delivery` platform object, plus a `redeliver` refusal), not a rider on this fix. Recommending its own card; reasoning in full in the issue report.\n\n## Verification\n\n- **Reverse-verified**: the window test is **red on `origin/main`** (2 failed / 10 passed of 12 — `expected [] to have a length of 1`) and **green after** (12/12). It runs with `refreshIntervalMs: 0`, so it cannot pass by waiting — the only thing that can re-arm the cache is the registration itself.\n- Asserted on the **durable record** (the `sys_http_delivery` row and the receiver's HMAC), never on cache internals or call counts.\n- #7799/#7722 invariants re-asserted in the same tests: the delivery is signed from a key that exists only as ciphertext, the row carries `signature` and not the key, and while the key stays unresolvable nothing is delivered at all.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01FuYKU5d8xPfHSZyASNsyia)_"
+}

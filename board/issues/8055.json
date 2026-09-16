@@ -1,0 +1,36 @@
+{
+  "number": 8055,
+  "kind": "issue",
+  "title": "`POST /api/v1/automation` answers 500 INTERNAL_ERROR for a malformed flow body — including the #4277 undeclared-config-key refusal the #7545 ruling leans on",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-12T13:40:00Z",
+  "updated_at": "2026-08-12T17:31:14Z",
+  "closed_at": "2026-08-12T17:31:14Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8055",
+  "body": "Same error-class mismatch #7535 just fixed on the sibling `POST /automation/:name/toggle` route.\n\n## Symptom\n\nFour distinct malformed registration bodies, all answered **500 INTERNAL_ERROR** where 400 is the right class. Reproduced 2×:\n\n1. A node missing `label` → 500 carrying a **raw zod issue array**: `{expected:'string', code:'invalid_type', path:['nodes',0,'label']}`\n2. An unknown node key → 500 `{code:'unrecognized_keys', keys:['next'], path:['nodes',0]}`\n3. A malformed `try_catch` region → 500 `\"try_catch 'g' try: invalid region — Invalid input: expected object, received array\"`\n4. **The important one** — an undeclared node config key → 500:\n   > `Flow 'x' rejected: 1 undeclared config key(s) (#4277). - node 'n' (notify): unknown config key \\`totallyBogusKey\\` at config.totallyBogusKey. It is not declared by this node type's configSchema…`\n\n**Expected** 400 `VALIDATION_FAILED` with an ADR-0114 `details.fields[]`, as the sibling `/toggle` route now returns and as the descriptor routes return.\n\nContrast controls run in the same pass: a well-formed body still registers 200, and the unknown-flow toggle correctly answers 404 `RESOURCE_NOT_FOUND`. So the catch arm on this one handler is mapping caller-input refusals to `INTERNAL_ERROR`.\n\n## The substance is fine — only the class and the message shape are wrong\n\nThe #7545 premise still holds: the refusal **is** hard and **is** located. Case 4 in particular produces exactly the self-correcting message #4277 designed. It is delivered under an HTTP status that says the opposite.\n\n## Impact — the one #7535 spelled out\n\nAn authoring client with retry-on-5xx will retry a request that can never succeed. And an agent authoring a flow reads \"the server broke\" instead of \"your metadata is wrong\" — the inverse of the self-correcting shape #4277 chose. Case 1 additionally leaks a raw zod issue array where the house envelope belongs.\n\n## Severity\n\nP3.\n\n## Source\n\nFound by the platform checklist retest of `automation.flow-node-type-matrix` (framework `279ee48a`), while verifying the #7545 ruling. Held no clause of that item.\n"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 7744,
+  "kind": "issue",
+  "title": "finding: datasource-admin route-ledger gap (D6) + an unknown-driver draft is accepted 201 with status:'error'",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T12:25:43Z",
+  "updated_at": "2026-08-12T10:06:23Z",
+  "closed_at": "2026-08-12T10:06:23Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7744",
+  "body": "## Symptom\n\nTwo observations from `datasource-admin-lifecycle` (the item otherwise passes — secret handling is exemplary, and refusals attribute to the right service so the #4249 mis-attribution is absent):\n\n(a) A draft naming an **unknown driver** is accepted **201** with `status:'error'` rather than refused — health-reporting rather than validation.\n\n(b) **D6 confirmed** — the admin CRUD routes actually mounted carry **no route-ledger entry**, and the ledgered spelling differs from the live one.\n\n## Root cause\n\n(b) The live admin CRUD routes are mounted at `/api/v1/datasources/:name/remote-tables` (`packages/services/service-datasource/src/admin-routes.ts`, ~line 200), but the route ledger (`packages/rest/src/rest-route-ledger.ts`, ~lines 321-323) lists only the **federation** family under the different spelling `/api/v1/datasources/:name/external/tables` — so the mounted admin routes have no ledger entry and the ledgered path does not match the live one. Same tranche-3 route-ledger parity family as #7526 (and the datasource-admin error-attribution family #4225 / #4249).\n\n(a) The datasource-admin draft-create path accepts an unknown-driver draft and records `status:'error'` on the row instead of validating the driver name at create time (`packages/services/service-datasource`).\n\nFix per site: the ledger entry belongs in `packages/rest`; the draft driver-name validation in `packages/services/service-datasource`.\n\nStale-premise check: present on `origin/main` (ledger still spells `/external/tables`; live mount still `/remote-tables`).\n\n## Reproduction\n\n(b) Diff the mounted datasource-admin routes against `packages/rest/src/rest-route-ledger.ts`: the five datasource ledger entries are all federation (`/external/tables`) ones; the live `/remote-tables` CRUD routes appear nowhere.\n\n(a) `POST` a datasource draft naming a driver that is not registered.\n\nExpected: (b) every mounted route has a ledger entry at its live spelling; (a) the unknown-driver draft is refused. Actual: (b) no ledger entry, spelling mismatch; (a) 201 with `status:'error'`.\n\n## Source\n\nExtracted from the QA run objectstack-ai/objectstack#7690 (framework 92f26f75, console 09987b680)."
+}

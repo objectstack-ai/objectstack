@@ -1,0 +1,35 @@
+{
+  "number": 7843,
+  "kind": "pull_request",
+  "title": "fix(service-analytics): fence `$icontains` comparands on the analytics `where` door (#7693)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T20:26:35Z",
+  "updated_at": "2026-08-11T21:15:44Z",
+  "closed_at": "2026-08-11T21:15:42Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": "2026-08-11T21:15:42Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/7843",
+  "body": "Fixes #7693\n\n## The measured defect\n\n`$icontains` was the one text-pattern operator the #5234 comparand fence never covered on the analytics `where` door. It arrived **after** the fence: #6520 added it to `filter-normalizer.ts`'s `MONGO_TO_CUBE_OP` and gave `read-scope-sql.ts`'s arm its `assertRenderableText` call, but not the entry in `comparand-shape.ts`'s `TEXT_PATTERN_OPERATORS` — the set the `where` door's shape gate reads.\n\nRe-measured on `origin/main` @ `b54aaab` (the card measured @ `5823d593d`, triage re-verified @ `a3c0865`; the premise holds unchanged on today's tip):\n\n| filter | analytics `where` door | `read-scope-sql` |\n|---|---|---|\n| `{name: {$contains: {foo: 1}}}` | REFUSED (`INVALID_FILTER` / 400) | REFUSED (`READ_SCOPE_COMPILE_FAILED` / 500) |\n| `{name: {$icontains: {foo: 1}}}` | **compiled** — leaf `{operator: 'icontains', values: [{foo: 1}]}` | REFUSED |\n\nand the leaf reached the statement, verbatim from the reproduction:\n\n```\nsql    = … WHERE translate(name, 'ABC…', 'abc…') LIKE translate($1, 'ABC…', 'abc…') ESCAPE $2 …\nparams = [\"%[object Object]%\",\"\\\\\"]\n```\n\nThat is #5234's defect at the operator its fence was never extended to — a parameterised, syntactically perfect `LIKE` pattern nobody wrote, which a row whose text really is `[object Object]` matches. It is also a split **inside one package**, the shape #5234 / #5332 / #5567 each spent a round removing. #7158 closed the same gap at the objectql `having` face; this is the third and last.\n\n## The change\n\nOne entry in `TEXT_PATTERN_OPERATORS`. The gate in `filter-normalizer.ts` is generic over the set, so nothing else in the compiler moves.\n\n**The consumer measurement the card required** (quoted-exact-name grep across the repo, not just the package): inside `service-analytics` the set has exactly **one reader** — `strategies/filter-normalizer.ts` :358 (import) and :577 (the gate in `assertCompilableComparand`) — plus its own definition. Every remaining hit is either a comment or `driver-sql`'s **module-private** set of the same name (`sql-driver.ts:1201`), a separate declaration in a package this one does not depend on; it has listed `$icontains` since #6520, which is why the drivers were already right. So the fix really is one entry, measured rather than assumed.\n\n## What changes for a caller\n\nA malformed `$icontains` comparand on the `/analytics` `where` door — an object, a `{$field}` reference, or an array — is now refused with `INVALID_FILTER` / 400 and the same sentence `$contains` gets (asserted byte-identical apart from the operator name), instead of compiling into a pattern that matches the wrong rows. Well-formed comparands are untouched: strings, numbers, `null`, booleans and `Date`s compile exactly as before, ASCII fold and metacharacter escaping included. The read-scope door is unchanged — it already refused these shapes.\n\n## Tests\n\n- **`cross-field-reference-refusal.test.ts`** — #7598's RECORDED GAP pin is **flipped**: it used to assert the `where` door *returned* a leaf, and now asserts the refusal on both doors, the plain `{foo: 1}` shape, the array shape, and a narrowness control. The shared #5222 corpus is driven **whole** there — the `CROSS_FIELD_REFUSALS.filter(… !includes('$icontains'))` exclusion is gone, so `$icontains against a field reference is refused` is now answered on the `where` door too.\n- **`comparand-shape-refusal.test.ts`** — the LIKE-family loops gain their fifth member on both doors (the read-scope arm is the no-regression control; it was already green).\n\n**Reverse verification**, direction predicted before running: delete the entry and re-run the whole package → **5 failed / 1553 passed** (with it: 1558 / 0). The five are exactly the `where`-door cells — three new ones, the now-unfiltered corpus case, and the fifth loop member. Every read-scope `$icontains` assertion and every narrowness control stayed **green**, which is the other half of the proof: that door's refusal comes from its own `assertRenderableText`, and a well-formed comparand compiles identically in both states, so the entry closes a hole rather than retiring the operator #6520 added.\n\n## Gates run locally\n\n| gate | result |\n|---|---|\n| `pnpm --filter @objectstack/service-analytics... build` | ✅ pass (closure, incl. `driver-sql`) |\n| `service-analytics` package suite | ✅ 72 files / 1558 tests pass |\n| reverse verification (entry removed) | ✅ 5 failed / 1553 passed, exactly the predicted cells |\n| `pnpm check:docs-audit-scope` | ✅ pass |\n| `eslint` on the three changed files | ✅ clean |\n| `tsc --noEmit` (package) | ⚠️ 10 **pre-existing** errors, all in untouched test files (`measure-source-field-gate.test.ts`, `objectql-timedimension-projection.test.ts`); zero in the files this PR touches |\n| changeset | ✅ `.changeset/icontains-comparand-fence-analytics-where.md` (patch — accept/reject behavior change on a served door) |\n\nNo new test fakes were added, so the engine-double dispatch gate does not apply. No `content/docs/releases/` edits.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01M7h5X9FCDSAkT531cJZ9D2)_"
+}

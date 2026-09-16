@@ -1,0 +1,36 @@
+{
+  "number": 7741,
+  "kind": "issue",
+  "title": "authoring-validation-not-persisted: a flat view body is accepted, published and reported valid, then expands to nothing — the write door judges by the wire union, not the strict ViewSchema",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:spec",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "huangyiirene"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T12:25:22Z",
+  "updated_at": "2026-08-12T15:48:01Z",
+  "closed_at": "2026-08-12T15:48:01Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7741",
+  "body": "## Symptom\n\nA **flat** view body — a single view's config written where the container belongs — is accepted silently by the runtime metadata door.\n\n- `PUT /api/v1/meta/view/&lt;name&gt;?mode=draft` with `{name, type:'grid', columns:[…], data:{…}}` → **200** `state:'draft'` (and **200** `state:'active'` on the direct door)\n- publish → **200**\n- read-back carries `_diagnostics:{valid:true}`\n\nReproduced on 3 names. **The guidance for this exact body exists and fires elsewhere**: `defineView(body)` on the *same* body throws a located message — *\"Unrecognized key(s) on this view container: `type`, `columns`, `data`. • `type` belongs to a single VIEW, not to the container. Wrap it: `defineView({ list: { … } })`\"*.\n\n**Consequence measured:** `expandViewContainer(...)` → `[]`, and `GET /meta/view?object=…` omits it, while `GET /meta/view` lists it as a bare unbound row. Registered, reported valid, renders nothing — precisely the outcome the strict container shape was closed to prevent.\n\n## Root cause\n\nTwo schemas judge the same body, and the write path is on the lenient one.\n\n- `getMetadataTypeSchema('view')` resolves to `ViewMetadataSchema` (`packages/spec/src/kernel/metadata-type-schemas.ts:102`), a 4-member **wire union** (`packages/spec/src/ui/view.zod.ts`, ~line 2941 on the run's build). Its precondition `assertViewIdentity` passes anything that `speaksViewVocabulary` accepts — and the message it would otherwise emit names *\"an inline view config (`type`, `columns`, `sections`, `filter`, …)\"* as a legitimate arm. A body carrying `type` + `columns` therefore never reaches a rejection.\n- The guidance-carrying **strict** `ViewSchema` (`view.zod.ts:2327` on `origin/main`; line 2358 on the run's build) is only on the `defineView`/build path.\n\nVerified by hand during the run: `ui.ViewSchema.safeParse(body).success = false` with the guidance; `getMetadataTypeSchema('view').safeParse(body).success = true`.\n\n**Stale-premise check:** re-verified on `objectstack` `origin/main` (`00e9196`). The union, the inline-config arm and the `assertViewIdentity` precondition are all present; the strict `ViewSchema` is still build-path only.\n\n## ⚠️ This needs a direction ruling before implementation\n\nThe inline arm looks **deliberate** — #6391 named the union's members precisely so a consumer could reference them contractually, and #5599 / #5074 sit behind the current shape. The defect as measured is not \"the union has four members\"; it is that **the door accepts a `view` it then cannot expand, and stamps it valid**. Two candidate directions, and picking wrong re-opens a settled contract:\n\n- **A — re-word the checklist item / accept the shape as authored.** If a bare inline config is a legitimate stored `view`, then the bug is that it is reported `valid:true` while being unreachable, and the fix is on the diagnostics/expansion side, not the schema.\n- **B — make the inline arm require an object binding.** An inline config that cannot name the object it attaches to cannot be expanded or served, so requiring the binding turns a silent dead row into a located refusal at the door — at the cost of tightening a published union arm.\n\nNeither is safe to guess. Please rule before this is dispatched.\n\n**Related, not duplicate:** #5599 (closed) is the ancestor of the current union — it reported that `saveMetaItem({item:{nope:1}})` stored a junk active view. That hole was closed by the identity precondition; this card is the residue the precondition deliberately lets through, because a flat view config *does* speak view vocabulary.\n\nAdjacent and worth reading together: #7736 (this run) — a *container* body reaches the same door and is stored without ever being expanded either. The two cards meet at the same place: the runtime write door has no expansion step, so neither shape can produce a servable view.\n\n## Reproduction\n\n1. Boot the showcase with writable runtime packages.\n2. `PUT /api/v1/meta/view/&lt;name&gt;?mode=draft` with `{name:'&lt;name&gt;', type:'grid', columns:[…], data:{…}}` → 200 `state:'draft'`.\n3. Publish → 200; `GET /api/v1/meta/view/&lt;name&gt;` → `_diagnostics:{valid:true}`.\n4. `GET /api/v1/meta/view?object=&lt;obj&gt;` → the view is absent; `GET /api/v1/meta/view` lists it as a bare unbound row.\n5. Contrast: call `defineView(body)` on the identical body — it throws the located \"Wrap it: `defineView({ list: { … } })`\" guidance.\n\n## Routing note\n\nFiled `domain:spec` rather than `domain:metadata`: both located files are in `packages/spec` (`ui/view.zod.ts`, `kernel/metadata-type-schemas.ts`), and every candidate fix direction above edits a schema or its diagnostics. If the ruling lands on A and the work turns out to be expansion-side, re-route to `domain:metadata` at that point.\n\n## Source\n\nExtracted from the QA run objectstack-ai/objectstack#7695 (framework 92f26f75, console 09987b680)."
+}

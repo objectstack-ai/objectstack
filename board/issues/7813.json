@@ -1,0 +1,35 @@
+{
+  "number": 7813,
+  "kind": "pull_request",
+  "title": "feat(spec): Field.number gains useGrouping presentation hint (#7768)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T15:41:48Z",
+  "updated_at": "2026-08-12T09:50:29Z",
+  "closed_at": "2026-08-12T09:50:28Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-12T09:50:28Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/7813",
+  "body": "Fixes #7768\n\n## Problem\n\n`Field.number`'s only presentation-adjacent property is `scale`, which governs\ndecimal places, not digit grouping. Console number renderers construct\n`Intl.NumberFormat` with grouping unconditionally ON, so an ordinal/identifier\ninteger authored as `Field.number({ scale: 0, min: 1900 })` (a year) renders\n`2,026` everywhere it is shown. Downstream apps hit this three times\n(hotcrm-heimao#35, #40, #59), each time converting the field to `Field.text`\nto escape the comma — trading away numeric semantics (range validation,\nsort-as-number, arithmetic) for a display detail unrelated to the field's type.\n\n## Ruled direction (provenance)\n\nOption A ruled on #7768, 2026-08-11 (PM triage comment), maintainer veto\nwindow noted and still open: add a narrow `useGrouping?: boolean` mapping 1:1\nto `Intl.NumberFormat`'s `useGrouping`. Option B (`displayFormat`, a broader\npresentation slot) explicitly rejected as capability surface without demand\nper the maintainer's #7496 norm — narrowest shape with measured pull wins.\n\n## What changed\n\n- `packages/spec/src/data/field.zod.ts` — `FieldSchema` gains `useGrouping:\n  z.boolean().optional()`, flat alongside `precision`/`scale`/`min`/`max`\n  (\"Number Constraints\"). Docblock explains the three-valued contract:\n  - **absent** (no default declared) — the renderer decides: an interim\n    heuristic today (objectui#4033), the locale's own default eventually.\n    That contract lives in objectui, not here.\n  - **`false`** — explicit author opt-out (a year / ID / zip code).\n  - **`true`** — author pins grouping on.\n  Threads automatically through `Field.number(...)` (and every other\n  builder) via the existing `FieldInput` shape — no builder special-casing\n  needed, the same way `scale`/`min` travel today. Unknown-key strictness on\n  `FieldSchema` (`strictObject`, #4001) is unaffected — verified with a\n  dedicated test.\n\n- Tests added to `packages/spec/src/data/field.test.ts`: accepts explicit\n  `true`/`false`, absent stays absent (no materialized default), rejects\n  non-boolean, confirms `Field.number(...)` threading, confirms unknown-key\n  strictness is unchanged, and pins the JSON-Schema projection (`boolean`\n  type, no `default`, not in `required`) the way\n  `field-autonumber-default-format.test.ts` pins `autonumberFormat`'s.\n\n- Regenerated: `authorable-surface/` + `authorable-surface.base.json` +\n  `json-schema/` (via `pnpm gen:schema`) and `content/docs/references/data/field.mdx`\n  (via the docs gate), which now list `useGrouping` in the `data/Field:` key\n  set / reference table.\n\n- `packages/spec/liveness/field.json` — classified the new key `planned`\n  (not `live`): it has no runtime consumer yet, objectui#4033 is the\n  consumer landing next. Not `authorWarn`'d, per the ledger's own rule —\n  unlike a speculative future phase, an author who sets this today loses\n  nothing and needs no re-authoring once the objectui half lands.\n  `packages/spec/liveness/state-counts.md` regenerated to match\n  (`pnpm gen:liveness-counts`); `check:liveness` is green.\n\n## Scope note — sibling authoring surfaces deliberately NOT touched\n\n`scale`/`min`/`precision` also travel into two Setup-app admin field-editor\nform definitions (`packages/spec/src/data/field.form.ts`,\n`packages/spec/src/data/object.form.ts`) and into `ui/view.zod.ts`'s\n`FormFieldBaseSchema` (per-view field override for end-user Form views). I\nchecked all three; none were extended. Exposing `useGrouping` as a Studio UI\ntoggle (which would also need `pnpm i18n:extract` across 4 locale bundles) or\nas a per-view override is a UX decision the ruling did not make, and Option A\nwas explicitly scoped to \"the number field's authorable schema\" — extending\nthose surfaces now would be widening past the ruled direction while the\nmaintainer veto window is still open. Flagging as a candidate follow-up.\n\n## Renderer contract (not implemented here)\n\nexplicit hint > interim heuristic > locale default. objectui#4033 is the\nconsumer that reads this key and retires the interim heuristic\n(`scale === 0 && no currency` ⇒ ungrouped).\n\n## Gate results\n\nLocal, scoped to this surface (full commands/output in the dev report\ncomment on #7768):\n\n- `pnpm --filter @objectstack/spec test` (full package, 378 files): 376\n  passed, 1 pre-existing failure (`api-methods-batch-conformance.test.ts` on\n  `sys_api_key`, introduced by #7769, tracked as #7793 — not touched by this\n  PR), 1 file transiently red mid-run on my own uncommitted staleness\n  (`build-schemas-check-mode.test.ts`, re-run clean after `gen:schema`: 60/60).\n- `pnpm --filter @objectstack/spec typecheck`: clean, zero errors.\n- `pnpm --filter @objectstack/spec build`: clean.\n- `pnpm --filter @objectstack/spec check:generated`: all 13 generated\n  artifacts current.\n- `check:adr-anchors`, `check:changeset-gate-self-tests` (+ real\n  empty-changeset/adr-0087-registration runs against the committed diff),\n  `check:docs-audit-scope`, `check:driver-conformance`, `check:merge-driver`,\n  `check:release-body`, `check:spec-parsed-alias`, `check:nul-bytes`: all\n  green.\n- `check:i18n` — skipped: needs the built `@objectstack/cli` (prerequisite\n  this worktree doesn't carry), and this PR touches no i18n-extraction\n  surface (no `field.form.ts`/`object.form.ts`/translation file changed) so\n  there is nothing for it to see.\n- `--filter @objectstack/lint check:doc-formula-expressions` — skipped: needs\n  the built `@objectstack/formula` package, unrelated to this schema-only\n  change (no formula-expression doc content touched).\n\n## Landing\n\nPer the claim comment, this PR is expected to touch `content/docs/references/**`\nand joins the os-regen one-at-a-time landing relay\n(#7758 → #7759 → #7763 → #7782). Left as **draft** — the PM lands it.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01JY2Q5Xto1u8YHADgrZDTnk)_"
+}

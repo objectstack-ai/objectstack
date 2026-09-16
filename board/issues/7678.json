@@ -1,0 +1,36 @@
+{
+  "number": 7678,
+  "kind": "issue",
+  "title": "suggested-binding-loop (b): unknown ?status on /security/suggested-bindings returns 200 empty instead of 400 (live REST route skips validation)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T10:13:51Z",
+  "updated_at": "2026-08-12T10:25:03Z",
+  "closed_at": "2026-08-12T10:25:03Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7678",
+  "body": "## Symptom\n`GET /api/v1/security/suggested-bindings?status=garbage` → 200 **empty** (same for `?status=PENDING`) — which reads as \"there are no suggestions\", the failure mode the clause forbids. Expected 400 for an unknown status value.\n\n## Root cause\nLocated by the run. The **live** route is `packages/rest/src/rest-server.ts` `registerSecurityEndpoints`, which forwards `req.query.status` through with **no validation** (rest-server.ts ~L9219: `status: req.query?.status ? String(req.query.status) : undefined`). The `isSuggestionStatus` 400 guard exists **only** on the parallel runtime dispatcher domain, whose own comment describes precisely this observed behaviour. The fix landed on the dispatcher path only — a dispatcher-vs-REST divergence in the **opposite** direction from the earlier `/meta` cases (where routes were on the dispatcher but never mounted on REST). Confirmed present on `origin/main`.\n\nThis strengthens the case for the route-ledger↔live-mount parity gate objectstack-ai/objectstack#7526, and argues that gate should cover **behaviour** divergence, not just mount presence.\n\n## Reproduction\n1. Stock boot; as admin `GET /api/v1/security/suggested-bindings?status=garbage`.\n2. Observe 200 with an empty list instead of 400.\n\n## Suggested fix\nApply the `isSuggestionStatus` validation (the same guard already on the dispatcher) on the live `registerSecurityEndpoints` REST route, returning 400 for an unknown `?status` value.\n\n## Source\nExtracted from the QA run objectstack-ai/objectstack#7637 (framework 92f26f75, console 09987b680)."
+}

@@ -1,0 +1,35 @@
+{
+  "number": 7556,
+  "kind": "issue",
+  "title": "Object-extension overlay fields are missing from `GET /meta/object/:name` (present in the list route) — the overlay's fields can never be set through the UI",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "huangyiirene"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T05:24:42Z",
+  "updated_at": "2026-08-12T12:05:16Z",
+  "closed_at": "2026-08-12T12:05:15Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7556",
+  "body": "## Symptom\n\nThe showcase account extension contributes **3 fields**. Where they show up:\n\n| Surface | Extension fields present? |\n|:--|:--|\n| `GET /meta/object` (list) | **yes** |\n| `GET /meta/object/showcase_account` (by name) | **no** |\n| `GET /meta/object/showcase_account?layers=true` | **no** — absent from *both* layers |\n| `GET /api/v1/data/...` round-trip | **yes** — they are real columns, values persist |\n| Read-only record detail page | **yes** — they render |\n\nExpected: the by-name response composes the same contributors the list response does, so an object's resolved schema is identical whichever way it is fetched.\n\nConsequence, and why this is not cosmetic: **the edit and new forms derive from the by-name response**, so the three overlay fields are absent from every writable form. They can be read, and they can be written through the data API, but **they can never be set through the UI**.\n\n## Root cause\n\nNot located by the report. What the evidence constrains:\n\n- The contribution *is* registered and *is* materialised — the columns exist and round-trip through `/api/v1/data`, and the list route composes them.\n- So the fault is on the **by-name read path**, not in registration: the by-name handler resolves the object from a source that omits extension contributors, and the `?layers=true` projection omits them too (they are in neither layer, not merely folded into the wrong one).\n\nWhether the omission sits in the REST `/meta/object/:name` handler or in the metadata read path it calls needs to be measured; the `?layers=true` behaviour points at the layer-resolution side rather than at REST plumbing, which is why this card is filed `domain:metadata` — re-route if the fix turns out to land in `packages/rest`.\n\nTiming note for whoever picks this up: objectstack-ai/objectstack#7306 (ADR-0029 D9, \"register a tenant object overlay as its own contributor layer\") merged 2026-08-10T09:34Z, around when this run's framework commit was cut, and it changes layer classification and the `getArtifactItem` read. It targets *tenant* (`_provenance:'org'`) overlays rather than a code-declared extension, so it is not expected to fix this — but re-measure on current `main` before starting.\n\n## Reproduction\n\n1. Boot the showcase (it declares the account extension with its 3 extra fields).\n2. `GET /meta/object` — the extension fields are in the listed `showcase_account` entry.\n3. `GET /meta/object/showcase_account` — they are gone.\n4. `GET /meta/object/showcase_account?layers=true` — still gone, in both layers.\n5. Open the record's edit/new form in the console — no inputs for those 3 fields; open the read-only detail page — they render, with values written through `/api/v1/data`.\n\n## Source\n\nExtracted from the QA run objectstack-ai/objectstack#7514 (framework a86db175, console 09987b68)."
+}

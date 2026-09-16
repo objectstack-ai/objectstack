@@ -1,0 +1,34 @@
+{
+  "number": 7521,
+  "kind": "issue",
+  "title": "`reconcileManagedApiMethods` strips declared verbs with only a console.warn — a declared≠enforced split can live indefinitely unseen (found via cloud#1225)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "huangyiirene"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T04:56:12Z",
+  "updated_at": "2026-08-12T13:57:35Z",
+  "closed_at": "2026-08-12T13:57:35Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 9,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7521",
+  "body": "Linkage card from **cloud#1225** (PR objectstack-ai/cloud#1235), filed by the repo:cloud seat per multi-repo rule 3. Session: `session_01PPDkETJ37ntVTFUZWX5FQg`.\n\n## What cloud measured\n\n`sys_environment` and `sys_package` (both `managedBy: 'platform'`, `userActions` create/edit/delete all `false`) declared `apiMethods: ['get','list','create','update']`. At registration, `reconcileManagedApiMethods` in objectql's `registry.ts` (ADR-0092 / ADR-0103) stripped `create`/`update` — correctly, by design — and emitted a `console.warn`.\n\nThat warning fired on **every control-plane boot for the life of the divergence and nobody noticed**. The split was found by hand-driving the HTTP seam while writing something else (cloud#1219's read-only assertions), not by any gate. Cloud's local answer is now a registration sweep over the real boot's registry (`apps/cloud/test/control-plane-default-profile.test.ts`, cloud PR #1235) — but that only covers cloud's objects.\n\n## The question for the framework side\n\nA declaration the registry has to strip IS a `declared != enforced` split (ADR-0049's class), and today the only signal is a boot-log line. Candidates, from the cloud report:\n\n- make the reconciliation **fail-closed at registration** (an object advertising a verb its own affordances refuse is an authoring error — loud, at the layer that knows);\n- or make it **lint/gate-visible** (an authoring-time check over object definitions: `enable.apiMethods` ⊆ what `userActions` affordances admit for managed objects);\n- or a deliberate decision that warn-only is the intended posture, recorded where the next reader of `reconcileManagedApiMethods` will meet it.\n\nNot urgent (the strip itself is fail-closed; nothing is exposed), but every repo authoring managed objects re-pays the silent-divergence cost until one of the above exists.\n\nPremise re-check command:\n`git grep -n \"reconcileManagedApiMethods\" origin/main -- 'packages/objectql/src'` (verify it still warns rather than throws).\n\n(Unlabeled on purpose — routing/`domain:*` is the triage seat's single-producer territory.)"
+}

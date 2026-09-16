@@ -2,9 +2,9 @@
   "number": 18303,
   "kind": "pull_request",
   "title": "feat(spec,core)!: the startup contract describes what the kernel produces — retire the orchestrator, declare PluginStartupResult once (#16059)",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
-  "draft": true,
+  "draft": false,
   "author": {
     "login": "os-warren",
     "id": 318460043,
@@ -12,7 +12,6 @@
   },
   "labels": [
     "documentation",
-    "needs:contract-review",
     "size/xl",
     "tests",
     "tooling"
@@ -21,10 +20,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-09-15T15:17:05Z",
-  "updated_at": "2026-09-15T16:26:30Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-09-15T23:25:21Z",
+  "closed_at": "2026-09-15T23:25:19Z",
+  "closed_by": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "merged_at": "2026-09-15T23:25:19Z",
   "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/18303",

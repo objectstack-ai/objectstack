@@ -1,0 +1,36 @@
+{
+  "number": 7848,
+  "kind": "issue",
+  "title": "`os test`: 5 of the 8 declared action types cannot reach a stock server (wrong base path), and a zero-match glob exits 0",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T20:41:23Z",
+  "updated_at": "2026-08-12T10:34:10Z",
+  "closed_at": "2026-08-12T10:34:10Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7848",
+  "body": "Filing unassigned; `domain:*` routing is the triage seat's. Two defects on the same surface, both **measured on a booted showcase app** while authoring the `qa` checklist item for #7347 (PR #7786) — recorded there as out-of-scope findings rather than fixed inside a checklist card.\n\n## Item 1 — the record action types 404 against a stock server\n\n`HttpTestAdapter` builds its URLs as `${baseUrl}/api/data/:object`. The server serves `{basePath}/data/:object`, with `basePath` = `/api/v1`. So every record-shaped action type is off by the version segment.\n\nMeasured verbatim against a running showcase:\n\n| action type | result |\n|---|---|\n| `create_record` | `HTTP Error 404: {\"error\":\"Not found\"}` |\n| `read_record` | 404 |\n| `update_record` | 404 — **and** it issues `PUT` where the route is `PATCH`, so this one is wrong twice |\n| `delete_record` | 404 |\n| `query_records` | 404 |\n| `api_call` | executes |\n| `wait` | executes |\n| `run_script` | no adapter branch; throws loudly (already recorded in the liveness ledger) |\n\nSo **5 of 8** declared members of `TestActionTypeSchema` cannot do the thing their name promises, and a suite author who reaches for them gets a 404 that reads like their own URL mistake rather than a platform defect. `api_call` works, which is why the gap survived: anything the Quality Protocol has actually been used for so far was expressible through it.\n\nThe fix is in `packages/core` (the adapter's URL construction, plus the verb for `update_record`) — it is a product fix, not a checklist edit, which is why it was split out.\n\n## Item 2 — a run that loads no suite exits 0\n\n```\n$ os test 'qa/nothing-matches-*.test.json'\nNo test files found matching: qa/nothing-matches-*.test.json\n$ echo $?\n0\n```\n\nA green exit from a run that executed nothing. Whether that is a defect or a deliberate posture (a repo with no suites should not fail CI) is a product call — but as it stands, a CI step that runs `os test` with a glob that stops matching (renamed dir, moved suite) goes on reporting success forever. This is the same shape as the `coverage.json` blindness #7347 just closed: a green check that checked nothing.\n\nIf the posture is deliberate, the ask is smaller — say so in the command's help and give a `--fail-on-empty` (or make `Found N test suites.` machine-readable) so a caller can opt into the strict reading. The new checklist item `cli.qa-suite-execution` currently works around it by requiring a run to quote `Found N test suites.` with N > 0.\n\n## Provenance\n\nBoth measured during PR #7786 (`docs(qa): map the `qa` capability to a real checklist item, not a waiver`), which landed the first real Quality Protocol suite in the repo (`examples/app-showcase/qa/platform-smoke.test.json`). That suite is written entirely in `api_call` + `wait` — item 1 is the reason.\n\nFiled by the devx PM seat (#6023) from the dev's out-of-scope report."
+}

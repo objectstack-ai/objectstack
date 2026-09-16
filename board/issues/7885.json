@@ -1,0 +1,34 @@
+{
+  "number": 7885,
+  "kind": "issue",
+  "title": "pm-dispatch SKILL structural optimization: role-split loading, issue-ID removal (lessons distilled in place), probe-first startup (maintainer-directed)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-12T02:13:35Z",
+  "updated_at": "2026-08-12T06:56:46Z",
+  "closed_at": "2026-08-12T06:56:19Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7885",
+  "body": "Filed by the skills seat (session `session_012Gg6rMAti8ZaueWb6BRsDn`) on the maintainer's instruction, skills-seat PM session chat, 2026-08-12. Direct routing under the 2026-08-10 standing authorization (maintainer-directed cards are routed by the handling PM session; provenance below).\n\n## Provenance (maintainer, verbatim, untranslated)\n\n> 我开了4个项目经理,还没开始干活,5小时额度就用掉了 33% 。你评估一下项目经理的skills 是不是应该优化。\n\n> 我之前看到有很多历史的 issue id,是不是没有意义并且反而浪费时间。\n\n> 立一张结构卡,我觉的 处理 issue 时犯的错应该总结成经验,保留 issue id没有意义,如果ai去查原始issue,得不偿失。\n\n> 还有我觉得现有的项目经理 skills 应该大幅简化,只需要说原则,不需要写细节。\n\nThe third quote rules the ID question: incident learnings are **distilled into the rules themselves as self-contained lessons**; issue IDs carry no value in the skill text; an AI dereferencing original issues costs more than it returns. The fourth quote (2026-08-12, later the same session) **supersedes the earlier ~50–70% role-split compression target**: the rewrite target is a **principles-only text** — state the principles, drop the procedural detail.\n\n## Measured baseline (origin/main, 2026-08-12)\n\n- `SKILL.md`: 2568 lines, 118,324 chars (~33.7k CJK + ~84.6k ASCII) ≈ **~59k tokens**, loaded in full by **every** PM session at start.\n- Issue-ID citations in SKILL.md: **370 mentions, 223 unique, on 263 of 2568 lines**.\n- `references/incidents.md`: 1517 lines of ID-keyed narratives (on-demand load).\n- Startup protocol reads per seat: ~50–100k tokens measured; four concurrent seats share no cache ⇒ ~150k input per seat before its first dispatch — consistent with the observed \"33% of the 5-hour window before any work\".\n\n## Scope — three deltas, one PR chain (design round held jointly with #7899's)\n\n**1. Principles-only drastic simplification (per the fourth ruling).** Rewrite SKILL.md as principles + the state machine + role duties; delete procedural narration. Working division for the design round: a detail survives in prose only if it is (a) a genuine principle/invariant, (b) operational lookup data (e.g., the domain→package table), or (c) irreplaceable by mechanical enforcement — everything the hooks/gates/scripts already enforce (worktree guard, stash guard, ratchet, half-state checker) loses its prose twin. The earlier role-split-into-modules idea is downgraded to a design choice: at principles-only size a single small file with role sections may suffice, which is simpler than multi-file loading.\n\n**2. Issue-ID removal, lessons distilled in place (the third ruling).** Every incident-backed rule rewritten to carry its lesson self-contained (failure mode + discipline + boundary), **no issue-ID citations in operative text**, no expectation that any reader dereferences an original issue. Design round settles: disposition of `references/incidents.md` (deprecated by the ruling; git history remains the archive), handling of maintainer-ruling provenance (dates + verbatim quotes carry authority; numbers go), and a mechanical guard so IDs do not creep back (lint for `#[0-9]+` in skill operative text).\n\n**3. Probe-first startup.** A seat's first action becomes one cheap lane-inventory query; empty queue + nothing in flight + nothing awaiting review ⇒ self-retire without further reads. Bounds idle-seat cost; delta 1 bounds the loaded-text cost.\n\n## Constraints\n\n- Blocked-by: #7755\n- Blocked-by: #7765\n- Blocked-by: #7767\n- Same-file serial: position 4 in the SKILL.md hot-file queue (after PR #7794 lands, then #7765, then #7767). Targets WILL have moved by dispatch time — the dev relocates semantically on the then-current text; the two queued cards' landed deltas must survive the rewrite **as principles** (their procedural detail is subject to delta 1 like everything else).\n- Skills updates are ADR-class: draft PR(s), ⛔ no auto-merge, no queue entry; the maintainer merges by hand.\n- Model tiering mandatory clause: dispatch with `model: claude-fable-5`.\n- Design round: held jointly with **#7899** (ruled 2026-08-12: 「六条补充都同意,设计轮和 #7885 一起开」); #7899's step-8 adjudication text is authored against the post-rewrite structure.\n\n## Process\n\nDesign round first, in the skills seat's 专题 channel (chat), outcomes recorded here. Implementation dispatches only after the design round closes and the blockers above land."
+}

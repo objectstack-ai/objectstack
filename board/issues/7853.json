@@ -1,0 +1,34 @@
+{
+  "number": 7853,
+  "kind": "issue",
+  "title": "driver-memory's `AnalyticsResult.sql` loses a RegExp operand to `{}`, so the pipeline dump shows no pattern at all",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "huangyiirene"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T20:44:30Z",
+  "updated_at": "2026-08-12T01:34:46Z",
+  "closed_at": "2026-08-12T01:33:19Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7853",
+  "body": "Found while implementing #7117 (the analytics `generateSql()` echo). Out of that card's scope — it is a **different exit** with a different failure mode — so it is filed rather than folded in. #7117's PR declares its status in the per-face table.\n\n## Measured on `origin/main` @ `69fde55`, executed\n\n`MemoryAnalyticsService.query()` returns `AnalyticsResult.sql` from `generateSqlFromPipeline()` (`memory-analytics.ts`), which dumps the executed mingo pipeline stage by stage:\n\n```ts\nconst stages = pipeline.map((stage, idx) => {\n  const op = Object.keys(stage)[0];\n  return `/* Stage ${idx + 1}: ${op} */ ${JSON.stringify(stage[op])}`;\n}).join('\\n');\n```\n\nFor `{name: {$contains: 'Industries'}}` on a one-row cube that prints:\n\n```\n-- MongoDB Aggregation Pipeline on table: deal\n/* Stage 1: $match */ {\"name\":{\"$regex\":{}}}\n/* Stage 2: $group */ {\"_id\":{\"id\":\"$id\"},\"total\":{\"$sum\":1}}\n/* Stage 3: $project */ {\"_id\":0,\"id\":\"$_id.id\",\"total\":\"$total\"}\n```\n\n`JSON.stringify` renders a `RegExp` as `{}` — it has no own enumerable properties — so **the pattern is gone**. The `$match` stage is reported as constraining `name` by an empty object. Every operator whose predicate carries a RegExp is affected: `contains`, `icontains`, `notContains` (the last nested inside `$not`).\n\n## Why this is filed separately from #7117, and at a lower grade\n\n#7117 is the #5333 class — a rendering that **contradicts** execution. This is not that:\n\n- it is **not SQL** and does not claim to be (`-- MongoDB Aggregation Pipeline on table: …`), so nobody can run it and get a wrong row set;\n- the loss is **visibly degenerate** rather than plausibly wrong. `{\"$regex\":{}}` reads as \"something is missing here\"; `WHERE name LIKE 'acme'` read as a working predicate, which is exactly what let #7117 survive.\n\nSo the direction is lost-information on a transparency surface, not a wrong answer. It is still worth closing: this string is the only thing an author debugging an in-memory chart is given, and the one field it drops is the one they are usually looking for.\n\n## Scope\n\n`generateSqlFromPipeline()` in `packages/drivers/driver-memory/src/memory-analytics.ts`. A replacer that renders a `RegExp` as its `source` / `flags` would be the smallest fix; whether the dump should render `$regex` in the pattern's own syntax (`/Industries/`) or as `{\"$regex\":\"Industries\"}` is the one decision to make.\n\nA check should assert on the dump's **content for a pattern operator**, not merely that the string is non-empty — the current output is non-empty and passes any such assertion."
+}

@@ -1,0 +1,35 @@
+{
+  "number": 7362,
+  "kind": "issue",
+  "title": "`/data` harness: the `success` exit is still a stand-in, so a success-envelope regression cannot go red there either",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-10T07:58:21Z",
+  "updated_at": "2026-08-12T10:48:13Z",
+  "closed_at": "2026-08-12T10:48:13Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7362",
+  "body": "**Source**: out-of-scope finding from #6719 (PR converging that harness's three ERROR exits). **Observation-class, ungraded — for triage.** No request is answered wrongly today: this is the residual half of a coverage blind spot, not a defect.\n\n## Fact (verified on `origin/main` @ `06be54ec3`)\n\n`packages/runtime/src/domains/data-path-object.test.ts` builds its `DomainHandlerDeps` stand-in with:\n\n```\nsuccess: (data: any) => ({ status: 200, body: data }),\n```\n\nProduction's `HttpDispatcher.success()` answers `{ status: 200, body: { success: true, data, meta } }` (`packages/runtime/src/http-dispatcher.ts`, the `private success()` method). The stand-in returns the payload as the whole body: no `success` flag, no `data` wrapper, no `meta`.\n\n#6719 ruled on — and its PR converges — the three ERROR exits (`error` / `routeNotFound` / `errorFromThrown`), which now come off a real `HttpDispatcher`. `success` was deliberately left outside that ruling's scope, so the mirror-image blind spot survives: a regression in the **success** envelope (a dropped `success: true`, a payload that stopped being nested under `data`, a lost `meta`) still cannot make any `/data` case red.\n\n## What it costs today\n\nSmaller than #6719's half, and worth saying plainly rather than inflating:\n\n- Every `/data` success branch in that file asserts through `findData` call arguments, not through the response body — so nothing there is testing the stand-in's shape.\n- The one assertion that reads the response is `expect(res.response.status).toBe(200)` (the `crm_account` / `sys_user` exposure-gate case). Its `200` is a constant the stand-in itself writes. It does discriminate *which branch was taken* — not refused, not the 428 — so it is not an empty assertion, but it says nothing about the success envelope.\n\n## Possible convergence\n\nSame shape as #6719's fix, and cheaper now that the machinery is in place: `HttpDispatcher.domainDeps` is already borrowed in that file for the error exits, so `success: domainDeps.success` is a one-line change. Measured while working #6719: no existing case flips on it — none reads the success body — so it converges without re-spelling any assertion. Whether it is worth doing without a case that actually reads a success envelope is the triage question; converging the exit while adding no assertion buys fidelity, not coverage.\n\n*Unassigned, no `pm:queue` — for the triage seat.*\n"
+}

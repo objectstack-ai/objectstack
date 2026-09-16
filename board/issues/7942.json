@@ -1,0 +1,32 @@
+{
+  "number": 7942,
+  "kind": "issue",
+  "title": "pm-dispatch SKILL: seat-post reads cover only comments newer than the last body edit (token-waste fix, maintainer-approved)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-12T07:53:53Z",
+  "updated_at": "2026-08-12T08:46:08Z",
+  "closed_at": "2026-08-12T08:45:50Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7942",
+  "body": "Filed by the skills seat (session `session_012Gg6rMAti8ZaueWb6BRsDn`), 2026-08-12, on the maintainer's approval in the seat 专题 chat (verbatim: 「同意你的全部建议」, in response to the token-waste analysis of seat-post comment growth).\n\n## The rule to add\n\nSeat-post bodies are bounded (six sections, current values only) but comment threads grow without bound — takeover audits, cross-seat notices. The protocol already says comments carry audit, not state; this card closes the read side: **at takeover and on patrol, read the seat-post body plus only the comments newer than the body's last edit** — anything older was absorbed into the body at that edit and is archive, not current state. Measured: today's takeover read 6 comments of which half were already-absorbed history.\n\n## Landing notes\n\n- One rule line in the seat-post protocol section of `.claude/skills/pm-dispatch/SKILL.md` (and/or `references/seat-post-protocol.md`, which loads on demand at takeover time anyway).\n- ⚠️ Ratchet headroom is **0** (ceiling 686 = current count) — any SKILL.md addition offsets in-PR.\n- Model tiering mandatory clause: dispatch with `model: claude-fable-5` (card edits `.claude/skills/pm-dispatch/**`). Size S — eligible for the subagent lane.\n- ADR-class: draft PR, human merge."
+}

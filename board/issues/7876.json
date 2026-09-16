@@ -1,0 +1,34 @@
+{
+  "number": 7876,
+  "kind": "issue",
+  "title": "[Decision] Two doors answer `__search` differently: the projection door drops it silently, `$searchFields` refuses it with 400 \"is hidden\"",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-12T01:41:35Z",
+  "updated_at": "2026-08-12T15:30:41Z",
+  "closed_at": "2026-08-12T15:30:41Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7876",
+  "body": "Filed by the `domain:engine-core` seat (#6019, session `session_01VGAePF7iGGUYUT8oX1cVgx`) from PR #7868's open question 2. ⛔ Nothing shipped depends on this — #7868 landed (`8b90d68`) and is coherent either way. This is about whether two doors should agree.\n\n## The question\n\nA **non-system** caller names the hidden `__search` companion column explicitly. Two doors, one column, two different answers:\n\n| door | spelling | answer today |\n|---|---|---|\n| `$searchFields` override | `__search` | **400** — \"is hidden\" |\n| projection / `select` | `?select=__search` | **silent drop** — 200, key absent (as of #7868) |\n\nShould the projection door also refuse with a 400, or is silence correct there?\n\n## Premises, each with its re-check command\n\n- `$searchFields` refuses the spelling with a 400 — `git grep -n \"is hidden\" origin/main -- packages/objectql/src`\n- The projection door drops it silently, added by #7868 — `git grep -n \"stripSearchCompanionFromRead\" origin/main -- packages/objectql/src/engine.ts`\n- `assertProjectionFieldsExist` gates only on whether a field is **known**, not on whether it is returnable — `git grep -n \"assertProjectionFieldsExist\" origin/main -- packages/objectql/src`\n- A **system** caller naming it still receives it (the `plugin-pinyin-search` backfill depends on this) — `git grep -n \"isSearchCompanionRequested\" origin/main -- packages/objectql/src`\n\n## Options\n\n**A — keep the silent drop (status quo, shipped).**\nThe projection door's existing contract for a field it will not return is silence, not refusal. A 400 here is a *new* refusal on a spelling that used to answer 200.\n*Cost:* the two doors keep disagreeing, and a client that asks for the column gets a 200 whose body silently lacks what was asked for.\n\n**B — make the projection door refuse too (400 \"is hidden\").**\nOne column, one answer, whichever door you knock on. Matches how the platform already answers this exact spelling elsewhere.\n*Cost:* a behaviour change on a request that currently succeeds; anything that today passes `select=__search` and tolerates the missing key would start failing. Needs the system-caller carve-out preserved.\n\n**C — rule that the divergence is intended and record why.**\nThe two doors mean different things: `$searchFields` is *authoring* input (a wrong value is an authoring error), `select` is a *read* projection (a field you cannot see is simply not in the body).\n*Cost:* none mechanically; the cost is that the next reader re-asks this question unless the reasoning is written where they will meet it.\n\n## Recommendation: **C**, with the reasoning pinned in the code.\n\nThe divergence looks accidental but is defensible: the two doors are different *kinds* of surface, and B changes a currently-succeeding request for tidiness rather than for a user-visible defect. But C is only worth anything if the reasoning is written at `stripSearchCompanionFromRead` and at the `$searchFields` refusal, so this does not get re-litigated.\n\n⚠️ If you prefer **B**, it is a small change, but ⛔ it must not disturb the system-caller carve-out — `plugin-pinyin-search`'s backfill projects `['id', …sources, '__search']` under `isSystem` and compares stored-vs-recomputed; breaking it makes the walk rewrite every row of every object on every pass.\n\n## Four-lens\n\n1. **Platform long-term coherence** — B shrinks special-casing (one column, one answer); C keeps two rules but gives them a stated reason. A leaves an unexplained inconsistency, which is the worst of the three for coherence.\n2. **Measured business pull** — **zero today.** No in-tree caller passes `select=__search`; the column is a private index and the only deliberate reader is the system backfill. Under the zero-pull default this is defer-or-record, not build — which is what makes C the proportionate answer and B the one that needs a reason beyond symmetry.\n3. **AI-agent error-resistance** — B is strongest: a loud refusal on a spelling that cannot work is much harder for an AI author to misuse than a 200 whose body quietly lacks the requested key. This is the one lens that genuinely favours B, and it is the reason this is a decision rather than a shrug.\n4. **Startup scope discipline** — C costs two comments; B costs a behaviour change plus a regression surface on a zero-pull path. Cheapest honest answer wins unless lens 3 outweighs it.\n\nRelated: #7642 (origin) · PR #7868 (`8b90d68`) · #2486 (the companion column)."
+}

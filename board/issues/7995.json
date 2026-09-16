@@ -1,0 +1,35 @@
+{
+  "number": 7995,
+  "kind": "pull_request",
+  "title": "feat(metadata-protocol)!: cross-tenant uninstall must be declared — `deletePackage` refuses a call naming neither an organization nor `allTenants` (#7780)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-12T10:22:42Z",
+  "updated_at": "2026-08-12T11:51:19Z",
+  "closed_at": "2026-08-12T11:51:18Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": "2026-08-12T11:51:18Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/7995",
+  "body": "Fixes #7780\n\n⚠️ **PR opened by the `domain:metadata` PM seat on the implementing dev's behalf** — it had the PR body ready but no GitHub write access in its container (four of five sibling dispatches hit this today: branches push fine, PR/comment creation does not). Body is the dev's own changeset. Its full report is still owed and will be appended as a comment.\n\n⚠️ **Breaking change (`!`), minor on three packages.** A caller that omits the organization today starts getting a 400. **That is the point of the change, not a side effect.**\n\n## The defect\n\n`protocol.deletePackage` selected rows with `{ package_id }` and added an organization predicate only when the caller supplied one. With no `organizationId` the predicate matched **every organization's rows** — measured during #7705 at **5 of 5 deleted, including a foreign organization's**.\n\nNobody chose that. It fell out of a missing argument, and the two doors of `DELETE /api/v1/packages/:id` disagreed about which semantic they invoked:\n\n- the direct-mount REST registrar (`packages/rest/src/package-routes.ts`) passes no organization ⇒ cross-tenant;\n- the dispatcher twin (`packages/runtime/src/domains/packages.ts`) resolves one ⇒ org-scoped.\n\nWorse, the two are **indistinguishable at the call site**: `resolveActiveOrganizationId` (#4127) is entirely `catch`-wrapped, so any throw on the auth seam returns `undefined`. An accidental org-less call and a deliberate environment-wide one are byte-identical, and the accident silently selected the widest possible reading of a destructive operation.\n\n## Maintainer ruling (2026-08-12), quoted unchanged\n\n> 跨租户卸载必须显式声明，缺省缺参永远不等于「全部租户」。\n\n## What changes\n\n- `deletePackage` gains **`allTenants?: boolean`**, the explicit carrier for cross-tenant semantics.\n- Neither `organizationId` nor `allTenants: true` ⇒ refused with **`TENANT_SCOPE_REQUIRED` (HTTP 400)**, deleting nothing. An explicit **`allTenants: false` is treated as undeclared** — it is not an affirmative request for cross-tenant semantics, so it cannot authorise them.\n- **Both** supplied ⇒ refused with the same code. They are **contradictory, not redundant** — one scopes to a tenant, the other clears every tenant — and both silent resolutions are worse than a refusal: narrow-first makes `allTenants: true` silently inert; explicit-first ignores a named organization and deletes every tenant's rows, *which is the original defect wearing a flag*. Rejecting is also the only reading that stays correct when a request is composed from two places (a resolver supplying the org, config supplying the flag). The message names both offending parameters.\n- **The REST direct-mount door now declares `allTenants: true`.** ⭐ This was a PM assumption handed over as falsifiable, and the dev measured it: **`packages/rest` carries no org plumbing at all**, so of the two remedies the ruling allows, only declaring the intent is available there. Observable behaviour is unchanged; what changed is that the width is now *stated at the call site* instead of inferred from an absent argument.\n\n## What deliberately does NOT change\n\nThe no-organization branch is still **not** narrowed to `organization_id IS NULL`. #7705 proved that narrowing orphans every org-scoped row — the same defect pointed the other way. The remedy is **explicitness, not narrowing**.\n\n## Scope, verified by the PM\n\nThe card's sibling `reassignOrphanedMetadata` carries the same shape one notch wider (its `where` starts as `{}`; measured 3-of-3 cross-org rebinding). It was dispatched as **a measurement and a sentence, not a fix** — and the tripwire confirms scope held: **`package-duplicate-adopt-org-scope.integration.test.ts` is not in this diff**, so the pin that would have gone red on an unsanctioned widening never fired.\n\n`#7705 case 4` (which pinned that a no-org uninstall still clears the package) is **rewritten, not deleted** — that pin was deliberate and its replacement encodes the ruled semantics.\n\n## Callers updated\n\nAny caller omitting `organizationId` that intends an environment-wide uninstall must now pass `allTenants: true`; the refusal message names both remedies. Updated in-tree: `durable-package.test.ts`, `protocol-package-lifecycle.test.ts`, `package-first-authoring.dogfood.test.ts`.\n\n⚠️ **Cross-seat note for `domain:spec` (#6017):** this adds **one line** to `packages/spec/src/api/error-code-ledger.zod.ts` — the `TENANT_SCOPE_REQUIRED` registration. It is additive registration rather than an acceptance-face change, and it is cleanly separable if that seat wants it lifted out.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01AmES43BMDg4bPrxTdi5q7t)_"
+}

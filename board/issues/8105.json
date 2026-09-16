@@ -1,0 +1,35 @@
+{
+  "number": 8105,
+  "kind": "pull_request",
+  "title": "fix(objectql): a refused package uninstall mutates nothing (#7970)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-12T15:37:09Z",
+  "updated_at": "2026-08-12T16:19:34Z",
+  "closed_at": "2026-08-12T16:19:32Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-12T16:19:32Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/8105",
+  "body": "Fixes #7970\n\n`SchemaRegistry.uninstallPackage` has exactly one step that can **refuse**:\n`unregisterObjectsByPackage`, which throws when the package owns an object another\npackage `extend`s (ADR-0029 — the refusal that tells an operator to uninstall the\nextenders first). That guard exists to keep a registry whole, and it was reached\n**through** mutations. So exercising the protection half-tore down the very package it\nwas protecting.\n\nThis is a **consistency fix, not new policy** — the invariant was already written into\nthis function, three lines below the defect, by #7221:\n\n> Runs AFTER the object verb because that one can refuse (ADR-0029 extenders): a refused\n> uninstall must remove nothing at all.\n\nThe `unregisterItemsByPackage` call that comment describes obeyed it. The\n`unregisterNamespace` call directly above it did the opposite.\n\n## Every mutation in `uninstallPackage`, and where the refusal sat\n\nEnumerated rather than assumed, because the card names only the namespace:\n\n| step | before | after |\n|---|---|---|\n| `unregisterNamespace` | **before the refusal** | after |\n| `unregisterObjectsByPackage` (the refusing verb) | 2nd | **1st** |\n| `unregisterItemsByPackage` | after | after |\n| `package` record delete | after | after |\n\nOnly the namespace was exposed at this level — the other two were already correctly\nplaced. The verb is safe as the first step because it reads `objectContributors` only; it\ndepends on nothing the steps below establish, so a straight hoist restores the ordering\nwith no compensating change.\n\n## The second limb: the refusing verb was itself partially mutating\n\nHoisting only the namespace would have left the card's own headline defect — *\"a\nrejected uninstall leaves the package half-mutated\"* — alive in a second place.\n`unregisterObjectsByPackage` decided the refusal **inline, one object at a time, inside\nthe walk that removes them**. A package owning `account` (free) and `contact` (extended\nby another package) therefore lost `account` on its way to refusing over `contact`. The\ncomment above says \"remove nothing at all\", not \"nothing except the objects we got\nthrough before we noticed\".\n\nFixed with the **same tool one level down**: a refusal pass over every object, then a\nmutation pass. Same predicate, same iteration order — so the same object still refuses\nwith the same message, and only the removals that used to precede the throw are gone.\nDeliberately **not** a second public `canUninstall(id)` probe (that leaves two places\nthat must agree) and **not** a transactional collect-and-apply (no journal, no rollback,\nnothing to unwind) — both were refused by name in triage; neither is here.\n\n`unregisterObjectsByPackage` now documents the guarantee its callers depend on: a throw\nis a no-op, which is what makes it safe to run ahead of a caller's own mutations. That\nalso covers its other callers (`MetadataFacade.unregisterPackage`,\n`ObjectQL.unregisterObject`), which were exposed to the same partial walk.\n\n## Tests\n\nSix, in `packages/objectql/src/registry.test.ts`. Three witness the defect and go **red**\nwhen `registry.ts` is reverted; three stay **green** under both versions, which is what\nmakes them regression pins rather than restatements of the fix:\n\nRed on revert:\n- `a refused uninstall leaves the namespace still resolving` — **the assertion the card\n  names.** No existing test refused and then inspected the namespace, which is exactly\n  why the defect was invisible to a fully green suite.\n- `refuses before removing anything — a free sibling object survives` — **the second-limb\n  pin**, and the only multi-object case at the verb level. A single-object fixture passes\n  under the namespace-only fix too; this one does not.\n- `a refused uninstall leaves the whole package intact, not just the namespace` — the\n  same multi-object shape through `uninstallPackage`, asserting every limb the function\n  mutates (namespace, both objects, the item half, the package record).\n\nGreen under both (measured, by running them against the pre-fix `registry.ts`):\n- `the refusal still names the first refusable object and all its extenders` — **message\n  identity, checked rather than claimed.** With two refusable objects and three\n  extenders, the first object walked still wins and its extenders are still listed in\n  registration order, so the full message string is byte-identical to the pre-fix one.\n- `force still removes the owner even with a free sibling ahead of it` — the `force: true`\n  path skips the refusal pass and removes exactly what it removed before.\n- `the successful path still releases the namespace after the object verb`.\n\nReverse verification was run from a committed state, against the exact pre-fix\n`registry.ts` this branch merged (`021622ada^2`): 3 failed, 3 passed, and the other 93\ntests in the file were unmoved — so nothing in the existing suite depended on the old\nordering.\n\n## Grade: latent\n\nNo in-tree caller reaches the refusal path today, so no shipped behaviour was observably\nbroken. This restores the invariant before one does. Not an incident.\n\n## One note for the next person to locate this defect\n\nIt had three different addresses in one day: triage measured `registry.ts:2586-2608`,\nmy branch point (`f78dd23`) had it at `:2636-2667`, and after merging `origin/main` it\nsits at `:2725`. `registry.ts` took two unrelated merges in that window while being 3,000\nlines long. Locate this seam by symbol — `uninstallPackage` and\n`unregisterObjectsByPackage` — never by the line numbers in a card.\n\n## Verification\n\n- `pnpm --filter @objectstack/objectql test` — 190 files, 3382 tests, all passing\n- `pnpm --filter @objectstack/objectql typecheck` — clean\n- `pnpm lint` on both changed files — clean\n- `pnpm check:durability-log-level`, `pnpm check:engine-double-contract`,\n  `pnpm check:query-options-erasure`, `pnpm check:type-check-debt --re-measure`\n  (on a full built closure), `node scripts/check-engine-split-ratio.mjs`,\n  `pnpm check:nul-bytes` — all exit 0, no baseline raised, no ledger touched\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_014C8pAprWdmtecFsEprZax4)_"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 7962,
+  "kind": "pull_request",
+  "title": "fix(service-automation): report a durable http callout as unmeasured, not acted (#7882)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-12T08:59:25Z",
+  "updated_at": "2026-08-12T09:51:00Z",
+  "closed_at": "2026-08-12T09:50:58Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": "2026-08-12T09:50:58Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/7962",
+  "body": "Fixes #7882\n\n## The defect\n\n`http-nodes.ts:139` returned `metrics: { acted: 1 }` for a delivery that had only been **enqueued**. `enqueueHttp()` hands back the id of a **`pending`** `sys_http_delivery` row; `HttpDispatcher` decides the real outcome afterwards, and that outcome includes dead-lettering the callout (non-retriable status, or an exhausted retry budget). So an operator reading the run summary could see `acted: 1` for a callout the durable record shows as `dead` — the summary asserting an effect that never happened.\n\n## The fix\n\nThe durable path now reports `unmeasuredEffect`. That is the platform's existing word for \"an effect happened but its outcome is not yet knowable\" (the same qualifier `connector_action` uses), and pointedly **not** a bare `acted: 0` — `connector.zod.ts:613` forbids that, and it would trip the documented broken-sweep alert (`selected > 0 AND acted = 0 AND unmeasured = 0`) on every healthy durable callout. A pending delivery now suppresses that alert without asserting success.\n\nThe step still **succeeds** and its output is still `{ deliveryId, enqueued: true }`: the flow did everything it can do synchronously, and not blocking on the callout is the whole point of durable mode. No synchronous wait was added.\n\n## Did #7875's shape apply? Partly — the ruling, not the structure\n\n#7875 needed `EmitResult` split into `delivered` vs `enqueued` **inside `service-messaging`**, because `MessagingService.emit()` hides two outcomes behind one call: inline (P0) fan-out, which really does know the result, and the P1 outbox, which does not. The node could not tell them apart without the service-side narrowing.\n\n`enqueueHttp()` has no such ambiguity. It returns a row id and nothing else, and the row it writes is unconditionally `pending` — there is nothing to split. The two-path structure already sits **in the node**: `durable: true` enqueues, everything else calls `fetch()` inline, and the inline half already reported honestly (`acted: 0` for a read, `acted: 1` for an accepted mutation, `unmeasuredEffect` for a rejected/timed-out one). So the whole disagreement was one branch of one node. **Nothing in `service-messaging` changed.**\n\n## Reverse-verification on `origin/main`\n\nNew test run against unmodified `origin/main` node code:\n\n```\nTests  2 failed | 2 passed (4)\n  × durable delivery that dead-letters      — expected { acted: 0, unmeasured: 1 }, got { acted: 1, unmeasured: 0 }\n  × durable delivery that later succeeds    — expected { acted: 0, unmeasured: 1 }, got { acted: 1, unmeasured: 0 }\n  ✓ inline mutating call                    — acted: 1\n  ✓ inline GET                              — acted: 0\n```\n\nEvery **durable-record** assertion (`sys_http_delivery` row is `dead` / `pending` / `success`, `responseCode: 404`, `attempts: 0`) passed on `main` — the defect is real and lives only in the summary. After the fix: **4/4 green**, and the full package suite is **940 passed (79 files)**.\n\nThe test wires the **real** `MessagingService` + `MemoryHttpOutbox` + `HttpDispatcher` and ticks the dispatcher manually, for the same reason #7875 did: the outcome is decided *after* the run settles, which a fake answering in one shot cannot express. Assertions are on the two durable operator-facing records — the folded run summary and the outbox row — never on call counts. Both directions are covered so the fix cannot degenerate into \"dead-lettered deliveries are special\": the enqueued-then-**succeeded** case reports the same `unmeasured`, and the two inline cases keep their **measured** counts.\n\n## Consumer check\n\nGrepped `deliveryId`, `enqueued`, and the durable `acted` claim across the repo:\n\n- **`{ deliveryId, enqueued: true }` output** — read by nothing outside the node and its own tests. `plugin-webhooks`' `deliveryId` is an unrelated request-body field on the redeliver endpoint.\n- **`metrics`** — folded generically by `run-summary.ts`; no consumer special-cases the `http` node.\n- **`content/docs/automation/flows.mdx:737`** documented `http, durable: true → acted: 1 — the outbox row is a real, durable effect`. That row is now corrected — it was the one place the old behavior was promised. Updated in this PR.\n- No `packages/spec/src/**` file was touched, so no `gen:schema` / `gen:docs` regeneration is needed (`io-node-config.zod.ts`'s doc comment describes the `{ deliveryId }` output, which is unchanged, and makes no `acted` claim).\n\n`check:doc-authoring`, `check:doc-anchors`, `check:docs-audit-scope` and `typecheck` are green locally. Changeset: `.changeset/http-node-enqueued-not-acted.md`.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_016U4fTquAhViZT7RcMfcmSq)_"
+}

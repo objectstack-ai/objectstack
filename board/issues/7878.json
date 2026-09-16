@@ -1,0 +1,35 @@
+{
+  "number": 7878,
+  "kind": "pull_request",
+  "title": "fix(plugin-email): materialize a runtime email_template write without a restart (#7733)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-12T01:42:54Z",
+  "updated_at": "2026-08-12T02:08:08Z",
+  "closed_at": "2026-08-12T02:08:07Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": "2026-08-12T02:08:07Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/7878",
+  "body": "Fixes #7733\n\n## Premise: confirmed, and the cross-lane fork is NOT forced\n\nThe card's own analysis placed the gap \"upstream of the callback — the metadata service does not deliver an `added`/`changed` event for the `email_template` namespace on the runtime-write path\". Measurement says the runtime-write path **never reaches the metadata service at all**, so there is nothing for `packages/metadata*` to fix:\n\n- `PUT /api/v1/meta/:type/:name` (`packages/rest/src/rest-server.ts:5753`) calls `protocol.saveMetaItem`.\n- `saveMetaItem` (`packages/metadata-protocol/src/protocol.ts:9678`) persists to `sys_metadata` via the overlay repo, calls `applyRegistryWriteThrough` — that is the `[Registry] Registered email_template` line the QA run saw, from `packages/objectql/src/registry.ts:2006`, the **SchemaRegistry**, not the MetadataManager — then announces on its **own** seam: `runMutationProjector` (awaited, ADR-0094) then `emitMetadataMutation` (fire-and-forget, #2588).\n- It never calls `MetadataManager.register()`. And `notifyWatchers` — the sole producer of `metadataService.subscribe` callbacks — has **zero callers outside `metadata-manager.ts`**.\n\nSo the plugin's watcher was armed against an event the authoring door does not emit. The boot log \"subscribed to email_template metadata changes\" was true; it just named the other door. This is the same shape as the sibling precedent #7742 / PR #7847 (connectors), and it takes the same services-side answer: subscribe to a source the runtime write actually refreshes. **No `packages/metadata*` diff.**\n\n## The fix\n\n`EmailServicePlugin` now bridges **both** doors through one shared materializer:\n\n* **`metadataService.subscribe('email_template', …)`** — package ingest / artifact reload (unchanged behaviour).\n* **the protocol's mutation seam** — `PUT /meta`, the Studio save behind it, publish, delete.\n\nThe awaited ADR-0094 `registerMutationProjector` is preferred, exactly as plugin-security's permission projection prefers it: the write itself carries the materialization, so the QA repro's `PUT` → query `sys_email_template` is consistent with no race window, and a failure is reported on the save's own `projectionApplied` instead of vanishing into a log. `onMetadataMutation` is the fallback for protocol implementations predating the projector. A kernel with no protocol service is a silent no-op — it has no runtime-authoring door, and the boot sweep still covers it.\n\nDraft saves stay inert (ADR-0005 staging buffer). Both seams landing the same write is harmless and deliberately un-deduped: `upsertDeclaredEmailTemplate` is keyed on `(name, locale)` and idempotent.\n\n### Two things found while wiring the delete path\n\n* **A delete is not automatically a withdrawal.** `DELETE /meta/:type/:name` discards a *customization overlay*, so on an artifact-backed template it resets to the packaged declaration. Deactivating there would silently retire a template the package still ships. The bridge re-reads the effective item and re-materializes the revealed baseline; rows are deactivated only when nothing declares the name any more. A **failed** read is not an answer and deactivates nothing — a transient DB error must never be what stops a live template being sent.\n* **A served item carries read decorations** (`_diagnostics` from `decorateMetadataItem`, `_packageId` / `_provenance`), and `EmailTemplateDefinitionSchema` is a `strictObject` declaring no underscore key — so an unstripped body would reject the very baseline the reset exists to restore. Stripped before the upsert.\n\n`dispose()` disarms the bridge explicitly: the projector seam is a per-type Map slot with no unregister verb, so without it a torn-down plugin would keep writing through an engine whose provenance hook is already unbound.\n\n### #7731 invariant preserved\n\nThe read side is untouched, and the write side still goes through `mapTemplateToRow`, so a row's `locale` column holds the tag the loader queries it by. Pinned explicitly in the first new test.\n\n## Reverse-verification\n\nThe new suite was run against **origin/main** in a separate worktree: **9 of the 14 new cases fail**, exactly the way the QA run observed. The other 5 are never-regress guards that pass on both sides and are meant to — draft inert, other metadata types ignored, admin-authored rows never clobbered, boots without a protocol service, detaches on dispose. The 21 pre-existing test files are green on main, so the only red is the new file.\n\n## Gates\n\n| Gate | Result |\n| --- | --- |\n| `pnpm --filter @objectstack/plugin-email... build` (dep closure) | ✅ |\n| `pnpm --filter @objectstack/plugin-email test` | ✅ 22 files, **334 tests** (320 baseline + 14 new) |\n| `pnpm --filter @objectstack/plugin-email typecheck` | ✅ |\n| `pnpm --filter @objectstack/cli typecheck` (downstream consumer) | ✅ |\n| `pnpm check:docs-audit-scope` | ✅ |\n| `.changeset/email-template-runtime-write.md` | ✅ patch |\n| Engine-double gate | ✅ the new fake's `update` routes through `assertEngineUpdateDispatch` |\n\n`packages/spec/src/**` is not touched, so no schema/docs regeneration applies. The full lint.yml farm was deliberately not run locally."
+}

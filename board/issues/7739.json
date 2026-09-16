@@ -1,0 +1,36 @@
+{
+  "number": 7739,
+  "kind": "issue",
+  "title": "external-datasource-federated-read: external-write refusal (ExternalWriteForbiddenError) leaks to the client as a bare 500 INTERNAL_ERROR",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "pm:queue"
+  ],
+  "assignees": [
+    "huangyiirene"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T12:25:09Z",
+  "updated_at": "2026-08-11T18:40:10Z",
+  "closed_at": "2026-08-11T18:40:10Z",
+  "closed_by": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7739",
+  "body": "## Symptom\n\nA write to a read-only federated external object is correctly refused server-side — `ExternalWriteForbiddenError` names the datasource, its `schemaMode`, and both flags that would be required — but it reaches the client as a bare **500 INTERNAL_ERROR**, indistinguishable from a crash. Nothing is applied (the remote table is byte-identical after the attempt). Same envelope-leak class as the auth bodyless-500s in #7663 and the earlier raw-`TypeError` leak in #7543 (and the 5xx driver-throw passthrough family #5437).\n\n## Root cause\n\n`ExternalWriteForbiddenError` (defined in `packages/spec/src/shared/external-errors.ts`, thrown in `packages/objectql/src/engine.ts`) carries a stable `code` (`EXTERNAL_ERROR_CODES.writeForbidden`), but no REST/runtime error map references it: a `git grep` for `writeForbidden` / `ExternalWriteForbidden` / `EXTERNAL_ERROR_CODES` across `packages/rest`, `packages/runtime`, and `packages/cli` finds no mapping. So the error falls through the generic handler in `packages/rest/src/rest-server.ts` to 500 INTERNAL_ERROR instead of a 4xx envelope that carries the `code` and the refusal detail the error already computed.\n\nStale-premise check: present on `origin/main` (no external-error mapping exists in the rest/runtime layer).\n\n## Reproduction\n\n1. Boot with a read-only federated external object (`schemaMode` that forbids writes).\n2. `POST /api/v1/data/&lt;external_object&gt;` with any body.\n\nExpected: a 4xx envelope with a stable `code` naming the write-forbidden refusal. Actual: 500 INTERNAL_ERROR with no `code`, indistinguishable from a crash, even though the server-side `ExternalWriteForbiddenError` was correct and nothing was applied.\n\n## Source\n\nExtracted from the QA run objectstack-ai/objectstack#7690 (framework 92f26f75, console 09987b680)."
+}

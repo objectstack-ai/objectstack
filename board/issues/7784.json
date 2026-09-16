@@ -1,0 +1,35 @@
+{
+  "number": 7784,
+  "kind": "pull_request",
+  "title": "fix(service-job): enforce job timeouts in the durable run record (#7734)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T14:42:01Z",
+  "updated_at": "2026-08-11T19:40:57Z",
+  "closed_at": "2026-08-11T19:40:55Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": "2026-08-11T19:40:55Z",
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/7784",
+  "body": "Fixes #7734\n\n## Premise — verified against `origin/main` (`7a8476f`), holds exactly\n\nThe filer's root-cause analysis reproduces line for line on today's `main`:\n\n- `db-job-adapter.ts:81` — `schedule()` builds `const wrapped = this.wrap(name, handler, 'schedule')` and hands **the wrapper** to `IntervalJobAdapter`/`CronJobAdapter` (lines 84–91) along with `options`.\n- `interval-job-adapter.ts:157` / `cron-job-adapter.ts:158` — those adapters call `runWithPolicy(record.name, () => record.handler(...), record.options)`, i.e. the timeout guard wraps the **recorder**.\n- `run-with-policy.ts:50` — `Promise.race([run(), guard])`. When the guard wins, `wrap()`'s own `await handler(ctx)` (line 200) is still pending on a handler JavaScript cannot cancel; whenever it resolves, line 211 writes `finishRun(runId, 'success', …)` over the run.\n- The `timeout` verdict existed only in the in-memory `JobExecution` the adapters push (`interval-job-adapter.ts:171`), which `sys_job_run` never reads.\n- `startRun` (line 233) hardcoded `attempt: 1`, for the same reason: the recorder ran once per attempt but had no way to know which attempt it was.\n\n#7446's degraded-outcome mapping is intact on `main` and this change builds on it rather than replacing it — its whole suite stays green (see gates).\n\n## The fix\n\n**The party that observes the timeout is now the party that records it.**\n\n1. `run-with-policy.ts` — `runWithPolicy` gains an optional 4th argument, a per-attempt `JobAttemptRecorder` (`onAttemptStart(attempt)` / `onAttemptSettled(attempt, result)`), where `result` carries `timedOut` reported at the instant the guard fires. The two former code paths (with/without `retryPolicy`) are unified into one loop so the recorder is driven identically either way; no-policy is simply `maxRetries = 0`.\n2. `db-job-adapter.ts` — `wrap()` now runs the handler **under** `runWithPolicy` and records from those callbacks, instead of being run under someone else's policy. The timer adapter receives a registration with `retryPolicy`/`timeout` removed (`withoutPolicy()`), because the wrapper above it now applies both — forwarding them too would race the entire retry sequence against one more timeout budget and cut retries off mid-flight.\n\nAn abandoned attempt's late value loses `Promise.race` and reaches no observer, so **the overwrite has no code path left**. A per-run `settled` latch (one terminal write per `sys_job_run` row) is the second lock on the same door, so no future edit to this seam can move a run off a terminal status.\n\nBehaviour changes, all on the durable record:\n\n| | before | after |\n|:---|:---|:---|\n| `sys_job_run.status` for a timed-out run | `success` (or `running` until the handler resolved) | `timeout`, guard message in `error` |\n| `sys_job_run.duration_ms` | the abandoned handler's full runtime | the abandoned attempt's |\n| `sys_job.last_status` / `failure_count` | `success` / flat | `timeout` / **+1** — a run that never finished is a failure, and alerting keys on that count |\n| `sys_job_run.attempt` | `1` on every row | the real attempt number (retry ⇒ `2`) |\n| `replay()`'s synthetic row | mirrored only `degraded`; a timed-out replay paired an honest row with a `success` one | mirrors any terminal status |\n\n**Additive**: a handler that finishes inside its timeout, or that declares no `timeout`/`retryPolicy`, records exactly what it did before. `runWithPolicy`'s existing 3-argument signature and retry semantics (throw-driven only) are untouched.\n\n## Tests — `db-job-adapter.timeout.test.ts` (new, 10 cases)\n\nEvery assertion reads a `sys_job_run` / `sys_job` **cell**, never the in-memory history — the existing in-memory \"records status 'timeout'\" assertion stayed green all the way through this defect, which is exactly why it was not evidence.\n\n- persists `status: 'timeout'`, not `success`; `last_status: 'timeout'` with `failure_count: 1`; `duration_ms` bounded below the handler's runtime\n- **the overwrite race head-on**: guard fires → assert `timeout` → let the abandoned handler run to completion (asserting it really did resolve) → the row must still read `timeout`, still one row, `run_count`/`failure_count` unmoved\n- retried timeout lands rows `[attempt 1, attempt 2]`, both `timeout`, `failure_count: 2`; a retried failure numbers `[1, 2, 3]`\n- additivity: a handler inside its timeout still records `success` / `attempt 1`\n- in-memory `getExecutions()` and the persisted row report the same verdict; `listExecutionsByStatus('timeout')` finds it\n- replay of a timing-out job writes no `success` row\n- the policy still applies through an **injected `CronJobAdapter`** — the guard against `withoutPolicy()` ever outrunning the wrapper that replaces it\n\n**Reverse-verified**: with `db-job-adapter.ts` + `run-with-policy.ts` reverted to `origin/main` and the new test file kept, 9 of the 10 fail (`expected 'running' to be 'timeout'`, `expected [1,1] to deeply equal [1,2]`, …). The 10th is the additivity case, correctly green both before and after.\n\n## Gates run locally\n\n| gate | result |\n|:---|:---|\n| `turbo run build --filter=@objectstack/service-job...` | ✅ 6/6 |\n| `vitest run` (service-job, incl. #7446's `db-job-adapter.degraded-outcome.test.ts`) | ✅ 8 files, 66 tests |\n| `turbo run typecheck --filter=@objectstack/service-job` | ✅ |\n| `pnpm check:docs-audit-scope` | ✅ |\n| downstream consumers: `runtime/app-plugin.jobs.test.ts`, automation `wait-node*.test.ts` | ✅ 34 tests |\n| `.changeset/job-timeout-durable-record.md` (patch) | ✅ |\n\nPer the dispatch contract the full lint.yml farm is left to CI.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01CPtM1rkfEraQfp1TZbgtyE)_"
+}

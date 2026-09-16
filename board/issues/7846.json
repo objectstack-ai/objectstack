@@ -1,0 +1,35 @@
+{
+  "number": 7846,
+  "kind": "pull_request",
+  "title": "test(objectql): conjoin `$or`/`$and` with sibling filters in six driver doubles",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T20:33:02Z",
+  "updated_at": "2026-08-11T21:32:47Z",
+  "closed_at": "2026-08-11T21:32:46Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": "2026-08-11T21:32:46Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/7846",
+  "body": "Part of #7620\n\n⚠️ **`Part of`, not `Fixes`, and deliberately so.** #7620 names **16** files across four packages. This PR carries the **six** in `packages/objectql/src` — the `domain:engine-core` lane, per the claim comment on the card. The remaining ten (6 `plugin-sharing`, 3 `plugin-security`, 1 `runtime`) belong to two other seats and are routed separately, so the card must survive this merge.\n\n## What\n\nSix in-memory driver doubles built a `WHERE` matcher that **returned early** on `$and`/`$or`, discarding every sibling equality key in the same object:\n\n```ts\nif (Array.isArray(where.$and)) return where.$and.every((w) => matchesWhere(row, w));\nif (Array.isArray(where.$or))  return where.$or.some((w) => matchesWhere(row, w));\nfor (const [k, v] of Object.entries(where)) { /* the siblings, never reached */ }\n```\n\nA real driver ANDs them. So a query shaped like `SysMetadataRepository.listDrafts`'s —\n\n```js\n{ state: 'draft', package_id: 'app.x', $or: [{ organization_id: ORG }, { organization_id: null }] }\n```\n\n— would have been answered on the `$or` alone, handing back rows matching neither `state` nor `package_id`. Not a stricter or looser edge case: a **different query**, with the suite staying green while testing it.\n\nThe fix folds `$and`/`$or` into the entries loop so they compose with their siblings, matching the corrected form `protocol-revert-org-scope.test.ts` already carries from #7619 (re-verified intact on current `main`).\n\n| file | matcher calls observed | `$or`/`$and` seen |\n|:--|--:|--:|\n| `publish-meta-response-conformance.test.ts` | 60 | 0 |\n| `protocol-recorded-by-null.test.ts` | 44 | 0 |\n| `protocol-save-meta-repo-path-real-engine.test.ts` | 21 | 0 |\n| `protocol-registry-shadow.test.ts` | 7 | 0 |\n| `save-meta-response-conformance.test.ts` | 0 | 0 |\n| `plugin.authoring-channel.test.ts` | 0 | 0 |\n\n## Live vs dormant — measured, not assumed\n\nThe card names establishing this as step one. A probe was installed in each of the six matchers, logging every `where` it was handed, and the suites run:\n\n**132 matcher calls across the six suites, and not one `$or` or `$and`. All six are dormant.**\n\nThe two zero-call files never invoke their matcher at all — those suites drive writes, not reads. The control that makes the silence evidence rather than a dead probe is the 132 plain-equality calls the same instrumentation *did* record.\n\nConsequence: **no existing test outcome changes, and none should.** There was no correction-induced failure to report — the interesting result this card could have produced (a test that was passing against a query nobody wrote) did not materialise in this lane. The card's own note that `sharing` and `security` are the likeliest to be **live** is unaffected by this measurement and still worth the other seats' attention.\n\nDormant is still worth closing: nothing distinguished \"this double is faithful here\" from \"this double quietly changed the fixture\", and the next test to add an `$or` would have inherited a matcher that lies.\n\n## Capability preservation\n\nEach matcher keeps exactly the operator surface it already had — `$eq` unwrapping, the `undefined`→`null` comparison normalisation, and the skip for any other `$`-prefixed key. A non-array `$and`/`$or` still falls through to that skip, exactly as before. Measured first: the six proved **semantically identical**, differing only in indentation (one is 2-space) and an intermediate `rowVal` variable, so there was no lowest-common-denominator to flatten anything to.\n\n## No shared helper — stated deliberately\n\nA helper local to `packages/objectql` would genuinely have reduced six to one. Rejected anyway, for three reasons:\n\n1. `publish-meta-response-conformance.test.ts` carries the repo's **own** written rationale against it: *\"a gate that imports its own substrate from another gate's file couples two tripwires that must be able to fail independently.\"*\n2. #7619's reference correction is inline for the same reason, and it is the template this card says to copy.\n3. An objectql-local helper **cannot** serve the ten remaining files in `plugin-sharing` / `plugin-security` / `runtime` — a cross-package one is out of scope by construction — so it would add a second convention rather than consolidate to one.\n\n## Verification\n\nAll run locally in a dedicated worktree at `b54aaab`.\n\n| gate | result |\n|:--|:--|\n| `packages/objectql` vitest (full) | **185 files / 3274 tests passed**, 0 failed |\n| `pnpm check:query-options-erasure` | **exit 0** — 67 non-test sites, none new; baseline key set verified against `b54aaab`, no files added |\n| `pnpm check:type-check-debt` | **exit 0** — 33 ledger entries re-measured, none above its recorded number |\n| `pnpm check:durability-log-level` | exit 0 |\n| `pnpm check:engine-double-contract` | exit 0 — 155 pinned, unchanged |\n| `node scripts/check-engine-split-ratio.mjs` | exit 0 |\n| `eslint` on the six | clean |\n\nGate list derived with `node scripts/pm/dispatch-gates.mjs <the six paths>`, not enumerated by hand. Neither ratchet baseline was raised. Nothing here let me *lower* a ledger entry: `packages/objectql` is fully type-checked and carries no entry, and the surplus the debt gate reports sits in unrelated packages.\n\n## Not in this PR\n\n- The other **ten** files of #7620 — other lanes, deliberately untouched.\n- **#7264** (these same doubles are `any`-annotated at scale) — that is the *type* channel over the same fixtures; this is their *runtime semantics*. Different fix, different round.\n- No product code, and no test assertion, changed.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01Da8i4RxJBSv73tgr92D9KB)_"
+}

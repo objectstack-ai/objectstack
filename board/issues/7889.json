@@ -1,0 +1,32 @@
+{
+  "number": 7889,
+  "kind": "issue",
+  "title": "[finding] alias-integrity cannot see an alias row made unreachable by a guidanceSet — a vis-shaped alias on VISIBILITY_STRICT_OPTIONS surfaces would be dead code with no gate saying so",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-12T02:17:48Z",
+  "updated_at": "2026-08-12T09:23:55Z",
+  "closed_at": "2026-08-12T09:22:48Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7889",
+  "body": "Recorded from PR #7884's report (out_of_scope_finding 3 of card #7832; filed by the PM seat because the cloud dev session cannot write issues). Filed unassigned — a recording, not a claim.\n\n## Mechanism, measured during #7832\n\nIn `packages/spec/src/shared/strict-object.ts`, when an unknown key matches a guidanceSet's pattern, the set **consumes the key and `continue`s past the rename channel** — the `aliases` table is never consulted for that key. `VISIBILITY_KEY_PATTERN` (`/vis|conceal|hidden|show.?when/i`, part of the ADR-0089 conditional-visibility prescription in `VISIBILITY_STRICT_OPTIONS`) therefore makes ANY vis-shaped alias row on those surfaces (`FormSectionSchema`, `PageComponentSchema`, `FormFieldSchema`) dead on arrival.\n\nThat behaviour is **correct** (the shared prescription is the intended answer), but it is not enforced or documented at the alias-authoring site:\n\n- `alias-integrity.test.ts` checks that an alias row's **target key is declared** — it does not check that the row is **reachable** past the guidanceSets in the same strict options.\n- A future card adding e.g. `visible: 'visibleWhen'` to one of those shapes would ship dead code, every gate green, and the author would reasonably believe the hint exists.\n\nPR #7884 worked around it by (a) placing its one view-family alias (`disabled → readonly` on `FormFieldSchema`) outside the pattern's reach, and (b) pinning in `visible-when-alias-guidance.test.ts` that the three shared-options surfaces answer `visible`/`showWhen` via the ADR-0089 set with **no** `Did you mean` rename — but that pin protects those specific keys only, not the class.\n\n## Possible fix shape (for whoever grades this)\n\nExtend alias-integrity to fail an alias key that a guidanceSet in the same strict options already matches — turning \"dead row\" from a silent state into a red gate. Lands in the gate/test machinery around `strict-object.ts` ⇒ `domain:spec-tooling` face by the #5163 boundary (routing is the triage seat's call).\n\n## Refs\n\n#7832 / PR #7884 (provenance, workaround, partial pins), #6619 (where the ADR-0089 guidanceSets were added), ADR-0089.\n\nDedup: searched for alias-integrity / guidanceSet / VISIBILITY_KEY_PATTERN reachability — zero hits."
+}

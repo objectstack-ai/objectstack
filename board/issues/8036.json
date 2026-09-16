@@ -1,0 +1,33 @@
+{
+  "number": 8036,
+  "kind": "pull_request",
+  "title": "showcase: author an `emptyState` fixture on the Urgent task view",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-12T12:51:42Z",
+  "updated_at": "2026-08-12T13:54:05Z",
+  "closed_at": "2026-08-12T13:54:03Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-08-12T13:54:03Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/8036",
+  "body": "Fixes #7714\n\n## What\n\n`packages/spec` declares a per-view empty-state translation surface — `objects.OBJECT._views.VIEW.emptyState.title` / `.message` — it is authorable on a list view, and it is documented. But no view anywhere under `examples/` authored one, so the declared key group had no reachable instance on the stock fixture. The i18n surface-matrix check therefore had nothing to resolve and was recorded as waived-for-missing-fixture rather than actually run.\n\nThis authors the specimen and translates it in both bundle locales. Fixture-only, entirely inside `examples/app-showcase/src/**`; no spec change — the surface was already declared and authorable, and the card exists precisely because nothing *used* it.\n\n- `src/ui/views/task.view.ts` — `listViews.urgent` gains `emptyState: { title, message }`\n- `src/system/translations/index.ts` — the matching `en` and `zh-CN` entries under `_views.urgent`\n\n## Why this view\n\nThis is the whole substance of an otherwise small diff, so stating it plainly: emptiness means different things on a filtered saved view and on an unfiltered object list.\n\nAn unfiltered list that is empty is a **setup** state — \"nothing exists yet\" — and the showcase seed deliberately never produces it (`data/seed/index.ts` seeds inquiries specifically so \"every view renders real data\"). A **filtered** view that is empty is a **steady** state — \"nothing matches right now\" — which a running deployment hits constantly. That second case is what per-view empty-state copy exists to serve, which makes it the spelling worth pinning as the fixture.\n\n`listViews.urgent` (filter: `priority equals urgent`) is the strongest instance of it, for two reasons beyond being filtered:\n\n1. **Empty is the outcome the user wants.** The copy can report good news (\"Nothing needs immediate attention right now\") instead of nagging about absent data. A plausible message is the difference between a fixture people trust and maintain and one they route around.\n2. **It is reachable without touching the seed.** The two urgent seed rows are exactly what the neighbouring `bulk_actions` view's `showcase_mark_done` exists to clear — so a demo user empties this view by *using the app*, not by editing fixtures. That kept the change inside the declared file surface.\n\n## Why the `en` arm is not a mirror\n\nThe `en` side of this bundle carried no `_views` block at all before this change; all fifteen live on the zh-CN side. The new `en` block is deliberately **only** the `emptyState` group, not a mirror: view labels are already English in the view file, so restating all fifteen would be fifteen fake translations of exactly the kind the bundle's own header warns about.\n\nThe `emptyState` group earns its entry because a key present in one locale cannot demonstrate a locale-resolving surface — an `en` session would read the view's inline source string through the *fallback* path, which is a different code path and proves nothing about the resolver. Both arms present is what gives the surface-matrix check the same key resolving to different copy per locale.\n\n## Verification\n\nGates derived from the touched paths via `scripts/pm/dispatch-gates.mjs` (it named no path-scoped family; the implicated ones were run by convention).\n\n| Gate | Result |\n| --- | --- |\n| `pnpm --filter '@objectstack/example-showcase...' build` | green — the showcase's own metadata validation accepts the view definition |\n| `check:i18n-coverage` | `OK (12 config(s), 660 baselined untranslated string(s), none new)` |\n| `check:i18n` | `OK (9 package(s) — all bundles in sync, no undeclared authoring keys)` |\n| `check:nul-bytes` | `OK (scanned 7331 text file(s) … no raw ASCII control bytes)` |\n\n**Reverse verification — direction predicted before running.** `i18n-extract.ts` emits `_views.VIEW.emptyState.title` / `.message` as real expected entries, so the prediction was that dropping the bundle entries while keeping the view's `emptyState` should make the ratchet go red by **exactly two**. Reverting only the translations file and re-running gave:\n\n> `examples/app-showcase/objectstack.config.ts: untranslated declared strings grew 451 → 453.`\n\n+2, as predicted. That is what proves the fixture genuinely reaches the extractor rather than sitting inert, and it is why both keys are translated in the same change: leaving them untranslated widens the frozen count (fails the ratchet), and translating anything *extra* would push it below baseline (which the same gate rejects). Restored via patch file, both gates re-confirmed green.\n\n## Notes\n\n- **No changeset**, and `skip-changeset` applies: `@objectstack/example-showcase` is `private: true`, which `scripts/check-changeset-fixed.mjs` excludes by design (`if (!pkg.name || pkg.private === true) continue`).\n- Worth recording for whoever picks up the QA item: **no resolver in this repo reads `_views.VIEW.emptyState`** — `i18n-resolver.ts` resolves `label` and `description` only. The consumer is the `objectui` list renderer. That does not affect this card (the gap filed was the missing *fixture*, and the extractor/coverage path does read the key, as the reverse verification above shows), but a checklist item expecting a framework-side resolver call would be looking in the wrong repo.\n- Related: #7746 remains referenced as the nearest fixture precedent; nothing here changes its state.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01Vs1H5ouuLLAtyZLALg4H7H)_"
+}

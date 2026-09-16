@@ -1,0 +1,34 @@
+{
+  "number": 7504,
+  "kind": "issue",
+  "title": "Error-code ledger provenance: `INVALID_METADATA` now has a second emitter (`@objectstack/plugin-security`) and is registered under only one",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T04:09:28Z",
+  "updated_at": "2026-08-12T02:15:49Z",
+  "closed_at": "2026-08-12T02:15:49Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7504",
+  "body": "Observation filed while implementing #7474. The dispatch for that card put `packages/spec` out of surface (the error vocabulary belongs to the spec seat), so this is recorded rather than done.\n\n## What changed\n\nThe #7474 PR makes `@objectstack/plugin-security` emit `INVALID_METADATA` (`422`) for the `controlled_by_parent`-without-`master_detail` authoring defect. The code is drawn from the existing closed vocabulary deliberately — ADR-0112's registration guidance says a generic condition takes an existing entry rather than a registered synonym, and \"your metadata is broken\" is exactly what `INVALID_METADATA` already names on the metadata-protocol publish path.\n\n## The gap\n\nNothing on the wire is wrong: `ERROR_CODE_LEDGER` dedupes into `REGISTERED_ERROR_CODES`, so `INVALID_METADATA` is already a member of the `ErrorCode` union and every envelope conformance parse passes. What is now incomplete is the ledger's **provenance**, which the file itself defines as per-emitter:\n\n> A code emitted by several packages is listed once per emitting package — the union dedupes; the per-package rows are provenance, not identity.\n\n`INVALID_METADATA` sits under `'@objectstack/metadata-protocol'` only. It should also sit under `'@objectstack/plugin-security'`.\n\n## Why it is worth a row rather than nothing\n\nThe ledger's retirement rule reads the rows as the emitter list: \"A row whose last EMITTER is deleted comes out with it.\" With provenance missing, a future retirement pass on metadata-protocol's `INVALID_METADATA` would look correct and would unregister a code plugin-security still throws — the silent fourth state, arrived at by following the documented procedure.\n\nNo behaviour change, no gate red today: `check:error-code-casing` checks casing, and `error-code-ledger.test.ts` checks casing, duplication and shadowing — none of them checks which package emits what.\n\n## The change\n\nOne line in `packages/spec/src/api/error-code-ledger.zod.ts`:\n\n```ts\n  '@objectstack/plugin-security': [\n    'INVALID_METADATA',           // controlled_by_parent declared with no master_detail relation (#7474)\n    'SUGGESTION_NOT_FOUND',\n    'SUGGESTION_STATE',\n  ],\n```"
+}

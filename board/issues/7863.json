@@ -1,0 +1,32 @@
+{
+  "number": 7863,
+  "kind": "issue",
+  "title": "#7800 fixed the two docs a human reads; the same work-destroying recipe still ships in the os-dev agent definition, the stash hook, and the pm-dispatch SKILL",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T21:25:18Z",
+  "updated_at": "2026-08-12T14:15:54Z",
+  "closed_at": "2026-08-12T14:14:43Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7863",
+  "body": "Filing unassigned; `domain:*` routing is the triage seat's. Direct follow-up to **#7800 / PR #7839** (merged 20:56Z), which corrected `CLAUDE.md` and `AGENTS.md` only — the file surface that card claimed.\n\n## Why this is not just tidy-up\n\nThe recipe is `git checkout origin/main -- <path>` presented as one half of a restore round-trip. Run against an **uncommitted** edit — which is the normal state during reverse verification, the exercise it is advertised for — it silently discards the working-tree change at exit 0. No warning, no conflict, no refusal. It has already destroyed in-flight work **three times in one day**: objectui #4278 (PR #4293), objectui #4243 (PR #4299), and this repo's #7739 (PR #7791). Every recovery depended on the change still being in the session transcript.\n\nPR #7839 removed it from the two root docs. But the copy that matters most for *agents* was out of that card's scope:\n\n| location | what reads it |\n|---|---|\n| `.claude/agents/os-dev.md:488` | **every `os-dev` subagent, on every dispatch** — this is the developer agent's own operating instructions |\n| `.claude/hooks/guard-shared-stash.sh:32,170` | the hook that *enforces* the stash ban; its own comments recommend the unsafe alternative |\n| `.claude/skills/pm-dispatch/SKILL.md:2120` | the PM loop skill |\n\nSo the net effect of #7839 alone is that the docs a **human** opens are correct while the instructions an **agent** is handed still carry the hazard. Given that the three recorded incidents were all agents, this is the copy with the highest exposure, not the lowest.\n\n## Scope and the required split\n\nThe three landings do not share a merge channel, so this cannot be one PR:\n\n- **AI-mergeable half** — `.claude/agents/os-dev.md` and `.claude/hooks/guard-shared-stash.sh`. Neither is under `.claude/skills/**` or `skills/**`, so neither is in the maintainer's manual channel.\n- **Manual-review half** — `.claude/skills/pm-dispatch/SKILL.md`. Per the maintainer's 2026-08-11 ruling, any diff touching a skills root is ADR-class: an AI seat may draft and PR it, but ⛔ **never merge, enqueue, or arm auto-merge on it**. It needs its own PR, titled to say so, using `Part of` rather than `Fixes`. Same shape as #7783 → #7837 earlier today.\n\nWhoever takes this should also **grep for further copies rather than trusting this list** — it came from one dev's incidental sweep while working a different file surface, so it is a lower bound.\n\n## What the replacement should say\n\nDo not re-derive it. PR #7839 already landed the agreed wording in this repo's `AGENTS.md`, itself aligned with objectui's `c880799` (*\"docs(agents): require commit-then-revert for reverse verification\"*, objectui #4301/#4339). The rule: **doing reverse verification? commit the fix first** — then restoring is `git checkout <your-branch> -- <path>`, pulling the file back out of a commit that really exists. Copy that, so all five files say one thing.\n\nOne further point worth carrying into the agent definition specifically, since it is where a recovering agent will look: a matching `git diff --stat` insertion count is **not** byte-identity. If a lost change is retyped, prove it with `git diff` against a saved patch or `git hash-object`.\n\n## Provenance\n\nOut-of-scope findings section of the #7800 dev report (2026-08-11T20:09Z), which named the three paths with line numbers and explicitly flagged them as wanting a follow-up card. Filed by the devx PM seat (#6023)."
+}

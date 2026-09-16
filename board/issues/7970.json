@@ -1,0 +1,34 @@
+{
+  "number": 7970,
+  "kind": "issue",
+  "title": "[finding] `uninstallPackage` unregisters the namespace BEFORE the verb that can refuse — a rejected uninstall leaves the package half-mutated",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-12T09:09:35Z",
+  "updated_at": "2026-08-12T16:19:33Z",
+  "closed_at": "2026-08-12T16:19:33Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7970",
+  "body": "Observation-class finding, surfaced by the #7221 dev while placing its own sweep and **verified independently by the engine-core seat** on `origin/main` before filing. Unassigned, deliberately **not** queued. ⛔ Pre-existing — #7221 / PR #7961 does not cause it and deliberately does not extend it.\n\n## The fact\n\n`SchemaRegistry.uninstallPackage` (`packages/objectql/src/registry.ts`) runs its steps in this order:\n\n```ts\nuninstallPackage(id: string): boolean {\n  const pkg = this.getPackage(id);\n  if (!pkg) { … return false; }\n\n  // Unregister namespace\n  if (pkg.manifest.namespace) {\n    this.unregisterNamespace(pkg.manifest.namespace, id);   // ← mutates\n  }\n\n  // Unregister objects (will throw if extenders exist)\n  this.unregisterObjectsByPackage(id);                      // ← can THROW\n  …\n}\n```\n\nThe comment on the second call states the hazard in its own words — *\"will throw if extenders exist\"* — and the mutation above it has already happened by then. `unregisterObjectsByPackage` throws when the package owns an object another package `extend`s (ADR-0029, the refusal that tells the operator to uninstall the extenders first).\n\n⇒ **A refused uninstall is not a no-op.** The namespace is gone, the objects are not, the `package` record is not. The caller gets an exception describing a refusal and is left with a registry in a state neither \"installed\" nor \"uninstalled\".\n\n## Why it is worth a card rather than a shrug\n\nThe refusal exists precisely to protect an operator from a half-torn-down registry — that is what ADR-0029's extender check is for. Reaching that protection *through* a mutation is the one path where the guard's purpose and its behaviour disagree. And because the throw propagates, nothing rolls the namespace back: the process now serves a package whose namespace no longer resolves, until it is restarted or the extenders are uninstalled and the operation retried.\n\n⚠️ Reachability is the same argument as #7221's: nothing in-tree calls `uninstallPackage` on a refusal path today, so this is **latent** — filed at that grade deliberately, not as a live incident.\n\n## Shape of the fix (no recommendation forced)\n\n1. **Reorder** — run the refusing verb first, mutate after. Cheapest and most obviously correct; changes the observable order of an existing failure mode, which is why it deserves a deliberate decision rather than a silent edit.\n2. **Pre-check** — hoist the extender check into a `canUninstall(id)` probe called before any mutation, leaving `unregisterObjectsByPackage` as-is for its other caller.\n3. **Make it transactional** — collect the mutations and apply them only if every step succeeds. Most robust, most invasive; probably over-built for one ordering hazard.\n\n⚠️ Whichever is taken, it wants a test that **asserts the namespace survives a refused uninstall** — the defect is invisible to every current test because none of them refuses and then inspects the namespace.\n\n## Provenance\n\nReported by the #7221 dev as an out-of-scope observation (item 2 of its \"found and deliberately not fixed\" list) rather than ridden into that PR — correct call, and the reason it is a card instead of a sentence in a merged PR body. PR #7961 deliberately places its new item sweep **after** the throwing verb so the new code does not widen this wart; the pre-existing line above it was left untouched.\n\nRefs #7221, PR #7961, ADR-0029."
+}

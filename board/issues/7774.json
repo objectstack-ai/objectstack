@@ -1,0 +1,34 @@
+{
+  "number": 7774,
+  "kind": "issue",
+  "title": "GET /meta/email_template can collapse an i18n bundle back to one row — the list merge dedups by (package, name), no locale",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "huangyiirene"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T14:28:44Z",
+  "updated_at": "2026-08-12T05:58:55Z",
+  "closed_at": "2026-08-12T05:58:55Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7774",
+  "body": "## What\n\n`MetadataProtocol`'s unscoped metadata list merges the registry's items with the\nMetadataService's items under `metaItemKey(packageId, name)`\n(`packages/metadata-protocol/src/protocol.ts:988`, used at `:4363` and `:4377`).\nThat key is `(package, name)` with no discriminator, so two rows of the same\nemail template in different locales — an i18n bundle, per\n`EmailTemplateDefinitionSchema` — map to ONE map entry and the second\n`itemMap.set(...)` in the first loop overwrites the first. The list serves one\nlocale of the bundle.\n\n## Why it is filed now\n\nFound while fixing #7730. Until that fix, `SchemaRegistry` itself held only one\nlocale per name, so this collapse was masked — there was never a second row to\ndrop. With the registry keeping the bundle (`<packageId>:<name>@<locale>`),\n`listItems('email_template')` returns both members and this merge is the next\nplace they can be lost.\n\nNot a regression from #7730 and not on that issue's reported path: the\n`sys_email_template` materializer (`bootstrapDeclaredEmailTemplates`) reads\n`registry.listItems` directly and never goes through this merge, so the reported\nsymptom is fixed. What is affected is `GET /meta/email_template` (Studio's\nmetadata list), and only when a `metadata` service is installed and returns a\nnon-empty list for the type — the merge block is skipped otherwise.\n\n## Why it was not fixed in the same PR\n\nThe discriminator table lives in `@objectstack/objectql`\n(`ITEM_KEY_DISCRIMINATORS`, `packages/objectql/src/registry.ts`), and\n`@objectstack/metadata-protocol` does not depend on `@objectstack/objectql` —\nso sharing it needs a home decision (`@objectstack/metadata-core` is a\ndependency of both and is the obvious candidate) rather than a new package\ndependency added in passing. #7730's claimed file surface was\n`packages/objectql/src/registry.ts` + tests + changeset.\n\n## Suggested shape\n\nMove (or re-export) the per-type discriminator table into a package both sides\ndepend on, and give `metaItemKey` the discriminator when the type declares one —\n`(package, name, locale)` for `email_template`, unchanged for every other type.\nThe `sys_metadata` overlay merge at `:4207` needs no change: overlay rows are\nunique on `type+name+org` and carry no locale."
+}

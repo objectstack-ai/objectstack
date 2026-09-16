@@ -1,0 +1,35 @@
+{
+  "number": 8071,
+  "kind": "pull_request",
+  "title": "fix(rest): one error envelope across the three /security/suggested-bindings routes (#7981)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-12T14:24:27Z",
+  "updated_at": "2026-08-12T16:43:24Z",
+  "closed_at": "2026-08-12T16:43:22Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-08-12T16:43:22Z",
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/8071",
+  "body": "Fixes #7981\n\n## What was wrong\n\n`registerSecurityEndpoints` answered **three mutually incompatible refusal envelopes**, decided only by which arm refused — on three routes a single client calls in sequence (list → confirm / dismiss):\n\n| arm | shape before |\n|:---|:---|\n| validation refusals (repeated query param #6877, unknown `?status` #7678) | `{ error: { code, message } }` — ADR-0112 |\n| security service not registered (`respond501`) | `{ code, message }` — no `error` wrapper at all |\n| thrown service error 403 / 404 / 409 / 500 (`handleError`) | `{ code, error: 'a bare string' }` |\n\nSo `body.error.code` — the one position ADR-0112 D5 declares for the semantic code — read `undefined` on two arms out of three, and the two it failed on include the arm carrying the typed `PERMISSION_DENIED` 403 / `SUGGESTION_NOT_FOUND` 404 / `SUGGESTION_STATE` 409 codes the routes' own docblock advertises, i.e. the arm a consumer is most likely to branch on. None of the three was wrong on its own; they were wrong as a set.\n\n## What changed\n\nAll three arms now emit `{ error: { code, message } }` through **one** shared `respondError` helper inside `registerSecurityEndpoints`, so \"the arms agree\" is a property of the code rather than of three literals that happen to match today.\n\n**The target shape was taken from a sibling arm in this same file, not re-derived from the ADR** — the `?status` guard PR #7979 landed here earlier today, and the multiplicity gate it sits beside, both write exactly this body from `query-multiplicity.ts`. The region therefore converges rather than acquiring a fourth reading of the same document.\n\nNo code value and no HTTP status moves: `NOT_IMPLEMENTED` / `VALIDATION_ERROR` stay the standard catalog's members for 501 / 400, the thrown arm still passes the service's own `err.code` through, and nothing in `packages/spec` changes. `respond501`'s status was explicitly out of scope and is untouched.\n\n## The wire-visible half — TWO readers exist, both multi-envelope by design\n\nThe bare-string `error` is wire-visible, so the consumer sweep ran before the edit (#7035 methodology: `code === '…'` as well as `code: '…'`), each negative paired with a control query.\n\n**Readers found — 2:**\n\n1. **`packages/client` SDK**, `ObjectStackClient.fetch` (`packages/client/src/index.ts`, the `if (!res.ok)` branch — not `unwrapResponse`, which never sees a failure because `fetch` throws first):\n\n```js\nconst errorMessage = errorBody?.message\n  ?? errorBody?.error?.message\n  ?? (typeof errorBody?.error === 'string' ? errorBody.error : undefined)\n  ?? res.statusText;\nconst errorCode = asSemanticCode(errorBody?.code) ?? asSemanticCode(errorBody?.error?.code);\n```\n\n   Its own comment states the intent: the two reads are \"the two LIVE envelopes' declared spots, not a fallback chain\". So it is deliberately bi-dialectal, and every field it exposes comes out **identical in value** after this change — 501: message moves `body.message` → `body.error.message`, code `body.code` → `body.error.code`, same strings; thrown arm: message moves off the plain-string limb onto `error.message`, code likewise. `err.httpStatus` is taken from the transport, and `err.details` already fell through to the whole body on both flat shapes and still does.\n\n2. **`objectui` console**, `packages/app-shell/src/services/suggestedBindingsApi.ts:41-42` — `payload?.error?.code ?? 'HTTP_'+status` and `payload?.error?.message ?? payload?.error ?? res.statusText`: canonical-first, so this change **improves** it (a 403 confirm denial currently reports `HTTP_403`; afterwards the real `PERMISSION_DENIED`, with the same message text). It cannot render `[object Object]` — the chain ends in a `typeof message === 'string'` guard. Nothing branches on the code (`errorCodeIs` is used on the marketplace API, never here).\n\n**Negatives, each with its control:**\n\n| surface | result | control |\n|:---|:---|:---|\n| `cloud` | no consumer at all | control `api/v1/security` returns 2 hits in cloud; target returns 0 |\n| this repo's tests | none assert these arms' bodies; `SUGGESTION_*` appear only at the emitter and in the spec ledger | control `NOT_IMPLEMENTED` is asserted in 8+ rest test files |\n| docs / QA checklist | name codes and statuses, never a body position | control `security/explain` returns 52 files |\n\nBoth readers therefore keep working, and neither loses information. **The go/no-go on a wire change is still the PM's, not mine** — this PR is deliberately parked in draft for that ruling.\n\n## Verification\n\n- `@objectstack/rest` suite: **98 files / 1589 tests passed**.\n- `pnpm --filter @objectstack/rest typecheck` (`tsc --noEmit`): clean.\n- `pnpm check:type-check-debt`: OK, none above its recorded number; `@objectstack/rest` is absent from the \"can be lowered\" list, i.e. it re-measured at exactly its recorded **155**. The ledger does not move.\n- `check:error-code-casing` and `check-nul-bytes`: clean.\n- **Reverse verification** — with the fix committed, the `handleError` arm alone was reverted to `{ code, error: 'string' }` and the new suite re-run: **12 failed / 11 passed**, all on shape, none a compile error. Representative reds: `typed 403 list has no nested code: expected 'undefined' to be 'string'`; `typed 403 list still has a top-level code sibling: expected { code: 'PERMISSION_DENIED' } to not have property \"code\"`; and the derived cross-arm pin `expected 1, received 2` distinct skeletons. Restored with `git checkout HEAD -- packages/rest/src/rest-server.ts`.\n\nThe cross-arm pin is **derived, not three literals**: `shapeOf()` reduces a body to its key-path/type skeleton and the family case asserts every arm reduces to the same one without naming it — so a fourth dialect fails there even if someone also adds a matching literal case.\n\nOut-of-scope finding filed from this work: #8073 (the two adjacent registrars in this same file still answer the retired dialects).\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01B3Kurx8qufrDzNjk4rag7V)_\n"
+}

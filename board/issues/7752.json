@@ -1,0 +1,35 @@
+{
+  "number": 7752,
+  "kind": "issue",
+  "title": "The vendored `packages/console/dist` is built from a pin two days behind `.objectui-sha` — QA runs measure a console the repo no longer pins",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "huangyiirene"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T12:28:25Z",
+  "updated_at": "2026-08-11T20:07:49Z",
+  "closed_at": "2026-08-11T20:07:49Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7752",
+  "body": "## Symptom\n\nThe console served to a QA run is not the console the repo pins, and the gap is large enough to invalidate findings.\n\nMeasured in this run:\n\n- served bundle — `packages/console/dist/.objectui-sha` = **`09987b680`**, built 2026-08-09 02:35 UTC\n- repo-root pin — `.objectui-sha` = **`6314e87f2`**, 2026-08-11 04:17 UTC\n\nTwo days and a substantial range of objectui work separate them, and the run's `page-variables-and-actions` item was marked `blocked(dependency)` rather than FAIL because of it.\n\n## The blocked clauses\n\n`page-variables-and-actions` clauses 4-5: the submit POSTs a literally **empty** body, because `bodyExtra` is dropped by `ElementButtonRenderer`'s key whitelist at the served pin. objectui `origin/main` forwards it end-to-end via **`7e5bb5d4e`** — *\"fix(actions): forward bodyExtra end-to-end through the action chain (#3924)\"* — and `git merge-base --is-ancestor 09987b680 7e5bb5d4e` confirms the fix landed **after** the served pin (fix 2026-08-09 05:38 UTC; pin 02:35 UTC). The repo-root pin already contains it.\n\n**The server half is proven healthy independently** — a real POST created a `showcase_inquiry` with `source:'web'`, `status:'new'`. So there is nothing to fix in the framework here; there is a bundle to rebuild and clauses to re-run.\n\nEverything else that passes in that item is genuine and unaffected: page variables initialize empty and gate dependent blocks, a ref-targeted picker selection flips the gate live with **0** main-frame navigations, one text input's write drives another component's visibility, and a reload with no selection re-initializes empty.\n\n## Root cause / remediation\n\n`packages/console/dist` is a **gitignored, locally-built artifact** (`packages/console/.gitignore` = `dist/`). It is rebuilt only by `scripts/build-console.sh` — `pnpm objectui:build` — and **not** by `turbo run build`, so pulling a branch that moves `.objectui-sha` updates the pin and leaves the old dist serving.\n\nRemediation is `pnpm objectui:build` (rebuild at the *pinned* SHA), **not** `objectui:refresh` — the pin is already correct, and refresh would re-bump it to the local `../objectui` HEAD.\n\n**Worth a second look while fixing:** the drift guard for exactly this condition already exists. `scripts/check-console-sha.mjs` compares the dist stamp against the pin and exits 1 with that remediation, and it is wired into `pnpm dev` / `dev:showcase` / `dev:crm` / `dev:todo` via `check:console-sha`. A run that served a drifted dist therefore booted the app by a path that does not pass through it. Either the QA boot path should route through the guarded script, or the guard needs a second seat on whatever path the runner uses — otherwise the next run silently repeats this.\n\n## What to re-run after the rebuild\n\n- `page-variables-and-actions` clauses 4-5 (`bodyExtra` on the action chain).\n- #7750's fix verification: objectui#4041 (`9154d9e`, 2026-08-10) is likewise absent from the served pin and present in the root pin, so `object-grid`'s singular `filter` input is not reachable on the old bundle.\n\n## Related\n\nConsole-pin cards are a recurring lane: #7411 (bump, closed), #7268 (bump, closed), #6813 (bump, closed). All of those move the **pin**; this one is the other half — the pin moved and the **dist** did not follow.\n\n## Source\n\nExtracted from the QA run objectstack-ai/objectstack#7695 (framework 92f26f75, console 09987b680)."
+}

@@ -1,0 +1,38 @@
+{
+  "number": 7799,
+  "kind": "issue",
+  "title": "[security] The webhook signing secret is stored in cleartext in `sys_webhook.definition_json`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:services",
+    "pm:dispatched",
+    "security",
+    "target:v17"
+  ],
+  "assignees": [
+    "huangyiirene"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T15:09:33Z",
+  "updated_at": "2026-08-12T03:35:10Z",
+  "closed_at": "2026-08-12T03:35:10Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7799",
+  "body": "Filed unassigned as an out-of-scope finding from #7722 / PR #7798. Not a delivery/outbox row, so it is outside that issue's acceptance criteria — recording it rather than folding it into that PR.\n\n## What\n\nA webhook subscriber's HMAC signing secret is persisted verbatim inside the `definition_json` textarea on `sys_webhook`:\n\n- `packages/plugins/plugin-webhooks/src/bootstrap-declared-webhooks.ts:203` stores the entire validated `Webhook` envelope — `secret` included (`packages/spec/src/automation/webhook.zod.ts:201`) — as `definition_json: JSON.stringify(wh)`.\n- `auto-enqueuer.ts:parseRow` reads it back out (`defn.secret`) to sign deliveries.\n\n`sys_webhook` is an admin-authorable object with no restrictive `enable.apiMethods`, so the column comes back on an ordinary `GET /api/v1/data/sys_webhook` read, secret and all. Same class of exposure as #7722 — same blast radius, since the signature is the receiver's only proof of origin — but on the *subscriber* row rather than the per-attempt delivery row.\n\n#7722 removed the per-attempt copies (every `sys_http_delivery` row held one); this is the remaining cleartext location, and unlike the delivery table it is not covered by a retention window.\n\n## Why it is a separate card\n\nThe delivery-row fix could be made without a secret store at all: a delivery's body is fixed at enqueue, so the outbox signs once and keeps only the signature. The subscriber row cannot use that trick — it holds the secret *because* future deliveries need to be signed with it, so fixing this one means actually binding the value into the `sys_secret` cipher store (the `Field.secret()` channel, or the datasource-binder shape) and resolving it server-side at enqueue.\n\nThat reaches further than #7722's surface: the `sys_webhook` schema, the boot seeder, the Studio authoring form, and a migration path for existing rows.\n\n## Suggested shape (not prescriptive)\n\nMove `secret` out of the `definition_json` blob into its own `Field.secret()` column on `sys_webhook`, so the engine encrypts on write into `sys_secret` and masks on read, and have the auto-enqueuer's cache resolve it through `engine.resolveSecret()` when it builds an enqueue input. Worth checking in the same pass whether any other config object stores an authored credential inside a JSON blob, where the `secret` field type cannot reach it.\n\n## Acceptance criteria\n\n- The signing secret is not recoverable from `sys_webhook` over the data API, for any persona.\n- Signing still works end-to-end: a delivered payload's `x-objectstack-signature` verifies by recomputing HMAC-SHA256 over the raw body (not by asserting \"no error\").\n- A regression guard reads the table directly after authoring a subscriber and asserts the secret's bytes are absent — the byte-level scan shape #7722's at-rest test and the datasource path both use."
+}

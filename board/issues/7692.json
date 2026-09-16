@@ -1,0 +1,35 @@
+{
+  "number": 7692,
+  "kind": "issue",
+  "title": "userActions.create is boolean-only — related-list [+ New] cannot be gated on parent-record state, unlike edit/delete (#3076 left create behind)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T10:26:40Z",
+  "updated_at": "2026-08-12T03:50:14Z",
+  "closed_at": "2026-08-12T03:50:14Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7692",
+  "body": "## The gap\n\n`@objectstack/spec@17.0.0-rc.6` — `UserActionsSchema`:\n\n```ts\nuserActions: z.ZodOptional<z.ZodObject<{\n  create: z.ZodOptional<z.ZodBoolean>;                  // ← boolean only\n  import: z.ZodOptional<z.ZodBoolean>;                  // ← boolean only\n  edit:   z.ZodOptional<z.ZodUnion<[z.ZodBoolean, z.ZodObject<{ enabled, visibleWhen: CEL }>]>>;\n  delete: /* same union as edit */\n}>>\n```\n\n#3076 (`feat(spec): userActions.edit/delete accept per-record CEL predicates`, objectui#2614) gave `edit` and `delete` a per-record CEL predicate. **`create` was left behind**, and there is no other lever for it.\n\n## Why that is a real hole, not a nice-to-have\n\nA child object's `[+ New]` button in a related list must very often be gated on the **parent** record's state — the classic case being \"the parent is frozen/published/archived, so nothing may be added under it any more\".\n\nWith `edit`/`delete` you can express this today: snapshot the parent's status onto the child and write `userActions.delete.visibleWhen`. For `create` there is nothing to write — the button is either always on or always off for the whole object, and \"always off\" is wrong because the child *is* creatable while the parent is a draft.\n\n## Concrete case that hit us\n\nApp-side object model:\n\n- `task_version` (parent) — has states draft / published / deprecated\n- `task_version_check_item`, `task_position` (children, rendered as related lists on the version record page)\n\nSpec requirement: once a version is **published** or **deprecated**, its children are frozen — no add, no edit, no delete.\n\nWhat we could implement:\n\n| control | gated on parent state? |\n|---|---|\n| child row `Edit` / `Delete` | ✅ via `userActions.edit/delete.visibleWhen` against a `version_status` snapshot field |\n| related-list **`[+ New]`** | ❌ **no expression accepted** — `create` is boolean |\n\nResult: on a published version the row actions correctly grey out, but the `[+ New]` button still renders. The server-side guard does reject the insert (HTTP 409 with a business message), so this is **not** a data-integrity problem — it is a pure UI affordance leak: users are shown an action that can never succeed, and QA legitimately reports it as a defect every round.\n\nWe deliberately did not work around it (no custom page, no patched component), which is why we are reporting it rather than shipping a local hack.\n\n## Requested change\n\nWiden `create` (and `import`, same shape and same argument) to the union already used by `edit` / `delete`:\n\n```ts\ncreate: z.union([\n  z.boolean(),\n  z.object({ enabled: z.boolean().optional(), visibleWhen: CelPredicate.optional() })\n]).optional()\n```\n\nEvaluation context should be the same one `edit`/`delete` already get. For a related list the useful context is the **parent** record; if that is not available at that point, the snapshot-field workaround we already use for `edit`/`delete` (parent status denormalised onto the child) would be enough — the blocker is purely that `create` accepts no expression at all.\n\nRenderer side presumably needs the objectui counterpart of objectui#2614/#2617 for the related-list toolbar.\n\n## Environment\n\n- `@objectstack/*@17.0.0-rc.6`\n- Reproduced in an app project; server-side guard confirmed working (409 on insert), so the request is strictly about the affordance."
+}

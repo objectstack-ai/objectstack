@@ -1,0 +1,33 @@
+{
+  "number": 4933,
+  "kind": "issue",
+  "title": "expense / helpdesk / hr / project 四个模板既不对用户开放、也无任何 CI 覆盖 —— 是有意暂缓还是漏了?",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:on-hold",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T16:33:35Z",
+  "updated_at": "2026-08-12T05:22:22Z",
+  "closed_at": "2026-08-12T05:22:21Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4933",
+  "body": "## 事实\n\n`objectstack-ai/templates@960f24d` 的 `packages/` 下有 10 个包:\n\n```\nall  compliance  content  contracts  expense  helpdesk  hr  procurement  project  todo\n```\n\n`packages/create-objectstack/src/index.ts` 的 `TEMPLATES` 注册表只提供 6 个:`blank`(自带)+ `todo` / `compliance` / `content` / `contracts` / `procurement`。`scaffold-e2e.yml` 的金丝雀矩阵也正好是这 6 个。\n\n差集里的四个**都是形态完整的真实模板**,各自带 `objectstack.config.ts` 和 namespace:\n\n| 包 | `objectstack.config.ts` | namespace |\n|:--|:--|:--|\n| `expense` | 有 | `expense` |\n| `helpdesk` | 有 | `helpdesk` |\n| `hr` | 有 | `hr` |\n| `project` | 有 | `pm` |\n\n(`all` 没有 config,不是模板,可忽略。)\n\n也就是说这四个模板:**用户 `-t` 不到、CI 不碰、没有任何东西证明它们还能构建**。\n\n## 需要确认的是意图\n\n两种可能,处理方式相反:\n\n1. **有意暂不发布**(尚未完工 / 等某个特性)—— 那么现状可接受,但值得在 templates 仓库或本仓库注册表旁留一行说明,免得下一个人重新推理一遍;\n2. **漏加了** —— 那么它们既该进 `TEMPLATES` 注册表,也该进金丝雀矩阵。注意在 #4926 修好之前,它们一进金丝雀就会以同样的 namespace 前缀错误立刻变红;#4926 是前置。\n\n## 为什么现在提\n\n#4926 暴露的是「已发布的 5 个模板坏了一周多没人知道」。这四个的处境更彻底:**它们连一个会红的地方都没有**。若属情况 2,今天的教训直接适用。\n\n需要维护者拍板,故不认领。"
+}

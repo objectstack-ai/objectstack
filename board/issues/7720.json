@@ -1,0 +1,35 @@
+{
+  "number": 7720,
+  "kind": "issue",
+  "title": "docs(qa): document the area-level `fixtures` recipe convention in the platform-checklist README",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "huangyiirene"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T12:05:44Z",
+  "updated_at": "2026-08-11T20:25:39Z",
+  "closed_at": "2026-08-11T20:25:39Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7720",
+  "body": "Blocked-by: objectstack-ai/objectstack#7716\n\nLinkage chore from PR #7716 (#7670), filed by the devx PM per the accepted option B on that PR's open question.\n\n## Task\n\n`docs/qa/platform-checklist/README.md`'s \"Item anatomy\" documents `fixtures` only per-item. PR #7716 introduced an **area-level `fixtures` block** (a named provisioning recipe, e.g. `qa-scratch-authz` in `areas/attachments-storage.json`) that items opt into via `fixtures.provisioning = { use, why }`. Document both halves of that convention in README.md's Item anatomy so the next area that needs a shared recipe copies a documented shape instead of reverse-engineering the first one.\n\nDeliberately deferred (option C on the same question): teaching `check-platform-checklist.mjs` to resolve `fixtures.provisioning.use` against the area's `fixtures` keys — revisit only if the recipe shape spreads to more areas.\n\n## Provenance\n\n- #7670 (the fixture card) → PR #7716 (the recipe) → its report's open_questions[0], option B accepted at review.\n\nNo `domain:*` label — routing is the triage seat's. `pm:blocked` omitted in favor of the `Blocked-by:` line + `pm:queue` since #7716 is expected to merge within the hour; if selection reaches this card first, the line above defers it."
+}

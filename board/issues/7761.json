@@ -1,0 +1,36 @@
+{
+  "number": 7761,
+  "kind": "issue",
+  "title": "plugin-sharing: `getRule`'s by-id branch has no org filter — an org admin can read, evaluate and DELETE another organization's sharing rule (and its grants)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched",
+    "security"
+  ],
+  "assignees": [
+    "os-help"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T13:23:56Z",
+  "updated_at": "2026-08-11T20:20:51Z",
+  "closed_at": "2026-08-11T20:20:51Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7761",
+  "body": "## Symptom\n\n`SharingRuleService.getRule` resolves an id **without any organization filter**, so an org-scoped sharing admin holding another organization's rule id can read, evaluate and delete that organization's rule.\n\n`packages/plugins/plugin-sharing/src/sharing-rule-service.ts`, `getRule`:\n\n```ts\nconst byId = await this.engine.find('sys_sharing_rule', {\n  where: { id: idOrName },   // ← no organization_id predicate\n  limit: 1,\n  context: SYSTEM_CTX,\n});\nif (Array.isArray(byId) && byId[0]) return rowFromRule(byId[0]);\n```\n\nThe read runs under `SYSTEM_CTX`, so nothing downstream re-scopes it either. Three verbs inherit the hole, because all three resolve through `getRule`:\n\n- `GET /api/v1/sharing/rules/:id` — read another org's rule (criteria, recipient, access level).\n- `POST /api/v1/sharing/rules/:id/evaluate` — materialise that org's grants on demand.\n- `DELETE /api/v1/sharing/rules/:id` — `deleteRule` calls `getRule` and then purges the row **and every `sys_record_share` grant it materialised**, i.e. silently revoke another tenant's record access.\n\nThe by-**name** path is correctly scoped (`{name, organization_id: orgId}`), so this is specifically the id branch. The caller still needs `manage_sharing` (or the legacy `manage_platform_settings`) in their own org, and needs to know an opaque `srule_…` id — but neither is a tenant boundary, and ids leak through logs, exports, support tickets and evaluation responses (`{ruleId}` is returned by the evaluate endpoint).\n\n## Not a regression from #7676\n\nFound while auditing callers for #7676 / PR #7760, which widens the two **org-scoped** reads (`listRules`, `getRule`'s by-name fallback) from `organization_id = orgId` to `organization_id = orgId OR organization_id IS NULL`. That change deliberately does not touch this branch and does not make it worse: it never admits another organization's rows. This defect is present on `origin/main` today and predates it.\n\nWorth noting the interaction, though: #7760 makes seeded rules **listable**, and a rule's `id` is in the listing. That is intended (they are platform-global), but it does mean rule ids become easier to come by generally, which raises the value of closing this.\n\n## Suggested direction\n\nScope the by-id branch the same way the by-name path is scoped once #7760 lands — `id = idOrName AND (organization_id = orgId OR organization_id IS NULL)` when the caller carries an organization, unfiltered when it does not (system/boot contexts must keep working). Points to check before implementing:\n\n1. Whether any existing caller depends on by-id reaching an arbitrary org's row. From the #7676 audit, every non-REST caller passes a system context (no org id), so they take the unfiltered branch regardless.\n2. Whether a platform admin (as opposed to an org admin) should retain cross-org by-id access, and if so which capability expresses that — `manage_sharing` is an org-level capability and should not.\n3. `deleteRule` and `evaluateRule` inherit whatever `getRule` decides, so no separate change is needed for them, but both want a test.\n\nTests should pin both directions: another org's rule is unreachable by id (404 rather than 200/204), and a platform-global (`organization_id = null`) rule stays reachable by id.\n\n## Source\n\nFound during the mandatory caller/tenant-isolation audit for #7676 (PR #7760). Filed unassigned.\n"
+}

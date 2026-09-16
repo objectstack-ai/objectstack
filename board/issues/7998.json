@@ -1,0 +1,36 @@
+{
+  "number": 7998,
+  "kind": "pull_request",
+  "title": "fix(service-datasource): forward `?schema=` on the admin remote-tables route (#7955)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-12T10:45:34Z",
+  "updated_at": "2026-08-12T12:04:59Z",
+  "closed_at": "2026-08-12T12:04:57Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": "2026-08-12T12:04:57Z",
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/7998",
+  "body": "Fixes #7955\n\n## What was wrong\n\n`IExternalDatasourceService.listRemoteTables` is reachable through two live routes:\n\n| route | package | before |\n|:---|:---|:---|\n| `GET /api/v1/datasources/:name/external/tables` | `packages/rest` | `listRemoteTables(name, { schema })` |\n| `GET /api/v1/datasources/:name/remote-tables` | `packages/services/service-datasource` | `listRemoteTables(name)` — query never read |\n\nSo `?schema=public` on the admin spelling returned the **unfiltered** listing: not the filtered set, and not a refusal either — \"declared ≠ enforced\" at its quietest, since the twin one path over honoured the same parameter.\n\n## The premise, measured\n\nThe card's ruling rests on the twins being genuinely the same operation. They are:\n\n- Both resolve the **same service slot** — `ctx.getService('external-datasource')` (`admin-routes.ts:201`, `external-datasource-routes.ts:81`).\n- Both call the **same method** with the same argument — `listRemoteTables(req.params.name, …)`.\n- The admin spelling's 503 and 400 are already attributed to `external-datasource` (#4225/#4249), i.e. the codebase already treats it as that service's route, not a differently-scoped admin listing.\n- `datasource-route-ledger.ts` states it in prose and cites this issue.\n\nNo scope difference, no second service method. Route A applies as ruled.\n\n## The change\n\n`packages/services/service-datasource/src/admin-routes.ts` — the one behavioural edit:\n\n```ts\nconst schema = typeof req.query?.schema === 'string' ? req.query.schema : undefined;\nconst tables = await svc.listRemoteTables(req.params.name, { schema });\n```\n\nWire-visible: `?schema=<name>` now narrows the listing on the admin spelling, exactly as the federation twin already did. No `?schema=` is unchanged — still the full listing.\n\n**Validation is mirrored, not invented.** The coercion is copied verbatim from `packages/rest/src/external-datasource-routes.ts:122` — the reference spelling, which this PR does not touch. It is a *coercion*, not a refusal: a non-string (a repeated `?schema=a&schema=b`, which the adapter surfaces as an array) degrades to `undefined`, i.e. no filter, on both paths. The empty string `?schema=` stays a string and the service's own `opts?.schema &&` guard treats it as no filter — again on both paths, from the one service.\n\n**No refusal was added.** Whether an unusable query parameter should be refused is the global ingress-policy question owned by #7606; honouring the parameter is correct under either answer, so the twins can move together then.\n\n## Tests\n\n`packages/rest/src/remote-tables-twin.equivalence.test.ts` (new) drives the same query at **both** spellings — one real `ExternalDatasourceService` over a fake introspector, both registrars mounted on one real `HonoHttpServer` — and asserts the two answers are equal:\n\n1. `?schema=public` → same **filtered** set (and it really filtered: 2 of 3 tables).\n2. no `?schema=` → same **unfiltered** set (an always-filtering fix could not pass).\n3. `?schema=nonexistent` → same empty set.\n4. repeated `?schema=a&schema=b` → both degrade to no filter, identically.\n5. `?schema=` (empty) → both unfiltered, identically.\n\nIt lives in `packages/rest` because that is the side that can reach both halves without widening anyone's public API: `registerDatasourceAdminRoutes` is exported from `@objectstack/service-datasource`, while `registerExternalDatasourceRoutes` is deliberately internal to `packages/rest`. The edge is dev-only (`rest → service-datasource`) and not a cycle. `packages/services/service-datasource/src/__tests__/admin-routes.test.ts` gains the same-package forwarding case and its existing assertion now pins the options bag.\n\n**Reverse-verification.** With `admin-routes.ts` reverted to `origin/main` and the package rebuilt, the equivalence test is **red**: 2 failed / 3 passed — cases 1 and 3 fail with the admin route returning all three tables where the federation route returned the filtered set / none. With the fix: **5 passed**. The three that pass in both directions are the unfiltered arms, which is what makes case 2 a real guard rather than a restatement.\n\nFull suites green: `@objectstack/rest` 1536 tests / 95 files, `@objectstack/service-datasource` 334 tests / 13 files. Typecheck and eslint clean on both. `check:route-envelope`, `check:cross-package-test-inputs`, `check:published-files`, `check:empty-changeset`, `check:adr-0087-registration` all pass.\n\n## Deliberately not done\n\n- `packages/rest/src/external-datasource-routes.ts` is untouched — it is the reference spelling being converged onto.\n- No refusal / warning / deprecation for an unusable `?schema=` (that is #7606's global call).\n- No `packages/spec` edit, so no `gen:schema` / `gen:docs` regeneration is due.\n- Changeset: `.changeset/remote-tables-twins-forward-schema.md` (`@objectstack/service-datasource` patch). `@objectstack/rest` gets no release entry — only its devDependencies changed, so its published artifact is identical.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01VpES7grJgY4eC8emonWP5s)_"
+}

@@ -1,0 +1,32 @@
+{
+  "number": 7512,
+  "kind": "issue",
+  "title": "[finding] Cloud dev sessions get auto-subscribed to their own PR with a drive-to-green posture that contradicts os-dev L2 (report-at-draft; PM owns CI convergence)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T04:19:16Z",
+  "updated_at": "2026-08-12T01:21:11Z",
+  "closed_at": "2026-08-11T11:45:52Z",
+  "closed_by": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7512",
+  "body": "Observation-class finding, filed by the `domain:engine-core` PM seat (session `session_01MhAQCKYvakd4fx78uZXUB2`) from a dev's stop-and-flag during #7477. Unassigned, deliberately not queued — triage grades it. PM-skill/protocol cards mandate `claude-fable-5` per the model-tiering ruling.\n\n## What was observed\n\nWhen the #7477 dev session (`session_018vok76Sp1NgLNbWHYSoLtj`, cloud card) created draft PR #7502, the platform auto-subscribed that session to its own PR and injected instructions carrying a drive-to-green posture — stay resident, react to CI events, do not end a CI-failure wake without a push or a blocker reply, arm hourly self check-ins until MERGED.\n\nThat posture directly contradicts the protocol the dev was dispatched under:\n\n- os-dev L2 (#6644, in `.claude/agents/os-dev.md` and the dispatch brief): report at draft-PR time, record gate status honestly (`in_progress` included), ⛔ do not idle-poll CI — the PM owns CI convergence, the ready-flip and landing.\n- The dispatch brief's turn-end constraint: legitimate endpoints are branch + draft PR + report, or a hard blocker.\n\nThe dev resolved it correctly (followed L2, delivered the report, flagged the conflict in `open_questions` instead of silently picking a side) — this card exists so the conflict gets ruled once instead of being re-litigated inside every future cloud dispatch.\n\n## Why it matters\n\n- The two postures cannot both be followed; whichever the dev picks looks like disobedience against the other instruction stream. An instruction conflict that every cloud card hits is a standing coin-flip.\n- The drive-to-green residency is exactly the idle-poll shape #7156 measured as a session-limit burn (closed into the #7341 batch, which is also where L2 came from) — the platform message re-introduces it from outside the repo's control.\n- Double ownership of one PR's CI (dev subscription + PM landing window subscription) is the two-drivers problem the L2 split exists to prevent — e.g. both sides re-queuing or both pushing fixes.\n\n## Non-goals / boundaries\n\n- Not a defect in #7502 (all green, in queue) nor in the dev's conduct — the worked example went right.\n- The subscription message is platform-injected; the repo cannot edit its text. The fix direction is deliberately NOT pre-ruled. Candidate shapes, for whoever takes this up: (a) an explicit os-dev.md / dispatch-brief clause ranking the dispatch contract above platform-injected PR-subscription postures for dispatched dev sessions (status quo made textual — the dev this time had to derive it); (b) instruct devs to unsubscribe from their own PR after the report; (c) accept the dev-side subscription and re-draw the L2 ownership line instead. Each has different failure modes on the \"who owns a red gate\" boundary.\n\n## Refs\n\n- #7477 / PR #7502 — the observation site (dev report `open_questions[2]`, 2026-08-11 04:01Z).\n- #6644 (L2 ruling), #7156 (idle-poll finding), #6586 (termination failures), #7341 (batch that consolidated them).\n\nFiled unassigned — recording the finding, not claiming it."
+}

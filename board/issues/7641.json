@@ -1,0 +1,35 @@
+{
+  "number": 7641,
+  "kind": "issue",
+  "title": "`$search` is case-sensitive on textual fields, contrary to three declarations that say case-insensitive",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "huangyiirene"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T09:49:43Z",
+  "updated_at": "2026-08-12T04:24:49Z",
+  "closed_at": "2026-08-12T04:24:49Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7641",
+  "body": "## Symptom\n\n`$search` is **case-sensitive** on textual fields, contrary to three declarations that all say case-insensitive: the `cross-field-object-search` checklist item title, the `search-filter.ts` docblock (*\"Matching: case-insensitive\"*), and the `search-conformance` ledger row.\n\n`POST /api/v1/data/showcase_account/query {\"search\":\"Retail\",\"searchFields\":[\"name\"]}` returns 1 record (\"Acme Retail\"); the same query with `\"retail\"` returns `[]`, total 0. Also reproduces for `stark`/`Stark`, `wonka`/`Wonka`, `NORTHWIND`. Reproduced on two fresh boots.\n\nCross-field OR scanning and multi-term AND semantics are correct; only the case-fold clause fails. Enum/select terms are unaffected because `optionValuesMatching` lowercases both sides in JS before emitting `$in`.\n\n## Root cause\n\n`packages/objectql/src/search-filter.ts` `fieldClausesForTerm` emits `{field:{$contains:term}}` for textual types, and `$contains` is contractually case-**sensitive** (#4706 Q2=A). The #6518 SQLite `LIKE`→`GLOB` change removed SQLite's incidental ASCII fold, exposing this. The case-insensitive operator is `$icontains`: `{name:{$icontains:'retail'}}` **does** return \"Acme Retail\".\n\nConfirmed still present on `origin/main` (`76d74ecb`): the docblock (line 18) still declares \"Matching: case-insensitive\", and `fieldClausesForTerm` still emits `$contains` (lines 91/93).\n\n## Decision dimension\n\nThe fix has a direction that is the maintainer's call:\n\n- **(A)** make `$search` emit `$icontains` for textual fields, so behaviour matches the three declarations; or\n- **(B)** change the three declarations to say case-sensitive.\n\nRecommend **(A)**: search is near-universally expected to be case-insensitive, and three places already declare it so. Whichever way #4706 Q2 finally lands, the three declarations (item title, `search-filter.ts` docblock, `search-conformance` ledger row) must be made consistent with the behaviour. Filed as a `bug` per maintainer instruction.\n\n## Reproduction\n\n```\nPOST /api/v1/data/showcase_account/query {\"search\":\"Retail\",\"searchFields\":[\"name\"]}\n  → 200, 1 record \"Acme Retail\"\nPOST /api/v1/data/showcase_account/query {\"search\":\"retail\",\"searchFields\":[\"name\"]}\n  → 200, records [] total 0\n```\n\n`{name:{$icontains:'retail'}}` matches; `{name:{$contains:'retail'}}` does not. The dogfood pin stayed green because its only case assertion is a select label — a single lowercase-name assertion would catch this.\n\n## Source\n\nExtracted from the QA run objectstack-ai/objectstack#7629 (framework 92f26f75, console 6314e87f)."
+}

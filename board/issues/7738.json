@@ -1,0 +1,35 @@
+{
+  "number": 7738,
+  "kind": "issue",
+  "title": "external-datasource-federated-read: the platform injects its org-scoping predicate onto a federated remote table that has no organization_id column",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T12:25:01Z",
+  "updated_at": "2026-08-11T21:14:07Z",
+  "closed_at": "2026-08-11T21:14:07Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 10,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7738",
+  "body": "## Symptom\n\nOn a control boot where the external object→remote-table mapping **did** register, the read against the federated remote table still carries the platform's org-scoping predicate: `select * from customers where (organization_id = '…' or organization_id is null)` — against a remote `customers` table that has no such column. Separately actionable from the boot-ordering defect (it survives that fix, and would surface as a remote SQL error or a silently-wrong result once the mapping registers).\n\n## Root cause\n\nThe engine's tenant-scoping layer folds the caller's `ExecutionContext.tenantId` into a `WHERE organization_id = … OR organization_id IS NULL` predicate on every read (`packages/objectql/src/engine.ts`, the org-scope path — see the `organization_id` scoping around the tenant-scope helper) without exempting **federated / external** objects, whose schema is owned by the remote database and need not carry the platform's system columns (`organization_id`, `owner_id`, etc.). Not pinned to a single line by the run; the fix is to skip org-scope injection for objects with `external != null`.\n\nStale-premise check: present on `origin/main`.\n\n## Reproduction\n\n1. Boot so the `showcase_ext_customer` → remote `customers` mapping registers (avoid the boot-ordering skip).\n2. Issue a read for `showcase_ext_customer` as a normal (non-system) caller and capture the SQL sent to the remote driver.\n\nExpected: no platform system-column predicate on a remote table that lacks it. Actual: the query carries `(organization_id = '…' or organization_id is null)`.\n\n## Source\n\nExtracted from the QA run objectstack-ai/objectstack#7690 (framework 92f26f75, console 09987b680)."
+}

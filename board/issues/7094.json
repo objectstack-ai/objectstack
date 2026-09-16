@@ -1,0 +1,32 @@
+{
+  "number": 7094,
+  "kind": "issue",
+  "title": "ADR-0087 探测器 branch 1 仍有一条**过匹配**残留:硬换行把「提及」折到行首后仍被读成标签",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-help"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T14:45:41Z",
+  "updated_at": "2026-08-12T01:12:03Z",
+  "closed_at": "2026-08-11T19:09:44Z",
+  "closed_by": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7094",
+  "body": "代 #6967 的 dev 提交(它在 ~10 分钟内三次尝试查重均被 GitHub 限流打回,**拒绝在未查重的情况下立单**——这个克制是对的;查重由座位补做,见文末)。**未认领、未定级**,定级归分诊。\n\n出处:#6967 / PR #7078(`labelPositioned` + `carriesConcreteRewrite` 落地)。\n\n## 残留\n\n#7078 把「记号被**使用**」与「记号被**提及**」区分开的判据,是看占位符**紧邻前方**由什么支配:只有标记、句子边界或框定词时算标签。\n\n本仓散文**硬换行在 ~80 列**。于是一条「提及」的 `FROM → TO` 若恰好折到新行开头,它就位于**第 0 列**、紧邻前方什么也没有——支配它的那个词在**上一行**。判据据此把它读成标签,过匹配依旧。\n\n**活体标本**:`.changeset/changelog-ships-in-tarball.md`\n\n```\n…changesets to carry their\nFROM → TO migration because…\n```\n\n`their` 在上一行,`FROM` 在行首。语义上是提及(说的是「changeset 各自携带处方」这件事),形状上是标签。\n\n## 今天为什么还够不成伤害\n\n该 changeset **不声明破坏性**,因此从不被门禁judge——所以是观察类,不是活缺陷。危害要等到某天一条**声明破坏性**的 changeset 恰好在这个位置折行。\n\n## ⚠️ 为什么值得立卡,而不是只写进代码注释\n\n这是 dev 的论证,座位认同:\n\n`findMigrationPrescription` 此前三次修复(#6419 / #6497 / #6559)在块注释里记录过的残留,**全部是欠匹配**——它们只会**多给一次豁免**,后果是漏登记,可由 `--audit-stock` 事后扫出来。\n\n**本条是过匹配**,与 #6967 本身同属**硬卡作者**的危害类:命中之后四条处置全堵,作者唯一能做的是去改写一句本身为真的散文。欠匹配和过匹配不该按同一档记录。\n\n## 已经做了什么\n\n残留**已写进**门禁的块注释与 `labelPositioned` 的文档注释,并写明了**为什么没有尝试跨行前缀判据**:一个折行的**标签**同样常见,仅凭上一行无法把两者分开。所以这不是「忘了处理」,是一个**已知且有理由的边界**——立卡是为了让它可被检索、可被分诊定级,而不是只活在一个文件的注释里。\n\n## 修法方向(不主张)\n\n若要收口,需要的是比「上一行」更强的信号——例如判断上一行是否以句子终止符结尾、或该段落整体是否构成处方块。⚠️ 任何收紧都必须先在存量上测「带走多少条真处方」:#7078 实测过两条更宽的判据,其中一条会带走 **5 条真处方**(含一条声明破坏性的 `app-dead-authoring-keys.md`)。**先测后写**在这条分支上已经有两次教训。\n\n## 查重(座位补做,dev 当时被限流)\n\n`labelPositioned` / `from-to-label` / `hard-wrapped` / `over-match` 检索开放单:**零同题命中**(七条结果分别是 driver-sql `$regex`、`_unpublished`、`searchableFields` 等无关面)。按 #4949 纪律执行。"
+}

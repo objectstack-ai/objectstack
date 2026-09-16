@@ -1,0 +1,36 @@
+{
+  "number": 7645,
+  "kind": "issue",
+  "title": "mcp-stdio-fail-closed c3: the stdio MCP transport starts but is permanently deaf (oclif arg parser pauses process.stdin)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T09:50:18Z",
+  "updated_at": "2026-08-12T04:38:48Z",
+  "closed_at": "2026-08-12T04:38:48Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7645",
+  "body": "The fail-closed contract this item exists to pin (clauses 0–2, 7) **PASSES and is correct** — please do not \"fix\" it: stdio enabled with no key throws at plugin start and the kernel rolls back with the port closed; an unknown/revoked key draws the same refusal with no anonymous-but-serving fallback; a real member key binds the principal to *that* member (not admin); and stdio off boots cleanly with an explanatory line while HTTP is still served. The defect below is only that the started transport never answers.\n\n## Symptom\n\nWith the stdio transport successfully started (`[MCP] Server started (transport: stdio)` logged), the transport never answers a single JSON-RPC request.\n\n- **Observed:** `initialize`, `tools/list`, `resources/list`, `resources/read` all time out with **zero bytes on stdout**, across 4 separate runs. Malformed input draws no error either. Clause 3 fails; clauses 4–6 are blocked as a consequence.\n- **Expected:** a started, principal-bound stdio transport answers `initialize` (and the rest) over the child's stdin/stdout.\n\nAn instrumented probe 40 s after boot reports `listeners(data)=1 readableFlowing=false isPaused=true bytesRead=0` — the data listener *is* attached, but `process.stdin` is **paused**.\n\n## Root cause\n\noclif's argument parser opens a `readline` Interface over `process.stdin` and closes it on its abort signal; `Interface.close()` calls `stdin.pause()`. Captured stack:\n\n```\nat Interface.pause (node:internal/readline/interface:539)\nat Interface.close (node:internal/readline/interface:525)\nat signal.addEventListener.once (@oclif/core/lib/parser/parse.js:64)\n```\n\nSo the deafness is in the **host process**, above the plugin. Two controls isolate it there: (a) a bare `@modelcontextprotocol/sdk` `McpServer` + `StdioServerTransport` answers the identical bytes, and (b) ObjectStack's **own** `MCPServerRuntime({transport:'stdio'})` answers too — both in a plain node process. `MCPServerRuntime.start()` (`packages/mcp/src/mcp-server-runtime.ts:807-811`) simply constructs `new StdioServerTransport()` and `connect()`s it; nothing resumes `process.stdin` after oclif's parser has paused it. On `origin/main` the connect region carries no `stdin.resume()` mitigation.\n\nConsequence: every `objectstack serve`/`dev` stdio transport is started-but-deaf — `OS_MCP_STDIO_ENABLED=true` advertises and logs a principal-bound stdio server that no MCP client can ever talk to. The 17/17 unit pins are green because the gap is above the plugin.\n\n## Reproduction\n\n1. Spawn `node packages/cli/bin/run.js serve -p &lt;port&gt; --dev` with `stdio:['pipe','pipe','pipe']`, `OS_MCP_STDIO_ENABLED=true`, and a valid `osk_` key.\n2. Wait for `[MCP] Server started (transport: stdio)`.\n3. Write a JSON-RPC `initialize` line to the child's stdin.\n\n**Expected** an `initialize` result. **Actual** nothing, ever (zero bytes on stdout).\n\n## Source\n\nExtracted from the QA run objectstack-ai/objectstack#7627 (framework 92f26f75, console 6314e87f)."
+}

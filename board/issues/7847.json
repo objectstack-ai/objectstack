@@ -1,0 +1,35 @@
+{
+  "number": 7847,
+  "kind": "pull_request",
+  "title": "fix(service-automation): reconcile declarative connectors against a set the metadata reload actually refreshes (#7742)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T20:38:42Z",
+  "updated_at": "2026-08-11T21:43:52Z",
+  "closed_at": "2026-08-11T21:43:51Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": "2026-08-11T21:43:51Z",
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/7847",
+  "body": "Fixes #7742\n\n## What was broken\n\nA connector edit followed by a metadata reload changed nothing: no reconcile, no teardown, no re-materialize — the pre-edit connector kept serving until the process restarted. `os dev` masks it (the serve child restarts on recompile), so the trigger that walks straight into it is a **Studio package publish** into a running server.\n\n**Premise verified on `origin/main` before implementing.** A test driving the real reload shape against a real `SchemaRegistry` shows the edit, the addition and the deletion are all no-ops:\n\n```\n× re-materializes an edited connector …        expected [] to deeply equal [ 'billing' ]\n× tears down a connector no longer declared …  expected [] to deeply equal [ 'shipping' ]\n× materializes a connector added by the reload  expected [ 'billing' ] to include 'shipping'\n```\n\n## Root cause\n\nThe reconcile was fine; its **input** was a boot snapshot. `reconcileDeclaredConnectors` read `ql.registry.listItems('connector')`, and no reload path re-ingests connector items into that registry — ObjectQL's own `metadata:reloaded` handler re-ingests the payload's OBJECT definitions (`ingestReloadedObjects`) and stops there. So the reconcile compared the boot world against itself and found nothing to do.\n\nEvery existing connector reload test drove the reload through a **hand-mutated fake registry** (`state.declared = next` and only then fire the hook), which is why the path looked covered.\n\n## The fix\n\n`readDeclaredConnectorItems` folds the sources a reload *does* refresh over that registry read — one per trigger:\n\n- **The artifact carried on the `metadata:reloaded` payload** — the dev/HMR trigger, and the only place an edited or deleted definition exists at all. Held as plugin state, so a degraded-instance retry firing minutes later does not fall back to the boot snapshot and rebuild the pre-edit instance. The fold is a **replacement scoped to the packages the artifact speaks for** (its manifest id + the `_packageId` stamped on its items), not a union: a union can never observe a deletion, while an unscoped replacement would tear down a connector another package contributed.\n- **`protocol.getMetaItems({ type: 'connector' })`** — the flattened `/meta` view the flow re-sync already reads, which layers the `sys_metadata` rows a publish promotes to active over the registry (`mergePackageAwareOverlay`: the overlay wins). Post-boot reconciles only — at boot the registry was just built and is current by construction, and this read costs a `sys_metadata` query and can fail, so neither belongs on the fail-loudly boot path.\n\nBoth reads **fail safe**: an absent, failing, or empty-while-the-registry-is-not answer is treated as *no answer* and never tears down a live connector; an announcement carrying no connector collection at all (a publish's bare `{ changed }`, or an artifact with no `connectors:` key) leaves every instance alone. Only an artifact carrying an **empty array** is the honest \"none left\". An unchanged entry still hashes to the same signature, so reloads do not churn live connections.\n\nThe descriptor audit beside the reconcile reads the same declaration, so its warning describes the stack as it is now rather than as it booted. `readFlowDefsFromProtocol`'s body became the shared `readMetaItemsFromProtocol` — same normalization, same `null`-means-no-answer contract, byte-identical log message for the flow type.\n\n## Scope note\n\nDeliberately **not** changed: the artifact reload path in `packages/metadata*`. Making the reload re-ingest connector items into the registry for all consumers is `domain:metadata` territory; this lands the services-side shape the dispatch named — the automation plugin's reconcile reading a fresh input.\n\n## Tests\n\n`connector-reload-reingest.test.ts` (8 tests) uses a **real `SchemaRegistry`** and deliberately never mutates it across the reload — the registry going stale is the fact under test. Assertions are on the observable effect (the old instance's `close()`, a re-materialization carrying the new `providerConfig`), not on call counts: edit / add / delete / another package's connector surviving / Studio-publish view / empty + failing view / no-collection payload.\n\n**Reverse-verified**: with the fix reverted and the tests kept, the four behavioural cases fail exactly the way the QA run observed (no-op reconcile), while the never-tear-down guards pass on both sides.\n\n## Gates\n\n- `@objectstack/service-automation` suite: **928 passed / 76 files**\n- Build closure (`--filter @objectstack/service-automation...`): 20/20\n- `tsc --noEmit`: no new errors (3 pre-existing in the untouched `nested-region-parity.test.ts`)\n- `pnpm check:docs-audit-scope`: pass\n- Downstream connector plugin suites (`connector-mcp` 23, `connector-rest` 16): pass\n- Changeset: `.changeset/connector-reload-reingest.md` (patch)\n\nOne flake observed once and not reproducible in isolation or on re-run: `engine.test.ts > should execute unconditional branches in parallel` (a wall-clock parallelism assertion, untouched by this diff).\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01HzBZyXMffETYpmvEYTwbKN)_"
+}

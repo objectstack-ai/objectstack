@@ -1,0 +1,32 @@
+{
+  "number": 5474,
+  "kind": "issue",
+  "title": "试点:分诊 PM 座位 Routine 化 —— 全仓唯一分诊者,cron 定时 fresh session,只标签不认领(#5472 模型第 5 点先行验证)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "tracking"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T13:34:59Z",
+  "updated_at": "2026-08-12T05:21:43Z",
+  "closed_at": "2026-08-12T05:21:43Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 9,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5474",
+  "body": "#5472(维护者 2026-08-05 拍板的协调模型改版)第 5 点「座位 Routine 化」的先行试点。选**分诊座位**试点because它风险最低:只读 + 打标签,零认领零派发,与现行 SKILL 不冲突(现行「any PM may label any issue」的子集行为),失败回滚 = 删 Routine,零残留。\n\n## 试点内容\n\n- 创建 cron Routine(`create_new_session_on_fire: true`,每小时),prompt 为完整独立指令:执行 pm-dispatch 的 **step 0 backlog sweep 与 step 2 triage 的标签半边**——扫无 `pm:*`/`domain:*` 标签的 open issue,逐个:读正文 + 全部评论 → 查重(关键词/包名/报错串,三仓)→ 过时前提检查 → 分类打标签(`pm:queue` / `finding` / `needs-user-decision` + `domain:*` + `repo:*`)→ 跨域的做 contract-first 拆分(父单 + 每域 sub-issue + `Blocked-by:`)→ 一条分诊审计评论。**⛔ 永不 assign、永不派发、永不改代码。** 发现分诊轮(#4949)按现行节律由它顺带执行。\n- 接管登记:Routine 创建后在 #4604 分诊行填入 Routine ID + 一条审计评论(正文即真相协议)。\n- 读写纪律:读与评论走 REST(Operational note 3);标签写操作按配额规程排队。\n\n## 运行一周的成功判据\n\n1. 新 issue 从开出到有标签的中位延迟 ≤ 1 个 cron 周期;\n2. 分诊座位产生的 assign 数 = **0**(双射纪律的机械验证);\n3. GraphQL 配额不因分诊轮打满(REST 化落实);\n4. 抽查 ≥10 条分诊结论,误标率可接受(域判定按「修复落点的包」,不按标题词汇——SKILL 锚定规则);\n5. 轮次无重叠事故(fire 间隔 1h vs 分诊轮时长实测,若逼近则降频或加自退守卫)。\n\n## 回滚\n\n`delete_trigger` + #4604 行清空 + 审计评论。无其他状态残留(所有产出是标签与评论,本就是状态机的合法写入)。\n\n## 依赖与顺序\n\n无硬依赖(行为是现行 SKILL 子集);**建议**与 #5472 的 SKILL 条款施工并行启动,试点数据反哺条款定稿(尤其轮次互斥机制与频率默认值)。域表重切(#5472/#5095)落地前,分诊按现行域表打标签,拆分后 Routine prompt 无需改动(它读 SKILL 现行表)。"
+}

@@ -1,0 +1,36 @@
+{
+  "number": 8053,
+  "kind": "issue",
+  "title": "api-key-ui-lifecycle: after #7727 an ordinary member still cannot revoke their OWN API key — 403 PERMISSION_DENIED, and the key keeps authenticating",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched",
+    "target:v17"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-12T13:39:33Z",
+  "updated_at": "2026-08-12T17:47:15Z",
+  "closed_at": "2026-08-12T17:46:44Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8053",
+  "body": "Residual of #7727, found by re-testing it. **#7727 is genuinely fixed for admins** — `PATCH /api/v1/data/sys_api_key/{id} {revoked:true}` went from `405 OBJECT_API_METHOD_NOT_ALLOWED` to 200, the key stops authenticating on the very next request, and the console's Setup → API Keys → Revoke row action now fires a 200 and toasts \"API key revoked\" instead of erroring. The method gate and the ADR-0092 column whitelist both landed correctly.\n\nWhat did not land is the persona the item names first — **\"a signed-in member (key owner)\"**. The declared row actions `revoke_api_key` / `restore_api_key` still render in that member's own **My Keys** grid, and still error for them.\n\n## Symptom\n\nA member mints a personal API key, then cannot revoke it:\n\n- `PATCH /api/v1/data/sys_api_key/{their own id} {revoked:true}` → **403 PERMISSION_DENIED**\n- the row still reads `revoked: false`\n- the key still returns **200** on `GET /api/v1/data/showcase_task`\n\nReproduced with two independent personas.\n\n## Reproduction\n\n1. As admin: `POST /api/v1/auth/admin/create-user {\"email\":…,\"password\":…,\"mustChangePassword\":false}`\n2. Sign in as that member.\n3. `POST /api/v1/keys {\"name\":\"k\"}` → 201; capture `data.id` and `data.key`.\n4. `GET /api/v1/data/showcase_task` with `x-api-key: <key>` → 200.\n5. As the **same member**: `PATCH /api/v1/data/sys_api_key/{id} {\"revoked\":true}`.\n\n**Expected** 200, and the key stops authenticating.\n**Actual** `403 {\"code\":\"PERMISSION_DENIED\"}`, row unchanged, key still 200.\n\n## Root cause\n\n#7769 opened the **method** gate (`apiMethods` now `['get','list','update']`) and the ADR-0092 D2 column whitelist (`revoked`), but the **object-CRUD** layer is unchanged. The platform `member_default` set grants only `allowRead` on the `BETTER_AUTH_MANAGED_OBJECTS` list (`packages/plugins/plugin-security/src/objects/default-permission-sets.ts`), so `update` on `sys_api_key` resolves only for `admin_full_access`.\n\nConfirmed with the platform's own explain route, as that member:\n\n```\nGET /api/v1/security/explain?object=sys_api_key&operation=update\n→ allowed: false; object_crud DENIES —\n  \"No resolved permission set grants update on sys_api_key\"\n```\n\n(`member_default` does carry a `sys_api_key_self` RLS carve-out, so the row is *visible* to its owner — there is just no `allowEdit` to go with it.)\n\n## Why it is worth closing rather than deferring\n\nA personal API key \"acts as you — treat it like a password\" (the console's own copy on the mint screen). The owner is the person who discovers it leaked, and right now their only remedy is to find an admin. It is also a **dead affordance of the exact shape #7727 filed**, one layer up: the button renders for the persona that cannot use it.\n\n## Suggested shape (not prescriptive)\n\nGive `member_default` an owner-scoped `update` grant on `sys_api_key` narrowed to the whitelisted column, so the existing `sys_api_key_self` RLS carve-out decides *which* rows and the column whitelist decides *which fields*. The gate: extend the revoke test to run as the key's **owner**, not only as admin — the current pins exercise the admin path, which is why this half stayed hidden behind #7727's fix.\n\n## Not affected\n\nCross-owner revocation is correctly refused (a member PATCHing the admin's key → 403, row unchanged), non-`revoked` column writes are still refused with a located message, `create`/`delete`/`batch` stay closed (405), and show-once semantics are intact.\n\n## Source\n\nFound by the platform checklist retest of `identity-auth.api-key-ui-lifecycle` (framework `279ee48a`), re-running #7727's own reproduction.\n"
+}

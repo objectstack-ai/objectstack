@@ -1,0 +1,32 @@
+{
+  "number": 7548,
+  "kind": "issue",
+  "title": "pm-dispatch SKILL: skills updates are ADR-class — human review/merge required (maintainer ruling 2026-08-11)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T05:07:15Z",
+  "updated_at": "2026-08-12T01:21:09Z",
+  "closed_at": "2026-08-11T11:45:50Z",
+  "closed_by": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7548",
+  "body": "Maintainer ruling, 2026-08-11, issued directly to the devx PM seat in chat (session `session_01GZKbx4xyF7U5WXj6ch49BM`), verbatim, untranslated:\n\n> 所有 skills 的更新和 adr 类似,需要人工审核\n\n## What this settles\n\nSkill updates get the same terminal-state discipline the ADR ruling (#6741) established for `docs/adr/**`: AI seats may draft, branch, open and review the PR, but **confirming it and landing it is the maintainer's manual act** — ⛔ no AI seat merges, enqueues, or arms auto-merge on a PR whose path face touches a skill.\n\n## The SKILL edit (by PR — and by this very ruling, that PR is itself human-merged)\n\n1. **Step 7 ACCEPT path fork**: extend the existing `docs/adr/**` fork so it also fires on any changed path under `.claude/skills/**` or `skills/**` (published skills dir) — same three-part terminal state: review lands on the issue as usual; the PR stays visibly pending for the maintainer (ready or draft, never queued, never auto-merged); the round report carries an \"awaiting a human merge\" line until it lands.\n2. **Guardrails**: add the ruling beside the ADR and release-action prohibitions, quote verbatim.\n3. One-hit-is-enough / no-proportional-read applies as with ADR (a mixed diff touching a skill file takes the fork; split the PR if the skill half should land separately).\n\nScope note for the implementer to verify at work time (measure, do not assume): \"所有 skills\" is read as both skill roots — `.claude/skills/**` (internal agent skills) and `skills/**` (published skills). If the maintainer narrows or widens this, the ruling comment on this card supersedes.\n\n## Serialization trap (recorded at filing, step-3 discipline)\n\nSame-file with in-flight #7498 (`claude/issue-7498-decision-four-lens`, editing SKILL.md now): ⛔ do not dispatch this card until #7498's PR reaches terminal state; the dev must re-derive section anchors from post-#7498 `origin/main`, not from this card. Line ratchet: headroom was 23 lines before #7498; re-measure after it lands.\n\n## Immediate effect (already applied, ahead of the SKILL text)\n\n- #7498's own PR — the only in-flight skill-touching PR — will be reviewed, then left **awaiting a human merge** (no queue, no auto-merge), and listed as such in round reports.\n- Recorded on the devx seat post #6023 in the same stroke.\n\nRouting: filed with `pm:queue` + `domain:devx` under the maintainer direct-command channel (rule 4, standing authorization 2026-08-10 — the maintainer is directly instructing this session; quoted directive above is the authority). Dispatch tier when worked: `claude-fable-5` (mandatory — SKILL surface)."
+}

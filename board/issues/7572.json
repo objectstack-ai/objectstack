@@ -1,0 +1,35 @@
+{
+  "number": 7572,
+  "kind": "issue",
+  "title": "The eight-bullet secret read-mask is declared twice with no gate binding them — objectql's `SECRET_MASK` and service-settings' `SETTINGS_SECRET_MASK`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T05:30:16Z",
+  "updated_at": "2026-08-12T06:24:10Z",
+  "closed_at": "2026-08-12T06:24:10Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7572",
+  "body": "Follow-up from the #7522 security fix (PR #7554), raised by the implementing dev and accepted by the PM as out of scope for that card.\n\n## Symptom\n\nThe mask a client sees in place of a redacted secret is now declared in **two** places, byte-identical by convention only:\n\n- `SECRET_MASK` in `@objectstack/objectql` — the encrypted-**field** read mask on the generic CRUD path (ADR-0100), exercised by the `records-forms.encrypted-field-behavior` checklist item;\n- `SETTINGS_SECRET_MASK` in `@objectstack/service-settings` — added by #7522 for the settings REST read boundary.\n\nNothing binds them. An edit to either literal silently desynchronises the two masked-read surfaces a client sees, and the failure is invisible on both sides: each package's own tests keep passing, because each asserts against its own constant.\n\nThis is the `declared = enforced` shape one level up — the *contract* is \"a masked read looks like this\", and there is no single definition of \"this\".\n\n## Why it wasn't fixed in #7522\n\nDeliberate, and the reasoning is worth keeping. The dev's own note:\n\n> The constant is redeclared rather than imported because this service is deliberately framework-agnostic: it defines its own minimal `SettingsEngine` instead of importing `IDataEngine`, and does not depend on `@objectstack/objectql` at all. Taking a runtime dependency on the whole data engine to reach one string would undo that.\n\nPlus: a cross-package move whose consumer sweep is effectively the whole repo has no business riding on a security fix.\n\n## Options\n\n**A — hoist into `@objectstack/spec`, objectql re-exports for back-compat.** Both packages already depend on spec, and ADR-0100 is already documented in `spec/src/data/field.zod.ts`. One definition, both sides import it. **Recommended.**\n\n**B — leave the duplication, add a cross-package pin test** in a package that already depends on both (`cli` / `plugin-email` / `verify`). Binds the constants, but puts a contract pin in a package whose subject is something else.\n\n**C — add `@objectstack/objectql` as a dependency of service-settings.** Rejected: it undoes the framework-agnostic design the settings service is built around.\n\nA is the only option that leaves **one** definition. A mask is a client-facing contract, and \"structurally hard to get wrong\" here means the console cannot be shown two different masks.\n\n## Notes for whoever takes it\n\n- The duplication is **inert until someone edits one of the two literals** — this is a drift-prevention card, not a live defect. Priority accordingly.\n- `packages/services/service-settings/src/settings-secret-redaction.ts` already carries a comment stating the mirroring and naming this follow-up, so the next reader does not re-derive the analysis.\n- Both literals are spelled as the literal `••••••••` rather than an escape, deliberately, so a grep for the mask finds both declarations. Keep that property in whatever lands.\n\n## Source\n\nFollow-up from objectstack-ai/objectstack#7522 (PR #7554), which itself came from the QA run objectstack-ai/objectstack#7514."
+}

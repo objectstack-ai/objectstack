@@ -1,0 +1,37 @@
+{
+  "number": 8049,
+  "kind": "issue",
+  "title": "A successful `/auth/change-password` over a BEARER token never clears `must_change_password` — the caller is permanently locked out of every protected route with a 200 telling them it worked",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched",
+    "security",
+    "target:v17"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-12T13:38:04Z",
+  "updated_at": "2026-08-12T16:13:40Z",
+  "closed_at": "2026-08-12T16:12:37Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8049",
+  "body": "## Symptom\n\nAn admin-provisioned user (`POST /auth/admin/create-user`, where `mustChangePassword` defaults to **true**) is gated out of every protected route with `403 PASSWORD_EXPIRED` until they change their password — correct, that gate is doing its job. But on the **bearer-token lane** the escape hatch does not work: `POST /auth/change-password` answers **200**, the password **really rotates**, and the caller stays locked out forever.\n\n**The defect is lane-specific and I measured both sides:**\n\n| | `change-password` | password really rotated? | `must_change_password` | `password_changed_at` | protected read after |\n|---|---|---|---|---|---|\n| **Cookie lane** | 200 | yes | → `false` ✅ | stamped ✅ | **200** ✅ |\n| **Bearer lane** | 200 | yes | stays `true` ❌ | stays `null` ❌ | **403 PASSWORD_EXPIRED** ❌ |\n\nSo the console is fine. Every API/agent/CLI client authenticating with `Authorization: Bearer` — the documented API lane — has no working way out of the force-change gate.\n\n## Reproduction\n\n1. As an admin: `POST /api/v1/auth/admin/create-user {\"email\":\"x@example.com\",\"password\":\"OldPass!123\"}` → 200, response says `mustChangePassword: true`.\n2. Sign in as that user, take the bearer from the `set-auth-token` response header.\n3. `GET /api/v1/data/showcase_task?limit=1` → `403 {\"code\":\"PASSWORD_EXPIRED\"}` (expected).\n4. `POST /api/v1/auth/change-password {\"currentPassword\":\"OldPass!123\",\"newPassword\":\"NewPass!456\"}` with that bearer → **200**.\n5. Re-sign-in with the **new** password → succeeds (proving the rotation landed); old password → 401.\n6. Repeat step 3 with the fresh token → **still `403 PASSWORD_EXPIRED`**.\n7. As admin, read the row: `must_change_password: true`, `password_changed_at: null`.\n\nRun the identical sequence with a **cookie jar** instead of a bearer and step 6 returns 200 with the flags correctly cleared. Reproduced on two fresh users per lane.\n\n## Root cause\n\nThe intent is right and the write is correct — it simply never runs on the bearer lane.\n\n`packages/plugins/plugin-auth/src/auth-manager.ts:4362` `stampPasswordChangedAt()` does exactly the right thing:\n\n```ts\n// #2766 V1 — a completed password change also satisfies any pending\n// admin-issued force-change flag, so clear it in the same write.\nawait engine.update('sys_user',\n  { id: userId, password_changed_at: new Date(), must_change_password: false },\n  { context: SYSTEM_CTX });\n```\n\nThe after-hook (`:1452-1465`) only calls it when the before-hook stashed `ctx.context.__osPwChangeUserId`, and that stash comes from `resolvePasswordChangeUserId()` (`:4399-4404`):\n\n```ts\nif (ctx?.path === '/change-password') {\n  const { getSessionFromCtx } = await import('better-auth/api');\n  const sess: any = await getSessionFromCtx(ctx).catch(() => null);\n  return sess?.user?.id ?? sess?.session?.userId ?? undefined;\n}\n```\n\n`getSessionFromCtx` resolves the session from the **cookie**. On a bearer-authenticated request it returns null, so no user id is stashed, so the after-hook stamps nothing — while better-auth's own password write proceeds normally. Hence the 200 with no flag clear.\n\n## Second consequence on the same stash — a security control silently skipped\n\nThe **same** `__osPwChangeUserId` gate guards ADR-0069 D1's password-reuse rejection: the before-hook calls `assertPasswordNotReused()` only when the user id resolved, and stashes `__osPwHistory` for `recordPasswordHistory()` in the after-hook. On the bearer lane neither runs, so **password history is neither checked nor recorded** for bearer-lane changes. A control that is enforced on one transport and silently absent on the other is worse than one that is absent on both, because the pins and the console both exercise the working lane.\n\n## Suggested shape (not prescriptive)\n\nResolve the acting user the way the rest of the request pipeline already does — fall back to the bearer-derived principal when `getSessionFromCtx` yields nothing — rather than adding a second stamp site. The gate that keeps it from regressing is a test that drives `/auth/change-password` **over both transports** and asserts the same post-conditions (`must_change_password === false`, `password_changed_at` stamped, history appended, protected read 200); the current pins only exercise the cookie path.\n\n## Source\n\nFound during the platform checklist retest of `identity-auth.admin-lifecycle-operations` (framework `279ee48a`) and independently re-measured on both lanes before filing. Not caused by any of the fixes under retest.\n"
+}

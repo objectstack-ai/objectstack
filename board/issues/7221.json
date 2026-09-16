@@ -1,0 +1,34 @@
+{
+  "number": 7221,
+  "kind": "issue",
+  "title": "`MetadataFacade.unregisterPackage` removes only object contributors — every non-object item the package shipped stays registered",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "huangyiirene"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-10T03:05:56Z",
+  "updated_at": "2026-08-12T10:16:03Z",
+  "closed_at": "2026-08-12T10:16:03Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 9,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7221",
+  "body": "Observation-class finding, filed per Prime Directive #10 while implementing #6725 (PR #7211). Unassigned, deliberately **not** queued. Deliberately kept OUT of #6725: that card is the `register`/read split for the `object` type, this is a different verb with a different root cause, and folding it in would have widened the card.\n\n## The fact (read on `origin/main` @ `55da611`)\n\n`MetadataFacade.unregisterPackage` (`packages/objectql/src/metadata-facade.ts`) is one line:\n\n```ts\nasync unregisterPackage(packageName: string): Promise<void> {\n  this.registry.unregisterObjectsByPackage(packageName);\n}\n```\n\n`SchemaRegistry.unregisterObjectsByPackage` walks `objectContributors` only. So for a facade-backed `metadata` slot, \"unregister all metadata from a package\" leaves behind:\n\n1. **Every non-object item the package shipped** — its `page`, `view`, `flow`, `app`, `api` … entries all live in the generic `metadata` map under composite `${packageId}:${name}` keys (`registerItem`), and nothing here touches that map. They stay resolvable through `get`, `list`, `listNames` and `exists` after the package is gone.\n2. **The generic-map half of its objects.** An object is written into two places (the invariant `SchemaRegistry.unregisterObject`'s header states); this verb reaches one. Post-#6725 the facade's own `register('object', …)` writes both, so this leaves a genuine orphan rather than a theoretical one.\n\nItem 1 is the load-bearing half: it is not a stale-cache nuisance, it is uninstall leaving a package's UI and API metadata installed.\n\n## Reachability\n\nSame reachability as #6725, and it is the same argument: `new MetadataFacade(...)` appears nowhere on `main` outside `packages/objectql`'s own tests, so nothing in-tree calls this. But `MetadataFacade` is exported from `@objectstack/objectql`'s root and `core` entrypoints, and `unregisterPackage` is a declared (optional) member of `IMetadataService` — so a downstream host that installs the facade and uninstalls a package gets a half-uninstall, silently.\n\n`MetadataManager` (`packages/metadata`) is the in-tree occupant of the slot and does not share this shape.\n\n## Why it is not a one-line fix\n\n`SchemaRegistry` has no \"remove every generic item owned by package X\" verb. The composite key format (`${packageId}:${name}`) makes the scan mechanically easy, but two questions need a ruling before writing it:\n\n- **Bare-key overlays.** ADR-0005 runtime/DB rows are stored under the bare name with no package id. An uninstall must not take a tenant's overlay with it — but leaving it means the overlay outlives the item it overlays. `unregisterObjectsByPackage`'s `force` parameter is the nearest precedent for who decides.\n- **Where the verb belongs.** On `SchemaRegistry` (shared by every registry-direct caller, including `uninstallPackage`) or private to the facade. The registry is the better home if `uninstallPackage` has the same gap — that wants measuring, not assuming.\n\n## Dispositions worth pricing (no recommendation forced)\n\n1. Add `SchemaRegistry.unregisterItemsByPackage(packageId)` and call it here alongside the object verb — closes it for every caller, needs the bare-key ruling.\n2. Scan-and-delete inside the facade only — narrower blast radius, but a second copy of the ownership rule, which is the drift #6808 was about.\n3. Document the member as objects-only — cheapest, and honest, but `IMetadataService` names it \"Unregister all metadata items from a specific package\".\n\nRefs #6725, PR #7211, #6808, ADR-0005.\n"
+}

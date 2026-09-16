@@ -1,0 +1,35 @@
+{
+  "number": 7783,
+  "kind": "pull_request",
+  "title": "fix(cli): refuse to serve a drifted vendored console under `os dev` (#7752)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T14:38:57Z",
+  "updated_at": "2026-08-11T20:07:49Z",
+  "closed_at": "2026-08-11T20:07:48Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": "2026-08-11T20:07:48Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/7783",
+  "body": "Fixes #7752\n\n## Scope\n\nThe card's rebuild half (`pnpm objectui:build` + re-running `page-variables-and-actions` clauses 4-5 and #7750's fix verification) happens on the QA runner's machine — `packages/console/dist` is a gitignored local artifact and is **not** in this PR. What is in scope is the card's \"Worth a second look\" paragraph: the drift guard exists, and the boot path the QA run used never reaches it.\n\n## The bypassed path, and the evidence\n\n`pnpm check:console-sha` is wired into **four** root scripts and nothing else:\n\n```\ndev          :: node scripts/check-dev-prereqs.mjs && pnpm check:console-sha && pnpm --filter @objectstack/example-showcase dev\ndev:showcase :: … && pnpm check:console-sha && …\ndev:crm      :: … && pnpm check:console-sha && …\ndev:todo     :: … && pnpm check:console-sha && …\n```\n\nThe QA runner does not use any of them. `docs/qa/platform-checklist/RUNNER.md` delegates booting to the **dogfood-verification skill §0/§1**, whose pre-flight is a named `.claude/launch.json` config driven by `preview_start`. Both configs checked in today have the same shape:\n\n```jsonc\n// .claude/launch.json — \"showcase-dogfood-3777\"\n\"runtimeExecutable\": \"pnpm\",\n\"runtimeArgs\": [\"-C\", \"examples/app-showcase\", \"exec\", \"objectstack\", \"dev\",\n                \"--ui\", \"--seed-admin\", \"-p\", \"3777\", \"-d\", \"file:/tmp/…/data.db\"]\n```\n\nThat is `objectstack dev` invoked **directly**, so the root script — and with it `check:console-sha` — is never on the path. The same hole is wider than the launch file: `examples/app-showcase`'s own `dev` script is `objectstack dev --seed-admin`, so even `pnpm -C examples/app-showcase dev` boots unguarded. Only the four root scripts carry seat 1.\n\nWhat the boot path *did* have was `warnOnConsoleShaDrift` in `packages/cli/src/utils/console.ts` — a single advisory line, after which the drifted bundle mounts and serves normally. That is the gap: a warning that scrolls past 47 loaded plugins and a seed summary is not a guard, and #7752 is what it costs.\n\n## The fix — a second seat on the boot path itself\n\n- `resolveConsolePath` now **reports** proven drift to its caller (`onDrift`) instead of warning about it in place, so exactly one message is emitted by whoever decides what to do.\n- `decideConsoleMount` is that decision, and is the whole policy in one testable function: with drift proven and `isDev`, the Console **does not mount**. `serve.ts` prints the refusal block and moves on.\n- Result: `/_console/` 404s, `/` stops redirecting to it, the banner advertises no console URL (it is derived from `loadedPlugins.includes('ConsoleUI')`), and the API still boots — so `api` / `cli` / `build` checklist items are unaffected. The stale bundle is unreachable instead of silently authoritative.\n\nRemediation wording is the existing script's, verbatim in intent: **`pnpm objectui:build`** (rebuild at the *pinned* SHA), with `objectui:refresh` named only as the labelled wrong turn, since it would re-bump the pin to the local `../objectui` HEAD.\n\nDeliberately narrow, so nothing outside the dev loop can reach it:\n\n| situation | behavior |\n|---|---|\n| dev, stamp ≠ pin | **refuse to mount**, print remediation |\n| dev, stamp = pin | mount (no message) |\n| dist unstamped / no `.objectui-sha` pin up-tree (published install, sibling-repo fallback) | unprovable → mount, unchanged |\n| `os serve` / production | advisory warning, unchanged |\n| `OS_ALLOW_CONSOLE_DRIFT=1` | mount the stale bundle deliberately |\n\nWhy here rather than patching `.claude/launch.json`: launch configs are authored fresh per run, so a seat there guards only the configs that exist today. Every boot — root script, example script, launch config, a bare `pnpm exec objectstack dev` — goes through `serve.ts`. Minimum intrusion, no bypass left.\n\n## Verification\n\nEnd-to-end, booting **the runner's own command shape** (`objectstack dev --ui -p <port> -d file:…` from `examples/app-showcase`) against a fabricated stamp carrying the exact gap the card measured — dist `09987b680…` vs pin `6314e87f2…`:\n\n| case | result |\n|---|---|\n| **drift, `os dev`** | refusal block printed; `GET /_console/` → **404**; `GET /` → **404** (no redirect); banner Console line absent; `GET /api/v1/health` → **200** |\n| **stamp = pin** (no other change) | no drift message; banner `Console: http://localhost:3878/_console/`; `/_console/` → **200**; `/` → **302** → `/_console/` — no false positive |\n| **drift + `OS_ALLOW_CONSOLE_DRIFT=1`** | advisory warning only; `/_console/` → **200** — escape hatch works |\n| seat 1 unchanged | `node scripts/check-console-sha.mjs` → exit **1** on drift, **0** in sync |\n\nResolution chain checked on the real path too (cwd `examples/app-showcase`): resolves `packages/console`, walks up to the repo `.objectui-sha`, decision `{mount:false, refusedForDrift:true}`.\n\nUnit: 19 tests pass across `packages/cli/src/utils/console.sha-drift.test.ts` (new — the decision matrix, override parsing, and \"no dist at all\" staying distinguishable from \"refused for drift\" since they need different messages) and `packages/cli/test/console-resolve.test.ts` (detection semantics, migrated to `detectConsoleShaDrift`). `eslint` clean on every touched file; `tsc` reports nothing new in them.\n\n## Runner-facing docs\n\nThe counterpart change, so the new 404 is not mis-read as a product bug: the dogfood skill §2 and the `stale-console-bundle` trap row in `RUNNER.md` now say that a 404 `/_console/` means \"rebuild with `pnpm objectui:build`\", never \"console broken\".\n\n## Out of scope\n\nNo `.objectui-sha` bump (the pin is already correct), no `packages/console` change, no `scripts/pm/check-half-states.mjs` (that is #7412), no release-notes edit."
+}

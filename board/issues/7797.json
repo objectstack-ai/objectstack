@@ -1,0 +1,35 @@
+{
+  "number": 7797,
+  "kind": "pull_request",
+  "title": "fix(plugin-sharing): scope getRule's by-id branch to the caller's organization",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T15:08:20Z",
+  "updated_at": "2026-08-11T20:20:51Z",
+  "closed_at": "2026-08-11T20:20:49Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": "2026-08-11T20:20:49Z",
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/7797",
+  "body": "Fixes #7761\n\n## The defect\n\n`SharingRuleService.getRule` resolved an id with a bare `{id: idOrName}` predicate and no organization filter, executed under the service's `SYSTEM_CTX` so nothing re-scoped it downstream. All three verbs resolve through `getRule`, so all three inherited the hole:\n\n- `GET /api/v1/sharing/rules/:id` — read another tenant's rule (criteria, recipient, access level);\n- `POST /api/v1/sharing/rules/:id/evaluate` — materialise that tenant's grants on demand;\n- `DELETE /api/v1/sharing/rules/:id` — delete the rule **and purge every `sys_record_share` grant it had materialised**, i.e. silently revoke another tenant's record access.\n\nThe caller needed `manage_sharing` in their own organization and an opaque `srule_...` id. Neither is a tenant boundary: `manage_sharing` is declared `scope: 'org'` in the spec's capability registry, and ids leak through logs, exports, support tickets and the evaluate endpoint's own `{ruleId}` response.\n\n## The fix\n\nOne predicate. The by-id lookup now goes through the same `adminOrgScope` helper #7760 introduced for the by-name path, rather than a second scoping helper:\n\n```ts\nwhere: this.adminOrgScope({ id: idOrName }, orgId),\n```\n\nso the read is `id = {id} AND (organization_id = {orgId} OR organization_id IS NULL)` when the caller carries an organization, and unfiltered when it does not. Two behaviours are deliberately preserved:\n\n- **No-org (system / boot) contexts are unchanged** — boot seeding, hooks and backfills keep resolving any row by id.\n- **Platform-global (`organization_id = null`) rows stay reachable by id**, for symmetry with the by-name path #7760 shipped.\n\nReaching another organization's rule by id is now indistinguishable from addressing one that does not exist: `getRule` answers `null` (REST 404), `evaluateRule` throws `RULE_NOT_FOUND`, and `deleteRule` is a no-op leaving the row and its grants intact. `deleteRule` staying a silent no-op is deliberate — it keeps delete idempotent and gives the caller no existence oracle for other tenants' ids.\n\n## Caller audit (verified on this branch, not inherited from #7676)\n\nEvery in-repo caller was re-checked rather than taken from the #7676 audit. The only callers passing a non-system context are the three REST routes above (`packages/rest/src/rest-server.ts:9268/9287/9305`), which pass the resolved auth context and are exactly the surface being fixed. Every other caller passes a system context with no organization and so takes the unfiltered branch unchanged:\n\n- `sharing-plugin.ts:86` boot reconcile and `:352` rebind — `{isSystem: true}`;\n- `sharing-rule-service.ts` `evaluateAllRulesForObject` — `SYSTEM_CTX`;\n- `bulk-recompute.ts` / `rule-hooks.ts` — reach rules through `listRules` / `evaluateAllForRecord`, not `getRule` by id;\n- the two dogfood tests that call `evaluateRule` (`showcase-bu-hierarchy-sharing`, `showcase-d3-d4-capabilities`) resolve **by name** under a system context.\n\nNo caller depends on by-id reaching an arbitrary organization's row.\n\n## The second axis is NOT decided here\n\nAn org admin deleting a **platform-global** row affects every tenant until the next boot reseeds it, and #7760 made those rows discoverable. Whether read/evaluate/delete should split for the null-org case is a maintainer call, not a dev judgment, so this PR does not implement a split — it is filed separately as #7795 and cross-linked from #7761. Note this PR neither introduces nor widens that exposure: after #7760, `deleteRule(name, orgAdmin)` already reaches a platform-global row by name on `main` today.\n\n## Tests\n\nNew `[#7761]` block in `sharing-rule.test.ts`, modelled on #7676's hand-built org contexts (the package's unit fakes have no notion of a resolved authenticated context, and `bootStack` cannot mint an org-scoped admin — #7762 — so an HTTP-layer test of this path would be structurally non-discriminating in the open core and none was written).\n\nBoth directions are pinned: another organization's rule unreachable by id across read/evaluate/delete; platform-global rows still reachable; the caller's own rows unchanged including a **successful** delete; and a no-org boot context still resolving any row. The delete pin asserts the victim's `sys_record_share` grants survive, not just its rule row — grant purging is the actual harm, and a row-only assertion would pass over a fix that still purged them.\n\n```\nTest Files  16 passed (16)\n     Tests  436 passed (436)\n```\n\n`pnpm --filter @objectstack/plugin-sharing typecheck` clean; `check:engine-double-contract` OK (150 pinned, 2 exempt — the fake engine is untouched); `check-nul-bytes` OK.\n\n### Ablation, direction predicted in advance\n\nPrediction: restoring `where: { id: idOrName }` turns the three \"unreachable by id\" tests red while the platform-global, own-org, boot and fixture-integrity pins stay green. Measured, exactly that — 3 failed / 433 passed:\n\n```\nFAIL  [#7761] ... another organization's rule is unreachable BY ID — read\n        AssertionError: expected { ...(15) } to be null\nFAIL  [#7761] ... another organization's rule is unreachable BY ID — evaluate\n        AssertionError: promise resolved \"{ ...(6) }\" instead of rejecting\nFAIL  [#7761] ... unreachable BY ID — delete leaves the row AND its grants intact\n        AssertionError: expected undefined to be truthy\n```\n\nThe third is the cross-tenant deletion itself, reproduced live: under the unfixed code the victim's rule row is gone. The whole `[#7676]` block stays green throughout, so this change does not disturb what its predecessor shipped.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01BVc1ekPpi6yaWywAUhfzfd)_"
+}

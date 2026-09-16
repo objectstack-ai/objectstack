@@ -1,0 +1,35 @@
+{
+  "number": 7762,
+  "kind": "issue",
+  "title": "[finding] `@objectstack/verify` bootStack mints admins with NO organization — every org-scoped read is structurally untestable in the dogfood suite (the reason #7676 escaped)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T13:24:23Z",
+  "updated_at": "2026-08-12T10:23:11Z",
+  "closed_at": "2026-08-12T10:23:11Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7762",
+  "body": "## Finding\n\n`@objectstack/verify`'s `bootStack` cannot produce an admin whose execution context carries an **organization**, so no dogfood test can exercise any org-scoped code path. Every `organization_id`-filtered read in the platform is, at the HTTP layer, structurally untestable in the open core.\n\nMeasured while writing an HTTP regression test for #7676:\n\n```\nPOST /api/v1/sharing/rules   (as stack.signIn() admin, booted showcase)\n→ 201, and the created row comes back organization_id: null\n```\n\n`defineRule` stamps `organization_id` from the caller's resolved context, so a null stamp is direct evidence the context has no organization. Consequence: a rule list that should have been filtered was returned unfiltered, and a test asserting \"another org's rule stays invisible\" saw it plainly — not because the filter was broken, but because the filter never engaged.\n\nThe escape hatch is `bootStack(stack, { multiTenant: true })`, and it does not help here: per `packages/verify/src/harness.ts` it requires the cloud-private `@objectstack/organizations` package, which is not present in this repo, and the gates that need it SKIP rather than pretend.\n\n## Why this matters\n\nThis is the direct reason #7676 escaped. That defect — package-seeded (`organization_id = null`) sharing rules invisible to an org-scoped admin — was invisible to **both** suites that should have caught it:\n\n- `plugin-sharing`'s own 428-test unit suite: its fake engine has no notion of a resolved authenticated context, so the org id that makes the filter miss only exists after a real sign-in.\n- the 579-test dogfood suite: real HTTP, real sign-in, but the admin has no organization, so the filtered branch is never taken.\n\nIt took a manual QA run (#7637) to find it. An HTTP-layer regression test was written for PR #7760 and then **deleted**, because it was green on the unfixed code for the wrong reason — a phantom check that reads as coverage. That deletion is the concrete cost of this gap.\n\nThe blast radius is wider than sharing rules. Every `organization_id`-scoped read follows this pattern, and several have already been fixed one at a time for the same root cause — `sys_business_unit` approver expansion (#3807), `sys_metadata` pending-draft listing, and now `sys_sharing_rule` (#7676). Each is a defect that only manifests when the caller has an organization, and none of them could have been caught by the harness that boots real HTTP.\n\n## Options\n\n**A. Give the open-core harness a real org-scoped context.** Let `bootStack` establish an organization and mint admin tokens bound to it, without the enterprise plugin — the organization *wall* (RLS scoping, posture) is the cloud-private part, but stamping an `organizationId` on the resolved execution context is not the wall, it is upstream of it. Cheapest route to real coverage; needs care that it does not silently imply a posture the open core cannot honour, which is exactly what `harness.ts` warns about today.\n\n**B. A seam for the resolved context.** Let a test declare the context the REST layer should resolve, so org-scoped filters can be driven directly without modelling org membership. Narrower, more honest about what is being tested, less faithful to a real deployment.\n\n**C. Accept the gap and cover org scoping at the service layer only**, with a shared test kit modelling the org-scoped context — what #7676's unit tests do by hand. Cheapest, and leaves the transport-to-service seam (where #7676 actually lived) uncovered forever.\n\nRecommendation: **A**, gated on confirming the posture question, with **C** as the interim — the recurrence record above suggests this class will keep producing defects, and each one costs a QA run to find.\n\n## Source\n\nFound during #7676 / PR #7760. Filed unassigned; observation-class (no user hits it today) but with a measured escape behind it.\n"
+}

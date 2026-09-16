@@ -1,0 +1,35 @@
+{
+  "number": 7544,
+  "kind": "issue",
+  "title": "Setup › Advanced › Signing Keys (JWKS) is a dead nav entry — `sys_jwks` is API-disabled and a `requiredPermissions` gate cannot prune it",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "huangyiirene"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T05:02:56Z",
+  "updated_at": "2026-08-12T04:27:50Z",
+  "closed_at": "2026-08-12T04:16:22Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7544",
+  "body": "## Symptom\n\nSetup › Advanced › **Signing Keys (JWKS)** can never load, for **any** persona.\n\n`sys_jwks` declares `enable.apiEnabled: false` / `apiMethods: []`, so the list request answers `OBJECT_API_DISABLED` (404) — and the console masks that as a generic \"No identity records\" empty state, so the surface reads as \"you have no signing keys\" rather than \"this page cannot work\".\n\nControl from the same run: `nav_api_keys` → `sys_api_key` rides the same machinery and returns no 4xx, so this is specific to the API-disabled object, not to the nav mechanism.\n\n## Root cause\n\nThe nav entry is contributed with only a `requiredPermissions` gate, and **a permission gate cannot prune an API-disabled object**. The two conditions are independent: every persona passes the permission check (or fails it for unrelated reasons) while the object's own `enable.apiEnabled: false` makes the destination unreachable regardless. There is no signal on the entry that the server could use to drop it.\n\nWorth deciding as part of the fix: whether the general answer is a `requiresObject`-style declaration that also consults `enable.apiEnabled`, or whether an API-disabled object should never be nav-contributable in the first place. Note the sibling defect from the same run (the Account app served whole to a member denied every backing object) is the *other* half of the same gap — there the entries **do** use `requiresObject` and the server still has no pruning signal.\n\n## Reproduction\n\n1. Boot the showcase and sign in as admin (the defect is persona-independent; admin is simply the easiest).\n2. Navigate to Setup › Advanced › **Signing Keys (JWKS)**.\n3. Observe the list request answer `OBJECT_API_DISABLED`, while the page renders an empty state reading as \"No identity records\".\n4. Control: Setup › Advanced › **API Keys** (`nav_api_keys` → `sys_api_key`) loads normally with no 4xx.\n\n## Source\n\nExtracted from the QA run objectstack-ai/objectstack#7514 (`builtin-apps-nav-render`, framework `a86db175`, vendored console `09987b68`).\n\n_Body restored 2026-08-11 after the filing agent overwrote it with a probe string and was interrupted before restoring it; content is unchanged from the source run._"
+}

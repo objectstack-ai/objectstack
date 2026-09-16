@@ -1,0 +1,32 @@
+{
+  "number": 7830,
+  "kind": "issue",
+  "title": "`api-methods-batch-conformance` fails on `main` for `sys_api_key` — reproduced in two independent containers while CI reports green, so CI is not covering it",
+  "state": "closed",
+  "state_reason": "duplicate",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "finding"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T17:51:46Z",
+  "updated_at": "2026-08-11T18:20:27Z",
+  "closed_at": "2026-08-11T18:04:10Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7830",
+  "body": "## Two independent reproductions, and a green CI that disagrees with both\n\nReported separately, without collusion, by two dispatched dev sessions working different cards in different containers and different worktrees:\n\n- #7309's dev ([report](https://github.com/objectstack-ai/objectstack/issues/7309#issuecomment-5256410797)) — *\"spec tests: 9947 passed, 1 pre-existing failure … `api-methods-batch-conformance` flagging `sys_api_key`\"*, diff contains zero `apiMethods` occurrences.\n- #7616's dev ([report](https://github.com/objectstack-ai/objectstack/issues/7616#issuecomment-5256702154)) — names the assertion: **`sys_api_key: [get, list, update] grants single-record writes but not 'bulk' — /batch and the *Many routes will 405`**, and confirms the subject file is byte-identical to `main` on its branch.\n\n**Test:** `packages/spec/src/data/api-methods-batch-conformance.test.ts`\n**Subject:** `packages/platform-objects/src/identity/sys-api-key.object.ts` — `apiMethods: ['get', 'list', 'update']` at :262, introduced by #7727 / PR #7769 (`52200b43d`).\n\n## ⚠️ The correction that makes this worth filing\n\nAfter the first report I checked CI and found it **green** — `main` @ `098b62914` (CI, Lint & Type Check, CodeQL, Release all `success`) and PR #7827 @ `61132169f` (8/8 workflows `success`) — and concluded the failure was **a local container artefact**. **That conclusion was wrong**, and I am recording it as mine rather than quietly dropping it.\n\nA second independent reproduction, in a separate container, makes \"local environment\" a much weaker explanation than the alternative: **CI is not running this test.** A green CI over a test that fails on a developer's clean checkout is not reassurance — it is the gate reporting on something narrower than it appears to.\n\n## Settle these in order — the second is the important one\n\n1. **Does it actually fail on a clean checkout of `main`?** Neither report is a controlled reproduction: both were observed as a side-effect of running a package suite during other work. Check out `main` clean, install, run the file. If it passes, both containers shared an environmental cause and this card becomes that question instead.\n2. **If it fails: why is CI green?** This is the half with reach. Likely candidates worth measuring rather than guessing:\n   - CI runs an **affected-packages subset**, and a change in `platform-objects` does not mark `packages/spec` as affected — so a spec test whose *fixture* is a platform object is never re-run when that object changes. That is a cross-package dependency the affected-graph does not model.\n   - or the test is skipped/filtered in the CI environment.\n\n   Whichever it is, the consequence is the same and outlives this one failure: **every future regression in that file is invisible to CI.**\n\n## On the substance, before anyone \"fixes\" the red\n\nDo **not** assume the object is wrong. #7727 added that `apiMethods` line deliberately, with a comment block at :22-28 explaining that `managedBy` objects run through `reconcileManagedApiMethods`, which strips write verbs the resolved affordances do not grant. It is entirely possible the **test's expectation** is what needs updating for `managedBy: 'better-auth'` objects, not the declaration. Measure which side is wrong before changing either.\n\n⛔ Do not resolve this by skipping the test, adding it to a ratchet ledger, or relaxing the assertion to make the red go away. Both devs correctly declined to raise a ratchet for it.\n\n## Credit where due\n\nBoth devs reported an unexplained red rather than treating it as noise, in reports that were otherwise clean. That habit is the only reason this is visible at all — CI would never have told anyone.\n\nFiled unassigned; assign at the moment you start."
+}

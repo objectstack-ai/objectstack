@@ -1,0 +1,37 @@
+{
+  "number": 7861,
+  "kind": "issue",
+  "title": "fix(sharing): `publicSharing.eligibility` is declared-but-unenforced — a draft or internal record mints a `public` share link and is served anonymously",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched",
+    "security",
+    "target:v17"
+  ],
+  "assignees": [
+    "huangyiirene"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T21:15:18Z",
+  "updated_at": "2026-08-12T13:59:05Z",
+  "closed_at": "2026-08-12T13:59:05Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7861",
+  "body": "Found while implementing share-link publishing in the HotCRM app (objectstack-ai/hotcrm#601, PR objectstack-ai/hotcrm#1103). Not fixable from that side, and the app deliberately shipped **without** the feature rather than declare a key that does nothing — the measurement is below.\n\nSame class as #3865 (`full` access level declared Transfer/Share/Delete and was equivalent to `edit`), and #3865's resolution — remove the option rather than let it mislead — is one of the two routes here.\n\n## The key\n\n`packages/spec/src/data/object.zod.ts`, inside `publicSharing`:\n\n```ts\neligibility: z.string().optional()\n  .describe('CEL expression that must evaluate to true on the target record'),\n```\n\nwith the TSDoc above it:\n\n> Optional CEL/JSONLogic predicate evaluated against the candidate record when a link is created. When the predicate returns false, the create call fails with 422 (e.g. \"draft records cannot be shared\"). Evaluator is the same one used by sharing rules.\n\n**Nothing evaluates it.** `ShareLinkService.getPolicy()` builds its policy object from `enabled` / `allowedAudiences` / `allowedPermissions` / `maxExpiryDays` / `redactFields` and never reads `eligibility`; `createLink()` runs no predicate anywhere. A read across the whole installed platform at `17.0.0-rc.6` finds no consumer of the key at all — the only other hits for the word are unrelated prose in `driver-sql`.\n\nThe sibling keys are all genuinely enforced, which is what makes this one easy to miss in review:\n\n| key | measured on 17.0.0-rc.6 |\n| --- | --- |\n| `enabled` | ENFORCED — false ⇒ every create refused, `SHARING_NOT_ENABLED` |\n| `allowedAudiences` | ENFORCED — `signed_in` refused `422 AUDIENCE_NOT_ALLOWED` |\n| `allowedPermissions` | ENFORCED — a non-`view` grant refused 422 |\n| `maxExpiryDays` | ENFORCED — a longer expiry refused `422 EXPIRY_TOO_LONG` |\n| `redactFields` | APPLIED to every token-served response |\n| **`eligibility`** | **INERT** |\n\n## Measured end to end\n\nDriving the real `ShareLinkService` against an object declaring exactly what the docs suggest —\n\n```\npublicSharing: {\n  enabled: true,\n  allowedAudiences: ['public', 'link_only'],\n  allowedPermissions: ['view'],\n  redactFields: ['owner_id'],\n  eligibility: \"record.status == 'published' && record.audience == 'public'\",\n}\n```\n\n```\ncreateLink(published + public,   audience 'public') → OK\ncreateLink(published + INTERNAL, audience 'public') → OK      ← should be 422\ncreateLink(DRAFT + public,       audience 'public') → OK      ← should be 422\nresolveToken( the internal link , {})               → SERVED, anonymously\n```\n\nThe last line is the impact: `GET /api/v1/share-links/:token/resolve` has no auth check, reads the record under `SYSTEM_CTX` and returns it. So the record an author believed unshareable is served to a caller with no principal.\n\nSeverity is bounded by the fact that link creation itself requires authentication (`isAuthenticated(ctx)` on `POST /share-links`) plus read access to the record — so this is not an anonymous-to-anonymous hole. It is: **any staff user who can read a record can publish it to the open internet, past a policy the object author wrote specifically to prevent that**, and the policy raises no error while being ignored. That is the shape a restrictive policy must never fail in — the schema's own history note beside this block makes the point about the sibling keys:\n\n> On a policy whose whole job is to be restrictive, a silently dropped key fails OPEN.\n\n## Why an app cannot work around it\n\nWorth recording, because the obvious mitigation looks available and is not. The chokepoint exists: `createLink` persists every link with one `engine.insert('sys_share_link', row, { context: SYSTEM_CTX })`, and a `beforeInsert` hook on `sys_share_link` was **measured working** against a real ObjectQL engine — it fires despite the system context (`triggerHooks` filters on object name and `session.skipAutomations`, which that context does not carry), `ctx.api` reads the candidate record, and a throw refuses the link. It covers the console share dialog and a raw REST create alike.\n\nBut a metadata app cannot register it. `validateCrossReferences` in `@objectstack/spec` refuses any hook whose `object` is not in the stack's own `objects`:\n\n```\nHook 'share_link_article_eligibility' references object 'sys_share_link' which is not defined in objects.\n```\n\n`collectObjectNames` reads `config.objects` only, so there is no wildcard escape either — `'*'` is not in that set. So the rule is expressible, enforceable, and unreachable from where apps live.\n\n## Two routes\n\n**A. Implement it.** Evaluate the predicate in `createLink` before the insert, refusing with 422, using the same evaluator sharing-rule conditions use. Note that `compileCelToFilter` (the sharing-rule path) compiles to a pushdown filter and rejects things a record-level predicate should accept — `has(record.x)` among them, per objectstack-ai/hotcrm's measured operator matrix — so \"the same evaluator\" may need to mean the record-level one rather than the filter compiler. Worth deciding explicitly, since the TSDoc already promises the sharing-rule evaluator.\n\n**B. Remove the key**, per #3865 / ADR-0078 precedent, so that authors cannot write a policy that silently does nothing. If B, `@objectstack/spec`'s strict object will then reject `eligibility` outright, which is the loud failure this needs — and the docs paragraph promising the 422 must go with it.\n\n**A is worth preferring here**, unlike #3865: an eligibility gate is the one thing that makes `publicSharing` safe to enable on any object holding a mix of public and internal records, which is most of them. Without it the only safe posture is `enabled: false`, and that is the posture objectstack-ai/hotcrm#1103 shipped — the feature was dropped rather than approximated.\n\n## Repro environment\n\n`17.0.0-rc.6` as pinned by objectstack-ai/hotcrm, `@objectstack/plugin-sharing` from that pin, driven through `ShareLinkService` directly and through a real `ObjectQL` + `InMemoryDriver`. Happy to hand over the probe scripts if useful.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01NM6o28jmBgsyTRQHutn7LC)_\n"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 7484,
+  "kind": "issue",
+  "title": "[finding] No CI gate checks documentation anchors — `lychee.toml` sets `include_fragments = \"none\"`, so a link to a heading that does not exist passes as `[200] OK`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "huangyiirene"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-10T19:59:19Z",
+  "updated_at": "2026-08-11T20:56:08Z",
+  "closed_at": "2026-08-11T20:56:08Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7484",
+  "body": "Observation-class gate gap, measured while implementing #7465 (PR #7483, the `## The one gate, three entry points` → `four doors` rename). **Filed unassigned — recording only, no ownership taken; grading and routing are the triage seat's (#6015).** ⛔ Not self-claimed.\n\n## The measurement\n\n`Check Documentation Links` runs lychee, and it resolves the **file** target only — it does not look at the `#fragment`. This was not read off a config comment; it was **probed with the pinned binary under the CI argv**:\n\n- `lychee.toml` sets `include_fragments = \"none\"`\n- a probe file linking `/docs/deployment/validating-metadata#this-anchor-does-not-exist-at-all`, run through **lychee 0.24.2** with the exact argv from `.github/workflows/check-links.yml`, is reported **`[200] ✅ OK`**\n- the same run over the real corpus: 1756 total / 775 unique / 0 errors\n\nSo a heading rename that updates the heading but not an inbound `#anchor` — or updates the anchor but leaves the link text contradicting it — **ships green**.\n\n## Why this is worth recording rather than assuming everyone knows\n\nIt falsified a live PM patrol criterion. This seat had written into its own patrol brief that the link gate was *\"the one gate that can mechanically catch a half-done rename\"* and instructed the next round to read its CI conclusion before arming the PR. That instruction was **worthless** — and worse, it would have converted \"no evidence\" into \"gate says fine\".\n\nThe gap is structural, not incidental: **a cross-file anchor is a two-sided invariant with no owner.** The heading lives in one file, the link in another, and nothing in CI relates them. #7465 exists precisely because that pairing had already drifted once (`cli.mdx:458` still pointed at a heading whose text had been correct in 2024).\n\n## What #7483 used instead, and why it is not a substitute\n\nPR #7483 verified its own rename by:\n\n1. computing the slug with the repo's **own** `github-slugger@2.0.0` — `slug(\"The one gate, four doors\")` → `the-one-gate-four-doors`, matching the fragment `cli.mdx` now links; and\n2. a repo-wide grep proving no residual references to the old fragment.\n\nBoth are correct, and both are **manual discipline that happened because a dispatch asked for it**. Neither runs on anyone else's PR.\n\n## Possible directions — deliberately not pre-judged\n\n- flip `include_fragments` on for **internal** links only (the corpus is 775 unique URLs, so cost is likely small, but external-anchor checking is the noisy part lychee turns off by default — that asymmetry is probably why it is `\"none\"` today, and that guess should be verified before acting);\n- a dedicated check that extracts `#fragment` targets from `content/**` and resolves them against the slugged headings of the destination file, with `github-slugger` as the single slug authority so the gate and the renderer cannot disagree;\n- accept and document, with the two-sided-rename discipline written where renames happen.\n\n⚠️ Whoever takes this should establish the **current** breakage count first — this card measures that the gate is blind, ⛔ **not** that the corpus is clean. Those are different claims and only the first was tested.\n\n## Related, smaller, and deliberately separate\n\nThe same #7465 pass found the stale rule count `26` surviving in two **code comments** — `packages/objectql/src/plugin.ts:76` and `packages/metadata-protocol/src/protocol.ts:2542` (the live registry holds 38). Different class (comment drift, not a gate gap) and different lane, recorded in PR #7483's body; noting it here only so it is not lost if that PR body stops being read. Triage may want it as its own card.\n\n## Dedup\n\nSearched open issues for `lychee`, `include_fragments`, `anchor`, `check-links` before filing: no existing card.\n\nRefs: #7465, PR #7483, `.github/workflows/check-links.yml`, `lychee.toml`."
+}

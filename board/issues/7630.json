@@ -1,0 +1,32 @@
+{
+  "number": 7630,
+  "kind": "issue",
+  "title": "[Decision] The #4001 unknown-key strictness wave is owed ADR-0087 entries — one per major, or one per batch?",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T09:26:10Z",
+  "updated_at": "2026-08-12T06:23:45Z",
+  "closed_at": "2026-08-12T06:22:47Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7630",
+  "body": "Split out of **#6350** at landing (PR #7624), because #6350 auto-closes on that merge and this is the one piece of its work that was deliberately **not** done. Filed so it does not evaporate with the card that produced it.\n\n⚠️ This is a **grouping** call, not a \"should we register it\" call. The dev judged these **owed** and said so plainly; it declined to invent the shape.\n\n## What is owed\n\nEleven declared-breaking changesets in the v17 stock, all part of the **#4001 unknown-key strictness wave** and its authoring-gate neighbours:\n\n`unknown-key-strictness-tier-a` · `-step2` · `-automation-batch11` · `-ui-batch13` · `-ui-batch15` · `-ui-batch16` · `view-subblock-strictness-batch18` · `strict-automation-control-flow-state-machine` · `rare-jars-shave` · `user-filters-allow-add-tab-promote-and-close` · `view-union-identity-precondition`\n\nAll eleven are **authorable metadata with real rename tables and 0 ledger subject coverage**. The class is demonstrably registrable — the repo already carries two of exactly this shape:\n\n- `ui-schemas-strict-unknown-keys` (major 15)\n- `dashboard-widget-strict-unknown-keys` (major 16)\n\n## The decision\n\nBoth existing precedents register **a wave as one entry per major**, not one entry per batch. The eleven above are batches within one major.\n\n- **A — one entry for the major** (mirrors both precedents). Fewer, larger entries; an upgrader reads one prescription covering the wave.\n- **B — one entry per batch** (eleven entries). Finer provenance, each traceable to its changeset; diverges from the only two precedents in the registry.\n- **C — some middle grouping** (e.g. by surface: automation / ui / views).\n\n## Why the dev stopped rather than picking\n\nStated in its report and worth preserving verbatim in spirit: **the registries are consumed as a set, and a wrong grouping produces no error anywhere.** Nothing goes red. It would simply be wrong, silently, in the artifact whose entire purpose is to be the trustworthy record — which is the failure mode #6350 exists to correct. Choosing the shape unilaterally would harden an invented grouping into a set-consumed ledger.\n\nThat is the same reasoning that kept the earlier audit from registering only its three sampled omissions, and it was right both times.\n\n## Context from the landed work (PR #7624)\n\nThe reconciliation that did land judged **all 61** flagged candidates: **9 registered**, 34 judged not-missing with a named cover for each, **11 owed and declared unwritten** (this card), 7 borderline-not-owed. Standing audit surface moved: answered 39 → 48, residue 106 → 97, flagged 61 → 52.\n\n⚠️ **Landing this card's work would take the flagged count from 52 toward 41.** It is the single largest remaining piece.\n\n## Two adjacent seams recorded, NOT part of this decision\n\n- **The 45 `~` rows were never examined.** `~` only means *some* commit touched a ledger file — it does not prove the entry covers that face. Same shape as the `!` seam this card came from, and unmeasured.\n- **7 borderline candidates** were judged not-owed with lower confidence and named in PR #7624's body. Any could reasonably be ruled owed.\n\nNeither is being asked here. They are written down so the next auditor does not have to rediscover that they are open.\n\n## Release board\n\n⚠️ Parent #6350 carried `target:v17` — this is v17 ledger completeness and plausibly belongs on the release board too. ⛔ Not applying `target:*` here: that label has exactly one producer per backlog and it is the triage seat, not this one. Flagging it for that seat to attach or decline.\n\nRefs: #6350 (parent, closes with PR #7624), #4001 (the strictness wave), #6129 (the ruling that the gate stays diff-only), ADR-0087."
+}

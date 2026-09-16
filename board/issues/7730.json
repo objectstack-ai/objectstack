@@ -1,0 +1,35 @@
+{
+  "number": 7730,
+  "kind": "issue",
+  "title": "email-template-render (a): declared i18n bundle collides — Registry keys email_template without locale, only the last locale survives",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T12:24:08Z",
+  "updated_at": "2026-08-11T18:45:25Z",
+  "closed_at": "2026-08-11T18:45:25Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7730",
+  "body": "## Symptom\n\nA stack declaring two `emailTemplates` with the same `name` and different `locale` (an i18n bundle) does not materialize all rows. The registry logs `[Registry] Overwriting email_template: packageId:name` and only 3 of 4 authored templates reach `sys_email_template` — the en-US twin is dropped. The spec states that multiple rows with the same name but different locale form an i18n bundle, so both should coexist.\n\n## Root cause\n\n`packages/objectql/src/registry.ts` (~line 1826) computes the storage key without locale:\n\n`const storageKey = packageId ? ` + \"`${packageId}:${baseName}`\" + ` : baseName;`\n\nA second row with the same name but a different locale collides on that key and overwrites the first (the `[Registry] Overwriting ...` path at ~line 1828). Locale is not part of any item key, so the registry cannot hold an i18n bundle for a single name. This contradicts the spec's own \"same name + different locale = i18n bundle\" statement. The key computation is generic to every item type, so nothing email-specific rescues it.\n\nStale-premise check: identical in `src`, in the executed `dist`, and on `origin/main` (byte-for-byte with the `92f26f75` pin) — not fixed upstream.\n\n## Reproduction\n\n1. Author a stack declaring two `emailTemplates` with the same `name`, one `locale: 'en-US'` and one `locale: 'zh-CN'`.\n2. Boot; watch the registry log and query `sys_email_template`.\n\nExpected: both locales materialize as an i18n bundle. Actual: `[Registry] Overwriting email_template` is logged and only the last-registered locale survives.\n\n## Source\n\nExtracted from the QA run objectstack-ai/objectstack#7690 (framework 92f26f75, console 09987b680)."
+}

@@ -1,0 +1,32 @@
+{
+  "number": 7583,
+  "kind": "issue",
+  "title": "Seat-post protocol: registry bodies grow without bound — bound the live body to current state, move shift narration out",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T06:25:22Z",
+  "updated_at": "2026-08-12T01:21:06Z",
+  "closed_at": "2026-08-11T11:45:52Z",
+  "closed_by": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7583",
+  "body": "## Problem\n\nSeat posts (`label:pm:seat`) are defined as \"the single authoritative registry\" for each seat, but nothing bounds their size. #6019 (`domain:engine-core`) had reached **~61 KB** by 2026-08-11: wave-by-wave status narration, per-card verdicts, patrol notes and stacked handover sections all accreted in the body across shifts. The maintainer raised it directly today (2026-08-11, engine-core PM session):\n\n&gt; 座位贴 #6019 内容较大, 这个问题应该怎么解决，以后会越来越大。\n\nCost is concrete, not aesthetic: a 61 KB body exceeds tool read limits (this morning's takeover needed chunked shell reads of a saved file to read its own seat post), every full-body edit must round-trip the whole text through a write channel, and the operative state — which the protocol says the body exists to carry — is buried under history that belongs to closed cards.\n\n## Growth mechanism\n\nThe protocol already says the right things — \"评论只作交接审计,不承载状态\", state lives on the issues — but in practice the body absorbed **shift narration** (\"#NNNN DISPATCHED…\", \"#NNNN ACCEPTED + QUEUED…\", per-wave tallies), which is per-card state that already lives on the cards and PRs. That narration is the unbounded term; the genuinely body-shaped sections (Scope / Current PM / inherited ledger / hot-file serial queue / standing commitments) are all naturally bounded.\n\n## Precedents already in the field\n\n- #6019 was fully re-authored once before (Chinese → English rewrite) relying on body edit history as the archive — established that edit history is an acceptable archive channel.\n- The 2026-08-11 06:0xZ takeover of #6019 compacted the live body to current-state-only (~4.5 KB), with prior logs retained in the 05:13Z body revision. Worked; nothing was lost; the takeover audit comment records the pointer.\n\n## Proposal (for a SKILL.md amendment — ⚠️ any card editing `.claude/skills/pm-dispatch/**` mandates `model: claude-fable-5` per the 2026-08-10 Model-tiering ruling)\n\n1. **Fixed section template for seat bodies**: Scope / Current PM / Inherited state / Hot-file serial queue / Standing commitments / Notes — nothing else. All sections are current-state; none grow with time.\n2. **Shift narration goes where the state already lives**: per-card dispatch/accept/landing facts belong on the card and PR threads (they are already required there); round tallies go to the chat round report. The seat body is edited at takeover, handover, and structural change — not per event.\n3. **Takeover compaction as a standard step**: an incoming PM restates the handover's operative content in the bounded template and points at the outgoing revision in edit history (audit comment carries the pointer).\n4. **Mechanical guard**: a soft size predicate (e.g. body &gt; ~10 KB) added to `scripts/pm/check-half-states.mjs` as a report-only H-item, so oversized seat posts surface in patrol sweeps instead of being discovered at read-failure time.\n\nOptions 1–3 are protocol text; option 4 is a small script change. The #7341-style skill-batch card is the natural vehicle if one is already queued.\n\nFiled unassigned, no `domain:*` — triage routes (likely `domain:devx` by the skills/scripts surface, with the fable mandate noted above).\n\n## Source\n\nObserved during the 2026-08-11 engine-core seat takeover (session `session_01PemxJmMZT9JphrsNx886Ce`); maintainer prompt quoted above. Dedup: searched `pm:seat` size/compaction cards — none exist."
+}

@@ -1,0 +1,35 @@
+{
+  "number": 7642,
+  "kind": "issue",
+  "title": "The `__search` companion column, declared client-invisible, is echoed in every record body",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "huangyiirene"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T09:49:55Z",
+  "updated_at": "2026-08-12T01:22:50Z",
+  "closed_at": "2026-08-12T01:22:50Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7642",
+  "body": "## Symptom\n\nThe `__search` companion column — declared invisible to clients — is echoed in **every** record body: query results, GET by id, `/search` hits, and the 201 create body. Still present after restarting with `OS_SEARCH_PINYIN_ENABLED=false`.\n\nThe `$searchFields`-override half of the contract IS correctly enforced (supplying `__search` as an override → 400 \"is hidden\"); only the default-projection strip is missing.\n\n## Root cause\n\n`packages/objectql/src/search-companion.ts` provisions the column `hidden` + `system` + `readonly` + `searchable:false`. Those flags only keep it out of auto-views, the `$search` auto-default, and `$searchFields` overrides — **no read path strips it from the default projection**, so hidden system columns come back (as `organization_id` does).\n\nConfirmed still present on `origin/main` (`76d74ecb`): the provisioning (lines 151–154) still sets `hidden` / `readonly` / `system` / `searchable:false`, with no default-projection strip on any read path.\n\n## Impact\n\nDisclosure risk is **low** — the value derives from the display field only, and secret/FLS-restricted sources are excluded. But the declared client-invisibility contract is broken and every payload carries a private index column.\n\n## Reproduction\n\n```\nPOST /api/v1/data/showcase_contact/query {\"search\":\"zhangwei\",\"limit\":1}\n  → the returned record contains \"__search\":\"zhangwei zw\"\nGET  /api/v1/data/showcase_account/\n  → \"__search\":\"huaningkeji hnkj\"\nGET  /api/v1/search?q=INV-1003\n  → each hit.record carries a __search key\n```\n\nThe 201 body of a create carries it too. Still echoed after restarting with `OS_SEARCH_PINYIN_ENABLED=false`.\n\n## Source\n\nExtracted from the QA run objectstack-ai/objectstack#7629 (framework 92f26f75, console 6314e87f)."
+}

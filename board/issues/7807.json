@@ -1,0 +1,36 @@
+{
+  "number": 7807,
+  "kind": "issue",
+  "title": "sharing rules: the `business_unit` recipient expands the whole SUBTREE, but the spec declares it as exactly one unit (no subtree)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched",
+    "security",
+    "target:v17"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T15:28:18Z",
+  "updated_at": "2026-08-12T16:09:48Z",
+  "closed_at": "2026-08-12T16:08:55Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7807",
+  "body": "## Symptom\n\n⚠️ **Potentially security-relevant (over-grant).** The two business-unit recipient kinds are declared as different widths and enforced as the **same** width. A sharing rule authored with `recipient_type: 'business_unit'`, expecting to reach exactly one unit's members, in fact reaches that unit **plus every descendant unit's members**.\n\n## Declared\n\n`packages/spec/src/security/sharing.zod.ts`, on `ShareRecipientType`:\n\n- `unit_and_subordinates` — a business unit plus every descendant unit's members (ADR-0057 D5 subtree widening).\n- `business_unit` — exactly one business unit's members (no subtree).\n\n`packages/lint/src/validate-org-axis-red-lines.ts` carries the same table and calls `unit_and_subordinates` the \"strictly WIDER grant\" of the pair.\n\n## Enforced\n\n`SharingRuleService.expandRecipient` routes both kinds through the identical call. On `origin/main` at 098b62914, `packages/plugins/plugin-sharing/src/sharing-rule-service.ts`:\n\n```ts\nif (rule.recipient_type === 'business_unit') {\n  const dept = new BusinessUnitGraphService({ /* … */ });\n  return dept.expandUsers(rule.recipient_id);\n}\n// …\nif (rule.recipient_type === 'unit_and_subordinates') {\n  const dept = new BusinessUnitGraphService({ /* … */ });\n  return dept.expandUsers(rule.recipient_id);\n}\n```\n\n`BusinessUnitGraphService.expandUsers` opens with `const units = await this.descendants(businessUnitId)` — a BFS over `parent_business_unit_id` — and then expands members over `business_unit_id: { $in: units }`. So `business_unit` walks the subtree. The two branches differ only in their comments.\n\nConsequence: on a three-level tree, a `business_unit` rule anchored at a division silently grants to every department and office beneath it. The wider of the two declared kinds is not wider at all, which also makes the distinction the lint red-line draws between them unenforceable in practice.\n\n## Which way to fix is a decision, not a detail\n\nBoth directions are defensible and they are not equivalent:\n\n1. **Narrow the runtime to the declaration** — `business_unit` expands members of that unit only. Matches the spec, the lint table and ADR-0057 D5's framing of `unit_and_subordinates` as the widening. **Reduces** access for any deployment that already authored `business_unit` rules and is relying, knowingly or not, on the subtree behaviour, so it needs a release note at minimum.\n2. **Change the declaration to match the runtime** — and then `business_unit` and `unit_and_subordinates` are one kind with two names, which raises whether one should be retired under ADR-0049 enforce-or-remove.\n\nWorth checking before either: whether any shipped example app or seeded rule authors `business_unit`, since that decides how much real pull direction 1's narrowing has to overcome.\n\n## Source\n\nFound while implementing #7729 (lazy revocation on BU-tree changes, PR #7806). Out of scope there and deliberately not fixed in that PR: #7729 is a **timing** defect and its fix must cover whatever `expandRecipient` reads today, which is why that PR covers both kinds. Covering both stays correct whichever way this issue is decided.\n"
+}

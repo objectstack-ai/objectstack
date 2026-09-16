@@ -1,0 +1,35 @@
+{
+  "number": 8127,
+  "kind": "pull_request",
+  "title": "fix(plugin-security): let a member revoke their OWN API key — owner-scoped update on sys_api_key",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-12T17:18:33Z",
+  "updated_at": "2026-08-12T17:46:44Z",
+  "closed_at": "2026-08-12T17:46:42Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-12T17:46:42Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/8127",
+  "body": "Fixes #8053\n\nAn ordinary member who minted a personal API key could not revoke it. `PATCH /api/v1/data/sys_api_key/{their own id} {\"revoked\": true}` answered **403 `PERMISSION_DENIED`**, the row stayed `revoked: false`, and the key kept authenticating — while the `revoke_api_key` / `restore_api_key` row actions rendered in that member's own **My Keys** grid the whole time.\n\nThis is the residual of #7727, one layer down. #7727 is genuinely fixed for admins and stays fixed: the method gate (`enable.apiMethods` gained `update`) and the ADR-0092 D2 column whitelist both landed correctly. What was untouched is **object-CRUD**: the platform `member_default` set granted only `allowRead` across the better-auth-managed identity tables, so `update` on `sys_api_key` resolved for `admin_full_access` and nobody else.\n\n## The fix\n\nOne explicit `sys_api_key` entry on `member_default`, overriding the blanket managed-object deny:\n\n```ts\nsys_api_key: { allowRead: true, allowCreate: false, allowEdit: true, allowDelete: false },\n```\n\nIt is deliberately **not** bounded by that boolean alone. Two pre-existing mechanisms do the narrowing, which is why this is a restoration of declared-versus-enforced intent rather than a new grant:\n\n- **which rows** — the `sys_api_key_self` RLS carve-out (`user_id == current_user.id`), which already made the row owner-*visible*; there was simply no `allowEdit` to go with it.\n- **which fields** — ADR-0092 D2's identity write guard, whose per-object update whitelist for this table lists `revoked` alone.\n\nBeing an *explicit* entry is also what makes it survive `kernel:ready`: `applyManagedWriteDenies` injects its deny only for managed objects a target set does not already name.\n\n## The persona is the gate\n\nThe card named the root cause of why this survived #7727's own test suite: those pins all drive the seeded **admin**, and an admin-persona revoke assertion passes against the unfixed build. So the new pin — `packages/qa/dogfood/test/api-key-owner-revoke.dogfood.test.ts` — signs up a plain member and drives every case as them.\n\nPredict-then-mutate, written down before the first run and confirmed in both directions:\n\n| Case | Without the grant | With it |\n|---|---|---|\n| owner revokes own key, key stops authenticating | **403** | 200 |\n| owner restores own key | **403** | 200 |\n| `/security/explain` `object_crud` for update | **`denies`** | `grants`, contributor `member_default` |\n| credential columns smuggled beside a legal `revoked` | **403** | 200, only `revoked` applied |\n| cross-owner revoke, non-`revoked` column, create/delete | 403 / 403 / 405 | unchanged |\n\n⚠️ Recorded honestly: the three refusal cases pass **vacuously** without the grant, because nothing granted the member `update` at all, so every PATCH was 403 regardless of row or column. They become load-bearing only once the grant exists — their stillness during the reverse verification is not evidence, and the file says so in its header.\n\nThe two existing unit pins that encoded the old all-false posture were updated rather than loosened: the exception is keyed as an exact `member_default::sys_api_key` pair, the create/delete/read axes are still asserted, and a new assertion pins the exception list itself so it cannot grow silently. All four of those assertions go red with the grant removed.\n\n## Not affected, and pinned as such\n\nCross-owner revocation stays **403** with the row unchanged and the admin's key still live; a non-`revoked` column stays refused for the owner too; `create` / `delete` stay **405** at the method gate; `key` and `user_id` are stripped even when smuggled alongside a legal `revoked`; show-once semantics are intact. Every other better-auth-managed identity table stays write-denied — `sys_api_key` is the one exception, and it is one because that table is hand-rolled ObjectStack rather than better-auth-owned, with a registered whitelist already governing its single platform-owned column.\n\n## Verification\n\n- `@objectstack/plugin-security` — 51 files, **1029 tests** pass; `typecheck` clean.\n- `@objectstack/dogfood` full suite — **663 passed / 4 failed** before the fix, **667 passed / 0 failed** after, same total: exactly the four predicted cases flipped and nothing else moved. `typecheck` clean.\n- Gates: `check:authz-resolver`, `check:nul-bytes`, `check:cross-package-test-inputs`, `check:test-source-alias`, `check:changeset-gate-self-tests`, `check-changeset-no-major` all green.\n- The two gates that do not appear in the dispatch-gates list: `check:query-options-erasure` holds (baseline verified against `28df4a6`, no files added) and `check:type-check-debt` is OK with nothing raised. The latter first failed on an **unbuilt closure** (`@objectstack/service-knowledge` had no built type entry point), not on this diff — re-run green after building the closure the gate's own message prescribes.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01PEVB6w7D7uCszR9Mw1BL73)_"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 7329,
+  "kind": "issue",
+  "title": "check:adr-anchors has no model of a \"non-decision\" ADR number — gaps go unflagged, and a tombstone is anchorable",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "huangyiirene"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-10T06:48:25Z",
+  "updated_at": "2026-08-11T21:35:54Z",
+  "closed_at": "2026-08-11T21:35:54Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7329",
+  "body": "Out-of-scope finding from #6676 / PR #7316 (the ADR-0107 tombstone). Recorded, not claimed. **Observation-class**: nothing a user hits today, and both halves are deliberately-deferred judgment calls, not defects.\n\n#6676 explicitly deferred its own optional half — *\"Optionally teach `check:adr-anchors` to flag future gaps (separate judgment — gaps may be legitimate)\"* — and that half dies with the card when PR #7316 closes it. This issue carries it forward **with the measurement that was missing**, plus a second fact PR #7316 introduced. Both would be fixed inside one change (\"teach the gate about ADR numbers that are not live decisions\"), which is why they are one card rather than two.\n\n## Fact 1 — gaps are NOT uniformly illegitimate; measured, four holes, three causes\n\n`docs/adr/` holds 119 records with max `0122`. The holes, each chased on full history (9,829 commits, clone verified unshallowed):\n\n| Hole | Cause | Evidence |\n|---|---|---|\n| `0001` | Record **deleted** 2026-02-11 in the permission-protocol rewrite; still cited as history by ADR-0002 | `9da8e3e72`; on `UNRESOLVED_ADR_CITATIONS` |\n| `0075` | Drafted only on an **unmerged branch** — never assigned on `main` | `148f4c8f5`, `617f3f8ae`; both `git merge-base --is-ancestor ... origin/main` = false |\n| `0083` | **Never existed**, on any branch, at any time; never cited | no path ever matched `*0083*`; no citations |\n| `0107` | Landed 2026-07-28 00:25, **withdrawn** 09:24 the same day | `53d37f1ae` (#3716) / `3bb382b67` (#3735) — tombstoned by PR #7316 |\n\nSo a blanket \"flag every gap\" would be wrong: `0075` and `0083` are ordinary, blameless number skips, and `0001` is already grandfathered on purpose. Only the `0107` shape (a number that **was** a live record) carries the squat risk #6634 is about. Any gate here needs to discriminate, and this table is the discrimination data.\n\n**This is the input #6676 asked for, not a request to build the gate.** Whether a gap check is worth having at all is the open question.\n\n## Fact 2 — a tombstone reads to the gate as a decision that exists\n\nPR #7316 adds the corpus's first tombstone, `docs/adr/0107-withdrawn-hook-body-write-set-static-gap.md`: a record whose entire content is \"this number is withdrawn, do not reuse\".\n\n`check-adr-anchors.mjs` builds its `records` set from **filenames only** (`auditAdrDirectory`), so the tombstone satisfies both the citation audit (intended and wanted — the historical `ADR-0107` citations now resolve) **and** the anchor loop's `if (!records.has(...))` guard, which was never meant to accept it. A future `scripts/adr-anchors/*.json` entry anchoring live code to `ADR-0107` would pass.\n\nConsequences are small and bounded today:\n\n- nothing anchors `ADR-0107`, and nothing should;\n- the anchor schema requires an `invariant` stating what the ADR decided — unwritable truthfully for a number that decided nothing, so the mistake is caught by a **reader**, not by the gate;\n- PR #7316 marks the hole inline at the guard rather than leaving it silent.\n\nThe gate has no concept of \"a record that is not a decision\", which is the same missing concept as Fact 1. Options if this is ever taken up: a front-matter status the gate reads; a filename convention (`NNNN-withdrawn-*`); or an explicit list. All three are contract choices, hence a finding rather than a patch.\n\n## Why this is not in PR #7316\n\nScope discipline: #6676's card said the gate question is *\"explicitly OPTIONAL and separate… Do not implement it in this PR.\"* Fact 2 was found while implementing it and is recorded here for the same reason.\n\nRefs: #6676, PR #7316, #6634 (the citation audit and the squat failure mode), #5992 (the number-uniqueness audit).\n"
+}

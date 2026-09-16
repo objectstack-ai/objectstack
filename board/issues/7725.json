@@ -1,0 +1,35 @@
+{
+  "number": 7725,
+  "kind": "issue",
+  "title": "invitation-scope-gates: `accept-invitation` → bodyless HTTP 500, invitation stays `pending` forever (UNIQUE constraint on sys_member)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-help"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T12:21:53Z",
+  "updated_at": "2026-08-11T21:28:26Z",
+  "closed_at": "2026-08-11T21:28:26Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7725",
+  "body": "## Symptom\n\nAccepting a valid org invitation never transitions the row from `pending` to `accepted`.\n\n- **Observed:** `accept-invitation` returns **HTTP 500 with an empty body**, and the `sys_invitation` row stays `pending` **forever**. Reproduced twice with fresh emails.\n- **Expected:** 2xx, the invitation moves to `accepted`, and the invitee holds exactly one membership in the target org.\n\nServer log names the real cause:\n\n```\ninsert into sys_member … UNIQUE constraint failed: sys_member.organization_id, sys_member.user_id\n```\n\nThe delegated-admin **scope** itself is correct (a real `delegated_admin` can invite a member — 200, exactly one attributed row — but cannot invite an admin — 403 with the ADR-0090 D12 message — and leaves zero orphan rows). The break is purely in **acceptance**.\n\n## Root cause\n\nAcceptance re-inserts a membership the **sign-up reconciler already created**. Every user is auto-bound to the default org at sign-up via the membership reconciler (`packages/plugins/plugin-auth/src/reconcile-membership.ts`, run as a `user.create.after` hook). better-auth's built-in `/accept-invitation` route then performs its **own** `sys_member` insert, which collides with the reconciler's row on the unique index `{ organization_id, user_id }` (`packages/platform-objects/src/identity/sys-member.object.ts` — `indexes: [{ fields: ['organization_id', 'user_id'], unique: true }]`).\n\nThe reconciler yields to any pre-existing membership (its `insertMembership` path checks for an existing row first), but better-auth's built-in accept-invitation insert does not go through that seam, so it hits the constraint.\n\n**Suspected fix:** acceptance should upsert/adopt the existing `sys_member` row (or skip the insert when the invitee is already a member of the target org).\n\nThis is the **same bodyless-500 statusCode-leak class** as the `remove-user` failure filed from this run — see #7724: an engine-level fault surfaces through the better-auth route as a bodyless 500 instead of a structured envelope.\n\n## Reproduction\n\n1. A `delegated_admin` (or admin) invites a fresh email as a member → 200, one `pending` row.\n2. The invitee signs up / signs in through the invitation link (the reconciler binds them to the default org).\n3. `POST /api/v1/auth/accept-invitation {invitationId}`.\n4. Observe HTTP 500 with an empty body; the invitation row is still `pending` on re-read.\n\n## Source\n\nExtracted from the QA run objectstack-ai/objectstack#7663 (framework 92f26f75, console 09987b680)."
+}

@@ -1,0 +1,35 @@
+{
+  "number": 7740,
+  "kind": "issue",
+  "title": "Checklist maintenance from the identity-auth QA run (#7663): 5 item/oracle/fixture corrections for docs/qa/platform-checklist",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "huangyiirene"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T12:25:19Z",
+  "updated_at": "2026-08-11T20:25:38Z",
+  "closed_at": "2026-08-11T20:25:38Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7740",
+  "body": "## Summary\n\nConsolidated checklist-maintenance edits falling out of the identity-auth FULL-area QA run (objectstack-ai/objectstack#7663). All five are edits to `docs/qa/platform-checklist/` (primarily `areas/identity-auth.json`) — checklist text / oracle / fixture-note corrections, **not** product fixes. Each item's product defect, where one exists, is filed separately.\n\n## Items\n\n1. **`org-membership-team-management` clause 1 (and its negative) name the wrong role vocabulary.** The enforced builtin set is `{owner, admin, delegated_admin, member}` per ADR-0108 (`BUILTIN_MEMBERSHIP_ROLE_OPTIONS`, \"nothing widens these at boot any more\") — **not** `{owner, admin, member, guest}`. `guest` is actually **rejected** (400 `ROLE_NOT_FOUND`), and `delegated_admin` is legitimate. The stale spec doc-comment on `MemberSchema.role` (`packages/spec/src/identity/organization.zod.ts:84-87`, \"Common roles: 'owner', 'admin', 'member', 'guest'\"; the `.describe(...)` at line 87 repeats it) is probably where the checklist text came from — **fix both** the checklist clause and the spec doc-comment. (The spec doc-comment edit is a `packages/spec` change, so it may warrant its own tiny `domain:spec` PR; the checklist clause is the `domain:devx` part.)\n\n2. **`invitation-scope-gates` clause 6 conflates two axes.** `DelegableScope` models ObjectStack positions / permission sets / business units and has **no field** that could carry a better-auth org invitation role, so it can never \"contain member\". The delegate demonstrably *can* mint a member invitation while the endpoint reports an empty assignable set — it **under-reports, never over-reports** (the safe direction). The clause needs a revision, not a product fix.\n\n3. **`admin-lifecycle-operations` clause 4 should name the authed-request oracle**, not `get-session`'s status code. better-auth's no-session convention is **200-with-null-body**, so the clause's literal 401 expectation misdescribes a correct implementation. The session was provably gone; the clause should assert against a protected authed request, not `get-session`'s status.\n\n4. **`teams-bu-membership`** — retire the `knownGap` (a BU-consuming geometry does ship: `share_new_inquiries_with_field_ops`, so the clause runs) and add the **zero-seeded-placements** note: a fresh boot seeds the BU tree but **zero** `sys_business_unit_member` rows, so the rule materializes nothing until a tester places someone (the `seed-data-thin` trap for this item). (Product defect from this clause filed separately as objectstack-ai/objectstack#7729.)\n\n5. **`identity-import-wizard`** — add the fixture note that the `auto` policy's **temporary-fallback** branch cannot occur on `objectstack dev`: both transports always register and `dev.ts` hard-sets `NODE_ENV='development'` so `isPhoneOtpDeliverable()` cannot be made false. Record as a fixture note so the next sweep does not re-derive it.\n\n## Source\n\nExtracted from the QA run objectstack-ai/objectstack#7663 (framework 92f26f75, console 09987b680)."
+}

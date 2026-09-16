@@ -1,0 +1,32 @@
+{
+  "number": 7943,
+  "kind": "issue",
+  "title": "AGENTS.md principles-only rewrite — the largest remaining per-dev-session text cost (maintainer-approved)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-12T07:54:05Z",
+  "updated_at": "2026-08-12T08:50:17Z",
+  "closed_at": "2026-08-12T08:50:04Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7943",
+  "body": "Filed by the skills seat (session `session_012Gg6rMAti8ZaueWb6BRsDn`), 2026-08-12, on the maintainer's approval in the seat 专题 chat (verbatim: 「同意你的全部建议」, in response to the token-waste inventory that ranked AGENTS.md as the largest remaining lever after os-dev.md).\n\n## Measured baseline\n\n`AGENTS.md`: **1,050 lines / 84,665 chars ≈ ~20k tokens** — read in full by dev agents directed to it, per session. The same 2026-08-12 rulings apply (「只需要说原则,不需要写细节」;「保留 issue id没有意义」).\n\n## Scope — same three-way sorting rule as the SKILL.md / os-dev.md rewrites\n\n1. **Mechanize ⇒ one principle line**: everything the hooks/gates already enforce.\n2. **Delete**: incident narratives and procedural walkthroughs; lessons distilled in place (failure mode + discipline + boundary), no issue-ID citations; maintainer rulings keep date + verbatim quote.\n3. **Keep as data**: operational lookups (dev-stack commands, PR-flow steps that are commands rather than prose).\n\nNo-silent-semantic-loss red line applies: Prime Directives survive whole; a dropped-with-rationale list in the PR body for line-by-line review.\n\n## Cautions\n\n- **AGENTS.md is a human-facing document too** (contributors read it, not only agents) — the rewrite must stay readable as the repo's source of truth, not become agent-telegraphese; where human onboarding narrative genuinely helps, it may survive the sort.\n- Conflict rule to preserve verbatim: pm-dispatch SKILL defers to AGENTS.md (「AGENTS.md wins」) — the rewrite must not invert or blur that.\n- CLAUDE.md's four inlined rules mirror AGENTS.md sections — keep the mirror consistent in the same PR.\n- Treated as ADR-class conservatively (repo-wide agent governance): draft PR, human merge.\n- Dispatch `model: claude-fable-5` (instruction-architecture card; seat tiering decision).\n- Extend the `check:pm-skill-id-lint` scan set to AGENTS.md in the same PR (with a legacy exact-count waiver if the two PRs need order independence — the pattern from the os-dev rewrite)."
+}

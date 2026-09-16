@@ -1,0 +1,36 @@
+{
+  "number": 7733,
+  "kind": "issue",
+  "title": "email-template-render (c): a runtime email_template write (PUT /meta) never materializes without a restart — the live subscription callback never fires",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:services",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "huangyiirene"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T12:24:25Z",
+  "updated_at": "2026-08-12T02:08:08Z",
+  "closed_at": "2026-08-12T02:08:08Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7733",
+  "body": "## Symptom\n\n`PUT /api/v1/meta/email_template/:name` returns 200 and logs `[Registry] Registered email_template`, but the row never reaches `sys_email_template`. Neither of the subscription's own log lines fires — 0 occurrences of \"materialized from a runtime write\", 0 of \"runtime email-template sync failed\" — even though the boot line \"subscribed to email_template metadata changes\" is present. Decisive control: restarting on the same DB materializes it immediately (`{seeded:1, skipped:1}`), so the bridge itself works and only the **live event path** is dead.\n\n## Root cause\n\nNot fully located by the run. The callback registered at `packages/plugins/plugin-email/src/email-plugin.ts` (~line 968) via `metadataService.subscribe('email_template', ...)` never runs on the PUT /meta path, so the `upsertDeclaredEmailTemplate` write inside it — and its two log lines (~lines 983/986) — never execute. The subscription registers without error (its boot log at ~line 991 prints), so the gap is upstream of the callback: the metadata service does not deliver an `added`/`changed` event for the `email_template` namespace on the runtime-write path that the plugin's own comment names (\"Studio saves / PUT /meta land as added/changed events\"). The declared-bootstrap and restart paths handle the item fine.\n\nStale-premise check: `email-plugin.ts` has zero diff between the `92f26f75` pin and `origin/main` — not fixed upstream.\n\n## Reproduction\n\n1. Boot with plugin-email; confirm \"subscribed to email_template metadata changes\" in the log.\n2. `PUT /api/v1/meta/email_template/:name` with a valid template body; observe 200 and `[Registry] Registered email_template`.\n3. Query `sys_email_template` for the name.\n\nExpected: the row is materialized and a \"materialized from a runtime write\" line is logged. Actual: no row, neither callback log line fires; a restart on the same DB then materializes it.\n\n## Source\n\nExtracted from the QA run objectstack-ai/objectstack#7690 (framework 92f26f75, console 09987b680)."
+}

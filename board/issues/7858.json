@@ -1,0 +1,35 @@
+{
+  "number": 7858,
+  "kind": "issue",
+  "title": "plugin-sharing lowers `__readScope` own/unit to an `owner_id` predicate on federated objects, where `owner_id` is a phantom column",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T21:05:20Z",
+  "updated_at": "2026-08-12T17:33:03Z",
+  "closed_at": "2026-08-12T17:31:47Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7858",
+  "body": "Found while measuring #7835 (PR for that card fixes the tenant half only). Filed unassigned; the fix is in `@objectstack/plugin-sharing`, which was outside #7835's cleared file surface — that card's dev reported and stopped rather than patching another lane.\n\n## Measured, on a real boot\n\nShowcase stack booted through `@objectstack/verify` at `origin/main` @ `b54aaab`. A second federated object was registered against the same remote SQLite table as `showcase_ext_customer`, differing only in that it carries **no** ADR-0090 D1 grandfather stamp — i.e. it takes the secure-default OWD (`private`), which is the exact case #7835's body names as unmeasured:\n\n```\nmeasure_ext_nostamp  external={\"remoteName\":\"customers\"}  sharingModel=undefined\nmeasure_ext_nostamp registered fields =\n  organization_id, created_at, created_by, updated_at, updated_by,\n  owner_id, owning_business_unit_id, name, email, region\n\nsharing.buildReadFilter(measure_ext_nostamp, __readScope='own')  = {\"owner_id\":\"usr_member_1\"}\nsharing.buildReadFilter(measure_ext_nostamp, __readScope='unit') = {\"owner_id\":\"usr_member_1\"}\nsharing.buildReadFilter(measure_ext_nostamp, __readScope='org')  = null\n\nsharing.buildReadFilter(showcase_ext_customer, __readScope='own')  = null   (grandfathered, public_read_write)\n```\n\nThe remote `customers` table has four columns — `name`, `email`, `region`, `lifetime_value` — and none of the seven platform anchors above.\n\n## Why it happens\n\n`SharingService.buildReadFilter` (`packages/plugins/plugin-sharing/src/sharing-service.ts`) gates on two facts and both are answered wrongly for a federated object:\n\n1. `effectiveSharingModel(schema) === 'private'` — true by secure default for any federated object without the grandfather stamp;\n2. `hasOwnerField(schema)` — true, because the ObjectQL registry injects `owner_id` into every non-opted-out object, federated ones included, while `Engine.syncObjectSchema` returns early for `external != null` and issues no DDL. The column exists in the registry and in no store.\n\nIt then AND-composes `owner_id = caller` (or the DEPTH-widened `$in`) onto a read whose backing table has no `owner_id`. `buildWriteFilter` reads `__writeScope` through the same two gates.\n\nThe scope label itself is stamped by plugin-security (`security-plugin.ts` — `sc.__readScope = ...`), but that is a property of the caller's grant, not of the storage; the predicate that names a column is built here, so this is where the check belongs.\n\n## Impact — same dialect split as #7738 / #7835\n\nOn SQLite the unresolvable identifier degrades to a string literal, so the comparison is constant-false: **0 rows, no error, HTTP 200**. Postgres and MySQL raise `column \"owner_id\" does not exist`. Either way a federated object under the secure-default OWD is unreadable by any principal whose read scope is narrower than `org`, and nothing reports why.\n\nLatency to a user hitting this: no shipped example app has a non-grandfathered federated object today (both showcase ones carry `sharingModel: 'public_read_write'`), so this is currently reachable only by an app author who declares one — which the secure default makes the *normal* thing to do, since it requires writing nothing.\n\n## Root cause, one layer further down\n\nBoth this and #7835 are consumers of the same producer: `applySystemFields` (`packages/objectql/src/registry.ts`) injects `organization_id`, `owner_id`, `owning_business_unit_id` and the audit `*_by` lookups into federated objects the platform provisions no storage for. Three fixes now exist at three consumers — the engine withholding `DriverOptions.tenantId` (#7738 / PR #7833), plugin-security's Layer 0 (#7835), and this one — each re-deriving \"that column is not really there\".\n\nA registry-level decision (do not inject anchors into an object whose storage the platform does not own, or mark them so consumers can tell) would subsume all three. That is a larger change with a wide blast radius — the `/meta` read path, Studio forms, the ADR-0087 declaration-parity ratchet — and is offered here as context rather than as this card's scope. Worth a dedicated architectural card if the platform wants one answer instead of three.\n\n## Suggested fix for THIS card\n\nGive `buildReadFilter` / `buildWriteFilter` the same provenance test #7835's PR introduced for the tenant anchor: an `owner_id` that is identically the shipped `OWNER_FIELD_DEF` on an `external` object is not a real owner column, so ownership scoping contributes nothing. A federated object that DECLARES a real remote owner column keeps its scoping, and every local object is untouched.\n\n## Related\n\n- #7835 — the tenant half, fixed on the plugin-security layer.\n- #7738 / PR #7833 — the engine half.\n- #7737 — boot ordering; its symptom turned out to be produced by #7738.\n"
+}

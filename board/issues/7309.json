@@ -1,0 +1,34 @@
+{
+  "number": 7309,
+  "kind": "issue",
+  "title": "platform-objects: 16 more actions declare both `confirmText` and `params`, so one click opens two sequential dialogs (same shape as #7278)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-10T06:17:27Z",
+  "updated_at": "2026-08-11T20:09:45Z",
+  "closed_at": "2026-08-11T20:09:45Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7309",
+  "body": "Out-of-scope finding from #7278 (which is scoped to the two `plugin-approvals` actions). Filed per PD #10 — **unassigned, ungraded**.\n\n## Fact\n\nThe shared console action runner chains confirmation **then** param collection, both awaited (objectui `packages/core/src/actions/ActionRunner.ts`, the `confirmText` block immediately followed by the `params` block). Any action declaring both keys therefore opens two dialogs for one click, and nothing is sent until the second.\n\n#7278 names two such actions in `plugin-approvals`. A precise scan of `origin/main` @ `b51a09046` (brace-depth block parse over every non-test `*.ts`, requiring `confirmText` and `params: [` at the same nesting level inside one action object) finds **20 actions in total** — the two from #7278, plus **16 in `packages/platform-objects`** and **4 in the showcase example**:\n\n| file | actions |\n|---|---|\n| `packages/platform-objects/src/identity/sys-user.object.ts` | `ban_user`, `delete_my_account`, `disable_two_factor`, `generate_backup_codes` |\n| `packages/platform-objects/src/identity/sys-oauth-application.object.ts` | `enable_oauth_application`, `disable_oauth_application`, `rotate_client_secret`, `delete_oauth_application` |\n| `packages/platform-objects/src/identity/sys-two-factor.object.ts` | `disable_two_factor`, `regenerate_backup_codes` |\n| `packages/platform-objects/src/identity/sys-account.object.ts` | `unlink_account` |\n| `packages/platform-objects/src/identity/sys-organization.object.ts` | `change_slug` |\n| `packages/platform-objects/src/identity/sys-sso-provider.object.ts` | `delete_sso_provider` |\n| `packages/platform-objects/src/identity/sys-team-member.object.ts` | `remove_team_member` |\n| `examples/app-showcase/src/ui/views/project.view.ts` | `set_labels`, `assign_team`, `reassign_account`, `reschedule` |\n| `packages/plugins/plugin-approvals/src/sys-approval-request.object.ts` | `approval_reject`, `approval_recall` (already #7278) |\n\nThese are live console surfaces, not dormant metadata: e.g. `sys_user.ban_user` is `locations: ['list_item', 'record_header']` with a `banReason` param, and `sys_oauth_application.rotate_client_secret` pairs a long finality warning with a `client_id` param **and** a `resultDialog`, i.e. three dialogs in a row for one click.\n\n## Why this is filed separately from #7278\n\n#7278's claim scopes it to `sys-approval-request.object.ts` plus tests in that package, and its triage ruling is written for those two actions. The 16 platform-objects occurrences are a different package and a different file surface, so sweeping them inside #7278 would breach that scope. They are, however, the same defect and want the same ruling.\n\n## Blocker cleared 2026-08-11 — this card is READY\n\n**#7278 closed 2026-08-11T07:13Z** via PR #7592 (*\"one decision, one dialog — carry reject/recall confirm questions on `description`\"*), so both conditions this card was waiting on are satisfied:\n\n1. **The direction is ruled and shipped.** #7278 took option 1 — drop `confirmText`, carry the question as the param dialog's `description`. This card follows it.\n2. **The producer-side slot now exists.** The measurement below recorded that `ActionSchema` had no `description` key, so the ruling was unimplementable when this card was filed. #7367 made `description` authorable and #7278 shipped on it, which closes that gap.\n\nReturned to `pm:queue` by the `domain:metadata` seat's unlock sweep. *(Housekeeping: this heading previously kept the literal blocker token in a struck-through form. That was a mistake — selection sweeps grep for the token, and strikethrough does not remove it, so the card still read as blocked to the exact mechanism that is supposed to pick it up. The token is now gone; the history is preserved in this section's prose and in the edit history.)*\n\nNote it still **blocks #7428** (the authoring-time guard on the `confirmText` + `params` pair), which cannot ship until this card drives the in-repo census to zero. That gives this card a fan-out of 1 and makes it worth pulling forward rather than letting it sit.\n\n### The original measurement, kept for the record (superseded)\n\nMeasured on `b51a09046`, before `description` was authorable:\n\n```text\nActionSchema: confirmText+params (today)  => success=true\nActionSchema: action.description          => success=false  unrecognized_keys: `description`\nTranslation:  _actions.{action}.confirmText => success=true\nTranslation:  _actions.{action}.description => success=false unrecognized_keys: `description`\n```\n\nWhoever picks this up should **re-run that probe on current `main` rather than trusting this paragraph** — including the *translation* node, which is a separate strict schema from `ActionSchema` and had the same gap. If the translation side is still strict without `description`, the 16 sites cannot carry translated confirm questions and that is a fork to report, not to work around.\n\n## Dedup\n\nSearched open issues for `confirmText params dialog` and for `action description param dialog slot`: only #7278 and the PM triage Routine. No twin.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_015fkdTyGmMD5s8ZtEifvuGy)_"
+}

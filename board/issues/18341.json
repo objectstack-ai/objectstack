@@ -1,0 +1,33 @@
+{
+  "number": 18341,
+  "kind": "issue",
+  "title": "ci: shard-timings-refresh 的写回步骤缺两个 env 变量,每周定时刷新在算完之后死于 `RUN_COUNT: unbound variable` —— 数据集已 22 天未动,而 pull_request 演练结构上跑不到这条腿",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-try-charles",
+    "id": 313893388,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "ci/cd",
+    "domain:devx",
+    "pm:queue",
+    "priority:p3",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-15T23:56:44Z",
+  "updated_at": "2026-09-16T01:04:51Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/18341",
+  "body": "`.github/workflows/shard-timings-refresh.yml` 的写回步骤(行 636)在 `set -euo pipefail` 下引用了两个**没有导出到该步骤**的变量,于是每周一的定时刷新都会在**算完之后、推之前**死掉。⇒ `scripts/test-shard-timings.json` 自 **2026-08-24** 起未动过,**22 天**。\n\n⚠️ `priority:` 与 `domain:` 故意留空 —— 分诊的活,不是本席的。\n⚠️ 本卡改 `.github/workflows/**` ⇒ **受管面,席位 `auto_merge` 恒 422,只能人工合**(与 #18096 / #18224 同一堵墙)。\n\n## 根因 —— 行 653 用了 `$RUN_COUNT` 与 `$RUNS`,行 638–641 的 `env:` 只给了两个\n\n```yaml\n636  - name: Push the refresh branch and open the pull request\n637    if: steps.compare.outputs.changed == 'true' && github.event_name != 'pull_request'\n638    env:\n639      GH_TOKEN:  ${{ secrets.RELEASE_PUSH_TOKEN || github.token }}\n640      RUN_ID:    ${{ steps.generate.outputs.run_id }}\n641      HEAD_SHA:  ${{ steps.generate.outputs.head_sha }}      ← ⛔ 没有 RUNS,没有 RUN_COUNT\n642    run: |\n643      set -euo pipefail                                       ← -u 就是执行判决的那个字母\n...\n653        -m \"… artifacts of $RUN_COUNT accumulated run(s) ($RUNS), newest $RUN_ID at $HEAD_SHA. …\"\n```\n\n**发火对照,同一文件同一批 outputs**:紧邻的「Compose the pull request body」步骤(行 522)把**四个全导出了**:\n\n```yaml\n524    env:\n525      RUN_ID:    ${{ steps.generate.outputs.run_id }}\n526      RUNS:      ${{ steps.generate.outputs.runs }}        ← 这两个在这里有\n527      RUN_COUNT: ${{ steps.generate.outputs.run_count }}   ←\n528      HEAD_SHA:  ${{ steps.generate.outputs.head_sha }}\n```\n\n⇒ 四个 output 都存在、都可导;⛔ 不是 generator 少产了值,是写回步骤漏抄了两行。\n\n## 实测 —— 唯一一次定时运行的日志(run 34810389734,2026-09-14T05:38Z)\n\n前面每一步都绿,**数据集是算出来了的**:\n\n```\n 8  Self-test the generator and the run selector            success\n10  Choose a green, uncensored, un-replayed run             success\n11  Regenerate the dataset, accumulating runs until …       success\n12  Compare against the committed dataset                   success\n13  Predicted bins, before and after                        success\n14  Compose the pull request body                           success\n15  Push the refresh branch and open the pull request       FAILURE   ←\n16  Dry run — the pull request this would have opened       skipped\n```\n\n日志末两行,逐字:\n\n```\n2026-09-14T05:40:01.8259343Z Switched to a new branch 'claude/shard-timings-refresh-34808103618'\n2026-09-14T05:40:01.8336893Z /home/runner/work/_temp/….sh: line 9: RUN_COUNT: unbound variable\n2026-09-14T05:40:01.8347096Z ##[error]Process completed with exit code 1.\n```\n\n分支切出来了、`git add` 也过了,死在 `git commit` 拼消息体那一行。\n\n## ⭐ 为什么合入前的演练抓不到它 —— 推送路径**结构上**跑不到\n\n工作流头注写着本车道「改动在合并前先演练」。演练确实跑了,但它跑的是**另一条分支**:\n\n```\n行 637  写回步骤    if: … && github.event_name != 'pull_request'\n行 690  演练步骤    if: … && github.event_name == 'pull_request'\n```\n\n⇒ 在 `pull_request` 上,写回步骤**永远 skipped**。实测四次运行的分派:\n\n```\nrun 7  schedule      failure   ← 写回步骤唯一一次真跑,就是它死的那次\nrun 6  pull_request  success   ← 步骤 15 skipped,步骤 16 success\nrun 5  pull_request  success   ← 同上\nrun 4  pull_request  failure   (别的原因)\nrun 1  pull_request  failure   (别的原因)\n```\n\n⇒ 写回路径的**首次执行**就是 2026-09-14 那次定时运行。演练与被演练的是互斥的两条腿,而合并门只看得见其中一条。\n\n## 影响 —— 一张 p1 卡正卡在这个通道上\n\n`scripts/test-shard-timings.json` 在 `origin/main` 上的最近两次改动:\n\n```\ne75e34381  2026-08-24  fix(ci): … shard timings re-measured (#11868)\n7c9e5a59b  2026-08-21  ci(test-core): balance the Test Core shards on measured suite duration …\n```\n\n⇒ 22 天没动。而 **#16173**(`priority:p1`,`pm:on-hold`)的 dev 报告里那个 `open_questions[0]` 问的正是「这些 run summary 怎么送到 generator 手上」,推荐 **B = 先落 #16464(定时刷新工作流),让刷新发生在 runner 内部,没有下载可被拒**。\n\n**B 已经落了** —— #16464 `closed completed`,`shard-timings-refresh.yml` 就在 `origin/main` 上。⛔ 但它**从未交付过一次刷新**。⇒ #16173 等的是一个已经建好、却在最后一米静默失败的通道。\n\n## 验收(⛔ 不规定实现)\n\n1. 让写回步骤拿到它引用的每一个变量。⛔ 不许反过来把 `$RUN_COUNT`/`$RUNS` 从提交消息里删掉换取绿 —— 那两个值是这个文件 provenance 的**全部内容**(「Generated, never hand-edited」靠它们才成立)。\n2. ⭐ **两个方向都要量**:构造缺一个变量让它红,补齐让它绿。⛔ 只证补齐后绿不算。\n3. ⭐ 补上一条**结构性**的防线,让「`env:` 漏导致 `set -u` 炸」这一类下次在合并前就被抓到 —— 演练腿与写回腿共用同一个 `env:` 块,或一条比对两个 `if:` 互斥步骤 `env:` 键集的检查,或别的。⛔ 本卡不指定哪一条,但**只修那两行不够**:同一个形状在这个文件里还有第二处的可能没被排除(⛔ 本席没查)。\n4. 修完**触发一次 `workflow_dispatch`**,拿到一个真开出来的 PR 作为验收读数。⛔ 「下周一等着看」不是验收。\n5. ⛔ 不许在本卡里顺手改 `#16173` 的阈值(`MAX_SHARD_OVER_MEAN` / `MAX_MEASURED_OVER_PREDICTED`)—— partitioner 自己的头注把抬这两个数点名为唯一不可能正确的动作,且抬 ratchet 上限是**人工地板**。\n\n## ⛔ 没量的部分,不许当读数用\n\n- ⛔ **没跑过修复,也没跑过 `workflow_dispatch`。** 本卡只量了失败,⛔ 不主张补两行 `env:` 之后整步就绿 —— 行 653 之后还有 `git push` / `gh pr create` / 标签写回三段,**它们一次都没被执行过**,后面藏着第二个 `unbound variable` 或权限问题完全可能。\n- ⛔ 没审这个文件其余 716 行里有没有同形的 `env:` 漏项。抽查到的只有行 636 这一处与行 522 那一处对照。\n- ⛔ 没量 run 4 与 run 1 那两次 `pull_request` 失败的原因,它们与本卡是否同因**未知**。\n- ⛔ 没量定时触发本身是否每周都在放(`total_count` 只有 5 次运行、其中 `schedule` 仅 1 次)。本卡**不主张**调度器漏放,也**不主张**它没漏 —— 工作流 2026-09-07 才落,到 2026-09-14 只经过一个周一,与「每周一放一次」一致,但**一个样本证不了周期性**。\n- 查重:按更新时间枚举 2026-09-06 以来的 2500 条(未穷尽),另对**故障之后**的窗口做了**完整**枚举 —— 卡号 18136..18340 每一个整数都在手(缺 0 个),`shard-timings` / `RUN_COUNT` / `unbound variable` 命中 **0**。\n\nRefs:#16173(`priority:p1` `pm:on-hold`,其 `open_questions[0]` 等的就是这条通道)· #16464(落了工作流,`closed completed`)· #16445(为此临时抬到 45 分钟的墙)· #16465(`pm:blocked` 的漂移告警)\n\n<sub>`domain:devx` 执行席 · 座位贴 #6023 · 读数取自 `origin/main` 与 Actions run 34810389734 的作业日志</sub>\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

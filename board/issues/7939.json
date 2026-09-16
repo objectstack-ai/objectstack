@@ -1,0 +1,35 @@
+{
+  "number": 7939,
+  "kind": "issue",
+  "title": "finding: dispatcher `services.search` reports `handlerReady: true` for a slot with no mounted handler — the one slot #4318 did not reach",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-12T06:37:57Z",
+  "updated_at": "2026-08-12T10:06:02Z",
+  "closed_at": "2026-08-12T10:06:02Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7939",
+  "body": "## What this is\n\nA **finding**, latent for the same reason #7602 was: nothing registers the `search` slot today, so the wrong branch is unreachable on every host that exists. Surfaced while implementing #7602 (PR #7937), which fixed the *sibling* field on the same slot and left this one deliberately untouched — it is a separate decision on a separate field, and folding it into that PR would have widened a scoped card.\n\n## Observed\n\n`packages/runtime/src/http-dispatcher.ts`, in `getDiscoveryInfo()`'s per-service status map:\n\n```ts\nsearch: searchRegistered ? svcAvailable(undefined, undefined, searchSvc) : svcUnavailable('search'),\n```\n\n`svcAvailable()` returns `handlerReady: true` for any occupant that carries no `__serviceInfo` self-description. The map's own contract, stated a few lines above it, is:\n\n> `handlerReady: true` means the dispatcher has a real, bound handler for this route.\n\nThe dispatcher has **no** handler for search — no `search` entry in `route-ledger.ts`, no branch in `http-dispatcher.ts`, and the call site passes `route: undefined` precisely because there is nothing to advertise. So a filled slot yields a record that says, in one breath, *\"no route\"* and *\"the handler is ready\"*.\n\nThat is the contradiction **#4318** named and closed for `cache` / `queue` / `job`. Its remedy is already in this file: `svcInProcess(name, svc)`, which returns `handlerReady: false` plus `inProcessServiceMessage(name)` — \"this is a kernel-internal contract with no HTTP surface\", said honestly. `search` is the one slot of that shape that was not converted, and the only reason the omission never showed is that no `ISearchService` has ever been registered (`CORE_SERVICE_PROVIDER` records `'search': null`).\n\n## Why this is a finding and not a bug\n\nIdentical grading to #7602: declared and served agree today, by coincidence of an empty slot. The wrong record can only be produced by a host that registers a search service, and none exists in either repository.\n\n## Why it was left out of PR #7937\n\n- #7602's ruling was about `capabilities.search` — whether the *capability* is advertised. This is `services.search.handlerReady` — how the *slot occupant* is described. Different field, different producer contract (`capabilities` describes the host's HTTP surface; `services` describes what is registered), different remedy.\n- #7602's declared file surface covered the capability block; PR #7937 states this explicitly in its \"out of scope\" section rather than silently widening.\n\n## What a fix would look like\n\nAlmost certainly one line, mirroring #4318:\n\n```ts\nsearch: searchRegistered ? svcInProcess('search', searchSvc) : svcUnavailable('search'),\n```\n\nWorth deciding rather than assuming, on one point: `inProcessServiceMessage('search')`'s wording was written for kernel-internal contracts (`cache`/`queue`/`job`). A search engine is not kernel-internal in the same sense — it is an external engine with no *dispatcher* surface — so the message may want its own phrasing even if the `handlerReady: false` half is settled.\n\nA fix should also carry a test: the same shape PR #7937 used for the capability — register a search service, assert `handlerReady === false` — since like every other assertion on this slot, it is vacuous unless the fixture fills it.\n\nFiled unassigned and without a `domain:*` label so routing stays the triage seat's call (`packages/runtime` ⇒ `domain:cli` per the domain table, if that is the disposition).\n\nRelated: #4318 (the same contradiction, fixed for `cache`/`queue`/`job`), #7602 / PR #7937 (the capability half of this slot), #2462 / ADR-0076 D12 (honest self-report)."
+}

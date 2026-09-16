@@ -1,0 +1,35 @@
+{
+  "number": 7428,
+  "kind": "issue",
+  "title": "spec: guard the `confirmText` + `params` PAIR at authoring time, once the 20 shipped sites have migrated to `action.description`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-10T10:56:38Z",
+  "updated_at": "2026-08-12T12:59:04Z",
+  "closed_at": "2026-08-12T12:59:04Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7428",
+  "body": "Follow-up split out of #7367 item 5, filed with the census measured rather than folded into that PR. Filed unassigned.\n\n`Blocked-by:` #7278\n`Blocked-by:` #7309\n\n## The structural fix\n\nAn action that declares **both** `confirmText` and a non-empty `params` shows the user two sequential dialogs for one decision — the confirm, then the param prompt. That is the defect class #7278 and #7309 are migrating away from, and the maintainer's 2026-08-10 ruling on #7278 gives the correct shape: carry the confirm question in `description` (now authorable, #7367) so one decision is one dialog.\n\nMigrating the sites fixes today's instances. It does not stop the next one being written. The structural version is an authoring-time guard on the PAIR — the thing that would have prevented all 20 rather than repairing them — which is why #7367's item 5 raised it. This card carries it.\n\n## Why it is NOT in #7367, and why it is blocked rather than ready\n\nCensused across the repo on `origin/main` @ `18ff1dab1`: **20 shipped sites** declare `confirmText` beside a non-empty `params`. (#7309 counts 16 in `platform-objects`; the four `examples/app-showcase` actions below are additional, and `plugin-approvals` contributes the two from #7278.)\n\n| File | Line | Action |\n|---|---|---|\n| `examples/app-showcase/src/ui/views/project.view.ts` | 50 | `set_labels` |\n| `examples/app-showcase/src/ui/views/project.view.ts` | 72 | `assign_team` |\n| `examples/app-showcase/src/ui/views/project.view.ts` | 89 | `reassign_account` |\n| `examples/app-showcase/src/ui/views/project.view.ts` | 105 | `reschedule` |\n| `packages/platform-objects/src/identity/sys-account.object.ts` | 84 | `unlink_account` |\n| `packages/platform-objects/src/identity/sys-oauth-application.object.ts` | 69 | `disable_oauth_application` |\n| `packages/platform-objects/src/identity/sys-oauth-application.object.ts` | 89 | `enable_oauth_application` |\n| `packages/platform-objects/src/identity/sys-oauth-application.object.ts` | 141 | `rotate_client_secret` |\n| `packages/platform-objects/src/identity/sys-oauth-application.object.ts` | 166 | `delete_oauth_application` |\n| `packages/platform-objects/src/identity/sys-organization.object.ts` | 151 | `change_slug` |\n| `packages/platform-objects/src/identity/sys-sso-provider.object.ts` | 198 | `delete_sso_provider` |\n| `packages/platform-objects/src/identity/sys-team-member.object.ts` | 70 | `remove_team_member` |\n| `packages/platform-objects/src/identity/sys-two-factor.object.ts` | 93 | `disable_two_factor` |\n| `packages/platform-objects/src/identity/sys-two-factor.object.ts` | 109 | `regenerate_backup_codes` |\n| `packages/platform-objects/src/identity/sys-user.object.ts` | 99 | `ban_user` |\n| `packages/platform-objects/src/identity/sys-user.object.ts` | 364 | `delete_my_account` |\n| `packages/platform-objects/src/identity/sys-user.object.ts` | 403 | `disable_two_factor` |\n| `packages/platform-objects/src/identity/sys-user.object.ts` | 420 | `generate_backup_codes` |\n| `packages/plugins/plugin-approvals/src/sys-approval-request.object.ts` | 291 | `approval_reject` |\n| `packages/plugins/plugin-approvals/src/sys-approval-request.object.ts` | 387 | `approval_recall` |\n\nConsequences, which is the whole reason this is a separate card:\n\n- **A refusal shipped today breaks 20 shipped declarations** before their migration, including the platform's own objects — every project fails to build on metadata it does not own.\n- **A warn-severity arm does not escape this either.** #7367's dispatch allowed a warn arm to ride *if* it caused zero shipped-metadata breakage. It does not: it would fire on all 20, 16 of them `platform-objects`, i.e. warnings on every build of an untouched project. That is the permanently-noisy-check shape — a check nobody reads.\n\nSo the guard is correct and its timing is not. It becomes shippable — refuse or warn — once #7278 and #7309 have migrated their sites and the census reaches zero. Standalone rather than a sub-issue because it merely *depends* on those cards; the fix does not fall inside either one's completion scope.\n\n## Design questions left open for whoever picks this up\n\nNot decided here — they shape the authoring contract and deserve their own read:\n\n1. **Severity.** Refuse (a `.refine` on `ActionSchema`) vs a lint rule. A refusal is contract-first and declared = enforced; a lint rule is recoverable for third-party metadata already in the wild. The census reaching zero in-repo says nothing about third-party stacks.\n2. **Scope of the predicate.** Is `confirmText` + non-empty `params` *always* wrong, or is there a legitimate shape — e.g. a destructive action whose params are all optional? Worth measuring against the migrated sites before encoding, rather than presuming.\n3. **Whether the guard should also require `description`** when `params` is present, or only forbid the pair. The ruling's \"one condition, one wording\" argues the former; that is a strictly bigger authoring demand and should be measured.\n\n## Verification note for the eventual fix\n\nThe census above was produced by a brace-balanced scan for `confirmText` inside an object literal carrying a non-empty `params:` array, excluding `node_modules`, `dist` and test files. Re-run it as the acceptance check: the guard is ready to ship when it returns 0.\n\nRefs: #7367 (the `description` key this depends on), #7278 (ruling + the two approvals actions), #7309 (the platform-objects census), objectui#3126 (renderer-side precedent).\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01PiRUoQkTSBBmpyXBY3cVn2)_\n"
+}

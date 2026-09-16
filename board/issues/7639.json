@@ -1,0 +1,35 @@
+{
+  "number": 7639,
+  "kind": "issue",
+  "title": "finding: a suspended flow run's variables are unreadable on run-detail — the paused `recordLog` omits them while the continuation keeps them",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "huangyiirene"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T09:46:41Z",
+  "updated_at": "2026-08-12T03:16:18Z",
+  "closed_at": "2026-08-12T03:16:18Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7639",
+  "body": "Observation-class finding, filed unassigned with no `pm:queue` — for triage to grade. Split out of #7530 (PR #7638), where it was explicitly gated **out of scope** by the card and the triage seat; recorded here so it is not rediscovered a third time.\n\n## What happens\n\nWhile an automation run is **paused**, `GET /api/v1/automation/{flow}/runs/{runId}` carries **no `variables` key at all**. This is structural, not a data gap, and it is not a permissions or serialization issue — the value is simply never written to the record that read serves.\n\n`packages/services/service-automation/src/engine.ts` has two `status: 'paused'` `recordLog` call sites (the initial-execution suspend path and the resume-path suspend). Both pass `id` / `flowName` / `flowVersion` / `startedAt` / `durationMs` / `trigger` / `steps` — and **neither passes `variables` or `output`**. The `completed` and `failed` call sites in the same file do pass `output`.\n\nThe information is not lost: a few lines above the second suspend site, the suspended-run bookkeeping captures `variables: Object.fromEntries(variables)` into the continuation. So the snapshot exists in the engine's own hands at exactly the moment the paused log is written; it just never reaches the surface a caller can read. There is no side door either.\n\n## Why it is worth a card\n\n**Observability of a stuck run.** A run paused at an approval or a screen is precisely the state an operator most often needs to inspect — \"what did the previous node actually produce, and why did the next one route the way it did?\" Today the answer is not readable from the product at all; it can only be inferred backwards from whatever the next node happened to resolve.\n\nThe QA ledger is where this surfaced concretely. `approvals.dynamic-approver-routing` prescribed reading the stage-1 decision outputs off the run's variables snapshot, and the full-area run #7517 could not do it — the item scored PARTIAL for the oracle alone, not for any product misbehaviour. PR #7638 re-anchored that clause on a functional oracle (stage-2 `pending_approvers` cardinality and order across a 1-pick and a 2-pick run), which is a sound proxy and unblocks the item — but it is a proxy. If run-detail ever carried the paused snapshot, the clause could assert the thing itself, and the `knownGaps` entry PR #7638 adds says so and points here.\n\n## Scope note — deliberately not implemented\n\nThis is a **product-side surface change**, not checklist authoring: it would mean deciding what a paused run's detail response exposes, and a variables snapshot can carry business data, so its shape and access control are a real design call rather than a one-line addition to a `recordLog` payload. #7530 was a docs-only authoring pass and the card gated this out explicitly; guessing the surface there would have been exactly the wrong place to make that decision.\n\n## Evidence\n\nMeasured 2026-08-11 against `origin/main` @ `8c20f75`, reading `packages/services/service-automation/src/engine.ts` (the two `status: 'paused'` `recordLog` calls) and corroborated by the live behaviour recorded in the #7517 run record.\n\n## Source\n\nSplit out of objectstack-ai/objectstack#7530 · evidence from the QA run objectstack-ai/objectstack#7517.\n"
+}

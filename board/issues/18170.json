@@ -10,16 +10,20 @@
     "id": 328766734,
     "type": "User"
   },
-  "labels": [],
+  "labels": [
+    "domain:cli",
+    "pm:queue",
+    "priority:p2"
+  ],
   "assignees": [],
   "milestone": null,
-  "type": null,
+  "type": "Bug",
   "created_at": "2026-09-14T10:07:24Z",
-  "updated_at": "2026-09-14T10:07:24Z",
+  "updated_at": "2026-09-16T01:09:33Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 0,
+  "comments": 1,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/18170",
   "body": "## Finding (class c — metadata the build silently drops on exit 0)\n\n`objectstack build` collects in-product package docs (ADR-0046) from exactly `path.join(dirname(configPath), 'src', 'docs')` and no other path. Measured on `objectstack-ai/hotcrm` at `590b095` (pin `@objectstack/*` 17.4.0), unmodified except for the probe:\n\n1. `git mv src/docs src/sales/docs` (the ADR-0130 layout, where every top-level directory under `src/` is a package).\n2. `pnpm build` → **exit 0**, the usual `Collecting package docs` line is printed.\n3. `dist/objectstack.json` has **no `docs` key** — the four package docs are gone, and nothing said so.\n\nThe hazard is the silence, not the fixed path: an exit-0 build with the usual progress line is the shape every reader trusts, and the artifact loses a whole collection. hotcrm keeps `src/docs/` at the top of `src/` for now and records the exception in its `AGENTS.md` (objectstack-ai/hotcrm#1910), because compensating for it in the app (walking the tree and declaring `docs:` inline) would be platform tooling the app's charter forbids.\n\n## Ask\n\nEither of:\n\n- read package docs from each package directory under an ADR-0130 layout (`src/<pkg>/docs/`, or a `docs` key on the package's `defineStack` input), so a module can ship its own docs; or, at minimum,\n- **fail or warn loudly** when a configured/expected docs directory is absent — an artifact that had `docs[]` on the previous build and has none now is a diagnostic, not a green line.\n\nDedupe words: package docs, src/docs, ADR-0046, collect-docs, multi-package, docs[] silently dropped.\n\nRelated: objectstack-ai/hotcrm#1904 (the split epic), #18163 and #18164 (the two other gaps the same split surfaced)."

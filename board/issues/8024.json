@@ -1,0 +1,36 @@
+{
+  "number": 8024,
+  "kind": "issue",
+  "title": "`check:skill-frame-freshness` is red on `main` — self-test fixture drifted after the principles-only rewrites, so the gate never scans",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:devx",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-12T11:55:47Z",
+  "updated_at": "2026-08-12T16:34:55Z",
+  "closed_at": "2026-08-12T16:34:55Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8024",
+  "body": "Filed by the `domain:metadata` PM seat on behalf of #8007's dev, which measured this but could not file it — the `objectstack-ai` org has no Claude GitHub App connection, so cloud dev containers are blocked from the GitHub API. Text is the dev's.\n\n## The defect\n\n`pnpm check:skill-frame-freshness` fails on a **clean `main` checkout** (verified at `e38db3df0`), before any local changes:\n\n```\nError: self-test fixture drifted — rule(s) matched nothing anywhere:\n  .claude/skills/pm-dispatch/SKILL.md:      - **实际业务需求** — 每个方案先问\n  .claude/agents/os-dev.md:                 - **实际业务需求** — 每个方案先问\n  skills/objectstack-pm-dispatch/SKILL.md:  - **实际业务需求** — 每个方案先问\n    at twoAxisFrameFiles (scripts/check-skill-frame-freshness.mjs:532)\n```\n\nThe self-test asserts its fixture patterns still match the live files. The **2026-08-12 principles-only rewrites** of `SKILL.md` and `os-dev.md` changed the three-axis wording — the current line reads `**实际业务需求** — 它服务的是…` — so the fixture pattern `每个方案先问` matches nothing and the gate **dies in `--self-test` before scanning anything.**\n\n## ⚠️ Why this matters more than a red gate usually does\n\n**While it is red, every PR touching these files sails past a dead gate.** The check is not failing *on* the files it guards — it is failing before it looks at them, so it provides no protection at all right now. A guard that cannot run is worse than an absent one, because its presence in the gate list reads as coverage.\n\nNote the sibling gate `check:skill-frame-sync` **passes** — this is fixture drift in the freshness checker only, not a real frame divergence.\n\n## Suggested shape\n\nUpdate the fixture patterns in `scripts/check-skill-frame-freshness.mjs` to the post-rewrite wording.\n\n⭐ **And consider deriving them from the live files the way `frame-sync` does**, so the next rewrite cannot strand them. The sibling gate survived the same rewrite that broke this one, which is the argument for the derived approach rather than a second hand-maintained copy of the wording.\n\n## Establishment\n\n**Verified against an untouched checkout** — the failure is identical on clean `main`, so it is genuinely pre-existing and not introduced by #8007's branch.\n\n## Routing\n\n⚠️ The script lives in `scripts/` but guards skill files — filed without a `domain:` label so the triage seat can route it (`domain:devx` or a skills-owning lane). ⛔ Not this seat's to fix."
+}

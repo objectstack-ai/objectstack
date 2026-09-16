@@ -1,0 +1,34 @@
+{
+  "number": 7117,
+  "kind": "issue",
+  "title": "driver-memory's analytics `generateSql()` renders the LIKE family with NO wildcards, so the echoed statement is an EQUALITY the pipeline never ran",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "huangyiirene"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-09T17:41:47Z",
+  "updated_at": "2026-08-11T21:30:37Z",
+  "closed_at": "2026-08-11T21:30:37Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7117",
+  "body": "Found while implementing #6520 (`$icontains` on every JS evaluation face). Out of that card's scope — it is the `$contains` family, not `$icontains`, and it predates that work — so it is filed rather than fixed there.\n\n## Measured on `origin/main` @ `f5a9bc2f3`, by reading the source\n\n`MemoryAnalyticsService` has two exits for one normalized filter tree, and they disagree about what the LIKE family MEANS.\n\n**The mingo exit** (`query()`) builds a real containment pattern — `memory-analytics.ts`, `CUBE_OPERATOR_TO_MONGO_PREDICATE`:\n\n```ts\ncontains: ({ raw, substring }) => ({ $regex: substring(raw[0]) }),\n```\n\nwhere `substring` is the driver's own `filterSubstringPattern(value)` = `new RegExp(escapeRegex(value), 'i')` — a substring match.\n\n**The SQL exit** (`generateSql()`) emits the comparand as a bare literal, with no `%` anywhere (`memory-analytics.ts`, the WHERE builder):\n\n```ts\nconst sqlOp = this.operatorToSql(filter.operator);          // 'contains' -> 'LIKE'\nconst comparand = this.comparandsFor(cube, filter.member, filter.values)[0];\nwhereClauses.push(`${fieldPath} ${sqlOp} ${this.toSqlLiteral(comparand)}`);\n```\n\n`toSqlLiteral` only quotes and escapes quotes; it adds no wildcards. So `{ name: { $contains: 'acme' } }` echoes\n\n```sql\nWHERE name LIKE 'acme'\n```\n\nwhich is an **equality** (case-folded on SQLite, exact on Postgres), while `query()` returns every row *containing* `acme`.\n\n`notContains` has the mirror of the same bug via `NOT LIKE`.\n\n## Why this matters\n\nThis is the #5333 / #3650 class — \"a rendering that contradicts execution is worse than no rendering\" — reached through driver-memory's analytics face instead of `service-analytics`' echo. An author who runs the echoed statement to reproduce a chart gets a **narrower** row set than the chart, so the filter reads as broken in the opposite direction from #5333's widening. `service-analytics` has an enumerated regression test for exactly this property on its own three compilers (`objectql-echo-operator-coverage.test.ts`); driver-memory's analytics `generateSql()` has none, which is why this survived.\n\nNote the direction is wrong-rendering, not a permission bypass: this exit produces display SQL, not the executed query.\n\n## Scope\n\n- `contains` -> should render `LIKE '%v%'`\n- `notContains` -> `NOT LIKE '%v%'`\n- `startsWith` / `endsWith` are not in `operatorToSql`'s table at all, so they fall to its `|| '='` fallback and render as equality too — same defect, one step further along. That `|| '='` fallback is itself the silent-wrong-answer shape #5374 and #5345 removed from this file's sibling tables.\n- #6520 added an `icontains: 'LIKE'` row to that same table. It is consistent with its `contains` neighbour and therefore inherits this same missing-wildcard defect; it was added explicitly so the operator would not fall to the `= ` fallback, which would have been strictly worse. Fixing this issue fixes that row with the others.\n\nA fix should also consider whether the comparand needs LIKE-escaping here (`%` / `_` in an author's comparand), which `service-analytics`' `likePattern` already does for the compilers on that side.\n\n## Suggested check\n\nPin `generateSql()`'s WHERE against `query()`'s row set for each member of the LIKE family, the way `objectql-echo-operator-coverage.test.ts` pins the echo against execution — an assertion on the SQL string alone would not have caught the missing `%` either.\n"
+}

@@ -1,0 +1,37 @@
+{
+  "number": 7722,
+  "kind": "issue",
+  "title": "[security] Webhook HMAC signing secrets are persisted in cleartext on every `sys_http_delivery` row",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:services",
+    "pm:dispatched",
+    "security"
+  ],
+  "assignees": [
+    "huangyiirene"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T12:15:35Z",
+  "updated_at": "2026-08-11T20:07:49Z",
+  "closed_at": "2026-08-11T20:07:49Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7722",
+  "body": "## Impact\n\nThe shared secret that authenticates ObjectStack to a webhook receiver is stored **verbatim, per delivery attempt**, in a table readable over the ordinary data API. Anyone who can read `sys_http_delivery` recovers the signing key for **every subscriber** and can mint payloads the receiver accepts as genuine — the signature is the receiver's *only* proof of origin.\n\nAdmin-gated on this deployment, so this is defense-in-depth rather than privilege escalation. But the blast radius is **external**: it compromises the trust boundary at systems ObjectStack does not control, and rotating a leaked key means re-coordinating with every receiver operator.\n\n## Root cause (located)\n\n`sys_http_delivery` carries the secret as a plain column alongside `headers_json`; the outbox writer **persists it with the attempt** rather than resolving it at send time.\n\nThe platform already has the machinery to avoid this and uses it elsewhere: `sys_setting` stores a `sec_` handle with the ciphertext in `sys_secret` (aes-256-gcm). And the **same QA run proved the sibling datasource path gets it right** — an inline `secret` on `POST /api/v1/datasources` is split out server-side, and a byte-level scan of every table and column of the running DB found **no** occurrence of it.\n\nSo this is an **inconsistency between two sibling subsystems, not a missing capability** — which is what makes it tractable.\n\n## Reproduction\n\n1. Author a webhook subscriber with a signing secret and trigger a delivery.\n2. Read the delivery row over the ordinary data API as an admin: `GET /api/v1/data/sys_http_delivery`.\n3. The authored secret comes back verbatim on the attempt row.\n\nFound as an adjacent observation while verifying HMAC correctness: the runner recomputed `HMAC-SHA256(raw body, &lt;secret&gt;)` against the delivered `x-objectstack-signature` — **exact match, so signing itself is correct** — and then noticed the secret was readable from the delivery table.\n\n## Acceptance criteria\n\n- The signing secret is **not** recoverable from `sys_http_delivery` (or any delivery/outbox row) over the data API, for any persona.\n- Signing still works end-to-end: a delivered payload's `x-objectstack-signature` still verifies against the subscriber's secret, asserted by recomputing the HMAC over the raw body — not by asserting \"no error\".\n- A regression guard reads the delivery table directly after a real delivery and asserts the secret's bytes are absent (the byte-level-scan shape the datasource path already passes).\n\n## Suggested shape (not prescriptive)\n\nStore a **handle** rather than the value on the delivery row and resolve it at send time, matching the `sys_setting` / `sys_secret` split. Failing that, at minimum keep it off the delivery record entirely — it belongs to the **subscriber**, not to each attempt — and exclude the column from the data-API projection.\n\nWorth checking in the same pass whether any **other** outbox/delivery table copies a credential the same way.\n\n## Note on `target:<major>`\n\nNot applied here — that label has a single producer and the maintainer has not ruled on this card. Flagging the tension for that ruling rather than pre-empting it: this is **admin-gated** (the #7522 precedent for an admin-gated cleartext read was *not* boarded), but unlike #7522 its blast radius reaches **outside** the deployment, which is an argument for boarding it. Maintainer's call.\n\n## Provenance &amp; disclosure\n\nHeld back from the public run card #7690 pending disclosure handling (D1 precedent); the private write-up is `docs/qa/platform-checklist/FOLLOW-UPS.md` §1a entry **D12** (branch `claude/platform-test-checklist-ocwugl` @ `1ce13eb`). Filed publicly under the maintainer's standing instruction of 2026-08-11 (verbatim): 「有问题就立卡片」.\n\n## Source\n\nQA run objectstack-ai/objectstack#7690 (`webhook-lifecycle`, adjacent observation; framework `92f26f75`), private write-up FOLLOW-UPS.md §1a D12. The webhook item itself **passes** — signature computation, custom headers, per-attempt durability, timeout enforcement and the retry ladder were all proven correct; this finding does not change that verdict."
+}

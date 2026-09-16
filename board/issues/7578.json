@@ -1,0 +1,35 @@
+{
+  "number": 7578,
+  "kind": "issue",
+  "title": "[finding] `packages.ts:337` promises a wire-field rename that the objectui follow-up measured out — the comment is now a false pointer",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T05:51:19Z",
+  "updated_at": "2026-08-12T04:02:20Z",
+  "closed_at": "2026-08-12T04:02:20Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7578",
+  "body": "Observation-class finding, filed unassigned by the spec-surface PM seat (#6298, session `session_016R9de1FqP7NvwKvqXi92Gh`) while closing #6955. For triage to grade.\n\n## The fact\n\n`packages/runtime/src/domains/packages.ts:337` (framework `origin/main`) keeps the `publish-drafts` response's diagnostic field names `unhiddenApps` / `unhideError` deliberately, with the comment promising: *\"The rename rides the objectui follow-up card, together.\"*\n\nThat follow-up card was #6955, and its dev measured the rename **out** rather than in (OS-DEV-REPORT on #6955, 2026-08-11): the server still emits the old names (`packages.ts:419`, `:426`; the `metadata:reloaded` announce reads `unhiddenApps` at `:444`), and objectui reads **neither field anywhere** (zero grep hits repo-wide). Under the card's own \"rename in lockstep, or not at all\" rule, the resolution was *not at all* — PM-ratified as option A on #6955: a rename of a zero-reader diagnostic payload buys no capability (startup-scope discipline).\n\n## What is wrong now\n\nNothing at runtime. The defect is the comment itself: it promises a rename to a card that has closed without performing it, so the next reader of `packages.ts:337` is pointed at work that was measured out and will never arrive — the same false-pointer class as #7441 (a source comment contradicting a made decision).\n\n## The fix shape (one comment edit)\n\nReword `:337` to record the settled state: the old spellings are kept deliberately and permanently; the planned lockstep rename was resolved \"not at all\" on #6955 (zero consumers on either side of the wire); cite #6955 and, if the triage grade wants it, the option-B escape hatch (a producer-side rename card) for the day someone independently wants the vocabulary tidy.\n\n## Dedup\n\nSearched open issues for `unhiddenApps` / `unhideError` — the only history is #6955's own thread and the #6942 framework half; no open card owns the comment. #6955 is closed by objectui#4238's merge (in convergence at filing time).\n\nRefs: #6955 (the measurement + ruling), PR #6942 (where the promise was written), objectui#4238 (the follow-up that resolved it)."
+}

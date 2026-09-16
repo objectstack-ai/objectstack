@@ -1,0 +1,35 @@
+{
+  "number": 7902,
+  "kind": "issue",
+  "title": "finding: survey — which other config objects still keep credentials in a JSON blob column, now that resolveSecretField() makes the Field.secret() channel readable",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "security"
+  ],
+  "assignees": [
+    "huangyiirene"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-12T03:18:22Z",
+  "updated_at": "2026-08-12T09:47:39Z",
+  "closed_at": "2026-08-12T09:47:39Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7902",
+  "body": "Observation-class finding, filed **unassigned with no `pm:queue`** — for triage to grade and route. Offered by the dev at the end of #7799 / PR #7901 (*\"the issue's 'worth checking in the same pass' line is a real second surface, but it is a survey, not this defect — happy to file it if you want it tracked\"*); the services PM took the offer rather than let it evaporate with the session.\n\n## Why this is worth a card now, and was not before\n\nUntil PR #7901, the `Field.secret()` channel was effectively **write-only**. Measured on that PR:\n\n- `maskSecretFields` (`packages/objectql/src/engine.ts:4744`) replaces the stored ref with `SECRET_MASK` on **every** `find`/`findOne`, unconditionally and *after* hooks, with no `isSystem` carve-out.\n- So `resolveSecret`'s own docstring — *\"privileged consumers use `resolveSecret()` against the stored ref\"* — described a path **no consumer could enter**, because there was no supported way to obtain the ref.\n- The observable consequence: subsystems that needed a credential back out of storage did **not** use the field type. `packages/services/service-datasource/src/datasource-secret-binder.ts` keeps its handle in a plain unmasked column; `plugin-webhooks` kept the HMAC secret inside `sys_webhook.definition_json` as cleartext (#7799).\n\nPR #7901 adds `ObjectQL.resolveSecretField(object, recordId, field)` — a type-guarded read that refuses any field not declared `type: 'secret'`. **That removes the reason those workarounds existed.** So the question \"who else is storing a credential somewhere a normal read can reach?\" changes from *\"nothing much can be done about it\"* to *\"each one now has an available plugin-local fix.\"*\n\n## What the survey should cover\n\nFor every system/config object that persists third-party or outbound credentials, determine whether the credential is:\n\n1. inside a serialized JSON blob column (the #7799 shape — recoverable through the ordinary data API by anyone who can read the row), or\n2. in a plain unmasked column (the datasource-binder shape — narrower, but still not encrypted at rest), or\n3. behind `Field.secret()` (encrypted into `sys_secret`, masked on read).\n\nNamed starting points, from #7799's measurement — **not** a claim that these are all of them, and **not** a claim that any of them is currently broken:\n\n- `packages/services/service-datasource` — the binder's plain ref column (deliberate, pre-`resolveSecretField`; worth re-deciding now).\n- Connector credential storage under `packages/connectors/*` and the connector registry.\n- Anything else persisting an outbound auth material: `plugin-email` transport credentials, `service-sms` provider keys, `service-storage` backend credentials, `embedder-openai` / `knowledge-ragflow` API keys.\n\nThe deliverable of the survey is a **list with a verdict per object**, not a fix — each hit that turns out to be shape ① or ② is its own card, sized on its own migration story (existing rows, fail-closed behaviour with no `CryptoProvider`, and whether the consumer can tolerate a decrypt at read time).\n\n## Explicitly NOT claimed\n\n- **No specific leak is asserted here.** #7799 is the one measured instance and it is fixed by PR #7901. Everything above is a hypothesis about siblings, filed so the class gets checked once rather than rediscovered one incident at a time.\n- **`password`-typed fields are out of scope** and must stay that way: they are plaintext at rest by ADR-0100, and `resolveSecretField`'s type guard deliberately refuses them so it cannot become a mask bypass. A survey hit on a `password` field is a different (ADR-level) conversation.\n\n## Routing note\n\nThe survey spans several lanes (`domain:services` owns most of the plugin/connector landing sites; `domain:engine-core` owns the `objectql` channel; `domain:cli`/`repo:cloud` may own host-side credential wiring), so this is a natural **split-into-per-lane-findings** card once graded — per the services seat's standing discipline ⑫. Triage's call on whether to grade it as one survey card or fan it out immediately.\n\n## Evidence\n\nMeasured 2026-08-12 by the dev on PR #7901, reading `packages/objectql/src/secret-fields.ts`, `packages/objectql/src/engine.ts:4640-4838`, `packages/services/service-datasource/src/datasource-secret-binder.ts`, and `packages/cli/src/commands/serve.ts:2691-2712`. Full measurement in the `<!-- os-dev-report -->` comment on #7799.\n\n## Source\n\nOffered by the dev on objectstack-ai/objectstack#7799 (PR objectstack-ai/objectstack#7901) as an explicitly out-of-scope second surface."
+}

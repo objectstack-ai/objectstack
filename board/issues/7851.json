@@ -1,0 +1,35 @@
+{
+  "number": 7851,
+  "kind": "pull_request",
+  "title": "feat(spec,lint): gate managed `apiMethods` ⊆ affordances where the author is (#7521)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T20:42:16Z",
+  "updated_at": "2026-08-12T13:57:35Z",
+  "closed_at": "2026-08-12T13:57:34Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": "2026-08-12T13:57:34Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/7851",
+  "body": "Fixes #7521\n\nExecutes the maintainer's 2026-08-11 08:08Z ruling — **the middle option, lint/gate-visible**. Boot-time behaviour is unchanged and pinned so.\n\n## The window\n\n`reconcileManagedApiMethods` has always caught a managed object advertising a generic write verb its own resolved affordances refuse, and **stripped** it. That strip is correct and fail-closed — nothing was ever exposed. What it could not do is *tell anyone*: the only signal was a `console.warn`.\n\n`sys_environment` and `sys_package` declared `apiMethods: ['get','list','create','update']` against `userActions` refusing all three writes. The strip and its warning fired on **every control-plane boot for the life of the divergence and nobody noticed**. The split was eventually found by hand-driving the HTTP seam while writing something else, not by any gate. A boot log is not an authoring surface.\n\n## What landed\n\n- **New shared predicate** `checkManagedApiMethodAffordances` in `@objectstack/spec/data`, beside `resolveCrudAffordances` — the affordance authority both sides already read. The verb → affordance table (`MANAGED_WRITE_VERB_AFFORDANCE`) **moves here** from objectql's registry; it is not copied.\n- **`reconcileManagedApiMethods` becomes a pure reaction to it.** Behaviour unchanged — all 91 pre-existing registry tests pass untouched — and now explicitly pinned: it still warns and strips, and still **does not throw**. The warning additionally cites the new lint rule id, so an operator who greps a stripped verb out of a boot log lands on the gate.\n- **New author-time rule `object/managed-api-method-unaffordable`** (`error`, `gating`, pre-parse) wired into `authoring-rules.ts`, so `os lint`, `os validate` **and** `os build` all report it. Verified end-to-end through the built authoring registry against the exact `sys_environment` declaration.\n\n## Why the predicate is in `spec`, not in `registry.ts`\n\nThe dispatch suggested `packages/objectql/src/registry.ts` as the predicate's home, with a pre-authorized crossing into `scripts/` or `packages/lint`. Measurement overturned that route, and the ⛔ non-negotiable — *one predicate, never a second affordance table* — is what forced the move:\n\n- `@objectstack/lint` depends on `@objectstack/spec` and, by its own stated package contract, **never on a runtime**. It cannot import objectql's table.\n- A `scripts/check-*.mjs` gate cannot either: every gate script in this repo is a static source scanner, and a `.mjs` cannot consume a TS predicate.\n- Both pre-authorized surfaces therefore structurally require a **second copy** of the table. `@objectstack/spec/data` is the only location both consumers can read.\n\nThis is exactly the `checkFieldCompleteness` precedent (`@objectstack/spec/kernel`), which serves the registry's functional-completeness warning and `@objectstack/lint`'s `validate-functional-completeness` gate from one predicate under ADR-0078 — the same problem, one ADR earlier, solved the same way.\n\n## Why not a `scripts/` sweep over this repo's object definitions\n\n`sys_environment` / `sys_package` live in the **cloud** repo, not here — a `scripts/` gate in objectstack could never have seen them. The issue's own framing is that \"every repo authoring managed objects re-pays the silent-divergence cost\", so the deliverable has to be *shipped, reusable* code. `validateManagedApiMethods` and `MANAGED_API_METHOD_UNAFFORDABLE` are exported from the package root so a repo whose object definitions live in **code** (which `os lint` never walks) can run the same rule over its own registry instead of hand-rolling the table — which is what cloud#1235 had to do.\n\n## Declared cross-package crossings\n\n`packages/spec` and `packages/lint`, beyond the card's `packages/objectql` surface. `packages/lint` was pre-authorized; **`packages/spec` was not** — flagging it explicitly for the cross-seat declaration, with the measurement above as the reason. `packages/objectql/src/engine.ts` was not touched.\n\n## Gates\n\nGreen locally: both mandatory ratchets (`check:query-options-erasure`, `check:type-check-debt` — no baseline raised, no ledger entry raised), full `objectql` (185 files / 3278 tests), full `spec` (379 / 9983), full `lint` (71 / 1929), typechecks for all three packages, ESLint on every changed file, the full `turbo build` closure (70/70, including `os build` over the example stacks with the new gating rule active), the spec surface baselines (`api-surface` / `export-origins` / `dual-source-exports` / `exported-any` / `spec-changes` / `generated`, regenerated and re-verified against a real `.d.ts` build), the changeset gates, and every gate `scripts/pm/dispatch-gates.mjs` derived for the changed paths.\n\nChangeset included. `content/docs/releases/` untouched.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_018tmmVmCkr4QtvGKMcn5s96)_"
+}

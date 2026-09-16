@@ -1,0 +1,32 @@
+{
+  "number": 7765,
+  "kind": "issue",
+  "title": "pm-dispatch SKILL: 5-hour usage-limit outages — queryable signals, cross-wall recovery timer (hourly cron, not send_later chains), wall-death playbook anchor",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T13:39:34Z",
+  "updated_at": "2026-08-12T06:56:47Z",
+  "closed_at": "2026-08-12T06:56:20Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7765",
+  "body": "Filed by the skills seat (#7623, session `session_01XoWxhuq3WNNaZUTs6kWdk8`) on the maintainer&#39;s prompt (skills-seat 专题讨论, 2026-08-11 ~13:4xZ, verbatim, untranslated):\n\n&gt; 项目经理技能还有一个缺口,有时候 Claude code 会到达 5-hour limit,首先项目经理能不能查到相关的数据,其次是到达时间窗口工作就会停,是否应该设置一个1小时的定时以监测时间窗口已经解锁。\n\nThe gap is real and already measured at fleet scale: two whole-account token outages on 2026-08-08/09 (~11:0x–12:10Z and ~16:0x–17:1x) each killed four in-flight devs at once (recorded in SKILL.md step 6, 直接验收兜底 section); #6686 is the earlier four-devs-one-wall specimen. What the skill lacks is a single place linking **detection readings → cross-wall timer → recovery playbook**.\n\n## Measured facts (2026-08-11, this container — re-measure at work time)\n\n1. **`npx ccusage blocks` works inside a CCR container** (reads local `~/.claude/projects/**.jsonl`): it reported the active 5-hour block (start 12:00, 3h21m remaining), per-container token burn (4.1M) and a burn-rate projection. Two readings are genuinely useful: **window boundary/remaining time** and **burn rate** (pre-warning).\n2. **Three blind spots of that reading**: single-container only (cloud dev cards burn the same account&#39;s allowance in their own containers, invisible here); it estimates cost, not plan allowance — **no surface exposes account-level remaining quota to the agent**; block start is inferred locally (approximate).\n3. **The authoritative wall signal is the failure itself**: API calls fail at the wall and the host surfaces &#34;limit reached, resets at HH:MM&#34; — i.e. the reset time IS usually available at hit time, just not queryable beforehand.\n\n## Deltas to `.claude/skills/pm-dispatch/SKILL.md`\n\n1. **断粮检测读数 paragraph** (likely near step 6&#39;s 舰队级死因 text): what a PM can query (ccusage per-container block timing + burn rate, explicitly labelled an estimate with the three blind spots) and cannot (account-level remaining quota); the wall signal and its embedded reset time.\n2. **Cross-wall recovery timer discipline**:\n   - On wall-hit — or pre-armed when the burn projection crosses the plan&#39;s risk threshold — arm an **hourly cron Routine** (`create_trigger`, cron), ⛔ **not a `send_later` chain**: a one-shot that fires into the dead window burns its only shot and the chain is severed — exactly the window it exists to cover. The cron re-fires hourly; the first post-unlock firing succeeds, runs recovery, then **deletes the cron** (self-cleanup is part of the discipline — a survivor cron is an orphan timer).\n   - Prefer a **one-shot aimed at reset-time + buffer** when the reset time was captured from the wall signal (one precise shot beats hourly polling — same instinct as notes 1 读间隔 and notes 3 整点对齐); the hourly cron is the fallback when no reset time is in hand.\n   - Fired text follows notes-3 discipline verbatim: opens with 「幂等 —— 动手前先重读状态」, criteria only, no imperatives.\n3. **Anchor the recovery playbook to this signature**: first post-unlock action sequence = probe every in-flight cloud card (they die at the wall, zero information loss iff the draft-PR-early contract held) → direct-acceptance path or transcript-revival per existing step-6 rules → re-arm normal patrols. This is linking existing text, not new rules.\n\n**PM 机制假设(须实测,鼓励证伪)**: whether a `send_later` that fires during an account-wide outage is lost or retried by the platform is **unmeasured** — the dev should verify what can be verified cheaply (e.g. doc reading; a live outage test is not required) and word the SKILL text to match the evidence level (if unverifiable, state it as the conservative design rationale, not as a measured fact).\n\n## Process constraints (standing rulings — restated, not new)\n\n- **Model**: `model: claude-fable-5` mandatory (card touches `.claude/skills/pm-dispatch/**`; maintainer 2026-08-10, #7341).\n- **Landing**: skills updates are ADR-class (#7548) — draft PR, ⛔ no auto-merge, no queue entry; the maintainer merges by hand.\n- **Same-file serial**: third in the SKILL.md hot-file queue, strictly behind **#7754** (whole-file compression, in flight) → **#7755** (event-driven-comms deltas). ⚠️ This card&#39;s section references describe the pre-compression file; locate targets **semantically** on the post-compression text.\n\nRefs: #7754, #7755 (queue predecessors), #6686 (额度墙 specimen), seat post #7623."
+}

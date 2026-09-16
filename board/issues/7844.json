@@ -1,0 +1,35 @@
+{
+  "number": 7844,
+  "kind": "pull_request",
+  "title": "fix(service-storage): give `failed`/`expired` upload-session statuses a producer (#7667)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T20:31:36Z",
+  "updated_at": "2026-08-12T00:56:01Z",
+  "closed_at": "2026-08-12T00:56:00Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": "2026-08-12T00:56:00Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/7844",
+  "body": "Fixes #7667\n\n## Premise: verified on `origin/main` (098f4bb)\n\nAll three anchors held. Enum members at `system-upload-session.object.ts:104-105`, retention `onlyWhen` at `:134`, type union at `metadata-store.ts:54`, and a repo grep confirms no writer for either status anywhere in `service-storage`.\n\n## Branch taken: ENFORCE, not remove\n\nThe deciding evidence is one file the issue does not mention: **`packages/spec/src/api/storage.zod.ts:247`** declares `UploadProgressSchema.status` as `z.enum(['in_progress','completing','completed','failed','expired'])`. Both statuses are *published to every client that reads the contract* — so they are not merely declared-and-unread; the API promises them. Removing them from the object enum would have forked the object from the spec's progress contract and forced a `packages/spec` narrowing (the dispatch's STOP condition). Enforcing gives that contract teeth instead.\n\nBoth statuses also name **real failure states that were previously invisible**:\n\n- **`failed`** — a completion whose backend `completeChunkedUpload` threw left the row at `completing`. That is a *non-terminal* status, so the 7d retention backstop (`$in ['completed','failed','expired']`) never reaped it, and a progress poll reported \"still assembling\" for a session that had already given up. The completion route now stamps `failed` on that path. It records an attempt rather than locking the session — nothing reads `failed` as a refusal, so a retry of the same `uploadId` runs the happy path and overwrites it with `completed` (pinned by a test).\n- **`expired`** — a session past its own `expires_at` kept answering `in_progress` **and kept accepting chunks**, until the TTL sweep deleted the row out from under the caller. The deadline the init response already announced (`expiresAt`) bound nothing. A chunk `PUT` or a `complete` against an overdue session is now refused **410 `UPLOAD_SESSION_EXPIRED`** and the row is durably stamped `expired`. `GET .../progress` **reports** the status rather than refusing — `expired` is a declared member of `UploadProgressSchema.status`, and the SDK's `resumeUpload` polls progress first.\n\nThe retention `onlyWhen` is now consistent with the enum in the strong direction: every member it names has a writer in `storage-routes.ts`. The reap guard (`createUploadSessionReapGuard`) already handled both statuses — it aborts the backend multipart for any non-`completed` row carrying a `backend_upload_id` — so this closes that loop rather than opening a new one.\n\nDeliberate non-behaviours, each pinned by a test: a row with **no** `expires_at` carries no declared deadline and is left alone (the guard enforces the row's own deadline, it does not invent one); a `completed` row does **not** become `expired` by waiting for the reaper; expiry is checked **after** the resume-token check, so a caller who cannot prove it owns the session learns nothing about its state.\n\n## ⚠️ Out-of-surface addition, declared loudly\n\n`packages/spec/src/api/error-code-ledger.zod.ts` — **one additive line**, registering `UPLOAD_SESSION_EXPIRED` under `@objectstack/service-storage`. `ErrorCode` is the closed union `StandardErrorCode ∪ ERROR_CODE_LEDGER`, and an unregistered code fails schema parse → fails the envelope conformance suites → fails CI (ADR-0112). The alternative was reusing a semantically wrong existing code (`UPLOAD_SESSION_NOT_FOUND` on a session that plainly exists), which is precisely the bypass the ledger's own header warns about. Purely additive: the union grows, nothing that validated before stops validating.\n\nThe `#5536` ride-along clause did **not** trigger — this diff does not touch `storage-service-plugin.ts`.\n\n## Checklist maintenance\n\n`docs/qa/platform-checklist/areas/attachments-storage.json` → `attachments-storage.upload-session-abort` **revision 3**, closing the clause-5 finding revision 2 explicitly deferred to this issue: two steps that drive `failed` and `expired`, a new acceptance clause for the 410 refusal, and the producers named in `source`. Transient **`completing`** is recorded as a `knownGap` rather than an unreachable-variant FAIL — the complete route writes it and overwrites it in the same request, so a scan of settled rows will never show it, and that is correct.\n\n## Gates (all run locally, all green)\n\n| Gate | Result |\n|---|---|\n| `pnpm build` (full closure) | ✅ 71/71 tasks |\n| `service-storage` suite | ✅ 24 files, 361 tests |\n| `spec` — `error-code-ledger` + `storage` | ✅ 62 tests |\n| `pnpm check:docs-audit-scope` | ✅ |\n| `pnpm check:platform-checklist` | ✅ 15 areas, 182 items |\n| `pnpm check:route-envelope` | ✅ (new 410 branch on the shared `sendError`) |\n| `pnpm typecheck` (spec) | ✅ |\n\n`service-storage` declares no `typecheck` script (not type-check-covered); an ad-hoc `tsc --noEmit` over it reports only the pre-existing extension-less test-import noise, none from this diff.\n\nNo new test fake with update/delete verbs was added — the tests drive the real `StorageMetadataStore` on its no-engine Map path, so the `assertEngineUpdateDispatch`/`assertEngineDeleteDispatch` gate does not apply.\n\n## Follow-up (not taken here — out of this card's file surface)\n\n`packages/client`'s `storage.resumeUpload` reads the progress body but ignores `status`, so resuming an expired session now surfaces as a 410 on the first chunk `PUT` rather than a clean early exit. That is an honest failure, not a regression, but a short-circuit on `status === 'expired'` would be a better client experience. Worth a separate `domain:client` card.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_0198Jr94CUGy2vDGtT1L8pka)_"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 7862,
+  "kind": "issue",
+  "title": "spec: the dashboard widget TranslationData node needs a third member for the metric sub-caption — the #5428 ruling's \"own key\" mandate is unimplementable against the strict `{title?, description?}` node",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "huangyiirene"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T21:16:08Z",
+  "updated_at": "2026-08-12T14:31:05Z",
+  "closed_at": "2026-08-12T14:31:05Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7862",
+  "body": "Contract-first card filed by the objectui whole-repo PM seat (session `session_017Qqyix2QcnpUC9XeYVDzx3`), spun out of objectui#4032 / PR objectui#4358. Unassigned — for this lane's triage; the objectui seat does not land code here.\n\n## The conflict (measured in objectui#4358's implementation)\n\nThe #5428 maintainer ruling (2026-08-06), item 4, gives the metric widget's sub-caption (`options.description` — a DIFFERENT authored field from `widget.description`) its **own** translation convention segment, ⛔ explicitly not sharing `widget.description`'s key (\"两个作者字段两个 key\").\n\nThe spec refuses every implementation of that: `TranslationDataSchema.dashboards.<dash>.widgets.<id>` is strict over exactly `{ title?, description? }`. Measured:\n\n```\n+subCaption  → unrecognized_keys: \"Unrecognized key(s) on this widget translation: `subCaption`. …\"\n+subtitle    → \"… Did you mean `subtitle` → `description`? …\"\n+caption     → unrecognized_keys\n```\n\n— and the schema's own suggestion points the sub-caption AT `description`, i.e. at precisely the shared key the ruling forbids. objectui#4358 landed ruling items 1–3 and returned item 4 as a stop rather than a workaround; `widget.description` on a self-contained metric is deliberately still unrendered there, because the only available slot would conflate the two fields.\n\n## The ask\n\nEither:\n- **A** — add an optional third member to the widget translation node (`subCaption?`, or the spelling this lane prefers) so the metric sub-caption keys `dashboards.<d>.widgets.<id>.subCaption`; objectui's renderer half then lands as a small follow-up (the resolution seam is already in place from #4358), or\n- **B** — overturn ruling item 4's two-keys mandate (maintainer veto was reserved) and let the sub-caption share `description`. That conflates two authored fields under one key — the drift shape the ruling named — but it is the zero-vocabulary option and the schema's own hint currently points there.\n\nA preserves the ruling; B preserves the vocabulary. Either unblocks objectui#4032's last item.\n\nRefs objectui#4032, objectui PR #4358, objectstack#5428 (the ruling), ADR governing TranslationData strictness."
+}

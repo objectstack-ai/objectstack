@@ -1,0 +1,36 @@
+{
+  "number": 8120,
+  "kind": "pull_request",
+  "title": "fix(plugin-sharing): stop scoping federated objects by the phantom owner_id anchor (#7858)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-12T16:44:12Z",
+  "updated_at": "2026-08-12T17:31:48Z",
+  "closed_at": "2026-08-12T17:31:46Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-12T17:31:46Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/8120",
+  "body": "Fixes #7858\n\n## What was wrong\n\nThe ObjectQL registry injects `owner_id` into every object that has not opted out, federated (ADR-0015 `external`) ones included, while `Engine.syncObjectSchema` returns early for `external != null` and issues no DDL — the remote schema is owned externally. So on a federated object that column exists in the registered schema and **in no store**.\n\n`SharingService.buildReadFilter` (`:291`) and `buildWriteFilter` (`:368`) both decided by asking `hasOwnerField` (`:141`), were answered yes, and AND-composed `owner_id = caller` (or the ADR-0057 DEPTH-widened `$in`) onto a query whose backing table has no such column.\n\nThe symptom is dialect-dependent and the defect is not: SQLite reinterprets the unresolvable identifier as a string literal, so the predicate is constant-false — **0 rows, no error, HTTP 200** — while Postgres/MySQL raise `column \"owner_id\" does not exist`. Either way a federated object under the secure-default `private` OWD was unreadable by any principal whose read scope was narrower than `org`, and nothing reported why.\n\n## The fix\n\nA provenance test, in the shape the card proposes and the #7835 sibling established: an `owner_id` **byte-identical to the shipped `OWNER_FIELD_DEF`** on an `external` object is the platform's injected anchor, not a real owner column, so ownership scoping contributes nothing there.\n\nBoth filters move together — the card measured both gates, and fixing only the read half would leave a bulk `update`/`delete` naming a phantom column. The new `federated-phantom-anchors.ts` is deliberately shaped identically to the plugin-security module of the same name (the tenant half, #7835), so that when #7865's registry provenance marker lands, both collapse into one read of it mechanically.\n\nWhy provenance rather than \"is it federated?\": a federated object that **declares** a real remote owner column keeps its scoping. Switching ownership scoping off for all `external` objects would close this card and silently widen reads on those.\n\n## Scope boundary\n\n`hasOwnerField` has five consumers. Only the two filters this card ruled on are changed. `checkEdit`, `checkDelete` and `assertSharingEnabled` still gate on the raw field-existence answer — deliberately: those paths currently fail **closed** on a federated object (deny / refuse), which is safe, and loosening them is a security-relevant widening that needs its own analysis. Filed separately as #8119 rather than ridden in here.\n\n`packages/objectql/**` is untouched — the registry-level fix is #7865's, ruled separately.\n\n## Verification — predict-then-mutate ablation\n\nPredictions were written down **before** each run.\n\n| Ablation | Predicted | Observed |\n|---|---|---|\n| A — revert read guard only | read cases red with `{owner_id:\"usr_member_1\"}`, writes green | exactly that (5 failed / 6 passed) |\n| B — revert write guard only | write update+delete red, reads green | exactly that (2 failed / 9 passed) |\n| D — `isFederatedObject` always true | the **local** object pin goes red | exactly that (1 failed) |\n| E — `equalsShippedDef` always true | the **declared real owner** pin goes red | exactly that (1 failed) |\n| F — both guards removed **and** the fixture given the grandfather stamp | stays **green** — a stamped fixture cannot observe the defect | 11/11 passed against the fully broken build |\n\n**F is the one that matters most.** Both shipped showcase federated objects carry `sharingModel: 'public_read_write'`, which returns `null` at a gate *above* the one under test — so a fixture built from them would have passed against the broken build and proved nothing. The fixture therefore leaves `sharingModel` unset, taking the secure-default `private` OWD, which is what an app author gets by declaring nothing.\n\nEvery case asserts the **composed filter value**, never an absence of error — on SQLite \"no error\" is precisely the failure mode.\n\n## Regression surface, pinned rather than assumed\n\n- `showcase_ext_customer`'s grandfathered shape: both filters still return `null`, via the same earlier gate as today.\n- A **local** private object with the injected anchor: still `{owner_id: caller}`.\n- A federated object with a **declared** real remote owner column: still `{owner_id: caller}`.\n\n## Tests and gates\n\n`pnpm --filter @objectstack/plugin-sharing test` — **501 passed (20 files)**, 11 of them new. `typecheck` clean.\n\nGates run locally: `check:nul-bytes`, `check:test-source-alias`, `check:docs-audit-scope`, `check:cross-package-test-inputs`, `check:changeset-gate-self-tests`, `check:objectui-changeset`, `check:query-options-erasure`, `check:type-check-debt` — all pass. The debt ledger was **not** raised.\n\n`check:test-source-alias` caught a real defect mid-run: `@objectstack/metadata-core` resolved through `dist/`, which would have let a stale copy of `OWNER_FIELD_DEF` — the provenance test's actual subject — move the verdict without moving the assertion. Fixed by aliasing it to source in the package's `vitest.config.ts`, anchored array form (metadata-core has a `./testing` subpath, so the object form would have swallowed it).\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01PEVB6w7D7uCszR9Mw1BL73)_"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 7787,
+  "kind": "pull_request",
+  "title": "fix(plugin-email): a no-locale `sendTemplate` renders the en-US default, not an arbitrary row (#7731)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T14:50:09Z",
+  "updated_at": "2026-08-11T19:49:45Z",
+  "closed_at": "2026-08-11T19:49:43Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": "2026-08-11T19:49:43Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/7787",
+  "body": "Fixes #7731\n\n## The bug\n\nWith an i18n bundle in `sys_email_template` (`en-US` + `zh-CN` rows under one name), a `sendTemplate` call that named **no** `locale` rendered zh-CN — on two consecutive fresh boots. Three declarations say en-US is the answer there:\n\n- `SendTemplateInput.locale` (spec contract) — *\"Falls back to `'en-US'`\"*\n- `EmailTemplateDefinitionSchema.locale` — *\"the service picks the best match for the recipient's locale, falling back to `en-US`\"*\n- `sys_email_template`'s own object doc — *\"Resolved by `(name, locale)`; the EmailService picks the best-matching locale for the recipient, falling back to `en-US`\"*\n\n**Premise verified against `origin/main` (7a8476f), still valid.** Both seams the issue names are present and unchanged, and each had to be right on its own for the default to hold:\n\n- `email-plugin.ts:547` — the inline loader built `where = { name }`, added `locale` only when one was passed, then ran `limit: 1` with **no ordering**. \"First row of an unordered set\" is whatever the driver yields.\n- `email-service.ts:1139` — the en-US fallback ran only `if (!row && preferred && …)`, so the no-locale path never reached it.\n\n## The fix\n\nLocale resolution moved out of the plugin into `template-loader.ts` (`createSysEmailTemplateLoader`). Every branch pins the row it wants in the `where` clause and carries an `orderBy`, so neither locale selection nor duplicate-row tie-breaking reads storage order:\n\n1. **locale named** → exact `(name, locale)` match, or `null`. The en-US fallback stays in `sendTemplate`'s ladder, where it is documented, so a replacement loader can't relocate it.\n2. **no locale** → `(name, 'en-US')`. The *query* names en-US, so even a driver that honours no ordering at all cannot answer with a different locale.\n3. **no locale and no en-US row** → the bundle's lowest locale tag, ordered. A single-locale (e.g. zh-CN-only) tenant had exactly one row to pick arbitrarily from before this change; hard-failing it now would swap one bug for an outage. Ordered rather than arbitrary, so it's the same answer on every boot.\n\n`EmailService.sendTemplate` asks for `DEFAULT_TEMPLATE_LOCALE` by name when the caller named none, and only reaches rung 3 for a call that named no locale — an explicit locale is never widened to \"any row\".\n\nOut of scope, deliberately (声明面从紧): language-only prefix matching (`zh` → `zh-CN`) is still not performed. No contract declares it and the issue does not claim it should; the loader's module doc records the omission.\n\n`orderBy` is the canonical engine key — `find()` rejects the wire spelling `sort` outright, so the tie-break has to be spelled that way to exist at all. A test pins that we never send `sort`.\n\n## Verification record\n\n- **Reverse-verification** — restored both pre-fix seams inside the new module and re-ran the new file: **8 of 18 fail**, including the reported symptom (`renders en-US for a no-locale send on a fresh boot (zh-CN inserted first)`) and `asks for en-US by name when the caller named no locale`. The 10 that pass in both directions are the unchanged-behaviour pins (explicit exact match, explicit → en-US fallback) — which is what \"unaffected\" should look like. Reverted, suite green again.\n- **Determinism is not insertion-order luck** — the locale assertions run the same bundle through a driver holding `[en-US, zh-CN]` and one holding `[zh-CN, en-US]`, plus one that **ignores `orderBy` entirely**. All three answer en-US, because the `where` clause names it.\n- `pnpm build --filter=...@objectstack/plugin-email --filter=...@objectstack/spec` — **70/70 successful**.\n- `plugin-email` suite — **21 files / 320 tests pass** (18 new).\n- `packages/qa/dogfood/test/email-template-materialization.dogfood.test.ts` — **2/2 pass** against a real booted kernel + driver, so the new `orderBy` queries are exercised end-to-end, not only against a fake engine.\n- `pnpm typecheck` (plugin-email, spec) and `eslint --no-inline-config` on every changed file — clean.\n- `pnpm check:docs-audit-scope` — green.\n- Changeset: `.changeset/email-template-default-locale.md` (patch × `@objectstack/plugin-email`, `@objectstack/spec`).\n\n## Spec doc-comment (second commit)\n\n`SendTemplateInput.locale` documented the preference but was silent on the two rungs a caller actually depends on — that a call omitting `locale` *starts* at en-US, and what happens to a bundle with no en-US row. Rung 3 succeeding where the old `TEMPLATE_NOT_FOUND` bullet read as a hard failure is behaviour a caller can rely on, so it is declared where the contract lives. Doc-comment only: no schema, no shape, no behaviour change, no generated page derives from it.\n\n## Notes for the reviewer\n\n- `#7733` (runtime `PUT /meta` materialization, same package) is untouched. This change is confined to the read side; the metadata-subscription path writes rows through `upsertDeclaredEmailTemplate` and is not on this diff.\n- A no-locale send still renders with `renderOpts.locale` unset (the runtime locale) even though the row resolved is now reliably en-US. That is pre-existing `{{ ts | datetime }}` behaviour and no contract speaks to it, so it is left alone rather than changed on the way past.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01BsLtjETXfWzP78bMxkyXmB)_"
+}

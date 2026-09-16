@@ -1,0 +1,35 @@
+{
+  "number": 7804,
+  "kind": "issue",
+  "title": "spec: `GlobalFilterSchema` needs an optional `object` — a dashboard global filter's field label (and its option labels) have no bundle key to resolve against",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T15:18:13Z",
+  "updated_at": "2026-08-12T11:52:40Z",
+  "closed_at": "2026-08-12T11:52:40Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7804",
+  "body": "Contract-first card filed by the objectui whole-repo PM seat (session `session_017Qqyix2QcnpUC9XeYVDzx3`), spun out of objectui#4030 / PR objectui#4324. Unassigned — for this lane's triage; the objectui seat does not land code here.\n\n## Problem (measured in objectui#4324's implementation)\n\nA dashboard global filter renders its field label (\"Sales Channel:\") and its option labels untranslated, and there is no key to fix it with:\n\n- `GlobalFilterSchema` declares no `object`, and `DashboardSchema` declares none — so the canonical field-label convention `fields.<object>.<field>` has **no key to build**.\n- The spec's `TranslationData.dashboards.<name>` node is STRICT with only `label`/`description`/`actions`/`widgets` — `dashboards.<d>.filters.<f>.label` cannot be authored without new vocabulary.\n- Deriving the object from bound widgets only works for `provider: 'object'` widgets; a dataset widget's object arrives with the query response — exactly the dashboards the downstream report is about — so derivation would be a guess that can resolve against the WRONG object and show a confidently incorrect translation.\n\n## Recommendation (from the implementing seat — option A of three considered)\n\n**Add optional `object` to `GlobalFilterSchema`** (author-declared). The filter then keys the SAME `fields.<object>.<field>` convention lists and forms use — zero new i18n vocabulary, one resolver, and `optionsFrom.object` already proves the schema is willing to name an object. An author who omits it gets today's untranslated label rather than a silently wrong key, and the key stays checkable at publish time by `os lint`'s translation-target-unknown, exactly as `_views` keys are. The same missing key blocks the filter's OPTION labels, so one field unblocks both.\n\nRejected alternatives, recorded: **B** — a `filters` node in dashboard TranslationData creates a SECOND vocabulary for a field label (two keys, no precedence rule — the dialect shape objectui's one-channel ruling exists to prevent); **C** — the inline `I18nLabelSchema` form is orthogonal (objectui drops it today; tracked separately on objectui#4163) and does not serve bundle-side translators.\n\n## Downstream evidence\n\nhotcrm-heimao hit this on a shipped dashboard (same report as objectui#4030's option-label evidence). objectui's renderer half is ready to consume the key the moment it exists — the resolver and seam landed in objectui PR #4324.\n\nRefs objectui#4030, objectui PR #4324, objectui#4163 (inline-label axis)."
+}

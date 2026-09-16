@@ -1,0 +1,35 @@
+{
+  "number": 7808,
+  "kind": "pull_request",
+  "title": "fix(spec): render the reference section for a non-object root schema (#7658)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T15:31:42Z",
+  "updated_at": "2026-08-12T01:28:22Z",
+  "closed_at": "2026-08-12T01:28:21Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-12T01:28:21Z",
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/7808",
+  "body": "Fixes #7658\n\n## What was wrong\n\n`packages/spec/scripts/build-docs.ts`'s `generateMarkdown()` picked the node it was documenting by **enumerating shapes** — `properties`, `enum`, `anyOf`, `oneOf` — and answered \"none of those\" with `return ''`.\n\nA JSON Schema root is routinely none of those:\n\n| Zod spelling | JSON Schema root | old rendering |\n| :--- | :--- | :--- |\n| `z.string().describe(…)` | `{ type: 'string', description }` | — nothing — |\n| `z.record(…)` | `type: object` + `additionalProperties`, no `properties` | — nothing — |\n| `z.array(…)` | `{ type: 'array', items }` | — nothing — |\n| `z.intersection(…)` | `{ allOf: [...] }` | — nothing — |\n\nEach lost its **entire `## Name` section** — the heading, and with it the `.describe()` prose an author wrote to be read — while the page's `## TypeScript Usage` block, which is spelled from the export surface rather than from this function, went on naming the export. The page read as if it had forgotten to finish rendering an entry it had just imported.\n\n## The count, re-measured today\n\nThe card says *\"~23 exports with a real `.describe()`\"*. Re-deriving it by replaying `generateMarkdown`'s exact root-selection over all 1578 published schemas (`wc -l` on the emitted lists, no pager in the pipeline):\n\n| | today | card |\n| :--- | ---: | ---: |\n| sections rendered | 1533 | — |\n| **sections dropped (`return ''`)** | **45** | ~31 |\n| ...carrying a root `description` | **33** | ~23 |\n| bare-scalar roots specifically | 32 (22 with a description) | 31 (~23) |\n\nThe card scanned only the bare-scalar spelling. The other 13 are record maps, one array root (`system/OidcProvidersConfig`) and one `allOf` (`data/FilterCondition`) — the same defect through the same line, so they are fixed with it. **Scope expansion, disclosed rather than absorbed.**\n\nPositive control on the same page, before the fix: `content/docs/references/cloud/tenant.mdx` renders `## TenantContext`, `## TenantDatabase` and 7 more, and does **not** render `## TenantPlan` — while line 26 of that same file imports `TenantPlanSchema`. The zero is a measurement, not a dead walk.\n\n## The fix\n\n- `selectRootDef` gains a **fourth, unconditional** step: the document itself is the schema. Appended rather than folded into the root-shape test — a document that reaches the \"first `$defs` entry\" step today must keep reaching it, or a root that merely *looks* renderable would start outranking the definition with the actual content.\n- A final `else` renders the description plus one `**Type:**` line, using the **same `formatType`** every property row on the page already uses, so a schema's own section and a property typed with it cannot disagree. `allOf` is spelled as an `&` intersection (root-only spelling `formatType` has never met in a property position), with identical members collapsed — safe here because `A & A` is `A`, and deliberately not the union rule, where arity is the point (#6569).\n- `any` is withheld rather than printed: on this page it reads as \"free-form slot, nothing validates it\", the misreading #5606 fixed for tombstones.\n- Constraints (`pattern`, `minLength`, `minimum`) are deliberately **not** spelled — this renderer prints none in any position, and `json-schema/` stays the authority.\n\nThe renderer moves to `packages/spec/scripts/lib/schema-section.ts` so it can be pinned directly: the extraction `lib/format-type.ts` got at #4912, for the same reason. Its output here was the **empty string**, which is exactly what grepping emitted `.mdx` cannot see — and why `check:docs` (generated vs. committed) stayed green over this for months.\n\n## Regeneration\n\n- **244 insertions, 0 deletions** across 27 pages. The 45 new `## ` headings are exactly the 45 measured dropped names (set diff empty); none of the 1533 already-rendering sections moves a byte.\n- **Emitted files 230 → 230.** An empty section never removed a page, so no category's `pages.length` changes — **#7303's `pages.length === 0` `meta.json` guard is untouched**, and `contracts/` neither gains nor loses a directory (14 category dirs before and after).\n- `gen:docs` run **twice**: second run byte-identical to the first (same tree sha256, same 27 changed files).\n- All 45 new headings slug cleanly under the repo's own `github-slugger` — 0 collisions. No heading renamed, so there is no old fragment to grep for (#7484).\n\n## Gates\n\n| gate | result |\n| :--- | :--- |\n| `pnpm --filter @objectstack/spec run check:docs` | ✅ 230 generated files in sync |\n| `pnpm --filter @objectstack/spec run gen:docs` ×2 | ✅ stable, identical output |\n| `pnpm --filter @objectstack/spec exec vitest run scripts/schema-section.test.ts` | ✅ 13 passed |\n| `pnpm --filter @objectstack/spec run typecheck` | ✅ |\n| `pnpm --filter @objectstack/spec run check:api-surface` | ✅ public API surface unchanged |\n| `pnpm --filter @objectstack/spec run check:generated` | ✅ all 13 generated artifacts up to date |\n| `pnpm exec eslint <changed files>` | ✅ clean |\n| `pnpm run check:doc-authoring` / `check:empty-changeset` / `check:adr-0087-registration` | ✅ |\n| `pnpm --filter @objectstack/spec run test` | 9960 passed, **1 pre-existing failure** — see below |\n\n**Reverse verification**: restoring the old behaviour (dropping the unconditional root fallback and returning `''`) turns 7 of the 13 new cases red — the six render cases lose their whole section, heading included — and leaves the other 6 green. That asymmetry is the point: the four shapes the old code enumerated were always correct, which is why this survived unnoticed.\n\n**Pre-existing failure, not from this diff**: `src/data/api-methods-batch-conformance.test.ts` fails on `sys_api_key: [get, list, update] grants single-record writes but not 'bulk'` in `packages/platform-objects/src/identity/sys-api-key.object.ts` — a file this branch does not touch (`git diff --name-only origin/main -- packages/platform-objects` → 0)."
+}

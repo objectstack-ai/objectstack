@@ -1,0 +1,32 @@
+{
+  "number": 7658,
+  "kind": "issue",
+  "title": "[finding] build-docs.ts silently drops the whole reference-doc section for a bare opaque-string top-level schema (~23 exports with a real .describe())",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-help"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T09:53:11Z",
+  "updated_at": "2026-08-12T01:40:13Z",
+  "closed_at": "2026-08-12T01:28:22Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 11,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7658",
+  "body": "Found while implementing #7513 (re-typing `TenantPlanSchema` from a closed enum to an opaque `z.string().describe(…)`).\n\n## What happens\n\n`packages/spec/scripts/build-docs.ts`'s `generateMarkdown()` decides what to render for a top-level exported schema like this:\n\n```ts\nconst defs = schema.definitions || schema.$defs || {};\nlet mainDef = defs[schemaName];\n\nif (!mainDef && (schema.properties || schema.enum || schema.anyOf || schema.oneOf)) {\n  mainDef = schema;\n}\nif (!mainDef) {\n  mainDef = Object.values(defs)[0];\n}\nif (!mainDef) return '';   // <-- silently drops the entire \"## SchemaName\" section\n```\n\nThe root-detection condition only recognizes `object` (`properties`), `enum`, and union (`anyOf`/`oneOf`) shapes. A schema whose JSON Schema is a **bare primitive** — `{\"type\": \"string\", \"description\": \"…\"}` with no `enum`, `properties`, `anyOf`, or `oneOf` — matches none of those, so `mainDef` stays `undefined` and `generateMarkdown` returns `''`. Not just the \"Allowed Values\" bullets — the **entire heading, including the schema's own `.describe()` text**, disappears from the published page. The `## TypeScript Usage` import list and the root `content/docs/references/index.mdx` table still name the export (they're driven by the export surface, not this function), so the page looks like it forgot to finish rendering an entry it just imported.\n\n## Confirmed on #7513\n\nBefore #7513, `TenantPlan.json` was `{\"type\": \"string\", \"enum\": [...]}`, which the `schema.enum` branch of the condition caught, so `content/docs/references/cloud/tenant.mdx` had a `## TenantPlan` / `### Allowed Values` section. #7513 widens it to `{\"type\": \"string\", \"description\": \"...\"}` (no enum) — and the whole section vanished on regeneration, taking the schema's new ownership-statement description with it. The JSON Schema itself (`packages/spec/json-schema/cloud/TenantPlan.json`) still carries the full description; only the rendered `.mdx` page silently lost it.\n\n## Scope — this is not just `TenantPlan`\n\nScanning `packages/spec/json-schema/**/*.json` for `type ∈ {string,number,integer,boolean}` with no `enum`/`properties`/`anyOf`/`oneOf`, **31 exported schemas** match this shape today, **23 of them carrying a real `.describe()`** that never reaches its reference page:\n\n```\napi/EventPattern, cloud/EnvironmentDriver, cloud/PackageCategory, cloud/PackageLocale,\ncloud/Sha256Digest, cloud/TenantPlan, data/DriverSslToggle, data/DriverType,\nkernel/OpsFilePath, shared/AppName, shared/EventName, shared/FieldName, shared/FlowName,\nshared/ObjectName, shared/RoleName, shared/SnakeCaseIdentifier, shared/SystemIdentifier,\nshared/ViewName, system/Locale, system/Sha256Digest, system/TraceFlags, ui/ViewItemName\n```\n\n(8 more have no description either way: `data/CalendarDateValue`, `ClockTimeValue`, `ContextToken`, `ContextTokenPlaceholder`, `DateMacroPlaceholder`, `DateMacroToken`, `FieldNode`, `FileReferenceIdValue`, `InstantValue`, `ReferenceIdValue`.)\n\n## Why `finding`, not a queued defect\n\nNothing breaks: `check:docs` compares the generated output to what's committed, so a doc that never had the section stays green — this has apparently been silently true for a while (`EnvironmentDriver` etc. predate #7513 and already showed the same gap before my change touched anything). No runtime path depends on the rendered docs. It's a documentation-quality gap — real `.describe()` text authors wrote to be read is invisible on the one page meant to show it — not a defect a user hits today. Filed unassigned/no `pm:queue` per the observation-class convention.\n\n## Suggested fix shape (not attempted here — out of scope for #7513)\n\nAdd an `else if (mainDef.type)` fallback in `generateMarkdown()` (`packages/spec/scripts/build-docs.ts`, ~line 368) that renders the description (already handled above the type-specific branches) plus a `**Type:** \\`<type>\\`` line for any recognized root type that isn't object/enum/union, instead of falling through to the `if (!mainDef) return ''` case. Would need a fixture pin (a bare-string schema whose description shows up on its page) so this doesn't silently regress again.\n\n---\n_Filed while implementing #7513._\n_Generated by [Claude Code](https://claude.ai/code/session_01JY2Q5Xto1u8YHADgrZDTnk)_"
+}

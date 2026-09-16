@@ -1,0 +1,36 @@
+{
+  "number": 7798,
+  "kind": "pull_request",
+  "title": "fix(service-messaging): store the delivery signature, not the signing secret (#7722)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T15:09:08Z",
+  "updated_at": "2026-08-11T20:07:49Z",
+  "closed_at": "2026-08-11T20:07:48Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": "2026-08-11T20:07:48Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/7798",
+  "body": "Fixes #7722\n\n## The defect, confirmed against `origin/main`\n\n`packages/services/service-messaging/src/objects/http-delivery.object.ts` declared\n`signing_secret: Field.text(...)` and `SqlHttpOutbox.enqueue` wrote `input.signingSecret`\ninto it verbatim, once per attempt row. `sys_http_delivery` declares\n`enable.apiMethods: ['get','list']`, so the column is readable over the ordinary data API.\nBoth producers fed it cleartext: `plugin-webhooks/src/auto-enqueuer.ts` (`signingSecret: sub.secret`,\n:387 / :483) and the Flow `http` node (`service-automation/src/builtin/http-nodes.ts:133`).\nPremise holds as filed.\n\n## The shape\n\nThe issue's suggested shape was a handle resolved at send time (`sys_setting`/`sys_secret` split).\nThis PR takes the stronger option the issue itself names second — **keep it off the delivery record\nentirely** — because the delivery row does not need the key at all:\n\n> A delivery's body is decided at enqueue and replayed byte-for-byte by every retry and by\n> `redeliver()`. So the HMAC has exactly one correct value for the row's whole life.\n\nThe outbox therefore computes the signature **once, at enqueue**, and stores only the result —\n`signature`, `sha256=<hex>`, the same value the receiver is handed on the wire and one-way in\nthe key. The secret is consumed by `enqueue()` and dropped. Reading a delivery row now tells you\nwhat was sent, not how to forge something else.\n\nWhy this over the handle shape, given the datasource path was the reference:\nthe datasource binder exists because a live connection pool must recover the *cleartext* at\nruntime. A delivery does not — it needs one HMAC over one fixed body. A handle would still have\nhad to mint a `sys_secret` row per delivery (a per-attempt ciphertext row on a telemetry table\nwith 30-day retention, with no reaper) and re-resolve it on every retry, to end up in the same\nplace. Both producers keep their `enqueueHttp({ …, signingSecret })` call sites unchanged\nbecause the fix sits at the outbox, so the Flow `http` node stops writing cleartext too.\n\n## Changes\n\n- `http-sender.ts` — owns both halves of the signing contract now: `deliveryBody()` (the exact\n  bytes signed AND sent) and `signBody()`. `sendOnce` sends `delivery.signature` instead of\n  re-deriving an HMAC from a stored secret, so the signer and the transport cannot drift into\n  signing one string and posting another.\n- `sql-http-outbox.ts` / `memory-http-outbox.ts` — sign at enqueue, persist `signature`, drop the\n  secret. Both impls, so a test cannot pass on a row production wouldn't write.\n- `http-delivery.object.ts` — `signing_secret` → `signature` (+ the four generated locale files).\n- `http-outbox.ts` — `HttpDelivery.signingSecret` removed, `signature` added;\n  `EnqueueHttpInput.signingSecret` stays and is documented as consumed-not-stored.\n- `content/docs/automation/webhooks.mdx` — §3.2 column table and §6 signing model.\n- Changeset: patch × `service-messaging`, `plugin-webhooks`.\n\n## Verification record\n\nBoth acceptance checks pass **together**, and neither is an \"it didn't throw\" assertion.\n\n**1. At-rest byte scan after a real delivery** — `service-messaging/src/http-signature-at-rest.integration.test.ts`.\nReal `ObjectQL` + `@objectstack/driver-sql` on better-sqlite3 `:memory:`, real DDL via\n`syncSchemas()`, production `SqlHttpOutbox` + `HttpDispatcher`. After a delivery it runs\n`SELECT *` over the delivery table — every column, not a projection of declared fields, so a\nstale physical column could not hide — and asserts the secret's bytes are absent. The scan is\nitself guarded (it must see the URL and the signature), so an empty dump can never be what makes\nit pass. Cases: webhook, flow, redelivery, unsigned.\n\n**2. HMAC recomputed over the raw body** — same file, plus\n`plugin-webhooks/src/webhook-signing-secret.test.ts`, which drives the full chain from a\n`data.record.created` event through the real `AutoEnqueuer`. Each asserts\n`X-Objectstack-Signature === 'sha256=' + HMAC-SHA256(raw body received, subscriber secret)`,\nand that the signed body is the real event rather than an empty one an HMAC would also match.\nThis doubles as the round-trip pin: the signature is computed *before* the row is written and\nthe body is rebuilt *after* a full `stringify → text column → parse → stringify` round-trip, so\na single changed byte breaks verification instead of shipping an unverifiable delivery.\n\n**Reverse-verification** (the guard fails on the pre-fix behaviour): reinstating the cleartext\ncolumn and the `signing_secret: input.signingSecret` write fails 3 of the 4 at-rest cases, each\non the byte-scan assertion —\n`AssertionError: expected '…' not to contain 'whsec_7722_do_not_persist_me'`.\nThe 4th (unsigned delivery) legitimately passes either way. Temporary edits reverted before commit.\n\n**Gates run locally**\n\n| Gate | Result |\n|---|---|\n| `service-messaging` suite | 18 files / 206 tests passed |\n| `plugin-webhooks` suite | 4 files / 35 tests passed |\n| `turbo typecheck --filter=...@objectstack/service-messaging` (dependents) | 77 tasks passed |\n| `turbo build` — dependents closure of both packages | 66 tasks passed |\n| `pnpm check:docs-audit-scope` | passed |\n\n## Upgrading\n\nThe `signing_secret` column is no longer declared, so an existing database keeps it as an\nunmapped column still holding the old cleartext until it is dropped: `os migrate plan` reports\nthe `drop_column` op, classified **destructive**, so it is never applied unattended. Until then\nthose rows also age out on the table's existing 30-day telemetry retention. **Rotate any signing\nsecret that was exposed.** Code reading `HttpDelivery.signingSecret` off a row should read\n`signature`; the secret is not available there by design.\n\n## Out of scope, filed separately\n\nThe \"does any other outbox/delivery table copy a credential the same way\" sweep found **none** —\nno other outbox/delivery/job object declares a credential-shaped column. It did surface one\nadjacent finding, filed unassigned rather than folded in here: the subscriber's own secret sits\nin cleartext in `sys_webhook.definition_json`, which is not a delivery/outbox row and is outside\nthis issue's acceptance criteria.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01XuxBHt3YbtJ34CSk6kuNWg)_"
+}

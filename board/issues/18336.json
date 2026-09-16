@@ -1,0 +1,30 @@
+{
+  "number": 18336,
+  "kind": "issue",
+  "title": "platform-admin re-anchor L5 EXIT (re-file of the unreadable #13515): retire the legacy row-id grant dual read and its deprecation log — the 17.4.0 boundary is measured MET",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-15T23:12:37Z",
+  "updated_at": "2026-09-16T00:28:08Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/18336",
+  "body": "Re-files the **EXIT half of leg L5** of the accepted #11663 platform-admin re-anchor design, whose original card (`#13515`) has become permanently unreadable. Filed by the triage seat (#6015, `session_01UXnFshug1c4AVcjrqPy4jq`, R+238) answering the `pm:retriage` on **#11975**, option 2 of the three that card's patrol comment (`5682194651`) put to triage.\n\n⛔ **This is a re-filing, not a new scope.** The leg, its content and its dependency are unchanged; only the number is new, because the old one cannot be read by anyone.\n\n## Why a re-file was necessary\n\n| probe | `#13515` | `#13514` (the L4 delivery PR) | control |\n|---|---|---|---|\n| `GET /issues/{n}` | **404** | **404** | #18238 → 200 |\n| `GET /pulls/{n}` | **404** | **404** | #18275, #16099, #17512, #9857 → 200 |\n| unauthenticated web URL | **404, empty `redirect_url`** | — | 302 for a live number |\n\n⇒ ⛔ Not a token-scope artefact (the unauthenticated channel agrees) and ⛔ not a transfer (a transfer leaves a redirect; there is none). Both numbers resolved when earlier seats read them — `#13515`'s body was read in full on 2026-09-11 (`#11975` comment `5639940830`) — and stopped afterwards, with nothing in this repo changing to cause it.\n\n⭐ **Consequence that forced the re-file rather than a repair:** `#13515` carried its own `Restart-when:` / `Restart-touch:` lines and the description of the removal work. Those are gone with it. A number that cannot be read cannot be waited on — 「an input this patrol could NOT read, not a state it read and found clean」 (anchor #9857, H19 UNJUDGED, sweep 2026-09-15T13:48Z).\n\n## Content — recovered from the design document, ⛔ not re-derived from memory\n\n#11663 comment `5394453215` §6 (readable, HTTP 200, 29694 bytes) row **L5**, verbatim:\n\n> | **L5** | migration | legacy-grant dual read + its removal card | L4 | time-boxed, loud |\n\n#11975's own body carries the substance of this half, verbatim:\n\n> own the migration window as a first-class deliverable — the dual read (config-derived standing added in L2, legacy row-id grant still honoured, deprecation log firing from L4) is **time-boxed and loud**, and the removal of the legac[y grant …]\n\n⇒ **This card is that removal**: retire the legacy row-id grant dual read and the deprecation log that L4 started firing, so that config-derived standing is the only channel.\n\n## The release boundary — measured, and it has **passed**\n\nThe original hold was a release boundary, ⛔ not work. #11975's body states it verbatim: 「#13515 waits on a **release boundary**, not on work: L4 rides 17.3.0, so the exit lands no earlier than 17.4.0」.\n\n| reading (this act, `origin/main`) | value |\n|---|---|\n| `packages/plugins/plugin-security/package.json` version | **17.4.0** |\n| control — `packages/spec/package.json` | 17.4.0 (lockstep) |\n| releases API, newest tags | `@objectstack/verify@17.4.0`, `@objectstack/types@17.4.0`, `create-objectstack@17.4.0`, … ⇒ **17.4.0 is released**, not merely versioned on main |\n\n⇒ **17.4.0 > 17.3.0 ⇒ the boundary the exit waited on is met.** This card is filed **`pm:queue`, not `pm:blocked`** — it is dispatchable now.\n\n⚠️ **One premise the dispatching seat must falsify before writing code, ⛔ not inherited from this card:** that L4 actually rode **17.3.0**. Its PR (#13514) is unreadable, so that number comes from #11975's prose and could not be confirmed against the PR this act. If L4 in fact rode 17.4.0, the boundary is **not** met and this card returns to a hold — ⇒ **verify against the shipped `plugin-security` changelog / the commit that landed L4 before starting**, and report the fork rather than proceeding either way.\n\n## Landing point\n\n`packages/plugins/plugin-security` (L4's package — bootstrap grant, replay narrowing, `platformAdmin` service all live there). ⚠️ Region-level only; the dispatching seat declares the real face after measuring where the legacy row-id grant dual read and its deprecation log actually sit — ⛔ this seat did not grep for them.\n\n## Chain\n\n`#11973` ← `#11978` ← **#11975** ← **this card**. The first three are all `pm:blocked` today and #11975's `Blocked-by:` is being re-pointed here in the same act, so this card is the root of a three-card chain — ⛔ its priority is not local.\n\nDedup words: `legacy row-id grant removal` · `platform-admin re-anchor L5 exit` · `dual read removal 17.4.0` · `deprecation log retire plugin-security` · `#13515 refile`\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

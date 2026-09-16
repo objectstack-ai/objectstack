@@ -1,0 +1,35 @@
+{
+  "number": 7809,
+  "kind": "issue",
+  "title": "[finding] The bulk AST write path passes `opCtx.operation` raw, so `purge` / `transfer` / `restore` derive no row scope while `update` / `delete` now do (#7665 asymmetry)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched",
+    "security"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-11T15:32:17Z",
+  "updated_at": "2026-08-12T16:38:34Z",
+  "closed_at": "2026-08-12T16:38:03Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7809",
+  "body": "Found by the PM while reviewing PR #7792 (#7665). **Not a regression** — the behaviour described here is the same before and after that PR — but #7665 creates an asymmetry between the two write paths that deserves a deliberate answer rather than an accident.\n\n## What #7665 changed, and where it stops\n\n#7665 makes an empty write-class policy collection derive its row scope from the caller's `select` narrowing, inside `computeLayeredRlsFilter`. The derivation is written for `operation === 'update' || operation === 'delete'`.\n\nOn the **by-id write pre-image gate (step 2.7)** that is complete coverage, because the gate normalises first (`security-plugin.ts:1487-1489`):\n\n```ts\nconst rlsOperation =\n  opCtx.operation === 'purge' ? 'delete'\n  : opCtx.operation === 'transfer' || opCtx.operation === 'restore' ? 'update'\n  : opCtx.operation;\n```\n\nso all six write verbs reach the derivation as `update` or `delete`.\n\nOn the **bulk AST injection path (step 3)** there is no such normalisation — `opCtx.operation` is passed raw:\n\n- `security-plugin.ts:2113` — `computeRlsFilter(permissionSets, opCtx.object, opCtx.operation, opCtx.context)`\n- `security-plugin.ts:2133` — the ADR-0090 D10 delegator half, same shape\n\nA bulk write arriving as `purge`, `transfer` or `restore` therefore collects no policies for that literal operation name, derives nothing, and has no row scope AND-ed into its AST — while a bulk `update` or `delete` on the same select-only object now does.\n\n## Why it is worth answering rather than assuming\n\nTwo questions, and they have different answers:\n\n1. **Can those verbs reach the AST path at all?** If `opCtx.ast` is only ever populated for `find` / `update` / `delete`, the asymmetry is theoretical and the right fix is a comment saying so. That is a reading job on the engine's dispatch, not a guess.\n2. **If they can**, then a select-only object has bulk `purge` / `transfer` / `restore` unscoped by row visibility while by-id and bulk `update` / `delete` are scoped — the same class of defect #7665 fixed, on the verbs whose blast radius is largest (`purge` destroys; `transfer` reassigns ownership).\n\nNote the two paths already normalise differently for a reason that may be legitimate — the 2.7 gate is asking \"may this caller write THIS row\", the AST path is scoping a set — so the fix may be \"normalise there too\" or may be \"these verbs never take the AST path, and here is the assertion that says so\".\n\n## Related, deliberately not merged into this\n\n- **#1883** (`pm:on-hold`) covers `allowRestore` / `allowPurge` **RBAC** — the object-level bit, a different layer from row scope. If that card is ever taken up, this finding belongs in the same sweep.\n- **#7401** / **#6736** track the opposite direction (authored write wideners going dead). Any fix here must not derive when a write-class policy applies, exactly as #7665 does not.\n\n## Provenance\n\nPM review of PR #7792, verified against `origin/main` at the time of writing (`:1487-1489` normalisation present; `:2113` / `:2133` raw). Filed unassigned and unqueued — recording, not claiming. Sizing note for whoever takes it: the `@objectstack/verify` harness gap (#7762) does not apply here, but the coverage would need a bulk-write fixture on a select-only object, which the #7665 suite (`select-only-write-visibility.test.ts`) already has the personas for."
+}

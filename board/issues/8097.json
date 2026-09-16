@@ -1,0 +1,35 @@
+{
+  "number": 8097,
+  "kind": "pull_request",
+  "title": "fix(plugin-sharing): the `business_unit` recipient expands exactly one unit, not the whole subtree (#7807)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-12T15:18:17Z",
+  "updated_at": "2026-08-12T16:08:56Z",
+  "closed_at": "2026-08-12T16:08:54Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-12T16:08:54Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/8097",
+  "body": "Fixes #7807\n\nImplements the maintainer ruling of 2026-08-12 — **direction 1: narrow the runtime to match the declaration.**\n\n## The defect\n\nThe two business-unit recipient kinds were **declared** as two widths and **enforced** as one. `SharingRuleService.expandRecipient` routed both through the identical `BusinessUnitGraphService.expandUsers` call, whose first act is a BFS over `parent_business_unit_id` — so the two branches differed only in their comments.\n\nA rule authored `recipient_type: 'business_unit'`, which the spec (`ShareRecipientType`), the org-axis lint red-line table and ADR-0057 D5 all describe as *\"exactly one business unit's members (no subtree)\"*, in fact reached that unit **plus every descendant unit's members**. On a three-level tree a division-anchored rule silently granted to every department and office beneath it — an over-grant, and one that left `unit_and_subordinates`, documented as the strictly wider grant of the pair, not wider at all.\n\n## The fix\n\n`business_unit` now resolves through a new `BusinessUnitGraphService.expandUnitMembers()` — members whose `business_unit_id` equals the named unit, no descent. It keeps every other guarantee the subtree walk had: an inactive or out-of-tenant anchor contributes nobody, and an unreadable unit fails closed rather than granting.\n\n`unit_and_subordinates` is **unchanged** and keeps the subtree walk. Both kinds survive; neither is merged into the other or retired, which the ruling names as the outcome to avoid. `expandUsers()` keeps its `IBusinessUnitGraphService` contract meaning (the contract declares it as the descendant expansion) for the `bu:` approver prefix and org rollups.\n\nTwo details worth review attention:\n\n- **The widths cache separately.** Both are keyed by business-unit id, so one shared map would let whichever width ran first answer for the other — the over-grant returning through the cache door. Pinned by a test.\n- **`packages/spec` is untouched**, per the ruling: the declaration was already right, the runtime was wrong.\n\n## Verification — predict-then-mutate ablation\n\nThe prediction was written down before either ablation ran.\n\n**Ablation A — revert only the narrowing (the defect shape).** Predicted: exactly the narrow assertions go red, every wide one stays green. Measured: **8 failures, all narrow-width**; the wide control and the whole `business-unit-graph` suite stayed green.\n\n**Ablation B — narrow BOTH branches (the failure mode this PR must not be).** Predicted: the wide assertions go red, the narrow ones stay green. Measured: **8 failures, all wide-width**, including four in the existing #7729 recompute suite, which turns out to be a second independent control for the wide width.\n\nThe symmetry is the point: it shows the wide pin is a real control rather than a tautology that passes because both branches happen to agree.\n\n## Tests\n\n- `packages/plugins/plugin-sharing` — **490 passed (19 files)**, `typecheck` clean.\n- `packages/qa/dogfood` — the BU-hierarchy e2e proof: **7 passed**, including three new cases proving through the real REST stack that a `business_unit` rule reaches the anchor unit and a subordinate-unit member is **denied**. `typecheck` clean after building the closure.\n- Gates re-derived for the final surface with `scripts/pm/dispatch-gates.mjs` and run green: `check:nul-bytes`, `check:engine-double-contract` (the new fake is **pinned** for both verbs, not debt), `check:test-source-alias`, `check:docs-audit-scope`, `check:changeset-gate-self-tests`, `check:objectui-changeset`, `check-changeset-no-major`.\n\n## Fixture dispositions\n\nThree existing fixtures spelled the limb this PR removes, and each was judged individually rather than batch re-spelled:\n\n- `sharing-rule.test.ts` — a test literally named *\"expands via the BU graph (BFS)\"* asserted the over-grant as if it were the contract. **Replaced wholesale** by the pair: the narrow kind expands one unit, and a new sibling case pins `unit_and_subordinates` expanding the subtree.\n- `showcase-bu-hierarchy-sharing.dogfood.test.ts` — authored `business_unit` to demonstrate *hierarchy widening*, which is `unit_and_subordinates`' own semantics. **Re-spelled** (its two authz-conformance rows are preserved), plus the narrow half added on the same booted stack.\n- `bu-tree-recompute.test.ts` — its `business_unit` case was already anchored at the unit the member belongs to **directly**, so it survives the narrowing unchanged; only its title, which asserted the now-false \"they walk the same subtree resolver\", was corrected.\n\n## Release note\n\nA changeset is included and states plainly that this **reduces** visible rows for any out-of-tree deployment that authored `business_unit` rules relying on the subtree behaviour, with the migration path (switch the recipient to `unit_and_subordinates` if the subtree reach was what you wanted).\n\n## Re-measurement of the ruling's shelf-life claim\n\nThe ruling's \"in-tree migration cost is zero\" rested on a 2026-08-12 measurement that no in-tree rule authors `business_unit`. **Re-verified on current `origin/main` and it still holds** — the showcase app authors `position` and `unit_and_subordinates`, the CRM app authors `position`, and no seeded rule authors `business_unit`. The only in-tree `business_unit` authors were the two test fixtures dispositioned above.\n\n_Generated by [Claude Code](https://claude.ai/code/session_01PEVB6w7D7uCszR9Mw1BL73)_\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01PEVB6w7D7uCszR9Mw1BL73)_"
+}

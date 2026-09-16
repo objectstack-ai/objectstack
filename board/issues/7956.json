@@ -1,0 +1,32 @@
+{
+  "number": 7956,
+  "kind": "issue",
+  "title": "measure: how each driver answers the six non-JSON comparand types (#7872 restart condition b)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "huangyiirene"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-12T08:48:43Z",
+  "updated_at": "2026-08-12T09:22:12Z",
+  "closed_at": "2026-08-12T09:22:12Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7956",
+  "body": "## What this card is\n\nA **measurement**, not a fix. Its whole deliverable is a table plus a judgement about what the table means. No behaviour changes, no refusal is added, no schema is touched.\n\nIt exists because triage named this measurement as restart condition **(b)** on #7872 (comment `5263919935`), in those words: *「the still-unmeasured four-driver divergence matrix (crash/refuse/silent-empty on the six comparands), which now answers \"how much silent divergence exists under the unenforced schema\" and would feed either outcome.」*\n\n\"Either outcome\" is the point: the drivers seat measured (#7872 comment `5261540941`) that comparand-type policy is per-driver **by construction** — every driver calls `parseFilterAST`, which casts object-form filters through unvalidated, and `NormalizedFilterSchema` (which *does* carry type policy for `$gt`/`$between`/`$contains`) has **zero consumers outside `packages/spec`**. Whether the spec seat builds a door (#6017, declaration `5261543992`) or declines it, the same question has to be answered first: **how far apart are the five drivers today?** If they already agree, a door is codifying consensus. If they disagree, the divergence is itself the argument.\n\n## The measurement\n\nSix comparand types, from #7872's measured table on `driver-memory`:\n\n`BigInt(100)` · `() => 1` · `Symbol('x')` · `new Map()` · a class instance · `undefined`\n\nFor each, on each driver, in a scalar comparison (`{qty: {$eq: <value>}}` is the shape #7872 used; extend to a second operator only if it changes the answer). Record which of these happens:\n\n- **crash** — an unhandled throw reaches the caller (record the error, and *whose* it is: the driver's, or a third party's like mingo/knex)\n- **refuse** — a clean typed refusal (record the code, and whether it carries an ADR-0112 envelope)\n- **silent-empty** — 0 rows, no error (the #5240 shape)\n- **works** — rows come back as if the comparand were a normal literal (record what it matched)\n\nFive drivers: `driver-memory`, `driver-sql`, `driver-sqlite-wasm`, `driver-turso`, `driver-mongodb`. Include `driver-memory` rather than copying #7872's numbers — re-measuring it on current `main` confirms or corrects the card that started this.\n\n## Environment constraints — declare what you could not reach\n\nKnown before you start, from the drivers seat's operating notes:\n\n- `mongodb-memory-server`'s binary download is **blocked by the proxy (403)** in this environment. `driver-mongodb` has to be measured **server-free at the translation layer** (what the filter lowers to, and whether the lowering throws) rather than by executing against a real mongod. That is a real answer to a slightly different question — say so explicitly in the row rather than implying an execution result.\n- `driver-sql` (better-sqlite3, `:memory:`) and `driver-sqlite-wasm` run in-process.\n- `driver-turso` has local / replica / remote transports that do **not** behave alike (#6944 is the precedent: the remote transport bypasses paths the other two take). Measure what you can reach without a real Turso endpoint and say which transports the result covers.\n\n**A row you could not measure is a legitimate result.** Write \"not reachable in this environment, because X\" — do not infer it from a sibling driver and do not leave it blank.\n\n## Deliverable\n\nA report on this card **and** a copy of the matrix as a comment on #7872, since that is the card whose restart condition this satisfies. Plus a short judgement: **is the divergence material?** Name the worst cell and say why it is the worst — \"five drivers answer the same wrong thing\" and \"five drivers answer five different things\" have opposite implications for whether a shared door is worth building.\n\n## Explicitly out of scope\n\n- ⛔ **No fix, on any driver.** #7872 is held; this card does not lift that hold, it feeds it.\n- ⛔ **No new conformance cells and no ledger entries.** `check:driver-conformance` currently reads **40 covered / 0 DEBT / 0 exempt** — cleared this week. Adding cells for `driver-memory` / `driver-mongodb` would be capability investment in drivers whose investment is frozen under #5499 (maintainer, restated 2026-08-12 on #6915). If you believe a pin is warranted so the matrix cannot drift silently, **propose it in the report** with the reason; do not add it.\n- ⛔ **Nothing in `packages/spec`.** The door question belongs to the spec seat (#6017).\n\n## Refs\n\n#7872 (the finding and restart condition b) · #6017 (`5261543992`, the cross-seat declaration) · #7596 (why `$eq`/`$in` are deliberately `z.any()`) · #5240 (the silent-empty shape) · #5499 (the investment freeze and its scope)"
+}

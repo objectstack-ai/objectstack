@@ -1,0 +1,36 @@
+{
+  "number": 7915,
+  "kind": "issue",
+  "title": "`os serve` writes its banner and kernel logs to the stdout the stdio MCP transport owns",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-12T04:04:45Z",
+  "updated_at": "2026-08-12T14:45:13Z",
+  "closed_at": "2026-08-12T14:45:13Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7915",
+  "body": "Found while fixing #7645 (PR #7914). Different defect, different seam — filed rather than folded in.\n\n## Symptom\n\nWith `OS_MCP_STDIO_ENABLED=true`, `objectstack serve` uses `process.stdout` as the MCP JSON-RPC channel **and** as its ordinary human/log output. Both streams are interleaved on the same fd.\n\nMeasured on `origin/main` @ `d91fad5` (spawned CLI, `stdio: ['pipe','pipe','pipe']`, a real minted `osk_` key, full child stdout captured). The `initialize` result arrives on **line 517**, behind 516 lines of non-protocol text:\n\n```\n  1  (blank)\n  2    Loading objectstack.config.ts...\n  3  [StandaloneStack] no compiled artifact at '…/dist/objectstack.json' — booting without one …\n  4  2026-08-12T04:02:36.854Z INFO Registered metadata loader: filesystem (file:)\n     … ~490 more kernel log lines …\n499    ✓ Server is ready\n512    Plugins: 29 loaded\n515    Press Ctrl+C to stop\n517  {\"result\":{\"protocolVersion\":\"2024-11-05\", … },\"jsonrpc\":\"2.0\",\"id\":1}\n```\n\n## Why it matters\n\nThe MCP stdio transport is newline-delimited JSON. A spec-conforming client's `ReadBuffer` `JSON.parse`s every line it reads off the server's stdout, so each of those 516 lines is a parse failure surfaced to the client as a transport error before the one valid frame arrives.\n\nTwo independent sources, so fixing one is not enough:\n\n- **the human banner** — `console.log` in the serve command (`✓ Server is ready`, the plugin table, `Press Ctrl+C to stop`). Unconditional, so this holds at the default `OS_LOG_LEVEL=warn` too.\n- **the kernel logger** — `INFO`/`WARN` records go to stdout (`ERROR` was observed on stderr). The capture above used `OS_LOG_LEVEL=info`; at the default level the WARN records and the boot-diagnostics block still land there.\n\nNote the observed direction of the two defects: #7645 meant the channel carried *nothing*, which is also why this one had never been seen. With #7645 fixed the channel works and now demonstrably carries noise.\n\n## Expected\n\nWhen the stdio transport is enabled, `stdout` is reserved for the protocol and everything human — banner, logs, diagnostics — goes to `stderr` (the convention every other MCP stdio server follows). When it is off, nothing changes.\n\n## Not investigated here\n\nWhich seam owns it: the serve command's banner/logger wiring, the kernel logger's stream choice, or a mode flag the MCP plugin sets when it claims stdout. Whoever picks it up should also decide whether `--json`-style stdout-purity rules already in `packages/cli/test/json-stdout-purity.e2e.test.ts` extend to this case.\n\n## Repro\n\n1. Spawn `node packages/cli/bin/run.js serve -p <port> --dev` with `stdio: ['pipe','pipe','pipe']`, `OS_MCP_STDIO_ENABLED=true` and a valid `osk_` key.\n2. Capture the child's stdout in full.\n3. Every line before the first JSON-RPC frame is protocol garbage the client must parse.\n\n(On `main` today, step 3 needs PR #7914 to get a frame at all.)"
+}

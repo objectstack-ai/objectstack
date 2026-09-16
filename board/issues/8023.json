@@ -1,0 +1,36 @@
+{
+  "number": 8023,
+  "kind": "issue",
+  "title": "A `public_read_write` object is only writable by the row's creator — `showcase_contributor` gets 403 editing a `showcase_project` it can read, where the access matrix declares `edit:true`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched",
+    "target:v17"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-12T11:50:21Z",
+  "updated_at": "2026-08-12T15:02:58Z",
+  "closed_at": "2026-08-12T15:01:51Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8023",
+  "body": "Found by a **retest** of `access-security.owd-sharing-matrix` and `access-security.crud-permission-matrix` (QA run #7637) against `origin/main` @ `b602d536`, rebuilt. This is the **only** failing cell of a 124-cell matrix re-drive.\n\n> **Explicitly NOT caused by PR #7792** (the by-id write-visibility fix retested in the same pass) — attribution evidence below. The previous run at `92f26f75` reported this cell as correct (123/124, the single break being the now-fixed #7673), so this looks like a change inside the `92f26f75 → b602d536` window.\n\n## Symptom\n\nA `showcase_contributor` persona **can read** a seeded `showcase_project` but **cannot edit** it:\n\n```\nGET   /api/v1/data/showcase_project/8jdgvvB-1vbptKgO   → 200\nPATCH /api/v1/data/showcase_project/8jdgvvB-1vbptKgO\n      {\"description\":\"contributor edit\"}                → 403 PERMISSION_DENIED\n```\n\nMessage: *\"You do not have access to this record. Contact the person who owns it, or your administrator, if you need access.\"* — the **record-level** pre-image sentence, not the object-level one. Reproduced twice; the project's fields are unchanged.\n\n**Expected 2xx**, because all three inputs say so:\n- `access-matrix.json` grants `showcase_contributor` **`edit: true`** on `showcase_project`;\n- `GET /api/v1/meta/object/showcase_project` reports **`sharingModel: 'public_read_write'`**;\n- **no RLS policy is authored on `showcase_project`** for any position.\n\nThe object-level gate still works correctly and is distinguishable: a `member_default` persona (`edit:false`) gets a *different* message — *\"You do not have permission to perform this action\"*.\n\n## Reproduction\n\n1. Boot stock showcase isolated.\n2. Provision a contributor: `POST /api/v1/auth/sign-up/email`, then as admin `POST /api/v1/data/sys_user_permission_set {user_id, permission_set_id: <showcase_contributor>}` and `POST /api/v1/data/sys_user_position {user_id, position:'contributor'}`, then **re-sign-in** so the session carries the position.\n3. As that persona, `PATCH` any seeded `showcase_project` **it did not create**.\n\n## Root cause (suspected, mechanism-evidenced)\n\nThe platform's own **row-level write ownership floor** stays composed into Layer 1:\n\n`member_default`'s `owner_only_writes` — object `'*'`, operation `update`, `using: 'created_by == current_user.id'`, positions `['org_member']` (`packages/plugins/plugin-security/src/platform-ownership-policies.ts`, #5492) — remains in effect because `ISharingService` **abstains** on a `public_read_write` object (*\"sharing=not_applicable: Baseline already grants the rows sharing would add\"*), and per the documented #5492 composition **an abstain KEEPS the floor**.\n\nNet effect: on a `public_read_write` object, record-level **write** is open only to the row's **creator**, which contradicts the OWD contract.\n\n**Two independent confirmations that this is the `created_by` floor and not a derived select scope:**\n\n1. `POST /api/v1/security/explain {object:'showcase_project', operation:'update', userId:<persona>}` reports the rls layer as **`narrows`** even though `showcase_project` has **zero authored RLS** — while `operation:'read'` reports `not_applicable` with `readFilter: null`.\n2. Cross-object, on an object with no app RLS anywhere: a `showcase_field_ops_delegate` **reads** an admin-created `sys_user_position` row (200) but **PATCHes it 403**, while it can PATCH (200) and DELETE (200) a `sys_user_position` row **it created itself**. Readable-but-not-creator ⇒ refused; creator ⇒ allowed.\n\n## Why this is not PR #7792\n\nOn `showcase_project` the contributor holds **no select-class RLS at all**, so the #7792 derivation (which derives a write scope from the caller's SELECT policies) can only compile a **null** filter there and cannot narrow anything. The retest also confirmed #7792's own guards positively — legitimate in-scope writes still succeed, the widener directions (#7401 / #6736) are not resurrected (6 dogfood files / 34 tests green, plus the fix's own 17/17 pin), and `verify --rls` now reports 20 PROVEN / 0 HOLES.\n\n**Honest limit on the attribution**: a build ablation (rebuilding `plugin-security` at the parent commit) was **not** run — the environment forbids mutating repo sources — so the root cause above rests on the mechanism evidence, not on a differential build. Pinning it to a specific merge needs that ablation.\n\n## Acceptance criteria\n\n- A persona the access matrix grants `edit:true` on a `public_read_write` object can PATCH a row it did not create.\n- The object-level gate is unchanged: a persona with `edit:false` still gets the object-level refusal, with its distinct message.\n- The `created_by` floor still applies where it should — on objects whose OWD does **not** open writes (`private`, `public_read`), a non-owner write stays refused.\n- The #7792 by-id write-visibility behaviour is not regressed (a contributor still cannot write a row outside its select scope).\n\n## Source\n\nRetest of QA run #7637 (`owd-sharing-matrix` clause 3, also surfacing as the single failing cell of `crud-permission-matrix` clause 0) at `b602d536`."
+}

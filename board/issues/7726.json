@@ -1,0 +1,36 @@
+{
+  "number": 7726,
+  "kind": "issue",
+  "title": "invitation-scope-gates: `cancel-invitation` writes `status:'canceled'`, a value absent from the spec `InvitationStatus` enum (spec-vs-platform-object divergence)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:spec",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T12:22:39Z",
+  "updated_at": "2026-08-12T08:39:05Z",
+  "closed_at": "2026-08-12T08:39:05Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7726",
+  "body": "## Symptom\n\n`cancel-invitation` writes `status: 'canceled'` onto the `sys_invitation` row. But the spec enum this item's `source` names as the authority does **not** include `canceled`:\n\n- **Spec (authority named by the item):** `InvitationStatus = z.enum(['pending', 'accepted', 'rejected', 'expired'])` — `packages/spec/src/identity/organization.zod.ts:105`. Four values, no `canceled`.\n- **Platform object (what actually gets written):** a divergent **5-value** select including `canceled` — `packages/platform-objects/src/identity/sys-invitation.object.ts:214`: `status: Field.select(['pending', 'accepted', 'rejected', 'expired', 'canceled'], …)`.\n\n**Consequence:** anything validating an invitation against `InvitationSchema` (which composes `InvitationStatus`) rejects a canceled row. Both refs confirmed present on `origin/main`.\n\n## Root cause\n\nA spec-vs-platform-object **contract divergence**: the two definitions of the invitation status vocabulary disagree by one value. The platform object treats `canceled` as a legitimate terminal state (it is even used in a listView filter, `sys-invitation.object.ts:158` filters `status in ['expired','rejected','canceled']`), while the spec enum omits it.\n\n## Decision needed (routing / authority)\n\nThis needs a maintainer ruling on **which side is authoritative**, then reconcile the other:\n\n- If the **spec enum** is the contract of record → add `canceled` to `InvitationStatus` (`organization.zod.ts:105`). This is the likely direction, hence `domain:spec`.\n- If the **spec deliberately excludes** `canceled` → the platform object and the `cancel-invitation` writer must stop producing it (use `rejected`/`expired` semantics, or drop the value).\n\nFiled under `domain:spec` (the enum) with a note to reconcile the platform object; **flag the decision** rather than assume the fix side.\n\n## Reproduction\n\n1. Create an invitation (`status:'pending'`).\n2. `cancel-invitation` on it.\n3. Read the row → `status:'canceled'`.\n4. Validate that row against `InvitationSchema` / `InvitationStatus` → rejected, because `canceled` is not in the spec enum.\n\n## Source\n\nExtracted from the QA run objectstack-ai/objectstack#7663 (framework 92f26f75, console 09987b680)."
+}

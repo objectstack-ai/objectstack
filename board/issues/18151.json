@@ -10,16 +10,20 @@
     "id": 6219465,
     "type": "User"
   },
-  "labels": [],
+  "labels": [
+    "pm:queue",
+    "priority:p2",
+    "repo:objectui"
+  ],
   "assignees": [],
   "milestone": null,
-  "type": null,
+  "type": "Bug",
   "created_at": "2026-09-14T06:54:16Z",
-  "updated_at": "2026-09-14T06:54:16Z",
+  "updated_at": "2026-09-16T01:02:57Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 0,
+  "comments": 1,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/18151",
   "body": "**Finding, not a claim on anyone's queue** — filed by the video-production lane while shooting a promo film against `hotcrm`. We are not taking this on; feel free to close as working-as-intended if the summary is not meant to reach the board header.\n\n## What we observed\n\nA kanban view declares `summarizeField: 'amount'` on an Opportunity board. The column header renders **only a count badge** — the summed amount never appears anywhere on the column.\n\nThe count badge itself is live and correct: dragging a card across columns updates it immediately (observed 2→1 and 2→3 on the two affected columns).\n\n## Why it mattered to us\n\nThe film's script had a beat on \"the column total re-computes as you drag\". We measured the behaviour, found the total is not rendered, and **cut that beat from the script** rather than imply a capability that isn't there.\n\n## Environment\n\n- `hotcrm` `main` @ `c716a2c` (17.4.0), `OS_PRODUCT_STAGE=ga`\n- Opportunity board grouped by `stage`, viewport 1920×1080\n\n## What would resolve it for us\n\nEither the header renders the `summarizeField` aggregate, or the docs/type state plainly that `summarizeField` is not consumed by the kanban header — so the next person reading the view config doesn't expect a total.\n\nContext: promo-video ticket steedos-labs/video-studio#356 (private repo; the finding above is self-contained)."

@@ -1,0 +1,35 @@
+{
+  "number": 7925,
+  "kind": "issue",
+  "title": "`service-settings` has no `typecheck` script — turbo silently no-ops it, and ~5 test files carry pre-existing type errors behind the unwired gate",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "huangyiirene"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-12T04:33:53Z",
+  "updated_at": "2026-08-12T09:51:00Z",
+  "closed_at": "2026-08-12T09:51:00Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7925",
+  "body": "Out-of-scope finding from the #7759 landing lap (PR #7759, `SECRET_MASK` hoist — the lap ran consumer-package verification and hit this). Filed unassigned per the #4949 discipline.\n\n## What was measured (2026-08-12, on the #7759 lap worktree @ merge of `origin/main`)\n\n- `packages/services/service-settings/package.json` defines only `build` and `test` — **no `typecheck` script**. Its sibling `service-messaging` has one.\n- The CI-equivalent command `turbo run typecheck --filter=@objectstack/service-settings` exits **0** while never running a `service-settings:typecheck` task: turbo silently no-ops packages missing the script. So \"typecheck green\" for this package is a claim nothing enforces — the declared-but-unexecuted-gate shape.\n- An ad-hoc `tsc --noEmit` in the package directory DOES surface real type errors, in `ai.manifest.test.ts`, `sms.manifest.test.ts`, `storage.manifest.test.ts`, `settings-service.test.ts`, `settings-translation-coverage.test.ts`. Git history shows these files last touched by old, unrelated commits (#3598–#7310 range) — the errors are pre-existing, not introduced by #7759 or the last 24h of main.\n\n## Why this is an issue and not a lap fix\n\nA landing lap makes no source-logic edits; and the fix has two halves that deserve one deliberate PR: (a) add the `typecheck` script (one line), (b) clear the accumulated type errors it immediately surfaces — which requires reading whether each error is a stale test or a real contract drift. The precedent shape is #4855 (`qa/dogfood`'s unexecuted tsconfig hiding 14 errors) and #5475 (`spec/scripts` outside every tsconfig include): both were graded and fixed as restore-invariant cards.\n\n## Suggested acceptance\n\n`turbo run typecheck --filter=@objectstack/service-settings` actually executes a typecheck task and it is green; the five files' errors are resolved or individually justified. Worth a quick sweep for OTHER packages missing the script in the same pass (`jq` over all workspace `package.json`s) — the silent no-op applies to every one of them."
+}

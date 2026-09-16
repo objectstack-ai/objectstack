@@ -1,0 +1,36 @@
+{
+  "number": 7821,
+  "kind": "issue",
+  "title": "REST: the UNIQUE_VIOLATION 409 message is hard-coded English and carries no field — and it is less informative than the bulk path's own message for the same constraint",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T16:24:02Z",
+  "updated_at": "2026-08-12T06:22:47Z",
+  "closed_at": "2026-08-12T06:22:47Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7821",
+  "body": "**Version:** `@objectstack/*@17.0.0-rc.6` (message originates in `@objectstack/rest`, `packages/rest`)\n\n## What happens\n\nSave a record that violates a `unique: true` field and the REST layer answers with a hard-coded English sentence that no application can localize or override:\n\n```\nPOST /api/v1/data/<object>            → 409 Conflict\n{\"error\":\"A record with this value already exists\",\"code\":\"UNIQUE_VIOLATION\",\"object\":\"<object>\"}\n```\n\nConsole renders `body.error` verbatim — in the form's error banner **and** in the toast. So an application whose every label, option and validation message is fully translated still shows this one English sentence to its end users, on one of the most commonly hit validation paths there is.\n\nThis is a server-side string, not a Console one — I checked both directions before filing:\n\n- the response body above carries it (read off the browser network panel on a real save, not inferred);\n- it appears in **none** of the Console bundle chunks (`index-*.js`, `framework-*.js`, `ui-components-*.js`, `vendor-*.js` — 0 hits, including the 2.8 MB `ui-components` chunk).\n\n## Minimal repro\n\n1. Any object with a `text` field declared `unique: true` — e.g. `invoice.serial_no`.\n2. Create a record with `serial_no = \"A-001\"`.\n3. Create a second record with the same `serial_no`, from the Console form or by `POST /api/v1/data/invoice`.\n4. → 409 with the body above; the Console banner/toast show the raw English sentence.\n\n## The part that looks like an outright inconsistency\n\nThe same package already knows how to do better on the **bulk / row** path. `sanitizeRowError` resolves the offending column and names it:\n\n```js\nvar UNNAMED_CONFLICT = \"A record with this value already exists.\";\nfunction sanitizeRowError(raw) {\n  ...\n  if (isUniqueViolationError(msg)) {\n    const column = uniqueViolationColumn(msg);\n    return column ? `A record with this ${column} already exists.` : UNNAMED_CONFLICT;\n  }\n```\n\n…while the single-record error envelope hard-codes the *unnamed* variant even though `uniqueViolationColumn` is right there and the error object is in hand:\n\n```js\nif (isUniqueViolationError2(error)) {\n  return {\n    status: 409,\n    body: {\n      error: \"A record with this value already exists\",\n      code: \"UNIQUE_VIOLATION\",\n      ...object ? { object } : {}\n    }\n  };\n}\n```\n\nSo the same platform gives two different answers to the same constraint depending on whether the write came in one row at a time or in a batch: the batch path tells the user *which field* collided, the single-record path does not. On a record with several unique fields, the user is told only that \"a value\" is taken and has to guess which one.\n\n## Why a client cannot work around it\n\n`code: \"UNIQUE_VIOLATION\"` is in the body, which is enough to detect the class of failure — but the body carries **no `field` / `column`**. A client that wanted to render its own localized message therefore cannot name the field either; the only thing it can produce is a generic \"some unique value is taken\", which is strictly worse than what the platform itself already computes on the bulk path.\n\nNote the asymmetry with application-authored errors: an error thrown from an app's own hook has its `message` surfaced verbatim, so app authors *can* localize those. It is specifically the platform's built-in constraint errors that are stuck in English.\n\n## Expected\n\nEither of these would close it; (b) alone is already enough to unblock clients:\n\n- **(a)** resolve the message through the i18n service the way other user-facing platform strings are, so a locale bundle can translate it and an application can override it;\n- **(b)** include the offending field in the 409 body (`field` / `column`, alongside the existing `code` and `object`), so a client can build its own localized message — and, while there, reuse `uniqueViolationColumn` in the single-record branch so its default message reaches parity with the bulk path.\n\nSame treatment would apply to the sibling constants in `sanitizeRowError` (`\"... is required.\"`, `\"The database rejected this row (a value may be invalid or already in use).\"`, `\"Row failed\"`), which are user-visible on the import path for the same reason.\n"
+}

@@ -1,0 +1,36 @@
+{
+  "number": 8034,
+  "kind": "issue",
+  "title": "mcp-stdio-fail-closed c3 (follow-on): the stdio transport now answers, but registers ZERO tools — advertises `tools` capability, `tools/list` → -32601",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-12T12:39:55Z",
+  "updated_at": "2026-08-12T15:50:28Z",
+  "closed_at": "2026-08-12T15:50:28Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8034",
+  "body": "Follow-on to #7645, found by re-testing it. **#7645 is genuinely fixed and this is not a regression of it** — the stdio transport is no longer deaf: `initialize` now answers immediately (it used to time out with zero bytes on stdout), and `resources/list`, `resources/templates/list` and `resources/read` all answer. The five fail-closed clauses were each re-proved from scratch rather than carried over, and they all hold. What the fix made *visible* is a second, independent gap that was previously masked by the deafness.\n\n**This is not an RLS bypass.** The one principal-bound read path stdio does expose (the record resource template) was driven on both sides and the gate held: a member key reads its own row in full and gets `not found` for another principal's row; an admin key reads both — matching REST row-for-row.\n\n## Symptom\n\nThe stdio server's `initialize` result advertises `capabilities.tools: {}`, but the tool surface is empty:\n\n- `tools/list` → `-32601 Method not found`\n- every `tools/call` → `-32601 Method not found`\n- across **4 fresh boots**, and on retry at +3 s and +8 s after `notifications/initialized` (ruling out a registration race)\n\n**Decisive isolation:** in the *same process*, with the *same* `osk_` key, the **HTTP** transport (`POST /api/v1/mcp`) returns all **11** tools. So the bridge, the key, and the principal are all fine — the tools are simply never registered on the stdio server.\n\nBoot log corroborates: `[MCP] Bridged 4 resource endpoints`, `Agent prompts bridged`, `[MCP] Bridged 0 skill prompts` — and **no tool-bridging line at all**.\n\n## Root cause\n\nThe object/action tool surface is built **per HTTP request**, on a throwaway server, and never on the long-lived stdio server.\n\n`packages/mcp/src/mcp-server-runtime.ts` — `handleHttpRequest()` constructs a fresh `McpServer` per request and registers the tools onto *that* instance:\n\n```ts\n// mcp-server-runtime.ts:1157,1166 — inside handleHttpRequest()\nregisterObjectTools(server, opts.bridge, opts.toolOptions);\n...\nregisterActionTools(server, opts.bridge as McpActionBridge, opts.toolOptions);\n```\n\nThe long-lived server used by stdio (`this.mcpServer`) only ever receives tools through `bridgeTools(toolRegistry)` (`mcp-server-runtime.ts:663`), which is a **different surface** — the AI service's function-calling `ToolRegistry`, wired in `packages/mcp/src/plugin.ts:138`:\n\n```ts\nconst aiService = ctx.getService<IAIService & { toolRegistry?: ToolRegistry }>('ai');\nif (aiService?.toolRegistry) this.runtime.bridgeTools(aiService.toolRegistry);\n```\n\nThe showcase registers no `ToolRegistry` tools, so zero tools land on the stdio server. `registerObjectTools`/`registerActionTools` are imported **only** at line 9 and called **only** from inside `handleHttpRequest` — there is no path that reaches them for stdio.\n\nThe `-32601` alongside an advertised `tools` capability is consistent with this: the MCP SDK only wires the `tools/list` handler once at least one tool is registered, while the capability object is declared statically at construction.\n\n## Reproduction\n\n1. Boot the showcase with stdio MCP enabled: `node packages/cli/bin/run.js serve -p <port> --dev` with `stdio: ['pipe','pipe','pipe']`, `OS_MCP_STDIO_ENABLED=true`, and a valid `osk_` key.\n2. Write JSON-RPC `initialize`, then `notifications/initialized`, then `tools/list` to the child's stdin.\n3. Against the same process, `POST /api/v1/mcp` with the same key and body `{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/list\"}`.\n\n**Expected** both transports expose the same tool surface (11 tools).\n**Actual** HTTP returns 11 tools; stdio returns `-32601 Method not found`, while its own `initialize` result claims `capabilities.tools: {}`.\n\n## Blast radius\n\nEvery MCP client that speaks stdio (the transport most desktop MCP hosts default to) sees an ObjectStack server with resources and prompts but **no tools** — it cannot query or mutate a single object. The 17/17 unit pins stay green because they exercise `handleHttpRequest` and `bridgeTools` separately, never asserting the two transports agree on the tool surface.\n\n## Downstream in the checklist\n\n`ai.mcp-stdio-fail-closed` clauses 4/5 are `blocked` by this (no aggregate to reconcile against on stdio). Clause 5 has a *separate* fixture gap worth recording: the factory showcase has **no `readable: false` FLS-masked field anywhere** (repo-wide grep is zero), runtime authoring of one is refused `403 NOT_OVERRIDABLE`, and the scratch-artifact escape hatch fails because the connector provider factory comes from `objectstack.config.ts`.\n\n## Suggested shape (not prescriptive)\n\nRegister the object/action tools on the long-lived server too — either by hoisting the `registerObjectTools`/`registerActionTools` pair into a shared `wireTools(server, bridge, opts)` called from both `start()` (stdio branch) and `handleHttpRequest()`, or by having stdio route through the same per-request assembly. Whatever the shape, the gate that keeps this from coming back is **a test that asserts the two transports expose the same tool names for the same bridge** — the current pins can't see a divergence.\n\n## Source\n\nExtracted from the checklist retest run (framework `b602d536`, console `6314e87f2d49`), re-testing #7645.\n"
+}

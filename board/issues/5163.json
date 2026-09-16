@@ -1,0 +1,32 @@
+{
+  "number": 5163,
+  "kind": "issue",
+  "title": "C 包 program card:协议工具链/门禁车道(`domain:spec-tooling`)—— 整包移交待接收",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "tracking"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T07:17:38Z",
+  "updated_at": "2026-08-12T08:29:55Z",
+  "closed_at": "2026-08-12T08:29:55Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5163",
+  "body": "## 这是什么\n\nspec 车道(session `session_01Ehu85kbvMcrNTUJjwxvLJ9`)按维护者 2026-08-04 指示切出的**整包移交**:协议工具链、门禁加固与配套 docs 修,共 **14 单**。目标是把 spec 车道的开发席 100% 留给 v17 切版链,同时让门禁债并行清掉。仿 #5040(B 包/执行器)先例:**包边界以本卡清单为准,标签只是查询辅助**。\n\n## 选单口径\n\n`label:domain:spec-tooling` + 本卡清单。这 14 单已从 `domain:spec` 摘出、换挂 `domain:spec-tooling`,两条车道查询天然不相交。\n\n### 门禁加固(7)\n\n- #4642 spec 的「编译期 pin」失效(tsconfig 排除 *.test.ts,vitest 不做类型检查)\n- #4659 build-schemas.ts 检查 (b) 叶名匹配可被无关簇冒充「已登记迁移」\n- #4663 `authorable-surface.json` 手编实锤 → 建字节级 round-trip 门(`JSON.stringify(gen(), null, 2)` 逐字节相等)\n- #4690 check:react-declaration-parity 没接进任何 workflow,无 MANIFEST 静默 skip 退出 0\n- #4696 build-docs.ts 按裸名建 schema→页面索引,同名跨 category 归错页\n- #4723 `check:docs` 第一步 `gen:schema` 改工作区(#4711 的残洞)\n- #4725 json-schema.manifest.json 「deliberate removal」删行仍是纪律非门禁(#4650 同类洞上移整 schema 级)\n\n### 生成/报错工具(4)\n\n- #4912 gen:docs 把数组内 passthrough 对象渲染成 `Record<string, any>[]`,抹掉已声明键\n- #5056 #4001 门测量 BFS 误报「可达」:zod `.describe()` 共享 def 对象,单属性 bridge 连通无关形状\n- #4990 未知键「你是不是想写」兜底对 camelCase 系统性偏弱(输入被小写化)\n- #4971 formatZodError 把 union 分支拒绝压成 \"Invalid input\",策展散文到不了 CLI 作者\n\n### docs 修(3)\n\n- #5125 ISharingService.canEdit 未提 modifyAllRecords 旁路(canDelete 提了)\n- #4749 AREA_REQUIRED_PERMISSIONS_RETIRED 处方在 #4722 后过时\n- #4759 `content/docs/references/index.mdx` 根索引表烂尾(⚠️ 这是 `references/`,不是 `releases/` —— ⛔ `content/docs/releases/` 任何 PR 都不许碰)\n\n## 协议影响与发布窗口定性(维护者 2026-08-04 问询后补记)\n\n- **零协议影响**:全包不改任何 schema 的接受/拒绝行为,不动 authorable surface,无 tombstone/conversion,wire 零变更 —— 所以无一单需要 `target:*` 标签,不受 changeset pre 窗口约束,17.0.1 / 17.1 任何时点可发。\n- **升级体验分层**:#4971 / #4990 / #4749 / #4912 决定客户升级 v17 撞上严格化拒绝时**看到什么**(报错散文、did-you-mean、退役处方、reference 词表),建议卡着 v17.0 GA 节奏优先;其余 10 单客户无感,纯内部债。\n\n## 明确除外(满足 `tooling` 查询但**不在**本包,留 spec 车道)\n\n- #5107(台账数字/散文分家)—— 台账手术,与 spec 批次强耦合\n- #5072(AST 计数器误读 `strictObject().passthrough()`)—— 搭 #5107 的车,同一文件面\n- #5068(SDUI props 闸门)—— `needs-user-decision` 决策位,非执行单\n\n## 边界与协作规则\n\n1. **文件面**:`scripts/**`、`packages/spec/scripts/**`、`packages/lint/**`、`content/docs/**`(⛔ 除 `content/docs/releases/`)。**不碰 `packages/spec/src/**/*.zod.ts` 与 `docs/audits/2026-07-unknown-key-strictness-ledger.md`**(strictness 台账)—— 那是 spec 车道单一所有者面;若某单的修复确需动 zod 文件,先到本卡留言,由 spec 车道协调串行。\n2. **无 v17 耦合**:本包没有一单卡 v17 切版;不需要 `target:*` 标签,不受 changeset pre 窗口约束。\n3. **接收流程**:接手 PM 在 #4604 登记(会话 ID + 本卡编号 + 域标签 `spec-tooling`),然后按标准认领协议逐单派发(assign + 会话 ID/分支 claim 评论,worktree-first)。\n4. **spec 车道自本卡立起停派这 14 单**;它们在 `pm:queue` 待新 PM。若 48h 无人登记接收,spec 车道恢复按空位插派并撤销本卡。\n\n## 建议起手顺序\n\n**升级体验优先**:#4971(union 拒绝散文)→ #4990(camelCase did-you-mean)→ #4749(退役处方过时)→ #4912(reference 页词表)—— 四单都小,卡 v17.0 GA 节奏先落。\n门禁组随后:#4663(字节级门,最小)→ #4725/#4723(生成检查闭环)→ #4690(接进 workflow)→ #5056(BFS 误报)→ 其余按容量。\n注:此为价值排序,非窗口约束 —— 全包均非破坏性,任何 17.x 可发。\n\n(spec 车道 PM 立卡,session `session_01Ehu85kbvMcrNTUJjwxvLJ9`)"
+}

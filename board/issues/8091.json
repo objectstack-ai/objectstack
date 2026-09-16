@@ -1,0 +1,34 @@
+{
+  "number": 8091,
+  "kind": "issue",
+  "title": "console: switching organization can land a member on a chrome-less \"no apps\" page — resolveLandingPath ignores per-user app access",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "priority:p2",
+    "repo:objectui"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-12T15:08:12Z",
+  "updated_at": "2026-08-12T15:55:34Z",
+  "closed_at": "2026-08-12T15:55:34Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8091",
+  "body": "Switching the active organization (and accepting an invitation, which switches as its last step) can land the user on a page with **no header, no navigation and no workspace switcher** — there is no way back except editing the URL by hand.\n\n## Repro\n\n1. User A (owner of workspace *甲*) invites user B as `member`.\n2. B accepts the invitation, then creates a workspace of their own (*B's workspace*, where B is owner).\n3. As B, from `/_console/home` of *B's workspace*, open the workspace switcher → select *甲*.\n\n## Actual\n\nB lands on `/_console/apps/setup` and sees a bare page:\n\n> 尚未配置应用 — 当前没有任何已注册的应用。请创建您的第一个应用，或前往系统设置进行配置。\n\n`document.querySelectorAll('header').length === 0` — no top bar, no workspace switcher, no way to switch back. The same page is reached right after accepting an invitation (`AcceptInvitationPage` calls `navigate('/home')`, but the org switch triggers a full-page load to the console root, which re-resolves the landing).\n\n`/_console/home` in the very same state renders correctly: top bar, workspace switcher, and a friendly empty state (\"还没有应用 — 工作区正在准备中——管理员共享给你的应用会显示在这里。\"). So the landing target is the problem, not the workspace.\n\n## Expected\n\nSwitching into an organization never strands the user. If the resolved landing app is not accessible to the current user in the target org, fall back to `/home`.\n\n## Cause\n\n`WorkspaceSwitcher` does a full-page navigation to the console root so `RootLandingRedirect` can resolve the landing (`packages/app-shell/src/layout/WorkspaceSwitcher.tsx:97`). `resolveLandingPath` then picks the app **purely from app metadata**, with no notion of whether the current user may enter it:\n\n```ts\n// apps/console/src/components/RootLandingRedirect.tsx\nconst visible = list.filter((a) => a.active !== false && a.hidden !== true);\nif (visible.length === 1) return `/apps/${visible[0].name}`;   // ← rule 2\n```\n\nIn a fresh workspace `com.objectstack.setup` is the only visible app, so rule 2 sends **every** user to `/apps/setup`. A `member` has no access to it (`sys_permission_set` reads 403 for positions `[org_member, everyone]`), and the app surface renders the chrome-less empty state above.\n\nNote the resolver is documented as a *product* decision (\"a build/dev-time PRODUCT decision, declared in metadata — not a runtime, per-tenant preference\"). That is fine for choosing *which* app a product lands in; the gap is that the result is not checked against the *current user's* access before redirecting.\n\n## Suggested fix\n\nEither filter the candidate list by the user's app access before applying rules 1–2, or make the app surface itself bounce to `/home` (with the shell chrome) when the app is not accessible, instead of rendering a chrome-less empty state. The second also covers a hand-typed `/_console/apps/<inaccessible>` URL.\n\n## Environment\n\nLocal dev server `http://localhost:8080`, multi-org enabled, zh locale, observed 2026-08-12. The server was started by the maintainer and its exact commit is not verified; the source quoted above is the current `objectui` main checkout.\n"
+}

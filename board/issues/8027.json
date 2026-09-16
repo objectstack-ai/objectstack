@@ -1,0 +1,35 @@
+{
+  "number": 8027,
+  "kind": "issue",
+  "title": "A tenant object overlay drops every `objectExtensions` field from the resolved schema, and `effective` contradicts `code` in the same response",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "huangyiirene"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-12T12:00:51Z",
+  "updated_at": "2026-08-12T14:13:49Z",
+  "closed_at": "2026-08-12T14:13:49Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8027",
+  "body": "Filed by the `domain:metadata` PM seat on behalf of #7556's dev, which measured this while fixing that card but could not file it — the `objectstack-ai` org has no Claude GitHub App connection, so cloud dev containers get 403 on the GitHub API. Text is the dev's.\n\n**Measured, not inferred; distinct from #7556 and not caused by its fix (PR #8015).**\n\n## The defect\n\nWhen a `sys_metadata` overlay row exists for an object — e.g. an admin customises the object's label in Studio — the protocol's by-name read **replaces the resolved body with the raw stored row**, and the list read does the same via `mergePackageAwareOverlay`, which **replaces wholesale rather than merging fields**.\n\n⚠️ **Both routes therefore agree — which is precisely why #7556's agreement pin does not catch it** — but they agree on a body that has lost every `objectExtensions` field.\n\n## Measured\n\nOne `extend` contributor (`loyalty_tier`, `linkedin_url`, `csat_score`), one env-wide overlay row, no metadata service:\n\n```\nbyName fields:     name, industry + system columns   — no extension fields\nlisted fields:     identical                          — no extension fields\nlayers.code:       has all 3                          (correct, ADR-0029 D9.6)\nlayers.overlay:    the raw row                        (correct)\nlayers.effective:  no extension fields\n```\n\n⇒ **A single `?layers=true` response reports a `code` layer that has the fields and an `effective` layer that does not, with no customisation explaining the difference.**\n\n## Why this looks wrong\n\nADR-0029 **D9.2** states the base layer is `overlay ?? own` and that extenders are **then folded on** — which is exactly what `SchemaRegistry.resolveObject` does for overlays it knows about. **The protocol's `sys_metadata` path never folds.**\n\nThe practical consequence mirrors #7556: an admin who customises an object's label **silently removes three extension-contributed fields from every writable form**, while the data API keeps accepting and persisting them.\n\n## Suggested shape — ⚠️ and a trap in it\n\nDeliberately **not** implemented in #7556: it widens blast radius beyond that card and needs its own reverse-verification.\n\nTreat the overlay row as the **base layer** and fold extenders onto it, matching D9.2, rather than serving it as the resolved schema.\n\n⚠️ **`mergeObjectDefinitions` concatenates validations and indexes, so the fold is NOT idempotent.** Any fix must establish that the stored row has not already been through it — a row saved from a previously-merged read may already contain extension fields, and folding again would duplicate validations and indexes. This is the part most likely to be missed.\n\n## Reproduction\n\nRegister an object `own` plus an `extend` contributor, seed one `sys_metadata` row (`type:'object'`, `state:'active'`, `organization_id:null`) whose body is the un-extended object, then compare `getMetaItem` / `getMetaItems` / `getMetaItemLayered`.\n\n## Note for whoever picks this up\n\n⚠️ This card is a good candidate for the same **agreement-pin** discipline #7556 used — but note that an agreement pin alone is **insufficient here**, because the two routes already agree. The assertion needs to be against **the registry's resolved schema** (what D9.2 defines), not against the other route."
+}

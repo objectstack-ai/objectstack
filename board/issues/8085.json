@@ -1,0 +1,33 @@
+{
+  "number": 8085,
+  "kind": "pull_request",
+  "title": "docs(objectql): audit the three unverified delete-phase hook bullets — all correct, and the audit recorded (#7933)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-12T14:56:03Z",
+  "updated_at": "2026-08-12T15:34:05Z",
+  "closed_at": "2026-08-12T15:34:02Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-12T15:34:02Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/8085",
+  "body": "Fixes #7933\n\nAudits the three never-verified entries of the delete-phase hook bullet list in `packages/objectql/src/engine.ts` — `plugin-auth`, `plugin-sharing`, `service-storage` — against each package's actual current hook registrations.\n\n**All three are correct as written**, on both halves (hook name and which gate term they hold). No bullet's substance changed. The diff is 13 comment lines recording the audit.\n\n## Verdict per bullet\n\n**1. `plugin-auth` identity-write-guard `beforeDelete` — CORRECT (term 1 only).**\n`packages/plugins/plugin-auth/src/identity-write-guard.ts:199`, bound by `registerIdentityWriteGuard`:\n`engine.registerHook('beforeDelete', rejectWrite('delete'), { priority: 10, packageId })` — no `object` key, so global. The handler opens by returning unless `isManaged(ctx.object)`, as the bullet claims. The package registers no `afterDelete` at all, so \"term 1 only\" is right.\n\n**2. `plugin-sharing` record-share-cascade `before+afterDelete` — CORRECT (terms 1 and 2).**\n`packages/plugins/plugin-sharing/src/record-share-cascade.ts:320` and `:331`, bound by `bindRecordShareCascade`, both registered with `opts = { packageId: RECORD_SHARE_CASCADE_PACKAGE, priority: 190 }` — no `object` key. Both handlers open with `const t = targets(objectName); if (!t.shares && !t.links) return;`, matching the bullet's named filter.\n\n**3. `service-storage` file-reference-lifecycle `before+afterDelete` — CORRECT (terms 1 and 2).**\n`packages/services/service-storage/src/file-reference-lifecycle.ts:782` and `:801`, bound by `installFileReferenceHooks`, both `{ packageId: PACKAGE_ID }` — no `object` key. Both handlers open with `if (activeFileFields(engine, object).length === 0) return;`, matching the bullet's named filter.\n\nNone of the three modules has moved or been retired.\n\n## The \"global\" premise, checked rather than assumed\n\nThe paragraph above the list asserts every listed hook registers with **no** `object`. Verified from both ends:\n\n- `hookMatchesObject` (`engine.ts:1026`) treats an absent `entry.object` as global, so an object-less registration makes `hasHooksFor` true for every object.\n- Every **other** delete-phase registration in `packages/plugins` and `packages/services` is object-scoped: `last-admin-guard` (four, on `sys_user` / `sys_member` / `sys_user_permission_set` / `sys_permission_set`), `rule-hooks` (`object: objectName`), `primary-bu-projection` and `bu-tree-recompute`, `attachment-lifecycle` and `attachment-access-hooks` (`sys_attachment`), `comment-access-hooks` (`sys_comment`), and metadata-driven record-change triggers (`object: binding.object`).\n\nSo the list's population — the global delete-phase registrants — is **complete**, not merely accurate. `plugin-sharing` says the same thing independently at `sharing-plugin.ts:513`: \"Not bound per object: the posture is judged per delete from live metadata\".\n\n## The gate itself was retired mid-flight\n\nPR #7989 (issue #7867) landed during this work and **retired the three-term `wantsPreImage` gate**: the `const wantsPreImage =` expression is gone from `main`, and only the prose mention survives inside its own RETIRED banner. That PR deliberately **kept** this bullet list, because its retirement rationale leans on it:\n\n> On any kernel loading the global registrants enumerated above, term 1 or 2 was already true for every object, so this skipped nothing there anyway.\n\nThat makes the audit worth more rather than less: the sentence the retirement stands on is exactly the claim these three bullets encode, and it had never been checked. `origin/main` is merged in here, its RETIRED banner preserved verbatim, and the audit note reframed to sit beneath it and say what it now supports.\n\n## Verification\n\n- Gates on the merged state: `check:adr-anchors`, `check:durability-log-level`, `check:engine-double-contract`, `check:stack-collection-maps`, `check:nul-bytes` — all pass\n- `node scripts/check-engine-split-ratio.mjs` — report-only metric, ran clean\n- `pnpm --filter @objectstack/objectql typecheck` — clean\n- `pnpm --filter @objectstack/objectql test` — 190 files / 3376 tests passed\n- ESLint on `engine.ts` — clean\n\nA first typecheck run reported `TS7006` in `registry.ts` — a file this PR does not touch. It was a stale-`dist` false red: the merge brought in `checkManagedApiMethodAffordances` (from #7851) while the built closure predated it. Rebuilding with `pnpm --filter '@objectstack/objectql^...' build` cleared it. `main` is not broken.\n\nComments-only diff, no test file touched, so neither repo-wide ratchet moves — this carries the `skip-changeset` label rather than a changeset, since an empty-frontmatter one would be rejected by `check-empty-changeset.mjs`.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_014C8pAprWdmtecFsEprZax4)_"
+}

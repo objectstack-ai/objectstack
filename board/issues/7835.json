@@ -1,0 +1,32 @@
+{
+  "number": 7835,
+  "kind": "issue",
+  "title": "plugin-security injects org- and owner-shaped predicates onto federated external objects too — the #7738 defect on a layer outside objectql",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "huangyiirene"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T18:45:48Z",
+  "updated_at": "2026-08-12T08:33:43Z",
+  "closed_at": "2026-08-12T08:33:43Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7835",
+  "body": "Reported by #7738's dev as `out_of_scope_findings` ([report §4](https://github.com/objectstack-ai/objectstack/issues/7738#issuecomment-5257162554)), deliberately not fixed there — `plugin-security` was outside that card's cleared lane. Filed unassigned.\n\n## Context: what #7738 did and did not close\n\n#7738 / PR #7833 withholds `DriverOptions.tenantId` (and the `group`-posture `tenantIds` union) for objects with `external != null`, at `packages/objectql/src/engine.ts:2528`. Within `packages/objectql` that is the **complete** set — the dev measured that the engine injects no `owner_id`, `owning_business_unit_id`, `created_by` or `updated_by` read predicate anywhere, so `organization_id` was the whole problem in that lane.\n\n**Two sibling injectors live on a different layer and are untouched.**\n\n## The two siblings\n\n| injector | column | site |\n|:---|:---|:---|\n| RLS compiler — resolves `current_user.organization_id` from `executionContext.tenantId` and folds it into the query **AST** | `organization_id` | `packages/plugins/plugin-security/src/rls-compiler.ts:119` |\n| record-ownership scoping (`__readScope` `own` / `unit`) | `owner_id`-shaped | plugin-security read path |\n\nA compiled wildcard `tenant_isolation` rule would add a **second, independent** org predicate to a federated read — one that #7833's engine-level fix does not reach, because it is applied at a different layer.\n\n## ⚠️ Unmeasured, and here is exactly why neither fired on the one capture we have\n\nThis is a hypothesis with a named place to check it, not an observed defect. #7738's QA capture did **not** show either predicate, for two identifiable reasons that are properties of that fixture rather than of the code:\n\n- the capture showed exactly **one** predicate with **one** binding, so no wildcard RLS rule had been compiled for that object on that boot;\n- `showcase_ext_customer` carries the ADR-0090 D1 grandfather stamp `sharingModel: 'public_read_write'`, and the run recorded `__readScope: 'org'`. **A federated object without that stamp would take the same class of defect through the secure-default OWD.**\n\nReporter's own stated evidence strength: read from source plus the QA capture, **not booted to confirm**. **Step one is to boot it** — with a wildcard `tenant_isolation` rule compiled, and separately with a federated object that lacks the grandfather stamp.\n\n## Why it matters as much as #7738 did\n\nThe failure is **fail-open**, and that is what makes it worse than an error. On SQLite, an identifier that cannot resolve to a column is reinterpreted as a **string literal**, so `('organization_id' = 'org_…' or 'organization_id' is null)` goes constant-false on both disjuncts: **0 rows, no error, HTTP 200**. Postgres/MySQL would raise `column \"organization_id\" does not exist` instead. The symptom is dialect-dependent; the defect is not. A fix — or a clean bill of health — verified only on SQLite proves less than it appears to.\n\n## ⛔ Fences\n\n- Do **not** fix this by widening #7833's engine-level skip. These are separate injectors on a separate layer, and reaching up from the engine to suppress them would couple the two.\n- If the measurement comes back clean — no wildcard rule ever reaches a federated object, no non-grandfathered federated object exists — **\"latent, no change needed\" is a valid outcome**, provided it is recorded with the measurement rather than assumed.\n\n## Also noted by the same report, same family, different lane\n\n`SqlDriver.computeTenantField` (`sql-driver.ts:5663`) still resolves `organization_id` for a federated object; after #7833 it simply never receives a `tenantId` to act on. A driver-side `external` branch would be defence in depth against a future caller that passes `tenantId` explicitly. That is the driver lane — mentioned so it is not lost, not folded in here.\n\n## Related\n\n- #7738 / PR #7833 — the engine-side fix and the measurements above.\n- #7737 — boot-ordering; its reported symptom turned out to be produced by #7738."
+}

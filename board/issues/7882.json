@@ -1,0 +1,35 @@
+{
+  "number": 7882,
+  "kind": "issue",
+  "title": "finding: the HTTP node reports `acted: 1` for a merely-enqueued outbox delivery — same overstatement #7747 fixed for notify, against `sys_http_delivery`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "huangyiirene"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-12T01:57:23Z",
+  "updated_at": "2026-08-12T09:51:00Z",
+  "closed_at": "2026-08-12T09:51:00Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7882",
+  "body": "## Observation\n\n`packages/services/service-automation/src/builtin/http-nodes.ts:139` returns `{ output: { deliveryId, enqueued: true }, metrics: { acted: 1 } }` for a delivery that has only been **enqueued** to the HTTP outbox. `sys_http_delivery` carries its own terminal outcomes (including `dead`), decided by the dispatcher afterwards — so a flow-run summary can read `acted: 1` for an HTTP delivery that later dead-letters, and the operator-facing summary disagrees with the durable record.\n\nThis is the same defect class #7747 (PR #7875) just fixed for the notify node, at the sibling node. Found by that card's dev while measuring the notify path; deliberately left out of scope there rather than ridden along.\n\n## Why it is likely the same fix shape\n\n#7875 established the pattern in this exact codebase: `acted` counts only what a channel **accepted terminally**; a merely-enqueued effect is reported as `unmeasuredEffect`, which is the platform's existing qualifier for \"an effect happened but the outcome is not yet knowable\". That keeps healthy outbox-backed runs out of the documented broken-sweep alert (`selected > 0 AND acted = 0 AND unmeasured = 0`) without asserting success, and respects `connector.zod.ts:613`'s rule against a blanket `acted: 0`.\n\nWorth confirming before assuming it transfers: whether the HTTP node has an inline (non-outbox) path whose outcome IS terminal at return time, as `MessagingService.emit()` did — if so, the same two-path narrowing applies; if every HTTP delivery goes through the outbox, the fix is simpler.\n\n## Where\n\n- `packages/services/service-automation/src/builtin/http-nodes.ts:139`\n- Reference implementation: PR #7875 (notify node + `EmitResult.enqueued` narrowing in `service-messaging`)\n- Durable record: `sys_http_delivery` (`packages/services/service-messaging`)\n\n## Refs\n\n- #7747 / PR #7875 — the notify-side fix and the design rationale it records\n- #4354 — the selected/acted/skipped surfacing this accounting feeds\n- Filed unassigned by the services seat (recording, not claiming)."
+}

@@ -1,0 +1,32 @@
+{
+  "number": 7899,
+  "kind": "issue",
+  "title": "pm-dispatch step 8: triage-seat four-lens auto-adjudication of high-confidence decision cards — human floor for feature-add / ADR / protocol-change (maintainer-directed)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-12T02:59:03Z",
+  "updated_at": "2026-08-12T06:56:50Z",
+  "closed_at": "2026-08-12T06:56:21Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7899",
+  "body": "Filed by the skills seat (session `session_012Gg6rMAti8ZaueWb6BRsDn`) on the maintainer's rulings, skills-seat PM session chat, 2026-08-12. Direct routing under the 2026-08-10 standing authorization.\n\n## Provenance (maintainer, verbatim, untranslated)\n\n> 每次待我决裁的时候,我都是模型切换到 fable5 ,让他 帮我从实际业务需求出发,从平台长远合理性出发,从避免ai写代码犯错的角度出发,从创业阶段不扩散需求的角度出发综合分析,给我建议。很多时候ai会有明确的建议,大部分建议我都会接受,这个是不是可以让分诊就处理掉。他没把握的才找我\n\n> 我同意你的意见,并补充功能新增类的,adr类别的,协议变化类别的,还是需要人工决裁,如果是代码整理或者bug修改,具体的代码细节其实ai看的比我清楚,让我判断我也判断不了。除了以上,你觉得还有哪些要补充\n\nThe four lenses named in the first quote are the four-lens block already mandatory on every `needs-user-decision` card (#7498): ① platform long-term coherence ② measured business pull ③ AI-agent error-resistance ④ startup scope discipline. This card changes **who consumes the analysis** for high-confidence cases: the triage seat decides and executes with a veto window; only low-confidence or floor-protected cases reach the maintainer.\n\n## RULED (execute as written — not re-litigable)\n\n**Human floor — always the maintainer, regardless of lens unanimity:**\n- 功能新增类 (new-capability additions)\n- ADR 类 (ADR-class changes)\n- 协议变化类 (protocol / public-contract changes)\n- (existing escalation-bar floor, restated): destructive or hard-to-reverse actions — stored-data migration shape, deleting a shipped capability, force operations\n\n**Auto-adjudication lane — triage seat decides:**\n- 代码整理 (code cleanup / refactoring with unchanged behavior)\n- bug 修复 (bug fixes) — per the ruling, the maintainer cannot judge code-level detail better than the AI can\n\n**Confidence gates (approved design, from the same chat):** a card is auto-adjudicable only when ALL hold:\n1. **四棱同向** — all four lenses point to the same option; any split ⇒ escalate;\n2. not on the human floor above;\n3. the decision does not narrow or overturn any existing maintainer ruling;\n4. execution is **veto-window, not permission-gate**: decide → swap `needs-user-decision` for the working state in one label write → post the four-lens block + conclusion + an `auto-adjudicated` marker on the card → list every auto-adjudicated card in a dedicated round-report section (the aggregate drift brake);\n5. the adjudication pass runs at **`claude-fable-5`** (same tier as the maintainer's own manual workflow).\n\n## Seat-proposed additions (answering 「还有哪些要补充」 — to confirm in the design round; each one narrows the auto lane, never widens it)\n\n1. **Security / permission-boundary changes → human**, even when shaped as a bug fix: anything relaxing access control, auth flows, RLS/sharing semantics, or audit trails. A \"fix\" that widens access is a product decision in disguise.\n2. **Gate-weakening → human**: lowering a gate threshold, removing a required check, raising a ratchet ceiling, skipping/quarantining tests. AI agents have a structural incentive to make CI green; weakening the farm must stay a human act.\n3. **Spend / quota / fleet-shape / default model-tier changes → human**: these move the maintainer's budget, not a technical judgment.\n4. **New runtime third-party dependency → human** (supply chain, license, maintenance obligations).\n5. **Unified mechanical boundary test** for the feature-vs-bug line, reusing the spec/spec-surface criterion: does the change **grow the accepted input set or the public surface**? Grows ⇒ 功能新增/协议变化 ⇒ human. Unchanged accept-set pulled back toward the declared contract (declared = enforced restored) ⇒ bug/cleanup ⇒ auto lane.\n6. **Flip-back clause**: if implementation of an auto-adjudicated card discovers the contract must move after all, the dev stops and the card returns to `needs-user-decision` — the existing third-tier premise discipline (report the fork; ⛔ never silently re-decide), reused verbatim.\n\n## Guardrail carve-out\n\nStep 8's 「**Never** answer a product/architecture question on the maintainer's behalf」 gains a bounded exception exactly coextensive with the auto lane above — no wider. The SKILL text change edits step 8, the triage-seat duties, and that guardrail line together.\n\n## Effect timing\n\n- **Immediate**: a cross-seat notice with these rulings goes on the triage seat post (#6015) so fired triage sessions can operate under it with on-card provenance quotes.\n- **Permanent**: this card's SKILL.md change — the #7701 lesson applies (a ruling recorded only in chat or on cards cannot bind sessions that have not read it; the skill text is what binds every session).\n\n## Constraints\n\n- Blocked-by: #7885\n- Same-file serial: SKILL.md hot-file queue position 5 (after PR #7794 → #7765 → #7767 → #7885); the design round may be held jointly with #7885's.\n- Skills updates are ADR-class: draft PR, ⛔ no auto-merge, no queue entry; the maintainer merges by hand.\n- Model tiering mandatory clause: dispatch with `model: claude-fable-5`."
+}

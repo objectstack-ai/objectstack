@@ -1,0 +1,36 @@
+{
+  "number": 8022,
+  "kind": "issue",
+  "title": "Regression from #7799: for ~60s after every restart, a webhook holding an encrypted signing secret silently drops its subscription — no delivery, no `sys_http_delivery` row, while it still reads `active:true`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:services",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "huangyiirene"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-12T11:49:52Z",
+  "updated_at": "2026-08-12T14:37:16Z",
+  "closed_at": "2026-08-12T14:37:16Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8022",
+  "body": "Found by a **retest** of `integration-system.webhook-lifecycle` (QA run #7690) against `origin/main` @ `b602d536`, rebuilt. The fix under retest — #7722/#7798 (delivery rows store the signature, not the secret) and **#7799/#7901 (encrypt `sys_webhook.signing_secret`)** — is otherwise verified correct. This card is about a **new** failure the second half introduced.\n\n## Impact\n\nFor roughly **60 seconds after every server start**, a webhook that holds an encrypted signing secret is **not subscribed**. A record change in that window produces:\n\n- **no delivery** to the receiver, and\n- **no `sys_http_delivery` row at all** — so there is no dead-letter, no retry, no durable trace that anything was missed,\n\nwhile `GET /api/v1/data/sys_webhook/<id>` still reads `active: true`, i.e. it looks armed in Setup. The event is simply gone. It self-heals at the next periodic cache refresh (60 s), so it is invisible to anyone not looking in that window.\n\n**The affected population is exactly the one #7799 created**: webhooks with an encrypted `signing_secret`. Before #7799 no secret needed decrypting at cache-build time, so this window did not exist.\n\n## Reproduction (2/2 — 11:29 and 11:33)\n\n1. Give an active webhook a signing secret:\n   `PATCH /api/v1/data/sys_webhook/<id> {\"active\":true,\"url\":\"<receiver>\",\"signing_secret\":\"<literal>\"}`\n   The engine stores `secret:sec_<id>` and encrypts into `sys_secret`.\n2. **Restart the server on the same DB.**\n3. Within ~60 s of boot, mutate a record the webhook subscribes to.\n\n**Expected**: one receiver hit and one `sys_http_delivery` row.\n**Actual**: no receiver hit, and **no `sys_http_delivery` row**.\n\nAfter the 60 s cache refresh, the same mutation delivers correctly and its signature verifies.\n\n## Root cause — boot ordering, not the fail-closed choice\n\nFrom the server log of the 11:33 run:\n\n```\n11:33:35.145  WARN [webhook-auto-enqueuer] webhook 'showcase_task_changed' holds an encrypted\n              signing secret that could not be decrypted — the subscription is DROPPED rather\n              than delivered unsigned (#7799)\n              err: \"Cannot resolve secret: no CryptoProvider is registered (fail-closed).\"\n11:33:36.4xx  INFO CryptoProvider configured for secret fields\n```\n\nThe `webhook-auto-enqueuer` builds its subscription cache **~1.3–2 s before** the `CryptoProvider` is registered. It cannot decrypt, and — correctly — refuses to deliver unsigned, so it **drops the subscription**. Nothing re-arms it until the periodic 60 s refresh (`cache refreshed {objects:1,rows:1}` observed at 11:29:45).\n\n**The fail-closed decision is right; the ordering is the bug.** Dropping unsigned deliveries is the correct choice — the problem is that the enqueuer's *first* cache build races the crypto registration, and that the drop leaves no durable record.\n\n## Suggested shape (not prescriptive)\n\nEither make the first cache build **wait on** CryptoProvider registration (or rebuild immediately on the registration event) instead of leaving a 60 s hole, or — if a drop is ever legitimate — **write a `sys_http_delivery` row in a failed/deferred state** so the miss is durable and retryable rather than silent. The silence is arguably the worse half: a fail-closed drop that leaves a trace is an operational event; one that leaves nothing is data loss.\n\n## What is verified working (so this card is narrowly scoped)\n\nThe retest confirms the secret fix itself is sound, and none of this should be reverted:\n\n- **The secret is genuinely gone from the delivery table.** `sys_http_delivery` has no secret column; it now carries `signature` instead. A **byte-level full-table/full-column scan** of both live SQLite files (`data.db`: 88 tables / 1395 columns / 4227 cells; `data.telemetry.db`: 9 tables / 186 columns / 3689 cells) plus a raw `grep -a -F` over `data.db`, `-wal` and `-shm` found **0 occurrences** of the secret literal — against a positive control (an unrelated literal returned 24 hits, the `sec_` handle 2 hits) proving the scanner reads live WAL data.\n- **Signing still works everywhere it must**: recomputed `HMAC-SHA256(raw body, secret)` matched `x-objectstack-signature` on all three per-record variants, on a 4th-attempt retry after receiver downtime, on a delivery after a full restart where the secret exists only as ciphertext, and on a `redeliver` replay.\n- Steady-state delivery, the retry ladder (`pending → attempts 4 → success`), trigger-enum enforcement and the customized-row-survives-reseed behaviour all pass.\n\n## Source\n\nRetest of `integration-system.webhook-lifecycle` at `b602d536`. The two fixes under retest do **not** interfere with each other; this defect belongs entirely to the #7799 half."
+}

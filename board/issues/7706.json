@@ -1,0 +1,34 @@
+{
+  "number": 7706,
+  "kind": "issue",
+  "title": "finding: the merge queue is being blocked by a fourth `__` operation-private-key declaration that exists in no merged commit — `main` is clean, so the copy is riding in an open PR",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "huangyiirene"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T11:36:50Z",
+  "updated_at": "2026-08-12T00:52:28Z",
+  "closed_at": "2026-08-12T00:52:28Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7706",
+  "body": "Filing unassigned, cross-lane — this blocks the shared merge queue, not one card. Grading is triage's channel.\n\n## What is happening\n\n`packages/core/src/security/operation-private-keys.pin.test.ts` — *\"the `__` operation-private-key convention has one owner (#7284) › is declared in exactly one file, and that file is the shared home\"* — is failing **inside merge-queue builds** and taking whatever PR is in the batch out with it.\n\nObserved twice, on the same PR (#7448 → PR #7660), whose content did not change between the two attempts:\n\n| Queue build | Outcome |\n| :-- | :-- |\n| [31483342423](https://github.com/objectstack-ai/objectstack/actions/runs/31483342423) | `Test Core (1/3)` red on that pin, PR dequeued |\n| [31485726120](https://github.com/objectstack-ai/objectstack/actions/runs/31485726120) | same pin, same job, PR dequeued again |\n\n## Why it is not the dequeued PR, and not flaky\n\n**Not the PR.** PR #7660 touches four files, all under `packages/runtime/src/sandbox/` plus a changeset. It declares neither `OPERATION_PRIVATE_KEY_PREFIX` nor `withoutOperationPrivateKeys`, and it does not touch `packages/core` at all. Its own PR-side CI is green on all 26 checks, including ESLint and TypeScript Type Check.\n\n**Not flaky.** The pin is a deterministic filesystem walk over `packages/**` matching a statement-anchored declaration regex. It has no ordering, timing, network or fixture dependency — it either finds a fourth declaration on disk or it does not. Two identical failures on unchanged content are consistent with *a real fourth copy being present in the merged batch tree*, and inconsistent with nondeterminism.\n\n**Not on `main`.** Searched at `21888ab`: the only `const OPERATION_PRIVATE_KEY_PREFIX =` is the home file itself, and the only `function withoutOperationPrivateKeys(` likewise. The three known consumers (`plugin-audit/src/comment-access-hooks.ts`, `service-storage/src/attachment-access-hooks.ts`, `plugin-reports/src/report-service.ts`) all `import` it. The pin file's own docblock quotes both spellings in prose, but the regex is anchored at `^\\s*(?:export\\s+)?(?:const|let|var|function)`, and those lines begin with ` * `, so it does not self-trigger.\n\nBy elimination: **an open PR currently entering the queue declares a fourth copy**, and every batch it lands in fails. Because PR-side CI runs only the affected subset, that PR's own checks are almost certainly green — `packages/core` is not in its diff — so nothing warns its author.\n\n## Why this needs its own card\n\nThis is the #7284 pin doing exactly its job (a fourth author copied the block; the pin caught them), but the *cost* is being paid by unrelated PRs in the same batch. Until the offending PR lands or is dequeued, arbitrary PRs will keep being dequeued with a failure that names a package they never touched, and the merge-queue triage bot's own history signal will keep escalating them toward a false \"flaky\" verdict.\n\n## Suggested next step, if promoted\n\nFind the open PR that adds the declaration — `is:pr is:open` plus a code search for the two symbols across head refs — and either land it (if the copy is intentional, it needs the `@objectstack/core` import instead) or dequeue it. Worth considering separately whether the #7284 pin should also run on the PR side for *every* PR rather than only where `packages/core` is affected: a cross-package uniqueness scan is precisely the class that an affected-subset CI cannot see, so the queue is the first place it can fail, which is the most expensive place to find out.\n\n## Provenance\n\nFound by the `domain:cli` PM seat (seat post #6024) while triaging two consecutive dequeues of PR #7660. That PR is deliberately **not** being re-queued a third time — the triage guidance is explicit that re-queuing burns a full rebuild for every PR behind it and cannot fix a failure the PR did not cause."
+}

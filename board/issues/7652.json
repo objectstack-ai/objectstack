@@ -1,0 +1,36 @@
+{
+  "number": 7652,
+  "kind": "issue",
+  "title": "mcp-http-surface (b): the stock showcase cannot serve MCP at all — capability resolver substring-matches the outbound MCP client connector",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T09:50:45Z",
+  "updated_at": "2026-08-12T06:24:10Z",
+  "closed_at": "2026-08-12T06:24:10Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7652",
+  "body": "## Symptom\n\nThe stock showcase boot banner advertises *\"MCP server — connect a coding agent: Endpoint …/api/v1/mcp\"*, yet both `/mcp` and `/mcp/skill` answer **501 \"MCP server is not available\"**.\n\n- **Observed:** banner promises the MCP surface; `/mcp` and `/mcp/skill` both 501.\n- **Expected:** the MCP surface the banner promises (keyed `initialize`/`tools/list`, `/mcp/skill` 200).\n\n## Root cause\n\n`serve.ts` auto-adds `mcp` to `requires` when the MCP server is enabled (`packages/cli/src/commands/serve.ts:884`), and `CAPABILITY_PROVIDERS.mcp` declares `nameMatch: ['mcp-server', 'MCPServerPlugin', 'mcp']` (`serve.ts:427`). `hasPluginMatching` (`serve.ts:2327`) does **substring** matching over loaded plugin names:\n\n```\nconst hasPluginMatching = (fragments) =>\n  plugins.some((p) => {\n    const n = String(p?.name ?? '');\n    const c = String(p?.constructor?.name ?? '');\n    return fragments.some((f) => n.includes(f) || c.includes(f));\n  });\n```\n\nThe showcase loads `com.objectstack.connector.mcp` — the outbound MCP **client** connector — whose name contains the substring `mcp`. So the resolver concludes the `mcp` capability is already provided and **never loads `MCPServerPlugin`**.\n\nProven: removing only `ConnectorMcpPlugin` from a scratch copy makes `[MCP] Plugin initialized` appear and `/mcp/skill` answer 200; `@objectstack/mcp` was resolvable from the CLI the whole time.\n\nThe **general hazard** is a substring match between a *provider* plugin name and a *consumer* plugin name: a consumer whose name contains the provider's fragment satisfies the provider's `nameMatch`, suppressing the real provider. Still present on `origin/main` (`serve.ts:427` and the `.includes(f)` in `hasPluginMatching` at 2327-2332).\n\n## Reproduction\n\nBoot the stock showcase; `curl` the advertised endpoint:\n\n```\ncurl http://&lt;host&gt;/api/v1/mcp/skill\n```\n\n**Expected** the MCP surface the banner promises. **Actual** 501 \"MCP server is not available\".\n\n## Source\n\nExtracted from the QA run objectstack-ai/objectstack#7627 (framework 92f26f75, console 6314e87f)."
+}

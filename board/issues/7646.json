@@ -1,0 +1,35 @@
+{
+  "number": 7646,
+  "kind": "issue",
+  "title": "i18n: TranslationBundle has no surface for screen-flow UI — wizard screens render source-language only, even in a fully localized app",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T09:50:18Z",
+  "updated_at": "2026-08-12T07:28:42Z",
+  "closed_at": "2026-08-12T07:28:42Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7646",
+  "body": "## Context\n\nHotCRM (main `333259a4`, @objectstack 17.0.0-rc.5) completed all four locales and retired its i18n exemption ledger (hotcrm#645/#679). Yet its lead-conversion wizard (`lead_conversion`, `type: 'screen'`) renders entirely in English on a zh-CN console:\n\n- screen title: **Conversion Details**\n- field labels: **Create Opportunity? / Opportunity Name / Opportunity Amount**\n- runner buttons: **Cancel / Submit**\n\n## Root cause\n\nThe TranslationBundle schema (`@objectstack/spec` `translation.zod`) exposes surfaces for **objects, apps, dashboards, actions** — there is **no `flows` / screen surface at all**. An app author has no place to put translations for screen titles or screen field labels: this is not a missing key, it is a missing vocabulary.\n\n```\n$ grep -oE '(flows?|screens?|apps|objects|views|dashboards|actions)[?:]' translation.zod-*.d.ts | sort | uniq -c\n  6 actions:   4 apps:   3 dashboards:   4 objects:   # no flows, no screens\n```\n\n## Expected\n\nA `flows` surface in the bundle (per-flow: label, per-screen: title, per-field: label/placeholder/help), applied by the screen-flow runner the same way object/field labels already are. The runner chrome (Cancel/Submit) presumably belongs to the console's own message catalog instead.\n\n## Repro\n\nzh-CN console → HotCRM → any lead → 转化线索 → wizard is English top to bottom.\n\nFiled from HotCRM main; happy to wire the HotCRM-side bundle entries as soon as the surface exists."
+}

@@ -1,0 +1,32 @@
+{
+  "number": 7767,
+  "kind": "issue",
+  "title": "pm-dispatch SKILL Guardrails: dangling sentence fragment \"someone else, never dispatch a needs-user-decision issue.\" — the bullet it belonged to is lost",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T13:53:55Z",
+  "updated_at": "2026-08-12T06:56:49Z",
+  "closed_at": "2026-08-12T06:56:20Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7767",
+  "body": "Found during #7754 (structural compression, PR #7766) and deliberately left untouched there — the card's red line was \"no rule deletion\", and repairing this needs the lost text back, not compression.\n\n## The defect\n\nIn `.claude/skills/pm-dispatch/SKILL.md`, Guardrails section, between the \"Skills 更新与 ADR 同级\" bullet and the \"Every dev agent works in its own worktree\" bullet, there is a bare orphan line (present on `origin/main` before #7754, preserved verbatim by PR #7766):\n\n```\nsomeone else, never dispatch a `needs-user-decision` issue.\n```\n\nIt is not attached to any bullet — the sentence it ends belonged to a guardrail that is no longer there (shape suggests something like \"Decisions belong to the maintainer: never answer a product question on behalf of someone else, never dispatch a `needs-user-decision` issue.\"). Its second half is a real prohibition that step 8 / the state model still state elsewhere (\"never dispatch a `needs-user-decision` issue\" appears in the state-model table's label semantics), so no binding rule is currently unenforceable — but the Guardrails list carries a truncated fragment whose first half is unrecoverable from the file itself.\n\n## Repair lead (verify, do not trust)\n\n`git log -S \"never dispatch a \\`needs-user-decision\\` issue\" -- .claude/skills/pm-dispatch/SKILL.md` should find the commit where the bullet's head was lost (likely a merge or an earlier compression/amendment landing) and the original wording to restore.\n\nFiled unassigned per the findings discipline; triage grades it."
+}

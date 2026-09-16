@@ -1,0 +1,33 @@
+{
+  "number": 7883,
+  "kind": "pull_request",
+  "title": "docs(objectql): correct two comments that still assert plugin-audit's retired `captureBefore` (#7707)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "size/xs",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-12T01:58:30Z",
+  "updated_at": "2026-08-12T02:33:50Z",
+  "closed_at": "2026-08-12T02:33:49Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": "2026-08-12T02:33:49Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/7883",
+  "body": "Fixes #7707\n\nComments only. **No executable line changes** — the whole diff is 5 added / 2 removed `//` lines, mechanically asserted below.\n\n## Premise: HOLDS — but only in part, and that part matters\n\nLocated by symbol, per the card's own instruction (`git grep -n \"captureBefore\" -- packages/objectql/src`). Every line number written on the card and in its comments had drifted again; the three sites on `b313fde` are `engine.ts:9109`, `plugin.ts:980`, `plugin.ts:984`.\n\nOf the three mentions, **two were stale and one is true history that stays**.\n\n### Evidence that `captureBefore` is genuinely retired\n\nNot taken from the card — measured in the tree:\n\n- `packages/plugins/plugin-audit/src/audit-writers.ts:1343-1345` — the plugin's only write-path registrations are `afterInsert` / `afterUpdate` / `afterDelete` on `writeAudit`, each with `excludeObjects: AUDIT_EXCLUDED_OBJECTS`. There is **no** `beforeUpdate` / `beforeDelete` registration left.\n- `audit-writers.ts:1031` — `⛔ RETIRED — captureBefore on beforeUpdate / beforeDelete (#6656, ADR-0049 enforce-or-remove)`.\n- `captureBefore` has **zero** live (non-comment) occurrences anywhere in `plugin-audit/src`.\n- `.changeset/hook-ctx-previous-stash-limb-removed.md` — `captureBefore` was the only writer of `ctx.__previous` in the repo; #6656 retired it, leaving that channel with zero producers.\n\n(`packages/rest/src/import-runner.ts` has an unrelated local named `captureBefore` — different symbol, out of scope.)\n\n## Site 1 — `engine.ts` ⇒ **stale, corrected**\n\nThe enumeration of delete-phase hooks that hold the `wantsPreImage` gate open listed:\n\n> `* plugin-audit  captureBefore / writeAudit before+afterDelete,`\n\nBoth halves are wrong today: `captureBefore` no longer exists, and `writeAudit` is `afterDelete` only. The bullet's job in that paragraph is to explain **which gate term** the hook holds open, so a reader trusting it concludes `plugin-audit` still makes term 1 (`hasHooksFor('beforeDelete')`) true for every object. It does not — it holds term 2.\n\nCorrected rather than deleted, because the rest of the bullet is still live and load-bearing: `plugin-audit`'s `excludeObjects` face (#5860) is the paragraph's worked example of a hook that narrows at the **engine** face, which is exactly what lets `hookMatchesObject` subtract it so an excluded object really does skip the read. Deleting the bullet would take that example with it.\n\n## Site 2 — `plugin.ts:980` ⇒ **NOT stale, deliberately left**\n\nInside the `⛔ RETIRED — sys_fetch_previous_update` block, the #5846 measurement reads *\"What it cost **while it stood** … read the same row THREE times — this builtin, plugin-audit's `captureBefore`, and the engine's own gated read.\"*\n\nThis is past-tense history of a state that really existed, explicitly scoped by \"while it stood\". It is accurate as written and is the argument the retirement block exists to preserve. **Left untouched.**\n\n## Site 3 — `plugin.ts:984` ⇒ **stale, corrected**\n\nThe same paragraph closed with:\n\n> `` `captureBefore`'s now-redundant read is the identity lane's follow-up. ``\n\nPresent tense, advertising **pending** work. That follow-up landed in #6656 (merged 2026-08-09). Restated to record the outcome, so a reader stops going looking for an open card and for a `captureBefore` that is no longer there. The historical sentences above it are unchanged.\n\n## Scope fence honoured\n\n`packages/plugins/plugin-audit` is **untouched**. This PR deletes stale prose that *mentions* the redundant read; acting on the read itself was the identity lane's card (#6022) and was already done by #6656. Nothing here follows the comment into another lane.\n\n## Verification\n\n- **Comment-only, asserted mechanically:** every added/removed line in `git diff -U0`, excluding file headers, matches `^[+-]\\s*//`. Zero non-comment lines.\n- `packages/objectql` vitest — **187 files / 3312 tests passed**, 0 failed.\n- `pnpm check:query-options-erasure` — exit 0, ratchet holds, baseline key set verified against `b313fde`, no files added.\n- `pnpm check:type-check-debt` — exit 0, 33 ledger entries re-measured, none above its recorded number. Ledger **not** raised and not lowered. (Requires the built closure first — `pnpm exec turbo run build --filter='./packages/*' --filter='./packages/*/*'`, 70/70 successful — exactly as `lint.yml` does.)\n- Gates derived with `node scripts/pm/dispatch-gates.mjs`, all exit 0: `check:adr-anchors`, `check:durability-log-level`, `check:engine-double-contract`, `check:stack-collection-maps`, `node scripts/check-engine-split-ratio.mjs`.\n\n## Changeset\n\n**None — recommend the `skip-changeset` label.** Comments only; nothing is released, and no empty-frontmatter changeset was added (`check-empty-changeset.mjs` rejects newly-added ones, #5471). `content/docs/releases/` untouched.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01G2TwHzwbY5Zg6RvuTSzhZa)_"
+}

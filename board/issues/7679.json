@@ -1,0 +1,36 @@
+{
+  "number": 7679,
+  "kind": "issue",
+  "title": "`/i18n/locales` advertises locales the app never opted into (returns 4, app declares 2)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "pm:queue"
+  ],
+  "assignees": [
+    "huangyiirene"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T10:13:54Z",
+  "updated_at": "2026-08-11T18:40:10Z",
+  "closed_at": "2026-08-11T18:40:10Z",
+  "closed_by": {
+    "login": "os-help",
+    "id": 315173663,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7679",
+  "body": "## Symptom\n\n`GET /api/v1/i18n/locales` returns **four** locale descriptors — `en`, `zh-CN`, `ja-JP`, `es-ES` — on the showcase app, whose artifact declares `i18n.supportedLocales = ['en','zh-CN']`. The envelope half is correct (`{success,data:{locales}}` with `isDefault`, the #3636 shape); the **set** is a superset. `ja-JP` and `es-ES` are real and servable here (200) but the app never opted into them. This is the FAIL of `surface-matrix` clause 6. Reproduced on two boots.\n\n## Root cause\n\nLocated, and verified still present on `origin/main` as of this filing. **Nothing narrows the i18n service's locale set to the app's declared `supportedLocales`.**\n\n- `packages/runtime/src/app-plugin.ts` `loadTranslations()` reads `i18nConfig.defaultLocale` only (it calls `setDefaultLocale`), then loads every locale key of every bundle. It never consults `i18nConfig.supportedLocales`.\n- Each platform plugin independently pushes its own 4-locale bundle at `kernel:ready` — `packages/platform-objects/src/plugin.ts` (~206-230), plus service-settings, service-storage, service-messaging, service-realtime, plugin-security, plugin-sharing, plugin-webhooks — each shipping `en/zh-CN/ja-JP/es-ES`.\n- `getLocales()` then returns the **loaded** key set (`packages/core/src/fallbacks/memory-i18n.ts`; same in `packages/services/service-i18n/src/file-i18n-adapter.ts:192`), and both the dispatcher `/i18n` domain and the service-i18n route map that set straight to the response.\n\n**Fix site / routing.** The app's `supportedLocales` is only visible at the runtime app-plugin layer — `loadTranslations()` already reads `i18nConfig` and sets the default locale there. `core`'s `getLocales()` has no knowledge of the app's declared set, so the narrowing must originate in `packages/runtime` (thread `supportedLocales` the way `defaultLocale` is already threaded, and narrow what `getLocales()` reports). Routed `domain:cli` on that basis.\n\n**Consequence.** Any client building a locale picker from this route — including the platform's own Settings &gt; Localization select, which already offers all four — offers locales in which only `sys_*` objects are translated. Picking `ja-JP` or `es-ES` guarantees a mixed-language session for app-owned metadata.\n\nRelated but distinct: #5418 (closed) covered the console's hardcoded language menu — a different layer (the console's own list), not this server-route superset.\n\n## Reproduction\n\nBoot the showcase on a fresh file DB, sign in, then `GET /api/v1/i18n/locales`.\n- **Expected**: descriptors for the artifact's declared `i18n.supportedLocales` = `['en','zh-CN']`.\n- **Actual**: four descriptors — `en`, `zh-CN`, `ja-JP`, `es-ES`.\n\n## Source\n\nExtracted from the QA run objectstack-ai/objectstack#7640 (framework 92f26f75, console 09987b680)."
+}

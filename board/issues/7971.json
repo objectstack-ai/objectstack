@@ -1,0 +1,33 @@
+{
+  "number": 7971,
+  "kind": "pull_request",
+  "title": "docs(pm-dispatch): spec-semantic fable clause, native issue-typing + Bug-first tiebreaker, retire shift-end skill-suggestion list",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/m",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-12T09:10:39Z",
+  "updated_at": "2026-08-12T09:59:38Z",
+  "closed_at": "2026-08-12T09:59:37Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-12T09:59:37Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/7971",
+  "body": "Fixes #7945\nFixes #7947\nFixes #7950\n\nClosing consolidated skills batch — three maintainer rulings of 2026-08-12, all fully ruled, zero design freedom. ADR-class (`.claude/skills/**`): draft PR, human merge only — no queue, no auto-merge.\n\n## Per-member checklist\n\n- **#7945** — landed in `SKILL.md` § 派发 › Model tiering: the mandatory-clause block now has two clauses; new clause ② mandates `claude-fable-5` for any card that alters the contract's accept/reject behavior or grows its public surface (the `domain:spec` semantic lane), same no-downward-discretion form as clause ①. The criterion cites the existing adjudication boundary test (§ 分诊代裁) and the one-package-three-seats split (§ Domain lanes) — no second copy written. Explicitly unchanged and stated so: `spec-surface` stays sonnet/opus; `spec-tooling` stays opus default, fable when designing a gate's semantics; downstream-adaptation stays opus default. Ruling quoted verbatim, untranslated: 「同意,就按语义面收窄,立卡并通知 spec 席」.\n- **#7947** — landed in two places. (a) `SKILL.md` § 分诊座位职责: new paragraph making the triage seat the single authoritative producer of the native `type` field (Bug/Feature/Task; filers may pre-set, triage corrects), with the mechanical criterion citing the same boundary test (wrong behavior against the declared contract ⇒ Bug; grows the accept-set/public surface ⇒ Feature; else Task), the Bug-repro discipline (no named location or repro path ⇒ does not enter `pm:queue`, flagged for repro), the no-mass-backfill rule, and the three named consumers (adjudication routing with Feature mechanically on the human floor; release-board `type:Bug is:open` query — also wired into the release-board paragraph's defect class ①… the query itself is named in the consumers list; the selection tiebreaker). (b) `SKILL.md` § 候选与批次 › 选择优先级: within ordinary queue items, `Bug` outranks `Feature`/`Task` — stated as a tiebreaker, explicitly not a priority ladder (P1–P5 gradations tried and rejected). Ruling: 「同意」.\n- **#7950** — landed in two places. (a) `references/seat-post-protocol.md` exit-checklist item ⑦: the mandatory tenure SKILL update-suggestion list is retired; shift-end reporting narrows to the three classes (① wrong/missing principle → skills seat via the 专题 channel; ② mechanizable item — a gate or script, never prose — → a normal card; ③ platform-fact change → one `references/` fact-table row), arriving as `finding`-class items in the skills lane, default disposition outside the three classes = close not-planned; lessons-learned prose no longer admissible into skill texts. (b) `SKILL.md` § 座位贴协议: the corresponding principle line (换班报告默认零建议) with the ruling quoted verbatim: 「还有各车道下班时会提交 skills 建议有必要吗?就是那些搞得后来skills越来越乱。」. This delta is net-negative and funds the batch's line budget.\n\n## Ratchet accounting (ceiling 686, headroom 0 — ceiling untouched)\n\n`check:pm-skill-ratchet` is green at exactly 686/686. All additions were offset inside the touched sections by compressing prose whose operational detail already lives, verbatim, in `references/` (verified before each cut):\n\n- 座位贴协议: six-segment enumeration, title format, liveness thresholds → `seat-post-protocol.md` carries them.\n- 发版板: producer mapping, three-repo query, board-clearing three-way, pin precondition → `seat-post-protocol.md` § 发版板运维细则.\n- 云卡四课 / 资源与后端: per-lesson parentheticals and the contention argument → `dispatch-runbook.md` (grep-verified: `outcome_branch`, 自驱/回合终点, 轮询负债, build+test 争用, 事件驱动 all present there).\n- Model tiering: the four-step model resolution order → authoritative in the os-dev definition's frontmatter comment, now cited instead of restated.\n- Plus ragged-wrap repacks with no wording change (代裁置信门, 三分区, sweep 段落).\n\n**Nothing from the three cards was dropped.** No card substance is obsolete; the dropped-with-rationale list is empty.\n\n## Gates (run locally, honest readings)\n\n- `check:pm-skill-ratchet` — green (686/686, self-test 5/5)\n- `check:pm-skill-id-lint` — green (9 files clean, zero issue-ID citations in operative text; self-test 9/9)\n- `check:skill-frame-sync` — green (4 copies isomorphic; self-test 12/12)\n- `check:doc-authoring` — green (375 files clean; self-test green)\n- `check:nul-bytes` — green (7283 files, no raw control bytes; plus a targeted control-char self-scan of both edited files: clean)\n\nDocs-only: no changeset (`skip-changeset` applied). Branch is merged up past PR #7948's landing (AGENTS.md/CLAUDE.md — no file overlap; ratchet and id-lint re-run green on the merge result).\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_012Gg6rMAti8ZaueWb6BRsDn)_"
+}

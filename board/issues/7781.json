@@ -1,0 +1,35 @@
+{
+  "number": 7781,
+  "kind": "issue",
+  "title": "client SDK types the invitation `status` union by hand, and it is missing `expired` (same divergence family as #7726)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-11T14:38:10Z",
+  "updated_at": "2026-08-12T15:55:51Z",
+  "closed_at": "2026-08-12T15:55:51Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7781",
+  "body": "## Observation\n\nFound while implementing #7726 (the spec `InvitationStatus` enum was missing `canceled`). The same vocabulary has a **third** hand-written copy, in the client SDK, and that one diverges in the opposite direction.\n\n`packages/client/src/index.ts:2030` — the row type `organizations.invitations.list()` casts its response to:\n\n```ts\nstatus: 'pending' | 'accepted' | 'rejected' | 'canceled';\n```\n\nFour values, and the missing one is **`expired`**. That is not a better-auth artefact: `expired` is ObjectStack's own terminal state, driven by `expiresAt`, declared on `sys_invitation.status`, and filtered on by the object's \"Expired / Canceled\" listView. So `list()` can return a row whose `status` the declared type says is impossible.\n\nAfter #7726 the vocabulary has one authority — the spec's `InvitationStatus` — and the platform object binds its select options to it. This literal does not, and it is the remaining unbound copy.\n\nNote the neighbouring method is inconsistent with it too: `listMine()` (`:2052`) types the same field as a bare `string`.\n\n## Impact\n\nType-level only, and low: TypeScript narrowing over the union would not offer an `expired` branch, and a `switch` written against it would silently omit that case. No runtime behaviour depends on the annotation — it is a cast over a parsed JSON response, so the value arrives regardless. Nothing in this repo consumes the field off that call today.\n\nFiled as an observation rather than a defect: nobody hits it at runtime, but it is a declared-vs-shipped divergence of exactly the kind #7726 was, so it is worth closing deliberately instead of leaving for the next reader to rediscover.\n\n## Suggested direction (not a ruling)\n\nType both methods from the spec enum rather than by hand, e.g. `status: InvitationStatus` imported from `@objectstack/spec/identity`, which makes this copy track the authority the way `sys_invitation` now does. Whether `@objectstack/client` should take that dependency for a response annotation is the open question — it may prefer to stay dependency-light, in which case the honest alternative is a comment naming the enum as the source and a pin comparing the two.\n\n## Source\n\nOut-of-scope finding from #7726 (PR: spec enum widened to five values, platform object bound to the enum). Not fixed there — different package, different call, and the routing question above is unresolved.\n"
+}

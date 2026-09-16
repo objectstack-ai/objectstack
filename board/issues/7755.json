@@ -1,0 +1,34 @@
+{
+  "number": 7755,
+  "kind": "issue",
+  "title": "pm-dispatch SKILL: cloud-card comms is event-driven by ruling — roster limitation on record, notes-21 verify-before-toggle amendment, PR subscription as a hard step",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T13:01:40Z",
+  "updated_at": "2026-08-12T03:55:53Z",
+  "closed_at": "2026-08-12T03:54:07Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7755",
+  "body": "Filed by the spec-lane PM seat (session `session_01JY2Q5Xto1u8YHADgrZDTnk`) on the maintainer's instruction (spec-lane PM session chat, 2026-08-11 ~13:05Z, verbatim: 「立卡」), executing the same-chat rulings: 「当前事件驱动架构即长期方案」/「云卡通信课题就此收档 … 不再追」/ 「没有计划 把 PM 席迁到常驻本地机」.\n\nThree validated deltas to `.claude/skills/pm-dispatch/SKILL.md`, all proven on the 2026-08-11 spec-lane shift. Scope is exactly these three plus one rider evaluation — not the seat post's broader suggestion list (that stays for 换班复盘).\n\n## 1. `mode:cloud` — record the cross-session-messaging conclusion as a known platform limitation\n\nAdd a short paragraph to the `mode:cloud` backend section so no future PM session re-investigates this path:\n\n- CCR-created cloud sessions do NOT register in the cross-session messaging roster: `ListAgents` does not list them and `SendMessage` by session ID returns not-reachable. Measured 2026-08-11 with the gates that the docs name all passing (Claude Code 2.1.227 ≥ 2.1.224; none of the four feature-flag-disabling env vars set; in-process subagents listed and messageable in the same reads). Per the official doc (code.claude.com/docs/en/cross-session-messaging), cloud sessions appear only when the sending session has \"cloud access: a claude.ai login on the first-party Anthropic API\" — a condition CCR-container credentials do not currently satisfy.\n- The maintainer ruled (2026-08-11): the event-driven architecture IS the standing solution — cloud-card channels are `subscribe_pr_activity` webhooks + the dual-drop report contract (issue comment + return message) + criteria-only timers. ⛔ Do not re-test the roster path or propose local-machine migration; both were examined and closed 2026-08-11.\n\n## 2. Operational note 21 amendment — after an empty-field enable, verify queue membership BEFORE any disable\n\nNote 21's current prescription is \"disable/enable 翻转一次\" on the empty-field signature. The 2026-08-11 shift measured a failure mode inside that prescription: GitHub's \"added to merge queue\" webhook can arrive OUT OF ORDER, after the first empty-field enable has actually enqueued the PR — and a disable fired into that arming window CANCELS the real enqueue (PR #7655: enable → empty-field → disable → out-of-order \"added to queue\" notice → queue branch gone; cost one extra toggle lap). The corrected sequence, which landed PR #7657 with zero friction the same day:\n\n1. `enable_pr_auto_merge` returns the empty-field form (`method: , enabled at `) ⇒ **verify by queue branch first** (`git ls-remote --heads origin 'refs/heads/gh-readonly-queue/*'`, allow ~20–30s for the entry);\n2. branch present ⇒ done — ⛔ no toggle;\n3. branch absent after the wait AND the queue has visibly churned (newer entries got branches while yours did not — the build-horizon caveat stays) ⇒ ONE disable/enable toggle, then re-verify;\n4. ⛔ never issue a disable between an enable and its queue-branch verification.\n\nWording should amend note 21 in place (it is the same signature and the same tool), not add a competing note elsewhere.\n\n## 3. 入队与落地 B — elevate the cloud-card PR subscription from 随行纪律 to a hard dispatch-flow step\n\nThe clause 「云卡创建即对其 PR 挂 `subscribe_pr_activity`」 exists today as one of three 随行纪律 bullets in the sizing section. The 2026-08-11 shift produced a clean A/B measurement of skipping it: #7672 (no subscription — merge discovered by polling, minutes late) vs #7655/#7657 (subscribed — CI failure and merge notices delivered in seconds, the whole relay ran event-driven with zero polling). Move/duplicate the requirement into the `mode:cloud` delivery-contract flow as a numbered step: \"the moment the cloud card's draft PR exists, `subscribe_pr_activity` it — a cloud-card PR without a subscription is a polling liability\", keeping the existing bullet as the pointer.\n\n## Rider evaluation (same PR if adopted)\n\nThe previous shift left a compressed 6-line replacement for the closed PR #7431 (cloud-card archival paragraph) on branch `claude/pm-dispatch-spec-5ls2tr` @ `bbe056b`, not reopened per the closed-PR rule. The dev on this card should read that commit and either fold the 6-line paragraph into this PR (if it still matches the current SKILL text) or record why it no longer applies. #7548 governs either way.\n\n## Process constraints (standing rulings — restated, not new)\n\n- **Model**: dispatch with `model: claude-fable-5` — the Model tiering mandatory clause for any card touching `.claude/skills/pm-dispatch/**` (maintainer 2026-08-10, #7341).\n- **Landing**: skills updates are ADR-class (#7548, maintainer 2026-08-11) — draft PR, ⛔ no auto-merge, no queue entry; the maintainer reviews and merges by hand.\n\nRefs: #7341 (tiering rulings), #7548 (skills-update governance), #7431 (closed predecessor), seat post #6017 (shift evidence ledger)."
+}

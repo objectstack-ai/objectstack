@@ -1,0 +1,32 @@
+{
+  "number": 5145,
+  "kind": "issue",
+  "title": "v17 rc.2/rc.3 verification — rollup of the 3 defects found (2 open, 1 fixed)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "tracking"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T06:09:49Z",
+  "updated_at": "2026-08-12T05:22:12Z",
+  "closed_at": "2026-08-12T05:22:12Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5145",
+  "body": "Rollup of the defects found in the **rc.2 / rc.3** verification pass on #3909 — the window `2bafe62e8` → `a1a855a28` (277 non-release commits, 283 changesets, objectui pin `7d9734d5e321 → f5bc4c78be76`).\n\nSupersedes #4482, which covered the rc.0/rc.1 passes and is closed along with all seventeen of its issues.\n\n**3 defects. 2 open, 1 fixed and re-verified.**\n\nVerified against a real showcase boot on `main` @ `06df4fa16`, two live principals, plus purpose-built probe stacks for the cases the showcase has no specimen for.\n\n---\n\n## Open\n\n### #5086 — `allowRuntimeCreate: false` is not enforced\n\n`PUT /meta` creates `job` and `agent` items that the metadata-type registry declares code-only:\n\n```\nPUT /api/v1/meta/job/rc3_j2\n    {\"name\":\"rc3_j2\",\"label\":\"J\",\"schedule\":{\"type\":\"cron\",\"expression\":\"0 0 * * *\"},\"handler\":\"nope\"}\n→ 200 {\"success\":true,\"message\":\"Saved customization overlay (env-wide) — type=job, name=rc3_j2\"}\n```\n\n`handler: \"nope\"` names no function in any compiled bundle — exactly the record #4509 argues can never be scheduled, saved and reported as success. `agent`, the only other type carrying the flag, behaves the same. `supportsOverlay: false` looks equally unenforced: the success message calls the row a \"customization overlay\" for a type declared not to support them.\n\nThis is the ADR-0049 failure mode one level up — **the enforcement flag itself is the silently-inert declaration**. Easy to miss because a minimal payload 422s on schema validation first; only a payload that *passes* the schema reveals that the gate never runs. Studio presumably reads the flag to hide \"create\", so the UI honours a rule the API does not.\n\nRe-confirmed on a fresh build after the #5088 fix landed — still reproduces.\n\n### #5079 — a deleted overlay stays in the `/meta` listing\n\n```\nPUT    /api/v1/meta/action/rc3_a2   → 200,  listed,  dispatch 200\nDELETE /api/v1/meta/action/rc3_a2   → 200 {\"reset\":true,\"seq\":N}\n  GET  /api/v1/meta/action          → still listed        ❌\n  POST /api/v1/actions/…/rc3_a2     → 404                 ✅\n```\n\nThe delete is real — `reset: true` with a sequence number, no `sys_metadata` row, absent from `dist/objectstack.json`. Only the enumeration view is stale, so list and dispatch disagree about what exists. It is the mirror of the seam #4521 fixed on the write side (saved overlays became immediately dispatchable).\n\nThe #4432 headline harms — namespace normalisation, listing shadowing, immediate dispatch — are all fixed and verified; this is the surviving branch.\n\n---\n\n## Fixed and re-verified\n\n### #5088 — `updateMany` ran hooks for a nonexistent id ✅\n\nFixed by `75bb3af56` (*by-id bulk writes refuse a row that names no record*). Re-verified on a freshly built `@objectstack/metadata-protocol`; all three branches the fix names now answer correctly:\n\n| call | before | now |\n|---|---|---|\n| `updateMany` missing id | `INTERNAL_ERROR` (hook-condition abort) | `RECORD_NOT_FOUND` |\n| atomic `[missing, valid]` | `[\"INTERNAL_ERROR\",\"NOT_ATTEMPTED\"]` | `[\"RECORD_NOT_FOUND\",\"NOT_ATTEMPTED\"]` |\n| `deleteMany` missing id | — | `RECORD_NOT_FOUND` |\n\nThe batch no longer accuses a correct hook of naming an undeclared field, and under `atomic` the abort reason is now the caller's actual mistake.\n\n---\n\n## Verification state\n\n#3909 stands at **110 / 113**. The three unticked items are:\n\n- `job` code-artifact gate — blocked on **#5086** above.\n- Two `changeset pre exit` close-out items — structurally impossible until the RC leaves pre-mode (npm `rc` dist-tag is still `17.0.0-rc.3`).\n\n## Two testing traps worth recording\n\nBoth cost me a wrong conclusion in this pass; anyone re-testing this train should watch for them.\n\n1. **A stale `dist/objectstack.json` fakes a platform failure.** An artifact from a previous day still carried two `apis` entries after the source moved to an empty array, so the showcase failed to boot on the new `apis:` rejection (#4936) and looked like a broken main. Delete the artifact before concluding anything about boot.\n2. **Turbo cache hides a merged fix.** `@objectstack/metadata-protocol`'s `dist` predated the #5088 fix by hours while `src` contained it, so the defect \"still reproduced\" after a full `pnpm build`. Check `dist` mtime against the fix commit before reporting a fix as not landed.\n\nTracker: #3909.\n"
+}

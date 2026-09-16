@@ -1,0 +1,34 @@
+{
+  "number": 7840,
+  "kind": "pull_request",
+  "title": "docs(metadata): re-anchor the single-connection-pool hazard on a verified live witness (#7708)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T20:12:53Z",
+  "updated_at": "2026-08-11T20:47:19Z",
+  "closed_at": "2026-08-11T20:47:17Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": "2026-08-11T20:47:17Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/7840",
+  "body": "Fixes #7708\n\n`MetadataManager`'s `listCache` policy comment cited `plugin-audit`'s `captureBefore` as the live example of a caller that threads its transaction by hand to dodge the SQLite single-connection-pool stall. #6656 retired `captureBefore` and PR #7081 removed its last consumer, so the **cited witness** is gone — but the **hazard claim is independent**. This replaces the witness rather than deleting the note.\n\n## Verification record — the card told me to distrust the card\n\nThe issue's own instruction outranks its confidence: verify the hazard against the *current* pool implementation rather than trusting the card. So the first step was a measurement, not an edit.\n\n**Setup:** real `ObjectQL` + real `SqlDriver` (better-sqlite3, `:memory:`), a real `DatabaseLoader.list('permission')` with the loader's own LRU cache disabled, `sys_metadata` created via `initObjects`. Confirmed at runtime: `knex.client.pool.max === 1` for the SQLite dialect, and `acquireConnectionTimeout` is not overridden anywhere in `driver-sql` (knex default 60s).\n\n| Case | Transaction opened via | Result |\n| --- | --- | --- |\n| **B** | `driver.beginTransaction()` — no ambient store | **STALLS**, then throws `Knex: Timeout acquiring a connection` — measured **60 085 ms** |\n| **A** | `engine.transaction()` — ambient `txStore` published | **returns in 12 ms** |\n| control | no transaction open | returns immediately |\n\nCase A was checked against the obvious false negative (that `engine.transaction()` had silently degraded to the no-tx-support path). Inside the callback: `driver.activeTransactions === 1`, `txStore.getStore().transaction` present, and a spy on `driver.find` recorded the `sys_metadata` read arriving with the transaction handle attached (`hasTx: true`).\n\n**Verdict: `premise_still_valid: true` — the hazard is real, and `DatabaseLoader._find()` does demonstrate it.** `_find()` forwards no options (`return this.engine.find(table, query)`), so nothing threads the caller's transaction.\n\n**But the measurement narrowed the claim**, and that refinement is now recorded in the comment: the stall is **conditional**. It needs an open transaction the engine's ambient `txStore` (ADR-0034) cannot see — `buildDriverOptions` prefers an explicit handle and falls back to the ambient store, so a transaction opened through `engine.transaction()` / `ScopedContext` gets threaded onto the read *on the loader's behalf* and does not stall. The old comment stated the hazard flatly and would have led a reader to the wrong conclusion about the engine-opened route.\n\n## The replacement witness\n\nA codebase sweep for callers that thread a transaction by hand found exactly one live one: **`SqlDriver.ensureSequencesTable()`**, which takes `parentTrx` and runs its DDL on the caller's transaction *for exactly this reason* (its own comment names the batch/autonumber deadlock), with `assertBareKnexSafe` as the tripwire for callers that forget. Both halves are pinned by `sql-driver-sqlite-tx-guard.test.ts`. `plugin-audit`'s remaining writers no longer mention transactions at all, confirming the old witness is fully gone.\n\nThis is a witness I verified stalls (case B) and verified is designed against (the `parentTrx` branch + its guard test) — not a fresher name substituted on faith, which is the defect this card exists to fix.\n\n## Scope\n\nComment-only, two files, both in `packages/metadata/src`:\n\n- `metadata-manager.ts` — the `listCache` policy comment.\n- `metadata-manager-degraded-list-cache.test.ts` — its doc comment carried the **identical** stale sentence. Updated in the same PR so the duplicate cannot re-seed the stale citation.\n\nNo widening: the fix did not land in the pool implementation. The temporary probes used for the measurement were run under `packages/runtime` (the only place with `objectql` + `driver-sql` + `metadata` in one dependency closure) and deleted — the diff contains no test additions.\n\n**Possible follow-up (not taken here, to respect the comment-only scope):** the case A / case B split is currently pinned only by this PR's prose. An integration test in `packages/runtime` asserting \"ambient-published transaction ⇒ threaded, bare driver transaction ⇒ stalls\" would keep the new comment honest the way `sql-driver-sqlite-tx-guard.test.ts` keeps the driver honest. Happy to file it as a separate card.\n\n## Gates\n\n| Gate | Status |\n| --- | --- |\n| `pnpm check:durability-log-level` | ✅ 24 catch seams, 63 read seams |\n| `pnpm check:nul-bytes` | ✅ 7164 files |\n| `eslint` (changed files) | ✅ clean |\n| `pnpm --filter @objectstack/metadata build` | ✅ |\n| `metadata` test suite | ✅ 31 files, 603 tests passed |\n\n**Changeset:** none. Comment-only with no reader-visible generated output ⇒ this wants the `skip-changeset` label rather than an empty changeset. Flagging for the PM to apply.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_014ULe4k76SVzSubUHtaFt6e)_"
+}

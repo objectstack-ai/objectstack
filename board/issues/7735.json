@@ -1,0 +1,35 @@
+{
+  "number": 7735,
+  "kind": "issue",
+  "title": "auth-method-matrix: `change-email` and `delete-user` are booked as mounted in `auth-route-ledger.ts` but plugin-auth never configures better-auth's `user.changeEmail` / `user.deleteUser` — no switch to enable them",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "huangyiirene"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T12:24:38Z",
+  "updated_at": "2026-08-12T14:03:45Z",
+  "closed_at": "2026-08-12T14:03:45Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7735",
+  "body": "## Symptom\n\nTwo core-auth routes are advertised as mounted but are dead:\n\n- `POST /api/v1/auth/change-email` answers **400 `CHANGE_EMAIL_DISABLED`**.\n- `POST /api/v1/auth/delete-user` answers **404**.\n\nBoth are booked in the route ledger (`packages/plugins/plugin-auth/src/auth-route-ledger.ts`): line 118 `{ route: 'POST /api/v1/auth/change-email', … client: 'auth.changeEmail' }` and line 120 `{ route: 'POST /api/v1/auth/delete-user', … client: 'auth.deleteUser' }` — yet neither can be enabled through any product switch.\n\n## Root cause\n\n`plugin-auth` **never configures better-auth's `user.changeEmail` / `user.deleteUser`** options. On `origin/main`, `changeEmail`/`deleteUser` appear **only** inside `auth-route-ledger.ts` (the two ledger rows at 118/120, plus the disabled-route list at 247/249 and a `/delete-user/callback` entry at 196) — **zero** configuration hits anywhere else in `plugin-auth/src` (or `dist`). Because better-auth ships these features **off** by default and nothing turns them on, the routes are mounted-but-disabled with no lever to flip.\n\nThe fix is either to configure better-auth's `user.changeEmail` / `user.deleteUser` (with whatever verification/confirmation policy the platform wants) so the ledgered routes actually work, or to stop booking them as mounted until they are wired.\n\n## Reproduction\n\n1. Boot the app; inspect `auth-route-ledger.ts` — both routes are booked mounted.\n2. `POST /api/v1/auth/change-email {newEmail}` → 400 `CHANGE_EMAIL_DISABLED`.\n3. `POST /api/v1/auth/delete-user` → 404.\n4. Grep `plugin-auth/src` (and `dist`) for `changeEmail` / `deleteUser` → the only hits are in `auth-route-ledger.ts`; no better-auth `user.*` configuration enables them.\n\n## Source\n\nExtracted from the QA run objectstack-ai/objectstack#7663 (framework 92f26f75, console 09987b680)."
+}

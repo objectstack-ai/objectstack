@@ -1,0 +1,37 @@
+{
+  "number": 7911,
+  "kind": "issue",
+  "title": "finding: anonymous-deny ordering inverted on /security too — the 503 \"Security service not available\" answers unauthenticated callers ahead of the gate",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "pm:dispatched",
+    "security"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-12T03:53:59Z",
+  "updated_at": "2026-08-12T10:06:59Z",
+  "closed_at": "2026-08-12T10:06:59Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7911",
+  "body": "Found while fixing #7653 (`/ai/**` anonymous-deny ordering, PR #7910). Filed rather than folded into that PR — different domain, and the card scoped that work to `domains/ai.ts`.\n\n## The defect\n\n`packages/runtime/src/domains/handleSecurityRequest` (`domains/security.ts`) resolves the security service and returns a **503** when the slot is empty or the occupant does not duck-type — **before** it consults the anonymous-deny gate:\n\n```ts\n// domains/security.ts:71-74\nconst service = await deps.resolveService(context, 'security', context.environmentId);\nif (!service || typeof service.listAudienceBindingSuggestions !== 'function') {\n    return { handled: true, response: deps.error('Security service not available', 503) };\n}\n\nconst ec = context.executionContext;\n// …\n// domains/security.ts:92\nif (!ec || shouldDenyAnonymous({ userId: ec.userId, isSystem: ec.isSystem })) {\n```\n\nSo on any deployment where the `security` slot is empty or stubbed, an unauthenticated caller to `/api/v1/security/suggested-bindings` gets `503 Security service not available` instead of `401 UNAUTHENTICATED` — a capability answer served ahead of the gate. That is the same inversion #7653 records for `/ai/**`, on a surface the handler's own comment calls an \"Admin surface — anonymous is denied UNCONDITIONALLY (#2567, #3963)\".\n\n## Why it is worth a ticket even though the string is bland\n\nSmaller disclosure than the AI one: the message names no remedy and no package, so what leaks is only *whether this deployment serves the security slot*. The value is the contract, not the secret — `/security` is meant to sit on the same anonymous-deny floor as `/data`, `/meta`, `/actions` and `/automation` (ADR-0056 D2 → #3963), and an anonymous caller should not be able to tell a 503-vs-401 apart on an admin surface. It is also the last of the six dispatcher domains still ordered this way.\n\n## Surveyed, for whoever picks this up\n\nEvery sibling in `packages/runtime/src/domains/` was checked for the same shape while verifying #7653. Exactly one is inverted:\n\n| domain | gate | first capability return | verdict |\n|---|---|---|---|\n| `automation.ts` | `:156` | `capabilityUnavailable` `:174` | ✅ gate first — the reference, with a comment giving the reason |\n| `meta.ts` | `:172` | — | ✅ gate first |\n| `actions.ts` | `:129` | — | ✅ gate first |\n| `packages.ts` | `:224` | — | ✅ gate first |\n| `ai.ts` | `:128` (in-loop) | courtesy `:68`, 501 `:79` | ❌ #7653 — fixed in #7910 |\n| `security.ts` | `:92` | 503 `:73` | ❌ **this issue** |\n\n`domains/automation.ts` is the shape to copy: hoist the gate above the service probe.\n\n## Suggested fix\n\nMove the `!ec || shouldDenyAnonymous(...)` block above the `resolveService` probe. Note the `!ec` arm is already documented as behaviour-preserving (`#4127 batch 3`), so hoisting does not change what it decides — only when. No route-level `auth: false` opt-out exists on this domain, so unlike `/ai` this is a straight hoist with a single consult site.\n\n## Verification the fix would need\n\nPositive: anonymous `GET /api/v1/security/suggested-bindings` with an empty `security` slot → **401** with `error.code === 'UNAUTHENTICATED'` (assert code *and* status — ADR-0112). Negative: with a valid principal and an empty slot, the **503 `Security service not available`** answer is unchanged; with a serveable slot the route still works for an authenticated caller and still denies anonymous.\n\nNot assigned — recording, not claiming."
+}

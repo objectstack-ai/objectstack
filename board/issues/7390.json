@@ -1,0 +1,35 @@
+{
+  "number": 7390,
+  "kind": "issue",
+  "title": "finding: a repeated `?filter=` on `GET /data/:object` cannot be told from a filter AST, so it is diagnosed as a malformed filter (and, rarely, succeeds)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-10T08:50:14Z",
+  "updated_at": "2026-08-12T11:19:48Z",
+  "closed_at": "2026-08-12T11:19:48Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7390",
+  "body": "Observation-class finding, split out of #7321 while implementing it (PR #7386). **Unassigned**, filed per Prime Directive #10. #7386 deliberately did not widen into this — closing it needs an acceptance-surface decision that card had no mandate for.\n\n## What #7386 did, and the one slot it could not cover\n\n#7386 added an arity gate to `findData`'s shared list-query normalizer (`packages/metadata-protocol/src/protocol.ts`). The rule keys off the **declared value type**, because that normalizer serves two ingresses it cannot tell apart — `GET /data/:object` (a repeated querystring arrives as `string[]`) and `POST /data/:object/query` (the body is arbitrary JSON). On a slot whose spec type never admits an array, `Array.isArray` is unambiguous evidence of repetition. On a slot that does admit one, it is the ordinary shape.\n\n`where` / `filter` / `filters` / `$filter` is on the second list, and it is the only member where that costs something. A filter **AST is an array**: `[\"status\",\"=\",\"open\"]`. So a repeated `?filter=A&filter=B` and a body-form AST are byte-identical at this layer, and the arity gate has to leave the slot alone.\n\n## The consequence, in two shapes\n\n**1. A repeated filter IS refused, but the diagnosis names the wrong cause.** `?filter={\"a\":1}&filter={\"b\":2}` arrives as `['{\"a\":1}','{\"b\":2}']`. `isFilterAST` cannot read it (the first element is a string, the second is not a known operator, and the legacy flat-array arm needs every element to be an array), so it falls to `malformedFilterArrayError` — `400`, `error.code: INVALID_FILTER`. The refusal is correct; the message tells the caller their filter is malformed, when in fact each filter they sent was fine and the mistake was sending two.\n\n**2. Rarely, a repeated filter silently SUCCEEDS.** When the repetition happens to spell a valid AST it is parsed as one. `?filter=status&filter=%3D&filter=open` arrives as `[\"status\",\"=\",\"open\"]`, which `isFilterAST` accepts, and `parseFilterAST` lowers to `{ status: \"open\" }`. Three occurrences of one parameter become one working filter. Contrived to write by hand, but it is a 200 with a filter nobody expressed, which is the same class as the rest of #7321.\n\n## Why it is separate, and why it is `finding` and not queued\n\nFixing shape 2 properly means deciding something #7386 had no mandate to decide: either the wire form of `filter` stops accepting the bare AST array (an **acceptance-surface** change, which is a `packages/spec` decision — see #6017, and note #6298's first red line excludes acceptance-surface changes), or the transport tells the normalizer which ingress it came from (a new contract between `packages/rest` and `packages/metadata-protocol`, i.e. a different owner's surface). Both are decisions, not implementations.\n\nShape 1 alone — improving only the message — is cheaper but would have to guess: \"an array of strings that are each parseable JSON is probably a repetition\" is a heuristic, and heuristics in the normalizer are what #4181 and #4121 spent effort removing.\n\n## Not reachable today, same expiry as its parent\n\nThe production Hono adapter collapses repeated parameters to the first value before any handler runs, so no caller hits either shape now. That dormancy ends with **#6878 route 2** (ruled adopted 2026-08-10), exactly like #7321's did. Priority is coupled to that, not independent of it.\n\n## Dedup\n\nSearched open issues for `readSingleQueryValue`, `query-multiplicity`, `repeated query`, `isFilterAST`, `malformed filter array`, and `query multiplicity single-valued`. Hits: #7321 (the parent, whose fix is PR #7386), #6878 (the adapter divergence that ungates the class), #7360 (the same class on the automation descriptor routes — a different surface, already filed unassigned), #6017 (the `domain:spec` PM seat). None covers the filter slot's AST-vs-repetition ambiguity."
+}
