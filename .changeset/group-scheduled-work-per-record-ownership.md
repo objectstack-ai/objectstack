@@ -6,21 +6,17 @@
 
 feat(spec,types,triggers)!: `group` runs package-authored scheduled work without a declaration, owning each run's writes per record (#18378)
 
-<!-- adr-0087: already-registered schedule-flow-acting-organization-required -->
+<!-- adr-0087: not-required (already-registered schedule-flow-acting-organization-required) This amends the EXISTING semantic entry rather than adding one: same authorable key, same deployment switch, same surface, and the entry predates this diff at the merge base. Nothing is renamed, retired or re-typed — the start node's `config` is an open record (ADR-0018), so every flow that parses today parses byte-identically afterwards and `objectstack migrate meta` has nothing new to rewrite. What moves is the BIND-time accept set (it WIDENS) and the RUN-time organization such a flow's writes carry; the entry's own surface/replacement/reason/acceptanceCriteria each gained their `group` row in this diff. -->
 
 `Clause-②: yes (widening)`
 
-**ADR-0087 disposition — `already-registered`, and why not `registered`.** This
-amends the EXISTING semantic entry `schedule-flow-acting-organization-required`
-(entry 18) rather than adding one: same authorable key, same deployment switch,
-same surface, and the entry predates this diff at the merge base. Nothing is
-renamed, retired or re-typed — the start node's `config` is an open record
-(ADR-0018) and every flow that parses today parses byte-identically afterwards.
-What moves is the BIND-time accept set (it WIDENS) and the RUN-time organization
-such a flow's writes carry. The entry's `surface`, `replacement`, `reason` and
-`acceptanceCriteria` each gained their `group` row, the rejected
-bootstrap-organization arm included — recorded because it is the one a later
-reader will re-propose.
+**ADR-0087 disposition — `not-required (already-registered)`, not `registered`.**
+The ledger entry this change belongs to already exists
+(`schedule-flow-acting-organization-required`, entry 18) and predates this diff
+at the merge base, so `registered` would assert a registration this PR did not
+make. The entry's `surface`, `replacement`, `reason` and `acceptanceCriteria`
+each gained their `group` row here, the rejected bootstrap-organization arm
+included — recorded because it is the one a later reader will re-propose.
 
 **Nothing that worked stops working, and nothing that was admitted becomes
 refused.** The accept set widens in one cell.
