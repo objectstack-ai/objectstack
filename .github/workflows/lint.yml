@@ -1367,6 +1367,16 @@ jobs:
       - name: 'Settings deny-roster pin (#18281)'
         run: pnpm check:pm-settings-deny-roster
 
+      # Expected-skips roster self-test (#18308) — same family and the same
+      # split as the widening-tell and prior-ruling steps above: the LIVE read
+      # takes a PR head and judges its check-runs over REST, so it is a tool a
+      # seat runs against the PR in front of it, not a verdict about the PR
+      # that happens to run CI next. Only the offline self-test runs here — it
+      # is the only instrument this roster's matching rules have, which is
+      # exactly the family `check:self-test-wired` requires this step for.
+      - name: Expected-skips roster self-test
+        run: pnpm check:pm-expected-skips
+
       # Release-rehearsal clone preflight self-test (#9555). A local
       # `pnpm run version` rehearsal — the prescribed verification route for
       # every release-machinery change — HANGS FOREVER in an agent container:
