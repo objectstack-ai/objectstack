@@ -365,6 +365,11 @@ import { maskComments, maskCommentsAndLiterals } from './js-comment-mask.mjs';
 // ⛔ Not re-implemented here: the ruling's condition on the arm is that it has a
 // single legal spelling read in a single place, and every reader imports it.
 import { readClause2Line } from './pm/check-clause2-carriers.mjs';
+// #16421 — the staging manifest for this gate's own I1/I2 fixture, derived from
+// the module graph rather than typed out. Shared with the OTHER site that copies
+// this gate into a sandbox (`objectui-changeset-digest.mjs`), because two hand
+// lists for one graph is how one of them goes stale unnoticed.
+import { stageFirstPartyClosure } from './first-party-closure.mjs';
 
 // ── The self-test's own battery roster and floor (#13489) ──────────────────
 //
@@ -6242,7 +6247,6 @@ function selfTest() {
       writeFileSync(join(dir, rel), text);
     };
     const copy = 'scripts/check-adr-0087-registration.mjs';
-    w(copy, readFileSync(fileURLToPath(import.meta.url), 'utf8'));
     // EVERY first-party module this file imports, TRANSITIVELY, travels with the
     // copy, or the fixture dies on ERR_MODULE_NOT_FOUND -- which reads as "I1 is
     // broken" rather than "the fixture is incomplete". `js-comment-mask.mjs`
@@ -6250,38 +6254,25 @@ function selfTest() {
     // arrived after `invoked-as.mjs` and took both I-cases red on a fixture
     // problem that had nothing to do with what they assert.
     //
-    // ⭐ DERIVED, not listed (#16421). It was a two-name list while this gate's
-    // imports were two leaves. Signal (4) added an edge to
-    // `pm/check-clause2-carriers.mjs`, whose own closure is nine modules deep and
-    // includes `pm/dispatch-gates.mjs` -- a file under constant change. A hand
-    // list against that graph is a trap that springs on whoever adds an import
-    // over there, in a gate over here, with an error message about neither. The
-    // walk reads the same edges Node will resolve, so the fixture cannot drift
-    // from the real module graph by construction.
-    //
-    // ⛔ Statement-shaped matches ONLY -- the two spellings that reach a
-    // line-start `from`, a single-line `import … from '…'` and the closing brace
-    // of a multi-line one. A bare regex over the source harvests every specifier
-    // sitting inside a STRING in a self-test fixture, which is how a walk of this
-    // tree ends up chasing `./does-not-exist.mjs`.
-    const EDGE_PATTERNS = [
-      /^[ \t]*(?:import|export)[^'"\n]*from[ \t]*['"](\.[^'"\n]+)['"]/gm,
-      /^[ \t]*\}[ \t]*from[ \t]*['"](\.[^'"\n]+)['"]/gm,
-    ];
-    const staged = new Set([copy]);
-    const stage = (rel) => {
-      if (staged.has(rel)) return;
-      staged.add(rel);
-      const src = readFileSync(join(REPO_ROOT, rel), 'utf8');
-      w(rel, src);
-      for (const pattern of EDGE_PATTERNS) {
-        pattern.lastIndex = 0;
-        for (const m of src.matchAll(pattern)) stage(join(dirname(rel), m[1]));
-      }
-    };
-    for (const m of readFileSync(fileURLToPath(import.meta.url), 'utf8').matchAll(EDGE_PATTERNS[0])) {
-      stage(join('scripts', m[1]));
-    }
+    // ⭐ DERIVED, not listed, and derived by a module BOTH staging sites of this
+    // gate import (#16421). It was a two-name list here and the same two-name
+    // list in `objectui-changeset-digest.mjs`'s `fw-gate` sandbox. Signal (4)
+    // added an edge to `pm/check-clause2-carriers.mjs`, whose own closure is nine
+    // modules deep; this site was updated in the same edit and the other was not,
+    // and `check:objectui-changeset` went red in CI with an error naming neither
+    // the import nor the manifest. One in two is the measured hit rate of "the
+    // next author remembers", so neither site holds an opinion about the graph
+    // any more. The statement-shaped rule that keeps the walk off quoted fixture
+    // specifiers lives in `first-party-closure.mjs`'s header.
+    const staged = stageFirstPartyClosure(copy, { root: REPO_ROOT, write: w });
+    // ⭐ The derivation is ASSERTED, not trusted. A walk that silently came back
+    // with only the entry would stage a runnable-looking fixture that dies the
+    // moment signal (4) is reached, and the two I-cases below would again report
+    // about the wrong thing. This names the one edge that made the list a graph.
+    assert(
+      staged.includes(copy) && staged.includes('scripts/pm/check-clause2-carriers.mjs'),
+      `I1/I2: the staged closure must carry the gate AND the declaration reader it imports — got ${staged.length} file(s): ${staged.join(', ')}`,
+    );
     w(
       'importer.mjs',
       "import { readDisposition } from './scripts/check-adr-0087-registration.mjs';\n" +

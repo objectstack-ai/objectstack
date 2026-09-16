@@ -767,7 +767,8 @@ export const CLAUSE2_VALUES = Object.freeze(['yes', 'no']);
  * #16296, a value-domain narrowing shipped to consumers with every gate green,
  * because `check-adr-0087-registration.mjs` read breaking-ness out of a
  * `**BREAKING**` PROSE BANNER the author simply did not type. Maintainer ruling,
- * director summon #17, decision batch #2 item 1, option B, verbatim 「同意」.
+ * director summon #17, decision batch #2 item 1, option B — #16421 comment
+ * 5572145955, 2026-09-07 — verbatim 「同意」.
  *
  * ## The arm is OPTIONAL, and that is a measurement, not a kindness
  *

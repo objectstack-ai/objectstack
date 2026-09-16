@@ -77,11 +77,23 @@ bad()  { echo "    ✗ $*" >&2; FAILED=$((FAILED + 1)); }
 case_begin() { CASE="$1"; echo "  • ${CASE}"; }
 
 # case_5 additionally needs a copy of the digest script `bump-objectui.sh`
-# calls and the `isEntrypoint` helper it imports, alongside the script under
-# test — mirroring `objectui-changeset-digest.mjs`'s own self-test fixtures
-# (which copy the same trio for the same reason).
-DIGEST_SCRIPT="${SCRIPT_DIR}/objectui-changeset-digest.mjs"
-INVOKED_AS_SCRIPT="${SCRIPT_DIR}/invoked-as.mjs"
+# calls, plus every first-party module that script imports, alongside the script
+# under test — mirroring `objectui-changeset-digest.mjs`'s own self-test
+# fixtures, which stage the same closure for the same reason.
+#
+# ⭐ The module list is DERIVED, not typed (#16421). It was two names here
+# (`objectui-changeset-digest.mjs`, `invoked-as.mjs`) and the same two names in
+# three other places; when the digest script gained one import, this file was the
+# THIRD staging site to go red, and the symptom it produced was not an
+# `ERR_MODULE_NOT_FOUND` a reader could act on — the digest died as a subprocess
+# and `bump-objectui.sh` reported the objectui RANGE as unwalkable, which is a
+# true sentence about the wrong thing. The derivation lives in
+# `first-party-closure.mjs` and is shared with the JS staging sites.
+DIGEST_ENTRY='scripts/objectui-changeset-digest.mjs'
+REPO_ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+# The same script, absolute, for the two cases that run it from THIS checkout
+# rather than from a sandbox — those need no staging at all.
+DIGEST_SCRIPT="${REPO_ROOT_DIR}/${DIGEST_ENTRY}"
 
 # Case 5's fixture changeset BASENAME — interpolated into a changeset path
 # everywhere it is used, never spelled as one bare path literal: that path
@@ -123,13 +135,48 @@ new_framework() {
 }
 
 # Same, plus a byte copy of the digest script `bump-objectui.sh` shells out to
-# and the `invoked-as.mjs` helper it imports — needed only by cases that do NOT
-# pass `--no-changeset` and so actually reach the changeset section.
+# and every first-party module that script imports — needed only by cases that
+# do NOT pass `--no-changeset` and so actually reach the changeset section.
+#
+# ⛔ The closure is written to a file and its exit code read on its own line: a
+# `node ... | while read` pipeline would hand this function the exit code of
+# `while`, so a derivation that died would stage NOTHING and look like it worked,
+# which is the failure shape this whole change exists to remove.
 new_framework_with_digest() {
   local d="$1" pin="${2-}"
   new_framework "$d" "$pin"
-  cp "$DIGEST_SCRIPT" "${d}/scripts/objectui-changeset-digest.mjs"
-  cp "$INVOKED_AS_SCRIPT" "${d}/scripts/invoked-as.mjs"
+  local list="${d}/.closure.txt" rel
+  # ⚠️ Each path is emitted with its OWN trailing newline, and the loop below
+  # still reads an unterminated last line. Both halves, because the first time
+  # this was written with `join('\n')` the final path — `first-party-closure.mjs`
+  # itself — was silently dropped by `read`, and the sandbox then failed with the
+  # SAME ERR_MODULE_NOT_FOUND this derivation exists to prevent, from a list that
+  # had named the file correctly.
+  node --input-type=module -e "
+    import { firstPartyModuleClosure } from '${REPO_ROOT_DIR}/scripts/first-party-closure.mjs';
+    for (const rel of firstPartyModuleClosure('${DIGEST_ENTRY}', { root: '${REPO_ROOT_DIR}' })) console.log(rel);
+  " > "$list" 2>"${list}.err"
+  local ec=$?
+  if [[ $ec -ne 0 ]]; then
+    printf 'bump-objectui.selftest: could not derive the digest closure (exit %s)\n' "$ec" >&2
+    cat "${list}.err" >&2
+    return "$ec"
+  fi
+  local staged_count=0
+  while read -r rel || [[ -n "$rel" ]]; do
+    [[ -z "$rel" ]] && continue
+    mkdir -p "${d}/$(dirname "$rel")"
+    cp "${REPO_ROOT_DIR}/${rel}" "${d}/${rel}"
+    staged_count=$((staged_count + 1))
+  done < "$list"
+  # A derivation that came back short stages a sandbox that looks runnable and
+  # is not, so the count is ASSERTED here rather than discovered three cases
+  # later as "the objectui range does not walk".
+  if [[ "$staged_count" -lt 2 ]]; then
+    printf 'bump-objectui.selftest: the digest closure staged only %s file(s) — expected the script and its imports\n' "$staged_count" >&2
+    return 1
+  fi
+  rm -f "$list" "${list}.err"
 }
 
 # A throwaway objectui repo with a REAL changeset commit — commit A (the

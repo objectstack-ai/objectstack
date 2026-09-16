@@ -211,6 +211,10 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { isEntrypoint } from './invoked-as.mjs';
+// #16421 — the `fw-gate` sandbox below copies `check-adr-0087-registration.mjs`
+// in and runs it. Its staging manifest is DERIVED from that gate's module graph,
+// by the same module the gate's own fixture uses, so the two cannot disagree.
+import { stageFirstPartyClosure } from './first-party-closure.mjs';
 
 // ── The self-test's own battery roster and floor (#13489) ──────────────────
 //
@@ -258,6 +262,37 @@ const UNATTRIBUTED_BATTERY = '(no battery open)';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(__dirname, '..');
+
+/**
+ * Stage the shell driver and everything it needs into a throwaway framework
+ * root, so `bump-objectui.sh` can be run there for real. (#16421)
+ *
+ * Seven of this file's self-test cases build such a root, and all seven used to
+ * carry the SAME hand-written three-name manifest — `bump-objectui.sh`, this
+ * script, `invoked-as.mjs`. One function now, for the reason the other staging
+ * site in this file just learned the hard way: a manifest is a rule enforced by
+ * remembering, and the first time this script gained an import, CI went red with
+ * an `ERR_MODULE_NOT_FOUND` naming neither the import nor the list.
+ *
+ * ⭐ `bump-objectui.sh` stays NAMED, and that is not an oversight. It is a shell
+ * script: no `import` statement reaches it, so no module walk can find it. What
+ * is derived is exactly the part a walk can answer — this script's own
+ * first-party JS closure — and what is named is the part it cannot.
+ *
+ * @param {string} root — the throwaway framework root.
+ * @returns {string[]} every repo-relative path written, for a caller to assert on.
+ */
+function stageBumpDriver(root) {
+  const write = (rel, text) => {
+    mkdirSync(dirname(join(root, rel)), { recursive: true });
+    writeFileSync(join(root, rel), text);
+  };
+  write('scripts/bump-objectui.sh', readFileSync(join(__dirname, 'bump-objectui.sh'), 'utf8'));
+  return [
+    'scripts/bump-objectui.sh',
+    ...stageFirstPartyClosure('scripts/objectui-changeset-digest.mjs', { root: REPO_ROOT, write }),
+  ];
+}
 
 /**
  * Default cap on EACH rendered list. The releasing entries (#4731) and the
@@ -1713,9 +1748,7 @@ function selfTest() {
     mkdirSync(join(fwRun, '.changeset'), { recursive: true });
     writeFileSync(join(fwRun, '.changeset', 'pre.json'), '{"mode":"pre","tag":"rc"}\n');
     writeFileSync(join(fwRun, '.objectui-sha'), `${base}\n`);
-    for (const f of ['bump-objectui.sh', 'objectui-changeset-digest.mjs', 'invoked-as.mjs']) {
-      writeFileSync(join(fwRun, 'scripts', f), readFileSync(join(__dirname, f), 'utf8'));
-    }
+    stageBumpDriver(fwRun);
     const bumpStdout = execFileSync(
       'bash',
       [join(fwRun, 'scripts', 'bump-objectui.sh'), '--no-commit', head],
@@ -1760,9 +1793,7 @@ function selfTest() {
     mkdirSync(join(fwDegraded, 'scripts'), { recursive: true });
     mkdirSync(join(fwDegraded, '.changeset'), { recursive: true });
     writeFileSync(join(fwDegraded, '.objectui-sha'), `${'0'.repeat(40)}\n`);
-    for (const f of ['bump-objectui.sh', 'objectui-changeset-digest.mjs', 'invoked-as.mjs']) {
-      writeFileSync(join(fwDegraded, 'scripts', f), readFileSync(join(__dirname, f), 'utf8'));
-    }
+    stageBumpDriver(fwDegraded);
     const unwalkableRun = spawnSync(
       'bash',
       [join(fwDegraded, 'scripts', 'bump-objectui.sh'), '--no-commit', head],
@@ -1788,9 +1819,7 @@ function selfTest() {
     const fwInitial = join(tmp, 'fw-initial-pin');
     mkdirSync(join(fwInitial, 'scripts'), { recursive: true });
     mkdirSync(join(fwInitial, '.changeset'), { recursive: true });
-    for (const f of ['bump-objectui.sh', 'objectui-changeset-digest.mjs', 'invoked-as.mjs']) {
-      writeFileSync(join(fwInitial, 'scripts', f), readFileSync(join(__dirname, f), 'utf8'));
-    }
+    stageBumpDriver(fwInitial);
     const initialRun = spawnSync(
       'bash',
       [join(fwInitial, 'scripts', 'bump-objectui.sh'), '--no-commit', head],
@@ -2272,21 +2301,27 @@ function selfTest() {
     // in the judged diff) — the gate's convention-rot assertion needs its
     // breaking detector to match something.
     gw('.changeset/stock-breaking.md', '---\n"@objectstack/spec": major\n---\n\nstock\n\n**BREAKING** something\n');
-    gw(
-      'scripts/check-adr-0087-registration.mjs',
-      readFileSync(join(__dirname, 'check-adr-0087-registration.mjs'), 'utf8'),
+    // EVERY first-party module that gate imports, TRANSITIVELY, travels with the
+    // copy, or it dies on ERR_MODULE_NOT_FOUND — and the two cases below then
+    // read as "the ROUND TRIP assertion broke" when nothing about the round trip
+    // moved.
+    //
+    // ⭐ It was a hand MANIFEST, and the manifest is what broke (#16421). That
+    // gate gained one import — `pm/check-clause2-carriers.mjs`, the fleet's one
+    // clause-② declaration reader, whose own closure is nine modules deep — and
+    // the author updated the gate's OWN I1/I2 staging site in the same edit and
+    // not this one. CI went red HERE, on a gate about objectui changesets, with
+    // an error naming neither the new import nor this list. Both sites now DERIVE
+    // the closure from the same edges Node resolves, through
+    // `first-party-closure.mjs`; neither holds an opinion about the graph any
+    // more, and adding an import over there costs nothing here by construction.
+    const gateEntry = 'scripts/check-adr-0087-registration.mjs';
+    const gateStaged = stageFirstPartyClosure(gateEntry, { root: join(__dirname, '..'), write: gw });
+    check(
+      '#6494 the staged gate carries its whole first-party closure — DERIVED, not a hand manifest',
+      gateStaged.includes(gateEntry) && gateStaged.includes('scripts/pm/check-clause2-carriers.mjs'),
+      `${gateStaged.length} file(s): ${gateStaged.join(', ')}`,
     );
-    // EVERY `./`-relative sibling that gate imports travels with the copy, or it
-    // dies on ERR_MODULE_NOT_FOUND — and the two cases below then read as "the
-    // ROUND TRIP assertion broke" when nothing about the round trip moved. This
-    // is a MANIFEST, so adding an import over there means adding a row here;
-    // `js-comment-mask.mjs` (#12881) is the case that proved it has to be a list
-    // rather than the one hard-coded `invoked-as.mjs` line it replaced. It is the
-    // second staging site of this same gate to learn that (the gate's own I1/I2
-    // fixture is the first), which is why both now spell it the same way.
-    for (const sibling of ['invoked-as.mjs', 'js-comment-mask.mjs']) {
-      gw(`scripts/${sibling}`, readFileSync(join(__dirname, sibling), 'utf8'));
-    }
     gg('add', '-A');
     gg('commit', '-q', '-m', 'base');
     const gateBase = gg('rev-parse', 'HEAD').trim();
@@ -2657,9 +2692,7 @@ function selfTest() {
     mkdirSync(join(fwTrunc, 'scripts'), { recursive: true });
     mkdirSync(join(fwTrunc, '.changeset'), { recursive: true });
     writeFileSync(join(fwTrunc, '.objectui-sha'), `${c6from}\n`);
-    for (const f of ['bump-objectui.sh', 'objectui-changeset-digest.mjs', 'invoked-as.mjs']) {
-      writeFileSync(join(fwTrunc, 'scripts', f), readFileSync(join(__dirname, f), 'utf8'));
-    }
+    stageBumpDriver(fwTrunc);
     const truncPinBefore = readFileSync(join(fwTrunc, '.objectui-sha'), 'utf8');
     // OBJECTUI_NO_DEEPEN=1 on purpose: a self-test must never reach the network,
     // and this run is also the opt-out's only coverage.
@@ -2710,9 +2743,7 @@ function selfTest() {
     mkdirSync(join(fwTrunc2, 'scripts'), { recursive: true });
     mkdirSync(join(fwTrunc2, '.changeset'), { recursive: true });
     writeFileSync(join(fwTrunc2, '.objectui-sha'), `${c6from}\n`);
-    for (const f of ['bump-objectui.sh', 'objectui-changeset-digest.mjs', 'invoked-as.mjs']) {
-      writeFileSync(join(fwTrunc2, 'scripts', f), readFileSync(join(__dirname, f), 'utf8'));
-    }
+    stageBumpDriver(fwTrunc2);
     const noopDeepen = spawnSync('bash', [join(fwTrunc2, 'scripts', 'bump-objectui.sh'), '--no-commit', c6to], {
       encoding: 'utf8',
       env: { ...process.env, OBJECTUI_ROOT: ui6, GIT_TERMINAL_PROMPT: '0' },
@@ -2883,9 +2914,7 @@ function selfTest() {
       mkdirSync(join(dir, 'scripts'), { recursive: true });
       mkdirSync(join(dir, '.changeset'), { recursive: true });
       writeFileSync(join(dir, '.objectui-sha'), `${pinSha}\n`);
-      for (const f of ['bump-objectui.sh', 'objectui-changeset-digest.mjs', 'invoked-as.mjs']) {
-        writeFileSync(join(dir, 'scripts', f), readFileSync(join(__dirname, f), 'utf8'));
-      }
+      stageBumpDriver(dir);
       return dir;
     };
     const runShellBump = (fwDir, uiRoot, extraEnv = {}) =>
@@ -2984,9 +3013,7 @@ function selfTest() {
       mkdirSync(join(dir, 'scripts'), { recursive: true });
       mkdirSync(join(dir, '.changeset'), { recursive: true });
       writeFileSync(join(dir, '.objectui-sha'), `${pinSha}\n`);
-      for (const f of ['bump-objectui.sh', 'objectui-changeset-digest.mjs', 'invoked-as.mjs']) {
-        writeFileSync(join(dir, 'scripts', f), readFileSync(join(__dirname, f), 'utf8'));
-      }
+      stageBumpDriver(dir);
       return dir;
     };
     // Offline by construction — a self-test must never reach the network.

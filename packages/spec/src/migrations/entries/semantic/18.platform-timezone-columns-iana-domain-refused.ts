@@ -37,8 +37,8 @@ export const entry: SemanticMigration = {
     + '(the declaration now carries a `(narrowing)` arm the gate reads instead of a prose '
     + 'banner) and this row is the other half of the same ruling: the narrowing that '
     + 'already shipped is RECORDED, ⛔ not re-released and ⛔ not ratified in silence. '
-    + 'Maintainer ruling, director summon #17, decision batch #2 item 1, option B, '
-    + 'verbatim and untranslated: 「同意」. The direct precedents for registering a change '
+    + 'Maintainer ruling, director summon #17, decision batch #2 item 1, option B '
+    + '(objectstack#16421 comment 5572145955, 2026-09-07), verbatim and untranslated: 「同意」. The direct precedents for registering a change '
     + 'no transform can apply are `schedule-flow-acting-organization-required` (protocol '
     + '18) and `rest-requireauth-default-flip` (protocol 12) — behaviour-only, a '
     + 'deployment judgement, registered anyway because the prescription is real.',

@@ -26,5 +26,5 @@ No authorable key, export, config field or stored shape moves, and no DDL is
 planned — this is a record of a change that already shipped, published so that
 `objectstack migrate meta`'s consumers can read it.
 
-Maintainer ruling, director summon #17, decision batch #2 item 1, option B,
-quoted verbatim and untranslated: 「同意」.
+Maintainer ruling, director summon #17, decision batch #2 item 1, option B
+(#16421 comment 5572145955, 2026-09-07), quoted verbatim and untranslated: 「同意」.
