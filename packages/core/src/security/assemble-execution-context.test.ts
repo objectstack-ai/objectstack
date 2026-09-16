@@ -235,7 +235,27 @@ describe('#6216 — runtime/dispatcher face: byte-for-byte parity with the pre-#
               authGate: undefined,
             });
             const before = legacyDispatcherAssembly(authz, oauth, localization, requestLocale);
-            expect(observable(now)).toEqual(observable(before));
+
+            // [#17022] The ONE argued delta from the frozen transcription, and
+            // it is SUBTRACTED here rather than absorbed into the transcription
+            // itself — the header's rule is that a legacy function is never
+            // "kept up to date", because the day it needs editing is the day a
+            // face's output changed and the change owes its own argument.
+            // Here that argument is ADR-0090 D10 rule 4: the agent face now
+            // carries the identity of the client that performed the write, and
+            // no other face carries anything new.
+            //
+            // Subtraction alone would be a hole big enough to hide the next
+            // drift in, so the key is asserted POSITIVELY on the very next
+            // line: present exactly on the agent branch — an authenticated
+            // principal whose token names a client — absent everywhere else,
+            // and carrying that client's id. The parity pin below is otherwise
+            // unweakened: every other key still compares byte-for-byte.
+            const { performedBy, ...restOfNow } = observable(now);
+            expect(restOfNow).toEqual(observable(before));
+            expect(performedBy).toEqual(
+              authz.userId && oauth?.clientId ? { clientId: oauth.clientId } : undefined,
+            );
           });
         }
       }
