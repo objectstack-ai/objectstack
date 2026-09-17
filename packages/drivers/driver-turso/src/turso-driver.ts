@@ -332,7 +332,10 @@ function refuseRemoteTransaction(door: string, detail: string): never {
     `inherit \`SqlDriver\`'s knex transactions and honour \`options.transaction\`, or take the ` +
     `non-transactional path deliberately: \`engine.transaction()\` without \`require: true\` on a ` +
     `datasource whose driver has no transactions runs the callback with no rollback and says so ` +
-    `(ADR-0119 D1). Implementing transactions on this transport is tracked separately (#18616).`,
+    // ⛔ No tracker id in this string: it reaches authors and operators, who have
+    // no tracker to resolve one against (`check:doc-authoring`). The card id is
+    // in the docblock above, where the reader who CAN resolve it is reading.
+    `(ADR-0119 D1). Implementing transactions on this transport is a separate piece of work.`,
   ) as Error & { code?: string; status?: number };
   err.code = StandardErrorCode.enum.NOT_IMPLEMENTED;
   err.status = 501;
