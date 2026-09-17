@@ -870,7 +870,35 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
                     // Admin gating is layered on top in a follow-up (step 2).
                     const previewDrafts = query?.preview === 'draft';
                     const data = await protocol.getMetaItem({ type: singularType, name, packageId, organizationId, previewDrafts });
-                    return { handled: true, response: deps.success(data) };
+                    // [#18401] The SAME hit test the `object` branch above runs,
+                    // asked here for the same reason. `getMetaItem` answers a
+                    // miss with the protection envelope around an absent item —
+                    // `{ type, name, item: undefined, lock, editable, deletable,
+                    // resettable }`, because `resolveLockState(undefined, false)`
+                    // is unconditional — never with `undefined`. Returned
+                    // straight through, `JSON.stringify` at the transport drops
+                    // the `item` member and the caller is handed a 200 whose body
+                    // is the declared envelope MINUS its required member: the
+                    // route reports a hit for a name with nothing behind it.
+                    //
+                    // ⭐ What made this a defect rather than a rough edge is that
+                    // this function already answered the same question the other
+                    // way one branch up: `object` refuses the item-less envelope
+                    // and 404s. One function, two opposite answers to "does
+                    // absence mean success?", selected by which type you asked
+                    // for. `GetMetaItemResponseSchema` declares `item` required,
+                    // and the REST twin of this door refuses the identical shape
+                    // (#18066) — three declarations agreeing against one branch.
+                    //
+                    // ⛔ This adds no new refusal dialect. The fall-through ends
+                    // at this block's OWN `deps.error('Not found', 404)` below —
+                    // the ADR-0112 nested envelope every other refusal in this
+                    // file already speaks — so the dialect question #18402 raises
+                    // about this route is untouched here, neither answered nor
+                    // pre-empted.
+                    if (data?.item != null) {
+                        return { handled: true, response: deps.success(data) };
+                    }
                  } catch (e: any) {
                     // Protocol might throw if not found or not supported
                  }
