@@ -249,7 +249,7 @@ export function resolveScheduledWorkEnabled(): boolean {
  *
  * | state | `enabled` | `requiresActingOrganization` | `runOwnership` | what binds |
  * |:--|:--|:--|:--|:--|
- * | OFF (default) | `false` | `false` | `'unscoped'` (moot) | nothing — no time trigger arms, no package job schedules |
+ * | OFF (default) | `false` | `false` | the posture's rule (moot) | nothing — no time trigger arms, no package job schedules |
  * | ON under `single` | `true` | `false` | `'unscoped'` | every time-triggered flow, carrying NO organization |
  * | ON under `group` | `true` | `false` | `'per-record'` | every time-triggered flow; a declared one acts as its declaration, an undeclared one acts as each swept record's own organization |
  * | ON under `isolated` | `true` | `true` | `'declared'` | only a flow that declares `config.organization` |
@@ -270,6 +270,17 @@ export function resolveScheduledWorkEnabled(): boolean {
  * remedy for a deployment decision. The OFF state has its own reason —
  * {@link SCHEDULED_WORK_DISABLED_REASON} — and it is the one that must be
  * reported.
+ *
+ * ⚠️ `runOwnership` is NOT gated on the switch the way that boolean is, and the
+ * OFF row above says "the posture's rule" rather than a value for exactly that
+ * reason: it answers a question about the POSTURE — where a bound run's writes
+ * would get their organization — so with the switch off it still reports
+ * `'per-record'` under `group` and `'declared'` under `isolated`, not
+ * `'unscoped'`. Nothing binds there, so no run can reach the state it names:
+ * ⛔ never read `runOwnership` alone as evidence that a run exists or that one
+ * is going to; {@link ScheduledWorkPolicy.enabled} is the discriminator, and
+ * the OFF reason above is what an operator gets told. Both halves are pinned in
+ * `env.test.ts`.
  *
  * ⚠️ `posture` is what the deployment ASKED FOR, exactly as
  * {@link resolveTenancyPosture} answers it — whether the wall is actually
@@ -328,9 +339,12 @@ export interface ScheduledWorkPolicy {
    */
   readonly requiresActingOrganization: boolean;
   /**
-   * What an armed run that declared nothing acts as. ⚠️ Meaningful only while
-   * {@link enabled}; when the switch is off nothing binds, so this reports
-   * `'unscoped'` rather than a state no run can reach.
+   * What an armed run that declared nothing acts as. ⚠️ A fact about
+   * {@link posture}, NOT about the switch: it reports that posture's rule
+   * (`group` ⇒ `'per-record'`, `isolated` ⇒ `'declared'`) whether or not
+   * {@link enabled}. With the switch off nothing binds, so no run can reach the
+   * state this names — ⛔ read it together with {@link enabled}, never alone as
+   * evidence that a run exists.
    */
   readonly runOwnership: ScheduledRunOwnership;
 }
