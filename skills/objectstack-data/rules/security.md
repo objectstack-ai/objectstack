@@ -32,6 +32,9 @@ export const salesUser = definePermissionSet({
   `allowTransfer` (ownership change), `viewAllRecords` / `modifyAllRecords`
   (super-user, bypass sharing).
 - Source: `node_modules/@objectstack/spec/src/security/permission.zod.ts`
+- **`isDefault: true` = the `everyone` baseline (ADR-0090 D5).** It may carry app
+  capabilities declared under `capabilities:` (`defineCapability`) and granted via
+  `systemPermissions`; lint and boot refuse a platform capability or undeclared name there.
 - Combine with `enable.apiMethods` to also restrict the HTTP surface.
 
 ## Assigning a permission set to a user

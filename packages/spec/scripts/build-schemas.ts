@@ -81,6 +81,17 @@ import {
   parseDefaultEntries,
 } from './lib/authorable-defaults';
 import { DEFAULT_CHANGES_BY_MAJOR } from './lib/default-changes';
+// The nested half of check (b2)'s question (#17969). Its own module because the
+// nested view must stay reachable from nothing that EMITS — recursing the
+// `currentKeys` walk three lines below would publish 14,376 nested keys into
+// `authorable-surface/**` — and because a resolution rule is assertable without
+// running the whole generator (scripts/nested-authorable-keys.test.ts).
+import {
+  isNestedAuthorableKey,
+  isRetiredJsonSchemaNode,
+  nestedAuthorableKeyState,
+  type NestedAuthorableKeyState,
+} from './lib/nested-authorable-keys';
 import { RETIRED_DEFS_BY_MAJOR, RETIRED_KEYS_BY_MAJOR } from '../src/migrations/registry';
 import {
   getMetadataTypeSchema,
@@ -832,11 +843,7 @@ interface AuthorableSurface { keys: string[] }
 interface AuthorableSurfaceBase { description: string; baseRev: string; keys: string[] }
 
 /** `retiredKey()` is `z.never()`, which Zod renders as `{ "not": {} }`. */
-function isRetired(prop: unknown): boolean {
-  if (!prop || typeof prop !== 'object') return false;
-  const not = (prop as Record<string, unknown>).not;
-  return !!not && typeof not === 'object' && Object.keys(not).length === 0;
-}
+const isRetired = isRetiredJsonSchemaNode;
 
 /**
  * Every authorable key the ADR-0087 registries declare as tombstoned, by exact
@@ -1042,6 +1049,29 @@ if (surfaceDoc) {
     }
   }
 
+  // The nested half of the two checks below (#17969). `currentKeys` is built
+  // from `schema.properties` ONE LEVEL DEEP, so a dotted row —
+  // `system/SchemaLevelIsolationStrategy:performance.schemaCacheTTL`, 48 of them
+  // on this tree — matches nothing in it and was IGNORED rather than judged:
+  // measured by ablation, a fabricated nested row passed this gate at exit 0
+  // with zero ❌ against a lit control (a live top-level key) refused at exit 1.
+  // Resolved here against the schemas this build emitted, for the REGISTERED
+  // ROWS ONLY — never materialised as a map, because the map three lines above
+  // is also `currentEntries`, the PUBLISHED baseline, and recursing it in place
+  // measures at +14,376 lines across all 14 shards. ./lib/nested-authorable-keys
+  // is the authority on the resolution rules and on what they cannot see.
+  //
+  // A dot in the name half does NOT by itself mean nested: `@odata.context` and
+  // the SCIM extension URN are TOP-LEVEL property names that carry one (4 such
+  // keys on the shipped baseline, all live). So a row whose exact key this build
+  // emits as a top-level property is judged as one, and only what is left over
+  // is read as a path — the routing record is this map's own membership.
+  const nestedStates = new Map<string, NestedAuthorableKeyState>(
+    [...registeredRetired.keys()]
+      .filter((k) => !currentKeys.has(k) && isNestedAuthorableKey(k))
+      .map((k) => [k, nestedAuthorableKeyState(k, generatedSchemas)]),
+  );
+
   // (b2) The other direction: an entry that registers a key this build still
   //      emits as LIVE. Nothing consumed that registration — it pre-approves a
   //      retirement that has not happened, and check (b) would then wave the
@@ -1049,8 +1079,8 @@ if (surfaceDoc) {
   //      the build no longer emits at all is NOT an error: that is the expected
   //      steady state once a tombstone ages out and check (c) lets its baseline
   //      line go (see RETIRED_KEYS_BY_MAJOR's "Lifecycle").
-  const liveButRegistered = [...registeredRetired.entries()].filter(
-    ([k]) => currentKeys.get(k) === false,
+  const liveButRegistered = [...registeredRetired.entries()].filter(([k]) =>
+    nestedStates.has(k) ? nestedStates.get(k) === 'live' : currentKeys.get(k) === false,
   );
   if (liveButRegistered.length > 0) {
     console.error(
@@ -1065,6 +1095,56 @@ if (surfaceDoc) {
       `   Either tombstone the key in its schema (\`retiredKey('<key> was removed in … — use\n` +
       `   <replacement>. …')\`), or delete the entry from\n` +
       `   packages/spec/src/migrations/registry.ts.`,
+    );
+    process.exit(1);
+  }
+
+  // (b3) A nested entry whose path this build does not emit at all. For a
+  //      TOP-LEVEL key that state is the aged-out steady state (b2) exempts
+  //      above — the tombstone carried `[RETIRED]` in `authorable-surface/`,
+  //      aged two majors, and check (c) let the line go, with evidence at every
+  //      step. A nested key reaches NONE of that: it has no baseline line (0
+  //      dotted entries on the shipped surface), so checks (a0)/(a)/(b)/(c) are
+  //      structurally blind to it and no gated route can produce a registered
+  //      nested row whose path is absent. The one origin left is that the row is
+  //      wrong — a typo'd def, a typo'd path, a stale key name — which until
+  //      #17969 registered silently and stayed registered, feeding the ADR-0087
+  //      conversions a fact nothing had checked.
+  //
+  //      A row whose DEF this build does not emit is deliberately NOT here: that
+  //      is the whole-def removal steady state, registered in
+  //      RETIRED_DEFS_BY_MAJOR and adjudicated by the json-schema.manifest/
+  //      ratchet, which subsumes the key entries under it (3 of the 48 nested
+  //      rows on this tree).
+  const unresolvableNested = [...registeredRetired.entries()].filter(
+    ([k]) => nestedStates.get(k) === 'unresolvable',
+  );
+  if (unresolvableNested.length > 0) {
+    console.error(
+      `\n❌ ${unresolvableNested.length} RETIRED_KEYS_BY_MAJOR entr(ies) name a NESTED key this build does not emit:`,
+    );
+    for (const [k, major] of unresolvableNested) {
+      console.error(`     - ${k}  (registered at major ${major})`);
+    }
+    console.error(
+      `\n   The def IS emitted; the dotted path is not in it. Unlike a top-level key, a\n` +
+      `   nested one never reaches ${SURFACE_FILE_NAME} — checks (a0)/(a)/(b)/(c) never see\n` +
+      `   it, and there is no aging clock that could have let it go. So this is not the\n` +
+      `   aged-out steady state: the row names a path this build has no property for.\n\n` +
+      `   Fix the spelling against the emitted schema (json-schema/<category>/<Def>.json —\n` +
+      `   an array member is spelled without its \`[]\`, as \`steps.estimatedMinutes\`), or\n` +
+      `   delete the entry from packages/spec/src/migrations/registry.ts.\n\n` +
+      `   Two legitimate shapes this check cannot yet tell apart from a wrong row, both\n` +
+      `   unreached on this tree — if yours is the first, teach this check the shape,\n` +
+      `   ⛔ do not delete a row that is telling the truth:\n` +
+      `     - a key retired by REMOVAL from a \`strictObject\` shape with a \`guidance\`\n` +
+      `       prescription (check (c) proof 4) is absent from the emitted schema on\n` +
+      `       purpose; that proof has no nested form, and 0 of this tree's nested rows\n` +
+      `       take that route;\n` +
+      `     - a TOP-LEVEL key whose own name carries a dot (\`@odata.context\`, a SCIM\n` +
+      `       extension URN — 4 on this tree, all live) that has aged out and stopped\n` +
+      `       being emitted: the row then reads as a path, and the aged-out steady state\n` +
+      `       (b2) exempts would land here instead.`,
     );
     process.exit(1);
   }
