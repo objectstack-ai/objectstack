@@ -1136,8 +1136,27 @@ const QueryAstWithCountSchema: z.ZodType<QueryAstWithCount, QueryInput & { count
  * `ZodObject` at run time. The claim about the parsed OUTPUT is made by
  * {@link QueryAstWithCountSchema}'s parse inside the fold, and by nothing else.
  */
-const queryObjectFace = (): z.ZodObject<z.ZodRawShape> =>
-  QuerySchema as unknown as z.ZodObject<z.ZodRawShape>;
+const queryObjectFace = (): z.ZodObject<Record<string, z.ZodType>> =>
+  QuerySchema as unknown as z.ZodObject<Record<string, z.ZodType>>;
+
+/**
+ * `expand` re-described on the extended shape, with the exact text
+ * `QuerySchema` gives it — READ from the member, ⛔ never re-typed, because two
+ * copies of a description drift.
+ *
+ * Not decoration. `expand` is RECURSIVE, so `z.toJSONSchema` hoists it into
+ * `$defs` and the property renders as a bare `$ref`; a `$ref` carries no
+ * sibling `description` unless the property node has one of its own. This slot
+ * publishes its INPUT shape — `build-schemas.ts` falls back to `io: 'input'`
+ * because the output of a transform has no JSON form — and in that direction
+ * the `FindDataRequest.query` / `expand` row rendered with an EMPTY description
+ * cell in `content/docs/references/api/protocol.mdx`. Re-describing the member
+ * puts the text back beside the `$ref`.
+ */
+const describedCanonicalExpand = (): z.ZodType => {
+  const member = queryObjectFace().shape.expand;
+  return member.describe(member.description ?? '');
+};
 
 /**
  * A query slot whose declared INPUT is the canonical AST or its transport
@@ -1171,6 +1190,7 @@ export const QueryWithTransportSchema = lazySchema(
   () => queryObjectFace()
     .extend({
       ...(QueryTransportParamsSchema as unknown as z.ZodObject<z.ZodRawShape>).shape,
+      expand: describedCanonicalExpand(),
       where: TransportFilterValueSchema.optional().describe(
         'Filtering criteria (WHERE) — a filter condition, or the input-only `FilterArray` '
         + "sugar (`['status', '=', 'open']`), which is lowered through `parseFilterAST` "

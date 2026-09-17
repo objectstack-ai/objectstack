@@ -1857,11 +1857,22 @@ export const GetUiViewResponseSchema = lazySchema(() => ViewSchema);
  * `query` declares its INPUT as the canonical QueryAST **or** its transport
  * spelling ({@link QueryTransportParamsSchema} — `$filter` / `$top` / `$skip` /
  * `$orderby` / `$select` / `$expand` and the plural `filters`), and its OUTPUT
- * as the AST: the transport keys are folded onto their canonical slots by
- * {@link QUERY_TRANSPORT_ALIAS_SLOTS} / {@link QUERY_TRANSPORT_DOLLAR_ALIASES}
- * at parse. The transport form is the FLATTENED SPELLING of the same AST with
- * a 1:1 alias table — ⛔ never a second query semantics, and nothing is
- * admitted into `QuerySchema` itself.
+ * as the AST plus the `count` flag: the transport keys are folded onto their
+ * canonical slots by {@link QUERY_TRANSPORT_ALIAS_SLOTS} /
+ * {@link QUERY_TRANSPORT_DOLLAR_ALIASES} at parse, and the folded bag is then
+ * PARSED by the AST schema, so the output is constructed rather than asserted.
+ * The transport form is the FLATTENED SPELLING of the same AST with a 1:1 alias
+ * table — ⛔ never a second query semantics, and nothing is admitted into
+ * `QuerySchema` itself.
+ *
+ * One semantics is a claim about VALUES too: every spelling of a slot accepts
+ * one set of value shapes, each of which is lowered to the canonical member's
+ * declared shape (`'50'` to `50`, a comma list to an array, the `FilterArray`
+ * sugar through `parseFilterAST`) or REFUSED at the parse. A shape that would
+ * need a parser the spec must not run — a JSON-encoded `$filter` string, an
+ * OData sort expression, a non-numeric `$top` — fails rather than reaching a
+ * consumer under the AST type; `$top: 'abc'` used to pass validation here and
+ * reach the engine as `limit: null`, an unbounded read under a 200.
  *
  * This records what the door already accepted. `@objectstack/metadata-protocol`
  * has folded these spellings since #3795 while the slot declared the AST alone,
