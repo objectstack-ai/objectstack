@@ -327,7 +327,8 @@
         "$TURBO_ROOT$/scripts/check-cross-package-test-inputs.mjs",
         "$TURBO_ROOT$/packages/types/src/node-isolation.test.ts",
         "$TURBO_ROOT$/scripts/js-comment-mask.mjs",
-        "$TURBO_ROOT$/scripts/js-comment-mask.d.mts"
+        "$TURBO_ROOT$/scripts/js-comment-mask.d.mts",
+        "$TURBO_ROOT$/docs/qa/platform-checklist/areas/*.json"
       ]
     },
     "@objectstack/plugin-auth#typecheck": {

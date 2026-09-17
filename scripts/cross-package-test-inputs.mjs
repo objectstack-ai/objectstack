@@ -945,6 +945,21 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
       // typecheck verdict is a function of it too.
       'scripts/js-comment-mask.mjs',
       'scripts/js-comment-mask.d.mts',
+      // [#18650] src/checklist-refusal-envelope-consistency.test.ts holds the QA
+      // platform checklist's statements about the anonymous `/get-session`
+      // answer equal to this package's own refusal envelope
+      // (`anonymous-session-refusal.ts`). The two halves can drift in OPPOSITE
+      // directions, so the radius is declared for the one the graph cannot
+      // reach: a diff HERE that moves the status or the code already puts this
+      // package in the affected set, but a diff in the checklist that
+      // re-introduces better-auth's retired `200 null` convention touches
+      // nothing this package declares -- and that is the direction the drift
+      // actually arrived from (the clauses sat inverted for five weeks after
+      // #17881 landed, with every gate green). Area-file granularity rather
+      // than the whole `docs/qa/platform-checklist/` tree: the scan reads
+      // `areas/*.json` and nothing else, and `runs/` beside it churns once per
+      // QA run.
+      'docs/qa/platform-checklist/areas/*.json',
     ],
     heldBy: {
       // The pair #10566 was measured on. That test's walk of `PACKAGES_DIR`
