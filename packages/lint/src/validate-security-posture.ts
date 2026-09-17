@@ -118,6 +118,7 @@
  * credit belongs to the schema's closed enum.
  */
 
+import { referenceCarrierOf } from '@objectstack/spec/data';
 import { describeAnchorForbiddenBits, type AnchorBindingContext } from '@objectstack/spec/security';
 import { indexObjectGraph, recordsOf, type ObjectGraph } from './object-graph.js';
 
@@ -276,10 +277,19 @@ function labelHasRoleWord(label: unknown): boolean {
  * `reference` is the only spelling `FieldSchema` declares; `reference_to` (like
  * `referenceTo` / `relatedTo` / `target`) is a rejected alias the strict error
  * map renames for the author, so a field carrying it does not parse (#5017).
+ *
+ * A NON-STRING carrier now THROWS rather than reading as "no target" (#13053).
+ * This function was the reader in that incident: a fixture spelled
+ * `reference: { object: … }`, `ObjectSchema.safeParse` refused it where it was
+ * written, and this returned `undefined` where it was consumed — so the suite
+ * was blind in both directions at once and green. The refusal is the spec's
+ * single carrier accessor, so this rule and the runtime give one answer.
  */
 function refOf(def: AnyRec): string | undefined {
-  const r = def.reference as unknown;
-  return typeof r === 'string' && r ? r : undefined;
+  // The read stays HERE, on `def.reference`, so the #5017 receiver meta-test
+  // below keeps its subject: this rule reads `reference` and never the alias.
+  // Only the SHAPE judgment moves out, to the spec's one carrier accessor.
+  return referenceCarrierOf({ reference: def.reference }, 'validate-security-posture refOf');
 }
 
 /**
