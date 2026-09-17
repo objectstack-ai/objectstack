@@ -70,6 +70,69 @@ describe('UserSchema', () => {
   });
 });
 
+/**
+ * [#18509] `UserSchema.image` accepts `null` — the shape better-auth serves.
+ *
+ * `sys_user.image` is `Field.url({ required: false })`, which reaches SQLite as
+ * `image varchar(255)` with `notnull=0`. better-auth SELECTs that column and
+ * serialises it present-and-null for a user who never set an avatar, so
+ * `/auth/sign-up/email` and `/auth/get-session` both carry `"image": null`.
+ * Measured on a real `AuthManager` over ObjectQL + driver-sqlite-wasm; the
+ * evidence and its controls are in PR #18510's body.
+ *
+ * The whole accept set is pinned, not just the row that moved, so that a later
+ * flip to `.nullable()` (which would retire the legal absent-key shape) or a
+ * drop of `.url()` (which would start admitting `''` and `'not-a-url'`) goes
+ * red here rather than passing as "still accepts null".
+ */
+describe('[#18509] UserSchema.image accept set', () => {
+  const base = {
+    id: 'user_123',
+    email: 'test@example.com',
+    createdAt: '2026-01-01T00:00:00.000Z',
+    updatedAt: '2026-01-01T00:00:00.000Z',
+  };
+  /** Issue paths, so a refusal is attributed to `image` and not to a neighbour. */
+  const failedPaths = (value: unknown, present = true) => {
+    const input = present ? { ...base, image: value } : { ...base };
+    const result = UserSchema.safeParse(input);
+    return result.success ? [] : result.error.issues.map((i) => i.path.join('.'));
+  };
+
+  it('accepts `null` — the value every /auth/* user body carries', () => {
+    expect(failedPaths(null)).toEqual([]);
+  });
+
+  it('still accepts the key being ABSENT — `.nullish()`, not `.nullable()`', () => {
+    expect(failedPaths(undefined, false)).toEqual([]);
+  });
+
+  it('still accepts a well-formed URL', () => {
+    expect(failedPaths('https://example.com/avatar.jpg')).toEqual([]);
+  });
+
+  it('still refuses a malformed URL — `.url()` keeps its force on the string branch', () => {
+    expect(failedPaths('not-a-url')).toEqual(['image']);
+  });
+
+  it('still refuses the empty string', () => {
+    expect(failedPaths('')).toEqual(['image']);
+  });
+
+  it('still refuses a non-string, non-null value', () => {
+    expect(failedPaths(42)).toEqual(['image']);
+  });
+
+  it('lit control: the instrument reports a neighbour when a neighbour is wrong', () => {
+    const { email: _dropped, ...withoutEmail } = base;
+    const result = UserSchema.safeParse({ ...withoutEmail, image: null });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues.map((i) => i.path.join('.'))).toEqual(['email']);
+    }
+  });
+});
+
 describe('AccountSchema', () => {
   it('should accept valid OAuth account', () => {
     const account: Account = {

@@ -115,6 +115,97 @@ describe('OrganizationSchema', () => {
   });
 });
 
+/**
+ * [#18509] `OrganizationSchema.logo` accepts `null` — the shape better-auth
+ * serves.
+ *
+ * `logo` is one of better-auth's own `sys_organization` columns, declared
+ * `Field.url({ required: false })` and reaching SQLite as `logo varchar(255)`
+ * with `notnull=0`. `/auth/organization/create`, `/auth/organization/list` and
+ * `/auth/organization/get-full-organization` all serve `"logo": null` for an
+ * organization created without one. Measured on a real `AuthManager` over
+ * ObjectQL + driver-sqlite-wasm; evidence and controls in PR #18510's body.
+ *
+ * The whole accept set is pinned, not just the row that moved — see the sibling
+ * block in `identity.test.ts` for why.
+ */
+describe('[#18509] OrganizationSchema.logo accept set', () => {
+  const base = {
+    id: 'org_123',
+    name: 'Acme Corporation',
+    slug: 'acme-corp',
+    createdAt: '2026-01-01T00:00:00.000Z',
+    updatedAt: '2026-01-01T00:00:00.000Z',
+  };
+  const failedPaths = (value: unknown, present = true) => {
+    const input = present ? { ...base, logo: value } : { ...base };
+    const result = OrganizationSchema.safeParse(input);
+    return result.success ? [] : result.error.issues.map((i) => i.path.join('.'));
+  };
+
+  it('accepts `null` — the value every organization body carries', () => {
+    expect(failedPaths(null)).toEqual([]);
+  });
+
+  it('still accepts the key being ABSENT — `.nullish()`, not `.nullable()`', () => {
+    expect(failedPaths(undefined, false)).toEqual([]);
+  });
+
+  it('still accepts a well-formed URL', () => {
+    expect(failedPaths('https://example.com/logo.png')).toEqual([]);
+  });
+
+  it('still refuses a malformed URL — `.url()` keeps its force on the string branch', () => {
+    expect(failedPaths('not-a-url')).toEqual(['logo']);
+  });
+
+  it('still refuses the empty string', () => {
+    expect(failedPaths('')).toEqual(['logo']);
+  });
+
+  it('still refuses a non-string, non-null value', () => {
+    expect(failedPaths(42)).toEqual(['logo']);
+  });
+
+  it('lit control: the instrument reports a neighbour when a neighbour is wrong', () => {
+    const { slug: _dropped, ...withoutSlug } = base;
+    const result = OrganizationSchema.safeParse({ ...withoutSlug, logo: null });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues.map((i) => i.path.join('.'))).toEqual(['slug']);
+    }
+  });
+
+  /**
+   * ⛔ Scope fence, deliberately pinned as CURRENT behaviour rather than fixed:
+   * the same measurement found `metadata` served present-and-null and
+   * `/auth/organization/create` omitting the required `updatedAt`. Those are
+   * separate defects, filed separately — #18509 asked about `logo`. This pin
+   * exists so that the fence is visible and so that a later fix for either one
+   * has to come here and say so.
+   */
+  it('does NOT (yet) accept a served body whole — metadata/updatedAt are separate cards', () => {
+    const served = {
+      id: 'org_123',
+      name: 'Acme Corporation',
+      slug: 'acme-corp',
+      logo: null,
+      metadata: null,
+      createdAt: '2026-01-01T00:00:00.000Z',
+      // `updatedAt` absent, exactly as `/auth/organization/create` serves it
+    };
+    const result = OrganizationSchema.safeParse(served);
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      // `logo` is gone from this list — that is this card's contribution.
+      expect(result.error.issues.map((i) => i.path.join('.')).sort()).toEqual([
+        'metadata',
+        'updatedAt',
+      ]);
+    }
+  });
+});
+
 describe('MemberSchema', () => {
   it('should accept valid member data', () => {
     const member: Member = {
