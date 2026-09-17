@@ -158,6 +158,7 @@
     "check:select-gate-families": "bash scripts/ci/select-gate-families.selftest.sh",
     "check:shard-attestation": "node scripts/check-shard-attestation.mjs --self-test && node scripts/check-shard-attestation.mjs",
     "check:required-contexts": "node scripts/check-required-contexts.mjs --self-test && node scripts/check-required-contexts.mjs",
+    "check:rerun-safety-verdict": "node scripts/rerun-safety-verdict.mjs --self-test",
     "check:cross-package-test-inputs": "node scripts/check-cross-package-test-inputs.mjs --self-test && node scripts/check-cross-package-test-inputs.mjs",
     "check:live-db-isolation": "node scripts/check-live-db-isolation.mjs --self-test && node scripts/check-live-db-isolation.mjs",
     "check:tier-file-adoption": "node scripts/check-tier-file-adoption.mjs --self-test && node scripts/check-tier-file-adoption.mjs",
