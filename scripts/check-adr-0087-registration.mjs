@@ -213,6 +213,12 @@
 // by hand, or pattern-matches the much looser "no metadata surface => no changeset
 // discipline", which is NOT what #8277 argued.
 //
+// ⚠️ #18745 is that same miss recurring, through a DIFFERENT gap in the detector, on
+// a changeset claiming the category this section built. The paragraph above stays as
+// written because it records what was measured on #8277; what it must not be read as
+// is "the hole is closed". See the `#18745` section above for which gap each of the
+// two misses went through and why closing the second does not close the first.
+//
 // ### What is checked, and why it is a NARROWING
 //
 // The claim names the symbols it is about, and each one is verified at HEAD:
@@ -892,6 +898,58 @@ export function breakingDeclaration(parsed) {
 //     different criterion (2+ replacements in code spans on a line with an
 //     imperative verb), whose false-positive surface is intuitively much larger:
 //     any changeset enumerating API usage would hit it. Falsify before implementing.
+//
+// ## #18745 -- the RETIREMENT arm: a rewrite whose TO side is an INSTRUCTION
+//
+// Every arm above reads a rewrite as a PAIR: an old name and a new one, across an
+// arrow or across a cell boundary. That is the shape of a RENAME. A REMOVAL has no
+// new name, so an author who writes the most careful possible prescription for one
+// writes the only thing there is to write -- an instruction:
+//
+//     **Migration -- `api: { ... }` -> delete the property.**
+//
+// That is `.changeset/18318-evalcontext-no-query-api.md` (#18318, PR #18736), and it
+// is the same failure this header records against #8277 one section down, arriving
+// through a different door. The line carries the framing word, it carries the arrow,
+// and its FROM side is a proper backticked operand. It was missed on ONE predicate:
+// `REWRITE_RE` requires an OPERAND on BOTH sides, and `delete the property` is an
+// instruction, not a name -- so branches 2 and 3 never saw the line, the body read as
+// carrying no prescription, and `not-required (runtime-interface-only ...)` was
+// verified against a silence. The verdict on that PR was sound -- its author verified
+// all four `runtime-interface-only` predicates POSITIVELY and handed the detector miss
+// up rather than letting it carry the claim -- and that is exactly why it is worth
+// repairing: the next author's claim would have rested on the silence.
+//
+// THE TWO MISSES ARE DIFFERENT HOLES, and the distinction decides what a repair can
+// cover. #8277's prescription is `read `result.driverFault?.message` where you read
+// `result.error`` -- no arrow, no table, no pair the vocabulary can match. It is the
+// IMPERATIVE-SENTENCE residue listed above, still deliberately out of reach, and this
+// arm does not move it one inch (RM11/RM12 pin that, so a later author widening toward
+// it has to argue with a red test rather than with prose). #18745's prescription has
+// the pair shape and fails only on the RIGHT-HAND operand. Repairing the second does
+// not repair the first, and a repair that claimed to would be the over-matching
+// criterion the residue paragraph says to falsify before implementing.
+//
+// Measured before it was written, over every `.changeset/*.md` blob in this
+// repository's history -- 5524 unique blobs -- the framed arrow lines whose right side
+// is NOT an operand number THREE, and every candidate removal vocabulary tried (the
+// bare imperatives; plus `unset`/`omit`; plus `none`/`nothing`; plus the past
+// participles; plus the Chinese arm) flags the SAME TWO changesets and no others:
+// `18318-evalcontext-no-query-api.md` and `drop-dead-env-template-flag.md`
+// (`**Migration.** `os environments create --template <id>` -> drop the flag`). Both
+// are genuine removal prescriptions on inspection. Zero false positives at any width
+// -- so the class shipped is the NARROW one, because a wider one buys nothing measured
+// and each extra word is a claim somebody later has to defend. The third non-operand
+// right side in the stock, `lookup-reference-target-gate.md`, is running prose about
+// resolution rungs, and this arm leaves it alone.
+//
+// Over the CURRENT stock (414 changesets) the arm moves exactly one verdict, from
+// `null` to `framed-removal`, and the other 413 are byte-identical before and after.
+// The one it moves holds `not-required (runtime-interface-only ...)`, so it WOULD be
+// refused if a future PR touched that file and the gate re-judged it -- this gate only
+// judges changesets a diff adds or modifies, so nothing reds today. That reading was
+// handed back rather than acted on: ⛔ a detector repair does not get to edit somebody
+// else's changeset on its way past.
 //
 // ## #6967 -- the first NARROWING, and why the direction reversed
 //
@@ -2169,6 +2227,15 @@ export function assertInputs({ cwd, head }) {
       'framed-table',
     ],
     ['an arrow rewrite under a `## 迁移` heading', '## 迁移\n\n- `a.b` → `a.c`\n', 'framed-section'],
+    // The retirement arm (#18745) reads a rewrite inside the SAME framed region, so
+    // it rots with the framing scan and is controlled with it. Without this row a
+    // framing scan that stopped seeing headings would take the removal arm down
+    // silently and the three rows above would still say the scan is healthy.
+    [
+      'a REMOVAL prescription under a `## Migration` heading (#18745)',
+      '## Migration\n\n- `a.b` → delete the property\n',
+      'framed-section-removal',
+    ],
   ];
   const MUST_NOT_FRAME = [
     [
