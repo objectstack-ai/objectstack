@@ -98,6 +98,32 @@ const PROBE_FIELDS: Record<string, Record<string, unknown>> = {
 /** The differ speaks dialect names, the matrix speaks cell ids. */
 const DIALECT_OF: Record<string, SqlDialectName> = { sqlite: 'sqlite', pg: 'postgres', mysql: 'mysql' };
 
+/**
+ * ONE behaviour, three dialect spellings — measured, not transcribed.
+ *
+ * The write omits the column (no field, no value), so each engine refuses it in
+ * its own vocabulary: SQLite and PostgreSQL substitute the column's implicit
+ * NULL and report the constraint, while MySQL in strict mode refuses the
+ * omission itself before a NULL is ever considered — `ER_NO_DEFAULT_FOR_FIELD`,
+ * "Field 'multi_nn' doesn't have a default value". ⛔ Not a per-dialect
+ * behaviour difference and ⛔ not a reason to widen one regex until it matches
+ * anything: all three REFUSE, which is the fact this cell exists to pin, and
+ * the row-count leg beside it states that dialect-independently. Keyed per cell
+ * so a refusal arriving for some OTHER reason — a connection fault, a tenancy
+ * error — still reddens this test instead of satisfying it.
+ *
+ * ⚠️ A `required: true` field would be refused earlier, by the record validator,
+ * with an ADR-0112 envelope. This declaration deliberately carries the storage
+ * constraint ALONE, which ADR-0113 says reaches the database as a raw driver
+ * error — so there is no envelope here to assert, and inventing one would pin a
+ * seam this card does not touch.
+ */
+const REFUSAL_BY_DIALECT: Record<string, RegExp> = {
+  sqlite: /NOT NULL constraint failed/i,
+  pg: /null value in column .* violates not-null constraint/i,
+  mysql: /doesn't have a default value|cannot be null/i,
+};
+
 describe('[#17231] the entrance — the declaration under repair is authorable', () => {
   /**
    * The reachability half. A rule about a VALUE (`storage.notNull === true`)
@@ -183,9 +209,19 @@ function declareMultiValueNullability(cell: DialectCell): void {
     });
 
     it('an INSERT omitting the field is refused — the divergence the card measured, closed', async () => {
+      const rows = async (): Promise<number> =>
+        Number(((await knexInstance(PROBE_OBJECT).count({ n: '*' })) as Array<{ n: unknown }>)[0].n);
+      const before = await rows();
+
       await expect(
         driver.create(PROBE_OBJECT, { scalar_nn: 'present' }),
-      ).rejects.toThrow(/NOT NULL|not null|null value in column|cannot be null/i);
+      ).rejects.toThrow(REFUSAL_BY_DIALECT[cell.id]);
+
+      // The dialect-independent half: a rejection that still wrote the row would
+      // be the same green as a refusal, and it is the WRITE that this card is
+      // about — the platform's own table now refuses what every table built
+      // from a generated migration already refused.
+      expect(await rows(), 'the refused INSERT landed anyway').toBe(before);
     });
 
     it('the differ agrees with the writer — no nullability drift against a table the driver just built', () => {
