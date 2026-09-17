@@ -139,6 +139,31 @@
  *      packaging. Appending at the end leaves every reported line number
  *      equal to the line number in the Markdown.
  *
+ * ## WHY THE `tsc` BINARY, AND WHY TWO PASSES
+ *
+ * The TypeScript compiler API is deliberately not used. `scripts/ts-parse.mjs`
+ * is the one sanctioned door to it under `scripts/**`, and its contract is to
+ * EXIT on a source it cannot parse — correct for a gate walking real files,
+ * wrong here, where a block that does not parse is the measurement's subject.
+ * Driving the binary also makes this instrument ask #18715's own question
+ * verbatim: `tsc --noEmit --strict`.
+ *
+ * ⚠️ MEASURED PROPERTY OF THE CLI, which one pass gets wrong: when any file in
+ * a program has a SYNTACTIC diagnostic, tsc reports the syntax errors and
+ * never type-checks ANY file in that program. One pass over this corpus
+ * returned 772 TS1xxx and not one semantic diagnostic — the firing control
+ * included, which is exactly how this was caught. So pass 1 finds the blocks
+ * that do not parse and pass 2 re-runs over the ones that do. A block that
+ * does not parse carries its syntax diagnostics and no semantic ones, which is
+ * honest: tsc cannot read it either.
+ *
+ * This instrument was first written against `ts.createProgram` +
+ * `getPreEmitDiagnostics` and then rewritten onto the binary. Over all 1002
+ * corpus blocks the two implementations agree on every block's verdict — raw,
+ * tolerant and well-formed-and-wrong — with ZERO disagreements. The binary run
+ * reports fewer DIAGNOSTICS on unparseable blocks, because the checker noise
+ * the API produced over wreckage is gone.
+ *
  * ## COMPILER OPTIONS, and why each deviation from the repo's own tsconfig
  *
  *   strict: true            — #18715's proven measurement is `tsc --noEmit
@@ -158,17 +183,27 @@
  *                             failure.
  */
 
-import { readFileSync, existsSync, readdirSync, mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { readFileSync, existsSync, readdirSync, mkdirSync, mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
+import { spawnSync } from 'node:child_process';
+
+import { isEntrypoint } from './invoked-as.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(HERE, '..');
 const PACKAGES_DIR = join(REPO_ROOT, 'packages');
 const nodeRequire = createRequire(import.meta.url);
-const ts = nodeRequire('typescript');
+// ⛔ The TypeScript compiler API is deliberately NOT imported here. This
+// instrument's SUBJECT is blocks that may not parse, so `createProgramChecked`
+// — the one sanctioned API door under `scripts/**` — is the wrong tool: it
+// exits 3 on the first syntactic diagnostic, which for this census is DATA.
+// Driving the real `tsc` binary answers exactly the question #18715 measured
+// (`tsc --noEmit --strict`, exit 2, TS2341) and keeps the parser home's rule
+// that nothing outside it reaches the parser API.
+const TSC_BIN = join(dirname(nodeRequire.resolve('typescript/package.json')), 'bin', 'tsc');
 
 // ── Population ─────────────────────────────────────────────────────────────
 
@@ -199,7 +234,7 @@ export function populationFiles() {
 /** CHANGELOG.md is release-owned history, reported as its own stratum. */
 export const stratumOf = (file) => (/(^|\/)CHANGELOG\.md$/.test(file) ? 'changelog' : 'handwritten');
 
-/** The literal `packages/<pkg>/*.md` glob #18715 names, kept as a reportable sub-stratum. */
+/** The literal `packages/PKG/NAME.md` glob #18715 names, kept as a reportable sub-stratum. */
 export const isDepthOne = (relPath) => relPath.split('/').length === 3;
 
 // ── Extraction ─────────────────────────────────────────────────────────────
@@ -272,6 +307,11 @@ export const normalise = (code) => `${code}\nexport {};\n`;
 // ── Diagnostic classification ──────────────────────────────────────────────
 
 const FORGIVEN_NAME_CODES = new Set([2304, 2552, 2503]);
+// "Cannot find name 'it' / 'describe' / 'process' / 'document'" — the READER's
+// ambient environment (a test runner, node, the DOM), never something the
+// document could have written. Same for a third-party module that ships no
+// types, and for JSX with no `JSX.IntrinsicElements` in scope.
+const FORGIVEN_AMBIENT_CODES = new Set([2580, 2581, 2582, 2583, 2584, 2591, 2592, 2593, 7016, 7026]);
 const SYNTAX_MAX = 1999;
 
 /**
@@ -281,6 +321,7 @@ const SYNTAX_MAX = 1999;
 export function classifyDiagnostic({ code, message }) {
   if (code >= 1000 && code <= SYNTAX_MAX) return { family: 'syntax', forgiven: false };
   if (FORGIVEN_NAME_CODES.has(code)) return { family: 'elided-name', forgiven: true };
+  if (FORGIVEN_AMBIENT_CODES.has(code)) return { family: 'missing-ambient-environment', forgiven: true };
   if (code === 2307) {
     const spec = /Cannot find module '([^']+)'/.exec(message)?.[1] ?? '';
     if (spec.startsWith('.')) return { family: 'doc-local-path', forgiven: true, specifier: spec };
@@ -292,9 +333,35 @@ export function classifyDiagnostic({ code, message }) {
 }
 
 /** The families `classifyDiagnostic` marks forgiven — a legitimately partial block can produce these and nothing else. */
-export const FORGIVEN_FAMILIES = new Set(['elided-name', 'doc-local-path', 'external-not-installed']);
+export const FORGIVEN_FAMILIES = new Set(['elided-name', 'doc-local-path', 'external-not-installed', 'missing-ambient-environment']);
 
-export const flattenMessage = (d) => ts.flattenDiagnosticMessageText(d.messageText, ' ');
+/**
+ * `tsc --pretty false` prints one diagnostic per line, with wrapped detail
+ * indented under it. Parsed here rather than read from the API, and held
+ * honest by the two controls: if this parser broke, GREEN_CONTROL would read
+ * as failing or FIRING_CONTROL as clean, and the run would refuse.
+ */
+export function parseTscOutput(text) {
+  const HEAD = /^(\S[^(]*)\((\d+),(\d+)\): (?:error|warning) TS(\d+): (.*)$/;
+  const BARE = /^(?:error|warning) TS(\d+): (.*)$/;
+  const diagnostics = [];
+  const global = [];
+  for (const line of text.split('\n')) {
+    const head = HEAD.exec(line);
+    if (head) {
+      diagnostics.push({ file: head[1], line: Number(head[2]), code: Number(head[4]), message: head[5] });
+      continue;
+    }
+    const bare = BARE.exec(line);
+    if (bare) {
+      global.push({ code: Number(bare[1]), message: bare[2], line: null });
+      continue;
+    }
+    const tail = diagnostics.length > 0 ? diagnostics : global;
+    if (/^\s+\S/.test(line) && tail.length > 0) tail[tail.length - 1].message += ` ${line.trim()}`;
+  }
+  return { diagnostics, global };
+}
 
 // ── Controls ───────────────────────────────────────────────────────────────
 
@@ -407,13 +474,19 @@ export function externalPaths(specifiers, packageRoots) {
     if (specifier.startsWith('.') || specifier.startsWith('@objectstack/') || specifier.startsWith('node:')) continue;
     const parts = specifier.split('/');
     const pkgName = specifier.startsWith('@') ? parts.slice(0, 2).join('/') : parts[0];
+    // An @types package FIRST: a runtime package that ships no declarations would
+    // otherwise resolve and then report TS7016, turning "this checkout has no
+    // types for react" into a census of the documentation.
+    const typesName = pkgName.startsWith('@') ? `@types/${pkgName.slice(1).replace('/', '__')}` : `@types/${pkgName}`;
     for (const root of searchRoots) {
-      const candidate = join(root, 'node_modules', pkgName);
-      if (existsSync(candidate)) {
+      for (const name of [typesName, pkgName]) {
+        const candidate = join(root, 'node_modules', name);
+        if (!existsSync(candidate)) continue;
         paths[pkgName] = [candidate];
         paths[`${pkgName}/*`] = [join(candidate, '*')];
         break;
       }
+      if (paths[pkgName]) break;
     }
   }
   return paths;
@@ -426,11 +499,11 @@ export const specifiersIn = (code) => [...code.matchAll(IMPORT_SPECIFIER_RE)].ma
 
 function compilerOptions(paths) {
   return {
-    target: ts.ScriptTarget.ES2022,
-    lib: ['lib.es2022.d.ts', 'lib.dom.d.ts', 'lib.dom.iterable.d.ts'],
-    module: ts.ModuleKind.ESNext,
-    moduleResolution: ts.ModuleResolutionKind.Bundler,
-    jsx: ts.JsxEmit.ReactJSX,
+    target: 'ES2022',
+    lib: ['ES2022', 'DOM', 'DOM.Iterable'],
+    module: 'ESNext',
+    moduleResolution: 'Bundler',
+    jsx: 'react-jsx',
     strict: true,
     noEmit: true,
     skipLibCheck: true,
@@ -440,7 +513,8 @@ function compilerOptions(paths) {
     forceConsistentCasingInFileNames: true,
     noUnusedLocals: false,
     noUnusedParameters: false,
-    baseUrl: REPO_ROOT,
+    // ⛔ No `baseUrl`: TS 6.0 deprecates it, and every `paths` target below is
+    // already absolute, so there is nothing for it to be relative to.
     typeRoots: [join(REPO_ROOT, 'node_modules', '@types')],
     types: ['node'],
     paths,
@@ -471,28 +545,63 @@ function compile(units, packageRoots) {
     process.exit(143);
   });
   try {
-    const fileNames = units.map((unit, index) => {
-      const file = join(tmpDir, `block-${String(index).padStart(4, '0')}.${unit.lang === 'tsx' ? 'tsx' : 'ts'}`);
-      writeFileSync(file, normalise(unit.code));
-      unit.compiledAs = file;
-      return file;
+    units.forEach((unit, index) => {
+      const name = `block-${String(index).padStart(4, '0')}.${unit.lang === 'tsx' ? 'tsx' : 'ts'}`;
+      writeFileSync(join(tmpDir, name), normalise(unit.code));
+      unit.compiledAs = name;
     });
     const specifiers = new Set(units.flatMap((unit) => specifiersIn(unit.code)));
     const paths = { ...workspacePaths(packageRoots), ...externalPaths(specifiers, packageRoots) };
-    const program = ts.createProgram(fileNames, compilerOptions(paths));
-    const byFile = new Map(fileNames.map((f) => [f, []]));
-    const global = [];
-    for (const diagnostic of ts.getPreEmitDiagnostics(program)) {
-      const record = {
-        code: diagnostic.code,
-        message: flattenMessage(diagnostic),
-        line: diagnostic.file && diagnostic.start !== undefined
-          ? diagnostic.file.getLineAndCharacterOfPosition(diagnostic.start).line + 1
-          : null,
-      };
-      const bucket = diagnostic.file ? byFile.get(diagnostic.file.fileName) : null;
-      if (bucket) bucket.push(record);
-      else if (!diagnostic.file) global.push(record);
+    writeFileSync(
+      join(tmpDir, 'tsconfig.json'),
+      JSON.stringify({ compilerOptions: compilerOptions(paths), files: units.map((u) => `./${u.compiledAs}`) }, null, 2),
+    );
+
+    // The real binary, the same question #18715's reading asked. `cwd` is the
+    // temp dir so every diagnostic names a bare `block-NNNN.ts`, and stdout and
+    // stderr are joined because tsc splits config errors from file ones.
+    //
+    // ⚠️ TWO PASSES, and the reason is a measured property of `tsc` itself:
+    // the CLI reports SYNTACTIC diagnostics and then stops — it never type-
+    // checks ANY file in a program where one file has a syntax error. One pass
+    // over this corpus returned 913 TS1xxx and not a single semantic
+    // diagnostic, the firing control included. FIRING_CONTROL is what caught
+    // that, which is the entire argument for running it on every census.
+    // So: pass 1 finds the blocks that do not parse, pass 2 re-runs over the
+    // ones that do. A block that does not parse is never type-checked, which
+    // is honest — tsc cannot read it either.
+    const runTsc = (fileList, configName) => {
+      writeFileSync(
+        join(tmpDir, configName),
+        JSON.stringify({ compilerOptions: compilerOptions(paths), files: fileList.map((n) => `./${n}`) }, null, 2),
+      );
+      const run = spawnSync(process.execPath, [TSC_BIN, '--project', configName, '--pretty', 'false'], {
+        cwd: tmpDir,
+        encoding: 'utf8',
+        maxBuffer: 256 * 1024 * 1024,
+      });
+      if (run.error) throw run.error;
+      return parseTscOutput(`${run.stdout ?? ''}\n${run.stderr ?? ''}`);
+    };
+
+    const all = units.map((u) => u.compiledAs);
+    const pass1 = runTsc(all, 'tsconfig.json');
+    const unparseable = new Set(pass1.diagnostics.filter((d) => d.code >= 1000 && d.code <= SYNTAX_MAX).map((d) => d.file));
+    const parseable = all.filter((name) => !unparseable.has(name));
+    const pass2 = parseable.length > 0 && parseable.length < all.length
+      ? runTsc(parseable, 'tsconfig.pass2.json')
+      : { diagnostics: parseable.length > 0 ? pass1.diagnostics : [], global: [] };
+
+    const global = [...pass1.global, ...pass2.global];
+    const byFile = new Map(units.map((u) => [u.compiledAs, []]));
+    const seen = new Set();
+    for (const d of [...pass1.diagnostics, ...pass2.diagnostics]) {
+      const key = `${d.file}:${d.line}:${d.code}:${d.message}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const bucket = byFile.get(d.file);
+      if (bucket) bucket.push(d);
+      else global.push(d);
     }
     for (const unit of units) {
       unit.diagnostics = (byFile.get(unit.compiledAs) ?? []).map((record) => ({
@@ -504,6 +613,10 @@ function compile(units, packageRoots) {
       unit.elided = hasElisionMarker(unit.code);
       const unforgiven = unit.diagnostics.filter((d) => !d.forgiven);
       unit.syntaxOnly = unforgiven.length > 0 && unforgiven.every((d) => d.family === 'syntax');
+      // Parses as a TypeScript module and STILL fails: the class the #18712
+      // `kernel.logger` block belongs to, and the only one a gate could hold
+      // at zero without anyone first tagging a thousand fragments.
+      unit.wellFormedAndWrong = unit.tolerant && !unit.diagnostics.some((d) => d.family === 'syntax');
     }
     return { global, paths };
   } finally {
@@ -577,7 +690,7 @@ export function controlProblems(controls) {
 }
 
 const EMPTY_STRATUM = () => ({
-  blocks: 0, raw: 0, tolerant: 0, elided: 0, syntaxOnly: 0,
+  blocks: 0, raw: 0, tolerant: 0, elided: 0, syntaxOnly: 0, wellFormedAndWrong: 0,
   exclusionConsidered: 0, exclusionFail: 0, files: new Set(), filesFailing: new Set(),
 });
 
@@ -597,6 +710,7 @@ export function summarise(units) {
       }
       if (unit.elided) target.elided += 1;
       if (unit.syntaxOnly) target.syntaxOnly += 1;
+      if (unit.wellFormedAndWrong) target.wellFormedAndWrong += 1;
       if (!unit.elided) {
         target.exclusionConsidered += 1;
         if (unit.raw) target.exclusionFail += 1;
@@ -620,6 +734,7 @@ function reportStratum(label, s) {
   console.log(`    fenced ts/typescript/tsx .... ${s.blocks}`);
   console.log(`    RAW      fail ............... ${String(s.raw).padStart(4)}  ${pct(s.raw, s.blocks)}   (upper bound)`);
   console.log(`    TOLERANT fail ............... ${String(s.tolerant).padStart(4)}  ${pct(s.tolerant, s.blocks)}   (lower bound — the gate-able number)`);
+  console.log(`    WELL-FORMED AND WRONG ....... ${String(s.wellFormedAndWrong).padStart(4)}  ${pct(s.wellFormedAndWrong, s.blocks)}   (parses as a module and still fails — the #18712 class)`);
   console.log(`    files carrying >=1 tolerant fail: ${s.filesFailing.size}`);
   console.log(`    blocks whose only unforgiven diagnostics are SYNTAX (would need an explicit \`partial\` tag): ${s.syntaxOnly}`);
   console.log(`    [disqualified] EXCLUSION reading: ${s.exclusionFail} fail of ${s.exclusionConsidered} considered, ${s.elided} blocks skipped for carrying an elision marker`);
@@ -647,7 +762,7 @@ function report(units, controls, summary, files) {
   for (const [label, key] of [['HAND-WRITTEN (repairable by an author)', 'handwritten'], ['CHANGELOG.md (release-owned history)', 'changelog']]) {
     if (summary.strata[key]) reportStratum(label, summary.strata[key]);
   }
-  reportStratum('SUB-STRATUM: the literal packages/<pkg>/*.md glob #18715 names', summary.depthOne);
+  reportStratum('SUB-STRATUM: the literal packages/*/*.md glob #18715 names', summary.depthOne);
 
   console.log('\nDIAGNOSTIC FAMILIES (every diagnostic on every corpus block)');
   const rows = Object.entries(summary.families).sort((a, b) => b[1].diagnostics - a[1].diagnostics);
@@ -692,7 +807,7 @@ function toJson(units, controls, summary, files) {
     blocks: units.map((u) => ({
       file: u.file, index: u.index, lang: u.lang, firstBodyLine: u.firstBodyLine,
       stratum: u.stratum, elided: u.elided, declaredPartial: u.declaredPartial,
-      rawFail: u.raw, tolerantFail: u.tolerant, syntaxOnly: u.syntaxOnly,
+      rawFail: u.raw, tolerantFail: u.tolerant, syntaxOnly: u.syntaxOnly, wellFormedAndWrong: u.wellFormedAndWrong,
       diagnostics: u.diagnostics.map((d) => ({ code: d.code, family: d.family, forgiven: d.forgiven, line: d.line, message: d.message })),
     })),
   };
@@ -733,6 +848,12 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'classify — TS2307 on a relative specifier is FORGIVEN': 1,
   'classify — TS2307 on an @objectstack specifier is COUNTED': 1,
   'classify — TS1005 syntax is COUNTED, never forgiven as elision': 1,
+  'classify — TS2593 (a test-runner global) is FORGIVEN as the reader\'s ambient environment': 1,
+  'classify — TS7016 (a module that ships no declarations) is FORGIVEN as ambient': 1,
+  'externals — an @types package is preferred over the runtime package': 1,
+  'tsc output — a located diagnostic line is parsed into file, line, code and message': 1,
+  'tsc output — an indented continuation line joins the diagnostic above it': 1,
+  'tsc output — a diagnostic with no file (a config error) lands in the global bucket': 1,
   'normalise — `export {}` is appended and body line numbers are unchanged': 1,
   'fixture — FIRING_CONTROL extracts to one block that reads kernel.logger': 1,
   'fixture — FIRING_CONTROL carries the elision marker that disqualifies exclusion': 1,
@@ -745,7 +866,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
 
 // Deleting an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 24;
+const SELF_TEST_BATTERY_FLOOR = 30;
 
 const md = (...lines) => lines.join('\n');
 
@@ -776,6 +897,51 @@ function selfTest() {
     { label: 'classify — TS2307 on a relative specifier is FORGIVEN', run: () => (classifyDiagnostic({ code: 2307, message: "Cannot find module './my-kernel' or its corresponding type declarations." }).forgiven ? null : 'a doc-local path was counted') },
     { label: 'classify — TS2307 on an @objectstack specifier is COUNTED', run: () => (classifyDiagnostic({ code: 2307, message: "Cannot find module '@objectstack/core/plugin' or its corresponding type declarations." }).forgiven ? 'an unpublished subpath was forgiven' : null) },
     { label: 'classify — TS1005 syntax is COUNTED, never forgiven as elision', run: () => (classifyDiagnostic({ code: 1005, message: "';' expected." }).family === 'syntax' && !classifyDiagnostic({ code: 1005, message: '' }).forgiven ? null : 'syntax forgiven') },
+    { label: "classify — TS2593 (a test-runner global) is FORGIVEN as the reader's ambient environment", run: () => (classifyDiagnostic({ code: 2593, message: "Cannot find name 'it'." }).family === 'missing-ambient-environment' ? null : 'a test-runner global was counted against the document') },
+    { label: 'classify — TS7016 (a module that ships no declarations) is FORGIVEN as ambient', run: () => (classifyDiagnostic({ code: 7016, message: "Could not find a declaration file for module 'react/jsx-runtime'." }).forgiven ? null : 'a missing third-party declaration was counted against the document') },
+    {
+      label: 'tsc output — a located diagnostic line is parsed into file, line, code and message',
+      run: () => {
+        const { diagnostics } = parseTscOutput("block-0007.ts(13,45): error TS2341: Property 'logger' is private and only accessible within class 'ObjectKernel'.");
+        const d = diagnostics[0];
+        if (!d) return 'nothing parsed';
+        return d.file === 'block-0007.ts' && d.line === 13 && d.code === 2341 && d.message.startsWith("Property 'logger' is private")
+          ? null
+          : `parsed ${JSON.stringify(d)}`;
+      },
+    },
+    {
+      label: 'tsc output — an indented continuation line joins the diagnostic above it',
+      run: () => {
+        const { diagnostics } = parseTscOutput('block-0001.ts(3,1): error TS2322: Type A is not assignable to type B.\n  Property x is missing.');
+        return diagnostics.length === 1 && diagnostics[0].message.includes('Property x is missing.')
+          ? null
+          : `got ${diagnostics.length} diagnostic(s): ${JSON.stringify(diagnostics.map((d) => d.message))}`;
+      },
+    },
+    {
+      label: 'tsc output — a diagnostic with no file (a config error) lands in the global bucket',
+      run: () => {
+        const { diagnostics, global } = parseTscOutput("error TS5101: Option 'baseUrl' is deprecated.");
+        return diagnostics.length === 0 && global.length === 1 && global[0].code === 5101
+          ? null
+          : `diagnostics=${diagnostics.length} global=${JSON.stringify(global)}`;
+      },
+    },
+    {
+      label: 'externals — an @types package is preferred over the runtime package',
+      run: () => {
+        const dir = mkdtempSync(join(tmpdir(), 'os-md-ts-selftest-'));
+        try {
+          mkdirSync(join(dir, 'node_modules', '@types', 'reactish'), { recursive: true });
+          mkdirSync(join(dir, 'node_modules', 'reactish'), { recursive: true });
+          const paths = externalPaths(['reactish/jsx-runtime'], [dir]);
+          return paths.reactish?.[0]?.includes(`${'@types'}/reactish`) ? null : `mapped to ${paths.reactish?.[0]}`;
+        } finally {
+          rmSync(dir, { recursive: true, force: true });
+        }
+      },
+    },
     {
       label: 'normalise — `export {}` is appended and body line numbers are unchanged',
       run: () => {
@@ -915,4 +1081,6 @@ function main() {
   else report(units, controls, summary, files);
 }
 
-main();
+// Guarded so this file can be imported for its exports without running the
+// census inside the importer (`scripts/invoked-as.mjs`, `check:entry-guard`).
+if (isEntrypoint(import.meta.url)) main();
