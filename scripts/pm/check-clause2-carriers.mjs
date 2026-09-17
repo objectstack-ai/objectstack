@@ -662,9 +662,12 @@ import {
   H51_SHA_MIN_HEX,
   PROXY_FLAG,
   SWEEP_REPO_SHAPE,
+  branchNameTarget,
+  closingKeywordTargets,
   contractReviewHeadMatch,
   deliveryEvidence,
   deliveryEvidenceNote,
+  partOfTargets,
   claimGovernance,
   claimedBranches,
   governingClaim,
@@ -3143,6 +3146,126 @@ export const RECORD_TEMPLATE_FENCE_START = '----- copy from here; replace the th
 export const RECORD_TEMPLATE_FENCE_END = '----- to here -----';
 
 /**
+ * ⭐ WHERE A REVIEW OF RECORD LIVES — the ONE set every reader in this regime
+ * searches and every printed instruction names.
+ *
+ * The governed text decides this and the constant does not; what the constant
+ * stops is TWO TOOLS ANSWERING IT DIFFERENTLY. The rule is quoted rather than
+ * paraphrased because it IS the operative criterion, and untranslated because
+ * rewriting a quoted ruling rewrites the ruling:
+ *
+ *   > 复核记录 = 一条评论落 PR 或卡，达档与默认档同形
+ *
+ * — `references/contract-review.md` 〈复核归属与资格〉, with SKILL.md
+ * 〈入队与落地〉 saying the same in the same words
+ * (「记录 = 同形评论落 PR 或卡」) and the landing check's own ① repeating it
+ * (「即 PR 或卡上同形的复核记录」). Two carriers, one record.
+ *
+ * ⚖️ THE MEASURED COST of spelling that set twice, on one pull request in one
+ * day: the skills seat posted its `## Contract review` on carrier card #18426
+ * (comment 5716694216) — a location `--template` offers in those exact words —
+ * and this file's `--pair` read it as a record on the card thread. The merge
+ * queue's own guard read the PR thread ALONE, answered
+ * 「0 comment(s) read on the PR thread」 and dequeued PR #18689 `CI_FAILURE`. A
+ * SECOND COPY of the same comment, on the PR thread, is what cured it. The two
+ * tools already shared every recogniser; what they did not share was the set of
+ * threads to run them over.
+ *
+ * ⛔ So nothing here spells a thread set of its own. `locateReviewOfRecord`
+ * builds the rows it searches from this list, `contractReviewTemplateLines`
+ * builds the sentence it prints from it, and `check-governed-queue-guard.mjs`
+ * fetches one thread per entry in it — which is what the cross-tool pin in this
+ * file's self-test measures, by DRIVING that guard rather than by restating the
+ * two sets beside each other.
+ *
+ *   `where`   the tag a located record carries, so a row can name its thread
+ *   `rows`    the key a pair carries that thread's comment rows under
+ *   `number`  the key a pair carries that thread's issue number under
+ *   `words`   how that location is NAMED to a human, in reading order
+ */
+export const REVIEW_OF_RECORD_THREADS = Object.freeze([
+  Object.freeze({ where: 'PR', rows: 'prComments', number: 'pr', words: 'the PR' }),
+  Object.freeze({ where: 'card', rows: 'cardComments', number: 'card', words: 'its card' }),
+]);
+
+/**
+ * The location in the words every instruction prints — DERIVED from the set
+ * above, so an instruction can never offer a thread no reader searches.
+ */
+export const REVIEW_OF_RECORD_LOCATION = REVIEW_OF_RECORD_THREADS.map((thread) => thread.words).join(' or ');
+
+/**
+ * The grades `deliveryEvidence` answers with, STRONGEST FIRST — the ranking that
+ * function already applies internally, written down here because a caller
+ * choosing AMONG several delivered cards needs it as data and
+ * `check-half-states.mjs` exports the relation rather than its ordering.
+ *
+ * ⛔ A MIRROR, so the self-test MEASURES it rather than trusting it: every
+ * neighbouring pair is driven through `deliveryEvidence` on a body that could
+ * grade either way, and the set is held equal to the kinds `deliveryEvidenceNote`
+ * recognises. A grade added or reordered upstream reds here instead of silently
+ * re-ranking a governance reading.
+ */
+export const DELIVERY_EVIDENCE_PRECEDENCE = Object.freeze(['closing-keyword', 'part-of', 'part-of-inline', 'branch-name']);
+
+/**
+ * The card a pull request DELIVERS, as a number — the other half of the pair a
+ * record read needs, for a caller that holds the pull request and no board.
+ *
+ * ⭐ DERIVED THROUGH `deliveryEvidence`, never beside it: this function only
+ * enumerates the numbers a body or a branch name could be naming, and then asks
+ * the ONE relation `derivePairs`, H8 and H31 already ask whether each is
+ * delivered. So it can never accept a card that relation rejects, and the
+ * precedence between a closing keyword, a `Part of` declaration and the branch
+ * name stays where it is written down rather than being graded twice.
+ *
+ * ⛔ AMBIGUITY IS NOT RESOLVED, it is REPORTED. A body naming two cards at the
+ * same strength delivers both, and picking one of them would decide which
+ * thread a governance reading searches by an accident of number order. The
+ * caller gets `card: null` and a reason it can print; on the queue guard that
+ * is the REFUSING direction (no card thread is searched, so no record can be
+ * found on one), which is the direction a governance reading is wrong in
+ * safely.
+ *
+ * @param {object} pr — a REST pull row: `body`, and `head.ref` for the fallback
+ * @returns {{ card: number, evidence: string } | { card: null, reason: string }}
+ */
+export function deliveredCardNumber(pr) {
+  const body = String(pr?.body ?? '');
+  const candidates = new Set([
+    ...closingKeywordTargets(body).keys(),
+    ...partOfTargets(body).keys(),
+    ...[branchNameTarget(pr?.head?.ref)].filter((n) => n !== null && n !== undefined),
+  ]);
+  const delivered = [];
+  for (const n of candidates) {
+    const evidence = deliveryEvidence(pr, n);
+    if (evidence === null) continue;
+    delivered.push({ card: Number(n), evidence, rank: DELIVERY_EVIDENCE_PRECEDENCE.indexOf(evidence) });
+  }
+  if (delivered.length === 0) {
+    return {
+      card: null,
+      reason:
+        'its body names no card (no closing keyword and no `Part of` declaration) and its branch is not '
+        + 'the protocol dev-branch shape, so no card thread could be located for it',
+    };
+  }
+  const best = Math.min(...delivered.map((row) => row.rank));
+  const strongest = delivered.filter((row) => row.rank === best);
+  if (strongest.length > 1) {
+    return {
+      card: null,
+      reason:
+        `it delivers ${strongest.length} cards at the same strength (${strongest.map((row) => `#${row.card}`).join(', ')}, `
+        + `${deliveryEvidenceNote(strongest[0].evidence)}), so WHICH card thread carries its record is not derivable `
+        + 'from the pull request alone',
+    };
+  }
+  return { card: strongest[0].card, evidence: strongest[0].evidence };
+}
+
+/**
  * What `--template` prints: the record, fenced, with the calibration around it.
  *
  * ⭐ The notes live OUTSIDE the fence and carry no key-initial line, so nothing
@@ -3156,7 +3279,7 @@ export const RECORD_TEMPLATE_FENCE_END = '----- to here -----';
 export function contractReviewTemplateLines(values = {}) {
   return [
     'check-clause2-carriers --template — the contract-review record of record, copyable. It is',
-    'ONE comment on the PR or its card; the NEWEST one naming this head governs.',
+    `ONE comment on ${REVIEW_OF_RECORD_LOCATION}; the NEWEST one naming this head governs.`,
     '',
     '⛔ The value is the FIRST thing after the colon. A leading word — "branch ", "the dev on " —',
     '   IS the value as far as the reader is concerned, the pair is refused HALF WRITTEN, and a',
@@ -3238,25 +3361,34 @@ export function contractReviewTemplateLines(values = {}) {
  */
 export function locateReviewOfRecord(pair) {
   const gaps = [];
-  if (!Array.isArray(pair?.prComments)) gaps.push(`PR #${pair?.pr}'s comment thread`);
-  if (!Array.isArray(pair?.cardComments)) gaps.push(`card #${pair?.card}'s comment thread`);
+  // \u2b50 THE THREAD SET IS READ FROM `REVIEW_OF_RECORD_THREADS`, never spelled
+  // here: this loop, the template's printed sentence and the queue guard's
+  // fetches are the three consumers of that one list, and the whole point of it
+  // is that no two of them can name different threads (#18701).
+  for (const thread of REVIEW_OF_RECORD_THREADS) {
+    if (!Array.isArray(pair?.[thread.rows])) gaps.push(`${thread.where} #${pair?.[thread.number]}'s comment thread`);
+  }
   const head = String(pair?.headSha ?? '');
   // A head too short to be matched by H51's span test can never find its
   // record, so it is a read that could not be made -- never an absent record.
   if (head.length < H51_SHA_MIN_HEX) gaps.push(`PR #${pair?.pr}'s head sha`);
   if (gaps.length > 0) return { state: 'unreadable', gaps };
 
-  const tagged = [
-    ...pair.prComments.map((row) => ({ row, where: 'PR' })),
-    ...pair.cardComments.map((row) => ({ row, where: 'card' })),
-  ];
+  const tagged = REVIEW_OF_RECORD_THREADS.flatMap((thread) =>
+    pair[thread.rows].map((row) => ({ row, where: thread.where })),
+  );
   const onHead = tagged.filter(
     ({ row }) =>
       CONTRACT_REVIEW_HEADING_MARKER.test(String(row?.body ?? '')) &&
       contractReviewHeadMatch(row?.body, head) !== null,
   );
   const newest = latestMarkedComment(onHead.map(({ row }) => row), CONTRACT_REVIEW_HEADING_MARKER);
-  if (!newest) return { state: 'absent', read: { pr: pair.prComments.length, card: pair.cardComments.length } };
+  if (!newest) {
+    return {
+      state: 'absent',
+      read: Object.fromEntries(REVIEW_OF_RECORD_THREADS.map((thread) => [thread.number, pair[thread.rows].length])),
+    };
+  }
   const { row, where } = onHead[newest.index];
   const found = {
     where,
