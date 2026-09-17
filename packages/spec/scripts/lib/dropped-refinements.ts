@@ -56,18 +56,23 @@
  *
  *   - a published schema with dropped refinements that is NOT recorded fails
  *     the build — a new gap has to be a reviewed line in a diff;
- *   - a recorded `count` the build does not observe ALSO fails, in either
- *     direction. A ledger that keeps saying 3 while the tree grew to 4 has
- *     stopped describing the tree, and the 4th arrives inside a number nobody
- *     re-read.
+ *   - a recorded `sites` list the build does not observe ALSO fails, in either
+ *     direction and path by path. A ledger that keeps naming a site the tree no
+ *     longer has stopped describing the tree, and the next gap arrives inside a
+ *     list nobody re-read.
  *
  * ## Why the ledger is HAND-EDITED and has no `gen:` script
  *
  * Identical to `unemitted-schemas.baseline.json`: a generator would let a new
- * gap be admitted by running a command instead of by a decision. Every entry
- * carries a `reason` in prose and the gate requires it to be non-empty, because
- * a baseline that records only a COUNT lets the next gap slip in behind a
- * repaired one with nobody able to see which was replaced.
+ * gap be admitted by running a command instead of by a decision. Where THAT
+ * ledger requires a non-empty per-entry `reason`, this one requires a non-empty
+ * `sites` list and has no `reason` field at all — the reason is the same for
+ * every site here and is written once, above and in the ledger's own
+ * `description`, so a per-entry copy would be exactly the prose a required
+ * `reason` exists to prevent (`DroppedRefinementsEntry` below argues that in
+ * full). Both refuse the same thing: an entry recording only MEMBERSHIP, which
+ * lets the next gap slip in behind a repaired one with nobody able to see which
+ * was replaced.
  */
 import fs from 'fs';
 import path from 'path';
@@ -493,7 +498,7 @@ export function readDroppedRefinementsBaseline(pkgDir: string): DroppedRefinemen
   const parsed = JSON.parse(fs.readFileSync(file, 'utf8')) as { entries?: unknown };
   const entries = parsed.entries;
   if (typeof entries !== 'object' || entries === null || Array.isArray(entries)) {
-    throw new Error(`${DROPPED_REFINEMENTS_BASELINE_FILE}: "entries" must be an object of key -> { count, reason }`);
+    throw new Error(`${DROPPED_REFINEMENTS_BASELINE_FILE}: "entries" must be an object of key -> { sites: string[] }`);
   }
   for (const [key, value] of Object.entries(entries as Record<string, unknown>)) {
     const entry = value as Partial<DroppedRefinementsEntry>;
