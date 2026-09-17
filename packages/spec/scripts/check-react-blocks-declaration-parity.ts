@@ -74,18 +74,27 @@
 // of #17735, so do not reason from either one alone:
 //
 //   browser  objectui's `scripts/dump-public-manifest.mjs` drives a real browser
-//            (Playwright chromium) at the built console's `dev/manifest-dump.html`
-//            and reads `window.__MANIFEST`. `pnpm sdui:manifest`
-//            (scripts/gen-sdui-manifest.sh) is the wrapper: it builds objectui
-//            from the SOURCE at `.objectui-sha`, dumps, then runs THIS gate on it.
+//            (Playwright chromium) at `dev/manifest-dump.html` and reads
+//            `window.__MANIFEST`. `pnpm sdui:manifest`
+//            (scripts/gen-sdui-manifest.sh) is the wrapper — and it does NOT
+//            build objectui. It REQUIRES a checkout already vendored at
+//            `.cache/objectui-<sha>` by `pnpm objectui:build`, and exits 1
+//            telling you to run that first (gen-sdui-manifest.sh 507-516). It
+//            then serves THAT tree with a vite dev server, dumps, and runs THIS
+//            gate on the result — so what it reads is the pinned SOURCE.
 //   node     `scripts/gen-sdui-manifest-node.mjs` writes the TRACKED repo-root
 //            artefact under plain Node — no browser, no objectui build. It
 //            enumerates the PUBLISHED `@object-ui/*` packages at the version named
 //            in `scripts/sdui-manifest.record.json`.
 //
 // ⚠️ "The registry is a browser app so nothing enumerates it from Node" was true
-// when this header was written and is now FALSE — measured in objectui#6741 and
-// re-measured on 2026-08-30; the node producer's header carries the readings.
+// when this header was written and is now FALSE — measured 2026-08-29,
+// re-measured 2026-08-30 against published `@object-ui/*` 17.6.0, and reproduced
+// byte-identically in review of #18608; the node producer's header carries the
+// readings. ⛔ Do not put an issue number back on this line: the objectui
+// citation this used to carry resolves to nothing — 404 for both the issue and
+// the PR at that number, with three neighbouring objectui numbers answering 200
+// as controls — and the readings above stand without one.
 //
 // ⚠️ The two producers disagree TODAY, and the reason is the input, not the code:
 // objectui bumps its `version` only at release, so the version read off the pinned
