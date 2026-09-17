@@ -112,15 +112,21 @@ export const CONFIG_CHANGE_OBJECT_NAME = 'sys_setting';
 export const CONFIG_CHANGE_ACTION = 'config_change';
 
 /**
- * The platform audit ledger this sink writes to.
+ * The platform audit ledger the mount probe asks about.
  *
  * Module-local on purpose. `CONFIG_CHANGE_ACTION` and
  * `CONFIG_CHANGE_OBJECT_NAME` are published because a host that binds its own
  * engine has to be able to reproduce the ROW; the ledger's own name is not part
- * of that row and publishing it would widen this module's exported surface for
- * nothing. Named rather than spelled inline because three places now depend on
- * meaning the same table: the mount probe, the `organization_id` field probe and
- * the insert.
+ * of that row, and publishing it would widen this module's exported surface for
+ * nothing.
+ *
+ * ⛔ The two pre-existing spellings below — the `organization_id` field probe
+ * and the insert itself — are deliberately left INLINE rather than folded onto
+ * this constant. They are counted sites in `content/docs/permissions/tenant-audit-census.mdx`
+ * ("object name spelled inline" vs "named through a const"), so folding them
+ * moves a corpus-scale ratchet and a hand-written prose count in a docs tree
+ * this change has no business in. The consolidation is worth doing; it is not
+ * worth doing here.
  */
 const AUDIT_LEDGER_OBJECT_NAME = 'sys_audit_log';
 
@@ -179,7 +185,7 @@ function makeFieldProbe(engine: IDataEngine): (field: string) => boolean {
         // `getSchema` is not on `IDataEngine`; it is an ObjectQL member every
         // real engine carries. Guarded rather than declared, so a lean engine
         // double stays assignable.
-        const schema: any = (engine as any).getSchema?.(AUDIT_LEDGER_OBJECT_NAME);
+        const schema: any = (engine as any).getSchema?.('sys_audit_log');
         const declared = schema?.fields;
         if (declared && typeof declared === 'object' && !Array.isArray(declared)) {
           fields = new Set<string>(Object.keys(declared));
@@ -317,7 +323,7 @@ export function buildConfigChangeAuditSink(
         };
         if (declares('organization_id')) row.organization_id = entry.tenantId ?? null;
 
-        await eng.insert(AUDIT_LEDGER_OBJECT_NAME, row, { context: SYSTEM_CTX });
+        await eng.insert('sys_audit_log', row, { context: SYSTEM_CTX });
       } catch (err: any) {
         // Reported once per process, not once per settings write: a failure here
         // is systemic (the ledger is mounted but unreachable — DDL never ran,
@@ -333,8 +339,8 @@ export function buildConfigChangeAuditSink(
           'until this is fixed (reported once per process). Cause: ' +
           detail +
           '. Fix: `sys_audit_log` IS registered on this deployment but the insert failed, so this is ' +
-          'not the un-mounted case (#18368) — confirm the table was provisioned (schema sync) and the ' +
-          'ledger datasource is reachable. `sys_setting_audit` still carries the settings-specific trail.';
+          'not the un-mounted case — confirm the table was provisioned (schema sync) and the ledger ' +
+          'datasource is reachable. `sys_setting_audit` still carries the settings-specific trail.';
         try {
           // [#18368] The durability channel. The expectation — a host that
           // never mounted the ledger — is skipped above and never reaches here,
