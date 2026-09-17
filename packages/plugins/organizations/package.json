@@ -14,7 +14,7 @@
     }
   },
   "scripts": {
-    "build": "tsup --config ../../../tsup.config.ts && node ../../../scripts/check-dts-emitted.mjs",
+    "build": "tsup --config ../../../tsup.config.ts && node ../../../scripts/check-dts-emitted.mjs && node ../../../scripts/check-dev-prereqs.mjs --stamp",
     "test": "vitest run",
     "typecheck": "tsc --noEmit && pnpm check:test-typecheck",
     "check:test-typecheck": "tsx ../../../scripts/check-test-typecheck.mts --self-test && tsx ../../../scripts/check-test-typecheck.mts --package packages/plugins/organizations --project tsconfig.test.json"
