@@ -393,6 +393,69 @@ export interface NodeExecutionResult {
      */
     screen?: ScreenSpec;
     /**
+     * [#18110 / #18555] Terminal REFUSAL. When `true`, the node evaluated
+     * successfully and the answer is *no*: the engine stops traversal here and
+     * the run finishes as a TERMINAL `refused` (a member of
+     * {@link TERMINAL_RUN_STATUSES} since #15788 — ⛔ no new status value),
+     * carrying {@link NodeExecutionResult.refusalMessage} onto the result and
+     * the run-history row.
+     *
+     * **The twin of {@link NodeExecutionResult.suspend}, deliberately.** Both
+     * are executor-facing flags asking {@link AutomationEngine.executeNode} to
+     * throw an internal unwinding signal, and both are read at the same point:
+     * AFTER the node's success step is pushed, after its `childSteps` are
+     * folded and after its output is written back. That position is the whole
+     * design — it is what keeps a refusing node's own #4354 `metrics`
+     * (`selected` / `acted` / `unmeasuredEffect`) in the run log and therefore
+     * in the run summary, instead of losing them to an unwind that began
+     * earlier. ⛔ Not a second unwinding protocol: `FlowRefusalSignal` already
+     * reuses `FlowSuspendSignal`'s, and this member is that protocol's
+     * executor-facing half, exactly as `suspend` is the pause's.
+     *
+     * ⚠️ `refused` here is the run OUTCOME — *a refusal is a successful
+     * evaluation that says no* — ⛔ NOT this package's other `refused`, the
+     * GUARD refusal (`refuseNode`, `guard-refusal.ts`, the resume-authority
+     * gate), which is a kind of FAILURE. A node that failed says so with
+     * `success: false`, and this flag is read only past the failure arm: on a
+     * failing result it changes nothing, which is the right answer rather than
+     * an oversight.
+     *
+     * **Precedence over `suspend`**: a refusal is terminal and a pause is a
+     * promise to come back, so a result carrying both REFUSES. Persisting a
+     * continuation for a decision the author already made would drop the
+     * refusal on the floor — the same fail-open direction this channel exists
+     * to close. No first-party executor sets both (`subflow` / `map` read one
+     * child status); one that does has declared a contradiction.
+     *
+     * ⚠️ With ONE exception, and it is FAIL-CLOSED. The #6667
+     * undeclared-suspension guard runs ahead of all of this and reads
+     * {@link NodeExecutionResult.suspend} alone: when the node type resolves to
+     * an action descriptor that does not declare `supportsPause: true`, that
+     * guard REPLACES the whole result with a guard refusal, the failure arm
+     * answers it, and `refuse` is never read at all — the run ends `failed`,
+     * not `refused`. That is the correct end for a declaration defect (⛔ no
+     * `fault` edge may route it, and re-running the flow unchanged can never
+     * fix it), so ⛔ do not reorder the guard to let this member through. The
+     * paragraph above describes the case the guard has nothing to say about:
+     * a type with no descriptor, or one that declares the pause it uses.
+     *
+     * Set today by `subflow` (#18110) and `map` (#18555) when their child run
+     * returned `status: 'refused'`: a refusal an author wrote inside a child
+     * flow must not roll up to the parent as an ordinary success.
+     */
+    refuse?: boolean;
+    /**
+     * The rendered reason for {@link NodeExecutionResult.refuse}, surfaced as
+     * `AutomationResult.refusalMessage` and on the terminal run-history row.
+     *
+     * For `subflow` / `map` this is the CHILD run's own `refusalMessage`,
+     * already interpolated against the child's live variables — passed through,
+     * ⛔ never re-rendered and ⛔ never replaced with text this node invented.
+     * `undefined` only when the refusal carried none, recorded honestly rather
+     * than filled in.
+     */
+    refusalMessage?: string;
+    /**
      * #1479: step logs produced inside the node's structured region(s). A
      * container node (`loop` / `parallel` / `try_catch`) collects the
      * {@link AutomationEngine.runRegion} return value(s) here; {@link AutomationEngine.executeNode}
@@ -1095,7 +1158,10 @@ function isSuspendSignal(err: unknown): err is FlowSuspendSignal {
 
 /**
  * [#15788] Internal sentinel thrown by {@link AutomationEngine.executeNode}
- * when an `end` node declares `outcome: 'refused'` (#14945 ruling 2′, lane 2).
+ * when a node REFUSES (#14945 ruling 2′, lane 2). Two producers, one signal:
+ * an `end` node declaring `outcome: 'refused'` (#15788), and any executor that
+ * returns {@link NodeExecutionResult.refuse} — `subflow` (#18110) and `map`
+ * (#18555) do, when their child run refused.
  * The twin of {@link FlowSuspendSignal}: it unwinds the synchronous DAG
  * recursion up to `execute()` / `resume()` / `executeWithoutRetry`, which
  * convert it into a TERMINAL `refused` run rather than a failed one.
@@ -1118,13 +1184,19 @@ function isSuspendSignal(err: unknown): err is FlowSuspendSignal {
 class FlowRefusalSignal {
     readonly __flowRefused = true as const;
     constructor(
-        /** The `end` node that refused — the last node the run reached. */
+        /**
+         * The node that carried the refusal — the last node the run reached.
+         * The refusing `end` itself, or the `subflow` / `map` whose child run
+         * refused.
+         */
         readonly nodeId: string,
         /**
-         * The author's `message`, already interpolated against the run's live
-         * variables. `undefined` only when the config carried none, which
-         * `EndConfigSchema`'s refinement refuses at the flow parse — recorded
-         * honestly rather than filled in with invented text.
+         * The rendered reason, already interpolated against the live variables
+         * of the run that produced it — the author's `end` `message`, or the
+         * child run's own `refusalMessage` passed through. `undefined` only
+         * when the refusal carried none, which `EndConfigSchema`'s refinement
+         * refuses at the flow parse — recorded honestly rather than filled in
+         * with invented text.
          */
         readonly message?: string,
     ) {}
@@ -5276,8 +5348,9 @@ export class AutomationEngine implements IAutomationService {
                 summary,
             };
         } catch (err: unknown) {
-            // [#15788] The run reached an `end` node declaring
-            // `outcome: 'refused'` (#14945 ruling 2′). Tested FIRST, beside the
+            // [#15788] The run REFUSED — an `end` node declaring
+            // `outcome: 'refused'`, or (#18110 / #18555) a node whose own child
+            // run refused. Tested FIRST, beside the
             // pause and for the same reason: this is NOT a failure either, and
             // a signal recognised only by the arm below would be recorded as
             // one. The shape is `finishRefusedRun`'s — one method, all three
@@ -8493,9 +8566,11 @@ export class AutomationEngine implements IAutomationService {
     }
 
     /**
-     * [#15788] Finish a run that reached an `end` node declaring
-     * `outcome: 'refused'` — record the terminal row and build the caller's
-     * result (#14945 ruling 2′, lane 2).
+     * [#15788] Finish a REFUSED run — record the terminal row and build the
+     * caller's result (#14945 ruling 2′, lane 2). Reached from either producer
+     * of {@link FlowRefusalSignal}: an `end` node declaring
+     * `outcome: 'refused'`, or a node returning
+     * {@link NodeExecutionResult.refuse} (#18110 / #18555).
      *
      * **ONE method, three producers.** `execute()`, `resumeInternal` and
      * `executeWithoutRetry` each own a terminal exit, and this file's own
@@ -8580,7 +8655,8 @@ export class AutomationEngine implements IAutomationService {
             // meta?)`; the `Error` slot stays empty on purpose (#5575).
             this.logger.error(
                 `[Automation] run '${args.runId}' of flow '${args.flowName}' REFUSED (an 'end' node with ` +
-                    `outcome: 'refused') but its run-history bookkeeping threw, so its terminal history row ` +
+                    `outcome: 'refused', or a node whose child run refused) but its run-history bookkeeping ` +
+                    `threw, so its terminal history row ` +
                     `never landed — nothing retries it, the caller is told the run refused, and after the next ` +
                     `restart this run is invisible to the Runs surfaces while the approvals sweeps read it as ` +
                     `never-finished. The run itself is TERMINAL and must NOT be re-run, retried or resumed. ` +
@@ -9640,6 +9716,30 @@ export class AutomationEngine implements IAutomationService {
                 }
             }
 
+            // [#18110 / #18555] Terminal refusal: the node evaluated and the
+            // answer is no. Thrown from HERE — the position the suspend signal
+            // below is thrown from — and that position is the point of the
+            // design, not a convenience: the node's success step is already
+            // pushed, its `childSteps` are already folded and its output is
+            // already written back, so a refusing `subflow` / `map` keeps the
+            // child's #4354 rollup (`selected` / `acted` / `unmeasuredEffect`)
+            // in the run summary. An unwind that began any earlier would drop
+            // exactly those counts — a refusing child really can have written
+            // rows before it said no.
+            //
+            // The step stays a SUCCESS on purpose: the node did evaluate, and
+            // what it evaluated to is the run's outcome, not this step's. The
+            // three terminal exits (`execute` / `resumeInternal` /
+            // `executeWithoutRetry`) already convert the signal into a
+            // `refused` run through the one `finishRefusedRun` chokepoint, so
+            // nothing downstream of here needed a second arm.
+            //
+            // Ahead of `suspend` deliberately — see `NodeExecutionResult.refuse`
+            // for why a result carrying both refuses rather than pausing.
+            if (result.refuse) {
+                throw new FlowRefusalSignal(node.id, result.refusalMessage);
+            }
+
             // ADR-0019 durable pause: the node did its on-entry work and asked to
             // suspend here. Output is already written above; unwind the recursion
             // up to execute()/resume(), which persists a continuation. Traversal
@@ -9986,11 +10086,23 @@ export class AutomationEngine implements IAutomationService {
             // question and ⛔ not one this lane rules on — the #14945 ruling
             // says nothing about regions, and "prefer failing to falling back"
             // decides the interim.
+            //
+            // [#18110 / #18555] The sentence NAMES the node that carried the
+            // refusal and nothing more, because there are now two producers: an
+            // `end` declaring the refusal itself, and a `subflow` / `map` whose
+            // CHILD run refused. Hard-wired to the first, it told an author
+            // inside a region to go find an `end` node that is not in their
+            // region at all, and handed them a prescription they could not
+            // follow. ⛔ TEXT only — region SEMANTICS are untouched (#18112's
+            // option B is not implemented, no container is taught to rethrow),
+            // and the authoring-time half of this boundary is #15646's, ⛔ not
+            // this change's.
             if (isRefusalSignal(err)) {
                 throw new Error(
-                    `an 'end' node declaring outcome: 'refused' inside a structured region (node ` +
-                    `'${err.nodeId}') is not supported — a refusal terminates the RUN, and a region ` +
-                    `body cannot end one. Put the refusing 'end' on the top-level graph and route the ` +
+                    `a refusal inside a structured region (node '${err.nodeId}') is not supported — a ` +
+                    `refusal terminates the RUN, and a region body cannot end one. The refusing node is ` +
+                    `either an 'end' declaring outcome: 'refused', or a node whose own child run refused ` +
+                    `(a 'subflow' / 'map'). Move that node onto the top-level graph and route the ` +
                     `region's exit to it.`,
                 );
             }
