@@ -122,6 +122,14 @@
  * is this file's own).
  */
 
+// The structural self-test case below reads the enqueue bar and asserts it still
+// names this file, so a change to that bar is a change this gate judges — and
+// `dispatch-gates.mjs` masks self-test bodies before it scans for a population,
+// which dropped the claim with the fixtures. This declaration is what puts it
+// back; the derivation grades it against the read this file really performs, so
+// it cannot be satisfied by deleting either half.
+// dispatch-gates: self-test-reads .claude/skills/pm-dispatch/SKILL.md -- the structural case asserts the SKILL.md enqueue bar still names this file, so a change to that bar is judged here
+
 import process from 'node:process';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
