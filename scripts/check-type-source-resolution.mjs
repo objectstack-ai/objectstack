@@ -315,6 +315,44 @@ const REPO_ROOT = resolve(HERE, '..');
  * from 37 errors to 42, the +5 being `TS6133` in other packages' source billed
  * to a ledger those packages cannot see — and a ledger holding another
  * package's diagnostics is a ledger nobody can pay down.
+ *
+ * ## The #12511 re-baseline, second half — the eighth package, one program
+ *
+ * `@objectstack/http-conformance` was the one package of the eight that could
+ * not take the #5286 sibling route when the other seven did: its
+ * `tsconfig.json` extended nothing and declared no `skipLibCheck`, so the
+ * question was a config-policy one and was left to a ruling. The ruling of
+ * 2026-09-16 (maintainer verbatim: 「同意」) aligned that build config to the
+ * repo root, after which the sibling goes in unchanged — so this is the same
+ * onboarding case as the six above, arriving late rather than a new shape.
+ *
+ * Condition 1 is read off the instrument, not asserted: all six deps admitted
+ * here are annotated `via tsconfig.test.json` in this gate's own provenance
+ * output, i.e. reached ONLY through the program this change onboarded.
+ *
+ *   before   135 programs / 80 packages, 61 entries, 321 package-dep pairs
+ *   after    136 programs / 80 packages, 61 entries, 327 package-dep pairs
+ *
+ * so +1 program, +0 entries (this package was already listed for
+ * `@objectstack/core`) and +6 pairs: `driver-sqlite-wasm`, `hono`, `objectql`,
+ * `plugin-hono-server`, `runtime`, `spec`. Both readings were taken on one
+ * checkout at d1bacbd2e, the BEFORE one under a trap-restored mutation that
+ * un-NAMES the sibling config in the `typecheck` script and nothing else — the
+ * gate exits 0 in that state, which is what makes the pair a measurement of the
+ * program set rather than of two different trees. The ratchet is shrink-only
+ * from the new number.
+ *
+ * ⚠️ ONE OF THE SIX IS THE SAME DISAGREEMENT `mcp` and `platform-objects`
+ * declare above, and it is named here for the same reason — a later reader will
+ * otherwise find it and think it was missed. `packages/qa/http-conformance`'s
+ * `vitest.config.ts` aliases `@objectstack/hono` to that package's SOURCE, on
+ * purpose and with its own reason written in place (the adapter's rendering IS
+ * the subject of one of these suites, so a stale `dist/` would leave it green
+ * against the very rendering it pins), while the test program admitted here
+ * still resolves that specifier's TYPES through `dist/`. `paths` is the obvious
+ * repair and is the one the paragraph directly above measures to be wrong for
+ * an onboarding program. Declared here instead, where the shrink-only ratchet
+ * keeps it visible.
  */
 const KNOWN_DIST_RESOLVED_TYPE_IMPORTS = {
   '@objectstack/account': ['@objectstack/platform-objects'],
@@ -410,7 +448,15 @@ const KNOWN_DIST_RESOLVED_TYPE_IMPORTS = {
   ],
   '@objectstack/formula': ['@objectstack/spec'],
   '@objectstack/hono': ['@objectstack/plugin-hono-server', '@objectstack/runtime', '@objectstack/types'],
-  '@objectstack/http-conformance': ['@objectstack/core'],
+  // #12511, the eighth package's re-baseline — the doc-block above carries the
+  // before/after `--list` numbers and the provenance condition. Everything
+  // after `@objectstack/core` here arrives from `tsconfig.test.json`, the
+  // program this card onboarded.
+  '@objectstack/http-conformance': [
+    '@objectstack/core', '@objectstack/driver-sqlite-wasm', '@objectstack/hono',
+    '@objectstack/objectql', '@objectstack/plugin-hono-server', '@objectstack/runtime',
+    '@objectstack/spec',
+  ],
   '@objectstack/knowledge-memory': ['@objectstack/core', '@objectstack/spec'],
   '@objectstack/knowledge-ragflow': ['@objectstack/core', '@objectstack/spec'],
   '@objectstack/lint': ['@objectstack/formula', '@objectstack/sdui-parser', '@objectstack/spec'],
