@@ -389,14 +389,23 @@ export function lowerRequiresFeature<T extends WithRequiresFeature>(
     ctx.addIssue({
       code: 'custom',
       path: ['requiresFeature'],
+      // ⚠ Deliberately does NOT interpolate `gate`. Doing so puts
+      // `featureGatePredicate` — and through it the whole
+      // `PUBLIC_AUTH_FEATURES` registry — in a customer-facing message
+      // position, and `check:doc-authoring`'s per-module fixed point then
+      // sweeps that registry's INTERNAL `notes` / `exempt.reason` prose as
+      // customer-facing text (measured: green at the base commit, three
+      // pre-existing strings flagged with the interpolation in). The concrete
+      // gate is one `featureGatePredicate` call away for anyone who wants it.
       message:
         '`requiresFeature` composes only with a CEL `visible` carrying a NON-BLANK `source`; this '
-        + '`source` is blank after trimming, so the composition would parenthesise nothing — '
-        + `\`( ) && ${gate}\` — which no CEL parse accepts on any scope. The gate would fault at `
-        + 'evaluation instead of gating: shown regardless of the flag where the surface is fail-soft, '
-        + 'hidden regardless of it where it is fail-closed. Either way the flag decides nothing, which '
-        + 'is the inert arrival ADR-0078 rejects. Drop the blank `visible` and `requiresFeature` emits '
-        + `\`${gate}\` alone, or put the predicate the gate should compose with in \`source\`.`,
+        + '`source` is blank after trimming, so composing the feature gate onto it would parenthesise '
+        + 'nothing — the predicate would read `( ) && ` followed by the gate — which no CEL parse '
+        + 'accepts on any scope. The gate would fault at evaluation instead of gating: the element is '
+        + 'shown regardless of the flag where the consuming surface is fail-soft and hidden regardless '
+        + 'of it where it is fail-closed, so the flag decides nothing — the inert arrival ADR-0078 '
+        + 'rejects. Drop the blank `visible` and `requiresFeature` emits the gate alone, or put the '
+        + 'predicate the gate should compose with in `source`.',
     });
     return rest as Omit<T, 'requiresFeature'>;
   }
